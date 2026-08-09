@@ -21,6 +21,8 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 | Renderer (v0) | Skia via thin C ABI; Impeller later |
 | Build tool | DIY Mill/Cargo-like: `scalui` (not sbt/Maven) |
 | Effects | Language + runtime builtins, not an external library ecosystem |
+| Impurity boundary | All non-determinism and external I/O go through blessed `IO` (clock, random, FS, network, env/args, console); `IO.delay` is not an app-level escape hatch |
+| Test interpreters | `scalui test` can run with fake clock/random/FS/network for deterministic replay (peer to live interpreters, same idea as Headless `Ui`) |
 | Self-host | On the critical path (Stage 0 → 1 → 2) |
 | UI model | Pure `View` + effectful `Ui` session (`mount` / `pump` / `inject` / `snapshot`) |
 
@@ -59,7 +61,7 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 - Rule: no feature may land Window-only without a Headless path
 - Kernel builtin: `Ui.runHeadless`; example `examples/hello_ui` + goldens
 
-### Phase 2 — Declarative UI core ✅ (current)
+### Phase 2 — Declarative UI core ✅
 
 - Element tree, state/signals, layout, hit testing in `crates/runtime` (Views stay backend-agnostic under `Ui`)
 - Theme tokens + core widgets: `Text`, `Button`, `TextField`, `List`, `Scroll`, `Image`, `Icon` (+ `Label`)
@@ -67,19 +69,21 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 - Examples: `examples/counter`, `examples/todo` (Todo load/save via `IO` + `Resource`) + goldens
 - Kernel builtins: `Ui.runCounter`, `Ui.runTodo` (demos drive the View tree until the language can express widgets)
 
-### Phase 3 — Language, effects stdlib, tooling
+### Phase 3 — Language, effects stdlib, tooling ✅ (current)
 
-- Expand subset: modules, packages, ADTs
-- Complete blessed effects kit: `Resource`, `Ref`, `Deferred`, `Queue`, race/par helpers, time
-- Incremental compile + hot reload; formatter; basic LSP
-- Linux (then Windows) embedders
-- **Start rewriting compiler modules in ScalUI** (parser first), still built by Stage 0
+- Expand subset: `package`, multi-file modules, nullary `enum` ADTs, `match`, local `val`
+- Blessed effects kit (concurrency / resource slice): `Resource` (releases on failure), `Ref`, `Deferred`, `Queue`, `handleErrorWith` / `attempt`, `sleep`, `race` / `both` — kernel demo `Effects.runKit`
+- Not yet a closed impurity surface: no readable `Clock`, `Random`, FS/network APIs, or fake test interpreters (see Phase 4 FS start + Phase 6 close-out)
+- Incremental compile (fingerprint cache), `scalui watch` / `run --watch`, `scalui fmt`, basic `scalui lsp`
+- Linux X11 embedder for `UiRuntime.Window` (`crates/embedder-desktop`); Headless remains CI default
+- ScalUI parser bootstrap under `compiler-scalui/` (Tok ADT + `Lexer.classify` + match), still built by Stage 0
 
 ### Phase 4 — Self-host
 
 - Stage 1: full compiler-in-ScalUI builds under Stage 0
 - Stage 2: Stage 1 compiles the compiler; CI dual-boot + self-rebuild check
 - CLI moves to ScalUI; Stage 0 retained as canary only
+- Blessed **filesystem** `IO` (read/write/list sources and artifacts) so the ScalUI compiler does not call libc FS directly; live interpreter first, fake FS later (Phase 6)
 - Success bar: `scalui` release binary is produced by a ScalUI-built compiler
 
 ### Phase 5 — Mobile
@@ -93,6 +97,11 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 - Design-language polish, animation system, accessibility hooks
 - Docs, samples gallery, distribution of prebuilt Skia + toolchains
 - Optional: evaluate Impeller as alternate backend behind the same canvas API
+- **Close the impurity boundary** for app + compiler code:
+  - Readable + sleepable `Clock` (real/monotonic); `Random` / entropy
+  - Complete FS + **network** (and env/args/console) as blessed `IO`, not ad-hoc FFI
+  - `TestRuntime` / fake interpreters: controllable clock & RNG, in-memory FS, stubbed network — so `scalui test` can replay without wall time or the real OS
+  - Discipline: no app-level `IO.delay` thunks that reach outside the blessed surface
 
 ## Risks and deliberate bets
 
@@ -101,6 +110,7 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 | Building a language + UI + tooling is huge | Ruthless subset; vertical slices; ship Counter before generality |
 | Self-host never arrives / dialect drift | Kernel dialect doc; port compiler early; Stage 0/1/2 CI gate |
 | Effects too weak vs cats-effect OR too heavy for UI | Builtin IO only; pure `View` build; `Ui` effect at session boundary |
+| Untracked non-determinism breaks goldens / self-host CI | Closed impurity surface (clock, random, FS, network, env); TestRuntime fakes (Phase 6); FS starts in Phase 4 |
 | “Almost Scala / almost CE” confuses users | Brand ScalUI language + effects guide; explicit non-goals (no cats port) |
 | Skia build/size complexity | Prebuilt artifacts per platform; thin C ABI; CI caches |
 | Window-only features sneak in | Rule: no UI feature without Headless interpreter path |

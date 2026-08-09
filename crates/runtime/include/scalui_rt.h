@@ -37,24 +37,64 @@ typedef struct SuError {
 SuError *su_error_new(int32_t code, const char *msg);
 void su_error_free(SuError *err);
 
-/* --- IO fiber skeleton --------------------------------------------------- */
+/* --- Either (attempt results) -------------------------------------------- */
+
+typedef struct SuEither {
+  int is_right; /* 1 = Right(value), 0 = Left(error) */
+  union {
+    SuError *left;
+    void *right;
+  } as;
+} SuEither;
+
+SuEither *su_either_right(void *value);
+SuEither *su_either_left(SuError *err);
+void su_either_free(SuEither *e);
+
+/* --- ADT boxes (nullary / unary tagged values for Stage-0 enums) --------- */
+
+typedef struct SuAdt {
+  int32_t tag;
+  void *payload; /* optional; null for nullary cases */
+} SuAdt;
+
+SuAdt *su_adt_new(int32_t tag, void *payload);
+int32_t su_adt_tag(const SuAdt *adt);
+void su_adt_free(SuAdt *adt);
+
+/* Lexer.classify — Stage-0 helper for ScalUI parser bootstrap (Tok tags).
+ * Tag order: AtMain=0, Def=1, Ident=2, StringLit=3, Eof=4, Other=5 */
+SuAdt *su_lexer_classify(const char *source);
+
+/* --- IO fiber skeleton + Phase 3 blessed kit ----------------------------- */
 
 typedef struct SuIo SuIo;
 typedef struct SuResource SuResource;
+typedef struct SuRef SuRef;
+typedef struct SuDeferred SuDeferred;
+typedef struct SuQueue SuQueue;
 
 typedef void *(*SuThunk)(void *env);
 typedef SuIo *(*SuCont)(void *value, void *env);
+typedef SuIo *(*SuErrorHandler)(SuError *err, void *env);
 typedef void *(*SuAcquire)(void *env);
 typedef void (*SuRelease)(void *value, void *env);
 
+typedef enum SuIoTag {
+  SU_IO_PURE = 1,
+  SU_IO_DELAY,
+  SU_IO_FLATMAP,
+  SU_IO_FAIL,
+  SU_IO_PRINTLN,
+  SU_IO_HANDLE_ERROR,
+  SU_IO_ATTEMPT,
+  SU_IO_SLEEP_MS,
+  SU_IO_RACE,
+  SU_IO_BOTH
+} SuIoTag;
+
 struct SuIo {
-  enum {
-    SU_IO_PURE = 1,
-    SU_IO_DELAY,
-    SU_IO_FLATMAP,
-    SU_IO_FAIL,
-    SU_IO_PRINTLN
-  } tag;
+  SuIoTag tag;
   union {
     void *pure_value;
     struct {
@@ -68,6 +108,21 @@ struct SuIo {
     } flatmap;
     SuError *fail;
     SuString *println;
+    struct {
+      SuIo *inner;
+      SuErrorHandler handler;
+      void *env;
+    } handle_error;
+    SuIo *attempt_inner;
+    int64_t sleep_ms;
+    struct {
+      SuIo *left;
+      SuIo *right;
+    } race;
+    struct {
+      SuIo *left;
+      SuIo *right;
+    } both;
   } as;
 };
 
@@ -75,10 +130,16 @@ SuIo *su_io_pure(void *value);
 SuIo *su_io_delay(SuThunk thunk, void *env);
 SuIo *su_io_flatmap(SuIo *inner, SuCont cont, void *env);
 SuIo *su_io_fail(SuError *err);
+SuIo *su_io_fail_cstr(const char *msg);
 SuIo *su_io_println(SuString *msg);
 SuIo *su_io_println_cstr(const char *msg);
+SuIo *su_io_handle_error_with(SuIo *inner, SuErrorHandler handler, void *env);
+SuIo *su_io_attempt(SuIo *inner);
+SuIo *su_io_sleep_ms(int64_t ms);
+SuIo *su_io_race(SuIo *left, SuIo *right);
+SuIo *su_io_both(SuIo *left, SuIo *right);
 
-/* Run to completion on the calling thread (Phase 0 single-threaded loop). */
+/* Run to completion on the calling thread (cooperative fibers for race/both). */
 typedef struct SuIoResult {
   int ok; /* 1 success, 0 error */
   void *value;
@@ -88,7 +149,7 @@ typedef struct SuIoResult {
 SuIoResult su_io_unsafe_run(SuIo *io);
 void su_io_free(SuIo *io);
 
-/* Resource: acquire / release with bracket semantics */
+/* Resource: acquire / release with bracket semantics (releases on failure). */
 struct SuResource {
   SuAcquire acquire;
   SuRelease release;
@@ -102,8 +163,64 @@ SuIo *su_resource_use(SuResource *res, SuIo *(*use)(void *acquired, void *env),
                       void *use_env);
 void su_resource_free(SuResource *res);
 
+/* Ref — mutable cell (single-threaded; string-friendly for kernel demos). */
+struct SuRef {
+  void *value;
+};
+
+SuRef *su_ref_make(void *initial);
+void su_ref_free(SuRef *ref);
+SuIo *su_ref_of(void *initial);          /* IO[Ref] */
+SuIo *su_ref_of_cstr(const char *initial);
+SuIo *su_ref_get(SuRef *ref);            /* IO[A] */
+SuIo *su_ref_set(SuRef *ref, void *value); /* IO[Unit] */
+SuIo *su_ref_set_cstr(SuRef *ref, const char *value);
+
+/* Deferred — one-shot promise. */
+struct SuDeferred {
+  int completed;
+  int ok;
+  void *value;
+  SuError *error;
+};
+
+SuDeferred *su_deferred_make(void);
+void su_deferred_free(SuDeferred *d);
+SuIo *su_deferred_empty(void); /* IO[Deferred] */
+SuIo *su_deferred_complete(SuDeferred *d, void *value);
+SuIo *su_deferred_complete_cstr(SuDeferred *d, const char *value);
+SuIo *su_deferred_fail(SuDeferred *d, SuError *err);
+SuIo *su_deferred_get(SuDeferred *d); /* IO[A]; fails if incomplete or erred */
+
+/* Queue — unbounded FIFO of void* (strings in kernel demos). */
+struct SuQueue {
+  void **items;
+  size_t len;
+  size_t cap;
+};
+
+SuQueue *su_queue_make(void);
+void su_queue_free(SuQueue *q);
+SuIo *su_queue_unbounded(void); /* IO[Queue] */
+SuIo *su_queue_offer(SuQueue *q, void *value);
+SuIo *su_queue_offer_cstr(SuQueue *q, const char *value);
+SuIo *su_queue_take(SuQueue *q); /* IO[A]; fails if empty (Phase 3 sync take) */
+size_t su_queue_size(const SuQueue *q);
+
+/* Pair for IO.both results */
+typedef struct SuPair {
+  void *left;
+  void *right;
+} SuPair;
+
+SuPair *su_pair_new(void *left, void *right);
+void su_pair_free(SuPair *p);
+
 /* Entrypoint helper used by @main codegen */
 int su_runtime_main(SuIo *program);
+
+/* Kernel demo: blessed effects kit smoke (Ref/Deferred/Queue/race/sleep/errors) */
+SuIo *su_effects_run_kit(void);
 
 #ifdef __cplusplus
 }

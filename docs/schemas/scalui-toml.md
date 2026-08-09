@@ -63,6 +63,9 @@ my-app/
   scalui.toml
   src/
     Main.scala          # or .scalui — extension TBD; .scala-ish accepted in Stage 0
+    Other.scala         # Phase 3+: multi-file packages / enums
+  .scalui/
+    fingerprint         # incremental compile cache (gitignored)
 ```
 
-Stage-0 compiler accepts `*.scala` and `*.scalui` under `src/`.
+Stage-0 compiler accepts `*.scala` and `*.scalui` under `src/` (recursive). Units in the same package are merged; exactly one `@main` is required for executables.

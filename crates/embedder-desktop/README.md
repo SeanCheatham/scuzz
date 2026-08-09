@@ -1,5 +1,15 @@
-# embedder-desktop (Phase 1+)
+# embedder-desktop (Phase 3)
 
-`UiRuntime.Window` is already a **peer interpreter** on the same session protocol as Headless (`su_ui_mount` with `SU_UI_RUNTIME_WINDOW` in `crates/runtime`). Phase 1 paints that peer offscreen so CI needs no display.
+OS window presentation for `UiRuntime.Window`. Headless remains the CI peer.
 
-This crate is the home for **OS window presentation** (X11/Wayland/etc.) that will attach a real surface to the existing session without Window-only features.
+## Linux (X11)
+
+`libscalui_embedder.a` opens a simple X11 window and blits RGBA frames from the
+runtime's offscreen Skia surface after `pump`. Linked automatically by Stage 0
+when the archive is present (`-lX11`).
+
+- Requires `DISPLAY` (use `xvfb-run` in CI if exercising Window presentation)
+- Press `q` / Escape to close during `present`
+- Without DISPLAY, Window stays offscreen (same as Phase 1/2)
+
+Windows embedder is deferred (same session protocol).

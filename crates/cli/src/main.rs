@@ -1,6 +1,9 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use scalui_compiler::driver::{compile_project, find_runtime_dir, CompileOptions};
+use scalui_compiler::driver::{
+    compile_project, find_runtime_dir, wait_for_source_change, CompileOptions,
+};
+use scalui_compiler::format::format_source;
 use scalui_compiler::manifest::load_manifest;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
@@ -26,6 +29,9 @@ enum Commands {
         /// Output directory
         #[arg(long, default_value = "build")]
         out_dir: PathBuf,
+        /// Force a full rebuild (ignore incremental fingerprint)
+        #[arg(long)]
+        full: bool,
     },
     /// Build and run a ScalUI project
     Run {
@@ -36,12 +42,32 @@ enum Commands {
         headless: bool,
         #[arg(long, default_value = "build")]
         out_dir: PathBuf,
+        /// Rebuild and rerun when sources change (hot reload)
+        #[arg(long)]
+        watch: bool,
+    },
+    /// Watch sources and rebuild on change (hot reload compile loop)
+    Watch {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        #[arg(long, default_value = "build")]
+        out_dir: PathBuf,
     },
     /// Run tests: runtime unit tests + Headless golden PNGs when present
     Test {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
+    /// Format ScalUI sources under src/
+    Fmt {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Check only (nonzero exit if would reformat)
+        #[arg(long)]
+        check: bool,
+    },
+    /// Start the basic ScalUI language server (stdio LSP)
+    Lsp,
     /// Create a new ScalUI project
     New {
         name: String,
@@ -66,49 +92,27 @@ fn main() -> ExitCode {
 fn real_main() -> Result<ExitCode> {
     let cli = Cli::parse();
     match cli.command {
-        Commands::Build { path, out_dir } => {
-            let out = build(&path, &out_dir)?;
-            eprintln!("built {}", out.executable.display());
+        Commands::Build { path, out_dir, full } => {
+            let out = build(&path, &out_dir, !full)?;
+            if out.cache_hit {
+                eprintln!("up-to-date {}", out.executable.display());
+            } else {
+                eprintln!("built {}", out.executable.display());
+            }
             Ok(ExitCode::SUCCESS)
         }
         Commands::Run {
             path,
             headless,
             out_dir,
+            watch,
         } => {
-            let project_dir = resolve_dir(&path)?;
-            let manifest = load_manifest(&project_dir.join("scalui.toml"))
-                .with_context(|| format!("reading {}/scalui.toml", project_dir.display()))?;
-            let use_headless = headless
-                || manifest
-                    .ui
-                    .as_ref()
-                    .map(|u| u.default_runtime.eq_ignore_ascii_case("headless"))
-                    .unwrap_or(false);
-
-            let out = build(&path, &out_dir)?;
-            let mut cmd = Command::new(&out.executable);
-            if use_headless {
-                let snap = out
-                    .executable
-                    .parent()
-                    .unwrap_or(Path::new("."))
-                    .join("snapshot.png");
-                apply_ui_env(&mut cmd, &manifest, &snap, /*tap*/ false);
-                eprintln!(
-                    "scalui run --headless → snapshot {}",
-                    snap.display()
-                );
+            if watch {
+                return watch_run(&path, &out_dir, headless);
             }
-            let status = cmd
-                .status()
-                .with_context(|| format!("running {}", out.executable.display()))?;
-            if status.success() {
-                Ok(ExitCode::SUCCESS)
-            } else {
-                Ok(ExitCode::from(status.code().unwrap_or(1) as u8))
-            }
+            run_once(&path, &out_dir, headless)
         }
+        Commands::Watch { path, out_dir } => watch_build(&path, &out_dir),
         Commands::Test { path } => {
             let runtime = find_runtime_dir(&std::env::current_dir()?)?;
             let status = Command::new("make")
@@ -139,11 +143,16 @@ fn real_main() -> Result<ExitCode> {
 
             let project_dir = resolve_dir(&path)?;
             if project_dir.join("scalui.toml").is_file() {
-                let out = build(&path, &PathBuf::from("build"))?;
+                let out = build(&path, &PathBuf::from("build"), false)?;
                 eprintln!("project compile smoke ok");
                 run_goldens(&project_dir, &out.executable)?;
             }
             eprintln!("scalui test ok");
+            Ok(ExitCode::SUCCESS)
+        }
+        Commands::Fmt { path, check } => fmt_project(&path, check),
+        Commands::Lsp => {
+            scalui_compiler::lsp::run_stdio()?;
             Ok(ExitCode::SUCCESS)
         }
         Commands::New { name, path, ui } => {
@@ -214,6 +223,119 @@ main = "Main"
     }
 }
 
+fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
+    let project_dir = resolve_dir(path)?;
+    let manifest = load_manifest(&project_dir.join("scalui.toml"))
+        .with_context(|| format!("reading {}/scalui.toml", project_dir.display()))?;
+    let use_headless = headless
+        || manifest
+            .ui
+            .as_ref()
+            .map(|u| u.default_runtime.eq_ignore_ascii_case("headless"))
+            .unwrap_or(false);
+
+    let out = build(path, &out_dir.to_path_buf(), true)?;
+    let mut cmd = Command::new(&out.executable);
+    if use_headless {
+        let snap = out
+            .executable
+            .parent()
+            .unwrap_or(Path::new("."))
+            .join("snapshot.png");
+        apply_ui_env(&mut cmd, &manifest, &snap, /*tap*/ false);
+        eprintln!(
+            "scalui run --headless → snapshot {}",
+            snap.display()
+        );
+    } else {
+        // Window peer + optional X11 embedder when DISPLAY is set.
+        cmd.env("SCALUI_UI_RUNTIME", "window");
+        if let Some(ui) = &manifest.ui {
+            cmd.env("SCALUI_UI_WIDTH", ui.width().to_string());
+            cmd.env("SCALUI_UI_HEIGHT", ui.height().to_string());
+        }
+    }
+    let status = cmd
+        .status()
+        .with_context(|| format!("running {}", out.executable.display()))?;
+    if status.success() {
+        Ok(ExitCode::SUCCESS)
+    } else {
+        Ok(ExitCode::from(status.code().unwrap_or(1) as u8))
+    }
+}
+
+fn watch_build(path: &Path, out_dir: &Path) -> Result<ExitCode> {
+    let project_dir = resolve_dir(path)?;
+    eprintln!("scalui watch {}", project_dir.display());
+    loop {
+        match build(path, &out_dir.to_path_buf(), false) {
+            Ok(out) => eprintln!("rebuilt {}", out.executable.display()),
+            Err(e) => eprintln!("scalui watch build error: {e:#}"),
+        }
+        if !wait_for_source_change(&project_dir, 60_000)? {
+            // idle timeout — keep watching
+            continue;
+        }
+    }
+}
+
+fn watch_run(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
+    let project_dir = resolve_dir(path)?;
+    eprintln!("scalui run --watch {}", project_dir.display());
+    loop {
+        match run_once(path, out_dir, headless) {
+            Ok(_) => {}
+            Err(e) => eprintln!("scalui watch run error: {e:#}"),
+        }
+        let _ = wait_for_source_change(&project_dir, 60_000)?;
+    }
+}
+
+fn fmt_project(path: &Path, check: bool) -> Result<ExitCode> {
+    let project_dir = resolve_dir(path)?;
+    let src = project_dir.join("src");
+    if !src.is_dir() {
+        bail!("missing src/ in {}", project_dir.display());
+    }
+    let mut dirty = 0usize;
+    let mut paths = Vec::new();
+    collect_scala(&src, &mut paths)?;
+    for p in paths {
+        let text = std::fs::read_to_string(&p)?;
+        let formatted = format_source(&text).with_context(|| format!("formatting {}", p.display()))?;
+        if formatted != text {
+            if check {
+                eprintln!("would reformat {}", p.display());
+                dirty += 1;
+            } else {
+                std::fs::write(&p, formatted)?;
+                eprintln!("formatted {}", p.display());
+            }
+        }
+    }
+    if check && dirty > 0 {
+        bail!("{dirty} file(s) need formatting");
+    }
+    eprintln!("scalui fmt ok");
+    Ok(ExitCode::SUCCESS)
+}
+
+fn collect_scala(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+    for entry in std::fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_scala(&path, out)?;
+        } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            if matches!(ext, "scala" | "scalui") {
+                out.push(path);
+            }
+        }
+    }
+    Ok(())
+}
+
 fn resolve_dir(path: &Path) -> Result<PathBuf> {
     if path.is_absolute() {
         Ok(path.to_path_buf())
@@ -229,6 +351,7 @@ fn apply_ui_env(
     tap: bool,
 ) {
     cmd.env("SCALUI_SNAPSHOT_PATH", snapshot);
+    cmd.env("SCALUI_UI_RUNTIME", "headless");
     if let Some(ui) = &manifest.ui {
         cmd.env("SCALUI_UI_WIDTH", ui.width().to_string());
         cmd.env("SCALUI_UI_HEIGHT", ui.height().to_string());
@@ -295,12 +418,13 @@ fn run_goldens(project_dir: &Path, exe: &Path) -> Result<()> {
 }
 
 fn build(
-    path: &PathBuf,
-    out_dir: &PathBuf,
+    path: &Path,
+    out_dir: &Path,
+    incremental: bool,
 ) -> Result<scalui_compiler::CompileOutput> {
     let project_dir = resolve_dir(path)?;
     let out_dir = if out_dir.is_absolute() {
-        out_dir.clone()
+        out_dir.to_path_buf()
     } else {
         project_dir.join(out_dir)
     };
@@ -312,5 +436,6 @@ fn build(
         runtime_dir,
         out_dir,
         clang,
+        incremental,
     })
 }
