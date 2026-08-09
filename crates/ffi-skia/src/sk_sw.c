@@ -252,7 +252,8 @@ void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
     for (row = 0; row < 8; row++) {
       uint8_t bits = glyph[row];
       for (col = 0; col < 8; col++) {
-        if (bits & (uint8_t)(0x80 >> col))
+        /* Font bytes are LSB-left in this table. */
+        if (bits & (uint8_t)(1u << col))
           put_pixel(canvas->surface, cx + col, cy + row, paint->color);
       }
     }
