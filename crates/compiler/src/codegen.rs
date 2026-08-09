@@ -90,20 +90,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
-    for d in &program.defs {
-        let ret = llvm_type(&d.ret);
-        write!(out, "declare {ret} @su_user_{}(", d.name).unwrap();
-        for (i, p) in d.params.iter().enumerate() {
-            if i > 0 {
-                write!(out, ", ").unwrap();
-            }
-            write!(out, "{}", llvm_type(&p.ty)).unwrap();
-        }
-        writeln!(out, ")").unwrap();
-    }
-    if !program.defs.is_empty() {
-        writeln!(out).unwrap();
-    }
+    // User defs are emitted below; LLVM allows call sites before the defining
+    // `define` in the same module (no separate `declare` — that would error).
 
     let mut cont_id = 0usize;
     let mut conts = String::new();

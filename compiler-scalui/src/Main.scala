@@ -1,17 +1,10 @@
-package scalui.parser
+package scalui.compiler
 
-// ScalUI-written parser smoke (Phase 3): classify + match in ScalUI,
-// still built by Stage 0 (ADR 0005).
+// Stage-1 lexer/parser smoke (built by Stage 0).
 @main def main: IO[Unit] =
-  val t = Lexer.classify("@main")
-  t match {
-    case Tok.AtMain =>
-      IO.println("parser-stage0: AtMain").flatMap(_ =>
-        val d = Lexer.classify("def")
-        d match {
-          case Tok.Def => IO.println("parser-stage0: ok")
-          case _ => IO.println("parser-stage0: bad-def")
-        }
-      )
-    case _ => IO.println("parser-stage0: bad-atmain")
-  }
+  val src = "@main def main: IO[Unit] = IO.println(\"x\")"
+  val toks = lex(src)
+  val prog = parseProgram(toks)
+  IO.println(Str.concat("tokens:", Str.fromInt(List.len(toks)))).flatMap(_ =>
+    IO.println(Str.concat("prog:", exprTag(prog)))
+  )
