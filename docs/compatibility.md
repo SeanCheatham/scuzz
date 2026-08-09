@@ -31,7 +31,7 @@ ScalUI deliberately diverges from the Scala Center / Typelevel / JVM ecosystems.
 
 | Target | Language/runtime/UI-core | Window embedder | Notes |
 | --- | --- | --- |
-| Linux headless (CI/cloud) | Yes | N/A | Default development & CI; Phase 1–3 golden PNGs |
+| Linux headless (CI/cloud) | Yes | N/A | Default development & CI; Phase 1–4 golden PNGs + self-host |
 | Linux desktop | Yes | Phase 3 X11 | `crates/embedder-desktop` blits Window peer frames when `DISPLAY` is set |
 | macOS desktop | Yes | Secondary | Metal/GL surface later |
 | Windows desktop | Yes | Secondary | Later (same session protocol) |
@@ -41,8 +41,8 @@ ScalUI deliberately diverges from the Scala Center / Typelevel / JVM ecosystems.
 
 | Stage | Host | Role |
 | --- | --- | --- |
-| 0 | Rust | Bootstrap compiler + early CLI |
-| 1 | ScalUI (built by Stage 0) | Proves language can express the compiler |
-| 2 | ScalUI (built by Stage 1) | True self-host; release compilers |
+| 0 | Rust | Bootstrap compiler + canary CLI (`crates/cli`) |
+| 1 | ScalUI (built by Stage 0) | `compiler-scalui/` — proves language can express the compiler |
+| 2 | ScalUI (built by Stage 1) | True self-host; release `scalui` binary |
 
-Kernel dialect constraints for self-host: `docs/adr/0005-kernel-dialect.md`.
+Dual-boot gate: `scripts/selfhost.sh` (CI). Kernel dialect: `docs/adr/0005-kernel-dialect.md`.

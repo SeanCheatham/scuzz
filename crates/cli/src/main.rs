@@ -12,7 +12,7 @@ use std::process::{Command, ExitCode};
 #[command(
     name = "scalui",
     version,
-    about = "ScalUI — Scala-inspired native UI stack (Stage-0 CLI)"
+    about = "ScalUI — Stage-0 canary CLI (release CLI is compiler-scalui)"
 )]
 struct Cli {
     #[command(subcommand)]
