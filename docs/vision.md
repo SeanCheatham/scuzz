@@ -100,7 +100,7 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 - Design-language polish: theme `accent` / `disabled` / `radius` (default radius 0 keeps prior goldens)
 - Animation v0: `SuAnimFloat` lerp ticked on `pump` via monotonic `Clock` dt
 - Accessibility hooks: `SuA11yRole` + label on Views; Headless `su_view_a11y_dump`
-- Samples gallery: `examples/{hello,effects,adt,fs,clock,impurity,hello_ui,counter,live,todo}` indexed in README
+- Samples gallery: `examples/{hello,effects,adt,fs,clock,impurity,hello_ui,counter,nav,live,todo}` indexed in README
 - Skia distribution: `scripts/fetch_skia.sh` + `third_party/skia/` notes; default remains in-tree `sk_sw`
 - Impeller: evaluated as optional alternate behind `sk_capi` — **deferred** (software CPU backend stays v0 default; see ADR 0002)
 - **Closed impurity boundary** for app + compiler code:
@@ -114,10 +114,11 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 
 Close the **v0 success bar** before more platform breadth:
 
-- ScalUI-authored widget trees: `Signal.*` / `View.*` / `Ui.run` / `Ui.runWithTodo` (Counter + Todo examples; `scalui new --ui`)
+- ScalUI-authored widget trees: `Signal.*` / `View.*` / `Ui.run` / `Ui.runWithTodo` (Counter + Todo + nav; `scalui new --ui`)
+- Interaction slice: stay-open `Ui.run` over language trees, `View.buttonSet`, `View.showWhen` (`examples/nav`) — before larger multi-demo apps
 - Stage-1 product CLI surface: `test` / `fmt` / `watch` / `new` / `package` alongside `build`/`run`
 - Happy path: `./scripts/install.sh` → `scalui new --ui` → `scalui test` (seeds goldens) → `scalui run --headless`
-- Keep dialect expansion ruthless (ADR 0005); defer Windows / device NDK / Impeller / GC revisit
+- Keep dialect expansion ruthless (ADR 0005); defer Windows / device NDK / Impeller / GC revisit; keep the interim tap family closed until first-class lambdas (ADR 0004)
 
 ## Risks and deliberate bets
 

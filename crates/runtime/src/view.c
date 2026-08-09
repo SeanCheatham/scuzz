@@ -47,12 +47,36 @@ struct SuView {
   /* Phase 6 a11y */
   SuA11yRole a11y_role;
   char *a11y_label;
+
+  /* showWhen: when show_when_sig != NULL, visible iff signal == show_when_value */
+  SuSignalInt *show_when_sig;
+  int64_t show_when_value;
 };
 
 static SuView *view_new(SuViewKind kind) {
   SuView *v = (SuView *)su_alloc_zero(sizeof(SuView));
   v->kind = kind;
   return v;
+}
+
+static int view_is_shown(const SuView *v) {
+  if (!v)
+    return 0;
+  if (v->show_when_sig &&
+      su_signal_int_get(v->show_when_sig) != v->show_when_value)
+    return 0;
+  return 1;
+}
+
+static int count_shown_children(const SuView *v) {
+  int i, n = 0;
+  if (!v)
+    return 0;
+  for (i = 0; i < v->child_count; i++) {
+    if (view_is_shown(v->children[i]))
+      n++;
+  }
+  return n;
 }
 
 SuViewKind su_view_kind(const SuView *view) {
@@ -168,7 +192,7 @@ static const char *a11y_role_name(SuA11yRole role) {
 
 static void a11y_dump_node(SuView *v, char *buf, size_t cap, size_t *len) {
   int i;
-  if (!v || !buf || !len)
+  if (!v || !buf || !len || !view_is_shown(v))
     return;
   if (v->a11y_role != SU_A11Y_NONE) {
     char line[256];
@@ -238,6 +262,19 @@ SuView *su_view_label(const char *text, uint32_t bg_argb, uint32_t fg_argb) {
   return v;
 }
 
+void su_view_set_show_when(SuView *view, SuSignalInt *sig, int64_t value) {
+  if (!view)
+    return;
+  view->show_when_sig = sig;
+  view->show_when_value = value;
+}
+
+SuView *su_view_show_when(SuSignalInt *sig, int64_t value, SuView *child) {
+  if (child)
+    su_view_set_show_when(child, sig, value);
+  return child;
+}
+
 void su_view_free(SuView *view) {
   int i;
   if (!view)
@@ -281,6 +318,12 @@ static void layout_node(SuView *v, float x, float y, float max_w, float max_h,
   v->frame.x = x;
   v->frame.y = y;
 
+  if (!view_is_shown(v)) {
+    v->frame.w = 0.f;
+    v->frame.h = 0.f;
+    return;
+  }
+
   switch (v->kind) {
   case SU_VIEW_TEXT:
     resolve_text(v, buf, sizeof buf);
@@ -319,14 +362,20 @@ static void layout_node(SuView *v, float x, float y, float max_w, float max_h,
     float cy = y + theme->pad;
     float inner_w = max_w - theme->pad * 2.f;
     float h = theme->pad;
+    int shown = 0;
     if (inner_w < 0)
       inner_w = 0;
     for (i = 0; i < v->child_count; i++) {
+      if (!view_is_shown(v->children[i])) {
+        layout_node(v->children[i], x + theme->pad, cy, inner_w, max_h, theme);
+        continue;
+      }
       layout_node(v->children[i], x + theme->pad, cy, inner_w, max_h, theme);
       cy += v->children[i]->frame.h + theme->gap;
       h += v->children[i]->frame.h + theme->gap;
+      shown++;
     }
-    if (v->child_count > 0)
+    if (shown > 0)
       h -= theme->gap;
     h += theme->pad;
     v->frame.w = max_w;
@@ -339,22 +388,26 @@ static void layout_node(SuView *v, float x, float y, float max_w, float max_h,
     float cx = x + theme->pad;
     float inner_h = theme->control_h;
     float w = theme->pad;
+    int shown = count_shown_children(v);
     float child_max =
-        v->child_count > 0
-            ? (max_w - theme->pad * 2.f -
-               theme->gap * (float)(v->child_count - 1)) /
-                  (float)v->child_count
+        shown > 0
+            ? (max_w - theme->pad * 2.f - theme->gap * (float)(shown - 1)) /
+                  (float)shown
             : max_w;
     if (child_max < 0)
       child_max = 0;
     for (i = 0; i < v->child_count; i++) {
+      if (!view_is_shown(v->children[i])) {
+        layout_node(v->children[i], cx, y + theme->pad, child_max, max_h, theme);
+        continue;
+      }
       layout_node(v->children[i], cx, y + theme->pad, child_max, max_h, theme);
       cx += v->children[i]->frame.w + theme->gap;
       w += v->children[i]->frame.w + theme->gap;
       if (v->children[i]->frame.h > inner_h)
         inner_h = v->children[i]->frame.h;
     }
-    if (v->child_count > 0)
+    if (shown > 0)
       w -= theme->gap;
     w += theme->pad;
     v->frame.w = max_w > 0 ? max_w : w;
@@ -394,7 +447,7 @@ static int point_in(const SuRect *r, float x, float y) {
 static SuView *hit_node(SuView *v, float x, float y) {
   int i;
   SuView *hit;
-  if (!v || !point_in(&v->frame, x, y))
+  if (!v || !view_is_shown(v) || !point_in(&v->frame, x, y))
     return NULL;
   /* Front-to-back: last child wins. */
   for (i = v->child_count - 1; i >= 0; i--) {
@@ -439,7 +492,7 @@ static void paint_node(SuView *v, SkCanvas *c, const SuTheme *theme) {
   int i;
   float tx, ty;
 
-  if (!v || !c)
+  if (!v || !c || !view_is_shown(v))
     return;
 
   switch (v->kind) {

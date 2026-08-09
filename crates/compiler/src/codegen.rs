@@ -81,6 +81,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @su_lang_view_text(ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_text_signal(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_button_inc(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @su_lang_view_button_set(ptr, ptr, i64)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_column()").unwrap();
     writeln!(out, "declare ptr @su_lang_view_row()").unwrap();
     writeln!(out, "declare ptr @su_lang_view_list()").unwrap();
@@ -89,6 +90,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @su_lang_view_icon(i64, i64)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_image(i64, i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_add_child(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @su_lang_view_show_when(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_todo_create()").unwrap();
     writeln!(out, "declare ptr @su_lang_todo_load(ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_todo_draft(ptr)").unwrap();
@@ -1537,6 +1539,15 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "View.buttonSet" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_view_button_set(ptr {}, ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "View.column" => {
             writeln!(code, "  %{prefix}_v = call ptr @su_lang_view_column()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
@@ -1593,6 +1604,15 @@ fn emit_call(
                 code,
                 "  %{prefix}_v = call ptr @su_lang_view_add_child(ptr {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "View.showWhen" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_view_show_when(ptr {}, i64 {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
             )
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)

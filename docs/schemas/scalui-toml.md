@@ -56,6 +56,7 @@ Optional. Used by `scalui run` / `test` / `package`.
 | `default_runtime` | `"headless"` \| `"window"` \| `"mobile"` | `scalui run` default; `--headless` forces Headless |
 | `headless_size` | `[w, h]` | Logical pixels for Headless / goldens / Mobile host |
 | `headless_scale` | float | Recorded on session; raster uses logical size |
+| `tap_button` | int (optional) | 0-based DFS button index for `_after_tap` goldens (`SCALUI_UI_TAP_N`) |
 | `bundle_id` | string | Android package / iOS `CFBundleIdentifier` for `scalui package` |
 
 ## Source layout (convention)

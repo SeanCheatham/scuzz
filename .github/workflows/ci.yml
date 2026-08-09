@@ -78,6 +78,9 @@ jobs:
           cargo run -p scalui -- run --headless examples/todo
           test -f examples/todo/build/snapshot.png
           cargo run -p scalui -- test examples/todo
+          cargo run -p scalui -- run --headless examples/nav
+          test -f examples/nav/build/snapshot.png
+          cargo run -p scalui -- test examples/nav
 
       - name: v0 new --ui happy path
         run: |

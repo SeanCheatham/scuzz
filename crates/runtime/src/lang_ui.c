@@ -4,6 +4,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* fill_cfg / demo_finish live in demos.c / ui.c */
 void su_ui_resolve_headless_size(int *width, int *height, double *scale);
@@ -82,6 +83,24 @@ SuView *su_lang_view_button_inc(SuString *label, SuSignalInt *sig) {
   return su_view_button(label ? su_string_cstr(label) : "+1", lang_button_inc, env);
 }
 
+typedef struct {
+  SuSignalInt *sig;
+  int64_t value;
+} LangSetEnv;
+
+static void lang_button_set(SuView *self, void *env) {
+  LangSetEnv *e = (LangSetEnv *)env;
+  (void)self;
+  su_signal_int_set(e->sig, e->value);
+}
+
+SuView *su_lang_view_button_set(SuString *label, SuSignalInt *sig, int64_t value) {
+  LangSetEnv *env = (LangSetEnv *)su_alloc(sizeof(LangSetEnv));
+  env->sig = sig;
+  env->value = value;
+  return su_view_button(label ? su_string_cstr(label) : "set", lang_button_set, env);
+}
+
 SuView *su_lang_view_column(void) { return su_view_column(); }
 SuView *su_lang_view_row(void) { return su_view_row(); }
 SuView *su_lang_view_list(void) { return su_view_list(); }
@@ -104,6 +123,10 @@ SuView *su_lang_view_image(int64_t w, int64_t h, int64_t argb, SuString *caption
 void *su_lang_view_add_child(SuView *parent, SuView *child) {
   su_view_add_child(parent, child);
   return NULL;
+}
+
+SuView *su_lang_view_show_when(SuSignalInt *sig, int64_t value, SuView *child) {
+  return su_view_show_when(sig, value, child);
 }
 
 /* --- Todo controller ----------------------------------------------------- */
@@ -269,29 +292,56 @@ static void scripted_button_tap(SuUiSession *session, int prefer_upper) {
   SuInputEvent tap;
   SuView *r = su_ui_session_root(session);
   SuView *hit_btn = NULL;
+  SuView *buttons[64];
+  int n_buttons = 0;
   float tx = 40.f, ty = 60.f;
   int yi, xi;
   int w = su_ui_session_width(session);
   int h = su_ui_session_height(session);
-  for (yi = 0; yi < h && (!hit_btn || prefer_upper); yi += 4) {
+  const char *tap_n_env = getenv("SCALUI_UI_TAP_N");
+  int tap_n = (tap_n_env && tap_n_env[0]) ? atoi(tap_n_env) : -1;
+
+  /* Collect unique buttons in top-to-bottom, left-to-right scan order. */
+  for (yi = 0; yi < h; yi += 4) {
     for (xi = 0; xi < w; xi += 4) {
       SuView *hit = su_view_hit_test(r, (float)xi, (float)yi);
       if (hit && su_view_kind(hit) == SU_VIEW_BUTTON) {
-        SuRect fr = su_view_frame(hit);
-        if (!hit_btn || (prefer_upper && fr.y < su_view_frame(hit_btn).y)) {
-          hit_btn = hit;
-          tx = fr.x + fr.w * 0.5f;
-          ty = fr.y + fr.h * 0.5f;
-          if (!prefer_upper)
+        int seen = 0;
+        int bi;
+        for (bi = 0; bi < n_buttons; bi++) {
+          if (buttons[bi] == hit) {
+            seen = 1;
             break;
+          }
         }
+        if (!seen && n_buttons < 64)
+          buttons[n_buttons++] = hit;
       }
     }
-    if (hit_btn && !prefer_upper)
-      break;
   }
+
+  if (tap_n >= 0) {
+    if (tap_n >= n_buttons)
+      su_panic("Ui.run: SCALUI_UI_TAP_N out of range");
+    hit_btn = buttons[tap_n];
+  } else if (prefer_upper && n_buttons > 0) {
+    int bi;
+    hit_btn = buttons[0];
+    for (bi = 1; bi < n_buttons; bi++) {
+      if (su_view_frame(buttons[bi]).y < su_view_frame(hit_btn).y)
+        hit_btn = buttons[bi];
+    }
+  } else if (n_buttons > 0) {
+    hit_btn = buttons[0];
+  }
+
   if (!hit_btn)
     su_panic("Ui.run: button not found for SCALUI_UI_TAP");
+  {
+    SuRect fr = su_view_frame(hit_btn);
+    tx = fr.x + fr.w * 0.5f;
+    ty = fr.y + fr.h * 0.5f;
+  }
   memset(&tap, 0, sizeof(tap));
   tap.kind = SU_INPUT_TAP;
   tap.x = tx;
@@ -312,6 +362,7 @@ static void *thunk_run_view(void *env) {
   RunViewEnv *e = (RunViewEnv *)env;
   SuUiConfig cfg;
   SuUiSession *session;
+  int interactive;
 
   fill_cfg(&cfg, 0, 0);
   if (e->todo) {
@@ -347,7 +398,24 @@ static void *thunk_run_view(void *env) {
   if (e->todo && getenv("SCALUI_TODO_SAVE"))
     todo_on_save(NULL, e->todo);
 
-  su_ui_demo_finish(session);
+  interactive = cfg.kind == SU_UI_RUNTIME_WINDOW && su_embedder_available();
+  if (interactive) {
+    const char *max_frames_env = getenv("SCALUI_LIVE_FRAMES");
+    int64_t max_frames =
+        (max_frames_env && atoi(max_frames_env) > 0) ? atoi(max_frames_env) : 0;
+    int64_t frame = 0;
+    do {
+      if (!su_ui_pump_sync(session))
+        su_panic("Ui.run live pump failed");
+      frame++;
+      if (max_frames > 0 && frame >= max_frames)
+        break;
+      usleep(16000);
+    } while (su_embedder_alive());
+  } else {
+    su_ui_demo_finish(session);
+  }
+
   su_ui_unmount(session);
   if (e->todo)
     todo_free(e->todo);

@@ -167,6 +167,69 @@ static void test_signals_layout_hit(void) {
   su_signal_int_free(count);
 }
 
+static void test_button_set_and_show_when(void) {
+  SuSignalInt *page;
+  SuSignalInt *count;
+  SuView *root, *home, *other, *set_btn, *inc_btn;
+  const SuTheme *theme = su_theme_default();
+  SuUiConfig cfg;
+  SuUiSession *session;
+  SuInputEvent tap;
+  float hx, hy;
+
+  page = su_signal_int(0);
+  count = su_signal_int(0);
+  root = su_view_column();
+  set_btn = su_lang_view_button_set(su_string_from_cstr("Other"), page, 1);
+  su_view_add_child(root, set_btn);
+
+  home = su_view_column();
+  su_view_add_child(home, su_view_text("Home"));
+  inc_btn = su_lang_view_button_inc(su_string_from_cstr("+1"), count);
+  su_view_add_child(home, inc_btn);
+  su_view_add_child(root, su_view_show_when(page, 0, home));
+
+  other = su_view_column();
+  su_view_add_child(other, su_view_text("Other page"));
+  su_view_add_child(root, su_view_show_when(page, 1, other));
+
+  su_view_layout(root, 200.f, 160.f, theme);
+  assert(su_view_frame(home).h > 0.f);
+  assert(su_view_frame(other).h == 0.f);
+  assert(su_view_hit_test(root, su_view_frame(inc_btn).x + 4.f,
+                          su_view_frame(inc_btn).y + 4.f) == inc_btn);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SU_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 160;
+  cfg.scale = 1.0;
+  session = su_ui_mount(&cfg, root);
+  assert(session);
+  assert(su_ui_pump_sync(session));
+
+  hx = su_view_frame(set_btn).x + 8.f;
+  hy = su_view_frame(set_btn).y + 8.f;
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SU_INPUT_TAP;
+  tap.x = hx;
+  tap.y = hy;
+  assert(su_ui_inject_sync(session, &tap));
+  assert(su_signal_int_get(page) == 1);
+  assert(su_ui_pump_sync(session));
+
+  su_view_layout(root, 200.f, 160.f, theme);
+  assert(su_view_frame(home).h == 0.f);
+  assert(su_view_frame(other).h > 0.f);
+  assert(su_view_hit_test(root, su_view_frame(inc_btn).x + 4.f,
+                          su_view_frame(inc_btn).y + 4.f) != inc_btn);
+
+  su_ui_unmount(session);
+  su_view_free(root);
+  su_signal_int_free(page);
+  su_signal_int_free(count);
+}
+
 static void test_widgets_and_demos(void) {
   SuView *col, *scroll, *list, *field, *img, *icon;
   SuSignalStr *draft;
@@ -375,6 +438,7 @@ static void test_a11y_and_anim(void) {
 int main(void) {
   test_label_session();
   test_signals_layout_hit();
+  test_button_set_and_show_when();
   test_widgets_and_demos();
   test_mobile_pointer_scroll_lifecycle();
   test_a11y_and_anim();
