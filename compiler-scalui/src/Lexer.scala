@@ -168,11 +168,11 @@ def lexInterpString(source: String, quoteI: Int, acc: List): List =
   lexAt(source, parseInt(snd(p)), pushInterpTokens(fstL(p), acc))
 
 def pushInterpTokens(parts: List, acc: List): List =
-  List.cons("InterpEnd", pushInterpParts(parts, List.cons("InterpStart", acc)))
+  List.cons("InterpEnd", appendLists(parts, List.cons("InterpStart", acc)))
 
-def pushInterpParts(parts: List, acc: List): List =
-  if (List.isEmpty(parts) == 1) acc
-  else pushInterpParts(List.tail(parts), List.cons(List.head(parts), acc))
+def appendLists(xs: List, ys: List): List =
+  if (List.isEmpty(xs) == 1) ys
+  else List.cons(List.head(xs), appendLists(List.tail(xs), ys))
 
 def readInterp(source: String, i: Int, parts: List, lit: String): List =
   if (i >= Str.len(source)) pairLS(parts, Str.fromInt(i))
