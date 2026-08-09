@@ -52,7 +52,7 @@ jobs:
           grep -q "parser-stage0: ok" /tmp/parser.out
           cargo run -p scalui -- fmt --check examples/adt
           cargo run -p scalui -- build examples/adt
-          cargo run -p scalui -- build examples/adt | tee /tmp/incr.out
+          cargo run -p scalui -- build examples/adt 2>&1 | tee /tmp/incr.out
           grep -q "up-to-date" /tmp/incr.out
 
       - name: Headless UI + golden PNGs
