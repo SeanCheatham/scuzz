@@ -10,6 +10,7 @@
 
 /* Weak stubs — strong defs from embedder-desktop override when linked. */
 __attribute__((weak)) int su_embedder_available(void) { return 0; }
+__attribute__((weak)) int su_embedder_alive(void) { return 0; }
 __attribute__((weak)) int su_embedder_present(const char *title, int width,
                                               int height, const uint8_t *rgba,
                                               size_t nbytes) {

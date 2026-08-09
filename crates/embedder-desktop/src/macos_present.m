@@ -12,10 +12,15 @@ static int g_w;
 static int g_h;
 static int g_ready;
 static int g_app_ready;
+static int g_user_quit;
 
 int su_embedder_available(void) {
   /* GUI session with a main display (SSH/headless Mac returns 0). */
   return CGMainDisplayID() != kCGNullDirectDisplay ? 1 : 0;
+}
+
+int su_embedder_alive(void) {
+  return !g_user_quit && su_embedder_available();
 }
 
 static void ensure_app(void) {
@@ -26,12 +31,18 @@ static void ensure_app(void) {
   g_app_ready = 1;
 }
 
+static void mark_user_quit(void) {
+  g_user_quit = 1;
+  su_embedder_shutdown();
+}
+
 static int ensure_window(const char *title, int width, int height) {
   @autoreleasepool {
     if (g_ready && g_w == width && g_h == height)
       return 1;
 
     su_embedder_shutdown();
+    g_user_quit = 0;
     ensure_app();
 
     NSRect rect = NSMakeRect(100, 100, (CGFloat)width, (CGFloat)height);
@@ -71,6 +82,8 @@ int su_embedder_present(const char *title, int width, int height,
   size_t need;
   int quit = 0;
 
+  if (g_user_quit)
+    return 0;
   if (!rgba || width <= 0 || height <= 0)
     return 0;
   need = (size_t)width * (size_t)height * 4;
@@ -122,14 +135,15 @@ int su_embedder_present(const char *title, int width, int height,
           break;
         }
       }
-      if ([ev type] == NSEventTypeApplicationDefined)
-        continue;
       [NSApp sendEvent:ev];
     }
+
+    if (!quit && g_win && ![g_win isVisible])
+      quit = 1;
   }
 
   if (quit) {
-    su_embedder_shutdown();
+    mark_user_quit();
     return 1;
   }
   return 1;

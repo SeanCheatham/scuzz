@@ -60,6 +60,7 @@ fn infer(
         | Expr::IoFail(_)
         | Expr::UiRunHeadless(_)
         | Expr::UiRunCounter
+        | Expr::UiRunLive
         | Expr::UiRunTodo
         | Expr::EffectsRunKit => Ok(Type::Io(Box::new(Type::Unit))),
         Expr::IoPure(inner) => {

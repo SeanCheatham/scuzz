@@ -68,6 +68,8 @@ pub enum Expr {
     UiRunHeadless(Box<Expr>),
     /// `Ui.runCounter`
     UiRunCounter,
+    /// `Ui.runLive` — pump until quit when Window embedder is present
+    UiRunLive,
     /// `Ui.runTodo`
     UiRunTodo,
     /// `Effects.runKit`

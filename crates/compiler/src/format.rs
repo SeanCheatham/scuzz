@@ -94,6 +94,7 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
         Expr::IoPure(e) => format!("{pad}IO.pure({})", pretty_expr(e, 0).trim()),
         Expr::UiRunHeadless(e) => format!("{pad}Ui.runHeadless({})", pretty_expr(e, 0).trim()),
         Expr::UiRunCounter => format!("{pad}Ui.runCounter"),
+        Expr::UiRunLive => format!("{pad}Ui.runLive"),
         Expr::UiRunTodo => format!("{pad}Ui.runTodo"),
         Expr::EffectsRunKit => format!("{pad}Effects.runKit"),
         Expr::LexerClassify(e) => format!("{pad}Lexer.classify({})", pretty_expr(e, 0).trim()),
