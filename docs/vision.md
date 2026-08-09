@@ -39,14 +39,71 @@ Install CLI → `scalui new` → Counter/Todo as backend-agnostic `View` + built
 **v1 (language credibility)**  
 Stage-2 self-host: ScalUI compiler compiles ScalUI compiler; release builds do not require Rust Stage-0 except as CI canary.
 
-## Phases (summary)
+## Phased roadmap
 
-0. Foundation — skeleton, Stage-0 hello→LLVM, runtime + IO fiber skeleton  
-1. `Ui` effect + Headless (then Window)  
-2. Declarative UI core  
-3. Effects stdlib + tooling; begin ScalUI rewrite of compiler  
-4. Self-host Stage 1/2  
-5. Mobile embedders  
-6. Productize  
+Vertical slices over breadth. Ship Counter before generality. No UI feature may land Window-only without a Headless path.
+
+### Phase 0 — Foundation
+
+- Repo skeleton, vision docs, compatibility matrix, `scalui.toml` schema draft
+- Stage-0 compiler (Rust): hello-world → LLVM IR → native executable
+- Minimal runtime (alloc, string, panic) + IO fiber skeleton (`IO.delay`, `flatMap`, `Resource`, run loop)
+- ADRs: GC v0, Skia acquisition, IO error model, `Ui` vs `View` boundary, kernel dialect for self-host
+- CI on headless Linux from day one
+
+### Phase 1 — `Ui` effect + Headless backend first
+
+- Skia offscreen + `UiRuntime.Headless`: `mount` / `pump` / `inject` / `snapshot`
+- Golden PNG under `scalui test`; `scalui run --headless` works with no display
+- **Then** `UiRuntime.Window` as a second interpreter wrapping the same session protocol
+- Rule: no feature may land Window-only without a Headless path
+
+### Phase 2 — Declarative UI core
+
+- Element tree, state/signals, layout, hit testing
+- Theme tokens + core widgets (`Text`, `Button`, `TextField`, `List`, `Scroll`, `Image`, `Icon`, …)
+- Bridge: signal updates from completed `IO`; UI-thread hop
+- Examples: Counter + Todo (Todo loads/saves via `IO` + `Resource`)
+- Views stay backend-agnostic under the `Ui` effect
+
+### Phase 3 — Language, effects stdlib, tooling
+
+- Expand subset: modules, packages, ADTs
+- Complete blessed effects kit: `Resource`, `Ref`, `Deferred`, `Queue`, race/par helpers, time
+- Incremental compile + hot reload; formatter; basic LSP
+- Linux (then Windows) embedders
+- **Start rewriting compiler modules in ScalUI** (parser first), still built by Stage 0
+
+### Phase 4 — Self-host
+
+- Stage 1: full compiler-in-ScalUI builds under Stage 0
+- Stage 2: Stage 1 compiles the compiler; CI dual-boot + self-rebuild check
+- CLI moves to ScalUI; Stage 0 retained as canary only
+- Success bar: `scalui` release binary is produced by a ScalUI-built compiler
+
+### Phase 5 — Mobile
+
+- iOS/Android embedder shells + packaging (`scalui package`)
+- Touch gestures, soft keyboard, app lifecycle
+- Same examples run unmodified across platforms
+
+### Phase 6 — Productize
+
+- Design-language polish, animation system, accessibility hooks
+- Docs, samples gallery, distribution of prebuilt Skia + toolchains
+- Optional: evaluate Impeller as alternate backend behind the same canvas API
+
+## Risks and deliberate bets
+
+| Risk | Mitigation |
+| --- | --- |
+| Building a language + UI + tooling is huge | Ruthless subset; vertical slices; ship Counter before generality |
+| Self-host never arrives / dialect drift | Kernel dialect doc; port compiler early; Stage 0/1/2 CI gate |
+| Effects too weak vs cats-effect OR too heavy for UI | Builtin IO only; pure `View` build; `Ui` effect at session boundary |
+| “Almost Scala / almost CE” confuses users | Brand ScalUI language + effects guide; explicit non-goals (no cats port) |
+| Skia build/size complexity | Prebuilt artifacts per platform; thin C ABI; CI caches |
+| Window-only features sneak in | Rule: no UI feature without Headless interpreter path |
+| GC + UI frame budget | `pump` as frame boundary; measure; isolate render work |
+| Mobile packaging hell | Defer until desktop UI core + self-host path are credible |
 
 See `docs/adr/` for locked design decisions and `docs/compatibility.md` for the matrix.
