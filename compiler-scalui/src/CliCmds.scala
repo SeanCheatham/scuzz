@@ -197,43 +197,6 @@ def cmdPackage(projectDir: String, target: String): IO[Unit] =
     )
   )
 
-def readTomlDefaultRuntime(toml: String): String =
-  readTomlQuotedAfter(toml, "default_runtime = \"", "headless")
-
-def readTomlQuotedAfter(toml: String, key: String, fallback: String): String =
-  readTomlQuotedAt(toml, Str.indexOf(toml, key), Str.len(key), fallback)
-
-def readTomlQuotedAt(toml: String, idx: Int, keyLen: Int, fallback: String): String =
-  if (idx < 0) fallback
-  else readUntilQuote(toml, idx + keyLen, "")
-
-def readTomlHeadlessW(toml: String): String =
-  readTomlBracketNum(toml, Str.indexOf(toml, "headless_size = ["), 0, "200")
-
-def readTomlHeadlessH(toml: String): String =
-  readTomlBracketNum(toml, Str.indexOf(toml, "headless_size = ["), 1, "120")
-
-def readTomlBracketNum(toml: String, idx: Int, which: Int, fallback: String): String =
-  if (idx < 0) fallback
-  else readTomlBracketNumAt(toml, idx + 18, which, fallback)
-
-def readTomlBracketNumAt(toml: String, i: Int, which: Int, fallback: String): String =
-  if (i >= Str.len(toml)) fallback
-  else if (isDigit(Str.charAt(toml, i)) == 1)
-    readTomlBracketNumTake(toml, i, which, fallback, "")
-  else if (Str.charAt(toml, i) == 93) fallback
-  else readTomlBracketNumAt(toml, i + 1, which, fallback)
-
-def readTomlBracketNumTake(toml: String, i: Int, which: Int, fallback: String, acc: String): String =
-  if (i >= Str.len(toml)) fallback
-  else if (isDigit(Str.charAt(toml, i)) == 1)
-    readTomlBracketNumTake(toml, i + 1, which, fallback, Str.concat(acc, Str.slice(toml, i, i + 1)))
-  else if (which == 0) acc
-  else readTomlBracketNumAt(toml, i + 1, 0, fallback)
-
-def hasUiSection(toml: String): Int =
-  if (Str.indexOf(toml, "[ui]") < 0) 0 else 1
-
 def cmdRun(projectDir: String, headless: Int): IO[Unit] =
   compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
     Fs.read(pathJoin(projectDir, "scalui.toml")).flatMap(toml =>
