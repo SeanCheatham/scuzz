@@ -355,6 +355,89 @@ fn ensure_io(code: &mut String, kind: Kind, value: &str, tmp: &str) -> String {
     format!("%{tmp}")
 }
 
+/// Stable capture order for packing/unpacking flatMap/handleErrorWith env lists.
+fn capture_name_order(locals: &HashMap<String, (String, Kind)>) -> Vec<String> {
+    let mut names: Vec<String> = locals.keys().cloned().collect();
+    names.sort();
+    names
+}
+
+/// Pack enclosing locals into a `SuList` (head = first capture name). Ints are boxed.
+fn pack_env(
+    code: &mut String,
+    locals: &HashMap<String, (String, Kind)>,
+    names: &[String],
+    prefix: &str,
+) -> String {
+    if names.is_empty() {
+        return "null".into();
+    }
+    writeln!(code, "  %{prefix}_0 = call ptr @su_list_nil()").unwrap();
+    let mut cur = format!("%{prefix}_0");
+    for (i, name) in names.iter().enumerate().rev() {
+        let (val, kind) = locals.get(name).expect("capture name");
+        let ptr = if *kind == Kind::Int {
+            writeln!(
+                code,
+                "  %{prefix}_b{i} = call ptr @su_box_i64(i64 {val})"
+            )
+            .unwrap();
+            format!("%{prefix}_b{i}")
+        } else {
+            val.clone()
+        };
+        writeln!(
+            code,
+            "  %{prefix}_{} = call ptr @su_list_cons(ptr {ptr}, ptr {cur})",
+            i + 1
+        )
+        .unwrap();
+        cur = format!("%{prefix}_{}", i + 1);
+    }
+    cur
+}
+
+/// Unpack `%env` list into `body_locals` (mirrors [`pack_env`] order).
+fn unpack_env_preamble(
+    pre: &mut String,
+    body_locals: &mut HashMap<String, (String, Kind)>,
+    outer: &HashMap<String, (String, Kind)>,
+    names: &[String],
+    prefix: &str,
+) {
+    if names.is_empty() {
+        return;
+    }
+    let mut cur = "%env".to_string();
+    for (i, name) in names.iter().enumerate() {
+        let kind = outer.get(name).map(|(_, k)| *k).unwrap_or(Kind::Ptr);
+        writeln!(
+            pre,
+            "  %{prefix}_h{i} = call ptr @su_list_head(ptr {cur})"
+        )
+        .unwrap();
+        writeln!(
+            pre,
+            "  %{prefix}_t{i} = call ptr @su_list_tail(ptr {cur})"
+        )
+        .unwrap();
+        match kind {
+            Kind::Int => {
+                writeln!(
+                    pre,
+                    "  %{name} = call i64 @su_unbox_i64(ptr %{prefix}_h{i})"
+                )
+                .unwrap();
+                body_locals.insert(name.clone(), (format!("%{name}"), Kind::Int));
+            }
+            Kind::Ptr | Kind::Io => {
+                body_locals.insert(name.clone(), (format!("%{prefix}_h{i}"), kind));
+            }
+        }
+        cur = format!("%{prefix}_t{i}");
+    }
+}
+
 fn emit_cstr_from_string(
     code: &mut String,
     strs: &[String],
@@ -787,20 +870,18 @@ fn emit_expr(
             let inner_emitted = emit_expr(inner, ctx, locals, &format!("{prefix}_in"));
             let payload_kind = inner_emitted.payload;
 
-            let mut body_locals: HashMap<String, (String, Kind)> = HashMap::new();
-            // Cont is a separate function; bind only the flatMap param.
-            if let Some(p) = param {
-                if payload_kind == Kind::Int {
-                    // placeholder; real binding emitted inside cont
-                    body_locals.insert(p.clone(), (format!("%{p}"), Kind::Int));
-                } else {
-                    body_locals.insert(p.clone(), ("%value".into(), Kind::Ptr));
-                }
-            }
-
-            // Emit body first into a temporary buffer with the intended local names.
-            // For Int payload we unbox into %param before the body.
+            // Cont is a separate LLVM function; capture enclosing locals via %env list.
+            let capture_names = capture_name_order(locals);
             let mut pre = String::new();
+            let mut body_locals: HashMap<String, (String, Kind)> = HashMap::new();
+            unpack_env_preamble(
+                &mut pre,
+                &mut body_locals,
+                locals,
+                &capture_names,
+                &format!("c{id}"),
+            );
+
             if let Some(p) = param {
                 if payload_kind == Kind::Int {
                     writeln!(
@@ -809,6 +890,8 @@ fn emit_expr(
                     )
                     .unwrap();
                     body_locals.insert(p.clone(), (format!("%{p}"), Kind::Int));
+                } else {
+                    body_locals.insert(p.clone(), ("%value".into(), Kind::Ptr));
                 }
             }
 
@@ -844,9 +927,15 @@ fn emit_expr(
                 &inner_emitted.value,
                 &format!("{prefix}_inio"),
             );
+            let env_ptr = pack_env(
+                &mut code,
+                locals,
+                &capture_names,
+                &format!("{prefix}_cap"),
+            );
             writeln!(
                 code,
-                "  %{prefix}_fm = call ptr @su_io_flatmap(ptr {inner_io}, ptr @{cont_name}, ptr null)"
+                "  %{prefix}_fm = call ptr @su_io_flatmap(ptr {inner_io}, ptr @{cont_name}, ptr {env_ptr})"
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_fm"), body_emitted.payload)
@@ -855,7 +944,16 @@ fn emit_expr(
             let id = *ctx.cont_id;
             *ctx.cont_id += 1;
             let cont_name = format!("su_err_{id}");
+            let capture_names = capture_name_order(locals);
+            let mut pre = String::new();
             let mut body_locals = HashMap::new();
+            unpack_env_preamble(
+                &mut pre,
+                &mut body_locals,
+                locals,
+                &capture_names,
+                &format!("e{id}"),
+            );
             let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("e{id}"));
             writeln!(
                 ctx.conts,
@@ -863,6 +961,7 @@ fn emit_expr(
             )
             .unwrap();
             writeln!(ctx.conts, "entry:").unwrap();
+            ctx.conts.push_str(&pre);
             ctx.conts.push_str(&body_emitted.code);
             let ret = ensure_io(
                 ctx.conts,
@@ -882,9 +981,15 @@ fn emit_expr(
                 &inner_emitted.value,
                 &format!("{prefix}_heio"),
             );
+            let env_ptr = pack_env(
+                &mut code,
+                locals,
+                &capture_names,
+                &format!("{prefix}_ecap"),
+            );
             writeln!(
                 code,
-                "  %{prefix}_h = call ptr @su_io_handle_error_with(ptr {inner_io}, ptr @{cont_name}, ptr null)"
+                "  %{prefix}_h = call ptr @su_io_handle_error_with(ptr {inner_io}, ptr @{cont_name}, ptr {env_ptr})"
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_h"), body_emitted.payload)
