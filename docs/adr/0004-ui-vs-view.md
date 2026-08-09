@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — Phase 1 session API + Phase 2 declarative tree + Phase 5 Mobile peer + Phase 6 anim/a11y hooks + post–Phase 6 language View surface + interaction slice (`buttonSet` / `showWhen` / stay-open `Ui.run`)
+Accepted
 
 ## Context
 
@@ -20,11 +20,11 @@ Two layers:
 - `UiRuntime.Headless` is a **peer** of `Window` / `Mobile`, not a test-only shim.
 - Widget rebuild is **not** an `IO`. Frame boundary is `UiSession.pump`.
 - World effects (HTTP, files, clock, random) stay plain blessed `IO`; compose with `Ui` at the edges.
-- Phase 2: `View` is an element tree with layout frames + hit testing; **signals** hold UI state; theme tokens style widgets.
+- `View` is an element tree with layout frames + hit testing; **signals** hold UI state; theme tokens style widgets.
 - IO → UI bridge: completed `IO` may `su_ui_bridge_post_*` signal writes; `pump` flushes the queue (UI-thread hop).
-- Phase 5: Mobile uses the same session protocol. Input expands with pointer phases, scroll, soft-keyboard visibility, and lifecycle — all injectable under Headless. OS shells (`crates/embedder-mobile`) only present + map events.
-- Phase 6: animation ticks (`SuAnimFloat`) advance on `pump` using monotonic Clock dt; accessibility is View metadata (`role`/`label`) dumpable under Headless — no OS assistive-tech bridge yet. Theme gains `accent`/`disabled`/`radius` without forcing golden churn (default `radius = 0`).
-- Post–Phase 6: Counter/Todo/nav examples build View trees in ScalUI via blessed `Signal` / `View` / `Todo` / `Ui.run` builtins (wrapping the C API). Kernel demos (`Ui.runCounter` / `Ui.runTodo` / `Ui.runLive`) remain for kits that are not yet language-authored.
+- Mobile uses the same session protocol. Input expands with pointer phases, scroll, soft-keyboard visibility, and lifecycle — all injectable under Headless. OS shells (`crates/embedder-mobile`) only present + map events.
+- Animation ticks (`SuAnimFloat`) advance on `pump` using monotonic Clock dt; accessibility is View metadata (`role`/`label`) dumpable under Headless — no OS assistive-tech bridge yet. Theme gains `accent`/`disabled`/`radius` without forcing golden churn (default `radius = 0`).
+- Counter/Todo/nav examples build View trees in ScalUI via blessed `Signal` / `View` / `Todo` / `Ui.run` builtins (wrapping the C API). Kernel demos (`Ui.runCounter` / `Ui.runTodo` / `Ui.runLive`) remain for kits that are not yet language-authored.
 - **`Ui.run` session lifetime**: Headless is mount → optional scripted tap → snapshot → unmount. Window (when an embedder is present) stays open and pumps until quit (q/Esc) or `SCALUI_LIVE_FRAMES`; same entry point as Headless. `Ui.runLive` remains the kernel stay-open demo with its own tree.
 - **`View.showWhen(sig, value, child)`**: declarative visibility (layout/paint/hit skip when `Signal.get(sig) != value`). Not a lambda workaround — remains valid after first-class taps exist.
 

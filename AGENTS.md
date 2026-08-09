@@ -6,7 +6,8 @@ Read these before large changes. Prefer updating them over inventing parallel do
 
 | Doc | Purpose |
 | --- | --- |
-| [`docs/vision.md`](docs/vision.md) | Product thesis, locked defaults, **phased roadmap (0–6)**, risks |
+| [`docs/vision.md`](docs/vision.md) | Product thesis, locked defaults, risks |
+| [`docs/plan.md`](docs/plan.md) | Ordered next steps with done-when gates |
 | [`docs/compatibility.md`](docs/compatibility.md) | What we keep / cut vs Scala & Typelevel; platform matrix; self-host stages |
 | [`docs/adr/`](docs/adr/) | Accepted decisions (GC, Skia, IO errors, `Ui` vs `View`, kernel dialect) |
 | [`docs/schemas/scalui-toml.md`](docs/schemas/scalui-toml.md) | Package manifest schema draft |
@@ -29,7 +30,7 @@ ScalUI is already a language + runtime + UI + tooling bet. **Ruthless subset and
 
 ## Default workflow
 
-1. Check `docs/vision.md` for which phase the work belongs to.
+1. Check `docs/plan.md` for current priorities; `docs/vision.md` for locked defaults.
 2. Check relevant ADRs before changing GC, effects, UI boundaries, or Skia strategy.
 3. Implement the smallest slice that proves the behavior (test or `examples/` when applicable).
 4. Update the one doc that owns the decision—not a new parallel note.
