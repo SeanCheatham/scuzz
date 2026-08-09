@@ -98,7 +98,7 @@ fn real_main() -> Result<ExitCode> {
             }
             // Also compile the project if it looks like one
             if path.join("scalui.toml").is_file() {
-                let _ = build(&path, &path.join("build"))?;
+                let _ = build(&path, &PathBuf::from("build"))?;
                 eprintln!("project compile smoke ok");
             }
             eprintln!("scalui test ok");

@@ -7,8 +7,8 @@
 /.scalui/
 *.png
 .DS_Store
-/examples/*/build/
-/crates/runtime/build/
+examples/**/build/
+crates/runtime/build/
 *.a
 *.so
 *.dylib
