@@ -9,8 +9,8 @@ cargo run -p scalui -- build --full compiler-scalui
 # Stage 1 builds hello
 ./compiler-scalui/build/scalui build examples/hello
 
-# Dual-boot (Stage 1 → Stage 2)
+# Dual-boot (Stage 1 → Stage 2; raises stack for recursive emit)
 ./scripts/selfhost.sh
 ```
 
-Stage 0 Rust CLI remains a CI canary.
+Stage-1 CLI: `scalui (build|run) [project]` (writes `project/build/`). Stage 0 Rust CLI remains a CI canary.
