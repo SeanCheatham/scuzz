@@ -1,21 +1,40 @@
-use crate::ast::{EnumDef, Expr, Pattern, Program};
+use crate::ast::{BinOp, EnumDef, Expr, FunDef, Pattern, Program, Type};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
-/// Emit LLVM IR text for a Stage-0 / Phase 3 program. Links against `libscalui_rt`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Kind {
+    Int,
+    Ptr,
+    Io,
+}
+
+/// Emit LLVM IR text for a Stage-0 / Phase 4 program. Links against `libscalui_rt`.
 pub fn emit_llvm(program: &Program) -> String {
-    let mut out = String::new();
     let mut strs: Vec<String> = Vec::new();
+    for d in &program.defs {
+        collect_strings(&d.body, &mut strs);
+    }
     collect_strings(&program.main.body, &mut strs);
 
     let enum_tags = build_enum_tags(&program.enums);
+    let funs: HashMap<String, &FunDef> = program.defs.iter().map(|d| (d.name.clone(), d)).collect();
 
+    let mut out = String::new();
     writeln!(out, "; ScalUI Stage-0 generated LLVM IR").unwrap();
     writeln!(out, "target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"").unwrap();
     writeln!(out, "target triple = \"x86_64-pc-linux-gnu\"").unwrap();
     writeln!(out).unwrap();
 
     writeln!(out, "declare ptr @su_string_from_cstr(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_string_cstr(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_string_concat(ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @su_string_len(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_string_slice(ptr, i64, i64)").unwrap();
+    writeln!(out, "declare i32 @su_string_eq(ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @su_string_char_at(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @su_string_from_int(i64)").unwrap();
+    writeln!(out, "declare i64 @su_string_index_of(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @su_io_println(ptr)").unwrap();
     writeln!(out, "declare ptr @su_io_pure(ptr)").unwrap();
     writeln!(out, "declare ptr @su_io_delay(ptr, ptr)").unwrap();
@@ -33,7 +52,25 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @su_ui_run_headless_label(ptr, i32, i32)").unwrap();
     writeln!(out, "declare ptr @su_ui_run_counter(i32, i32)").unwrap();
     writeln!(out, "declare ptr @su_ui_run_todo(i32, i32)").unwrap();
-    writeln!(out, "declare i32 @su_runtime_main(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_list_nil()").unwrap();
+    writeln!(out, "declare i32 @su_list_is_empty(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_list_cons(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @su_list_head(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_list_tail(ptr)").unwrap();
+    writeln!(out, "declare i64 @su_list_len(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_list_at(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @su_list_reverse(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_list_join(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @su_fs_read(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_fs_write(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @su_fs_list(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_fs_mkdirs(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_sys_args()").unwrap();
+    writeln!(out, "declare ptr @su_sys_exec(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_sys_getenv(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_box_i64(i64)").unwrap();
+    writeln!(out, "declare i64 @su_unbox_i64(ptr)").unwrap();
+    writeln!(out, "declare i32 @su_runtime_main_args(ptr, i32, ptr)").unwrap();
     writeln!(out).unwrap();
 
     for (i, s) in strs.iter().enumerate() {
@@ -53,52 +90,89 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
-    // Error handler trampoline: SuErrorHandler(err, env) → calls cont(err, env) style body.
-    // We lower handleErrorWith bodies as SuCont-shaped functions that ignore the error ptr.
-    // Runtime signature: SuIo* (*)(SuError*, void*)
-    // Emit wrapper per handler that ignores err and runs the body.
+    for d in &program.defs {
+        let ret = llvm_type(&d.ret);
+        write!(out, "declare {ret} @su_user_{}(", d.name).unwrap();
+        for (i, p) in d.params.iter().enumerate() {
+            if i > 0 {
+                write!(out, ", ").unwrap();
+            }
+            write!(out, "{}", llvm_type(&p.ty)).unwrap();
+        }
+        writeln!(out, ")").unwrap();
+    }
+    if !program.defs.is_empty() {
+        writeln!(out).unwrap();
+    }
 
     let mut cont_id = 0usize;
     let mut conts = String::new();
-    let mut locals: HashMap<String, String> = HashMap::new();
-    let body_expr = emit_expr(
-        &program.main.body,
-        &strs,
-        &enum_tags,
-        &mut cont_id,
-        &mut conts,
-        &mut locals,
-        "build",
-    );
+    let mut ctx = EmitCtx {
+        strs: &strs,
+        enum_tags: &enum_tags,
+        funs: &funs,
+        cont_id: &mut cont_id,
+        conts: &mut conts,
+    };
+
+    let mut fundef_ir = String::new();
+    for d in &program.defs {
+        emit_fundef(d, &mut ctx, &mut fundef_ir);
+    }
+
+    let mut locals: HashMap<String, (String, Kind)> = HashMap::new();
+    let body_expr = emit_expr(&program.main.body, &mut ctx, &mut locals, "build");
 
     out.push_str(&conts);
+    out.push_str(&fundef_ir);
 
-    writeln!(out, "define i32 @main() {{").unwrap();
+    writeln!(out, "define i32 @main(i32 %argc, ptr %argv) {{").unwrap();
     writeln!(out, "entry:").unwrap();
     out.push_str(&body_expr.code);
-    // If body is a pure ADT/unit (shouldn't happen for @main after typecheck), wrap.
-    let io_val = if body_expr.is_io {
-        body_expr.value
-    } else {
-        writeln!(
-            out,
-            "  %wrapped = call ptr @su_io_pure(ptr {})",
-            body_expr.value
-        )
-        .unwrap();
-        "%wrapped".into()
-    };
-    writeln!(out, "  %rc = call i32 @su_runtime_main(ptr {io_val})").unwrap();
+    let io_val = ensure_io(&mut out, body_expr.kind, &body_expr.value, "wrapped");
+    writeln!(
+        out,
+        "  %rc = call i32 @su_runtime_main_args(ptr {io_val}, i32 %argc, ptr %argv)"
+    )
+    .unwrap();
     writeln!(out, "  ret i32 %rc").unwrap();
     writeln!(out, "}}").unwrap();
 
     out
 }
 
+struct EmitCtx<'a> {
+    strs: &'a [String],
+    enum_tags: &'a HashMap<(String, String), i32>,
+    funs: &'a HashMap<String, &'a FunDef>,
+    cont_id: &'a mut usize,
+    conts: &'a mut String,
+}
+
 struct Emitted {
     code: String,
     value: String,
-    is_io: bool,
+    kind: Kind,
+    /// When `kind == Io`, the kind of the successful payload (Int for Sys.exec).
+    payload: Kind,
+}
+
+fn io_emitted(code: String, value: String, payload: Kind) -> Emitted {
+    Emitted {
+        code,
+        value,
+        kind: Kind::Io,
+        payload,
+    }
+}
+
+fn val_emitted(code: String, value: String, kind: Kind) -> Emitted {
+    Emitted {
+        code,
+        value,
+        kind,
+        payload: Kind::Ptr,
+    }
 }
 
 fn build_enum_tags(enums: &[EnumDef]) -> HashMap<(String, String), i32> {
@@ -111,17 +185,43 @@ fn build_enum_tags(enums: &[EnumDef]) -> HashMap<(String, String), i32> {
     m
 }
 
+fn llvm_type(ty: &Type) -> &'static str {
+    match ty {
+        Type::Int | Type::Bool => "i64",
+        _ => "ptr",
+    }
+}
+
+fn kind_of_type(ty: &Type) -> Kind {
+    match ty {
+        Type::Int | Type::Bool => Kind::Int,
+        Type::Io(_) => Kind::Io,
+        _ => Kind::Ptr,
+    }
+}
+
+fn payload_of_type(ty: &Type) -> Kind {
+    match ty {
+        Type::Io(inner) => kind_of_type(inner),
+        _ => Kind::Ptr,
+    }
+}
+
 fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
     match expr {
-        Expr::IoPrintln(s)
-        | Expr::UiRunHeadless(s)
-        | Expr::IoFail(s)
-        | Expr::LexerClassify(s) => {
+        Expr::StrLit(s) => {
             if !out.contains(s) {
                 out.push(s.clone());
             }
         }
-        Expr::FlatMap { inner, body }
+        Expr::IoPrintln(e)
+        | Expr::IoSleep(e)
+        | Expr::IoFail(e)
+        | Expr::IoPure(e)
+        | Expr::UiRunHeadless(e)
+        | Expr::LexerClassify(e)
+        | Expr::Attempt { inner: e } => collect_strings(e, out),
+        Expr::FlatMap { inner, body, .. }
         | Expr::HandleErrorWith { inner, body }
         | Expr::Let {
             value: inner,
@@ -135,15 +235,33 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         | Expr::IoBoth {
             left: inner,
             right: body,
+        }
+        | Expr::Binary {
+            left: inner,
+            right: body,
+            ..
         } => {
             collect_strings(inner, out);
             collect_strings(body, out);
         }
-        Expr::Attempt { inner } => collect_strings(inner, out),
+        Expr::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            collect_strings(cond, out);
+            collect_strings(then_branch, out);
+            collect_strings(else_branch, out);
+        }
         Expr::Match { scrutinee, arms } => {
             collect_strings(scrutinee, out);
             for a in arms {
                 collect_strings(&a.body, out);
+            }
+        }
+        Expr::Call { args, .. } => {
+            for a in args {
+                collect_strings(a, out);
             }
         }
         Expr::IoDelayUnit
@@ -151,541 +269,14 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         | Expr::UiRunCounter
         | Expr::UiRunTodo
         | Expr::EffectsRunKit
-        | Expr::IoSleep(_)
         | Expr::Var(_)
+        | Expr::IntLit(_)
         | Expr::AdtConstruct { .. } => {}
     }
 }
 
 fn str_index(strs: &[String], s: &str) -> usize {
     strs.iter().position(|x| x == s).expect("string collected")
-}
-
-fn emit_expr(
-    expr: &Expr,
-    strs: &[String],
-    enum_tags: &HashMap<(String, String), i32>,
-    cont_id: &mut usize,
-    conts: &mut String,
-    locals: &mut HashMap<String, String>,
-    prefix: &str,
-) -> Emitted {
-    match expr {
-        Expr::Unit => {
-            let mut code = String::new();
-            writeln!(code, "  %{prefix}_unit = call ptr @su_io_pure(ptr null)").unwrap();
-            Emitted {
-                code,
-                value: format!("%{prefix}_unit"),
-                is_io: true,
-            }
-        }
-        Expr::IoDelayUnit => {
-            let mut code = String::new();
-            writeln!(
-                code,
-                "  %{prefix}_delay = call ptr @su_io_delay(ptr @su_delay_unit_thunk, ptr null)"
-            )
-            .unwrap();
-            Emitted {
-                code,
-                value: format!("%{prefix}_delay"),
-                is_io: true,
-            }
-        }
-        Expr::IoSleep(ms) => {
-            let mut code = String::new();
-            writeln!(
-                code,
-                "  %{prefix}_sleep = call ptr @su_io_sleep_ms(i64 {ms})"
-            )
-            .unwrap();
-            Emitted {
-                code,
-                value: format!("%{prefix}_sleep"),
-                is_io: true,
-            }
-        }
-        Expr::IoFail(s) => {
-            let idx = str_index(strs, s);
-            let len = s.len() + 1;
-            let mut code = String::new();
-            writeln!(
-                code,
-                "  %{prefix}_sptr = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_io = call ptr @su_io_fail_cstr(ptr %{prefix}_sptr)"
-            )
-            .unwrap();
-            Emitted {
-                code,
-                value: format!("%{prefix}_io"),
-                is_io: true,
-            }
-        }
-        Expr::IoPrintln(s) => {
-            let idx = str_index(strs, s);
-            let len = s.len() + 1;
-            let mut code = String::new();
-            writeln!(
-                code,
-                "  %{prefix}_sptr = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_s = call ptr @su_string_from_cstr(ptr %{prefix}_sptr)"
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_io = call ptr @su_io_println(ptr %{prefix}_s)"
-            )
-            .unwrap();
-            Emitted {
-                code,
-                value: format!("%{prefix}_io"),
-                is_io: true,
-            }
-        }
-        Expr::UiRunHeadless(s) => {
-            let idx = str_index(strs, s);
-            let len = s.len() + 1;
-            let mut code = String::new();
-            writeln!(
-                code,
-                "  %{prefix}_sptr = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_io = call ptr @su_ui_run_headless_label(ptr %{prefix}_sptr, i32 0, i32 0)"
-            )
-            .unwrap();
-            Emitted {
-                code,
-                value: format!("%{prefix}_io"),
-                is_io: true,
-            }
-        }
-        Expr::UiRunCounter => {
-            let mut code = String::new();
-            writeln!(
-                code,
-                "  %{prefix}_io = call ptr @su_ui_run_counter(i32 0, i32 0)"
-            )
-            .unwrap();
-            Emitted {
-                code,
-                value: format!("%{prefix}_io"),
-                is_io: true,
-            }
-        }
-        Expr::UiRunTodo => {
-            let mut code = String::new();
-            writeln!(
-                code,
-                "  %{prefix}_io = call ptr @su_ui_run_todo(i32 0, i32 0)"
-            )
-            .unwrap();
-            Emitted {
-                code,
-                value: format!("%{prefix}_io"),
-                is_io: true,
-            }
-        }
-        Expr::EffectsRunKit => {
-            let mut code = String::new();
-            writeln!(code, "  %{prefix}_io = call ptr @su_effects_run_kit()").unwrap();
-            Emitted {
-                code,
-                value: format!("%{prefix}_io"),
-                is_io: true,
-            }
-        }
-        Expr::LexerClassify(s) => {
-            let idx = str_index(strs, s);
-            let len = s.len() + 1;
-            let mut code = String::new();
-            writeln!(
-                code,
-                "  %{prefix}_sptr = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_adt = call ptr @su_lexer_classify(ptr %{prefix}_sptr)"
-            )
-            .unwrap();
-            Emitted {
-                code,
-                value: format!("%{prefix}_adt"),
-                is_io: false,
-            }
-        }
-        Expr::AdtConstruct {
-            enum_name,
-            case_name,
-        } => {
-            let tag = enum_tags
-                .get(&(enum_name.clone(), case_name.clone()))
-                .copied()
-                .unwrap_or(0);
-            let mut code = String::new();
-            writeln!(
-                code,
-                "  %{prefix}_adt = call ptr @su_adt_new(i32 {tag}, ptr null)"
-            )
-            .unwrap();
-            Emitted {
-                code,
-                value: format!("%{prefix}_adt"),
-                is_io: false,
-            }
-        }
-        Expr::Var(name) => {
-            let val = locals
-                .get(name)
-                .cloned()
-                .unwrap_or_else(|| "null".into());
-            Emitted {
-                code: String::new(),
-                value: val,
-                is_io: false,
-            }
-        }
-        Expr::Let { name, value, body } => {
-            let ve = emit_expr(value, strs, enum_tags, cont_id, conts, locals, &format!("{prefix}_lv"));
-            let mut code = ve.code;
-            locals.insert(name.clone(), ve.value.clone());
-            let be = emit_expr(body, strs, enum_tags, cont_id, conts, locals, prefix);
-            locals.remove(name);
-            code.push_str(&be.code);
-            Emitted {
-                code,
-                value: be.value,
-                is_io: be.is_io,
-            }
-        }
-        Expr::Match { scrutinee, arms } => {
-            let se = emit_expr(
-                scrutinee,
-                strs,
-                enum_tags,
-                cont_id,
-                conts,
-                locals,
-                &format!("{prefix}_sc"),
-            );
-            let id = *cont_id;
-            *cont_id += 1;
-            let mut code = se.code;
-            writeln!(
-                code,
-                "  %{prefix}_tag = call i32 @su_adt_tag(ptr {})",
-                se.value
-            )
-            .unwrap();
-
-            // Emit each arm into its own block; phi the resulting IO ptr.
-            let merge = format!("{prefix}_merge_{id}");
-            let mut arm_blocks = Vec::new();
-            for (i, arm) in arms.iter().enumerate() {
-                let label = format!("{prefix}_arm_{id}_{i}");
-                arm_blocks.push((label.clone(), arm));
-                let _ = i;
-            }
-            let default_label = format!("{prefix}_default_{id}");
-
-            // switch
-            write!(code, "  switch i32 %{prefix}_tag, label %{default_label} [").unwrap();
-            for (i, arm) in arms.iter().enumerate() {
-                if let Pattern::Adt {
-                    enum_name,
-                    case_name,
-                } = &arm.pattern
-                {
-                    if let Some(tag) = enum_tags.get(&(enum_name.clone(), case_name.clone())) {
-                        write!(code, " i32 {tag}, label %{prefix}_arm_{id}_{i}").unwrap();
-                    }
-                }
-            }
-            writeln!(code, " ]").unwrap();
-
-            let mut phi_parts = Vec::new();
-            for (i, arm) in arms.iter().enumerate() {
-                if matches!(arm.pattern, Pattern::Wildcard) {
-                    continue;
-                }
-                let label = format!("{prefix}_arm_{id}_{i}");
-                writeln!(code, "{label}:").unwrap();
-                let ae = emit_expr(
-                    &arm.body,
-                    strs,
-                    enum_tags,
-                    cont_id,
-                    conts,
-                    locals,
-                    &format!("{prefix}_a{id}_{i}"),
-                );
-                code.push_str(&ae.code);
-                writeln!(code, "  br label %{merge}").unwrap();
-                phi_parts.push((ae.value, label));
-            }
-            writeln!(code, "{default_label}:").unwrap();
-            if let Some(arm) = arms
-                .iter()
-                .find(|a| matches!(a.pattern, Pattern::Wildcard))
-            {
-                let ae = emit_expr(
-                    &arm.body,
-                    strs,
-                    enum_tags,
-                    cont_id,
-                    conts,
-                    locals,
-                    &format!("{prefix}_aw{id}"),
-                );
-                code.push_str(&ae.code);
-                writeln!(code, "  br label %{merge}").unwrap();
-                phi_parts.push((ae.value, default_label));
-            } else {
-                writeln!(
-                    code,
-                    "  %{prefix}_dflt = call ptr @su_io_pure(ptr null)"
-                )
-                .unwrap();
-                writeln!(code, "  br label %{merge}").unwrap();
-                phi_parts.push((format!("%{prefix}_dflt"), default_label));
-            }
-
-            writeln!(code, "{merge}:").unwrap();
-            write!(code, "  %{prefix}_phi = phi ptr").unwrap();
-            for (i, (val, lab)) in phi_parts.iter().enumerate() {
-                if i > 0 {
-                    write!(code, ",").unwrap();
-                }
-                write!(code, " [ {val}, %{lab} ]").unwrap();
-            }
-            writeln!(code).unwrap();
-
-            Emitted {
-                code,
-                value: format!("%{prefix}_phi"),
-                is_io: true,
-            }
-        }
-        Expr::FlatMap { inner, body } => {
-            let id = *cont_id;
-            *cont_id += 1;
-            let cont_name = format!("su_cont_{id}");
-
-            let mut body_locals = HashMap::new();
-            let body_emitted = emit_expr(
-                body,
-                strs,
-                enum_tags,
-                cont_id,
-                conts,
-                &mut body_locals,
-                &format!("c{id}"),
-            );
-            writeln!(
-                conts,
-                "define internal ptr @{cont_name}(ptr %value, ptr %env) {{"
-            )
-            .unwrap();
-            writeln!(conts, "entry:").unwrap();
-            conts.push_str(&body_emitted.code);
-            let ret = if body_emitted.is_io {
-                body_emitted.value
-            } else {
-                writeln!(
-                    conts,
-                    "  %c{id}_wrap = call ptr @su_io_pure(ptr {})",
-                    body_emitted.value
-                )
-                .unwrap();
-                format!("%c{id}_wrap")
-            };
-            writeln!(conts, "  ret ptr {ret}").unwrap();
-            writeln!(conts, "}}").unwrap();
-            writeln!(conts).unwrap();
-
-            let inner_emitted = emit_expr(
-                inner,
-                strs,
-                enum_tags,
-                cont_id,
-                conts,
-                locals,
-                &format!("{prefix}_in"),
-            );
-            let mut code = inner_emitted.code;
-            writeln!(
-                code,
-                "  %{prefix}_fm = call ptr @su_io_flatmap(ptr {}, ptr @{cont_name}, ptr null)",
-                inner_emitted.value
-            )
-            .unwrap();
-            Emitted {
-                code,
-                value: format!("%{prefix}_fm"),
-                is_io: true,
-            }
-        }
-        Expr::HandleErrorWith { inner, body } => {
-            let id = *cont_id;
-            *cont_id += 1;
-            let cont_name = format!("su_err_{id}");
-            let mut body_locals = HashMap::new();
-            let body_emitted = emit_expr(
-                body,
-                strs,
-                enum_tags,
-                cont_id,
-                conts,
-                &mut body_locals,
-                &format!("e{id}"),
-            );
-            // SuErrorHandler: ptr (ptr err, ptr env)
-            writeln!(
-                conts,
-                "define internal ptr @{cont_name}(ptr %err, ptr %env) {{"
-            )
-            .unwrap();
-            writeln!(conts, "entry:").unwrap();
-            conts.push_str(&body_emitted.code);
-            let ret = if body_emitted.is_io {
-                body_emitted.value
-            } else {
-                writeln!(
-                    conts,
-                    "  %e{id}_wrap = call ptr @su_io_pure(ptr {})",
-                    body_emitted.value
-                )
-                .unwrap();
-                format!("%e{id}_wrap")
-            };
-            writeln!(conts, "  ret ptr {ret}").unwrap();
-            writeln!(conts, "}}").unwrap();
-            writeln!(conts).unwrap();
-
-            let inner_emitted = emit_expr(
-                inner,
-                strs,
-                enum_tags,
-                cont_id,
-                conts,
-                locals,
-                &format!("{prefix}_he"),
-            );
-            let mut code = inner_emitted.code;
-            writeln!(
-                code,
-                "  %{prefix}_h = call ptr @su_io_handle_error_with(ptr {}, ptr @{cont_name}, ptr null)",
-                inner_emitted.value
-            )
-            .unwrap();
-            Emitted {
-                code,
-                value: format!("%{prefix}_h"),
-                is_io: true,
-            }
-        }
-        Expr::Attempt { inner } => {
-            let inner_emitted = emit_expr(
-                inner,
-                strs,
-                enum_tags,
-                cont_id,
-                conts,
-                locals,
-                &format!("{prefix}_at"),
-            );
-            let mut code = inner_emitted.code;
-            writeln!(
-                code,
-                "  %{prefix}_attempt = call ptr @su_io_attempt(ptr {})",
-                inner_emitted.value
-            )
-            .unwrap();
-            Emitted {
-                code,
-                value: format!("%{prefix}_attempt"),
-                is_io: true,
-            }
-        }
-        Expr::IoRace { left, right } => {
-            let le = emit_expr(
-                left,
-                strs,
-                enum_tags,
-                cont_id,
-                conts,
-                locals,
-                &format!("{prefix}_rl"),
-            );
-            let re = emit_expr(
-                right,
-                strs,
-                enum_tags,
-                cont_id,
-                conts,
-                locals,
-                &format!("{prefix}_rr"),
-            );
-            let mut code = le.code;
-            code.push_str(&re.code);
-            writeln!(
-                code,
-                "  %{prefix}_race = call ptr @su_io_race(ptr {}, ptr {})",
-                le.value, re.value
-            )
-            .unwrap();
-            Emitted {
-                code,
-                value: format!("%{prefix}_race"),
-                is_io: true,
-            }
-        }
-        Expr::IoBoth { left, right } => {
-            let le = emit_expr(
-                left,
-                strs,
-                enum_tags,
-                cont_id,
-                conts,
-                locals,
-                &format!("{prefix}_bl"),
-            );
-            let re = emit_expr(
-                right,
-                strs,
-                enum_tags,
-                cont_id,
-                conts,
-                locals,
-                &format!("{prefix}_br"),
-            );
-            let mut code = le.code;
-            code.push_str(&re.code);
-            writeln!(
-                code,
-                "  %{prefix}_both = call ptr @su_io_both(ptr {}, ptr {})",
-                le.value, re.value
-            )
-            .unwrap();
-            Emitted {
-                code,
-                value: format!("%{prefix}_both"),
-                is_io: true,
-            }
-        }
-    }
 }
 
 fn llvm_escape(s: &str) -> String {
@@ -703,6 +294,1076 @@ fn llvm_escape(s: &str) -> String {
     out
 }
 
+fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
+    let ret = llvm_type(&def.ret);
+    write!(out, "define internal {ret} @su_user_{}(", def.name).unwrap();
+    for (i, p) in def.params.iter().enumerate() {
+        if i > 0 {
+            write!(out, ", ").unwrap();
+        }
+        write!(out, "{} %{}", llvm_type(&p.ty), p.name).unwrap();
+    }
+    writeln!(out, ") {{").unwrap();
+    writeln!(out, "entry:").unwrap();
+
+    let mut locals: HashMap<String, (String, Kind)> = HashMap::new();
+    for p in &def.params {
+        locals.insert(
+            p.name.clone(),
+            (format!("%{}", p.name), kind_of_type(&p.ty)),
+        );
+    }
+
+    let body = emit_expr(&def.body, ctx, &mut locals, "body");
+    out.push_str(&body.code);
+
+    let ret_kind = kind_of_type(&def.ret);
+    match ret_kind {
+        Kind::Io => {
+            let io = ensure_io(out, body.kind, &body.value, "ret_wrap");
+            writeln!(out, "  ret ptr {io}").unwrap();
+        }
+        Kind::Int => {
+            let v = if body.kind == Kind::Int {
+                body.value
+            } else {
+                writeln!(out, "  %ret_coerce = add i64 0, 0").unwrap();
+                "%ret_coerce".into()
+            };
+            writeln!(out, "  ret i64 {v}").unwrap();
+        }
+        Kind::Ptr => {
+            let v = if body.kind == Kind::Ptr || body.kind == Kind::Io {
+                body.value
+            } else if body.kind == Kind::Int {
+                writeln!(
+                    out,
+                    "  %ret_box = call ptr @su_box_i64(i64 {})",
+                    body.value
+                )
+                .unwrap();
+                "%ret_box".into()
+            } else {
+                "null".into()
+            };
+            writeln!(out, "  ret ptr {v}").unwrap();
+        }
+    }
+    writeln!(out, "}}").unwrap();
+    writeln!(out).unwrap();
+}
+
+fn ensure_io(code: &mut String, kind: Kind, value: &str, tmp: &str) -> String {
+    if kind == Kind::Io {
+        return value.to_string();
+    }
+    let ptr = if kind == Kind::Int {
+        writeln!(code, "  %{tmp}_box = call ptr @su_box_i64(i64 {value})").unwrap();
+        format!("%{tmp}_box")
+    } else {
+        value.to_string()
+    };
+    writeln!(code, "  %{tmp} = call ptr @su_io_pure(ptr {ptr})").unwrap();
+    format!("%{tmp}")
+}
+
+fn emit_cstr_from_string(
+    code: &mut String,
+    strs: &[String],
+    expr: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> String {
+    if let Expr::StrLit(s) = expr {
+        let idx = str_index(strs, s);
+        let len = s.len() + 1;
+        writeln!(
+            code,
+            "  %{prefix}_cstr = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
+        )
+        .unwrap();
+        return format!("%{prefix}_cstr");
+    }
+    let se = emit_expr(expr, ctx, locals, &format!("{prefix}_s"));
+    code.push_str(&se.code);
+    writeln!(
+        code,
+        "  %{prefix}_cstr = call ptr @su_string_cstr(ptr {})",
+        se.value
+    )
+    .unwrap();
+    format!("%{prefix}_cstr")
+}
+
+fn emit_su_string(
+    code: &mut String,
+    strs: &[String],
+    expr: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> String {
+    if let Expr::StrLit(s) = expr {
+        let idx = str_index(strs, s);
+        let len = s.len() + 1;
+        writeln!(
+            code,
+            "  %{prefix}_gep = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
+        )
+        .unwrap();
+        writeln!(
+            code,
+            "  %{prefix}_ss = call ptr @su_string_from_cstr(ptr %{prefix}_gep)"
+        )
+        .unwrap();
+        return format!("%{prefix}_ss");
+    }
+    let se = emit_expr(expr, ctx, locals, &format!("{prefix}_e"));
+    code.push_str(&se.code);
+    se.value
+}
+
+fn emit_expr(
+    expr: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    match expr {
+        Expr::Unit => val_emitted(String::new(), "null".into(), Kind::Ptr),
+        Expr::IntLit(n) => val_emitted(String::new(), format!("{n}"), Kind::Int),
+        Expr::StrLit(s) => {
+            let idx = str_index(ctx.strs, s);
+            let len = s.len() + 1;
+            let mut code = String::new();
+            writeln!(
+                code,
+                "  %{prefix}_gep = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
+            )
+            .unwrap();
+            writeln!(
+                code,
+                "  %{prefix}_s = call ptr @su_string_from_cstr(ptr %{prefix}_gep)"
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_s"), Kind::Ptr)
+        }
+        Expr::IoDelayUnit => {
+            let mut code = String::new();
+            writeln!(
+                code,
+                "  %{prefix}_delay = call ptr @su_io_delay(ptr @su_delay_unit_thunk, ptr null)"
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_delay"), Kind::Ptr)
+        }
+        Expr::IoSleep(ms) => {
+            let me = emit_expr(ms, ctx, locals, &format!("{prefix}_ms"));
+            let mut code = me.code;
+            let ms_val = if me.kind == Kind::Int {
+                me.value
+            } else {
+                writeln!(code, "  %{prefix}_ms0 = add i64 0, 0").unwrap();
+                format!("%{prefix}_ms0")
+            };
+            writeln!(
+                code,
+                "  %{prefix}_sleep = call ptr @su_io_sleep_ms(i64 {ms_val})"
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_sleep"), Kind::Ptr)
+        }
+        Expr::IoFail(msg) => {
+            let mut code = String::new();
+            let cstr = emit_cstr_from_string(&mut code, ctx.strs, msg, ctx, locals, prefix);
+            writeln!(
+                code,
+                "  %{prefix}_io = call ptr @su_io_fail_cstr(ptr {cstr})"
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
+        }
+        Expr::IoPrintln(arg) => {
+            let mut code = String::new();
+            let s = emit_su_string(&mut code, ctx.strs, arg, ctx, locals, prefix);
+            writeln!(
+                code,
+                "  %{prefix}_io = call ptr @su_io_println(ptr {s})"
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
+        }
+        Expr::IoPure(inner) => {
+            let ie = emit_expr(inner, ctx, locals, &format!("{prefix}_p"));
+            let mut code = ie.code;
+            let ptr = if ie.kind == Kind::Int {
+                writeln!(
+                    code,
+                    "  %{prefix}_box = call ptr @su_box_i64(i64 {})",
+                    ie.value
+                )
+                .unwrap();
+                format!("%{prefix}_box")
+            } else if ie.kind == Kind::Io {
+                ie.value
+            } else {
+                ie.value
+            };
+            writeln!(
+                code,
+                "  %{prefix}_io = call ptr @su_io_pure(ptr {ptr})"
+            )
+            .unwrap();
+            let payload = if ie.kind == Kind::Io {
+                ie.payload
+            } else {
+                ie.kind
+            };
+            io_emitted(code, format!("%{prefix}_io"), payload)
+        }
+        Expr::UiRunHeadless(label) => {
+            let mut code = String::new();
+            let cstr =
+                emit_cstr_from_string(&mut code, ctx.strs, label, ctx, locals, prefix);
+            writeln!(
+                code,
+                "  %{prefix}_io = call ptr @su_ui_run_headless_label(ptr {cstr}, i32 0, i32 0)"
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
+        }
+        Expr::UiRunCounter => {
+            let mut code = String::new();
+            writeln!(
+                code,
+                "  %{prefix}_io = call ptr @su_ui_run_counter(i32 0, i32 0)"
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
+        }
+        Expr::UiRunTodo => {
+            let mut code = String::new();
+            writeln!(
+                code,
+                "  %{prefix}_io = call ptr @su_ui_run_todo(i32 0, i32 0)"
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
+        }
+        Expr::EffectsRunKit => {
+            let mut code = String::new();
+            writeln!(code, "  %{prefix}_io = call ptr @su_effects_run_kit()").unwrap();
+            io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
+        }
+        Expr::LexerClassify(arg) => {
+            let mut code = String::new();
+            let cstr =
+                emit_cstr_from_string(&mut code, ctx.strs, arg, ctx, locals, prefix);
+            writeln!(
+                code,
+                "  %{prefix}_adt = call ptr @su_lexer_classify(ptr {cstr})"
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_adt"), Kind::Ptr)
+        }
+        Expr::AdtConstruct {
+            enum_name,
+            case_name,
+        } => {
+            let tag = ctx
+                .enum_tags
+                .get(&(enum_name.clone(), case_name.clone()))
+                .copied()
+                .unwrap_or(0);
+            let mut code = String::new();
+            writeln!(
+                code,
+                "  %{prefix}_adt = call ptr @su_adt_new(i32 {tag}, ptr null)"
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_adt"), Kind::Ptr)
+        }
+        Expr::Var(name) => {
+            let (val, kind) = locals
+                .get(name)
+                .cloned()
+                .unwrap_or_else(|| ("null".into(), Kind::Ptr));
+            val_emitted(String::new(), val, kind)
+        }
+        Expr::Let { name, value, body } => {
+            let ve = emit_expr(value, ctx, locals, &format!("{prefix}_lv"));
+            let mut code = ve.code;
+            locals.insert(name.clone(), (ve.value.clone(), ve.kind));
+            let be = emit_expr(body, ctx, locals, prefix);
+            locals.remove(name);
+            code.push_str(&be.code);
+            Emitted {
+                code,
+                value: be.value,
+                kind: be.kind,
+                payload: be.payload,
+            }
+        }
+        Expr::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            let id = *ctx.cont_id;
+            *ctx.cont_id += 1;
+            let ce = emit_expr(cond, ctx, locals, &format!("{prefix}_ic"));
+            let mut code = ce.code;
+            let cond_i64 = if ce.kind == Kind::Int {
+                ce.value
+            } else {
+                writeln!(code, "  %{prefix}_c0 = add i64 0, 0").unwrap();
+                format!("%{prefix}_c0")
+            };
+            let then_l = format!("{prefix}_then_{id}");
+            let else_l = format!("{prefix}_else_{id}");
+            let merge = format!("{prefix}_merge_{id}");
+            writeln!(
+                code,
+                "  %{prefix}_cmp = icmp ne i64 {cond_i64}, 0"
+            )
+            .unwrap();
+            writeln!(
+                code,
+                "  br i1 %{prefix}_cmp, label %{then_l}, label %{else_l}"
+            )
+            .unwrap();
+
+            writeln!(code, "{then_l}:").unwrap();
+            let te = emit_expr(then_branch, ctx, locals, &format!("{prefix}_t{id}"));
+            code.push_str(&te.code);
+            writeln!(code, "  br label %{merge}").unwrap();
+
+            writeln!(code, "{else_l}:").unwrap();
+            let ee = emit_expr(else_branch, ctx, locals, &format!("{prefix}_e{id}"));
+            code.push_str(&ee.code);
+            writeln!(code, "  br label %{merge}").unwrap();
+
+            let kind = te.kind;
+            let payload = te.payload;
+            let ty = match kind {
+                Kind::Int => "i64",
+                Kind::Ptr | Kind::Io => "ptr",
+            };
+            writeln!(code, "{merge}:").unwrap();
+            writeln!(
+                code,
+                "  %{prefix}_phi = phi {ty} [ {}, %{then_l} ], [ {}, %{else_l} ]",
+                te.value, ee.value
+            )
+            .unwrap();
+            Emitted {
+                code,
+                value: format!("%{prefix}_phi"),
+                kind,
+                payload,
+            }
+        }
+        Expr::Binary { op, left, right } => emit_binary(op, left, right, ctx, locals, prefix),
+        Expr::Call { callee, args } => emit_call(callee, args, ctx, locals, prefix),
+        Expr::Match { scrutinee, arms } => {
+            let se = emit_expr(scrutinee, ctx, locals, &format!("{prefix}_sc"));
+            let id = *ctx.cont_id;
+            *ctx.cont_id += 1;
+            let mut code = se.code;
+            writeln!(
+                code,
+                "  %{prefix}_tag = call i32 @su_adt_tag(ptr {})",
+                se.value
+            )
+            .unwrap();
+
+            let merge = format!("{prefix}_merge_{id}");
+            let default_label = format!("{prefix}_default_{id}");
+
+            write!(
+                code,
+                "  switch i32 %{prefix}_tag, label %{default_label} ["
+            )
+            .unwrap();
+            for (i, arm) in arms.iter().enumerate() {
+                if let Pattern::Adt {
+                    enum_name,
+                    case_name,
+                } = &arm.pattern
+                {
+                    if let Some(tag) = ctx.enum_tags.get(&(enum_name.clone(), case_name.clone())) {
+                        write!(code, " i32 {tag}, label %{prefix}_arm_{id}_{i}").unwrap();
+                    }
+                }
+            }
+            writeln!(code, " ]").unwrap();
+
+            let mut phi_parts: Vec<(String, String)> = Vec::new();
+            let mut result_kind = Kind::Io;
+            let mut result_payload = Kind::Ptr;
+
+            for (i, arm) in arms.iter().enumerate() {
+                if matches!(arm.pattern, Pattern::Wildcard) {
+                    continue;
+                }
+                let label = format!("{prefix}_arm_{id}_{i}");
+                writeln!(code, "{label}:").unwrap();
+                let ae = emit_expr(
+                    &arm.body,
+                    ctx,
+                    locals,
+                    &format!("{prefix}_a{id}_{i}"),
+                );
+                code.push_str(&ae.code);
+                if phi_parts.is_empty() {
+                    result_kind = ae.kind;
+                    result_payload = ae.payload;
+                }
+                writeln!(code, "  br label %{merge}").unwrap();
+                phi_parts.push((ae.value, label));
+            }
+
+            writeln!(code, "{default_label}:").unwrap();
+            if let Some(arm) = arms
+                .iter()
+                .find(|a| matches!(a.pattern, Pattern::Wildcard))
+            {
+                let ae = emit_expr(
+                    &arm.body,
+                    ctx,
+                    locals,
+                    &format!("{prefix}_aw{id}"),
+                );
+                code.push_str(&ae.code);
+                if phi_parts.is_empty() {
+                    result_kind = ae.kind;
+                    result_payload = ae.payload;
+                }
+                writeln!(code, "  br label %{merge}").unwrap();
+                phi_parts.push((ae.value, default_label));
+            } else {
+                let dflt = match result_kind {
+                    Kind::Int => {
+                        writeln!(code, "  %{prefix}_dflt = add i64 0, 0").unwrap();
+                        format!("%{prefix}_dflt")
+                    }
+                    Kind::Ptr => "null".into(),
+                    Kind::Io => {
+                        writeln!(
+                            code,
+                            "  %{prefix}_dflt = call ptr @su_io_pure(ptr null)"
+                        )
+                        .unwrap();
+                        format!("%{prefix}_dflt")
+                    }
+                };
+                writeln!(code, "  br label %{merge}").unwrap();
+                phi_parts.push((dflt, default_label));
+            }
+
+            let ty = match result_kind {
+                Kind::Int => "i64",
+                Kind::Ptr | Kind::Io => "ptr",
+            };
+            writeln!(code, "{merge}:").unwrap();
+            write!(code, "  %{prefix}_phi = phi {ty}").unwrap();
+            for (i, (val, lab)) in phi_parts.iter().enumerate() {
+                if i > 0 {
+                    write!(code, ",").unwrap();
+                }
+                write!(code, " [ {val}, %{lab} ]").unwrap();
+            }
+            writeln!(code).unwrap();
+
+            Emitted {
+                code,
+                value: format!("%{prefix}_phi"),
+                kind: result_kind,
+                payload: result_payload,
+            }
+        }
+        Expr::FlatMap { inner, param, body } => {
+            let id = *ctx.cont_id;
+            *ctx.cont_id += 1;
+            let cont_name = format!("su_cont_{id}");
+
+            let inner_emitted = emit_expr(inner, ctx, locals, &format!("{prefix}_in"));
+            let payload_kind = inner_emitted.payload;
+
+            let mut body_locals: HashMap<String, (String, Kind)> = HashMap::new();
+            // Cont is a separate function; bind only the flatMap param.
+            if let Some(p) = param {
+                if payload_kind == Kind::Int {
+                    // placeholder; real binding emitted inside cont
+                    body_locals.insert(p.clone(), (format!("%{p}"), Kind::Int));
+                } else {
+                    body_locals.insert(p.clone(), ("%value".into(), Kind::Ptr));
+                }
+            }
+
+            // Emit body first into a temporary buffer with the intended local names.
+            // For Int payload we unbox into %param before the body.
+            let mut pre = String::new();
+            if let Some(p) = param {
+                if payload_kind == Kind::Int {
+                    writeln!(
+                        pre,
+                        "  %{p} = call i64 @su_unbox_i64(ptr %value)"
+                    )
+                    .unwrap();
+                    body_locals.insert(p.clone(), (format!("%{p}"), Kind::Int));
+                }
+            }
+
+            let body_emitted = emit_expr(
+                body,
+                ctx,
+                &mut body_locals,
+                &format!("c{id}"),
+            );
+
+            writeln!(
+                ctx.conts,
+                "define internal ptr @{cont_name}(ptr %value, ptr %env) {{"
+            )
+            .unwrap();
+            writeln!(ctx.conts, "entry:").unwrap();
+            ctx.conts.push_str(&pre);
+            ctx.conts.push_str(&body_emitted.code);
+            let ret = ensure_io(
+                ctx.conts,
+                body_emitted.kind,
+                &body_emitted.value,
+                &format!("c{id}_wrap"),
+            );
+            writeln!(ctx.conts, "  ret ptr {ret}").unwrap();
+            writeln!(ctx.conts, "}}").unwrap();
+            writeln!(ctx.conts).unwrap();
+
+            let mut code = inner_emitted.code;
+            let inner_io = ensure_io(
+                &mut code,
+                inner_emitted.kind,
+                &inner_emitted.value,
+                &format!("{prefix}_inio"),
+            );
+            writeln!(
+                code,
+                "  %{prefix}_fm = call ptr @su_io_flatmap(ptr {inner_io}, ptr @{cont_name}, ptr null)"
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_fm"), body_emitted.payload)
+        }
+        Expr::HandleErrorWith { inner, body } => {
+            let id = *ctx.cont_id;
+            *ctx.cont_id += 1;
+            let cont_name = format!("su_err_{id}");
+            let mut body_locals = HashMap::new();
+            let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("e{id}"));
+            writeln!(
+                ctx.conts,
+                "define internal ptr @{cont_name}(ptr %err, ptr %env) {{"
+            )
+            .unwrap();
+            writeln!(ctx.conts, "entry:").unwrap();
+            ctx.conts.push_str(&body_emitted.code);
+            let ret = ensure_io(
+                ctx.conts,
+                body_emitted.kind,
+                &body_emitted.value,
+                &format!("e{id}_wrap"),
+            );
+            writeln!(ctx.conts, "  ret ptr {ret}").unwrap();
+            writeln!(ctx.conts, "}}").unwrap();
+            writeln!(ctx.conts).unwrap();
+
+            let inner_emitted = emit_expr(inner, ctx, locals, &format!("{prefix}_he"));
+            let mut code = inner_emitted.code;
+            let inner_io = ensure_io(
+                &mut code,
+                inner_emitted.kind,
+                &inner_emitted.value,
+                &format!("{prefix}_heio"),
+            );
+            writeln!(
+                code,
+                "  %{prefix}_h = call ptr @su_io_handle_error_with(ptr {inner_io}, ptr @{cont_name}, ptr null)"
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_h"), body_emitted.payload)
+        }
+        Expr::Attempt { inner } => {
+            let inner_emitted = emit_expr(inner, ctx, locals, &format!("{prefix}_at"));
+            let mut code = inner_emitted.code;
+            let inner_io = ensure_io(
+                &mut code,
+                inner_emitted.kind,
+                &inner_emitted.value,
+                &format!("{prefix}_atio"),
+            );
+            writeln!(
+                code,
+                "  %{prefix}_attempt = call ptr @su_io_attempt(ptr {inner_io})"
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_attempt"), Kind::Ptr)
+        }
+        Expr::IoRace { left, right } => {
+            let le = emit_expr(left, ctx, locals, &format!("{prefix}_rl"));
+            let re = emit_expr(right, ctx, locals, &format!("{prefix}_rr"));
+            let mut code = le.code;
+            code.push_str(&re.code);
+            let lv = ensure_io(&mut code, le.kind, &le.value, &format!("{prefix}_rlio"));
+            let rv = ensure_io(&mut code, re.kind, &re.value, &format!("{prefix}_rrio"));
+            writeln!(
+                code,
+                "  %{prefix}_race = call ptr @su_io_race(ptr {lv}, ptr {rv})"
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_race"), Kind::Ptr)
+        }
+        Expr::IoBoth { left, right } => {
+            let le = emit_expr(left, ctx, locals, &format!("{prefix}_bl"));
+            let re = emit_expr(right, ctx, locals, &format!("{prefix}_br"));
+            let mut code = le.code;
+            code.push_str(&re.code);
+            let lv = ensure_io(&mut code, le.kind, &le.value, &format!("{prefix}_blio"));
+            let rv = ensure_io(&mut code, re.kind, &re.value, &format!("{prefix}_brio"));
+            writeln!(
+                code,
+                "  %{prefix}_both = call ptr @su_io_both(ptr {lv}, ptr {rv})"
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_both"), Kind::Ptr)
+        }
+    }
+}
+
+fn emit_binary(
+    op: &BinOp,
+    left: &Expr,
+    right: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    let le = emit_expr(left, ctx, locals, &format!("{prefix}_l"));
+    let re = emit_expr(right, ctx, locals, &format!("{prefix}_r"));
+    let mut code = le.code;
+    code.push_str(&re.code);
+
+    if *op == BinOp::Add && le.kind == Kind::Ptr && re.kind == Kind::Ptr {
+        writeln!(
+            code,
+            "  %{prefix}_add = call ptr @su_string_concat(ptr {}, ptr {})",
+            le.value, re.value
+        )
+        .unwrap();
+        return val_emitted(code, format!("%{prefix}_add"), Kind::Ptr);
+    }
+
+    if matches!(op, BinOp::Eq | BinOp::Ne) && le.kind == Kind::Ptr && re.kind == Kind::Ptr {
+        writeln!(
+            code,
+            "  %{prefix}_eqi = call i32 @su_string_eq(ptr {}, ptr {})",
+            le.value, re.value
+        )
+        .unwrap();
+        writeln!(
+            code,
+            "  %{prefix}_eq = zext i32 %{prefix}_eqi to i64"
+        )
+        .unwrap();
+        if *op == BinOp::Eq {
+            return val_emitted(code, format!("%{prefix}_eq"), Kind::Int);
+        }
+        writeln!(
+            code,
+            "  %{prefix}_ne = icmp eq i64 %{prefix}_eq, 0"
+        )
+        .unwrap();
+        writeln!(
+            code,
+            "  %{prefix}_nev = zext i1 %{prefix}_ne to i64"
+        )
+        .unwrap();
+        return val_emitted(code, format!("%{prefix}_nev"), Kind::Int);
+    }
+
+    let lv = if le.kind == Kind::Int {
+        le.value
+    } else {
+        writeln!(code, "  %{prefix}_l0 = add i64 0, 0").unwrap();
+        format!("%{prefix}_l0")
+    };
+    let rv = if re.kind == Kind::Int {
+        re.value
+    } else {
+        writeln!(code, "  %{prefix}_r0 = add i64 0, 0").unwrap();
+        format!("%{prefix}_r0")
+    };
+
+    match op {
+        BinOp::Add => {
+            writeln!(code, "  %{prefix}_v = add i64 {lv}, {rv}").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        BinOp::Sub => {
+            writeln!(code, "  %{prefix}_v = sub i64 {lv}, {rv}").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        BinOp::Mul => {
+            writeln!(code, "  %{prefix}_v = mul i64 {lv}, {rv}").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        BinOp::Div => {
+            writeln!(code, "  %{prefix}_v = sdiv i64 {lv}, {rv}").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        BinOp::Mod => {
+            writeln!(code, "  %{prefix}_v = srem i64 {lv}, {rv}").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        BinOp::And => {
+            writeln!(code, "  %{prefix}_v = and i64 {lv}, {rv}").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        BinOp::Or => {
+            writeln!(code, "  %{prefix}_v = or i64 {lv}, {rv}").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+            let pred = match op {
+                BinOp::Eq => "eq",
+                BinOp::Ne => "ne",
+                BinOp::Lt => "slt",
+                BinOp::Le => "sle",
+                BinOp::Gt => "sgt",
+                BinOp::Ge => "sge",
+                _ => unreachable!(),
+            };
+            writeln!(
+                code,
+                "  %{prefix}_cmp = icmp {pred} i64 {lv}, {rv}"
+            )
+            .unwrap();
+            writeln!(
+                code,
+                "  %{prefix}_v = zext i1 %{prefix}_cmp to i64"
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+    }
+}
+
+fn emit_call(
+    callee: &str,
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    let mut emitted_args = Vec::new();
+    for (i, a) in args.iter().enumerate() {
+        emitted_args.push(emit_expr(
+            a,
+            ctx,
+            locals,
+            &format!("{prefix}_arg{i}"),
+        ));
+    }
+    let mut code = String::new();
+    for a in &emitted_args {
+        code.push_str(&a.code);
+    }
+
+    match callee {
+        "Str.concat" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_string_concat(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Str.len" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @su_string_len(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Str.slice" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_string_slice(ptr {}, i64 {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Str.eq" => {
+            writeln!(
+                code,
+                "  %{prefix}_eqi = call i32 @su_string_eq(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            writeln!(
+                code,
+                "  %{prefix}_v = zext i32 %{prefix}_eqi to i64"
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Str.charAt" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @su_string_char_at(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Str.fromInt" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_string_from_int(i64 {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Str.indexOf" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @su_string_index_of(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "List.empty" => {
+            writeln!(code, "  %{prefix}_v = call ptr @su_list_nil()").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "List.cons" => {
+            let head = if emitted_args[0].kind == Kind::Int {
+                writeln!(
+                    code,
+                    "  %{prefix}_hd = call ptr @su_box_i64(i64 {})",
+                    emitted_args[0].value
+                )
+                .unwrap();
+                format!("%{prefix}_hd")
+            } else {
+                emitted_args[0].value.clone()
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_list_cons(ptr {head}, ptr {})",
+                emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "List.isEmpty" => {
+            writeln!(
+                code,
+                "  %{prefix}_i = call i32 @su_list_is_empty(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            writeln!(
+                code,
+                "  %{prefix}_v = zext i32 %{prefix}_i to i64"
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "List.head" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_list_head(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "List.tail" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_list_tail(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "List.len" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @su_list_len(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "List.at" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_list_at(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "List.reverse" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_list_reverse(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "List.join" => {
+            writeln!(
+                code,
+                "  %{prefix}_sep = call ptr @su_string_cstr(ptr {})",
+                emitted_args[1].value
+            )
+            .unwrap();
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_list_join(ptr {}, ptr %{prefix}_sep)",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Fs.read" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_fs_read(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Fs.write" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_fs_write(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Fs.list" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_fs_list(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Fs.mkdirs" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_fs_mkdirs(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Sys.args" => {
+            writeln!(code, "  %{prefix}_v = call ptr @su_sys_args()").unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Sys.exec" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_sys_exec(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Sys.getenv" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_sys_getenv(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        other => {
+            let f = ctx.funs.get(other).copied();
+            let (ret_ty, ret_kind, payload) = if let Some(f) = f {
+                (
+                    llvm_type(&f.ret),
+                    kind_of_type(&f.ret),
+                    payload_of_type(&f.ret),
+                )
+            } else {
+                ("ptr", Kind::Ptr, Kind::Ptr)
+            };
+            let mut arg_parts = Vec::new();
+            if let Some(f) = f {
+                for (i, p) in f.params.iter().enumerate() {
+                    let a = &emitted_args[i];
+                    let want = kind_of_type(&p.ty);
+                    let (lval, lty) = match (want, a.kind) {
+                        (Kind::Int, Kind::Int) => (a.value.clone(), "i64"),
+                        (Kind::Int, _) => {
+                            writeln!(code, "  %{prefix}_a{i} = add i64 0, 0").unwrap();
+                            (format!("%{prefix}_a{i}"), "i64")
+                        }
+                        (_, Kind::Int) => {
+                            writeln!(
+                                code,
+                                "  %{prefix}_a{i} = call ptr @su_box_i64(i64 {})",
+                                a.value
+                            )
+                            .unwrap();
+                            (format!("%{prefix}_a{i}"), "ptr")
+                        }
+                        _ => (a.value.clone(), "ptr"),
+                    };
+                    arg_parts.push(format!("{lty} {lval}"));
+                }
+            } else {
+                for (i, a) in emitted_args.iter().enumerate() {
+                    let (lval, lty) = if a.kind == Kind::Int {
+                        (a.value.clone(), "i64")
+                    } else {
+                        (a.value.clone(), "ptr")
+                    };
+                    let _ = i;
+                    arg_parts.push(format!("{lty} {lval}"));
+                }
+            }
+            writeln!(
+                code,
+                "  %{prefix}_v = call {ret_ty} @su_user_{other}({})",
+                arg_parts.join(", ")
+            )
+            .unwrap();
+            match ret_kind {
+                Kind::Io => io_emitted(code, format!("%{prefix}_v"), payload),
+                other_k => val_emitted(code, format!("%{prefix}_v"), other_k),
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -712,9 +1373,9 @@ mod tests {
     fn emit_contains_main_and_println() {
         let p = parse(r#"@main def main: IO[Unit] = IO.println("Hi")"#).unwrap();
         let ir = emit_llvm(&p);
-        assert!(ir.contains("define i32 @main()"));
+        assert!(ir.contains("define i32 @main(i32 %argc, ptr %argv)"));
         assert!(ir.contains("su_io_println"));
-        assert!(ir.contains("su_runtime_main"));
+        assert!(ir.contains("su_runtime_main_args"));
     }
 
     #[test]
@@ -733,5 +1394,19 @@ enum Color { case Red, case Blue }
         assert!(ir.contains("su_adt_new"));
         assert!(ir.contains("su_adt_tag"));
         assert!(ir.contains("switch i32"));
+    }
+
+    #[test]
+    fn emit_def_and_if() {
+        let src = r#"
+def add1(n: Int): Int = n + 1
+@main def main: IO[Unit] =
+  if (add1(0) == 1) IO.println("ok") else IO.println("bad")
+"#;
+        let p = parse(src).unwrap();
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("@su_user_add1"));
+        assert!(ir.contains("icmp"));
+        assert!(ir.contains("su_runtime_main_args"));
     }
 }
