@@ -11,10 +11,10 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install clang/make
+      - name: Install clang/make/X11/xvfb
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang make
+          sudo apt-get install -y clang make libx11-dev xvfb
 
       - name: Install Rust (stable via rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@stable
@@ -25,6 +25,9 @@ jobs:
       - name: ffi-skia tests
         run: make -C crates/ffi-skia test CC=clang
 
+      - name: Embedder lib
+        run: make -C crates/embedder-desktop lib CC=clang
+
       - name: Build CLI
         run: cargo build -p scalui
 
@@ -33,10 +36,24 @@ jobs:
 
       - name: Hello world → LLVM → native
         run: |
-          cargo run -p scalui -- build examples/hello
+          cargo run -p scalui -- build --full examples/hello
           ./examples/hello/build/hello | tee /tmp/hello.out
           grep -q "Hello, ScalUI!" /tmp/hello.out
           grep -q "Phase 0 online." /tmp/hello.out
+
+      - name: Phase 3 effects + ADT + ScalUI parser
+        run: |
+          cargo run -p scalui -- run examples/effects | tee /tmp/effects.out
+          grep -q "phase3" /tmp/effects.out
+          grep -q "both-ok" /tmp/effects.out
+          cargo run -p scalui -- run examples/adt | tee /tmp/adt.out
+          grep -q "adt:red" /tmp/adt.out
+          cargo run -p scalui -- run compiler-scalui | tee /tmp/parser.out
+          grep -q "parser-stage0: ok" /tmp/parser.out
+          cargo run -p scalui -- fmt --check examples/adt
+          cargo run -p scalui -- build examples/adt
+          cargo run -p scalui -- build examples/adt | tee /tmp/incr.out
+          grep -q "up-to-date" /tmp/incr.out
 
       - name: Headless UI + golden PNGs
         run: |
@@ -49,3 +66,9 @@ jobs:
           cargo run -p scalui -- run --headless examples/todo
           test -f examples/todo/build/snapshot.png
           cargo run -p scalui -- test examples/todo
+
+      - name: Window peer + X11 embedder (xvfb)
+        run: |
+          xvfb-run -a env SCALUI_UI_RUNTIME=window SCALUI_UI_WIDTH=200 SCALUI_UI_HEIGHT=100 \
+            ./examples/hello_ui/build/hello_ui 2>&1 | tee /tmp/win.out
+          grep -q "X11 embedder" /tmp/win.out

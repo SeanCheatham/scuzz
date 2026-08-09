@@ -13,13 +13,22 @@ static SuIo *res_after_use(void *use_value, void *env) {
   return su_io_pure(v);
 }
 
+static SuIo *res_on_error(SuError *err, void *env) {
+  ResState *st = (ResState *)env;
+  st->res->release(st->acquired, st->res->env);
+  su_free(st);
+  return su_io_fail(err);
+}
+
 static SuIo *res_after_acquire(void *acquired, void *env) {
   SuResource *res = (SuResource *)env;
   SuIo *use_io = res->use(acquired, res->use_env);
   ResState *st = (ResState *)su_alloc(sizeof(ResState));
   st->res = res;
   st->acquired = acquired;
-  return su_io_flatmap(use_io, res_after_use, st);
+  /* Bracket: release on success (flatMap) and on failure (handleErrorWith). */
+  SuIo *after = su_io_flatmap(use_io, res_after_use, st);
+  return su_io_handle_error_with(after, res_on_error, st);
 }
 
 static void *res_acquire_thunk(void *env) {

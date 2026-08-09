@@ -1,0 +1,7 @@
+[package]
+name = "adt"
+version = "0.1.0"
+
+[targets.native]
+kind = "executable"
+main = "Main"

@@ -2,8 +2,10 @@ CC ?= clang
 CFLAGS ?= -std=c11 -Wall -Wextra -Werror -O2
 ROOT := $(abspath ../..)
 FFI_SKIA := $(ROOT)/crates/ffi-skia
-INCLUDES := -Iinclude -I$(FFI_SKIA)/include
-SRC := src/runtime.c src/resource.c src/theme.c src/signal.c src/view.c src/ui.c src/demos.c
+EMBEDDER := $(ROOT)/crates/embedder-desktop
+INCLUDES := -Iinclude -I$(FFI_SKIA)/include -I$(EMBEDDER)/include
+SRC := src/runtime.c src/resource.c src/ref.c src/deferred.c src/queue.c \
+	src/effects.c src/theme.c src/signal.c src/view.c src/ui.c src/demos.c
 OBJ := $(SRC:src/%.c=build/%.o)
 
 .PHONY: all clean test lib ffi-skia

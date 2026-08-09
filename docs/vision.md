@@ -59,7 +59,7 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 - Rule: no feature may land Window-only without a Headless path
 - Kernel builtin: `Ui.runHeadless`; example `examples/hello_ui` + goldens
 
-### Phase 2 — Declarative UI core ✅ (current)
+### Phase 2 — Declarative UI core ✅
 
 - Element tree, state/signals, layout, hit testing in `crates/runtime` (Views stay backend-agnostic under `Ui`)
 - Theme tokens + core widgets: `Text`, `Button`, `TextField`, `List`, `Scroll`, `Image`, `Icon` (+ `Label`)
@@ -67,13 +67,13 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 - Examples: `examples/counter`, `examples/todo` (Todo load/save via `IO` + `Resource`) + goldens
 - Kernel builtins: `Ui.runCounter`, `Ui.runTodo` (demos drive the View tree until the language can express widgets)
 
-### Phase 3 — Language, effects stdlib, tooling
+### Phase 3 — Language, effects stdlib, tooling ✅ (current)
 
-- Expand subset: modules, packages, ADTs
-- Complete blessed effects kit: `Resource`, `Ref`, `Deferred`, `Queue`, race/par helpers, time
-- Incremental compile + hot reload; formatter; basic LSP
-- Linux (then Windows) embedders
-- **Start rewriting compiler modules in ScalUI** (parser first), still built by Stage 0
+- Expand subset: `package`, multi-file modules, nullary `enum` ADTs, `match`, local `val`
+- Blessed effects kit: `Resource` (releases on failure), `Ref`, `Deferred`, `Queue`, `handleErrorWith` / `attempt`, `sleep`, `race` / `both` — kernel demo `Effects.runKit`
+- Incremental compile (fingerprint cache), `scalui watch` / `run --watch`, `scalui fmt`, basic `scalui lsp`
+- Linux X11 embedder for `UiRuntime.Window` (`crates/embedder-desktop`); Headless remains CI default
+- ScalUI parser bootstrap under `compiler-scalui/` (Tok ADT + `Lexer.classify` + match), still built by Stage 0
 
 ### Phase 4 — Self-host
 

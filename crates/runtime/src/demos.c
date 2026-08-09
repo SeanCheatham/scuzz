@@ -21,10 +21,14 @@ static char *su_strdup(const char *s) {
 
 static void fill_cfg(SuUiConfig *cfg, int width, int height) {
   double scale = 1.0;
+  const char *rt = getenv("SCALUI_UI_RUNTIME");
   memset(cfg, 0, sizeof(*cfg));
   cfg->kind = SU_UI_RUNTIME_HEADLESS;
+  if (rt && (strcmp(rt, "window") == 0 || strcmp(rt, "Window") == 0))
+    cfg->kind = SU_UI_RUNTIME_WINDOW;
   cfg->width = width;
   cfg->height = height;
+  cfg->title = "ScalUI";
   su_ui_resolve_headless_size(&cfg->width, &cfg->height, &scale);
   cfg->scale = scale;
 }
