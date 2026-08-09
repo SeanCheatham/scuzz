@@ -142,10 +142,10 @@ SuUiSession *su_ui_mount(const SuUiConfig *cfg, SuView *root) {
   s->dirty = 1;
   if (cfg->kind == SU_UI_RUNTIME_WINDOW) {
     if (su_embedder_available()) {
-      fprintf(stderr, "scalui: UiRuntime.Window mounted (X11 embedder)\n");
+      fprintf(stderr, "scalui: UiRuntime.Window mounted (desktop embedder)\n");
     } else {
       fprintf(stderr,
-              "scalui: UiRuntime.Window mounted (offscreen; no DISPLAY)\n");
+              "scalui: UiRuntime.Window mounted (offscreen; no desktop embedder)\n");
     }
   } else if (cfg->kind == SU_UI_RUNTIME_MOBILE) {
     if (su_mobile_available()) {

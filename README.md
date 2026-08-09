@@ -17,7 +17,7 @@ See [docs/vision.md](docs/vision.md).
 
 ## Quick start
 
-Requirements: Rust (stable), `clang`, `make`. Optional for Window: X11 (`libx11-dev`) + a display (or `xvfb-run`).
+Requirements: Rust (stable), `clang`, `make`. Optional for Window: Linux X11 (`libx11-dev` + display / `xvfb-run`) or macOS GUI session (Cocoa).
 
 ```bash
 # Runtime + UI unit tests (includes TestRuntime / anim / a11y)
@@ -45,9 +45,13 @@ env SCALUI_TESTRT=1 cargo run -p scalui -- run examples/fs
 ./scripts/selfhost.sh
 ```
 
-Window peer (presents via X11 when `DISPLAY` is set):
+Window peer (blits via X11 on Linux or Cocoa on macOS):
 
 ```bash
+# macOS / Linux with a display
+env SCALUI_UI_RUNTIME=window cargo run -p scalui -- run examples/hello_ui
+
+# Linux CI / no display
 xvfb-run -a env SCALUI_UI_RUNTIME=window cargo run -p scalui -- run examples/hello_ui
 ```
 
@@ -73,7 +77,7 @@ crates/compiler/          Stage-0 parser / typer / LLVM codegen (Rust canary)
 crates/cli/               Stage-0 scalui tool (canary)
 crates/runtime/           C runtime (IO kit, impurity, View/Ui — widgets live here for now)
 crates/ffi-skia/          sk_capi + CPU software backend
-crates/embedder-desktop/  Linux X11 present for Window peer
+crates/embedder-desktop/  Linux X11 / macOS Cocoa present for Window peer
 crates/embedder-mobile/   Mobile host shell + Android/iOS packaging templates
 compiler-scalui/          Stage 1/2 ScalUI compiler + CLI (release path)
 scripts/                  selfhost.sh, fetch_skia.sh

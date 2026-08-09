@@ -130,6 +130,9 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
         push_force_load(&mut link, &embedder_lib);
         if cfg!(target_os = "linux") {
             link.arg("-lX11");
+        } else if cfg!(target_os = "macos") {
+            link.arg("-framework").arg("Cocoa");
+            link.arg("-lobjc");
         }
     }
     if mobile_lib.is_file() {
