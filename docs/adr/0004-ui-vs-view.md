@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (Phase 0 design lock; code in Phase 1)
+Accepted — Phase 1 session API landed (`crates/runtime` + Headless/Window peers)
 
 ## Context
 

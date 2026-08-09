@@ -21,7 +21,9 @@ pub fn typecheck(program: &Program) -> Result<(), TypeError> {
 fn infer(expr: &Expr) -> Result<Type, TypeError> {
     match expr {
         Expr::Unit => Ok(Type::Unit),
-        Expr::IoPrintln(_) | Expr::IoDelayUnit => Ok(Type::Io(Box::new(Type::Unit))),
+        Expr::IoPrintln(_) | Expr::IoDelayUnit | Expr::UiRunHeadless(_) => {
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
         Expr::FlatMap { inner, body } => {
             let it = infer(inner)?;
             if !matches!(it, Type::Io(_)) {

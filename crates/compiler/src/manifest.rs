@@ -6,6 +6,8 @@ pub struct Manifest {
     pub package: Package,
     #[serde(default)]
     pub targets: Targets,
+    #[serde(default)]
+    pub ui: Option<UiConfig>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -38,6 +40,37 @@ fn default_kind() -> String {
 }
 fn default_main() -> String {
     "Main".into()
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct UiConfig {
+    /// `"headless"` or `"window"` — default runtime for `scalui run`
+    #[serde(default = "default_runtime")]
+    pub default_runtime: String,
+    /// `[width, height]` for Headless
+    #[serde(default = "default_headless_size")]
+    pub headless_size: Vec<i32>,
+    #[serde(default = "default_scale")]
+    pub headless_scale: f64,
+}
+
+fn default_runtime() -> String {
+    "headless".into()
+}
+fn default_headless_size() -> Vec<i32> {
+    vec![200, 100]
+}
+fn default_scale() -> f64 {
+    1.0
+}
+
+impl UiConfig {
+    pub fn width(&self) -> i32 {
+        self.headless_size.first().copied().filter(|w| *w > 0).unwrap_or(200)
+    }
+    pub fn height(&self) -> i32 {
+        self.headless_size.get(1).copied().filter(|h| *h > 0).unwrap_or(100)
+    }
 }
 
 pub fn load_manifest(path: &Path) -> anyhow::Result<Manifest> {

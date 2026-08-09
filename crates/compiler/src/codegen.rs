@@ -18,6 +18,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @su_io_pure(ptr)").unwrap();
     writeln!(out, "declare ptr @su_io_delay(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @su_io_flatmap(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @su_ui_run_headless_label(ptr, i32, i32)").unwrap();
     writeln!(out, "declare i32 @su_runtime_main(ptr)").unwrap();
     writeln!(out).unwrap();
 
@@ -72,7 +73,7 @@ struct Emitted {
 
 fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
     match expr {
-        Expr::IoPrintln(s) => {
+        Expr::IoPrintln(s) | Expr::UiRunHeadless(s) => {
             if !out.contains(s) {
                 out.push(s.clone());
             }
@@ -134,6 +135,27 @@ fn emit_expr(
             writeln!(
                 code,
                 "  %{prefix}_io = call ptr @su_io_println(ptr %{prefix}_s)"
+            )
+            .unwrap();
+            Emitted {
+                code,
+                value: format!("%{prefix}_io"),
+            }
+        }
+        Expr::UiRunHeadless(s) => {
+            let idx = str_index(strs, s);
+            let len = s.len() + 1;
+            let mut code = String::new();
+            writeln!(
+                code,
+                "  %{prefix}_sptr = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
+            )
+            .unwrap();
+            // Width/height come from SCALUI_UI_WIDTH / HEIGHT env at runtime defaults in C;
+            // Stage-0 passes 0,0 to mean "use defaults / env".
+            writeln!(
+                code,
+                "  %{prefix}_io = call ptr @su_ui_run_headless_label(ptr %{prefix}_sptr, i32 0, i32 0)"
             )
             .unwrap();
             Emitted {

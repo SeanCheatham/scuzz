@@ -48,7 +48,13 @@ v0: empty or path deps only. No Maven Central.
 
 ### `[ui]`
 
-Optional. Used by `scalui run` / `test` once Phase 1 lands.
+Optional. Used by `scalui run` / `test` (Phase 1+).
+
+| Key | Type | Notes |
+| --- | --- | --- |
+| `default_runtime` | `"headless"` \| `"window"` | `scalui run` default; `--headless` forces Headless |
+| `headless_size` | `[w, h]` | Logical pixels for Headless / goldens |
+| `headless_scale` | float | Recorded on session; Phase 1 raster uses logical size |
 
 ## Source layout (convention)
 
