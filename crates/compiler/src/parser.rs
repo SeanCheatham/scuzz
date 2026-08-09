@@ -654,6 +654,13 @@ impl Parser {
                         }
                         Ok(Expr::UiRunCounter)
                     }
+                    "runLive" => {
+                        if matches!(self.peek(), Token::LParen) {
+                            self.bump();
+                            self.expect(&Token::RParen)?;
+                        }
+                        Ok(Expr::UiRunLive)
+                    }
                     "runTodo" => {
                         if matches!(self.peek(), Token::LParen) {
                             self.bump();

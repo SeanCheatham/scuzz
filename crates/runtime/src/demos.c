@@ -1,8 +1,10 @@
 #include "scalui_ui.h"
+#include "scalui_embedder.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* From ui.c */
 void su_ui_resolve_headless_size(int *width, int *height, double *scale);
@@ -220,6 +222,64 @@ SuIo *su_ui_run_counter(int width, int height) {
   e->width = width;
   e->height = height;
   return su_io_delay(thunk_counter, e);
+}
+
+/* --- Live (stay-open Window loop) ---------------------------------------- */
+
+static void *thunk_live(void *env) {
+  SizeEnv *e = (SizeEnv *)env;
+  SuUiConfig cfg;
+  SuSignalInt *ticks;
+  SuView *root;
+  SuUiSession *session;
+  int interactive;
+
+  fill_cfg(&cfg, e->width, e->height);
+  cfg.title = "ScalUI Live";
+  ticks = su_signal_int(0);
+
+  root = su_view_column();
+  su_view_add_child(root, su_view_text("Live"));
+  su_view_add_child(root, su_view_text_signal_int(ticks, "ticks = "));
+  su_view_add_child(root, su_view_text("Press q or Esc to quit"));
+
+  session = su_ui_mount(&cfg, root);
+  if (!session)
+    su_panic("live mount failed");
+  su_ui_session_take_root(session);
+
+  interactive = cfg.kind == SU_UI_RUNTIME_WINDOW && su_embedder_available();
+  {
+    const char *max_frames_env = getenv("SCALUI_LIVE_FRAMES");
+    int64_t max_frames =
+        (max_frames_env && atoi(max_frames_env) > 0) ? atoi(max_frames_env) : 0;
+    int64_t frame = 0;
+    do {
+      su_signal_int_set(ticks, su_signal_int_get(ticks) + 1);
+      if (!su_ui_pump_sync(session))
+        su_panic("live pump failed");
+      frame++;
+      if (max_frames > 0 && frame >= max_frames)
+        break;
+      if (interactive)
+        usleep(16000); /* ~60fps cap */
+    } while (interactive && su_embedder_alive());
+  }
+
+  if (!interactive)
+    su_ui_demo_finish(session);
+
+  su_ui_unmount(session);
+  su_signal_int_free(ticks);
+  su_free(e);
+  return NULL;
+}
+
+SuIo *su_ui_run_live(int width, int height) {
+  SizeEnv *e = (SizeEnv *)su_alloc(sizeof(SizeEnv));
+  e->width = width;
+  e->height = height;
+  return su_io_delay(thunk_live, e);
 }
 
 /* --- Todo (IO Resource load/save) ---------------------------------------- */

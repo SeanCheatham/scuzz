@@ -14,6 +14,11 @@ extern "C" {
 /* Nonzero if a display can be opened (DISPLAY+X11, or Cocoa GUI session). */
 int su_embedder_available(void);
 
+/* Nonzero while the desktop window session should keep pumping.
+ * Becomes 0 after the user quits (q / Escape / window close).
+ * Weak stub returns 0 (one-shot demos). */
+int su_embedder_alive(void);
+
 /* Present an RGBA8888 frame in a window. Blocks briefly to process events.
  * Returns 1 on success, 0 if embedder unavailable / failed. */
 int su_embedder_present(const char *title, int width, int height,

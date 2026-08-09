@@ -15,6 +15,7 @@ static char *g_img_data;
 static int g_w;
 static int g_h;
 static int g_ready;
+static int g_user_quit;
 
 int su_embedder_available(void) {
   const char *d = getenv("DISPLAY");
@@ -27,11 +28,16 @@ int su_embedder_available(void) {
   return 1;
 }
 
+int su_embedder_alive(void) {
+  return !g_user_quit && su_embedder_available();
+}
+
 static int ensure_window(const char *title, int width, int height) {
   if (g_ready && g_w == width && g_h == height)
     return 1;
 
   su_embedder_shutdown();
+  g_user_quit = 0;
 
   g_dpy = XOpenDisplay(NULL);
   if (!g_dpy) {
@@ -83,6 +89,8 @@ int su_embedder_present(const char *title, int width, int height,
   size_t need;
   int x, y;
 
+  if (g_user_quit)
+    return 0;
   if (!rgba || width <= 0 || height <= 0)
     return 0;
   need = (size_t)width * (size_t)height * 4;
@@ -110,9 +118,15 @@ int su_embedder_present(const char *title, int width, int height,
   while (XPending(g_dpy)) {
     XEvent ev;
     XNextEvent(g_dpy, &ev);
+    if (ev.type == ClientMessage || ev.type == DestroyNotify) {
+      g_user_quit = 1;
+      su_embedder_shutdown();
+      return 1;
+    }
     if (ev.type == KeyPress) {
       KeySym ks = XLookupKeysym(&ev.xkey, 0);
       if (ks == XK_q || ks == XK_Escape) {
+        g_user_quit = 1;
         su_embedder_shutdown();
         return 1;
       }

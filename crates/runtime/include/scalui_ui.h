@@ -211,6 +211,8 @@ void su_ui_bridge_flush(SuUiSession *session);
 SuIo *su_ui_run_headless_label(const char *text, int width, int height);
 /* Counter: Text + Button; tap increments. Optional IO bridge hop demo. */
 SuIo *su_ui_run_counter(int width, int height);
+/* Live window: pump until quit (q/Esc); Headless one-shots a snapshot. */
+SuIo *su_ui_run_live(int width, int height);
 /* Todo: TextField + List; load/save via IO Resource. */
 SuIo *su_ui_run_todo(int width, int height);
 

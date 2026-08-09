@@ -49,10 +49,18 @@ Window peer (blits via X11 on Linux or Cocoa on macOS):
 
 ```bash
 # macOS / Linux with a display
-env SCALUI_UI_RUNTIME=window cargo run -p scalui -- run examples/hello_ui
+env SCALUI_UI_RUNTIME=window cargo run -p scalui -- run examples/live
 
 # Linux CI / no display
 xvfb-run -a env SCALUI_UI_RUNTIME=window cargo run -p scalui -- run examples/hello_ui
+```
+
+Stay-open Window demo (`examples/live`, default `[ui].default_runtime = "window"`):
+
+```bash
+cargo run -p scalui -- run examples/live
+# Press q or Escape to quit. Headless one-shot:
+cargo run -p scalui -- run --headless examples/live
 ```
 
 ## Samples gallery
@@ -62,6 +70,7 @@ xvfb-run -a env SCALUI_UI_RUNTIME=window cargo run -p scalui -- run examples/hel
 | `examples/hello` | 0 | `IO.println` |
 | `examples/hello_ui` | 1 | Headless `Ui` + goldens |
 | `examples/counter` | 2 | Signals + Button + goldens |
+| `examples/live` | — | Stay-open Window (`Ui.runLive`; q/Esc) |
 | `examples/todo` | 2 | TextField/List + IO bridge + goldens |
 | `examples/effects` | 3 | Blessed effects kit |
 | `examples/adt` | 3 | package / enum / match |

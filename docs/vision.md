@@ -100,7 +100,7 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 - Design-language polish: theme `accent` / `disabled` / `radius` (default radius 0 keeps prior goldens)
 - Animation v0: `SuAnimFloat` lerp ticked on `pump` via monotonic `Clock` dt
 - Accessibility hooks: `SuA11yRole` + label on Views; Headless `su_view_a11y_dump`
-- Samples gallery: `examples/{hello,effects,adt,fs,clock,impurity,hello_ui,counter,todo}` indexed in README
+- Samples gallery: `examples/{hello,effects,adt,fs,clock,impurity,hello_ui,counter,live,todo}` indexed in README
 - Skia distribution: `scripts/fetch_skia.sh` + `third_party/skia/` notes; default remains in-tree `sk_sw`
 - Impeller: evaluated as optional alternate behind `sk_capi` — **deferred** (software CPU backend stays v0 default; see ADR 0002)
 - **Closed impurity boundary** for app + compiler code:

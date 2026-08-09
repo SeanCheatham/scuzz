@@ -51,6 +51,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @su_effects_run_kit()").unwrap();
     writeln!(out, "declare ptr @su_ui_run_headless_label(ptr, i32, i32)").unwrap();
     writeln!(out, "declare ptr @su_ui_run_counter(i32, i32)").unwrap();
+    writeln!(out, "declare ptr @su_ui_run_live(i32, i32)").unwrap();
     writeln!(out, "declare ptr @su_ui_run_todo(i32, i32)").unwrap();
     writeln!(out, "declare ptr @su_list_nil()").unwrap();
     writeln!(out, "declare i32 @su_list_is_empty(ptr)").unwrap();
@@ -260,6 +261,7 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         Expr::IoDelayUnit
         | Expr::Unit
         | Expr::UiRunCounter
+        | Expr::UiRunLive
         | Expr::UiRunTodo
         | Expr::EffectsRunKit
         | Expr::Var(_)
@@ -614,6 +616,15 @@ fn emit_expr(
             writeln!(
                 code,
                 "  %{prefix}_io = call ptr @su_ui_run_counter(i32 0, i32 0)"
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
+        }
+        Expr::UiRunLive => {
+            let mut code = String::new();
+            writeln!(
+                code,
+                "  %{prefix}_io = call ptr @su_ui_run_live(i32 0, i32 0)"
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)

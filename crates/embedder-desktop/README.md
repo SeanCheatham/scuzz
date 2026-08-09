@@ -11,12 +11,14 @@ Linked by Stage 0 / Stage 1 when present.
 - Press `q` / Escape to close during `present`
 - Without `DISPLAY`, Window stays offscreen
 - Link: `-lX11`
+- `su_embedder_alive` is 0 after quit (stay-open demos stop pumping)
 
 ## macOS (Cocoa)
 
 - Requires a GUI session (main display); otherwise Window stays offscreen
 - Press `q` / Escape to close during `present`
 - Link: `-framework Cocoa -lobjc`
+- `su_embedder_alive` is 0 after quit (or closing the window)
 
 ## Other hosts
 
