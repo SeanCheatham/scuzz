@@ -3,7 +3,8 @@ CFLAGS ?= -std=c11 -Wall -Wextra -Werror -O2
 ROOT := $(abspath ../..)
 FFI_SKIA := $(ROOT)/crates/ffi-skia
 EMBEDDER := $(ROOT)/crates/embedder-desktop
-INCLUDES := -Iinclude -I$(FFI_SKIA)/include -I$(EMBEDDER)/include
+MOBILE := $(ROOT)/crates/embedder-mobile
+INCLUDES := -Iinclude -I$(FFI_SKIA)/include -I$(EMBEDDER)/include -I$(MOBILE)/include
 SRC := src/runtime.c src/resource.c src/ref.c src/deferred.c src/queue.c \
 	src/effects.c src/theme.c src/signal.c src/view.c src/ui.c src/demos.c \
 	src/list.c src/fs.c src/sys.c

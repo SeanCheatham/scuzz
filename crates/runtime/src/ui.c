@@ -1,6 +1,7 @@
 #include "scalui_ui.h"
 
 #include "scalui_embedder.h"
+#include "scalui_mobile.h"
 #include "sk_capi.h"
 
 #include <stdio.h>
@@ -20,6 +21,27 @@ __attribute__((weak)) int su_embedder_present(const char *title, int width,
   return 0;
 }
 __attribute__((weak)) void su_embedder_shutdown(void) {}
+
+/* Weak stubs — strong defs from embedder-mobile override when linked. */
+__attribute__((weak)) int su_mobile_available(void) { return 0; }
+__attribute__((weak)) int su_mobile_present(const char *title, int width,
+                                            int height, const uint8_t *rgba,
+                                            size_t nbytes) {
+  (void)title;
+  (void)width;
+  (void)height;
+  (void)rgba;
+  (void)nbytes;
+  return 0;
+}
+__attribute__((weak)) void su_mobile_shutdown(void) {}
+__attribute__((weak)) void su_mobile_set_keyboard(int visible) {
+  (void)visible;
+}
+__attribute__((weak)) int su_mobile_poll_event(SuInputEvent *out) {
+  (void)out;
+  return 0;
+}
 
 /* Implemented in view.c */
 int su_view_paint(SuView *root, SkCanvas *canvas, int width, int height,
@@ -51,6 +73,14 @@ struct SuUiSession {
   const SuTheme *theme;
   BridgeItem *bridge_head;
   BridgeItem *bridge_tail;
+  SuLifecyclePhase lifecycle;
+  int keyboard_visible;
+  int pointer_down;
+  float pointer_x;
+  float pointer_y;
+  float pointer_down_x;
+  float pointer_down_y;
+  SuView *pointer_scroll;
 };
 
 static char *su_strdup(const char *s) {
@@ -64,6 +94,23 @@ static char *su_strdup(const char *s) {
   return out;
 }
 
+static int runtime_kind_ok(SuUiRuntimeKind kind) {
+  return kind == SU_UI_RUNTIME_HEADLESS || kind == SU_UI_RUNTIME_WINDOW ||
+         kind == SU_UI_RUNTIME_MOBILE;
+}
+
+static void sync_keyboard(SuUiSession *session) {
+  int want;
+  if (!session || !session->root)
+    return;
+  want = su_view_has_focused_text_field(session->root) ? 1 : 0;
+  if (want == session->keyboard_visible)
+    return;
+  session->keyboard_visible = want;
+  if (session->cfg.kind == SU_UI_RUNTIME_MOBILE)
+    su_mobile_set_keyboard(want);
+}
+
 SuUiSession *su_ui_mount(const SuUiConfig *cfg, SuView *root) {
   SuUiSession *s;
   int w, h;
@@ -71,7 +118,7 @@ SuUiSession *su_ui_mount(const SuUiConfig *cfg, SuView *root) {
     return NULL;
   if (cfg->width <= 0 || cfg->height <= 0)
     return NULL;
-  if (cfg->kind != SU_UI_RUNTIME_HEADLESS && cfg->kind != SU_UI_RUNTIME_WINDOW)
+  if (!runtime_kind_ok(cfg->kind))
     return NULL;
 
   w = cfg->width;
@@ -83,6 +130,7 @@ SuUiSession *su_ui_mount(const SuUiConfig *cfg, SuView *root) {
   s->root = root;
   s->owns_view = 0;
   s->theme = su_theme_default();
+  s->lifecycle = SU_LIFECYCLE_RESUME;
   s->surface = sk_surface_make_raster_n32_premul(w, h);
   if (!s->surface) {
     su_free(s);
@@ -96,6 +144,13 @@ SuUiSession *su_ui_mount(const SuUiConfig *cfg, SuView *root) {
     } else {
       fprintf(stderr,
               "scalui: UiRuntime.Window mounted (offscreen; no DISPLAY)\n");
+    }
+  } else if (cfg->kind == SU_UI_RUNTIME_MOBILE) {
+    if (su_mobile_available()) {
+      fprintf(stderr, "scalui: UiRuntime.Mobile mounted (mobile embedder)\n");
+    } else {
+      fprintf(stderr,
+              "scalui: UiRuntime.Mobile mounted (offscreen; no mobile shell)\n");
     }
   }
   return s;
@@ -164,6 +219,10 @@ void su_ui_unmount(SuUiSession *session) {
   su_ui_bridge_flush(session);
   if (session->cfg.kind == SU_UI_RUNTIME_WINDOW)
     su_embedder_shutdown();
+  if (session->cfg.kind == SU_UI_RUNTIME_MOBILE) {
+    su_mobile_set_keyboard(0);
+    su_mobile_shutdown();
+  }
   if (session->surface)
     sk_surface_unref(session->surface);
   if (session->owns_view)
@@ -171,11 +230,27 @@ void su_ui_unmount(SuUiSession *session) {
   su_free(session);
 }
 
+static void drain_mobile_events(SuUiSession *session) {
+  SuInputEvent ev;
+  if (!session || session->cfg.kind != SU_UI_RUNTIME_MOBILE)
+    return;
+  if (!su_mobile_available())
+    return;
+  while (su_mobile_poll_event(&ev)) {
+    if (!su_ui_inject_sync(session, &ev))
+      break;
+  }
+}
+
 int su_ui_pump_sync(SuUiSession *session) {
   size_t nbytes = 0;
   const uint8_t *rgba;
   if (!session)
     return 0;
+  if (session->lifecycle == SU_LIFECYCLE_STOP)
+    return 0;
+  /* Pull OS events before the frame (host-driven mobile shell). */
+  drain_mobile_events(session);
   /* UI-thread hop: apply signal writes posted from completed IO. */
   su_ui_bridge_flush(session);
   if (!su_view_paint(session->root, session->canvas, session->cfg.width,
@@ -190,21 +265,90 @@ int su_ui_pump_sync(SuUiSession *session) {
                           session->cfg.height, rgba, nbytes);
     }
   }
+  /* Mobile peer: present when resumed and shell is available. */
+  if (session->cfg.kind == SU_UI_RUNTIME_MOBILE &&
+      session->lifecycle == SU_LIFECYCLE_RESUME && su_mobile_available()) {
+    rgba = sk_surface_peek_pixels(session->surface, &nbytes);
+    if (rgba) {
+      su_mobile_present(session->cfg.title, session->cfg.width,
+                        session->cfg.height, rgba, nbytes);
+    }
+  }
   return 1;
 }
 
+static int inject_pointer(SuUiSession *session, const SuInputEvent *event) {
+  float dx, dy;
+  const float tap_slop2 = 64.f; /* 8px squared */
+
+  if (!session->root)
+    return 0;
+
+  /* Ensure frames are current for hit / scroll targeting. */
+  su_view_layout(session->root, (float)session->cfg.width,
+                 (float)session->cfg.height, session->theme);
+
+  switch (event->pointer_phase) {
+  case SU_POINTER_DOWN:
+    session->pointer_down = 1;
+    session->pointer_x = event->x;
+    session->pointer_y = event->y;
+    session->pointer_down_x = event->x;
+    session->pointer_down_y = event->y;
+    session->pointer_scroll = su_view_scroll_at(session->root, event->x, event->y);
+    session->dirty = 1;
+    return 1;
+  case SU_POINTER_MOVE:
+    if (!session->pointer_down)
+      return 0;
+    dy = event->y - session->pointer_y;
+    if (session->pointer_scroll && (dy > 0.5f || dy < -0.5f)) {
+      /* Finger down → content follows (positive finger dy scrolls content up). */
+      su_view_scroll_by(session->pointer_scroll, -dy);
+      session->dirty = 1;
+    }
+    session->pointer_x = event->x;
+    session->pointer_y = event->y;
+    return 1;
+  case SU_POINTER_UP:
+    if (!session->pointer_down)
+      return 0;
+    dx = event->x - session->pointer_down_x;
+    dy = event->y - session->pointer_down_y;
+    session->pointer_down = 0;
+    session->pointer_scroll = NULL;
+    if (dx * dx + dy * dy <= tap_slop2) {
+      if (!su_view_handle_tap(session->root, event->x, event->y)) {
+        /* Miss is still a successful pointer up. */
+      }
+      sync_keyboard(session);
+      session->dirty = 1;
+    }
+    return 1;
+  default:
+    return 0;
+  }
+}
+
 int su_ui_inject_sync(SuUiSession *session, const SuInputEvent *event) {
+  SuView *scroll;
   if (!session || !event || !session->root)
     return 0;
+  if (session->lifecycle == SU_LIFECYCLE_STOP &&
+      event->kind != SU_INPUT_LIFECYCLE)
+    return 0;
+
   switch (event->kind) {
   case SU_INPUT_TAP:
     if (!su_view_handle_tap(session->root, event->x, event->y))
       return 0;
+    sync_keyboard(session);
     session->dirty = 1;
     return 1;
   case SU_INPUT_TEXT:
     if (!su_view_handle_text(session->root, event->text))
       return 0;
+    sync_keyboard(session);
     session->dirty = 1;
     return 1;
   case SU_INPUT_RESIZE:
@@ -218,6 +362,37 @@ int su_ui_inject_sync(SuUiSession *session, const SuInputEvent *event) {
     if (!session->surface)
       return 0;
     session->canvas = sk_surface_get_canvas(session->surface);
+    session->dirty = 1;
+    return 1;
+  case SU_INPUT_POINTER:
+    return inject_pointer(session, event);
+  case SU_INPUT_SCROLL:
+    su_view_layout(session->root, (float)session->cfg.width,
+                   (float)session->cfg.height, session->theme);
+    scroll = su_view_scroll_at(session->root, event->x, event->y);
+    if (!scroll)
+      return 0;
+    su_view_scroll_by(scroll, event->dy);
+    session->dirty = 1;
+    return 1;
+  case SU_INPUT_LIFECYCLE:
+    if (event->lifecycle != SU_LIFECYCLE_RESUME &&
+        event->lifecycle != SU_LIFECYCLE_PAUSE &&
+        event->lifecycle != SU_LIFECYCLE_STOP)
+      return 0;
+    session->lifecycle = event->lifecycle;
+    if (event->lifecycle == SU_LIFECYCLE_PAUSE ||
+        event->lifecycle == SU_LIFECYCLE_STOP) {
+      session->keyboard_visible = 0;
+      if (session->cfg.kind == SU_UI_RUNTIME_MOBILE)
+        su_mobile_set_keyboard(0);
+    }
+    session->dirty = 1;
+    return 1;
+  case SU_INPUT_KEYBOARD:
+    session->keyboard_visible = event->keyboard_visible ? 1 : 0;
+    if (session->cfg.kind == SU_UI_RUNTIME_MOBILE)
+      su_mobile_set_keyboard(session->keyboard_visible);
     session->dirty = 1;
     return 1;
   default:
@@ -322,6 +497,14 @@ SuView *su_ui_session_root(SuUiSession *session) {
 
 const SuTheme *su_ui_session_theme(const SuUiSession *session) {
   return session ? session->theme : su_theme_default();
+}
+
+SuLifecyclePhase su_ui_session_lifecycle(const SuUiSession *session) {
+  return session ? session->lifecycle : SU_LIFECYCLE_STOP;
+}
+
+int su_ui_session_keyboard_visible(const SuUiSession *session) {
+  return session ? session->keyboard_visible : 0;
 }
 
 /* Shared resolution of headless size from args / env. */

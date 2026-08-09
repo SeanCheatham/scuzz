@@ -26,6 +26,8 @@ static void fill_cfg(SuUiConfig *cfg, int width, int height) {
   cfg->kind = SU_UI_RUNTIME_HEADLESS;
   if (rt && (strcmp(rt, "window") == 0 || strcmp(rt, "Window") == 0))
     cfg->kind = SU_UI_RUNTIME_WINDOW;
+  else if (rt && (strcmp(rt, "mobile") == 0 || strcmp(rt, "Mobile") == 0))
+    cfg->kind = SU_UI_RUNTIME_MOBILE;
   cfg->width = width;
   cfg->height = height;
   cfg->title = "ScalUI";

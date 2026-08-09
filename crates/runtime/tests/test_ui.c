@@ -87,6 +87,17 @@ static void test_label_session(void) {
   su_ui_unmount(session);
   su_view_free(view);
 
+  cfg.kind = SU_UI_RUNTIME_MOBILE;
+  cfg.title = "mobile";
+  view = su_view_label("Mob", 0xFF142850u, 0xFFF0F0F0u);
+  session = su_ui_mount(&cfg, view);
+  assert(session);
+  assert(su_ui_session_kind(session) == SU_UI_RUNTIME_MOBILE);
+  assert(su_ui_pump_sync(session));
+  assert(su_ui_snapshot_png_sync(session, path_b));
+  su_ui_unmount(session);
+  su_view_free(view);
+
   {
     SuIoResult r = su_io_unsafe_run(su_ui_run_headless_label("Demo", 160, 80));
     assert(r.ok);
@@ -213,10 +224,111 @@ static void test_widgets_and_demos(void) {
   remove(todo_path);
 }
 
+static void test_mobile_pointer_scroll_lifecycle(void) {
+  SuUiConfig cfg;
+  SuSignalStr *draft;
+  SuView *root, *scroll, *list, *field;
+  SuUiSession *session;
+  SuInputEvent ev;
+  const SuTheme *theme = su_theme_default();
+  float y0;
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SU_UI_RUNTIME_MOBILE;
+  cfg.width = 200;
+  cfg.height = 160;
+  cfg.scale = 1.0;
+  cfg.title = "mobile-test";
+
+  draft = su_signal_str("");
+  root = su_view_column();
+  field = su_view_text_field(draft, "type");
+  su_view_add_child(root, field);
+  list = su_view_list();
+  su_view_add_child(list, su_view_text("one"));
+  su_view_add_child(list, su_view_text("two"));
+  su_view_add_child(list, su_view_text("three"));
+  su_view_add_child(list, su_view_text("four"));
+  scroll = su_view_scroll(list);
+  su_view_add_child(root, scroll);
+
+  session = su_ui_mount(&cfg, root);
+  assert(session);
+  assert(su_ui_session_kind(session) == SU_UI_RUNTIME_MOBILE);
+  assert(su_ui_session_lifecycle(session) == SU_LIFECYCLE_RESUME);
+  assert(su_ui_pump_sync(session));
+
+  /* Soft keyboard: tap TextField → keyboard visible. */
+  su_view_layout(root, 200.f, 160.f, theme);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SU_INPUT_POINTER;
+  ev.pointer_phase = SU_POINTER_DOWN;
+  ev.x = su_view_frame(field).x + 4.f;
+  ev.y = su_view_frame(field).y + 4.f;
+  assert(su_ui_inject_sync(session, &ev));
+  ev.pointer_phase = SU_POINTER_UP;
+  assert(su_ui_inject_sync(session, &ev));
+  assert(su_ui_session_keyboard_visible(session) == 1);
+  assert(su_view_has_focused_text_field(root));
+
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SU_INPUT_TEXT;
+  ev.text = "milk";
+  assert(su_ui_inject_sync(session, &ev));
+  assert(strcmp(su_signal_str_get(draft), "milk") == 0);
+
+  /* Scroll gesture via POINTER move on the Scroll viewport. */
+  su_view_layout(root, 200.f, 160.f, theme);
+  y0 = su_view_scroll_y(scroll);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SU_INPUT_POINTER;
+  ev.pointer_phase = SU_POINTER_DOWN;
+  ev.x = su_view_frame(scroll).x + 8.f;
+  ev.y = su_view_frame(scroll).y + 8.f;
+  assert(su_ui_inject_sync(session, &ev));
+  ev.pointer_phase = SU_POINTER_MOVE;
+  ev.y = su_view_frame(scroll).y + 8.f - 20.f; /* finger up → content up */
+  assert(su_ui_inject_sync(session, &ev));
+  ev.pointer_phase = SU_POINTER_UP;
+  assert(su_ui_inject_sync(session, &ev));
+  assert(su_view_scroll_y(scroll) > y0);
+
+  /* Direct scroll inject also works (Headless-scriptable). */
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SU_INPUT_SCROLL;
+  ev.x = su_view_frame(scroll).x + 8.f;
+  ev.y = su_view_frame(scroll).y + 8.f;
+  ev.dy = 12.f;
+  y0 = su_view_scroll_y(scroll);
+  assert(su_ui_inject_sync(session, &ev));
+  assert(su_view_scroll_y(scroll) == y0 + 12.f);
+
+  /* Lifecycle pause hides keyboard; stop blocks further taps. */
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SU_INPUT_LIFECYCLE;
+  ev.lifecycle = SU_LIFECYCLE_PAUSE;
+  assert(su_ui_inject_sync(session, &ev));
+  assert(su_ui_session_lifecycle(session) == SU_LIFECYCLE_PAUSE);
+  assert(su_ui_session_keyboard_visible(session) == 0);
+
+  ev.lifecycle = SU_LIFECYCLE_RESUME;
+  assert(su_ui_inject_sync(session, &ev));
+  assert(su_ui_pump_sync(session));
+
+  ev.lifecycle = SU_LIFECYCLE_STOP;
+  assert(su_ui_inject_sync(session, &ev));
+  assert(!su_ui_pump_sync(session));
+
+  su_ui_unmount(session);
+  su_view_free(root);
+  su_signal_str_free(draft);
+}
+
 int main(void) {
   test_label_session();
   test_signals_layout_hit();
   test_widgets_and_demos();
+  test_mobile_pointer_scroll_lifecycle();
   puts("runtime ui tests ok");
   return 0;
 }

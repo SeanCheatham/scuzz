@@ -44,14 +44,21 @@ fn default_main() -> String {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UiConfig {
-    /// `"headless"` or `"window"` — default runtime for `scalui run`
+    /// `"headless"`, `"window"`, or `"mobile"` — default runtime for `scalui run`
     #[serde(default = "default_runtime")]
     pub default_runtime: String,
-    /// `[width, height]` for Headless
+    /// `[width, height]` for Headless / Mobile goldens
     #[serde(default = "default_headless_size")]
     pub headless_size: Vec<i32>,
     #[serde(default = "default_scale")]
     pub headless_scale: f64,
+    /// Bundle id used by `scalui package` mobile shells
+    #[serde(default = "default_bundle_id")]
+    pub bundle_id: String,
+}
+
+fn default_bundle_id() -> String {
+    "dev.scalui.app".into()
 }
 
 fn default_runtime() -> String {

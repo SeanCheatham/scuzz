@@ -77,7 +77,7 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 - Linux X11 embedder for `UiRuntime.Window` (`crates/embedder-desktop`); Headless remains CI default
 - ScalUI parser bootstrap under `compiler-scalui/` (seed for Phase 4)
 
-### Phase 4 — Self-host ✅ (current)
+### Phase 4 — Self-host ✅
 
 - Stage 1: full compiler-in-ScalUI under `compiler-scalui/` (lexer/parser/codegen/driver/CLI), built by Stage 0
 - Stage 2: Stage 1 rebuilds the compiler; `scripts/selfhost.sh` + CI dual-boot smoke on `examples/hello`
@@ -86,11 +86,14 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 - Kernel dialect expansion for self-host: top-level `def`, `if`/`else`, `Int`/`String`/`List`, string/int ops, bound `flatMap`
 - Success bar: `scalui` release binary is produced by a ScalUI-built compiler (`./scripts/selfhost.sh`)
 
-### Phase 5 — Mobile
+### Phase 5 — Mobile ✅ (current)
 
-- iOS/Android embedder shells + packaging (`scalui package`)
-- Touch gestures, soft keyboard, app lifecycle
-- Same examples run unmodified across platforms
+- `UiRuntime.Mobile` peer (same `mount` / `pump` / `inject` / `snapshot` protocol)
+- Touch: `SU_INPUT_POINTER` (down/move/up) + `SU_INPUT_SCROLL`; soft keyboard via TextField focus + `SU_INPUT_TEXT` / `SU_INPUT_KEYBOARD`
+- App lifecycle: `SU_INPUT_LIFECYCLE` {Resume, Pause, Stop} — Headless-scriptable
+- Embedder shells: `crates/embedder-mobile` host shell (CI) + Android/iOS packaging templates
+- `scalui package` emits `build/package/{host,android,ios}/`
+- Same examples run unmodified (`SCALUI_UI_RUNTIME=mobile`)
 
 ### Phase 6 — Productize
 
@@ -115,6 +118,6 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 | Skia build/size complexity | Prebuilt artifacts per platform; thin C ABI; CI caches |
 | Window-only features sneak in | Rule: no UI feature without Headless interpreter path |
 | GC + UI frame budget | `pump` as frame boundary; measure; isolate render work |
-| Mobile packaging hell | Defer until desktop UI core + self-host path are credible |
+| Mobile packaging hell | Packaging shells + host Mobile peer first; device NDK/Xcode later |
 
 See `docs/adr/` for locked design decisions and `docs/compatibility.md` for the matrix.

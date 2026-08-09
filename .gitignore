@@ -16,6 +16,7 @@ examples/**/.scalui/
 crates/runtime/build/
 crates/ffi-skia/build/
 crates/embedder-desktop/build/
+crates/embedder-mobile/build/
 *.a
 *.so
 *.dylib

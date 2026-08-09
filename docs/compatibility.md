@@ -29,13 +29,14 @@ ScalUI deliberately diverges from the Scala Center / Typelevel / JVM ecosystems.
 
 ## Platforms (headless-first)
 
-| Target | Language/runtime/UI-core | Window embedder | Notes |
-| --- | --- | --- |
-| Linux headless (CI/cloud) | Yes | N/A | Default development & CI; Phase 1–4 golden PNGs + self-host |
+| Target | Language/runtime/UI-core | Window / Mobile embedder | Notes |
+| --- | --- | --- | --- |
+| Linux headless (CI/cloud) | Yes | N/A | Default development & CI; Phase 1–5 golden PNGs + self-host |
 | Linux desktop | Yes | Phase 3 X11 | `crates/embedder-desktop` blits Window peer frames when `DISPLAY` is set |
+| Linux mobile host shell | Yes | Phase 5 host | `crates/embedder-mobile` + `SCALUI_MOBILE_SHELL=1` exercises Mobile peer |
 | macOS desktop | Yes | Secondary | Metal/GL surface later |
 | Windows desktop | Yes | Secondary | Later (same session protocol) |
-| iOS / Android | Shared app code later | Phase 5 | Packaging shells only |
+| iOS / Android | Shared app code | Phase 5 packaging shells | `scalui package`; NDK/Xcode for device builds |
 
 ## Self-host stages
 
