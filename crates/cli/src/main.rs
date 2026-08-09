@@ -247,13 +247,16 @@ fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
         .ui
         .as_ref()
         .map(|u| u.default_runtime.as_str())
-        .unwrap_or("headless");
-    let use_headless = headless || default_rt.eq_ignore_ascii_case("headless");
+        .unwrap_or("");
+    // Only force Headless UI env for `--headless` or packages that declare `[ui]`.
+    let use_headless =
+        headless || default_rt.eq_ignore_ascii_case("headless");
     let use_mobile = !headless && default_rt.eq_ignore_ascii_case("mobile");
+    let use_window = !headless && manifest.ui.is_some() && !use_mobile;
 
     let out = build(path, &out_dir.to_path_buf(), true)?;
     let mut cmd = Command::new(&out.executable);
-    if use_headless {
+    if use_headless && (headless || manifest.ui.is_some()) {
         let snap = out
             .executable
             .parent()
@@ -272,7 +275,7 @@ fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
             cmd.env("SCALUI_UI_HEIGHT", ui.height().to_string());
         }
         eprintln!("scalui run → UiRuntime.Mobile (host shell)");
-    } else {
+    } else if use_window {
         // Window peer + optional X11 embedder when DISPLAY is set.
         cmd.env("SCALUI_UI_RUNTIME", "window");
         if let Some(ui) = &manifest.ui {

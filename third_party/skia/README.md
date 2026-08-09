@@ -1,13 +1,12 @@
-# Skia (Phase 1+)
+# Skia
 
-Default contributor path does **not** require a Skia tree. ScalUI paints through `crates/ffi-skia` (`sk_capi`), which ships a CPU software backend for Headless CI.
-
-To install hosted prebuilts when available:
+Default path does **not** require a Skia tree. Paint goes through `crates/ffi-skia`
+(`sk_capi`) with an in-tree CPU software backend for Headless CI.
 
 ```bash
 SCALUI_SKIA_URL=https://…/skia-linux-x64-cpu.tar.gz ./scripts/fetch_skia.sh
 ```
 
-Layout after fetch: `third_party/skia/prebuilt/<triple>/` (override triple with `SCALUI_SKIA_TRIPLE`).
+Layout after fetch: `third_party/skia/prebuilt/<triple>/` (override with `SCALUI_SKIA_TRIPLE`).
 
-Phase 6: Impeller remains an optional future backend behind the same ABI — not required for v0 (see `docs/adr/0002-skia-acquisition.md`).
+See ADR 0002 for prebuilts and deferred Impeller.

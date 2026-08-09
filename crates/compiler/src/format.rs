@@ -1,4 +1,4 @@
-//! Minimal ScalUI formatter: parse → pretty-print (Phase 4 kernel dialect).
+//! Minimal ScalUI formatter: parse → pretty-print (kernel dialect).
 
 use crate::ast::{BinOp, EnumDef, Expr, FunDef, MatchArm, Pattern, Program, Type};
 use crate::parser::{parse, ParseError};

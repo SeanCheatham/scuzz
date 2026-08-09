@@ -7,7 +7,6 @@
 /.scalui/
 *.png
 !examples/**/goldens/**/*.png
-!**/testdata/**/*.png
 .DS_Store
 examples/**/build/
 compiler-scalui/build/
@@ -26,4 +25,3 @@ crates/embedder-mobile/build/
 *.swp
 .idea/
 .vscode/
-!docs/**/*.md

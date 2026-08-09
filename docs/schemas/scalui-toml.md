@@ -49,14 +49,14 @@ v0: empty or path deps only. No Maven Central.
 
 ### `[ui]`
 
-Optional. Used by `scalui run` / `test` / `package` (Phase 1+).
+Optional. Used by `scalui run` / `test` / `package`.
 
 | Key | Type | Notes |
 | --- | --- | --- |
 | `default_runtime` | `"headless"` \| `"window"` \| `"mobile"` | `scalui run` default; `--headless` forces Headless |
 | `headless_size` | `[w, h]` | Logical pixels for Headless / goldens / Mobile host |
-| `headless_scale` | float | Recorded on session; Phase 1 raster uses logical size |
-| `bundle_id` | string | Phase 5: Android package / iOS `CFBundleIdentifier` for `scalui package` |
+| `headless_scale` | float | Recorded on session; raster uses logical size |
+| `bundle_id` | string | Android package / iOS `CFBundleIdentifier` for `scalui package` |
 
 ## Source layout (convention)
 
@@ -64,14 +64,14 @@ Optional. Used by `scalui run` / `test` / `package` (Phase 1+).
 my-app/
   scalui.toml
   src/
-    Main.scala          # or .scalui — extension TBD; .scala-ish accepted in Stage 0
-    Other.scala         # Phase 3+: multi-file packages / enums
+    Main.scala          # *.scala or *.scalui
+    Other.scala         # multi-file packages / enums
   .scalui/
     fingerprint         # incremental compile cache (gitignored)
-  build/package/        # Phase 5: emitted by `scalui package`
+  build/package/        # emitted by `scalui package`
     host/run.sh
     android/
     ios/
 ```
 
-Stage-0 compiler accepts `*.scala` and `*.scalui` under `src/` (recursive). Units in the same package are merged; exactly one `@main` is required for executables.
+Stage-0 accepts `*.scala` and `*.scalui` under `src/` (recursive). Units in the same package are merged; exactly one `@main` is required for executables.
