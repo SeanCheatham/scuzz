@@ -154,22 +154,29 @@ def runtimeDeclaresB(): String =
   )
 
 def runtimeDeclaresC(): String =
-  str5(
-    "declare ptr @su_lang_view_text(ptr)\ndeclare ptr @su_lang_view_text_signal(ptr, ptr)\n",
-    "declare ptr @su_lang_view_button(ptr, ptr, ptr)\n",
-    "declare ptr @su_lang_view_column()\ndeclare ptr @su_lang_view_row()\n",
-    "declare ptr @su_lang_view_list()\ndeclare ptr @su_lang_view_scroll(ptr)\n",
+  Str.concat(
     str5(
+      "declare ptr @su_lang_view_text(ptr)\ndeclare ptr @su_lang_view_text_signal(ptr, ptr)\n",
+      "declare ptr @su_lang_view_button(ptr, ptr, ptr)\n",
+      "declare i64 @su_theme_accent()\ndeclare i64 @su_theme_primary()\n",
+      "declare i64 @su_theme_muted()\ndeclare i64 @su_theme_foreground()\n",
+      "declare i64 @su_color_rgb(i64, i64, i64)\n"
+    ),
+    str5(
+      "declare ptr @su_lang_view_column()\ndeclare ptr @su_lang_view_row()\n",
+      "declare ptr @su_lang_view_list()\ndeclare ptr @su_lang_view_scroll(ptr)\n",
       "declare ptr @su_lang_view_text_field(ptr, ptr)\ndeclare ptr @su_lang_view_icon(i64, i64)\n",
       "declare ptr @su_lang_view_image(i64, i64, i64, ptr)\ndeclare ptr @su_lang_view_add_child(ptr, ptr)\n",
-      "declare ptr @su_lang_view_show_when(ptr, i64, ptr)\ndeclare ptr @su_lang_todo_create()\n",
-      "declare ptr @su_lang_todo_load(ptr)\ndeclare ptr @su_lang_todo_draft(ptr)\n",
       str5(
+        "declare ptr @su_lang_view_show_when(ptr, i64, ptr)\ndeclare ptr @su_lang_todo_create()\n",
+        "declare ptr @su_lang_todo_load(ptr)\ndeclare ptr @su_lang_todo_draft(ptr)\n",
         "declare ptr @su_lang_todo_list_view(ptr)\ndeclare ptr @su_lang_view_button_todo_add(ptr, ptr)\n",
         "declare ptr @su_lang_view_button_todo_save(ptr, ptr)\ndeclare ptr @su_ui_run_view(ptr)\n",
-        "declare ptr @su_ui_run_view_todo(ptr, ptr)\ndeclare ptr @su_box_i64(i64)\n",
-        "declare i64 @su_unbox_i64(ptr)\ndeclare i32 @su_runtime_main_args(ptr, i32, ptr)\n\n",
-        ""
+        str3(
+          "declare ptr @su_ui_run_view_todo(ptr, ptr)\ndeclare ptr @su_box_i64(i64)\n",
+          "declare i64 @su_unbox_i64(ptr)\ndeclare i32 @su_runtime_main_args(ptr, i32, ptr)\n\n",
+          ""
+        )
       )
     )
   )
@@ -834,6 +841,8 @@ def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id:
   else if (startsWith(callee, "Clock.") == 1) emitBuiltinClock(callee, code, vals, id, conts, prefix)
   else if (startsWith(callee, "Signal.") == 1) emitBuiltinSignal(callee, code, vals, id, conts, prefix)
   else if (startsWith(callee, "View.") == 1) emitBuiltinView(callee, code, vals, id, conts, prefix)
+  else if (startsWith(callee, "Theme.") == 1) emitBuiltinTheme(callee, code, vals, id, conts, prefix)
+  else if (startsWith(callee, "Color.") == 1) emitBuiltinColor(callee, code, vals, id, conts, prefix)
   else if (startsWith(callee, "Todo.") == 1) emitBuiltinTodo(callee, code, vals, id, conts, prefix)
   else if (startsWith(callee, "Ui.") == 1) emitBuiltinUi(callee, code, vals, id, conts, prefix)
   else if (streq(callee, "Random.nextInt") == 1)
@@ -985,6 +994,28 @@ def emitBuiltinView(callee: String, code: String, vals: List, id: Int, conts: St
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_button_todo_add(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "View.buttonTodoSave") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_button_todo_save(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinTheme(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "Theme.accent") == 1)
+    mkS(str3(code, "  %", Str.concat(prefix, "_v = call i64 @su_theme_accent()\n")), str3("%", prefix, "_v"), "int", id, conts)
+  else if (streq(callee, "Theme.primary") == 1)
+    mkS(str3(code, "  %", Str.concat(prefix, "_v = call i64 @su_theme_primary()\n")), str3("%", prefix, "_v"), "int", id, conts)
+  else if (streq(callee, "Theme.muted") == 1)
+    mkS(str3(code, "  %", Str.concat(prefix, "_v = call i64 @su_theme_muted()\n")), str3("%", prefix, "_v"), "int", id, conts)
+  else if (streq(callee, "Theme.foreground") == 1)
+    mkS(str3(code, "  %", Str.concat(prefix, "_v = call i64 @su_theme_foreground()\n")), str3("%", prefix, "_v"), "int", id, conts)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinColor(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "Color.rgb") == 1)
+    mkS(
+      str4(code, "  %", prefix, str4("_v = call i64 @su_color_rgb(i64 ", List.at(vals, 0), str4(", i64 ", List.at(vals, 1), ", i64 ", List.at(vals, 2)), ")\n")),
+      str3("%", prefix, "_v"),
+      "int",
+      id,
+      conts
+    )
   else mkS(code, "null", "ptr", id, conts)
 
 // vals[1] is a closure value: cons(fn_ptr, cons(env_ptr, nil)). Unpack the pair

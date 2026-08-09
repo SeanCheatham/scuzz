@@ -371,6 +371,8 @@ def parseIdentExpr(tokens: List, i: Int, name: String): List =
   else if (streq(name, "Net") == 1) parseModuleCall(tokens, i + 1, "Net")
   else if (streq(name, "Impurity") == 1) parseModuleCall(tokens, i + 1, "Impurity")
   else if (streq(name, "Signal") == 1) parseModuleCall(tokens, i + 1, "Signal")
+  else if (streq(name, "Theme") == 1) parseModuleCall(tokens, i + 1, "Theme")
+  else if (streq(name, "Color") == 1) parseModuleCall(tokens, i + 1, "Color")
   else if (streq(name, "View") == 1) parseModuleCall(tokens, i + 1, "View")
   else if (streq(name, "Todo") == 1) parseModuleCall(tokens, i + 1, "Todo")
   else if (streq(name, "Ui") == 1) parseModuleCall(tokens, i + 1, "Ui")
@@ -381,7 +383,6 @@ def parseIdentExpr(tokens: List, i: Int, name: String): List =
 def parseCallOrVar(tokens: List, i: Int, name: String): List =
   if (isTok(tokens, i, "LParen") == 1) parseCallArgs(tokens, i + 1, name)
   else if (isTok(tokens, i, "Dot") == 1) parseAdt(tokens, i + 1, name)
-  else if (isTok(tokens, i, "Arrow") == 1) parseLambdaExpr(tokens, i, name)
   else ok(List.cons("Var", List.cons(name, List.empty)), i)
 
 def parseAdt(tokens: List, i: Int, enumName: String): List =

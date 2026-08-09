@@ -81,6 +81,11 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @su_lang_view_text(ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_text_signal(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_button(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @su_theme_accent()").unwrap();
+    writeln!(out, "declare i64 @su_theme_primary()").unwrap();
+    writeln!(out, "declare i64 @su_theme_muted()").unwrap();
+    writeln!(out, "declare i64 @su_theme_foreground()").unwrap();
+    writeln!(out, "declare i64 @su_color_rgb(i64, i64, i64)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_column()").unwrap();
     writeln!(out, "declare ptr @su_lang_view_row()").unwrap();
     writeln!(out, "declare ptr @su_lang_view_list()").unwrap();
@@ -1617,6 +1622,31 @@ fn emit_call(
             )
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Theme.accent" => {
+            writeln!(code, "  %{prefix}_v = call i64 @su_theme_accent()").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Theme.primary" => {
+            writeln!(code, "  %{prefix}_v = call i64 @su_theme_primary()").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Theme.muted" => {
+            writeln!(code, "  %{prefix}_v = call i64 @su_theme_muted()").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Theme.foreground" => {
+            writeln!(code, "  %{prefix}_v = call i64 @su_theme_foreground()").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Color.rgb" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @su_color_rgb(i64 {}, i64 {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "View.column" => {
             writeln!(code, "  %{prefix}_v = call ptr @su_lang_view_column()").unwrap();

@@ -439,6 +439,17 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::Opaque("View".into()))
         }
+        "Theme.accent" | "Theme.primary" | "Theme.muted" | "Theme.foreground" => {
+            expect_arity(callee, &arg_tys, 0)?;
+            Ok(Type::Int)
+        }
+        "Color.rgb" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            expect_ty(&arg_tys[2], &Type::Int)?;
+            Ok(Type::Int)
+        }
         "View.column" | "View.row" | "View.list" => {
             expect_arity(callee, &arg_tys, 0)?;
             Ok(Type::Opaque("View".into()))

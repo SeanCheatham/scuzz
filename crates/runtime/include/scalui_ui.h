@@ -80,6 +80,13 @@ typedef struct SuTheme {
 
 const SuTheme *su_theme_default(void);
 
+/* Language-facing theme / color ints (ARGB). */
+int64_t su_theme_accent(void);
+int64_t su_theme_primary(void);
+int64_t su_theme_muted(void);
+int64_t su_theme_foreground(void);
+int64_t su_color_rgb(int64_t r, int64_t g, int64_t b);
+
 /* --- signals (Phase 2 state) --------------------------------------------- */
 
 typedef struct SuSignalInt SuSignalInt;

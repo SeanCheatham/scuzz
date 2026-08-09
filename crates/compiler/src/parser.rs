@@ -705,7 +705,7 @@ impl Parser {
                 if matches!(
                     name.as_str(),
                     "Str" | "List" | "Fs" | "Sys" | "Lexer" | "Clock" | "Random"
-                        | "Net" | "Impurity" | "Signal" | "View" | "Todo"
+                        | "Net" | "Impurity" | "Signal" | "View" | "Todo" | "Theme" | "Color"
                 ) =>
             {
                 self.bump();
