@@ -53,13 +53,16 @@ enum Commands {
         #[arg(long, default_value = "build")]
         out_dir: PathBuf,
     },
-    /// Run tests: runtime unit tests + Headless golden PNGs when present
+    /// Run tests: Headless golden PNGs when present (optional runtime C suites)
     Test {
         #[arg(default_value = ".")]
         path: PathBuf,
         /// Rewrite / seed goldens from Headless snapshots
         #[arg(long)]
         update: bool,
+        /// Also run crates/runtime + ffi-skia C unit tests
+        #[arg(long)]
+        runtime_tests: bool,
     },
     /// Format ScalUI sources under src/
     Fmt {
@@ -126,31 +129,37 @@ fn real_main() -> Result<ExitCode> {
             run_once(&path, &out_dir, headless)
         }
         Commands::Watch { path, out_dir } => watch_build(&path, &out_dir),
-        Commands::Test { path, update } => {
-            let runtime = find_runtime_dir(&std::env::current_dir()?)?;
-            let status = Command::new("make")
-                .arg("-C")
-                .arg(&runtime)
-                .arg("test")
-                .status()
-                .context("runtime tests")?;
-            if !status.success() {
-                bail!("runtime tests failed");
-            }
-
-            let ffi = runtime
-                .parent()
-                .map(|p| p.join("ffi-skia"))
-                .unwrap_or_else(|| PathBuf::from("crates/ffi-skia"));
-            if ffi.join("Makefile").is_file() {
-                let st = Command::new("make")
+        Commands::Test {
+            path,
+            update,
+            runtime_tests,
+        } => {
+            if runtime_tests {
+                let runtime = find_runtime_dir(&std::env::current_dir()?)?;
+                let status = Command::new("make")
                     .arg("-C")
-                    .arg(&ffi)
+                    .arg(&runtime)
                     .arg("test")
                     .status()
-                    .context("ffi-skia tests")?;
-                if !st.success() {
-                    bail!("ffi-skia tests failed");
+                    .context("runtime tests")?;
+                if !status.success() {
+                    bail!("runtime tests failed");
+                }
+
+                let ffi = runtime
+                    .parent()
+                    .map(|p| p.join("ffi-skia"))
+                    .unwrap_or_else(|| PathBuf::from("crates/ffi-skia"));
+                if ffi.join("Makefile").is_file() {
+                    let st = Command::new("make")
+                        .arg("-C")
+                        .arg(&ffi)
+                        .arg("test")
+                        .status()
+                        .context("ffi-skia tests")?;
+                    if !st.success() {
+                        bail!("ffi-skia tests failed");
+                    }
                 }
             }
 
