@@ -6,15 +6,15 @@
 
 ## Status
 
-**Phase 1 — `Ui` effect + Headless** (current)
+**Phase 2 — Declarative UI core** (current)
 
-- `UiRuntime.Headless`: `mount` / `pump` / `inject` / `snapshot` (PNG)
-- Thin `sk_capi` + CPU software backend (`crates/ffi-skia`); fetch script for future Skia prebuilts
-- Golden PNGs under `scalui test`; `scalui run --headless` works with no display
-- `UiRuntime.Window` peer interpreter (same session protocol; OS window in embedder later)
-- Stage-0 builtin: `Ui.runHeadless("…")`
+- Element tree, signals, layout, hit testing under the `Ui` session protocol
+- Theme tokens + widgets: `Text`, `Button`, `TextField`, `List`, `Scroll`, `Image`, `Icon` (+ Phase 1 `Label`)
+- IO → UI bridge: completed `IO` posts signal writes; `pump` applies them (UI-thread hop)
+- Examples: `examples/counter`, `examples/todo` (Todo load/save via `IO` + `Resource`)
+- Kernel dialect: `Ui.runCounter`, `Ui.runTodo`, `Ui.runHeadless`
 
-Phase 0 foundation (compiler, IO runtime, CLI) is complete. Phase 2 adds declarative widgets. See [docs/vision.md](docs/vision.md).
+Phase 1 Headless/Window session + goldens remain. See [docs/vision.md](docs/vision.md).
 
 ## Quick start
 
@@ -27,17 +27,21 @@ make -C crates/runtime test
 # Build the Stage-0 CLI
 cargo build -p scalui
 
-# Headless UI demo → snapshot PNG (no display)
-cargo run -p scalui -- run --headless examples/hello_ui
+# Counter (Headless snapshot, no display)
+cargo run -p scalui -- run --headless examples/counter
+
+# Todo (List + Resource persistence)
+cargo run -p scalui -- run --headless examples/todo
 
 # Golden PNG tests
-cargo run -p scalui -- test examples/hello_ui
+cargo run -p scalui -- test examples/counter
+cargo run -p scalui -- test examples/todo
 
-# IO hello (Phase 0)
-cargo run -p scalui -- run examples/hello
+# Phase 1 label demo still works
+cargo run -p scalui -- test examples/hello_ui
 ```
 
-Create a Headless UI project:
+Create a Counter UI project:
 
 ```bash
 cargo run -p scalui -- new --ui counter
@@ -50,23 +54,26 @@ cargo run -p scalui -- run --headless counter
 docs/                 vision, compatibility, ADRs, scalui.toml schema
 crates/compiler/      Stage-0 parser / typer / LLVM codegen (Rust)
 crates/cli/           scalui tool
-crates/runtime/       C runtime (GC-v0 alloc, IO fibers, Ui session)
-crates/ffi-skia/      sk_capi + CPU software backend (Phase 1)
+crates/runtime/       C runtime (GC-v0, IO, View tree, Ui session, demos)
+crates/ui/            design-language home (Phase 2 widgets live in runtime C for now)
+crates/ffi-skia/      sk_capi + CPU software backend
 crates/embedder-desktop/  Window OS surface (stub; peer protocol in runtime)
 examples/hello/       Stage-0 IO sample
-examples/hello_ui/    Phase 1 Headless + goldens
+examples/hello_ui/    Phase 1 Headless label + goldens
+examples/counter/     Phase 2 Counter + goldens
+examples/todo/        Phase 2 Todo + goldens
 third_party/skia/     prebuilt fetch notes
 scripts/fetch_skia.sh optional Skia prebuilt fetch
 ```
 
-## Kernel dialect (Stage 0 / Phase 1)
+## Kernel dialect (Stage 0 / Phase 2)
 
 ```scala
 @main def main: IO[Unit] =
-  Ui.runHeadless("Hello Headless")
+  Ui.runCounter
 ```
 
-See [docs/adr/0005-kernel-dialect.md](docs/adr/0005-kernel-dialect.md).
+Also: `Ui.runTodo`, `Ui.runHeadless("…")`, `IO.println` / `flatMap`. See [docs/adr/0005-kernel-dialect.md](docs/adr/0005-kernel-dialect.md).
 
 ## License
 

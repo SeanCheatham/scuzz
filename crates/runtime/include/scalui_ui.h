@@ -19,13 +19,14 @@ typedef struct SuUiConfig {
   SuUiRuntimeKind kind;
   int width;
   int height;
-  double scale;      /* Phase 1: recorded; raster uses logical pixels */
+  double scale;      /* recorded; raster uses logical pixels */
   const char *title; /* Window only; may be NULL */
 } SuUiConfig;
 
 typedef enum SuInputKind {
   SU_INPUT_TAP = 1,
-  SU_INPUT_RESIZE = 2
+  SU_INPUT_RESIZE = 2,
+  SU_INPUT_TEXT = 3 /* deliver string to focused TextField */
 } SuInputKind;
 
 typedef struct SuInputEvent {
@@ -34,27 +35,103 @@ typedef struct SuInputEvent {
   float y;
   int width;  /* resize */
   int height; /* resize */
+  const char *text; /* SU_INPUT_TEXT */
 } SuInputEvent;
+
+/* --- theme tokens -------------------------------------------------------- */
+
+typedef struct SuTheme {
+  uint32_t background;
+  uint32_t surface;
+  uint32_t foreground;
+  uint32_t primary;
+  uint32_t on_primary;
+  uint32_t border;
+  uint32_t muted;
+  float pad;
+  float gap;
+  float control_h;
+  float font_px; /* bitmap font cell size (Phase 1 font is 8px) */
+} SuTheme;
+
+const SuTheme *su_theme_default(void);
+
+/* --- signals (Phase 2 state) --------------------------------------------- */
+
+typedef struct SuSignalInt SuSignalInt;
+typedef struct SuSignalStr SuSignalStr;
+
+SuSignalInt *su_signal_int(int64_t initial);
+void su_signal_int_set(SuSignalInt *s, int64_t v);
+int64_t su_signal_int_get(const SuSignalInt *s);
+void su_signal_int_free(SuSignalInt *s);
+
+SuSignalStr *su_signal_str(const char *initial);
+void su_signal_str_set(SuSignalStr *s, const char *v);
+const char *su_signal_str_get(const SuSignalStr *s);
+void su_signal_str_free(SuSignalStr *s);
+
+/* --- declarative View tree ----------------------------------------------- */
+
+typedef enum SuViewKind {
+  SU_VIEW_TEXT = 1,
+  SU_VIEW_BUTTON,
+  SU_VIEW_TEXT_FIELD,
+  SU_VIEW_COLUMN,
+  SU_VIEW_ROW,
+  SU_VIEW_LIST,
+  SU_VIEW_SCROLL,
+  SU_VIEW_IMAGE,
+  SU_VIEW_ICON,
+  SU_VIEW_LABEL /* Phase 1-shaped toggling bar (hello_ui goldens) */
+} SuViewKind;
+
+typedef struct SuRect {
+  float x, y, w, h;
+} SuRect;
 
 typedef struct SuView SuView;
 typedef struct SuUiSession SuUiSession;
 
-/* Phase 1 minimal Views — Phase 2 adds the real declarative tree. */
+typedef void (*SuViewTapFn)(SuView *self, void *env);
+
+SuView *su_view_text(const char *text);
+SuView *su_view_text_signal_int(SuSignalInt *sig, const char *prefix);
+SuView *su_view_text_signal_str(SuSignalStr *sig);
+
+SuView *su_view_button(const char *label, SuViewTapFn on_tap, void *env);
+SuView *su_view_text_field(SuSignalStr *text, const char *placeholder);
+SuView *su_view_column(void);
+SuView *su_view_row(void);
+SuView *su_view_list(void);
+SuView *su_view_scroll(SuView *child);
+SuView *su_view_image(int w, int h, uint32_t argb, const char *caption);
+SuView *su_view_icon(char glyph, uint32_t argb);
+/* Phase 1 compat: full-bleed bg + bar that toggles colors on tap. */
 SuView *su_view_label(const char *text, uint32_t bg_argb, uint32_t fg_argb);
+
+void su_view_add_child(SuView *parent, SuView *child);
 void su_view_free(SuView *view);
 
-/* Mount root under a runtime. Window shares the session protocol; Phase 1
- * presents offscreen (no OS window yet — see crates/embedder-desktop). */
+SuViewKind su_view_kind(const SuView *view);
+SuRect su_view_frame(const SuView *view);
+
+/* Layout + hit-test (also run inside pump / inject). */
+void su_view_layout(SuView *root, float width, float height, const SuTheme *theme);
+SuView *su_view_hit_test(SuView *root, float x, float y);
+
+/* --- session protocol ---------------------------------------------------- */
+
 SuUiSession *su_ui_mount(const SuUiConfig *cfg, SuView *root);
+/* Transfer View ownership to the session (freed on unmount). */
+void su_ui_session_take_root(SuUiSession *session);
 void su_ui_unmount(SuUiSession *session);
 
-/* Sync helpers (also available as IO via delay thunks). */
 int su_ui_pump_sync(SuUiSession *session);
 int su_ui_inject_sync(SuUiSession *session, const SuInputEvent *event);
 int su_ui_snapshot_png_sync(SuUiSession *session, const char *path);
 int su_ui_snapshot_png_bytes(SuUiSession *session, uint8_t **out, size_t *out_len);
 
-/* IO-shaped session ops (ADR 0004 / 0003). */
 SuIo *su_ui_pump(SuUiSession *session);
 SuIo *su_ui_inject(SuUiSession *session, SuInputEvent event);
 SuIo *su_ui_snapshot_png(SuUiSession *session, const char *path);
@@ -62,11 +139,22 @@ SuIo *su_ui_snapshot_png(SuUiSession *session, const char *path);
 SuUiRuntimeKind su_ui_session_kind(const SuUiSession *session);
 int su_ui_session_width(const SuUiSession *session);
 int su_ui_session_height(const SuUiSession *session);
+SuView *su_ui_session_root(SuUiSession *session);
+const SuTheme *su_ui_session_theme(const SuUiSession *session);
 
-/* Kernel-dialect demo: mount label → pump → optional snapshot → unmount.
- * SCALUI_SNAPSHOT_PATH / SCALUI_UI_GOLDEN env control output path.
- * Returns IO[Unit]. */
+/* IO → UI bridge: post signal writes from completed IO; flushed at pump. */
+void su_ui_bridge_post_int(SuUiSession *session, SuSignalInt *sig, int64_t value);
+void su_ui_bridge_post_str(SuUiSession *session, SuSignalStr *sig, const char *value);
+void su_ui_bridge_flush(SuUiSession *session);
+
+/* --- kernel dialect demos (Stage 0) -------------------------------------- */
+
+/* Mount label → pump → optional tap/snapshot → unmount. */
 SuIo *su_ui_run_headless_label(const char *text, int width, int height);
+/* Counter: Text + Button; tap increments. Optional IO bridge hop demo. */
+SuIo *su_ui_run_counter(int width, int height);
+/* Todo: TextField + List; load/save via IO Resource. */
+SuIo *su_ui_run_todo(int width, int height);
 
 #ifdef __cplusplus
 }

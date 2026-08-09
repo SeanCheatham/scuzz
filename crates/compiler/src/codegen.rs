@@ -19,6 +19,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @su_io_delay(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @su_io_flatmap(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @su_ui_run_headless_label(ptr, i32, i32)").unwrap();
+    writeln!(out, "declare ptr @su_ui_run_counter(i32, i32)").unwrap();
+    writeln!(out, "declare ptr @su_ui_run_todo(i32, i32)").unwrap();
     writeln!(out, "declare i32 @su_runtime_main(ptr)").unwrap();
     writeln!(out).unwrap();
 
@@ -82,7 +84,7 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
             collect_strings(inner, out);
             collect_strings(body, out);
         }
-        Expr::IoDelayUnit | Expr::Unit => {}
+        Expr::IoDelayUnit | Expr::Unit | Expr::UiRunCounter | Expr::UiRunTodo => {}
     }
 }
 
@@ -156,6 +158,30 @@ fn emit_expr(
             writeln!(
                 code,
                 "  %{prefix}_io = call ptr @su_ui_run_headless_label(ptr %{prefix}_sptr, i32 0, i32 0)"
+            )
+            .unwrap();
+            Emitted {
+                code,
+                value: format!("%{prefix}_io"),
+            }
+        }
+        Expr::UiRunCounter => {
+            let mut code = String::new();
+            writeln!(
+                code,
+                "  %{prefix}_io = call ptr @su_ui_run_counter(i32 0, i32 0)"
+            )
+            .unwrap();
+            Emitted {
+                code,
+                value: format!("%{prefix}_io"),
+            }
+        }
+        Expr::UiRunTodo => {
+            let mut code = String::new();
+            writeln!(
+                code,
+                "  %{prefix}_io = call ptr @su_ui_run_todo(i32 0, i32 0)"
             )
             .unwrap();
             Emitted {

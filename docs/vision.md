@@ -51,7 +51,7 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 - ADRs: GC v0, Skia acquisition, IO error model, `Ui` vs `View` boundary, kernel dialect for self-host
 - CI on headless Linux from day one
 
-### Phase 1 — `Ui` effect + Headless backend first ✅ (current)
+### Phase 1 — `Ui` effect + Headless backend first ✅
 
 - Skia-shaped offscreen (`sk_capi` + CPU software backend) + `UiRuntime.Headless`: `mount` / `pump` / `inject` / `snapshot`
 - Golden PNG under `scalui test`; `scalui run --headless` works with no display
@@ -59,13 +59,13 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 - Rule: no feature may land Window-only without a Headless path
 - Kernel builtin: `Ui.runHeadless`; example `examples/hello_ui` + goldens
 
-### Phase 2 — Declarative UI core
+### Phase 2 — Declarative UI core ✅ (current)
 
-- Element tree, state/signals, layout, hit testing
-- Theme tokens + core widgets (`Text`, `Button`, `TextField`, `List`, `Scroll`, `Image`, `Icon`, …)
-- Bridge: signal updates from completed `IO`; UI-thread hop
-- Examples: Counter + Todo (Todo loads/saves via `IO` + `Resource`)
-- Views stay backend-agnostic under the `Ui` effect
+- Element tree, state/signals, layout, hit testing in `crates/runtime` (Views stay backend-agnostic under `Ui`)
+- Theme tokens + core widgets: `Text`, `Button`, `TextField`, `List`, `Scroll`, `Image`, `Icon` (+ `Label`)
+- Bridge: completed `IO` posts signal writes; `pump` flushes them (UI-thread hop on the single-threaded loop)
+- Examples: `examples/counter`, `examples/todo` (Todo load/save via `IO` + `Resource`) + goldens
+- Kernel builtins: `Ui.runCounter`, `Ui.runTodo` (demos drive the View tree until the language can express widgets)
 
 ### Phase 3 — Language, effects stdlib, tooling
 

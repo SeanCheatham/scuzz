@@ -1,0 +1,12 @@
+[package]
+name = "counter"
+version = "0.1.0"
+
+[targets.native]
+kind = "executable"
+main = "Main"
+
+[ui]
+default_runtime = "headless"
+headless_size = [200, 120]
+headless_scale = 1.0

@@ -176,7 +176,7 @@ main = "Main"
 
 [ui]
 default_runtime = "headless"
-headless_size = [200, 100]
+headless_size = [200, 120]
 headless_scale = 1.0
 "#
                     ),
@@ -184,7 +184,7 @@ headless_scale = 1.0
                 std::fs::write(
                     dir.join("src/Main.scala"),
                     r#"@main def main: IO[Unit] =
-  Ui.runHeadless("Hello Headless")
+  Ui.runCounter
 "#,
                 )?;
             } else {
