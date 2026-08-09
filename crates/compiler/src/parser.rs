@@ -668,7 +668,15 @@ impl Parser {
                         }
                         Ok(Expr::UiRunTodo)
                     }
-                    other => Err(ParseError::Msg(format!("unknown Ui.{other}"))),
+                    other => {
+                        let callee = format!("Ui.{other}");
+                        let args = if matches!(self.peek(), Token::LParen) {
+                            self.parse_args()?
+                        } else {
+                            Vec::new()
+                        };
+                        Ok(Expr::Call { callee, args })
+                    }
                 }
             }
             Token::Ident(name) if name == "Effects" => {
@@ -688,7 +696,7 @@ impl Parser {
                 if matches!(
                     name.as_str(),
                     "Str" | "List" | "Fs" | "Sys" | "Lexer" | "Clock" | "Random"
-                        | "Net" | "Impurity"
+                        | "Net" | "Impurity" | "Signal" | "View" | "Todo"
                 ) =>
             {
                 self.bump();

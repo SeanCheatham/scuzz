@@ -87,17 +87,17 @@ def buildRuntime(runtimeDir: String, clang: String): IO[Unit] =
     ).flatMap(_ => IO.pure(()))
   )
 
-/* Shell fragment: force-load desktop embedder + platform libs when archive exists. */
+// Shell fragment: force-load desktop embedder + platform libs when archive exists.
 def embedderLinkFlags(embedder: String): String =
-  str4(
+  str5(
     "$(test -f ",
     embedder,
-    " && case $(uname -s) in Darwin) echo -Wl,-force_load,",
-    str4(
+    " && if [ \"`uname -s`\" = Darwin ]; then echo -Wl,-force_load,",
+    embedder,
+    str3(
+      " -framework Cocoa -lobjc; elif [ \"`uname -s`\" = Linux ]; then echo -Wl,--whole-archive ",
       embedder,
-      " -framework Cocoa -lobjc;; Linux) echo -Wl,--whole-archive ",
-      embedder,
-      " -Wl,--no-whole-archive -lX11;; esac)"
+      " -Wl,--no-whole-archive -lX11; fi)"
     )
   )
 

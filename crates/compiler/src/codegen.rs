@@ -74,6 +74,29 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @su_random_next_int(i64)").unwrap();
     writeln!(out, "declare ptr @su_net_http_get(ptr)").unwrap();
     writeln!(out, "declare ptr @su_impurity_run_kit()").unwrap();
+    writeln!(out, "declare ptr @su_lang_signal_int(i64)").unwrap();
+    writeln!(out, "declare i64 @su_lang_signal_get(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_lang_signal_set(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @su_lang_signal_str(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_lang_view_text(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_lang_view_text_signal(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @su_lang_view_button_inc(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @su_lang_view_column()").unwrap();
+    writeln!(out, "declare ptr @su_lang_view_row()").unwrap();
+    writeln!(out, "declare ptr @su_lang_view_list()").unwrap();
+    writeln!(out, "declare ptr @su_lang_view_scroll(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_lang_view_text_field(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @su_lang_view_icon(i64, i64)").unwrap();
+    writeln!(out, "declare ptr @su_lang_view_image(i64, i64, i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @su_lang_view_add_child(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @su_lang_todo_create()").unwrap();
+    writeln!(out, "declare ptr @su_lang_todo_load(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_lang_todo_draft(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_lang_todo_list_view(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_lang_view_button_todo_add(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @su_lang_view_button_todo_save(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @su_ui_run_view(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_ui_run_view_todo(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @su_box_i64(i64)").unwrap();
     writeln!(out, "declare i64 @su_unbox_i64(ptr)").unwrap();
     writeln!(out, "declare i32 @su_runtime_main_args(ptr, i32, ptr)").unwrap();
@@ -1449,6 +1472,196 @@ fn emit_call(
         }
         "Impurity.runKit" => {
             writeln!(code, "  %{prefix}_v = call ptr @su_impurity_run_kit()").unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Signal.int" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_signal_int(i64 {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Signal.get" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @su_lang_signal_get(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Signal.set" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_signal_set(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Signal.str" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_signal_str(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "View.text" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_view_text(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "View.textSignal" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_view_text_signal(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "View.buttonInc" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_view_button_inc(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "View.column" => {
+            writeln!(code, "  %{prefix}_v = call ptr @su_lang_view_column()").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "View.row" => {
+            writeln!(code, "  %{prefix}_v = call ptr @su_lang_view_row()").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "View.list" => {
+            writeln!(code, "  %{prefix}_v = call ptr @su_lang_view_list()").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "View.scroll" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_view_scroll(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "View.textField" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_view_text_field(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "View.icon" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_view_icon(i64 {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "View.image" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_view_image(i64 {}, i64 {}, i64 {}, ptr {})",
+                emitted_args[0].value,
+                emitted_args[1].value,
+                emitted_args[2].value,
+                emitted_args[3].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "View.addChild" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_view_add_child(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "View.buttonTodoAdd" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_view_button_todo_add(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "View.buttonTodoSave" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_view_button_todo_save(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Todo.create" => {
+            writeln!(code, "  %{prefix}_v = call ptr @su_lang_todo_create()").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Todo.load" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_todo_load(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Todo.draft" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_todo_draft(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Todo.listView" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_todo_list_view(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Ui.run" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_ui_run_view(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Ui.runWithTodo" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_ui_run_view_todo(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         other => {

@@ -388,6 +388,100 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 0)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
+        "Signal.int" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            Ok(Type::Opaque("SignalInt".into()))
+        }
+        "Signal.get" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::Int)
+        }
+        "Signal.set" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(Type::Unit)
+        }
+        "Signal.str" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::Opaque("SignalStr".into()))
+        }
+        "View.text" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::Opaque("View".into()))
+        }
+        "View.textSignal" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            Ok(Type::Opaque("View".into()))
+        }
+        "View.buttonInc" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::Opaque("View".into()))
+        }
+        "View.column" | "View.row" | "View.list" => {
+            expect_arity(callee, &arg_tys, 0)?;
+            Ok(Type::Opaque("View".into()))
+        }
+        "View.scroll" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::Opaque("View".into()))
+        }
+        "View.textField" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            Ok(Type::Opaque("View".into()))
+        }
+        "View.icon" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(Type::Opaque("View".into()))
+        }
+        "View.image" => {
+            expect_arity(callee, &arg_tys, 4)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            expect_ty(&arg_tys[2], &Type::Int)?;
+            expect_ty(&arg_tys[3], &Type::String)?;
+            Ok(Type::Opaque("View".into()))
+        }
+        "View.addChild" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            Ok(Type::Unit)
+        }
+        "View.buttonTodoAdd" | "View.buttonTodoSave" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::Opaque("View".into()))
+        }
+        "Todo.create" => {
+            expect_arity(callee, &arg_tys, 0)?;
+            Ok(Type::Opaque("Todo".into()))
+        }
+        "Todo.load" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
+        "Todo.draft" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::Opaque("SignalStr".into()))
+        }
+        "Todo.listView" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::Opaque("View".into()))
+        }
+        "Ui.run" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
+        "Ui.runWithTodo" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
         _ => {
             let f = funs
                 .get(callee)

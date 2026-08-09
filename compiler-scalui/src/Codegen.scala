@@ -108,7 +108,70 @@ def emitOneStr(s: String, i: Int): String =
   )
 
 def runtimeDeclares(): String =
-  str5("declare ptr @su_string_from_cstr(ptr)\n", "declare ptr @su_string_cstr(ptr)\n", "declare ptr @su_string_concat(ptr, ptr)\n", "declare i64 @su_string_len(ptr)\n", str5("declare ptr @su_string_slice(ptr, i64, i64)\n", "declare i32 @su_string_eq(ptr, ptr)\n", "declare i64 @su_string_char_at(ptr, i64)\n", "declare ptr @su_string_from_int(i64)\n", str5("declare i64 @su_string_index_of(ptr, ptr)\n", "declare ptr @su_io_println(ptr)\n", "declare ptr @su_io_pure(ptr)\n", "declare ptr @su_io_delay(ptr, ptr)\n", str5("declare ptr @su_io_flatmap(ptr, ptr, ptr)\n", "declare ptr @su_io_fail_cstr(ptr)\n", "declare ptr @su_io_sleep_ms(i64)\n", "declare ptr @su_io_handle_error_with(ptr, ptr, ptr)\n", str5("declare ptr @su_io_attempt(ptr)\n", "declare ptr @su_io_race(ptr, ptr)\n", "declare ptr @su_io_both(ptr, ptr)\n", "declare ptr @su_adt_new(i32, ptr)\n", str5("declare i32 @su_adt_tag(ptr)\n", "declare ptr @su_lexer_classify(ptr)\n", "declare ptr @su_effects_run_kit()\n", "declare ptr @su_ui_run_headless_label(ptr, i32, i32)\n", str5("declare ptr @su_ui_run_counter(i32, i32)\n", "declare ptr @su_ui_run_live(i32, i32)\n", "declare ptr @su_ui_run_todo(i32, i32)\n", "declare ptr @su_list_nil()\n", "declare i32 @su_list_is_empty(ptr)\n", str5("declare ptr @su_list_cons(ptr, ptr)\n", "declare ptr @su_list_head(ptr)\n", "declare ptr @su_list_tail(ptr)\n", "declare i64 @su_list_len(ptr)\n", str5("declare ptr @su_list_at(ptr, i64)\n", "declare ptr @su_list_reverse(ptr)\n", "declare ptr @su_list_join(ptr, ptr)\n", "declare ptr @su_fs_read(ptr)\n", str5("declare ptr @su_fs_write(ptr, ptr)\n", "declare ptr @su_fs_list(ptr)\n", "declare ptr @su_fs_mkdirs(ptr)\n", "declare ptr @su_sys_args()\n", str5("declare ptr @su_sys_exec(ptr)\n", "declare ptr @su_sys_getenv(ptr)\n", "declare ptr @su_clock_real_time()\n", "declare ptr @su_clock_monotonic()\n", str5("declare ptr @su_random_next_int(i64)\n", "declare ptr @su_net_http_get(ptr)\n", "declare ptr @su_impurity_run_kit()\n", "declare ptr @su_box_i64(i64)\n", str5("declare i64 @su_unbox_i64(ptr)\n", "declare i32 @su_runtime_main_args(ptr, i32, ptr)\n\n", "", "", "")))))))))))))
+  Str.concat(runtimeDeclaresA(), Str.concat(runtimeDeclaresB(), runtimeDeclaresC()))
+
+def runtimeDeclaresA(): String =
+  str5(
+    "declare ptr @su_string_from_cstr(ptr)\ndeclare ptr @su_string_cstr(ptr)\n",
+    "declare ptr @su_string_concat(ptr, ptr)\ndeclare i64 @su_string_len(ptr)\n",
+    "declare ptr @su_string_slice(ptr, i64, i64)\ndeclare i32 @su_string_eq(ptr, ptr)\n",
+    "declare i64 @su_string_char_at(ptr, i64)\ndeclare ptr @su_string_from_int(i64)\n",
+    str5(
+      "declare i64 @su_string_index_of(ptr, ptr)\ndeclare ptr @su_io_println(ptr)\n",
+      "declare ptr @su_io_pure(ptr)\ndeclare ptr @su_io_delay(ptr, ptr)\n",
+      "declare ptr @su_io_flatmap(ptr, ptr, ptr)\ndeclare ptr @su_io_fail_cstr(ptr)\n",
+      "declare ptr @su_io_sleep_ms(i64)\ndeclare ptr @su_io_handle_error_with(ptr, ptr, ptr)\n",
+      str5(
+        "declare ptr @su_io_attempt(ptr)\ndeclare ptr @su_io_race(ptr, ptr)\n",
+        "declare ptr @su_io_both(ptr, ptr)\ndeclare ptr @su_adt_new(i32, ptr)\n",
+        "declare i32 @su_adt_tag(ptr)\ndeclare ptr @su_lexer_classify(ptr)\n",
+        "declare ptr @su_effects_run_kit()\ndeclare ptr @su_ui_run_headless_label(ptr, i32, i32)\n",
+        "declare ptr @su_ui_run_counter(i32, i32)\ndeclare ptr @su_ui_run_live(i32, i32)\n"
+      )
+    )
+  )
+
+def runtimeDeclaresB(): String =
+  str5(
+    "declare ptr @su_ui_run_todo(i32, i32)\ndeclare ptr @su_list_nil()\n",
+    "declare i32 @su_list_is_empty(ptr)\ndeclare ptr @su_list_cons(ptr, ptr)\n",
+    "declare ptr @su_list_head(ptr)\ndeclare ptr @su_list_tail(ptr)\n",
+    "declare i64 @su_list_len(ptr)\ndeclare ptr @su_list_at(ptr, i64)\n",
+    str5(
+      "declare ptr @su_list_reverse(ptr)\ndeclare ptr @su_list_join(ptr, ptr)\n",
+      "declare ptr @su_fs_read(ptr)\ndeclare ptr @su_fs_write(ptr, ptr)\n",
+      "declare ptr @su_fs_list(ptr)\ndeclare ptr @su_fs_mkdirs(ptr)\n",
+      "declare ptr @su_sys_args()\ndeclare ptr @su_sys_exec(ptr)\n",
+      str5(
+        "declare ptr @su_sys_getenv(ptr)\ndeclare ptr @su_clock_real_time()\n",
+        "declare ptr @su_clock_monotonic()\ndeclare ptr @su_random_next_int(i64)\n",
+        "declare ptr @su_net_http_get(ptr)\ndeclare ptr @su_impurity_run_kit()\n",
+        "declare ptr @su_lang_signal_int(i64)\ndeclare i64 @su_lang_signal_get(ptr)\n",
+        "declare ptr @su_lang_signal_set(ptr, i64)\ndeclare ptr @su_lang_signal_str(ptr)\n"
+      )
+    )
+  )
+
+def runtimeDeclaresC(): String =
+  str5(
+    "declare ptr @su_lang_view_text(ptr)\ndeclare ptr @su_lang_view_text_signal(ptr, ptr)\n",
+    "declare ptr @su_lang_view_button_inc(ptr, ptr)\ndeclare ptr @su_lang_view_column()\n",
+    "declare ptr @su_lang_view_row()\ndeclare ptr @su_lang_view_list()\n",
+    "declare ptr @su_lang_view_scroll(ptr)\ndeclare ptr @su_lang_view_text_field(ptr, ptr)\n",
+    str5(
+      "declare ptr @su_lang_view_icon(i64, i64)\ndeclare ptr @su_lang_view_image(i64, i64, i64, ptr)\n",
+      "declare ptr @su_lang_view_add_child(ptr, ptr)\ndeclare ptr @su_lang_todo_create()\n",
+      "declare ptr @su_lang_todo_load(ptr)\ndeclare ptr @su_lang_todo_draft(ptr)\n",
+      "declare ptr @su_lang_todo_list_view(ptr)\ndeclare ptr @su_lang_view_button_todo_add(ptr, ptr)\n",
+      str5(
+        "declare ptr @su_lang_view_button_todo_save(ptr, ptr)\ndeclare ptr @su_ui_run_view(ptr)\n",
+        "declare ptr @su_ui_run_view_todo(ptr, ptr)\ndeclare ptr @su_box_i64(i64)\n",
+        "declare i64 @su_unbox_i64(ptr)\ndeclare i32 @su_runtime_main_args(ptr, i32, ptr)\n\n",
+        "",
+        ""
+      )
+    )
+  )
 
 def delayThunk(): String =
   "define internal ptr @su_delay_unit_thunk(ptr %env) {\nentry:\n  ret ptr null\n}\n\n"
@@ -789,6 +852,68 @@ def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id:
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_net_http_get(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
   else if (streq(callee, "Impurity.runKit") == 1)
     mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_impurity_run_kit()\n")), str3("%", prefix, "_v"), "io", id, conts)
+  else if (streq(callee, "Signal.int") == 1)
+    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_signal_int(i64 ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "Signal.get") == 1)
+    mkS(str4(code, "  %", prefix, str3("_v = call i64 @su_lang_signal_get(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "int", id, conts)
+  else if (streq(callee, "Signal.set") == 1)
+    mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_signal_set(ptr ", List.at(vals, 0), ", i64 ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "Signal.str") == 1)
+    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_signal_str(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "View.text") == 1)
+    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_view_text(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "View.textSignal") == 1)
+    mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_text_signal(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "View.buttonInc") == 1)
+    mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_button_inc(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "View.column") == 1)
+    mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_lang_view_column()\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "View.row") == 1)
+    mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_lang_view_row()\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "View.list") == 1)
+    mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_lang_view_list()\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "View.scroll") == 1)
+    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_view_scroll(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "View.textField") == 1)
+    mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_text_field(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "View.icon") == 1)
+    mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_icon(i64 ", List.at(vals, 0), ", i64 ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "View.image") == 1)
+    mkS(
+      str4(
+        code,
+        "  %",
+        prefix,
+        str4(
+          "_v = call ptr @su_lang_view_image(i64 ",
+          List.at(vals, 0),
+          str4(", i64 ", List.at(vals, 1), ", i64 ", List.at(vals, 2)),
+          str3(", ptr ", List.at(vals, 3), ")\n")
+        )
+      ),
+      str3("%", prefix, "_v"),
+      "ptr",
+      id,
+      conts
+    )
+  else if (streq(callee, "View.addChild") == 1)
+    mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_add_child(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "View.buttonTodoAdd") == 1)
+    mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_button_todo_add(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "View.buttonTodoSave") == 1)
+    mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_button_todo_save(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "Todo.create") == 1)
+    mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_lang_todo_create()\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "Todo.load") == 1)
+    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_todo_load(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
+  else if (streq(callee, "Todo.draft") == 1)
+    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_todo_draft(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "Todo.listView") == 1)
+    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_todo_list_view(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "Ui.run") == 1)
+    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_ui_run_view(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
+  else if (streq(callee, "Ui.runWithTodo") == 1)
+    mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_ui_run_view_todo(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
   else if (streq(callee, "Ui.runHeadless") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_ui_run_headless_label(ptr ", List.at(vals, 0), ", i32 0, i32 0)\n")), str3("%", prefix, "_v"), "io", id, conts)
   else if (streq(callee, "Ui.runCounter") == 1)

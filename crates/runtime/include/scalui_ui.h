@@ -205,6 +205,39 @@ void su_ui_bridge_post_int(SuUiSession *session, SuSignalInt *sig, int64_t value
 void su_ui_bridge_post_str(SuUiSession *session, SuSignalStr *sig, const char *value);
 void su_ui_bridge_flush(SuUiSession *session);
 
+/* --- language-facing View / Signal / Todo (ScalUI-authored UI) ----------- */
+
+typedef struct SuTodo SuTodo;
+
+SuSignalInt *su_lang_signal_int(int64_t initial);
+int64_t su_lang_signal_get(SuSignalInt *s);
+void *su_lang_signal_set(SuSignalInt *s, int64_t v);
+SuSignalStr *su_lang_signal_str(SuString *initial);
+void *su_lang_signal_str_set(SuSignalStr *s, SuString *v);
+
+SuView *su_lang_view_text(SuString *text);
+SuView *su_lang_view_text_signal(SuSignalInt *sig, SuString *prefix);
+SuView *su_lang_view_button_inc(SuString *label, SuSignalInt *sig);
+SuView *su_lang_view_column(void);
+SuView *su_lang_view_row(void);
+SuView *su_lang_view_list(void);
+SuView *su_lang_view_scroll(SuView *child);
+SuView *su_lang_view_text_field(SuSignalStr *text, SuString *placeholder);
+SuView *su_lang_view_icon(int64_t glyph, int64_t argb);
+SuView *su_lang_view_image(int64_t w, int64_t h, int64_t argb, SuString *caption);
+void *su_lang_view_add_child(SuView *parent, SuView *child);
+
+SuTodo *su_lang_todo_create(void);
+SuIo *su_lang_todo_load(SuTodo *todo);
+SuSignalStr *su_lang_todo_draft(SuTodo *todo);
+SuView *su_lang_todo_list_view(SuTodo *todo);
+SuView *su_lang_view_button_todo_add(SuString *label, SuTodo *todo);
+SuView *su_lang_view_button_todo_save(SuString *label, SuTodo *todo);
+
+/* Mount prebuilt root → pump → optional scripted tap → snapshot → unmount. */
+SuIo *su_ui_run_view(SuView *root);
+SuIo *su_ui_run_view_todo(SuView *root, SuTodo *todo);
+
 /* --- kernel dialect demos (Stage 0) -------------------------------------- */
 
 /* Mount label → pump → optional tap/snapshot → unmount. */

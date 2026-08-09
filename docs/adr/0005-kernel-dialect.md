@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (Phase 0; expanded Phase 3; expanded Phase 4; impurity builtins Phase 6)
+Accepted (Phase 0; expanded Phase 3; expanded Phase 4; impurity builtins Phase 6; View/Signal language surface post–Phase 6)
 
 ## Context
 
@@ -23,7 +23,8 @@ Document a **kernel dialect**: the subset used by compiler sources and bootstrap
 - Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
 - Ops: int arithmetic/compare, `&&`/`||`, string `+`
 - Builtins: `Str.*`, `List.*`, `Fs.read`/`write`/`list`/`mkdirs`, `Sys.args`/`exec`/`getenv`,
-  `Clock.realTime`/`monotonic`, `Random.nextInt`, `Net.httpGet`
+  `Clock.realTime`/`monotonic`, `Random.nextInt`, `Net.httpGet`,
+  `Signal.*`, `View.*`, `Todo.*`, `Ui.run` / `Ui.runWithTodo`
 - Calls: `IO.println`/`delay`/`sleep`/`fail`/`pure`/`race`/`both`, `.flatMap(x => …)` (bound or `_`), `.handleErrorWith`, `.attempt`
 - Phase 1–6 demos (Stage 0): `Ui.runHeadless` / `runCounter` / `runLive` / `runTodo`, `Effects.runKit`, `Impurity.runKit`, `Lexer.classify`
 - Multi-file `src/**/*.scala` units merged per package

@@ -1,3 +1,12 @@
-// ScalUI Phase 2 — Counter (signals + Button, Headless)
+// ScalUI Counter — View tree expressed in ScalUI (Signal + View + Ui.run)
 @main def main: IO[Unit] =
-  Ui.runCounter
+  val count = Signal.int(0)
+  val root = View.column()
+  val a = View.addChild(root, View.text("Counter"))
+  val b = View.addChild(root, View.textSignal(count, "count = "))
+  val row = View.row()
+  val c = View.addChild(row, View.buttonInc("+1", count))
+  val d = View.addChild(row, View.icon(43, 4279511120))
+  val e = View.addChild(row, View.image(24, 24, 4282220198, ""))
+  val f = View.addChild(root, row)
+  Ui.run(root)

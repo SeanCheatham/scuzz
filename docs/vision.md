@@ -95,7 +95,7 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 - `scalui package` emits `build/package/{host,android,ios}/`
 - Same examples run unmodified (`SCALUI_UI_RUNTIME=mobile`)
 
-### Phase 6 — Productize ✅ (current)
+### Phase 6 — Productize ✅
 
 - Design-language polish: theme `accent` / `disabled` / `radius` (default radius 0 keeps prior goldens)
 - Animation v0: `SuAnimFloat` lerp ticked on `pump` via monotonic `Clock` dt
@@ -109,6 +109,14 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
   - `TestRuntime` fakes: clock, seeded RNG, mem FS, stubbed network (`su_testrt_install` / `SCALUI_TESTRT=1`)
   - Kernel demo `Impurity.runKit`; examples `examples/clock`, `examples/impurity`
   - Discipline: new impurity only through blessed modules — no app-level OS thunks via `IO.delay`
+
+## Current focus — v0 app path (post–Phase 6)
+
+Close the **v0 success bar** before more platform breadth:
+
+- ScalUI-authored widget trees: `Signal.*` / `View.*` / `Ui.run` / `Ui.runWithTodo` (Counter + Todo examples; `scalui new --ui`)
+- Stage-1 product CLI surface: `test` / `fmt` / `watch` / `new` / `package` alongside `build`/`run`
+- Keep dialect expansion ruthless (ADR 0005); defer Windows / device NDK / Impeller / GC revisit
 
 ## Risks and deliberate bets
 

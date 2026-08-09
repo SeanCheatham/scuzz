@@ -204,7 +204,14 @@ bundle_id = "dev.scalui.{package_name}"
                 std::fs::write(
                     dir.join("src/Main.scala"),
                     r#"@main def main: IO[Unit] =
-  Ui.runCounter
+  val count = Signal.int(0)
+  val root = View.column()
+  val a = View.addChild(root, View.text("Counter"))
+  val b = View.addChild(root, View.textSignal(count, "count = "))
+  val row = View.row()
+  val c = View.addChild(row, View.buttonInc("+1", count))
+  val d = View.addChild(root, row)
+  Ui.run(root)
 "#,
                 )?;
             } else {
