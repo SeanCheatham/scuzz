@@ -248,11 +248,19 @@ fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
         .as_ref()
         .map(|u| u.default_runtime.as_str())
         .unwrap_or("");
-    // Only force Headless UI env for `--headless` or packages that declare `[ui]`.
-    let use_headless =
-        headless || default_rt.eq_ignore_ascii_case("headless");
-    let use_mobile = !headless && default_rt.eq_ignore_ascii_case("mobile");
-    let use_window = !headless && manifest.ui.is_some() && !use_mobile;
+    // Prefer CLI `--headless`, then inherited SCALUI_UI_RUNTIME, then [ui].default_runtime.
+    let env_rt = std::env::var("SCALUI_UI_RUNTIME").unwrap_or_default();
+    let effective = if headless {
+        "headless".to_string()
+    } else if !env_rt.is_empty() {
+        env_rt
+    } else {
+        default_rt.to_string()
+    };
+    let use_headless = effective.eq_ignore_ascii_case("headless");
+    let use_mobile = effective.eq_ignore_ascii_case("mobile");
+    let use_window = effective.eq_ignore_ascii_case("window")
+        || (!use_headless && !use_mobile && manifest.ui.is_some());
 
     let out = build(path, &out_dir.to_path_buf(), true)?;
     let mut cmd = Command::new(&out.executable);
@@ -276,12 +284,13 @@ fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
         }
         eprintln!("scalui run → UiRuntime.Mobile (host shell)");
     } else if use_window {
-        // Window peer + optional X11 embedder when DISPLAY is set.
+        // Window peer + desktop embedder (X11 / Cocoa) when available.
         cmd.env("SCALUI_UI_RUNTIME", "window");
         if let Some(ui) = &manifest.ui {
             cmd.env("SCALUI_UI_WIDTH", ui.width().to_string());
             cmd.env("SCALUI_UI_HEIGHT", ui.height().to_string());
         }
+        eprintln!("scalui run → UiRuntime.Window (desktop embedder)");
     }
     let status = cmd
         .status()

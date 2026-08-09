@@ -87,7 +87,21 @@ def buildRuntime(runtimeDir: String, clang: String): IO[Unit] =
     ).flatMap(_ => IO.pure(()))
   )
 
-def linkCmd(clang: String, ll: String, lib: String, skia: String, inc: String, skInc: String, exe: String): String =
+/* Shell fragment: force-load desktop embedder + platform libs when archive exists. */
+def embedderLinkFlags(embedder: String): String =
+  str4(
+    "$(test -f ",
+    embedder,
+    " && case $(uname -s) in Darwin) echo -Wl,-force_load,",
+    str4(
+      embedder,
+      " -framework Cocoa -lobjc;; Linux) echo -Wl,--whole-archive ",
+      embedder,
+      " -Wl,--no-whole-archive -lX11;; esac)"
+    )
+  )
+
+def linkCmd(clang: String, ll: String, lib: String, skia: String, inc: String, skInc: String, embedder: String, exe: String): String =
   str4(
     clang,
     " ",
@@ -100,7 +114,12 @@ def linkCmd(clang: String, ll: String, lib: String, skia: String, inc: String, s
         skia,
         " -I",
         inc,
-        str4(" -I", skInc, " -o ", exe)
+        str4(
+          " -I",
+          skInc,
+          " ",
+          str4(embedderLinkFlags(embedder), " -o ", exe, "")
+        )
       )
     )
   )
@@ -141,10 +160,11 @@ def compileAfterSources(projectDir: String, outDir: String, doRun: Int, runtimeD
   val skia = pathJoin(ffi, "build/libsk_capi.a")
   val inc = pathJoin(runtimeDir, "include")
   val skInc = pathJoin(ffi, "include")
+  val embedder = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-desktop"), "build/libscalui_embedder.a")
   Fs.mkdirs(outDir).flatMap(_ =>
     Fs.write(ll, ir).flatMap(_ =>
       buildRuntime(runtimeDir, clang).flatMap(_ =>
-        Sys.exec(linkCmd(clang, ll, lib, skia, inc, skInc, exe)).flatMap(_ =>
+        Sys.exec(linkCmd(clang, ll, lib, skia, inc, skInc, embedder, exe)).flatMap(_ =>
           runIfNeeded(exe, doRun)
         )
       )

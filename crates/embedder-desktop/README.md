@@ -2,13 +2,22 @@
 
 OS window presentation for `UiRuntime.Window`. Headless remains the CI peer.
 
-## Linux (X11)
+`libscalui_embedder.a` opens a native window and blits RGBA frames after `pump`.
+Linked by Stage 0 / Stage 1 when present.
 
-`libscalui_embedder.a` opens a simple X11 window and blits RGBA frames after `pump`.
-Linked by Stage 0 when present (`-lX11`).
+## Linux (X11)
 
 - Requires `DISPLAY` (use `xvfb-run` in CI)
 - Press `q` / Escape to close during `present`
 - Without `DISPLAY`, Window stays offscreen
+- Link: `-lX11`
 
-Build is Linux-only (`uname`); macOS/Windows Window presenters deferred — same session protocol.
+## macOS (Cocoa)
+
+- Requires a GUI session (main display); otherwise Window stays offscreen
+- Press `q` / Escape to close during `present`
+- Link: `-framework Cocoa -lobjc`
+
+## Other hosts
+
+Build is skipped (`uname`); Headless/Mobile still work. Windows presenter deferred — same session protocol.

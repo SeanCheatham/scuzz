@@ -74,7 +74,7 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 - Expand subset: `package`, multi-file modules, nullary `enum` ADTs, `match`, local `val`
 - Blessed effects kit (concurrency / resource slice): `Resource` (releases on failure), `Ref`, `Deferred`, `Queue`, `handleErrorWith` / `attempt`, `sleep`, `race` / `both` — kernel demo `Effects.runKit`
 - Incremental compile (fingerprint cache), `scalui watch` / `run --watch`, `scalui fmt`, basic `scalui lsp`
-- Linux X11 embedder for `UiRuntime.Window` (`crates/embedder-desktop`); Headless remains CI default
+- Linux X11 / macOS Cocoa embedder for `UiRuntime.Window` (`crates/embedder-desktop`); Headless remains CI default
 - ScalUI parser bootstrap under `compiler-scalui/` (seed for Phase 4)
 
 ### Phase 4 — Self-host ✅
