@@ -57,6 +57,9 @@ enum Commands {
     Test {
         #[arg(default_value = ".")]
         path: PathBuf,
+        /// Rewrite / seed goldens from Headless snapshots
+        #[arg(long)]
+        update: bool,
     },
     /// Format ScalUI sources under src/
     Fmt {
@@ -123,7 +126,7 @@ fn real_main() -> Result<ExitCode> {
             run_once(&path, &out_dir, headless)
         }
         Commands::Watch { path, out_dir } => watch_build(&path, &out_dir),
-        Commands::Test { path } => {
+        Commands::Test { path, update } => {
             let runtime = find_runtime_dir(&std::env::current_dir()?)?;
             let status = Command::new("make")
                 .arg("-C")
@@ -155,7 +158,7 @@ fn real_main() -> Result<ExitCode> {
             if project_dir.join("scalui.toml").is_file() {
                 let out = build(&path, &PathBuf::from("build"), false)?;
                 eprintln!("project compile smoke ok");
-                run_goldens(&project_dir, &out.executable)?;
+                run_goldens(&project_dir, &out.executable, update)?;
             }
             eprintln!("scalui test ok");
             Ok(ExitCode::SUCCESS)
@@ -214,6 +217,10 @@ bundle_id = "dev.scalui.{package_name}"
   Ui.run(root)
 "#,
                 )?;
+                eprintln!(
+                    "created {} (ui) — next: scalui test (seeds goldens) && scalui run --headless",
+                    dir.display()
+                );
             } else {
                 std::fs::write(
                     dir.join("scalui.toml"),
@@ -234,8 +241,8 @@ main = "Main"
   IO.println("Hello, ScalUI!").flatMap(_ => IO.println("Phase 0 online."))
 "#,
                 )?;
+                eprintln!("created {}", dir.display());
             }
-            eprintln!("created {}", dir.display());
             Ok(ExitCode::SUCCESS)
         }
         Commands::Package {
@@ -410,53 +417,80 @@ fn apply_ui_env(
     }
 }
 
-fn run_goldens(project_dir: &Path, exe: &Path) -> Result<()> {
+fn run_goldens(project_dir: &Path, exe: &Path, update: bool) -> Result<()> {
     let goldens = project_dir.join("goldens");
     if !goldens.is_dir() {
         return Ok(());
     }
     let manifest = load_manifest(&project_dir.join("scalui.toml"))?;
-    let mut ran = 0usize;
+    let name = manifest.package.name.as_str();
+    let out_dir = exe.parent().unwrap_or(Path::new("."));
+
+    let mut pngs: Vec<PathBuf> = Vec::new();
     for entry in std::fs::read_dir(&goldens)? {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("png") {
-            continue;
+        if path.extension().and_then(|e| e.to_str()) == Some("png") {
+            pngs.push(path);
         }
+    }
+    pngs.sort();
+
+    if pngs.is_empty() {
+        let base = goldens.join(format!("{name}.png"));
+        let tap = goldens.join(format!("{name}_after_tap.png"));
+        capture_golden(exe, &manifest, &base, false)?;
+        capture_golden(exe, &manifest, &tap, true)?;
+        eprintln!("seeded goldens: {}.png {}_after_tap.png", name, name);
+        return Ok(());
+    }
+
+    for path in pngs {
         let stem = path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("golden");
         let tap = stem.ends_with("_after_tap");
-        let out_dir = exe.parent().unwrap_or(Path::new("."));
         let actual = out_dir.join(format!("{stem}.actual.png"));
-        let mut cmd = Command::new(exe);
-        apply_ui_env(&mut cmd, &manifest, &actual, tap);
-        let status = cmd
-            .status()
-            .with_context(|| format!("running golden {stem}"))?;
-        if !status.success() {
-            bail!("golden {stem}: executable failed");
+        capture_golden(exe, &manifest, &actual, tap)?;
+        if update {
+            std::fs::copy(&actual, &path)
+                .with_context(|| format!("updating golden {}", path.display()))?;
+            eprintln!("golden updated: {stem}");
+        } else {
+            let expected = std::fs::read(&path)?;
+            let got = std::fs::read(&actual)?;
+            if expected != got {
+                bail!(
+                    "golden mismatch: {} vs {} ({} vs {} bytes); re-run with --update to accept",
+                    path.display(),
+                    actual.display(),
+                    expected.len(),
+                    got.len()
+                );
+            }
+            eprintln!("golden ok: {stem}");
         }
-        if !actual.is_file() {
-            bail!("golden {stem}: missing actual snapshot {}", actual.display());
-        }
-        let expected = std::fs::read(&path)?;
-        let got = std::fs::read(&actual)?;
-        if expected != got {
-            bail!(
-                "golden mismatch: {} vs {} ({} vs {} bytes)",
-                path.display(),
-                actual.display(),
-                expected.len(),
-                got.len()
-            );
-        }
-        eprintln!("golden ok: {stem}");
-        ran += 1;
     }
-    if ran == 0 {
-        eprintln!("note: goldens/ present but no .png files");
+    Ok(())
+}
+
+fn capture_golden(
+    exe: &Path,
+    manifest: &scalui_compiler::manifest::Manifest,
+    snapshot: &Path,
+    tap: bool,
+) -> Result<()> {
+    let mut cmd = Command::new(exe);
+    apply_ui_env(&mut cmd, manifest, snapshot, tap);
+    let status = cmd
+        .status()
+        .with_context(|| format!("running golden {}", snapshot.display()))?;
+    if !status.success() {
+        bail!("golden capture failed: {}", snapshot.display());
+    }
+    if !snapshot.is_file() {
+        bail!("golden capture missing snapshot {}", snapshot.display());
     }
     Ok(())
 }

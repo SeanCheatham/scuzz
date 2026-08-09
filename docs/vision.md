@@ -116,6 +116,7 @@ Close the **v0 success bar** before more platform breadth:
 
 - ScalUI-authored widget trees: `Signal.*` / `View.*` / `Ui.run` / `Ui.runWithTodo` (Counter + Todo examples; `scalui new --ui`)
 - Stage-1 product CLI surface: `test` / `fmt` / `watch` / `new` / `package` alongside `build`/`run`
+- Happy path: `./scripts/install.sh` → `scalui new --ui` → `scalui test` (seeds goldens) → `scalui run --headless`
 - Keep dialect expansion ruthless (ADR 0005); defer Windows / device NDK / Impeller / GC revisit
 
 ## Risks and deliberate bets

@@ -57,10 +57,23 @@ def partitionSourcesOne(name: String, rest: List, others: List, mains: List): Li
 
 def resolveRuntimeEnv(env: String, projectDir: String): IO[String] =
   if (Str.len(env) > 0) IO.pure(env)
-  else findRuntimeFrom(projectDir, 8)
+  else Sys.getenv("SCALUI_HOME").flatMap(home =>
+    if (Str.len(home) > 0) IO.pure(pathJoin(home, "crates/runtime"))
+    else tryFindRuntime(projectDir).handleErrorWith(_ =>
+      Sys.getenv("PWD").flatMap(pwd =>
+        if (Str.len(pwd) > 0) tryFindRuntime(pwd)
+        else IO.fail("could not find crates/runtime (set SCALUI_HOME or SCALUI_RUNTIME)")
+      )
+    )
+  )
+
+def tryFindRuntime(start: String): IO[String] =
+  findRuntimeFrom(start, 8).flatMap(dir =>
+    Fs.read(pathJoin(dir, "include/scalui_rt.h")).flatMap(_ => IO.pure(dir))
+  )
 
 def findRuntimeFrom(dir: String, fuel: Int): IO[String] =
-  if (fuel <= 0) IO.pure(pathJoin(dir, "crates/runtime"))
+  if (fuel <= 0) IO.fail("could not find crates/runtime")
   else
     Fs.read(pathJoin(pathJoin(dir, "crates/runtime"), "include/scalui_rt.h")).flatMap(_ =>
       IO.pure(pathJoin(dir, "crates/runtime"))
@@ -68,6 +81,12 @@ def findRuntimeFrom(dir: String, fuel: Int): IO[String] =
 
 def clangOrDefault(env: String): String =
   if (Str.len(env) > 0) env else "clang"
+
+def execOk(cmd: String): IO[Unit] =
+  Sys.exec(cmd).flatMap(code =>
+    if (code == 0) IO.pure(())
+    else IO.fail(str3("exec failed (", Str.fromInt(code), str3("): ", cmd, "")))
+  )
 
 def readSources(srcDir: String, names: List, acc: List): IO[List] =
   if (List.isEmpty(names) == 1) IO.pure(List.reverse(acc))
@@ -81,10 +100,10 @@ def mergeSources(texts: List, acc: List): List =
   else mergeSources(List.tail(texts), mergeProg(acc, parseSource(List.head(texts))))
 
 def buildRuntime(runtimeDir: String, clang: String): IO[Unit] =
-  Sys.exec(str4("make -C ", runtimeDir, " lib CC=", clang)).flatMap(_ =>
-    Sys.exec(
+  execOk(str4("make -C ", runtimeDir, " lib CC=", clang)).flatMap(_ =>
+    execOk(
       str4("make -C ", pathJoin(parentDir(runtimeDir), "embedder-desktop"), " lib CC=", clang)
-    ).flatMap(_ => IO.pure(()))
+    )
   )
 
 // Shell fragment: force-load desktop embedder + platform libs when archive exists.
@@ -125,7 +144,7 @@ def linkCmd(clang: String, ll: String, lib: String, skia: String, inc: String, s
   )
 
 def runIfNeeded(exe: String, doRun: Int): IO[Unit] =
-  if (doRun == 1) Sys.exec(exe).flatMap(_ => IO.pure(()))
+  if (doRun == 1) execOk(exe)
   else IO.pure(())
 
 def compileProject(projectDir: String, outDir: String, doRun: Int): IO[Unit] =
@@ -164,7 +183,7 @@ def compileAfterSources(projectDir: String, outDir: String, doRun: Int, runtimeD
   Fs.mkdirs(outDir).flatMap(_ =>
     Fs.write(ll, ir).flatMap(_ =>
       buildRuntime(runtimeDir, clang).flatMap(_ =>
-        Sys.exec(linkCmd(clang, ll, lib, skia, inc, skInc, embedder, exe)).flatMap(_ =>
+        execOk(linkCmd(clang, ll, lib, skia, inc, skInc, embedder, exe)).flatMap(_ =>
           runIfNeeded(exe, doRun)
         )
       )

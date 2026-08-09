@@ -79,6 +79,22 @@ jobs:
           test -f examples/todo/build/snapshot.png
           cargo run -p scalui -- test examples/todo
 
+      - name: v0 new --ui happy path
+        run: |
+          rm -rf /tmp/scalui-v0app
+          cargo run -p scalui -- new --ui --path /tmp scalui-v0app
+          cargo run -p scalui -- test /tmp/scalui-v0app
+          test -f /tmp/scalui-v0app/goldens/scalui-v0app.png
+          test -f /tmp/scalui-v0app/goldens/scalui-v0app_after_tap.png
+          cargo run -p scalui -- test /tmp/scalui-v0app
+          cargo run -p scalui -- run --headless /tmp/scalui-v0app
+          test -f /tmp/scalui-v0app/build/snapshot.png
+          /tmp/stage1-scalui new --ui --path /tmp scalui-v0s1
+          /tmp/stage1-scalui test /tmp/scalui-v0s1
+          test -f /tmp/scalui-v0s1/goldens/scalui-v0s1.png
+          /tmp/stage1-scalui run --headless /tmp/scalui-v0s1
+          test -f /tmp/scalui-v0s1/build/snapshot.png
+
       - name: Window peer + X11 embedder (xvfb)
         run: |
           xvfb-run -a env SCALUI_UI_RUNTIME=window SCALUI_UI_WIDTH=200 SCALUI_UI_HEIGHT=100 \
