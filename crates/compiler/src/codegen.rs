@@ -580,10 +580,11 @@ fn emit_expr(
             val_emitted(String::new(), val, kind)
         }
         Expr::Let { name, value, body } => {
-            let ve = emit_expr(value, ctx, locals, &format!("{prefix}_lv"));
+            // Nested vals must not reuse the same LLVM name prefix.
+            let ve = emit_expr(value, ctx, locals, &format!("{prefix}_lv_{name}"));
             let mut code = ve.code;
             locals.insert(name.clone(), (ve.value.clone(), ve.kind));
-            let be = emit_expr(body, ctx, locals, prefix);
+            let be = emit_expr(body, ctx, locals, &format!("{prefix}_l_{name}"));
             locals.remove(name);
             code.push_str(&be.code);
             Emitted {
@@ -610,6 +611,9 @@ fn emit_expr(
             };
             let then_l = format!("{prefix}_then_{id}");
             let else_l = format!("{prefix}_else_{id}");
+            // Join blocks so nested if/match inside a branch are valid PHI preds.
+            let then_join = format!("{prefix}_tj_{id}");
+            let else_join = format!("{prefix}_ej_{id}");
             let merge = format!("{prefix}_merge_{id}");
             writeln!(
                 code,
@@ -625,11 +629,15 @@ fn emit_expr(
             writeln!(code, "{then_l}:").unwrap();
             let te = emit_expr(then_branch, ctx, locals, &format!("{prefix}_t{id}"));
             code.push_str(&te.code);
+            writeln!(code, "  br label %{then_join}").unwrap();
+            writeln!(code, "{then_join}:").unwrap();
             writeln!(code, "  br label %{merge}").unwrap();
 
             writeln!(code, "{else_l}:").unwrap();
             let ee = emit_expr(else_branch, ctx, locals, &format!("{prefix}_e{id}"));
             code.push_str(&ee.code);
+            writeln!(code, "  br label %{else_join}").unwrap();
+            writeln!(code, "{else_join}:").unwrap();
             writeln!(code, "  br label %{merge}").unwrap();
 
             let kind = te.kind;
@@ -641,7 +649,7 @@ fn emit_expr(
             writeln!(code, "{merge}:").unwrap();
             writeln!(
                 code,
-                "  %{prefix}_phi = phi {ty} [ {}, %{then_l} ], [ {}, %{else_l} ]",
+                "  %{prefix}_phi = phi {ty} [ {}, %{then_join} ], [ {}, %{else_join} ]",
                 te.value, ee.value
             )
             .unwrap();

@@ -5,6 +5,11 @@ package scalui.compiler
   val src = "@main def main: IO[Unit] = IO.println(\"x\")"
   val toks = lex(src)
   val prog = parseProgram(toks)
-  IO.println(Str.concat("tokens:", Str.fromInt(List.len(toks)))).flatMap(_ =>
-    IO.println(Str.concat("prog:", exprTag(prog)))
+  val body = exprChild(prog, 2)
+  val msg = str4(
+    "tokens:",
+    Str.fromInt(List.len(toks)),
+    " body:",
+    exprTag(body)
   )
+  IO.println(msg)

@@ -2,16 +2,6 @@ package scalui.compiler
 
 // Stage-1 lexer: source → List of token strings (kernel dialect).
 
-def printable(): String =
-  " !\"#$%&'()*+,-./0123456789:;<=>?@ABCDEFGHIJKLMNOPQRSTUVWXYZ[\\]^_`abcdefghijklmnopqrstuvwxyz{|}~"
-
-def char1(c: Int): String =
-  if (c == 9) "\t"
-  else if (c == 10) "\n"
-  else if (c == 13) "\r"
-  else if (c >= 32) if (c <= 126) Str.slice(printable(), c - 32, c - 31) else "?"
-  else "?"
-
 def skipTrivia(source: String, i: Int): Int =
   if (i >= Str.len(source)) i
   else skipTriviaCont(source, i, Str.charAt(source, i))
@@ -55,13 +45,6 @@ def lexDigitsEnd(source: String, i: Int): Int =
   else if (isDigit(Str.charAt(source, i)) == 1) lexDigitsEnd(source, i + 1)
   else i
 
-def escChar(c: Int): String =
-  if (c == 110) "\n"
-  else if (c == 116) "\t"
-  else if (c == 92) "\\"
-  else if (c == 34) "\""
-  else char1(c)
-
 def readString(source: String, i: Int, acc: String): List =
   if (i >= Str.len(source)) pair(acc, Str.fromInt(i))
   else readStringCont(source, i, acc, Str.charAt(source, i))
@@ -73,7 +56,14 @@ def readStringCont(source: String, i: Int, acc: String, c: Int): List =
 
 def readStringEsc(source: String, i: Int, acc: String): List =
   if (i >= Str.len(source)) pair(acc, Str.fromInt(i))
-  else readString(source, i + 1, Str.concat(acc, escChar(Str.charAt(source, i))))
+  else readStringEscCont(source, i, acc, Str.charAt(source, i))
+
+def readStringEscCont(source: String, i: Int, acc: String, c: Int): List =
+  if (c == 110) readString(source, i + 1, Str.concat(acc, "\n"))
+  else if (c == 116) readString(source, i + 1, Str.concat(acc, "\t"))
+  else if (c == 92) readString(source, i + 1, Str.concat(acc, "\\"))
+  else if (c == 34) readString(source, i + 1, Str.concat(acc, "\""))
+  else readString(source, i + 1, Str.concat(acc, Str.slice(source, i, i + 1)))
 
 def readStringRun(source: String, i: Int, acc: String): List =
   val j = readStringRunEnd(source, i)
