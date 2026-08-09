@@ -43,3 +43,9 @@ jobs:
           cargo run -p scalui -- run --headless examples/hello_ui
           test -f examples/hello_ui/build/snapshot.png
           cargo run -p scalui -- test examples/hello_ui
+          cargo run -p scalui -- run --headless examples/counter
+          test -f examples/counter/build/snapshot.png
+          cargo run -p scalui -- test examples/counter
+          cargo run -p scalui -- run --headless examples/todo
+          test -f examples/todo/build/snapshot.png
+          cargo run -p scalui -- test examples/todo

@@ -12,7 +12,7 @@ Self-host requires the compiler sources to stay inside what Stage 0 can emit unt
 
 Document a **kernel dialect**: the subset used by compiler sources and bootstrap examples.
 
-### Kernel (Stage 0 → Phase 0/1)
+### Kernel (Stage 0 → Phase 0/2)
 
 - Top-level `@main def name: IO[Unit] = expr`
 - `def` / `val` bindings (local vals in later slices)
@@ -20,6 +20,7 @@ Document a **kernel dialect**: the subset used by compiler sources and bootstrap
 - Type syntax: `Unit`, `IO[Unit]`, later `IO[A]` for monomorphic A
 - Calls: `IO.println(str)`, `IO.delay`, `.flatMap(cont)` with simple `_ => expr` or named params as added
 - Phase 1 UI: `Ui.runHeadless(str)` → `IO[Unit]` (runtime drives mount/pump/snapshot; size via env / `scalui.toml` `[ui]`)
+- Phase 2 UI: `Ui.runCounter` / `Ui.runTodo` → `IO[Unit]` (C-side demos over the declarative View tree + signals; Todo uses `Resource` for load/save)
 - No macros, no implicits, no HKT beyond `IO`, no null
 
 ### Expansion rules

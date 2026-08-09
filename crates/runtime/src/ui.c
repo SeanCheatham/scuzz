@@ -6,6 +6,38 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Implemented in view.c */
+int su_view_paint(SuView *root, SkCanvas *canvas, int width, int height,
+                  const SuTheme *theme);
+int su_view_handle_tap(SuView *root, float x, float y);
+int su_view_handle_text(SuView *root, const char *text);
+
+typedef enum {
+  BRIDGE_INT = 1,
+  BRIDGE_STR = 2
+} BridgeKind;
+
+typedef struct BridgeItem {
+  BridgeKind kind;
+  SuSignalInt *sig_int;
+  SuSignalStr *sig_str;
+  int64_t int_value;
+  char *str_value;
+  struct BridgeItem *next;
+} BridgeItem;
+
+struct SuUiSession {
+  SuUiConfig cfg;
+  SuView *root;
+  SkSurface *surface;
+  SkCanvas *canvas;
+  int dirty;
+  int owns_view;
+  const SuTheme *theme;
+  BridgeItem *bridge_head;
+  BridgeItem *bridge_tail;
+};
+
 static char *su_strdup(const char *s) {
   size_t n;
   char *out;
@@ -15,68 +47,6 @@ static char *su_strdup(const char *s) {
   out = (char *)su_alloc(n + 1);
   memcpy(out, s, n + 1);
   return out;
-}
-
-struct SuView {
-  char *text;
-  uint32_t bg_argb;
-  uint32_t fg_argb;
-  int toggled; /* flipped by tap for Phase 1 interaction demo */
-};
-
-struct SuUiSession {
-  SuUiConfig cfg;
-  SuView *root;
-  SkSurface *surface;
-  SkCanvas *canvas;
-  int dirty;
-  int owns_view;
-};
-
-SuView *su_view_label(const char *text, uint32_t bg_argb, uint32_t fg_argb) {
-  SuView *v = (SuView *)su_alloc_zero(sizeof(SuView));
-  v->text = su_strdup(text);
-  v->bg_argb = bg_argb;
-  v->fg_argb = fg_argb;
-  v->toggled = 0;
-  return v;
-}
-
-void su_view_free(SuView *view) {
-  if (!view)
-    return;
-  su_free(view->text);
-  su_free(view);
-}
-
-static int paint_view(SuUiSession *s) {
-  SkPaint *paint;
-  SkColor bg, fg;
-  uint32_t bg_argb, fg_argb;
-  const char *label;
-  float pad = 16.f;
-  float bar_h = 40.f;
-  if (!s || !s->canvas || !s->root)
-    return 0;
-
-  bg_argb = s->root->toggled ? s->root->fg_argb : s->root->bg_argb;
-  fg_argb = s->root->toggled ? s->root->bg_argb : s->root->fg_argb;
-  bg = sk_color_argb(bg_argb);
-  fg = sk_color_argb(fg_argb);
-  label = s->root->text ? s->root->text : "";
-
-  sk_canvas_clear(s->canvas, bg);
-  paint = sk_paint_new();
-  if (!paint)
-    return 0;
-  sk_paint_set_color(paint, fg);
-  sk_canvas_draw_rect(s->canvas, pad, pad, (float)s->cfg.width - pad * 2.f, bar_h,
-                      paint);
-  sk_paint_set_color(paint, bg);
-  sk_canvas_draw_string(s->canvas, label, pad + 8.f, pad + 26.f, paint);
-  sk_paint_delete(paint);
-  s->dirty = 0;
-  return 1;
 }
 
 SuUiSession *su_ui_mount(const SuUiConfig *cfg, SuView *root) {
@@ -97,6 +67,7 @@ SuUiSession *su_ui_mount(const SuUiConfig *cfg, SuView *root) {
     s->cfg.scale = 1.0;
   s->root = root;
   s->owns_view = 0;
+  s->theme = su_theme_default();
   s->surface = sk_surface_make_raster_n32_premul(w, h);
   if (!s->surface) {
     su_free(s);
@@ -105,18 +76,73 @@ SuUiSession *su_ui_mount(const SuUiConfig *cfg, SuView *root) {
   s->canvas = sk_surface_get_canvas(s->surface);
   s->dirty = 1;
   if (cfg->kind == SU_UI_RUNTIME_WINDOW) {
-    /* Phase 1: Window is a peer interpreter on the same protocol. OS window
-     * presentation lands in crates/embedder-desktop; we still paint offscreen
-     * so mount/pump/inject/snapshot work without a display. */
     fprintf(stderr,
             "scalui: UiRuntime.Window mounted (offscreen peer; embedder later)\n");
   }
   return s;
 }
 
+void su_ui_session_take_root(SuUiSession *session) {
+  if (session)
+    session->owns_view = 1;
+}
+
+void su_ui_bridge_post_int(SuUiSession *session, SuSignalInt *sig, int64_t value) {
+  BridgeItem *it;
+  if (!session || !sig)
+    return;
+  it = (BridgeItem *)su_alloc_zero(sizeof(BridgeItem));
+  it->kind = BRIDGE_INT;
+  it->sig_int = sig;
+  it->int_value = value;
+  if (session->bridge_tail)
+    session->bridge_tail->next = it;
+  else
+    session->bridge_head = it;
+  session->bridge_tail = it;
+  session->dirty = 1;
+}
+
+void su_ui_bridge_post_str(SuUiSession *session, SuSignalStr *sig, const char *value) {
+  BridgeItem *it;
+  if (!session || !sig)
+    return;
+  it = (BridgeItem *)su_alloc_zero(sizeof(BridgeItem));
+  it->kind = BRIDGE_STR;
+  it->sig_str = sig;
+  it->str_value = su_strdup(value);
+  if (session->bridge_tail)
+    session->bridge_tail->next = it;
+  else
+    session->bridge_head = it;
+  session->bridge_tail = it;
+  session->dirty = 1;
+}
+
+void su_ui_bridge_flush(SuUiSession *session) {
+  BridgeItem *it, *next;
+  if (!session)
+    return;
+  it = session->bridge_head;
+  session->bridge_head = NULL;
+  session->bridge_tail = NULL;
+  while (it) {
+    next = it->next;
+    if (it->kind == BRIDGE_INT)
+      su_signal_int_set(it->sig_int, it->int_value);
+    else if (it->kind == BRIDGE_STR) {
+      su_signal_str_set(it->sig_str, it->str_value);
+      su_free(it->str_value);
+    }
+    su_free(it);
+    it = next;
+  }
+}
+
 void su_ui_unmount(SuUiSession *session) {
   if (!session)
     return;
+  su_ui_bridge_flush(session);
   if (session->surface)
     sk_surface_unref(session->surface);
   if (session->owns_view)
@@ -127,8 +153,12 @@ void su_ui_unmount(SuUiSession *session) {
 int su_ui_pump_sync(SuUiSession *session) {
   if (!session)
     return 0;
-  if (!paint_view(session))
+  /* UI-thread hop: apply signal writes posted from completed IO. */
+  su_ui_bridge_flush(session);
+  if (!su_view_paint(session->root, session->canvas, session->cfg.width,
+                     session->cfg.height, session->theme))
     return 0;
+  session->dirty = 0;
   return 1;
 }
 
@@ -137,7 +167,13 @@ int su_ui_inject_sync(SuUiSession *session, const SuInputEvent *event) {
     return 0;
   switch (event->kind) {
   case SU_INPUT_TAP:
-    session->root->toggled = !session->root->toggled;
+    if (!su_view_handle_tap(session->root, event->x, event->y))
+      return 0;
+    session->dirty = 1;
+    return 1;
+  case SU_INPUT_TEXT:
+    if (!su_view_handle_text(session->root, event->text))
+      return 0;
     session->dirty = 1;
     return 1;
   case SU_INPUT_RESIZE:
@@ -194,6 +230,7 @@ SuIo *su_ui_pump(SuUiSession *session) {
 typedef struct {
   SuUiSession *session;
   SuInputEvent event;
+  char *text_owned;
 } UiInjectEnv;
 
 static void *thunk_inject(void *env) {
@@ -207,6 +244,11 @@ SuIo *su_ui_inject(SuUiSession *session, SuInputEvent event) {
   UiInjectEnv *e = (UiInjectEnv *)su_alloc(sizeof(UiInjectEnv));
   e->session = session;
   e->event = event;
+  e->text_owned = NULL;
+  if (event.kind == SU_INPUT_TEXT && event.text) {
+    e->text_owned = su_strdup(event.text);
+    e->event.text = e->text_owned;
+  }
   return su_io_delay(thunk_inject, e);
 }
 
@@ -243,72 +285,35 @@ int su_ui_session_height(const SuUiSession *session) {
   return session ? session->cfg.height : 0;
 }
 
-typedef struct {
-  char *text;
-  int width;
-  int height;
-} HeadlessDemoEnv;
+SuView *su_ui_session_root(SuUiSession *session) {
+  return session ? session->root : NULL;
+}
 
-static void *thunk_headless_demo(void *env) {
-  HeadlessDemoEnv *e = (HeadlessDemoEnv *)env;
-  SuUiConfig cfg;
-  SuView *view;
-  SuUiSession *session;
-  const char *snap = getenv("SCALUI_SNAPSHOT_PATH");
-  SuInputEvent tap;
+const SuTheme *su_ui_session_theme(const SuUiSession *session) {
+  return session ? session->theme : su_theme_default();
+}
 
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SU_UI_RUNTIME_HEADLESS;
-  cfg.width = e->width;
-  cfg.height = e->height;
-  if (cfg.width <= 0) {
+/* Shared resolution of headless size from args / env. */
+void su_ui_resolve_headless_size(int *width, int *height, double *scale) {
+  if (*width <= 0) {
     const char *w = getenv("SCALUI_UI_WIDTH");
-    cfg.width = (w && atoi(w) > 0) ? atoi(w) : 200;
+    *width = (w && atoi(w) > 0) ? atoi(w) : 200;
   }
-  if (cfg.height <= 0) {
+  if (*height <= 0) {
     const char *h = getenv("SCALUI_UI_HEIGHT");
-    cfg.height = (h && atoi(h) > 0) ? atoi(h) : 100;
+    *height = (h && atoi(h) > 0) ? atoi(h) : 100;
   }
-  {
+  if (scale) {
     const char *sc = getenv("SCALUI_UI_SCALE");
-    cfg.scale = (sc && atof(sc) > 0.0) ? atof(sc) : 1.0;
+    *scale = (sc && atof(sc) > 0.0) ? atof(sc) : 1.0;
   }
+}
 
-  view = su_view_label(e->text, 0xFF142850u, 0xFFF0F0F0u);
-  session = su_ui_mount(&cfg, view);
-  if (!session)
-    su_panic("headless mount failed");
-  session->owns_view = 1;
-
-  if (!su_ui_pump_sync(session))
-    su_panic("headless pump failed");
-
-  /* Optional scripted interaction for golden-after-tap tests. */
-  if (getenv("SCALUI_UI_TAP")) {
-    memset(&tap, 0, sizeof(tap));
-    tap.kind = SU_INPUT_TAP;
-    tap.x = (float)cfg.width / 2.f;
-    tap.y = (float)cfg.height / 2.f;
-    if (!su_ui_inject_sync(session, &tap) || !su_ui_pump_sync(session))
-      su_panic("headless tap/pump failed");
-  }
-
+void su_ui_demo_finish(SuUiSession *session) {
+  const char *snap = getenv("SCALUI_SNAPSHOT_PATH");
   if (snap && snap[0]) {
     if (!su_ui_snapshot_png_sync(session, snap))
       su_panic("headless snapshot failed");
     fprintf(stderr, "scalui: wrote snapshot %s\n", snap);
   }
-
-  su_ui_unmount(session);
-  su_free(e->text);
-  su_free(e);
-  return NULL;
-}
-
-SuIo *su_ui_run_headless_label(const char *text, int width, int height) {
-  HeadlessDemoEnv *e = (HeadlessDemoEnv *)su_alloc(sizeof(HeadlessDemoEnv));
-  e->text = su_strdup(text ? text : "ScalUI");
-  e->width = width;
-  e->height = height;
-  return su_io_delay(thunk_headless_demo, e);
 }
