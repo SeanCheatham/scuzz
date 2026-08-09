@@ -1,9 +1,13 @@
 # Skia (Phase 1+)
 
-Skia is **not vendored in Phase 0**. See `docs/adr/0002-skia-acquisition.md`.
+Default contributor path does **not** require a Skia tree. ScalUI paints through `crates/ffi-skia` (`sk_capi`), which ships a CPU software backend for Headless CI.
 
-Planned layout:
+To install hosted prebuilts when available:
 
-- Prebuilt static libraries per platform (Linux x64 CPU offscreen first)
-- Thin C ABI under `crates/ffi-skia/`
-- Fetch script (to be added in Phase 1) rather than requiring contributors to build Skia from source
+```bash
+SCALUI_SKIA_URL=https://…/skia-linux-x64-cpu.tar.gz ./scripts/fetch_skia.sh
+```
+
+Layout after fetch: `third_party/skia/prebuilt/<triple>/`.
+
+See `docs/adr/0002-skia-acquisition.md`.

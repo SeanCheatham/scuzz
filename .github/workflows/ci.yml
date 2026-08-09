@@ -19,8 +19,11 @@ jobs:
       - name: Install Rust (stable via rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Runtime IO tests
+      - name: Runtime + UI tests
         run: make -C crates/runtime test CC=clang
+
+      - name: ffi-skia tests
+        run: make -C crates/ffi-skia test CC=clang
 
       - name: Build CLI
         run: cargo build -p scalui
@@ -35,5 +38,8 @@ jobs:
           grep -q "Hello, ScalUI!" /tmp/hello.out
           grep -q "Phase 0 online." /tmp/hello.out
 
-      - name: scalui test
-        run: cargo run -p scalui -- test examples/hello
+      - name: Headless UI + golden PNGs
+        run: |
+          cargo run -p scalui -- run --headless examples/hello_ui
+          test -f examples/hello_ui/build/snapshot.png
+          cargo run -p scalui -- test examples/hello_ui

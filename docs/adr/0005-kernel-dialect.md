@@ -19,6 +19,7 @@ Document a **kernel dialect**: the subset used by compiler sources and bootstrap
 - String literals, unit `()`
 - Type syntax: `Unit`, `IO[Unit]`, later `IO[A]` for monomorphic A
 - Calls: `IO.println(str)`, `IO.delay`, `.flatMap(cont)` with simple `_ => expr` or named params as added
+- Phase 1 UI: `Ui.runHeadless(str)` → `IO[Unit]` (runtime drives mount/pump/snapshot; size via env / `scalui.toml` `[ui]`)
 - No macros, no implicits, no HKT beyond `IO`, no null
 
 ### Expansion rules
