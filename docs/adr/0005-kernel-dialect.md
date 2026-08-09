@@ -24,8 +24,9 @@ Document a **kernel dialect**: the subset used by compiler sources and bootstrap
 - Ops: int arithmetic/compare, `&&`/`||`, string `+`
 - Builtins: `Str.*`, `List.*`, `Fs.read`/`write`/`list`/`mkdirs`, `Sys.args`/`exec`/`getenv`,
   `Clock.realTime`/`monotonic`, `Random.nextInt`, `Net.httpGet`,
-  `Signal.*`, `View.*` (incl. `buttonInc` / `buttonSet` / `showWhen`), `Todo.*`, `Ui.run` / `Ui.runWithTodo`
+  `Signal.*`, `View.*` (incl. `button` / `showWhen`), `Todo.*`, `Ui.run` / `Ui.runWithTodo`
 - Calls: `IO.println`/`delay`/`sleep`/`fail`/`pure`/`race`/`both`, `.flatMap(x => …)` (bound or `_`), `.handleErrorWith`, `.attempt`
+- First-class lambda literals: `_ => expr` / `name => expr` (single param, untyped), used as `View.button` tap closures
 - Kernel demos: `Ui.runHeadless` / `runCounter` / `runLive` / `runTodo`, `Effects.runKit`, `Impurity.runKit`, `Lexer.classify`
 - Multi-file `src/**/*.scala` units merged per package
 - No macros, no implicits, no HKT beyond `IO`, no null

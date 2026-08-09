@@ -220,8 +220,8 @@ void *su_lang_signal_str_set(SuSignalStr *s, SuString *v);
 
 SuView *su_lang_view_text(SuString *text);
 SuView *su_lang_view_text_signal(SuSignalInt *sig, SuString *prefix);
-SuView *su_lang_view_button_inc(SuString *label, SuSignalInt *sig);
-SuView *su_lang_view_button_set(SuString *label, SuSignalInt *sig, int64_t value);
+/* First-class tap closure: `tap`/`env` come from a compiled `_ => ...` lambda. */
+SuView *su_lang_view_button(SuString *label, SuViewTapFn tap, void *env);
 SuView *su_lang_view_column(void);
 SuView *su_lang_view_row(void);
 SuView *su_lang_view_list(void);

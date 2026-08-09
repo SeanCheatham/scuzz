@@ -237,6 +237,23 @@ fn infer(
             }
             Ok(Type::Io(Box::new(Type::Opaque("Either".into()))))
         }
+        Expr::Lambda { param, body } => {
+            let old = param
+                .as_ref()
+                .map(|p| (p.clone(), env.insert(p.clone(), Type::Opaque("View".into()))));
+            let _ = infer(body, enums, funs, env)?;
+            if let Some((p, old_val)) = old {
+                match old_val {
+                    Some(v) => {
+                        env.insert(p, v);
+                    }
+                    None => {
+                        env.remove(&p);
+                    }
+                }
+            }
+            Ok(Type::Opaque("TapFn".into()))
+        }
         Expr::IoRace { left, right } | Expr::IoBoth { left, right } => {
             let lt = infer(left, enums, funs, env)?;
             let rt = infer(right, enums, funs, env)?;
@@ -417,15 +434,9 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::Opaque("View".into()))
         }
-        "View.buttonInc" => {
+        "View.button" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::String)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.buttonSet" => {
-            expect_arity(callee, &arg_tys, 3)?;
-            expect_ty(&arg_tys[0], &Type::String)?;
-            expect_ty(&arg_tys[2], &Type::Int)?;
             Ok(Type::Opaque("View".into()))
         }
         "View.column" | "View.row" | "View.list" => {

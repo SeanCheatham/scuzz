@@ -565,6 +565,15 @@ impl Parser {
                 };
                 Ok(Expr::IntLit(-n))
             }
+            Token::Underscore => {
+                self.bump();
+                self.expect(&Token::Arrow)?;
+                let body = self.parse_block()?;
+                Ok(Expr::Lambda {
+                    param: None,
+                    body: Box::new(body),
+                })
+            }
             Token::Ident(name) if name == "IO" => {
                 self.bump();
                 self.expect(&Token::Dot)?;
@@ -720,6 +729,14 @@ impl Parser {
             }
             Token::Ident(name) => {
                 self.bump();
+                if matches!(self.peek(), Token::Arrow) {
+                    self.bump();
+                    let body = self.parse_block()?;
+                    return Ok(Expr::Lambda {
+                        param: Some(name),
+                        body: Box::new(body),
+                    });
+                }
                 if matches!(self.peek(), Token::LParen) {
                     let args = self.parse_args()?;
                     return Ok(Expr::Call {
@@ -752,6 +769,32 @@ mod tests {
         let p = parse(r#"@main def main: IO[Unit] = IO.println("Hello")"#).unwrap();
         assert_eq!(p.main.name, "main");
         assert!(matches!(p.main.body, Expr::IoPrintln(_)));
+    }
+
+    #[test]
+    fn parse_lambda_literal_underscore() {
+        let src = r#"@main def main: IO[Unit] = View.button("+1", _ => Signal.set(count, Signal.get(count) + 1))"#;
+        let p = parse(src).unwrap();
+        match &p.main.body {
+            Expr::Call { callee, args } if callee == "View.button" => {
+                assert_eq!(args.len(), 2);
+                assert!(matches!(args[1], Expr::Lambda { param: None, .. }));
+            }
+            other => panic!("expected View.button call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_lambda_literal_named_param() {
+        let src = r#"@main def main: IO[Unit] = View.button("+1", self => Signal.set(count, 1))"#;
+        let p = parse(src).unwrap();
+        match &p.main.body {
+            Expr::Call { args, .. } => assert!(matches!(
+                args[1],
+                Expr::Lambda { param: Some(ref n), .. } if n == "self"
+            )),
+            other => panic!("expected call, got {other:?}"),
+        }
     }
 
     #[test]

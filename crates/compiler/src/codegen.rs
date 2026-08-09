@@ -80,8 +80,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @su_lang_signal_str(ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_text(ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_text_signal(ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_button_inc(ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_button_set(ptr, ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @su_lang_view_button(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_column()").unwrap();
     writeln!(out, "declare ptr @su_lang_view_row()").unwrap();
     writeln!(out, "declare ptr @su_lang_view_list()").unwrap();
@@ -240,6 +239,7 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         | Expr::UiRunHeadless(e)
         | Expr::LexerClassify(e)
         | Expr::Attempt { inner: e } => collect_strings(e, out),
+        Expr::Lambda { body, .. } => collect_strings(body, out),
         Expr::FlatMap { inner, body, .. }
         | Expr::HandleErrorWith { inner, body }
         | Expr::Let {
@@ -784,6 +784,7 @@ fn emit_expr(
                 payload,
             }
         }
+        Expr::Lambda { param, body } => emit_lambda(param, body, ctx, locals, prefix),
         Expr::Binary { op, left, right } => emit_binary(op, left, right, ctx, locals, prefix),
         Expr::Call { callee, args } => emit_call(callee, args, ctx, locals, prefix),
         Expr::Match { scrutinee, arms } => {
@@ -1080,6 +1081,66 @@ fn emit_expr(
             io_emitted(code, format!("%{prefix}_both"), Kind::Ptr)
         }
     }
+}
+
+/// Emit a `_ => body` / `x => body` lambda literal as a closure value: a
+/// 2-element `SuList` `cons(fn_ptr, cons(env_ptr, nil))`. `fn_ptr` matches the
+/// C `SuViewTapFn` signature `void (*)(SuView *self, void *env)`; `env_ptr` is
+/// the captured-locals list (same packing scheme as `flatMap` continuations).
+/// Consumers (currently only `View.button`) unpack the pair back out.
+fn emit_lambda(
+    param: &Option<String>,
+    body: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    let id = *ctx.cont_id;
+    *ctx.cont_id += 1;
+    let fn_name = format!("su_tap_{id}");
+
+    let capture_names = capture_name_order(locals);
+    let mut pre = String::new();
+    let mut body_locals: HashMap<String, (String, Kind)> = HashMap::new();
+    unpack_env_preamble(
+        &mut pre,
+        &mut body_locals,
+        locals,
+        &capture_names,
+        &format!("t{id}"),
+    );
+    if let Some(p) = param {
+        body_locals.insert(p.clone(), ("%self".into(), Kind::Ptr));
+    }
+
+    let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("t{id}"));
+
+    writeln!(
+        ctx.conts,
+        "define internal void @{fn_name}(ptr %self, ptr %env) {{"
+    )
+    .unwrap();
+    writeln!(ctx.conts, "entry:").unwrap();
+    ctx.conts.push_str(&pre);
+    ctx.conts.push_str(&body_emitted.code);
+    writeln!(ctx.conts, "  ret void").unwrap();
+    writeln!(ctx.conts, "}}").unwrap();
+    writeln!(ctx.conts).unwrap();
+
+    let mut code = String::new();
+    let env_ptr = pack_env(&mut code, locals, &capture_names, &format!("{prefix}_cap"));
+    writeln!(code, "  %{prefix}_cl0 = call ptr @su_list_nil()").unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_cl1 = call ptr @su_list_cons(ptr {env_ptr}, ptr %{prefix}_cl0)"
+    )
+    .unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_cl2 = call ptr @su_list_cons(ptr @{fn_name}, ptr %{prefix}_cl1)"
+    )
+    .unwrap();
+    val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
 }
 
 fn emit_binary(
@@ -1530,20 +1591,29 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
-        "View.buttonInc" => {
+        "View.button" => {
+            // args[1] is a closure value: cons(fn_ptr, cons(env_ptr, nil)).
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_view_button_inc(ptr {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
+                "  %{prefix}_fnp = call ptr @su_list_head(ptr {})",
+                emitted_args[1].value
             )
             .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.buttonSet" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_view_button_set(ptr {}, ptr {}, i64 {})",
-                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+                "  %{prefix}_fnt = call ptr @su_list_tail(ptr {})",
+                emitted_args[1].value
+            )
+            .unwrap();
+            writeln!(
+                code,
+                "  %{prefix}_envp = call ptr @su_list_head(ptr %{prefix}_fnt)"
+            )
+            .unwrap();
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_view_button(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
+                emitted_args[0].value
             )
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)

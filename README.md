@@ -92,7 +92,7 @@ cargo run -p scalui -- run --headless examples/live
 | `examples/hello` | `IO.println` |
 | `examples/hello_ui` | Headless `Ui` + goldens |
 | `examples/counter` | ScalUI `Signal`/`View`/`Ui.run` + goldens |
-| `examples/nav` | `buttonSet` + `showWhen` + stay-open `Ui.run` + goldens |
+| `examples/nav` | Lambda taps + `showWhen` + stay-open `Ui.run` + goldens |
 | `examples/live` | Stay-open Window (`Ui.runLive`; q/Esc) |
 | `examples/todo` | ScalUI Todo tree + `Ui.runWithTodo` + goldens |
 | `examples/effects` | Blessed effects kit |

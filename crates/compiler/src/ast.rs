@@ -142,6 +142,11 @@ pub enum Expr {
         callee: String,
         args: Vec<Expr>,
     },
+    /// `_ => expr` or `x => expr` — single-param lambda literal (tap callbacks).
+    Lambda {
+        param: Option<String>,
+        body: Box<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

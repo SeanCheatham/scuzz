@@ -103,6 +103,10 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             enum_name,
             case_name,
         } => format!("{pad}{enum_name}.{case_name}"),
+        Expr::Lambda { param, body } => {
+            let p = param.as_deref().unwrap_or("_");
+            format!("{pad}{p} => {}", pretty_expr(body, 0).trim())
+        }
         Expr::Call { callee, args } => {
             let a: Vec<_> = args
                 .iter()

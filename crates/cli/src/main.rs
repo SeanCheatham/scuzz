@@ -221,7 +221,7 @@ bundle_id = "dev.scalui.{package_name}"
   val a = View.addChild(root, View.text("Counter"))
   val b = View.addChild(root, View.textSignal(count, "count = "))
   val row = View.row()
-  val c = View.addChild(row, View.buttonInc("+1", count))
+  val c = View.addChild(row, View.button("+1", _ => Signal.set(count, Signal.get(count) + 1)))
   val d = View.addChild(root, row)
   Ui.run(root)
 "#,
