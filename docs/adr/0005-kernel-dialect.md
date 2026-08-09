@@ -2,30 +2,29 @@
 
 ## Status
 
-Accepted (Phase 0; expanded Phase 3)
+Accepted (Phase 0; expanded Phase 3; expanded Phase 4)
 
 ## Context
 
-Self-host requires the compiler sources to stay inside what Stage 0 can emit until Stage 1 catches up.
+Self-host requires the compiler sources to stay inside what Stage 0 can emit until Stage 1 catches up. Phase 4 lands Stage 1/2 in `compiler-scalui/`.
 
 ## Decision
 
 Document a **kernel dialect**: the subset used by compiler sources and bootstrap examples.
 
-### Kernel (Stage 0 → Phase 3)
+### Kernel (Stage 0 → Phase 4)
 
 - Optional `package a.b.c`
-- Top-level nullary `enum Name:` / `enum Name { case A, case B }` ADTs
-- Top-level `@main def name: IO[Unit] = expr`
-- Local `val` bindings; sync expressions (`Enum.Case`, `Lexer.classify`, `match`)
-- `match { case Enum.Case => expr; case _ => expr }`
-- String literals, int literals (for `IO.sleep`), unit `()`
-- Type syntax: `Unit`, `IO[Unit]`, nominal enum types
-- Calls: `IO.println`, `IO.delay`, `IO.sleep`, `IO.fail`, `IO.race`, `IO.both`, `.flatMap`, `.handleErrorWith`, `.attempt`
-- Phase 1 UI: `Ui.runHeadless(str)` → `IO[Unit]`
-- Phase 2 UI: `Ui.runCounter` / `Ui.runTodo` → `IO[Unit]`
-- Phase 3 effects: `Effects.runKit` → `IO[Unit]`
-- Phase 3 parser bootstrap: `Lexer.classify(str)` → `Tok` ADT (`su_lexer_classify` tag order)
+- Top-level nullary `enum Name:` / `enum Name { case A, case B }` ADTs (Stage 0; Stage 1 sources avoid enums)
+- Top-level `def name(params): Type = body` (Phase 4) and `@main def name: IO[Unit] = expr`
+- Local `val` bindings at block starts (not inside bare `if` branches)
+- `if (cond) then else else` (Phase 4); `match { case Enum.Case => expr; case _ => expr }`
+- Literals: strings, ints, unit `()`
+- Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
+- Ops: int arithmetic/compare, `&&`/`||`, string `+`
+- Builtins: `Str.*`, `List.*`, `Fs.read`/`write`/`list`/`mkdirs`, `Sys.args`/`exec`/`getenv`
+- Calls: `IO.println`/`delay`/`sleep`/`fail`/`pure`/`race`/`both`, `.flatMap(x => …)` (bound or `_`), `.handleErrorWith`, `.attempt`
+- Phase 1–3 demos (Stage 0): `Ui.runHeadless` / `runCounter` / `runTodo`, `Effects.runKit`, `Lexer.classify`
 - Multi-file `src/**/*.scala` units merged per package
 - No macros, no implicits, no HKT beyond `IO`, no null
 
@@ -34,9 +33,10 @@ Document a **kernel dialect**: the subset used by compiler sources and bootstrap
 1. New compiler features must land in Stage 0 **before** compiler sources depend on them.
 2. Prefer AST shapes and golden LLVM tests that port cleanly to ScalUI Stage 1.
 3. Runtime GC / fibers / Skia remain C/Rust; not part of the kernel dialect.
+4. Dual-boot CI (`scripts/selfhost.sh`) is the dialect-drift gate: Stage 1 must rebuild itself and run `examples/hello`.
 
 ## Consequences
 
 - Parser/codegen stay small and portability-oriented.
-- Drift is a CI failure mode (dual-boot later), not a doc-only aspiration.
-- `compiler-scalui/` begins the Stage 1 port (parser ADTs + classify smoke) under Stage 0.
+- `compiler-scalui/` is the Stage 1/2 compiler + CLI; Stage 0 Rust remains a canary host.
+- Blessed FS/Sys keep the ScalUI compiler off raw libc FS/process calls in app code.

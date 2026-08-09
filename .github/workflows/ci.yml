@@ -41,19 +41,22 @@ jobs:
           grep -q "Hello, ScalUI!" /tmp/hello.out
           grep -q "Phase 0 online." /tmp/hello.out
 
-      - name: Phase 3 effects + ADT + ScalUI parser
+      - name: Phase 3–4 effects + ADT + FS + Stage-1 canary
         run: |
           cargo run -p scalui -- run examples/effects | tee /tmp/effects.out
           grep -q "phase3" /tmp/effects.out
           grep -q "both-ok" /tmp/effects.out
           cargo run -p scalui -- run examples/adt | tee /tmp/adt.out
           grep -q "adt:red" /tmp/adt.out
-          cargo run -p scalui -- run compiler-scalui | tee /tmp/parser.out
-          grep -q "parser-stage0: ok" /tmp/parser.out
+          cargo run -p scalui -- run examples/fs | tee /tmp/fs.out
+          grep -q "fs:phase4-fs" /tmp/fs.out
           cargo run -p scalui -- fmt --check examples/adt
           cargo run -p scalui -- build examples/adt
           cargo run -p scalui -- build examples/adt 2>&1 | tee /tmp/incr.out
           grep -q "up-to-date" /tmp/incr.out
+
+      - name: Phase 4 self-host dual-boot
+        run: ./scripts/selfhost.sh
 
       - name: Headless UI + golden PNGs
         run: |

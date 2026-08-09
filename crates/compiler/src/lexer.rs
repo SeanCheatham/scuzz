@@ -9,6 +9,8 @@ pub enum Token {
     Match,
     Def,
     Val,
+    If,
+    Else,
     Colon,
     Eq,
     Dot,
@@ -21,6 +23,19 @@ pub enum Token {
     RBracket,
     Arrow, // =>
     Underscore,
+    Plus,
+    Minus,
+    Star,
+    Slash,
+    Percent,
+    EqEq,
+    BangEq,
+    Lt,
+    LtEq,
+    Gt,
+    GtEq,
+    AmpAmp,
+    PipePipe,
     Ident(String),
     StringLit(String),
     IntLit(i64),
@@ -110,6 +125,36 @@ pub fn lex(input: &str) -> Result<Vec<Token>, LexError> {
             i += 2;
             continue;
         }
+        if c == '=' && i + 1 < chars.len() && chars[i + 1] == '=' {
+            tokens.push(Token::EqEq);
+            i += 2;
+            continue;
+        }
+        if c == '!' && i + 1 < chars.len() && chars[i + 1] == '=' {
+            tokens.push(Token::BangEq);
+            i += 2;
+            continue;
+        }
+        if c == '<' && i + 1 < chars.len() && chars[i + 1] == '=' {
+            tokens.push(Token::LtEq);
+            i += 2;
+            continue;
+        }
+        if c == '>' && i + 1 < chars.len() && chars[i + 1] == '=' {
+            tokens.push(Token::GtEq);
+            i += 2;
+            continue;
+        }
+        if c == '&' && i + 1 < chars.len() && chars[i + 1] == '&' {
+            tokens.push(Token::AmpAmp);
+            i += 2;
+            continue;
+        }
+        if c == '|' && i + 1 < chars.len() && chars[i + 1] == '|' {
+            tokens.push(Token::PipePipe);
+            i += 2;
+            continue;
+        }
         if c.is_ascii_digit() {
             let mut n = 0i64;
             while i < chars.len() && chars[i].is_ascii_digit() {
@@ -162,6 +207,34 @@ pub fn lex(input: &str) -> Result<Vec<Token>, LexError> {
                 tokens.push(Token::RBracket);
                 i += 1;
             }
+            '+' => {
+                tokens.push(Token::Plus);
+                i += 1;
+            }
+            '-' => {
+                tokens.push(Token::Minus);
+                i += 1;
+            }
+            '*' => {
+                tokens.push(Token::Star);
+                i += 1;
+            }
+            '/' => {
+                tokens.push(Token::Slash);
+                i += 1;
+            }
+            '%' => {
+                tokens.push(Token::Percent);
+                i += 1;
+            }
+            '<' => {
+                tokens.push(Token::Lt);
+                i += 1;
+            }
+            '>' => {
+                tokens.push(Token::Gt);
+                i += 1;
+            }
             '_' => {
                 tokens.push(Token::Underscore);
                 i += 1;
@@ -179,6 +252,8 @@ pub fn lex(input: &str) -> Result<Vec<Token>, LexError> {
                     "match" => Token::Match,
                     "def" => Token::Def,
                     "val" => Token::Val,
+                    "if" => Token::If,
+                    "else" => Token::Else,
                     _ => Token::Ident(ident),
                 });
             }
@@ -205,15 +280,12 @@ mod tests {
     }
 
     #[test]
-    fn lexes_package_enum() {
-        let src = r#"package scalui.parser
-enum Tok:
-  case AtMain
-  case Def
-"#;
+    fn lexes_ops_and_if() {
+        let src = r#"if (n == 0) a + b else c"#;
         let toks = lex(src).unwrap();
-        assert!(matches!(toks[0], Token::Package));
-        assert!(toks.iter().any(|t| matches!(t, Token::Enum)));
-        assert!(toks.iter().any(|t| matches!(t, Token::Case)));
+        assert!(toks.iter().any(|t| matches!(t, Token::If)));
+        assert!(toks.iter().any(|t| matches!(t, Token::EqEq)));
+        assert!(toks.iter().any(|t| matches!(t, Token::Plus)));
+        assert!(toks.iter().any(|t| matches!(t, Token::Else)));
     }
 }

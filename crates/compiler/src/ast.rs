@@ -1,10 +1,11 @@
-//! Typed-enough AST for the Stage-0 / Phase 3 kernel dialect.
+//! Typed-enough AST for the Stage-0 / Phase 4 kernel dialect.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
-    /// Dotted package path, e.g. `["scalui", "parser"]`.
+    /// Dotted package path, e.g. `["scalui", "compiler"]`.
     pub package: Vec<String>,
     pub enums: Vec<EnumDef>,
+    pub defs: Vec<FunDef>,
     pub main: MainDef,
 }
 
@@ -15,34 +16,68 @@ pub struct EnumDef {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FunDef {
+    pub name: String,
+    pub params: Vec<Param>,
+    pub ret: Type,
+    pub body: Expr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Param {
+    pub name: String,
+    pub ty: Type,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MainDef {
     pub name: String,
     pub body: Expr,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum BinOp {
+    Add,
+    Sub,
+    Mul,
+    Div,
+    Mod,
+    Eq,
+    Ne,
+    Lt,
+    Le,
+    Gt,
+    Ge,
+    And,
+    Or,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Expr {
-    /// `IO.println("...")`
-    IoPrintln(String),
+    /// `IO.println(expr)`
+    IoPrintln(Box<Expr>),
     /// `IO.delay` — unit delay
     IoDelayUnit,
-    /// `IO.sleep(ms)`
-    IoSleep(i64),
-    /// `IO.fail("...")`
-    IoFail(String),
-    /// `Ui.runHeadless("...")`
-    UiRunHeadless(String),
+    /// `IO.sleep(expr)`
+    IoSleep(Box<Expr>),
+    /// `IO.fail(expr)`
+    IoFail(Box<Expr>),
+    /// `IO.pure(expr)`
+    IoPure(Box<Expr>),
+    /// `Ui.runHeadless(expr)`
+    UiRunHeadless(Box<Expr>),
     /// `Ui.runCounter`
     UiRunCounter,
     /// `Ui.runTodo`
     UiRunTodo,
-    /// `Effects.runKit` — blessed kit demo
+    /// `Effects.runKit`
     EffectsRunKit,
-    /// `Lexer.classify("...")` → enum Tok (SuAdt*)
-    LexerClassify(String),
-    /// `left.flatMap(_ => right)`
+    /// `Lexer.classify(expr)` → enum Tok
+    LexerClassify(Box<Expr>),
+    /// `left.flatMap(param => right)` — param None means `_`
     FlatMap {
         inner: Box<Expr>,
+        param: Option<String>,
         body: Box<Expr>,
     },
     /// `io.handleErrorWith(_ => body)`
@@ -50,7 +85,7 @@ pub enum Expr {
         inner: Box<Expr>,
         body: Box<Expr>,
     },
-    /// `io.attempt` → IO[Either]
+    /// `io.attempt`
     Attempt {
         inner: Box<Expr>,
     },
@@ -64,13 +99,13 @@ pub enum Expr {
         left: Box<Expr>,
         right: Box<Expr>,
     },
-    /// `val name = value; body` (semicolon / newline sequenced)
+    /// `val name = value; body`
     Let {
         name: String,
         value: Box<Expr>,
         body: Box<Expr>,
     },
-    /// Local binding reference
+    /// Local binding / parameter reference
     Var(String),
     /// `Color.Red` nullary ADT case
     AdtConstruct {
@@ -84,6 +119,27 @@ pub enum Expr {
     },
     /// `()`
     Unit,
+    /// Integer literal
+    IntLit(i64),
+    /// String literal
+    StrLit(String),
+    /// `if (cond) then else else_`
+    If {
+        cond: Box<Expr>,
+        then_branch: Box<Expr>,
+        else_branch: Box<Expr>,
+    },
+    /// Binary operator
+    Binary {
+        op: BinOp,
+        left: Box<Expr>,
+        right: Box<Expr>,
+    },
+    /// Builtin or user call: `Str.concat(a,b)`, `foo(x)`, `Fs.read(p)`
+    Call {
+        callee: String,
+        args: Vec<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -106,9 +162,13 @@ pub enum Pattern {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Type {
     Unit,
+    Int,
+    String,
+    Bool,
+    List,
     Io(Box<Type>),
     /// Nominal enum type
     Adt(String),
-    /// Untyped/opaque (Ref, etc. in later slices)
+    /// Untyped/opaque
     Opaque(String),
 }

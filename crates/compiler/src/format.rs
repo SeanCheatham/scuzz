@@ -1,6 +1,6 @@
-//! Minimal ScalUI formatter: parse → pretty-print (Phase 3 kernel dialect).
+//! Minimal ScalUI formatter: parse → pretty-print (Phase 4 kernel dialect).
 
-use crate::ast::{EnumDef, Expr, MatchArm, Pattern, Program};
+use crate::ast::{BinOp, EnumDef, Expr, FunDef, MatchArm, Pattern, Program, Type};
 use crate::parser::{parse, ParseError};
 use thiserror::Error;
 
@@ -27,6 +27,10 @@ fn pretty_program(p: &Program) -> String {
         out.push_str(&pretty_enum(e));
         out.push('\n');
     }
+    for d in &p.defs {
+        out.push_str(&pretty_def(d));
+        out.push_str("\n\n");
+    }
     if !p.main.name.is_empty() {
         out.push_str("@main def ");
         out.push_str(&p.main.name);
@@ -50,34 +54,89 @@ fn pretty_enum(e: &EnumDef) -> String {
     out
 }
 
+fn pretty_type(t: &Type) -> String {
+    match t {
+        Type::Unit => "Unit".into(),
+        Type::Int => "Int".into(),
+        Type::String => "String".into(),
+        Type::Bool => "Bool".into(),
+        Type::List => "List".into(),
+        Type::Io(inner) => format!("IO[{}]", pretty_type(inner)),
+        Type::Adt(n) | Type::Opaque(n) => n.clone(),
+    }
+}
+
+fn pretty_def(d: &FunDef) -> String {
+    let params: Vec<String> = d
+        .params
+        .iter()
+        .map(|p| format!("{}: {}", p.name, pretty_type(&p.ty)))
+        .collect();
+    format!(
+        "def {}({}): {} =\n{}",
+        d.name,
+        params.join(", "),
+        pretty_type(&d.ret),
+        pretty_expr(&d.body, 1)
+    )
+}
+
 fn pretty_expr(expr: &Expr, indent: usize) -> String {
     let pad = "  ".repeat(indent);
     match expr {
         Expr::Unit => format!("{pad}()"),
-        Expr::IoPrintln(s) => format!("{pad}IO.println(\"{}\")", escape(s)),
+        Expr::IntLit(n) => format!("{pad}{n}"),
+        Expr::StrLit(s) => format!("{pad}\"{}\"", escape(s)),
+        Expr::IoPrintln(e) => format!("{pad}IO.println({})", pretty_expr(e, 0).trim()),
         Expr::IoDelayUnit => format!("{pad}IO.delay(() => ())"),
-        Expr::IoSleep(ms) => format!("{pad}IO.sleep({ms})"),
-        Expr::IoFail(s) => format!("{pad}IO.fail(\"{}\")", escape(s)),
-        Expr::UiRunHeadless(s) => format!("{pad}Ui.runHeadless(\"{}\")", escape(s)),
+        Expr::IoSleep(e) => format!("{pad}IO.sleep({})", pretty_expr(e, 0).trim()),
+        Expr::IoFail(e) => format!("{pad}IO.fail({})", pretty_expr(e, 0).trim()),
+        Expr::IoPure(e) => format!("{pad}IO.pure({})", pretty_expr(e, 0).trim()),
+        Expr::UiRunHeadless(e) => format!("{pad}Ui.runHeadless({})", pretty_expr(e, 0).trim()),
         Expr::UiRunCounter => format!("{pad}Ui.runCounter"),
         Expr::UiRunTodo => format!("{pad}Ui.runTodo"),
         Expr::EffectsRunKit => format!("{pad}Effects.runKit"),
-        Expr::LexerClassify(s) => format!("{pad}Lexer.classify(\"{}\")", escape(s)),
+        Expr::LexerClassify(e) => format!("{pad}Lexer.classify({})", pretty_expr(e, 0).trim()),
         Expr::Var(n) => format!("{pad}{n}"),
         Expr::AdtConstruct {
             enum_name,
             case_name,
         } => format!("{pad}{enum_name}.{case_name}"),
-        Expr::FlatMap { inner, body } => {
+        Expr::Call { callee, args } => {
+            let a: Vec<_> = args
+                .iter()
+                .map(|e| pretty_expr(e, 0).trim().to_string())
+                .collect();
+            format!("{pad}{callee}({})", a.join(", "))
+        }
+        Expr::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => format!(
+            "{pad}if ({}) {} else {}",
+            pretty_expr(cond, 0).trim(),
+            pretty_expr(then_branch, 0).trim(),
+            pretty_expr(else_branch, 0).trim()
+        ),
+        Expr::Binary { op, left, right } => format!(
+            "{pad}{} {} {}",
+            pretty_expr(left, 0).trim(),
+            binop_str(*op),
+            pretty_expr(right, 0).trim()
+        ),
+        Expr::FlatMap { inner, param, body } => {
             let left = pretty_expr(inner, 0).trim().to_string();
             let right = pretty_expr(body, indent + 1);
-            // Keep simple one-line bodies compact.
-            if !matches!(body.as_ref(), Expr::Let { .. } | Expr::Match { .. } | Expr::FlatMap { .. })
-                && !right.contains('\n')
+            let p = param.as_deref().unwrap_or("_");
+            if !matches!(
+                body.as_ref(),
+                Expr::Let { .. } | Expr::Match { .. } | Expr::FlatMap { .. }
+            ) && !right.contains('\n')
             {
-                format!("{pad}{left}.flatMap(_ => {})", right.trim())
+                format!("{pad}{left}.flatMap({p} => {})", right.trim())
             } else {
-                format!("{pad}{left}.flatMap(_ =>\n{right}\n{pad})")
+                format!("{pad}{left}.flatMap({p} =>\n{right}\n{pad})")
             }
         }
         Expr::HandleErrorWith { inner, body } => {
@@ -115,6 +174,24 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             out.push('}');
             out
         }
+    }
+}
+
+fn binop_str(op: BinOp) -> &'static str {
+    match op {
+        BinOp::Add => "+",
+        BinOp::Sub => "-",
+        BinOp::Mul => "*",
+        BinOp::Div => "/",
+        BinOp::Mod => "%",
+        BinOp::Eq => "==",
+        BinOp::Ne => "!=",
+        BinOp::Lt => "<",
+        BinOp::Le => "<=",
+        BinOp::Gt => ">",
+        BinOp::Ge => ">=",
+        BinOp::And => "&&",
+        BinOp::Or => "||",
     }
 }
 
@@ -166,7 +243,6 @@ enum Color:
         assert!(out.contains("package demo.color"));
         assert!(out.contains("val c = Color.Red"));
         assert!(out.contains("case Color.Red =>"));
-        // Round-trip
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }
