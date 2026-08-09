@@ -3,7 +3,7 @@ CFLAGS ?= -std=c11 -Wall -Wextra -Werror -O2
 ROOT := $(abspath ../..)
 FFI_SKIA := $(ROOT)/crates/ffi-skia
 INCLUDES := -Iinclude -I$(FFI_SKIA)/include
-SRC := src/runtime.c src/resource.c src/ui.c
+SRC := src/runtime.c src/resource.c src/theme.c src/signal.c src/view.c src/ui.c src/demos.c
 OBJ := $(SRC:src/%.c=build/%.o)
 
 .PHONY: all clean test lib ffi-skia

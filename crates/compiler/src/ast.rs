@@ -17,8 +17,12 @@ pub enum Expr {
     IoPrintln(String),
     /// `IO.delay` — thunk is opaque in Phase 0 language; lowered as pure unit delay placeholder
     IoDelayUnit,
-    /// `Ui.runHeadless("...")` — Phase 1 Headless demo (mount/pump[/tap]/snapshot)
+    /// `Ui.runHeadless("...")` — Headless label demo (mount/pump[/tap]/snapshot)
     UiRunHeadless(String),
+    /// `Ui.runCounter` — Phase 2 Counter (signals + Button)
+    UiRunCounter,
+    /// `Ui.runTodo` — Phase 2 Todo (List + IO Resource load/save)
+    UiRunTodo,
     /// `left.flatMap(_ => right)` or `left.flatMap(() => right)`
     FlatMap {
         inner: Box<Expr>,

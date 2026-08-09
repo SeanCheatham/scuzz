@@ -1,0 +1,12 @@
+[package]
+name = "todo"
+version = "0.1.0"
+
+[targets.native]
+kind = "executable"
+main = "Main"
+
+[ui]
+default_runtime = "headless"
+headless_size = [240, 160]
+headless_scale = 1.0

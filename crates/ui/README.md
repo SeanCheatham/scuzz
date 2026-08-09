@@ -2,4 +2,4 @@
 
 Design language: layout, widgets, theme tokens, gestures. Views are backend-agnostic under the `Ui` effect.
 
-Phase 1 ships only minimal label Views inside `crates/runtime` for Headless goldens.
+Phase 2 implementation lives in `crates/runtime` (`view.c`, `signal.c`, `theme.c`, demos) so Stage-0 links a single `libscalui_rt.a`. This crate remains the future home when widgets move into ScalUI sources.

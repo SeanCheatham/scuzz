@@ -192,6 +192,21 @@ impl Parser {
                         self.expect(&Token::RParen)?;
                         Ok(Expr::UiRunHeadless(s))
                     }
+                    "runCounter" => {
+                        // Ui.runCounter or Ui.runCounter()
+                        if self.peek() == &Token::LParen {
+                            self.bump();
+                            self.expect(&Token::RParen)?;
+                        }
+                        Ok(Expr::UiRunCounter)
+                    }
+                    "runTodo" => {
+                        if self.peek() == &Token::LParen {
+                            self.bump();
+                            self.expect(&Token::RParen)?;
+                        }
+                        Ok(Expr::UiRunTodo)
+                    }
                     other => Err(ParseError::Msg(format!("unknown Ui.{other}"))),
                 }
             }
@@ -222,5 +237,13 @@ mod tests {
     fn parse_ui_run_headless() {
         let p = parse(r#"@main def main: IO[Unit] = Ui.runHeadless("Hi")"#).unwrap();
         assert!(matches!(p.main.body, Expr::UiRunHeadless(s) if s == "Hi"));
+    }
+
+    #[test]
+    fn parse_ui_run_counter_todo() {
+        let p = parse(r#"@main def main: IO[Unit] = Ui.runCounter"#).unwrap();
+        assert!(matches!(p.main.body, Expr::UiRunCounter));
+        let p = parse(r#"@main def main: IO[Unit] = Ui.runTodo()"#).unwrap();
+        assert!(matches!(p.main.body, Expr::UiRunTodo));
     }
 }

@@ -31,7 +31,7 @@ ScalUI deliberately diverges from the Scala Center / Typelevel / JVM ecosystems.
 
 | Target | Language/runtime/UI-core | Window embedder | Notes |
 | --- | --- | --- |
-| Linux headless (CI/cloud) | Yes | N/A | Default development & CI; Phase 1 golden PNGs |
+| Linux headless (CI/cloud) | Yes | N/A | Default development & CI; Phase 1–2 golden PNGs |
 | Linux desktop | Yes | Secondary | X11/Wayland later |
 | macOS desktop | Yes | Secondary | Metal/GL surface later |
 | Windows desktop | Yes | Secondary | Later |
