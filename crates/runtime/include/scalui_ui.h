@@ -69,10 +69,13 @@ typedef struct SuTheme {
   uint32_t on_primary;
   uint32_t border;
   uint32_t muted;
+  uint32_t accent;   /* Phase 6 polish */
+  uint32_t disabled; /* Phase 6 polish */
   float pad;
   float gap;
   float control_h;
   float font_px; /* bitmap font cell size (Phase 1 font is 8px) */
+  float radius;  /* corner radius; 0 keeps Phase 2–5 goldens */
 } SuTheme;
 
 const SuTheme *su_theme_default(void);
@@ -146,6 +149,32 @@ float su_view_scroll_y(const SuView *scroll);
 void su_view_scroll_by(SuView *scroll, float dy);
 SuView *su_view_scroll_at(SuView *root, float x, float y);
 int su_view_has_focused_text_field(SuView *root);
+
+/* Phase 6 accessibility hooks (Headless-dumpable; no OS AT bridge yet). */
+typedef enum SuA11yRole {
+  SU_A11Y_NONE = 0,
+  SU_A11Y_BUTTON = 1,
+  SU_A11Y_TEXT = 2,
+  SU_A11Y_TEXT_FIELD = 3,
+  SU_A11Y_IMAGE = 4,
+  SU_A11Y_LIST = 5,
+  SU_A11Y_SCROLL = 6
+} SuA11yRole;
+
+void su_view_set_a11y(SuView *view, SuA11yRole role, const char *label);
+SuA11yRole su_view_a11y_role(const SuView *view);
+const char *su_view_a11y_label(const SuView *view);
+/* Depth-first "role:label" lines joined by newlines (caller frees SuString). */
+SuString *su_view_a11y_dump(SuView *root);
+
+/* Phase 6 animation v0 — float lerp; session pump ticks all registered anims. */
+typedef struct SuAnimFloat SuAnimFloat;
+SuAnimFloat *su_anim_float(float from, float to, int64_t duration_ms);
+void su_anim_free(SuAnimFloat *a);
+float su_anim_value(const SuAnimFloat *a);
+int su_anim_done(const SuAnimFloat *a);
+void su_anim_tick(SuAnimFloat *a, int64_t dt_ms);
+void su_anim_tick_all(int64_t dt_ms);
 
 /* --- session protocol ---------------------------------------------------- */
 

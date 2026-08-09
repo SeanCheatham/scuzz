@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (Phase 0; expanded Phase 3; expanded Phase 4)
+Accepted (Phase 0; expanded Phase 3; expanded Phase 4; impurity builtins Phase 6)
 
 ## Context
 
@@ -12,7 +12,7 @@ Self-host requires the compiler sources to stay inside what Stage 0 can emit unt
 
 Document a **kernel dialect**: the subset used by compiler sources and bootstrap examples.
 
-### Kernel (Stage 0 → Phase 4)
+### Kernel (Stage 0 → Phase 6)
 
 - Optional `package a.b.c`
 - Top-level nullary `enum Name:` / `enum Name { case A, case B }` ADTs (Stage 0; Stage 1 sources avoid enums)
@@ -22,9 +22,10 @@ Document a **kernel dialect**: the subset used by compiler sources and bootstrap
 - Literals: strings, ints, unit `()`
 - Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
 - Ops: int arithmetic/compare, `&&`/`||`, string `+`
-- Builtins: `Str.*`, `List.*`, `Fs.read`/`write`/`list`/`mkdirs`, `Sys.args`/`exec`/`getenv`
+- Builtins: `Str.*`, `List.*`, `Fs.read`/`write`/`list`/`mkdirs`, `Sys.args`/`exec`/`getenv`,
+  `Clock.realTime`/`monotonic`, `Random.nextInt`, `Net.httpGet`
 - Calls: `IO.println`/`delay`/`sleep`/`fail`/`pure`/`race`/`both`, `.flatMap(x => …)` (bound or `_`), `.handleErrorWith`, `.attempt`
-- Phase 1–3 demos (Stage 0): `Ui.runHeadless` / `runCounter` / `runTodo`, `Effects.runKit`, `Lexer.classify`
+- Phase 1–6 demos (Stage 0): `Ui.runHeadless` / `runCounter` / `runTodo`, `Effects.runKit`, `Impurity.runKit`, `Lexer.classify`
 - Multi-file `src/**/*.scala` units merged per package
 - No macros, no implicits, no HKT beyond `IO`, no null
 
@@ -39,4 +40,4 @@ Document a **kernel dialect**: the subset used by compiler sources and bootstrap
 
 - Parser/codegen stay small and portability-oriented.
 - `compiler-scalui/` is the Stage 1/2 compiler + CLI; Stage 0 Rust remains a canary host.
-- Blessed FS/Sys keep the ScalUI compiler off raw libc FS/process calls in app code.
+- Blessed Fs/Sys/Clock/Random/Net keep ScalUI app + compiler code off raw libc impurity.
