@@ -49,22 +49,33 @@ def helloToml(name: String): String =
   )
 
 def cmdNew(args: List): IO[Unit] =
-  if (List.len(args) < 2) IO.println("usage: scalui new <name> [--ui] [parent]")
-  else cmdNewNamed(List.at(args, 1), args)
+  if (List.len(args) < 2) IO.println("usage: scalui new <name> [--ui] [--path <dir>]")
+  else cmdNewResolved(newNameArg(args), args)
+
+def newNameArg(args: List): String =
+  positionalAt(args, 1, 0)
 
 def argHasUi(args: List, i: Int): Int =
   if (i >= List.len(args)) 0
   else if (streq(List.at(args, i), "--ui") == 1) 1
   else argHasUi(args, i + 1)
 
-def argParent(args: List, i: Int): String =
+def argPathValue(args: List, i: Int): String =
   if (i >= List.len(args)) "."
-  else if (streq(List.at(args, i), "--ui") == 1) argParent(args, i + 1)
-  else if (i <= 1) argParent(args, i + 1)
-  else List.at(args, i)
+  else if (streq(List.at(args, i), "--path") == 1)
+    if (i + 1 >= List.len(args)) "." else List.at(args, i + 1)
+  else argPathValue(args, i + 1)
 
-def cmdNewNamed(name: String, args: List): IO[Unit] =
-  writeNewProject(pathJoin(argParent(args, 0), name), name, argHasUi(args, 0))
+def newParentDir(args: List): String =
+  if (argFlag(args, "--path", 0) == 1) argPathValue(args, 0)
+  else "."
+
+def cmdNewResolved(name: String, args: List): IO[Unit] =
+  if (streq(name, ".") == 1)
+    IO.println("usage: scalui new <name> [--ui] [--path <dir>]")
+  else if (startsWith(name, "--") == 1)
+    IO.println("usage: scalui new <name> [--ui] [--path <dir>]")
+  else writeNewProject(pathJoin(newParentDir(args), name), name, argHasUi(args, 0))
 
 def writeNewProject(dir: String, name: String, ui: Int): IO[Unit] =
   if (ui == 1) writeNewUi(dir, name) else writeNewHello(dir, name)
@@ -74,7 +85,13 @@ def writeNewUi(dir: String, name: String): IO[Unit] =
     Fs.mkdirs(pathJoin(dir, "goldens")).flatMap(_ =>
       Fs.write(pathJoin(dir, "scalui.toml"), uiToml(name)).flatMap(_ =>
         Fs.write(pathJoin(dir, "src/Main.scala"), uiMainTemplate()).flatMap(_ =>
-          IO.println(str3("created ", dir, " (ui)"))
+          IO.println(
+            str3(
+              "created ",
+              dir,
+              " (ui) — next: scalui test (seeds goldens) && scalui run --headless"
+            )
+          )
         )
       )
     )
@@ -89,16 +106,21 @@ def writeNewHello(dir: String, name: String): IO[Unit] =
     )
   )
 
-def cmdTest(projectDir: String): IO[Unit] =
+def updateFlagEnv(update: Int): String =
+  if (update == 1) "SCALUI_UPDATE_GOLDENS=1 " else ""
+
+def cmdTest(projectDir: String, update: Int): IO[Unit] =
   resolveRuntimeEnv("", projectDir).flatMap(runtimeDir =>
-    Sys.exec(str3("make -C ", runtimeDir, " test")).flatMap(_ =>
-      Sys.exec(str3("make -C ", pathJoin(parentDir(runtimeDir), "ffi-skia"), " test")).flatMap(_ =>
+    execOk(str3("make -C ", runtimeDir, " test")).flatMap(_ =>
+      execOk(str3("make -C ", pathJoin(parentDir(runtimeDir), "ffi-skia"), " test")).flatMap(_ =>
         compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
-          Sys.exec(
-            str3(
+          execOk(
+            str5(
+              updateFlagEnv(update),
               "bash ",
               pathJoin(pathJoin(parentDir(parentDir(runtimeDir)), "scripts"), "run_goldens.sh"),
-              Str.concat(" ", projectDir)
+              " ",
+              projectDir
             )
           ).flatMap(_ => IO.println("scalui test ok"))
         )
@@ -112,7 +134,7 @@ def checkFlagStr(check: Int): String =
 def cmdFmt(projectDir: String, check: Int): IO[Unit] =
   Sys.getenv("SCALUI_CANARY").flatMap(canary =>
     if (Str.len(canary) > 0)
-      Sys.exec(str4(canary, " fmt ", projectDir, checkFlagStr(check))).flatMap(_ => IO.pure(()))
+      execOk(str4(canary, " fmt ", projectDir, checkFlagStr(check)))
     else fmtParseValidate(projectDir)
   )
 
@@ -150,7 +172,7 @@ def watchLoop(projectDir: String): IO[Unit] =
 def cmdPackage(projectDir: String, target: String): IO[Unit] =
   compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
     resolveRuntimeEnv("", projectDir).flatMap(runtimeDir =>
-      Sys.exec(
+      execOk(
         str5(
           "bash ",
           pathJoin(pathJoin(parentDir(parentDir(runtimeDir)), "scripts"), "package_project.sh"),
@@ -158,6 +180,105 @@ def cmdPackage(projectDir: String, target: String): IO[Unit] =
           projectDir,
           Str.concat(" ", target)
         )
-      ).flatMap(_ => IO.pure(()))
+      )
+    )
+  )
+
+def readTomlDefaultRuntime(toml: String): String =
+  readTomlQuotedAfter(toml, "default_runtime = \"", "headless")
+
+def readTomlQuotedAfter(toml: String, key: String, fallback: String): String =
+  readTomlQuotedAt(toml, Str.indexOf(toml, key), Str.len(key), fallback)
+
+def readTomlQuotedAt(toml: String, idx: Int, keyLen: Int, fallback: String): String =
+  if (idx < 0) fallback
+  else readUntilQuote(toml, idx + keyLen, "")
+
+def readTomlHeadlessW(toml: String): String =
+  readTomlBracketNum(toml, Str.indexOf(toml, "headless_size = ["), 0, "200")
+
+def readTomlHeadlessH(toml: String): String =
+  readTomlBracketNum(toml, Str.indexOf(toml, "headless_size = ["), 1, "120")
+
+def readTomlBracketNum(toml: String, idx: Int, which: Int, fallback: String): String =
+  if (idx < 0) fallback
+  else readTomlBracketNumAt(toml, idx + 18, which, fallback)
+
+def readTomlBracketNumAt(toml: String, i: Int, which: Int, fallback: String): String =
+  if (i >= Str.len(toml)) fallback
+  else if (isDigit(Str.charAt(toml, i)) == 1)
+    readTomlBracketNumTake(toml, i, which, fallback, "")
+  else if (Str.charAt(toml, i) == 93) fallback
+  else readTomlBracketNumAt(toml, i + 1, which, fallback)
+
+def readTomlBracketNumTake(toml: String, i: Int, which: Int, fallback: String, acc: String): String =
+  if (i >= Str.len(toml)) fallback
+  else if (isDigit(Str.charAt(toml, i)) == 1)
+    readTomlBracketNumTake(toml, i + 1, which, fallback, Str.concat(acc, Str.slice(toml, i, i + 1)))
+  else if (which == 0) acc
+  else readTomlBracketNumAt(toml, i + 1, 0, fallback)
+
+def hasUiSection(toml: String): Int =
+  if (Str.indexOf(toml, "[ui]") < 0) 0 else 1
+
+def cmdRun(projectDir: String, headless: Int): IO[Unit] =
+  compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
+    Fs.read(pathJoin(projectDir, "scalui.toml")).flatMap(toml =>
+      runCompiled(projectDir, readTomlName(toml), toml, headless)
+    )
+  )
+
+def runCompiled(projectDir: String, name: String, toml: String, headlessForce: Int): IO[Unit] =
+  if (headlessForce == 1) runHeadless(projectDir, name, toml)
+  else if (hasUiSection(toml) == 0) execOk(pathJoin(pathJoin(projectDir, "build"), name))
+  else runWithDefaultRuntime(projectDir, name, toml)
+
+def runWithDefaultRuntime(projectDir: String, name: String, toml: String): IO[Unit] =
+  if (streq(readTomlDefaultRuntime(toml), "window") == 1) runWindow(projectDir, name, toml)
+  else if (streq(readTomlDefaultRuntime(toml), "mobile") == 1) runMobile(projectDir, name, toml)
+  else runHeadless(projectDir, name, toml)
+
+def runHeadless(projectDir: String, name: String, toml: String): IO[Unit] =
+  val exe = pathJoin(pathJoin(projectDir, "build"), name)
+  val snap = pathJoin(pathJoin(projectDir, "build"), "snapshot.png")
+  val w = readTomlHeadlessW(toml)
+  val h = readTomlHeadlessH(toml)
+  IO.println(str3("scalui run --headless → snapshot ", snap, "")).flatMap(_ =>
+    execOk(
+      str5(
+        "env SCALUI_UI_RUNTIME=headless SCALUI_SNAPSHOT_PATH=",
+        snap,
+        " SCALUI_UI_WIDTH=",
+        w,
+        str4(" SCALUI_UI_HEIGHT=", h, " ", exe)
+      )
+    )
+  )
+
+def runWindow(projectDir: String, name: String, toml: String): IO[Unit] =
+  val exe = pathJoin(pathJoin(projectDir, "build"), name)
+  IO.println("scalui run → UiRuntime.Window (desktop embedder)").flatMap(_ =>
+    execOk(
+      str5(
+        "env SCALUI_UI_RUNTIME=window SCALUI_UI_WIDTH=",
+        readTomlHeadlessW(toml),
+        " SCALUI_UI_HEIGHT=",
+        readTomlHeadlessH(toml),
+        Str.concat(" ", exe)
+      )
+    )
+  )
+
+def runMobile(projectDir: String, name: String, toml: String): IO[Unit] =
+  val exe = pathJoin(pathJoin(projectDir, "build"), name)
+  IO.println("scalui run → UiRuntime.Mobile (host shell)").flatMap(_ =>
+    execOk(
+      str5(
+        "env SCALUI_UI_RUNTIME=mobile SCALUI_MOBILE_SHELL=1 SCALUI_UI_WIDTH=",
+        readTomlHeadlessW(toml),
+        " SCALUI_UI_HEIGHT=",
+        readTomlHeadlessH(toml),
+        Str.concat(" ", exe)
+      )
     )
   )

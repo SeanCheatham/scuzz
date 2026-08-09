@@ -22,6 +22,26 @@ See [docs/vision.md](docs/vision.md).
 Requirements: Rust (stable), `clang`, `make`. Optional for Window: Linux X11 (`libx11-dev` + display / `xvfb-run`) or macOS GUI session (Cocoa).
 
 ```bash
+# Install Stage-1 CLI (wrapper sets SCALUI_HOME to this checkout)
+./scripts/install.sh
+# ensure ~/.local/bin is on PATH
+
+# v0 happy path
+scalui new myapp --ui
+cd myapp
+scalui test              # seeds goldens/ on first run, then compares
+scalui run --headless    # writes build/snapshot.png
+# scalui run             # Window when [ui].default_runtime = "window"
+
+# Or use the Stage-0 canary without installing
+cargo run -p scalui -- new --ui --path /tmp myapp
+cargo run -p scalui -- test /tmp/myapp
+cargo run -p scalui -- run --headless /tmp/myapp
+```
+
+Other useful commands:
+
+```bash
 # Runtime + UI unit tests (includes TestRuntime / anim / a11y)
 make -C crates/runtime test
 
@@ -37,7 +57,7 @@ cargo run -p scalui -- run examples/clock
 # Counter (Headless snapshot, no display)
 cargo run -p scalui -- run --headless examples/counter
 
-# Golden PNG tests
+# Golden PNG tests (use --update to rewrite goldens)
 cargo run -p scalui -- test examples/counter
 
 # Optional: install process-wide TestRuntime for an app binary
@@ -91,7 +111,7 @@ crates/ffi-skia/          sk_capi + CPU software backend
 crates/embedder-desktop/  Linux X11 / macOS Cocoa present for Window peer
 crates/embedder-mobile/   Mobile host shell + Android/iOS packaging templates
 compiler-scalui/          Stage 1/2 ScalUI compiler + CLI (release path)
-scripts/                  selfhost.sh, fetch_skia.sh
+scripts/                  selfhost.sh, install.sh, fetch_skia.sh, run_goldens.sh
 examples/                 samples gallery (table above)
 third_party/skia/         prebuilt fetch notes
 ```
