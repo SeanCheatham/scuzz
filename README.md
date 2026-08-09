@@ -6,12 +6,12 @@
 
 ## Status
 
-**Phase 6 — Productize** (current)
+**Phase 6 — Productize** (current). Phases 0–5 landed (Headless UI → self-host → Mobile).
 
 - Closed impurity boundary: `Clock` / `Random` / `Fs` / `Net` / `Sys` / `IO.println` + `TestRuntime` fakes
 - Animation v0 + accessibility hooks (Headless-dumpable); theme polish tokens
 - Samples gallery below; Skia prebuilts via `SCALUI_SKIA_URL` (default: in-tree `sk_sw`)
-- Impeller evaluated and deferred (ADR 0002); Phase 4 self-host + Phase 5 Mobile remain
+- Impeller evaluated and deferred (ADR 0002)
 
 See [docs/vision.md](docs/vision.md).
 
@@ -65,41 +65,23 @@ xvfb-run -a env SCALUI_UI_RUNTIME=window cargo run -p scalui -- run examples/hel
 | `examples/clock` | 6 | `Clock.realTime` / `monotonic` |
 | `examples/impurity` | 6 | `Impurity.runKit` + TestRuntime fakes |
 
-```bash
-cargo run -p scalui -- run examples/impurity   # impurity-ok
-cargo run -p scalui -- test examples/counter   # goldens
-```
-
 ## Layout
 
 ```
-docs/                 vision, compatibility, ADRs, scalui.toml schema
-crates/compiler/      Stage-0 parser / typer / LLVM codegen (Rust canary)
-crates/cli/           Stage-0 scalui tool (canary: build/run/test/fmt/lsp/watch/package)
-crates/runtime/       C runtime (GC-v0, IO kit, Clock/Random/Fs/Net/Sys, TestRuntime, View/Ui)
-crates/ui/            design-language home (widgets live in runtime C for now)
-crates/ffi-skia/      sk_capi + CPU software backend
+docs/                     vision, compatibility, ADRs, scalui.toml schema
+crates/compiler/          Stage-0 parser / typer / LLVM codegen (Rust canary)
+crates/cli/               Stage-0 scalui tool (canary)
+crates/runtime/           C runtime (IO kit, impurity, View/Ui — widgets live here for now)
+crates/ffi-skia/          sk_capi + CPU software backend
 crates/embedder-desktop/  Linux X11 present for Window peer
 crates/embedder-mobile/   Mobile host shell + Android/iOS packaging templates
-compiler-scalui/      Stage 1/2 ScalUI compiler + CLI (release path)
-scripts/selfhost.sh   dual-boot Stage 0 → 1 → 2
-scripts/fetch_skia.sh optional Skia prebuilt fetch (`SCALUI_SKIA_URL`)
-examples/             samples gallery (see table above)
-third_party/skia/     prebuilt fetch notes
+compiler-scalui/          Stage 1/2 ScalUI compiler + CLI (release path)
+scripts/                  selfhost.sh, fetch_skia.sh
+examples/                 samples gallery (table above)
+third_party/skia/         prebuilt fetch notes
 ```
 
-## Kernel dialect (Stage 0 / Phase 6)
-
-```scala
-@main def main: IO[Unit] =
-  Clock.realTime.flatMap(t =>
-    Fs.read("note.txt").flatMap(s =>
-      IO.println(Str.concat(Str.fromInt(t), s))
-    )
-  )
-```
-
-Also: `Random.nextInt`, `Net.httpGet`, `Impurity.runKit`, `Sys.*`, packages/enums/`match`, UI/effects demos. See [docs/adr/0005-kernel-dialect.md](docs/adr/0005-kernel-dialect.md).
+Kernel dialect: [docs/adr/0005-kernel-dialect.md](docs/adr/0005-kernel-dialect.md).
 
 ## License
 

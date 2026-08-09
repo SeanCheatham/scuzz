@@ -125,17 +125,15 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
         .arg(&skia_lib)
         .arg(format!("-I{}", include.display()))
         .arg(format!("-I{}", skia_include.display()));
+    // Strong embedder symbols must override weak stubs in libscalui_rt.a.
     if embedder_lib.is_file() {
-        // whole-archive so strong X11 symbols override weak stubs in libscalui_rt.a
-        link.arg("-Wl,--whole-archive")
-            .arg(&embedder_lib)
-            .arg("-Wl,--no-whole-archive")
-            .arg("-lX11");
+        push_force_load(&mut link, &embedder_lib);
+        if cfg!(target_os = "linux") {
+            link.arg("-lX11");
+        }
     }
     if mobile_lib.is_file() {
-        link.arg("-Wl,--whole-archive")
-            .arg(&mobile_lib)
-            .arg("-Wl,--no-whole-archive");
+        push_force_load(&mut link, &mobile_lib);
     }
     link.arg("-o").arg(&exe);
     let status = link.status().with_context(|| "spawning clang")?;
@@ -152,6 +150,16 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
         manifest,
         cache_hit: false,
     })
+}
+
+fn push_force_load(link: &mut Command, archive: &Path) {
+    if cfg!(target_os = "macos") {
+        link.arg(format!("-Wl,-force_load,{}", archive.display()));
+    } else {
+        link.arg("-Wl,--whole-archive")
+            .arg(archive)
+            .arg("-Wl,--no-whole-archive");
+    }
 }
 
 fn fingerprint_sources(sources: &[(String, String)], package: &str) -> String {

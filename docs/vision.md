@@ -82,7 +82,7 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 - Stage 1: full compiler-in-ScalUI under `compiler-scalui/` (lexer/parser/codegen/driver/CLI), built by Stage 0
 - Stage 2: Stage 1 rebuilds the compiler; `scripts/selfhost.sh` + CI dual-boot smoke on `examples/hello`
 - CLI moves to ScalUI (`compiler-scalui` binary name `scalui`); Stage 0 Rust CLI retained as canary (`cargo run -p scalui`)
-- Blessed **filesystem** `IO` (`Fs.read` / `write` / `list` / `mkdirs`) plus host kit `Sys.args` / `exec` / `getenv` for the compiler CLI and clang link — live interpreters; fake FS later (Phase 6)
+- Blessed **filesystem** `IO` (`Fs.read` / `write` / `list` / `mkdirs`) plus host kit `Sys.args` / `exec` / `getenv` for the compiler CLI and clang link — live interpreters (TestRuntime fakes in Phase 6)
 - Kernel dialect expansion for self-host: top-level `def`, `if`/`else`, `Int`/`String`/`List`, string/int ops, bound `flatMap`
 - Success bar: `scalui` release binary is produced by a ScalUI-built compiler (`./scripts/selfhost.sh`)
 

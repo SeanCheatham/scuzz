@@ -2,8 +2,7 @@ CC ?= clang
 CFLAGS ?= -std=c11 -Wall -Wextra -Werror -O2
 ROOT := $(abspath ../..)
 RUNTIME := $(ROOT)/crates/runtime
-FFI_SKIA := $(ROOT)/crates/ffi-skia
-INCLUDES := -Iinclude -I$(RUNTIME)/include -I$(FFI_SKIA)/include
+INCLUDES := -Iinclude -I$(RUNTIME)/include
 SRC := src/host_shell.c
 OBJ := $(SRC:src/%.c=build/%.o)
 
