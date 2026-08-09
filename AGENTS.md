@@ -21,7 +21,7 @@ ScalUI is already a language + runtime + UI + tooling bet. **Ruthless subset and
 - **No docs sprawl.** Do not add README/GUIDE/ARCHITECTURE files per crate “for completeness.” Stub crates may have a short README pointing at the phase; otherwise document in `docs/` or in code comments where a future reader will actually look. Update existing docs instead of creating siblings.
 - **No premature abstraction.** One clear implementation beats traits/factories/indirection for a single caller. Introduce seams when a second backend or Stage-1 port needs them (e.g. Headless vs Window), not before.
 - **No ecosystem theater.** No Maven/JVM/cats compatibility layers, no “just in case” dependency graphs, no copying Scala Native structure for familiarity.
-- **Small diffs.** Change only what the task needs. Match existing style; do not reformat or rename widely.
+- **Forwards-only.** Do not maintain backwards compatibility, migration shims, or legacy code paths—especially during the prototype / pre-v1 phase. Prefer deleting and rewriting call sites over keeping dual APIs “for now.”
 - **Vertical slice over scaffolding.** Prefer a working hello / Counter path to empty module trees and placeholder APIs.
 - **Headless-first for UI.** Never land Window-only UI behavior; Headless is a peer runtime (see ADR 0004).
 - **Kernel dialect discipline.** Compiler and bootstrap sources stay inside what Stage 0 can emit until Stage 1 catches up (ADR 0005).
