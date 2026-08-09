@@ -1,9 +1,16 @@
-# compiler-scalui (Phase 3)
+# Stage 1 ScalUI compiler
 
-ScalUI sources for the Stage 1 compiler port, still **built by Stage 0** (ADR 0005).
-
-Phase 3 slice: `Tok` ADT + `Lexer.classify` + `match` smoke under `package scalui.parser`.
+ScalUI-written compiler + CLI (Phase 4). Built by Stage 0, then rebuilds itself (Stage 2).
 
 ```bash
-cargo run -p scalui -- run compiler-scalui
+# Stage 0 hosts Stage 1
+cargo run -p scalui -- build --full compiler-scalui
+
+# Stage 1 builds hello
+./compiler-scalui/build/scalui build examples/hello
+
+# Dual-boot (Stage 1 → Stage 2; raises stack for recursive emit)
+./scripts/selfhost.sh
 ```
+
+Stage-1 CLI: `scalui (build|run) [project]` (writes `project/build/`). Stage 0 Rust CLI remains a CI canary.

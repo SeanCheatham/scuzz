@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (Phase 0; kit completed Phase 3)
+Accepted (Phase 0; kit completed Phase 3; FS/Sys live interpreters Phase 4)
 
 ## Context
 
@@ -17,6 +17,7 @@ Surface:
 - Success values are untyped `void*` at the C ABI; typed at the language level.
 - `IO` can complete as ok(value) or err(SuError).
 - Language/runtime ops: `flatMap`, `delay`, `fail`, `handleErrorWith`, `attempt` (`SuEither`), plus the Phase 3 blessed kit (`Resource` with release-on-failure, `Ref`, `Deferred`, `Queue`, `sleep`, `race`, `both`).
+- Phase 4 live interpreters: `Fs.read`/`write`/`list`/`mkdirs`, `Sys.args`/`exec`/`getenv` — failures use the same `SuError` channel (fake FS/TestRuntime in Phase 6).
 - **No checked exception hierarchy.** Panics (invariant violations) abort via `su_panic`.
 - Prefer string messages for human diagnostics; structured errors can layer later without changing the ok/err split.
 

@@ -69,22 +69,22 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 - Examples: `examples/counter`, `examples/todo` (Todo load/save via `IO` + `Resource`) + goldens
 - Kernel builtins: `Ui.runCounter`, `Ui.runTodo` (demos drive the View tree until the language can express widgets)
 
-### Phase 3 — Language, effects stdlib, tooling ✅ (current)
+### Phase 3 — Language, effects stdlib, tooling ✅
 
 - Expand subset: `package`, multi-file modules, nullary `enum` ADTs, `match`, local `val`
 - Blessed effects kit (concurrency / resource slice): `Resource` (releases on failure), `Ref`, `Deferred`, `Queue`, `handleErrorWith` / `attempt`, `sleep`, `race` / `both` — kernel demo `Effects.runKit`
-- Not yet a closed impurity surface: no readable `Clock`, `Random`, FS/network APIs, or fake test interpreters (see Phase 4 FS start + Phase 6 close-out)
 - Incremental compile (fingerprint cache), `scalui watch` / `run --watch`, `scalui fmt`, basic `scalui lsp`
 - Linux X11 embedder for `UiRuntime.Window` (`crates/embedder-desktop`); Headless remains CI default
-- ScalUI parser bootstrap under `compiler-scalui/` (Tok ADT + `Lexer.classify` + match), still built by Stage 0
+- ScalUI parser bootstrap under `compiler-scalui/` (seed for Phase 4)
 
-### Phase 4 — Self-host
+### Phase 4 — Self-host ✅ (current)
 
-- Stage 1: full compiler-in-ScalUI builds under Stage 0
-- Stage 2: Stage 1 compiles the compiler; CI dual-boot + self-rebuild check
-- CLI moves to ScalUI; Stage 0 retained as canary only
-- Blessed **filesystem** `IO` (read/write/list sources and artifacts) so the ScalUI compiler does not call libc FS directly; live interpreter first, fake FS later (Phase 6)
-- Success bar: `scalui` release binary is produced by a ScalUI-built compiler
+- Stage 1: full compiler-in-ScalUI under `compiler-scalui/` (lexer/parser/codegen/driver/CLI), built by Stage 0
+- Stage 2: Stage 1 rebuilds the compiler; `scripts/selfhost.sh` + CI dual-boot smoke on `examples/hello`
+- CLI moves to ScalUI (`compiler-scalui` binary name `scalui`); Stage 0 Rust CLI retained as canary (`cargo run -p scalui`)
+- Blessed **filesystem** `IO` (`Fs.read` / `write` / `list` / `mkdirs`) plus host kit `Sys.args` / `exec` / `getenv` for the compiler CLI and clang link — live interpreters; fake FS later (Phase 6)
+- Kernel dialect expansion for self-host: top-level `def`, `if`/`else`, `Int`/`String`/`List`, string/int ops, bound `flatMap`
+- Success bar: `scalui` release binary is produced by a ScalUI-built compiler (`./scripts/selfhost.sh`)
 
 ### Phase 5 — Mobile
 

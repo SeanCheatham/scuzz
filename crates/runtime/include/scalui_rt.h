@@ -27,6 +27,20 @@ SuString *su_string_from_bytes(const char *bytes, size_t len);
 const char *su_string_cstr(const SuString *s);
 void su_string_free(SuString *s);
 
+/* String ops for Stage-1 / Phase 4 kernel dialect */
+SuString *su_string_concat(const SuString *a, const SuString *b);
+int64_t su_string_len(const SuString *s);
+SuString *su_string_slice(const SuString *s, int64_t start, int64_t end);
+int su_string_eq(const SuString *a, const SuString *b);
+int64_t su_string_char_at(const SuString *s, int64_t index); /* byte as i64; -1 OOB */
+SuString *su_string_from_int(int64_t n);
+int64_t su_string_index_of(const SuString *s, const SuString *needle);
+SuString *su_string_to_cstr_clone(const SuString *s); /* alias helper */
+
+/* Boxed i64 for IO[Int] */
+void *su_box_i64(int64_t n);
+int64_t su_unbox_i64(const void *p);
+
 /* --- errors -------------------------------------------------------------- */
 
 typedef struct SuError {
@@ -216,8 +230,37 @@ typedef struct SuPair {
 SuPair *su_pair_new(void *left, void *right);
 void su_pair_free(SuPair *p);
 
+/* Linked list (NULL = Nil) for Phase 4 dialect / Stage-1 compiler */
+typedef struct SuList {
+  void *head;
+  struct SuList *tail;
+} SuList;
+
+SuList *su_list_nil(void);
+int su_list_is_empty(const SuList *xs);
+SuList *su_list_cons(void *head, SuList *tail);
+void *su_list_head(const SuList *xs);
+SuList *su_list_tail(const SuList *xs);
+size_t su_list_len(const SuList *xs);
+void *su_list_at(const SuList *xs, size_t index);
+SuList *su_list_reverse(SuList *xs);
+SuString *su_list_join(const SuList *xs, const char *sep);
+
+/* Blessed filesystem IO (live interpreter) */
+SuIo *su_fs_read(SuString *path);
+SuIo *su_fs_write(SuString *path, SuString *contents);
+SuIo *su_fs_list(SuString *path);
+SuIo *su_fs_mkdirs(SuString *path);
+
+/* Process / args for Stage-1 CLI + clang */
+void su_sys_set_args(int argc, char **argv);
+SuIo *su_sys_args(void);
+SuIo *su_sys_exec(SuString *cmd);
+SuIo *su_sys_getenv(SuString *key);
+
 /* Entrypoint helper used by @main codegen */
 int su_runtime_main(SuIo *program);
+int su_runtime_main_args(SuIo *program, int argc, char **argv);
 
 /* Kernel demo: blessed effects kit smoke (Ref/Deferred/Queue/race/sleep/errors) */
 SuIo *su_effects_run_kit(void);
