@@ -1,10 +1,13 @@
 use crate::codegen::emit_llvm;
 use crate::manifest::{load_manifest, Manifest};
-use crate::parser::parse;
+use crate::parser::parse_sources;
 use crate::typ::typecheck;
 use anyhow::{bail, Context, Result};
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::time::SystemTime;
 
 #[derive(Debug, Clone)]
 pub struct CompileOptions {
@@ -13,6 +16,20 @@ pub struct CompileOptions {
     pub runtime_dir: PathBuf,
     pub out_dir: PathBuf,
     pub clang: String,
+    /// Skip clang link when fingerprint matches (incremental).
+    pub incremental: bool,
+}
+
+impl CompileOptions {
+    pub fn new(project_dir: PathBuf, runtime_dir: PathBuf, out_dir: PathBuf, clang: String) -> Self {
+        Self {
+            project_dir,
+            runtime_dir,
+            out_dir,
+            clang,
+            incremental: true,
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -20,6 +37,7 @@ pub struct CompileOutput {
     pub executable: PathBuf,
     pub llvm_ir: PathBuf,
     pub manifest: Manifest,
+    pub cache_hit: bool,
 }
 
 pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
@@ -27,25 +45,21 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
     let manifest = load_manifest(&manifest_path)
         .with_context(|| format!("reading {}", manifest_path.display()))?;
 
-    let source = find_main_source(&opts.project_dir)?;
-    let src_text = std::fs::read_to_string(&source)
-        .with_context(|| format!("reading {}", source.display()))?;
+    let sources = find_sources(&opts.project_dir)?;
+    let mut named: Vec<(String, String)> = Vec::new();
+    for path in &sources {
+        let text = std::fs::read_to_string(path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        let label = path
+            .file_name()
+            .and_then(|s| s.to_str())
+            .unwrap_or("source")
+            .to_string();
+        named.push((label, text));
+    }
 
-    let program = parse(&src_text).map_err(|e| anyhow::anyhow!("parse error: {e}"))?;
-    typecheck(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let fingerprint = fingerprint_sources(&named, &manifest.package.name);
 
-    let ir = emit_llvm(&program);
-
-    std::fs::create_dir_all(&opts.out_dir)?;
-    build_runtime(&opts.runtime_dir, &opts.clang)?;
-
-    let lib = opts.runtime_dir.join("build/libscalui_rt.a");
-    let ffi_skia_dir = opts
-        .runtime_dir
-        .parent()
-        .map(|p| p.join("ffi-skia"))
-        .unwrap_or_else(|| PathBuf::from("crates/ffi-skia"));
-    let skia_lib = ffi_skia_dir.join("build/libsk_capi.a");
     // Join must use a relative file name — absolute package names would replace out_dir.
     let exe_name = Path::new(&manifest.package.name)
         .file_name()
@@ -55,62 +69,133 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
     if exe_name.contains('/') || exe_name.contains('\\') {
         bail!("invalid package name for executable: {}", manifest.package.name);
     }
+
+    std::fs::create_dir_all(&opts.out_dir)?;
+    let cache_dir = opts.project_dir.join(".scalui");
+    std::fs::create_dir_all(&cache_dir)?;
+    let fp_path = cache_dir.join("fingerprint");
     let exe = opts.out_dir.join(exe_name);
     let ll_path = opts.out_dir.join(format!("{exe_name}.ll"));
+
+    if opts.incremental
+        && exe.is_file()
+        && fp_path.is_file()
+        && std::fs::read_to_string(&fp_path).unwrap_or_default().trim() == fingerprint
+    {
+        return Ok(CompileOutput {
+            executable: exe,
+            llvm_ir: ll_path,
+            manifest,
+            cache_hit: true,
+        });
+    }
+
+    let program =
+        parse_sources(&named).map_err(|e| anyhow::anyhow!("parse error: {e}"))?;
+    typecheck(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
+
+    let ir = emit_llvm(&program);
     std::fs::write(&ll_path, &ir)?;
+
+    build_runtime(&opts.runtime_dir, &opts.clang)?;
+
+    let lib = opts.runtime_dir.join("build/libscalui_rt.a");
+    let ffi_skia_dir = opts
+        .runtime_dir
+        .parent()
+        .map(|p| p.join("ffi-skia"))
+        .unwrap_or_else(|| PathBuf::from("crates/ffi-skia"));
+    let skia_lib = ffi_skia_dir.join("build/libsk_capi.a");
     let include = opts.runtime_dir.join("include");
     let skia_include = ffi_skia_dir.join("include");
 
-    let status = Command::new(&opts.clang)
-        .arg(&ll_path)
+    // Optional desktop embedder (X11). Link when lib exists.
+    let embedder_dir = opts
+        .runtime_dir
+        .parent()
+        .map(|p| p.join("embedder-desktop"))
+        .unwrap_or_else(|| PathBuf::from("crates/embedder-desktop"));
+    let embedder_lib = embedder_dir.join("build/libscalui_embedder.a");
+    let mut link = Command::new(&opts.clang);
+    link.arg(&ll_path)
         .arg(&lib)
         .arg(&skia_lib)
         .arg(format!("-I{}", include.display()))
-        .arg(format!("-I{}", skia_include.display()))
-        .arg("-o")
-        .arg(&exe)
-        .status()
-        .with_context(|| "spawning clang")?;
+        .arg(format!("-I{}", skia_include.display()));
+    if embedder_lib.is_file() {
+        // whole-archive so strong X11 symbols override weak stubs in libscalui_rt.a
+        link.arg("-Wl,--whole-archive")
+            .arg(&embedder_lib)
+            .arg("-Wl,--no-whole-archive")
+            .arg("-lX11");
+    }
+    link.arg("-o").arg(&exe);
+    let status = link.status().with_context(|| "spawning clang")?;
 
     if !status.success() {
         bail!("clang failed to link {}", exe.display());
     }
 
+    std::fs::write(&fp_path, &fingerprint)?;
+
     Ok(CompileOutput {
         executable: exe,
         llvm_ir: ll_path,
         manifest,
+        cache_hit: false,
     })
 }
 
-fn find_main_source(project_dir: &Path) -> Result<PathBuf> {
+fn fingerprint_sources(sources: &[(String, String)], package: &str) -> String {
+    let mut h = DefaultHasher::new();
+    package.hash(&mut h);
+    for (name, text) in sources {
+        name.hash(&mut h);
+        text.hash(&mut h);
+    }
+    format!("{:016x}", h.finish())
+}
+
+fn find_sources(project_dir: &Path) -> Result<Vec<PathBuf>> {
     let src = project_dir.join("src");
     if !src.is_dir() {
         bail!("missing src/ in {}", project_dir.display());
     }
     let mut candidates: Vec<PathBuf> = Vec::new();
-    for entry in std::fs::read_dir(&src)? {
-        let entry = entry?;
-        let path = entry.path();
-        if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            if matches!(ext, "scala" | "scalui") {
-                candidates.push(path);
-            }
-        }
-    }
+    collect_sources(&src, &mut candidates)?;
     if candidates.is_empty() {
         bail!("no .scala / .scalui sources in {}", src.display());
     }
-    // Prefer Main.*
-    if let Some(main) = candidates.iter().find(|p| {
-        p.file_stem()
-            .and_then(|s| s.to_str())
-            .is_some_and(|s| s.eq_ignore_ascii_case("main"))
-    }) {
-        return Ok(main.clone());
+    // Main.* last so package/enum units parse first (order only affects error msgs;
+    // parse_sources merges). Prefer stable order: non-main first, then main.
+    candidates.sort_by(|a, b| {
+        let am = is_main_file(a);
+        let bm = is_main_file(b);
+        am.cmp(&bm).then_with(|| a.cmp(b))
+    });
+    Ok(candidates)
+}
+
+fn is_main_file(p: &Path) -> bool {
+    p.file_stem()
+        .and_then(|s| s.to_str())
+        .is_some_and(|s| s.eq_ignore_ascii_case("main"))
+}
+
+fn collect_sources(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+    let mut entries: Vec<_> = std::fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|e| e.path());
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_sources(&path, out)?;
+        } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
+            if matches!(ext, "scala" | "scalui") {
+                out.push(path);
+            }
+        }
     }
-    candidates.sort();
-    Ok(candidates.remove(0))
+    Ok(())
 }
 
 fn build_runtime(runtime_dir: &Path, clang: &str) -> Result<()> {
@@ -123,6 +208,19 @@ fn build_runtime(runtime_dir: &Path, clang: &str) -> Result<()> {
         .with_context(|| "building runtime (make)")?;
     if !status.success() {
         bail!("runtime build failed in {}", runtime_dir.display());
+    }
+
+    // Best-effort embedder build (optional; skipped if make fails / no X11).
+    if let Some(parent) = runtime_dir.parent() {
+        let embedder = parent.join("embedder-desktop");
+        if embedder.join("Makefile").is_file() {
+            let _ = Command::new("make")
+                .arg("-C")
+                .arg(&embedder)
+                .arg("lib")
+                .env("CC", clang)
+                .status();
+        }
     }
     Ok(())
 }
@@ -139,4 +237,32 @@ pub fn find_runtime_dir(start: &Path) -> Result<PathBuf> {
             bail!("could not find crates/runtime from {}", start.display());
         }
     }
+}
+
+/// Poll sources until change or timeout; returns true if a change was observed.
+pub fn wait_for_source_change(project_dir: &Path, idle_ms: u64) -> Result<bool> {
+    let sources = find_sources(project_dir)?;
+    let last = latest_mtime(&sources)?;
+    let start = SystemTime::now();
+    loop {
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        let now = latest_mtime(&sources)?;
+        if now > last {
+            return Ok(true);
+        }
+        if start.elapsed()?.as_millis() as u64 >= idle_ms {
+            return Ok(false);
+        }
+    }
+}
+
+fn latest_mtime(paths: &[PathBuf]) -> Result<SystemTime> {
+    let mut latest = SystemTime::UNIX_EPOCH;
+    for p in paths {
+        let m = std::fs::metadata(p)?.modified()?;
+        if m > latest {
+            latest = m;
+        }
+    }
+    Ok(latest)
 }

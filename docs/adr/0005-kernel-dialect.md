@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (Phase 0)
+Accepted (Phase 0; expanded Phase 3)
 
 ## Context
 
@@ -12,15 +12,21 @@ Self-host requires the compiler sources to stay inside what Stage 0 can emit unt
 
 Document a **kernel dialect**: the subset used by compiler sources and bootstrap examples.
 
-### Kernel (Stage 0 → Phase 0/2)
+### Kernel (Stage 0 → Phase 3)
 
+- Optional `package a.b.c`
+- Top-level nullary `enum Name:` / `enum Name { case A, case B }` ADTs
 - Top-level `@main def name: IO[Unit] = expr`
-- `def` / `val` bindings (local vals in later slices)
-- String literals, unit `()`
-- Type syntax: `Unit`, `IO[Unit]`, later `IO[A]` for monomorphic A
-- Calls: `IO.println(str)`, `IO.delay`, `.flatMap(cont)` with simple `_ => expr` or named params as added
-- Phase 1 UI: `Ui.runHeadless(str)` → `IO[Unit]` (runtime drives mount/pump/snapshot; size via env / `scalui.toml` `[ui]`)
-- Phase 2 UI: `Ui.runCounter` / `Ui.runTodo` → `IO[Unit]` (C-side demos over the declarative View tree + signals; Todo uses `Resource` for load/save)
+- Local `val` bindings; sync expressions (`Enum.Case`, `Lexer.classify`, `match`)
+- `match { case Enum.Case => expr; case _ => expr }`
+- String literals, int literals (for `IO.sleep`), unit `()`
+- Type syntax: `Unit`, `IO[Unit]`, nominal enum types
+- Calls: `IO.println`, `IO.delay`, `IO.sleep`, `IO.fail`, `IO.race`, `IO.both`, `.flatMap`, `.handleErrorWith`, `.attempt`
+- Phase 1 UI: `Ui.runHeadless(str)` → `IO[Unit]`
+- Phase 2 UI: `Ui.runCounter` / `Ui.runTodo` → `IO[Unit]`
+- Phase 3 effects: `Effects.runKit` → `IO[Unit]`
+- Phase 3 parser bootstrap: `Lexer.classify(str)` → `Tok` ADT (`su_lexer_classify` tag order)
+- Multi-file `src/**/*.scala` units merged per package
 - No macros, no implicits, no HKT beyond `IO`, no null
 
 ### Expansion rules
@@ -33,3 +39,4 @@ Document a **kernel dialect**: the subset used by compiler sources and bootstrap
 
 - Parser/codegen stay small and portability-oriented.
 - Drift is a CI failure mode (dual-boot later), not a doc-only aspiration.
+- `compiler-scalui/` begins the Stage 1 port (parser ADTs + classify smoke) under Stage 0.

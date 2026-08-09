@@ -3,11 +3,16 @@ use thiserror::Error;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     AtMain, // @main
+    Package,
+    Enum,
+    Case,
+    Match,
     Def,
     Val,
     Colon,
     Eq,
     Dot,
+    Comma,
     LParen,
     RParen,
     LBrace,
@@ -18,6 +23,7 @@ pub enum Token {
     Underscore,
     Ident(String),
     StringLit(String),
+    IntLit(i64),
     Eof,
 }
 
@@ -104,6 +110,17 @@ pub fn lex(input: &str) -> Result<Vec<Token>, LexError> {
             i += 2;
             continue;
         }
+        if c.is_ascii_digit() {
+            let mut n = 0i64;
+            while i < chars.len() && chars[i].is_ascii_digit() {
+                n = n
+                    .saturating_mul(10)
+                    .saturating_add((chars[i] as u8 - b'0') as i64);
+                i += 1;
+            }
+            tokens.push(Token::IntLit(n));
+            continue;
+        }
         match c {
             ':' => {
                 tokens.push(Token::Colon);
@@ -115,6 +132,10 @@ pub fn lex(input: &str) -> Result<Vec<Token>, LexError> {
             }
             '.' => {
                 tokens.push(Token::Dot);
+                i += 1;
+            }
+            ',' => {
+                tokens.push(Token::Comma);
                 i += 1;
             }
             '(' => {
@@ -152,6 +173,10 @@ pub fn lex(input: &str) -> Result<Vec<Token>, LexError> {
                     i += 1;
                 }
                 tokens.push(match ident.as_str() {
+                    "package" => Token::Package,
+                    "enum" => Token::Enum,
+                    "case" => Token::Case,
+                    "match" => Token::Match,
                     "def" => Token::Def,
                     "val" => Token::Val,
                     _ => Token::Ident(ident),
@@ -174,6 +199,21 @@ mod tests {
         let toks = lex(src).unwrap();
         assert!(matches!(toks[0], Token::AtMain));
         assert!(matches!(toks[1], Token::Def));
-        assert!(toks.iter().any(|t| matches!(t, Token::StringLit(s) if s == "hi")));
+        assert!(toks
+            .iter()
+            .any(|t| matches!(t, Token::StringLit(s) if s == "hi")));
+    }
+
+    #[test]
+    fn lexes_package_enum() {
+        let src = r#"package scalui.parser
+enum Tok:
+  case AtMain
+  case Def
+"#;
+        let toks = lex(src).unwrap();
+        assert!(matches!(toks[0], Token::Package));
+        assert!(toks.iter().any(|t| matches!(t, Token::Enum)));
+        assert!(toks.iter().any(|t| matches!(t, Token::Case)));
     }
 }

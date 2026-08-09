@@ -1,10 +1,25 @@
 #include "scalui_ui.h"
 
+#include "scalui_embedder.h"
 #include "sk_capi.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+
+/* Weak stubs — strong defs from embedder-desktop override when linked. */
+__attribute__((weak)) int su_embedder_available(void) { return 0; }
+__attribute__((weak)) int su_embedder_present(const char *title, int width,
+                                              int height, const uint8_t *rgba,
+                                              size_t nbytes) {
+  (void)title;
+  (void)width;
+  (void)height;
+  (void)rgba;
+  (void)nbytes;
+  return 0;
+}
+__attribute__((weak)) void su_embedder_shutdown(void) {}
 
 /* Implemented in view.c */
 int su_view_paint(SuView *root, SkCanvas *canvas, int width, int height,
@@ -76,8 +91,12 @@ SuUiSession *su_ui_mount(const SuUiConfig *cfg, SuView *root) {
   s->canvas = sk_surface_get_canvas(s->surface);
   s->dirty = 1;
   if (cfg->kind == SU_UI_RUNTIME_WINDOW) {
-    fprintf(stderr,
-            "scalui: UiRuntime.Window mounted (offscreen peer; embedder later)\n");
+    if (su_embedder_available()) {
+      fprintf(stderr, "scalui: UiRuntime.Window mounted (X11 embedder)\n");
+    } else {
+      fprintf(stderr,
+              "scalui: UiRuntime.Window mounted (offscreen; no DISPLAY)\n");
+    }
   }
   return s;
 }
@@ -143,6 +162,8 @@ void su_ui_unmount(SuUiSession *session) {
   if (!session)
     return;
   su_ui_bridge_flush(session);
+  if (session->cfg.kind == SU_UI_RUNTIME_WINDOW)
+    su_embedder_shutdown();
   if (session->surface)
     sk_surface_unref(session->surface);
   if (session->owns_view)
@@ -151,6 +172,8 @@ void su_ui_unmount(SuUiSession *session) {
 }
 
 int su_ui_pump_sync(SuUiSession *session) {
+  size_t nbytes = 0;
+  const uint8_t *rgba;
   if (!session)
     return 0;
   /* UI-thread hop: apply signal writes posted from completed IO. */
@@ -159,6 +182,14 @@ int su_ui_pump_sync(SuUiSession *session) {
                      session->cfg.height, session->theme))
     return 0;
   session->dirty = 0;
+  /* Window peer: present to OS surface when embedder is available. */
+  if (session->cfg.kind == SU_UI_RUNTIME_WINDOW && su_embedder_available()) {
+    rgba = sk_surface_peek_pixels(session->surface, &nbytes);
+    if (rgba) {
+      su_embedder_present(session->cfg.title, session->cfg.width,
+                          session->cfg.height, rgba, nbytes);
+    }
+  }
   return 1;
 }
 

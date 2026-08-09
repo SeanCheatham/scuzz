@@ -10,8 +10,12 @@
 !**/testdata/**/*.png
 .DS_Store
 examples/**/build/
+compiler-scalui/build/
+compiler-scalui/.scalui/
+examples/**/.scalui/
 crates/runtime/build/
 crates/ffi-skia/build/
+crates/embedder-desktop/build/
 *.a
 *.so
 *.dylib

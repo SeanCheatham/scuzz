@@ -31,10 +31,10 @@ ScalUI deliberately diverges from the Scala Center / Typelevel / JVM ecosystems.
 
 | Target | Language/runtime/UI-core | Window embedder | Notes |
 | --- | --- | --- |
-| Linux headless (CI/cloud) | Yes | N/A | Default development & CI; Phase 1–2 golden PNGs |
-| Linux desktop | Yes | Secondary | X11/Wayland later |
+| Linux headless (CI/cloud) | Yes | N/A | Default development & CI; Phase 1–3 golden PNGs |
+| Linux desktop | Yes | Phase 3 X11 | `crates/embedder-desktop` blits Window peer frames when `DISPLAY` is set |
 | macOS desktop | Yes | Secondary | Metal/GL surface later |
-| Windows desktop | Yes | Secondary | Later |
+| Windows desktop | Yes | Secondary | Later (same session protocol) |
 | iOS / Android | Shared app code later | Phase 5 | Packaging shells only |
 
 ## Self-host stages

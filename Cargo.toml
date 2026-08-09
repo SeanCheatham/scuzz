@@ -17,6 +17,7 @@ scalui-compiler = { path = "crates/compiler" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 toml = "0.8"
 thiserror = "2"
 tempfile = "3"
