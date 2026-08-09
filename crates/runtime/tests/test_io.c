@@ -178,6 +178,51 @@ int main(void) {
   r = su_io_unsafe_run(su_effects_run_kit());
   assert(r.ok);
 
+  /* string ops */
+  {
+    SuString *a = su_string_from_cstr("foo");
+    SuString *b = su_string_from_cstr("bar");
+    SuString *c = su_string_concat(a, b);
+    assert(strcmp(su_string_cstr(c), "foobar") == 0);
+    assert(su_string_len(c) == 6);
+    assert(su_string_eq(c, su_string_from_cstr("foobar")));
+    assert(su_string_char_at(c, 0) == 'f');
+    SuString *sl = su_string_slice(c, 3, 6);
+    assert(strcmp(su_string_cstr(sl), "bar") == 0);
+    assert(su_string_index_of(c, b) == 3);
+    assert(strcmp(su_string_cstr(su_string_from_int(42)), "42") == 0);
+  }
+
+  /* list */
+  {
+    SuList *xs = su_list_cons(su_string_from_cstr("a"),
+                              su_list_cons(su_string_from_cstr("b"), su_list_nil()));
+    assert(su_list_len(xs) == 2);
+    assert(strcmp(su_string_cstr((SuString *)su_list_head(xs)), "a") == 0);
+    assert(strcmp(su_string_cstr((SuString *)su_list_at(xs, 1)), "b") == 0);
+    SuString *j = su_list_join(xs, ",");
+    assert(strcmp(su_string_cstr(j), "a,b") == 0);
+  }
+
+  /* box */
+  assert(su_unbox_i64(su_box_i64(7)) == 7);
+
+  /* Fs roundtrip */
+  {
+    const char *path = "build/test_fs_roundtrip.txt";
+    r = su_io_unsafe_run(su_fs_mkdirs(su_string_from_cstr("build")));
+    assert(r.ok);
+    r = su_io_unsafe_run(
+        su_fs_write(su_string_from_cstr(path), su_string_from_cstr("phase4")));
+    assert(r.ok);
+    r = su_io_unsafe_run(su_fs_read(su_string_from_cstr(path)));
+    assert(r.ok);
+    assert(strcmp(su_string_cstr((SuString *)r.value), "phase4") == 0);
+    r = su_io_unsafe_run(su_fs_list(su_string_from_cstr("build")));
+    assert(r.ok);
+    assert(!su_list_is_empty((SuList *)r.value));
+  }
+
   puts("runtime io tests ok");
   return 0;
 }

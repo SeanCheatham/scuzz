@@ -59,6 +59,84 @@ void su_string_free(SuString *s) {
   su_free(s);
 }
 
+SuString *su_string_concat(const SuString *a, const SuString *b) {
+  size_t al = a && a->data ? a->len : 0;
+  size_t bl = b && b->data ? b->len : 0;
+  char *buf = (char *)su_alloc(al + bl + 1);
+  if (al)
+    memcpy(buf, a->data, al);
+  if (bl)
+    memcpy(buf + al, b->data, bl);
+  buf[al + bl] = '\0';
+  SuString *out = su_string_from_bytes(buf, al + bl);
+  su_free(buf);
+  return out;
+}
+
+int64_t su_string_len(const SuString *s) {
+  return s ? (int64_t)s->len : 0;
+}
+
+SuString *su_string_slice(const SuString *s, int64_t start, int64_t end) {
+  int64_t len = su_string_len(s);
+  if (start < 0)
+    start = 0;
+  if (end > len)
+    end = len;
+  if (start > end)
+    start = end;
+  size_t n = (size_t)(end - start);
+  if (!s || !s->data || n == 0)
+    return su_string_from_cstr("");
+  return su_string_from_bytes(s->data + start, n);
+}
+
+int su_string_eq(const SuString *a, const SuString *b) {
+  if (a == b)
+    return 1;
+  if (!a || !b)
+    return 0;
+  if (a->len != b->len)
+    return 0;
+  return memcmp(a->data, b->data, a->len) == 0;
+}
+
+int64_t su_string_char_at(const SuString *s, int64_t index) {
+  if (!s || index < 0 || (size_t)index >= s->len)
+    return -1;
+  return (unsigned char)s->data[index];
+}
+
+SuString *su_string_from_int(int64_t n) {
+  char buf[32];
+  snprintf(buf, sizeof(buf), "%lld", (long long)n);
+  return su_string_from_cstr(buf);
+}
+
+int64_t su_string_index_of(const SuString *s, const SuString *needle) {
+  if (!s || !needle)
+    return -1;
+  if (needle->len == 0)
+    return 0;
+  if (needle->len > s->len)
+    return -1;
+  for (size_t i = 0; i + needle->len <= s->len; i++) {
+    if (memcmp(s->data + i, needle->data, needle->len) == 0)
+      return (int64_t)i;
+  }
+  return -1;
+}
+
+void *su_box_i64(int64_t n) {
+  int64_t *p = (int64_t *)su_alloc(sizeof(int64_t));
+  *p = n;
+  return p;
+}
+
+int64_t su_unbox_i64(const void *p) {
+  return p ? *(const int64_t *)p : 0;
+}
+
 /* --- errors / Either / ADT / Pair ---------------------------------------- */
 
 SuError *su_error_new(int32_t code, const char *msg) {
@@ -497,6 +575,12 @@ static SuIoResult run_io(SuIo *root) {
 SuIoResult su_io_unsafe_run(SuIo *root) { return run_io(root); }
 
 int su_runtime_main(SuIo *program) {
+  return su_runtime_main_args(program, 0, NULL);
+}
+
+int su_runtime_main_args(SuIo *program, int argc, char **argv) {
+  if (argc > 0 && argv)
+    su_sys_set_args(argc, argv);
   SuIoResult r = su_io_unsafe_run(program);
   if (!r.ok) {
     fprintf(stderr, "scalui: IO failed: %s\n",
