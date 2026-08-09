@@ -678,7 +678,11 @@ impl Parser {
                 Ok(Expr::EffectsRunKit)
             }
             Token::Ident(name)
-                if matches!(name.as_str(), "Str" | "List" | "Fs" | "Sys" | "Lexer") =>
+                if matches!(
+                    name.as_str(),
+                    "Str" | "List" | "Fs" | "Sys" | "Lexer" | "Clock" | "Random"
+                        | "Net" | "Impurity"
+                ) =>
             {
                 self.bump();
                 self.expect(&Token::Dot)?;

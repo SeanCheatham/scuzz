@@ -86,7 +86,7 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 - Kernel dialect expansion for self-host: top-level `def`, `if`/`else`, `Int`/`String`/`List`, string/int ops, bound `flatMap`
 - Success bar: `scalui` release binary is produced by a ScalUI-built compiler (`./scripts/selfhost.sh`)
 
-### Phase 5 — Mobile ✅ (current)
+### Phase 5 — Mobile ✅
 
 - `UiRuntime.Mobile` peer (same `mount` / `pump` / `inject` / `snapshot` protocol)
 - Touch: `SU_INPUT_POINTER` (down/move/up) + `SU_INPUT_SCROLL`; soft keyboard via TextField focus + `SU_INPUT_TEXT` / `SU_INPUT_KEYBOARD`
@@ -95,16 +95,20 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 - `scalui package` emits `build/package/{host,android,ios}/`
 - Same examples run unmodified (`SCALUI_UI_RUNTIME=mobile`)
 
-### Phase 6 — Productize
+### Phase 6 — Productize ✅ (current)
 
-- Design-language polish, animation system, accessibility hooks
-- Docs, samples gallery, distribution of prebuilt Skia + toolchains
-- Optional: evaluate Impeller as alternate backend behind the same canvas API
-- **Close the impurity boundary** for app + compiler code:
-  - Readable + sleepable `Clock` (real/monotonic); `Random` / entropy
-  - Complete FS + **network** (and env/args/console) as blessed `IO`, not ad-hoc FFI
-  - `TestRuntime` / fake interpreters: controllable clock & RNG, in-memory FS, stubbed network — so `scalui test` can replay without wall time or the real OS
-  - Discipline: no app-level `IO.delay` thunks that reach outside the blessed surface
+- Design-language polish: theme `accent` / `disabled` / `radius` (default radius 0 keeps prior goldens)
+- Animation v0: `SuAnimFloat` lerp ticked on `pump` via monotonic `Clock` dt
+- Accessibility hooks: `SuA11yRole` + label on Views; Headless `su_view_a11y_dump`
+- Samples gallery: `examples/{hello,effects,adt,fs,clock,impurity,hello_ui,counter,todo}` indexed in README
+- Skia distribution: `scripts/fetch_skia.sh` + `third_party/skia/` notes; default remains in-tree `sk_sw`
+- Impeller: evaluated as optional alternate behind `sk_capi` — **deferred** (software CPU backend stays v0 default; see ADR 0002)
+- **Closed impurity boundary** for app + compiler code:
+  - `Clock.realTime` / `Clock.monotonic`; `IO.sleep` routed through Clock (fake advances virtual time)
+  - `Random.nextInt`; `Net.httpGet`; Fs/Sys/console (`IO.println`) already blessed
+  - `TestRuntime` fakes: clock, seeded RNG, mem FS, stubbed network (`su_testrt_install` / `SCALUI_TESTRT=1`)
+  - Kernel demo `Impurity.runKit`; examples `examples/clock`, `examples/impurity`
+  - Discipline: new impurity only through blessed modules — no app-level OS thunks via `IO.delay`
 
 ## Risks and deliberate bets
 
@@ -113,7 +117,7 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 | Building a language + UI + tooling is huge | Ruthless subset; vertical slices; ship Counter before generality |
 | Self-host never arrives / dialect drift | Kernel dialect doc; port compiler early; Stage 0/1/2 CI gate |
 | Effects too weak vs cats-effect OR too heavy for UI | Builtin IO only; pure `View` build; `Ui` effect at session boundary |
-| Untracked non-determinism breaks goldens / self-host CI | Closed impurity surface (clock, random, FS, network, env); TestRuntime fakes (Phase 6); FS starts in Phase 4 |
+| Untracked non-determinism breaks goldens / self-host CI | Closed impurity surface (Clock/Random/Fs/Net/Sys/console); TestRuntime fakes (`su_testrt_*`, `SCALUI_TESTRT=1`) |
 | “Almost Scala / almost CE” confuses users | Brand ScalUI language + effects guide; explicit non-goals (no cats port) |
 | Skia build/size complexity | Prebuilt artifacts per platform; thin C ABI; CI caches |
 | Window-only features sneak in | Rule: no UI feature without Headless interpreter path |

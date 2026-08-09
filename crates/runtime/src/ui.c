@@ -81,6 +81,8 @@ struct SuUiSession {
   float pointer_down_x;
   float pointer_down_y;
   SuView *pointer_scroll;
+  int64_t last_pump_ms; /* monotonic ms for animation dt */
+  int has_pump_clock;
 };
 
 static char *su_strdup(const char *s) {
@@ -245,12 +247,23 @@ static void drain_mobile_events(SuUiSession *session) {
 int su_ui_pump_sync(SuUiSession *session) {
   size_t nbytes = 0;
   const uint8_t *rgba;
+  int64_t now_ms;
   if (!session)
     return 0;
   if (session->lifecycle == SU_LIFECYCLE_STOP)
     return 0;
   /* Pull OS events before the frame (host-driven mobile shell). */
   drain_mobile_events(session);
+  /* Phase 6: advance animations with monotonic Clock dt. */
+  now_ms = su_clock_monotonic_ms_sync();
+  if (session->has_pump_clock) {
+    int64_t dt = now_ms - session->last_pump_ms;
+    if (dt > 0)
+      su_anim_tick_all(dt);
+  } else {
+    session->has_pump_clock = 1;
+  }
+  session->last_pump_ms = now_ms;
   /* UI-thread hop: apply signal writes posted from completed IO. */
   su_ui_bridge_flush(session);
   if (!su_view_paint(session->root, session->canvas, session->cfg.width,

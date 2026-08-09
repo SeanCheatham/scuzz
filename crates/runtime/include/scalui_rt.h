@@ -246,17 +246,52 @@ void *su_list_at(const SuList *xs, size_t index);
 SuList *su_list_reverse(SuList *xs);
 SuString *su_list_join(const SuList *xs, const char *sep);
 
-/* Blessed filesystem IO (live interpreter) */
+/* Blessed filesystem IO (live or TestRuntime mem FS) */
 SuIo *su_fs_read(SuString *path);
 SuIo *su_fs_write(SuString *path, SuString *contents);
 SuIo *su_fs_list(SuString *path);
 SuIo *su_fs_mkdirs(SuString *path);
 
-/* Process / args for Stage-1 CLI + clang */
+/* Process / args / env for Stage-1 CLI + clang (console out = IO.println) */
 void su_sys_set_args(int argc, char **argv);
 SuIo *su_sys_args(void);
 SuIo *su_sys_exec(SuString *cmd);
 SuIo *su_sys_getenv(SuString *key);
+
+/* Blessed Clock / Random / Net (Phase 6 impurity boundary) */
+SuIo *su_clock_real_time(void);   /* IO[Int] wall epoch ms */
+SuIo *su_clock_monotonic(void);   /* IO[Int] monotonic ms */
+int64_t su_clock_monotonic_ms_sync(void); /* sync read for UI pump dt */
+void su_clock_sleep_ms(int64_t ms); /* used by IO.sleep run loop */
+
+SuIo *su_random_next_int(int64_t bound); /* IO[Int] in [0, bound) */
+
+SuIo *su_net_http_get(SuString *url); /* IO[String] response body */
+
+/* TestRuntime — fake interpreters for deterministic scalui test / unit tests */
+void su_testrt_install(void); /* fake clock+rng+mem FS+stub net */
+void su_testrt_reset(void);   /* restore live interpreters */
+
+void su_testrt_clock_install(int64_t start_ms);
+void su_testrt_clock_advance(int64_t ms);
+int su_testrt_clock_is_fake(void);
+int64_t su_testrt_clock_now_ms(void);
+
+void su_testrt_random_install(uint64_t seed);
+int su_testrt_random_is_fake(void);
+
+void su_testrt_fs_install(void);
+int su_testrt_fs_is_fake(void);
+/* Mem-FS IO used by fs.c when fake is active (same SuError codes as live). */
+SuIo *su_testrt_fs_read(SuString *path);
+SuIo *su_testrt_fs_write(SuString *path, SuString *contents);
+SuIo *su_testrt_fs_list(SuString *path);
+SuIo *su_testrt_fs_mkdirs(SuString *path);
+
+void su_testrt_net_install(void);
+void su_testrt_net_stub(const char *url, const char *body);
+int su_testrt_net_is_fake(void);
+SuIo *su_testrt_net_http_get(SuString *url);
 
 /* Entrypoint helper used by @main codegen */
 int su_runtime_main(SuIo *program);
@@ -264,6 +299,9 @@ int su_runtime_main_args(SuIo *program, int argc, char **argv);
 
 /* Kernel demo: blessed effects kit smoke (Ref/Deferred/Queue/race/sleep/errors) */
 SuIo *su_effects_run_kit(void);
+
+/* Kernel demo: Phase 6 impurity + TestRuntime (Clock/Random/Fs/Net fakes) */
+SuIo *su_impurity_run_kit(void);
 
 #ifdef __cplusplus
 }

@@ -383,12 +383,8 @@ static void cont_free_all(ContFrame *stack) {
 }
 
 static void sleep_ms(int64_t ms) {
-  if (ms <= 0)
-    return;
-  struct timespec ts;
-  ts.tv_sec = (time_t)(ms / 1000);
-  ts.tv_nsec = (long)((ms % 1000) * 1000000L);
-  nanosleep(&ts, NULL);
+  /* Phase 6: routed through Clock interpreter (live nanosleep or fake advance). */
+  su_clock_sleep_ms(ms);
 }
 
 /* Attempt success continuation: wrap value as Right. */
@@ -581,6 +577,12 @@ int su_runtime_main(SuIo *program) {
 int su_runtime_main_args(SuIo *program, int argc, char **argv) {
   if (argc > 0 && argv)
     su_sys_set_args(argc, argv);
+  /* Phase 6: optional TestRuntime for deterministic replay (set by tests / CI). */
+  {
+    const char *tr = getenv("SCALUI_TESTRT");
+    if (tr && tr[0] == '1')
+      su_testrt_install();
+  }
   SuIoResult r = su_io_unsafe_run(program);
   if (!r.ok) {
     fprintf(stderr, "scalui: IO failed: %s\n",

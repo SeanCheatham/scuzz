@@ -8,10 +8,13 @@ static const SuTheme k_default_theme = {
     .on_primary = 0xFFF0F0F0u,
     .border = 0xFFB0B0B0u,
     .muted = 0xFF6A6A6Au,
+    .accent = 0xFF142850u,   /* matches primary — no golden drift */
+    .disabled = 0xFF6A6A6Au, /* matches muted */
     .pad = 12.f,
     .gap = 8.f,
     .control_h = 32.f,
     .font_px = 8.f,
+    .radius = 0.f, /* 0 preserves Phase 2–5 goldens; gallery may override */
 };
 
 const SuTheme *su_theme_default(void) { return &k_default_theme; }

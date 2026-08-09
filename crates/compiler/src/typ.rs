@@ -369,6 +369,24 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::Io(Box::new(Type::String)))
         }
+        "Clock.realTime" | "Clock.monotonic" => {
+            expect_arity(callee, &arg_tys, 0)?;
+            Ok(Type::Io(Box::new(Type::Int)))
+        }
+        "Random.nextInt" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            Ok(Type::Io(Box::new(Type::Int)))
+        }
+        "Net.httpGet" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::Io(Box::new(Type::String)))
+        }
+        "Impurity.runKit" => {
+            expect_arity(callee, &arg_tys, 0)?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
         _ => {
             let f = funs
                 .get(callee)
