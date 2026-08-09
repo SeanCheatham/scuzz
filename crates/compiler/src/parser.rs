@@ -174,6 +174,27 @@ impl Parser {
                     other => Err(ParseError::Msg(format!("unknown IO.{other}"))),
                 }
             }
+            Token::Ident(name) if name == "Ui" => {
+                self.bump();
+                self.expect(&Token::Dot)?;
+                let method = self.expect_ident()?;
+                match method.as_str() {
+                    "runHeadless" => {
+                        self.expect(&Token::LParen)?;
+                        let s = match self.bump() {
+                            Token::StringLit(s) => s,
+                            other => {
+                                return Err(ParseError::Msg(format!(
+                                    "Ui.runHeadless expects string, got {other:?}"
+                                )))
+                            }
+                        };
+                        self.expect(&Token::RParen)?;
+                        Ok(Expr::UiRunHeadless(s))
+                    }
+                    other => Err(ParseError::Msg(format!("unknown Ui.{other}"))),
+                }
+            }
             other => Err(ParseError::Msg(format!("unexpected token {other:?}"))),
         }
     }
@@ -195,5 +216,11 @@ mod tests {
         let src = r#"@main def main: IO[Unit] = IO.println("a").flatMap(_ => IO.println("b"))"#;
         let p = parse(src).unwrap();
         assert!(matches!(p.main.body, Expr::FlatMap { .. }));
+    }
+
+    #[test]
+    fn parse_ui_run_headless() {
+        let p = parse(r#"@main def main: IO[Unit] = Ui.runHeadless("Hi")"#).unwrap();
+        assert!(matches!(p.main.body, Expr::UiRunHeadless(s) if s == "Hi"));
     }
 }

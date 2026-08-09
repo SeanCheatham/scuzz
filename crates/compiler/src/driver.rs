@@ -40,6 +40,12 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
     build_runtime(&opts.runtime_dir, &opts.clang)?;
 
     let lib = opts.runtime_dir.join("build/libscalui_rt.a");
+    let ffi_skia_dir = opts
+        .runtime_dir
+        .parent()
+        .map(|p| p.join("ffi-skia"))
+        .unwrap_or_else(|| PathBuf::from("crates/ffi-skia"));
+    let skia_lib = ffi_skia_dir.join("build/libsk_capi.a");
     // Join must use a relative file name — absolute package names would replace out_dir.
     let exe_name = Path::new(&manifest.package.name)
         .file_name()
@@ -53,11 +59,14 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
     let ll_path = opts.out_dir.join(format!("{exe_name}.ll"));
     std::fs::write(&ll_path, &ir)?;
     let include = opts.runtime_dir.join("include");
+    let skia_include = ffi_skia_dir.join("include");
 
     let status = Command::new(&opts.clang)
         .arg(&ll_path)
         .arg(&lib)
+        .arg(&skia_lib)
         .arg(format!("-I{}", include.display()))
+        .arg(format!("-I{}", skia_include.display()))
         .arg("-o")
         .arg(&exe)
         .status()

@@ -43,7 +43,7 @@ Stage-2 self-host: ScalUI compiler compiles ScalUI compiler; release builds do n
 
 Vertical slices over breadth. Ship Counter before generality. No UI feature may land Window-only without a Headless path.
 
-### Phase 0 — Foundation
+### Phase 0 — Foundation ✅
 
 - Repo skeleton, vision docs, compatibility matrix, `scalui.toml` schema draft
 - Stage-0 compiler (Rust): hello-world → LLVM IR → native executable
@@ -51,12 +51,13 @@ Vertical slices over breadth. Ship Counter before generality. No UI feature may 
 - ADRs: GC v0, Skia acquisition, IO error model, `Ui` vs `View` boundary, kernel dialect for self-host
 - CI on headless Linux from day one
 
-### Phase 1 — `Ui` effect + Headless backend first
+### Phase 1 — `Ui` effect + Headless backend first ✅ (current)
 
-- Skia offscreen + `UiRuntime.Headless`: `mount` / `pump` / `inject` / `snapshot`
+- Skia-shaped offscreen (`sk_capi` + CPU software backend) + `UiRuntime.Headless`: `mount` / `pump` / `inject` / `snapshot`
 - Golden PNG under `scalui test`; `scalui run --headless` works with no display
-- **Then** `UiRuntime.Window` as a second interpreter wrapping the same session protocol
+- `UiRuntime.Window` as a second interpreter wrapping the same session protocol (OS window presentation deferred to embedder)
 - Rule: no feature may land Window-only without a Headless path
+- Kernel builtin: `Ui.runHeadless`; example `examples/hello_ui` + goldens
 
 ### Phase 2 — Declarative UI core
 
