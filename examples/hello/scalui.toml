@@ -1,0 +1,8 @@
+[package]
+name = "hello"
+version = "0.1.0"
+description = "Stage-0 hello world (IO)"
+
+[targets.native]
+kind = "executable"
+main = "Main"

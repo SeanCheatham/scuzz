@@ -1,0 +1,39 @@
+name: ci
+
+on:
+  push:
+    branches: [main, "cursor/**"]
+  pull_request:
+
+jobs:
+  linux-headless:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install clang/make
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang make
+
+      - name: Install Rust (stable via rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Runtime IO tests
+        run: make -C crates/runtime test CC=clang
+
+      - name: Build CLI
+        run: cargo build -p scalui
+
+      - name: Compiler unit tests
+        run: cargo test -p scalui-compiler
+
+      - name: Hello world → LLVM → native
+        run: |
+          cargo run -p scalui -- build examples/hello
+          ./examples/hello/build/hello | tee /tmp/hello.out
+          grep -q "Hello, ScalUI!" /tmp/hello.out
+          grep -q "Phase 0 online." /tmp/hello.out
+
+      - name: scalui test
+        run: cargo run -p scalui -- test examples/hello
