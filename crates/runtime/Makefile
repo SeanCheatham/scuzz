@@ -32,11 +32,11 @@ build/libscalui_rt.a: $(OBJ)
 
 build/test_io: tests/test_io.c build/libscalui_rt.a | build ffi-skia
 	$(CC) $(CFLAGS) $(INCLUDES) tests/test_io.c -Lbuild -L$(FFI_SKIA)/build \
-		-lscalui_rt -lsk_capi -o $@
+		-lscalui_rt -lsk_capi -lpthread -o $@
 
 build/test_ui: tests/test_ui.c build/libscalui_rt.a | build ffi-skia
 	$(CC) $(CFLAGS) $(INCLUDES) tests/test_ui.c -Lbuild -L$(FFI_SKIA)/build \
-		-lscalui_rt -lsk_capi -o $@
+		-lscalui_rt -lsk_capi -lpthread -o $@
 
 test: build/test_io build/test_ui
 	./build/test_io

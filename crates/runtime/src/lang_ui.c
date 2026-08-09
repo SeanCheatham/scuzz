@@ -1,10 +1,12 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include "scalui_ui.h"
 #include "scalui_embedder.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+#include <time.h>
 
 /* fill_cfg / demo_finish live in demos.c / ui.c */
 void su_ui_resolve_headless_size(int *width, int *height, double *scale);
@@ -410,7 +412,12 @@ static void *thunk_run_view(void *env) {
       frame++;
       if (max_frames > 0 && frame >= max_frames)
         break;
-      usleep(16000);
+      {
+        struct timespec ts;
+        ts.tv_sec = 0;
+        ts.tv_nsec = 16000000L; /* ~60fps cap */
+        nanosleep(&ts, NULL);
+      }
     } while (su_embedder_alive());
   } else {
     su_ui_demo_finish(session);

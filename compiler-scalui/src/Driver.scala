@@ -136,7 +136,7 @@ def linkCmd(clang: String, ll: String, lib: String, skia: String, inc: String, s
         str4(
           " -I",
           skInc,
-          " ",
+          " -lpthread ",
           str4(embedderLinkFlags(embedder), " -o ", exe, "")
         )
       )

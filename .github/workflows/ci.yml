@@ -118,3 +118,31 @@ jobs:
           env SCALUI_UI_WIDTH=200 SCALUI_UI_HEIGHT=120 \
             ./examples/counter/build/package/host/run.sh 2>&1 | tee /tmp/pkg-host.out
           grep -q "scalui mobile: present" /tmp/pkg-host.out
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust (stable via rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Runtime + UI tests
+        run: make -C crates/runtime test CC=clang
+
+      - name: Build CLI + embedders
+        run: |
+          make -C crates/ffi-skia lib CC=clang
+          make -C crates/embedder-desktop lib CC=clang
+          make -C crates/embedder-mobile lib CC=clang
+          cargo build -p scalui
+
+      - name: Self-host dual-boot (default stack)
+        run: ./scripts/selfhost.sh
+
+      - name: Golden PNG tests
+        run: |
+          cargo run -p scalui -- test examples/hello_ui
+          cargo run -p scalui -- test examples/counter
+          cargo run -p scalui -- test examples/todo
+          cargo run -p scalui -- test examples/nav

@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "scalui_rt.h"
 
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -574,22 +575,68 @@ int su_runtime_main(SuIo *program) {
   return su_runtime_main_args(program, 0, NULL);
 }
 
-int su_runtime_main_args(SuIo *program, int argc, char **argv) {
-  if (argc > 0 && argv)
-    su_sys_set_args(argc, argv);
-  /* Phase 6: optional TestRuntime for deterministic replay (set by tests / CI). */
+typedef struct {
+  SuIo *program;
+  int argc;
+  char **argv;
+  int rc;
+} SuMainArgs;
+
+static void *su_runtime_main_worker(void *arg) {
+  SuMainArgs *a = (SuMainArgs *)arg;
+  if (a->argc > 0 && a->argv)
+    su_sys_set_args(a->argc, a->argv);
   {
     const char *tr = getenv("SCALUI_TESTRT");
     if (tr && tr[0] == '1')
       su_testrt_install();
   }
-  SuIoResult r = su_io_unsafe_run(program);
+  SuIoResult r = su_io_unsafe_run(a->program);
   if (!r.ok) {
     fprintf(stderr, "scalui: IO failed: %s\n",
             r.error ? su_string_cstr(r.error->message) : "unknown");
     if (r.error)
       su_error_free(r.error);
-    return 1;
+    a->rc = 1;
+    return NULL;
   }
-  return 0;
+  a->rc = 0;
+  return NULL;
+}
+
+int su_runtime_main_args(SuIo *program, int argc, char **argv) {
+  /* Run the program on a heap-allocated stack so Stage-1 emit (deep but
+   * bounded) does not depend on the process main-thread ulimit — required on
+   * macOS where `ulimit -s` cannot grow the main stack. */
+  SuMainArgs args;
+  pthread_t thr;
+  pthread_attr_t attr;
+  size_t stack = 64u * 1024u * 1024u;
+  int perr;
+
+  args.program = program;
+  args.argc = argc;
+  args.argv = argv;
+  args.rc = 1;
+
+  perr = pthread_attr_init(&attr);
+  if (perr != 0)
+    su_panic("pthread_attr_init failed");
+  perr = pthread_attr_setstacksize(&attr, stack);
+  if (perr != 0) {
+    pthread_attr_destroy(&attr);
+    /* Fall back to the calling thread if the platform rejects the size. */
+    su_runtime_main_worker(&args);
+    return args.rc;
+  }
+  perr = pthread_create(&thr, &attr, su_runtime_main_worker, &args);
+  pthread_attr_destroy(&attr);
+  if (perr != 0) {
+    su_runtime_main_worker(&args);
+    return args.rc;
+  }
+  perr = pthread_join(thr, NULL);
+  if (perr != 0)
+    su_panic("pthread_join failed");
+  return args.rc;
 }

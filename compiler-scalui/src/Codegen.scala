@@ -779,6 +779,28 @@ def emitCallWithArgs(callee: String, ae: List, defs: List, prefix: String): List
   emitBuiltinOrUser(callee, argPackCode(ae), argPackVals(ae), argPackKinds(ae), argPackId(ae), argPackConts(ae), defs, prefix)
 
 def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id: Int, conts: String, defs: List, prefix: String): List =
+  if (startsWith(callee, "Str.") == 1) emitBuiltinStr(callee, code, vals, id, conts, prefix)
+  else if (startsWith(callee, "List.") == 1) emitBuiltinList(callee, code, vals, kinds, id, conts, prefix)
+  else if (startsWith(callee, "Fs.") == 1) emitBuiltinFs(callee, code, vals, id, conts, prefix)
+  else if (startsWith(callee, "Sys.") == 1) emitBuiltinSys(callee, code, vals, id, conts, prefix)
+  else if (startsWith(callee, "Clock.") == 1) emitBuiltinClock(callee, code, vals, id, conts, prefix)
+  else if (startsWith(callee, "Signal.") == 1) emitBuiltinSignal(callee, code, vals, id, conts, prefix)
+  else if (startsWith(callee, "View.") == 1) emitBuiltinView(callee, code, vals, id, conts, prefix)
+  else if (startsWith(callee, "Todo.") == 1) emitBuiltinTodo(callee, code, vals, id, conts, prefix)
+  else if (startsWith(callee, "Ui.") == 1) emitBuiltinUi(callee, code, vals, id, conts, prefix)
+  else if (streq(callee, "Random.nextInt") == 1)
+    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_random_next_int(i64 ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ioi", id, conts)
+  else if (streq(callee, "Net.httpGet") == 1)
+    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_net_http_get(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
+  else if (streq(callee, "Impurity.runKit") == 1)
+    mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_impurity_run_kit()\n")), str3("%", prefix, "_v"), "io", id, conts)
+  else if (streq(callee, "Effects.runKit") == 1)
+    mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_effects_run_kit()\n")), str3("%", prefix, "_v"), "io", id, conts)
+  else if (streq(callee, "Lexer.classify") == 1)
+    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lexer_classify(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else emitUserCall(callee, code, vals, kinds, id, conts, defs, prefix)
+
+def emitBuiltinStr(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
   if (streq(callee, "Str.concat") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_string_concat(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "Str.len") == 1)
@@ -799,7 +821,10 @@ def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id:
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_string_from_int(i64 ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "Str.indexOf") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call i64 @su_string_index_of(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "int", id, conts)
-  else if (streq(callee, "List.empty") == 1)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinList(callee: String, code: String, vals: List, kinds: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "List.empty") == 1)
     mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_list_nil()\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "List.cons") == 1) emitListCons(code, vals, kinds, id, conts, prefix)
   else if (streq(callee, "List.isEmpty") == 1)
@@ -828,7 +853,10 @@ def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id:
       id,
       conts
     )
-  else if (streq(callee, "Fs.read") == 1)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinFs(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "Fs.read") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_fs_read(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
   else if (streq(callee, "Fs.write") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_fs_write(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
@@ -836,23 +864,26 @@ def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id:
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_fs_list(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
   else if (streq(callee, "Fs.mkdirs") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_fs_mkdirs(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
-  else if (streq(callee, "Sys.args") == 1)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinSys(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "Sys.args") == 1)
     mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_sys_args()\n")), str3("%", prefix, "_v"), "io", id, conts)
   else if (streq(callee, "Sys.exec") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_sys_exec(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ioi", id, conts)
   else if (streq(callee, "Sys.getenv") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_sys_getenv(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
-  else if (streq(callee, "Clock.realTime") == 1)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinClock(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "Clock.realTime") == 1)
     mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_clock_real_time()\n")), str3("%", prefix, "_v"), "ioi", id, conts)
   else if (streq(callee, "Clock.monotonic") == 1)
     mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_clock_monotonic()\n")), str3("%", prefix, "_v"), "ioi", id, conts)
-  else if (streq(callee, "Random.nextInt") == 1)
-    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_random_next_int(i64 ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ioi", id, conts)
-  else if (streq(callee, "Net.httpGet") == 1)
-    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_net_http_get(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
-  else if (streq(callee, "Impurity.runKit") == 1)
-    mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_impurity_run_kit()\n")), str3("%", prefix, "_v"), "io", id, conts)
-  else if (streq(callee, "Signal.int") == 1)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinSignal(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "Signal.int") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_signal_int(i64 ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "Signal.get") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call i64 @su_lang_signal_get(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "int", id, conts)
@@ -860,7 +891,10 @@ def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id:
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_signal_set(ptr ", List.at(vals, 0), ", i64 ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "Signal.str") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_signal_str(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
-  else if (streq(callee, "View.text") == 1)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinView(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "View.text") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_view_text(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "View.textSignal") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_text_signal(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
@@ -906,7 +940,10 @@ def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id:
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_button_todo_add(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "View.buttonTodoSave") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_button_todo_save(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
-  else if (streq(callee, "Todo.create") == 1)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinTodo(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "Todo.create") == 1)
     mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_lang_todo_create()\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "Todo.load") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_todo_load(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
@@ -914,7 +951,10 @@ def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id:
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_todo_draft(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "Todo.listView") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_todo_list_view(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
-  else if (streq(callee, "Ui.run") == 1)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinUi(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "Ui.run") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_ui_run_view(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
   else if (streq(callee, "Ui.runWithTodo") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_ui_run_view_todo(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
@@ -926,11 +966,7 @@ def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id:
     mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_ui_run_live(i32 0, i32 0)\n")), str3("%", prefix, "_v"), "io", id, conts)
   else if (streq(callee, "Ui.runTodo") == 1)
     mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_ui_run_todo(i32 0, i32 0)\n")), str3("%", prefix, "_v"), "io", id, conts)
-  else if (streq(callee, "Effects.runKit") == 1)
-    mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_effects_run_kit()\n")), str3("%", prefix, "_v"), "io", id, conts)
-  else if (streq(callee, "Lexer.classify") == 1)
-    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lexer_classify(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
-  else emitUserCall(callee, code, vals, kinds, id, conts, defs, prefix)
+  else mkS(code, "null", "ptr", id, conts)
 
 def emitListCons(code: String, vals: List, kinds: List, id: Int, conts: String, prefix: String): List =
   if (streq(List.head(kinds), "int") == 1)
