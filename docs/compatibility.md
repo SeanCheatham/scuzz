@@ -24,14 +24,15 @@ ScalUI deliberately diverges from the Scala Center / Typelevel / JVM ecosystems.
 | --- | --- | --- |
 | Binary format | Native ELF/Mach-O/PE via LLVM | JVM classfiles / JARs |
 | Dependencies | `scalui.toml` path/git/versioned artifacts we host | Maven Central / Ivy |
-| Effects | Builtin `IO` / `Resource` / concurrent kit | cats-effect runtime, ZIO, Future-as-default |
-| UI | ScalUI `View` + `Ui` + Skia | Swing, JavaFX, Compose Multiplatform, Flutter widgets |
+| Effects | Builtin `IO` / `Resource` / concurrent kit + Clock/Random/Fs/Net/Sys | cats-effect runtime, ZIO, Future-as-default |
+| Test interpreters | `TestRuntime` fakes (clock/RNG/mem FS/stub net); `SCALUI_TESTRT=1` | Wall-clock-only test harnesses; ad-hoc FFI mocks |
+| UI | ScalUI `View` + `Ui` + Skia (`sk_capi`; Impeller deferred) | Swing, JavaFX, Compose Multiplatform, Flutter widgets |
 
 ## Platforms (headless-first)
 
 | Target | Language/runtime/UI-core | Window / Mobile embedder | Notes |
 | --- | --- | --- | --- |
-| Linux headless (CI/cloud) | Yes | N/A | Default development & CI; Phase 1–5 golden PNGs + self-host |
+| Linux headless (CI/cloud) | Yes | N/A | Default development & CI; Phase 1–6 golden PNGs + self-host + TestRuntime |
 | Linux desktop | Yes | Phase 3 X11 | `crates/embedder-desktop` blits Window peer frames when `DISPLAY` is set |
 | Linux mobile host shell | Yes | Phase 5 host | `crates/embedder-mobile` + `SCALUI_MOBILE_SHELL=1` exercises Mobile peer |
 | macOS desktop | Yes | Secondary | Metal/GL surface later |

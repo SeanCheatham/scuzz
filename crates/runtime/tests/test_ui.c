@@ -324,11 +324,60 @@ static void test_mobile_pointer_scroll_lifecycle(void) {
   su_signal_str_free(draft);
 }
 
+static void test_a11y_and_anim(void) {
+  SuView *btn;
+  SuView *col;
+  SuString *dump;
+  SuAnimFloat *anim;
+  SuUiConfig cfg;
+  SuUiSession *session;
+
+  btn = su_view_button("Go", NULL, NULL);
+  assert(su_view_a11y_role(btn) == SU_A11Y_BUTTON);
+  assert(strcmp(su_view_a11y_label(btn), "Go") == 0);
+  col = su_view_column();
+  su_view_add_child(col, btn);
+  su_view_add_child(col, su_view_text("hi"));
+  dump = su_view_a11y_dump(col);
+  assert(strstr(su_string_cstr(dump), "button:Go") != NULL);
+  assert(strstr(su_string_cstr(dump), "text:hi") != NULL);
+
+  anim = su_anim_float(0.f, 10.f, 100);
+  assert(!su_anim_done(anim));
+  su_anim_tick(anim, 50);
+  assert(su_anim_value(anim) > 4.f && su_anim_value(anim) < 6.f);
+  su_anim_tick(anim, 50);
+  assert(su_anim_done(anim));
+  assert(su_anim_value(anim) == 10.f);
+
+  /* Pump advances registered anims via Clock dt (fake clock). */
+  su_testrt_clock_install(1000);
+  {
+    SuAnimFloat *a2 = su_anim_float(0.f, 1.f, 40);
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.kind = SU_UI_RUNTIME_HEADLESS;
+    cfg.width = 80;
+    cfg.height = 40;
+    session = su_ui_mount(&cfg, col);
+    assert(session);
+    assert(su_ui_pump_sync(session));
+    su_testrt_clock_advance(40);
+    assert(su_ui_pump_sync(session));
+    assert(su_anim_done(a2));
+    su_ui_unmount(session);
+    su_anim_free(a2);
+  }
+  su_testrt_reset();
+  su_anim_free(anim);
+  su_view_free(col);
+}
+
 int main(void) {
   test_label_session();
   test_signals_layout_hit();
   test_widgets_and_demos();
   test_mobile_pointer_scroll_lifecycle();
+  test_a11y_and_anim();
   puts("runtime ui tests ok");
   return 0;
 }

@@ -68,6 +68,11 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @su_sys_args()").unwrap();
     writeln!(out, "declare ptr @su_sys_exec(ptr)").unwrap();
     writeln!(out, "declare ptr @su_sys_getenv(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_clock_real_time()").unwrap();
+    writeln!(out, "declare ptr @su_clock_monotonic()").unwrap();
+    writeln!(out, "declare ptr @su_random_next_int(i64)").unwrap();
+    writeln!(out, "declare ptr @su_net_http_get(ptr)").unwrap();
+    writeln!(out, "declare ptr @su_impurity_run_kit()").unwrap();
     writeln!(out, "declare ptr @su_box_i64(i64)").unwrap();
     writeln!(out, "declare i64 @su_unbox_i64(ptr)").unwrap();
     writeln!(out, "declare i32 @su_runtime_main_args(ptr, i32, ptr)").unwrap();
@@ -1403,6 +1408,36 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Clock.realTime" => {
+            writeln!(code, "  %{prefix}_v = call ptr @su_clock_real_time()").unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Clock.monotonic" => {
+            writeln!(code, "  %{prefix}_v = call ptr @su_clock_monotonic()").unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Random.nextInt" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_random_next_int(i64 {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Net.httpGet" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_net_http_get(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Impurity.runKit" => {
+            writeln!(code, "  %{prefix}_v = call ptr @su_impurity_run_kit()").unwrap();
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         other => {

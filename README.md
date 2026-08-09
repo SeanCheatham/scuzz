@@ -6,13 +6,12 @@
 
 ## Status
 
-**Phase 5 — Mobile** (current)
+**Phase 6 — Productize** (current)
 
-- `UiRuntime.Mobile` peer + host shell (`crates/embedder-mobile`); Android/iOS packaging templates
-- Touch pointer / scroll, soft keyboard (TextField focus), app lifecycle inject — all Headless-scriptable
-- `scalui package` → `build/package/{host,android,ios}/`
-- Same Counter/Todo/hello_ui examples via `SCALUI_UI_RUNTIME=mobile`
-- Phase 4 self-host path remains (`./scripts/selfhost.sh`; Stage 0 Rust CLI is the feature canary)
+- Closed impurity boundary: `Clock` / `Random` / `Fs` / `Net` / `Sys` / `IO.println` + `TestRuntime` fakes
+- Animation v0 + accessibility hooks (Headless-dumpable); theme polish tokens
+- Samples gallery below; Skia prebuilts via `SCALUI_SKIA_URL` (default: in-tree `sk_sw`)
+- Impeller evaluated and deferred (ADR 0002); Phase 4 self-host + Phase 5 Mobile remain
 
 See [docs/vision.md](docs/vision.md).
 
@@ -21,11 +20,17 @@ See [docs/vision.md](docs/vision.md).
 Requirements: Rust (stable), `clang`, `make`. Optional for Window: X11 (`libx11-dev`) + a display (or `xvfb-run`).
 
 ```bash
-# Runtime + UI unit tests (includes Mobile peer / gestures)
+# Runtime + UI unit tests (includes TestRuntime / anim / a11y)
 make -C crates/runtime test
 
 # Stage-0 canary CLI
 cargo build -p scalui
+
+# Impurity kit (fake Clock/Random/Fs/Net — no wall wait, no network)
+cargo run -p scalui -- run examples/impurity
+
+# Live clock
+cargo run -p scalui -- run examples/clock
 
 # Counter (Headless snapshot, no display)
 cargo run -p scalui -- run --headless examples/counter
@@ -33,13 +38,8 @@ cargo run -p scalui -- run --headless examples/counter
 # Golden PNG tests
 cargo run -p scalui -- test examples/counter
 
-# Mobile peer via host shell (same example binary)
-env SCALUI_UI_RUNTIME=mobile SCALUI_MOBILE_SHELL=1 \
-  cargo run -p scalui -- run examples/counter
-
-# Packaging shells
-cargo run -p scalui -- package examples/counter
-./examples/counter/build/package/host/run.sh
+# Optional: install process-wide TestRuntime for an app binary
+env SCALUI_TESTRT=1 cargo run -p scalui -- run examples/fs
 
 # Dual-boot (Stage 1 rebuilds itself → Stage 2)
 ./scripts/selfhost.sh
@@ -51,42 +51,55 @@ Window peer (presents via X11 when `DISPLAY` is set):
 xvfb-run -a env SCALUI_UI_RUNTIME=window cargo run -p scalui -- run examples/hello_ui
 ```
 
+## Samples gallery
+
+| Example | Phase | What it proves |
+| --- | --- | --- |
+| `examples/hello` | 0 | `IO.println` |
+| `examples/hello_ui` | 1 | Headless `Ui` + goldens |
+| `examples/counter` | 2 | Signals + Button + goldens |
+| `examples/todo` | 2 | TextField/List + IO bridge + goldens |
+| `examples/effects` | 3 | Blessed effects kit |
+| `examples/adt` | 3 | package / enum / match |
+| `examples/fs` | 4 | Blessed `Fs.*` (live) |
+| `examples/clock` | 6 | `Clock.realTime` / `monotonic` |
+| `examples/impurity` | 6 | `Impurity.runKit` + TestRuntime fakes |
+
+```bash
+cargo run -p scalui -- run examples/impurity   # impurity-ok
+cargo run -p scalui -- test examples/counter   # goldens
+```
+
 ## Layout
 
 ```
 docs/                 vision, compatibility, ADRs, scalui.toml schema
 crates/compiler/      Stage-0 parser / typer / LLVM codegen (Rust canary)
 crates/cli/           Stage-0 scalui tool (canary: build/run/test/fmt/lsp/watch/package)
-crates/runtime/       C runtime (GC-v0, IO kit, Fs/Sys, View tree, Ui session)
-crates/ui/            design-language home (Phase 2 widgets live in runtime C for now)
+crates/runtime/       C runtime (GC-v0, IO kit, Clock/Random/Fs/Net/Sys, TestRuntime, View/Ui)
+crates/ui/            design-language home (widgets live in runtime C for now)
 crates/ffi-skia/      sk_capi + CPU software backend
 crates/embedder-desktop/  Linux X11 present for Window peer
 crates/embedder-mobile/   Mobile host shell + Android/iOS packaging templates
 compiler-scalui/      Stage 1/2 ScalUI compiler + CLI (release path)
 scripts/selfhost.sh   dual-boot Stage 0 → 1 → 2
-examples/hello/       Stage-0 IO sample
-examples/fs/          Phase 4 blessed Fs.read/write
-examples/hello_ui/    Phase 1 Headless label + goldens
-examples/counter/     Phase 2 Counter + goldens
-examples/todo/        Phase 2 Todo + goldens
-examples/effects/     Phase 3 effects kit
-examples/adt/         Phase 3 package + enum + match
+scripts/fetch_skia.sh optional Skia prebuilt fetch (`SCALUI_SKIA_URL`)
+examples/             samples gallery (see table above)
 third_party/skia/     prebuilt fetch notes
-scripts/fetch_skia.sh optional Skia prebuilt fetch
 ```
 
-## Kernel dialect (Stage 0 / Phase 4+)
+## Kernel dialect (Stage 0 / Phase 6)
 
 ```scala
-def greet(name: String): String = Str.concat("hi:", name)
-
 @main def main: IO[Unit] =
-  Fs.read("note.txt").flatMap(s =>
-    IO.println(greet(s))
+  Clock.realTime.flatMap(t =>
+    Fs.read("note.txt").flatMap(s =>
+      IO.println(Str.concat(Str.fromInt(t), s))
+    )
   )
 ```
 
-Also: top-level `def`, `if`/`else`, `List`/`Str`/`Fs`/`Sys`, packages/enums/`match` (Stage 0), UI/effects demos. See [docs/adr/0005-kernel-dialect.md](docs/adr/0005-kernel-dialect.md).
+Also: `Random.nextInt`, `Net.httpGet`, `Impurity.runKit`, `Sys.*`, packages/enums/`match`, UI/effects demos. See [docs/adr/0005-kernel-dialect.md](docs/adr/0005-kernel-dialect.md).
 
 ## License
 

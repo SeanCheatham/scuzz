@@ -43,7 +43,7 @@ jobs:
           grep -q "Hello, ScalUI!" /tmp/hello.out
           grep -q "Phase 0 online." /tmp/hello.out
 
-      - name: Phase 3–4 effects + ADT + FS + Stage-1 canary
+      - name: Phase 3–6 effects + ADT + FS + impurity + Stage-1 canary
         run: |
           cargo run -p scalui -- run examples/effects | tee /tmp/effects.out
           grep -q "phase3" /tmp/effects.out
@@ -52,6 +52,13 @@ jobs:
           grep -q "adt:red" /tmp/adt.out
           cargo run -p scalui -- run examples/fs | tee /tmp/fs.out
           grep -q "fs:phase4-fs" /tmp/fs.out
+          cargo run -p scalui -- run examples/clock | tee /tmp/clock.out
+          grep -q "real:" /tmp/clock.out
+          grep -q "mono:" /tmp/clock.out
+          cargo run -p scalui -- run examples/impurity | tee /tmp/impurity.out
+          grep -q "impurity-ok" /tmp/impurity.out
+          grep -q "fs:" /tmp/impurity.out
+          grep -q "net:" /tmp/impurity.out
           cargo run -p scalui -- fmt --check examples/adt
           cargo run -p scalui -- build examples/adt
           cargo run -p scalui -- build examples/adt 2>&1 | tee /tmp/incr.out

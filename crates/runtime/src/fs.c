@@ -7,7 +7,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
-/* Blessed filesystem IO — live interpreter (fake FS is Phase 6). */
+/* Blessed filesystem IO — live interpreter or TestRuntime mem FS. */
 
 typedef struct {
   int is_err;
@@ -77,6 +77,8 @@ static void *fs_read_result(void *env) {
 SuIo *su_fs_read(SuString *path) {
   if (!path)
     su_panic("su_fs_read(null)");
+  if (su_testrt_fs_is_fake())
+    return su_testrt_fs_read(path);
   return su_io_flatmap(su_io_delay(fs_read_result, path), unwrap_fs, NULL);
 }
 
@@ -110,6 +112,8 @@ static void *fs_write_result(void *env) {
 SuIo *su_fs_write(SuString *path, SuString *contents) {
   if (!path)
     su_panic("su_fs_write(null path)");
+  if (su_testrt_fs_is_fake())
+    return su_testrt_fs_write(path, contents);
   FsWriteEnv *e = (FsWriteEnv *)su_alloc(sizeof(FsWriteEnv));
   e->path = path;
   e->contents = contents ? contents : su_string_from_cstr("");
@@ -144,6 +148,8 @@ static void *fs_list_result(void *env) {
 SuIo *su_fs_list(SuString *path) {
   if (!path)
     su_panic("su_fs_list(null)");
+  if (su_testrt_fs_is_fake())
+    return su_testrt_fs_list(path);
   return su_io_flatmap(su_io_delay(fs_list_result, path), unwrap_fs, NULL);
 }
 
@@ -187,5 +193,7 @@ static void *fs_mkdirs_result(void *env) {
 SuIo *su_fs_mkdirs(SuString *path) {
   if (!path)
     su_panic("su_fs_mkdirs(null)");
+  if (su_testrt_fs_is_fake())
+    return su_testrt_fs_mkdirs(path);
   return su_io_flatmap(su_io_delay(fs_mkdirs_result, path), unwrap_fs, NULL);
 }

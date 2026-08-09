@@ -207,7 +207,7 @@ int main(void) {
   /* box */
   assert(su_unbox_i64(su_box_i64(7)) == 7);
 
-  /* Fs roundtrip */
+  /* Fs roundtrip (live) */
   {
     const char *path = "build/test_fs_roundtrip.txt";
     r = su_io_unsafe_run(su_fs_mkdirs(su_string_from_cstr("build")));
@@ -221,6 +221,45 @@ int main(void) {
     r = su_io_unsafe_run(su_fs_list(su_string_from_cstr("build")));
     assert(r.ok);
     assert(!su_list_is_empty((SuList *)r.value));
+  }
+
+  /* Phase 6 TestRuntime: fake clock sleep without wall wait */
+  {
+    int64_t t0, t1;
+    su_testrt_install();
+    su_testrt_net_stub("http://example.test/ping", "pong");
+    t0 = su_testrt_clock_now_ms();
+    r = su_io_unsafe_run(su_io_sleep_ms(1000));
+    assert(r.ok);
+    t1 = su_testrt_clock_now_ms();
+    assert(t1 == t0 + 1000);
+
+    r = su_io_unsafe_run(su_clock_real_time());
+    assert(r.ok);
+    assert(su_unbox_i64(r.value) == t1);
+
+    r = su_io_unsafe_run(su_random_next_int(10));
+    assert(r.ok);
+    assert(su_unbox_i64(r.value) >= 0 && su_unbox_i64(r.value) < 10);
+
+    r = su_io_unsafe_run(
+        su_fs_write(su_string_from_cstr("a/b.txt"), su_string_from_cstr("mem")));
+    assert(r.ok);
+    r = su_io_unsafe_run(su_fs_read(su_string_from_cstr("a/b.txt")));
+    assert(r.ok);
+    assert(strcmp(su_string_cstr((SuString *)r.value), "mem") == 0);
+
+    r = su_io_unsafe_run(
+        su_net_http_get(su_string_from_cstr("http://example.test/ping")));
+    assert(r.ok);
+    assert(strcmp(su_string_cstr((SuString *)r.value), "pong") == 0);
+
+    r = su_io_unsafe_run(su_impurity_run_kit());
+    assert(r.ok);
+
+    su_testrt_reset();
+    assert(!su_testrt_clock_is_fake());
+    assert(!su_testrt_fs_is_fake());
   }
 
   puts("runtime io tests ok");

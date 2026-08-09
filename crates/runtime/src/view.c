@@ -43,6 +43,10 @@ struct SuView {
   float scroll_y;
   float pref_h; /* >0 overrides natural height when set */
   SuView *scroll_child; /* owned as sole child for SCROLL */
+
+  /* Phase 6 a11y */
+  SuA11yRole a11y_role;
+  char *a11y_label;
 };
 
 static SuView *view_new(SuViewKind kind) {
@@ -86,11 +90,15 @@ void su_view_add_child(SuView *parent, SuView *child) {
 SuView *su_view_text(const char *text) {
   SuView *v = view_new(SU_VIEW_TEXT);
   v->text = su_strdup(text);
+  v->a11y_role = SU_A11Y_TEXT;
+  v->a11y_label = su_strdup(text);
   return v;
 }
 
 SuView *su_view_text_signal_int(SuSignalInt *sig, const char *prefix) {
   SuView *v = view_new(SU_VIEW_TEXT);
+  v->a11y_role = SU_A11Y_TEXT;
+  v->a11y_label = su_strdup(prefix ? prefix : "value");
   v->sig_int = sig;
   v->prefix = su_strdup(prefix ? prefix : "");
   return v;
@@ -108,6 +116,8 @@ SuView *su_view_button(const char *label, SuViewTapFn on_tap, void *env) {
   v->on_tap = on_tap;
   v->tap_env = env;
   v->interactive = 1;
+  v->a11y_role = SU_A11Y_BUTTON;
+  v->a11y_label = su_strdup(label);
   return v;
 }
 
@@ -116,16 +126,86 @@ SuView *su_view_text_field(SuSignalStr *text, const char *placeholder) {
   v->sig_str = text;
   v->placeholder = su_strdup(placeholder ? placeholder : "");
   v->interactive = 1;
+  v->a11y_role = SU_A11Y_TEXT_FIELD;
+  v->a11y_label = su_strdup(placeholder ? placeholder : "text field");
   return v;
+}
+
+void su_view_set_a11y(SuView *view, SuA11yRole role, const char *label) {
+  if (!view)
+    return;
+  view->a11y_role = role;
+  su_free(view->a11y_label);
+  view->a11y_label = su_strdup(label ? label : "");
+}
+
+SuA11yRole su_view_a11y_role(const SuView *view) {
+  return view ? view->a11y_role : SU_A11Y_NONE;
+}
+
+const char *su_view_a11y_label(const SuView *view) {
+  return view && view->a11y_label ? view->a11y_label : "";
+}
+
+static const char *a11y_role_name(SuA11yRole role) {
+  switch (role) {
+  case SU_A11Y_BUTTON:
+    return "button";
+  case SU_A11Y_TEXT:
+    return "text";
+  case SU_A11Y_TEXT_FIELD:
+    return "textfield";
+  case SU_A11Y_IMAGE:
+    return "image";
+  case SU_A11Y_LIST:
+    return "list";
+  case SU_A11Y_SCROLL:
+    return "scroll";
+  default:
+    return "none";
+  }
+}
+
+static void a11y_dump_node(SuView *v, char *buf, size_t cap, size_t *len) {
+  int i;
+  if (!v || !buf || !len)
+    return;
+  if (v->a11y_role != SU_A11Y_NONE) {
+    char line[256];
+    int n = snprintf(line, sizeof line, "%s:%s\n", a11y_role_name(v->a11y_role),
+                     v->a11y_label ? v->a11y_label : "");
+    if (n > 0 && *len + (size_t)n < cap) {
+      memcpy(buf + *len, line, (size_t)n);
+      *len += (size_t)n;
+      buf[*len] = '\0';
+    }
+  }
+  for (i = 0; i < v->child_count; i++)
+    a11y_dump_node(v->children[i], buf, cap, len);
+}
+
+SuString *su_view_a11y_dump(SuView *root) {
+  char buf[4096];
+  size_t len = 0;
+  buf[0] = '\0';
+  a11y_dump_node(root, buf, sizeof buf, &len);
+  return su_string_from_cstr(buf);
 }
 
 SuView *su_view_column(void) { return view_new(SU_VIEW_COLUMN); }
 SuView *su_view_row(void) { return view_new(SU_VIEW_ROW); }
-SuView *su_view_list(void) { return view_new(SU_VIEW_LIST); }
+SuView *su_view_list(void) {
+  SuView *v = view_new(SU_VIEW_LIST);
+  v->a11y_role = SU_A11Y_LIST;
+  v->a11y_label = su_strdup("list");
+  return v;
+}
 
 SuView *su_view_scroll(SuView *child) {
   SuView *v = view_new(SU_VIEW_SCROLL);
   v->pref_h = 64.f;
+  v->a11y_role = SU_A11Y_SCROLL;
+  v->a11y_label = su_strdup("scroll");
   if (child)
     su_view_add_child(v, child);
   return v;
@@ -137,6 +217,8 @@ SuView *su_view_image(int w, int h, uint32_t argb, const char *caption) {
   v->img_h = h > 0 ? h : 32;
   v->bg_argb = argb ? argb : 0xFF888888u;
   v->text = su_strdup(caption ? caption : "");
+  v->a11y_role = SU_A11Y_IMAGE;
+  v->a11y_label = su_strdup(caption && caption[0] ? caption : "image");
   return v;
 }
 
@@ -166,6 +248,7 @@ void su_view_free(SuView *view) {
   su_free(view->text);
   su_free(view->prefix);
   su_free(view->placeholder);
+  su_free(view->a11y_label);
   /* Signals are owned by the demo/session, not the view. */
   su_free(view);
 }
