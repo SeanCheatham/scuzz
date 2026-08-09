@@ -441,6 +441,68 @@ int su_view_paint(SuView *root, SkCanvas *canvas, int width, int height,
   return 1;
 }
 
+static void clear_focus(SuView *v) {
+  int i;
+  if (!v)
+    return;
+  v->focused = 0;
+  for (i = 0; i < v->child_count; i++)
+    clear_focus(v->children[i]);
+  if (v->kind == SU_VIEW_SCROLL && v->scroll_child)
+    clear_focus(v->scroll_child);
+}
+
+float su_view_scroll_y(const SuView *scroll) {
+  if (!scroll || scroll->kind != SU_VIEW_SCROLL)
+    return 0.f;
+  return scroll->scroll_y;
+}
+
+void su_view_scroll_by(SuView *scroll, float dy) {
+  if (!scroll || scroll->kind != SU_VIEW_SCROLL)
+    return;
+  scroll->scroll_y += dy;
+  if (scroll->scroll_y < 0.f)
+    scroll->scroll_y = 0.f;
+}
+
+static SuView *scroll_at_node(SuView *v, float x, float y) {
+  int i;
+  SuView *found;
+  if (!v || !point_in(&v->frame, x, y))
+    return NULL;
+  for (i = v->child_count - 1; i >= 0; i--) {
+    found = scroll_at_node(v->children[i], x, y);
+    if (found)
+      return found;
+  }
+  if (v->kind == SU_VIEW_SCROLL && v->scroll_child) {
+    found = scroll_at_node(v->scroll_child, x, y);
+    if (found)
+      return found;
+  }
+  return v->kind == SU_VIEW_SCROLL ? v : NULL;
+}
+
+SuView *su_view_scroll_at(SuView *root, float x, float y) {
+  return scroll_at_node(root, x, y);
+}
+
+int su_view_has_focused_text_field(SuView *root) {
+  int i;
+  if (!root)
+    return 0;
+  if (root->kind == SU_VIEW_TEXT_FIELD && root->focused)
+    return 1;
+  for (i = 0; i < root->child_count; i++) {
+    if (su_view_has_focused_text_field(root->children[i]))
+      return 1;
+  }
+  if (root->kind == SU_VIEW_SCROLL && root->scroll_child)
+    return su_view_has_focused_text_field(root->scroll_child);
+  return 0;
+}
+
 int su_view_handle_tap(SuView *root, float x, float y) {
   SuView *hit;
   if (!root)
@@ -457,7 +519,7 @@ int su_view_handle_tap(SuView *root, float x, float y) {
     return 1;
   }
   if (hit->kind == SU_VIEW_TEXT_FIELD) {
-    /* Focus this field; clear focus on siblings via walk. */
+    clear_focus(root);
     hit->focused = 1;
     return 1;
   }

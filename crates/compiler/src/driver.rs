@@ -109,13 +109,16 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
     let include = opts.runtime_dir.join("include");
     let skia_include = ffi_skia_dir.join("include");
 
-    // Optional desktop embedder (X11). Link when lib exists.
-    let embedder_dir = opts
+    // Optional desktop (X11) + mobile host shells. Link when libs exist.
+    let crates_dir = opts
         .runtime_dir
         .parent()
-        .map(|p| p.join("embedder-desktop"))
-        .unwrap_or_else(|| PathBuf::from("crates/embedder-desktop"));
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("crates"));
+    let embedder_dir = crates_dir.join("embedder-desktop");
+    let mobile_dir = crates_dir.join("embedder-mobile");
     let embedder_lib = embedder_dir.join("build/libscalui_embedder.a");
+    let mobile_lib = mobile_dir.join("build/libscalui_mobile.a");
     let mut link = Command::new(&opts.clang);
     link.arg(&ll_path)
         .arg(&lib)
@@ -128,6 +131,11 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
             .arg(&embedder_lib)
             .arg("-Wl,--no-whole-archive")
             .arg("-lX11");
+    }
+    if mobile_lib.is_file() {
+        link.arg("-Wl,--whole-archive")
+            .arg(&mobile_lib)
+            .arg("-Wl,--no-whole-archive");
     }
     link.arg("-o").arg(&exe);
     let status = link.status().with_context(|| "spawning clang")?;
@@ -210,16 +218,18 @@ fn build_runtime(runtime_dir: &Path, clang: &str) -> Result<()> {
         bail!("runtime build failed in {}", runtime_dir.display());
     }
 
-    // Best-effort embedder build (optional; skipped if make fails / no X11).
+    // Best-effort embedder builds (optional; skipped if make fails).
     if let Some(parent) = runtime_dir.parent() {
-        let embedder = parent.join("embedder-desktop");
-        if embedder.join("Makefile").is_file() {
-            let _ = Command::new("make")
-                .arg("-C")
-                .arg(&embedder)
-                .arg("lib")
-                .env("CC", clang)
-                .status();
+        for name in ["embedder-desktop", "embedder-mobile"] {
+            let embedder = parent.join(name);
+            if embedder.join("Makefile").is_file() {
+                let _ = Command::new("make")
+                    .arg("-C")
+                    .arg(&embedder)
+                    .arg("lib")
+                    .env("CC", clang)
+                    .status();
+            }
         }
     }
     Ok(())

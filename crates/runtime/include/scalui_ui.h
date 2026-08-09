@@ -12,7 +12,8 @@ extern "C" {
 /* UiRuntime peer interpreters (ADR 0004). Headless is first-class. */
 typedef enum SuUiRuntimeKind {
   SU_UI_RUNTIME_HEADLESS = 1,
-  SU_UI_RUNTIME_WINDOW = 2
+  SU_UI_RUNTIME_WINDOW = 2,
+  SU_UI_RUNTIME_MOBILE = 3
 } SuUiRuntimeKind;
 
 typedef struct SuUiConfig {
@@ -20,13 +21,29 @@ typedef struct SuUiConfig {
   int width;
   int height;
   double scale;      /* recorded; raster uses logical pixels */
-  const char *title; /* Window only; may be NULL */
+  const char *title; /* Window / Mobile; may be NULL */
 } SuUiConfig;
+
+typedef enum SuPointerPhase {
+  SU_POINTER_DOWN = 1,
+  SU_POINTER_MOVE = 2,
+  SU_POINTER_UP = 3
+} SuPointerPhase;
+
+typedef enum SuLifecyclePhase {
+  SU_LIFECYCLE_RESUME = 1,
+  SU_LIFECYCLE_PAUSE = 2,
+  SU_LIFECYCLE_STOP = 3
+} SuLifecyclePhase;
 
 typedef enum SuInputKind {
   SU_INPUT_TAP = 1,
   SU_INPUT_RESIZE = 2,
-  SU_INPUT_TEXT = 3 /* deliver string to focused TextField */
+  SU_INPUT_TEXT = 3,      /* deliver string to focused TextField */
+  SU_INPUT_POINTER = 4,   /* touch / pointer with phase (Phase 5) */
+  SU_INPUT_SCROLL = 5,    /* vertical pan dy on Scroll under (x,y) */
+  SU_INPUT_LIFECYCLE = 6, /* pause / resume / stop */
+  SU_INPUT_KEYBOARD = 7   /* soft keyboard show (1) / hide (0) */
 } SuInputKind;
 
 typedef struct SuInputEvent {
@@ -36,6 +53,10 @@ typedef struct SuInputEvent {
   int width;  /* resize */
   int height; /* resize */
   const char *text; /* SU_INPUT_TEXT */
+  SuPointerPhase pointer_phase; /* SU_INPUT_POINTER */
+  float dy;                     /* SU_INPUT_SCROLL (positive = content up) */
+  SuLifecyclePhase lifecycle;   /* SU_INPUT_LIFECYCLE */
+  int keyboard_visible;         /* SU_INPUT_KEYBOARD: 1=show, 0=hide */
 } SuInputEvent;
 
 /* --- theme tokens -------------------------------------------------------- */
@@ -120,6 +141,12 @@ SuRect su_view_frame(const SuView *view);
 void su_view_layout(SuView *root, float width, float height, const SuTheme *theme);
 SuView *su_view_hit_test(SuView *root, float x, float y);
 
+/* Phase 5: Scroll offset + soft keyboard helpers. */
+float su_view_scroll_y(const SuView *scroll);
+void su_view_scroll_by(SuView *scroll, float dy);
+SuView *su_view_scroll_at(SuView *root, float x, float y);
+int su_view_has_focused_text_field(SuView *root);
+
 /* --- session protocol ---------------------------------------------------- */
 
 SuUiSession *su_ui_mount(const SuUiConfig *cfg, SuView *root);
@@ -141,6 +168,8 @@ int su_ui_session_width(const SuUiSession *session);
 int su_ui_session_height(const SuUiSession *session);
 SuView *su_ui_session_root(SuUiSession *session);
 const SuTheme *su_ui_session_theme(const SuUiSession *session);
+SuLifecyclePhase su_ui_session_lifecycle(const SuUiSession *session);
+int su_ui_session_keyboard_visible(const SuUiSession *session);
 
 /* IO → UI bridge: post signal writes from completed IO; flushed at pump. */
 void su_ui_bridge_post_int(SuUiSession *session, SuSignalInt *sig, int64_t value);

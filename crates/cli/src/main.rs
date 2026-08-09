@@ -77,6 +77,16 @@ enum Commands {
         #[arg(long)]
         ui: bool,
     },
+    /// Emit mobile packaging shells (android / ios / host)
+    Package {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Packaging target: host, android, ios, or all
+        #[arg(long, default_value = "all")]
+        target: String,
+        #[arg(long, default_value = "build")]
+        out_dir: PathBuf,
+    },
 }
 
 fn main() -> ExitCode {
@@ -187,6 +197,7 @@ main = "Main"
 default_runtime = "headless"
 headless_size = [200, 120]
 headless_scale = 1.0
+bundle_id = "dev.scalui.{package_name}"
 "#
                     ),
                 )?;
@@ -220,6 +231,11 @@ main = "Main"
             eprintln!("created {}", dir.display());
             Ok(ExitCode::SUCCESS)
         }
+        Commands::Package {
+            path,
+            target,
+            out_dir,
+        } => package_project(&path, &target, &out_dir),
     }
 }
 
@@ -227,12 +243,13 @@ fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
     let project_dir = resolve_dir(path)?;
     let manifest = load_manifest(&project_dir.join("scalui.toml"))
         .with_context(|| format!("reading {}/scalui.toml", project_dir.display()))?;
-    let use_headless = headless
-        || manifest
-            .ui
-            .as_ref()
-            .map(|u| u.default_runtime.eq_ignore_ascii_case("headless"))
-            .unwrap_or(false);
+    let default_rt = manifest
+        .ui
+        .as_ref()
+        .map(|u| u.default_runtime.as_str())
+        .unwrap_or("headless");
+    let use_headless = headless || default_rt.eq_ignore_ascii_case("headless");
+    let use_mobile = !headless && default_rt.eq_ignore_ascii_case("mobile");
 
     let out = build(path, &out_dir.to_path_buf(), true)?;
     let mut cmd = Command::new(&out.executable);
@@ -247,6 +264,14 @@ fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
             "scalui run --headless → snapshot {}",
             snap.display()
         );
+    } else if use_mobile {
+        cmd.env("SCALUI_UI_RUNTIME", "mobile");
+        cmd.env("SCALUI_MOBILE_SHELL", "1");
+        if let Some(ui) = &manifest.ui {
+            cmd.env("SCALUI_UI_WIDTH", ui.width().to_string());
+            cmd.env("SCALUI_UI_HEIGHT", ui.height().to_string());
+        }
+        eprintln!("scalui run → UiRuntime.Mobile (host shell)");
     } else {
         // Window peer + optional X11 embedder when DISPLAY is set.
         cmd.env("SCALUI_UI_RUNTIME", "window");
@@ -438,4 +463,167 @@ fn build(
         clang,
         incremental,
     })
+}
+
+fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode> {
+    let project_dir = resolve_dir(path)?;
+    let manifest = load_manifest(&project_dir.join("scalui.toml"))
+        .with_context(|| format!("reading {}/scalui.toml", project_dir.display()))?;
+    let package_out = if out_dir.is_absolute() {
+        out_dir.to_path_buf()
+    } else {
+        project_dir.join(out_dir).join("package")
+    };
+    std::fs::create_dir_all(&package_out)?;
+
+    let runtime_dir = find_runtime_dir(&std::env::current_dir()?)
+        .or_else(|_| find_runtime_dir(&project_dir))?;
+    let mobile_dir = runtime_dir
+        .parent()
+        .map(|p| p.join("embedder-mobile"))
+        .unwrap_or_else(|| PathBuf::from("crates/embedder-mobile"));
+    if !mobile_dir.join("Makefile").is_file() {
+        bail!("missing embedder-mobile at {}", mobile_dir.display());
+    }
+
+    let clang = std::env::var("SCALUI_CLANG").unwrap_or_else(|_| "clang".into());
+    let status = Command::new("make")
+        .arg("-C")
+        .arg(&mobile_dir)
+        .arg("lib")
+        .env("CC", &clang)
+        .status()
+        .context("building embedder-mobile")?;
+    if !status.success() {
+        bail!("embedder-mobile build failed");
+    }
+
+    let compiled = build(path, &PathBuf::from("build"), true)?;
+    let target_lc = target.to_ascii_lowercase();
+    let targets: Vec<&str> = if target_lc == "all" {
+        vec!["host", "android", "ios"]
+    } else if matches!(target_lc.as_str(), "host" | "android" | "ios") {
+        vec![target_lc.as_str()]
+    } else {
+        bail!("unknown package target '{target_lc}' (host|android|ios|all)");
+    };
+
+    let bundle_id = manifest
+        .ui
+        .as_ref()
+        .map(|u| u.bundle_id.as_str())
+        .filter(|s| !s.is_empty())
+        .unwrap_or("dev.scalui.app");
+
+    for t in targets {
+        let dest = package_out.join(t);
+        if dest.exists() {
+            std::fs::remove_dir_all(&dest)?;
+        }
+        std::fs::create_dir_all(&dest)?;
+        match t {
+            "host" => {
+                write_host_package(&dest, &compiled.executable, &manifest.package.name)?;
+            }
+            "android" => {
+                copy_dir(&mobile_dir.join("shells/android"), &dest)?;
+                patch_bundle_id(&dest.join("AndroidManifest.xml"), bundle_id)?;
+                write_package_meta(&dest, &manifest.package.name, "android", bundle_id)?;
+            }
+            "ios" => {
+                copy_dir(&mobile_dir.join("shells/ios"), &dest)?;
+                patch_ios_bundle(&dest.join("Info.plist"), bundle_id)?;
+                write_package_meta(&dest, &manifest.package.name, "ios", bundle_id)?;
+            }
+            _ => unreachable!(),
+        }
+        eprintln!("packaged {} → {}", t, dest.display());
+    }
+    eprintln!("scalui package ok ({})", package_out.display());
+    Ok(ExitCode::SUCCESS)
+}
+
+fn write_host_package(dest: &Path, exe: &Path, name: &str) -> Result<()> {
+    let run_sh = dest.join("run.sh");
+    let exe_abs = if exe.is_absolute() {
+        exe.to_path_buf()
+    } else {
+        std::env::current_dir()?.join(exe)
+    };
+    std::fs::write(
+        &run_sh,
+        format!(
+            r#"#!/usr/bin/env bash
+# Host Mobile shell smoke (Phase 5). Same app binary; Mobile peer + host embedder.
+set -euo pipefail
+export SCALUI_UI_RUNTIME=mobile
+export SCALUI_MOBILE_SHELL=1
+exec "{exe}" "$@"
+"#,
+            exe = exe_abs.display()
+        ),
+    )?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&run_sh)?.permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&run_sh, perms)?;
+    }
+    write_package_meta(dest, name, "host", "dev.scalui.app")?;
+    std::fs::write(
+        dest.join("README.md"),
+        format!(
+            "# {name} host mobile package\n\nRun `./run.sh` (sets `SCALUI_UI_RUNTIME=mobile`).\n"
+        ),
+    )?;
+    Ok(())
+}
+
+fn write_package_meta(dest: &Path, name: &str, target: &str, bundle_id: &str) -> Result<()> {
+    std::fs::write(
+        dest.join("package.toml"),
+        format!(
+            r#"[package]
+name = "{name}"
+target = "{target}"
+bundle_id = "{bundle_id}"
+runtime = "mobile"
+"#
+        ),
+    )?;
+    Ok(())
+}
+
+fn patch_bundle_id(manifest: &Path, bundle_id: &str) -> Result<()> {
+    if !manifest.is_file() {
+        return Ok(());
+    }
+    let text = std::fs::read_to_string(manifest)?;
+    let patched = text.replace("dev.scalui.app", bundle_id);
+    std::fs::write(manifest, patched)?;
+    Ok(())
+}
+
+fn patch_ios_bundle(plist: &Path, bundle_id: &str) -> Result<()> {
+    patch_bundle_id(plist, bundle_id)
+}
+
+fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
+    if !src.is_dir() {
+        bail!("missing shell template {}", src.display());
+    }
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let from = entry.path();
+        let to = dst.join(entry.file_name());
+        if from.is_dir() {
+            copy_dir(&from, &to)?;
+        } else {
+            std::fs::copy(&from, &to)
+                .with_context(|| format!("copy {} → {}", from.display(), to.display()))?;
+        }
+    }
+    Ok(())
 }
