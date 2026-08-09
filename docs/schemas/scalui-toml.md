@@ -19,10 +19,11 @@ main = "Main"
 # git = { url = "https://example.com/scalui-lib.git", rev = "..." }
 
 [ui]
-# default runtime when `scalui run` has a display
-default_runtime = "window"   # or "headless"
+# default runtime when `scalui run` has a display / shell
+default_runtime = "window"   # or "headless" / "mobile"
 headless_size = [400, 600]
 headless_scale = 1.0
+bundle_id = "dev.scalui.hello"  # used by `scalui package`
 ```
 
 ## Fields
@@ -48,13 +49,14 @@ v0: empty or path deps only. No Maven Central.
 
 ### `[ui]`
 
-Optional. Used by `scalui run` / `test` (Phase 1+).
+Optional. Used by `scalui run` / `test` / `package` (Phase 1+).
 
 | Key | Type | Notes |
 | --- | --- | --- |
-| `default_runtime` | `"headless"` \| `"window"` | `scalui run` default; `--headless` forces Headless |
-| `headless_size` | `[w, h]` | Logical pixels for Headless / goldens |
+| `default_runtime` | `"headless"` \| `"window"` \| `"mobile"` | `scalui run` default; `--headless` forces Headless |
+| `headless_size` | `[w, h]` | Logical pixels for Headless / goldens / Mobile host |
 | `headless_scale` | float | Recorded on session; Phase 1 raster uses logical size |
+| `bundle_id` | string | Phase 5: Android package / iOS `CFBundleIdentifier` for `scalui package` |
 
 ## Source layout (convention)
 
@@ -66,6 +68,10 @@ my-app/
     Other.scala         # Phase 3+: multi-file packages / enums
   .scalui/
     fingerprint         # incremental compile cache (gitignored)
+  build/package/        # Phase 5: emitted by `scalui package`
+    host/run.sh
+    android/
+    ios/
 ```
 
 Stage-0 compiler accepts `*.scala` and `*.scalui` under `src/` (recursive). Units in the same package are merged; exactly one `@main` is required for executables.

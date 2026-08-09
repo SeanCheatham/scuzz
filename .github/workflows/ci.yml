@@ -25,8 +25,10 @@ jobs:
       - name: ffi-skia tests
         run: make -C crates/ffi-skia test CC=clang
 
-      - name: Embedder lib
-        run: make -C crates/embedder-desktop lib CC=clang
+      - name: Embedder libs
+        run: |
+          make -C crates/embedder-desktop lib CC=clang
+          make -C crates/embedder-mobile lib CC=clang
 
       - name: Build CLI
         run: cargo build -p scalui
@@ -75,3 +77,17 @@ jobs:
           xvfb-run -a env SCALUI_UI_RUNTIME=window SCALUI_UI_WIDTH=200 SCALUI_UI_HEIGHT=100 \
             ./examples/hello_ui/build/hello_ui 2>&1 | tee /tmp/win.out
           grep -q "X11 embedder" /tmp/win.out
+
+      - name: Mobile peer + package shells
+        run: |
+          env SCALUI_UI_RUNTIME=mobile SCALUI_MOBILE_SHELL=1 SCALUI_UI_WIDTH=200 SCALUI_UI_HEIGHT=120 \
+            ./examples/counter/build/counter 2>&1 | tee /tmp/mobile.out
+          grep -q "UiRuntime.Mobile" /tmp/mobile.out
+          grep -q "scalui mobile: present" /tmp/mobile.out
+          cargo run -p scalui -- package --target all examples/counter
+          test -x examples/counter/build/package/host/run.sh
+          test -f examples/counter/build/package/android/jni/scalui_jni.c
+          test -f examples/counter/build/package/ios/ScaluiAppDelegate.m
+          env SCALUI_UI_WIDTH=200 SCALUI_UI_HEIGHT=120 \
+            ./examples/counter/build/package/host/run.sh 2>&1 | tee /tmp/pkg-host.out
+          grep -q "scalui mobile: present" /tmp/pkg-host.out

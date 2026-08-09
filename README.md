@@ -6,46 +6,43 @@
 
 ## Status
 
-**Phase 4 — Self-host** (current)
+**Phase 5 — Mobile** (current)
 
-- Stage 1 compiler + CLI in ScalUI (`compiler-scalui/`), hosted by Stage 0 then self-rebuilt (Stage 2)
-- Blessed `Fs` IO + `Sys.args` / `exec` / `getenv` for the compiler path
-- Kernel dialect: `def`, `if`/`else`, `Int`/`String`/`List`, string/int ops, bound `flatMap`
-- Dual-boot: `./scripts/selfhost.sh` (Stage 0 → 1 → 2 → `examples/hello`)
-- Stage 0 Rust CLI remains the CI canary (`cargo run -p scalui`)
+- `UiRuntime.Mobile` peer + host shell (`crates/embedder-mobile`); Android/iOS packaging templates
+- Touch pointer / scroll, soft keyboard (TextField focus), app lifecycle inject — all Headless-scriptable
+- `scalui package` → `build/package/{host,android,ios}/`
+- Same Counter/Todo/hello_ui examples via `SCALUI_UI_RUNTIME=mobile`
+- Phase 4 self-host path remains (`./scripts/selfhost.sh`; Stage 0 Rust CLI is the feature canary)
 
-Phase 1–3 Headless UI + Counter/Todo goldens remain. See [docs/vision.md](docs/vision.md).
+See [docs/vision.md](docs/vision.md).
 
 ## Quick start
 
 Requirements: Rust (stable), `clang`, `make`. Optional for Window: X11 (`libx11-dev`) + a display (or `xvfb-run`).
 
 ```bash
-# Runtime + UI unit tests
+# Runtime + UI unit tests (includes Mobile peer / gestures)
 make -C crates/runtime test
 
 # Stage-0 canary CLI
 cargo build -p scalui
-
-# Blessed FS demo
-cargo run -p scalui -- run examples/fs
-
-# Build Stage 1 (ScalUI compiler/CLI)
-cargo run -p scalui -- build --full compiler-scalui
-./compiler-scalui/build/scalui run examples/hello
-
-# Dual-boot (Stage 1 rebuilds itself → Stage 2)
-./scripts/selfhost.sh
-
-# Effects / ADT (Stage 0 canary)
-cargo run -p scalui -- run examples/effects
-cargo run -p scalui -- run examples/adt
 
 # Counter (Headless snapshot, no display)
 cargo run -p scalui -- run --headless examples/counter
 
 # Golden PNG tests
 cargo run -p scalui -- test examples/counter
+
+# Mobile peer via host shell (same example binary)
+env SCALUI_UI_RUNTIME=mobile SCALUI_MOBILE_SHELL=1 \
+  cargo run -p scalui -- run examples/counter
+
+# Packaging shells
+cargo run -p scalui -- package examples/counter
+./examples/counter/build/package/host/run.sh
+
+# Dual-boot (Stage 1 rebuilds itself → Stage 2)
+./scripts/selfhost.sh
 ```
 
 Window peer (presents via X11 when `DISPLAY` is set):
@@ -59,11 +56,12 @@ xvfb-run -a env SCALUI_UI_RUNTIME=window cargo run -p scalui -- run examples/hel
 ```
 docs/                 vision, compatibility, ADRs, scalui.toml schema
 crates/compiler/      Stage-0 parser / typer / LLVM codegen (Rust canary)
-crates/cli/           Stage-0 scalui tool (canary: build/run/test/fmt/lsp/watch)
+crates/cli/           Stage-0 scalui tool (canary: build/run/test/fmt/lsp/watch/package)
 crates/runtime/       C runtime (GC-v0, IO kit, Fs/Sys, View tree, Ui session)
 crates/ui/            design-language home (Phase 2 widgets live in runtime C for now)
 crates/ffi-skia/      sk_capi + CPU software backend
 crates/embedder-desktop/  Linux X11 present for Window peer
+crates/embedder-mobile/   Mobile host shell + Android/iOS packaging templates
 compiler-scalui/      Stage 1/2 ScalUI compiler + CLI (release path)
 scripts/selfhost.sh   dual-boot Stage 0 → 1 → 2
 examples/hello/       Stage-0 IO sample
@@ -77,7 +75,7 @@ third_party/skia/     prebuilt fetch notes
 scripts/fetch_skia.sh optional Skia prebuilt fetch
 ```
 
-## Kernel dialect (Stage 0 / Phase 4)
+## Kernel dialect (Stage 0 / Phase 4+)
 
 ```scala
 def greet(name: String): String = Str.concat("hi:", name)
