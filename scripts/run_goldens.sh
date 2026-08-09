@@ -15,6 +15,7 @@ w=$(sed -n 's/.*headless_size = \[\([0-9]*\),.*/\1/p' "$toml" | head -1)
 h=$(sed -n 's/.*headless_size = \[[0-9]*, *\([0-9]*\).*/\1/p' "$toml" | head -1)
 w="${w:-200}"
 h="${h:-120}"
+tap_n=$(sed -n 's/^tap_button = \([0-9][0-9]*\).*/\1/p' "$toml" | head -1)
 exe="$project/build/$name"
 [[ -x "$exe" ]] || { echo "missing executable $exe"; exit 1; }
 
@@ -29,11 +30,20 @@ run_snap() {
       "$exe"
 }
 
+tap_env() {
+  if [[ -n "${tap_n:-}" ]]; then
+    echo "SCALUI_UI_TAP=1" "SCALUI_UI_TAP_N=$tap_n"
+  else
+    echo "SCALUI_UI_TAP=1"
+  fi
+}
+
 seed_goldens() {
   local base="$goldens/${name}.png"
   local tap="$goldens/${name}_after_tap.png"
   run_snap "$base"
-  run_snap "$tap" SCALUI_UI_TAP=1
+  # shellcheck disable=SC2046
+  run_snap "$tap" $(tap_env)
   echo "seeded goldens: ${name}.png ${name}_after_tap.png"
 }
 
@@ -50,7 +60,8 @@ for png in "${pngs[@]}"; do
   stem=$(basename "$png" .png)
   actual="$project/build/${stem}.actual.png"
   if [[ "$stem" == *_after_tap ]]; then
-    run_snap "$actual" SCALUI_UI_TAP=1
+    # shellcheck disable=SC2046
+    run_snap "$actual" $(tap_env)
   else
     run_snap "$actual"
   fi

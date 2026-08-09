@@ -422,6 +422,12 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::Opaque("View".into()))
         }
+        "View.buttonSet" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            expect_ty(&arg_tys[2], &Type::Int)?;
+            Ok(Type::Opaque("View".into()))
+        }
         "View.column" | "View.row" | "View.list" => {
             expect_arity(callee, &arg_tys, 0)?;
             Ok(Type::Opaque("View".into()))
@@ -452,6 +458,11 @@ fn infer_call(
         "View.addChild" => {
             expect_arity(callee, &arg_tys, 2)?;
             Ok(Type::Unit)
+        }
+        "View.showWhen" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(Type::Opaque("View".into()))
         }
         "View.buttonTodoAdd" | "View.buttonTodoSave" => {
             expect_arity(callee, &arg_tys, 2)?;

@@ -414,6 +414,11 @@ fn apply_ui_env(
     }
     if tap {
         cmd.env("SCALUI_UI_TAP", "1");
+        if let Some(ui) = &manifest.ui {
+            if let Some(n) = ui.tap_button {
+                cmd.env("SCALUI_UI_TAP_N", n.to_string());
+            }
+        }
     }
 }
 

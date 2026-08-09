@@ -155,19 +155,19 @@ def runtimeDeclaresB(): String =
 def runtimeDeclaresC(): String =
   str5(
     "declare ptr @su_lang_view_text(ptr)\ndeclare ptr @su_lang_view_text_signal(ptr, ptr)\n",
-    "declare ptr @su_lang_view_button_inc(ptr, ptr)\ndeclare ptr @su_lang_view_column()\n",
-    "declare ptr @su_lang_view_row()\ndeclare ptr @su_lang_view_list()\n",
-    "declare ptr @su_lang_view_scroll(ptr)\ndeclare ptr @su_lang_view_text_field(ptr, ptr)\n",
+    "declare ptr @su_lang_view_button_inc(ptr, ptr)\ndeclare ptr @su_lang_view_button_set(ptr, ptr, i64)\n",
+    "declare ptr @su_lang_view_column()\ndeclare ptr @su_lang_view_row()\n",
+    "declare ptr @su_lang_view_list()\ndeclare ptr @su_lang_view_scroll(ptr)\n",
     str5(
-      "declare ptr @su_lang_view_icon(i64, i64)\ndeclare ptr @su_lang_view_image(i64, i64, i64, ptr)\n",
-      "declare ptr @su_lang_view_add_child(ptr, ptr)\ndeclare ptr @su_lang_todo_create()\n",
+      "declare ptr @su_lang_view_text_field(ptr, ptr)\ndeclare ptr @su_lang_view_icon(i64, i64)\n",
+      "declare ptr @su_lang_view_image(i64, i64, i64, ptr)\ndeclare ptr @su_lang_view_add_child(ptr, ptr)\n",
+      "declare ptr @su_lang_view_show_when(ptr, i64, ptr)\ndeclare ptr @su_lang_todo_create()\n",
       "declare ptr @su_lang_todo_load(ptr)\ndeclare ptr @su_lang_todo_draft(ptr)\n",
-      "declare ptr @su_lang_todo_list_view(ptr)\ndeclare ptr @su_lang_view_button_todo_add(ptr, ptr)\n",
       str5(
+        "declare ptr @su_lang_todo_list_view(ptr)\ndeclare ptr @su_lang_view_button_todo_add(ptr, ptr)\n",
         "declare ptr @su_lang_view_button_todo_save(ptr, ptr)\ndeclare ptr @su_ui_run_view(ptr)\n",
         "declare ptr @su_ui_run_view_todo(ptr, ptr)\ndeclare ptr @su_box_i64(i64)\n",
         "declare i64 @su_unbox_i64(ptr)\ndeclare i32 @su_runtime_main_args(ptr, i32, ptr)\n\n",
-        "",
         ""
       )
     )
@@ -866,6 +866,8 @@ def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id:
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_text_signal(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "View.buttonInc") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_button_inc(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "View.buttonSet") == 1)
+    mkS(str4(code, "  %", prefix, str4("_v = call ptr @su_lang_view_button_set(ptr ", List.at(vals, 0), str4(", ptr ", List.at(vals, 1), ", i64 ", List.at(vals, 2)), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "View.column") == 1)
     mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_lang_view_column()\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "View.row") == 1)
@@ -898,6 +900,8 @@ def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id:
     )
   else if (streq(callee, "View.addChild") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_add_child(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "View.showWhen") == 1)
+    mkS(str4(code, "  %", prefix, str4("_v = call ptr @su_lang_view_show_when(ptr ", List.at(vals, 0), str4(", i64 ", List.at(vals, 1), ", ptr ", List.at(vals, 2)), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "View.buttonTodoAdd") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_button_todo_add(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "View.buttonTodoSave") == 1)

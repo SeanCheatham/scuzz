@@ -133,6 +133,9 @@ SuView *su_view_image(int w, int h, uint32_t argb, const char *caption);
 SuView *su_view_icon(char glyph, uint32_t argb);
 /* Phase 1 compat: full-bleed bg + bar that toggles colors on tap. */
 SuView *su_view_label(const char *text, uint32_t bg_argb, uint32_t fg_argb);
+/* Visible iff Signal.get(sig) == value; returns child. */
+void su_view_set_show_when(SuView *view, SuSignalInt *sig, int64_t value);
+SuView *su_view_show_when(SuSignalInt *sig, int64_t value, SuView *child);
 
 void su_view_add_child(SuView *parent, SuView *child);
 void su_view_free(SuView *view);
@@ -218,6 +221,7 @@ void *su_lang_signal_str_set(SuSignalStr *s, SuString *v);
 SuView *su_lang_view_text(SuString *text);
 SuView *su_lang_view_text_signal(SuSignalInt *sig, SuString *prefix);
 SuView *su_lang_view_button_inc(SuString *label, SuSignalInt *sig);
+SuView *su_lang_view_button_set(SuString *label, SuSignalInt *sig, int64_t value);
 SuView *su_lang_view_column(void);
 SuView *su_lang_view_row(void);
 SuView *su_lang_view_list(void);
@@ -226,6 +230,7 @@ SuView *su_lang_view_text_field(SuSignalStr *text, SuString *placeholder);
 SuView *su_lang_view_icon(int64_t glyph, int64_t argb);
 SuView *su_lang_view_image(int64_t w, int64_t h, int64_t argb, SuString *caption);
 void *su_lang_view_add_child(SuView *parent, SuView *child);
+SuView *su_lang_view_show_when(SuSignalInt *sig, int64_t value, SuView *child);
 
 SuTodo *su_lang_todo_create(void);
 SuIo *su_lang_todo_load(SuTodo *todo);
