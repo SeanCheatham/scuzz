@@ -165,7 +165,7 @@ def lexAtIdent(source: String, i: Int, acc: List): List =
 
 def lexInterpString(source: String, quoteI: Int, acc: List): List =
   val p = readInterp(source, quoteI + 1, List.empty, "")
-  lexAt(source, parseInt(snd(p)), pushInterpTokens(fst(p), acc))
+  lexAt(source, parseInt(snd(p)), pushInterpTokens(fstL(p), acc))
 
 def pushInterpTokens(parts: List, acc: List): List =
   List.cons("InterpEnd", pushInterpParts(parts, List.cons("InterpStart", acc)))
@@ -175,11 +175,11 @@ def pushInterpParts(parts: List, acc: List): List =
   else pushInterpParts(List.tail(parts), List.cons(List.head(parts), acc))
 
 def readInterp(source: String, i: Int, parts: List, lit: String): List =
-  if (i >= Str.len(source)) pair(parts, Str.fromInt(i))
+  if (i >= Str.len(source)) pairLS(parts, Str.fromInt(i))
   else readInterpCont(source, i, parts, lit, Str.charAt(source, i))
 
 def readInterpCont(source: String, i: Int, parts: List, lit: String, c: Int): List =
-  if (c == 34) pair(flushInterpLit(parts, lit), Str.fromInt(i + 1))
+  if (c == 34) pairLS(flushInterpLit(parts, lit), Str.fromInt(i + 1))
   else if (c == 92) readInterpEsc(source, i + 1, parts, lit)
   else if (c == 36) readInterpDollar(source, i + 1, flushInterpLit(parts, lit))
   else readInterp(source, i + 1, parts, Str.concat(lit, Str.slice(source, i, i + 1)))
@@ -189,7 +189,7 @@ def flushInterpLit(parts: List, lit: String): List =
   else List.cons(Str.concat("InterpLit:", lit), parts)
 
 def readInterpEsc(source: String, i: Int, parts: List, lit: String): List =
-  if (i >= Str.len(source)) pair(parts, Str.fromInt(i))
+  if (i >= Str.len(source)) pairLS(parts, Str.fromInt(i))
   else readInterpEscCont(source, i, parts, lit, Str.charAt(source, i))
 
 def readInterpEscCont(source: String, i: Int, parts: List, lit: String, c: Int): List =
@@ -201,17 +201,17 @@ def readInterpEscCont(source: String, i: Int, parts: List, lit: String, c: Int):
   else readInterp(source, i + 1, parts, Str.concat(lit, Str.slice(source, i, i + 1)))
 
 def readInterpDollar(source: String, i: Int, parts: List): List =
-  if (i >= Str.len(source)) pair(parts, Str.fromInt(i))
+  if (i >= Str.len(source)) pairLS(parts, Str.fromInt(i))
   else if (Str.charAt(source, i) == 123) readInterpBrace(source, i + 1, parts, "", 1)
   else if (isIdentStart(Str.charAt(source, i)) == 1) readInterpIdent(source, i, parts)
-  else pair(parts, Str.fromInt(i))
+  else pairLS(parts, Str.fromInt(i))
 
 def readInterpIdent(source: String, i: Int, parts: List): List =
   val j = lexIdentEnd(source, i)
   readInterp(source, j, List.cons(Str.concat("InterpId:", Str.slice(source, i, j)), parts), "")
 
 def readInterpBrace(source: String, i: Int, parts: List, body: String, depth: Int): List =
-  if (i >= Str.len(source)) pair(parts, Str.fromInt(i))
+  if (i >= Str.len(source)) pairLS(parts, Str.fromInt(i))
   else readInterpBraceCont(source, i, parts, body, depth, Str.charAt(source, i))
 
 def readInterpBraceCont(source: String, i: Int, parts: List, body: String, depth: Int, c: Int): List =

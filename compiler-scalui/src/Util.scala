@@ -56,6 +56,10 @@ def snd(p: List): String = List.head(List.tail(p))
 def pairSL(a: String, b: List): List = List.cons(a, List.cons(b, List.empty))
 def sndL(p: List): List = List.head(List.tail(p))
 
+// Heterogeneous pair (List, String) for lexer accumulators.
+def pairLS(a: List, b: String): List = List.cons(a, List.cons(b, List.empty))
+def fstL(p: List): List = List.head(p)
+
 def quad(code: String, value: String, kind: String, id: Int): List =
   List.cons(code, List.cons(value, List.cons(kind, List.cons(Str.fromInt(id), List.empty))))
 

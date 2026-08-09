@@ -857,10 +857,10 @@ def emitInterpHole(
       prefix,
       sId(pe),
       sConts(pe),
-      str4(code, sCode(pe), "  %", str5(prefix, "_s", Str.fromInt(i), " = call ptr @su_string_from_int(i64 ", sValue(pe), ")\n")),
+      str4(code, sCode(pe), "  %", str6(prefix, "_s", Str.fromInt(i), " = call ptr @su_string_from_int(i64 ", sValue(pe), ")\n")),
       acc,
       i,
-      mkS("", str3("%", prefix, str3("_s", Str.fromInt(i))), "ptr", sId(pe), sConts(pe))
+      mkS("", str4("%", prefix, "_s", Str.fromInt(i)), "ptr", sId(pe), sConts(pe))
     )
   else
     emitInterpPiece(strs, rest, defs, env, prefix, sId(pe), sConts(pe), str3(code, sCode(pe), ""), acc, i, pe)
@@ -889,8 +889,8 @@ def emitInterpPiece(
       prefix,
       id,
       conts,
-      str4(code, sCode(pe), "  %", str5(prefix, "_c", Str.fromInt(i), " = call ptr @su_string_concat(ptr ", acc, str3(", ptr ", sValue(pe), ")\n"))),
-      str3("%", prefix, str3("_c", Str.fromInt(i))),
+      str4(code, sCode(pe), "  %", str6(prefix, "_c", Str.fromInt(i), " = call ptr @su_string_concat(ptr ", acc, str3(", ptr ", sValue(pe), ")\n"))),
+      str4("%", prefix, "_c", Str.fromInt(i)),
       i + 1
     )
 
