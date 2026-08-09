@@ -82,6 +82,7 @@ def collectExprTag(tag: String, e: List, strs: List): List =
     collectExpr(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs))
   else if (streq(tag, "IoBoth") == 1)
     collectExpr(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs))
+  else if (streq(tag, "Lambda") == 1) collectExpr(nodeExpr(e, 1), strs)
   else strs
 
 def collectArgs(args: List, strs: List): List =
@@ -155,7 +156,7 @@ def runtimeDeclaresB(): String =
 def runtimeDeclaresC(): String =
   str5(
     "declare ptr @su_lang_view_text(ptr)\ndeclare ptr @su_lang_view_text_signal(ptr, ptr)\n",
-    "declare ptr @su_lang_view_button_inc(ptr, ptr)\ndeclare ptr @su_lang_view_button_set(ptr, ptr, i64)\n",
+    "declare ptr @su_lang_view_button(ptr, ptr, ptr)\n",
     "declare ptr @su_lang_view_column()\ndeclare ptr @su_lang_view_row()\n",
     "declare ptr @su_lang_view_list()\ndeclare ptr @su_lang_view_scroll(ptr)\n",
     str5(
@@ -282,6 +283,7 @@ def emitExprTag(tag: String, e: List, strs: List, defs: List, env: List, prefix:
   else if (streq(tag, "IoRace") == 1) emitRaceBoth(strs, e, defs, env, prefix, id, conts, "race")
   else if (streq(tag, "IoBoth") == 1) emitRaceBoth(strs, e, defs, env, prefix, id, conts, "both")
   else if (streq(tag, "Adt") == 1) emitAdt(e, prefix, id, conts)
+  else if (streq(tag, "Lambda") == 1) emitLambda(strs, e, defs, env, prefix, id, conts)
   else mkS("", "null", "ptr", id, conts)
 
 def emitPrintln(strs: List, arg: List, defs: List, env: List, prefix: String, id: Int, conts: String): List =
@@ -740,6 +742,52 @@ def emitFlatMap(strs: List, e: List, defs: List, env: List, prefix: String, id: 
     Str.concat(sConts(be), contDef)
   )
 
+// `_ => body` / `x => body` lowers to a closure value: a 2-element SuList
+// cons(fn_ptr, cons(env_ptr, nil)). fn_ptr matches SuViewTapFn
+// `void (*)(SuView *self, void *env)`; env_ptr is the captured-locals list
+// (same packing as flatMap continuations). View.button unpacks the pair.
+def emitLambda(strs: List, e: List, defs: List, env: List, prefix: String, id: Int, conts: String): List =
+  val fnName = Str.concat("su_tap_", Str.fromInt(id))
+  val param = nodeStr(e, 0)
+  val names = captureNames(env, List.empty)
+  val up = unpackEnv(names, Str.concat("t", Str.fromInt(id)), env)
+  val benv = lambdaBind(param, sndL(up))
+  val be = emitExpr(nodeExpr(e, 1), strs, defs, benv, Str.concat("t", Str.fromInt(id)), id + 1, conts)
+  val contDef = str4(
+    "define internal void @",
+    fnName,
+    "(ptr %self, ptr %env) {\nentry:\n",
+    str4(fst(up), sCode(be), "  ret void\n", "}\n\n")
+  )
+  emitLambdaClosure(env, prefix, fnName, sId(be), Str.concat(sConts(be), contDef))
+
+def lambdaBind(param: String, env: List): List =
+  if (streq(param, "_") == 1) env
+  else envPut(env, param, "%self", "ptr")
+
+def emitLambdaClosure(env: List, prefix: String, fnName: String, id: Int, conts: String): List =
+  val packed = packEnv(env, Str.concat(prefix, "_cap"), "")
+  val code = str4(
+    fst(packed),
+    "  %",
+    prefix,
+    str5(
+      "_cl0 = call ptr @su_list_nil()\n  %",
+      prefix,
+      "_cl1 = call ptr @su_list_cons(ptr ",
+      snd(packed),
+      str6(
+        ", ptr %",
+        prefix,
+        "_cl0)\n  %",
+        prefix,
+        "_cl2 = call ptr @su_list_cons(ptr @",
+        str4(fnName, ", ptr %", prefix, "_cl1)\n")
+      )
+    )
+  )
+  mkS(code, str3("%", prefix, "_cl2"), "ptr", id, conts)
+
 def emitCall(strs: List, e: List, defs: List, env: List, prefix: String, id: Int, conts: String): List =
   val callee = nodeStr(e, 0)
   val args = nodeExpr(e, 1)
@@ -898,10 +946,7 @@ def emitBuiltinView(callee: String, code: String, vals: List, id: Int, conts: St
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_view_text(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "View.textSignal") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_text_signal(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
-  else if (streq(callee, "View.buttonInc") == 1)
-    mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_button_inc(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
-  else if (streq(callee, "View.buttonSet") == 1)
-    mkS(str4(code, "  %", prefix, str4("_v = call ptr @su_lang_view_button_set(ptr ", List.at(vals, 0), str4(", ptr ", List.at(vals, 1), ", i64 ", List.at(vals, 2)), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "View.button") == 1) emitViewButton(code, vals, id, conts, prefix)
   else if (streq(callee, "View.column") == 1)
     mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_lang_view_column()\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "View.row") == 1)
@@ -941,6 +986,21 @@ def emitBuiltinView(callee: String, code: String, vals: List, id: Int, conts: St
   else if (streq(callee, "View.buttonTodoSave") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_button_todo_save(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else mkS(code, "null", "ptr", id, conts)
+
+// vals[1] is a closure value: cons(fn_ptr, cons(env_ptr, nil)). Unpack the pair
+// and hand it to su_lang_view_button(ptr label, ptr fn, ptr env).
+def emitViewButton(code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  val cl = List.at(vals, 1)
+  val c1 = str4(code, "  %", prefix, str3("_fnp = call ptr @su_list_head(ptr ", cl, ")\n"))
+  val c2 = str4(c1, "  %", prefix, str3("_fnt = call ptr @su_list_tail(ptr ", cl, ")\n"))
+  val c3 = str4(c2, "  %", prefix, str4("_envp = call ptr @su_list_head(ptr %", prefix, "_fnt)\n", ""))
+  val c4 = str4(
+    c3,
+    "  %",
+    prefix,
+    str5("_v = call ptr @su_lang_view_button(ptr ", List.at(vals, 0), ", ptr %", prefix, str4("_fnp, ptr %", prefix, "_envp)\n", ""))
+  )
+  mkS(c4, str3("%", prefix, "_v"), "ptr", id, conts)
 
 def emitBuiltinTodo(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
   if (streq(callee, "Todo.create") == 1)

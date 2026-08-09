@@ -303,8 +303,29 @@ def parsePrimary(tokens: List, i: Int): List =
   else if (isStringTok(t) == 1)
     ok(List.cons("StrLit", List.cons(stringVal(t), List.empty)), i + 1)
   else if (streq(t, "Minus") == 1) parseNegInt(tokens, i + 1)
-  else if (isIdentTok(t) == 1) parseIdentExpr(tokens, i, identName(t))
+  else if (streq(t, "Underscore") == 1)
+    if (isTok(tokens, i + 1, "Arrow") == 1) parseLambdaExpr(tokens, i + 1, "_")
+    else ok(unitExpr(), i + 1)
+  else if (isIdentTok(t) == 1) parsePrimaryIdent(tokens, i, t)
   else ok(unitExpr(), i)
+
+// The lexer emits `_` as an identifier, so `_ => …` also lands here. An Ident
+// (or `_`) immediately followed by `=>` is a first-class lambda literal;
+// otherwise it is a plain variable/call.
+def parsePrimaryIdent(tokens: List, i: Int, t: String): List =
+  if (isTok(tokens, i + 1, "Arrow") == 1) parseLambdaExpr(tokens, i + 1, identName(t))
+  else parseIdentExpr(tokens, i, identName(t))
+
+// First-class lambda literal `_ => expr` / `name => expr` (single param, tap
+// callbacks). `param` is the already-consumed `_` or identifier text; `i`
+// points at the `=>` token.
+def parseLambdaExpr(tokens: List, i: Int, param: String): List =
+  val i1 = expectTok(tokens, i, "Arrow")
+  val bodyP = parseBlock(tokens, i1)
+  ok(
+    List.cons("Lambda", List.cons(param, List.cons(pAst(bodyP), List.empty))),
+    pIdx(bodyP)
+  )
 
 def parseNegInt(tokens: List, i: Int): List =
   val t = tokAt(tokens, i)
@@ -360,6 +381,7 @@ def parseIdentExpr(tokens: List, i: Int, name: String): List =
 def parseCallOrVar(tokens: List, i: Int, name: String): List =
   if (isTok(tokens, i, "LParen") == 1) parseCallArgs(tokens, i + 1, name)
   else if (isTok(tokens, i, "Dot") == 1) parseAdt(tokens, i + 1, name)
+  else if (isTok(tokens, i, "Arrow") == 1) parseLambdaExpr(tokens, i, name)
   else ok(List.cons("Var", List.cons(name, List.empty)), i)
 
 def parseAdt(tokens: List, i: Int, enumName: String): List =

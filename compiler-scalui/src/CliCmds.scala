@@ -13,7 +13,7 @@ def uiMainTemplate(): String =
     ),
     str5(
       "  val row = View.row()\n",
-      "  val c = View.addChild(row, View.buttonInc(\"+1\", count))\n",
+      "  val c = View.addChild(row, View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)))\n",
       "  val d = View.addChild(root, row)\n",
       "  Ui.run(root)\n",
       ""
