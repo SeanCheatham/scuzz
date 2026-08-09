@@ -6,7 +6,7 @@
 
 ## Status
 
-**Post–Phase 6 — v0 app path** (current). Phases 0–6 landed; focus is closing the v0 success bar.
+**v0 app path** (current). Phases 0–6 landed; next steps live in [docs/plan.md](docs/plan.md).
 
 - **ScalUI-authored Views**: Counter/Todo build widget trees via `Signal` / `View` / `Ui.run` (C demos remain for Live / kits)
 - Closed impurity boundary: `Clock` / `Random` / `Fs` / `Net` / `Sys` / `IO.println` + `TestRuntime` fakes
@@ -87,19 +87,19 @@ cargo run -p scalui -- run --headless examples/live
 
 ## Samples gallery
 
-| Example | Phase | What it proves |
-| --- | --- | --- |
-| `examples/hello` | 0 | `IO.println` |
-| `examples/hello_ui` | 1 | Headless `Ui` + goldens |
-| `examples/counter` | 2 / v0 | ScalUI `Signal`/`View`/`Ui.run` + goldens |
-| `examples/nav` | v0 | `buttonSet` + `showWhen` + stay-open `Ui.run` + goldens |
-| `examples/live` | — | Stay-open Window (`Ui.runLive`; q/Esc) |
-| `examples/todo` | 2 / v0 | ScalUI Todo tree + `Ui.runWithTodo` + goldens |
-| `examples/effects` | 3 | Blessed effects kit |
-| `examples/adt` | 3 | package / enum / match |
-| `examples/fs` | 4 | Blessed `Fs.*` (live) |
-| `examples/clock` | 6 | `Clock.realTime` / `monotonic` |
-| `examples/impurity` | 6 | `Impurity.runKit` + TestRuntime fakes |
+| Example | What it proves |
+| --- | --- |
+| `examples/hello` | `IO.println` |
+| `examples/hello_ui` | Headless `Ui` + goldens |
+| `examples/counter` | ScalUI `Signal`/`View`/`Ui.run` + goldens |
+| `examples/nav` | `buttonSet` + `showWhen` + stay-open `Ui.run` + goldens |
+| `examples/live` | Stay-open Window (`Ui.runLive`; q/Esc) |
+| `examples/todo` | ScalUI Todo tree + `Ui.runWithTodo` + goldens |
+| `examples/effects` | Blessed effects kit |
+| `examples/adt` | package / enum / match |
+| `examples/fs` | Blessed `Fs.*` (live) |
+| `examples/clock` | `Clock.realTime` / `monotonic` |
+| `examples/impurity` | `Impurity.runKit` + TestRuntime fakes |
 
 ## Layout
 

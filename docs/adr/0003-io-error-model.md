@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted (Phase 0; kit completed Phase 3; FS/Sys live interpreters Phase 4; Clock/Random/Net + TestRuntime Phase 6)
+Accepted
 
 ## Context
 
@@ -16,7 +16,7 @@ Surface:
 
 - Success values are untyped `void*` at the C ABI; typed at the language level.
 - `IO` can complete as ok(value) or err(SuError).
-- Language/runtime ops: `flatMap`, `delay`, `fail`, `handleErrorWith`, `attempt` (`SuEither`), plus the Phase 3 blessed kit (`Resource` with release-on-failure, `Ref`, `Deferred`, `Queue`, `sleep`, `race`, `both`).
+- Language/runtime ops: `flatMap`, `delay`, `fail`, `handleErrorWith`, `attempt` (`SuEither`), plus the blessed kit (`Resource` with release-on-failure, `Ref`, `Deferred`, `Queue`, `sleep`, `race`, `both`).
 - Blessed impurity interpreters (live + TestRuntime fakes):
   - `Fs.read`/`write`/`list`/`mkdirs` — error code **2**
   - `Sys.args`/`exec`/`getenv` — error code **3** (exec)
@@ -33,5 +33,5 @@ Surface:
 
 - Simple interpreter and LLVM lowering.
 - Not source-compatible with cats-effect `Throwable` channels — documented non-goal.
-- UI session failures (Phase 1) use the same `IO` error channel.
+- UI session failures use the same `IO` error channel.
 - Deterministic `scalui test` / unit tests can install TestRuntime without wall time or the real OS.

@@ -1,6 +1,6 @@
 # Stage 1 ScalUI compiler
 
-ScalUI-written compiler + CLI (Phase 4). Built by Stage 0, then rebuilds itself (Stage 2).
+ScalUI-written compiler + CLI. Built by Stage 0, then rebuilds itself (Stage 2).
 
 ```bash
 # Stage 0 hosts Stage 1
