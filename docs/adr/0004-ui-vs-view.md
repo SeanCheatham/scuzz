@@ -2,7 +2,7 @@
 
 ## Status
 
-Accepted — Phase 1 session API + Phase 2 declarative tree + Phase 5 Mobile peer + Phase 6 anim/a11y hooks
+Accepted — Phase 1 session API + Phase 2 declarative tree + Phase 5 Mobile peer + Phase 6 anim/a11y hooks + post–Phase 6 language View surface
 
 ## Context
 
@@ -24,10 +24,11 @@ Two layers:
 - IO → UI bridge: completed `IO` may `su_ui_bridge_post_*` signal writes; `pump` flushes the queue (UI-thread hop).
 - Phase 5: Mobile uses the same session protocol. Input expands with pointer phases, scroll, soft-keyboard visibility, and lifecycle — all injectable under Headless. OS shells (`crates/embedder-mobile`) only present + map events.
 - Phase 6: animation ticks (`SuAnimFloat`) advance on `pump` using monotonic Clock dt; accessibility is View metadata (`role`/`label`) dumpable under Headless — no OS assistive-tech bridge yet. Theme gains `accent`/`disabled`/`radius` without forcing golden churn (default `radius = 0`).
+- Post–Phase 6: Counter/Todo examples build View trees in ScalUI via blessed `Signal` / `View` / `Todo` / `Ui.run` builtins (wrapping the C API). Kernel demos (`Ui.runCounter` / `Ui.runTodo` / `Ui.runLive`) remain for kits that are not yet language-authored.
 
 ## Consequences
 
 - No UI feature may land Window- or Mobile-only without a Headless path.
 - `scalui test` always Headless; `scalui run --headless` is first-class.
-- Stage-0 demos (`Ui.runCounter` / `Ui.runTodo`) build Views in C until the kernel dialect can express widget trees.
+- Language-authored Views use opaque handles + specialized tap builtins (`View.buttonInc`, `View.buttonTodoAdd`) until first-class lambdas exist for `SuViewTapFn`.
 - `scalui package` emits packaging shells; device toolchains are outside the Headless CI default.

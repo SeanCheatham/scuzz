@@ -1,3 +1,16 @@
-// ScalUI Phase 2 — Todo (List + TextField + IO Resource load/save)
+// ScalUI Todo — View tree in ScalUI (Todo controller + View + Ui.runWithTodo)
 @main def main: IO[Unit] =
-  Ui.runTodo
+  val todo = Todo.create()
+  Todo.load(todo).flatMap(_ =>
+    val draft = Todo.draft(todo)
+    val list = Todo.listView(todo)
+    val root = View.column()
+    val a = View.addChild(root, View.text("Todo"))
+    val row = View.row()
+    val b = View.addChild(row, View.textField(draft, "item"))
+    val c = View.addChild(row, View.buttonTodoAdd("Add", todo))
+    val d = View.addChild(root, row)
+    val e = View.addChild(root, View.scroll(list))
+    val f = View.addChild(root, View.buttonTodoSave("Save", todo))
+    Ui.runWithTodo(root, todo)
+  )

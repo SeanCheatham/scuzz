@@ -6,10 +6,12 @@
 
 ## Status
 
-**Phase 6 — Productize** (current). Phases 0–5 landed (Headless UI → self-host → Mobile).
+**Post–Phase 6 — v0 app path** (current). Phases 0–6 landed; focus is closing the v0 success bar.
 
+- **ScalUI-authored Views**: Counter/Todo build widget trees via `Signal` / `View` / `Ui.run` (C demos remain for Live / kits)
 - Closed impurity boundary: `Clock` / `Random` / `Fs` / `Net` / `Sys` / `IO.println` + `TestRuntime` fakes
 - Animation v0 + accessibility hooks (Headless-dumpable); theme polish tokens
+- Stage-1 CLI: `build|run|test|fmt|watch|new|package` (`compiler-scalui`); Stage-0 Rust is canary
 - Samples gallery below; Skia prebuilts via `SCALUI_SKIA_URL` (default: in-tree `sk_sw`)
 - Impeller evaluated and deferred (ADR 0002)
 
@@ -69,9 +71,9 @@ cargo run -p scalui -- run --headless examples/live
 | --- | --- | --- |
 | `examples/hello` | 0 | `IO.println` |
 | `examples/hello_ui` | 1 | Headless `Ui` + goldens |
-| `examples/counter` | 2 | Signals + Button + goldens |
+| `examples/counter` | 2 / v0 | ScalUI `Signal`/`View`/`Ui.run` + goldens |
 | `examples/live` | — | Stay-open Window (`Ui.runLive`; q/Esc) |
-| `examples/todo` | 2 | TextField/List + IO bridge + goldens |
+| `examples/todo` | 2 / v0 | ScalUI Todo tree + `Ui.runWithTodo` + goldens |
 | `examples/effects` | 3 | Blessed effects kit |
 | `examples/adt` | 3 | package / enum / match |
 | `examples/fs` | 4 | Blessed `Fs.*` (live) |
