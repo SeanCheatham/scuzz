@@ -237,6 +237,18 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
                 out.push(s.clone());
             }
         }
+        Expr::Interpolate { parts } => {
+            for part in parts {
+                match part {
+                    crate::ast::InterpPart::Lit(s) => {
+                        if !out.contains(s) {
+                            out.push(s.clone());
+                        }
+                    }
+                    crate::ast::InterpPart::Expr(e) => collect_strings(e, out),
+                }
+            }
+        }
         Expr::IoPrintln(e)
         | Expr::IoSleep(e)
         | Expr::IoFail(e)
@@ -557,6 +569,7 @@ fn emit_expr(
             .unwrap();
             val_emitted(code, format!("%{prefix}_s"), Kind::Ptr)
         }
+        Expr::Interpolate { parts } => emit_interpolate(parts, ctx, locals, prefix),
         Expr::IoDelayUnit => {
             let mut code = String::new();
             writeln!(
@@ -1086,6 +1099,78 @@ fn emit_expr(
             io_emitted(code, format!("%{prefix}_both"), Kind::Ptr)
         }
     }
+}
+
+/// Emit `s"..."` as left-fold `su_string_concat`, coercing Int holes via `su_string_from_int`.
+fn emit_interpolate(
+    parts: &[crate::ast::InterpPart],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    if parts.is_empty() {
+        return emit_expr(&Expr::StrLit(String::new()), ctx, locals, prefix);
+    }
+    if parts.len() == 1 {
+        match &parts[0] {
+            crate::ast::InterpPart::Lit(s) => {
+                return emit_expr(&Expr::StrLit(s.clone()), ctx, locals, prefix);
+            }
+            crate::ast::InterpPart::Expr(e) => {
+                let ee = emit_expr(e, ctx, locals, &format!("{prefix}_p0"));
+                if ee.kind == Kind::Ptr {
+                    return ee;
+                }
+                let mut code = ee.code;
+                writeln!(
+                    code,
+                    "  %{prefix}_s = call ptr @su_string_from_int(i64 {})",
+                    ee.value
+                )
+                .unwrap();
+                return val_emitted(code, format!("%{prefix}_s"), Kind::Ptr);
+            }
+        }
+    }
+
+    let mut code = String::new();
+    let mut acc: Option<String> = None;
+    for (i, part) in parts.iter().enumerate() {
+        let piece = match part {
+            crate::ast::InterpPart::Lit(s) => {
+                let e = emit_expr(&Expr::StrLit(s.clone()), ctx, locals, &format!("{prefix}_l{i}"));
+                code.push_str(&e.code);
+                e.value
+            }
+            crate::ast::InterpPart::Expr(e) => {
+                let ee = emit_expr(e, ctx, locals, &format!("{prefix}_e{i}"));
+                code.push_str(&ee.code);
+                if ee.kind == Kind::Ptr {
+                    ee.value
+                } else {
+                    writeln!(
+                        code,
+                        "  %{prefix}_s{i} = call ptr @su_string_from_int(i64 {})",
+                        ee.value
+                    )
+                    .unwrap();
+                    format!("%{prefix}_s{i}")
+                }
+            }
+        };
+        acc = Some(match acc {
+            None => piece,
+            Some(prev) => {
+                writeln!(
+                    code,
+                    "  %{prefix}_c{i} = call ptr @su_string_concat(ptr {prev}, ptr {piece})"
+                )
+                .unwrap();
+                format!("%{prefix}_c{i}")
+            }
+        });
+    }
+    val_emitted(code, acc.unwrap(), Kind::Ptr)
 }
 
 /// Emit a `_ => body` / `x => body` lambda literal as a closure value: a

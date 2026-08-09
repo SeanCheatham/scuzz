@@ -125,6 +125,10 @@ pub enum Expr {
     IntLit(i64),
     /// String literal
     StrLit(String),
+    /// `s"...$x..."` / `s"...${expr}..."` — typed concat (Int holes via `Str.fromInt`).
+    Interpolate {
+        parts: Vec<InterpPart>,
+    },
     /// `if (cond) then else else_`
     If {
         cond: Box<Expr>,
@@ -147,6 +151,12 @@ pub enum Expr {
         param: Option<String>,
         body: Box<Expr>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum InterpPart {
+    Lit(String),
+    Expr(Expr),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

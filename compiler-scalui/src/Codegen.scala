@@ -83,7 +83,16 @@ def collectExprTag(tag: String, e: List, strs: List): List =
   else if (streq(tag, "IoBoth") == 1)
     collectExpr(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs))
   else if (streq(tag, "Lambda") == 1) collectExpr(nodeExpr(e, 1), strs)
+  else if (streq(tag, "Interp") == 1) collectInterpParts(nodeExpr(e, 0), strs)
   else strs
+
+def collectInterpParts(parts: List, strs: List): List =
+  if (List.isEmpty(parts) == 1) strs
+  else collectInterpParts(List.tail(parts), collectInterpPart(List.head(parts), strs))
+
+def collectInterpPart(part: List, strs: List): List =
+  if (streq(List.head(part), "Lit") == 1) collectPush(strs, List.head(List.tail(part)))
+  else collectExpr(List.head(List.tail(part)), strs)
 
 def collectArgs(args: List, strs: List): List =
   if (List.isEmpty(args) == 1) strs
@@ -291,6 +300,7 @@ def emitExprTag(tag: String, e: List, strs: List, defs: List, env: List, prefix:
   else if (streq(tag, "IoBoth") == 1) emitRaceBoth(strs, e, defs, env, prefix, id, conts, "both")
   else if (streq(tag, "Adt") == 1) emitAdt(e, prefix, id, conts)
   else if (streq(tag, "Lambda") == 1) emitLambda(strs, e, defs, env, prefix, id, conts)
+  else if (streq(tag, "Interp") == 1) emitInterp(strs, e, defs, env, prefix, id, conts)
   else mkS("", "null", "ptr", id, conts)
 
 def emitPrintln(strs: List, arg: List, defs: List, env: List, prefix: String, id: Int, conts: String): List =
@@ -749,12 +759,148 @@ def emitFlatMap(strs: List, e: List, defs: List, env: List, prefix: String, id: 
     Str.concat(sConts(be), contDef)
   )
 
+// `s"..."` → left-fold su_string_concat; Int holes via su_string_from_int.
+def emitInterp(strs: List, e: List, defs: List, env: List, prefix: String, id: Int, conts: String): List =
+  emitInterpParts(strs, nodeExpr(e, 0), defs, env, prefix, id, conts, "", "", 0)
+
+def emitInterpParts(
+    strs: List,
+    parts: List,
+    defs: List,
+    env: List,
+    prefix: String,
+    id: Int,
+    conts: String,
+    code: String,
+    acc: String,
+    i: Int
+): List =
+  if (List.isEmpty(parts) == 1)
+    if (streq(acc, "") == 1) emitSuStringLit(strs, "", prefix, id, conts)
+    else mkS(code, acc, "ptr", id, conts)
+  else
+    emitInterpPart(
+      strs,
+      List.head(parts),
+      List.tail(parts),
+      defs,
+      env,
+      prefix,
+      id,
+      conts,
+      code,
+      acc,
+      i
+    )
+
+def emitInterpPart(
+    strs: List,
+    part: List,
+    rest: List,
+    defs: List,
+    env: List,
+    prefix: String,
+    id: Int,
+    conts: String,
+    code: String,
+    acc: String,
+    i: Int
+): List =
+  if (streq(List.head(part), "Lit") == 1)
+    emitInterpPiece(
+      strs,
+      rest,
+      defs,
+      env,
+      prefix,
+      id,
+      conts,
+      code,
+      acc,
+      i,
+      emitSuStringLit(strs, nodeStr(part, 0), str4(prefix, "_l", Str.fromInt(i), ""), id, conts)
+    )
+  else
+    emitInterpHole(
+      strs,
+      rest,
+      defs,
+      env,
+      prefix,
+      id,
+      conts,
+      code,
+      acc,
+      i,
+      emitExpr(nodeExpr(part, 0), strs, defs, env, str4(prefix, "_e", Str.fromInt(i), ""), id, conts)
+    )
+
+def emitInterpHole(
+    strs: List,
+    rest: List,
+    defs: List,
+    env: List,
+    prefix: String,
+    id: Int,
+    conts: String,
+    code: String,
+    acc: String,
+    i: Int,
+    pe: List
+): List =
+  if (streq(sKind(pe), "int") == 1)
+    emitInterpPiece(
+      strs,
+      rest,
+      defs,
+      env,
+      prefix,
+      sId(pe),
+      sConts(pe),
+      str4(code, sCode(pe), "  %", str5(prefix, "_s", Str.fromInt(i), " = call ptr @su_string_from_int(i64 ", sValue(pe), ")\n")),
+      acc,
+      i,
+      mkS("", str3("%", prefix, str3("_s", Str.fromInt(i))), "ptr", sId(pe), sConts(pe))
+    )
+  else
+    emitInterpPiece(strs, rest, defs, env, prefix, sId(pe), sConts(pe), str3(code, sCode(pe), ""), acc, i, pe)
+
+def emitInterpPiece(
+    strs: List,
+    rest: List,
+    defs: List,
+    env: List,
+    prefix: String,
+    id: Int,
+    conts: String,
+    code: String,
+    acc: String,
+    i: Int,
+    pe: List
+): List =
+  if (streq(acc, "") == 1)
+    emitInterpParts(strs, rest, defs, env, prefix, id, conts, str3(code, sCode(pe), ""), sValue(pe), i + 1)
+  else
+    emitInterpParts(
+      strs,
+      rest,
+      defs,
+      env,
+      prefix,
+      id,
+      conts,
+      str4(code, sCode(pe), "  %", str5(prefix, "_c", Str.fromInt(i), " = call ptr @su_string_concat(ptr ", acc, str3(", ptr ", sValue(pe), ")\n"))),
+      str3("%", prefix, str3("_c", Str.fromInt(i))),
+      i + 1
+    )
+
 // `_ => body` / `x => body` lowers to a closure value: a 2-element SuList
 // cons(fn_ptr, cons(env_ptr, nil)). fn_ptr matches SuViewTapFn
 // `void (*)(SuView *self, void *env)`; env_ptr is the captured-locals list
 // (same packing as flatMap continuations). View.button unpacks the pair.
 def emitLambda(strs: List, e: List, defs: List, env: List, prefix: String, id: Int, conts: String): List =
   val fnName = Str.concat("su_tap_", Str.fromInt(id))
+
   val param = nodeStr(e, 0)
   val names = captureNames(env, List.empty)
   val up = unpackEnv(names, Str.concat("t", Str.fromInt(id)), env)

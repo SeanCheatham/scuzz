@@ -54,6 +54,22 @@ fn infer(
         Expr::Unit => Ok(Type::Unit),
         Expr::IntLit(_) => Ok(Type::Int),
         Expr::StrLit(_) => Ok(Type::String),
+        Expr::Interpolate { parts } => {
+            for part in parts {
+                match part {
+                    crate::ast::InterpPart::Lit(_) => {}
+                    crate::ast::InterpPart::Expr(e) => {
+                        let t = infer(e, enums, funs, env)?;
+                        if !matches!(t, Type::String | Type::Int) {
+                            return Err(TypeError::Msg(format!(
+                                "interpolation hole must be String or Int, got {t:?}"
+                            )));
+                        }
+                    }
+                }
+            }
+            Ok(Type::String)
+        },
         Expr::IoPrintln(_)
         | Expr::IoDelayUnit
         | Expr::IoSleep(_)

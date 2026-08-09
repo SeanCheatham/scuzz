@@ -87,6 +87,25 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
         Expr::Unit => format!("{pad}()"),
         Expr::IntLit(n) => format!("{pad}{n}"),
         Expr::StrLit(s) => format!("{pad}\"{}\"", escape(s)),
+        Expr::Interpolate { parts } => {
+            let mut body = String::from("s\"");
+            for part in parts {
+                match part {
+                    crate::ast::InterpPart::Lit(s) => body.push_str(&escape_interp_lit(s)),
+                    crate::ast::InterpPart::Expr(Expr::Var(n)) => {
+                        body.push('$');
+                        body.push_str(n);
+                    }
+                    crate::ast::InterpPart::Expr(e) => {
+                        body.push_str("${");
+                        body.push_str(pretty_expr(e, 0).trim());
+                        body.push('}');
+                    }
+                }
+            }
+            body.push('"');
+            format!("{pad}{body}")
+        }
         Expr::IoPrintln(e) => format!("{pad}IO.println({})", pretty_expr(e, 0).trim()),
         Expr::IoDelayUnit => format!("{pad}IO.delay(() => ())"),
         Expr::IoSleep(e) => format!("{pad}IO.sleep({})", pretty_expr(e, 0).trim()),
@@ -215,6 +234,10 @@ fn pretty_arm(arm: &MatchArm, indent: usize) -> String {
 
 fn escape(s: &str) -> String {
     s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
+fn escape_interp_lit(s: &str) -> String {
+    escape(s).replace('$', "\\$")
 }
 
 #[cfg(test)]

@@ -1,7 +1,7 @@
 use crate::ast::{
-    BinOp, EnumDef, Expr, FunDef, MainDef, MatchArm, Param, Pattern, Program, Type,
+    BinOp, EnumDef, Expr, FunDef, InterpPart, MainDef, MatchArm, Param, Pattern, Program, Type,
 };
-use crate::lexer::{lex, LexError, Token};
+use crate::lexer::{lex, InterpTok, LexError, Token};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -265,7 +265,7 @@ impl Parser {
         }
     }
 
-    /// Block: zero or more `val` bindings then a final expression.
+    /// Block: `val` bindings and expression statements, ending in a final expression.
     fn parse_block(&mut self) -> Result<Expr, ParseError> {
         if matches!(self.peek(), Token::Val) {
             self.bump();
@@ -279,7 +279,16 @@ impl Parser {
                 body: Box::new(body),
             });
         }
-        self.parse_expr()
+        let expr = self.parse_expr()?;
+        // Mid-block `val` after a statement expression (val-anywhere).
+        if matches!(self.peek(), Token::Val) {
+            return Ok(Expr::Let {
+                name: "_".into(),
+                value: Box::new(expr),
+                body: Box::new(self.parse_block()?),
+            });
+        }
+        Ok(expr)
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
@@ -553,6 +562,10 @@ impl Parser {
                 self.bump();
                 Ok(Expr::StrLit(s))
             }
+            Token::InterpString(parts) => {
+                self.bump();
+                self.parse_interpolate(parts)
+            }
             Token::Minus => {
                 self.bump();
                 let n = match self.bump() {
@@ -757,6 +770,31 @@ impl Parser {
             }
             other => Err(ParseError::Msg(format!("unexpected token {other:?}"))),
         }
+    }
+
+    fn parse_interpolate(&mut self, parts: Vec<InterpTok>) -> Result<Expr, ParseError> {
+        let mut out = Vec::new();
+        for part in parts {
+            match part {
+                InterpTok::Lit(s) => out.push(InterpPart::Lit(s)),
+                InterpTok::Ident(name) => out.push(InterpPart::Expr(Expr::Var(name))),
+                InterpTok::Brace(body) => {
+                    let tokens = lex(&body)?;
+                    let mut nested = Parser { tokens, i: 0 };
+                    let e = nested.parse_expr()?;
+                    if !matches!(nested.peek(), Token::Eof) {
+                        return Err(ParseError::Msg(
+                            "trailing tokens in interpolation hole".into(),
+                        ));
+                    }
+                    out.push(InterpPart::Expr(e));
+                }
+            }
+        }
+        if out.is_empty() {
+            out.push(InterpPart::Lit(String::new()));
+        }
+        Ok(Expr::Interpolate { parts: out })
     }
 }
 
