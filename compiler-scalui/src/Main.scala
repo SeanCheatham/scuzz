@@ -31,4 +31,4 @@ def dispatchBuild(projectDir: String, doRun: Int): IO[Unit] =
   compileProject(projectDir, pathJoin(projectDir, "build"), doRun)
 
 @main def main: IO[Unit] =
-  Sys.args().flatMap(args =>     dispatch(args))
+  Sys.args().flatMap(args => dispatch(args))
