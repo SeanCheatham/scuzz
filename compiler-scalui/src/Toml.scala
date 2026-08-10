@@ -108,6 +108,36 @@ def tomlArrayNthAt(s: String, j: Int, which: Int, fallback: String): String =
 def tomlArrayNthTake(s: String, i: Int, which: Int, fallback: String, acc: String): String =
   if (i >= Str.len(s)) fallback else if (isDigit(Str.charAt(s, i)) == 1) tomlArrayNthTake(s, i + 1, which, fallback, Str.concat(acc, Str.slice(s, i, i + 1))) else if (which == 0) acc else tomlArrayNth(s, i, 0, fallback)
 
+def tomlGetArrayString(s: String, section: String, key: String): List =
+  tomlGetArrayStringAt(s, tomlSectionStart(s, section), key)
+
+def tomlGetArrayStringAt(s: String, start: Int, key: String): List =
+  if (start < 0) List.empty() else tomlScanStrArray(s, start, tomlSectionEnd(s, start), key)
+
+def tomlScanStrArray(s: String, i: Int, end: Int, key: String): List =
+  if (i >= end) List.empty() else tomlScanStrArrayAt(s, tomlSkip(s, i), end, key)
+
+def tomlScanStrArrayAt(s: String, j: Int, end: Int, key: String): List =
+  if (j >= end) List.empty() else if (Str.charAt(s, j) == 91) List.empty() else if (startsWith(Str.slice(s, j, Str.len(s)), key) == 1) tomlParseStrArray(s, tomlSkip(s, j + Str.len(key))) else tomlScanStrArray(s, tomlSkipLine(s, j), end, key)
+
+def tomlParseStrArray(s: String, j: Int): List =
+  if (j >= Str.len(s)) List.empty() else if (Str.charAt(s, j) != 61) List.empty() else tomlParseStrArrayAfterEq(s, tomlSkip(s, j + 1))
+
+def tomlParseStrArrayAfterEq(s: String, k: Int): List =
+  if (k >= Str.len(s)) List.empty() else if (Str.charAt(s, k) != 91) List.empty() else tomlStrItems(s, k + 1, List.empty())
+
+def tomlStrItems(s: String, i: Int, acc: List): List =
+  if (i >= Str.len(s)) List.reverse(acc) else tomlStrItemsAt(s, tomlSkip(s, i), acc)
+
+def tomlStrItemsAt(s: String, j: Int, acc: List): List =
+  if (j >= Str.len(s)) List.reverse(acc) else if (Str.charAt(s, j) == 93) List.reverse(acc) else if (Str.charAt(s, j) == 34) tomlStrItemsTake(s, j + 1, acc) else tomlStrItems(s, j + 1, acc)
+
+def tomlStrItemsTake(s: String, i: Int, acc: List): List =
+  tomlStrItemsCont(s, i, readUntilQuote(s, i, ""), acc)
+
+def tomlStrItemsCont(s: String, i: Int, v: String, acc: List): List =
+  tomlStrItems(s, i + Str.len(v) + 1, List.cons(v, acc))
+
 def readTomlName(toml: String): String =
   tomlGetString(toml, "package", "name", "app")
 
