@@ -17,8 +17,9 @@ scalui fmt --check            # Stage-1 pretty-printer (no canary env)
 
 ## Kernel language (what you write)
 
-- `@main def main: IO[Unit] = …` entry; top-level `def` helpers; local `val` in blocks
-- `if (cond) then else else` — branches may start with `val` for multi-binding bodies (same bindings as lambda / `def` blocks)
+- `@main def main: IO[Unit] = …` entry; top-level `def` helpers
+- **`for { x = e; y <- io } yield r`** as the primary binder (pure `=`, effect `<-`). Nested `for` in `if` / lambda arms when multi-bind is needed.
+- No `val` / statement blocks
 - Literals: ints, strings, `()`, `s"…$x…"`, list literals `[a, b]`
 - Blessed impurity only: `IO.println` / `sleep` / `fail` / `pure` / `race` / `both`, `Fs.*`, `Sys.*`, `Clock.*`, `Random.*`, `Net.httpGet`
 - No raw side effects in View build — taps may run `IO` via `su_io_unsafe_run`
@@ -30,13 +31,15 @@ Stage-0 Rust remains a CI canary for the compiler host; product `fmt` / `build` 
 Build a pure `View` tree, hold state in `Signal`, run a session with `Ui.run`:
 
 ```scala
-val count = Signal.int(0)
-val root = View.column()
-val _ = View.addChild(root, View.textSignal(count, "count = "))
-val _ = View.addChild(root, View.button("+1", _ =>
-  Signal.set(count, Signal.get(count) + 1)
-))
-Ui.run(root)
+@main def main: IO[Unit] =
+  for {
+    count = Signal.int(0)
+    root = View.column(
+      View.textSignal(count, "count = "),
+      View.button("+1", _ => Signal.set(count, Signal.get(count) + 1))
+    )
+    _ <- Ui.run(root)
+  } yield ()
 ```
 
 Lists: keep a `Signal.list`, render with `View.list` + `View.setTexts` / `View.clearChildren` when the model changes (replace-style, not append-only). See `examples/todo`.

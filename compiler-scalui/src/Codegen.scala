@@ -9,7 +9,6 @@ def progDefs(p: List): List =
 def progMain(p: List): List =
   nodeExpr(p, 3)
 
-
 def emitCtx(defs: List, tags: List): List =
   List.cons(defs, List.cons(tags, List.empty()))
 
@@ -54,7 +53,6 @@ def armBody(arm: List): List =
 
 def findWildArm(arms: List): List =
   if (List.isEmpty(arms) == 1) List.empty() else if (streq(exprTag(armPat(List.head(arms))), "PatWild") == 1) List.head(arms) else findWildArm(List.tail(arms))
-
 
 def defName(d: List): String =
   nodeStr(d, 0)
@@ -116,10 +114,8 @@ def collectInterpPart(part: List, strs: List): List =
 def collectArgs(args: List, strs: List): List =
   if (List.isEmpty(args) == 1) strs else collectArgs(List.tail(args), collectExpr(List.head(args), strs))
 
-
 def collectMatchArms(arms: List, strs: List): List =
   if (List.isEmpty(arms) == 1) strs else collectMatchArms(List.tail(arms), collectExpr(armBody(List.head(arms)), strs))
-
 
 def collectDefs(defs: List, strs: List): List =
   if (List.isEmpty(defs) == 1) strs else collectDefs(List.tail(defs), collectExpr(defBody(List.head(defs)), strs))
@@ -158,11 +154,12 @@ def emitSuString(strs: List, e: List, ctx: List, env: List, prefix: String, id: 
   if (streq(exprTag(e), "StrLit") == 1) emitSuStringLit(strs, nodeStr(e, 0), prefix, id, conts) else emitSuStringExpr(strs, e, ctx, env, prefix, id, conts)
 
 def emitSuStringLit(strs: List, s: String, prefix: String, id: Int, conts: String): List =
-  val idx = strIndexAt(strs, s, 0)
-  val len = Str.len(s) + 1
-  val code = str4("  %", prefix, "_gep = getelementptr inbounds [", str4(Str.fromInt(len), " x i8], ptr @.str", Str.fromInt(idx), ", i64 0, i64 0\n  %"))
-  val code2 = str4(code, prefix, "_ss = call ptr @su_string_from_cstr(ptr %", str3(prefix, "_gep", ")\n"))
-  mkS(code2, str3("%", prefix, "_ss"), "ptr", id, conts)
+  for {
+    idx = strIndexAt(strs, s, 0)
+    len = Str.len(s) + 1
+    code = str4("  %", prefix, "_gep = getelementptr inbounds [", str4(Str.fromInt(len), " x i8], ptr @.str", Str.fromInt(idx), ", i64 0, i64 0\n  %"))
+    code2 = str4(code, prefix, "_ss = call ptr @su_string_from_cstr(ptr %", str3(prefix, "_gep", ")\n"))
+  } yield mkS(code2, str3("%", prefix, "_ss"), "ptr", id, conts)
 
 def emitSuStringExpr(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   emitExpr(e, strs, ctx, env, Str.concat(prefix, "_e"), id, conts)
@@ -171,14 +168,16 @@ def emitCstr(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int,
   if (streq(exprTag(e), "StrLit") == 1) emitCstrLit(strs, nodeStr(e, 0), prefix, id, conts) else emitCstrExpr(strs, e, ctx, env, prefix, id, conts)
 
 def emitCstrLit(strs: List, s: String, prefix: String, id: Int, conts: String): List =
-  val idx = strIndexAt(strs, s, 0)
-  val len = Str.len(s) + 1
-  val code = str4("  %", prefix, "_cstr = getelementptr inbounds [", str4(Str.fromInt(len), " x i8], ptr @.str", Str.fromInt(idx), ", i64 0, i64 0\n"))
-  mkS(code, str3("%", prefix, "_cstr"), "ptr", id, conts)
+  for {
+    idx = strIndexAt(strs, s, 0)
+    len = Str.len(s) + 1
+    code = str4("  %", prefix, "_cstr = getelementptr inbounds [", str4(Str.fromInt(len), " x i8], ptr @.str", Str.fromInt(idx), ", i64 0, i64 0\n"))
+  } yield mkS(code, str3("%", prefix, "_cstr"), "ptr", id, conts)
 
 def emitCstrExpr(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  val se = emitExpr(e, strs, ctx, env, Str.concat(prefix, "_s"), id, conts)
-  mkS(str4(sCode(se), "  %", prefix, str3("_cstr = call ptr @su_string_cstr(ptr ", sValue(se), ")\n")), str3("%", prefix, "_cstr"), "ptr", sId(se), sConts(se))
+  for {
+    se = emitExpr(e, strs, ctx, env, Str.concat(prefix, "_s"), id, conts)
+  } yield mkS(str4(sCode(se), "  %", prefix, str3("_cstr = call ptr @su_string_cstr(ptr ", sValue(se), ")\n")), str3("%", prefix, "_cstr"), "ptr", sId(se), sConts(se))
 
 def emitExpr(e: List, strs: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   emitExprTag(exprTag(e), e, strs, ctx, env, prefix, id, conts)
@@ -187,75 +186,85 @@ def emitExprTag(tag: String, e: List, strs: List, ctx: List, env: List, prefix: 
   if (streq(tag, "Unit") == 1) mkS("", "null", "ptr", id, conts) else if (streq(tag, "IntLit") == 1) mkS("", nodeStr(e, 0), "int", id, conts) else if (streq(tag, "StrLit") == 1) emitSuStringLit(strs, nodeStr(e, 0), prefix, id, conts) else if (streq(tag, "Var") == 1) mkS("", envGetVal(env, nodeStr(e, 0)), envGetKind(env, nodeStr(e, 0)), id, conts) else if (streq(tag, "Delay") == 1) mkS(str3("  %", prefix, "_delay = call ptr @su_io_delay(ptr @su_delay_unit_thunk, ptr null)\n"), str3("%", prefix, "_delay"), "io", id, conts) else if (streq(tag, "Println") == 1) emitPrintln(strs, nodeExpr(e, 0), ctx, env, prefix, id, conts) else if (streq(tag, "Fail") == 1) emitFail(strs, nodeExpr(e, 0), ctx, env, prefix, id, conts) else if (streq(tag, "Pure") == 1) emitPure(strs, nodeExpr(e, 0), ctx, env, prefix, id, conts) else if (streq(tag, "Sleep") == 1) emitSleep(strs, nodeExpr(e, 0), ctx, env, prefix, id, conts) else if (streq(tag, "Let") == 1) emitLet(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "If") == 1) emitIf(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "BinOp") == 1) emitBinOp(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Call") == 1) emitCall(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "FlatMap") == 1) emitFlatMap(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Handle") == 1) emitHandle(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Attempt") == 1) emitAttempt(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "IoRace") == 1) emitRaceBoth(strs, e, ctx, env, prefix, id, conts, "race") else if (streq(tag, "IoBoth") == 1) emitRaceBoth(strs, e, ctx, env, prefix, id, conts, "both") else if (streq(tag, "Adt") == 1) emitAdt(e, ctxTags(ctx), prefix, id, conts) else if (streq(tag, "Match") == 1) emitMatch(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Lambda") == 1) emitLambda(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Interp") == 1) emitInterp(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "ListLit") == 1) emitListLit(strs, e, ctx, env, prefix, id, conts) else mkS("", "null", "ptr", id, conts)
 
 def emitPrintln(strs: List, arg: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  val se = emitSuString(strs, arg, ctx, env, prefix, id, conts)
-  mkS(str4(sCode(se), "  %", prefix, str3("_io = call ptr @su_io_println(ptr ", sValue(se), ")\n")), str3("%", prefix, "_io"), "io", sId(se), sConts(se))
+  for {
+    se = emitSuString(strs, arg, ctx, env, prefix, id, conts)
+  } yield mkS(str4(sCode(se), "  %", prefix, str3("_io = call ptr @su_io_println(ptr ", sValue(se), ")\n")), str3("%", prefix, "_io"), "io", sId(se), sConts(se))
 
 def emitFail(strs: List, arg: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  val ce = emitCstr(strs, arg, ctx, env, prefix, id, conts)
-  mkS(str4(sCode(ce), "  %", prefix, str3("_io = call ptr @su_io_fail_cstr(ptr ", sValue(ce), ")\n")), str3("%", prefix, "_io"), "io", sId(ce), sConts(ce))
+  for {
+    ce = emitCstr(strs, arg, ctx, env, prefix, id, conts)
+  } yield mkS(str4(sCode(ce), "  %", prefix, str3("_io = call ptr @su_io_fail_cstr(ptr ", sValue(ce), ")\n")), str3("%", prefix, "_io"), "io", sId(ce), sConts(ce))
 
 def emitPure(strs: List, inner: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  val ie = emitExpr(inner, strs, ctx, env, Str.concat(prefix, "_p"), id, conts)
-  emitPureCont(ie, prefix)
+  for {
+    ie = emitExpr(inner, strs, ctx, env, Str.concat(prefix, "_p"), id, conts)
+  } yield emitPureCont(ie, prefix)
 
 def emitPureCont(ie: List, prefix: String): List =
   if (streq(sKind(ie), "int") == 1) mkS(str4(sCode(ie), "  %", prefix, str6("_box = call ptr @su_box_i64(i64 ", sValue(ie), ")\n  %", prefix, "_io = call ptr @su_io_pure(ptr %", str3(prefix, "_box", ")\n"))), str3("%", prefix, "_io"), "ioi", sId(ie), sConts(ie)) else if (isIoKind(sKind(ie)) == 1) mkS(str4(sCode(ie), "  %", prefix, str3("_io = call ptr @su_io_pure(ptr ", sValue(ie), ")\n")), str3("%", prefix, "_io"), sKind(ie), sId(ie), sConts(ie)) else mkS(str4(sCode(ie), "  %", prefix, str3("_io = call ptr @su_io_pure(ptr ", sValue(ie), ")\n")), str3("%", prefix, "_io"), "io", sId(ie), sConts(ie))
 
 def emitSleep(strs: List, ms: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  val me = emitExpr(ms, strs, ctx, env, Str.concat(prefix, "_ms"), id, conts)
-  emitSleepCont(me, prefix)
+  for {
+    me = emitExpr(ms, strs, ctx, env, Str.concat(prefix, "_ms"), id, conts)
+  } yield emitSleepCont(me, prefix)
 
 def emitSleepCont(me: List, prefix: String): List =
   if (streq(sKind(me), "int") == 1) mkS(str4(sCode(me), "  %", prefix, str3("_sleep = call ptr @su_io_sleep_ms(i64 ", sValue(me), ")\n")), str3("%", prefix, "_sleep"), "io", sId(me), sConts(me)) else mkS(str5(sCode(me), "  %", prefix, "_ms0 = add i64 0, 0\n  %", str4(prefix, "_sleep = call ptr @su_io_sleep_ms(i64 %", prefix, "_ms0)\n")), str3("%", prefix, "_sleep"), "io", sId(me), sConts(me))
 
 def emitLet(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  val name = nodeStr(e, 0)
-  val ve = emitExpr(nodeExpr(e, 1), strs, ctx, env, str4(prefix, "_lv_", name, ""), id, conts)
-  val env2 = envPut(env, name, sValue(ve), sKind(ve))
-  val be = emitExpr(nodeExpr(e, 2), strs, ctx, env2, str4(prefix, "_l_", name, ""), sId(ve), sConts(ve))
-  mkS(Str.concat(sCode(ve), sCode(be)), sValue(be), sKind(be), sId(be), sConts(be))
+  for {
+    name = nodeStr(e, 0)
+    ve = emitExpr(nodeExpr(e, 1), strs, ctx, env, str4(prefix, "_lv_", name, ""), id, conts)
+    env2 = envPut(env, name, sValue(ve), sKind(ve))
+    be = emitExpr(nodeExpr(e, 2), strs, ctx, env2, str4(prefix, "_l_", name, ""), sId(ve), sConts(ve))
+  } yield mkS(Str.concat(sCode(ve), sCode(be)), sValue(be), sKind(be), sId(be), sConts(be))
 
 def emitIf(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  val ce = emitExpr(nodeExpr(e, 0), strs, ctx, env, Str.concat(prefix, "_ic"), id, conts)
-  emitIfAfterCond(strs, e, ctx, env, prefix, ce)
+  for {
+    ce = emitExpr(nodeExpr(e, 0), strs, ctx, env, Str.concat(prefix, "_ic"), id, conts)
+  } yield emitIfAfterCond(strs, e, ctx, env, prefix, ce)
 
 def emitIfAfterCond(strs: List, e: List, ctx: List, env: List, prefix: String, ce: List): List =
-  val id = sId(ce)
-  val cond = if (streq(sKind(ce), "int") == 1) sValue(ce) else str3("%", prefix, "_c0")
-  val pre = if (streq(sKind(ce), "int") == 1) sCode(ce) else str4(sCode(ce), "  %", prefix, "_c0 = add i64 0, 0\n")
-  val thenL = str4(prefix, "_then_", Str.fromInt(id), "")
-  val elseL = str4(prefix, "_else_", Str.fromInt(id), "")
-  val thenJ = str4(prefix, "_tj_", Str.fromInt(id), "")
-  val elseJ = str4(prefix, "_ej_", Str.fromInt(id), "")
-  val merge = str4(prefix, "_merge_", Str.fromInt(id), "")
-  val head = str4(pre, "  %", prefix, str5("_cmp = icmp ne i64 ", cond, ", 0\n  br i1 %", prefix, str5("_cmp, label %", thenL, ", label %", elseL, "\n")))
-  val te = emitExpr(nodeExpr(e, 1), strs, ctx, env, Str.concat(prefix, Str.concat("_t", Str.fromInt(id))), id + 1, sConts(ce))
-  val ee = emitExpr(nodeExpr(e, 2), strs, ctx, env, Str.concat(prefix, Str.concat("_e", Str.fromInt(id))), sId(te), sConts(te))
-  val ty = if (streq(sKind(te), "int") == 1) "i64" else "ptr"
-  val body = str4(head, thenL, ":\n", str4(sCode(te), "  br label %", thenJ, str5("\n", thenJ, ":\n  br label %", merge, str4("\n", elseL, ":\n", str4(sCode(ee), "  br label %", elseJ, str5("\n", elseJ, ":\n  br label %", merge, str5("\n", merge, ":\n  %", prefix, str5("_phi = phi ", ty, " [ ", sValue(te), str5(", %", thenJ, " ], [ ", sValue(ee), str3(", %", elseJ, " ]\n"))))))))))
-  mkS(body, str3("%", prefix, "_phi"), sKind(te), sId(ee), sConts(ee))
+  for {
+    id = sId(ce)
+    cond = if (streq(sKind(ce), "int") == 1) sValue(ce) else str3("%", prefix, "_c0")
+    pre = if (streq(sKind(ce), "int") == 1) sCode(ce) else str4(sCode(ce), "  %", prefix, "_c0 = add i64 0, 0\n")
+    thenL = str4(prefix, "_then_", Str.fromInt(id), "")
+    elseL = str4(prefix, "_else_", Str.fromInt(id), "")
+    thenJ = str4(prefix, "_tj_", Str.fromInt(id), "")
+    elseJ = str4(prefix, "_ej_", Str.fromInt(id), "")
+    merge = str4(prefix, "_merge_", Str.fromInt(id), "")
+    head = str4(pre, "  %", prefix, str5("_cmp = icmp ne i64 ", cond, ", 0\n  br i1 %", prefix, str5("_cmp, label %", thenL, ", label %", elseL, "\n")))
+    te = emitExpr(nodeExpr(e, 1), strs, ctx, env, Str.concat(prefix, Str.concat("_t", Str.fromInt(id))), id + 1, sConts(ce))
+    ee = emitExpr(nodeExpr(e, 2), strs, ctx, env, Str.concat(prefix, Str.concat("_e", Str.fromInt(id))), sId(te), sConts(te))
+    ty = if (streq(sKind(te), "int") == 1) "i64" else "ptr"
+    body = str4(head, thenL, ":\n", str4(sCode(te), "  br label %", thenJ, str5("\n", thenJ, ":\n  br label %", merge, str4("\n", elseL, ":\n", str4(sCode(ee), "  br label %", elseJ, str5("\n", elseJ, ":\n  br label %", merge, str5("\n", merge, ":\n  %", prefix, str5("_phi = phi ", ty, " [ ", sValue(te), str5(", %", thenJ, " ], [ ", sValue(ee), str3(", %", elseJ, " ]\n"))))))))))
+  } yield mkS(body, str3("%", prefix, "_phi"), sKind(te), sId(ee), sConts(ee))
 
 def emitBinOp(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  val op = nodeStr(e, 0)
-  val le = emitExpr(nodeExpr(e, 1), strs, ctx, env, Str.concat(prefix, "_l"), id, conts)
-  val re = emitExpr(nodeExpr(e, 2), strs, ctx, env, Str.concat(prefix, "_r"), sId(le), sConts(le))
-  emitBinOpCont(op, le, re, prefix)
+  for {
+    op = nodeStr(e, 0)
+    le = emitExpr(nodeExpr(e, 1), strs, ctx, env, Str.concat(prefix, "_l"), id, conts)
+    re = emitExpr(nodeExpr(e, 2), strs, ctx, env, Str.concat(prefix, "_r"), sId(le), sConts(le))
+  } yield emitBinOpCont(op, le, re, prefix)
 
 def emitBinOpCont(op: String, le: List, re: List, prefix: String): List =
   if (streq(op, "+") == 1) if (streq(sKind(le), "ptr") == 1) if (streq(sKind(re), "ptr") == 1) mkS(str5(sCode(le), sCode(re), "  %", prefix, str5("_add = call ptr @su_string_concat(ptr ", sValue(le), ", ptr ", sValue(re), ")\n")), str3("%", prefix, "_add"), "ptr", sId(re), sConts(re)) else emitBinOpInt(op, le, re, prefix) else emitBinOpInt(op, le, re, prefix) else if (streq(op, "==") == 1) if (streq(sKind(le), "ptr") == 1) if (streq(sKind(re), "ptr") == 1) emitBinOpStrEq(le, re, prefix, 1) else emitBinOpInt(op, le, re, prefix) else emitBinOpInt(op, le, re, prefix) else if (streq(op, "!=") == 1) if (streq(sKind(le), "ptr") == 1) if (streq(sKind(re), "ptr") == 1) emitBinOpStrEq(le, re, prefix, 0) else emitBinOpInt(op, le, re, prefix) else emitBinOpInt(op, le, re, prefix) else emitBinOpInt(op, le, re, prefix)
 
 def emitBinOpStrEq(le: List, re: List, prefix: String, isEq: Int): List =
-  val code0 = str5(sCode(le), sCode(re), "  %", prefix, str5("_eqi = call i32 @su_string_eq(ptr ", sValue(le), ", ptr ", sValue(re), ")\n  %"))
-  val code1 = str4(code0, prefix, "_eq = zext i32 %", str3(prefix, "_eqi", " to i64\n"))
-  if (isEq == 1) mkS(code1, str3("%", prefix, "_eq"), "int", sId(re), sConts(re)) else mkS(str4(code1, "  %", prefix, str6("_ne = icmp eq i64 %", prefix, "_eq, 0\n  %", prefix, "_nev = zext i1 %", str3(prefix, "_ne", " to i64\n"))), str3("%", prefix, "_nev"), "int", sId(re), sConts(re))
+  for {
+    code0 = str5(sCode(le), sCode(re), "  %", prefix, str5("_eqi = call i32 @su_string_eq(ptr ", sValue(le), ", ptr ", sValue(re), ")\n  %"))
+    code1 = str4(code0, prefix, "_eq = zext i32 %", str3(prefix, "_eqi", " to i64\n"))
+  } yield if (isEq == 1) mkS(code1, str3("%", prefix, "_eq"), "int", sId(re), sConts(re)) else mkS(str4(code1, "  %", prefix, str6("_ne = icmp eq i64 %", prefix, "_eq, 0\n  %", prefix, "_nev = zext i1 %", str3(prefix, "_ne", " to i64\n"))), str3("%", prefix, "_nev"), "int", sId(re), sConts(re))
 
 def emitBinOpInt(op: String, le: List, re: List, prefix: String): List =
-  val lv = if (streq(sKind(le), "int") == 1) sValue(le) else str3("%", prefix, "_l0")
-  val rv = if (streq(sKind(re), "int") == 1) sValue(re) else str3("%", prefix, "_r0")
-  val c0 = Str.concat(sCode(le), sCode(re))
-  val c1 = if (streq(sKind(le), "int") == 1) c0 else str4(c0, "  %", prefix, "_l0 = add i64 0, 0\n")
-  val c2 = if (streq(sKind(re), "int") == 1) c1 else str4(c1, "  %", prefix, "_r0 = add i64 0, 0\n")
-  emitBinOpIntOp(op, c2, lv, rv, prefix, sId(re), sConts(re))
+  for {
+    lv = if (streq(sKind(le), "int") == 1) sValue(le) else str3("%", prefix, "_l0")
+    rv = if (streq(sKind(re), "int") == 1) sValue(re) else str3("%", prefix, "_r0")
+    c0 = Str.concat(sCode(le), sCode(re))
+    c1 = if (streq(sKind(le), "int") == 1) c0 else str4(c0, "  %", prefix, "_l0 = add i64 0, 0\n")
+    c2 = if (streq(sKind(re), "int") == 1) c1 else str4(c1, "  %", prefix, "_r0 = add i64 0, 0\n")
+  } yield emitBinOpIntOp(op, c2, lv, rv, prefix, sId(re), sConts(re))
 
 def emitBinOpIntOp(op: String, code: String, lv: String, rv: String, prefix: String, id: Int, conts: String): List =
   if (streq(op, "+") == 1) mkS(str4(code, "  %", prefix, str5("_v = add i64 ", lv, ", ", rv, "\n")), str3("%", prefix, "_v"), "int", id, conts) else if (streq(op, "-") == 1) mkS(str4(code, "  %", prefix, str5("_v = sub i64 ", lv, ", ", rv, "\n")), str3("%", prefix, "_v"), "int", id, conts) else if (streq(op, "*") == 1) mkS(str4(code, "  %", prefix, str5("_v = mul i64 ", lv, ", ", rv, "\n")), str3("%", prefix, "_v"), "int", id, conts) else if (streq(op, "/") == 1) mkS(str4(code, "  %", prefix, str5("_v = sdiv i64 ", lv, ", ", rv, "\n")), str3("%", prefix, "_v"), "int", id, conts) else if (streq(op, "%") == 1) mkS(str4(code, "  %", prefix, str5("_v = srem i64 ", lv, ", ", rv, "\n")), str3("%", prefix, "_v"), "int", id, conts) else if (streq(op, "&&") == 1) mkS(str4(code, "  %", prefix, str5("_v = and i64 ", lv, ", ", rv, "\n")), str3("%", prefix, "_v"), "int", id, conts) else if (streq(op, "||") == 1) mkS(str4(code, "  %", prefix, str5("_v = or i64 ", lv, ", ", rv, "\n")), str3("%", prefix, "_v"), "int", id, conts) else emitIcmp(op, code, lv, rv, prefix, id, conts)
@@ -267,28 +276,32 @@ def emitIcmp(op: String, code: String, lv: String, rv: String, prefix: String, i
   mkS(str4(code, "  %", prefix, str5("_cmp = icmp ", icmpPred(op), " i64 ", lv, str6(", ", rv, "\n  %", prefix, "_v = zext i1 %", str3(prefix, "_cmp", " to i64\n")))), str3("%", prefix, "_v"), "int", id, conts)
 
 def emitAdt(e: List, tags: List, prefix: String, id: Int, conts: String): List =
-  val tag = tagLookup(tags, nodeStr(e, 0), nodeStr(e, 1))
-  mkS(str5("  %", prefix, "_adt = call ptr @su_adt_new(i32 ", tag, ", ptr null)\n"), str3("%", prefix, "_adt"), "ptr", id, conts)
+  for {
+    tag = tagLookup(tags, nodeStr(e, 0), nodeStr(e, 1))
+  } yield mkS(str5("  %", prefix, "_adt = call ptr @su_adt_new(i32 ", tag, ", ptr null)\n"), str3("%", prefix, "_adt"), "ptr", id, conts)
 
 def emitSwitchLabels(arms: List, tags: List, prefix: String, mid: Int, i: Int): String =
   if (List.isEmpty(arms) == 1) "" else emitSwitchLabelOne(List.head(arms), List.tail(arms), tags, prefix, mid, i)
 
 def emitSwitchLabelOne(arm: List, rest: List, tags: List, prefix: String, mid: Int, i: Int): String =
-  val pat = armPat(arm)
-  if (streq(exprTag(pat), "PatWild") == 1) emitSwitchLabels(rest, tags, prefix, mid, i + 1) else str5(" i32 ", tagLookup(tags, nodeStr(pat, 0), nodeStr(pat, 1)), ", label %", str4(prefix, "_arm_", Str.fromInt(mid), str3("_", Str.fromInt(i), "")), emitSwitchLabels(rest, tags, prefix, mid, i + 1))
+  for {
+    pat = armPat(arm)
+  } yield if (streq(exprTag(pat), "PatWild") == 1) emitSwitchLabels(rest, tags, prefix, mid, i + 1) else str5(" i32 ", tagLookup(tags, nodeStr(pat, 0), nodeStr(pat, 1)), ", label %", str4(prefix, "_arm_", Str.fromInt(mid), str3("_", Str.fromInt(i), "")), emitSwitchLabels(rest, tags, prefix, mid, i + 1))
 
 def emitMatch(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  val se = emitExpr(nodeExpr(e, 0), strs, ctx, env, Str.concat(prefix, "_sc"), id, conts)
-  emitMatchAfterScrut(strs, e, ctx, env, prefix, se)
+  for {
+    se = emitExpr(nodeExpr(e, 0), strs, ctx, env, Str.concat(prefix, "_sc"), id, conts)
+  } yield emitMatchAfterScrut(strs, e, ctx, env, prefix, se)
 
 def emitMatchAfterScrut(strs: List, e: List, ctx: List, env: List, prefix: String, se: List): List =
-  val mid = sId(se)
-  val arms = nodeExpr(e, 1)
-  val merge = str4(prefix, "_merge_", Str.fromInt(mid), "")
-  val defaultL = str4(prefix, "_default_", Str.fromInt(mid), "")
-  val sw = str4(sCode(se), "  %", prefix, str5("_tag = call i32 @su_adt_tag(ptr ", sValue(se), ")\n  switch i32 %", prefix, str5("_tag, label %", defaultL, " [", emitSwitchLabels(arms, ctxTags(ctx), prefix, mid, 0), " ]\n")))
-  val ar = emitMatchArms(strs, arms, ctx, env, prefix, mid, merge, sId(se) + 1, sConts(se), sw, "", "io", 0)
-  emitMatchDefault(strs, arms, ctx, env, prefix, mid, merge, defaultL, ar)
+  for {
+    mid = sId(se)
+    arms = nodeExpr(e, 1)
+    merge = str4(prefix, "_merge_", Str.fromInt(mid), "")
+    defaultL = str4(prefix, "_default_", Str.fromInt(mid), "")
+    sw = str4(sCode(se), "  %", prefix, str5("_tag = call i32 @su_adt_tag(ptr ", sValue(se), ")\n  switch i32 %", prefix, str5("_tag, label %", defaultL, " [", emitSwitchLabels(arms, ctxTags(ctx), prefix, mid, 0), " ]\n")))
+    ar = emitMatchArms(strs, arms, ctx, env, prefix, mid, merge, sId(se) + 1, sConts(se), sw, "", "io", 0)
+  } yield emitMatchDefault(strs, arms, ctx, env, prefix, mid, merge, defaultL, ar)
 
 def emitMatchArms(strs: List, arms: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, id: Int, conts: String, code: String, phi: String, kind: String, i: Int): List =
   if (List.isEmpty(arms) == 1) mkS(code, phi, kind, id, conts) else emitMatchArmOne(List.head(arms), List.tail(arms), strs, ctx, env, prefix, mid, merge, id, conts, code, phi, kind, i)
@@ -297,54 +310,61 @@ def emitMatchArmOne(arm: List, rest: List, strs: List, ctx: List, env: List, pre
   if (streq(exprTag(armPat(arm)), "PatWild") == 1) emitMatchArms(strs, rest, ctx, env, prefix, mid, merge, id, conts, code, phi, kind, i + 1) else emitMatchArmBody(arm, rest, strs, ctx, env, prefix, mid, merge, id, conts, code, phi, kind, i)
 
 def emitMatchArmBody(arm: List, rest: List, strs: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, id: Int, conts: String, code: String, phi: String, kind: String, i: Int): List =
-  val label = str4(prefix, "_arm_", Str.fromInt(mid), str3("_", Str.fromInt(i), ""))
-  val ae = emitExpr(armBody(arm), strs, ctx, env, str4(prefix, "_a", Str.fromInt(mid), str3("_", Str.fromInt(i), "")), id, conts)
-  val code2 = str4(code, label, ":\n", str4(sCode(ae), "  br label %", merge, "\n"))
-  val phi2 = if (streq(phi, "") == 1) str5(" [ ", sValue(ae), ", %", label, " ]") else str5(phi, ", [ ", sValue(ae), Str.concat(", %", label), " ]")
-  val kind2 = if (streq(phi, "") == 1) sKind(ae) else kind
-  emitMatchArms(strs, rest, ctx, env, prefix, mid, merge, sId(ae), sConts(ae), code2, phi2, kind2, i + 1)
+  for {
+    label = str4(prefix, "_arm_", Str.fromInt(mid), str3("_", Str.fromInt(i), ""))
+    ae = emitExpr(armBody(arm), strs, ctx, env, str4(prefix, "_a", Str.fromInt(mid), str3("_", Str.fromInt(i), "")), id, conts)
+    code2 = str4(code, label, ":\n", str4(sCode(ae), "  br label %", merge, "\n"))
+    phi2 = if (streq(phi, "") == 1) str5(" [ ", sValue(ae), ", %", label, " ]") else str5(phi, ", [ ", sValue(ae), Str.concat(", %", label), " ]")
+    kind2 = if (streq(phi, "") == 1) sKind(ae) else kind
+  } yield emitMatchArms(strs, rest, ctx, env, prefix, mid, merge, sId(ae), sConts(ae), code2, phi2, kind2, i + 1)
 
 def emitMatchDefault(strs: List, arms: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, defaultL: String, ar: List): List =
-  val wild = findWildArm(arms)
-  if (List.isEmpty(wild) == 1) emitMatchDefaultSynth(prefix, mid, merge, defaultL, ar) else emitMatchDefaultWild(strs, wild, ctx, env, prefix, mid, merge, defaultL, ar)
+  for {
+    wild = findWildArm(arms)
+  } yield if (List.isEmpty(wild) == 1) emitMatchDefaultSynth(prefix, mid, merge, defaultL, ar) else emitMatchDefaultWild(strs, wild, ctx, env, prefix, mid, merge, defaultL, ar)
 
 def emitMatchDefaultWild(strs: List, wild: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, defaultL: String, ar: List): List =
-  val ae = emitExpr(armBody(wild), strs, ctx, env, str4(prefix, "_aw", Str.fromInt(mid), ""), sId(ar), sConts(ar))
-  val phi0 = sValue(ar)
-  val kind0 = sKind(ar)
-  val kind2 = if (streq(phi0, "") == 1) sKind(ae) else kind0
-  val phi2 = if (streq(phi0, "") == 1) str5(" [ ", sValue(ae), ", %", defaultL, " ]") else str5(phi0, ", [ ", sValue(ae), Str.concat(", %", defaultL), " ]")
-  val code2 = str4(sCode(ar), defaultL, ":\n", str4(sCode(ae), "  br label %", merge, "\n"))
-  emitMatchFinish(code2, phi2, kind2, sId(ae), sConts(ae), prefix, merge)
+  for {
+    ae = emitExpr(armBody(wild), strs, ctx, env, str4(prefix, "_aw", Str.fromInt(mid), ""), sId(ar), sConts(ar))
+    phi0 = sValue(ar)
+    kind0 = sKind(ar)
+    kind2 = if (streq(phi0, "") == 1) sKind(ae) else kind0
+    phi2 = if (streq(phi0, "") == 1) str5(" [ ", sValue(ae), ", %", defaultL, " ]") else str5(phi0, ", [ ", sValue(ae), Str.concat(", %", defaultL), " ]")
+    code2 = str4(sCode(ar), defaultL, ":\n", str4(sCode(ae), "  br label %", merge, "\n"))
+  } yield emitMatchFinish(code2, phi2, kind2, sId(ae), sConts(ae), prefix, merge)
 
 def emitMatchDefaultSynth(prefix: String, mid: Int, merge: String, defaultL: String, ar: List): List =
-  val kind = if (streq(sValue(ar), "") == 1) "io" else sKind(ar)
-  val dflt = emitMatchDfltVal(prefix, kind)
-  val phi0 = sValue(ar)
-  val phi2 = if (streq(phi0, "") == 1) str5(" [ ", fst(dflt), ", %", defaultL, " ]") else str5(phi0, ", [ ", fst(dflt), Str.concat(", %", defaultL), " ]")
-  val code2 = str4(sCode(ar), defaultL, ":\n", str4(snd(dflt), "  br label %", merge, "\n"))
-  emitMatchFinish(code2, phi2, kind, sId(ar), sConts(ar), prefix, merge)
+  for {
+    kind = if (streq(sValue(ar), "") == 1) "io" else sKind(ar)
+    dflt = emitMatchDfltVal(prefix, kind)
+    phi0 = sValue(ar)
+    phi2 = if (streq(phi0, "") == 1) str5(" [ ", fst(dflt), ", %", defaultL, " ]") else str5(phi0, ", [ ", fst(dflt), Str.concat(", %", defaultL), " ]")
+    code2 = str4(sCode(ar), defaultL, ":\n", str4(snd(dflt), "  br label %", merge, "\n"))
+  } yield emitMatchFinish(code2, phi2, kind, sId(ar), sConts(ar), prefix, merge)
 
 def emitMatchDfltVal(prefix: String, kind: String): List =
   if (streq(kind, "int") == 1) pair(str3("%", prefix, "_dflt"), str3("  %", prefix, "_dflt = add i64 0, 0\n")) else if (streq(kind, "ptr") == 1) pair("null", "") else pair(str3("%", prefix, "_dflt"), str3("  %", prefix, "_dflt = call ptr @su_io_pure(ptr null)\n"))
 
 def emitMatchFinish(code: String, phi: String, kind: String, id: Int, conts: String, prefix: String, merge: String): List =
-  val ty = if (streq(kind, "int") == 1) "i64" else "ptr"
-  val body = str4(code, merge, ":\n  %", str5(prefix, "_phi = phi ", ty, phi, "\n"))
-  mkS(body, str3("%", prefix, "_phi"), kind, id, conts)
+  for {
+    ty = if (streq(kind, "int") == 1) "i64" else "ptr"
+    body = str4(code, merge, ":\n  %", str5(prefix, "_phi = phi ", ty, phi, "\n"))
+  } yield mkS(body, str3("%", prefix, "_phi"), kind, id, conts)
 
 def emitAttempt(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  val ie = emitExpr(nodeExpr(e, 0), strs, ctx, env, Str.concat(prefix, "_at"), id, conts)
-  val p = ensureIoPair(sCode(ie), sKind(ie), sValue(ie), Str.concat(prefix, "_atio"))
-  mkS(str4(fst(p), "  %", prefix, str3("_attempt = call ptr @su_io_attempt(ptr ", snd(p), ")\n")), str3("%", prefix, "_attempt"), "io", sId(ie), sConts(ie))
+  for {
+    ie = emitExpr(nodeExpr(e, 0), strs, ctx, env, Str.concat(prefix, "_at"), id, conts)
+    p = ensureIoPair(sCode(ie), sKind(ie), sValue(ie), Str.concat(prefix, "_atio"))
+  } yield mkS(str4(fst(p), "  %", prefix, str3("_attempt = call ptr @su_io_attempt(ptr ", snd(p), ")\n")), str3("%", prefix, "_attempt"), "io", sId(ie), sConts(ie))
 
 def emitRaceBoth(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String, which: String): List =
-  val le = emitExpr(nodeExpr(e, 0), strs, ctx, env, Str.concat(prefix, "_rl"), id, conts)
-  val re = emitExpr(nodeExpr(e, 1), strs, ctx, env, Str.concat(prefix, "_rr"), sId(le), sConts(le))
-  val lp = ensureIoPair(sCode(le), sKind(le), sValue(le), Str.concat(prefix, "_rlio"))
-  val rp = ensureIoPair(Str.concat(fst(lp), sCode(re)), sKind(re), sValue(re), Str.concat(prefix, "_rrio"))
-  val fn = if (streq(which, "race") == 1) "@su_io_race" else "@su_io_both"
-  mkS(str4(fst(rp), "  %", prefix, str5("_v = call ptr ", fn, "(ptr ", snd(lp), str3(", ptr ", snd(rp), ")\n"))), str3("%", prefix, "_v"), "io", sId(re), sConts(re))
+  for {
+    le = emitExpr(nodeExpr(e, 0), strs, ctx, env, Str.concat(prefix, "_rl"), id, conts)
+    re = emitExpr(nodeExpr(e, 1), strs, ctx, env, Str.concat(prefix, "_rr"), sId(le), sConts(le))
+    lp = ensureIoPair(sCode(le), sKind(le), sValue(le), Str.concat(prefix, "_rlio"))
+    rp = ensureIoPair(Str.concat(fst(lp), sCode(re)), sKind(re), sValue(re), Str.concat(prefix, "_rrio"))
+    fn = if (streq(which, "race") == 1) "@su_io_race" else "@su_io_both"
+  } yield mkS(str4(fst(rp), "  %", prefix, str5("_v = call ptr ", fn, "(ptr ", snd(lp), str3(", ptr ", snd(rp), ")\n"))), str3("%", prefix, "_v"), "io", sId(re), sConts(re))
 
 def nameInList(names: List, n: String): Int =
   if (List.isEmpty(names) == 1) 0 else if (streq(List.head(names), n) == 1) 1 else nameInList(List.tail(names), n)
@@ -359,23 +379,26 @@ def packEnvRev(revNames: List, env: List, prefix: String, i: Int, code: String, 
   if (List.isEmpty(revNames) == 1) pair(code, cur) else packEnvRevOne(List.head(revNames), List.tail(revNames), env, prefix, i, code, cur)
 
 def packEnvRevOne(n: String, rest: List, env: List, prefix: String, i: Int, code: String, cur: String): List =
-  val v = envGetVal(env, n)
-  val k = envGetKind(env, n)
-  if (streq(k, "int") == 1) packEnvRev(rest, env, prefix, i + 1, str4(code, "  %", prefix, str5("_b", Str.fromInt(i), " = call ptr @su_box_i64(i64 ", v, str4(")\n  %", prefix, "_", str5(Str.fromInt(i + 1), " = call ptr @su_list_cons(ptr %", prefix, "_b", str4(Str.fromInt(i), ", ptr ", cur, ")\n"))))), str3("%", prefix, Str.concat("_", Str.fromInt(i + 1)))) else packEnvRev(rest, env, prefix, i + 1, str4(code, "  %", prefix, str4("_", Str.fromInt(i + 1), " = call ptr @su_list_cons(ptr ", str4(v, ", ptr ", cur, ")\n"))), str3("%", prefix, Str.concat("_", Str.fromInt(i + 1))))
+  for {
+    v = envGetVal(env, n)
+    k = envGetKind(env, n)
+  } yield if (streq(k, "int") == 1) packEnvRev(rest, env, prefix, i + 1, str4(code, "  %", prefix, str5("_b", Str.fromInt(i), " = call ptr @su_box_i64(i64 ", v, str4(")\n  %", prefix, "_", str5(Str.fromInt(i + 1), " = call ptr @su_list_cons(ptr %", prefix, "_b", str4(Str.fromInt(i), ", ptr ", cur, ")\n"))))), str3("%", prefix, Str.concat("_", Str.fromInt(i + 1)))) else packEnvRev(rest, env, prefix, i + 1, str4(code, "  %", prefix, str4("_", Str.fromInt(i + 1), " = call ptr @su_list_cons(ptr ", str4(v, ", ptr ", cur, ")\n"))), str3("%", prefix, Str.concat("_", Str.fromInt(i + 1))))
 
 def packEnv(env: List, prefix: String, code: String): List =
-  val names = captureNames(env, List.empty())
-  if (List.isEmpty(names) == 1) pair(code, "null") else packEnvRev(List.reverse(names), env, prefix, 0, str4(code, "  %", prefix, "_0 = call ptr @su_list_nil()\n"), str3("%", prefix, "_0"))
+  for {
+    names = captureNames(env, List.empty())
+  } yield if (List.isEmpty(names) == 1) pair(code, "null") else packEnvRev(List.reverse(names), env, prefix, 0, str4(code, "  %", prefix, "_0 = call ptr @su_list_nil()\n"), str3("%", prefix, "_0"))
 
 def unpackEnvAt(names: List, prefix: String, i: Int, cur: String, code: String, envAcc: List, outer: List): List =
   if (List.isEmpty(names) == 1) pairSL(code, envAcc) else unpackEnvOne(List.head(names), List.tail(names), prefix, i, cur, code, envAcc, outer)
 
 def unpackEnvOne(n: String, rest: List, prefix: String, i: Int, cur: String, code: String, envAcc: List, outer: List): List =
-  val k = envGetKind(outer, n)
-  val h = str4("%", prefix, "_h", Str.fromInt(i))
-  val t = str4("%", prefix, "_t", Str.fromInt(i))
-  val code2 = str4(code, "  ", h, str4(" = call ptr @su_list_head(ptr ", cur, ")\n  ", str4(t, " = call ptr @su_list_tail(ptr ", cur, ")\n")))
-  if (streq(k, "int") == 1) unpackEnvAt(rest, prefix, i + 1, t, str4(code2, "  %", n, str3(" = call i64 @su_unbox_i64(ptr ", h, ")\n")), envPut(envAcc, n, Str.concat("%", n), "int"), outer) else unpackEnvAt(rest, prefix, i + 1, t, code2, envPut(envAcc, n, h, k), outer)
+  for {
+    k = envGetKind(outer, n)
+    h = str4("%", prefix, "_h", Str.fromInt(i))
+    t = str4("%", prefix, "_t", Str.fromInt(i))
+    code2 = str4(code, "  ", h, str4(" = call ptr @su_list_head(ptr ", cur, ")\n  ", str4(t, " = call ptr @su_list_tail(ptr ", cur, ")\n")))
+  } yield if (streq(k, "int") == 1) unpackEnvAt(rest, prefix, i + 1, t, str4(code2, "  %", n, str3(" = call i64 @su_unbox_i64(ptr ", h, ")\n")), envPut(envAcc, n, Str.concat("%", n), "int"), outer) else unpackEnvAt(rest, prefix, i + 1, t, code2, envPut(envAcc, n, h, k), outer)
 
 def unpackEnv(names: List, prefix: String, outer: List): List =
   if (List.isEmpty(names) == 1) pairSL("", List.empty()) else unpackEnvAt(names, prefix, 0, "%env", "", List.empty(), outer)
@@ -387,31 +410,33 @@ def flatMapBind(param: String, payload: String, env: List): List =
   if (streq(param, "_") == 1) pairSL("", env) else if (streq(payload, "int") == 1) pairSL(str3("  %", param, " = call i64 @su_unbox_i64(ptr %value)\n"), envPut(env, param, Str.concat("%", param), "int")) else pairSL("", envPut(env, param, "%value", "ptr"))
 
 def emitHandle(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  val contName = Str.concat("su_err_", Str.fromInt(id))
-  val names = captureNames(env, List.empty())
-  val up = unpackEnv(names, Str.concat("e", Str.fromInt(id)), env)
-  val be = emitExpr(nodeExpr(e, 1), strs, ctx, sndL(up), Str.concat("e", Str.fromInt(id)), id + 1, conts)
-  val wrap = ensureIoPair(sCode(be), sKind(be), sValue(be), Str.concat("e", Str.concat(Str.fromInt(id), "_wrap")))
-  val contDef = str4("define internal ptr @", contName, "(ptr %err, ptr %env) {\nentry:\n", str5(fst(up), fst(wrap), "  ret ptr ", snd(wrap), "\n}\n\n"))
-  val ie = emitExpr(nodeExpr(e, 0), strs, ctx, env, Str.concat(prefix, "_he"), sId(be), Str.concat(sConts(be), contDef))
-  val ip = ensureIoPair(sCode(ie), sKind(ie), sValue(ie), Str.concat(prefix, "_heio"))
-  val packed = packEnv(env, Str.concat(prefix, "_ecap"), fst(ip))
-  mkS(str4(fst(packed), "  %", prefix, str5("_h = call ptr @su_io_handle_error_with(ptr ", snd(ip), ", ptr @", contName, str3(", ptr ", snd(packed), ")\n"))), str3("%", prefix, "_h"), "io", sId(ie), sConts(ie))
+  for {
+    contName = Str.concat("su_err_", Str.fromInt(id))
+    names = captureNames(env, List.empty())
+    up = unpackEnv(names, Str.concat("e", Str.fromInt(id)), env)
+    be = emitExpr(nodeExpr(e, 1), strs, ctx, sndL(up), Str.concat("e", Str.fromInt(id)), id + 1, conts)
+    wrap = ensureIoPair(sCode(be), sKind(be), sValue(be), Str.concat("e", Str.concat(Str.fromInt(id), "_wrap")))
+    contDef = str4("define internal ptr @", contName, "(ptr %err, ptr %env) {\nentry:\n", str5(fst(up), fst(wrap), "  ret ptr ", snd(wrap), "\n}\n\n"))
+    ie = emitExpr(nodeExpr(e, 0), strs, ctx, env, Str.concat(prefix, "_he"), sId(be), Str.concat(sConts(be), contDef))
+    ip = ensureIoPair(sCode(ie), sKind(ie), sValue(ie), Str.concat(prefix, "_heio"))
+    packed = packEnv(env, Str.concat(prefix, "_ecap"), fst(ip))
+  } yield mkS(str4(fst(packed), "  %", prefix, str5("_h = call ptr @su_io_handle_error_with(ptr ", snd(ip), ", ptr @", contName, str3(", ptr ", snd(packed), ")\n"))), str3("%", prefix, "_h"), "io", sId(ie), sConts(ie))
 
 def emitFlatMap(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  val contName = Str.concat("su_cont_", Str.fromInt(id))
-  val param = nodeStr(e, 1)
-  val inner = emitExpr(nodeExpr(e, 0), strs, ctx, env, Str.concat(prefix, "_in"), id + 1, conts)
-  val payload = payloadOfKind(sKind(inner))
-  val names = captureNames(env, List.empty())
-  val up = unpackEnv(names, Str.concat("c", Str.fromInt(id)), env)
-  val bind = flatMapBind(param, payload, sndL(up))
-  val be = emitExpr(nodeExpr(e, 2), strs, ctx, sndL(bind), Str.concat("c", Str.fromInt(id)), sId(inner), sConts(inner))
-  val wrap = ensureIoPair(sCode(be), sKind(be), sValue(be), Str.concat("c", Str.concat(Str.fromInt(id), "_wrap")))
-  val contDef = str4("define internal ptr @", contName, "(ptr %value, ptr %env) {\nentry:\n", str3(fst(up), fst(bind), str4(fst(wrap), "  ret ptr ", snd(wrap), "\n}\n\n")))
-  val ip = ensureIoPair(sCode(inner), sKind(inner), sValue(inner), Str.concat(prefix, "_inio"))
-  val packed = packEnv(env, Str.concat(prefix, "_cap"), fst(ip))
-  mkS(str4(fst(packed), "  %", prefix, str5("_fm = call ptr @su_io_flatmap(ptr ", snd(ip), ", ptr @", contName, str3(", ptr ", snd(packed), ")\n"))), str3("%", prefix, "_fm"), flatMapResultKind(sKind(be)), sId(be), Str.concat(sConts(be), contDef))
+  for {
+    contName = Str.concat("su_cont_", Str.fromInt(id))
+    param = nodeStr(e, 1)
+    inner = emitExpr(nodeExpr(e, 0), strs, ctx, env, Str.concat(prefix, "_in"), id + 1, conts)
+    payload = payloadOfKind(sKind(inner))
+    names = captureNames(env, List.empty())
+    up = unpackEnv(names, Str.concat("c", Str.fromInt(id)), env)
+    bind = flatMapBind(param, payload, sndL(up))
+    be = emitExpr(nodeExpr(e, 2), strs, ctx, sndL(bind), Str.concat("c", Str.fromInt(id)), sId(inner), sConts(inner))
+    wrap = ensureIoPair(sCode(be), sKind(be), sValue(be), Str.concat("c", Str.concat(Str.fromInt(id), "_wrap")))
+    contDef = str4("define internal ptr @", contName, "(ptr %value, ptr %env) {\nentry:\n", str3(fst(up), fst(bind), str4(fst(wrap), "  ret ptr ", snd(wrap), "\n}\n\n")))
+    ip = ensureIoPair(sCode(inner), sKind(inner), sValue(inner), Str.concat(prefix, "_inio"))
+    packed = packEnv(env, Str.concat(prefix, "_cap"), fst(ip))
+  } yield mkS(str4(fst(packed), "  %", prefix, str5("_fm = call ptr @su_io_flatmap(ptr ", snd(ip), ", ptr @", contName, str3(", ptr ", snd(packed), ")\n"))), str3("%", prefix, "_fm"), flatMapResultKind(sKind(be)), sId(be), Str.concat(sConts(be), contDef))
 
 def emitInterp(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   emitInterpParts(strs, nodeExpr(e, 0), ctx, env, prefix, id, conts, "", "", 0)
@@ -429,36 +454,40 @@ def emitInterpPiece(strs: List, rest: List, ctx: List, env: List, prefix: String
   if (streq(acc, "") == 1) emitInterpParts(strs, rest, ctx, env, prefix, id, conts, str3(code, sCode(pe), ""), sValue(pe), i + 1) else emitInterpParts(strs, rest, ctx, env, prefix, id, conts, str4(code, sCode(pe), "  %", str6(prefix, "_c", Str.fromInt(i), " = call ptr @su_string_concat(ptr ", acc, str3(", ptr ", sValue(pe), ")\n"))), str4("%", prefix, "_c", Str.fromInt(i)), i + 1)
 
 def emitLambda(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  val fnName = Str.concat("su_tap_", Str.fromInt(id))
-  val param = nodeStr(e, 0)
-  val names = captureNames(env, List.empty())
-  val up = unpackEnv(names, Str.concat("t", Str.fromInt(id)), env)
-  val benv = lambdaBind(param, sndL(up))
-  val be = emitExpr(nodeExpr(e, 1), strs, ctx, benv, Str.concat("t", Str.fromInt(id)), id + 1, conts)
-  val bodyEnd = if (isIoKind(sKind(be)) == 1) str4(sCode(be), "  %t", Str.fromInt(id), str3("_ur = call { i32, ptr, ptr } @su_io_unsafe_run(ptr ", sValue(be), ")\n  ret void\n")) else str4(sCode(be), "  ret void\n", "", "")
-  val contDef = str4("define internal void @", fnName, "(ptr %self, ptr %env) {\nentry:\n", str4(fst(up), bodyEnd, "}\n\n", ""))
-  emitLambdaClosure(env, prefix, fnName, sId(be), Str.concat(sConts(be), contDef))
+  for {
+    fnName = Str.concat("su_tap_", Str.fromInt(id))
+    param = nodeStr(e, 0)
+    names = captureNames(env, List.empty())
+    up = unpackEnv(names, Str.concat("t", Str.fromInt(id)), env)
+    benv = lambdaBind(param, sndL(up))
+    be = emitExpr(nodeExpr(e, 1), strs, ctx, benv, Str.concat("t", Str.fromInt(id)), id + 1, conts)
+    bodyEnd = if (isIoKind(sKind(be)) == 1) str4(sCode(be), "  %t", Str.fromInt(id), str3("_ur = call { i32, ptr, ptr } @su_io_unsafe_run(ptr ", sValue(be), ")\n  ret void\n")) else str4(sCode(be), "  ret void\n", "", "")
+    contDef = str4("define internal void @", fnName, "(ptr %self, ptr %env) {\nentry:\n", str4(fst(up), bodyEnd, "}\n\n", ""))
+  } yield emitLambdaClosure(env, prefix, fnName, sId(be), Str.concat(sConts(be), contDef))
 
 def lambdaBind(param: String, env: List): List =
   if (streq(param, "_") == 1) env else envPut(env, param, "%self", "ptr")
 
 def emitLambdaClosure(env: List, prefix: String, fnName: String, id: Int, conts: String): List =
-  val packed = packEnv(env, Str.concat(prefix, "_cap"), "")
-  val code = str4(fst(packed), "  %", prefix, str5("_cl0 = call ptr @su_list_nil()\n  %", prefix, "_cl1 = call ptr @su_list_cons(ptr ", snd(packed), str6(", ptr %", prefix, "_cl0)\n  %", prefix, "_cl2 = call ptr @su_list_cons(ptr @", str4(fnName, ", ptr %", prefix, "_cl1)\n"))))
-  mkS(code, str3("%", prefix, "_cl2"), "ptr", id, conts)
+  for {
+    packed = packEnv(env, Str.concat(prefix, "_cap"), "")
+    code = str4(fst(packed), "  %", prefix, str5("_cl0 = call ptr @su_list_nil()\n  %", prefix, "_cl1 = call ptr @su_list_cons(ptr ", snd(packed), str6(", ptr %", prefix, "_cl0)\n  %", prefix, "_cl2 = call ptr @su_list_cons(ptr @", str4(fnName, ", ptr %", prefix, "_cl1)\n"))))
+  } yield mkS(code, str3("%", prefix, "_cl2"), "ptr", id, conts)
 
 def emitCall(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  val callee = nodeStr(e, 0)
-  val args = nodeExpr(e, 1)
-  val ae = emitArgList(args, strs, ctx, env, prefix, 0, id, conts, "", List.empty(), List.empty())
-  emitCallWithArgs(callee, ae, ctx, prefix)
+  for {
+    callee = nodeStr(e, 0)
+    args = nodeExpr(e, 1)
+    ae = emitArgList(args, strs, ctx, env, prefix, 0, id, conts, "", List.empty(), List.empty())
+  } yield emitCallWithArgs(callee, ae, ctx, prefix)
 
 def emitArgList(args: List, strs: List, ctx: List, env: List, prefix: String, i: Int, id: Int, conts: String, code: String, vals: List, kinds: List): List =
   if (List.isEmpty(args) == 1) List.cons(code, List.cons(Str.fromInt(id), List.cons(conts, List.cons(List.reverse(vals), List.cons(List.reverse(kinds), List.empty()))))) else emitArgListOne(List.head(args), List.tail(args), strs, ctx, env, prefix, i, id, conts, code, vals, kinds)
 
 def emitArgListOne(arg: List, rest: List, strs: List, ctx: List, env: List, prefix: String, i: Int, id: Int, conts: String, code: String, vals: List, kinds: List): List =
-  val ee = emitExpr(arg, strs, ctx, env, str4(prefix, "_arg", Str.fromInt(i), ""), id, conts)
-  emitArgList(rest, strs, ctx, env, prefix, i + 1, sId(ee), sConts(ee), Str.concat(code, sCode(ee)), List.cons(sValue(ee), vals), List.cons(sKind(ee), kinds))
+  for {
+    ee = emitExpr(arg, strs, ctx, env, str4(prefix, "_arg", Str.fromInt(i), ""), id, conts)
+  } yield emitArgList(rest, strs, ctx, env, prefix, i + 1, sId(ee), sConts(ee), Str.concat(code, sCode(ee)), List.cons(sValue(ee), vals), List.cons(sKind(ee), kinds))
 
 def argPackCode(p: List): String =
   List.head(p)
@@ -500,7 +529,7 @@ def emitBuiltinSignal(callee: String, code: String, vals: List, id: Int, conts: 
   if (streq(callee, "Signal.int") == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_signal_int(i64 ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "Signal.get") == 1) mkS(str4(code, "  %", prefix, str3("_v = call i64 @su_lang_signal_get(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "int", id, conts) else if (streq(callee, "Signal.set") == 1) mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_signal_set(ptr ", List.at(vals, 0), ", i64 ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "Signal.str") == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_signal_str(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "Signal.getStr") == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_signal_str_get(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "Signal.setStr") == 1) mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_signal_str_set(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "Signal.list") == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_signal_list(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "Signal.getList") == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_signal_list_get(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "Signal.setList") == 1) mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_signal_list_set(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else mkS(code, "null", "ptr", id, conts)
 
 def emitBuiltinView(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
-  if (streq(callee, "View.text") == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_view_text(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.textSignal") == 1) mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_text_signal(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.button") == 1) emitViewButton(code, vals, id, conts, prefix) else if (streq(callee, "View.column") == 1) mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_lang_view_column()\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.row") == 1) mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_lang_view_row()\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.list") == 1) mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_lang_view_list()\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.scroll") == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_view_scroll(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.textField") == 1) mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_text_field(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.icon") == 1) mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_icon(i64 ", List.at(vals, 0), ", i64 ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.image") == 1) mkS(str4(code, "  %", prefix, str4("_v = call ptr @su_lang_view_image(i64 ", List.at(vals, 0), str4(", i64 ", List.at(vals, 1), ", i64 ", List.at(vals, 2)), str3(", ptr ", List.at(vals, 3), ")\n"))), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.addChild") == 1) mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_add_child(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.addTexts") == 1) mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_add_texts(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.clearChildren") == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_view_clear_children(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.setTexts") == 1) mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_set_texts(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.showWhen") == 1) mkS(str4(code, "  %", prefix, str4("_v = call ptr @su_lang_view_show_when(ptr ", List.at(vals, 0), str4(", i64 ", List.at(vals, 1), ", ptr ", List.at(vals, 2)), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else mkS(code, "null", "ptr", id, conts)
+  if (streq(callee, "View.text") == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_view_text(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.textSignal") == 1) mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_text_signal(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.button") == 1) emitViewButton(code, vals, id, conts, prefix) else if (streq(callee, "View.column") == 1) emitViewBox(code, vals, id, conts, prefix, "su_lang_view_column") else if (streq(callee, "View.row") == 1) emitViewBox(code, vals, id, conts, prefix, "su_lang_view_row") else if (streq(callee, "View.list") == 1) mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_lang_view_list()\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.scroll") == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_view_scroll(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.textField") == 1) mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_text_field(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.icon") == 1) mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_icon(i64 ", List.at(vals, 0), ", i64 ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.image") == 1) mkS(str4(code, "  %", prefix, str4("_v = call ptr @su_lang_view_image(i64 ", List.at(vals, 0), str4(", i64 ", List.at(vals, 1), ", i64 ", List.at(vals, 2)), str3(", ptr ", List.at(vals, 3), ")\n"))), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.addChild") == 1) mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_add_child(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.addTexts") == 1) mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_add_texts(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.clearChildren") == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_view_clear_children(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.setTexts") == 1) mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_set_texts(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (streq(callee, "View.showWhen") == 1) mkS(str4(code, "  %", prefix, str4("_v = call ptr @su_lang_view_show_when(ptr ", List.at(vals, 0), str4(", i64 ", List.at(vals, 1), ", ptr ", List.at(vals, 2)), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts) else mkS(code, "null", "ptr", id, conts)
 
 def emitBuiltinTheme(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
   if (streq(callee, "Theme.accent") == 1) mkS(str3(code, "  %", Str.concat(prefix, "_v = call i64 @su_theme_accent()\n")), str3("%", prefix, "_v"), "int", id, conts) else if (streq(callee, "Theme.primary") == 1) mkS(str3(code, "  %", Str.concat(prefix, "_v = call i64 @su_theme_primary()\n")), str3("%", prefix, "_v"), "int", id, conts) else if (streq(callee, "Theme.muted") == 1) mkS(str3(code, "  %", Str.concat(prefix, "_v = call i64 @su_theme_muted()\n")), str3("%", prefix, "_v"), "int", id, conts) else if (streq(callee, "Theme.foreground") == 1) mkS(str3(code, "  %", Str.concat(prefix, "_v = call i64 @su_theme_foreground()\n")), str3("%", prefix, "_v"), "int", id, conts) else mkS(code, "null", "ptr", id, conts)
@@ -508,13 +537,22 @@ def emitBuiltinTheme(callee: String, code: String, vals: List, id: Int, conts: S
 def emitBuiltinColor(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
   if (streq(callee, "Color.rgb") == 1) mkS(str4(code, "  %", prefix, str4("_v = call i64 @su_color_rgb(i64 ", List.at(vals, 0), str4(", i64 ", List.at(vals, 1), ", i64 ", List.at(vals, 2)), ")\n")), str3("%", prefix, "_v"), "int", id, conts) else mkS(code, "null", "ptr", id, conts)
 
+def emitViewBox(code: String, vals: List, id: Int, conts: String, prefix: String, createFn: String): List =
+  for {
+    c0 = str4(code, "  %", prefix, str3("_v = call ptr @", createFn, "()\n"))
+  } yield emitViewBoxChildren(c0, vals, 0, id, conts, prefix)
+
+def emitViewBoxChildren(code: String, vals: List, i: Int, id: Int, conts: String, prefix: String): List =
+  if (i >= List.len(vals)) mkS(code, str3("%", prefix, "_v"), "ptr", id, conts) else emitViewBoxChildren(str4(code, "  %", prefix, str4("_ac", Str.fromInt(i), " = call ptr @su_lang_view_add_child(ptr %", str4(prefix, "_v, ptr ", List.at(vals, i), ")\n"))), vals, i + 1, id, conts, prefix)
+
 def emitViewButton(code: String, vals: List, id: Int, conts: String, prefix: String): List =
-  val cl = List.at(vals, 1)
-  val c1 = str4(code, "  %", prefix, str3("_fnp = call ptr @su_list_head(ptr ", cl, ")\n"))
-  val c2 = str4(c1, "  %", prefix, str3("_fnt = call ptr @su_list_tail(ptr ", cl, ")\n"))
-  val c3 = str4(c2, "  %", prefix, str4("_envp = call ptr @su_list_head(ptr %", prefix, "_fnt)\n", ""))
-  val c4 = str4(c3, "  %", prefix, str5("_v = call ptr @su_lang_view_button(ptr ", List.at(vals, 0), ", ptr %", prefix, str4("_fnp, ptr %", prefix, "_envp)\n", "")))
-  mkS(c4, str3("%", prefix, "_v"), "ptr", id, conts)
+  for {
+    cl = List.at(vals, 1)
+    c1 = str4(code, "  %", prefix, str3("_fnp = call ptr @su_list_head(ptr ", cl, ")\n"))
+    c2 = str4(c1, "  %", prefix, str3("_fnt = call ptr @su_list_tail(ptr ", cl, ")\n"))
+    c3 = str4(c2, "  %", prefix, str4("_envp = call ptr @su_list_head(ptr %", prefix, "_fnt)\n", ""))
+    c4 = str4(c3, "  %", prefix, str5("_v = call ptr @su_lang_view_button(ptr ", List.at(vals, 0), ", ptr %", prefix, str4("_fnp, ptr %", prefix, "_envp)\n", "")))
+  } yield mkS(c4, str3("%", prefix, "_v"), "ptr", id, conts)
 
 def emitBuiltinUi(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
   if (streq(callee, "Ui.run") == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_ui_run_view(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts) else if (streq(callee, "Ui.runHeadless") == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_ui_run_headless_label(ptr ", List.at(vals, 0), ", i32 0, i32 0)\n")), str3("%", prefix, "_v"), "io", id, conts) else if (streq(callee, "Ui.runCounter") == 1) mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_ui_run_counter(i32 0, i32 0)\n")), str3("%", prefix, "_v"), "io", id, conts) else if (streq(callee, "Ui.runLive") == 1) mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_ui_run_live(i32 0, i32 0)\n")), str3("%", prefix, "_v"), "io", id, conts) else if (streq(callee, "Ui.runTodo") == 1) mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_ui_run_todo(i32 0, i32 0)\n")), str3("%", prefix, "_v"), "io", id, conts) else mkS(code, "null", "ptr", id, conts)
@@ -532,44 +570,50 @@ def emitListLitRev(strs: List, revElems: List, ctx: List, env: List, prefix: Str
   if (List.isEmpty(revElems) == 1) mkS(code, cur, "ptr", id, conts) else emitListLitRevOne(List.head(revElems), List.tail(revElems), strs, ctx, env, prefix, id, conts, code, cur, n)
 
 def emitListLitRevOne(elem: List, rest: List, strs: List, ctx: List, env: List, prefix: String, id: Int, conts: String, code: String, cur: String, n: Int): List =
-  val ee = emitExpr(elem, strs, ctx, env, str4(prefix, "_e", Str.fromInt(n), ""), id, conts)
-  emitListLitRevCons(rest, strs, ctx, env, prefix, sId(ee), sConts(ee), str3(code, sCode(ee), ""), ee, cur, n)
+  for {
+    ee = emitExpr(elem, strs, ctx, env, str4(prefix, "_e", Str.fromInt(n), ""), id, conts)
+  } yield emitListLitRevCons(rest, strs, ctx, env, prefix, sId(ee), sConts(ee), str3(code, sCode(ee), ""), ee, cur, n)
 
 def emitListLitRevCons(rest: List, strs: List, ctx: List, env: List, prefix: String, id: Int, conts: String, code: String, ee: List, cur: String, n: Int): List =
   if (streq(sKind(ee), "int") == 1) emitListLitRevAfterCons(rest, strs, ctx, env, prefix, id, conts, str4(code, "  %", prefix, str5("_b", Str.fromInt(n), " = call ptr @su_box_i64(i64 ", sValue(ee), ")\n")), str4("%", prefix, "_b", Str.fromInt(n)), cur, n) else emitListLitRevAfterCons(rest, strs, ctx, env, prefix, id, conts, code, sValue(ee), cur, n)
 
 def emitListLitRevAfterCons(rest: List, strs: List, ctx: List, env: List, prefix: String, id: Int, conts: String, code: String, ptr: String, cur: String, n: Int): List =
-  val next = str4("%", prefix, "_", Str.fromInt(n))
-  val code2 = str4(code, "  ", next, str5(" = call ptr @su_list_cons(ptr ", ptr, ", ptr ", cur, ")\n"))
-  emitListLitRev(strs, rest, ctx, env, prefix, id, conts, code2, next, n + 1)
+  for {
+    next = str4("%", prefix, "_", Str.fromInt(n))
+    code2 = str4(code, "  ", next, str5(" = call ptr @su_list_cons(ptr ", ptr, ", ptr ", cur, ")\n"))
+  } yield emitListLitRev(strs, rest, ctx, env, prefix, id, conts, code2, next, n + 1)
 
 def emitUserCall(callee: String, code: String, vals: List, kinds: List, id: Int, conts: String, ctx: List, prefix: String): List =
-  val d = findDef(ctxDefs(ctx), callee)
-  if (List.isEmpty(d) == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_user_", callee, "()\n")), str3("%", prefix, "_v"), "ptr", id, conts) else emitUserCallDef(callee, code, vals, kinds, id, conts, d, prefix)
+  for {
+    d = findDef(ctxDefs(ctx), callee)
+  } yield if (List.isEmpty(d) == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_user_", callee, "()\n")), str3("%", prefix, "_v"), "ptr", id, conts) else emitUserCallDef(callee, code, vals, kinds, id, conts, d, prefix)
 
 def emitUserCallDef(callee: String, code: String, vals: List, kinds: List, id: Int, conts: String, d: List, prefix: String): List =
-  val retTy = llvmTypeOf(defRet(d))
-  val retKind = kindOfType(defRet(d))
-  val ap = emitUserArgs(defParams(d), vals, kinds, code, prefix, 0, "")
-  mkS(str4(fst(ap), "  %", prefix, str5("_v = call ", retTy, " @su_user_", callee, str3("(", snd(ap), ")\n"))), str3("%", prefix, "_v"), retKind, id, conts)
+  for {
+    retTy = llvmTypeOf(defRet(d))
+    retKind = kindOfType(defRet(d))
+    ap = emitUserArgs(defParams(d), vals, kinds, code, prefix, 0, "")
+  } yield mkS(str4(fst(ap), "  %", prefix, str5("_v = call ", retTy, " @su_user_", callee, str3("(", snd(ap), ")\n"))), str3("%", prefix, "_v"), retKind, id, conts)
 
 def emitUserArgs(params: List, vals: List, kinds: List, code: String, prefix: String, i: Int, acc: String): List =
   if (List.isEmpty(params) == 1) pair(code, acc) else emitUserArgsOne(List.head(params), List.tail(params), vals, kinds, code, prefix, i, acc)
 
 def emitUserArgsOne(p: String, rest: List, vals: List, kinds: List, code: String, prefix: String, i: Int, acc: String): List =
-  val want = kindOfType(paramType(p))
-  val got = List.at(kinds, i)
-  val v = List.at(vals, i)
-  val sep = if (Str.len(acc) == 0) "" else ", "
-  if (streq(want, "int") == 1) if (streq(got, "int") == 1) emitUserArgs(rest, vals, kinds, code, prefix, i + 1, str4(acc, sep, "i64 ", v)) else emitUserArgs(rest, vals, kinds, str4(code, "  %", prefix, str3("_a", Str.fromInt(i), " = add i64 0, 0\n")), prefix, i + 1, str4(acc, sep, "i64 %", str3(prefix, "_a", Str.fromInt(i)))) else if (streq(got, "int") == 1) emitUserArgs(rest, vals, kinds, str4(code, "  %", prefix, str5("_a", Str.fromInt(i), " = call ptr @su_box_i64(i64 ", v, ")\n")), prefix, i + 1, str4(acc, sep, "ptr %", str3(prefix, "_a", Str.fromInt(i)))) else emitUserArgs(rest, vals, kinds, code, prefix, i + 1, str4(acc, sep, "ptr ", v))
+  for {
+    want = kindOfType(paramType(p))
+    got = List.at(kinds, i)
+    v = List.at(vals, i)
+    sep = if (Str.len(acc) == 0) "" else ", "
+  } yield if (streq(want, "int") == 1) if (streq(got, "int") == 1) emitUserArgs(rest, vals, kinds, code, prefix, i + 1, str4(acc, sep, "i64 ", v)) else emitUserArgs(rest, vals, kinds, str4(code, "  %", prefix, str3("_a", Str.fromInt(i), " = add i64 0, 0\n")), prefix, i + 1, str4(acc, sep, "i64 %", str3(prefix, "_a", Str.fromInt(i)))) else if (streq(got, "int") == 1) emitUserArgs(rest, vals, kinds, str4(code, "  %", prefix, str5("_a", Str.fromInt(i), " = call ptr @su_box_i64(i64 ", v, ")\n")), prefix, i + 1, str4(acc, sep, "ptr %", str3(prefix, "_a", Str.fromInt(i)))) else emitUserArgs(rest, vals, kinds, code, prefix, i + 1, str4(acc, sep, "ptr ", v))
 
 def emitParams(params: List, i: Int, acc: String): String =
   if (List.isEmpty(params) == 1) acc else emitParamsOne(List.head(params), List.tail(params), i, acc)
 
 def emitParamsOne(p: String, rest: List, i: Int, acc: String): String =
-  val sep = if (i == 0) "" else ", "
-  val part = str4(sep, llvmTypeOf(paramType(p)), " %", paramName(p))
-  emitParams(rest, i + 1, Str.concat(acc, part))
+  for {
+    sep = if (i == 0) "" else ", "
+    part = str4(sep, llvmTypeOf(paramType(p)), " %", paramName(p))
+  } yield emitParams(rest, i + 1, Str.concat(acc, part))
 
 def paramsEnv(params: List, env: List): List =
   if (List.isEmpty(params) == 1) env else paramsEnv(List.tail(params), envPut(env, paramName(List.head(params)), Str.concat("%", paramName(List.head(params))), kindOfType(paramType(List.head(params)))))
@@ -581,36 +625,41 @@ def emitFundefRetPtr(code: String, bodyKind: String, bodyVal: String): List =
   if (streq(bodyKind, "int") == 1) pair(str3(code, "  %ret_box = call ptr @su_box_i64(i64 ", Str.concat(bodyVal, ")\n  ret ptr %ret_box")), "") else if (streq(bodyKind, "ptr") == 1) pair(str3(code, "  ret ptr ", bodyVal), "") else if (isIoKind(bodyKind) == 1) pair(str3(code, "  ret ptr ", bodyVal), "") else pair(Str.concat(code, "  ret ptr null"), "")
 
 def emitFundefRetIo(code: String, bodyKind: String, bodyVal: String): List =
-  val p = ensureIoPair(code, bodyKind, bodyVal, "ret_wrap")
-  pair(str3(fst(p), "  ret ptr ", snd(p)), "")
+  for {
+    p = ensureIoPair(code, bodyKind, bodyVal, "ret_wrap")
+  } yield pair(str3(fst(p), "  ret ptr ", snd(p)), "")
 
 def emitFundef(d: List, strs: List, ctx: List, id: Int, conts: String): List =
-  val ret = llvmTypeOf(defRet(d))
-  val env = paramsEnv(defParams(d), List.empty())
-  val body = emitExpr(defBody(d), strs, ctx, env, "body", id, conts)
-  val retKind = kindOfType(defRet(d))
-  val tail = if (isIoKind(retKind) == 1) emitFundefRetIo(sCode(body), sKind(body), sValue(body)) else if (streq(retKind, "int") == 1) emitFundefRetInt(sCode(body), sKind(body), sValue(body)) else emitFundefRetPtr(sCode(body), sKind(body), sValue(body))
-  val ir = str4("define internal ", ret, " @su_user_", str6(defName(d), "(", emitParams(defParams(d), 0, ""), ") {\nentry:\n", fst(tail), "\n}\n\n"))
-  mkS(ir, "", "", sId(body), sConts(body))
+  for {
+    ret = llvmTypeOf(defRet(d))
+    env = paramsEnv(defParams(d), List.empty())
+    body = emitExpr(defBody(d), strs, ctx, env, "body", id, conts)
+    retKind = kindOfType(defRet(d))
+    tail = if (isIoKind(retKind) == 1) emitFundefRetIo(sCode(body), sKind(body), sValue(body)) else if (streq(retKind, "int") == 1) emitFundefRetInt(sCode(body), sKind(body), sValue(body)) else emitFundefRetPtr(sCode(body), sKind(body), sValue(body))
+    ir = str4("define internal ", ret, " @su_user_", str6(defName(d), "(", emitParams(defParams(d), 0, ""), ") {\nentry:\n", fst(tail), "\n}\n\n"))
+  } yield mkS(ir, "", "", sId(body), sConts(body))
 
 def emitDefs(defs: List, strs: List, allDefs: List, id: Int, conts: String, acc: String): List =
   if (List.isEmpty(defs) == 1) mkS(acc, "", "", id, conts) else emitDefsOne(List.head(defs), List.tail(defs), strs, allDefs, id, conts, acc)
 
 def emitDefsOne(d: List, rest: List, strs: List, allDefs: List, id: Int, conts: String, acc: String): List =
-  val fe = emitFundef(d, strs, allDefs, id, conts)
-  emitDefs(rest, strs, allDefs, sId(fe), sConts(fe), Str.concat(acc, sCode(fe)))
+  for {
+    fe = emitFundef(d, strs, allDefs, id, conts)
+  } yield emitDefs(rest, strs, allDefs, sId(fe), sConts(fe), Str.concat(acc, sCode(fe)))
 
 def emitMain(prog: List, strs: List, ctx: List, defsIr: List): String =
-  val body = emitExpr(progMain(prog), strs, ctx, List.empty(), "build", sId(defsIr), sConts(defsIr))
-  val p = ensureIoPair(sCode(body), sKind(body), sValue(body), "wrapped")
-  val mainFn = str4("define i32 @main(i32 %argc, ptr %argv) {\nentry:\n", fst(p), "  %rc = call i32 @su_runtime_main_args(ptr ", Str.concat(snd(p), ", i32 %argc, ptr %argv)\n  ret i32 %rc\n}\n"))
-  str4(sConts(body), sCode(defsIr), mainFn, "")
+  for {
+    body = emitExpr(progMain(prog), strs, ctx, List.empty(), "build", sId(defsIr), sConts(defsIr))
+    p = ensureIoPair(sCode(body), sKind(body), sValue(body), "wrapped")
+    mainFn = str4("define i32 @main(i32 %argc, ptr %argv) {\nentry:\n", fst(p), "  %rc = call i32 @su_runtime_main_args(ptr ", Str.concat(snd(p), ", i32 %argc, ptr %argv)\n  ret i32 %rc\n}\n"))
+  } yield str4(sConts(body), sCode(defsIr), mainFn, "")
 
 def emitProgram(prog: List): String =
-  val strs = collectProgram(prog)
-  val tags = buildEnumTags(progEnums(prog))
-  val ctx = emitCtx(progDefs(prog), tags)
-  val header = emitHeader(strs)
-  val defsIr = emitDefs(progDefs(prog), strs, ctx, 0, "", "")
-  Str.concat(header, emitMain(prog, strs, ctx, defsIr))
+  for {
+    strs = collectProgram(prog)
+    tags = buildEnumTags(progEnums(prog))
+    ctx = emitCtx(progDefs(prog), tags)
+    header = emitHeader(strs)
+    defsIr = emitDefs(progDefs(prog), strs, ctx, 0, "", "")
+  } yield Str.concat(header, emitMain(prog, strs, ctx, defsIr))
 

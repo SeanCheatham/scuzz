@@ -7,7 +7,7 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 | Feature | Stance |
 | --- | --- |
 | Scala-like defs, ADTs, pattern matching | Keep |
-| Local `val` / blocks | Keep for now; direction is `for` with `=` / `<-` and no `val`/`var` ([vision](vision.md#language-direction)) |
+| Local `val` / blocks | Cut — use `for` with `=` / `<-` ([vision](vision.md#language-direction)) |
 | Traits-as-interfaces, `Option`/`Either`-style enums | Keep |
 | Local type inference, generics | Keep (monomorphize early) |
 | Higher-kinded types | Only where effects need them (`IO`) |
