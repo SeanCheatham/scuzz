@@ -1,6 +1,7 @@
 #include "scalui_rt.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* TestRuntime: install / reset fake interpreters. */
@@ -406,6 +407,154 @@ SuIo *su_testrt_net_http_get(SuString *url) {
   return su_io_flatmap(su_io_delay(stub_http_get, url), unwrap_box, NULL);
 }
 
+/* --- sys / console ------------------------------------------------------- */
+
+static int g_sys_fake = 0;
+static int g_args_override = 0;
+static char **g_fake_argv = NULL;
+static int g_fake_argc = 0;
+
+static char *g_stdin_buf = NULL;
+static size_t g_stdin_len = 0;
+static size_t g_stdin_off = 0;
+
+static char *g_stdout_buf = NULL;
+static size_t g_stdout_len = 0;
+static size_t g_stdout_cap = 0;
+
+static void free_fake_argv(void) {
+  int i;
+  if (!g_fake_argv)
+    return;
+  for (i = 0; i < g_fake_argc; i++)
+    su_free(g_fake_argv[i]);
+  su_free(g_fake_argv);
+  g_fake_argv = NULL;
+  g_fake_argc = 0;
+  g_args_override = 0;
+}
+
+void su_testrt_sys_reset_live(void) {
+  free_fake_argv();
+  su_free(g_stdin_buf);
+  g_stdin_buf = NULL;
+  g_stdin_len = 0;
+  g_stdin_off = 0;
+  su_free(g_stdout_buf);
+  g_stdout_buf = NULL;
+  g_stdout_len = 0;
+  g_stdout_cap = 0;
+  g_sys_fake = 0;
+}
+
+void su_testrt_stdout_reset(void) {
+  if (g_stdout_buf)
+    g_stdout_buf[0] = '\0';
+  g_stdout_len = 0;
+}
+
+void su_testrt_stdout_append(const char *line) {
+  size_t n;
+  size_t need;
+  if (!line)
+    line = "";
+  n = strlen(line);
+  need = g_stdout_len + n + 2; /* line + '\n' + NUL */
+  if (need > g_stdout_cap) {
+    size_t cap = g_stdout_cap ? g_stdout_cap : 64;
+    char *nb;
+    while (cap < need)
+      cap *= 2;
+    nb = (char *)su_alloc(cap);
+    if (g_stdout_buf && g_stdout_len)
+      memcpy(nb, g_stdout_buf, g_stdout_len);
+    su_free(g_stdout_buf);
+    g_stdout_buf = nb;
+    g_stdout_cap = cap;
+  }
+  memcpy(g_stdout_buf + g_stdout_len, line, n);
+  g_stdout_len += n;
+  g_stdout_buf[g_stdout_len++] = '\n';
+  g_stdout_buf[g_stdout_len] = '\0';
+}
+
+const char *su_testrt_stdout_cstr(void) {
+  return g_stdout_buf ? g_stdout_buf : "";
+}
+
+void su_testrt_stdin_feed(const char *text) {
+  size_t n;
+  if (!text)
+    text = "";
+  n = strlen(text);
+  su_free(g_stdin_buf);
+  g_stdin_buf = (char *)su_alloc(n + 1);
+  memcpy(g_stdin_buf, text, n + 1);
+  g_stdin_len = n;
+  g_stdin_off = 0;
+}
+
+void su_testrt_sys_set_args(int argc, char **argv) {
+  int i;
+  free_fake_argv();
+  if (argc < 0)
+    argc = 0;
+  g_fake_argc = argc;
+  g_fake_argv = (char **)su_alloc(sizeof(char *) * (size_t)(argc + 1));
+  for (i = 0; i < argc; i++) {
+    const char *s = argv && argv[i] ? argv[i] : "";
+    size_t n = strlen(s);
+    g_fake_argv[i] = (char *)su_alloc(n + 1);
+    memcpy(g_fake_argv[i], s, n + 1);
+  }
+  g_fake_argv[argc] = NULL;
+  g_args_override = 1;
+}
+
+int su_testrt_sys_has_args_override(void) { return g_args_override; }
+
+SuList *su_testrt_sys_args_list(void) {
+  SuList *acc = su_list_nil();
+  int i;
+  /* Override stores user args only (no argv[0]). */
+  for (i = g_fake_argc - 1; i >= 0; i--)
+    acc = su_list_cons(su_string_from_cstr(g_fake_argv[i] ? g_fake_argv[i] : ""),
+                       acc);
+  return acc;
+}
+
+static void *testrt_read_line_thunk(void *env) {
+  size_t start;
+  size_t end;
+  (void)env;
+  if (!g_stdin_buf || g_stdin_off >= g_stdin_len)
+    return su_string_from_cstr("");
+  start = g_stdin_off;
+  end = start;
+  while (end < g_stdin_len && g_stdin_buf[end] != '\n')
+    end++;
+  g_stdin_off = end < g_stdin_len ? end + 1 : end;
+  /* Strip trailing CR for CRLF. */
+  if (end > start && g_stdin_buf[end - 1] == '\r')
+    end--;
+  return su_string_from_bytes(g_stdin_buf + start, end - start);
+}
+
+SuIo *su_testrt_sys_read_line(void) {
+  return su_io_delay(testrt_read_line_thunk, NULL);
+}
+
+void su_testrt_sys_install(void) {
+  const char *feed;
+  su_testrt_sys_reset_live();
+  g_sys_fake = 1;
+  feed = getenv("SCALUI_TESTRT_STDIN");
+  if (feed && feed[0])
+    su_testrt_stdin_feed(feed);
+}
+
+int su_testrt_sys_is_fake(void) { return g_sys_fake; }
+
 /* --- install / reset ----------------------------------------------------- */
 
 void su_testrt_install(void) {
@@ -413,6 +562,7 @@ void su_testrt_install(void) {
   su_testrt_random_install(42);
   su_testrt_fs_install();
   su_testrt_net_install();
+  su_testrt_sys_install();
 }
 
 void su_testrt_reset(void) {
@@ -420,4 +570,5 @@ void su_testrt_reset(void) {
   su_testrt_random_reset_live();
   su_testrt_fs_reset_live();
   su_testrt_net_reset_live();
+  su_testrt_sys_reset_live();
 }

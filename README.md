@@ -8,14 +8,14 @@
 
 **v0 app path.** Product intent and direction: [docs/vision.md](docs/vision.md).
 
-- Counter/Todo/nav as ScalUI `Signal` / `View` / `Ui.run`
-- Closed impurity boundary: `Clock` / `Random` / `Fs` / `Net` / `Sys` / `IO.println` + `TestRuntime` fakes
+- Counter/Todo/nav as ScalUI `Signal` / `View` / `Ui.run`; IO-only apps via `scalui new` (no `--ui`)
+- Closed impurity boundary: `Clock` / `Random` / `Fs` / `Net` / `Sys` (args/readLine) / `IO.println` + `TestRuntime` fakes
 - Animation + accessibility hooks (Headless-dumpable); theme polish tokens
 - Stage-1 CLI: `build|run|test|check|fuzz|watch|new|package|fmt` (`compiler-scalui`); Stage-0 Rust for bootstrap only
 - Prebuilt Stage-1 release tree (`scripts/package_release.sh` → `dist/scalui-<triple>.tar.gz`); `install.sh` installs under `PREFIX/share/scalui`
 - Deterministic fuzz: `scalui fuzz` (seeded `--iters`, bounded `--exhaust --depth N`, `--replay repro.toml`) on TestRuntime + Headless
-- Structural goldens (signal store + a11y dump); PNG optional via `scalui test --pixels`
-- Skia prebuilts via `SCALUI_SKIA_URL` (default: in-tree `sk_sw`)
+- Structural goldens (signal store + a11y dump); PNG optional via `scalui test --pixels`; IO packages use TESTRT exit-0 smoke
+- Skia linked for `[ui]` packages only (IO-only link is Skia-free); prebuilts via `SCALUI_SKIA_URL` (default: in-tree `sk_sw`)
 - Impeller deferred (see `docs/vision.md`)
 
 App authors: [docs/guide.md](docs/guide.md).

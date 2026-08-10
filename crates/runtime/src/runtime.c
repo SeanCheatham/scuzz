@@ -430,7 +430,10 @@ static SuIoResult run_io(SuIo *root) {
       break;
     }
     case SU_IO_PRINTLN: {
-      fputs(su_string_cstr(cur->as.println), stdout);
+      const char *s = su_string_cstr(cur->as.println);
+      if (su_testrt_sys_is_fake())
+        su_testrt_stdout_append(s);
+      fputs(s, stdout);
       fputc('\n', stdout);
       fflush(stdout);
       cur = su_io_pure(NULL);
