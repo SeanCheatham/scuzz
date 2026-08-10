@@ -402,6 +402,10 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 0)?;
             Ok(Type::Io(Box::new(Type::List)))
         }
+        "Sys.readLine" => {
+            expect_arity(callee, &arg_tys, 0)?;
+            Ok(Type::Io(Box::new(Type::String)))
+        }
         "Sys.exec" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;

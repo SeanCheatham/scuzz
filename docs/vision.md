@@ -26,7 +26,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 | Build tool | DIY Mill/Cargo-like: `scalui` (not sbt/Maven) |
 | Effects | Language + runtime builtins |
 | Impurity | All nondeterminism / external I/O through blessed `IO`; no app-level `IO.delay` escape hatch |
-| Tests | TestRuntime fakes (clock/random/FS/net) for deterministic replay |
+| Tests | TestRuntime fakes (clock/random/FS/net/console) for deterministic replay |
 | Self-host | Stage 0 → 1 → 2 on the critical path |
 | UI model | Pure `View` + effectful `Ui` session (`mount` / `pump` / `inject` / `snapshot`) |
 
@@ -39,7 +39,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 
 ## Success bars
 
-**v0** — Install CLI → `scalui new --ui` → Counter/Todo as `View` + builtin `IO` → `scalui test` (Headless) and `scalui run --headless` → `scalui run` opens a window when available. (`scalui new` without `--ui` is the IO hello path today; full first-class IO packaging is post-v0 — see [Open work](#open-work).)
+**v0** — Install CLI → `scalui new --ui` → Counter/Todo as `View` + builtin `IO` → `scalui test` (Headless) and `scalui run --headless` → `scalui run` opens a window when available. IO-only path: `scalui new` (no `--ui`) → `scalui test` (TESTRT smoke) → `scalui run`.
 
 **v1** — Stage-2 self-host; release builds do not need Rust Stage-0 except as CI bootstrap.
 
@@ -55,7 +55,7 @@ No vendored Skia tree. Thin `sk_capi` + CPU `sk_sw` for Headless CI; optional pr
 
 ### IO errors
 
-One failure channel: `SuError` (message + optional code) on `IO`. Ops: `flatMap`, `delay`, `fail`, `handleErrorWith`, `attempt`, plus blessed kit (`Resource`, `Ref`, `Deferred`, `Queue`, `sleep`, `race`, `both`). Impurity codes: Fs **2**, Sys exec **3**, Clock **4**, Random **5**, Net **6**. TestRuntime (`SCALUI_TESTRT=1`) fakes the same surface. No checked exception hierarchy; panics abort via `su_panic`.
+One failure channel: `SuError` (message + optional code) on `IO`. Ops: `flatMap`, `delay`, `fail`, `handleErrorWith`, `attempt`, plus blessed kit (`Resource`, `Ref`, `Deferred`, `Queue`, `sleep`, `race`, `both`). Impurity codes: Fs **2**, Sys (**3**; exec + `readLine`), Clock **4**, Random **5**, Net **6**. TestRuntime (`SCALUI_TESTRT=1`) fakes clock/random/FS/net plus console (scripted stdin, optional argv override, println capture+echo). No checked exception hierarchy; panics abort via `su_panic`.
 
 ### `Ui` vs `View`
 
@@ -73,7 +73,7 @@ Headless is a **peer** of Window/Mobile, not a test-only shim. Frame boundary is
 | **Headless** | `UiRuntime` peer — still `View` / Skia / structural dumps; CI path for UI |
 | **IO-only** | No `[ui]`, no `Ui.run`; `scalui run` just execs the `@main: IO[Unit]` binary |
 
-IO-only is **not** a fourth runtime peer. Plain `IO` programs already run today (`scalui new`, `examples/hello`, Fs/Clock/Net kits). First-class productization (deferred): docs/CLI naming, IO test smoke (not a11y goldens), Skia-free link when `[ui]` is absent, argv/stdin kit when needed.
+IO-only is **not** a fourth runtime peer. Package contract: missing `[ui]` ⇒ Skia omitted from the app link, `scalui test` runs `SCALUI_TESTRT=1` exit-0 smoke (not a11y goldens), and `scalui run` is plain exec. Console kit: `Sys.args`, `Sys.readLine`, `IO.println` (TestRuntime fakes stdin / optional argv / println capture). See `examples/hello`, `examples/cli`, impurity kits.
 
 ### Kernel dialect
 
@@ -84,7 +84,7 @@ Subset used by compiler sources and bootstrap examples. New features land in Sta
 - No `val` / statement blocks / `var` — expression dialect only.
 - `if` / `match`; literals incl. list `[a,b,c]` and `s"…"`
 - Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
-- Builtins: `Str.*`, `List.*`, Fs/Sys/Clock/Random/Net, `Signal.*` (incl. `Signal.map`), `View.*` (incl. nested `View.column`/`row` children, `View.each`, `View.bindText`), `Ui.run`, Theme/Color
+- Builtins: `Str.*`, `List.*`, Fs/Sys (`args` / `readLine` / `exec` / `getenv`)/Clock/Random/Net, `Signal.*` (incl. `Signal.map`), `View.*` (incl. nested `View.column`/`row` children, `View.each`, `View.bindText`), `Ui.run`, Theme/Color
 - `IO` kit + `.flatMap` / `.handleErrorWith` / `.attempt`; lambdas `_ =>` / `name =>` for taps
 - No macros, no implicits, no HKT beyond `IO`, no null
 
@@ -145,11 +145,9 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ### UI testing
 
-Primary goldens are **structural** (signal store + a11y view dump). PNG pixels are optional (`scalui test --pixels`). Agent-facing: `scalui check` (typecheck only) and `--message-format=json`.
+Primary goldens are **structural** (signal store + a11y view dump). PNG pixels are optional (`scalui test --pixels`). IO packages (no `[ui]`): `scalui test` is compile + `SCALUI_TESTRT=1` exit-0 smoke. Agent-facing: `scalui check` (typecheck only) and `--message-format=json`.
 
 ## Open work
-
-- First-class IO/CLI apps (docs + IO test smoke; Skia-free link; argv/stdin)
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
 
@@ -164,6 +162,6 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-onl
 | “Almost Scala” confusion | Explicit non-goals; language direction above; [guide.md](guide.md) |
 | Skia weight | `sk_sw` + optional prebuilts |
 | Window-only features | Headless peer rule |
-| Diluting Flutter-shaped focus | UI stays the v0 bar; IO is substrate + deferred productization |
+| Diluting Flutter-shaped focus | UI stays the v0 bar; IO is substrate + first-class packaging without a fourth peer |
 | GC vs frame budget | `pump` boundary; measure |
 | Mobile packaging | Host Mobile peer first; device toolchains later |

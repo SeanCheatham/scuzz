@@ -254,12 +254,44 @@ int main(void) {
     assert(r.ok);
     assert(strcmp(su_string_cstr((SuString *)r.value), "pong") == 0);
 
+    /* Console: argv override, stdin feed, println capture (+ echo) */
+    {
+      char *argv[] = {"x", "y"};
+      su_testrt_sys_set_args(2, argv);
+      su_testrt_stdin_feed("one\ntwo\n");
+      su_testrt_stdout_reset();
+
+      r = su_io_unsafe_run(su_sys_args());
+      assert(r.ok);
+      assert(su_list_len((SuList *)r.value) == 2);
+      assert(strcmp(su_string_cstr((SuString *)su_list_head((SuList *)r.value)),
+                    "x") == 0);
+
+      r = su_io_unsafe_run(su_sys_read_line());
+      assert(r.ok);
+      assert(strcmp(su_string_cstr((SuString *)r.value), "one") == 0);
+      r = su_io_unsafe_run(su_sys_read_line());
+      assert(r.ok);
+      assert(strcmp(su_string_cstr((SuString *)r.value), "two") == 0);
+      r = su_io_unsafe_run(su_sys_read_line());
+      assert(r.ok);
+      assert(strcmp(su_string_cstr((SuString *)r.value), "") == 0);
+
+      r = su_io_unsafe_run(su_io_println_cstr("cap"));
+      assert(r.ok);
+      assert(strstr(su_testrt_stdout_cstr(), "cap\n") != NULL);
+    }
+
     r = su_io_unsafe_run(su_impurity_run_kit());
     assert(r.ok);
+    assert(strstr(su_testrt_stdout_cstr(), "args:") != NULL);
+    assert(strstr(su_testrt_stdout_cstr(), "line:") != NULL);
+    assert(strstr(su_testrt_stdout_cstr(), "impurity-ok\n") != NULL);
 
     su_testrt_reset();
     assert(!su_testrt_clock_is_fake());
     assert(!su_testrt_fs_is_fake());
+    assert(!su_testrt_sys_is_fake());
   }
 
   puts("runtime io tests ok");
