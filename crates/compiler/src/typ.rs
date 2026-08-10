@@ -508,7 +508,11 @@ fn infer_call(
             expect_ty(&arg_tys[2], &Type::Int)?;
             Ok(Type::Int)
         }
-        "View.column" | "View.row" | "View.list" => {
+        "View.column" | "View.row" => {
+            // Nullary or children: `View.column(a, b, …)` adds each child.
+            Ok(Type::Opaque("View".into()))
+        }
+        "View.list" => {
             expect_arity(callee, &arg_tys, 0)?;
             Ok(Type::Opaque("View".into()))
         }

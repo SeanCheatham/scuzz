@@ -122,6 +122,130 @@ fn desugar_for(binders: Vec<ForBinder>, body: Expr) -> Expr {
     })
 }
 
+/// Rewrite `val` / `Let` chains into `for { x = e … } yield body` (forwards migration).
+pub fn raise_program(mut program: Program) -> Program {
+    for d in &mut program.defs {
+        d.body = raise_expr(std::mem::replace(&mut d.body, Expr::Unit));
+    }
+    program.main.body = raise_expr(std::mem::replace(&mut program.main.body, Expr::Unit));
+    program
+}
+
+pub fn raise_expr(expr: Expr) -> Expr {
+    match expr {
+        Expr::Let { name, value, body } => {
+            let mut binders = vec![ForBinder::Eq {
+                name,
+                value: raise_expr(*value),
+            }];
+            let mut cur = *body;
+            while let Expr::Let {
+                name,
+                value,
+                body: next,
+            } = cur
+            {
+                binders.push(ForBinder::Eq {
+                    name,
+                    value: raise_expr(*value),
+                });
+                cur = *next;
+            }
+            Expr::For {
+                binders,
+                body: Box::new(raise_expr(cur)),
+            }
+        }
+        Expr::IoPrintln(e) => Expr::IoPrintln(Box::new(raise_expr(*e))),
+        Expr::IoSleep(e) => Expr::IoSleep(Box::new(raise_expr(*e))),
+        Expr::IoFail(e) => Expr::IoFail(Box::new(raise_expr(*e))),
+        Expr::IoPure(e) => Expr::IoPure(Box::new(raise_expr(*e))),
+        Expr::UiRunHeadless(e) => Expr::UiRunHeadless(Box::new(raise_expr(*e))),
+        Expr::LexerClassify(e) => Expr::LexerClassify(Box::new(raise_expr(*e))),
+        Expr::FlatMap { inner, param, body } => Expr::FlatMap {
+            inner: Box::new(raise_expr(*inner)),
+            param,
+            body: Box::new(raise_expr(*body)),
+        },
+        Expr::HandleErrorWith { inner, body } => Expr::HandleErrorWith {
+            inner: Box::new(raise_expr(*inner)),
+            body: Box::new(raise_expr(*body)),
+        },
+        Expr::Attempt { inner } => Expr::Attempt {
+            inner: Box::new(raise_expr(*inner)),
+        },
+        Expr::IoRace { left, right } => Expr::IoRace {
+            left: Box::new(raise_expr(*left)),
+            right: Box::new(raise_expr(*right)),
+        },
+        Expr::IoBoth { left, right } => Expr::IoBoth {
+            left: Box::new(raise_expr(*left)),
+            right: Box::new(raise_expr(*right)),
+        },
+        Expr::For { binders, body } => Expr::For {
+            binders: binders
+                .into_iter()
+                .map(|b| match b {
+                    ForBinder::Eq { name, value } => ForBinder::Eq {
+                        name,
+                        value: raise_expr(value),
+                    },
+                    ForBinder::Draw { name, value } => ForBinder::Draw {
+                        name,
+                        value: raise_expr(value),
+                    },
+                })
+                .collect(),
+            body: Box::new(raise_expr(*body)),
+        },
+        Expr::Match { scrutinee, arms } => Expr::Match {
+            scrutinee: Box::new(raise_expr(*scrutinee)),
+            arms: arms
+                .into_iter()
+                .map(|MatchArm { pattern, body }| MatchArm {
+                    pattern,
+                    body: raise_expr(body),
+                })
+                .collect(),
+        },
+        Expr::ListLit { elems } => Expr::ListLit {
+            elems: elems.into_iter().map(raise_expr).collect(),
+        },
+        Expr::Interpolate { parts } => Expr::Interpolate {
+            parts: parts
+                .into_iter()
+                .map(|p| match p {
+                    InterpPart::Lit(s) => InterpPart::Lit(s),
+                    InterpPart::Expr(e) => InterpPart::Expr(raise_expr(e)),
+                })
+                .collect(),
+        },
+        Expr::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => Expr::If {
+            cond: Box::new(raise_expr(*cond)),
+            then_branch: Box::new(raise_expr(*then_branch)),
+            else_branch: Box::new(raise_expr(*else_branch)),
+        },
+        Expr::Binary { op, left, right } => Expr::Binary {
+            op,
+            left: Box::new(raise_expr(*left)),
+            right: Box::new(raise_expr(*right)),
+        },
+        Expr::Call { callee, args } => Expr::Call {
+            callee,
+            args: args.into_iter().map(raise_expr).collect(),
+        },
+        Expr::Lambda { param, body } => Expr::Lambda {
+            param,
+            body: Box::new(raise_expr(*body)),
+        },
+        other => other,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

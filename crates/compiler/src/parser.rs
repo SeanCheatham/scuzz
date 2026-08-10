@@ -173,7 +173,7 @@ impl Parser {
             }
         }
         self.expect(&Token::Eq)?;
-        let body = self.parse_block()?;
+        let body = self.parse_expr()?;
         Ok(MainDef { name, body })
     }
 
@@ -202,7 +202,7 @@ impl Parser {
         self.expect(&Token::Colon)?;
         let ret = self.parse_type()?;
         self.expect(&Token::Eq)?;
-        let body = self.parse_block()?;
+        let body = self.parse_expr()?;
         Ok(FunDef {
             name,
             params,
@@ -266,41 +266,14 @@ impl Parser {
         }
     }
 
-    /// Block: `val` bindings and expression statements, ending in a final expression.
+    /// Expr body for `def` / `@main` / lambda (no statement-block grammar).
     fn parse_block(&mut self) -> Result<Expr, ParseError> {
-        if matches!(self.peek(), Token::Val) {
-            self.bump();
-            let name = self.expect_ident()?;
-            self.expect(&Token::Eq)?;
-            let value = self.parse_expr()?;
-            let body = self.parse_block()?;
-            return Ok(Expr::Let {
-                name,
-                value: Box::new(value),
-                body: Box::new(body),
-            });
-        }
-        let expr = self.parse_expr()?;
-        // Mid-block `val` after a statement expression (val-anywhere).
-        if matches!(self.peek(), Token::Val) {
-            return Ok(Expr::Let {
-                name: "_".into(),
-                value: Box::new(expr),
-                body: Box::new(self.parse_block()?),
-            });
-        }
-        Ok(expr)
+        self.parse_expr()
     }
 
-    /// `if` then/else: `val`-led block / `for` / single expression.
-    /// Starting with `val` is required for multi-binding `val` branches so
-    /// mid-block `val x = if … else e` does not steal following vals.
+    /// `if` then/else: single expression (nested `for` for multi-bind arms).
     fn parse_if_branch(&mut self) -> Result<Expr, ParseError> {
-        if matches!(self.peek(), Token::Val) {
-            self.parse_block()
-        } else {
-            self.parse_expr()
-        }
+        self.parse_expr()
     }
 
     /// Binder name: ident or `_`.
@@ -325,11 +298,6 @@ impl Parser {
                 Token::Yield => {
                     return Err(ParseError::Msg(
                         "`yield` belongs after `}`: `for { … } yield e`".into(),
-                    ))
-                }
-                Token::Val => {
-                    return Err(ParseError::Msg(
-                        "bare `val` is not allowed inside `for`; use `x = e` or `x <- e`".into(),
                     ))
                 }
                 _ => {
@@ -961,51 +929,50 @@ def add1(n: Int): Int = n + 1
     }
 
     #[test]
-    fn parse_if_val_led_else_block() {
+    fn parse_if_for_led_else_block() {
         let src = r#"
 @main def main: IO[Unit] =
-  val n = 1
-  if (n == 0) ()
+  for {
+    n = 1
+  } yield if (n == 0) ()
   else
-    val a = IO.println("a")
-    val b = IO.println("b")
-    IO.println("c")
+    for {
+      a = IO.println("a")
+      b = IO.println("b")
+    } yield IO.println("c")
 "#;
         let p = parse(src).unwrap();
         match &p.main.body {
-            Expr::Let { body, .. } => match body.as_ref() {
+            Expr::For { body, .. } => match body.as_ref() {
                 Expr::If { else_branch, .. } => match else_branch.as_ref() {
-                    Expr::Let { name, body, .. } => {
-                        assert_eq!(name, "a");
-                        assert!(matches!(body.as_ref(), Expr::Let { name, .. } if name == "b"));
+                    Expr::For { binders, .. } => {
+                        assert_eq!(binders.len(), 2);
                     }
-                    other => panic!("expected let-else, got {other:?}"),
+                    other => panic!("expected for-else, got {other:?}"),
                 },
-                other => panic!("expected if with let-else, got {other:?}"),
+                other => panic!("expected if, got {other:?}"),
             },
-            other => panic!("expected let, got {other:?}"),
+            other => panic!("expected for, got {other:?}"),
         }
     }
 
     #[test]
-    fn parse_mid_block_if_does_not_steal_following_val() {
+    fn parse_for_if_does_not_steal_following_binder() {
         let src = r#"
 @main def main: IO[Unit] =
-  val path = if (1 == 0) "a" else "b"
-  val draft = "x"
-  IO.println(draft)
+  for {
+    path = if (1 == 0) "a" else "b"
+    draft = "x"
+  } yield IO.println(draft)
 "#;
         let p = parse(src).unwrap();
         match &p.main.body {
-            Expr::Let { name, value, body } => {
-                assert_eq!(name, "path");
-                assert!(matches!(value.as_ref(), Expr::If { .. }));
-                match body.as_ref() {
-                    Expr::Let { name: draft, .. } => assert_eq!(draft, "draft"),
-                    other => panic!("expected draft let, got {other:?}"),
-                }
+            Expr::For { binders, .. } => {
+                assert_eq!(binders.len(), 2);
+                assert!(matches!(&binders[0], ForBinder::Eq { name, .. } if name == "path"));
+                assert!(matches!(&binders[1], ForBinder::Eq { name, .. } if name == "draft"));
             }
-            other => panic!("expected path if + draft let, got {other:?}"),
+            other => panic!("expected for, got {other:?}"),
         }
     }
 
@@ -1017,8 +984,9 @@ enum Color:
   case Red
   case Blue
 @main def main: IO[Unit] =
-  val c = Color.Red
-  c match {
+  for {
+    c = Color.Red
+  } yield c match {
     case Color.Red => IO.println("red")
     case Color.Blue => IO.println("blue")
   }
@@ -1026,7 +994,7 @@ enum Color:
         let p = parse(src).unwrap();
         assert_eq!(p.package, vec!["demo", "color"]);
         assert_eq!(p.enums.len(), 1);
-        assert!(matches!(p.main.body, Expr::Let { .. }));
+        assert!(matches!(p.main.body, Expr::For { .. }));
     }
 
     #[test]
@@ -1101,14 +1069,15 @@ enum Color:
     }
 
     #[test]
-    fn parse_for_rejects_bare_val() {
+    fn parse_for_rejects_statement_val_ident() {
+        // `val` is no longer a keyword; `val x = 1` parses as binder name `val`.
         let src = r#"
 @main def main: IO[Unit] =
   for {
-    val x = 1
+    val = 1
   } yield IO.println("x")
 "#;
-        let err = parse(src).unwrap_err();
-        assert!(err.to_string().contains("bare `val`"));
+        let p = parse(src).unwrap();
+        assert!(matches!(p.main.body, Expr::For { .. }));
     }
 }

@@ -28,42 +28,36 @@ def partitionSourcesOne(name: String, rest: List, others: List, mains: List): Li
   if (isScalaName(name) == 0) partitionSources(rest, others, mains) else if (isMainName(name) == 1) partitionSources(rest, others, List.cons(name, mains)) else partitionSources(rest, List.cons(name, others), mains)
 
 def resolveRuntimeEnv(env: String, projectDir: String): IO[String] =
-  if (Str.len(env) > 0) IO.pure(env)
-  else
-    Sys.getenv("SCALUI_HOME").flatMap(home =>
-      if (Str.len(home) > 0) IO.pure(pathJoin(home, "crates/runtime"))
-      else
-        tryFindRuntime(projectDir).handleErrorWith(_ =>
-          Sys.getenv("PWD").flatMap(pwd =>             if (Str.len(pwd) > 0) tryFindRuntime(pwd) else IO.fail("could not find crates/runtime (set SCALUI_HOME or SCALUI_RUNTIME)"))
-        )
-    )
+  if (Str.len(env) > 0) IO.pure(env) else Sys.getenv("SCALUI_HOME").flatMap(home =>
+  if (Str.len(home) > 0) IO.pure(pathJoin(home, "crates/runtime")) else tryFindRuntime(projectDir).handleErrorWith(_ =>
+  Sys.getenv("PWD").flatMap(pwd => if (Str.len(pwd) > 0) tryFindRuntime(pwd) else IO.fail("could not find crates/runtime (set SCALUI_HOME or SCALUI_RUNTIME)"))
+)
+)
 
 def tryFindRuntime(start: String): IO[String] =
   findRuntimeFrom(start, 8).flatMap(dir =>
-    Fs.read(pathJoin(dir, "include/scalui_rt.h")).flatMap(_ =>       IO.pure(dir))
+    Fs.read(pathJoin(dir, "include/scalui_rt.h")).flatMap(_ => IO.pure(dir))
   )
 
 def findRuntimeFrom(dir: String, fuel: Int): IO[String] =
-  if (fuel <= 0) IO.fail("could not find crates/runtime")
-  else
-    Fs.read(pathJoin(pathJoin(dir, "crates/runtime"), "include/scalui_rt.h")).flatMap(_ =>   IO.pure(pathJoin(dir, "crates/runtime"))).handleErrorWith(_ =>
-      findRuntimeFrom(parentDir(dir), fuel - 1)
-    )
+  if (fuel <= 0) IO.fail("could not find crates/runtime") else Fs.read(pathJoin(pathJoin(dir, "crates/runtime"), "include/scalui_rt.h")).flatMap(_ => IO.pure(pathJoin(dir, "crates/runtime"))).handleErrorWith(_ =>
+  findRuntimeFrom(parentDir(dir), fuel - 1)
+)
 
 def clangOrDefault(env: String): String =
   if (Str.len(env) > 0) env else "clang"
 
 def execOk(cmd: String): IO[Unit] =
-  Sys.exec(cmd).flatMap(code =>     if (code == 0) IO.pure(()) else IO.fail(str3("exec failed (", Str.fromInt(code), str3("): ", cmd, ""))))
+  Sys.exec(cmd).flatMap(code => if (code == 0) IO.pure(()) else IO.fail(str3("exec failed (", Str.fromInt(code), str3("): ", cmd, ""))))
 
 def readSources(srcDir: String, names: List, acc: List): IO[List] =
-  if (List.isEmpty(names) == 1) IO.pure(List.reverse(acc)) else Fs.read(pathJoin(srcDir, List.head(names))).flatMap(text =>   readSources(srcDir, List.tail(names), List.cons(text, acc)))
+  if (List.isEmpty(names) == 1) IO.pure(List.reverse(acc)) else Fs.read(pathJoin(srcDir, List.head(names))).flatMap(text => readSources(srcDir, List.tail(names), List.cons(text, acc)))
 
 def mergeSources(texts: List, acc: List): List =
   if (List.isEmpty(texts) == 1) acc else mergeSources(List.tail(texts), mergeProg(acc, parseSource(List.head(texts))))
 
 def buildRuntime(runtimeDir: String, clang: String): IO[Unit] =
-  execOk(str4("make -C ", runtimeDir, " lib CC=", clang)).flatMap(_ =>     execOk(str4("make -C ", pathJoin(parentDir(runtimeDir), "embedder-desktop"), " lib CC=", clang)))
+  execOk(str4("make -C ", runtimeDir, " lib CC=", clang)).flatMap(_ => execOk(str4("make -C ", pathJoin(parentDir(runtimeDir), "embedder-desktop"), " lib CC=", clang)))
 
 def embedderLinkFlags(embedder: String): String =
   str5("$(test -f ", embedder, " && if [ \"`uname -s`\" = Darwin ]; then echo -Wl,-force_load,", embedder, str3(" -framework Cocoa -lobjc; elif [ \"`uname -s`\" = Linux ]; then echo -Wl,--whole-archive ", embedder, " -Wl,--no-whole-archive -lX11; fi)"))
@@ -77,35 +71,37 @@ def runIfNeeded(exe: String, doRun: Int): IO[Unit] =
 def compileProject(projectDir: String, outDir: String, doRun: Int): IO[Unit] =
   Sys.getenv("SCALUI_RUNTIME").flatMap(rtEnv =>
     resolveRuntimeEnv(rtEnv, projectDir).flatMap(runtimeDir =>
-      Sys.getenv("SCALUI_CLANG").flatMap(clangEnv =>         compileProjectWith(projectDir, outDir, doRun, runtimeDir, clangOrDefault(clangEnv)))
+      Sys.getenv("SCALUI_CLANG").flatMap(clangEnv => compileProjectWith(projectDir, outDir, doRun, runtimeDir, clangOrDefault(clangEnv)))
     )
   )
 
 def compileProjectWith(projectDir: String, outDir: String, doRun: Int, runtimeDir: String, clang: String): IO[Unit] =
-  Fs.read(pathJoin(projectDir, "scalui.toml")).flatMap(toml =>     compileAfterToml(projectDir, outDir, doRun, runtimeDir, clang, readTomlName(toml)))
+  Fs.read(pathJoin(projectDir, "scalui.toml")).flatMap(toml => compileAfterToml(projectDir, outDir, doRun, runtimeDir, clang, readTomlName(toml)))
 
 def compileAfterToml(projectDir: String, outDir: String, doRun: Int, runtimeDir: String, clang: String, name: String): IO[Unit] =
-  val srcDir = pathJoin(projectDir, "src")
-  Fs.list(srcDir).flatMap(names =>
-    readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty()).flatMap(texts =>       compileAfterSources(projectDir, outDir, doRun, runtimeDir, clang, name, texts))
-  )
+  for {
+    srcDir = pathJoin(projectDir, "src")
+  } yield Fs.list(srcDir).flatMap(names =>
+  readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty()).flatMap(texts => compileAfterSources(projectDir, outDir, doRun, runtimeDir, clang, name, texts))
+)
 
 def compileAfterSources(projectDir: String, outDir: String, doRun: Int, runtimeDir: String, clang: String, name: String, texts: List): IO[Unit] =
-  val prog = lowerProg(mergeSources(texts, emptyProg()))
-  val ir = emitProgram(prog)
-  val ll = pathJoin(outDir, Str.concat(name, ".ll"))
-  val exe = pathJoin(outDir, name)
-  val lib = pathJoin(runtimeDir, "build/libscalui_rt.a")
-  val ffi = pathJoin(parentDir(runtimeDir), "ffi-skia")
-  val skia = pathJoin(ffi, "build/libsk_capi.a")
-  val inc = pathJoin(runtimeDir, "include")
-  val skInc = pathJoin(ffi, "include")
-  val embedder = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-desktop"), "build/libscalui_embedder.a")
-  Fs.mkdirs(outDir).flatMap(_ =>
-    Fs.write(ll, ir).flatMap(_ =>
-      buildRuntime(runtimeDir, clang).flatMap(_ =>
-        execOk(linkCmd(clang, ll, lib, skia, inc, skInc, embedder, exe)).flatMap(_ =>           runIfNeeded(exe, doRun))
-      )
+  for {
+    prog = lowerProg(mergeSources(texts, emptyProg()))
+    ir = emitProgram(prog)
+    ll = pathJoin(outDir, Str.concat(name, ".ll"))
+    exe = pathJoin(outDir, name)
+    lib = pathJoin(runtimeDir, "build/libscalui_rt.a")
+    ffi = pathJoin(parentDir(runtimeDir), "ffi-skia")
+    skia = pathJoin(ffi, "build/libsk_capi.a")
+    inc = pathJoin(runtimeDir, "include")
+    skInc = pathJoin(ffi, "include")
+    embedder = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-desktop"), "build/libscalui_embedder.a")
+  } yield Fs.mkdirs(outDir).flatMap(_ =>
+  Fs.write(ll, ir).flatMap(_ =>
+    buildRuntime(runtimeDir, clang).flatMap(_ =>
+      execOk(linkCmd(clang, ll, lib, skia, inc, skInc, embedder, exe)).flatMap(_ => runIfNeeded(exe, doRun))
     )
   )
+)
 

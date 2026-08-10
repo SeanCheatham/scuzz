@@ -13,7 +13,7 @@ def skipLineComment(source: String, i: Int): Int =
   if (i >= Str.len(source)) i else if (Str.charAt(source, i) == 10) skipTrivia(source, i + 1) else skipLineComment(source, i + 1)
 
 def kwToken(name: String): String =
-  if (streq(name, "package") == 1) "Package" else if (streq(name, "enum") == 1) "Enum" else if (streq(name, "case") == 1) "Case" else if (streq(name, "match") == 1) "Match" else if (streq(name, "def") == 1) "Def" else if (streq(name, "val") == 1) "Val" else if (streq(name, "for") == 1) "For" else if (streq(name, "yield") == 1) "Yield" else if (streq(name, "if") == 1) "If" else if (streq(name, "else") == 1) "Else" else Str.concat("Ident:", name)
+  if (streq(name, "package") == 1) "Package" else if (streq(name, "enum") == 1) "Enum" else if (streq(name, "case") == 1) "Case" else if (streq(name, "match") == 1) "Match" else if (streq(name, "def") == 1) "Def" else if (streq(name, "for") == 1) "For" else if (streq(name, "yield") == 1) "Yield" else if (streq(name, "if") == 1) "If" else if (streq(name, "else") == 1) "Else" else Str.concat("Ident:", name)
 
 def lexIdentEnd(source: String, i: Int): Int =
   if (i >= Str.len(source)) i else if (isIdentChar(Str.charAt(source, i)) == 1) lexIdentEnd(source, i + 1) else i
@@ -34,8 +34,9 @@ def readStringEscCont(source: String, i: Int, acc: String, c: Int): List =
   if (c == 110) readString(source, i + 1, Str.concat(acc, "\n")) else if (c == 116) readString(source, i + 1, Str.concat(acc, "\t")) else if (c == 92) readString(source, i + 1, Str.concat(acc, "\\")) else if (c == 34) readString(source, i + 1, Str.concat(acc, "\"")) else readString(source, i + 1, Str.concat(acc, Str.slice(source, i, i + 1)))
 
 def readStringRun(source: String, i: Int, acc: String): List =
-  val j = readStringRunEnd(source, i)
-  readString(source, j, Str.concat(acc, Str.slice(source, i, j)))
+  for {
+    j = readStringRunEnd(source, i)
+  } yield readString(source, j, Str.concat(acc, Str.slice(source, i, j)))
 
 def readStringRunEnd(source: String, i: Int): Int =
   if (i >= Str.len(source)) i else readStringRunEndCont(source, i, Str.charAt(source, i))
@@ -47,20 +48,23 @@ def peekEq(source: String, i: Int, ch: Int): Int =
   if (i >= Str.len(source)) 0 else if (Str.charAt(source, i) == ch) 1 else 0
 
 def lexAt(source: String, i0: Int, acc: List): List =
-  val i = skipTrivia(source, i0)
-  if (i >= Str.len(source)) List.cons("Eof", acc) else lexAtChar(source, i, acc, Str.charAt(source, i))
+  for {
+    i = skipTrivia(source, i0)
+  } yield if (i >= Str.len(source)) List.cons("Eof", acc) else lexAtChar(source, i, acc, Str.charAt(source, i))
 
 def lexAtChar(source: String, i: Int, acc: List, c: Int): List =
   if (c == 64) lexAtMain(source, i, acc) else if (c == 34) lexAtString(source, i, acc) else if (c == 61) lexAtEq(source, i, acc) else if (c == 33) lexAtBang(source, i, acc) else if (c == 60) lexAtLt(source, i, acc) else if (c == 62) lexAtGt(source, i, acc) else if (c == 38) lexAtAmp(source, i, acc) else if (c == 124) lexAtPipe(source, i, acc) else if (isDigit(c) == 1) lexAtInt(source, i, acc) else if (isIdentStart(c) == 1) lexAtIdent(source, i, acc) else if (c == 58) lexAt(source, i + 1, List.cons("Colon", acc)) else if (c == 46) lexAt(source, i + 1, List.cons("Dot", acc)) else if (c == 44) lexAt(source, i + 1, List.cons("Comma", acc)) else if (c == 40) lexAt(source, i + 1, List.cons("LParen", acc)) else if (c == 41) lexAt(source, i + 1, List.cons("RParen", acc)) else if (c == 123) lexAt(source, i + 1, List.cons("LBrace", acc)) else if (c == 125) lexAt(source, i + 1, List.cons("RBrace", acc)) else if (c == 91) lexAt(source, i + 1, List.cons("LBracket", acc)) else if (c == 93) lexAt(source, i + 1, List.cons("RBracket", acc)) else if (c == 43) lexAt(source, i + 1, List.cons("Plus", acc)) else if (c == 45) lexAt(source, i + 1, List.cons("Minus", acc)) else if (c == 42) lexAt(source, i + 1, List.cons("Star", acc)) else if (c == 47) lexAt(source, i + 1, List.cons("Slash", acc)) else if (c == 37) lexAt(source, i + 1, List.cons("Percent", acc)) else if (c == 95) lexAt(source, i + 1, List.cons("Underscore", acc)) else lexAt(source, i + 1, acc)
 
 def lexAtMain(source: String, i: Int, acc: List): List =
-  val j = lexIdentEnd(source, i + 1)
-  val name = Str.slice(source, i + 1, j)
-  if (streq(name, "main") == 1) lexAt(source, j, List.cons("AtMain", acc)) else lexAt(source, j, acc)
+  for {
+    j = lexIdentEnd(source, i + 1)
+    name = Str.slice(source, i + 1, j)
+  } yield if (streq(name, "main") == 1) lexAt(source, j, List.cons("AtMain", acc)) else lexAt(source, j, acc)
 
 def lexAtString(source: String, i: Int, acc: List): List =
-  val p = readString(source, i + 1, "")
-  lexAt(source, parseInt(snd(p)), List.cons(Str.concat("String:", fst(p)), acc))
+  for {
+    p = readString(source, i + 1, "")
+  } yield lexAt(source, parseInt(snd(p)), List.cons(Str.concat("String:", fst(p)), acc))
 
 def lexAtEq(source: String, i: Int, acc: List): List =
   if (peekEq(source, i + 1, 62) == 1) lexAt(source, i + 2, List.cons("Arrow", acc)) else if (peekEq(source, i + 1, 61) == 1) lexAt(source, i + 2, List.cons("EqEq", acc)) else lexAt(source, i + 1, List.cons("Eq", acc))
@@ -81,17 +85,20 @@ def lexAtPipe(source: String, i: Int, acc: List): List =
   if (peekEq(source, i + 1, 124) == 1) lexAt(source, i + 2, List.cons("PipePipe", acc)) else lexAt(source, i + 1, acc)
 
 def lexAtInt(source: String, i: Int, acc: List): List =
-  val j = lexDigitsEnd(source, i)
-  lexAt(source, j, List.cons(Str.concat("Int:", Str.slice(source, i, j)), acc))
+  for {
+    j = lexDigitsEnd(source, i)
+  } yield lexAt(source, j, List.cons(Str.concat("Int:", Str.slice(source, i, j)), acc))
 
 def lexAtIdent(source: String, i: Int, acc: List): List =
-  val j = lexIdentEnd(source, i)
-  val name = Str.slice(source, i, j)
-  if (streq(name, "s") == 1) if (peekEq(source, j, 34) == 1) lexInterpString(source, j, acc) else lexAt(source, j, List.cons(kwToken(name), acc)) else lexAt(source, j, List.cons(kwToken(name), acc))
+  for {
+    j = lexIdentEnd(source, i)
+    name = Str.slice(source, i, j)
+  } yield if (streq(name, "s") == 1) if (peekEq(source, j, 34) == 1) lexInterpString(source, j, acc) else lexAt(source, j, List.cons(kwToken(name), acc)) else lexAt(source, j, List.cons(kwToken(name), acc))
 
 def lexInterpString(source: String, quoteI: Int, acc: List): List =
-  val p = readInterp(source, quoteI + 1, List.empty(), "")
-  lexAt(source, parseInt(snd(p)), pushInterpTokens(fstL(p), acc))
+  for {
+    p = readInterp(source, quoteI + 1, List.empty(), "")
+  } yield lexAt(source, parseInt(snd(p)), pushInterpTokens(fstL(p), acc))
 
 def pushInterpTokens(parts: List, acc: List): List =
   List.cons("InterpEnd", appendLists(parts, List.cons("InterpStart", acc)))
@@ -118,8 +125,9 @@ def readInterpDollar(source: String, i: Int, parts: List): List =
   if (i >= Str.len(source)) pairLS(parts, Str.fromInt(i)) else if (Str.charAt(source, i) == 123) readInterpBrace(source, i + 1, parts, "", 1) else if (isIdentStart(Str.charAt(source, i)) == 1) readInterpIdent(source, i, parts) else pairLS(parts, Str.fromInt(i))
 
 def readInterpIdent(source: String, i: Int, parts: List): List =
-  val j = lexIdentEnd(source, i)
-  readInterp(source, j, List.cons(Str.concat("InterpId:", Str.slice(source, i, j)), parts), "")
+  for {
+    j = lexIdentEnd(source, i)
+  } yield readInterp(source, j, List.cons(Str.concat("InterpId:", Str.slice(source, i, j)), parts), "")
 
 def readInterpBrace(source: String, i: Int, parts: List, body: String, depth: Int): List =
   if (i >= Str.len(source)) pairLS(parts, Str.fromInt(i)) else readInterpBraceCont(source, i, parts, body, depth, Str.charAt(source, i))

@@ -1413,6 +1413,24 @@ fn emit_binary(
     }
 }
 
+fn emit_view_box(
+    create_fn: &str,
+    code: &mut String,
+    emitted_args: &[Emitted],
+    prefix: &str,
+) -> Emitted {
+    writeln!(code, "  %{prefix}_v = call ptr @{create_fn}()").unwrap();
+    for (i, child) in emitted_args.iter().enumerate() {
+        writeln!(
+            code,
+            "  %{prefix}_ac{i} = call ptr @su_lang_view_add_child(ptr %{prefix}_v, ptr {})",
+            child.value
+        )
+        .unwrap();
+    }
+    val_emitted(std::mem::take(code), format!("%{prefix}_v"), Kind::Ptr)
+}
+
 fn emit_call(
     callee: &str,
     args: &[Expr],
@@ -1869,14 +1887,13 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        "View.column" => {
-            writeln!(code, "  %{prefix}_v = call ptr @su_lang_view_column()").unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.row" => {
-            writeln!(code, "  %{prefix}_v = call ptr @su_lang_view_row()").unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
+        "View.column" => emit_view_box(
+            "su_lang_view_column",
+            &mut code,
+            &emitted_args,
+            prefix,
+        ),
+        "View.row" => emit_view_box("su_lang_view_row", &mut code, &emitted_args, prefix),
         "View.list" => {
             writeln!(code, "  %{prefix}_v = call ptr @su_lang_view_list()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
@@ -2053,13 +2070,14 @@ mod tests {
         let src = r#"
 enum Color { case Red, case Blue }
 @main def main: IO[Unit] =
-  val c = Color.Red
-  c match {
+  for {
+    c = Color.Red
+  } yield c match {
     case Color.Red => IO.println("red")
     case Color.Blue => IO.println("blue")
   }
 "#;
-        let p = parse(src).unwrap();
+        let p = crate::lower::lower_program(parse(src).unwrap());
         let ir = emit_llvm(&p);
         assert!(ir.contains("su_adt_new"));
         assert!(ir.contains("su_adt_tag"));
@@ -2084,11 +2102,12 @@ def add1(n: Int): Int = n + 1
     fn emit_list_literals() {
         let src = r#"
 @main def main: IO[Unit] =
-  val empty = []
-  val pair = ["a", "b"]
-  IO.println("ok")
+  for {
+    empty = []
+    pair = ["a", "b"]
+  } yield IO.println("ok")
 "#;
-        let p = parse(src).unwrap();
+        let p = crate::lower::lower_program(parse(src).unwrap());
         let ir = emit_llvm(&p);
         assert!(ir.contains("su_list_nil"));
         assert!(ir.contains("su_list_cons"));

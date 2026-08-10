@@ -16,6 +16,12 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     Ok(pretty_program(&prog))
 }
 
+/// Parse, raise `val`/`Let` chains to `for`, and pretty-print (migration helper).
+pub fn format_source_raised(source: &str) -> Result<String, FormatError> {
+    let prog = crate::lower::raise_program(parse(source)?);
+    Ok(pretty_program(&prog))
+}
+
 fn pretty_program(p: &Program) -> String {
     let mut out = String::new();
     if !p.package.is_empty() {
@@ -190,9 +196,17 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             pretty_expr(right, 0).trim()
         ),
         Expr::Let { name, value, body } => {
-            let v = pretty_expr(value, 0).trim().to_string();
-            let b = pretty_expr(body, indent);
-            format!("{pad}val {name} = {v}\n{b}")
+            // Core `Let` (post-lower): reprint as a one-binder `for`.
+            pretty_expr(
+                &Expr::For {
+                    binders: vec![ForBinder::Eq {
+                        name: name.clone(),
+                        value: *value.clone(),
+                    }],
+                    body: body.clone(),
+                },
+                indent,
+            )
         }
         Expr::For { binders, body } => {
             let mut out = format!("{pad}for {{\n");
@@ -266,7 +280,18 @@ fn pretty_arm(arm: &MatchArm, indent: usize) -> String {
 }
 
 fn escape(s: &str) -> String {
-    s.replace('\\', "\\\\").replace('"', "\\\"")
+    let mut out = String::new();
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\t' => out.push_str("\\t"),
+            '\r' => out.push_str("\\r"),
+            other => out.push(other),
+        }
+    }
+    out
 }
 
 fn escape_interp_lit(s: &str) -> String {
@@ -294,15 +319,16 @@ enum Color:
   case Red
   case Blue
 @main def main: IO[Unit] =
-  val c = Color.Red
-  c match {
+  for {
+    c = Color.Red
+  } yield c match {
     case Color.Red => IO.println("red")
     case Color.Blue => IO.println("blue")
   }
 "#;
         let out = format_source(src).unwrap();
         assert!(out.contains("package demo.color"));
-        assert!(out.contains("val c = Color.Red"));
+        assert!(out.contains("c = Color.Red"));
         assert!(out.contains("case Color.Red =>"));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);

@@ -1,18 +1,23 @@
 @main def main: IO[Unit] =
-  val page = Signal.int(0)
-  val count = Signal.int(0)
-  val root = View.column()
-  val nav = View.row()
-  val a = View.addChild(nav, View.button("Home", _ => Signal.set(page, 0)))
-  val b = View.addChild(nav, View.button("Other", _ => Signal.set(page, 1)))
-  val c = View.addChild(root, nav)
-  val home = View.column()
-  val d = View.addChild(home, View.text("Home"))
-  val e = View.addChild(home, View.textSignal(count, "count = "))
-  val f = View.addChild(home, View.button("+1", _ => Signal.set(count, Signal.get(count) + 1)))
-  val other = View.column()
-  val g = View.addChild(other, View.text("Other"))
-  val h = View.addChild(other, View.textSignal(page, "page = "))
-  val i = View.addChild(root, View.showWhen(page, 0, home))
-  val j = View.addChild(root, View.showWhen(page, 1, other))
-  Ui.run(root)
+  for {
+    page = Signal.int(0)
+    count = Signal.int(0)
+    home = View.column(
+      View.text("Home"),
+      View.textSignal(count, "count = "),
+      View.button("+1", _ => Signal.set(count, Signal.get(count) + 1))
+    )
+    other = View.column(
+      View.text("Other"),
+      View.textSignal(page, "page = ")
+    )
+    root = View.column(
+      View.row(
+        View.button("Home", _ => Signal.set(page, 0)),
+        View.button("Other", _ => Signal.set(page, 1))
+      ),
+      View.showWhen(page, 0, home),
+      View.showWhen(page, 1, other)
+    )
+    _ <- Ui.run(root)
+  } yield ()
