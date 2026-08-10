@@ -6,7 +6,7 @@
 
 ## Status
 
-**v0 app path** (current). Phases 0–6 landed; next steps live in [docs/plan.md](docs/plan.md).
+**v0 app path** (current). Phases 0–6 landed; product intent and direction live in [docs/vision.md](docs/vision.md).
 
 - **ScalUI-authored Views**: Counter/Todo/nav via `Signal` / `View` / `Ui.run` (List literals + `Signal.list`; C demos remain for Live / kits)
 - Closed impurity boundary: `Clock` / `Random` / `Fs` / `Net` / `Sys` / `IO.println` + `TestRuntime` fakes

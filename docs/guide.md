@@ -1,6 +1,6 @@
 # ScalUI app guide
 
-Short path from install to a Headless UI app. For product thesis and design locks see [vision.md](vision.md); ordered next steps in [plan.md](plan.md).
+Short path from install to a Headless UI app. For product thesis, design locks, and direction see [vision.md](vision.md).
 
 ## Happy path
 
@@ -58,4 +58,4 @@ Lists: keep a `Signal.list`, render with `View.list` + `View.setTexts` / `View.c
 | `examples/nav` | `showWhen`, multi-page |
 | `examples/impurity` | Clock / Random / Fs / Net kit |
 
-Then skim [plan.md](plan.md) for remaining gaps; edit [vision.md](vision.md) when changing GC, Skia, effects, UI boundaries, or language direction.
+Edit [vision.md](vision.md) when changing GC, Skia, effects, UI boundaries, or language direction.

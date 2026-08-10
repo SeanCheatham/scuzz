@@ -2,9 +2,9 @@
 
 ScalUI is a **Flutter-shaped product** with a **Scala-inspired language**, not a Scala 3 / Scala Native / Maven citizen.
 
-One doc for product intent and design locks. Next work lives in [`plan.md`](plan.md). Keep/cut tables live in [`compatibility.md`](compatibility.md). Manifest schema: [`schemas/scalui-toml.md`](schemas/scalui-toml.md).
+One doc for product intent, design locks, language direction, and open roadmap. Keep/cut tables live in [`compatibility.md`](compatibility.md). Manifest schema: [`schemas/scalui-toml.md`](schemas/scalui-toml.md). App path: [`guide.md`](guide.md).
 
-Edit this file when a decision changes. No separate “ADR” process — just update the section.
+Edit this file when a decision or next-step ordering changes. No separate “ADR” or `plan.md` — just update the section.
 
 ## Thesis
 
@@ -131,7 +131,7 @@ Oracles: panic/`SuError` → invariants → structural dumps (PNG last). Exhaust
 
 ## Roadmap
 
-Phases 0–6 landed. Ordered next steps: [`plan.md`](plan.md). App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
+Phases 0–6 landed. Open direction: [Language direction](#language-direction) above (expr/`for` cutover next). App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
 
 ## Risks
 
