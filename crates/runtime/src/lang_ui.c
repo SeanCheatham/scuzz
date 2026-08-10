@@ -1,10 +1,12 @@
+#define _POSIX_C_SOURCE 200809L
+
 #include "scalui_ui.h"
 #include "scalui_embedder.h"
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
+#include <time.h>
 
 /* fill_cfg / demo_finish live in demos.c / ui.c */
 void su_ui_resolve_headless_size(int *width, int *height, double *scale);
@@ -67,38 +69,10 @@ SuView *su_lang_view_text_signal(SuSignalInt *sig, SuString *prefix) {
   return su_view_text_signal_int(sig, prefix ? su_string_cstr(prefix) : "");
 }
 
-typedef struct {
-  SuSignalInt *count;
-} LangIncEnv;
-
-static void lang_button_inc(SuView *self, void *env) {
-  LangIncEnv *e = (LangIncEnv *)env;
-  (void)self;
-  su_signal_int_set(e->count, su_signal_int_get(e->count) + 1);
-}
-
-SuView *su_lang_view_button_inc(SuString *label, SuSignalInt *sig) {
-  LangIncEnv *env = (LangIncEnv *)su_alloc(sizeof(LangIncEnv));
-  env->count = sig;
-  return su_view_button(label ? su_string_cstr(label) : "+1", lang_button_inc, env);
-}
-
-typedef struct {
-  SuSignalInt *sig;
-  int64_t value;
-} LangSetEnv;
-
-static void lang_button_set(SuView *self, void *env) {
-  LangSetEnv *e = (LangSetEnv *)env;
-  (void)self;
-  su_signal_int_set(e->sig, e->value);
-}
-
-SuView *su_lang_view_button_set(SuString *label, SuSignalInt *sig, int64_t value) {
-  LangSetEnv *env = (LangSetEnv *)su_alloc(sizeof(LangSetEnv));
-  env->sig = sig;
-  env->value = value;
-  return su_view_button(label ? su_string_cstr(label) : "set", lang_button_set, env);
+/* First-class tap closure: `tap`/`env` are a compiled `_ => ...` lambda's
+ * function pointer + captured-locals env (ADR-driven ScalUI closures). */
+SuView *su_lang_view_button(SuString *label, SuViewTapFn tap, void *env) {
+  return su_view_button(label ? su_string_cstr(label) : "", tap, env);
 }
 
 SuView *su_lang_view_column(void) { return su_view_column(); }
@@ -410,7 +384,12 @@ static void *thunk_run_view(void *env) {
       frame++;
       if (max_frames > 0 && frame >= max_frames)
         break;
-      usleep(16000);
+      {
+        struct timespec ts;
+        ts.tv_sec = 0;
+        ts.tv_nsec = 16000000L; /* ~60fps cap */
+        nanosleep(&ts, NULL);
+      }
     } while (su_embedder_alive());
   } else {
     su_ui_demo_finish(session);

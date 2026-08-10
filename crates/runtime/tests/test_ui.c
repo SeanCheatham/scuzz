@@ -167,10 +167,22 @@ static void test_signals_layout_hit(void) {
   su_signal_int_free(count);
 }
 
+typedef struct {
+  SuSignalInt *sig;
+  int64_t value;
+} SetEnv;
+
+static void set_tap(SuView *self, void *env) {
+  SetEnv *e = (SetEnv *)env;
+  (void)self;
+  su_signal_int_set(e->sig, e->value);
+}
+
 static void test_button_set_and_show_when(void) {
   SuSignalInt *page;
   SuSignalInt *count;
   SuView *root, *home, *other, *set_btn, *inc_btn;
+  SetEnv *set_env;
   const SuTheme *theme = su_theme_default();
   SuUiConfig cfg;
   SuUiSession *session;
@@ -180,12 +192,15 @@ static void test_button_set_and_show_when(void) {
   page = su_signal_int(0);
   count = su_signal_int(0);
   root = su_view_column();
-  set_btn = su_lang_view_button_set(su_string_from_cstr("Other"), page, 1);
+  set_env = (SetEnv *)su_alloc(sizeof(SetEnv));
+  set_env->sig = page;
+  set_env->value = 1;
+  set_btn = su_lang_view_button(su_string_from_cstr("Other"), set_tap, set_env);
   su_view_add_child(root, set_btn);
 
   home = su_view_column();
   su_view_add_child(home, su_view_text("Home"));
-  inc_btn = su_lang_view_button_inc(su_string_from_cstr("+1"), count);
+  inc_btn = su_lang_view_button(su_string_from_cstr("+1"), counter_tap, count);
   su_view_add_child(home, inc_btn);
   su_view_add_child(root, su_view_show_when(page, 0, home));
 

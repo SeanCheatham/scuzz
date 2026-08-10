@@ -5,8 +5,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PREFIX="${PREFIX:-$HOME/.local}"
 BIN="$PREFIX/bin"
-# Stage-1 emit is deeply recursive.
-ulimit -s unlimited 2>/dev/null || ulimit -s 65536 2>/dev/null || true
 
 cd "$ROOT"
 echo "==> building Stage-1 CLI (via Stage-0 canary)"
@@ -28,8 +26,6 @@ export SCALUI_RUNTIME="\${SCALUI_RUNTIME:-\$SCALUI_HOME/crates/runtime}"
 if [[ -x "${CANARY}" ]]; then
   export SCALUI_CANARY="\${SCALUI_CANARY:-${CANARY}}"
 fi
-# Stage-1 self-compile needs a large stack.
-ulimit -s unlimited 2>/dev/null || ulimit -s 65536 2>/dev/null || true
 exec "${STAGE1}" "\$@"
 EOF
 chmod +x "$WRAPPER"

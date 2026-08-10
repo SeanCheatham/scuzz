@@ -124,7 +124,8 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
         .arg(&lib)
         .arg(&skia_lib)
         .arg(format!("-I{}", include.display()))
-        .arg(format!("-I{}", skia_include.display()));
+        .arg(format!("-I{}", skia_include.display()))
+        .arg("-lpthread");
     // Strong embedder symbols must override weak stubs in libscalui_rt.a.
     if embedder_lib.is_file() {
         push_force_load(&mut link, &embedder_lib);

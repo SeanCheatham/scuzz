@@ -28,10 +28,16 @@ def isTok(tokens: List, i: Int, t: String): Int =
 def isIdentTok(t: String): Int = startsWith(t, "Ident:")
 def isStringTok(t: String): Int = startsWith(t, "String:")
 def isIntTok(t: String): Int = startsWith(t, "Int:")
+def isInterpLitTok(t: String): Int = startsWith(t, "InterpLit:")
+def isInterpIdTok(t: String): Int = startsWith(t, "InterpId:")
+def isInterpBraceTok(t: String): Int = startsWith(t, "InterpBrace:")
 
 def identName(t: String): String = Str.slice(t, 6, Str.len(t))
 def stringVal(t: String): String = Str.slice(t, 7, Str.len(t))
 def intDigits(t: String): String = Str.slice(t, 4, Str.len(t))
+def interpLitVal(t: String): String = Str.slice(t, 10, Str.len(t))
+def interpIdVal(t: String): String = Str.slice(t, 9, Str.len(t))
+def interpBraceVal(t: String): String = Str.slice(t, 12, Str.len(t))
 
 def expectTok(tokens: List, i: Int, t: String): Int =
   if (isTok(tokens, i, t) == 1) i + 1 else i + 1
@@ -99,7 +105,22 @@ def parseArgsCont(tokens: List, i: Int, acc: List): List =
 
 def parseBlock(tokens: List, i: Int): List =
   if (isTok(tokens, i, "Val") == 1) parseLet(tokens, i + 1)
-  else parseExpr(tokens, i)
+  else parseBlockExpr(tokens, i)
+
+def parseBlockExpr(tokens: List, i: Int): List =
+  val e = parseExpr(tokens, i)
+  if (isTok(tokens, pIdx(e), "Val") == 1) parseBlockStmt(tokens, pAst(e), pIdx(e))
+  else e
+
+def parseBlockStmt(tokens: List, stmt: List, i: Int): List =
+  val bodyP = parseBlock(tokens, i)
+  ok(
+    List.cons(
+      "Let",
+      List.cons("_", List.cons(stmt, List.cons(pAst(bodyP), List.empty)))
+    ),
+    pIdx(bodyP)
+  )
 
 def parseLet(tokens: List, i: Int): List =
   val nameP = parseIdent(tokens, i)
@@ -302,9 +323,61 @@ def parsePrimary(tokens: List, i: Int): List =
     ok(List.cons("IntLit", List.cons(intDigits(t), List.empty)), i + 1)
   else if (isStringTok(t) == 1)
     ok(List.cons("StrLit", List.cons(stringVal(t), List.empty)), i + 1)
+  else if (streq(t, "InterpStart") == 1) parseInterp(tokens, i + 1, List.empty)
   else if (streq(t, "Minus") == 1) parseNegInt(tokens, i + 1)
-  else if (isIdentTok(t) == 1) parseIdentExpr(tokens, i, identName(t))
+  else if (streq(t, "Underscore") == 1)
+    if (isTok(tokens, i + 1, "Arrow") == 1) parseLambdaExpr(tokens, i + 1, "_")
+    else ok(unitExpr(), i + 1)
+  else if (isIdentTok(t) == 1) parsePrimaryIdent(tokens, i, t)
   else ok(unitExpr(), i)
+
+def parseInterp(tokens: List, i: Int, acc: List): List =
+  val t = tokAt(tokens, i)
+  if (streq(t, "InterpEnd") == 1)
+    ok(List.cons("Interp", List.cons(List.reverse(acc), List.empty)), i + 1)
+  else if (isInterpLitTok(t) == 1)
+    parseInterp(
+      tokens,
+      i + 1,
+      List.cons(List.cons("Lit", List.cons(interpLitVal(t), List.empty)), acc)
+    )
+  else if (isInterpIdTok(t) == 1)
+    parseInterp(
+      tokens,
+      i + 1,
+      List.cons(
+        List.cons("Hole", List.cons(List.cons("Var", List.cons(interpIdVal(t), List.empty)), List.empty)),
+        acc
+      )
+    )
+  else if (isInterpBraceTok(t) == 1) parseInterpBrace(tokens, i, acc, interpBraceVal(t))
+  else ok(List.cons("Interp", List.cons(List.reverse(acc), List.empty)), i)
+
+def parseInterpBrace(tokens: List, i: Int, acc: List, body: String): List =
+  val nested = parseExpr(lex(body), 0)
+  parseInterp(
+    tokens,
+    i + 1,
+    List.cons(List.cons("Hole", List.cons(pAst(nested), List.empty)), acc)
+  )
+
+// The lexer emits `_` as an identifier, so `_ => …` also lands here. An Ident
+// (or `_`) immediately followed by `=>` is a first-class lambda literal;
+// otherwise it is a plain variable/call.
+def parsePrimaryIdent(tokens: List, i: Int, t: String): List =
+  if (isTok(tokens, i + 1, "Arrow") == 1) parseLambdaExpr(tokens, i + 1, identName(t))
+  else parseIdentExpr(tokens, i, identName(t))
+
+// First-class lambda literal `_ => expr` / `name => expr` (single param, tap
+// callbacks). `param` is the already-consumed `_` or identifier text; `i`
+// points at the `=>` token.
+def parseLambdaExpr(tokens: List, i: Int, param: String): List =
+  val i1 = expectTok(tokens, i, "Arrow")
+  val bodyP = parseBlock(tokens, i1)
+  ok(
+    List.cons("Lambda", List.cons(param, List.cons(pAst(bodyP), List.empty))),
+    pIdx(bodyP)
+  )
 
 def parseNegInt(tokens: List, i: Int): List =
   val t = tokAt(tokens, i)
@@ -350,6 +423,8 @@ def parseIdentExpr(tokens: List, i: Int, name: String): List =
   else if (streq(name, "Net") == 1) parseModuleCall(tokens, i + 1, "Net")
   else if (streq(name, "Impurity") == 1) parseModuleCall(tokens, i + 1, "Impurity")
   else if (streq(name, "Signal") == 1) parseModuleCall(tokens, i + 1, "Signal")
+  else if (streq(name, "Theme") == 1) parseModuleCall(tokens, i + 1, "Theme")
+  else if (streq(name, "Color") == 1) parseModuleCall(tokens, i + 1, "Color")
   else if (streq(name, "View") == 1) parseModuleCall(tokens, i + 1, "View")
   else if (streq(name, "Todo") == 1) parseModuleCall(tokens, i + 1, "Todo")
   else if (streq(name, "Ui") == 1) parseModuleCall(tokens, i + 1, "Ui")

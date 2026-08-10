@@ -37,7 +37,12 @@ def dispatch(args: List): IO[Unit] =
 def dispatchCmd(cmd: String, args: List): IO[Unit] =
   if (streq(cmd, "build") == 1) dispatchBuild(defaultProject(args), 0)
   else if (streq(cmd, "run") == 1) cmdRun(defaultProject(args), argFlag(args, "--headless", 0))
-  else if (streq(cmd, "test") == 1) cmdTest(defaultProject(args), argFlag(args, "--update", 0))
+  else if (streq(cmd, "test") == 1)
+    cmdTest(
+      defaultProject(args),
+      argFlag(args, "--update", 0),
+      argFlag(args, "--runtime-tests", 0)
+    )
   else if (streq(cmd, "fmt") == 1)
     cmdFmt(defaultProject(args), argFlag(args, "--check", 0))
   else if (streq(cmd, "watch") == 1) cmdWatch(defaultProject(args))

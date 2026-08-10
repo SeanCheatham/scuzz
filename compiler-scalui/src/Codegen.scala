@@ -82,7 +82,17 @@ def collectExprTag(tag: String, e: List, strs: List): List =
     collectExpr(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs))
   else if (streq(tag, "IoBoth") == 1)
     collectExpr(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs))
+  else if (streq(tag, "Lambda") == 1) collectExpr(nodeExpr(e, 1), strs)
+  else if (streq(tag, "Interp") == 1) collectInterpParts(nodeExpr(e, 0), strs)
   else strs
+
+def collectInterpParts(parts: List, strs: List): List =
+  if (List.isEmpty(parts) == 1) strs
+  else collectInterpParts(List.tail(parts), collectInterpPart(List.head(parts), strs))
+
+def collectInterpPart(part: List, strs: List): List =
+  if (streq(List.head(part), "Lit") == 1) collectPush(strs, List.head(List.tail(part)))
+  else collectExpr(List.head(List.tail(part)), strs)
 
 def collectArgs(args: List, strs: List): List =
   if (List.isEmpty(args) == 1) strs
@@ -153,22 +163,29 @@ def runtimeDeclaresB(): String =
   )
 
 def runtimeDeclaresC(): String =
-  str5(
-    "declare ptr @su_lang_view_text(ptr)\ndeclare ptr @su_lang_view_text_signal(ptr, ptr)\n",
-    "declare ptr @su_lang_view_button_inc(ptr, ptr)\ndeclare ptr @su_lang_view_button_set(ptr, ptr, i64)\n",
-    "declare ptr @su_lang_view_column()\ndeclare ptr @su_lang_view_row()\n",
-    "declare ptr @su_lang_view_list()\ndeclare ptr @su_lang_view_scroll(ptr)\n",
+  Str.concat(
     str5(
+      "declare ptr @su_lang_view_text(ptr)\ndeclare ptr @su_lang_view_text_signal(ptr, ptr)\n",
+      "declare ptr @su_lang_view_button(ptr, ptr, ptr)\n",
+      "declare i64 @su_theme_accent()\ndeclare i64 @su_theme_primary()\n",
+      "declare i64 @su_theme_muted()\ndeclare i64 @su_theme_foreground()\n",
+      "declare i64 @su_color_rgb(i64, i64, i64)\n"
+    ),
+    str5(
+      "declare ptr @su_lang_view_column()\ndeclare ptr @su_lang_view_row()\n",
+      "declare ptr @su_lang_view_list()\ndeclare ptr @su_lang_view_scroll(ptr)\n",
       "declare ptr @su_lang_view_text_field(ptr, ptr)\ndeclare ptr @su_lang_view_icon(i64, i64)\n",
       "declare ptr @su_lang_view_image(i64, i64, i64, ptr)\ndeclare ptr @su_lang_view_add_child(ptr, ptr)\n",
-      "declare ptr @su_lang_view_show_when(ptr, i64, ptr)\ndeclare ptr @su_lang_todo_create()\n",
-      "declare ptr @su_lang_todo_load(ptr)\ndeclare ptr @su_lang_todo_draft(ptr)\n",
       str5(
+        "declare ptr @su_lang_view_show_when(ptr, i64, ptr)\ndeclare ptr @su_lang_todo_create()\n",
+        "declare ptr @su_lang_todo_load(ptr)\ndeclare ptr @su_lang_todo_draft(ptr)\n",
         "declare ptr @su_lang_todo_list_view(ptr)\ndeclare ptr @su_lang_view_button_todo_add(ptr, ptr)\n",
         "declare ptr @su_lang_view_button_todo_save(ptr, ptr)\ndeclare ptr @su_ui_run_view(ptr)\n",
-        "declare ptr @su_ui_run_view_todo(ptr, ptr)\ndeclare ptr @su_box_i64(i64)\n",
-        "declare i64 @su_unbox_i64(ptr)\ndeclare i32 @su_runtime_main_args(ptr, i32, ptr)\n\n",
-        ""
+        str3(
+          "declare ptr @su_ui_run_view_todo(ptr, ptr)\ndeclare ptr @su_box_i64(i64)\n",
+          "declare i64 @su_unbox_i64(ptr)\ndeclare i32 @su_runtime_main_args(ptr, i32, ptr)\n\n",
+          ""
+        )
       )
     )
   )
@@ -282,6 +299,8 @@ def emitExprTag(tag: String, e: List, strs: List, defs: List, env: List, prefix:
   else if (streq(tag, "IoRace") == 1) emitRaceBoth(strs, e, defs, env, prefix, id, conts, "race")
   else if (streq(tag, "IoBoth") == 1) emitRaceBoth(strs, e, defs, env, prefix, id, conts, "both")
   else if (streq(tag, "Adt") == 1) emitAdt(e, prefix, id, conts)
+  else if (streq(tag, "Lambda") == 1) emitLambda(strs, e, defs, env, prefix, id, conts)
+  else if (streq(tag, "Interp") == 1) emitInterp(strs, e, defs, env, prefix, id, conts)
   else mkS("", "null", "ptr", id, conts)
 
 def emitPrintln(strs: List, arg: List, defs: List, env: List, prefix: String, id: Int, conts: String): List =
@@ -740,6 +759,188 @@ def emitFlatMap(strs: List, e: List, defs: List, env: List, prefix: String, id: 
     Str.concat(sConts(be), contDef)
   )
 
+// `s"..."` → left-fold su_string_concat; Int holes via su_string_from_int.
+def emitInterp(strs: List, e: List, defs: List, env: List, prefix: String, id: Int, conts: String): List =
+  emitInterpParts(strs, nodeExpr(e, 0), defs, env, prefix, id, conts, "", "", 0)
+
+def emitInterpParts(
+    strs: List,
+    parts: List,
+    defs: List,
+    env: List,
+    prefix: String,
+    id: Int,
+    conts: String,
+    code: String,
+    acc: String,
+    i: Int
+): List =
+  if (List.isEmpty(parts) == 1)
+    if (streq(acc, "") == 1) emitSuStringLit(strs, "", prefix, id, conts)
+    else mkS(code, acc, "ptr", id, conts)
+  else
+    emitInterpPart(
+      strs,
+      List.head(parts),
+      List.tail(parts),
+      defs,
+      env,
+      prefix,
+      id,
+      conts,
+      code,
+      acc,
+      i
+    )
+
+def emitInterpPart(
+    strs: List,
+    part: List,
+    rest: List,
+    defs: List,
+    env: List,
+    prefix: String,
+    id: Int,
+    conts: String,
+    code: String,
+    acc: String,
+    i: Int
+): List =
+  if (streq(List.head(part), "Lit") == 1)
+    emitInterpPiece(
+      strs,
+      rest,
+      defs,
+      env,
+      prefix,
+      id,
+      conts,
+      code,
+      acc,
+      i,
+      emitSuStringLit(strs, nodeStr(part, 0), str4(prefix, "_l", Str.fromInt(i), ""), id, conts)
+    )
+  else
+    emitInterpHole(
+      strs,
+      rest,
+      defs,
+      env,
+      prefix,
+      id,
+      conts,
+      code,
+      acc,
+      i,
+      emitExpr(nodeExpr(part, 0), strs, defs, env, str4(prefix, "_e", Str.fromInt(i), ""), id, conts)
+    )
+
+def emitInterpHole(
+    strs: List,
+    rest: List,
+    defs: List,
+    env: List,
+    prefix: String,
+    id: Int,
+    conts: String,
+    code: String,
+    acc: String,
+    i: Int,
+    pe: List
+): List =
+  if (streq(sKind(pe), "int") == 1)
+    emitInterpPiece(
+      strs,
+      rest,
+      defs,
+      env,
+      prefix,
+      sId(pe),
+      sConts(pe),
+      str4(code, sCode(pe), "  %", str6(prefix, "_s", Str.fromInt(i), " = call ptr @su_string_from_int(i64 ", sValue(pe), ")\n")),
+      acc,
+      i,
+      mkS("", str4("%", prefix, "_s", Str.fromInt(i)), "ptr", sId(pe), sConts(pe))
+    )
+  else
+    emitInterpPiece(strs, rest, defs, env, prefix, sId(pe), sConts(pe), str3(code, sCode(pe), ""), acc, i, pe)
+
+def emitInterpPiece(
+    strs: List,
+    rest: List,
+    defs: List,
+    env: List,
+    prefix: String,
+    id: Int,
+    conts: String,
+    code: String,
+    acc: String,
+    i: Int,
+    pe: List
+): List =
+  if (streq(acc, "") == 1)
+    emitInterpParts(strs, rest, defs, env, prefix, id, conts, str3(code, sCode(pe), ""), sValue(pe), i + 1)
+  else
+    emitInterpParts(
+      strs,
+      rest,
+      defs,
+      env,
+      prefix,
+      id,
+      conts,
+      str4(code, sCode(pe), "  %", str6(prefix, "_c", Str.fromInt(i), " = call ptr @su_string_concat(ptr ", acc, str3(", ptr ", sValue(pe), ")\n"))),
+      str4("%", prefix, "_c", Str.fromInt(i)),
+      i + 1
+    )
+
+// `_ => body` / `x => body` lowers to a closure value: a 2-element SuList
+// cons(fn_ptr, cons(env_ptr, nil)). fn_ptr matches SuViewTapFn
+// `void (*)(SuView *self, void *env)`; env_ptr is the captured-locals list
+// (same packing as flatMap continuations). View.button unpacks the pair.
+def emitLambda(strs: List, e: List, defs: List, env: List, prefix: String, id: Int, conts: String): List =
+  val fnName = Str.concat("su_tap_", Str.fromInt(id))
+
+  val param = nodeStr(e, 0)
+  val names = captureNames(env, List.empty)
+  val up = unpackEnv(names, Str.concat("t", Str.fromInt(id)), env)
+  val benv = lambdaBind(param, sndL(up))
+  val be = emitExpr(nodeExpr(e, 1), strs, defs, benv, Str.concat("t", Str.fromInt(id)), id + 1, conts)
+  val contDef = str4(
+    "define internal void @",
+    fnName,
+    "(ptr %self, ptr %env) {\nentry:\n",
+    str4(fst(up), sCode(be), "  ret void\n", "}\n\n")
+  )
+  emitLambdaClosure(env, prefix, fnName, sId(be), Str.concat(sConts(be), contDef))
+
+def lambdaBind(param: String, env: List): List =
+  if (streq(param, "_") == 1) env
+  else envPut(env, param, "%self", "ptr")
+
+def emitLambdaClosure(env: List, prefix: String, fnName: String, id: Int, conts: String): List =
+  val packed = packEnv(env, Str.concat(prefix, "_cap"), "")
+  val code = str4(
+    fst(packed),
+    "  %",
+    prefix,
+    str5(
+      "_cl0 = call ptr @su_list_nil()\n  %",
+      prefix,
+      "_cl1 = call ptr @su_list_cons(ptr ",
+      snd(packed),
+      str6(
+        ", ptr %",
+        prefix,
+        "_cl0)\n  %",
+        prefix,
+        "_cl2 = call ptr @su_list_cons(ptr @",
+        str4(fnName, ", ptr %", prefix, "_cl1)\n")
+      )
+    )
+  )
+  mkS(code, str3("%", prefix, "_cl2"), "ptr", id, conts)
+
 def emitCall(strs: List, e: List, defs: List, env: List, prefix: String, id: Int, conts: String): List =
   val callee = nodeStr(e, 0)
   val args = nodeExpr(e, 1)
@@ -779,6 +980,30 @@ def emitCallWithArgs(callee: String, ae: List, defs: List, prefix: String): List
   emitBuiltinOrUser(callee, argPackCode(ae), argPackVals(ae), argPackKinds(ae), argPackId(ae), argPackConts(ae), defs, prefix)
 
 def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id: Int, conts: String, defs: List, prefix: String): List =
+  if (startsWith(callee, "Str.") == 1) emitBuiltinStr(callee, code, vals, id, conts, prefix)
+  else if (startsWith(callee, "List.") == 1) emitBuiltinList(callee, code, vals, kinds, id, conts, prefix)
+  else if (startsWith(callee, "Fs.") == 1) emitBuiltinFs(callee, code, vals, id, conts, prefix)
+  else if (startsWith(callee, "Sys.") == 1) emitBuiltinSys(callee, code, vals, id, conts, prefix)
+  else if (startsWith(callee, "Clock.") == 1) emitBuiltinClock(callee, code, vals, id, conts, prefix)
+  else if (startsWith(callee, "Signal.") == 1) emitBuiltinSignal(callee, code, vals, id, conts, prefix)
+  else if (startsWith(callee, "View.") == 1) emitBuiltinView(callee, code, vals, id, conts, prefix)
+  else if (startsWith(callee, "Theme.") == 1) emitBuiltinTheme(callee, code, vals, id, conts, prefix)
+  else if (startsWith(callee, "Color.") == 1) emitBuiltinColor(callee, code, vals, id, conts, prefix)
+  else if (startsWith(callee, "Todo.") == 1) emitBuiltinTodo(callee, code, vals, id, conts, prefix)
+  else if (startsWith(callee, "Ui.") == 1) emitBuiltinUi(callee, code, vals, id, conts, prefix)
+  else if (streq(callee, "Random.nextInt") == 1)
+    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_random_next_int(i64 ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ioi", id, conts)
+  else if (streq(callee, "Net.httpGet") == 1)
+    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_net_http_get(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
+  else if (streq(callee, "Impurity.runKit") == 1)
+    mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_impurity_run_kit()\n")), str3("%", prefix, "_v"), "io", id, conts)
+  else if (streq(callee, "Effects.runKit") == 1)
+    mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_effects_run_kit()\n")), str3("%", prefix, "_v"), "io", id, conts)
+  else if (streq(callee, "Lexer.classify") == 1)
+    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lexer_classify(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else emitUserCall(callee, code, vals, kinds, id, conts, defs, prefix)
+
+def emitBuiltinStr(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
   if (streq(callee, "Str.concat") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_string_concat(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "Str.len") == 1)
@@ -799,7 +1024,10 @@ def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id:
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_string_from_int(i64 ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "Str.indexOf") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call i64 @su_string_index_of(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "int", id, conts)
-  else if (streq(callee, "List.empty") == 1)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinList(callee: String, code: String, vals: List, kinds: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "List.empty") == 1)
     mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_list_nil()\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "List.cons") == 1) emitListCons(code, vals, kinds, id, conts, prefix)
   else if (streq(callee, "List.isEmpty") == 1)
@@ -828,7 +1056,10 @@ def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id:
       id,
       conts
     )
-  else if (streq(callee, "Fs.read") == 1)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinFs(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "Fs.read") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_fs_read(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
   else if (streq(callee, "Fs.write") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_fs_write(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
@@ -836,23 +1067,26 @@ def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id:
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_fs_list(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
   else if (streq(callee, "Fs.mkdirs") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_fs_mkdirs(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
-  else if (streq(callee, "Sys.args") == 1)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinSys(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "Sys.args") == 1)
     mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_sys_args()\n")), str3("%", prefix, "_v"), "io", id, conts)
   else if (streq(callee, "Sys.exec") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_sys_exec(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ioi", id, conts)
   else if (streq(callee, "Sys.getenv") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_sys_getenv(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
-  else if (streq(callee, "Clock.realTime") == 1)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinClock(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "Clock.realTime") == 1)
     mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_clock_real_time()\n")), str3("%", prefix, "_v"), "ioi", id, conts)
   else if (streq(callee, "Clock.monotonic") == 1)
     mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_clock_monotonic()\n")), str3("%", prefix, "_v"), "ioi", id, conts)
-  else if (streq(callee, "Random.nextInt") == 1)
-    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_random_next_int(i64 ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ioi", id, conts)
-  else if (streq(callee, "Net.httpGet") == 1)
-    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_net_http_get(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
-  else if (streq(callee, "Impurity.runKit") == 1)
-    mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_impurity_run_kit()\n")), str3("%", prefix, "_v"), "io", id, conts)
-  else if (streq(callee, "Signal.int") == 1)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinSignal(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "Signal.int") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_signal_int(i64 ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "Signal.get") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call i64 @su_lang_signal_get(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "int", id, conts)
@@ -860,14 +1094,14 @@ def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id:
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_signal_set(ptr ", List.at(vals, 0), ", i64 ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "Signal.str") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_signal_str(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
-  else if (streq(callee, "View.text") == 1)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinView(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "View.text") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_view_text(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "View.textSignal") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_text_signal(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
-  else if (streq(callee, "View.buttonInc") == 1)
-    mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_button_inc(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
-  else if (streq(callee, "View.buttonSet") == 1)
-    mkS(str4(code, "  %", prefix, str4("_v = call ptr @su_lang_view_button_set(ptr ", List.at(vals, 0), str4(", ptr ", List.at(vals, 1), ", i64 ", List.at(vals, 2)), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "View.button") == 1) emitViewButton(code, vals, id, conts, prefix)
   else if (streq(callee, "View.column") == 1)
     mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_lang_view_column()\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "View.row") == 1)
@@ -906,7 +1140,47 @@ def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id:
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_button_todo_add(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "View.buttonTodoSave") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_button_todo_save(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
-  else if (streq(callee, "Todo.create") == 1)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinTheme(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "Theme.accent") == 1)
+    mkS(str3(code, "  %", Str.concat(prefix, "_v = call i64 @su_theme_accent()\n")), str3("%", prefix, "_v"), "int", id, conts)
+  else if (streq(callee, "Theme.primary") == 1)
+    mkS(str3(code, "  %", Str.concat(prefix, "_v = call i64 @su_theme_primary()\n")), str3("%", prefix, "_v"), "int", id, conts)
+  else if (streq(callee, "Theme.muted") == 1)
+    mkS(str3(code, "  %", Str.concat(prefix, "_v = call i64 @su_theme_muted()\n")), str3("%", prefix, "_v"), "int", id, conts)
+  else if (streq(callee, "Theme.foreground") == 1)
+    mkS(str3(code, "  %", Str.concat(prefix, "_v = call i64 @su_theme_foreground()\n")), str3("%", prefix, "_v"), "int", id, conts)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinColor(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "Color.rgb") == 1)
+    mkS(
+      str4(code, "  %", prefix, str4("_v = call i64 @su_color_rgb(i64 ", List.at(vals, 0), str4(", i64 ", List.at(vals, 1), ", i64 ", List.at(vals, 2)), ")\n")),
+      str3("%", prefix, "_v"),
+      "int",
+      id,
+      conts
+    )
+  else mkS(code, "null", "ptr", id, conts)
+
+// vals[1] is a closure value: cons(fn_ptr, cons(env_ptr, nil)). Unpack the pair
+// and hand it to su_lang_view_button(ptr label, ptr fn, ptr env).
+def emitViewButton(code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  val cl = List.at(vals, 1)
+  val c1 = str4(code, "  %", prefix, str3("_fnp = call ptr @su_list_head(ptr ", cl, ")\n"))
+  val c2 = str4(c1, "  %", prefix, str3("_fnt = call ptr @su_list_tail(ptr ", cl, ")\n"))
+  val c3 = str4(c2, "  %", prefix, str4("_envp = call ptr @su_list_head(ptr %", prefix, "_fnt)\n", ""))
+  val c4 = str4(
+    c3,
+    "  %",
+    prefix,
+    str5("_v = call ptr @su_lang_view_button(ptr ", List.at(vals, 0), ", ptr %", prefix, str4("_fnp, ptr %", prefix, "_envp)\n", ""))
+  )
+  mkS(c4, str3("%", prefix, "_v"), "ptr", id, conts)
+
+def emitBuiltinTodo(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "Todo.create") == 1)
     mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_lang_todo_create()\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "Todo.load") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_todo_load(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
@@ -914,7 +1188,10 @@ def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id:
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_todo_draft(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "Todo.listView") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_todo_list_view(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
-  else if (streq(callee, "Ui.run") == 1)
+  else mkS(code, "null", "ptr", id, conts)
+
+def emitBuiltinUi(callee: String, code: String, vals: List, id: Int, conts: String, prefix: String): List =
+  if (streq(callee, "Ui.run") == 1)
     mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_ui_run_view(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
   else if (streq(callee, "Ui.runWithTodo") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_ui_run_view_todo(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "io", id, conts)
@@ -926,11 +1203,7 @@ def emitBuiltinOrUser(callee: String, code: String, vals: List, kinds: List, id:
     mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_ui_run_live(i32 0, i32 0)\n")), str3("%", prefix, "_v"), "io", id, conts)
   else if (streq(callee, "Ui.runTodo") == 1)
     mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_ui_run_todo(i32 0, i32 0)\n")), str3("%", prefix, "_v"), "io", id, conts)
-  else if (streq(callee, "Effects.runKit") == 1)
-    mkS(str3(code, "  %", Str.concat(prefix, "_v = call ptr @su_effects_run_kit()\n")), str3("%", prefix, "_v"), "io", id, conts)
-  else if (streq(callee, "Lexer.classify") == 1)
-    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lexer_classify(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
-  else emitUserCall(callee, code, vals, kinds, id, conts, defs, prefix)
+  else mkS(code, "null", "ptr", id, conts)
 
 def emitListCons(code: String, vals: List, kinds: List, id: Int, conts: String, prefix: String): List =
   if (streq(List.head(kinds), "int") == 1)

@@ -1,7 +1,7 @@
 use crate::ast::{
-    BinOp, EnumDef, Expr, FunDef, MainDef, MatchArm, Param, Pattern, Program, Type,
+    BinOp, EnumDef, Expr, FunDef, InterpPart, MainDef, MatchArm, Param, Pattern, Program, Type,
 };
-use crate::lexer::{lex, LexError, Token};
+use crate::lexer::{lex, InterpTok, LexError, Token};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -265,7 +265,7 @@ impl Parser {
         }
     }
 
-    /// Block: zero or more `val` bindings then a final expression.
+    /// Block: `val` bindings and expression statements, ending in a final expression.
     fn parse_block(&mut self) -> Result<Expr, ParseError> {
         if matches!(self.peek(), Token::Val) {
             self.bump();
@@ -279,7 +279,16 @@ impl Parser {
                 body: Box::new(body),
             });
         }
-        self.parse_expr()
+        let expr = self.parse_expr()?;
+        // Mid-block `val` after a statement expression (val-anywhere).
+        if matches!(self.peek(), Token::Val) {
+            return Ok(Expr::Let {
+                name: "_".into(),
+                value: Box::new(expr),
+                body: Box::new(self.parse_block()?),
+            });
+        }
+        Ok(expr)
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
@@ -553,6 +562,10 @@ impl Parser {
                 self.bump();
                 Ok(Expr::StrLit(s))
             }
+            Token::InterpString(parts) => {
+                self.bump();
+                self.parse_interpolate(parts)
+            }
             Token::Minus => {
                 self.bump();
                 let n = match self.bump() {
@@ -564,6 +577,15 @@ impl Parser {
                     }
                 };
                 Ok(Expr::IntLit(-n))
+            }
+            Token::Underscore => {
+                self.bump();
+                self.expect(&Token::Arrow)?;
+                let body = self.parse_block()?;
+                Ok(Expr::Lambda {
+                    param: None,
+                    body: Box::new(body),
+                })
             }
             Token::Ident(name) if name == "IO" => {
                 self.bump();
@@ -696,7 +718,7 @@ impl Parser {
                 if matches!(
                     name.as_str(),
                     "Str" | "List" | "Fs" | "Sys" | "Lexer" | "Clock" | "Random"
-                        | "Net" | "Impurity" | "Signal" | "View" | "Todo"
+                        | "Net" | "Impurity" | "Signal" | "View" | "Todo" | "Theme" | "Color"
                 ) =>
             {
                 self.bump();
@@ -720,6 +742,14 @@ impl Parser {
             }
             Token::Ident(name) => {
                 self.bump();
+                if matches!(self.peek(), Token::Arrow) {
+                    self.bump();
+                    let body = self.parse_block()?;
+                    return Ok(Expr::Lambda {
+                        param: Some(name),
+                        body: Box::new(body),
+                    });
+                }
                 if matches!(self.peek(), Token::LParen) {
                     let args = self.parse_args()?;
                     return Ok(Expr::Call {
@@ -741,6 +771,31 @@ impl Parser {
             other => Err(ParseError::Msg(format!("unexpected token {other:?}"))),
         }
     }
+
+    fn parse_interpolate(&mut self, parts: Vec<InterpTok>) -> Result<Expr, ParseError> {
+        let mut out = Vec::new();
+        for part in parts {
+            match part {
+                InterpTok::Lit(s) => out.push(InterpPart::Lit(s)),
+                InterpTok::Ident(name) => out.push(InterpPart::Expr(Expr::Var(name))),
+                InterpTok::Brace(body) => {
+                    let tokens = lex(&body)?;
+                    let mut nested = Parser { tokens, i: 0 };
+                    let e = nested.parse_expr()?;
+                    if !matches!(nested.peek(), Token::Eof) {
+                        return Err(ParseError::Msg(
+                            "trailing tokens in interpolation hole".into(),
+                        ));
+                    }
+                    out.push(InterpPart::Expr(e));
+                }
+            }
+        }
+        if out.is_empty() {
+            out.push(InterpPart::Lit(String::new()));
+        }
+        Ok(Expr::Interpolate { parts: out })
+    }
 }
 
 #[cfg(test)]
@@ -752,6 +807,32 @@ mod tests {
         let p = parse(r#"@main def main: IO[Unit] = IO.println("Hello")"#).unwrap();
         assert_eq!(p.main.name, "main");
         assert!(matches!(p.main.body, Expr::IoPrintln(_)));
+    }
+
+    #[test]
+    fn parse_lambda_literal_underscore() {
+        let src = r#"@main def main: IO[Unit] = View.button("+1", _ => Signal.set(count, Signal.get(count) + 1))"#;
+        let p = parse(src).unwrap();
+        match &p.main.body {
+            Expr::Call { callee, args } if callee == "View.button" => {
+                assert_eq!(args.len(), 2);
+                assert!(matches!(args[1], Expr::Lambda { param: None, .. }));
+            }
+            other => panic!("expected View.button call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_lambda_literal_named_param() {
+        let src = r#"@main def main: IO[Unit] = View.button("+1", self => Signal.set(count, 1))"#;
+        let p = parse(src).unwrap();
+        match &p.main.body {
+            Expr::Call { args, .. } => assert!(matches!(
+                args[1],
+                Expr::Lambda { param: Some(ref n), .. } if n == "self"
+            )),
+            other => panic!("expected call, got {other:?}"),
+        }
     }
 
     #[test]

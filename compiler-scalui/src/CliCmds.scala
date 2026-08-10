@@ -13,7 +13,7 @@ def uiMainTemplate(): String =
     ),
     str5(
       "  val row = View.row()\n",
-      "  val c = View.addChild(row, View.buttonInc(\"+1\", count))\n",
+      "  val c = View.addChild(row, View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)))\n",
       "  val d = View.addChild(root, row)\n",
       "  Ui.run(root)\n",
       ""
@@ -109,24 +109,29 @@ def writeNewHello(dir: String, name: String): IO[Unit] =
 def updateFlagEnv(update: Int): String =
   if (update == 1) "SCALUI_UPDATE_GOLDENS=1 " else ""
 
-def cmdTest(projectDir: String, update: Int): IO[Unit] =
+def cmdTest(projectDir: String, update: Int, runtimeTests: Int): IO[Unit] =
   resolveRuntimeEnv("", projectDir).flatMap(runtimeDir =>
-    execOk(str3("make -C ", runtimeDir, " test")).flatMap(_ =>
-      execOk(str3("make -C ", pathJoin(parentDir(runtimeDir), "ffi-skia"), " test")).flatMap(_ =>
-        compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
-          execOk(
-            str5(
-              updateFlagEnv(update),
-              "bash ",
-              pathJoin(pathJoin(parentDir(parentDir(runtimeDir)), "scripts"), "run_goldens.sh"),
-              " ",
-              projectDir
-            )
-          ).flatMap(_ => IO.println("scalui test ok"))
-        )
+    maybeRuntimeTests(runtimeDir, runtimeTests).flatMap(_ =>
+      compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
+        execOk(
+          str5(
+            updateFlagEnv(update),
+            "bash ",
+            pathJoin(pathJoin(parentDir(parentDir(runtimeDir)), "scripts"), "run_goldens.sh"),
+            " ",
+            projectDir
+          )
+        ).flatMap(_ => IO.println("scalui test ok"))
       )
     )
   )
+
+def maybeRuntimeTests(runtimeDir: String, runtimeTests: Int): IO[Unit] =
+  if (runtimeTests == 0) IO.pure(())
+  else
+    execOk(str3("make -C ", runtimeDir, " test")).flatMap(_ =>
+      execOk(str3("make -C ", pathJoin(parentDir(runtimeDir), "ffi-skia"), " test"))
+    )
 
 def checkFlagStr(check: Int): String =
   if (check == 1) " --check" else ""
@@ -135,39 +140,47 @@ def cmdFmt(projectDir: String, check: Int): IO[Unit] =
   Sys.getenv("SCALUI_CANARY").flatMap(canary =>
     if (Str.len(canary) > 0)
       execOk(str4(canary, " fmt ", projectDir, checkFlagStr(check)))
-    else fmtParseValidate(projectDir)
+    else
+      IO.println(
+        "scalui fmt: Stage-1 formatter not ported yet; set SCALUI_CANARY to the Stage-0 binary (cargo run -p scalui)"
+      ).flatMap(_ => IO.fail("fmt requires SCALUI_CANARY until Stage-1 pretty-printer lands"))
   )
-
-def fmtParseValidate(projectDir: String): IO[Unit] =
-  Fs.list(pathJoin(projectDir, "src")).flatMap(names =>
-    fmtFiles(pathJoin(projectDir, "src"), partitionSources(names, List.empty, List.empty))
-  ).flatMap(_ => IO.println("scalui fmt ok"))
-
-def fmtFiles(srcDir: String, names: List): IO[Unit] =
-  if (List.isEmpty(names) == 1) IO.pure(())
-  else fmtFileOne(srcDir, List.head(names), List.tail(names))
-
-def fmtFileOne(srcDir: String, name: String, rest: List): IO[Unit] =
-  Fs.read(pathJoin(srcDir, name)).flatMap(text =>
-    fmtFileAfterRead(srcDir, rest, exprTag(parseSource(text)))
-  )
-
-def fmtFileAfterRead(srcDir: String, rest: List, tag: String): IO[Unit] =
-  fmtFiles(srcDir, rest)
 
 def cmdWatch(projectDir: String): IO[Unit] =
-  IO.println(str3("scalui watch ", projectDir, "")).flatMap(_ => watchLoop(projectDir))
+  IO.println(str3("scalui watch ", projectDir, "")).flatMap(_ =>
+    srcFingerprint(projectDir).flatMap(fp => watchLoop(projectDir, fp, 1))
+  )
 
-def watchLoop(projectDir: String): IO[Unit] =
-  compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
-    IO.println("rebuilt").flatMap(_ =>
-      IO.sleep(2000).flatMap(_ => watchLoop(projectDir))
-    )
-  ).handleErrorWith(_ =>
-    IO.println("scalui watch build error").flatMap(_ =>
-      IO.sleep(2000).flatMap(_ => watchLoop(projectDir))
+def watchLoop(projectDir: String, lastFp: String, force: Int): IO[Unit] =
+  maybeRebuild(projectDir, lastFp, force).flatMap(fp2 =>
+    IO.sleep(500).flatMap(_ =>
+      srcFingerprint(projectDir).flatMap(fp3 =>
+        if (streq(fp3, fp2) == 1) watchLoop(projectDir, fp2, 0)
+        else watchLoop(projectDir, fp3, 1)
+      )
     )
   )
+
+def maybeRebuild(projectDir: String, lastFp: String, force: Int): IO[String] =
+  if (force == 0) IO.pure(lastFp)
+  else
+    compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
+      IO.println("rebuilt").flatMap(_ => IO.pure(lastFp))
+    ).handleErrorWith(_ =>
+      IO.println("scalui watch build error").flatMap(_ => IO.pure(lastFp))
+    )
+
+def srcFingerprint(projectDir: String): IO[String] =
+  Fs.list(pathJoin(projectDir, "src")).flatMap(names =>
+    fpFiles(pathJoin(projectDir, "src"), partitionSources(names, List.empty, List.empty), "")
+  )
+
+def fpFiles(srcDir: String, names: List, acc: String): IO[String] =
+  if (List.isEmpty(names) == 1) IO.pure(acc)
+  else
+    Fs.read(pathJoin(srcDir, List.head(names))).flatMap(text =>
+      fpFiles(srcDir, List.tail(names), str4(acc, List.head(names), "\n", text))
+    )
 
 def cmdPackage(projectDir: String, target: String): IO[Unit] =
   compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
@@ -183,43 +196,6 @@ def cmdPackage(projectDir: String, target: String): IO[Unit] =
       )
     )
   )
-
-def readTomlDefaultRuntime(toml: String): String =
-  readTomlQuotedAfter(toml, "default_runtime = \"", "headless")
-
-def readTomlQuotedAfter(toml: String, key: String, fallback: String): String =
-  readTomlQuotedAt(toml, Str.indexOf(toml, key), Str.len(key), fallback)
-
-def readTomlQuotedAt(toml: String, idx: Int, keyLen: Int, fallback: String): String =
-  if (idx < 0) fallback
-  else readUntilQuote(toml, idx + keyLen, "")
-
-def readTomlHeadlessW(toml: String): String =
-  readTomlBracketNum(toml, Str.indexOf(toml, "headless_size = ["), 0, "200")
-
-def readTomlHeadlessH(toml: String): String =
-  readTomlBracketNum(toml, Str.indexOf(toml, "headless_size = ["), 1, "120")
-
-def readTomlBracketNum(toml: String, idx: Int, which: Int, fallback: String): String =
-  if (idx < 0) fallback
-  else readTomlBracketNumAt(toml, idx + 18, which, fallback)
-
-def readTomlBracketNumAt(toml: String, i: Int, which: Int, fallback: String): String =
-  if (i >= Str.len(toml)) fallback
-  else if (isDigit(Str.charAt(toml, i)) == 1)
-    readTomlBracketNumTake(toml, i, which, fallback, "")
-  else if (Str.charAt(toml, i) == 93) fallback
-  else readTomlBracketNumAt(toml, i + 1, which, fallback)
-
-def readTomlBracketNumTake(toml: String, i: Int, which: Int, fallback: String, acc: String): String =
-  if (i >= Str.len(toml)) fallback
-  else if (isDigit(Str.charAt(toml, i)) == 1)
-    readTomlBracketNumTake(toml, i + 1, which, fallback, Str.concat(acc, Str.slice(toml, i, i + 1)))
-  else if (which == 0) acc
-  else readTomlBracketNumAt(toml, i + 1, 0, fallback)
-
-def hasUiSection(toml: String): Int =
-  if (Str.indexOf(toml, "[ui]") < 0) 0 else 1
 
 def cmdRun(projectDir: String, headless: Int): IO[Unit] =
   compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
