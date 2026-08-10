@@ -118,14 +118,10 @@ def exhaustExtend(exe: String, fuzzDir: String, w: String, h: String, projectDir
   if (List.len(prefix) == targetLen) exhaustRunPrefix(exe, fuzzDir, w, h, projectDir, maxDepth, scriptIndex, prefix) else exhaustExtendOver(exe, fuzzDir, w, h, projectDir, maxDepth, targetLen, alphabet, alphabet, prefix, scriptIndex)
 
 def exhaustExtendOver(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, maxDepth: Int, targetLen: Int, alphabet: List, remaining: List, prefix: List, scriptIndex: Int): IO[Int] =
-  if (List.isEmpty(remaining) == 1) IO.pure(scriptIndex) else exhaustExtend(exe, fuzzDir, w, h, projectDir, maxDepth, targetLen, alphabet, List.append(prefix, List.head(remaining)), scriptIndex).flatMap(next =>
-    exhaustExtendOver(exe, fuzzDir, w, h, projectDir, maxDepth, targetLen, alphabet, List.tail(remaining), prefix, next)
-  )
+  if (List.isEmpty(remaining) == 1) IO.pure(scriptIndex) else exhaustExtend(exe, fuzzDir, w, h, projectDir, maxDepth, targetLen, alphabet, List.append(prefix, List.head(remaining)), scriptIndex).flatMap(next => exhaustExtendOver(exe, fuzzDir, w, h, projectDir, maxDepth, targetLen, alphabet, List.tail(remaining), prefix, next))
 
 def fuzzExhaustDepth(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, alphabet: List, depth: Int, maxDepth: Int, scriptIndex: Int): IO[Unit] =
-  if (depth > maxDepth) IO.println(str5("scalui fuzz --exhaust ok (depth ", Str.fromInt(maxDepth), ", ", Str.fromInt(scriptIndex), " scripts)")) else exhaustExtend(exe, fuzzDir, w, h, projectDir, maxDepth, depth, alphabet, List.empty(), scriptIndex).flatMap(next =>
-    fuzzExhaustDepth(exe, fuzzDir, w, h, projectDir, alphabet, depth + 1, maxDepth, next)
-  )
+  if (depth > maxDepth) IO.println(str5("scalui fuzz --exhaust ok (depth ", Str.fromInt(maxDepth), ", ", Str.fromInt(scriptIndex), " scripts)")) else exhaustExtend(exe, fuzzDir, w, h, projectDir, maxDepth, depth, alphabet, List.empty(), scriptIndex).flatMap(next => fuzzExhaustDepth(exe, fuzzDir, w, h, projectDir, alphabet, depth + 1, maxDepth, next))
 
 def fuzzExhaust(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, nButtons: Int, hasText: Int, depth: Int): IO[Unit] =
   fuzzExhaustDepth(exe, fuzzDir, w, h, projectDir, exhaustAlphabet(nButtons, hasText), 1, depth, 0)
@@ -187,3 +183,4 @@ def fuzzBuilt(projectDir: String, replay: String, iters: Int, seed: Int, exhaust
 
 def fuzzDispatch(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, replay: String, iters: Int, seed: Int, exhaust: Int, depth: Int): IO[Unit] =
   if (Str.len(replay) > 0) fuzzReplay(exe, fuzzDir, w, h, replay) else fuzzProbe(exe, fuzzDir, w, h, projectDir, seed, iters, exhaust, depth)
+
