@@ -2,7 +2,6 @@ package scalui.compiler
 
 // Minimal TOML subset for scalui.toml: tables, quoted strings, ints, int arrays.
 // Tolerates whitespace around keys/`=` so reformatted manifests still parse.
-// Kernel dialect: no `val` inside bare if branches.
 
 def tomlSkip(s: String, i: Int): Int =
   if (i >= Str.len(s)) i

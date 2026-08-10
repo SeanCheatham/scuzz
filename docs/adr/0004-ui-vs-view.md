@@ -34,7 +34,7 @@ Two layers:
 
 Closure representation (both compilers): a lambda lowers to a function pointer matching `SuViewTapFn` (`void (*)(SuView *self, void *env)`) plus a captured-locals environment, packed the same way as `flatMap` continuations (a boxed `SuList`, ints boxed via `su_box_i64`). `su_lang_view_button` receives the unpacked `(fn, env)` pair and forwards to `su_view_button`. When the tap body is an `IO[_]`, codegen inserts `su_io_unsafe_run` so blessed effects (e.g. `Fs.write`) can run from a tap.
 
-Todo is language-authored: `List` literals, `Signal.list` / `Signal.str`, `Str.lines`, `View.addTexts`, and ordinary `View.button` lambdas — no Todo-shaped C controller.
+Todo is language-authored: `List` literals, `Signal.list` / `Signal.str`, `Str.lines`, `View.setTexts` / `View.clearChildren`, and ordinary `View.button` lambdas — no Todo-shaped C controller. List UI updates are explicit clear/rebuild (or `setTexts`), not append-only.
 
 Rules:
 

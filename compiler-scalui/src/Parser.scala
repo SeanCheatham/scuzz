@@ -272,7 +272,49 @@ def parsePostfix(tokens: List, i: Int): List =
 
 def parsePostfixRest(tokens: List, expr: List, i: Int): List =
   if (isTok(tokens, i, "Dot") == 1) parsePostfixDot(tokens, expr, i + 1)
+  else if (isTok(tokens, i, "Match") == 1) parseMatch(tokens, expr, i + 1)
   else ok(expr, i)
+
+def parseMatch(tokens: List, scrut: List, i: Int): List =
+  val i1 = if (isTok(tokens, i, "LBrace") == 1) i + 1 else i
+  val armsP = parseMatchArms(tokens, i1, List.empty)
+  val i2 = if (isTok(tokens, pIdx(armsP), "RBrace") == 1) pIdx(armsP) + 1 else pIdx(armsP)
+  parsePostfixRest(
+    tokens,
+    List.cons("Match", List.cons(scrut, List.cons(pAst(armsP), List.empty))),
+    i2
+  )
+
+def parseMatchArms(tokens: List, i: Int, acc: List): List =
+  if (isTok(tokens, i, "Case") == 0) ok(List.reverse(acc), i)
+  else parseMatchArm(tokens, i + 1, acc)
+
+def parseMatchArm(tokens: List, i: Int, acc: List): List =
+  val patP = parsePattern(tokens, i)
+  val i1 = expectTok(tokens, pIdx(patP), "Arrow")
+  val bodyP = parseExpr(tokens, i1)
+  parseMatchArms(
+    tokens,
+    pIdx(bodyP),
+    List.cons(
+      List.cons("Arm", List.cons(pAst(patP), List.cons(pAst(bodyP), List.empty))),
+      acc
+    )
+  )
+
+def parsePattern(tokens: List, i: Int): List =
+  if (isTok(tokens, i, "Underscore") == 1)
+    ok(List.cons("PatWild", List.empty), i + 1)
+  else parsePatternAdt(tokens, i)
+
+def parsePatternAdt(tokens: List, i: Int): List =
+  val enumP = parseIdent(tokens, i)
+  val i1 = expectTok(tokens, pIdx(enumP), "Dot")
+  val caseP = parseIdent(tokens, i1)
+  ok(
+    List.cons("PatAdt", List.cons(pStr(enumP), List.cons(pStr(caseP), List.empty))),
+    pIdx(caseP)
+  )
 
 def parsePostfixDot(tokens: List, expr: List, i: Int): List =
   val methodP = parseIdent(tokens, i)
@@ -417,9 +459,9 @@ def parseIf(tokens: List, i: Int): List =
   val i1 = expectTok(tokens, i, "LParen")
   val condP = parseExpr(tokens, i1)
   val i2 = expectTok(tokens, pIdx(condP), "RParen")
-  val thenP = parseExpr(tokens, i2)
+  val thenP = parseIfBranch(tokens, i2)
   val i3 = expectTok(tokens, pIdx(thenP), "Else")
-  val elseP = parseExpr(tokens, i3)
+  val elseP = parseIfBranch(tokens, i3)
   ok(
     List.cons(
       "If",
@@ -430,6 +472,12 @@ def parseIf(tokens: List, i: Int): List =
     ),
     pIdx(elseP)
   )
+
+// Val-led branches use full blocks; otherwise a single expr so mid-block
+// `val x = if … else e` does not steal following vals.
+def parseIfBranch(tokens: List, i: Int): List =
+  if (isTok(tokens, i, "Val") == 1) parseBlock(tokens, i)
+  else parseExpr(tokens, i)
 
 def parseIdentExpr(tokens: List, i: Int, name: String): List =
   if (streq(name, "IO") == 1) parseIo(tokens, i + 1)
@@ -565,25 +613,65 @@ def parseMain(tokens: List, i: Int): List =
   val i3 = expectTok(tokens, pIdx(tyP), "Eq")
   parseBlock(tokens, i3)
 
-def parseTop(tokens: List, i: Int, pkg: String, defs: List, main: List): List =
+def parseTop(tokens: List, i: Int, pkg: String, enums: List, defs: List, main: List): List =
   val t = tokAt(tokens, i)
   if (streq(t, "Eof") == 1)
     List.cons(
       "Prog",
-      List.cons(pkg, List.cons(List.reverse(defs), List.cons(main, List.empty)))
+      List.cons(
+        pkg,
+        List.cons(
+          List.reverse(enums),
+          List.cons(List.reverse(defs), List.cons(main, List.empty))
+        )
+      )
     )
-  else if (streq(t, "Def") == 1) parseTopDef(tokens, i + 1, pkg, defs, main)
-  else if (streq(t, "AtMain") == 1) parseTopMain(tokens, i + 1, pkg, defs)
-  else parseTop(tokens, i + 1, pkg, defs, main)
+  else if (streq(t, "Enum") == 1) parseTopEnum(tokens, i + 1, pkg, enums, defs, main)
+  else if (streq(t, "Def") == 1) parseTopDef(tokens, i + 1, pkg, enums, defs, main)
+  else if (streq(t, "AtMain") == 1) parseTopMain(tokens, i + 1, pkg, enums, defs)
+  else parseTop(tokens, i + 1, pkg, enums, defs, main)
 
-def parseTopDef(tokens: List, i: Int, pkg: String, defs: List, main: List): List =
+def parseEnum(tokens: List, i: Int): List =
+  val nameP = parseIdent(tokens, i)
+  val i1 = pIdx(nameP)
+  if (isTok(tokens, i1, "LBrace") == 1) parseEnumBrace(tokens, i1 + 1, pStr(nameP), List.empty)
+  else if (isTok(tokens, i1, "Colon") == 1) parseEnumColon(tokens, i1 + 1, pStr(nameP), List.empty)
+  else ok(List.cons("Enum", List.cons(pStr(nameP), List.cons(List.empty, List.empty))), i1)
+
+def parseEnumBrace(tokens: List, i: Int, name: String, acc: List): List =
+  if (isTok(tokens, i, "RBrace") == 1)
+    ok(List.cons("Enum", List.cons(name, List.cons(List.reverse(acc), List.empty))), i + 1)
+  else parseEnumBraceCase(tokens, i, name, acc)
+
+def parseEnumBraceCase(tokens: List, i: Int, name: String, acc: List): List =
+  val i1 = expectTok(tokens, i, "Case")
+  val caseP = parseIdent(tokens, i1)
+  val i2 = pIdx(caseP)
+  val acc2 = List.cons(pStr(caseP), acc)
+  if (isTok(tokens, i2, "Comma") == 1) parseEnumBrace(tokens, i2 + 1, name, acc2)
+  else parseEnumBrace(tokens, i2, name, acc2)
+
+def parseEnumColon(tokens: List, i: Int, name: String, acc: List): List =
+  if (isTok(tokens, i, "Case") == 0)
+    ok(List.cons("Enum", List.cons(name, List.cons(List.reverse(acc), List.empty))), i)
+  else parseEnumColonCase(tokens, i + 1, name, acc)
+
+def parseEnumColonCase(tokens: List, i: Int, name: String, acc: List): List =
+  val caseP = parseIdent(tokens, i)
+  parseEnumColon(tokens, pIdx(caseP), name, List.cons(pStr(caseP), acc))
+
+def parseTopEnum(tokens: List, i: Int, pkg: String, enums: List, defs: List, main: List): List =
+  val e = parseEnum(tokens, i)
+  parseTop(tokens, pIdx(e), pkg, List.cons(pAst(e), enums), defs, main)
+
+def parseTopDef(tokens: List, i: Int, pkg: String, enums: List, defs: List, main: List): List =
   val d = parseDef(tokens, i)
-  parseTop(tokens, pIdx(d), pkg, List.cons(pAst(d), defs), main)
+  parseTop(tokens, pIdx(d), pkg, enums, List.cons(pAst(d), defs), main)
 
-def parseTopMain(tokens: List, i: Int, pkg: String, defs: List): List =
+def parseTopMain(tokens: List, i: Int, pkg: String, enums: List, defs: List): List =
   val m = parseMain(tokens, i)
-  parseTop(tokens, pIdx(m), pkg, defs, pAst(m))
+  parseTop(tokens, pIdx(m), pkg, enums, defs, pAst(m))
 
 def parseProgram(tokens: List): List =
   val pkgP = parsePackage(tokens, 0)
-  parseTop(tokens, pIdx(pkgP), pStr(pkgP), List.empty, unitExpr())
+  parseTop(tokens, pIdx(pkgP), pStr(pkgP), List.empty, List.empty, unitExpr())

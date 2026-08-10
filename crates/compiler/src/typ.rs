@@ -541,6 +541,15 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::List)?;
             Ok(Type::Unit)
         }
+        "View.clearChildren" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::Unit)
+        }
+        "View.setTexts" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[1], &Type::List)?;
+            Ok(Type::Unit)
+        }
         "View.showWhen" => {
             expect_arity(callee, &arg_tys, 3)?;
             expect_ty(&arg_tys[1], &Type::Int)?;

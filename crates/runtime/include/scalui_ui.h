@@ -151,6 +151,7 @@ void su_view_set_show_when(SuView *view, SuSignalInt *sig, int64_t value);
 SuView *su_view_show_when(SuSignalInt *sig, int64_t value, SuView *child);
 
 void su_view_add_child(SuView *parent, SuView *child);
+void su_view_clear_children(SuView *parent);
 void su_view_free(SuView *view);
 
 SuViewKind su_view_kind(const SuView *view);
@@ -246,6 +247,8 @@ SuView *su_lang_view_icon(int64_t glyph, int64_t argb);
 SuView *su_lang_view_image(int64_t w, int64_t h, int64_t argb, SuString *caption);
 void *su_lang_view_add_child(SuView *parent, SuView *child);
 void *su_lang_view_add_texts(SuView *parent, SuList *lines);
+void *su_lang_view_clear_children(SuView *parent);
+void *su_lang_view_set_texts(SuView *parent, SuList *lines);
 SuView *su_lang_view_show_when(SuSignalInt *sig, int64_t value, SuView *child);
 
 /* Mount prebuilt root → pump → optional scripted tap → snapshot → unmount. */

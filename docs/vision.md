@@ -53,7 +53,7 @@ Phases 0–6 landed (foundation, Headless `Ui`, declarative Views, effects/tooli
 | Self-host never arrives / dialect drift | Kernel dialect doc; port compiler early; Stage 0/1/2 CI gate |
 | Effects too weak vs cats-effect OR too heavy for UI | Builtin IO only; pure `View` build; `Ui` effect at session boundary |
 | Untracked non-determinism breaks goldens / self-host CI | Closed impurity surface (Clock/Random/Fs/Net/Sys/console); TestRuntime fakes (`su_testrt_*`, `SCALUI_TESTRT=1`) |
-| “Almost Scala / almost CE” confuses users | Brand ScalUI language + effects guide; explicit non-goals (no cats port) |
+| “Almost Scala / almost CE” confuses users | Brand ScalUI language + [docs/guide.md](guide.md); explicit non-goals (no cats port) |
 | Skia build/size complexity | Prebuilt artifacts per platform; thin C ABI; CI caches |
 | Window-only features sneak in | Rule: no UI feature without Headless interpreter path |
 | GC + UI frame budget | `pump` as frame boundary; measure; isolate render work |

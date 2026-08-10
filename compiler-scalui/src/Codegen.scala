@@ -2,8 +2,9 @@ package scalui.compiler
 
 // Stage-1 LLVM IR emitter (kernel dialect). Conts threaded via emit state List.
 
-def progDefs(p: List): List = nodeExpr(p, 1)
-def progMain(p: List): List = nodeExpr(p, 2)
+def progEnums(p: List): List = nodeExpr(p, 1)
+def progDefs(p: List): List = nodeExpr(p, 2)
+def progMain(p: List): List = nodeExpr(p, 3)
 
 def defName(d: List): String = nodeStr(d, 0)
 def defParams(d: List): List = nodeExpr(d, 1)
@@ -188,9 +189,9 @@ def runtimeDeclaresC(): String =
       "declare ptr @su_lang_view_text_field(ptr, ptr)\ndeclare ptr @su_lang_view_icon(i64, i64)\n",
       "declare ptr @su_lang_view_image(i64, i64, i64, ptr)\ndeclare ptr @su_lang_view_add_child(ptr, ptr)\n",
       str3(
-        "declare ptr @su_lang_view_add_texts(ptr, ptr)\ndeclare ptr @su_lang_view_show_when(ptr, i64, ptr)\n",
-        "declare ptr @su_ui_run_view(ptr)\ndeclare ptr @su_box_i64(i64)\n",
-        "declare i64 @su_unbox_i64(ptr)\ndeclare i32 @su_runtime_main_args(ptr, i32, ptr)\n\n"
+        "declare ptr @su_lang_view_add_texts(ptr, ptr)\ndeclare ptr @su_lang_view_clear_children(ptr)\n",
+        "declare ptr @su_lang_view_set_texts(ptr, ptr)\ndeclare ptr @su_lang_view_show_when(ptr, i64, ptr)\n",
+        "declare ptr @su_ui_run_view(ptr)\ndeclare ptr @su_box_i64(i64)\ndeclare i64 @su_unbox_i64(ptr)\ndeclare i32 @su_runtime_main_args(ptr, i32, ptr)\n\n"
       )
     )
   )
@@ -1162,6 +1163,10 @@ def emitBuiltinView(callee: String, code: String, vals: List, id: Int, conts: St
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_add_child(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "View.addTexts") == 1)
     mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_add_texts(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "View.clearChildren") == 1)
+    mkS(str4(code, "  %", prefix, str3("_v = call ptr @su_lang_view_clear_children(ptr ", List.at(vals, 0), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
+  else if (streq(callee, "View.setTexts") == 1)
+    mkS(str4(code, "  %", prefix, str5("_v = call ptr @su_lang_view_set_texts(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else if (streq(callee, "View.showWhen") == 1)
     mkS(str4(code, "  %", prefix, str4("_v = call ptr @su_lang_view_show_when(ptr ", List.at(vals, 0), str4(", i64 ", List.at(vals, 1), ", ptr ", List.at(vals, 2)), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
   else mkS(code, "null", "ptr", id, conts)

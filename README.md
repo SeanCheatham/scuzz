@@ -11,11 +11,11 @@
 - **ScalUI-authored Views**: Counter/Todo/nav via `Signal` / `View` / `Ui.run` (List literals + `Signal.list`; C demos remain for Live / kits)
 - Closed impurity boundary: `Clock` / `Random` / `Fs` / `Net` / `Sys` / `IO.println` + `TestRuntime` fakes
 - Animation v0 + accessibility hooks (Headless-dumpable); theme polish tokens
-- Stage-1 CLI: `build|run|test|watch|new|package` (`compiler-scalui`); Stage-0 Rust is canary (`fmt` stays canary until pretty-printer is ported)
+- Stage-1 CLI: `build|run|test|watch|new|package|fmt` (`compiler-scalui`); Stage-0 Rust is CI canary
 - Samples gallery below; Skia prebuilts via `SCALUI_SKIA_URL` (default: in-tree `sk_sw`)
 - Impeller evaluated and deferred (ADR 0002)
 
-See [docs/vision.md](docs/vision.md).
+See [docs/vision.md](docs/vision.md). App authors: start with [docs/guide.md](docs/guide.md).
 
 ## Quick start
 
