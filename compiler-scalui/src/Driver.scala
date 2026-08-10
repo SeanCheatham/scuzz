@@ -57,13 +57,18 @@ def mergeSources(texts: List, acc: List): List =
   if (List.isEmpty(texts) == 1) acc else mergeSources(List.tail(texts), mergeProg(acc, parseSource(List.head(texts))))
 
 def buildRuntime(runtimeDir: String, clang: String): IO[Unit] =
-  execOk(str4("make -C ", runtimeDir, " lib CC=", clang)).flatMap(_ => execOk(str4("make -C ", pathJoin(parentDir(runtimeDir), "embedder-desktop"), " lib CC=", clang)))
+  execOk(str4("make -C ", runtimeDir, " lib CC=", clang)).flatMap(_ =>
+    execOk(str4("make -C ", pathJoin(parentDir(runtimeDir), "embedder-desktop"), " lib CC=", clang)).flatMap(_ => execOk(str4("make -C ", pathJoin(parentDir(runtimeDir), "embedder-mobile"), " lib CC=", clang)))
+  )
 
 def embedderLinkFlags(embedder: String): String =
   str5("$(test -f ", embedder, " && if [ \"`uname -s`\" = Darwin ]; then echo -Wl,-force_load,", embedder, str3(" -framework Cocoa -lobjc; elif [ \"`uname -s`\" = Linux ]; then echo -Wl,--whole-archive ", embedder, " -Wl,--no-whole-archive -lX11; fi)"))
 
-def linkCmd(clang: String, ll: String, lib: String, skia: String, inc: String, skInc: String, embedder: String, exe: String): String =
-  str4(clang, " ", ll, str4(" ", lib, " ", str4(skia, " -I", inc, str4(" -I", skInc, " -lpthread ", str4(embedderLinkFlags(embedder), " -o ", exe, "")))))
+def mobileLinkFlags(mobile: String): String =
+  str5("$(test -f ", mobile, " && if [ \"`uname -s`\" = Darwin ]; then echo -Wl,-force_load,", mobile, str3("; elif [ \"`uname -s`\" = Linux ]; then echo -Wl,--whole-archive ", mobile, " -Wl,--no-whole-archive; fi)"))
+
+def linkCmd(clang: String, ll: String, lib: String, skia: String, inc: String, skInc: String, embedder: String, mobile: String, exe: String): String =
+  str4(clang, " ", ll, str4(" ", lib, " ", str4(skia, " -I", inc, str4(" -I", skInc, " -lpthread ", str5(embedderLinkFlags(embedder), " ", mobileLinkFlags(mobile), " -o ", exe)))))
 
 def runIfNeeded(exe: String, doRun: Int): IO[Unit] =
   if (doRun == 1) execOk(exe) else IO.pure(())
@@ -110,10 +115,11 @@ def compileAfterSources(projectDir: String, outDir: String, doRun: Int, runtimeD
     inc = pathJoin(runtimeDir, "include")
     skInc = pathJoin(ffi, "include")
     embedder = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-desktop"), "build/libscalui_embedder.a")
+    mobile = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-mobile"), "build/libscalui_mobile.a")
   } yield if (tyIsOk(ty) == 0) IO.fail(tyMsg(ty)) else Fs.mkdirs(outDir).flatMap(_ =>
   Fs.write(ll, ir).flatMap(_ =>
     buildRuntime(runtimeDir, clang).flatMap(_ =>
-      execOk(linkCmd(clang, ll, lib, skia, inc, skInc, embedder, exe)).flatMap(_ => runIfNeeded(exe, doRun))
+      execOk(linkCmd(clang, ll, lib, skia, inc, skInc, embedder, mobile, exe)).flatMap(_ => runIfNeeded(exe, doRun))
     )
   )
 )
