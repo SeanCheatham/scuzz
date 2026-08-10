@@ -23,12 +23,17 @@ exe="$project/build/$name"
 run_snap() {
   local actual="$1"
   shift
+  local todo_path
+  todo_path="$(mktemp "${TMPDIR:-/tmp}/scalui-todo.XXXXXX")"
+  rm -f "$todo_path"
   env SCALUI_UI_RUNTIME=headless \
       SCALUI_SNAPSHOT_PATH="$actual" \
       SCALUI_UI_WIDTH="$w" \
       SCALUI_UI_HEIGHT="$h" \
+      SCALUI_TODO_PATH="$todo_path" \
       "$@" \
       "$exe"
+  rm -f "$todo_path"
 }
 
 tap_env() {
