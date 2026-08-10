@@ -215,7 +215,6 @@ SzUiRuntimeKind sz_ui_session_kind(const SzUiSession *session);
 int sz_ui_session_width(const SzUiSession *session);
 int sz_ui_session_height(const SzUiSession *session);
 SzView *sz_ui_session_root(SzUiSession *session);
-const SzTheme *sz_ui_session_theme(const SzUiSession *session);
 SzLifecyclePhase sz_ui_session_lifecycle(const SzUiSession *session);
 int sz_ui_session_keyboard_visible(const SzUiSession *session);
 

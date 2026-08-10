@@ -69,7 +69,7 @@ my-app/
     Main.scala          # *.scala or *.scuzz
     Other.scala         # multi-file packages / enums
   .scuzz/
-    fingerprint         # incremental compile cache (gitignored)
+    fingerprint         # incremental compile cache (gitignored via **/.scuzz/)
   build/package/        # emitted by `scuzz package`
     host/run.sh
     android/

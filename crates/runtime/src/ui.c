@@ -446,10 +446,6 @@ SzView *sz_ui_session_root(SzUiSession *session) {
   return session ? session->root : NULL;
 }
 
-const SzTheme *sz_ui_session_theme(const SzUiSession *session) {
-  return session ? session->theme : sz_theme_default();
-}
-
 SzLifecyclePhase sz_ui_session_lifecycle(const SzUiSession *session) {
   return session ? session->lifecycle : SZ_LIFECYCLE_STOP;
 }
@@ -466,7 +462,7 @@ void sz_ui_resolve_headless_size(int *width, int *height, double *scale) {
   }
   if (*height <= 0) {
     const char *h = getenv("SCUZZ_UI_HEIGHT");
-    *height = (h && atoi(h) > 0) ? atoi(h) : 100;
+    *height = (h && atoi(h) > 0) ? atoi(h) : 120;
   }
   if (scale) {
     const char *sc = getenv("SCUZZ_UI_SCALE");

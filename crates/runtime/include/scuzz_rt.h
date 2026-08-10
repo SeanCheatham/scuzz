@@ -35,7 +35,6 @@ int sz_string_eq(const SzString *a, const SzString *b);
 int64_t sz_string_char_at(const SzString *s, int64_t index); /* byte as i64; -1 OOB */
 SzString *sz_string_from_int(int64_t n);
 int64_t sz_string_index_of(const SzString *s, const SzString *needle);
-SzString *sz_string_to_cstr_clone(const SzString *s); /* alias helper */
 
 typedef struct SzList SzList;
 /* Split on `\n` / `\r\n`; skip empty lines. */

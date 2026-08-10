@@ -16,12 +16,6 @@ pub fn format_source(source: &str) -> Result<String, FormatError> {
     Ok(pretty_program(&prog))
 }
 
-/// Parse, raise `val`/`Let` chains to `for`, and pretty-print (migration helper).
-pub fn format_source_raised(source: &str) -> Result<String, FormatError> {
-    let prog = crate::lower::raise_program(parse(source)?);
-    Ok(pretty_program(&prog))
-}
-
 fn pretty_program(p: &Program) -> String {
     let mut out = String::new();
     if !p.package.is_empty() {
@@ -124,7 +118,7 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
         Expr::IoSleep(e) => format!("{pad}IO.sleep({})", pretty_expr(e, 0).trim()),
         Expr::IoFail(e) => format!("{pad}IO.fail({})", pretty_expr(e, 0).trim()),
         Expr::IoPure(e) => format!("{pad}IO.pure({})", pretty_expr(e, 0).trim()),
-        Expr::EffectsRunKit => format!("{pad}Effects.runKit"),
+        Expr::EffectsRunKit => format!("{pad}Effects.runKit()"),
         Expr::Var(n) => format!("{pad}{n}"),
         Expr::AdtConstruct {
             enum_name,

@@ -5,7 +5,7 @@ Short path from install to a Headless UI or IO app. For product thesis, design l
 ## Happy path (UI)
 
 ```bash
-./scripts/install.sh          # packages Stage-1 + SDK → ~/.local/share/scuzz; wrapper → ~/.local/bin/scuzz
+./scripts/install.sh          # packages Stage-2 + SDK → ~/.local/share/scuzz; wrapper → ~/.local/bin/scuzz
 # ensure ~/.local/bin is on PATH (apps need clang + make; Rust not required after install)
 scuzz new myapp --ui
 cd myapp
@@ -66,7 +66,7 @@ Lists: keep a `Signal.list`, render with `View.each(items)` (framework rebuilds 
 
 - `[ui]` packages: `scuzz test` is Headless **structural** goldens (signal store + a11y dump); PNG optional via `--pixels`
 - IO packages (no `[ui]`): `scuzz test` compiles and runs under `SCUZZ_TESTRT=1`, requiring exit 0
-- `scuzz check` typechecks without codegen; `--message-format=json` for agents/editors
+- `scuzz check` typechecks without codegen; `--message-format=json` for editors and tooling
 - `scuzz fuzz --iters N` / `scuzz fuzz --exhaust --depth N` on TestRuntime + Headless; `--replay repro.toml` on failure (requires `[ui]`)
 - Deterministic fakes: `TestRuntime` / `SCUZZ_TESTRT=1` for clock/random/FS/network/console in app binaries
 - Put non-determinism behind blessed `IO`; keep View construction pure
@@ -80,6 +80,7 @@ Lists: keep a `Signal.list`, render with `View.each(items)` (framework rebuilds 
 | `examples/counter` | `Signal.map` + `View.bindText` + button lambda + `Ui.run` |
 | `examples/todo` | `Signal.list` + `View.each`, Rename via `setAt`, Fs load/save |
 | `examples/nav` | `showWhen`, multi-page |
+| `examples/live` | Stay-open Window (`Ui.run`; q/Esc) |
 | `examples/impurity` | Clock / Random / Fs / Net / Sys console kit |
 
-Edit [vision.md](vision.md) when changing GC, Skia, effects, UI boundaries, or language direction.
+Full gallery: [README.md](../README.md#samples-gallery). Edit [vision.md](vision.md) when changing GC, Skia, effects, UI boundaries, or language direction.
