@@ -1,8 +1,8 @@
 # ScalUI app guide
 
-Short path from install to a Headless UI app. For product thesis, design locks, and direction see [vision.md](vision.md).
+Short path from install to a Headless UI or IO app. For product thesis, design locks, and direction see [vision.md](vision.md).
 
-## Happy path
+## Happy path (UI)
 
 ```bash
 ./scripts/install.sh          # packages Stage-1 + SDK → ~/.local/share/scalui; wrapper → ~/.local/bin/scalui
@@ -17,7 +17,18 @@ scalui fmt --check
 
 From a prebuilt tarball (no checkout build): `RELEASE_TGZ=scalui-<triple>.tar.gz ./scripts/install.sh`. Produce one with `./scripts/package_release.sh`.
 
-`scalui new --ui` scaffolds `scalui.toml`, a Counter-shaped `src/Main.scala`, and Headless-friendly defaults.
+`scalui new --ui` scaffolds `scalui.toml` with `[ui]`, a Counter-shaped `src/Main.scala`, and Headless-friendly defaults.
+
+## Happy path (IO)
+
+```bash
+scalui new mycli              # no --ui → IO hello (no [ui], Skia-free link)
+cd mycli
+scalui test                   # compile + SCALUI_TESTRT=1 exit-0 smoke
+scalui run
+```
+
+Console kit: `Sys.args(): IO[List]`, `Sys.readLine(): IO[String]` (EOF → `""`), `IO.println`. Under `SCALUI_TESTRT=1`, TestRuntime scripts stdin (`SCALUI_TESTRT_STDIN` or `su_testrt_stdin_feed`), optionally overrides argv, and captures println (still echoes to live stdout). See `examples/cli` and `examples/hello`.
 
 ## Kernel language (what you write)
 
@@ -25,7 +36,7 @@ From a prebuilt tarball (no checkout build): `RELEASE_TGZ=scalui-<triple>.tar.gz
 - **`for { x = e; y <- io } yield r`** as the primary binder (pure `=`, effect `<-`). Nested `for` in `if` / lambda arms when multi-bind is needed.
 - No `val` / statement blocks
 - Literals: ints, strings, `()`, `s"…$x…"`, list literals `[a, b]`
-- Blessed impurity only: `IO.println` / `sleep` / `fail` / `pure` / `race` / `both`, `Fs.*`, `Sys.*`, `Clock.*`, `Random.*`, `Net.httpGet`
+- Blessed impurity only: `IO.println` / `sleep` / `fail` / `pure` / `race` / `both`, `Fs.*`, `Sys.args` / `Sys.readLine` / `Sys.exec` / `Sys.getenv`, `Clock.*`, `Random.*`, `Net.httpGet`
 - No raw side effects in View build — taps may run `IO` via `su_io_unsafe_run`
 
 Product `fmt` / `build` / `run` / `test` / `check` / `fuzz` go through Stage 1/2 (`compiler-scalui`). Stage-0 Rust hosts the bootstrap compiler.
@@ -53,19 +64,22 @@ Lists: keep a `Signal.list`, render with `View.each(items)` (framework rebuilds 
 
 ## Tests and impurity
 
-- `scalui test` is Headless **structural** goldens (signal store + a11y dump); PNG optional via `--pixels`
+- `[ui]` packages: `scalui test` is Headless **structural** goldens (signal store + a11y dump); PNG optional via `--pixels`
+- IO packages (no `[ui]`): `scalui test` compiles and runs under `SCALUI_TESTRT=1`, requiring exit 0
 - `scalui check` typechecks without codegen; `--message-format=json` for agents/editors
-- `scalui fuzz --iters N` / `scalui fuzz --exhaust --depth N` on TestRuntime + Headless; `--replay repro.toml` on failure
-- Deterministic fakes: `TestRuntime` / `SCALUI_TESTRT=1` for clock/random/FS/network in app binaries
+- `scalui fuzz --iters N` / `scalui fuzz --exhaust --depth N` on TestRuntime + Headless; `--replay repro.toml` on failure (requires `[ui]`)
+- Deterministic fakes: `TestRuntime` / `SCALUI_TESTRT=1` for clock/random/FS/network/console in app binaries
 - Put non-determinism behind blessed `IO`; keep View construction pure
 
 ## Examples to read next
 
 | Example | Shows |
 | --- | --- |
+| `examples/hello` | IO println hello |
+| `examples/cli` | `Sys.args` + `Sys.readLine` |
 | `examples/counter` | `Signal.map` + `View.bindText` + button lambda + `Ui.run` |
 | `examples/todo` | `Signal.list` + `View.each`, Rename via `setAt`, Fs load/save |
 | `examples/nav` | `showWhen`, multi-page |
-| `examples/impurity` | Clock / Random / Fs / Net kit |
+| `examples/impurity` | Clock / Random / Fs / Net / Sys console kit |
 
 Edit [vision.md](vision.md) when changing GC, Skia, effects, UI boundaries, or language direction.

@@ -70,6 +70,9 @@ def mobileLinkFlags(mobile: String): String =
 def linkCmd(clang: String, ll: String, lib: String, skia: String, inc: String, skInc: String, embedder: String, mobile: String, exe: String): String =
   str4(clang, " ", ll, str4(" ", lib, " ", str4(skia, " -I", inc, str4(" -I", skInc, " -lpthread ", str5(embedderLinkFlags(embedder), " ", mobileLinkFlags(mobile), " -o ", exe)))))
 
+def linkCmdIo(clang: String, ll: String, lib: String, inc: String, exe: String): String =
+  str5(clang, " ", ll, " ", str4(lib, " -I", inc, str3(" -lpthread -o ", exe, "")))
+
 def runIfNeeded(exe: String, doRun: Int): IO[Unit] =
   if (doRun == 1) execOk(exe) else IO.pure(())
 
@@ -81,13 +84,13 @@ def compileProject(projectDir: String, outDir: String, doRun: Int): IO[Unit] =
   )
 
 def compileProjectWith(projectDir: String, outDir: String, doRun: Int, runtimeDir: String, clang: String): IO[Unit] =
-  Fs.read(pathJoin(projectDir, "scalui.toml")).flatMap(toml => compileAfterToml(projectDir, outDir, doRun, runtimeDir, clang, readTomlName(toml)))
+  Fs.read(pathJoin(projectDir, "scalui.toml")).flatMap(toml => compileAfterToml(projectDir, outDir, doRun, runtimeDir, clang, toml, readTomlName(toml)))
 
-def compileAfterToml(projectDir: String, outDir: String, doRun: Int, runtimeDir: String, clang: String, name: String): IO[Unit] =
+def compileAfterToml(projectDir: String, outDir: String, doRun: Int, runtimeDir: String, clang: String, toml: String, name: String): IO[Unit] =
   for {
     srcDir = pathJoin(projectDir, "src")
   } yield Fs.list(srcDir).flatMap(names =>
-  readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty()).flatMap(texts => compileAfterSources(projectDir, outDir, doRun, runtimeDir, clang, name, texts))
+  readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty()).flatMap(texts => compileAfterSources(projectDir, outDir, doRun, runtimeDir, clang, name, hasUiSection(toml), texts))
 )
 
 def checkProject(projectDir: String): IO[String] =
@@ -102,7 +105,10 @@ def checkProject(projectDir: String): IO[String] =
   )
 )
 
-def compileAfterSources(projectDir: String, outDir: String, doRun: Int, runtimeDir: String, clang: String, name: String, texts: List): IO[Unit] =
+def linkProject(clang: String, ll: String, lib: String, ffi: String, inc: String, embedder: String, mobile: String, exe: String, withUi: Int): IO[Unit] =
+  if (withUi == 0) execOk(linkCmdIo(clang, ll, lib, inc, exe)) else execOk(linkCmd(clang, ll, lib, pathJoin(ffi, "build/libsk_capi.a"), inc, pathJoin(ffi, "include"), embedder, mobile, exe))
+
+def compileAfterSources(projectDir: String, outDir: String, doRun: Int, runtimeDir: String, clang: String, name: String, withUi: Int, texts: List): IO[Unit] =
   for {
     prog = lowerProg(mergeSources(texts, emptyProg()))
     ty = typecheckProg(prog)
@@ -111,15 +117,13 @@ def compileAfterSources(projectDir: String, outDir: String, doRun: Int, runtimeD
     exe = pathJoin(outDir, name)
     lib = pathJoin(runtimeDir, "build/libscalui_rt.a")
     ffi = pathJoin(parentDir(runtimeDir), "ffi-skia")
-    skia = pathJoin(ffi, "build/libsk_capi.a")
     inc = pathJoin(runtimeDir, "include")
-    skInc = pathJoin(ffi, "include")
     embedder = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-desktop"), "build/libscalui_embedder.a")
     mobile = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-mobile"), "build/libscalui_mobile.a")
   } yield if (tyIsOk(ty) == 0) IO.fail(tyMsg(ty)) else Fs.mkdirs(outDir).flatMap(_ =>
   Fs.write(ll, ir).flatMap(_ =>
     buildRuntime(runtimeDir, clang).flatMap(_ =>
-      execOk(linkCmd(clang, ll, lib, skia, inc, skInc, embedder, mobile, exe)).flatMap(_ => runIfNeeded(exe, doRun))
+      linkProject(clang, ll, lib, ffi, inc, embedder, mobile, exe, withUi).flatMap(_ => runIfNeeded(exe, doRun))
     )
   )
 )

@@ -56,7 +56,7 @@ enum Commands {
         #[arg(long, default_value = "build")]
         out_dir: PathBuf,
     },
-    /// Run tests: Headless structural goldens (a11y + signal dump); optional PNG with --pixels
+    /// Run tests: Headless structural goldens for [ui] packages; IO smoke (TESTRT exit 0) otherwise
     Test {
         #[arg(default_value = ".")]
         path: PathBuf,
@@ -88,7 +88,7 @@ enum Commands {
         name: String,
         #[arg(long, default_value = ".")]
         path: PathBuf,
-        /// Scaffold a Headless UI sample instead of IO hello
+        /// Scaffold a Headless UI sample instead of an IO hello
         #[arg(long)]
         ui: bool,
     },
@@ -205,7 +205,11 @@ fn real_main() -> Result<ExitCode> {
             if project_dir.join("scalui.toml").is_file() {
                 let out = build(&path, &PathBuf::from("build"), false)?;
                 eprintln!("project compile smoke ok");
-                run_goldens(&project_dir, &out.executable, update, pixels)?;
+                if out.manifest.ui.is_none() {
+                    run_io_smoke(&out.executable)?;
+                } else {
+                    run_goldens(&project_dir, &out.executable, update, pixels)?;
+                }
             }
             eprintln!("scalui test ok");
             Ok(ExitCode::SUCCESS)
@@ -286,7 +290,10 @@ main = "Main"
   IO.println("Hello, ScalUI!").flatMap(_ => IO.println("ready."))
 "#,
                 )?;
-                eprintln!("created {}", dir.display());
+                eprintln!(
+                    "created {} — next: scalui test && scalui run",
+                    dir.display()
+                );
             }
             Ok(ExitCode::SUCCESS)
         }
@@ -479,6 +486,18 @@ fn apply_ui_env(
             }
         }
     }
+}
+
+fn run_io_smoke(exe: &Path) -> Result<()> {
+    let status = Command::new(exe)
+        .env("SCALUI_TESTRT", "1")
+        .status()
+        .with_context(|| format!("IO smoke {}", exe.display()))?;
+    if !status.success() {
+        bail!("IO smoke failed: {}", exe.display());
+    }
+    eprintln!("IO smoke ok");
+    Ok(())
 }
 
 fn run_goldens(project_dir: &Path, exe: &Path, update: bool, pixels: bool) -> Result<()> {

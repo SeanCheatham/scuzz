@@ -64,6 +64,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @su_fs_list(ptr)").unwrap();
     writeln!(out, "declare ptr @su_fs_mkdirs(ptr)").unwrap();
     writeln!(out, "declare ptr @su_sys_args()").unwrap();
+    writeln!(out, "declare ptr @su_sys_read_line()").unwrap();
     writeln!(out, "declare ptr @su_sys_exec(ptr)").unwrap();
     writeln!(out, "declare ptr @su_sys_getenv(ptr)").unwrap();
     writeln!(out, "declare ptr @su_clock_real_time()").unwrap();
@@ -1750,6 +1751,10 @@ fn emit_call(
         }
         "Sys.args" => {
             writeln!(code, "  %{prefix}_v = call ptr @su_sys_args()").unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Sys.readLine" => {
+            writeln!(code, "  %{prefix}_v = call ptr @su_sys_read_line()").unwrap();
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Sys.exec" => {

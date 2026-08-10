@@ -59,7 +59,7 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
         named.push((label, text));
     }
 
-    let fingerprint = fingerprint_sources(&named, &manifest.package.name);
+    let fingerprint = fingerprint_sources(&named, &manifest.package.name, manifest.ui.is_some());
 
     // Join must use a relative file name — absolute package names would replace out_dir.
     let exe_name = Path::new(&manifest.package.name)
@@ -102,46 +102,51 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
     build_runtime(&opts.runtime_dir, &opts.clang)?;
 
     let lib = opts.runtime_dir.join("build/libscalui_rt.a");
-    let ffi_skia_dir = opts
-        .runtime_dir
-        .parent()
-        .map(|p| p.join("ffi-skia"))
-        .unwrap_or_else(|| PathBuf::from("crates/ffi-skia"));
-    let skia_lib = ffi_skia_dir.join("build/libsk_capi.a");
     let include = opts.runtime_dir.join("include");
-    let skia_include = ffi_skia_dir.join("include");
+    let with_ui = manifest.ui.is_some();
 
-    // Optional desktop (X11) + mobile host shells. Link when libs exist.
-    let crates_dir = opts
-        .runtime_dir
-        .parent()
-        .map(|p| p.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("crates"));
-    let embedder_dir = crates_dir.join("embedder-desktop");
-    let mobile_dir = crates_dir.join("embedder-mobile");
-    let embedder_lib = embedder_dir.join("build/libscalui_embedder.a");
-    let mobile_lib = mobile_dir.join("build/libscalui_mobile.a");
     let mut link = Command::new(&opts.clang);
-    link.arg(&ll_path)
-        .arg(&lib)
-        .arg(&skia_lib)
-        .arg(format!("-I{}", include.display()))
-        .arg(format!("-I{}", skia_include.display()))
-        .arg("-lpthread");
-    // Strong embedder symbols must override weak stubs in libscalui_rt.a.
-    if embedder_lib.is_file() {
-        push_force_load(&mut link, &embedder_lib);
-        if cfg!(target_os = "linux") {
-            link.arg("-lX11");
-        } else if cfg!(target_os = "macos") {
-            link.arg("-framework").arg("Cocoa");
-            link.arg("-lobjc");
+    link.arg(&ll_path).arg(&lib).arg(format!("-I{}", include.display()));
+
+    if with_ui {
+        let ffi_skia_dir = opts
+            .runtime_dir
+            .parent()
+            .map(|p| p.join("ffi-skia"))
+            .unwrap_or_else(|| PathBuf::from("crates/ffi-skia"));
+        let skia_lib = ffi_skia_dir.join("build/libsk_capi.a");
+        let skia_include = ffi_skia_dir.join("include");
+        link.arg(&skia_lib)
+            .arg(format!("-I{}", skia_include.display()));
+
+        // Optional desktop (X11) + mobile host shells. Link when libs exist.
+        let crates_dir = opts
+            .runtime_dir
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("crates"));
+        let embedder_lib = crates_dir
+            .join("embedder-desktop")
+            .join("build/libscalui_embedder.a");
+        let mobile_lib = crates_dir
+            .join("embedder-mobile")
+            .join("build/libscalui_mobile.a");
+        // Strong embedder symbols must override weak stubs in libscalui_rt.a.
+        if embedder_lib.is_file() {
+            push_force_load(&mut link, &embedder_lib);
+            if cfg!(target_os = "linux") {
+                link.arg("-lX11");
+            } else if cfg!(target_os = "macos") {
+                link.arg("-framework").arg("Cocoa");
+                link.arg("-lobjc");
+            }
+        }
+        if mobile_lib.is_file() {
+            push_force_load(&mut link, &mobile_lib);
         }
     }
-    if mobile_lib.is_file() {
-        push_force_load(&mut link, &mobile_lib);
-    }
-    link.arg("-o").arg(&exe);
+
+    link.arg("-lpthread").arg("-o").arg(&exe);
     let status = link.status().with_context(|| "spawning clang")?;
 
     if !status.success() {
@@ -168,9 +173,14 @@ fn push_force_load(link: &mut Command, archive: &Path) {
     }
 }
 
-fn fingerprint_sources(sources: &[(String, String)], package: &str) -> String {
+fn fingerprint_sources(sources: &[(String, String)], package: &str, with_ui: bool) -> String {
     let mut h = DefaultHasher::new();
     package.hash(&mut h);
+    if with_ui {
+        "ui=1".hash(&mut h);
+    } else {
+        "ui=0".hash(&mut h);
+    }
     for (name, text) in sources {
         name.hash(&mut h);
         text.hash(&mut h);

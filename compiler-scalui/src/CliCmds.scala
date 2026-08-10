@@ -45,7 +45,7 @@ def writeNewUi(dir: String, name: String): IO[Unit] =
 def writeNewHello(dir: String, name: String): IO[Unit] =
   Fs.mkdirs(pathJoin(dir, "src")).flatMap(_ =>
     Fs.write(pathJoin(dir, "scalui.toml"), helloToml(name)).flatMap(_ =>
-      Fs.write(pathJoin(dir, "src/Main.scala"), helloMainTemplate()).flatMap(_ => IO.println(str3("created ", dir, "")))
+      Fs.write(pathJoin(dir, "src/Main.scala"), helloMainTemplate()).flatMap(_ => IO.println(str3("created ", dir, " — next: scalui test && scalui run")))
     )
   )
 
@@ -59,10 +59,16 @@ def cmdTest(projectDir: String, update: Int, runtimeTests: Int, pixels: Int): IO
   resolveRuntimeEnv("", projectDir).flatMap(runtimeDir =>
     maybeRuntimeTests(runtimeDir, runtimeTests).flatMap(_ =>
       compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
-        execOk(str5(updateFlagEnv(update), pixelsFlagEnv(pixels), "bash ", pathJoin(pathJoin(parentDir(parentDir(runtimeDir)), "scripts"), "run_goldens.sh"), Str.concat(" ", projectDir))).flatMap(_ => IO.println("scalui test ok"))
+        Fs.read(pathJoin(projectDir, "scalui.toml")).flatMap(toml => afterTestCompile(projectDir, toml, update, pixels, runtimeDir))
       )
     )
   )
+
+def afterTestCompile(projectDir: String, toml: String, update: Int, pixels: Int, runtimeDir: String): IO[Unit] =
+  if (hasUiSection(toml) == 0) runIoSmoke(projectDir, readTomlName(toml)).flatMap(_ => IO.println("scalui test ok")) else execOk(str5(updateFlagEnv(update), pixelsFlagEnv(pixels), "bash ", pathJoin(pathJoin(parentDir(parentDir(runtimeDir)), "scripts"), "run_goldens.sh"), Str.concat(" ", projectDir))).flatMap(_ => IO.println("scalui test ok"))
+
+def runIoSmoke(projectDir: String, name: String): IO[Unit] =
+  execOk(str3("SCALUI_TESTRT=1 ", pathJoin(pathJoin(projectDir, "build"), name), ""))
 
 def maybeRuntimeTests(runtimeDir: String, runtimeTests: Int): IO[Unit] =
   if (runtimeTests == 0) IO.pure(()) else execOk(str3("make -C ", runtimeDir, " test")).flatMap(_ => execOk(str3("make -C ", pathJoin(parentDir(runtimeDir), "ffi-skia"), " test")))

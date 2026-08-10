@@ -26,7 +26,7 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 | Binary format | Native ELF/Mach-O/PE via LLVM | JVM classfiles / JARs |
 | Dependencies | `scalui.toml` path/git/versioned artifacts we host | Maven Central / Ivy |
 | Effects | Builtin `IO` / `Resource` / concurrent kit + Clock/Random/Fs/Net/Sys | cats-effect runtime, ZIO, Future-as-default |
-| Test interpreters | TestRuntime fakes; `SCALUI_TESTRT=1` | Wall-clock-only harnesses; ad-hoc FFI mocks |
+| Test interpreters | TestRuntime fakes (clock/random/FS/net + argv/stdin/println capture); `SCALUI_TESTRT=1` | Wall-clock-only harnesses; ad-hoc FFI mocks |
 | UI | `View` + `Ui` + Skia (`sk_capi`; Impeller deferred) | Swing, JavaFX, Compose Multiplatform, Flutter widgets |
 
 ## Platforms (headless-first)

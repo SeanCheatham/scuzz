@@ -253,9 +253,10 @@ SuIo *su_fs_write(SuString *path, SuString *contents);
 SuIo *su_fs_list(SuString *path);
 SuIo *su_fs_mkdirs(SuString *path);
 
-/* Process / args / env for Stage-1 CLI + clang (console out = IO.println) */
+/* Process / args / env / console for Stage-1 CLI + clang (console out = IO.println) */
 void su_sys_set_args(int argc, char **argv);
 SuIo *su_sys_args(void);
+SuIo *su_sys_read_line(void); /* IO[String]: one stdin line; EOF → "" */
 SuIo *su_sys_exec(SuString *cmd);
 SuIo *su_sys_getenv(SuString *key);
 
@@ -270,7 +271,7 @@ SuIo *su_random_next_int(int64_t bound); /* IO[Int] in [0, bound) */
 SuIo *su_net_http_get(SuString *url); /* IO[String] response body */
 
 /* TestRuntime — fake interpreters for deterministic scalui test / unit tests */
-void su_testrt_install(void); /* fake clock+rng+mem FS+stub net */
+void su_testrt_install(void); /* fake clock+rng+mem FS+stub net+sys/console */
 void su_testrt_reset(void);   /* restore live interpreters */
 
 void su_testrt_clock_install(int64_t start_ms);
@@ -294,6 +295,19 @@ void su_testrt_net_stub(const char *url, const char *body);
 int su_testrt_net_is_fake(void);
 SuIo *su_testrt_net_http_get(SuString *url);
 
+/* Console fakes: scripted stdin, optional argv override, println capture (+ echo). */
+void su_testrt_sys_install(void);
+void su_testrt_sys_reset_live(void);
+int su_testrt_sys_is_fake(void);
+void su_testrt_sys_set_args(int argc, char **argv); /* user args only; overrides live */
+int su_testrt_sys_has_args_override(void);
+SuList *su_testrt_sys_args_list(void); /* snapshot of override (or empty) */
+void su_testrt_stdin_feed(const char *text); /* newline-separated lines */
+SuIo *su_testrt_sys_read_line(void);
+void su_testrt_stdout_reset(void);
+void su_testrt_stdout_append(const char *line); /* appends line + '\n' */
+const char *su_testrt_stdout_cstr(void);
+
 /* Entrypoint helper used by @main codegen */
 int su_runtime_main(SuIo *program);
 int su_runtime_main_args(SuIo *program, int argc, char **argv);
@@ -301,7 +315,7 @@ int su_runtime_main_args(SuIo *program, int argc, char **argv);
 /* Blessed effects kit smoke (Ref/Deferred/Queue/race/sleep/errors) */
 SuIo *su_effects_run_kit(void);
 
-/* Impurity kit + TestRuntime (Clock/Random/Fs/Net fakes) */
+/* Impurity kit + TestRuntime (Clock/Random/Fs/Net/Sys console fakes) */
 SuIo *su_impurity_run_kit(void);
 
 #ifdef __cplusplus
