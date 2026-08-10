@@ -82,6 +82,32 @@ jobs:
           test -f examples/nav/build/snapshot.png
           cargo run -p scalui -- test examples/nav
 
+      - name: Deterministic fuzz (bounded) + repro replay
+        run: |
+          cargo run -p scalui -- fuzz --iters 16 examples/counter
+          cargo run -p scalui -- fuzz --iters 16 examples/todo
+          rm -rf /tmp/scalui-fuzzbug
+          cargo run -p scalui -- new --ui --path /tmp scalui-fuzzbug
+          cat > /tmp/scalui-fuzzbug/src/Main.scala <<'EOF'
+          @main def main: IO[Unit] =
+            for {
+              count = Signal.int(0)
+              root = View.column(
+                View.text("Bug"),
+                View.textSignal(count, "count = "),
+                View.row(View.button("boom", _ => Fs.read("/definitely/missing")))
+              )
+              _ <- Ui.run(root)
+            } yield ()
+          EOF
+          if cargo run -p scalui -- fuzz --iters 8 /tmp/scalui-fuzzbug; then
+            echo "fuzz should have found the failure" && exit 1
+          fi
+          test -f /tmp/scalui-fuzzbug/build/fuzz/repro.toml
+          if cargo run -p scalui -- fuzz /tmp/scalui-fuzzbug --replay /tmp/scalui-fuzzbug/build/fuzz/repro.toml; then
+            echo "replay should have reproduced the failure" && exit 1
+          fi
+
       - name: v0 new --ui happy path
         run: |
           rm -rf /tmp/scalui-v0app

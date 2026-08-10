@@ -11,7 +11,7 @@ Edit this file when a decision or next-step ordering changes. No separate “ADR
 - **Language**: purposeful Scala-inspired subset for UI apps and native codegen, with **built-in effect/IO** (Cats Effect spirit, not a cats port). Aim: denser expr dialect (`for` as primary binder) — see [Language direction](#language-direction) below.
 - **Runtime**: custom native (LLVM). No JVM, no Java interop, no classpath/Maven.
 - **UI**: one design language + Skia, as a **`Ui` effect** with Headless/Window/Mobile interpreters.
-- **Tooling**: one CLI (`scalui`) for compile, link, assets, hot reload, packaging; later deterministic `scalui fuzz`.
+- **Tooling**: one CLI (`scalui`) for compile, link, assets, hot reload, packaging, deterministic `scalui fuzz`.
 - **Bootstrap**: self-host is a hard goal. Stage-0 (Rust) exists only to get there.
 
 Upstream Scala Native is a *reference*, not a dependency. Divergence is intentional.
@@ -113,21 +113,20 @@ Clear-dense, not cryptic-dense: nested declarative `View`s (`View.column(child, 
 
 Keep purity checkable (pure `A` vs `IO` vs session), total expr core, signals as an explicit store, immutable data by default, errors as values. Spec **signal store + View/a11y dump**, not Skia pixels. Defer dependent types and runtime-heap proofs.
 
-### `scalui fuzz` (aspirational)
+### `scalui fuzz` (v0 slice landed)
 
 Deterministic TestRuntime + Headless event scripts:
 
 ```text
-(program, seed/config, event script) → trace + signals + view dump
+(program, seed/config, event script) → exit code + signal store + a11y view dump
 ```
 
 ```bash
-scalui fuzz                       # typed random scripts until fail / timeout
-scalui fuzz --exhaust --depth N   # bounded systematic search
-scalui fuzz --replay repro.toml
+scalui fuzz [--iters N] [--seed S]   # typed random scripts until fail / N scripts
+scalui fuzz --replay repro.toml      # deterministic replay of a recorded failure
 ```
 
-Oracles: panic/`SuError` → invariants → structural dumps (PNG last). Exhaustion is **bounded**, not infinite-state. Requires stable tap ids/labels, `pump` as time, no hidden nondeterminism.
+Scripts are a line protocol — `tap <n>` / `text <s>` / `pump <k>` — played by the runtime (`SCALUI_UI_SCRIPT`) across `pump` boundaries; on exit it writes the signal store + a11y view dump (`SCALUI_FUZZ_DUMP`). The CLI probes the a11y dump for the typed event surface (buttons in scan order, text fields), generates seeded scripts (SplitMix64), and writes `repro.toml` (seed + events) on failure. Oracles: panic/`SuError` exit → structural dumps (PNG last). `--exhaust --depth N` (bounded systematic search) is still open. Requires stable tap order, `pump` as time, no hidden nondeterminism.
 
 ## Roadmap
 
