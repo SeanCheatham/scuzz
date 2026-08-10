@@ -124,12 +124,24 @@ static SuIo *after_real(void *value, void *env) {
   return su_io_flatmap(label_i64("real:", su_unbox_i64(value)), do_mono, NULL);
 }
 
-SuIo *su_impurity_run_kit(void) {
+static void *impurity_unit_thunk(void *env) {
+  (void)env;
+  return NULL;
+}
+
+/* Install/stub when the returned IO runs (after @main TESTRT install). */
+static SuIo *impurity_boot(void *value, void *env) {
   char *argv[] = {"alpha", "beta"};
+  (void)value;
+  (void)env;
   su_testrt_install();
   su_testrt_net_stub("http://example.test/v1", "stub-body");
   su_testrt_sys_set_args(2, argv);
   su_testrt_stdin_feed("hello-line\n");
   su_testrt_stdout_reset();
   return su_io_flatmap(su_clock_real_time(), after_real, NULL);
+}
+
+SuIo *su_impurity_run_kit(void) {
+  return su_io_flatmap(su_io_delay(impurity_unit_thunk, NULL), impurity_boot, NULL);
 }
