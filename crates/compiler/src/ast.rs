@@ -2,7 +2,7 @@
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
-    /// Dotted package path, e.g. `["scalui", "compiler"]`.
+    /// Dotted package path, e.g. `["scuzz", "compiler"]`.
     pub package: Vec<String>,
     pub enums: Vec<EnumDef>,
     pub defs: Vec<FunDef>,

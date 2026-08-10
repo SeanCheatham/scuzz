@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Headless structural goldens (a11y + signal dump) for a ScalUI project.
+# Headless structural goldens (a11y + signal dump) for a Scuzz Lang project.
 # Primary artifacts: goldens/{name}.dump and {name}_after_tap.dump
-# Optional PNG compare when SCALUI_PIXEL_GOLDENS=1 (or --pixels via CLI).
-# Empty dump set seeds structural goldens. SCALUI_UPDATE_GOLDENS=1 rewrites.
+# Optional PNG compare when SCUZZ_PIXEL_GOLDENS=1 (or --pixels via CLI).
+# Empty dump set seeds structural goldens. SCUZZ_UPDATE_GOLDENS=1 rewrites.
 set -euo pipefail
 project="${1:-.}"
-toml="$project/scalui.toml"
+toml="$project/scuzz.toml"
 goldens="$project/goldens"
 [[ -f "$toml" ]] || exit 0
 [[ -d "$goldens" ]] || { echo "note: no goldens/"; exit 0; }
@@ -26,26 +26,26 @@ run_snap() {
   local actual_dump="$2"
   shift 2
   local todo_path
-  todo_path="$(mktemp "${TMPDIR:-/tmp}/scalui-todo.XXXXXX")"
+  todo_path="$(mktemp "${TMPDIR:-/tmp}/scuzz-todo.XXXXXX")"
   rm -f "$todo_path"
-  env SCALUI_UI_RUNTIME=headless \
-      SCALUI_SNAPSHOT_PATH="$actual_png" \
-      SCALUI_FUZZ_DUMP="$actual_dump" \
-      SCALUI_UI_WIDTH="$w" \
-      SCALUI_UI_HEIGHT="$h" \
-      SCALUI_TODO_PATH="$todo_path" \
+  env SCUZZ_UI_RUNTIME=headless \
+      SCUZZ_SNAPSHOT_PATH="$actual_png" \
+      SCUZZ_FUZZ_DUMP="$actual_dump" \
+      SCUZZ_UI_WIDTH="$w" \
+      SCUZZ_UI_HEIGHT="$h" \
+      SCUZZ_TODO_PATH="$todo_path" \
       "$@" \
       "$exe"
   rm -f "$todo_path"
 }
 
 tap_env() {
-  local args=("SCALUI_UI_TAP=1")
+  local args=("SCUZZ_UI_TAP=1")
   if [[ -n "${tap_n:-}" ]]; then
-    args+=("SCALUI_UI_TAP_N=$tap_n")
+    args+=("SCUZZ_UI_TAP_N=$tap_n")
   fi
   if [[ -n "${tap_text:-}" ]]; then
-    args+=("SCALUI_UI_TEXT=$tap_text")
+    args+=("SCUZZ_UI_TEXT=$tap_text")
   fi
   echo "${args[@]}"
 }
@@ -59,7 +59,7 @@ seed_goldens() {
   # shellcheck disable=SC2046
   run_snap "$tap_png" "$tap_dump" $(tap_env)
   echo "seeded goldens: ${name}.dump ${name}_after_tap.dump"
-  if [[ "${SCALUI_PIXEL_GOLDENS:-0}" == "1" ]]; then
+  if [[ "${SCUZZ_PIXEL_GOLDENS:-0}" == "1" ]]; then
     cp "$base_png" "$goldens/${name}.png"
     cp "$tap_png" "$goldens/${name}_after_tap.png"
     echo "seeded pixel goldens: ${name}.png ${name}_after_tap.png"
@@ -68,8 +68,8 @@ seed_goldens() {
 
 shopt -s nullglob
 dumps=("$goldens"/*.dump)
-update="${SCALUI_UPDATE_GOLDENS:-0}"
-pixels="${SCALUI_PIXEL_GOLDENS:-0}"
+update="${SCUZZ_UPDATE_GOLDENS:-0}"
+pixels="${SCUZZ_PIXEL_GOLDENS:-0}"
 
 if [[ ${#dumps[@]} -eq 0 ]]; then
   seed_goldens

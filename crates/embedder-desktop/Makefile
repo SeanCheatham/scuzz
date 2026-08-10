@@ -17,12 +17,12 @@ ifeq ($(UNAME_S),Linux)
 SRC := src/x11_present.c
 OBJ := build/x11_present.o
 
-build/%.o: src/%.c include/scalui_embedder.h | build
+build/%.o: src/%.c include/scuzz_embedder.h | build
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
-lib: build/libscalui_embedder.a
+lib: build/libscuzz_embedder.a
 
-build/libscalui_embedder.a: $(OBJ)
+build/libscuzz_embedder.a: $(OBJ)
 	ar rcs $@ $(OBJ)
 
 test: lib
@@ -33,12 +33,12 @@ else ifeq ($(UNAME_S),Darwin)
 SRC := src/macos_present.m
 OBJ := build/macos_present.o
 
-build/%.o: src/%.m include/scalui_embedder.h | build
+build/%.o: src/%.m include/scuzz_embedder.h | build
 	$(CC) $(OBJCFLAGS) $(INCLUDES) -c $< -o $@
 
-lib: build/libscalui_embedder.a
+lib: build/libscuzz_embedder.a
 
-build/libscalui_embedder.a: $(OBJ)
+build/libscuzz_embedder.a: $(OBJ)
 	ar rcs $@ $(OBJ)
 
 test: lib

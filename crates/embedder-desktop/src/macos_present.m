@@ -1,4 +1,4 @@
-#include "scalui_embedder.h"
+#include "scuzz_embedder.h"
 
 #import <Cocoa/Cocoa.h>
 #import <CoreGraphics/CoreGraphics.h>
@@ -14,13 +14,13 @@ static int g_ready;
 static int g_app_ready;
 static int g_user_quit;
 
-int su_embedder_available(void) {
+int sz_embedder_available(void) {
   /* GUI session with a main display (SSH/headless Mac returns 0). */
   return CGMainDisplayID() != kCGNullDirectDisplay ? 1 : 0;
 }
 
-int su_embedder_alive(void) {
-  return !g_user_quit && su_embedder_available();
+int sz_embedder_alive(void) {
+  return !g_user_quit && sz_embedder_available();
 }
 
 static void ensure_app(void) {
@@ -33,7 +33,7 @@ static void ensure_app(void) {
 
 static void mark_user_quit(void) {
   g_user_quit = 1;
-  su_embedder_shutdown();
+  sz_embedder_shutdown();
 }
 
 static int ensure_window(const char *title, int width, int height) {
@@ -41,7 +41,7 @@ static int ensure_window(const char *title, int width, int height) {
     if (g_ready && g_w == width && g_h == height)
       return 1;
 
-    su_embedder_shutdown();
+    sz_embedder_shutdown();
     g_user_quit = 0;
     ensure_app();
 
@@ -53,12 +53,12 @@ static int ensure_window(const char *title, int width, int height) {
                                           backing:NSBackingStoreBuffered
                                             defer:NO];
     if (!g_win) {
-      fprintf(stderr, "scalui embedder: cannot create NSWindow\n");
+      fprintf(stderr, "scuzz embedder: cannot create NSWindow\n");
       return 0;
     }
 
     NSString *nsTitle =
-        title ? [NSString stringWithUTF8String:title] : @"ScalUI";
+        title ? [NSString stringWithUTF8String:title] : @"Scuzz Lang";
     [g_win setTitle:nsTitle];
     [g_win setReleasedWhenClosed:NO];
 
@@ -72,12 +72,12 @@ static int ensure_window(const char *title, int width, int height) {
     g_w = width;
     g_h = height;
     g_ready = 1;
-    fprintf(stderr, "scalui embedder: Cocoa window %dx%d\n", width, height);
+    fprintf(stderr, "scuzz embedder: Cocoa window %dx%d\n", width, height);
     return 1;
   }
 }
 
-int su_embedder_present(const char *title, int width, int height,
+int sz_embedder_present(const char *title, int width, int height,
                         const uint8_t *rgba, size_t nbytes) {
   size_t need;
   int quit = 0;
@@ -89,7 +89,7 @@ int su_embedder_present(const char *title, int width, int height,
   need = (size_t)width * (size_t)height * 4;
   if (nbytes < need)
     return 0;
-  if (!su_embedder_available())
+  if (!sz_embedder_available())
     return 0;
   if (!ensure_window(title, width, height))
     return 0;
@@ -107,7 +107,7 @@ int su_embedder_present(const char *title, int width, int height,
                      bytesPerRow:(NSInteger)width * 4
                     bitsPerPixel:32];
     if (!rep || ![rep bitmapData]) {
-      fprintf(stderr, "scalui embedder: bitmap alloc failed\n");
+      fprintf(stderr, "scuzz embedder: bitmap alloc failed\n");
       return 0;
     }
     memcpy([rep bitmapData], rgba, need);
@@ -149,7 +149,7 @@ int su_embedder_present(const char *title, int width, int height,
   return 1;
 }
 
-void su_embedder_shutdown(void) {
+void sz_embedder_shutdown(void) {
   @autoreleasepool {
     if (g_win) {
       [g_win orderOut:nil];

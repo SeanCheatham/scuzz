@@ -1,26 +1,26 @@
-#include "scalui_rt.h"
+#include "scuzz_rt.h"
 
-SuDeferred *su_deferred_make(void) {
-  return (SuDeferred *)su_alloc_zero(sizeof(SuDeferred));
+SzDeferred *sz_deferred_make(void) {
+  return (SzDeferred *)sz_alloc_zero(sizeof(SzDeferred));
 }
 
-void su_deferred_free(SuDeferred *d) {
+void sz_deferred_free(SzDeferred *d) {
   if (!d)
     return;
   if (d->completed && !d->ok && d->error)
-    su_error_free(d->error);
-  su_free(d);
+    sz_error_free(d->error);
+  sz_free(d);
 }
 
 static void *deferred_empty_thunk(void *env) {
   (void)env;
-  return su_deferred_make();
+  return sz_deferred_make();
 }
 
-SuIo *su_deferred_empty(void) { return su_io_delay(deferred_empty_thunk, NULL); }
+SzIo *sz_deferred_empty(void) { return sz_io_delay(deferred_empty_thunk, NULL); }
 
 typedef struct DefCompleteEnv {
-  SuDeferred *d;
+  SzDeferred *d;
   void *value;
 } DefCompleteEnv;
 
@@ -31,26 +31,26 @@ static void *deferred_complete_thunk(void *env) {
     e->d->ok = 1;
     e->d->value = e->value;
   }
-  su_free(e);
+  sz_free(e);
   return NULL;
 }
 
-SuIo *su_deferred_complete(SuDeferred *d, void *value) {
+SzIo *sz_deferred_complete(SzDeferred *d, void *value) {
   if (!d)
-    su_panic("su_deferred_complete(null)");
-  DefCompleteEnv *e = (DefCompleteEnv *)su_alloc(sizeof(DefCompleteEnv));
+    sz_panic("sz_deferred_complete(null)");
+  DefCompleteEnv *e = (DefCompleteEnv *)sz_alloc(sizeof(DefCompleteEnv));
   e->d = d;
   e->value = value;
-  return su_io_delay(deferred_complete_thunk, e);
+  return sz_io_delay(deferred_complete_thunk, e);
 }
 
-SuIo *su_deferred_complete_cstr(SuDeferred *d, const char *value) {
-  return su_deferred_complete(d, su_string_from_cstr(value ? value : ""));
+SzIo *sz_deferred_complete_cstr(SzDeferred *d, const char *value) {
+  return sz_deferred_complete(d, sz_string_from_cstr(value ? value : ""));
 }
 
 typedef struct DefFailEnv {
-  SuDeferred *d;
-  SuError *err;
+  SzDeferred *d;
+  SzError *err;
 } DefFailEnv;
 
 static void *deferred_fail_thunk(void *env) {
@@ -60,36 +60,36 @@ static void *deferred_fail_thunk(void *env) {
     e->d->ok = 0;
     e->d->error = e->err;
   } else {
-    su_error_free(e->err);
+    sz_error_free(e->err);
   }
-  su_free(e);
+  sz_free(e);
   return NULL;
 }
 
-SuIo *su_deferred_fail(SuDeferred *d, SuError *err) {
+SzIo *sz_deferred_fail(SzDeferred *d, SzError *err) {
   if (!d)
-    su_panic("su_deferred_fail(null)");
-  DefFailEnv *e = (DefFailEnv *)su_alloc(sizeof(DefFailEnv));
+    sz_panic("sz_deferred_fail(null)");
+  DefFailEnv *e = (DefFailEnv *)sz_alloc(sizeof(DefFailEnv));
   e->d = d;
-  e->err = err ? err : su_error_new(1, "deferred fail");
-  return su_io_delay(deferred_fail_thunk, e);
+  e->err = err ? err : sz_error_new(1, "deferred fail");
+  return sz_io_delay(deferred_fail_thunk, e);
 }
 
-static SuIo *deferred_get_cont(void *value, void *env) {
+static SzIo *deferred_get_cont(void *value, void *env) {
   (void)value;
-  SuDeferred *d = (SuDeferred *)env;
+  SzDeferred *d = (SzDeferred *)env;
   if (!d->completed)
-    return su_io_fail_cstr("deferred incomplete");
+    return sz_io_fail_cstr("deferred incomplete");
   if (!d->ok)
-    return su_io_fail(d->error ? su_error_new(d->error->code,
-                                              su_string_cstr(d->error->message))
-                               : su_error_new(1, "deferred failed"));
-  return su_io_pure(d->value);
+    return sz_io_fail(d->error ? sz_error_new(d->error->code,
+                                              sz_string_cstr(d->error->message))
+                               : sz_error_new(1, "deferred failed"));
+  return sz_io_pure(d->value);
 }
 
-SuIo *su_deferred_get(SuDeferred *d) {
+SzIo *sz_deferred_get(SzDeferred *d) {
   if (!d)
-    su_panic("su_deferred_get(null)");
+    sz_panic("sz_deferred_get(null)");
   /* delay + cont so it participates in flatMap chains cleanly */
-  return su_io_flatmap(su_io_pure(NULL), deferred_get_cont, d);
+  return sz_io_flatmap(sz_io_pure(NULL), deferred_get_cont, d);
 }

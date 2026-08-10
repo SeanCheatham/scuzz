@@ -13,17 +13,17 @@ all: lib
 build:
 	mkdir -p build
 
-build/%.o: src/%.c include/scalui_mobile.h | build
+build/%.o: src/%.c include/scuzz_mobile.h | build
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
-lib: build/libscalui_mobile.a
+lib: build/libscuzz_mobile.a
 
-build/libscalui_mobile.a: $(OBJ)
+build/libscuzz_mobile.a: $(OBJ)
 	ar rcs $@ $(OBJ)
 
-# Host shell is gated by SCALUI_MOBILE_SHELL; available() is 0 without it.
+# Host shell is gated by SCUZZ_MOBILE_SHELL; available() is 0 without it.
 test: lib
-	@echo "embedder-mobile: lib ok (host shell requires SCALUI_MOBILE_SHELL=1)"
+	@echo "embedder-mobile: lib ok (host shell requires SCUZZ_MOBILE_SHELL=1)"
 
 clean:
 	rm -rf build

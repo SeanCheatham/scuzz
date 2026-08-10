@@ -32,37 +32,37 @@ jobs:
           make -C crates/embedder-mobile lib CC=clang
 
       - name: Build CLI
-        run: cargo build -p scalui
+        run: cargo build -p scuzz
 
       - name: Compiler unit tests
-        run: cargo test -p scalui-compiler
+        run: cargo test -p scuzz-compiler
 
       - name: Hello world → LLVM → native
         run: |
-          cargo run -p scalui -- build --full examples/hello
+          cargo run -p scuzz -- build --full examples/hello
           ./examples/hello/build/hello | tee /tmp/hello.out
-          grep -q "Hello, ScalUI!" /tmp/hello.out
+          grep -q "Hello, Scuzz!" /tmp/hello.out
           grep -q "ready." /tmp/hello.out
 
       - name: Effects + ADT + FS + impurity + incremental build
         run: |
-          cargo run -p scalui -- run examples/effects | tee /tmp/effects.out
+          cargo run -p scuzz -- run examples/effects | tee /tmp/effects.out
           grep -q "ref-ok" /tmp/effects.out
           grep -q "both-ok" /tmp/effects.out
-          cargo run -p scalui -- run examples/adt | tee /tmp/adt.out
+          cargo run -p scuzz -- run examples/adt | tee /tmp/adt.out
           grep -q "adt:red" /tmp/adt.out
-          cargo run -p scalui -- run examples/fs | tee /tmp/fs.out
+          cargo run -p scuzz -- run examples/fs | tee /tmp/fs.out
           grep -q "fs:fs-note" /tmp/fs.out
-          cargo run -p scalui -- run examples/clock | tee /tmp/clock.out
+          cargo run -p scuzz -- run examples/clock | tee /tmp/clock.out
           grep -q "real:" /tmp/clock.out
           grep -q "mono:" /tmp/clock.out
-          cargo run -p scalui -- run examples/impurity | tee /tmp/impurity.out
+          cargo run -p scuzz -- run examples/impurity | tee /tmp/impurity.out
           grep -q "impurity-ok" /tmp/impurity.out
           grep -q "fs:" /tmp/impurity.out
           grep -q "net:" /tmp/impurity.out
-          cargo run -p scalui -- fmt --check examples/adt
-          cargo run -p scalui -- build examples/adt
-          cargo run -p scalui -- build examples/adt 2>&1 | tee /tmp/incr.out
+          cargo run -p scuzz -- fmt --check examples/adt
+          cargo run -p scuzz -- build examples/adt
+          cargo run -p scuzz -- build examples/adt 2>&1 | tee /tmp/incr.out
           grep -q "up-to-date" /tmp/incr.out
 
       - name: Self-host dual-boot
@@ -71,57 +71,57 @@ jobs:
       - name: Package Stage-2 release + install-from-tarball smoke
         run: |
           TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
-          # Stage 1 from selfhost rebuilds compiler-scalui → Stage 2 (no cargo).
-          SCALUI_BOOTSTRAP=/tmp/stage1-scalui ./scripts/package_release.sh
-          test -f "dist/scalui-${TRIPLE}.tar.gz"
-          test -x "dist/scalui-${TRIPLE}/bin/scalui"
-          grep -q '^stage=2$' "dist/scalui-${TRIPLE}/VERSION"
-          PREFIX=/tmp/scalui-prefix
+          # Stage 1 from selfhost rebuilds compiler-scuzz → Stage 2 (no cargo).
+          SCUZZ_BOOTSTRAP=/tmp/stage1-scuzz ./scripts/package_release.sh
+          test -f "dist/scuzz-${TRIPLE}.tar.gz"
+          test -x "dist/scuzz-${TRIPLE}/bin/scuzz"
+          grep -q '^stage=2$' "dist/scuzz-${TRIPLE}/VERSION"
+          PREFIX=/tmp/scuzz-prefix
           rm -rf "$PREFIX"
-          RELEASE_TGZ="$PWD/dist/scalui-${TRIPLE}.tar.gz" PREFIX="$PREFIX" ./scripts/install.sh
+          RELEASE_TGZ="$PWD/dist/scuzz-${TRIPLE}.tar.gz" PREFIX="$PREFIX" ./scripts/install.sh
           export PATH="$PREFIX/bin:$PATH"
-          unset SCALUI_HOME SCALUI_RUNTIME || true
-          test "$(command -v scalui)" = "$PREFIX/bin/scalui"
-          rm -rf /tmp/scalui-release-app
-          scalui new --ui --path /tmp scalui-release-app
-          scalui test /tmp/scalui-release-app
-          test -f /tmp/scalui-release-app/goldens/scalui-release-app.dump
-          scalui run --headless /tmp/scalui-release-app
-          test -f /tmp/scalui-release-app/build/snapshot.png
+          unset SCUZZ_HOME SCUZZ_RUNTIME || true
+          test "$(command -v scuzz)" = "$PREFIX/bin/scuzz"
+          rm -rf /tmp/scuzz-release-app
+          scuzz new --ui --path /tmp scuzz-release-app
+          scuzz test /tmp/scuzz-release-app
+          test -f /tmp/scuzz-release-app/goldens/scuzz-release-app.dump
+          scuzz run --headless /tmp/scuzz-release-app
+          test -f /tmp/scuzz-release-app/build/snapshot.png
           # Installed Stage-2 CLI is self-sufficient: rebuild the compiler without Rust.
-          scalui build "$GITHUB_WORKSPACE/compiler-scalui"
-          test -x "$GITHUB_WORKSPACE/compiler-scalui/build/scalui"
+          scuzz build "$GITHUB_WORKSPACE/compiler-scuzz"
+          test -x "$GITHUB_WORKSPACE/compiler-scuzz/build/scuzz"
 
       - name: Upload Stage-2 release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: scalui-linux-x86_64
-          path: dist/scalui-*.tar.gz
+          name: scuzz-linux-x86_64
+          path: dist/scuzz-*.tar.gz
           if-no-files-found: error
 
       - name: Headless UI + golden PNGs
         run: |
-          cargo run -p scalui -- run --headless examples/hello_ui
+          cargo run -p scuzz -- run --headless examples/hello_ui
           test -f examples/hello_ui/build/snapshot.png
-          cargo run -p scalui -- test examples/hello_ui
-          cargo run -p scalui -- run --headless examples/counter
+          cargo run -p scuzz -- test examples/hello_ui
+          cargo run -p scuzz -- run --headless examples/counter
           test -f examples/counter/build/snapshot.png
-          cargo run -p scalui -- test examples/counter
-          cargo run -p scalui -- run --headless examples/todo
+          cargo run -p scuzz -- test examples/counter
+          cargo run -p scuzz -- run --headless examples/todo
           test -f examples/todo/build/snapshot.png
-          cargo run -p scalui -- test examples/todo
-          cargo run -p scalui -- run --headless examples/nav
+          cargo run -p scuzz -- test examples/todo
+          cargo run -p scuzz -- run --headless examples/nav
           test -f examples/nav/build/snapshot.png
-          cargo run -p scalui -- test examples/nav
+          cargo run -p scuzz -- test examples/nav
 
       - name: Deterministic fuzz (bounded) + repro replay (Stage-2 CLI)
         run: |
-          /tmp/stage2-scalui fuzz --iters 16 examples/counter
-          /tmp/stage2-scalui fuzz --iters 16 examples/todo
-          /tmp/stage2-scalui fuzz --exhaust --depth 1 examples/counter
-          rm -rf /tmp/scalui-fuzzbug
-          /tmp/stage2-scalui new --ui --path /tmp scalui-fuzzbug
-          cat > /tmp/scalui-fuzzbug/src/Main.scala <<'EOF'
+          /tmp/stage2-scuzz fuzz --iters 16 examples/counter
+          /tmp/stage2-scuzz fuzz --iters 16 examples/todo
+          /tmp/stage2-scuzz fuzz --exhaust --depth 1 examples/counter
+          rm -rf /tmp/scuzz-fuzzbug
+          /tmp/stage2-scuzz new --ui --path /tmp scuzz-fuzzbug
+          cat > /tmp/scuzz-fuzzbug/src/Main.scala <<'EOF'
           @main def main: IO[Unit] =
             for {
               count = Signal.int(0)
@@ -134,16 +134,16 @@ jobs:
               _ <- Ui.run(root)
             } yield ()
           EOF
-          if /tmp/stage2-scalui fuzz --iters 8 /tmp/scalui-fuzzbug; then
+          if /tmp/stage2-scuzz fuzz --iters 8 /tmp/scuzz-fuzzbug; then
             echo "fuzz should have found the failure" && exit 1
           fi
-          test -f /tmp/scalui-fuzzbug/build/fuzz/repro.toml
-          if /tmp/stage2-scalui fuzz --replay /tmp/scalui-fuzzbug/build/fuzz/repro.toml /tmp/scalui-fuzzbug; then
+          test -f /tmp/scuzz-fuzzbug/build/fuzz/repro.toml
+          if /tmp/stage2-scuzz fuzz --replay /tmp/scuzz-fuzzbug/build/fuzz/repro.toml /tmp/scuzz-fuzzbug; then
             echo "replay should have reproduced the failure" && exit 1
           fi
-          rm -rf /tmp/scalui-fuzzbug-ex
-          /tmp/stage2-scalui new --ui --path /tmp scalui-fuzzbug-ex
-          cat > /tmp/scalui-fuzzbug-ex/src/Main.scala <<'EOF'
+          rm -rf /tmp/scuzz-fuzzbug-ex
+          /tmp/stage2-scuzz new --ui --path /tmp scuzz-fuzzbug-ex
+          cat > /tmp/scuzz-fuzzbug-ex/src/Main.scala <<'EOF'
           @main def main: IO[Unit] =
             for {
               count = Signal.int(0)
@@ -156,52 +156,52 @@ jobs:
               _ <- Ui.run(root)
             } yield ()
           EOF
-          if /tmp/stage2-scalui fuzz --exhaust --depth 1 /tmp/scalui-fuzzbug-ex; then
+          if /tmp/stage2-scuzz fuzz --exhaust --depth 1 /tmp/scuzz-fuzzbug-ex; then
             echo "exhaust should have found the failure" && exit 1
           fi
-          test -f /tmp/scalui-fuzzbug-ex/build/fuzz/repro.toml
-          if /tmp/stage2-scalui fuzz --replay /tmp/scalui-fuzzbug-ex/build/fuzz/repro.toml /tmp/scalui-fuzzbug-ex; then
+          test -f /tmp/scuzz-fuzzbug-ex/build/fuzz/repro.toml
+          if /tmp/stage2-scuzz fuzz --replay /tmp/scuzz-fuzzbug-ex/build/fuzz/repro.toml /tmp/scuzz-fuzzbug-ex; then
             echo "exhaust replay should have reproduced the failure" && exit 1
           fi
 
       - name: v0 new --ui happy path
         run: |
-          rm -rf /tmp/scalui-v0app
-          cargo run -p scalui -- new --ui --path /tmp scalui-v0app
-          cargo run -p scalui -- test /tmp/scalui-v0app
-          test -f /tmp/scalui-v0app/goldens/scalui-v0app.dump
-          test -f /tmp/scalui-v0app/goldens/scalui-v0app_after_tap.dump
-          cargo run -p scalui -- test /tmp/scalui-v0app
-          cargo run -p scalui -- run --headless /tmp/scalui-v0app
-          test -f /tmp/scalui-v0app/build/snapshot.png
-          /tmp/stage2-scalui new --ui --path /tmp scalui-v0s2
-          /tmp/stage2-scalui test /tmp/scalui-v0s2
-          test -f /tmp/scalui-v0s2/goldens/scalui-v0s2.dump
-          /tmp/stage2-scalui run --headless /tmp/scalui-v0s2
-          test -f /tmp/scalui-v0s2/build/snapshot.png
+          rm -rf /tmp/scuzz-v0app
+          cargo run -p scuzz -- new --ui --path /tmp scuzz-v0app
+          cargo run -p scuzz -- test /tmp/scuzz-v0app
+          test -f /tmp/scuzz-v0app/goldens/scuzz-v0app.dump
+          test -f /tmp/scuzz-v0app/goldens/scuzz-v0app_after_tap.dump
+          cargo run -p scuzz -- test /tmp/scuzz-v0app
+          cargo run -p scuzz -- run --headless /tmp/scuzz-v0app
+          test -f /tmp/scuzz-v0app/build/snapshot.png
+          /tmp/stage2-scuzz new --ui --path /tmp scuzz-v0s2
+          /tmp/stage2-scuzz test /tmp/scuzz-v0s2
+          test -f /tmp/scuzz-v0s2/goldens/scuzz-v0s2.dump
+          /tmp/stage2-scuzz run --headless /tmp/scuzz-v0s2
+          test -f /tmp/scuzz-v0s2/build/snapshot.png
 
       - name: Window peer + X11 embedder (xvfb)
         run: |
-          # SCALUI_LIVE_FRAMES bounds stay-open Ui.run under Window (else hangs on xvfb).
-          timeout 30s xvfb-run -a env SCALUI_UI_RUNTIME=window SCALUI_LIVE_FRAMES=2 \
-            SCALUI_UI_WIDTH=200 SCALUI_UI_HEIGHT=100 \
+          # SCUZZ_LIVE_FRAMES bounds stay-open Ui.run under Window (else hangs on xvfb).
+          timeout 30s xvfb-run -a env SCUZZ_UI_RUNTIME=window SCUZZ_LIVE_FRAMES=2 \
+            SCUZZ_UI_WIDTH=200 SCUZZ_UI_HEIGHT=100 \
             ./examples/hello_ui/build/hello_ui 2>&1 | tee /tmp/win.out
           grep -q "desktop embedder" /tmp/win.out
           grep -q "X11 window" /tmp/win.out
 
       - name: Mobile peer + package shells
         run: |
-          env SCALUI_UI_RUNTIME=mobile SCALUI_MOBILE_SHELL=1 SCALUI_UI_WIDTH=200 SCALUI_UI_HEIGHT=120 \
+          env SCUZZ_UI_RUNTIME=mobile SCUZZ_MOBILE_SHELL=1 SCUZZ_UI_WIDTH=200 SCUZZ_UI_HEIGHT=120 \
             ./examples/counter/build/counter 2>&1 | tee /tmp/mobile.out
           grep -q "UiRuntime.Mobile" /tmp/mobile.out
-          grep -q "scalui mobile: present" /tmp/mobile.out
-          cargo run -p scalui -- package --target all examples/counter
+          grep -q "scuzz mobile: present" /tmp/mobile.out
+          cargo run -p scuzz -- package --target all examples/counter
           test -x examples/counter/build/package/host/run.sh
-          test -f examples/counter/build/package/android/jni/scalui_jni.c
-          test -f examples/counter/build/package/ios/ScaluiAppDelegate.m
-          env SCALUI_UI_WIDTH=200 SCALUI_UI_HEIGHT=120 \
+          test -f examples/counter/build/package/android/jni/scuzz_jni.c
+          test -f examples/counter/build/package/ios/ScuzzAppDelegate.m
+          env SCUZZ_UI_WIDTH=200 SCUZZ_UI_HEIGHT=120 \
             ./examples/counter/build/package/host/run.sh 2>&1 | tee /tmp/pkg-host.out
-          grep -q "scalui mobile: present" /tmp/pkg-host.out
+          grep -q "scuzz mobile: present" /tmp/pkg-host.out
 
   # macOS is 10× Linux Actions minutes; skip on push/PR until we ship Darwin more seriously.
   # Trigger manually: Actions → ci → Run workflow.
@@ -222,7 +222,7 @@ jobs:
           make -C crates/ffi-skia lib CC=clang
           make -C crates/embedder-desktop lib CC=clang
           make -C crates/embedder-mobile lib CC=clang
-          cargo build -p scalui
+          cargo build -p scuzz
 
       - name: Self-host dual-boot (default stack)
         run: ./scripts/selfhost.sh
@@ -230,29 +230,29 @@ jobs:
       - name: Package Stage-2 release + install smoke
         run: |
           TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
-          SCALUI_BOOTSTRAP=/tmp/stage1-scalui ./scripts/package_release.sh
-          test -f "dist/scalui-${TRIPLE}.tar.gz"
-          grep -q '^stage=2$' "dist/scalui-${TRIPLE}/VERSION"
-          PREFIX=/tmp/scalui-prefix
+          SCUZZ_BOOTSTRAP=/tmp/stage1-scuzz ./scripts/package_release.sh
+          test -f "dist/scuzz-${TRIPLE}.tar.gz"
+          grep -q '^stage=2$' "dist/scuzz-${TRIPLE}/VERSION"
+          PREFIX=/tmp/scuzz-prefix
           rm -rf "$PREFIX"
-          RELEASE_TGZ="$PWD/dist/scalui-${TRIPLE}.tar.gz" PREFIX="$PREFIX" ./scripts/install.sh
+          RELEASE_TGZ="$PWD/dist/scuzz-${TRIPLE}.tar.gz" PREFIX="$PREFIX" ./scripts/install.sh
           export PATH="$PREFIX/bin:$PATH"
-          unset SCALUI_HOME SCALUI_RUNTIME || true
-          rm -rf /tmp/scalui-release-app
-          scalui new --ui --path /tmp scalui-release-app
-          scalui test /tmp/scalui-release-app
-          scalui run --headless /tmp/scalui-release-app
+          unset SCUZZ_HOME SCUZZ_RUNTIME || true
+          rm -rf /tmp/scuzz-release-app
+          scuzz new --ui --path /tmp scuzz-release-app
+          scuzz test /tmp/scuzz-release-app
+          scuzz run --headless /tmp/scuzz-release-app
 
       - name: Upload Stage-2 release artifact
         uses: actions/upload-artifact@v4
         with:
-          name: scalui-macos-arm64
-          path: dist/scalui-*.tar.gz
+          name: scuzz-macos-arm64
+          path: dist/scuzz-*.tar.gz
           if-no-files-found: error
 
       - name: Golden PNG tests
         run: |
-          cargo run -p scalui -- test examples/hello_ui
-          cargo run -p scalui -- test examples/counter
-          cargo run -p scalui -- test examples/todo
-          cargo run -p scalui -- test examples/nav
+          cargo run -p scuzz -- test examples/hello_ui
+          cargo run -p scuzz -- test examples/counter
+          cargo run -p scuzz -- test examples/todo
+          cargo run -p scuzz -- test examples/nav
