@@ -58,9 +58,7 @@ def mergeSources(texts: List, acc: List): List =
 
 def buildRuntime(runtimeDir: String, clang: String): IO[Unit] =
   execOk(str4("make -C ", runtimeDir, " lib CC=", clang)).flatMap(_ =>
-    execOk(str4("make -C ", pathJoin(parentDir(runtimeDir), "embedder-desktop"), " lib CC=", clang)).flatMap(_ =>
-      execOk(str4("make -C ", pathJoin(parentDir(runtimeDir), "embedder-mobile"), " lib CC=", clang))
-    )
+    execOk(str4("make -C ", pathJoin(parentDir(runtimeDir), "embedder-desktop"), " lib CC=", clang)).flatMap(_ => execOk(str4("make -C ", pathJoin(parentDir(runtimeDir), "embedder-mobile"), " lib CC=", clang)))
   )
 
 def embedderLinkFlags(embedder: String): String =
