@@ -37,6 +37,10 @@ SuString *su_string_from_int(int64_t n);
 int64_t su_string_index_of(const SuString *s, const SuString *needle);
 SuString *su_string_to_cstr_clone(const SuString *s); /* alias helper */
 
+typedef struct SuList SuList;
+/* Split on `\n` / `\r\n`; skip empty lines. */
+SuList *su_string_lines(const SuString *s);
+
 /* Boxed i64 for IO[Int] */
 void *su_box_i64(int64_t n);
 int64_t su_unbox_i64(const void *p);
@@ -231,10 +235,10 @@ SuPair *su_pair_new(void *left, void *right);
 void su_pair_free(SuPair *p);
 
 /* Linked list (NULL = Nil) for Phase 4 dialect / Stage-1 compiler */
-typedef struct SuList {
+struct SuList {
   void *head;
   struct SuList *tail;
-} SuList;
+};
 
 SuList *su_list_nil(void);
 int su_list_is_empty(const SuList *xs);
@@ -244,6 +248,7 @@ SuList *su_list_tail(const SuList *xs);
 size_t su_list_len(const SuList *xs);
 void *su_list_at(const SuList *xs, size_t index);
 SuList *su_list_reverse(SuList *xs);
+SuList *su_list_append(SuList *xs, void *x);
 SuString *su_list_join(const SuList *xs, const char *sep);
 
 /* Blessed filesystem IO (live or TestRuntime mem FS) */

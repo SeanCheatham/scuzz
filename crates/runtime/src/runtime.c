@@ -128,6 +128,26 @@ int64_t su_string_index_of(const SuString *s, const SuString *needle) {
   return -1;
 }
 
+SuList *su_string_lines(const SuString *s) {
+  SuList *acc = NULL;
+  size_t i = 0;
+  size_t len = s && s->data ? s->len : 0;
+  const char *data = s && s->data ? s->data : "";
+  while (i < len) {
+    size_t start = i;
+    while (i < len && data[i] != '\n' && data[i] != '\r')
+      i++;
+    size_t end = i;
+    if (i < len && data[i] == '\r')
+      i++;
+    if (i < len && data[i] == '\n')
+      i++;
+    if (end > start)
+      acc = su_list_cons(su_string_from_bytes(data + start, end - start), acc);
+  }
+  return su_list_reverse(acc);
+}
+
 void *su_box_i64(int64_t n) {
   int64_t *p = (int64_t *)su_alloc(sizeof(int64_t));
   *p = n;

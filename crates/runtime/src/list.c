@@ -55,6 +55,12 @@ SuList *su_list_reverse(SuList *xs) {
   return acc;
 }
 
+SuList *su_list_append(SuList *xs, void *x) {
+  if (!xs)
+    return su_list_cons(x, NULL);
+  return su_list_cons(xs->head, su_list_append(xs->tail, x));
+}
+
 SuString *su_list_join(const SuList *xs, const char *sep) {
   if (!sep)
     sep = "";

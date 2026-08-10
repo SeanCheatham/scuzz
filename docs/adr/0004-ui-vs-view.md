@@ -24,22 +24,22 @@ Two layers:
 - IO → UI bridge: completed `IO` may `su_ui_bridge_post_*` signal writes; `pump` flushes the queue (UI-thread hop).
 - Mobile uses the same session protocol. Input expands with pointer phases, scroll, soft-keyboard visibility, and lifecycle — all injectable under Headless. OS shells (`crates/embedder-mobile`) only present + map events.
 - Animation ticks (`SuAnimFloat`) advance on `pump` using monotonic Clock dt; accessibility is View metadata (`role`/`label`) dumpable under Headless — no OS assistive-tech bridge yet. Theme gains `accent`/`disabled`/`radius` without forcing golden churn (default `radius = 0`).
-- Counter/Todo/nav examples build View trees in ScalUI via blessed `Signal` / `View` / `Todo` / `Ui.run` builtins (wrapping the C API). Kernel demos (`Ui.runCounter` / `Ui.runTodo` / `Ui.runLive`) remain for kits that are not yet language-authored.
-- **`Ui.run` session lifetime**: Headless is mount → optional scripted tap → snapshot → unmount. Window (when an embedder is present) stays open and pumps until quit (q/Esc) or `SCALUI_LIVE_FRAMES`; same entry point as Headless. `Ui.runLive` remains the kernel stay-open demo with its own tree.
+- Counter/Todo/nav examples build View trees in ScalUI via blessed `Signal` / `View` / `Ui.run` builtins (wrapping the C API). Kernel demos (`Ui.runCounter` / `Ui.runTodo` / `Ui.runLive`) remain for C kits.
+- **`Ui.run` session lifetime**: Headless is mount → optional scripted text (`SCALUI_UI_TEXT` / `tap_text` in toml) → optional scripted tap → snapshot → unmount. Window (when an embedder is present) stays open and pumps until quit (q/Esc) or `SCALUI_LIVE_FRAMES`; same entry point as Headless. `Ui.runLive` remains the kernel stay-open demo with its own tree.
 - **`View.showWhen(sig, value, child)`**: declarative visibility (layout/paint/hit skip when `Signal.get(sig) != value`). Not a lambda workaround — remains valid after first-class taps exist.
 
 ### Tap API: first-class lambdas
 
 `View.button(label, onTap)` takes a lambda literal (`_ => expr` / `name => expr`) as its tap closure — no separate builtin per signal-write shape. The former closed family (`buttonInc` / `buttonSet`) is deleted (forwards-only); callers write the signal update directly, e.g. `View.button("+1", _ => Signal.set(count, Signal.get(count) + 1))`.
 
-Closure representation (both compilers): a lambda lowers to a function pointer matching `SuViewTapFn` (`void (*)(SuView *self, void *env)`) plus a captured-locals environment, packed the same way as `flatMap` continuations (a boxed `SuList`, ints boxed via `su_box_i64`). `su_lang_view_button` receives the unpacked `(fn, env)` pair and forwards to `su_view_button`.
+Closure representation (both compilers): a lambda lowers to a function pointer matching `SuViewTapFn` (`void (*)(SuView *self, void *env)`) plus a captured-locals environment, packed the same way as `flatMap` continuations (a boxed `SuList`, ints boxed via `su_box_i64`). `su_lang_view_button` receives the unpacked `(fn, env)` pair and forwards to `su_view_button`. When the tap body is an `IO[_]`, codegen inserts `su_io_unsafe_run` so blessed effects (e.g. `Fs.write`) can run from a tap.
 
-Todo Add/Save remain controller-owned C taps until list mutation is language-facing.
+Todo is language-authored: `List` literals, `Signal.list` / `Signal.str`, `Str.lines`, `View.addTexts`, and ordinary `View.button` lambdas — no Todo-shaped C controller.
 
 Rules:
 
-1. **Do not** add further specialized tap builtins now that lambdas exist — express new tap behavior as `View.button(label, _ => ...)`. No more Todo-shaped C controllers for one-off apps; delete the Todo C controller once `List` literals make it language-facing.
-2. Missing list-literal support must **not** block Todo's controller-owned taps; those are independent of the tap calling convention.
+1. **Do not** add specialized tap builtins — express new tap behavior as `View.button(label, _ => ...)`.
+2. Prefer List + Signal surface over one-off C controllers for app demos.
 
 ## Consequences
 

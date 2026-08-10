@@ -125,6 +125,10 @@ pub enum Expr {
     IntLit(i64),
     /// String literal
     StrLit(String),
+    /// List literal `[a, b, c]`
+    ListLit {
+        elems: Vec<Expr>,
+    },
     /// `s"...$x..."` / `s"...${expr}..."` — typed concat (Int holes via `Str.fromInt`).
     Interpolate {
         parts: Vec<InterpPart>,

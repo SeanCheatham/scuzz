@@ -28,17 +28,6 @@ static void fill_cfg(SuUiConfig *cfg, int width, int height) {
   cfg->scale = scale;
 }
 
-static char *su_strdup(const char *s) {
-  size_t n;
-  char *out;
-  if (!s)
-    s = "";
-  n = strlen(s);
-  out = (char *)su_alloc(n + 1);
-  memcpy(out, s, n + 1);
-  return out;
-}
-
 /* --- Signal -------------------------------------------------------------- */
 
 SuSignalInt *su_lang_signal_int(int64_t initial) { return su_signal_int(initial); }
@@ -54,8 +43,21 @@ SuSignalStr *su_lang_signal_str(SuString *initial) {
   return su_signal_str(initial ? su_string_cstr(initial) : "");
 }
 
+SuString *su_lang_signal_str_get(SuSignalStr *s) {
+  return su_string_from_cstr(su_signal_str_get(s));
+}
+
 void *su_lang_signal_str_set(SuSignalStr *s, SuString *v) {
   su_signal_str_set(s, v ? su_string_cstr(v) : "");
+  return NULL;
+}
+
+SuSignalList *su_lang_signal_list(SuList *initial) { return su_signal_list(initial); }
+
+SuList *su_lang_signal_list_get(SuSignalList *s) { return su_signal_list_get(s); }
+
+void *su_lang_signal_list_set(SuSignalList *s, SuList *v) {
+  su_signal_list_set(s, v);
   return NULL;
 }
 
@@ -69,14 +71,14 @@ SuView *su_lang_view_text_signal(SuSignalInt *sig, SuString *prefix) {
   return su_view_text_signal_int(sig, prefix ? su_string_cstr(prefix) : "");
 }
 
-/* First-class tap closure: `tap`/`env` are a compiled `_ => ...` lambda's
- * function pointer + captured-locals env (ADR-driven ScalUI closures). */
 SuView *su_lang_view_button(SuString *label, SuViewTapFn tap, void *env) {
   return su_view_button(label ? su_string_cstr(label) : "", tap, env);
 }
 
 SuView *su_lang_view_column(void) { return su_view_column(); }
+
 SuView *su_lang_view_row(void) { return su_view_row(); }
+
 SuView *su_lang_view_list(void) { return su_view_list(); }
 
 SuView *su_lang_view_scroll(SuView *child) { return su_view_scroll(child); }
@@ -99,167 +101,24 @@ void *su_lang_view_add_child(SuView *parent, SuView *child) {
   return NULL;
 }
 
+void *su_lang_view_add_texts(SuView *parent, SuList *lines) {
+  for (SuList *p = lines; p; p = p->tail) {
+    SuString *s = (SuString *)p->head;
+    char line[256];
+    snprintf(line, sizeof line, "- %s", s ? su_string_cstr(s) : "");
+    su_view_add_child(parent, su_view_text(line));
+  }
+  return NULL;
+}
+
 SuView *su_lang_view_show_when(SuSignalInt *sig, int64_t value, SuView *child) {
   return su_view_show_when(sig, value, child);
 }
 
-/* --- Todo controller ----------------------------------------------------- */
-
-struct SuTodo {
-  char *items[32];
-  int count;
-  SuSignalStr *draft;
-  SuView *list;
-  char *path;
-};
-
-SuTodo *su_lang_todo_create(void) {
-  SuTodo *st = (SuTodo *)su_alloc_zero(sizeof(SuTodo));
-  const char *path_env = getenv("SCALUI_TODO_PATH");
-  st->path = su_strdup(path_env && path_env[0] ? path_env : "/tmp/scalui_todo.txt");
-  st->draft = su_signal_str("");
-  st->list = su_view_list();
-  return st;
-}
-
-SuSignalStr *su_lang_todo_draft(SuTodo *todo) { return todo ? todo->draft : NULL; }
-
-SuView *su_lang_todo_list_view(SuTodo *todo) { return todo ? todo->list : NULL; }
-
-typedef struct {
-  SuTodo *st;
-  int writing;
-} TodoFileEnv;
-
-static void *todo_acquire(void *env) {
-  TodoFileEnv *fe = (TodoFileEnv *)env;
-  FILE *f = fopen(fe->st->path, fe->writing ? "w" : "r");
-  if (!f && !fe->writing) {
-    f = fopen(fe->st->path, "w+");
-    if (f)
-      rewind(f);
-  }
-  if (!f)
-    su_panic("todo: open failed");
-  return f;
-}
-
-static void todo_release(void *acquired, void *env) {
-  (void)env;
-  if (acquired)
-    fclose((FILE *)acquired);
-}
-
-static SuIo *todo_use_load(void *acquired, void *env) {
-  TodoFileEnv *fe = (TodoFileEnv *)env;
-  SuTodo *st = fe->st;
-  FILE *f = (FILE *)acquired;
-  char line[256];
-  st->count = 0;
-  while (st->count < 32 && fgets(line, sizeof line, f)) {
-    size_t n = strlen(line);
-    while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r'))
-      line[--n] = '\0';
-    if (n == 0)
-      continue;
-    st->items[st->count++] = su_strdup(line);
-  }
-  return su_io_pure(NULL);
-}
-
-static SuIo *todo_use_save(void *acquired, void *env) {
-  TodoFileEnv *fe = (TodoFileEnv *)env;
-  SuTodo *st = fe->st;
-  FILE *f = (FILE *)acquired;
-  int i;
-  for (i = 0; i < st->count; i++) {
-    if (st->items[i])
-      fprintf(f, "%s\n", st->items[i]);
-  }
-  fflush(f);
-  return su_io_pure(NULL);
-}
-
-static void todo_rebuild_list(SuTodo *st) {
-  int i;
-  for (i = 0; i < st->count; i++) {
-    char line[128];
-    snprintf(line, sizeof line, "- %s", st->items[i] ? st->items[i] : "");
-    su_view_add_child(st->list, su_view_text(line));
-  }
-}
-
-static void *thunk_todo_load(void *env) {
-  SuTodo *st = (SuTodo *)env;
-  TodoFileEnv fe;
-  SuResource *res;
-  SuIoResult r;
-  fe.st = st;
-  fe.writing = 0;
-  res = su_resource_make(todo_acquire, todo_release, &fe);
-  r = su_io_unsafe_run(su_resource_use(res, todo_use_load, &fe));
-  su_resource_free(res);
-  if (!r.ok)
-    su_panic("todo load failed");
-  todo_rebuild_list(st);
-  return NULL;
-}
-
-SuIo *su_lang_todo_load(SuTodo *todo) { return su_io_delay(thunk_todo_load, todo); }
-
-static void todo_on_add(SuView *self, void *env) {
-  SuTodo *st = (SuTodo *)env;
-  const char *draft;
-  char line[128];
-  (void)self;
-  draft = su_signal_str_get(st->draft);
-  if (!draft || !draft[0] || st->count >= 32)
-    return;
-  st->items[st->count++] = su_strdup(draft);
-  snprintf(line, sizeof line, "- %s", draft);
-  su_view_add_child(st->list, su_view_text(line));
-  su_signal_str_set(st->draft, "");
-}
-
-static void todo_on_save(SuView *self, void *env) {
-  SuTodo *st = (SuTodo *)env;
-  TodoFileEnv fe;
-  SuResource *res;
-  SuIoResult r;
-  (void)self;
-  fe.st = st;
-  fe.writing = 1;
-  res = su_resource_make(todo_acquire, todo_release, &fe);
-  r = su_io_unsafe_run(su_resource_use(res, todo_use_save, &fe));
-  su_resource_free(res);
-  if (!r.ok)
-    su_panic("todo save failed");
-}
-
-SuView *su_lang_view_button_todo_add(SuString *label, SuTodo *todo) {
-  return su_view_button(label ? su_string_cstr(label) : "Add", todo_on_add, todo);
-}
-
-SuView *su_lang_view_button_todo_save(SuString *label, SuTodo *todo) {
-  return su_view_button(label ? su_string_cstr(label) : "Save", todo_on_save, todo);
-}
-
-static void todo_free(SuTodo *st) {
-  int i;
-  if (!st)
-    return;
-  for (i = 0; i < st->count; i++)
-    su_free(st->items[i]);
-  su_signal_str_free(st->draft);
-  su_free(st->path);
-  su_free(st);
-}
-
-/* --- Ui.run / Ui.runWithTodo --------------------------------------------- */
+/* --- Ui.run -------------------------------------------------------------- */
 
 typedef struct {
   SuView *root;
-  SuTodo *todo; /* optional; enables todo tap scripting */
 } RunViewEnv;
 
 static void scripted_button_tap(SuUiSession *session, int prefer_upper) {
@@ -337,14 +196,9 @@ static void *thunk_run_view(void *env) {
   SuUiConfig cfg;
   SuUiSession *session;
   int interactive;
+  int inject_text = 0;
 
   fill_cfg(&cfg, 0, 0);
-  if (e->todo) {
-    if (!getenv("SCALUI_UI_WIDTH"))
-      cfg.width = 240;
-    if (!getenv("SCALUI_UI_HEIGHT"))
-      cfg.height = 160;
-  }
 
   session = su_ui_mount(&cfg, e->root);
   if (!session)
@@ -355,22 +209,20 @@ static void *thunk_run_view(void *env) {
     su_panic("Ui.run pump failed");
 
   if (getenv("SCALUI_UI_TAP")) {
-    if (e->todo) {
+    const char *seed = getenv("SCALUI_UI_TEXT");
+    if (!seed || !seed[0])
+      seed = getenv("SCALUI_TODO_SEED");
+    if (seed && seed[0]) {
       SuInputEvent ev;
-      const char *seed = getenv("SCALUI_TODO_SEED");
       memset(&ev, 0, sizeof(ev));
       ev.kind = SU_INPUT_TEXT;
-      ev.text = seed && seed[0] ? seed : "milk";
+      ev.text = seed;
       if (!su_ui_inject_sync(session, &ev))
-        su_panic("todo text inject failed");
-      scripted_button_tap(session, 1);
-    } else {
-      scripted_button_tap(session, 0);
+        su_panic("Ui.run text inject failed");
+      inject_text = 1;
     }
+    scripted_button_tap(session, inject_text);
   }
-
-  if (e->todo && getenv("SCALUI_TODO_SAVE"))
-    todo_on_save(NULL, e->todo);
 
   interactive = cfg.kind == SU_UI_RUNTIME_WINDOW && su_embedder_available();
   if (interactive) {
@@ -396,8 +248,6 @@ static void *thunk_run_view(void *env) {
   }
 
   su_ui_unmount(session);
-  if (e->todo)
-    todo_free(e->todo);
   su_free(e);
   return NULL;
 }
@@ -405,13 +255,5 @@ static void *thunk_run_view(void *env) {
 SuIo *su_ui_run_view(SuView *root) {
   RunViewEnv *e = (RunViewEnv *)su_alloc(sizeof(RunViewEnv));
   e->root = root;
-  e->todo = NULL;
-  return su_io_delay(thunk_run_view, e);
-}
-
-SuIo *su_ui_run_view_todo(SuView *root, SuTodo *todo) {
-  RunViewEnv *e = (RunViewEnv *)su_alloc(sizeof(RunViewEnv));
-  e->root = root;
-  e->todo = todo;
   return su_io_delay(thunk_run_view, e);
 }

@@ -412,6 +412,17 @@ fn apply_ui_env(
 ) {
     cmd.env("SCALUI_SNAPSHOT_PATH", snapshot);
     cmd.env("SCALUI_UI_RUNTIME", "headless");
+    // Isolate Todo/Fs path so goldens do not share /tmp/scalui_todo.txt.
+    let todo_path = std::env::temp_dir().join(format!(
+        "scalui-todo-{}-{}",
+        std::process::id(),
+        snapshot
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("snap")
+    ));
+    let _ = std::fs::remove_file(&todo_path);
+    cmd.env("SCALUI_TODO_PATH", &todo_path);
     if let Some(ui) = &manifest.ui {
         cmd.env("SCALUI_UI_WIDTH", ui.width().to_string());
         cmd.env("SCALUI_UI_HEIGHT", ui.height().to_string());
@@ -426,6 +437,9 @@ fn apply_ui_env(
         if let Some(ui) = &manifest.ui {
             if let Some(n) = ui.tap_button {
                 cmd.env("SCALUI_UI_TAP_N", n.to_string());
+            }
+            if let Some(text) = &ui.tap_text {
+                cmd.env("SCALUI_UI_TEXT", text);
             }
         }
     }
