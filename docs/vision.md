@@ -68,7 +68,7 @@ Headless is a **peer** of Window/Mobile, not a test-only shim. Frame boundary is
 
 ### Kernel dialect (current)
 
-Subset used by compiler sources and bootstrap examples. New features land in Stage 0 **before** `compiler-scalui/` depends on them. Dual-boot gate: `scripts/selfhost.sh` (smoke `examples/hello` + `examples/adt`).
+Subset used by compiler sources and bootstrap examples. New features land in Stage 0 **before** `compiler-scalui/` depends on them. Dual-boot gate: `scripts/selfhost.sh` — each stage smokes `examples/hello` + `examples/adt`, passes the counter/todo/nav Headless goldens, and agrees with Stage 0 on `fmt --check` for the compiler sources; Stage 2 must re-emit byte-identical compiler IR (Stage-3 fixpoint).
 
 - Optional `package`; top-level `def` / `@main def …: IO[Unit]`; nullary enums (Stage 1 sources avoid enums; Stage 1/2 emit `su_adt_new` / `su_adt_tag` + `match` `switch`)
 - **`for { binders } yield e`** as primary binder: `x = e` (pure), `x <- e` (effect; yield wraps with `IO.pure` when any `<-` is present). Nested `for` in `if` / lambda arms when multi-bind is needed.
@@ -130,7 +130,7 @@ Scripts are a line protocol — `tap <n>` / `text <s>` / `pump <k>` — played b
 
 ## Roadmap
 
-Phases 0–6 landed. **`for` cutover done** (Stage 0/1, Counter/Todo/nav, bootstrap off `val`). Open direction: `scalui fuzz` / v1 self-host polish. App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
+Phases 0–6 landed. **`for` cutover done** (Stage 0/1, Counter/Todo/nav, bootstrap off `val`). **Fuzz v0 landed** (Stage-0 `scalui fuzz` + `--replay`; runtime script playback + structural dumps). **Self-host gate widened** (per-stage goldens, fmt parity, Stage-3 IR fixpoint; `install.sh` self-builds from an existing Stage-1 binary). Open direction: `scalui fuzz --exhaust`, Stage-1 `fuzz` port, prebuilt Stage-1 release artifacts. App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
 
 ## Risks
 

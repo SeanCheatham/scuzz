@@ -12,6 +12,7 @@
 - Closed impurity boundary: `Clock` / `Random` / `Fs` / `Net` / `Sys` / `IO.println` + `TestRuntime` fakes
 - Animation v0 + accessibility hooks (Headless-dumpable); theme polish tokens
 - Stage-1 CLI: `build|run|test|watch|new|package|fmt` (`compiler-scalui`); Stage-0 Rust is CI canary
+- Deterministic fuzz v0: `scalui fuzz` (seeded event scripts + `--replay repro.toml`) on TestRuntime + Headless (Stage-0 CLI)
 - Samples gallery below; Skia prebuilts via `SCALUI_SKIA_URL` (default: in-tree `sk_sw`)
 - Impeller evaluated and deferred (see `docs/vision.md`)
 
@@ -63,7 +64,10 @@ cargo run -p scalui -- test examples/counter
 # Optional: install process-wide TestRuntime for an app binary
 env SCALUI_TESTRT=1 cargo run -p scalui -- run examples/fs
 
-# Dual-boot (Stage 1 rebuilds itself → Stage 2)
+# Deterministic fuzz (seeded event scripts; --replay build/fuzz/repro.toml on failure)
+cargo run -p scalui -- fuzz --iters 16 examples/todo
+
+# Dual-boot gate (Stage 1 → Stage 2: smoke + goldens + fmt parity + IR fixpoint)
 ./scripts/selfhost.sh
 ```
 
