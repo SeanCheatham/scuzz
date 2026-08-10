@@ -41,3 +41,4 @@ def desugarForBinders(binders: List, body: List): List =
 
 def wrapForBinder(b: List, body: List): List =
   if (streq(List.head(b), "Eq") == 1) List.cons("Let", List.cons(nodeStr(b, 0), List.cons(lowerExpr(nodeExpr(b, 1)), List.cons(body, List.empty())))) else List.cons("FlatMap", List.cons(lowerExpr(nodeExpr(b, 1)), List.cons(nodeStr(b, 0), List.cons(body, List.empty()))))
+

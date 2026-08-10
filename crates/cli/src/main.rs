@@ -64,6 +64,22 @@ enum Commands {
         #[arg(long)]
         runtime_tests: bool,
     },
+    /// Deterministic Headless fuzz: seeded random event scripts, or --replay
+    Fuzz {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Replay a recorded repro.toml instead of generating scripts
+        #[arg(long)]
+        replay: Option<PathBuf>,
+        /// Random scripts to try before declaring success
+        #[arg(long, default_value_t = 32)]
+        iters: u64,
+        /// Base seed for script generation
+        #[arg(long, default_value_t = 42)]
+        seed: u64,
+        #[arg(long, default_value = "build")]
+        out_dir: PathBuf,
+    },
     /// Format ScalUI sources under src/
     Fmt {
         #[arg(default_value = ".")]
@@ -172,6 +188,13 @@ fn real_main() -> Result<ExitCode> {
             eprintln!("scalui test ok");
             Ok(ExitCode::SUCCESS)
         }
+        Commands::Fuzz {
+            path,
+            replay,
+            iters,
+            seed,
+            out_dir,
+        } => fuzz_project(&path, replay.as_deref(), iters, seed, &out_dir),
         Commands::Fmt { path, check } => fmt_project(&path, check),
         Commands::Lsp => {
             scalui_compiler::lsp::run_stdio()?;
@@ -522,6 +545,193 @@ fn capture_golden(
         bail!("golden capture missing snapshot {}", snapshot.display());
     }
     Ok(())
+}
+
+/* --- scalui fuzz ----------------------------------------------------------
+   Deterministic TestRuntime + Headless event scripts:
+     (program, seed/config, event script) → exit code + signals + view dump
+   Oracles: panic / unhandled SuError (nonzero exit). Structural, not pixels. */
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct ReproFile {
+    fuzz: Repro,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+struct Repro {
+    seed: u64,
+    events: Vec<String>,
+}
+
+/// SplitMix64 — deterministic and platform-independent script generation.
+struct Rng(u64);
+
+impl Rng {
+    fn next(&mut self) -> u64 {
+        self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
+        let mut z = self.0;
+        z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
+        z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
+        z ^ (z >> 31)
+    }
+
+    fn below(&mut self, n: u64) -> u64 {
+        if n == 0 {
+            0
+        } else {
+            self.next() % n
+        }
+    }
+}
+
+struct FuzzRun {
+    ok: bool,
+    dump: String,
+}
+
+fn fuzz_exec(
+    exe: &Path,
+    manifest: &scalui_compiler::manifest::Manifest,
+    fuzz_dir: &Path,
+    events: &[String],
+) -> Result<FuzzRun> {
+    let script_path = fuzz_dir.join("script.txt");
+    let dump_path = fuzz_dir.join("dump.txt");
+    let mut script = events.join("\n");
+    script.push('\n');
+    std::fs::write(&script_path, script)?;
+    let _ = std::fs::remove_file(&dump_path);
+    let mut cmd = Command::new(exe);
+    cmd.env("SCALUI_UI_RUNTIME", "headless");
+    cmd.env("SCALUI_TESTRT", "1");
+    cmd.env("SCALUI_UI_SCRIPT", &script_path);
+    cmd.env("SCALUI_FUZZ_DUMP", &dump_path);
+    if let Some(ui) = &manifest.ui {
+        cmd.env("SCALUI_UI_WIDTH", ui.width().to_string());
+        cmd.env("SCALUI_UI_HEIGHT", ui.height().to_string());
+        cmd.env("SCALUI_UI_SCALE", ui.headless_scale.to_string());
+    }
+    let status = cmd
+        .status()
+        .with_context(|| format!("running fuzz script {}", script_path.display()))?;
+    let dump = std::fs::read_to_string(&dump_path).unwrap_or_default();
+    Ok(FuzzRun {
+        ok: status.success(),
+        dump,
+    })
+}
+
+fn gen_script(seed: u64, n_buttons: u64, has_text_field: bool) -> Vec<String> {
+    let mut rng = Rng(seed);
+    let len = 1 + rng.below(12);
+    let mut events = Vec::new();
+    for _ in 0..len {
+        let kinds = if has_text_field { 4 } else { 3 };
+        match rng.below(kinds) {
+            0 | 1 => events.push(format!("tap {}", rng.below(n_buttons.max(1)))),
+            2 => events.push(format!("pump {}", 1 + rng.below(3))),
+            _ => {
+                let n = 1 + rng.below(7);
+                let word: String =
+                    (0..n).map(|_| (b'a' + rng.below(26) as u8) as char).collect();
+                events.push(format!("text {word}"));
+            }
+        }
+    }
+    events
+}
+
+fn fuzz_project(
+    path: &Path,
+    replay: Option<&Path>,
+    iters: u64,
+    seed: u64,
+    out_dir: &Path,
+) -> Result<ExitCode> {
+    let project_dir = resolve_dir(path)?;
+    let manifest = load_manifest(&project_dir.join("scalui.toml"))
+        .with_context(|| format!("reading {}/scalui.toml", project_dir.display()))?;
+    if manifest.ui.is_none() {
+        bail!("scalui fuzz needs a [ui] project (Headless event scripts)");
+    }
+    let out = build(path, &out_dir.to_path_buf(), true)?;
+    let fuzz_dir = out
+        .executable
+        .parent()
+        .unwrap_or(Path::new("."))
+        .join("fuzz");
+    std::fs::create_dir_all(&fuzz_dir)?;
+
+    if let Some(repro_path) = replay {
+        let text = std::fs::read_to_string(repro_path)
+            .with_context(|| format!("reading {}", repro_path.display()))?;
+        let repro: ReproFile =
+            toml::from_str(&text).with_context(|| format!("parsing {}", repro_path.display()))?;
+        eprintln!(
+            "scalui fuzz --replay {} ({} events, seed {})",
+            repro_path.display(),
+            repro.fuzz.events.len(),
+            repro.fuzz.seed
+        );
+        let run = fuzz_exec(&out.executable, &manifest, &fuzz_dir, &repro.fuzz.events)?;
+        eprintln!("fuzz dump: {}", fuzz_dir.join("dump.txt").display());
+        if run.ok {
+            eprintln!("fuzz replay ok (no failure)");
+            return Ok(ExitCode::SUCCESS);
+        }
+        eprintln!(
+            "fuzz replay reproduced a failure (script {})",
+            fuzz_dir.join("script.txt").display()
+        );
+        return Ok(ExitCode::FAILURE);
+    }
+
+    /* Probe with no events: must pass; its view dump is the typed event
+       surface (stable tap indices in scan order + text field presence). */
+    let probe = fuzz_exec(&out.executable, &manifest, &fuzz_dir, &[])?;
+    if !probe.ok {
+        bail!("fuzz probe failed: app fails under TestRuntime before any event");
+    }
+    let n_buttons = probe
+        .dump
+        .lines()
+        .filter(|l| l.starts_with("button:"))
+        .count() as u64;
+    let has_text_field = probe.dump.lines().any(|l| l.starts_with("textfield:"));
+    if n_buttons == 0 && !has_text_field {
+        eprintln!("scalui fuzz ok (no buttons or text fields; probe only)");
+        return Ok(ExitCode::SUCCESS);
+    }
+
+    for iter in 0..iters {
+        let script_seed = seed.wrapping_add(iter);
+        let events = gen_script(script_seed, n_buttons, has_text_field);
+        let run = fuzz_exec(&out.executable, &manifest, &fuzz_dir, &events)?;
+        if !run.ok {
+            let repro_path = fuzz_dir.join("repro.toml");
+            let repro = ReproFile {
+                fuzz: Repro {
+                    seed: script_seed,
+                    events,
+                },
+            };
+            std::fs::write(&repro_path, toml::to_string_pretty(&repro)?)?;
+            eprintln!(
+                "fuzz failure at script {} (seed {}); wrote {}",
+                iter,
+                script_seed,
+                repro_path.display()
+            );
+            eprintln!(
+                "replay: scalui fuzz {} --replay {}",
+                project_dir.display(),
+                repro_path.display()
+            );
+            return Ok(ExitCode::FAILURE);
+        }
+    }
+    eprintln!("scalui fuzz ok ({iters} scripts, seed {seed})");
+    Ok(ExitCode::SUCCESS)
 }
 
 fn build(

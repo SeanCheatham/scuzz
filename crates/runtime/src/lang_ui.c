@@ -131,20 +131,14 @@ typedef struct {
   SuView *root;
 } RunViewEnv;
 
-static void scripted_button_tap(SuUiSession *session, int prefer_upper) {
-  SuInputEvent tap;
+/* Collect unique buttons in top-to-bottom, left-to-right scan order.
+   Frames must be current (run after a pump). */
+static int collect_buttons(SuUiSession *session, SuView **buttons, int cap) {
   SuView *r = su_ui_session_root(session);
-  SuView *hit_btn = NULL;
-  SuView *buttons[64];
   int n_buttons = 0;
-  float tx = 40.f, ty = 60.f;
   int yi, xi;
   int w = su_ui_session_width(session);
   int h = su_ui_session_height(session);
-  const char *tap_n_env = getenv("SCALUI_UI_TAP_N");
-  int tap_n = (tap_n_env && tap_n_env[0]) ? atoi(tap_n_env) : -1;
-
-  /* Collect unique buttons in top-to-bottom, left-to-right scan order. */
   for (yi = 0; yi < h; yi += 4) {
     for (xi = 0; xi < w; xi += 4) {
       SuView *hit = su_view_hit_test(r, (float)xi, (float)yi);
@@ -157,11 +151,24 @@ static void scripted_button_tap(SuUiSession *session, int prefer_upper) {
             break;
           }
         }
-        if (!seen && n_buttons < 64)
+        if (!seen && n_buttons < cap)
           buttons[n_buttons++] = hit;
       }
     }
   }
+  return n_buttons;
+}
+
+static void scripted_button_tap(SuUiSession *session, int prefer_upper) {
+  SuInputEvent tap;
+  SuView *hit_btn = NULL;
+  SuView *buttons[64];
+  int n_buttons;
+  float tx = 40.f, ty = 60.f;
+  const char *tap_n_env = getenv("SCALUI_UI_TAP_N");
+  int tap_n = (tap_n_env && tap_n_env[0]) ? atoi(tap_n_env) : -1;
+
+  n_buttons = collect_buttons(session, buttons, 64);
 
   if (tap_n >= 0) {
     if (tap_n >= n_buttons)
@@ -201,6 +208,67 @@ static void scripted_button_tap(SuUiSession *session, int prefer_upper) {
     su_panic("Ui.run tap/pump failed");
 }
 
+/* --- SCALUI_UI_SCRIPT playback (fuzz / replay) ---------------------------- */
+/* Line protocol, one event per line, delivered across pump boundaries:
+     tap <n>    tap the nth button (scan order); missing target is a no-op
+     text <s>   deliver <s> to the focused/first TextField; no field is a no-op
+     pump <k>   pump k extra frames
+   Blank lines and #-comments are skipped. Pump runs after every event. */
+
+static void script_tap(SuUiSession *session, int n) {
+  SuView *buttons[64];
+  int count = collect_buttons(session, buttons, 64);
+  SuInputEvent tap;
+  SuRect fr;
+  if (n < 0 || n >= count) {
+    fprintf(stderr, "scalui: script tap %d skipped (%d buttons)\n", n, count);
+    return;
+  }
+  fr = su_view_frame(buttons[n]);
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SU_INPUT_TAP;
+  tap.x = fr.x + fr.w * 0.5f;
+  tap.y = fr.y + fr.h * 0.5f;
+  if (!su_ui_inject_sync(session, &tap))
+    su_panic("Ui.run: script tap inject failed");
+}
+
+static void run_ui_script(SuUiSession *session, const char *path) {
+  FILE *f = fopen(path, "r");
+  char line[1024];
+  if (!f)
+    su_panic("Ui.run: SCALUI_UI_SCRIPT open failed");
+  while (fgets(line, sizeof line, f)) {
+    size_t len = strlen(line);
+    while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
+      line[--len] = '\0';
+    if (len == 0 || line[0] == '#')
+      continue;
+    if (strncmp(line, "tap ", 4) == 0 || strcmp(line, "tap") == 0) {
+      script_tap(session, len > 3 ? atoi(line + 4) : 0);
+    } else if (strncmp(line, "text ", 5) == 0 || strcmp(line, "text") == 0) {
+      SuInputEvent ev;
+      memset(&ev, 0, sizeof(ev));
+      ev.kind = SU_INPUT_TEXT;
+      ev.text = len > 4 ? line + 5 : "";
+      if (!su_ui_inject_sync(session, &ev))
+        fprintf(stderr, "scalui: script text skipped (no text field)\n");
+    } else if (strncmp(line, "pump ", 5) == 0 || strcmp(line, "pump") == 0) {
+      int k = len > 5 ? atoi(line + 5) : 1;
+      while (k-- > 1) {
+        if (!su_ui_pump_sync(session))
+          su_panic("Ui.run: script pump failed");
+      }
+    } else {
+      fclose(f);
+      su_panic("Ui.run: unknown SCALUI_UI_SCRIPT directive");
+    }
+    if (!su_ui_pump_sync(session))
+      su_panic("Ui.run: script pump failed");
+  }
+  fclose(f);
+}
+
 static void *thunk_run_view(void *env) {
   RunViewEnv *e = (RunViewEnv *)env;
   SuUiConfig cfg;
@@ -217,6 +285,12 @@ static void *thunk_run_view(void *env) {
 
   if (!su_ui_pump_sync(session))
     su_panic("Ui.run pump failed");
+
+  {
+    const char *script = getenv("SCALUI_UI_SCRIPT");
+    if (script && script[0])
+      run_ui_script(session, script);
+  }
 
   if (getenv("SCALUI_UI_TAP")) {
     const char *seed = getenv("SCALUI_UI_TEXT");
