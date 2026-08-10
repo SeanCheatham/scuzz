@@ -13,4 +13,4 @@ cargo run -p scalui -- build --full compiler-scalui
 ./scripts/selfhost.sh
 ```
 
-Stage-1 CLI: `scalui (build|run) [project]` (writes `project/build/`). Stage 0 Rust CLI remains a CI canary.
+Stage-1 CLI: `scalui (build|run|test|fmt|watch|new|package) [args]` (writes `project/build/`). Stage-0 Rust remains the bootstrap host and provides `fuzz`.

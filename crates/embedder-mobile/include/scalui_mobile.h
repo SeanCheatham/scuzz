@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-/* Mobile embedder ABI (Phase 5). Weak stubs live in runtime when unlinked.
+/* Mobile embedder ABI. Weak stubs live in runtime when unlinked.
  *
  * Host shell (Linux CI): present + scripted event queue when SCALUI_MOBILE_SHELL=1.
  * Android / iOS packaging shells map OS touch / lifecycle / IME onto SuInputEvent

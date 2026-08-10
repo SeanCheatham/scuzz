@@ -1,4 +1,4 @@
-//! Typed-enough AST for the Stage-0 / Phase 4 kernel dialect.
+//! Typed-enough AST for the Stage-0 kernel dialect.
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
@@ -64,18 +64,8 @@ pub enum Expr {
     IoFail(Box<Expr>),
     /// `IO.pure(expr)`
     IoPure(Box<Expr>),
-    /// `Ui.runHeadless(expr)`
-    UiRunHeadless(Box<Expr>),
-    /// `Ui.runCounter`
-    UiRunCounter,
-    /// `Ui.runLive` — pump until quit when Window embedder is present
-    UiRunLive,
-    /// `Ui.runTodo`
-    UiRunTodo,
     /// `Effects.runKit`
     EffectsRunKit,
-    /// `Lexer.classify(expr)` → enum Tok
-    LexerClassify(Box<Expr>),
     /// `left.flatMap(param => right)` — param None means `_`
     FlatMap {
         inner: Box<Expr>,

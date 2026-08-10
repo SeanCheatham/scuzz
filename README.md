@@ -6,17 +6,17 @@
 
 ## Status
 
-**v0 app path** (current). Phases 0–6 landed; product intent and direction live in [docs/vision.md](docs/vision.md).
+**v0 app path.** Product intent and direction: [docs/vision.md](docs/vision.md).
 
-- **ScalUI-authored Views**: Counter/Todo/nav via `Signal` / `View` / `Ui.run` (List literals + `Signal.list`; C demos remain for Live / kits)
+- Counter/Todo/nav as ScalUI `Signal` / `View` / `Ui.run`
 - Closed impurity boundary: `Clock` / `Random` / `Fs` / `Net` / `Sys` / `IO.println` + `TestRuntime` fakes
-- Animation v0 + accessibility hooks (Headless-dumpable); theme polish tokens
-- Stage-1 CLI: `build|run|test|watch|new|package|fmt` (`compiler-scalui`); Stage-0 Rust is CI canary
-- Deterministic fuzz v0: `scalui fuzz` (seeded event scripts + `--replay repro.toml`) on TestRuntime + Headless (Stage-0 CLI)
-- Samples gallery below; Skia prebuilts via `SCALUI_SKIA_URL` (default: in-tree `sk_sw`)
-- Impeller evaluated and deferred (see `docs/vision.md`)
+- Animation + accessibility hooks (Headless-dumpable); theme polish tokens
+- Stage-1 CLI: `build|run|test|watch|new|package|fmt` (`compiler-scalui`); Stage-0 Rust for bootstrap + `fuzz`
+- Deterministic fuzz: `scalui fuzz` (seeded event scripts + `--replay repro.toml`) on TestRuntime + Headless
+- Skia prebuilts via `SCALUI_SKIA_URL` (default: in-tree `sk_sw`)
+- Impeller deferred (see `docs/vision.md`)
 
-See [docs/vision.md](docs/vision.md). App authors: start with [docs/guide.md](docs/guide.md).
+App authors: [docs/guide.md](docs/guide.md).
 
 ## Quick start
 
@@ -34,7 +34,7 @@ scalui test              # seeds goldens/ on first run, then compares
 scalui run --headless    # writes build/snapshot.png
 # scalui run             # Window when [ui].default_runtime = "window"
 
-# Or use the Stage-0 canary without installing
+# Or use the Stage-0 bootstrap CLI without installing
 cargo run -p scalui -- new --ui --path /tmp myapp
 cargo run -p scalui -- test /tmp/myapp
 cargo run -p scalui -- run --headless /tmp/myapp
@@ -46,7 +46,7 @@ Other useful commands:
 # Runtime + UI unit tests (includes TestRuntime / anim / a11y)
 make -C crates/runtime test
 
-# Stage-0 canary CLI
+# Stage-0 bootstrap CLI
 cargo build -p scalui
 
 # Impurity kit (fake Clock/Random/Fs/Net — no wall wait, no network)
@@ -95,10 +95,10 @@ cargo run -p scalui -- run --headless examples/live
 | --- | --- |
 | `examples/hello` | `IO.println` |
 | `examples/hello_ui` | Headless `Ui` + goldens |
-| `examples/counter` | ScalUI `Signal`/`View`/`Ui.run` + goldens |
+| `examples/counter` | `Signal`/`View`/`Ui.run` + goldens |
 | `examples/nav` | Lambda taps + `showWhen` + stay-open `Ui.run` + goldens |
-| `examples/live` | Stay-open Window (`Ui.runLive`; q/Esc) |
-| `examples/todo` | ScalUI Todo — `List` / `Signal.list` / lambda Add·Save + goldens |
+| `examples/live` | Stay-open Window (`Ui.run`; q/Esc) |
+| `examples/todo` | Todo — `List` / `Signal.list` / lambda Add·Save + goldens |
 | `examples/effects` | Blessed effects kit |
 | `examples/adt` | package / enum / match |
 | `examples/fs` | Blessed `Fs.*` (live) |
@@ -108,10 +108,10 @@ cargo run -p scalui -- run --headless examples/live
 ## Layout
 
 ```
-docs/                     vision, plan, compatibility, scalui.toml schema
-crates/compiler/          Stage-0 parser / typer / LLVM codegen (Rust canary)
-crates/cli/               Stage-0 scalui tool (canary)
-crates/runtime/           C runtime (IO kit, impurity, View/Ui — widgets live here for now)
+docs/                     vision, guide, compatibility, scalui.toml schema
+crates/compiler/          Stage-0 parser / typer / LLVM codegen
+crates/cli/               Stage-0 scalui tool (bootstrap + fuzz)
+crates/runtime/           C runtime (IO kit, impurity, View/Ui)
 crates/ffi-skia/          sk_capi + CPU software backend
 crates/embedder-desktop/  Linux X11 / macOS Cocoa present for Window peer
 crates/embedder-mobile/   Mobile host shell + Android/iOS packaging templates
@@ -121,7 +121,7 @@ examples/                 samples gallery (table above)
 third_party/skia/         prebuilt fetch notes
 ```
 
-Kernel dialect: [docs/vision.md](docs/vision.md#kernel-dialect-current).
+Kernel dialect: [docs/vision.md](docs/vision.md#kernel-dialect).
 
 ## License
 

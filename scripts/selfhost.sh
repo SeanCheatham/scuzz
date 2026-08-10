@@ -16,7 +16,7 @@ stage_checks() {
   hello_out="$("$bin" run examples/hello)"
   echo "$hello_out"
   echo "$hello_out" | grep -q "Hello, ScalUI"
-  echo "$hello_out" | grep -q "Phase 0 online"
+  echo "$hello_out" | grep -q "ready."
 
   echo "==> $stage runs examples/adt"
   adt_out="$("$bin" run examples/adt)"

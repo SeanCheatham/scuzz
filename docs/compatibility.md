@@ -44,7 +44,7 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 
 | Stage | Host | Role |
 | --- | --- | --- |
-| 0 | Rust | Bootstrap compiler + canary CLI (`crates/cli`) |
+| 0 | Rust | Bootstrap compiler + CLI (`crates/cli`) |
 | 1 | ScalUI (built by Stage 0) | `compiler-scalui/` |
 | 2 | ScalUI (built by Stage 1) | True self-host; release `scalui` |
 

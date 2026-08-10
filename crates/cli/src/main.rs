@@ -12,7 +12,7 @@ use std::process::{Command, ExitCode};
 #[command(
     name = "scalui",
     version,
-    about = "ScalUI — Stage-0 canary CLI (release CLI is compiler-scalui)"
+    about = "ScalUI — Stage-0 bootstrap CLI (release CLI is compiler-scalui)"
 )]
 struct Cli {
     #[command(subcommand)]
@@ -88,8 +88,6 @@ enum Commands {
         #[arg(long)]
         check: bool,
     },
-    /// Start the basic ScalUI language server (stdio LSP)
-    Lsp,
     /// Create a new ScalUI project
     New {
         name: String,
@@ -196,10 +194,6 @@ fn real_main() -> Result<ExitCode> {
             out_dir,
         } => fuzz_project(&path, replay.as_deref(), iters, seed, &out_dir),
         Commands::Fmt { path, check } => fmt_project(&path, check),
-        Commands::Lsp => {
-            scalui_compiler::lsp::run_stdio()?;
-            Ok(ExitCode::SUCCESS)
-        }
         Commands::New { name, path, ui } => {
             let package_name = PathBuf::from(&name)
                 .file_name()
@@ -271,7 +265,7 @@ main = "Main"
                 std::fs::write(
                     dir.join("src/Main.scala"),
                     r#"@main def main: IO[Unit] =
-  IO.println("Hello, ScalUI!").flatMap(_ => IO.println("Phase 0 online."))
+  IO.println("Hello, ScalUI!").flatMap(_ => IO.println("ready."))
 "#,
                 )?;
                 eprintln!("created {}", dir.display());
@@ -846,7 +840,7 @@ fn write_host_package(dest: &Path, exe: &Path, name: &str) -> Result<()> {
         &run_sh,
         format!(
             r#"#!/usr/bin/env bash
-# Host Mobile shell smoke (Phase 5). Same app binary; Mobile peer + host embedder.
+# Host Mobile shell smoke. Same app binary; Mobile peer + host embedder.
 set -euo pipefail
 export SCALUI_UI_RUNTIME=mobile
 export SCALUI_MOBILE_SHELL=1

@@ -41,17 +41,17 @@ jobs:
           cargo run -p scalui -- build --full examples/hello
           ./examples/hello/build/hello | tee /tmp/hello.out
           grep -q "Hello, ScalUI!" /tmp/hello.out
-          grep -q "Phase 0 online." /tmp/hello.out
+          grep -q "ready." /tmp/hello.out
 
-      - name: Phase 3–6 effects + ADT + FS + impurity + Stage-1 canary
+      - name: Effects + ADT + FS + impurity + incremental build
         run: |
           cargo run -p scalui -- run examples/effects | tee /tmp/effects.out
-          grep -q "phase3" /tmp/effects.out
+          grep -q "ref-ok" /tmp/effects.out
           grep -q "both-ok" /tmp/effects.out
           cargo run -p scalui -- run examples/adt | tee /tmp/adt.out
           grep -q "adt:red" /tmp/adt.out
           cargo run -p scalui -- run examples/fs | tee /tmp/fs.out
-          grep -q "fs:phase4-fs" /tmp/fs.out
+          grep -q "fs:fs-note" /tmp/fs.out
           cargo run -p scalui -- run examples/clock | tee /tmp/clock.out
           grep -q "real:" /tmp/clock.out
           grep -q "mono:" /tmp/clock.out
@@ -64,7 +64,7 @@ jobs:
           cargo run -p scalui -- build examples/adt 2>&1 | tee /tmp/incr.out
           grep -q "up-to-date" /tmp/incr.out
 
-      - name: Phase 4 self-host dual-boot
+      - name: Self-host dual-boot
         run: ./scripts/selfhost.sh
 
       - name: Headless UI + golden PNGs

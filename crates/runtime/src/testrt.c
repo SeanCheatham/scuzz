@@ -3,7 +3,7 @@
 #include <stdio.h>
 #include <string.h>
 
-/* TestRuntime: install / reset fake interpreters (Phase 6). */
+/* TestRuntime: install / reset fake interpreters. */
 
 void su_testrt_clock_reset_live(void);
 void su_testrt_random_reset_live(void);

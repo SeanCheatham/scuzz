@@ -719,47 +719,13 @@ impl Parser {
                 self.bump();
                 self.expect(&Token::Dot)?;
                 let method = self.expect_ident()?;
-                match method.as_str() {
-                    "runHeadless" => {
-                        let args = self.parse_args()?;
-                        if args.len() != 1 {
-                            return Err(ParseError::Msg("Ui.runHeadless expects 1 arg".into()));
-                        }
-                        Ok(Expr::UiRunHeadless(Box::new(
-                            args.into_iter().next().unwrap(),
-                        )))
-                    }
-                    "runCounter" => {
-                        if matches!(self.peek(), Token::LParen) {
-                            self.bump();
-                            self.expect(&Token::RParen)?;
-                        }
-                        Ok(Expr::UiRunCounter)
-                    }
-                    "runLive" => {
-                        if matches!(self.peek(), Token::LParen) {
-                            self.bump();
-                            self.expect(&Token::RParen)?;
-                        }
-                        Ok(Expr::UiRunLive)
-                    }
-                    "runTodo" => {
-                        if matches!(self.peek(), Token::LParen) {
-                            self.bump();
-                            self.expect(&Token::RParen)?;
-                        }
-                        Ok(Expr::UiRunTodo)
-                    }
-                    other => {
-                        let callee = format!("Ui.{other}");
-                        let args = if matches!(self.peek(), Token::LParen) {
-                            self.parse_args()?
-                        } else {
-                            Vec::new()
-                        };
-                        Ok(Expr::Call { callee, args })
-                    }
-                }
+                let callee = format!("Ui.{method}");
+                let args = if matches!(self.peek(), Token::LParen) {
+                    self.parse_args()?
+                } else {
+                    Vec::new()
+                };
+                Ok(Expr::Call { callee, args })
             }
             Token::Ident(name) if name == "Effects" => {
                 self.bump();
@@ -777,7 +743,7 @@ impl Parser {
             Token::Ident(name)
                 if matches!(
                     name.as_str(),
-                    "Str" | "List" | "Fs" | "Sys" | "Lexer" | "Clock" | "Random"
+                    "Str" | "List" | "Fs" | "Sys" | "Clock" | "Random"
                         | "Net" | "Impurity" | "Signal" | "View" | "Theme"
                 ) =>
             {
@@ -790,14 +756,6 @@ impl Parser {
                 } else {
                     Vec::new()
                 };
-                if name == "Lexer" && method == "classify" {
-                    if args.len() != 1 {
-                        return Err(ParseError::Msg("Lexer.classify expects 1 arg".into()));
-                    }
-                    return Ok(Expr::LexerClassify(Box::new(
-                        args.into_iter().next().unwrap(),
-                    )));
-                }
                 Ok(Expr::Call { callee, args })
             }
             Token::Ident(name) => {

@@ -1,4 +1,4 @@
-# embedder-mobile (Phase 5)
+# embedder-mobile
 
 OS presentation + input for `UiRuntime.Mobile`. Headless remains the CI peer for goldens.
 

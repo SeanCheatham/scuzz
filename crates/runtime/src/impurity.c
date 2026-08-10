@@ -2,7 +2,7 @@
 
 #include <stdio.h>
 
-/* Kernel demo: Clock / Random / mem FS / stub Net under TestRuntime. */
+/* Impurity kit: Clock / Random / mem FS / stub Net under TestRuntime. */
 
 static SuIo *println_env(void *value, void *env) {
   (void)value;
@@ -55,7 +55,7 @@ static SuIo *do_fs_write(void *value, void *env) {
   (void)env;
   return su_io_flatmap(
       su_fs_write(su_string_from_cstr("note.txt"),
-                  su_string_from_cstr("phase6")),
+                  su_string_from_cstr("kit-note")),
       do_fs_read, NULL);
 }
 

@@ -98,11 +98,6 @@ static void test_label_session(void) {
   su_ui_unmount(session);
   su_view_free(view);
 
-  {
-    SuIoResult r = su_io_unsafe_run(su_ui_run_headless_label("Demo", 160, 80));
-    assert(r.ok);
-  }
-
   remove(path_a);
   remove(path_b);
   remove(path_tap);
@@ -245,12 +240,10 @@ static void test_button_set_and_show_when(void) {
   su_signal_int_free(count);
 }
 
-static void test_widgets_and_demos(void) {
+static void test_widgets(void) {
   SuView *col, *scroll, *list, *field, *img, *icon;
   SuSignalStr *draft;
   const SuTheme *theme = su_theme_default();
-  SuIoResult r;
-  const char *todo_path = "/tmp/scalui_todo_test.txt";
 
   draft = su_signal_str("hi");
   col = su_view_column();
@@ -270,36 +263,6 @@ static void test_widgets_and_demos(void) {
   assert(su_view_frame(scroll).h > 0);
   su_view_free(col);
   su_signal_str_free(draft);
-
-  r = su_io_unsafe_run(su_ui_run_counter(200, 120));
-  assert(r.ok);
-
-  remove(todo_path);
-  setenv("SCALUI_TODO_PATH", todo_path, 1);
-  unsetenv("SCALUI_UI_TAP");
-  r = su_io_unsafe_run(su_ui_run_todo(240, 160));
-  assert(r.ok);
-
-  /* Seed + add + save via env scripting */
-  setenv("SCALUI_UI_TAP", "1", 1);
-  setenv("SCALUI_TODO_SEED", "eggs", 1);
-  setenv("SCALUI_TODO_SAVE", "1", 1);
-  r = su_io_unsafe_run(su_ui_run_todo(240, 160));
-  assert(r.ok);
-  {
-    FILE *f = fopen(todo_path, "r");
-    char buf[64] = {0};
-    assert(f);
-    assert(fgets(buf, sizeof buf, f));
-    assert(strncmp(buf, "eggs", 4) == 0);
-    fclose(f);
-  }
-
-  unsetenv("SCALUI_UI_TAP");
-  unsetenv("SCALUI_TODO_SEED");
-  unsetenv("SCALUI_TODO_SAVE");
-  unsetenv("SCALUI_TODO_PATH");
-  remove(todo_path);
 }
 
 static void test_mobile_pointer_scroll_lifecycle(void) {
@@ -481,7 +444,7 @@ int main(void) {
   test_label_session();
   test_signals_layout_hit();
   test_button_set_and_show_when();
-  test_widgets_and_demos();
+  test_widgets();
   test_mobile_pointer_scroll_lifecycle();
   test_a11y_and_anim();
   test_clear_and_set_texts();

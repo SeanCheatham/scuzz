@@ -8,7 +8,7 @@
 #include <string.h>
 #include <time.h>
 
-/* fill_cfg / demo_finish live in demos.c / ui.c */
+/* demo_finish lives in ui.c */
 void su_ui_resolve_headless_size(int *width, int *height, double *scale);
 void su_ui_demo_finish(SuUiSession *session);
 
