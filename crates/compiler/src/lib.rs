@@ -5,6 +5,7 @@ pub mod codegen;
 pub mod driver;
 pub mod format;
 pub mod lexer;
+pub mod lower;
 pub mod lsp;
 pub mod manifest;
 pub mod parser;

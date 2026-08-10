@@ -1,6 +1,6 @@
 //! Minimal ScalUI formatter: parse → pretty-print (kernel dialect).
 
-use crate::ast::{BinOp, EnumDef, Expr, FunDef, MatchArm, Pattern, Program, Type};
+use crate::ast::{BinOp, EnumDef, Expr, ForBinder, FunDef, MatchArm, Pattern, Program, Type};
 use crate::parser::{parse, ParseError};
 use thiserror::Error;
 
@@ -194,6 +194,32 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             let b = pretty_expr(body, indent);
             format!("{pad}val {name} = {v}\n{b}")
         }
+        Expr::For { binders, body } => {
+            let mut out = format!("{pad}for {{\n");
+            let inner = "  ".repeat(indent + 1);
+            for b in binders {
+                match b {
+                    ForBinder::Eq { name, value } => {
+                        out.push_str(&inner);
+                        out.push_str(name);
+                        out.push_str(" = ");
+                        out.push_str(pretty_expr(value, 0).trim());
+                        out.push('\n');
+                    }
+                    ForBinder::Draw { name, value } => {
+                        out.push_str(&inner);
+                        out.push_str(name);
+                        out.push_str(" <- ");
+                        out.push_str(pretty_expr(value, 0).trim());
+                        out.push('\n');
+                    }
+                }
+            }
+            out.push_str(&pad);
+            out.push_str("} yield ");
+            out.push_str(pretty_expr(body, 0).trim());
+            out
+        }
         Expr::Match { scrutinee, arms } => {
             let s = pretty_expr(scrutinee, 0).trim().to_string();
             let mut out = format!("{pad}{s} match {{\n");
@@ -278,6 +304,23 @@ enum Color:
         assert!(out.contains("package demo.color"));
         assert!(out.contains("val c = Color.Red"));
         assert!(out.contains("case Color.Red =>"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_for_roundtrip() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    count = Signal.int(0)
+    _ <- Ui.run(count)
+  } yield IO.pure(())
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("for {"));
+        assert!(out.contains("count = Signal.int(0)"));
+        assert!(out.contains("_ <- Ui.run(count)"));
+        assert!(out.contains("yield IO.pure(())"));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

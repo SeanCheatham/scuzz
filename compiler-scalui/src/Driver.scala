@@ -91,7 +91,7 @@ def compileAfterToml(projectDir: String, outDir: String, doRun: Int, runtimeDir:
   )
 
 def compileAfterSources(projectDir: String, outDir: String, doRun: Int, runtimeDir: String, clang: String, name: String, texts: List): IO[Unit] =
-  val prog = mergeSources(texts, emptyProg())
+  val prog = lowerProg(mergeSources(texts, emptyProg()))
   val ir = emitProgram(prog)
   val ll = pathJoin(outDir, Str.concat(name, ".ll"))
   val exe = pathJoin(outDir, name)

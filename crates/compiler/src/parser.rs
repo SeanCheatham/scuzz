@@ -1,5 +1,6 @@
 use crate::ast::{
-    BinOp, EnumDef, Expr, FunDef, InterpPart, MainDef, MatchArm, Param, Pattern, Program, Type,
+    BinOp, EnumDef, Expr, ForBinder, FunDef, InterpPart, MainDef, MatchArm, Param, Pattern,
+    Program, Type,
 };
 use crate::lexer::{lex, InterpTok, LexError, Token};
 use thiserror::Error;
@@ -291,15 +292,75 @@ impl Parser {
         Ok(expr)
     }
 
-    /// `if` then/else: `val`-led block (same bindings as lambda bodies), or a
-    /// single expression. Starting with `val` is required for multi-binding
-    /// branches so mid-block `val x = if … else e` does not steal following vals.
+    /// `if` then/else: `val`-led block / `for` / single expression.
+    /// Starting with `val` is required for multi-binding `val` branches so
+    /// mid-block `val x = if … else e` does not steal following vals.
     fn parse_if_branch(&mut self) -> Result<Expr, ParseError> {
         if matches!(self.peek(), Token::Val) {
             self.parse_block()
         } else {
             self.parse_expr()
         }
+    }
+
+    /// Binder name: ident or `_`.
+    fn parse_binder_name(&mut self) -> Result<String, ParseError> {
+        match self.bump() {
+            Token::Ident(s) => Ok(s),
+            Token::Underscore => Ok("_".into()),
+            other => Err(ParseError::Msg(format!(
+                "expected binder name, got {other:?}"
+            ))),
+        }
+    }
+
+    /// `for { binders… } yield expr`
+    fn parse_for(&mut self) -> Result<Expr, ParseError> {
+        self.expect(&Token::For)?;
+        self.expect(&Token::LBrace)?;
+        let mut binders = Vec::new();
+        loop {
+            match self.peek() {
+                Token::RBrace => break,
+                Token::Yield => {
+                    return Err(ParseError::Msg(
+                        "`yield` belongs after `}`: `for { … } yield e`".into(),
+                    ))
+                }
+                Token::Val => {
+                    return Err(ParseError::Msg(
+                        "bare `val` is not allowed inside `for`; use `x = e` or `x <- e`".into(),
+                    ))
+                }
+                _ => {
+                    let name = self.parse_binder_name()?;
+                    match self.peek() {
+                        Token::Eq => {
+                            self.bump();
+                            let value = self.parse_expr()?;
+                            binders.push(ForBinder::Eq { name, value });
+                        }
+                        Token::LeftArrow => {
+                            self.bump();
+                            let value = self.parse_expr()?;
+                            binders.push(ForBinder::Draw { name, value });
+                        }
+                        other => {
+                            return Err(ParseError::Msg(format!(
+                                "for binder expected `=` or `<-`, got {other:?}"
+                            )))
+                        }
+                    }
+                }
+            }
+        }
+        self.expect(&Token::RBrace)?;
+        self.expect(&Token::Yield)?;
+        let body = self.parse_expr()?;
+        Ok(Expr::For {
+            binders,
+            body: Box::new(body),
+        })
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
@@ -541,6 +602,7 @@ impl Parser {
 
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
         match self.peek().clone() {
+            Token::For => self.parse_for(),
             Token::If => {
                 self.bump();
                 self.expect(&Token::LParen)?;
@@ -987,5 +1049,66 @@ enum Color:
             }
             other => panic!("expected ListLit, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_for_eq_binders() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    count = Signal.int(0)
+    root = View.column()
+  } yield Ui.run(root)
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body {
+            Expr::For { binders, body } => {
+                assert_eq!(binders.len(), 2);
+                assert!(matches!(
+                    &binders[0],
+                    ForBinder::Eq { name, .. } if name == "count"
+                ));
+                assert!(matches!(
+                    &binders[1],
+                    ForBinder::Eq { name, .. } if name == "root"
+                ));
+                assert!(matches!(body.as_ref(), Expr::Call { callee, .. } if callee == "Ui.run"));
+            }
+            other => panic!("expected For, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_for_mixed_eq_and_draw() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    path = "/tmp/x"
+    s <- Fs.read(path)
+    _ <- IO.println(s)
+  } yield IO.pure(())
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body {
+            Expr::For { binders, .. } => {
+                assert_eq!(binders.len(), 3);
+                assert!(matches!(&binders[0], ForBinder::Eq { name, .. } if name == "path"));
+                assert!(matches!(&binders[1], ForBinder::Draw { name, .. } if name == "s"));
+                assert!(matches!(&binders[2], ForBinder::Draw { name, .. } if name == "_"));
+            }
+            other => panic!("expected For, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_for_rejects_bare_val() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    val x = 1
+  } yield IO.println("x")
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(err.to_string().contains("bare `val`"));
     }
 }

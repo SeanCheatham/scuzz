@@ -107,6 +107,11 @@ pub enum Expr {
         value: Box<Expr>,
         body: Box<Expr>,
     },
+    /// `for { binders… } yield body` — sugar over `Let` / `FlatMap` (lowered before codegen).
+    For {
+        binders: Vec<ForBinder>,
+        body: Box<Expr>,
+    },
     /// Local binding / parameter reference
     Var(String),
     /// `Color.Red` nullary ADT case
@@ -161,6 +166,15 @@ pub enum Expr {
 pub enum InterpPart {
     Lit(String),
     Expr(Expr),
+}
+
+/// Binder inside `for { … }`: `x = e` (pure) or `x <- e` (effect).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ForBinder {
+    /// `name = value`
+    Eq { name: String, value: Expr },
+    /// `name <- value` (`name` may be `"_"`)
+    Draw { name: String, value: Expr },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

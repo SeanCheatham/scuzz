@@ -9,6 +9,8 @@ pub enum Token {
     Match,
     Def,
     Val,
+    For,
+    Yield,
     If,
     Else,
     Colon,
@@ -22,6 +24,7 @@ pub enum Token {
     LBracket,
     RBracket,
     Arrow, // =>
+    LeftArrow, // <-
     Underscore,
     Plus,
     Minus,
@@ -113,6 +116,11 @@ pub fn lex(input: &str) -> Result<Vec<Token>, LexError> {
         }
         if c == '!' && i + 1 < chars.len() && chars[i + 1] == '=' {
             tokens.push(Token::BangEq);
+            i += 2;
+            continue;
+        }
+        if c == '<' && i + 1 < chars.len() && chars[i + 1] == '-' {
+            tokens.push(Token::LeftArrow);
             i += 2;
             continue;
         }
@@ -238,6 +246,8 @@ pub fn lex(input: &str) -> Result<Vec<Token>, LexError> {
                         "match" => Token::Match,
                         "def" => Token::Def,
                         "val" => Token::Val,
+                        "for" => Token::For,
+                        "yield" => Token::Yield,
                         "if" => Token::If,
                         "else" => Token::Else,
                         _ => Token::Ident(ident),
@@ -407,5 +417,14 @@ mod tests {
             }
             other => panic!("expected InterpString, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn lexes_for_yield_left_arrow() {
+        let toks = lex(r#"for { x = 1 y <- e } yield x"#).unwrap();
+        assert!(toks.iter().any(|t| matches!(t, Token::For)));
+        assert!(toks.iter().any(|t| matches!(t, Token::Yield)));
+        assert!(toks.iter().any(|t| matches!(t, Token::LeftArrow)));
+        assert!(toks.iter().any(|t| matches!(t, Token::Eq)));
     }
 }

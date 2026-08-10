@@ -290,7 +290,33 @@ def parseAttemptParen(tokens: List, expr: List, i: Int): List =
 
 def parsePrimary(tokens: List, i: Int): List =
   val t = tokAt(tokens, i)
-  if (streq(t, "If") == 1) parseIf(tokens, i + 1) else if (streq(t, "LParen") == 1) parseParen(tokens, i + 1) else if (isIntTok(t) == 1) ok(List.cons("IntLit", List.cons(intDigits(t), List.empty())), i + 1) else if (isStringTok(t) == 1) ok(List.cons("StrLit", List.cons(stringVal(t), List.empty())), i + 1) else if (streq(t, "InterpStart") == 1) parseInterp(tokens, i + 1, List.empty()) else if (streq(t, "LBracket") == 1) parseListLit(tokens, i + 1) else if (streq(t, "Minus") == 1) parseNegInt(tokens, i + 1) else if (streq(t, "Underscore") == 1) if (isTok(tokens, i + 1, "Arrow") == 1) parseLambdaExpr(tokens, i + 1, "_") else ok(unitExpr(), i + 1) else if (isIdentTok(t) == 1) parsePrimaryIdent(tokens, i, t) else ok(unitExpr(), i)
+  if (streq(t, "For") == 1) parseFor(tokens, i + 1) else if (streq(t, "If") == 1) parseIf(tokens, i + 1) else if (streq(t, "LParen") == 1) parseParen(tokens, i + 1) else if (isIntTok(t) == 1) ok(List.cons("IntLit", List.cons(intDigits(t), List.empty())), i + 1) else if (isStringTok(t) == 1) ok(List.cons("StrLit", List.cons(stringVal(t), List.empty())), i + 1) else if (streq(t, "InterpStart") == 1) parseInterp(tokens, i + 1, List.empty()) else if (streq(t, "LBracket") == 1) parseListLit(tokens, i + 1) else if (streq(t, "Minus") == 1) parseNegInt(tokens, i + 1) else if (streq(t, "Underscore") == 1) if (isTok(tokens, i + 1, "Arrow") == 1) parseLambdaExpr(tokens, i + 1, "_") else ok(unitExpr(), i + 1) else if (isIdentTok(t) == 1) parsePrimaryIdent(tokens, i, t) else ok(unitExpr(), i)
+
+def parseBinderName(tokens: List, i: Int): List =
+  if (isTok(tokens, i, "Underscore") == 1) okStr("_", i + 1) else parseIdent(tokens, i)
+
+def parseFor(tokens: List, i: Int): List =
+  val i1 = expectTok(tokens, i, "LBrace")
+  val bindersP = parseForBinders(tokens, i1, List.empty())
+  val i2 = expectTok(tokens, pIdx(bindersP), "RBrace")
+  val i3 = expectTok(tokens, i2, "Yield")
+  val bodyP = parseExpr(tokens, i3)
+  ok(List.cons("For", List.cons(pAst(bindersP), List.cons(pAst(bodyP), List.empty()))), pIdx(bodyP))
+
+def parseForBinders(tokens: List, i: Int, acc: List): List =
+  if (isTok(tokens, i, "RBrace") == 1) ok(List.reverse(acc), i) else if (isTok(tokens, i, "Yield") == 1) ok(List.reverse(acc), i) else if (isTok(tokens, i, "Val") == 1) ok(List.reverse(acc), i) else parseForBinder(tokens, i, acc)
+
+def parseForBinder(tokens: List, i: Int, acc: List): List =
+  val nameP = parseBinderName(tokens, i)
+  if (isTok(tokens, pIdx(nameP), "Eq") == 1) parseForBinderEq(tokens, pIdx(nameP) + 1, pStr(nameP), acc) else if (isTok(tokens, pIdx(nameP), "LeftArrow") == 1) parseForBinderDraw(tokens, pIdx(nameP) + 1, pStr(nameP), acc) else ok(List.reverse(acc), pIdx(nameP))
+
+def parseForBinderEq(tokens: List, i: Int, name: String, acc: List): List =
+  val valueP = parseExpr(tokens, i)
+  parseForBinders(tokens, pIdx(valueP), List.cons(List.cons("Eq", List.cons(name, List.cons(pAst(valueP), List.empty()))), acc))
+
+def parseForBinderDraw(tokens: List, i: Int, name: String, acc: List): List =
+  val valueP = parseExpr(tokens, i)
+  parseForBinders(tokens, pIdx(valueP), List.cons(List.cons("Draw", List.cons(name, List.cons(pAst(valueP), List.empty()))), acc))
 
 def parseInterp(tokens: List, i: Int, acc: List): List =
   val t = tokAt(tokens, i)

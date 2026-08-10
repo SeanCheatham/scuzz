@@ -286,6 +286,9 @@ fn infer(
             }
             Ok(Type::Io(Box::new(Type::Unit)))
         }
+        Expr::For { .. } => Err(TypeError::Msg(
+            "internal: unlowered `for` (run lower before typecheck)".into(),
+        )),
     }
 }
 

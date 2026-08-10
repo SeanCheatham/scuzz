@@ -318,6 +318,15 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         | Expr::Var(_)
         | Expr::IntLit(_)
         | Expr::AdtConstruct { .. } => {}
+        Expr::For { binders, body } => {
+            for b in binders {
+                match b {
+                    crate::ast::ForBinder::Eq { value, .. }
+                    | crate::ast::ForBinder::Draw { value, .. } => collect_strings(value, out),
+                }
+            }
+            collect_strings(body, out);
+        }
     }
 }
 
@@ -849,6 +858,7 @@ fn emit_expr(
         Expr::Lambda { param, body } => emit_lambda(param, body, ctx, locals, prefix),
         Expr::Binary { op, left, right } => emit_binary(op, left, right, ctx, locals, prefix),
         Expr::Call { callee, args } => emit_call(callee, args, ctx, locals, prefix),
+        Expr::For { .. } => panic!("internal: unlowered `for` in codegen"),
         Expr::Match { scrutinee, arms } => {
             let se = emit_expr(scrutinee, ctx, locals, &format!("{prefix}_sc"));
             let id = *ctx.cont_id;

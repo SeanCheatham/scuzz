@@ -1,4 +1,5 @@
 use crate::codegen::emit_llvm;
+use crate::lower::lower_program;
 use crate::manifest::{load_manifest, Manifest};
 use crate::parser::parse_sources;
 use crate::typ::typecheck;
@@ -92,6 +93,7 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
 
     let program =
         parse_sources(&named).map_err(|e| anyhow::anyhow!("parse error: {e}"))?;
+    let program = lower_program(program);
     typecheck(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let ir = emit_llvm(&program);

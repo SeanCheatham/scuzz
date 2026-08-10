@@ -13,7 +13,7 @@ def skipLineComment(source: String, i: Int): Int =
   if (i >= Str.len(source)) i else if (Str.charAt(source, i) == 10) skipTrivia(source, i + 1) else skipLineComment(source, i + 1)
 
 def kwToken(name: String): String =
-  if (streq(name, "package") == 1) "Package" else if (streq(name, "enum") == 1) "Enum" else if (streq(name, "case") == 1) "Case" else if (streq(name, "match") == 1) "Match" else if (streq(name, "def") == 1) "Def" else if (streq(name, "val") == 1) "Val" else if (streq(name, "if") == 1) "If" else if (streq(name, "else") == 1) "Else" else Str.concat("Ident:", name)
+  if (streq(name, "package") == 1) "Package" else if (streq(name, "enum") == 1) "Enum" else if (streq(name, "case") == 1) "Case" else if (streq(name, "match") == 1) "Match" else if (streq(name, "def") == 1) "Def" else if (streq(name, "val") == 1) "Val" else if (streq(name, "for") == 1) "For" else if (streq(name, "yield") == 1) "Yield" else if (streq(name, "if") == 1) "If" else if (streq(name, "else") == 1) "Else" else Str.concat("Ident:", name)
 
 def lexIdentEnd(source: String, i: Int): Int =
   if (i >= Str.len(source)) i else if (isIdentChar(Str.charAt(source, i)) == 1) lexIdentEnd(source, i + 1) else i
@@ -69,7 +69,7 @@ def lexAtBang(source: String, i: Int, acc: List): List =
   if (peekEq(source, i + 1, 61) == 1) lexAt(source, i + 2, List.cons("BangEq", acc)) else lexAt(source, i + 1, acc)
 
 def lexAtLt(source: String, i: Int, acc: List): List =
-  if (peekEq(source, i + 1, 61) == 1) lexAt(source, i + 2, List.cons("LtEq", acc)) else lexAt(source, i + 1, List.cons("Lt", acc))
+  if (peekEq(source, i + 1, 61) == 1) lexAt(source, i + 2, List.cons("LtEq", acc)) else if (peekEq(source, i + 1, 45) == 1) lexAt(source, i + 2, List.cons("LeftArrow", acc)) else lexAt(source, i + 1, List.cons("Lt", acc))
 
 def lexAtGt(source: String, i: Int, acc: List): List =
   if (peekEq(source, i + 1, 61) == 1) lexAt(source, i + 2, List.cons("GtEq", acc)) else lexAt(source, i + 1, List.cons("Gt", acc))
