@@ -4,6 +4,7 @@ on:
   push:
     branches: [main]
   pull_request:
+  workflow_dispatch:
 
 jobs:
   linux-headless:
@@ -197,7 +198,10 @@ jobs:
             ./examples/counter/build/package/host/run.sh 2>&1 | tee /tmp/pkg-host.out
           grep -q "scalui mobile: present" /tmp/pkg-host.out
 
+  # macOS is 10× Linux Actions minutes; skip on push/PR until we ship Darwin more seriously.
+  # Trigger manually: Actions → ci → Run workflow.
   macos:
+    if: github.event_name == 'workflow_dispatch'
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
