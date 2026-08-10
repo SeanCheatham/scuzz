@@ -11,7 +11,7 @@
 - Counter/Todo/nav as ScalUI `Signal` / `View` / `Ui.run`
 - Closed impurity boundary: `Clock` / `Random` / `Fs` / `Net` / `Sys` / `IO.println` + `TestRuntime` fakes
 - Animation + accessibility hooks (Headless-dumpable); theme polish tokens
-- Stage-1 CLI: `build|run|test|watch|new|package|fmt` (`compiler-scalui`); Stage-0 Rust for bootstrap + `fuzz`
+- Stage-1 CLI: `build|run|test|fuzz|watch|new|package|fmt` (`compiler-scalui`); Stage-0 Rust for bootstrap only
 - Deterministic fuzz: `scalui fuzz` (seeded event scripts + `--replay repro.toml`) on TestRuntime + Headless
 - Skia prebuilts via `SCALUI_SKIA_URL` (default: in-tree `sk_sw`)
 - Impeller deferred (see `docs/vision.md`)
@@ -65,7 +65,7 @@ cargo run -p scalui -- test examples/counter
 env SCALUI_TESTRT=1 cargo run -p scalui -- run examples/fs
 
 # Deterministic fuzz (seeded event scripts; --replay build/fuzz/repro.toml on failure)
-cargo run -p scalui -- fuzz --iters 16 examples/todo
+scalui fuzz --iters 16 examples/todo
 
 # Dual-boot gate (Stage 1 → Stage 2: smoke + goldens + fmt parity + IR fixpoint)
 ./scripts/selfhost.sh
@@ -110,7 +110,7 @@ cargo run -p scalui -- run --headless examples/live
 ```
 docs/                     vision, guide, compatibility, scalui.toml schema
 crates/compiler/          Stage-0 parser / typer / LLVM codegen
-crates/cli/               Stage-0 scalui tool (bootstrap + fuzz)
+crates/cli/               Stage-0 scalui tool (bootstrap)
 crates/runtime/           C runtime (IO kit, impurity, View/Ui)
 crates/ffi-skia/          sk_capi + CPU software backend
 crates/embedder-desktop/  Linux X11 / macOS Cocoa present for Window peer
