@@ -257,6 +257,8 @@ dependencies = [
  "anyhow",
  "clap",
  "scalui-compiler",
+ "serde",
+ "toml",
 ]
 
 [[package]]
