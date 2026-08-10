@@ -1,6 +1,6 @@
 # ScalUI runtime (C)
 
-Minimal native runtime linked into Stage-0 binaries. Design locks: ADR 0001 (GC), 0003 (IO errors), 0004 (`Ui`/`View`).
+Minimal native runtime linked into Stage-0 binaries. Design locks: [`docs/vision.md`](../../docs/vision.md) (GC, IO errors, `Ui`/`View`).
 
 ## Contents
 

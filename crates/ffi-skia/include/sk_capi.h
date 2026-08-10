@@ -1,4 +1,4 @@
-/* Thin Skia-shaped C ABI for ScalUI (ADR 0002).
+/* Thin Skia-shaped C ABI for ScalUI.
  *
  * Phase 1 ships a CPU software implementation (sk_sw) behind this header so
  * Headless CI works without downloading multi‑GB Skia trees. A future fetch of

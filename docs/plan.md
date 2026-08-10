@@ -1,50 +1,45 @@
 # ScalUI plan — next steps
 
-Phases 0–6 and the post–Phase-6 credibility slice (self-host gate, dialect ergonomics, honest CLI, TOML parsing, List literals + language Todo) are landed. v0 app path works; Stage-0 remains a canary. This plan orders the next gaps so language and product credibility keep ahead of platform breadth.
-
-Ordered by priority; each workstream lists its done-when gate.
+Phases 0–6 landed; v0 app path works; Stage-0 is a canary. Ordered by priority; each item has a done-when gate. Product intent and design locks: [`vision.md`](vision.md).
 
 ## 1. Port `scalui fmt` to Stage 1
 
-README already marks `fmt` as canary-only. That honesty is fine for a week; it is not fine for v1.
-
-- Port `crates/compiler/src/format.rs` into the kernel dialect (`compiler-scalui/`), or emit a thin Stage-1 driver that pretty-prints via the same AST shapes Stage 1 already builds.
+- Port formatter into the kernel dialect (`compiler-scalui/`), or a thin Stage-1 driver over AST shapes Stage 1 already builds.
 - Default `scalui fmt` / `fmt --check` must not require `SCALUI_CANARY`.
 - Keep Stage-0 formatter as CI canary only.
 
 Done when: `scalui fmt --check` on `examples/` and `compiler-scalui/src` succeeds via Stage 1/2 with no canary env, and README drops the canary caveat.
 
-## 2. Block-shaped `if` / expression statements
+## 2. Todo tap ergonomics (expr-shaped)
 
-List-mutation taps still contort around “`if` branches are single exprs.” Mid-block `val` exists; branch bodies do not accept the same block grammar.
+List-mutation taps still contort around single-expr `if` arms. Prefer the [language direction](vision.md#language-direction): bind before the branch, expression arms, nested `for` if needed — **do not** grow statement-block / mid-branch `val` grammar as the long-term fix.
 
-- Then/else branches parse as blocks (same rules as lambda / `let` bodies): leading `val`s, mid-block statement exprs, final expr.
-- No brace syntax — keep the newline/indent-free kernel style; just allow `val` after `else` the same way lambda bodies do.
-- Rewrite `examples/todo` Add tap to the obvious multi-`val` else form once branches accept it.
+- Unblock `examples/todo` Add tap without hoisting flags.
+- Keep Stage 0 + Stage 1 dual-boot green.
 
-Done when: a tap body can `else`-bind multiple `val`s without hoisting flags, and Stage 0 + Stage 1 dual-boot stays green.
+Done when: Todo Add tap is readable in-kernel without flag hoisting, dual-boot green.
 
 ## 3. Language-facing list ↔ View sync
 
-Todo is append-only (`View.addTexts` + `addChild`). Real lists need replace/clear without a C controller.
+Todo is append-only (`View.addTexts` + `addChild`). Need replace/clear without a C controller.
 
-- `View.clearChildren(view)` (or equivalent rebuild) in runtime + both compilers.
-- Enough surface to rebuild a `View.list` from a `Signal.list` in ScalUI (helper def or small builtin).
-- Keep Headless goldens for Todo green under replace-style updates (edit/remove at least one item in the example or a sibling).
+- `View.clearChildren` (or equivalent) in runtime + both compilers.
+- Rebuild a `View.list` from a `Signal.list` in ScalUI.
+- Headless goldens stay green under replace-style updates (edit/remove at least one item).
 
-Done when: Todo (or a successor example) can reload/replace items from `Fs.read` + `Str.lines` without append-only assumptions or new C controllers.
+Done when: Todo (or sibling) reloads/replaces items from `Fs.read` + `Str.lines` without append-only assumptions or new C controllers.
 
-## 4. App developer docs slice
+## 4. Short app guide
 
-Vision still points at an effects/language guide that is not a durable in-tree surface for app authors.
+- One short guide under `docs/` (kernel + blessed `IO` + `View`/`Ui` Headless path) linked from README.
+- Cover: `scalui new --ui` → test → run --headless; Signal/View/list taps; TestRuntime; where canary still matters (`fmt` until §1).
 
-- One short guide under `docs/` (language kernel + blessed `IO` + `View`/`Ui` Headless path) linked from README — not a second vision, not per-crate READMEs.
-- Cover: `scalui new --ui` → test → run --headless; Signal/View/list taps; impurity boundary + `TestRuntime`; where Stage-0 canary still matters (`fmt` until §1 lands).
+Done when: README → guide → Counter/Todo works without reading all of `vision.md`.
 
-Done when: a new contributor can follow README → guide → Counter/Todo without reading ADRs first.
+## Deferred
 
-## Deferred (do not start)
-
-- GC revisit beyond malloc/free (ADR 0001) — wait for long-lived interactive apps to pressure it.
-- Windows embedder, device NDK/Xcode builds, Impeller (ADR 0002) — platform breadth after §1–§3.
-- Reactive framework sugar (automatic View←Signal list binding) — only after explicit clear/rebuild exists.
+- GC beyond malloc/free — when long-lived interactive apps pressure it ([vision](vision.md#gc-v0))
+- Windows embedder, device NDK/Xcode, Impeller — after §1–§3 ([vision](vision.md#skia))
+- Reactive View←Signal list sugar — after explicit clear/rebuild
+- `scalui fuzz` — after stable tap labels + deterministic event scripts ([vision](vision.md#scalui-fuzz-aspirational))
+- Expr-dialect/`for` binder cutover — when ready to churn kernel forwards-only ([vision](vision.md#language-direction))

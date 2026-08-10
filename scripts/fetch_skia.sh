@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# Fetch prebuilt Skia static libs for ScalUI (ADR 0002).
+# Fetch prebuilt Skia static libs for ScalUI.
 #
 # Default: no download — crates/ffi-skia ships a CPU software backend (sk_sw)
-# that implements include/sk_capi.h (ADR 0002). When hosted prebuilts exist, set:
+# that implements include/sk_capi.h. When hosted prebuilts exist, set:
 #
 #   SCALUI_SKIA_URL=https://…/skia-linux-x64-cpu.tar.gz
 #   SCALUI_SKIA_TRIPLE=x86_64-unknown-linux-gnu   # optional

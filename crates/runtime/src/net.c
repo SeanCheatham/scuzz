@@ -11,7 +11,7 @@
 #include <unistd.h>
 
 /* Blessed Net.httpGet — live HTTP/1.0 GET or TestRuntime stub map.
- * Error code 6 (see ADR 0003). */
+ * Error code 6 (see docs/vision.md IO errors). */
 
 typedef struct {
   int is_err;

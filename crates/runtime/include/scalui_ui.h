@@ -9,7 +9,7 @@
 extern "C" {
 #endif
 
-/* UiRuntime peer interpreters (ADR 0004). Headless is first-class. */
+/* UiRuntime peer interpreters. Headless is first-class. */
 typedef enum SuUiRuntimeKind {
   SU_UI_RUNTIME_HEADLESS = 1,
   SU_UI_RUNTIME_WINDOW = 2,
