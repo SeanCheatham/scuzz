@@ -912,13 +912,13 @@ def add1(n: Int): Int = n + 1
         let p = parse(src).unwrap();
         match &p.main.body {
             Expr::Let { body, .. } => match body.as_ref() {
-                Expr::If {
-                    else_branch: box Expr::Let { name, body, .. },
-                    ..
-                } => {
-                    assert_eq!(name, "a");
-                    assert!(matches!(body.as_ref(), Expr::Let { name, .. } if name == "b"));
-                }
+                Expr::If { else_branch, .. } => match else_branch.as_ref() {
+                    Expr::Let { name, body, .. } => {
+                        assert_eq!(name, "a");
+                        assert!(matches!(body.as_ref(), Expr::Let { name, .. } if name == "b"));
+                    }
+                    other => panic!("expected let-else, got {other:?}"),
+                },
                 other => panic!("expected if with let-else, got {other:?}"),
             },
             other => panic!("expected let, got {other:?}"),
@@ -935,13 +935,13 @@ def add1(n: Int): Int = n + 1
 "#;
         let p = parse(src).unwrap();
         match &p.main.body {
-            Expr::Let {
-                name,
-                value: box Expr::If { .. },
-                body: box Expr::Let { name: draft, .. },
-            } => {
+            Expr::Let { name, value, body } => {
                 assert_eq!(name, "path");
-                assert_eq!(draft, "draft");
+                assert!(matches!(value.as_ref(), Expr::If { .. }));
+                match body.as_ref() {
+                    Expr::Let { name: draft, .. } => assert_eq!(draft, "draft"),
+                    other => panic!("expected draft let, got {other:?}"),
+                }
             }
             other => panic!("expected path if + draft let, got {other:?}"),
         }
