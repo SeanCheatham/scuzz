@@ -8,9 +8,9 @@ Edit this file when a decision or next-step ordering changes.
 
 ## Thesis
 
-- **Language**: purposeful Scala-inspired subset for UI apps and native codegen, with **built-in effect/IO** (Cats Effect spirit, not a cats port). Aim: denser expr dialect (`for` as primary binder) — see [Language direction](#language-direction) below.
+- **Language**: purposeful Scala-inspired subset for UI apps, native CLI/server-shaped `IO` programs, and native codegen, with **built-in effect/IO** (Cats Effect spirit, not a cats port). Aim: denser expr dialect (`for` as primary binder) — see [Language direction](#language-direction) below.
 - **Runtime**: custom native (LLVM). No JVM, no Java interop, no classpath/Maven.
-- **UI**: one design language + Skia, as a **`Ui` effect** with Headless/Window/Mobile interpreters.
+- **UI**: primary product face — one design language + Skia, as a **`Ui` effect** with Headless/Window/Mobile interpreters.
 - **Tooling**: one CLI (`scalui`) for compile, link, assets, hot reload, packaging, deterministic `scalui fuzz`.
 - **Bootstrap**: self-host is a hard goal. Stage-0 (Rust) exists only to get there.
 
@@ -39,7 +39,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 
 ## Success bars
 
-**v0** — Install CLI → `scalui new` → Counter/Todo as `View` + builtin `IO` → `scalui test` (Headless) and `scalui run --headless` → `scalui run` opens a window when available.
+**v0** — Install CLI → `scalui new --ui` → Counter/Todo as `View` + builtin `IO` → `scalui test` (Headless) and `scalui run --headless` → `scalui run` opens a window when available. (`scalui new` without `--ui` is the IO hello path today; full first-class IO packaging is post-v0 — see [Open work](#open-work).)
 
 **v1** — Stage-2 self-host; release builds do not need Rust Stage-0 except as CI bootstrap.
 
@@ -65,6 +65,15 @@ One failure channel: `SuError` (message + optional code) on `IO`. Ops: `flatMap`
 | **`Ui` / `UiSession`** | `mount` / `pump` / `inject` / `snapshot` | Effectful (`UiRuntime`) |
 
 Headless is a **peer** of Window/Mobile, not a test-only shim. Frame boundary is `pump`. World effects stay blessed `IO`; bridge into signals via `su_ui_bridge_post_*`. No UI feature without a Headless path. Taps: `View.button(label, _ => …)` first-class lambdas. Prefer `Signal.list` + `View.each` (framework-owned list reconciliation at layout). Derived display: `Signal.map` + `View.bindText`.
+
+### IO apps vs Headless
+
+| Path | Meaning |
+| --- | --- |
+| **Headless** | `UiRuntime` peer — still `View` / Skia / structural dumps; CI path for UI |
+| **IO-only** | No `[ui]`, no `Ui.run`; `scalui run` just execs the `@main: IO[Unit]` binary |
+
+IO-only is **not** a fourth runtime peer. Plain `IO` programs already run today (`scalui new`, `examples/hello`, Fs/Clock/Net kits). First-class productization (deferred): docs/CLI naming, IO test smoke (not a11y goldens), Skia-free link when `[ui]` is absent, argv/stdin kit when needed.
 
 ### Kernel dialect
 
@@ -141,6 +150,7 @@ Primary goldens are **structural** (signal store + a11y view dump). PNG pixels a
 ## Open work
 
 - Prebuilt Stage-1 release artifacts
+- First-class IO/CLI apps (docs + IO test smoke; Skia-free link; argv/stdin) — after v0 UI / Stage-1 release artifacts
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
 
@@ -155,5 +165,6 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-onl
 | “Almost Scala” confusion | Explicit non-goals; language direction above; [guide.md](guide.md) |
 | Skia weight | `sk_sw` + optional prebuilts |
 | Window-only features | Headless peer rule |
+| Diluting Flutter-shaped focus | UI stays the v0 bar; IO is substrate + deferred productization |
 | GC vs frame budget | `pump` boundary; measure |
 | Mobile packaging | Host Mobile peer first; device toolchains later |
