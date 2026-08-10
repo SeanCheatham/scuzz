@@ -1,14 +1,14 @@
 #!/usr/bin/env bash
-# Install Stage-1 `scalui` into PREFIX (default: ~/.local).
+# Install Stage-2 `scalui` into PREFIX (default: ~/.local).
 #
 # Installs a self-contained release tree under $PREFIX/share/scalui and a
 # wrapper at $PREFIX/bin/scalui that sets SCALUI_HOME. App builds need
 # clang/make; Rust/cargo is not required when installing from a prebuilt
 # artifact (RELEASE_TGZ / RELEASE_DIR).
 #
-# From a checkout (default): builds/packages Stage-1 via package_release.sh,
-# then installs that tree. Self-host: SCALUI_BOOTSTRAP (or an existing
-# compiler-scalui/build/scalui) rebuilds without Stage 0.
+# From a checkout (default): builds/packages Stage 2 via package_release.sh,
+# then installs that tree. Stage 0 is used only when no ScalUI bootstrap
+# binary is available (SCALUI_BOOTSTRAP or compiler-scalui/build/scalui).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PREFIX="${PREFIX:-$HOME/.local}"
@@ -44,7 +44,7 @@ resolve_release_dir() {
     return
   fi
 
-  echo "==> packaging Stage-1 release (no RELEASE_DIR / RELEASE_TGZ)" >&2
+  echo "==> packaging Stage-2 release (no RELEASE_DIR / RELEASE_TGZ)" >&2
   DIST_ROOT="${DIST_ROOT:-$ROOT/dist}" \
     SCALUI_BOOTSTRAP="${SCALUI_BOOTSTRAP:-}" \
     "$ROOT/scripts/package_release.sh" >&2
@@ -81,6 +81,9 @@ chmod +x "$WRAPPER"
 
 echo "installed $WRAPPER"
 echo "  SCALUI_HOME=$SHARE"
+if [[ -f "$SHARE/VERSION" ]]; then
+  echo "  $(tr '\n' ' ' <"$SHARE/VERSION")"
+fi
 echo "Ensure $BIN is on PATH (clang + make required to build apps), then:"
 echo "  scalui new myapp --ui"
 echo "  cd myapp && scalui test && scalui run --headless"

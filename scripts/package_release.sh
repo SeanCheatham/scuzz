@@ -1,8 +1,13 @@
 #!/usr/bin/env bash
-# Assemble a self-contained Stage-1 release tree + tarball under dist/.
-# Layout matches SCALUI_HOME expectations in the Stage-1 CLI (crates/ + scripts/).
-# Host needs clang/make to link apps; Rust/cargo only needed to *build* this package
-# unless SCALUI_BOOTSTRAP (or compiler-scalui/build/scalui) is already present.
+# Assemble a self-contained Stage-2 release tree + tarball under dist/.
+#
+# The shipped `scalui` is always built by ScalUI itself (Stage 1 → Stage 2).
+# Stage 0 (Rust/cargo) is used only when no ScalUI bootstrap binary is available
+# (CI bootstrap / fresh checkout). Layout matches SCALUI_HOME expectations
+# (crates/ + scripts/). Host needs clang/make to link apps.
+#
+# Optional: SCALUI_BOOTSTRAP=/path/to/scalui skips Stage 0 (use Stage 1 from
+# selfhost.sh, or any prior ScalUI CLI that can rebuild compiler-scalui).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
@@ -13,33 +18,47 @@ NAME="scalui-$TRIPLE"
 OUT="$DIST_ROOT/$NAME"
 TGZ="$DIST_ROOT/$NAME.tar.gz"
 
+STAGE1_TMP=""
+cleanup() {
+  if [[ -n "$STAGE1_TMP" && -f "$STAGE1_TMP" ]]; then
+    rm -f "$STAGE1_TMP"
+  fi
+}
+trap cleanup EXIT
+
+# Copy a ScalUI CLI aside so a rebuild can overwrite compiler-scalui/build/scalui.
+stage1_from() {
+  local src="$1"
+  STAGE1_TMP="$(mktemp "${TMPDIR:-/tmp}/scalui-stage1.XXXXXX")"
+  cp -f "$src" "$STAGE1_TMP"
+  chmod +x "$STAGE1_TMP"
+}
+
 BOOTSTRAP="${SCALUI_BOOTSTRAP:-}"
 if [[ -z "$BOOTSTRAP" && -x "$ROOT/compiler-scalui/build/scalui" ]]; then
   BOOTSTRAP="$ROOT/compiler-scalui/build/scalui"
 fi
 
 if [[ -n "$BOOTSTRAP" && -x "$BOOTSTRAP" ]]; then
-  if [[ "$BOOTSTRAP" -ef "$ROOT/compiler-scalui/build/scalui" ]]; then
-    TMP_BOOTSTRAP="$(mktemp "${TMPDIR:-/tmp}/scalui-bootstrap.XXXXXX")"
-    cp -f "$BOOTSTRAP" "$TMP_BOOTSTRAP"
-    chmod +x "$TMP_BOOTSTRAP"
-    BOOTSTRAP="$TMP_BOOTSTRAP"
-  fi
-  echo "==> building Stage-1 CLI (self-build via $BOOTSTRAP; no Stage 0)"
-  "$BOOTSTRAP" build compiler-scalui
+  echo "==> using ScalUI bootstrap: $BOOTSTRAP"
+  stage1_from "$BOOTSTRAP"
 else
-  echo "==> building Stage-1 CLI (via Stage-0 bootstrap; SCALUI_BOOTSTRAP skips cargo)"
+  echo "==> Stage 0 builds Stage 1 (set SCALUI_BOOTSTRAP to skip cargo)"
   cargo run -p scalui -- build --full compiler-scalui
+  test -x "$ROOT/compiler-scalui/build/scalui"
+  stage1_from "$ROOT/compiler-scalui/build/scalui"
 fi
 
-STAGE1="$ROOT/compiler-scalui/build/scalui"
-test -x "$STAGE1"
+echo "==> Stage 1 rebuilds compiler-scalui (Stage 2 — release binary)"
+"$STAGE1_TMP" build compiler-scalui
+STAGE2="$ROOT/compiler-scalui/build/scalui"
+test -x "$STAGE2"
 
 echo "==> assembling $OUT"
 rm -rf "$OUT"
 mkdir -p "$OUT/bin" "$OUT/crates" "$OUT/scripts"
 
-cp -f "$STAGE1" "$OUT/bin/scalui"
+cp -f "$STAGE2" "$OUT/bin/scalui"
 chmod +x "$OUT/bin/scalui"
 
 copy_crate() {
@@ -75,6 +94,7 @@ chmod +x "$OUT/scripts/run_goldens.sh" "$OUT/scripts/package_project.sh"
 # package_project.sh resolves ROOT from scripts/.. — works inside the release tree.
 {
   echo "triple=$TRIPLE"
+  echo "stage=2"
   echo "built=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 } >"$OUT/VERSION"
 
@@ -82,7 +102,7 @@ echo "==> writing $TGZ"
 mkdir -p "$DIST_ROOT"
 tar -C "$DIST_ROOT" -czf "$TGZ" "$NAME"
 
-echo "packaged $OUT"
+echo "packaged $OUT (Stage 2)"
 echo "  tarball $TGZ"
 echo "Install with: RELEASE_TGZ=$TGZ ./scripts/install.sh"
 echo "  or:        RELEASE_DIR=$OUT ./scripts/install.sh"

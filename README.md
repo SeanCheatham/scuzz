@@ -11,8 +11,8 @@
 - Counter/Todo/nav as ScalUI `Signal` / `View` / `Ui.run`; IO-only apps via `scalui new` (no `--ui`)
 - Closed impurity boundary: `Clock` / `Random` / `Fs` / `Net` / `Sys` (args/readLine) / `IO.println` + `TestRuntime` fakes
 - Animation + accessibility hooks (Headless-dumpable); theme polish tokens
-- Stage-1 CLI: `build|run|test|check|fuzz|watch|new|package|fmt` (`compiler-scalui`); Stage-0 Rust for bootstrap only
-- Prebuilt Stage-1 release tree (`scripts/package_release.sh` → `dist/scalui-<triple>.tar.gz`); `install.sh` installs under `PREFIX/share/scalui`
+- Stage-2 CLI (release): `build|run|test|check|fuzz|watch|new|package|fmt` (`compiler-scalui`); Stage-0 Rust for bootstrap only
+- Prebuilt Stage-2 release tree (`scripts/package_release.sh` → `dist/scalui-<triple>.tar.gz`); `install.sh` installs under `PREFIX/share/scalui`
 - Deterministic fuzz: `scalui fuzz` (seeded `--iters`, bounded `--exhaust --depth N`, `--replay repro.toml`) on TestRuntime + Headless
 - Structural goldens (signal store + a11y dump); PNG optional via `scalui test --pixels`; IO packages use TESTRT exit-0 smoke
 - Skia linked for `[ui]` packages only (IO-only link is Skia-free); prebuilts via `SCALUI_SKIA_URL` (default: in-tree `sk_sw`)
@@ -24,10 +24,10 @@ App authors: [docs/guide.md](docs/guide.md).
 
 Requirements to **build** from this checkout: Rust (stable), `clang`, `make`. Optional for Window: Linux X11 (`libx11-dev` + display / `xvfb-run`) or macOS GUI session (Cocoa).
 
-Installed apps only need `clang` + `make` (and the Stage-1 release tree under `SCALUI_HOME`).
+Installed apps only need `clang` + `make` (and the Stage-2 release tree under `SCALUI_HOME`).
 
 ```bash
-# Package + install Stage-1 CLI + SDK (SCALUI_HOME → ~/.local/share/scalui)
+# Package + install Stage-2 CLI + SDK (SCALUI_HOME → ~/.local/share/scalui)
 ./scripts/install.sh
 # ensure ~/.local/bin is on PATH
 

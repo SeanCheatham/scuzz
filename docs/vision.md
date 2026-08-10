@@ -27,7 +27,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 | Effects | Language + runtime builtins |
 | Impurity | All nondeterminism / external I/O through blessed `IO`; no app-level `IO.delay` escape hatch |
 | Tests | TestRuntime fakes (clock/random/FS/net/console) for deterministic replay |
-| Self-host | Stage 0 → 1 → 2 on the critical path |
+| Self-host | Stage 0 → 1 → 2 on the critical path; **release ships Stage 2** |
 | UI model | Pure `View` + effectful `Ui` session (`mount` / `pump` / `inject` / `snapshot`) |
 
 ## What ScalUI is not
@@ -41,7 +41,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 
 **v0** — Install CLI → `scalui new --ui` → Counter/Todo as `View` + builtin `IO` → `scalui test` (Headless) and `scalui run --headless` → `scalui run` opens a window when available. IO-only path: `scalui new` (no `--ui`) → `scalui test` (TESTRT smoke) → `scalui run`.
 
-**v1** — Stage-2 self-host; release builds do not need Rust Stage-0 except as CI bootstrap.
+**v1** — Stage-2 self-host as the shipped `scalui` (`package_release.sh` / `install.sh`); Rust Stage-0 is CI/bootstrap only. Dual-boot gate: `scripts/selfhost.sh`.
 
 ## Decisions
 
@@ -148,6 +148,8 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 Primary goldens are **structural** (signal store + a11y view dump). PNG pixels are optional (`scalui test --pixels`). IO packages (no `[ui]`): `scalui test` is compile + `SCALUI_TESTRT=1` exit-0 smoke. Agent-facing: `scalui check` (typecheck only) and `--message-format=json`.
 
 ## Open work
+
+Path `[dependencies]`, deeper UI (Flutter-style constraints when the widget set grows), and Windows desktop embedder stay deferred — pick the next vertical slice when needed.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
 
