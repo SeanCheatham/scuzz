@@ -7,7 +7,7 @@ def isFlag(s: String): Int =
   if (startsWith(s, "--") == 1) 1 else 0
 
 def positionalAt(args: List, i: Int, n: Int): String =
-  if (i >= List.len(args)) "." else if (streq(List.at(args, i), "--path") == 1) positionalAt(args, i + 2, n) else if (isFlag(List.at(args, i)) == 1) positionalAt(args, i + 1, n) else if (n == 0) List.at(args, i) else positionalAt(args, i + 1, n - 1)
+  if (i >= List.len(args)) "." else if (streq(List.at(args, i), "--path") == 1) positionalAt(args, i + 2, n) else if (streq(List.at(args, i), "--target") == 1) positionalAt(args, i + 2, n) else if (isFlag(List.at(args, i)) == 1) positionalAt(args, i + 1, n) else if (n == 0) List.at(args, i) else positionalAt(args, i + 1, n - 1)
 
 def defaultProject(args: List): String =
   positionalAt(args, 1, 0)
