@@ -48,7 +48,21 @@ chmod +x "$STAGE1"
 echo "==> Stage 0 fmt --check (compiler-scalui sources)"
 cargo run -p scalui -- fmt --check compiler-scalui
 
+echo "==> Stage 0 rejects ill-typed program"
+if cargo run -p scalui -- build testdata/typecheck/bad_main 2>/tmp/scalui-bad0.err; then
+  echo "expected type error from Stage 0" >&2
+  exit 1
+fi
+grep -q "arithmetic needs Int" /tmp/scalui-bad0.err
+
 stage_checks "Stage 1" "$STAGE1"
+
+echo "==> Stage 1 rejects ill-typed program"
+if "$STAGE1" build testdata/typecheck/bad_main 2>/tmp/scalui-bad1.err; then
+  echo "expected type error from Stage 1" >&2
+  exit 1
+fi
+grep -q "arithmetic needs Int" /tmp/scalui-bad1.err
 
 echo "==> Stage 1 rebuilds compiler-scalui (Stage 2)"
 "$STAGE1" build compiler-scalui

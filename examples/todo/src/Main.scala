@@ -7,7 +7,7 @@ def setAt(xs: List, i: Int, v: String): List =
       path = if (Str.len(envPath) == 0) "/tmp/scalui_todo.txt" else envPath
       draft = Signal.str("")
       items = Signal.list([])
-      list = View.list()
+      list = View.each(items)
       root = View.column()
       _ = View.addChild(root, View.text("Todo"))
       row = View.row()
@@ -21,15 +21,13 @@ def setAt(xs: List, i: Int, v: String): List =
           for {
             xs = List.append(Signal.getList(items), d)
             _ = Signal.setList(items, xs)
-            _ = View.setTexts(list, xs)
           } yield Signal.setStr(draft, "")
       ))
       _ = View.addChild(row, View.button("Rename", _ =>
         for {
           xs = Signal.getList(items)
           ys = setAt(xs, 0, "oat milk")
-          _ = Signal.setList(items, ys)
-        } yield View.setTexts(list, ys)
+        } yield Signal.setList(items, ys)
       ))
       _ = View.addChild(root, row)
       _ = View.addChild(root, View.scroll(list))
@@ -40,15 +38,12 @@ def setAt(xs: List, i: Int, v: String): List =
         } yield Fs.write(path, body)
       ))
       _ = View.addChild(root, View.button("Clear", _ =>
-        for {
-          _ = Signal.setList(items, [])
-        } yield View.clearChildren(list)
+        Signal.setList(items, [])
       ))
       text <- Fs.read(path).handleErrorWith(_ => IO.pure(""))
       loaded0 = Str.lines(text)
       loaded = if (List.isEmpty(loaded0) == 1) ["milk"] else loaded0
       _ = Signal.setList(items, loaded)
-      _ = View.setTexts(list, loaded)
       _ <- Ui.run(root)
     } yield ()
   )

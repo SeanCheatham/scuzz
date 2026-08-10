@@ -1,0 +1,10 @@
+[signals]
+int[0] = 1
+int[1] = 0
+str[2] = "count = 0"
+str[3] = "page = 1"
+
+[views]
+button:Home
+button:Other
+text:Other

@@ -145,6 +145,8 @@ SuView *su_view_text_field(SuSignalStr *text, const char *placeholder);
 SuView *su_view_column(void);
 SuView *su_view_row(void);
 SuView *su_view_list(void);
+/* Reactive list: children rebuilt from Signal.list at layout (`- item` texts). */
+SuView *su_view_each(SuSignalList *sig);
 SuView *su_view_scroll(SuView *child);
 SuView *su_view_image(int w, int h, uint32_t argb, const char *caption);
 SuView *su_view_icon(char glyph, uint32_t argb);
@@ -241,15 +243,22 @@ SuView *su_lang_view_button(SuString *label, SuViewTapFn tap, void *env);
 SuView *su_lang_view_column(void);
 SuView *su_lang_view_row(void);
 SuView *su_lang_view_list(void);
+SuView *su_lang_view_each(SuSignalList *sig);
 SuView *su_lang_view_scroll(SuView *child);
 SuView *su_lang_view_text_field(SuSignalStr *text, SuString *placeholder);
 SuView *su_lang_view_icon(int64_t glyph, int64_t argb);
 SuView *su_lang_view_image(int64_t w, int64_t h, int64_t argb, SuString *caption);
 void *su_lang_view_add_child(SuView *parent, SuView *child);
 void *su_lang_view_add_texts(SuView *parent, SuList *lines);
+/* C/test helpers; app code uses View.each instead. */
 void *su_lang_view_clear_children(SuView *parent);
 void *su_lang_view_set_texts(SuView *parent, SuList *lines);
 SuView *su_lang_view_show_when(SuSignalInt *sig, int64_t value, SuView *child);
+
+/* Derived Signal.str from Signal.int (recomputed on get / dump). */
+typedef SuString *(*SuSignalMapIntFn)(int64_t v, void *env);
+SuSignalStr *su_lang_signal_map(SuSignalInt *src, SuSignalMapIntFn fn, void *env);
+SuView *su_lang_view_bind_text(SuSignalStr *sig);
 
 /* Mount prebuilt root → pump → optional scripted tap → snapshot → unmount. */
 SuIo *su_ui_run_view(SuView *root);

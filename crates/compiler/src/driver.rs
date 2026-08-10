@@ -178,7 +178,7 @@ fn fingerprint_sources(sources: &[(String, String)], package: &str) -> String {
     format!("{:016x}", h.finish())
 }
 
-fn find_sources(project_dir: &Path) -> Result<Vec<PathBuf>> {
+pub fn find_sources(project_dir: &Path) -> Result<Vec<PathBuf>> {
     let src = project_dir.join("src");
     if !src.is_dir() {
         bail!("missing src/ in {}", project_dir.display());

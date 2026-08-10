@@ -81,6 +81,8 @@ SuView *su_lang_view_row(void) { return su_view_row(); }
 
 SuView *su_lang_view_list(void) { return su_view_list(); }
 
+SuView *su_lang_view_each(SuSignalList *sig) { return su_view_each(sig); }
+
 SuView *su_lang_view_scroll(SuView *child) { return su_view_scroll(child); }
 
 SuView *su_lang_view_text_field(SuSignalStr *text, SuString *placeholder) {
@@ -124,6 +126,8 @@ void *su_lang_view_set_texts(SuView *parent, SuList *lines) {
 SuView *su_lang_view_show_when(SuSignalInt *sig, int64_t value, SuView *child) {
   return su_view_show_when(sig, value, child);
 }
+
+SuView *su_lang_view_bind_text(SuSignalStr *sig) { return su_view_text_signal_str(sig); }
 
 /* --- Ui.run -------------------------------------------------------------- */
 

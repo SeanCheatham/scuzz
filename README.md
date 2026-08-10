@@ -11,8 +11,9 @@
 - Counter/Todo/nav as ScalUI `Signal` / `View` / `Ui.run`
 - Closed impurity boundary: `Clock` / `Random` / `Fs` / `Net` / `Sys` / `IO.println` + `TestRuntime` fakes
 - Animation + accessibility hooks (Headless-dumpable); theme polish tokens
-- Stage-1 CLI: `build|run|test|fuzz|watch|new|package|fmt` (`compiler-scalui`); Stage-0 Rust for bootstrap only
+- Stage-1 CLI: `build|run|test|check|fuzz|watch|new|package|fmt` (`compiler-scalui`); Stage-0 Rust for bootstrap only
 - Deterministic fuzz: `scalui fuzz` (seeded event scripts + `--replay repro.toml`) on TestRuntime + Headless
+- Structural goldens (signal store + a11y dump); PNG optional via `scalui test --pixels`
 - Skia prebuilts via `SCALUI_SKIA_URL` (default: in-tree `sk_sw`)
 - Impeller deferred (see `docs/vision.md`)
 
@@ -58,7 +59,7 @@ cargo run -p scalui -- run examples/clock
 # Counter (Headless snapshot, no display)
 cargo run -p scalui -- run --headless examples/counter
 
-# Golden PNG tests (use --update to rewrite goldens)
+# Golden tests (structural dumps; use --update to rewrite; --pixels for PNGs)
 cargo run -p scalui -- test examples/counter
 
 # Optional: install process-wide TestRuntime for an app binary

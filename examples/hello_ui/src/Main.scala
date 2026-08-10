@@ -1,9 +1,10 @@
 @main def main: IO[Unit] =
   for {
     n = Signal.int(0)
+    label = Signal.map(n, x => s"taps = $x")
     root = View.column(
       View.text("Hello Headless"),
-      View.textSignal(n, "taps = "),
+      View.bindText(label),
       View.button("tap", _ => Signal.set(n, Signal.get(n) + 1))
     )
     _ <- Ui.run(root)

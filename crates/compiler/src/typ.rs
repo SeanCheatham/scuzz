@@ -66,7 +66,7 @@ fn infer(
                     crate::ast::InterpPart::Lit(_) => {}
                     crate::ast::InterpPart::Expr(e) => {
                         let t = infer(e, enums, funs, env)?;
-                        if !matches!(t, Type::String | Type::Int) {
+                        if !matches!(t, Type::String | Type::Int | Type::Opaque(_)) {
                             return Err(TypeError::Msg(format!(
                                 "interpolation hole must be String or Int, got {t:?}"
                             )));
@@ -76,11 +76,11 @@ fn infer(
             }
             Ok(Type::String)
         },
-        Expr::IoPrintln(_)
-        | Expr::IoDelayUnit
-        | Expr::IoSleep(_)
-        | Expr::IoFail(_)
-        | Expr::EffectsRunKit => Ok(Type::Io(Box::new(Type::Unit))),
+        Expr::IoPrintln(e) | Expr::IoSleep(e) | Expr::IoFail(e) => {
+            let _ = infer(e, enums, funs, env)?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
+        Expr::IoDelayUnit | Expr::EffectsRunKit => Ok(Type::Io(Box::new(Type::Unit))),
         Expr::IoPure(inner) => {
             let t = infer(inner, enums, funs, env)?;
             Ok(Type::Io(Box::new(t)))
@@ -245,9 +245,14 @@ fn infer(
             Ok(Type::Io(Box::new(Type::Opaque("Either".into()))))
         }
         Expr::Lambda { param, body } => {
-            let old = param
-                .as_ref()
-                .map(|p| (p.clone(), env.insert(p.clone(), Type::Opaque("View".into()))));
+            // Param type is context-dependent (View for taps, Int for Signal.map).
+            // Bind as Opaque so both map and tap lambdas typecheck.
+            let old = param.as_ref().map(|p| {
+                (
+                    p.clone(),
+                    env.insert(p.clone(), Type::Opaque("Param".into())),
+                )
+            });
             let _ = infer(body, enums, funs, env)?;
             if let Some((p, old_val)) = old {
                 match old_val {
@@ -467,14 +472,17 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::List)?;
             Ok(Type::Unit)
         }
+        "Signal.map" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            Ok(Type::Opaque("SignalStr".into()))
+        }
         "View.text" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::Opaque("View".into()))
         }
-        "View.textSignal" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            expect_ty(&arg_tys[1], &Type::String)?;
+        "View.bindText" => {
+            expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Opaque("View".into()))
         }
         "View.button" => {
@@ -499,6 +507,10 @@ fn infer_call(
         }
         "View.list" => {
             expect_arity(callee, &arg_tys, 0)?;
+            Ok(Type::Opaque("View".into()))
+        }
+        "View.each" => {
+            expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Opaque("View".into()))
         }
         "View.scroll" => {
@@ -529,15 +541,6 @@ fn infer_call(
             Ok(Type::Unit)
         }
         "View.addTexts" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            expect_ty(&arg_tys[1], &Type::List)?;
-            Ok(Type::Unit)
-        }
-        "View.clearChildren" => {
-            expect_arity(callee, &arg_tys, 1)?;
-            Ok(Type::Unit)
-        }
-        "View.setTexts" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[1], &Type::List)?;
             Ok(Type::Unit)
