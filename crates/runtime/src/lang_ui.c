@@ -111,6 +111,16 @@ void *su_lang_view_add_texts(SuView *parent, SuList *lines) {
   return NULL;
 }
 
+void *su_lang_view_clear_children(SuView *parent) {
+  su_view_clear_children(parent);
+  return NULL;
+}
+
+void *su_lang_view_set_texts(SuView *parent, SuList *lines) {
+  su_view_clear_children(parent);
+  return su_lang_view_add_texts(parent, lines);
+}
+
 SuView *su_lang_view_show_when(SuSignalInt *sig, int64_t value, SuView *child) {
   return su_view_show_when(sig, value, child);
 }

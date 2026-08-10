@@ -1,4 +1,3 @@
-// Two-panel nav: lambda taps + showWhen + stay-open Ui.run (Window).
 @main def main: IO[Unit] =
   val page = Signal.int(0)
   val count = Signal.int(0)

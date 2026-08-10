@@ -1,173 +1,112 @@
 package scalui.compiler
 
-// Minimal TOML subset for scalui.toml: tables, quoted strings, ints, int arrays.
-// Tolerates whitespace around keys/`=` so reformatted manifests still parse.
-// Kernel dialect: no `val` inside bare if branches.
-
 def tomlSkip(s: String, i: Int): Int =
-  if (i >= Str.len(s)) i
-  else tomlSkipCont(s, i, Str.charAt(s, i))
+  if (i >= Str.len(s)) i else tomlSkipCont(s, i, Str.charAt(s, i))
 
 def tomlSkipCont(s: String, i: Int, c: Int): Int =
-  if (c == 32) tomlSkip(s, i + 1)
-  else if (c == 9) tomlSkip(s, i + 1)
-  else if (c == 10) tomlSkip(s, i + 1)
-  else if (c == 13) tomlSkip(s, i + 1)
-  else if (c == 35) tomlSkip(s, tomlSkipLine(s, i + 1))
-  else i
+  if (c == 32) tomlSkip(s, i + 1) else if (c == 9) tomlSkip(s, i + 1) else if (c == 10) tomlSkip(s, i + 1) else if (c == 13) tomlSkip(s, i + 1) else if (c == 35) tomlSkip(s, tomlSkipLine(s, i + 1)) else i
 
 def tomlSkipLine(s: String, i: Int): Int =
-  if (i >= Str.len(s)) i
-  else if (Str.charAt(s, i) == 10) i + 1
-  else tomlSkipLine(s, i + 1)
+  if (i >= Str.len(s)) i else if (Str.charAt(s, i) == 10) i + 1 else tomlSkipLine(s, i + 1)
 
 def tomlSectionStart(s: String, name: String): Int =
   tomlFindSection(s, 0, name)
 
 def tomlFindSection(s: String, i: Int, name: String): Int =
-  if (i >= Str.len(s)) 0 - 1
-  else tomlFindSectionAt(s, tomlSkip(s, i), name)
+  if (i >= Str.len(s)) 0 - 1 else tomlFindSectionAt(s, tomlSkip(s, i), name)
 
 def tomlFindSectionAt(s: String, j: Int, name: String): Int =
-  if (j >= Str.len(s)) 0 - 1
-  else if (Str.charAt(s, j) == 91) tomlMatchSection(s, j + 1, name)
-  else tomlFindSection(s, tomlSkipLine(s, j), name)
+  if (j >= Str.len(s)) 0 - 1 else if (Str.charAt(s, j) == 91) tomlMatchSection(s, j + 1, name) else tomlFindSection(s, tomlSkipLine(s, j), name)
 
 def tomlMatchSection(s: String, i: Int, name: String): Int =
   tomlMatchSectionAt(s, tomlSkip(s, i), name)
 
 def tomlMatchSectionAt(s: String, j: Int, name: String): Int =
-  if (startsWith(Str.slice(s, j, Str.len(s)), name) == 0) tomlFindSection(s, j, name)
-  else tomlMatchSectionClose(s, tomlSkip(s, j + Str.len(name)), name)
+  if (startsWith(Str.slice(s, j, Str.len(s)), name) == 0) tomlFindSection(s, j, name) else tomlMatchSectionClose(s, tomlSkip(s, j + Str.len(name)), name)
 
 def tomlMatchSectionClose(s: String, k: Int, name: String): Int =
-  if (k >= Str.len(s)) 0 - 1
-  else if (Str.charAt(s, k) == 93) k + 1
-  else tomlFindSection(s, k, name)
+  if (k >= Str.len(s)) 0 - 1 else if (Str.charAt(s, k) == 93) k + 1 else tomlFindSection(s, k, name)
 
 def tomlSectionEnd(s: String, i: Int): Int =
-  if (i >= Str.len(s)) i
-  else tomlSectionEndAt(s, tomlSkip(s, i))
+  if (i >= Str.len(s)) i else tomlSectionEndAt(s, tomlSkip(s, i))
 
 def tomlSectionEndAt(s: String, j: Int): Int =
-  if (j >= Str.len(s)) j
-  else if (Str.charAt(s, j) == 91) j
-  else tomlSectionEnd(s, tomlSkipLine(s, j))
+  if (j >= Str.len(s)) j else if (Str.charAt(s, j) == 91) j else tomlSectionEnd(s, tomlSkipLine(s, j))
 
 def tomlGetString(s: String, section: String, key: String, fallback: String): String =
   tomlGetStringAt(s, tomlSectionStart(s, section), key, fallback)
 
 def tomlGetStringAt(s: String, start: Int, key: String, fallback: String): String =
-  if (start < 0) fallback
-  else tomlScanString(s, start, tomlSectionEnd(s, start), key, fallback)
+  if (start < 0) fallback else tomlScanString(s, start, tomlSectionEnd(s, start), key, fallback)
 
 def tomlScanString(s: String, i: Int, end: Int, key: String, fallback: String): String =
-  if (i >= end) fallback
-  else tomlScanStringAt(s, tomlSkip(s, i), end, key, fallback)
+  if (i >= end) fallback else tomlScanStringAt(s, tomlSkip(s, i), end, key, fallback)
 
 def tomlScanStringAt(s: String, j: Int, end: Int, key: String, fallback: String): String =
-  if (j >= end) fallback
-  else if (Str.charAt(s, j) == 91) fallback
-  else if (startsWith(Str.slice(s, j, Str.len(s)), key) == 1)
-    tomlParseStringValue(s, tomlSkip(s, j + Str.len(key)), fallback)
-  else tomlScanString(s, tomlSkipLine(s, j), end, key, fallback)
+  if (j >= end) fallback else if (Str.charAt(s, j) == 91) fallback else if (startsWith(Str.slice(s, j, Str.len(s)), key) == 1) tomlParseStringValue(s, tomlSkip(s, j + Str.len(key)), fallback) else tomlScanString(s, tomlSkipLine(s, j), end, key, fallback)
 
 def tomlParseStringValue(s: String, i: Int, fallback: String): String =
   tomlParseStringValueAt(s, tomlSkip(s, i), fallback)
 
 def tomlParseStringValueAt(s: String, j: Int, fallback: String): String =
-  if (j >= Str.len(s)) fallback
-  else if (Str.charAt(s, j) != 61) fallback
-  else tomlParseStringAfterEq(s, tomlSkip(s, j + 1), fallback)
+  if (j >= Str.len(s)) fallback else if (Str.charAt(s, j) != 61) fallback else tomlParseStringAfterEq(s, tomlSkip(s, j + 1), fallback)
 
 def tomlParseStringAfterEq(s: String, k: Int, fallback: String): String =
-  if (k >= Str.len(s)) fallback
-  else if (Str.charAt(s, k) != 34) fallback
-  else readUntilQuote(s, k + 1, "")
+  if (k >= Str.len(s)) fallback else if (Str.charAt(s, k) != 34) fallback else readUntilQuote(s, k + 1, "")
 
 def tomlGetInt(s: String, section: String, key: String, fallback: String): String =
   tomlGetIntAt(s, tomlSectionStart(s, section), key, fallback)
 
 def tomlGetIntAt(s: String, start: Int, key: String, fallback: String): String =
-  if (start < 0) fallback
-  else tomlScanInt(s, start, tomlSectionEnd(s, start), key, fallback)
+  if (start < 0) fallback else tomlScanInt(s, start, tomlSectionEnd(s, start), key, fallback)
 
 def tomlScanInt(s: String, i: Int, end: Int, key: String, fallback: String): String =
-  if (i >= end) fallback
-  else tomlScanIntAt(s, tomlSkip(s, i), end, key, fallback)
+  if (i >= end) fallback else tomlScanIntAt(s, tomlSkip(s, i), end, key, fallback)
 
 def tomlScanIntAt(s: String, j: Int, end: Int, key: String, fallback: String): String =
-  if (j >= end) fallback
-  else if (Str.charAt(s, j) == 91) fallback
-  else if (startsWith(Str.slice(s, j, Str.len(s)), key) == 1)
-    tomlParseIntValue(s, tomlSkip(s, j + Str.len(key)), fallback)
-  else tomlScanInt(s, tomlSkipLine(s, j), end, key, fallback)
+  if (j >= end) fallback else if (Str.charAt(s, j) == 91) fallback else if (startsWith(Str.slice(s, j, Str.len(s)), key) == 1) tomlParseIntValue(s, tomlSkip(s, j + Str.len(key)), fallback) else tomlScanInt(s, tomlSkipLine(s, j), end, key, fallback)
 
 def tomlParseIntValue(s: String, i: Int, fallback: String): String =
   tomlParseIntValueAt(s, tomlSkip(s, i), fallback)
 
 def tomlParseIntValueAt(s: String, j: Int, fallback: String): String =
-  if (j >= Str.len(s)) fallback
-  else if (Str.charAt(s, j) != 61) fallback
-  else tomlParseIntAfterEq(s, tomlSkip(s, j + 1), fallback)
+  if (j >= Str.len(s)) fallback else if (Str.charAt(s, j) != 61) fallback else tomlParseIntAfterEq(s, tomlSkip(s, j + 1), fallback)
 
 def tomlParseIntAfterEq(s: String, k: Int, fallback: String): String =
-  if (k >= Str.len(s)) fallback
-  else if (isDigit(Str.charAt(s, k)) == 0) fallback
-  else tomlTakeDigits(s, k, "")
+  if (k >= Str.len(s)) fallback else if (isDigit(Str.charAt(s, k)) == 0) fallback else tomlTakeDigits(s, k, "")
 
 def tomlTakeDigits(s: String, i: Int, acc: String): String =
-  if (i >= Str.len(s)) acc
-  else if (isDigit(Str.charAt(s, i)) == 1)
-    tomlTakeDigits(s, i + 1, Str.concat(acc, Str.slice(s, i, i + 1)))
-  else acc
+  if (i >= Str.len(s)) acc else if (isDigit(Str.charAt(s, i)) == 1) tomlTakeDigits(s, i + 1, Str.concat(acc, Str.slice(s, i, i + 1))) else acc
 
 def tomlGetArrayInt(s: String, section: String, key: String, which: Int, fallback: String): String =
   tomlGetArrayIntAt(s, tomlSectionStart(s, section), key, which, fallback)
 
 def tomlGetArrayIntAt(s: String, start: Int, key: String, which: Int, fallback: String): String =
-  if (start < 0) fallback
-  else tomlScanArray(s, start, tomlSectionEnd(s, start), key, which, fallback)
+  if (start < 0) fallback else tomlScanArray(s, start, tomlSectionEnd(s, start), key, which, fallback)
 
 def tomlScanArray(s: String, i: Int, end: Int, key: String, which: Int, fallback: String): String =
-  if (i >= end) fallback
-  else tomlScanArrayAt(s, tomlSkip(s, i), end, key, which, fallback)
+  if (i >= end) fallback else tomlScanArrayAt(s, tomlSkip(s, i), end, key, which, fallback)
 
 def tomlScanArrayAt(s: String, j: Int, end: Int, key: String, which: Int, fallback: String): String =
-  if (j >= end) fallback
-  else if (Str.charAt(s, j) == 91) fallback
-  else if (startsWith(Str.slice(s, j, Str.len(s)), key) == 1)
-    tomlParseArrayValue(s, tomlSkip(s, j + Str.len(key)), which, fallback)
-  else tomlScanArray(s, tomlSkipLine(s, j), end, key, which, fallback)
+  if (j >= end) fallback else if (Str.charAt(s, j) == 91) fallback else if (startsWith(Str.slice(s, j, Str.len(s)), key) == 1) tomlParseArrayValue(s, tomlSkip(s, j + Str.len(key)), which, fallback) else tomlScanArray(s, tomlSkipLine(s, j), end, key, which, fallback)
 
 def tomlParseArrayValue(s: String, i: Int, which: Int, fallback: String): String =
   tomlParseArrayValueAt(s, tomlSkip(s, i), which, fallback)
 
 def tomlParseArrayValueAt(s: String, j: Int, which: Int, fallback: String): String =
-  if (j >= Str.len(s)) fallback
-  else if (Str.charAt(s, j) != 61) fallback
-  else tomlParseArrayAfterEq(s, tomlSkip(s, j + 1), which, fallback)
+  if (j >= Str.len(s)) fallback else if (Str.charAt(s, j) != 61) fallback else tomlParseArrayAfterEq(s, tomlSkip(s, j + 1), which, fallback)
 
 def tomlParseArrayAfterEq(s: String, k: Int, which: Int, fallback: String): String =
-  if (k >= Str.len(s)) fallback
-  else if (Str.charAt(s, k) != 91) fallback
-  else tomlArrayNth(s, k + 1, which, fallback)
+  if (k >= Str.len(s)) fallback else if (Str.charAt(s, k) != 91) fallback else tomlArrayNth(s, k + 1, which, fallback)
 
 def tomlArrayNth(s: String, i: Int, which: Int, fallback: String): String =
   tomlArrayNthAt(s, tomlSkip(s, i), which, fallback)
 
 def tomlArrayNthAt(s: String, j: Int, which: Int, fallback: String): String =
-  if (j >= Str.len(s)) fallback
-  else if (Str.charAt(s, j) == 93) fallback
-  else if (isDigit(Str.charAt(s, j)) == 1) tomlArrayNthTake(s, j, which, fallback, "")
-  else tomlArrayNth(s, j + 1, which, fallback)
+  if (j >= Str.len(s)) fallback else if (Str.charAt(s, j) == 93) fallback else if (isDigit(Str.charAt(s, j)) == 1) tomlArrayNthTake(s, j, which, fallback, "") else tomlArrayNth(s, j + 1, which, fallback)
 
 def tomlArrayNthTake(s: String, i: Int, which: Int, fallback: String, acc: String): String =
-  if (i >= Str.len(s)) fallback
-  else if (isDigit(Str.charAt(s, i)) == 1)
-    tomlArrayNthTake(s, i + 1, which, fallback, Str.concat(acc, Str.slice(s, i, i + 1)))
-  else if (which == 0) acc
-  else tomlArrayNth(s, i, 0, fallback)
+  if (i >= Str.len(s)) fallback else if (isDigit(Str.charAt(s, i)) == 1) tomlArrayNthTake(s, i + 1, which, fallback, Str.concat(acc, Str.slice(s, i, i + 1))) else if (which == 0) acc else tomlArrayNth(s, i, 0, fallback)
 
 def readTomlName(toml: String): String =
   tomlGetString(toml, "package", "name", "app")
@@ -183,3 +122,4 @@ def readTomlHeadlessH(toml: String): String =
 
 def hasUiSection(toml: String): Int =
   if (tomlSectionStart(toml, "ui") < 0) 0 else 1
+

@@ -10,4 +10,4 @@ main = "Main"
 default_runtime = "headless"
 headless_size = [240, 160]
 headless_scale = 1.0
-tap_text = "milk"
+tap_button = 1

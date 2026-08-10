@@ -450,6 +450,33 @@ static void test_a11y_and_anim(void) {
   su_view_free(col);
 }
 
+static void test_clear_and_set_texts(void) {
+  SuView *list;
+  SuString *dump;
+  SuList *lines;
+
+  list = su_view_list();
+  su_view_add_child(list, su_view_text("old"));
+  dump = su_view_a11y_dump(list);
+  assert(strstr(su_string_cstr(dump), "text:old") != NULL);
+
+  su_view_clear_children(list);
+  dump = su_view_a11y_dump(list);
+  assert(strstr(su_string_cstr(dump), "text:old") == NULL);
+
+  lines = su_list_cons(su_string_from_cstr("milk"),
+                       su_list_cons(su_string_from_cstr("eggs"), su_list_nil()));
+  su_lang_view_set_texts(list, lines);
+  dump = su_view_a11y_dump(list);
+  assert(strstr(su_string_cstr(dump), "text:- milk") != NULL);
+  assert(strstr(su_string_cstr(dump), "text:- eggs") != NULL);
+
+  su_lang_view_clear_children(list);
+  dump = su_view_a11y_dump(list);
+  assert(strstr(su_string_cstr(dump), "text:- milk") == NULL);
+  su_view_free(list);
+}
+
 int main(void) {
   test_label_session();
   test_signals_layout_hit();
@@ -457,6 +484,7 @@ int main(void) {
   test_widgets_and_demos();
   test_mobile_pointer_scroll_lifecycle();
   test_a11y_and_anim();
+  test_clear_and_set_texts();
   puts("runtime ui tests ok");
   return 0;
 }
