@@ -20,6 +20,10 @@ struct SuSignalInt {
 
 struct SuSignalStr {
   char *value;
+  /* Derived from Signal.int via map (recomputed on get). */
+  SuSignalInt *map_src;
+  SuSignalMapIntFn map_fn;
+  void *map_env;
 };
 
 struct SuSignalList {
@@ -153,21 +157,31 @@ void su_signal_int_free(SuSignalInt *s) {
 }
 
 SuSignalStr *su_signal_str(const char *initial) {
-  SuSignalStr *s = (SuSignalStr *)su_alloc(sizeof(SuSignalStr));
+  SuSignalStr *s = (SuSignalStr *)su_alloc_zero(sizeof(SuSignalStr));
   s->value = su_strdup(initial);
   sig_register(SIG_STR, s);
   return s;
 }
 
 void su_signal_str_set(SuSignalStr *s, const char *v) {
-  if (!s)
+  if (!s || s->map_fn)
     return;
   su_free(s->value);
   s->value = su_strdup(v);
 }
 
 const char *su_signal_str_get(const SuSignalStr *s) {
-  return s && s->value ? s->value : "";
+  SuSignalStr *mut;
+  if (!s)
+    return "";
+  if (s->map_fn && s->map_src) {
+    SuString *out;
+    mut = (SuSignalStr *)s;
+    out = s->map_fn(su_signal_int_get(s->map_src), s->map_env);
+    su_free(mut->value);
+    mut->value = su_strdup(out ? su_string_cstr(out) : "");
+  }
+  return s->value ? s->value : "";
 }
 
 void su_signal_str_free(SuSignalStr *s) {
@@ -176,6 +190,18 @@ void su_signal_str_free(SuSignalStr *s) {
   sig_unregister(s);
   su_free(s->value);
   su_free(s);
+}
+
+SuSignalStr *su_lang_signal_map(SuSignalInt *src, SuSignalMapIntFn fn, void *env) {
+  SuSignalStr *s = (SuSignalStr *)su_alloc_zero(sizeof(SuSignalStr));
+  s->map_src = src;
+  s->map_fn = fn;
+  s->map_env = env;
+  s->value = su_strdup("");
+  sig_register(SIG_STR, s);
+  /* Prime cached value. */
+  (void)su_signal_str_get(s);
+  return s;
 }
 
 SuSignalList *su_signal_list(SuList *initial) {

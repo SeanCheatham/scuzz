@@ -2,6 +2,7 @@
 
 #include "sk_capi.h"
 
+#include <stdint.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -51,6 +52,10 @@ struct SuView {
   /* showWhen: when show_when_sig != NULL, visible iff signal == show_when_value */
   SuSignalInt *show_when_sig;
   int64_t show_when_value;
+
+  /* View.each: rebuild children from Signal.list at layout (pull). */
+  SuSignalList *each_sig;
+  SuList *each_seen; /* last synced list pointer (not owned) */
 };
 
 static SuView *view_new(SuViewKind kind) {
@@ -225,6 +230,32 @@ SuView *su_view_list(void) {
   return v;
 }
 
+SuView *su_view_each(SuSignalList *sig) {
+  SuView *v = su_view_list();
+  v->each_sig = sig;
+  /* Sentinel: force first sync even when the list is empty (NULL). */
+  v->each_seen = (SuList *)(uintptr_t)1;
+  return v;
+}
+
+static void sync_each(SuView *v) {
+  SuList *xs;
+  SuList *p;
+  if (!v || !v->each_sig)
+    return;
+  xs = su_signal_list_get(v->each_sig);
+  if (xs == v->each_seen)
+    return;
+  su_view_clear_children(v);
+  for (p = xs; p; p = p->tail) {
+    SuString *s = (SuString *)p->head;
+    char line[256];
+    snprintf(line, sizeof line, "- %s", s ? su_string_cstr(s) : "");
+    su_view_add_child(v, su_view_text(line));
+  }
+  v->each_seen = xs;
+}
+
 SuView *su_view_scroll(SuView *child) {
   SuView *v = view_new(SU_VIEW_SCROLL);
   v->pref_h = 64.f;
@@ -378,6 +409,8 @@ static void layout_node(SuView *v, float x, float y, float max_w, float max_h,
     float inner_w = max_w - theme->pad * 2.f;
     float h = theme->pad;
     int shown = 0;
+    if (v->kind == SU_VIEW_LIST)
+      sync_each(v);
     if (inner_w < 0)
       inner_w = 0;
     for (i = 0; i < v->child_count; i++) {

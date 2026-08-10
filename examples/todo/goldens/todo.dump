@@ -1,0 +1,14 @@
+[signals]
+str[0] = ""
+list[1] = ["milk"]
+
+[views]
+text:Todo
+textfield:item
+button:Add
+button:Rename
+scroll:scroll
+list:list
+text:- milk
+button:Save
+button:Clear

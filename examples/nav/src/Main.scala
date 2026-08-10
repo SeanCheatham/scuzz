@@ -2,14 +2,16 @@
   for {
     page = Signal.int(0)
     count = Signal.int(0)
+    countLabel = Signal.map(count, n => s"count = $n")
+    pageLabel = Signal.map(page, n => s"page = $n")
     home = View.column(
       View.text("Home"),
-      View.textSignal(count, "count = "),
+      View.bindText(countLabel),
       View.button("+1", _ => Signal.set(count, Signal.get(count) + 1))
     )
     other = View.column(
       View.text("Other"),
-      View.textSignal(page, "page = ")
+      View.bindText(pageLabel)
     )
     root = View.column(
       View.row(

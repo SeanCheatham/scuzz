@@ -20,7 +20,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 
 | Topic | Choice |
 | --- | --- |
-| UI testing / CI | `UiRuntime.Headless` first; Window/Mobile are alternate interpreters |
+| UI testing / CI | Structural dumps (signal + a11y) first; PNG optional via `--pixels` |
 | Codegen | LLVM IR |
 | Renderer (v0) | Skia via thin C ABI; Impeller deferred |
 | Build tool | DIY Mill/Cargo-like: `scalui` (not sbt/Maven) |
@@ -64,7 +64,7 @@ One failure channel: `SuError` (message + optional code) on `IO`. Ops: `flatMap`
 | **`View`** | Widget tree | Sync/pure `build` |
 | **`Ui` / `UiSession`** | `mount` / `pump` / `inject` / `snapshot` | Effectful (`UiRuntime`) |
 
-Headless is a **peer** of Window/Mobile, not a test-only shim. Frame boundary is `pump`. World effects stay blessed `IO`; bridge into signals via `su_ui_bridge_post_*`. No UI feature without a Headless path. Taps: `View.button(label, _ => …)` first-class lambdas. Prefer List + Signal over one-off C controllers. List rebuild helpers: `View.clearChildren` / `View.setTexts`.
+Headless is a **peer** of Window/Mobile, not a test-only shim. Frame boundary is `pump`. World effects stay blessed `IO`; bridge into signals via `su_ui_bridge_post_*`. No UI feature without a Headless path. Taps: `View.button(label, _ => …)` first-class lambdas. Prefer `Signal.list` + `View.each` (framework-owned list reconciliation at layout). Derived display: `Signal.map` + `View.bindText`.
 
 ### Kernel dialect
 
@@ -75,7 +75,7 @@ Subset used by compiler sources and bootstrap examples. New features land in Sta
 - No `val` / statement blocks / `var` — expression dialect only.
 - `if` / `match`; literals incl. list `[a,b,c]` and `s"…"`
 - Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
-- Builtins: `Str.*`, `List.*`, Fs/Sys/Clock/Random/Net, `Signal.*`, `View.*` (incl. nested `View.column`/`row` children, `clearChildren` / `setTexts`), `Ui.run`, Theme/Color
+- Builtins: `Str.*`, `List.*`, Fs/Sys/Clock/Random/Net, `Signal.*` (incl. `Signal.map`), `View.*` (incl. nested `View.column`/`row` children, `View.each`, `View.bindText`), `Ui.run`, Theme/Color
 - `IO` kit + `.flatMap` / `.handleErrorWith` / `.attempt`; lambdas `_ =>` / `name =>` for taps
 - No macros, no implicits, no HKT beyond `IO`, no null
 
@@ -96,9 +96,10 @@ App-shaped Counter:
 @main def main: IO[Unit] =
   for {
     count = Signal.int(0)
+    label = Signal.map(count, n => s"count = $n")
     root  = View.column(
               View.text("Counter"),
-              View.textSignal(count, "count = "),
+              View.bindText(label),
               View.row(View.button("+1", _ => Signal.set(count, Signal.get(count) + 1)))
             )
     _    <- Ui.run(root)
@@ -127,6 +128,14 @@ scalui fuzz --replay repro.toml      # deterministic replay of a recorded failur
 ```
 
 Scripts are a line protocol — `tap <n>` / `text <s>` / `pump <k>` — played by the runtime (`SCALUI_UI_SCRIPT`) across `pump` boundaries; on exit it writes the signal store + a11y view dump (`SCALUI_FUZZ_DUMP`). The CLI probes the a11y dump for the typed event surface (buttons in scan order, text fields), generates seeded scripts (Lehmer/MINSTD LCG — the kernel dialect has no bitwise ops), and writes `repro.toml` (seed + events) on failure. `fuzz` lives in the Stage-1 CLI; replay plays recorded events verbatim, so it is independent of the generator. Oracles: panic/`SuError` exit → structural dumps (PNG last). Requires stable tap order, `pump` as time, no hidden nondeterminism.
+
+### Layout model
+
+When the widget set grows beyond column/row: **Flutter-style constraints** (constraints down, sizes up). Do not drift into CSS-ish ad-hoc layout rules.
+
+### UI testing
+
+Primary goldens are **structural** (signal store + a11y view dump). PNG pixels are optional (`scalui test --pixels`). Agent-facing: `scalui check` (typecheck only) and `--message-format=json`.
 
 ## Open work
 

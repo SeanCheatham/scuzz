@@ -1,0 +1,8 @@
+[signals]
+int[0] = 1
+str[1] = "count = 1"
+
+[views]
+text:Counter
+button:+1
+image:image

@@ -1,7 +1,7 @@
 package scalui.compiler
 
 def uiMainTemplate(): String =
-  Str.concat("@main def main: IO[Unit] =\n  for {\n    count = Signal.int(0)\n    root = View.column(\n      View.text(\"Counter\"),\n      View.textSignal(count, \"count = \"),\n      View.row(View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)))\n    )\n    _ <- Ui.run(root)\n  } yield ()\n", "")
+  Str.concat("@main def main: IO[Unit] =\n  for {\n    count = Signal.int(0)\n    label = Signal.map(count, n => s\"count = $n\")\n    root = View.column(\n      View.text(\"Counter\"),\n      View.bindText(label),\n      View.row(View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)))\n    )\n    _ <- Ui.run(root)\n  } yield ()\n", "")
 
 def helloMainTemplate(): String =
   str3("@main def main: IO[Unit] =\n", "  IO.println(\"Hello, ScalUI!\").flatMap(_ => IO.println(\"ready.\"))\n", "")
@@ -52,11 +52,14 @@ def writeNewHello(dir: String, name: String): IO[Unit] =
 def updateFlagEnv(update: Int): String =
   if (update == 1) "SCALUI_UPDATE_GOLDENS=1 " else ""
 
-def cmdTest(projectDir: String, update: Int, runtimeTests: Int): IO[Unit] =
+def pixelsFlagEnv(pixels: Int): String =
+  if (pixels == 1) "SCALUI_PIXEL_GOLDENS=1 " else ""
+
+def cmdTest(projectDir: String, update: Int, runtimeTests: Int, pixels: Int): IO[Unit] =
   resolveRuntimeEnv("", projectDir).flatMap(runtimeDir =>
     maybeRuntimeTests(runtimeDir, runtimeTests).flatMap(_ =>
       compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
-        execOk(str5(updateFlagEnv(update), "bash ", pathJoin(pathJoin(parentDir(parentDir(runtimeDir)), "scripts"), "run_goldens.sh"), " ", projectDir)).flatMap(_ => IO.println("scalui test ok"))
+        execOk(str5(updateFlagEnv(update), pixelsFlagEnv(pixels), "bash ", pathJoin(pathJoin(parentDir(parentDir(runtimeDir)), "scripts"), "run_goldens.sh"), Str.concat(" ", projectDir))).flatMap(_ => IO.println("scalui test ok"))
       )
     )
   )

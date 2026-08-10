@@ -440,6 +440,28 @@ static void test_clear_and_set_texts(void) {
   su_view_free(list);
 }
 
+static void test_view_each(void) {
+  SuSignalList *items;
+  SuView *list;
+  const SuTheme *theme = su_theme_default();
+  SuList *xs;
+
+  xs = su_list_cons(su_string_from_cstr("milk"), su_list_nil());
+  items = su_signal_list(xs);
+  list = su_view_each(items);
+  su_view_layout(list, 200.f, 120.f, theme);
+  assert(strstr(su_string_cstr(su_view_a11y_dump(list)), "text:- milk") != NULL);
+
+  xs = su_list_cons(su_string_from_cstr("eggs"), xs);
+  su_signal_list_set(items, xs);
+  su_view_layout(list, 200.f, 120.f, theme);
+  assert(strstr(su_string_cstr(su_view_a11y_dump(list)), "text:- eggs") != NULL);
+  assert(strstr(su_string_cstr(su_view_a11y_dump(list)), "text:- milk") != NULL);
+
+  su_view_free(list);
+  su_signal_list_free(items);
+}
+
 int main(void) {
   test_label_session();
   test_signals_layout_hit();
@@ -448,6 +470,7 @@ int main(void) {
   test_mobile_pointer_scroll_lifecycle();
   test_a11y_and_anim();
   test_clear_and_set_texts();
+  test_view_each();
   puts("runtime ui tests ok");
   return 0;
 }

@@ -85,9 +85,22 @@ def compileAfterToml(projectDir: String, outDir: String, doRun: Int, runtimeDir:
   readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty()).flatMap(texts => compileAfterSources(projectDir, outDir, doRun, runtimeDir, clang, name, texts))
 )
 
+def checkProject(projectDir: String): IO[String] =
+  for {
+    srcDir = pathJoin(projectDir, "src")
+  } yield Fs.list(srcDir).flatMap(names =>
+  readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty()).flatMap(texts =>
+    for {
+      prog = lowerProg(mergeSources(texts, emptyProg()))
+      ty = typecheckProg(prog)
+    } yield IO.pure(ty)
+  )
+)
+
 def compileAfterSources(projectDir: String, outDir: String, doRun: Int, runtimeDir: String, clang: String, name: String, texts: List): IO[Unit] =
   for {
     prog = lowerProg(mergeSources(texts, emptyProg()))
+    ty = typecheckProg(prog)
     ir = emitProgram(prog)
     ll = pathJoin(outDir, Str.concat(name, ".ll"))
     exe = pathJoin(outDir, name)
@@ -97,7 +110,7 @@ def compileAfterSources(projectDir: String, outDir: String, doRun: Int, runtimeD
     inc = pathJoin(runtimeDir, "include")
     skInc = pathJoin(ffi, "include")
     embedder = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-desktop"), "build/libscalui_embedder.a")
-  } yield Fs.mkdirs(outDir).flatMap(_ =>
+  } yield if (tyIsOk(ty) == 0) IO.fail(tyMsg(ty)) else Fs.mkdirs(outDir).flatMap(_ =>
   Fs.write(ll, ir).flatMap(_ =>
     buildRuntime(runtimeDir, clang).flatMap(_ =>
       execOk(linkCmd(clang, ll, lib, skia, inc, skInc, embedder, exe)).flatMap(_ => runIfNeeded(exe, doRun))

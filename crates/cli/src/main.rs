@@ -15,6 +15,9 @@ use std::process::{Command, ExitCode};
     about = "ScalUI — Stage-0 bootstrap CLI (release CLI is compiler-scalui)"
 )]
 struct Cli {
+    /// Diagnostic format: human (default) or json
+    #[arg(long, global = true, default_value = "human", value_parser = ["human", "json"])]
+    message_format: String,
     #[command(subcommand)]
     command: Commands,
 }
@@ -53,16 +56,24 @@ enum Commands {
         #[arg(long, default_value = "build")]
         out_dir: PathBuf,
     },
-    /// Run tests: Headless golden PNGs when present (optional runtime C suites)
+    /// Run tests: Headless structural goldens (a11y + signal dump); optional PNG with --pixels
     Test {
         #[arg(default_value = ".")]
         path: PathBuf,
         /// Rewrite / seed goldens from Headless snapshots
         #[arg(long)]
         update: bool,
+        /// Also compare / seed PNG pixel goldens
+        #[arg(long)]
+        pixels: bool,
         /// Also run crates/runtime + ffi-skia C unit tests
         #[arg(long)]
         runtime_tests: bool,
+    },
+    /// Parse + lower + typecheck only (no codegen / link)
+    Check {
+        #[arg(default_value = ".")]
+        path: PathBuf,
     },
     /// Format ScalUI sources under src/
     Fmt {
@@ -103,17 +114,45 @@ fn main() -> ExitCode {
     }
 }
 
+fn diag_err(e: anyhow::Error, json: bool) -> anyhow::Error {
+    if !json {
+        return e;
+    }
+    let d = scalui_compiler::Diagnostic::error(format!("{e:#}"));
+    anyhow::anyhow!("{}", scalui_compiler::format_diagnostics(&[d], true))
+}
+
 fn real_main() -> Result<ExitCode> {
     let cli = Cli::parse();
+    let json = cli.message_format == "json";
     match cli.command {
         Commands::Build { path, out_dir, full } => {
-            let out = build(&path, &out_dir, !full)?;
+            let out = build(&path, &out_dir, !full).map_err(|e| diag_err(e, json))?;
             if out.cache_hit {
                 eprintln!("up-to-date {}", out.executable.display());
             } else {
                 eprintln!("built {}", out.executable.display());
             }
             Ok(ExitCode::SUCCESS)
+        }
+        Commands::Check { path } => {
+            let diags = scalui_compiler::check_project(&path)?;
+            if diags.is_empty() {
+                if json {
+                    println!("[]");
+                } else {
+                    eprintln!("scalui check ok");
+                }
+                Ok(ExitCode::SUCCESS)
+            } else {
+                let out = scalui_compiler::format_diagnostics(&diags, json);
+                if json {
+                    println!("{out}");
+                } else {
+                    eprintln!("{out}");
+                }
+                Ok(ExitCode::FAILURE)
+            }
         }
         Commands::Run {
             path,
@@ -130,6 +169,7 @@ fn real_main() -> Result<ExitCode> {
         Commands::Test {
             path,
             update,
+            pixels,
             runtime_tests,
         } => {
             if runtime_tests {
@@ -165,7 +205,7 @@ fn real_main() -> Result<ExitCode> {
             if project_dir.join("scalui.toml").is_file() {
                 let out = build(&path, &PathBuf::from("build"), false)?;
                 eprintln!("project compile smoke ok");
-                run_goldens(&project_dir, &out.executable, update)?;
+                run_goldens(&project_dir, &out.executable, update, pixels)?;
             }
             eprintln!("scalui test ok");
             Ok(ExitCode::SUCCESS)
@@ -212,9 +252,10 @@ bundle_id = "dev.scalui.{package_name}"
                     r#"@main def main: IO[Unit] =
   for {
     count = Signal.int(0)
+    label = Signal.map(count, n => s"count = $n")
     root = View.column(
       View.text("Counter"),
-      View.textSignal(count, "count = "),
+      View.bindText(label),
       View.row(View.button("+1", _ => Signal.set(count, Signal.get(count) + 1)))
     )
     _ <- Ui.run(root)
@@ -440,7 +481,7 @@ fn apply_ui_env(
     }
 }
 
-fn run_goldens(project_dir: &Path, exe: &Path, update: bool) -> Result<()> {
+fn run_goldens(project_dir: &Path, exe: &Path, update: bool, pixels: bool) -> Result<()> {
     let goldens = project_dir.join("goldens");
     if !goldens.is_dir() {
         return Ok(());
@@ -449,71 +490,114 @@ fn run_goldens(project_dir: &Path, exe: &Path, update: bool) -> Result<()> {
     let name = manifest.package.name.as_str();
     let out_dir = exe.parent().unwrap_or(Path::new("."));
 
+    let mut dumps: Vec<PathBuf> = Vec::new();
     let mut pngs: Vec<PathBuf> = Vec::new();
     for entry in std::fs::read_dir(&goldens)? {
         let entry = entry?;
         let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) == Some("png") {
-            pngs.push(path);
+        match path.extension().and_then(|e| e.to_str()) {
+            Some("dump") => dumps.push(path),
+            Some("png") => pngs.push(path),
+            _ => {}
         }
     }
+    dumps.sort();
     pngs.sort();
 
-    if pngs.is_empty() {
-        let base = goldens.join(format!("{name}.png"));
-        let tap = goldens.join(format!("{name}_after_tap.png"));
-        capture_golden(exe, &manifest, &base, false)?;
-        capture_golden(exe, &manifest, &tap, true)?;
-        eprintln!("seeded goldens: {}.png {}_after_tap.png", name, name);
+    if dumps.is_empty() {
+        let base = goldens.join(format!("{name}.dump"));
+        let tap = goldens.join(format!("{name}_after_tap.dump"));
+        capture_structural(exe, &manifest, &base, out_dir.join(format!("{name}.actual.png")), false)?;
+        capture_structural(
+            exe,
+            &manifest,
+            &tap,
+            out_dir.join(format!("{name}_after_tap.actual.png")),
+            true,
+        )?;
+        eprintln!("seeded goldens: {}.dump {}_after_tap.dump", name, name);
+        if pixels {
+            let base_png = goldens.join(format!("{name}.png"));
+            let tap_png = goldens.join(format!("{name}_after_tap.png"));
+            std::fs::copy(out_dir.join(format!("{name}.actual.png")), &base_png)?;
+            std::fs::copy(out_dir.join(format!("{name}_after_tap.actual.png")), &tap_png)?;
+            eprintln!("seeded pixel goldens: {}.png {}_after_tap.png", name, name);
+        }
         return Ok(());
     }
 
-    for path in pngs {
+    for path in &dumps {
         let stem = path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or("golden");
         let tap = stem.ends_with("_after_tap");
-        let actual = out_dir.join(format!("{stem}.actual.png"));
-        capture_golden(exe, &manifest, &actual, tap)?;
+        let actual_dump = out_dir.join(format!("{stem}.actual.dump"));
+        let actual_png = out_dir.join(format!("{stem}.actual.png"));
+        capture_structural(exe, &manifest, &actual_dump, actual_png.clone(), tap)?;
         if update {
-            std::fs::copy(&actual, &path)
+            std::fs::copy(&actual_dump, path)
                 .with_context(|| format!("updating golden {}", path.display()))?;
-            eprintln!("golden updated: {stem}");
+            eprintln!("golden updated: {stem}.dump");
+            if pixels {
+                let png_path = goldens.join(format!("{stem}.png"));
+                if actual_png.is_file() {
+                    std::fs::copy(&actual_png, &png_path)?;
+                    eprintln!("golden updated: {stem}.png");
+                }
+            }
         } else {
-            let expected = std::fs::read(&path)?;
-            let got = std::fs::read(&actual)?;
+            let expected = std::fs::read_to_string(path)?;
+            let got = std::fs::read_to_string(&actual_dump)?;
             if expected != got {
                 bail!(
-                    "golden mismatch: {} vs {} ({} vs {} bytes); re-run with --update to accept",
+                    "structural golden mismatch: {}\n--- expected ---\n{}--- actual ---\n{}",
                     path.display(),
-                    actual.display(),
-                    expected.len(),
-                    got.len()
+                    expected,
+                    got
                 );
             }
-            eprintln!("golden ok: {stem}");
+            eprintln!("golden ok: {stem}.dump");
+            if pixels {
+                let png_path = goldens.join(format!("{stem}.png"));
+                if png_path.is_file() {
+                    let expected = std::fs::read(&png_path)?;
+                    let got = std::fs::read(&actual_png)?;
+                    if expected != got {
+                        bail!(
+                            "pixel golden mismatch: {} vs {} ({} vs {} bytes); re-run with --update --pixels",
+                            png_path.display(),
+                            actual_png.display(),
+                            expected.len(),
+                            got.len()
+                        );
+                    }
+                    eprintln!("golden ok: {stem}.png");
+                }
+            }
         }
     }
     Ok(())
 }
 
-fn capture_golden(
+fn capture_structural(
     exe: &Path,
     manifest: &scalui_compiler::manifest::Manifest,
-    snapshot: &Path,
+    dump: &Path,
+    snapshot: PathBuf,
     tap: bool,
 ) -> Result<()> {
     let mut cmd = Command::new(exe);
-    apply_ui_env(&mut cmd, manifest, snapshot, tap);
+    apply_ui_env(&mut cmd, manifest, &snapshot, tap);
+    cmd.env("SCALUI_FUZZ_DUMP", dump);
     let status = cmd
         .status()
-        .with_context(|| format!("running golden {}", snapshot.display()))?;
+        .with_context(|| format!("running structural golden {}", dump.display()))?;
     if !status.success() {
-        bail!("golden capture failed: {}", snapshot.display());
+        bail!("structural golden capture failed: {}", dump.display());
     }
-    if !snapshot.is_file() {
-        bail!("golden capture missing snapshot {}", snapshot.display());
+    if !dump.is_file() {
+        bail!("structural golden capture missing dump {}", dump.display());
     }
     Ok(())
 }

@@ -1,0 +1,7 @@
+[signals]
+int[0] = 0
+str[1] = "taps = 0"
+
+[views]
+text:Hello Headless
+button:tap

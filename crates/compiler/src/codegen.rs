@@ -22,8 +22,7 @@ pub fn emit_llvm(program: &Program) -> String {
 
     let mut out = String::new();
     writeln!(out, "; ScalUI Stage-0 generated LLVM IR").unwrap();
-    writeln!(out, "target datalayout = \"e-m:e-p270:32:32-p271:32:32-p272:64:64-i64:64-i128:128-f80:128-n8:16:32:64-S128\"").unwrap();
-    writeln!(out, "target triple = \"x86_64-pc-linux-gnu\"").unwrap();
+    // Omit target triple / datalayout: clang uses the host defaults (macOS arm64, Linux x86_64, …).
     writeln!(out).unwrap();
 
     writeln!(out, "declare ptr @su_string_from_cstr(ptr)").unwrap();
@@ -81,8 +80,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @su_lang_signal_list(ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_signal_list_get(ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_signal_list_set(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @su_lang_signal_map(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_text(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_text_signal(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @su_lang_view_bind_text(ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_button(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @su_theme_accent()").unwrap();
     writeln!(out, "declare i64 @su_theme_primary()").unwrap();
@@ -92,14 +92,13 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @su_lang_view_column()").unwrap();
     writeln!(out, "declare ptr @su_lang_view_row()").unwrap();
     writeln!(out, "declare ptr @su_lang_view_list()").unwrap();
+    writeln!(out, "declare ptr @su_lang_view_each(ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_scroll(ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_text_field(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_icon(i64, i64)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_image(i64, i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_add_child(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_add_texts(ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_clear_children(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_set_texts(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @su_lang_view_show_when(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @su_ui_run_view(ptr)").unwrap();
     writeln!(out, "declare ptr @su_box_i64(i64)").unwrap();
@@ -1236,6 +1235,127 @@ fn emit_lambda(
     val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
 }
 
+/// `n => body` for `Signal.map`: `ptr (*)(i64, ptr)` returning a SuString.
+fn emit_map_lambda(
+    param: &Option<String>,
+    body: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    let id = *ctx.cont_id;
+    *ctx.cont_id += 1;
+    let fn_name = format!("su_map_{id}");
+
+    let capture_names = capture_name_order(locals);
+    let mut pre = String::new();
+    let mut body_locals: HashMap<String, (String, Kind)> = HashMap::new();
+    unpack_env_preamble(
+        &mut pre,
+        &mut body_locals,
+        locals,
+        &capture_names,
+        &format!("m{id}"),
+    );
+    if let Some(p) = param {
+        if p != "_" {
+            body_locals.insert(p.clone(), ("%n".into(), Kind::Int));
+        }
+    }
+
+    let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("m{id}"));
+
+    writeln!(
+        ctx.conts,
+        "define internal ptr @{fn_name}(i64 %n, ptr %env) {{"
+    )
+    .unwrap();
+    writeln!(ctx.conts, "entry:").unwrap();
+    ctx.conts.push_str(&pre);
+    ctx.conts.push_str(&body_emitted.code);
+    if body_emitted.kind == Kind::Io {
+        writeln!(
+            ctx.conts,
+            "  %m{id}_ur = call {{ i32, ptr, ptr }} @su_io_unsafe_run(ptr {})",
+            body_emitted.value
+        )
+        .unwrap();
+        writeln!(
+            ctx.conts,
+            "  %m{id}_ok = extractvalue {{ i32, ptr, ptr }} %m{id}_ur, 1"
+        )
+        .unwrap();
+        writeln!(ctx.conts, "  ret ptr %m{id}_ok").unwrap();
+    } else if body_emitted.kind == Kind::Int {
+        writeln!(
+            ctx.conts,
+            "  %m{id}_s = call ptr @su_string_from_int(i64 {})",
+            body_emitted.value
+        )
+        .unwrap();
+        writeln!(ctx.conts, "  ret ptr %m{id}_s").unwrap();
+    } else {
+        writeln!(ctx.conts, "  ret ptr {}", body_emitted.value).unwrap();
+    }
+    writeln!(ctx.conts, "}}").unwrap();
+    writeln!(ctx.conts).unwrap();
+
+    let mut code = String::new();
+    let env_ptr = pack_env(&mut code, locals, &capture_names, &format!("{prefix}_cap"));
+    writeln!(code, "  %{prefix}_cl0 = call ptr @su_list_nil()").unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_cl1 = call ptr @su_list_cons(ptr {env_ptr}, ptr %{prefix}_cl0)"
+    )
+    .unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_cl2 = call ptr @su_list_cons(ptr @{fn_name}, ptr %{prefix}_cl1)"
+    )
+    .unwrap();
+    val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
+}
+
+fn emit_signal_map(
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 2, "Signal.map expects 2 args");
+    let src = emit_expr(&args[0], ctx, locals, &format!("{prefix}_src"));
+    let Expr::Lambda { param, body } = &args[1] else {
+        panic!("Signal.map mapper must be a lambda");
+    };
+    let mapper = emit_map_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
+    let mut code = src.code;
+    code.push_str(&mapper.code);
+    writeln!(
+        code,
+        "  %{prefix}_fnp = call ptr @su_list_head(ptr {})",
+        mapper.value
+    )
+    .unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_fnt = call ptr @su_list_tail(ptr {})",
+        mapper.value
+    )
+    .unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_envp = call ptr @su_list_head(ptr %{prefix}_fnt)"
+    )
+    .unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @su_lang_signal_map(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
+        src.value
+    )
+    .unwrap();
+    val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+}
+
 fn emit_binary(
     op: &BinOp,
     left: &Expr,
@@ -1379,6 +1499,9 @@ fn emit_call(
     locals: &mut HashMap<String, (String, Kind)>,
     prefix: &str,
 ) -> Emitted {
+    if callee == "Signal.map" {
+        return emit_signal_map(args, ctx, locals, prefix);
+    }
     let mut emitted_args = Vec::new();
     for (i, a) in args.iter().enumerate() {
         emitted_args.push(emit_expr(
@@ -1767,11 +1890,11 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
-        "View.textSignal" => {
+        "View.bindText" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_view_text_signal(ptr {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
+                "  %{prefix}_v = call ptr @su_lang_view_bind_text(ptr {})",
+                emitted_args[0].value
             )
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
@@ -1839,6 +1962,15 @@ fn emit_call(
             writeln!(code, "  %{prefix}_v = call ptr @su_lang_view_list()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "View.each" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @su_lang_view_each(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "View.scroll" => {
             writeln!(
                 code,
@@ -1891,24 +2023,6 @@ fn emit_call(
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @su_lang_view_add_texts(ptr {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.clearChildren" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @su_lang_view_clear_children(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.setTexts" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @su_lang_view_set_texts(ptr {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
