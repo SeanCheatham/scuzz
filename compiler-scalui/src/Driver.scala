@@ -71,7 +71,7 @@ def linkCmd(clang: String, ll: String, lib: String, skia: String, inc: String, s
   str4(clang, " ", ll, str4(" ", lib, " ", str4(skia, " -I", inc, str4(" -I", skInc, " -lpthread ", str5(embedderLinkFlags(embedder), " ", mobileLinkFlags(mobile), " -o ", exe)))))
 
 def linkCmdIo(clang: String, ll: String, lib: String, inc: String, exe: String): String =
-  str5(clang, " ", ll, str4(" ", lib, " -I", inc, str3(" -lpthread -o ", exe, "")))
+  str5(clang, " ", ll, " ", str4(lib, " -I", inc, str3(" -lpthread -o ", exe, "")))
 
 def runIfNeeded(exe: String, doRun: Int): IO[Unit] =
   if (doRun == 1) execOk(exe) else IO.pure(())
