@@ -1,4 +1,4 @@
-/* Android JNI packaging shell (Phase 5).
+/* Android JNI packaging shell.
  *
  * Maps MotionEvent / lifecycle / InputConnection onto SuInputEvent and drives
  * the same UiSession protocol as Headless / Window / host mobile shell.

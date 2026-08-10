@@ -9,7 +9,7 @@ enum Kind {
     Io,
 }
 
-/// Emit LLVM IR text for a Stage-0 / Phase 4 program. Links against `libscalui_rt`.
+/// Emit LLVM IR text for a Stage-0 program. Links against `libscalui_rt`.
 pub fn emit_llvm(program: &Program) -> String {
     let mut strs: Vec<String> = Vec::new();
     for d in &program.defs {
@@ -49,12 +49,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare {{ i32, ptr, ptr }} @su_io_unsafe_run(ptr)").unwrap();
     writeln!(out, "declare ptr @su_adt_new(i32, ptr)").unwrap();
     writeln!(out, "declare i32 @su_adt_tag(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lexer_classify(ptr)").unwrap();
     writeln!(out, "declare ptr @su_effects_run_kit()").unwrap();
-    writeln!(out, "declare ptr @su_ui_run_headless_label(ptr, i32, i32)").unwrap();
-    writeln!(out, "declare ptr @su_ui_run_counter(i32, i32)").unwrap();
-    writeln!(out, "declare ptr @su_ui_run_live(i32, i32)").unwrap();
-    writeln!(out, "declare ptr @su_ui_run_todo(i32, i32)").unwrap();
     writeln!(out, "declare ptr @su_list_nil()").unwrap();
     writeln!(out, "declare i32 @su_list_is_empty(ptr)").unwrap();
     writeln!(out, "declare ptr @su_list_cons(ptr, ptr)").unwrap();
@@ -257,8 +252,6 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         | Expr::IoSleep(e)
         | Expr::IoFail(e)
         | Expr::IoPure(e)
-        | Expr::UiRunHeadless(e)
-        | Expr::LexerClassify(e)
         | Expr::Attempt { inner: e } => collect_strings(e, out),
         Expr::Lambda { body, .. } => collect_strings(body, out),
         Expr::FlatMap { inner, body, .. }
@@ -311,9 +304,6 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         }
         Expr::IoDelayUnit
         | Expr::Unit
-        | Expr::UiRunCounter
-        | Expr::UiRunLive
-        | Expr::UiRunTodo
         | Expr::EffectsRunKit
         | Expr::Var(_)
         | Expr::IntLit(_)
@@ -696,59 +686,10 @@ fn emit_expr(
             };
             io_emitted(code, format!("%{prefix}_io"), payload)
         }
-        Expr::UiRunHeadless(label) => {
-            let mut code = String::new();
-            let cstr =
-                emit_cstr_from_string(&mut code, ctx.strs, label, ctx, locals, prefix);
-            writeln!(
-                code,
-                "  %{prefix}_io = call ptr @su_ui_run_headless_label(ptr {cstr}, i32 0, i32 0)"
-            )
-            .unwrap();
-            io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
-        }
-        Expr::UiRunCounter => {
-            let mut code = String::new();
-            writeln!(
-                code,
-                "  %{prefix}_io = call ptr @su_ui_run_counter(i32 0, i32 0)"
-            )
-            .unwrap();
-            io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
-        }
-        Expr::UiRunLive => {
-            let mut code = String::new();
-            writeln!(
-                code,
-                "  %{prefix}_io = call ptr @su_ui_run_live(i32 0, i32 0)"
-            )
-            .unwrap();
-            io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
-        }
-        Expr::UiRunTodo => {
-            let mut code = String::new();
-            writeln!(
-                code,
-                "  %{prefix}_io = call ptr @su_ui_run_todo(i32 0, i32 0)"
-            )
-            .unwrap();
-            io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
-        }
         Expr::EffectsRunKit => {
             let mut code = String::new();
             writeln!(code, "  %{prefix}_io = call ptr @su_effects_run_kit()").unwrap();
             io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
-        }
-        Expr::LexerClassify(arg) => {
-            let mut code = String::new();
-            let cstr =
-                emit_cstr_from_string(&mut code, ctx.strs, arg, ctx, locals, prefix);
-            writeln!(
-                code,
-                "  %{prefix}_adt = call ptr @su_lexer_classify(ptr {cstr})"
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_adt"), Kind::Ptr)
         }
         Expr::AdtConstruct {
             enum_name,

@@ -1,6 +1,6 @@
 /* Thin Skia-shaped C ABI for ScalUI.
  *
- * Phase 1 ships a CPU software implementation (sk_sw) behind this header so
+ * A CPU software implementation (sk_sw) ships behind this header so
  * Headless CI works without downloading multi‑GB Skia trees. A future fetch of
  * prebuilt Skia static libs can replace the backend without changing callers.
  */
@@ -37,7 +37,7 @@ const uint8_t *sk_surface_peek_pixels(const SkSurface *surface, size_t *out_size
 void sk_canvas_clear(SkCanvas *canvas, SkColor color);
 void sk_canvas_draw_rect(SkCanvas *canvas, float x, float y, float w, float h,
                          const SkPaint *paint);
-/* Baseline-left text with a built-in 8x8 bitmap font (Phase 1). */
+/* Baseline-left text with a built-in 8x8 bitmap font. */
 void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
                            const SkPaint *paint);
 

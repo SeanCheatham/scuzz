@@ -21,8 +21,6 @@ pub fn lower_expr(expr: Expr) -> Expr {
         Expr::IoSleep(e) => Expr::IoSleep(Box::new(lower_expr(*e))),
         Expr::IoFail(e) => Expr::IoFail(Box::new(lower_expr(*e))),
         Expr::IoPure(e) => Expr::IoPure(Box::new(lower_expr(*e))),
-        Expr::UiRunHeadless(e) => Expr::UiRunHeadless(Box::new(lower_expr(*e))),
-        Expr::LexerClassify(e) => Expr::LexerClassify(Box::new(lower_expr(*e))),
         Expr::FlatMap { inner, param, body } => Expr::FlatMap {
             inner: Box::new(lower_expr(*inner)),
             param,
@@ -160,8 +158,6 @@ pub fn raise_expr(expr: Expr) -> Expr {
         Expr::IoSleep(e) => Expr::IoSleep(Box::new(raise_expr(*e))),
         Expr::IoFail(e) => Expr::IoFail(Box::new(raise_expr(*e))),
         Expr::IoPure(e) => Expr::IoPure(Box::new(raise_expr(*e))),
-        Expr::UiRunHeadless(e) => Expr::UiRunHeadless(Box::new(raise_expr(*e))),
-        Expr::LexerClassify(e) => Expr::LexerClassify(Box::new(raise_expr(*e))),
         Expr::FlatMap { inner, param, body } => Expr::FlatMap {
             inner: Box::new(raise_expr(*inner)),
             param,

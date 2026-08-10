@@ -27,7 +27,7 @@ SuString *su_string_from_bytes(const char *bytes, size_t len);
 const char *su_string_cstr(const SuString *s);
 void su_string_free(SuString *s);
 
-/* String ops for Stage-1 / Phase 4 kernel dialect */
+/* String ops for the kernel dialect */
 SuString *su_string_concat(const SuString *a, const SuString *b);
 int64_t su_string_len(const SuString *s);
 SuString *su_string_slice(const SuString *s, int64_t start, int64_t end);
@@ -80,11 +80,7 @@ SuAdt *su_adt_new(int32_t tag, void *payload);
 int32_t su_adt_tag(const SuAdt *adt);
 void su_adt_free(SuAdt *adt);
 
-/* Lexer.classify — Stage-0 helper for ScalUI parser bootstrap (Tok tags).
- * Tag order: AtMain=0, Def=1, Ident=2, StringLit=3, Eof=4, Other=5 */
-SuAdt *su_lexer_classify(const char *source);
-
-/* --- IO fiber skeleton + Phase 3 blessed kit ----------------------------- */
+/* --- IO fiber skeleton + blessed kit ------------------------------------ */
 
 typedef struct SuIo SuIo;
 typedef struct SuResource SuResource;
@@ -181,7 +177,7 @@ SuIo *su_resource_use(SuResource *res, SuIo *(*use)(void *acquired, void *env),
                       void *use_env);
 void su_resource_free(SuResource *res);
 
-/* Ref — mutable cell (single-threaded; string-friendly for kernel demos). */
+/* Ref — mutable cell (single-threaded). */
 struct SuRef {
   void *value;
 };
@@ -210,7 +206,7 @@ SuIo *su_deferred_complete_cstr(SuDeferred *d, const char *value);
 SuIo *su_deferred_fail(SuDeferred *d, SuError *err);
 SuIo *su_deferred_get(SuDeferred *d); /* IO[A]; fails if incomplete or erred */
 
-/* Queue — unbounded FIFO of void* (strings in kernel demos). */
+/* Queue — unbounded FIFO of void*. */
 struct SuQueue {
   void **items;
   size_t len;
@@ -222,7 +218,7 @@ void su_queue_free(SuQueue *q);
 SuIo *su_queue_unbounded(void); /* IO[Queue] */
 SuIo *su_queue_offer(SuQueue *q, void *value);
 SuIo *su_queue_offer_cstr(SuQueue *q, const char *value);
-SuIo *su_queue_take(SuQueue *q); /* IO[A]; fails if empty (Phase 3 sync take) */
+SuIo *su_queue_take(SuQueue *q); /* IO[A]; fails if empty (sync take) */
 size_t su_queue_size(const SuQueue *q);
 
 /* Pair for IO.both results */
@@ -234,7 +230,7 @@ typedef struct SuPair {
 SuPair *su_pair_new(void *left, void *right);
 void su_pair_free(SuPair *p);
 
-/* Linked list (NULL = Nil) for Phase 4 dialect / Stage-1 compiler */
+/* Linked list (NULL = Nil) for kernel dialect / Stage-1 compiler */
 struct SuList {
   void *head;
   struct SuList *tail;
@@ -263,7 +259,7 @@ SuIo *su_sys_args(void);
 SuIo *su_sys_exec(SuString *cmd);
 SuIo *su_sys_getenv(SuString *key);
 
-/* Blessed Clock / Random / Net (Phase 6 impurity boundary) */
+/* Blessed Clock / Random / Net (impurity boundary) */
 SuIo *su_clock_real_time(void);   /* IO[Int] wall epoch ms */
 SuIo *su_clock_monotonic(void);   /* IO[Int] monotonic ms */
 int64_t su_clock_monotonic_ms_sync(void); /* sync read for UI pump dt */
@@ -302,10 +298,10 @@ SuIo *su_testrt_net_http_get(SuString *url);
 int su_runtime_main(SuIo *program);
 int su_runtime_main_args(SuIo *program, int argc, char **argv);
 
-/* Kernel demo: blessed effects kit smoke (Ref/Deferred/Queue/race/sleep/errors) */
+/* Blessed effects kit smoke (Ref/Deferred/Queue/race/sleep/errors) */
 SuIo *su_effects_run_kit(void);
 
-/* Kernel demo: Phase 6 impurity + TestRuntime (Clock/Random/Fs/Net fakes) */
+/* Impurity kit + TestRuntime (Clock/Random/Fs/Net fakes) */
 SuIo *su_impurity_run_kit(void);
 
 #ifdef __cplusplus

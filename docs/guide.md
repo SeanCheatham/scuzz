@@ -10,7 +10,7 @@ scalui new myapp --ui
 cd myapp
 scalui test                   # seeds goldens/ on first run, then compares
 scalui run --headless         # writes build/snapshot.png
-scalui fmt --check            # Stage-1 pretty-printer (no canary env)
+scalui fmt --check
 ```
 
 `scalui new --ui` scaffolds `scalui.toml`, a Counter-shaped `src/Main.scala`, and Headless-friendly defaults.
@@ -24,7 +24,7 @@ scalui fmt --check            # Stage-1 pretty-printer (no canary env)
 - Blessed impurity only: `IO.println` / `sleep` / `fail` / `pure` / `race` / `both`, `Fs.*`, `Sys.*`, `Clock.*`, `Random.*`, `Net.httpGet`
 - No raw side effects in View build — taps may run `IO` via `su_io_unsafe_run`
 
-Stage-0 Rust remains a CI canary for the compiler host; product `fmt` / `build` / `run` / `test` go through Stage 1/2.
+Product `fmt` / `build` / `run` / `test` go through Stage 1/2 (`compiler-scalui`). Stage-0 Rust hosts the bootstrap compiler and CI tooling (`fuzz`).
 
 ## View + Signal + Ui
 
@@ -48,7 +48,7 @@ Lists: keep a `Signal.list`, render with `View.list` + `View.setTexts` / `View.c
 
 ## Tests and impurity
 
-- `scalui test` is Headless goldens (peer to Window, not a shim)
+- `scalui test` is Headless goldens (peer to Window)
 - Deterministic fakes: `TestRuntime` / `SCALUI_TESTRT=1` for clock/random/FS/network in app binaries
 - Put non-determinism behind blessed `IO`; keep View construction pure
 

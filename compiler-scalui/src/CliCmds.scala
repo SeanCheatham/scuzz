@@ -4,7 +4,7 @@ def uiMainTemplate(): String =
   Str.concat("@main def main: IO[Unit] =\n  for {\n    count = Signal.int(0)\n    root = View.column(\n      View.text(\"Counter\"),\n      View.textSignal(count, \"count = \"),\n      View.row(View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)))\n    )\n    _ <- Ui.run(root)\n  } yield ()\n", "")
 
 def helloMainTemplate(): String =
-  str3("@main def main: IO[Unit] =\n", "  IO.println(\"Hello, ScalUI!\").flatMap(_ => IO.println(\"Phase 0 online.\"))\n", "")
+  str3("@main def main: IO[Unit] =\n", "  IO.println(\"Hello, ScalUI!\").flatMap(_ => IO.println(\"ready.\"))\n", "")
 
 def uiToml(name: String): String =
   Str.concat(str5("[package]\nname = \"", name, "\"\nversion = \"0.1.0\"\n\n[targets.native]\nkind = \"executable\"\nmain = \"Main\"\n\n[ui]\n", "default_runtime = \"headless\"\nheadless_size = [200, 120]\nheadless_scale = 1.0\n", str3("bundle_id = \"dev.scalui.", name, "\"\n")), "")

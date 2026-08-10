@@ -40,7 +40,7 @@ typedef enum SuInputKind {
   SU_INPUT_TAP = 1,
   SU_INPUT_RESIZE = 2,
   SU_INPUT_TEXT = 3,      /* deliver string to focused TextField */
-  SU_INPUT_POINTER = 4,   /* touch / pointer with phase (Phase 5) */
+  SU_INPUT_POINTER = 4,   /* touch / pointer with phase */
   SU_INPUT_SCROLL = 5,    /* vertical pan dy on Scroll under (x,y) */
   SU_INPUT_LIFECYCLE = 6, /* pause / resume / stop */
   SU_INPUT_KEYBOARD = 7   /* soft keyboard show (1) / hide (0) */
@@ -69,13 +69,13 @@ typedef struct SuTheme {
   uint32_t on_primary;
   uint32_t border;
   uint32_t muted;
-  uint32_t accent;   /* Phase 6 polish */
-  uint32_t disabled; /* Phase 6 polish */
+  uint32_t accent;
+  uint32_t disabled;
   float pad;
   float gap;
   float control_h;
-  float font_px; /* bitmap font cell size (Phase 1 font is 8px) */
-  float radius;  /* corner radius; 0 keeps Phase 2–5 goldens */
+  float font_px; /* bitmap font cell size (default 8px) */
+  float radius;  /* corner radius (0 = sharp; preserves current goldens) */
 } SuTheme;
 
 const SuTheme *su_theme_default(void);
@@ -87,7 +87,7 @@ int64_t su_theme_muted(void);
 int64_t su_theme_foreground(void);
 int64_t su_color_rgb(int64_t r, int64_t g, int64_t b);
 
-/* --- signals (Phase 2 state) --------------------------------------------- */
+/* --- signals ------------------------------------------------------------- */
 
 typedef struct SuSignalInt SuSignalInt;
 typedef struct SuSignalStr SuSignalStr;
@@ -124,7 +124,7 @@ typedef enum SuViewKind {
   SU_VIEW_SCROLL,
   SU_VIEW_IMAGE,
   SU_VIEW_ICON,
-  SU_VIEW_LABEL /* Phase 1-shaped toggling bar (hello_ui goldens) */
+  SU_VIEW_LABEL /* full-bleed bg + bar that toggles colors on tap */
 } SuViewKind;
 
 typedef struct SuRect {
@@ -148,7 +148,7 @@ SuView *su_view_list(void);
 SuView *su_view_scroll(SuView *child);
 SuView *su_view_image(int w, int h, uint32_t argb, const char *caption);
 SuView *su_view_icon(char glyph, uint32_t argb);
-/* Phase 1 compat: full-bleed bg + bar that toggles colors on tap. */
+/* Full-bleed bg + bar that toggles colors on tap (C unit-test helper). */
 SuView *su_view_label(const char *text, uint32_t bg_argb, uint32_t fg_argb);
 /* Visible iff Signal.get(sig) == value; returns child. */
 void su_view_set_show_when(SuView *view, SuSignalInt *sig, int64_t value);
@@ -165,13 +165,13 @@ SuRect su_view_frame(const SuView *view);
 void su_view_layout(SuView *root, float width, float height, const SuTheme *theme);
 SuView *su_view_hit_test(SuView *root, float x, float y);
 
-/* Phase 5: Scroll offset + soft keyboard helpers. */
+/* Scroll offset + soft keyboard helpers. */
 float su_view_scroll_y(const SuView *scroll);
 void su_view_scroll_by(SuView *scroll, float dy);
 SuView *su_view_scroll_at(SuView *root, float x, float y);
 int su_view_has_focused_text_field(SuView *root);
 
-/* Phase 6 accessibility hooks (Headless-dumpable; no OS AT bridge yet). */
+/* Accessibility hooks (Headless-dumpable; no OS AT bridge yet). */
 typedef enum SuA11yRole {
   SU_A11Y_NONE = 0,
   SU_A11Y_BUTTON = 1,
@@ -188,7 +188,7 @@ const char *su_view_a11y_label(const SuView *view);
 /* Depth-first "role:label" lines joined by newlines (caller frees SuString). */
 SuString *su_view_a11y_dump(SuView *root);
 
-/* Phase 6 animation v0 — float lerp; session pump ticks all registered anims. */
+/* Animation — float lerp; session pump ticks all registered anims. */
 typedef struct SuAnimFloat SuAnimFloat;
 SuAnimFloat *su_anim_float(float from, float to, int64_t duration_ms);
 void su_anim_free(SuAnimFloat *a);
@@ -208,10 +208,6 @@ int su_ui_pump_sync(SuUiSession *session);
 int su_ui_inject_sync(SuUiSession *session, const SuInputEvent *event);
 int su_ui_snapshot_png_sync(SuUiSession *session, const char *path);
 int su_ui_snapshot_png_bytes(SuUiSession *session, uint8_t **out, size_t *out_len);
-
-SuIo *su_ui_pump(SuUiSession *session);
-SuIo *su_ui_inject(SuUiSession *session, SuInputEvent event);
-SuIo *su_ui_snapshot_png(SuUiSession *session, const char *path);
 
 SuUiRuntimeKind su_ui_session_kind(const SuUiSession *session);
 int su_ui_session_width(const SuUiSession *session);
@@ -257,17 +253,6 @@ SuView *su_lang_view_show_when(SuSignalInt *sig, int64_t value, SuView *child);
 
 /* Mount prebuilt root → pump → optional scripted tap → snapshot → unmount. */
 SuIo *su_ui_run_view(SuView *root);
-
-/* --- kernel dialect demos (Stage 0) -------------------------------------- */
-
-/* Mount label → pump → optional tap/snapshot → unmount. */
-SuIo *su_ui_run_headless_label(const char *text, int width, int height);
-/* Counter: Text + Button; tap increments. Optional IO bridge hop demo. */
-SuIo *su_ui_run_counter(int width, int height);
-/* Live window: pump until quit (q/Esc); Headless one-shots a snapshot. */
-SuIo *su_ui_run_live(int width, int height);
-/* Todo: TextField + List; load/save via IO Resource (C kit demo). */
-SuIo *su_ui_run_todo(int width, int height);
 
 #ifdef __cplusplus
 }

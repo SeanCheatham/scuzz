@@ -213,17 +213,17 @@ int main(void) {
     r = su_io_unsafe_run(su_fs_mkdirs(su_string_from_cstr("build")));
     assert(r.ok);
     r = su_io_unsafe_run(
-        su_fs_write(su_string_from_cstr(path), su_string_from_cstr("phase4")));
+        su_fs_write(su_string_from_cstr(path), su_string_from_cstr("fs-note")));
     assert(r.ok);
     r = su_io_unsafe_run(su_fs_read(su_string_from_cstr(path)));
     assert(r.ok);
-    assert(strcmp(su_string_cstr((SuString *)r.value), "phase4") == 0);
+    assert(strcmp(su_string_cstr((SuString *)r.value), "fs-note") == 0);
     r = su_io_unsafe_run(su_fs_list(su_string_from_cstr("build")));
     assert(r.ok);
     assert(!su_list_is_empty((SuList *)r.value));
   }
 
-  /* Phase 6 TestRuntime: fake clock sleep without wall wait */
+  /* TestRuntime: fake clock sleep without wall wait */
   {
     int64_t t0, t1;
     su_testrt_install();

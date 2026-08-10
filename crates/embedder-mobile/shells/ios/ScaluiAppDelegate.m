@@ -1,4 +1,4 @@
-/* iOS packaging shell (Phase 5).
+/* iOS packaging shell.
  *
  * UIApplicationDelegate drives mount → pump; UITouch / lifecycle map to
  * SuInputEvent. Compile-shaped stub — link libscalui_rt + libsk_capi under

@@ -44,7 +44,7 @@ struct SuView {
   float pref_h; /* >0 overrides natural height when set */
   SuView *scroll_child; /* owned as sole child for SCROLL */
 
-  /* Phase 6 a11y */
+  /* a11y */
   SuA11yRole a11y_role;
   char *a11y_label;
 

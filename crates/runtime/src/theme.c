@@ -14,7 +14,7 @@ static const SuTheme k_default_theme = {
     .gap = 8.f,
     .control_h = 32.f,
     .font_px = 8.f,
-    .radius = 0.f, /* 0 preserves Phase 2–5 goldens; gallery may override */
+    .radius = 0.f, /* 0 preserves current goldens; gallery may override */
 };
 
 const SuTheme *su_theme_default(void) { return &k_default_theme; }

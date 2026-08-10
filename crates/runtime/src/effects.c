@@ -1,6 +1,6 @@
 #include "scalui_rt.h"
 
-/* Kernel demo: proves Ref / Deferred / Queue / race / both / sleep / errors. */
+/* Effects kit: Ref / Deferred / Queue / race / both / sleep / errors. */
 
 /* flatMap(println, cont) invokes cont(NULL, env) — pass payload via env. */
 static SuIo *println_env(void *value, void *env) {
@@ -27,7 +27,7 @@ static SuIo *kit_after_ref_set(void *value, void *env) {
 static SuIo *kit_after_ref(void *value, void *env) {
   (void)env;
   SuRef *r = (SuRef *)value;
-  return su_io_flatmap(su_ref_set_cstr(r, "phase3"), kit_after_ref_set, r);
+  return su_io_flatmap(su_ref_set_cstr(r, "ref-ok"), kit_after_ref_set, r);
 }
 
 static SuIo *kit_after_q_take(void *value, void *env) {

@@ -25,26 +25,19 @@ if [[ -n "$BOOTSTRAP" && -x "$BOOTSTRAP" ]]; then
   echo "==> building Stage-1 CLI (self-build via $BOOTSTRAP; no Stage 0)"
   "$BOOTSTRAP" build compiler-scalui
 else
-  echo "==> building Stage-1 CLI (via Stage-0 canary; SCALUI_BOOTSTRAP skips cargo)"
+  echo "==> building Stage-1 CLI (via Stage-0 bootstrap; SCALUI_BOOTSTRAP skips cargo)"
   cargo run -p scalui -- build --full compiler-scalui
 fi
 
 mkdir -p "$BIN"
 WRAPPER="$BIN/scalui"
 STAGE1="$ROOT/compiler-scalui/build/scalui"
-CANARY="$ROOT/target/debug/scalui"
-if [[ ! -x "$CANARY" ]]; then
-  CANARY="$ROOT/target/release/scalui"
-fi
 
 cat >"$WRAPPER" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
 export SCALUI_HOME="${ROOT}"
 export SCALUI_RUNTIME="\${SCALUI_RUNTIME:-\$SCALUI_HOME/crates/runtime}"
-if [[ -x "${CANARY}" ]]; then
-  export SCALUI_CANARY="\${SCALUI_CANARY:-${CANARY}}"
-fi
 exec "${STAGE1}" "\$@"
 EOF
 chmod +x "$WRAPPER"
