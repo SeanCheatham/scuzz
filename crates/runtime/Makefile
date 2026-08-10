@@ -22,21 +22,21 @@ build:
 ffi-skia:
 	$(MAKE) -C $(FFI_SKIA) lib CC=$(CC)
 
-build/%.o: src/%.c include/scalui_rt.h include/scalui_ui.h | build ffi-skia
+build/%.o: src/%.c include/scuzz_rt.h include/scuzz_ui.h | build ffi-skia
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
-lib: build/libscalui_rt.a
+lib: build/libscuzz_rt.a
 
-build/libscalui_rt.a: $(OBJ)
+build/libscuzz_rt.a: $(OBJ)
 	ar rcs $@ $(OBJ)
 
-build/test_io: tests/test_io.c build/libscalui_rt.a | build ffi-skia
+build/test_io: tests/test_io.c build/libscuzz_rt.a | build ffi-skia
 	$(CC) $(CFLAGS) $(INCLUDES) tests/test_io.c -Lbuild -L$(FFI_SKIA)/build \
-		-lscalui_rt -lsk_capi -lpthread -o $@
+		-lscuzz_rt -lsk_capi -lpthread -o $@
 
-build/test_ui: tests/test_ui.c build/libscalui_rt.a | build ffi-skia
+build/test_ui: tests/test_ui.c build/libscuzz_rt.a | build ffi-skia
 	$(CC) $(CFLAGS) $(INCLUDES) tests/test_ui.c -Lbuild -L$(FFI_SKIA)/build \
-		-lscalui_rt -lsk_capi -lpthread -o $@
+		-lscuzz_rt -lsk_capi -lpthread -o $@
 
 test: build/test_io build/test_ui
 	./build/test_io

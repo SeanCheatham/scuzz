@@ -1,4 +1,4 @@
-package scalui.compiler
+package scuzz.compiler
 
 def tomlSkip(s: String, i: Int): Int =
   if (i >= Str.len(s)) i else tomlSkipCont(s, i, Str.charAt(s, i))

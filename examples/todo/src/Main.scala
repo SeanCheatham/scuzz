@@ -2,9 +2,9 @@ def setAt(xs: List, i: Int, v: String): List =
   if (List.isEmpty(xs) == 1) List.empty() else if (i == 0) List.cons(v, List.tail(xs)) else List.cons(List.head(xs), setAt(List.tail(xs), i - 1, v))
 
 @main def main: IO[Unit] =
-  Sys.getenv("SCALUI_TODO_PATH").flatMap(envPath =>
+  Sys.getenv("SCUZZ_TODO_PATH").flatMap(envPath =>
     for {
-      path = if (Str.len(envPath) == 0) "/tmp/scalui_todo.txt" else envPath
+      path = if (Str.len(envPath) == 0) "/tmp/scuzz_todo.txt" else envPath
       draft = Signal.str("")
       items = Signal.list([])
       list = View.each(items)

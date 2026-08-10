@@ -1,2 +1,2 @@
 @main def main: IO[Unit] =
-  IO.println("Hello, ScalUI!").flatMap(_ => IO.println("ready."))
+  IO.println("Hello, Scuzz!").flatMap(_ => IO.println("ready."))

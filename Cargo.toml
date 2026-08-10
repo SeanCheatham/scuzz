@@ -10,10 +10,10 @@ default-members = ["crates/cli"]
 version = "0.1.0"
 edition = "2021"
 license = "Apache-2.0"
-repository = "https://github.com/SeanCheatham/scalui"
+repository = "https://github.com/SeanCheatham/scuzz"
 
 [workspace.dependencies]
-scalui-compiler = { path = "crates/compiler" }
+scuzz-compiler = { path = "crates/compiler" }
 anyhow = "1"
 clap = { version = "4", features = ["derive"] }
 serde = { version = "1", features = ["derive"] }

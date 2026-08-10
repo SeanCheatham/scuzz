@@ -1,23 +1,23 @@
-#include "scalui_ui.h"
+#include "scuzz_ui.h"
 
 #include <string.h>
 
 /* Animation: float lerp advanced on pump via Clock dt. */
 
-struct SuAnimFloat {
+struct SzAnimFloat {
   float from;
   float to;
   float current;
   int64_t duration_ms;
   int64_t elapsed_ms;
   int done;
-  SuAnimFloat *next; /* session registry */
+  SzAnimFloat *next; /* session registry */
 };
 
-static SuAnimFloat *g_anims = NULL;
+static SzAnimFloat *g_anims = NULL;
 
-SuAnimFloat *su_anim_float(float from, float to, int64_t duration_ms) {
-  SuAnimFloat *a = (SuAnimFloat *)su_alloc_zero(sizeof(SuAnimFloat));
+SzAnimFloat *sz_anim_float(float from, float to, int64_t duration_ms) {
+  SzAnimFloat *a = (SzAnimFloat *)sz_alloc_zero(sizeof(SzAnimFloat));
   a->from = from;
   a->to = to;
   a->current = from;
@@ -31,8 +31,8 @@ SuAnimFloat *su_anim_float(float from, float to, int64_t duration_ms) {
   return a;
 }
 
-void su_anim_free(SuAnimFloat *a) {
-  SuAnimFloat **pp;
+void sz_anim_free(SzAnimFloat *a) {
+  SzAnimFloat **pp;
   if (!a)
     return;
   for (pp = &g_anims; *pp; pp = &(*pp)->next) {
@@ -41,14 +41,14 @@ void su_anim_free(SuAnimFloat *a) {
       break;
     }
   }
-  su_free(a);
+  sz_free(a);
 }
 
-float su_anim_value(const SuAnimFloat *a) { return a ? a->current : 0.f; }
+float sz_anim_value(const SzAnimFloat *a) { return a ? a->current : 0.f; }
 
-int su_anim_done(const SuAnimFloat *a) { return a ? a->done : 1; }
+int sz_anim_done(const SzAnimFloat *a) { return a ? a->done : 1; }
 
-void su_anim_tick(SuAnimFloat *a, int64_t dt_ms) {
+void sz_anim_tick(SzAnimFloat *a, int64_t dt_ms) {
   float t;
   if (!a || a->done || dt_ms <= 0)
     return;
@@ -62,8 +62,8 @@ void su_anim_tick(SuAnimFloat *a, int64_t dt_ms) {
   a->current = a->from + (a->to - a->from) * t;
 }
 
-void su_anim_tick_all(int64_t dt_ms) {
-  SuAnimFloat *a;
+void sz_anim_tick_all(int64_t dt_ms) {
+  SzAnimFloat *a;
   for (a = g_anims; a; a = a->next)
-    su_anim_tick(a, dt_ms);
+    sz_anim_tick(a, dt_ms);
 }

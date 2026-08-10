@@ -1,4 +1,4 @@
-package scalui.compiler
+package scuzz.compiler
 
 def tyOk(t: String): String =
   Str.concat("OK:", t)

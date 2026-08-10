@@ -145,7 +145,7 @@ static int zlib_store(const uint8_t *data, size_t data_len, Buf *out) {
   return buf_be32(out, (s2 << 16) + s1);
 }
 
-uint8_t *su_png_encode_rgba(const uint8_t *pixels, int width, int height,
+uint8_t *sz_png_encode_rgba(const uint8_t *pixels, int width, int height,
                             int stride, size_t *out_len) {
   Buf png = {0};
   Buf z = {0};

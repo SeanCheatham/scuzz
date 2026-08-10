@@ -293,7 +293,7 @@ int sk_encode_png(const SkSurface *surface, uint8_t **out_bytes, size_t *out_len
   size_t len = 0;
   if (!surface || !out_bytes || !out_len)
     return 0;
-  mem = su_png_encode_rgba(surface->pixels, surface->width, surface->height,
+  mem = sz_png_encode_rgba(surface->pixels, surface->width, surface->height,
                            surface->width * 4, &len);
   if (!mem)
     return 0;

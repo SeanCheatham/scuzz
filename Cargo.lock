@@ -245,16 +245,16 @@ dependencies = [
 ]
 
 [[package]]
-name = "scalui"
+name = "scuzz"
 version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
- "scalui-compiler",
+ "scuzz-compiler",
 ]
 
 [[package]]
-name = "scalui-compiler"
+name = "scuzz-compiler"
 version = "0.1.0"
 dependencies = [
  "anyhow",

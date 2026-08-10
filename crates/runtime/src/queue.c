@@ -1,28 +1,28 @@
-#include "scalui_rt.h"
+#include "scuzz_rt.h"
 
-SuQueue *su_queue_make(void) {
-  SuQueue *q = (SuQueue *)su_alloc_zero(sizeof(SuQueue));
+SzQueue *sz_queue_make(void) {
+  SzQueue *q = (SzQueue *)sz_alloc_zero(sizeof(SzQueue));
   q->cap = 8;
-  q->items = (void **)su_alloc(sizeof(void *) * q->cap);
+  q->items = (void **)sz_alloc(sizeof(void *) * q->cap);
   return q;
 }
 
-void su_queue_free(SuQueue *q) {
+void sz_queue_free(SzQueue *q) {
   if (!q)
     return;
-  su_free(q->items);
-  su_free(q);
+  sz_free(q->items);
+  sz_free(q);
 }
 
 static void *queue_unbounded_thunk(void *env) {
   (void)env;
-  return su_queue_make();
+  return sz_queue_make();
 }
 
-SuIo *su_queue_unbounded(void) { return su_io_delay(queue_unbounded_thunk, NULL); }
+SzIo *sz_queue_unbounded(void) { return sz_io_delay(queue_unbounded_thunk, NULL); }
 
 typedef struct QOfferEnv {
-  SuQueue *q;
+  SzQueue *q;
   void *value;
 } QOfferEnv;
 
@@ -30,51 +30,51 @@ static void *queue_offer_thunk(void *env) {
   QOfferEnv *e = (QOfferEnv *)env;
   if (e->q->len == e->q->cap) {
     size_t ncap = e->q->cap * 2;
-    void **nitems = (void **)su_alloc(sizeof(void *) * ncap);
+    void **nitems = (void **)sz_alloc(sizeof(void *) * ncap);
     size_t i;
     for (i = 0; i < e->q->len; i++)
       nitems[i] = e->q->items[i];
-    su_free(e->q->items);
+    sz_free(e->q->items);
     e->q->items = nitems;
     e->q->cap = ncap;
   }
   e->q->items[e->q->len++] = e->value;
-  su_free(e);
+  sz_free(e);
   return NULL;
 }
 
-SuIo *su_queue_offer(SuQueue *q, void *value) {
+SzIo *sz_queue_offer(SzQueue *q, void *value) {
   if (!q)
-    su_panic("su_queue_offer(null)");
-  QOfferEnv *e = (QOfferEnv *)su_alloc(sizeof(QOfferEnv));
+    sz_panic("sz_queue_offer(null)");
+  QOfferEnv *e = (QOfferEnv *)sz_alloc(sizeof(QOfferEnv));
   e->q = q;
   e->value = value;
-  return su_io_delay(queue_offer_thunk, e);
+  return sz_io_delay(queue_offer_thunk, e);
 }
 
-SuIo *su_queue_offer_cstr(SuQueue *q, const char *value) {
-  return su_queue_offer(q, su_string_from_cstr(value ? value : ""));
+SzIo *sz_queue_offer_cstr(SzQueue *q, const char *value) {
+  return sz_queue_offer(q, sz_string_from_cstr(value ? value : ""));
 }
 
-static SuIo *queue_take_cont(void *value, void *env) {
+static SzIo *queue_take_cont(void *value, void *env) {
   (void)value;
-  SuQueue *q = (SuQueue *)env;
+  SzQueue *q = (SzQueue *)env;
   if (q->len == 0)
-    return su_io_fail_cstr("queue empty");
+    return sz_io_fail_cstr("queue empty");
   {
     void *v = q->items[0];
     size_t i;
     for (i = 1; i < q->len; i++)
       q->items[i - 1] = q->items[i];
     q->len--;
-    return su_io_pure(v);
+    return sz_io_pure(v);
   }
 }
 
-SuIo *su_queue_take(SuQueue *q) {
+SzIo *sz_queue_take(SzQueue *q) {
   if (!q)
-    su_panic("su_queue_take(null)");
-  return su_io_flatmap(su_io_pure(NULL), queue_take_cont, q);
+    sz_panic("sz_queue_take(null)");
+  return sz_io_flatmap(sz_io_pure(NULL), queue_take_cont, q);
 }
 
-size_t su_queue_size(const SuQueue *q) { return q ? q->len : 0; }
+size_t sz_queue_size(const SzQueue *q) { return q ? q->len : 0; }

@@ -1,7 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 
-#include "scalui_ui.h"
-#include "scalui_embedder.h"
+#include "scuzz_ui.h"
+#include "scuzz_embedder.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -9,144 +9,144 @@
 #include <time.h>
 
 /* demo_finish lives in ui.c */
-void su_ui_resolve_headless_size(int *width, int *height, double *scale);
-void su_ui_demo_finish(SuUiSession *session);
+void sz_ui_resolve_headless_size(int *width, int *height, double *scale);
+void sz_ui_demo_finish(SzUiSession *session);
 
-static void fill_cfg(SuUiConfig *cfg, int width, int height) {
+static void fill_cfg(SzUiConfig *cfg, int width, int height) {
   double scale = 1.0;
-  const char *rt = getenv("SCALUI_UI_RUNTIME");
+  const char *rt = getenv("SCUZZ_UI_RUNTIME");
   memset(cfg, 0, sizeof(*cfg));
-  cfg->kind = SU_UI_RUNTIME_HEADLESS;
+  cfg->kind = SZ_UI_RUNTIME_HEADLESS;
   if (rt && (strcmp(rt, "window") == 0 || strcmp(rt, "Window") == 0))
-    cfg->kind = SU_UI_RUNTIME_WINDOW;
+    cfg->kind = SZ_UI_RUNTIME_WINDOW;
   else if (rt && (strcmp(rt, "mobile") == 0 || strcmp(rt, "Mobile") == 0))
-    cfg->kind = SU_UI_RUNTIME_MOBILE;
+    cfg->kind = SZ_UI_RUNTIME_MOBILE;
   cfg->width = width;
   cfg->height = height;
-  cfg->title = "ScalUI";
-  su_ui_resolve_headless_size(&cfg->width, &cfg->height, &scale);
+  cfg->title = "Scuzz Lang";
+  sz_ui_resolve_headless_size(&cfg->width, &cfg->height, &scale);
   cfg->scale = scale;
 }
 
 /* --- Signal -------------------------------------------------------------- */
 
-SuSignalInt *su_lang_signal_int(int64_t initial) { return su_signal_int(initial); }
+SzSignalInt *sz_lang_signal_int(int64_t initial) { return sz_signal_int(initial); }
 
-int64_t su_lang_signal_get(SuSignalInt *s) { return su_signal_int_get(s); }
+int64_t sz_lang_signal_get(SzSignalInt *s) { return sz_signal_int_get(s); }
 
-void *su_lang_signal_set(SuSignalInt *s, int64_t v) {
-  su_signal_int_set(s, v);
+void *sz_lang_signal_set(SzSignalInt *s, int64_t v) {
+  sz_signal_int_set(s, v);
   return NULL;
 }
 
-SuSignalStr *su_lang_signal_str(SuString *initial) {
-  return su_signal_str(initial ? su_string_cstr(initial) : "");
+SzSignalStr *sz_lang_signal_str(SzString *initial) {
+  return sz_signal_str(initial ? sz_string_cstr(initial) : "");
 }
 
-SuString *su_lang_signal_str_get(SuSignalStr *s) {
-  return su_string_from_cstr(su_signal_str_get(s));
+SzString *sz_lang_signal_str_get(SzSignalStr *s) {
+  return sz_string_from_cstr(sz_signal_str_get(s));
 }
 
-void *su_lang_signal_str_set(SuSignalStr *s, SuString *v) {
-  su_signal_str_set(s, v ? su_string_cstr(v) : "");
+void *sz_lang_signal_str_set(SzSignalStr *s, SzString *v) {
+  sz_signal_str_set(s, v ? sz_string_cstr(v) : "");
   return NULL;
 }
 
-SuSignalList *su_lang_signal_list(SuList *initial) { return su_signal_list(initial); }
+SzSignalList *sz_lang_signal_list(SzList *initial) { return sz_signal_list(initial); }
 
-SuList *su_lang_signal_list_get(SuSignalList *s) { return su_signal_list_get(s); }
+SzList *sz_lang_signal_list_get(SzSignalList *s) { return sz_signal_list_get(s); }
 
-void *su_lang_signal_list_set(SuSignalList *s, SuList *v) {
-  su_signal_list_set(s, v);
+void *sz_lang_signal_list_set(SzSignalList *s, SzList *v) {
+  sz_signal_list_set(s, v);
   return NULL;
 }
 
 /* --- View builders ------------------------------------------------------- */
 
-SuView *su_lang_view_text(SuString *text) {
-  return su_view_text(text ? su_string_cstr(text) : "");
+SzView *sz_lang_view_text(SzString *text) {
+  return sz_view_text(text ? sz_string_cstr(text) : "");
 }
 
-SuView *su_lang_view_text_signal(SuSignalInt *sig, SuString *prefix) {
-  return su_view_text_signal_int(sig, prefix ? su_string_cstr(prefix) : "");
+SzView *sz_lang_view_text_signal(SzSignalInt *sig, SzString *prefix) {
+  return sz_view_text_signal_int(sig, prefix ? sz_string_cstr(prefix) : "");
 }
 
-SuView *su_lang_view_button(SuString *label, SuViewTapFn tap, void *env) {
-  return su_view_button(label ? su_string_cstr(label) : "", tap, env);
+SzView *sz_lang_view_button(SzString *label, SzViewTapFn tap, void *env) {
+  return sz_view_button(label ? sz_string_cstr(label) : "", tap, env);
 }
 
-SuView *su_lang_view_column(void) { return su_view_column(); }
+SzView *sz_lang_view_column(void) { return sz_view_column(); }
 
-SuView *su_lang_view_row(void) { return su_view_row(); }
+SzView *sz_lang_view_row(void) { return sz_view_row(); }
 
-SuView *su_lang_view_list(void) { return su_view_list(); }
+SzView *sz_lang_view_list(void) { return sz_view_list(); }
 
-SuView *su_lang_view_each(SuSignalList *sig) { return su_view_each(sig); }
+SzView *sz_lang_view_each(SzSignalList *sig) { return sz_view_each(sig); }
 
-SuView *su_lang_view_scroll(SuView *child) { return su_view_scroll(child); }
+SzView *sz_lang_view_scroll(SzView *child) { return sz_view_scroll(child); }
 
-SuView *su_lang_view_text_field(SuSignalStr *text, SuString *placeholder) {
-  return su_view_text_field(text, placeholder ? su_string_cstr(placeholder) : "");
+SzView *sz_lang_view_text_field(SzSignalStr *text, SzString *placeholder) {
+  return sz_view_text_field(text, placeholder ? sz_string_cstr(placeholder) : "");
 }
 
-SuView *su_lang_view_icon(int64_t glyph, int64_t argb) {
-  return su_view_icon((char)glyph, (uint32_t)argb);
+SzView *sz_lang_view_icon(int64_t glyph, int64_t argb) {
+  return sz_view_icon((char)glyph, (uint32_t)argb);
 }
 
-SuView *su_lang_view_image(int64_t w, int64_t h, int64_t argb, SuString *caption) {
-  return su_view_image((int)w, (int)h, (uint32_t)argb,
-                       caption ? su_string_cstr(caption) : "");
+SzView *sz_lang_view_image(int64_t w, int64_t h, int64_t argb, SzString *caption) {
+  return sz_view_image((int)w, (int)h, (uint32_t)argb,
+                       caption ? sz_string_cstr(caption) : "");
 }
 
-void *su_lang_view_add_child(SuView *parent, SuView *child) {
-  su_view_add_child(parent, child);
+void *sz_lang_view_add_child(SzView *parent, SzView *child) {
+  sz_view_add_child(parent, child);
   return NULL;
 }
 
-void *su_lang_view_add_texts(SuView *parent, SuList *lines) {
-  for (SuList *p = lines; p; p = p->tail) {
-    SuString *s = (SuString *)p->head;
+void *sz_lang_view_add_texts(SzView *parent, SzList *lines) {
+  for (SzList *p = lines; p; p = p->tail) {
+    SzString *s = (SzString *)p->head;
     char line[256];
-    snprintf(line, sizeof line, "- %s", s ? su_string_cstr(s) : "");
-    su_view_add_child(parent, su_view_text(line));
+    snprintf(line, sizeof line, "- %s", s ? sz_string_cstr(s) : "");
+    sz_view_add_child(parent, sz_view_text(line));
   }
   return NULL;
 }
 
-void *su_lang_view_clear_children(SuView *parent) {
-  su_view_clear_children(parent);
+void *sz_lang_view_clear_children(SzView *parent) {
+  sz_view_clear_children(parent);
   return NULL;
 }
 
-void *su_lang_view_set_texts(SuView *parent, SuList *lines) {
-  su_view_clear_children(parent);
-  return su_lang_view_add_texts(parent, lines);
+void *sz_lang_view_set_texts(SzView *parent, SzList *lines) {
+  sz_view_clear_children(parent);
+  return sz_lang_view_add_texts(parent, lines);
 }
 
-SuView *su_lang_view_show_when(SuSignalInt *sig, int64_t value, SuView *child) {
-  return su_view_show_when(sig, value, child);
+SzView *sz_lang_view_show_when(SzSignalInt *sig, int64_t value, SzView *child) {
+  return sz_view_show_when(sig, value, child);
 }
 
-SuView *su_lang_view_bind_text(SuSignalStr *sig) { return su_view_text_signal_str(sig); }
+SzView *sz_lang_view_bind_text(SzSignalStr *sig) { return sz_view_text_signal_str(sig); }
 
 /* --- Ui.run -------------------------------------------------------------- */
 
 typedef struct {
-  SuView *root;
+  SzView *root;
 } RunViewEnv;
 
 /* Collect unique buttons in top-to-bottom, left-to-right scan order.
    Frames must be current (run after a pump). */
-static int collect_buttons(SuUiSession *session, SuView **buttons, int cap) {
-  SuView *r = su_ui_session_root(session);
+static int collect_buttons(SzUiSession *session, SzView **buttons, int cap) {
+  SzView *r = sz_ui_session_root(session);
   int n_buttons = 0;
   int yi, xi;
-  int w = su_ui_session_width(session);
-  int h = su_ui_session_height(session);
+  int w = sz_ui_session_width(session);
+  int h = sz_ui_session_height(session);
   for (yi = 0; yi < h; yi += 4) {
     for (xi = 0; xi < w; xi += 4) {
-      SuView *hit = su_view_hit_test(r, (float)xi, (float)yi);
-      if (hit && su_view_kind(hit) == SU_VIEW_BUTTON) {
+      SzView *hit = sz_view_hit_test(r, (float)xi, (float)yi);
+      if (hit && sz_view_kind(hit) == SZ_VIEW_BUTTON) {
         int seen = 0;
         int bi;
         for (bi = 0; bi < n_buttons; bi++) {
@@ -163,26 +163,26 @@ static int collect_buttons(SuUiSession *session, SuView **buttons, int cap) {
   return n_buttons;
 }
 
-static void scripted_button_tap(SuUiSession *session, int prefer_upper) {
-  SuInputEvent tap;
-  SuView *hit_btn = NULL;
-  SuView *buttons[64];
+static void scripted_button_tap(SzUiSession *session, int prefer_upper) {
+  SzInputEvent tap;
+  SzView *hit_btn = NULL;
+  SzView *buttons[64];
   int n_buttons;
   float tx = 40.f, ty = 60.f;
-  const char *tap_n_env = getenv("SCALUI_UI_TAP_N");
+  const char *tap_n_env = getenv("SCUZZ_UI_TAP_N");
   int tap_n = (tap_n_env && tap_n_env[0]) ? atoi(tap_n_env) : -1;
 
   n_buttons = collect_buttons(session, buttons, 64);
 
   if (tap_n >= 0) {
     if (tap_n >= n_buttons)
-      su_panic("Ui.run: SCALUI_UI_TAP_N out of range");
+      sz_panic("Ui.run: SCUZZ_UI_TAP_N out of range");
     hit_btn = buttons[tap_n];
   } else if (prefer_upper && n_buttons > 0) {
     int bi;
     hit_btn = buttons[0];
     for (bi = 1; bi < n_buttons; bi++) {
-      if (su_view_frame(buttons[bi]).y < su_view_frame(hit_btn).y)
+      if (sz_view_frame(buttons[bi]).y < sz_view_frame(hit_btn).y)
         hit_btn = buttons[bi];
     }
   } else if (n_buttons > 0) {
@@ -190,58 +190,58 @@ static void scripted_button_tap(SuUiSession *session, int prefer_upper) {
   }
 
   if (!hit_btn)
-    su_panic("Ui.run: button not found for SCALUI_UI_TAP");
+    sz_panic("Ui.run: button not found for SCUZZ_UI_TAP");
   {
-    SuRect fr = su_view_frame(hit_btn);
+    SzRect fr = sz_view_frame(hit_btn);
     tx = fr.x + fr.w * 0.5f;
     ty = fr.y + fr.h * 0.5f;
   }
   memset(&tap, 0, sizeof(tap));
-  tap.kind = SU_INPUT_TAP;
+  tap.kind = SZ_INPUT_TAP;
   tap.x = tx;
   tap.y = ty;
   {
-    const char *sx = getenv("SCALUI_UI_TAP_X");
-    const char *sy = getenv("SCALUI_UI_TAP_Y");
+    const char *sx = getenv("SCUZZ_UI_TAP_X");
+    const char *sy = getenv("SCUZZ_UI_TAP_Y");
     if (sx)
       tap.x = (float)atof(sx);
     if (sy)
       tap.y = (float)atof(sy);
   }
-  if (!su_ui_inject_sync(session, &tap) || !su_ui_pump_sync(session))
-    su_panic("Ui.run tap/pump failed");
+  if (!sz_ui_inject_sync(session, &tap) || !sz_ui_pump_sync(session))
+    sz_panic("Ui.run tap/pump failed");
 }
 
-/* --- SCALUI_UI_SCRIPT playback (fuzz / replay) ---------------------------- */
+/* --- SCUZZ_UI_SCRIPT playback (fuzz / replay) ---------------------------- */
 /* Line protocol, one event per line, delivered across pump boundaries:
      tap <n>    tap the nth button (scan order); missing target is a no-op
      text <s>   deliver <s> to the focused/first TextField; no field is a no-op
      pump <k>   pump k extra frames
    Blank lines and #-comments are skipped. Pump runs after every event. */
 
-static void script_tap(SuUiSession *session, int n) {
-  SuView *buttons[64];
+static void script_tap(SzUiSession *session, int n) {
+  SzView *buttons[64];
   int count = collect_buttons(session, buttons, 64);
-  SuInputEvent tap;
-  SuRect fr;
+  SzInputEvent tap;
+  SzRect fr;
   if (n < 0 || n >= count) {
-    fprintf(stderr, "scalui: script tap %d skipped (%d buttons)\n", n, count);
+    fprintf(stderr, "scuzz: script tap %d skipped (%d buttons)\n", n, count);
     return;
   }
-  fr = su_view_frame(buttons[n]);
+  fr = sz_view_frame(buttons[n]);
   memset(&tap, 0, sizeof(tap));
-  tap.kind = SU_INPUT_TAP;
+  tap.kind = SZ_INPUT_TAP;
   tap.x = fr.x + fr.w * 0.5f;
   tap.y = fr.y + fr.h * 0.5f;
-  if (!su_ui_inject_sync(session, &tap))
-    su_panic("Ui.run: script tap inject failed");
+  if (!sz_ui_inject_sync(session, &tap))
+    sz_panic("Ui.run: script tap inject failed");
 }
 
-static void run_ui_script(SuUiSession *session, const char *path) {
+static void run_ui_script(SzUiSession *session, const char *path) {
   FILE *f = fopen(path, "r");
   char line[1024];
   if (!f)
-    su_panic("Ui.run: SCALUI_UI_SCRIPT open failed");
+    sz_panic("Ui.run: SCUZZ_UI_SCRIPT open failed");
   while (fgets(line, sizeof line, f)) {
     size_t len = strlen(line);
     while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
@@ -251,76 +251,76 @@ static void run_ui_script(SuUiSession *session, const char *path) {
     if (strncmp(line, "tap ", 4) == 0 || strcmp(line, "tap") == 0) {
       script_tap(session, len > 3 ? atoi(line + 4) : 0);
     } else if (strncmp(line, "text ", 5) == 0 || strcmp(line, "text") == 0) {
-      SuInputEvent ev;
+      SzInputEvent ev;
       memset(&ev, 0, sizeof(ev));
-      ev.kind = SU_INPUT_TEXT;
+      ev.kind = SZ_INPUT_TEXT;
       ev.text = len > 4 ? line + 5 : "";
-      if (!su_ui_inject_sync(session, &ev))
-        fprintf(stderr, "scalui: script text skipped (no text field)\n");
+      if (!sz_ui_inject_sync(session, &ev))
+        fprintf(stderr, "scuzz: script text skipped (no text field)\n");
     } else if (strncmp(line, "pump ", 5) == 0 || strcmp(line, "pump") == 0) {
       int k = len > 5 ? atoi(line + 5) : 1;
       while (k-- > 1) {
-        if (!su_ui_pump_sync(session))
-          su_panic("Ui.run: script pump failed");
+        if (!sz_ui_pump_sync(session))
+          sz_panic("Ui.run: script pump failed");
       }
     } else {
       fclose(f);
-      su_panic("Ui.run: unknown SCALUI_UI_SCRIPT directive");
+      sz_panic("Ui.run: unknown SCUZZ_UI_SCRIPT directive");
     }
-    if (!su_ui_pump_sync(session))
-      su_panic("Ui.run: script pump failed");
+    if (!sz_ui_pump_sync(session))
+      sz_panic("Ui.run: script pump failed");
   }
   fclose(f);
 }
 
 static void *thunk_run_view(void *env) {
   RunViewEnv *e = (RunViewEnv *)env;
-  SuUiConfig cfg;
-  SuUiSession *session;
+  SzUiConfig cfg;
+  SzUiSession *session;
   int interactive;
   int inject_text = 0;
 
   fill_cfg(&cfg, 0, 0);
 
-  session = su_ui_mount(&cfg, e->root);
+  session = sz_ui_mount(&cfg, e->root);
   if (!session)
-    su_panic("Ui.run mount failed");
-  su_ui_session_take_root(session);
+    sz_panic("Ui.run mount failed");
+  sz_ui_session_take_root(session);
 
-  if (!su_ui_pump_sync(session))
-    su_panic("Ui.run pump failed");
+  if (!sz_ui_pump_sync(session))
+    sz_panic("Ui.run pump failed");
 
   {
-    const char *script = getenv("SCALUI_UI_SCRIPT");
+    const char *script = getenv("SCUZZ_UI_SCRIPT");
     if (script && script[0])
       run_ui_script(session, script);
   }
 
-  if (getenv("SCALUI_UI_TAP")) {
-    const char *seed = getenv("SCALUI_UI_TEXT");
+  if (getenv("SCUZZ_UI_TAP")) {
+    const char *seed = getenv("SCUZZ_UI_TEXT");
     if (!seed || !seed[0])
-      seed = getenv("SCALUI_TODO_SEED");
+      seed = getenv("SCUZZ_TODO_SEED");
     if (seed && seed[0]) {
-      SuInputEvent ev;
+      SzInputEvent ev;
       memset(&ev, 0, sizeof(ev));
-      ev.kind = SU_INPUT_TEXT;
+      ev.kind = SZ_INPUT_TEXT;
       ev.text = seed;
-      if (!su_ui_inject_sync(session, &ev))
-        su_panic("Ui.run text inject failed");
+      if (!sz_ui_inject_sync(session, &ev))
+        sz_panic("Ui.run text inject failed");
       inject_text = 1;
     }
     scripted_button_tap(session, inject_text);
   }
 
-  interactive = cfg.kind == SU_UI_RUNTIME_WINDOW && su_embedder_available();
+  interactive = cfg.kind == SZ_UI_RUNTIME_WINDOW && sz_embedder_available();
   if (interactive) {
-    const char *max_frames_env = getenv("SCALUI_LIVE_FRAMES");
+    const char *max_frames_env = getenv("SCUZZ_LIVE_FRAMES");
     int64_t max_frames =
         (max_frames_env && atoi(max_frames_env) > 0) ? atoi(max_frames_env) : 0;
     int64_t frame = 0;
     do {
-      if (!su_ui_pump_sync(session))
-        su_panic("Ui.run live pump failed");
+      if (!sz_ui_pump_sync(session))
+        sz_panic("Ui.run live pump failed");
       frame++;
       if (max_frames > 0 && frame >= max_frames)
         break;
@@ -330,18 +330,18 @@ static void *thunk_run_view(void *env) {
         ts.tv_nsec = 16000000L; /* ~60fps cap */
         nanosleep(&ts, NULL);
       }
-    } while (su_embedder_alive());
+    } while (sz_embedder_alive());
   } else {
-    su_ui_demo_finish(session);
+    sz_ui_demo_finish(session);
   }
 
-  su_ui_unmount(session);
-  su_free(e);
+  sz_ui_unmount(session);
+  sz_free(e);
   return NULL;
 }
 
-SuIo *su_ui_run_view(SuView *root) {
-  RunViewEnv *e = (RunViewEnv *)su_alloc(sizeof(RunViewEnv));
+SzIo *sz_ui_run_view(SzView *root) {
+  RunViewEnv *e = (RunViewEnv *)sz_alloc(sizeof(RunViewEnv));
   e->root = root;
-  return su_io_delay(thunk_run_view, e);
+  return sz_io_delay(thunk_run_view, e);
 }

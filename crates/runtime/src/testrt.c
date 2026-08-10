@@ -1,4 +1,4 @@
-#include "scalui_rt.h"
+#include "scuzz_rt.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -6,10 +6,10 @@
 
 /* TestRuntime: install / reset fake interpreters. */
 
-void su_testrt_clock_reset_live(void);
-void su_testrt_random_reset_live(void);
-void su_testrt_fs_reset_live(void);
-void su_testrt_net_reset_live(void);
+void sz_testrt_clock_reset_live(void);
+void sz_testrt_random_reset_live(void);
+void sz_testrt_fs_reset_live(void);
+void sz_testrt_net_reset_live(void);
 
 /* --- mem FS -------------------------------------------------------------- */
 
@@ -24,26 +24,26 @@ typedef struct MemNode {
 static int g_fs_fake = 0;
 static MemNode *g_fs = NULL;
 
-void su_testrt_fs_reset_live(void) {
+void sz_testrt_fs_reset_live(void) {
   MemNode *n = g_fs;
   while (n) {
     MemNode *next = n->next;
-    su_free(n->path);
-    su_free(n->data);
-    su_free(n);
+    sz_free(n->path);
+    sz_free(n->data);
+    sz_free(n);
     n = next;
   }
   g_fs = NULL;
   g_fs_fake = 0;
 }
 
-void su_testrt_fs_install(void) {
-  su_testrt_fs_reset_live();
+void sz_testrt_fs_install(void) {
+  sz_testrt_fs_reset_live();
   g_fs_fake = 1;
   /* Root directory exists. */
   {
-    MemNode *root = (MemNode *)su_alloc(sizeof(MemNode));
-    root->path = (char *)su_alloc(1);
+    MemNode *root = (MemNode *)sz_alloc(sizeof(MemNode));
+    root->path = (char *)sz_alloc(1);
     root->path[0] = '\0';
     root->is_dir = 1;
     root->data = NULL;
@@ -53,7 +53,7 @@ void su_testrt_fs_install(void) {
   }
 }
 
-int su_testrt_fs_is_fake(void) { return g_fs_fake; }
+int sz_testrt_fs_is_fake(void) { return g_fs_fake; }
 
 static char *norm_path(const char *p) {
   size_t n;
@@ -65,7 +65,7 @@ static char *norm_path(const char *p) {
   while (p[0] == '.' && p[1] == '/')
     p += 2;
   n = strlen(p);
-  out = (char *)su_alloc(n + 1);
+  out = (char *)sz_alloc(n + 1);
   j = 0;
   for (i = 0; i < n; i++) {
     if (p[i] == '/' && j > 0 && out[j - 1] == '/')
@@ -91,8 +91,8 @@ static MemNode *fs_ensure_dir(const char *path) {
   MemNode *n = fs_find(path);
   if (n)
     return n->is_dir ? n : NULL;
-  n = (MemNode *)su_alloc(sizeof(MemNode));
-  n->path = (char *)su_alloc(strlen(path) + 1);
+  n = (MemNode *)sz_alloc(sizeof(MemNode));
+  n->path = (char *)sz_alloc(strlen(path) + 1);
   memcpy(n->path, path, strlen(path) + 1);
   n->is_dir = 1;
   n->data = NULL;
@@ -122,58 +122,58 @@ static int parent_path(const char *path, char *out, size_t out_sz) {
 typedef struct {
   int is_err;
   union {
-    SuError *err;
+    SzError *err;
     void *ok;
   } as;
 } BoxResult;
 
-static SuIo *unwrap_box(void *value, void *env) {
+static SzIo *unwrap_box(void *value, void *env) {
   (void)env;
   BoxResult *r = (BoxResult *)value;
   if (!r)
-    return su_io_fail_cstr("TestRuntime: null result");
+    return sz_io_fail_cstr("TestRuntime: null result");
   if (r->is_err)
-    return su_io_fail(r->as.err);
-  return su_io_pure(r->as.ok);
+    return sz_io_fail(r->as.err);
+  return sz_io_pure(r->as.ok);
 }
 
 static void *mem_read(void *env) {
-  SuString *path_s = (SuString *)env;
-  BoxResult *r = (BoxResult *)su_alloc(sizeof(BoxResult));
-  char *path = norm_path(su_string_cstr(path_s));
+  SzString *path_s = (SzString *)env;
+  BoxResult *r = (BoxResult *)sz_alloc(sizeof(BoxResult));
+  char *path = norm_path(sz_string_cstr(path_s));
   MemNode *n = fs_find(path);
-  su_free(path);
+  sz_free(path);
   if (!n || n->is_dir) {
     r->is_err = 1;
-    r->as.err = su_error_new(2, "Fs.read: not found (mem)");
+    r->as.err = sz_error_new(2, "Fs.read: not found (mem)");
     return r;
   }
   r->is_err = 0;
-  r->as.ok = su_string_from_bytes(n->data ? n->data : "", n->len);
+  r->as.ok = sz_string_from_bytes(n->data ? n->data : "", n->len);
   return r;
 }
 
-SuIo *su_testrt_fs_read(SuString *path) {
-  return su_io_flatmap(su_io_delay(mem_read, path), unwrap_box, NULL);
+SzIo *sz_testrt_fs_read(SzString *path) {
+  return sz_io_flatmap(sz_io_delay(mem_read, path), unwrap_box, NULL);
 }
 
 typedef struct {
-  SuString *path;
-  SuString *contents;
+  SzString *path;
+  SzString *contents;
 } WriteEnv;
 
 static void *mem_write(void *env) {
   WriteEnv *e = (WriteEnv *)env;
-  BoxResult *r = (BoxResult *)su_alloc(sizeof(BoxResult));
-  char *path = norm_path(su_string_cstr(e->path));
+  BoxResult *r = (BoxResult *)sz_alloc(sizeof(BoxResult));
+  char *path = norm_path(sz_string_cstr(e->path));
   char parent[1024];
   MemNode *n;
-  SuString *c = e->contents ? e->contents : su_string_from_cstr("");
+  SzString *c = e->contents ? e->contents : sz_string_from_cstr("");
 
   if (!parent_path(path, parent, sizeof parent)) {
-    su_free(path);
+    sz_free(path);
     r->is_err = 1;
-    r->as.err = su_error_new(2, "Fs.write: path too long (mem)");
+    r->as.err = sz_error_new(2, "Fs.write: path too long (mem)");
     return r;
   }
   if (parent[0] != '\0' && !fs_find(parent)) {
@@ -182,9 +182,9 @@ static void *mem_write(void *env) {
     size_t len = strlen(parent);
     size_t i;
     if (len >= sizeof tmp) {
-      su_free(path);
+      sz_free(path);
       r->is_err = 1;
-      r->as.err = su_error_new(2, "Fs.write: parent too long (mem)");
+      r->as.err = sz_error_new(2, "Fs.write: parent too long (mem)");
       return r;
     }
     memcpy(tmp, parent, len + 1);
@@ -192,31 +192,31 @@ static void *mem_write(void *env) {
       if (tmp[i] == '/') {
         tmp[i] = '\0';
         if (!fs_ensure_dir(tmp)) {
-          su_free(path);
+          sz_free(path);
           r->is_err = 1;
-          r->as.err = su_error_new(2, "Fs.write: parent is file (mem)");
+          r->as.err = sz_error_new(2, "Fs.write: parent is file (mem)");
           return r;
         }
         tmp[i] = '/';
       }
     }
     if (!fs_ensure_dir(parent)) {
-      su_free(path);
+      sz_free(path);
       r->is_err = 1;
-      r->as.err = su_error_new(2, "Fs.write: parent is file (mem)");
+      r->as.err = sz_error_new(2, "Fs.write: parent is file (mem)");
       return r;
     }
   }
 
   n = fs_find(path);
   if (n && n->is_dir) {
-    su_free(path);
+    sz_free(path);
     r->is_err = 1;
-    r->as.err = su_error_new(2, "Fs.write: is a directory (mem)");
+    r->as.err = sz_error_new(2, "Fs.write: is a directory (mem)");
     return r;
   }
   if (!n) {
-    n = (MemNode *)su_alloc(sizeof(MemNode));
+    n = (MemNode *)sz_alloc(sizeof(MemNode));
     n->path = path;
     n->is_dir = 0;
     n->data = NULL;
@@ -224,13 +224,13 @@ static void *mem_write(void *env) {
     n->next = g_fs;
     g_fs = n;
   } else {
-    su_free(path);
-    su_free(n->data);
+    sz_free(path);
+    sz_free(n->data);
     n->data = NULL;
     n->len = 0;
   }
   n->len = c->len;
-  n->data = (char *)su_alloc(c->len + 1);
+  n->data = (char *)sz_alloc(c->len + 1);
   if (c->len)
     memcpy(n->data, c->data, c->len);
   n->data[c->len] = '\0';
@@ -239,11 +239,11 @@ static void *mem_write(void *env) {
   return r;
 }
 
-SuIo *su_testrt_fs_write(SuString *path, SuString *contents) {
-  WriteEnv *e = (WriteEnv *)su_alloc(sizeof(WriteEnv));
+SzIo *sz_testrt_fs_write(SzString *path, SzString *contents) {
+  WriteEnv *e = (WriteEnv *)sz_alloc(sizeof(WriteEnv));
   e->path = path;
   e->contents = contents;
-  return su_io_flatmap(su_io_delay(mem_write, e), unwrap_box, NULL);
+  return sz_io_flatmap(sz_io_delay(mem_write, e), unwrap_box, NULL);
 }
 
 static int is_direct_child(const char *dir, const char *child) {
@@ -260,57 +260,57 @@ static int is_direct_child(const char *dir, const char *child) {
 }
 
 static void *mem_list(void *env) {
-  SuString *path_s = (SuString *)env;
-  BoxResult *r = (BoxResult *)su_alloc(sizeof(BoxResult));
-  char *path = norm_path(su_string_cstr(path_s));
+  SzString *path_s = (SzString *)env;
+  BoxResult *r = (BoxResult *)sz_alloc(sizeof(BoxResult));
+  char *path = norm_path(sz_string_cstr(path_s));
   MemNode *dir = fs_find(path);
   MemNode *n;
-  SuList *acc;
+  SzList *acc;
 
   if (!dir || !dir->is_dir) {
-    su_free(path);
+    sz_free(path);
     r->is_err = 1;
-    r->as.err = su_error_new(2, "Fs.list: not a directory (mem)");
+    r->as.err = sz_error_new(2, "Fs.list: not a directory (mem)");
     return r;
   }
-  acc = su_list_nil();
+  acc = sz_list_nil();
   for (n = g_fs; n; n = n->next) {
     if (n == dir)
       continue;
     if (is_direct_child(path, n->path)) {
       const char *base = strrchr(n->path, '/');
       base = base ? base + 1 : n->path;
-      acc = su_list_cons(su_string_from_cstr(base), acc);
+      acc = sz_list_cons(sz_string_from_cstr(base), acc);
     }
   }
-  su_free(path);
+  sz_free(path);
   r->is_err = 0;
-  r->as.ok = su_list_reverse(acc);
+  r->as.ok = sz_list_reverse(acc);
   return r;
 }
 
-SuIo *su_testrt_fs_list(SuString *path) {
-  return su_io_flatmap(su_io_delay(mem_list, path), unwrap_box, NULL);
+SzIo *sz_testrt_fs_list(SzString *path) {
+  return sz_io_flatmap(sz_io_delay(mem_list, path), unwrap_box, NULL);
 }
 
 static void *mem_mkdirs(void *env) {
-  SuString *path_s = (SuString *)env;
-  BoxResult *r = (BoxResult *)su_alloc(sizeof(BoxResult));
-  char *path = norm_path(su_string_cstr(path_s));
+  SzString *path_s = (SzString *)env;
+  BoxResult *r = (BoxResult *)sz_alloc(sizeof(BoxResult));
+  char *path = norm_path(sz_string_cstr(path_s));
   char tmp[1024];
   size_t len = strlen(path);
   size_t i;
 
   if (len == 0) {
-    su_free(path);
+    sz_free(path);
     r->is_err = 0;
     r->as.ok = NULL;
     return r;
   }
   if (len >= sizeof tmp) {
-    su_free(path);
+    sz_free(path);
     r->is_err = 1;
-    r->as.err = su_error_new(2, "Fs.mkdirs: path too long (mem)");
+    r->as.err = sz_error_new(2, "Fs.mkdirs: path too long (mem)");
     return r;
   }
   memcpy(tmp, path, len + 1);
@@ -318,28 +318,28 @@ static void *mem_mkdirs(void *env) {
     if (tmp[i] == '/') {
       tmp[i] = '\0';
       if (!fs_ensure_dir(tmp)) {
-        su_free(path);
+        sz_free(path);
         r->is_err = 1;
-        r->as.err = su_error_new(2, "Fs.mkdirs: path component is file (mem)");
+        r->as.err = sz_error_new(2, "Fs.mkdirs: path component is file (mem)");
         return r;
       }
       tmp[i] = '/';
     }
   }
   if (!fs_ensure_dir(path)) {
-    su_free(path);
+    sz_free(path);
     r->is_err = 1;
-    r->as.err = su_error_new(2, "Fs.mkdirs: path is file (mem)");
+    r->as.err = sz_error_new(2, "Fs.mkdirs: path is file (mem)");
     return r;
   }
-  su_free(path);
+  sz_free(path);
   r->is_err = 0;
   r->as.ok = NULL;
   return r;
 }
 
-SuIo *su_testrt_fs_mkdirs(SuString *path) {
-  return su_io_flatmap(su_io_delay(mem_mkdirs, path), unwrap_box, NULL);
+SzIo *sz_testrt_fs_mkdirs(SzString *path) {
+  return sz_io_flatmap(sz_io_delay(mem_mkdirs, path), unwrap_box, NULL);
 }
 
 /* --- stub network -------------------------------------------------------- */
@@ -353,58 +353,58 @@ typedef struct NetStub {
 static int g_net_fake = 0;
 static NetStub *g_stubs = NULL;
 
-void su_testrt_net_reset_live(void) {
+void sz_testrt_net_reset_live(void) {
   NetStub *s = g_stubs;
   while (s) {
     NetStub *n = s->next;
-    su_free(s->url);
-    su_free(s->body);
-    su_free(s);
+    sz_free(s->url);
+    sz_free(s->body);
+    sz_free(s);
     s = n;
   }
   g_stubs = NULL;
   g_net_fake = 0;
 }
 
-void su_testrt_net_install(void) {
-  su_testrt_net_reset_live();
+void sz_testrt_net_install(void) {
+  sz_testrt_net_reset_live();
   g_net_fake = 1;
 }
 
-int su_testrt_net_is_fake(void) { return g_net_fake; }
+int sz_testrt_net_is_fake(void) { return g_net_fake; }
 
-void su_testrt_net_stub(const char *url, const char *body) {
+void sz_testrt_net_stub(const char *url, const char *body) {
   NetStub *s;
   if (!g_net_fake)
-    su_testrt_net_install();
-  s = (NetStub *)su_alloc(sizeof(NetStub));
-  s->url = (char *)su_alloc(strlen(url ? url : "") + 1);
+    sz_testrt_net_install();
+  s = (NetStub *)sz_alloc(sizeof(NetStub));
+  s->url = (char *)sz_alloc(strlen(url ? url : "") + 1);
   memcpy(s->url, url ? url : "", strlen(url ? url : "") + 1);
-  s->body = (char *)su_alloc(strlen(body ? body : "") + 1);
+  s->body = (char *)sz_alloc(strlen(body ? body : "") + 1);
   memcpy(s->body, body ? body : "", strlen(body ? body : "") + 1);
   s->next = g_stubs;
   g_stubs = s;
 }
 
 static void *stub_http_get(void *env) {
-  SuString *url_s = (SuString *)env;
-  BoxResult *r = (BoxResult *)su_alloc(sizeof(BoxResult));
-  const char *url = su_string_cstr(url_s);
+  SzString *url_s = (SzString *)env;
+  BoxResult *r = (BoxResult *)sz_alloc(sizeof(BoxResult));
+  const char *url = sz_string_cstr(url_s);
   NetStub *s;
   for (s = g_stubs; s; s = s->next) {
     if (strcmp(s->url, url) == 0) {
       r->is_err = 0;
-      r->as.ok = su_string_from_cstr(s->body);
+      r->as.ok = sz_string_from_cstr(s->body);
       return r;
     }
   }
   r->is_err = 1;
-  r->as.err = su_error_new(6, "Net.httpGet: no stub for URL");
+  r->as.err = sz_error_new(6, "Net.httpGet: no stub for URL");
   return r;
 }
 
-SuIo *su_testrt_net_http_get(SuString *url) {
-  return su_io_flatmap(su_io_delay(stub_http_get, url), unwrap_box, NULL);
+SzIo *sz_testrt_net_http_get(SzString *url) {
+  return sz_io_flatmap(sz_io_delay(stub_http_get, url), unwrap_box, NULL);
 }
 
 /* --- sys / console ------------------------------------------------------- */
@@ -427,33 +427,33 @@ static void free_fake_argv(void) {
   if (!g_fake_argv)
     return;
   for (i = 0; i < g_fake_argc; i++)
-    su_free(g_fake_argv[i]);
-  su_free(g_fake_argv);
+    sz_free(g_fake_argv[i]);
+  sz_free(g_fake_argv);
   g_fake_argv = NULL;
   g_fake_argc = 0;
   g_args_override = 0;
 }
 
-void su_testrt_sys_reset_live(void) {
+void sz_testrt_sys_reset_live(void) {
   free_fake_argv();
-  su_free(g_stdin_buf);
+  sz_free(g_stdin_buf);
   g_stdin_buf = NULL;
   g_stdin_len = 0;
   g_stdin_off = 0;
-  su_free(g_stdout_buf);
+  sz_free(g_stdout_buf);
   g_stdout_buf = NULL;
   g_stdout_len = 0;
   g_stdout_cap = 0;
   g_sys_fake = 0;
 }
 
-void su_testrt_stdout_reset(void) {
+void sz_testrt_stdout_reset(void) {
   if (g_stdout_buf)
     g_stdout_buf[0] = '\0';
   g_stdout_len = 0;
 }
 
-void su_testrt_stdout_append(const char *line) {
+void sz_testrt_stdout_append(const char *line) {
   size_t n;
   size_t need;
   if (!line)
@@ -465,10 +465,10 @@ void su_testrt_stdout_append(const char *line) {
     char *nb;
     while (cap < need)
       cap *= 2;
-    nb = (char *)su_alloc(cap);
+    nb = (char *)sz_alloc(cap);
     if (g_stdout_buf && g_stdout_len)
       memcpy(nb, g_stdout_buf, g_stdout_len);
-    su_free(g_stdout_buf);
+    sz_free(g_stdout_buf);
     g_stdout_buf = nb;
     g_stdout_cap = cap;
   }
@@ -478,47 +478,47 @@ void su_testrt_stdout_append(const char *line) {
   g_stdout_buf[g_stdout_len] = '\0';
 }
 
-const char *su_testrt_stdout_cstr(void) {
+const char *sz_testrt_stdout_cstr(void) {
   return g_stdout_buf ? g_stdout_buf : "";
 }
 
-void su_testrt_stdin_feed(const char *text) {
+void sz_testrt_stdin_feed(const char *text) {
   size_t n;
   if (!text)
     text = "";
   n = strlen(text);
-  su_free(g_stdin_buf);
-  g_stdin_buf = (char *)su_alloc(n + 1);
+  sz_free(g_stdin_buf);
+  g_stdin_buf = (char *)sz_alloc(n + 1);
   memcpy(g_stdin_buf, text, n + 1);
   g_stdin_len = n;
   g_stdin_off = 0;
 }
 
-void su_testrt_sys_set_args(int argc, char **argv) {
+void sz_testrt_sys_set_args(int argc, char **argv) {
   int i;
   free_fake_argv();
   if (argc < 0)
     argc = 0;
   g_fake_argc = argc;
-  g_fake_argv = (char **)su_alloc(sizeof(char *) * (size_t)(argc + 1));
+  g_fake_argv = (char **)sz_alloc(sizeof(char *) * (size_t)(argc + 1));
   for (i = 0; i < argc; i++) {
     const char *s = argv && argv[i] ? argv[i] : "";
     size_t n = strlen(s);
-    g_fake_argv[i] = (char *)su_alloc(n + 1);
+    g_fake_argv[i] = (char *)sz_alloc(n + 1);
     memcpy(g_fake_argv[i], s, n + 1);
   }
   g_fake_argv[argc] = NULL;
   g_args_override = 1;
 }
 
-int su_testrt_sys_has_args_override(void) { return g_args_override; }
+int sz_testrt_sys_has_args_override(void) { return g_args_override; }
 
-SuList *su_testrt_sys_args_list(void) {
-  SuList *acc = su_list_nil();
+SzList *sz_testrt_sys_args_list(void) {
+  SzList *acc = sz_list_nil();
   int i;
   /* Override stores user args only (no argv[0]). */
   for (i = g_fake_argc - 1; i >= 0; i--)
-    acc = su_list_cons(su_string_from_cstr(g_fake_argv[i] ? g_fake_argv[i] : ""),
+    acc = sz_list_cons(sz_string_from_cstr(g_fake_argv[i] ? g_fake_argv[i] : ""),
                        acc);
   return acc;
 }
@@ -528,7 +528,7 @@ static void *testrt_read_line_thunk(void *env) {
   size_t end;
   (void)env;
   if (!g_stdin_buf || g_stdin_off >= g_stdin_len)
-    return su_string_from_cstr("");
+    return sz_string_from_cstr("");
   start = g_stdin_off;
   end = start;
   while (end < g_stdin_len && g_stdin_buf[end] != '\n')
@@ -537,38 +537,38 @@ static void *testrt_read_line_thunk(void *env) {
   /* Strip trailing CR for CRLF. */
   if (end > start && g_stdin_buf[end - 1] == '\r')
     end--;
-  return su_string_from_bytes(g_stdin_buf + start, end - start);
+  return sz_string_from_bytes(g_stdin_buf + start, end - start);
 }
 
-SuIo *su_testrt_sys_read_line(void) {
-  return su_io_delay(testrt_read_line_thunk, NULL);
+SzIo *sz_testrt_sys_read_line(void) {
+  return sz_io_delay(testrt_read_line_thunk, NULL);
 }
 
-void su_testrt_sys_install(void) {
+void sz_testrt_sys_install(void) {
   const char *feed;
-  su_testrt_sys_reset_live();
+  sz_testrt_sys_reset_live();
   g_sys_fake = 1;
-  feed = getenv("SCALUI_TESTRT_STDIN");
+  feed = getenv("SCUZZ_TESTRT_STDIN");
   if (feed && feed[0])
-    su_testrt_stdin_feed(feed);
+    sz_testrt_stdin_feed(feed);
 }
 
-int su_testrt_sys_is_fake(void) { return g_sys_fake; }
+int sz_testrt_sys_is_fake(void) { return g_sys_fake; }
 
 /* --- install / reset ----------------------------------------------------- */
 
-void su_testrt_install(void) {
-  su_testrt_clock_install(1);
-  su_testrt_random_install(42);
-  su_testrt_fs_install();
-  su_testrt_net_install();
-  su_testrt_sys_install();
+void sz_testrt_install(void) {
+  sz_testrt_clock_install(1);
+  sz_testrt_random_install(42);
+  sz_testrt_fs_install();
+  sz_testrt_net_install();
+  sz_testrt_sys_install();
 }
 
-void su_testrt_reset(void) {
-  su_testrt_clock_reset_live();
-  su_testrt_random_reset_live();
-  su_testrt_fs_reset_live();
-  su_testrt_net_reset_live();
-  su_testrt_sys_reset_live();
+void sz_testrt_reset(void) {
+  sz_testrt_clock_reset_live();
+  sz_testrt_random_reset_live();
+  sz_testrt_fs_reset_live();
+  sz_testrt_net_reset_live();
+  sz_testrt_sys_reset_live();
 }

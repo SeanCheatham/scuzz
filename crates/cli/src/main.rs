@@ -1,18 +1,18 @@
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use scalui_compiler::driver::{
+use scuzz_compiler::driver::{
     compile_project, find_runtime_dir, wait_for_source_change, CompileOptions,
 };
-use scalui_compiler::format::format_source;
-use scalui_compiler::manifest::load_manifest;
+use scuzz_compiler::format::format_source;
+use scuzz_compiler::manifest::load_manifest;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
 #[derive(Parser, Debug)]
 #[command(
-    name = "scalui",
+    name = "scuzz",
     version,
-    about = "ScalUI — Stage-0 bootstrap CLI (release CLI is compiler-scalui)"
+    about = "Scuzz Lang — Stage-0 bootstrap CLI (release CLI is compiler-scuzz)"
 )]
 struct Cli {
     /// Diagnostic format: human (default) or json
@@ -24,9 +24,9 @@ struct Cli {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Compile a ScalUI project to a native executable (LLVM)
+    /// Compile a Scuzz Lang project to a native executable (LLVM)
     Build {
-        /// Project directory containing scalui.toml
+        /// Project directory containing scuzz.toml
         #[arg(default_value = ".")]
         path: PathBuf,
         /// Output directory
@@ -36,7 +36,7 @@ enum Commands {
         #[arg(long)]
         full: bool,
     },
-    /// Build and run a ScalUI project
+    /// Build and run a Scuzz Lang project
     Run {
         #[arg(default_value = ".")]
         path: PathBuf,
@@ -75,7 +75,7 @@ enum Commands {
         #[arg(default_value = ".")]
         path: PathBuf,
     },
-    /// Format ScalUI sources under src/
+    /// Format Scuzz Lang sources under src/
     Fmt {
         #[arg(default_value = ".")]
         path: PathBuf,
@@ -83,7 +83,7 @@ enum Commands {
         #[arg(long)]
         check: bool,
     },
-    /// Create a new ScalUI project
+    /// Create a new Scuzz Lang project
     New {
         name: String,
         #[arg(long, default_value = ".")]
@@ -108,7 +108,7 @@ fn main() -> ExitCode {
     match real_main() {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("scalui error: {e:#}");
+            eprintln!("scuzz error: {e:#}");
             ExitCode::FAILURE
         }
     }
@@ -118,8 +118,8 @@ fn diag_err(e: anyhow::Error, json: bool) -> anyhow::Error {
     if !json {
         return e;
     }
-    let d = scalui_compiler::Diagnostic::error(format!("{e:#}"));
-    anyhow::anyhow!("{}", scalui_compiler::format_diagnostics(&[d], true))
+    let d = scuzz_compiler::Diagnostic::error(format!("{e:#}"));
+    anyhow::anyhow!("{}", scuzz_compiler::format_diagnostics(&[d], true))
 }
 
 fn real_main() -> Result<ExitCode> {
@@ -136,16 +136,16 @@ fn real_main() -> Result<ExitCode> {
             Ok(ExitCode::SUCCESS)
         }
         Commands::Check { path } => {
-            let diags = scalui_compiler::check_project(&path)?;
+            let diags = scuzz_compiler::check_project(&path)?;
             if diags.is_empty() {
                 if json {
                     println!("[]");
                 } else {
-                    eprintln!("scalui check ok");
+                    eprintln!("scuzz check ok");
                 }
                 Ok(ExitCode::SUCCESS)
             } else {
-                let out = scalui_compiler::format_diagnostics(&diags, json);
+                let out = scuzz_compiler::format_diagnostics(&diags, json);
                 if json {
                     println!("{out}");
                 } else {
@@ -202,7 +202,7 @@ fn real_main() -> Result<ExitCode> {
             }
 
             let project_dir = resolve_dir(&path)?;
-            if project_dir.join("scalui.toml").is_file() {
+            if project_dir.join("scuzz.toml").is_file() {
                 let out = build(&path, &PathBuf::from("build"), false)?;
                 eprintln!("project compile smoke ok");
                 if out.manifest.ui.is_none() {
@@ -211,7 +211,7 @@ fn real_main() -> Result<ExitCode> {
                     run_goldens(&project_dir, &out.executable, update, pixels)?;
                 }
             }
-            eprintln!("scalui test ok");
+            eprintln!("scuzz test ok");
             Ok(ExitCode::SUCCESS)
         }
         Commands::Fmt { path, check } => fmt_project(&path, check),
@@ -233,7 +233,7 @@ fn real_main() -> Result<ExitCode> {
             if ui {
                 std::fs::create_dir_all(dir.join("goldens"))?;
                 std::fs::write(
-                    dir.join("scalui.toml"),
+                    dir.join("scuzz.toml"),
                     format!(
                         r#"[package]
 name = "{package_name}"
@@ -247,7 +247,7 @@ main = "Main"
 default_runtime = "headless"
 headless_size = [200, 120]
 headless_scale = 1.0
-bundle_id = "dev.scalui.{package_name}"
+bundle_id = "dev.scuzz.{package_name}"
 "#
                     ),
                 )?;
@@ -267,12 +267,12 @@ bundle_id = "dev.scalui.{package_name}"
 "#,
                 )?;
                 eprintln!(
-                    "created {} (ui) — next: scalui test (seeds goldens) && scalui run --headless",
+                    "created {} (ui) — next: scuzz test (seeds goldens) && scuzz run --headless",
                     dir.display()
                 );
             } else {
                 std::fs::write(
-                    dir.join("scalui.toml"),
+                    dir.join("scuzz.toml"),
                     format!(
                         r#"[package]
 name = "{package_name}"
@@ -287,11 +287,11 @@ main = "Main"
                 std::fs::write(
                     dir.join("src/Main.scala"),
                     r#"@main def main: IO[Unit] =
-  IO.println("Hello, ScalUI!").flatMap(_ => IO.println("ready."))
+  IO.println("Hello, Scuzz!").flatMap(_ => IO.println("ready."))
 "#,
                 )?;
                 eprintln!(
-                    "created {} — next: scalui test && scalui run",
+                    "created {} — next: scuzz test && scuzz run",
                     dir.display()
                 );
             }
@@ -307,15 +307,15 @@ main = "Main"
 
 fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
     let project_dir = resolve_dir(path)?;
-    let manifest = load_manifest(&project_dir.join("scalui.toml"))
-        .with_context(|| format!("reading {}/scalui.toml", project_dir.display()))?;
+    let manifest = load_manifest(&project_dir.join("scuzz.toml"))
+        .with_context(|| format!("reading {}/scuzz.toml", project_dir.display()))?;
     let default_rt = manifest
         .ui
         .as_ref()
         .map(|u| u.default_runtime.as_str())
         .unwrap_or("");
-    // Prefer CLI `--headless`, then inherited SCALUI_UI_RUNTIME, then [ui].default_runtime.
-    let env_rt = std::env::var("SCALUI_UI_RUNTIME").unwrap_or_default();
+    // Prefer CLI `--headless`, then inherited SCUZZ_UI_RUNTIME, then [ui].default_runtime.
+    let env_rt = std::env::var("SCUZZ_UI_RUNTIME").unwrap_or_default();
     let effective = if headless {
         "headless".to_string()
     } else if !env_rt.is_empty() {
@@ -338,25 +338,25 @@ fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
             .join("snapshot.png");
         apply_ui_env(&mut cmd, &manifest, &snap, /*tap*/ false);
         eprintln!(
-            "scalui run --headless → snapshot {}",
+            "scuzz run --headless → snapshot {}",
             snap.display()
         );
     } else if use_mobile {
-        cmd.env("SCALUI_UI_RUNTIME", "mobile");
-        cmd.env("SCALUI_MOBILE_SHELL", "1");
+        cmd.env("SCUZZ_UI_RUNTIME", "mobile");
+        cmd.env("SCUZZ_MOBILE_SHELL", "1");
         if let Some(ui) = &manifest.ui {
-            cmd.env("SCALUI_UI_WIDTH", ui.width().to_string());
-            cmd.env("SCALUI_UI_HEIGHT", ui.height().to_string());
+            cmd.env("SCUZZ_UI_WIDTH", ui.width().to_string());
+            cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
         }
-        eprintln!("scalui run → UiRuntime.Mobile (host shell)");
+        eprintln!("scuzz run → UiRuntime.Mobile (host shell)");
     } else if use_window {
         // Window peer + desktop embedder (X11 / Cocoa) when available.
-        cmd.env("SCALUI_UI_RUNTIME", "window");
+        cmd.env("SCUZZ_UI_RUNTIME", "window");
         if let Some(ui) = &manifest.ui {
-            cmd.env("SCALUI_UI_WIDTH", ui.width().to_string());
-            cmd.env("SCALUI_UI_HEIGHT", ui.height().to_string());
+            cmd.env("SCUZZ_UI_WIDTH", ui.width().to_string());
+            cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
         }
-        eprintln!("scalui run → UiRuntime.Window (desktop embedder)");
+        eprintln!("scuzz run → UiRuntime.Window (desktop embedder)");
     }
     let status = cmd
         .status()
@@ -370,11 +370,11 @@ fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
 
 fn watch_build(path: &Path, out_dir: &Path) -> Result<ExitCode> {
     let project_dir = resolve_dir(path)?;
-    eprintln!("scalui watch {}", project_dir.display());
+    eprintln!("scuzz watch {}", project_dir.display());
     loop {
         match build(path, &out_dir.to_path_buf(), false) {
             Ok(out) => eprintln!("rebuilt {}", out.executable.display()),
-            Err(e) => eprintln!("scalui watch build error: {e:#}"),
+            Err(e) => eprintln!("scuzz watch build error: {e:#}"),
         }
         if !wait_for_source_change(&project_dir, 60_000)? {
             // idle timeout — keep watching
@@ -385,11 +385,11 @@ fn watch_build(path: &Path, out_dir: &Path) -> Result<ExitCode> {
 
 fn watch_run(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
     let project_dir = resolve_dir(path)?;
-    eprintln!("scalui run --watch {}", project_dir.display());
+    eprintln!("scuzz run --watch {}", project_dir.display());
     loop {
         match run_once(path, out_dir, headless) {
             Ok(_) => {}
-            Err(e) => eprintln!("scalui watch run error: {e:#}"),
+            Err(e) => eprintln!("scuzz watch run error: {e:#}"),
         }
         let _ = wait_for_source_change(&project_dir, 60_000)?;
     }
@@ -420,7 +420,7 @@ fn fmt_project(path: &Path, check: bool) -> Result<ExitCode> {
     if check && dirty > 0 {
         bail!("{dirty} file(s) need formatting");
     }
-    eprintln!("scalui fmt ok");
+    eprintln!("scuzz fmt ok");
     Ok(ExitCode::SUCCESS)
 }
 
@@ -431,7 +431,7 @@ fn collect_scala(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
         if path.is_dir() {
             collect_scala(&path, out)?;
         } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            if matches!(ext, "scala" | "scalui") {
+            if matches!(ext, "scala" | "scuzz") {
                 out.push(path);
             }
         }
@@ -449,15 +449,15 @@ fn resolve_dir(path: &Path) -> Result<PathBuf> {
 
 fn apply_ui_env(
     cmd: &mut Command,
-    manifest: &scalui_compiler::manifest::Manifest,
+    manifest: &scuzz_compiler::manifest::Manifest,
     snapshot: &Path,
     tap: bool,
 ) {
-    cmd.env("SCALUI_SNAPSHOT_PATH", snapshot);
-    cmd.env("SCALUI_UI_RUNTIME", "headless");
-    // Isolate Todo/Fs path so goldens do not share /tmp/scalui_todo.txt.
+    cmd.env("SCUZZ_SNAPSHOT_PATH", snapshot);
+    cmd.env("SCUZZ_UI_RUNTIME", "headless");
+    // Isolate Todo/Fs path so goldens do not share /tmp/scuzz_todo.txt.
     let todo_path = std::env::temp_dir().join(format!(
-        "scalui-todo-{}-{}",
+        "scuzz-todo-{}-{}",
         std::process::id(),
         snapshot
             .file_stem()
@@ -465,24 +465,24 @@ fn apply_ui_env(
             .unwrap_or("snap")
     ));
     let _ = std::fs::remove_file(&todo_path);
-    cmd.env("SCALUI_TODO_PATH", &todo_path);
+    cmd.env("SCUZZ_TODO_PATH", &todo_path);
     if let Some(ui) = &manifest.ui {
-        cmd.env("SCALUI_UI_WIDTH", ui.width().to_string());
-        cmd.env("SCALUI_UI_HEIGHT", ui.height().to_string());
-        cmd.env("SCALUI_UI_SCALE", ui.headless_scale.to_string());
+        cmd.env("SCUZZ_UI_WIDTH", ui.width().to_string());
+        cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
+        cmd.env("SCUZZ_UI_SCALE", ui.headless_scale.to_string());
     } else {
-        cmd.env("SCALUI_UI_WIDTH", "200");
-        cmd.env("SCALUI_UI_HEIGHT", "100");
-        cmd.env("SCALUI_UI_SCALE", "1");
+        cmd.env("SCUZZ_UI_WIDTH", "200");
+        cmd.env("SCUZZ_UI_HEIGHT", "100");
+        cmd.env("SCUZZ_UI_SCALE", "1");
     }
     if tap {
-        cmd.env("SCALUI_UI_TAP", "1");
+        cmd.env("SCUZZ_UI_TAP", "1");
         if let Some(ui) = &manifest.ui {
             if let Some(n) = ui.tap_button {
-                cmd.env("SCALUI_UI_TAP_N", n.to_string());
+                cmd.env("SCUZZ_UI_TAP_N", n.to_string());
             }
             if let Some(text) = &ui.tap_text {
-                cmd.env("SCALUI_UI_TEXT", text);
+                cmd.env("SCUZZ_UI_TEXT", text);
             }
         }
     }
@@ -490,7 +490,7 @@ fn apply_ui_env(
 
 fn run_io_smoke(exe: &Path) -> Result<()> {
     let status = Command::new(exe)
-        .env("SCALUI_TESTRT", "1")
+        .env("SCUZZ_TESTRT", "1")
         .status()
         .with_context(|| format!("IO smoke {}", exe.display()))?;
     if !status.success() {
@@ -505,7 +505,7 @@ fn run_goldens(project_dir: &Path, exe: &Path, update: bool, pixels: bool) -> Re
     if !goldens.is_dir() {
         return Ok(());
     }
-    let manifest = load_manifest(&project_dir.join("scalui.toml"))?;
+    let manifest = load_manifest(&project_dir.join("scuzz.toml"))?;
     let name = manifest.package.name.as_str();
     let out_dir = exe.parent().unwrap_or(Path::new("."));
 
@@ -601,14 +601,14 @@ fn run_goldens(project_dir: &Path, exe: &Path, update: bool, pixels: bool) -> Re
 
 fn capture_structural(
     exe: &Path,
-    manifest: &scalui_compiler::manifest::Manifest,
+    manifest: &scuzz_compiler::manifest::Manifest,
     dump: &Path,
     snapshot: PathBuf,
     tap: bool,
 ) -> Result<()> {
     let mut cmd = Command::new(exe);
     apply_ui_env(&mut cmd, manifest, &snapshot, tap);
-    cmd.env("SCALUI_FUZZ_DUMP", dump);
+    cmd.env("SCUZZ_FUZZ_DUMP", dump);
     let status = cmd
         .status()
         .with_context(|| format!("running structural golden {}", dump.display()))?;
@@ -625,7 +625,7 @@ fn build(
     path: &Path,
     out_dir: &Path,
     incremental: bool,
-) -> Result<scalui_compiler::CompileOutput> {
+) -> Result<scuzz_compiler::CompileOutput> {
     let project_dir = resolve_dir(path)?;
     let out_dir = if out_dir.is_absolute() {
         out_dir.to_path_buf()
@@ -634,7 +634,7 @@ fn build(
     };
     let runtime_dir = find_runtime_dir(&std::env::current_dir()?)
         .or_else(|_| find_runtime_dir(&project_dir))?;
-    let clang = std::env::var("SCALUI_CLANG").unwrap_or_else(|_| "clang".into());
+    let clang = std::env::var("SCUZZ_CLANG").unwrap_or_else(|_| "clang".into());
     compile_project(&CompileOptions {
         project_dir,
         runtime_dir,
@@ -646,8 +646,8 @@ fn build(
 
 fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode> {
     let project_dir = resolve_dir(path)?;
-    let manifest = load_manifest(&project_dir.join("scalui.toml"))
-        .with_context(|| format!("reading {}/scalui.toml", project_dir.display()))?;
+    let manifest = load_manifest(&project_dir.join("scuzz.toml"))
+        .with_context(|| format!("reading {}/scuzz.toml", project_dir.display()))?;
     let package_out = if out_dir.is_absolute() {
         out_dir.to_path_buf()
     } else {
@@ -665,7 +665,7 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
         bail!("missing embedder-mobile at {}", mobile_dir.display());
     }
 
-    let clang = std::env::var("SCALUI_CLANG").unwrap_or_else(|_| "clang".into());
+    let clang = std::env::var("SCUZZ_CLANG").unwrap_or_else(|_| "clang".into());
     let status = Command::new("make")
         .arg("-C")
         .arg(&mobile_dir)
@@ -692,7 +692,7 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
         .as_ref()
         .map(|u| u.bundle_id.as_str())
         .filter(|s| !s.is_empty())
-        .unwrap_or("dev.scalui.app");
+        .unwrap_or("dev.scuzz.app");
 
     for t in targets {
         let dest = package_out.join(t);
@@ -718,7 +718,7 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
         }
         eprintln!("packaged {} → {}", t, dest.display());
     }
-    eprintln!("scalui package ok ({})", package_out.display());
+    eprintln!("scuzz package ok ({})", package_out.display());
     Ok(ExitCode::SUCCESS)
 }
 
@@ -735,8 +735,8 @@ fn write_host_package(dest: &Path, exe: &Path, name: &str) -> Result<()> {
             r#"#!/usr/bin/env bash
 # Host Mobile shell smoke. Same app binary; Mobile peer + host embedder.
 set -euo pipefail
-export SCALUI_UI_RUNTIME=mobile
-export SCALUI_MOBILE_SHELL=1
+export SCUZZ_UI_RUNTIME=mobile
+export SCUZZ_MOBILE_SHELL=1
 exec "{exe}" "$@"
 "#,
             exe = exe_abs.display()
@@ -749,11 +749,11 @@ exec "{exe}" "$@"
         perms.set_mode(0o755);
         std::fs::set_permissions(&run_sh, perms)?;
     }
-    write_package_meta(dest, name, "host", "dev.scalui.app")?;
+    write_package_meta(dest, name, "host", "dev.scuzz.app")?;
     std::fs::write(
         dest.join("README.md"),
         format!(
-            "# {name} host mobile package\n\nRun `./run.sh` (sets `SCALUI_UI_RUNTIME=mobile`).\n"
+            "# {name} host mobile package\n\nRun `./run.sh` (sets `SCUZZ_UI_RUNTIME=mobile`).\n"
         ),
     )?;
     Ok(())
@@ -779,7 +779,7 @@ fn patch_bundle_id(manifest: &Path, bundle_id: &str) -> Result<()> {
         return Ok(());
     }
     let text = std::fs::read_to_string(manifest)?;
-    let patched = text.replace("dev.scalui.app", bundle_id);
+    let patched = text.replace("dev.scuzz.app", bundle_id);
     std::fs::write(manifest, patched)?;
     Ok(())
 }

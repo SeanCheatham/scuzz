@@ -1,5 +1,5 @@
 [package]
-name = "scalui"
+name = "scuzz"
 version = "0.1.0"
 
 [targets.native]

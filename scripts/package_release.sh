@@ -1,20 +1,20 @@
 #!/usr/bin/env bash
 # Assemble a self-contained Stage-2 release tree + tarball under dist/.
 #
-# The shipped `scalui` is always built by ScalUI itself (Stage 1 → Stage 2).
-# Stage 0 (Rust/cargo) is used only when no ScalUI bootstrap binary is available
-# (CI bootstrap / fresh checkout). Layout matches SCALUI_HOME expectations
+# The shipped `scuzz` is always built by Scuzz Lang itself (Stage 1 → Stage 2).
+# Stage 0 (Rust/cargo) is used only when no Scuzz Lang bootstrap binary is available
+# (CI bootstrap / fresh checkout). Layout matches SCUZZ_HOME expectations
 # (crates/ + scripts/). Host needs clang/make to link apps.
 #
-# Optional: SCALUI_BOOTSTRAP=/path/to/scalui skips Stage 0 (use Stage 1 from
-# selfhost.sh, or any prior ScalUI CLI that can rebuild compiler-scalui).
+# Optional: SCUZZ_BOOTSTRAP=/path/to/scuzz skips Stage 0 (use Stage 1 from
+# selfhost.sh, or any prior Scuzz Lang CLI that can rebuild compiler-scuzz).
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
 DIST_ROOT="${DIST_ROOT:-$ROOT/dist}"
-NAME="scalui-$TRIPLE"
+NAME="scuzz-$TRIPLE"
 OUT="$DIST_ROOT/$NAME"
 TGZ="$DIST_ROOT/$NAME.tar.gz"
 
@@ -26,40 +26,40 @@ cleanup() {
 }
 trap cleanup EXIT
 
-# Copy a ScalUI CLI aside so a rebuild can overwrite compiler-scalui/build/scalui.
+# Copy a Scuzz Lang CLI aside so a rebuild can overwrite compiler-scuzz/build/scuzz.
 stage1_from() {
   local src="$1"
-  STAGE1_TMP="$(mktemp "${TMPDIR:-/tmp}/scalui-stage1.XXXXXX")"
+  STAGE1_TMP="$(mktemp "${TMPDIR:-/tmp}/scuzz-stage1.XXXXXX")"
   cp -f "$src" "$STAGE1_TMP"
   chmod +x "$STAGE1_TMP"
 }
 
-BOOTSTRAP="${SCALUI_BOOTSTRAP:-}"
-if [[ -z "$BOOTSTRAP" && -x "$ROOT/compiler-scalui/build/scalui" ]]; then
-  BOOTSTRAP="$ROOT/compiler-scalui/build/scalui"
+BOOTSTRAP="${SCUZZ_BOOTSTRAP:-}"
+if [[ -z "$BOOTSTRAP" && -x "$ROOT/compiler-scuzz/build/scuzz" ]]; then
+  BOOTSTRAP="$ROOT/compiler-scuzz/build/scuzz"
 fi
 
 if [[ -n "$BOOTSTRAP" && -x "$BOOTSTRAP" ]]; then
-  echo "==> using ScalUI bootstrap: $BOOTSTRAP"
+  echo "==> using Scuzz Lang bootstrap: $BOOTSTRAP"
   stage1_from "$BOOTSTRAP"
 else
-  echo "==> Stage 0 builds Stage 1 (set SCALUI_BOOTSTRAP to skip cargo)"
-  cargo run -p scalui -- build --full compiler-scalui
-  test -x "$ROOT/compiler-scalui/build/scalui"
-  stage1_from "$ROOT/compiler-scalui/build/scalui"
+  echo "==> Stage 0 builds Stage 1 (set SCUZZ_BOOTSTRAP to skip cargo)"
+  cargo run -p scuzz -- build --full compiler-scuzz
+  test -x "$ROOT/compiler-scuzz/build/scuzz"
+  stage1_from "$ROOT/compiler-scuzz/build/scuzz"
 fi
 
-echo "==> Stage 1 rebuilds compiler-scalui (Stage 2 — release binary)"
-"$STAGE1_TMP" build compiler-scalui
-STAGE2="$ROOT/compiler-scalui/build/scalui"
+echo "==> Stage 1 rebuilds compiler-scuzz (Stage 2 — release binary)"
+"$STAGE1_TMP" build compiler-scuzz
+STAGE2="$ROOT/compiler-scuzz/build/scuzz"
 test -x "$STAGE2"
 
 echo "==> assembling $OUT"
 rm -rf "$OUT"
 mkdir -p "$OUT/bin" "$OUT/crates" "$OUT/scripts"
 
-cp -f "$STAGE2" "$OUT/bin/scalui"
-chmod +x "$OUT/bin/scalui"
+cp -f "$STAGE2" "$OUT/bin/scuzz"
+chmod +x "$OUT/bin/scuzz"
 
 copy_crate() {
   local name="$1"

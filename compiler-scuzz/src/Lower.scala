@@ -1,4 +1,4 @@
-package scalui.compiler
+package scuzz.compiler
 
 def lowerProg(prog: List): List =
   List.cons("Prog", List.cons(nodeStr(prog, 0), List.cons(progEnums(prog), List.cons(lowerDefs(progDefs(prog), List.empty()), List.cons(lowerExpr(progMain(prog)), List.empty())))))
