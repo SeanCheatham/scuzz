@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Dual-boot gate: Stage-0 → Stage-1 → Stage-2, plus a Stage-3 fixpoint.
 # Each stage must smoke examples/hello + examples/adt, pass the Headless
-# goldens (counter/todo/nav), and agree with Stage 0 on fmt --check for the
-# compiler sources. Stage 2 must re-emit byte-identical compiler IR.
+# goldens (counter/todo/nav), smoke fuzz on examples/todo, and agree with
+# Stage 0 on fmt --check for the compiler sources. Stage 2 must re-emit
+# byte-identical compiler IR.
 # Fail loudly: every stage must succeed; no masked exit codes.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -27,6 +28,9 @@ stage_checks() {
   "$bin" test examples/counter
   "$bin" test examples/todo
   "$bin" test examples/nav
+
+  echo "==> $stage fuzz smoke (examples/todo)"
+  "$bin" fuzz --iters 4 examples/todo
 
   echo "==> $stage fmt --check (compiler-scalui sources)"
   "$bin" fmt --check compiler-scalui

@@ -24,7 +24,7 @@ scalui fmt --check
 - Blessed impurity only: `IO.println` / `sleep` / `fail` / `pure` / `race` / `both`, `Fs.*`, `Sys.*`, `Clock.*`, `Random.*`, `Net.httpGet`
 - No raw side effects in View build — taps may run `IO` via `su_io_unsafe_run`
 
-Product `fmt` / `build` / `run` / `test` go through Stage 1/2 (`compiler-scalui`). Stage-0 Rust hosts the bootstrap compiler and CI tooling (`fuzz`).
+Product `fmt` / `build` / `run` / `test` / `fuzz` go through Stage 1/2 (`compiler-scalui`). Stage-0 Rust hosts the bootstrap compiler.
 
 ## View + Signal + Ui
 

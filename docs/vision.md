@@ -68,7 +68,7 @@ Headless is a **peer** of Window/Mobile, not a test-only shim. Frame boundary is
 
 ### Kernel dialect
 
-Subset used by compiler sources and bootstrap examples. New features land in Stage 0 **before** `compiler-scalui/` depends on them. Dual-boot gate: `scripts/selfhost.sh` — each stage smokes `examples/hello` + `examples/adt`, passes the counter/todo/nav Headless goldens, and agrees with Stage 0 on `fmt --check` for the compiler sources; Stage 2 must re-emit byte-identical compiler IR (Stage-3 fixpoint).
+Subset used by compiler sources and bootstrap examples. New features land in Stage 0 **before** `compiler-scalui/` depends on them. Dual-boot gate: `scripts/selfhost.sh` — each stage smokes `examples/hello` + `examples/adt`, passes the counter/todo/nav Headless goldens, smokes `fuzz` on `examples/todo`, and agrees with Stage 0 on `fmt --check` for the compiler sources; Stage 2 must re-emit byte-identical compiler IR (Stage-3 fixpoint).
 
 - Optional `package`; top-level `def` / `@main def …: IO[Unit]`; nullary enums (Stage 1 sources avoid enums; Stage 1/2 emit `su_adt_new` / `su_adt_tag` + `match` `switch`)
 - **`for { binders } yield e`** as primary binder: `x = e` (pure), `x <- e` (effect; yield wraps with `IO.pure` when any `<-` is present). Nested `for` in `if` / lambda arms when multi-bind is needed.
@@ -126,12 +126,11 @@ scalui fuzz [--iters N] [--seed S]   # typed random scripts until fail / N scrip
 scalui fuzz --replay repro.toml      # deterministic replay of a recorded failure
 ```
 
-Scripts are a line protocol — `tap <n>` / `text <s>` / `pump <k>` — played by the runtime (`SCALUI_UI_SCRIPT`) across `pump` boundaries; on exit it writes the signal store + a11y view dump (`SCALUI_FUZZ_DUMP`). The CLI probes the a11y dump for the typed event surface (buttons in scan order, text fields), generates seeded scripts (SplitMix64), and writes `repro.toml` (seed + events) on failure. Oracles: panic/`SuError` exit → structural dumps (PNG last). Requires stable tap order, `pump` as time, no hidden nondeterminism.
+Scripts are a line protocol — `tap <n>` / `text <s>` / `pump <k>` — played by the runtime (`SCALUI_UI_SCRIPT`) across `pump` boundaries; on exit it writes the signal store + a11y view dump (`SCALUI_FUZZ_DUMP`). The CLI probes the a11y dump for the typed event surface (buttons in scan order, text fields), generates seeded scripts (Lehmer/MINSTD LCG — the kernel dialect has no bitwise ops), and writes `repro.toml` (seed + events) on failure. `fuzz` lives in the Stage-1 CLI; replay plays recorded events verbatim, so it is independent of the generator. Oracles: panic/`SuError` exit → structural dumps (PNG last). Requires stable tap order, `pump` as time, no hidden nondeterminism.
 
 ## Open work
 
 - `scalui fuzz --exhaust --depth N` (bounded systematic search)
-- Stage-1 `fuzz` port (today: Stage-0 CLI)
 - Prebuilt Stage-1 release artifacts
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
