@@ -55,6 +55,9 @@ pub struct UiConfig {
     /// 0-based DFS button index for `_after_tap` goldens (`SCALUI_UI_TAP_N`)
     #[serde(default)]
     pub tap_button: Option<i32>,
+    /// Text injected before the scripted tap (`SCALUI_UI_TEXT`)
+    #[serde(default)]
+    pub tap_text: Option<String>,
     /// Bundle id used by `scalui package` mobile shells
     #[serde(default = "default_bundle_id")]
     pub bundle_id: String,

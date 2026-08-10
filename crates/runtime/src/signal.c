@@ -21,6 +21,10 @@ struct SuSignalStr {
   char *value;
 };
 
+struct SuSignalList {
+  SuList *value;
+};
+
 SuSignalInt *su_signal_int(int64_t initial) {
   SuSignalInt *s = (SuSignalInt *)su_alloc(sizeof(SuSignalInt));
   s->value = initial;
@@ -59,3 +63,18 @@ void su_signal_str_free(SuSignalStr *s) {
   su_free(s->value);
   su_free(s);
 }
+
+SuSignalList *su_signal_list(SuList *initial) {
+  SuSignalList *s = (SuSignalList *)su_alloc(sizeof(SuSignalList));
+  s->value = initial;
+  return s;
+}
+
+void su_signal_list_set(SuSignalList *s, SuList *v) {
+  if (s)
+    s->value = v;
+}
+
+SuList *su_signal_list_get(const SuSignalList *s) { return s ? s->value : NULL; }
+
+void su_signal_list_free(SuSignalList *s) { su_free(s); }

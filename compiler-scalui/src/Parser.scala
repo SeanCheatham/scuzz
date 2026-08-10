@@ -103,6 +103,24 @@ def parseArgsCont(tokens: List, i: Int, acc: List): List =
   if (isTok(tokens, pIdx(e), "Comma") == 1) parseArgs(tokens, pIdx(e) + 1, acc2)
   else ok(List.reverse(acc2), pIdx(e))
 
+def parseListLit(tokens: List, i: Int): List =
+  parseListLitElems(tokens, i, List.empty)
+
+def parseListLitElems(tokens: List, i: Int, acc: List): List =
+  if (isTok(tokens, i, "RBracket") == 1)
+    ok(List.cons("ListLit", List.cons(List.reverse(acc), List.empty)), i + 1)
+  else parseListLitElemsCont(tokens, i, acc)
+
+def parseListLitElemsCont(tokens: List, i: Int, acc: List): List =
+  val e = parseExpr(tokens, i)
+  val acc2 = List.cons(pAst(e), acc)
+  if (isTok(tokens, pIdx(e), "Comma") == 1) parseListLitElems(tokens, pIdx(e) + 1, acc2)
+  else parseListLitElemsEnd(tokens, pIdx(e), acc2)
+
+def parseListLitElemsEnd(tokens: List, i: Int, acc: List): List =
+  val i1 = expectTok(tokens, i, "RBracket")
+  ok(List.cons("ListLit", List.cons(List.reverse(acc), List.empty)), i1)
+
 def parseBlock(tokens: List, i: Int): List =
   if (isTok(tokens, i, "Val") == 1) parseLet(tokens, i + 1)
   else parseBlockExpr(tokens, i)
@@ -324,6 +342,7 @@ def parsePrimary(tokens: List, i: Int): List =
   else if (isStringTok(t) == 1)
     ok(List.cons("StrLit", List.cons(stringVal(t), List.empty)), i + 1)
   else if (streq(t, "InterpStart") == 1) parseInterp(tokens, i + 1, List.empty)
+  else if (streq(t, "LBracket") == 1) parseListLit(tokens, i + 1)
   else if (streq(t, "Minus") == 1) parseNegInt(tokens, i + 1)
   else if (streq(t, "Underscore") == 1)
     if (isTok(tokens, i + 1, "Arrow") == 1) parseLambdaExpr(tokens, i + 1, "_")
@@ -424,9 +443,7 @@ def parseIdentExpr(tokens: List, i: Int, name: String): List =
   else if (streq(name, "Impurity") == 1) parseModuleCall(tokens, i + 1, "Impurity")
   else if (streq(name, "Signal") == 1) parseModuleCall(tokens, i + 1, "Signal")
   else if (streq(name, "Theme") == 1) parseModuleCall(tokens, i + 1, "Theme")
-  else if (streq(name, "Color") == 1) parseModuleCall(tokens, i + 1, "Color")
   else if (streq(name, "View") == 1) parseModuleCall(tokens, i + 1, "View")
-  else if (streq(name, "Todo") == 1) parseModuleCall(tokens, i + 1, "Todo")
   else if (streq(name, "Ui") == 1) parseModuleCall(tokens, i + 1, "Ui")
   else if (streq(name, "Effects") == 1) parseModuleCall(tokens, i + 1, "Effects")
   else if (streq(name, "Lexer") == 1) parseModuleCall(tokens, i + 1, "Lexer")
@@ -434,18 +451,22 @@ def parseIdentExpr(tokens: List, i: Int, name: String): List =
 
 def parseCallOrVar(tokens: List, i: Int, name: String): List =
   if (isTok(tokens, i, "LParen") == 1) parseCallArgs(tokens, i + 1, name)
-  else if (isTok(tokens, i, "Dot") == 1) parseAdt(tokens, i + 1, name)
+  else if (isTok(tokens, i, "Dot") == 1) parseDotCallOrAdt(tokens, i + 1, name)
   else ok(List.cons("Var", List.cons(name, List.empty)), i)
 
-def parseAdt(tokens: List, i: Int, enumName: String): List =
+def parseDotCallOrAdt(tokens: List, i: Int, enumName: String): List =
   val caseP = parseIdent(tokens, i)
-  ok(
-    List.cons(
-      "Adt",
-      List.cons(enumName, List.cons(pStr(caseP), List.empty))
-    ),
-    pIdx(caseP)
-  )
+  val caseName = pStr(caseP)
+  val j = pIdx(caseP)
+  if (isTok(tokens, j, "LParen") == 1) parseCallArgs(tokens, j + 1, str3(enumName, ".", caseName))
+  else
+    ok(
+      List.cons(
+        "Adt",
+        List.cons(enumName, List.cons(caseName, List.empty))
+      ),
+      j
+    )
 
 def parseCallArgs(tokens: List, i: Int, callee: String): List =
   val argsP = parseArgs(tokens, i, List.empty)

@@ -554,6 +554,22 @@ impl Parser {
                 self.expect(&Token::RParen)?;
                 Ok(inner)
             }
+            Token::LBracket => {
+                self.bump();
+                let mut elems = Vec::new();
+                if !matches!(self.peek(), Token::RBracket) {
+                    loop {
+                        elems.push(self.parse_expr()?);
+                        if matches!(self.peek(), Token::Comma) {
+                            self.bump();
+                        } else {
+                            break;
+                        }
+                    }
+                }
+                self.expect(&Token::RBracket)?;
+                Ok(Expr::ListLit { elems })
+            }
             Token::IntLit(n) => {
                 self.bump();
                 Ok(Expr::IntLit(n))
@@ -718,7 +734,7 @@ impl Parser {
                 if matches!(
                     name.as_str(),
                     "Str" | "List" | "Fs" | "Sys" | "Lexer" | "Clock" | "Random"
-                        | "Net" | "Impurity" | "Signal" | "View" | "Todo" | "Theme" | "Color"
+                        | "Net" | "Impurity" | "Signal" | "View" | "Theme"
                 ) =>
             {
                 self.bump();
@@ -760,6 +776,14 @@ impl Parser {
                 if matches!(self.peek(), Token::Dot) {
                     self.bump();
                     let case_name = self.expect_ident()?;
+                    // `Color.rgb(...)` is a module call; `Color.Red` is an ADT case.
+                    if matches!(self.peek(), Token::LParen) {
+                        let args = self.parse_args()?;
+                        return Ok(Expr::Call {
+                            callee: format!("{name}.{case_name}"),
+                            args,
+                        });
+                    }
                     Ok(Expr::AdtConstruct {
                         enum_name: name,
                         case_name,
@@ -878,5 +902,27 @@ enum Color:
         assert_eq!(p.package, vec!["demo", "color"]);
         assert_eq!(p.enums.len(), 1);
         assert!(matches!(p.main.body, Expr::Let { .. }));
+    }
+
+    #[test]
+    fn parse_list_literal_empty() {
+        let p = parse(r#"@main def main: IO[Unit] = []"#).unwrap();
+        match &p.main.body {
+            Expr::ListLit { elems } => assert!(elems.is_empty()),
+            other => panic!("expected ListLit, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_list_literal_elems() {
+        let p = parse(r#"@main def main: IO[Unit] = [a, b]"#).unwrap();
+        match &p.main.body {
+            Expr::ListLit { elems } => {
+                assert_eq!(elems.len(), 2);
+                assert!(matches!(elems[0], Expr::Var(ref n) if n == "a"));
+                assert!(matches!(elems[1], Expr::Var(ref n) if n == "b"));
+            }
+            other => panic!("expected ListLit, got {other:?}"),
+        }
     }
 }

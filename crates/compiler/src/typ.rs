@@ -54,6 +54,12 @@ fn infer(
         Expr::Unit => Ok(Type::Unit),
         Expr::IntLit(_) => Ok(Type::Int),
         Expr::StrLit(_) => Ok(Type::String),
+        Expr::ListLit { elems } => {
+            for e in elems {
+                infer(e, enums, funs, env)?;
+            }
+            Ok(Type::List)
+        }
         Expr::Interpolate { parts } => {
             for part in parts {
                 match part {
@@ -334,6 +340,11 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::Int)?;
             Ok(Type::String)
         }
+        "Str.lines" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::List)
+        }
         "List.empty" => {
             expect_arity(callee, &arg_tys, 0)?;
             Ok(Type::List)
@@ -373,6 +384,11 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::List)?;
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::String)
+        }
+        "List.append" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::List)?;
+            Ok(Type::List)
         }
         "Fs.read" | "Fs.list" | "Fs.mkdirs" => {
             expect_arity(callee, &arg_tys, 1)?;
@@ -440,6 +456,29 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::Opaque("SignalStr".into()))
         }
+        "Signal.getStr" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::String)
+        }
+        "Signal.setStr" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            Ok(Type::Unit)
+        }
+        "Signal.list" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::List)?;
+            Ok(Type::Opaque("SignalList".into()))
+        }
+        "Signal.getList" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::List)
+        }
+        "Signal.setList" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[1], &Type::List)?;
+            Ok(Type::Unit)
+        }
         "View.text" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
@@ -497,38 +536,18 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 2)?;
             Ok(Type::Unit)
         }
+        "View.addTexts" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[1], &Type::List)?;
+            Ok(Type::Unit)
+        }
         "View.showWhen" => {
             expect_arity(callee, &arg_tys, 3)?;
             expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(Type::Opaque("View".into()))
         }
-        "View.buttonTodoAdd" | "View.buttonTodoSave" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            expect_ty(&arg_tys[0], &Type::String)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "Todo.create" => {
-            expect_arity(callee, &arg_tys, 0)?;
-            Ok(Type::Opaque("Todo".into()))
-        }
-        "Todo.load" => {
-            expect_arity(callee, &arg_tys, 1)?;
-            Ok(Type::Io(Box::new(Type::Unit)))
-        }
-        "Todo.draft" => {
-            expect_arity(callee, &arg_tys, 1)?;
-            Ok(Type::Opaque("SignalStr".into()))
-        }
-        "Todo.listView" => {
-            expect_arity(callee, &arg_tys, 1)?;
-            Ok(Type::Opaque("View".into()))
-        }
         "Ui.run" => {
             expect_arity(callee, &arg_tys, 1)?;
-            Ok(Type::Io(Box::new(Type::Unit)))
-        }
-        "Ui.runWithTodo" => {
-            expect_arity(callee, &arg_tys, 2)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         _ => {

@@ -87,6 +87,13 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
         Expr::Unit => format!("{pad}()"),
         Expr::IntLit(n) => format!("{pad}{n}"),
         Expr::StrLit(s) => format!("{pad}\"{}\"", escape(s)),
+        Expr::ListLit { elems } => {
+            let a: Vec<_> = elems
+                .iter()
+                .map(|e| pretty_expr(e, 0).trim().to_string())
+                .collect();
+            format!("{pad}[{}]", a.join(", "))
+        }
         Expr::Interpolate { parts } => {
             let mut body = String::from("s\"");
             for part in parts {
