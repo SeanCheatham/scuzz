@@ -149,8 +149,7 @@ Primary goldens are **structural** (signal store + a11y view dump). PNG pixels a
 
 ## Open work
 
-- Prebuilt Stage-1 release artifacts
-- First-class IO/CLI apps (docs + IO test smoke; Skia-free link; argv/stdin) — after v0 UI / Stage-1 release artifacts
+- First-class IO/CLI apps (docs + IO test smoke; Skia-free link; argv/stdin)
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
 

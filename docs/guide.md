@@ -5,7 +5,8 @@ Short path from install to a Headless UI app. For product thesis, design locks, 
 ## Happy path
 
 ```bash
-./scripts/install.sh          # Stage-1 CLI → ~/.local/bin/scalui
+./scripts/install.sh          # packages Stage-1 + SDK → ~/.local/share/scalui; wrapper → ~/.local/bin/scalui
+# ensure ~/.local/bin is on PATH (apps need clang + make; Rust not required after install)
 scalui new myapp --ui
 cd myapp
 scalui check                  # parse + typecheck only
@@ -13,6 +14,8 @@ scalui test                   # seeds goldens/ on first run, then compares
 scalui run --headless         # writes build/snapshot.png
 scalui fmt --check
 ```
+
+From a prebuilt tarball (no checkout build): `RELEASE_TGZ=scalui-<triple>.tar.gz ./scripts/install.sh`. Produce one with `./scripts/package_release.sh`.
 
 `scalui new --ui` scaffolds `scalui.toml`, a Counter-shaped `src/Main.scala`, and Headless-friendly defaults.
 

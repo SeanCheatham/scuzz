@@ -12,6 +12,7 @@
 - Closed impurity boundary: `Clock` / `Random` / `Fs` / `Net` / `Sys` / `IO.println` + `TestRuntime` fakes
 - Animation + accessibility hooks (Headless-dumpable); theme polish tokens
 - Stage-1 CLI: `build|run|test|check|fuzz|watch|new|package|fmt` (`compiler-scalui`); Stage-0 Rust for bootstrap only
+- Prebuilt Stage-1 release tree (`scripts/package_release.sh` → `dist/scalui-<triple>.tar.gz`); `install.sh` installs under `PREFIX/share/scalui`
 - Deterministic fuzz: `scalui fuzz` (seeded `--iters`, bounded `--exhaust --depth N`, `--replay repro.toml`) on TestRuntime + Headless
 - Structural goldens (signal store + a11y dump); PNG optional via `scalui test --pixels`
 - Skia prebuilts via `SCALUI_SKIA_URL` (default: in-tree `sk_sw`)
@@ -21,12 +22,18 @@ App authors: [docs/guide.md](docs/guide.md).
 
 ## Quick start
 
-Requirements: Rust (stable), `clang`, `make`. Optional for Window: Linux X11 (`libx11-dev` + display / `xvfb-run`) or macOS GUI session (Cocoa).
+Requirements to **build** from this checkout: Rust (stable), `clang`, `make`. Optional for Window: Linux X11 (`libx11-dev` + display / `xvfb-run`) or macOS GUI session (Cocoa).
+
+Installed apps only need `clang` + `make` (and the Stage-1 release tree under `SCALUI_HOME`).
 
 ```bash
-# Install Stage-1 CLI (wrapper sets SCALUI_HOME to this checkout)
+# Package + install Stage-1 CLI + SDK (SCALUI_HOME → ~/.local/share/scalui)
 ./scripts/install.sh
 # ensure ~/.local/bin is on PATH
+
+# Or install a prebuilt tarball without rebuilding:
+#   ./scripts/package_release.sh
+#   RELEASE_TGZ=dist/scalui-$(uname -s | tr A-Z a-z)-$(uname -m).tar.gz ./scripts/install.sh
 
 # v0 happy path
 scalui new myapp --ui
@@ -118,7 +125,7 @@ crates/ffi-skia/          sk_capi + CPU software backend
 crates/embedder-desktop/  Linux X11 / macOS Cocoa present for Window peer
 crates/embedder-mobile/   Mobile host shell + Android/iOS packaging templates
 compiler-scalui/          Stage 1/2 ScalUI compiler + CLI (release path)
-scripts/                  selfhost.sh, install.sh, fetch_skia.sh, run_goldens.sh
+scripts/                  selfhost.sh, install.sh, package_release.sh, fetch_skia.sh, run_goldens.sh
 examples/                 samples gallery (table above)
 third_party/skia/         prebuilt fetch notes
 ```
