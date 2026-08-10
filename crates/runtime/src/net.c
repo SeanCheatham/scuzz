@@ -1,5 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
-#include "scalui_rt.h"
+#include "scuzz_rt.h"
 
 #include <arpa/inet.h>
 #include <errno.h>
@@ -16,19 +16,19 @@
 typedef struct {
   int is_err;
   union {
-    SuError *err;
+    SzError *err;
     void *ok;
   } as;
 } NetResult;
 
-static SuIo *unwrap_net(void *value, void *env) {
+static SzIo *unwrap_net(void *value, void *env) {
   (void)env;
   NetResult *r = (NetResult *)value;
   if (!r)
-    return su_io_fail_cstr("Net: null result");
+    return sz_io_fail_cstr("Net: null result");
   if (r->is_err)
-    return su_io_fail(r->as.err);
-  return su_io_pure(r->as.ok);
+    return sz_io_fail(r->as.err);
+  return sz_io_pure(r->as.ok);
 }
 
 static int parse_http_url(const char *url, char *host, size_t host_sz, char *path,
@@ -67,9 +67,9 @@ static int parse_http_url(const char *url, char *host, size_t host_sz, char *pat
 }
 
 static void *net_http_get_live(void *env) {
-  SuString *url_s = (SuString *)env;
-  NetResult *r = (NetResult *)su_alloc(sizeof(NetResult));
-  const char *url = su_string_cstr(url_s);
+  SzString *url_s = (SzString *)env;
+  NetResult *r = (NetResult *)sz_alloc(sizeof(NetResult));
+  const char *url = sz_string_cstr(url_s);
   char host[256];
   char path[1024];
   int port = 80;
@@ -86,7 +86,7 @@ static void *net_http_get_live(void *env) {
 
   if (!parse_http_url(url, host, sizeof host, path, sizeof path, &port)) {
     r->is_err = 1;
-    r->as.err = su_error_new(6, "Net.httpGet: only http:// URLs supported");
+    r->as.err = sz_error_new(6, "Net.httpGet: only http:// URLs supported");
     return r;
   }
 
@@ -96,7 +96,7 @@ static void *net_http_get_live(void *env) {
   snprintf(port_str, sizeof port_str, "%d", port);
   if (getaddrinfo(host, port_str, &hints, &res) != 0 || !res) {
     r->is_err = 1;
-    r->as.err = su_error_new(6, "Net.httpGet: DNS failed");
+    r->as.err = sz_error_new(6, "Net.httpGet: DNS failed");
     return r;
   }
   fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
@@ -105,7 +105,7 @@ static void *net_http_get_live(void *env) {
       close(fd);
     freeaddrinfo(res);
     r->is_err = 1;
-    r->as.err = su_error_new(6, "Net.httpGet: connect failed");
+    r->as.err = sz_error_new(6, "Net.httpGet: connect failed");
     return r;
   }
   freeaddrinfo(res);
@@ -116,42 +116,42 @@ static void *net_http_get_live(void *env) {
   if (write(fd, req, strlen(req)) < 0) {
     close(fd);
     r->is_err = 1;
-    r->as.err = su_error_new(6, "Net.httpGet: write failed");
+    r->as.err = sz_error_new(6, "Net.httpGet: write failed");
     return r;
   }
 
-  acc = (char *)su_alloc(1);
+  acc = (char *)sz_alloc(1);
   acc[0] = '\0';
   while ((n = read(fd, buf, sizeof buf)) > 0) {
-    char *nacc = (char *)su_alloc(total + (size_t)n + 1);
+    char *nacc = (char *)sz_alloc(total + (size_t)n + 1);
     if (total)
       memcpy(nacc, acc, total);
     memcpy(nacc + total, buf, (size_t)n);
     total += (size_t)n;
     nacc[total] = '\0';
-    su_free(acc);
+    sz_free(acc);
     acc = nacc;
   }
   close(fd);
 
   body = strstr(acc, "\r\n\r\n");
   if (!body) {
-    su_free(acc);
+    sz_free(acc);
     r->is_err = 1;
-    r->as.err = su_error_new(6, "Net.httpGet: malformed response");
+    r->as.err = sz_error_new(6, "Net.httpGet: malformed response");
     return r;
   }
   body += 4;
   r->is_err = 0;
-  r->as.ok = su_string_from_cstr(body);
-  su_free(acc);
+  r->as.ok = sz_string_from_cstr(body);
+  sz_free(acc);
   return r;
 }
 
-SuIo *su_net_http_get(SuString *url) {
+SzIo *sz_net_http_get(SzString *url) {
   if (!url)
-    su_panic("su_net_http_get(null)");
-  if (su_testrt_net_is_fake())
-    return su_testrt_net_http_get(url);
-  return su_io_flatmap(su_io_delay(net_http_get_live, url), unwrap_net, NULL);
+    sz_panic("sz_net_http_get(null)");
+  if (sz_testrt_net_is_fake())
+    return sz_testrt_net_http_get(url);
+  return sz_io_flatmap(sz_io_delay(net_http_get_live, url), unwrap_net, NULL);
 }

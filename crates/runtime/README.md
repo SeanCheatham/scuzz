@@ -1,14 +1,14 @@
-# ScalUI runtime (C)
+# Scuzz Lang runtime (C)
 
 Minimal native runtime linked into Stage-0 / Stage-1 binaries. Design locks: [`docs/vision.md`](../../docs/vision.md).
 
 ## Contents
 
-- Alloc wrappers (`su_alloc` / `su_free`), strings, panic, `SuError`
+- Alloc wrappers (`sz_alloc` / `sz_free`), strings, panic, `SzError`
 - Builtin `IO` + blessed kit (`Resource`, `Ref`, `Deferred`, `Queue`, race/both/sleep/errors)
 - Blessed impurity: `Clock` / `Random` / `Fs` / `Net` / `Sys` / `IO.println` + `TestRuntime` fakes
 - `Ui` session (Headless / Window / Mobile peers): View tree, signals, theme, anim, a11y hooks
-- Language FFI: `su_lang_*` for `Signal` / `View` / `Ui.run`; kit entry points `Effects.runKit` / `Impurity.runKit`
+- Language FFI: `sz_lang_*` for `Signal` / `View` / `Ui.run`; kit entry points `Effects.runKit` / `Impurity.runKit`
 
 Links `crates/ffi-skia`. Optional: `embedder-desktop`, `embedder-mobile`.
 

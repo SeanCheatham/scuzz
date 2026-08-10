@@ -24,9 +24,9 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 | Area | Compatible with | Not compatible with |
 | --- | --- | --- |
 | Binary format | Native ELF/Mach-O/PE via LLVM | JVM classfiles / JARs |
-| Dependencies | `scalui.toml` path/git/versioned artifacts we host | Maven Central / Ivy |
+| Dependencies | `scuzz.toml` path/git/versioned artifacts we host | Maven Central / Ivy |
 | Effects | Builtin `IO` / `Resource` / concurrent kit + Clock/Random/Fs/Net/Sys | cats-effect runtime, ZIO, Future-as-default |
-| Test interpreters | TestRuntime fakes (clock/random/FS/net + argv/stdin/println capture); `SCALUI_TESTRT=1` | Wall-clock-only harnesses; ad-hoc FFI mocks |
+| Test interpreters | TestRuntime fakes (clock/random/FS/net + argv/stdin/println capture); `SCUZZ_TESTRT=1` | Wall-clock-only harnesses; ad-hoc FFI mocks |
 | UI | `View` + `Ui` + Skia (`sk_capi`; Impeller deferred) | Swing, JavaFX, Compose Multiplatform, Flutter widgets |
 
 ## Platforms (headless-first)
@@ -35,17 +35,17 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 | --- | --- | --- | --- |
 | Linux headless (CI/cloud) | Yes | N/A | Default CI; goldens + self-host + TestRuntime |
 | Linux desktop | Yes | X11 | `embedder-desktop` when `DISPLAY` is set |
-| Linux mobile host shell | Yes | Host shell | `embedder-mobile` + `SCALUI_MOBILE_SHELL=1` |
+| Linux mobile host shell | Yes | Host shell | `embedder-mobile` + `SCUZZ_MOBILE_SHELL=1` |
 | macOS desktop | Yes | Cocoa blit | peer to Linux X11 |
 | Windows desktop | Yes | Secondary | Later (same session protocol) |
-| iOS / Android | Shared app code | Packaging shells | `scalui package`; NDK/Xcode for device |
+| iOS / Android | Shared app code | Packaging shells | `scuzz package`; NDK/Xcode for device |
 
 ## Self-host stages
 
 | Stage | Host | Role |
 | --- | --- | --- |
 | 0 | Rust | Bootstrap only (`crates/cli`); CI / fresh checkout |
-| 1 | ScalUI (built by Stage 0) | First ScalUI-built CLI; rebuilds the compiler |
-| 2 | ScalUI (built by Stage 1) | True self-host; **shipped** `scalui` (`package_release.sh`) |
+| 1 | Scuzz Lang (built by Stage 0) | First Scuzz Lang-built CLI; rebuilds the compiler |
+| 2 | Scuzz Lang (built by Stage 1) | True self-host; **shipped** `scuzz` (`package_release.sh`) |
 
 Dual-boot gate: `scripts/selfhost.sh`. Kernel surface: [vision.md](vision.md#kernel-dialect). Release tarballs record `stage=2` in `VERSION`.

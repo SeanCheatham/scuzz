@@ -1,56 +1,56 @@
-#include "scalui_rt.h"
+#include "scuzz_rt.h"
 
-SuRef *su_ref_make(void *initial) {
-  SuRef *r = (SuRef *)su_alloc(sizeof(SuRef));
+SzRef *sz_ref_make(void *initial) {
+  SzRef *r = (SzRef *)sz_alloc(sizeof(SzRef));
   r->value = initial;
   return r;
 }
 
-void su_ref_free(SuRef *ref) { su_free(ref); }
+void sz_ref_free(SzRef *ref) { sz_free(ref); }
 
 static void *ref_of_thunk(void *env) { return env; }
 
-SuIo *su_ref_of(void *initial) {
-  SuRef *r = su_ref_make(initial);
-  return su_io_delay(ref_of_thunk, r);
+SzIo *sz_ref_of(void *initial) {
+  SzRef *r = sz_ref_make(initial);
+  return sz_io_delay(ref_of_thunk, r);
 }
 
-SuIo *su_ref_of_cstr(const char *initial) {
-  return su_ref_of(su_string_from_cstr(initial ? initial : ""));
+SzIo *sz_ref_of_cstr(const char *initial) {
+  return sz_ref_of(sz_string_from_cstr(initial ? initial : ""));
 }
 
 static void *ref_get_thunk(void *env) {
-  SuRef *r = (SuRef *)env;
+  SzRef *r = (SzRef *)env;
   return r->value;
 }
 
-SuIo *su_ref_get(SuRef *ref) {
+SzIo *sz_ref_get(SzRef *ref) {
   if (!ref)
-    su_panic("su_ref_get(null)");
-  return su_io_delay(ref_get_thunk, ref);
+    sz_panic("sz_ref_get(null)");
+  return sz_io_delay(ref_get_thunk, ref);
 }
 
 typedef struct RefSetEnv {
-  SuRef *ref;
+  SzRef *ref;
   void *value;
 } RefSetEnv;
 
 static void *ref_set_thunk(void *env) {
   RefSetEnv *e = (RefSetEnv *)env;
   e->ref->value = e->value;
-  su_free(e);
+  sz_free(e);
   return NULL;
 }
 
-SuIo *su_ref_set(SuRef *ref, void *value) {
+SzIo *sz_ref_set(SzRef *ref, void *value) {
   if (!ref)
-    su_panic("su_ref_set(null)");
-  RefSetEnv *e = (RefSetEnv *)su_alloc(sizeof(RefSetEnv));
+    sz_panic("sz_ref_set(null)");
+  RefSetEnv *e = (RefSetEnv *)sz_alloc(sizeof(RefSetEnv));
   e->ref = ref;
   e->value = value;
-  return su_io_delay(ref_set_thunk, e);
+  return sz_io_delay(ref_set_thunk, e);
 }
 
-SuIo *su_ref_set_cstr(SuRef *ref, const char *value) {
-  return su_ref_set(ref, su_string_from_cstr(value ? value : ""));
+SzIo *sz_ref_set_cstr(SzRef *ref, const char *value) {
+  return sz_ref_set(ref, sz_string_from_cstr(value ? value : ""));
 }

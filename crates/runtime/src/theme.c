@@ -1,6 +1,6 @@
-#include "scalui_ui.h"
+#include "scuzz_ui.h"
 
-static const SuTheme k_default_theme = {
+static const SzTheme k_default_theme = {
     .background = 0xFFF5F5F5u,
     .surface = 0xFFFFFFFFu,
     .foreground = 0xFF1A1A1Au,
@@ -17,16 +17,16 @@ static const SuTheme k_default_theme = {
     .radius = 0.f, /* 0 preserves current goldens; gallery may override */
 };
 
-const SuTheme *su_theme_default(void) { return &k_default_theme; }
+const SzTheme *sz_theme_default(void) { return &k_default_theme; }
 
-int64_t su_theme_accent(void) { return (int64_t)(uint32_t)k_default_theme.accent; }
-int64_t su_theme_primary(void) { return (int64_t)(uint32_t)k_default_theme.primary; }
-int64_t su_theme_muted(void) { return (int64_t)(uint32_t)k_default_theme.muted; }
-int64_t su_theme_foreground(void) {
+int64_t sz_theme_accent(void) { return (int64_t)(uint32_t)k_default_theme.accent; }
+int64_t sz_theme_primary(void) { return (int64_t)(uint32_t)k_default_theme.primary; }
+int64_t sz_theme_muted(void) { return (int64_t)(uint32_t)k_default_theme.muted; }
+int64_t sz_theme_foreground(void) {
   return (int64_t)(uint32_t)k_default_theme.foreground;
 }
 
-int64_t su_color_rgb(int64_t r, int64_t g, int64_t b) {
+int64_t sz_color_rgb(int64_t r, int64_t g, int64_t b) {
   uint32_t rr = (uint32_t)(r & 255);
   uint32_t gg = (uint32_t)(g & 255);
   uint32_t bb = (uint32_t)(b & 255);

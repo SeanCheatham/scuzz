@@ -1,0 +1,270 @@
+#ifndef SCUZZ_UI_H
+#define SCUZZ_UI_H
+
+#include "scuzz_rt.h"
+
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+/* UiRuntime peer interpreters. Headless is first-class. */
+typedef enum SzUiRuntimeKind {
+  SZ_UI_RUNTIME_HEADLESS = 1,
+  SZ_UI_RUNTIME_WINDOW = 2,
+  SZ_UI_RUNTIME_MOBILE = 3
+} SzUiRuntimeKind;
+
+typedef struct SzUiConfig {
+  SzUiRuntimeKind kind;
+  int width;
+  int height;
+  double scale;      /* recorded; raster uses logical pixels */
+  const char *title; /* Window / Mobile; may be NULL */
+} SzUiConfig;
+
+typedef enum SzPointerPhase {
+  SZ_POINTER_DOWN = 1,
+  SZ_POINTER_MOVE = 2,
+  SZ_POINTER_UP = 3
+} SzPointerPhase;
+
+typedef enum SzLifecyclePhase {
+  SZ_LIFECYCLE_RESUME = 1,
+  SZ_LIFECYCLE_PAUSE = 2,
+  SZ_LIFECYCLE_STOP = 3
+} SzLifecyclePhase;
+
+typedef enum SzInputKind {
+  SZ_INPUT_TAP = 1,
+  SZ_INPUT_RESIZE = 2,
+  SZ_INPUT_TEXT = 3,      /* deliver string to focused TextField */
+  SZ_INPUT_POINTER = 4,   /* touch / pointer with phase */
+  SZ_INPUT_SCROLL = 5,    /* vertical pan dy on Scroll under (x,y) */
+  SZ_INPUT_LIFECYCLE = 6, /* pause / resume / stop */
+  SZ_INPUT_KEYBOARD = 7   /* soft keyboard show (1) / hide (0) */
+} SzInputKind;
+
+typedef struct SzInputEvent {
+  SzInputKind kind;
+  float x;
+  float y;
+  int width;  /* resize */
+  int height; /* resize */
+  const char *text; /* SZ_INPUT_TEXT */
+  SzPointerPhase pointer_phase; /* SZ_INPUT_POINTER */
+  float dy;                     /* SZ_INPUT_SCROLL (positive = content up) */
+  SzLifecyclePhase lifecycle;   /* SZ_INPUT_LIFECYCLE */
+  int keyboard_visible;         /* SZ_INPUT_KEYBOARD: 1=show, 0=hide */
+} SzInputEvent;
+
+/* --- theme tokens -------------------------------------------------------- */
+
+typedef struct SzTheme {
+  uint32_t background;
+  uint32_t surface;
+  uint32_t foreground;
+  uint32_t primary;
+  uint32_t on_primary;
+  uint32_t border;
+  uint32_t muted;
+  uint32_t accent;
+  uint32_t disabled;
+  float pad;
+  float gap;
+  float control_h;
+  float font_px; /* bitmap font cell size (default 8px) */
+  float radius;  /* corner radius (0 = sharp; preserves current goldens) */
+} SzTheme;
+
+const SzTheme *sz_theme_default(void);
+
+/* Language-facing theme / color ints (ARGB). */
+int64_t sz_theme_accent(void);
+int64_t sz_theme_primary(void);
+int64_t sz_theme_muted(void);
+int64_t sz_theme_foreground(void);
+int64_t sz_color_rgb(int64_t r, int64_t g, int64_t b);
+
+/* --- signals ------------------------------------------------------------- */
+
+typedef struct SzSignalInt SzSignalInt;
+typedef struct SzSignalStr SzSignalStr;
+typedef struct SzSignalList SzSignalList;
+
+SzSignalInt *sz_signal_int(int64_t initial);
+void sz_signal_int_set(SzSignalInt *s, int64_t v);
+int64_t sz_signal_int_get(const SzSignalInt *s);
+void sz_signal_int_free(SzSignalInt *s);
+
+SzSignalStr *sz_signal_str(const char *initial);
+void sz_signal_str_set(SzSignalStr *s, const char *v);
+const char *sz_signal_str_get(const SzSignalStr *s);
+void sz_signal_str_free(SzSignalStr *s);
+
+SzSignalList *sz_signal_list(SzList *initial);
+void sz_signal_list_set(SzSignalList *s, SzList *v);
+SzList *sz_signal_list_get(const SzSignalList *s);
+void sz_signal_list_free(SzSignalList *s);
+
+/* Signal store dump: one "kind[id] = value" line per live signal, in creation
+   order (fuzz oracle; caller frees SzString). */
+SzString *sz_signal_dump(void);
+
+/* --- declarative View tree ----------------------------------------------- */
+
+typedef enum SzViewKind {
+  SZ_VIEW_TEXT = 1,
+  SZ_VIEW_BUTTON,
+  SZ_VIEW_TEXT_FIELD,
+  SZ_VIEW_COLUMN,
+  SZ_VIEW_ROW,
+  SZ_VIEW_LIST,
+  SZ_VIEW_SCROLL,
+  SZ_VIEW_IMAGE,
+  SZ_VIEW_ICON,
+  SZ_VIEW_LABEL /* full-bleed bg + bar that toggles colors on tap */
+} SzViewKind;
+
+typedef struct SzRect {
+  float x, y, w, h;
+} SzRect;
+
+typedef struct SzView SzView;
+typedef struct SzUiSession SzUiSession;
+
+typedef void (*SzViewTapFn)(SzView *self, void *env);
+
+SzView *sz_view_text(const char *text);
+SzView *sz_view_text_signal_int(SzSignalInt *sig, const char *prefix);
+SzView *sz_view_text_signal_str(SzSignalStr *sig);
+
+SzView *sz_view_button(const char *label, SzViewTapFn on_tap, void *env);
+SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder);
+SzView *sz_view_column(void);
+SzView *sz_view_row(void);
+SzView *sz_view_list(void);
+/* Reactive list: children rebuilt from Signal.list at layout (`- item` texts). */
+SzView *sz_view_each(SzSignalList *sig);
+SzView *sz_view_scroll(SzView *child);
+SzView *sz_view_image(int w, int h, uint32_t argb, const char *caption);
+SzView *sz_view_icon(char glyph, uint32_t argb);
+/* Full-bleed bg + bar that toggles colors on tap (C unit-test helper). */
+SzView *sz_view_label(const char *text, uint32_t bg_argb, uint32_t fg_argb);
+/* Visible iff Signal.get(sig) == value; returns child. */
+void sz_view_set_show_when(SzView *view, SzSignalInt *sig, int64_t value);
+SzView *sz_view_show_when(SzSignalInt *sig, int64_t value, SzView *child);
+
+void sz_view_add_child(SzView *parent, SzView *child);
+void sz_view_clear_children(SzView *parent);
+void sz_view_free(SzView *view);
+
+SzViewKind sz_view_kind(const SzView *view);
+SzRect sz_view_frame(const SzView *view);
+
+/* Layout + hit-test (also run inside pump / inject). */
+void sz_view_layout(SzView *root, float width, float height, const SzTheme *theme);
+SzView *sz_view_hit_test(SzView *root, float x, float y);
+
+/* Scroll offset + soft keyboard helpers. */
+float sz_view_scroll_y(const SzView *scroll);
+void sz_view_scroll_by(SzView *scroll, float dy);
+SzView *sz_view_scroll_at(SzView *root, float x, float y);
+int sz_view_has_focused_text_field(SzView *root);
+
+/* Accessibility hooks (Headless-dumpable; no OS AT bridge yet). */
+typedef enum SzA11yRole {
+  SZ_A11Y_NONE = 0,
+  SZ_A11Y_BUTTON = 1,
+  SZ_A11Y_TEXT = 2,
+  SZ_A11Y_TEXT_FIELD = 3,
+  SZ_A11Y_IMAGE = 4,
+  SZ_A11Y_LIST = 5,
+  SZ_A11Y_SCROLL = 6
+} SzA11yRole;
+
+void sz_view_set_a11y(SzView *view, SzA11yRole role, const char *label);
+SzA11yRole sz_view_a11y_role(const SzView *view);
+const char *sz_view_a11y_label(const SzView *view);
+/* Depth-first "role:label" lines joined by newlines (caller frees SzString). */
+SzString *sz_view_a11y_dump(SzView *root);
+
+/* Animation — float lerp; session pump ticks all registered anims. */
+typedef struct SzAnimFloat SzAnimFloat;
+SzAnimFloat *sz_anim_float(float from, float to, int64_t duration_ms);
+void sz_anim_free(SzAnimFloat *a);
+float sz_anim_value(const SzAnimFloat *a);
+int sz_anim_done(const SzAnimFloat *a);
+void sz_anim_tick(SzAnimFloat *a, int64_t dt_ms);
+void sz_anim_tick_all(int64_t dt_ms);
+
+/* --- session protocol ---------------------------------------------------- */
+
+SzUiSession *sz_ui_mount(const SzUiConfig *cfg, SzView *root);
+/* Transfer View ownership to the session (freed on unmount). */
+void sz_ui_session_take_root(SzUiSession *session);
+void sz_ui_unmount(SzUiSession *session);
+
+int sz_ui_pump_sync(SzUiSession *session);
+int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event);
+int sz_ui_snapshot_png_sync(SzUiSession *session, const char *path);
+int sz_ui_snapshot_png_bytes(SzUiSession *session, uint8_t **out, size_t *out_len);
+
+SzUiRuntimeKind sz_ui_session_kind(const SzUiSession *session);
+int sz_ui_session_width(const SzUiSession *session);
+int sz_ui_session_height(const SzUiSession *session);
+SzView *sz_ui_session_root(SzUiSession *session);
+const SzTheme *sz_ui_session_theme(const SzUiSession *session);
+SzLifecyclePhase sz_ui_session_lifecycle(const SzUiSession *session);
+int sz_ui_session_keyboard_visible(const SzUiSession *session);
+
+/* IO → UI bridge: post signal writes from completed IO; flushed at pump. */
+void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value);
+void sz_ui_bridge_post_str(SzUiSession *session, SzSignalStr *sig, const char *value);
+void sz_ui_bridge_flush(SzUiSession *session);
+
+/* --- language-facing View / Signal (Scuzz Lang-authored UI) ----------- */
+
+SzSignalInt *sz_lang_signal_int(int64_t initial);
+int64_t sz_lang_signal_get(SzSignalInt *s);
+void *sz_lang_signal_set(SzSignalInt *s, int64_t v);
+SzSignalStr *sz_lang_signal_str(SzString *initial);
+SzString *sz_lang_signal_str_get(SzSignalStr *s);
+void *sz_lang_signal_str_set(SzSignalStr *s, SzString *v);
+SzSignalList *sz_lang_signal_list(SzList *initial);
+SzList *sz_lang_signal_list_get(SzSignalList *s);
+void *sz_lang_signal_list_set(SzSignalList *s, SzList *v);
+
+SzView *sz_lang_view_text(SzString *text);
+SzView *sz_lang_view_text_signal(SzSignalInt *sig, SzString *prefix);
+/* First-class tap closure: `tap`/`env` come from a compiled `_ => ...` lambda. */
+SzView *sz_lang_view_button(SzString *label, SzViewTapFn tap, void *env);
+SzView *sz_lang_view_column(void);
+SzView *sz_lang_view_row(void);
+SzView *sz_lang_view_list(void);
+SzView *sz_lang_view_each(SzSignalList *sig);
+SzView *sz_lang_view_scroll(SzView *child);
+SzView *sz_lang_view_text_field(SzSignalStr *text, SzString *placeholder);
+SzView *sz_lang_view_icon(int64_t glyph, int64_t argb);
+SzView *sz_lang_view_image(int64_t w, int64_t h, int64_t argb, SzString *caption);
+void *sz_lang_view_add_child(SzView *parent, SzView *child);
+void *sz_lang_view_add_texts(SzView *parent, SzList *lines);
+/* C/test helpers; app code uses View.each instead. */
+void *sz_lang_view_clear_children(SzView *parent);
+void *sz_lang_view_set_texts(SzView *parent, SzList *lines);
+SzView *sz_lang_view_show_when(SzSignalInt *sig, int64_t value, SzView *child);
+
+/* Derived Signal.str from Signal.int (recomputed on get / dump). */
+typedef SzString *(*SzSignalMapIntFn)(int64_t v, void *env);
+SzSignalStr *sz_lang_signal_map(SzSignalInt *src, SzSignalMapIntFn fn, void *env);
+SzView *sz_lang_view_bind_text(SzSignalStr *sig);
+
+/* Mount prebuilt root → pump → optional scripted tap → snapshot → unmount. */
+SzIo *sz_ui_run_view(SzView *root);
+
+#ifdef __cplusplus
+}
+#endif
+
+#endif /* SCUZZ_UI_H */

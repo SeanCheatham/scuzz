@@ -1,19 +1,19 @@
-package scalui.compiler
+package scuzz.compiler
 
 def uiMainTemplate(): String =
   Str.concat("@main def main: IO[Unit] =\n  for {\n    count = Signal.int(0)\n    label = Signal.map(count, n => s\"count = $n\")\n    root = View.column(\n      View.text(\"Counter\"),\n      View.bindText(label),\n      View.row(View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)))\n    )\n    _ <- Ui.run(root)\n  } yield ()\n", "")
 
 def helloMainTemplate(): String =
-  str3("@main def main: IO[Unit] =\n", "  IO.println(\"Hello, ScalUI!\").flatMap(_ => IO.println(\"ready.\"))\n", "")
+  str3("@main def main: IO[Unit] =\n", "  IO.println(\"Hello, Scuzz!\").flatMap(_ => IO.println(\"ready.\"))\n", "")
 
 def uiToml(name: String): String =
-  Str.concat(str5("[package]\nname = \"", name, "\"\nversion = \"0.1.0\"\n\n[targets.native]\nkind = \"executable\"\nmain = \"Main\"\n\n[ui]\n", "default_runtime = \"headless\"\nheadless_size = [200, 120]\nheadless_scale = 1.0\n", str3("bundle_id = \"dev.scalui.", name, "\"\n")), "")
+  Str.concat(str5("[package]\nname = \"", name, "\"\nversion = \"0.1.0\"\n\n[targets.native]\nkind = \"executable\"\nmain = \"Main\"\n\n[ui]\n", "default_runtime = \"headless\"\nheadless_size = [200, 120]\nheadless_scale = 1.0\n", str3("bundle_id = \"dev.scuzz.", name, "\"\n")), "")
 
 def helloToml(name: String): String =
   str5("[package]\nname = \"", name, "\"\nversion = \"0.1.0\"\n\n[targets.native]\nkind = \"executable\"\nmain = \"Main\"\n", "", "")
 
 def cmdNew(args: List): IO[Unit] =
-  if (List.len(args) < 2) IO.println("usage: scalui new <name> [--ui] [--path <dir>]") else cmdNewResolved(newNameArg(args), args)
+  if (List.len(args) < 2) IO.println("usage: scuzz new <name> [--ui] [--path <dir>]") else cmdNewResolved(newNameArg(args), args)
 
 def newNameArg(args: List): String =
   positionalAt(args, 1, 0)
@@ -28,7 +28,7 @@ def newParentDir(args: List): String =
   if (argFlag(args, "--path", 0) == 1) argPathValue(args, 0) else "."
 
 def cmdNewResolved(name: String, args: List): IO[Unit] =
-  if (streq(name, ".") == 1) IO.println("usage: scalui new <name> [--ui] [--path <dir>]") else if (startsWith(name, "--") == 1) IO.println("usage: scalui new <name> [--ui] [--path <dir>]") else writeNewProject(pathJoin(newParentDir(args), name), name, argHasUi(args, 0))
+  if (streq(name, ".") == 1) IO.println("usage: scuzz new <name> [--ui] [--path <dir>]") else if (startsWith(name, "--") == 1) IO.println("usage: scuzz new <name> [--ui] [--path <dir>]") else writeNewProject(pathJoin(newParentDir(args), name), name, argHasUi(args, 0))
 
 def writeNewProject(dir: String, name: String, ui: Int): IO[Unit] =
   if (ui == 1) writeNewUi(dir, name) else writeNewHello(dir, name)
@@ -36,45 +36,45 @@ def writeNewProject(dir: String, name: String, ui: Int): IO[Unit] =
 def writeNewUi(dir: String, name: String): IO[Unit] =
   Fs.mkdirs(pathJoin(dir, "src")).flatMap(_ =>
     Fs.mkdirs(pathJoin(dir, "goldens")).flatMap(_ =>
-      Fs.write(pathJoin(dir, "scalui.toml"), uiToml(name)).flatMap(_ =>
-        Fs.write(pathJoin(dir, "src/Main.scala"), uiMainTemplate()).flatMap(_ => IO.println(str3("created ", dir, " (ui) — next: scalui test (seeds goldens) && scalui run --headless")))
+      Fs.write(pathJoin(dir, "scuzz.toml"), uiToml(name)).flatMap(_ =>
+        Fs.write(pathJoin(dir, "src/Main.scala"), uiMainTemplate()).flatMap(_ => IO.println(str3("created ", dir, " (ui) — next: scuzz test (seeds goldens) && scuzz run --headless")))
       )
     )
   )
 
 def writeNewHello(dir: String, name: String): IO[Unit] =
   Fs.mkdirs(pathJoin(dir, "src")).flatMap(_ =>
-    Fs.write(pathJoin(dir, "scalui.toml"), helloToml(name)).flatMap(_ =>
-      Fs.write(pathJoin(dir, "src/Main.scala"), helloMainTemplate()).flatMap(_ => IO.println(str3("created ", dir, " — next: scalui test && scalui run")))
+    Fs.write(pathJoin(dir, "scuzz.toml"), helloToml(name)).flatMap(_ =>
+      Fs.write(pathJoin(dir, "src/Main.scala"), helloMainTemplate()).flatMap(_ => IO.println(str3("created ", dir, " — next: scuzz test && scuzz run")))
     )
   )
 
 def updateFlagEnv(update: Int): String =
-  if (update == 1) "SCALUI_UPDATE_GOLDENS=1 " else ""
+  if (update == 1) "SCUZZ_UPDATE_GOLDENS=1 " else ""
 
 def pixelsFlagEnv(pixels: Int): String =
-  if (pixels == 1) "SCALUI_PIXEL_GOLDENS=1 " else ""
+  if (pixels == 1) "SCUZZ_PIXEL_GOLDENS=1 " else ""
 
 def cmdTest(projectDir: String, update: Int, runtimeTests: Int, pixels: Int): IO[Unit] =
   resolveRuntimeEnv("", projectDir).flatMap(runtimeDir =>
     maybeRuntimeTests(runtimeDir, runtimeTests).flatMap(_ =>
       compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
-        Fs.read(pathJoin(projectDir, "scalui.toml")).flatMap(toml => afterTestCompile(projectDir, toml, update, pixels, runtimeDir))
+        Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml => afterTestCompile(projectDir, toml, update, pixels, runtimeDir))
       )
     )
   )
 
 def afterTestCompile(projectDir: String, toml: String, update: Int, pixels: Int, runtimeDir: String): IO[Unit] =
-  if (hasUiSection(toml) == 0) runIoSmoke(projectDir, readTomlName(toml)).flatMap(_ => IO.println("scalui test ok")) else execOk(str5(updateFlagEnv(update), pixelsFlagEnv(pixels), "bash ", pathJoin(pathJoin(parentDir(parentDir(runtimeDir)), "scripts"), "run_goldens.sh"), Str.concat(" ", projectDir))).flatMap(_ => IO.println("scalui test ok"))
+  if (hasUiSection(toml) == 0) runIoSmoke(projectDir, readTomlName(toml)).flatMap(_ => IO.println("scuzz test ok")) else execOk(str5(updateFlagEnv(update), pixelsFlagEnv(pixels), "bash ", pathJoin(pathJoin(parentDir(parentDir(runtimeDir)), "scripts"), "run_goldens.sh"), Str.concat(" ", projectDir))).flatMap(_ => IO.println("scuzz test ok"))
 
 def runIoSmoke(projectDir: String, name: String): IO[Unit] =
-  execOk(str3("SCALUI_TESTRT=1 ", pathJoin(pathJoin(projectDir, "build"), name), ""))
+  execOk(str3("SCUZZ_TESTRT=1 ", pathJoin(pathJoin(projectDir, "build"), name), ""))
 
 def maybeRuntimeTests(runtimeDir: String, runtimeTests: Int): IO[Unit] =
   if (runtimeTests == 0) IO.pure(()) else execOk(str3("make -C ", runtimeDir, " test")).flatMap(_ => execOk(str3("make -C ", pathJoin(parentDir(runtimeDir), "ffi-skia"), " test")))
 
 def cmdFmt(projectDir: String, check: Int): IO[Unit] =
-  Fs.list(pathJoin(projectDir, "src")).flatMap(names => fmtFiles(pathJoin(projectDir, "src"), partitionSources(names, List.empty(), List.empty()), check, 0)).flatMap(dirty => if (check == 1) if (dirty == 0) IO.println("scalui fmt ok") else IO.println(str3("scalui fmt: ", Str.fromInt(dirty), " file(s) need formatting")).flatMap(_ => IO.fail("fmt --check failed")) else IO.println("scalui fmt ok"))
+  Fs.list(pathJoin(projectDir, "src")).flatMap(names => fmtFiles(pathJoin(projectDir, "src"), partitionSources(names, List.empty(), List.empty()), check, 0)).flatMap(dirty => if (check == 1) if (dirty == 0) IO.println("scuzz fmt ok") else IO.println(str3("scuzz fmt: ", Str.fromInt(dirty), " file(s) need formatting")).flatMap(_ => IO.fail("fmt --check failed")) else IO.println("scuzz fmt ok"))
 
 def fmtFiles(srcDir: String, names: List, check: Int, dirty: Int): IO[Int] =
   if (List.isEmpty(names) == 1) IO.pure(dirty) else fmtOne(srcDir, List.head(names), check).flatMap(d => fmtFiles(srcDir, List.tail(names), check, dirty + d))
@@ -91,7 +91,7 @@ def fmtOne(srcDir: String, name: String, check: Int): IO[Int] =
 )
 
 def cmdWatch(projectDir: String): IO[Unit] =
-  IO.println(str3("scalui watch ", projectDir, "")).flatMap(_ =>
+  IO.println(str3("scuzz watch ", projectDir, "")).flatMap(_ =>
     srcFingerprint(projectDir).flatMap(fp => watchLoop(projectDir, fp, 1))
   )
 
@@ -106,7 +106,7 @@ def maybeRebuild(projectDir: String, lastFp: String, force: Int): IO[String] =
   if (force == 0) IO.pure(lastFp) else compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
   IO.println("rebuilt").flatMap(_ => IO.pure(lastFp))
 ).handleErrorWith(_ =>
-  IO.println("scalui watch build error").flatMap(_ => IO.pure(lastFp))
+  IO.println("scuzz watch build error").flatMap(_ => IO.pure(lastFp))
 )
 
 def srcFingerprint(projectDir: String): IO[String] =
@@ -122,7 +122,7 @@ def cmdPackage(projectDir: String, target: String): IO[Unit] =
 
 def cmdRun(projectDir: String, headless: Int): IO[Unit] =
   compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
-    Fs.read(pathJoin(projectDir, "scalui.toml")).flatMap(toml => runCompiled(projectDir, readTomlName(toml), toml, headless))
+    Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml => runCompiled(projectDir, readTomlName(toml), toml, headless))
   )
 
 def runCompiled(projectDir: String, name: String, toml: String, headlessForce: Int): IO[Unit] =
@@ -137,15 +137,15 @@ def runHeadless(projectDir: String, name: String, toml: String): IO[Unit] =
     snap = pathJoin(pathJoin(projectDir, "build"), "snapshot.png")
     w = readTomlHeadlessW(toml)
     h = readTomlHeadlessH(toml)
-  } yield IO.println(str3("scalui run --headless → snapshot ", snap, "")).flatMap(_ => execOk(str5("env SCALUI_UI_RUNTIME=headless SCALUI_SNAPSHOT_PATH=", snap, " SCALUI_UI_WIDTH=", w, str4(" SCALUI_UI_HEIGHT=", h, " ", exe))))
+  } yield IO.println(str3("scuzz run --headless → snapshot ", snap, "")).flatMap(_ => execOk(str5("env SCUZZ_UI_RUNTIME=headless SCUZZ_SNAPSHOT_PATH=", snap, " SCUZZ_UI_WIDTH=", w, str4(" SCUZZ_UI_HEIGHT=", h, " ", exe))))
 
 def runWindow(projectDir: String, name: String, toml: String): IO[Unit] =
   for {
     exe = pathJoin(pathJoin(projectDir, "build"), name)
-  } yield IO.println("scalui run → UiRuntime.Window (desktop embedder)").flatMap(_ => execOk(str5("env SCALUI_UI_RUNTIME=window SCALUI_UI_WIDTH=", readTomlHeadlessW(toml), " SCALUI_UI_HEIGHT=", readTomlHeadlessH(toml), Str.concat(" ", exe))))
+  } yield IO.println("scuzz run → UiRuntime.Window (desktop embedder)").flatMap(_ => execOk(str5("env SCUZZ_UI_RUNTIME=window SCUZZ_UI_WIDTH=", readTomlHeadlessW(toml), " SCUZZ_UI_HEIGHT=", readTomlHeadlessH(toml), Str.concat(" ", exe))))
 
 def runMobile(projectDir: String, name: String, toml: String): IO[Unit] =
   for {
     exe = pathJoin(pathJoin(projectDir, "build"), name)
-  } yield IO.println("scalui run → UiRuntime.Mobile (host shell)").flatMap(_ => execOk(str5("env SCALUI_UI_RUNTIME=mobile SCALUI_MOBILE_SHELL=1 SCALUI_UI_WIDTH=", readTomlHeadlessW(toml), " SCALUI_UI_HEIGHT=", readTomlHeadlessH(toml), Str.concat(" ", exe))))
+  } yield IO.println("scuzz run → UiRuntime.Mobile (host shell)").flatMap(_ => execOk(str5("env SCUZZ_UI_RUNTIME=mobile SCUZZ_MOBILE_SHELL=1 SCUZZ_UI_WIDTH=", readTomlHeadlessW(toml), " SCUZZ_UI_HEIGHT=", readTomlHeadlessH(toml), Str.concat(" ", exe))))
 

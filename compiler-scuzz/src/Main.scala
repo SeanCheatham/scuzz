@@ -1,7 +1,7 @@
-package scalui.compiler
+package scuzz.compiler
 
 def usage(): String =
-  "scalui (build|run|test|check|fuzz|fmt|watch|new|package) [args]\n  --message-format=human|json"
+  "scuzz (build|run|test|check|fuzz|fmt|watch|new|package) [args]\n  --message-format=human|json"
 
 def isFlag(s: String): Int =
   if (startsWith(s, "--") == 1) 1 else 0
@@ -40,7 +40,7 @@ def dispatchBuild(projectDir: String, doRun: Int): IO[Unit] =
   compileProject(projectDir, pathJoin(projectDir, "build"), doRun)
 
 def cmdCheck(projectDir: String, json: Int): IO[Unit] =
-  checkProject(projectDir).flatMap(ty => if (tyIsOk(ty) == 1) if (json == 1) IO.println("[]") else IO.println("scalui check ok") else emitCheckFail(ty, json))
+  checkProject(projectDir).flatMap(ty => if (tyIsOk(ty) == 1) if (json == 1) IO.println("[]") else IO.println("scuzz check ok") else emitCheckFail(ty, json))
 
 def emitCheckFail(ty: String, json: Int): IO[Unit] =
   if (json == 1) IO.println(str3("[{\"severity\":\"error\",\"message\":", jsonQuote(tyMsg(ty)), "}]")).flatMap(_ => IO.fail(tyMsg(ty))) else IO.println(str3("error: ", tyMsg(ty), "")).flatMap(_ => IO.fail(tyMsg(ty)))

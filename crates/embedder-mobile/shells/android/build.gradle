@@ -1,7 +1,7 @@
-// Stub Gradle entry for the ScalUI Android packaging shell.
+// Stub Gradle entry for the Scuzz Lang Android packaging shell.
 // Wire NDK / cmake paths for a real device build; CI uses the host shell instead.
 plugins {
     id 'com.android.application' version '8.2.0' apply false
 }
 
-// See jni/scalui_jni.c for the C session loop.
+// See jni/scuzz_jni.c for the C session loop.

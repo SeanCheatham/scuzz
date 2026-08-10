@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Emit mobile packaging shells (used by Stage-1 `scalui package`).
+# Emit mobile packaging shells (used by Stage-1 `scuzz package`).
 set -euo pipefail
 project="${1:-.}"
 target="${2:-all}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 mobile="$ROOT/crates/embedder-mobile"
 out="$project/build/package"
-name=$(sed -n 's/^name = "\(.*\)"/\1/p' "$project/scalui.toml" | head -1)
+name=$(sed -n 's/^name = "\(.*\)"/\1/p' "$project/scuzz.toml" | head -1)
 name="${name:-app}"
 exe="$project/build/$name"
 
@@ -28,8 +28,8 @@ for t in "${targets[@]}"; do
       cat >"$dest/run.sh" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-export SCALUI_UI_RUNTIME=mobile
-export SCALUI_MOBILE_SHELL=1
+export SCUZZ_UI_RUNTIME=mobile
+export SCUZZ_MOBILE_SHELL=1
 exec "$(cd "$(dirname "$exe")" && pwd)/$(basename "$exe")" "\$@"
 EOF
       chmod +x "$dest/run.sh"
@@ -49,9 +49,9 @@ EOF
 [package]
 name = "$name"
 target = "$t"
-bundle_id = "dev.scalui.app"
+bundle_id = "dev.scuzz.app"
 runtime = "mobile"
 EOF
   echo "packaged $t → $dest"
 done
-echo "scalui package ok ($out)"
+echo "scuzz package ok ($out)"

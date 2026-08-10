@@ -17,7 +17,7 @@ stage_checks() {
   echo "==> $stage runs examples/hello"
   hello_out="$("$bin" run examples/hello)"
   echo "$hello_out"
-  echo "$hello_out" | grep -q "Hello, ScalUI"
+  echo "$hello_out" | grep -q "Hello, Scuzz"
   echo "$hello_out" | grep -q "ready."
 
   echo "==> $stage runs examples/adt"
@@ -36,49 +36,49 @@ stage_checks() {
   echo "==> $stage fuzz --exhaust smoke (examples/counter)"
   "$bin" fuzz --exhaust --depth 1 examples/counter
 
-  echo "==> $stage fmt --check (compiler-scalui sources)"
-  "$bin" fmt --check compiler-scalui
+  echo "==> $stage fmt --check (compiler-scuzz sources)"
+  "$bin" fmt --check compiler-scuzz
 }
 
-echo "==> Stage 0 builds Stage 1 (compiler-scalui)"
-cargo run -p scalui -- build --full compiler-scalui
-test -x compiler-scalui/build/scalui
+echo "==> Stage 0 builds Stage 1 (compiler-scuzz)"
+cargo run -p scuzz -- build --full compiler-scuzz
+test -x compiler-scuzz/build/scuzz
 
-STAGE1="/tmp/stage1-scalui"
-STAGE2="/tmp/stage2-scalui"
-cp -f compiler-scalui/build/scalui "$STAGE1"
+STAGE1="/tmp/stage1-scuzz"
+STAGE2="/tmp/stage2-scuzz"
+cp -f compiler-scuzz/build/scuzz "$STAGE1"
 chmod +x "$STAGE1"
 
-echo "==> Stage 0 fmt --check (compiler-scalui sources)"
-cargo run -p scalui -- fmt --check compiler-scalui
+echo "==> Stage 0 fmt --check (compiler-scuzz sources)"
+cargo run -p scuzz -- fmt --check compiler-scuzz
 
 echo "==> Stage 0 rejects ill-typed program"
-if cargo run -p scalui -- build testdata/typecheck/bad_main 2>/tmp/scalui-bad0.err; then
+if cargo run -p scuzz -- build testdata/typecheck/bad_main 2>/tmp/scuzz-bad0.err; then
   echo "expected type error from Stage 0" >&2
   exit 1
 fi
-grep -q "arithmetic needs Int" /tmp/scalui-bad0.err
+grep -q "arithmetic needs Int" /tmp/scuzz-bad0.err
 
 stage_checks "Stage 1" "$STAGE1"
 
 echo "==> Stage 1 rejects ill-typed program"
-if "$STAGE1" build testdata/typecheck/bad_main 2>/tmp/scalui-bad1.err; then
+if "$STAGE1" build testdata/typecheck/bad_main 2>/tmp/scuzz-bad1.err; then
   echo "expected type error from Stage 1" >&2
   exit 1
 fi
-grep -q "arithmetic needs Int" /tmp/scalui-bad1.err
+grep -q "arithmetic needs Int" /tmp/scuzz-bad1.err
 
-echo "==> Stage 1 rebuilds compiler-scalui (Stage 2)"
-"$STAGE1" build compiler-scalui
-test -x compiler-scalui/build/scalui
-cp -f compiler-scalui/build/scalui "$STAGE2"
+echo "==> Stage 1 rebuilds compiler-scuzz (Stage 2)"
+"$STAGE1" build compiler-scuzz
+test -x compiler-scuzz/build/scuzz
+cp -f compiler-scuzz/build/scuzz "$STAGE2"
 chmod +x "$STAGE2"
-cp -f compiler-scalui/build/scalui.ll /tmp/stage2-scalui.ll
+cp -f compiler-scuzz/build/scuzz.ll /tmp/stage2-scuzz.ll
 
 stage_checks "Stage 2" "$STAGE2"
 
 echo "==> Stage 3 fixpoint: Stage 2 re-emits identical compiler IR"
-"$STAGE2" build compiler-scalui
-cmp /tmp/stage2-scalui.ll compiler-scalui/build/scalui.ll
+"$STAGE2" build compiler-scuzz
+cmp /tmp/stage2-scuzz.ll compiler-scuzz/build/scuzz.ll
 
 echo "selfhost ok"

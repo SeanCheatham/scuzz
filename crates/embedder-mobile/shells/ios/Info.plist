@@ -5,13 +5,13 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleDisplayName</key>
-  <string>ScalUI</string>
+  <string>Scuzz Lang</string>
   <key>CFBundleExecutable</key>
   <string>$(EXECUTABLE_NAME)</string>
   <key>CFBundleIdentifier</key>
-  <string>dev.scalui.app</string>
+  <string>dev.scuzz.app</string>
   <key>CFBundleName</key>
-  <string>ScalUI</string>
+  <string>Scuzz Lang</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>

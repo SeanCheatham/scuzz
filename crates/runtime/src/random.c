@@ -1,5 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
-#include "scalui_rt.h"
+#include "scuzz_rt.h"
 
 #include <stdio.h>
 #include <time.h>
@@ -9,14 +9,14 @@
 static int g_fake = 0;
 static uint64_t g_state = 1;
 
-void su_testrt_random_install(uint64_t seed) {
+void sz_testrt_random_install(uint64_t seed) {
   g_fake = 1;
   g_state = seed ? seed : 1;
 }
 
-int su_testrt_random_is_fake(void) { return g_fake; }
+int sz_testrt_random_is_fake(void) { return g_fake; }
 
-void su_testrt_random_reset_live(void) { g_fake = 0; }
+void sz_testrt_random_reset_live(void) { g_fake = 0; }
 
 static uint64_t live_seed(void) {
   FILE *f = fopen("/dev/urandom", "rb");
@@ -58,13 +58,13 @@ static void *random_next_thunk(void *env) {
   RandEnv *e = (RandEnv *)env;
   int64_t bound = e ? e->bound : 0;
   if (bound <= 0)
-    return su_box_i64(0);
+    return sz_box_i64(0);
   uint64_t u = next_u64() >> 33;
-  return su_box_i64((int64_t)(u % (uint64_t)bound));
+  return sz_box_i64((int64_t)(u % (uint64_t)bound));
 }
 
-SuIo *su_random_next_int(int64_t bound) {
-  RandEnv *e = (RandEnv *)su_alloc(sizeof(RandEnv));
+SzIo *sz_random_next_int(int64_t bound) {
+  RandEnv *e = (RandEnv *)sz_alloc(sizeof(RandEnv));
   e->bound = bound;
-  return su_io_delay(random_next_thunk, e);
+  return sz_io_delay(random_next_thunk, e);
 }

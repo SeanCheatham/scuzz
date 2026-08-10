@@ -1,4 +1,4 @@
-package scalui.compiler
+package scuzz.compiler
 
 def strHasChar(s: String, ch: Int, i: Int): Int =
   if (i >= Str.len(s)) 0 else if (Str.charAt(s, i) == ch) 1 else strHasChar(s, ch, i + 1)

@@ -42,7 +42,7 @@ pub struct CompileOutput {
 }
 
 pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
-    let manifest_path = opts.project_dir.join("scalui.toml");
+    let manifest_path = opts.project_dir.join("scuzz.toml");
     let manifest = load_manifest(&manifest_path)
         .with_context(|| format!("reading {}", manifest_path.display()))?;
 
@@ -72,7 +72,7 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
     }
 
     std::fs::create_dir_all(&opts.out_dir)?;
-    let cache_dir = opts.project_dir.join(".scalui");
+    let cache_dir = opts.project_dir.join(".scuzz");
     std::fs::create_dir_all(&cache_dir)?;
     let fp_path = cache_dir.join("fingerprint");
     let exe = opts.out_dir.join(exe_name);
@@ -101,7 +101,7 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
 
     build_runtime(&opts.runtime_dir, &opts.clang)?;
 
-    let lib = opts.runtime_dir.join("build/libscalui_rt.a");
+    let lib = opts.runtime_dir.join("build/libscuzz_rt.a");
     let include = opts.runtime_dir.join("include");
     let with_ui = manifest.ui.is_some();
 
@@ -127,11 +127,11 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
             .unwrap_or_else(|| PathBuf::from("crates"));
         let embedder_lib = crates_dir
             .join("embedder-desktop")
-            .join("build/libscalui_embedder.a");
+            .join("build/libscuzz_embedder.a");
         let mobile_lib = crates_dir
             .join("embedder-mobile")
-            .join("build/libscalui_mobile.a");
-        // Strong embedder symbols must override weak stubs in libscalui_rt.a.
+            .join("build/libscuzz_mobile.a");
+        // Strong embedder symbols must override weak stubs in libscuzz_rt.a.
         if embedder_lib.is_file() {
             push_force_load(&mut link, &embedder_lib);
             if cfg!(target_os = "linux") {
@@ -196,7 +196,7 @@ pub fn find_sources(project_dir: &Path) -> Result<Vec<PathBuf>> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     collect_sources(&src, &mut candidates)?;
     if candidates.is_empty() {
-        bail!("no .scala / .scalui sources in {}", src.display());
+        bail!("no .scala / .scuzz sources in {}", src.display());
     }
     // Main.* last so package/enum units parse first (order only affects error msgs;
     // parse_sources merges). Prefer stable order: non-main first, then main.
@@ -222,7 +222,7 @@ fn collect_sources(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
         if path.is_dir() {
             collect_sources(&path, out)?;
         } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            if matches!(ext, "scala" | "scalui") {
+            if matches!(ext, "scala" | "scuzz") {
                 out.push(path);
             }
         }
@@ -264,7 +264,7 @@ pub fn find_runtime_dir(start: &Path) -> Result<PathBuf> {
     let mut cur = start.to_path_buf();
     loop {
         let candidate = cur.join("crates/runtime");
-        if candidate.join("include/scalui_rt.h").is_file() {
+        if candidate.join("include/scuzz_rt.h").is_file() {
             return Ok(candidate);
         }
         if !cur.pop() {

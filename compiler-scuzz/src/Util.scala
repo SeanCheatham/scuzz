@@ -1,4 +1,4 @@
-package scalui.compiler
+package scuzz.compiler
 
 def streq(a: String, b: String): Int =
   Str.eq(a, b)

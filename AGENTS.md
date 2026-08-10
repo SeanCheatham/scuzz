@@ -7,14 +7,14 @@
 | [`docs/vision.md`](docs/vision.md) | Product thesis, decisions, language direction, open work, risks |
 | [`docs/compatibility.md`](docs/compatibility.md) | Keep/cut vs Scala & Typelevel; platforms; self-host stages |
 | [`docs/guide.md`](docs/guide.md) | App author happy path |
-| [`docs/schemas/scalui-toml.md`](docs/schemas/scalui-toml.md) | Package manifest schema |
+| [`docs/schemas/scuzz-toml.md`](docs/schemas/scuzz-toml.md) | Package manifest schema |
 | [`README.md`](README.md) | Quick start and current status only |
 
 If a decision or next-step ordering changes, edit `vision.md`.
 
 ## Keep the codebase lightweight
 
-ScalUI is already a language + runtime + UI + tooling bet. **Ruthless subset and vertical slices win.**
+Scuzz Lang is already a language + runtime + UI + tooling bet. **Ruthless subset and vertical slices win.**
 
 - **No docs sprawl.** Do not add README/GUIDE/ARCHITECTURE files per crate “for completeness.” Stub crates may have a short README pointing at role; otherwise document in `docs/` or in code comments. Update existing docs instead of creating siblings.
 - **No premature abstraction.** One clear implementation beats traits/factories/indirection for a single caller. Introduce seams when a second backend or Stage-1 port needs them (e.g. Headless vs Window), not before.

@@ -1,4 +1,4 @@
-//! Minimal ScalUI formatter: parse → pretty-print (kernel dialect).
+//! Minimal Scuzz Lang formatter: parse → pretty-print (kernel dialect).
 
 use crate::ast::{BinOp, EnumDef, Expr, ForBinder, FunDef, MatchArm, Pattern, Program, Type};
 use crate::parser::{parse, ParseError};

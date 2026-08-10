@@ -1,4 +1,4 @@
-package scalui.compiler
+package scuzz.compiler
 
 def lcgSeed(seed: Int): Int =
   seed % 2147483646 + 1
@@ -64,7 +64,7 @@ def fuzzScriptText(events: List): String =
   Str.concat(join(events, "\n"), "\n")
 
 def fuzzCmd(exe: String, script: String, dump: String, w: String, h: String): String =
-  Str.concat(str6("env SCALUI_UI_RUNTIME=headless SCALUI_TESTRT=1 SCALUI_UI_SCRIPT=", script, " SCALUI_FUZZ_DUMP=", dump, " SCALUI_UI_WIDTH=", w), str4(" SCALUI_UI_HEIGHT=", h, " ", exe))
+  Str.concat(str6("env SCUZZ_UI_RUNTIME=headless SCUZZ_TESTRT=1 SCUZZ_UI_SCRIPT=", script, " SCUZZ_FUZZ_DUMP=", dump, " SCUZZ_UI_WIDTH=", w), str4(" SCUZZ_UI_HEIGHT=", h, " ", exe))
 
 def fuzzExec(exe: String, fuzzDir: String, w: String, h: String, events: List): IO[Int] =
   Fs.write(pathJoin(fuzzDir, "script.txt"), fuzzScriptText(events)).flatMap(_ =>
@@ -80,19 +80,19 @@ def reproText(seed: Int, events: List): String =
 def fuzzFail(projectDir: String, fuzzDir: String, scriptSeed: Int, iter: Int, events: List): IO[Unit] =
   Fs.write(pathJoin(fuzzDir, "repro.toml"), reproText(scriptSeed, events)).flatMap(_ =>
     IO.println(str6("fuzz failure at script ", Str.fromInt(iter), " (seed ", Str.fromInt(scriptSeed), "); wrote ", pathJoin(fuzzDir, "repro.toml"))).flatMap(_ =>
-      IO.println(str4("replay: scalui fuzz ", projectDir, " --replay ", pathJoin(fuzzDir, "repro.toml"))).flatMap(_ => IO.fail("fuzz failure"))
+      IO.println(str4("replay: scuzz fuzz ", projectDir, " --replay ", pathJoin(fuzzDir, "repro.toml"))).flatMap(_ => IO.fail("fuzz failure"))
     )
   )
 
 def fuzzExhaustFail(projectDir: String, fuzzDir: String, depth: Int, scriptIndex: Int, events: List): IO[Unit] =
   Fs.write(pathJoin(fuzzDir, "repro.toml"), reproText(depth, events)).flatMap(_ =>
     IO.println(str6("fuzz --exhaust failure at script ", Str.fromInt(scriptIndex), " (depth ", Str.fromInt(depth), "); wrote ", pathJoin(fuzzDir, "repro.toml"))).flatMap(_ =>
-      IO.println(str4("replay: scalui fuzz ", projectDir, " --replay ", pathJoin(fuzzDir, "repro.toml"))).flatMap(_ => IO.fail("fuzz exhaust failure"))
+      IO.println(str4("replay: scuzz fuzz ", projectDir, " --replay ", pathJoin(fuzzDir, "repro.toml"))).flatMap(_ => IO.fail("fuzz exhaust failure"))
     )
   )
 
 def fuzzLoop(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, nButtons: Int, hasText: Int, seed: Int, iter: Int, iters: Int): IO[Unit] =
-  if (iter >= iters) IO.println(str5("scalui fuzz ok (", Str.fromInt(iters), " scripts, seed ", Str.fromInt(seed), ")")) else fuzzIter(exe, fuzzDir, w, h, projectDir, nButtons, hasText, seed, iter, iters)
+  if (iter >= iters) IO.println(str5("scuzz fuzz ok (", Str.fromInt(iters), " scripts, seed ", Str.fromInt(seed), ")")) else fuzzIter(exe, fuzzDir, w, h, projectDir, nButtons, hasText, seed, iter, iters)
 
 def fuzzIter(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, nButtons: Int, hasText: Int, seed: Int, iter: Int, iters: Int): IO[Unit] =
   for {
@@ -121,7 +121,7 @@ def exhaustExtendOver(exe: String, fuzzDir: String, w: String, h: String, projec
   if (List.isEmpty(remaining) == 1) IO.pure(scriptIndex) else exhaustExtend(exe, fuzzDir, w, h, projectDir, maxDepth, targetLen, alphabet, List.append(prefix, List.head(remaining)), scriptIndex).flatMap(next => exhaustExtendOver(exe, fuzzDir, w, h, projectDir, maxDepth, targetLen, alphabet, List.tail(remaining), prefix, next))
 
 def fuzzExhaustDepth(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, alphabet: List, depth: Int, maxDepth: Int, scriptIndex: Int): IO[Unit] =
-  if (depth > maxDepth) IO.println(str5("scalui fuzz --exhaust ok (depth ", Str.fromInt(maxDepth), ", ", Str.fromInt(scriptIndex), " scripts)")) else exhaustExtend(exe, fuzzDir, w, h, projectDir, maxDepth, depth, alphabet, List.empty(), scriptIndex).flatMap(next => fuzzExhaustDepth(exe, fuzzDir, w, h, projectDir, alphabet, depth + 1, maxDepth, next))
+  if (depth > maxDepth) IO.println(str5("scuzz fuzz --exhaust ok (depth ", Str.fromInt(maxDepth), ", ", Str.fromInt(scriptIndex), " scripts)")) else exhaustExtend(exe, fuzzDir, w, h, projectDir, maxDepth, depth, alphabet, List.empty(), scriptIndex).flatMap(next => fuzzExhaustDepth(exe, fuzzDir, w, h, projectDir, alphabet, depth + 1, maxDepth, next))
 
 def fuzzExhaust(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, nButtons: Int, hasText: Int, depth: Int): IO[Unit] =
   fuzzExhaustDepth(exe, fuzzDir, w, h, projectDir, exhaustAlphabet(nButtons, hasText), 1, depth, 0)
@@ -130,13 +130,13 @@ def fuzzProbe(exe: String, fuzzDir: String, w: String, h: String, projectDir: St
   fuzzExec(exe, fuzzDir, w, h, List.empty()).flatMap(code => if (code != 0) IO.fail("fuzz probe failed: app fails under TestRuntime before any event") else Fs.read(pathJoin(fuzzDir, "dump.txt")).flatMap(dump => fuzzProbeCont(exe, fuzzDir, w, h, projectDir, seed, iters, exhaust, depth, countPrefixLines(dump, "button:", 0, 0), countPrefixLines(dump, "textfield:", 0, 0))))
 
 def fuzzProbeCont(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, seed: Int, iters: Int, exhaust: Int, depth: Int, nButtons: Int, nFields: Int): IO[Unit] =
-  if (nButtons + nFields == 0) IO.println("scalui fuzz ok (no buttons or text fields; probe only)") else if (exhaust == 1) fuzzExhaust(exe, fuzzDir, w, h, projectDir, nButtons, boolPos(nFields), depth) else fuzzLoop(exe, fuzzDir, w, h, projectDir, nButtons, boolPos(nFields), seed, 0, iters)
+  if (nButtons + nFields == 0) IO.println("scuzz fuzz ok (no buttons or text fields; probe only)") else if (exhaust == 1) fuzzExhaust(exe, fuzzDir, w, h, projectDir, nButtons, boolPos(nFields), depth) else fuzzLoop(exe, fuzzDir, w, h, projectDir, nButtons, boolPos(nFields), seed, 0, iters)
 
 def fuzzReplay(exe: String, fuzzDir: String, w: String, h: String, replayPath: String): IO[Unit] =
   Fs.read(replayPath).flatMap(text => fuzzReplayLoaded(exe, fuzzDir, w, h, replayPath, tomlGetArrayString(text, "fuzz", "events"), tomlGetInt(text, "fuzz", "seed", "0")))
 
 def fuzzReplayLoaded(exe: String, fuzzDir: String, w: String, h: String, replayPath: String, events: List, seedStr: String): IO[Unit] =
-  IO.println(str6("scalui fuzz --replay ", replayPath, " (", Str.fromInt(List.len(events)), " events, seed ", str3(seedStr, ")", ""))).flatMap(_ =>
+  IO.println(str6("scuzz fuzz --replay ", replayPath, " (", Str.fromInt(List.len(events)), " events, seed ", str3(seedStr, ")", ""))).flatMap(_ =>
     fuzzExec(exe, fuzzDir, w, h, events).flatMap(code => fuzzReplayResult(code))
   )
 
@@ -168,10 +168,10 @@ def cmdFuzzExhaustDepth(projectDir: String, depth: Int): IO[Unit] =
   if (depth <= 0) IO.fail("fuzz --exhaust --depth N requires N > 0") else cmdFuzz(projectDir, "", 0, 0, 1, depth)
 
 def cmdFuzz(projectDir: String, replay: String, iters: Int, seed: Int, exhaust: Int, depth: Int): IO[Unit] =
-  Fs.read(pathJoin(projectDir, "scalui.toml")).flatMap(toml => fuzzChecked(projectDir, replay, iters, seed, exhaust, depth, toml))
+  Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml => fuzzChecked(projectDir, replay, iters, seed, exhaust, depth, toml))
 
 def fuzzChecked(projectDir: String, replay: String, iters: Int, seed: Int, exhaust: Int, depth: Int, toml: String): IO[Unit] =
-  if (hasUiSection(toml) == 0) IO.fail("scalui fuzz needs a [ui] project (Headless event scripts)") else compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ => fuzzBuilt(projectDir, replay, iters, seed, exhaust, depth, toml))
+  if (hasUiSection(toml) == 0) IO.fail("scuzz fuzz needs a [ui] project (Headless event scripts)") else compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ => fuzzBuilt(projectDir, replay, iters, seed, exhaust, depth, toml))
 
 def fuzzBuilt(projectDir: String, replay: String, iters: Int, seed: Int, exhaust: Int, depth: Int, toml: String): IO[Unit] =
   for {

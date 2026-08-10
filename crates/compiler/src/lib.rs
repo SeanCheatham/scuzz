@@ -1,4 +1,4 @@
-//! ScalUI Stage-0 compiler: parse kernel dialect → LLVM IR → native link.
+//! Scuzz Lang Stage-0 compiler: parse kernel dialect → LLVM IR → native link.
 
 pub mod ast;
 pub mod check;

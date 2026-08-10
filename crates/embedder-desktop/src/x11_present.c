@@ -1,4 +1,4 @@
-#include "scalui_embedder.h"
+#include "scuzz_embedder.h"
 
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
@@ -17,7 +17,7 @@ static int g_h;
 static int g_ready;
 static int g_user_quit;
 
-int su_embedder_available(void) {
+int sz_embedder_available(void) {
   const char *d = getenv("DISPLAY");
   if (!d || !*d)
     return 0;
@@ -28,20 +28,20 @@ int su_embedder_available(void) {
   return 1;
 }
 
-int su_embedder_alive(void) {
-  return !g_user_quit && su_embedder_available();
+int sz_embedder_alive(void) {
+  return !g_user_quit && sz_embedder_available();
 }
 
 static int ensure_window(const char *title, int width, int height) {
   if (g_ready && g_w == width && g_h == height)
     return 1;
 
-  su_embedder_shutdown();
+  sz_embedder_shutdown();
   g_user_quit = 0;
 
   g_dpy = XOpenDisplay(NULL);
   if (!g_dpy) {
-    fprintf(stderr, "scalui embedder: cannot open DISPLAY\n");
+    fprintf(stderr, "scuzz embedder: cannot open DISPLAY\n");
     return 0;
   }
 
@@ -50,7 +50,7 @@ static int ensure_window(const char *title, int width, int height) {
                               (unsigned)width, (unsigned)height, 1,
                               BlackPixel(g_dpy, screen),
                               WhitePixel(g_dpy, screen));
-  XStoreName(g_dpy, g_win, title ? title : "ScalUI");
+  XStoreName(g_dpy, g_win, title ? title : "Scuzz Lang");
   XSelectInput(g_dpy, g_win, ExposureMask | StructureNotifyMask | KeyPressMask);
   XMapWindow(g_dpy, g_win);
   g_gc = DefaultGC(g_dpy, screen);
@@ -59,7 +59,7 @@ static int ensure_window(const char *title, int width, int height) {
   g_h = height;
   g_img_data = (char *)malloc((size_t)width * (size_t)height * 4);
   if (!g_img_data) {
-    su_embedder_shutdown();
+    sz_embedder_shutdown();
     return 0;
   }
 
@@ -67,7 +67,7 @@ static int ensure_window(const char *title, int width, int height) {
                        g_img_data, (unsigned)width, (unsigned)height, 32,
                        width * 4);
   if (!g_img) {
-    su_embedder_shutdown();
+    sz_embedder_shutdown();
     return 0;
   }
 
@@ -80,11 +80,11 @@ static int ensure_window(const char *title, int width, int height) {
   }
 
   g_ready = 1;
-  fprintf(stderr, "scalui embedder: X11 window %dx%d\n", width, height);
+  fprintf(stderr, "scuzz embedder: X11 window %dx%d\n", width, height);
   return 1;
 }
 
-int su_embedder_present(const char *title, int width, int height,
+int sz_embedder_present(const char *title, int width, int height,
                         const uint8_t *rgba, size_t nbytes) {
   size_t need;
   int x, y;
@@ -96,7 +96,7 @@ int su_embedder_present(const char *title, int width, int height,
   need = (size_t)width * (size_t)height * 4;
   if (nbytes < need)
     return 0;
-  if (!su_embedder_available())
+  if (!sz_embedder_available())
     return 0;
   if (!ensure_window(title, width, height))
     return 0;
@@ -120,14 +120,14 @@ int su_embedder_present(const char *title, int width, int height,
     XNextEvent(g_dpy, &ev);
     if (ev.type == ClientMessage || ev.type == DestroyNotify) {
       g_user_quit = 1;
-      su_embedder_shutdown();
+      sz_embedder_shutdown();
       return 1;
     }
     if (ev.type == KeyPress) {
       KeySym ks = XLookupKeysym(&ev.xkey, 0);
       if (ks == XK_q || ks == XK_Escape) {
         g_user_quit = 1;
-        su_embedder_shutdown();
+        sz_embedder_shutdown();
         return 1;
       }
     }
@@ -135,7 +135,7 @@ int su_embedder_present(const char *title, int width, int height,
   return 1;
 }
 
-void su_embedder_shutdown(void) {
+void sz_embedder_shutdown(void) {
   if (g_img) {
     /* XDestroyImage frees g_img_data */
     g_img->data = g_img_data;
