@@ -67,6 +67,32 @@ jobs:
       - name: Self-host dual-boot
         run: ./scripts/selfhost.sh
 
+      - name: Package Stage-1 release + install-from-tarball smoke
+        run: |
+          TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
+          SCALUI_BOOTSTRAP=/tmp/stage1-scalui ./scripts/package_release.sh
+          test -f "dist/scalui-${TRIPLE}.tar.gz"
+          test -x "dist/scalui-${TRIPLE}/bin/scalui"
+          PREFIX=/tmp/scalui-prefix
+          rm -rf "$PREFIX"
+          RELEASE_TGZ="$PWD/dist/scalui-${TRIPLE}.tar.gz" PREFIX="$PREFIX" ./scripts/install.sh
+          export PATH="$PREFIX/bin:$PATH"
+          unset SCALUI_HOME SCALUI_RUNTIME || true
+          test "$(command -v scalui)" = "$PREFIX/bin/scalui"
+          rm -rf /tmp/scalui-release-app
+          scalui new --ui --path /tmp scalui-release-app
+          scalui test /tmp/scalui-release-app
+          test -f /tmp/scalui-release-app/goldens/scalui-release-app.dump
+          scalui run --headless /tmp/scalui-release-app
+          test -f /tmp/scalui-release-app/build/snapshot.png
+
+      - name: Upload Stage-1 release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scalui-linux-x86_64
+          path: dist/scalui-*.tar.gz
+          if-no-files-found: error
+
       - name: Headless UI + golden PNGs
         run: |
           cargo run -p scalui -- run --headless examples/hello_ui
@@ -150,7 +176,9 @@ jobs:
 
       - name: Window peer + X11 embedder (xvfb)
         run: |
-          xvfb-run -a env SCALUI_UI_RUNTIME=window SCALUI_UI_WIDTH=200 SCALUI_UI_HEIGHT=100 \
+          # SCALUI_LIVE_FRAMES bounds stay-open Ui.run under Window (else hangs on xvfb).
+          timeout 30s xvfb-run -a env SCALUI_UI_RUNTIME=window SCALUI_LIVE_FRAMES=2 \
+            SCALUI_UI_WIDTH=200 SCALUI_UI_HEIGHT=100 \
             ./examples/hello_ui/build/hello_ui 2>&1 | tee /tmp/win.out
           grep -q "desktop embedder" /tmp/win.out
           grep -q "X11 window" /tmp/win.out

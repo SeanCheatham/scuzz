@@ -1,49 +1,86 @@
 #!/usr/bin/env bash
-# Install Stage-1 `scalui` (release CLI) into PREFIX (default: ~/.local).
-# Requires a ScalUI checkout: runtime/embedder live under SCALUI_HOME.
-# Self-hosting: an existing Stage-1 binary (SCALUI_BOOTSTRAP, or a previous
-# compiler-scalui/build/scalui) rebuilds the CLI without cargo / Stage 0.
+# Install Stage-1 `scalui` into PREFIX (default: ~/.local).
+#
+# Installs a self-contained release tree under $PREFIX/share/scalui and a
+# wrapper at $PREFIX/bin/scalui that sets SCALUI_HOME. App builds need
+# clang/make; Rust/cargo is not required when installing from a prebuilt
+# artifact (RELEASE_TGZ / RELEASE_DIR).
+#
+# From a checkout (default): builds/packages Stage-1 via package_release.sh,
+# then installs that tree. Self-host: SCALUI_BOOTSTRAP (or an existing
+# compiler-scalui/build/scalui) rebuilds without Stage 0.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 PREFIX="${PREFIX:-$HOME/.local}"
 BIN="$PREFIX/bin"
+SHARE="${PREFIX}/share/scalui"
+TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
 
-cd "$ROOT"
-BOOTSTRAP="${SCALUI_BOOTSTRAP:-}"
-if [[ -z "$BOOTSTRAP" && -x "$ROOT/compiler-scalui/build/scalui" ]]; then
-  BOOTSTRAP="$ROOT/compiler-scalui/build/scalui"
-fi
-
-if [[ -n "$BOOTSTRAP" && -x "$BOOTSTRAP" ]]; then
-  if [[ "$BOOTSTRAP" -ef "$ROOT/compiler-scalui/build/scalui" ]]; then
-    # Rebuilding over the running binary would hit ETXTBSY; run a copy.
-    TMP_BOOTSTRAP="$(mktemp "${TMPDIR:-/tmp}/scalui-bootstrap.XXXXXX")"
-    cp -f "$BOOTSTRAP" "$TMP_BOOTSTRAP"
-    chmod +x "$TMP_BOOTSTRAP"
-    BOOTSTRAP="$TMP_BOOTSTRAP"
+resolve_release_dir() {
+  if [[ -n "${RELEASE_DIR:-}" ]]; then
+    if [[ ! -x "$RELEASE_DIR/bin/scalui" ]]; then
+      echo "RELEASE_DIR=$RELEASE_DIR missing bin/scalui" >&2
+      exit 1
+    fi
+    echo "$RELEASE_DIR"
+    return
   fi
-  echo "==> building Stage-1 CLI (self-build via $BOOTSTRAP; no Stage 0)"
-  "$BOOTSTRAP" build compiler-scalui
-else
-  echo "==> building Stage-1 CLI (via Stage-0 bootstrap; SCALUI_BOOTSTRAP skips cargo)"
-  cargo run -p scalui -- build --full compiler-scalui
+
+  if [[ -n "${RELEASE_TGZ:-}" ]]; then
+    if [[ ! -f "$RELEASE_TGZ" ]]; then
+      echo "RELEASE_TGZ=$RELEASE_TGZ not found" >&2
+      exit 1
+    fi
+    local extract
+    extract="$(mktemp -d "${TMPDIR:-/tmp}/scalui-release.XXXXXX")"
+    tar -C "$extract" -xzf "$RELEASE_TGZ"
+    local dir
+    dir="$(find "$extract" -mindepth 1 -maxdepth 1 -type d | head -1)"
+    if [[ -z "$dir" || ! -x "$dir/bin/scalui" ]]; then
+      echo "RELEASE_TGZ=$RELEASE_TGZ did not contain bin/scalui" >&2
+      exit 1
+    fi
+    echo "$dir"
+    return
+  fi
+
+  echo "==> packaging Stage-1 release (no RELEASE_DIR / RELEASE_TGZ)" >&2
+  DIST_ROOT="${DIST_ROOT:-$ROOT/dist}" \
+    SCALUI_BOOTSTRAP="${SCALUI_BOOTSTRAP:-}" \
+    "$ROOT/scripts/package_release.sh" >&2
+  local packaged="$ROOT/dist/scalui-$TRIPLE"
+  if [[ ! -x "$packaged/bin/scalui" ]]; then
+    echo "package_release.sh did not produce $packaged/bin/scalui" >&2
+    exit 1
+  fi
+  printf '%s\n' "$packaged"
+}
+
+RELEASE="$(resolve_release_dir)"
+
+echo "==> installing release tree → $SHARE"
+rm -rf "$SHARE"
+mkdir -p "$(dirname "$SHARE")" "$BIN"
+# Copy tree; keep a private copy under PREFIX (not a live checkout link).
+mkdir -p "$SHARE"
+(cd "$RELEASE" && tar cf - .) | (cd "$SHARE" && tar xf -)
+chmod +x "$SHARE/bin/scalui"
+if [[ -d "$SHARE/scripts" ]]; then
+  chmod +x "$SHARE/scripts"/*.sh 2>/dev/null || true
 fi
 
-mkdir -p "$BIN"
 WRAPPER="$BIN/scalui"
-STAGE1="$ROOT/compiler-scalui/build/scalui"
-
 cat >"$WRAPPER" <<EOF
 #!/usr/bin/env bash
 set -euo pipefail
-export SCALUI_HOME="${ROOT}"
+export SCALUI_HOME="${SHARE}"
 export SCALUI_RUNTIME="\${SCALUI_RUNTIME:-\$SCALUI_HOME/crates/runtime}"
-exec "${STAGE1}" "\$@"
+exec "\$SCALUI_HOME/bin/scalui" "\$@"
 EOF
 chmod +x "$WRAPPER"
 
 echo "installed $WRAPPER"
-echo "  SCALUI_HOME=$ROOT"
-echo "Ensure $BIN is on PATH, then:"
+echo "  SCALUI_HOME=$SHARE"
+echo "Ensure $BIN is on PATH (clang + make required to build apps), then:"
 echo "  scalui new myapp --ui"
 echo "  cd myapp && scalui test && scalui run --headless"
