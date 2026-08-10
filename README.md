@@ -11,7 +11,7 @@
 - **ScalUI-authored Views**: Counter/Todo build widget trees via `Signal` / `View` / `Ui.run` (C demos remain for Live / kits)
 - Closed impurity boundary: `Clock` / `Random` / `Fs` / `Net` / `Sys` / `IO.println` + `TestRuntime` fakes
 - Animation v0 + accessibility hooks (Headless-dumpable); theme polish tokens
-- Stage-1 CLI: `build|run|test|fmt|watch|new|package` (`compiler-scalui`); Stage-0 Rust is canary
+- Stage-1 CLI: `build|run|test|watch|new|package` (`compiler-scalui`); Stage-0 Rust is canary (`fmt` stays canary until pretty-printer is ported)
 - Samples gallery below; Skia prebuilts via `SCALUI_SKIA_URL` (default: in-tree `sk_sw`)
 - Impeller evaluated and deferred (ADR 0002)
 
@@ -92,7 +92,7 @@ cargo run -p scalui -- run --headless examples/live
 | `examples/hello` | `IO.println` |
 | `examples/hello_ui` | Headless `Ui` + goldens |
 | `examples/counter` | ScalUI `Signal`/`View`/`Ui.run` + goldens |
-| `examples/nav` | `buttonSet` + `showWhen` + stay-open `Ui.run` + goldens |
+| `examples/nav` | Lambda taps + `showWhen` + stay-open `Ui.run` + goldens |
 | `examples/live` | Stay-open Window (`Ui.runLive`; q/Esc) |
 | `examples/todo` | ScalUI Todo tree + `Ui.runWithTodo` + goldens |
 | `examples/effects` | Blessed effects kit |

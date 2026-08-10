@@ -54,6 +54,22 @@ fn infer(
         Expr::Unit => Ok(Type::Unit),
         Expr::IntLit(_) => Ok(Type::Int),
         Expr::StrLit(_) => Ok(Type::String),
+        Expr::Interpolate { parts } => {
+            for part in parts {
+                match part {
+                    crate::ast::InterpPart::Lit(_) => {}
+                    crate::ast::InterpPart::Expr(e) => {
+                        let t = infer(e, enums, funs, env)?;
+                        if !matches!(t, Type::String | Type::Int) {
+                            return Err(TypeError::Msg(format!(
+                                "interpolation hole must be String or Int, got {t:?}"
+                            )));
+                        }
+                    }
+                }
+            }
+            Ok(Type::String)
+        },
         Expr::IoPrintln(_)
         | Expr::IoDelayUnit
         | Expr::IoSleep(_)
@@ -237,6 +253,23 @@ fn infer(
             }
             Ok(Type::Io(Box::new(Type::Opaque("Either".into()))))
         }
+        Expr::Lambda { param, body } => {
+            let old = param
+                .as_ref()
+                .map(|p| (p.clone(), env.insert(p.clone(), Type::Opaque("View".into()))));
+            let _ = infer(body, enums, funs, env)?;
+            if let Some((p, old_val)) = old {
+                match old_val {
+                    Some(v) => {
+                        env.insert(p, v);
+                    }
+                    None => {
+                        env.remove(&p);
+                    }
+                }
+            }
+            Ok(Type::Opaque("TapFn".into()))
+        }
         Expr::IoRace { left, right } | Expr::IoBoth { left, right } => {
             let lt = infer(left, enums, funs, env)?;
             let rt = infer(right, enums, funs, env)?;
@@ -417,16 +450,21 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::Opaque("View".into()))
         }
-        "View.buttonInc" => {
+        "View.button" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::Opaque("View".into()))
         }
-        "View.buttonSet" => {
+        "Theme.accent" | "Theme.primary" | "Theme.muted" | "Theme.foreground" => {
+            expect_arity(callee, &arg_tys, 0)?;
+            Ok(Type::Int)
+        }
+        "Color.rgb" => {
             expect_arity(callee, &arg_tys, 3)?;
-            expect_ty(&arg_tys[0], &Type::String)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
             expect_ty(&arg_tys[2], &Type::Int)?;
-            Ok(Type::Opaque("View".into()))
+            Ok(Type::Int)
         }
         "View.column" | "View.row" | "View.list" => {
             expect_arity(callee, &arg_tys, 0)?;

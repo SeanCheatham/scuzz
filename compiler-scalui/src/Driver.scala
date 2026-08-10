@@ -25,13 +25,6 @@ def mergeProg(acc: List, p: List): List =
 
 def parseSource(src: String): List = parseProgram(lex(src))
 
-def readTomlName(toml: String): String =
-  readTomlNameAt(toml, Str.indexOf(toml, "name = \""))
-
-def readTomlNameAt(toml: String, idx: Int): String =
-  if (idx < 0) "app"
-  else readUntilQuote(toml, idx + 8, "")
-
 def readUntilQuote(s: String, i: Int, acc: String): String =
   if (i >= Str.len(s)) acc
   else if (Str.charAt(s, i) == 34) acc
@@ -136,7 +129,7 @@ def linkCmd(clang: String, ll: String, lib: String, skia: String, inc: String, s
         str4(
           " -I",
           skInc,
-          " ",
+          " -lpthread ",
           str4(embedderLinkFlags(embedder), " -o ", exe, "")
         )
       )

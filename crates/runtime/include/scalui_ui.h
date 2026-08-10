@@ -80,6 +80,13 @@ typedef struct SuTheme {
 
 const SuTheme *su_theme_default(void);
 
+/* Language-facing theme / color ints (ARGB). */
+int64_t su_theme_accent(void);
+int64_t su_theme_primary(void);
+int64_t su_theme_muted(void);
+int64_t su_theme_foreground(void);
+int64_t su_color_rgb(int64_t r, int64_t g, int64_t b);
+
 /* --- signals (Phase 2 state) --------------------------------------------- */
 
 typedef struct SuSignalInt SuSignalInt;
@@ -220,8 +227,8 @@ void *su_lang_signal_str_set(SuSignalStr *s, SuString *v);
 
 SuView *su_lang_view_text(SuString *text);
 SuView *su_lang_view_text_signal(SuSignalInt *sig, SuString *prefix);
-SuView *su_lang_view_button_inc(SuString *label, SuSignalInt *sig);
-SuView *su_lang_view_button_set(SuString *label, SuSignalInt *sig, int64_t value);
+/* First-class tap closure: `tap`/`env` come from a compiled `_ => ...` lambda. */
+SuView *su_lang_view_button(SuString *label, SuViewTapFn tap, void *env);
 SuView *su_lang_view_column(void);
 SuView *su_lang_view_row(void);
 SuView *su_lang_view_list(void);

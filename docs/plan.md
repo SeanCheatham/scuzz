@@ -14,17 +14,7 @@ ADR 0005 names `scripts/selfhost.sh` the dialect-drift gate. It currently segfau
 
 Done when: `./scripts/selfhost.sh` passes on macOS and Linux with default stack limits, and CI fails on regression on both.
 
-## 2. First-class lambdas and closures
-
-The interim tap family (`View.buttonInc` / `View.buttonSet`, per ADR 0004) exists only because the language lacks closures. This is the single biggest step toward a Scala-shaped language.
-
-- Closures in the kernel dialect (Stage 0 first, per ADR 0005 expansion rules): lambda literals, captured environments, `SuViewTapFn` lowering.
-- `View.button(label, onTap)` taking `_ => ...` signal writes; delete `buttonInc` / `buttonSet` and rewrite `examples/counter` / `examples/nav` (forwards-only, no dual API).
-- Port the Stage-1 compiler to use lambdas internally where it currently hand-threads state.
-
-Done when: Counter/nav express taps as lambdas, the interim tap builtins are deleted from runtime + both compilers, and goldens stay green.
-
-## 3. Dialect ergonomics for the v0 bar
+## 2. Dialect ergonomics for the v0 bar
 
 Counter should read like UI code, not assembly. Small, high-leverage additions, each landing in Stage 0 before Stage 1 depends on it:
 
@@ -35,7 +25,7 @@ Counter should read like UI code, not assembly. Small, high-leverage additions, 
 
 Done when: `scalui new --ui` templates and all `examples/` build without concat helpers or magic color ints.
 
-## 4. Honest CLI surface
+## 3. Honest CLI surface
 
 Stage-1 `fmt` and `watch` are stubs dressed as features: `fmt` only parse-validates (or delegates to the Rust canary), `watch` is a blind 2 s poll-rebuild.
 
@@ -45,7 +35,7 @@ Stage-1 `fmt` and `watch` are stubs dressed as features: `fmt` only parse-valida
 
 Done when: README's CLI claims match behavior with no canary delegation on the default path, or the claims are removed.
 
-## 5. Real manifest parsing
+## 4. Real manifest parsing
 
 `scalui.toml` is currently read via string search (`readTomlQuotedAfter` in `compiler-scalui/src/CliCmds.scala`), which breaks on any formatting variation.
 

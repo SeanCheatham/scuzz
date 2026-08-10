@@ -1,13 +1,13 @@
 #!/usr/bin/env bash
 # Dual-boot: Stage-0 → Stage-1 → Stage-2, smoke-test examples/hello.
+# Fail loudly: every stage must succeed; no masked exit codes.
 set -euo pipefail
-# Stage-1 emit is deeply recursive; default stack is too small for self-compile.
-ulimit -s unlimited || ulimit -s 65536 || true
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
 echo "==> Stage 0 builds Stage 1 (compiler-scalui)"
 cargo run -p scalui -- build --full compiler-scalui
+test -x compiler-scalui/build/scalui
 
 STAGE1="/tmp/stage1-scalui"
 STAGE2="/tmp/stage2-scalui"
@@ -22,6 +22,7 @@ echo "$HELLO1" | grep -q "Phase 0 online"
 
 echo "==> Stage 1 rebuilds compiler-scalui (Stage 2)"
 "$STAGE1" build compiler-scalui
+test -x compiler-scalui/build/scalui
 cp -f compiler-scalui/build/scalui "$STAGE2"
 chmod +x "$STAGE2"
 
