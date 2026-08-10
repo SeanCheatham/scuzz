@@ -5,7 +5,10 @@ package scalui.compiler
 def emptyProg(): List =
   List.cons(
     "Prog",
-    List.cons("", List.cons(List.empty, List.cons(unitExpr(), List.empty)))
+    List.cons(
+      "",
+      List.cons(List.empty, List.cons(List.empty, List.cons(unitExpr(), List.empty)))
+    )
   )
 
 def chooseMain(a: List, b: List): List =
@@ -17,8 +20,11 @@ def mergeProg(acc: List, p: List): List =
     List.cons(
       nodeStr(p, 0),
       List.cons(
-        listConcat(progDefs(acc), progDefs(p)),
-        List.cons(chooseMain(progMain(acc), progMain(p)), List.empty)
+        listConcat(progEnums(acc), progEnums(p)),
+        List.cons(
+          listConcat(progDefs(acc), progDefs(p)),
+          List.cons(chooseMain(progMain(acc), progMain(p)), List.empty)
+        )
       )
     )
   )

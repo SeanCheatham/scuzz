@@ -133,17 +133,37 @@ def maybeRuntimeTests(runtimeDir: String, runtimeTests: Int): IO[Unit] =
       execOk(str3("make -C ", pathJoin(parentDir(runtimeDir), "ffi-skia"), " test"))
     )
 
-def checkFlagStr(check: Int): String =
-  if (check == 1) " --check" else ""
-
 def cmdFmt(projectDir: String, check: Int): IO[Unit] =
-  Sys.getenv("SCALUI_CANARY").flatMap(canary =>
-    if (Str.len(canary) > 0)
-      execOk(str4(canary, " fmt ", projectDir, checkFlagStr(check)))
+  Fs.list(pathJoin(projectDir, "src")).flatMap(names =>
+    fmtFiles(pathJoin(projectDir, "src"), partitionSources(names, List.empty, List.empty), check, 0)
+  ).flatMap(dirty =>
+    if (check == 1)
+      if (dirty == 0) IO.println("scalui fmt ok")
+      else
+        IO.println(str3("scalui fmt: ", Str.fromInt(dirty), " file(s) need formatting")).flatMap(_ =>
+          IO.fail("fmt --check failed")
+        )
+    else IO.println("scalui fmt ok")
+  )
+
+def fmtFiles(srcDir: String, names: List, check: Int, dirty: Int): IO[Int] =
+  if (List.isEmpty(names) == 1) IO.pure(dirty)
+  else
+    fmtOne(srcDir, List.head(names), check).flatMap(d =>
+      fmtFiles(srcDir, List.tail(names), check, dirty + d)
+    )
+
+def fmtOne(srcDir: String, name: String, check: Int): IO[Int] =
+  val path = pathJoin(srcDir, name)
+  Fs.read(path).flatMap(text =>
+    val formatted = formatSource(text)
+    if (streq(formatted, text) == 1) IO.pure(0)
+    else if (check == 1)
+      IO.println(str3("would reformat ", path, "")).flatMap(_ => IO.pure(1))
     else
-      IO.println(
-        "scalui fmt: Stage-1 formatter not ported yet; set SCALUI_CANARY to the Stage-0 binary (cargo run -p scalui)"
-      ).flatMap(_ => IO.fail("fmt requires SCALUI_CANARY until Stage-1 pretty-printer lands"))
+      Fs.write(path, formatted).flatMap(_ =>
+        IO.println(str3("formatted ", path, "")).flatMap(_ => IO.pure(0))
+      )
   )
 
 def cmdWatch(projectDir: String): IO[Unit] =
