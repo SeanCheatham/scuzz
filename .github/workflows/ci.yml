@@ -82,12 +82,12 @@ jobs:
           test -f examples/nav/build/snapshot.png
           cargo run -p scalui -- test examples/nav
 
-      - name: Deterministic fuzz (bounded) + repro replay
+      - name: Deterministic fuzz (bounded) + repro replay (Stage-1 CLI)
         run: |
-          cargo run -p scalui -- fuzz --iters 16 examples/counter
-          cargo run -p scalui -- fuzz --iters 16 examples/todo
+          /tmp/stage1-scalui fuzz --iters 16 examples/counter
+          /tmp/stage1-scalui fuzz --iters 16 examples/todo
           rm -rf /tmp/scalui-fuzzbug
-          cargo run -p scalui -- new --ui --path /tmp scalui-fuzzbug
+          /tmp/stage1-scalui new --ui --path /tmp scalui-fuzzbug
           cat > /tmp/scalui-fuzzbug/src/Main.scala <<'EOF'
           @main def main: IO[Unit] =
             for {
@@ -100,11 +100,11 @@ jobs:
               _ <- Ui.run(root)
             } yield ()
           EOF
-          if cargo run -p scalui -- fuzz --iters 8 /tmp/scalui-fuzzbug; then
+          if /tmp/stage1-scalui fuzz --iters 8 /tmp/scalui-fuzzbug; then
             echo "fuzz should have found the failure" && exit 1
           fi
           test -f /tmp/scalui-fuzzbug/build/fuzz/repro.toml
-          if cargo run -p scalui -- fuzz /tmp/scalui-fuzzbug --replay /tmp/scalui-fuzzbug/build/fuzz/repro.toml; then
+          if /tmp/stage1-scalui fuzz --replay /tmp/scalui-fuzzbug/build/fuzz/repro.toml /tmp/scalui-fuzzbug; then
             echo "replay should have reproduced the failure" && exit 1
           fi
 
