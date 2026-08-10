@@ -55,7 +55,7 @@ libc `malloc`/`free` via `sz_alloc` / `sz_free`. No moving collector yet. Clear 
 
 ### Skia
 
-No vendored Skia tree. Thin `sk_capi` + CPU `sk_sw` for Headless CI; optional prebuilts via `SCUZZ_SKIA_URL`. Impeller deferred (GPU presenters later; must not change `Ui` session or logical goldens). Callers depend only on `sk_capi.h`.
+No vendored Skia tree. Thin `sk_capi` + CPU `sk_sw` for Headless CI (what `crates/ffi-skia` links today). `scripts/fetch_skia.sh` can drop prebuilts under `third_party/skia/prebuilt/` when `SCUZZ_SKIA_URL` is set; wiring those into the Makefile is deferred. Impeller deferred (GPU presenters later; must not change `Ui` session or logical goldens). Callers depend only on `sk_capi.h`.
 
 ### IO errors
 
@@ -141,7 +141,7 @@ scuzz fuzz --exhaust --depth N      # bounded systematic search (all scripts of 
 scuzz fuzz --replay repro.toml      # deterministic replay of a recorded failure
 ```
 
-Scripts are a line protocol — `tap <n>` / `text <s>` / `pump <k>` — played by the runtime (`SCUZZ_UI_SCRIPT`) across `pump` boundaries; on exit it writes the signal store + a11y view dump (`SCUZZ_FUZZ_DUMP`). The CLI probes the a11y dump for the typed event surface (buttons in scan order, text fields), generates seeded scripts (Lehmer/MINSTD LCG — the kernel dialect has no bitwise ops) or enumerates a finite alphabet under `--exhaust` (`tap <i>` for each button, `text` / `text a` when a field exists, `pump 1`), and writes `repro.toml` (seed + events) on failure. Exhaustive mode walks lengths `1..N` in stable order so shorter counterexamples win. `fuzz` lives in the Stage-1 CLI; replay plays recorded events verbatim, so it is independent of the generator. Oracles: panic/`SzError` exit → structural dumps (PNG last). Requires stable tap order, `pump` as time, no hidden nondeterminism.
+Scripts are a line protocol — `tap <n>` / `text <s>` / `pump <k>` — played by the runtime (`SCUZZ_UI_SCRIPT`) across `pump` boundaries; on exit it writes the signal store + a11y view dump (`SCUZZ_FUZZ_DUMP`). The CLI probes the a11y dump for the typed event surface (buttons in scan order, text fields), generates seeded scripts (Lehmer/MINSTD LCG — the kernel dialect has no bitwise ops) or enumerates a finite alphabet under `--exhaust` (`tap <i>` for each button, `text` / `text a` when a field exists, `pump 1`), and writes `repro.toml` (seed + events) on failure. Exhaustive mode walks lengths `1..N` in stable order so shorter counterexamples win. `fuzz` lives in the Stage-1/2 CLI (not Stage 0); replay plays recorded events verbatim, so it is independent of the generator. Oracles: panic/`SzError` exit → structural dumps (PNG last). Requires stable tap order, `pump` as time, no hidden nondeterminism.
 
 ### Layout model
 
@@ -149,7 +149,7 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ### UI testing
 
-Primary goldens are **structural** (signal store + a11y view dump). PNG pixels are optional (`scuzz test --pixels`). IO packages (no `[ui]`): `scuzz test` is compile + `SCUZZ_TESTRT=1` exit-0 smoke. Agent-facing: `scuzz check` (typecheck only) and `--message-format=json`.
+Primary goldens are **structural** (signal store + a11y view dump). PNG pixels are optional (`scuzz test --pixels`). IO packages (no `[ui]`): `scuzz test` is compile + `SCUZZ_TESTRT=1` exit-0 smoke. Tooling: `scuzz check` (typecheck only) and `--message-format=json`.
 
 ## Open work
 
@@ -166,7 +166,7 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-onl
 | Effects too weak or too heavy | Builtin IO; pure `View`; `Ui` at session boundary |
 | Hidden nondeterminism | Closed impurity + TestRuntime |
 | “Almost Scala” confusion | Explicit non-goals; language direction above; [guide.md](guide.md) |
-| Skia weight | `sk_sw` + optional prebuilts |
+| Skia weight | in-tree `sk_sw`; prebuilt fetch reserved |
 | Window-only features | Headless peer rule |
 | Diluting Flutter-shaped focus | UI stays the v0 bar; IO is substrate + first-class packaging without a fourth peer |
 | GC vs frame budget | `pump` boundary; measure |

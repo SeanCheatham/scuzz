@@ -15,7 +15,7 @@
 - Prebuilt Stage-2 release tree (`scripts/package_release.sh` → `dist/scuzz-<triple>.tar.gz`); `install.sh` installs under `PREFIX/share/scuzz`
 - Deterministic fuzz: `scuzz fuzz` (seeded `--iters`, bounded `--exhaust --depth N`, `--replay repro.toml`) on TestRuntime + Headless
 - Structural goldens (signal store + a11y dump); PNG optional via `scuzz test --pixels`; IO packages use TESTRT exit-0 smoke
-- Skia linked for `[ui]` packages only (IO-only link is Skia-free); prebuilts via `SCUZZ_SKIA_URL` (default: in-tree `sk_sw`)
+- Skia linked for `[ui]` packages only (IO-only link is Skia-free); in-tree `sk_sw` today (`SCUZZ_SKIA_URL` fetch is reserved)
 - Impeller deferred (see `docs/vision.md`)
 
 App authors: [docs/guide.md](docs/guide.md).
@@ -104,6 +104,7 @@ cargo run -p scuzz -- run --headless examples/live
 | Example | What it proves |
 | --- | --- |
 | `examples/hello` | `IO.println` |
+| `examples/cli` | `Sys.args` + `Sys.readLine` |
 | `examples/hello_ui` | Headless `Ui` + goldens |
 | `examples/counter` | `Signal`/`View`/`Ui.run` + goldens |
 | `examples/nav` | Lambda taps + `showWhen` + stay-open `Ui.run` + goldens |
@@ -126,7 +127,7 @@ crates/ffi-skia/          sk_capi + CPU software backend
 crates/embedder-desktop/  Linux X11 / macOS Cocoa present for Window peer
 crates/embedder-mobile/   Mobile host shell + Android/iOS packaging templates
 compiler-scuzz/          Stage 1/2 Scuzz Lang compiler + CLI (release path)
-scripts/                  selfhost.sh, install.sh, package_release.sh, fetch_skia.sh, run_goldens.sh
+scripts/                  selfhost.sh, install.sh, package_release.sh, package_project.sh, fetch_skia.sh, run_goldens.sh
 examples/                 samples gallery (table above)
 third_party/skia/         prebuilt fetch notes
 ```

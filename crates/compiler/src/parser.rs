@@ -1028,7 +1028,7 @@ enum Color:
 
     #[test]
     fn parse_for_rejects_statement_val_ident() {
-        // `val` is no longer a keyword; `val x = 1` parses as binder name `val`.
+        // `val` is an ordinary binder name in the kernel dialect.
         let src = r#"
 @main def main: IO[Unit] =
   for {

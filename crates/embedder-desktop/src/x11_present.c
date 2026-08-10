@@ -12,6 +12,7 @@ static Window g_win;
 static GC g_gc;
 static XImage *g_img;
 static char *g_img_data;
+static Atom g_wm_delete;
 static int g_w;
 static int g_h;
 static int g_ready;
@@ -29,7 +30,11 @@ int sz_embedder_available(void) {
 }
 
 int sz_embedder_alive(void) {
-  return !g_user_quit && sz_embedder_available();
+  if (g_user_quit)
+    return 0;
+  if (g_ready)
+    return 1;
+  return sz_embedder_available();
 }
 
 static int ensure_window(const char *title, int width, int height) {
@@ -51,6 +56,8 @@ static int ensure_window(const char *title, int width, int height) {
                               BlackPixel(g_dpy, screen),
                               WhitePixel(g_dpy, screen));
   XStoreName(g_dpy, g_win, title ? title : "Scuzz Lang");
+  g_wm_delete = XInternAtom(g_dpy, "WM_DELETE_WINDOW", False);
+  XSetWMProtocols(g_dpy, g_win, &g_wm_delete, 1);
   XSelectInput(g_dpy, g_win, ExposureMask | StructureNotifyMask | KeyPressMask);
   XMapWindow(g_dpy, g_win);
   g_gc = DefaultGC(g_dpy, screen);
@@ -118,7 +125,13 @@ int sz_embedder_present(const char *title, int width, int height,
   while (XPending(g_dpy)) {
     XEvent ev;
     XNextEvent(g_dpy, &ev);
-    if (ev.type == ClientMessage || ev.type == DestroyNotify) {
+    if (ev.type == DestroyNotify) {
+      g_user_quit = 1;
+      sz_embedder_shutdown();
+      return 1;
+    }
+    if (ev.type == ClientMessage &&
+        (Atom)ev.xclient.data.l[0] == g_wm_delete) {
       g_user_quit = 1;
       sz_embedder_shutdown();
       return 1;

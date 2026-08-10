@@ -298,8 +298,6 @@ static void *thunk_run_view(void *env) {
 
   if (getenv("SCUZZ_UI_TAP")) {
     const char *seed = getenv("SCUZZ_UI_TEXT");
-    if (!seed || !seed[0])
-      seed = getenv("SCUZZ_TODO_SEED");
     if (seed && seed[0]) {
       SzInputEvent ev;
       memset(&ev, 0, sizeof(ev));

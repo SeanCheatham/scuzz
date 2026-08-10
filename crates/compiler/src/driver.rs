@@ -21,18 +21,6 @@ pub struct CompileOptions {
     pub incremental: bool,
 }
 
-impl CompileOptions {
-    pub fn new(project_dir: PathBuf, runtime_dir: PathBuf, out_dir: PathBuf, clang: String) -> Self {
-        Self {
-            project_dir,
-            runtime_dir,
-            out_dir,
-            clang,
-            incremental: true,
-        }
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct CompileOutput {
     pub executable: PathBuf,
@@ -259,7 +247,7 @@ fn build_runtime(runtime_dir: &Path, clang: &str) -> Result<()> {
     Ok(())
 }
 
-/// Resolve repo root from an optional override or by walking parents looking for crates/runtime.
+/// Walk parents from `start` looking for `crates/runtime` (with `include/scuzz_rt.h`).
 pub fn find_runtime_dir(start: &Path) -> Result<PathBuf> {
     let mut cur = start.to_path_buf();
     loop {
@@ -273,14 +261,13 @@ pub fn find_runtime_dir(start: &Path) -> Result<PathBuf> {
     }
 }
 
-/// Poll sources until change or timeout; returns true if a change was observed.
+/// Poll sources + `scuzz.toml` until change or timeout; returns true if a change was observed.
 pub fn wait_for_source_change(project_dir: &Path, idle_ms: u64) -> Result<bool> {
-    let sources = find_sources(project_dir)?;
-    let last = latest_mtime(&sources)?;
+    let last = project_mtime(project_dir)?;
     let start = SystemTime::now();
     loop {
         std::thread::sleep(std::time::Duration::from_millis(200));
-        let now = latest_mtime(&sources)?;
+        let now = project_mtime(project_dir)?;
         if now > last {
             return Ok(true);
         }
@@ -288,6 +275,15 @@ pub fn wait_for_source_change(project_dir: &Path, idle_ms: u64) -> Result<bool> 
             return Ok(false);
         }
     }
+}
+
+fn project_mtime(project_dir: &Path) -> Result<SystemTime> {
+    let mut paths = find_sources(project_dir)?;
+    let manifest = project_dir.join("scuzz.toml");
+    if manifest.is_file() {
+        paths.push(manifest);
+    }
+    latest_mtime(&paths)
 }
 
 fn latest_mtime(paths: &[PathBuf]) -> Result<SystemTime> {

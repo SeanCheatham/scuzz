@@ -64,7 +64,7 @@ pub enum Expr {
     IoFail(Box<Expr>),
     /// `IO.pure(expr)`
     IoPure(Box<Expr>),
-    /// `Effects.runKit`
+    /// `Effects.runKit()`
     EffectsRunKit,
     /// `left.flatMap(param => right)` — param None means `_`
     FlatMap {

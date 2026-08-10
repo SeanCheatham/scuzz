@@ -472,7 +472,7 @@ fn apply_ui_env(
         cmd.env("SCUZZ_UI_SCALE", ui.headless_scale.to_string());
     } else {
         cmd.env("SCUZZ_UI_WIDTH", "200");
-        cmd.env("SCUZZ_UI_HEIGHT", "100");
+        cmd.env("SCUZZ_UI_HEIGHT", "120");
         cmd.env("SCUZZ_UI_SCALE", "1");
     }
     if tap {
@@ -702,7 +702,12 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
         std::fs::create_dir_all(&dest)?;
         match t {
             "host" => {
-                write_host_package(&dest, &compiled.executable, &manifest.package.name)?;
+                write_host_package(
+                    &dest,
+                    &compiled.executable,
+                    &manifest.package.name,
+                    bundle_id,
+                )?;
             }
             "android" => {
                 copy_dir(&mobile_dir.join("shells/android"), &dest)?;
@@ -722,7 +727,7 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
     Ok(ExitCode::SUCCESS)
 }
 
-fn write_host_package(dest: &Path, exe: &Path, name: &str) -> Result<()> {
+fn write_host_package(dest: &Path, exe: &Path, name: &str, bundle_id: &str) -> Result<()> {
     let run_sh = dest.join("run.sh");
     let exe_abs = if exe.is_absolute() {
         exe.to_path_buf()
@@ -749,7 +754,7 @@ exec "{exe}" "$@"
         perms.set_mode(0o755);
         std::fs::set_permissions(&run_sh, perms)?;
     }
-    write_package_meta(dest, name, "host", "dev.scuzz.app")?;
+    write_package_meta(dest, name, "host", bundle_id)?;
     std::fs::write(
         dest.join("README.md"),
         format!(

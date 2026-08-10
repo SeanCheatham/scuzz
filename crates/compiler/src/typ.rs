@@ -76,8 +76,14 @@ fn infer(
             }
             Ok(Type::String)
         },
-        Expr::IoPrintln(e) | Expr::IoSleep(e) | Expr::IoFail(e) => {
-            let _ = infer(e, enums, funs, env)?;
+        Expr::IoPrintln(e) | Expr::IoFail(e) => {
+            let t = infer(e, enums, funs, env)?;
+            expect_ty(&t, &Type::String)?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
+        Expr::IoSleep(e) => {
+            let t = infer(e, enums, funs, env)?;
+            expect_ty(&t, &Type::Int)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         Expr::IoDelayUnit | Expr::EffectsRunKit => Ok(Type::Io(Box::new(Type::Unit))),
