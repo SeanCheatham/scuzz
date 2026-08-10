@@ -54,8 +54,8 @@ Lists: keep a `Signal.list`, render with `View.list` + `View.setTexts` / `View.c
 | Example | Shows |
 | --- | --- |
 | `examples/counter` | Signal + button lambda + `Ui.run` |
-| `examples/todo` | `Signal.list`, `View.setTexts` / `clearChildren`, Fs load/save |
+| `examples/todo` | `Signal.list`, `View.setTexts` / `clearChildren`, Rename via `setAt`, Fs load/save |
 | `examples/nav` | `showWhen`, multi-page |
 | `examples/impurity` | Clock / Random / Fs / Net kit |
 
-Then skim [plan.md](plan.md) for remaining gaps; ADRs only when changing GC, Skia, effects, or UI boundaries.
+Then skim [plan.md](plan.md) for remaining gaps; edit [vision.md](vision.md) when changing GC, Skia, effects, UI boundaries, or language direction.
