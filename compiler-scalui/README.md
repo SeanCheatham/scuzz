@@ -13,4 +13,4 @@ cargo run -p scalui -- build --full compiler-scalui
 ./scripts/selfhost.sh
 ```
 
-Stage-1 CLI: `scalui (build|run|test|check|fuzz|fmt|watch|new|package) [args]` (writes `project/build/`). `fuzz` lives in Stage 1 (not Stage 0). Stage-0 Rust remains the bootstrap host.
+Stage-1 CLI: `scalui (build|run|test|check|fuzz|fmt|watch|new|package) [args]` (writes `project/build/`). `fuzz` lives in Stage 1 (not Stage 0): seeded `--iters`, bounded `--exhaust --depth N`, and `--replay`. Stage-0 Rust remains the bootstrap host.

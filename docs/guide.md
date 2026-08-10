@@ -52,6 +52,7 @@ Lists: keep a `Signal.list`, render with `View.each(items)` (framework rebuilds 
 
 - `scalui test` is Headless **structural** goldens (signal store + a11y dump); PNG optional via `--pixels`
 - `scalui check` typechecks without codegen; `--message-format=json` for agents/editors
+- `scalui fuzz --iters N` / `scalui fuzz --exhaust --depth N` on TestRuntime + Headless; `--replay repro.toml` on failure
 - Deterministic fakes: `TestRuntime` / `SCALUI_TESTRT=1` for clock/random/FS/network in app binaries
 - Put non-determinism behind blessed `IO`; keep View construction pure
 
