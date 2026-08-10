@@ -291,6 +291,17 @@ impl Parser {
         Ok(expr)
     }
 
+    /// `if` then/else: `val`-led block (same bindings as lambda bodies), or a
+    /// single expression. Starting with `val` is required for multi-binding
+    /// branches so mid-block `val x = if … else e` does not steal following vals.
+    fn parse_if_branch(&mut self) -> Result<Expr, ParseError> {
+        if matches!(self.peek(), Token::Val) {
+            self.parse_block()
+        } else {
+            self.parse_expr()
+        }
+    }
+
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
         self.parse_or()
     }
@@ -535,9 +546,12 @@ impl Parser {
                 self.expect(&Token::LParen)?;
                 let cond = self.parse_expr()?;
                 self.expect(&Token::RParen)?;
-                let then_branch = self.parse_expr()?;
+                // Branches: full blocks when led by `val` (multi-binding else);
+                // otherwise a single expr so `val x = if … else e` + following
+                // `val` is not greedily absorbed into the branch.
+                let then_branch = self.parse_if_branch()?;
                 self.expect(&Token::Else)?;
-                let else_branch = self.parse_expr()?;
+                let else_branch = self.parse_if_branch()?;
                 Ok(Expr::If {
                     cond: Box::new(cond),
                     then_branch: Box::new(then_branch),
@@ -882,6 +896,55 @@ def add1(n: Int): Int = n + 1
         let p = parse(src).unwrap();
         assert_eq!(p.defs.len(), 1);
         assert!(matches!(p.main.body, Expr::If { .. }));
+    }
+
+    #[test]
+    fn parse_if_val_led_else_block() {
+        let src = r#"
+@main def main: IO[Unit] =
+  val n = 1
+  if (n == 0) ()
+  else
+    val a = IO.println("a")
+    val b = IO.println("b")
+    IO.println("c")
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body {
+            Expr::Let { body, .. } => match body.as_ref() {
+                Expr::If { else_branch, .. } => match else_branch.as_ref() {
+                    Expr::Let { name, body, .. } => {
+                        assert_eq!(name, "a");
+                        assert!(matches!(body.as_ref(), Expr::Let { name, .. } if name == "b"));
+                    }
+                    other => panic!("expected let-else, got {other:?}"),
+                },
+                other => panic!("expected if with let-else, got {other:?}"),
+            },
+            other => panic!("expected let, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_mid_block_if_does_not_steal_following_val() {
+        let src = r#"
+@main def main: IO[Unit] =
+  val path = if (1 == 0) "a" else "b"
+  val draft = "x"
+  IO.println(draft)
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body {
+            Expr::Let { name, value, body } => {
+                assert_eq!(name, "path");
+                assert!(matches!(value.as_ref(), Expr::If { .. }));
+                match body.as_ref() {
+                    Expr::Let { name: draft, .. } => assert_eq!(draft, "draft"),
+                    other => panic!("expected draft let, got {other:?}"),
+                }
+            }
+            other => panic!("expected path if + draft let, got {other:?}"),
+        }
     }
 
     #[test]

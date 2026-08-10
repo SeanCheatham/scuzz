@@ -4,13 +4,12 @@
 
 | Doc | Purpose |
 | --- | --- |
-| [`docs/vision.md`](docs/vision.md) | Product thesis, decisions, language direction, risks |
-| [`docs/plan.md`](docs/plan.md) | Ordered next steps with done-when gates |
+| [`docs/vision.md`](docs/vision.md) | Product thesis, decisions, language direction, roadmap, risks |
 | [`docs/compatibility.md`](docs/compatibility.md) | Keep/cut vs Scala & Typelevel; platforms; self-host stages |
 | [`docs/schemas/scalui-toml.md`](docs/schemas/scalui-toml.md) | Package manifest schema draft |
 | [`README.md`](README.md) | Quick start and current status only |
 
-No ADR folder and no parallel “exploratory” notes. If a decision changes, edit `vision.md`. Roadmap detail that is still open work goes in `plan.md`.
+No ADR folder, no `plan.md`, and no parallel “exploratory” notes. If a decision or next-step ordering changes, edit `vision.md`.
 
 ## Keep the codebase lightweight
 
@@ -27,6 +26,6 @@ ScalUI is already a language + runtime + UI + tooling bet. **Ruthless subset and
 
 ## Default workflow
 
-1. Check `docs/plan.md` for current priorities; `docs/vision.md` for intent and locks.
+1. Check `docs/vision.md` for intent, locks, and current direction.
 2. Implement the smallest slice that proves the behavior (test or `examples/` when applicable).
-3. Update the one doc that owns the decision—usually `vision.md` or `plan.md`.
+3. Update `vision.md` (or `compatibility.md` / `guide.md` when that file owns the topic).

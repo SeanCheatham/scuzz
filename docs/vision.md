@@ -2,9 +2,9 @@
 
 ScalUI is a **Flutter-shaped product** with a **Scala-inspired language**, not a Scala 3 / Scala Native / Maven citizen.
 
-One doc for product intent and design locks. Next work lives in [`plan.md`](plan.md). Keep/cut tables live in [`compatibility.md`](compatibility.md). Manifest schema: [`schemas/scalui-toml.md`](schemas/scalui-toml.md).
+One doc for product intent, design locks, language direction, and open roadmap. Keep/cut tables live in [`compatibility.md`](compatibility.md). Manifest schema: [`schemas/scalui-toml.md`](schemas/scalui-toml.md). App path: [`guide.md`](guide.md).
 
-Edit this file when a decision changes. No separate “ADR” process — just update the section.
+Edit this file when a decision or next-step ordering changes. No separate “ADR” or `plan.md` — just update the section.
 
 ## Thesis
 
@@ -64,16 +64,18 @@ One failure channel: `SuError` (message + optional code) on `IO`. Ops: `flatMap`
 | **`View`** | Widget tree | Sync/pure `build` |
 | **`Ui` / `UiSession`** | `mount` / `pump` / `inject` / `snapshot` | Effectful (`UiRuntime`) |
 
-Headless is a **peer** of Window/Mobile, not a test-only shim. Frame boundary is `pump`. World effects stay blessed `IO`; bridge into signals via `su_ui_bridge_post_*`. No UI feature without a Headless path. Taps: `View.button(label, _ => …)` first-class lambdas (no specialized tap builtins). Prefer List + Signal over one-off C controllers.
+Headless is a **peer** of Window/Mobile, not a test-only shim. Frame boundary is `pump`. World effects stay blessed `IO`; bridge into signals via `su_ui_bridge_post_*`. No UI feature without a Headless path. Taps: `View.button(label, _ => …)` first-class lambdas (no specialized tap builtins). Prefer List + Signal over one-off C controllers. List rebuild helpers: `View.clearChildren` / `View.setTexts` (no Todo-shaped C controllers).
 
 ### Kernel dialect (current)
 
-Subset used by compiler sources and bootstrap examples. New features land in Stage 0 **before** `compiler-scalui/` depends on them. Dual-boot gate: `scripts/selfhost.sh`.
+Subset used by compiler sources and bootstrap examples. New features land in Stage 0 **before** `compiler-scalui/` depends on them. Dual-boot gate: `scripts/selfhost.sh` (smoke `examples/hello` + `examples/adt`).
 
-- Optional `package`; top-level `def` / `@main def …: IO[Unit]`; enums (Stage 1 sources avoid enums)
+- Optional `package`; top-level `def` / `@main def …: IO[Unit]`; nullary enums (Stage 1 sources avoid enums; Stage 1/2 emit `su_adt_new` / `su_adt_tag` + `match` `switch`)
 - Local `val` in blocks (today); `if` / `match`; literals incl. list `[a,b,c]` and `s"…"`
+- Interim: an `if` branch that starts with `val` parses as a block (unblocks Todo-shaped taps). Not the long-term dialect — see [Language direction](#language-direction).
+- Mid-block `val x = if … else e` stays a single expression so following vals are not stolen.
 - Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
-- Builtins: `Str.*`, `List.*`, Fs/Sys/Clock/Random/Net, `Signal.*`, `View.*`, `Ui.run`, Theme/Color
+- Builtins: `Str.*`, `List.*`, Fs/Sys/Clock/Random/Net, `Signal.*`, `View.*` (incl. `clearChildren` / `setTexts`), `Ui.run`, Theme/Color
 - `IO` kit + `.flatMap` / `.handleErrorWith` / `.attempt`; lambdas `_ =>` / `name =>` for taps
 - No macros, no implicits, no HKT beyond `IO`, no null
 
@@ -129,7 +131,7 @@ Oracles: panic/`SuError` → invariants → structural dumps (PNG last). Exhaust
 
 ## Roadmap
 
-Phases 0–6 landed. Ordered next steps: [`plan.md`](plan.md). Vertical slices over breadth; no Window-only UI features.
+Phases 0–6 landed. Open direction: [Language direction](#language-direction) above (expr/`for` cutover next). App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
 
 ## Risks
 
@@ -139,7 +141,7 @@ Phases 0–6 landed. Ordered next steps: [`plan.md`](plan.md). Vertical slices o
 | Self-host / dialect drift | Kernel section above; port compiler early; Stage 0/1/2 CI |
 | Effects too weak or too heavy | Builtin IO; pure `View`; `Ui` at session boundary |
 | Hidden nondeterminism | Closed impurity + TestRuntime |
-| “Almost Scala” confusion | Explicit non-goals; language direction above |
+| “Almost Scala” confusion | Explicit non-goals; language direction above; [guide.md](guide.md) |
 | Skia weight | `sk_sw` + optional prebuilts |
 | Window-only features | Headless peer rule |
 | GC vs frame budget | `pump` boundary; measure |

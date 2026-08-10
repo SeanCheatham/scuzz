@@ -290,6 +290,21 @@ void su_view_free(SuView *view) {
   su_free(view);
 }
 
+void su_view_clear_children(SuView *parent) {
+  int i;
+  if (!parent)
+    return;
+  if (parent->kind != SU_VIEW_COLUMN && parent->kind != SU_VIEW_ROW &&
+      parent->kind != SU_VIEW_LIST && parent->kind != SU_VIEW_SCROLL)
+    su_panic("su_view_clear_children: parent cannot have children");
+  for (i = 0; i < parent->child_count; i++) {
+    parent->children[i]->parent = NULL;
+    su_view_free(parent->children[i]);
+  }
+  parent->child_count = 0;
+  parent->scroll_child = NULL;
+}
+
 static float text_width(const char *s, float font_px) {
   size_t n = s ? strlen(s) : 0;
   return (float)n * font_px;
