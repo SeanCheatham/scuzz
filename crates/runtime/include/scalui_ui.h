@@ -108,6 +108,10 @@ void su_signal_list_set(SuSignalList *s, SuList *v);
 SuList *su_signal_list_get(const SuSignalList *s);
 void su_signal_list_free(SuSignalList *s);
 
+/* Signal store dump: one "kind[id] = value" line per live signal, in creation
+   order (fuzz oracle; caller frees SuString). */
+SuString *su_signal_dump(void);
+
 /* --- declarative View tree ----------------------------------------------- */
 
 typedef enum SuViewKind {
