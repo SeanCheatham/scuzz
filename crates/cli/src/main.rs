@@ -216,14 +216,15 @@ bundle_id = "dev.scalui.{package_name}"
                 std::fs::write(
                     dir.join("src/Main.scala"),
                     r#"@main def main: IO[Unit] =
-  val count = Signal.int(0)
-  val root = View.column()
-  val a = View.addChild(root, View.text("Counter"))
-  val b = View.addChild(root, View.textSignal(count, "count = "))
-  val row = View.row()
-  val c = View.addChild(row, View.button("+1", _ => Signal.set(count, Signal.get(count) + 1)))
-  val d = View.addChild(root, row)
-  Ui.run(root)
+  for {
+    count = Signal.int(0)
+    root = View.column(
+      View.text("Counter"),
+      View.textSignal(count, "count = "),
+      View.row(View.button("+1", _ => Signal.set(count, Signal.get(count) + 1)))
+    )
+    _ <- Ui.run(root)
+  } yield ()
 "#,
                 )?;
                 eprintln!(

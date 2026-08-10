@@ -2,6 +2,7 @@
 //! Supports initialize, shutdown, textDocument/didOpen|didChange, hover, publishDiagnostics.
 
 use crate::lexer::lex;
+use crate::lower::lower_program;
 use crate::parser::parse;
 use crate::typ::typecheck;
 use serde_json::{json, Value};
@@ -104,6 +105,7 @@ fn publish_diagnostics(out: &mut impl Write, uri: &str, text: &str) -> anyhow::R
         Ok(_) => match parse(text) {
             Ok(prog) => {
                 if !prog.main.name.is_empty() {
+                    let prog = lower_program(prog);
                     if let Err(e) = typecheck(&prog) {
                         diags.push(json!({
                             "range": {

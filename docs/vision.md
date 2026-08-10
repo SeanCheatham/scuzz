@@ -71,26 +71,26 @@ Headless is a **peer** of Window/Mobile, not a test-only shim. Frame boundary is
 Subset used by compiler sources and bootstrap examples. New features land in Stage 0 **before** `compiler-scalui/` depends on them. Dual-boot gate: `scripts/selfhost.sh` (smoke `examples/hello` + `examples/adt`).
 
 - Optional `package`; top-level `def` / `@main def …: IO[Unit]`; nullary enums (Stage 1 sources avoid enums; Stage 1/2 emit `su_adt_new` / `su_adt_tag` + `match` `switch`)
-- Local `val` in blocks (today); `if` / `match`; literals incl. list `[a,b,c]` and `s"…"`
-- Interim: an `if` branch that starts with `val` parses as a block (unblocks Todo-shaped taps). Not the long-term dialect — see [Language direction](#language-direction).
-- Mid-block `val x = if … else e` stays a single expression so following vals are not stolen.
+- **`for { binders } yield e`** as primary binder: `x = e` (pure), `x <- e` (effect; yield wraps with `IO.pure` when any `<-` is present). Nested `for` in `if` / lambda arms when multi-bind is needed.
+- No `val` / statement blocks / `var` — expression dialect only.
+- `if` / `match`; literals incl. list `[a,b,c]` and `s"…"`
 - Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
-- Builtins: `Str.*`, `List.*`, Fs/Sys/Clock/Random/Net, `Signal.*`, `View.*` (incl. `clearChildren` / `setTexts`), `Ui.run`, Theme/Color
+- Builtins: `Str.*`, `List.*`, Fs/Sys/Clock/Random/Net, `Signal.*`, `View.*` (incl. nested `View.column`/`row` children, `clearChildren` / `setTexts`), `Ui.run`, Theme/Color
 - `IO` kit + `.flatMap` / `.handleErrorWith` / `.attempt`; lambdas `_ =>` / `name =>` for taps
 - No macros, no implicits, no HKT beyond `IO`, no null
 
 ## Language direction
 
-Aim (forwards-only when implemented): diverge further from “almost Scala” toward an expression-only, effect-sequenced dialect — dense, deterministic, verification-friendly without becoming a proof assistant.
+Aim (forwards-only): expression-only, effect-sequenced dialect — dense, deterministic, verification-friendly without becoming a proof assistant. **`for` is the kernel binder**; `val`/statement blocks are removed.
 
 ### Expr dialect
 
-- **`for` as primary binder**: `x = e` (pure alias), `x <- e` (effect), optional guards
-- **No statement blocks**, no `var`, drop the `val` keyword once `=` binders exist
+- **`for` as primary binder**: `x = e` (pure alias), `x <- e` (effect)
+- **No statement blocks**, no `var`, no `val`
 - Branch arms stay expressions; nested `for` when an arm needs names — don’t grow a second block grammar
-- Surface sugar elaborates to a small core (bindings, `match`, ADTs, `IO`); self-host and checkers target the core
+- Surface sugar elaborates to a small core (`Let`, `FlatMap`, `match`, ADTs, `IO`); self-host and checkers target the core
 
-Illustrative (not today’s kernel):
+App-shaped Counter (today’s kernel):
 
 ```scala
 @main def main: IO[Unit] =
@@ -99,7 +99,7 @@ Illustrative (not today’s kernel):
     root  = View.column(
               View.text("Counter"),
               View.textSignal(count, "count = "),
-              View.row(View.button("+1", _ => Signal.update(count, _ + 1)))
+              View.row(View.button("+1", _ => Signal.set(count, Signal.get(count) + 1)))
             )
     _    <- Ui.run(root)
   } yield ()
@@ -107,7 +107,7 @@ Illustrative (not today’s kernel):
 
 ### Density
 
-Clear-dense, not cryptic-dense: nested declarative `View`s, inference, single-expr forms, short update verbs, enums + match. Avoid implicits, deep HKT, and “everything is `IO`.” Counter/Todo should shrink once Views are nested expressions.
+Clear-dense, not cryptic-dense: nested declarative `View`s (`View.column(child, …)` / `View.row(…)`), inference, single-expr forms, short update verbs, enums + match. Avoid implicits, deep HKT, and “everything is `IO`.”
 
 ### Verification posture
 
@@ -131,7 +131,7 @@ Oracles: panic/`SuError` → invariants → structural dumps (PNG last). Exhaust
 
 ## Roadmap
 
-Phases 0–6 landed. Open direction: [Language direction](#language-direction) above (expr/`for` cutover next). App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
+Phases 0–6 landed. **`for` cutover done** (Stage 0/1, Counter/Todo/nav, bootstrap off `val`). Open direction: `scalui fuzz` / v1 self-host polish. App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
 
 ## Risks
 
