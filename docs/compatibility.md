@@ -1,19 +1,20 @@
 # Compatibility matrix
 
-ScalUI deliberately diverges from the Scala Center / Typelevel / JVM ecosystems.
+What we keep vs cut. Product locks and language direction: [`vision.md`](vision.md).
 
 ## Language
 
-| Feature | v0 stance |
+| Feature | Stance |
 | --- | --- |
-| Scala-like vals/defs, case classes / ADTs, pattern matching | Keep |
+| Scala-like defs, ADTs, pattern matching | Keep |
+| Local `val` / blocks | Keep for now; direction is `for` with `=` / `<-` and no `val`/`var` ([vision](vision.md#language-direction)) |
 | Traits-as-interfaces, `Option`/`Either`-style enums | Keep |
 | Local type inference, generics | Keep (monomorphize early) |
-| Higher-kinded types | Only where effects need them |
-| Immutability-by-default + explicit `var` | Keep |
+| Higher-kinded types | Only where effects need them (`IO`) |
+| `var` | Cut directionally; UI state via `Signal` / blessed cells |
 | Built-in `IO` / fibers / `Resource` | Keep (blessed) |
 | Null | Null-free surface; explicit null only at FFI |
-| Full Scala 3 metaprogramming / given-using heavy | Defer / cut |
+| Scala 3 metaprogramming / given-using | Cut |
 | Implicit conversions | Cut |
 | Java interop / Scala.js / JVM backends | Cut |
 | cats / cats-effect library compatibility | Cut |
@@ -25,26 +26,26 @@ ScalUI deliberately diverges from the Scala Center / Typelevel / JVM ecosystems.
 | Binary format | Native ELF/Mach-O/PE via LLVM | JVM classfiles / JARs |
 | Dependencies | `scalui.toml` path/git/versioned artifacts we host | Maven Central / Ivy |
 | Effects | Builtin `IO` / `Resource` / concurrent kit + Clock/Random/Fs/Net/Sys | cats-effect runtime, ZIO, Future-as-default |
-| Test interpreters | `TestRuntime` fakes (clock/RNG/mem FS/stub net); `SCALUI_TESTRT=1` | Wall-clock-only test harnesses; ad-hoc FFI mocks |
-| UI | ScalUI `View` + `Ui` + Skia (`sk_capi`; Impeller deferred) | Swing, JavaFX, Compose Multiplatform, Flutter widgets |
+| Test interpreters | TestRuntime fakes; `SCALUI_TESTRT=1` | Wall-clock-only harnesses; ad-hoc FFI mocks |
+| UI | `View` + `Ui` + Skia (`sk_capi`; Impeller deferred) | Swing, JavaFX, Compose Multiplatform, Flutter widgets |
 
 ## Platforms (headless-first)
 
 | Target | Language/runtime/UI-core | Window / Mobile embedder | Notes |
 | --- | --- | --- | --- |
-| Linux headless (CI/cloud) | Yes | N/A | Default development & CI; golden PNGs + self-host + TestRuntime |
-| Linux desktop | Yes | X11 | `crates/embedder-desktop` blits Window peer frames when `DISPLAY` is set |
-| Linux mobile host shell | Yes | Host shell | `crates/embedder-mobile` + `SCALUI_MOBILE_SHELL=1` exercises Mobile peer |
-| macOS desktop | Yes | Cocoa blit | `crates/embedder-desktop` (`macos_present.m`); peer to Linux X11 |
+| Linux headless (CI/cloud) | Yes | N/A | Default CI; goldens + self-host + TestRuntime |
+| Linux desktop | Yes | X11 | `embedder-desktop` when `DISPLAY` is set |
+| Linux mobile host shell | Yes | Host shell | `embedder-mobile` + `SCALUI_MOBILE_SHELL=1` |
+| macOS desktop | Yes | Cocoa blit | peer to Linux X11 |
 | Windows desktop | Yes | Secondary | Later (same session protocol) |
-| iOS / Android | Shared app code | Packaging shells | `scalui package`; NDK/Xcode for device builds |
+| iOS / Android | Shared app code | Packaging shells | `scalui package`; NDK/Xcode for device |
 
 ## Self-host stages
 
 | Stage | Host | Role |
 | --- | --- | --- |
 | 0 | Rust | Bootstrap compiler + canary CLI (`crates/cli`) |
-| 1 | ScalUI (built by Stage 0) | `compiler-scalui/` — proves language can express the compiler |
-| 2 | ScalUI (built by Stage 1) | True self-host; release `scalui` binary |
+| 1 | ScalUI (built by Stage 0) | `compiler-scalui/` |
+| 2 | ScalUI (built by Stage 1) | True self-host; release `scalui` |
 
-Dual-boot gate: `scripts/selfhost.sh` (CI). Kernel dialect: `docs/adr/0005-kernel-dialect.md`.
+Dual-boot gate: `scripts/selfhost.sh`. Kernel surface: [vision.md](vision.md#kernel-dialect-current).

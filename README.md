@@ -13,7 +13,7 @@
 - Animation v0 + accessibility hooks (Headless-dumpable); theme polish tokens
 - Stage-1 CLI: `build|run|test|watch|new|package` (`compiler-scalui`); Stage-0 Rust is canary (`fmt` stays canary until pretty-printer is ported)
 - Samples gallery below; Skia prebuilts via `SCALUI_SKIA_URL` (default: in-tree `sk_sw`)
-- Impeller evaluated and deferred (ADR 0002)
+- Impeller evaluated and deferred (see `docs/vision.md`)
 
 See [docs/vision.md](docs/vision.md).
 
@@ -104,7 +104,7 @@ cargo run -p scalui -- run --headless examples/live
 ## Layout
 
 ```
-docs/                     vision, compatibility, ADRs, scalui.toml schema
+docs/                     vision, plan, compatibility, scalui.toml schema
 crates/compiler/          Stage-0 parser / typer / LLVM codegen (Rust canary)
 crates/cli/               Stage-0 scalui tool (canary)
 crates/runtime/           C runtime (IO kit, impurity, View/Ui — widgets live here for now)
@@ -117,7 +117,7 @@ examples/                 samples gallery (table above)
 third_party/skia/         prebuilt fetch notes
 ```
 
-Kernel dialect: [docs/adr/0005-kernel-dialect.md](docs/adr/0005-kernel-dialect.md).
+Kernel dialect: [docs/vision.md](docs/vision.md#kernel-dialect-current).
 
 ## License
 

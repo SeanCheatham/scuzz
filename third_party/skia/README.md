@@ -9,4 +9,4 @@ SCALUI_SKIA_URL=https://…/skia-linux-x64-cpu.tar.gz ./scripts/fetch_skia.sh
 
 Layout after fetch: `third_party/skia/prebuilt/<triple>/` (override with `SCALUI_SKIA_TRIPLE`).
 
-See ADR 0002 for prebuilts and deferred Impeller.
+See `docs/vision.md` for prebuilts and deferred Impeller.
