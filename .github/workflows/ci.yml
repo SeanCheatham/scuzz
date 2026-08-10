@@ -176,7 +176,9 @@ jobs:
 
       - name: Window peer + X11 embedder (xvfb)
         run: |
-          xvfb-run -a env SCALUI_UI_RUNTIME=window SCALUI_UI_WIDTH=200 SCALUI_UI_HEIGHT=100 \
+          # SCALUI_LIVE_FRAMES bounds stay-open Ui.run under Window (else hangs on xvfb).
+          timeout 30s xvfb-run -a env SCALUI_UI_RUNTIME=window SCALUI_LIVE_FRAMES=2 \
+            SCALUI_UI_WIDTH=200 SCALUI_UI_HEIGHT=100 \
             ./examples/hello_ui/build/hello_ui 2>&1 | tee /tmp/win.out
           grep -q "desktop embedder" /tmp/win.out
           grep -q "X11 window" /tmp/win.out

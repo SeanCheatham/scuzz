@@ -86,8 +86,9 @@ Window peer (blits via X11 on Linux or Cocoa on macOS):
 # macOS / Linux with a display
 env SCALUI_UI_RUNTIME=window cargo run -p scalui -- run examples/live
 
-# Linux CI / no display
-xvfb-run -a env SCALUI_UI_RUNTIME=window cargo run -p scalui -- run examples/hello_ui
+# Linux CI / no display (LIVE_FRAMES exits after N pumps; omit for interactive)
+xvfb-run -a env SCALUI_UI_RUNTIME=window SCALUI_LIVE_FRAMES=2 \
+  cargo run -p scalui -- run examples/hello_ui
 ```
 
 Stay-open Window demo (`examples/live`, default `[ui].default_runtime = "window"`):
