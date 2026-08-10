@@ -16,6 +16,7 @@ h=$(sed -n 's/.*headless_size = \[[0-9]*, *\([0-9]*\).*/\1/p' "$toml" | head -1)
 w="${w:-200}"
 h="${h:-120}"
 tap_n=$(sed -n 's/^tap_button = \([0-9][0-9]*\).*/\1/p' "$toml" | head -1)
+tap_text=$(sed -n 's/^tap_text = "\(.*\)"/\1/p' "$toml" | head -1)
 exe="$project/build/$name"
 [[ -x "$exe" ]] || { echo "missing executable $exe"; exit 1; }
 
@@ -31,11 +32,14 @@ run_snap() {
 }
 
 tap_env() {
+  local args=("SCALUI_UI_TAP=1")
   if [[ -n "${tap_n:-}" ]]; then
-    echo "SCALUI_UI_TAP=1" "SCALUI_UI_TAP_N=$tap_n"
-  else
-    echo "SCALUI_UI_TAP=1"
+    args+=("SCALUI_UI_TAP_N=$tap_n")
   fi
+  if [[ -n "${tap_text:-}" ]]; then
+    args+=("SCALUI_UI_TEXT=$tap_text")
+  fi
+  echo "${args[@]}"
 }
 
 seed_goldens() {

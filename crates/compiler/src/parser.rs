@@ -734,7 +734,7 @@ impl Parser {
                 if matches!(
                     name.as_str(),
                     "Str" | "List" | "Fs" | "Sys" | "Lexer" | "Clock" | "Random"
-                        | "Net" | "Impurity" | "Signal" | "View" | "Todo" | "Theme" | "Color"
+                        | "Net" | "Impurity" | "Signal" | "View" | "Theme"
                 ) =>
             {
                 self.bump();
@@ -776,6 +776,14 @@ impl Parser {
                 if matches!(self.peek(), Token::Dot) {
                     self.bump();
                     let case_name = self.expect_ident()?;
+                    // `Color.rgb(...)` is a module call; `Color.Red` is an ADT case.
+                    if matches!(self.peek(), Token::LParen) {
+                        let args = self.parse_args()?;
+                        return Ok(Expr::Call {
+                            callee: format!("{name}.{case_name}"),
+                            args,
+                        });
+                    }
                     Ok(Expr::AdtConstruct {
                         enum_name: name,
                         case_name,

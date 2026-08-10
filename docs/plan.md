@@ -1,49 +1,50 @@
 # ScalUI plan — next steps
 
-Post–Phase 6, the gates are greener than the product. The self-host script passes on Linux CI but segfaults on macOS, the CLI surface outruns its implementations, and the language still reads like a handle-passing DSL. This plan orders the work so credibility gaps close before new breadth.
+Phases 0–6 and the post–Phase-6 credibility slice (self-host gate, dialect ergonomics, honest CLI, TOML parsing, List literals + language Todo) are landed. v0 app path works; Stage-0 remains a canary. This plan orders the next gaps so language and product credibility keep ahead of platform breadth.
 
 Ordered by priority; each workstream lists its done-when gate.
 
-## 1. Fix the self-host gate
+## 1. Port `scalui fmt` to Stage 1
 
-ADR 0005 names `scripts/selfhost.sh` the dialect-drift gate. It currently segfaults at Stage 2 on macOS (deeply recursive Stage-1 emit blows the main-thread stack; the `ulimit` fallback is ineffective there) and its exit-code handling can mask failures.
+README already marks `fmt` as canary-only. That honesty is fine for a week; it is not fine for v1.
 
-- Make `selfhost.sh` fail loudly: no `|| true` on stack setup, explicit exit-code checks after every stage.
-- Remove the stack-depth dependency: convert recursive emit/print paths in `compiler-scalui/src/Codegen.scala` to explicit-stack iteration (or trampoline), so Stage 2 builds within the default 8 MB stack.
-- Add a macOS CI job (at minimum: selfhost dual-boot + `make -C crates/runtime test` + golden tests) so the Cocoa embedder and Darwin linking are gated too.
+- Port `crates/compiler/src/format.rs` into the kernel dialect (`compiler-scalui/`), or emit a thin Stage-1 driver that pretty-prints via the same AST shapes Stage 1 already builds.
+- Default `scalui fmt` / `fmt --check` must not require `SCALUI_CANARY`.
+- Keep Stage-0 formatter as CI canary only.
 
-Done when: `./scripts/selfhost.sh` passes on macOS and Linux with default stack limits, and CI fails on regression on both.
+Done when: `scalui fmt --check` on `examples/` and `compiler-scalui/src` succeeds via Stage 1/2 with no canary env, and README drops the canary caveat.
 
-## 2. Dialect ergonomics for the v0 bar
+## 2. Block-shaped `if` / expression statements
 
-Counter should read like UI code, not assembly. Small, high-leverage additions, each landing in Stage 0 before Stage 1 depends on it:
+List-mutation taps still contort around “`if` branches are single exprs.” Mid-block `val` exists; branch bodies do not accept the same block grammar.
 
-- String interpolation (`s"count = $count"`) — retires the `str3`/`str4`/`str5` concat helpers littering `compiler-scalui/src/CliCmds.scala`.
-- Typed theme/color accessors (e.g. `Theme.accent`, `Color.rgb(...)`) — retires raw ARGB literals like `4282220198` in app code.
-- `val` bindings anywhere in a block (not just block starts).
-- `List` literals and enough list surface to delete the C-side Todo controller (ADR 0004, rule 1).
+- Then/else branches parse as blocks (same rules as lambda / `let` bodies): leading `val`s, mid-block statement exprs, final expr.
+- No brace syntax — keep the newline/indent-free kernel style; just allow `val` after `else` the same way lambda bodies do.
+- Rewrite `examples/todo` Add tap to the obvious multi-`val` else form once branches accept it.
 
-Done when: `scalui new --ui` templates and all `examples/` build without concat helpers or magic color ints.
+Done when: a tap body can `else`-bind multiple `val`s without hoisting flags, and Stage 0 + Stage 1 dual-boot stays green.
 
-## 3. Honest CLI surface
+## 3. Language-facing list ↔ View sync
 
-Stage-1 `fmt` and `watch` are stubs dressed as features: `fmt` only parse-validates (or delegates to the Rust canary), `watch` is a blind 2 s poll-rebuild.
+Todo is append-only (`View.addTexts` + `addChild`). Real lists need replace/clear without a C controller.
 
-- `scalui fmt`: port the Stage-0 formatter (`crates/compiler/src/format.rs`) to Stage 1, or mark `fmt` as canary-only in README until ported.
-- `scalui watch`: rebuild on actual file-change detection (mtime fingerprinting over `src/**`), not a fixed sleep loop.
-- `scalui test` for app projects should not rebuild the C runtime test suites; gate that behind a flag.
+- `View.clearChildren(view)` (or equivalent rebuild) in runtime + both compilers.
+- Enough surface to rebuild a `View.list` from a `Signal.list` in ScalUI (helper def or small builtin).
+- Keep Headless goldens for Todo green under replace-style updates (edit/remove at least one item in the example or a sibling).
 
-Done when: README's CLI claims match behavior with no canary delegation on the default path, or the claims are removed.
+Done when: Todo (or a successor example) can reload/replace items from `Fs.read` + `Str.lines` without append-only assumptions or new C controllers.
 
-## 4. Real manifest parsing
+## 4. App developer docs slice
 
-`scalui.toml` is currently read via string search (`readTomlQuotedAfter` in `compiler-scalui/src/CliCmds.scala`), which breaks on any formatting variation.
+Vision still points at an effects/language guide that is not a durable in-tree surface for app authors.
 
-- Minimal TOML subset parser in the kernel dialect (tables, strings, ints, arrays) shared by both compilers, validated against `docs/schemas/scalui-toml.md`.
+- One short guide under `docs/` (language kernel + blessed `IO` + `View`/`Ui` Headless path) linked from README — not a second vision, not per-crate READMEs.
+- Cover: `scalui new --ui` → test → run --headless; Signal/View/list taps; impurity boundary + `TestRuntime`; where Stage-0 canary still matters (`fmt` until §1 lands).
 
-Done when: reformatted-but-equivalent `scalui.toml` files produce identical behavior across Stage 0 and Stage 1.
+Done when: a new contributor can follow README → guide → Counter/Todo without reading ADRs first.
 
 ## Deferred (do not start)
 
-- GC revisit beyond malloc/free (ADR 0001) — wait for real long-lived interactive apps to pressure it.
-- Windows embedder, device NDK/Xcode builds, Impeller (ADR 0002) — platform breadth after the language is credible.
+- GC revisit beyond malloc/free (ADR 0001) — wait for long-lived interactive apps to pressure it.
+- Windows embedder, device NDK/Xcode builds, Impeller (ADR 0002) — platform breadth after §1–§3.
+- Reactive framework sugar (automatic View←Signal list binding) — only after explicit clear/rebuild exists.

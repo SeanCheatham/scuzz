@@ -8,7 +8,7 @@
 
 **v0 app path** (current). Phases 0–6 landed; next steps live in [docs/plan.md](docs/plan.md).
 
-- **ScalUI-authored Views**: Counter/Todo build widget trees via `Signal` / `View` / `Ui.run` (C demos remain for Live / kits)
+- **ScalUI-authored Views**: Counter/Todo/nav via `Signal` / `View` / `Ui.run` (List literals + `Signal.list`; C demos remain for Live / kits)
 - Closed impurity boundary: `Clock` / `Random` / `Fs` / `Net` / `Sys` / `IO.println` + `TestRuntime` fakes
 - Animation v0 + accessibility hooks (Headless-dumpable); theme polish tokens
 - Stage-1 CLI: `build|run|test|watch|new|package` (`compiler-scalui`); Stage-0 Rust is canary (`fmt` stays canary until pretty-printer is ported)
@@ -94,7 +94,7 @@ cargo run -p scalui -- run --headless examples/live
 | `examples/counter` | ScalUI `Signal`/`View`/`Ui.run` + goldens |
 | `examples/nav` | Lambda taps + `showWhen` + stay-open `Ui.run` + goldens |
 | `examples/live` | Stay-open Window (`Ui.runLive`; q/Esc) |
-| `examples/todo` | ScalUI Todo tree + `Ui.runWithTodo` + goldens |
+| `examples/todo` | ScalUI Todo — `List` / `Signal.list` / lambda Add·Save + goldens |
 | `examples/effects` | Blessed effects kit |
 | `examples/adt` | package / enum / match |
 | `examples/fs` | Blessed `Fs.*` (live) |
