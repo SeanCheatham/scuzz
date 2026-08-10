@@ -1,6 +1,6 @@
 # ScalUI app guide
 
-Short path from install to a Headless UI app. For product thesis and locked defaults see [vision.md](vision.md); for design locks see [adr/](adr/).
+Short path from install to a Headless UI app. For product thesis and design locks see [vision.md](vision.md); ordered next steps in [plan.md](plan.md).
 
 ## Happy path
 
