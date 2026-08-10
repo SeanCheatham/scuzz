@@ -539,9 +539,26 @@ void su_ui_resolve_headless_size(int *width, int *height, double *scale) {
 
 void su_ui_demo_finish(SuUiSession *session) {
   const char *snap = getenv("SCALUI_SNAPSHOT_PATH");
+  const char *dump = getenv("SCALUI_FUZZ_DUMP");
   if (snap && snap[0]) {
     if (!su_ui_snapshot_png_sync(session, snap))
       su_panic("headless snapshot failed");
     fprintf(stderr, "scalui: wrote snapshot %s\n", snap);
+  }
+  if (dump && dump[0]) {
+    /* Structural oracle: signal store + a11y view dump (not pixels). */
+    FILE *f = fopen(dump, "w");
+    SuString *signals, *views;
+    if (!f)
+      su_panic("fuzz dump open failed");
+    signals = su_signal_dump();
+    views = session && session->root ? su_view_a11y_dump(session->root)
+                                     : su_string_from_cstr("");
+    fprintf(f, "[signals]\n%s\n[views]\n%s", su_string_cstr(signals),
+            su_string_cstr(views));
+    fclose(f);
+    su_string_free(signals);
+    su_string_free(views);
+    fprintf(stderr, "scalui: wrote fuzz dump %s\n", dump);
   }
 }
