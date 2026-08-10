@@ -1,4 +1,4 @@
-package scalui.compiler
+package scuzz.compiler
 
 def emptyProg(): List =
   List.cons("Prog", List.cons("", List.cons(List.empty(), List.cons(List.empty(), List.cons(unitExpr(), List.empty())))))
@@ -16,10 +16,10 @@ def readUntilQuote(s: String, i: Int, acc: String): String =
   if (i >= Str.len(s)) acc else if (Str.charAt(s, i) == 34) acc else readUntilQuote(s, i + 1, Str.concat(acc, Str.slice(s, i, i + 1)))
 
 def isScalaName(name: String): Int =
-  if (endsWith(name, ".scala") == 1) 1 else if (endsWith(name, ".scalui") == 1) 1 else 0
+  if (endsWith(name, ".scala") == 1) 1 else if (endsWith(name, ".scuzz") == 1) 1 else 0
 
 def isMainName(name: String): Int =
-  if (streq(name, "Main.scala") == 1) 1 else if (streq(name, "main.scala") == 1) 1 else if (streq(name, "Main.scalui") == 1) 1 else 0
+  if (streq(name, "Main.scala") == 1) 1 else if (streq(name, "main.scala") == 1) 1 else if (streq(name, "Main.scuzz") == 1) 1 else 0
 
 def partitionSources(names: List, others: List, mains: List): List =
   if (List.isEmpty(names) == 1) listConcat(List.reverse(others), List.reverse(mains)) else partitionSourcesOne(List.head(names), List.tail(names), others, mains)
@@ -28,19 +28,19 @@ def partitionSourcesOne(name: String, rest: List, others: List, mains: List): Li
   if (isScalaName(name) == 0) partitionSources(rest, others, mains) else if (isMainName(name) == 1) partitionSources(rest, others, List.cons(name, mains)) else partitionSources(rest, List.cons(name, others), mains)
 
 def resolveRuntimeEnv(env: String, projectDir: String): IO[String] =
-  if (Str.len(env) > 0) IO.pure(env) else Sys.getenv("SCALUI_HOME").flatMap(home =>
+  if (Str.len(env) > 0) IO.pure(env) else Sys.getenv("SCUZZ_HOME").flatMap(home =>
   if (Str.len(home) > 0) IO.pure(pathJoin(home, "crates/runtime")) else tryFindRuntime(projectDir).handleErrorWith(_ =>
-  Sys.getenv("PWD").flatMap(pwd => if (Str.len(pwd) > 0) tryFindRuntime(pwd) else IO.fail("could not find crates/runtime (set SCALUI_HOME or SCALUI_RUNTIME)"))
+  Sys.getenv("PWD").flatMap(pwd => if (Str.len(pwd) > 0) tryFindRuntime(pwd) else IO.fail("could not find crates/runtime (set SCUZZ_HOME or SCUZZ_RUNTIME)"))
 )
 )
 
 def tryFindRuntime(start: String): IO[String] =
   findRuntimeFrom(start, 8).flatMap(dir =>
-    Fs.read(pathJoin(dir, "include/scalui_rt.h")).flatMap(_ => IO.pure(dir))
+    Fs.read(pathJoin(dir, "include/scuzz_rt.h")).flatMap(_ => IO.pure(dir))
   )
 
 def findRuntimeFrom(dir: String, fuel: Int): IO[String] =
-  if (fuel <= 0) IO.fail("could not find crates/runtime") else Fs.read(pathJoin(pathJoin(dir, "crates/runtime"), "include/scalui_rt.h")).flatMap(_ => IO.pure(pathJoin(dir, "crates/runtime"))).handleErrorWith(_ =>
+  if (fuel <= 0) IO.fail("could not find crates/runtime") else Fs.read(pathJoin(pathJoin(dir, "crates/runtime"), "include/scuzz_rt.h")).flatMap(_ => IO.pure(pathJoin(dir, "crates/runtime"))).handleErrorWith(_ =>
   findRuntimeFrom(parentDir(dir), fuel - 1)
 )
 
@@ -77,14 +77,14 @@ def runIfNeeded(exe: String, doRun: Int): IO[Unit] =
   if (doRun == 1) execOk(exe) else IO.pure(())
 
 def compileProject(projectDir: String, outDir: String, doRun: Int): IO[Unit] =
-  Sys.getenv("SCALUI_RUNTIME").flatMap(rtEnv =>
+  Sys.getenv("SCUZZ_RUNTIME").flatMap(rtEnv =>
     resolveRuntimeEnv(rtEnv, projectDir).flatMap(runtimeDir =>
-      Sys.getenv("SCALUI_CLANG").flatMap(clangEnv => compileProjectWith(projectDir, outDir, doRun, runtimeDir, clangOrDefault(clangEnv)))
+      Sys.getenv("SCUZZ_CLANG").flatMap(clangEnv => compileProjectWith(projectDir, outDir, doRun, runtimeDir, clangOrDefault(clangEnv)))
     )
   )
 
 def compileProjectWith(projectDir: String, outDir: String, doRun: Int, runtimeDir: String, clang: String): IO[Unit] =
-  Fs.read(pathJoin(projectDir, "scalui.toml")).flatMap(toml => compileAfterToml(projectDir, outDir, doRun, runtimeDir, clang, toml, readTomlName(toml)))
+  Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml => compileAfterToml(projectDir, outDir, doRun, runtimeDir, clang, toml, readTomlName(toml)))
 
 def compileAfterToml(projectDir: String, outDir: String, doRun: Int, runtimeDir: String, clang: String, toml: String, name: String): IO[Unit] =
   for {
@@ -115,11 +115,11 @@ def compileAfterSources(projectDir: String, outDir: String, doRun: Int, runtimeD
     ir = emitProgram(prog)
     ll = pathJoin(outDir, Str.concat(name, ".ll"))
     exe = pathJoin(outDir, name)
-    lib = pathJoin(runtimeDir, "build/libscalui_rt.a")
+    lib = pathJoin(runtimeDir, "build/libscuzz_rt.a")
     ffi = pathJoin(parentDir(runtimeDir), "ffi-skia")
     inc = pathJoin(runtimeDir, "include")
-    embedder = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-desktop"), "build/libscalui_embedder.a")
-    mobile = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-mobile"), "build/libscalui_mobile.a")
+    embedder = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-desktop"), "build/libscuzz_embedder.a")
+    mobile = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-mobile"), "build/libscuzz_mobile.a")
   } yield if (tyIsOk(ty) == 0) IO.fail(tyMsg(ty)) else Fs.mkdirs(outDir).flatMap(_ =>
   Fs.write(ll, ir).flatMap(_ =>
     buildRuntime(runtimeDir, clang).flatMap(_ =>

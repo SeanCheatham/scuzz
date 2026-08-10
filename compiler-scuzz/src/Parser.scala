@@ -1,4 +1,4 @@
-package scalui.compiler
+package scuzz.compiler
 
 def ok(node: List, i: Int): List =
   List.cons(node, List.cons(Str.fromInt(i), List.empty()))

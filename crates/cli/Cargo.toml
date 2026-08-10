@@ -1,15 +1,15 @@
 [package]
-name = "scalui"
+name = "scuzz"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "ScalUI Stage-0 CLI"
+description = "Scuzz Lang Stage-0 CLI"
 
 [[bin]]
-name = "scalui"
+name = "scuzz"
 path = "src/main.rs"
 
 [dependencies]
-scalui-compiler.workspace = true
+scuzz-compiler.workspace = true
 anyhow.workspace = true
 clap.workspace = true

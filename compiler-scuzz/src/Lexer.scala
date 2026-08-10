@@ -1,4 +1,4 @@
-package scalui.compiler
+package scuzz.compiler
 
 def skipTrivia(source: String, i: Int): Int =
   if (i >= Str.len(source)) i else skipTriviaCont(source, i, Str.charAt(source, i))

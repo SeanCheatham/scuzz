@@ -1,4 +1,4 @@
-/* Thin Skia-shaped C ABI for ScalUI.
+/* Thin Skia-shaped C ABI for Scuzz Lang.
  *
  * A CPU software implementation (sk_sw) ships behind this header so
  * Headless CI works without downloading multi‑GB Skia trees. A future fetch of

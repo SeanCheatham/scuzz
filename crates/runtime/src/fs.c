@@ -1,5 +1,5 @@
 #define _POSIX_C_SOURCE 200809L
-#include "scalui_rt.h"
+#include "scuzz_rt.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -12,94 +12,94 @@
 typedef struct {
   int is_err;
   union {
-    SuError *err;
+    SzError *err;
     void *ok;
   } as;
 } FsResult;
 
 typedef struct {
-  SuString *path;
-  SuString *contents;
+  SzString *path;
+  SzString *contents;
 } FsWriteEnv;
 
-static SuIo *unwrap_fs(void *value, void *env) {
+static SzIo *unwrap_fs(void *value, void *env) {
   (void)env;
   FsResult *r = (FsResult *)value;
   if (!r)
-    return su_io_fail_cstr("Fs: null result");
+    return sz_io_fail_cstr("Fs: null result");
   if (r->is_err)
-    return su_io_fail(r->as.err);
-  return su_io_pure(r->as.ok);
+    return sz_io_fail(r->as.err);
+  return sz_io_pure(r->as.ok);
 }
 
 static void *fs_read_result(void *env) {
-  SuString *path = (SuString *)env;
-  FsResult *r = (FsResult *)su_alloc(sizeof(FsResult));
-  const char *p = su_string_cstr(path);
+  SzString *path = (SzString *)env;
+  FsResult *r = (FsResult *)sz_alloc(sizeof(FsResult));
+  const char *p = sz_string_cstr(path);
   FILE *f = fopen(p, "rb");
   if (!f) {
     char msg[512];
     snprintf(msg, sizeof(msg), "Fs.read: cannot open %s: %s", p, strerror(errno));
     r->is_err = 1;
-    r->as.err = su_error_new(2, msg);
+    r->as.err = sz_error_new(2, msg);
     return r;
   }
   if (fseek(f, 0, SEEK_END) != 0) {
     fclose(f);
     r->is_err = 1;
-    r->as.err = su_error_new(2, "Fs.read: seek end failed");
+    r->as.err = sz_error_new(2, "Fs.read: seek end failed");
     return r;
   }
   long sz = ftell(f);
   if (sz < 0) {
     fclose(f);
     r->is_err = 1;
-    r->as.err = su_error_new(2, "Fs.read: ftell failed");
+    r->as.err = sz_error_new(2, "Fs.read: ftell failed");
     return r;
   }
   if (fseek(f, 0, SEEK_SET) != 0) {
     fclose(f);
     r->is_err = 1;
-    r->as.err = su_error_new(2, "Fs.read: seek set failed");
+    r->as.err = sz_error_new(2, "Fs.read: seek set failed");
     return r;
   }
-  char *buf = (char *)su_alloc((size_t)sz + 1);
+  char *buf = (char *)sz_alloc((size_t)sz + 1);
   size_t n = fread(buf, 1, (size_t)sz, f);
   fclose(f);
   buf[n] = '\0';
-  SuString *s = su_string_from_bytes(buf, n);
-  su_free(buf);
+  SzString *s = sz_string_from_bytes(buf, n);
+  sz_free(buf);
   r->is_err = 0;
   r->as.ok = s;
   return r;
 }
 
-SuIo *su_fs_read(SuString *path) {
+SzIo *sz_fs_read(SzString *path) {
   if (!path)
-    su_panic("su_fs_read(null)");
-  if (su_testrt_fs_is_fake())
-    return su_testrt_fs_read(path);
-  return su_io_flatmap(su_io_delay(fs_read_result, path), unwrap_fs, NULL);
+    sz_panic("sz_fs_read(null)");
+  if (sz_testrt_fs_is_fake())
+    return sz_testrt_fs_read(path);
+  return sz_io_flatmap(sz_io_delay(fs_read_result, path), unwrap_fs, NULL);
 }
 
 static void *fs_write_result(void *env) {
   FsWriteEnv *e = (FsWriteEnv *)env;
-  FsResult *r = (FsResult *)su_alloc(sizeof(FsResult));
-  const char *p = su_string_cstr(e->path);
+  FsResult *r = (FsResult *)sz_alloc(sizeof(FsResult));
+  const char *p = sz_string_cstr(e->path);
   FILE *f = fopen(p, "wb");
   if (!f) {
     char msg[512];
     snprintf(msg, sizeof(msg), "Fs.write: cannot open %s: %s", p, strerror(errno));
     r->is_err = 1;
-    r->as.err = su_error_new(2, msg);
+    r->as.err = sz_error_new(2, msg);
     return r;
   }
-  SuString *c = e->contents;
+  SzString *c = e->contents;
   if (c && c->len) {
     if (fwrite(c->data, 1, c->len, f) != c->len) {
       fclose(f);
       r->is_err = 1;
-      r->as.err = su_error_new(2, "Fs.write: short write");
+      r->as.err = sz_error_new(2, "Fs.write: short write");
       return r;
     }
   }
@@ -109,59 +109,59 @@ static void *fs_write_result(void *env) {
   return r;
 }
 
-SuIo *su_fs_write(SuString *path, SuString *contents) {
+SzIo *sz_fs_write(SzString *path, SzString *contents) {
   if (!path)
-    su_panic("su_fs_write(null path)");
-  if (su_testrt_fs_is_fake())
-    return su_testrt_fs_write(path, contents);
-  FsWriteEnv *e = (FsWriteEnv *)su_alloc(sizeof(FsWriteEnv));
+    sz_panic("sz_fs_write(null path)");
+  if (sz_testrt_fs_is_fake())
+    return sz_testrt_fs_write(path, contents);
+  FsWriteEnv *e = (FsWriteEnv *)sz_alloc(sizeof(FsWriteEnv));
   e->path = path;
-  e->contents = contents ? contents : su_string_from_cstr("");
-  return su_io_flatmap(su_io_delay(fs_write_result, e), unwrap_fs, NULL);
+  e->contents = contents ? contents : sz_string_from_cstr("");
+  return sz_io_flatmap(sz_io_delay(fs_write_result, e), unwrap_fs, NULL);
 }
 
 static void *fs_list_result(void *env) {
-  SuString *path = (SuString *)env;
-  FsResult *r = (FsResult *)su_alloc(sizeof(FsResult));
-  const char *p = su_string_cstr(path);
+  SzString *path = (SzString *)env;
+  FsResult *r = (FsResult *)sz_alloc(sizeof(FsResult));
+  const char *p = sz_string_cstr(path);
   DIR *d = opendir(p);
   if (!d) {
     char msg[512];
     snprintf(msg, sizeof(msg), "Fs.list: cannot open %s: %s", p, strerror(errno));
     r->is_err = 1;
-    r->as.err = su_error_new(2, msg);
+    r->as.err = sz_error_new(2, msg);
     return r;
   }
-  SuList *acc = su_list_nil();
+  SzList *acc = sz_list_nil();
   struct dirent *ent;
   while ((ent = readdir(d)) != NULL) {
     if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
       continue;
-    acc = su_list_cons(su_string_from_cstr(ent->d_name), acc);
+    acc = sz_list_cons(sz_string_from_cstr(ent->d_name), acc);
   }
   closedir(d);
   r->is_err = 0;
-  r->as.ok = su_list_reverse(acc);
+  r->as.ok = sz_list_reverse(acc);
   return r;
 }
 
-SuIo *su_fs_list(SuString *path) {
+SzIo *sz_fs_list(SzString *path) {
   if (!path)
-    su_panic("su_fs_list(null)");
-  if (su_testrt_fs_is_fake())
-    return su_testrt_fs_list(path);
-  return su_io_flatmap(su_io_delay(fs_list_result, path), unwrap_fs, NULL);
+    sz_panic("sz_fs_list(null)");
+  if (sz_testrt_fs_is_fake())
+    return sz_testrt_fs_list(path);
+  return sz_io_flatmap(sz_io_delay(fs_list_result, path), unwrap_fs, NULL);
 }
 
 static void *fs_mkdirs_result(void *env) {
-  SuString *path = (SuString *)env;
-  FsResult *r = (FsResult *)su_alloc(sizeof(FsResult));
-  const char *p = su_string_cstr(path);
+  SzString *path = (SzString *)env;
+  FsResult *r = (FsResult *)sz_alloc(sizeof(FsResult));
+  const char *p = sz_string_cstr(path);
   char tmp[1024];
   size_t len = strlen(p);
   if (len >= sizeof(tmp)) {
     r->is_err = 1;
-    r->as.err = su_error_new(2, "Fs.mkdirs: path too long");
+    r->as.err = sz_error_new(2, "Fs.mkdirs: path too long");
     return r;
   }
   memcpy(tmp, p, len + 1);
@@ -172,7 +172,7 @@ static void *fs_mkdirs_result(void *env) {
         char msg[512];
         snprintf(msg, sizeof(msg), "Fs.mkdirs: %s: %s", tmp, strerror(errno));
         r->is_err = 1;
-        r->as.err = su_error_new(2, msg);
+        r->as.err = sz_error_new(2, msg);
         return r;
       }
       *q = '/';
@@ -182,7 +182,7 @@ static void *fs_mkdirs_result(void *env) {
     char msg[512];
     snprintf(msg, sizeof(msg), "Fs.mkdirs: %s: %s", tmp, strerror(errno));
     r->is_err = 1;
-    r->as.err = su_error_new(2, msg);
+    r->as.err = sz_error_new(2, msg);
     return r;
   }
   r->is_err = 0;
@@ -190,10 +190,10 @@ static void *fs_mkdirs_result(void *env) {
   return r;
 }
 
-SuIo *su_fs_mkdirs(SuString *path) {
+SzIo *sz_fs_mkdirs(SzString *path) {
   if (!path)
-    su_panic("su_fs_mkdirs(null)");
-  if (su_testrt_fs_is_fake())
-    return su_testrt_fs_mkdirs(path);
-  return su_io_flatmap(su_io_delay(fs_mkdirs_result, path), unwrap_fs, NULL);
+    sz_panic("sz_fs_mkdirs(null)");
+  if (sz_testrt_fs_is_fake())
+    return sz_testrt_fs_mkdirs(path);
+  return sz_io_flatmap(sz_io_delay(fs_mkdirs_result, path), unwrap_fs, NULL);
 }

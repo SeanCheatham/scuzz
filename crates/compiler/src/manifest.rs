@@ -44,7 +44,7 @@ fn default_main() -> String {
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct UiConfig {
-    /// `"headless"`, `"window"`, or `"mobile"` — default runtime for `scalui run`
+    /// `"headless"`, `"window"`, or `"mobile"` — default runtime for `scuzz run`
     #[serde(default = "default_runtime")]
     pub default_runtime: String,
     /// `[width, height]` for Headless / Mobile goldens
@@ -52,19 +52,19 @@ pub struct UiConfig {
     pub headless_size: Vec<i32>,
     #[serde(default = "default_scale")]
     pub headless_scale: f64,
-    /// 0-based DFS button index for `_after_tap` goldens (`SCALUI_UI_TAP_N`)
+    /// 0-based DFS button index for `_after_tap` goldens (`SCUZZ_UI_TAP_N`)
     #[serde(default)]
     pub tap_button: Option<i32>,
-    /// Text injected before the scripted tap (`SCALUI_UI_TEXT`)
+    /// Text injected before the scripted tap (`SCUZZ_UI_TEXT`)
     #[serde(default)]
     pub tap_text: Option<String>,
-    /// Bundle id used by `scalui package` mobile shells
+    /// Bundle id used by `scuzz package` mobile shells
     #[serde(default = "default_bundle_id")]
     pub bundle_id: String,
 }
 
 fn default_bundle_id() -> String {
-    "dev.scalui.app".into()
+    "dev.scuzz.app".into()
 }
 
 fn default_runtime() -> String {

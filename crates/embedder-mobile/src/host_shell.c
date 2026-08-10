@@ -1,6 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 
-#include "scalui_mobile.h"
+#include "scuzz_mobile.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -13,19 +13,19 @@ static int g_keyboard;
 static int g_frames;
 static int g_w;
 static int g_h;
-static SuInputEvent g_queue[EVENT_CAP];
+static SzInputEvent g_queue[EVENT_CAP];
 static int g_q_head;
 static int g_q_tail;
 static char *g_last_title;
 
 static int shell_enabled(void) {
-  const char *e = getenv("SCALUI_MOBILE_SHELL");
+  const char *e = getenv("SCUZZ_MOBILE_SHELL");
   return e && e[0] && strcmp(e, "0") != 0;
 }
 
-int su_mobile_available(void) { return shell_enabled(); }
+int sz_mobile_available(void) { return shell_enabled(); }
 
-static int q_push(const SuInputEvent *ev) {
+static int q_push(const SzInputEvent *ev) {
   int next;
   if (!ev)
     return 0;
@@ -38,9 +38,9 @@ static int q_push(const SuInputEvent *ev) {
   return 1;
 }
 
-int su_mobile_push_event(const SuInputEvent *event) { return q_push(event); }
+int sz_mobile_push_event(const SzInputEvent *event) { return q_push(event); }
 
-int su_mobile_poll_event(SuInputEvent *out) {
+int sz_mobile_poll_event(SzInputEvent *out) {
   if (!out || g_q_head == g_q_tail)
     return 0;
   *out = g_queue[g_q_head];
@@ -48,15 +48,15 @@ int su_mobile_poll_event(SuInputEvent *out) {
   return 1;
 }
 
-void su_mobile_set_keyboard(int visible) {
+void sz_mobile_set_keyboard(int visible) {
   g_keyboard = visible ? 1 : 0;
   if (shell_enabled()) {
-    fprintf(stderr, "scalui mobile: soft keyboard %s\n",
+    fprintf(stderr, "scuzz mobile: soft keyboard %s\n",
             g_keyboard ? "show" : "hide");
   }
 }
 
-int su_mobile_present(const char *title, int width, int height,
+int sz_mobile_present(const char *title, int width, int height,
                       const uint8_t *rgba, size_t nbytes) {
   size_t need;
   if (!shell_enabled())
@@ -77,16 +77,16 @@ int su_mobile_present(const char *title, int width, int height,
     if (g_last_title)
       memcpy(g_last_title, title, n + 1);
   }
-  fprintf(stderr, "scalui mobile: present %dx%d frame=%d keyboard=%d title=%s\n",
+  fprintf(stderr, "scuzz mobile: present %dx%d frame=%d keyboard=%d title=%s\n",
           width, height, g_frames, g_keyboard,
-          g_last_title ? g_last_title : "ScalUI");
+          g_last_title ? g_last_title : "Scuzz Lang");
   (void)g_ready;
   (void)g_w;
   (void)g_h;
   return 1;
 }
 
-void su_mobile_shutdown(void) {
+void sz_mobile_shutdown(void) {
   free(g_last_title);
   g_last_title = NULL;
   g_ready = 0;
@@ -95,5 +95,5 @@ void su_mobile_shutdown(void) {
   g_w = g_h = 0;
   g_q_head = g_q_tail = 0;
   if (shell_enabled())
-    fprintf(stderr, "scalui mobile: shutdown\n");
+    fprintf(stderr, "scuzz mobile: shutdown\n");
 }

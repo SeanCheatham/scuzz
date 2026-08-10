@@ -90,7 +90,7 @@ pub fn format_diagnostics(diags: &[Diagnostic], json: bool) -> String {
 
 /// Parse, lower, and typecheck a project. No LLVM emit or link.
 pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
-    let manifest_path = project_dir.join("scalui.toml");
+    let manifest_path = project_dir.join("scuzz.toml");
     let _manifest = crate::manifest::load_manifest(&manifest_path)
         .with_context(|| format!("reading {}", manifest_path.display()))?;
 

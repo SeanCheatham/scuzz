@@ -9,7 +9,7 @@ enum Kind {
     Io,
 }
 
-/// Emit LLVM IR text for a Stage-0 program. Links against `libscalui_rt`.
+/// Emit LLVM IR text for a Stage-0 program. Links against `libscuzz_rt`.
 pub fn emit_llvm(program: &Program) -> String {
     let mut strs: Vec<String> = Vec::new();
     for d in &program.defs {
@@ -21,90 +21,90 @@ pub fn emit_llvm(program: &Program) -> String {
     let funs: HashMap<String, &FunDef> = program.defs.iter().map(|d| (d.name.clone(), d)).collect();
 
     let mut out = String::new();
-    writeln!(out, "; ScalUI Stage-0 generated LLVM IR").unwrap();
+    writeln!(out, "; Scuzz Lang Stage-0 generated LLVM IR").unwrap();
     // Omit target triple / datalayout: clang uses the host defaults (macOS arm64, Linux x86_64, …).
     writeln!(out).unwrap();
 
-    writeln!(out, "declare ptr @su_string_from_cstr(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_string_cstr(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_string_concat(ptr, ptr)").unwrap();
-    writeln!(out, "declare i64 @su_string_len(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_string_slice(ptr, i64, i64)").unwrap();
-    writeln!(out, "declare i32 @su_string_eq(ptr, ptr)").unwrap();
-    writeln!(out, "declare i64 @su_string_char_at(ptr, i64)").unwrap();
-    writeln!(out, "declare ptr @su_string_from_int(i64)").unwrap();
-    writeln!(out, "declare i64 @su_string_index_of(ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_string_lines(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_io_println(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_io_pure(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_io_delay(ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_io_flatmap(ptr, ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_io_fail_cstr(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_io_sleep_ms(i64)").unwrap();
-    writeln!(out, "declare ptr @su_io_handle_error_with(ptr, ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_io_attempt(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_io_race(ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_io_both(ptr, ptr)").unwrap();
-    writeln!(out, "declare {{ i32, ptr, ptr }} @su_io_unsafe_run(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_adt_new(i32, ptr)").unwrap();
-    writeln!(out, "declare i32 @su_adt_tag(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_effects_run_kit()").unwrap();
-    writeln!(out, "declare ptr @su_list_nil()").unwrap();
-    writeln!(out, "declare i32 @su_list_is_empty(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_list_cons(ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_list_head(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_list_tail(ptr)").unwrap();
-    writeln!(out, "declare i64 @su_list_len(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_list_at(ptr, i64)").unwrap();
-    writeln!(out, "declare ptr @su_list_reverse(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_list_join(ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_list_append(ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_fs_read(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_fs_write(ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_fs_list(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_fs_mkdirs(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_sys_args()").unwrap();
-    writeln!(out, "declare ptr @su_sys_read_line()").unwrap();
-    writeln!(out, "declare ptr @su_sys_exec(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_sys_getenv(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_clock_real_time()").unwrap();
-    writeln!(out, "declare ptr @su_clock_monotonic()").unwrap();
-    writeln!(out, "declare ptr @su_random_next_int(i64)").unwrap();
-    writeln!(out, "declare ptr @su_net_http_get(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_impurity_run_kit()").unwrap();
-    writeln!(out, "declare ptr @su_lang_signal_int(i64)").unwrap();
-    writeln!(out, "declare i64 @su_lang_signal_get(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_signal_set(ptr, i64)").unwrap();
-    writeln!(out, "declare ptr @su_lang_signal_str(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_signal_str_get(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_signal_str_set(ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_signal_list(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_signal_list_get(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_signal_list_set(ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_signal_map(ptr, ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_text(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_bind_text(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_button(ptr, ptr, ptr)").unwrap();
-    writeln!(out, "declare i64 @su_theme_accent()").unwrap();
-    writeln!(out, "declare i64 @su_theme_primary()").unwrap();
-    writeln!(out, "declare i64 @su_theme_muted()").unwrap();
-    writeln!(out, "declare i64 @su_theme_foreground()").unwrap();
-    writeln!(out, "declare i64 @su_color_rgb(i64, i64, i64)").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_column()").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_row()").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_list()").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_each(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_scroll(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_text_field(ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_icon(i64, i64)").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_image(i64, i64, i64, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_add_child(ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_add_texts(ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_lang_view_show_when(ptr, i64, ptr)").unwrap();
-    writeln!(out, "declare ptr @su_ui_run_view(ptr)").unwrap();
-    writeln!(out, "declare ptr @su_box_i64(i64)").unwrap();
-    writeln!(out, "declare i64 @su_unbox_i64(ptr)").unwrap();
-    writeln!(out, "declare i32 @su_runtime_main_args(ptr, i32, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_string_from_cstr(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_string_cstr(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_string_concat(ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_string_len(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_string_slice(ptr, i64, i64)").unwrap();
+    writeln!(out, "declare i32 @sz_string_eq(ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_string_char_at(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_string_from_int(i64)").unwrap();
+    writeln!(out, "declare i64 @sz_string_index_of(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_string_lines(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_println(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_pure(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_delay(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_flatmap(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_fail_cstr(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_sleep_ms(i64)").unwrap();
+    writeln!(out, "declare ptr @sz_io_handle_error_with(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_attempt(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_race(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_both(ptr, ptr)").unwrap();
+    writeln!(out, "declare {{ i32, ptr, ptr }} @sz_io_unsafe_run(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_adt_new(i32, ptr)").unwrap();
+    writeln!(out, "declare i32 @sz_adt_tag(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_effects_run_kit()").unwrap();
+    writeln!(out, "declare ptr @sz_list_nil()").unwrap();
+    writeln!(out, "declare i32 @sz_list_is_empty(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_cons(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_head(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_tail(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_list_len(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_at(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_list_reverse(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_join(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_append(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_fs_write(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_fs_list(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_fs_mkdirs(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_sys_args()").unwrap();
+    writeln!(out, "declare ptr @sz_sys_read_line()").unwrap();
+    writeln!(out, "declare ptr @sz_sys_exec(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_sys_getenv(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_clock_real_time()").unwrap();
+    writeln!(out, "declare ptr @sz_clock_monotonic()").unwrap();
+    writeln!(out, "declare ptr @sz_random_next_int(i64)").unwrap();
+    writeln!(out, "declare ptr @sz_net_http_get(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_impurity_run_kit()").unwrap();
+    writeln!(out, "declare ptr @sz_lang_signal_int(i64)").unwrap();
+    writeln!(out, "declare i64 @sz_lang_signal_get(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_signal_set(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_signal_str(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_signal_str_get(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_signal_str_set(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_signal_list(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_signal_list_get(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_signal_list_set(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_signal_map(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_text(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_bind_text(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_button(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_theme_accent()").unwrap();
+    writeln!(out, "declare i64 @sz_theme_primary()").unwrap();
+    writeln!(out, "declare i64 @sz_theme_muted()").unwrap();
+    writeln!(out, "declare i64 @sz_theme_foreground()").unwrap();
+    writeln!(out, "declare i64 @sz_color_rgb(i64, i64, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_column()").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_row()").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_list()").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_each(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_scroll(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_text_field(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_icon(i64, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_image(i64, i64, i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_add_child(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_add_texts(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_show_when(ptr, i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_ui_run_view(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_box_i64(i64)").unwrap();
+    writeln!(out, "declare i64 @sz_unbox_i64(ptr)").unwrap();
+    writeln!(out, "declare i32 @sz_runtime_main_args(ptr, i32, ptr)").unwrap();
     writeln!(out).unwrap();
 
     for (i, s) in strs.iter().enumerate() {
@@ -118,7 +118,7 @@ pub fn emit_llvm(program: &Program) -> String {
     }
     writeln!(out).unwrap();
 
-    writeln!(out, "define internal ptr @su_delay_unit_thunk(ptr %env) {{").unwrap();
+    writeln!(out, "define internal ptr @sz_delay_unit_thunk(ptr %env) {{").unwrap();
     writeln!(out, "entry:").unwrap();
     writeln!(out, "  ret ptr null").unwrap();
     writeln!(out, "}}").unwrap();
@@ -154,7 +154,7 @@ pub fn emit_llvm(program: &Program) -> String {
     let io_val = ensure_io(&mut out, body_expr.kind, &body_expr.value, "wrapped");
     writeln!(
         out,
-        "  %rc = call i32 @su_runtime_main_args(ptr {io_val}, i32 %argc, ptr %argv)"
+        "  %rc = call i32 @sz_runtime_main_args(ptr {io_val}, i32 %argc, ptr %argv)"
     )
     .unwrap();
     writeln!(out, "  ret i32 %rc").unwrap();
@@ -341,7 +341,7 @@ fn llvm_escape(s: &str) -> String {
 
 fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
     let ret = llvm_type(&def.ret);
-    write!(out, "define internal {ret} @su_user_{}(", def.name).unwrap();
+    write!(out, "define internal {ret} @sz_user_{}(", def.name).unwrap();
     for (i, p) in def.params.iter().enumerate() {
         if i > 0 {
             write!(out, ", ").unwrap();
@@ -383,7 +383,7 @@ fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
             } else if body.kind == Kind::Int {
                 writeln!(
                     out,
-                    "  %ret_box = call ptr @su_box_i64(i64 {})",
+                    "  %ret_box = call ptr @sz_box_i64(i64 {})",
                     body.value
                 )
                 .unwrap();
@@ -403,12 +403,12 @@ fn ensure_io(code: &mut String, kind: Kind, value: &str, tmp: &str) -> String {
         return value.to_string();
     }
     let ptr = if kind == Kind::Int {
-        writeln!(code, "  %{tmp}_box = call ptr @su_box_i64(i64 {value})").unwrap();
+        writeln!(code, "  %{tmp}_box = call ptr @sz_box_i64(i64 {value})").unwrap();
         format!("%{tmp}_box")
     } else {
         value.to_string()
     };
-    writeln!(code, "  %{tmp} = call ptr @su_io_pure(ptr {ptr})").unwrap();
+    writeln!(code, "  %{tmp} = call ptr @sz_io_pure(ptr {ptr})").unwrap();
     format!("%{tmp}")
 }
 
@@ -419,7 +419,7 @@ fn capture_name_order(locals: &HashMap<String, (String, Kind)>) -> Vec<String> {
     names
 }
 
-/// Pack enclosing locals into a `SuList` (head = first capture name). Ints are boxed.
+/// Pack enclosing locals into a `SzList` (head = first capture name). Ints are boxed.
 fn pack_env(
     code: &mut String,
     locals: &HashMap<String, (String, Kind)>,
@@ -429,14 +429,14 @@ fn pack_env(
     if names.is_empty() {
         return "null".into();
     }
-    writeln!(code, "  %{prefix}_0 = call ptr @su_list_nil()").unwrap();
+    writeln!(code, "  %{prefix}_0 = call ptr @sz_list_nil()").unwrap();
     let mut cur = format!("%{prefix}_0");
     for (i, name) in names.iter().enumerate().rev() {
         let (val, kind) = locals.get(name).expect("capture name");
         let ptr = if *kind == Kind::Int {
             writeln!(
                 code,
-                "  %{prefix}_b{i} = call ptr @su_box_i64(i64 {val})"
+                "  %{prefix}_b{i} = call ptr @sz_box_i64(i64 {val})"
             )
             .unwrap();
             format!("%{prefix}_b{i}")
@@ -445,7 +445,7 @@ fn pack_env(
         };
         writeln!(
             code,
-            "  %{prefix}_{} = call ptr @su_list_cons(ptr {ptr}, ptr {cur})",
+            "  %{prefix}_{} = call ptr @sz_list_cons(ptr {ptr}, ptr {cur})",
             i + 1
         )
         .unwrap();
@@ -461,7 +461,7 @@ fn emit_list_lit(
     prefix: &str,
 ) -> Emitted {
     let mut code = String::new();
-    writeln!(code, "  %{prefix}_0 = call ptr @su_list_nil()").unwrap();
+    writeln!(code, "  %{prefix}_0 = call ptr @sz_list_nil()").unwrap();
     let mut cur = format!("%{prefix}_0");
     for (i, elem) in elems.iter().enumerate().rev() {
         let ee = emit_expr(elem, ctx, locals, &format!("{prefix}_e{i}"));
@@ -469,7 +469,7 @@ fn emit_list_lit(
         let ptr = if ee.kind == Kind::Int {
             writeln!(
                 code,
-                "  %{prefix}_b{i} = call ptr @su_box_i64(i64 {})",
+                "  %{prefix}_b{i} = call ptr @sz_box_i64(i64 {})",
                 ee.value
             )
             .unwrap();
@@ -480,7 +480,7 @@ fn emit_list_lit(
         let next = format!("%{prefix}_{}", i + 1);
         writeln!(
             code,
-            "  {next} = call ptr @su_list_cons(ptr {ptr}, ptr {cur})"
+            "  {next} = call ptr @sz_list_cons(ptr {ptr}, ptr {cur})"
         )
         .unwrap();
         cur = next;
@@ -504,19 +504,19 @@ fn unpack_env_preamble(
         let kind = outer.get(name).map(|(_, k)| *k).unwrap_or(Kind::Ptr);
         writeln!(
             pre,
-            "  %{prefix}_h{i} = call ptr @su_list_head(ptr {cur})"
+            "  %{prefix}_h{i} = call ptr @sz_list_head(ptr {cur})"
         )
         .unwrap();
         writeln!(
             pre,
-            "  %{prefix}_t{i} = call ptr @su_list_tail(ptr {cur})"
+            "  %{prefix}_t{i} = call ptr @sz_list_tail(ptr {cur})"
         )
         .unwrap();
         match kind {
             Kind::Int => {
                 writeln!(
                     pre,
-                    "  %{name} = call i64 @su_unbox_i64(ptr %{prefix}_h{i})"
+                    "  %{name} = call i64 @sz_unbox_i64(ptr %{prefix}_h{i})"
                 )
                 .unwrap();
                 body_locals.insert(name.clone(), (format!("%{name}"), Kind::Int));
@@ -551,14 +551,14 @@ fn emit_cstr_from_string(
     code.push_str(&se.code);
     writeln!(
         code,
-        "  %{prefix}_cstr = call ptr @su_string_cstr(ptr {})",
+        "  %{prefix}_cstr = call ptr @sz_string_cstr(ptr {})",
         se.value
     )
     .unwrap();
     format!("%{prefix}_cstr")
 }
 
-fn emit_su_string(
+fn emit_sz_string(
     code: &mut String,
     strs: &[String],
     expr: &Expr,
@@ -576,7 +576,7 @@ fn emit_su_string(
         .unwrap();
         writeln!(
             code,
-            "  %{prefix}_ss = call ptr @su_string_from_cstr(ptr %{prefix}_gep)"
+            "  %{prefix}_ss = call ptr @sz_string_from_cstr(ptr %{prefix}_gep)"
         )
         .unwrap();
         return format!("%{prefix}_ss");
@@ -606,7 +606,7 @@ fn emit_expr(
             .unwrap();
             writeln!(
                 code,
-                "  %{prefix}_s = call ptr @su_string_from_cstr(ptr %{prefix}_gep)"
+                "  %{prefix}_s = call ptr @sz_string_from_cstr(ptr %{prefix}_gep)"
             )
             .unwrap();
             val_emitted(code, format!("%{prefix}_s"), Kind::Ptr)
@@ -617,7 +617,7 @@ fn emit_expr(
             let mut code = String::new();
             writeln!(
                 code,
-                "  %{prefix}_delay = call ptr @su_io_delay(ptr @su_delay_unit_thunk, ptr null)"
+                "  %{prefix}_delay = call ptr @sz_io_delay(ptr @sz_delay_unit_thunk, ptr null)"
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_delay"), Kind::Ptr)
@@ -633,7 +633,7 @@ fn emit_expr(
             };
             writeln!(
                 code,
-                "  %{prefix}_sleep = call ptr @su_io_sleep_ms(i64 {ms_val})"
+                "  %{prefix}_sleep = call ptr @sz_io_sleep_ms(i64 {ms_val})"
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_sleep"), Kind::Ptr)
@@ -643,17 +643,17 @@ fn emit_expr(
             let cstr = emit_cstr_from_string(&mut code, ctx.strs, msg, ctx, locals, prefix);
             writeln!(
                 code,
-                "  %{prefix}_io = call ptr @su_io_fail_cstr(ptr {cstr})"
+                "  %{prefix}_io = call ptr @sz_io_fail_cstr(ptr {cstr})"
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
         }
         Expr::IoPrintln(arg) => {
             let mut code = String::new();
-            let s = emit_su_string(&mut code, ctx.strs, arg, ctx, locals, prefix);
+            let s = emit_sz_string(&mut code, ctx.strs, arg, ctx, locals, prefix);
             writeln!(
                 code,
-                "  %{prefix}_io = call ptr @su_io_println(ptr {s})"
+                "  %{prefix}_io = call ptr @sz_io_println(ptr {s})"
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
@@ -664,7 +664,7 @@ fn emit_expr(
             let ptr = if ie.kind == Kind::Int {
                 writeln!(
                     code,
-                    "  %{prefix}_box = call ptr @su_box_i64(i64 {})",
+                    "  %{prefix}_box = call ptr @sz_box_i64(i64 {})",
                     ie.value
                 )
                 .unwrap();
@@ -676,7 +676,7 @@ fn emit_expr(
             };
             writeln!(
                 code,
-                "  %{prefix}_io = call ptr @su_io_pure(ptr {ptr})"
+                "  %{prefix}_io = call ptr @sz_io_pure(ptr {ptr})"
             )
             .unwrap();
             let payload = if ie.kind == Kind::Io {
@@ -688,7 +688,7 @@ fn emit_expr(
         }
         Expr::EffectsRunKit => {
             let mut code = String::new();
-            writeln!(code, "  %{prefix}_io = call ptr @su_effects_run_kit()").unwrap();
+            writeln!(code, "  %{prefix}_io = call ptr @sz_effects_run_kit()").unwrap();
             io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
         }
         Expr::AdtConstruct {
@@ -703,7 +703,7 @@ fn emit_expr(
             let mut code = String::new();
             writeln!(
                 code,
-                "  %{prefix}_adt = call ptr @su_adt_new(i32 {tag}, ptr null)"
+                "  %{prefix}_adt = call ptr @sz_adt_new(i32 {tag}, ptr null)"
             )
             .unwrap();
             val_emitted(code, format!("%{prefix}_adt"), Kind::Ptr)
@@ -807,7 +807,7 @@ fn emit_expr(
             let mut code = se.code;
             writeln!(
                 code,
-                "  %{prefix}_tag = call i32 @su_adt_tag(ptr {})",
+                "  %{prefix}_tag = call i32 @sz_adt_tag(ptr {})",
                 se.value
             )
             .unwrap();
@@ -886,7 +886,7 @@ fn emit_expr(
                     Kind::Io => {
                         writeln!(
                             code,
-                            "  %{prefix}_dflt = call ptr @su_io_pure(ptr null)"
+                            "  %{prefix}_dflt = call ptr @sz_io_pure(ptr null)"
                         )
                         .unwrap();
                         format!("%{prefix}_dflt")
@@ -920,7 +920,7 @@ fn emit_expr(
         Expr::FlatMap { inner, param, body } => {
             let id = *ctx.cont_id;
             *ctx.cont_id += 1;
-            let cont_name = format!("su_cont_{id}");
+            let cont_name = format!("sz_cont_{id}");
 
             let inner_emitted = emit_expr(inner, ctx, locals, &format!("{prefix}_in"));
             let payload_kind = inner_emitted.payload;
@@ -941,7 +941,7 @@ fn emit_expr(
                 if payload_kind == Kind::Int {
                     writeln!(
                         pre,
-                        "  %{p} = call i64 @su_unbox_i64(ptr %value)"
+                        "  %{p} = call i64 @sz_unbox_i64(ptr %value)"
                     )
                     .unwrap();
                     body_locals.insert(p.clone(), (format!("%{p}"), Kind::Int));
@@ -990,7 +990,7 @@ fn emit_expr(
             );
             writeln!(
                 code,
-                "  %{prefix}_fm = call ptr @su_io_flatmap(ptr {inner_io}, ptr @{cont_name}, ptr {env_ptr})"
+                "  %{prefix}_fm = call ptr @sz_io_flatmap(ptr {inner_io}, ptr @{cont_name}, ptr {env_ptr})"
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_fm"), body_emitted.payload)
@@ -998,7 +998,7 @@ fn emit_expr(
         Expr::HandleErrorWith { inner, body } => {
             let id = *ctx.cont_id;
             *ctx.cont_id += 1;
-            let cont_name = format!("su_err_{id}");
+            let cont_name = format!("sz_err_{id}");
             let capture_names = capture_name_order(locals);
             let mut pre = String::new();
             let mut body_locals = HashMap::new();
@@ -1044,7 +1044,7 @@ fn emit_expr(
             );
             writeln!(
                 code,
-                "  %{prefix}_h = call ptr @su_io_handle_error_with(ptr {inner_io}, ptr @{cont_name}, ptr {env_ptr})"
+                "  %{prefix}_h = call ptr @sz_io_handle_error_with(ptr {inner_io}, ptr @{cont_name}, ptr {env_ptr})"
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_h"), body_emitted.payload)
@@ -1060,7 +1060,7 @@ fn emit_expr(
             );
             writeln!(
                 code,
-                "  %{prefix}_attempt = call ptr @su_io_attempt(ptr {inner_io})"
+                "  %{prefix}_attempt = call ptr @sz_io_attempt(ptr {inner_io})"
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_attempt"), Kind::Ptr)
@@ -1074,7 +1074,7 @@ fn emit_expr(
             let rv = ensure_io(&mut code, re.kind, &re.value, &format!("{prefix}_rrio"));
             writeln!(
                 code,
-                "  %{prefix}_race = call ptr @su_io_race(ptr {lv}, ptr {rv})"
+                "  %{prefix}_race = call ptr @sz_io_race(ptr {lv}, ptr {rv})"
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_race"), Kind::Ptr)
@@ -1088,7 +1088,7 @@ fn emit_expr(
             let rv = ensure_io(&mut code, re.kind, &re.value, &format!("{prefix}_brio"));
             writeln!(
                 code,
-                "  %{prefix}_both = call ptr @su_io_both(ptr {lv}, ptr {rv})"
+                "  %{prefix}_both = call ptr @sz_io_both(ptr {lv}, ptr {rv})"
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_both"), Kind::Ptr)
@@ -1096,7 +1096,7 @@ fn emit_expr(
     }
 }
 
-/// Emit `s"..."` as left-fold `su_string_concat`, coercing Int holes via `su_string_from_int`.
+/// Emit `s"..."` as left-fold `sz_string_concat`, coercing Int holes via `sz_string_from_int`.
 fn emit_interpolate(
     parts: &[crate::ast::InterpPart],
     ctx: &mut EmitCtx<'_>,
@@ -1119,7 +1119,7 @@ fn emit_interpolate(
                 let mut code = ee.code;
                 writeln!(
                     code,
-                    "  %{prefix}_s = call ptr @su_string_from_int(i64 {})",
+                    "  %{prefix}_s = call ptr @sz_string_from_int(i64 {})",
                     ee.value
                 )
                 .unwrap();
@@ -1145,7 +1145,7 @@ fn emit_interpolate(
                 } else {
                     writeln!(
                         code,
-                        "  %{prefix}_s{i} = call ptr @su_string_from_int(i64 {})",
+                        "  %{prefix}_s{i} = call ptr @sz_string_from_int(i64 {})",
                         ee.value
                     )
                     .unwrap();
@@ -1158,7 +1158,7 @@ fn emit_interpolate(
             Some(prev) => {
                 writeln!(
                     code,
-                    "  %{prefix}_c{i} = call ptr @su_string_concat(ptr {prev}, ptr {piece})"
+                    "  %{prefix}_c{i} = call ptr @sz_string_concat(ptr {prev}, ptr {piece})"
                 )
                 .unwrap();
                 format!("%{prefix}_c{i}")
@@ -1169,8 +1169,8 @@ fn emit_interpolate(
 }
 
 /// Emit a `_ => body` / `x => body` lambda literal as a closure value: a
-/// 2-element `SuList` `cons(fn_ptr, cons(env_ptr, nil))`. `fn_ptr` matches the
-/// C `SuViewTapFn` signature `void (*)(SuView *self, void *env)`; `env_ptr` is
+/// 2-element `SzList` `cons(fn_ptr, cons(env_ptr, nil))`. `fn_ptr` matches the
+/// C `SzViewTapFn` signature `void (*)(SzView *self, void *env)`; `env_ptr` is
 /// the captured-locals list (same packing scheme as `flatMap` continuations).
 /// Consumers (currently only `View.button`) unpack the pair back out.
 fn emit_lambda(
@@ -1182,7 +1182,7 @@ fn emit_lambda(
 ) -> Emitted {
     let id = *ctx.cont_id;
     *ctx.cont_id += 1;
-    let fn_name = format!("su_tap_{id}");
+    let fn_name = format!("sz_tap_{id}");
 
     let capture_names = capture_name_order(locals);
     let mut pre = String::new();
@@ -1211,7 +1211,7 @@ fn emit_lambda(
     if body_emitted.kind == Kind::Io {
         writeln!(
             ctx.conts,
-            "  %t{id}_ur = call {{ i32, ptr, ptr }} @su_io_unsafe_run(ptr {})",
+            "  %t{id}_ur = call {{ i32, ptr, ptr }} @sz_io_unsafe_run(ptr {})",
             body_emitted.value
         )
         .unwrap();
@@ -1222,21 +1222,21 @@ fn emit_lambda(
 
     let mut code = String::new();
     let env_ptr = pack_env(&mut code, locals, &capture_names, &format!("{prefix}_cap"));
-    writeln!(code, "  %{prefix}_cl0 = call ptr @su_list_nil()").unwrap();
+    writeln!(code, "  %{prefix}_cl0 = call ptr @sz_list_nil()").unwrap();
     writeln!(
         code,
-        "  %{prefix}_cl1 = call ptr @su_list_cons(ptr {env_ptr}, ptr %{prefix}_cl0)"
+        "  %{prefix}_cl1 = call ptr @sz_list_cons(ptr {env_ptr}, ptr %{prefix}_cl0)"
     )
     .unwrap();
     writeln!(
         code,
-        "  %{prefix}_cl2 = call ptr @su_list_cons(ptr @{fn_name}, ptr %{prefix}_cl1)"
+        "  %{prefix}_cl2 = call ptr @sz_list_cons(ptr @{fn_name}, ptr %{prefix}_cl1)"
     )
     .unwrap();
     val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
 }
 
-/// `n => body` for `Signal.map`: `ptr (*)(i64, ptr)` returning a SuString.
+/// `n => body` for `Signal.map`: `ptr (*)(i64, ptr)` returning a SzString.
 fn emit_map_lambda(
     param: &Option<String>,
     body: &Expr,
@@ -1246,7 +1246,7 @@ fn emit_map_lambda(
 ) -> Emitted {
     let id = *ctx.cont_id;
     *ctx.cont_id += 1;
-    let fn_name = format!("su_map_{id}");
+    let fn_name = format!("sz_map_{id}");
 
     let capture_names = capture_name_order(locals);
     let mut pre = String::new();
@@ -1277,7 +1277,7 @@ fn emit_map_lambda(
     if body_emitted.kind == Kind::Io {
         writeln!(
             ctx.conts,
-            "  %m{id}_ur = call {{ i32, ptr, ptr }} @su_io_unsafe_run(ptr {})",
+            "  %m{id}_ur = call {{ i32, ptr, ptr }} @sz_io_unsafe_run(ptr {})",
             body_emitted.value
         )
         .unwrap();
@@ -1290,7 +1290,7 @@ fn emit_map_lambda(
     } else if body_emitted.kind == Kind::Int {
         writeln!(
             ctx.conts,
-            "  %m{id}_s = call ptr @su_string_from_int(i64 {})",
+            "  %m{id}_s = call ptr @sz_string_from_int(i64 {})",
             body_emitted.value
         )
         .unwrap();
@@ -1303,15 +1303,15 @@ fn emit_map_lambda(
 
     let mut code = String::new();
     let env_ptr = pack_env(&mut code, locals, &capture_names, &format!("{prefix}_cap"));
-    writeln!(code, "  %{prefix}_cl0 = call ptr @su_list_nil()").unwrap();
+    writeln!(code, "  %{prefix}_cl0 = call ptr @sz_list_nil()").unwrap();
     writeln!(
         code,
-        "  %{prefix}_cl1 = call ptr @su_list_cons(ptr {env_ptr}, ptr %{prefix}_cl0)"
+        "  %{prefix}_cl1 = call ptr @sz_list_cons(ptr {env_ptr}, ptr %{prefix}_cl0)"
     )
     .unwrap();
     writeln!(
         code,
-        "  %{prefix}_cl2 = call ptr @su_list_cons(ptr @{fn_name}, ptr %{prefix}_cl1)"
+        "  %{prefix}_cl2 = call ptr @sz_list_cons(ptr @{fn_name}, ptr %{prefix}_cl1)"
     )
     .unwrap();
     val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
@@ -1333,24 +1333,24 @@ fn emit_signal_map(
     code.push_str(&mapper.code);
     writeln!(
         code,
-        "  %{prefix}_fnp = call ptr @su_list_head(ptr {})",
+        "  %{prefix}_fnp = call ptr @sz_list_head(ptr {})",
         mapper.value
     )
     .unwrap();
     writeln!(
         code,
-        "  %{prefix}_fnt = call ptr @su_list_tail(ptr {})",
+        "  %{prefix}_fnt = call ptr @sz_list_tail(ptr {})",
         mapper.value
     )
     .unwrap();
     writeln!(
         code,
-        "  %{prefix}_envp = call ptr @su_list_head(ptr %{prefix}_fnt)"
+        "  %{prefix}_envp = call ptr @sz_list_head(ptr %{prefix}_fnt)"
     )
     .unwrap();
     writeln!(
         code,
-        "  %{prefix}_v = call ptr @su_lang_signal_map(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
+        "  %{prefix}_v = call ptr @sz_lang_signal_map(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
         src.value
     )
     .unwrap();
@@ -1373,7 +1373,7 @@ fn emit_binary(
     if *op == BinOp::Add && le.kind == Kind::Ptr && re.kind == Kind::Ptr {
         writeln!(
             code,
-            "  %{prefix}_add = call ptr @su_string_concat(ptr {}, ptr {})",
+            "  %{prefix}_add = call ptr @sz_string_concat(ptr {}, ptr {})",
             le.value, re.value
         )
         .unwrap();
@@ -1383,7 +1383,7 @@ fn emit_binary(
     if matches!(op, BinOp::Eq | BinOp::Ne) && le.kind == Kind::Ptr && re.kind == Kind::Ptr {
         writeln!(
             code,
-            "  %{prefix}_eqi = call i32 @su_string_eq(ptr {}, ptr {})",
+            "  %{prefix}_eqi = call i32 @sz_string_eq(ptr {}, ptr {})",
             le.value, re.value
         )
         .unwrap();
@@ -1485,7 +1485,7 @@ fn emit_view_box(
     for (i, child) in emitted_args.iter().enumerate() {
         writeln!(
             code,
-            "  %{prefix}_ac{i} = call ptr @su_lang_view_add_child(ptr %{prefix}_v, ptr {})",
+            "  %{prefix}_ac{i} = call ptr @sz_lang_view_add_child(ptr %{prefix}_v, ptr {})",
             child.value
         )
         .unwrap();
@@ -1521,7 +1521,7 @@ fn emit_call(
         "Str.concat" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_string_concat(ptr {}, ptr {})",
+                "  %{prefix}_v = call ptr @sz_string_concat(ptr {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
@@ -1530,7 +1530,7 @@ fn emit_call(
         "Str.len" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call i64 @su_string_len(ptr {})",
+                "  %{prefix}_v = call i64 @sz_string_len(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1539,7 +1539,7 @@ fn emit_call(
         "Str.slice" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_string_slice(ptr {}, i64 {}, i64 {})",
+                "  %{prefix}_v = call ptr @sz_string_slice(ptr {}, i64 {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
             )
             .unwrap();
@@ -1548,7 +1548,7 @@ fn emit_call(
         "Str.eq" => {
             writeln!(
                 code,
-                "  %{prefix}_eqi = call i32 @su_string_eq(ptr {}, ptr {})",
+                "  %{prefix}_eqi = call i32 @sz_string_eq(ptr {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
@@ -1562,7 +1562,7 @@ fn emit_call(
         "Str.charAt" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call i64 @su_string_char_at(ptr {}, i64 {})",
+                "  %{prefix}_v = call i64 @sz_string_char_at(ptr {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
@@ -1571,7 +1571,7 @@ fn emit_call(
         "Str.fromInt" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_string_from_int(i64 {})",
+                "  %{prefix}_v = call ptr @sz_string_from_int(i64 {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1580,7 +1580,7 @@ fn emit_call(
         "Str.indexOf" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call i64 @su_string_index_of(ptr {}, ptr {})",
+                "  %{prefix}_v = call i64 @sz_string_index_of(ptr {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
@@ -1589,21 +1589,21 @@ fn emit_call(
         "Str.lines" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_string_lines(ptr {})",
+                "  %{prefix}_v = call ptr @sz_string_lines(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "List.empty" => {
-            writeln!(code, "  %{prefix}_v = call ptr @su_list_nil()").unwrap();
+            writeln!(code, "  %{prefix}_v = call ptr @sz_list_nil()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "List.cons" => {
             let head = if emitted_args[0].kind == Kind::Int {
                 writeln!(
                     code,
-                    "  %{prefix}_hd = call ptr @su_box_i64(i64 {})",
+                    "  %{prefix}_hd = call ptr @sz_box_i64(i64 {})",
                     emitted_args[0].value
                 )
                 .unwrap();
@@ -1613,7 +1613,7 @@ fn emit_call(
             };
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_list_cons(ptr {head}, ptr {})",
+                "  %{prefix}_v = call ptr @sz_list_cons(ptr {head}, ptr {})",
                 emitted_args[1].value
             )
             .unwrap();
@@ -1622,7 +1622,7 @@ fn emit_call(
         "List.isEmpty" => {
             writeln!(
                 code,
-                "  %{prefix}_i = call i32 @su_list_is_empty(ptr {})",
+                "  %{prefix}_i = call i32 @sz_list_is_empty(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1636,7 +1636,7 @@ fn emit_call(
         "List.head" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_list_head(ptr {})",
+                "  %{prefix}_v = call ptr @sz_list_head(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1645,7 +1645,7 @@ fn emit_call(
         "List.tail" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_list_tail(ptr {})",
+                "  %{prefix}_v = call ptr @sz_list_tail(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1654,7 +1654,7 @@ fn emit_call(
         "List.len" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call i64 @su_list_len(ptr {})",
+                "  %{prefix}_v = call i64 @sz_list_len(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1663,7 +1663,7 @@ fn emit_call(
         "List.at" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_list_at(ptr {}, i64 {})",
+                "  %{prefix}_v = call ptr @sz_list_at(ptr {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
@@ -1672,7 +1672,7 @@ fn emit_call(
         "List.reverse" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_list_reverse(ptr {})",
+                "  %{prefix}_v = call ptr @sz_list_reverse(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1681,13 +1681,13 @@ fn emit_call(
         "List.join" => {
             writeln!(
                 code,
-                "  %{prefix}_sep = call ptr @su_string_cstr(ptr {})",
+                "  %{prefix}_sep = call ptr @sz_string_cstr(ptr {})",
                 emitted_args[1].value
             )
             .unwrap();
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_list_join(ptr {}, ptr %{prefix}_sep)",
+                "  %{prefix}_v = call ptr @sz_list_join(ptr {}, ptr %{prefix}_sep)",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1697,7 +1697,7 @@ fn emit_call(
             let elem = if emitted_args[1].kind == Kind::Int {
                 writeln!(
                     code,
-                    "  %{prefix}_el = call ptr @su_box_i64(i64 {})",
+                    "  %{prefix}_el = call ptr @sz_box_i64(i64 {})",
                     emitted_args[1].value
                 )
                 .unwrap();
@@ -1707,7 +1707,7 @@ fn emit_call(
             };
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_list_append(ptr {}, ptr {elem})",
+                "  %{prefix}_v = call ptr @sz_list_append(ptr {}, ptr {elem})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1716,7 +1716,7 @@ fn emit_call(
         "Fs.read" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_fs_read(ptr {})",
+                "  %{prefix}_v = call ptr @sz_fs_read(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1725,7 +1725,7 @@ fn emit_call(
         "Fs.write" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_fs_write(ptr {}, ptr {})",
+                "  %{prefix}_v = call ptr @sz_fs_write(ptr {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
@@ -1734,7 +1734,7 @@ fn emit_call(
         "Fs.list" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_fs_list(ptr {})",
+                "  %{prefix}_v = call ptr @sz_fs_list(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1743,24 +1743,24 @@ fn emit_call(
         "Fs.mkdirs" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_fs_mkdirs(ptr {})",
+                "  %{prefix}_v = call ptr @sz_fs_mkdirs(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Sys.args" => {
-            writeln!(code, "  %{prefix}_v = call ptr @su_sys_args()").unwrap();
+            writeln!(code, "  %{prefix}_v = call ptr @sz_sys_args()").unwrap();
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Sys.readLine" => {
-            writeln!(code, "  %{prefix}_v = call ptr @su_sys_read_line()").unwrap();
+            writeln!(code, "  %{prefix}_v = call ptr @sz_sys_read_line()").unwrap();
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Sys.exec" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_sys_exec(ptr {})",
+                "  %{prefix}_v = call ptr @sz_sys_exec(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1769,24 +1769,24 @@ fn emit_call(
         "Sys.getenv" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_sys_getenv(ptr {})",
+                "  %{prefix}_v = call ptr @sz_sys_getenv(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Clock.realTime" => {
-            writeln!(code, "  %{prefix}_v = call ptr @su_clock_real_time()").unwrap();
+            writeln!(code, "  %{prefix}_v = call ptr @sz_clock_real_time()").unwrap();
             io_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Clock.monotonic" => {
-            writeln!(code, "  %{prefix}_v = call ptr @su_clock_monotonic()").unwrap();
+            writeln!(code, "  %{prefix}_v = call ptr @sz_clock_monotonic()").unwrap();
             io_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Random.nextInt" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_random_next_int(i64 {})",
+                "  %{prefix}_v = call ptr @sz_random_next_int(i64 {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1795,20 +1795,20 @@ fn emit_call(
         "Net.httpGet" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_net_http_get(ptr {})",
+                "  %{prefix}_v = call ptr @sz_net_http_get(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Impurity.runKit" => {
-            writeln!(code, "  %{prefix}_v = call ptr @su_impurity_run_kit()").unwrap();
+            writeln!(code, "  %{prefix}_v = call ptr @sz_impurity_run_kit()").unwrap();
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Signal.int" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_signal_int(i64 {})",
+                "  %{prefix}_v = call ptr @sz_lang_signal_int(i64 {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1817,7 +1817,7 @@ fn emit_call(
         "Signal.get" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call i64 @su_lang_signal_get(ptr {})",
+                "  %{prefix}_v = call i64 @sz_lang_signal_get(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1826,7 +1826,7 @@ fn emit_call(
         "Signal.set" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_signal_set(ptr {}, i64 {})",
+                "  %{prefix}_v = call ptr @sz_lang_signal_set(ptr {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
@@ -1835,7 +1835,7 @@ fn emit_call(
         "Signal.str" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_signal_str(ptr {})",
+                "  %{prefix}_v = call ptr @sz_lang_signal_str(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1844,7 +1844,7 @@ fn emit_call(
         "Signal.getStr" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_signal_str_get(ptr {})",
+                "  %{prefix}_v = call ptr @sz_lang_signal_str_get(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1853,7 +1853,7 @@ fn emit_call(
         "Signal.setStr" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_signal_str_set(ptr {}, ptr {})",
+                "  %{prefix}_v = call ptr @sz_lang_signal_str_set(ptr {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
@@ -1862,7 +1862,7 @@ fn emit_call(
         "Signal.list" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_signal_list(ptr {})",
+                "  %{prefix}_v = call ptr @sz_lang_signal_list(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1871,7 +1871,7 @@ fn emit_call(
         "Signal.getList" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_signal_list_get(ptr {})",
+                "  %{prefix}_v = call ptr @sz_lang_signal_list_get(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1880,7 +1880,7 @@ fn emit_call(
         "Signal.setList" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_signal_list_set(ptr {}, ptr {})",
+                "  %{prefix}_v = call ptr @sz_lang_signal_list_set(ptr {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
@@ -1889,7 +1889,7 @@ fn emit_call(
         "View.text" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_view_text(ptr {})",
+                "  %{prefix}_v = call ptr @sz_lang_view_text(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1898,7 +1898,7 @@ fn emit_call(
         "View.bindText" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_view_bind_text(ptr {})",
+                "  %{prefix}_v = call ptr @sz_lang_view_bind_text(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1908,69 +1908,69 @@ fn emit_call(
             // args[1] is a closure value: cons(fn_ptr, cons(env_ptr, nil)).
             writeln!(
                 code,
-                "  %{prefix}_fnp = call ptr @su_list_head(ptr {})",
+                "  %{prefix}_fnp = call ptr @sz_list_head(ptr {})",
                 emitted_args[1].value
             )
             .unwrap();
             writeln!(
                 code,
-                "  %{prefix}_fnt = call ptr @su_list_tail(ptr {})",
+                "  %{prefix}_fnt = call ptr @sz_list_tail(ptr {})",
                 emitted_args[1].value
             )
             .unwrap();
             writeln!(
                 code,
-                "  %{prefix}_envp = call ptr @su_list_head(ptr %{prefix}_fnt)"
+                "  %{prefix}_envp = call ptr @sz_list_head(ptr %{prefix}_fnt)"
             )
             .unwrap();
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_view_button(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
+                "  %{prefix}_v = call ptr @sz_lang_view_button(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
                 emitted_args[0].value
             )
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Theme.accent" => {
-            writeln!(code, "  %{prefix}_v = call i64 @su_theme_accent()").unwrap();
+            writeln!(code, "  %{prefix}_v = call i64 @sz_theme_accent()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Theme.primary" => {
-            writeln!(code, "  %{prefix}_v = call i64 @su_theme_primary()").unwrap();
+            writeln!(code, "  %{prefix}_v = call i64 @sz_theme_primary()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Theme.muted" => {
-            writeln!(code, "  %{prefix}_v = call i64 @su_theme_muted()").unwrap();
+            writeln!(code, "  %{prefix}_v = call i64 @sz_theme_muted()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Theme.foreground" => {
-            writeln!(code, "  %{prefix}_v = call i64 @su_theme_foreground()").unwrap();
+            writeln!(code, "  %{prefix}_v = call i64 @sz_theme_foreground()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Color.rgb" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call i64 @su_color_rgb(i64 {}, i64 {}, i64 {})",
+                "  %{prefix}_v = call i64 @sz_color_rgb(i64 {}, i64 {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
             )
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "View.column" => emit_view_box(
-            "su_lang_view_column",
+            "sz_lang_view_column",
             &mut code,
             &emitted_args,
             prefix,
         ),
-        "View.row" => emit_view_box("su_lang_view_row", &mut code, &emitted_args, prefix),
+        "View.row" => emit_view_box("sz_lang_view_row", &mut code, &emitted_args, prefix),
         "View.list" => {
-            writeln!(code, "  %{prefix}_v = call ptr @su_lang_view_list()").unwrap();
+            writeln!(code, "  %{prefix}_v = call ptr @sz_lang_view_list()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.each" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_view_each(ptr {})",
+                "  %{prefix}_v = call ptr @sz_lang_view_each(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1979,7 +1979,7 @@ fn emit_call(
         "View.scroll" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_view_scroll(ptr {})",
+                "  %{prefix}_v = call ptr @sz_lang_view_scroll(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -1988,7 +1988,7 @@ fn emit_call(
         "View.textField" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_view_text_field(ptr {}, ptr {})",
+                "  %{prefix}_v = call ptr @sz_lang_view_text_field(ptr {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
@@ -1997,7 +1997,7 @@ fn emit_call(
         "View.icon" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_view_icon(i64 {}, i64 {})",
+                "  %{prefix}_v = call ptr @sz_lang_view_icon(i64 {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
@@ -2006,7 +2006,7 @@ fn emit_call(
         "View.image" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_view_image(i64 {}, i64 {}, i64 {}, ptr {})",
+                "  %{prefix}_v = call ptr @sz_lang_view_image(i64 {}, i64 {}, i64 {}, ptr {})",
                 emitted_args[0].value,
                 emitted_args[1].value,
                 emitted_args[2].value,
@@ -2018,7 +2018,7 @@ fn emit_call(
         "View.addChild" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_view_add_child(ptr {}, ptr {})",
+                "  %{prefix}_v = call ptr @sz_lang_view_add_child(ptr {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
@@ -2027,7 +2027,7 @@ fn emit_call(
         "View.addTexts" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_view_add_texts(ptr {}, ptr {})",
+                "  %{prefix}_v = call ptr @sz_lang_view_add_texts(ptr {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
@@ -2036,7 +2036,7 @@ fn emit_call(
         "View.showWhen" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_lang_view_show_when(ptr {}, i64 {}, ptr {})",
+                "  %{prefix}_v = call ptr @sz_lang_view_show_when(ptr {}, i64 {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
             )
             .unwrap();
@@ -2045,7 +2045,7 @@ fn emit_call(
         "Ui.run" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @su_ui_run_view(ptr {})",
+                "  %{prefix}_v = call ptr @sz_ui_run_view(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -2076,7 +2076,7 @@ fn emit_call(
                         (_, Kind::Int) => {
                             writeln!(
                                 code,
-                                "  %{prefix}_a{i} = call ptr @su_box_i64(i64 {})",
+                                "  %{prefix}_a{i} = call ptr @sz_box_i64(i64 {})",
                                 a.value
                             )
                             .unwrap();
@@ -2099,7 +2099,7 @@ fn emit_call(
             }
             writeln!(
                 code,
-                "  %{prefix}_v = call {ret_ty} @su_user_{other}({})",
+                "  %{prefix}_v = call {ret_ty} @sz_user_{other}({})",
                 arg_parts.join(", ")
             )
             .unwrap();
@@ -2121,8 +2121,8 @@ mod tests {
         let p = parse(r#"@main def main: IO[Unit] = IO.println("Hi")"#).unwrap();
         let ir = emit_llvm(&p);
         assert!(ir.contains("define i32 @main(i32 %argc, ptr %argv)"));
-        assert!(ir.contains("su_io_println"));
-        assert!(ir.contains("su_runtime_main_args"));
+        assert!(ir.contains("sz_io_println"));
+        assert!(ir.contains("sz_runtime_main_args"));
     }
 
     #[test]
@@ -2139,8 +2139,8 @@ enum Color { case Red, case Blue }
 "#;
         let p = crate::lower::lower_program(parse(src).unwrap());
         let ir = emit_llvm(&p);
-        assert!(ir.contains("su_adt_new"));
-        assert!(ir.contains("su_adt_tag"));
+        assert!(ir.contains("sz_adt_new"));
+        assert!(ir.contains("sz_adt_tag"));
         assert!(ir.contains("switch i32"));
     }
 
@@ -2153,9 +2153,9 @@ def add1(n: Int): Int = n + 1
 "#;
         let p = parse(src).unwrap();
         let ir = emit_llvm(&p);
-        assert!(ir.contains("@su_user_add1"));
+        assert!(ir.contains("@sz_user_add1"));
         assert!(ir.contains("icmp"));
-        assert!(ir.contains("su_runtime_main_args"));
+        assert!(ir.contains("sz_runtime_main_args"));
     }
 
     #[test]
@@ -2169,7 +2169,7 @@ def add1(n: Int): Int = n + 1
 "#;
         let p = crate::lower::lower_program(parse(src).unwrap());
         let ir = emit_llvm(&p);
-        assert!(ir.contains("su_list_nil"));
-        assert!(ir.contains("su_list_cons"));
+        assert!(ir.contains("sz_list_nil"));
+        assert!(ir.contains("sz_list_cons"));
     }
 }

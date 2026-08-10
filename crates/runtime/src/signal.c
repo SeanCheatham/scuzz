@@ -1,33 +1,33 @@
-#include "scalui_ui.h"
+#include "scuzz_ui.h"
 
 #include <stdio.h>
 #include <string.h>
 
-static char *su_strdup(const char *s) {
+static char *sz_strdup(const char *s) {
   size_t n;
   char *out;
   if (!s)
     s = "";
   n = strlen(s);
-  out = (char *)su_alloc(n + 1);
+  out = (char *)sz_alloc(n + 1);
   memcpy(out, s, n + 1);
   return out;
 }
 
-struct SuSignalInt {
+struct SzSignalInt {
   int64_t value;
 };
 
-struct SuSignalStr {
+struct SzSignalStr {
   char *value;
   /* Derived from Signal.int via map (recomputed on get). */
-  SuSignalInt *map_src;
-  SuSignalMapIntFn map_fn;
+  SzSignalInt *map_src;
+  SzSignalMapIntFn map_fn;
   void *map_env;
 };
 
-struct SuSignalList {
-  SuList *value;
+struct SzSignalList {
+  SzList *value;
 };
 
 /* --- signal store registry (fuzz / dump oracle) --------------------------- */
@@ -48,7 +48,7 @@ static SigReg *g_sig_tail = NULL;
 static int g_sig_next_id = 0;
 
 static void sig_register(SigKind kind, const void *sig) {
-  SigReg *r = (SigReg *)su_alloc_zero(sizeof(SigReg));
+  SigReg *r = (SigReg *)sz_alloc_zero(sizeof(SigReg));
   r->kind = kind;
   r->id = g_sig_next_id++;
   r->sig = sig;
@@ -70,7 +70,7 @@ static void sig_unregister(const void *sig) {
         while (g_sig_tail && g_sig_tail->next)
           g_sig_tail = g_sig_tail->next;
       }
-      su_free(dead);
+      sz_free(dead);
       return;
     }
     p = &(*p)->next;
@@ -84,10 +84,10 @@ static void dump_append(char **buf, size_t *len, size_t *cap, const char *s) {
     char *nb;
     while (*len + n + 1 > ncap)
       ncap *= 2;
-    nb = (char *)su_alloc(ncap);
+    nb = (char *)sz_alloc(ncap);
     if (*buf) {
       memcpy(nb, *buf, *len);
-      su_free(*buf);
+      sz_free(*buf);
     }
     *buf = nb;
     *cap = ncap;
@@ -97,32 +97,32 @@ static void dump_append(char **buf, size_t *len, size_t *cap, const char *s) {
   (*buf)[*len] = '\0';
 }
 
-SuString *su_signal_dump(void) {
+SzString *sz_signal_dump(void) {
   char *buf = NULL;
   size_t len = 0, cap = 0;
   char line[512];
   SigReg *r;
-  SuString *out;
+  SzString *out;
   dump_append(&buf, &len, &cap, "");
   for (r = g_sig_head; r; r = r->next) {
     switch (r->kind) {
     case SIG_INT:
       snprintf(line, sizeof line, "int[%d] = %lld\n", r->id,
-               (long long)su_signal_int_get((const SuSignalInt *)r->sig));
+               (long long)sz_signal_int_get((const SzSignalInt *)r->sig));
       dump_append(&buf, &len, &cap, line);
       break;
     case SIG_STR:
       snprintf(line, sizeof line, "str[%d] = \"%s\"\n", r->id,
-               su_signal_str_get((const SuSignalStr *)r->sig));
+               sz_signal_str_get((const SzSignalStr *)r->sig));
       dump_append(&buf, &len, &cap, line);
       break;
     case SIG_LIST: {
-      SuList *p = su_signal_list_get((const SuSignalList *)r->sig);
+      SzList *p = sz_signal_list_get((const SzSignalList *)r->sig);
       snprintf(line, sizeof line, "list[%d] = [", r->id);
       dump_append(&buf, &len, &cap, line);
       for (; p; p = p->tail) {
-        const SuString *s = (const SuString *)p->head;
-        snprintf(line, sizeof line, "\"%s\"%s", s ? su_string_cstr(s) : "",
+        const SzString *s = (const SzString *)p->head;
+        snprintf(line, sizeof line, "\"%s\"%s", s ? sz_string_cstr(s) : "",
                  p->tail ? ", " : "");
         dump_append(&buf, &len, &cap, line);
       }
@@ -131,95 +131,95 @@ SuString *su_signal_dump(void) {
     }
     }
   }
-  out = su_string_from_cstr(buf);
-  su_free(buf);
+  out = sz_string_from_cstr(buf);
+  sz_free(buf);
   return out;
 }
 
-SuSignalInt *su_signal_int(int64_t initial) {
-  SuSignalInt *s = (SuSignalInt *)su_alloc(sizeof(SuSignalInt));
+SzSignalInt *sz_signal_int(int64_t initial) {
+  SzSignalInt *s = (SzSignalInt *)sz_alloc(sizeof(SzSignalInt));
   s->value = initial;
   sig_register(SIG_INT, s);
   return s;
 }
 
-void su_signal_int_set(SuSignalInt *s, int64_t v) {
+void sz_signal_int_set(SzSignalInt *s, int64_t v) {
   if (s)
     s->value = v;
 }
 
-int64_t su_signal_int_get(const SuSignalInt *s) { return s ? s->value : 0; }
+int64_t sz_signal_int_get(const SzSignalInt *s) { return s ? s->value : 0; }
 
-void su_signal_int_free(SuSignalInt *s) {
+void sz_signal_int_free(SzSignalInt *s) {
   if (s)
     sig_unregister(s);
-  su_free(s);
+  sz_free(s);
 }
 
-SuSignalStr *su_signal_str(const char *initial) {
-  SuSignalStr *s = (SuSignalStr *)su_alloc_zero(sizeof(SuSignalStr));
-  s->value = su_strdup(initial);
+SzSignalStr *sz_signal_str(const char *initial) {
+  SzSignalStr *s = (SzSignalStr *)sz_alloc_zero(sizeof(SzSignalStr));
+  s->value = sz_strdup(initial);
   sig_register(SIG_STR, s);
   return s;
 }
 
-void su_signal_str_set(SuSignalStr *s, const char *v) {
+void sz_signal_str_set(SzSignalStr *s, const char *v) {
   if (!s || s->map_fn)
     return;
-  su_free(s->value);
-  s->value = su_strdup(v);
+  sz_free(s->value);
+  s->value = sz_strdup(v);
 }
 
-const char *su_signal_str_get(const SuSignalStr *s) {
-  SuSignalStr *mut;
+const char *sz_signal_str_get(const SzSignalStr *s) {
+  SzSignalStr *mut;
   if (!s)
     return "";
   if (s->map_fn && s->map_src) {
-    SuString *out;
-    mut = (SuSignalStr *)s;
-    out = s->map_fn(su_signal_int_get(s->map_src), s->map_env);
-    su_free(mut->value);
-    mut->value = su_strdup(out ? su_string_cstr(out) : "");
+    SzString *out;
+    mut = (SzSignalStr *)s;
+    out = s->map_fn(sz_signal_int_get(s->map_src), s->map_env);
+    sz_free(mut->value);
+    mut->value = sz_strdup(out ? sz_string_cstr(out) : "");
   }
   return s->value ? s->value : "";
 }
 
-void su_signal_str_free(SuSignalStr *s) {
+void sz_signal_str_free(SzSignalStr *s) {
   if (!s)
     return;
   sig_unregister(s);
-  su_free(s->value);
-  su_free(s);
+  sz_free(s->value);
+  sz_free(s);
 }
 
-SuSignalStr *su_lang_signal_map(SuSignalInt *src, SuSignalMapIntFn fn, void *env) {
-  SuSignalStr *s = (SuSignalStr *)su_alloc_zero(sizeof(SuSignalStr));
+SzSignalStr *sz_lang_signal_map(SzSignalInt *src, SzSignalMapIntFn fn, void *env) {
+  SzSignalStr *s = (SzSignalStr *)sz_alloc_zero(sizeof(SzSignalStr));
   s->map_src = src;
   s->map_fn = fn;
   s->map_env = env;
-  s->value = su_strdup("");
+  s->value = sz_strdup("");
   sig_register(SIG_STR, s);
   /* Prime cached value. */
-  (void)su_signal_str_get(s);
+  (void)sz_signal_str_get(s);
   return s;
 }
 
-SuSignalList *su_signal_list(SuList *initial) {
-  SuSignalList *s = (SuSignalList *)su_alloc(sizeof(SuSignalList));
+SzSignalList *sz_signal_list(SzList *initial) {
+  SzSignalList *s = (SzSignalList *)sz_alloc(sizeof(SzSignalList));
   s->value = initial;
   sig_register(SIG_LIST, s);
   return s;
 }
 
-void su_signal_list_set(SuSignalList *s, SuList *v) {
+void sz_signal_list_set(SzSignalList *s, SzList *v) {
   if (s)
     s->value = v;
 }
 
-SuList *su_signal_list_get(const SuSignalList *s) { return s ? s->value : NULL; }
+SzList *sz_signal_list_get(const SzSignalList *s) { return s ? s->value : NULL; }
 
-void su_signal_list_free(SuSignalList *s) {
+void sz_signal_list_free(SzSignalList *s) {
   if (s)
     sig_unregister(s);
-  su_free(s);
+  sz_free(s);
 }
