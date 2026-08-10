@@ -86,15 +86,17 @@ jobs:
         run: |
           /tmp/stage1-scalui fuzz --iters 16 examples/counter
           /tmp/stage1-scalui fuzz --iters 16 examples/todo
+          /tmp/stage1-scalui fuzz --exhaust --depth 1 examples/counter
           rm -rf /tmp/scalui-fuzzbug
           /tmp/stage1-scalui new --ui --path /tmp scalui-fuzzbug
           cat > /tmp/scalui-fuzzbug/src/Main.scala <<'EOF'
           @main def main: IO[Unit] =
             for {
               count = Signal.int(0)
+              label = Signal.map(count, n => s"count = $n")
               root = View.column(
                 View.text("Bug"),
-                View.textSignal(count, "count = "),
+                View.bindText(label),
                 View.row(View.button("boom", _ => Fs.read("/definitely/missing")))
               )
               _ <- Ui.run(root)
@@ -107,20 +109,42 @@ jobs:
           if /tmp/stage1-scalui fuzz --replay /tmp/scalui-fuzzbug/build/fuzz/repro.toml /tmp/scalui-fuzzbug; then
             echo "replay should have reproduced the failure" && exit 1
           fi
+          rm -rf /tmp/scalui-fuzzbug-ex
+          /tmp/stage1-scalui new --ui --path /tmp scalui-fuzzbug-ex
+          cat > /tmp/scalui-fuzzbug-ex/src/Main.scala <<'EOF'
+          @main def main: IO[Unit] =
+            for {
+              count = Signal.int(0)
+              label = Signal.map(count, n => s"count = $n")
+              root = View.column(
+                View.text("Bug"),
+                View.bindText(label),
+                View.row(View.button("boom", _ => Fs.read("/definitely/missing")))
+              )
+              _ <- Ui.run(root)
+            } yield ()
+          EOF
+          if /tmp/stage1-scalui fuzz --exhaust --depth 1 /tmp/scalui-fuzzbug-ex; then
+            echo "exhaust should have found the failure" && exit 1
+          fi
+          test -f /tmp/scalui-fuzzbug-ex/build/fuzz/repro.toml
+          if /tmp/stage1-scalui fuzz --replay /tmp/scalui-fuzzbug-ex/build/fuzz/repro.toml /tmp/scalui-fuzzbug-ex; then
+            echo "exhaust replay should have reproduced the failure" && exit 1
+          fi
 
       - name: v0 new --ui happy path
         run: |
           rm -rf /tmp/scalui-v0app
           cargo run -p scalui -- new --ui --path /tmp scalui-v0app
           cargo run -p scalui -- test /tmp/scalui-v0app
-          test -f /tmp/scalui-v0app/goldens/scalui-v0app.png
-          test -f /tmp/scalui-v0app/goldens/scalui-v0app_after_tap.png
+          test -f /tmp/scalui-v0app/goldens/scalui-v0app.dump
+          test -f /tmp/scalui-v0app/goldens/scalui-v0app_after_tap.dump
           cargo run -p scalui -- test /tmp/scalui-v0app
           cargo run -p scalui -- run --headless /tmp/scalui-v0app
           test -f /tmp/scalui-v0app/build/snapshot.png
           /tmp/stage1-scalui new --ui --path /tmp scalui-v0s1
           /tmp/stage1-scalui test /tmp/scalui-v0s1
-          test -f /tmp/scalui-v0s1/goldens/scalui-v0s1.png
+          test -f /tmp/scalui-v0s1/goldens/scalui-v0s1.dump
           /tmp/stage1-scalui run --headless /tmp/scalui-v0s1
           test -f /tmp/scalui-v0s1/build/snapshot.png
 
