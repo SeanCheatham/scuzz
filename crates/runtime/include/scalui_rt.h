@@ -80,8 +80,6 @@ SuAdt *su_adt_new(int32_t tag, void *payload);
 int32_t su_adt_tag(const SuAdt *adt);
 void su_adt_free(SuAdt *adt);
 
- * Tag order: AtMain=0, Def=1, Ident=2, StringLit=3, Eof=4, Other=5 */
-
 /* --- IO fiber skeleton + blessed kit ------------------------------------ */
 
 typedef struct SuIo SuIo;
