@@ -2,7 +2,7 @@
 
 #include <string.h>
 
-/* Animation v0: float lerp advanced on pump via Clock dt (Phase 6). */
+/* Animation: float lerp advanced on pump via Clock dt. */
 
 struct SuAnimFloat {
   float from;

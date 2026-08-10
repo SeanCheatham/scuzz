@@ -207,44 +207,6 @@ int32_t su_adt_tag(const SuAdt *adt) { return adt ? adt->tag : -1; }
 
 void su_adt_free(SuAdt *adt) { su_free(adt); }
 
-/* Tok tags for Lexer.classify / ScalUI parser bootstrap */
-enum {
-  SU_TOK_AT_MAIN = 0,
-  SU_TOK_DEF = 1,
-  SU_TOK_IDENT = 2,
-  SU_TOK_STRING = 3,
-  SU_TOK_EOF = 4,
-  SU_TOK_OTHER = 5
-};
-
-static int is_ident_start(char c) {
-  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_';
-}
-
-static int is_ident(char c) {
-  return is_ident_start(c) || (c >= '0' && c <= '9');
-}
-
-SuAdt *su_lexer_classify(const char *source) {
-  const char *p = source ? source : "";
-  while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r')
-    p++;
-  if (*p == '\0')
-    return su_adt_new(SU_TOK_EOF, NULL);
-  if (*p == '@') {
-    if (strncmp(p, "@main", 5) == 0 && !is_ident(p[5]))
-      return su_adt_new(SU_TOK_AT_MAIN, NULL);
-    return su_adt_new(SU_TOK_OTHER, NULL);
-  }
-  if (*p == '"')
-    return su_adt_new(SU_TOK_STRING, NULL);
-  if (strncmp(p, "def", 3) == 0 && !is_ident(p[3]))
-    return su_adt_new(SU_TOK_DEF, NULL);
-  if (is_ident_start(*p))
-    return su_adt_new(SU_TOK_IDENT, NULL);
-  return su_adt_new(SU_TOK_OTHER, NULL);
-}
-
 SuPair *su_pair_new(void *left, void *right) {
   SuPair *p = (SuPair *)su_alloc(sizeof(SuPair));
   p->left = left;
@@ -352,7 +314,7 @@ SuIo *su_io_both(SuIo *left, SuIo *right) {
 }
 
 void su_io_free(SuIo *io) {
-  /* Phase 0/3: shallow free; graphs are short-lived process heaps. */
+  /* Shallow free; graphs are short-lived process heaps. */
   su_free(io);
 }
 
@@ -404,7 +366,7 @@ static void cont_free_all(ContFrame *stack) {
 }
 
 static void sleep_ms(int64_t ms) {
-  /* Phase 6: routed through Clock interpreter (live nanosleep or fake advance). */
+  /* Routed through Clock interpreter (live nanosleep or fake advance). */
   su_clock_sleep_ms(ms);
 }
 

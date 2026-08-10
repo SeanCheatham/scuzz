@@ -8,7 +8,7 @@ pub enum TypeError {
     Msg(String),
 }
 
-/// Structural check for Phase 4 kernel: @main is IO[Unit]; defs/calls resolve.
+/// Structural check for the kernel dialect: @main is IO[Unit]; defs/calls resolve.
 pub fn typecheck(program: &Program) -> Result<(), TypeError> {
     let enums: HashMap<&str, &EnumDef> = program
         .enums
@@ -80,25 +80,10 @@ fn infer(
         | Expr::IoDelayUnit
         | Expr::IoSleep(_)
         | Expr::IoFail(_)
-        | Expr::UiRunHeadless(_)
-        | Expr::UiRunCounter
-        | Expr::UiRunLive
-        | Expr::UiRunTodo
         | Expr::EffectsRunKit => Ok(Type::Io(Box::new(Type::Unit))),
         Expr::IoPure(inner) => {
             let t = infer(inner, enums, funs, env)?;
             Ok(Type::Io(Box::new(t)))
-        }
-        Expr::LexerClassify(arg) => {
-            let t = infer(arg, enums, funs, env)?;
-            if !matches!(t, Type::String) {
-                return Err(TypeError::Msg("Lexer.classify expects String".into()));
-            }
-            if enums.contains_key("Tok") {
-                Ok(Type::Adt("Tok".into()))
-            } else {
-                Ok(Type::Opaque("Tok".into()))
-            }
         }
         Expr::Var(name) => env
             .get(name)

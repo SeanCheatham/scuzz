@@ -255,7 +255,7 @@ int su_ui_pump_sync(SuUiSession *session) {
     return 0;
   /* Pull OS events before the frame (host-driven mobile shell). */
   drain_mobile_events(session);
-  /* Phase 6: advance animations with monotonic Clock dt. */
+  /* Advance animations with monotonic Clock dt. */
   now_ms = su_clock_monotonic_ms_sync();
   if (session->has_pump_clock) {
     int64_t dt = now_ms - session->last_pump_ms;
@@ -428,69 +428,6 @@ int su_ui_snapshot_png_sync(SuUiSession *session, const char *path) {
   if (session->dirty && !su_ui_pump_sync(session))
     return 0;
   return sk_encode_png_to_file(session->surface, path);
-}
-
-typedef struct {
-  SuUiSession *session;
-} UiEnv;
-
-static void *thunk_pump(void *env) {
-  UiEnv *e = (UiEnv *)env;
-  if (!su_ui_pump_sync(e->session))
-    su_panic("su_ui_pump failed");
-  return NULL;
-}
-
-SuIo *su_ui_pump(SuUiSession *session) {
-  UiEnv *e = (UiEnv *)su_alloc(sizeof(UiEnv));
-  e->session = session;
-  return su_io_delay(thunk_pump, e);
-}
-
-typedef struct {
-  SuUiSession *session;
-  SuInputEvent event;
-  char *text_owned;
-} UiInjectEnv;
-
-static void *thunk_inject(void *env) {
-  UiInjectEnv *e = (UiInjectEnv *)env;
-  if (!su_ui_inject_sync(e->session, &e->event))
-    su_panic("su_ui_inject failed");
-  return NULL;
-}
-
-SuIo *su_ui_inject(SuUiSession *session, SuInputEvent event) {
-  UiInjectEnv *e = (UiInjectEnv *)su_alloc(sizeof(UiInjectEnv));
-  e->session = session;
-  e->event = event;
-  e->text_owned = NULL;
-  if (event.kind == SU_INPUT_TEXT && event.text) {
-    e->text_owned = su_strdup(event.text);
-    e->event.text = e->text_owned;
-  }
-  return su_io_delay(thunk_inject, e);
-}
-
-typedef struct {
-  SuUiSession *session;
-  char *path;
-} UiSnapEnv;
-
-static void *thunk_snapshot(void *env) {
-  UiSnapEnv *e = (UiSnapEnv *)env;
-  if (!su_ui_snapshot_png_sync(e->session, e->path))
-    su_panic("su_ui_snapshot_png failed");
-  return NULL;
-}
-
-SuIo *su_ui_snapshot_png(SuUiSession *session, const char *path) {
-  UiSnapEnv *e = (UiSnapEnv *)su_alloc(sizeof(UiSnapEnv));
-  e->session = session;
-  e->path = path ? su_strdup(path) : NULL;
-  if (!e->path)
-    su_panic("snapshot path required");
-  return su_io_delay(thunk_snapshot, e);
 }
 
 SuUiRuntimeKind su_ui_session_kind(const SuUiSession *session) {

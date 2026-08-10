@@ -1,2 +1,5 @@
 @main def main: IO[Unit] =
-  Ui.runHeadless("Hello Headless")
+  for {
+    root = View.column(View.text("Hello Headless"))
+    _ <- Ui.run(root)
+  } yield ()

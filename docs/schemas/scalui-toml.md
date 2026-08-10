@@ -1,6 +1,6 @@
-# `scalui.toml` schema (draft)
+# `scalui.toml` schema
 
-Working title for the package manifest. Not Maven POM-compatible.
+Package manifest for ScalUI projects. Not Maven POM-compatible.
 
 ## Example
 
