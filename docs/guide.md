@@ -15,7 +15,7 @@ scalui run --headless         # writes build/snapshot.png
 scalui fmt --check
 ```
 
-From a prebuilt tarball (no checkout build): `RELEASE_TGZ=scalui-<triple>.tar.gz ./scripts/install.sh`. Produce one with `./scripts/package_release.sh`.
+From a prebuilt tarball (no checkout build): `RELEASE_TGZ=scalui-<triple>.tar.gz ./scripts/install.sh`. Produce one with `./scripts/package_release.sh` (always Stage 2 — ScalUI builds ScalUI; Stage 0 only if no bootstrap CLI is present).
 
 `scalui new --ui` scaffolds `scalui.toml` with `[ui]`, a Counter-shaped `src/Main.scala`, and Headless-friendly defaults.
 

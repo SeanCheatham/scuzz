@@ -44,8 +44,8 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 
 | Stage | Host | Role |
 | --- | --- | --- |
-| 0 | Rust | Bootstrap compiler + CLI (`crates/cli`) |
-| 1 | ScalUI (built by Stage 0) | `compiler-scalui/` |
-| 2 | ScalUI (built by Stage 1) | True self-host; release `scalui` |
+| 0 | Rust | Bootstrap only (`crates/cli`); CI / fresh checkout |
+| 1 | ScalUI (built by Stage 0) | First ScalUI-built CLI; rebuilds the compiler |
+| 2 | ScalUI (built by Stage 1) | True self-host; **shipped** `scalui` (`package_release.sh`) |
 
-Dual-boot gate: `scripts/selfhost.sh`. Kernel surface: [vision.md](vision.md#kernel-dialect-current).
+Dual-boot gate: `scripts/selfhost.sh`. Kernel surface: [vision.md](vision.md#kernel-dialect). Release tarballs record `stage=2` in `VERSION`.

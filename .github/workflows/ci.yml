@@ -68,12 +68,14 @@ jobs:
       - name: Self-host dual-boot
         run: ./scripts/selfhost.sh
 
-      - name: Package Stage-1 release + install-from-tarball smoke
+      - name: Package Stage-2 release + install-from-tarball smoke
         run: |
           TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
+          # Stage 1 from selfhost rebuilds compiler-scalui → Stage 2 (no cargo).
           SCALUI_BOOTSTRAP=/tmp/stage1-scalui ./scripts/package_release.sh
           test -f "dist/scalui-${TRIPLE}.tar.gz"
           test -x "dist/scalui-${TRIPLE}/bin/scalui"
+          grep -q '^stage=2$' "dist/scalui-${TRIPLE}/VERSION"
           PREFIX=/tmp/scalui-prefix
           rm -rf "$PREFIX"
           RELEASE_TGZ="$PWD/dist/scalui-${TRIPLE}.tar.gz" PREFIX="$PREFIX" ./scripts/install.sh
@@ -86,8 +88,11 @@ jobs:
           test -f /tmp/scalui-release-app/goldens/scalui-release-app.dump
           scalui run --headless /tmp/scalui-release-app
           test -f /tmp/scalui-release-app/build/snapshot.png
+          # Installed Stage-2 CLI is self-sufficient: rebuild the compiler without Rust.
+          scalui build "$GITHUB_WORKSPACE/compiler-scalui"
+          test -x "$GITHUB_WORKSPACE/compiler-scalui/build/scalui"
 
-      - name: Upload Stage-1 release artifact
+      - name: Upload Stage-2 release artifact
         uses: actions/upload-artifact@v4
         with:
           name: scalui-linux-x86_64
@@ -109,13 +114,13 @@ jobs:
           test -f examples/nav/build/snapshot.png
           cargo run -p scalui -- test examples/nav
 
-      - name: Deterministic fuzz (bounded) + repro replay (Stage-1 CLI)
+      - name: Deterministic fuzz (bounded) + repro replay (Stage-2 CLI)
         run: |
-          /tmp/stage1-scalui fuzz --iters 16 examples/counter
-          /tmp/stage1-scalui fuzz --iters 16 examples/todo
-          /tmp/stage1-scalui fuzz --exhaust --depth 1 examples/counter
+          /tmp/stage2-scalui fuzz --iters 16 examples/counter
+          /tmp/stage2-scalui fuzz --iters 16 examples/todo
+          /tmp/stage2-scalui fuzz --exhaust --depth 1 examples/counter
           rm -rf /tmp/scalui-fuzzbug
-          /tmp/stage1-scalui new --ui --path /tmp scalui-fuzzbug
+          /tmp/stage2-scalui new --ui --path /tmp scalui-fuzzbug
           cat > /tmp/scalui-fuzzbug/src/Main.scala <<'EOF'
           @main def main: IO[Unit] =
             for {
@@ -129,15 +134,15 @@ jobs:
               _ <- Ui.run(root)
             } yield ()
           EOF
-          if /tmp/stage1-scalui fuzz --iters 8 /tmp/scalui-fuzzbug; then
+          if /tmp/stage2-scalui fuzz --iters 8 /tmp/scalui-fuzzbug; then
             echo "fuzz should have found the failure" && exit 1
           fi
           test -f /tmp/scalui-fuzzbug/build/fuzz/repro.toml
-          if /tmp/stage1-scalui fuzz --replay /tmp/scalui-fuzzbug/build/fuzz/repro.toml /tmp/scalui-fuzzbug; then
+          if /tmp/stage2-scalui fuzz --replay /tmp/scalui-fuzzbug/build/fuzz/repro.toml /tmp/scalui-fuzzbug; then
             echo "replay should have reproduced the failure" && exit 1
           fi
           rm -rf /tmp/scalui-fuzzbug-ex
-          /tmp/stage1-scalui new --ui --path /tmp scalui-fuzzbug-ex
+          /tmp/stage2-scalui new --ui --path /tmp scalui-fuzzbug-ex
           cat > /tmp/scalui-fuzzbug-ex/src/Main.scala <<'EOF'
           @main def main: IO[Unit] =
             for {
@@ -151,11 +156,11 @@ jobs:
               _ <- Ui.run(root)
             } yield ()
           EOF
-          if /tmp/stage1-scalui fuzz --exhaust --depth 1 /tmp/scalui-fuzzbug-ex; then
+          if /tmp/stage2-scalui fuzz --exhaust --depth 1 /tmp/scalui-fuzzbug-ex; then
             echo "exhaust should have found the failure" && exit 1
           fi
           test -f /tmp/scalui-fuzzbug-ex/build/fuzz/repro.toml
-          if /tmp/stage1-scalui fuzz --replay /tmp/scalui-fuzzbug-ex/build/fuzz/repro.toml /tmp/scalui-fuzzbug-ex; then
+          if /tmp/stage2-scalui fuzz --replay /tmp/scalui-fuzzbug-ex/build/fuzz/repro.toml /tmp/scalui-fuzzbug-ex; then
             echo "exhaust replay should have reproduced the failure" && exit 1
           fi
 
@@ -169,11 +174,11 @@ jobs:
           cargo run -p scalui -- test /tmp/scalui-v0app
           cargo run -p scalui -- run --headless /tmp/scalui-v0app
           test -f /tmp/scalui-v0app/build/snapshot.png
-          /tmp/stage1-scalui new --ui --path /tmp scalui-v0s1
-          /tmp/stage1-scalui test /tmp/scalui-v0s1
-          test -f /tmp/scalui-v0s1/goldens/scalui-v0s1.dump
-          /tmp/stage1-scalui run --headless /tmp/scalui-v0s1
-          test -f /tmp/scalui-v0s1/build/snapshot.png
+          /tmp/stage2-scalui new --ui --path /tmp scalui-v0s2
+          /tmp/stage2-scalui test /tmp/scalui-v0s2
+          test -f /tmp/scalui-v0s2/goldens/scalui-v0s2.dump
+          /tmp/stage2-scalui run --headless /tmp/scalui-v0s2
+          test -f /tmp/scalui-v0s2/build/snapshot.png
 
       - name: Window peer + X11 embedder (xvfb)
         run: |
@@ -221,6 +226,29 @@ jobs:
 
       - name: Self-host dual-boot (default stack)
         run: ./scripts/selfhost.sh
+
+      - name: Package Stage-2 release + install smoke
+        run: |
+          TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
+          SCALUI_BOOTSTRAP=/tmp/stage1-scalui ./scripts/package_release.sh
+          test -f "dist/scalui-${TRIPLE}.tar.gz"
+          grep -q '^stage=2$' "dist/scalui-${TRIPLE}/VERSION"
+          PREFIX=/tmp/scalui-prefix
+          rm -rf "$PREFIX"
+          RELEASE_TGZ="$PWD/dist/scalui-${TRIPLE}.tar.gz" PREFIX="$PREFIX" ./scripts/install.sh
+          export PATH="$PREFIX/bin:$PATH"
+          unset SCALUI_HOME SCALUI_RUNTIME || true
+          rm -rf /tmp/scalui-release-app
+          scalui new --ui --path /tmp scalui-release-app
+          scalui test /tmp/scalui-release-app
+          scalui run --headless /tmp/scalui-release-app
+
+      - name: Upload Stage-2 release artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: scalui-macos-arm64
+          path: dist/scalui-*.tar.gz
+          if-no-files-found: error
 
       - name: Golden PNG tests
         run: |
