@@ -1,0 +1,5 @@
+def counterTitle(): String =
+  "Counter"
+
+def countLabel(n: Int): String =
+  s"count = $n"

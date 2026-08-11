@@ -110,10 +110,12 @@ def maybeRebuild(projectDir: String, lastFp: String, force: Int): IO[String] =
 )
 
 def srcFingerprint(projectDir: String): IO[String] =
-  Fs.list(pathJoin(projectDir, "src")).flatMap(names => fpFiles(pathJoin(projectDir, "src"), partitionSources(names, List.empty(), List.empty()), ""))
+  Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml =>
+    loadGraphSources(projectDir, toml).flatMap(texts => fpTexts(texts, toml))
+  )
 
-def fpFiles(srcDir: String, names: List, acc: String): IO[String] =
-  if (List.isEmpty(names) == 1) IO.pure(acc) else Fs.read(pathJoin(srcDir, List.head(names))).flatMap(text => fpFiles(srcDir, List.tail(names), str4(acc, List.head(names), "\n", text)))
+def fpTexts(texts: List, acc: String): IO[String] =
+  if (List.isEmpty(texts) == 1) IO.pure(acc) else fpTexts(List.tail(texts), str3(acc, "\n", List.head(texts)))
 
 def cmdPackage(projectDir: String, target: String): IO[Unit] =
   compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>

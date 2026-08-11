@@ -342,6 +342,85 @@ SzIo *sz_testrt_fs_mkdirs(SzString *path) {
   return sz_io_flatmap(sz_io_delay(mem_mkdirs, path), unwrap_box, NULL);
 }
 
+static char *canon_path(const char *p) {
+  char *norm = norm_path(p);
+  char *parts[256];
+  size_t nparts = 0;
+  size_t i = 0;
+  int abs = 0;
+  char *out;
+  size_t out_len = 1;
+  if (norm[0] == '/')
+    abs = 1;
+  while (norm[i]) {
+    size_t start = i;
+    while (norm[i] && norm[i] != '/')
+      i++;
+    if (i > start) {
+      size_t n = i - start;
+      char *seg = (char *)sz_alloc(n + 1);
+      memcpy(seg, norm + start, n);
+      seg[n] = '\0';
+      if (strcmp(seg, ".") == 0) {
+        sz_free(seg);
+      } else if (strcmp(seg, "..") == 0) {
+        sz_free(seg);
+        if (nparts > 0) {
+          sz_free(parts[nparts - 1]);
+          nparts--;
+        }
+      } else if (nparts < 256) {
+        parts[nparts++] = seg;
+      } else {
+        sz_free(seg);
+      }
+    }
+    if (norm[i] == '/')
+      i++;
+  }
+  sz_free(norm);
+  for (i = 0; i < nparts; i++)
+    out_len += strlen(parts[i]) + 1;
+  out = (char *)sz_alloc(out_len + 2);
+  out[0] = '\0';
+  if (abs)
+    strcat(out, "/");
+  for (i = 0; i < nparts; i++) {
+    if (i > 0)
+      strcat(out, "/");
+    strcat(out, parts[i]);
+    sz_free(parts[i]);
+  }
+  if (abs && nparts == 0) {
+    out[0] = '/';
+    out[1] = '\0';
+  }
+  return out;
+}
+
+static void *mem_canonicalize(void *env) {
+  SzString *path_s = (SzString *)env;
+  BoxResult *r = (BoxResult *)sz_alloc(sizeof(BoxResult));
+  char *path = canon_path(sz_string_cstr(path_s));
+  MemNode *n = fs_find(path);
+  if (!n) {
+    /* Allow canonicalize of non-existent leaf if parent exists as dir, matching
+       common realpath failure modes loosely: require exact mem node. */
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.canonicalize: not found (mem)");
+    sz_free(path);
+    return r;
+  }
+  r->is_err = 0;
+  r->as.ok = sz_string_from_cstr(path);
+  sz_free(path);
+  return r;
+}
+
+SzIo *sz_testrt_fs_canonicalize(SzString *path) {
+  return sz_io_flatmap(sz_io_delay(mem_canonicalize, path), unwrap_box, NULL);
+}
+
 /* --- stub network -------------------------------------------------------- */
 
 typedef struct NetStub {

@@ -63,6 +63,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_fs_write(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_list(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_mkdirs(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_fs_canonicalize(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_sys_args()").unwrap();
     writeln!(out, "declare ptr @sz_sys_read_line()").unwrap();
     writeln!(out, "declare ptr @sz_sys_exec(ptr)").unwrap();
@@ -1744,6 +1745,15 @@ fn emit_call(
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @sz_fs_mkdirs(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Fs.canonicalize" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_fs_canonicalize(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();

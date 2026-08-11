@@ -88,7 +88,7 @@ Subset used by compiler sources and bootstrap examples. New features land in Sta
 - No `val` / statement blocks / `var` — expression dialect only.
 - `if` / `match`; literals incl. list `[a,b,c]` and `s"…"`
 - Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
-- Builtins: `Str.*`, `List.*`, Fs/Sys (`args` / `readLine` / `exec` / `getenv`)/Clock/Random/Net, `Signal.*` (incl. `Signal.map`), `View.*` (incl. nested `View.column`/`row` children, `View.each`, `View.bindText`), `Ui.run`, Theme/Color
+- Builtins: `Str.*`, `List.*`, Fs (`read` / `write` / `list` / `mkdirs` / `canonicalize`)/Sys (`args` / `readLine` / `exec` / `getenv`)/Clock/Random/Net, `Signal.*` (incl. `Signal.map`), `View.*` (incl. nested `View.column`/`row` children, `View.each`, `View.bindText`), `Ui.run`, Theme/Color
 - `IO` kit + `.flatMap` / `.handleErrorWith` / `.attempt`; lambdas `_ =>` / `name =>` for taps
 - No macros, no implicits, no HKT beyond `IO`, no null
 
@@ -153,7 +153,7 @@ Primary goldens are **structural** (signal store + a11y view dump). PNG pixels a
 
 ## Open work
 
-Path `[dependencies]`, deeper UI (Flutter-style constraints when the widget set grows), and Windows desktop embedder stay deferred — pick the next vertical slice when needed.
+Deeper UI (Flutter-style constraints when the widget set grows) and Windows desktop embedder stay deferred — pick the next vertical slice when needed.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
 

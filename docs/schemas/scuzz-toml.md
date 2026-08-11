@@ -15,8 +15,7 @@ kind = "executable"
 main = "Main"
 
 [dependencies]
-# path = "../shared"
-# git = { url = "https://example.com/scuzz-lib.git", rev = "..." }
+shared = { path = "../shared" }
 
 [ui]
 # default runtime when `scuzz run` has a display / shell
@@ -45,7 +44,20 @@ bundle_id = "dev.scuzz.hello"  # used by `scuzz package`
 
 ### `[dependencies]`
 
-v0: empty or path deps only. No Maven Central.
+v0: named local path dependencies only. No git, hosted, version, or registry forms.
+
+```toml
+[dependencies]
+shared = { path = "../shared" }
+utils = { path = "../utils" }
+```
+
+- Each entry is an inline table with exactly `path`.
+- Paths resolve relative to the directory containing the declaring `scuzz.toml`.
+- Dependencies may declare their own path dependencies (recursive).
+- Resolution is deterministic (sorted by dependency name). A package directory is compiled once even if reached through multiple paths.
+- Sources from the complete graph are **merged and typechecked as one program** (not separately compiled library artifacts). Exactly one `@main` is required for an executable root.
+- Cycles, missing packages/`src/`, duplicate names, empty paths, and unsupported value shapes are rejected.
 
 ### `[ui]`
 
@@ -76,4 +88,4 @@ my-app/
     ios/
 ```
 
-Stage-0 accepts `*.scala` and `*.scuzz` under `src/` (recursive). Units in the same package are merged; exactly one `@main` is required for executables.
+Stage-0 accepts `*.scala` and `*.scuzz` under `src/` (recursive). Units in the same package are merged; exactly one `@main` is required for executables. `scuzz fmt` formats only the selected project's `src/` (not dependency trees).

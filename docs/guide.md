@@ -62,6 +62,17 @@ Lists: keep a `Signal.list`, render with `View.each(items)` (framework rebuilds 
 
 `Ui.run` under Headless: mount → optional scripted text/tap (`tap_text` in toml / env) → snapshot → unmount. Window stays open when `[ui].default_runtime = "window"`.
 
+## Shared packages (path dependencies)
+
+Reusable local packages are ordinary projects without `@main`. Depend on them from `scuzz.toml`:
+
+```toml
+[dependencies]
+shared = { path = "../shared" }
+```
+
+Dependency sources are merged into one program with the root (and any transitive path deps). See `examples/shared` + `examples/counter`, and [scuzz-toml.md](schemas/scuzz-toml.md).
+
 ## Tests and impurity
 
 - `[ui]` packages: `scuzz test` is Headless **structural** goldens (signal store + a11y dump); PNG optional via `--pixels`
@@ -77,7 +88,8 @@ Lists: keep a `Signal.list`, render with `View.each(items)` (framework rebuilds 
 | --- | --- |
 | `examples/hello` | IO println hello |
 | `examples/cli` | `Sys.args` + `Sys.readLine` |
-| `examples/counter` | `Signal.map` + `View.bindText` + button lambda + `Ui.run` |
+| `examples/counter` | `Signal.map` + `View.bindText` + button lambda + `Ui.run` + path dep on `shared` |
+| `examples/shared` | Library package (`{ path = "..." }`) with helpers, no `@main` |
 | `examples/todo` | `Signal.list` + `View.each`, Rename via `setAt`, Fs load/save |
 | `examples/nav` | `showWhen`, multi-page |
 | `examples/live` | Stay-open Window (`Ui.run`; q/Esc) |

@@ -251,6 +251,7 @@ SzIo *sz_fs_read(SzString *path);
 SzIo *sz_fs_write(SzString *path, SzString *contents);
 SzIo *sz_fs_list(SzString *path);
 SzIo *sz_fs_mkdirs(SzString *path);
+SzIo *sz_fs_canonicalize(SzString *path);
 
 /* Process / args / env / console for Stage-1 CLI + clang (console out = IO.println) */
 void sz_sys_set_args(int argc, char **argv);
@@ -288,6 +289,7 @@ SzIo *sz_testrt_fs_read(SzString *path);
 SzIo *sz_testrt_fs_write(SzString *path, SzString *contents);
 SzIo *sz_testrt_fs_list(SzString *path);
 SzIo *sz_testrt_fs_mkdirs(SzString *path);
+SzIo *sz_testrt_fs_canonicalize(SzString *path);
 
 void sz_testrt_net_install(void);
 void sz_testrt_net_stub(const char *url, const char *body);

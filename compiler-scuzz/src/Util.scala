@@ -102,6 +102,30 @@ def skipWsCont(s: String, i: Int, c: Int): Int =
 def pathJoin(a: String, b: String): String =
   if (Str.len(a) == 0) b else if (Str.charAt(a, Str.len(a) - 1) == 47) Str.concat(a, b) else str3(a, "/", b)
 
+def strLess(a: String, b: String): Int =
+  strLessAt(a, b, 0)
+
+def strLessAt(a: String, b: String, i: Int): Int =
+  if (i >= Str.len(a)) if (i >= Str.len(b)) 0 else 1 else if (i >= Str.len(b)) 0 else if (Str.charAt(a, i) < Str.charAt(b, i)) 1 else if (Str.charAt(a, i) > Str.charAt(b, i)) 0 else strLessAt(a, b, i + 1)
+
+def listContainsStr(xs: List, s: String): Int =
+  if (List.isEmpty(xs) == 1) 0 else if (streq(List.head(xs), s) == 1) 1 else listContainsStr(List.tail(xs), s)
+
+def depName(dep: List): String =
+  List.head(dep)
+
+def depPath(dep: List): String =
+  List.head(List.tail(dep))
+
+def insertDepSorted(dep: List, xs: List): List =
+  if (List.isEmpty(xs) == 1) List.cons(dep, List.empty()) else if (strLess(depName(dep), depName(List.head(xs))) == 1) List.cons(dep, xs) else List.cons(List.head(xs), insertDepSorted(dep, List.tail(xs)))
+
+def sortDeps(deps: List): List =
+  if (List.isEmpty(deps) == 1) List.empty() else insertDepSorted(List.head(deps), sortDeps(List.tail(deps)))
+
+def joinChain(xs: List, sep: String): String =
+  if (List.isEmpty(xs) == 1) "" else if (List.isEmpty(List.tail(xs)) == 1) List.head(xs) else str3(List.head(xs), sep, joinChain(List.tail(xs), sep))
+
 def indexOfChar(s: String, ch: Int, i: Int): Int =
   if (i >= Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == ch) i else indexOfChar(s, ch, i + 1)
 

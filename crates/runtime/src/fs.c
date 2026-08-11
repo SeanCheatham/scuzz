@@ -4,6 +4,7 @@
 #include <dirent.h>
 #include <errno.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
@@ -196,4 +197,30 @@ SzIo *sz_fs_mkdirs(SzString *path) {
   if (sz_testrt_fs_is_fake())
     return sz_testrt_fs_mkdirs(path);
   return sz_io_flatmap(sz_io_delay(fs_mkdirs_result, path), unwrap_fs, NULL);
+}
+
+static void *fs_canonicalize_result(void *env) {
+  SzString *path = (SzString *)env;
+  FsResult *r = (FsResult *)sz_alloc(sizeof(FsResult));
+  const char *p = sz_string_cstr(path);
+  char *resolved = realpath(p, NULL);
+  if (!resolved) {
+    char msg[512];
+    snprintf(msg, sizeof(msg), "Fs.canonicalize: %s: %s", p, strerror(errno));
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, msg);
+    return r;
+  }
+  r->is_err = 0;
+  r->as.ok = sz_string_from_cstr(resolved);
+  free(resolved);
+  return r;
+}
+
+SzIo *sz_fs_canonicalize(SzString *path) {
+  if (!path)
+    sz_panic("sz_fs_canonicalize(null)");
+  if (sz_testrt_fs_is_fake())
+    return sz_testrt_fs_canonicalize(path);
+  return sz_io_flatmap(sz_io_delay(fs_canonicalize_result, path), unwrap_fs, NULL);
 }
