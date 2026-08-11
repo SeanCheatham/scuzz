@@ -1,4 +1,5 @@
-use crate::ast::{BinOp, EnumDef, Expr, FunDef, Program, Type};
+use crate::ast::{BinOp, EnumDef, Expr, ExprKind, FunDef, Program, Type};
+use crate::span::Span;
 use std::collections::HashMap;
 use thiserror::Error;
 
@@ -6,6 +7,34 @@ use thiserror::Error;
 pub enum TypeError {
     #[error("type error: {0}")]
     Msg(String),
+    #[error("type error: {msg}")]
+    At { msg: String, span: Span },
+}
+
+impl TypeError {
+    pub fn message(&self) -> &str {
+        match self {
+            TypeError::Msg(m) => m.as_str(),
+            TypeError::At { msg, .. } => msg.as_str(),
+        }
+    }
+
+    pub fn span(&self) -> Option<&Span> {
+        match self {
+            TypeError::At { span, .. } => Some(span),
+            TypeError::Msg(_) => None,
+        }
+    }
+
+    fn with_span_if_bare(self, span: &Span) -> Self {
+        match self {
+            TypeError::Msg(msg) => TypeError::At {
+                msg,
+                span: span.clone(),
+            },
+            other => other,
+        }
+    }
 }
 
 /// Structural check for the kernel dialect: @main is IO[Unit]; defs/calls resolve.
@@ -28,19 +57,23 @@ pub fn typecheck(program: &Program) -> Result<(), TypeError> {
         }
         let body_ty = infer(&d.body, &enums, &funs, &mut env)?;
         if !types_compat(&body_ty, &d.ret) {
-            return Err(TypeError::Msg(format!(
-                "def {} body {:?} does not match declared {:?}",
-                d.name, body_ty, d.ret
-            )));
+            return Err(TypeError::At {
+                msg: format!(
+                    "def {} body {:?} does not match declared {:?}",
+                    d.name, body_ty, d.ret
+                ),
+                span: d.body.span.clone(),
+            });
         }
     }
     let mut env: HashMap<String, Type> = HashMap::new();
     let ty = infer(&program.main.body, &enums, &funs, &mut env)?;
     match ty {
         Type::Io(inner) if matches!(*inner, Type::Unit) => Ok(()),
-        other => Err(TypeError::Msg(format!(
-            "@main body must be IO[Unit], got {other:?}"
-        ))),
+        other => Err(TypeError::At {
+            msg: format!("@main body must be IO[Unit], got {other:?}"),
+            span: program.main.body.span.clone(),
+        }),
     }
 }
 
@@ -50,17 +83,18 @@ fn infer(
     funs: &HashMap<String, &FunDef>,
     env: &mut HashMap<String, Type>,
 ) -> Result<Type, TypeError> {
-    match expr {
-        Expr::Unit => Ok(Type::Unit),
-        Expr::IntLit(_) => Ok(Type::Int),
-        Expr::StrLit(_) => Ok(Type::String),
-        Expr::ListLit { elems } => {
+    (|| {
+    let result = match &expr.kind {
+        ExprKind::Unit => Ok(Type::Unit),
+        ExprKind::IntLit(_) => Ok(Type::Int),
+        ExprKind::StrLit(_) => Ok(Type::String),
+        ExprKind::ListLit { elems } => {
             for e in elems {
                 infer(e, enums, funs, env)?;
             }
             Ok(Type::List)
         }
-        Expr::Interpolate { parts } => {
+        ExprKind::Interpolate { parts } => {
             for part in parts {
                 match part {
                     crate::ast::InterpPart::Lit(_) => {}
@@ -76,26 +110,26 @@ fn infer(
             }
             Ok(Type::String)
         },
-        Expr::IoPrintln(e) | Expr::IoFail(e) => {
+        ExprKind::IoPrintln(e) | ExprKind::IoFail(e) => {
             let t = infer(e, enums, funs, env)?;
             expect_ty(&t, &Type::String)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
-        Expr::IoSleep(e) => {
+        ExprKind::IoSleep(e) => {
             let t = infer(e, enums, funs, env)?;
             expect_ty(&t, &Type::Int)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
-        Expr::IoDelayUnit | Expr::EffectsRunKit => Ok(Type::Io(Box::new(Type::Unit))),
-        Expr::IoPure(inner) => {
+        ExprKind::IoDelayUnit | ExprKind::EffectsRunKit => Ok(Type::Io(Box::new(Type::Unit))),
+        ExprKind::IoPure(inner) => {
             let t = infer(inner, enums, funs, env)?;
             Ok(Type::Io(Box::new(t)))
         }
-        Expr::Var(name) => env
+        ExprKind::Var(name) => env
             .get(name)
             .cloned()
             .ok_or_else(|| TypeError::Msg(format!("unbound variable {name}"))),
-        Expr::AdtConstruct {
+        ExprKind::AdtConstruct {
             enum_name,
             case_name,
         } => {
@@ -109,7 +143,7 @@ fn infer(
             }
             Ok(Type::Adt(enum_name.clone()))
         }
-        Expr::Let { name, value, body } => {
+        ExprKind::Let { name, value, body } => {
             let vt = infer(value, enums, funs, env)?;
             let old = env.insert(name.clone(), vt);
             let bt = infer(body, enums, funs, env)?;
@@ -120,7 +154,7 @@ fn infer(
             }
             Ok(bt)
         }
-        Expr::If {
+        ExprKind::If {
             cond,
             then_branch,
             else_branch,
@@ -140,7 +174,7 @@ fn infer(
             }
             Ok(tt)
         }
-        Expr::Binary { op, left, right } => {
+        ExprKind::Binary { op, left, right } => {
             let lt = infer(left, enums, funs, env)?;
             let rt = infer(right, enums, funs, env)?;
             match op {
@@ -184,8 +218,8 @@ fn infer(
                 }
             }
         }
-        Expr::Call { callee, args } => infer_call(callee, args, enums, funs, env),
-        Expr::Match { scrutinee, arms } => {
+        ExprKind::Call { callee, args } => infer_call(callee, args, enums, funs, env),
+        ExprKind::Match { scrutinee, arms } => {
             let st = infer(scrutinee, enums, funs, env)?;
             let mut result: Option<Type> = None;
             for arm in arms {
@@ -203,7 +237,7 @@ fn infer(
             }
             result.ok_or_else(|| TypeError::Msg("empty match".into()))
         }
-        Expr::FlatMap { inner, param, body } => {
+        ExprKind::FlatMap { inner, param, body } => {
             let it = infer(inner, enums, funs, env)?;
             let Type::Io(inner_t) = it else {
                 return Err(TypeError::Msg("flatMap receiver must be IO[_]".into()));
@@ -228,7 +262,7 @@ fn infer(
             }
             Ok(bt)
         }
-        Expr::HandleErrorWith { inner, body } => {
+        ExprKind::HandleErrorWith { inner, body } => {
             let it = infer(inner, enums, funs, env)?;
             if !matches!(it, Type::Io(_)) {
                 return Err(TypeError::Msg(
@@ -243,14 +277,14 @@ fn infer(
             }
             Ok(bt)
         }
-        Expr::Attempt { inner } => {
+        ExprKind::Attempt { inner } => {
             let it = infer(inner, enums, funs, env)?;
             if !matches!(it, Type::Io(_)) {
                 return Err(TypeError::Msg("attempt receiver must be IO[_]".into()));
             }
             Ok(Type::Io(Box::new(Type::Opaque("Either".into()))))
         }
-        Expr::Lambda { param, body } => {
+        ExprKind::Lambda { param, body } => {
             // Param type is context-dependent (View for taps, Int for Signal.map).
             // Bind as Opaque so both map and tap lambdas typecheck.
             let old = param.as_ref().map(|p| {
@@ -272,7 +306,7 @@ fn infer(
             }
             Ok(Type::Opaque("TapFn".into()))
         }
-        Expr::IoRace { left, right } | Expr::IoBoth { left, right } => {
+        ExprKind::IoRace { left, right } | ExprKind::IoBoth { left, right } => {
             let lt = infer(left, enums, funs, env)?;
             let rt = infer(right, enums, funs, env)?;
             if !matches!(lt, Type::Io(_)) || !matches!(rt, Type::Io(_)) {
@@ -282,10 +316,13 @@ fn infer(
             }
             Ok(Type::Io(Box::new(Type::Unit)))
         }
-        Expr::For { .. } => Err(TypeError::Msg(
+        ExprKind::For { .. } => Err(TypeError::Msg(
             "internal: unlowered `for` (run lower before typecheck)".into(),
         )),
-    }
+    };
+    result
+    })()
+    .map_err(|e| e.with_span_if_bare(&expr.span))
 }
 
 fn infer_call(

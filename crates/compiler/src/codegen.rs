@@ -1,4 +1,4 @@
-use crate::ast::{BinOp, EnumDef, Expr, FunDef, Pattern, Program, Type};
+use crate::ast::{BinOp, EnumDef, Expr, ExprKind, FunDef, Pattern, Program, Type};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
@@ -234,13 +234,13 @@ fn payload_of_type(ty: &Type) -> Kind {
 }
 
 fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
-    match expr {
-        Expr::StrLit(s) => {
+    match &expr.kind {
+        ExprKind::StrLit(s) => {
             if !out.contains(s) {
                 out.push(s.clone());
             }
         }
-        Expr::Interpolate { parts } => {
+        ExprKind::Interpolate { parts } => {
             for part in parts {
                 match part {
                     crate::ast::InterpPart::Lit(s) => {
@@ -252,28 +252,28 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
                 }
             }
         }
-        Expr::IoPrintln(e)
-        | Expr::IoSleep(e)
-        | Expr::IoFail(e)
-        | Expr::IoPure(e)
-        | Expr::Attempt { inner: e } => collect_strings(e, out),
-        Expr::Lambda { body, .. } => collect_strings(body, out),
-        Expr::FlatMap { inner, body, .. }
-        | Expr::HandleErrorWith { inner, body }
-        | Expr::Let {
+        ExprKind::IoPrintln(e)
+        | ExprKind::IoSleep(e)
+        | ExprKind::IoFail(e)
+        | ExprKind::IoPure(e)
+        | ExprKind::Attempt { inner: e } => collect_strings(e, out),
+        ExprKind::Lambda { body, .. } => collect_strings(body, out),
+        ExprKind::FlatMap { inner, body, .. }
+        | ExprKind::HandleErrorWith { inner, body }
+        | ExprKind::Let {
             value: inner,
             body,
             ..
         }
-        | Expr::IoRace {
+        | ExprKind::IoRace {
             left: inner,
             right: body,
         }
-        | Expr::IoBoth {
+        | ExprKind::IoBoth {
             left: inner,
             right: body,
         }
-        | Expr::Binary {
+        | ExprKind::Binary {
             left: inner,
             right: body,
             ..
@@ -281,7 +281,7 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
             collect_strings(inner, out);
             collect_strings(body, out);
         }
-        Expr::If {
+        ExprKind::If {
             cond,
             then_branch,
             else_branch,
@@ -290,29 +290,29 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
             collect_strings(then_branch, out);
             collect_strings(else_branch, out);
         }
-        Expr::Match { scrutinee, arms } => {
+        ExprKind::Match { scrutinee, arms } => {
             collect_strings(scrutinee, out);
             for a in arms {
                 collect_strings(&a.body, out);
             }
         }
-        Expr::Call { args, .. } => {
+        ExprKind::Call { args, .. } => {
             for a in args {
                 collect_strings(a, out);
             }
         }
-        Expr::ListLit { elems } => {
+        ExprKind::ListLit { elems } => {
             for e in elems {
                 collect_strings(e, out);
             }
         }
-        Expr::IoDelayUnit
-        | Expr::Unit
-        | Expr::EffectsRunKit
-        | Expr::Var(_)
-        | Expr::IntLit(_)
-        | Expr::AdtConstruct { .. } => {}
-        Expr::For { binders, body } => {
+        ExprKind::IoDelayUnit
+        | ExprKind::Unit
+        | ExprKind::EffectsRunKit
+        | ExprKind::Var(_)
+        | ExprKind::IntLit(_)
+        | ExprKind::AdtConstruct { .. } => {}
+        ExprKind::For { binders, body } => {
             for b in binders {
                 match b {
                     crate::ast::ForBinder::Eq { value, .. }
@@ -541,7 +541,7 @@ fn emit_cstr_from_string(
     locals: &mut HashMap<String, (String, Kind)>,
     prefix: &str,
 ) -> String {
-    if let Expr::StrLit(s) = expr {
+    if let ExprKind::StrLit(s) = &expr.kind {
         let idx = str_index(strs, s);
         let len = s.len() + 1;
         writeln!(
@@ -570,7 +570,7 @@ fn emit_sz_string(
     locals: &mut HashMap<String, (String, Kind)>,
     prefix: &str,
 ) -> String {
-    if let Expr::StrLit(s) = expr {
+    if let ExprKind::StrLit(s) = &expr.kind {
         let idx = str_index(strs, s);
         let len = s.len() + 1;
         writeln!(
@@ -596,10 +596,10 @@ fn emit_expr(
     locals: &mut HashMap<String, (String, Kind)>,
     prefix: &str,
 ) -> Emitted {
-    match expr {
-        Expr::Unit => val_emitted(String::new(), "null".into(), Kind::Ptr),
-        Expr::IntLit(n) => val_emitted(String::new(), format!("{n}"), Kind::Int),
-        Expr::StrLit(s) => {
+    match &expr.kind {
+        ExprKind::Unit => val_emitted(String::new(), "null".into(), Kind::Ptr),
+        ExprKind::IntLit(n) => val_emitted(String::new(), format!("{n}"), Kind::Int),
+        ExprKind::StrLit(s) => {
             let idx = str_index(ctx.strs, s);
             let len = s.len() + 1;
             let mut code = String::new();
@@ -615,9 +615,9 @@ fn emit_expr(
             .unwrap();
             val_emitted(code, format!("%{prefix}_s"), Kind::Ptr)
         }
-        Expr::ListLit { elems } => emit_list_lit(elems, ctx, locals, prefix),
-        Expr::Interpolate { parts } => emit_interpolate(parts, ctx, locals, prefix),
-        Expr::IoDelayUnit => {
+        ExprKind::ListLit { elems } => emit_list_lit(elems, ctx, locals, prefix),
+        ExprKind::Interpolate { parts } => emit_interpolate(parts, ctx, locals, prefix),
+        ExprKind::IoDelayUnit => {
             let mut code = String::new();
             writeln!(
                 code,
@@ -626,7 +626,7 @@ fn emit_expr(
             .unwrap();
             io_emitted(code, format!("%{prefix}_delay"), Kind::Ptr)
         }
-        Expr::IoSleep(ms) => {
+        ExprKind::IoSleep(ms) => {
             let me = emit_expr(ms, ctx, locals, &format!("{prefix}_ms"));
             let mut code = me.code;
             let ms_val = if me.kind == Kind::Int {
@@ -642,7 +642,7 @@ fn emit_expr(
             .unwrap();
             io_emitted(code, format!("%{prefix}_sleep"), Kind::Ptr)
         }
-        Expr::IoFail(msg) => {
+        ExprKind::IoFail(msg) => {
             let mut code = String::new();
             let cstr = emit_cstr_from_string(&mut code, ctx.strs, msg, ctx, locals, prefix);
             writeln!(
@@ -652,7 +652,7 @@ fn emit_expr(
             .unwrap();
             io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
         }
-        Expr::IoPrintln(arg) => {
+        ExprKind::IoPrintln(arg) => {
             let mut code = String::new();
             let s = emit_sz_string(&mut code, ctx.strs, arg, ctx, locals, prefix);
             writeln!(
@@ -662,7 +662,7 @@ fn emit_expr(
             .unwrap();
             io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
         }
-        Expr::IoPure(inner) => {
+        ExprKind::IoPure(inner) => {
             let ie = emit_expr(inner, ctx, locals, &format!("{prefix}_p"));
             let mut code = ie.code;
             let ptr = if ie.kind == Kind::Int {
@@ -690,12 +690,12 @@ fn emit_expr(
             };
             io_emitted(code, format!("%{prefix}_io"), payload)
         }
-        Expr::EffectsRunKit => {
+        ExprKind::EffectsRunKit => {
             let mut code = String::new();
             writeln!(code, "  %{prefix}_io = call ptr @sz_effects_run_kit()").unwrap();
             io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
         }
-        Expr::AdtConstruct {
+        ExprKind::AdtConstruct {
             enum_name,
             case_name,
         } => {
@@ -712,14 +712,14 @@ fn emit_expr(
             .unwrap();
             val_emitted(code, format!("%{prefix}_adt"), Kind::Ptr)
         }
-        Expr::Var(name) => {
+        ExprKind::Var(name) => {
             let (val, kind) = locals
                 .get(name)
                 .cloned()
                 .unwrap_or_else(|| ("null".into(), Kind::Ptr));
             val_emitted(String::new(), val, kind)
         }
-        Expr::Let { name, value, body } => {
+        ExprKind::Let { name, value, body } => {
             // Nested vals must not reuse the same LLVM name prefix.
             let ve = emit_expr(value, ctx, locals, &format!("{prefix}_lv_{name}"));
             let mut code = ve.code;
@@ -734,7 +734,7 @@ fn emit_expr(
                 payload: be.payload,
             }
         }
-        Expr::If {
+        ExprKind::If {
             cond,
             then_branch,
             else_branch,
@@ -800,11 +800,11 @@ fn emit_expr(
                 payload,
             }
         }
-        Expr::Lambda { param, body } => emit_lambda(param, body, ctx, locals, prefix),
-        Expr::Binary { op, left, right } => emit_binary(op, left, right, ctx, locals, prefix),
-        Expr::Call { callee, args } => emit_call(callee, args, ctx, locals, prefix),
-        Expr::For { .. } => panic!("internal: unlowered `for` in codegen"),
-        Expr::Match { scrutinee, arms } => {
+        ExprKind::Lambda { param, body } => emit_lambda(param, body, ctx, locals, prefix),
+        ExprKind::Binary { op, left, right } => emit_binary(op, left, right, ctx, locals, prefix),
+        ExprKind::Call { callee, args } => emit_call(callee, args, ctx, locals, prefix),
+        ExprKind::For { .. } => panic!("internal: unlowered `for` in codegen"),
+        ExprKind::Match { scrutinee, arms } => {
             let se = emit_expr(scrutinee, ctx, locals, &format!("{prefix}_sc"));
             let id = *ctx.cont_id;
             *ctx.cont_id += 1;
@@ -921,7 +921,7 @@ fn emit_expr(
                 payload: result_payload,
             }
         }
-        Expr::FlatMap { inner, param, body } => {
+        ExprKind::FlatMap { inner, param, body } => {
             let id = *ctx.cont_id;
             *ctx.cont_id += 1;
             let cont_name = format!("sz_cont_{id}");
@@ -999,7 +999,7 @@ fn emit_expr(
             .unwrap();
             io_emitted(code, format!("%{prefix}_fm"), body_emitted.payload)
         }
-        Expr::HandleErrorWith { inner, body } => {
+        ExprKind::HandleErrorWith { inner, body } => {
             let id = *ctx.cont_id;
             *ctx.cont_id += 1;
             let cont_name = format!("sz_err_{id}");
@@ -1053,7 +1053,7 @@ fn emit_expr(
             .unwrap();
             io_emitted(code, format!("%{prefix}_h"), body_emitted.payload)
         }
-        Expr::Attempt { inner } => {
+        ExprKind::Attempt { inner } => {
             let inner_emitted = emit_expr(inner, ctx, locals, &format!("{prefix}_at"));
             let mut code = inner_emitted.code;
             let inner_io = ensure_io(
@@ -1069,7 +1069,7 @@ fn emit_expr(
             .unwrap();
             io_emitted(code, format!("%{prefix}_attempt"), Kind::Ptr)
         }
-        Expr::IoRace { left, right } => {
+        ExprKind::IoRace { left, right } => {
             let le = emit_expr(left, ctx, locals, &format!("{prefix}_rl"));
             let re = emit_expr(right, ctx, locals, &format!("{prefix}_rr"));
             let mut code = le.code;
@@ -1083,7 +1083,7 @@ fn emit_expr(
             .unwrap();
             io_emitted(code, format!("%{prefix}_race"), Kind::Ptr)
         }
-        Expr::IoBoth { left, right } => {
+        ExprKind::IoBoth { left, right } => {
             let le = emit_expr(left, ctx, locals, &format!("{prefix}_bl"));
             let re = emit_expr(right, ctx, locals, &format!("{prefix}_br"));
             let mut code = le.code;
@@ -1108,12 +1108,12 @@ fn emit_interpolate(
     prefix: &str,
 ) -> Emitted {
     if parts.is_empty() {
-        return emit_expr(&Expr::StrLit(String::new()), ctx, locals, prefix);
+        return emit_expr(&Expr::dummy(ExprKind::StrLit(String::new())), ctx, locals, prefix);
     }
     if parts.len() == 1 {
         match &parts[0] {
             crate::ast::InterpPart::Lit(s) => {
-                return emit_expr(&Expr::StrLit(s.clone()), ctx, locals, prefix);
+                return emit_expr(&Expr::dummy(ExprKind::StrLit(s.clone())), ctx, locals, prefix);
             }
             crate::ast::InterpPart::Expr(e) => {
                 let ee = emit_expr(e, ctx, locals, &format!("{prefix}_p0"));
@@ -1137,7 +1137,7 @@ fn emit_interpolate(
     for (i, part) in parts.iter().enumerate() {
         let piece = match part {
             crate::ast::InterpPart::Lit(s) => {
-                let e = emit_expr(&Expr::StrLit(s.clone()), ctx, locals, &format!("{prefix}_l{i}"));
+                let e = emit_expr(&Expr::dummy(ExprKind::StrLit(s.clone())), ctx, locals, &format!("{prefix}_l{i}"));
                 code.push_str(&e.code);
                 e.value
             }
@@ -1329,7 +1329,7 @@ fn emit_signal_map(
 ) -> Emitted {
     assert!(args.len() == 2, "Signal.map expects 2 args");
     let src = emit_expr(&args[0], ctx, locals, &format!("{prefix}_src"));
-    let Expr::Lambda { param, body } = &args[1] else {
+    let ExprKind::Lambda { param, body } = &args[1].kind else {
         panic!("Signal.map mapper must be a lambda");
     };
     let mapper = emit_map_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));

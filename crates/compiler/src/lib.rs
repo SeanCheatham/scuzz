@@ -10,7 +10,9 @@ pub mod lower;
 pub mod manifest;
 pub mod overlay;
 pub mod parser;
+pub mod span;
 pub mod typ;
 
 pub use check::{check_project, format_diagnostics, Diagnostic};
 pub use driver::{compile_project, CompileOptions, CompileOutput};
+pub use span::{offset_to_line_col, Span};

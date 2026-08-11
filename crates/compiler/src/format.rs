@@ -1,6 +1,6 @@
 //! Minimal Scuzz Lang formatter: parse → pretty-print (kernel dialect).
 
-use crate::ast::{BinOp, EnumDef, Expr, ForBinder, FunDef, MatchArm, Pattern, Program, Type};
+use crate::ast::{BinOp, EnumDef, Expr, ExprKind, ForBinder, FunDef, MatchArm, Pattern, Program, Type};
 use crate::parser::{parse, ParseError};
 use thiserror::Error;
 
@@ -83,59 +83,61 @@ fn pretty_def(d: &FunDef) -> String {
 
 fn pretty_expr(expr: &Expr, indent: usize) -> String {
     let pad = "  ".repeat(indent);
-    match expr {
-        Expr::Unit => format!("{pad}()"),
-        Expr::IntLit(n) => format!("{pad}{n}"),
-        Expr::StrLit(s) => format!("{pad}\"{}\"", escape(s)),
-        Expr::ListLit { elems } => {
+    match &expr.kind {
+        ExprKind::Unit => format!("{pad}()"),
+        ExprKind::IntLit(n) => format!("{pad}{n}"),
+        ExprKind::StrLit(s) => format!("{pad}\"{}\"", escape(s)),
+        ExprKind::ListLit { elems } => {
             let a: Vec<_> = elems
                 .iter()
                 .map(|e| pretty_expr(e, 0).trim().to_string())
                 .collect();
             format!("{pad}[{}]", a.join(", "))
         }
-        Expr::Interpolate { parts } => {
+        ExprKind::Interpolate { parts } => {
             let mut body = String::from("s\"");
             for part in parts {
                 match part {
                     crate::ast::InterpPart::Lit(s) => body.push_str(&escape_interp_lit(s)),
-                    crate::ast::InterpPart::Expr(Expr::Var(n)) => {
-                        body.push('$');
-                        body.push_str(n);
-                    }
-                    crate::ast::InterpPart::Expr(e) => {
-                        body.push_str("${");
-                        body.push_str(pretty_expr(e, 0).trim());
-                        body.push('}');
-                    }
+                    crate::ast::InterpPart::Expr(e) => match &e.kind {
+                        ExprKind::Var(n) => {
+                            body.push('$');
+                            body.push_str(n);
+                        }
+                        _ => {
+                            body.push_str("${");
+                            body.push_str(pretty_expr(e, 0).trim());
+                            body.push('}');
+                        }
+                    },
                 }
             }
             body.push('"');
             format!("{pad}{body}")
         }
-        Expr::IoPrintln(e) => format!("{pad}IO.println({})", pretty_expr(e, 0).trim()),
-        Expr::IoDelayUnit => format!("{pad}IO.delay(() => ())"),
-        Expr::IoSleep(e) => format!("{pad}IO.sleep({})", pretty_expr(e, 0).trim()),
-        Expr::IoFail(e) => format!("{pad}IO.fail({})", pretty_expr(e, 0).trim()),
-        Expr::IoPure(e) => format!("{pad}IO.pure({})", pretty_expr(e, 0).trim()),
-        Expr::EffectsRunKit => format!("{pad}Effects.runKit()"),
-        Expr::Var(n) => format!("{pad}{n}"),
-        Expr::AdtConstruct {
+        ExprKind::IoPrintln(e) => format!("{pad}IO.println({})", pretty_expr(e, 0).trim()),
+        ExprKind::IoDelayUnit => format!("{pad}IO.delay(() => ())"),
+        ExprKind::IoSleep(e) => format!("{pad}IO.sleep({})", pretty_expr(e, 0).trim()),
+        ExprKind::IoFail(e) => format!("{pad}IO.fail({})", pretty_expr(e, 0).trim()),
+        ExprKind::IoPure(e) => format!("{pad}IO.pure({})", pretty_expr(e, 0).trim()),
+        ExprKind::EffectsRunKit => format!("{pad}Effects.runKit()"),
+        ExprKind::Var(n) => format!("{pad}{n}"),
+        ExprKind::AdtConstruct {
             enum_name,
             case_name,
         } => format!("{pad}{enum_name}.{case_name}"),
-        Expr::Lambda { param, body } => {
+        ExprKind::Lambda { param, body } => {
             let p = param.as_deref().unwrap_or("_");
             format!("{pad}{p} => {}", pretty_expr(body, 0).trim())
         }
-        Expr::Call { callee, args } => {
+        ExprKind::Call { callee, args } => {
             let a: Vec<_> = args
                 .iter()
                 .map(|e| pretty_expr(e, 0).trim().to_string())
                 .collect();
             format!("{pad}{callee}({})", a.join(", "))
         }
-        Expr::If {
+        ExprKind::If {
             cond,
             then_branch,
             else_branch,
@@ -145,19 +147,19 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             pretty_expr(then_branch, 0).trim(),
             pretty_expr(else_branch, 0).trim()
         ),
-        Expr::Binary { op, left, right } => format!(
+        ExprKind::Binary { op, left, right } => format!(
             "{pad}{} {} {}",
             pretty_expr(left, 0).trim(),
             binop_str(*op),
             pretty_expr(right, 0).trim()
         ),
-        Expr::FlatMap { inner, param, body } => {
+        ExprKind::FlatMap { inner, param, body } => {
             let left = pretty_expr(inner, 0).trim().to_string();
             let right = pretty_expr(body, indent + 1);
             let p = param.as_deref().unwrap_or("_");
             if !matches!(
-                body.as_ref(),
-                Expr::Let { .. } | Expr::Match { .. } | Expr::FlatMap { .. }
+                &body.kind,
+                ExprKind::Let { .. } | ExprKind::Match { .. } | ExprKind::FlatMap { .. }
             ) && !right.contains('\n')
             {
                 format!("{pad}{left}.flatMap({p} => {})", right.trim())
@@ -165,39 +167,39 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
                 format!("{pad}{left}.flatMap({p} =>\n{right}\n{pad})")
             }
         }
-        Expr::HandleErrorWith { inner, body } => {
+        ExprKind::HandleErrorWith { inner, body } => {
             let left = pretty_expr(inner, 0).trim().to_string();
             let right = pretty_expr(body, indent + 1);
             format!("{pad}{left}.handleErrorWith(_ =>\n{right}\n{pad})")
         }
-        Expr::Attempt { inner } => {
+        ExprKind::Attempt { inner } => {
             let left = pretty_expr(inner, 0).trim().to_string();
             format!("{pad}{left}.attempt")
         }
-        Expr::IoRace { left, right } => format!(
+        ExprKind::IoRace { left, right } => format!(
             "{pad}IO.race({}, {})",
             pretty_expr(left, 0).trim(),
             pretty_expr(right, 0).trim()
         ),
-        Expr::IoBoth { left, right } => format!(
+        ExprKind::IoBoth { left, right } => format!(
             "{pad}IO.both({}, {})",
             pretty_expr(left, 0).trim(),
             pretty_expr(right, 0).trim()
         ),
-        Expr::Let { name, value, body } => {
+        ExprKind::Let { name, value, body } => {
             // Core `Let` (post-lower): reprint as a one-binder `for`.
             pretty_expr(
-                &Expr::For {
+                &Expr::dummy(ExprKind::For {
                     binders: vec![ForBinder::Eq {
                         name: name.clone(),
                         value: *value.clone(),
                     }],
                     body: body.clone(),
-                },
+                }),
                 indent,
             )
         }
-        Expr::For { binders, body } => {
+        ExprKind::For { binders, body } => {
             let mut out = format!("{pad}for {{\n");
             let inner = "  ".repeat(indent + 1);
             for b in binders {
@@ -223,7 +225,7 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             out.push_str(pretty_expr(body, 0).trim());
             out
         }
-        Expr::Match { scrutinee, arms } => {
+        ExprKind::Match { scrutinee, arms } => {
             let s = pretty_expr(scrutinee, 0).trim().to_string();
             let mut out = format!("{pad}{s} match {{\n");
             for arm in arms {

@@ -1,6 +1,6 @@
 //! Stem-paired `*.scuzz_sim` / `*.scuzz_laws` overlays for check / fuzz / TestRuntime.
 
-use crate::ast::{Expr, FunDef, MainDef, Program, Type};
+use crate::ast::{Expr, ExprKind, FunDef, MainDef, Program, Type};
 use crate::parser::{parse, ParseError};
 use thiserror::Error;
 
@@ -153,21 +153,21 @@ pub fn residualize_laws(program: &mut Program, law_names: &[String]) {
     }
     let mut body = program.main.body.clone();
     for name in law_names {
-        let assert_call = Expr::Call {
+        let assert_call = Expr::dummy(ExprKind::Call {
             callee: "Law.assert".into(),
             args: vec![
-                Expr::StrLit(name.clone()),
-                Expr::Call {
+                Expr::dummy(ExprKind::StrLit(name.clone())),
+                Expr::dummy(ExprKind::Call {
                     callee: name.clone(),
                     args: vec![],
-                },
+                }),
             ],
-        };
-        body = Expr::FlatMap {
+        });
+        body = Expr::dummy(ExprKind::FlatMap {
             inner: Box::new(body),
             param: Some("_".into()),
             body: Box::new(assert_call),
-        };
+        });
     }
     program.main = MainDef {
         name: program.main.name.clone(),
@@ -221,8 +221,8 @@ mod tests {
         let (prog, laws) = apply_overlays(live, &overlays).unwrap();
         assert_eq!(laws, vec!["always".to_string()]);
         let title = prog.defs.iter().find(|d| d.name == "title").unwrap();
-        match &title.body {
-            crate::ast::Expr::StrLit(s) => assert_eq!(s, "Sim"),
+        match &title.body.kind {
+            crate::ast::ExprKind::StrLit(s) => assert_eq!(s, "Sim"),
             other => panic!("expected sim body, got {other:?}"),
         }
     }

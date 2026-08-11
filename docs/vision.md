@@ -200,7 +200,7 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ## Open work
 
-Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Stem-paired laws/sim are in; desktop Window typing/click-to-focus lands via `SZ_INPUT_TEXT_EDIT` (Headless `text <s>` remains the script reference). Next slices from gaps: spans, then language/runtime unknowns. Deeper UI (Flutter-style constraints when the widget set grows) and Windows desktop embedder stay deferred. IME waits on real text rendering.
+Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Stem-paired laws/sim are in; desktop Window typing/click-to-focus lands via `SZ_INPUT_TEXT_EDIT` (Headless `text <s>` remains the script reference). Stage-0 diagnostics carry file/line/column; remaining span work is the self-host port. Next slices from gaps: language/runtime unknowns. Deeper UI (Flutter-style constraints when the widget set grows) and Windows desktop embedder stay deferred. IME waits on real text rendering.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
 
