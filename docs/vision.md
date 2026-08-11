@@ -153,7 +153,7 @@ Primary goldens are **structural** (signal store + a11y view dump). PNG pixels a
 
 ## Open work
 
-Deeper UI (Flutter-style constraints when the widget set grows) and Windows desktop embedder stay deferred — pick the next vertical slice when needed.
+Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Deeper UI (Flutter-style constraints when the widget set grows) and Windows desktop embedder stay deferred — pick the next vertical slice from there when needed.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
 
