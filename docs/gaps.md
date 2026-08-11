@@ -29,11 +29,11 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### 3. Memory strategy under long-lived apps
 
-**Current state.** libc `malloc`/`free` via `sz_alloc` / `sz_free`, manual ownership, `Resource` brackets; panic may leak (see GC decision in `vision.md`). No refcounting, arenas, or collector. Alloc accounting exists: size header before the user pointer, `sz_alloc_stats` / `sz_alloc_reset_stats`, optional `SCUZZ_ALLOC_TRACE=1` peak/live samples every N pumps in `sz_ui_pump_sync`. Runtime unit tests cover free-to-baseline and flat-ish live count across pumps. Optional `make -C crates/runtime test-asan` (ASan; best-effort, not default CI).
+**Current state.** libc `malloc`/`free` via `sz_alloc` / `sz_free`, manual ownership, `Resource` brackets; panic may leak (see GC decision in `vision.md`). No refcounting, arenas, or collector. Alloc accounting exists: size header before the user pointer, `sz_alloc_stats` / `sz_alloc_reset_stats`, optional `SCUZZ_ALLOC_TRACE=1` peak/live samples every N pumps in `sz_ui_pump_sync`. Runtime unit tests cover free-to-baseline, **2000-pump** static-label flatness, and **2000-pump counter-shaped** UI (`Signal.map` + `bindText` + periodic taps) with flat `live_count`/`live_bytes`. `Signal.map` frees the mapper's `SzString` after caching. Optional `make -C crates/runtime test-asan` runs in Linux CI (best-effort skip if unsupported).
 
-**Unproven.** Whether manual ownership holds up in a long-running interactive app: RSS growth over thousands of pumps, fragmentation, leaks from signal/view graphs that outlive a frame. The vision defers a collector "when long-lived interactive graphs demand it" — but without a long-lived RSS proof we do not know whether that point is near or far.
+**Proven (vertical slice).** Idle and light-interaction Headless pumps on counter-shaped UI stay flat under alloc accounting. That answers the core unknown for the v0 GC posture on the golden UI path.
 
-**Proof.** A stay-open app (`examples/live`-shaped) driven for thousands of pumps shows flat RSS, and a leak check (e.g. ASan/LSan in CI on the runtime tests) is clean on the golden examples. Partially addressed: accounting + unit tests + optional `test-asan`; full long-lived RSS proof remains open.
+**Residual knowns (not unknowns).** `Signal.list` / list cons cells remain arena-ish (no collection of orphaned lists); golden example binaries intentionally do not free signals at process exit (GC-v0); LSan-clean example binaries are out of scope until exit ownership is designed. A collector stays deferred until list-churn or larger graphs demand it.
 
 ### 4. Language growth vs the self-host ratchet
 

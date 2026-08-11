@@ -511,7 +511,7 @@ static void test_text_field_edit(void) {
   sz_signal_str_free(draft);
 }
 
-/* Mount a static label and pump repeatedly: live_count stays flat-ish. */
+/* Mount a static label and pump repeatedly: live_count stays flat. */
 static void test_alloc_pump_flat(void) {
   SzUiConfig cfg;
   SzView *view;
@@ -534,7 +534,7 @@ static void test_alloc_pump_flat(void) {
   sz_alloc_stats(&base_bytes, &base_count);
   max_count = base_count;
 
-  for (i = 0; i < 40; i++) {
+  for (i = 0; i < 2000; i++) {
     assert(sz_ui_pump_sync(session));
     sz_alloc_stats(&live_bytes, &live_count);
     if (live_count > max_count)
@@ -549,6 +549,73 @@ static void test_alloc_pump_flat(void) {
   sz_view_free(view);
 }
 
+static SzString *map_count_label(int64_t v, void *env) {
+  (void)env;
+  return sz_string_from_int(v);
+}
+
+/* Counter-shaped UI (Signal.map + bindText + taps): live_count flat over pumps. */
+static void test_alloc_counter_pump_flat(void) {
+  SzUiConfig cfg;
+  SzSignalInt *count;
+  SzSignalStr *label;
+  SzView *root, *btn;
+  SzUiSession *session;
+  SzInputEvent tap;
+  size_t base_count = 0, base_bytes = 0;
+  size_t live_count = 0, live_bytes = 0;
+  size_t max_count = 0;
+  int i;
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 100;
+  cfg.scale = 1.0;
+
+  count = sz_signal_int(0);
+  label = sz_lang_signal_map(count, map_count_label, NULL);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_lang_view_bind_text(label));
+  btn = sz_view_button("+", counter_tap, count);
+  sz_view_add_child(root, btn);
+
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  /* Warm-up: layout + a few taps so map cache / frames settle. */
+  assert(sz_ui_pump_sync(session));
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SZ_INPUT_TAP;
+  tap.x = sz_view_frame(btn).x + 8.f;
+  tap.y = sz_view_frame(btn).y + 8.f;
+  for (i = 0; i < 5; i++) {
+    assert(sz_ui_inject_sync(session, &tap));
+    assert(sz_ui_pump_sync(session));
+  }
+  sz_alloc_stats(&base_bytes, &base_count);
+  max_count = base_count;
+
+  for (i = 0; i < 2000; i++) {
+    if ((i % 50) == 0) {
+      assert(sz_ui_inject_sync(session, &tap));
+    }
+    assert(sz_ui_pump_sync(session));
+    sz_alloc_stats(&live_bytes, &live_count);
+    if (live_count > max_count)
+      max_count = live_count;
+  }
+  /* live_count flat = no per-pump leak; live_bytes may grow a few bytes when
+   * the mapped label gains digits (e.g. "9" → "10"), same allocation count. */
+  assert(live_count == base_count);
+  assert(live_bytes <= base_bytes + 32);
+  assert(max_count <= base_count + 16);
+
+  sz_ui_unmount(session);
+  sz_view_free(root);
+  sz_signal_str_free(label);
+  sz_signal_int_free(count);
+}
+
 int main(void) {
   test_label_session();
   test_signals_layout_hit();
@@ -560,6 +627,7 @@ int main(void) {
   test_view_each();
   test_text_field_edit();
   test_alloc_pump_flat();
+  test_alloc_counter_pump_flat();
   puts("runtime ui tests ok");
   return 0;
 }

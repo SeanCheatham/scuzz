@@ -189,6 +189,8 @@ const char *sz_signal_str_get(const SzSignalStr *s) {
     out = s->map_fn(sz_signal_int_get(s->map_src), s->map_env);
     sz_free(mut->value);
     mut->value = sz_strdup(out ? sz_string_cstr(out) : "");
+    if (out)
+      sz_string_free(out);
   }
   return s->value ? s->value : "";
 }
