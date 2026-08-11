@@ -65,9 +65,9 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 Vision direction: `scuzz.toml` package = crate, `Foo.scuzz` = module ([vision.md](vision.md#modules-and-source-shape)). Stem pairing for `*.scuzz_sim` / `*.scuzz_laws` is implemented; Stage 0/1/2 still merge all live `src/**/*.scuzz` into one program with a single `@main` (no per-file visibility / namespaces yet).
 
-### Diagnostics source locations (Stage 0)
+### Diagnostics source locations
 
-Stage 0 threads `Span { file, start, end }` from lexer → parser → `Expr { kind, span }` → typer; `check` / `--message-format=json` emit line/column. Remaining: port the same span model into `compiler-scuzz` (self-host).
+Stage 0 and self-host (`compiler-scuzz/`) thread `Span { file, start, end }` (byte offsets) from lexer → parser → expr → typer; `check` / `--message-format=json` emit `file` / `line` / `column`. Self-host exprs carry a trailing span on every expr node (`[tag, …children, span]`) so fixed-index `exprTag` / `nodeStr` / `nodeExpr` accessors stay valid.
 
 ### Dependency forms beyond `path`
 
@@ -77,5 +77,5 @@ Stage 0 threads `Span { file, start, end }` from lexer → parser → `Expr { ki
 
 - **Flutter-style constraint layout** — today a single recursive stacker (`layout_node` in `view.c`): column/row/list/scroll with pad/gap. Locked direction: constraints down, sizes up, when the widget set grows. Real text metrics (unknown 1) should land first, since they change every intrinsic size.
 - **Windows desktop embedder** — same session protocol as X11/Cocoa; secondary platform.
-- **LSP / editor tooling** — `fmt`, `check --message-format=json` (with line/column in Stage 0), and `watch` exist; a language server does not. Self-host span parity is the remaining prerequisite for useful LSP diagnostics from Stage 1/2.
+- **LSP / editor tooling** — `fmt`, `check --message-format=json` (with line/column in Stage 0 and self-host), and `watch` exist; a language server does not.
 - **macOS in default CI** — the macOS job is `workflow_dispatch`-only for Actions cost; Darwin regressions surface late.

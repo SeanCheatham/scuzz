@@ -219,3 +219,71 @@ def envGetVal(env: List, name: String): String =
 def envGetKind(env: List, name: String): String =
   envRestKind(envGet(env, name))
 
+def dummySpan(): List =
+  List.cons("", List.cons("0", List.cons("0", List.empty())))
+
+def mkSpan(file: String, start: Int, end: Int): List =
+  List.cons(file, List.cons(Str.fromInt(start), List.cons(Str.fromInt(end), List.empty())))
+
+def spanFile(sp: List): String =
+  List.head(sp)
+
+def spanStart(sp: List): Int =
+  parseInt(List.head(List.tail(sp)))
+
+def spanEnd(sp: List): Int =
+  parseInt(List.head(List.tail(List.tail(sp))))
+
+def coverSpan(a: List, b: List): List =
+  for {
+    file = if (Str.len(spanFile(a)) == 0) spanFile(b) else spanFile(a)
+    s0 = spanStart(a)
+    s1 = spanStart(b)
+    e0 = spanEnd(a)
+    e1 = spanEnd(b)
+    start = if (s0 < s1) s0 else s1
+    end = if (e0 > e1) e0 else e1
+  } yield mkSpan(file, start, end)
+
+def listLast(xs: List): List =
+  if (List.isEmpty(List.tail(xs)) == 1) List.head(xs) else listLast(List.tail(xs))
+
+def withSpan(node: List, sp: List): List =
+  listConcat(node, List.cons(sp, List.empty()))
+
+def exprSpan(e: List): List =
+  listLast(e)
+
+def mkTok(kind: String, start: Int, end: Int): List =
+  List.cons(kind, List.cons(Str.fromInt(start), List.cons(Str.fromInt(end), List.empty())))
+
+def tokKind(t: List): String =
+  List.head(t)
+
+def tokStart(t: List): Int =
+  parseInt(List.head(List.tail(t)))
+
+def tokEnd(t: List): Int =
+  parseInt(List.head(List.tail(List.tail(t))))
+
+def tokSpan(file: String, t: List): List =
+  mkSpan(file, tokStart(t), tokEnd(t))
+
+def offsetToLineCol(source: String, offset: Int): List =
+  offsetToLineColAt(source, offset, 0, 1, 1)
+
+def offsetToLineColAt(source: String, offset: Int, i: Int, line: Int, col: Int): List =
+  if (i >= Str.len(source)) pair(Str.fromInt(line), Str.fromInt(col)) else if (i == offset) pair(Str.fromInt(line), Str.fromInt(col)) else if (Str.charAt(source, i) == 10) offsetToLineColAt(source, offset, i + 1, line + 1, 1) else offsetToLineColAt(source, offset, i + 1, line, col + 1)
+
+def findSourceText(sources: List, file: String): String =
+  if (List.isEmpty(sources) == 1) "" else if (streq(srcLabel(List.head(sources)), file) == 1) srcText(List.head(sources)) else findSourceText(List.tail(sources), file)
+
+def srcLabel(s: List): String =
+  List.head(s)
+
+def srcText(s: List): String =
+  List.head(List.tail(s))
+
+def mkSrc(label: String, text: String): List =
+  List.cons(label, List.cons(text, List.empty()))
+

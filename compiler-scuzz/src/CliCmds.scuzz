@@ -115,7 +115,7 @@ def srcFingerprint(projectDir: String): IO[String] =
   )
 
 def fpTexts(texts: List, acc: String): IO[String] =
-  if (List.isEmpty(texts) == 1) IO.pure(acc) else fpTexts(List.tail(texts), str3(acc, "\n", List.head(texts)))
+  if (List.isEmpty(texts) == 1) IO.pure(acc) else fpTexts(List.tail(texts), str3(acc, "\n", srcText(List.head(texts))))
 
 def cmdPackage(projectDir: String, target: String): IO[Unit] =
   compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>

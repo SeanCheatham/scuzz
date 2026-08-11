@@ -40,10 +40,45 @@ def dispatchBuild(projectDir: String, doRun: Int): IO[Unit] =
   compileProject(projectDir, pathJoin(projectDir, "build"), doRun)
 
 def cmdCheck(projectDir: String, json: Int): IO[Unit] =
-  checkProject(projectDir).flatMap(ty => if (tyIsOk(ty) == 1) if (json == 1) IO.println("[]") else IO.println("scuzz check ok") else emitCheckFail(ty, json))
+  checkProject(projectDir).flatMap(res =>
+    for {
+      ty = List.head(res)
+      sources = List.head(List.tail(res))
+    } yield if (tyIsOk(ty) == 1) if (json == 1) IO.println("[]") else IO.println("scuzz check ok") else emitCheckFail(ty, sources, json)
+  )
 
-def emitCheckFail(ty: String, json: Int): IO[Unit] =
-  if (json == 1) IO.println(str3("[{\"severity\":\"error\",\"message\":", jsonQuote(tyMsg(ty)), "}]")).flatMap(_ => IO.fail(tyMsg(ty))) else IO.println(str3("error: ", tyMsg(ty), "")).flatMap(_ => IO.fail(tyMsg(ty)))
+def emitCheckFail(ty: String, sources: List, json: Int): IO[Unit] =
+  for {
+    msg = tyMsg(ty)
+    loc = diagLoc(ty, sources)
+  } yield if (json == 1) IO.println(str3("[", diagJson(msg, loc), "]")).flatMap(_ => IO.fail(msg)) else IO.println(diagHuman(msg, loc)).flatMap(_ => IO.fail(msg))
+
+def diagLoc(ty: String, sources: List): List =
+  if (tyIsAt(ty) == 0) List.empty() else diagLocFromSpan(tyAtFile(ty), tyAtStart(ty), sources)
+
+def diagLocFromSpan(file: String, start: Int, sources: List): List =
+  for {
+    text = findSourceText(sources, file)
+    lc = if (Str.len(text) == 0) pair("1", "1") else offsetToLineCol(text, start)
+  } yield List.cons(file, List.cons(fst(lc), List.cons(snd(lc), List.empty())))
+
+def diagHasLoc(loc: List): Int =
+  if (List.isEmpty(loc) == 1) 0 else 1
+
+def diagFile(loc: List): String =
+  List.head(loc)
+
+def diagLine(loc: List): String =
+  List.head(List.tail(loc))
+
+def diagCol(loc: List): String =
+  List.head(List.tail(List.tail(loc)))
+
+def diagHuman(msg: String, loc: List): String =
+  if (diagHasLoc(loc) == 0) str3("error: ", msg, "") else str5(diagFile(loc), ":", diagLine(loc), ":", str4(diagCol(loc), ": error: ", msg, ""))
+
+def diagJson(msg: String, loc: List): String =
+  if (diagHasLoc(loc) == 0) str3("{\"severity\":\"error\",\"message\":", jsonQuote(msg), "}") else str5("{\"severity\":\"error\",\"message\":", jsonQuote(msg), ",\"file\":", jsonQuote(diagFile(loc)), str5(",\"line\":", diagLine(loc), ",\"column\":", diagCol(loc), "}"))
 
 def jsonQuote(s: String): String =
   str3("\"", jsonEscape(s, 0, ""), "\"")

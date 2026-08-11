@@ -18,8 +18,8 @@ def chooseMain(a: List, b: List): List =
 def mergeProg(acc: List, p: List): List =
   List.cons("Prog", List.cons(nodeStr(p, 0), List.cons(listConcat(progEnums(acc), progEnums(p)), List.cons(listConcat(progDefs(acc), progDefs(p)), List.cons(chooseMain(progMain(acc), progMain(p)), List.empty())))))
 
-def parseSource(src: String): List =
-  parseProgram(lex(src))
+def parseSource(label: String, src: String): List =
+  parseProgram(lex(src), label)
 
 def readUntilQuote(s: String, i: Int, acc: String): String =
   if (i >= Str.len(s)) acc else if (Str.charAt(s, i) == 34) acc else readUntilQuote(s, i + 1, Str.concat(acc, Str.slice(s, i, i + 1)))
@@ -99,17 +99,17 @@ def execOk(cmd: String): IO[Unit] =
   Sys.exec(cmd).flatMap(code => if (code == 0) IO.pure(()) else IO.fail(str3("exec failed (", Str.fromInt(code), str3("): ", cmd, ""))))
 
 def readSources(srcDir: String, names: List, acc: List): IO[List] =
-  if (List.isEmpty(names) == 1) IO.pure(List.reverse(acc)) else Fs.read(pathJoin(srcDir, List.head(names))).flatMap(text => readSources(srcDir, List.tail(names), List.cons(text, acc)))
+  if (List.isEmpty(names) == 1) IO.pure(List.reverse(acc)) else Fs.read(pathJoin(srcDir, List.head(names))).flatMap(text => readSources(srcDir, List.tail(names), List.cons(mkSrc(List.head(names), text), acc)))
 
 def readOverlayFiles(srcDir: String, kind: String, names: List, acc: List): IO[List] =
   if (List.isEmpty(names) == 1) IO.pure(List.reverse(acc)) else Fs.read(pathJoin(srcDir, List.head(names))).flatMap(text => readOverlayFiles(srcDir, kind, List.tail(names), List.cons(mkOverlay(kind, List.head(names), text), acc)))
 
-def mergeSources(texts: List, acc: List, mains: Int): IO[List] =
-  if (List.isEmpty(texts) == 1) if (mains == 0) IO.fail("no @main definition") else if (mains > 1) IO.fail("multiple @main definitions") else IO.pure(acc) else mergeSourcesOne(List.head(texts), List.tail(texts), acc, mains)
+def mergeSources(sources: List, acc: List, mains: Int): IO[List] =
+  if (List.isEmpty(sources) == 1) if (mains == 0) IO.fail("no @main definition") else if (mains > 1) IO.fail("multiple @main definitions") else IO.pure(acc) else mergeSourcesOne(List.head(sources), List.tail(sources), acc, mains)
 
-def mergeSourcesOne(text: String, rest: List, acc: List, mains: Int): IO[List] =
+def mergeSourcesOne(src: List, rest: List, acc: List, mains: Int): IO[List] =
   for {
-    p = parseSource(text)
+    p = parseSource(srcLabel(src), srcText(src))
     n = if (streq(exprTag(progMain(p)), "Unit") == 1) 0 else 1
   } yield mergeSources(rest, mergeProg(acc, p), mains + n)
 
@@ -142,13 +142,13 @@ def runIfNeeded(exe: String, doRun: Int): IO[Unit] =
   if (doRun == 1) execOk(exe) else IO.pure(())
 
 def lawCall(name: String): List =
-  List.cons("Call", List.cons(name, List.cons(List.empty(), List.empty())))
+  withSpan(List.cons("Call", List.cons(name, List.cons(List.empty(), List.empty()))), dummySpan())
 
 def lawAssertCall(name: String): List =
-  List.cons("Call", List.cons("Law.assert", List.cons(List.cons(List.cons("StrLit", List.cons(name, List.empty())), List.cons(lawCall(name), List.empty())), List.empty())))
+  withSpan(List.cons("Call", List.cons("Law.assert", List.cons(List.cons(withSpan(List.cons("StrLit", List.cons(name, List.empty())), dummySpan()), List.cons(lawCall(name), List.empty())), List.empty()))), dummySpan())
 
 def wrapLawAssert(body: List, name: String): List =
-  List.cons("FlatMap", List.cons(body, List.cons("_", List.cons(lawAssertCall(name), List.empty()))))
+  withSpan(List.cons("FlatMap", List.cons(body, List.cons("_", List.cons(lawAssertCall(name), List.empty())))), coverSpan(exprSpan(body), dummySpan()))
 
 def residualizeLaws(prog: List, lawNames: List): List =
   if (List.isEmpty(lawNames) == 1) prog else setProgMain(prog, residualizeMain(progMain(prog), lawNames))
@@ -177,7 +177,7 @@ def applySimDefs(prog: List, defs: List, label: String): IO[List] =
 
 def applyOneSim(prog: List, ov: List): IO[List] =
   for {
-    p = parseSource(ovText(ov))
+    p = parseSource(ovLabel(ov), ovText(ov))
     label = ovLabel(ov)
   } yield if (streq(exprTag(progMain(p)), "Unit") == 0) IO.fail(str3(label, ": *.scuzz_sim must not define @main", "")) else if (List.isEmpty(progEnums(p)) == 0) IO.fail(str3(label, ": *.scuzz_sim must not define enums", "")) else applySimDefs(prog, progDefs(p), label)
 
@@ -198,7 +198,7 @@ def applyLawDefOne(prog: List, d: List, rest: List, label: String, names: List):
 
 def applyOneLaw(prog: List, ov: List, names: List): IO[List] =
   for {
-    p = parseSource(ovText(ov))
+    p = parseSource(ovLabel(ov), ovText(ov))
     label = ovLabel(ov)
   } yield if (streq(exprTag(progMain(p)), "Unit") == 0) IO.fail(str3(label, ": *.scuzz_laws must not define @main", "")) else if (List.isEmpty(progEnums(p)) == 0) IO.fail(str3(label, ": *.scuzz_laws must not define enums", "")) else applyLawDefs(prog, progDefs(p), label, names)
 
@@ -234,17 +234,19 @@ def compileProjectWith(projectDir: String, outDir: String, doRun: Int, verify: I
 def compileAfterToml(projectDir: String, outDir: String, doRun: Int, verify: Int, runtimeDir: String, clang: String, toml: String, name: String): IO[Unit] =
   loadGraphBundle(projectDir, toml).flatMap(bundle => compileAfterSources(projectDir, outDir, doRun, verify, runtimeDir, clang, name, hasUiSection(toml), List.head(bundle), List.head(List.tail(bundle))))
 
-def checkProject(projectDir: String): IO[String] =
+def checkProject(projectDir: String): IO[List] =
   Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml =>
     loadGraphBundle(projectDir, toml).flatMap(bundle =>
-      mergeSources(List.head(bundle), emptyProg(), 0).flatMap(prog0 =>
-        prepareVerifyProg(prog0, List.head(List.tail(bundle))).flatMap(prog1 =>
-          for {
-            prog = lowerProg(prog1)
-            ty = typecheckProg(prog)
-          } yield IO.pure(ty)
-        )
-      )
+      for {
+        sources = List.head(bundle)
+      } yield mergeSources(sources, emptyProg(), 0).flatMap(prog0 =>
+  prepareVerifyProg(prog0, List.head(List.tail(bundle))).flatMap(prog1 =>
+    for {
+      prog = lowerProg(prog1)
+      ty = typecheckProg(prog)
+    } yield IO.pure(List.cons(ty, List.cons(sources, List.empty())))
+  )
+)
     )
   )
 
