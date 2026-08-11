@@ -3,7 +3,9 @@ UNAME_S := $(shell uname -s)
 CC ?= clang
 CFLAGS ?= -std=c11 -Wall -Wextra -Werror -O2
 OBJCFLAGS ?= -Wall -Wextra -Werror -O2 -fobjc-arc
-INCLUDES := -Iinclude
+ROOT := $(abspath ../..)
+RUNTIME := $(ROOT)/crates/runtime
+INCLUDES := -Iinclude -I$(RUNTIME)/include
 
 .PHONY: all clean lib test
 

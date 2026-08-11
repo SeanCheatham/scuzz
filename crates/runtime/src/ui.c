@@ -22,6 +22,10 @@ __attribute__((weak)) int sz_embedder_present(const char *title, int width,
   return 0;
 }
 __attribute__((weak)) void sz_embedder_shutdown(void) {}
+__attribute__((weak)) int sz_embedder_poll_event(SzInputEvent *out) {
+  (void)out;
+  return 0;
+}
 
 /* Weak stubs — strong defs from embedder-mobile override when linked. */
 __attribute__((weak)) int sz_mobile_available(void) { return 0; }
@@ -49,6 +53,7 @@ int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
                   const SzTheme *theme);
 int sz_view_handle_tap(SzView *root, float x, float y);
 int sz_view_handle_text(SzView *root, const char *text);
+int sz_view_handle_text_edit(SzView *root, const char *text, int backspace);
 
 typedef enum {
   BRIDGE_INT = 1,
@@ -245,6 +250,18 @@ static void drain_mobile_events(SzUiSession *session) {
   }
 }
 
+static void drain_desktop_events(SzUiSession *session) {
+  SzInputEvent ev;
+  if (!session || session->cfg.kind != SZ_UI_RUNTIME_WINDOW)
+    return;
+  if (!sz_embedder_available())
+    return;
+  while (sz_embedder_poll_event(&ev)) {
+    if (!sz_ui_inject_sync(session, &ev))
+      break;
+  }
+}
+
 int sz_ui_pump_sync(SzUiSession *session) {
   size_t nbytes = 0;
   const uint8_t *rgba;
@@ -253,8 +270,9 @@ int sz_ui_pump_sync(SzUiSession *session) {
     return 0;
   if (session->lifecycle == SZ_LIFECYCLE_STOP)
     return 0;
-  /* Pull OS events before the frame (host-driven mobile shell). */
+  /* Pull OS events before the frame (host-driven mobile / desktop shell). */
   drain_mobile_events(session);
+  drain_desktop_events(session);
   /* Advance animations with monotonic Clock dt. */
   now_ms = sz_clock_monotonic_ms_sync();
   if (session->has_pump_clock) {
@@ -365,6 +383,14 @@ int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event) {
     sync_keyboard(session);
     session->dirty = 1;
     return 1;
+  case SZ_INPUT_TEXT_EDIT: {
+    int backspace = !event->text || !event->text[0];
+    if (!sz_view_handle_text_edit(session->root, event->text, backspace))
+      return 0;
+    sync_keyboard(session);
+    session->dirty = 1;
+    return 1;
+  }
   case SZ_INPUT_RESIZE:
     if (event->width <= 0 || event->height <= 0)
       return 0;

@@ -710,51 +710,84 @@ int sz_view_handle_tap(SzView *root, float x, float y) {
   return 0;
 }
 
-int sz_view_handle_text(SzView *root, const char *text) {
-  /* Find focused TextField, else first TextField. */
+/* Focused TextField, else first TextField in DFS order. */
+static SzView *find_text_field(SzView *root) {
   int i;
   SzView *target = NULL;
+  SzView **stack = NULL;
+  int sp = 0, scap = 0;
+  SzView *first = NULL;
 
   if (!root)
-    return 0;
+    return NULL;
 
-  /* DFS search for focused, then any. */
-  {
-    SzView **stack = NULL;
-    int sp = 0, scap = 0;
-    SzView *first = NULL;
-    stack = (SzView **)sz_alloc(sizeof(SzView *) * 32);
-    scap = 32;
-    stack[sp++] = root;
-    while (sp > 0) {
-      SzView *n = stack[--sp];
-      if (n->kind == SZ_VIEW_TEXT_FIELD) {
-        if (!first)
-          first = n;
-        if (n->focused) {
-          target = n;
-          break;
-        }
-      }
-      for (i = 0; i < n->child_count; i++) {
-        if (sp >= scap) {
-          int ncap = scap * 2;
-          SzView **ns = (SzView **)sz_alloc(sizeof(SzView *) * (size_t)ncap);
-          memcpy(ns, stack, (size_t)scap * sizeof(SzView *));
-          sz_free(stack);
-          stack = ns;
-          scap = ncap;
-        }
-        stack[sp++] = n->children[i];
+  stack = (SzView **)sz_alloc(sizeof(SzView *) * 32);
+  scap = 32;
+  stack[sp++] = root;
+  while (sp > 0) {
+    SzView *n = stack[--sp];
+    if (n->kind == SZ_VIEW_TEXT_FIELD) {
+      if (!first)
+        first = n;
+      if (n->focused) {
+        target = n;
+        break;
       }
     }
-    sz_free(stack);
-    if (!target)
-      target = first;
+    for (i = 0; i < n->child_count; i++) {
+      if (sp >= scap) {
+        int ncap = scap * 2;
+        SzView **ns = (SzView **)sz_alloc(sizeof(SzView *) * (size_t)ncap);
+        memcpy(ns, stack, (size_t)scap * sizeof(SzView *));
+        sz_free(stack);
+        stack = ns;
+        scap = ncap;
+      }
+      stack[sp++] = n->children[i];
+    }
   }
+  sz_free(stack);
+  return target ? target : first;
+}
+
+int sz_view_handle_text(SzView *root, const char *text) {
+  SzView *target = find_text_field(root);
   if (!target || !target->sig_str)
     return 0;
   sz_signal_str_set(target->sig_str, text ? text : "");
+  target->focused = 1;
+  return 1;
+}
+
+int sz_view_handle_text_edit(SzView *root, const char *text, int backspace) {
+  SzView *target = find_text_field(root);
+  const char *cur;
+  size_t n;
+  char *buf;
+
+  if (!target || !target->sig_str)
+    return 0;
+  cur = sz_signal_str_get(target->sig_str);
+  if (!cur)
+    cur = "";
+  n = strlen(cur);
+
+  if (backspace) {
+    if (n > 0) {
+      buf = (char *)sz_alloc(n); /* n bytes: drop last, keep NUL */
+      memcpy(buf, cur, n - 1);
+      buf[n - 1] = '\0';
+      sz_signal_str_set(target->sig_str, buf);
+      sz_free(buf);
+    }
+  } else if (text && text[0]) {
+    size_t add = strlen(text);
+    buf = (char *)sz_alloc(n + add + 1);
+    memcpy(buf, cur, n);
+    memcpy(buf + n, text, add + 1);
+    sz_signal_str_set(target->sig_str, buf);
+    sz_free(buf);
+  }
   target->focused = 1;
   return 1;
 }

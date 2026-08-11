@@ -6,6 +6,10 @@
 #include <stdio.h>
 #include <string.h>
 
+#define EVENT_CAP 64
+#define TEXT_RING 32
+#define TEXT_LEN 8
+
 static NSWindow *g_win;
 static NSImageView *g_view;
 static int g_w;
@@ -14,6 +18,12 @@ static int g_ready;
 static int g_app_ready;
 static int g_user_quit;
 
+static SzInputEvent g_queue[EVENT_CAP];
+static int g_q_head;
+static int g_q_tail;
+static char g_text_bufs[TEXT_RING][TEXT_LEN];
+static int g_text_i;
+
 int sz_embedder_available(void) {
   /* GUI session with a main display (SSH/headless Mac returns 0). */
   return CGMainDisplayID() != kCGNullDirectDisplay ? 1 : 0;
@@ -21,6 +31,58 @@ int sz_embedder_available(void) {
 
 int sz_embedder_alive(void) {
   return !g_user_quit && sz_embedder_available();
+}
+
+static const char *stash_text(const char *s) {
+  size_t n;
+  char *dst;
+  if (!s)
+    s = "";
+  n = strlen(s);
+  if (n >= TEXT_LEN)
+    n = TEXT_LEN - 1;
+  dst = g_text_bufs[g_text_i];
+  g_text_i = (g_text_i + 1) % TEXT_RING;
+  memcpy(dst, s, n);
+  dst[n] = '\0';
+  return dst;
+}
+
+static int q_push(const SzInputEvent *ev) {
+  int next;
+  if (!ev)
+    return 0;
+  next = (g_q_tail + 1) % EVENT_CAP;
+  if (next == g_q_head)
+    return 0;
+  g_queue[g_q_tail] = *ev;
+  g_q_tail = next;
+  return 1;
+}
+
+int sz_embedder_poll_event(SzInputEvent *out) {
+  if (!out || g_q_head == g_q_tail)
+    return 0;
+  *out = g_queue[g_q_head];
+  g_q_head = (g_q_head + 1) % EVENT_CAP;
+  return 1;
+}
+
+static void enqueue_tap(float x, float y) {
+  SzInputEvent ev;
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_TAP;
+  ev.x = x;
+  ev.y = y;
+  q_push(&ev);
+}
+
+static void enqueue_text_edit(const char *text) {
+  SzInputEvent ev;
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_TEXT_EDIT;
+  ev.text = stash_text(text ? text : "");
+  q_push(&ev);
 }
 
 static void ensure_app(void) {
@@ -119,7 +181,7 @@ int sz_embedder_present(const char *title, int width, int height,
     [g_view setNeedsDisplay:YES];
     [g_win displayIfNeeded];
 
-    /* Drain pending events without blocking (peer to XPending loop). */
+    /* Drain pending events: quit handled here; input only enqueued. */
     for (;;) {
       NSEvent *ev = [NSApp nextEventMatchingMask:NSEventMaskAny
                                        untilDate:[NSDate distantPast]
@@ -127,14 +189,38 @@ int sz_embedder_present(const char *title, int width, int height,
                                          dequeue:YES];
       if (!ev)
         break;
+
+      if ([ev type] == NSEventTypeLeftMouseDown && g_win) {
+        NSView *content = [g_win contentView];
+        NSPoint loc = [ev locationInWindow];
+        NSPoint inView = [content convertPoint:loc fromView:nil];
+        float x = (float)inView.x;
+        /* Cocoa y is bottom-up; Scuzz layout is top-down. */
+        float y = (float)(content.bounds.size.height - inView.y);
+        enqueue_tap(x, y);
+        continue;
+      }
+
       if ([ev type] == NSEventTypeKeyDown) {
-        NSString *chars = [ev charactersIgnoringModifiers];
-        unichar c = (chars && [chars length] > 0) ? [chars characterAtIndex:0] : 0;
+        NSString *chars = [ev characters];
+        unichar c =
+            (chars && [chars length] > 0) ? [chars characterAtIndex:0] : 0;
         if (c == 'q' || c == 'Q' || c == 27) {
           quit = 1;
           break;
         }
+        if (c == 127 || c == NSDeleteCharacter) {
+          enqueue_text_edit("");
+          continue;
+        }
+        if (c >= 32 && c < 127) {
+          char buf[2] = {(char)c, '\0'};
+          enqueue_text_edit(buf);
+          continue;
+        }
+        continue; /* swallow other keydowns (no system beep path) */
       }
+
       [NSApp sendEvent:ev];
     }
 
@@ -160,4 +246,5 @@ void sz_embedder_shutdown(void) {
   }
   g_ready = 0;
   g_w = g_h = 0;
+  g_q_head = g_q_tail = 0;
 }

@@ -39,11 +39,12 @@ typedef enum SzLifecyclePhase {
 typedef enum SzInputKind {
   SZ_INPUT_TAP = 1,
   SZ_INPUT_RESIZE = 2,
-  SZ_INPUT_TEXT = 3,      /* deliver string to focused TextField */
+  SZ_INPUT_TEXT = 3,      /* full replace of focused TextField (Headless) */
   SZ_INPUT_POINTER = 4,   /* touch / pointer with phase */
   SZ_INPUT_SCROLL = 5,    /* vertical pan dy on Scroll under (x,y) */
   SZ_INPUT_LIFECYCLE = 6, /* pause / resume / stop */
-  SZ_INPUT_KEYBOARD = 7   /* soft keyboard show (1) / hide (0) */
+  SZ_INPUT_KEYBOARD = 7,  /* soft keyboard show (1) / hide (0) */
+  SZ_INPUT_TEXT_EDIT = 8  /* append text, or backspace if text NULL/empty */
 } SzInputKind;
 
 typedef struct SzInputEvent {
@@ -52,7 +53,7 @@ typedef struct SzInputEvent {
   float y;
   int width;  /* resize */
   int height; /* resize */
-  const char *text; /* SZ_INPUT_TEXT */
+  const char *text; /* SZ_INPUT_TEXT / SZ_INPUT_TEXT_EDIT */
   SzPointerPhase pointer_phase; /* SZ_INPUT_POINTER */
   float dy;                     /* SZ_INPUT_SCROLL (positive = content up) */
   SzLifecyclePhase lifecycle;   /* SZ_INPUT_LIFECYCLE */
@@ -168,6 +169,8 @@ SzRect sz_view_frame(const SzView *view);
 /* Layout + hit-test (also run inside pump / inject). */
 void sz_view_layout(SzView *root, float width, float height, const SzTheme *theme);
 SzView *sz_view_hit_test(SzView *root, float x, float y);
+/* Append to focused TextField, or chop one byte when backspace != 0. */
+int sz_view_handle_text_edit(SzView *root, const char *text, int backspace);
 
 /* Scroll offset + soft keyboard helpers. */
 float sz_view_scroll_y(const SzView *scroll);

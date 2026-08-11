@@ -462,6 +462,55 @@ static void test_view_each(void) {
   sz_signal_list_free(items);
 }
 
+static void test_text_field_edit(void) {
+  SzSignalStr *draft;
+  SzView *root;
+  SzView *field;
+  const SzTheme *theme = sz_theme_default();
+
+  draft = sz_signal_str("");
+  root = sz_view_column();
+  field = sz_view_text_field(draft, "type");
+  sz_view_add_child(root, field);
+  sz_view_layout(root, 200.f, 80.f, theme);
+  (void)field;
+
+  /* Append / backspace on the (first) TextField. */
+  assert(sz_view_handle_text_edit(root, "hi", 0));
+  assert(strcmp(sz_signal_str_get(draft), "hi") == 0);
+  assert(sz_view_handle_text_edit(root, "!", 0));
+  assert(strcmp(sz_signal_str_get(draft), "hi!") == 0);
+  assert(sz_view_handle_text_edit(root, NULL, 1));
+  assert(strcmp(sz_signal_str_get(draft), "hi") == 0);
+  assert(sz_view_handle_text_edit(root, "", 1));
+  assert(strcmp(sz_signal_str_get(draft), "h") == 0);
+
+  /* Inject path: TEXT_EDIT empty → backspace. */
+  {
+    SzUiConfig cfg;
+    SzUiSession *session;
+    SzInputEvent ev;
+    memset(&cfg, 0, sizeof(cfg));
+    cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+    cfg.width = 200;
+    cfg.height = 80;
+    session = sz_ui_mount(&cfg, root);
+    assert(session);
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = SZ_INPUT_TEXT_EDIT;
+    ev.text = "ello";
+    assert(sz_ui_inject_sync(session, &ev));
+    assert(strcmp(sz_signal_str_get(draft), "hello") == 0);
+    ev.text = "";
+    assert(sz_ui_inject_sync(session, &ev));
+    assert(strcmp(sz_signal_str_get(draft), "hell") == 0);
+    sz_ui_unmount(session);
+  }
+
+  sz_view_free(root);
+  sz_signal_str_free(draft);
+}
+
 int main(void) {
   test_label_session();
   test_signals_layout_hit();
@@ -471,6 +520,7 @@ int main(void) {
   test_a11y_and_anim();
   test_clear_and_set_texts();
   test_view_each();
+  test_text_field_edit();
   puts("runtime ui tests ok");
   return 0;
 }
