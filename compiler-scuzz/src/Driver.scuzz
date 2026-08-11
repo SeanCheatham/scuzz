@@ -139,10 +139,10 @@ def cxxLinkFlags(): String =
   "$(if [ \"`uname -s`\" = Darwin ]; then echo -lc++ -lm; else echo -lstdc++ -lm; fi)"
 
 def skiaExtraLinkFlags(ffi: String): String =
-  str3("$(test -f ", pathJoin(ffi, "build/sk_capi_backend"), " && grep -qx skia ", str3(pathJoin(ffi, "build/sk_capi_backend"), " && echo -lz -lbz2 -lbrotlidec -lbrotlicommon)"))
+  str5("$(test -f ", pathJoin(ffi, "build/sk_capi_backend"), " && grep -qx skia ", pathJoin(ffi, "build/sk_capi_backend"), " && echo -lz -lbz2 -lbrotlidec -lbrotlicommon)")
 
 def linkCmd(clang: String, ll: String, lib: String, skia: String, inc: String, skInc: String, embedder: String, mobile: String, exe: String): String =
-  str4(clang, " ", ll, str4(" ", lib, " ", str4(skia, " -I", inc, str4(" -I", skInc, " -lpthread ", str5(cxxLinkFlags(), " ", skiaExtraLinkFlags(parentDir(parentDir(skia))), str5(" ", embedderLinkFlags(embedder), " ", str3(mobileLinkFlags(mobile), str3(" -o ", exe, "")))))))
+  str4(clang, " ", ll, str4(" ", lib, " ", str4(skia, " -I", inc, str4(" -I", skInc, " -lpthread ", str5(cxxLinkFlags(), " ", skiaExtraLinkFlags(parentDir(parentDir(skia))), " ", str5(embedderLinkFlags(embedder), " ", mobileLinkFlags(mobile), " -o ", exe))))))
 
 def linkCmdIo(clang: String, ll: String, lib: String, inc: String, exe: String): String =
   str5(clang, " ", ll, " ", str4(lib, " -I", inc, str3(" -lpthread -o ", exe, "")))
