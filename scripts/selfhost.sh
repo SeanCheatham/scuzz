@@ -24,6 +24,7 @@ stage_checks() {
   adt_out="$("$bin" run examples/adt)"
   echo "$adt_out"
   echo "$adt_out" | grep -q "adt:red"
+  echo "$adt_out" | grep -q "adt:some:42"
 
   echo "==> $stage golden tests (counter/todo/nav)"
   "$bin" test examples/counter

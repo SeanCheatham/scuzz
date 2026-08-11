@@ -340,11 +340,10 @@ def loadPackageFromNames(srcDir: String, names: List): IO[List] =
     simNames = filterSimNames(names, List.empty())
     lawNames = filterLawsNames(names, List.empty())
   } yield validateOverlayStems(stems, listConcat(simNames, lawNames)).flatMap(_ =>
-    readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty()).flatMap(texts =>
-      readOverlayFiles(srcDir, "sim", simNames, List.empty()).flatMap(sims =>
-        readOverlayFiles(srcDir, "laws", lawNames, List.empty()).flatMap(laws =>
-          IO.pure(List.cons(texts, List.cons(listConcat(sims, laws), List.empty())))
-        )
-      )
+  readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty()).flatMap(texts =>
+    readOverlayFiles(srcDir, "sim", simNames, List.empty()).flatMap(sims =>
+      readOverlayFiles(srcDir, "laws", lawNames, List.empty()).flatMap(laws => IO.pure(List.cons(texts, List.cons(listConcat(sims, laws), List.empty()))))
     )
   )
+)
+

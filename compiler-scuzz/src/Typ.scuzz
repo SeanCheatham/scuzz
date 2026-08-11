@@ -55,7 +55,20 @@ def findEnum(enums: List, name: String): List =
   if (List.isEmpty(enums) == 1) List.empty() else if (streq(enumName(List.head(enums)), name) == 1) List.head(enums) else findEnum(List.tail(enums), name)
 
 def enumHasCase(cases: List, name: String): Int =
-  if (List.isEmpty(cases) == 1) 0 else if (streq(List.head(cases), name) == 1) 1 else enumHasCase(List.tail(cases), name)
+  if (List.isEmpty(cases) == 1) 0 else if (streq(caseName(List.head(cases)), name) == 1) 1 else enumHasCase(List.tail(cases), name)
+
+def findCase(cases: List, name: String): List =
+  if (List.isEmpty(cases) == 1) List.empty() else if (streq(caseName(List.head(cases)), name) == 1) List.head(cases) else findCase(List.tail(cases), name)
+
+def checkPayloadFields(en: String, c: List): String =
+  for {
+    fields = caseFields(c)
+  } yield if (List.len(fields) > 1) tyErr(str4(en, ".", caseName(c), ": Stage 0 supports at most one payload field")) else if (List.isEmpty(fields) == 1) tyOk("Unit") else checkPayloadFieldTy(en, caseName(c), List.head(fields))
+
+def checkPayloadFieldTy(en: String, cn: String, f: List): String =
+  for {
+    ty = fieldType(f)
+  } yield if (streq(ty, "Int") == 1) tyOk("Unit") else if (streq(ty, "String") == 1) tyOk("Unit") else tyErr(str5(en, ".", cn, str3(" field ", fieldName(f), ": Stage 0 payload types are Int or String, got "), ty))
 
 def defSeen(seen: List, name: String): Int =
   if (List.isEmpty(seen) == 1) 0 else if (streq(List.head(seen), name) == 1) 1 else defSeen(List.tail(seen), name)
@@ -88,7 +101,7 @@ def inferExpr(e: List, enums: List, funs: List, env: List): String =
   inferExprTag(exprTag(e), e, enums, funs, env)
 
 def inferExprTag(tag: String, e: List, enums: List, funs: List, env: List): String =
-  if (streq(tag, "Unit") == 1) tyOk("Unit") else if (streq(tag, "IntLit") == 1) tyOk("Int") else if (streq(tag, "StrLit") == 1) tyOk("String") else if (streq(tag, "ListLit") == 1) inferListLit(nodeExpr(e, 0), enums, funs, env) else if (streq(tag, "Interp") == 1) inferInterp(nodeExpr(e, 0), enums, funs, env) else if (streq(tag, "Println") == 1) inferIoChild(nodeExpr(e, 0), "String", enums, funs, env) else if (streq(tag, "Delay") == 1) tyOk("IO[Unit]") else if (streq(tag, "Sleep") == 1) inferIoChild(nodeExpr(e, 0), "Int", enums, funs, env) else if (streq(tag, "Fail") == 1) inferIoChild(nodeExpr(e, 0), "String", enums, funs, env) else if (streq(tag, "Pure") == 1) inferPure(nodeExpr(e, 0), enums, funs, env) else if (streq(tag, "Var") == 1) inferVar(nodeStr(e, 0), env) else if (streq(tag, "Adt") == 1) inferAdt(nodeStr(e, 0), nodeStr(e, 1), enums) else if (streq(tag, "Let") == 1) inferLet(nodeStr(e, 0), nodeExpr(e, 1), nodeExpr(e, 2), enums, funs, env) else if (streq(tag, "If") == 1) inferIf(nodeExpr(e, 0), nodeExpr(e, 1), nodeExpr(e, 2), enums, funs, env) else if (streq(tag, "BinOp") == 1) inferBinOp(nodeStr(e, 0), nodeExpr(e, 1), nodeExpr(e, 2), enums, funs, env) else if (streq(tag, "Call") == 1) inferCall(nodeStr(e, 0), nodeExpr(e, 1), enums, funs, env) else if (streq(tag, "Match") == 1) inferMatch(nodeExpr(e, 0), nodeExpr(e, 1), enums, funs, env) else if (streq(tag, "FlatMap") == 1) inferFlatMap(nodeExpr(e, 0), nodeStr(e, 1), nodeExpr(e, 2), enums, funs, env) else if (streq(tag, "Handle") == 1) inferHandle(nodeExpr(e, 0), nodeExpr(e, 1), enums, funs, env) else if (streq(tag, "Attempt") == 1) inferAttempt(nodeExpr(e, 0), enums, funs, env) else if (streq(tag, "Lambda") == 1) inferLambda(nodeStr(e, 0), nodeExpr(e, 1), enums, funs, env) else if (streq(tag, "IoRace") == 1) inferIoPair(nodeExpr(e, 0), nodeExpr(e, 1), enums, funs, env) else if (streq(tag, "IoBoth") == 1) inferIoPair(nodeExpr(e, 0), nodeExpr(e, 1), enums, funs, env) else if (streq(tag, "For") == 1) tyErr("internal: unlowered `for` (run lower before typecheck)") else tyErr(str3("unknown expr ", tag, ""))
+  if (streq(tag, "Unit") == 1) tyOk("Unit") else if (streq(tag, "IntLit") == 1) tyOk("Int") else if (streq(tag, "StrLit") == 1) tyOk("String") else if (streq(tag, "ListLit") == 1) inferListLit(nodeExpr(e, 0), enums, funs, env) else if (streq(tag, "Interp") == 1) inferInterp(nodeExpr(e, 0), enums, funs, env) else if (streq(tag, "Println") == 1) inferIoChild(nodeExpr(e, 0), "String", enums, funs, env) else if (streq(tag, "Delay") == 1) tyOk("IO[Unit]") else if (streq(tag, "Sleep") == 1) inferIoChild(nodeExpr(e, 0), "Int", enums, funs, env) else if (streq(tag, "Fail") == 1) inferIoChild(nodeExpr(e, 0), "String", enums, funs, env) else if (streq(tag, "Pure") == 1) inferPure(nodeExpr(e, 0), enums, funs, env) else if (streq(tag, "Var") == 1) inferVar(nodeStr(e, 0), env) else if (streq(tag, "Adt") == 1) inferAdt(nodeStr(e, 0), nodeStr(e, 1), nodeExpr(e, 2), enums, funs, env) else if (streq(tag, "Let") == 1) inferLet(nodeStr(e, 0), nodeExpr(e, 1), nodeExpr(e, 2), enums, funs, env) else if (streq(tag, "If") == 1) inferIf(nodeExpr(e, 0), nodeExpr(e, 1), nodeExpr(e, 2), enums, funs, env) else if (streq(tag, "BinOp") == 1) inferBinOp(nodeStr(e, 0), nodeExpr(e, 1), nodeExpr(e, 2), enums, funs, env) else if (streq(tag, "Call") == 1) inferCall(nodeStr(e, 0), nodeExpr(e, 1), enums, funs, env) else if (streq(tag, "Match") == 1) inferMatch(nodeExpr(e, 0), nodeExpr(e, 1), enums, funs, env) else if (streq(tag, "FlatMap") == 1) inferFlatMap(nodeExpr(e, 0), nodeStr(e, 1), nodeExpr(e, 2), enums, funs, env) else if (streq(tag, "Handle") == 1) inferHandle(nodeExpr(e, 0), nodeExpr(e, 1), enums, funs, env) else if (streq(tag, "Attempt") == 1) inferAttempt(nodeExpr(e, 0), enums, funs, env) else if (streq(tag, "Lambda") == 1) inferLambda(nodeStr(e, 0), nodeExpr(e, 1), enums, funs, env) else if (streq(tag, "IoRace") == 1) inferIoPair(nodeExpr(e, 0), nodeExpr(e, 1), enums, funs, env) else if (streq(tag, "IoBoth") == 1) inferIoPair(nodeExpr(e, 0), nodeExpr(e, 1), enums, funs, env) else if (streq(tag, "For") == 1) tyErr("internal: unlowered `for` (run lower before typecheck)") else tyErr(str3("unknown expr ", tag, ""))
 
 def inferIoChild(child: List, want: String, enums: List, funs: List, env: List): String =
   for {
@@ -105,10 +118,26 @@ def inferVar(name: String, env: List): String =
     t = tyEnvGet(env, name)
   } yield if (Str.len(t) == 0) tyErr(str3("unbound variable ", name, "")) else tyOk(t)
 
-def inferAdt(en: String, caseName: String, enums: List): String =
+def inferAdt(en: String, cn: String, args: List, enums: List, funs: List, env: List): String =
   for {
     e = findEnum(enums, en)
-  } yield if (List.isEmpty(e) == 1) tyErr(str3("unknown enum ", en, "")) else if (enumHasCase(enumCases(e), caseName) == 0) tyErr(str4("unknown case ", en, ".", caseName)) else tyOk(tyMkAdt(en))
+  } yield if (List.isEmpty(e) == 1) tyErr(str3("unknown enum ", en, "")) else inferAdtCase(en, cn, args, enumCases(e), enums, funs, env)
+
+def inferAdtCase(en: String, cn: String, args: List, cases: List, enums: List, funs: List, env: List): String =
+  for {
+    c = findCase(cases, cn)
+  } yield if (List.isEmpty(c) == 1) tyErr(str4("unknown case ", en, ".", cn)) else inferAdtPayload(en, c, args, enums, funs, env)
+
+def inferAdtPayload(en: String, c: List, args: List, enums: List, funs: List, env: List): String =
+  for {
+    pf = checkPayloadFields(en, c)
+    fields = caseFields(c)
+  } yield if (tyIsOk(pf) == 0) pf else if (List.len(args) == List.len(fields)) inferAdtArgs(en, caseName(c), args, fields, enums, funs, env) else tyErr(str5(en, ".", caseName(c), " expects ", str3(Str.fromInt(List.len(fields)), " arg(s), got ", Str.fromInt(List.len(args)))))
+
+def inferAdtArgs(en: String, cn: String, args: List, fields: List, enums: List, funs: List, env: List): String =
+  if (List.isEmpty(args) == 1) tyOk(tyMkAdt(en)) else for {
+  ar = inferExpr(List.head(args), enums, funs, env)
+} yield if (tyIsOk(ar) == 0) ar else if (typesCompat(tyVal(ar), fieldType(List.head(fields))) == 0) tyErr(str4("expected ", fieldType(List.head(fields)), ", got ", tyVal(ar))) else inferAdtArgs(en, cn, List.tail(args), List.tail(fields), enums, funs, env)
 
 def inferLet(name: String, value: List, body: List, enums: List, funs: List, env: List): String =
   for {
@@ -208,16 +237,44 @@ def inferMatchArms(st: String, arms: List, enums: List, funs: List, env: List, a
 def inferMatchArm(st: String, arm: List, rest: List, enums: List, funs: List, env: List, acc: String): String =
   for {
     pr = checkPattern(armPat(arm), st, enums)
-    br = inferExpr(armBody(arm), enums, funs, env)
+    env2 = patternExtendEnv(armPat(arm), enums, env)
+    br = inferExpr(armBody(arm), enums, funs, env2)
   } yield if (tyIsOk(pr) == 0) pr else if (tyIsOk(br) == 0) br else if (Str.len(acc) == 0) inferMatchArms(st, rest, enums, funs, env, tyVal(br)) else if (typesCompat(acc, tyVal(br)) == 0) tyErr(str4("match arms disagree: ", acc, " vs ", tyVal(br))) else inferMatchArms(st, rest, enums, funs, env, acc)
 
 def checkPattern(pat: List, scrut: String, enums: List): String =
-  if (streq(exprTag(pat), "PatWild") == 1) tyOk("Unit") else checkPatAdt(nodeStr(pat, 0), nodeStr(pat, 1), scrut, enums)
+  if (streq(exprTag(pat), "PatWild") == 1) tyOk("Unit") else checkPatAdt(nodeStr(pat, 0), nodeStr(pat, 1), nodeStr(pat, 2), scrut, enums)
 
-def checkPatAdt(en: String, caseName: String, scrut: String, enums: List): String =
+def checkPatAdt(en: String, cn: String, bind: String, scrut: String, enums: List): String =
   for {
     e = findEnum(enums, en)
-  } yield if (List.isEmpty(e) == 1) tyErr(str3("unknown enum ", en, " in pattern")) else if (enumHasCase(enumCases(e), caseName) == 0) tyErr(str5("unknown case ", en, ".", caseName, " in pattern")) else if (tyIsAdt(scrut) == 1) if (streq(tyAdtName(scrut), en) == 1) tyOk("Unit") else tyErr(str5("pattern ", en, ".", caseName, str3(" does not match scrutinee ", scrut, ""))) else if (tyIsOpaque(scrut) == 1) tyOk("Unit") else tyErr(str5("pattern ", en, ".", caseName, str3(" does not match scrutinee ", scrut, "")))
+  } yield if (List.isEmpty(e) == 1) tyErr(str3("unknown enum ", en, " in pattern")) else checkPatAdtCase(en, cn, bind, scrut, enumCases(e))
+
+def checkPatAdtCase(en: String, cn: String, bind: String, scrut: String, cases: List): String =
+  for {
+    c = findCase(cases, cn)
+  } yield if (List.isEmpty(c) == 1) tyErr(str5("unknown case ", en, ".", cn, " in pattern")) else checkPatAdtScrut(en, cn, bind, scrut, c)
+
+def checkPatAdtScrut(en: String, cn: String, bind: String, scrut: String, c: List): String =
+  if (tyIsAdt(scrut) == 1) if (streq(tyAdtName(scrut), en) == 1) checkPatAdtBind(en, cn, bind, c) else tyErr(str5("pattern ", en, ".", cn, str3(" does not match scrutinee ", scrut, ""))) else if (tyIsOpaque(scrut) == 1) checkPatAdtBind(en, cn, bind, c) else tyErr(str5("pattern ", en, ".", cn, str3(" does not match scrutinee ", scrut, "")))
+
+def checkPatAdtBind(en: String, cn: String, bind: String, c: List): String =
+  for {
+    pf = checkPayloadFields(en, c)
+    fields = caseFields(c)
+  } yield if (tyIsOk(pf) == 0) pf else if (Str.len(bind) == 0) if (List.isEmpty(fields) == 1) tyOk("Unit") else tyErr(str5("pattern ", en, ".", cn, str3(" needs a payload binder, e.g. ", str4(en, ".", cn, "(x)"), ""))) else if (List.isEmpty(fields) == 1) tyErr(str5("pattern ", en, ".", cn, " is nullary; remove payload binder")) else tyOk("Unit")
+
+def patternExtendEnv(pat: List, enums: List, env: List): List =
+  if (streq(exprTag(pat), "PatWild") == 1) env else patternExtendEnvAdt(nodeStr(pat, 0), nodeStr(pat, 1), nodeStr(pat, 2), enums, env)
+
+def patternExtendEnvAdt(en: String, cn: String, bind: String, enums: List, env: List): List =
+  if (Str.len(bind) == 0) env else patternExtendEnvCase(en, cn, bind, enums, env)
+
+def patternExtendEnvCase(en: String, cn: String, bind: String, enums: List, env: List): List =
+  for {
+    e = findEnum(enums, en)
+    c = findCase(enumCases(e), cn)
+    fields = caseFields(c)
+  } yield if (List.isEmpty(fields) == 1) env else tyEnvPut(env, bind, fieldType(List.head(fields)))
 
 def expectArity(name: String, n: Int, got: Int): String =
   if (n == got) tyOk("Unit") else tyErr(str4(name, " expects ", Str.fromInt(n), str3(" args, got ", Str.fromInt(got), "")))
