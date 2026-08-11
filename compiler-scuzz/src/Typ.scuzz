@@ -115,7 +115,7 @@ def checkPayloadFieldTys(en: String, cn: String, fields: List): String =
 def checkPayloadFieldTy(en: String, cn: String, f: List): String =
   for {
     ty = fieldType(f)
-  } yield if (streq(ty, "Int") == 1) tyOk("Unit") else if (streq(ty, "String") == 1) tyOk("Unit") else tyErr(str5(en, ".", cn, str3(" field ", fieldName(f), ": Stage 0 payload types are Int or String, got "), ty))
+  } yield if (streq(ty, "Int") == 1) tyOk("Unit") else if (streq(ty, "String") == 1) tyOk("Unit") else if (streq(ty, "List") == 1) tyOk("Unit") else tyErr(str5(en, ".", cn, str3(" field ", fieldName(f), ": Stage 0 payload types are Int, String, or List, got "), ty))
 
 def defSeen(seen: List, name: String): Int =
   if (List.isEmpty(seen) == 1) 0 else if (streq(List.head(seen), name) == 1) 1 else defSeen(List.tail(seen), name)
@@ -251,10 +251,16 @@ def inferListLit(elems: List, enums: List, funs: List, env: List): String =
 def inferInterp(parts: List, enums: List, funs: List, env: List): String =
   if (List.isEmpty(parts) == 1) tyOk("String") else inferInterpPart(List.head(parts), List.tail(parts), enums, funs, env)
 
-def inferInterpPart(part: List, rest: List, enums: List, funs: List, env: List): String =
-  if (streq(List.head(part), "Lit") == 1) inferInterp(rest, enums, funs, env) else for {
-  r = inferExpr(nodeExpr(part, 0), enums, funs, env)
-} yield if (tyIsOk(r) == 0) r else if (streq(tyVal(r), "String") == 1) inferInterp(rest, enums, funs, env) else if (streq(tyVal(r), "Int") == 1) inferInterp(rest, enums, funs, env) else if (tyIsOpaque(tyVal(r)) == 1) inferInterp(rest, enums, funs, env) else tyErr(str3("interpolation hole must be String or Int, got ", tyVal(r), ""))
+def inferInterpPart(part: InterpPart, rest: List, enums: List, funs: List, env: List): String =
+  part match {
+    case InterpPart.Lit(text) => inferInterp(rest, enums, funs, env)
+    case InterpPart.Hole(expr) => inferInterpHole(expr, rest, enums, funs, env)
+  }
+
+def inferInterpHole(expr: List, rest: List, enums: List, funs: List, env: List): String =
+  for {
+    r = inferExpr(expr, enums, funs, env)
+  } yield if (tyIsOk(r) == 0) r else if (streq(tyVal(r), "String") == 1) inferInterp(rest, enums, funs, env) else if (streq(tyVal(r), "Int") == 1) inferInterp(rest, enums, funs, env) else if (tyIsOpaque(tyVal(r)) == 1) inferInterp(rest, enums, funs, env) else tyErr(str3("interpolation hole must be String or Int, got ", tyVal(r), ""))
 
 def inferFlatMap(inner: List, param: String, body: List, enums: List, funs: List, env: List): String =
   for {

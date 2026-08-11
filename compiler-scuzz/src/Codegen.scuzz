@@ -204,8 +204,11 @@ def collectExprTag(tag: String, e: List, strs: List): List =
 def collectInterpParts(parts: List, strs: List): List =
   if (List.isEmpty(parts) == 1) strs else collectInterpParts(List.tail(parts), collectInterpPart(List.head(parts), strs))
 
-def collectInterpPart(part: List, strs: List): List =
-  if (streq(List.head(part), "Lit") == 1) collectPush(strs, List.head(List.tail(part))) else collectExpr(List.head(List.tail(part)), strs)
+def collectInterpPart(part: InterpPart, strs: List): List =
+  part match {
+    case InterpPart.Lit(text) => collectPush(strs, text)
+    case InterpPart.Hole(expr) => collectExpr(expr, strs)
+  }
 
 def collectArgs(args: List, strs: List): List =
   if (List.isEmpty(args) == 1) strs else collectArgs(List.tail(args), collectExpr(List.head(args), strs))
@@ -615,8 +618,11 @@ def emitInterp(strs: List, e: List, ctx: List, env: List, prefix: String, id: In
 def emitInterpParts(strs: List, parts: List, ctx: List, env: List, prefix: String, id: Int, conts: String, code: String, acc: String, i: Int): List =
   if (List.isEmpty(parts) == 1) if (streq(acc, "") == 1) emitSzStringLit(strs, "", prefix, id, conts) else mkS(code, acc, "ptr", id, conts) else emitInterpPart(strs, List.head(parts), List.tail(parts), ctx, env, prefix, id, conts, code, acc, i)
 
-def emitInterpPart(strs: List, part: List, rest: List, ctx: List, env: List, prefix: String, id: Int, conts: String, code: String, acc: String, i: Int): List =
-  if (streq(List.head(part), "Lit") == 1) emitInterpPiece(strs, rest, ctx, env, prefix, id, conts, code, acc, i, emitSzStringLit(strs, nodeStr(part, 0), str4(prefix, "_l", Str.fromInt(i), ""), id, conts)) else emitInterpHole(strs, rest, ctx, env, prefix, id, conts, code, acc, i, emitExpr(nodeExpr(part, 0), strs, ctx, env, str4(prefix, "_e", Str.fromInt(i), ""), id, conts))
+def emitInterpPart(strs: List, part: InterpPart, rest: List, ctx: List, env: List, prefix: String, id: Int, conts: String, code: String, acc: String, i: Int): List =
+  part match {
+    case InterpPart.Lit(text) => emitInterpPiece(strs, rest, ctx, env, prefix, id, conts, code, acc, i, emitSzStringLit(strs, text, str4(prefix, "_l", Str.fromInt(i), ""), id, conts))
+    case InterpPart.Hole(expr) => emitInterpHole(strs, rest, ctx, env, prefix, id, conts, code, acc, i, emitExpr(expr, strs, ctx, env, str4(prefix, "_e", Str.fromInt(i), ""), id, conts))
+  }
 
 def emitInterpHole(strs: List, rest: List, ctx: List, env: List, prefix: String, id: Int, conts: String, code: String, acc: String, i: Int, pe: List): List =
   if (streq(sKind(pe), "int") == 1) emitInterpPiece(strs, rest, ctx, env, prefix, sId(pe), sConts(pe), str4(code, sCode(pe), "  %", str6(prefix, "_s", Str.fromInt(i), " = call ptr @sz_string_from_int(i64 ", sValue(pe), ")\n")), acc, i, mkS("", str4("%", prefix, "_s", Str.fromInt(i)), "ptr", sId(pe), sConts(pe))) else emitInterpPiece(strs, rest, ctx, env, prefix, sId(pe), sConts(pe), str3(code, sCode(pe), ""), acc, i, pe)

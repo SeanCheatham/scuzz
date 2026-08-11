@@ -168,8 +168,11 @@ def prettyExprListCont(e: List, rest: List, acc: String): String =
 def prettyInterpParts(parts: List, acc: String): String =
   if (List.isEmpty(parts) == 1) acc else prettyInterpParts(List.tail(parts), Str.concat(acc, prettyInterpPart(List.head(parts))))
 
-def prettyInterpPart(part: List): String =
-  if (streq(exprTag(part), "Lit") == 1) escapeInterpLit(nodeStr(part, 0)) else prettyInterpHole(nodeExpr(part, 0))
+def prettyInterpPart(part: InterpPart): String =
+  part match {
+    case InterpPart.Lit(text) => escapeInterpLit(text)
+    case InterpPart.Hole(expr) => prettyInterpHole(expr)
+  }
 
 def prettyInterpHole(e: List): String =
   if (streq(exprTag(e), "Var") == 1) Str.concat("$", nodeStr(e, 0)) else str3("${", trimStr(prettyExpr(e, 0)), "}")

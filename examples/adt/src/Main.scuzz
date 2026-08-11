@@ -41,4 +41,9 @@ def describe(o: Opt): String =
   case Color.Red => IO.println("adt:list:red")
   case Color.Blue => IO.println("adt:list:blue")
 }
+    boxed = Box.Of(List.cons("a", List.cons("b", List.empty())))
+    _ <- boxed match {
+  case Box.Of(ys) => IO.println(Str.concat("adt:box:", List.join(ys, ",")))
+  case Box.Empty => IO.println("adt:box:empty")
+}
   } yield ()

@@ -9,15 +9,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ## Unknowns
 
-### 1. Compiler IR onto payload ADTs
-
-**Status.** Open in-repo (large). User programs already have N-field `Int`/`String` payload ADTs and file-stem def namespaces on Stage 0 and self-host (`examples/adt`, `examples/modules`). Enum-typed def signatures work on all stages (`normalizeTy` in self-host). Compiler sources use a payload `Tok` enum for the token stream (`compiler-scuzz/src/Tok.scuzz`) with match-based accessors; Format/Typ/Codegen AST/IR still assume List+string-tag encoding. No records, traits, or user generics yet (`compatibility.md` keeps early-monomorphized generics as direction).
-
-**Unproven.** That rewriting the compiler’s own AST/IR onto payload ADTs (and later generics) keeps the self-host ratchet intact. Token mechanics are proven; List-typed payload fields (needed for child nodes) and a true AST node family are not.
-
-**Proof.** At least one AST node family rewritten onto payload ADTs with `scripts/selfhost.sh` green and byte-identical Stage-2/3 IR.
-
-### 2. Mobile on real devices
+### 1. Mobile on real devices
 
 **Status.** Blocked on Android NDK and/or Xcode. `crates/embedder-mobile/` is a host shell (`SCUZZ_MOBILE_SHELL=1`) plus packaging stubs (`shells/android/`, `shells/ios/`). No NDK/Xcode build has run; no toolchain invocation in Makefiles or CI.
 
@@ -25,7 +17,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 **Proof.** One example (counter) runs on one device or simulator via `scuzz package` plus the platform toolchain. Further stubs do not close the proof.
 
-### 3. GPU presenters (Impeller / Skia GPU)
+### 2. GPU presenters (Impeller / Skia GPU)
 
 **Status.** Unblocked on text/metrics. Only the CPU raster path exists today (`sk_sw` or fetched Skia CPU prebuilt). Presenters must not change `Ui` session or logical goldens — asserted, not demonstrated.
 
@@ -37,6 +29,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### Residuals (closed bets)
 
+- **Compiler IR onto payload ADTs** — self-host ratchet intact with payload ADTs in compiler sources: `Tok` (token stream), `InterpPart` (`Lit`/`Hole` with `List`-typed hole expr), enum-typed def signatures (`normalizeTy`), and `Int`/`String`/`List` payload fields (`examples/adt` incl. `Box.Of(xs: List)`). Stage-2/3 IR remains byte-identical. Later: rewrite remaining AST/IR families (for-binders, exprs, spans); records/traits/generics (`compatibility.md`).
 - **Real text through `sk_capi`** — measure/text-size APIs on `sk_capi.h`; layout uses `sk_font_measure_string`; dual-backend Makefile defaults to `third_party/skia/prebuilt/<triple>/libsk_capi.a` (fail-closed fetch via `PIN` / `fetch_skia.sh`); `SCUZZ_SKIA=sk_sw` opts into the in-tree software backend; as-needed `.github/workflows/skia-cpu.yml` + `scripts/build_skia_prebuilt.sh` produce a fat `sk_capi` archive. Structural goldens remain logical-only and stay green against real Skia.
 - **Concurrency** — cooperative fibers + TestRuntime virtual-time jumps cover the determinism thesis (`test_io.c`). Out of scope / later: OS threads, interruptible cancel mid-`nanosleep`, supervision trees, Scuzz bindings for Queue/Deferred.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting (`test_ui.c`, optional `test-asan`). Later: `Signal.list` collection, exit-time signal ownership / LSan-clean examples, a collector if list-churn demands it.

@@ -690,10 +690,10 @@ fn expect_ty(got: &Type, want: &Type) -> Result<(), TypeError> {
 fn check_payload_fields(enum_name: &str, case: &crate::ast::EnumCase) -> Result<(), TypeError> {
     for (fname, fty) in &case.fields {
         match fty {
-            Type::Int | Type::String => {}
+            Type::Int | Type::String | Type::List => {}
             other => {
                 return Err(TypeError::Msg(format!(
-                    "{enum_name}.{} field {fname}: Stage 0 payload types are Int or String, got {other:?}",
+                    "{enum_name}.{} field {fname}: Stage 0 payload types are Int, String, or List, got {other:?}",
                     case.name
                 )))
             }
@@ -813,6 +813,22 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("payload ADT should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_payload_adt() {
+        let src = r#"
+enum Box:
+  case Of(xs: List)
+  case Empty
+@main def main: IO[Unit] =
+  Box.Of(List.cons("a", List.empty())) match {
+    case Box.Of(ys) => IO.println(List.head(ys))
+    case Box.Empty => IO.println("empty")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List payload ADT should typecheck");
     }
 
     #[test]

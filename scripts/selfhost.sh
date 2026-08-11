@@ -29,6 +29,7 @@ stage_checks() {
   echo "$adt_out" | grep -q "adt:flip:blue"
   echo "$adt_out" | grep -q "adt:describe:42"
   echo "$adt_out" | grep -q "adt:list:blue"
+  echo "$adt_out" | grep -q "adt:box:a,b"
 
   echo "==> $stage runs examples/modules"
   modules_out="$("$bin" run examples/modules)"

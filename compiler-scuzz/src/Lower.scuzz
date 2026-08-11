@@ -51,8 +51,11 @@ def lowerArm(arm: List, ctors: List): List =
 def lowerInterpParts(parts: List, ctors: List, acc: List): List =
   if (List.isEmpty(parts) == 1) List.reverse(acc) else lowerInterpParts(List.tail(parts), ctors, List.cons(lowerInterpPart(List.head(parts), ctors), acc))
 
-def lowerInterpPart(part: List, ctors: List): List =
-  if (streq(List.head(part), "Lit") == 1) part else List.cons("Hole", List.cons(lowerExpr(nodeExpr(part, 0), ctors), List.empty()))
+def lowerInterpPart(part: InterpPart, ctors: List): InterpPart =
+  part match {
+    case InterpPart.Lit(text) => InterpPart.Lit(text)
+    case InterpPart.Hole(expr) => InterpPart.Hole(lowerExpr(expr, ctors))
+  }
 
 def forBindersHaveDraw(binders: List): Int =
   if (List.isEmpty(binders) == 1) 0 else if (streq(List.head(List.head(binders)), "Draw") == 1) 1 else forBindersHaveDraw(List.tail(binders))
