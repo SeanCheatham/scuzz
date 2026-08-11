@@ -4,9 +4,10 @@
 # Default: no download — crates/ffi-skia ships a CPU software backend (sk_sw)
 # that implements include/sk_capi.h. When a URL is available:
 #
-#   SCUZZ_SKIA_URL=https://…/skia-x86_64-unknown-linux-gnu-cpu.tar.gz ./scripts/fetch_skia.sh
+#   SCUZZ_SKIA_URL=https://…/skia-{triple}-cpu.tar.gz ./scripts/fetch_skia.sh
 #
 # If SCUZZ_SKIA_URL is unset, reads `url=` from third_party/skia/PIN when set.
+# `{triple}` in the URL is replaced with the host triple (or SCUZZ_SKIA_TRIPLE).
 # Layout written under third_party/skia/prebuilt/<triple>/ when fetched.
 set -euo pipefail
 
@@ -29,11 +30,15 @@ EOF
   exit 0
 fi
 
+# Host-specific asset from a shared release pin (e.g. skia-{triple}-cpu.tar.gz).
+URL="${URL//\{triple\}/${TRIPLE}}"
+
 mkdir -p "${DEST}/${TRIPLE}"
 # Clear previous contents so stale companion libs do not linger.
 rm -rf "${DEST}/${TRIPLE:?}/"*
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT
+echo "fetch_skia: triple=${TRIPLE}"
 echo "fetch_skia: downloading ${URL}"
 # Allow file:// and plain paths for local proof tarballs.
 if [[ "${URL}" == file://* ]]; then

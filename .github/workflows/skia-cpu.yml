@@ -20,43 +20,71 @@ permissions:
   contents: write
 
 jobs:
-  linux-x64:
-    runs-on: ubuntu-latest
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-latest
+            triple: x86_64-unknown-linux-gnu
+          - runner: macos-latest
+            triple: aarch64-apple-darwin
+    runs-on: ${{ matrix.runner }}
     timeout-minutes: 180
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install build deps
+      - name: Install Linux build deps
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y clang make ninja-build python3 git curl xxd \
             libfontconfig-dev g++ fonts-dejavu-core \
             libfreetype-dev libbrotli-dev libbz2-dev zlib1g-dev
 
+      - name: Install macOS build deps
+        if: runner.os == 'macOS'
+        run: brew install ninja
+
       - name: Build sk_capi Skia prebuilt
         env:
           SCUZZ_SKIA_BRANCH: ${{ github.event.inputs.skia_branch || 'chrome/m131' }}
-          SCUZZ_SKIA_TRIPLE: x86_64-unknown-linux-gnu
+          SCUZZ_SKIA_TRIPLE: ${{ matrix.triple }}
         run: ./scripts/build_skia_prebuilt.sh
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: skia-x86_64-unknown-linux-gnu-cpu
-          path: dist/skia-x86_64-unknown-linux-gnu-cpu.tar.gz
+          name: skia-${{ matrix.triple }}-cpu
+          path: dist/skia-${{ matrix.triple }}-cpu.tar.gz
           if-no-files-found: error
+
+  release:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download prebuilt artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          pattern: skia-*-cpu
+          merge-multiple: true
 
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
           name: ${{ github.event.inputs.release_tag || github.ref_name }}
-          files: dist/skia-x86_64-unknown-linux-gnu-cpu.tar.gz
+          files: dist/*.tar.gz
           generate_release_notes: false
           body: |
-            Scuzz `sk_capi` CPU prebuilt for `x86_64-unknown-linux-gnu`.
+            Scuzz `sk_capi` CPU prebuilts (`x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`).
             Install with:
             ```
             SCUZZ_SKIA_URL=<asset-url> ./scripts/fetch_skia.sh
             ```
-            Or pin the URL in `third_party/skia/PIN` for `package_release.sh`.
+            Or pin a `{triple}` template in `third_party/skia/PIN`:
+            ```
+            url=https://github.com/<owner>/<repo>/releases/download/<tag>/skia-{triple}-cpu.tar.gz
+            ```
+            `fetch_skia.sh` / `package_release.sh` substitute the host triple.

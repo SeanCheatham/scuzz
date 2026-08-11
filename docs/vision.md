@@ -57,7 +57,7 @@ libc `malloc`/`free` via `sz_alloc` / `sz_free`. No moving collector yet. Clear 
 
 ### Skia
 
-No vendored Skia tree. Thin `sk_capi` (measure + draw) with CPU `sk_sw` as the zero-dep Headless CI default. When `third_party/skia/prebuilt/<triple>/libsk_capi.a` is present (via `scripts/fetch_skia.sh` / `SCUZZ_SKIA_URL` or `third_party/skia/PIN`), the Makefile links that real Skia CPU backend instead. As-needed builds: `.github/workflows/skia-cpu.yml` + `scripts/build_skia_prebuilt.sh`. `package_release.sh` fetches the PIN into the install tree. Impeller deferred (GPU presenters later; must not change `Ui` session or logical goldens). Callers depend only on `sk_capi.h`.
+No vendored Skia tree. Thin `sk_capi` (measure + draw) with CPU `sk_sw` as the zero-dep Headless CI default. When `third_party/skia/prebuilt/<triple>/libsk_capi.a` is present (via `scripts/fetch_skia.sh` / `SCUZZ_SKIA_URL` or `third_party/skia/PIN`), the Makefile links that real Skia CPU backend instead. As-needed builds: `.github/workflows/skia-cpu.yml` + `scripts/build_skia_prebuilt.sh` (Linux x86_64 + macOS arm64). `PIN` uses a `{triple}` URL template so `package_release.sh` fetches the host-matching asset. Impeller deferred (GPU presenters later; must not change `Ui` session or logical goldens). Callers depend only on `sk_capi.h`.
 
 ### IO errors
 

@@ -99,36 +99,52 @@ for dep in freetype2 harfbuzz zlib png jpeg skcms; do
     cp -f "${SKIA}/out/Static/lib${dep}.a" "${PKG}/lib${dep}.a"
   fi
 done
-# Prefer merging everything into one fat archive for simple linking.
-COMBINED="${PKG}/combine"
-rm -rf "${COMBINED}"
-mkdir -p "${COMBINED}"
-(
-  cd "${COMBINED}"
-  ar x "${PKG}/libskia.a" 2>/dev/null || ar -x "${PKG}/libskia.a"
-  for dep in freetype2 harfbuzz zlib png jpeg skcms; do
-    if [[ -f "${PKG}/lib${dep}.a" ]]; then
-      ar x "${PKG}/lib${dep}.a" 2>/dev/null || ar -x "${PKG}/lib${dep}.a"
-    fi
-  done
-  cp -f "${PKG}/obj/sk_capi_skia.o" "${PKG}/obj/sk_capi_skia_bridge.o" \
-    "${PKG}/obj/scuzz_embedded_font.o" .
-  objs=( ./*.o )
-  if ((${#objs[@]} > 500)); then
-    {
-      echo "CREATE ${PKG}/libsk_capi.a"
-      for o in ./*.o; do echo "ADDMOD $o"; done
-      echo "SAVE"
-      echo "END"
-    } | ar -M
-  else
-    ar rcs "${PKG}/libsk_capi.a" ./*.o
-  fi
+
+SHIM_OBJS=(
+  "${PKG}/obj/sk_capi_skia.o"
+  "${PKG}/obj/sk_capi_skia_bridge.o"
+  "${PKG}/obj/scuzz_embedded_font.o"
 )
+ARCHIVES=( "${PKG}/libskia.a" )
+for dep in freetype2 harfbuzz zlib png jpeg skcms; do
+  if [[ -f "${PKG}/lib${dep}.a" ]]; then
+    ARCHIVES+=( "${PKG}/lib${dep}.a" )
+  fi
+done
+
+# Prefer merging everything into one fat archive for simple linking.
+# Darwin: Apple libtool merges .a/.o without GNU ar -M (unsupported by BSD ar).
+# Linux: extract objects and use GNU ar (MRI script when the object count is large).
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  libtool -static -o "${PKG}/libsk_capi.a" "${ARCHIVES[@]}" "${SHIM_OBJS[@]}"
+else
+  COMBINED="${PKG}/combine"
+  rm -rf "${COMBINED}"
+  mkdir -p "${COMBINED}"
+  (
+    cd "${COMBINED}"
+    for archive in "${ARCHIVES[@]}"; do
+      ar x "${archive}" 2>/dev/null || ar -x "${archive}"
+    done
+    cp -f "${SHIM_OBJS[@]}" .
+    objs=( ./*.o )
+    if ((${#objs[@]} > 500)); then
+      {
+        echo "CREATE ${PKG}/libsk_capi.a"
+        for o in ./*.o; do echo "ADDMOD $o"; done
+        echo "SAVE"
+        echo "END"
+      } | ar -M
+    else
+      ar rcs "${PKG}/libsk_capi.a" ./*.o
+    fi
+  )
+  rm -rf "${COMBINED}"
+fi
 
 rm -f "${PKG}"/libskia.a "${PKG}"/libfreetype2.a "${PKG}"/libharfbuzz.a \
   "${PKG}"/libzlib.a "${PKG}"/libpng.a "${PKG}"/libjpeg.a "${PKG}"/libskcms.a
-rm -rf "${PKG}/obj" "${COMBINED}"
+rm -rf "${PKG}/obj"
 
 {
   echo "skia_branch=${BRANCH}"

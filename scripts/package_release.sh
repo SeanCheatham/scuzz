@@ -100,6 +100,7 @@ chmod +x "$OUT/scripts/run_goldens.sh" "$OUT/scripts/package_project.sh" \
   "$OUT/scripts/fetch_skia.sh" "$OUT/scripts/skia_triple.sh"
 
 # Skia pin + optional prebuilt for UI text (fetched when PIN url= is set).
+# fetch_skia.sh substitutes {triple} so Linux/macOS releases get the matching asset.
 mkdir -p "$OUT/third_party/skia"
 cp -f "$ROOT/third_party/skia/README.md" "$OUT/third_party/skia/README.md"
 cp -f "$ROOT/third_party/skia/PIN" "$OUT/third_party/skia/PIN"
@@ -107,7 +108,8 @@ if [[ -f "$ROOT/third_party/skia/PIN" ]]; then
   PIN_URL="$(awk -F= '/^url=/{print substr($0,5); exit}' "$ROOT/third_party/skia/PIN" || true)"
   if [[ -n "${PIN_URL}" ]]; then
     echo "==> fetching pinned Skia prebuilt into release tree"
-    SCUZZ_SKIA_URL="${PIN_URL}" "$ROOT/scripts/fetch_skia.sh"
+    unset SCUZZ_SKIA_URL || true
+    "$ROOT/scripts/fetch_skia.sh"
     if [[ -d "$ROOT/third_party/skia/prebuilt" ]]; then
       mkdir -p "$OUT/third_party/skia"
       cp -a "$ROOT/third_party/skia/prebuilt" "$OUT/third_party/skia/"

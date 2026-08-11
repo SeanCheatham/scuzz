@@ -1,10 +1,16 @@
-# Pinned sk_capi Skia CPU prebuilt (as-needed skia-cpu-vN Release asset).
-# package_release.sh fetches this into the release tree when URL is set.
-# Leave URL empty until the first skia-cpu workflow publishes an asset.
+# Pinned sk_capi Skia CPU prebuilt (as-needed skia-cpu-vN Release assets).
+# package_release.sh / fetch_skia.sh fetch when url= is set.
 #
 # Format: key=value lines
+#   skia_branch=…   milestone used to build the assets
+#   url=…           HTTPS (or file://) tarball; embed {triple} for host selection
+#
+# {triple} is replaced with the host triple from scripts/skia_triple.sh
+# (override with SCUZZ_SKIA_TRIPLE). Published triples from skia-cpu.yml:
+#   x86_64-unknown-linux-gnu, aarch64-apple-darwin
+#
+# Leave url= empty until the first skia-cpu workflow publishes assets.
 skia_branch=chrome/m131
-triple=x86_64-unknown-linux-gnu
 # Example after first publish:
-# url=https://github.com/OWNER/REPO/releases/download/skia-cpu-v0.1/skia-x86_64-unknown-linux-gnu-cpu.tar.gz
+# url=https://github.com/OWNER/REPO/releases/download/skia-cpu-v0.1/skia-{triple}-cpu.tar.gz
 url=
