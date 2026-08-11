@@ -47,7 +47,11 @@ build/sk_capi_backend: $(PREBUILT_LIB) | build
 endif
 
 build/test_skia: tests/test_skia.c build/libsk_capi.a | build
-	$(CC) $(CFLAGS) $(INCLUDES) tests/test_skia.c -Lbuild -lsk_capi -lstdc++ -lm -lpthread -o $@
+	@extra=""; \
+	if [ -f build/sk_capi_backend ] && grep -qx skia build/sk_capi_backend; then \
+	  extra="-lz -lbz2 -lbrotlidec -lbrotlicommon"; \
+	fi; \
+	$(CC) $(CFLAGS) $(INCLUDES) tests/test_skia.c -Lbuild -lsk_capi -lstdc++ -lm -lpthread $$extra -o $@
 
 test: build/test_skia
 	./build/test_skia

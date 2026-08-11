@@ -16,8 +16,10 @@ companion `.a` files). `crates/ffi-skia/Makefile` copies that archive into
 **Tarball contract:** a static library exporting every symbol in
 `crates/ffi-skia/include/sk_capi.h` (including measure / text-size APIs). No Skia
 headers are required by callers — only `sk_capi.h`. Prefer a single fat
-`libsk_capi.a` (shim + Skia objects). Companion archives in the same directory are
-also linked.
+`libsk_capi.a` (shim + Skia objects + embedded font). Companion archives in the
+same directory are also linked. Linking a real Skia prebuilt may need
+`-lstdc++ -lm -lz -lbz2 -lbrotlidec -lbrotlicommon` (Stage 0 / self-host add these
+when `build/sk_capi_backend` is `skia`).
 
 **Pin / release:** `third_party/skia/PIN` records the as-needed `skia-cpu-vN` asset
 URL. `scripts/package_release.sh` fetches that pin into the release tree under

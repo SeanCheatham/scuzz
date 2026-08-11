@@ -154,6 +154,14 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
             link.arg("-lstdc++");
         }
         link.arg("-lm");
+        // Compression helpers used by FreeType inside real Skia prebuilts.
+        let backend = ffi_skia_dir.join("build/sk_capi_backend");
+        let is_skia = std::fs::read_to_string(&backend)
+            .map(|s| s.trim() == "skia")
+            .unwrap_or(false);
+        if is_skia {
+            link.arg("-lz").arg("-lbz2").arg("-lbrotlidec").arg("-lbrotlicommon");
+        }
 
         // Optional companion archives copied next to libsk_capi.a by ffi-skia Makefile.
         if let Ok(entries) = std::fs::read_dir(ffi_skia_dir.join("build")) {

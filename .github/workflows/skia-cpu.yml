@@ -30,7 +30,8 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y clang make ninja-build python3 git curl xxd \
-            libfontconfig-dev g++ fonts-dejavu-core
+            libfontconfig-dev g++ fonts-dejavu-core \
+            libfreetype-dev libbrotli-dev libbz2-dev zlib1g-dev
 
       - name: Build sk_capi Skia prebuilt
         env:

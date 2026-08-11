@@ -15,7 +15,7 @@
 - Prebuilt Stage-2 release tree (`scripts/package_release.sh` → `dist/scuzz-<triple>.tar.gz`); `install.sh` installs under `PREFIX/share/scuzz`
 - Deterministic fuzz: `scuzz fuzz` (seeded `--iters`, bounded `--exhaust --depth N`, `--replay repro.toml`) on TestRuntime + Headless; residual module **laws** + sim overlays as the primary oracle
 - Structural goldens (signal store + a11y dump); PNG optional via `scuzz test --pixels`; IO packages use TESTRT exit-0 smoke
-- Skia linked for `[ui]` packages only (IO-only link is Skia-free); in-tree `sk_sw` today (`SCUZZ_SKIA_URL` fetch is reserved)
+- Skia linked for `[ui]` packages only (IO-only link is Skia-free); default `sk_sw`, optional real Skia CPU via `SCUZZ_SKIA_URL` / `third_party/skia/PIN` (`scripts/fetch_skia.sh`, as-needed `skia-cpu` workflow)
 - Impeller deferred (see `docs/vision.md`)
 
 App authors: [docs/guide.md](docs/guide.md).

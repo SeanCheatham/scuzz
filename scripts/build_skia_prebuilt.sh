@@ -16,6 +16,7 @@ WORK="${SCUZZ_SKIA_WORK:-/tmp/scuzz-skia-build}"
 OUT_DIR="${ROOT}/dist"
 ASSET="skia-${TRIPLE}-cpu.tar.gz"
 SHIM="${ROOT}/crates/ffi-skia/src/sk_capi_skia.cpp"
+BRIDGE="${ROOT}/crates/ffi-skia/src/sk_capi_skia_bridge.c"
 
 echo "build_skia_prebuilt: triple=${TRIPLE} branch=${BRANCH} work=${WORK}"
 
@@ -61,7 +62,7 @@ GN_ARGS=(
   'skia_use_system_libwebp=false'
   'skia_use_system_zlib=false'
   'skia_use_system_harfbuzz=false'
-  'skia_use_system_freetype=false'
+  'skia_use_system_freetype2=false'
   'skia_enable_gpu=false'
   'skia_use_gl=false'
   'skia_enable_pdf=false'
@@ -71,35 +72,47 @@ GN_ARGS=(
 
 echo "==> gn gen"
 bin/gn gen out/Static --args="${GN_ARGS[*]}"
-echo "==> ninja skia"
-ninja -C out/Static skia
+echo "==> ninja skia (+ freetype2/harfbuzz)"
+ninja -C out/Static skia freetype2 harfbuzz
 
 PKG="${WORK}/pkg"
 rm -rf "${PKG}"
 mkdir -p "${PKG}/fonts" "${PKG}/obj"
 cp -f "${FONT_TTF}" "${PKG}/fonts/DejaVuSans.ttf"
 
-echo "==> compile sk_capi shim + embedded font"
+echo "==> compile sk_capi shim + bridge + embedded font"
 c++ -std=c++17 -O2 -fPIC -c "${SHIM}" -o "${PKG}/obj/sk_capi_skia.o" \
-  -I"${SKIA}" -I"${ROOT}/crates/ffi-skia/include" \
+  -I"${SKIA}" \
   -DSK_RELEASE \
-  -DSK_FONTMGR_FONTCONFIG_AVAILABLE \
-  -DSCUZZ_SKIA_EMBEDDED_FONT \
-  -DSCUZZ_SKIA_FONT_PATH=\"fonts/DejaVuSans.ttf\"
+  -DSCUZZ_SKIA_EMBEDDED_FONT
+
+cc -O2 -fPIC -c "${BRIDGE}" -o "${PKG}/obj/sk_capi_skia_bridge.o" \
+  -I"${ROOT}/crates/ffi-skia/include"
 
 cc -O2 -fPIC -c "${FONT_INC}" -o "${PKG}/obj/scuzz_embedded_font.o"
 
 echo "==> pack libsk_capi.a"
 cp -f "${SKIA}/out/Static/libskia.a" "${PKG}/libskia.a"
+# Also pull companion static libs produced by the Skia build into the fat archive.
+for dep in freetype2 harfbuzz zlib png jpeg skcms; do
+  if [[ -f "${SKIA}/out/Static/lib${dep}.a" ]]; then
+    cp -f "${SKIA}/out/Static/lib${dep}.a" "${PKG}/lib${dep}.a"
+  fi
+done
+# Prefer merging everything into one fat archive for simple linking.
 COMBINED="${PKG}/combine"
 rm -rf "${COMBINED}"
 mkdir -p "${COMBINED}"
 (
   cd "${COMBINED}"
-  # Some ar archives use paths; extract with full names where supported.
   ar x "${PKG}/libskia.a" 2>/dev/null || ar -x "${PKG}/libskia.a"
-  cp -f "${PKG}/obj/sk_capi_skia.o" "${PKG}/obj/scuzz_embedded_font.o" .
-  # Avoid arg-list too long: use an MRI script when needed.
+  for dep in freetype2 harfbuzz zlib png jpeg skcms; do
+    if [[ -f "${PKG}/lib${dep}.a" ]]; then
+      ar x "${PKG}/lib${dep}.a" 2>/dev/null || ar -x "${PKG}/lib${dep}.a"
+    fi
+  done
+  cp -f "${PKG}/obj/sk_capi_skia.o" "${PKG}/obj/sk_capi_skia_bridge.o" \
+    "${PKG}/obj/scuzz_embedded_font.o" .
   objs=( ./*.o )
   if ((${#objs[@]} > 500)); then
     {
@@ -113,7 +126,8 @@ mkdir -p "${COMBINED}"
   fi
 )
 
-rm -f "${PKG}/libskia.a"
+rm -f "${PKG}"/libskia.a "${PKG}"/libfreetype2.a "${PKG}"/libharfbuzz.a \
+  "${PKG}"/libzlib.a "${PKG}"/libpng.a "${PKG}"/libjpeg.a "${PKG}"/libskcms.a
 rm -rf "${PKG}/obj" "${COMBINED}"
 
 {
