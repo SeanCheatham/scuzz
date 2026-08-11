@@ -56,7 +56,7 @@ test-asan:
 		rm -f /tmp/scuzz_asan_probe; \
 		$(MAKE) clean && \
 		ASAN_OPTIONS=detect_leaks=0 $(MAKE) test CFLAGS='$(ASAN_CFLAGS)' && \
-		$(MAKE) -C $(FFI_SKIA) clean; \
+		$(MAKE) clean; \
 	else \
 		echo "test-asan: AddressSanitizer not supported by $(CC) on this host; skipping"; \
 	fi
