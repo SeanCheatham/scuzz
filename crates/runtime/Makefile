@@ -19,8 +19,12 @@ all: lib
 build:
 	mkdir -p build
 
+FFI_SKIA_CFLAGS := -std=c11 -Wall -Wextra -Werror -O2
+
 ffi-skia:
-	$(MAKE) -C $(FFI_SKIA) lib CC=$(CC)
+	# Keep ffi-skia on its own CFLAGS so optional ASan runs do not leave
+	# instrumented objects for later non-ASan `make -C ffi-skia test`.
+	$(MAKE) -C $(FFI_SKIA) lib CC=$(CC) CFLAGS='$(FFI_SKIA_CFLAGS)'
 
 build/%.o: src/%.c include/scuzz_rt.h include/scuzz_ui.h | build ffi-skia
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
@@ -51,7 +55,8 @@ test-asan:
 	@if echo 'int main(void){return 0;}' | $(CC) $(ASAN_CFLAGS) -x c - -o /tmp/scuzz_asan_probe 2>/dev/null; then \
 		rm -f /tmp/scuzz_asan_probe; \
 		$(MAKE) clean && \
-		ASAN_OPTIONS=detect_leaks=0 $(MAKE) test CFLAGS='$(ASAN_CFLAGS)'; \
+		ASAN_OPTIONS=detect_leaks=0 $(MAKE) test CFLAGS='$(ASAN_CFLAGS)' && \
+		$(MAKE) -C $(FFI_SKIA) clean; \
 	else \
 		echo "test-asan: AddressSanitizer not supported by $(CC) on this host; skipping"; \
 	fi
