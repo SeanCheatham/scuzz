@@ -23,6 +23,9 @@ jobs:
       - name: Runtime + UI tests
         run: make -C crates/runtime test CC=clang
 
+      - name: Runtime ASan (optional sanitizer; skips if unsupported)
+        run: make -C crates/runtime test-asan CC=clang
+
       - name: ffi-skia tests
         run: make -C crates/ffi-skia test CC=clang
 
