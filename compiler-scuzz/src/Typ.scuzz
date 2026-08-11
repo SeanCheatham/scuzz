@@ -115,25 +115,39 @@ def defSeen(seen: List, name: String): Int =
   if (List.isEmpty(seen) == 1) 0 else if (streq(List.head(seen), name) == 1) 1 else defSeen(List.tail(seen), name)
 
 def findDupDef(defs: List, seen: List): String =
-  if (List.isEmpty(defs) == 1) "" else if (defSeen(seen, defName(List.head(defs))) == 1) defName(List.head(defs)) else findDupDef(List.tail(defs), List.cons(defName(List.head(defs)), seen))
+  if (List.isEmpty(defs) == 1) "" else findDupDefOne(List.head(defs), List.tail(defs), seen)
+
+def findDupDefOne(d: List, rest: List, seen: List): String =
+  for {
+    q = qualKey(defModule(d), defName(d))
+  } yield if (defSeen(seen, q) == 1) q else findDupDef(rest, List.cons(q, seen))
 
 def bindParams(params: List, env: List): List =
   if (List.isEmpty(params) == 1) env else bindParams(List.tail(params), tyEnvPut(env, paramName(List.head(params)), paramType(List.head(params))))
 
+def mkFuns(mod: String, defs: List): List =
+  List.cons(mod, List.cons(defs, List.empty()))
+
+def funsMod(funs: List): String =
+  List.head(funs)
+
+def funsDefs(funs: List): List =
+  List.head(List.tail(funs))
+
 def typecheckProg(prog: List): String =
   for {
     dup = findDupDef(progDefs(prog), List.empty())
-    funs = progDefs(prog)
-  } yield if (Str.len(dup) > 0) tyErr(str3("duplicate def ", dup, "")) else typecheckDefsThenMain(funs, progEnums(prog), funs, progMain(prog))
+    defs = progDefs(prog)
+  } yield if (Str.len(dup) > 0) tyErr(str3("duplicate def ", dup, "")) else typecheckDefsThenMain(defs, progEnums(prog), defs, progMain(prog), progMainModule(prog))
 
-def typecheckDefsThenMain(defs: List, enums: List, funs: List, main: List): String =
-  if (List.isEmpty(defs) == 1) checkMainTy(inferExpr(main, enums, funs, List.empty())) else typecheckDefsThenMainOne(List.head(defs), List.tail(defs), enums, funs, main)
+def typecheckDefsThenMain(defs: List, enums: List, allDefs: List, main: List, mainMod: String): String =
+  if (List.isEmpty(defs) == 1) checkMainTy(inferExpr(main, enums, mkFuns(mainMod, allDefs), List.empty())) else typecheckDefsThenMainOne(List.head(defs), List.tail(defs), enums, allDefs, main, mainMod)
 
-def typecheckDefsThenMainOne(d: List, rest: List, enums: List, funs: List, main: List): String =
+def typecheckDefsThenMainOne(d: List, rest: List, enums: List, allDefs: List, main: List, mainMod: String): String =
   for {
     env = bindParams(defParams(d), List.empty())
-    bodyR = inferExpr(defBody(d), enums, funs, env)
-  } yield if (tyIsOk(bodyR) == 0) bodyR else if (typesCompat(tyVal(bodyR), defRet(d)) == 0) tyErr(str5("def ", defName(d), " body ", tyVal(bodyR), str3(" does not match declared ", defRet(d), ""))) else typecheckDefsThenMain(rest, enums, funs, main)
+    bodyR = inferExpr(defBody(d), enums, mkFuns(defModule(d), allDefs), env)
+  } yield if (tyIsOk(bodyR) == 0) bodyR else if (typesCompat(tyVal(bodyR), defRet(d)) == 0) tyErr(str5("def ", defName(d), " body ", tyVal(bodyR), str3(" does not match declared ", defRet(d), ""))) else typecheckDefsThenMain(rest, enums, allDefs, main, mainMod)
 
 def checkMainTy(r: String): String =
   if (tyIsOk(r) == 0) r else if (streq(tyVal(r), "IO[Unit]") == 1) tyOk("IO[Unit]") else tyErr(str3("@main body must be IO[Unit], got ", tyVal(r), ""))
@@ -661,8 +675,8 @@ def callUiRun(argTys: List): String =
 
 def callUserFun(callee: String, argTys: List, funs: List): String =
   for {
-    d = findDef(funs, callee)
-  } yield if (List.isEmpty(d) == 1) tyErr(str3("unknown function ", callee, "")) else callUserFunParams(callee, defParams(d), argTys, 0, defRet(d))
+    d = resolveFun(funsDefs(funs), callee, funsMod(funs))
+  } yield if (List.isEmpty(d) == 1) tyErr(str3("unknown function ", callee, "")) else if (resolveIsAmbiguous(d) == 1) tyErr(str4("ambiguous function ", callee, ": qualify as Module.", callee)) else callUserFunParams(callee, defParams(d), argTys, 0, defRet(d))
 
 def callUserFunParams(callee: String, params: List, argTys: List, i: Int, ret: String): String =
   if (List.len(params) != List.len(argTys)) tyErr(str4(callee, " expects ", Str.fromInt(List.len(params)), str3(" args, got ", Str.fromInt(List.len(argTys)), ""))) else if (i >= List.len(params)) tyOk(ret) else if (typesCompat(argTyAt(argTys, i), paramType(List.at(params, i))) == 0) tyErr(str4(callee, " arg type mismatch: expected ", paramType(List.at(params, i)), str3(", got ", argTyAt(argTys, i), ""))) else callUserFunParams(callee, params, argTys, i + 1, ret)

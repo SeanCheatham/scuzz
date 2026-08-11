@@ -479,7 +479,7 @@ def parseDef(file: String, tokens: List, i: Int): List =
     retP = parseType(file, tokens, i3)
     i4 = expectTok(tokens, pIdx(retP), "Eq")
     bodyP = parseBlock(file, tokens, i4)
-  } yield ok(List.cons("Def", List.cons(pStr(nameP), List.cons(pAst(paramsP), List.cons(pStr(retP), List.cons(pAst(bodyP), List.empty()))))), pIdx(bodyP))
+  } yield ok(List.cons("Def", List.cons(pStr(nameP), List.cons(pAst(paramsP), List.cons(pStr(retP), List.cons(pAst(bodyP), List.cons(moduleIdFromLabel(file), List.empty())))))), pIdx(bodyP))
 
 def parseMain(file: String, tokens: List, i: Int): List =
   for {
@@ -490,10 +490,10 @@ def parseMain(file: String, tokens: List, i: Int): List =
     i3 = expectTok(tokens, pIdx(tyP), "Eq")
   } yield parseBlock(file, tokens, i3)
 
-def parseTop(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: List): List =
+def parseTop(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: List, mainMod: String): List =
   for {
     t = tokKind(tokAt(tokens, i))
-  } yield if (streq(t, "Eof") == 1) List.cons("Prog", List.cons(pkg, List.cons(List.reverse(enums), List.cons(List.reverse(defs), List.cons(main, List.empty()))))) else if (streq(t, "Enum") == 1) parseTopEnum(file, tokens, i + 1, pkg, enums, defs, main) else if (streq(t, "Def") == 1) parseTopDef(file, tokens, i + 1, pkg, enums, defs, main) else if (streq(t, "AtMain") == 1) parseTopMain(file, tokens, i + 1, pkg, enums, defs) else parseTop(file, tokens, i + 1, pkg, enums, defs, main)
+  } yield if (streq(t, "Eof") == 1) List.cons("Prog", List.cons(pkg, List.cons(List.reverse(enums), List.cons(List.reverse(defs), List.cons(main, List.cons(mainMod, List.empty())))))) else if (streq(t, "Enum") == 1) parseTopEnum(file, tokens, i + 1, pkg, enums, defs, main, mainMod) else if (streq(t, "Def") == 1) parseTopDef(file, tokens, i + 1, pkg, enums, defs, main, mainMod) else if (streq(t, "AtMain") == 1) parseTopMain(file, tokens, i + 1, pkg, enums, defs) else parseTop(file, tokens, i + 1, pkg, enums, defs, main, mainMod)
 
 def parseEnum(file: String, tokens: List, i: Int): List =
   for {
@@ -542,23 +542,23 @@ def parseEnumCaseFieldsEnd(file: String, tokens: List, i: Int, acc: List): List 
     i1 = expectTok(tokens, i, "RParen")
   } yield ok(List.reverse(acc), i1)
 
-def parseTopEnum(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: List): List =
+def parseTopEnum(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: List, mainMod: String): List =
   for {
     e = parseEnum(file, tokens, i)
-  } yield parseTop(file, tokens, pIdx(e), pkg, List.cons(pAst(e), enums), defs, main)
+  } yield parseTop(file, tokens, pIdx(e), pkg, List.cons(pAst(e), enums), defs, main, mainMod)
 
-def parseTopDef(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: List): List =
+def parseTopDef(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: List, mainMod: String): List =
   for {
     d = parseDef(file, tokens, i)
-  } yield parseTop(file, tokens, pIdx(d), pkg, enums, List.cons(pAst(d), defs), main)
+  } yield parseTop(file, tokens, pIdx(d), pkg, enums, List.cons(pAst(d), defs), main, mainMod)
 
 def parseTopMain(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List): List =
   for {
     m = parseMain(file, tokens, i)
-  } yield parseTop(file, tokens, pIdx(m), pkg, enums, defs, pAst(m))
+  } yield parseTop(file, tokens, pIdx(m), pkg, enums, defs, pAst(m), moduleIdFromLabel(file))
 
 def parseProgram(tokens: List, file: String): List =
   for {
     pkgP = parsePackage(file, tokens, 0)
-  } yield parseTop(file, tokens, pIdx(pkgP), pStr(pkgP), List.empty(), List.empty(), unitExpr())
+  } yield parseTop(file, tokens, pIdx(pkgP), pStr(pkgP), List.empty(), List.empty(), unitExpr(), "")
 

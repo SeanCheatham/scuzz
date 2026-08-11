@@ -3,7 +3,7 @@ package scuzz.compiler
 def lowerProg(prog: List): List =
   for {
     ctors = enumCtors(progEnums(prog), List.empty())
-  } yield List.cons("Prog", List.cons(nodeStr(prog, 0), List.cons(progEnums(prog), List.cons(lowerDefs(progDefs(prog), ctors, List.empty()), List.cons(lowerExpr(progMain(prog), ctors), List.empty())))))
+  } yield List.cons("Prog", List.cons(nodeStr(prog, 0), List.cons(progEnums(prog), List.cons(lowerDefs(progDefs(prog), ctors, List.empty()), List.cons(lowerExpr(progMain(prog), ctors), List.cons(progMainModule(prog), List.empty()))))))
 
 def enumCtors(enums: List, acc: List): List =
   if (List.isEmpty(enums) == 1) acc else enumCtors(List.tail(enums), enumCtorsOne(List.head(enums), acc))
@@ -26,7 +26,7 @@ def lowerDefs(defs: List, ctors: List, acc: List): List =
   if (List.isEmpty(defs) == 1) List.reverse(acc) else lowerDefs(List.tail(defs), ctors, List.cons(lowerDef(List.head(defs), ctors), acc))
 
 def lowerDef(d: List, ctors: List): List =
-  List.cons("Def", List.cons(nodeStr(d, 0), List.cons(nodeExpr(d, 1), List.cons(nodeStr(d, 2), List.cons(lowerExpr(nodeExpr(d, 3), ctors), List.empty())))))
+  List.cons("Def", List.cons(nodeStr(d, 0), List.cons(nodeExpr(d, 1), List.cons(nodeStr(d, 2), List.cons(lowerExpr(nodeExpr(d, 3), ctors), List.cons(nodeStr(d, 4), List.empty()))))))
 
 def lowerExpr(e: List, ctors: List): List =
   lowerExprTag(exprTag(e), e, ctors)
