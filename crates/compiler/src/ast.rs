@@ -7,6 +7,8 @@ pub struct Program {
     pub enums: Vec<EnumDef>,
     pub defs: Vec<FunDef>,
     pub main: MainDef,
+    /// Law def names residualized under TestRuntime (empty for live builds).
+    pub law_names: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -74,6 +74,7 @@ pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError
         enums,
         defs,
         main,
+        law_names: Vec::new(),
     })
 }
 
@@ -155,6 +156,7 @@ impl Parser {
             enums,
             defs,
             main,
+            law_names: Vec::new(),
         })
     }
 

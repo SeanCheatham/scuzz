@@ -1,6 +1,7 @@
 //! Parse + lower + typecheck without codegen/link.
 
 use crate::lower::lower_program;
+use crate::overlay::{apply_overlays, residualize_laws};
 use crate::parser::parse_sources;
 use crate::typ::typecheck;
 use anyhow::{Context, Result};
@@ -88,7 +89,7 @@ pub fn format_diagnostics(diags: &[Diagnostic], json: bool) -> String {
     }
 }
 
-/// Parse, lower, and typecheck a project. No LLVM emit or link.
+/// Parse, lower, and typecheck a project (live + sim twins + pure laws). No LLVM emit or link.
 pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
     let resolved = crate::driver::resolve_project(project_dir)
         .with_context(|| format!("resolving {}", project_dir.display()))?;
@@ -110,6 +111,15 @@ pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
             return Ok(vec![d]);
         }
     };
+    let (mut program, law_names) = match apply_overlays(program, &resolved.overlays) {
+        Ok(v) => v,
+        Err(e) => {
+            return Ok(vec![Diagnostic::error(e.to_string())]);
+        }
+    };
+    // Residualize so Law.assert / law calls typecheck the same way as verify builds.
+    residualize_laws(&mut program, &law_names);
+    program.law_names = law_names;
     let program = lower_program(program);
     match typecheck(&program) {
         Ok(()) => Ok(vec![]),

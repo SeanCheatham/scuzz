@@ -35,6 +35,9 @@ enum Commands {
         /// Force a full rebuild (ignore incremental fingerprint)
         #[arg(long)]
         full: bool,
+        /// Apply `*.scuzz_sim` + residual `*.scuzz_laws` (TestRuntime / fuzz graph)
+        #[arg(long)]
+        verify: bool,
     },
     /// Build and run a Scuzz Lang project
     Run {
@@ -126,8 +129,13 @@ fn real_main() -> Result<ExitCode> {
     let cli = Cli::parse();
     let json = cli.message_format == "json";
     match cli.command {
-        Commands::Build { path, out_dir, full } => {
-            let out = build(&path, &out_dir, !full).map_err(|e| diag_err(e, json))?;
+        Commands::Build {
+            path,
+            out_dir,
+            full,
+            verify,
+        } => {
+            let out = build(&path, &out_dir, !full, verify).map_err(|e| diag_err(e, json))?;
             if out.cache_hit {
                 eprintln!("up-to-date {}", out.executable.display());
             } else {
@@ -203,7 +211,7 @@ fn real_main() -> Result<ExitCode> {
 
             let project_dir = resolve_dir(&path)?;
             if project_dir.join("scuzz.toml").is_file() {
-                let out = build(&path, &PathBuf::from("build"), false)?;
+                let out = build(&path, &PathBuf::from("build"), false, false)?;
                 eprintln!("project compile smoke ok");
                 if out.manifest.ui.is_none() {
                     run_io_smoke(&out.executable)?;
@@ -328,7 +336,7 @@ fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
     let use_window = effective.eq_ignore_ascii_case("window")
         || (!use_headless && !use_mobile && manifest.ui.is_some());
 
-    let out = build(path, &out_dir.to_path_buf(), true)?;
+    let out = build(path, &out_dir.to_path_buf(), true, false)?;
     let mut cmd = Command::new(&out.executable);
     if use_headless && (headless || manifest.ui.is_some()) {
         let snap = out
@@ -372,7 +380,7 @@ fn watch_build(path: &Path, out_dir: &Path) -> Result<ExitCode> {
     let project_dir = resolve_dir(path)?;
     eprintln!("scuzz watch {}", project_dir.display());
     loop {
-        match build(path, &out_dir.to_path_buf(), false) {
+        match build(path, &out_dir.to_path_buf(), false, false) {
             Ok(out) => eprintln!("rebuilt {}", out.executable.display()),
             Err(e) => eprintln!("scuzz watch build error: {e:#}"),
         }
@@ -625,6 +633,7 @@ fn build(
     path: &Path,
     out_dir: &Path,
     incremental: bool,
+    verify: bool,
 ) -> Result<scuzz_compiler::CompileOutput> {
     let project_dir = resolve_dir(path)?;
     let out_dir = if out_dir.is_absolute() {
@@ -641,6 +650,7 @@ fn build(
         out_dir,
         clang,
         incremental,
+        verify,
     })
 }
 
@@ -677,7 +687,7 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
         bail!("embedder-mobile build failed");
     }
 
-    let compiled = build(path, &PathBuf::from("build"), true)?;
+    let compiled = build(path, &PathBuf::from("build"), true, false)?;
     let target_lc = target.to_ascii_lowercase();
     let targets: Vec<&str> = if target_lc == "all" {
         vec!["host", "android", "ios"]

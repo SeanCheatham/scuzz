@@ -487,6 +487,27 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 2)?;
             Ok(Type::Opaque("SignalStr".into()))
         }
+        "Law.signalInt" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            Ok(Type::Int)
+        }
+        "Law.a11yHas" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::Bool)
+        }
+        "Law.assert" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            if !matches!(arg_tys[1], Type::Bool | Type::Int) {
+                return Err(TypeError::Msg(format!(
+                    "Law.assert ok must be Bool/Int, got {:?}",
+                    arg_tys[1]
+                )));
+            }
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
         "View.text" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;

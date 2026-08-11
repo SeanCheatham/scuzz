@@ -490,8 +490,14 @@ void sz_ui_demo_finish(SzUiSession *session) {
     fprintf(f, "[signals]\n%s\n[views]\n%s", sz_string_cstr(signals),
             sz_string_cstr(views));
     fclose(f);
+    sz_law_stash_a11y(sz_string_cstr(views));
     sz_string_free(signals);
     sz_string_free(views);
     fprintf(stderr, "scuzz: wrote fuzz dump %s\n", dump);
+  } else if (session && session->root) {
+    /* Still stash a11y for residual laws under TESTRT without a dump path. */
+    SzString *views = sz_view_a11y_dump(session->root);
+    sz_law_stash_a11y(sz_string_cstr(views));
+    sz_string_free(views);
   }
 }

@@ -8,6 +8,7 @@ pub mod format;
 pub mod lexer;
 pub mod lower;
 pub mod manifest;
+pub mod overlay;
 pub mod parser;
 pub mod typ;
 

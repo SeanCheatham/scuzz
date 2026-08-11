@@ -103,6 +103,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_add_texts(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_show_when(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_ui_run_view(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_law_signal_int(i64)").unwrap();
+    writeln!(out, "declare i64 @sz_law_a11y_has(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_law_assert(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_box_i64(i64)").unwrap();
     writeln!(out, "declare i64 @sz_unbox_i64(ptr)").unwrap();
     writeln!(out, "declare i32 @sz_runtime_main_args(ptr, i32, ptr)").unwrap();
@@ -1895,6 +1898,33 @@ fn emit_call(
             )
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Law.signalInt" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_law_signal_int(i64 {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Law.a11yHas" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_law_a11y_has(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Law.assert" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_law_assert(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.text" => {
             writeln!(
