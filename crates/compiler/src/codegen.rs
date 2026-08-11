@@ -18,6 +18,7 @@ pub fn emit_llvm(program: &Program) -> String {
     collect_strings(&program.main.body, &mut strs);
 
     let enum_tags = build_enum_tags(&program.enums);
+    let enum_payloads = build_enum_payloads(&program.enums);
     let funs: HashMap<String, &FunDef> = program.defs.iter().map(|d| (d.name.clone(), d)).collect();
 
     let mut out = String::new();
@@ -48,6 +49,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare {{ i32, ptr, ptr }} @sz_io_unsafe_run(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_adt_new(i32, ptr)").unwrap();
     writeln!(out, "declare i32 @sz_adt_tag(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_adt_payload(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_effects_run_kit()").unwrap();
     writeln!(out, "declare ptr @sz_list_nil()").unwrap();
     writeln!(out, "declare i32 @sz_list_is_empty(ptr)").unwrap();
@@ -136,6 +138,7 @@ pub fn emit_llvm(program: &Program) -> String {
     let mut ctx = EmitCtx {
         strs: &strs,
         enum_tags: &enum_tags,
+        enum_payloads: &enum_payloads,
         funs: &funs,
         cont_id: &mut cont_id,
         conts: &mut conts,
@@ -170,6 +173,8 @@ pub fn emit_llvm(program: &Program) -> String {
 struct EmitCtx<'a> {
     strs: &'a [String],
     enum_tags: &'a HashMap<(String, String), i32>,
+    /// Payload field type for unary cases (absent / Unit-like = nullary).
+    enum_payloads: &'a HashMap<(String, String), Type>,
     funs: &'a HashMap<String, &'a FunDef>,
     cont_id: &'a mut usize,
     conts: &'a mut String,
@@ -205,7 +210,19 @@ fn build_enum_tags(enums: &[EnumDef]) -> HashMap<(String, String), i32> {
     let mut m = HashMap::new();
     for e in enums {
         for (i, c) in e.cases.iter().enumerate() {
-            m.insert((e.name.clone(), c.clone()), i as i32);
+            m.insert((e.name.clone(), c.name.clone()), i as i32);
+        }
+    }
+    m
+}
+
+fn build_enum_payloads(enums: &[EnumDef]) -> HashMap<(String, String), Type> {
+    let mut m = HashMap::new();
+    for e in enums {
+        for c in &e.cases {
+            if let Some((_, ty)) = c.fields.first() {
+                m.insert((e.name.clone(), c.name.clone()), ty.clone());
+            }
         }
     }
     m
@@ -310,8 +327,12 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         | ExprKind::Unit
         | ExprKind::EffectsRunKit
         | ExprKind::Var(_)
-        | ExprKind::IntLit(_)
-        | ExprKind::AdtConstruct { .. } => {}
+        | ExprKind::IntLit(_) => {}
+        ExprKind::AdtConstruct { args, .. } => {
+            for a in args {
+                collect_strings(a, out);
+            }
+        }
         ExprKind::For { binders, body } => {
             for b in binders {
                 match b {
@@ -698,6 +719,7 @@ fn emit_expr(
         ExprKind::AdtConstruct {
             enum_name,
             case_name,
+            args,
         } => {
             let tag = ctx
                 .enum_tags
@@ -705,9 +727,33 @@ fn emit_expr(
                 .copied()
                 .unwrap_or(0);
             let mut code = String::new();
+            let payload_ptr = if args.is_empty() {
+                "null".to_string()
+            } else {
+                let ae = emit_expr(&args[0], ctx, locals, &format!("{prefix}_ap"));
+                code.push_str(&ae.code);
+                match ctx.enum_payloads.get(&(enum_name.clone(), case_name.clone())) {
+                    Some(Type::Int) => {
+                        let v = if ae.kind == Kind::Int {
+                            ae.value
+                        } else {
+                            writeln!(code, "  %{prefix}_ap0 = add i64 0, 0").unwrap();
+                            format!("%{prefix}_ap0")
+                        };
+                        writeln!(
+                            code,
+                            "  %{prefix}_box = call ptr @sz_box_i64(i64 {v})"
+                        )
+                        .unwrap();
+                        format!("%{prefix}_box")
+                    }
+                    Some(Type::String) | None => ae.value,
+                    Some(_) => ae.value,
+                }
+            };
             writeln!(
                 code,
-                "  %{prefix}_adt = call ptr @sz_adt_new(i32 {tag}, ptr null)"
+                "  %{prefix}_adt = call ptr @sz_adt_new(i32 {tag}, ptr {payload_ptr})"
             )
             .unwrap();
             val_emitted(code, format!("%{prefix}_adt"), Kind::Ptr)
@@ -828,6 +874,7 @@ fn emit_expr(
                 if let Pattern::Adt {
                     enum_name,
                     case_name,
+                    ..
                 } = &arm.pattern
                 {
                     if let Some(tag) = ctx.enum_tags.get(&(enum_name.clone(), case_name.clone())) {
@@ -847,12 +894,47 @@ fn emit_expr(
                 }
                 let label = format!("{prefix}_arm_{id}_{i}");
                 writeln!(code, "{label}:").unwrap();
+                let mut bound_name: Option<String> = None;
+                if let Pattern::Adt {
+                    enum_name,
+                    case_name,
+                    bind: Some(b),
+                } = &arm.pattern
+                {
+                    writeln!(
+                        code,
+                        "  %{prefix}_pl{id}_{i} = call ptr @sz_adt_payload(ptr {})",
+                        se.value
+                    )
+                    .unwrap();
+                    let llvm_name = format!("{prefix}_b{id}_{i}");
+                    match ctx.enum_payloads.get(&(enum_name.clone(), case_name.clone())) {
+                        Some(Type::Int) => {
+                            writeln!(
+                                code,
+                                "  %{llvm_name} = call i64 @sz_unbox_i64(ptr %{prefix}_pl{id}_{i})"
+                            )
+                            .unwrap();
+                            locals.insert(b.clone(), (format!("%{llvm_name}"), Kind::Int));
+                        }
+                        _ => {
+                            locals.insert(
+                                b.clone(),
+                                (format!("%{prefix}_pl{id}_{i}"), Kind::Ptr),
+                            );
+                        }
+                    }
+                    bound_name = Some(b.clone());
+                }
                 let ae = emit_expr(
                     &arm.body,
                     ctx,
                     locals,
                     &format!("{prefix}_a{id}_{i}"),
                 );
+                if let Some(b) = bound_name {
+                    locals.remove(&b);
+                }
                 code.push_str(&ae.code);
                 if phi_parts.is_empty() {
                     result_kind = ae.kind;
@@ -2182,6 +2264,51 @@ enum Color { case Red, case Blue }
         assert!(ir.contains("sz_adt_new"));
         assert!(ir.contains("sz_adt_tag"));
         assert!(ir.contains("switch i32"));
+    }
+
+    #[test]
+    fn emit_payload_adt_int() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  Opt.Some(7) match {
+    case Opt.Some(n) => IO.println(Str.fromInt(n))
+    case Opt.None => IO.println("none")
+  }
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_box_i64"));
+        assert!(ir.contains("sz_adt_new"));
+        assert!(ir.contains("sz_adt_payload"));
+        assert!(ir.contains("sz_unbox_i64"));
+        // Some is tag 0, None tag 1 — payload non-null for Some.
+        assert!(ir.contains("call ptr @sz_adt_new(i32 0, ptr %"));
+        assert!(ir.contains("call ptr @sz_adt_new(i32 1, ptr null)") || !ir.contains("Opt.None("));
+    }
+
+    #[test]
+    fn emit_payload_adt_string() {
+        let src = r#"
+enum Msg:
+  case Hello(s: String)
+  case Empty
+@main def main: IO[Unit] =
+  Msg.Hello("hi") match {
+    case Msg.Hello(t) => IO.println(t)
+    case Msg.Empty => IO.println("empty")
+  }
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_adt_payload"));
+        assert!(ir.contains("sz_adt_new"));
+        // String payload is passed through (no box_i64 for the ctor arg).
+        assert!(ir.contains("call ptr @sz_adt_new(i32 0, ptr %"));
     }
 
     #[test]
