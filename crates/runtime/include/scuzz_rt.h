@@ -110,7 +110,9 @@ typedef enum SzIoTag {
   SZ_IO_ATTEMPT,
   SZ_IO_SLEEP_MS,
   SZ_IO_RACE,
-  SZ_IO_BOTH
+  SZ_IO_BOTH,
+  SZ_IO_QUEUE_TAKE,
+  SZ_IO_DEFERRED_GET
 } SzIoTag;
 
 struct SzIo {
@@ -143,6 +145,8 @@ struct SzIo {
       SzIo *left;
       SzIo *right;
     } both;
+    SzQueue *queue_take;
+    SzDeferred *deferred_get;
   } as;
 };
 
@@ -158,8 +162,14 @@ SzIo *sz_io_attempt(SzIo *inner);
 SzIo *sz_io_sleep_ms(int64_t ms);
 SzIo *sz_io_race(SzIo *left, SzIo *right);
 SzIo *sz_io_both(SzIo *left, SzIo *right);
+/* Internal constructors used by queue/deferred kits. */
+SzIo *sz_io_queue_take(SzQueue *q);
+SzIo *sz_io_deferred_get(SzDeferred *d);
 
-/* Run to completion on the calling thread (cooperative fibers for race/both). */
+/* Run to completion on the calling thread.
+ * Concurrency is cooperative single-threaded fibers: sleep/Queue/Deferred park;
+ * race/both fork left-then-right onto a FIFO ready queue. TestRuntime jumps
+ * virtual time to the next wakeup when all fibers are blocked on timers. */
 typedef struct SzIoResult {
   int ok; /* 1 success, 0 error */
   void *value;
@@ -168,6 +178,10 @@ typedef struct SzIoResult {
 
 SzIoResult sz_io_unsafe_run(SzIo *io);
 void sz_io_free(SzIo *io);
+
+/* Called from queue/deferred delay thunks to wake a parked fiber (returns 1 if woke). */
+int sz_fiber_wake_queue(SzQueue *q, void *value);
+void sz_fiber_wake_deferred(SzDeferred *d);
 
 /* Resource: acquire / release with bracket semantics (releases on failure). */
 struct SzResource {
@@ -202,6 +216,7 @@ struct SzDeferred {
   int ok;
   void *value;
   SzError *error;
+  void *waiters; /* runtime Fiber* list while get is parked */
 };
 
 SzDeferred *sz_deferred_make(void);
@@ -210,13 +225,14 @@ SzIo *sz_deferred_empty(void); /* IO[Deferred] */
 SzIo *sz_deferred_complete(SzDeferred *d, void *value);
 SzIo *sz_deferred_complete_cstr(SzDeferred *d, const char *value);
 SzIo *sz_deferred_fail(SzDeferred *d, SzError *err);
-SzIo *sz_deferred_get(SzDeferred *d); /* IO[A]; fails if incomplete or erred */
+SzIo *sz_deferred_get(SzDeferred *d); /* IO[A]; parks until complete under the fiber scheduler */
 
 /* Queue — unbounded FIFO of void*. */
 struct SzQueue {
   void **items;
   size_t len;
   size_t cap;
+  void *waiters; /* runtime Fiber* list while take is parked */
 };
 
 SzQueue *sz_queue_make(void);
@@ -224,7 +240,7 @@ void sz_queue_free(SzQueue *q);
 SzIo *sz_queue_unbounded(void); /* IO[Queue] */
 SzIo *sz_queue_offer(SzQueue *q, void *value);
 SzIo *sz_queue_offer_cstr(SzQueue *q, const char *value);
-SzIo *sz_queue_take(SzQueue *q); /* IO[A]; fails if empty (sync take) */
+SzIo *sz_queue_take(SzQueue *q); /* IO[A]; parks when empty under the fiber scheduler */
 size_t sz_queue_size(const SzQueue *q);
 
 /* Pair for IO.both results */

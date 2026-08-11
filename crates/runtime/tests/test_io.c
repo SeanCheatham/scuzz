@@ -66,6 +66,11 @@ static SzIo *after_ref(void *value, void *env) {
   return sz_io_flatmap(sz_ref_set_cstr(r, "b"), after_ref_set, r);
 }
 
+static SzIo *after_sleep_tag(void *value, void *env) {
+  (void)value;
+  return sz_io_pure(env);
+}
+
 int main(void) {
   /* delay */
   delay_calls = 0;
@@ -295,6 +300,84 @@ int main(void) {
     assert(!sz_testrt_clock_is_fake());
     assert(!sz_testrt_fs_is_fake());
     assert(!sz_testrt_sys_is_fake());
+  }
+
+  /* Cooperative fibers: race/both/Queue/Deferred + deterministic TestRuntime. */
+  {
+    int64_t t0, t1;
+    const char *out1;
+    const char *out2;
+    SzQueue *q;
+    SzDeferred *def;
+
+    sz_testrt_install();
+
+    /* race(sleep(100), sleep(1)) wins the short sleep; clock jumps by 1. */
+    t0 = sz_testrt_clock_now_ms();
+    r = sz_io_unsafe_run(sz_io_race(
+        sz_io_flatmap(sz_io_sleep_ms(100), after_sleep_tag, (void *)(intptr_t)100),
+        sz_io_flatmap(sz_io_sleep_ms(1), after_sleep_tag, (void *)(intptr_t)1)));
+    assert(r.ok);
+    assert((intptr_t)r.value == 1);
+    t1 = sz_testrt_clock_now_ms();
+    assert(t1 == t0 + 1);
+
+    /* race(sleep, println) wins println without advancing the sleep. */
+    t0 = sz_testrt_clock_now_ms();
+    sz_testrt_stdout_reset();
+    r = sz_io_unsafe_run(
+        sz_io_race(sz_io_sleep_ms(50), sz_io_println_cstr("race-win")));
+    assert(r.ok);
+    assert(sz_testrt_clock_now_ms() == t0);
+    assert(strstr(sz_testrt_stdout_cstr(), "race-win\n") != NULL);
+
+    /* both println order is stable across runs. */
+    sz_testrt_stdout_reset();
+    r = sz_io_unsafe_run(
+        sz_io_both(sz_io_println_cstr("a"), sz_io_println_cstr("b")));
+    assert(r.ok);
+    {
+      char saved[64];
+      const char *s = sz_testrt_stdout_cstr();
+      assert(strlen(s) < sizeof(saved));
+      memcpy(saved, s, strlen(s) + 1);
+      sz_testrt_stdout_reset();
+      r = sz_io_unsafe_run(
+          sz_io_both(sz_io_println_cstr("a"), sz_io_println_cstr("b")));
+      assert(r.ok);
+      out2 = sz_testrt_stdout_cstr();
+      assert(strcmp(saved, out2) == 0);
+      assert(strstr(saved, "a\nb\n") != NULL);
+      (void)out1;
+    }
+
+    /* both(take, offer) parks take until offer wakes it. */
+    q = sz_queue_make();
+    r = sz_io_unsafe_run(
+        sz_io_both(sz_queue_take(q), sz_queue_offer_cstr(q, "parked")));
+    assert(r.ok);
+    {
+      SzPair *p = (SzPair *)r.value;
+      assert(p);
+      assert(strcmp(sz_string_cstr((SzString *)p->left), "parked") == 0);
+      sz_pair_free(p);
+    }
+    sz_queue_free(q);
+
+    /* both(get, complete) parks get until complete wakes it. */
+    def = sz_deferred_make();
+    r = sz_io_unsafe_run(sz_io_both(sz_deferred_get(def),
+                                    sz_deferred_complete_cstr(def, "go")));
+    assert(r.ok);
+    {
+      SzPair *p = (SzPair *)r.value;
+      assert(p);
+      assert(strcmp(sz_string_cstr((SzString *)p->left), "go") == 0);
+      sz_pair_free(p);
+    }
+    sz_deferred_free(def);
+
+    sz_testrt_reset();
   }
 
   /* Alloc accounting: live_count returns to baseline after free. */

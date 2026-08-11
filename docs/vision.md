@@ -61,7 +61,7 @@ No vendored Skia tree. Thin `sk_capi` + CPU `sk_sw` for Headless CI (what `crate
 
 ### IO errors
 
-One failure channel: `SzError` (message + optional code) on `IO`. Ops: `flatMap`, `delay`, `fail`, `handleErrorWith`, `attempt`, plus blessed kit (`Resource`, `Ref`, `Deferred`, `Queue`, `sleep`, `race`, `both`). Impurity codes: Fs **2**, Sys (**3**; exec + `readLine`), Clock **4**, Random **5**, Net **6**. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net plus console (scripted stdin, optional argv override, println capture+echo). No checked exception hierarchy; panics abort via `sz_panic`.
+One failure channel: `SzError` (message + optional code) on `IO`. Ops: `flatMap`, `delay`, `fail`, `handleErrorWith`, `attempt`, plus blessed kit (`Resource`, `Ref`, `Deferred`, `Queue`, `sleep`, `race`, `both`). **Concurrency:** cooperative single-threaded fibers (FIFO ready queue, left-before-right fork); `sleep` / empty `Queue.take` / incomplete `Deferred.get` park; TestRuntime advances virtual time to the next wakeup when idle. No OS threads for IO. Impurity codes: Fs **2**, Sys (**3**; exec + `readLine`), Clock **4**, Random **5**, Net **6**. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net plus console (scripted stdin, optional argv override, println capture+echo). No checked exception hierarchy; panics abort via `sz_panic`.
 
 ### `Ui` vs `View`
 
@@ -200,7 +200,7 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ## Open work
 
-Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Closed in-tree slices: stem-paired laws/sim, desktop Window typing (`SZ_INPUT_TEXT_EDIT`), Stage-0 spans, alloc accounting / optional `test-asan`, Stage-0 unary payload ADTs, self-host unary payload ADTs for user programs (`examples/adt`). Still open: concurrent IO determinism, long-lived RSS proof, self-host span port, rewriting compiler IR/AST onto payloads, file-as-module namespaces, device Mobile, non-path deps. **Blocked on external assets/toolchains:** real Skia text (needs hosted `SCUZZ_SKIA_URL` prebuilt), GPU presenters (downstream of Skia). Deeper UI (Flutter-style constraints) and Windows desktop stay deferred. IME waits on real text rendering.
+Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Closed in-tree slices: stem-paired laws/sim, desktop Window typing (`SZ_INPUT_TEXT_EDIT`), Stage-0 spans, alloc accounting / optional `test-asan`, Stage-0 unary payload ADTs, self-host unary payload ADTs for user programs (`examples/adt`), cooperative fiber `race`/`both`/`Queue`/`Deferred` with TestRuntime virtual-time jumps. Still open: long-lived RSS proof, self-host span port, rewriting compiler IR/AST onto payloads, file-as-module namespaces, device Mobile, non-path deps. **Blocked on external assets/toolchains:** real Skia text (needs hosted `SCUZZ_SKIA_URL` prebuilt), GPU presenters (downstream of Skia). Deeper UI (Flutter-style constraints) and Windows desktop stay deferred. IME waits on real text rendering.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
 
