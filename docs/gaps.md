@@ -23,7 +23,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 **Unproven.** Whether the runtime can gain genuine concurrency — an event loop or threads, parked/woken fibers, a `race` that actually races — while preserving the determinism that fuzz, laws, TestRuntime, and goldens depend on. Determinism is the crown jewel; naive concurrency destroys replayability. The open design question is what the deterministic semantics of concurrent `IO` even are (virtual-time scheduling under TestRuntime, stable interleaving order, `pump` as the only observable clock for UI).
 
-**Proof.** `race` / `both` / `Queue` / `Deferred` behave concurrently in live mode, TestRuntime replays the same program to identical dumps across runs, and `scuzz fuzz --replay` stays byte-stable (including residual law checks once laws land).
+**Proof.** `race` / `both` / `Queue` / `Deferred` behave concurrently in live mode, TestRuntime replays the same program to identical dumps across runs, and `scuzz fuzz --replay` stays byte-stable (including residual law checks).
 
 ### 3. Memory strategy under long-lived apps
 
