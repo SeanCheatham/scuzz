@@ -21,9 +21,9 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 **Current state.** `IO` is a single-threaded trampoline (`run_io` / `sz_io_unsafe_run` in `crates/runtime/src/runtime.c`). `race` runs both sides sequentially (with a swap when one side is a pure sleep); `both` is sequential; `Queue.take` fails when empty and `Deferred.get` fails when incomplete instead of parking a fiber. Live `sleep` is `nanosleep`.
 
-**Unproven.** Whether the runtime can gain genuine concurrency — an event loop or threads, parked/woken fibers, a `race` that actually races — while preserving the determinism that fuzz, TestRuntime, and goldens depend on. Determinism is the crown jewel; naive concurrency destroys replayability. The open design question is what the deterministic semantics of concurrent `IO` even are (virtual-time scheduling under TestRuntime, stable interleaving order, `pump` as the only observable clock for UI).
+**Unproven.** Whether the runtime can gain genuine concurrency — an event loop or threads, parked/woken fibers, a `race` that actually races — while preserving the determinism that fuzz, laws, TestRuntime, and goldens depend on. Determinism is the crown jewel; naive concurrency destroys replayability. The open design question is what the deterministic semantics of concurrent `IO` even are (virtual-time scheduling under TestRuntime, stable interleaving order, `pump` as the only observable clock for UI).
 
-**Proof.** `race` / `both` / `Queue` / `Deferred` behave concurrently in live mode, TestRuntime replays the same program to identical dumps across runs, and `scuzz fuzz --replay` stays byte-stable.
+**Proof.** `race` / `both` / `Queue` / `Deferred` behave concurrently in live mode, TestRuntime replays the same program to identical dumps across runs, and `scuzz fuzz --replay` stays byte-stable (including residual law checks once laws land).
 
 ### 3. Memory strategy under long-lived apps
 
@@ -58,6 +58,14 @@ When a gap closes or its assessment changes, update this file and (if direction 
 **Proof.** A second presenter renders the golden examples with unchanged structural goldens.
 
 ## Known gaps
+
+### Module laws + sim overlays
+
+Vision locks app verification as stem-paired `Foo.scuzz` / `Foo.scuzz_sim` / `Foo.scuzz_laws`: same-name sim replacements under fuzz/TestRuntime, pure laws as the fuzz oracle, no app-level unit-test trees ([vision.md](vision.md#laws-simulation-and-verification)). Nothing of that toolchain exists yet — `scuzz fuzz` still fails only on panic/`SzError`, and `scuzz test` is goldens (UI) or exit-0 smoke (IO). Smallest slice: one example (`examples/counter` or `todo`) with a `*.scuzz_laws` predicate over the signal/a11y dump, residualized under `SCUZZ_TESTRT=1`, failing fuzz with `repro.toml` when broken; then a `*.scuzz_sim` that swaps one app-owned value (e.g. a URL string).
+
+### File-as-module (vs merge-all `src/`)
+
+Vision direction: `scuzz.toml` package = crate, `Foo.scuzz` = module ([vision.md](vision.md#modules-and-source-shape)). Today Stage 0/1/2 still merge all `src/**/*.scuzz` into one program with a single `@main`. Pure work once laws/sim need per-module overlay resolution — start with stem pairing for sim/laws without full visibility/namespaces if that unblocks the verification slice sooner.
 
 ### Desktop keyboard input into `TextField`
 

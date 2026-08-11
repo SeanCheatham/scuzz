@@ -11,7 +11,7 @@ Edit this file when a decision or next-step ordering changes.
 - **Language**: purposeful Scala-inspired subset for UI apps, native CLI/server-shaped `IO` programs, and native codegen, with **built-in effect/IO** (Cats Effect spirit, not a cats port). Aim: denser expr dialect (`for` as primary binder) — see [Language direction](#language-direction) below.
 - **Runtime**: custom native (LLVM). No JVM, no Java interop, no classpath/Maven.
 - **UI**: primary product face — one design language + Skia, as a **`Ui` effect** with Headless/Window/Mobile interpreters.
-- **Tooling**: one CLI (`scuzz`) for compile, link, assets, hot reload, packaging, deterministic `scuzz fuzz`.
+- **Tooling**: one CLI (`scuzz`) for compile, link, assets, hot reload, packaging, deterministic `scuzz fuzz` over module **laws** + **sim** overlays.
 - **Bootstrap**: self-host is a hard goal. Stage-0 (Rust) exists only to get there.
 
 Upstream Scala Native is a *reference*, not a dependency. Divergence is intentional.
@@ -20,13 +20,14 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 
 | Topic | Choice |
 | --- | --- |
-| UI testing / CI | Structural dumps (signal + a11y) first; PNG optional via `--pixels` |
+| UI testing / CI | Laws via `scuzz fuzz` (primary); structural goldens as regression face; PNG optional via `--pixels` |
 | Codegen | LLVM IR |
 | Renderer (v0) | Skia via thin C ABI; Impeller deferred |
 | Build tool | DIY Mill/Cargo-like: `scuzz` (not sbt/Maven) |
 | Effects | Language + runtime builtins |
 | Impurity | All nondeterminism / external I/O through blessed `IO`; no app-level `IO.delay` escape hatch |
-| Tests | TestRuntime fakes (clock/random/FS/net/console) for deterministic replay |
+| Tests | Module **laws** + **sim** overlays; TestRuntime fakes for blessed kits; no app-level unit-test culture |
+| Modules | `scuzz.toml` package = crate; `Foo.scuzz` = module (not JVM packages) |
 | Self-host | Stage 0 → 1 → 2 on the critical path; **release ships Stage 2** |
 | UI model | Pure `View` + effectful `Ui` session (`mount` / `pump` / `inject` / `snapshot`) |
 
@@ -36,6 +37,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 - Not a cats / cats-effect / Typelevel port
 - Not SwiftUI / UIKit / WinUI wrappers
 - Not “every widget rebuild is an `IO`” (`View` build stays sync/pure)
+- Not example-based unit-test culture (`src/test`, Mockito, assert-equal fixtures) for apps — **laws + fuzz + sim** instead
 
 ## Success bars
 
@@ -47,7 +49,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 
 ### Product name
 
-Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI / cargo package `scuzz`; Stage-0 crate `scuzz-compiler`; self-host tree `compiler-scuzz/`; manifest `scuzz.toml`; sources `*.scuzz`; C ABI `sz_` / `Sz*` / `SZ_*`. No dual names or legacy aliases.
+Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI / cargo package `scuzz`; Stage-0 crate `scuzz-compiler`; self-host tree `compiler-scuzz/`; manifest `scuzz.toml`; sources `*.scuzz` (plus stem-paired `*.scuzz_sim` / `*.scuzz_laws`); C ABI `sz_` / `Sz*` / `SZ_*`. No dual names or legacy aliases.
 
 ### GC (v0)
 
@@ -123,16 +125,61 @@ App-shaped Counter:
 
 Clear-dense, not cryptic-dense: nested declarative `View`s (`View.column(child, …)` / `View.row(…)`), inference, single-expr forms, short update verbs, enums + match. Avoid implicits, deep HKT, and “everything is `IO`.”
 
+### Modules and source shape
+
+Scala **nouns**, Rust/Cargo **verbs** — without JVM packages or Rust `struct`/`impl` as the primary story.
+
+| Layer | Meaning |
+| --- | --- |
+| Package (`scuzz.toml`) | Dependency / link boundary (crate) |
+| File module (`Todo.scuzz`) | Namespacing + visibility |
+| Optional deeper `mod` tree | Only when a single file gets heavy |
+
+Direction for data/interfaces (see also [`compatibility.md`](compatibility.md)): payload **enums** / case-like records + thin **traits**-as-interfaces; monomorphize generics early. No classes (mutable identity), no `var`, no classpath/`com.foo.bar` directories. Path deps remain the unit of reuse. Today `src/**/*.scuzz` still merges into one program; file-as-module is the intended ratchet, not a parallel `src/test` tree.
+
+### Laws, simulation, and verification
+
+App correctness is **laws** searched by `scuzz fuzz`, not example-based unit tests. Authors declare properties the program must obey under interaction; the toolchain typechecks them and residualizes checks for TestRuntime / fuzz. Compilation and testing share one declaration surface:
+
+| Phase | Role |
+| --- | --- |
+| `scuzz check` | Laws and sim overlays typecheck; laws are pure; sim bindings match live types/purity |
+| `scuzz build` (sim graph) | Layer `*.scuzz_sim` over live defs; emit residual law checks (armed under TestRuntime / fuzz only) |
+| `scuzz fuzz` | Search event scripts / IO schedules for law violations → `repro.toml` |
+| Later (optional) | Prove trivial law fragments statically; leave the rest as search |
+
+**File convention (stem-paired, no attribute tags):**
+
+```text
+src/
+  Todo.scuzz              # live module
+  Todo.scuzz_sim          # same names replace live defs under sim / fuzz
+  Todo.scuzz_laws         # pure laws over signals / a11y dump / module vals
+```
+
+- Live/`scuzz run` loads `*.scuzz` only.
+- Fuzz/test loads `Foo.scuzz`, then replaces same-named top-level defs from `Foo.scuzz_sim` (exactly one live and at most one sim binding per name; same type and purity), then arms `Foo.scuzz_laws`.
+- No free-floating `tests/` package roots — only stem-paired overlays next to the module they constrain.
+- Rename drift is an error: sim names without a live twin, or laws that reference unknown names, fail `check`.
+
+**Simulation** is first-class at the **app policy / impurity edge**, not Mockito for every `def`:
+
+- Prefer swapping values you own (API base URL, a `Backend` ADT, scripted fixtures) via `*.scuzz_sim`.
+- Blessed kits (`Net`, `Fs`, `Clock`, …) keep one implementation; TestRuntime still fakes the wire under `SCUZZ_TESTRT=1`.
+- Do not stub pure helpers, `View` builders, or `Signal` cells. Sim bodies must stay deterministic.
+
+**Observation surface for laws:** signal store + View/a11y dump (and pure reads of module state) — not Skia pixels. Kernel/runtime (Stage 0 Rust, C runtime) keep ordinary example tests; the laws story is for **Scuzz apps**.
+
 ### Verification posture
 
-Keep purity checkable (pure `A` vs `IO` vs session), total expr core, signals as an explicit store, immutable data by default, errors as values. Spec **signal store + View/a11y dump**, not Skia pixels. Defer dependent types and runtime-heap proofs.
+Keep purity checkable (pure `A` vs `IO` vs session), total expr core, signals as an explicit store, immutable data by default, errors as values. Spec **laws over signal store + View/a11y dump**, not Skia pixels. Defer dependent types and runtime-heap proofs — residual laws + fuzz first; static proof only where cheap.
 
 ### `scuzz fuzz`
 
-Deterministic TestRuntime + Headless event scripts:
+Deterministic TestRuntime + Headless event scripts (plus sim overlays when present):
 
 ```text
-(program, seed/config, event script) → exit code + signal store + a11y view dump
+(program + sim, seed/config, event script) → exit code + signal store + a11y view dump + law results
 ```
 
 ```bash
@@ -141,7 +188,7 @@ scuzz fuzz --exhaust --depth N      # bounded systematic search (all scripts of 
 scuzz fuzz --replay repro.toml      # deterministic replay of a recorded failure
 ```
 
-Scripts are a line protocol — `tap <n>` / `text <s>` / `pump <k>` — played by the runtime (`SCUZZ_UI_SCRIPT`) across `pump` boundaries; on exit it writes the signal store + a11y view dump (`SCUZZ_FUZZ_DUMP`). The CLI probes the a11y dump for the typed event surface (buttons in scan order, text fields), generates seeded scripts (Lehmer/MINSTD LCG — the kernel dialect has no bitwise ops) or enumerates a finite alphabet under `--exhaust` (`tap <i>` for each button, `text` / `text a` when a field exists, `pump 1`), and writes `repro.toml` (seed + events) on failure. Exhaustive mode walks lengths `1..N` in stable order so shorter counterexamples win. `fuzz` lives in the Stage-1/2 CLI (not Stage 0); replay plays recorded events verbatim, so it is independent of the generator. Oracles: panic/`SzError` exit → structural dumps (PNG last). Requires stable tap order, `pump` as time, no hidden nondeterminism.
+Scripts are a line protocol — `tap <n>` / `text <s>` / `pump <k>` — played by the runtime (`SCUZZ_UI_SCRIPT`) across `pump` boundaries; on exit it writes the signal store + a11y view dump (`SCUZZ_FUZZ_DUMP`). The CLI probes the a11y dump for the typed event surface (buttons in scan order, text fields), generates seeded scripts (Lehmer/MINSTD LCG — the kernel dialect has no bitwise ops) or enumerates a finite alphabet under `--exhaust` (`tap <i>` for each button, `text` / `text a` when a field exists, `pump 1`), and writes `repro.toml` (seed + events) on failure. Exhaustive mode walks lengths `1..N` in stable order so shorter counterexamples win. `fuzz` lives in the Stage-1/2 CLI (not Stage 0); replay plays recorded events verbatim, so it is independent of the generator. **Oracles (direction):** module **laws** first; panic/`SzError` exit still fails; structural dumps aid diagnosis (PNG last). Today’s shipped oracle is still panic/`SzError` until laws land. Requires stable tap order, `pump` as time, no hidden nondeterminism.
 
 ### Layout model
 
@@ -149,7 +196,7 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ### UI testing
 
-Primary goldens are **structural** (signal store + a11y view dump). PNG pixels are optional (`scuzz test --pixels`). IO packages (no `[ui]`): `scuzz test` is compile + `SCUZZ_TESTRT=1` exit-0 smoke. Tooling: `scuzz check` (typecheck only) and `--message-format=json`.
+**Laws + `scuzz fuzz`** are the primary correctness story for `[ui]` apps. Structural goldens (signal store + a11y dump) remain a **regression face** for silent shape drift — few, Headless-only — not a substitute for laws. PNG pixels stay optional (`scuzz test --pixels`). IO packages (no `[ui]`): laws + sim overlays under TestRuntime; until laws land, `scuzz test` stays compile + `SCUZZ_TESTRT=1` exit-0 smoke. Tooling: `scuzz check` (typecheck live + sim + laws) and `--message-format=json`.
 
 ## Open work
 
@@ -164,7 +211,9 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-onl
 | Language + UI + tooling is huge | Ruthless subset; vertical slices; Counter before generality |
 | Self-host / dialect drift | Kernel section above; port compiler early; Stage 0/1/2 CI |
 | Effects too weak or too heavy | Builtin IO; pure `View`; `Ui` at session boundary |
-| Hidden nondeterminism | Closed impurity + TestRuntime |
+| Hidden nondeterminism | Closed impurity + TestRuntime + deterministic `*.scuzz_sim` |
+| Laws become brittle dump goldens | Laws talk to named module/signal surface; strict sim/live pairing in `check` |
+| Sim becomes Mockito | Only top-level same-name overlays; no stubbing pure `View`/`Signal`; kits stay TestRuntime |
 | “Almost Scala” confusion | Explicit non-goals; language direction above; [guide.md](guide.md) |
 | Skia weight | in-tree `sk_sw`; prebuilt fetch reserved |
 | Window-only features | Headless peer rule |
