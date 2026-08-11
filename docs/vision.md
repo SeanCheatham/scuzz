@@ -85,7 +85,7 @@ IO-only is **not** a fourth runtime peer. Package contract: missing `[ui]` ⇒ S
 
 Subset used by compiler sources and bootstrap examples. New features land in Stage 0 **before** `compiler-scuzz/` depends on them. Dual-boot gate: `scripts/selfhost.sh` — each stage smokes `examples/hello` + `examples/adt`, passes the counter/todo/nav Headless goldens, smokes `fuzz` on `examples/todo` and `fuzz --exhaust --depth 1` on `examples/counter`, and agrees with Stage 0 on `fmt --check` for the compiler sources; Stage 2 must re-emit byte-identical compiler IR (Stage-3 fixpoint).
 
-- Optional `package`; top-level `def` / `@main def …: IO[Unit]`; nullary enums (Stage 1 sources avoid enums; Stage 1/2 emit `sz_adt_new` / `sz_adt_tag` + `match` `switch`)
+- Optional `package`; top-level `def` / `@main def …: IO[Unit]`; enums (nullary in Stage 1 sources / `examples/adt`; Stage 0 also emits unary `Int`/`String` payloads via `sz_adt_new` / `sz_adt_tag` / `sz_adt_payload` + `match` bind — self-host adoption pending)
 - **`for { binders } yield e`** as primary binder: `x = e` (pure), `x <- e` (effect; yield wraps with `IO.pure` when any `<-` is present). Nested `for` in `if` / lambda arms when multi-bind is needed.
 - No `val` / statement blocks / `var` — expression dialect only.
 - `if` / `match`; literals incl. list `[a,b,c]` and `s"…"`
@@ -135,7 +135,7 @@ Scala **nouns**, Rust/Cargo **verbs** — without JVM packages or Rust `struct`/
 | File module (`Todo.scuzz`) | Namespacing + visibility |
 | Optional deeper `mod` tree | Only when a single file gets heavy |
 
-Direction for data/interfaces (see also [`compatibility.md`](compatibility.md)): payload **enums** / case-like records + thin **traits**-as-interfaces; monomorphize generics early. No classes (mutable identity), no `var`, no classpath/`com.foo.bar` directories. Path deps remain the unit of reuse. Today `src/**/*.scuzz` still merges into one program; file-as-module is the intended ratchet, not a parallel `src/test` tree.
+Direction for data/interfaces (see also [`compatibility.md`](compatibility.md)): payload **enums** / case-like records + thin **traits**-as-interfaces; monomorphize generics early. Stage 0 can emit unary `Int`/`String` payload enums; self-host (`compiler-scuzz/`) still uses nullary enums only. No classes (mutable identity), no `var`, no classpath/`com.foo.bar` directories. Path deps remain the unit of reuse. Today `src/**/*.scuzz` still merges into one program; file-as-module is the intended ratchet, not a parallel `src/test` tree.
 
 ### Laws, simulation, and verification
 

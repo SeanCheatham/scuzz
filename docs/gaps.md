@@ -27,19 +27,19 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### 3. Memory strategy under long-lived apps
 
-**Current state.** libc `malloc`/`free` via `sz_alloc` / `sz_free`, manual ownership, `Resource` brackets; panic may leak (see GC decision in `vision.md`). No refcounting, arenas, or collector. Nothing measures allocation behavior across `pump` boundaries.
+**Current state.** libc `malloc`/`free` via `sz_alloc` / `sz_free`, manual ownership, `Resource` brackets; panic may leak (see GC decision in `vision.md`). No refcounting, arenas, or collector. Alloc accounting exists: size header before the user pointer, `sz_alloc_stats` / `sz_alloc_reset_stats`, optional `SCUZZ_ALLOC_TRACE=1` peak/live samples every N pumps in `sz_ui_pump_sync`. Runtime unit tests cover free-to-baseline and flat-ish live count across pumps. Optional `make -C crates/runtime test-asan` (ASan; best-effort, not default CI).
 
-**Unproven.** Whether manual ownership holds up in a long-running interactive app: memory growth per pump, fragmentation, leaks from signal/view graphs that outlive a frame. The vision defers a collector "when long-lived interactive graphs demand it" — but without measurement we do not know whether that point is near or far.
+**Unproven.** Whether manual ownership holds up in a long-running interactive app: RSS growth over thousands of pumps, fragmentation, leaks from signal/view graphs that outlive a frame. The vision defers a collector "when long-lived interactive graphs demand it" — but without a long-lived RSS proof we do not know whether that point is near or far.
 
-**Proof.** A stay-open app (`examples/live`-shaped) driven for thousands of pumps shows flat RSS, and a leak check (e.g. ASan/LSan in CI on the runtime tests) is clean on the golden examples.
+**Proof.** A stay-open app (`examples/live`-shaped) driven for thousands of pumps shows flat RSS, and a leak check (e.g. ASan/LSan in CI on the runtime tests) is clean on the golden examples. Partially addressed: accounting + unit tests + optional `test-asan`; full long-lived RSS proof remains open.
 
 ### 4. Language growth vs the self-host ratchet
 
-**Current state.** Enums are nullary-only (`EnumDef { name, cases: Vec<String> }` in `crates/compiler/src/ast.rs`; `parseEnum*` in `compiler-scuzz/src/Parser.scuzz`). `List` is monomorphic; the only type constructor is builtin `IO[T]`. No payload ADTs, records, traits, or user generics in either compiler, though `compatibility.md` keeps "generics (monomorphize early)" as direction. The self-hosted compiler (~3,100 lines under `compiler-scuzz/src/`) contorts around this with string-tag encodings.
+**Current state.** Stage 0 supports payload ADTs with a single `Int` or `String` field (`EnumCase { name, fields }`, `sz_adt_payload`, match binders) — proven by Stage-0 unit tests. `examples/adt` and `compiler-scuzz/` stay nullary-only so the dual-boot gate does not need the new syntax yet. `List` is monomorphic; the only type constructor is builtin `IO[T]`. No records, traits, or user generics in either compiler, though `compatibility.md` keeps "generics (monomorphize early)" as direction. The self-hosted compiler (~3,100 lines under `compiler-scuzz/src/`) still contorts around nullary/string-tag encodings.
 
-**Unproven.** Whether the Stage 0 → 1 → 2 ratchet stays tractable once features are structurally big. Every feature lands in Rust Stage 0 first, then gets ported into the kernel dialect, then must survive the fixpoint gate (`scripts/selfhost.sh`, byte-identical Stage-2/3 IR). Payload ADTs (`case Some(x: Int)`) are the first real stress test — and the self-hosted compiler is their first customer. Generics + early monomorphization is the second, larger one.
+**Unproven.** Whether the Stage 0 → 1 → 2 ratchet stays tractable once features are structurally big. Every feature lands in Stage 0 first, then gets ported into the kernel dialect, then must survive the fixpoint gate (`scripts/selfhost.sh`, byte-identical Stage-2/3 IR). Payload ADTs are the first stress test: Stage 0 is in; **self-host adoption** (`compiler-scuzz/` parse/type/codegen + rewriting compiler IR/AST to use payloads) is the remaining proof. Generics + early monomorphization is the second, larger one.
 
-**Proof.** Payload ADTs land in Stage 0, `compiler-scuzz/` adopts them for its own IR/AST types, and the dual-boot gate still passes with the fixpoint intact.
+**Proof.** Payload ADTs land in Stage 0 (done), `compiler-scuzz/` adopts them for its own IR/AST types, and the dual-boot gate still passes with the fixpoint intact.
 
 ### 5. Mobile on real devices
 

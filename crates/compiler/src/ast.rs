@@ -16,7 +16,15 @@ pub struct Program {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumDef {
     pub name: String,
-    pub cases: Vec<String>,
+    pub cases: Vec<EnumCase>,
+}
+
+/// One `case Name` / `case Name(x: T)` in an enum.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EnumCase {
+    pub name: String,
+    /// Empty = nullary. Stage 0 codegen supports at most one field (`Int` or `String`).
+    pub fields: Vec<(String, Type)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -128,10 +136,11 @@ pub enum ExprKind {
     },
     /// Local binding / parameter reference
     Var(String),
-    /// `Color.Red` nullary ADT case
+    /// `Color.Red` / `Opt.Some(x)` ADT case construct
     AdtConstruct {
         enum_name: String,
         case_name: String,
+        args: Vec<Expr>,
     },
     /// `scrutinee match { case Pat => expr ... }`
     Match {
@@ -199,10 +208,11 @@ pub struct MatchArm {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Pattern {
-    /// `Color.Red`
+    /// `Color.Red` / `Opt.Some(n)` — `bind` is the payload name when present
     Adt {
         enum_name: String,
         case_name: String,
+        bind: Option<String>,
     },
     /// `_`
     Wildcard,

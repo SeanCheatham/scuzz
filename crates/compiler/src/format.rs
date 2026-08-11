@@ -48,7 +48,17 @@ fn pretty_enum(e: &EnumDef) -> String {
     out.push_str(":\n");
     for c in &e.cases {
         out.push_str("  case ");
-        out.push_str(c);
+        out.push_str(&c.name);
+        if !c.fields.is_empty() {
+            let parts: Vec<String> = c
+                .fields
+                .iter()
+                .map(|(n, t)| format!("{n}: {}", pretty_type(t)))
+                .collect();
+            out.push('(');
+            out.push_str(&parts.join(", "));
+            out.push(')');
+        }
         out.push('\n');
     }
     out
@@ -125,7 +135,18 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
         ExprKind::AdtConstruct {
             enum_name,
             case_name,
-        } => format!("{pad}{enum_name}.{case_name}"),
+            args,
+        } => {
+            if args.is_empty() {
+                format!("{pad}{enum_name}.{case_name}")
+            } else {
+                let a: Vec<_> = args
+                    .iter()
+                    .map(|e| pretty_expr(e, 0).trim().to_string())
+                    .collect();
+                format!("{pad}{enum_name}.{case_name}({})", a.join(", "))
+            }
+        },
         ExprKind::Lambda { param, body } => {
             let p = param.as_deref().unwrap_or("_");
             format!("{pad}{p} => {}", pretty_expr(body, 0).trim())
@@ -264,7 +285,11 @@ fn pretty_arm(arm: &MatchArm, indent: usize) -> String {
         Pattern::Adt {
             enum_name,
             case_name,
-        } => format!("{enum_name}.{case_name}"),
+            bind,
+        } => match bind {
+            Some(b) => format!("{enum_name}.{case_name}({b})"),
+            None => format!("{enum_name}.{case_name}"),
+        },
     };
     let body = pretty_expr(&arm.body, 0).trim().to_string();
     format!("{pad}case {pat} => {body}")
@@ -321,6 +346,27 @@ enum Color:
         assert!(out.contains("package demo.color"));
         assert!(out.contains("c = Color.Red"));
         assert!(out.contains("case Color.Red =>"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_payload_enum() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  Opt.Some(1) match {
+    case Opt.Some(n) => IO.println(Str.fromInt(n))
+    case Opt.None => IO.println("none")
+  }
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("case Some(x: Int)"));
+        assert!(out.contains("case None"));
+        assert!(out.contains("Opt.Some(1)"));
+        assert!(out.contains("case Opt.Some(n) =>"));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

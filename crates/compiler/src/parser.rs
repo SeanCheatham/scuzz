@@ -1,6 +1,6 @@
 use crate::ast::{
-    BinOp, EnumDef, Expr, ExprKind, ForBinder, FunDef, InterpPart, MainDef, MatchArm, Param, Pattern,
-    Program, Type,
+    BinOp, EnumCase, EnumDef, Expr, ExprKind, ForBinder, FunDef, InterpPart, MainDef, MatchArm,
+    Param, Pattern, Program, Type,
 };
 use crate::lexer::{lex, InterpTok, LexError, SpannedToken, Token};
 use crate::span::Span;
@@ -299,7 +299,7 @@ impl Parser {
                 self.bump();
                 loop {
                     self.expect(&Token::Case)?;
-                    cases.push(self.expect_ident()?.0);
+                    cases.push(self.parse_enum_case()?);
                     if matches!(self.peek(), Token::Comma) {
                         self.bump();
                         continue;
@@ -312,7 +312,7 @@ impl Parser {
                 self.bump();
                 while matches!(self.peek(), Token::Case) {
                     self.bump();
-                    cases.push(self.expect_ident()?.0);
+                    cases.push(self.parse_enum_case()?);
                 }
             }
             other => {
@@ -325,6 +325,26 @@ impl Parser {
             return Err(self.err(format!("enum {name} has no cases")));
         }
         Ok(EnumDef { name, cases })
+    }
+
+    /// `Name` or `Name(x: Type)` (Stage 0: at most one field).
+    fn parse_enum_case(&mut self) -> Result<EnumCase, ParseError> {
+        let (name, _) = self.expect_ident()?;
+        let mut fields = Vec::new();
+        if matches!(self.peek(), Token::LParen) {
+            self.bump();
+            let (fname, _) = self.expect_ident()?;
+            self.expect(&Token::Colon)?;
+            let fty = self.parse_type()?;
+            fields.push((fname, fty));
+            if matches!(self.peek(), Token::Comma) {
+                return Err(self.err(
+                    "Stage 0 payload ADTs support a single field only",
+                ));
+            }
+            self.expect(&Token::RParen)?;
+        }
+        Ok(EnumCase { name, fields })
     }
 
     fn parse_type(&mut self) -> Result<Type, ParseError> {
@@ -648,9 +668,18 @@ impl Parser {
                 let (enum_name, _) = self.expect_ident()?;
                 self.expect(&Token::Dot)?;
                 let (case_name, _) = self.expect_ident()?;
+                let bind = if matches!(self.peek(), Token::LParen) {
+                    self.bump();
+                    let (b, _) = self.expect_ident()?;
+                    self.expect(&Token::RParen)?;
+                    Some(b)
+                } else {
+                    None
+                };
                 Ok(Pattern::Adt {
                     enum_name,
                     case_name,
+                    bind,
                 })
             }
             other => Err(self.err(format!("expected pattern, got {other:?}"))),
@@ -956,6 +985,7 @@ impl Parser {
                         ExprKind::AdtConstruct {
                             enum_name: name,
                             case_name,
+                            args: Vec::new(),
                         },
                         start.cover(&case_span),
                     ))
@@ -1130,7 +1160,63 @@ enum Color:
         let p = parse(src).unwrap();
         assert_eq!(p.package, vec!["demo", "color"]);
         assert_eq!(p.enums.len(), 1);
+        assert_eq!(p.enums[0].cases.len(), 2);
+        assert!(p.enums[0].cases[0].fields.is_empty());
         assert!(matches!(p.main.body.kind, ExprKind::For { .. }));
+    }
+
+    #[test]
+    fn parse_payload_enum_and_match_bind() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  Opt.Some(1) match {
+    case Opt.Some(n) => IO.println(Str.fromInt(n))
+    case Opt.None => IO.println("none")
+  }
+"#;
+        let p = parse(src).unwrap();
+        assert_eq!(p.enums[0].cases[0].name, "Some");
+        assert_eq!(p.enums[0].cases[0].fields.len(), 1);
+        assert_eq!(p.enums[0].cases[0].fields[0].0, "x");
+        assert!(matches!(
+            p.enums[0].cases[0].fields[0].1,
+            crate::ast::Type::Int
+        ));
+        assert!(p.enums[0].cases[1].fields.is_empty());
+        // Dotted call with args stays Call until lower resolves known enum ctors.
+        match &p.main.body.kind {
+            ExprKind::Match { scrutinee, arms } => {
+                assert!(matches!(
+                    &scrutinee.kind,
+                    ExprKind::Call { callee, args }
+                        if callee == "Opt.Some" && args.len() == 1
+                ));
+                match &arms[0].pattern {
+                    Pattern::Adt {
+                        enum_name,
+                        case_name,
+                        bind: Some(b),
+                    } => {
+                        assert_eq!(enum_name, "Opt");
+                        assert_eq!(case_name, "Some");
+                        assert_eq!(b, "n");
+                    }
+                    other => panic!("expected payload pattern, got {other:?}"),
+                }
+                match &arms[1].pattern {
+                    Pattern::Adt {
+                        bind: None,
+                        case_name,
+                        ..
+                    } if case_name == "None" => {}
+                    other => panic!("expected nullary None, got {other:?}"),
+                }
+            }
+            other => panic!("expected match, got {other:?}"),
+        }
     }
 
     #[test]

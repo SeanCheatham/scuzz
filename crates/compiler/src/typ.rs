@@ -132,14 +132,25 @@ fn infer(
         ExprKind::AdtConstruct {
             enum_name,
             case_name,
+            args,
         } => {
             let en = enums.get(enum_name.as_str()).ok_or_else(|| {
                 TypeError::Msg(format!("unknown enum {enum_name}"))
             })?;
-            if !en.cases.iter().any(|c| c == case_name) {
+            let case = en.cases.iter().find(|c| c.name == *case_name).ok_or_else(|| {
+                TypeError::Msg(format!("unknown case {enum_name}.{case_name}"))
+            })?;
+            check_payload_fields(enum_name, case)?;
+            if args.len() != case.fields.len() {
                 return Err(TypeError::Msg(format!(
-                    "unknown case {enum_name}.{case_name}"
+                    "{enum_name}.{case_name} expects {} arg(s), got {}",
+                    case.fields.len(),
+                    args.len()
                 )));
+            }
+            for (arg, (_fname, fty)) in args.iter().zip(case.fields.iter()) {
+                let at = infer(arg, enums, funs, env)?;
+                expect_ty(&at, fty)?;
             }
             Ok(Type::Adt(enum_name.clone()))
         }
@@ -223,8 +234,9 @@ fn infer(
             let st = infer(scrutinee, enums, funs, env)?;
             let mut result: Option<Type> = None;
             for arm in arms {
-                check_pattern(&arm.pattern, &st, enums)?;
+                let bound = bind_pattern(&arm.pattern, &st, enums, env)?;
                 let bt = infer(&arm.body, enums, funs, env)?;
+                unbind_pattern(bound, env);
                 match &result {
                     None => result = Some(bt),
                     Some(prev) if types_compat(prev, &bt) => {}
@@ -666,32 +678,85 @@ fn expect_ty(got: &Type, want: &Type) -> Result<(), TypeError> {
     }
 }
 
-fn check_pattern(
+fn check_payload_fields(enum_name: &str, case: &crate::ast::EnumCase) -> Result<(), TypeError> {
+    if case.fields.len() > 1 {
+        return Err(TypeError::Msg(format!(
+            "{enum_name}.{}: Stage 0 supports at most one payload field",
+            case.name
+        )));
+    }
+    for (fname, fty) in &case.fields {
+        match fty {
+            Type::Int | Type::String => {}
+            other => {
+                return Err(TypeError::Msg(format!(
+                    "{enum_name}.{} field {fname}: Stage 0 payload types are Int or String, got {other:?}",
+                    case.name
+                )))
+            }
+        }
+    }
+    Ok(())
+}
+
+/// Typecheck a pattern and bind any payload name into `env`. Returns the previous binding to restore.
+fn bind_pattern(
     pat: &crate::ast::Pattern,
     scrut: &Type,
     enums: &HashMap<&str, &EnumDef>,
-) -> Result<(), TypeError> {
+    env: &mut HashMap<String, Type>,
+) -> Result<Option<(String, Option<Type>)>, TypeError> {
     match pat {
-        crate::ast::Pattern::Wildcard => Ok(()),
+        crate::ast::Pattern::Wildcard => Ok(None),
         crate::ast::Pattern::Adt {
             enum_name,
             case_name,
+            bind,
         } => {
             let en = enums.get(enum_name.as_str()).ok_or_else(|| {
                 TypeError::Msg(format!("unknown enum {enum_name} in pattern"))
             })?;
-            if !en.cases.iter().any(|c| c == case_name) {
-                return Err(TypeError::Msg(format!(
+            let case = en.cases.iter().find(|c| c.name == *case_name).ok_or_else(|| {
+                TypeError::Msg(format!(
                     "unknown case {enum_name}.{case_name} in pattern"
-                )));
-            }
+                ))
+            })?;
+            check_payload_fields(enum_name, case)?;
             match scrut {
-                Type::Adt(n) if n == enum_name => Ok(()),
-                Type::Opaque(_) => Ok(()),
-                other => Err(TypeError::Msg(format!(
-                    "pattern {enum_name}.{case_name} does not match scrutinee {other:?}"
+                Type::Adt(n) if n == enum_name => {}
+                Type::Opaque(_) => {}
+                other => {
+                    return Err(TypeError::Msg(format!(
+                        "pattern {enum_name}.{case_name} does not match scrutinee {other:?}"
+                    )))
+                }
+            }
+            match (bind, case.fields.as_slice()) {
+                (None, []) => Ok(None),
+                (Some(name), [(_, fty)]) => {
+                    let old = env.insert(name.clone(), fty.clone());
+                    Ok(Some((name.clone(), old)))
+                }
+                (Some(_), []) => Err(TypeError::Msg(format!(
+                    "pattern {enum_name}.{case_name} is nullary; remove payload binder"
+                ))),
+                (None, [_]) => Err(TypeError::Msg(format!(
+                    "pattern {enum_name}.{case_name} needs a payload binder, e.g. {enum_name}.{case_name}(x)"
+                ))),
+                (_, _) => Err(TypeError::Msg(format!(
+                    "pattern {enum_name}.{case_name}: Stage 0 supports a single payload field"
                 ))),
             }
+        }
+    }
+}
+
+fn unbind_pattern(bound: Option<(String, Option<Type>)>, env: &mut HashMap<String, Type>) {
+    if let Some((name, old)) = bound {
+        if let Some(v) = old {
+            env.insert(name, v);
+        } else {
+            env.remove(&name);
         }
     }
 }
@@ -708,5 +773,59 @@ fn types_compat(a: &Type, b: &Type) -> bool {
         (Type::Adt(x), Type::Adt(y)) => x == y,
         (Type::Opaque(_), _) | (_, Type::Opaque(_)) => true,
         _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lower::lower_program;
+    use crate::parser::parse;
+
+    #[test]
+    fn typechecks_payload_adt() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  Opt.Some(7) match {
+    case Opt.Some(n) => IO.println(Str.fromInt(n))
+    case Opt.None => IO.println("none")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("payload ADT should typecheck");
+    }
+
+    #[test]
+    fn rejects_payload_type_mismatch() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] = Opt.Some("no") match {
+  case Opt.Some(n) => IO.println("x")
+  case Opt.None => IO.println("n")
+}
+"#;
+        let p = lower_program(parse(src).unwrap());
+        assert!(typecheck(&p).is_err());
+    }
+
+    #[test]
+    fn rejects_missing_payload_binder() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] = Opt.Some(1) match {
+  case Opt.Some => IO.println("x")
+  case Opt.None => IO.println("n")
+}
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(err.message().contains("needs a payload binder"));
     }
 }
