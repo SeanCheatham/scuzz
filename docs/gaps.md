@@ -59,13 +59,9 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ## Known gaps
 
-### Module laws + sim overlays
-
-Vision locks app verification as stem-paired `Foo.scuzz` / `Foo.scuzz_sim` / `Foo.scuzz_laws`: same-name sim replacements under fuzz/TestRuntime, pure laws as the fuzz oracle, no app-level unit-test trees ([vision.md](vision.md#laws-simulation-and-verification)). Nothing of that toolchain exists yet — `scuzz fuzz` still fails only on panic/`SzError`, and `scuzz test` is goldens (UI) or exit-0 smoke (IO). Smallest slice: one example (`examples/counter` or `todo`) with a `*.scuzz_laws` predicate over the signal/a11y dump, residualized under `SCUZZ_TESTRT=1`, failing fuzz with `repro.toml` when broken; then a `*.scuzz_sim` that swaps one app-owned value (e.g. a URL string).
-
 ### File-as-module (vs merge-all `src/`)
 
-Vision direction: `scuzz.toml` package = crate, `Foo.scuzz` = module ([vision.md](vision.md#modules-and-source-shape)). Today Stage 0/1/2 still merge all `src/**/*.scuzz` into one program with a single `@main`. Pure work once laws/sim need per-module overlay resolution — start with stem pairing for sim/laws without full visibility/namespaces if that unblocks the verification slice sooner.
+Vision direction: `scuzz.toml` package = crate, `Foo.scuzz` = module ([vision.md](vision.md#modules-and-source-shape)). Stem pairing for `*.scuzz_sim` / `*.scuzz_laws` is implemented; Stage 0/1/2 still merge all live `src/**/*.scuzz` into one program with a single `@main` (no per-file visibility / namespaces yet).
 
 ### Desktop keyboard input into `TextField`
 

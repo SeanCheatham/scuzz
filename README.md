@@ -13,7 +13,7 @@
 - Animation + accessibility hooks (Headless-dumpable); theme polish tokens
 - Stage-2 CLI (release): `build|run|test|check|fuzz|watch|new|package|fmt` (`compiler-scuzz`); Stage-0 Rust for bootstrap only
 - Prebuilt Stage-2 release tree (`scripts/package_release.sh` → `dist/scuzz-<triple>.tar.gz`); `install.sh` installs under `PREFIX/share/scuzz`
-- Deterministic fuzz: `scuzz fuzz` (seeded `--iters`, bounded `--exhaust --depth N`, `--replay repro.toml`) on TestRuntime + Headless
+- Deterministic fuzz: `scuzz fuzz` (seeded `--iters`, bounded `--exhaust --depth N`, `--replay repro.toml`) on TestRuntime + Headless; residual module **laws** + sim overlays as the primary oracle
 - Structural goldens (signal store + a11y dump); PNG optional via `scuzz test --pixels`; IO packages use TESTRT exit-0 smoke
 - Skia linked for `[ui]` packages only (IO-only link is Skia-free); in-tree `sk_sw` today (`SCUZZ_SKIA_URL` fetch is reserved)
 - Impeller deferred (see `docs/vision.md`)

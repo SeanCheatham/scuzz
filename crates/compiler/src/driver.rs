@@ -1,6 +1,9 @@
 use crate::codegen::emit_llvm;
 use crate::lower::lower_program;
 use crate::manifest::{load_manifest, Manifest};
+use crate::overlay::{
+    apply_overlays, overlay_kind_from_path, residualize_laws, OverlaySource,
+};
 use crate::parser::parse_sources;
 use crate::typ::typecheck;
 use anyhow::{bail, Context, Result};
@@ -20,6 +23,8 @@ pub struct CompileOptions {
     pub clang: String,
     /// Skip clang link when fingerprint matches (incremental).
     pub incremental: bool,
+    /// Apply `*.scuzz_sim` / residual `*.scuzz_laws` (fuzz / TestRuntime builds).
+    pub verify: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -44,6 +49,8 @@ pub struct ResolvedSource {
 pub struct ResolvedProject {
     pub root_manifest: Manifest,
     pub sources: Vec<ResolvedSource>,
+    /// Stem-paired sim/laws overlays (not loaded for live `build`/`run`).
+    pub overlays: Vec<OverlaySource>,
     /// Canonical package directories in visit order (deps first).
     pub package_dirs: Vec<PathBuf>,
     /// Manifest paths in the same order as `package_dirs`.
@@ -59,7 +66,7 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
         .iter()
         .map(|s| (s.label.clone(), s.text.clone()))
         .collect();
-    let fingerprint = fingerprint_resolved(&resolved);
+    let fingerprint = fingerprint_resolved(&resolved, opts.verify);
 
     // Join must use a relative file name — absolute package names would replace out_dir.
     let exe_name = Path::new(&manifest.package.name)
@@ -74,7 +81,11 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
     std::fs::create_dir_all(&opts.out_dir)?;
     let cache_dir = opts.project_dir.join(".scuzz");
     std::fs::create_dir_all(&cache_dir)?;
-    let fp_path = cache_dir.join("fingerprint");
+    let fp_path = cache_dir.join(if opts.verify {
+        "fingerprint.verify"
+    } else {
+        "fingerprint"
+    });
     let exe = opts.out_dir.join(exe_name);
     let ll_path = opts.out_dir.join(format!("{exe_name}.ll"));
 
@@ -93,6 +104,17 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
 
     let program =
         parse_sources(&named).map_err(|e| anyhow::anyhow!("parse error: {e}"))?;
+    let (mut program, law_names) = if opts.verify {
+        let (p, laws) = apply_overlays(program, &resolved.overlays)
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        (p, laws)
+    } else {
+        (program, Vec::new())
+    };
+    if opts.verify {
+        residualize_laws(&mut program, &law_names);
+        program.law_names = law_names;
+    }
     let program = lower_program(program);
     typecheck(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
 
@@ -173,13 +195,18 @@ fn push_force_load(link: &mut Command, archive: &Path) {
     }
 }
 
-fn fingerprint_resolved(resolved: &ResolvedProject) -> String {
+fn fingerprint_resolved(resolved: &ResolvedProject, verify: bool) -> String {
     let mut h = DefaultHasher::new();
     resolved.root_manifest.package.name.hash(&mut h);
     if resolved.root_manifest.ui.is_some() {
         "ui=1".hash(&mut h);
     } else {
         "ui=0".hash(&mut h);
+    }
+    if verify {
+        "verify=1".hash(&mut h);
+    } else {
+        "verify=0".hash(&mut h);
     }
     for (dir, manifest_path) in resolved
         .package_dirs
@@ -194,6 +221,12 @@ fn fingerprint_resolved(resolved: &ResolvedProject) -> String {
         src.label.hash(&mut h);
         src.text.hash(&mut h);
     }
+    if verify {
+        for ov in &resolved.overlays {
+            ov.label.hash(&mut h);
+            ov.text.hash(&mut h);
+        }
+    }
     format!("{:016x}", h.finish())
 }
 
@@ -202,6 +235,7 @@ pub fn resolve_project(project_dir: &Path) -> Result<ResolvedProject> {
     let root = canonicalize_dir(project_dir)
         .with_context(|| format!("resolving project {}", project_dir.display()))?;
     let mut sources = Vec::new();
+    let mut overlays = Vec::new();
     let mut package_dirs = Vec::new();
     let mut manifest_paths = Vec::new();
     let mut visiting: Vec<(String, PathBuf)> = Vec::new();
@@ -213,13 +247,17 @@ pub fn resolve_project(project_dir: &Path) -> Result<ResolvedProject> {
         &mut visiting,
         &mut done,
         &mut sources,
+        &mut overlays,
         &mut package_dirs,
         &mut manifest_paths,
     )?;
 
+    validate_overlay_stems(&sources, &overlays)?;
+
     Ok(ResolvedProject {
         root_manifest,
         sources,
+        overlays,
         package_dirs,
         manifest_paths,
     })
@@ -231,6 +269,7 @@ fn visit_package(
     visiting: &mut Vec<(String, PathBuf)>,
     done: &mut HashSet<PathBuf>,
     sources: &mut Vec<ResolvedSource>,
+    overlays: &mut Vec<OverlaySource>,
     package_dirs: &mut Vec<PathBuf>,
     manifest_paths: &mut Vec<PathBuf>,
 ) -> Result<Manifest> {
@@ -300,6 +339,7 @@ fn visit_package(
             visiting,
             done,
             sources,
+            overlays,
             package_dirs,
             manifest_paths,
         )?;
@@ -324,6 +364,24 @@ fn visit_package(
         sources.push(ResolvedSource {
             label,
             path,
+            text,
+        });
+    }
+
+    let pkg_overlays = find_overlays(&canon)?;
+    for (path, stem, kind) in pkg_overlays {
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        let rel = path
+            .strip_prefix(&canon)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let label = format!("{pkg_name}/{rel}");
+        overlays.push(OverlaySource {
+            stem,
+            kind,
+            label,
             text,
         });
     }
@@ -391,6 +449,59 @@ fn collect_sources(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
             if ext == "scuzz" {
                 out.push(path);
             }
+        }
+    }
+    Ok(())
+}
+
+fn find_overlays(project_dir: &Path) -> Result<Vec<(PathBuf, String, crate::overlay::OverlayKind)>> {
+    let src = project_dir.join("src");
+    if !src.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut out = Vec::new();
+    collect_overlays(&src, &mut out)?;
+    out.sort_by(|a, b| a.0.cmp(&b.0));
+    Ok(out)
+}
+
+fn collect_overlays(
+    dir: &Path,
+    out: &mut Vec<(PathBuf, String, crate::overlay::OverlayKind)>,
+) -> Result<()> {
+    let mut entries: Vec<_> = std::fs::read_dir(dir)?.collect::<Result<Vec<_>, _>>()?;
+    entries.sort_by_key(|e| e.path());
+    for entry in entries {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_overlays(&path, out)?;
+        } else if let Some((stem, kind)) = overlay_kind_from_path(&path) {
+            out.push((path, stem, kind));
+        }
+    }
+    Ok(())
+}
+
+fn validate_overlay_stems(sources: &[ResolvedSource], overlays: &[OverlaySource]) -> Result<()> {
+    let mut live_stems: HashSet<String> = HashSet::new();
+    for s in sources {
+        if let Some(stem) = s
+            .path
+            .file_stem()
+            .and_then(|x| x.to_str())
+            .map(|s| s.to_string())
+        {
+            live_stems.insert(stem);
+        }
+    }
+    for ov in overlays {
+        if !live_stems.contains(&ov.stem) {
+            bail!(
+                "{}: overlay stem `{}` has no live `{}.scuzz` twin",
+                ov.label,
+                ov.stem,
+                ov.stem
+            );
         }
     }
     Ok(())
@@ -724,10 +835,10 @@ mod tests {
             "IO.println(greet())",
         );
         let r1 = resolve_project(&app).unwrap();
-        let fp1 = fingerprint_resolved(&r1);
+        let fp1 = fingerprint_resolved(&r1, false);
         fs::write(shared.join("src/Lib.scuzz"), "def greet(): String = \"yo\"\n").unwrap();
         let r2 = resolve_project(&app).unwrap();
-        let fp2 = fingerprint_resolved(&r2);
+        let fp2 = fingerprint_resolved(&r2, false);
         assert_ne!(fp1, fp2);
     }
 

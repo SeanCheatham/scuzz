@@ -3,6 +3,15 @@ package scuzz.compiler
 def emptyProg(): List =
   List.cons("Prog", List.cons("", List.cons(List.empty(), List.cons(List.empty(), List.cons(unitExpr(), List.empty())))))
 
+def mkProg(pkg: String, enums: List, defs: List, main: List): List =
+  List.cons("Prog", List.cons(pkg, List.cons(enums, List.cons(defs, List.cons(main, List.empty())))))
+
+def setProgDefs(prog: List, defs: List): List =
+  mkProg(nodeStr(prog, 0), progEnums(prog), defs, progMain(prog))
+
+def setProgMain(prog: List, main: List): List =
+  mkProg(nodeStr(prog, 0), progEnums(prog), progDefs(prog), main)
+
 def chooseMain(a: List, b: List): List =
   if (streq(exprTag(b), "Unit") == 1) a else b
 
@@ -18,6 +27,21 @@ def readUntilQuote(s: String, i: Int, acc: String): String =
 def isScuzzName(name: String): Int =
   if (endsWith(name, ".scuzz") == 1) 1 else 0
 
+def isSimName(name: String): Int =
+  if (endsWith(name, ".scuzz_sim") == 1) 1 else 0
+
+def isLawsName(name: String): Int =
+  if (endsWith(name, ".scuzz_laws") == 1) 1 else 0
+
+def liveStem(name: String): String =
+  Str.slice(name, 0, Str.len(name) - 6)
+
+def simStem(name: String): String =
+  Str.slice(name, 0, Str.len(name) - 10)
+
+def lawsStem(name: String): String =
+  Str.slice(name, 0, Str.len(name) - 11)
+
 def isMainName(name: String): Int =
   if (streq(name, "Main.scuzz") == 1) 1 else if (streq(name, "main.scuzz") == 1) 1 else 0
 
@@ -26,6 +50,30 @@ def partitionSources(names: List, others: List, mains: List): List =
 
 def partitionSourcesOne(name: String, rest: List, others: List, mains: List): List =
   if (isScuzzName(name) == 0) partitionSources(rest, others, mains) else if (isMainName(name) == 1) partitionSources(rest, others, List.cons(name, mains)) else partitionSources(rest, List.cons(name, others), mains)
+
+def collectLiveStems(names: List, acc: List): List =
+  if (List.isEmpty(names) == 1) acc else collectLiveStemsOne(List.head(names), List.tail(names), acc)
+
+def collectLiveStemsOne(name: String, rest: List, acc: List): List =
+  if (isScuzzName(name) == 0) collectLiveStems(rest, acc) else collectLiveStems(rest, List.cons(liveStem(name), acc))
+
+def filterSimNames(names: List, acc: List): List =
+  if (List.isEmpty(names) == 1) List.reverse(acc) else if (isSimName(List.head(names)) == 1) filterSimNames(List.tail(names), List.cons(List.head(names), acc)) else filterSimNames(List.tail(names), acc)
+
+def filterLawsNames(names: List, acc: List): List =
+  if (List.isEmpty(names) == 1) List.reverse(acc) else if (isLawsName(List.head(names)) == 1) filterLawsNames(List.tail(names), List.cons(List.head(names), acc)) else filterLawsNames(List.tail(names), acc)
+
+def ovKind(o: List): String =
+  List.head(o)
+
+def ovLabel(o: List): String =
+  List.head(List.tail(o))
+
+def ovText(o: List): String =
+  List.head(List.tail(List.tail(o)))
+
+def mkOverlay(kind: String, label: String, text: String): List =
+  List.cons(kind, List.cons(label, List.cons(text, List.empty())))
 
 def resolveRuntimeEnv(env: String, projectDir: String): IO[String] =
   if (Str.len(env) > 0) IO.pure(env) else Sys.getenv("SCUZZ_HOME").flatMap(home =>
@@ -53,6 +101,9 @@ def execOk(cmd: String): IO[Unit] =
 def readSources(srcDir: String, names: List, acc: List): IO[List] =
   if (List.isEmpty(names) == 1) IO.pure(List.reverse(acc)) else Fs.read(pathJoin(srcDir, List.head(names))).flatMap(text => readSources(srcDir, List.tail(names), List.cons(text, acc)))
 
+def readOverlayFiles(srcDir: String, kind: String, names: List, acc: List): IO[List] =
+  if (List.isEmpty(names) == 1) IO.pure(List.reverse(acc)) else Fs.read(pathJoin(srcDir, List.head(names))).flatMap(text => readOverlayFiles(srcDir, kind, List.tail(names), List.cons(mkOverlay(kind, List.head(names), text), acc)))
+
 def mergeSources(texts: List, acc: List, mains: Int): IO[List] =
   if (List.isEmpty(texts) == 1) if (mains == 0) IO.fail("no @main definition") else if (mains > 1) IO.fail("multiple @main definitions") else IO.pure(acc) else mergeSourcesOne(List.head(texts), List.tail(texts), acc, mains)
 
@@ -61,6 +112,14 @@ def mergeSourcesOne(text: String, rest: List, acc: List, mains: Int): IO[List] =
     p = parseSource(text)
     n = if (streq(exprTag(progMain(p)), "Unit") == 1) 0 else 1
   } yield mergeSources(rest, mergeProg(acc, p), mains + n)
+
+def validateOverlayStems(stems: List, names: List): IO[Unit] =
+  if (List.isEmpty(names) == 1) IO.pure(()) else validateOverlayStemOne(stems, List.head(names), List.tail(names))
+
+def validateOverlayStemOne(stems: List, name: String, rest: List): IO[Unit] =
+  for {
+    stem = if (isSimName(name) == 1) simStem(name) else lawsStem(name)
+  } yield if (listContainsStr(stems, stem) == 0) IO.fail(str4(name, ": overlay stem `", stem, str3("` has no live `", stem, ".scuzz` twin"))) else validateOverlayStems(stems, rest)
 
 def buildRuntime(runtimeDir: String, clang: String): IO[Unit] =
   execOk(str4("make -C ", runtimeDir, " lib CC=", clang)).flatMap(_ =>
@@ -82,27 +141,109 @@ def linkCmdIo(clang: String, ll: String, lib: String, inc: String, exe: String):
 def runIfNeeded(exe: String, doRun: Int): IO[Unit] =
   if (doRun == 1) execOk(exe) else IO.pure(())
 
+def lawCall(name: String): List =
+  List.cons("Call", List.cons(name, List.cons(List.empty(), List.empty())))
+
+def lawAssertCall(name: String): List =
+  List.cons("Call", List.cons("Law.assert", List.cons(List.cons(List.cons("StrLit", List.cons(name, List.empty())), List.cons(lawCall(name), List.empty())), List.empty())))
+
+def wrapLawAssert(body: List, name: String): List =
+  List.cons("FlatMap", List.cons(body, List.cons("_", List.cons(lawAssertCall(name), List.empty()))))
+
+def residualizeLaws(prog: List, lawNames: List): List =
+  if (List.isEmpty(lawNames) == 1) prog else setProgMain(prog, residualizeMain(progMain(prog), lawNames))
+
+def residualizeMain(body: List, lawNames: List): List =
+  if (List.isEmpty(lawNames) == 1) body else residualizeMain(wrapLawAssert(body, List.head(lawNames)), List.tail(lawNames))
+
+def checkSimParams(lp: List, sp: List, name: String, label: String, i: Int): IO[Unit] =
+  if (i >= List.len(lp)) IO.pure(()) else if (streq(paramType(List.at(lp, i)), paramType(List.at(sp, i))) == 0) IO.fail(str4(label, ": sim def `", name, str3("` param `", paramName(List.at(sp, i)), "` type mismatch"))) else checkSimParams(lp, sp, name, label, i + 1)
+
+def checkSimMatch(live: List, sim: List, label: String): IO[Unit] =
+  for {
+    lp = defParams(live)
+    sp = defParams(sim)
+    name = defName(sim)
+  } yield if (List.len(lp) != List.len(sp)) IO.fail(str4(label, ": sim def `", name, str3("` arity mismatch (live ", Str.fromInt(List.len(lp)), str3(", sim ", Str.fromInt(List.len(sp)), ")")))) else if (streq(defRet(live), defRet(sim)) == 0) IO.fail(str4(label, ": sim def `", name, "` return type mismatch")) else if (tyIsIo(defRet(live)) != tyIsIo(defRet(sim))) IO.fail(str4(label, ": sim def `", name, "` purity mismatch")) else checkSimParams(lp, sp, name, label, 0)
+
+def replaceSimDefAcc(defs: List, sim: List, label: String, acc: List, found: Int): IO[List] =
+  if (List.isEmpty(defs) == 1) if (found == 0) IO.fail(str5(label, ": sim def `", defName(sim), "` has no live twin", "")) else IO.pure(List.reverse(acc)) else if (streq(defName(List.head(defs)), defName(sim)) == 1) checkSimMatch(List.head(defs), sim, label).flatMap(_ => replaceSimDefAcc(List.tail(defs), sim, label, List.cons(sim, acc), 1)) else replaceSimDefAcc(List.tail(defs), sim, label, List.cons(List.head(defs), acc), found)
+
+def replaceSimDef(defs: List, sim: List, label: String): IO[List] =
+  replaceSimDefAcc(defs, sim, label, List.empty(), 0)
+
+def applySimDefs(prog: List, defs: List, label: String): IO[List] =
+  if (List.isEmpty(defs) == 1) IO.pure(prog) else replaceSimDef(progDefs(prog), List.head(defs), label).flatMap(newDefs => applySimDefs(setProgDefs(prog, newDefs), List.tail(defs), label))
+
+def applyOneSim(prog: List, ov: List): IO[List] =
+  for {
+    p = parseSource(ovText(ov))
+    label = ovLabel(ov)
+  } yield if (streq(exprTag(progMain(p)), "Unit") == 0) IO.fail(str3(label, ": *.scuzz_sim must not define @main", "")) else if (List.isEmpty(progEnums(p)) == 0) IO.fail(str3(label, ": *.scuzz_sim must not define enums", "")) else applySimDefs(prog, progDefs(p), label)
+
+def applySims(prog: List, sims: List): IO[List] =
+  if (List.isEmpty(sims) == 1) IO.pure(prog) else applyOneSim(prog, List.head(sims)).flatMap(p2 => applySims(p2, List.tail(sims)))
+
+def lawRetOk(ret: String): Int =
+  if (streq(ret, "Bool") == 1) 1 else if (streq(ret, "Int") == 1) 1 else 0
+
+def applyLawDefs(prog: List, defs: List, label: String, names: List): IO[List] =
+  if (List.isEmpty(defs) == 1) IO.pure(List.cons(prog, List.cons(names, List.empty()))) else applyLawDefOne(prog, List.head(defs), List.tail(defs), label, names)
+
+def applyLawDefOne(prog: List, d: List, rest: List, label: String, names: List): IO[List] =
+  for {
+    name = defName(d)
+    hit = findDef(progDefs(prog), name)
+  } yield if (List.isEmpty(hit) == 0) IO.fail(str5(label, ": law `", name, "` collides with a live/sim def", "")) else if (lawRetOk(defRet(d)) == 0) IO.fail(str4(label, ": law `", name, str3("` must return Bool (or Int), got ", defRet(d), ""))) else if (List.isEmpty(defParams(d)) == 0) IO.fail(str5(label, ": law `", name, "` must be nullary for residual checks", "")) else applyLawDefs(setProgDefs(prog, listConcat(progDefs(prog), List.cons(d, List.empty()))), rest, label, listConcat(names, List.cons(name, List.empty())))
+
+def applyOneLaw(prog: List, ov: List, names: List): IO[List] =
+  for {
+    p = parseSource(ovText(ov))
+    label = ovLabel(ov)
+  } yield if (streq(exprTag(progMain(p)), "Unit") == 0) IO.fail(str3(label, ": *.scuzz_laws must not define @main", "")) else if (List.isEmpty(progEnums(p)) == 0) IO.fail(str3(label, ": *.scuzz_laws must not define enums", "")) else applyLawDefs(prog, progDefs(p), label, names)
+
+def applyLaws(prog: List, laws: List, names: List): IO[List] =
+  if (List.isEmpty(laws) == 1) IO.pure(List.cons(prog, List.cons(names, List.empty()))) else applyOneLaw(prog, List.head(laws), names).flatMap(state => applyLaws(List.head(state), List.tail(laws), List.head(List.tail(state))))
+
+def filterOverlays(ovs: List, kind: String, acc: List): List =
+  if (List.isEmpty(ovs) == 1) List.reverse(acc) else if (streq(ovKind(List.head(ovs)), kind) == 1) filterOverlays(List.tail(ovs), kind, List.cons(List.head(ovs), acc)) else filterOverlays(List.tail(ovs), kind, acc)
+
+def applyOverlays(live: List, overlays: List): IO[List] =
+  applySims(live, filterOverlays(overlays, "sim", List.empty())).flatMap(p1 => applyLaws(p1, filterOverlays(overlays, "laws", List.empty()), List.empty()))
+
+def prepareVerifyProg(prog0: List, overlays: List): IO[List] =
+  applyOverlays(prog0, overlays).flatMap(applied => IO.pure(residualizeLaws(List.head(applied), List.head(List.tail(applied)))))
+
 def compileProject(projectDir: String, outDir: String, doRun: Int): IO[Unit] =
   Sys.getenv("SCUZZ_RUNTIME").flatMap(rtEnv =>
     resolveRuntimeEnv(rtEnv, projectDir).flatMap(runtimeDir =>
-      Sys.getenv("SCUZZ_CLANG").flatMap(clangEnv => compileProjectWith(projectDir, outDir, doRun, runtimeDir, clangOrDefault(clangEnv)))
+      Sys.getenv("SCUZZ_CLANG").flatMap(clangEnv => compileProjectWith(projectDir, outDir, doRun, 0, runtimeDir, clangOrDefault(clangEnv)))
     )
   )
 
-def compileProjectWith(projectDir: String, outDir: String, doRun: Int, runtimeDir: String, clang: String): IO[Unit] =
-  Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml => compileAfterToml(projectDir, outDir, doRun, runtimeDir, clang, toml, readTomlName(toml)))
+def compileProjectVerify(projectDir: String, outDir: String, doRun: Int): IO[Unit] =
+  Sys.getenv("SCUZZ_RUNTIME").flatMap(rtEnv =>
+    resolveRuntimeEnv(rtEnv, projectDir).flatMap(runtimeDir =>
+      Sys.getenv("SCUZZ_CLANG").flatMap(clangEnv => compileProjectWith(projectDir, outDir, doRun, 1, runtimeDir, clangOrDefault(clangEnv)))
+    )
+  )
 
-def compileAfterToml(projectDir: String, outDir: String, doRun: Int, runtimeDir: String, clang: String, toml: String, name: String): IO[Unit] =
-  loadGraphSources(projectDir, toml).flatMap(texts => compileAfterSources(projectDir, outDir, doRun, runtimeDir, clang, name, hasUiSection(toml), texts))
+def compileProjectWith(projectDir: String, outDir: String, doRun: Int, verify: Int, runtimeDir: String, clang: String): IO[Unit] =
+  Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml => compileAfterToml(projectDir, outDir, doRun, verify, runtimeDir, clang, toml, readTomlName(toml)))
+
+def compileAfterToml(projectDir: String, outDir: String, doRun: Int, verify: Int, runtimeDir: String, clang: String, toml: String, name: String): IO[Unit] =
+  loadGraphBundle(projectDir, toml).flatMap(bundle => compileAfterSources(projectDir, outDir, doRun, verify, runtimeDir, clang, name, hasUiSection(toml), List.head(bundle), List.head(List.tail(bundle))))
 
 def checkProject(projectDir: String): IO[String] =
   Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml =>
-    loadGraphSources(projectDir, toml).flatMap(texts =>
-      mergeSources(texts, emptyProg(), 0).flatMap(prog0 =>
-        for {
-          prog = lowerProg(prog0)
-          ty = typecheckProg(prog)
-        } yield IO.pure(ty)
+    loadGraphBundle(projectDir, toml).flatMap(bundle =>
+      mergeSources(List.head(bundle), emptyProg(), 0).flatMap(prog0 =>
+        prepareVerifyProg(prog0, List.head(List.tail(bundle))).flatMap(prog1 =>
+          for {
+            prog = lowerProg(prog1)
+            ty = typecheckProg(prog)
+          } yield IO.pure(ty)
+        )
       )
     )
   )
@@ -110,45 +251,52 @@ def checkProject(projectDir: String): IO[String] =
 def linkProject(clang: String, ll: String, lib: String, ffi: String, inc: String, embedder: String, mobile: String, exe: String, withUi: Int): IO[Unit] =
   if (withUi == 0) execOk(linkCmdIo(clang, ll, lib, inc, exe)) else execOk(linkCmd(clang, ll, lib, pathJoin(ffi, "build/libsk_capi.a"), inc, pathJoin(ffi, "include"), embedder, mobile, exe))
 
-def compileAfterSources(projectDir: String, outDir: String, doRun: Int, runtimeDir: String, clang: String, name: String, withUi: Int, texts: List): IO[Unit] =
+def compileAfterSources(projectDir: String, outDir: String, doRun: Int, verify: Int, runtimeDir: String, clang: String, name: String, withUi: Int, texts: List, overlays: List): IO[Unit] =
   mergeSources(texts, emptyProg(), 0).flatMap(prog0 =>
-    for {
-      prog = lowerProg(prog0)
-      ty = typecheckProg(prog)
-      ir = emitProgram(prog)
-      ll = pathJoin(outDir, Str.concat(name, ".ll"))
-      exe = pathJoin(outDir, name)
-      lib = pathJoin(runtimeDir, "build/libscuzz_rt.a")
-      ffi = pathJoin(parentDir(runtimeDir), "ffi-skia")
-      inc = pathJoin(runtimeDir, "include")
-      embedder = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-desktop"), "build/libscuzz_embedder.a")
-      mobile = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-mobile"), "build/libscuzz_mobile.a")
-    } yield if (tyIsOk(ty) == 0) IO.fail(tyMsg(ty)) else Fs.mkdirs(outDir).flatMap(_ =>
+    prepareCompileProg(prog0, overlays, verify).flatMap(prog1 =>
+      for {
+        prog = lowerProg(prog1)
+        ty = typecheckProg(prog)
+        ir = emitProgram(prog)
+        ll = pathJoin(outDir, Str.concat(name, ".ll"))
+        exe = pathJoin(outDir, name)
+        lib = pathJoin(runtimeDir, "build/libscuzz_rt.a")
+        ffi = pathJoin(parentDir(runtimeDir), "ffi-skia")
+        inc = pathJoin(runtimeDir, "include")
+        embedder = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-desktop"), "build/libscuzz_embedder.a")
+        mobile = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-mobile"), "build/libscuzz_mobile.a")
+      } yield if (tyIsOk(ty) == 0) IO.fail(tyMsg(ty)) else Fs.mkdirs(outDir).flatMap(_ =>
   Fs.write(ll, ir).flatMap(_ =>
     buildRuntime(runtimeDir, clang).flatMap(_ =>
       linkProject(clang, ll, lib, ffi, inc, embedder, mobile, exe, withUi).flatMap(_ => runIfNeeded(exe, doRun))
     )
   )
 )
+    )
   )
 
-def loadGraphSources(projectDir: String, toml: String): IO[List] =
+def prepareCompileProg(prog0: List, overlays: List, verify: Int): IO[List] =
+  if (verify == 0) IO.pure(prog0) else prepareVerifyProg(prog0, overlays)
+
+def loadGraphBundle(projectDir: String, toml: String): IO[List] =
   Fs.canonicalize(projectDir).flatMap(root =>
-    visitPackage(root, toml, "", List.empty(), List.empty()).flatMap(state => IO.pure(List.head(state)))
+    visitPackage(root, toml, "", List.empty(), List.empty()).flatMap(state => IO.pure(List.cons(List.head(state), List.cons(List.head(List.tail(state)), List.empty()))))
   )
 
 def visitPackage(pkgDir: String, toml: String, viaDep: String, stack: List, done: List): IO[List] =
   Fs.canonicalize(pkgDir).flatMap(canon => visitPackageCanon(canon, toml, viaDep, stack, done))
 
 def visitPackageCanon(canon: String, toml: String, viaDep: String, stack: List, done: List): IO[List] =
-  if (listContainsStr(stack, canon) == 1) IO.fail(str3("dependency cycle: ", joinChain(List.reverse(List.cons(cycleLabel(viaDep, canon), stack)), " -> "), "")) else if (listContainsStr(done, canon) == 1) IO.pure(List.cons(List.empty(), List.cons(done, List.empty()))) else readTomlDeps(toml).flatMap(deps =>
-  visitDeps(canon, deps, List.cons(canon, stack), done, List.empty()).flatMap(depState =>
-    loadPackageTexts(canon).flatMap(texts =>
+  if (listContainsStr(stack, canon) == 1) IO.fail(str3("dependency cycle: ", joinChain(List.reverse(List.cons(cycleLabel(viaDep, canon), stack)), " -> "), "")) else if (listContainsStr(done, canon) == 1) IO.pure(List.cons(List.empty(), List.cons(List.empty(), List.cons(done, List.empty())))) else readTomlDeps(toml).flatMap(deps =>
+  visitDeps(canon, deps, List.cons(canon, stack), done, List.empty(), List.empty()).flatMap(depState =>
+    loadPackageBundle(canon).flatMap(bundle =>
       for {
         depTexts = List.head(depState)
-        depDone = List.head(List.tail(depState))
-        all = listConcat(depTexts, texts)
-      } yield IO.pure(List.cons(all, List.cons(List.cons(canon, depDone), List.empty())))
+        depOvs = List.head(List.tail(depState))
+        depDone = List.head(List.tail(List.tail(depState)))
+        allTexts = listConcat(depTexts, List.head(bundle))
+        allOvs = listConcat(depOvs, List.head(List.tail(bundle)))
+      } yield IO.pure(List.cons(allTexts, List.cons(allOvs, List.cons(List.cons(canon, depDone), List.empty()))))
     )
   )
 )
@@ -156,10 +304,10 @@ def visitPackageCanon(canon: String, toml: String, viaDep: String, stack: List, 
 def cycleLabel(viaDep: String, canon: String): String =
   if (Str.len(viaDep) > 0) viaDep else canon
 
-def visitDeps(pkgDir: String, deps: List, stack: List, done: List, accTexts: List): IO[List] =
-  if (List.isEmpty(deps) == 1) IO.pure(List.cons(accTexts, List.cons(done, List.empty()))) else visitDepOne(pkgDir, List.head(deps), List.tail(deps), stack, done, accTexts)
+def visitDeps(pkgDir: String, deps: List, stack: List, done: List, accTexts: List, accOvs: List): IO[List] =
+  if (List.isEmpty(deps) == 1) IO.pure(List.cons(accTexts, List.cons(accOvs, List.cons(done, List.empty())))) else visitDepOne(pkgDir, List.head(deps), List.tail(deps), stack, done, accTexts, accOvs)
 
-def visitDepOne(pkgDir: String, dep: List, rest: List, stack: List, done: List, accTexts: List): IO[List] =
+def visitDepOne(pkgDir: String, dep: List, rest: List, stack: List, done: List, accTexts: List, accOvs: List): IO[List] =
   for {
     name = depName(dep)
     rel = depPath(dep)
@@ -168,8 +316,9 @@ def visitDepOne(pkgDir: String, dep: List, rest: List, stack: List, done: List, 
   visitPackage(child, childToml, name, stack, done).flatMap(childState =>
     for {
       childTexts = List.head(childState)
-      childDone = List.head(List.tail(childState))
-    } yield visitDeps(pkgDir, rest, stack, childDone, listConcat(accTexts, childTexts))
+      childOvs = List.head(List.tail(childState))
+      childDone = List.head(List.tail(List.tail(childState)))
+    } yield visitDeps(pkgDir, rest, stack, childDone, listConcat(accTexts, childTexts), listConcat(accOvs, childOvs))
   )
 )
 
@@ -178,10 +327,24 @@ def readDepManifest(name: String, child: String): IO[String] =
     IO.fail(str5("dependency `", name, "`: missing scuzz.toml in ", child, "")).flatMap(_ => IO.pure(""))
   )
 
-def loadPackageTexts(pkgDir: String): IO[List] =
+def loadPackageBundle(pkgDir: String): IO[List] =
   for {
     srcDir = pathJoin(pkgDir, "src")
-  } yield Fs.list(srcDir).flatMap(names => readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty())).handleErrorWith(_ =>
-  IO.fail(str3("missing src/ in ", pkgDir, "")).flatMap(_ => IO.pure(List.empty()))
+  } yield Fs.list(srcDir).flatMap(names => loadPackageFromNames(srcDir, names)).handleErrorWith(_ =>
+  IO.fail(str3("missing src/ in ", pkgDir, "")).flatMap(_ => IO.pure(List.cons(List.empty(), List.cons(List.empty(), List.empty()))))
 )
 
+def loadPackageFromNames(srcDir: String, names: List): IO[List] =
+  for {
+    stems = collectLiveStems(names, List.empty())
+    simNames = filterSimNames(names, List.empty())
+    lawNames = filterLawsNames(names, List.empty())
+  } yield validateOverlayStems(stems, listConcat(simNames, lawNames)).flatMap(_ =>
+    readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty()).flatMap(texts =>
+      readOverlayFiles(srcDir, "sim", simNames, List.empty()).flatMap(sims =>
+        readOverlayFiles(srcDir, "laws", lawNames, List.empty()).flatMap(laws =>
+          IO.pure(List.cons(texts, List.cons(listConcat(sims, laws), List.empty())))
+        )
+      )
+    )
+  )

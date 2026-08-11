@@ -75,7 +75,7 @@ Dependency sources are merged into one program with the root (and any transitive
 
 ## Laws, sim, and impurity
 
-Direction (see [vision.md](vision.md#laws-simulation-and-verification)): app correctness is **laws** searched by `scuzz fuzz`, with stem-paired overlays — not example-based unit tests.
+App correctness is **laws** searched by `scuzz fuzz`, with stem-paired overlays — not example-based unit tests (see [vision.md](vision.md#laws-simulation-and-verification)).
 
 ```text
 src/
@@ -85,15 +85,17 @@ src/
 ```
 
 - Prefer sim overlays for app policy (API base URL, a `Backend` value); blessed kits stay one implementation with TestRuntime fakes on the wire
-- Laws are pure; armed only under TestRuntime / fuzz
+- Laws are nullary pure `Bool`/`Int` defs; residual `Law.assert` runs only under `SCUZZ_TESTRT=1` (fuzz)
+- Observation builtins: `Law.signalInt(id)`, `Law.a11yHas(needle)` (signal store + stashed a11y dump)
 - No `src/test` twin trees — only stem-paired `*.scuzz_sim` / `*.scuzz_laws`
+- Example: `examples/counter` + `examples/shared` (`Shared.scuzz_sim` swaps `counterTitle`; `Main.scuzz_laws` checks count / button / sim title)
 
-**Today (until laws land):**
+**Today:**
 
-- `[ui]` packages: `scuzz test` is Headless **structural** goldens (signal store + a11y dump); PNG optional via `--pixels`. Goldens stay a regression face once laws exist.
+- `[ui]` packages: `scuzz test` is Headless **structural** goldens on the **live** graph (signal store + a11y dump); PNG optional via `--pixels`. `scuzz fuzz` compiles the **verify** graph (sim + residual laws).
 - IO packages (no `[ui]`): `scuzz test` compiles and runs under `SCUZZ_TESTRT=1`, requiring exit 0
-- `scuzz check` typechecks without codegen; `--message-format=json` for editors and tooling
-- `scuzz fuzz --iters N` / `scuzz fuzz --exhaust --depth N` on TestRuntime + Headless; `--replay repro.toml` on failure (requires `[ui]`); oracle is still panic/`SzError`
+- `scuzz check` typechecks live + sim twins + laws; `--message-format=json` for editors and tooling
+- `scuzz fuzz --iters N` / `scuzz fuzz --exhaust --depth N` on TestRuntime + Headless; `--replay repro.toml` on failure (requires `[ui]`); oracle is residual laws + panic/`SzError`
 - Deterministic fakes: `TestRuntime` / `SCUZZ_TESTRT=1` for clock/random/FS/network/console in app binaries
 - Put non-determinism behind blessed `IO`; keep View construction pure
 
@@ -103,8 +105,8 @@ src/
 | --- | --- |
 | `examples/hello` | IO println hello |
 | `examples/cli` | `Sys.args` + `Sys.readLine` |
-| `examples/counter` | `Signal.map` + `View.bindText` + button lambda + `Ui.run` + path dep on `shared` |
-| `examples/shared` | Library package (`{ path = "..." }`) with helpers, no `@main` |
+| `examples/counter` | `Signal.map` + `View.bindText` + button lambda + `Ui.run` + path dep on `shared` + laws/sim |
+| `examples/shared` | Library package (`{ path = "..." }`) with helpers + optional `*.scuzz_sim` |
 | `examples/todo` | `Signal.list` + `View.each`, Rename via `setAt`, Fs load/save |
 | `examples/nav` | `showWhen`, multi-page |
 | `examples/live` | Stay-open Window (`Ui.run`; q/Esc) |

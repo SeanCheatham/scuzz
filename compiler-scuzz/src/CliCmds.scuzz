@@ -111,7 +111,7 @@ def maybeRebuild(projectDir: String, lastFp: String, force: Int): IO[String] =
 
 def srcFingerprint(projectDir: String): IO[String] =
   Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml =>
-    loadGraphSources(projectDir, toml).flatMap(texts => fpTexts(texts, toml))
+    loadGraphBundle(projectDir, toml).flatMap(bundle => fpTexts(List.head(bundle), toml))
   )
 
 def fpTexts(texts: List, acc: String): IO[String] =

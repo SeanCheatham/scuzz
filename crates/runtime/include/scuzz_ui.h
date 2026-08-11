@@ -111,6 +111,8 @@ void sz_signal_list_free(SzSignalList *s);
 /* Signal store dump: one "kind[id] = value" line per live signal, in creation
    order (fuzz oracle; caller frees SzString). */
 SzString *sz_signal_dump(void);
+/* Law observation: signal store by creation-order id (TestRuntime / fuzz). */
+int64_t sz_law_signal_int(int64_t id);
 
 /* --- declarative View tree ----------------------------------------------- */
 

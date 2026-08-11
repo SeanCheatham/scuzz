@@ -136,6 +136,15 @@ SzString *sz_signal_dump(void) {
   return out;
 }
 
+int64_t sz_law_signal_int(int64_t id) {
+  SigReg *r;
+  for (r = g_sig_head; r; r = r->next) {
+    if (r->id == (int)id && r->kind == SIG_INT)
+      return sz_signal_int_get((const SzSignalInt *)r->sig);
+  }
+  return 0;
+}
+
 SzSignalInt *sz_signal_int(int64_t initial) {
   SzSignalInt *s = (SzSignalInt *)sz_alloc(sizeof(SzSignalInt));
   s->value = initial;

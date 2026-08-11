@@ -309,6 +309,11 @@ void sz_testrt_stdout_reset(void);
 void sz_testrt_stdout_append(const char *line); /* appends line + '\n' */
 const char *sz_testrt_stdout_cstr(void);
 
+/* Laws — residual checks armed only under SCUZZ_TESTRT=1 */
+void sz_law_stash_a11y(const char *dump);
+int64_t sz_law_a11y_has(SzString *needle);
+SzIo *sz_law_assert(SzString *name, int64_t ok);
+
 /* Entrypoint helper used by @main codegen */
 int sz_runtime_main(SzIo *program);
 int sz_runtime_main_args(SzIo *program, int argc, char **argv);

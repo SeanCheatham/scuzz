@@ -26,7 +26,7 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 | Binary format | Native ELF/Mach-O/PE via LLVM | JVM classfiles / JARs |
 | Dependencies | `scuzz.toml` path/git/versioned artifacts we host | Maven Central / Ivy |
 | Effects | Builtin `IO` / `Resource` / concurrent kit + Clock/Random/Fs/Net/Sys | cats-effect runtime, ZIO, Future-as-default |
-| Test interpreters | TestRuntime fakes (clock/random/FS/net + argv/stdin/println capture); `SCUZZ_TESTRT=1`; stem-paired `*.scuzz_sim` / `*.scuzz_laws` (direction) | Wall-clock-only harnesses; ad-hoc FFI mocks; app-level Mockito / `src/test` unit trees |
+| Test interpreters | TestRuntime fakes (clock/random/FS/net + argv/stdin/println capture); `SCUZZ_TESTRT=1`; stem-paired `*.scuzz_sim` / `*.scuzz_laws` | Wall-clock-only harnesses; ad-hoc FFI mocks; app-level Mockito / `src/test` unit trees |
 | UI | `View` + `Ui` + Skia (`sk_capi`; Impeller deferred) | Swing, JavaFX, Compose Multiplatform, Flutter widgets |
 
 ## Platforms (headless-first)

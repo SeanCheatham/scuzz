@@ -90,7 +90,7 @@ Subset used by compiler sources and bootstrap examples. New features land in Sta
 - No `val` / statement blocks / `var` — expression dialect only.
 - `if` / `match`; literals incl. list `[a,b,c]` and `s"…"`
 - Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
-- Builtins: `Str.*`, `List.*`, Fs (`read` / `write` / `list` / `mkdirs` / `canonicalize`)/Sys (`args` / `readLine` / `exec` / `getenv`)/Clock/Random/Net, `Signal.*` (incl. `Signal.map`), `View.*` (incl. nested `View.column`/`row` children, `View.each`, `View.bindText`), `Ui.run`, Theme/Color
+- Builtins: `Str.*`, `List.*`, Fs (`read` / `write` / `list` / `mkdirs` / `canonicalize`)/Sys (`args` / `readLine` / `exec` / `getenv`)/Clock/Random/Net, `Signal.*` (incl. `Signal.map`), `View.*` (incl. nested `View.column`/`row` children, `View.each`, `View.bindText`), `Ui.run`, Theme/Color, `Law.signalInt` / `Law.a11yHas` / `Law.assert` (residual under TestRuntime)
 - `IO` kit + `.flatMap` / `.handleErrorWith` / `.attempt`; lambdas `_ =>` / `name =>` for taps
 - No macros, no implicits, no HKT beyond `IO`, no null
 
@@ -188,7 +188,7 @@ scuzz fuzz --exhaust --depth N      # bounded systematic search (all scripts of 
 scuzz fuzz --replay repro.toml      # deterministic replay of a recorded failure
 ```
 
-Scripts are a line protocol — `tap <n>` / `text <s>` / `pump <k>` — played by the runtime (`SCUZZ_UI_SCRIPT`) across `pump` boundaries; on exit it writes the signal store + a11y view dump (`SCUZZ_FUZZ_DUMP`). The CLI probes the a11y dump for the typed event surface (buttons in scan order, text fields), generates seeded scripts (Lehmer/MINSTD LCG — the kernel dialect has no bitwise ops) or enumerates a finite alphabet under `--exhaust` (`tap <i>` for each button, `text` / `text a` when a field exists, `pump 1`), and writes `repro.toml` (seed + events) on failure. Exhaustive mode walks lengths `1..N` in stable order so shorter counterexamples win. `fuzz` lives in the Stage-1/2 CLI (not Stage 0); replay plays recorded events verbatim, so it is independent of the generator. **Oracles (direction):** module **laws** first; panic/`SzError` exit still fails; structural dumps aid diagnosis (PNG last). Today’s shipped oracle is still panic/`SzError` until laws land. Requires stable tap order, `pump` as time, no hidden nondeterminism.
+Scripts are a line protocol — `tap <n>` / `text <s>` / `pump <k>` — played by the runtime (`SCUZZ_UI_SCRIPT`) across `pump` boundaries; on exit it writes the signal store + a11y view dump (`SCUZZ_FUZZ_DUMP`). The CLI probes the a11y dump for the typed event surface (buttons in scan order, text fields), generates seeded scripts (Lehmer/MINSTD LCG — the kernel dialect has no bitwise ops) or enumerates a finite alphabet under `--exhaust` (`tap <i>` for each button, `text` / `text a` when a field exists, `pump 1`), and writes `repro.toml` (seed + events) on failure. Exhaustive mode walks lengths `1..N` in stable order so shorter counterexamples win. `fuzz` lives in the Stage-1/2 CLI (not Stage 0); replay plays recorded events verbatim, so it is independent of the generator. **Oracles:** module **laws** first (residual `Law.assert` under `SCUZZ_TESTRT=1`); panic/`SzError` exit still fails; structural dumps aid diagnosis (PNG last). Requires stable tap order, `pump` as time, no hidden nondeterminism.
 
 ### Layout model
 
@@ -196,11 +196,11 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ### UI testing
 
-**Laws + `scuzz fuzz`** are the primary correctness story for `[ui]` apps. Structural goldens (signal store + a11y dump) remain a **regression face** for silent shape drift — few, Headless-only — not a substitute for laws. PNG pixels stay optional (`scuzz test --pixels`). IO packages (no `[ui]`): laws + sim overlays under TestRuntime; until laws land, `scuzz test` stays compile + `SCUZZ_TESTRT=1` exit-0 smoke. Tooling: `scuzz check` (typecheck live + sim + laws) and `--message-format=json`.
+**Laws + `scuzz fuzz`** are the primary correctness story for `[ui]` apps. Structural goldens (signal store + a11y dump) remain a **regression face** for silent shape drift — few, Headless-only, live graph — not a substitute for laws. PNG pixels stay optional (`scuzz test --pixels`). IO packages (no `[ui]`): laws + sim overlays under TestRuntime when present; otherwise `scuzz test` stays compile + `SCUZZ_TESTRT=1` exit-0 smoke. Tooling: `scuzz check` (typecheck live + sim + laws) and `--message-format=json`.
 
 ## Open work
 
-Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Deeper UI (Flutter-style constraints when the widget set grows) and Windows desktop embedder stay deferred — pick the next vertical slice from there when needed.
+Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Stem-paired laws/sim are in; next vertical slices from gaps (desktop keyboard, spans, then language/runtime unknowns). Deeper UI (Flutter-style constraints when the widget set grows) and Windows desktop embedder stay deferred.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
 
