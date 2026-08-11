@@ -39,6 +39,11 @@ int sz_embedder_available(void) {
   return 1;
 }
 
+double sz_embedder_display_scale(void) {
+  /* X11 path stays 1× (CI / typical Linux). HiDPI X11 later. */
+  return 1.0;
+}
+
 int sz_embedder_alive(void) {
   if (g_user_quit)
     return 0;
@@ -155,10 +160,16 @@ static int ensure_window(const char *title, int width, int height) {
   return 1;
 }
 
-int sz_embedder_present(const char *title, int width, int height,
-                        const uint8_t *rgba, size_t nbytes) {
+int sz_embedder_present(const char *title, int point_w, int point_h,
+                        int pixel_w, int pixel_h, const uint8_t *rgba,
+                        size_t nbytes) {
   size_t need;
   int x, y;
+  int width = pixel_w;
+  int height = pixel_h;
+
+  (void)point_w;
+  (void)point_h;
 
   if (g_user_quit)
     return 0;

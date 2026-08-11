@@ -16,15 +16,21 @@ extern "C" {
 /* Nonzero if a display can be opened (DISPLAY+X11, or Cocoa GUI session). */
 int sz_embedder_available(void);
 
+/* Backing scale for the primary display (1.0 if unknown / unavailable).
+ * Retina macOS typically returns 2.0. */
+double sz_embedder_display_scale(void);
+
 /* Nonzero while the desktop window session should keep pumping.
  * Becomes 0 after the user quits (q / Escape / window close).
  * Weak stub returns 0 (one-shot demos). */
 int sz_embedder_alive(void);
 
 /* Present an RGBA8888 frame in a window. Blocks briefly to process events.
- * Returns 1 on success, 0 if embedder unavailable / failed. */
-int sz_embedder_present(const char *title, int width, int height,
-                        const uint8_t *rgba, size_t nbytes);
+ * point_w/point_h are the window size in points; pixel_w/pixel_h are the
+ * rgba dimensions (point * backing scale). Returns 1 on success. */
+int sz_embedder_present(const char *title, int point_w, int point_h,
+                        int pixel_w, int pixel_h, const uint8_t *rgba,
+                        size_t nbytes);
 
 /* Destroy the window / display connection. */
 void sz_embedder_shutdown(void);

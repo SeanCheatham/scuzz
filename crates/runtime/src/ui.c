@@ -10,13 +10,17 @@
 
 /* Weak stubs — strong defs from embedder-desktop override when linked. */
 __attribute__((weak)) int sz_embedder_available(void) { return 0; }
+__attribute__((weak)) double sz_embedder_display_scale(void) { return 1.0; }
 __attribute__((weak)) int sz_embedder_alive(void) { return 0; }
-__attribute__((weak)) int sz_embedder_present(const char *title, int width,
-                                              int height, const uint8_t *rgba,
+__attribute__((weak)) int sz_embedder_present(const char *title, int point_w,
+                                              int point_h, int pixel_w,
+                                              int pixel_h, const uint8_t *rgba,
                                               size_t nbytes) {
   (void)title;
-  (void)width;
-  (void)height;
+  (void)point_w;
+  (void)point_h;
+  (void)pixel_w;
+  (void)pixel_h;
   (void)rgba;
   (void)nbytes;
   return 0;
@@ -121,7 +125,7 @@ static void sync_keyboard(SzUiSession *session) {
 
 SzUiSession *sz_ui_mount(const SzUiConfig *cfg, SzView *root) {
   SzUiSession *s;
-  int w, h;
+  int w, h, pw, ph;
   if (!cfg || !root)
     return NULL;
   if (cfg->width <= 0 || cfg->height <= 0)
@@ -135,11 +139,23 @@ SzUiSession *sz_ui_mount(const SzUiConfig *cfg, SzView *root) {
   s->cfg = *cfg;
   if (s->cfg.scale <= 0.0)
     s->cfg.scale = 1.0;
+  /* Window: prefer OS backing scale so Retina text stays sharp. */
+  if (s->cfg.kind == SZ_UI_RUNTIME_WINDOW && sz_embedder_available()) {
+    double ds = sz_embedder_display_scale();
+    if (ds > s->cfg.scale)
+      s->cfg.scale = ds;
+  }
   s->root = root;
   s->owns_view = 0;
   s->theme = sz_theme_default();
   s->lifecycle = SZ_LIFECYCLE_RESUME;
-  s->surface = sk_surface_make_raster_n32_premul(w, h);
+  pw = (int)(w * s->cfg.scale + 0.5);
+  ph = (int)(h * s->cfg.scale + 0.5);
+  if (pw < 1)
+    pw = 1;
+  if (ph < 1)
+    ph = 1;
+  s->surface = sk_surface_make_raster_n32_premul(pw, ph);
   if (!s->surface) {
     sz_free(s);
     return NULL;
@@ -148,7 +164,9 @@ SzUiSession *sz_ui_mount(const SzUiConfig *cfg, SzView *root) {
   s->dirty = 1;
   if (cfg->kind == SZ_UI_RUNTIME_WINDOW) {
     if (sz_embedder_available()) {
-      fprintf(stderr, "scuzz: UiRuntime.Window mounted (desktop embedder)\n");
+      fprintf(stderr,
+              "scuzz: UiRuntime.Window mounted (desktop embedder, scale=%.2f)\n",
+              s->cfg.scale);
     } else {
       fprintf(stderr,
               "scuzz: UiRuntime.Window mounted (offscreen; no desktop embedder)\n");
@@ -266,6 +284,10 @@ int sz_ui_pump_sync(SzUiSession *session) {
   size_t nbytes = 0;
   const uint8_t *rgba;
   int64_t now_ms;
+  int pw, ph;
+  float scale;
+  SzTheme paint_theme;
+  const SzTheme *theme;
   if (!session)
     return 0;
   if (session->lifecycle == SZ_LIFECYCLE_STOP)
@@ -285,16 +307,36 @@ int sz_ui_pump_sync(SzUiSession *session) {
   session->last_pump_ms = now_ms;
   /* UI-thread hop: apply signal writes posted from completed IO. */
   sz_ui_bridge_flush(session);
-  if (!sz_view_paint(session->root, session->canvas, session->cfg.width,
-                     session->cfg.height, session->theme))
+
+  scale = (float)session->cfg.scale;
+  if (scale < 0.01f)
+    scale = 1.f;
+  pw = sk_surface_width(session->surface);
+  ph = sk_surface_height(session->surface);
+  theme = session->theme;
+  if (scale != 1.f) {
+    paint_theme = *session->theme;
+    paint_theme.font_px *= scale;
+    paint_theme.pad *= scale;
+    paint_theme.gap *= scale;
+    paint_theme.control_h *= scale;
+    paint_theme.radius *= scale;
+    theme = &paint_theme;
+  }
+  /* Paint in device pixels; layout is restored to logical points afterward
+   * so hit-testing / inject stay in the same space as embedder events. */
+  if (!sz_view_paint(session->root, session->canvas, pw, ph, theme))
     return 0;
+  if (scale != 1.f)
+    sz_view_layout(session->root, (float)session->cfg.width,
+                   (float)session->cfg.height, session->theme);
   session->dirty = 0;
   /* Window peer: present to OS surface when embedder is available. */
   if (session->cfg.kind == SZ_UI_RUNTIME_WINDOW && sz_embedder_available()) {
     rgba = sk_surface_peek_pixels(session->surface, &nbytes);
     if (rgba) {
       sz_embedder_present(session->cfg.title, session->cfg.width,
-                          session->cfg.height, rgba, nbytes);
+                          session->cfg.height, pw, ph, rgba, nbytes);
     }
   }
   /* Mobile peer: present when resumed and shell is available. */
@@ -398,8 +440,15 @@ int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event) {
     sk_surface_unref(session->surface);
     session->cfg.width = event->width;
     session->cfg.height = event->height;
-    session->surface =
-        sk_surface_make_raster_n32_premul(event->width, event->height);
+    {
+      int pw = (int)(event->width * session->cfg.scale + 0.5);
+      int ph = (int)(event->height * session->cfg.scale + 0.5);
+      if (pw < 1)
+        pw = 1;
+      if (ph < 1)
+        ph = 1;
+      session->surface = sk_surface_make_raster_n32_premul(pw, ph);
+    }
     if (!session->surface)
       return 0;
     session->canvas = sk_surface_get_canvas(session->surface);

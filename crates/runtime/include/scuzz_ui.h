@@ -20,7 +20,7 @@ typedef struct SzUiConfig {
   SzUiRuntimeKind kind;
   int width;
   int height;
-  double scale;      /* recorded; raster uses logical pixels */
+  double scale; /* Window: display backing scale; Headless: from SCUZZ_UI_SCALE */
   const char *title; /* Window / Mobile; may be NULL */
 } SzUiConfig;
 

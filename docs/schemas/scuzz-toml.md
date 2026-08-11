@@ -67,7 +67,7 @@ Optional. Used by `scuzz run` / `test` / `package`.
 | --- | --- | --- |
 | `default_runtime` | `"headless"` \| `"window"` \| `"mobile"` | `scuzz run` default; `--headless` forces Headless |
 | `headless_size` | `[w, h]` | Logical pixels for Headless / goldens / Mobile host |
-| `headless_scale` | float | Recorded on session; raster uses logical size |
+| `headless_scale` | float | Headless session scale (default 1). Window uses OS backing scale when higher. |
 | `tap_button` | int (optional) | 0-based button index for `_after_tap` goldens (`SCUZZ_UI_TAP_N`) |
 | `tap_text` | string (optional) | Text injected before the scripted tap (`SCUZZ_UI_TEXT`) — used by TextField apps like Todo |
 | `bundle_id` | string | Android package / iOS `CFBundleIdentifier` for `scuzz package` |

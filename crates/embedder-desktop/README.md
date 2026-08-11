@@ -19,4 +19,6 @@ Linked by Stage 0 / Stage 1 / Stage 2 when present.
 - Press `q` / Escape to close during `present`
 - AppKit runs on the process main thread (`dispatch_sync` from the IO worker;
   `sz_runtime_main_args` parks main in the CFRunLoop)
+- Retina: session paints at `backingScaleFactor` and presents a point-sized
+  `NSImage` with a matching pixel buffer (no upsample blur)
 - Link: `-framework Cocoa -lobjc` (apps also need `-framework CoreFoundation`)

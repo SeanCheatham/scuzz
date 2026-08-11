@@ -45,6 +45,20 @@ static void on_main(void (^block)(void)) {
   }
 }
 
+double sz_embedder_display_scale(void) {
+  __block double scale = 1.0;
+  if (!sz_embedder_available())
+    return 1.0;
+  on_main(^{
+    NSScreen *screen = [NSScreen mainScreen];
+    if (screen)
+      scale = (double)[screen backingScaleFactor];
+    if (scale < 1.0)
+      scale = 1.0;
+  });
+  return scale;
+}
+
 static const char *stash_text(const char *s) {
   size_t n;
   char *dst;
@@ -161,17 +175,18 @@ static int ensure_window_on_main(const char *title, int width, int height) {
   return 1;
 }
 
-int sz_embedder_present(const char *title, int width, int height,
-                        const uint8_t *rgba, size_t nbytes) {
+int sz_embedder_present(const char *title, int point_w, int point_h,
+                        int pixel_w, int pixel_h, const uint8_t *rgba,
+                        size_t nbytes) {
   size_t need;
   __block int ok = 0;
   __block int quit = 0;
 
   if (g_user_quit)
     return 0;
-  if (!rgba || width <= 0 || height <= 0)
+  if (!rgba || point_w <= 0 || point_h <= 0 || pixel_w <= 0 || pixel_h <= 0)
     return 0;
-  need = (size_t)width * (size_t)height * 4;
+  need = (size_t)pixel_w * (size_t)pixel_h * 4;
   if (nbytes < need)
     return 0;
   if (!sz_embedder_available())
@@ -179,29 +194,32 @@ int sz_embedder_present(const char *title, int width, int height,
 
   on_main(^{
     @autoreleasepool {
-      if (!ensure_window_on_main(title, width, height))
+      if (!ensure_window_on_main(title, point_w, point_h))
         return;
 
       NSBitmapImageRep *rep = [[NSBitmapImageRep alloc]
           initWithBitmapDataPlanes:NULL
-                        pixelsWide:width
-                        pixelsHigh:height
+                        pixelsWide:pixel_w
+                        pixelsHigh:pixel_h
                      bitsPerSample:8
                    samplesPerPixel:4
                           hasAlpha:YES
                           isPlanar:NO
                     colorSpaceName:NSDeviceRGBColorSpace
-                       bytesPerRow:(NSInteger)width * 4
+                       bytesPerRow:(NSInteger)pixel_w * 4
                       bitsPerPixel:32];
       if (!rep || ![rep bitmapData]) {
         fprintf(stderr, "scuzz embedder: bitmap alloc failed\n");
         return;
       }
       memcpy([rep bitmapData], rgba, need);
+      /* Point size + pixel buffer → sharp Retina blit (no stretch upsample). */
+      [rep setSize:NSMakeSize((CGFloat)point_w, (CGFloat)point_h)];
 
       NSImage *image = [[NSImage alloc]
-          initWithSize:NSMakeSize((CGFloat)width, (CGFloat)height)];
+          initWithSize:NSMakeSize((CGFloat)point_w, (CGFloat)point_h)];
       [image addRepresentation:rep];
+      [g_view setImageScaling:NSImageScaleAxesIndependently];
       [g_view setImage:image];
       [g_view setNeedsDisplay:YES];
       [g_win displayIfNeeded];
