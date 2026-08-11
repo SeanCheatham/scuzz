@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Dual-boot gate: Stage-0 → Stage-1 → Stage-2, plus a Stage-3 fixpoint.
-# Each stage must smoke examples/hello + examples/adt, pass the Headless
+# Each stage must smoke examples/hello + examples/adt + examples/modules, pass the Headless
 # goldens (counter/todo/nav), smoke fuzz on examples/todo, smoke
 # fuzz --exhaust --depth 1 on examples/counter, and agree with Stage 0 on
 # fmt --check for the compiler sources. Stage 2 must re-emit byte-identical
@@ -26,6 +26,11 @@ stage_checks() {
   echo "$adt_out" | grep -q "adt:red"
   echo "$adt_out" | grep -q "adt:some:42"
   echo "$adt_out" | grep -q "adt:pair:7:ok"
+
+  echo "==> $stage runs examples/modules"
+  modules_out="$("$bin" run examples/modules)"
+  echo "$modules_out"
+  echo "$modules_out" | grep -q "ab"
 
   echo "==> $stage golden tests (counter/todo/nav)"
   "$bin" test examples/counter
