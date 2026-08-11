@@ -8,6 +8,10 @@
 #include <time.h>
 #include <unistd.h>
 
+#if defined(__APPLE__)
+#include <CoreFoundation/CoreFoundation.h>
+#endif
+
 /* --- panic / alloc ------------------------------------------------------- */
 
 /* Header before user pointer: [size_t nbytes][user bytes...] */
@@ -1042,6 +1046,11 @@ typedef struct {
   int rc;
 } SzMainArgs;
 
+#if defined(__APPLE__)
+/* Worker finished — main thread may leave the CFRunLoop park. */
+static volatile int g_sz_main_worker_done;
+#endif
+
 static void *sz_runtime_main_worker(void *arg) {
   SzMainArgs *a = (SzMainArgs *)arg;
   if (a->argc > 0 && a->argv)
@@ -1058,9 +1067,14 @@ static void *sz_runtime_main_worker(void *arg) {
     if (r.error)
       sz_error_free(r.error);
     a->rc = 1;
-    return NULL;
+  } else {
+    a->rc = 0;
   }
-  a->rc = 0;
+#if defined(__APPLE__)
+  g_sz_main_worker_done = 1;
+  /* Wake the main CFRunLoop so it notices the done flag promptly. */
+  CFRunLoopStop(CFRunLoopGetMain());
+#endif
   return NULL;
 }
 
@@ -1089,12 +1103,23 @@ int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
     sz_runtime_main_worker(&args);
     return args.rc;
   }
+#if defined(__APPLE__)
+  g_sz_main_worker_done = 0;
+#endif
   perr = pthread_create(&thr, &attr, sz_runtime_main_worker, &args);
   pthread_attr_destroy(&attr);
   if (perr != 0) {
     sz_runtime_main_worker(&args);
     return args.rc;
   }
+#if defined(__APPLE__)
+  /* Keep the process main thread in the CFRunLoop so AppKit work (NSWindow)
+   * dispatched from the worker can run. A plain pthread_join would deadlock
+   * with dispatch_sync to the main queue. */
+  while (!g_sz_main_worker_done) {
+    CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, true);
+  }
+#endif
   perr = pthread_join(thr, NULL);
   if (perr != 0)
     sz_panic("pthread_join failed");

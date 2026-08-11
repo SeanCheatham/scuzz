@@ -30,7 +30,9 @@ jobs:
         run: make -C crates/runtime test-asan CC=clang
 
       - name: ffi-skia tests
-        run: make -C crates/ffi-skia test CC=clang
+        run: |
+          make -C crates/ffi-skia test CC=clang
+          grep -qx skia crates/ffi-skia/build/sk_capi_backend
 
       - name: Embedder libs
         run: |
@@ -92,6 +94,8 @@ jobs:
           test -f "dist/scuzz-${TRIPLE}.tar.gz"
           test -x "dist/scuzz-${TRIPLE}/bin/scuzz"
           grep -q '^stage=2$' "dist/scuzz-${TRIPLE}/VERSION"
+          SKIA_TRIPLE="$(./scripts/skia_triple.sh)"
+          test -f "dist/scuzz-${TRIPLE}/third_party/skia/prebuilt/${SKIA_TRIPLE}/libsk_capi.a"
           PREFIX=/tmp/scuzz-prefix
           rm -rf "$PREFIX"
           RELEASE_TGZ="$PWD/dist/scuzz-${TRIPLE}.tar.gz" PREFIX="$PREFIX" ./scripts/install.sh
@@ -102,6 +106,7 @@ jobs:
           scuzz new --ui --path /tmp scuzz-release-app
           scuzz test /tmp/scuzz-release-app
           test -f /tmp/scuzz-release-app/goldens/scuzz-release-app.dump
+          grep -qx skia "$PREFIX/share/scuzz/crates/ffi-skia/build/sk_capi_backend"
           scuzz run --headless /tmp/scuzz-release-app
           test -f /tmp/scuzz-release-app/build/snapshot.png
           # Installed Stage-2 CLI is self-sufficient: rebuild the compiler without Rust.
@@ -230,25 +235,37 @@ jobs:
       - name: Install Rust (stable via rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Homebrew Skia link deps
+        run: brew install brotli bzip2
+
       - name: Runtime + UI tests
-        run: make -C crates/runtime test CC=clang
+        run: |
+          export LIBRARY_PATH="$(brew --prefix)/lib:$(brew --prefix bzip2)/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+          make -C crates/runtime test CC=clang
 
       - name: Build CLI + embedders
         run: |
+          export LIBRARY_PATH="$(brew --prefix)/lib:$(brew --prefix bzip2)/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
           make -C crates/ffi-skia lib CC=clang
+          grep -qx skia crates/ffi-skia/build/sk_capi_backend
           make -C crates/embedder-desktop lib CC=clang
           make -C crates/embedder-mobile lib CC=clang
           cargo build -p scuzz
 
       - name: Self-host dual-boot (default stack)
-        run: ./scripts/selfhost.sh
+        run: |
+          export LIBRARY_PATH="$(brew --prefix)/lib:$(brew --prefix bzip2)/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+          ./scripts/selfhost.sh
 
       - name: Package Stage-2 release + install smoke
         run: |
+          export LIBRARY_PATH="$(brew --prefix)/lib:$(brew --prefix bzip2)/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
           TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
           SCUZZ_BOOTSTRAP=/tmp/stage1-scuzz ./scripts/package_release.sh
           test -f "dist/scuzz-${TRIPLE}.tar.gz"
           grep -q '^stage=2$' "dist/scuzz-${TRIPLE}/VERSION"
+          SKIA_TRIPLE="$(./scripts/skia_triple.sh)"
+          test -f "dist/scuzz-${TRIPLE}/third_party/skia/prebuilt/${SKIA_TRIPLE}/libsk_capi.a"
           PREFIX=/tmp/scuzz-prefix
           rm -rf "$PREFIX"
           RELEASE_TGZ="$PWD/dist/scuzz-${TRIPLE}.tar.gz" PREFIX="$PREFIX" ./scripts/install.sh
@@ -257,6 +274,7 @@ jobs:
           rm -rf /tmp/scuzz-release-app
           scuzz new --ui --path /tmp scuzz-release-app
           scuzz test /tmp/scuzz-release-app
+          grep -qx skia "$PREFIX/share/scuzz/crates/ffi-skia/build/sk_capi_backend"
           scuzz run --headless /tmp/scuzz-release-app
 
       - name: Upload Stage-2 release artifact

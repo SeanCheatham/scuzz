@@ -57,7 +57,7 @@ libc `malloc`/`free` via `sz_alloc` / `sz_free`. No moving collector yet. Clear 
 
 ### Skia
 
-No vendored Skia tree. Thin `sk_capi` (measure + draw) with CPU `sk_sw` as the zero-dep Headless CI default. When `third_party/skia/prebuilt/<triple>/libsk_capi.a` is present (via `scripts/fetch_skia.sh` / `SCUZZ_SKIA_URL` or `third_party/skia/PIN`), the Makefile links that real Skia CPU backend instead. As-needed builds: `.github/workflows/skia-cpu.yml` + `scripts/build_skia_prebuilt.sh` (Linux x86_64 + macOS arm64). `PIN` uses a `{triple}` URL template so `package_release.sh` fetches the host-matching asset. Impeller deferred (GPU presenters later; must not change `Ui` session or logical goldens). Callers depend only on `sk_capi.h`.
+No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** is the pinned Skia CPU prebuilt (`third_party/skia/PIN` → `scripts/fetch_skia.sh` / `SCUZZ_SKIA_URL`), linked when `third_party/skia/prebuilt/<triple>/libsk_capi.a` is present — fetch is fail-closed for supported triples. In-tree `sk_sw` remains an explicit opt-out (`SCUZZ_SKIA=sk_sw`) for offline/exotic hosts. As-needed rebuilds of the pin: `.github/workflows/skia-cpu.yml` + `scripts/build_skia_prebuilt.sh` (Linux x86_64 + macOS arm64). `PIN` uses a `{triple}` URL template so `package_release.sh` fetches the host-matching asset. Impeller deferred (GPU presenters later; must not change `Ui` session or logical goldens). Callers depend only on `sk_capi.h`.
 
 ### IO errors
 
@@ -200,7 +200,7 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ## Open work
 
-Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: compiler IR onto payload ADTs (in-repo, large), device Mobile (blocked on NDK/Xcode), GPU presenters. Real Skia text is closed (measure API + dual-backend + as-needed prebuilt workflow; CI default remains `sk_sw`). Residuals and deferred work live in `gaps.md`. IME can follow real text metrics.
+Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: compiler IR onto payload ADTs (in-repo, large), device Mobile (blocked on NDK/Xcode), GPU presenters. Real Skia text is closed (measure API + dual-backend + pinned prebuilt as the default UI path; `SCUZZ_SKIA=sk_sw` opt-out). Residuals and deferred work live in `gaps.md`. IME can follow real text metrics.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
 
@@ -215,7 +215,7 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-onl
 | Laws become brittle dump goldens | Laws talk to named module/signal surface; strict sim/live pairing in `check` |
 | Sim becomes Mockito | Only top-level same-name overlays; no stubbing pure `View`/`Signal`; kits stay TestRuntime |
 | “Almost Scala” confusion | Explicit non-goals; language direction above; [guide.md](guide.md) |
-| Skia weight | in-tree `sk_sw` default; as-needed prebuilt fetch |
+| Skia weight | pinned CPU prebuilt default; `sk_sw` opt-out (`SCUZZ_SKIA=sk_sw`) |
 | Window-only features | Headless peer rule |
 | Diluting Flutter-shaped focus | UI stays the v0 bar; IO is substrate + first-class packaging without a fourth peer |
 | GC vs frame budget | `pump` boundary; measure |

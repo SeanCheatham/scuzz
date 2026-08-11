@@ -1,5 +1,6 @@
-# Pinned sk_capi Skia CPU prebuilt (as-needed skia-cpu-vN Release assets).
-# package_release.sh / fetch_skia.sh fetch when url= is set.
+# Pinned sk_capi Skia CPU prebuilt (default UI backend).
+# package_release.sh / fetch_skia.sh / ffi-skia Makefile fetch when url= is set.
+# Opt out of Skia with SCUZZ_SKIA=sk_sw (in-tree sk_sw).
 #
 # Format: key=value lines
 #   skia_branch=…   milestone used to build the assets

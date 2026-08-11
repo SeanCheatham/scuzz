@@ -8,50 +8,59 @@ INCLUDES := -Iinclude -Isrc
 SRC := src/sk_sw.c src/png_enc.c
 OBJ := $(SRC:src/%.c=build/%.o)
 
-.PHONY: all clean test lib
+.PHONY: all clean test lib lib-skia lib-sk-sw ensure-prebuilt
 
 all: lib
 
 build:
 	mkdir -p build
 
-# Prefer a fetched/real Skia prebuilt when present; otherwise build sk_sw.
-ifeq ($(wildcard $(PREBUILT_LIB)),)
+# Default: pinned Skia prebuilt (fetch if needed). Opt out with SCUZZ_SKIA=sk_sw.
+lib: ensure-prebuilt
+	@if [ "$${SCUZZ_SKIA:-}" = "sk_sw" ]; then \
+	  $(MAKE) lib-sk-sw; \
+	elif [ -f "$(PREBUILT_LIB)" ]; then \
+	  $(MAKE) lib-skia; \
+	else \
+	  echo "ffi-skia: missing $(PREBUILT_LIB) (set SCUZZ_SKIA=sk_sw to use in-tree sk_sw)" >&2; \
+	  exit 1; \
+	fi
+
+ensure-prebuilt:
+	@if [ "$${SCUZZ_SKIA:-}" = "sk_sw" ]; then \
+	  echo "ffi-skia: SCUZZ_SKIA=sk_sw — in-tree software backend"; \
+	else \
+	  "$(ROOT)/scripts/fetch_skia.sh"; \
+	fi
 
 build/%.o: src/%.c include/sk_capi.h src/png_enc.h | build
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
-lib: build/libsk_capi.a build/sk_capi_backend
+lib-sk-sw: $(OBJ) | build
+	ar rcs build/libsk_capi.a $(OBJ)
+	echo sk_sw > build/sk_capi_backend
 
-build/libsk_capi.a: $(OBJ)
-	ar rcs $@ $(OBJ)
-
-build/sk_capi_backend: | build
-	echo sk_sw > $@
-
-else
-
-lib: build/libsk_capi.a build/sk_capi_backend
-
-build/libsk_capi.a: $(PREBUILT_LIB) | build
-	cp -f $(PREBUILT_LIB) $@
+lib-skia: | build
+	@test -f "$(PREBUILT_LIB)"
+	cp -f "$(PREBUILT_LIB)" build/libsk_capi.a
 	# Optional companion archives from the same prebuilt dir (not named libsk_capi.a).
-	@for f in $(PREBUILT_DIR)/*.a; do \
+	@for f in "$(PREBUILT_DIR)"/*.a; do \
+	  [ -e "$$f" ] || continue; \
 	  b=$$(basename "$$f"); \
 	  if [ "$$b" != "libsk_capi.a" ]; then cp -f "$$f" "build/$$b"; fi; \
 	done
+	echo skia > build/sk_capi_backend
 
-build/sk_capi_backend: $(PREBUILT_LIB) | build
-	echo skia > $@
-
-endif
-
-build/test_skia: tests/test_skia.c build/libsk_capi.a | build
+build/test_skia: tests/test_skia.c lib
 	@extra=""; \
 	if [ -f build/sk_capi_backend ] && grep -qx skia build/sk_capi_backend; then \
-	  extra="-lz -lbz2 -lbrotlidec -lbrotlicommon"; \
+	  if [ "$$(uname -s)" = Darwin ]; then \
+	    extra="-lc++ -lm -lz -lbz2 -lbrotlidec -lbrotlicommon -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon"; \
+	  else \
+	    extra="-lstdc++ -lm -lz -lbz2 -lbrotlidec -lbrotlicommon"; \
+	  fi; \
 	fi; \
-	$(CC) $(CFLAGS) $(INCLUDES) tests/test_skia.c -Lbuild -lsk_capi -lstdc++ -lm -lpthread $$extra -o $@
+	$(CC) $(CFLAGS) $(INCLUDES) tests/test_skia.c -Lbuild -lsk_capi $$extra -lpthread -o $@
 
 test: build/test_skia
 	./build/test_skia

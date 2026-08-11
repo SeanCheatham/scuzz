@@ -79,12 +79,10 @@ jobs:
           generate_release_notes: false
           body: |
             Scuzz `sk_capi` CPU prebuilts (`x86_64-unknown-linux-gnu`, `aarch64-apple-darwin`).
-            Install with:
-            ```
-            SCUZZ_SKIA_URL=<asset-url> ./scripts/fetch_skia.sh
-            ```
-            Or pin a `{triple}` template in `third_party/skia/PIN`:
+            Default UI path: pin `url=` in `third_party/skia/PIN` (or set `SCUZZ_SKIA_URL`);
+            `fetch_skia.sh` / `ffi-skia` / `package_release.sh` fetch the host triple.
+            Opt out of Skia with `SCUZZ_SKIA=sk_sw`.
             ```
             url=https://github.com/<owner>/<repo>/releases/download/<tag>/skia-{triple}-cpu.tar.gz
+            ./scripts/fetch_skia.sh
             ```
-            `fetch_skia.sh` / `package_release.sh` substitute the host triple.

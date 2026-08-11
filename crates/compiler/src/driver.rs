@@ -130,13 +130,18 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
     let mut link = Command::new(&opts.clang);
     link.arg(&ll_path).arg(&lib).arg(format!("-I{}", include.display()));
 
+    // macOS: runtime parks main in CFRunLoop so AppKit can hop from the worker.
+    if cfg!(target_os = "macos") {
+        link.arg("-framework").arg("CoreFoundation");
+    }
+
     if with_ui {
         let ffi_skia_dir = opts
             .runtime_dir
             .parent()
             .map(|p| p.join("ffi-skia"))
             .unwrap_or_else(|| PathBuf::from("crates/ffi-skia"));
-        // Ensure libsk_capi.a exists (sk_sw or copied prebuilt).
+        // Ensure libsk_capi.a exists (pinned Skia by default; SCUZZ_SKIA=sk_sw opts out).
         let _ = Command::new("make")
             .arg("-C")
             .arg(&ffi_skia_dir)
@@ -161,6 +166,18 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
             .unwrap_or(false);
         if is_skia {
             link.arg("-lz").arg("-lbz2").arg("-lbrotlidec").arg("-lbrotlicommon");
+            if cfg!(target_os = "macos") {
+                // Residual CoreText / Carbon symbols in the Darwin Skia fat archive.
+                for fw in [
+                    "CoreFoundation",
+                    "CoreGraphics",
+                    "CoreText",
+                    "Foundation",
+                    "Carbon",
+                ] {
+                    link.arg("-framework").arg(fw);
+                }
+            }
         }
 
         // Optional companion archives copied next to libsk_capi.a by ffi-skia Makefile.

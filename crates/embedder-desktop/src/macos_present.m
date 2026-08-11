@@ -3,6 +3,7 @@
 #import <Cocoa/Cocoa.h>
 #import <CoreGraphics/CoreGraphics.h>
 
+#include <dispatch/dispatch.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -31,6 +32,17 @@ int sz_embedder_available(void) {
 
 int sz_embedder_alive(void) {
   return !g_user_quit && sz_embedder_available();
+}
+
+/* AppKit must run on the process main thread. The Scuzz IO runtime often
+ * executes on a large-stack worker; hop via the main queue (main parks in
+ * CFRunLoop — see sz_runtime_main_args). */
+static void on_main(void (^block)(void)) {
+  if ([NSThread isMainThread]) {
+    block();
+  } else {
+    dispatch_sync(dispatch_get_main_queue(), block);
+  }
 }
 
 static const char *stash_text(const char *s) {
@@ -93,56 +105,67 @@ static void ensure_app(void) {
   g_app_ready = 1;
 }
 
+static void shutdown_on_main(void) {
+  if (g_win) {
+    [g_win orderOut:nil];
+    [g_win close];
+    g_win = nil;
+  }
+  g_view = nil;
+  g_ready = 0;
+  g_w = g_h = 0;
+  g_q_head = g_q_tail = 0;
+}
+
 static void mark_user_quit(void) {
   g_user_quit = 1;
   sz_embedder_shutdown();
 }
 
-static int ensure_window(const char *title, int width, int height) {
-  @autoreleasepool {
-    if (g_ready && g_w == width && g_h == height)
-      return 1;
-
-    sz_embedder_shutdown();
-    g_user_quit = 0;
-    ensure_app();
-
-    NSRect rect = NSMakeRect(100, 100, (CGFloat)width, (CGFloat)height);
-    NSUInteger style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-                       NSWindowStyleMaskMiniaturizable;
-    g_win = [[NSWindow alloc] initWithContentRect:rect
-                                        styleMask:style
-                                          backing:NSBackingStoreBuffered
-                                            defer:NO];
-    if (!g_win) {
-      fprintf(stderr, "scuzz embedder: cannot create NSWindow\n");
-      return 0;
-    }
-
-    NSString *nsTitle =
-        title ? [NSString stringWithUTF8String:title] : @"Scuzz Lang";
-    [g_win setTitle:nsTitle];
-    [g_win setReleasedWhenClosed:NO];
-
-    g_view = [[NSImageView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
-    [g_view setImageScaling:NSImageScaleAxesIndependently];
-    [g_view setAnimates:NO];
-    [g_win setContentView:g_view];
-    [g_win makeKeyAndOrderFront:nil];
-    [NSApp activateIgnoringOtherApps:YES];
-
-    g_w = width;
-    g_h = height;
-    g_ready = 1;
-    fprintf(stderr, "scuzz embedder: Cocoa window %dx%d\n", width, height);
+static int ensure_window_on_main(const char *title, int width, int height) {
+  if (g_ready && g_w == width && g_h == height)
     return 1;
+
+  shutdown_on_main();
+  g_user_quit = 0;
+  ensure_app();
+
+  NSRect rect = NSMakeRect(100, 100, (CGFloat)width, (CGFloat)height);
+  NSUInteger style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
+                     NSWindowStyleMaskMiniaturizable;
+  g_win = [[NSWindow alloc] initWithContentRect:rect
+                                      styleMask:style
+                                        backing:NSBackingStoreBuffered
+                                          defer:NO];
+  if (!g_win) {
+    fprintf(stderr, "scuzz embedder: cannot create NSWindow\n");
+    return 0;
   }
+
+  NSString *nsTitle =
+      title ? [NSString stringWithUTF8String:title] : @"Scuzz Lang";
+  [g_win setTitle:nsTitle];
+  [g_win setReleasedWhenClosed:NO];
+
+  g_view = [[NSImageView alloc] initWithFrame:NSMakeRect(0, 0, width, height)];
+  [g_view setImageScaling:NSImageScaleAxesIndependently];
+  [g_view setAnimates:NO];
+  [g_win setContentView:g_view];
+  [g_win makeKeyAndOrderFront:nil];
+  [NSApp activateIgnoringOtherApps:YES];
+
+  g_w = width;
+  g_h = height;
+  g_ready = 1;
+  fprintf(stderr, "scuzz embedder: Cocoa window %dx%d\n", width, height);
+  return 1;
 }
 
 int sz_embedder_present(const char *title, int width, int height,
                         const uint8_t *rgba, size_t nbytes) {
   size_t need;
-  int quit = 0;
+  __block int ok = 0;
+  __block int quit = 0;
 
   if (g_user_quit)
     return 0;
@@ -153,81 +176,87 @@ int sz_embedder_present(const char *title, int width, int height,
     return 0;
   if (!sz_embedder_available())
     return 0;
-  if (!ensure_window(title, width, height))
-    return 0;
 
-  @autoreleasepool {
-    NSBitmapImageRep *rep = [[NSBitmapImageRep alloc]
-        initWithBitmapDataPlanes:NULL
-                      pixelsWide:width
-                      pixelsHigh:height
-                   bitsPerSample:8
-                 samplesPerPixel:4
-                        hasAlpha:YES
-                        isPlanar:NO
-                  colorSpaceName:NSDeviceRGBColorSpace
-                     bytesPerRow:(NSInteger)width * 4
-                    bitsPerPixel:32];
-    if (!rep || ![rep bitmapData]) {
-      fprintf(stderr, "scuzz embedder: bitmap alloc failed\n");
-      return 0;
-    }
-    memcpy([rep bitmapData], rgba, need);
+  on_main(^{
+    @autoreleasepool {
+      if (!ensure_window_on_main(title, width, height))
+        return;
 
-    NSImage *image =
-        [[NSImage alloc] initWithSize:NSMakeSize((CGFloat)width, (CGFloat)height)];
-    [image addRepresentation:rep];
-    [g_view setImage:image];
-    [g_view setNeedsDisplay:YES];
-    [g_win displayIfNeeded];
-
-    /* Drain pending events: quit handled here; input only enqueued. */
-    for (;;) {
-      NSEvent *ev = [NSApp nextEventMatchingMask:NSEventMaskAny
-                                       untilDate:[NSDate distantPast]
-                                          inMode:NSDefaultRunLoopMode
-                                         dequeue:YES];
-      if (!ev)
-        break;
-
-      if ([ev type] == NSEventTypeLeftMouseDown && g_win) {
-        NSView *content = [g_win contentView];
-        NSPoint loc = [ev locationInWindow];
-        NSPoint inView = [content convertPoint:loc fromView:nil];
-        float x = (float)inView.x;
-        /* Cocoa y is bottom-up; Scuzz layout is top-down. */
-        float y = (float)(content.bounds.size.height - inView.y);
-        enqueue_tap(x, y);
-        continue;
+      NSBitmapImageRep *rep = [[NSBitmapImageRep alloc]
+          initWithBitmapDataPlanes:NULL
+                        pixelsWide:width
+                        pixelsHigh:height
+                     bitsPerSample:8
+                   samplesPerPixel:4
+                          hasAlpha:YES
+                          isPlanar:NO
+                    colorSpaceName:NSDeviceRGBColorSpace
+                       bytesPerRow:(NSInteger)width * 4
+                      bitsPerPixel:32];
+      if (!rep || ![rep bitmapData]) {
+        fprintf(stderr, "scuzz embedder: bitmap alloc failed\n");
+        return;
       }
+      memcpy([rep bitmapData], rgba, need);
 
-      if ([ev type] == NSEventTypeKeyDown) {
-        NSString *chars = [ev characters];
-        unichar c =
-            (chars && [chars length] > 0) ? [chars characterAtIndex:0] : 0;
-        if (c == 'q' || c == 'Q' || c == 27) {
-          quit = 1;
+      NSImage *image = [[NSImage alloc]
+          initWithSize:NSMakeSize((CGFloat)width, (CGFloat)height)];
+      [image addRepresentation:rep];
+      [g_view setImage:image];
+      [g_view setNeedsDisplay:YES];
+      [g_win displayIfNeeded];
+
+      /* Drain pending events: quit handled here; input only enqueued. */
+      for (;;) {
+        NSEvent *ev = [NSApp nextEventMatchingMask:NSEventMaskAny
+                                         untilDate:[NSDate distantPast]
+                                            inMode:NSDefaultRunLoopMode
+                                           dequeue:YES];
+        if (!ev)
           break;
-        }
-        if (c == 127 || c == NSDeleteCharacter) {
-          enqueue_text_edit("");
+
+        if ([ev type] == NSEventTypeLeftMouseDown && g_win) {
+          NSView *content = [g_win contentView];
+          NSPoint loc = [ev locationInWindow];
+          NSPoint inView = [content convertPoint:loc fromView:nil];
+          float x = (float)inView.x;
+          /* Cocoa y is bottom-up; Scuzz layout is top-down. */
+          float y = (float)(content.bounds.size.height - inView.y);
+          enqueue_tap(x, y);
           continue;
         }
-        if (c >= 32 && c < 127) {
-          char buf[2] = {(char)c, '\0'};
-          enqueue_text_edit(buf);
-          continue;
+
+        if ([ev type] == NSEventTypeKeyDown) {
+          NSString *chars = [ev characters];
+          unichar c =
+              (chars && [chars length] > 0) ? [chars characterAtIndex:0] : 0;
+          if (c == 'q' || c == 'Q' || c == 27) {
+            quit = 1;
+            break;
+          }
+          if (c == 127 || c == NSDeleteCharacter) {
+            enqueue_text_edit("");
+            continue;
+          }
+          if (c >= 32 && c < 127) {
+            char buf[2] = {(char)c, '\0'};
+            enqueue_text_edit(buf);
+            continue;
+          }
+          continue; /* swallow other keydowns (no system beep path) */
         }
-        continue; /* swallow other keydowns (no system beep path) */
+
+        [NSApp sendEvent:ev];
       }
 
-      [NSApp sendEvent:ev];
+      if (!quit && g_win && ![g_win isVisible])
+        quit = 1;
+      ok = 1;
     }
+  });
 
-    if (!quit && g_win && ![g_win isVisible])
-      quit = 1;
-  }
-
+  if (!ok)
+    return 0;
   if (quit) {
     mark_user_quit();
     return 1;
@@ -236,15 +265,9 @@ int sz_embedder_present(const char *title, int width, int height,
 }
 
 void sz_embedder_shutdown(void) {
-  @autoreleasepool {
-    if (g_win) {
-      [g_win orderOut:nil];
-      [g_win close];
-      g_win = nil;
+  on_main(^{
+    @autoreleasepool {
+      shutdown_on_main();
     }
-    g_view = nil;
-  }
-  g_ready = 0;
-  g_w = g_h = 0;
-  g_q_head = g_q_tail = 0;
+  });
 }

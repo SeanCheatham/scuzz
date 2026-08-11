@@ -136,16 +136,19 @@ def mobileLinkFlags(mobile: String): String =
   str5("$(test -f ", mobile, " && if [ \"`uname -s`\" = Darwin ]; then echo -Wl,-force_load,", mobile, str3("; elif [ \"`uname -s`\" = Linux ]; then echo -Wl,--whole-archive ", mobile, " -Wl,--no-whole-archive; fi)"))
 
 def cxxLinkFlags(): String =
-  "$(if [ \"`uname -s`\" = Darwin ]; then echo -lc++ -lm; else echo -lstdc++ -lm; fi)"
+  "$(if [ \"`uname -s`\" = Darwin ]; then echo -lc++ -lm -framework CoreFoundation; else echo -lstdc++ -lm; fi)"
 
 def skiaExtraLinkFlags(ffi: String): String =
-  str5("$(test -f ", pathJoin(ffi, "build/sk_capi_backend"), " && grep -qx skia ", pathJoin(ffi, "build/sk_capi_backend"), " && echo -lz -lbz2 -lbrotlidec -lbrotlicommon)")
+  str5("$(test -f ", pathJoin(ffi, "build/sk_capi_backend"), " && grep -qx skia ", pathJoin(ffi, "build/sk_capi_backend"), " && if [ \"`uname -s`\" = Darwin ]; then echo -lz -lbz2 -lbrotlidec -lbrotlicommon -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon; else echo -lz -lbz2 -lbrotlidec -lbrotlicommon; fi)")
 
 def linkCmd(clang: String, ll: String, lib: String, skia: String, inc: String, skInc: String, embedder: String, mobile: String, exe: String): String =
   str4(clang, " ", ll, str4(" ", lib, " ", str4(skia, " -I", inc, str4(" -I", skInc, " -lpthread ", str5(cxxLinkFlags(), " ", skiaExtraLinkFlags(parentDir(parentDir(skia))), " ", str5(embedderLinkFlags(embedder), " ", mobileLinkFlags(mobile), " -o ", exe))))))
 
 def linkCmdIo(clang: String, ll: String, lib: String, inc: String, exe: String): String =
-  str5(clang, " ", ll, " ", str4(lib, " -I", inc, str3(" -lpthread -o ", exe, "")))
+  str5(clang, " ", ll, " ", str4(lib, " -I", inc, str3(" -lpthread ", cxxLinkFlagsIo(), str3(" -o ", exe, ""))))
+
+def cxxLinkFlagsIo(): String =
+  "$(if [ \"`uname -s`\" = Darwin ]; then echo -framework CoreFoundation; else echo; fi)"
 
 def runIfNeeded(exe: String, doRun: Int): IO[Unit] =
   if (doRun == 1) execOk(exe) else IO.pure(())

@@ -17,4 +17,6 @@ Linked by Stage 0 / Stage 1 / Stage 2 when present.
 
 - Requires a GUI session (main display); otherwise Window stays offscreen
 - Press `q` / Escape to close during `present`
-- Link: `-framework Cocoa -lobjc`
+- AppKit runs on the process main thread (`dispatch_sync` from the IO worker;
+  `sz_runtime_main_args` parks main in the CFRunLoop)
+- Link: `-framework Cocoa -lobjc` (apps also need `-framework CoreFoundation`)

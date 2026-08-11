@@ -6,7 +6,7 @@ Short path from install to a Headless UI or IO app. For product thesis, design l
 
 ```bash
 ./scripts/install.sh          # packages Stage-2 + SDK → ~/.local/share/scuzz; wrapper → ~/.local/bin/scuzz
-# ensure ~/.local/bin is on PATH (apps need clang + make; Rust not required after install)
+# ensure ~/.local/bin is on PATH (apps need clang + make; Linux [ui] also zlib/bz2/brotli)
 scuzz new myapp --ui
 cd myapp
 scuzz check                  # parse + typecheck only
@@ -14,6 +14,8 @@ scuzz test                   # seeds goldens/ on first run, then compares
 scuzz run --headless         # writes build/snapshot.png
 scuzz fmt --check
 ```
+
+Default `[ui]` link uses the pinned Skia CPU prebuilt (`third_party/skia/PIN`). Checkout builds fetch it on first `ffi-skia` make; opt out with `SCUZZ_SKIA=sk_sw`.
 
 From a prebuilt tarball (no checkout build): `RELEASE_TGZ=scuzz-<triple>.tar.gz ./scripts/install.sh`. Produce one with `./scripts/package_release.sh` (always Stage 2 — Scuzz Lang builds Scuzz Lang; Stage 0 only if no bootstrap CLI is present).
 

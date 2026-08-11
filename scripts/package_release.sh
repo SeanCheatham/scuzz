@@ -99,24 +99,24 @@ cp -f "$ROOT/scripts/skia_triple.sh" "$OUT/scripts/skia_triple.sh"
 chmod +x "$OUT/scripts/run_goldens.sh" "$OUT/scripts/package_project.sh" \
   "$OUT/scripts/fetch_skia.sh" "$OUT/scripts/skia_triple.sh"
 
-# Skia pin + optional prebuilt for UI text (fetched when PIN url= is set).
+# Skia pin + prebuilt for UI text (default backend). Opt out: SCUZZ_SKIA=sk_sw.
 # fetch_skia.sh substitutes {triple} so Linux/macOS releases get the matching asset.
 mkdir -p "$OUT/third_party/skia"
 cp -f "$ROOT/third_party/skia/README.md" "$OUT/third_party/skia/README.md"
 cp -f "$ROOT/third_party/skia/PIN" "$OUT/third_party/skia/PIN"
-if [[ -f "$ROOT/third_party/skia/PIN" ]]; then
-  PIN_URL="$(awk -F= '/^url=/{print substr($0,5); exit}' "$ROOT/third_party/skia/PIN" || true)"
-  if [[ -n "${PIN_URL}" ]]; then
-    echo "==> fetching pinned Skia prebuilt into release tree"
-    unset SCUZZ_SKIA_URL || true
-    "$ROOT/scripts/fetch_skia.sh"
-    if [[ -d "$ROOT/third_party/skia/prebuilt" ]]; then
-      mkdir -p "$OUT/third_party/skia"
-      cp -a "$ROOT/third_party/skia/prebuilt" "$OUT/third_party/skia/"
-    fi
-  else
-    echo "==> third_party/skia/PIN url= empty — release keeps sk_sw only"
+if [[ "${SCUZZ_SKIA:-}" == "sk_sw" ]]; then
+  echo "==> SCUZZ_SKIA=sk_sw — release keeps in-tree sk_sw only"
+else
+  echo "==> fetching pinned Skia prebuilt into release tree"
+  unset SCUZZ_SKIA_URL || true
+  "$ROOT/scripts/fetch_skia.sh"
+  SKIA_TRIPLE="$("$ROOT/scripts/skia_triple.sh")"
+  if [[ ! -f "$ROOT/third_party/skia/prebuilt/${SKIA_TRIPLE}/libsk_capi.a" ]]; then
+    echo "package_release: missing Skia prebuilt for ${SKIA_TRIPLE} (or set SCUZZ_SKIA=sk_sw)" >&2
+    exit 1
   fi
+  mkdir -p "$OUT/third_party/skia"
+  cp -a "$ROOT/third_party/skia/prebuilt" "$OUT/third_party/skia/"
 fi
 
 # package_project.sh resolves ROOT from scripts/.. — works inside the release tree.

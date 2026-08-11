@@ -1,9 +1,8 @@
 /* Thin Skia-shaped C ABI for Scuzz Lang.
  *
- * A CPU software implementation (sk_sw) ships behind this header so
- * Headless CI works without downloading multi‑GB Skia trees. A fetched
- * prebuilt that exports these symbols can replace the backend without
- * changing callers (see third_party/skia/README.md).
+ * Default backend is a fetched Skia CPU prebuilt (third_party/skia/PIN).
+ * In-tree sk_sw remains available via SCUZZ_SKIA=sk_sw for offline/exotic
+ * hosts (see third_party/skia/README.md). Callers depend only on this header.
  */
 #ifndef SK_CAPI_H
 #define SK_CAPI_H

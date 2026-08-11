@@ -34,13 +34,21 @@ lib: build/libscuzz_rt.a
 build/libscuzz_rt.a: $(OBJ)
 	ar rcs $@ $(OBJ)
 
+# Real Skia prebuilts need C++ + zlib/bz2/brotli (+ Darwin text frameworks).
+# CoreFoundation: macOS runtime parks main in CFRunLoop for AppKit hops.
+SKIA_LINK = $$([ -f $(FFI_SKIA)/build/sk_capi_backend ] && grep -qx skia $(FFI_SKIA)/build/sk_capi_backend && \
+	if [ "$$(uname -s)" = Darwin ]; then \
+	  echo -lc++ -lm -lz -lbz2 -lbrotlidec -lbrotlicommon -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon; \
+	else echo -lstdc++ -lm -lz -lbz2 -lbrotlidec -lbrotlicommon; fi)
+HOST_LINK = $$(if [ "$$(uname -s)" = Darwin ]; then echo -framework CoreFoundation; fi)
+
 build/test_io: tests/test_io.c build/libscuzz_rt.a | build ffi-skia
 	$(CC) $(CFLAGS) $(INCLUDES) tests/test_io.c -Lbuild -L$(FFI_SKIA)/build \
-		-lscuzz_rt -lsk_capi -lpthread -o $@
+		-lscuzz_rt -lsk_capi -lpthread $(HOST_LINK) $(SKIA_LINK) -o $@
 
 build/test_ui: tests/test_ui.c build/libscuzz_rt.a | build ffi-skia
 	$(CC) $(CFLAGS) $(INCLUDES) tests/test_ui.c -Lbuild -L$(FFI_SKIA)/build \
-		-lscuzz_rt -lsk_capi -lpthread -o $@
+		-lscuzz_rt -lsk_capi -lpthread $(HOST_LINK) $(SKIA_LINK) -o $@
 
 test: build/test_io build/test_ui
 	./build/test_io

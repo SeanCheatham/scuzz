@@ -15,16 +15,16 @@
 - Prebuilt Stage-2 release tree (`scripts/package_release.sh` → `dist/scuzz-<triple>.tar.gz`); `install.sh` installs under `PREFIX/share/scuzz`
 - Deterministic fuzz: `scuzz fuzz` (seeded `--iters`, bounded `--exhaust --depth N`, `--replay repro.toml`) on TestRuntime + Headless; residual module **laws** + sim overlays as the primary oracle
 - Structural goldens (signal store + a11y dump); PNG optional via `scuzz test --pixels`; IO packages use TESTRT exit-0 smoke
-- Skia linked for `[ui]` packages only (IO-only link is Skia-free); default `sk_sw`, optional real Skia CPU via `SCUZZ_SKIA_URL` / `third_party/skia/PIN` (`scripts/fetch_skia.sh`, as-needed `skia-cpu` workflow)
+- Skia linked for `[ui]` packages only (IO-only link is Skia-free); default pinned Skia CPU via `third_party/skia/PIN` (`scripts/fetch_skia.sh`); opt out with `SCUZZ_SKIA=sk_sw` (in-tree software backend); as-needed `skia-cpu` workflow rebuilds the pin
 - Impeller deferred (see `docs/vision.md`)
 
 App authors: [docs/guide.md](docs/guide.md).
 
 ## Quick start
 
-Requirements to **build** from this checkout: Rust (stable), `clang`, `make`. Optional for Window: Linux X11 (`libx11-dev` + display / `xvfb-run`) or macOS GUI session (Cocoa).
+Requirements to **build** from this checkout: Rust (stable), `clang`, `make`, network once to fetch the pinned Skia CPU prebuilt (or `SCUZZ_SKIA=sk_sw` to skip). Optional for Window: Linux X11 (`libx11-dev` + display / `xvfb-run`) or macOS GUI session (Cocoa).
 
-Installed apps need `clang` + `make` (and the Stage-2 release tree under `SCUZZ_HOME`). Linking `[ui]` apps against the packaged Skia CPU prebuilt also needs zlib / bzip2 / brotli on Linux (`zlib1g-dev libbz2-dev libbrotli-dev`).
+Installed apps need `clang` + `make` (and the Stage-2 release tree under `SCUZZ_HOME`). Linking `[ui]` apps against the packaged Skia CPU prebuilt also needs zlib / bzip2 / brotli on Linux (`zlib1g-dev libbz2-dev libbrotli-dev`); on macOS, Homebrew `brotli` / `bzip2` if the linker cannot find them.
 
 ```bash
 # Package + install Stage-2 CLI + SDK (SCUZZ_HOME → ~/.local/share/scuzz)
