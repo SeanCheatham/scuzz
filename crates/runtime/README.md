@@ -4,7 +4,7 @@ Minimal native runtime linked into Stage-0 / Stage-1 / Stage-2 binaries. Design 
 
 ## Contents
 
-- Alloc wrappers (`sz_alloc` / `sz_free`), strings, panic, `SzError`
+- Alloc wrappers (`sz_alloc` / `sz_free`) with live byte/count stats (`sz_alloc_stats`), strings, panic, `SzError`
 - Builtin `IO` + blessed kit (`Resource`, `Ref`, `Deferred`, `Queue`, race/both/sleep/errors)
 - Blessed impurity: `Clock` / `Random` / `Fs` / `Net` / `Sys` / `IO.println` + `TestRuntime` fakes
 - `Ui` session (Headless / Window / Mobile peers): View tree, signals, theme, anim, a11y hooks
@@ -14,4 +14,5 @@ Links `crates/ffi-skia`. Optional: `embedder-desktop`, `embedder-mobile`.
 
 ```bash
 make -C crates/runtime test
+make -C crates/runtime test-asan   # optional ASan; skipped if unsupported
 ```

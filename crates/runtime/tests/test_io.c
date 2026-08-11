@@ -297,6 +297,35 @@ int main(void) {
     assert(!sz_testrt_sys_is_fake());
   }
 
+  /* Alloc accounting: live_count returns to baseline after free. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    void *p;
+    void *z;
+    sz_alloc_stats(&base_bytes, &base_count);
+    p = sz_alloc(128);
+    assert(p);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count + 1);
+    assert(live_bytes == base_bytes + 128);
+    z = sz_alloc_zero(64);
+    assert(z);
+    assert(((unsigned char *)z)[0] == 0);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count + 2);
+    assert(live_bytes == base_bytes + 128 + 64);
+    sz_free(p);
+    sz_free(z);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+    sz_alloc_reset_stats();
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   puts("runtime io tests ok");
   return 0;
 }
