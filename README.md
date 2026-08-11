@@ -24,7 +24,7 @@ App authors: [docs/guide.md](docs/guide.md).
 
 Requirements to **build** from this checkout: Rust (stable), `clang`, `make`. Optional for Window: Linux X11 (`libx11-dev` + display / `xvfb-run`) or macOS GUI session (Cocoa).
 
-Installed apps only need `clang` + `make` (and the Stage-2 release tree under `SCUZZ_HOME`).
+Installed apps need `clang` + `make` (and the Stage-2 release tree under `SCUZZ_HOME`). Linking `[ui]` apps against the packaged Skia CPU prebuilt also needs zlib / bzip2 / brotli on Linux (`zlib1g-dev libbz2-dev libbrotli-dev`).
 
 ```bash
 # Package + install Stage-2 CLI + SDK (SCUZZ_HOME → ~/.local/share/scuzz)
