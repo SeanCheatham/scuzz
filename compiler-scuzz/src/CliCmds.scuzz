@@ -37,7 +37,7 @@ def writeNewUi(dir: String, name: String): IO[Unit] =
   Fs.mkdirs(pathJoin(dir, "src")).flatMap(_ =>
     Fs.mkdirs(pathJoin(dir, "goldens")).flatMap(_ =>
       Fs.write(pathJoin(dir, "scuzz.toml"), uiToml(name)).flatMap(_ =>
-        Fs.write(pathJoin(dir, "src/Main.scala"), uiMainTemplate()).flatMap(_ => IO.println(str3("created ", dir, " (ui) — next: scuzz test (seeds goldens) && scuzz run --headless")))
+        Fs.write(pathJoin(dir, "src/Main.scuzz"), uiMainTemplate()).flatMap(_ => IO.println(str3("created ", dir, " (ui) — next: scuzz test (seeds goldens) && scuzz run --headless")))
       )
     )
   )
@@ -45,7 +45,7 @@ def writeNewUi(dir: String, name: String): IO[Unit] =
 def writeNewHello(dir: String, name: String): IO[Unit] =
   Fs.mkdirs(pathJoin(dir, "src")).flatMap(_ =>
     Fs.write(pathJoin(dir, "scuzz.toml"), helloToml(name)).flatMap(_ =>
-      Fs.write(pathJoin(dir, "src/Main.scala"), helloMainTemplate()).flatMap(_ => IO.println(str3("created ", dir, " — next: scuzz test && scuzz run")))
+      Fs.write(pathJoin(dir, "src/Main.scuzz"), helloMainTemplate()).flatMap(_ => IO.println(str3("created ", dir, " — next: scuzz test && scuzz run")))
     )
   )
 

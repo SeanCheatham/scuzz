@@ -117,7 +117,7 @@ pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
             let file = resolved
                 .sources
                 .iter()
-                .find(|s| s.label.contains("/src/Main.scala") || s.label.ends_with("Main.scala"))
+                .find(|s| s.label.contains("/src/Main.scuzz") || s.label.ends_with("Main.scuzz"))
                 .or_else(|| resolved.sources.last())
                 .map(|s| s.label.clone());
             let mut d = Diagnostic::error(e.to_string());

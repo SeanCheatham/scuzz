@@ -252,7 +252,7 @@ bundle_id = "dev.scuzz.{package_name}"
                     ),
                 )?;
                 std::fs::write(
-                    dir.join("src/Main.scala"),
+                    dir.join("src/Main.scuzz"),
                     r#"@main def main: IO[Unit] =
   for {
     count = Signal.int(0)
@@ -285,7 +285,7 @@ main = "Main"
                     ),
                 )?;
                 std::fs::write(
-                    dir.join("src/Main.scala"),
+                    dir.join("src/Main.scuzz"),
                     r#"@main def main: IO[Unit] =
   IO.println("Hello, Scuzz!").flatMap(_ => IO.println("ready."))
 "#,

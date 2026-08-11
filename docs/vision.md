@@ -47,7 +47,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 
 ### Product name
 
-Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI / cargo package `scuzz`; Stage-0 crate `scuzz-compiler`; self-host tree `compiler-scuzz/`; manifest `scuzz.toml`; C ABI `sz_` / `Sz*` / `SZ_*`. No dual names or legacy aliases.
+Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI / cargo package `scuzz`; Stage-0 crate `scuzz-compiler`; self-host tree `compiler-scuzz/`; manifest `scuzz.toml`; sources `*.scuzz`; C ABI `sz_` / `Sz*` / `SZ_*`. No dual names or legacy aliases.
 
 ### GC (v0)
 
