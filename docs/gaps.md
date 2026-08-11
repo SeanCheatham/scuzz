@@ -37,11 +37,13 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### 4. Language growth vs the self-host ratchet
 
-**Current state.** Stage 0 and self-host (`compiler-scuzz/`) support payload ADTs with N `Int`/`String` fields (`EnumCase` / `Case` + fields, `sz_adt_payload`, multi-binder match) — proven by Stage-0 unit tests and `examples/adt` (`Opt.Some(42)`, `Pair.Pair(7, "ok")`). Multi-field product payloads pack as a `List` of values (Ints boxed) in the existing ADT payload pointer. Compiler sources stay on List+string-tag IR (rewriting the compiler AST onto payloads is the next residual). `List` is monomorphic; the only type constructor is builtin `IO[T]`. No records, traits, or user generics in either compiler, though `compatibility.md` keeps "generics (monomorphize early)" as direction.
+**Current state.** Stage 0 and self-host (`compiler-scuzz/`) support payload ADTs with N `Int`/`String` fields (`EnumCase` / `Case` + fields, `sz_adt_payload`, multi-binder match) — proven by Stage-0 unit tests and `examples/adt` (`Opt.Some(42)`, `Pair.Pair(7, "ok")`). Multi-field product payloads pack as a `List` of values (Ints boxed) in the existing ADT payload pointer. File-stem def namespaces are in (`examples/modules`). Compiler sources stay on List+string-tag IR. `List` is monomorphic; the only type constructor is builtin `IO[T]`. No records, traits, or user generics in either compiler, though `compatibility.md` keeps "generics (monomorphize early)" as direction.
 
-**Unproven.** Whether the Stage 0 → 1 → 2 ratchet stays tractable once features are structurally big. Every feature lands in Stage 0 first, then gets ported into the kernel dialect, then must survive the fixpoint gate (`scripts/selfhost.sh`, byte-identical Stage-2/3 IR). Payload ADTs for **user programs** (including multi-field) are in. Rewriting the compiler's own IR/AST onto payloads remains the next ratchet stress. Generics + early monomorphization is the large stress after that.
+**Proven (vertical slices).** User-program payload ADTs (unary and multi-field) and file-as-module def namespaces survive the dual-boot path. That de-risks the first structural growth bets.
 
-**Proof.** Payload ADTs land in Stage 0 (done), `compiler-scuzz/` compiles multi-field payload ADTs for user programs through the dual-boot gate (done for `examples/adt`), and a later compiler-IR rewrite still has to keep the fixpoint intact.
+**Residual unknown.** Rewriting the compiler's own IR/AST onto payload ADTs (and later generics + early monomorphization) is still the large ratchet stress — not blocked on external assets, but not a small vertical slice: every Format/Typ/Codegen site assumes List+string-tag encoding. Track as open until a first IR node family is rewritten and the Stage-2/3 fixpoint still holds.
+
+**Proof (residual).** A compiler-IR rewrite of at least one AST node family onto payload ADTs keeps `scripts/selfhost.sh` green with byte-identical Stage-2/3 IR.
 
 ### 5. Mobile on real devices
 
@@ -67,9 +69,9 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### File-as-module (vs merge-all `src/`)
 
-**Stage 0 vertical slice.** Module id = file stem (`Foo.scuzz` → `Foo`). Defs are namespaced: the same bare `def` name may appear in two modules; calls use `Module.def` / `Module.def(args)` (existing `Ident.Ident` syntax). Intra-module bare names resolve locally; from another module, qualify when the name is ambiguous (unique cross-module bare names still resolve, so path-dep helpers like `examples/shared` keep working). Enums stay globally unique (`examples/adt`). Codegen mangles `@sz_user_{Module}_{def}`. Proof: `examples/modules` (`A.tag` + `B.tag` → `ab`).
+**Closed (vertical slice).** Module id = file stem (`Foo.scuzz` → `Foo`). Defs are namespaced on Stage 0 and self-host: the same bare `def` name may appear in two modules; calls use `Module.def` / `Module.def(args)`. Intra-module bare names resolve locally; unique cross-module bare names still resolve (path-dep helpers like `examples/shared`). Enums stay globally unique (`examples/adt`). Codegen mangles `@sz_user_{Module}_{def}`. Proof: `examples/modules` (`A.tag` + `B.tag` → `ab`) on Stage 0 and Stage 1; `scripts/selfhost.sh` smokes it.
 
-**Residual.** No `private`/`pub`, no `import`, no enum-per-module. Self-host (`compiler-scuzz/`) ports FunIndex / mangling (file-stem modules, `@sz_user_{Module}_{def}`); `examples/modules` works on Stage 0 and Stage 1. Stem-paired `*.scuzz_sim` / `*.scuzz_laws` already exist.
+**Residual (not blocking).** No `private`/`pub`, no `import`, no enum-per-module. Stem-paired `*.scuzz_sim` / `*.scuzz_laws` already exist.
 
 ### Diagnostics source locations
 
