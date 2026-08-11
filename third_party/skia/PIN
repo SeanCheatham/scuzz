@@ -8,9 +8,5 @@
 # {triple} is replaced with the host triple from scripts/skia_triple.sh
 # (override with SCUZZ_SKIA_TRIPLE). Published triples from skia-cpu.yml:
 #   x86_64-unknown-linux-gnu, aarch64-apple-darwin
-#
-# Leave url= empty until the first skia-cpu workflow publishes assets.
 skia_branch=chrome/m131
-# Example after first publish:
-# url=https://github.com/OWNER/REPO/releases/download/skia-cpu-v0.1/skia-{triple}-cpu.tar.gz
-url=
+url=https://github.com/SeanCheatham/scuzz/releases/download/skia-cpu-v0.2/skia-{triple}-cpu.tar.gz
