@@ -337,8 +337,7 @@ void sz_view_clear_children(SzView *parent) {
 }
 
 static float text_width(const char *s, float font_px) {
-  size_t n = s ? strlen(s) : 0;
-  return (float)n * font_px;
+  return sk_font_measure_string(s ? s : "", font_px);
 }
 
 static void resolve_text(const SzView *v, char *buf, size_t buflen) {
@@ -526,11 +525,12 @@ static void paint_rect(SkCanvas *c, float x, float y, float w, float h,
 }
 
 static void paint_string(SkCanvas *c, const char *s, float x, float y,
-                         uint32_t argb) {
+                         uint32_t argb, float font_px) {
   SkPaint *p = sk_paint_new();
   if (!p)
     return;
   sk_paint_set_color(p, sk_color_argb(argb));
+  sk_paint_set_text_size(p, font_px);
   sk_canvas_draw_string(c, s ? s : "", x, y, p);
   sk_paint_delete(p);
 }
@@ -551,20 +551,20 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     float bar_h = 40.f;
     sk_canvas_clear(c, sk_color_argb(bg));
     paint_rect(c, pad, pad, v->frame.w - pad * 2.f, bar_h, fg);
-    paint_string(c, v->text, pad + 8.f, pad + 26.f, bg);
+    paint_string(c, v->text, pad + 8.f, pad + 26.f, bg, theme->font_px);
     return;
   }
   case SZ_VIEW_TEXT:
     resolve_text(v, buf, sizeof buf);
     paint_string(c, buf, v->frame.x + 2.f, v->frame.y + theme->font_px + 2.f,
-                 theme->foreground);
+                 theme->foreground, theme->font_px);
     break;
   case SZ_VIEW_BUTTON:
     resolve_text(v, buf, sizeof buf);
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->primary);
     tx = v->frame.x + theme->pad;
     ty = v->frame.y + (v->frame.h + theme->font_px) * 0.5f;
-    paint_string(c, buf, tx, ty, theme->on_primary);
+    paint_string(c, buf, tx, ty, theme->on_primary, theme->font_px);
     break;
   case SZ_VIEW_TEXT_FIELD: {
     const char *shown;
@@ -584,20 +584,21 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     }
     paint_string(c, shown, v->frame.x + 6.f,
                  v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
-                 buf[0] ? theme->foreground : theme->muted);
+                 buf[0] ? theme->foreground : theme->muted, theme->font_px);
     break;
   }
   case SZ_VIEW_ICON: {
     char g[2] = {v->glyph, '\0'};
     paint_string(c, g, v->frame.x + 2.f, v->frame.y + theme->font_px + 2.f,
-                 v->fg_argb);
+                 v->fg_argb, theme->font_px);
     break;
   }
   case SZ_VIEW_IMAGE:
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, v->bg_argb);
     if (v->text && v->text[0])
       paint_string(c, v->text, v->frame.x + 4.f,
-                   v->frame.y + v->frame.h * 0.5f + 4.f, theme->on_primary);
+                   v->frame.y + v->frame.h * 0.5f + 4.f, theme->on_primary,
+                   theme->font_px);
     break;
   case SZ_VIEW_COLUMN:
   case SZ_VIEW_ROW:

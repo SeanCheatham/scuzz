@@ -135,8 +135,11 @@ def embedderLinkFlags(embedder: String): String =
 def mobileLinkFlags(mobile: String): String =
   str5("$(test -f ", mobile, " && if [ \"`uname -s`\" = Darwin ]; then echo -Wl,-force_load,", mobile, str3("; elif [ \"`uname -s`\" = Linux ]; then echo -Wl,--whole-archive ", mobile, " -Wl,--no-whole-archive; fi)"))
 
+def cxxLinkFlags(): String =
+  "$(if [ \"`uname -s`\" = Darwin ]; then echo -lc++ -lm; else echo -lstdc++ -lm; fi)"
+
 def linkCmd(clang: String, ll: String, lib: String, skia: String, inc: String, skInc: String, embedder: String, mobile: String, exe: String): String =
-  str4(clang, " ", ll, str4(" ", lib, " ", str4(skia, " -I", inc, str4(" -I", skInc, " -lpthread ", str5(embedderLinkFlags(embedder), " ", mobileLinkFlags(mobile), " -o ", exe)))))
+  str4(clang, " ", ll, str4(" ", lib, " ", str4(skia, " -I", inc, str4(" -I", skInc, " -lpthread ", str5(cxxLinkFlags(), " ", embedderLinkFlags(embedder), str3(" ", mobileLinkFlags(mobile), str3(" -o ", exe, ""))))))
 
 def linkCmdIo(clang: String, ll: String, lib: String, inc: String, exe: String): String =
   str5(clang, " ", ll, " ", str4(lib, " -I", inc, str3(" -lpthread -o ", exe, "")))

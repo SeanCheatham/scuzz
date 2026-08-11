@@ -136,10 +136,36 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
             .parent()
             .map(|p| p.join("ffi-skia"))
             .unwrap_or_else(|| PathBuf::from("crates/ffi-skia"));
+        // Ensure libsk_capi.a exists (sk_sw or copied prebuilt).
+        let _ = Command::new("make")
+            .arg("-C")
+            .arg(&ffi_skia_dir)
+            .arg("lib")
+            .env("CC", &opts.clang)
+            .status();
         let skia_lib = ffi_skia_dir.join("build/libsk_capi.a");
         let skia_include = ffi_skia_dir.join("include");
         link.arg(&skia_lib)
             .arg(format!("-I{}", skia_include.display()));
+        // Real Skia backends are C++; sk_sw ignores these.
+        if cfg!(target_os = "macos") {
+            link.arg("-lc++");
+        } else {
+            link.arg("-lstdc++");
+        }
+        link.arg("-lm");
+
+        // Optional companion archives copied next to libsk_capi.a by ffi-skia Makefile.
+        if let Ok(entries) = std::fs::read_dir(ffi_skia_dir.join("build")) {
+            for ent in entries.flatten() {
+                let p = ent.path();
+                if p.extension().and_then(|e| e.to_str()) == Some("a")
+                    && p.file_name().and_then(|n| n.to_str()) != Some("libsk_capi.a")
+                {
+                    link.arg(p);
+                }
+            }
+        }
 
         // Optional desktop (X11) + mobile host shells. Link when libs exist.
         let crates_dir = opts

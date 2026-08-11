@@ -9,6 +9,7 @@ struct SkPaint {
   SkColor color;
   int stroke;
   float stroke_width;
+  float text_size;
 };
 
 struct SkCanvas {
@@ -235,29 +236,62 @@ static const uint8_t FONT8[95][8] = {
     {0x6E, 0x3B, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00},
 };
 
+float sk_font_measure_string(const char *text, float font_px) {
+  size_t n;
+  float px = font_px > 0.f ? font_px : 8.f;
+  if (!text)
+    return 0.f;
+  n = strlen(text);
+  return (float)n * px;
+}
+
 void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
                            const SkPaint *paint) {
-  int cx, cy, row, col;
+  float size, scale;
+  int advance, baseline, cx, row, col, sr, sc;
   const char *p;
   if (!canvas || !canvas->surface || !paint || !text)
     return;
+  size = paint->text_size > 0.f ? paint->text_size : 8.f;
+  scale = size / 8.f;
+  advance = (int)(size + 0.5f);
+  if (advance < 1)
+    advance = 1;
+  baseline = (int)(size - 1.f + 0.5f);
+  if (baseline < 0)
+    baseline = 0;
   cx = (int)x;
-  cy = (int)y - 7;
   for (p = text; *p; p++) {
     unsigned char ch = (unsigned char)*p;
     const uint8_t *glyph;
+    int gy = (int)y - baseline;
     if (ch < 32 || ch > 126)
       ch = '?';
     glyph = FONT8[ch - 32];
-    for (row = 0; row < 8; row++) {
-      uint8_t bits = glyph[row];
-      for (col = 0; col < 8; col++) {
-        /* Font bytes are LSB-left in this table. */
-        if (bits & (uint8_t)(1u << col))
-          put_pixel(canvas->surface, cx + col, cy + row, paint->color);
+    if (scale >= 0.999f && scale <= 1.001f) {
+      for (row = 0; row < 8; row++) {
+        uint8_t bits = glyph[row];
+        for (col = 0; col < 8; col++) {
+          /* Font bytes are LSB-left in this table. */
+          if (bits & (uint8_t)(1u << col))
+            put_pixel(canvas->surface, cx + col, gy + row, paint->color);
+        }
+      }
+    } else {
+      for (sr = 0; sr < advance; sr++) {
+        row = (int)((float)sr / scale);
+        if (row > 7)
+          row = 7;
+        for (sc = 0; sc < advance; sc++) {
+          col = (int)((float)sc / scale);
+          if (col > 7)
+            col = 7;
+          if (glyph[row] & (uint8_t)(1u << col))
+            put_pixel(canvas->surface, cx + sc, gy + sr, paint->color);
+        }
       }
     }
-    cx += 8;
+    cx += advance;
   }
 }
 
@@ -268,6 +302,7 @@ SkPaint *sk_paint_new(void) {
   p->color = sk_color_rgba(0, 0, 0, 255);
   p->stroke = 0;
   p->stroke_width = 1.f;
+  p->text_size = 8.f;
   return p;
 }
 
@@ -286,6 +321,15 @@ void sk_paint_set_stroke(SkPaint *paint, int stroke) {
 void sk_paint_set_stroke_width(SkPaint *paint, float width) {
   if (paint)
     paint->stroke_width = width;
+}
+
+void sk_paint_set_text_size(SkPaint *paint, float size) {
+  if (paint)
+    paint->text_size = size > 0.f ? size : 8.f;
+}
+
+float sk_paint_get_text_size(const SkPaint *paint) {
+  return paint ? paint->text_size : 8.f;
 }
 
 int sk_encode_png(const SkSurface *surface, uint8_t **out_bytes, size_t *out_len) {
