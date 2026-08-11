@@ -30,6 +30,7 @@ static void *deferred_complete_thunk(void *env) {
     e->d->completed = 1;
     e->d->ok = 1;
     e->d->value = e->value;
+    sz_fiber_wake_deferred(e->d);
   }
   sz_free(e);
   return NULL;
@@ -59,6 +60,7 @@ static void *deferred_fail_thunk(void *env) {
     e->d->completed = 1;
     e->d->ok = 0;
     e->d->error = e->err;
+    sz_fiber_wake_deferred(e->d);
   } else {
     sz_error_free(e->err);
   }
@@ -75,21 +77,8 @@ SzIo *sz_deferred_fail(SzDeferred *d, SzError *err) {
   return sz_io_delay(deferred_fail_thunk, e);
 }
 
-static SzIo *deferred_get_cont(void *value, void *env) {
-  (void)value;
-  SzDeferred *d = (SzDeferred *)env;
-  if (!d->completed)
-    return sz_io_fail_cstr("deferred incomplete");
-  if (!d->ok)
-    return sz_io_fail(d->error ? sz_error_new(d->error->code,
-                                              sz_string_cstr(d->error->message))
-                               : sz_error_new(1, "deferred failed"));
-  return sz_io_pure(d->value);
-}
-
 SzIo *sz_deferred_get(SzDeferred *d) {
   if (!d)
     sz_panic("sz_deferred_get(null)");
-  /* delay + cont so it participates in flatMap chains cleanly */
-  return sz_io_flatmap(sz_io_pure(NULL), deferred_get_cont, d);
+  return sz_io_deferred_get(d);
 }
