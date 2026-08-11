@@ -3,7 +3,13 @@ package demo.color
 @main def main: IO[Unit] =
   for {
     c = Color.Red
-  } yield c match {
-  case Color.Red => IO.println("adt:red")
-  case Color.Blue => IO.println("adt:blue")
-}
+    o = Opt.Some(42)
+    _ <- c match {
+      case Color.Red => IO.println("adt:red")
+      case Color.Blue => IO.println("adt:blue")
+    }
+    _ <- o match {
+      case Opt.Some(n) => IO.println(Str.concat("adt:some:", Str.fromInt(n)))
+      case Opt.None => IO.println("adt:none")
+    }
+  } yield ()

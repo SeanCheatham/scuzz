@@ -254,7 +254,14 @@ def parsePatternAdt(tokens: List, i: Int): List =
     enumP = parseIdent(tokens, i)
     i1 = expectTok(tokens, pIdx(enumP), "Dot")
     caseP = parseIdent(tokens, i1)
-  } yield ok(List.cons("PatAdt", List.cons(pStr(enumP), List.cons(pStr(caseP), List.empty()))), pIdx(caseP))
+    j = pIdx(caseP)
+  } yield if (isTok(tokens, j, "LParen") == 1) parsePatternBind(tokens, j + 1, pStr(enumP), pStr(caseP)) else ok(List.cons("PatAdt", List.cons(pStr(enumP), List.cons(pStr(caseP), List.cons("", List.empty())))), j)
+
+def parsePatternBind(tokens: List, i: Int, en: String, caseName: String): List =
+  for {
+    bindP = parseIdent(tokens, i)
+    i1 = expectTok(tokens, pIdx(bindP), "RParen")
+  } yield ok(List.cons("PatAdt", List.cons(en, List.cons(caseName, List.cons(pStr(bindP), List.empty())))), i1)
 
 def parsePostfixDot(tokens: List, expr: List, i: Int): List =
   for {
@@ -396,7 +403,7 @@ def parseDotCallOrAdt(tokens: List, i: Int, enumName: String): List =
     caseP = parseIdent(tokens, i)
     caseName = pStr(caseP)
     j = pIdx(caseP)
-  } yield if (isTok(tokens, j, "LParen") == 1) parseCallArgs(tokens, j + 1, str3(enumName, ".", caseName)) else ok(List.cons("Adt", List.cons(enumName, List.cons(caseName, List.empty()))), j)
+  } yield if (isTok(tokens, j, "LParen") == 1) parseCallArgs(tokens, j + 1, str3(enumName, ".", caseName)) else ok(List.cons("Adt", List.cons(enumName, List.cons(caseName, List.cons(List.empty(), List.empty())))), j)
 
 def parseCallArgs(tokens: List, i: Int, callee: String): List =
   for {
@@ -480,8 +487,9 @@ def parseEnumBraceCase(tokens: List, i: Int, name: String, acc: List): List =
   for {
     i1 = expectTok(tokens, i, "Case")
     caseP = parseIdent(tokens, i1)
-    i2 = pIdx(caseP)
-    acc2 = List.cons(pStr(caseP), acc)
+    fieldsP = parseEnumCaseFields(tokens, pIdx(caseP))
+    i2 = pIdx(fieldsP)
+    acc2 = List.cons(List.cons("Case", List.cons(pStr(caseP), List.cons(pAst(fieldsP), List.empty()))), acc)
   } yield if (isTok(tokens, i2, "Comma") == 1) parseEnumBrace(tokens, i2 + 1, name, acc2) else parseEnumBrace(tokens, i2, name, acc2)
 
 def parseEnumColon(tokens: List, i: Int, name: String, acc: List): List =
@@ -490,7 +498,19 @@ def parseEnumColon(tokens: List, i: Int, name: String, acc: List): List =
 def parseEnumColonCase(tokens: List, i: Int, name: String, acc: List): List =
   for {
     caseP = parseIdent(tokens, i)
-  } yield parseEnumColon(tokens, pIdx(caseP), name, List.cons(pStr(caseP), acc))
+    fieldsP = parseEnumCaseFields(tokens, pIdx(caseP))
+  } yield parseEnumColon(tokens, pIdx(fieldsP), name, List.cons(List.cons("Case", List.cons(pStr(caseP), List.cons(pAst(fieldsP), List.empty()))), acc))
+
+def parseEnumCaseFields(tokens: List, i: Int): List =
+  if (isTok(tokens, i, "LParen") == 0) ok(List.empty(), i) else parseEnumCaseField(tokens, i + 1)
+
+def parseEnumCaseField(tokens: List, i: Int): List =
+  for {
+    fnameP = parseIdent(tokens, i)
+    i1 = expectTok(tokens, pIdx(fnameP), "Colon")
+    tyP = parseType(tokens, i1)
+    i2 = expectTok(tokens, pIdx(tyP), "RParen")
+  } yield ok(List.cons(List.cons("Field", List.cons(pStr(fnameP), List.cons(pStr(tyP), List.empty()))), List.empty()), i2)
 
 def parseTopEnum(tokens: List, i: Int, pkg: String, enums: List, defs: List, main: List): List =
   for {

@@ -9,8 +9,26 @@ def progDefs(p: List): List =
 def progMain(p: List): List =
   nodeExpr(p, 3)
 
-def emitCtx(defs: List, tags: List): List =
-  List.cons(defs, List.cons(tags, List.empty()))
+def enumName(e: List): String =
+  nodeStr(e, 0)
+
+def enumCases(e: List): List =
+  nodeExpr(e, 1)
+
+def caseName(c: List): String =
+  nodeStr(c, 0)
+
+def caseFields(c: List): List =
+  nodeExpr(c, 1)
+
+def fieldName(f: List): String =
+  nodeStr(f, 0)
+
+def fieldType(f: List): String =
+  nodeStr(f, 1)
+
+def emitCtx(defs: List, tags: List, payloads: List): List =
+  List.cons(defs, List.cons(tags, List.cons(payloads, List.empty())))
 
 def ctxDefs(ctx: List): List =
   List.head(ctx)
@@ -18,11 +36,8 @@ def ctxDefs(ctx: List): List =
 def ctxTags(ctx: List): List =
   List.head(List.tail(ctx))
 
-def enumName(e: List): String =
-  nodeStr(e, 0)
-
-def enumCases(e: List): List =
-  nodeExpr(e, 1)
+def ctxPayloads(ctx: List): List =
+  List.head(List.tail(List.tail(ctx)))
 
 def buildEnumTags(enums: List): List =
   buildEnumTagsAcc(enums, List.empty())
@@ -34,7 +49,22 @@ def buildOneEnumTags(e: List, acc: List): List =
   buildCaseTags(enumName(e), enumCases(e), 0, acc)
 
 def buildCaseTags(en: String, cases: List, i: Int, acc: List): List =
-  if (List.isEmpty(cases) == 1) acc else buildCaseTags(en, List.tail(cases), i + 1, List.cons(str4(en, ".", List.head(cases), str3("=", Str.fromInt(i), "")), acc))
+  if (List.isEmpty(cases) == 1) acc else buildCaseTags(en, List.tail(cases), i + 1, List.cons(str4(en, ".", caseName(List.head(cases)), str3("=", Str.fromInt(i), "")), acc))
+
+def buildEnumPayloads(enums: List): List =
+  buildEnumPayloadsAcc(enums, List.empty())
+
+def buildEnumPayloadsAcc(enums: List, acc: List): List =
+  if (List.isEmpty(enums) == 1) acc else buildEnumPayloadsAcc(List.tail(enums), buildOneEnumPayloads(List.head(enums), acc))
+
+def buildOneEnumPayloads(e: List, acc: List): List =
+  buildCasePayloads(enumName(e), enumCases(e), acc)
+
+def buildCasePayloads(en: String, cases: List, acc: List): List =
+  if (List.isEmpty(cases) == 1) acc else buildCasePayloads(en, List.tail(cases), buildCasePayloadOne(en, List.head(cases), acc))
+
+def buildCasePayloadOne(en: String, c: List, acc: List): List =
+  if (List.isEmpty(caseFields(c)) == 1) acc else List.cons(str4(en, ".", caseName(c), str3("=", fieldType(List.head(caseFields(c))), "")), acc)
 
 def tagLookup(tags: List, en: String, caseName: String): String =
   tagLookupKey(tags, str3(en, ".", caseName))
@@ -44,6 +74,15 @@ def tagLookupKey(tags: List, key: String): String =
 
 def tagLookupKeyCont(row: String, rest: List, key: String): String =
   if (startsWith(row, Str.concat(key, "=")) == 1) Str.slice(row, Str.len(key) + 1, Str.len(row)) else tagLookupKey(rest, key)
+
+def payloadLookup(payloads: List, en: String, caseName: String): String =
+  payloadLookupKey(payloads, str3(en, ".", caseName))
+
+def payloadLookupKey(payloads: List, key: String): String =
+  if (List.isEmpty(payloads) == 1) "" else payloadLookupKeyCont(List.head(payloads), List.tail(payloads), key)
+
+def payloadLookupKeyCont(row: String, rest: List, key: String): String =
+  if (startsWith(row, Str.concat(key, "=")) == 1) Str.slice(row, Str.len(key) + 1, Str.len(row)) else payloadLookupKey(rest, key)
 
 def armPat(arm: List): List =
   nodeExpr(arm, 0)
@@ -103,7 +142,7 @@ def collectExpr(e: List, strs: List): List =
   collectExprTag(exprTag(e), e, strs)
 
 def collectExprTag(tag: String, e: List, strs: List): List =
-  if (streq(tag, "StrLit") == 1) collectPush(strs, nodeStr(e, 0)) else if (streq(tag, "Println") == 1) collectExpr(nodeExpr(e, 0), strs) else if (streq(tag, "Fail") == 1) collectExpr(nodeExpr(e, 0), strs) else if (streq(tag, "Pure") == 1) collectExpr(nodeExpr(e, 0), strs) else if (streq(tag, "Sleep") == 1) collectExpr(nodeExpr(e, 0), strs) else if (streq(tag, "FlatMap") == 1) collectExpr(nodeExpr(e, 2), collectExpr(nodeExpr(e, 0), strs)) else if (streq(tag, "Handle") == 1) collectExpr(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs)) else if (streq(tag, "Attempt") == 1) collectExpr(nodeExpr(e, 0), strs) else if (streq(tag, "Let") == 1) collectExpr(nodeExpr(e, 2), collectExpr(nodeExpr(e, 1), strs)) else if (streq(tag, "If") == 1) collectExpr(nodeExpr(e, 2), collectExpr(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs))) else if (streq(tag, "BinOp") == 1) collectExpr(nodeExpr(e, 2), collectExpr(nodeExpr(e, 1), strs)) else if (streq(tag, "Call") == 1) collectArgs(nodeExpr(e, 1), strs) else if (streq(tag, "IoRace") == 1) collectExpr(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs)) else if (streq(tag, "IoBoth") == 1) collectExpr(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs)) else if (streq(tag, "Lambda") == 1) collectExpr(nodeExpr(e, 1), strs) else if (streq(tag, "Interp") == 1) collectInterpParts(nodeExpr(e, 0), strs) else if (streq(tag, "ListLit") == 1) collectArgs(nodeExpr(e, 0), strs) else if (streq(tag, "Match") == 1) collectMatchArms(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs)) else strs
+  if (streq(tag, "StrLit") == 1) collectPush(strs, nodeStr(e, 0)) else if (streq(tag, "Println") == 1) collectExpr(nodeExpr(e, 0), strs) else if (streq(tag, "Fail") == 1) collectExpr(nodeExpr(e, 0), strs) else if (streq(tag, "Pure") == 1) collectExpr(nodeExpr(e, 0), strs) else if (streq(tag, "Sleep") == 1) collectExpr(nodeExpr(e, 0), strs) else if (streq(tag, "FlatMap") == 1) collectExpr(nodeExpr(e, 2), collectExpr(nodeExpr(e, 0), strs)) else if (streq(tag, "Handle") == 1) collectExpr(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs)) else if (streq(tag, "Attempt") == 1) collectExpr(nodeExpr(e, 0), strs) else if (streq(tag, "Let") == 1) collectExpr(nodeExpr(e, 2), collectExpr(nodeExpr(e, 1), strs)) else if (streq(tag, "If") == 1) collectExpr(nodeExpr(e, 2), collectExpr(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs))) else if (streq(tag, "BinOp") == 1) collectExpr(nodeExpr(e, 2), collectExpr(nodeExpr(e, 1), strs)) else if (streq(tag, "Call") == 1) collectArgs(nodeExpr(e, 1), strs) else if (streq(tag, "Adt") == 1) collectArgs(nodeExpr(e, 2), strs) else if (streq(tag, "IoRace") == 1) collectExpr(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs)) else if (streq(tag, "IoBoth") == 1) collectExpr(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs)) else if (streq(tag, "Lambda") == 1) collectExpr(nodeExpr(e, 1), strs) else if (streq(tag, "Interp") == 1) collectInterpParts(nodeExpr(e, 0), strs) else if (streq(tag, "ListLit") == 1) collectArgs(nodeExpr(e, 0), strs) else if (streq(tag, "Match") == 1) collectMatchArms(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs)) else strs
 
 def collectInterpParts(parts: List, strs: List): List =
   if (List.isEmpty(parts) == 1) strs else collectInterpParts(List.tail(parts), collectInterpPart(List.head(parts), strs))
@@ -133,7 +172,7 @@ def runtimeDeclares(): String =
   Str.concat(runtimeDeclaresA(), Str.concat(runtimeDeclaresB(), runtimeDeclaresC()))
 
 def runtimeDeclaresA(): String =
-  str5("declare ptr @sz_string_from_cstr(ptr)\ndeclare ptr @sz_string_cstr(ptr)\n", "declare ptr @sz_string_concat(ptr, ptr)\ndeclare i64 @sz_string_len(ptr)\n", "declare ptr @sz_string_slice(ptr, i64, i64)\ndeclare i32 @sz_string_eq(ptr, ptr)\n", "declare i64 @sz_string_char_at(ptr, i64)\ndeclare ptr @sz_string_from_int(i64)\n", str5("declare i64 @sz_string_index_of(ptr, ptr)\ndeclare ptr @sz_io_println(ptr)\n", "declare ptr @sz_io_pure(ptr)\ndeclare ptr @sz_io_delay(ptr, ptr)\n", "declare ptr @sz_io_flatmap(ptr, ptr, ptr)\ndeclare ptr @sz_io_fail_cstr(ptr)\n", "declare ptr @sz_io_sleep_ms(i64)\ndeclare ptr @sz_io_handle_error_with(ptr, ptr, ptr)\n", str5("declare ptr @sz_io_attempt(ptr)\ndeclare ptr @sz_io_race(ptr, ptr)\n", "declare ptr @sz_io_both(ptr, ptr)\ndeclare ptr @sz_adt_new(i32, ptr)\n", "declare i32 @sz_adt_tag(ptr)\n", "declare ptr @sz_effects_run_kit()\n", "")))
+  str5("declare ptr @sz_string_from_cstr(ptr)\ndeclare ptr @sz_string_cstr(ptr)\n", "declare ptr @sz_string_concat(ptr, ptr)\ndeclare i64 @sz_string_len(ptr)\n", "declare ptr @sz_string_slice(ptr, i64, i64)\ndeclare i32 @sz_string_eq(ptr, ptr)\n", "declare i64 @sz_string_char_at(ptr, i64)\ndeclare ptr @sz_string_from_int(i64)\n", str5("declare i64 @sz_string_index_of(ptr, ptr)\ndeclare ptr @sz_io_println(ptr)\n", "declare ptr @sz_io_pure(ptr)\ndeclare ptr @sz_io_delay(ptr, ptr)\n", "declare ptr @sz_io_flatmap(ptr, ptr, ptr)\ndeclare ptr @sz_io_fail_cstr(ptr)\n", "declare ptr @sz_io_sleep_ms(i64)\ndeclare ptr @sz_io_handle_error_with(ptr, ptr, ptr)\n", str5("declare ptr @sz_io_attempt(ptr)\ndeclare ptr @sz_io_race(ptr, ptr)\n", "declare ptr @sz_io_both(ptr, ptr)\ndeclare ptr @sz_adt_new(i32, ptr)\n", "declare i32 @sz_adt_tag(ptr)\ndeclare ptr @sz_adt_payload(ptr)\n", "declare ptr @sz_effects_run_kit()\n", "")))
 
 def runtimeDeclaresB(): String =
   str5("declare ptr @sz_list_nil()\n", "declare i32 @sz_list_is_empty(ptr)\ndeclare ptr @sz_list_cons(ptr, ptr)\n", "declare ptr @sz_list_head(ptr)\ndeclare ptr @sz_list_tail(ptr)\n", "declare i64 @sz_list_len(ptr)\ndeclare ptr @sz_list_at(ptr, i64)\n", str5("declare ptr @sz_list_reverse(ptr)\ndeclare ptr @sz_list_join(ptr, ptr)\n", "declare ptr @sz_list_append(ptr, ptr)\ndeclare ptr @sz_fs_read(ptr)\n", "declare ptr @sz_fs_write(ptr, ptr)\ndeclare ptr @sz_fs_list(ptr)\n", "declare ptr @sz_fs_mkdirs(ptr)\ndeclare ptr @sz_fs_canonicalize(ptr)\ndeclare ptr @sz_sys_args()\n", str5("declare ptr @sz_sys_read_line()\ndeclare ptr @sz_sys_exec(ptr)\ndeclare ptr @sz_sys_getenv(ptr)\n", "declare ptr @sz_clock_real_time()\ndeclare ptr @sz_clock_monotonic()\n", "declare ptr @sz_random_next_int(i64)\ndeclare ptr @sz_net_http_get(ptr)\n", "declare ptr @sz_impurity_run_kit()\ndeclare ptr @sz_lang_signal_int(i64)\n", str5("declare i64 @sz_lang_signal_get(ptr)\ndeclare ptr @sz_lang_signal_set(ptr, i64)\n", "declare ptr @sz_lang_signal_str(ptr)\ndeclare ptr @sz_lang_signal_str_get(ptr)\n", "declare ptr @sz_lang_signal_str_set(ptr, ptr)\ndeclare ptr @sz_lang_signal_list(ptr)\n", "declare ptr @sz_lang_signal_list_get(ptr)\ndeclare ptr @sz_lang_signal_list_set(ptr, ptr)\n", str3("declare ptr @sz_string_lines(ptr)\n", "declare { i32, ptr, ptr } @sz_io_unsafe_run(ptr)\n", "")))))
@@ -183,7 +222,7 @@ def emitExpr(e: List, strs: List, ctx: List, env: List, prefix: String, id: Int,
   emitExprTag(exprTag(e), e, strs, ctx, env, prefix, id, conts)
 
 def emitExprTag(tag: String, e: List, strs: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  if (streq(tag, "Unit") == 1) mkS("", "null", "ptr", id, conts) else if (streq(tag, "IntLit") == 1) mkS("", nodeStr(e, 0), "int", id, conts) else if (streq(tag, "StrLit") == 1) emitSzStringLit(strs, nodeStr(e, 0), prefix, id, conts) else if (streq(tag, "Var") == 1) mkS("", envGetVal(env, nodeStr(e, 0)), envGetKind(env, nodeStr(e, 0)), id, conts) else if (streq(tag, "Delay") == 1) mkS(str3("  %", prefix, "_delay = call ptr @sz_io_delay(ptr @sz_delay_unit_thunk, ptr null)\n"), str3("%", prefix, "_delay"), "io", id, conts) else if (streq(tag, "Println") == 1) emitPrintln(strs, nodeExpr(e, 0), ctx, env, prefix, id, conts) else if (streq(tag, "Fail") == 1) emitFail(strs, nodeExpr(e, 0), ctx, env, prefix, id, conts) else if (streq(tag, "Pure") == 1) emitPure(strs, nodeExpr(e, 0), ctx, env, prefix, id, conts) else if (streq(tag, "Sleep") == 1) emitSleep(strs, nodeExpr(e, 0), ctx, env, prefix, id, conts) else if (streq(tag, "Let") == 1) emitLet(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "If") == 1) emitIf(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "BinOp") == 1) emitBinOp(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Call") == 1) emitCall(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "FlatMap") == 1) emitFlatMap(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Handle") == 1) emitHandle(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Attempt") == 1) emitAttempt(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "IoRace") == 1) emitRaceBoth(strs, e, ctx, env, prefix, id, conts, "race") else if (streq(tag, "IoBoth") == 1) emitRaceBoth(strs, e, ctx, env, prefix, id, conts, "both") else if (streq(tag, "Adt") == 1) emitAdt(e, ctxTags(ctx), prefix, id, conts) else if (streq(tag, "Match") == 1) emitMatch(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Lambda") == 1) emitLambda(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Interp") == 1) emitInterp(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "ListLit") == 1) emitListLit(strs, e, ctx, env, prefix, id, conts) else mkS("", "null", "ptr", id, conts)
+  if (streq(tag, "Unit") == 1) mkS("", "null", "ptr", id, conts) else if (streq(tag, "IntLit") == 1) mkS("", nodeStr(e, 0), "int", id, conts) else if (streq(tag, "StrLit") == 1) emitSzStringLit(strs, nodeStr(e, 0), prefix, id, conts) else if (streq(tag, "Var") == 1) mkS("", envGetVal(env, nodeStr(e, 0)), envGetKind(env, nodeStr(e, 0)), id, conts) else if (streq(tag, "Delay") == 1) mkS(str3("  %", prefix, "_delay = call ptr @sz_io_delay(ptr @sz_delay_unit_thunk, ptr null)\n"), str3("%", prefix, "_delay"), "io", id, conts) else if (streq(tag, "Println") == 1) emitPrintln(strs, nodeExpr(e, 0), ctx, env, prefix, id, conts) else if (streq(tag, "Fail") == 1) emitFail(strs, nodeExpr(e, 0), ctx, env, prefix, id, conts) else if (streq(tag, "Pure") == 1) emitPure(strs, nodeExpr(e, 0), ctx, env, prefix, id, conts) else if (streq(tag, "Sleep") == 1) emitSleep(strs, nodeExpr(e, 0), ctx, env, prefix, id, conts) else if (streq(tag, "Let") == 1) emitLet(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "If") == 1) emitIf(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "BinOp") == 1) emitBinOp(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Call") == 1) emitCall(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "FlatMap") == 1) emitFlatMap(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Handle") == 1) emitHandle(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Attempt") == 1) emitAttempt(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "IoRace") == 1) emitRaceBoth(strs, e, ctx, env, prefix, id, conts, "race") else if (streq(tag, "IoBoth") == 1) emitRaceBoth(strs, e, ctx, env, prefix, id, conts, "both") else if (streq(tag, "Adt") == 1) emitAdt(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Match") == 1) emitMatch(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Lambda") == 1) emitLambda(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Interp") == 1) emitInterp(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "ListLit") == 1) emitListLit(strs, e, ctx, env, prefix, id, conts) else mkS("", "null", "ptr", id, conts)
 
 def emitPrintln(strs: List, arg: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   for {
@@ -275,10 +314,26 @@ def icmpPred(op: String): String =
 def emitIcmp(op: String, code: String, lv: String, rv: String, prefix: String, id: Int, conts: String): List =
   mkS(str4(code, "  %", prefix, str5("_cmp = icmp ", icmpPred(op), " i64 ", lv, str6(", ", rv, "\n  %", prefix, "_v = zext i1 %", str3(prefix, "_cmp", " to i64\n")))), str3("%", prefix, "_v"), "int", id, conts)
 
-def emitAdt(e: List, tags: List, prefix: String, id: Int, conts: String): List =
+def emitAdt(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   for {
-    tag = tagLookup(tags, nodeStr(e, 0), nodeStr(e, 1))
-  } yield mkS(str5("  %", prefix, "_adt = call ptr @sz_adt_new(i32 ", tag, ", ptr null)\n"), str3("%", prefix, "_adt"), "ptr", id, conts)
+    tag = tagLookup(ctxTags(ctx), nodeStr(e, 0), nodeStr(e, 1))
+    args = nodeExpr(e, 2)
+  } yield if (List.isEmpty(args) == 1) mkS(str5("  %", prefix, "_adt = call ptr @sz_adt_new(i32 ", tag, ", ptr null)\n"), str3("%", prefix, "_adt"), "ptr", id, conts) else emitAdtWithArg(strs, e, ctx, env, prefix, id, conts, tag, List.head(args))
+
+def emitAdtWithArg(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String, tag: String, arg: List): List =
+  for {
+    ae = emitExpr(arg, strs, ctx, env, Str.concat(prefix, "_ap"), id, conts)
+    pty = payloadLookup(ctxPayloads(ctx), nodeStr(e, 0), nodeStr(e, 1))
+  } yield emitAdtFinish(ae, prefix, tag, pty)
+
+def emitAdtFinish(ae: List, prefix: String, tag: String, pty: String): List =
+  if (streq(pty, "Int") == 1) emitAdtIntPayload(ae, prefix, tag) else mkS(str4(sCode(ae), "  %", prefix, str5("_adt = call ptr @sz_adt_new(i32 ", tag, ", ptr ", sValue(ae), ")\n")), str3("%", prefix, "_adt"), "ptr", sId(ae), sConts(ae))
+
+def emitAdtIntPayload(ae: List, prefix: String, tag: String): List =
+  for {
+    v = if (streq(sKind(ae), "int") == 1) sValue(ae) else str3("%", prefix, "_ap0")
+    pre = if (streq(sKind(ae), "int") == 1) sCode(ae) else str4(sCode(ae), "  %", prefix, "_ap0 = add i64 0, 0\n")
+  } yield mkS(str4(pre, "  %", prefix, str5("_box = call ptr @sz_box_i64(i64 ", v, ")\n  %", prefix, str4("_adt = call ptr @sz_adt_new(i32 ", tag, ", ptr %", Str.concat(prefix, "_box)\n")))), str3("%", prefix, "_adt"), "ptr", sId(ae), sConts(ae))
 
 def emitSwitchLabels(arms: List, tags: List, prefix: String, mid: Int, i: Int): String =
   if (List.isEmpty(arms) == 1) "" else emitSwitchLabelOne(List.head(arms), List.tail(arms), tags, prefix, mid, i)
@@ -300,23 +355,37 @@ def emitMatchAfterScrut(strs: List, e: List, ctx: List, env: List, prefix: Strin
     merge = str4(prefix, "_merge_", Str.fromInt(mid), "")
     defaultL = str4(prefix, "_default_", Str.fromInt(mid), "")
     sw = str4(sCode(se), "  %", prefix, str5("_tag = call i32 @sz_adt_tag(ptr ", sValue(se), ")\n  switch i32 %", prefix, str5("_tag, label %", defaultL, " [", emitSwitchLabels(arms, ctxTags(ctx), prefix, mid, 0), " ]\n")))
-    ar = emitMatchArms(strs, arms, ctx, env, prefix, mid, merge, sId(se) + 1, sConts(se), sw, "", "io", 0)
+    ar = emitMatchArms(strs, arms, ctx, env, prefix, mid, merge, sValue(se), sId(se) + 1, sConts(se), sw, "", "io", 0)
   } yield emitMatchDefault(strs, arms, ctx, env, prefix, mid, merge, defaultL, ar)
 
-def emitMatchArms(strs: List, arms: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, id: Int, conts: String, code: String, phi: String, kind: String, i: Int): List =
-  if (List.isEmpty(arms) == 1) mkS(code, phi, kind, id, conts) else emitMatchArmOne(List.head(arms), List.tail(arms), strs, ctx, env, prefix, mid, merge, id, conts, code, phi, kind, i)
+def emitMatchArms(strs: List, arms: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, scrut: String, id: Int, conts: String, code: String, phi: String, kind: String, i: Int): List =
+  if (List.isEmpty(arms) == 1) mkS(code, phi, kind, id, conts) else emitMatchArmOne(List.head(arms), List.tail(arms), strs, ctx, env, prefix, mid, merge, scrut, id, conts, code, phi, kind, i)
 
-def emitMatchArmOne(arm: List, rest: List, strs: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, id: Int, conts: String, code: String, phi: String, kind: String, i: Int): List =
-  if (streq(exprTag(armPat(arm)), "PatWild") == 1) emitMatchArms(strs, rest, ctx, env, prefix, mid, merge, id, conts, code, phi, kind, i + 1) else emitMatchArmBody(arm, rest, strs, ctx, env, prefix, mid, merge, id, conts, code, phi, kind, i)
+def emitMatchArmOne(arm: List, rest: List, strs: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, scrut: String, id: Int, conts: String, code: String, phi: String, kind: String, i: Int): List =
+  if (streq(exprTag(armPat(arm)), "PatWild") == 1) emitMatchArms(strs, rest, ctx, env, prefix, mid, merge, scrut, id, conts, code, phi, kind, i + 1) else emitMatchArmBody(arm, rest, strs, ctx, env, prefix, mid, merge, scrut, id, conts, code, phi, kind, i)
 
-def emitMatchArmBody(arm: List, rest: List, strs: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, id: Int, conts: String, code: String, phi: String, kind: String, i: Int): List =
+def emitMatchArmBody(arm: List, rest: List, strs: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, scrut: String, id: Int, conts: String, code: String, phi: String, kind: String, i: Int): List =
   for {
     label = str4(prefix, "_arm_", Str.fromInt(mid), str3("_", Str.fromInt(i), ""))
-    ae = emitExpr(armBody(arm), strs, ctx, env, str4(prefix, "_a", Str.fromInt(mid), str3("_", Str.fromInt(i), "")), id, conts)
-    code2 = str4(code, label, ":\n", str4(sCode(ae), "  br label %", merge, "\n"))
+    bound = emitPatBind(armPat(arm), ctx, env, prefix, mid, i, scrut)
+    ae = emitExpr(armBody(arm), strs, ctx, sndL(bound), str4(prefix, "_a", Str.fromInt(mid), str3("_", Str.fromInt(i), "")), id, conts)
+    code2 = str5(code, label, ":\n", fst(bound), str4(sCode(ae), "  br label %", merge, "\n"))
     phi2 = if (streq(phi, "") == 1) str5(" [ ", sValue(ae), ", %", label, " ]") else str5(phi, ", [ ", sValue(ae), Str.concat(", %", label), " ]")
     kind2 = if (streq(phi, "") == 1) sKind(ae) else kind
-  } yield emitMatchArms(strs, rest, ctx, env, prefix, mid, merge, sId(ae), sConts(ae), code2, phi2, kind2, i + 1)
+  } yield emitMatchArms(strs, rest, ctx, env, prefix, mid, merge, scrut, sId(ae), sConts(ae), code2, phi2, kind2, i + 1)
+
+def emitPatBind(pat: List, ctx: List, env: List, prefix: String, mid: Int, i: Int, scrut: String): List =
+  for {
+    bind = nodeStr(pat, 2)
+  } yield if (Str.len(bind) == 0) pairSL("", env) else emitPatBindPayload(pat, ctx, env, prefix, mid, i, scrut, bind)
+
+def emitPatBindPayload(pat: List, ctx: List, env: List, prefix: String, mid: Int, i: Int, scrut: String, bind: String): List =
+  for {
+    pl = str4(prefix, "_pl", Str.fromInt(mid), str3("_", Str.fromInt(i), ""))
+    bn = str4(prefix, "_b", Str.fromInt(mid), str3("_", Str.fromInt(i), ""))
+    pty = payloadLookup(ctxPayloads(ctx), nodeStr(pat, 0), nodeStr(pat, 1))
+    code = str5("  %", pl, " = call ptr @sz_adt_payload(ptr ", scrut, ")\n")
+  } yield if (streq(pty, "Int") == 1) pairSL(str4(code, "  %", bn, str3(" = call i64 @sz_unbox_i64(ptr %", pl, ")\n")), envPut(env, bind, Str.concat("%", bn), "int")) else pairSL(code, envPut(env, bind, Str.concat("%", pl), "ptr"))
 
 def emitMatchDefault(strs: List, arms: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, defaultL: String, ar: List): List =
   for {
@@ -695,7 +764,8 @@ def emitProgram(prog: List): String =
   for {
     strs = collectProgram(prog)
     tags = buildEnumTags(progEnums(prog))
-    ctx = emitCtx(progDefs(prog), tags)
+    payloads = buildEnumPayloads(progEnums(prog))
+    ctx = emitCtx(progDefs(prog), tags, payloads)
     header = emitHeader(strs)
     defsIr = emitDefs(progDefs(prog), strs, ctx, 0, "", "")
   } yield Str.concat(header, emitMain(prog, strs, ctx, defsIr))

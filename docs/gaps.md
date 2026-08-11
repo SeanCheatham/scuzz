@@ -35,11 +35,11 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### 4. Language growth vs the self-host ratchet
 
-**Current state.** Stage 0 supports payload ADTs with a single `Int` or `String` field (`EnumCase { name, fields }`, `sz_adt_payload`, match binders) — proven by Stage-0 unit tests. `examples/adt` and `compiler-scuzz/` stay nullary-only so the dual-boot gate does not need the new syntax yet. `List` is monomorphic; the only type constructor is builtin `IO[T]`. No records, traits, or user generics in either compiler, though `compatibility.md` keeps "generics (monomorphize early)" as direction. The self-hosted compiler (~3,100 lines under `compiler-scuzz/src/`) still contorts around nullary/string-tag encodings.
+**Current state.** Stage 0 and self-host (`compiler-scuzz/`) support payload ADTs with a single `Int` or `String` field (`EnumCase` / `Case` + fields, `sz_adt_payload`, match binders) — proven by Stage-0 unit tests and `examples/adt` (`Opt.Some(42)`). Compiler sources stay on List+string-tag IR (multi-field cases would be needed for a full AST rewrite). `List` is monomorphic; the only type constructor is builtin `IO[T]`. No records, traits, or user generics in either compiler, though `compatibility.md` keeps "generics (monomorphize early)" as direction.
 
-**Unproven.** Whether the Stage 0 → 1 → 2 ratchet stays tractable once features are structurally big. Every feature lands in Stage 0 first, then gets ported into the kernel dialect, then must survive the fixpoint gate (`scripts/selfhost.sh`, byte-identical Stage-2/3 IR). Payload ADTs are the first stress test: Stage 0 is in; **self-host adoption** (`compiler-scuzz/` parse/type/codegen + rewriting compiler IR/AST to use payloads) is the remaining proof. Generics + early monomorphization is the second, larger one.
+**Unproven.** Whether the Stage 0 → 1 → 2 ratchet stays tractable once features are structurally big. Every feature lands in Stage 0 first, then gets ported into the kernel dialect, then must survive the fixpoint gate (`scripts/selfhost.sh`, byte-identical Stage-2/3 IR). Payload ADTs for **user programs** are in (Stage 0 + self-host). Rewriting the compiler's own IR/AST onto payloads remains blocked on multi-field cases. Generics + early monomorphization is the next large stress test.
 
-**Proof.** Payload ADTs land in Stage 0 (done), `compiler-scuzz/` adopts them for its own IR/AST types, and the dual-boot gate still passes with the fixpoint intact.
+**Proof.** Payload ADTs land in Stage 0 (done), `compiler-scuzz/` compiles unary payload ADTs for user programs through the dual-boot gate (done for `examples/adt`), and a later multi-field / compiler-IR rewrite still has to keep the fixpoint intact.
 
 ### 5. Mobile on real devices
 
