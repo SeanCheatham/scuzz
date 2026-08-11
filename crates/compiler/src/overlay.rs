@@ -57,6 +57,8 @@ pub fn apply_overlays(
             )));
         }
         for d in prog.defs {
+            let mut d = d;
+            d.module = sim.stem.clone();
             replace_sim_def(&mut live, &d, &sim.label)?;
         }
     }
@@ -78,7 +80,13 @@ pub fn apply_overlays(
             )));
         }
         for d in prog.defs {
-            if live.defs.iter().any(|x| x.name == d.name) {
+            let mut d = d;
+            d.module = law.stem.clone();
+            if live
+                .defs
+                .iter()
+                .any(|x| x.module == d.module && x.name == d.name)
+            {
                 return Err(OverlayError::Msg(format!(
                     "{}: law `{}` collides with a live/sim def",
                     law.label, d.name
@@ -105,7 +113,11 @@ pub fn apply_overlays(
 }
 
 fn replace_sim_def(live: &mut Program, sim: &FunDef, label: &str) -> Result<(), OverlayError> {
-    let Some(idx) = live.defs.iter().position(|d| d.name == sim.name) else {
+    let Some(idx) = live
+        .defs
+        .iter()
+        .position(|d| d.module == sim.module && d.name == sim.name)
+    else {
         return Err(OverlayError::Msg(format!(
             "{label}: sim def `{}` has no live twin",
             sim.name
@@ -170,6 +182,7 @@ pub fn residualize_laws(program: &mut Program, law_names: &[String]) {
         });
     }
     program.main = MainDef {
+        module: program.main.module.clone(),
         name: program.main.name.clone(),
         body,
     };

@@ -1,4 +1,5 @@
 use crate::ast::{BinOp, EnumDef, Expr, ExprKind, FunDef, Pattern, Program, Type};
+use crate::resolve::{user_symbol, FunIndex};
 use std::collections::HashMap;
 use std::fmt::Write as _;
 
@@ -19,7 +20,7 @@ pub fn emit_llvm(program: &Program) -> String {
 
     let enum_tags = build_enum_tags(&program.enums);
     let enum_payloads = build_enum_payloads(&program.enums);
-    let funs: HashMap<String, &FunDef> = program.defs.iter().map(|d| (d.name.clone(), d)).collect();
+    let funs = FunIndex::build(&program.defs).expect("duplicate defs should be rejected earlier");
 
     let mut out = String::new();
     writeln!(out, "; Scuzz Lang Stage-0 generated LLVM IR").unwrap();
@@ -140,15 +141,18 @@ pub fn emit_llvm(program: &Program) -> String {
         enum_tags: &enum_tags,
         enum_payloads: &enum_payloads,
         funs: &funs,
+        current_module: "",
         cont_id: &mut cont_id,
         conts: &mut conts,
     };
 
     let mut fundef_ir = String::new();
     for d in &program.defs {
+        ctx.current_module = d.module.as_str();
         emit_fundef(d, &mut ctx, &mut fundef_ir);
     }
 
+    ctx.current_module = program.main.module.as_str();
     let mut locals: HashMap<String, (String, Kind)> = HashMap::new();
     let body_expr = emit_expr(&program.main.body, &mut ctx, &mut locals, "build");
 
@@ -175,7 +179,8 @@ struct EmitCtx<'a> {
     enum_tags: &'a HashMap<(String, String), i32>,
     /// Payload field type for unary cases (absent / Unit-like = nullary).
     enum_payloads: &'a HashMap<(String, String), Vec<Type>>,
-    funs: &'a HashMap<String, &'a FunDef>,
+    funs: &'a FunIndex<'a>,
+    current_module: &'a str,
     cont_id: &'a mut usize,
     conts: &'a mut String,
 }
@@ -369,7 +374,8 @@ fn llvm_escape(s: &str) -> String {
 
 fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
     let ret = llvm_type(&def.ret);
-    write!(out, "define internal {ret} @sz_user_{}(", def.name).unwrap();
+    let sym = user_symbol(&def.module, &def.name);
+    write!(out, "define internal {ret} @{sym}(").unwrap();
     for (i, p) in def.params.iter().enumerate() {
         if i > 0 {
             write!(out, ", ").unwrap();
@@ -2256,15 +2262,21 @@ fn emit_call(
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         other => {
-            let f = ctx.funs.get(other).copied();
-            let (ret_ty, ret_kind, payload) = if let Some(f) = f {
+            let f = ctx.funs.resolve(other, ctx.current_module).ok();
+            let (ret_ty, ret_kind, payload, sym) = if let Some(f) = f {
                 (
                     llvm_type(&f.ret),
                     kind_of_type(&f.ret),
                     payload_of_type(&f.ret),
+                    user_symbol(&f.module, &f.name),
                 )
             } else {
-                ("ptr", Kind::Ptr, Kind::Ptr)
+                (
+                    "ptr",
+                    Kind::Ptr,
+                    Kind::Ptr,
+                    format!("sz_user_{other}"),
+                )
             };
             let mut arg_parts = Vec::new();
             if let Some(f) = f {
@@ -2303,7 +2315,7 @@ fn emit_call(
             }
             writeln!(
                 code,
-                "  %{prefix}_v = call {ret_ty} @sz_user_{other}({})",
+                "  %{prefix}_v = call {ret_ty} @{sym}({})",
                 arg_parts.join(", ")
             )
             .unwrap();
@@ -2427,6 +2439,26 @@ def add1(n: Int): Int = n + 1
         assert!(ir.contains("@sz_user_add1"));
         assert!(ir.contains("icmp"));
         assert!(ir.contains("sz_runtime_main_args"));
+    }
+
+    #[test]
+    fn emit_namespaced_module_defs() {
+        let p = crate::parser::parse_sources(&[
+            ("A.scuzz".into(), "def tag(): String = \"a\"\n".into()),
+            ("B.scuzz".into(), "def tag(): String = \"b\"\n".into()),
+            (
+                "Main.scuzz".into(),
+                "@main def main: IO[Unit] = IO.println(Str.concat(A.tag(), B.tag()))\n".into(),
+            ),
+        ])
+        .unwrap();
+        let p = crate::lower::lower_program(p);
+        crate::typ::typecheck(&p).unwrap();
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("@sz_user_A_tag"));
+        assert!(ir.contains("@sz_user_B_tag"));
+        assert!(ir.contains("call ptr @sz_user_A_tag()"));
+        assert!(ir.contains("call ptr @sz_user_B_tag()"));
     }
 
     #[test]

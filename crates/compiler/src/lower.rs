@@ -161,14 +161,28 @@ pub fn lower_expr(expr: Expr, ctors: &HashSet<(String, String)>) -> Expr {
             enum_name,
             case_name,
             args,
-        } => Expr::new(
-            ExprKind::AdtConstruct {
-                enum_name,
-                case_name,
-                args: args.into_iter().map(|e| lower_expr(e, ctors)).collect(),
-            },
-            span,
-        ),
+        } => {
+            let args: Vec<Expr> = args.into_iter().map(|e| lower_expr(e, ctors)).collect();
+            // Nullary `Ident.Ident` is AdtConstruct at parse; if not an enum case, treat as
+            // zero-arg module call (`A.tag`).
+            if args.is_empty() && !ctors.contains(&(enum_name.clone(), case_name.clone())) {
+                return Expr::new(
+                    ExprKind::Call {
+                        callee: format!("{enum_name}.{case_name}"),
+                        args,
+                    },
+                    span,
+                );
+            }
+            Expr::new(
+                ExprKind::AdtConstruct {
+                    enum_name,
+                    case_name,
+                    args,
+                },
+                span,
+            )
+        }
         ExprKind::Lambda { param, body } => Expr::new(
             ExprKind::Lambda {
                 param,
@@ -181,11 +195,7 @@ pub fn lower_expr(expr: Expr, ctors: &HashSet<(String, String)>) -> Expr {
 }
 
 fn split_dotted(callee: &str) -> Option<(String, String)> {
-    let (a, b) = callee.split_once('.')?;
-    if a.is_empty() || b.is_empty() || b.contains('.') {
-        return None;
-    }
-    Some((a.to_string(), b.to_string()))
+    crate::resolve::split_dotted(callee).map(|(a, b)| (a.to_string(), b.to_string()))
 }
 
 fn desugar_for(

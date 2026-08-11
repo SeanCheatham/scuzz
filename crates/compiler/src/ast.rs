@@ -29,6 +29,8 @@ pub struct EnumCase {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct FunDef {
+    /// File-stem module id (`Foo.scuzz` → `Foo`). Empty when parsed without a path.
+    pub module: String,
     pub name: String,
     pub params: Vec<Param>,
     pub ret: Type,
@@ -43,6 +45,8 @@ pub struct Param {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MainDef {
+    /// File-stem module id of the `@main` source file.
+    pub module: String,
     pub name: String,
     pub body: Expr,
 }

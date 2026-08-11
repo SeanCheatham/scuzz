@@ -10,6 +10,7 @@ pub mod lower;
 pub mod manifest;
 pub mod overlay;
 pub mod parser;
+pub mod resolve;
 pub mod span;
 pub mod typ;
 

@@ -1,0 +1,8 @@
+[package]
+name = "modules"
+version = "0.1.0"
+description = "File-as-module vertical slice (Stage 0)"
+
+[targets.native]
+kind = "executable"
+main = "Main"

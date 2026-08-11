@@ -1,4 +1,5 @@
-use crate::ast::{BinOp, EnumDef, Expr, ExprKind, FunDef, Program, Type};
+use crate::ast::{BinOp, EnumDef, Expr, ExprKind, Program, Type};
+use crate::resolve::{FunIndex, ResolveError};
 use crate::span::Span;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -44,18 +45,18 @@ pub fn typecheck(program: &Program) -> Result<(), TypeError> {
         .iter()
         .map(|e| (e.name.as_str(), e))
         .collect();
-    let mut funs: HashMap<String, &FunDef> = HashMap::new();
-    for d in &program.defs {
-        if funs.insert(d.name.clone(), d).is_some() {
-            return Err(TypeError::Msg(format!("duplicate def {}", d.name)));
+    let funs = FunIndex::build(&program.defs).map_err(|e| match e {
+        ResolveError::Duplicate { module, name } => {
+            TypeError::Msg(format!("duplicate def {module}.{name}"))
         }
-    }
+        other => TypeError::Msg(other.to_string()),
+    })?;
     for d in &program.defs {
         let mut env: HashMap<String, Type> = HashMap::new();
         for p in &d.params {
             env.insert(p.name.clone(), p.ty.clone());
         }
-        let body_ty = infer(&d.body, &enums, &funs, &mut env)?;
+        let body_ty = infer(&d.body, &enums, &funs, &d.module, &mut env)?;
         if !types_compat(&body_ty, &d.ret) {
             return Err(TypeError::At {
                 msg: format!(
@@ -67,7 +68,13 @@ pub fn typecheck(program: &Program) -> Result<(), TypeError> {
         }
     }
     let mut env: HashMap<String, Type> = HashMap::new();
-    let ty = infer(&program.main.body, &enums, &funs, &mut env)?;
+    let ty = infer(
+        &program.main.body,
+        &enums,
+        &funs,
+        &program.main.module,
+        &mut env,
+    )?;
     match ty {
         Type::Io(inner) if matches!(*inner, Type::Unit) => Ok(()),
         other => Err(TypeError::At {
@@ -80,7 +87,8 @@ pub fn typecheck(program: &Program) -> Result<(), TypeError> {
 fn infer(
     expr: &Expr,
     enums: &HashMap<&str, &EnumDef>,
-    funs: &HashMap<String, &FunDef>,
+    funs: &FunIndex<'_>,
+    current_module: &str,
     env: &mut HashMap<String, Type>,
 ) -> Result<Type, TypeError> {
     (|| {
@@ -90,7 +98,7 @@ fn infer(
         ExprKind::StrLit(_) => Ok(Type::String),
         ExprKind::ListLit { elems } => {
             for e in elems {
-                infer(e, enums, funs, env)?;
+                infer(e, enums, funs, current_module, env)?;
             }
             Ok(Type::List)
         }
@@ -99,7 +107,7 @@ fn infer(
                 match part {
                     crate::ast::InterpPart::Lit(_) => {}
                     crate::ast::InterpPart::Expr(e) => {
-                        let t = infer(e, enums, funs, env)?;
+                        let t = infer(e, enums, funs, current_module, env)?;
                         if !matches!(t, Type::String | Type::Int | Type::Opaque(_)) {
                             return Err(TypeError::Msg(format!(
                                 "interpolation hole must be String or Int, got {t:?}"
@@ -111,18 +119,18 @@ fn infer(
             Ok(Type::String)
         },
         ExprKind::IoPrintln(e) | ExprKind::IoFail(e) => {
-            let t = infer(e, enums, funs, env)?;
+            let t = infer(e, enums, funs, current_module, env)?;
             expect_ty(&t, &Type::String)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         ExprKind::IoSleep(e) => {
-            let t = infer(e, enums, funs, env)?;
+            let t = infer(e, enums, funs, current_module, env)?;
             expect_ty(&t, &Type::Int)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         ExprKind::IoDelayUnit | ExprKind::EffectsRunKit => Ok(Type::Io(Box::new(Type::Unit))),
         ExprKind::IoPure(inner) => {
-            let t = infer(inner, enums, funs, env)?;
+            let t = infer(inner, enums, funs, current_module, env)?;
             Ok(Type::Io(Box::new(t)))
         }
         ExprKind::Var(name) => env
@@ -149,15 +157,15 @@ fn infer(
                 )));
             }
             for (arg, (_fname, fty)) in args.iter().zip(case.fields.iter()) {
-                let at = infer(arg, enums, funs, env)?;
+                let at = infer(arg, enums, funs, current_module, env)?;
                 expect_ty(&at, fty)?;
             }
             Ok(Type::Adt(enum_name.clone()))
         }
         ExprKind::Let { name, value, body } => {
-            let vt = infer(value, enums, funs, env)?;
+            let vt = infer(value, enums, funs, current_module, env)?;
             let old = env.insert(name.clone(), vt);
-            let bt = infer(body, enums, funs, env)?;
+            let bt = infer(body, enums, funs, current_module, env)?;
             if let Some(v) = old {
                 env.insert(name.clone(), v);
             } else {
@@ -170,14 +178,14 @@ fn infer(
             then_branch,
             else_branch,
         } => {
-            let ct = infer(cond, enums, funs, env)?;
+            let ct = infer(cond, enums, funs, current_module, env)?;
             if !matches!(ct, Type::Int | Type::Bool) {
                 return Err(TypeError::Msg(format!(
                     "if condition must be Int/Bool, got {ct:?}"
                 )));
             }
-            let tt = infer(then_branch, enums, funs, env)?;
-            let et = infer(else_branch, enums, funs, env)?;
+            let tt = infer(then_branch, enums, funs, current_module, env)?;
+            let et = infer(else_branch, enums, funs, current_module, env)?;
             if !types_compat(&tt, &et) {
                 return Err(TypeError::Msg(format!(
                     "if branches disagree: {tt:?} vs {et:?}"
@@ -186,8 +194,8 @@ fn infer(
             Ok(tt)
         }
         ExprKind::Binary { op, left, right } => {
-            let lt = infer(left, enums, funs, env)?;
-            let rt = infer(right, enums, funs, env)?;
+            let lt = infer(left, enums, funs, current_module, env)?;
+            let rt = infer(right, enums, funs, current_module, env)?;
             match op {
                 BinOp::Add if matches!(lt, Type::String) && matches!(rt, Type::String) => {
                     Ok(Type::String)
@@ -229,13 +237,13 @@ fn infer(
                 }
             }
         }
-        ExprKind::Call { callee, args } => infer_call(callee, args, enums, funs, env),
+        ExprKind::Call { callee, args } => infer_call(callee, args, enums, funs, current_module, env),
         ExprKind::Match { scrutinee, arms } => {
-            let st = infer(scrutinee, enums, funs, env)?;
+            let st = infer(scrutinee, enums, funs, current_module, env)?;
             let mut result: Option<Type> = None;
             for arm in arms {
                 let bound = bind_pattern(&arm.pattern, &st, enums, env)?;
-                let bt = infer(&arm.body, enums, funs, env)?;
+                let bt = infer(&arm.body, enums, funs, current_module, env)?;
                 unbind_pattern(bound, env);
                 match &result {
                     None => result = Some(bt),
@@ -250,7 +258,7 @@ fn infer(
             result.ok_or_else(|| TypeError::Msg("empty match".into()))
         }
         ExprKind::FlatMap { inner, param, body } => {
-            let it = infer(inner, enums, funs, env)?;
+            let it = infer(inner, enums, funs, current_module, env)?;
             let Type::Io(inner_t) = it else {
                 return Err(TypeError::Msg("flatMap receiver must be IO[_]".into()));
             };
@@ -259,7 +267,7 @@ fn infer(
             } else {
                 None
             };
-            let bt = infer(body, enums, funs, env)?;
+            let bt = infer(body, enums, funs, current_module, env)?;
             if let Some(p) = param {
                 if let Some(v) = old {
                     env.insert(p.clone(), v);
@@ -275,13 +283,13 @@ fn infer(
             Ok(bt)
         }
         ExprKind::HandleErrorWith { inner, body } => {
-            let it = infer(inner, enums, funs, env)?;
+            let it = infer(inner, enums, funs, current_module, env)?;
             if !matches!(it, Type::Io(_)) {
                 return Err(TypeError::Msg(
                     "handleErrorWith receiver must be IO[_]".into(),
                 ));
             }
-            let bt = infer(body, enums, funs, env)?;
+            let bt = infer(body, enums, funs, current_module, env)?;
             if !matches!(bt, Type::Io(_)) {
                 return Err(TypeError::Msg(
                     "handleErrorWith body must return IO[_]".into(),
@@ -290,7 +298,7 @@ fn infer(
             Ok(bt)
         }
         ExprKind::Attempt { inner } => {
-            let it = infer(inner, enums, funs, env)?;
+            let it = infer(inner, enums, funs, current_module, env)?;
             if !matches!(it, Type::Io(_)) {
                 return Err(TypeError::Msg("attempt receiver must be IO[_]".into()));
             }
@@ -305,7 +313,7 @@ fn infer(
                     env.insert(p.clone(), Type::Opaque("Param".into())),
                 )
             });
-            let _ = infer(body, enums, funs, env)?;
+            let _ = infer(body, enums, funs, current_module, env)?;
             if let Some((p, old_val)) = old {
                 match old_val {
                     Some(v) => {
@@ -319,8 +327,8 @@ fn infer(
             Ok(Type::Opaque("TapFn".into()))
         }
         ExprKind::IoRace { left, right } | ExprKind::IoBoth { left, right } => {
-            let lt = infer(left, enums, funs, env)?;
-            let rt = infer(right, enums, funs, env)?;
+            let lt = infer(left, enums, funs, current_module, env)?;
+            let rt = infer(right, enums, funs, current_module, env)?;
             if !matches!(lt, Type::Io(_)) || !matches!(rt, Type::Io(_)) {
                 return Err(TypeError::Msg(
                     "IO.race/both arguments must be IO[_]".into(),
@@ -341,12 +349,13 @@ fn infer_call(
     callee: &str,
     args: &[Expr],
     enums: &HashMap<&str, &EnumDef>,
-    funs: &HashMap<String, &FunDef>,
+    funs: &FunIndex<'_>,
+    current_module: &str,
     env: &mut HashMap<String, Type>,
 ) -> Result<Type, TypeError> {
     let mut arg_tys = Vec::new();
     for a in args {
-        arg_tys.push(infer(a, enums, funs, env)?);
+        arg_tys.push(infer(a, enums, funs, current_module, env)?);
     }
     match callee {
         "Str.concat" => {
@@ -636,9 +645,9 @@ fn infer_call(
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         _ => {
-            let f = funs
-                .get(callee)
-                .ok_or_else(|| TypeError::Msg(format!("unknown function {callee}")))?;
+            let f = funs.resolve(callee, current_module).map_err(|e| {
+                TypeError::Msg(e.to_string())
+            })?;
             if f.params.len() != arg_tys.len() {
                 return Err(TypeError::Msg(format!(
                     "{callee} expects {} args, got {}",
@@ -863,5 +872,52 @@ enum Pair:
         let p = lower_program(parse(src).unwrap());
         let err = typecheck(&p).unwrap_err();
         assert!(err.message().contains("expects 2 binder(s)"));
+    }
+
+    #[test]
+    fn duplicate_def_across_modules_ok() {
+        let p = crate::parser::parse_sources(&[
+            (
+                "A.scuzz".into(),
+                "def tag(): String = \"a\"\n".into(),
+            ),
+            (
+                "B.scuzz".into(),
+                "def tag(): String = \"b\"\n".into(),
+            ),
+            (
+                "Main.scuzz".into(),
+                "@main def main: IO[Unit] = IO.println(Str.concat(A.tag(), B.tag()))\n".into(),
+            ),
+        ])
+        .unwrap();
+        let p = lower_program(p);
+        typecheck(&p).expect("cross-module duplicate bare names should typecheck when qualified");
+    }
+
+    #[test]
+    fn bare_ambiguous_tag_requires_qualify() {
+        let p = crate::parser::parse_sources(&[
+            (
+                "A.scuzz".into(),
+                "def tag(): String = \"a\"\n".into(),
+            ),
+            (
+                "B.scuzz".into(),
+                "def tag(): String = \"b\"\n".into(),
+            ),
+            (
+                "Main.scuzz".into(),
+                "@main def main: IO[Unit] = IO.println(tag())\n".into(),
+            ),
+        ])
+        .unwrap();
+        let p = lower_program(p);
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("ambiguous"),
+            "unexpected: {}",
+            err.message()
+        );
     }
 }

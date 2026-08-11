@@ -67,7 +67,9 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### File-as-module (vs merge-all `src/`)
 
-Vision direction: `scuzz.toml` package = crate, `Foo.scuzz` = module ([vision.md](vision.md#modules-and-source-shape)). Stem pairing for `*.scuzz_sim` / `*.scuzz_laws` is implemented; Stage 0/1/2 still merge all live `src/**/*.scuzz` into one program with a single `@main` (no per-file visibility / namespaces yet).
+**Stage 0 vertical slice.** Module id = file stem (`Foo.scuzz` → `Foo`). Defs are namespaced: the same bare `def` name may appear in two modules; calls use `Module.def` / `Module.def(args)` (existing `Ident.Ident` syntax). Intra-module bare names resolve locally; from another module, qualify when the name is ambiguous (unique cross-module bare names still resolve, so path-dep helpers like `examples/shared` keep working). Enums stay globally unique (`examples/adt`). Codegen mangles `@sz_user_{Module}_{def}`. Proof: `examples/modules` (`A.tag` + `B.tag` → `ab`).
+
+**Residual.** No `private`/`pub`, no `import`, no enum-per-module. Self-host (`compiler-scuzz/`) still merges defs by bare name (duplicate across files errors); `examples/modules` is Stage 0–only until Stage 1 ports FunIndex / mangling. Stem-paired `*.scuzz_sim` / `*.scuzz_laws` already exist.
 
 ### Diagnostics source locations
 
@@ -75,7 +77,9 @@ Stage 0 and self-host (`compiler-scuzz/`) thread `Span { file, start, end }` (by
 
 ### Dependency forms beyond `path`
 
-`scuzz.toml` supports path deps only (enforced in `crates/compiler/src/manifest.rs` and `compiler-scuzz/src/Toml.scuzz`; see [`schemas/scuzz-toml.md`](schemas/scuzz-toml.md)). Git and versioned/hosted artifacts are direction, not implementation. No registry exists. Deliberately last: no ecosystem theater before there is an ecosystem.
+`scuzz.toml` supports path deps only (enforced in `crates/compiler/src/manifest.rs` and `compiler-scuzz/src/Toml.scuzz`; see [`schemas/scuzz-toml.md`](schemas/scuzz-toml.md)). Git and versioned/hosted artifacts are direction, not implementation. No registry exists.
+
+**Deferred by decision (deliberately last).** No ecosystem theater before there is an ecosystem. In-repo work that does **not** close this: inventing a registry protocol, fake `git =` resolution without a hosting story, or Maven-shaped coordinates. Revisit only after path deps + file-as-module are the proven reuse story.
 
 ### Deferred by decision (not blocked)
 
