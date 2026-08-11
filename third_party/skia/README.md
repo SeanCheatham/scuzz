@@ -15,5 +15,5 @@ additive measure/font APIs added to that header. Unpack so the linker can find t
 under `prebuilt/<triple>/`. No Skia headers are required by callers — only `sk_capi.h`.
 
 Wiring those prebuilts into `crates/ffi-skia/Makefile` stays deferred until such a URL
-exists (see `docs/gaps.md` unknown 1). Impeller / GPU presenters stay deferred
+exists (see `docs/gaps.md` unknown 1 — real text). Impeller / GPU presenters stay deferred
 (`docs/vision.md`).

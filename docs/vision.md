@@ -57,7 +57,7 @@ libc `malloc`/`free` via `sz_alloc` / `sz_free`. No moving collector yet. Clear 
 
 ### Skia
 
-No vendored Skia tree. Thin `sk_capi` + CPU `sk_sw` for Headless CI (what `crates/ffi-skia` links today). `scripts/fetch_skia.sh` can drop prebuilts under `third_party/skia/prebuilt/` when `SCUZZ_SKIA_URL` is set; wiring those into the Makefile is deferred until a hosted prebuilt that implements `sk_capi` exists (see [`gaps.md`](gaps.md) unknown 1). Impeller deferred (GPU presenters later; must not change `Ui` session or logical goldens). Callers depend only on `sk_capi.h`.
+No vendored Skia tree. Thin `sk_capi` + CPU `sk_sw` for Headless CI (what `crates/ffi-skia` links today). `scripts/fetch_skia.sh` can drop prebuilts under `third_party/skia/prebuilt/` when `SCUZZ_SKIA_URL` is set; wiring those into the Makefile is deferred until a hosted prebuilt that implements `sk_capi` exists (see [`gaps.md`](gaps.md) unknown 1 — real text). Impeller deferred (GPU presenters later; must not change `Ui` session or logical goldens). Callers depend only on `sk_capi.h`.
 
 ### IO errors
 
@@ -200,7 +200,7 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ## Open work
 
-Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Closed in-tree slices: stem-paired laws/sim, desktop Window typing (`SZ_INPUT_TEXT_EDIT`), Stage-0 spans, self-host span diagnostics parity, alloc accounting / optional `test-asan`, Stage-0 / self-host multi-field payload ADTs for user programs (`examples/adt`), Stage-0 / self-host file-as-module def namespaces (`examples/modules`), cooperative fiber `race`/`both`/`Queue`/`Deferred` with TestRuntime virtual-time jumps, long-lived Headless pump flatness (counter-shaped `Signal.map` path). Still open (in-repo, large): rewriting compiler IR/AST onto payloads. **Deferred by decision:** non-path deps, Flutter-style constraints, Windows desktop, LSP, macOS-always-on CI. **Blocked on external assets/toolchains:** real Skia text (needs hosted `SCUZZ_SKIA_URL` prebuilt), device Mobile (needs NDK/Xcode; host shell + stubs only), GPU presenters (downstream of Skia; CPU `sk_sw` only). IME waits on real text rendering.
+Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: real Skia text (blocked on hosted prebuilt), compiler IR onto payload ADTs (in-repo, large), device Mobile (blocked on NDK/Xcode), GPU presenters (downstream of real Skia). Residuals and deferred work live in `gaps.md`. IME waits on real text rendering.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
 
