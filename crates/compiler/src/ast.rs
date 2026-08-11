@@ -1,5 +1,7 @@
 //! Typed-enough AST for the Stage-0 kernel dialect.
 
+use crate::span::Span;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
     /// Dotted package path, e.g. `["scuzz", "compiler"]`.
@@ -54,8 +56,28 @@ pub enum BinOp {
     Or,
 }
 
+/// Expression with source span.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Expr {
+pub struct Expr {
+    pub kind: ExprKind,
+    pub span: Span,
+}
+
+impl Expr {
+    pub fn new(kind: ExprKind, span: Span) -> Self {
+        Self { kind, span }
+    }
+
+    pub fn dummy(kind: ExprKind) -> Self {
+        Self {
+            kind,
+            span: Span::dummy(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ExprKind {
     /// `IO.println(expr)`
     IoPrintln(Box<Expr>),
     /// `IO.delay` — unit delay
