@@ -11,9 +11,9 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### 1. Compiler IR onto payload ADTs
 
-**Status.** Open in-repo (large). User programs already have N-field `Int`/`String` payload ADTs and file-stem def namespaces on Stage 0 and self-host (`examples/adt`, `examples/modules`). Compiler sources still use List+string-tag IR; Format/Typ/Codegen assume that encoding. No records, traits, or user generics yet (`compatibility.md` keeps early-monomorphized generics as direction).
+**Status.** Open in-repo (large). User programs already have N-field `Int`/`String` payload ADTs and file-stem def namespaces on Stage 0 and self-host (`examples/adt`, `examples/modules`). Enum-typed def signatures work on all stages (`normalizeTy` in self-host). Compiler sources use a payload `Tok` enum for the token stream (`compiler-scuzz/src/Tok.scuzz`) with match-based accessors; Format/Typ/Codegen AST/IR still assume List+string-tag encoding. No records, traits, or user generics yet (`compatibility.md` keeps early-monomorphized generics as direction).
 
-**Unproven.** That rewriting the compiler’s own AST/IR onto payload ADTs (and later generics) keeps the self-host ratchet intact.
+**Unproven.** That rewriting the compiler’s own AST/IR onto payload ADTs (and later generics) keeps the self-host ratchet intact. Token mechanics are proven; List-typed payload fields (needed for child nodes) and a true AST node family are not.
 
 **Proof.** At least one AST node family rewritten onto payload ADTs with `scripts/selfhost.sh` green and byte-identical Stage-2/3 IR.
 

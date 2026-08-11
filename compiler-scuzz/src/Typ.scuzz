@@ -84,6 +84,12 @@ def tyIsOpaque(t: String): Int =
 def tyMkOpaque(name: String): String =
   Str.concat("Opaque:", name)
 
+def isBuiltinTy(t: String): Int =
+  if (streq(t, "Unit") == 1) 1 else if (streq(t, "Int") == 1) 1 else if (streq(t, "String") == 1) 1 else if (streq(t, "Bool") == 1) 1 else if (streq(t, "List") == 1) 1 else if (tyIsIo(t) == 1) 1 else if (tyIsAdt(t) == 1) 1 else if (tyIsOpaque(t) == 1) 1 else 0
+
+def normalizeTy(t: String): String =
+  if (isBuiltinTy(t) == 1) t else tyMkAdt(t)
+
 def typesCompat(a: String, b: String): Int =
   if (streq(a, b) == 1) 1 else if (streq(a, "Bool") == 1) if (streq(b, "Int") == 1) 1 else 0 else if (streq(a, "Int") == 1) if (streq(b, "Bool") == 1) 1 else 0 else if (tyIsIo(a) == 1) if (tyIsIo(b) == 1) 1 else 0 else if (tyIsOpaque(a) == 1) 1 else if (tyIsOpaque(b) == 1) 1 else 0
 
@@ -123,7 +129,7 @@ def findDupDefOne(d: List, rest: List, seen: List): String =
   } yield if (defSeen(seen, q) == 1) q else findDupDef(rest, List.cons(q, seen))
 
 def bindParams(params: List, env: List): List =
-  if (List.isEmpty(params) == 1) env else bindParams(List.tail(params), tyEnvPut(env, paramName(List.head(params)), paramType(List.head(params))))
+  if (List.isEmpty(params) == 1) env else bindParams(List.tail(params), tyEnvPut(env, paramName(List.head(params)), normalizeTy(paramType(List.head(params)))))
 
 def mkFuns(mod: String, defs: List): List =
   List.cons(mod, List.cons(defs, List.empty()))
@@ -147,7 +153,8 @@ def typecheckDefsThenMainOne(d: List, rest: List, enums: List, allDefs: List, ma
   for {
     env = bindParams(defParams(d), List.empty())
     bodyR = inferExpr(defBody(d), enums, mkFuns(defModule(d), allDefs), env)
-  } yield if (tyIsOk(bodyR) == 0) bodyR else if (typesCompat(tyVal(bodyR), defRet(d)) == 0) tyErr(str5("def ", defName(d), " body ", tyVal(bodyR), str3(" does not match declared ", defRet(d), ""))) else typecheckDefsThenMain(rest, enums, allDefs, main, mainMod)
+    ret = normalizeTy(defRet(d))
+  } yield if (tyIsOk(bodyR) == 0) bodyR else if (typesCompat(tyVal(bodyR), ret) == 0) tyErr(str5("def ", defName(d), " body ", tyVal(bodyR), str3(" does not match declared ", ret, ""))) else typecheckDefsThenMain(rest, enums, allDefs, main, mainMod)
 
 def checkMainTy(r: String): String =
   if (tyIsOk(r) == 0) r else if (streq(tyVal(r), "IO[Unit]") == 1) tyOk("IO[Unit]") else tyErr(str3("@main body must be IO[Unit], got ", tyVal(r), ""))
@@ -676,8 +683,8 @@ def callUiRun(argTys: List): String =
 def callUserFun(callee: String, argTys: List, funs: List): String =
   for {
     d = resolveFun(funsDefs(funs), callee, funsMod(funs))
-  } yield if (List.isEmpty(d) == 1) tyErr(str3("unknown function ", callee, "")) else if (resolveIsAmbiguous(d) == 1) tyErr(str4("ambiguous function ", callee, ": qualify as Module.", callee)) else callUserFunParams(callee, defParams(d), argTys, 0, defRet(d))
+  } yield if (List.isEmpty(d) == 1) tyErr(str3("unknown function ", callee, "")) else if (resolveIsAmbiguous(d) == 1) tyErr(str4("ambiguous function ", callee, ": qualify as Module.", callee)) else callUserFunParams(callee, defParams(d), argTys, 0, normalizeTy(defRet(d)))
 
 def callUserFunParams(callee: String, params: List, argTys: List, i: Int, ret: String): String =
-  if (List.len(params) != List.len(argTys)) tyErr(str4(callee, " expects ", Str.fromInt(List.len(params)), str3(" args, got ", Str.fromInt(List.len(argTys)), ""))) else if (i >= List.len(params)) tyOk(ret) else if (typesCompat(argTyAt(argTys, i), paramType(List.at(params, i))) == 0) tyErr(str4(callee, " arg type mismatch: expected ", paramType(List.at(params, i)), str3(", got ", argTyAt(argTys, i), ""))) else callUserFunParams(callee, params, argTys, i + 1, ret)
+  if (List.len(params) != List.len(argTys)) tyErr(str4(callee, " expects ", Str.fromInt(List.len(params)), str3(" args, got ", Str.fromInt(List.len(argTys)), ""))) else if (i >= List.len(params)) tyOk(ret) else if (typesCompat(argTyAt(argTys, i), normalizeTy(paramType(List.at(params, i)))) == 0) tyErr(str4(callee, " arg type mismatch: expected ", normalizeTy(paramType(List.at(params, i))), str3(", got ", argTyAt(argTys, i), ""))) else callUserFunParams(callee, params, argTys, i + 1, ret)
 

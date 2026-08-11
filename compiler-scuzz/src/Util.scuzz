@@ -254,21 +254,6 @@ def withSpan(node: List, sp: List): List =
 def exprSpan(e: List): List =
   listLast(e)
 
-def mkTok(kind: String, start: Int, end: Int): List =
-  List.cons(kind, List.cons(Str.fromInt(start), List.cons(Str.fromInt(end), List.empty())))
-
-def tokKind(t: List): String =
-  List.head(t)
-
-def tokStart(t: List): Int =
-  parseInt(List.head(List.tail(t)))
-
-def tokEnd(t: List): Int =
-  parseInt(List.head(List.tail(List.tail(t))))
-
-def tokSpan(file: String, t: List): List =
-  mkSpan(file, tokStart(t), tokEnd(t))
-
 def offsetToLineCol(source: String, offset: Int): List =
   offsetToLineColAt(source, offset, 0, 1, 1)
 

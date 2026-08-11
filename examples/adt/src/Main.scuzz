@@ -1,10 +1,26 @@
 package demo.color
 
+def flip(c: Color): Color =
+  c match {
+    case Color.Red => Color.Blue
+    case Color.Blue => Color.Red
+  }
+
+def describe(o: Opt): String =
+  o match {
+    case Opt.Some(n) => Str.concat("adt:describe:", Str.fromInt(n))
+    case Opt.None => "adt:describe:none"
+  }
+
 @main def main: IO[Unit] =
   for {
     c = Color.Red
     o = Opt.Some(42)
     p = Pair.Pair(7, "ok")
+    flipped = flip(c)
+    desc = describe(o)
+    xs = List.cons(Color.Blue, List.empty())
+    head = List.head(xs)
     _ <- c match {
   case Color.Red => IO.println("adt:red")
   case Color.Blue => IO.println("adt:blue")
@@ -15,5 +31,14 @@ package demo.color
 }
     _ <- p match {
   case Pair.Pair(x, y) => IO.println(Str.concat(Str.concat("adt:pair:", Str.fromInt(x)), Str.concat(":", y)))
+}
+    _ <- flipped match {
+  case Color.Red => IO.println("adt:flip:red")
+  case Color.Blue => IO.println("adt:flip:blue")
+}
+    _ <- IO.println(desc)
+    _ <- head match {
+  case Color.Red => IO.println("adt:list:red")
+  case Color.Blue => IO.println("adt:list:blue")
 }
   } yield ()

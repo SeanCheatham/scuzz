@@ -27,47 +27,11 @@ def unitExpr(): List =
 def unitAt(file: String, tokens: List, i: Int): List =
   withSpan(List.cons("Unit", List.empty()), tokSpan(file, tokAt(tokens, i)))
 
-def tokAt(tokens: List, i: Int): List =
-  if (i >= List.len(tokens)) mkTok("Eof", 0, 0) else List.at(tokens, i)
+def tokAt(tokens: List, i: Int): Tok =
+  if (i >= List.len(tokens)) Tok.Sym("Eof", 0, 0) else List.at(tokens, i)
 
 def isTok(tokens: List, i: Int, t: String): Int =
   if (streq(tokKind(tokAt(tokens, i)), t) == 1) 1 else 0
-
-def isIdentTok(t: String): Int =
-  startsWith(t, "Ident:")
-
-def isStringTok(t: String): Int =
-  startsWith(t, "String:")
-
-def isIntTok(t: String): Int =
-  startsWith(t, "Int:")
-
-def isInterpLitTok(t: String): Int =
-  startsWith(t, "InterpLit:")
-
-def isInterpIdTok(t: String): Int =
-  startsWith(t, "InterpId:")
-
-def isInterpBraceTok(t: String): Int =
-  startsWith(t, "InterpBrace:")
-
-def identName(t: String): String =
-  Str.slice(t, 6, Str.len(t))
-
-def stringVal(t: String): String =
-  Str.slice(t, 7, Str.len(t))
-
-def intDigits(t: String): String =
-  Str.slice(t, 4, Str.len(t))
-
-def interpLitVal(t: String): String =
-  Str.slice(t, 10, Str.len(t))
-
-def interpIdVal(t: String): String =
-  Str.slice(t, 9, Str.len(t))
-
-def interpBraceVal(t: String): String =
-  Str.slice(t, 12, Str.len(t))
 
 def expectTok(tokens: List, i: Int, t: String): Int =
   if (isTok(tokens, i, t) == 1) i + 1 else i + 1
@@ -77,8 +41,8 @@ def spanCover(file: String, tokens: List, lo: Int, hi: Int): List =
 
 def parseIdent(file: String, tokens: List, i: Int): List =
   for {
-    t = tokKind(tokAt(tokens, i))
-  } yield if (isIdentTok(t) == 1) okStr(identName(t), i + 1) else okStr("", i)
+    tok = tokAt(tokens, i)
+  } yield if (isIdentTok(tok) == 1) okStr(identName(tok), i + 1) else okStr("", i)
 
 def typeToString(name: String, inner: String): String =
   if (streq(name, "IO") == 1) str3("IO[", inner, "]") else name
@@ -292,8 +256,9 @@ def parsePostfixDot(file: String, tokens: List, expr: List, i: Int): List =
 
 def parseLambda(file: String, tokens: List, i: Int): List =
   for {
-    t = tokKind(tokAt(tokens, i))
-  } yield if (streq(t, "Underscore") == 1) parseLambdaBody(file, tokens, i + 1, "_") else if (isIdentTok(t) == 1) parseLambdaBody(file, tokens, i + 1, identName(t)) else if (streq(t, "LParen") == 1) parseLambdaUnit(file, tokens, i + 1) else ok(List.cons("_", List.cons(unitAt(file, tokens, i), List.empty())), i)
+    tok = tokAt(tokens, i)
+    t = tokKind(tok)
+  } yield if (streq(t, "Underscore") == 1) parseLambdaBody(file, tokens, i + 1, "_") else if (isIdentTok(tok) == 1) parseLambdaBody(file, tokens, i + 1, identName(tok)) else if (streq(t, "LParen") == 1) parseLambdaUnit(file, tokens, i + 1) else ok(List.cons("_", List.cons(unitAt(file, tokens, i), List.empty())), i)
 
 def parseLambdaUnit(file: String, tokens: List, i: Int): List =
   for {
@@ -333,8 +298,9 @@ def parseAttemptParen(file: String, tokens: List, expr: List, i: Int): List =
 
 def parsePrimary(file: String, tokens: List, i: Int): List =
   for {
-    t = tokKind(tokAt(tokens, i))
-  } yield if (streq(t, "For") == 1) parseFor(file, tokens, i + 1, i) else if (streq(t, "If") == 1) parseIf(file, tokens, i + 1, i) else if (streq(t, "LParen") == 1) parseParen(file, tokens, i + 1, i) else if (isIntTok(t) == 1) ok(withSpan(List.cons("IntLit", List.cons(intDigits(t), List.empty())), tokSpan(file, tokAt(tokens, i))), i + 1) else if (isStringTok(t) == 1) ok(withSpan(List.cons("StrLit", List.cons(stringVal(t), List.empty())), tokSpan(file, tokAt(tokens, i))), i + 1) else if (streq(t, "InterpStart") == 1) parseInterp(file, tokens, i + 1, List.empty(), i) else if (streq(t, "LBracket") == 1) parseListLit(file, tokens, i + 1) else if (streq(t, "Minus") == 1) parseNegInt(file, tokens, i + 1, i) else if (streq(t, "Underscore") == 1) if (isTok(tokens, i + 1, "Arrow") == 1) parseLambdaExpr(file, tokens, i + 1, "_", i) else ok(unitAt(file, tokens, i), i + 1) else if (isIdentTok(t) == 1) parsePrimaryIdent(file, tokens, i, t) else ok(unitAt(file, tokens, i), i)
+    tok = tokAt(tokens, i)
+    t = tokKind(tok)
+  } yield if (streq(t, "For") == 1) parseFor(file, tokens, i + 1, i) else if (streq(t, "If") == 1) parseIf(file, tokens, i + 1, i) else if (streq(t, "LParen") == 1) parseParen(file, tokens, i + 1, i) else if (isIntTok(tok) == 1) ok(withSpan(List.cons("IntLit", List.cons(intDigits(tok), List.empty())), tokSpan(file, tok)), i + 1) else if (isStringTok(tok) == 1) ok(withSpan(List.cons("StrLit", List.cons(stringVal(tok), List.empty())), tokSpan(file, tok)), i + 1) else if (streq(t, "InterpStart") == 1) parseInterp(file, tokens, i + 1, List.empty(), i) else if (streq(t, "LBracket") == 1) parseListLit(file, tokens, i + 1) else if (streq(t, "Minus") == 1) parseNegInt(file, tokens, i + 1, i) else if (streq(t, "Underscore") == 1) if (isTok(tokens, i + 1, "Arrow") == 1) parseLambdaExpr(file, tokens, i + 1, "_", i) else ok(unitAt(file, tokens, i), i + 1) else if (isIdentTok(tok) == 1) parsePrimaryIdent(file, tokens, i, tok) else ok(unitAt(file, tokens, i), i)
 
 def parseBinderName(file: String, tokens: List, i: Int): List =
   if (isTok(tokens, i, "Underscore") == 1) okStr("_", i + 1) else parseIdent(file, tokens, i)
@@ -368,16 +334,17 @@ def parseForBinderDraw(file: String, tokens: List, i: Int, name: String, acc: Li
 
 def parseInterp(file: String, tokens: List, i: Int, acc: List, startI: Int): List =
   for {
-    t = tokKind(tokAt(tokens, i))
-  } yield if (streq(t, "InterpEnd") == 1) ok(withSpan(List.cons("Interp", List.cons(List.reverse(acc), List.empty())), spanCover(file, tokens, startI, i + 1)), i + 1) else if (isInterpLitTok(t) == 1) parseInterp(file, tokens, i + 1, List.cons(List.cons("Lit", List.cons(interpLitVal(t), List.empty())), acc), startI) else if (isInterpIdTok(t) == 1) parseInterp(file, tokens, i + 1, List.cons(List.cons("Hole", List.cons(withSpan(List.cons("Var", List.cons(interpIdVal(t), List.empty())), tokSpan(file, tokAt(tokens, i))), List.empty())), acc), startI) else if (isInterpBraceTok(t) == 1) parseInterpBrace(file, tokens, i, acc, interpBraceVal(t), startI) else ok(withSpan(List.cons("Interp", List.cons(List.reverse(acc), List.empty())), spanCover(file, tokens, startI, i)), i)
+    tok = tokAt(tokens, i)
+    t = tokKind(tok)
+  } yield if (streq(t, "InterpEnd") == 1) ok(withSpan(List.cons("Interp", List.cons(List.reverse(acc), List.empty())), spanCover(file, tokens, startI, i + 1)), i + 1) else if (isInterpLitTok(tok) == 1) parseInterp(file, tokens, i + 1, List.cons(List.cons("Lit", List.cons(interpLitVal(tok), List.empty())), acc), startI) else if (isInterpIdTok(tok) == 1) parseInterp(file, tokens, i + 1, List.cons(List.cons("Hole", List.cons(withSpan(List.cons("Var", List.cons(interpIdVal(tok), List.empty())), tokSpan(file, tok)), List.empty())), acc), startI) else if (isInterpBraceTok(tok) == 1) parseInterpBrace(file, tokens, i, acc, interpBraceVal(tok), startI) else ok(withSpan(List.cons("Interp", List.cons(List.reverse(acc), List.empty())), spanCover(file, tokens, startI, i)), i)
 
 def parseInterpBrace(file: String, tokens: List, i: Int, acc: List, body: String, startI: Int): List =
   for {
     nested = parseExpr(file, lex(body), 0)
   } yield parseInterp(file, tokens, i + 1, List.cons(List.cons("Hole", List.cons(pAst(nested), List.empty())), acc), startI)
 
-def parsePrimaryIdent(file: String, tokens: List, i: Int, t: String): List =
-  if (isTok(tokens, i + 1, "Arrow") == 1) parseLambdaExpr(file, tokens, i + 1, identName(t), i) else parseIdentExpr(file, tokens, i, identName(t))
+def parsePrimaryIdent(file: String, tokens: List, i: Int, tok: Tok): List =
+  if (isTok(tokens, i + 1, "Arrow") == 1) parseLambdaExpr(file, tokens, i + 1, identName(tok), i) else parseIdentExpr(file, tokens, i, identName(tok))
 
 def parseLambdaExpr(file: String, tokens: List, i: Int, param: String, startI: Int): List =
   for {
@@ -387,8 +354,8 @@ def parseLambdaExpr(file: String, tokens: List, i: Int, param: String, startI: I
 
 def parseNegInt(file: String, tokens: List, i: Int, startI: Int): List =
   for {
-    t = tokKind(tokAt(tokens, i))
-  } yield if (isIntTok(t) == 1) ok(withSpan(List.cons("IntLit", List.cons(Str.concat("-", intDigits(t)), List.empty())), spanCover(file, tokens, startI, i + 1)), i + 1) else ok(unitAt(file, tokens, startI), i)
+    tok = tokAt(tokens, i)
+  } yield if (isIntTok(tok) == 1) ok(withSpan(List.cons("IntLit", List.cons(Str.concat("-", intDigits(tok)), List.empty())), spanCover(file, tokens, startI, i + 1)), i + 1) else ok(unitAt(file, tokens, startI), i)
 
 def parseParen(file: String, tokens: List, i: Int, startI: Int): List =
   if (isTok(tokens, i, "RParen") == 1) ok(withSpan(List.cons("Unit", List.empty()), spanCover(file, tokens, startI, i + 1)), i + 1) else parseParenExpr(file, tokens, i)
