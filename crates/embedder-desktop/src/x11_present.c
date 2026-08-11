@@ -7,6 +7,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#define EVENT_CAP 64
+#define TEXT_RING 32
+#define TEXT_LEN 8
+
 static Display *g_dpy;
 static Window g_win;
 static GC g_gc;
@@ -17,6 +21,12 @@ static int g_w;
 static int g_h;
 static int g_ready;
 static int g_user_quit;
+
+static SzInputEvent g_queue[EVENT_CAP];
+static int g_q_head;
+static int g_q_tail;
+static char g_text_bufs[TEXT_RING][TEXT_LEN];
+static int g_text_i;
 
 int sz_embedder_available(void) {
   const char *d = getenv("DISPLAY");
@@ -35,6 +45,58 @@ int sz_embedder_alive(void) {
   if (g_ready)
     return 1;
   return sz_embedder_available();
+}
+
+static const char *stash_text(const char *s) {
+  size_t n;
+  char *dst;
+  if (!s)
+    s = "";
+  n = strlen(s);
+  if (n >= TEXT_LEN)
+    n = TEXT_LEN - 1;
+  dst = g_text_bufs[g_text_i];
+  g_text_i = (g_text_i + 1) % TEXT_RING;
+  memcpy(dst, s, n);
+  dst[n] = '\0';
+  return dst;
+}
+
+static int q_push(const SzInputEvent *ev) {
+  int next;
+  if (!ev)
+    return 0;
+  next = (g_q_tail + 1) % EVENT_CAP;
+  if (next == g_q_head)
+    return 0; /* full */
+  g_queue[g_q_tail] = *ev;
+  g_q_tail = next;
+  return 1;
+}
+
+int sz_embedder_poll_event(SzInputEvent *out) {
+  if (!out || g_q_head == g_q_tail)
+    return 0;
+  *out = g_queue[g_q_head];
+  g_q_head = (g_q_head + 1) % EVENT_CAP;
+  return 1;
+}
+
+static void enqueue_tap(float x, float y) {
+  SzInputEvent ev;
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_TAP;
+  ev.x = x;
+  ev.y = y;
+  q_push(&ev);
+}
+
+static void enqueue_text_edit(const char *text) {
+  SzInputEvent ev;
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_TEXT_EDIT;
+  ev.text = stash_text(text ? text : "");
+  q_push(&ev);
 }
 
 static int ensure_window(const char *title, int width, int height) {
@@ -58,7 +120,9 @@ static int ensure_window(const char *title, int width, int height) {
   XStoreName(g_dpy, g_win, title ? title : "Scuzz Lang");
   g_wm_delete = XInternAtom(g_dpy, "WM_DELETE_WINDOW", False);
   XSetWMProtocols(g_dpy, g_win, &g_wm_delete, 1);
-  XSelectInput(g_dpy, g_win, ExposureMask | StructureNotifyMask | KeyPressMask);
+  XSelectInput(g_dpy, g_win,
+               ExposureMask | StructureNotifyMask | KeyPressMask |
+                   ButtonPressMask);
   XMapWindow(g_dpy, g_win);
   g_gc = DefaultGC(g_dpy, screen);
 
@@ -121,7 +185,7 @@ int sz_embedder_present(const char *title, int width, int height,
             (unsigned)height);
   XFlush(g_dpy);
 
-  /* Drain pending events without blocking forever. */
+  /* Drain pending events: quit/close handled here; input only enqueued. */
   while (XPending(g_dpy)) {
     XEvent ev;
     XNextEvent(g_dpy, &ev);
@@ -136,12 +200,28 @@ int sz_embedder_present(const char *title, int width, int height,
       sz_embedder_shutdown();
       return 1;
     }
+    if (ev.type == ButtonPress) {
+      enqueue_tap((float)ev.xbutton.x, (float)ev.xbutton.y);
+      continue;
+    }
     if (ev.type == KeyPress) {
-      KeySym ks = XLookupKeysym(&ev.xkey, 0);
+      KeySym ks;
+      char buf[8];
+      int n;
+      ks = XLookupKeysym(&ev.xkey, 0);
       if (ks == XK_q || ks == XK_Escape) {
         g_user_quit = 1;
         sz_embedder_shutdown();
         return 1;
+      }
+      if (ks == XK_BackSpace) {
+        enqueue_text_edit("");
+        continue;
+      }
+      n = XLookupString(&ev.xkey, buf, (int)sizeof(buf) - 1, &ks, NULL);
+      if (n == 1 && buf[0] >= 32 && buf[0] < 127) {
+        buf[1] = '\0';
+        enqueue_text_edit(buf);
       }
     }
   }
@@ -168,4 +248,5 @@ void sz_embedder_shutdown(void) {
   g_win = 0;
   g_ready = 0;
   g_w = g_h = 0;
+  g_q_head = g_q_tail = 0;
 }

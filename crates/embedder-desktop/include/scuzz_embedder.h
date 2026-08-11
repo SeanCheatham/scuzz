@@ -1,6 +1,8 @@
 #ifndef SCUZZ_EMBEDDER_H
 #define SCUZZ_EMBEDDER_H
 
+#include "scuzz_ui.h"
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -26,6 +28,10 @@ int sz_embedder_present(const char *title, int width, int height,
 
 /* Destroy the window / display connection. */
 void sz_embedder_shutdown(void);
+
+/* Pop one queued OS event into out. Returns 1 if an event was written.
+ * present() enqueues taps / text edits; pump drains via this. */
+int sz_embedder_poll_event(SzInputEvent *out);
 
 #ifdef __cplusplus
 }

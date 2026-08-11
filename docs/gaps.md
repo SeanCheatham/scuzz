@@ -63,10 +63,6 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 Vision direction: `scuzz.toml` package = crate, `Foo.scuzz` = module ([vision.md](vision.md#modules-and-source-shape)). Stem pairing for `*.scuzz_sim` / `*.scuzz_laws` is implemented; Stage 0/1/2 still merge all live `src/**/*.scuzz` into one program with a single `@main` (no per-file visibility / namespaces yet).
 
-### Desktop keyboard input into `TextField`
-
-`View.textField` works: focus-on-tap, `sz_view_handle_text`, `SZ_INPUT_TEXT` events, Headless script `text <s>`, used by `examples/todo`. But the desktop embedders (`x11_present.c`, `macos_present.m`) only map q / Escape to quit — no keystroke ever reaches a `TextField`, so you cannot type into a Scuzz app in a window. Smallest high-value slice: translate X11/Cocoa key events into `SZ_INPUT_TEXT` (plus backspace), keeping Headless the behavioral reference. IME is out of scope until real text rendering (unknown 1) lands.
-
 ### Diagnostics carry no source locations
 
 `Diagnostic { severity, message, file, line, column }` exists in both compilers with `--message-format=json` (`crates/compiler/src/check.rs`), but `line`/`column` are always `None` and `file` is a heuristic — the typer only produces unlocated strings (`TypeError::Msg` in `crates/compiler/src/typ.rs`). Pure work: thread spans from lexer through typer in Stage 0, then port. Hurts every user of the language, including compiler development itself.
