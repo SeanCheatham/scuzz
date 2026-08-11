@@ -362,7 +362,7 @@ pub fn find_sources(project_dir: &Path) -> Result<Vec<PathBuf>> {
     let mut candidates: Vec<PathBuf> = Vec::new();
     collect_sources(&src, &mut candidates)?;
     if candidates.is_empty() {
-        bail!("no .scala / .scuzz sources in {}", src.display());
+        bail!("no .scuzz sources in {}", src.display());
     }
     // Main.* last so package/enum units parse first (order only affects error msgs;
     // parse_sources merges). Prefer stable order: non-main first, then main.
@@ -388,7 +388,7 @@ fn collect_sources(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
         if path.is_dir() {
             collect_sources(&path, out)?;
         } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            if matches!(ext, "scala" | "scuzz") {
+            if ext == "scuzz" {
                 out.push(path);
             }
         }
@@ -500,7 +500,7 @@ mod tests {
         } else {
             body.to_string()
         };
-        let file = if main { "Main.scala" } else { "Lib.scala" };
+        let file = if main { "Main.scuzz" } else { "Lib.scuzz" };
         fs::write(dir.join("src").join(file), &src).unwrap();
     }
 
@@ -725,7 +725,7 @@ mod tests {
         );
         let r1 = resolve_project(&app).unwrap();
         let fp1 = fingerprint_resolved(&r1);
-        fs::write(shared.join("src/Lib.scala"), "def greet(): String = \"yo\"\n").unwrap();
+        fs::write(shared.join("src/Lib.scuzz"), "def greet(): String = \"yo\"\n").unwrap();
         let r2 = resolve_project(&app).unwrap();
         let fp2 = fingerprint_resolved(&r2);
         assert_ne!(fp1, fp2);
@@ -742,7 +742,7 @@ mod tests {
         )
         .unwrap();
         fs::write(
-            app.join("src/Main.scala"),
+            app.join("src/Main.scuzz"),
             "@main def main: IO[Unit] =\n  IO.println(\"x\")\n",
         )
         .unwrap();

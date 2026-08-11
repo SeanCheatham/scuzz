@@ -78,8 +78,8 @@ Optional. Used by `scuzz run` / `test` / `package`.
 my-app/
   scuzz.toml
   src/
-    Main.scala          # *.scala or *.scuzz
-    Other.scala         # multi-file packages / enums
+    Main.scuzz          # *.scuzz under src/
+    Other.scuzz         # multi-file packages / enums
   .scuzz/
     fingerprint         # incremental compile cache (gitignored via **/.scuzz/)
   build/package/        # emitted by `scuzz package`
@@ -88,4 +88,4 @@ my-app/
     ios/
 ```
 
-Stage-0 accepts `*.scala` and `*.scuzz` under `src/` (recursive). Units in the same package are merged; exactly one `@main` is required for executables. `scuzz fmt` formats only the selected project's `src/` (not dependency trees).
+Stage-0 accepts `*.scuzz` under `src/` (recursive). Units in the same package are merged; exactly one `@main` is required for executables. `scuzz fmt` formats only the selected project's `src/` (not dependency trees).
