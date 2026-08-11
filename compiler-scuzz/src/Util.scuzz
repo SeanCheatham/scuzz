@@ -287,3 +287,20 @@ def srcText(s: List): String =
 def mkSrc(label: String, text: String): List =
   List.cons(label, List.cons(text, List.empty()))
 
+def pathBaseName(path: String): String =
+  for {
+    slash = lastIndexOfChar(path, 47, 0, 0 - 1)
+  } yield if (slash < 0) path else Str.slice(path, slash + 1, Str.len(path))
+
+def moduleIdFromLabel(label: String): String =
+  for {
+    base = pathBaseName(label)
+    dot = lastIndexOfChar(base, 46, 0, 0 - 1)
+  } yield if (dot <= 0) base else Str.slice(base, 0, dot)
+
+def qualKey(module: String, name: String): String =
+  str3(module, ".", name)
+
+def userSymbol(module: String, name: String): String =
+  if (Str.len(module) == 0) name else str3(module, "_", name)
+

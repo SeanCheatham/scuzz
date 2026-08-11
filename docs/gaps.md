@@ -69,7 +69,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 **Stage 0 vertical slice.** Module id = file stem (`Foo.scuzz` → `Foo`). Defs are namespaced: the same bare `def` name may appear in two modules; calls use `Module.def` / `Module.def(args)` (existing `Ident.Ident` syntax). Intra-module bare names resolve locally; from another module, qualify when the name is ambiguous (unique cross-module bare names still resolve, so path-dep helpers like `examples/shared` keep working). Enums stay globally unique (`examples/adt`). Codegen mangles `@sz_user_{Module}_{def}`. Proof: `examples/modules` (`A.tag` + `B.tag` → `ab`).
 
-**Residual.** No `private`/`pub`, no `import`, no enum-per-module. Self-host (`compiler-scuzz/`) still merges defs by bare name (duplicate across files errors); `examples/modules` is Stage 0–only until Stage 1 ports FunIndex / mangling. Stem-paired `*.scuzz_sim` / `*.scuzz_laws` already exist.
+**Residual.** No `private`/`pub`, no `import`, no enum-per-module. Self-host (`compiler-scuzz/`) ports FunIndex / mangling (file-stem modules, `@sz_user_{Module}_{def}`); `examples/modules` works on Stage 0 and Stage 1. Stem-paired `*.scuzz_sim` / `*.scuzz_laws` already exist.
 
 ### Diagnostics source locations
 

@@ -9,6 +9,9 @@ def progDefs(p: List): List =
 def progMain(p: List): List =
   nodeExpr(p, 3)
 
+def progMainModule(p: List): String =
+  nodeStr(p, 4)
+
 def enumName(e: List): String =
   nodeStr(e, 0)
 
@@ -27,8 +30,8 @@ def fieldName(f: List): String =
 def fieldType(f: List): String =
   nodeStr(f, 1)
 
-def emitCtx(defs: List, tags: List, payloads: List): List =
-  List.cons(defs, List.cons(tags, List.cons(payloads, List.empty())))
+def emitCtx(defs: List, tags: List, payloads: List, mod: String): List =
+  List.cons(defs, List.cons(tags, List.cons(payloads, List.cons(mod, List.empty()))))
 
 def ctxDefs(ctx: List): List =
   List.head(ctx)
@@ -38,6 +41,12 @@ def ctxTags(ctx: List): List =
 
 def ctxPayloads(ctx: List): List =
   List.head(List.tail(List.tail(ctx)))
+
+def ctxModule(ctx: List): String =
+  List.head(List.tail(List.tail(List.tail(ctx))))
+
+def setCtxModule(ctx: List, mod: String): List =
+  emitCtx(ctxDefs(ctx), ctxTags(ctx), ctxPayloads(ctx), mod)
 
 def buildEnumTags(enums: List): List =
   buildEnumTagsAcc(enums, List.empty())
@@ -117,6 +126,15 @@ def defRet(d: List): String =
 def defBody(d: List): List =
   nodeExpr(d, 3)
 
+def defModule(d: List): String =
+  nodeStr(d, 4)
+
+def setDefModule(d: List, mod: String): List =
+  List.cons("Def", List.cons(defName(d), List.cons(defParams(d), List.cons(defRet(d), List.cons(defBody(d), List.cons(mod, List.empty()))))))
+
+def stampDefsModule(defs: List, mod: String): List =
+  if (List.isEmpty(defs) == 1) List.empty() else List.cons(setDefModule(List.head(defs), mod), stampDefsModule(List.tail(defs), mod))
+
 def paramName(p: String): String =
   paramNameFrom(Str.slice(p, 6, Str.len(p)))
 
@@ -140,6 +158,33 @@ def kindOfIoType(ty: String): String =
 
 def findDef(defs: List, name: String): List =
   if (List.isEmpty(defs) == 1) List.empty() else if (streq(defName(List.head(defs)), name) == 1) List.head(defs) else findDef(List.tail(defs), name)
+
+def findDefByQual(defs: List, module: String, name: String): List =
+  if (List.isEmpty(defs) == 1) List.empty() else if (streq(defModule(List.head(defs)), module) == 1) if (streq(defName(List.head(defs)), name) == 1) List.head(defs) else findDefByQual(List.tail(defs), module, name) else findDefByQual(List.tail(defs), module, name)
+
+def collectDefsByName(defs: List, name: String, acc: List): List =
+  if (List.isEmpty(defs) == 1) List.reverse(acc) else if (streq(defName(List.head(defs)), name) == 1) collectDefsByName(List.tail(defs), name, List.cons(List.head(defs), acc)) else collectDefsByName(List.tail(defs), name, acc)
+
+def resolveFunQual(defs: List, module: String, name: String): List =
+  findDefByQual(defs, module, name)
+
+def resolveFunBareUnique(defs: List, name: String): List =
+  for {
+    hits = collectDefsByName(defs, name, List.empty())
+  } yield if (List.isEmpty(hits) == 1) List.empty() else if (List.isEmpty(List.tail(hits)) == 1) List.head(hits) else List.cons("Ambiguous", List.empty())
+
+def resolveFunBare(defs: List, name: String, currentModule: String): List =
+  for {
+    local = findDefByQual(defs, currentModule, name)
+  } yield if (List.isEmpty(local) == 0) local else resolveFunBareUnique(defs, name)
+
+def resolveFun(defs: List, callee: String, currentModule: String): List =
+  for {
+    parts = splitDotted(callee)
+  } yield if (List.isEmpty(parts) == 0) resolveFunQual(defs, List.head(parts), List.head(List.tail(parts))) else resolveFunBare(defs, callee, currentModule)
+
+def resolveIsAmbiguous(d: List): Int =
+  if (List.isEmpty(d) == 1) 0 else if (streq(List.head(d), "Ambiguous") == 1) 1 else 0
 
 def strContains(strs: List, s: String): Int =
   if (List.isEmpty(strs) == 1) 0 else if (streq(List.head(strs), s) == 1) 1 else strContains(List.tail(strs), s)
@@ -748,15 +793,16 @@ def emitListLitRevAfterCons(rest: List, strs: List, ctx: List, env: List, prefix
 
 def emitUserCall(callee: String, code: String, vals: List, kinds: List, id: Int, conts: String, ctx: List, prefix: String): List =
   for {
-    d = findDef(ctxDefs(ctx), callee)
-  } yield if (List.isEmpty(d) == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @sz_user_", callee, "()\n")), str3("%", prefix, "_v"), "ptr", id, conts) else emitUserCallDef(callee, code, vals, kinds, id, conts, d, prefix)
+    d = resolveFun(ctxDefs(ctx), callee, ctxModule(ctx))
+  } yield if (List.isEmpty(d) == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @sz_user_", callee, "()\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (resolveIsAmbiguous(d) == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @sz_user_", callee, "()\n")), str3("%", prefix, "_v"), "ptr", id, conts) else emitUserCallDef(code, vals, kinds, id, conts, d, prefix)
 
-def emitUserCallDef(callee: String, code: String, vals: List, kinds: List, id: Int, conts: String, d: List, prefix: String): List =
+def emitUserCallDef(code: String, vals: List, kinds: List, id: Int, conts: String, d: List, prefix: String): List =
   for {
     retTy = llvmTypeOf(defRet(d))
     retKind = kindOfType(defRet(d))
+    sym = userSymbol(defModule(d), defName(d))
     ap = emitUserArgs(defParams(d), vals, kinds, code, prefix, 0, "")
-  } yield mkS(str4(fst(ap), "  %", prefix, str5("_v = call ", retTy, " @sz_user_", callee, str3("(", snd(ap), ")\n"))), str3("%", prefix, "_v"), retKind, id, conts)
+  } yield mkS(str4(fst(ap), "  %", prefix, str5("_v = call ", retTy, " @sz_user_", sym, str3("(", snd(ap), ")\n"))), str3("%", prefix, "_v"), retKind, id, conts)
 
 def emitUserArgs(params: List, vals: List, kinds: List, code: String, prefix: String, i: Int, acc: String): List =
   if (List.isEmpty(params) == 1) pair(code, acc) else emitUserArgsOne(List.head(params), List.tail(params), vals, kinds, code, prefix, i, acc)
@@ -796,10 +842,11 @@ def emitFundef(d: List, strs: List, ctx: List, id: Int, conts: String): List =
   for {
     ret = llvmTypeOf(defRet(d))
     env = paramsEnv(defParams(d), List.empty())
-    body = emitExpr(defBody(d), strs, ctx, env, "body", id, conts)
+    body = emitExpr(defBody(d), strs, setCtxModule(ctx, defModule(d)), env, "body", id, conts)
     retKind = kindOfType(defRet(d))
     tail = if (isIoKind(retKind) == 1) emitFundefRetIo(sCode(body), sKind(body), sValue(body)) else if (streq(retKind, "int") == 1) emitFundefRetInt(sCode(body), sKind(body), sValue(body)) else emitFundefRetPtr(sCode(body), sKind(body), sValue(body))
-    ir = str4("define internal ", ret, " @sz_user_", str6(defName(d), "(", emitParams(defParams(d), 0, ""), ") {\nentry:\n", fst(tail), "\n}\n\n"))
+    sym = userSymbol(defModule(d), defName(d))
+    ir = str4("define internal ", ret, " @sz_user_", str6(sym, "(", emitParams(defParams(d), 0, ""), ") {\nentry:\n", fst(tail), "\n}\n\n"))
   } yield mkS(ir, "", "", sId(body), sConts(body))
 
 def emitDefs(defs: List, strs: List, allDefs: List, id: Int, conts: String, acc: String): List =
@@ -812,7 +859,7 @@ def emitDefsOne(d: List, rest: List, strs: List, allDefs: List, id: Int, conts: 
 
 def emitMain(prog: List, strs: List, ctx: List, defsIr: List): String =
   for {
-    body = emitExpr(progMain(prog), strs, ctx, List.empty(), "build", sId(defsIr), sConts(defsIr))
+    body = emitExpr(progMain(prog), strs, setCtxModule(ctx, progMainModule(prog)), List.empty(), "build", sId(defsIr), sConts(defsIr))
     p = ensureIoPair(sCode(body), sKind(body), sValue(body), "wrapped")
     mainFn = str4("define i32 @main(i32 %argc, ptr %argv) {\nentry:\n", fst(p), "  %rc = call i32 @sz_runtime_main_args(ptr ", Str.concat(snd(p), ", i32 %argc, ptr %argv)\n  ret i32 %rc\n}\n"))
   } yield str4(sConts(body), sCode(defsIr), mainFn, "")
@@ -822,7 +869,7 @@ def emitProgram(prog: List): String =
     strs = collectProgram(prog)
     tags = buildEnumTags(progEnums(prog))
     payloads = buildEnumPayloads(progEnums(prog))
-    ctx = emitCtx(progDefs(prog), tags, payloads)
+    ctx = emitCtx(progDefs(prog), tags, payloads, "")
     header = emitHeader(strs)
     defsIr = emitDefs(progDefs(prog), strs, ctx, 0, "", "")
   } yield Str.concat(header, emitMain(prog, strs, ctx, defsIr))
