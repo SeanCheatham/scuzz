@@ -57,7 +57,7 @@ libc `malloc`/`free` via `sz_alloc` / `sz_free`. No moving collector yet. Clear 
 
 ### Skia
 
-No vendored Skia tree. Thin `sk_capi` + CPU `sk_sw` for Headless CI (what `crates/ffi-skia` links today). `scripts/fetch_skia.sh` can drop prebuilts under `third_party/skia/prebuilt/` when `SCUZZ_SKIA_URL` is set; wiring those into the Makefile is deferred. Impeller deferred (GPU presenters later; must not change `Ui` session or logical goldens). Callers depend only on `sk_capi.h`.
+No vendored Skia tree. Thin `sk_capi` + CPU `sk_sw` for Headless CI (what `crates/ffi-skia` links today). `scripts/fetch_skia.sh` can drop prebuilts under `third_party/skia/prebuilt/` when `SCUZZ_SKIA_URL` is set; wiring those into the Makefile is deferred until a hosted prebuilt that implements `sk_capi` exists (see [`gaps.md`](gaps.md) unknown 1). Impeller deferred (GPU presenters later; must not change `Ui` session or logical goldens). Callers depend only on `sk_capi.h`.
 
 ### IO errors
 
@@ -200,7 +200,7 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ## Open work
 
-Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Closed in-tree slices: stem-paired laws/sim, desktop Window typing (`SZ_INPUT_TEXT_EDIT`), Stage-0 spans, alloc accounting / optional `test-asan`, Stage-0 unary payload ADTs, self-host unary payload ADTs for user programs (`examples/adt`). Still open: real Skia text, concurrent IO determinism, long-lived RSS proof, self-host span port, rewriting compiler IR/AST onto payloads, file-as-module namespaces, device Mobile, GPU presenters, non-path deps. Deeper UI (Flutter-style constraints) and Windows desktop stay deferred. IME waits on real text rendering.
+Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Closed in-tree slices: stem-paired laws/sim, desktop Window typing (`SZ_INPUT_TEXT_EDIT`), Stage-0 spans, alloc accounting / optional `test-asan`, Stage-0 unary payload ADTs, self-host unary payload ADTs for user programs (`examples/adt`). Still open: concurrent IO determinism, long-lived RSS proof, self-host span port, rewriting compiler IR/AST onto payloads, file-as-module namespaces, device Mobile, non-path deps. **Blocked on external assets/toolchains:** real Skia text (needs hosted `SCUZZ_SKIA_URL` prebuilt), GPU presenters (downstream of Skia). Deeper UI (Flutter-style constraints) and Windows desktop stay deferred. IME waits on real text rendering.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
 
