@@ -266,13 +266,22 @@ def parsePatternAdt(file: String, tokens: List, i: Int): List =
     i1 = expectTok(tokens, pIdx(enumP), "Dot")
     caseP = parseIdent(file, tokens, i1)
     j = pIdx(caseP)
-  } yield if (isTok(tokens, j, "LParen") == 1) parsePatternBind(file, tokens, j + 1, pStr(enumP), pStr(caseP), i) else ok(withSpan(List.cons("PatAdt", List.cons(pStr(enumP), List.cons(pStr(caseP), List.cons("", List.empty())))), spanCover(file, tokens, i, j)), j)
+  } yield if (isTok(tokens, j, "LParen") == 1) parsePatternBinds(file, tokens, j + 1, pStr(enumP), pStr(caseP), i, List.empty()) else ok(withSpan(List.cons("PatAdt", List.cons(pStr(enumP), List.cons(pStr(caseP), List.cons(List.empty(), List.empty())))), spanCover(file, tokens, i, j)), j)
 
-def parsePatternBind(file: String, tokens: List, i: Int, en: String, caseName: String, startI: Int): List =
+def parsePatternBinds(file: String, tokens: List, i: Int, en: String, caseName: String, startI: Int, acc: List): List =
+  if (isTok(tokens, i, "RParen") == 1) ok(withSpan(List.cons("PatAdt", List.cons(en, List.cons(caseName, List.cons(List.reverse(acc), List.empty())))), spanCover(file, tokens, startI, i + 1)), i + 1) else parsePatternBindsCont(file, tokens, i, en, caseName, startI, acc)
+
+def parsePatternBindsCont(file: String, tokens: List, i: Int, en: String, caseName: String, startI: Int, acc: List): List =
   for {
     bindP = parseIdent(file, tokens, i)
-    i1 = expectTok(tokens, pIdx(bindP), "RParen")
-  } yield ok(withSpan(List.cons("PatAdt", List.cons(en, List.cons(caseName, List.cons(pStr(bindP), List.empty())))), spanCover(file, tokens, startI, i1)), i1)
+    acc2 = List.cons(pStr(bindP), acc)
+    j = pIdx(bindP)
+  } yield if (isTok(tokens, j, "Comma") == 1) parsePatternBinds(file, tokens, j + 1, en, caseName, startI, acc2) else parsePatternBindsEnd(file, tokens, j, en, caseName, startI, acc2)
+
+def parsePatternBindsEnd(file: String, tokens: List, i: Int, en: String, caseName: String, startI: Int, acc: List): List =
+  for {
+    i1 = expectTok(tokens, i, "RParen")
+  } yield ok(withSpan(List.cons("PatAdt", List.cons(en, List.cons(caseName, List.cons(List.reverse(acc), List.empty())))), spanCover(file, tokens, startI, i1)), i1)
 
 def parsePostfixDot(file: String, tokens: List, expr: List, i: Int): List =
   for {
@@ -514,15 +523,24 @@ def parseEnumColonCase(file: String, tokens: List, i: Int, name: String, acc: Li
   } yield parseEnumColon(file, tokens, pIdx(fieldsP), name, List.cons(List.cons("Case", List.cons(pStr(caseP), List.cons(pAst(fieldsP), List.empty()))), acc))
 
 def parseEnumCaseFields(file: String, tokens: List, i: Int): List =
-  if (isTok(tokens, i, "LParen") == 0) ok(List.empty(), i) else parseEnumCaseField(file, tokens, i + 1)
+  if (isTok(tokens, i, "LParen") == 0) ok(List.empty(), i) else parseEnumCaseFieldsAcc(file, tokens, i + 1, List.empty())
 
-def parseEnumCaseField(file: String, tokens: List, i: Int): List =
+def parseEnumCaseFieldsAcc(file: String, tokens: List, i: Int, acc: List): List =
+  if (isTok(tokens, i, "RParen") == 1) ok(List.reverse(acc), i + 1) else parseEnumCaseFieldCont(file, tokens, i, acc)
+
+def parseEnumCaseFieldCont(file: String, tokens: List, i: Int, acc: List): List =
   for {
     fnameP = parseIdent(file, tokens, i)
     i1 = expectTok(tokens, pIdx(fnameP), "Colon")
     tyP = parseType(file, tokens, i1)
-    i2 = expectTok(tokens, pIdx(tyP), "RParen")
-  } yield ok(List.cons(List.cons("Field", List.cons(pStr(fnameP), List.cons(pStr(tyP), List.empty()))), List.empty()), i2)
+    acc2 = List.cons(List.cons("Field", List.cons(pStr(fnameP), List.cons(pStr(tyP), List.empty()))), acc)
+    j = pIdx(tyP)
+  } yield if (isTok(tokens, j, "Comma") == 1) parseEnumCaseFieldsAcc(file, tokens, j + 1, acc2) else parseEnumCaseFieldsEnd(file, tokens, j, acc2)
+
+def parseEnumCaseFieldsEnd(file: String, tokens: List, i: Int, acc: List): List =
+  for {
+    i1 = expectTok(tokens, i, "RParen")
+  } yield ok(List.reverse(acc), i1)
 
 def parseTopEnum(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: List): List =
   for {

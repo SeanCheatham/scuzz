@@ -327,20 +327,22 @@ impl Parser {
         Ok(EnumDef { name, cases })
     }
 
-    /// `Name` or `Name(x: Type)` (Stage 0: at most one field).
+    /// `Name` or `Name(f1: T1, f2: T2, …)` (fields are Int|String only; checked in typer).
     fn parse_enum_case(&mut self) -> Result<EnumCase, ParseError> {
         let (name, _) = self.expect_ident()?;
         let mut fields = Vec::new();
         if matches!(self.peek(), Token::LParen) {
             self.bump();
-            let (fname, _) = self.expect_ident()?;
-            self.expect(&Token::Colon)?;
-            let fty = self.parse_type()?;
-            fields.push((fname, fty));
-            if matches!(self.peek(), Token::Comma) {
-                return Err(self.err(
-                    "Stage 0 payload ADTs support a single field only",
-                ));
+            loop {
+                let (fname, _) = self.expect_ident()?;
+                self.expect(&Token::Colon)?;
+                let fty = self.parse_type()?;
+                fields.push((fname, fty));
+                if matches!(self.peek(), Token::Comma) {
+                    self.bump();
+                    continue;
+                }
+                break;
             }
             self.expect(&Token::RParen)?;
         }
@@ -668,18 +670,27 @@ impl Parser {
                 let (enum_name, _) = self.expect_ident()?;
                 self.expect(&Token::Dot)?;
                 let (case_name, _) = self.expect_ident()?;
-                let bind = if matches!(self.peek(), Token::LParen) {
+                let binds = if matches!(self.peek(), Token::LParen) {
                     self.bump();
-                    let (b, _) = self.expect_ident()?;
+                    let mut binds = Vec::new();
+                    loop {
+                        let (b, _) = self.expect_ident()?;
+                        binds.push(b);
+                        if matches!(self.peek(), Token::Comma) {
+                            self.bump();
+                            continue;
+                        }
+                        break;
+                    }
                     self.expect(&Token::RParen)?;
-                    Some(b)
+                    binds
                 } else {
-                    None
+                    Vec::new()
                 };
                 Ok(Pattern::Adt {
                     enum_name,
                     case_name,
-                    bind,
+                    binds,
                 })
             }
             other => Err(self.err(format!("expected pattern, got {other:?}"))),
@@ -1198,23 +1209,52 @@ enum Opt:
                     Pattern::Adt {
                         enum_name,
                         case_name,
-                        bind: Some(b),
+                        binds,
                     } => {
                         assert_eq!(enum_name, "Opt");
                         assert_eq!(case_name, "Some");
-                        assert_eq!(b, "n");
+                        assert_eq!(binds, &["n".to_string()]);
                     }
                     other => panic!("expected payload pattern, got {other:?}"),
                 }
                 match &arms[1].pattern {
                     Pattern::Adt {
-                        bind: None,
+                        binds,
                         case_name,
                         ..
-                    } if case_name == "None" => {}
+                    } if case_name == "None" && binds.is_empty() => {}
                     other => panic!("expected nullary None, got {other:?}"),
                 }
             }
+            other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_multi_field_payload_enum_and_match() {
+        let src = r#"
+enum Pair:
+  case Pair(a: Int, b: String)
+@main def main: IO[Unit] =
+  Pair.Pair(1, "x") match {
+    case Pair.Pair(x, y) => IO.println(y)
+  }
+"#;
+        let p = parse(src).unwrap();
+        assert_eq!(p.enums[0].cases[0].fields.len(), 2);
+        assert_eq!(p.enums[0].cases[0].fields[0].0, "a");
+        assert_eq!(p.enums[0].cases[0].fields[1].0, "b");
+        assert!(matches!(
+            p.enums[0].cases[0].fields[1].1,
+            crate::ast::Type::String
+        ));
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => match &arms[0].pattern {
+                Pattern::Adt { binds, .. } => {
+                    assert_eq!(binds, &["x".to_string(), "y".to_string()]);
+                }
+                other => panic!("expected multi-bind pattern, got {other:?}"),
+            },
             other => panic!("expected match, got {other:?}"),
         }
     }

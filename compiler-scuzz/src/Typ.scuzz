@@ -99,7 +99,12 @@ def findCase(cases: List, name: String): List =
 def checkPayloadFields(en: String, c: List): String =
   for {
     fields = caseFields(c)
-  } yield if (List.len(fields) > 1) tyErr(str4(en, ".", caseName(c), ": Stage 0 supports at most one payload field")) else if (List.isEmpty(fields) == 1) tyOk("Unit") else checkPayloadFieldTy(en, caseName(c), List.head(fields))
+  } yield if (List.isEmpty(fields) == 1) tyOk("Unit") else checkPayloadFieldTys(en, caseName(c), fields)
+
+def checkPayloadFieldTys(en: String, cn: String, fields: List): String =
+  if (List.isEmpty(fields) == 1) tyOk("Unit") else for {
+  one = checkPayloadFieldTy(en, cn, List.head(fields))
+} yield if (tyIsOk(one) == 0) one else checkPayloadFieldTys(en, cn, List.tail(fields))
 
 def checkPayloadFieldTy(en: String, cn: String, f: List): String =
   for {
@@ -280,39 +285,42 @@ def inferMatchArm(st: String, arm: List, rest: List, enums: List, funs: List, en
   } yield if (tyIsOk(pr) == 0) pr else if (tyIsOk(br) == 0) br else if (Str.len(acc) == 0) inferMatchArms(st, rest, enums, funs, env, tyVal(br)) else if (typesCompat(acc, tyVal(br)) == 0) tyErr(str4("match arms disagree: ", acc, " vs ", tyVal(br))) else inferMatchArms(st, rest, enums, funs, env, acc)
 
 def checkPattern(pat: List, scrut: String, enums: List): String =
-  if (streq(exprTag(pat), "PatWild") == 1) tyOk("Unit") else checkPatAdt(nodeStr(pat, 0), nodeStr(pat, 1), nodeStr(pat, 2), scrut, enums)
+  if (streq(exprTag(pat), "PatWild") == 1) tyOk("Unit") else checkPatAdt(nodeStr(pat, 0), nodeStr(pat, 1), nodeExpr(pat, 2), scrut, enums)
 
-def checkPatAdt(en: String, cn: String, bind: String, scrut: String, enums: List): String =
+def checkPatAdt(en: String, cn: String, binds: List, scrut: String, enums: List): String =
   for {
     e = findEnum(enums, en)
-  } yield if (List.isEmpty(e) == 1) tyErr(str3("unknown enum ", en, " in pattern")) else checkPatAdtCase(en, cn, bind, scrut, enumCases(e))
+  } yield if (List.isEmpty(e) == 1) tyErr(str3("unknown enum ", en, " in pattern")) else checkPatAdtCase(en, cn, binds, scrut, enumCases(e))
 
-def checkPatAdtCase(en: String, cn: String, bind: String, scrut: String, cases: List): String =
+def checkPatAdtCase(en: String, cn: String, binds: List, scrut: String, cases: List): String =
   for {
     c = findCase(cases, cn)
-  } yield if (List.isEmpty(c) == 1) tyErr(str5("unknown case ", en, ".", cn, " in pattern")) else checkPatAdtScrut(en, cn, bind, scrut, c)
+  } yield if (List.isEmpty(c) == 1) tyErr(str5("unknown case ", en, ".", cn, " in pattern")) else checkPatAdtScrut(en, cn, binds, scrut, c)
 
-def checkPatAdtScrut(en: String, cn: String, bind: String, scrut: String, c: List): String =
-  if (tyIsAdt(scrut) == 1) if (streq(tyAdtName(scrut), en) == 1) checkPatAdtBind(en, cn, bind, c) else tyErr(str5("pattern ", en, ".", cn, str3(" does not match scrutinee ", scrut, ""))) else if (tyIsOpaque(scrut) == 1) checkPatAdtBind(en, cn, bind, c) else tyErr(str5("pattern ", en, ".", cn, str3(" does not match scrutinee ", scrut, "")))
+def checkPatAdtScrut(en: String, cn: String, binds: List, scrut: String, c: List): String =
+  if (tyIsAdt(scrut) == 1) if (streq(tyAdtName(scrut), en) == 1) checkPatAdtBind(en, cn, binds, c) else tyErr(str5("pattern ", en, ".", cn, str3(" does not match scrutinee ", scrut, ""))) else if (tyIsOpaque(scrut) == 1) checkPatAdtBind(en, cn, binds, c) else tyErr(str5("pattern ", en, ".", cn, str3(" does not match scrutinee ", scrut, "")))
 
-def checkPatAdtBind(en: String, cn: String, bind: String, c: List): String =
+def checkPatAdtBind(en: String, cn: String, binds: List, c: List): String =
   for {
     pf = checkPayloadFields(en, c)
     fields = caseFields(c)
-  } yield if (tyIsOk(pf) == 0) pf else if (Str.len(bind) == 0) if (List.isEmpty(fields) == 1) tyOk("Unit") else tyErr(str5("pattern ", en, ".", cn, str3(" needs a payload binder, e.g. ", str4(en, ".", cn, "(x)"), ""))) else if (List.isEmpty(fields) == 1) tyErr(str5("pattern ", en, ".", cn, " is nullary; remove payload binder")) else tyOk("Unit")
+  } yield if (tyIsOk(pf) == 0) pf else if (List.len(binds) == List.len(fields)) tyOk("Unit") else if (List.isEmpty(fields) == 1) tyErr(str5("pattern ", en, ".", cn, " is nullary; remove payload binder")) else if (List.isEmpty(binds) == 1) tyErr(str5("pattern ", en, ".", cn, str3(" needs a payload binder, e.g. ", str4(en, ".", cn, "(x)"), ""))) else tyErr(str5("pattern ", en, ".", cn, str3(" expects ", Str.fromInt(List.len(fields)), str3(" binder(s), got ", Str.fromInt(List.len(binds)), ""))))
 
 def patternExtendEnv(pat: List, enums: List, env: List): List =
-  if (streq(exprTag(pat), "PatWild") == 1) env else patternExtendEnvAdt(nodeStr(pat, 0), nodeStr(pat, 1), nodeStr(pat, 2), enums, env)
+  if (streq(exprTag(pat), "PatWild") == 1) env else patternExtendEnvAdt(nodeStr(pat, 0), nodeStr(pat, 1), nodeExpr(pat, 2), enums, env)
 
-def patternExtendEnvAdt(en: String, cn: String, bind: String, enums: List, env: List): List =
-  if (Str.len(bind) == 0) env else patternExtendEnvCase(en, cn, bind, enums, env)
+def patternExtendEnvAdt(en: String, cn: String, binds: List, enums: List, env: List): List =
+  if (List.isEmpty(binds) == 1) env else patternExtendEnvCase(en, cn, binds, enums, env)
 
-def patternExtendEnvCase(en: String, cn: String, bind: String, enums: List, env: List): List =
+def patternExtendEnvCase(en: String, cn: String, binds: List, enums: List, env: List): List =
   for {
     e = findEnum(enums, en)
     c = findCase(enumCases(e), cn)
     fields = caseFields(c)
-  } yield if (List.isEmpty(fields) == 1) env else tyEnvPut(env, bind, fieldType(List.head(fields)))
+  } yield patternBindFields(binds, fields, env)
+
+def patternBindFields(binds: List, fields: List, env: List): List =
+  if (List.isEmpty(binds) == 1) env else patternBindFields(List.tail(binds), List.tail(fields), tyEnvPut(env, List.head(binds), fieldType(List.head(fields))))
 
 def expectArity(name: String, n: Int, got: Int): String =
   if (n == got) tyOk("Unit") else tyErr(str4(name, " expects ", Str.fromInt(n), str3(" args, got ", Str.fromInt(got), "")))

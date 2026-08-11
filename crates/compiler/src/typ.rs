@@ -679,12 +679,6 @@ fn expect_ty(got: &Type, want: &Type) -> Result<(), TypeError> {
 }
 
 fn check_payload_fields(enum_name: &str, case: &crate::ast::EnumCase) -> Result<(), TypeError> {
-    if case.fields.len() > 1 {
-        return Err(TypeError::Msg(format!(
-            "{enum_name}.{}: Stage 0 supports at most one payload field",
-            case.name
-        )));
-    }
     for (fname, fty) in &case.fields {
         match fty {
             Type::Int | Type::String => {}
@@ -699,19 +693,19 @@ fn check_payload_fields(enum_name: &str, case: &crate::ast::EnumCase) -> Result<
     Ok(())
 }
 
-/// Typecheck a pattern and bind any payload name into `env`. Returns the previous binding to restore.
+/// Typecheck a pattern and bind payload names into `env`. Returns previous bindings to restore.
 fn bind_pattern(
     pat: &crate::ast::Pattern,
     scrut: &Type,
     enums: &HashMap<&str, &EnumDef>,
     env: &mut HashMap<String, Type>,
-) -> Result<Option<(String, Option<Type>)>, TypeError> {
+) -> Result<Vec<(String, Option<Type>)>, TypeError> {
     match pat {
-        crate::ast::Pattern::Wildcard => Ok(None),
+        crate::ast::Pattern::Wildcard => Ok(Vec::new()),
         crate::ast::Pattern::Adt {
             enum_name,
             case_name,
-            bind,
+            binds,
         } => {
             let en = enums.get(enum_name.as_str()).ok_or_else(|| {
                 TypeError::Msg(format!("unknown enum {enum_name} in pattern"))
@@ -731,28 +725,42 @@ fn bind_pattern(
                     )))
                 }
             }
-            match (bind, case.fields.as_slice()) {
-                (None, []) => Ok(None),
-                (Some(name), [(_, fty)]) => {
-                    let old = env.insert(name.clone(), fty.clone());
-                    Ok(Some((name.clone(), old)))
+            if binds.len() != case.fields.len() {
+                if case.fields.is_empty() {
+                    return Err(TypeError::Msg(format!(
+                        "pattern {enum_name}.{case_name} is nullary; remove payload binder"
+                    )));
                 }
-                (Some(_), []) => Err(TypeError::Msg(format!(
-                    "pattern {enum_name}.{case_name} is nullary; remove payload binder"
-                ))),
-                (None, [_]) => Err(TypeError::Msg(format!(
-                    "pattern {enum_name}.{case_name} needs a payload binder, e.g. {enum_name}.{case_name}(x)"
-                ))),
-                (_, _) => Err(TypeError::Msg(format!(
-                    "pattern {enum_name}.{case_name}: Stage 0 supports a single payload field"
-                ))),
+                if binds.is_empty() {
+                    let example: Vec<_> = case
+                        .fields
+                        .iter()
+                        .enumerate()
+                        .map(|(i, _)| format!("x{i}"))
+                        .collect();
+                    return Err(TypeError::Msg(format!(
+                        "pattern {enum_name}.{case_name} needs a payload binder, e.g. {enum_name}.{case_name}({})",
+                        example.join(", ")
+                    )));
+                }
+                return Err(TypeError::Msg(format!(
+                    "pattern {enum_name}.{case_name} expects {} binder(s), got {}",
+                    case.fields.len(),
+                    binds.len()
+                )));
             }
+            let mut restored = Vec::new();
+            for (name, (_, fty)) in binds.iter().zip(case.fields.iter()) {
+                let old = env.insert(name.clone(), fty.clone());
+                restored.push((name.clone(), old));
+            }
+            Ok(restored)
         }
     }
 }
 
-fn unbind_pattern(bound: Option<(String, Option<Type>)>, env: &mut HashMap<String, Type>) {
-    if let Some((name, old)) = bound {
+fn unbind_pattern(bound: Vec<(String, Option<Type>)>, env: &mut HashMap<String, Type>) {
+    for (name, old) in bound.into_iter().rev() {
         if let Some(v) = old {
             env.insert(name, v);
         } else {
@@ -799,6 +807,20 @@ enum Opt:
     }
 
     #[test]
+    fn typechecks_multi_field_payload_adt() {
+        let src = r#"
+enum Pair:
+  case Pair(a: Int, b: String)
+@main def main: IO[Unit] =
+  Pair.Pair(7, "hi") match {
+    case Pair.Pair(x, y) => IO.println(Str.concat(Str.fromInt(x), y))
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("multi-field payload ADT should typecheck");
+    }
+
+    #[test]
     fn rejects_payload_type_mismatch() {
         let src = r#"
 enum Opt:
@@ -827,5 +849,19 @@ enum Opt:
         let p = lower_program(parse(src).unwrap());
         let err = typecheck(&p).unwrap_err();
         assert!(err.message().contains("needs a payload binder"));
+    }
+
+    #[test]
+    fn rejects_wrong_binder_arity() {
+        let src = r#"
+enum Pair:
+  case Pair(a: Int, b: String)
+@main def main: IO[Unit] = Pair.Pair(1, "x") match {
+  case Pair.Pair(x) => IO.println(x)
+}
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(err.message().contains("expects 2 binder(s)"));
     }
 }

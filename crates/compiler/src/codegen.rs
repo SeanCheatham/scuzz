@@ -174,7 +174,7 @@ struct EmitCtx<'a> {
     strs: &'a [String],
     enum_tags: &'a HashMap<(String, String), i32>,
     /// Payload field type for unary cases (absent / Unit-like = nullary).
-    enum_payloads: &'a HashMap<(String, String), Type>,
+    enum_payloads: &'a HashMap<(String, String), Vec<Type>>,
     funs: &'a HashMap<String, &'a FunDef>,
     cont_id: &'a mut usize,
     conts: &'a mut String,
@@ -216,12 +216,15 @@ fn build_enum_tags(enums: &[EnumDef]) -> HashMap<(String, String), i32> {
     m
 }
 
-fn build_enum_payloads(enums: &[EnumDef]) -> HashMap<(String, String), Type> {
+fn build_enum_payloads(enums: &[EnumDef]) -> HashMap<(String, String), Vec<Type>> {
     let mut m = HashMap::new();
     for e in enums {
         for c in &e.cases {
-            if let Some((_, ty)) = c.fields.first() {
-                m.insert((e.name.clone(), c.name.clone()), ty.clone());
+            if !c.fields.is_empty() {
+                m.insert(
+                    (e.name.clone(), c.name.clone()),
+                    c.fields.iter().map(|(_, ty)| ty.clone()).collect(),
+                );
             }
         }
     }
@@ -730,25 +733,64 @@ fn emit_expr(
             let payload_ptr = if args.is_empty() {
                 "null".to_string()
             } else {
-                let ae = emit_expr(&args[0], ctx, locals, &format!("{prefix}_ap"));
-                code.push_str(&ae.code);
-                match ctx.enum_payloads.get(&(enum_name.clone(), case_name.clone())) {
-                    Some(Type::Int) => {
-                        let v = if ae.kind == Kind::Int {
-                            ae.value
-                        } else {
-                            writeln!(code, "  %{prefix}_ap0 = add i64 0, 0").unwrap();
-                            format!("%{prefix}_ap0")
+                let field_tys = ctx
+                    .enum_payloads
+                    .get(&(enum_name.clone(), case_name.clone()))
+                    .cloned()
+                    .unwrap_or_default();
+                if args.len() == 1 {
+                    let ae = emit_expr(&args[0], ctx, locals, &format!("{prefix}_ap"));
+                    code.push_str(&ae.code);
+                    match field_tys.first() {
+                        Some(Type::Int) => {
+                            let v = if ae.kind == Kind::Int {
+                                ae.value
+                            } else {
+                                writeln!(code, "  %{prefix}_ap0 = add i64 0, 0").unwrap();
+                                format!("%{prefix}_ap0")
+                            };
+                            writeln!(
+                                code,
+                                "  %{prefix}_box = call ptr @sz_box_i64(i64 {v})"
+                            )
+                            .unwrap();
+                            format!("%{prefix}_box")
+                        }
+                        _ => ae.value,
+                    }
+                } else {
+                    // N>=2: pack field values into a List (Ints boxed).
+                    writeln!(code, "  %{prefix}_pl0 = call ptr @sz_list_nil()").unwrap();
+                    let mut cur = format!("%{prefix}_pl0");
+                    for (i, arg) in args.iter().enumerate().rev() {
+                        let ae = emit_expr(arg, ctx, locals, &format!("{prefix}_ap{i}"));
+                        code.push_str(&ae.code);
+                        let ptr = match field_tys.get(i) {
+                            Some(Type::Int) => {
+                                let v = if ae.kind == Kind::Int {
+                                    ae.value.clone()
+                                } else {
+                                    writeln!(code, "  %{prefix}_ap{i}i = add i64 0, 0").unwrap();
+                                    format!("%{prefix}_ap{i}i")
+                                };
+                                writeln!(
+                                    code,
+                                    "  %{prefix}_bx{i} = call ptr @sz_box_i64(i64 {v})"
+                                )
+                                .unwrap();
+                                format!("%{prefix}_bx{i}")
+                            }
+                            _ => ae.value.clone(),
                         };
+                        let next = format!("%{prefix}_pl{}", args.len() - i);
                         writeln!(
                             code,
-                            "  %{prefix}_box = call ptr @sz_box_i64(i64 {v})"
+                            "  {next} = call ptr @sz_list_cons(ptr {ptr}, ptr {cur})"
                         )
                         .unwrap();
-                        format!("%{prefix}_box")
+                        cur = next;
                     }
-                    Some(Type::String) | None => ae.value,
-                    Some(_) => ae.value,
+                    cur
                 }
             };
             writeln!(
@@ -894,37 +936,77 @@ fn emit_expr(
                 }
                 let label = format!("{prefix}_arm_{id}_{i}");
                 writeln!(code, "{label}:").unwrap();
-                let mut bound_name: Option<String> = None;
+                let mut bound_names: Vec<String> = Vec::new();
                 if let Pattern::Adt {
                     enum_name,
                     case_name,
-                    bind: Some(b),
+                    binds,
                 } = &arm.pattern
                 {
-                    writeln!(
-                        code,
-                        "  %{prefix}_pl{id}_{i} = call ptr @sz_adt_payload(ptr {})",
-                        se.value
-                    )
-                    .unwrap();
-                    let llvm_name = format!("{prefix}_b{id}_{i}");
-                    match ctx.enum_payloads.get(&(enum_name.clone(), case_name.clone())) {
-                        Some(Type::Int) => {
-                            writeln!(
-                                code,
-                                "  %{llvm_name} = call i64 @sz_unbox_i64(ptr %{prefix}_pl{id}_{i})"
-                            )
-                            .unwrap();
-                            locals.insert(b.clone(), (format!("%{llvm_name}"), Kind::Int));
-                        }
-                        _ => {
-                            locals.insert(
-                                b.clone(),
-                                (format!("%{prefix}_pl{id}_{i}"), Kind::Ptr),
-                            );
+                    if !binds.is_empty() {
+                        writeln!(
+                            code,
+                            "  %{prefix}_pl{id}_{i} = call ptr @sz_adt_payload(ptr {})",
+                            se.value
+                        )
+                        .unwrap();
+                        let field_tys = ctx
+                            .enum_payloads
+                            .get(&(enum_name.clone(), case_name.clone()))
+                            .cloned()
+                            .unwrap_or_default();
+                        if binds.len() == 1 {
+                            let b = &binds[0];
+                            let llvm_name = format!("{prefix}_b{id}_{i}");
+                            match field_tys.first() {
+                                Some(Type::Int) => {
+                                    writeln!(
+                                        code,
+                                        "  %{llvm_name} = call i64 @sz_unbox_i64(ptr %{prefix}_pl{id}_{i})"
+                                    )
+                                    .unwrap();
+                                    locals.insert(b.clone(), (format!("%{llvm_name}"), Kind::Int));
+                                }
+                                _ => {
+                                    locals.insert(
+                                        b.clone(),
+                                        (format!("%{prefix}_pl{id}_{i}"), Kind::Ptr),
+                                    );
+                                }
+                            }
+                            bound_names.push(b.clone());
+                        } else {
+                            for (fi, b) in binds.iter().enumerate() {
+                                let cell = format!("{prefix}_c{id}_{i}_{fi}");
+                                writeln!(
+                                    code,
+                                    "  %{cell} = call ptr @sz_list_at(ptr %{prefix}_pl{id}_{i}, i64 {fi})"
+                                )
+                                .unwrap();
+                                match field_tys.get(fi) {
+                                    Some(Type::Int) => {
+                                        let llvm_name = format!("{prefix}_b{id}_{i}_{fi}");
+                                        writeln!(
+                                            code,
+                                            "  %{llvm_name} = call i64 @sz_unbox_i64(ptr %{cell})"
+                                        )
+                                        .unwrap();
+                                        locals.insert(
+                                            b.clone(),
+                                            (format!("%{llvm_name}"), Kind::Int),
+                                        );
+                                    }
+                                    _ => {
+                                        locals.insert(
+                                            b.clone(),
+                                            (format!("%{cell}"), Kind::Ptr),
+                                        );
+                                    }
+                                }
+                                bound_names.push(b.clone());
+                            }
                         }
                     }
-                    bound_name = Some(b.clone());
                 }
                 let ae = emit_expr(
                     &arm.body,
@@ -932,7 +1014,7 @@ fn emit_expr(
                     locals,
                     &format!("{prefix}_a{id}_{i}"),
                 );
-                if let Some(b) = bound_name {
+                for b in bound_names {
                     locals.remove(&b);
                 }
                 code.push_str(&ae.code);
@@ -2309,6 +2391,28 @@ enum Msg:
         assert!(ir.contains("sz_adt_new"));
         // String payload is passed through (no box_i64 for the ctor arg).
         assert!(ir.contains("call ptr @sz_adt_new(i32 0, ptr %"));
+    }
+
+    #[test]
+    fn emit_multi_field_payload_adt() {
+        let src = r#"
+enum Pair:
+  case Pair(a: Int, b: String)
+@main def main: IO[Unit] =
+  Pair.Pair(7, "hi") match {
+    case Pair.Pair(x, y) => IO.println(Str.concat(Str.fromInt(x), y))
+  }
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_nil"));
+        assert!(ir.contains("sz_list_cons"));
+        assert!(ir.contains("sz_box_i64"));
+        assert!(ir.contains("sz_list_at"));
+        assert!(ir.contains("sz_unbox_i64"));
+        assert!(ir.contains("sz_adt_new"));
+        assert!(ir.contains("sz_adt_payload"));
     }
 
     #[test]

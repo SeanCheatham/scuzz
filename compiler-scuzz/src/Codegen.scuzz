@@ -64,7 +64,19 @@ def buildCasePayloads(en: String, cases: List, acc: List): List =
   if (List.isEmpty(cases) == 1) acc else buildCasePayloads(en, List.tail(cases), buildCasePayloadOne(en, List.head(cases), acc))
 
 def buildCasePayloadOne(en: String, c: List, acc: List): List =
-  if (List.isEmpty(caseFields(c)) == 1) acc else List.cons(str4(en, ".", caseName(c), str3("=", fieldType(List.head(caseFields(c))), "")), acc)
+  if (List.isEmpty(caseFields(c)) == 1) acc else List.cons(str4(en, ".", caseName(c), str3("=", joinFieldTypes(caseFields(c), ""), "")), acc)
+
+def joinFieldTypes(fields: List, acc: String): String =
+  if (List.isEmpty(fields) == 1) acc else joinFieldTypesCont(List.head(fields), List.tail(fields), acc)
+
+def joinFieldTypesCont(f: List, rest: List, acc: String): String =
+  for {
+    one = fieldType(f)
+    acc2 = if (Str.len(acc) == 0) one else str3(acc, "\n", one)
+  } yield joinFieldTypes(rest, acc2)
+
+def payloadTypeList(pty: String): List =
+  if (Str.len(pty) == 0) List.empty() else Str.lines(pty)
 
 def tagLookup(tags: List, en: String, caseName: String): String =
   tagLookupKey(tags, str3(en, ".", caseName))
@@ -318,13 +330,13 @@ def emitAdt(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, 
   for {
     tag = tagLookup(ctxTags(ctx), nodeStr(e, 0), nodeStr(e, 1))
     args = nodeExpr(e, 2)
-  } yield if (List.isEmpty(args) == 1) mkS(str5("  %", prefix, "_adt = call ptr @sz_adt_new(i32 ", tag, ", ptr null)\n"), str3("%", prefix, "_adt"), "ptr", id, conts) else emitAdtWithArg(strs, e, ctx, env, prefix, id, conts, tag, List.head(args))
+  } yield if (List.isEmpty(args) == 1) mkS(str5("  %", prefix, "_adt = call ptr @sz_adt_new(i32 ", tag, ", ptr null)\n"), str3("%", prefix, "_adt"), "ptr", id, conts) else if (List.len(args) == 1) emitAdtWithArg(strs, e, ctx, env, prefix, id, conts, tag, List.head(args)) else emitAdtMulti(strs, e, ctx, env, prefix, id, conts, tag, args)
 
 def emitAdtWithArg(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String, tag: String, arg: List): List =
   for {
     ae = emitExpr(arg, strs, ctx, env, Str.concat(prefix, "_ap"), id, conts)
     pty = payloadLookup(ctxPayloads(ctx), nodeStr(e, 0), nodeStr(e, 1))
-  } yield emitAdtFinish(ae, prefix, tag, pty)
+  } yield emitAdtFinish(ae, prefix, tag, List.head(payloadTypeList(pty)))
 
 def emitAdtFinish(ae: List, prefix: String, tag: String, pty: String): List =
   if (streq(pty, "Int") == 1) emitAdtIntPayload(ae, prefix, tag) else mkS(str4(sCode(ae), "  %", prefix, str5("_adt = call ptr @sz_adt_new(i32 ", tag, ", ptr ", sValue(ae), ")\n")), str3("%", prefix, "_adt"), "ptr", sId(ae), sConts(ae))
@@ -334,6 +346,31 @@ def emitAdtIntPayload(ae: List, prefix: String, tag: String): List =
     v = if (streq(sKind(ae), "int") == 1) sValue(ae) else str3("%", prefix, "_ap0")
     pre = if (streq(sKind(ae), "int") == 1) sCode(ae) else str4(sCode(ae), "  %", prefix, "_ap0 = add i64 0, 0\n")
   } yield mkS(str4(pre, "  %", prefix, str5("_box = call ptr @sz_box_i64(i64 ", v, ")\n  %", prefix, str4("_adt = call ptr @sz_adt_new(i32 ", tag, ", ptr %", Str.concat(prefix, "_box)\n")))), str3("%", prefix, "_adt"), "ptr", sId(ae), sConts(ae))
+
+def emitAdtMulti(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String, tag: String, args: List): List =
+  for {
+    pty = payloadLookup(ctxPayloads(ctx), nodeStr(e, 0), nodeStr(e, 1))
+    tys = payloadTypeList(pty)
+  } yield emitAdtMultiPack(strs, List.reverse(args), List.reverse(tys), ctx, env, prefix, id, conts, tag, List.len(args), str3("  %", prefix, "_pl0 = call ptr @sz_list_nil()\n"), str3("%", prefix, "_pl0"), 0)
+
+def emitAdtMultiPack(strs: List, argsRev: List, tysRev: List, ctx: List, env: List, prefix: String, id: Int, conts: String, tag: String, n: Int, code: String, cur: String, packed: Int): List =
+  if (List.isEmpty(argsRev) == 1) mkS(str4(code, "  %", prefix, str5("_adt = call ptr @sz_adt_new(i32 ", tag, ", ptr ", cur, ")\n")), str3("%", prefix, "_adt"), "ptr", id, conts) else emitAdtMultiPackOne(strs, List.head(argsRev), List.head(tysRev), List.tail(argsRev), List.tail(tysRev), ctx, env, prefix, id, conts, tag, n, code, cur, packed)
+
+def emitAdtMultiPackOne(strs: List, arg: List, ty: String, argsRev: List, tysRev: List, ctx: List, env: List, prefix: String, id: Int, conts: String, tag: String, n: Int, code: String, cur: String, packed: Int): List =
+  for {
+    idx = n - 1 - packed
+    ae = emitExpr(arg, strs, ctx, env, str3(prefix, "_ap", Str.fromInt(idx)), id, conts)
+    next = str3("%", prefix, Str.concat("_pl", Str.fromInt(packed + 1)))
+    boxed = if (streq(ty, "Int") == 1) emitAdtMultiBoxInt(ae, prefix, idx, code, next, cur) else pair(str4(code, sCode(ae), "  ", str4(next, " = call ptr @sz_list_cons(ptr ", sValue(ae), str3(", ptr ", cur, ")\n"))), next)
+  } yield emitAdtMultiPack(strs, argsRev, tysRev, ctx, env, prefix, sId(ae), sConts(ae), tag, n, fst(boxed), snd(boxed), packed + 1)
+
+def emitAdtMultiBoxInt(ae: List, prefix: String, idx: Int, code: String, next: String, cur: String): List =
+  for {
+    v = if (streq(sKind(ae), "int") == 1) sValue(ae) else str3("%", prefix, Str.concat("_ap", Str.concat(Str.fromInt(idx), "i")))
+    pre0 = str3(code, sCode(ae), "")
+    pre = if (streq(sKind(ae), "int") == 1) pre0 else str4(pre0, "  %", prefix, Str.concat("_ap", str3(Str.fromInt(idx), "i = add i64 0, 0\n", "")))
+    bx = str3("%", prefix, Str.concat("_bx", Str.fromInt(idx)))
+  } yield pair(str4(pre, "  ", bx, str5(" = call ptr @sz_box_i64(i64 ", v, ")\n  ", next, str3(" = call ptr @sz_list_cons(ptr ", bx, str3(", ptr ", cur, ")\n")))), next)
 
 def emitSwitchLabels(arms: List, tags: List, prefix: String, mid: Int, i: Int): String =
   if (List.isEmpty(arms) == 1) "" else emitSwitchLabelOne(List.head(arms), List.tail(arms), tags, prefix, mid, i)
@@ -376,16 +413,36 @@ def emitMatchArmBody(arm: List, rest: List, strs: List, ctx: List, env: List, pr
 
 def emitPatBind(pat: List, ctx: List, env: List, prefix: String, mid: Int, i: Int, scrut: String): List =
   for {
-    bind = nodeStr(pat, 2)
-  } yield if (Str.len(bind) == 0) pairSL("", env) else emitPatBindPayload(pat, ctx, env, prefix, mid, i, scrut, bind)
+    binds = nodeExpr(pat, 2)
+  } yield if (List.isEmpty(binds) == 1) pairSL("", env) else emitPatBindPayload(pat, ctx, env, prefix, mid, i, scrut, binds)
 
-def emitPatBindPayload(pat: List, ctx: List, env: List, prefix: String, mid: Int, i: Int, scrut: String, bind: String): List =
+def emitPatBindPayload(pat: List, ctx: List, env: List, prefix: String, mid: Int, i: Int, scrut: String, binds: List): List =
   for {
     pl = str4(prefix, "_pl", Str.fromInt(mid), str3("_", Str.fromInt(i), ""))
-    bn = str4(prefix, "_b", Str.fromInt(mid), str3("_", Str.fromInt(i), ""))
     pty = payloadLookup(ctxPayloads(ctx), nodeStr(pat, 0), nodeStr(pat, 1))
+    tys = payloadTypeList(pty)
     code = str5("  %", pl, " = call ptr @sz_adt_payload(ptr ", scrut, ")\n")
+  } yield if (List.len(binds) == 1) emitPatBindUnary(code, pl, List.head(binds), List.head(tys), env, prefix, mid, i) else emitPatBindMulti(code, pl, binds, tys, env, prefix, mid, i, 0)
+
+def emitPatBindUnary(code: String, pl: String, bind: String, pty: String, env: List, prefix: String, mid: Int, i: Int): List =
+  for {
+    bn = str4(prefix, "_b", Str.fromInt(mid), str3("_", Str.fromInt(i), ""))
   } yield if (streq(pty, "Int") == 1) pairSL(str4(code, "  %", bn, str3(" = call i64 @sz_unbox_i64(ptr %", pl, ")\n")), envPut(env, bind, Str.concat("%", bn), "int")) else pairSL(code, envPut(env, bind, Str.concat("%", pl), "ptr"))
+
+def emitPatBindMulti(code: String, pl: String, binds: List, tys: List, env: List, prefix: String, mid: Int, i: Int, fi: Int): List =
+  if (List.isEmpty(binds) == 1) pairSL(code, env) else emitPatBindMultiOne(code, pl, List.head(binds), List.head(tys), List.tail(binds), List.tail(tys), env, prefix, mid, i, fi)
+
+def emitPatBindMultiOne(code: String, pl: String, bind: String, ty: String, binds: List, tys: List, env: List, prefix: String, mid: Int, i: Int, fi: Int): List =
+  for {
+    cell = str4(prefix, "_c", Str.fromInt(mid), str3("_", Str.fromInt(i), Str.concat("_", Str.fromInt(fi))))
+    code2 = str4(code, "  %", cell, str5(" = call ptr @sz_list_at(ptr %", pl, ", i64 ", Str.fromInt(fi), ")\n"))
+  } yield if (streq(ty, "Int") == 1) emitPatBindMultiInt(code2, pl, cell, bind, binds, tys, env, prefix, mid, i, fi) else emitPatBindMulti(code2, pl, binds, tys, envPut(env, bind, Str.concat("%", cell), "ptr"), prefix, mid, i, fi + 1)
+
+def emitPatBindMultiInt(code: String, pl: String, cell: String, bind: String, binds: List, tys: List, env: List, prefix: String, mid: Int, i: Int, fi: Int): List =
+  for {
+    bn = str4(prefix, "_b", Str.fromInt(mid), str3("_", Str.fromInt(i), Str.concat("_", Str.fromInt(fi))))
+    code2 = str4(code, "  %", bn, str3(" = call i64 @sz_unbox_i64(ptr %", cell, ")\n"))
+  } yield emitPatBindMulti(code2, pl, binds, tys, envPut(env, bind, Str.concat("%", bn), "int"), prefix, mid, i, fi + 1)
 
 def emitMatchDefault(strs: List, arms: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, defaultL: String, ar: List): List =
   for {

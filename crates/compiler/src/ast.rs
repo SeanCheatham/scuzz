@@ -208,11 +208,11 @@ pub struct MatchArm {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Pattern {
-    /// `Color.Red` / `Opt.Some(n)` — `bind` is the payload name when present
+    /// `Color.Red` / `Opt.Some(n)` / `Pair.Pair(x, y)` — `binds` are payload names (empty = nullary)
     Adt {
         enum_name: String,
         case_name: String,
-        bind: Option<String>,
+        binds: Vec<String>,
     },
     /// `_`
     Wildcard,

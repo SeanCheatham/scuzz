@@ -37,11 +37,11 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### 4. Language growth vs the self-host ratchet
 
-**Current state.** Stage 0 and self-host (`compiler-scuzz/`) support payload ADTs with a single `Int` or `String` field (`EnumCase` / `Case` + fields, `sz_adt_payload`, match binders) — proven by Stage-0 unit tests and `examples/adt` (`Opt.Some(42)`). Compiler sources stay on List+string-tag IR (multi-field cases would be needed for a full AST rewrite). `List` is monomorphic; the only type constructor is builtin `IO[T]`. No records, traits, or user generics in either compiler, though `compatibility.md` keeps "generics (monomorphize early)" as direction.
+**Current state.** Stage 0 and self-host (`compiler-scuzz/`) support payload ADTs with N `Int`/`String` fields (`EnumCase` / `Case` + fields, `sz_adt_payload`, multi-binder match) — proven by Stage-0 unit tests and `examples/adt` (`Opt.Some(42)`, `Pair.Pair(7, "ok")`). Multi-field product payloads pack as a `List` of values (Ints boxed) in the existing ADT payload pointer. Compiler sources stay on List+string-tag IR (rewriting the compiler AST onto payloads is the next residual). `List` is monomorphic; the only type constructor is builtin `IO[T]`. No records, traits, or user generics in either compiler, though `compatibility.md` keeps "generics (monomorphize early)" as direction.
 
-**Unproven.** Whether the Stage 0 → 1 → 2 ratchet stays tractable once features are structurally big. Every feature lands in Stage 0 first, then gets ported into the kernel dialect, then must survive the fixpoint gate (`scripts/selfhost.sh`, byte-identical Stage-2/3 IR). Payload ADTs for **user programs** are in (Stage 0 + self-host). Rewriting the compiler's own IR/AST onto payloads remains blocked on multi-field cases. Generics + early monomorphization is the next large stress test.
+**Unproven.** Whether the Stage 0 → 1 → 2 ratchet stays tractable once features are structurally big. Every feature lands in Stage 0 first, then gets ported into the kernel dialect, then must survive the fixpoint gate (`scripts/selfhost.sh`, byte-identical Stage-2/3 IR). Payload ADTs for **user programs** (including multi-field) are in. Rewriting the compiler's own IR/AST onto payloads remains the next ratchet stress. Generics + early monomorphization is the large stress after that.
 
-**Proof.** Payload ADTs land in Stage 0 (done), `compiler-scuzz/` compiles unary payload ADTs for user programs through the dual-boot gate (done for `examples/adt`), and a later multi-field / compiler-IR rewrite still has to keep the fixpoint intact.
+**Proof.** Payload ADTs land in Stage 0 (done), `compiler-scuzz/` compiles multi-field payload ADTs for user programs through the dual-boot gate (done for `examples/adt`), and a later compiler-IR rewrite still has to keep the fixpoint intact.
 
 ### 5. Mobile on real devices
 
@@ -49,15 +49,19 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 **Unproven.** The entire device chain: cross-compiling the LLVM-emitted app + C runtime + `sk_sw` for arm64, JNI/ObjC embedding, surface/present, touch and soft-keyboard input on hardware. Consciously deferred (host Mobile peer first), but zero of it is demonstrated.
 
-**Proof.** One example (counter) runs on one real device or simulator via `scuzz package` plus the platform toolchain.
+**Blocked (in-repo exhausted).** Proof requires an Android NDK and/or Xcode (device or simulator) toolchain that can cross-compile, package, and run the app. Host shell + packaging stubs are in tree; no NDK/Xcode invocation exists in Makefiles or CI. In-repo prep that does **not** close the proof: further stub manifests, JNI/ObjC hook shapes, or host-shell polish. Do not claim device Mobile until a real toolchain run succeeds.
+
+**Proof (when unblocked).** One example (counter) runs on one real device or simulator via `scuzz package` plus the platform toolchain.
 
 ### 6. GPU presenters (Impeller / Skia GPU)
 
-**Current state.** Deferred by decision, with the constraint that presenters "must not change `Ui` session or logical goldens" — asserted, never demonstrated. Only the CPU raster path exists.
+**Current state.** Deferred by decision, with the constraint that presenters "must not change `Ui` session or logical goldens" — asserted, never demonstrated. Only the CPU raster path (`sk_sw`) exists.
 
-**Unproven.** That the presenter seam actually holds: a GPU backend behind `sk_capi` with identical structural dumps and (tolerance-bounded) pixels. Downstream of unknown 1; do not attempt before real Skia is wired.
+**Unproven.** That the presenter seam actually holds: a GPU backend behind `sk_capi` with identical structural dumps and (tolerance-bounded) pixels.
 
-**Proof.** A second presenter renders the golden examples with unchanged structural goldens.
+**Blocked (in-repo exhausted).** Downstream of unknown 1 (real Skia via `sk_capi`). Until a fetched Skia prebuilt replaces CPU-only `sk_sw` for text and raster, there is no second backend to prove the presenter seam against. In-repo prep that does **not** close the proof: documenting presenter constraints or adding unused GPU stubs. Do not attempt until unknown 1 is unblocked.
+
+**Proof (when unblocked).** A second presenter renders the golden examples with unchanged structural goldens.
 
 ## Known gaps
 

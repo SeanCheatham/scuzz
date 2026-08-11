@@ -285,11 +285,14 @@ fn pretty_arm(arm: &MatchArm, indent: usize) -> String {
         Pattern::Adt {
             enum_name,
             case_name,
-            bind,
-        } => match bind {
-            Some(b) => format!("{enum_name}.{case_name}({b})"),
-            None => format!("{enum_name}.{case_name}"),
-        },
+            binds,
+        } => {
+            if binds.is_empty() {
+                format!("{enum_name}.{case_name}")
+            } else {
+                format!("{enum_name}.{case_name}({})", binds.join(", "))
+            }
+        }
     };
     let body = pretty_expr(&arm.body, 0).trim().to_string();
     format!("{pad}case {pat} => {body}")
@@ -367,6 +370,24 @@ enum Opt:
         assert!(out.contains("case None"));
         assert!(out.contains("Opt.Some(1)"));
         assert!(out.contains("case Opt.Some(n) =>"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_multi_field_payload_enum() {
+        let src = r#"
+enum Pair:
+  case Pair(a: Int, b: String)
+@main def main: IO[Unit] =
+  Pair.Pair(1, "x") match {
+    case Pair.Pair(x, y) => IO.println(y)
+  }
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("case Pair(a: Int, b: String)"));
+        assert!(out.contains("Pair.Pair(1, \"x\")"));
+        assert!(out.contains("case Pair.Pair(x, y) =>"));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }
