@@ -24,3 +24,5 @@ crates/embedder-mobile/build/
 .idea/
 .vscode/
 third_party/skia/prebuilt/
+
+scratchpad/
