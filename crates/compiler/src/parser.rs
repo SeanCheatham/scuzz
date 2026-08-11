@@ -3,6 +3,7 @@ use crate::ast::{
     Param, Pattern, Program, Type,
 };
 use crate::lexer::{lex, InterpTok, LexError, SpannedToken, Token};
+use crate::resolve::module_id_from_label;
 use crate::span::Span;
 use thiserror::Error;
 
@@ -53,15 +54,18 @@ pub fn parse_file(source: &str, file: &str) -> Result<Program, ParseError> {
             t.span.file = file.to_string();
         }
     }
+    let module = module_id_from_label(file);
     let mut p = Parser {
         tokens,
         i: 0,
         file: file.to_string(),
+        module,
     };
     p.parse_program()
 }
 
-/// Parse multiple source files into one program (packages must agree; enums/defs merge).
+/// Parse multiple source files into one program (packages must agree; enums merge globally;
+/// defs are namespaced by file-stem module — same bare name in two modules is allowed).
 pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError> {
     let mut package: Option<Vec<String>> = None;
     let mut enums: Vec<EnumDef> = Vec::new();
@@ -92,10 +96,13 @@ pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError
             enums.push(e);
         }
         for d in prog.defs {
-            if defs.iter().any(|x| x.name == d.name) {
+            if defs
+                .iter()
+                .any(|x| x.module == d.module && x.name == d.name)
+            {
                 return Err(ParseError::Msg(format!(
-                    "{name}: duplicate def {}",
-                    d.name
+                    "{name}: duplicate def {}.{}",
+                    d.module, d.name
                 )));
             }
             defs.push(d);
@@ -124,6 +131,7 @@ struct Parser {
     tokens: Vec<SpannedToken>,
     i: usize,
     file: String,
+    module: String,
 }
 
 impl Parser {
@@ -205,6 +213,7 @@ impl Parser {
         let mut enums = Vec::new();
         let mut defs = Vec::new();
         let mut main = MainDef {
+            module: self.module.clone(),
             name: String::new(),
             body: Expr::dummy(ExprKind::Unit),
         };
@@ -253,7 +262,11 @@ impl Parser {
         }
         self.expect(&Token::Eq)?;
         let body = self.parse_expr()?;
-        Ok(MainDef { name, body })
+        Ok(MainDef {
+            module: self.module.clone(),
+            name,
+            body,
+        })
     }
 
     fn parse_def(&mut self) -> Result<FunDef, ParseError> {
@@ -283,6 +296,7 @@ impl Parser {
         self.expect(&Token::Eq)?;
         let body = self.parse_expr()?;
         Ok(FunDef {
+            module: self.module.clone(),
             name,
             params,
             ret,
@@ -1026,6 +1040,7 @@ impl Parser {
                         tokens,
                         i: 0,
                         file: self.file.clone(),
+                        module: self.module.clone(),
                     };
                     let e = nested.parse_expr()?;
                     if !matches!(nested.peek(), Token::Eof) {
@@ -1341,5 +1356,39 @@ enum Pair:
 "#;
         let p = parse(src).unwrap();
         assert!(matches!(p.main.body.kind, ExprKind::For { .. }));
+    }
+
+    #[test]
+    fn parse_sources_allows_same_def_in_two_modules() {
+        let p = parse_sources(&[
+            ("A.scuzz".into(), "def tag(): String = \"a\"\n".into()),
+            ("B.scuzz".into(), "def tag(): String = \"b\"\n".into()),
+            (
+                "Main.scuzz".into(),
+                "@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
+            ),
+        ])
+        .unwrap();
+        assert_eq!(p.defs.len(), 2);
+        assert_eq!(p.defs[0].module, "A");
+        assert_eq!(p.defs[1].module, "B");
+        assert_eq!(p.main.module, "Main");
+    }
+
+    #[test]
+    fn parse_sources_rejects_duplicate_def_in_same_module() {
+        let err = parse_sources(&[
+            (
+                "pkg/src/A.scuzz".into(),
+                "def tag(): String = \"a\"\ndef tag(): String = \"x\"\n".into(),
+            ),
+            (
+                "Main.scuzz".into(),
+                "@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
+            ),
+        ])
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("duplicate def"), "unexpected: {err}");
     }
 }
