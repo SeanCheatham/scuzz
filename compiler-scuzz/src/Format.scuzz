@@ -37,7 +37,7 @@ def padOf(indent: Int): String =
   if (indent <= 0) "" else Str.concat("  ", padOf(indent - 1))
 
 def formatSource(source: String): String =
-  prettyProg(parseSource(source))
+  prettyProg(parseSource("", source))
 
 def prettyProg(p: List): String =
   prettyProgParts(nodeStr(p, 0), progEnums(p), progDefs(p), progMain(p))

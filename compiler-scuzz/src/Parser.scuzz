@@ -22,13 +22,16 @@ def exprChild(e: List, i: Int): List =
   List.at(List.tail(e), i)
 
 def unitExpr(): List =
-  List.cons("Unit", List.empty())
+  withSpan(List.cons("Unit", List.empty()), dummySpan())
 
-def tokAt(tokens: List, i: Int): String =
-  if (i >= List.len(tokens)) "Eof" else List.at(tokens, i)
+def unitAt(file: String, tokens: List, i: Int): List =
+  withSpan(List.cons("Unit", List.empty()), tokSpan(file, tokAt(tokens, i)))
+
+def tokAt(tokens: List, i: Int): List =
+  if (i >= List.len(tokens)) mkTok("Eof", 0, 0) else List.at(tokens, i)
 
 def isTok(tokens: List, i: Int, t: String): Int =
-  if (streq(tokAt(tokens, i), t) == 1) 1 else 0
+  if (streq(tokKind(tokAt(tokens, i)), t) == 1) 1 else 0
 
 def isIdentTok(t: String): Int =
   startsWith(t, "Ident:")
@@ -69,368 +72,376 @@ def interpBraceVal(t: String): String =
 def expectTok(tokens: List, i: Int, t: String): Int =
   if (isTok(tokens, i, t) == 1) i + 1 else i + 1
 
-def parseIdent(tokens: List, i: Int): List =
+def spanCover(file: String, tokens: List, lo: Int, hi: Int): List =
+  if (hi <= lo) tokSpan(file, tokAt(tokens, lo)) else coverSpan(tokSpan(file, tokAt(tokens, lo)), tokSpan(file, tokAt(tokens, hi - 1)))
+
+def parseIdent(file: String, tokens: List, i: Int): List =
   for {
-    t = tokAt(tokens, i)
+    t = tokKind(tokAt(tokens, i))
   } yield if (isIdentTok(t) == 1) okStr(identName(t), i + 1) else okStr("", i)
 
 def typeToString(name: String, inner: String): String =
   if (streq(name, "IO") == 1) str3("IO[", inner, "]") else name
 
-def parseType(tokens: List, i: Int): List =
+def parseType(file: String, tokens: List, i: Int): List =
   for {
-    nameP = parseIdent(tokens, i)
-  } yield parseTypeAfterName(tokens, pStr(nameP), pIdx(nameP))
+    nameP = parseIdent(file, tokens, i)
+  } yield parseTypeAfterName(file, tokens, pStr(nameP), pIdx(nameP))
 
-def parseTypeAfterName(tokens: List, name: String, i: Int): List =
-  if (streq(name, "IO") == 1) parseTypeIo(tokens, i) else okStr(name, i)
+def parseTypeAfterName(file: String, tokens: List, name: String, i: Int): List =
+  if (streq(name, "IO") == 1) parseTypeIo(file, tokens, i) else okStr(name, i)
 
-def parseTypeIo(tokens: List, i: Int): List =
+def parseTypeIo(file: String, tokens: List, i: Int): List =
   for {
     i1 = expectTok(tokens, i, "LBracket")
-    innerP = parseType(tokens, i1)
+    innerP = parseType(file, tokens, i1)
     i2 = expectTok(tokens, pIdx(innerP), "RBracket")
   } yield okStr(str3("IO[", pStr(innerP), "]"), i2)
 
-def parsePackage(tokens: List, i: Int): List =
-  if (isTok(tokens, i, "Package") == 0) okStr("", i) else parsePackageParts(tokens, i + 1, "")
+def parsePackage(file: String, tokens: List, i: Int): List =
+  if (isTok(tokens, i, "Package") == 0) okStr("", i) else parsePackageParts(file, tokens, i + 1, "")
 
-def parsePackageParts(tokens: List, i: Int, acc: String): List =
+def parsePackageParts(file: String, tokens: List, i: Int, acc: String): List =
   for {
-    nameP = parseIdent(tokens, i)
+    nameP = parseIdent(file, tokens, i)
     name = pStr(nameP)
     i1 = pIdx(nameP)
     next = if (Str.len(acc) == 0) name else str3(acc, ".", name)
-  } yield if (isTok(tokens, i1, "Dot") == 1) parsePackageParts(tokens, i1 + 1, next) else okStr(next, i1)
+  } yield if (isTok(tokens, i1, "Dot") == 1) parsePackageParts(file, tokens, i1 + 1, next) else okStr(next, i1)
 
-def parseParam(tokens: List, i: Int): List =
+def parseParam(file: String, tokens: List, i: Int): List =
   for {
-    nameP = parseIdent(tokens, i)
+    nameP = parseIdent(file, tokens, i)
     i1 = expectTok(tokens, pIdx(nameP), "Colon")
-    tyP = parseType(tokens, i1)
+    tyP = parseType(file, tokens, i1)
   } yield okStr(str3("Param:", pStr(nameP), Str.concat(":", pStr(tyP))), pIdx(tyP))
 
-def parseParams(tokens: List, i: Int, acc: List): List =
-  if (isTok(tokens, i, "RParen") == 1) ok(List.reverse(acc), i) else parseParamsCont(tokens, i, acc)
+def parseParams(file: String, tokens: List, i: Int, acc: List): List =
+  if (isTok(tokens, i, "RParen") == 1) ok(List.reverse(acc), i) else parseParamsCont(file, tokens, i, acc)
 
-def parseParamsCont(tokens: List, i: Int, acc: List): List =
+def parseParamsCont(file: String, tokens: List, i: Int, acc: List): List =
   for {
-    p = parseParam(tokens, i)
+    p = parseParam(file, tokens, i)
     acc2 = List.cons(pStr(p), acc)
-  } yield if (isTok(tokens, pIdx(p), "Comma") == 1) parseParams(tokens, pIdx(p) + 1, acc2) else ok(List.reverse(acc2), pIdx(p))
+  } yield if (isTok(tokens, pIdx(p), "Comma") == 1) parseParams(file, tokens, pIdx(p) + 1, acc2) else ok(List.reverse(acc2), pIdx(p))
 
-def parseArgs(tokens: List, i: Int, acc: List): List =
-  if (isTok(tokens, i, "RParen") == 1) ok(List.reverse(acc), i) else parseArgsCont(tokens, i, acc)
+def parseArgs(file: String, tokens: List, i: Int, acc: List): List =
+  if (isTok(tokens, i, "RParen") == 1) ok(List.reverse(acc), i) else parseArgsCont(file, tokens, i, acc)
 
-def parseArgsCont(tokens: List, i: Int, acc: List): List =
+def parseArgsCont(file: String, tokens: List, i: Int, acc: List): List =
   for {
-    e = parseExpr(tokens, i)
+    e = parseExpr(file, tokens, i)
     acc2 = List.cons(pAst(e), acc)
-  } yield if (isTok(tokens, pIdx(e), "Comma") == 1) parseArgs(tokens, pIdx(e) + 1, acc2) else ok(List.reverse(acc2), pIdx(e))
+  } yield if (isTok(tokens, pIdx(e), "Comma") == 1) parseArgs(file, tokens, pIdx(e) + 1, acc2) else ok(List.reverse(acc2), pIdx(e))
 
-def parseListLit(tokens: List, i: Int): List =
-  parseListLitElems(tokens, i, List.empty())
+def parseListLit(file: String, tokens: List, i: Int): List =
+  parseListLitElems(file, tokens, i, List.empty(), i - 1)
 
-def parseListLitElems(tokens: List, i: Int, acc: List): List =
-  if (isTok(tokens, i, "RBracket") == 1) ok(List.cons("ListLit", List.cons(List.reverse(acc), List.empty())), i + 1) else parseListLitElemsCont(tokens, i, acc)
+def parseListLitElems(file: String, tokens: List, i: Int, acc: List, startI: Int): List =
+  if (isTok(tokens, i, "RBracket") == 1) ok(withSpan(List.cons("ListLit", List.cons(List.reverse(acc), List.empty())), spanCover(file, tokens, startI, i + 1)), i + 1) else parseListLitElemsCont(file, tokens, i, acc, startI)
 
-def parseListLitElemsCont(tokens: List, i: Int, acc: List): List =
+def parseListLitElemsCont(file: String, tokens: List, i: Int, acc: List, startI: Int): List =
   for {
-    e = parseExpr(tokens, i)
+    e = parseExpr(file, tokens, i)
     acc2 = List.cons(pAst(e), acc)
-  } yield if (isTok(tokens, pIdx(e), "Comma") == 1) parseListLitElems(tokens, pIdx(e) + 1, acc2) else parseListLitElemsEnd(tokens, pIdx(e), acc2)
+  } yield if (isTok(tokens, pIdx(e), "Comma") == 1) parseListLitElems(file, tokens, pIdx(e) + 1, acc2, startI) else parseListLitElemsEnd(file, tokens, pIdx(e), acc2, startI)
 
-def parseListLitElemsEnd(tokens: List, i: Int, acc: List): List =
+def parseListLitElemsEnd(file: String, tokens: List, i: Int, acc: List, startI: Int): List =
   for {
     i1 = expectTok(tokens, i, "RBracket")
-  } yield ok(List.cons("ListLit", List.cons(List.reverse(acc), List.empty())), i1)
+  } yield ok(withSpan(List.cons("ListLit", List.cons(List.reverse(acc), List.empty())), spanCover(file, tokens, startI, i1)), i1)
 
-def parseBlock(tokens: List, i: Int): List =
-  parseExpr(tokens, i)
+def parseBlock(file: String, tokens: List, i: Int): List =
+  parseExpr(file, tokens, i)
 
-def parseExpr(tokens: List, i: Int): List =
-  parseOr(tokens, i)
+def parseExpr(file: String, tokens: List, i: Int): List =
+  parseOr(file, tokens, i)
 
-def parseOr(tokens: List, i: Int): List =
+def parseOr(file: String, tokens: List, i: Int): List =
   for {
-    leftP = parseAnd(tokens, i)
-  } yield parseOrRest(tokens, pAst(leftP), pIdx(leftP))
+    leftP = parseAnd(file, tokens, i)
+  } yield parseOrRest(file, tokens, pAst(leftP), pIdx(leftP))
 
-def parseOrRest(tokens: List, left: List, i: Int): List =
-  if (isTok(tokens, i, "PipePipe") == 1) parseOrRestOp(tokens, left, i + 1) else ok(left, i)
+def parseOrRest(file: String, tokens: List, left: List, i: Int): List =
+  if (isTok(tokens, i, "PipePipe") == 1) parseOrRestOp(file, tokens, left, i + 1) else ok(left, i)
 
-def parseOrRestOp(tokens: List, left: List, i: Int): List =
+def parseOrRestOp(file: String, tokens: List, left: List, i: Int): List =
   for {
-    rightP = parseAnd(tokens, i)
-  } yield parseOrRest(tokens, List.cons("BinOp", List.cons("||", List.cons(left, List.cons(pAst(rightP), List.empty())))), pIdx(rightP))
+    rightP = parseAnd(file, tokens, i)
+    right = pAst(rightP)
+  } yield parseOrRest(file, tokens, withSpan(List.cons("BinOp", List.cons("||", List.cons(left, List.cons(right, List.empty())))), coverSpan(exprSpan(left), exprSpan(right))), pIdx(rightP))
 
-def parseAnd(tokens: List, i: Int): List =
+def parseAnd(file: String, tokens: List, i: Int): List =
   for {
-    leftP = parseCmp(tokens, i)
-  } yield parseAndRest(tokens, pAst(leftP), pIdx(leftP))
+    leftP = parseCmp(file, tokens, i)
+  } yield parseAndRest(file, tokens, pAst(leftP), pIdx(leftP))
 
-def parseAndRest(tokens: List, left: List, i: Int): List =
-  if (isTok(tokens, i, "AmpAmp") == 1) parseAndRestOp(tokens, left, i + 1) else ok(left, i)
+def parseAndRest(file: String, tokens: List, left: List, i: Int): List =
+  if (isTok(tokens, i, "AmpAmp") == 1) parseAndRestOp(file, tokens, left, i + 1) else ok(left, i)
 
-def parseAndRestOp(tokens: List, left: List, i: Int): List =
+def parseAndRestOp(file: String, tokens: List, left: List, i: Int): List =
   for {
-    rightP = parseCmp(tokens, i)
-  } yield parseAndRest(tokens, List.cons("BinOp", List.cons("&&", List.cons(left, List.cons(pAst(rightP), List.empty())))), pIdx(rightP))
+    rightP = parseCmp(file, tokens, i)
+    right = pAst(rightP)
+  } yield parseAndRest(file, tokens, withSpan(List.cons("BinOp", List.cons("&&", List.cons(left, List.cons(right, List.empty())))), coverSpan(exprSpan(left), exprSpan(right))), pIdx(rightP))
 
 def cmpOp(t: String): String =
   if (streq(t, "EqEq") == 1) "==" else if (streq(t, "BangEq") == 1) "!=" else if (streq(t, "Lt") == 1) "<" else if (streq(t, "LtEq") == 1) "<=" else if (streq(t, "Gt") == 1) ">" else if (streq(t, "GtEq") == 1) ">=" else ""
 
-def parseCmp(tokens: List, i: Int): List =
+def parseCmp(file: String, tokens: List, i: Int): List =
   for {
-    leftP = parseAdd(tokens, i)
-  } yield parseCmpRest(tokens, pAst(leftP), pIdx(leftP))
+    leftP = parseAdd(file, tokens, i)
+  } yield parseCmpRest(file, tokens, pAst(leftP), pIdx(leftP))
 
-def parseCmpRest(tokens: List, left: List, i: Int): List =
+def parseCmpRest(file: String, tokens: List, left: List, i: Int): List =
   for {
-    op = cmpOp(tokAt(tokens, i))
-  } yield if (Str.len(op) == 0) ok(left, i) else parseCmpRestOp(tokens, left, i + 1, op)
+    op = cmpOp(tokKind(tokAt(tokens, i)))
+  } yield if (Str.len(op) == 0) ok(left, i) else parseCmpRestOp(file, tokens, left, i + 1, op)
 
-def parseCmpRestOp(tokens: List, left: List, i: Int, op: String): List =
+def parseCmpRestOp(file: String, tokens: List, left: List, i: Int, op: String): List =
   for {
-    rightP = parseAdd(tokens, i)
-  } yield parseCmpRest(tokens, List.cons("BinOp", List.cons(op, List.cons(left, List.cons(pAst(rightP), List.empty())))), pIdx(rightP))
+    rightP = parseAdd(file, tokens, i)
+    right = pAst(rightP)
+  } yield parseCmpRest(file, tokens, withSpan(List.cons("BinOp", List.cons(op, List.cons(left, List.cons(right, List.empty())))), coverSpan(exprSpan(left), exprSpan(right))), pIdx(rightP))
 
-def parseAdd(tokens: List, i: Int): List =
+def parseAdd(file: String, tokens: List, i: Int): List =
   for {
-    leftP = parseMul(tokens, i)
-  } yield parseAddRest(tokens, pAst(leftP), pIdx(leftP))
+    leftP = parseMul(file, tokens, i)
+  } yield parseAddRest(file, tokens, pAst(leftP), pIdx(leftP))
 
-def parseAddRest(tokens: List, left: List, i: Int): List =
-  if (isTok(tokens, i, "Plus") == 1) parseAddRestOp(tokens, left, i + 1, "+") else if (isTok(tokens, i, "Minus") == 1) parseAddRestOp(tokens, left, i + 1, "-") else ok(left, i)
+def parseAddRest(file: String, tokens: List, left: List, i: Int): List =
+  if (isTok(tokens, i, "Plus") == 1) parseAddRestOp(file, tokens, left, i + 1, "+") else if (isTok(tokens, i, "Minus") == 1) parseAddRestOp(file, tokens, left, i + 1, "-") else ok(left, i)
 
-def parseAddRestOp(tokens: List, left: List, i: Int, op: String): List =
+def parseAddRestOp(file: String, tokens: List, left: List, i: Int, op: String): List =
   for {
-    rightP = parseMul(tokens, i)
-  } yield parseAddRest(tokens, List.cons("BinOp", List.cons(op, List.cons(left, List.cons(pAst(rightP), List.empty())))), pIdx(rightP))
+    rightP = parseMul(file, tokens, i)
+    right = pAst(rightP)
+  } yield parseAddRest(file, tokens, withSpan(List.cons("BinOp", List.cons(op, List.cons(left, List.cons(right, List.empty())))), coverSpan(exprSpan(left), exprSpan(right))), pIdx(rightP))
 
-def parseMul(tokens: List, i: Int): List =
+def parseMul(file: String, tokens: List, i: Int): List =
   for {
-    leftP = parsePostfix(tokens, i)
-  } yield parseMulRest(tokens, pAst(leftP), pIdx(leftP))
+    leftP = parsePostfix(file, tokens, i)
+  } yield parseMulRest(file, tokens, pAst(leftP), pIdx(leftP))
 
-def parseMulRest(tokens: List, left: List, i: Int): List =
-  if (isTok(tokens, i, "Star") == 1) parseMulRestOp(tokens, left, i + 1, "*") else if (isTok(tokens, i, "Slash") == 1) parseMulRestOp(tokens, left, i + 1, "/") else if (isTok(tokens, i, "Percent") == 1) parseMulRestOp(tokens, left, i + 1, "%") else ok(left, i)
+def parseMulRest(file: String, tokens: List, left: List, i: Int): List =
+  if (isTok(tokens, i, "Star") == 1) parseMulRestOp(file, tokens, left, i + 1, "*") else if (isTok(tokens, i, "Slash") == 1) parseMulRestOp(file, tokens, left, i + 1, "/") else if (isTok(tokens, i, "Percent") == 1) parseMulRestOp(file, tokens, left, i + 1, "%") else ok(left, i)
 
-def parseMulRestOp(tokens: List, left: List, i: Int, op: String): List =
+def parseMulRestOp(file: String, tokens: List, left: List, i: Int, op: String): List =
   for {
-    rightP = parsePostfix(tokens, i)
-  } yield parseMulRest(tokens, List.cons("BinOp", List.cons(op, List.cons(left, List.cons(pAst(rightP), List.empty())))), pIdx(rightP))
+    rightP = parsePostfix(file, tokens, i)
+    right = pAst(rightP)
+  } yield parseMulRest(file, tokens, withSpan(List.cons("BinOp", List.cons(op, List.cons(left, List.cons(right, List.empty())))), coverSpan(exprSpan(left), exprSpan(right))), pIdx(rightP))
 
-def parsePostfix(tokens: List, i: Int): List =
+def parsePostfix(file: String, tokens: List, i: Int): List =
   for {
-    primP = parsePrimary(tokens, i)
-  } yield parsePostfixRest(tokens, pAst(primP), pIdx(primP))
+    primP = parsePrimary(file, tokens, i)
+  } yield parsePostfixRest(file, tokens, pAst(primP), pIdx(primP))
 
-def parsePostfixRest(tokens: List, expr: List, i: Int): List =
-  if (isTok(tokens, i, "Dot") == 1) parsePostfixDot(tokens, expr, i + 1) else if (isTok(tokens, i, "Match") == 1) parseMatch(tokens, expr, i + 1) else ok(expr, i)
+def parsePostfixRest(file: String, tokens: List, expr: List, i: Int): List =
+  if (isTok(tokens, i, "Dot") == 1) parsePostfixDot(file, tokens, expr, i + 1) else if (isTok(tokens, i, "Match") == 1) parseMatch(file, tokens, expr, i + 1) else ok(expr, i)
 
-def parseMatch(tokens: List, scrut: List, i: Int): List =
+def parseMatch(file: String, tokens: List, scrut: List, i: Int): List =
   for {
     i1 = if (isTok(tokens, i, "LBrace") == 1) i + 1 else i
-    armsP = parseMatchArms(tokens, i1, List.empty())
+    armsP = parseMatchArms(file, tokens, i1, List.empty())
     i2 = if (isTok(tokens, pIdx(armsP), "RBrace") == 1) pIdx(armsP) + 1 else pIdx(armsP)
-  } yield parsePostfixRest(tokens, List.cons("Match", List.cons(scrut, List.cons(pAst(armsP), List.empty()))), i2)
+  } yield parsePostfixRest(file, tokens, withSpan(List.cons("Match", List.cons(scrut, List.cons(pAst(armsP), List.empty()))), coverSpan(exprSpan(scrut), spanCover(file, tokens, i - 1, i2))), i2)
 
-def parseMatchArms(tokens: List, i: Int, acc: List): List =
-  if (isTok(tokens, i, "Case") == 0) ok(List.reverse(acc), i) else parseMatchArm(tokens, i + 1, acc)
+def parseMatchArms(file: String, tokens: List, i: Int, acc: List): List =
+  if (isTok(tokens, i, "Case") == 0) ok(List.reverse(acc), i) else parseMatchArm(file, tokens, i + 1, acc)
 
-def parseMatchArm(tokens: List, i: Int, acc: List): List =
+def parseMatchArm(file: String, tokens: List, i: Int, acc: List): List =
   for {
-    patP = parsePattern(tokens, i)
+    patP = parsePattern(file, tokens, i)
     i1 = expectTok(tokens, pIdx(patP), "Arrow")
-    bodyP = parseExpr(tokens, i1)
-  } yield parseMatchArms(tokens, pIdx(bodyP), List.cons(List.cons("Arm", List.cons(pAst(patP), List.cons(pAst(bodyP), List.empty()))), acc))
+    bodyP = parseExpr(file, tokens, i1)
+  } yield parseMatchArms(file, tokens, pIdx(bodyP), List.cons(List.cons("Arm", List.cons(pAst(patP), List.cons(pAst(bodyP), List.empty()))), acc))
 
-def parsePattern(tokens: List, i: Int): List =
-  if (isTok(tokens, i, "Underscore") == 1) ok(List.cons("PatWild", List.empty()), i + 1) else parsePatternAdt(tokens, i)
+def parsePattern(file: String, tokens: List, i: Int): List =
+  if (isTok(tokens, i, "Underscore") == 1) ok(withSpan(List.cons("PatWild", List.empty()), tokSpan(file, tokAt(tokens, i))), i + 1) else parsePatternAdt(file, tokens, i)
 
-def parsePatternAdt(tokens: List, i: Int): List =
+def parsePatternAdt(file: String, tokens: List, i: Int): List =
   for {
-    enumP = parseIdent(tokens, i)
+    enumP = parseIdent(file, tokens, i)
     i1 = expectTok(tokens, pIdx(enumP), "Dot")
-    caseP = parseIdent(tokens, i1)
+    caseP = parseIdent(file, tokens, i1)
     j = pIdx(caseP)
-  } yield if (isTok(tokens, j, "LParen") == 1) parsePatternBind(tokens, j + 1, pStr(enumP), pStr(caseP)) else ok(List.cons("PatAdt", List.cons(pStr(enumP), List.cons(pStr(caseP), List.cons("", List.empty())))), j)
+  } yield if (isTok(tokens, j, "LParen") == 1) parsePatternBind(file, tokens, j + 1, pStr(enumP), pStr(caseP), i) else ok(withSpan(List.cons("PatAdt", List.cons(pStr(enumP), List.cons(pStr(caseP), List.cons("", List.empty())))), spanCover(file, tokens, i, j)), j)
 
-def parsePatternBind(tokens: List, i: Int, en: String, caseName: String): List =
+def parsePatternBind(file: String, tokens: List, i: Int, en: String, caseName: String, startI: Int): List =
   for {
-    bindP = parseIdent(tokens, i)
+    bindP = parseIdent(file, tokens, i)
     i1 = expectTok(tokens, pIdx(bindP), "RParen")
-  } yield ok(List.cons("PatAdt", List.cons(en, List.cons(caseName, List.cons(pStr(bindP), List.empty())))), i1)
+  } yield ok(withSpan(List.cons("PatAdt", List.cons(en, List.cons(caseName, List.cons(pStr(bindP), List.empty())))), spanCover(file, tokens, startI, i1)), i1)
 
-def parsePostfixDot(tokens: List, expr: List, i: Int): List =
+def parsePostfixDot(file: String, tokens: List, expr: List, i: Int): List =
   for {
-    methodP = parseIdent(tokens, i)
+    methodP = parseIdent(file, tokens, i)
     method = pStr(methodP)
     i1 = pIdx(methodP)
-  } yield if (streq(method, "flatMap") == 1) parseFlatMap(tokens, expr, i1) else if (streq(method, "handleErrorWith") == 1) parseHandle(tokens, expr, i1) else if (streq(method, "attempt") == 1) parseAttempt(tokens, expr, i1) else ok(expr, i1)
+  } yield if (streq(method, "flatMap") == 1) parseFlatMap(file, tokens, expr, i1) else if (streq(method, "handleErrorWith") == 1) parseHandle(file, tokens, expr, i1) else if (streq(method, "attempt") == 1) parseAttempt(file, tokens, expr, i1) else ok(expr, i1)
 
-def parseLambda(tokens: List, i: Int): List =
+def parseLambda(file: String, tokens: List, i: Int): List =
   for {
-    t = tokAt(tokens, i)
-  } yield if (streq(t, "Underscore") == 1) parseLambdaBody(tokens, i + 1, "_") else if (isIdentTok(t) == 1) parseLambdaBody(tokens, i + 1, identName(t)) else if (streq(t, "LParen") == 1) parseLambdaUnit(tokens, i + 1) else ok(unitExpr(), i)
+    t = tokKind(tokAt(tokens, i))
+  } yield if (streq(t, "Underscore") == 1) parseLambdaBody(file, tokens, i + 1, "_") else if (isIdentTok(t) == 1) parseLambdaBody(file, tokens, i + 1, identName(t)) else if (streq(t, "LParen") == 1) parseLambdaUnit(file, tokens, i + 1) else ok(List.cons("_", List.cons(unitAt(file, tokens, i), List.empty())), i)
 
-def parseLambdaUnit(tokens: List, i: Int): List =
+def parseLambdaUnit(file: String, tokens: List, i: Int): List =
   for {
     i1 = expectTok(tokens, i, "RParen")
-  } yield parseLambdaBody(tokens, i1, "_")
+  } yield parseLambdaBody(file, tokens, i1, "_")
 
-def parseLambdaBody(tokens: List, i: Int, param: String): List =
+def parseLambdaBody(file: String, tokens: List, i: Int, param: String): List =
   for {
     i1 = expectTok(tokens, i, "Arrow")
-    bodyP = parseBlock(tokens, i1)
+    bodyP = parseBlock(file, tokens, i1)
   } yield ok(List.cons(param, List.cons(pAst(bodyP), List.empty())), pIdx(bodyP))
 
-def parseFlatMap(tokens: List, expr: List, i: Int): List =
+def parseFlatMap(file: String, tokens: List, expr: List, i: Int): List =
   for {
     i1 = expectTok(tokens, i, "LParen")
-    lamP = parseLambda(tokens, i1)
+    lamP = parseLambda(file, tokens, i1)
     i2 = expectTok(tokens, pIdx(lamP), "RParen")
     param = List.head(pAst(lamP))
     body = List.head(List.tail(pAst(lamP)))
-  } yield parsePostfixRest(tokens, List.cons("FlatMap", List.cons(expr, List.cons(param, List.cons(body, List.empty())))), i2)
+  } yield parsePostfixRest(file, tokens, withSpan(List.cons("FlatMap", List.cons(expr, List.cons(param, List.cons(body, List.empty())))), coverSpan(exprSpan(expr), spanCover(file, tokens, i, i2))), i2)
 
-def parseHandle(tokens: List, expr: List, i: Int): List =
+def parseHandle(file: String, tokens: List, expr: List, i: Int): List =
   for {
     i1 = expectTok(tokens, i, "LParen")
-    lamP = parseLambda(tokens, i1)
+    lamP = parseLambda(file, tokens, i1)
     i2 = expectTok(tokens, pIdx(lamP), "RParen")
     body = List.head(List.tail(pAst(lamP)))
-  } yield parsePostfixRest(tokens, List.cons("Handle", List.cons(expr, List.cons(body, List.empty()))), i2)
+  } yield parsePostfixRest(file, tokens, withSpan(List.cons("Handle", List.cons(expr, List.cons(body, List.empty()))), coverSpan(exprSpan(expr), spanCover(file, tokens, i, i2))), i2)
 
-def parseAttempt(tokens: List, expr: List, i: Int): List =
-  if (isTok(tokens, i, "LParen") == 1) parseAttemptParen(tokens, expr, i + 1) else parsePostfixRest(tokens, List.cons("Attempt", List.cons(expr, List.empty())), i)
+def parseAttempt(file: String, tokens: List, expr: List, i: Int): List =
+  if (isTok(tokens, i, "LParen") == 1) parseAttemptParen(file, tokens, expr, i + 1) else parsePostfixRest(file, tokens, withSpan(List.cons("Attempt", List.cons(expr, List.empty())), coverSpan(exprSpan(expr), tokSpan(file, tokAt(tokens, i - 1)))), i)
 
-def parseAttemptParen(tokens: List, expr: List, i: Int): List =
+def parseAttemptParen(file: String, tokens: List, expr: List, i: Int): List =
   for {
     i1 = expectTok(tokens, i, "RParen")
-  } yield parsePostfixRest(tokens, List.cons("Attempt", List.cons(expr, List.empty())), i1)
+  } yield parsePostfixRest(file, tokens, withSpan(List.cons("Attempt", List.cons(expr, List.empty())), coverSpan(exprSpan(expr), tokSpan(file, tokAt(tokens, i1 - 1)))), i1)
 
-def parsePrimary(tokens: List, i: Int): List =
+def parsePrimary(file: String, tokens: List, i: Int): List =
   for {
-    t = tokAt(tokens, i)
-  } yield if (streq(t, "For") == 1) parseFor(tokens, i + 1) else if (streq(t, "If") == 1) parseIf(tokens, i + 1) else if (streq(t, "LParen") == 1) parseParen(tokens, i + 1) else if (isIntTok(t) == 1) ok(List.cons("IntLit", List.cons(intDigits(t), List.empty())), i + 1) else if (isStringTok(t) == 1) ok(List.cons("StrLit", List.cons(stringVal(t), List.empty())), i + 1) else if (streq(t, "InterpStart") == 1) parseInterp(tokens, i + 1, List.empty()) else if (streq(t, "LBracket") == 1) parseListLit(tokens, i + 1) else if (streq(t, "Minus") == 1) parseNegInt(tokens, i + 1) else if (streq(t, "Underscore") == 1) if (isTok(tokens, i + 1, "Arrow") == 1) parseLambdaExpr(tokens, i + 1, "_") else ok(unitExpr(), i + 1) else if (isIdentTok(t) == 1) parsePrimaryIdent(tokens, i, t) else ok(unitExpr(), i)
+    t = tokKind(tokAt(tokens, i))
+  } yield if (streq(t, "For") == 1) parseFor(file, tokens, i + 1, i) else if (streq(t, "If") == 1) parseIf(file, tokens, i + 1, i) else if (streq(t, "LParen") == 1) parseParen(file, tokens, i + 1, i) else if (isIntTok(t) == 1) ok(withSpan(List.cons("IntLit", List.cons(intDigits(t), List.empty())), tokSpan(file, tokAt(tokens, i))), i + 1) else if (isStringTok(t) == 1) ok(withSpan(List.cons("StrLit", List.cons(stringVal(t), List.empty())), tokSpan(file, tokAt(tokens, i))), i + 1) else if (streq(t, "InterpStart") == 1) parseInterp(file, tokens, i + 1, List.empty(), i) else if (streq(t, "LBracket") == 1) parseListLit(file, tokens, i + 1) else if (streq(t, "Minus") == 1) parseNegInt(file, tokens, i + 1, i) else if (streq(t, "Underscore") == 1) if (isTok(tokens, i + 1, "Arrow") == 1) parseLambdaExpr(file, tokens, i + 1, "_", i) else ok(unitAt(file, tokens, i), i + 1) else if (isIdentTok(t) == 1) parsePrimaryIdent(file, tokens, i, t) else ok(unitAt(file, tokens, i), i)
 
-def parseBinderName(tokens: List, i: Int): List =
-  if (isTok(tokens, i, "Underscore") == 1) okStr("_", i + 1) else parseIdent(tokens, i)
+def parseBinderName(file: String, tokens: List, i: Int): List =
+  if (isTok(tokens, i, "Underscore") == 1) okStr("_", i + 1) else parseIdent(file, tokens, i)
 
-def parseFor(tokens: List, i: Int): List =
+def parseFor(file: String, tokens: List, i: Int, startI: Int): List =
   for {
     i1 = expectTok(tokens, i, "LBrace")
-    bindersP = parseForBinders(tokens, i1, List.empty())
+    bindersP = parseForBinders(file, tokens, i1, List.empty())
     i2 = expectTok(tokens, pIdx(bindersP), "RBrace")
     i3 = expectTok(tokens, i2, "Yield")
-    bodyP = parseExpr(tokens, i3)
-  } yield ok(List.cons("For", List.cons(pAst(bindersP), List.cons(pAst(bodyP), List.empty()))), pIdx(bodyP))
+    bodyP = parseExpr(file, tokens, i3)
+  } yield ok(withSpan(List.cons("For", List.cons(pAst(bindersP), List.cons(pAst(bodyP), List.empty()))), spanCover(file, tokens, startI, pIdx(bodyP))), pIdx(bodyP))
 
-def parseForBinders(tokens: List, i: Int, acc: List): List =
-  if (isTok(tokens, i, "RBrace") == 1) ok(List.reverse(acc), i) else if (isTok(tokens, i, "Yield") == 1) ok(List.reverse(acc), i) else parseForBinder(tokens, i, acc)
+def parseForBinders(file: String, tokens: List, i: Int, acc: List): List =
+  if (isTok(tokens, i, "RBrace") == 1) ok(List.reverse(acc), i) else if (isTok(tokens, i, "Yield") == 1) ok(List.reverse(acc), i) else parseForBinder(file, tokens, i, acc)
 
-def parseForBinder(tokens: List, i: Int, acc: List): List =
+def parseForBinder(file: String, tokens: List, i: Int, acc: List): List =
   for {
-    nameP = parseBinderName(tokens, i)
-  } yield if (isTok(tokens, pIdx(nameP), "Eq") == 1) parseForBinderEq(tokens, pIdx(nameP) + 1, pStr(nameP), acc) else if (isTok(tokens, pIdx(nameP), "LeftArrow") == 1) parseForBinderDraw(tokens, pIdx(nameP) + 1, pStr(nameP), acc) else ok(List.reverse(acc), pIdx(nameP))
+    nameP = parseBinderName(file, tokens, i)
+  } yield if (isTok(tokens, pIdx(nameP), "Eq") == 1) parseForBinderEq(file, tokens, pIdx(nameP) + 1, pStr(nameP), acc) else if (isTok(tokens, pIdx(nameP), "LeftArrow") == 1) parseForBinderDraw(file, tokens, pIdx(nameP) + 1, pStr(nameP), acc) else ok(List.reverse(acc), pIdx(nameP))
 
-def parseForBinderEq(tokens: List, i: Int, name: String, acc: List): List =
+def parseForBinderEq(file: String, tokens: List, i: Int, name: String, acc: List): List =
   for {
-    valueP = parseExpr(tokens, i)
-  } yield parseForBinders(tokens, pIdx(valueP), List.cons(List.cons("Eq", List.cons(name, List.cons(pAst(valueP), List.empty()))), acc))
+    valueP = parseExpr(file, tokens, i)
+  } yield parseForBinders(file, tokens, pIdx(valueP), List.cons(List.cons("Eq", List.cons(name, List.cons(pAst(valueP), List.empty()))), acc))
 
-def parseForBinderDraw(tokens: List, i: Int, name: String, acc: List): List =
+def parseForBinderDraw(file: String, tokens: List, i: Int, name: String, acc: List): List =
   for {
-    valueP = parseExpr(tokens, i)
-  } yield parseForBinders(tokens, pIdx(valueP), List.cons(List.cons("Draw", List.cons(name, List.cons(pAst(valueP), List.empty()))), acc))
+    valueP = parseExpr(file, tokens, i)
+  } yield parseForBinders(file, tokens, pIdx(valueP), List.cons(List.cons("Draw", List.cons(name, List.cons(pAst(valueP), List.empty()))), acc))
 
-def parseInterp(tokens: List, i: Int, acc: List): List =
+def parseInterp(file: String, tokens: List, i: Int, acc: List, startI: Int): List =
   for {
-    t = tokAt(tokens, i)
-  } yield if (streq(t, "InterpEnd") == 1) ok(List.cons("Interp", List.cons(List.reverse(acc), List.empty())), i + 1) else if (isInterpLitTok(t) == 1) parseInterp(tokens, i + 1, List.cons(List.cons("Lit", List.cons(interpLitVal(t), List.empty())), acc)) else if (isInterpIdTok(t) == 1) parseInterp(tokens, i + 1, List.cons(List.cons("Hole", List.cons(List.cons("Var", List.cons(interpIdVal(t), List.empty())), List.empty())), acc)) else if (isInterpBraceTok(t) == 1) parseInterpBrace(tokens, i, acc, interpBraceVal(t)) else ok(List.cons("Interp", List.cons(List.reverse(acc), List.empty())), i)
+    t = tokKind(tokAt(tokens, i))
+  } yield if (streq(t, "InterpEnd") == 1) ok(withSpan(List.cons("Interp", List.cons(List.reverse(acc), List.empty())), spanCover(file, tokens, startI, i + 1)), i + 1) else if (isInterpLitTok(t) == 1) parseInterp(file, tokens, i + 1, List.cons(List.cons("Lit", List.cons(interpLitVal(t), List.empty())), acc), startI) else if (isInterpIdTok(t) == 1) parseInterp(file, tokens, i + 1, List.cons(List.cons("Hole", List.cons(withSpan(List.cons("Var", List.cons(interpIdVal(t), List.empty())), tokSpan(file, tokAt(tokens, i))), List.empty())), acc), startI) else if (isInterpBraceTok(t) == 1) parseInterpBrace(file, tokens, i, acc, interpBraceVal(t), startI) else ok(withSpan(List.cons("Interp", List.cons(List.reverse(acc), List.empty())), spanCover(file, tokens, startI, i)), i)
 
-def parseInterpBrace(tokens: List, i: Int, acc: List, body: String): List =
+def parseInterpBrace(file: String, tokens: List, i: Int, acc: List, body: String, startI: Int): List =
   for {
-    nested = parseExpr(lex(body), 0)
-  } yield parseInterp(tokens, i + 1, List.cons(List.cons("Hole", List.cons(pAst(nested), List.empty())), acc))
+    nested = parseExpr(file, lex(body), 0)
+  } yield parseInterp(file, tokens, i + 1, List.cons(List.cons("Hole", List.cons(pAst(nested), List.empty())), acc), startI)
 
-def parsePrimaryIdent(tokens: List, i: Int, t: String): List =
-  if (isTok(tokens, i + 1, "Arrow") == 1) parseLambdaExpr(tokens, i + 1, identName(t)) else parseIdentExpr(tokens, i, identName(t))
+def parsePrimaryIdent(file: String, tokens: List, i: Int, t: String): List =
+  if (isTok(tokens, i + 1, "Arrow") == 1) parseLambdaExpr(file, tokens, i + 1, identName(t), i) else parseIdentExpr(file, tokens, i, identName(t))
 
-def parseLambdaExpr(tokens: List, i: Int, param: String): List =
+def parseLambdaExpr(file: String, tokens: List, i: Int, param: String, startI: Int): List =
   for {
     i1 = expectTok(tokens, i, "Arrow")
-    bodyP = parseBlock(tokens, i1)
-  } yield ok(List.cons("Lambda", List.cons(param, List.cons(pAst(bodyP), List.empty()))), pIdx(bodyP))
+    bodyP = parseBlock(file, tokens, i1)
+  } yield ok(withSpan(List.cons("Lambda", List.cons(param, List.cons(pAst(bodyP), List.empty()))), spanCover(file, tokens, startI, pIdx(bodyP))), pIdx(bodyP))
 
-def parseNegInt(tokens: List, i: Int): List =
+def parseNegInt(file: String, tokens: List, i: Int, startI: Int): List =
   for {
-    t = tokAt(tokens, i)
-  } yield if (isIntTok(t) == 1) ok(List.cons("IntLit", List.cons(Str.concat("-", intDigits(t)), List.empty())), i + 1) else ok(unitExpr(), i)
+    t = tokKind(tokAt(tokens, i))
+  } yield if (isIntTok(t) == 1) ok(withSpan(List.cons("IntLit", List.cons(Str.concat("-", intDigits(t)), List.empty())), spanCover(file, tokens, startI, i + 1)), i + 1) else ok(unitAt(file, tokens, startI), i)
 
-def parseParen(tokens: List, i: Int): List =
-  if (isTok(tokens, i, "RParen") == 1) ok(unitExpr(), i + 1) else parseParenExpr(tokens, i)
+def parseParen(file: String, tokens: List, i: Int, startI: Int): List =
+  if (isTok(tokens, i, "RParen") == 1) ok(withSpan(List.cons("Unit", List.empty()), spanCover(file, tokens, startI, i + 1)), i + 1) else parseParenExpr(file, tokens, i)
 
-def parseParenExpr(tokens: List, i: Int): List =
+def parseParenExpr(file: String, tokens: List, i: Int): List =
   for {
-    e = parseExpr(tokens, i)
+    e = parseExpr(file, tokens, i)
     i1 = expectTok(tokens, pIdx(e), "RParen")
   } yield ok(pAst(e), i1)
 
-def parseIf(tokens: List, i: Int): List =
+def parseIf(file: String, tokens: List, i: Int, startI: Int): List =
   for {
     i1 = expectTok(tokens, i, "LParen")
-    condP = parseExpr(tokens, i1)
+    condP = parseExpr(file, tokens, i1)
     i2 = expectTok(tokens, pIdx(condP), "RParen")
-    thenP = parseIfBranch(tokens, i2)
+    thenP = parseIfBranch(file, tokens, i2)
     i3 = expectTok(tokens, pIdx(thenP), "Else")
-    elseP = parseIfBranch(tokens, i3)
-  } yield ok(List.cons("If", List.cons(pAst(condP), List.cons(pAst(thenP), List.cons(pAst(elseP), List.empty())))), pIdx(elseP))
+    elseP = parseIfBranch(file, tokens, i3)
+  } yield ok(withSpan(List.cons("If", List.cons(pAst(condP), List.cons(pAst(thenP), List.cons(pAst(elseP), List.empty())))), spanCover(file, tokens, startI, pIdx(elseP))), pIdx(elseP))
 
-def parseIfBranch(tokens: List, i: Int): List =
-  parseExpr(tokens, i)
+def parseIfBranch(file: String, tokens: List, i: Int): List =
+  parseExpr(file, tokens, i)
 
-def parseIdentExpr(tokens: List, i: Int, name: String): List =
-  if (streq(name, "IO") == 1) parseIo(tokens, i + 1) else if (streq(name, "Str") == 1) parseModuleCall(tokens, i + 1, "Str") else if (streq(name, "List") == 1) parseModuleCall(tokens, i + 1, "List") else if (streq(name, "Fs") == 1) parseModuleCall(tokens, i + 1, "Fs") else if (streq(name, "Sys") == 1) parseModuleCall(tokens, i + 1, "Sys") else if (streq(name, "Clock") == 1) parseModuleCall(tokens, i + 1, "Clock") else if (streq(name, "Random") == 1) parseModuleCall(tokens, i + 1, "Random") else if (streq(name, "Net") == 1) parseModuleCall(tokens, i + 1, "Net") else if (streq(name, "Impurity") == 1) parseModuleCall(tokens, i + 1, "Impurity") else if (streq(name, "Signal") == 1) parseModuleCall(tokens, i + 1, "Signal") else if (streq(name, "Theme") == 1) parseModuleCall(tokens, i + 1, "Theme") else if (streq(name, "View") == 1) parseModuleCall(tokens, i + 1, "View") else if (streq(name, "Ui") == 1) parseModuleCall(tokens, i + 1, "Ui") else if (streq(name, "Effects") == 1) parseModuleCall(tokens, i + 1, "Effects") else if (streq(name, "Lexer") == 1) parseModuleCall(tokens, i + 1, "Lexer") else parseCallOrVar(tokens, i + 1, name)
+def parseIdentExpr(file: String, tokens: List, i: Int, name: String): List =
+  if (streq(name, "IO") == 1) parseIo(file, tokens, i + 1, i) else if (streq(name, "Str") == 1) parseModuleCall(file, tokens, i + 1, "Str", i) else if (streq(name, "List") == 1) parseModuleCall(file, tokens, i + 1, "List", i) else if (streq(name, "Fs") == 1) parseModuleCall(file, tokens, i + 1, "Fs", i) else if (streq(name, "Sys") == 1) parseModuleCall(file, tokens, i + 1, "Sys", i) else if (streq(name, "Clock") == 1) parseModuleCall(file, tokens, i + 1, "Clock", i) else if (streq(name, "Random") == 1) parseModuleCall(file, tokens, i + 1, "Random", i) else if (streq(name, "Net") == 1) parseModuleCall(file, tokens, i + 1, "Net", i) else if (streq(name, "Impurity") == 1) parseModuleCall(file, tokens, i + 1, "Impurity", i) else if (streq(name, "Signal") == 1) parseModuleCall(file, tokens, i + 1, "Signal", i) else if (streq(name, "Theme") == 1) parseModuleCall(file, tokens, i + 1, "Theme", i) else if (streq(name, "View") == 1) parseModuleCall(file, tokens, i + 1, "View", i) else if (streq(name, "Ui") == 1) parseModuleCall(file, tokens, i + 1, "Ui", i) else if (streq(name, "Effects") == 1) parseModuleCall(file, tokens, i + 1, "Effects", i) else if (streq(name, "Lexer") == 1) parseModuleCall(file, tokens, i + 1, "Lexer", i) else parseCallOrVar(file, tokens, i + 1, name, i)
 
-def parseCallOrVar(tokens: List, i: Int, name: String): List =
-  if (isTok(tokens, i, "LParen") == 1) parseCallArgs(tokens, i + 1, name) else if (isTok(tokens, i, "Dot") == 1) parseDotCallOrAdt(tokens, i + 1, name) else ok(List.cons("Var", List.cons(name, List.empty())), i)
+def parseCallOrVar(file: String, tokens: List, i: Int, name: String, startI: Int): List =
+  if (isTok(tokens, i, "LParen") == 1) parseCallArgs(file, tokens, i + 1, name, startI) else if (isTok(tokens, i, "Dot") == 1) parseDotCallOrAdt(file, tokens, i + 1, name, startI) else ok(withSpan(List.cons("Var", List.cons(name, List.empty())), tokSpan(file, tokAt(tokens, startI))), i)
 
-def parseDotCallOrAdt(tokens: List, i: Int, enumName: String): List =
+def parseDotCallOrAdt(file: String, tokens: List, i: Int, enumName: String, startI: Int): List =
   for {
-    caseP = parseIdent(tokens, i)
+    caseP = parseIdent(file, tokens, i)
     caseName = pStr(caseP)
     j = pIdx(caseP)
-  } yield if (isTok(tokens, j, "LParen") == 1) parseCallArgs(tokens, j + 1, str3(enumName, ".", caseName)) else ok(List.cons("Adt", List.cons(enumName, List.cons(caseName, List.cons(List.empty(), List.empty())))), j)
+  } yield if (isTok(tokens, j, "LParen") == 1) parseCallArgs(file, tokens, j + 1, str3(enumName, ".", caseName), startI) else ok(withSpan(List.cons("Adt", List.cons(enumName, List.cons(caseName, List.cons(List.empty(), List.empty())))), spanCover(file, tokens, startI, j)), j)
 
-def parseCallArgs(tokens: List, i: Int, callee: String): List =
+def parseCallArgs(file: String, tokens: List, i: Int, callee: String, startI: Int): List =
   for {
-    argsP = parseArgs(tokens, i, List.empty())
+    argsP = parseArgs(file, tokens, i, List.empty())
     i1 = expectTok(tokens, pIdx(argsP), "RParen")
-  } yield ok(List.cons("Call", List.cons(callee, List.cons(pAst(argsP), List.empty()))), i1)
+  } yield ok(withSpan(List.cons("Call", List.cons(callee, List.cons(pAst(argsP), List.empty()))), spanCover(file, tokens, startI, i1)), i1)
 
-def parseModuleCall(tokens: List, i: Int, mod: String): List =
+def parseModuleCall(file: String, tokens: List, i: Int, mod: String, startI: Int): List =
   for {
     i1 = expectTok(tokens, i, "Dot")
-    methodP = parseIdent(tokens, i1)
+    methodP = parseIdent(file, tokens, i1)
     callee = str3(mod, ".", pStr(methodP))
     i2 = pIdx(methodP)
-  } yield if (isTok(tokens, i2, "LParen") == 1) parseModuleCallArgs(tokens, i2 + 1, mod, callee) else ok(List.cons("Call", List.cons(callee, List.cons(List.empty(), List.empty()))), i2)
+  } yield if (isTok(tokens, i2, "LParen") == 1) parseModuleCallArgs(file, tokens, i2 + 1, mod, callee, startI) else ok(withSpan(List.cons("Call", List.cons(callee, List.cons(List.empty(), List.empty()))), spanCover(file, tokens, startI, i2)), i2)
 
-def parseModuleCallArgs(tokens: List, i: Int, mod: String, callee: String): List =
-  if (streq(mod, "IO") == 1) parseIoArgs(tokens, i, callee) else parseCallArgs(tokens, i, callee)
+def parseModuleCallArgs(file: String, tokens: List, i: Int, mod: String, callee: String, startI: Int): List =
+  if (streq(mod, "IO") == 1) parseIoArgs(file, tokens, i, callee, startI) else parseCallArgs(file, tokens, i, callee, startI)
 
-def parseIo(tokens: List, i: Int): List =
+def parseIo(file: String, tokens: List, i: Int, startI: Int): List =
   for {
     i1 = expectTok(tokens, i, "Dot")
-    methodP = parseIdent(tokens, i1)
+    methodP = parseIdent(file, tokens, i1)
     method = pStr(methodP)
     i2 = pIdx(methodP)
-  } yield if (streq(method, "delay") == 1) parseIoDelay(tokens, i2) else if (isTok(tokens, i2, "LParen") == 1) parseIoArgs(tokens, i2 + 1, Str.concat("IO.", method)) else ok(List.cons("Call", List.cons(Str.concat("IO.", method), List.cons(List.empty(), List.empty()))), i2)
+  } yield if (streq(method, "delay") == 1) parseIoDelay(file, tokens, i2, startI) else if (isTok(tokens, i2, "LParen") == 1) parseIoArgs(file, tokens, i2 + 1, Str.concat("IO.", method), startI) else ok(withSpan(List.cons("Call", List.cons(Str.concat("IO.", method), List.cons(List.empty(), List.empty()))), spanCover(file, tokens, startI, i2)), i2)
 
-def parseIoDelay(tokens: List, i: Int): List =
+def parseIoDelay(file: String, tokens: List, i: Int, startI: Int): List =
   for {
     i1 = expectTok(tokens, i, "LParen")
     i2 = expectTok(tokens, i1, "LParen")
@@ -439,96 +450,97 @@ def parseIoDelay(tokens: List, i: Int): List =
     i5 = expectTok(tokens, i4, "LParen")
     i6 = expectTok(tokens, i5, "RParen")
     i7 = expectTok(tokens, i6, "RParen")
-  } yield ok(List.cons("Delay", List.empty()), i7)
+  } yield ok(withSpan(List.cons("Delay", List.empty()), spanCover(file, tokens, startI, i7)), i7)
 
-def parseIoArgs(tokens: List, i: Int, callee: String): List =
+def parseIoArgs(file: String, tokens: List, i: Int, callee: String, startI: Int): List =
   for {
-    argsP = parseArgs(tokens, i, List.empty())
+    argsP = parseArgs(file, tokens, i, List.empty())
     i1 = expectTok(tokens, pIdx(argsP), "RParen")
     args = pAst(argsP)
-  } yield if (streq(callee, "IO.println") == 1) ok(List.cons("Println", List.cons(List.head(args), List.empty())), i1) else if (streq(callee, "IO.fail") == 1) ok(List.cons("Fail", List.cons(List.head(args), List.empty())), i1) else if (streq(callee, "IO.pure") == 1) ok(List.cons("Pure", List.cons(List.head(args), List.empty())), i1) else if (streq(callee, "IO.sleep") == 1) ok(List.cons("Sleep", List.cons(List.head(args), List.empty())), i1) else if (streq(callee, "IO.race") == 1) ok(List.cons("IoRace", List.cons(List.head(args), List.cons(List.head(List.tail(args)), List.empty()))), i1) else if (streq(callee, "IO.both") == 1) ok(List.cons("IoBoth", List.cons(List.head(args), List.cons(List.head(List.tail(args)), List.empty()))), i1) else ok(List.cons("Call", List.cons(callee, List.cons(args, List.empty()))), i1)
+    sp = spanCover(file, tokens, startI, i1)
+  } yield if (streq(callee, "IO.println") == 1) ok(withSpan(List.cons("Println", List.cons(List.head(args), List.empty())), sp), i1) else if (streq(callee, "IO.fail") == 1) ok(withSpan(List.cons("Fail", List.cons(List.head(args), List.empty())), sp), i1) else if (streq(callee, "IO.pure") == 1) ok(withSpan(List.cons("Pure", List.cons(List.head(args), List.empty())), sp), i1) else if (streq(callee, "IO.sleep") == 1) ok(withSpan(List.cons("Sleep", List.cons(List.head(args), List.empty())), sp), i1) else if (streq(callee, "IO.race") == 1) ok(withSpan(List.cons("IoRace", List.cons(List.head(args), List.cons(List.head(List.tail(args)), List.empty()))), sp), i1) else if (streq(callee, "IO.both") == 1) ok(withSpan(List.cons("IoBoth", List.cons(List.head(args), List.cons(List.head(List.tail(args)), List.empty()))), sp), i1) else ok(withSpan(List.cons("Call", List.cons(callee, List.cons(args, List.empty()))), sp), i1)
 
-def parseDef(tokens: List, i: Int): List =
+def parseDef(file: String, tokens: List, i: Int): List =
   for {
-    nameP = parseIdent(tokens, i)
+    nameP = parseIdent(file, tokens, i)
     i1 = expectTok(tokens, pIdx(nameP), "LParen")
-    paramsP = parseParams(tokens, i1, List.empty())
+    paramsP = parseParams(file, tokens, i1, List.empty())
     i2 = expectTok(tokens, pIdx(paramsP), "RParen")
     i3 = expectTok(tokens, i2, "Colon")
-    retP = parseType(tokens, i3)
+    retP = parseType(file, tokens, i3)
     i4 = expectTok(tokens, pIdx(retP), "Eq")
-    bodyP = parseBlock(tokens, i4)
+    bodyP = parseBlock(file, tokens, i4)
   } yield ok(List.cons("Def", List.cons(pStr(nameP), List.cons(pAst(paramsP), List.cons(pStr(retP), List.cons(pAst(bodyP), List.empty()))))), pIdx(bodyP))
 
-def parseMain(tokens: List, i: Int): List =
+def parseMain(file: String, tokens: List, i: Int): List =
   for {
     i1 = expectTok(tokens, i, "Def")
-    nameP = parseIdent(tokens, i1)
+    nameP = parseIdent(file, tokens, i1)
     i2 = expectTok(tokens, pIdx(nameP), "Colon")
-    tyP = parseType(tokens, i2)
+    tyP = parseType(file, tokens, i2)
     i3 = expectTok(tokens, pIdx(tyP), "Eq")
-  } yield parseBlock(tokens, i3)
+  } yield parseBlock(file, tokens, i3)
 
-def parseTop(tokens: List, i: Int, pkg: String, enums: List, defs: List, main: List): List =
+def parseTop(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: List): List =
   for {
-    t = tokAt(tokens, i)
-  } yield if (streq(t, "Eof") == 1) List.cons("Prog", List.cons(pkg, List.cons(List.reverse(enums), List.cons(List.reverse(defs), List.cons(main, List.empty()))))) else if (streq(t, "Enum") == 1) parseTopEnum(tokens, i + 1, pkg, enums, defs, main) else if (streq(t, "Def") == 1) parseTopDef(tokens, i + 1, pkg, enums, defs, main) else if (streq(t, "AtMain") == 1) parseTopMain(tokens, i + 1, pkg, enums, defs) else parseTop(tokens, i + 1, pkg, enums, defs, main)
+    t = tokKind(tokAt(tokens, i))
+  } yield if (streq(t, "Eof") == 1) List.cons("Prog", List.cons(pkg, List.cons(List.reverse(enums), List.cons(List.reverse(defs), List.cons(main, List.empty()))))) else if (streq(t, "Enum") == 1) parseTopEnum(file, tokens, i + 1, pkg, enums, defs, main) else if (streq(t, "Def") == 1) parseTopDef(file, tokens, i + 1, pkg, enums, defs, main) else if (streq(t, "AtMain") == 1) parseTopMain(file, tokens, i + 1, pkg, enums, defs) else parseTop(file, tokens, i + 1, pkg, enums, defs, main)
 
-def parseEnum(tokens: List, i: Int): List =
+def parseEnum(file: String, tokens: List, i: Int): List =
   for {
-    nameP = parseIdent(tokens, i)
+    nameP = parseIdent(file, tokens, i)
     i1 = pIdx(nameP)
-  } yield if (isTok(tokens, i1, "LBrace") == 1) parseEnumBrace(tokens, i1 + 1, pStr(nameP), List.empty()) else if (isTok(tokens, i1, "Colon") == 1) parseEnumColon(tokens, i1 + 1, pStr(nameP), List.empty()) else ok(List.cons("Enum", List.cons(pStr(nameP), List.cons(List.empty(), List.empty()))), i1)
+  } yield if (isTok(tokens, i1, "LBrace") == 1) parseEnumBrace(file, tokens, i1 + 1, pStr(nameP), List.empty()) else if (isTok(tokens, i1, "Colon") == 1) parseEnumColon(file, tokens, i1 + 1, pStr(nameP), List.empty()) else ok(List.cons("Enum", List.cons(pStr(nameP), List.cons(List.empty(), List.empty()))), i1)
 
-def parseEnumBrace(tokens: List, i: Int, name: String, acc: List): List =
-  if (isTok(tokens, i, "RBrace") == 1) ok(List.cons("Enum", List.cons(name, List.cons(List.reverse(acc), List.empty()))), i + 1) else parseEnumBraceCase(tokens, i, name, acc)
+def parseEnumBrace(file: String, tokens: List, i: Int, name: String, acc: List): List =
+  if (isTok(tokens, i, "RBrace") == 1) ok(List.cons("Enum", List.cons(name, List.cons(List.reverse(acc), List.empty()))), i + 1) else parseEnumBraceCase(file, tokens, i, name, acc)
 
-def parseEnumBraceCase(tokens: List, i: Int, name: String, acc: List): List =
+def parseEnumBraceCase(file: String, tokens: List, i: Int, name: String, acc: List): List =
   for {
     i1 = expectTok(tokens, i, "Case")
-    caseP = parseIdent(tokens, i1)
-    fieldsP = parseEnumCaseFields(tokens, pIdx(caseP))
+    caseP = parseIdent(file, tokens, i1)
+    fieldsP = parseEnumCaseFields(file, tokens, pIdx(caseP))
     i2 = pIdx(fieldsP)
     acc2 = List.cons(List.cons("Case", List.cons(pStr(caseP), List.cons(pAst(fieldsP), List.empty()))), acc)
-  } yield if (isTok(tokens, i2, "Comma") == 1) parseEnumBrace(tokens, i2 + 1, name, acc2) else parseEnumBrace(tokens, i2, name, acc2)
+  } yield if (isTok(tokens, i2, "Comma") == 1) parseEnumBrace(file, tokens, i2 + 1, name, acc2) else parseEnumBrace(file, tokens, i2, name, acc2)
 
-def parseEnumColon(tokens: List, i: Int, name: String, acc: List): List =
-  if (isTok(tokens, i, "Case") == 0) ok(List.cons("Enum", List.cons(name, List.cons(List.reverse(acc), List.empty()))), i) else parseEnumColonCase(tokens, i + 1, name, acc)
+def parseEnumColon(file: String, tokens: List, i: Int, name: String, acc: List): List =
+  if (isTok(tokens, i, "Case") == 0) ok(List.cons("Enum", List.cons(name, List.cons(List.reverse(acc), List.empty()))), i) else parseEnumColonCase(file, tokens, i + 1, name, acc)
 
-def parseEnumColonCase(tokens: List, i: Int, name: String, acc: List): List =
+def parseEnumColonCase(file: String, tokens: List, i: Int, name: String, acc: List): List =
   for {
-    caseP = parseIdent(tokens, i)
-    fieldsP = parseEnumCaseFields(tokens, pIdx(caseP))
-  } yield parseEnumColon(tokens, pIdx(fieldsP), name, List.cons(List.cons("Case", List.cons(pStr(caseP), List.cons(pAst(fieldsP), List.empty()))), acc))
+    caseP = parseIdent(file, tokens, i)
+    fieldsP = parseEnumCaseFields(file, tokens, pIdx(caseP))
+  } yield parseEnumColon(file, tokens, pIdx(fieldsP), name, List.cons(List.cons("Case", List.cons(pStr(caseP), List.cons(pAst(fieldsP), List.empty()))), acc))
 
-def parseEnumCaseFields(tokens: List, i: Int): List =
-  if (isTok(tokens, i, "LParen") == 0) ok(List.empty(), i) else parseEnumCaseField(tokens, i + 1)
+def parseEnumCaseFields(file: String, tokens: List, i: Int): List =
+  if (isTok(tokens, i, "LParen") == 0) ok(List.empty(), i) else parseEnumCaseField(file, tokens, i + 1)
 
-def parseEnumCaseField(tokens: List, i: Int): List =
+def parseEnumCaseField(file: String, tokens: List, i: Int): List =
   for {
-    fnameP = parseIdent(tokens, i)
+    fnameP = parseIdent(file, tokens, i)
     i1 = expectTok(tokens, pIdx(fnameP), "Colon")
-    tyP = parseType(tokens, i1)
+    tyP = parseType(file, tokens, i1)
     i2 = expectTok(tokens, pIdx(tyP), "RParen")
   } yield ok(List.cons(List.cons("Field", List.cons(pStr(fnameP), List.cons(pStr(tyP), List.empty()))), List.empty()), i2)
 
-def parseTopEnum(tokens: List, i: Int, pkg: String, enums: List, defs: List, main: List): List =
+def parseTopEnum(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: List): List =
   for {
-    e = parseEnum(tokens, i)
-  } yield parseTop(tokens, pIdx(e), pkg, List.cons(pAst(e), enums), defs, main)
+    e = parseEnum(file, tokens, i)
+  } yield parseTop(file, tokens, pIdx(e), pkg, List.cons(pAst(e), enums), defs, main)
 
-def parseTopDef(tokens: List, i: Int, pkg: String, enums: List, defs: List, main: List): List =
+def parseTopDef(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: List): List =
   for {
-    d = parseDef(tokens, i)
-  } yield parseTop(tokens, pIdx(d), pkg, enums, List.cons(pAst(d), defs), main)
+    d = parseDef(file, tokens, i)
+  } yield parseTop(file, tokens, pIdx(d), pkg, enums, List.cons(pAst(d), defs), main)
 
-def parseTopMain(tokens: List, i: Int, pkg: String, enums: List, defs: List): List =
+def parseTopMain(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List): List =
   for {
-    m = parseMain(tokens, i)
-  } yield parseTop(tokens, pIdx(m), pkg, enums, defs, pAst(m))
+    m = parseMain(file, tokens, i)
+  } yield parseTop(file, tokens, pIdx(m), pkg, enums, defs, pAst(m))
 
-def parseProgram(tokens: List): List =
+def parseProgram(tokens: List, file: String): List =
   for {
-    pkgP = parsePackage(tokens, 0)
-  } yield parseTop(tokens, pIdx(pkgP), pStr(pkgP), List.empty(), List.empty(), unitExpr())
+    pkgP = parsePackage(file, tokens, 0)
+  } yield parseTop(file, tokens, pIdx(pkgP), pStr(pkgP), List.empty(), List.empty(), unitExpr())
 
