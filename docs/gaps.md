@@ -11,11 +11,13 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### 1. Real text rendering through `sk_capi`
 
-**Current state.** All text is an 8×8 ASCII bitmap font baked into `crates/ffi-skia/src/sk_sw.c` (`FONT8`, printable 32–126). Layout measures text as `strlen * font_px` (`text_width` in `crates/runtime/src/view.c`); theme `font_px` defaults to 8. `scripts/fetch_skia.sh` can drop prebuilts under `third_party/skia/prebuilt/` when `SCUZZ_SKIA_URL` is set, but nothing wires them into a build.
+**Current state.** All text is an 8×8 ASCII bitmap font baked into `crates/ffi-skia/src/sk_sw.c` (`FONT8`, printable 32–126). Layout measures text as `strlen * font_px` (`text_width` in `crates/runtime/src/view.c`); theme `font_px` defaults to 8. `scripts/fetch_skia.sh` can drop prebuilts under `third_party/skia/prebuilt/` when `SCUZZ_SKIA_URL` is set, but nothing wires them into a build. `sk_capi.h` exposes draw-only text (`sk_canvas_draw_string`); there is no measure API, no Makefile dual-backend switch, and no hosted prebuilt tarball or ABI packaging contract under `third_party/skia/`.
 
 **Unproven.** Whether the thin `sk_capi` ABI can absorb real Skia — glyph shaping, font metrics, anti-aliasing, non-monospace widths — without breaking the layout model or the structural-golden discipline. Everything about the UI face (layout calibration, theme tokens, goldens, future GPU presenters) is currently calibrated against a fake monospace font, so this is the load-bearing unknown for a Flutter-shaped product.
 
-**Proof.** A `[ui]` app links a fetched Skia prebuilt behind unchanged `sk_capi.h`, text measures via real font metrics, structural (a11y) goldens stay logical-only and stable, and `sk_sw` remains the zero-dependency CI fallback.
+**Blocked (in-repo exhausted).** Proof requires a fetched Skia prebuilt that implements `sk_capi` (plus a documented tarball layout and link path). Vision forbids vendoring a Skia tree; no `SCUZZ_SKIA_URL` artifact exists; CI and linkers always build `sk_sw`. In-repo prep that does **not** close the proof: additive measure API + `text_width` wiring, Makefile prebuilt switch, tarball contract in `third_party/skia/README.md`. Do not attempt GPU presenters (unknown 6) until this is unblocked.
+
+**Proof (when unblocked).** A `[ui]` app links a fetched Skia prebuilt behind `sk_capi.h`, text measures via real font metrics, structural (a11y) goldens stay logical-only and stable, and `sk_sw` remains the zero-dependency CI fallback.
 
 ### 2. True concurrency without losing determinism
 
