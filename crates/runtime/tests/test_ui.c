@@ -511,6 +511,44 @@ static void test_text_field_edit(void) {
   sz_signal_str_free(draft);
 }
 
+/* Mount a static label and pump repeatedly: live_count stays flat-ish. */
+static void test_alloc_pump_flat(void) {
+  SzUiConfig cfg;
+  SzView *view;
+  SzUiSession *session;
+  size_t base_count = 0, base_bytes = 0;
+  size_t live_count = 0, live_bytes = 0;
+  size_t max_count = 0;
+  int i;
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 120;
+  cfg.height = 60;
+  cfg.scale = 1.0;
+
+  view = sz_view_label("alloc", 0xFF142850u, 0xFFF0F0F0u);
+  session = sz_ui_mount(&cfg, view);
+  assert(session);
+  assert(sz_ui_pump_sync(session));
+  sz_alloc_stats(&base_bytes, &base_count);
+  max_count = base_count;
+
+  for (i = 0; i < 40; i++) {
+    assert(sz_ui_pump_sync(session));
+    sz_alloc_stats(&live_bytes, &live_count);
+    if (live_count > max_count)
+      max_count = live_count;
+  }
+  /* No unbounded growth across pumps (temps may allocate then free). */
+  assert(live_count == base_count);
+  assert(live_bytes == base_bytes);
+  assert(max_count <= base_count + 8);
+
+  sz_ui_unmount(session);
+  sz_view_free(view);
+}
+
 int main(void) {
   test_label_session();
   test_signals_layout_hit();
@@ -521,6 +559,7 @@ int main(void) {
   test_clear_and_set_texts();
   test_view_each();
   test_text_field_edit();
+  test_alloc_pump_flat();
   puts("runtime ui tests ok");
   return 0;
 }

@@ -10,26 +10,87 @@
 
 /* --- panic / alloc ------------------------------------------------------- */
 
+/* Header before user pointer: [size_t nbytes][user bytes...] */
+static size_t g_live_bytes = 0;
+static size_t g_live_count = 0;
+static size_t g_peak_bytes = 0;
+static unsigned g_trace_pumps = 0;
+enum { SZ_ALLOC_TRACE_EVERY = 32 };
+
 void sz_panic(const char *msg) {
   fprintf(stderr, "scuzz panic: %s\n", msg ? msg : "(null)");
   abort();
 }
 
 void *sz_alloc(size_t size) {
-  void *p = malloc(size);
-  if (!p)
+  size_t *raw = (size_t *)malloc(sizeof(size_t) + size);
+  if (!raw)
     sz_panic("out of memory");
-  return p;
+  *raw = size;
+  g_live_bytes += size;
+  g_live_count += 1;
+  if (g_live_bytes > g_peak_bytes)
+    g_peak_bytes = g_live_bytes;
+  return (void *)(raw + 1);
 }
 
 void *sz_alloc_zero(size_t size) {
-  void *p = calloc(1, size);
-  if (!p)
+  size_t *raw = (size_t *)calloc(1, sizeof(size_t) + size);
+  if (!raw)
     sz_panic("out of memory");
-  return p;
+  *raw = size;
+  g_live_bytes += size;
+  g_live_count += 1;
+  if (g_live_bytes > g_peak_bytes)
+    g_peak_bytes = g_live_bytes;
+  return (void *)(raw + 1);
 }
 
-void sz_free(void *ptr) { free(ptr); }
+void sz_free(void *ptr) {
+  size_t *raw;
+  size_t n;
+  if (!ptr)
+    return;
+  raw = ((size_t *)ptr) - 1;
+  n = *raw;
+  if (g_live_count > 0)
+    g_live_count -= 1;
+  if (g_live_bytes >= n)
+    g_live_bytes -= n;
+  else
+    g_live_bytes = 0;
+  free(raw);
+}
+
+void sz_alloc_stats(size_t *live_bytes, size_t *live_count) {
+  if (live_bytes)
+    *live_bytes = g_live_bytes;
+  if (live_count)
+    *live_count = g_live_count;
+}
+
+void sz_alloc_reset_stats(void) {
+  g_peak_bytes = g_live_bytes;
+  g_trace_pumps = 0;
+}
+
+void sz_alloc_trace_on_pump(void) {
+  static int checked = 0;
+  static int enabled = 0;
+  const char *e;
+  if (!checked) {
+    e = getenv("SCUZZ_ALLOC_TRACE");
+    enabled = (e && strcmp(e, "1") == 0) ? 1 : 0;
+    checked = 1;
+  }
+  if (!enabled)
+    return;
+  g_trace_pumps += 1;
+  if (g_trace_pumps % SZ_ALLOC_TRACE_EVERY != 0)
+    return;
+  fprintf(stderr, "scuzz alloc: pump=%u live_bytes=%zu live_count=%zu peak_bytes=%zu\n",
+          g_trace_pumps, g_live_bytes, g_live_count, g_peak_bytes);
+}
 
 /* --- strings ------------------------------------------------------------- */
 
@@ -204,6 +265,8 @@ SzAdt *sz_adt_new(int32_t tag, void *payload) {
 }
 
 int32_t sz_adt_tag(const SzAdt *adt) { return adt ? adt->tag : -1; }
+
+void *sz_adt_payload(const SzAdt *adt) { return adt ? adt->payload : NULL; }
 
 void sz_adt_free(SzAdt *adt) { sz_free(adt); }
 

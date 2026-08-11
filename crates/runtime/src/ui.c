@@ -306,6 +306,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
                         session->cfg.height, rgba, nbytes);
     }
   }
+  sz_alloc_trace_on_pump();
   return 1;
 }
 
