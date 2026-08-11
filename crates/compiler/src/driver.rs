@@ -5,6 +5,7 @@ use crate::parser::parse_sources;
 use crate::typ::typecheck;
 use anyhow::{bail, Context, Result};
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -29,25 +30,36 @@ pub struct CompileOutput {
     pub cache_hit: bool,
 }
 
+/// One source unit in the resolved package graph.
+#[derive(Debug, Clone)]
+pub struct ResolvedSource {
+    /// Stable label for diagnostics (`{package}/src/...`).
+    pub label: String,
+    pub path: PathBuf,
+    pub text: String,
+}
+
+/// Root manifest plus ordered sources (dependencies before dependents).
+#[derive(Debug, Clone)]
+pub struct ResolvedProject {
+    pub root_manifest: Manifest,
+    pub sources: Vec<ResolvedSource>,
+    /// Canonical package directories in visit order (deps first).
+    pub package_dirs: Vec<PathBuf>,
+    /// Manifest paths in the same order as `package_dirs`.
+    pub manifest_paths: Vec<PathBuf>,
+}
+
 pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
-    let manifest_path = opts.project_dir.join("scuzz.toml");
-    let manifest = load_manifest(&manifest_path)
-        .with_context(|| format!("reading {}", manifest_path.display()))?;
+    let resolved = resolve_project(&opts.project_dir)?;
+    let manifest = resolved.root_manifest.clone();
 
-    let sources = find_sources(&opts.project_dir)?;
-    let mut named: Vec<(String, String)> = Vec::new();
-    for path in &sources {
-        let text = std::fs::read_to_string(path)
-            .with_context(|| format!("reading {}", path.display()))?;
-        let label = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("source")
-            .to_string();
-        named.push((label, text));
-    }
-
-    let fingerprint = fingerprint_sources(&named, &manifest.package.name, manifest.ui.is_some());
+    let named: Vec<(String, String)> = resolved
+        .sources
+        .iter()
+        .map(|s| (s.label.clone(), s.text.clone()))
+        .collect();
+    let fingerprint = fingerprint_resolved(&resolved);
 
     // Join must use a relative file name — absolute package names would replace out_dir.
     let exe_name = Path::new(&manifest.package.name)
@@ -161,21 +173,187 @@ fn push_force_load(link: &mut Command, archive: &Path) {
     }
 }
 
-fn fingerprint_sources(sources: &[(String, String)], package: &str, with_ui: bool) -> String {
+fn fingerprint_resolved(resolved: &ResolvedProject) -> String {
     let mut h = DefaultHasher::new();
-    package.hash(&mut h);
-    if with_ui {
+    resolved.root_manifest.package.name.hash(&mut h);
+    if resolved.root_manifest.ui.is_some() {
         "ui=1".hash(&mut h);
     } else {
         "ui=0".hash(&mut h);
     }
-    for (name, text) in sources {
-        name.hash(&mut h);
+    for (dir, manifest_path) in resolved
+        .package_dirs
+        .iter()
+        .zip(resolved.manifest_paths.iter())
+    {
+        dir.to_string_lossy().hash(&mut h);
+        let text = std::fs::read_to_string(manifest_path).unwrap_or_default();
         text.hash(&mut h);
+    }
+    for src in &resolved.sources {
+        src.label.hash(&mut h);
+        src.text.hash(&mut h);
     }
     format!("{:016x}", h.finish())
 }
 
+/// Resolve the full package graph starting at `project_dir`.
+pub fn resolve_project(project_dir: &Path) -> Result<ResolvedProject> {
+    let root = canonicalize_dir(project_dir)
+        .with_context(|| format!("resolving project {}", project_dir.display()))?;
+    let mut sources = Vec::new();
+    let mut package_dirs = Vec::new();
+    let mut manifest_paths = Vec::new();
+    let mut visiting: Vec<(String, PathBuf)> = Vec::new();
+    let mut done: HashSet<PathBuf> = HashSet::new();
+
+    let root_manifest = visit_package(
+        &root,
+        None,
+        &mut visiting,
+        &mut done,
+        &mut sources,
+        &mut package_dirs,
+        &mut manifest_paths,
+    )?;
+
+    Ok(ResolvedProject {
+        root_manifest,
+        sources,
+        package_dirs,
+        manifest_paths,
+    })
+}
+
+fn visit_package(
+    pkg_dir: &Path,
+    via_dep: Option<&str>,
+    visiting: &mut Vec<(String, PathBuf)>,
+    done: &mut HashSet<PathBuf>,
+    sources: &mut Vec<ResolvedSource>,
+    package_dirs: &mut Vec<PathBuf>,
+    manifest_paths: &mut Vec<PathBuf>,
+) -> Result<Manifest> {
+    let canon = canonicalize_dir(pkg_dir).with_context(|| {
+        if let Some(name) = via_dep {
+            format!("dependency `{name}` path {}", pkg_dir.display())
+        } else {
+            format!("package directory {}", pkg_dir.display())
+        }
+    })?;
+
+    if let Some(pos) = visiting.iter().position(|(_, p)| p == &canon) {
+        let mut chain: Vec<String> = visiting[pos..].iter().map(|(n, _)| n.clone()).collect();
+        let self_name = via_dep
+            .map(|s| s.to_string())
+            .unwrap_or_else(|| visiting.last().map(|(n, _)| n.clone()).unwrap_or_else(|| "?".into()));
+        chain.push(self_name);
+        bail!("dependency cycle: {}", chain.join(" -> "));
+    }
+
+    let manifest_path = canon.join("scuzz.toml");
+    if !manifest_path.is_file() {
+        if let Some(name) = via_dep {
+            bail!(
+                "dependency `{name}`: missing scuzz.toml in {}",
+                canon.display()
+            );
+        }
+        bail!("missing scuzz.toml in {}", canon.display());
+    }
+    let manifest = load_manifest(&manifest_path).with_context(|| {
+        if let Some(name) = via_dep {
+            format!("dependency `{name}`: reading {}", manifest_path.display())
+        } else {
+            format!("reading {}", manifest_path.display())
+        }
+    })?;
+
+    if done.contains(&canon) {
+        return Ok(manifest);
+    }
+
+    let pkg_name = manifest.package.name.clone();
+    visiting.push((pkg_name.clone(), canon.clone()));
+
+    // Deterministic order regardless of TOML/map iteration (already BTreeMap).
+    let deps: Vec<(String, String)> = manifest
+        .dependencies
+        .iter()
+        .map(|(n, d)| (n.clone(), d.path.clone()))
+        .collect();
+
+    for (dep_name, dep_path) in &deps {
+        if dep_path.is_empty() {
+            bail!("dependency `{dep_name}` path must not be empty");
+        }
+        let child = resolve_dep_path(&canon, dep_path);
+        if !child.exists() {
+            bail!(
+                "dependency `{dep_name}`: path {} does not exist",
+                child.display()
+            );
+        }
+        visit_package(
+            &child,
+            Some(dep_name),
+            visiting,
+            done,
+            sources,
+            package_dirs,
+            manifest_paths,
+        )?;
+    }
+
+    let pkg_sources = find_sources(&canon).with_context(|| {
+        if let Some(name) = via_dep {
+            format!("dependency `{name}`: sources in {}", canon.display())
+        } else {
+            format!("sources in {}", canon.display())
+        }
+    })?;
+    for path in pkg_sources {
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        let rel = path
+            .strip_prefix(&canon)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let label = format!("{pkg_name}/{rel}");
+        sources.push(ResolvedSource {
+            label,
+            path,
+            text,
+        });
+    }
+
+    package_dirs.push(canon.clone());
+    manifest_paths.push(manifest_path);
+    done.insert(canon);
+    visiting.pop();
+    Ok(manifest)
+}
+
+fn resolve_dep_path(from_pkg: &Path, dep_path: &str) -> PathBuf {
+    let p = Path::new(dep_path);
+    if p.is_absolute() {
+        p.to_path_buf()
+    } else {
+        from_pkg.join(p)
+    }
+}
+
+fn canonicalize_dir(path: &Path) -> Result<PathBuf> {
+    let canon = std::fs::canonicalize(path)
+        .with_context(|| format!("canonicalizing {}", path.display()))?;
+    if !canon.is_dir() {
+        bail!("{} is not a directory", canon.display());
+    }
+    Ok(canon)
+}
+
+/// Package-local sources only (no dependency walk). Used by `fmt` and tests.
 pub fn find_sources(project_dir: &Path) -> Result<Vec<PathBuf>> {
     let src = project_dir.join("src");
     if !src.is_dir() {
@@ -261,7 +439,7 @@ pub fn find_runtime_dir(start: &Path) -> Result<PathBuf> {
     }
 }
 
-/// Poll sources + `scuzz.toml` until change or timeout; returns true if a change was observed.
+/// Poll sources + manifests (including path deps) until change or timeout.
 pub fn wait_for_source_change(project_dir: &Path, idle_ms: u64) -> Result<bool> {
     let last = project_mtime(project_dir)?;
     let start = SystemTime::now();
@@ -278,10 +456,10 @@ pub fn wait_for_source_change(project_dir: &Path, idle_ms: u64) -> Result<bool> 
 }
 
 fn project_mtime(project_dir: &Path) -> Result<SystemTime> {
-    let mut paths = find_sources(project_dir)?;
-    let manifest = project_dir.join("scuzz.toml");
-    if manifest.is_file() {
-        paths.push(manifest);
+    let resolved = resolve_project(project_dir)?;
+    let mut paths: Vec<PathBuf> = resolved.manifest_paths.clone();
+    for s in &resolved.sources {
+        paths.push(s.path.clone());
     }
     latest_mtime(&paths)
 }
@@ -295,4 +473,283 @@ fn latest_mtime(paths: &[PathBuf]) -> Result<SystemTime> {
         }
     }
     Ok(latest)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::tempdir;
+
+    fn write_pkg(dir: &Path, name: &str, deps: &str, main: bool, body: &str) {
+        fs::create_dir_all(dir.join("src")).unwrap();
+        let dep_section = if deps.is_empty() {
+            String::new()
+        } else {
+            format!("\n[dependencies]\n{deps}\n")
+        };
+        fs::write(
+            dir.join("scuzz.toml"),
+            format!(
+                "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n{dep_section}"
+            ),
+        )
+        .unwrap();
+        let src = if main {
+            format!("@main def main: IO[Unit] =\n  {body}\n")
+        } else {
+            body.to_string()
+        };
+        let file = if main { "Main.scala" } else { "Lib.scala" };
+        fs::write(dir.join("src").join(file), &src).unwrap();
+    }
+
+    #[test]
+    fn resolves_direct_dependency() {
+        let tmp = tempdir().unwrap();
+        let shared = tmp.path().join("shared");
+        let app = tmp.path().join("app");
+        write_pkg(
+            &shared,
+            "shared",
+            "",
+            false,
+            "def greet(): String = \"hi\"\n",
+        );
+        write_pkg(
+            &app,
+            "app",
+            "shared = { path = \"../shared\" }\n",
+            true,
+            "IO.println(greet())",
+        );
+        let r = resolve_project(&app).unwrap();
+        assert_eq!(r.sources.len(), 2);
+        assert!(r.sources[0].label.starts_with("shared/"));
+        assert!(r.sources[1].label.starts_with("app/"));
+        let named: Vec<_> = r
+            .sources
+            .iter()
+            .map(|s| (s.label.clone(), s.text.clone()))
+            .collect();
+        parse_sources(&named).unwrap();
+    }
+
+    #[test]
+    fn resolves_transitive_and_diamond_once() {
+        let tmp = tempdir().unwrap();
+        let base = tmp.path().join("base");
+        let left = tmp.path().join("left");
+        let right = tmp.path().join("right");
+        let app = tmp.path().join("app");
+        write_pkg(&base, "base", "", false, "def baseId(): String = \"b\"\n");
+        write_pkg(
+            &left,
+            "left",
+            "base = { path = \"../base\" }\n",
+            false,
+            "def leftId(): String = baseId()\n",
+        );
+        write_pkg(
+            &right,
+            "right",
+            "base = { path = \"../base\" }\n",
+            false,
+            "def rightId(): String = baseId()\n",
+        );
+        write_pkg(
+            &app,
+            "app",
+            "left = { path = \"../left\" }\nright = { path = \"../right\" }\n",
+            true,
+            "IO.println(Str.concat(leftId(), rightId()))",
+        );
+        let r = resolve_project(&app).unwrap();
+        let base_count = r.sources.iter().filter(|s| s.label.starts_with("base/")).count();
+        assert_eq!(base_count, 1);
+        assert_eq!(r.package_dirs.len(), 4);
+    }
+
+    #[test]
+    fn stable_order_independent_of_manifest_entry_order() {
+        let tmp = tempdir().unwrap();
+        let a = tmp.path().join("a");
+        let b = tmp.path().join("b");
+        let app1 = tmp.path().join("app1");
+        let app2 = tmp.path().join("app2");
+        write_pkg(&a, "a", "", false, "def aId(): String = \"a\"\n");
+        write_pkg(&b, "b", "", false, "def bId(): String = \"b\"\n");
+        write_pkg(
+            &app1,
+            "app",
+            "zebra = { path = \"../b\" }\nalpha = { path = \"../a\" }\n",
+            true,
+            "IO.println(Str.concat(aId(), bId()))",
+        );
+        write_pkg(
+            &app2,
+            "app",
+            "alpha = { path = \"../a\" }\nzebra = { path = \"../b\" }\n",
+            true,
+            "IO.println(Str.concat(aId(), bId()))",
+        );
+        let r1 = resolve_project(&app1).unwrap();
+        let r2 = resolve_project(&app2).unwrap();
+        let labels1: Vec<_> = r1.sources.iter().map(|s| s.label.clone()).collect();
+        let labels2: Vec<_> = r2.sources.iter().map(|s| s.label.clone()).collect();
+        assert_eq!(labels1, labels2);
+        assert!(labels1[0].starts_with("a/"));
+        assert!(labels1[1].starts_with("b/"));
+    }
+
+    #[test]
+    fn rejects_missing_manifest() {
+        let tmp = tempdir().unwrap();
+        let missing = tmp.path().join("missing");
+        fs::create_dir_all(&missing).unwrap();
+        let app = tmp.path().join("app");
+        write_pkg(
+            &app,
+            "app",
+            "shared = { path = \"../missing\" }\n",
+            true,
+            "IO.println(\"x\")",
+        );
+        let err = resolve_project(&app).unwrap_err().to_string();
+        assert!(err.contains("dependency `shared`"), "unexpected: {err}");
+        assert!(err.contains("missing scuzz.toml"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn rejects_missing_src() {
+        let tmp = tempdir().unwrap();
+        let shared = tmp.path().join("shared");
+        fs::create_dir_all(&shared).unwrap();
+        fs::write(
+            shared.join("scuzz.toml"),
+            "[package]\nname = \"shared\"\n",
+        )
+        .unwrap();
+        let app = tmp.path().join("app");
+        write_pkg(
+            &app,
+            "app",
+            "shared = { path = \"../shared\" }\n",
+            true,
+            "IO.println(\"x\")",
+        );
+        let err = format!("{:#}", resolve_project(&app).unwrap_err());
+        assert!(err.contains("dependency `shared`"), "unexpected: {err}");
+        assert!(err.contains("missing src/"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn rejects_direct_cycle() {
+        let tmp = tempdir().unwrap();
+        let a = tmp.path().join("a");
+        let b = tmp.path().join("b");
+        write_pkg(
+            &a,
+            "a",
+            "b = { path = \"../b\" }\n",
+            false,
+            "def aId(): String = \"a\"\n",
+        );
+        write_pkg(
+            &b,
+            "b",
+            "a = { path = \"../a\" }\n",
+            false,
+            "def bId(): String = \"b\"\n",
+        );
+        // Need an executable root that depends on the cycle.
+        let app = tmp.path().join("app");
+        write_pkg(
+            &app,
+            "app",
+            "a = { path = \"../a\" }\n",
+            true,
+            "IO.println(aId())",
+        );
+        let err = resolve_project(&app).unwrap_err().to_string();
+        assert!(err.contains("dependency cycle"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn rejects_multiple_mains() {
+        let tmp = tempdir().unwrap();
+        let shared = tmp.path().join("shared");
+        let app = tmp.path().join("app");
+        write_pkg(
+            &shared,
+            "shared",
+            "",
+            true,
+            "IO.println(\"shared\")",
+        );
+        write_pkg(
+            &app,
+            "app",
+            "shared = { path = \"../shared\" }\n",
+            true,
+            "IO.println(\"app\")",
+        );
+        let r = resolve_project(&app).unwrap();
+        let named: Vec<_> = r
+            .sources
+            .iter()
+            .map(|s| (s.label.clone(), s.text.clone()))
+            .collect();
+        let err = parse_sources(&named).unwrap_err().to_string();
+        assert!(err.contains("multiple @main"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn fingerprint_changes_when_dependency_source_changes() {
+        let tmp = tempdir().unwrap();
+        let shared = tmp.path().join("shared");
+        let app = tmp.path().join("app");
+        write_pkg(
+            &shared,
+            "shared",
+            "",
+            false,
+            "def greet(): String = \"hi\"\n",
+        );
+        write_pkg(
+            &app,
+            "app",
+            "shared = { path = \"../shared\" }\n",
+            true,
+            "IO.println(greet())",
+        );
+        let r1 = resolve_project(&app).unwrap();
+        let fp1 = fingerprint_resolved(&r1);
+        fs::write(shared.join("src/Lib.scala"), "def greet(): String = \"yo\"\n").unwrap();
+        let r2 = resolve_project(&app).unwrap();
+        let fp2 = fingerprint_resolved(&r2);
+        assert_ne!(fp1, fp2);
+    }
+
+    #[test]
+    fn rejects_unsupported_dependency_in_resolve_load() {
+        let tmp = tempdir().unwrap();
+        let app = tmp.path().join("app");
+        fs::create_dir_all(app.join("src")).unwrap();
+        fs::write(
+            app.join("scuzz.toml"),
+            "[package]\nname = \"app\"\n[dependencies]\nshared = \"../shared\"\n",
+        )
+        .unwrap();
+        fs::write(
+            app.join("src/Main.scala"),
+            "@main def main: IO[Unit] =\n  IO.println(\"x\")\n",
+        )
+        .unwrap();
+        let err = format!("{:#}", resolve_project(&app).unwrap_err());
+        assert!(
+            err.contains("string dependencies are unsupported"),
+            "unexpected: {err}"
+        );
+    }
 }

@@ -53,8 +53,14 @@ def execOk(cmd: String): IO[Unit] =
 def readSources(srcDir: String, names: List, acc: List): IO[List] =
   if (List.isEmpty(names) == 1) IO.pure(List.reverse(acc)) else Fs.read(pathJoin(srcDir, List.head(names))).flatMap(text => readSources(srcDir, List.tail(names), List.cons(text, acc)))
 
-def mergeSources(texts: List, acc: List): List =
-  if (List.isEmpty(texts) == 1) acc else mergeSources(List.tail(texts), mergeProg(acc, parseSource(List.head(texts))))
+def mergeSources(texts: List, acc: List, mains: Int): IO[List] =
+  if (List.isEmpty(texts) == 1) if (mains == 0) IO.fail("no @main definition") else if (mains > 1) IO.fail("multiple @main definitions") else IO.pure(acc) else mergeSourcesOne(List.head(texts), List.tail(texts), acc, mains)
+
+def mergeSourcesOne(text: String, rest: List, acc: List, mains: Int): IO[List] =
+  for {
+    p = parseSource(text)
+    n = if (streq(exprTag(progMain(p)), "Unit") == 1) 0 else 1
+  } yield mergeSources(rest, mergeProg(acc, p), mains + n)
 
 def buildRuntime(runtimeDir: String, clang: String): IO[Unit] =
   execOk(str4("make -C ", runtimeDir, " lib CC=", clang)).flatMap(_ =>
@@ -87,44 +93,95 @@ def compileProjectWith(projectDir: String, outDir: String, doRun: Int, runtimeDi
   Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml => compileAfterToml(projectDir, outDir, doRun, runtimeDir, clang, toml, readTomlName(toml)))
 
 def compileAfterToml(projectDir: String, outDir: String, doRun: Int, runtimeDir: String, clang: String, toml: String, name: String): IO[Unit] =
-  for {
-    srcDir = pathJoin(projectDir, "src")
-  } yield Fs.list(srcDir).flatMap(names =>
-  readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty()).flatMap(texts => compileAfterSources(projectDir, outDir, doRun, runtimeDir, clang, name, hasUiSection(toml), texts))
-)
+  loadGraphSources(projectDir, toml).flatMap(texts => compileAfterSources(projectDir, outDir, doRun, runtimeDir, clang, name, hasUiSection(toml), texts))
 
 def checkProject(projectDir: String): IO[String] =
-  for {
-    srcDir = pathJoin(projectDir, "src")
-  } yield Fs.list(srcDir).flatMap(names =>
-  readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty()).flatMap(texts =>
-    for {
-      prog = lowerProg(mergeSources(texts, emptyProg()))
-      ty = typecheckProg(prog)
-    } yield IO.pure(ty)
+  Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml =>
+    loadGraphSources(projectDir, toml).flatMap(texts =>
+      mergeSources(texts, emptyProg(), 0).flatMap(prog0 =>
+        for {
+          prog = lowerProg(prog0)
+          ty = typecheckProg(prog)
+        } yield IO.pure(ty)
+      )
+    )
   )
-)
 
 def linkProject(clang: String, ll: String, lib: String, ffi: String, inc: String, embedder: String, mobile: String, exe: String, withUi: Int): IO[Unit] =
   if (withUi == 0) execOk(linkCmdIo(clang, ll, lib, inc, exe)) else execOk(linkCmd(clang, ll, lib, pathJoin(ffi, "build/libsk_capi.a"), inc, pathJoin(ffi, "include"), embedder, mobile, exe))
 
 def compileAfterSources(projectDir: String, outDir: String, doRun: Int, runtimeDir: String, clang: String, name: String, withUi: Int, texts: List): IO[Unit] =
-  for {
-    prog = lowerProg(mergeSources(texts, emptyProg()))
-    ty = typecheckProg(prog)
-    ir = emitProgram(prog)
-    ll = pathJoin(outDir, Str.concat(name, ".ll"))
-    exe = pathJoin(outDir, name)
-    lib = pathJoin(runtimeDir, "build/libscuzz_rt.a")
-    ffi = pathJoin(parentDir(runtimeDir), "ffi-skia")
-    inc = pathJoin(runtimeDir, "include")
-    embedder = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-desktop"), "build/libscuzz_embedder.a")
-    mobile = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-mobile"), "build/libscuzz_mobile.a")
-  } yield if (tyIsOk(ty) == 0) IO.fail(tyMsg(ty)) else Fs.mkdirs(outDir).flatMap(_ =>
+  mergeSources(texts, emptyProg(), 0).flatMap(prog0 =>
+    for {
+      prog = lowerProg(prog0)
+      ty = typecheckProg(prog)
+      ir = emitProgram(prog)
+      ll = pathJoin(outDir, Str.concat(name, ".ll"))
+      exe = pathJoin(outDir, name)
+      lib = pathJoin(runtimeDir, "build/libscuzz_rt.a")
+      ffi = pathJoin(parentDir(runtimeDir), "ffi-skia")
+      inc = pathJoin(runtimeDir, "include")
+      embedder = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-desktop"), "build/libscuzz_embedder.a")
+      mobile = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-mobile"), "build/libscuzz_mobile.a")
+    } yield if (tyIsOk(ty) == 0) IO.fail(tyMsg(ty)) else Fs.mkdirs(outDir).flatMap(_ =>
   Fs.write(ll, ir).flatMap(_ =>
     buildRuntime(runtimeDir, clang).flatMap(_ =>
       linkProject(clang, ll, lib, ffi, inc, embedder, mobile, exe, withUi).flatMap(_ => runIfNeeded(exe, doRun))
     )
   )
+)
+  )
+
+def loadGraphSources(projectDir: String, toml: String): IO[List] =
+  Fs.canonicalize(projectDir).flatMap(root =>
+    visitPackage(root, toml, "", List.empty(), List.empty()).flatMap(state => IO.pure(List.head(state)))
+  )
+
+def visitPackage(pkgDir: String, toml: String, viaDep: String, stack: List, done: List): IO[List] =
+  Fs.canonicalize(pkgDir).flatMap(canon => visitPackageCanon(canon, toml, viaDep, stack, done))
+
+def visitPackageCanon(canon: String, toml: String, viaDep: String, stack: List, done: List): IO[List] =
+  if (listContainsStr(stack, canon) == 1) IO.fail(str3("dependency cycle: ", joinChain(List.reverse(List.cons(cycleLabel(viaDep, canon), stack)), " -> "), "")) else if (listContainsStr(done, canon) == 1) IO.pure(List.cons(List.empty(), List.cons(done, List.empty()))) else readTomlDeps(toml).flatMap(deps =>
+  visitDeps(canon, deps, List.cons(canon, stack), done, List.empty()).flatMap(depState =>
+    loadPackageTexts(canon).flatMap(texts =>
+      for {
+        depTexts = List.head(depState)
+        depDone = List.head(List.tail(depState))
+        all = listConcat(depTexts, texts)
+      } yield IO.pure(List.cons(all, List.cons(List.cons(canon, depDone), List.empty())))
+    )
+  )
+)
+
+def cycleLabel(viaDep: String, canon: String): String =
+  if (Str.len(viaDep) > 0) viaDep else canon
+
+def visitDeps(pkgDir: String, deps: List, stack: List, done: List, accTexts: List): IO[List] =
+  if (List.isEmpty(deps) == 1) IO.pure(List.cons(accTexts, List.cons(done, List.empty()))) else visitDepOne(pkgDir, List.head(deps), List.tail(deps), stack, done, accTexts)
+
+def visitDepOne(pkgDir: String, dep: List, rest: List, stack: List, done: List, accTexts: List): IO[List] =
+  for {
+    name = depName(dep)
+    rel = depPath(dep)
+    child = pathJoin(pkgDir, rel)
+  } yield readDepManifest(name, child).flatMap(childToml =>
+  visitPackage(child, childToml, name, stack, done).flatMap(childState =>
+    for {
+      childTexts = List.head(childState)
+      childDone = List.head(List.tail(childState))
+    } yield visitDeps(pkgDir, rest, stack, childDone, listConcat(accTexts, childTexts))
+  )
+)
+
+def readDepManifest(name: String, child: String): IO[String] =
+  Fs.read(pathJoin(child, "scuzz.toml")).handleErrorWith(_ =>
+    IO.fail(str5("dependency `", name, "`: missing scuzz.toml in ", child, "")).flatMap(_ => IO.pure(""))
+  )
+
+def loadPackageTexts(pkgDir: String): IO[List] =
+  for {
+    srcDir = pathJoin(pkgDir, "src")
+  } yield Fs.list(srcDir).flatMap(names => readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty())).handleErrorWith(_ =>
+  IO.fail(str3("missing src/ in ", pkgDir, "")).flatMap(_ => IO.pure(List.empty()))
 )
 

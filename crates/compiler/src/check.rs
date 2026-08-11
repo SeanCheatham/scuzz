@@ -4,7 +4,7 @@ use crate::lower::lower_program;
 use crate::parser::parse_sources;
 use crate::typ::typecheck;
 use anyhow::{Context, Result};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
@@ -90,33 +90,19 @@ pub fn format_diagnostics(diags: &[Diagnostic], json: bool) -> String {
 
 /// Parse, lower, and typecheck a project. No LLVM emit or link.
 pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
-    let manifest_path = project_dir.join("scuzz.toml");
-    let _manifest = crate::manifest::load_manifest(&manifest_path)
-        .with_context(|| format!("reading {}", manifest_path.display()))?;
+    let resolved = crate::driver::resolve_project(project_dir)
+        .with_context(|| format!("resolving {}", project_dir.display()))?;
 
-    let sources = crate::driver::find_sources(project_dir)?;
-    let mut named: Vec<(String, String)> = Vec::new();
-    let mut paths: Vec<PathBuf> = Vec::new();
-    for path in &sources {
-        let text = std::fs::read_to_string(path)
-            .with_context(|| format!("reading {}", path.display()))?;
-        let label = path
-            .file_name()
-            .and_then(|s| s.to_str())
-            .unwrap_or("source")
-            .to_string();
-        named.push((label, text));
-        paths.push(path.clone());
-    }
+    let named: Vec<(String, String)> = resolved
+        .sources
+        .iter()
+        .map(|s| (s.label.clone(), s.text.clone()))
+        .collect();
 
     let program = match parse_sources(&named) {
         Ok(p) => p,
         Err(e) => {
-            let file = paths
-                .first()
-                .and_then(|p| p.file_name())
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_string());
+            let file = resolved.sources.first().map(|s| s.label.clone());
             let mut d = Diagnostic::error(format!("parse error: {e}"));
             if let Some(f) = file {
                 d = d.with_file(f);
@@ -128,18 +114,12 @@ pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
     match typecheck(&program) {
         Ok(()) => Ok(vec![]),
         Err(e) => {
-            let file = paths
+            let file = resolved
+                .sources
                 .iter()
-                .find(|p| {
-                    p.file_name()
-                        .and_then(|s| s.to_str())
-                        .map(|s| s == "Main.scala" || s == "main.scala")
-                        .unwrap_or(false)
-                })
-                .or_else(|| paths.first())
-                .and_then(|p| p.file_name())
-                .and_then(|s| s.to_str())
-                .map(|s| s.to_string());
+                .find(|s| s.label.contains("/src/Main.scala") || s.label.ends_with("Main.scala"))
+                .or_else(|| resolved.sources.last())
+                .map(|s| s.label.clone());
             let mut d = Diagnostic::error(e.to_string());
             if let Some(f) = file {
                 d = d.with_file(f);

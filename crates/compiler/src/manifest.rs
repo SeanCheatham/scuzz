@@ -1,4 +1,7 @@
-use serde::Deserialize;
+use serde::de::{self, MapAccess, Visitor};
+use serde::{Deserialize, Deserializer};
+use std::collections::BTreeMap;
+use std::fmt;
 use std::path::Path;
 
 #[derive(Debug, Clone, Deserialize)]
@@ -8,6 +11,9 @@ pub struct Manifest {
     pub targets: Targets,
     #[serde(default)]
     pub ui: Option<UiConfig>,
+    /// Named path dependencies, sorted by name via `BTreeMap`.
+    #[serde(default)]
+    pub dependencies: BTreeMap<String, PathDependency>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -40,6 +46,63 @@ fn default_kind() -> String {
 }
 fn default_main() -> String {
     "Main".into()
+}
+
+/// v0 local path dependency: `{ path = "..." }` only.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PathDependency {
+    pub path: String,
+}
+
+impl<'de> Deserialize<'de> for PathDependency {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        struct PathDepVisitor;
+
+        impl<'de> Visitor<'de> for PathDepVisitor {
+            type Value = PathDependency;
+
+            fn expecting(&self, f: &mut fmt::Formatter) -> fmt::Result {
+                write!(f, "inline table {{ path = \"...\" }}")
+            }
+
+            fn visit_str<E: de::Error>(self, _v: &str) -> Result<Self::Value, E> {
+                Err(de::Error::custom(
+                    "string dependencies are unsupported; use `{ path = \"...\" }`",
+                ))
+            }
+
+            fn visit_string<E: de::Error>(self, v: String) -> Result<Self::Value, E> {
+                self.visit_str(&v)
+            }
+
+            fn visit_map<M: MapAccess<'de>>(self, mut map: M) -> Result<Self::Value, M::Error> {
+                let mut path: Option<String> = None;
+                while let Some(key) = map.next_key::<String>()? {
+                    if key == "path" {
+                        if path.is_some() {
+                            return Err(de::Error::custom("duplicate `path` in dependency table"));
+                        }
+                        path = Some(map.next_value()?);
+                    } else {
+                        return Err(de::Error::custom(format!(
+                            "unsupported dependency key `{key}`; only `path` is supported in v0"
+                        )));
+                    }
+                }
+                let path =
+                    path.ok_or_else(|| de::Error::custom("dependency requires `path = \"...\"`"))?;
+                if path.is_empty() {
+                    return Err(de::Error::custom("dependency path must not be empty"));
+                }
+                Ok(PathDependency { path })
+            }
+        }
+
+        deserializer.deserialize_any(PathDepVisitor)
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -88,6 +151,109 @@ impl UiConfig {
 
 pub fn load_manifest(path: &Path) -> anyhow::Result<Manifest> {
     let text = std::fs::read_to_string(path)?;
-    let m: Manifest = toml::from_str(&text)?;
+    parse_manifest(&text)
+}
+
+pub fn parse_manifest(text: &str) -> anyhow::Result<Manifest> {
+    let m: Manifest = toml::from_str(text)?;
+    validate_manifest(&m)?;
     Ok(m)
+}
+
+fn validate_manifest(m: &Manifest) -> anyhow::Result<()> {
+    for (name, dep) in &m.dependencies {
+        if name.is_empty() {
+            anyhow::bail!("dependency name must not be empty");
+        }
+        if dep.path.is_empty() {
+            anyhow::bail!("dependency `{name}` path must not be empty");
+        }
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_named_path_deps() {
+        let m = parse_manifest(
+            r#"
+[package]
+name = "app"
+
+[dependencies]
+shared = { path = "../shared" }
+other = { path = "../other" }
+"#,
+        )
+        .unwrap();
+        let names: Vec<_> = m.dependencies.keys().cloned().collect();
+        assert_eq!(names, vec!["other".to_string(), "shared".to_string()]);
+        assert_eq!(m.dependencies["shared"].path, "../shared");
+    }
+
+    #[test]
+    fn rejects_string_dependency() {
+        let err = parse_manifest(
+            r#"
+[package]
+name = "app"
+[dependencies]
+shared = "../shared"
+"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("string dependencies are unsupported"),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_git_dependency_key() {
+        let err = parse_manifest(
+            r#"
+[package]
+name = "app"
+[dependencies]
+shared = { git = "https://example.com/x.git" }
+"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("unsupported dependency key `git`"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn rejects_empty_path() {
+        let err = parse_manifest(
+            r#"
+[package]
+name = "app"
+[dependencies]
+shared = { path = "" }
+"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("must not be empty"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn rejects_missing_path_key() {
+        let err = parse_manifest(
+            r#"
+[package]
+name = "app"
+[dependencies]
+shared = { }
+"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("requires `path"), "unexpected: {err}");
+    }
 }

@@ -389,12 +389,13 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::List)?;
             Ok(Type::List)
         }
-        "Fs.read" | "Fs.list" | "Fs.mkdirs" => {
+        "Fs.read" | "Fs.list" | "Fs.mkdirs" | "Fs.canonicalize" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(match callee {
                 "Fs.read" => Type::Io(Box::new(Type::String)),
                 "Fs.list" => Type::Io(Box::new(Type::List)),
+                "Fs.canonicalize" => Type::Io(Box::new(Type::String)),
                 _ => Type::Io(Box::new(Type::Unit)),
             })
         }

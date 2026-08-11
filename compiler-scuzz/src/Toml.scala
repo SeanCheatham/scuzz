@@ -153,3 +153,51 @@ def readTomlHeadlessH(toml: String): String =
 def hasUiSection(toml: String): Int =
   if (tomlSectionStart(toml, "ui") < 0) 0 else 1
 
+def isDepIdentChar(c: Int): Int =
+  if (c >= 97) if (c <= 122) 1 else 0 else if (c >= 65) if (c <= 90) 1 else 0 else if (c >= 48) if (c <= 57) 1 else 0 else if (c == 95) 1 else if (c == 45) 1 else 0
+
+def readDepIdent(s: String, i: Int, acc: String): String =
+  if (i >= Str.len(s)) acc else if (isDepIdentChar(Str.charAt(s, i)) == 1) readDepIdent(s, i + 1, Str.concat(acc, Str.slice(s, i, i + 1))) else acc
+
+def depHasName(deps: List, name: String): Int =
+  if (List.isEmpty(deps) == 1) 0 else if (streq(depName(List.head(deps)), name) == 1) 1 else depHasName(List.tail(deps), name)
+
+def readTomlDeps(toml: String): IO[List] =
+  readTomlDepsAt(toml, tomlSectionStart(toml, "dependencies"))
+
+def readTomlDepsAt(toml: String, start: Int): IO[List] =
+  if (start < 0) IO.pure(List.empty()) else scanDeps(toml, start, tomlSectionEnd(toml, start), List.empty()).flatMap(deps => IO.pure(sortDeps(deps)))
+
+def scanDeps(s: String, i: Int, end: Int, acc: List): IO[List] =
+  if (i >= end) IO.pure(List.reverse(acc)) else scanDepsAt(s, tomlSkip(s, i), end, acc)
+
+def scanDepsAt(s: String, j: Int, end: Int, acc: List): IO[List] =
+  if (j >= end) IO.pure(List.reverse(acc)) else if (Str.charAt(s, j) == 91) IO.pure(List.reverse(acc)) else parseDepEntry(s, j, end, acc)
+
+def parseDepEntry(s: String, j: Int, end: Int, acc: List): IO[List] =
+  parseDepEntryNamed(s, j, end, acc, readDepIdent(s, j, ""))
+
+def parseDepEntryNamed(s: String, j: Int, end: Int, acc: List, name: String): IO[List] =
+  if (Str.len(name) == 0) IO.fail("dependencies: expected dependency name") else if (depHasName(acc, name) == 1) IO.fail(str3("dependencies: duplicate dependency name `", name, "`")) else parseDepAfterName(s, tomlSkip(s, j + Str.len(name)), end, acc, name)
+
+def parseDepAfterName(s: String, k: Int, end: Int, acc: List, name: String): IO[List] =
+  if (k >= end) IO.fail(str3("dependencies: `", name, "` missing `=`")) else if (Str.charAt(s, k) != 61) IO.fail(str3("dependencies: `", name, "` expected `=`")) else parseDepValue(s, tomlSkip(s, k + 1), end, acc, name)
+
+def parseDepValue(s: String, k: Int, end: Int, acc: List, name: String): IO[List] =
+  if (k >= end) IO.fail(str3("dependencies: `", name, "` missing value")) else if (Str.charAt(s, k) == 34) IO.fail(str3("dependencies: `", name, "` string dependencies are unsupported; use `{ path = \"...\" }`")) else if (Str.charAt(s, k) != 123) IO.fail(str3("dependencies: `", name, "` expected `{ path = \"...\" }`")) else parseDepInline(s, tomlSkip(s, k + 1), end, acc, name)
+
+def parseDepInline(s: String, k: Int, end: Int, acc: List, name: String): IO[List] =
+  if (k >= end) IO.fail(str3("dependencies: `", name, "` unclosed `{`")) else if (startsWith(Str.slice(s, k, Str.len(s)), "path") == 0) IO.fail(str3("dependencies: `", name, "` only `path` is supported in v0")) else if (k + 4 < Str.len(s)) if (isDepIdentChar(Str.charAt(s, k + 4)) == 1) IO.fail(str3("dependencies: `", name, "` only `path` is supported in v0")) else parseDepPathKey(s, tomlSkip(s, k + 4), end, acc, name) else parseDepPathKey(s, tomlSkip(s, k + 4), end, acc, name)
+
+def parseDepPathKey(s: String, k: Int, end: Int, acc: List, name: String): IO[List] =
+  if (k >= end) IO.fail(str3("dependencies: `", name, "` missing `=` after path")) else if (Str.charAt(s, k) != 61) IO.fail(str3("dependencies: `", name, "` expected `=` after path")) else parseDepPathEq(s, tomlSkip(s, k + 1), end, acc, name)
+
+def parseDepPathEq(s: String, k: Int, end: Int, acc: List, name: String): IO[List] =
+  if (k >= end) IO.fail(str3("dependencies: `", name, "` missing path string")) else if (Str.charAt(s, k) != 34) IO.fail(str3("dependencies: `", name, "` path must be a quoted string")) else parseDepPathStr(s, k + 1, end, acc, name, readUntilQuote(s, k + 1, ""))
+
+def parseDepPathStr(s: String, start: Int, end: Int, acc: List, name: String, path: String): IO[List] =
+  if (Str.len(path) == 0) IO.fail(str3("dependencies: `", name, "` path must not be empty")) else parseDepClose(s, tomlSkip(s, start + Str.len(path) + 1), end, acc, name, path)
+
+def parseDepClose(s: String, k: Int, end: Int, acc: List, name: String, path: String): IO[List] =
+  if (k >= end) IO.fail(str3("dependencies: `", name, "` unclosed `{`")) else if (Str.charAt(s, k) != 125) IO.fail(str3("dependencies: `", name, "` unsupported dependency table; only `{ path = \"...\" }` is supported")) else scanDeps(s, k + 1, end, List.cons(List.cons(name, List.cons(path, List.empty())), acc))
+

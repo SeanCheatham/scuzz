@@ -1,9 +1,9 @@
 @main def main: IO[Unit] =
   for {
     count = Signal.int(0)
-    label = Signal.map(count, n => s"count = $n")
+    label = Signal.map(count, n => countLabel(n))
     root = View.column(
-      View.text("Counter"),
+      View.text(counterTitle()),
       View.bindText(label),
       View.row(
         View.button("+1", _ => Signal.set(count, Signal.get(count) + 1)),

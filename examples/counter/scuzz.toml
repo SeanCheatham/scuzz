@@ -6,6 +6,9 @@ version = "0.1.0"
 kind = "executable"
 main = "Main"
 
+[dependencies]
+shared = { path = "../shared" }
+
 [ui]
 default_runtime = "headless"
 headless_size = [200, 120]
