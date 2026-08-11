@@ -1,8 +1,9 @@
 /* Thin Skia-shaped C ABI for Scuzz Lang.
  *
  * A CPU software implementation (sk_sw) ships behind this header so
- * Headless CI works without downloading multi‑GB Skia trees. A future fetch of
- * prebuilt Skia static libs can replace the backend without changing callers.
+ * Headless CI works without downloading multi‑GB Skia trees. A fetched
+ * prebuilt that exports these symbols can replace the backend without
+ * changing callers (see third_party/skia/README.md).
  */
 #ifndef SK_CAPI_H
 #define SK_CAPI_H
@@ -37,7 +38,7 @@ const uint8_t *sk_surface_peek_pixels(const SkSurface *surface, size_t *out_size
 void sk_canvas_clear(SkCanvas *canvas, SkColor color);
 void sk_canvas_draw_rect(SkCanvas *canvas, float x, float y, float w, float h,
                          const SkPaint *paint);
-/* Baseline-left text with a built-in 8x8 bitmap font. */
+/* Baseline-left text. Uses paint text size (default 8). */
 void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
                            const SkPaint *paint);
 
@@ -46,6 +47,11 @@ void sk_paint_delete(SkPaint *paint);
 void sk_paint_set_color(SkPaint *paint, SkColor color);
 void sk_paint_set_stroke(SkPaint *paint, int stroke /* bool */);
 void sk_paint_set_stroke_width(SkPaint *paint, float width);
+void sk_paint_set_text_size(SkPaint *paint, float size);
+float sk_paint_get_text_size(const SkPaint *paint);
+
+/* Advance width of UTF-8 text at font_px (sk_sw: monospace n * font_px). */
+float sk_font_measure_string(const char *text, float font_px);
 
 /* Encode surface pixels as PNG into freshly allocated buffer (caller frees). */
 int sk_encode_png(const SkSurface *surface, uint8_t **out_bytes, size_t *out_len);

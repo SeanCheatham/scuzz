@@ -1,0 +1,62 @@
+# As-needed Skia CPU prebuilt that exports sk_capi.h.
+# Trigger manually or by pushing a skia-cpu-v* tag. Not part of default CI.
+name: skia-cpu
+
+on:
+  workflow_dispatch:
+    inputs:
+      skia_branch:
+        description: Skia git branch/tag
+        required: false
+        default: chrome/m131
+      release_tag:
+        description: GitHub Release tag (e.g. skia-cpu-v0.1)
+        required: true
+  push:
+    tags:
+      - "skia-cpu-v*"
+
+permissions:
+  contents: write
+
+jobs:
+  linux-x64:
+    runs-on: ubuntu-latest
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build deps
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y clang make ninja-build python3 git curl xxd \
+            libfontconfig-dev g++ fonts-dejavu-core \
+            libfreetype-dev libbrotli-dev libbz2-dev zlib1g-dev
+
+      - name: Build sk_capi Skia prebuilt
+        env:
+          SCUZZ_SKIA_BRANCH: ${{ github.event.inputs.skia_branch || 'chrome/m131' }}
+          SCUZZ_SKIA_TRIPLE: x86_64-unknown-linux-gnu
+        run: ./scripts/build_skia_prebuilt.sh
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: skia-x86_64-unknown-linux-gnu-cpu
+          path: dist/skia-x86_64-unknown-linux-gnu-cpu.tar.gz
+          if-no-files-found: error
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          files: dist/skia-x86_64-unknown-linux-gnu-cpu.tar.gz
+          generate_release_notes: false
+          body: |
+            Scuzz `sk_capi` CPU prebuilt for `x86_64-unknown-linux-gnu`.
+            Install with:
+            ```
+            SCUZZ_SKIA_URL=<asset-url> ./scripts/fetch_skia.sh
+            ```
+            Or pin the URL in `third_party/skia/PIN` for `package_release.sh`.
