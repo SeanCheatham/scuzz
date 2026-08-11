@@ -52,6 +52,9 @@ test -s "${FONT_TTF}"
 FONT_INC="${WORK}/scuzz_embedded_font.c"
 xxd -i -n scuzz_embedded_font "${FONT_TTF}" >"${FONT_INC}"
 
+# Hermetic CPU build. Force FreeType + custom fontmgr on all hosts (including
+# Darwin, where Skia defaults to CoreText and omits the freetype2 ninja target)
+# so sk_capi_skia.cpp's SkFontMgr_New_Custom_* path links.
 GN_ARGS=(
   'is_official_build=true'
   'is_component_build=false'
@@ -62,13 +65,24 @@ GN_ARGS=(
   'skia_use_system_libwebp=false'
   'skia_use_system_zlib=false'
   'skia_use_system_harfbuzz=false'
+  'skia_use_freetype=true'
   'skia_use_system_freetype2=false'
+  'skia_enable_fontmgr_custom_embedded=true'
+  'skia_enable_fontmgr_custom_empty=true'
+  'skia_use_fontconfig=false'
   'skia_enable_gpu=false'
   'skia_use_gl=false'
+  'skia_use_metal=false'
   'skia_enable_pdf=false'
   'skia_enable_svg=false'
   'skia_use_x11=false'
 )
+
+# Skia's macOS GN defaults to Intel; set arm64 for Apple Silicon triples.
+case "${TRIPLE}" in
+  aarch64-apple-darwin|aarch64-*-darwin*) GN_ARGS+=('target_cpu="arm64"') ;;
+  x86_64-apple-darwin|x86_64-*-darwin*) GN_ARGS+=('target_cpu="x64"') ;;
+esac
 
 echo "==> gn gen"
 bin/gn gen out/Static --args="${GN_ARGS[*]}"
