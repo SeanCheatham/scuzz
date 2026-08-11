@@ -85,7 +85,7 @@ IO-only is **not** a fourth runtime peer. Package contract: missing `[ui]` ⇒ S
 
 Subset used by compiler sources and bootstrap examples. New features land in Stage 0 **before** `compiler-scuzz/` depends on them. Dual-boot gate: `scripts/selfhost.sh` — each stage smokes `examples/hello` + `examples/adt`, passes the counter/todo/nav Headless goldens, smokes `fuzz` on `examples/todo` and `fuzz --exhaust --depth 1` on `examples/counter`, and agrees with Stage 0 on `fmt --check` for the compiler sources; Stage 2 must re-emit byte-identical compiler IR (Stage-3 fixpoint).
 
-- Optional `package`; top-level `def` / `@main def …: IO[Unit]`; enums (nullary in Stage 1 sources; Stage 0 and self-host emit unary `Int`/`String` payloads via `sz_adt_new` / `sz_adt_tag` / `sz_adt_payload` + `match` bind — `examples/adt` exercises both; compiler IR/AST still List+string-tag)
+- Optional `package`; top-level `def` / `@main def …: IO[Unit]`; enums (nullary in Stage 1 sources; Stage 0 and self-host emit N-field `Int`/`String` payload enums via `sz_adt_new` / `sz_adt_tag` / `sz_adt_payload` + multi-binder `match` — `examples/adt` exercises nullary/unary/multi-field; multi-field packs as `List` in the ADT payload; compiler IR/AST still List+string-tag)
 - **`for { binders } yield e`** as primary binder: `x = e` (pure), `x <- e` (effect; yield wraps with `IO.pure` when any `<-` is present). Nested `for` in `if` / lambda arms when multi-bind is needed.
 - No `val` / statement blocks / `var` — expression dialect only.
 - `if` / `match`; literals incl. list `[a,b,c]` and `s"…"`
@@ -135,7 +135,7 @@ Scala **nouns**, Rust/Cargo **verbs** — without JVM packages or Rust `struct`/
 | File module (`Todo.scuzz`) | Namespacing + visibility |
 | Optional deeper `mod` tree | Only when a single file gets heavy |
 
-Direction for data/interfaces (see also [`compatibility.md`](compatibility.md)): payload **enums** / case-like records + thin **traits**-as-interfaces; monomorphize generics early. Stage 0 and self-host (`compiler-scuzz/`) emit unary `Int`/`String` payload enums for user programs; compiler sources still use nullary / List+string-tag IR. No classes (mutable identity), no `var`, no classpath/`com.foo.bar` directories. Path deps remain the unit of reuse. Today `src/**/*.scuzz` still merges into one program; file-as-module is the intended ratchet, not a parallel `src/test` tree.
+Direction for data/interfaces (see also [`compatibility.md`](compatibility.md)): payload **enums** / case-like records + thin **traits**-as-interfaces; monomorphize generics early. Stage 0 and self-host (`compiler-scuzz/`) emit N-field `Int`/`String` payload enums for user programs (multi-field as `List` in `sz_adt_payload`); compiler sources still use nullary / List+string-tag IR. No classes (mutable identity), no `var`, no classpath/`com.foo.bar` directories. Path deps remain the unit of reuse. Today `src/**/*.scuzz` still merges into one program; file-as-module is the intended ratchet, not a parallel `src/test` tree.
 
 ### Laws, simulation, and verification
 
@@ -200,7 +200,7 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ## Open work
 
-Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Closed in-tree slices: stem-paired laws/sim, desktop Window typing (`SZ_INPUT_TEXT_EDIT`), Stage-0 spans, self-host span diagnostics parity, alloc accounting / optional `test-asan`, Stage-0 unary payload ADTs, self-host unary payload ADTs for user programs (`examples/adt`), cooperative fiber `race`/`both`/`Queue`/`Deferred` with TestRuntime virtual-time jumps, long-lived Headless pump flatness (counter-shaped `Signal.map` path). Still open: rewriting compiler IR/AST onto payloads, file-as-module namespaces, device Mobile, non-path deps. **Blocked on external assets/toolchains:** real Skia text (needs hosted `SCUZZ_SKIA_URL` prebuilt), GPU presenters (downstream of Skia). Deeper UI (Flutter-style constraints) and Windows desktop stay deferred. IME waits on real text rendering.
+Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Closed in-tree slices: stem-paired laws/sim, desktop Window typing (`SZ_INPUT_TEXT_EDIT`), Stage-0 spans, self-host span diagnostics parity, alloc accounting / optional `test-asan`, Stage-0 / self-host multi-field payload ADTs for user programs (`examples/adt`), cooperative fiber `race`/`both`/`Queue`/`Deferred` with TestRuntime virtual-time jumps, long-lived Headless pump flatness (counter-shaped `Signal.map` path). Still open: rewriting compiler IR/AST onto payloads, file-as-module namespaces, non-path deps. **Blocked on external assets/toolchains:** real Skia text (needs hosted `SCUZZ_SKIA_URL` prebuilt), device Mobile (needs NDK/Xcode; host shell + stubs only), GPU presenters (downstream of Skia; CPU `sk_sw` only). Deeper UI (Flutter-style constraints) and Windows desktop stay deferred. IME waits on real text rendering.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
 

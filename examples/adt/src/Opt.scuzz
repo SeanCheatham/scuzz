@@ -3,3 +3,4 @@ package demo.color
 enum Opt:
   case Some(x: Int)
   case None
+

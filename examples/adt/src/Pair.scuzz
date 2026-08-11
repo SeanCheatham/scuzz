@@ -1,0 +1,5 @@
+package demo.color
+
+enum Pair:
+  case Pair(a: Int, b: String)
+

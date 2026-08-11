@@ -145,9 +145,17 @@ def prettyPat(pat: List): String =
 
 def prettyPatAdt(pat: List): String =
   for {
-    bind = nodeStr(pat, 2)
+    binds = nodeExpr(pat, 2)
     base = str3(nodeStr(pat, 0), ".", nodeStr(pat, 1))
-  } yield if (Str.len(bind) == 0) base else str4(base, "(", bind, ")")
+  } yield if (List.isEmpty(binds) == 1) base else str4(base, "(", prettyBindList(binds, ""), ")")
+
+def prettyBindList(binds: List, acc: String): String =
+  if (List.isEmpty(binds) == 1) acc else prettyBindListCont(List.head(binds), List.tail(binds), acc)
+
+def prettyBindListCont(b: String, rest: List, acc: String): String =
+  for {
+    acc2 = if (Str.len(acc) == 0) b else str3(acc, ", ", b)
+  } yield prettyBindList(rest, acc2)
 
 def prettyExprList(xs: List, acc: String): String =
   if (List.isEmpty(xs) == 1) acc else prettyExprListCont(List.head(xs), List.tail(xs), acc)

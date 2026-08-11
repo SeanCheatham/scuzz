@@ -25,6 +25,7 @@ stage_checks() {
   echo "$adt_out"
   echo "$adt_out" | grep -q "adt:red"
   echo "$adt_out" | grep -q "adt:some:42"
+  echo "$adt_out" | grep -q "adt:pair:7:ok"
 
   echo "==> $stage golden tests (counter/todo/nav)"
   "$bin" test examples/counter
