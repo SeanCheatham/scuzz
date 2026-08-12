@@ -80,6 +80,7 @@ SzView *sz_lang_view_list(void) { return sz_view_list(); }
 SzView *sz_lang_view_each(SzSignalList *sig) { return sz_view_each(sig); }
 
 SzView *sz_lang_view_scroll(SzView *child) { return sz_view_scroll(child); }
+SzView *sz_lang_view_expanded(SzView *child) { return sz_view_expanded(child); }
 
 SzView *sz_lang_view_text_field(SzSignalStr *text, SzString *placeholder) {
   return sz_view_text_field(text, placeholder ? sz_string_cstr(placeholder) : "");
@@ -220,15 +221,37 @@ static void script_tap(SzUiSession *session, int n) {
   int count = collect_buttons(session, buttons, 64);
   SzInputEvent tap;
   SzRect fr;
+  float x, y;
+  int w = sz_ui_session_width(session);
+  int h = sz_ui_session_height(session);
   if (n < 0 || n >= count) {
     fprintf(stderr, "scuzz: script tap %d skipped (%d buttons)\n", n, count);
     return;
   }
   fr = sz_view_frame(buttons[n]);
+  x = fr.x + fr.w * 0.5f;
+  y = fr.y + fr.h * 0.5f;
+  /* Clamp into the session viewport so partially-offscreen controls still tap. */
+  if (x < 0.f)
+    x = 0.f;
+  if (y < 0.f)
+    y = 0.f;
+  if (w > 0 && x >= (float)w)
+    x = (float)w - 1.f;
+  if (h > 0 && y >= (float)h)
+    y = (float)h - 1.f;
+  if (x < fr.x)
+    x = fr.x + 1.f;
+  if (y < fr.y)
+    y = fr.y + 1.f;
+  if (x >= fr.x + fr.w)
+    x = fr.x + fr.w - 1.f;
+  if (y >= fr.y + fr.h)
+    y = fr.y + fr.h - 1.f;
   memset(&tap, 0, sizeof(tap));
   tap.kind = SZ_INPUT_TAP;
-  tap.x = fr.x + fr.w * 0.5f;
-  tap.y = fr.y + fr.h * 0.5f;
+  tap.x = x;
+  tap.y = y;
   if (!sz_ui_inject_sync(session, &tap))
     sz_panic("Ui.run: script tap inject failed");
 }

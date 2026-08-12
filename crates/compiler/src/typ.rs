@@ -1380,6 +1380,10 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Opaque("View".into()))
         }
+        "View.expanded" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::Opaque("View".into()))
+        }
         "View.textField" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[1], &Type::String)?;

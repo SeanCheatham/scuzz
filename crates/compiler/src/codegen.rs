@@ -47,7 +47,11 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_io_attempt(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_race(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_both(ptr, ptr)").unwrap();
-    writeln!(out, "declare {{ i32, ptr, ptr }} @sz_io_unsafe_run(ptr)").unwrap();
+    writeln!(
+        out,
+        "declare void @sz_io_unsafe_run(ptr sret({{ i32, ptr, ptr }}), ptr)"
+    )
+    .unwrap();
     writeln!(out, "declare ptr @sz_adt_new(i32, ptr)").unwrap();
     writeln!(out, "declare i32 @sz_adt_tag(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_adt_payload(ptr)").unwrap();
@@ -107,6 +111,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_list()").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_each(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_scroll(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_expanded(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_text_field(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_icon(i64, i64)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_image(i64, i64, i64, ptr)").unwrap();
@@ -1407,7 +1412,7 @@ fn emit_lambda(
     if body_emitted.kind == Kind::Io {
         writeln!(
             ctx.conts,
-            "  %t{id}_ur = call {{ i32, ptr, ptr }} @sz_io_unsafe_run(ptr {})",
+            "  %t{id}_urs = alloca {{ i32, ptr, ptr }}\n  call void @sz_io_unsafe_run(ptr sret({{ i32, ptr, ptr }}) %t{id}_urs, ptr {})",
             body_emitted.value
         )
         .unwrap();
@@ -1473,8 +1478,13 @@ fn emit_map_lambda(
     if body_emitted.kind == Kind::Io {
         writeln!(
             ctx.conts,
-            "  %m{id}_ur = call {{ i32, ptr, ptr }} @sz_io_unsafe_run(ptr {})",
+            "  %m{id}_urs = alloca {{ i32, ptr, ptr }}\n  call void @sz_io_unsafe_run(ptr sret({{ i32, ptr, ptr }}) %m{id}_urs, ptr {})",
             body_emitted.value
+        )
+        .unwrap();
+        writeln!(
+            ctx.conts,
+            "  %m{id}_ur = load {{ i32, ptr, ptr }}, ptr %m{id}_urs"
         )
         .unwrap();
         writeln!(
@@ -2283,6 +2293,15 @@ fn emit_call(
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @sz_lang_view_scroll(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "View.expanded" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_view_expanded(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();

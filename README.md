@@ -109,7 +109,7 @@ cargo run -p scuzz -- run --headless examples/live
 | `examples/counter` | `Signal`/`View`/`Ui.run` + path dep + goldens |
 | `examples/nav` | Lambda taps + `showWhen` + stay-open `Ui.run` + goldens |
 | `examples/live` | Stay-open Window (`Ui.run`; q/Esc) |
-| `examples/todo` | Todo — `List` / `Signal.list` / lambda Add·Save + goldens |
+| `examples/todo` | Todo — `Signal.list` / `View.expanded` scroll / Add·Save + goldens |
 | `examples/concurrency` | `Ref` / `Queue` / `Deferred` + `IO.race` / `IO.both` |
 | `examples/adt` | package / enum / match |
 | `examples/modules` | stem modules, `private def`, `import`, enum-per-module |

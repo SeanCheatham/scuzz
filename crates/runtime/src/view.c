@@ -97,7 +97,8 @@ void sz_view_add_child(SzView *parent, SzView *child) {
   if (!parent || !child)
     return;
   if (parent->kind != SZ_VIEW_COLUMN && parent->kind != SZ_VIEW_ROW &&
-      parent->kind != SZ_VIEW_LIST && parent->kind != SZ_VIEW_SCROLL)
+      parent->kind != SZ_VIEW_LIST && parent->kind != SZ_VIEW_SCROLL &&
+      parent->kind != SZ_VIEW_EXPANDED)
     sz_panic("sz_view_add_child: parent cannot have children");
   if (parent->child_count >= parent->child_cap) {
     int ncap = parent->child_cap ? parent->child_cap * 2 : 4;
@@ -266,6 +267,14 @@ SzView *sz_view_scroll(SzView *child) {
   return v;
 }
 
+SzView *sz_view_expanded(SzView *child) {
+  SzView *v = view_new(SZ_VIEW_EXPANDED);
+  /* Transparent wrapper: no a11y role; children still dump. */
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
 SzView *sz_view_image(int w, int h, uint32_t argb, const char *caption) {
   SzView *v = view_new(SZ_VIEW_IMAGE);
   v->img_w = w > 0 ? w : 32;
@@ -326,7 +335,8 @@ void sz_view_clear_children(SzView *parent) {
   if (!parent)
     return;
   if (parent->kind != SZ_VIEW_COLUMN && parent->kind != SZ_VIEW_ROW &&
-      parent->kind != SZ_VIEW_LIST && parent->kind != SZ_VIEW_SCROLL)
+      parent->kind != SZ_VIEW_LIST && parent->kind != SZ_VIEW_SCROLL &&
+      parent->kind != SZ_VIEW_EXPANDED)
     sz_panic("sz_view_clear_children: parent cannot have children");
   for (i = 0; i < parent->child_count; i++) {
     parent->children[i]->parent = NULL;
@@ -408,10 +418,62 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
     float inner_w = max_w - theme->pad * 2.f;
     float h = theme->pad;
     int shown = 0;
+    int n_flex = 0;
+    float fixed_h = 0.f;
+    float flex_h = 0.f;
+    float gaps = 0.f;
     if (v->kind == SZ_VIEW_LIST)
       sync_each(v);
     if (inner_w < 0)
       inner_w = 0;
+    if (v->kind == SZ_VIEW_COLUMN) {
+      int col_shown = 0;
+      for (i = 0; i < v->child_count; i++) {
+        if (!view_is_shown(v->children[i]))
+          continue;
+        col_shown++;
+        if (v->children[i]->kind == SZ_VIEW_EXPANDED)
+          n_flex++;
+      }
+      if (n_flex > 0 && max_h > 0) {
+        /* Measure non-flex children for leftover height. */
+        for (i = 0; i < v->child_count; i++) {
+          SzView *ch = v->children[i];
+          if (!view_is_shown(ch) || ch->kind == SZ_VIEW_EXPANDED)
+            continue;
+          layout_node(ch, x + theme->pad, y + theme->pad, inner_w, max_h, theme);
+          fixed_h += ch->frame.h;
+        }
+        if (col_shown > 1)
+          gaps = theme->gap * (float)(col_shown - 1);
+        /* Not enough room for flex: fall back to intrinsic column layout. */
+        if (fixed_h + gaps + theme->pad * 2.f > max_h + 0.5f)
+          n_flex = 0;
+        else {
+        flex_h = max_h - theme->pad * 2.f - fixed_h - gaps;
+        if (flex_h < 0.f)
+          flex_h = 0.f;
+        if (n_flex > 1)
+          flex_h = flex_h / (float)n_flex;
+        cy = y + theme->pad;
+        for (i = 0; i < v->child_count; i++) {
+          SzView *ch = v->children[i];
+          if (!view_is_shown(ch)) {
+            layout_node(ch, x + theme->pad, cy, inner_w, max_h, theme);
+            continue;
+          }
+          if (ch->kind == SZ_VIEW_EXPANDED)
+            layout_node(ch, x + theme->pad, cy, inner_w, flex_h, theme);
+          else
+            layout_node(ch, x + theme->pad, cy, inner_w, max_h, theme);
+          cy += ch->frame.h + theme->gap;
+        }
+        v->frame.w = max_w;
+        v->frame.h = max_h;
+        break;
+        }
+      }
+    }
     for (i = 0; i < v->child_count; i++) {
       if (!view_is_shown(v->children[i])) {
         layout_node(v->children[i], x + theme->pad, cy, inner_w, max_h, theme);
@@ -429,6 +491,23 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
     v->frame.h = h;
     if (max_h > 0 && v->frame.h > max_h && v->kind == SZ_VIEW_LIST)
       v->frame.h = max_h;
+    break;
+  }
+  case SZ_VIEW_EXPANDED: {
+    float old_pref = 0.f;
+    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
+    v->frame.w = max_w;
+    v->frame.h = max_h > 0 ? max_h : 0.f;
+    if (ch) {
+      /* Scroll defaults to pref_h=64; inside Expanded, fill the flex slot. */
+      if (ch->kind == SZ_VIEW_SCROLL) {
+        old_pref = ch->pref_h;
+        ch->pref_h = 0.f;
+      }
+      layout_node(ch, x, y, max_w, v->frame.h, theme);
+      if (ch->kind == SZ_VIEW_SCROLL)
+        ch->pref_h = old_pref;
+    }
     break;
   }
   case SZ_VIEW_ROW: {
@@ -463,7 +542,13 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
   }
   case SZ_VIEW_SCROLL: {
     float inner_w = max_w - theme->pad * 2.f;
-    float vh = v->pref_h > 0 ? v->pref_h : (max_h > 0 ? max_h : 100.f);
+    float vh;
+    if (v->pref_h > 0)
+      vh = v->pref_h;
+    else if (max_h > 0)
+      vh = max_h;
+    else
+      vh = 0.f; /* Expanded flex slot may be empty; do not invent height */
     if (max_h > 0 && vh > max_h)
       vh = max_h;
     v->frame.w = max_w;
@@ -604,6 +689,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_ROW:
   case SZ_VIEW_LIST:
   case SZ_VIEW_SCROLL:
+  case SZ_VIEW_EXPANDED:
     if (v->kind == SZ_VIEW_LIST || v->kind == SZ_VIEW_SCROLL)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     for (i = 0; i < v->child_count; i++)

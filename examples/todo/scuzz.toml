@@ -8,6 +8,6 @@ main = "Main"
 
 [ui]
 default_runtime = "headless"
-headless_size = [240, 160]
+headless_size = [240, 320]
 headless_scale = 1.0
 tap_button = 1

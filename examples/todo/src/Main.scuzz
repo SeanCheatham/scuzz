@@ -30,12 +30,13 @@ def setAt(xs: List, i: Int, v: String): List =
         } yield Signal.setList(items, ys)
       ))
       _ = View.addChild(root, row)
-      _ = View.addChild(root, View.scroll(list))
+      _ = View.addChild(root, View.expanded(View.scroll(list)))
       _ = View.addChild(root, View.button("Save", _ =>
         for {
           xs = Signal.getList(items)
           body = if (List.isEmpty(xs) == 1) "" else Str.concat(List.join(xs, "\n"), "\n")
-        } yield Fs.write(path, body)
+          _ <- Fs.write(path, body)
+        } yield ()
       ))
       _ = View.addChild(root, View.button("Clear", _ =>
         Signal.setList(items, [])

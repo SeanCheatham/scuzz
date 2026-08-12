@@ -265,6 +265,34 @@ static void test_widgets(void) {
   sz_signal_str_free(draft);
 }
 
+static void test_expanded_column(void) {
+  SzView *col, *title, *scroll, *list, *btn, *exp;
+  const SzTheme *theme = sz_theme_default();
+  float max_h = 280.f;
+  float leftover;
+
+  col = sz_view_column();
+  title = sz_view_text("Title");
+  list = sz_view_list();
+  sz_view_add_child(list, sz_view_text("a"));
+  scroll = sz_view_scroll(list);
+  exp = sz_view_expanded(scroll);
+  btn = sz_view_button("Go", NULL, NULL);
+  sz_view_add_child(col, title);
+  sz_view_add_child(col, exp);
+  sz_view_add_child(col, btn);
+  sz_view_layout(col, 200.f, max_h, theme);
+  assert(sz_view_kind(exp) == SZ_VIEW_EXPANDED);
+  assert(sz_view_frame(col).h == max_h);
+  leftover = max_h - theme->pad * 2.f - sz_view_frame(title).h -
+             sz_view_frame(btn).h - theme->gap * 2.f;
+  assert(sz_view_frame(exp).h > 64.f);
+  assert(sz_view_frame(exp).h >= leftover - 0.5f);
+  assert(sz_view_frame(exp).h <= leftover + 0.5f);
+  assert(sz_view_frame(scroll).h >= leftover - 0.5f);
+  sz_view_free(col);
+}
+
 static void test_mobile_pointer_scroll_lifecycle(void) {
   SzUiConfig cfg;
   SzSignalStr *draft;
@@ -621,6 +649,7 @@ int main(void) {
   test_signals_layout_hit();
   test_button_set_and_show_when();
   test_widgets();
+  test_expanded_column();
   test_mobile_pointer_scroll_lifecycle();
   test_a11y_and_anim();
   test_clear_and_set_texts();
