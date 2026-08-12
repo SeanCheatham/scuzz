@@ -1368,10 +1368,6 @@ fn infer_call(
             // Nullary or children: `View.column(a, b, …)` adds each child.
             Ok(Type::Opaque("View".into()))
         }
-        "View.list" => {
-            expect_arity(callee, &arg_tys, 0)?;
-            Ok(Type::Opaque("View".into()))
-        }
         "View.each" => {
             expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Opaque("View".into()))
@@ -1409,11 +1405,6 @@ fn infer_call(
         }
         "View.addChild" => {
             expect_arity(callee, &arg_tys, 2)?;
-            Ok(Type::Unit)
-        }
-        "View.addTexts" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            expect_ty(&arg_tys[1], &Type::List)?;
             Ok(Type::Unit)
         }
         "View.showWhen" => {

@@ -109,7 +109,6 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_column()").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_row()").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_stack()").unwrap();
-    writeln!(out, "declare ptr @sz_lang_view_list()").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_each(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_scroll(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_expanded(ptr)").unwrap();
@@ -118,7 +117,6 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_icon(i64, i64)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_image(i64, i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_add_child(ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @sz_lang_view_add_texts(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_show_when(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_ui_run_view(ptr)").unwrap();
     writeln!(out, "declare i64 @sz_law_signal_int(i64)").unwrap();
@@ -2279,10 +2277,6 @@ fn emit_call(
         ),
         "View.row" => emit_view_box("sz_lang_view_row", &mut code, &emitted_args, prefix),
         "View.stack" => emit_view_box("sz_lang_view_stack", &mut code, &emitted_args, prefix),
-        "View.list" => {
-            writeln!(code, "  %{prefix}_v = call ptr @sz_lang_view_list()").unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
         "View.each" => {
             writeln!(
                 code,
@@ -2353,15 +2347,6 @@ fn emit_call(
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @sz_lang_view_add_child(ptr {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.addTexts" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_add_texts(ptr {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();

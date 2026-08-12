@@ -513,10 +513,9 @@ static void test_a11y_and_anim(void) {
   sz_view_free(col);
 }
 
-static void test_clear_and_set_texts(void) {
+static void test_clear_children(void) {
   SzView *list;
   SzString *dump;
-  SzList *lines;
 
   list = sz_view_list();
   sz_view_add_child(list, sz_view_text("old"));
@@ -527,16 +526,15 @@ static void test_clear_and_set_texts(void) {
   dump = sz_view_a11y_dump(list);
   assert(strstr(sz_string_cstr(dump), "text:old") == NULL);
 
-  lines = sz_list_cons(sz_string_from_cstr("milk"),
-                       sz_list_cons(sz_string_from_cstr("eggs"), sz_list_nil()));
-  sz_lang_view_set_texts(list, lines);
+  sz_view_add_child(list, sz_view_text("milk"));
+  sz_view_add_child(list, sz_view_text("eggs"));
   dump = sz_view_a11y_dump(list);
-  assert(strstr(sz_string_cstr(dump), "text:- milk") != NULL);
-  assert(strstr(sz_string_cstr(dump), "text:- eggs") != NULL);
+  assert(strstr(sz_string_cstr(dump), "text:milk") != NULL);
+  assert(strstr(sz_string_cstr(dump), "text:eggs") != NULL);
 
-  sz_lang_view_clear_children(list);
+  sz_view_clear_children(list);
   dump = sz_view_a11y_dump(list);
-  assert(strstr(sz_string_cstr(dump), "text:- milk") == NULL);
+  assert(strstr(sz_string_cstr(dump), "text:milk") == NULL);
   sz_view_free(list);
 }
 
@@ -727,7 +725,7 @@ int main(void) {
   test_stack();
   test_mobile_pointer_scroll_lifecycle();
   test_a11y_and_anim();
-  test_clear_and_set_texts();
+  test_clear_children();
   test_view_each();
   test_text_field_edit();
   test_alloc_pump_flat();

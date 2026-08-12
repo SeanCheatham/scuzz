@@ -84,6 +84,13 @@ static int count_shown_children(const SzView *v) {
   return n;
 }
 
+static int view_accepts_children(SzViewKind kind) {
+  return kind == SZ_VIEW_COLUMN || kind == SZ_VIEW_ROW ||
+         kind == SZ_VIEW_LIST || kind == SZ_VIEW_SCROLL ||
+         kind == SZ_VIEW_EXPANDED || kind == SZ_VIEW_CENTER ||
+         kind == SZ_VIEW_STACK;
+}
+
 SzViewKind sz_view_kind(const SzView *view) {
   return view ? view->kind : (SzViewKind)0;
 }
@@ -96,10 +103,7 @@ SzRect sz_view_frame(const SzView *view) {
 void sz_view_add_child(SzView *parent, SzView *child) {
   if (!parent || !child)
     return;
-  if (parent->kind != SZ_VIEW_COLUMN && parent->kind != SZ_VIEW_ROW &&
-      parent->kind != SZ_VIEW_LIST && parent->kind != SZ_VIEW_SCROLL &&
-      parent->kind != SZ_VIEW_EXPANDED && parent->kind != SZ_VIEW_CENTER &&
-      parent->kind != SZ_VIEW_STACK)
+  if (!view_accepts_children(parent->kind))
     sz_panic("sz_view_add_child: parent cannot have children");
   if (parent->child_count >= parent->child_cap) {
     int ncap = parent->child_cap ? parent->child_cap * 2 : 4;
@@ -160,14 +164,6 @@ SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder) {
   v->a11y_role = SZ_A11Y_TEXT_FIELD;
   v->a11y_label = sz_strdup(placeholder ? placeholder : "text field");
   return v;
-}
-
-void sz_view_set_a11y(SzView *view, SzA11yRole role, const char *label) {
-  if (!view)
-    return;
-  view->a11y_role = role;
-  sz_free(view->a11y_label);
-  view->a11y_label = sz_strdup(label ? label : "");
 }
 
 SzA11yRole sz_view_a11y_role(const SzView *view) {
@@ -271,7 +267,6 @@ SzView *sz_view_scroll(SzView *child) {
 
 SzView *sz_view_expanded(SzView *child) {
   SzView *v = view_new(SZ_VIEW_EXPANDED);
-  /* Transparent wrapper: no a11y role; children still dump. */
   if (child)
     sz_view_add_child(v, child);
   return v;
@@ -279,7 +274,6 @@ SzView *sz_view_expanded(SzView *child) {
 
 SzView *sz_view_center(SzView *child) {
   SzView *v = view_new(SZ_VIEW_CENTER);
-  /* Transparent wrapper: no a11y role; children still dump. */
   if (child)
     sz_view_add_child(v, child);
   return v;
@@ -312,7 +306,7 @@ SzView *sz_view_label(const char *text, uint32_t bg_argb, uint32_t fg_argb) {
   return v;
 }
 
-void sz_view_set_show_when(SzView *view, SzSignalInt *sig, int64_t value) {
+static void sz_view_set_show_when(SzView *view, SzSignalInt *sig, int64_t value) {
   if (!view)
     return;
   view->show_when_sig = sig;
@@ -344,10 +338,7 @@ void sz_view_clear_children(SzView *parent) {
   int i;
   if (!parent)
     return;
-  if (parent->kind != SZ_VIEW_COLUMN && parent->kind != SZ_VIEW_ROW &&
-      parent->kind != SZ_VIEW_LIST && parent->kind != SZ_VIEW_SCROLL &&
-      parent->kind != SZ_VIEW_EXPANDED && parent->kind != SZ_VIEW_CENTER &&
-      parent->kind != SZ_VIEW_STACK)
+  if (!view_accepts_children(parent->kind))
     sz_panic("sz_view_clear_children: parent cannot have children");
   for (i = 0; i < parent->child_count; i++) {
     parent->children[i]->parent = NULL;
@@ -461,27 +452,27 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
         if (fixed_h + gaps + theme->pad * 2.f > max_h + 0.5f)
           n_flex = 0;
         else {
-        flex_h = max_h - theme->pad * 2.f - fixed_h - gaps;
-        if (flex_h < 0.f)
-          flex_h = 0.f;
-        if (n_flex > 1)
-          flex_h = flex_h / (float)n_flex;
-        cy = y + theme->pad;
-        for (i = 0; i < v->child_count; i++) {
-          SzView *ch = v->children[i];
-          if (!view_is_shown(ch)) {
-            layout_node(ch, x + theme->pad, cy, inner_w, max_h, theme);
-            continue;
+          flex_h = max_h - theme->pad * 2.f - fixed_h - gaps;
+          if (flex_h < 0.f)
+            flex_h = 0.f;
+          if (n_flex > 1)
+            flex_h = flex_h / (float)n_flex;
+          cy = y + theme->pad;
+          for (i = 0; i < v->child_count; i++) {
+            SzView *ch = v->children[i];
+            if (!view_is_shown(ch)) {
+              layout_node(ch, x + theme->pad, cy, inner_w, max_h, theme);
+              continue;
+            }
+            if (ch->kind == SZ_VIEW_EXPANDED)
+              layout_node(ch, x + theme->pad, cy, inner_w, flex_h, theme);
+            else
+              layout_node(ch, x + theme->pad, cy, inner_w, max_h, theme);
+            cy += ch->frame.h + theme->gap;
           }
-          if (ch->kind == SZ_VIEW_EXPANDED)
-            layout_node(ch, x + theme->pad, cy, inner_w, flex_h, theme);
-          else
-            layout_node(ch, x + theme->pad, cy, inner_w, max_h, theme);
-          cy += ch->frame.h + theme->gap;
-        }
-        v->frame.w = max_w;
-        v->frame.h = max_h;
-        break;
+          v->frame.w = max_w;
+          v->frame.h = max_h;
+          break;
         }
       }
     }
@@ -711,11 +702,6 @@ static SzView *hit_node(SzView *v, float x, float y) {
     if (hit)
       return hit;
   }
-  if (v->kind == SZ_VIEW_SCROLL && v->scroll_child) {
-    hit = hit_node(v->scroll_child, x, y);
-    if (hit)
-      return hit;
-  }
   return v->interactive ? v : NULL;
 }
 
@@ -845,8 +831,6 @@ static void clear_focus(SzView *v) {
   v->focused = 0;
   for (i = 0; i < v->child_count; i++)
     clear_focus(v->children[i]);
-  if (v->kind == SZ_VIEW_SCROLL && v->scroll_child)
-    clear_focus(v->scroll_child);
 }
 
 float sz_view_scroll_y(const SzView *scroll) {
@@ -873,11 +857,6 @@ static SzView *scroll_at_node(SzView *v, float x, float y) {
     if (found)
       return found;
   }
-  if (v->kind == SZ_VIEW_SCROLL && v->scroll_child) {
-    found = scroll_at_node(v->scroll_child, x, y);
-    if (found)
-      return found;
-  }
   return v->kind == SZ_VIEW_SCROLL ? v : NULL;
 }
 
@@ -895,8 +874,6 @@ int sz_view_has_focused_text_field(SzView *root) {
     if (sz_view_has_focused_text_field(root->children[i]))
       return 1;
   }
-  if (root->kind == SZ_VIEW_SCROLL && root->scroll_child)
-    return sz_view_has_focused_text_field(root->scroll_child);
   return 0;
 }
 

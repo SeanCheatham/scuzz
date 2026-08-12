@@ -77,8 +77,6 @@ SzView *sz_lang_view_row(void) { return sz_view_row(); }
 
 SzView *sz_lang_view_stack(void) { return sz_view_stack(); }
 
-SzView *sz_lang_view_list(void) { return sz_view_list(); }
-
 SzView *sz_lang_view_each(SzSignalList *sig) { return sz_view_each(sig); }
 
 SzView *sz_lang_view_scroll(SzView *child) { return sz_view_scroll(child); }
@@ -101,26 +99,6 @@ SzView *sz_lang_view_image(int64_t w, int64_t h, int64_t argb, SzString *caption
 void *sz_lang_view_add_child(SzView *parent, SzView *child) {
   sz_view_add_child(parent, child);
   return NULL;
-}
-
-void *sz_lang_view_add_texts(SzView *parent, SzList *lines) {
-  for (SzList *p = lines; p; p = p->tail) {
-    SzString *s = (SzString *)p->head;
-    char line[256];
-    snprintf(line, sizeof line, "- %s", s ? sz_string_cstr(s) : "");
-    sz_view_add_child(parent, sz_view_text(line));
-  }
-  return NULL;
-}
-
-void *sz_lang_view_clear_children(SzView *parent) {
-  sz_view_clear_children(parent);
-  return NULL;
-}
-
-void *sz_lang_view_set_texts(SzView *parent, SzList *lines) {
-  sz_view_clear_children(parent);
-  return sz_lang_view_add_texts(parent, lines);
 }
 
 SzView *sz_lang_view_show_when(SzSignalInt *sig, int64_t value, SzView *child) {

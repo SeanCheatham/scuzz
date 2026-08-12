@@ -123,7 +123,7 @@ cargo run -p scuzz -- run --headless examples/live
 ## Layout
 
 ```
-docs/                     vision, gaps, guide, plans, compatibility, scuzz.toml schema
+docs/                     vision, gaps, guide, compatibility, scuzz.toml schema
 crates/compiler/          Stage-0 parser / typer / LLVM codegen
 crates/cli/               Stage-0 scuzz tool (bootstrap)
 crates/runtime/           C runtime (IO kit, impurity, View/Ui)

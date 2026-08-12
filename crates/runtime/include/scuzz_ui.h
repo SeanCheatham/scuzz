@@ -76,7 +76,7 @@ typedef struct SzTheme {
   float gap;
   float control_h;
   float font_px; /* bitmap font cell size (default 8px) */
-  float radius;  /* corner radius (0 = sharp; preserves current goldens) */
+  float radius;  /* 0 = sharp */
 } SzTheme;
 
 const SzTheme *sz_theme_default(void);
@@ -155,7 +155,7 @@ SzView *sz_view_list(void);
 /* Reactive list: children rebuilt from Signal.list at layout (`- item` texts). */
 SzView *sz_view_each(SzSignalList *sig);
 SzView *sz_view_scroll(SzView *child);
-/* Column-only flex: child gets leftover height after non-Expanded siblings. */
+/* Column leftover height or Row leftover width after non-Expanded siblings. */
 SzView *sz_view_expanded(SzView *child);
 SzView *sz_view_center(SzView *child);
 SzView *sz_view_image(int w, int h, uint32_t argb, const char *caption);
@@ -163,7 +163,6 @@ SzView *sz_view_icon(char glyph, uint32_t argb);
 /* Full-bleed bg + bar that toggles colors on tap (C unit-test helper). */
 SzView *sz_view_label(const char *text, uint32_t bg_argb, uint32_t fg_argb);
 /* Visible iff Signal.get(sig) == value; returns child. */
-void sz_view_set_show_when(SzView *view, SzSignalInt *sig, int64_t value);
 SzView *sz_view_show_when(SzSignalInt *sig, int64_t value, SzView *child);
 
 void sz_view_add_child(SzView *parent, SzView *child);
@@ -196,7 +195,6 @@ typedef enum SzA11yRole {
   SZ_A11Y_SCROLL = 6
 } SzA11yRole;
 
-void sz_view_set_a11y(SzView *view, SzA11yRole role, const char *label);
 SzA11yRole sz_view_a11y_role(const SzView *view);
 const char *sz_view_a11y_label(const SzView *view);
 /* Depth-first "role:label" lines joined by newlines (caller frees SzString). */
@@ -253,7 +251,6 @@ SzView *sz_lang_view_button(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_column(void);
 SzView *sz_lang_view_row(void);
 SzView *sz_lang_view_stack(void);
-SzView *sz_lang_view_list(void);
 SzView *sz_lang_view_each(SzSignalList *sig);
 SzView *sz_lang_view_scroll(SzView *child);
 SzView *sz_lang_view_expanded(SzView *child);
@@ -262,10 +259,6 @@ SzView *sz_lang_view_text_field(SzSignalStr *text, SzString *placeholder);
 SzView *sz_lang_view_icon(int64_t glyph, int64_t argb);
 SzView *sz_lang_view_image(int64_t w, int64_t h, int64_t argb, SzString *caption);
 void *sz_lang_view_add_child(SzView *parent, SzView *child);
-void *sz_lang_view_add_texts(SzView *parent, SzList *lines);
-/* C/test helpers; app code uses View.each instead. */
-void *sz_lang_view_clear_children(SzView *parent);
-void *sz_lang_view_set_texts(SzView *parent, SzList *lines);
 SzView *sz_lang_view_show_when(SzSignalInt *sig, int64_t value, SzView *child);
 
 /* Derived Signal.str from Signal.int (recomputed on get / dump). */
