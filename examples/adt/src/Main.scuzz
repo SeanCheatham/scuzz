@@ -30,7 +30,7 @@ def describe(o: Opt): String =
   case Opt.None => IO.println("adt:none")
 }
     _ <- p match {
-  case Pair.Pair(x, y) => IO.println(Str.concat(Str.concat("adt:pair:", Str.fromInt(x)), Str.concat(":", y)))
+  case Pair(x, y) => IO.println(Str.concat(Str.concat("adt:pair:", Str.fromInt(x)), Str.concat(":", y)))
 }
     _ <- flipped match {
   case Color.Red => IO.println("adt:flip:red")

@@ -1,13 +1,16 @@
-private def hidden(): String = "b"
-
-def tag(): String = hidden()
-
 enum Msg:
   case Hi
   case Bye
+
+private def hidden(): String =
+  "b"
+
+def tag(): String =
+  hidden()
 
 def greet(): String =
   Msg.Hi match {
     case Msg.Hi => "hello-b"
     case Msg.Bye => "bye-b"
   }
+
