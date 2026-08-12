@@ -822,7 +822,7 @@ def callSigMap(argTys: List): TyRes =
   } yield if (tyIsOk(a) == 0) a else tyOk(tyMkOpaque("SignalStr"))
 
 def callView(callee: String, argTys: List): TyRes =
-  if (streq(callee, "View.text") == 1) callViewText(argTys) else if (streq(callee, "View.bindText") == 1) callViewBindText(argTys) else if (streq(callee, "View.button") == 1) callViewButton(argTys) else if (streq(callee, "View.column") == 1) tyOk(tyMkOpaque("View")) else if (streq(callee, "View.row") == 1) tyOk(tyMkOpaque("View")) else if (streq(callee, "View.stack") == 1) tyOk(tyMkOpaque("View")) else if (streq(callee, "View.each") == 1) callViewEach(argTys) else if (streq(callee, "View.scroll") == 1) callViewScroll(argTys) else if (streq(callee, "View.expanded") == 1) callViewExpanded(argTys) else if (streq(callee, "View.center") == 1) callViewCenter(argTys) else if (streq(callee, "View.align") == 1) callViewAlign(argTys) else if (streq(callee, "View.textField") == 1) callViewTextField(argTys) else if (streq(callee, "View.icon") == 1) callViewIcon(argTys) else if (streq(callee, "View.image") == 1) callViewImage(argTys) else if (streq(callee, "View.addChild") == 1) callViewAddChild(argTys) else if (streq(callee, "View.showWhen") == 1) callViewShowWhen(argTys) else tyErr(str3("unknown function ", callee, ""))
+  if (streq(callee, "View.text") == 1) callViewText(argTys) else if (streq(callee, "View.bindText") == 1) callViewBindText(argTys) else if (streq(callee, "View.button") == 1) callViewButton(argTys) else if (streq(callee, "View.column") == 1) tyOk(tyMkOpaque("View")) else if (streq(callee, "View.row") == 1) tyOk(tyMkOpaque("View")) else if (streq(callee, "View.stack") == 1) tyOk(tyMkOpaque("View")) else if (streq(callee, "View.each") == 1) callViewEach(argTys) else if (streq(callee, "View.scroll") == 1) callViewScroll(argTys) else if (streq(callee, "View.expanded") == 1) callViewExpanded(argTys) else if (streq(callee, "View.center") == 1) callViewCenter(argTys) else if (streq(callee, "View.align") == 1) callViewAlign(argTys) else if (streq(callee, "View.positioned") == 1) callViewPositioned(argTys) else if (streq(callee, "View.textField") == 1) callViewTextField(argTys) else if (streq(callee, "View.icon") == 1) callViewIcon(argTys) else if (streq(callee, "View.image") == 1) callViewImage(argTys) else if (streq(callee, "View.addChild") == 1) callViewAddChild(argTys) else if (streq(callee, "View.showWhen") == 1) callViewShowWhen(argTys) else tyErr(str3("unknown function ", callee, ""))
 
 def callViewText(argTys: List): TyRes =
   for {
@@ -862,6 +862,11 @@ def callViewCenter(argTys: List): TyRes =
 def callViewAlign(argTys: List): TyRes =
   for {
     a = expectArity("View.align", 3, List.len(argTys))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.Int)) == 0) expectTy(argTyAt(argTys, 0), Type.Int) else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.Int)) == 0) expectTy(argTyAt(argTys, 1), Type.Int) else tyOk(tyMkOpaque("View"))
+
+def callViewPositioned(argTys: List): TyRes =
+  for {
+    a = expectArity("View.positioned", 3, List.len(argTys))
   } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.Int)) == 0) expectTy(argTyAt(argTys, 0), Type.Int) else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.Int)) == 0) expectTy(argTyAt(argTys, 1), Type.Int) else tyOk(tyMkOpaque("View"))
 
 def callViewTextField(argTys: List): TyRes =

@@ -10,7 +10,7 @@
           View.button("+1", _ => Signal.set(count, Signal.get(count) + 1)),
           View.stack(
             View.image(24, 24, Color.rgb(61, 126, 166), ""),
-            View.icon(43, Theme.accent())
+            View.positioned(4, 4, View.icon(43, Theme.accent()))
           )
         )
       )

@@ -395,6 +395,26 @@ static void test_stack(void) {
   sz_view_free(stack);
 }
 
+static void test_positioned(void) {
+  SzView *stack, *bot, *badge, *pos;
+  const SzTheme *theme = sz_theme_default();
+  SzRect bf, pf;
+
+  stack = sz_view_stack();
+  bot = sz_view_image(40, 40, 0xFF112233u, "");
+  badge = sz_view_icon('+', 0xFFFFFFFFu);
+  pos = sz_view_positioned(10, 6, badge);
+  sz_view_add_child(stack, bot);
+  sz_view_add_child(stack, pos);
+  sz_view_layout(stack, 200.f, 200.f, theme);
+  assert(sz_view_kind(pos) == SZ_VIEW_POSITIONED);
+  bf = sz_view_frame(bot);
+  pf = sz_view_frame(badge);
+  assert(fabsf(pf.x - (bf.x + 10.f)) < 0.5f);
+  assert(fabsf(pf.y - (bf.y + 6.f)) < 0.5f);
+  sz_view_free(stack);
+}
+
 static void test_mobile_pointer_scroll_lifecycle(void) {
   SzUiConfig cfg;
   SzSignalStr *draft;
@@ -754,6 +774,7 @@ int main(void) {
   test_center();
   test_align();
   test_stack();
+  test_positioned();
   test_mobile_pointer_scroll_lifecycle();
   test_a11y_and_anim();
   test_clear_children();

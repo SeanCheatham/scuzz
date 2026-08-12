@@ -60,6 +60,9 @@ struct SzView {
   /* View.align: 0=start, 1=center, 2=end on each axis. */
   int align_x;
   int align_y;
+  /* View.positioned: offset from Stack origin. */
+  int pos_x;
+  int pos_y;
 };
 
 static SzView *view_new(SzViewKind kind) {
@@ -92,7 +95,8 @@ static int view_accepts_children(SzViewKind kind) {
   return kind == SZ_VIEW_COLUMN || kind == SZ_VIEW_ROW ||
          kind == SZ_VIEW_LIST || kind == SZ_VIEW_SCROLL ||
          kind == SZ_VIEW_EXPANDED || kind == SZ_VIEW_CENTER ||
-         kind == SZ_VIEW_ALIGN || kind == SZ_VIEW_STACK;
+         kind == SZ_VIEW_ALIGN || kind == SZ_VIEW_STACK ||
+         kind == SZ_VIEW_POSITIONED;
 }
 
 SzViewKind sz_view_kind(const SzView *view) {
@@ -295,6 +299,15 @@ SzView *sz_view_align(int ax, int ay, SzView *child) {
   SzView *v = view_new(SZ_VIEW_ALIGN);
   v->align_x = clamp_align(ax);
   v->align_y = clamp_align(ay);
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
+SzView *sz_view_positioned(int x, int y, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_POSITIONED);
+  v->pos_x = x > 0 ? x : 0;
+  v->pos_y = y > 0 ? y : 0;
   if (child)
     sz_view_add_child(v, child);
   return v;
@@ -693,6 +706,24 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
       v->frame.h = max_h;
     break;
   }
+  case SZ_VIEW_POSITIONED: {
+    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
+    float px = (float)v->pos_x;
+    float py = (float)v->pos_y;
+    float cw = 0.f;
+    float chh = 0.f;
+    float child_max_w = max_w > px ? max_w - px : 0.f;
+    float child_max_h = max_h > py ? max_h - py : 0.f;
+    if (ch)
+      layout_node(ch, x + px, y + py, child_max_w, child_max_h, theme);
+    if (ch) {
+      cw = ch->frame.w;
+      chh = ch->frame.h;
+    }
+    v->frame.w = px + cw;
+    v->frame.h = py + chh;
+    break;
+  }
   case SZ_VIEW_SCROLL: {
     float inner_w = max_w - theme->pad * 2.f;
     float vh;
@@ -841,6 +872,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_CENTER:
   case SZ_VIEW_ALIGN:
   case SZ_VIEW_STACK:
+  case SZ_VIEW_POSITIONED:
     if (v->kind == SZ_VIEW_LIST || v->kind == SZ_VIEW_SCROLL)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     for (i = 0; i < v->child_count; i++)
