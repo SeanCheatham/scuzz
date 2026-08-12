@@ -2,4 +2,4 @@
 
 ## Next
 
-Interruptible cancel mid-`nanosleep` (concurrency residual). Headless/TestRuntime: a racing `sleep` must not block the winner for the full duration. Skip OS threads and supervision trees.
+File-as-module residual: one more kernel generic slice that Stage 0 can emit before `compiler-scuzz/` depends on it — or skip if that is not a small Headless proof. Not OS threads, LSP, or Windows.

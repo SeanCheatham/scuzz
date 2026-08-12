@@ -169,6 +169,17 @@ int main(void) {
   assert(r.ok);
   assert((intptr_t)r.value == 99);
 
+  /* Live: losing sleep must not block the winner for the full duration. */
+  {
+    int64_t t0 = sz_clock_monotonic_ms_sync();
+    int64_t t1;
+    r = sz_io_unsafe_run(
+        sz_io_race(sz_io_sleep_ms(300), sz_io_sleep_ms(1)));
+    t1 = sz_clock_monotonic_ms_sync();
+    assert(r.ok);
+    assert(t1 - t0 < 80);
+  }
+
   /* both */
   r = sz_io_unsafe_run(
       sz_io_both(sz_io_pure((void *)(intptr_t)1), sz_io_pure((void *)(intptr_t)2)));

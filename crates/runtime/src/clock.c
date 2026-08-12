@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "scuzz_rt.h"
 
+#include <errno.h>
 #include <time.h>
 
 /* Live vs fake clock. Fake: virtual ms advanced by sleep / sz_testrt_clock_advance. */
@@ -53,9 +54,14 @@ void sz_clock_sleep_ms(int64_t ms) {
   }
   {
     struct timespec ts;
+    struct timespec rem;
     ts.tv_sec = (time_t)(ms / 1000);
     ts.tv_nsec = (long)((ms % 1000) * 1000000L);
-    nanosleep(&ts, NULL);
+    while (nanosleep(&ts, &rem) < 0) {
+      if (errno != EINTR)
+        return;
+      ts = rem;
+    }
   }
 }
 

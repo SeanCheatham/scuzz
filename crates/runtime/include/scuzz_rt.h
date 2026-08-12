@@ -169,7 +169,9 @@ SzIo *sz_io_deferred_get(SzDeferred *d);
 /* Run to completion on the calling thread.
  * Concurrency is cooperative single-threaded fibers: sleep/Queue/Deferred park;
  * race/both fork left-then-right onto a FIFO ready queue. TestRuntime jumps
- * virtual time to the next wakeup when all fibers are blocked on timers. */
+ * virtual time to the next wakeup when all fibers are blocked on timers.
+ * Live idle sleep is interruptible (EINTR re-checks soonest wake so a cancelled
+ * sleeper cannot hold the run loop). */
 typedef struct SzIoResult {
   int ok; /* 1 success, 0 error */
   void *value;
@@ -289,7 +291,7 @@ SzIo *sz_sys_getenv(SzString *key);
 SzIo *sz_clock_real_time(void);   /* IO[Int] wall epoch ms */
 SzIo *sz_clock_monotonic(void);   /* IO[Int] monotonic ms */
 int64_t sz_clock_monotonic_ms_sync(void); /* sync read for UI pump dt */
-void sz_clock_sleep_ms(int64_t ms); /* used by IO.sleep run loop */
+void sz_clock_sleep_ms(int64_t ms); /* blocking sleep; EINTR restarts remaining */
 
 SzIo *sz_random_next_int(int64_t bound); /* IO[Int] in [0, bound) */
 

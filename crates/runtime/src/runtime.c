@@ -1,6 +1,7 @@
 #define _POSIX_C_SOURCE 200809L
 #include "scuzz_rt.h"
 
+#include <errno.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -962,24 +963,34 @@ static int64_t next_wake_at(Sched *s) {
 }
 
 static int idle_advance(Sched *s) {
-  int64_t now = sz_clock_monotonic_ms_sync();
-  int64_t next = next_wake_at(s);
-  int64_t delta;
-  if (next < 0)
-    return 0;
-  if (next <= now)
-    return wake_sleepers(s, now);
-  delta = next - now;
-  if (sz_testrt_clock_is_fake()) {
-    sz_testrt_clock_advance(delta);
-  } else {
-    struct timespec ts;
-    ts.tv_sec = (time_t)(delta / 1000);
-    ts.tv_nsec = (long)((delta % 1000) * 1000000L);
-    nanosleep(&ts, NULL);
+  for (;;) {
+    int64_t now = sz_clock_monotonic_ms_sync();
+    int64_t next = next_wake_at(s);
+    int64_t delta;
+    if (next < 0)
+      return 0;
+    if (next <= now)
+      return wake_sleepers(s, now);
+    delta = next - now;
+    if (sz_testrt_clock_is_fake()) {
+      sz_testrt_clock_advance(delta);
+      now = sz_clock_monotonic_ms_sync();
+      return wake_sleepers(s, now);
+    }
+    {
+      struct timespec ts;
+      struct timespec rem;
+      ts.tv_sec = (time_t)(delta / 1000);
+      ts.tv_nsec = (long)((delta % 1000) * 1000000L);
+      if (nanosleep(&ts, &rem) < 0 && errno == EINTR) {
+        /* Recompute soonest wake so a cancelled sleeper cannot keep us blocked. */
+        continue;
+      }
+    }
+    now = sz_clock_monotonic_ms_sync();
+    if (wake_sleepers(s, now))
+      return 1;
   }
-  now = sz_clock_monotonic_ms_sync();
-  return wake_sleepers(s, now);
 }
 
 static SzIoResult run_io(SzIo *root) {

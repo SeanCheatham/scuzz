@@ -62,7 +62,7 @@ No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** i
 
 ### IO errors
 
-One failure channel: `SzError` (message + optional code) on `IO`. Ops: `flatMap`, `delay`, `fail`, `handleErrorWith`, `attempt`, plus blessed kit (`Resource`, `Ref`, `Deferred`, `Queue`, `sleep`, `race`, `both`). **Concurrency:** cooperative single-threaded fibers (FIFO ready queue, left-before-right fork); `sleep` / empty `Queue.take` / incomplete `Deferred.get` park; TestRuntime advances virtual time to the next wakeup when idle. No OS threads for IO. Impurity codes: Fs **2**, Sys (**3**; exec + `readLine`), Clock **4**, Random **5**, Net **6**. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net plus console (scripted stdin, optional argv override, println capture+echo). No checked exception hierarchy; panics abort via `sz_panic`.
+One failure channel: `SzError` (message + optional code) on `IO`. Ops: `flatMap`, `delay`, `fail`, `handleErrorWith`, `attempt`, plus blessed kit (`Resource`, `Ref`, `Deferred`, `Queue`, `sleep`, `race`, `both`). **Concurrency:** cooperative single-threaded fibers (FIFO ready queue, left-before-right fork); `sleep` / empty `Queue.take` / incomplete `Deferred.get` park; TestRuntime advances virtual time to the next wakeup when idle; live idle `nanosleep` is EINTR-interruptible so a cancelled sleeper cannot hold the run loop. No OS threads for IO. Impurity codes: Fs **2**, Sys (**3**; exec + `readLine`), Clock **4**, Random **5**, Net **6**. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net plus console (scripted stdin, optional argv override, println capture+echo). No checked exception hierarchy; panics abort via `sz_panic`.
 
 ### `Ui` vs `View`
 
