@@ -217,6 +217,15 @@ pub fn typecheck(program: &Program) -> Result<(), TypeError> {
         }
         other => TypeError::Msg(other.to_string()),
     })?;
+    for en in &program.enums {
+        let id = crate::resolve::enum_id(&en.module, &en.name);
+        for case in &en.cases {
+            check_payload_fields(&id, en, case)?;
+            for (_fname, fty) in &case.fields {
+                resolve_type_in(fty, &enums, &en.module, &en.type_params)?;
+            }
+        }
+    }
     for d in &program.defs {
         let mut env: HashMap<String, Type> = HashMap::new();
         for p in &d.params {
@@ -278,10 +287,35 @@ fn resolve_type_in(
                 Ok(Type::Var(n.clone()))
             } else {
                 let id = enums.resolve_id(n, module).map_err(|e| {
-                    TypeError::Msg(format!("unknown type {n}: {e}"))
+                    TypeError::Msg(format!("unknown enum {n}: {e}"))
                 })?;
                 Ok(Type::Adt(id))
             }
+        }
+        Type::App(n, args) => {
+            let en = enums.resolve(n, module).map_err(|e| {
+                TypeError::Msg(format!("unknown enum {n}: {e}"))
+            })?;
+            if en.type_params.is_empty() {
+                return Err(TypeError::Msg(format!(
+                    "enum {n} is not generic; remove type arguments"
+                )));
+            }
+            if en.type_params.len() != args.len() {
+                return Err(TypeError::Msg(format!(
+                    "enum {n} expects {} type argument(s), got {}",
+                    en.type_params.len(),
+                    args.len()
+                )));
+            }
+            let id = enums.resolve_id(n, module).map_err(|e| {
+                TypeError::Msg(format!("unknown enum {n}: {e}"))
+            })?;
+            let rargs = args
+                .iter()
+                .map(|a| resolve_type_in(a, enums, module, type_params))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Type::App(id, rargs))
         }
         Type::Io(inner) => Ok(Type::Io(Box::new(resolve_type_in(
             inner,
@@ -314,10 +348,14 @@ fn field_type(
     enums: &EnumIndex<'_>,
     current_module: &str,
 ) -> Result<Type, TypeError> {
-    let Type::Adt(id) = base_ty else {
-        return Err(TypeError::Msg(format!(
-            "field access .{field} needs a record type, got {base_ty:?}"
-        )));
+    let (id, targs): (&str, &[Type]) = match base_ty {
+        Type::Adt(id) => (id, &[]),
+        Type::App(id, args) => (id, args),
+        other => {
+            return Err(TypeError::Msg(format!(
+                "field access .{field} needs a record type, got {other:?}"
+            )))
+        }
     };
     let (en, _) = lookup_enum(enums, id, current_module)?;
     if !is_record_like(en) {
@@ -336,7 +374,17 @@ fn field_type(
         .ok_or_else(|| {
             TypeError::Msg(format!("record {} has no field {field}", en.name))
         })?;
-    resolve_type(fty, enums, &en.module)
+    let resolved = resolve_type_in(fty, enums, &en.module, &en.type_params)?;
+    let mut subst: HashMap<String, Type> = HashMap::new();
+    let mut skipped: Vec<String> = Vec::new();
+    for (p, t) in en.type_params.iter().zip(targs.iter()) {
+        if matches!(t, Type::Opaque(_)) {
+            skipped.push(p.clone());
+        } else {
+            subst.insert(p.clone(), t.clone());
+        }
+    }
+    Ok(erase_vars(&apply_subst(&resolved, &subst), &skipped))
 }
 
 /// Rewrite `p.x` into a single-arm match and `p.m(…)` into a mangled Call.
@@ -881,7 +929,7 @@ fn infer(
             let case = en.cases.iter().find(|c| c.name == *case_name).ok_or_else(|| {
                 TypeError::Msg(format!("unknown case {enum_name}.{case_name}"))
             })?;
-            check_payload_fields(&id, case)?;
+            check_payload_fields(&id, en, case)?;
             if args.len() != case.fields.len() {
                 return Err(TypeError::Msg(format!(
                     "{enum_name}.{case_name} expects {} arg(s), got {}",
@@ -889,12 +937,34 @@ fn infer(
                     args.len()
                 )));
             }
-            for (arg, (_fname, fty)) in args.iter().zip(case.fields.iter()) {
-                let at = infer(arg, enums, funs, methods, current_module, env)?;
-                let want = resolve_type(fty, enums, &en.module)?;
-                expect_ty(&at, &want)?;
+            if en.type_params.is_empty() {
+                for (arg, (_fname, fty)) in args.iter().zip(case.fields.iter()) {
+                    let at = infer(arg, enums, funs, methods, current_module, env)?;
+                    let want = resolve_type(fty, enums, &en.module)?;
+                    expect_ty(&at, &want)?;
+                }
+                Ok(Type::Adt(id))
+            } else {
+                let mut subst: HashMap<String, Type> = HashMap::new();
+                for (arg, (_fname, fty)) in args.iter().zip(case.fields.iter()) {
+                    let at = infer(arg, enums, funs, methods, current_module, env)?;
+                    let want = resolve_type_in(fty, enums, &en.module, &en.type_params)?;
+                    unify_construct(&want, &at, &mut subst)?;
+                }
+                // Params the args did not determine stay opaque placeholders;
+                // elaboration resolves them from the expected type or errors.
+                let targs = en
+                    .type_params
+                    .iter()
+                    .map(|p| {
+                        subst
+                            .get(p)
+                            .cloned()
+                            .unwrap_or_else(|| Type::Opaque(format!("__unbound_{p}")))
+                    })
+                    .collect();
+                Ok(Type::App(id, targs))
             }
-            Ok(Type::Adt(id))
         }
         ExprKind::Let { name, value, body } => {
             let vt = infer(value, enums, funs, methods, current_module, env)?;
@@ -1520,19 +1590,47 @@ fn expect_ty(got: &Type, want: &Type) -> Result<(), TypeError> {
     }
 }
 
-fn check_payload_fields(enum_name: &str, case: &crate::ast::EnumCase) -> Result<(), TypeError> {
+fn check_payload_fields(
+    enum_name: &str,
+    en: &EnumDef,
+    case: &crate::ast::EnumCase,
+) -> Result<(), TypeError> {
     for (fname, fty) in &case.fields {
-        match fty {
-            Type::Int | Type::String | Type::List | Type::Adt(_) => {}
-            other => {
-                return Err(TypeError::Msg(format!(
-                    "{enum_name}.{} field {fname}: Stage 0 payload types are Int, String, List, or an ADT, got {other:?}",
-                    case.name
+        check_payload_ty(enum_name, en, case, fname, fty)?;
+    }
+    Ok(())
+}
+
+fn check_payload_ty(
+    enum_name: &str,
+    en: &EnumDef,
+    case: &crate::ast::EnumCase,
+    fname: &str,
+    fty: &Type,
+) -> Result<(), TypeError> {
+    match fty {
+        Type::Int | Type::String | Type::List | Type::Adt(_) => Ok(()),
+        Type::App(_, args) => {
+            for a in args {
+                check_payload_ty(enum_name, en, case, fname, a)?;
+            }
+            Ok(())
+        }
+        Type::Var(n) => {
+            if en.type_params.iter().any(|p| p == n) {
+                Ok(())
+            } else {
+                Err(TypeError::Msg(format!(
+                    "{enum_name}.{} field {fname}: {n} is not a type parameter of {}",
+                    case.name, en.name
                 )))
             }
         }
+        other => Err(TypeError::Msg(format!(
+            "{enum_name}.{} field {fname}: payload types are Int, String, List, an ADT, or the enum's type parameter(s), got {other:?}",
+            case.name
+        ))),
     }
-    Ok(())
 }
 
 /// Typecheck a pattern and bind payload names into `env`. Returns previous bindings to restore.
@@ -1557,10 +1655,26 @@ fn bind_pattern(
                     "unknown case {enum_name}.{case_name} in pattern"
                 ))
             })?;
-            check_payload_fields(&id, case)?;
+            check_payload_fields(&id, en, case)?;
+            let mut subst: HashMap<String, Type> = HashMap::new();
+            let mut skipped: Vec<String> = Vec::new();
             match scrut {
-                Type::Adt(n) if n == &id => {}
-                Type::Opaque(_) => {}
+                Type::Adt(n) if n == &id && en.type_params.is_empty() => {}
+                Type::App(n, targs) if n == &id => {
+                    for (p, t) in en.type_params.iter().zip(targs.iter()) {
+                        if matches!(t, Type::Opaque(_)) {
+                            skipped.push(p.clone());
+                        } else {
+                            subst.insert(p.clone(), t.clone());
+                        }
+                    }
+                }
+                Type::Opaque(_) if en.type_params.is_empty() => {}
+                Type::Opaque(_) => {
+                    return Err(TypeError::Msg(format!(
+                        "cannot match an untyped value against generic enum {enum_name}"
+                    )))
+                }
                 other => {
                     return Err(TypeError::Msg(format!(
                         "pattern {enum_name}.{case_name} does not match scrutinee {other:?}"
@@ -1593,7 +1707,8 @@ fn bind_pattern(
             }
             let mut restored = Vec::new();
             for (name, (_, fty)) in binds.iter().zip(case.fields.iter()) {
-                let fty = resolve_type(fty, enums, &en.module)?;
+                let resolved = resolve_type_in(fty, enums, &en.module, &en.type_params)?;
+                let fty = erase_vars(&apply_subst(&resolved, &subst), &skipped);
                 let old = env.insert(name.clone(), fty);
                 restored.push((name.clone(), old));
             }
@@ -1622,6 +1737,11 @@ fn types_compat(a: &Type, b: &Type) -> bool {
         (Type::List, Type::List) => true,
         (Type::Io(_), Type::Io(_)) => true,
         (Type::Adt(x), Type::Adt(y)) => x == y,
+        (Type::App(x, a), Type::App(y, b)) => {
+            x == y
+                && a.len() == b.len()
+                && a.iter().zip(b.iter()).all(|(u, v)| types_compat(u, v))
+        }
         (Type::Var(x), Type::Var(y)) => x == y,
         (Type::Opaque(_), _) | (_, Type::Opaque(_)) => true,
         _ => false,
@@ -1634,6 +1754,9 @@ fn unify_types(
     subst: &mut HashMap<String, Type>,
 ) -> Result<(), TypeError> {
     match (pattern, concrete) {
+        // Opaque carries no information (untyped List elements, ambiguous
+        // generic ctors); callers check subst completeness afterwards.
+        (Type::Opaque(_), _) | (_, Type::Opaque(_)) => Ok(()),
         (Type::Var(n), t) => {
             if let Some(prev) = subst.get(n) {
                 if !types_compat(prev, t) {
@@ -1652,6 +1775,47 @@ fn unify_types(
             Ok(())
         }
         (Type::Io(a), Type::Io(b)) => unify_types(a, b, subst),
+        (Type::App(x, a), Type::App(y, b)) if x == y && a.len() == b.len() => {
+            for (u, v) in a.iter().zip(b.iter()) {
+                unify_types(u, v, subst)?;
+            }
+            Ok(())
+        }
+        (a, b) if types_compat(a, b) => Ok(()),
+        (a, b) => Err(TypeError::Msg(format!(
+            "type mismatch: expected {a:?}, got {b:?}"
+        ))),
+    }
+}
+
+/// Like `unify_types`, but for generic enum construction: def-scope type
+/// parameters (`Var`) may bind — concretization happens at monomorphization.
+fn unify_construct(
+    pattern: &Type,
+    concrete: &Type,
+    subst: &mut HashMap<String, Type>,
+) -> Result<(), TypeError> {
+    match (pattern, concrete) {
+        (Type::Opaque(_), _) | (_, Type::Opaque(_)) => Ok(()),
+        (Type::Var(n), t) => {
+            if let Some(prev) = subst.get(n) {
+                if !types_compat(prev, t) {
+                    return Err(TypeError::Msg(format!(
+                        "type parameter {n} constrained to both {prev:?} and {t:?}"
+                    )));
+                }
+            } else {
+                subst.insert(n.clone(), t.clone());
+            }
+            Ok(())
+        }
+        (Type::Io(a), Type::Io(b)) => unify_construct(a, b, subst),
+        (Type::App(x, a), Type::App(y, b)) if x == y && a.len() == b.len() => {
+            for (u, v) in a.iter().zip(b.iter()) {
+                unify_construct(u, v, subst)?;
+            }
+            Ok(())
+        }
         (a, b) if types_compat(a, b) => Ok(()),
         (a, b) => Err(TypeError::Msg(format!(
             "type mismatch: expected {a:?}, got {b:?}"
@@ -1660,16 +1824,35 @@ fn unify_types(
 }
 
 fn mono_type_ok(t: &Type) -> bool {
-    matches!(
-        t,
-        Type::Unit | Type::Int | Type::String | Type::Bool | Type::List | Type::Adt(_)
-    )
+    match t {
+        Type::Unit | Type::Int | Type::String | Type::Bool | Type::List | Type::Adt(_) => true,
+        Type::App(_, args) => args.iter().all(mono_type_ok),
+        _ => false,
+    }
 }
 
 fn apply_subst(ty: &Type, subst: &HashMap<String, Type>) -> Type {
     match ty {
         Type::Var(n) => subst.get(n).cloned().unwrap_or_else(|| ty.clone()),
         Type::Io(inner) => Type::Io(Box::new(apply_subst(inner, subst))),
+        Type::App(n, args) => Type::App(
+            n.clone(),
+            args.iter().map(|a| apply_subst(a, subst)).collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
+/// Replace leftover `Var`s (enum type parameters that stayed unbound, e.g.
+/// behind an `Opaque` scrutinee) with opaque types.
+fn erase_vars(ty: &Type, names: &[String]) -> Type {
+    match ty {
+        Type::Var(n) if names.iter().any(|p| p == n) => Type::Opaque(n.clone()),
+        Type::Io(inner) => Type::Io(Box::new(erase_vars(inner, names))),
+        Type::App(n, args) => Type::App(
+            n.clone(),
+            args.iter().map(|a| erase_vars(a, names)).collect(),
+        ),
         other => other.clone(),
     }
 }
@@ -2422,6 +2605,168 @@ enum Pair:
         let err = typecheck(&p).unwrap_err();
         assert!(
             err.message().contains("private"),
+            "unexpected: {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn typechecks_generic_enum_construct_and_match() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] = Opt.Some(1) match {
+  case Opt.Some(n) => IO.println(Str.fromInt(n + 1))
+  case Opt.None => IO.println("none")
+}
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("generic enum construct/match should typecheck");
+    }
+
+    #[test]
+    fn typechecks_generic_def_over_generic_enum() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+def getOrElse[T](o: Opt[T], default: T): T = o match {
+  case Opt.Some(x) => x
+  case Opt.None => default
+}
+@main def main: IO[Unit] = IO.println(Str.fromInt(getOrElse(Opt.Some(1), 0)))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("generic def over generic enum should typecheck");
+    }
+
+    #[test]
+    fn typechecks_multi_param_either() {
+        let src = r#"
+enum Either[L, R]:
+  case Left(x: L)
+  case Right(y: R)
+def describe(e: Either[Int, String]): String = e match {
+  case Either.Left(n) => Str.fromInt(n)
+  case Either.Right(s) => s
+}
+@main def main: IO[Unit] = IO.println(describe(Either.Left(1)))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("multi-param Either should typecheck");
+    }
+
+    #[test]
+    fn typechecks_generic_record_field_access() {
+        let src = r#"
+record Box[T](x: T)
+def unbox[T](b: Box[T]): T = b.x
+@main def main: IO[Unit] = IO.println(Str.fromInt(unbox(Box(3))))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("generic record field access should typecheck");
+    }
+
+    #[test]
+    fn rejects_wrong_arity_application() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+def f(o: Opt[Int, String]): Int = 1
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("expects 1 type argument(s)"),
+            "unexpected: {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_application_of_non_generic_enum() {
+        let src = r#"
+enum Color:
+  case Red
+def f(c: Color[Int]): Int = 1
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("is not generic"),
+            "unexpected: {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_applied_enum() {
+        let src = r#"
+def f(x: Nope[Int]): Int = 1
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("unknown enum Nope"),
+            "unexpected: {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_payload_var_outside_type_params() {
+        let src = r#"
+enum Bad[T]:
+  case C(x: U)
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("unknown enum U"),
+            "unexpected: {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_opaque_scrutinee_against_generic_pattern() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] = List.head(["a"]) match {
+  case Opt.Some(n) => IO.println("some")
+  case Opt.None => IO.println("none")
+}
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("untyped value against generic enum"),
+            "unexpected: {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_mismatched_generic_construct_arg() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+def f(o: Opt[Int]): Int = 1
+@main def main: IO[Unit] = IO.println(Str.fromInt(f(Opt.Some("s"))))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("mismatch"),
             "unexpected: {}",
             err.message()
         );
