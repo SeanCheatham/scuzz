@@ -245,9 +245,15 @@ void sz_signal_list_set(SzSignalList *s, SzList *v) {
 SzList *sz_signal_list_get(const SzSignalList *s) { return s ? s->value : NULL; }
 
 void sz_signal_list_free(SzSignalList *s) {
+  SzList *p;
   if (!s)
     return;
   sig_unregister(s);
+  /* Signal.list holds String items (View.each); own heads at exit. */
+  for (p = s->value; p; p = p->tail) {
+    if (p->head)
+      sz_string_free((SzString *)p->head);
+  }
   sz_list_free(s->value);
   sz_free(s);
 }

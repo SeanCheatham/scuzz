@@ -54,7 +54,7 @@ Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI / cargo package `scuz
 
 ### GC (v0)
 
-libc `malloc`/`free` via `sz_alloc` / `sz_free`. No moving collector yet. Clear ownership frees strings/IO/`Resource`/Views and unshared `Signal.list` cons spines; panic may leak. Revisit when long-lived interactive graphs demand it.
+libc `malloc`/`free` via `sz_alloc` / `sz_free`. No moving collector yet. Clear ownership frees strings/IO/`Resource`/Views, unshared `Signal.list` cons spines, and list string heads on signal free; panic may leak. Revisit when long-lived interactive graphs demand it.
 
 ### Skia
 

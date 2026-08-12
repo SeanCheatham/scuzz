@@ -30,7 +30,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 ### Residuals
 
 - **Concurrency** — cooperative fibers + TestRuntime virtual-time jumps (`test_io.c`); Scuzz `Ref` / `Queue` / `Deferred` (String payloads) via Stage 0 + self-host (`examples/concurrency`). Later: OS threads, interruptible cancel mid-`nanosleep`, supervision trees.
-- **Memory** — counter-shaped Headless pumps stay flat under alloc accounting (`test_ui.c`, optional `test-asan`). `View.each` with a stable `Signal.list` is pump-flat; `Signal.list` frees unshared cons spines on set/free (`test_signal_list_spine_collect`). Shared tails (cons onto the current list) stay. String heads in lists are not owned. Later: exit-time string-head ownership, a collector if list-churn still demands it.
+- **Memory** — counter-shaped Headless pumps stay flat under alloc accounting (`test_ui.c`, optional `test-asan`). `View.each` with a stable `Signal.list` is pump-flat; `Signal.list` frees unshared cons spines on set and string heads on free (`test_signal_list_spine_collect`). Shared tails (cons onto the current list) stay. Later: a collector if list-churn still demands it.
 - **File-as-module** — stem namespaces for defs and enums + `private def` + `import Module.name` on Stage 0 and self-host (`examples/modules`). **`record`** product types + `p.x` field access (`examples/record`). Thin **traits**/`impl` with static-dispatch method calls (`examples/trait`). Stage 0 and self-host **monomorphized** `def id[T](…)` (`examples/generic`). Later: richer generics — [`compatibility.md`](compatibility.md).
 
 ### Dependency forms beyond `path`

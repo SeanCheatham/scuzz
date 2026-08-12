@@ -682,10 +682,12 @@ static void test_signal_list_spine_collect(void) {
   SzSignalList *items;
   SzList *xs;
   SzString *first;
+  size_t origin_count = 0, origin_bytes = 0;
   size_t base_count = 0, base_bytes = 0;
   size_t live_count = 0, live_bytes = 0;
   int i;
 
+  sz_alloc_stats(&origin_bytes, &origin_count);
   first = sz_string_from_cstr("a");
   xs = sz_list_cons(first, sz_list_nil());
   items = sz_signal_list(xs);
@@ -700,6 +702,9 @@ static void test_signal_list_spine_collect(void) {
   assert(live_count < base_count + 30 * 6);
   assert(sz_list_len(sz_signal_list_get(items)) == 31);
   sz_signal_list_free(items);
+  sz_alloc_stats(&live_bytes, &live_count);
+  assert(live_count == origin_count);
+  assert(live_bytes == origin_bytes);
 }
 
 static void test_alloc_each_pump_flat(void) {
