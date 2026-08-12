@@ -810,8 +810,13 @@ fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
+        let name = entry.file_name();
+        // Skip caches / VCS junk (e.g. .gradle) so packaging stays template-only.
+        if name.to_string_lossy().starts_with('.') {
+            continue;
+        }
         let from = entry.path();
-        let to = dst.join(entry.file_name());
+        let to = dst.join(&name);
         if from.is_dir() {
             copy_dir(&from, &to)?;
         } else {

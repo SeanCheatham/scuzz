@@ -112,6 +112,7 @@ cargo run -p scuzz -- run --headless examples/live
 | `examples/todo` | Todo — `List` / `Signal.list` / lambda Add·Save + goldens |
 | `examples/effects` | Blessed effects kit |
 | `examples/adt` | package / enum / match |
+| `examples/modules` | stem-namespaced defs across files |
 | `examples/fs` | Blessed `Fs.*` (live) |
 | `examples/clock` | `Clock.realTime` / `monotonic` |
 | `examples/impurity` | `Impurity.runKit` + TestRuntime fakes |

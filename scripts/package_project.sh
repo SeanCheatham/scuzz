@@ -49,11 +49,18 @@ EOF
       chmod +x "$dest/run.sh"
       ;;
     android)
-      cp -R "$mobile/shells/android/." "$dest/"
+      # Non-hidden entries only — skip local caches like .gradle.
+      for f in "$mobile/shells/android"/*; do
+        [ -e "$f" ] || continue
+        cp -R "$f" "$dest/"
+      done
       replace_bundle_id "$dest/AndroidManifest.xml"
       ;;
     ios)
-      cp -R "$mobile/shells/ios/." "$dest/"
+      for f in "$mobile/shells/ios"/*; do
+        [ -e "$f" ] || continue
+        cp -R "$f" "$dest/"
+      done
       replace_bundle_id "$dest/Info.plist"
       ;;
     *)

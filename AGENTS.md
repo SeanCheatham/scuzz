@@ -6,7 +6,6 @@
 | --- | --- |
 | [`docs/vision.md`](docs/vision.md) | Product thesis, decisions, language direction, open work, risks |
 | [`docs/gaps.md`](docs/gaps.md) | Unknowns (unproven bets) and known gaps, ranked by risk |
-| [`docs/ast_todo.md`](docs/ast_todo.md) | Compiler AST/IR payload-ADT status |
 | [`docs/compatibility.md`](docs/compatibility.md) | Keep/cut vs Scala & Typelevel; platforms; self-host stages |
 | [`docs/guide.md`](docs/guide.md) | App author happy path |
 | [`docs/schemas/scuzz-toml.md`](docs/schemas/scuzz-toml.md) | Package manifest schema |

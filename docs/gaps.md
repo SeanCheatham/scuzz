@@ -27,14 +27,11 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ## Known gaps
 
-### Residuals (closed bets)
+### Residuals
 
-- **Compiler IR onto payload ADTs** — self-host ratchet intact; compiler-source AST/IR families are payload ADTs (`Tok` … `Expr`, plus `Type`/`TyRes`/`TyBind` and codegen `Emit`/`EmitKind`/`EnvBind`/`CasePayload`), with `Int`/`String`/`List`/ADT payload fields. Match arm join blocks keep nested if/match PHI-valid. Status: [`ast_todo.md`](ast_todo.md). Records/traits/generics: [`compatibility.md`](compatibility.md).
-- **Real text through `sk_capi`** — measure/text-size APIs on `sk_capi.h`; layout uses `sk_font_measure_string`; dual-backend Makefile defaults to `third_party/skia/prebuilt/<triple>/libsk_capi.a` (fail-closed fetch via `PIN` / `fetch_skia.sh`); `SCUZZ_SKIA=sk_sw` opts into the in-tree software backend; as-needed `.github/workflows/skia-cpu.yml` + `scripts/build_skia_prebuilt.sh` produce a fat `sk_capi` archive. Structural goldens remain logical-only and stay green against real Skia.
-- **Concurrency** — cooperative fibers + TestRuntime virtual-time jumps cover the determinism thesis (`test_io.c`). Out of scope / later: OS threads, interruptible cancel mid-`nanosleep`, supervision trees, Scuzz bindings for Queue/Deferred.
+- **Concurrency** — cooperative fibers + TestRuntime virtual-time jumps cover the determinism thesis (`test_io.c`). Later: OS threads, interruptible cancel mid-`nanosleep`, supervision trees, Scuzz bindings for Queue/Deferred.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting (`test_ui.c`, optional `test-asan`). Later: `Signal.list` collection, exit-time signal ownership / LSan-clean examples, a collector if list-churn demands it.
-- **File-as-module** — stem namespaces on Stage 0 and self-host (`examples/modules`). Later: `private`/`pub`, `import`, enum-per-module.
-- **Diagnostics spans** — Stage 0 and self-host emit `file:line:column` (and JSON). Done.
+- **File-as-module** — stem namespaces on Stage 0 and self-host (`examples/modules`). Later: `private`/`pub`, `import`, enum-per-module. Records/traits/generics: [`compatibility.md`](compatibility.md).
 
 ### Dependency forms beyond `path`
 

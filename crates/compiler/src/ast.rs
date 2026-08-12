@@ -127,7 +127,7 @@ pub enum ExprKind {
         left: Box<Expr>,
         right: Box<Expr>,
     },
-    /// `val name = value; body`
+    /// Lowered `for` pure binder: `name = value` then `body`
     Let {
         name: String,
         value: Box<Expr>,

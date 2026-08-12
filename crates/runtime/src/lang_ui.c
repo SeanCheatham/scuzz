@@ -67,10 +67,6 @@ SzView *sz_lang_view_text(SzString *text) {
   return sz_view_text(text ? sz_string_cstr(text) : "");
 }
 
-SzView *sz_lang_view_text_signal(SzSignalInt *sig, SzString *prefix) {
-  return sz_view_text_signal_int(sig, prefix ? sz_string_cstr(prefix) : "");
-}
-
 SzView *sz_lang_view_button(SzString *label, SzViewTapFn tap, void *env) {
   return sz_view_button(label ? sz_string_cstr(label) : "", tap, env);
 }

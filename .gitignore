@@ -24,6 +24,15 @@ crates/embedder-mobile/build/
 .idea/
 .vscode/
 .gradle/
+local.properties
+.cxx/
+.externalNativeBuild/
+captures/
+*.apk
+*.aab
+*.iml
+crates/embedder-mobile/shells/android/build/
+crates/embedder-mobile/shells/ios/build/
 third_party/skia/prebuilt/
 
 scratchpad/

@@ -241,7 +241,6 @@ SzList *sz_lang_signal_list_get(SzSignalList *s);
 void *sz_lang_signal_list_set(SzSignalList *s, SzList *v);
 
 SzView *sz_lang_view_text(SzString *text);
-SzView *sz_lang_view_text_signal(SzSignalInt *sig, SzString *prefix);
 /* First-class tap closure: `tap`/`env` come from a compiled `_ => ...` lambda. */
 SzView *sz_lang_view_button(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_column(void);
