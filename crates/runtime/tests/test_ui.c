@@ -501,6 +501,29 @@ static void test_background(void) {
   sz_view_free(bg);
 }
 
+static void test_aspect_ratio(void) {
+  SzView *box, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect bf;
+
+  child = sz_view_text("Hi");
+  box = sz_view_aspect_ratio(16, 9, child);
+  sz_view_layout(box, 160.f, 200.f, theme);
+  assert(sz_view_kind(box) == SZ_VIEW_ASPECT_RATIO);
+  bf = sz_view_frame(box);
+  assert(fabsf(bf.w - 160.f) < 0.5f);
+  assert(fabsf(bf.h - 90.f) < 0.5f);
+  sz_view_free(box);
+
+  child = sz_view_text("Hi");
+  box = sz_view_aspect_ratio(16, 9, child);
+  sz_view_layout(box, 320.f, 90.f, theme);
+  bf = sz_view_frame(box);
+  assert(fabsf(bf.w - 160.f) < 0.5f);
+  assert(fabsf(bf.h - 90.f) < 0.5f);
+  sz_view_free(box);
+}
+
 static void test_mobile_pointer_scroll_lifecycle(void) {
   SzUiConfig cfg;
   SzSignalStr *draft;
@@ -975,6 +998,7 @@ int main(void) {
   test_sized();
   test_min_size();
   test_background();
+  test_aspect_ratio();
   test_mobile_pointer_scroll_lifecycle();
   test_a11y_and_anim();
   test_clear_children();
