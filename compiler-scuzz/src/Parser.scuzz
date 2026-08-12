@@ -466,7 +466,7 @@ def parseIoArgs(file: String, tokens: List, i: Int, callee: String, startI: Int)
     sp = spanCover(file, tokens, startI, i1)
   } yield if (streq(callee, "IO.println") == 1) okExpr(Expr.Println(List.head(args), sp), i1) else if (streq(callee, "IO.fail") == 1) okExpr(Expr.Fail(List.head(args), sp), i1) else if (streq(callee, "IO.pure") == 1) okExpr(Expr.Pure(List.head(args), sp), i1) else if (streq(callee, "IO.sleep") == 1) okExpr(Expr.Sleep(List.head(args), sp), i1) else if (streq(callee, "IO.race") == 1) okExpr(Expr.IoRace(List.head(args), List.head(List.tail(args)), sp), i1) else if (streq(callee, "IO.both") == 1) okExpr(Expr.IoBoth(List.head(args), List.head(List.tail(args)), sp), i1) else okExpr(Expr.Call(callee, args, sp), i1)
 
-def parseDef(file: String, tokens: List, i: Int): List =
+def parseDef(file: String, tokens: List, i: Int, isPrivate: Int): List =
   for {
     nameP = parseIdent(file, tokens, i)
     i1 = expectTok(tokens, pIdx(nameP), "LParen")
@@ -476,7 +476,7 @@ def parseDef(file: String, tokens: List, i: Int): List =
     retP = parseType(file, tokens, i3)
     i4 = expectTok(tokens, pIdx(retP), "Eq")
     bodyP = parseBlock(file, tokens, i4)
-  } yield okDef(Def.Def(pStr(nameP), pAst(paramsP), pType(retP), pExpr(bodyP), moduleIdFromLabel(file)), pIdx(bodyP))
+  } yield okDef(Def.Def(pStr(nameP), pAst(paramsP), pType(retP), pExpr(bodyP), moduleIdFromLabel(file), isPrivate), pIdx(bodyP))
 
 def parseMain(file: String, tokens: List, i: Int): List =
   for {
@@ -490,7 +490,7 @@ def parseMain(file: String, tokens: List, i: Int): List =
 def parseTop(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: Expr, mainMod: String): Prog =
   for {
     t = tokKind(tokAt(tokens, i))
-  } yield if (streq(t, "Eof") == 1) Prog.Prog(pkg, List.reverse(enums), List.reverse(defs), main, mainMod) else if (streq(t, "Enum") == 1) parseTopEnum(file, tokens, i + 1, pkg, enums, defs, main, mainMod) else if (streq(t, "Def") == 1) parseTopDef(file, tokens, i + 1, pkg, enums, defs, main, mainMod) else if (streq(t, "AtMain") == 1) parseTopMain(file, tokens, i + 1, pkg, enums, defs) else parseTop(file, tokens, i + 1, pkg, enums, defs, main, mainMod)
+  } yield if (streq(t, "Eof") == 1) Prog.Prog(pkg, List.reverse(enums), List.reverse(defs), main, mainMod) else if (streq(t, "Enum") == 1) parseTopEnum(file, tokens, i + 1, pkg, enums, defs, main, mainMod) else if (streq(t, "Private") == 1) parseTopPrivateDef(file, tokens, i + 1, pkg, enums, defs, main, mainMod) else if (streq(t, "Def") == 1) parseTopDef(file, tokens, i + 1, pkg, enums, defs, main, mainMod) else if (streq(t, "AtMain") == 1) parseTopMain(file, tokens, i + 1, pkg, enums, defs) else parseTop(file, tokens, i + 1, pkg, enums, defs, main, mainMod)
 
 def parseEnum(file: String, tokens: List, i: Int): List =
   for {
@@ -546,7 +546,13 @@ def parseTopEnum(file: String, tokens: List, i: Int, pkg: String, enums: List, d
 
 def parseTopDef(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: Expr, mainMod: String): Prog =
   for {
-    d = parseDef(file, tokens, i)
+    d = parseDef(file, tokens, i, 0)
+  } yield parseTop(file, tokens, pIdx(d), pkg, enums, List.cons(pDef(d), defs), main, mainMod)
+
+def parseTopPrivateDef(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: Expr, mainMod: String): Prog =
+  for {
+    i1 = expectTok(tokens, i, "Def")
+    d = parseDef(file, tokens, i1, 1)
   } yield parseTop(file, tokens, pIdx(d), pkg, enums, List.cons(pDef(d), defs), main, mainMod)
 
 def parseTopMain(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List): Prog =

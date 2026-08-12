@@ -82,8 +82,10 @@ fn pretty_def(d: &FunDef) -> String {
         .iter()
         .map(|p| format!("{}: {}", p.name, pretty_type(&p.ty)))
         .collect();
+    let vis = if d.is_private { "private " } else { "" };
     format!(
-        "def {}({}): {} =\n{}",
+        "{}def {}({}): {} =\n{}",
+        vis,
         d.name,
         params.join(", "),
         pretty_type(&d.ret),
@@ -328,6 +330,19 @@ mod tests {
         assert!(out.contains("@main def main: IO[Unit] ="));
         assert!(out.contains("IO.println(\"Hi\")"));
         assert!(out.ends_with('\n'));
+    }
+
+    #[test]
+    fn formats_private_def() {
+        let src = r#"
+private def helper(): String = "x"
+def tag(): String = helper()
+@main def main: IO[Unit] = IO.println(tag())
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("private def helper(): String ="));
+        assert!(out.contains("def tag(): String ="));
+        assert!(!out.contains("private def tag"));
     }
 
     #[test]

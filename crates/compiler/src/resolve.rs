@@ -2,7 +2,8 @@
 //!
 //! Module id = source file stem (`Foo.scuzz` → `Foo`). Defs are namespaced;
 //! enums stay globally unique. Bare names resolve locally first, then to a
-//! unique cross-module def when unambiguous.
+//! unique cross-module **public** def when unambiguous. `private def` is only
+//! visible within its module (qualified or bare).
 
 use crate::ast::FunDef;
 use std::collections::HashMap;
@@ -37,6 +38,10 @@ pub fn split_dotted(callee: &str) -> Option<(&str, &str)> {
     Some((a, b))
 }
 
+fn visible_from(d: &FunDef, current_module: &str) -> bool {
+    !d.is_private || d.module == current_module
+}
+
 #[derive(Debug)]
 pub struct FunIndex<'a> {
     by_qual: HashMap<String, &'a FunDef>,
@@ -47,6 +52,7 @@ pub struct FunIndex<'a> {
 pub enum ResolveError {
     Unknown(String),
     Ambiguous(String),
+    Private { module: String, name: String },
     Duplicate { module: String, name: String },
 }
 
@@ -58,6 +64,9 @@ impl std::fmt::Display for ResolveError {
                 f,
                 "ambiguous function {c}: qualify as Module.{c}"
             ),
+            ResolveError::Private { module, name } => {
+                write!(f, "private def {module}.{name} is not visible here")
+            }
             ResolveError::Duplicate { module, name } => {
                 write!(f, "duplicate def {module}.{name}")
             }
@@ -84,17 +93,33 @@ impl<'a> FunIndex<'a> {
 
     pub fn resolve(&self, callee: &str, current_module: &str) -> Result<&'a FunDef, ResolveError> {
         if let Some((m, n)) = split_dotted(callee) {
-            return self
+            let d = self
                 .by_qual
                 .get(&qual_key(m, n))
                 .copied()
-                .ok_or_else(|| ResolveError::Unknown(callee.to_string()));
+                .ok_or_else(|| ResolveError::Unknown(callee.to_string()))?;
+            if !visible_from(d, current_module) {
+                return Err(ResolveError::Private {
+                    module: m.to_string(),
+                    name: n.to_string(),
+                });
+            }
+            return Ok(d);
         }
         let local = qual_key(current_module, callee);
         if let Some(d) = self.by_qual.get(&local) {
             return Ok(*d);
         }
-        match self.by_name.get(callee).map(|v| v.as_slice()).unwrap_or(&[]) {
+        let visible: Vec<&'a FunDef> = self
+            .by_name
+            .get(callee)
+            .map(|v| v.as_slice())
+            .unwrap_or(&[])
+            .iter()
+            .copied()
+            .filter(|d| visible_from(d, current_module))
+            .collect();
+        match visible.as_slice() {
             [] => Err(ResolveError::Unknown(callee.to_string())),
             [d] => Ok(*d),
             _ => Err(ResolveError::Ambiguous(callee.to_string())),
@@ -111,10 +136,17 @@ mod tests {
         FunDef {
             module: module.into(),
             name: name.into(),
+            is_private: false,
             params: vec![],
             ret: Type::String,
             body: Expr::dummy(ExprKind::StrLit("x".into())),
         }
+    }
+
+    fn private_def(module: &str, name: &str) -> FunDef {
+        let mut d = def(module, name);
+        d.is_private = true;
+        d
     }
 
     #[test]
@@ -142,6 +174,34 @@ mod tests {
         let defs = vec![def("Shared", "greet")];
         let idx = FunIndex::build(&defs).unwrap();
         assert_eq!(idx.resolve("greet", "Main").unwrap().module, "Shared");
+    }
+
+    #[test]
+    fn private_not_visible_cross_module() {
+        let defs = vec![private_def("A", "helper"), def("A", "tag")];
+        let idx = FunIndex::build(&defs).unwrap();
+        assert!(matches!(
+            idx.resolve("A.helper", "Main"),
+            Err(ResolveError::Private { .. })
+        ));
+        assert!(matches!(
+            idx.resolve("helper", "Main"),
+            Err(ResolveError::Unknown(_))
+        ));
+        assert_eq!(idx.resolve("helper", "A").unwrap().name, "helper");
+        assert_eq!(idx.resolve("A.helper", "A").unwrap().name, "helper");
+        assert_eq!(idx.resolve("A.tag", "Main").unwrap().name, "tag");
+    }
+
+    #[test]
+    fn private_foreign_does_not_ambiguate() {
+        let defs = vec![def("A", "tag"), private_def("B", "tag")];
+        let idx = FunIndex::build(&defs).unwrap();
+        assert_eq!(idx.resolve("tag", "Main").unwrap().module, "A");
+        assert!(matches!(
+            idx.resolve("B.tag", "Main"),
+            Err(ResolveError::Private { .. })
+        ));
     }
 
     #[test]

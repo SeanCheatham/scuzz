@@ -954,4 +954,43 @@ enum Pair:
             err.message()
         );
     }
+
+    #[test]
+    fn private_def_not_visible_cross_module() {
+        let p = crate::parser::parse_sources(&[
+            (
+                "A.scuzz".into(),
+                "private def helper(): String = \"a\"\ndef tag(): String = helper()\n".into(),
+            ),
+            (
+                "Main.scuzz".into(),
+                "@main def main: IO[Unit] = IO.println(A.helper())\n".into(),
+            ),
+        ])
+        .unwrap();
+        let p = lower_program(p);
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("private"),
+            "unexpected: {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn private_def_visible_same_module() {
+        let p = crate::parser::parse_sources(&[
+            (
+                "A.scuzz".into(),
+                "private def helper(): String = \"a\"\ndef tag(): String = helper()\n".into(),
+            ),
+            (
+                "Main.scuzz".into(),
+                "@main def main: IO[Unit] = IO.println(A.tag())\n".into(),
+            ),
+        ])
+        .unwrap();
+        let p = lower_program(p);
+        typecheck(&p).expect("same-module private should typecheck");
+    }
 }

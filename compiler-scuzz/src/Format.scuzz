@@ -78,7 +78,9 @@ def prettyDefs(defs: List, acc: String): String =
   if (List.isEmpty(defs) == 1) acc else prettyDefs(List.tail(defs), Str.concat(acc, Str.concat(prettyDef(List.head(defs)), "\n\n")))
 
 def prettyDef(d: Def): String =
-  str5("def ", defName(d), str3("(", prettyParams(defParams(d), ""), "): "), tyPretty(defRet(d)), str3(" =\n", prettyExpr(defBody(d), 1), ""))
+  for {
+    head = if (defIsPrivate(d) == 1) "private def " else "def "
+  } yield str5(head, defName(d), str3("(", prettyParams(defParams(d), ""), "): "), tyPretty(defRet(d)), str3(" =\n", prettyExpr(defBody(d), 1), ""))
 
 def prettyParams(params: List, acc: String): String =
   if (List.isEmpty(params) == 1) acc else prettyParamsCont(List.head(params), List.tail(params), acc)

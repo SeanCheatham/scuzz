@@ -12,7 +12,7 @@ def paramTy(p: Param): Type =
 
 def declRet(d: Def): Type =
   d match {
-    case Def.Def(name, params, ret, body, module) => ret
+    case Def.Def(name, params, ret, body, module, isPrivate) => ret
   }
 
 def findEnum(enums: List, name: String): List =
@@ -723,7 +723,7 @@ def callUiRun(argTys: List): TyRes =
 def callUserFun(callee: String, argTys: List, funs: List): TyRes =
   for {
     d = resolveFun(funsDefs(funs), callee, funsMod(funs))
-  } yield if (List.isEmpty(d) == 1) tyErr(str3("unknown function ", callee, "")) else if (resolveIsAmbiguous(d) == 1) tyErr(str4("ambiguous function ", callee, ": qualify as Module.", callee)) else callUserFunParams(callee, defParams(resolvedDef(d)), argTys, 0, declRet(resolvedDef(d)))
+  } yield if (List.isEmpty(d) == 1) tyErr(str3("unknown function ", callee, "")) else if (resolveIsAmbiguous(d) == 1) tyErr(str4("ambiguous function ", callee, ": qualify as Module.", callee)) else if (resolveIsPrivate(d) == 1) tyErr(str5("private def ", resolvePrivateModule(d), ".", resolvePrivateName(d), " is not visible here")) else callUserFunParams(callee, defParams(resolvedDef(d)), argTys, 0, declRet(resolvedDef(d)))
 
 def callUserFunParams(callee: String, params: List, argTys: List, i: Int, ret: Type): TyRes =
   if (List.len(params) != List.len(argTys)) tyErr(str4(callee, " expects ", Str.fromInt(List.len(params)), str3(" args, got ", Str.fromInt(List.len(argTys)), ""))) else if (i >= List.len(params)) tyOk(ret) else if (typesCompat(argTyAt(argTys, i), paramTy(List.at(params, i))) == 0) tyErr(str4(callee, " arg type mismatch: expected ", tyShow(paramTy(List.at(params, i))), str3(", got ", tyShow(argTyAt(argTys, i)), ""))) else callUserFunParams(callee, params, argTys, i + 1, ret)

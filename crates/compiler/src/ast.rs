@@ -32,6 +32,8 @@ pub struct FunDef {
     /// File-stem module id (`Foo.scuzz` → `Foo`). Empty when parsed without a path.
     pub module: String,
     pub name: String,
+    /// `private def` — visible only within `module`. Default public.
+    pub is_private: bool,
     pub params: Vec<Param>,
     pub ret: Type,
     pub body: Expr,

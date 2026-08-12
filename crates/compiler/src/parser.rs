@@ -221,7 +221,11 @@ impl Parser {
         loop {
             match self.peek() {
                 Token::Enum => enums.push(self.parse_enum()?),
-                Token::Def => defs.push(self.parse_def()?),
+                Token::Private => {
+                    self.bump();
+                    defs.push(self.parse_def(true)?);
+                }
+                Token::Def => defs.push(self.parse_def(false)?),
                 Token::AtMain => {
                     if !main.name.is_empty() {
                         return Err(self.err("multiple @main"));
@@ -231,7 +235,7 @@ impl Parser {
                 Token::Eof => break,
                 other => {
                     return Err(self.err(format!(
-                        "expected enum/def/@main, got {other:?}"
+                        "expected enum/def/private def/@main, got {other:?}"
                     )))
                 }
             }
@@ -269,7 +273,7 @@ impl Parser {
         })
     }
 
-    fn parse_def(&mut self) -> Result<FunDef, ParseError> {
+    fn parse_def(&mut self, is_private: bool) -> Result<FunDef, ParseError> {
         self.expect(&Token::Def)?;
         let (name, _) = self.expect_ident()?;
         self.expect(&Token::LParen)?;
@@ -298,6 +302,7 @@ impl Parser {
         Ok(FunDef {
             module: self.module.clone(),
             name,
+            is_private,
             params,
             ret,
             body,
@@ -1118,6 +1123,20 @@ def add1(n: Int): Int = n + 1
         let p = parse(src).unwrap();
         assert_eq!(p.defs.len(), 1);
         assert!(matches!(p.main.body.kind, ExprKind::If { .. }));
+    }
+
+    #[test]
+    fn parse_private_def() {
+        let src = r#"
+private def helper(): String = "x"
+def tag(): String = helper()
+@main def main: IO[Unit] = IO.println(tag())
+"#;
+        let p = parse(src).unwrap();
+        assert_eq!(p.defs.len(), 2);
+        assert!(p.defs[0].is_private);
+        assert!(!p.defs[1].is_private);
+        assert_eq!(p.defs[0].name, "helper");
     }
 
     #[test]

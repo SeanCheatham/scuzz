@@ -13,7 +13,7 @@ def skipLineComment(source: String, i: Int): Int =
   if (i >= Str.len(source)) i else if (Str.charAt(source, i) == 10) skipTrivia(source, i + 1) else skipLineComment(source, i + 1)
 
 def kwToken(name: String, start: Int, end: Int): Tok =
-  if (streq(name, "package") == 1) Tok.Sym("Package", start, end) else if (streq(name, "enum") == 1) Tok.Sym("Enum", start, end) else if (streq(name, "case") == 1) Tok.Sym("Case", start, end) else if (streq(name, "match") == 1) Tok.Sym("Match", start, end) else if (streq(name, "def") == 1) Tok.Sym("Def", start, end) else if (streq(name, "for") == 1) Tok.Sym("For", start, end) else if (streq(name, "yield") == 1) Tok.Sym("Yield", start, end) else if (streq(name, "if") == 1) Tok.Sym("If", start, end) else if (streq(name, "else") == 1) Tok.Sym("Else", start, end) else Tok.Ident(name, start, end)
+  if (streq(name, "package") == 1) Tok.Sym("Package", start, end) else if (streq(name, "enum") == 1) Tok.Sym("Enum", start, end) else if (streq(name, "case") == 1) Tok.Sym("Case", start, end) else if (streq(name, "match") == 1) Tok.Sym("Match", start, end) else if (streq(name, "def") == 1) Tok.Sym("Def", start, end) else if (streq(name, "private") == 1) Tok.Sym("Private", start, end) else if (streq(name, "for") == 1) Tok.Sym("For", start, end) else if (streq(name, "yield") == 1) Tok.Sym("Yield", start, end) else if (streq(name, "if") == 1) Tok.Sym("If", start, end) else if (streq(name, "else") == 1) Tok.Sym("Else", start, end) else Tok.Ident(name, start, end)
 
 def lexIdentEnd(source: String, i: Int): Int =
   if (i >= Str.len(source)) i else if (isIdentChar(Str.charAt(source, i)) == 1) lexIdentEnd(source, i + 1) else i

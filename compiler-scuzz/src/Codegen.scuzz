@@ -145,32 +145,37 @@ def findWildArmPat(pat: Pattern, arm: MatchArm, rest: List): List =
 
 def defName(d: Def): String =
   d match {
-    case Def.Def(name, params, ret, body, module) => name
+    case Def.Def(name, params, ret, body, module, isPrivate) => name
   }
 
 def defParams(d: Def): List =
   d match {
-    case Def.Def(name, params, ret, body, module) => params
+    case Def.Def(name, params, ret, body, module, isPrivate) => params
   }
 
 def defRet(d: Def): Type =
   d match {
-    case Def.Def(name, params, ret, body, module) => ret
+    case Def.Def(name, params, ret, body, module, isPrivate) => ret
   }
 
 def defBody(d: Def): Expr =
   d match {
-    case Def.Def(name, params, ret, body, module) => body
+    case Def.Def(name, params, ret, body, module, isPrivate) => body
   }
 
 def defModule(d: Def): String =
   d match {
-    case Def.Def(name, params, ret, body, module) => module
+    case Def.Def(name, params, ret, body, module, isPrivate) => module
+  }
+
+def defIsPrivate(d: Def): Int =
+  d match {
+    case Def.Def(name, params, ret, body, module, isPrivate) => isPrivate
   }
 
 def setDefModule(d: Def, mod: String): Def =
   d match {
-    case Def.Def(name, params, ret, body, module) => Def.Def(name, params, ret, body, mod)
+    case Def.Def(name, params, ret, body, module, isPrivate) => Def.Def(name, params, ret, body, mod, isPrivate)
   }
 
 def stampDefsModule(defs: List, mod: String): List =
@@ -192,8 +197,20 @@ def funHit(d: Def): List =
 def funAmbiguous(): List =
   List.cons("Ambiguous", List.empty())
 
+def funPrivate(module: String, name: String): List =
+  List.cons("Private", List.cons(module, List.cons(name, List.empty())))
+
 def resolvedDef(d: List): Def =
   List.head(List.tail(d))
+
+def resolvePrivateModule(d: List): String =
+  List.head(List.tail(d))
+
+def resolvePrivateName(d: List): String =
+  List.head(List.tail(List.tail(d)))
+
+def defVisibleFrom(d: Def, currentModule: String): Int =
+  if (defIsPrivate(d) == 0) 1 else if (streq(defModule(d), currentModule) == 1) 1 else 0
 
 def enumHit(e: EnumDef): List =
   List.cons(e, List.empty())
@@ -231,26 +248,34 @@ def findDefByQual(defs: List, module: String, name: String): List =
 def collectDefsByName(defs: List, name: String, acc: List): List =
   if (List.isEmpty(defs) == 1) List.reverse(acc) else if (streq(defName(List.head(defs)), name) == 1) collectDefsByName(List.tail(defs), name, List.cons(List.head(defs), acc)) else collectDefsByName(List.tail(defs), name, acc)
 
-def resolveFunQual(defs: List, module: String, name: String): List =
-  findDefByQual(defs, module, name)
+def collectVisibleDefsByName(defs: List, name: String, currentModule: String, acc: List): List =
+  if (List.isEmpty(defs) == 1) List.reverse(acc) else if (streq(defName(List.head(defs)), name) == 1) if (defVisibleFrom(List.head(defs), currentModule) == 1) collectVisibleDefsByName(List.tail(defs), name, currentModule, List.cons(List.head(defs), acc)) else collectVisibleDefsByName(List.tail(defs), name, currentModule, acc) else collectVisibleDefsByName(List.tail(defs), name, currentModule, acc)
 
-def resolveFunBareUnique(defs: List, name: String): List =
+def resolveFunQual(defs: List, module: String, name: String, currentModule: String): List =
   for {
-    hits = collectDefsByName(defs, name, List.empty())
+    hit = findDefByQual(defs, module, name)
+  } yield if (List.isEmpty(hit) == 1) List.empty() else if (defVisibleFrom(resolvedDef(hit), currentModule) == 0) funPrivate(module, name) else hit
+
+def resolveFunBareUnique(defs: List, name: String, currentModule: String): List =
+  for {
+    hits = collectVisibleDefsByName(defs, name, currentModule, List.empty())
   } yield if (List.isEmpty(hits) == 1) List.empty() else if (List.isEmpty(List.tail(hits)) == 1) funHit(List.head(hits)) else funAmbiguous()
 
 def resolveFunBare(defs: List, name: String, currentModule: String): List =
   for {
     local = findDefByQual(defs, currentModule, name)
-  } yield if (List.isEmpty(local) == 0) local else resolveFunBareUnique(defs, name)
+  } yield if (List.isEmpty(local) == 0) local else resolveFunBareUnique(defs, name, currentModule)
 
 def resolveFun(defs: List, callee: String, currentModule: String): List =
   for {
     parts = splitDotted(callee)
-  } yield if (List.isEmpty(parts) == 0) resolveFunQual(defs, List.head(parts), List.head(List.tail(parts))) else resolveFunBare(defs, callee, currentModule)
+  } yield if (List.isEmpty(parts) == 0) resolveFunQual(defs, List.head(parts), List.head(List.tail(parts)), currentModule) else resolveFunBare(defs, callee, currentModule)
 
 def resolveIsAmbiguous(d: List): Int =
   if (List.isEmpty(d) == 1) 0 else if (streq(List.head(d), "Ambiguous") == 1) 1 else 0
+
+def resolveIsPrivate(d: List): Int =
+  if (List.isEmpty(d) == 1) 0 else if (streq(List.head(d), "Private") == 1) 1 else 0
 
 def strContains(strs: List, s: String): Int =
   if (List.isEmpty(strs) == 1) 0 else if (streq(List.head(strs), s) == 1) 1 else strContains(List.tail(strs), s)
@@ -955,7 +980,7 @@ def emitListLitRevAfterCons(rest: List, strs: List, ctx: List, env: List, prefix
 def emitUserCall(callee: String, code: String, vals: List, kinds: List, id: Int, conts: String, ctx: List, prefix: String): Emit =
   for {
     d = resolveFun(ctxDefs(ctx), callee, ctxModule(ctx))
-  } yield if (List.isEmpty(d) == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @sz_user_", callee, "()\n")), str3("%", prefix, "_v"), EmitKind.Ptr, id, conts) else if (resolveIsAmbiguous(d) == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @sz_user_", callee, "()\n")), str3("%", prefix, "_v"), EmitKind.Ptr, id, conts) else emitUserCallDef(code, vals, kinds, id, conts, resolvedDef(d), prefix)
+  } yield if (List.isEmpty(d) == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @sz_user_", callee, "()\n")), str3("%", prefix, "_v"), EmitKind.Ptr, id, conts) else if (resolveIsAmbiguous(d) == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @sz_user_", callee, "()\n")), str3("%", prefix, "_v"), EmitKind.Ptr, id, conts) else if (resolveIsPrivate(d) == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @sz_user_", callee, "()\n")), str3("%", prefix, "_v"), EmitKind.Ptr, id, conts) else emitUserCallDef(code, vals, kinds, id, conts, resolvedDef(d), prefix)
 
 def emitUserCallDef(code: String, vals: List, kinds: List, id: Int, conts: String, d: Def, prefix: String): Emit =
   for {

@@ -1,1 +1,3 @@
-def tag(): String = "a"
+private def hidden(): String = "a"
+
+def tag(): String = hidden()
