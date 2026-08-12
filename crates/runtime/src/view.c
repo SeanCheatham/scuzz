@@ -56,6 +56,10 @@ struct SzView {
   /* View.each: rebuild children from Signal.list at layout (pull). */
   SzSignalList *each_sig;
   SzList *each_seen; /* last synced list pointer (not owned) */
+
+  /* View.align: 0=start, 1=center, 2=end on each axis. */
+  int align_x;
+  int align_y;
 };
 
 static SzView *view_new(SzViewKind kind) {
@@ -88,7 +92,7 @@ static int view_accepts_children(SzViewKind kind) {
   return kind == SZ_VIEW_COLUMN || kind == SZ_VIEW_ROW ||
          kind == SZ_VIEW_LIST || kind == SZ_VIEW_SCROLL ||
          kind == SZ_VIEW_EXPANDED || kind == SZ_VIEW_CENTER ||
-         kind == SZ_VIEW_STACK;
+         kind == SZ_VIEW_ALIGN || kind == SZ_VIEW_STACK;
 }
 
 SzViewKind sz_view_kind(const SzView *view) {
@@ -274,6 +278,23 @@ SzView *sz_view_expanded(SzView *child) {
 
 SzView *sz_view_center(SzView *child) {
   SzView *v = view_new(SZ_VIEW_CENTER);
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
+static int clamp_align(int a) {
+  if (a < 0)
+    return 0;
+  if (a > 2)
+    return 2;
+  return a;
+}
+
+SzView *sz_view_align(int ax, int ay, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_ALIGN);
+  v->align_x = clamp_align(ax);
+  v->align_y = clamp_align(ay);
   if (child)
     sz_view_add_child(v, child);
   return v;
@@ -517,10 +538,15 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
     }
     break;
   }
-  case SZ_VIEW_CENTER: {
+  case SZ_VIEW_CENTER:
+  case SZ_VIEW_ALIGN: {
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
     float cw = 0.f;
     float chh = 0.f;
+    int ax = v->kind == SZ_VIEW_ALIGN ? v->align_x : 1;
+    int ay = v->kind == SZ_VIEW_ALIGN ? v->align_y : 1;
+    float ox;
+    float oy;
     if (ch)
       layout_node(ch, x, y, max_w, max_h, theme);
     if (ch) {
@@ -529,10 +555,22 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
     }
     v->frame.w = max_w > 0.f ? max_w : cw;
     v->frame.h = max_h > 0.f ? max_h : chh;
+    if (ax <= 0)
+      ox = 0.f;
+    else if (ax >= 2)
+      ox = v->frame.w > cw ? v->frame.w - cw : 0.f;
+    else
+      ox = (v->frame.w - cw) * 0.5f;
+    if (ay <= 0)
+      oy = 0.f;
+    else if (ay >= 2)
+      oy = v->frame.h > chh ? v->frame.h - chh : 0.f;
+    else
+      oy = (v->frame.h - chh) * 0.5f;
     if (ch) {
-      ch->frame.x = x + (v->frame.w - cw) * 0.5f;
-      ch->frame.y = y + (v->frame.h - chh) * 0.5f;
-      /* Re-layout nested children at the centered origin. */
+      ch->frame.x = x + ox;
+      ch->frame.y = y + oy;
+      /* Re-layout nested children at the aligned origin. */
       layout_node(ch, ch->frame.x, ch->frame.y, cw, chh, theme);
       ch->frame.w = cw;
       ch->frame.h = chh;
@@ -801,6 +839,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_SCROLL:
   case SZ_VIEW_EXPANDED:
   case SZ_VIEW_CENTER:
+  case SZ_VIEW_ALIGN:
   case SZ_VIEW_STACK:
     if (v->kind == SZ_VIEW_LIST || v->kind == SZ_VIEW_SCROLL)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);

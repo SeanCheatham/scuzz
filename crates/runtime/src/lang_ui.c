@@ -82,6 +82,9 @@ SzView *sz_lang_view_each(SzSignalList *sig) { return sz_view_each(sig); }
 SzView *sz_lang_view_scroll(SzView *child) { return sz_view_scroll(child); }
 SzView *sz_lang_view_expanded(SzView *child) { return sz_view_expanded(child); }
 SzView *sz_lang_view_center(SzView *child) { return sz_view_center(child); }
+SzView *sz_lang_view_align(int64_t ax, int64_t ay, SzView *child) {
+  return sz_view_align((int)ax, (int)ay, child);
+}
 
 SzView *sz_lang_view_text_field(SzSignalStr *text, SzString *placeholder) {
   return sz_view_text_field(text, placeholder ? sz_string_cstr(placeholder) : "");

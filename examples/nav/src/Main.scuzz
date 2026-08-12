@@ -20,7 +20,7 @@
         View.button("Other", _ => Signal.set(page, 1))
       ),
       View.showWhen(page, 0, home),
-      View.showWhen(page, 1, other)
+      View.showWhen(page, 1, View.expanded(View.align(2, 2, other)))
     )
     _ <- Ui.run(root)
   } yield ()

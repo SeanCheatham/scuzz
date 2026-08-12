@@ -127,6 +127,7 @@ typedef enum SzViewKind {
   SZ_VIEW_SCROLL,
   SZ_VIEW_EXPANDED, /* Column/Row flex child: leftover height or width */
   SZ_VIEW_CENTER,   /* fill max constraints; center child */
+  SZ_VIEW_ALIGN,    /* fill max; place child 0=start 1=center 2=end */
   SZ_VIEW_STACK,    /* overlay children; paint back-to-front */
   SZ_VIEW_IMAGE,
   SZ_VIEW_ICON,
@@ -158,6 +159,8 @@ SzView *sz_view_scroll(SzView *child);
 /* Column leftover height or Row leftover width after non-Expanded siblings. */
 SzView *sz_view_expanded(SzView *child);
 SzView *sz_view_center(SzView *child);
+/* ax/ay: 0=start (left/top), 1=center, 2=end (right/bottom). */
+SzView *sz_view_align(int ax, int ay, SzView *child);
 SzView *sz_view_image(int w, int h, uint32_t argb, const char *caption);
 SzView *sz_view_icon(char glyph, uint32_t argb);
 /* Full-bleed bg + bar that toggles colors on tap (C unit-test helper). */
@@ -255,6 +258,7 @@ SzView *sz_lang_view_each(SzSignalList *sig);
 SzView *sz_lang_view_scroll(SzView *child);
 SzView *sz_lang_view_expanded(SzView *child);
 SzView *sz_lang_view_center(SzView *child);
+SzView *sz_lang_view_align(int64_t ax, int64_t ay, SzView *child);
 SzView *sz_lang_view_text_field(SzSignalStr *text, SzString *placeholder);
 SzView *sz_lang_view_icon(int64_t glyph, int64_t argb);
 SzView *sz_lang_view_image(int64_t w, int64_t h, int64_t argb, SzString *caption);

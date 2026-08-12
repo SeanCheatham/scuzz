@@ -342,6 +342,36 @@ static void test_center(void) {
   sz_view_free(center);
 }
 
+static void test_align(void) {
+  SzView *align, *child;
+  const SzTheme *theme = sz_theme_default();
+  float max_w = 300.f;
+  float max_h = 200.f;
+  SzRect af, chf;
+
+  child = sz_view_text("Hi");
+  align = sz_view_align(2, 2, child);
+  sz_view_layout(align, max_w, max_h, theme);
+  assert(sz_view_kind(align) == SZ_VIEW_ALIGN);
+  af = sz_view_frame(align);
+  chf = sz_view_frame(child);
+  assert(af.w == max_w);
+  assert(af.h == max_h);
+  assert(chf.w > 0.f && chf.h > 0.f);
+  assert(fabsf(chf.x - (af.x + af.w - chf.w)) < 0.5f);
+  assert(fabsf(chf.y - (af.y + af.h - chf.h)) < 0.5f);
+  sz_view_free(align);
+
+  child = sz_view_text("Hi");
+  align = sz_view_align(0, 0, child);
+  sz_view_layout(align, max_w, max_h, theme);
+  chf = sz_view_frame(child);
+  af = sz_view_frame(align);
+  assert(fabsf(chf.x - af.x) < 0.5f);
+  assert(fabsf(chf.y - af.y) < 0.5f);
+  sz_view_free(align);
+}
+
 static void test_stack(void) {
   SzView *stack, *bot, *top;
   const SzTheme *theme = sz_theme_default();
@@ -722,6 +752,7 @@ int main(void) {
   test_expanded_column();
   test_expanded_row();
   test_center();
+  test_align();
   test_stack();
   test_mobile_pointer_scroll_lifecycle();
   test_a11y_and_anim();
