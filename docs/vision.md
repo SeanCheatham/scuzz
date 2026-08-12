@@ -8,7 +8,7 @@ Edit this file when a decision or next-step ordering changes.
 
 ## Thesis
 
-- **Language**: purposeful Scala-inspired subset for UI apps, native CLI/server-shaped `IO` programs, and native codegen, with **built-in effect/IO** (Cats Effect spirit, not a cats port). Aim: denser expr dialect (`for` as primary binder) — see [Language direction](#language-direction) below.
+- **Language**: purposeful Scala-inspired subset for UI apps, native CLI/server-shaped `IO` programs, and native codegen, with **built-in effect/IO/Streaming** (Cats Effect and FS2 spirit, not a cats/fs2 port). Aim: denser expr dialect (`for` as primary binder) — see [Language direction](#language-direction) below.
 - **Runtime**: custom native (LLVM). No JVM, no Java interop, no classpath/Maven.
 - **UI**: primary product face — one design language + Skia, as a **`Ui` effect** with Headless/Window/Mobile interpreters.
 - **Tooling**: one CLI (`scuzz`) for compile, link, assets, hot reload, packaging, deterministic `scuzz fuzz` over module **laws** + **sim** overlays.
