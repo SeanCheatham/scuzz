@@ -20,7 +20,7 @@ pub fn emit_llvm(program: &Program) -> String {
 
     let enum_tags = build_enum_tags(&program.enums);
     let enum_payloads = build_enum_payloads(&program.enums);
-    let funs = FunIndex::build(&program.defs).expect("duplicate defs should be rejected earlier");
+    let funs = FunIndex::build(&program.defs, &program.imports).expect("duplicate defs should be rejected earlier");
 
     let mut out = String::new();
     writeln!(out, "; Scuzz Lang Stage-0 generated LLVM IR").unwrap();

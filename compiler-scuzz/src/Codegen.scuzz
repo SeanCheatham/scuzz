@@ -2,27 +2,32 @@ package scuzz.compiler
 
 def progPkg(p: Prog): String =
   p match {
-    case Prog.Prog(pkg, enums, defs, main, mainModule) => pkg
+    case Prog.Prog(pkg, enums, defs, main, mainModule, imports) => pkg
   }
 
 def progEnums(p: Prog): List =
   p match {
-    case Prog.Prog(pkg, enums, defs, main, mainModule) => enums
+    case Prog.Prog(pkg, enums, defs, main, mainModule, imports) => enums
   }
 
 def progDefs(p: Prog): List =
   p match {
-    case Prog.Prog(pkg, enums, defs, main, mainModule) => defs
+    case Prog.Prog(pkg, enums, defs, main, mainModule, imports) => defs
   }
 
 def progMain(p: Prog): Expr =
   p match {
-    case Prog.Prog(pkg, enums, defs, main, mainModule) => main
+    case Prog.Prog(pkg, enums, defs, main, mainModule, imports) => main
   }
 
 def progMainModule(p: Prog): String =
   p match {
-    case Prog.Prog(pkg, enums, defs, main, mainModule) => mainModule
+    case Prog.Prog(pkg, enums, defs, main, mainModule, imports) => mainModule
+  }
+
+def progImports(p: Prog): List =
+  p match {
+    case Prog.Prog(pkg, enums, defs, main, mainModule, imports) => imports
   }
 
 def enumName(e: EnumDef): String =
@@ -55,8 +60,8 @@ def fieldType(f: EnumField): Type =
     case EnumField.Field(name, ty) => ty
   }
 
-def emitCtx(defs: List, tags: List, payloads: List, mod: String): List =
-  List.cons(defs, List.cons(tags, List.cons(payloads, List.cons(mod, List.empty()))))
+def emitCtx(defs: List, tags: List, payloads: List, mod: String, imports: List): List =
+  List.cons(defs, List.cons(tags, List.cons(payloads, List.cons(mod, List.cons(imports, List.empty())))))
 
 def ctxDefs(ctx: List): List =
   List.head(ctx)
@@ -70,8 +75,11 @@ def ctxPayloads(ctx: List): List =
 def ctxModule(ctx: List): String =
   List.head(List.tail(List.tail(List.tail(ctx))))
 
+def ctxImports(ctx: List): List =
+  List.head(List.tail(List.tail(List.tail(List.tail(ctx)))))
+
 def setCtxModule(ctx: List, mod: String): List =
-  emitCtx(ctxDefs(ctx), ctxTags(ctx), ctxPayloads(ctx), mod)
+  emitCtx(ctxDefs(ctx), ctxTags(ctx), ctxPayloads(ctx), mod, ctxImports(ctx))
 
 def buildEnumTags(enums: List): List =
   buildEnumTagsAcc(enums, List.empty())
@@ -261,15 +269,38 @@ def resolveFunBareUnique(defs: List, name: String, currentModule: String): List 
     hits = collectVisibleDefsByName(defs, name, currentModule, List.empty())
   } yield if (List.isEmpty(hits) == 1) List.empty() else if (List.isEmpty(List.tail(hits)) == 1) funHit(List.head(hits)) else funAmbiguous()
 
-def resolveFunBare(defs: List, name: String, currentModule: String): List =
+def importInModule(im: Import): String =
+  im match {
+    case Import.Import(inModule, fromModule, name) => inModule
+  }
+
+def importFromModule(im: Import): String =
+  im match {
+    case Import.Import(inModule, fromModule, name) => fromModule
+  }
+
+def importName(im: Import): String =
+  im match {
+    case Import.Import(inModule, fromModule, name) => name
+  }
+
+def findImport(imports: List, inModule: String, name: String): List =
+  if (List.isEmpty(imports) == 1) List.empty() else if (streq(importInModule(List.head(imports)), inModule) == 1) if (streq(importName(List.head(imports)), name) == 1) List.cons(List.head(imports), List.empty()) else findImport(List.tail(imports), inModule, name) else findImport(List.tail(imports), inModule, name)
+
+def resolveFunImport(defs: List, imports: List, name: String, currentModule: String): List =
+  for {
+    hit = findImport(imports, currentModule, name)
+  } yield if (List.isEmpty(hit) == 1) resolveFunBareUnique(defs, name, currentModule) else findDefByQual(defs, importFromModule(List.head(hit)), name)
+
+def resolveFunBare(defs: List, imports: List, name: String, currentModule: String): List =
   for {
     local = findDefByQual(defs, currentModule, name)
-  } yield if (List.isEmpty(local) == 0) local else resolveFunBareUnique(defs, name, currentModule)
+  } yield if (List.isEmpty(local) == 0) local else resolveFunImport(defs, imports, name, currentModule)
 
-def resolveFun(defs: List, callee: String, currentModule: String): List =
+def resolveFun(defs: List, imports: List, callee: String, currentModule: String): List =
   for {
     parts = splitDotted(callee)
-  } yield if (List.isEmpty(parts) == 0) resolveFunQual(defs, List.head(parts), List.head(List.tail(parts)), currentModule) else resolveFunBare(defs, callee, currentModule)
+  } yield if (List.isEmpty(parts) == 0) resolveFunQual(defs, List.head(parts), List.head(List.tail(parts)), currentModule) else resolveFunBare(defs, imports, callee, currentModule)
 
 def resolveIsAmbiguous(d: List): Int =
   if (List.isEmpty(d) == 1) 0 else if (streq(List.head(d), "Ambiguous") == 1) 1 else 0
@@ -345,7 +376,7 @@ def runtimeDeclares(): String =
   Str.concat(runtimeDeclaresA(), Str.concat(runtimeDeclaresB(), runtimeDeclaresC()))
 
 def runtimeDeclaresA(): String =
-  str5("declare ptr @sz_string_from_cstr(ptr)\ndeclare ptr @sz_string_cstr(ptr)\n", "declare ptr @sz_string_concat(ptr, ptr)\ndeclare i64 @sz_string_len(ptr)\n", "declare ptr @sz_string_slice(ptr, i64, i64)\ndeclare i32 @sz_string_eq(ptr, ptr)\n", "declare i64 @sz_string_char_at(ptr, i64)\ndeclare ptr @sz_string_from_int(i64)\n", str5("declare i64 @sz_string_index_of(ptr, ptr)\ndeclare ptr @sz_io_println(ptr)\n", "declare ptr @sz_io_pure(ptr)\ndeclare ptr @sz_io_delay(ptr, ptr)\n", "declare ptr @sz_io_flatmap(ptr, ptr, ptr)\ndeclare ptr @sz_io_fail_cstr(ptr)\n", "declare ptr @sz_io_sleep_ms(i64)\ndeclare ptr @sz_io_handle_error_with(ptr, ptr, ptr)\n", str5("declare ptr @sz_io_attempt(ptr)\ndeclare ptr @sz_io_race(ptr, ptr)\n", "declare ptr @sz_io_both(ptr, ptr)\ndeclare ptr @sz_adt_new(i32, ptr)\n", "declare i32 @sz_adt_tag(ptr)\ndeclare ptr @sz_adt_payload(ptr)\n", "")))
+  str5("declare ptr @sz_string_from_cstr(ptr)\ndeclare ptr @sz_string_cstr(ptr)\n", "declare ptr @sz_string_concat(ptr, ptr)\ndeclare i64 @sz_string_len(ptr)\n", "declare ptr @sz_string_slice(ptr, i64, i64)\ndeclare i32 @sz_string_eq(ptr, ptr)\n", "declare i64 @sz_string_char_at(ptr, i64)\ndeclare ptr @sz_string_from_int(i64)\n", str5("declare i64 @sz_string_index_of(ptr, ptr)\ndeclare ptr @sz_io_println(ptr)\n", "declare ptr @sz_io_pure(ptr)\ndeclare ptr @sz_io_delay(ptr, ptr)\n", "declare ptr @sz_io_flatmap(ptr, ptr, ptr)\ndeclare ptr @sz_io_fail_cstr(ptr)\n", "declare ptr @sz_io_sleep_ms(i64)\ndeclare ptr @sz_io_handle_error_with(ptr, ptr, ptr)\n", str4("declare ptr @sz_io_attempt(ptr)\ndeclare ptr @sz_io_race(ptr, ptr)\n", "declare ptr @sz_io_both(ptr, ptr)\ndeclare ptr @sz_adt_new(i32, ptr)\n", "declare i32 @sz_adt_tag(ptr)\ndeclare ptr @sz_adt_payload(ptr)\n", "")))
 
 def runtimeDeclaresB(): String =
   str5("declare ptr @sz_list_nil()\n", "declare i32 @sz_list_is_empty(ptr)\ndeclare ptr @sz_list_cons(ptr, ptr)\n", "declare ptr @sz_list_head(ptr)\ndeclare ptr @sz_list_tail(ptr)\n", "declare i64 @sz_list_len(ptr)\ndeclare ptr @sz_list_at(ptr, i64)\n", str5("declare ptr @sz_list_reverse(ptr)\ndeclare ptr @sz_list_join(ptr, ptr)\n", "declare ptr @sz_list_append(ptr, ptr)\ndeclare ptr @sz_fs_read(ptr)\n", "declare ptr @sz_fs_write(ptr, ptr)\ndeclare ptr @sz_fs_list(ptr)\n", "declare ptr @sz_fs_mkdirs(ptr)\ndeclare ptr @sz_fs_canonicalize(ptr)\ndeclare ptr @sz_sys_args()\n", str5("declare ptr @sz_sys_read_line()\ndeclare ptr @sz_sys_exec(ptr)\ndeclare ptr @sz_sys_getenv(ptr)\n", "declare ptr @sz_clock_real_time()\ndeclare ptr @sz_clock_monotonic()\n", "declare ptr @sz_random_next_int(i64)\ndeclare ptr @sz_net_http_get(ptr)\n", "declare ptr @sz_impurity_run_kit()\ndeclare ptr @sz_ref_of(ptr)\ndeclare ptr @sz_ref_get(ptr)\ndeclare ptr @sz_ref_set(ptr, ptr)\ndeclare ptr @sz_queue_unbounded()\ndeclare ptr @sz_queue_offer(ptr, ptr)\ndeclare ptr @sz_queue_take(ptr)\ndeclare ptr @sz_deferred_empty()\ndeclare ptr @sz_deferred_complete(ptr, ptr)\ndeclare ptr @sz_deferred_get(ptr)\ndeclare ptr @sz_lang_signal_int(i64)\n", str5("declare i64 @sz_lang_signal_get(ptr)\ndeclare ptr @sz_lang_signal_set(ptr, i64)\n", "declare ptr @sz_lang_signal_str(ptr)\ndeclare ptr @sz_lang_signal_str_get(ptr)\n", "declare ptr @sz_lang_signal_str_set(ptr, ptr)\ndeclare ptr @sz_lang_signal_list(ptr)\n", "declare ptr @sz_lang_signal_list_get(ptr)\ndeclare ptr @sz_lang_signal_list_set(ptr, ptr)\n", str3("declare ptr @sz_string_lines(ptr)\n", "declare { i32, ptr, ptr } @sz_io_unsafe_run(ptr)\n", "")))))
@@ -988,7 +1019,7 @@ def emitListLitRevAfterCons(rest: List, strs: List, ctx: List, env: List, prefix
 
 def emitUserCall(callee: String, code: String, vals: List, kinds: List, id: Int, conts: String, ctx: List, prefix: String): Emit =
   for {
-    d = resolveFun(ctxDefs(ctx), callee, ctxModule(ctx))
+    d = resolveFun(ctxDefs(ctx), ctxImports(ctx), callee, ctxModule(ctx))
   } yield if (List.isEmpty(d) == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @sz_user_", callee, "()\n")), str3("%", prefix, "_v"), EmitKind.Ptr, id, conts) else if (resolveIsAmbiguous(d) == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @sz_user_", callee, "()\n")), str3("%", prefix, "_v"), EmitKind.Ptr, id, conts) else if (resolveIsPrivate(d) == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @sz_user_", callee, "()\n")), str3("%", prefix, "_v"), EmitKind.Ptr, id, conts) else emitUserCallDef(code, vals, kinds, id, conts, resolvedDef(d), prefix)
 
 def emitUserCallDef(code: String, vals: List, kinds: List, id: Int, conts: String, d: Def, prefix: String): Emit =
@@ -1064,7 +1095,7 @@ def emitProgram(prog: Prog): String =
     strs = collectProgram(prog)
     tags = buildEnumTags(progEnums(prog))
     payloads = buildEnumPayloads(progEnums(prog))
-    ctx = emitCtx(progDefs(prog), tags, payloads, "")
+    ctx = emitCtx(progDefs(prog), tags, payloads, "", progImports(prog))
     header = emitHeader(strs)
     defsIr = emitDefs(progDefs(prog), strs, ctx, 0, "", "")
   } yield Str.concat(header, emitMain(prog, strs, ctx, defsIr))

@@ -9,8 +9,18 @@ pub struct Program {
     pub enums: Vec<EnumDef>,
     pub defs: Vec<FunDef>,
     pub main: MainDef,
+    /// `import Module.name` — bare `name` in `in_module` resolves to `from_module.name`.
+    pub imports: Vec<Import>,
     /// Law def names residualized under TestRuntime (empty for live builds).
     pub law_names: Vec<String>,
+}
+
+/// Top-level `import FromModule.name` in file-stem module `in_module`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Import {
+    pub in_module: String,
+    pub from_module: String,
+    pub name: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

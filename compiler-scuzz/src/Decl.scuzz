@@ -6,6 +6,9 @@ enum Param:
 enum Def:
   case Def(name: String, params: List, ret: Type, body: Expr, module: String, isPrivate: Int)
 
+enum Import:
+  case Import(inModule: String, fromModule: String, name: String)
+
 enum Prog:
-  case Prog(pkg: String, enums: List, defs: List, main: Expr, mainModule: String)
+  case Prog(pkg: String, enums: List, defs: List, main: Expr, mainModule: String, imports: List)
 

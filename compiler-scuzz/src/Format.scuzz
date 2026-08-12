@@ -40,16 +40,22 @@ def formatSource(source: String): String =
   prettyProg(parseSource("", source))
 
 def prettyProg(p: Prog): String =
-  prettyProgParts(progPkg(p), progEnums(p), progDefs(p), progMain(p))
+  prettyProgParts(progPkg(p), progEnums(p), progImports(p), progDefs(p), progMain(p))
 
-def prettyProgParts(pkg: String, enums: List, defs: List, main: Expr): String =
+def prettyProgParts(pkg: String, enums: List, imports: List, defs: List, main: Expr): String =
   for {
     head = prettyPkg(pkg)
-    mid = Str.concat(prettyEnums(enums, ""), prettyDefs(defs, ""))
+    mid = str3(prettyEnums(enums, ""), prettyImports(imports, ""), prettyDefs(defs, ""))
   } yield if (isUnitExpr(main) == 1) Str.concat(head, mid) else str4(head, mid, "@main def main: IO[Unit] =\n", Str.concat(prettyExpr(main, 1), "\n"))
 
 def prettyPkg(pkg: String): String =
   if (Str.len(pkg) == 0) "" else str3("package ", pkg, "\n\n")
+
+def prettyImports(imports: List, acc: String): String =
+  if (List.isEmpty(imports) == 1) if (Str.len(acc) == 0) acc else Str.concat(acc, "\n") else prettyImports(List.tail(imports), Str.concat(acc, prettyImport(List.head(imports))))
+
+def prettyImport(im: Import): String =
+  str4("import ", importFromModule(im), ".", Str.concat(importName(im), "\n"))
 
 def prettyEnums(enums: List, acc: String): String =
   if (List.isEmpty(enums) == 1) acc else prettyEnums(List.tail(enums), Str.concat(acc, Str.concat(prettyEnum(List.head(enums)), "\n")))

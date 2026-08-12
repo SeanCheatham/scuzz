@@ -1,6 +1,6 @@
 use crate::ast::{
-    BinOp, EnumCase, EnumDef, Expr, ExprKind, ForBinder, FunDef, InterpPart, MainDef, MatchArm,
-    Param, Pattern, Program, Type,
+    BinOp, EnumCase, EnumDef, Expr, ExprKind, ForBinder, FunDef, Import, InterpPart, MainDef,
+    MatchArm, Param, Pattern, Program, Type,
 };
 use crate::lexer::{lex, InterpTok, LexError, SpannedToken, Token};
 use crate::resolve::module_id_from_label;
@@ -70,6 +70,7 @@ pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError
     let mut package: Option<Vec<String>> = None;
     let mut enums: Vec<EnumDef> = Vec::new();
     let mut defs: Vec<FunDef> = Vec::new();
+    let mut imports: Vec<Import> = Vec::new();
     let mut main: Option<MainDef> = None;
 
     for (name, src) in sources {
@@ -107,6 +108,7 @@ pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError
             }
             defs.push(d);
         }
+        imports.extend(prog.imports);
         if !prog.main.name.is_empty() {
             if main.is_some() {
                 return Err(ParseError::Msg(format!(
@@ -123,6 +125,7 @@ pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError
         enums,
         defs,
         main,
+        imports,
         law_names: Vec::new(),
     })
 }
@@ -212,6 +215,7 @@ impl Parser {
 
         let mut enums = Vec::new();
         let mut defs = Vec::new();
+        let mut imports = Vec::new();
         let mut main = MainDef {
             module: self.module.clone(),
             name: String::new(),
@@ -221,6 +225,7 @@ impl Parser {
         loop {
             match self.peek() {
                 Token::Enum => enums.push(self.parse_enum()?),
+                Token::Import => imports.push(self.parse_import()?),
                 Token::Private => {
                     self.bump();
                     defs.push(self.parse_def(true)?);
@@ -235,7 +240,7 @@ impl Parser {
                 Token::Eof => break,
                 other => {
                     return Err(self.err(format!(
-                        "expected enum/def/private def/@main, got {other:?}"
+                        "expected enum/import/def/private def/@main, got {other:?}"
                     )))
                 }
             }
@@ -246,7 +251,20 @@ impl Parser {
             enums,
             defs,
             main,
+            imports,
             law_names: Vec::new(),
+        })
+    }
+
+    fn parse_import(&mut self) -> Result<Import, ParseError> {
+        self.expect(&Token::Import)?;
+        let (from_module, _) = self.expect_ident()?;
+        self.expect(&Token::Dot)?;
+        let (name, _) = self.expect_ident()?;
+        Ok(Import {
+            in_module: self.module.clone(),
+            from_module,
+            name,
         })
     }
 

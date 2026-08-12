@@ -3,7 +3,7 @@ package scuzz.compiler
 def lowerProg(prog: Prog): Prog =
   for {
     ctors = enumCtors(progEnums(prog), List.empty())
-  } yield Prog.Prog(progPkg(prog), progEnums(prog), lowerDefs(progDefs(prog), ctors, List.empty()), lowerExpr(progMain(prog), ctors), progMainModule(prog))
+  } yield Prog.Prog(progPkg(prog), progEnums(prog), lowerDefs(progDefs(prog), ctors, List.empty()), lowerExpr(progMain(prog), ctors), progMainModule(prog), progImports(prog))
 
 def enumCtors(enums: List, acc: List): List =
   if (List.isEmpty(enums) == 1) acc else enumCtors(List.tail(enums), enumCtorsOne(List.head(enums), acc))

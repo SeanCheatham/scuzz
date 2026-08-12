@@ -45,7 +45,7 @@ pub fn typecheck(program: &Program) -> Result<(), TypeError> {
         .iter()
         .map(|e| (e.name.as_str(), e))
         .collect();
-    let funs = FunIndex::build(&program.defs).map_err(|e| match e {
+    let funs = FunIndex::build(&program.defs, &program.imports).map_err(|e| match e {
         ResolveError::Duplicate { module, name } => {
             TypeError::Msg(format!("duplicate def {module}.{name}"))
         }
@@ -1032,5 +1032,49 @@ enum Pair:
         .unwrap();
         let p = lower_program(p);
         typecheck(&p).expect("same-module private should typecheck");
+    }
+
+    #[test]
+    fn import_disambiguates_ambiguous_bare() {
+        let p = crate::parser::parse_sources(&[
+            (
+                "A.scuzz".into(),
+                "def tag(): String = \"a\"\n".into(),
+            ),
+            (
+                "B.scuzz".into(),
+                "def tag(): String = \"b\"\n".into(),
+            ),
+            (
+                "Main.scuzz".into(),
+                "import A.tag\n@main def main: IO[Unit] = IO.println(Str.concat(tag(), B.tag()))\n"
+                    .into(),
+            ),
+        ])
+        .unwrap();
+        let p = lower_program(p);
+        typecheck(&p).expect("import should disambiguate bare tag");
+    }
+
+    #[test]
+    fn cannot_import_private_def() {
+        let p = crate::parser::parse_sources(&[
+            (
+                "A.scuzz".into(),
+                "private def helper(): String = \"a\"\ndef tag(): String = helper()\n".into(),
+            ),
+            (
+                "Main.scuzz".into(),
+                "import A.helper\n@main def main: IO[Unit] = IO.println(helper())\n".into(),
+            ),
+        ])
+        .unwrap();
+        let p = lower_program(p);
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("private"),
+            "unexpected: {}",
+            err.message()
+        );
     }
 }

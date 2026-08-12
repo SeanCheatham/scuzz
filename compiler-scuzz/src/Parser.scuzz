@@ -487,10 +487,10 @@ def parseMain(file: String, tokens: List, i: Int): List =
     i3 = expectTok(tokens, pIdx(tyP), "Eq")
   } yield parseBlock(file, tokens, i3)
 
-def parseTop(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: Expr, mainMod: String): Prog =
+def parseTop(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: Expr, mainMod: String, imports: List): Prog =
   for {
     t = tokKind(tokAt(tokens, i))
-  } yield if (streq(t, "Eof") == 1) Prog.Prog(pkg, List.reverse(enums), List.reverse(defs), main, mainMod) else if (streq(t, "Enum") == 1) parseTopEnum(file, tokens, i + 1, pkg, enums, defs, main, mainMod) else if (streq(t, "Private") == 1) parseTopPrivateDef(file, tokens, i + 1, pkg, enums, defs, main, mainMod) else if (streq(t, "Def") == 1) parseTopDef(file, tokens, i + 1, pkg, enums, defs, main, mainMod) else if (streq(t, "AtMain") == 1) parseTopMain(file, tokens, i + 1, pkg, enums, defs) else parseTop(file, tokens, i + 1, pkg, enums, defs, main, mainMod)
+  } yield if (streq(t, "Eof") == 1) Prog.Prog(pkg, List.reverse(enums), List.reverse(defs), main, mainMod, List.reverse(imports)) else if (streq(t, "Enum") == 1) parseTopEnum(file, tokens, i + 1, pkg, enums, defs, main, mainMod, imports) else if (streq(t, "Import") == 1) parseTopImport(file, tokens, i + 1, pkg, enums, defs, main, mainMod, imports) else if (streq(t, "Private") == 1) parseTopPrivateDef(file, tokens, i + 1, pkg, enums, defs, main, mainMod, imports) else if (streq(t, "Def") == 1) parseTopDef(file, tokens, i + 1, pkg, enums, defs, main, mainMod, imports) else if (streq(t, "AtMain") == 1) parseTopMain(file, tokens, i + 1, pkg, enums, defs, imports) else parseTop(file, tokens, i + 1, pkg, enums, defs, main, mainMod, imports)
 
 def parseEnum(file: String, tokens: List, i: Int): List =
   for {
@@ -539,29 +539,37 @@ def parseEnumCaseFieldsEnd(file: String, tokens: List, i: Int, acc: List): List 
     i1 = expectTok(tokens, i, "RParen")
   } yield ok(List.reverse(acc), i1)
 
-def parseTopEnum(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: Expr, mainMod: String): Prog =
+def parseTopEnum(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: Expr, mainMod: String, imports: List): Prog =
   for {
     e = parseEnum(file, tokens, i)
-  } yield parseTop(file, tokens, pIdx(e), pkg, List.cons(pEnum(e), enums), defs, main, mainMod)
+  } yield parseTop(file, tokens, pIdx(e), pkg, List.cons(pEnum(e), enums), defs, main, mainMod, imports)
 
-def parseTopDef(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: Expr, mainMod: String): Prog =
+def parseTopDef(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: Expr, mainMod: String, imports: List): Prog =
   for {
     d = parseDef(file, tokens, i, 0)
-  } yield parseTop(file, tokens, pIdx(d), pkg, enums, List.cons(pDef(d), defs), main, mainMod)
+  } yield parseTop(file, tokens, pIdx(d), pkg, enums, List.cons(pDef(d), defs), main, mainMod, imports)
 
-def parseTopPrivateDef(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: Expr, mainMod: String): Prog =
+def parseTopPrivateDef(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: Expr, mainMod: String, imports: List): Prog =
   for {
     i1 = expectTok(tokens, i, "Def")
     d = parseDef(file, tokens, i1, 1)
-  } yield parseTop(file, tokens, pIdx(d), pkg, enums, List.cons(pDef(d), defs), main, mainMod)
+  } yield parseTop(file, tokens, pIdx(d), pkg, enums, List.cons(pDef(d), defs), main, mainMod, imports)
 
-def parseTopMain(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List): Prog =
+def parseTopImport(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, main: Expr, mainMod: String, imports: List): Prog =
+  for {
+    fromP = parseIdent(file, tokens, i)
+    i1 = expectTok(tokens, pIdx(fromP), "Dot")
+    nameP = parseIdent(file, tokens, i1)
+    im = Import.Import(moduleIdFromLabel(file), pStr(fromP), pStr(nameP))
+  } yield parseTop(file, tokens, pIdx(nameP), pkg, enums, defs, main, mainMod, List.cons(im, imports))
+
+def parseTopMain(file: String, tokens: List, i: Int, pkg: String, enums: List, defs: List, imports: List): Prog =
   for {
     m = parseMain(file, tokens, i)
-  } yield parseTop(file, tokens, pIdx(m), pkg, enums, defs, pExpr(m), moduleIdFromLabel(file))
+  } yield parseTop(file, tokens, pIdx(m), pkg, enums, defs, pExpr(m), moduleIdFromLabel(file), imports)
 
 def parseProgram(tokens: List, file: String): Prog =
   for {
     pkgP = parsePackage(file, tokens, 0)
-  } yield parseTop(file, tokens, pIdx(pkgP), pStr(pkgP), List.empty(), List.empty(), unitExpr(), "")
+  } yield parseTop(file, tokens, pIdx(pkgP), pStr(pkgP), List.empty(), List.empty(), unitExpr(), "", List.empty())
 

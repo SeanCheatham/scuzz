@@ -1,16 +1,16 @@
 package scuzz.compiler
 
 def emptyProg(): Prog =
-  Prog.Prog("", List.empty(), List.empty(), unitExpr(), "")
+  Prog.Prog("", List.empty(), List.empty(), unitExpr(), "", List.empty())
 
-def mkProg(pkg: String, enums: List, defs: List, main: Expr, mainMod: String): Prog =
-  Prog.Prog(pkg, enums, defs, main, mainMod)
+def mkProg(pkg: String, enums: List, defs: List, main: Expr, mainMod: String, imports: List): Prog =
+  Prog.Prog(pkg, enums, defs, main, mainMod, imports)
 
 def setProgDefs(prog: Prog, defs: List): Prog =
-  mkProg(progPkg(prog), progEnums(prog), defs, progMain(prog), progMainModule(prog))
+  mkProg(progPkg(prog), progEnums(prog), defs, progMain(prog), progMainModule(prog), progImports(prog))
 
 def setProgMain(prog: Prog, main: Expr): Prog =
-  mkProg(progPkg(prog), progEnums(prog), progDefs(prog), main, progMainModule(prog))
+  mkProg(progPkg(prog), progEnums(prog), progDefs(prog), main, progMainModule(prog), progImports(prog))
 
 def chooseMain(a: Expr, b: Expr): Expr =
   if (isUnitExpr(b) == 1) a else b
@@ -19,7 +19,7 @@ def chooseMainModule(accMain: Expr, pMain: Expr, accMod: String, pMod: String): 
   if (isUnitExpr(pMain) == 1) accMod else pMod
 
 def mergeProg(acc: Prog, p: Prog): Prog =
-  mkProg(progPkg(p), listConcat(progEnums(acc), progEnums(p)), listConcat(progDefs(acc), progDefs(p)), chooseMain(progMain(acc), progMain(p)), chooseMainModule(progMain(acc), progMain(p), progMainModule(acc), progMainModule(p)))
+  mkProg(progPkg(p), listConcat(progEnums(acc), progEnums(p)), listConcat(progDefs(acc), progDefs(p)), chooseMain(progMain(acc), progMain(p)), chooseMainModule(progMain(acc), progMain(p), progMainModule(acc), progMainModule(p)), listConcat(progImports(acc), progImports(p)))
 
 def parseSource(label: String, src: String): Prog =
   parseProgram(lex(src), label)

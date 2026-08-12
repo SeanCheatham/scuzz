@@ -62,8 +62,8 @@ def findDupDefOne(d: Def, rest: List, seen: List): String =
 def bindParams(params: List, env: List): List =
   if (List.isEmpty(params) == 1) env else bindParams(List.tail(params), tyEnvPut(env, paramName(List.head(params)), paramTy(List.head(params))))
 
-def mkFuns(mod: String, defs: List): List =
-  List.cons(mod, List.cons(defs, List.empty()))
+def mkFuns(mod: String, defs: List, imports: List): List =
+  List.cons(mod, List.cons(defs, List.cons(imports, List.empty())))
 
 def funsMod(funs: List): String =
   List.head(funs)
@@ -71,21 +71,45 @@ def funsMod(funs: List): String =
 def funsDefs(funs: List): List =
   List.head(List.tail(funs))
 
+def funsImports(funs: List): List =
+  List.head(List.tail(List.tail(funs)))
+
 def typecheckProg(prog: Prog): TyRes =
   for {
     dup = findDupDef(progDefs(prog), List.empty())
     defs = progDefs(prog)
-  } yield if (Str.len(dup) > 0) tyErr(str3("duplicate def ", dup, "")) else typecheckDefsThenMain(defs, progEnums(prog), defs, progMain(prog), progMainModule(prog))
+    imports = progImports(prog)
+    impErr = validateImports(imports, defs)
+  } yield if (Str.len(dup) > 0) tyErr(str3("duplicate def ", dup, "")) else if (Str.len(impErr) > 0) tyErr(impErr) else typecheckDefsThenMain(defs, progEnums(prog), defs, imports, progMain(prog), progMainModule(prog))
 
-def typecheckDefsThenMain(defs: List, enums: List, allDefs: List, main: Expr, mainMod: String): TyRes =
-  if (List.isEmpty(defs) == 1) checkMainTy(inferExpr(main, enums, mkFuns(mainMod, allDefs), List.empty())) else typecheckDefsThenMainOne(List.head(defs), List.tail(defs), enums, allDefs, main, mainMod)
+def importDupKey(im: Import): String =
+  str3(importInModule(im), ".", importName(im))
 
-def typecheckDefsThenMainOne(d: Def, rest: List, enums: List, allDefs: List, main: Expr, mainMod: String): TyRes =
+def validateImports(imports: List, defs: List): String =
+  validateImportsAcc(imports, defs, List.empty())
+
+def validateImportsAcc(imports: List, defs: List, seen: List): String =
+  if (List.isEmpty(imports) == 1) "" else validateImportsOne(List.head(imports), List.tail(imports), defs, seen)
+
+def validateImportsOne(im: Import, rest: List, defs: List, seen: List): String =
+  for {
+    key = importDupKey(im)
+  } yield if (defSeen(seen, key) == 1) str4("duplicate import of ", importName(im), " in module ", importInModule(im)) else validateImportTarget(im, rest, defs, List.cons(key, seen))
+
+def validateImportTarget(im: Import, rest: List, defs: List, seen: List): String =
+  for {
+    hit = findDefByQual(defs, importFromModule(im), importName(im))
+  } yield if (List.isEmpty(hit) == 1) str4("unknown import ", importFromModule(im), ".", importName(im)) else if (defIsPrivate(resolvedDef(hit)) == 1) str4("cannot import private def ", importFromModule(im), ".", importName(im)) else validateImportsAcc(rest, defs, seen)
+
+def typecheckDefsThenMain(defs: List, enums: List, allDefs: List, imports: List, main: Expr, mainMod: String): TyRes =
+  if (List.isEmpty(defs) == 1) checkMainTy(inferExpr(main, enums, mkFuns(mainMod, allDefs, imports), List.empty())) else typecheckDefsThenMainOne(List.head(defs), List.tail(defs), enums, allDefs, imports, main, mainMod)
+
+def typecheckDefsThenMainOne(d: Def, rest: List, enums: List, allDefs: List, imports: List, main: Expr, mainMod: String): TyRes =
   for {
     env = bindParams(defParams(d), List.empty())
-    bodyR = inferExpr(defBody(d), enums, mkFuns(defModule(d), allDefs), env)
+    bodyR = inferExpr(defBody(d), enums, mkFuns(defModule(d), allDefs, imports), env)
     ret = declRet(d)
-  } yield if (tyIsOk(bodyR) == 0) bodyR else if (typesCompat(tyVal(bodyR), ret) == 0) tyErr(str5("def ", defName(d), " body ", tyShow(tyVal(bodyR)), str3(" does not match declared ", tyShow(ret), ""))) else typecheckDefsThenMain(rest, enums, allDefs, main, mainMod)
+  } yield if (tyIsOk(bodyR) == 0) bodyR else if (typesCompat(tyVal(bodyR), ret) == 0) tyErr(str5("def ", defName(d), " body ", tyShow(tyVal(bodyR)), str3(" does not match declared ", tyShow(ret), ""))) else typecheckDefsThenMain(rest, enums, allDefs, imports, main, mainMod)
 
 def checkMainTy(r: TyRes): TyRes =
   if (tyIsOk(r) == 0) r else if (tyEq(tyVal(r), tyMkIo(Type.Unit)) == 1) tyOk(tyMkIo(Type.Unit)) else tyErr(str3("@main body must be IO[Unit], got ", tyShow(tyVal(r)), ""))
@@ -771,7 +795,7 @@ def callUiRun(argTys: List): TyRes =
 
 def callUserFun(callee: String, argTys: List, funs: List): TyRes =
   for {
-    d = resolveFun(funsDefs(funs), callee, funsMod(funs))
+    d = resolveFun(funsDefs(funs), funsImports(funs), callee, funsMod(funs))
   } yield if (List.isEmpty(d) == 1) tyErr(str3("unknown function ", callee, "")) else if (resolveIsAmbiguous(d) == 1) tyErr(str4("ambiguous function ", callee, ": qualify as Module.", callee)) else if (resolveIsPrivate(d) == 1) tyErr(str5("private def ", resolvePrivateModule(d), ".", resolvePrivateName(d), " is not visible here")) else callUserFunParams(callee, defParams(resolvedDef(d)), argTys, 0, declRet(resolvedDef(d)))
 
 def callUserFunParams(callee: String, params: List, argTys: List, i: Int, ret: Type): TyRes =

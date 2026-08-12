@@ -1,2 +1,4 @@
+import A.tag
+
 @main def main: IO[Unit] =
-  IO.println(Str.concat(A.tag(), B.tag()))
+  IO.println(Str.concat(tag(), B.tag()))

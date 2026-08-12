@@ -1,11 +1,12 @@
 //! File-as-module name resolution and LLVM symbol mangling.
 //!
 //! Module id = source file stem (`Foo.scuzz` → `Foo`). Defs are namespaced;
-//! enums stay globally unique. Bare names resolve locally first, then to a
-//! unique cross-module **public** def when unambiguous. `private def` is only
-//! visible within its module (qualified or bare).
+//! enums stay globally unique. Bare names resolve locally first, then via
+//! `import Module.name` in the current module, then to a unique cross-module
+//! **public** def when unambiguous. `private def` is only visible within its
+//! module (qualified or bare).
 
-use crate::ast::FunDef;
+use crate::ast::{FunDef, Import};
 use std::collections::HashMap;
 
 /// LLVM symbol for a user def: `@sz_user_{Module}_{name}` (or `@sz_user_{name}` when module is empty).
@@ -46,6 +47,8 @@ fn visible_from(d: &FunDef, current_module: &str) -> bool {
 pub struct FunIndex<'a> {
     by_qual: HashMap<String, &'a FunDef>,
     by_name: HashMap<String, Vec<&'a FunDef>>,
+    /// `(in_module, bare_name)` → import.
+    imports: HashMap<(String, String), &'a Import>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +57,9 @@ pub enum ResolveError {
     Ambiguous(String),
     Private { module: String, name: String },
     Duplicate { module: String, name: String },
+    DuplicateImport { module: String, name: String },
+    ImportPrivate { module: String, name: String },
+    ImportUnknown { module: String, name: String },
 }
 
 impl std::fmt::Display for ResolveError {
@@ -70,12 +76,21 @@ impl std::fmt::Display for ResolveError {
             ResolveError::Duplicate { module, name } => {
                 write!(f, "duplicate def {module}.{name}")
             }
+            ResolveError::DuplicateImport { module, name } => {
+                write!(f, "duplicate import of {name} in module {module}")
+            }
+            ResolveError::ImportPrivate { module, name } => {
+                write!(f, "cannot import private def {module}.{name}")
+            }
+            ResolveError::ImportUnknown { module, name } => {
+                write!(f, "unknown import {module}.{name}")
+            }
         }
     }
 }
 
 impl<'a> FunIndex<'a> {
-    pub fn build(defs: &'a [FunDef]) -> Result<Self, ResolveError> {
+    pub fn build(defs: &'a [FunDef], imports: &'a [Import]) -> Result<Self, ResolveError> {
         let mut by_qual: HashMap<String, &'a FunDef> = HashMap::new();
         let mut by_name: HashMap<String, Vec<&'a FunDef>> = HashMap::new();
         for d in defs {
@@ -88,7 +103,33 @@ impl<'a> FunIndex<'a> {
             }
             by_name.entry(d.name.clone()).or_default().push(d);
         }
-        Ok(Self { by_qual, by_name })
+        let mut import_map: HashMap<(String, String), &'a Import> = HashMap::new();
+        for im in imports {
+            let key = (im.in_module.clone(), im.name.clone());
+            if import_map.insert(key, im).is_some() {
+                return Err(ResolveError::DuplicateImport {
+                    module: im.in_module.clone(),
+                    name: im.name.clone(),
+                });
+            }
+            let Some(d) = by_qual.get(&qual_key(&im.from_module, &im.name)).copied() else {
+                return Err(ResolveError::ImportUnknown {
+                    module: im.from_module.clone(),
+                    name: im.name.clone(),
+                });
+            };
+            if d.is_private {
+                return Err(ResolveError::ImportPrivate {
+                    module: im.from_module.clone(),
+                    name: im.name.clone(),
+                });
+            }
+        }
+        Ok(Self {
+            by_qual,
+            by_name,
+            imports: import_map,
+        })
     }
 
     pub fn resolve(&self, callee: &str, current_module: &str) -> Result<&'a FunDef, ResolveError> {
@@ -109,6 +150,16 @@ impl<'a> FunIndex<'a> {
         let local = qual_key(current_module, callee);
         if let Some(d) = self.by_qual.get(&local) {
             return Ok(*d);
+        }
+        if let Some(im) = self
+            .imports
+            .get(&(current_module.to_string(), callee.to_string()))
+        {
+            return self
+                .by_qual
+                .get(&qual_key(&im.from_module, &im.name))
+                .copied()
+                .ok_or_else(|| ResolveError::Unknown(callee.to_string()));
         }
         let visible: Vec<&'a FunDef> = self
             .by_name
@@ -149,10 +200,18 @@ mod tests {
         d
     }
 
+    fn imp(in_module: &str, from_module: &str, name: &str) -> Import {
+        Import {
+            in_module: in_module.into(),
+            from_module: from_module.into(),
+            name: name.into(),
+        }
+    }
+
     #[test]
     fn duplicate_across_modules_ok() {
         let defs = vec![def("A", "tag"), def("B", "tag")];
-        let idx = FunIndex::build(&defs).unwrap();
+        let idx = FunIndex::build(&defs, &[]).unwrap();
         assert_eq!(idx.resolve("A.tag", "Main").unwrap().module, "A");
         assert_eq!(idx.resolve("B.tag", "Main").unwrap().module, "B");
         assert!(matches!(
@@ -162,9 +221,18 @@ mod tests {
     }
 
     #[test]
+    fn import_disambiguates_ambiguous_bare() {
+        let defs = vec![def("A", "tag"), def("B", "tag")];
+        let imports = vec![imp("Main", "A", "tag")];
+        let idx = FunIndex::build(&defs, &imports).unwrap();
+        assert_eq!(idx.resolve("tag", "Main").unwrap().module, "A");
+        assert_eq!(idx.resolve("B.tag", "Main").unwrap().module, "B");
+    }
+
+    #[test]
     fn bare_resolves_locally() {
         let defs = vec![def("A", "tag"), def("B", "tag")];
-        let idx = FunIndex::build(&defs).unwrap();
+        let idx = FunIndex::build(&defs, &[]).unwrap();
         assert_eq!(idx.resolve("tag", "A").unwrap().module, "A");
         assert_eq!(idx.resolve("tag", "B").unwrap().module, "B");
     }
@@ -172,14 +240,14 @@ mod tests {
     #[test]
     fn unique_cross_module_bare_ok() {
         let defs = vec![def("Shared", "greet")];
-        let idx = FunIndex::build(&defs).unwrap();
+        let idx = FunIndex::build(&defs, &[]).unwrap();
         assert_eq!(idx.resolve("greet", "Main").unwrap().module, "Shared");
     }
 
     #[test]
     fn private_not_visible_cross_module() {
         let defs = vec![private_def("A", "helper"), def("A", "tag")];
-        let idx = FunIndex::build(&defs).unwrap();
+        let idx = FunIndex::build(&defs, &[]).unwrap();
         assert!(matches!(
             idx.resolve("A.helper", "Main"),
             Err(ResolveError::Private { .. })
@@ -194,9 +262,19 @@ mod tests {
     }
 
     #[test]
+    fn cannot_import_private() {
+        let defs = vec![private_def("A", "helper")];
+        let imports = vec![imp("Main", "A", "helper")];
+        assert!(matches!(
+            FunIndex::build(&defs, &imports),
+            Err(ResolveError::ImportPrivate { .. })
+        ));
+    }
+
+    #[test]
     fn private_foreign_does_not_ambiguate() {
         let defs = vec![def("A", "tag"), private_def("B", "tag")];
-        let idx = FunIndex::build(&defs).unwrap();
+        let idx = FunIndex::build(&defs, &[]).unwrap();
         assert_eq!(idx.resolve("tag", "Main").unwrap().module, "A");
         assert!(matches!(
             idx.resolve("B.tag", "Main"),
