@@ -100,7 +100,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_EXPANDED || kind == SZ_VIEW_CENTER ||
          kind == SZ_VIEW_ALIGN || kind == SZ_VIEW_STACK ||
          kind == SZ_VIEW_POSITIONED || kind == SZ_VIEW_PADDING ||
-         kind == SZ_VIEW_SIZED || kind == SZ_VIEW_MIN_SIZE;
+         kind == SZ_VIEW_SIZED || kind == SZ_VIEW_MIN_SIZE ||
+         kind == SZ_VIEW_BACKGROUND;
 }
 
 SzViewKind sz_view_kind(const SzView *view) {
@@ -338,6 +339,14 @@ SzView *sz_view_min_size(int w, int h, SzView *child) {
   SzView *v = view_new(SZ_VIEW_MIN_SIZE);
   v->img_w = w > 0 ? w : 0;
   v->img_h = h > 0 ? h : 0;
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
+SzView *sz_view_background(uint32_t argb, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_BACKGROUND);
+  v->bg_argb = argb;
   if (child)
     sz_view_add_child(v, child);
   return v;
@@ -820,6 +829,14 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.h = ch ? ch->frame.h : child_min_h;
     break;
   }
+  case SZ_VIEW_BACKGROUND: {
+    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
+    if (ch)
+      layout_node_ex(ch, x, y, min_w, min_h, max_w, max_h, theme);
+    v->frame.w = ch ? ch->frame.w : 0.f;
+    v->frame.h = ch ? ch->frame.h : 0.f;
+    break;
+  }
   case SZ_VIEW_SCROLL: {
     float inner_w = max_w - theme->pad * 2.f;
     float vh;
@@ -970,6 +987,11 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
                  v->fg_argb, theme->font_px);
     break;
   }
+  case SZ_VIEW_BACKGROUND:
+    paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, v->bg_argb);
+    for (i = 0; i < v->child_count; i++)
+      paint_node(v->children[i], c, theme);
+    break;
   case SZ_VIEW_IMAGE:
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, v->bg_argb);
     if (v->text && v->text[0])
