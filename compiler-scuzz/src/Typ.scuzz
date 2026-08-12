@@ -402,7 +402,7 @@ def inferCallArgs(args: List, enums: List, funs: List, env: List, acc: List, cal
 } yield if (tyIsOk(r) == 0) r else inferCallArgs(List.tail(args), enums, funs, env, List.cons(tyVal(r), acc), callee, funs2)
 
 def inferCallTy(callee: String, argTys: List, funs: List): TyRes =
-  if (streq(callee, "Str.concat") == 1) callStrConcat(argTys) else if (streq(callee, "Str.len") == 1) callStrLen(argTys) else if (streq(callee, "Str.charAt") == 1) callStrCharAt(argTys) else if (streq(callee, "Str.indexOf") == 1) callStrIndexOf(argTys) else if (streq(callee, "Str.slice") == 1) callStrSlice(argTys) else if (streq(callee, "Str.eq") == 1) callStrEq(argTys) else if (streq(callee, "Str.fromInt") == 1) callStrFromInt(argTys) else if (streq(callee, "Str.lines") == 1) callStrLines(argTys) else if (streq(callee, "List.empty") == 1) callListEmpty(argTys) else if (streq(callee, "List.cons") == 1) callListCons(argTys) else if (streq(callee, "List.isEmpty") == 1) callListIsEmpty(argTys) else if (streq(callee, "List.head") == 1) callListHead(argTys) else if (streq(callee, "List.at") == 1) callListAt(argTys) else if (streq(callee, "List.tail") == 1) callListTail(argTys) else if (streq(callee, "List.reverse") == 1) callListReverse(argTys) else if (streq(callee, "List.len") == 1) callListLen(argTys) else if (streq(callee, "List.join") == 1) callListJoin(argTys) else if (streq(callee, "List.append") == 1) callListAppend(argTys) else if (streq(callee, "Fs.read") == 1) callFsRead(argTys) else if (streq(callee, "Fs.list") == 1) callFsList(argTys) else if (streq(callee, "Fs.mkdirs") == 1) callFsMkdirs(argTys) else if (streq(callee, "Fs.canonicalize") == 1) callFsCanonicalize(argTys) else if (streq(callee, "Fs.write") == 1) callFsWrite(argTys) else if (streq(callee, "Sys.args") == 1) callSysArgs(argTys) else if (streq(callee, "Sys.readLine") == 1) callSysReadLine(argTys) else if (streq(callee, "Sys.exec") == 1) callSysExec(argTys) else if (streq(callee, "Sys.getenv") == 1) callSysGetenv(argTys) else if (streq(callee, "Clock.realTime") == 1) callClock(argTys) else if (streq(callee, "Clock.monotonic") == 1) callClock(argTys) else if (streq(callee, "Random.nextInt") == 1) callRandom(argTys) else if (streq(callee, "Net.httpGet") == 1) callNet(argTys) else if (streq(callee, "Impurity.runKit") == 1) callImpurity(argTys) else if (streq(callee, "Effects.runKit") == 1) callEffects(argTys) else if (startsWith(callee, "Signal.") == 1) callSignal(callee, argTys) else if (startsWith(callee, "Law.") == 1) callLaw(callee, argTys) else if (startsWith(callee, "View.") == 1) callView(callee, argTys) else if (startsWith(callee, "Theme.") == 1) callTheme(callee, argTys) else if (streq(callee, "Color.rgb") == 1) callColorRgb(argTys) else if (streq(callee, "Ui.run") == 1) callUiRun(argTys) else callUserFun(callee, argTys, funs)
+  if (streq(callee, "Str.concat") == 1) callStrConcat(argTys) else if (streq(callee, "Str.len") == 1) callStrLen(argTys) else if (streq(callee, "Str.charAt") == 1) callStrCharAt(argTys) else if (streq(callee, "Str.indexOf") == 1) callStrIndexOf(argTys) else if (streq(callee, "Str.slice") == 1) callStrSlice(argTys) else if (streq(callee, "Str.eq") == 1) callStrEq(argTys) else if (streq(callee, "Str.fromInt") == 1) callStrFromInt(argTys) else if (streq(callee, "Str.lines") == 1) callStrLines(argTys) else if (streq(callee, "List.empty") == 1) callListEmpty(argTys) else if (streq(callee, "List.cons") == 1) callListCons(argTys) else if (streq(callee, "List.isEmpty") == 1) callListIsEmpty(argTys) else if (streq(callee, "List.head") == 1) callListHead(argTys) else if (streq(callee, "List.at") == 1) callListAt(argTys) else if (streq(callee, "List.tail") == 1) callListTail(argTys) else if (streq(callee, "List.reverse") == 1) callListReverse(argTys) else if (streq(callee, "List.len") == 1) callListLen(argTys) else if (streq(callee, "List.join") == 1) callListJoin(argTys) else if (streq(callee, "List.append") == 1) callListAppend(argTys) else if (streq(callee, "Fs.read") == 1) callFsRead(argTys) else if (streq(callee, "Fs.list") == 1) callFsList(argTys) else if (streq(callee, "Fs.mkdirs") == 1) callFsMkdirs(argTys) else if (streq(callee, "Fs.canonicalize") == 1) callFsCanonicalize(argTys) else if (streq(callee, "Fs.write") == 1) callFsWrite(argTys) else if (streq(callee, "Sys.args") == 1) callSysArgs(argTys) else if (streq(callee, "Sys.readLine") == 1) callSysReadLine(argTys) else if (streq(callee, "Sys.exec") == 1) callSysExec(argTys) else if (streq(callee, "Sys.getenv") == 1) callSysGetenv(argTys) else if (streq(callee, "Clock.realTime") == 1) callClock(argTys) else if (streq(callee, "Clock.monotonic") == 1) callClock(argTys) else if (streq(callee, "Random.nextInt") == 1) callRandom(argTys) else if (streq(callee, "Net.httpGet") == 1) callNet(argTys) else if (streq(callee, "Impurity.runKit") == 1) callImpurity(argTys) else if (streq(callee, "Effects.runKit") == 1) callEffects(argTys) else if (startsWith(callee, "Ref.") == 1) callRef(callee, argTys) else if (startsWith(callee, "Queue.") == 1) callQueue(callee, argTys) else if (startsWith(callee, "Deferred.") == 1) callDeferred(callee, argTys) else if (startsWith(callee, "Signal.") == 1) callSignal(callee, argTys) else if (startsWith(callee, "Law.") == 1) callLaw(callee, argTys) else if (startsWith(callee, "View.") == 1) callView(callee, argTys) else if (startsWith(callee, "Theme.") == 1) callTheme(callee, argTys) else if (streq(callee, "Color.rgb") == 1) callColorRgb(argTys) else if (streq(callee, "Ui.run") == 1) callUiRun(argTys) else callUserFun(callee, argTys, funs)
 
 def callStrConcat(argTys: List): TyRes =
   for {
@@ -563,6 +563,60 @@ def callEffects(argTys: List): TyRes =
   for {
     a = expectArity("Effects.runKit", 0, List.len(argTys))
   } yield if (tyIsOk(a) == 0) a else tyOk(tyMkIo(Type.Unit))
+
+def callRef(callee: String, argTys: List): TyRes =
+  if (streq(callee, "Ref.of") == 1) callRefOf(argTys) else if (streq(callee, "Ref.get") == 1) callRefGet(argTys) else if (streq(callee, "Ref.set") == 1) callRefSet(argTys) else tyErr(str3("unknown function ", callee, ""))
+
+def callRefOf(argTys: List): TyRes =
+  for {
+    a = expectArity("Ref.of", 1, List.len(argTys))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else tyOk(tyMkIo(tyMkOpaque("Ref")))
+
+def callRefGet(argTys: List): TyRes =
+  for {
+    a = expectArity("Ref.get", 1, List.len(argTys))
+  } yield if (tyIsOk(a) == 0) a else tyOk(tyMkIo(Type.String))
+
+def callRefSet(argTys: List): TyRes =
+  for {
+    a = expectArity("Ref.set", 2, List.len(argTys))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.String)) == 0) expectTy(argTyAt(argTys, 1), Type.String) else tyOk(tyMkIo(Type.Unit))
+
+def callQueue(callee: String, argTys: List): TyRes =
+  if (streq(callee, "Queue.unbounded") == 1) callQueueUnbounded(argTys) else if (streq(callee, "Queue.offer") == 1) callQueueOffer(argTys) else if (streq(callee, "Queue.take") == 1) callQueueTake(argTys) else tyErr(str3("unknown function ", callee, ""))
+
+def callQueueUnbounded(argTys: List): TyRes =
+  for {
+    a = expectArity("Queue.unbounded", 0, List.len(argTys))
+  } yield if (tyIsOk(a) == 0) a else tyOk(tyMkIo(tyMkOpaque("Queue")))
+
+def callQueueOffer(argTys: List): TyRes =
+  for {
+    a = expectArity("Queue.offer", 2, List.len(argTys))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.String)) == 0) expectTy(argTyAt(argTys, 1), Type.String) else tyOk(tyMkIo(Type.Unit))
+
+def callQueueTake(argTys: List): TyRes =
+  for {
+    a = expectArity("Queue.take", 1, List.len(argTys))
+  } yield if (tyIsOk(a) == 0) a else tyOk(tyMkIo(Type.String))
+
+def callDeferred(callee: String, argTys: List): TyRes =
+  if (streq(callee, "Deferred.empty") == 1) callDeferredEmpty(argTys) else if (streq(callee, "Deferred.complete") == 1) callDeferredComplete(argTys) else if (streq(callee, "Deferred.get") == 1) callDeferredGet(argTys) else tyErr(str3("unknown function ", callee, ""))
+
+def callDeferredEmpty(argTys: List): TyRes =
+  for {
+    a = expectArity("Deferred.empty", 0, List.len(argTys))
+  } yield if (tyIsOk(a) == 0) a else tyOk(tyMkIo(tyMkOpaque("Deferred")))
+
+def callDeferredComplete(argTys: List): TyRes =
+  for {
+    a = expectArity("Deferred.complete", 2, List.len(argTys))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.String)) == 0) expectTy(argTyAt(argTys, 1), Type.String) else tyOk(tyMkIo(Type.Unit))
+
+def callDeferredGet(argTys: List): TyRes =
+  for {
+    a = expectArity("Deferred.get", 1, List.len(argTys))
+  } yield if (tyIsOk(a) == 0) a else tyOk(tyMkIo(Type.String))
 
 def callSignal(callee: String, argTys: List): TyRes =
   if (streq(callee, "Signal.int") == 1) callSigInt(argTys) else if (streq(callee, "Signal.get") == 1) callSigGet(argTys) else if (streq(callee, "Signal.set") == 1) callSigSet(argTys) else if (streq(callee, "Signal.str") == 1) callSigStr(argTys) else if (streq(callee, "Signal.getStr") == 1) callSigGetStr(argTys) else if (streq(callee, "Signal.setStr") == 1) callSigSetStr(argTys) else if (streq(callee, "Signal.list") == 1) callSigList(argTys) else if (streq(callee, "Signal.getList") == 1) callSigGetList(argTys) else if (streq(callee, "Signal.setList") == 1) callSigSetList(argTys) else if (streq(callee, "Signal.map") == 1) callSigMap(argTys) else tyErr(str3("unknown function ", callee, ""))

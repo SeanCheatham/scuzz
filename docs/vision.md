@@ -91,7 +91,7 @@ Subset used by compiler sources and bootstrap examples. New features land in Sta
 - No `val` / statement blocks / `var` — expression dialect only.
 - `if` / `match`; literals incl. list `[a,b,c]` and `s"…"`
 - Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
-- Builtins: `Str.*`, `List.*`, Fs (`read` / `write` / `list` / `mkdirs` / `canonicalize`)/Sys (`args` / `readLine` / `exec` / `getenv`)/Clock/Random/Net, `Signal.*` (incl. `Signal.map`), `View.*` (incl. nested `View.column`/`row` children, `View.each`, `View.bindText`), `Ui.run`, Theme/Color, `Law.signalInt` / `Law.a11yHas` / `Law.assert` (residual under TestRuntime)
+- Builtins: `Str.*`, `List.*`, Fs (`read` / `write` / `list` / `mkdirs` / `canonicalize`)/Sys (`args` / `readLine` / `exec` / `getenv`)/Clock/Random/Net, `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Signal.*` (incl. `Signal.map`), `View.*` (incl. nested `View.column`/`row` children, `View.each`, `View.bindText`), `Ui.run`, Theme/Color, `Law.signalInt` / `Law.a11yHas` / `Law.assert` (residual under TestRuntime)
 - `IO` kit + `.flatMap` / `.handleErrorWith` / `.attempt`; lambdas `_ =>` / `name =>` for taps
 - No macros, no implicits, no HKT beyond `IO`, no null
 

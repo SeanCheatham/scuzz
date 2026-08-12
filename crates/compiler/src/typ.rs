@@ -499,6 +499,46 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 0)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
+        "Ref.of" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::Io(Box::new(Type::Opaque("Ref".into()))))
+        }
+        "Ref.get" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::Io(Box::new(Type::String)))
+        }
+        "Ref.set" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
+        "Queue.unbounded" => {
+            expect_arity(callee, &arg_tys, 0)?;
+            Ok(Type::Io(Box::new(Type::Opaque("Queue".into()))))
+        }
+        "Queue.offer" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
+        "Queue.take" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::Io(Box::new(Type::String)))
+        }
+        "Deferred.empty" => {
+            expect_arity(callee, &arg_tys, 0)?;
+            Ok(Type::Io(Box::new(Type::Opaque("Deferred".into()))))
+        }
+        "Deferred.complete" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
+        "Deferred.get" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::Io(Box::new(Type::String)))
+        }
         "Signal.int" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::Int)?;

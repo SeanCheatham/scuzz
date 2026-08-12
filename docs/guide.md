@@ -38,7 +38,7 @@ Console kit: `Sys.args(): IO[List]`, `Sys.readLine(): IO[String]` (EOF → `""`)
 - **`for { x = e; y <- io } yield r`** as the primary binder (pure `=`, effect `<-`). Nested `for` in `if` / lambda arms when multi-bind is needed.
 - No `val` / statement blocks
 - Literals: ints, strings, `()`, `s"…$x…"`, list literals `[a, b]`
-- Blessed impurity only: `IO.println` / `sleep` / `fail` / `pure` / `race` / `both`, `Fs.*`, `Sys.args` / `Sys.readLine` / `Sys.exec` / `Sys.getenv`, `Clock.*`, `Random.*`, `Net.httpGet`
+- Blessed impurity only: `IO.println` / `sleep` / `fail` / `pure` / `race` / `both`, `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Fs.*`, `Sys.args` / `Sys.readLine` / `Sys.exec` / `Sys.getenv`, `Clock.*`, `Random.*`, `Net.httpGet`
 - No raw side effects in View build — taps may run `IO` via `sz_io_unsafe_run`
 
 Product `fmt` / `build` / `run` / `test` / `check` / `fuzz` go through Stage 1/2 (`compiler-scuzz`). Stage-0 Rust hosts the bootstrap compiler.
@@ -113,5 +113,6 @@ src/
 | `examples/nav` | `showWhen`, multi-page |
 | `examples/live` | Stay-open Window (`Ui.run`; q/Esc) |
 | `examples/impurity` | Clock / Random / Fs / Net / Sys console kit |
+| `examples/concurrency` | `Ref` / `Queue` / `Deferred` park under `IO.both` / `IO.race` |
 
 Full gallery: [README.md](../README.md#samples-gallery). Edit [vision.md](vision.md) when changing GC, Skia, effects, UI boundaries, or language direction.

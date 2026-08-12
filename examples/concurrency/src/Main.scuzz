@@ -1,0 +1,15 @@
+@main def main: IO[Unit] =
+  for {
+    r <- Ref.of("x")
+    _ <- Ref.set(r, "ref-ok")
+    v <- Ref.get(r)
+    _ <- IO.println(s"ref:$v")
+    q <- Queue.unbounded()
+    _ <- IO.both(Queue.take(q), Queue.offer(q, "parked"))
+    _ <- IO.println("queue-ok")
+    d <- Deferred.empty()
+    _ <- IO.both(Deferred.get(d), Deferred.complete(d, "go"))
+    _ <- IO.println("deferred-ok")
+    _ <- IO.race(IO.sleep(50), IO.println("race-fast"))
+    _ <- IO.println("done")
+  } yield ()

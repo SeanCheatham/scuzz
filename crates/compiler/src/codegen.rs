@@ -76,6 +76,15 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_random_next_int(i64)").unwrap();
     writeln!(out, "declare ptr @sz_net_http_get(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_impurity_run_kit()").unwrap();
+    writeln!(out, "declare ptr @sz_ref_of(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_ref_get(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_ref_set(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_queue_unbounded()").unwrap();
+    writeln!(out, "declare ptr @sz_queue_offer(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_queue_take(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_deferred_empty()").unwrap();
+    writeln!(out, "declare ptr @sz_deferred_complete(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_deferred_get(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_signal_int(i64)").unwrap();
     writeln!(out, "declare i64 @sz_lang_signal_get(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_signal_set(ptr, i64)").unwrap();
@@ -1993,6 +2002,77 @@ fn emit_call(
         }
         "Impurity.runKit" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_impurity_run_kit()").unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Ref.of" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_ref_of(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Ref.get" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_ref_get(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Ref.set" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_ref_set(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Queue.unbounded" => {
+            writeln!(code, "  %{prefix}_v = call ptr @sz_queue_unbounded()").unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Queue.offer" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_queue_offer(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Queue.take" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_queue_take(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Deferred.empty" => {
+            writeln!(code, "  %{prefix}_v = call ptr @sz_deferred_empty()").unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Deferred.complete" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_deferred_complete(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Deferred.get" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_deferred_get(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Signal.int" => {

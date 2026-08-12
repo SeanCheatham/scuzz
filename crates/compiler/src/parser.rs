@@ -958,6 +958,7 @@ impl Parser {
                     name.as_str(),
                     "Str" | "List" | "Fs" | "Sys" | "Clock" | "Random"
                         | "Net" | "Impurity" | "Signal" | "View" | "Theme"
+                        | "Ref" | "Queue" | "Deferred"
                 ) =>
             {
                 self.bump();

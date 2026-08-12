@@ -423,4 +423,28 @@ enum Pair:
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }
+
+    #[test]
+    fn formats_ref_queue_deferred_roundtrip() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    r <- Ref.of("x")
+    _ <- Ref.set(r, "ok")
+    v <- Ref.get(r)
+    q <- Queue.unbounded()
+    _ <- Queue.offer(q, "a")
+    t <- Queue.take(q)
+    d <- Deferred.empty()
+    _ <- Deferred.complete(d, "go")
+    g <- Deferred.get(d)
+    _ <- IO.println(v)
+  } yield ()
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("Ref.of("));
+        assert!(out.contains("Queue.unbounded()"));
+        assert!(out.contains("Deferred.empty()"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
 }

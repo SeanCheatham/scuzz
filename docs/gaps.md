@@ -29,7 +29,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### Residuals
 
-- **Concurrency** — cooperative fibers + TestRuntime virtual-time jumps cover the determinism thesis (`test_io.c`). Later: OS threads, interruptible cancel mid-`nanosleep`, supervision trees, Scuzz bindings for Queue/Deferred.
+- **Concurrency** — cooperative fibers + TestRuntime virtual-time jumps cover the determinism thesis (`test_io.c`); Scuzz bindings for `Ref` / `Queue` / `Deferred` (String payloads) via Stage 0 + self-host (`examples/concurrency`). Later: OS threads, interruptible cancel mid-`nanosleep`, supervision trees.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting (`test_ui.c`, optional `test-asan`). Later: `Signal.list` collection, exit-time signal ownership / LSan-clean examples, a collector if list-churn demands it.
 - **File-as-module** — stem namespaces + `private def` on Stage 0 and self-host (`examples/modules`). Later: `import`, enum-per-module. Records/traits/generics: [`compatibility.md`](compatibility.md).
 
