@@ -165,8 +165,11 @@ pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
     residualize_laws(&mut program, &law_names);
     program.law_names = law_names;
     let program = lower_program(program);
-    match typecheck(&program) {
-        Ok(()) => Ok(vec![]),
+    if let Err(e) = typecheck(&program) {
+        return Ok(vec![diagnostic_from_type(e, &named)]);
+    }
+    match crate::typ::elaborate_generics(program) {
+        Ok(_) => Ok(vec![]),
         Err(e) => Ok(vec![diagnostic_from_type(e, &named)]),
     }
 }

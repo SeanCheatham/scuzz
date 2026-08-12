@@ -2666,4 +2666,84 @@ def add1(n: Int): Int = n + 1
         assert!(ir.contains("sz_list_nil"));
         assert!(ir.contains("sz_list_cons"));
     }
+
+    fn gen_ir(src: &str) -> String {
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate");
+        let p = crate::typ::monomorphize(p).expect("monomorphize");
+        emit_llvm(&p)
+    }
+
+    #[test]
+    fn emit_generic_enum_boxes_int_payload() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+def noneInt(): Opt[Int] = Opt.None
+@main def main: IO[Unit] =
+  Opt.Some(7) match {
+    case Opt.Some(n) => IO.println(Str.fromInt(n))
+    case Opt.None => IO.println("none")
+  }
+"#;
+        let ir = gen_ir(src);
+        assert!(ir.contains("call ptr @sz_box_i64"), "Int payload must be boxed");
+        assert!(ir.contains("call ptr @sz_adt_new(i32 0, ptr %"));
+        assert!(ir.contains("call i64 @sz_unbox_i64"), "Int bind must be unboxed");
+        assert!(ir.contains("call ptr @sz_adt_new(i32 1, ptr null)"));
+    }
+
+    #[test]
+    fn emit_generic_enum_string_payload_not_boxed() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  Opt.Some("s") match {
+    case Opt.Some(x) => IO.println(x)
+    case Opt.None => IO.println("none")
+  }
+"#;
+        let ir = gen_ir(src);
+        assert!(!ir.contains("call ptr @sz_box_i64"), "String payload must pass through");
+        assert!(ir.contains("sz_adt_new"));
+        assert!(ir.contains("sz_adt_payload"));
+    }
+
+    #[test]
+    fn emit_multi_param_either_constructs() {
+        let src = r#"
+enum Either[L, R]:
+  case Left(x: L)
+  case Right(y: R)
+def describe(e: Either[Int, String]): String = e match {
+  case Either.Left(n) => Str.fromInt(n)
+  case Either.Right(s) => s
+}
+@main def main: IO[Unit] = IO.println(describe(Either.Right("r")))
+"#;
+        let ir = gen_ir(src);
+        assert!(ir.contains("sz_adt_new"));
+        assert!(ir.contains("switch i32"));
+        // Right is tag 1, String payload passes through unboxed.
+        assert!(ir.contains("call ptr @sz_adt_new(i32 1, ptr %"));
+    }
+
+    #[test]
+    fn emit_generic_record_mixed_payload_pack() {
+        let src = r#"
+record Pair[A, B](a: A, b: B)
+@main def main: IO[Unit] =
+  Pair(7, "x") match {
+    case Pair.Pair(n, s) => IO.println(Str.concat(Str.fromInt(n), s))
+  }
+"#;
+        let ir = gen_ir(src);
+        assert!(ir.contains("call ptr @sz_box_i64"), "Int field must be boxed in the pack");
+        assert!(ir.contains("sz_list_cons"), "multi-field payload packs as list");
+        assert!(ir.contains("call i64 @sz_unbox_i64"), "Int field bind must be unboxed");
+    }
 }

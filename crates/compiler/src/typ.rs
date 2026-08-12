@@ -1564,6 +1564,12 @@ fn infer_call(
                     let want = resolve_type_in(&p.ty, enums, &f.module, &f.type_params)?;
                     unify_types(&want, a, &mut subst)?;
                 }
+                if let Some(p) = f.type_params.iter().find(|p| !subst.contains_key(*p)) {
+                    return Err(TypeError::Msg(format!(
+                        "cannot infer type parameter {p} for {} — argument types are ambiguous",
+                        f.name
+                    )));
+                }
                 let ret = resolve_type_in(&f.ret, enums, &f.module, &f.type_params)?;
                 Ok(apply_subst(&ret, &subst))
             }
@@ -1804,7 +1810,9 @@ fn unify_construct(
                         "type parameter {n} constrained to both {prev:?} and {t:?}"
                     )));
                 }
-            } else {
+            } else if !contains_unbound(t) {
+                // Placeholder-laden types carry no information; the expected
+                // type at the construction site fills the parameter instead.
                 subst.insert(n.clone(), t.clone());
             }
             Ok(())
@@ -1939,7 +1947,7 @@ pub fn monomorphize(mut program: Program) -> Result<Program, TypeError> {
         }
         program.defs.push(def);
     }
-    Ok(program)
+    specialize_enums(program)
 }
 
 fn mono_expr(
@@ -1969,6 +1977,12 @@ fn mono_expr(
                         let want = resolve_type_in(&p.ty, enums, &f.module, &f.type_params)?;
                         unify_types(&want, a, &mut subst)?;
                     }
+                    if let Some(p) = f.type_params.iter().find(|p| !subst.contains_key(*p)) {
+                        return Err(TypeError::Msg(format!(
+                            "cannot infer type parameter {p} for {} — argument types are ambiguous",
+                            f.name
+                        )));
+                    }
                     let mangled = mono_def_name(&f.name, &subst, &f.type_params);
                     if !specialized.contains_key(&mangled) {
                         let params: Result<Vec<_>, _> = f
@@ -1995,7 +2009,7 @@ fn mono_expr(
                                 type_params: Vec::new(),
                                 params: params?,
                                 ret,
-                                body: f.body.clone(),
+                                body: subst_node_targs(f.body.clone(), &subst),
                             },
                         );
                     }
@@ -2363,6 +2377,1118 @@ fn mono_expr(
         )),
         other => Ok(Expr::new(other, span)),
     }
+}
+
+/// Annotate generic enum constructions/patterns with their instantiations
+/// (`type_args`). Runs after typecheck in both `check` and `build`; errors when
+/// an instantiation is determined neither by constructor args nor by the
+/// expected type at the construction site.
+pub fn elaborate_generics(mut program: Program) -> Result<Program, TypeError> {
+    let enums_owned = program.enums.clone();
+    let imports_owned = program.imports.clone();
+    let traits_owned = program.traits.clone();
+    let impls_owned = program.impls.clone();
+    let defs_owned = program.defs.clone();
+    let enums = EnumIndex::build(&enums_owned, &imports_owned)
+        .map_err(|e| TypeError::Msg(e.to_string()))?;
+    let methods = MethodIndex::build(&impls_owned, &traits_owned, &enums)?;
+    let funs = FunIndex::build(&defs_owned, &imports_owned, &enums_owned)
+        .map_err(|e| TypeError::Msg(e.to_string()))?;
+    for d in &mut program.defs {
+        let mut env: HashMap<String, Type> = HashMap::new();
+        for p in &d.params {
+            env.insert(
+                p.name.clone(),
+                resolve_type_in(&p.ty, &enums, &d.module, &d.type_params)?,
+            );
+        }
+        let expected = resolve_type_in(&d.ret, &enums, &d.module, &d.type_params)?;
+        d.body = elaborate_expr(
+            std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)),
+            &enums,
+            &funs,
+            &methods,
+            &d.module,
+            &mut env,
+            Some(&expected),
+            &d.type_params,
+        )?;
+    }
+    let mut env: HashMap<String, Type> = HashMap::new();
+    let main_mod = program.main.module.clone();
+    program.main.body = elaborate_expr(
+        std::mem::replace(&mut program.main.body, Expr::dummy(ExprKind::Unit)),
+        &enums,
+        &funs,
+        &methods,
+        &main_mod,
+        &mut env,
+        Some(&Type::Io(Box::new(Type::Unit))),
+        &[],
+    )?;
+    Ok(program)
+}
+
+/// An expected type is usable for filling a construction's instantiation when
+/// it carries no opaque holes and its type variables are in scope.
+fn usable_expected(ty: &Type, tparams: &[String]) -> bool {
+    match ty {
+        Type::Opaque(_) => false,
+        Type::Var(n) => tparams.iter().any(|p| p == n),
+        Type::Io(inner) => usable_expected(inner, tparams),
+        Type::App(_, args) => args.iter().all(|a| usable_expected(a, tparams)),
+        _ => true,
+    }
+}
+
+/// True when `t` still holds an undetermined instantiation placeholder.
+fn contains_unbound(t: &Type) -> bool {
+    match t {
+        Type::Opaque(n) => n.starts_with("__unbound_"),
+        Type::Io(inner) => contains_unbound(inner),
+        Type::App(_, args) => args.iter().any(contains_unbound),
+        _ => false,
+    }
+}
+
+fn check_targs(
+    enum_name: &str,
+    case_name: &str,
+    targs: &[Type],
+    tparams: &[String],
+    span: &Span,
+) -> Result<(), TypeError> {
+    for t in targs {
+        check_targ(enum_name, case_name, t, tparams, span)?;
+    }
+    Ok(())
+}
+
+fn check_targ(
+    enum_name: &str,
+    case_name: &str,
+    ty: &Type,
+    tparams: &[String],
+    span: &Span,
+) -> Result<(), TypeError> {
+    match ty {
+        Type::Opaque(n) if n.starts_with("__unbound_") => Err(TypeError::At {
+            msg: format!(
+                "cannot infer type parameter {} in {enum_name}.{case_name} — bind it through the def's return type or a typed parameter",
+                n.trim_start_matches("__unbound_")
+            ),
+            span: span.clone(),
+        }),
+        Type::Var(n) if !tparams.iter().any(|p| p == n) => Err(TypeError::At {
+            msg: format!(
+                "cannot infer type parameter {n} in {enum_name}.{case_name} — bind it through the def's return type or a typed parameter"
+            ),
+            span: span.clone(),
+        }),
+        Type::App(_, args) => {
+            for a in args {
+                check_targ(enum_name, case_name, a, tparams, span)?;
+            }
+            Ok(())
+        }
+        _ => Ok(()),
+    }
+}
+
+fn elaborate_expr(
+    expr: Expr,
+    enums: &EnumIndex<'_>,
+    funs: &FunIndex<'_>,
+    methods: &MethodIndex,
+    current_module: &str,
+    env: &mut HashMap<String, Type>,
+    expected: Option<&Type>,
+    tparams: &[String],
+) -> Result<Expr, TypeError> {
+    let span = expr.span.clone();
+    match expr.kind {
+        ExprKind::AdtConstruct {
+            enum_name,
+            case_name,
+            args,
+            ..
+        } => {
+            let (en, id) = lookup_enum(enums, &enum_name, current_module)?;
+            let case = en
+                .cases
+                .iter()
+                .find(|c| c.name == case_name)
+                .ok_or_else(|| {
+                    TypeError::Msg(format!("unknown case {enum_name}.{case_name}"))
+                })?;
+            if en.type_params.is_empty() {
+                let args = args
+                    .into_iter()
+                    .map(|a| {
+                        elaborate_expr(
+                            a,
+                            enums,
+                            funs,
+                            methods,
+                            current_module,
+                            env,
+                            None,
+                            tparams,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(Expr::new(
+                    ExprKind::AdtConstruct {
+                        enum_name,
+                        case_name,
+                        args,
+                        type_args: Vec::new(),
+                    },
+                    span,
+                ));
+            }
+            // Constructor args determine the instantiation first.
+            let mut subst: HashMap<String, Type> = HashMap::new();
+            for (arg, (_fname, fty)) in args.iter().zip(case.fields.iter()) {
+                let at = infer(arg, enums, funs, methods, current_module, env)?;
+                let want = resolve_type_in(fty, enums, &en.module, &en.type_params)?;
+                unify_construct(&want, &at, &mut subst)?;
+            }
+            // Then the expected type at the construction site.
+            if let Some(Type::App(eid, eargs)) = expected {
+                if eid == &id && eargs.len() == en.type_params.len() {
+                    for (p, ea) in en.type_params.iter().zip(eargs.iter()) {
+                        if !subst.contains_key(p) && !matches!(ea, Type::Opaque(_)) {
+                            subst.insert(p.clone(), ea.clone());
+                        }
+                    }
+                }
+            }
+            let targs: Vec<Type> = en
+                .type_params
+                .iter()
+                .map(|p| {
+                    subst
+                        .get(p)
+                        .cloned()
+                        .unwrap_or_else(|| Type::Opaque(format!("__unbound_{p}")))
+                })
+                .collect();
+            check_targs(&enum_name, &case_name, &targs, tparams, &span)?;
+            let new_args = args
+                .into_iter()
+                .zip(case.fields.iter())
+                .map(|(a, (_fname, fty))| {
+                    let want = apply_subst(
+                        &resolve_type_in(fty, enums, &en.module, &en.type_params)?,
+                        &subst,
+                    );
+                    let exp = if usable_expected(&want, tparams) {
+                        Some(want)
+                    } else {
+                        None
+                    };
+                    elaborate_expr(
+                        a,
+                        enums,
+                        funs,
+                        methods,
+                        current_module,
+                        env,
+                        exp.as_ref(),
+                        tparams,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(Expr::new(
+                ExprKind::AdtConstruct {
+                    enum_name,
+                    case_name,
+                    args: new_args,
+                    type_args: targs,
+                },
+                span,
+            ))
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            let scrutinee = elaborate_expr(
+                *scrutinee, enums, funs, methods, current_module, env, None, tparams,
+            )?;
+            let st = infer(&scrutinee, enums, funs, methods, current_module, env)?;
+            let mut out_arms = Vec::new();
+            for arm in arms {
+                let bound = bind_pattern(&arm.pattern, &st, enums, current_module, env)?;
+                let pattern = match &arm.pattern {
+                    crate::ast::Pattern::Wildcard => arm.pattern.clone(),
+                    crate::ast::Pattern::Adt {
+                        enum_name,
+                        case_name,
+                        binds,
+                        ..
+                    } => {
+                        let (en, id) = lookup_enum(enums, enum_name, current_module)?;
+                        let targs: Vec<Type> = if en.type_params.is_empty() {
+                            Vec::new()
+                        } else {
+                            match &st {
+                                Type::App(eid, eargs) if eid == &id => eargs.clone(),
+                                other => {
+                                    return Err(TypeError::Msg(format!(
+                                        "pattern {enum_name}.{case_name} does not match scrutinee {other:?}"
+                                    )))
+                                }
+                            }
+                        };
+                        check_targs(enum_name, case_name, &targs, tparams, &span)?;
+                        crate::ast::Pattern::Adt {
+                            enum_name: enum_name.clone(),
+                            case_name: case_name.clone(),
+                            binds: binds.clone(),
+                            type_args: targs,
+                        }
+                    }
+                };
+                let body = elaborate_expr(
+                    arm.body, enums, funs, methods, current_module, env, expected, tparams,
+                )?;
+                unbind_pattern(bound, env);
+                out_arms.push(crate::ast::MatchArm { pattern, body });
+            }
+            Ok(Expr::new(
+                ExprKind::Match {
+                    scrutinee: Box::new(scrutinee),
+                    arms: out_arms,
+                },
+                span,
+            ))
+        }
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => Ok(Expr::new(
+            ExprKind::If {
+                cond: Box::new(elaborate_expr(
+                    *cond, enums, funs, methods, current_module, env, None, tparams,
+                )?),
+                then_branch: Box::new(elaborate_expr(
+                    *then_branch, enums, funs, methods, current_module, env, expected, tparams,
+                )?),
+                else_branch: Box::new(elaborate_expr(
+                    *else_branch, enums, funs, methods, current_module, env, expected, tparams,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::Call { callee, args } => {
+            if let Ok(f) = funs.resolve(&callee, current_module) {
+                let mut subst: HashMap<String, Type> = HashMap::new();
+                for (a, p) in args.iter().zip(f.params.iter()) {
+                    let at = infer(a, enums, funs, methods, current_module, env)?;
+                    let want = resolve_type_in(&p.ty, enums, &f.module, &f.type_params)?;
+                    unify_construct(&want, &at, &mut subst)?;
+                }
+                let new_args = args
+                    .into_iter()
+                    .zip(f.params.iter())
+                    .map(|(a, p)| {
+                        let want = apply_subst(
+                            &resolve_type_in(&p.ty, enums, &f.module, &f.type_params)?,
+                            &subst,
+                        );
+                        let exp = if usable_expected(&want, tparams) {
+                            Some(want)
+                        } else {
+                            None
+                        };
+                        elaborate_expr(
+                            a,
+                            enums,
+                            funs,
+                            methods,
+                            current_module,
+                            env,
+                            exp.as_ref(),
+                            tparams,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Expr::new(ExprKind::Call { callee, args: new_args }, span))
+            } else {
+                let args = args
+                    .into_iter()
+                    .map(|a| {
+                        elaborate_expr(
+                            a,
+                            enums,
+                            funs,
+                            methods,
+                            current_module,
+                            env,
+                            None,
+                            tparams,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?;
+                Ok(Expr::new(ExprKind::Call { callee, args }, span))
+            }
+        }
+        ExprKind::Let { name, value, body } => {
+            let value = elaborate_expr(
+                *value, enums, funs, methods, current_module, env, None, tparams,
+            )?;
+            let vt = infer(&value, enums, funs, methods, current_module, env)?;
+            let old = env.insert(name.clone(), vt);
+            let body = elaborate_expr(
+                *body, enums, funs, methods, current_module, env, expected, tparams,
+            )?;
+            if let Some(v) = old {
+                env.insert(name.clone(), v);
+            } else {
+                env.remove(&name);
+            }
+            Ok(Expr::new(
+                ExprKind::Let {
+                    name,
+                    value: Box::new(value),
+                    body: Box::new(body),
+                },
+                span,
+            ))
+        }
+        ExprKind::FlatMap { inner, param, body } => {
+            let inner = elaborate_expr(
+                *inner, enums, funs, methods, current_module, env, None, tparams,
+            )?;
+            let it = infer(&inner, enums, funs, methods, current_module, env)?;
+            let mut old = None;
+            if let (Type::Io(inner_t), Some(p)) = (&it, &param) {
+                old = env.insert(p.clone(), (**inner_t).clone());
+            }
+            let body = elaborate_expr(
+                *body, enums, funs, methods, current_module, env, expected, tparams,
+            )?;
+            if let Some(p) = &param {
+                if let Some(v) = old {
+                    env.insert(p.clone(), v);
+                } else {
+                    env.remove(p);
+                }
+            }
+            Ok(Expr::new(
+                ExprKind::FlatMap {
+                    inner: Box::new(inner),
+                    param,
+                    body: Box::new(body),
+                },
+                span,
+            ))
+        }
+        ExprKind::IoPure(inner) => {
+            let inner_expected = match expected {
+                Some(Type::Io(t)) => Some(&**t),
+                _ => None,
+            };
+            Ok(Expr::new(
+                ExprKind::IoPure(Box::new(elaborate_expr(
+                    *inner,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    inner_expected,
+                    tparams,
+                )?)),
+                span,
+            ))
+        }
+        ExprKind::IoPrintln(inner) => Ok(Expr::new(
+            ExprKind::IoPrintln(Box::new(elaborate_expr(
+                *inner, enums, funs, methods, current_module, env, None, tparams,
+            )?)),
+            span,
+        )),
+        ExprKind::IoSleep(inner) => Ok(Expr::new(
+            ExprKind::IoSleep(Box::new(elaborate_expr(
+                *inner, enums, funs, methods, current_module, env, None, tparams,
+            )?)),
+            span,
+        )),
+        ExprKind::IoFail(inner) => Ok(Expr::new(
+            ExprKind::IoFail(Box::new(elaborate_expr(
+                *inner, enums, funs, methods, current_module, env, None, tparams,
+            )?)),
+            span,
+        )),
+        ExprKind::HandleErrorWith { inner, body } => Ok(Expr::new(
+            ExprKind::HandleErrorWith {
+                inner: Box::new(elaborate_expr(
+                    *inner, enums, funs, methods, current_module, env, expected, tparams,
+                )?),
+                body: Box::new(elaborate_expr(
+                    *body, enums, funs, methods, current_module, env, expected, tparams,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::Attempt { inner } => Ok(Expr::new(
+            ExprKind::Attempt {
+                inner: Box::new(elaborate_expr(
+                    *inner, enums, funs, methods, current_module, env, None, tparams,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::IoRace { left, right } => Ok(Expr::new(
+            ExprKind::IoRace {
+                left: Box::new(elaborate_expr(
+                    *left, enums, funs, methods, current_module, env, expected, tparams,
+                )?),
+                right: Box::new(elaborate_expr(
+                    *right, enums, funs, methods, current_module, env, expected, tparams,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::IoBoth { left, right } => Ok(Expr::new(
+            ExprKind::IoBoth {
+                left: Box::new(elaborate_expr(
+                    *left, enums, funs, methods, current_module, env, None, tparams,
+                )?),
+                right: Box::new(elaborate_expr(
+                    *right, enums, funs, methods, current_module, env, None, tparams,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::Field { base, field } => Ok(Expr::new(
+            ExprKind::Field {
+                base: Box::new(elaborate_expr(
+                    *base, enums, funs, methods, current_module, env, None, tparams,
+                )?),
+                field,
+            },
+            span,
+        )),
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+        } => Ok(Expr::new(
+            ExprKind::MethodCall {
+                receiver: Box::new(elaborate_expr(
+                    *receiver, enums, funs, methods, current_module, env, None, tparams,
+                )?),
+                method,
+                args: args
+                    .into_iter()
+                    .map(|a| {
+                        elaborate_expr(
+                            a,
+                            enums,
+                            funs,
+                            methods,
+                            current_module,
+                            env,
+                            None,
+                            tparams,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+            span,
+        )),
+        ExprKind::ListLit { elems } => Ok(Expr::new(
+            ExprKind::ListLit {
+                elems: elems
+                    .into_iter()
+                    .map(|e| {
+                        elaborate_expr(
+                            e,
+                            enums,
+                            funs,
+                            methods,
+                            current_module,
+                            env,
+                            None,
+                            tparams,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+            span,
+        )),
+        ExprKind::Interpolate { parts } => Ok(Expr::new(
+            ExprKind::Interpolate {
+                parts: parts
+                    .into_iter()
+                    .map(|p| match p {
+                        crate::ast::InterpPart::Lit(s) => Ok(crate::ast::InterpPart::Lit(s)),
+                        crate::ast::InterpPart::Expr(e) => Ok(crate::ast::InterpPart::Expr(
+                            elaborate_expr(
+                                e,
+                                enums,
+                                funs,
+                                methods,
+                                current_module,
+                                env,
+                                None,
+                                tparams,
+                            )?,
+                        )),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+            span,
+        )),
+        ExprKind::Binary { op, left, right } => Ok(Expr::new(
+            ExprKind::Binary {
+                op,
+                left: Box::new(elaborate_expr(
+                    *left, enums, funs, methods, current_module, env, None, tparams,
+                )?),
+                right: Box::new(elaborate_expr(
+                    *right, enums, funs, methods, current_module, env, None, tparams,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::Lambda { param, body } => Ok(Expr::new(
+            ExprKind::Lambda {
+                param,
+                body: Box::new(elaborate_expr(
+                    *body, enums, funs, methods, current_module, env, None, tparams,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::For { .. } => panic!("internal: unlowered `for` in elaboration"),
+        other => Ok(Expr::new(other, span)),
+    }
+}
+
+/// Apply a def specialization's substitution to the `type_args` stored on
+/// generic enum nodes inside a cloned template body.
+fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
+    let span = expr.span.clone();
+    let kind = match expr.kind {
+        ExprKind::AdtConstruct {
+            enum_name,
+            case_name,
+            args,
+            type_args,
+        } => ExprKind::AdtConstruct {
+            enum_name,
+            case_name,
+            args: args.into_iter().map(|a| subst_node_targs(a, subst)).collect(),
+            type_args: type_args.iter().map(|t| apply_subst(t, subst)).collect(),
+        },
+        ExprKind::Match { scrutinee, arms } => ExprKind::Match {
+            scrutinee: Box::new(subst_node_targs(*scrutinee, subst)),
+            arms: arms
+                .into_iter()
+                .map(|a| crate::ast::MatchArm {
+                    pattern: match a.pattern {
+                        crate::ast::Pattern::Adt {
+                            enum_name,
+                            case_name,
+                            binds,
+                            type_args,
+                        } => crate::ast::Pattern::Adt {
+                            enum_name,
+                            case_name,
+                            binds,
+                            type_args: type_args.iter().map(|t| apply_subst(t, subst)).collect(),
+                        },
+                        p => p,
+                    },
+                    body: subst_node_targs(a.body, subst),
+                })
+                .collect(),
+        },
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => ExprKind::If {
+            cond: Box::new(subst_node_targs(*cond, subst)),
+            then_branch: Box::new(subst_node_targs(*then_branch, subst)),
+            else_branch: Box::new(subst_node_targs(*else_branch, subst)),
+        },
+        ExprKind::Call { callee, args } => ExprKind::Call {
+            callee,
+            args: args.into_iter().map(|a| subst_node_targs(a, subst)).collect(),
+        },
+        ExprKind::Let { name, value, body } => ExprKind::Let {
+            name,
+            value: Box::new(subst_node_targs(*value, subst)),
+            body: Box::new(subst_node_targs(*body, subst)),
+        },
+        ExprKind::FlatMap { inner, param, body } => ExprKind::FlatMap {
+            inner: Box::new(subst_node_targs(*inner, subst)),
+            param,
+            body: Box::new(subst_node_targs(*body, subst)),
+        },
+        ExprKind::IoPrintln(e) => ExprKind::IoPrintln(Box::new(subst_node_targs(*e, subst))),
+        ExprKind::IoSleep(e) => ExprKind::IoSleep(Box::new(subst_node_targs(*e, subst))),
+        ExprKind::IoFail(e) => ExprKind::IoFail(Box::new(subst_node_targs(*e, subst))),
+        ExprKind::IoPure(e) => ExprKind::IoPure(Box::new(subst_node_targs(*e, subst))),
+        ExprKind::HandleErrorWith { inner, body } => ExprKind::HandleErrorWith {
+            inner: Box::new(subst_node_targs(*inner, subst)),
+            body: Box::new(subst_node_targs(*body, subst)),
+        },
+        ExprKind::Attempt { inner } => ExprKind::Attempt {
+            inner: Box::new(subst_node_targs(*inner, subst)),
+        },
+        ExprKind::IoRace { left, right } => ExprKind::IoRace {
+            left: Box::new(subst_node_targs(*left, subst)),
+            right: Box::new(subst_node_targs(*right, subst)),
+        },
+        ExprKind::IoBoth { left, right } => ExprKind::IoBoth {
+            left: Box::new(subst_node_targs(*left, subst)),
+            right: Box::new(subst_node_targs(*right, subst)),
+        },
+        ExprKind::Field { base, field } => ExprKind::Field {
+            base: Box::new(subst_node_targs(*base, subst)),
+            field,
+        },
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+        } => ExprKind::MethodCall {
+            receiver: Box::new(subst_node_targs(*receiver, subst)),
+            method,
+            args: args.into_iter().map(|a| subst_node_targs(a, subst)).collect(),
+        },
+        ExprKind::ListLit { elems } => ExprKind::ListLit {
+            elems: elems.into_iter().map(|e| subst_node_targs(e, subst)).collect(),
+        },
+        ExprKind::Interpolate { parts } => ExprKind::Interpolate {
+            parts: parts
+                .into_iter()
+                .map(|p| match p {
+                    crate::ast::InterpPart::Lit(s) => crate::ast::InterpPart::Lit(s),
+                    crate::ast::InterpPart::Expr(e) => {
+                        crate::ast::InterpPart::Expr(subst_node_targs(e, subst))
+                    }
+                })
+                .collect(),
+        },
+        ExprKind::Binary { op, left, right } => ExprKind::Binary {
+            op,
+            left: Box::new(subst_node_targs(*left, subst)),
+            right: Box::new(subst_node_targs(*right, subst)),
+        },
+        ExprKind::Lambda { param, body } => ExprKind::Lambda {
+            param,
+            body: Box::new(subst_node_targs(*body, subst)),
+        },
+        other => other,
+    };
+    Expr::new(kind, span)
+}
+
+fn mono_enum_name(en: &EnumDef, args: &[Type]) -> String {
+    let mut parts = vec![format!("__gen_{}", en.name)];
+    for a in args {
+        parts.push(type_mangle(a));
+    }
+    parts.join("_")
+}
+
+/// Collect `(template-id, args)` instantiations from a resolved type.
+fn collect_apps_in_type(ty: &Type, out: &mut Vec<(String, Vec<Type>)>) {
+    match ty {
+        Type::App(id, args) => {
+            out.push((id.clone(), args.clone()));
+            for a in args {
+                collect_apps_in_type(a, out);
+            }
+        }
+        Type::Io(inner) => collect_apps_in_type(inner, out),
+        _ => {}
+    }
+}
+
+/// Collect instantiations stored on elaborated construct/pattern nodes.
+fn collect_node_targs(expr: &Expr, out: &mut Vec<(String, Vec<Type>)>) {
+    match &expr.kind {
+        ExprKind::AdtConstruct {
+            enum_name,
+            args,
+            type_args,
+            ..
+        } => {
+            if !type_args.is_empty() {
+                out.push((enum_name.clone(), type_args.clone()));
+                for t in type_args {
+                    collect_apps_in_type(t, out);
+                }
+            }
+            for a in args {
+                collect_node_targs(a, out);
+            }
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            collect_node_targs(scrutinee, out);
+            for a in arms {
+                if let crate::ast::Pattern::Adt {
+                    enum_name,
+                    type_args,
+                    ..
+                } = &a.pattern
+                {
+                    if !type_args.is_empty() {
+                        out.push((enum_name.clone(), type_args.clone()));
+                        for t in type_args {
+                            collect_apps_in_type(t, out);
+                        }
+                    }
+                }
+                collect_node_targs(&a.body, out);
+            }
+        }
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            collect_node_targs(cond, out);
+            collect_node_targs(then_branch, out);
+            collect_node_targs(else_branch, out);
+        }
+        ExprKind::Call { args, .. } => {
+            for a in args {
+                collect_node_targs(a, out);
+            }
+        }
+        ExprKind::Let { value, body, .. } => {
+            collect_node_targs(value, out);
+            collect_node_targs(body, out);
+        }
+        ExprKind::FlatMap { inner, body, .. } => {
+            collect_node_targs(inner, out);
+            collect_node_targs(body, out);
+        }
+        ExprKind::IoPrintln(e)
+        | ExprKind::IoSleep(e)
+        | ExprKind::IoFail(e)
+        | ExprKind::IoPure(e)
+        | ExprKind::Attempt { inner: e } => collect_node_targs(e, out),
+        ExprKind::HandleErrorWith { inner, body } => {
+            collect_node_targs(inner, out);
+            collect_node_targs(body, out);
+        }
+        ExprKind::IoRace { left, right } | ExprKind::IoBoth { left, right } => {
+            collect_node_targs(left, out);
+            collect_node_targs(right, out);
+        }
+        ExprKind::Field { base, .. } => collect_node_targs(base, out),
+        ExprKind::MethodCall { receiver, args, .. } => {
+            collect_node_targs(receiver, out);
+            for a in args {
+                collect_node_targs(a, out);
+            }
+        }
+        ExprKind::ListLit { elems } => {
+            for e in elems {
+                collect_node_targs(e, out);
+            }
+        }
+        ExprKind::Interpolate { parts } => {
+            for p in parts {
+                if let crate::ast::InterpPart::Expr(e) = p {
+                    collect_node_targs(e, out);
+                }
+            }
+        }
+        ExprKind::Binary { left, right, .. } => {
+            collect_node_targs(left, out);
+            collect_node_targs(right, out);
+        }
+        ExprKind::Lambda { body, .. } => collect_node_targs(body, out),
+        _ => {}
+    }
+}
+
+/// Rewrite elaborated construct/pattern nodes to their cloned enum ids.
+fn rewrite_enum_refs(
+    expr: Expr,
+    clones: &HashMap<(String, Vec<Type>), String>,
+) -> Result<Expr, TypeError> {
+    let span = expr.span.clone();
+    let lookup = |enum_name: &str, type_args: &[Type]| -> Result<String, TypeError> {
+        clones
+            .get(&(enum_name.to_string(), type_args.to_vec()))
+            .cloned()
+            .ok_or_else(|| {
+                TypeError::Msg(format!(
+                    "internal: missing enum clone for {enum_name}{type_args:?}"
+                ))
+            })
+    };
+    let kind = match expr.kind {
+        ExprKind::AdtConstruct {
+            enum_name,
+            case_name,
+            args,
+            type_args,
+        } => {
+            let args = args
+                .into_iter()
+                .map(|a| rewrite_enum_refs(a, clones))
+                .collect::<Result<Vec<_>, _>>()?;
+            if type_args.is_empty() {
+                ExprKind::AdtConstruct {
+                    enum_name,
+                    case_name,
+                    args,
+                    type_args,
+                }
+            } else {
+                ExprKind::AdtConstruct {
+                    enum_name: lookup(&enum_name, &type_args)?,
+                    case_name,
+                    args,
+                    type_args: Vec::new(),
+                }
+            }
+        }
+        ExprKind::Match { scrutinee, arms } => ExprKind::Match {
+            scrutinee: Box::new(rewrite_enum_refs(*scrutinee, clones)?),
+            arms: arms
+                .into_iter()
+                .map(|a| {
+                    let pattern = match a.pattern {
+                        crate::ast::Pattern::Adt {
+                            enum_name,
+                            case_name,
+                            binds,
+                            type_args,
+                        } if !type_args.is_empty() => crate::ast::Pattern::Adt {
+                            enum_name: lookup(&enum_name, &type_args)?,
+                            case_name,
+                            binds,
+                            type_args: Vec::new(),
+                        },
+                        p => p,
+                    };
+                    Ok(crate::ast::MatchArm {
+                        pattern,
+                        body: rewrite_enum_refs(a.body, clones)?,
+                    })
+                })
+                .collect::<Result<Vec<_>, TypeError>>()?,
+        },
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => ExprKind::If {
+            cond: Box::new(rewrite_enum_refs(*cond, clones)?),
+            then_branch: Box::new(rewrite_enum_refs(*then_branch, clones)?),
+            else_branch: Box::new(rewrite_enum_refs(*else_branch, clones)?),
+        },
+        ExprKind::Call { callee, args } => ExprKind::Call {
+            callee,
+            args: args
+                .into_iter()
+                .map(|a| rewrite_enum_refs(a, clones))
+                .collect::<Result<Vec<_>, _>>()?,
+        },
+        ExprKind::Let { name, value, body } => ExprKind::Let {
+            name,
+            value: Box::new(rewrite_enum_refs(*value, clones)?),
+            body: Box::new(rewrite_enum_refs(*body, clones)?),
+        },
+        ExprKind::FlatMap { inner, param, body } => ExprKind::FlatMap {
+            inner: Box::new(rewrite_enum_refs(*inner, clones)?),
+            param,
+            body: Box::new(rewrite_enum_refs(*body, clones)?),
+        },
+        ExprKind::IoPrintln(e) => ExprKind::IoPrintln(Box::new(rewrite_enum_refs(*e, clones)?)),
+        ExprKind::IoSleep(e) => ExprKind::IoSleep(Box::new(rewrite_enum_refs(*e, clones)?)),
+        ExprKind::IoFail(e) => ExprKind::IoFail(Box::new(rewrite_enum_refs(*e, clones)?)),
+        ExprKind::IoPure(e) => ExprKind::IoPure(Box::new(rewrite_enum_refs(*e, clones)?)),
+        ExprKind::HandleErrorWith { inner, body } => ExprKind::HandleErrorWith {
+            inner: Box::new(rewrite_enum_refs(*inner, clones)?),
+            body: Box::new(rewrite_enum_refs(*body, clones)?),
+        },
+        ExprKind::Attempt { inner } => ExprKind::Attempt {
+            inner: Box::new(rewrite_enum_refs(*inner, clones)?),
+        },
+        ExprKind::IoRace { left, right } => ExprKind::IoRace {
+            left: Box::new(rewrite_enum_refs(*left, clones)?),
+            right: Box::new(rewrite_enum_refs(*right, clones)?),
+        },
+        ExprKind::IoBoth { left, right } => ExprKind::IoBoth {
+            left: Box::new(rewrite_enum_refs(*left, clones)?),
+            right: Box::new(rewrite_enum_refs(*right, clones)?),
+        },
+        ExprKind::Field { base, field } => ExprKind::Field {
+            base: Box::new(rewrite_enum_refs(*base, clones)?),
+            field,
+        },
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+        } => ExprKind::MethodCall {
+            receiver: Box::new(rewrite_enum_refs(*receiver, clones)?),
+            method,
+            args: args
+                .into_iter()
+                .map(|a| rewrite_enum_refs(a, clones))
+                .collect::<Result<Vec<_>, _>>()?,
+        },
+        ExprKind::ListLit { elems } => ExprKind::ListLit {
+            elems: elems
+                .into_iter()
+                .map(|e| rewrite_enum_refs(e, clones))
+                .collect::<Result<Vec<_>, _>>()?,
+        },
+        ExprKind::Interpolate { parts } => ExprKind::Interpolate {
+            parts: parts
+                .into_iter()
+                .map(|p| match p {
+                    crate::ast::InterpPart::Lit(s) => Ok(crate::ast::InterpPart::Lit(s)),
+                    crate::ast::InterpPart::Expr(e) => {
+                        Ok(crate::ast::InterpPart::Expr(rewrite_enum_refs(e, clones)?))
+                    }
+                })
+                .collect::<Result<Vec<_>, TypeError>>()?,
+        },
+        ExprKind::Binary { op, left, right } => ExprKind::Binary {
+            op,
+            left: Box::new(rewrite_enum_refs(*left, clones)?),
+            right: Box::new(rewrite_enum_refs(*right, clones)?),
+        },
+        ExprKind::Lambda { param, body } => ExprKind::Lambda {
+            param,
+            body: Box::new(rewrite_enum_refs(*body, clones)?),
+        },
+        other => other,
+    };
+    Ok(Expr::new(kind, span))
+}
+
+/// Replace applied types with their cloned enum ids (post-specialization).
+fn concretize_type(
+    ty: &Type,
+    clones: &HashMap<(String, Vec<Type>), String>,
+) -> Result<Type, TypeError> {
+    match ty {
+        Type::App(id, args) => {
+            let cid = clones
+                .get(&(id.clone(), args.clone()))
+                .ok_or_else(|| {
+                    TypeError::Msg(format!("internal: missing enum clone for {id}{args:?}"))
+                })?;
+            Ok(Type::Adt(cid.clone()))
+        }
+        Type::Io(inner) => Ok(Type::Io(Box::new(concretize_type(inner, clones)?))),
+        other => Ok(other.clone()),
+    }
+}
+
+/// Clone generic enums per concrete instantiation; erase `App` everywhere.
+/// Runs at the end of monomorphization so codegen only sees concrete enums.
+fn specialize_enums(mut program: Program) -> Result<Program, TypeError> {
+    let enums_owned = program.enums.clone();
+    let imports_owned = program.imports.clone();
+    let enums = EnumIndex::build(&enums_owned, &imports_owned)
+        .map_err(|e| TypeError::Msg(e.to_string()))?;
+
+    let mut instances: Vec<(String, Vec<Type>)> = Vec::new();
+    for d in &program.defs {
+        for p in &d.params {
+            let r = resolve_type(&p.ty, &enums, &d.module)?;
+            collect_apps_in_type(&r, &mut instances);
+        }
+        let r = resolve_type(&d.ret, &enums, &d.module)?;
+        collect_apps_in_type(&r, &mut instances);
+        collect_node_targs(&d.body, &mut instances);
+    }
+    collect_node_targs(&program.main.body, &mut instances);
+
+    let mut clones: HashMap<(String, Vec<Type>), String> = HashMap::new();
+    let mut clone_defs: Vec<EnumDef> = Vec::new();
+    let mut i = 0;
+    while i < instances.len() {
+        let (id, args) = instances[i].clone();
+        i += 1;
+        if clones.contains_key(&(id.clone(), args.clone())) {
+            continue;
+        }
+        if args.iter().any(|a| !mono_type_ok(a)) {
+            return Err(TypeError::Msg(format!(
+                "internal: non-concrete instantiation {id}{args:?} survived monomorphization"
+            )));
+        }
+        let en = enums.resolve(&id, "").map_err(|e| {
+            TypeError::Msg(format!("internal: unknown generic enum {id}: {e}"))
+        })?;
+        let subst: HashMap<String, Type> = en
+            .type_params
+            .iter()
+            .cloned()
+            .zip(args.iter().cloned())
+            .collect();
+        let mangled = mono_enum_name(en, &args);
+        let clone_id = crate::resolve::enum_id(&en.module, &mangled);
+        let mut cases = Vec::new();
+        for case in &en.cases {
+            let mut fields = Vec::new();
+            for (fname, fty) in &case.fields {
+                let r = resolve_type_in(fty, &enums, &en.module, &en.type_params)?;
+                let s = apply_subst(&r, &subst);
+                collect_apps_in_type(&s, &mut instances);
+                fields.push((fname.clone(), s));
+            }
+            cases.push(crate::ast::EnumCase {
+                name: case.name.clone(),
+                fields,
+            });
+        }
+        clones.insert((id, args), clone_id);
+        clone_defs.push(EnumDef {
+            module: en.module.clone(),
+            name: mangled,
+            type_params: Vec::new(),
+            cases,
+            is_record: en.is_record,
+        });
+    }
+
+    if clones.is_empty() {
+        return Ok(program);
+    }
+
+    for d in &mut program.defs {
+        for p in &mut d.params {
+            let r = resolve_type(&p.ty, &enums, &d.module)?;
+            p.ty = concretize_type(&r, &clones)?;
+        }
+        let r = resolve_type(&d.ret, &enums, &d.module)?;
+        d.ret = concretize_type(&r, &clones)?;
+        d.body = rewrite_enum_refs(std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)), &clones)?;
+    }
+    program.main.body = rewrite_enum_refs(
+        std::mem::replace(&mut program.main.body, Expr::dummy(ExprKind::Unit)),
+        &clones,
+    )?;
+    for c in &mut clone_defs {
+        for case in &mut c.cases {
+            for (_fname, fty) in &mut case.fields {
+                *fty = concretize_type(fty, &clones)?;
+            }
+        }
+    }
+    program.enums.retain(|e| e.type_params.is_empty());
+    program.enums.extend(clone_defs);
+    Ok(program)
 }
 
 #[cfg(test)]
@@ -2769,6 +3895,185 @@ def f(o: Opt[Int]): Int = 1
             err.message().contains("mismatch"),
             "unexpected: {}",
             err.message()
+        );
+    }
+
+    fn gen_pipeline(src: &str) -> Program {
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("typecheck");
+        let p = elaborate_generics(p).expect("elaborate");
+        monomorphize(p).expect("monomorphize")
+    }
+
+    fn mentions_app(ty: &Type) -> bool {
+        match ty {
+            Type::App(_, _) => true,
+            Type::Io(inner) => mentions_app(inner),
+            _ => false,
+        }
+    }
+
+    #[test]
+    fn mono_clones_generic_enum_per_instantiation() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(Str.fromInt(Opt.Some(1) match {
+      case Opt.Some(n) => n
+      case Opt.None => 0
+    }))
+    _ <- IO.println(Opt.Some("s") match {
+      case Opt.Some(x) => x
+      case Opt.None => "n"
+    })
+  } yield ()
+"#;
+        let p = gen_pipeline(src);
+        assert!(p.enums.iter().all(|e| e.type_params.is_empty()));
+        assert!(
+            p.enums.iter().any(|e| e.name.contains("__gen_Opt_Int")),
+            "missing Opt[Int] clone: {:?}",
+            p.enums.iter().map(|e| &e.name).collect::<Vec<_>>()
+        );
+        assert!(
+            p.enums.iter().any(|e| e.name.contains("__gen_Opt_String")),
+            "missing Opt[String] clone"
+        );
+        for d in &p.defs {
+            for prm in &d.params {
+                assert!(!mentions_app(&prm.ty));
+            }
+            assert!(!mentions_app(&d.ret));
+        }
+    }
+
+    #[test]
+    fn mono_rewrites_construct_to_cloned_enum() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] = Opt.Some(1) match {
+  case Opt.Some(n) => IO.println(Str.fromInt(n))
+  case Opt.None => IO.println("none")
+}
+"#;
+        let p = gen_pipeline(src);
+        match &p.main.body.kind {
+            ExprKind::Match { scrutinee, .. } => match &scrutinee.kind {
+                ExprKind::AdtConstruct {
+                    enum_name,
+                    type_args,
+                    ..
+                } => {
+                    assert!(type_args.is_empty(), "type_args must be cleared");
+                    assert!(
+                        enum_name.contains("__gen_Opt_Int"),
+                        "construct not rewritten: {enum_name}"
+                    );
+                }
+                other => panic!("expected AdtConstruct, got {other:?}"),
+            },
+            other => panic!("expected Match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn elaborate_infers_nullary_case_from_def_ret() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+def noneInt(): Opt[Int] = Opt.None
+@main def main: IO[Unit] = noneInt() match {
+  case Opt.Some(n) => IO.println(Str.fromInt(n))
+  case Opt.None => IO.println("none")
+}
+"#;
+        let p = gen_pipeline(src);
+        assert!(p.enums.iter().any(|e| e.name.contains("__gen_Opt_Int")));
+    }
+
+    #[test]
+    fn elaborate_errors_on_uninferrable_nullary() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  for {
+    x = Opt.None
+  } yield IO.println("x")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("typecheck");
+        let err = elaborate_generics(p).unwrap_err();
+        assert!(
+            err.message().contains("cannot infer type parameter T"),
+            "unexpected: {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn mono_specializes_generic_record() {
+        let src = r#"
+record Box[T](x: T)
+def unbox[T](b: Box[T]): T = b.x
+@main def main: IO[Unit] = IO.println(Str.fromInt(unbox(Box(3))))
+"#;
+        let p = gen_pipeline(src);
+        assert!(p.enums.iter().any(|e| e.name.contains("__gen_Box_Int")));
+        assert!(p.enums.iter().all(|e| e.type_params.is_empty()));
+    }
+
+    #[test]
+    fn mono_handles_nested_application() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+def wrap2(x: Int): Opt[Opt[Int]] = Opt.Some(Opt.Some(x))
+@main def main: IO[Unit] = wrap2(1) match {
+  case Opt.Some(inner) => inner match {
+    case Opt.Some(n) => IO.println(Str.fromInt(n))
+    case Opt.None => IO.println("inner-none")
+  }
+  case Opt.None => IO.println("outer-none")
+}
+"#;
+        let p = gen_pipeline(src);
+        assert!(
+            p.enums.iter().any(|e| e.name.contains("__gen_Opt_Int")),
+            "missing inner clone"
+        );
+        assert!(
+            p.enums.iter().any(|e| e.name.contains("__gen_Opt_Opt")),
+            "missing nested clone: {:?}",
+            p.enums.iter().map(|e| &e.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn mono_multi_param_either_clone() {
+        let src = r#"
+enum Either[L, R]:
+  case Left(x: L)
+  case Right(y: R)
+def describe(e: Either[Int, String]): String = e match {
+  case Either.Left(n) => Str.fromInt(n)
+  case Either.Right(s) => s
+}
+@main def main: IO[Unit] = IO.println(describe(Either.Left(1)))
+"#;
+        let p = gen_pipeline(src);
+        assert!(
+            p.enums.iter().any(|e| e.name.contains("__gen_Either_Int_String")),
+            "missing Either clone: {:?}",
+            p.enums.iter().map(|e| &e.name).collect::<Vec<_>>()
         );
     }
 }
