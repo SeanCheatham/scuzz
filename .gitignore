@@ -23,6 +23,7 @@ crates/embedder-mobile/build/
 *.swp
 .idea/
 .vscode/
+.gradle/
 third_party/skia/prebuilt/
 
 scratchpad/
