@@ -1,7 +1,7 @@
 package scuzz.compiler
 
 enum EnumField:
-  case Field(name: String, ty: String)
+  case Field(name: String, ty: Type)
 
 enum EnumCase:
   case Case(name: String, fields: List)

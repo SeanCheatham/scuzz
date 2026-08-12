@@ -21,6 +21,12 @@ def okDef(d: Def, i: Int): List =
 def okParam(p: Param, i: Int): List =
   List.cons(p, List.cons(Str.fromInt(i), List.empty()))
 
+def okType(t: Type, i: Int): List =
+  List.cons(t, List.cons(Str.fromInt(i), List.empty()))
+
+def pType(p: List): Type =
+  List.head(p)
+
 def pAst(p: List): List =
   List.head(p)
 
@@ -68,23 +74,23 @@ def parseIdent(file: String, tokens: List, i: Int): List =
     tok = tokAt(tokens, i)
   } yield if (isIdentTok(tok) == 1) okStr(identName(tok), i + 1) else okStr("", i)
 
-def typeToString(name: String, inner: String): String =
-  if (streq(name, "IO") == 1) str3("IO[", inner, "]") else name
-
 def parseType(file: String, tokens: List, i: Int): List =
   for {
     nameP = parseIdent(file, tokens, i)
   } yield parseTypeAfterName(file, tokens, pStr(nameP), pIdx(nameP))
 
 def parseTypeAfterName(file: String, tokens: List, name: String, i: Int): List =
-  if (streq(name, "IO") == 1) parseTypeIo(file, tokens, i) else okStr(name, i)
+  if (streq(name, "IO") == 1) parseTypeIo(file, tokens, i) else okType(parseTypeBuiltin(name), i)
+
+def parseTypeBuiltin(name: String): Type =
+  if (streq(name, "Unit") == 1) Type.Unit else if (streq(name, "Int") == 1) Type.Int else if (streq(name, "String") == 1) Type.String else if (streq(name, "Bool") == 1) Type.Bool else if (streq(name, "List") == 1) Type.List else tyMkAdt(name)
 
 def parseTypeIo(file: String, tokens: List, i: Int): List =
   for {
     i1 = expectTok(tokens, i, "LBracket")
     innerP = parseType(file, tokens, i1)
     i2 = expectTok(tokens, pIdx(innerP), "RBracket")
-  } yield okStr(str3("IO[", pStr(innerP), "]"), i2)
+  } yield okType(tyMkIo(pType(innerP)), i2)
 
 def parsePackage(file: String, tokens: List, i: Int): List =
   if (isTok(tokens, i, "Package") == 0) okStr("", i) else parsePackageParts(file, tokens, i + 1, "")
@@ -102,7 +108,7 @@ def parseParam(file: String, tokens: List, i: Int): List =
     nameP = parseIdent(file, tokens, i)
     i1 = expectTok(tokens, pIdx(nameP), "Colon")
     tyP = parseType(file, tokens, i1)
-  } yield okParam(Param.Param(pStr(nameP), pStr(tyP)), pIdx(tyP))
+  } yield okParam(Param.Param(pStr(nameP), pType(tyP)), pIdx(tyP))
 
 def parseParams(file: String, tokens: List, i: Int, acc: List): List =
   if (isTok(tokens, i, "RParen") == 1) ok(List.reverse(acc), i) else parseParamsCont(file, tokens, i, acc)
@@ -470,7 +476,7 @@ def parseDef(file: String, tokens: List, i: Int): List =
     retP = parseType(file, tokens, i3)
     i4 = expectTok(tokens, pIdx(retP), "Eq")
     bodyP = parseBlock(file, tokens, i4)
-  } yield okDef(Def.Def(pStr(nameP), pAst(paramsP), pStr(retP), pExpr(bodyP), moduleIdFromLabel(file)), pIdx(bodyP))
+  } yield okDef(Def.Def(pStr(nameP), pAst(paramsP), pType(retP), pExpr(bodyP), moduleIdFromLabel(file)), pIdx(bodyP))
 
 def parseMain(file: String, tokens: List, i: Int): List =
   for {
@@ -524,7 +530,7 @@ def parseEnumCaseFieldCont(file: String, tokens: List, i: Int, acc: List): List 
     fnameP = parseIdent(file, tokens, i)
     i1 = expectTok(tokens, pIdx(fnameP), "Colon")
     tyP = parseType(file, tokens, i1)
-    acc2 = List.cons(EnumField.Field(pStr(fnameP), pStr(tyP)), acc)
+    acc2 = List.cons(EnumField.Field(pStr(fnameP), pType(tyP)), acc)
     j = pIdx(tyP)
   } yield if (isTok(tokens, j, "Comma") == 1) parseEnumCaseFieldsAcc(file, tokens, j + 1, acc2) else parseEnumCaseFieldsEnd(file, tokens, j, acc2)
 

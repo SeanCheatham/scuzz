@@ -1,0 +1,386 @@
+package scuzz.compiler
+
+enum Type:
+  case Unit
+  case Int
+  case String
+  case Bool
+  case List
+  case Io(inner: Type)
+  case Adt(name: String)
+  case Opaque(name: String)
+
+enum TyBind:
+  case Bind(name: String, ty: Type)
+
+enum TyRes:
+  case Ok(ty: Type)
+  case Err(msg: String)
+  case At(file: String, start: Int, end: Int, msg: String)
+
+def tyShow(t: Type): String =
+  t match {
+    case Type.Unit => "Unit"
+    case Type.Int => "Int"
+    case Type.String => "String"
+    case Type.Bool => "Bool"
+    case Type.List => "List"
+    case Type.Io(inner) => str3("IO[", tyShow(inner), "]")
+    case Type.Adt(name) => Str.concat("Adt:", name)
+    case Type.Opaque(name) => Str.concat("Opaque:", name)
+  }
+
+def tyPretty(t: Type): String =
+  t match {
+    case Type.Unit => "Unit"
+    case Type.Int => "Int"
+    case Type.String => "String"
+    case Type.Bool => "Bool"
+    case Type.List => "List"
+    case Type.Io(inner) => str3("IO[", tyPretty(inner), "]")
+    case Type.Adt(name) => name
+    case Type.Opaque(name) => name
+  }
+
+def tyEq(a: Type, b: Type): Int =
+  a match {
+    case Type.Unit => tyEqUnit(b)
+    case Type.Int => tyEqInt(b)
+    case Type.String => tyEqString(b)
+    case Type.Bool => tyEqBool(b)
+    case Type.List => tyEqList(b)
+    case Type.Io(ia) => tyEqIo(ia, b)
+    case Type.Adt(na) => tyEqAdt(na, b)
+    case Type.Opaque(na) => tyEqOpaque(na, b)
+  }
+
+def tyEqUnit(b: Type): Int =
+  b match {
+    case Type.Unit => 1
+    case Type.Int => 0
+    case Type.String => 0
+    case Type.Bool => 0
+    case Type.List => 0
+    case Type.Io(inner) => 0
+    case Type.Adt(name) => 0
+    case Type.Opaque(name) => 0
+  }
+
+def tyEqInt(b: Type): Int =
+  b match {
+    case Type.Int => 1
+    case Type.Unit => 0
+    case Type.String => 0
+    case Type.Bool => 0
+    case Type.List => 0
+    case Type.Io(inner) => 0
+    case Type.Adt(name) => 0
+    case Type.Opaque(name) => 0
+  }
+
+def tyEqString(b: Type): Int =
+  b match {
+    case Type.String => 1
+    case Type.Unit => 0
+    case Type.Int => 0
+    case Type.Bool => 0
+    case Type.List => 0
+    case Type.Io(inner) => 0
+    case Type.Adt(name) => 0
+    case Type.Opaque(name) => 0
+  }
+
+def tyEqBool(b: Type): Int =
+  b match {
+    case Type.Bool => 1
+    case Type.Unit => 0
+    case Type.Int => 0
+    case Type.String => 0
+    case Type.List => 0
+    case Type.Io(inner) => 0
+    case Type.Adt(name) => 0
+    case Type.Opaque(name) => 0
+  }
+
+def tyEqList(b: Type): Int =
+  b match {
+    case Type.List => 1
+    case Type.Unit => 0
+    case Type.Int => 0
+    case Type.String => 0
+    case Type.Bool => 0
+    case Type.Io(inner) => 0
+    case Type.Adt(name) => 0
+    case Type.Opaque(name) => 0
+  }
+
+def tyEqIo(ia: Type, b: Type): Int =
+  b match {
+    case Type.Io(ib) => tyEq(ia, ib)
+    case Type.Unit => 0
+    case Type.Int => 0
+    case Type.String => 0
+    case Type.Bool => 0
+    case Type.List => 0
+    case Type.Adt(name) => 0
+    case Type.Opaque(name) => 0
+  }
+
+def tyEqAdt(na: String, b: Type): Int =
+  b match {
+    case Type.Adt(nb) => streq(na, nb)
+    case Type.Unit => 0
+    case Type.Int => 0
+    case Type.String => 0
+    case Type.Bool => 0
+    case Type.List => 0
+    case Type.Io(inner) => 0
+    case Type.Opaque(name) => 0
+  }
+
+def tyEqOpaque(na: String, b: Type): Int =
+  b match {
+    case Type.Opaque(nb) => streq(na, nb)
+    case Type.Unit => 0
+    case Type.Int => 0
+    case Type.String => 0
+    case Type.Bool => 0
+    case Type.List => 0
+    case Type.Io(inner) => 0
+    case Type.Adt(name) => 0
+  }
+
+def typesCompat(a: Type, b: Type): Int =
+  if (tyEq(a, b) == 1) 1 else typesCompatCont(a, b)
+
+def typesCompatCont(a: Type, b: Type): Int =
+  a match {
+    case Type.Bool => typesCompatBool(b)
+    case Type.Int => typesCompatInt(b)
+    case Type.Io(ia) => typesCompatIo(b)
+    case Type.Opaque(name) => 1
+    case Type.Unit => typesCompatOpaqueRhs(b)
+    case Type.String => typesCompatOpaqueRhs(b)
+    case Type.List => typesCompatOpaqueRhs(b)
+    case Type.Adt(name) => typesCompatOpaqueRhs(b)
+  }
+
+def typesCompatBool(b: Type): Int =
+  b match {
+    case Type.Int => 1
+    case Type.Unit => 0
+    case Type.String => 0
+    case Type.Bool => 0
+    case Type.List => 0
+    case Type.Io(inner) => 0
+    case Type.Adt(name) => 0
+    case Type.Opaque(name) => 0
+  }
+
+def typesCompatInt(b: Type): Int =
+  b match {
+    case Type.Bool => 1
+    case Type.Unit => 0
+    case Type.Int => 0
+    case Type.String => 0
+    case Type.List => 0
+    case Type.Io(inner) => 0
+    case Type.Adt(name) => 0
+    case Type.Opaque(name) => 0
+  }
+
+def typesCompatIo(b: Type): Int =
+  b match {
+    case Type.Io(ib) => 1
+    case Type.Unit => 0
+    case Type.Int => 0
+    case Type.String => 0
+    case Type.Bool => 0
+    case Type.List => 0
+    case Type.Adt(name) => 0
+    case Type.Opaque(name) => 0
+  }
+
+def typesCompatOpaqueRhs(b: Type): Int =
+  b match {
+    case Type.Opaque(name) => 1
+    case Type.Unit => 0
+    case Type.Int => 0
+    case Type.String => 0
+    case Type.Bool => 0
+    case Type.List => 0
+    case Type.Io(inner) => 0
+    case Type.Adt(name) => 0
+  }
+
+def normalizeTy(t: Type): Type =
+  t match {
+    case Type.Io(inner) => tyMkIo(normalizeTy(inner))
+    case Type.Unit => t
+    case Type.Int => t
+    case Type.String => t
+    case Type.Bool => t
+    case Type.List => t
+    case Type.Adt(name) => t
+    case Type.Opaque(name) => t
+  }
+
+def tyIsIo(t: Type): Int =
+  t match {
+    case Type.Io(inner) => 1
+    case Type.Unit => 0
+    case Type.Int => 0
+    case Type.String => 0
+    case Type.Bool => 0
+    case Type.List => 0
+    case Type.Adt(name) => 0
+    case Type.Opaque(name) => 0
+  }
+
+def tyIoInner(t: Type): Type =
+  t match {
+    case Type.Io(inner) => inner
+    case Type.Unit => t
+    case Type.Int => t
+    case Type.String => t
+    case Type.Bool => t
+    case Type.List => t
+    case Type.Adt(name) => t
+    case Type.Opaque(name) => t
+  }
+
+def tyMkIo(inner: Type): Type =
+  Type.Io(inner)
+
+def tyIsAdt(t: Type): Int =
+  t match {
+    case Type.Adt(name) => 1
+    case Type.Unit => 0
+    case Type.Int => 0
+    case Type.String => 0
+    case Type.Bool => 0
+    case Type.List => 0
+    case Type.Io(inner) => 0
+    case Type.Opaque(name) => 0
+  }
+
+def tyAdtName(t: Type): String =
+  t match {
+    case Type.Adt(name) => name
+    case Type.Unit => ""
+    case Type.Int => ""
+    case Type.String => ""
+    case Type.Bool => ""
+    case Type.List => ""
+    case Type.Io(inner) => ""
+    case Type.Opaque(name) => ""
+  }
+
+def tyMkAdt(name: String): Type =
+  Type.Adt(name)
+
+def tyIsOpaque(t: Type): Int =
+  t match {
+    case Type.Opaque(name) => 1
+    case Type.Unit => 0
+    case Type.Int => 0
+    case Type.String => 0
+    case Type.Bool => 0
+    case Type.List => 0
+    case Type.Io(inner) => 0
+    case Type.Adt(name) => 0
+  }
+
+def tyMkOpaque(name: String): Type =
+  Type.Opaque(name)
+
+def tyOk(t: Type): TyRes =
+  TyRes.Ok(t)
+
+def tyErr(m: String): TyRes =
+  TyRes.Err(m)
+
+def tyErrAt(m: String, sp: Span): TyRes =
+  TyRes.At(spanFile(sp), spanStart(sp), spanEnd(sp), m)
+
+def tyIsOk(r: TyRes): Int =
+  r match {
+    case TyRes.Ok(ty) => 1
+    case TyRes.Err(msg) => 0
+    case TyRes.At(file, start, end, msg) => 0
+  }
+
+def tyIsAt(r: TyRes): Int =
+  r match {
+    case TyRes.At(file, start, end, msg) => 1
+    case TyRes.Ok(ty) => 0
+    case TyRes.Err(msg) => 0
+  }
+
+def tyIsBareErr(r: TyRes): Int =
+  r match {
+    case TyRes.Err(msg) => 1
+    case TyRes.Ok(ty) => 0
+    case TyRes.At(file, start, end, msg) => 0
+  }
+
+def tyVal(r: TyRes): Type =
+  r match {
+    case TyRes.Ok(ty) => ty
+    case TyRes.Err(msg) => Type.Unit
+    case TyRes.At(file, start, end, msg) => Type.Unit
+  }
+
+def tyMsg(r: TyRes): String =
+  r match {
+    case TyRes.Err(msg) => msg
+    case TyRes.At(file, start, end, msg) => msg
+    case TyRes.Ok(ty) => ""
+  }
+
+def tyAtFile(r: TyRes): String =
+  r match {
+    case TyRes.At(file, start, end, msg) => file
+    case TyRes.Ok(ty) => ""
+    case TyRes.Err(msg) => ""
+  }
+
+def tyAtStart(r: TyRes): Int =
+  r match {
+    case TyRes.At(file, start, end, msg) => start
+    case TyRes.Ok(ty) => 0
+    case TyRes.Err(msg) => 0
+  }
+
+def tyAtEnd(r: TyRes): Int =
+  r match {
+    case TyRes.At(file, start, end, msg) => end
+    case TyRes.Ok(ty) => 0
+    case TyRes.Err(msg) => 0
+  }
+
+def withSpanIfBare(r: TyRes, sp: Span): TyRes =
+  r match {
+    case TyRes.Err(msg) => tyErrAt(msg, sp)
+    case TyRes.Ok(ty) => r
+    case TyRes.At(file, start, end, msg) => r
+  }
+
+def tySpanOf(r: TyRes): Span =
+  r match {
+    case TyRes.At(file, start, end, msg) => mkSpan(file, start, end)
+    case TyRes.Ok(ty) => dummySpan()
+    case TyRes.Err(msg) => dummySpan()
+  }
+
+def tyEnvPut(env: List, name: String, ty: Type): List =
+  List.cons(TyBind.Bind(name, ty), env)
+
+def tyEnvGet(env: List, name: String): List =
+  if (List.isEmpty(env) == 1) List.empty() else tyEnvGetCont(List.head(env), List.tail(env), name)
+
+def tyEnvGetCont(b: TyBind, rest: List, name: String): List =
+  b match {
+    case TyBind.Bind(n, ty) => if (streq(n, name) == 1) List.cons(ty, List.empty()) else tyEnvGet(rest, name)
+  }
+

@@ -70,7 +70,7 @@ def prettyEnumFields(fields: List, acc: String): String =
 
 def prettyEnumFieldsCont(f: EnumField, rest: List, acc: String): String =
   for {
-    one = str3(fieldName(f), ": ", fieldType(f))
+    one = str3(fieldName(f), ": ", tyPretty(fieldType(f)))
     acc2 = if (Str.len(acc) == 0) one else str3(acc, ", ", one)
   } yield prettyEnumFields(rest, acc2)
 
@@ -78,14 +78,14 @@ def prettyDefs(defs: List, acc: String): String =
   if (List.isEmpty(defs) == 1) acc else prettyDefs(List.tail(defs), Str.concat(acc, Str.concat(prettyDef(List.head(defs)), "\n\n")))
 
 def prettyDef(d: Def): String =
-  str5("def ", defName(d), str3("(", prettyParams(defParams(d), ""), "): "), defRet(d), str3(" =\n", prettyExpr(defBody(d), 1), ""))
+  str5("def ", defName(d), str3("(", prettyParams(defParams(d), ""), "): "), tyPretty(defRet(d)), str3(" =\n", prettyExpr(defBody(d), 1), ""))
 
 def prettyParams(params: List, acc: String): String =
   if (List.isEmpty(params) == 1) acc else prettyParamsCont(List.head(params), List.tail(params), acc)
 
 def prettyParamsCont(p: Param, rest: List, acc: String): String =
   for {
-    piece = str3(paramName(p), ": ", paramType(p))
+    piece = str3(paramName(p), ": ", tyPretty(paramType(p)))
   } yield if (Str.len(acc) == 0) prettyParams(rest, piece) else prettyParams(rest, str3(acc, ", ", piece))
 
 def prettyExpr(expr: Expr, indent: Int): String =

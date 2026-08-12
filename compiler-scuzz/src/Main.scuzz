@@ -47,13 +47,13 @@ def cmdCheck(projectDir: String, json: Int): IO[Unit] =
     } yield if (tyIsOk(ty) == 1) if (json == 1) IO.println("[]") else IO.println("scuzz check ok") else emitCheckFail(ty, sources, json)
   )
 
-def emitCheckFail(ty: String, sources: List, json: Int): IO[Unit] =
+def emitCheckFail(ty: TyRes, sources: List, json: Int): IO[Unit] =
   for {
     msg = tyMsg(ty)
     loc = diagLoc(ty, sources)
   } yield if (json == 1) IO.println(str3("[", diagJson(msg, loc), "]")).flatMap(_ => IO.fail(msg)) else IO.println(diagHuman(msg, loc)).flatMap(_ => IO.fail(msg))
 
-def diagLoc(ty: String, sources: List): List =
+def diagLoc(ty: TyRes, sources: List): List =
   if (tyIsAt(ty) == 0) List.empty() else diagLocFromSpan(tyAtFile(ty), tyAtStart(ty), sources)
 
 def diagLocFromSpan(file: String, start: Int, sources: List): List =

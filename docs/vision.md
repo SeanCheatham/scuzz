@@ -85,7 +85,7 @@ IO-only is **not** a fourth runtime peer. Package contract: missing `[ui]` ⇒ S
 
 Subset used by compiler sources and bootstrap examples. New features land in Stage 0 **before** `compiler-scuzz/` depends on them. Dual-boot gate: `scripts/selfhost.sh` — each stage smokes `examples/hello` + `examples/adt`, passes the counter/todo/nav Headless goldens, smokes `fuzz` on `examples/todo` and `fuzz --exhaust --depth 1` on `examples/counter`, and agrees with Stage 0 on `fmt --check` for the compiler sources; Stage 2 must re-emit byte-identical compiler IR (Stage-3 fixpoint).
 
-- Optional `package`; top-level `def` / `@main def …: IO[Unit]`; enums with N-field `Int`/`String`/`List`/ADT payloads (Stage 0 and self-host); compiler sources use payload ADTs end-to-end (`Tok` … `Expr` with `span` on every case); multi-binder `match` — `examples/adt` exercises nullary/unary/multi-field/List payloads plus enum-typed def signatures; multi-field packs as `List` in the ADT payload
+- Optional `package`; top-level `def` / `@main def …: IO[Unit]`; enums with N-field `Int`/`String`/`List`/ADT payloads (Stage 0 and self-host); compiler sources use payload ADTs end-to-end (`Tok` … `Expr`, `Type`/`TyRes`, codegen `Emit`/`EnvBind`); multi-binder `match` — `examples/adt` exercises nullary/unary/multi-field/List payloads plus enum-typed def signatures; multi-field packs as `List` in the ADT payload
 - **`for { binders } yield e`** as primary binder: `x = e` (pure), `x <- e` (effect; yield wraps with `IO.pure` when any `<-` is present). Nested `for` in `if` / lambda arms when multi-bind is needed.
 - No `val` / statement blocks / `var` — expression dialect only.
 - `if` / `match`; literals incl. list `[a,b,c]` and `s"…"`
@@ -135,7 +135,7 @@ Scala **nouns**, Rust/Cargo **verbs** — without JVM packages or Rust `struct`/
 | File module (`Todo.scuzz`) | Namespacing + visibility |
 | Optional deeper `mod` tree | Only when a single file gets heavy |
 
-Direction for data/interfaces (see also [`compatibility.md`](compatibility.md)): payload **enums** / case-like records + thin **traits**-as-interfaces; monomorphize generics early. Stage 0 and self-host (`compiler-scuzz/`) emit N-field `Int`/`String`/`List`/ADT payload enums for user programs (multi-field as `List` in `sz_adt_payload`); compiler sources use payload ADTs end-to-end (`Tok` … `Expr`). No classes (mutable identity), no `var`, no classpath/`com.foo.bar` directories. Path deps remain the unit of reuse. Stage 0 and self-host namespace defs by file stem (`examples/modules`); enums stay global. No `private`/`pub` / `import` yet.
+Direction for data/interfaces (see also [`compatibility.md`](compatibility.md)): payload **enums** / case-like records + thin **traits**-as-interfaces; monomorphize generics early. Stage 0 and self-host (`compiler-scuzz/`) emit N-field `Int`/`String`/`List`/ADT payload enums for user programs (multi-field as `List` in `sz_adt_payload`); compiler sources use payload ADTs end-to-end (`Tok` … `Expr`, typed `Type`/`Emit` channels). No classes (mutable identity), no `var`, no classpath/`com.foo.bar` directories. Path deps remain the unit of reuse. Stage 0 and self-host namespace defs by file stem (`examples/modules`); enums stay global. No `private`/`pub` / `import` yet.
 
 ### Laws, simulation, and verification
 
@@ -200,7 +200,7 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ## Open work
 
-Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters. Payload-ADT AST rewrite for compiler sources is complete (`Tok` … `Expr`); optional string-encoding follow-ons: [`ast_todo.md`](ast_todo.md). Real Skia text is closed (measure API + dual-backend + pinned prebuilt as the default UI path; `SCUZZ_SKIA=sk_sw` opt-out). Residuals and deferred work live in `gaps.md`. IME can follow real text metrics.
+Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters. Payload-ADT rewrite for compiler sources is complete (`Tok` … `Expr`, `Type`, codegen `Emit`/`EnvBind`); see [`ast_todo.md`](ast_todo.md). Real Skia text is closed (measure API + dual-backend + pinned prebuilt as the default UI path; `SCUZZ_SKIA=sk_sw` opt-out). Residuals and deferred work live in `gaps.md`. IME can follow real text metrics.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
 

@@ -1,97 +1,19 @@
 package scuzz.compiler
 
-def tyOk(t: String): String =
-  Str.concat("OK:", t)
+def fieldTy(f: EnumField): Type =
+  f match {
+    case EnumField.Field(name, ty) => ty
+  }
 
-def tyErr(m: String): String =
-  Str.concat("ERR:", m)
+def paramTy(p: Param): Type =
+  p match {
+    case Param.Param(name, ty) => ty
+  }
 
-def tyErrAt(m: String, sp: Span): String =
-  str5("AT\t", spanFile(sp), "\t", Str.fromInt(spanStart(sp)), str3("\t", Str.fromInt(spanEnd(sp)), Str.concat("\t", m)))
-
-def tyIsOk(r: String): Int =
-  startsWith(r, "OK:")
-
-def tyIsAt(r: String): Int =
-  startsWith(r, "AT\t")
-
-def tyIsBareErr(r: String): Int =
-  startsWith(r, "ERR:")
-
-def tyVal(r: String): String =
-  Str.slice(r, 3, Str.len(r))
-
-def tyMsg(r: String): String =
-  if (tyIsAt(r) == 1) tyAtMsg(r) else Str.slice(r, 4, Str.len(r))
-
-def tyAtField(r: String, n: Int): String =
-  tyAtFieldAt(r, 3, n)
-
-def tyAtFieldAt(r: String, i: Int, n: Int): String =
-  if (n == 0) Str.slice(r, i, tyAtNextTab(r, i)) else tyAtFieldAt(r, tyAtNextTab(r, i) + 1, n - 1)
-
-def tyAtNextTab(r: String, i: Int): Int =
-  if (i >= Str.len(r)) i else if (Str.charAt(r, i) == 9) i else tyAtNextTab(r, i + 1)
-
-def tyAtFile(r: String): String =
-  tyAtField(r, 0)
-
-def tyAtStart(r: String): Int =
-  parseInt(tyAtField(r, 1))
-
-def tyAtEnd(r: String): Int =
-  parseInt(tyAtField(r, 2))
-
-def tyAtMsg(r: String): String =
-  tyAtField(r, 3)
-
-def withSpanIfBare(r: String, sp: Span): String =
-  if (tyIsBareErr(r) == 1) tyErrAt(tyMsg(r), sp) else r
-
-def tySpanOf(r: String): Span =
-  if (tyIsAt(r) == 1) mkSpan(tyAtFile(r), tyAtStart(r), tyAtEnd(r)) else dummySpan()
-
-def tyEnvPut(env: List, name: String, ty: String): List =
-  List.cons(str3(name, "=", ty), env)
-
-def tyEnvGet(env: List, name: String): String =
-  if (List.isEmpty(env) == 1) "" else tyEnvGetCont(List.head(env), List.tail(env), name)
-
-def tyEnvGetCont(b: String, rest: List, name: String): String =
-  if (streq(Str.slice(b, 0, indexOfChar(b, 61, 0)), name) == 1) Str.slice(b, indexOfChar(b, 61, 0) + 1, Str.len(b)) else tyEnvGet(rest, name)
-
-def tyIsIo(t: String): Int =
-  startsWith(t, "IO[")
-
-def tyIoInner(t: String): String =
-  if (tyIsIo(t) == 0) t else Str.slice(t, 3, Str.len(t) - 1)
-
-def tyMkIo(inner: String): String =
-  str3("IO[", inner, "]")
-
-def tyIsAdt(t: String): Int =
-  startsWith(t, "Adt:")
-
-def tyAdtName(t: String): String =
-  Str.slice(t, 4, Str.len(t))
-
-def tyMkAdt(name: String): String =
-  Str.concat("Adt:", name)
-
-def tyIsOpaque(t: String): Int =
-  startsWith(t, "Opaque:")
-
-def tyMkOpaque(name: String): String =
-  Str.concat("Opaque:", name)
-
-def isBuiltinTy(t: String): Int =
-  if (streq(t, "Unit") == 1) 1 else if (streq(t, "Int") == 1) 1 else if (streq(t, "String") == 1) 1 else if (streq(t, "Bool") == 1) 1 else if (streq(t, "List") == 1) 1 else if (tyIsIo(t) == 1) 1 else if (tyIsAdt(t) == 1) 1 else if (tyIsOpaque(t) == 1) 1 else 0
-
-def normalizeTy(t: String): String =
-  if (tyIsIo(t) == 1) tyMkIo(normalizeTy(tyIoInner(t))) else if (isBuiltinTy(t) == 1) t else tyMkAdt(t)
-
-def typesCompat(a: String, b: String): Int =
-  if (streq(a, b) == 1) 1 else if (streq(a, "Bool") == 1) if (streq(b, "Int") == 1) 1 else 0 else if (streq(a, "Int") == 1) if (streq(b, "Bool") == 1) 1 else 0 else if (tyIsIo(a) == 1) if (tyIsIo(b) == 1) 1 else 0 else if (tyIsOpaque(a) == 1) 1 else if (tyIsOpaque(b) == 1) 1 else 0
+def declRet(d: Def): Type =
+  d match {
+    case Def.Def(name, params, ret, body, module) => ret
+  }
 
 def findEnum(enums: List, name: String): List =
   if (List.isEmpty(enums) == 1) List.empty() else if (streq(enumName(List.head(enums)), name) == 1) enumHit(List.head(enums)) else findEnum(List.tail(enums), name)
@@ -102,20 +24,29 @@ def enumHasCase(cases: List, name: String): Int =
 def findCase(cases: List, name: String): List =
   if (List.isEmpty(cases) == 1) List.empty() else if (streq(caseName(List.head(cases)), name) == 1) caseHit(List.head(cases)) else findCase(List.tail(cases), name)
 
-def checkPayloadFields(en: String, c: EnumCase): String =
+def checkPayloadFields(en: String, c: EnumCase): TyRes =
   for {
     fields = caseFields(c)
-  } yield if (List.isEmpty(fields) == 1) tyOk("Unit") else checkPayloadFieldTys(en, caseName(c), fields)
+  } yield if (List.isEmpty(fields) == 1) tyOk(Type.Unit) else checkPayloadFieldTys(en, caseName(c), fields)
 
-def checkPayloadFieldTys(en: String, cn: String, fields: List): String =
-  if (List.isEmpty(fields) == 1) tyOk("Unit") else for {
+def checkPayloadFieldTys(en: String, cn: String, fields: List): TyRes =
+  if (List.isEmpty(fields) == 1) tyOk(Type.Unit) else for {
   one = checkPayloadFieldTy(en, cn, List.head(fields))
 } yield if (tyIsOk(one) == 0) one else checkPayloadFieldTys(en, cn, List.tail(fields))
 
-def checkPayloadFieldTy(en: String, cn: String, f: EnumField): String =
+def checkPayloadFieldTy(en: String, cn: String, f: EnumField): TyRes =
   for {
-    ty = fieldType(f)
-  } yield if (streq(ty, "Int") == 1) tyOk("Unit") else if (streq(ty, "String") == 1) tyOk("Unit") else if (streq(ty, "List") == 1) tyOk("Unit") else if (streq(ty, "Unit") == 1) tyErr(str5(en, ".", cn, str3(" field ", fieldName(f), ": Stage 0 payload types are Int, String, List, or an ADT, got "), ty)) else if (streq(ty, "Bool") == 1) tyErr(str5(en, ".", cn, str3(" field ", fieldName(f), ": Stage 0 payload types are Int, String, List, or an ADT, got "), ty)) else if (tyIsIo(ty) == 1) tyErr(str5(en, ".", cn, str3(" field ", fieldName(f), ": Stage 0 payload types are Int, String, List, or an ADT, got "), ty)) else tyOk("Unit")
+    ty = fieldTy(f)
+  } yield checkPayloadFieldTyOne(en, cn, f, ty)
+
+def checkPayloadFieldTyOne(en: String, cn: String, f: EnumField, ty: Type): TyRes =
+  ty match {
+    case Type.Int => tyOk(Type.Unit)
+    case Type.String => tyOk(Type.Unit)
+    case Type.List => tyOk(Type.Unit)
+    case Type.Adt(name) => tyOk(Type.Unit)
+    case _ => tyErr(str5(en, ".", cn, str3(" field ", fieldName(f), ": Stage 0 payload types are Int, String, List, or an ADT, got "), tyShow(ty)))
+  }
 
 def defSeen(seen: List, name: String): Int =
   if (List.isEmpty(seen) == 1) 0 else if (streq(List.head(seen), name) == 1) 1 else defSeen(List.tail(seen), name)
@@ -129,7 +60,7 @@ def findDupDefOne(d: Def, rest: List, seen: List): String =
   } yield if (defSeen(seen, q) == 1) q else findDupDef(rest, List.cons(q, seen))
 
 def bindParams(params: List, env: List): List =
-  if (List.isEmpty(params) == 1) env else bindParams(List.tail(params), tyEnvPut(env, paramName(List.head(params)), normalizeTy(paramType(List.head(params)))))
+  if (List.isEmpty(params) == 1) env else bindParams(List.tail(params), tyEnvPut(env, paramName(List.head(params)), normalizeTy(paramTy(List.head(params)))))
 
 def mkFuns(mod: String, defs: List): List =
   List.cons(mod, List.cons(defs, List.empty()))
@@ -140,41 +71,41 @@ def funsMod(funs: List): String =
 def funsDefs(funs: List): List =
   List.head(List.tail(funs))
 
-def typecheckProg(prog: Prog): String =
+def typecheckProg(prog: Prog): TyRes =
   for {
     dup = findDupDef(progDefs(prog), List.empty())
     defs = progDefs(prog)
   } yield if (Str.len(dup) > 0) tyErr(str3("duplicate def ", dup, "")) else typecheckDefsThenMain(defs, progEnums(prog), defs, progMain(prog), progMainModule(prog))
 
-def typecheckDefsThenMain(defs: List, enums: List, allDefs: List, main: Expr, mainMod: String): String =
+def typecheckDefsThenMain(defs: List, enums: List, allDefs: List, main: Expr, mainMod: String): TyRes =
   if (List.isEmpty(defs) == 1) checkMainTy(inferExpr(main, enums, mkFuns(mainMod, allDefs), List.empty())) else typecheckDefsThenMainOne(List.head(defs), List.tail(defs), enums, allDefs, main, mainMod)
 
-def typecheckDefsThenMainOne(d: Def, rest: List, enums: List, allDefs: List, main: Expr, mainMod: String): String =
+def typecheckDefsThenMainOne(d: Def, rest: List, enums: List, allDefs: List, main: Expr, mainMod: String): TyRes =
   for {
     env = bindParams(defParams(d), List.empty())
     bodyR = inferExpr(defBody(d), enums, mkFuns(defModule(d), allDefs), env)
-    ret = normalizeTy(defRet(d))
-  } yield if (tyIsOk(bodyR) == 0) bodyR else if (typesCompat(tyVal(bodyR), ret) == 0) tyErr(str5("def ", defName(d), " body ", tyVal(bodyR), str3(" does not match declared ", ret, ""))) else typecheckDefsThenMain(rest, enums, allDefs, main, mainMod)
+    ret = normalizeTy(declRet(d))
+  } yield if (tyIsOk(bodyR) == 0) bodyR else if (typesCompat(tyVal(bodyR), ret) == 0) tyErr(str5("def ", defName(d), " body ", tyShow(tyVal(bodyR)), str3(" does not match declared ", tyShow(ret), ""))) else typecheckDefsThenMain(rest, enums, allDefs, main, mainMod)
 
-def checkMainTy(r: String): String =
-  if (tyIsOk(r) == 0) r else if (streq(tyVal(r), "IO[Unit]") == 1) tyOk("IO[Unit]") else tyErr(str3("@main body must be IO[Unit], got ", tyVal(r), ""))
+def checkMainTy(r: TyRes): TyRes =
+  if (tyIsOk(r) == 0) r else if (tyEq(tyVal(r), tyMkIo(Type.Unit)) == 1) tyOk(tyMkIo(Type.Unit)) else tyErr(str3("@main body must be IO[Unit], got ", tyShow(tyVal(r)), ""))
 
-def inferExpr(e: Expr, enums: List, funs: List, env: List): String =
+def inferExpr(e: Expr, enums: List, funs: List, env: List): TyRes =
   for {
     r = inferExprMatch(e, enums, funs, env)
   } yield withSpanIfBare(r, exprSpan(e))
 
-def inferExprMatch(e: Expr, enums: List, funs: List, env: List): String =
+def inferExprMatch(e: Expr, enums: List, funs: List, env: List): TyRes =
   e match {
-    case Expr.Unit(span) => tyOk("Unit")
-    case Expr.IntLit(digits, span) => tyOk("Int")
-    case Expr.StrLit(value, span) => tyOk("String")
+    case Expr.Unit(span) => tyOk(Type.Unit)
+    case Expr.IntLit(digits, span) => tyOk(Type.Int)
+    case Expr.StrLit(value, span) => tyOk(Type.String)
     case Expr.ListLit(elems, span) => inferListLit(elems, enums, funs, env)
     case Expr.Interp(parts, span) => inferInterp(parts, enums, funs, env)
-    case Expr.Println(arg, span) => inferIoChild(arg, "String", enums, funs, env)
-    case Expr.Delay(span) => tyOk("IO[Unit]")
-    case Expr.Sleep(arg, span) => inferIoChild(arg, "Int", enums, funs, env)
-    case Expr.Fail(arg, span) => inferIoChild(arg, "String", enums, funs, env)
+    case Expr.Println(arg, span) => inferIoChild(arg, Type.String, enums, funs, env)
+    case Expr.Delay(span) => tyOk(tyMkIo(Type.Unit))
+    case Expr.Sleep(arg, span) => inferIoChild(arg, Type.Int, enums, funs, env)
+    case Expr.Fail(arg, span) => inferIoChild(arg, Type.String, enums, funs, env)
     case Expr.Pure(arg, span) => inferPure(arg, enums, funs, env)
     case Expr.Var(name, span) => inferVar(name, env)
     case Expr.Adt(enumName, caseName, args, span) => inferAdt(enumName, caseName, args, enums, funs, env)
@@ -192,175 +123,247 @@ def inferExprMatch(e: Expr, enums: List, funs: List, env: List): String =
     case Expr.For(binders, body, span) => tyErr("internal: unlowered `for` (run lower before typecheck)")
   }
 
-def inferIoChild(child: Expr, want: String, enums: List, funs: List, env: List): String =
+def inferIoChild(child: Expr, want: Type, enums: List, funs: List, env: List): TyRes =
   for {
     r = inferExpr(child, enums, funs, env)
-  } yield if (tyIsOk(r) == 0) r else if (typesCompat(tyVal(r), want) == 1) tyOk("IO[Unit]") else tyErr(str4("expected ", want, ", got ", tyVal(r)))
+  } yield if (tyIsOk(r) == 0) r else if (typesCompat(tyVal(r), want) == 1) tyOk(tyMkIo(Type.Unit)) else tyErr(str4("expected ", tyShow(want), ", got ", tyShow(tyVal(r))))
 
-def inferPure(inner: Expr, enums: List, funs: List, env: List): String =
+def inferPure(inner: Expr, enums: List, funs: List, env: List): TyRes =
   for {
     r = inferExpr(inner, enums, funs, env)
   } yield if (tyIsOk(r) == 0) r else tyOk(tyMkIo(tyVal(r)))
 
-def inferVar(name: String, env: List): String =
+def inferVar(name: String, env: List): TyRes =
   for {
-    t = tyEnvGet(env, name)
-  } yield if (Str.len(t) == 0) tyErr(str3("unbound variable ", name, "")) else tyOk(t)
+    ts = tyEnvGet(env, name)
+  } yield if (List.isEmpty(ts) == 1) tyErr(str3("unbound variable ", name, "")) else tyOk(List.head(ts))
 
-def inferAdt(en: String, cn: String, args: List, enums: List, funs: List, env: List): String =
+def inferAdt(en: String, cn: String, args: List, enums: List, funs: List, env: List): TyRes =
   for {
     e = findEnum(enums, en)
   } yield if (List.isEmpty(e) == 1) tyErr(str3("unknown enum ", en, "")) else inferAdtCase(en, cn, args, enumCases(List.head(e)), enums, funs, env)
 
-def inferAdtCase(en: String, cn: String, args: List, cases: List, enums: List, funs: List, env: List): String =
+def inferAdtCase(en: String, cn: String, args: List, cases: List, enums: List, funs: List, env: List): TyRes =
   for {
     c = findCase(cases, cn)
   } yield if (List.isEmpty(c) == 1) tyErr(str4("unknown case ", en, ".", cn)) else inferAdtPayload(en, List.head(c), args, enums, funs, env)
 
-def inferAdtPayload(en: String, c: EnumCase, args: List, enums: List, funs: List, env: List): String =
+def inferAdtPayload(en: String, c: EnumCase, args: List, enums: List, funs: List, env: List): TyRes =
   for {
     pf = checkPayloadFields(en, c)
     fields = caseFields(c)
   } yield if (tyIsOk(pf) == 0) pf else if (List.len(args) == List.len(fields)) inferAdtArgs(en, caseName(c), args, fields, enums, funs, env) else tyErr(str5(en, ".", caseName(c), " expects ", str3(Str.fromInt(List.len(fields)), " arg(s), got ", Str.fromInt(List.len(args)))))
 
-def inferAdtArgs(en: String, cn: String, args: List, fields: List, enums: List, funs: List, env: List): String =
+def inferAdtArgs(en: String, cn: String, args: List, fields: List, enums: List, funs: List, env: List): TyRes =
   if (List.isEmpty(args) == 1) tyOk(tyMkAdt(en)) else for {
   ar = inferExpr(List.head(args), enums, funs, env)
-  want = normalizeTy(fieldType(List.head(fields)))
-} yield if (tyIsOk(ar) == 0) ar else if (typesCompat(tyVal(ar), want) == 0) tyErr(str4("expected ", want, ", got ", tyVal(ar))) else inferAdtArgs(en, cn, List.tail(args), List.tail(fields), enums, funs, env)
+  want = normalizeTy(fieldTy(List.head(fields)))
+} yield if (tyIsOk(ar) == 0) ar else if (typesCompat(tyVal(ar), want) == 0) tyErr(str4("expected ", tyShow(want), ", got ", tyShow(tyVal(ar)))) else inferAdtArgs(en, cn, List.tail(args), List.tail(fields), enums, funs, env)
 
-def inferLet(name: String, value: Expr, body: Expr, enums: List, funs: List, env: List): String =
+def inferLet(name: String, value: Expr, body: Expr, enums: List, funs: List, env: List): TyRes =
   for {
     vr = inferExpr(value, enums, funs, env)
   } yield if (tyIsOk(vr) == 0) vr else inferExpr(body, enums, funs, tyEnvPut(env, name, tyVal(vr)))
 
-def inferIf(cond: Expr, thenB: Expr, elseB: Expr, enums: List, funs: List, env: List): String =
+def inferIf(cond: Expr, thenB: Expr, elseB: Expr, enums: List, funs: List, env: List): TyRes =
   for {
     cr = inferExpr(cond, enums, funs, env)
   } yield if (tyIsOk(cr) == 0) cr else inferIfBranches(tyVal(cr), thenB, elseB, enums, funs, env)
 
-def inferIfBranches(ct: String, thenB: Expr, elseB: Expr, enums: List, funs: List, env: List): String =
-  if (streq(ct, "Int") == 0) if (streq(ct, "Bool") == 0) tyErr(str3("if condition must be Int/Bool, got ", ct, "")) else inferIfBody(thenB, elseB, enums, funs, env) else inferIfBody(thenB, elseB, enums, funs, env)
+def inferIfBranches(ct: Type, thenB: Expr, elseB: Expr, enums: List, funs: List, env: List): TyRes =
+  ct match {
+    case Type.Int => inferIfBody(thenB, elseB, enums, funs, env)
+    case Type.Bool => inferIfBody(thenB, elseB, enums, funs, env)
+    case _ => tyErr(str3("if condition must be Int/Bool, got ", tyShow(ct), ""))
+  }
 
-def inferIfBody(thenB: Expr, elseB: Expr, enums: List, funs: List, env: List): String =
+def inferIfBody(thenB: Expr, elseB: Expr, enums: List, funs: List, env: List): TyRes =
   for {
     tr = inferExpr(thenB, enums, funs, env)
     er = inferExpr(elseB, enums, funs, env)
-  } yield if (tyIsOk(tr) == 0) tr else if (tyIsOk(er) == 0) er else if (typesCompat(tyVal(tr), tyVal(er)) == 0) tyErr(str4("if branches disagree: ", tyVal(tr), " vs ", tyVal(er))) else tr
+  } yield if (tyIsOk(tr) == 0) tr else if (tyIsOk(er) == 0) er else if (typesCompat(tyVal(tr), tyVal(er)) == 0) tyErr(str4("if branches disagree: ", tyShow(tyVal(tr)), " vs ", tyShow(tyVal(er)))) else tr
 
-def inferBinOp(op: String, left: Expr, right: Expr, enums: List, funs: List, env: List): String =
+def inferBinOp(op: String, left: Expr, right: Expr, enums: List, funs: List, env: List): TyRes =
   for {
     lr = inferExpr(left, enums, funs, env)
     rr = inferExpr(right, enums, funs, env)
   } yield if (tyIsOk(lr) == 0) lr else if (tyIsOk(rr) == 0) rr else inferBinOpTy(op, tyVal(lr), tyVal(rr))
 
-def inferBinOpTy(op: String, lt: String, rt: String): String =
-  if (streq(op, "+") == 1) if (streq(lt, "String") == 1) if (streq(rt, "String") == 1) tyOk("String") else tyErr(str4("arithmetic needs Int, got ", lt, " and ", rt)) else if (streq(lt, "Int") == 1) if (streq(rt, "Int") == 1) tyOk("Int") else tyErr(str4("arithmetic needs Int, got ", lt, " and ", rt)) else tyErr(str4("arithmetic needs Int, got ", lt, " and ", rt)) else if (streq(op, "-") == 1) inferArith(lt, rt) else if (streq(op, "*") == 1) inferArith(lt, rt) else if (streq(op, "/") == 1) inferArith(lt, rt) else if (streq(op, "%") == 1) inferArith(lt, rt) else if (streq(op, "==") == 1) inferEq(lt, rt) else if (streq(op, "!=") == 1) inferEq(lt, rt) else if (streq(op, "<") == 1) inferOrd(lt, rt) else if (streq(op, "<=") == 1) inferOrd(lt, rt) else if (streq(op, ">") == 1) inferOrd(lt, rt) else if (streq(op, ">=") == 1) inferOrd(lt, rt) else if (streq(op, "&&") == 1) inferLogic(lt, rt) else if (streq(op, "||") == 1) inferLogic(lt, rt) else tyErr(str3("unknown binop ", op, ""))
+def inferBinOpTy(op: String, lt: Type, rt: Type): TyRes =
+  if (streq(op, "+") == 1) inferBinOpAdd(lt, rt) else if (streq(op, "-") == 1) inferArith(lt, rt) else if (streq(op, "*") == 1) inferArith(lt, rt) else if (streq(op, "/") == 1) inferArith(lt, rt) else if (streq(op, "%") == 1) inferArith(lt, rt) else if (streq(op, "==") == 1) inferEq(lt, rt) else if (streq(op, "!=") == 1) inferEq(lt, rt) else if (streq(op, "<") == 1) inferOrd(lt, rt) else if (streq(op, "<=") == 1) inferOrd(lt, rt) else if (streq(op, ">") == 1) inferOrd(lt, rt) else if (streq(op, ">=") == 1) inferOrd(lt, rt) else if (streq(op, "&&") == 1) inferLogic(lt, rt) else if (streq(op, "||") == 1) inferLogic(lt, rt) else tyErr(str3("unknown binop ", op, ""))
 
-def inferArith(lt: String, rt: String): String =
-  if (streq(lt, "Int") == 1) if (streq(rt, "Int") == 1) tyOk("Int") else tyErr(str4("arithmetic needs Int, got ", lt, " and ", rt)) else tyErr(str4("arithmetic needs Int, got ", lt, " and ", rt))
+def inferBinOpAdd(lt: Type, rt: Type): TyRes =
+  lt match {
+    case Type.String => inferBinOpAddString(rt, lt)
+    case Type.Int => inferBinOpAddInt(rt, lt)
+    case _ => tyErr(str4("arithmetic needs Int, got ", tyShow(lt), " and ", tyShow(rt)))
+  }
 
-def inferEq(lt: String, rt: String): String =
-  if (typesCompat(lt, rt) == 1) tyOk("Int") else if (streq(lt, "String") == 1) if (streq(rt, "String") == 1) tyOk("Int") else tyErr(str4("comparison type mismatch ", lt, " vs ", rt)) else tyErr(str4("comparison type mismatch ", lt, " vs ", rt))
+def inferBinOpAddString(rt: Type, lt: Type): TyRes =
+  rt match {
+    case Type.String => tyOk(Type.String)
+    case _ => tyErr(str4("arithmetic needs Int, got ", tyShow(lt), " and ", tyShow(rt)))
+  }
 
-def inferOrd(lt: String, rt: String): String =
-  if (streq(lt, "Int") == 1) if (streq(rt, "Int") == 1) tyOk("Int") else tyErr("ordered compare needs Int") else tyErr("ordered compare needs Int")
+def inferBinOpAddInt(rt: Type, lt: Type): TyRes =
+  rt match {
+    case Type.Int => tyOk(Type.Int)
+    case _ => tyErr(str4("arithmetic needs Int, got ", tyShow(lt), " and ", tyShow(rt)))
+  }
 
-def inferLogic(lt: String, rt: String): String =
-  if (streq(lt, "Int") == 1) if (streq(rt, "Int") == 1) tyOk("Int") else if (streq(rt, "Bool") == 1) tyOk("Int") else tyErr("&&/|| need Int/Bool") else if (streq(lt, "Bool") == 1) if (streq(rt, "Int") == 1) tyOk("Int") else if (streq(rt, "Bool") == 1) tyOk("Int") else tyErr("&&/|| need Int/Bool") else tyErr("&&/|| need Int/Bool")
+def inferArith(lt: Type, rt: Type): TyRes =
+  lt match {
+    case Type.Int => inferArithRhs(rt, lt)
+    case _ => tyErr(str4("arithmetic needs Int, got ", tyShow(lt), " and ", tyShow(rt)))
+  }
 
-def inferListLit(elems: List, enums: List, funs: List, env: List): String =
-  if (List.isEmpty(elems) == 1) tyOk("List") else for {
+def inferArithRhs(rt: Type, lt: Type): TyRes =
+  rt match {
+    case Type.Int => tyOk(Type.Int)
+    case _ => tyErr(str4("arithmetic needs Int, got ", tyShow(lt), " and ", tyShow(rt)))
+  }
+
+def inferEq(lt: Type, rt: Type): TyRes =
+  if (typesCompat(lt, rt) == 1) tyOk(Type.Int) else inferEqString(lt, rt)
+
+def inferEqString(lt: Type, rt: Type): TyRes =
+  lt match {
+    case Type.String => inferEqStringRhs(rt, lt)
+    case _ => tyErr(str4("comparison type mismatch ", tyShow(lt), " vs ", tyShow(rt)))
+  }
+
+def inferEqStringRhs(rt: Type, lt: Type): TyRes =
+  rt match {
+    case Type.String => tyOk(Type.Int)
+    case _ => tyErr(str4("comparison type mismatch ", tyShow(lt), " vs ", tyShow(rt)))
+  }
+
+def inferOrd(lt: Type, rt: Type): TyRes =
+  lt match {
+    case Type.Int => inferOrdRhs(rt)
+    case _ => tyErr("ordered compare needs Int")
+  }
+
+def inferOrdRhs(rt: Type): TyRes =
+  rt match {
+    case Type.Int => tyOk(Type.Int)
+    case _ => tyErr("ordered compare needs Int")
+  }
+
+def inferLogic(lt: Type, rt: Type): TyRes =
+  lt match {
+    case Type.Int => inferLogicRhs(rt)
+    case Type.Bool => inferLogicRhs(rt)
+    case _ => tyErr("&&/|| need Int/Bool")
+  }
+
+def inferLogicRhs(rt: Type): TyRes =
+  rt match {
+    case Type.Int => tyOk(Type.Int)
+    case Type.Bool => tyOk(Type.Int)
+    case _ => tyErr("&&/|| need Int/Bool")
+  }
+
+def inferListLit(elems: List, enums: List, funs: List, env: List): TyRes =
+  if (List.isEmpty(elems) == 1) tyOk(Type.List) else for {
   r = inferExpr(List.head(elems), enums, funs, env)
 } yield if (tyIsOk(r) == 0) r else inferListLit(List.tail(elems), enums, funs, env)
 
-def inferInterp(parts: List, enums: List, funs: List, env: List): String =
-  if (List.isEmpty(parts) == 1) tyOk("String") else inferInterpPart(List.head(parts), List.tail(parts), enums, funs, env)
+def inferInterp(parts: List, enums: List, funs: List, env: List): TyRes =
+  if (List.isEmpty(parts) == 1) tyOk(Type.String) else inferInterpPart(List.head(parts), List.tail(parts), enums, funs, env)
 
-def inferInterpPart(part: InterpPart, rest: List, enums: List, funs: List, env: List): String =
+def inferInterpPart(part: InterpPart, rest: List, enums: List, funs: List, env: List): TyRes =
   part match {
     case InterpPart.Lit(text) => inferInterp(rest, enums, funs, env)
     case InterpPart.Hole(expr) => inferInterpHole(expr, rest, enums, funs, env)
   }
 
-def inferInterpHole(expr: Expr, rest: List, enums: List, funs: List, env: List): String =
+def inferInterpHole(expr: Expr, rest: List, enums: List, funs: List, env: List): TyRes =
   for {
     r = inferExpr(expr, enums, funs, env)
-  } yield if (tyIsOk(r) == 0) r else if (streq(tyVal(r), "String") == 1) inferInterp(rest, enums, funs, env) else if (streq(tyVal(r), "Int") == 1) inferInterp(rest, enums, funs, env) else if (tyIsOpaque(tyVal(r)) == 1) inferInterp(rest, enums, funs, env) else tyErr(str3("interpolation hole must be String or Int, got ", tyVal(r), ""))
+  } yield if (tyIsOk(r) == 0) r else inferInterpHoleTy(tyVal(r), rest, enums, funs, env)
 
-def inferFlatMap(inner: Expr, param: String, body: Expr, enums: List, funs: List, env: List): String =
+def inferInterpHoleTy(t: Type, rest: List, enums: List, funs: List, env: List): TyRes =
+  t match {
+    case Type.String => inferInterp(rest, enums, funs, env)
+    case Type.Int => inferInterp(rest, enums, funs, env)
+    case Type.Opaque(name) => inferInterp(rest, enums, funs, env)
+    case _ => tyErr(str3("interpolation hole must be String or Int, got ", tyShow(t), ""))
+  }
+
+def inferFlatMap(inner: Expr, param: String, body: Expr, enums: List, funs: List, env: List): TyRes =
   for {
     ir = inferExpr(inner, enums, funs, env)
   } yield if (tyIsOk(ir) == 0) ir else if (tyIsIo(tyVal(ir)) == 0) tyErr("flatMap receiver must be IO[_]") else inferFlatMapBody(param, tyIoInner(tyVal(ir)), body, enums, funs, env)
 
-def inferFlatMapBody(param: String, innerT: String, body: Expr, enums: List, funs: List, env: List): String =
+def inferFlatMapBody(param: String, innerT: Type, body: Expr, enums: List, funs: List, env: List): TyRes =
   for {
     env2 = if (Str.len(param) == 0) env else if (streq(param, "_") == 1) env else tyEnvPut(env, param, innerT)
     br = inferExpr(body, enums, funs, env2)
   } yield if (tyIsOk(br) == 0) br else if (tyIsIo(tyVal(br)) == 0) tyErr("flatMap body must return IO[_]") else br
 
-def inferHandle(inner: Expr, body: Expr, enums: List, funs: List, env: List): String =
+def inferHandle(inner: Expr, body: Expr, enums: List, funs: List, env: List): TyRes =
   for {
     ir = inferExpr(inner, enums, funs, env)
     br = inferExpr(body, enums, funs, env)
   } yield if (tyIsOk(ir) == 0) ir else if (tyIsIo(tyVal(ir)) == 0) tyErr("handleErrorWith receiver must be IO[_]") else if (tyIsOk(br) == 0) br else if (tyIsIo(tyVal(br)) == 0) tyErr("handleErrorWith body must return IO[_]") else br
 
-def inferAttempt(inner: Expr, enums: List, funs: List, env: List): String =
+def inferAttempt(inner: Expr, enums: List, funs: List, env: List): TyRes =
   for {
     ir = inferExpr(inner, enums, funs, env)
   } yield if (tyIsOk(ir) == 0) ir else if (tyIsIo(tyVal(ir)) == 0) tyErr("attempt receiver must be IO[_]") else tyOk(tyMkIo(tyMkOpaque("Either")))
 
-def inferLambda(param: String, body: Expr, enums: List, funs: List, env: List): String =
+def inferLambda(param: String, body: Expr, enums: List, funs: List, env: List): TyRes =
   for {
     env2 = if (Str.len(param) == 0) env else if (streq(param, "_") == 1) env else tyEnvPut(env, param, tyMkOpaque("Param"))
     br = inferExpr(body, enums, funs, env2)
   } yield if (tyIsOk(br) == 0) br else tyOk(tyMkOpaque("TapFn"))
 
-def inferIoPair(left: Expr, right: Expr, enums: List, funs: List, env: List): String =
+def inferIoPair(left: Expr, right: Expr, enums: List, funs: List, env: List): TyRes =
   for {
     lr = inferExpr(left, enums, funs, env)
     rr = inferExpr(right, enums, funs, env)
-  } yield if (tyIsOk(lr) == 0) lr else if (tyIsOk(rr) == 0) rr else if (tyIsIo(tyVal(lr)) == 0) tyErr("IO.race/both arguments must be IO[_]") else if (tyIsIo(tyVal(rr)) == 0) tyErr("IO.race/both arguments must be IO[_]") else tyOk("IO[Unit]")
+  } yield if (tyIsOk(lr) == 0) lr else if (tyIsOk(rr) == 0) rr else if (tyIsIo(tyVal(lr)) == 0) tyErr("IO.race/both arguments must be IO[_]") else if (tyIsIo(tyVal(rr)) == 0) tyErr("IO.race/both arguments must be IO[_]") else tyOk(tyMkIo(Type.Unit))
 
-def inferMatch(scrut: Expr, arms: List, enums: List, funs: List, env: List): String =
+def inferMatch(scrut: Expr, arms: List, enums: List, funs: List, env: List): TyRes =
   for {
     sr = inferExpr(scrut, enums, funs, env)
-  } yield if (tyIsOk(sr) == 0) sr else inferMatchArms(tyVal(sr), arms, enums, funs, env, "")
+  } yield if (tyIsOk(sr) == 0) sr else inferMatchArms(tyVal(sr), arms, enums, funs, env, List.empty())
 
-def inferMatchArms(st: String, arms: List, enums: List, funs: List, env: List, acc: String): String =
-  if (List.isEmpty(arms) == 1) if (Str.len(acc) == 0) tyErr("empty match") else tyOk(acc) else inferMatchArm(st, List.head(arms), List.tail(arms), enums, funs, env, acc)
+def inferMatchArms(st: Type, arms: List, enums: List, funs: List, env: List, acc: List): TyRes =
+  if (List.isEmpty(arms) == 1) if (List.isEmpty(acc) == 1) tyErr("empty match") else tyOk(List.head(acc)) else inferMatchArm(st, List.head(arms), List.tail(arms), enums, funs, env, acc)
 
-def inferMatchArm(st: String, arm: MatchArm, rest: List, enums: List, funs: List, env: List, acc: String): String =
+def inferMatchArm(st: Type, arm: MatchArm, rest: List, enums: List, funs: List, env: List, acc: List): TyRes =
   for {
     pr = checkPattern(armPat(arm), st, enums)
     env2 = patternExtendEnv(armPat(arm), enums, env)
     br = inferExpr(armBody(arm), enums, funs, env2)
-  } yield if (tyIsOk(pr) == 0) pr else if (tyIsOk(br) == 0) br else if (Str.len(acc) == 0) inferMatchArms(st, rest, enums, funs, env, tyVal(br)) else if (typesCompat(acc, tyVal(br)) == 0) tyErr(str4("match arms disagree: ", acc, " vs ", tyVal(br))) else inferMatchArms(st, rest, enums, funs, env, acc)
+  } yield if (tyIsOk(pr) == 0) pr else if (tyIsOk(br) == 0) br else if (List.isEmpty(acc) == 1) inferMatchArms(st, rest, enums, funs, env, List.cons(tyVal(br), List.empty())) else if (typesCompat(List.head(acc), tyVal(br)) == 0) tyErr(str4("match arms disagree: ", tyShow(List.head(acc)), " vs ", tyShow(tyVal(br)))) else inferMatchArms(st, rest, enums, funs, env, acc)
 
-def checkPattern(pat: Pattern, scrut: String, enums: List): String =
+def checkPattern(pat: Pattern, scrut: Type, enums: List): TyRes =
   pat match {
-    case Pattern.Wild => tyOk("Unit")
+    case Pattern.Wild => tyOk(Type.Unit)
     case Pattern.Adt(enumName, caseName, binds) => checkPatAdt(enumName, caseName, binds, scrut, enums)
   }
 
-def checkPatAdt(en: String, cn: String, binds: List, scrut: String, enums: List): String =
+def checkPatAdt(en: String, cn: String, binds: List, scrut: Type, enums: List): TyRes =
   for {
     e = findEnum(enums, en)
   } yield if (List.isEmpty(e) == 1) tyErr(str3("unknown enum ", en, " in pattern")) else checkPatAdtCase(en, cn, binds, scrut, enumCases(List.head(e)))
 
-def checkPatAdtCase(en: String, cn: String, binds: List, scrut: String, cases: List): String =
+def checkPatAdtCase(en: String, cn: String, binds: List, scrut: Type, cases: List): TyRes =
   for {
     c = findCase(cases, cn)
   } yield if (List.isEmpty(c) == 1) tyErr(str5("unknown case ", en, ".", cn, " in pattern")) else checkPatAdtScrut(en, cn, binds, scrut, List.head(c))
 
-def checkPatAdtScrut(en: String, cn: String, binds: List, scrut: String, c: EnumCase): String =
-  if (tyIsAdt(scrut) == 1) if (streq(tyAdtName(scrut), en) == 1) checkPatAdtBind(en, cn, binds, c) else tyErr(str5("pattern ", en, ".", cn, str3(" does not match scrutinee ", scrut, ""))) else if (tyIsOpaque(scrut) == 1) checkPatAdtBind(en, cn, binds, c) else tyErr(str5("pattern ", en, ".", cn, str3(" does not match scrutinee ", scrut, "")))
+def checkPatAdtScrut(en: String, cn: String, binds: List, scrut: Type, c: EnumCase): TyRes =
+  if (tyIsAdt(scrut) == 1) if (streq(tyAdtName(scrut), en) == 1) checkPatAdtBind(en, cn, binds, c) else tyErr(str5("pattern ", en, ".", cn, str3(" does not match scrutinee ", tyShow(scrut), ""))) else if (tyIsOpaque(scrut) == 1) checkPatAdtBind(en, cn, binds, c) else tyErr(str5("pattern ", en, ".", cn, str3(" does not match scrutinee ", tyShow(scrut), "")))
 
-def checkPatAdtBind(en: String, cn: String, binds: List, c: EnumCase): String =
+def checkPatAdtBind(en: String, cn: String, binds: List, c: EnumCase): TyRes =
   for {
     pf = checkPayloadFields(en, c)
     fields = caseFields(c)
-  } yield if (tyIsOk(pf) == 0) pf else if (List.len(binds) == List.len(fields)) tyOk("Unit") else if (List.isEmpty(fields) == 1) tyErr(str5("pattern ", en, ".", cn, " is nullary; remove payload binder")) else if (List.isEmpty(binds) == 1) tyErr(str5("pattern ", en, ".", cn, str3(" needs a payload binder, e.g. ", str4(en, ".", cn, "(x)"), ""))) else tyErr(str5("pattern ", en, ".", cn, str3(" expects ", Str.fromInt(List.len(fields)), str3(" binder(s), got ", Str.fromInt(List.len(binds)), ""))))
+  } yield if (tyIsOk(pf) == 0) pf else if (List.len(binds) == List.len(fields)) tyOk(Type.Unit) else if (List.isEmpty(fields) == 1) tyErr(str5("pattern ", en, ".", cn, " is nullary; remove payload binder")) else if (List.isEmpty(binds) == 1) tyErr(str5("pattern ", en, ".", cn, str3(" needs a payload binder, e.g. ", str4(en, ".", cn, "(x)"), ""))) else tyErr(str5("pattern ", en, ".", cn, str3(" expects ", Str.fromInt(List.len(fields)), str3(" binder(s), got ", Str.fromInt(List.len(binds)), ""))))
 
 def patternExtendEnv(pat: Pattern, enums: List, env: List): List =
   pat match {
@@ -379,350 +382,349 @@ def patternExtendEnvCase(en: String, cn: String, binds: List, enums: List, env: 
   } yield patternBindFields(binds, fields, env)
 
 def patternBindFields(binds: List, fields: List, env: List): List =
-  if (List.isEmpty(binds) == 1) env else patternBindFields(List.tail(binds), List.tail(fields), tyEnvPut(env, List.head(binds), normalizeTy(fieldType(List.head(fields)))))
+  if (List.isEmpty(binds) == 1) env else patternBindFields(List.tail(binds), List.tail(fields), tyEnvPut(env, List.head(binds), normalizeTy(fieldTy(List.head(fields)))))
 
-def expectArity(name: String, n: Int, got: Int): String =
-  if (n == got) tyOk("Unit") else tyErr(str4(name, " expects ", Str.fromInt(n), str3(" args, got ", Str.fromInt(got), "")))
+def expectArity(name: String, n: Int, got: Int): TyRes =
+  if (n == got) tyOk(Type.Unit) else tyErr(str4(name, " expects ", Str.fromInt(n), str3(" args, got ", Str.fromInt(got), "")))
 
-def expectTy(got: String, want: String): String =
-  if (typesCompat(got, want) == 1) tyOk("Unit") else tyErr(str4("expected ", want, ", got ", got))
+def expectTy(got: Type, want: Type): TyRes =
+  if (typesCompat(got, want) == 1) tyOk(Type.Unit) else tyErr(str4("expected ", tyShow(want), ", got ", tyShow(got)))
 
-def inferArgs(args: List, enums: List, funs: List, env: List, acc: List): String =
-  if (List.isEmpty(args) == 1) tyOk(List.join(List.reverse(acc), "\n")) else for {
-  r = inferExpr(List.head(args), enums, funs, env)
-} yield if (tyIsOk(r) == 0) r else inferArgs(List.tail(args), enums, funs, env, List.cons(tyVal(r), acc))
-
-def argTyAt(tys: List, i: Int): String =
+def argTyAt(tys: List, i: Int): Type =
   List.at(tys, i)
 
-def splitArgTys(s: String): List =
-  if (Str.len(s) == 0) List.empty() else Str.lines(s)
+def inferCall(callee: String, args: List, enums: List, funs: List, env: List): TyRes =
+  inferCallArgs(args, enums, funs, env, List.empty(), callee, funs)
 
-def inferCall(callee: String, args: List, enums: List, funs: List, env: List): String =
-  for {
-    ar = inferArgs(args, enums, funs, env, List.empty())
-  } yield if (tyIsOk(ar) == 0) ar else inferCallTy(callee, splitArgTys(tyVal(ar)), funs)
+def inferCallArgs(args: List, enums: List, funs: List, env: List, acc: List, callee: String, funs2: List): TyRes =
+  if (List.isEmpty(args) == 1) inferCallTy(callee, List.reverse(acc), funs2) else for {
+  r = inferExpr(List.head(args), enums, funs, env)
+} yield if (tyIsOk(r) == 0) r else inferCallArgs(List.tail(args), enums, funs, env, List.cons(tyVal(r), acc), callee, funs2)
 
-def inferCallTy(callee: String, argTys: List, funs: List): String =
+def inferCallTy(callee: String, argTys: List, funs: List): TyRes =
   if (streq(callee, "Str.concat") == 1) callStrConcat(argTys) else if (streq(callee, "Str.len") == 1) callStrLen(argTys) else if (streq(callee, "Str.charAt") == 1) callStrCharAt(argTys) else if (streq(callee, "Str.indexOf") == 1) callStrIndexOf(argTys) else if (streq(callee, "Str.slice") == 1) callStrSlice(argTys) else if (streq(callee, "Str.eq") == 1) callStrEq(argTys) else if (streq(callee, "Str.fromInt") == 1) callStrFromInt(argTys) else if (streq(callee, "Str.lines") == 1) callStrLines(argTys) else if (streq(callee, "List.empty") == 1) callListEmpty(argTys) else if (streq(callee, "List.cons") == 1) callListCons(argTys) else if (streq(callee, "List.isEmpty") == 1) callListIsEmpty(argTys) else if (streq(callee, "List.head") == 1) callListHead(argTys) else if (streq(callee, "List.at") == 1) callListAt(argTys) else if (streq(callee, "List.tail") == 1) callListTail(argTys) else if (streq(callee, "List.reverse") == 1) callListReverse(argTys) else if (streq(callee, "List.len") == 1) callListLen(argTys) else if (streq(callee, "List.join") == 1) callListJoin(argTys) else if (streq(callee, "List.append") == 1) callListAppend(argTys) else if (streq(callee, "Fs.read") == 1) callFsRead(argTys) else if (streq(callee, "Fs.list") == 1) callFsList(argTys) else if (streq(callee, "Fs.mkdirs") == 1) callFsMkdirs(argTys) else if (streq(callee, "Fs.canonicalize") == 1) callFsCanonicalize(argTys) else if (streq(callee, "Fs.write") == 1) callFsWrite(argTys) else if (streq(callee, "Sys.args") == 1) callSysArgs(argTys) else if (streq(callee, "Sys.readLine") == 1) callSysReadLine(argTys) else if (streq(callee, "Sys.exec") == 1) callSysExec(argTys) else if (streq(callee, "Sys.getenv") == 1) callSysGetenv(argTys) else if (streq(callee, "Clock.realTime") == 1) callClock(argTys) else if (streq(callee, "Clock.monotonic") == 1) callClock(argTys) else if (streq(callee, "Random.nextInt") == 1) callRandom(argTys) else if (streq(callee, "Net.httpGet") == 1) callNet(argTys) else if (streq(callee, "Impurity.runKit") == 1) callImpurity(argTys) else if (streq(callee, "Effects.runKit") == 1) callEffects(argTys) else if (startsWith(callee, "Signal.") == 1) callSignal(callee, argTys) else if (startsWith(callee, "Law.") == 1) callLaw(callee, argTys) else if (startsWith(callee, "View.") == 1) callView(callee, argTys) else if (startsWith(callee, "Theme.") == 1) callTheme(callee, argTys) else if (streq(callee, "Color.rgb") == 1) callColorRgb(argTys) else if (streq(callee, "Ui.run") == 1) callUiRun(argTys) else callUserFun(callee, argTys, funs)
 
-def callStrConcat(argTys: List): String =
+def callStrConcat(argTys: List): TyRes =
   for {
     a = expectArity("Str.concat", 2, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else if (tyIsOk(expectTy(argTyAt(argTys, 1), "String")) == 0) expectTy(argTyAt(argTys, 1), "String") else tyOk("String")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.String)) == 0) expectTy(argTyAt(argTys, 1), Type.String) else tyOk(Type.String)
 
-def callStrLen(argTys: List): String =
+def callStrLen(argTys: List): TyRes =
   for {
     a = expectArity("Str.len", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else tyOk("Int")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else tyOk(Type.Int)
 
-def callStrCharAt(argTys: List): String =
+def callStrCharAt(argTys: List): TyRes =
   for {
     a = expectArity("Str.charAt", 2, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else if (tyIsOk(expectTy(argTyAt(argTys, 1), "Int")) == 0) expectTy(argTyAt(argTys, 1), "Int") else tyOk("Int")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.Int)) == 0) expectTy(argTyAt(argTys, 1), Type.Int) else tyOk(Type.Int)
 
-def callStrIndexOf(argTys: List): String =
+def callStrIndexOf(argTys: List): TyRes =
   for {
     a = expectArity("Str.indexOf", 2, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else if (tyIsOk(expectTy(argTyAt(argTys, 1), "String")) == 0) expectTy(argTyAt(argTys, 1), "String") else tyOk("Int")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.String)) == 0) expectTy(argTyAt(argTys, 1), Type.String) else tyOk(Type.Int)
 
-def callStrSlice(argTys: List): String =
+def callStrSlice(argTys: List): TyRes =
   for {
     a = expectArity("Str.slice", 3, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else if (tyIsOk(expectTy(argTyAt(argTys, 1), "Int")) == 0) expectTy(argTyAt(argTys, 1), "Int") else if (tyIsOk(expectTy(argTyAt(argTys, 2), "Int")) == 0) expectTy(argTyAt(argTys, 2), "Int") else tyOk("String")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.Int)) == 0) expectTy(argTyAt(argTys, 1), Type.Int) else if (tyIsOk(expectTy(argTyAt(argTys, 2), Type.Int)) == 0) expectTy(argTyAt(argTys, 2), Type.Int) else tyOk(Type.String)
 
-def callStrEq(argTys: List): String =
+def callStrEq(argTys: List): TyRes =
   for {
     a = expectArity("Str.eq", 2, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else if (tyIsOk(expectTy(argTyAt(argTys, 1), "String")) == 0) expectTy(argTyAt(argTys, 1), "String") else tyOk("Int")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.String)) == 0) expectTy(argTyAt(argTys, 1), Type.String) else tyOk(Type.Int)
 
-def callStrFromInt(argTys: List): String =
+def callStrFromInt(argTys: List): TyRes =
   for {
     a = expectArity("Str.fromInt", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "Int")) == 0) expectTy(argTyAt(argTys, 0), "Int") else tyOk("String")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.Int)) == 0) expectTy(argTyAt(argTys, 0), Type.Int) else tyOk(Type.String)
 
-def callStrLines(argTys: List): String =
+def callStrLines(argTys: List): TyRes =
   for {
     a = expectArity("Str.lines", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else tyOk("List")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else tyOk(Type.List)
 
-def callListEmpty(argTys: List): String =
+def callListEmpty(argTys: List): TyRes =
   for {
     a = expectArity("List.empty", 0, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else tyOk("List")
+  } yield if (tyIsOk(a) == 0) a else tyOk(Type.List)
 
-def callListCons(argTys: List): String =
+def callListCons(argTys: List): TyRes =
   for {
     a = expectArity("List.cons", 2, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), "List")) == 0) expectTy(argTyAt(argTys, 1), "List") else tyOk("List")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.List)) == 0) expectTy(argTyAt(argTys, 1), Type.List) else tyOk(Type.List)
 
-def callListIsEmpty(argTys: List): String =
+def callListIsEmpty(argTys: List): TyRes =
   for {
     a = expectArity("List.isEmpty", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "List")) == 0) expectTy(argTyAt(argTys, 0), "List") else tyOk("Int")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.List)) == 0) expectTy(argTyAt(argTys, 0), Type.List) else tyOk(Type.Int)
 
-def callListHead(argTys: List): String =
+def callListHead(argTys: List): TyRes =
   for {
     a = expectArity("List.head", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "List")) == 0) expectTy(argTyAt(argTys, 0), "List") else tyOk(tyMkOpaque("Any"))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.List)) == 0) expectTy(argTyAt(argTys, 0), Type.List) else tyOk(tyMkOpaque("Any"))
 
-def callListAt(argTys: List): String =
+def callListAt(argTys: List): TyRes =
   for {
     a = expectArity("List.at", 2, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "List")) == 0) expectTy(argTyAt(argTys, 0), "List") else if (tyIsOk(expectTy(argTyAt(argTys, 1), "Int")) == 0) expectTy(argTyAt(argTys, 1), "Int") else tyOk(tyMkOpaque("Any"))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.List)) == 0) expectTy(argTyAt(argTys, 0), Type.List) else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.Int)) == 0) expectTy(argTyAt(argTys, 1), Type.Int) else tyOk(tyMkOpaque("Any"))
 
-def callListTail(argTys: List): String =
+def callListTail(argTys: List): TyRes =
   for {
     a = expectArity("List.tail", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "List")) == 0) expectTy(argTyAt(argTys, 0), "List") else tyOk("List")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.List)) == 0) expectTy(argTyAt(argTys, 0), Type.List) else tyOk(Type.List)
 
-def callListReverse(argTys: List): String =
+def callListReverse(argTys: List): TyRes =
   for {
     a = expectArity("List.reverse", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "List")) == 0) expectTy(argTyAt(argTys, 0), "List") else tyOk("List")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.List)) == 0) expectTy(argTyAt(argTys, 0), Type.List) else tyOk(Type.List)
 
-def callListLen(argTys: List): String =
+def callListLen(argTys: List): TyRes =
   for {
     a = expectArity("List.len", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "List")) == 0) expectTy(argTyAt(argTys, 0), "List") else tyOk("Int")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.List)) == 0) expectTy(argTyAt(argTys, 0), Type.List) else tyOk(Type.Int)
 
-def callListJoin(argTys: List): String =
+def callListJoin(argTys: List): TyRes =
   for {
     a = expectArity("List.join", 2, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "List")) == 0) expectTy(argTyAt(argTys, 0), "List") else if (tyIsOk(expectTy(argTyAt(argTys, 1), "String")) == 0) expectTy(argTyAt(argTys, 1), "String") else tyOk("String")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.List)) == 0) expectTy(argTyAt(argTys, 0), Type.List) else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.String)) == 0) expectTy(argTyAt(argTys, 1), Type.String) else tyOk(Type.String)
 
-def callListAppend(argTys: List): String =
+def callListAppend(argTys: List): TyRes =
   for {
     a = expectArity("List.append", 2, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "List")) == 0) expectTy(argTyAt(argTys, 0), "List") else tyOk("List")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.List)) == 0) expectTy(argTyAt(argTys, 0), Type.List) else tyOk(Type.List)
 
-def callFsRead(argTys: List): String =
+def callFsRead(argTys: List): TyRes =
   for {
     a = expectArity("Fs.read", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else tyOk("IO[String]")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else tyOk(tyMkIo(Type.String))
 
-def callFsList(argTys: List): String =
+def callFsList(argTys: List): TyRes =
   for {
     a = expectArity("Fs.list", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else tyOk("IO[List]")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else tyOk(tyMkIo(Type.List))
 
-def callFsMkdirs(argTys: List): String =
+def callFsMkdirs(argTys: List): TyRes =
   for {
     a = expectArity("Fs.mkdirs", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else tyOk("IO[Unit]")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else tyOk(tyMkIo(Type.Unit))
 
-def callFsCanonicalize(argTys: List): String =
+def callFsCanonicalize(argTys: List): TyRes =
   for {
     a = expectArity("Fs.canonicalize", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else tyOk("IO[String]")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else tyOk(tyMkIo(Type.String))
 
-def callFsWrite(argTys: List): String =
+def callFsWrite(argTys: List): TyRes =
   for {
     a = expectArity("Fs.write", 2, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else if (tyIsOk(expectTy(argTyAt(argTys, 1), "String")) == 0) expectTy(argTyAt(argTys, 1), "String") else tyOk("IO[Unit]")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.String)) == 0) expectTy(argTyAt(argTys, 1), Type.String) else tyOk(tyMkIo(Type.Unit))
 
-def callSysArgs(argTys: List): String =
+def callSysArgs(argTys: List): TyRes =
   for {
     a = expectArity("Sys.args", 0, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else tyOk("IO[List]")
+  } yield if (tyIsOk(a) == 0) a else tyOk(tyMkIo(Type.List))
 
-def callSysReadLine(argTys: List): String =
+def callSysReadLine(argTys: List): TyRes =
   for {
     a = expectArity("Sys.readLine", 0, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else tyOk("IO[String]")
+  } yield if (tyIsOk(a) == 0) a else tyOk(tyMkIo(Type.String))
 
-def callSysExec(argTys: List): String =
+def callSysExec(argTys: List): TyRes =
   for {
     a = expectArity("Sys.exec", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else tyOk("IO[Int]")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else tyOk(tyMkIo(Type.Int))
 
-def callSysGetenv(argTys: List): String =
+def callSysGetenv(argTys: List): TyRes =
   for {
     a = expectArity("Sys.getenv", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else tyOk("IO[String]")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else tyOk(tyMkIo(Type.String))
 
-def callClock(argTys: List): String =
+def callClock(argTys: List): TyRes =
   for {
     a = expectArity("Clock.*", 0, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else tyOk("IO[Int]")
+  } yield if (tyIsOk(a) == 0) a else tyOk(tyMkIo(Type.Int))
 
-def callRandom(argTys: List): String =
+def callRandom(argTys: List): TyRes =
   for {
     a = expectArity("Random.nextInt", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "Int")) == 0) expectTy(argTyAt(argTys, 0), "Int") else tyOk("IO[Int]")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.Int)) == 0) expectTy(argTyAt(argTys, 0), Type.Int) else tyOk(tyMkIo(Type.Int))
 
-def callNet(argTys: List): String =
+def callNet(argTys: List): TyRes =
   for {
     a = expectArity("Net.httpGet", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else tyOk("IO[String]")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else tyOk(tyMkIo(Type.String))
 
-def callImpurity(argTys: List): String =
+def callImpurity(argTys: List): TyRes =
   for {
     a = expectArity("Impurity.runKit", 0, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else tyOk("IO[Unit]")
+  } yield if (tyIsOk(a) == 0) a else tyOk(tyMkIo(Type.Unit))
 
-def callEffects(argTys: List): String =
+def callEffects(argTys: List): TyRes =
   for {
     a = expectArity("Effects.runKit", 0, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else tyOk("IO[Unit]")
+  } yield if (tyIsOk(a) == 0) a else tyOk(tyMkIo(Type.Unit))
 
-def callSignal(callee: String, argTys: List): String =
+def callSignal(callee: String, argTys: List): TyRes =
   if (streq(callee, "Signal.int") == 1) callSigInt(argTys) else if (streq(callee, "Signal.get") == 1) callSigGet(argTys) else if (streq(callee, "Signal.set") == 1) callSigSet(argTys) else if (streq(callee, "Signal.str") == 1) callSigStr(argTys) else if (streq(callee, "Signal.getStr") == 1) callSigGetStr(argTys) else if (streq(callee, "Signal.setStr") == 1) callSigSetStr(argTys) else if (streq(callee, "Signal.list") == 1) callSigList(argTys) else if (streq(callee, "Signal.getList") == 1) callSigGetList(argTys) else if (streq(callee, "Signal.setList") == 1) callSigSetList(argTys) else if (streq(callee, "Signal.map") == 1) callSigMap(argTys) else tyErr(str3("unknown function ", callee, ""))
 
-def callLaw(callee: String, argTys: List): String =
+def callLaw(callee: String, argTys: List): TyRes =
   if (streq(callee, "Law.signalInt") == 1) callLawSignalInt(argTys) else if (streq(callee, "Law.a11yHas") == 1) callLawA11yHas(argTys) else if (streq(callee, "Law.assert") == 1) callLawAssert(argTys) else tyErr(str3("unknown function ", callee, ""))
 
-def callLawSignalInt(argTys: List): String =
+def callLawSignalInt(argTys: List): TyRes =
   for {
     a = expectArity("Law.signalInt", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "Int")) == 0) expectTy(argTyAt(argTys, 0), "Int") else tyOk("Int")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.Int)) == 0) expectTy(argTyAt(argTys, 0), Type.Int) else tyOk(Type.Int)
 
-def callLawA11yHas(argTys: List): String =
+def callLawA11yHas(argTys: List): TyRes =
   for {
     a = expectArity("Law.a11yHas", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else tyOk("Bool")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else tyOk(Type.Bool)
 
-def callLawAssert(argTys: List): String =
+def callLawAssert(argTys: List): TyRes =
   for {
     a = expectArity("Law.assert", 2, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else if (lawAssertOkTy(argTyAt(argTys, 1)) == 0) tyErr(str3("Law.assert ok must be Bool/Int, got ", argTyAt(argTys, 1), "")) else tyOk("IO[Unit]")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else if (lawAssertOkTy(argTyAt(argTys, 1)) == 0) tyErr(str3("Law.assert ok must be Bool/Int, got ", tyShow(argTyAt(argTys, 1)), "")) else tyOk(tyMkIo(Type.Unit))
 
-def lawAssertOkTy(t: String): Int =
-  if (streq(t, "Bool") == 1) 1 else if (streq(t, "Int") == 1) 1 else 0
+def lawAssertOkTy(t: Type): Int =
+  t match {
+    case Type.Bool => 1
+    case Type.Int => 1
+    case _ => 0
+  }
 
-def callSigInt(argTys: List): String =
+def callSigInt(argTys: List): TyRes =
   for {
     a = expectArity("Signal.int", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "Int")) == 0) expectTy(argTyAt(argTys, 0), "Int") else tyOk(tyMkOpaque("SignalInt"))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.Int)) == 0) expectTy(argTyAt(argTys, 0), Type.Int) else tyOk(tyMkOpaque("SignalInt"))
 
-def callSigGet(argTys: List): String =
+def callSigGet(argTys: List): TyRes =
   for {
     a = expectArity("Signal.get", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else tyOk("Int")
+  } yield if (tyIsOk(a) == 0) a else tyOk(Type.Int)
 
-def callSigSet(argTys: List): String =
+def callSigSet(argTys: List): TyRes =
   for {
     a = expectArity("Signal.set", 2, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), "Int")) == 0) expectTy(argTyAt(argTys, 1), "Int") else tyOk("Unit")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.Int)) == 0) expectTy(argTyAt(argTys, 1), Type.Int) else tyOk(Type.Unit)
 
-def callSigStr(argTys: List): String =
+def callSigStr(argTys: List): TyRes =
   for {
     a = expectArity("Signal.str", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else tyOk(tyMkOpaque("SignalStr"))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else tyOk(tyMkOpaque("SignalStr"))
 
-def callSigGetStr(argTys: List): String =
+def callSigGetStr(argTys: List): TyRes =
   for {
     a = expectArity("Signal.getStr", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else tyOk("String")
+  } yield if (tyIsOk(a) == 0) a else tyOk(Type.String)
 
-def callSigSetStr(argTys: List): String =
+def callSigSetStr(argTys: List): TyRes =
   for {
     a = expectArity("Signal.setStr", 2, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), "String")) == 0) expectTy(argTyAt(argTys, 1), "String") else tyOk("Unit")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.String)) == 0) expectTy(argTyAt(argTys, 1), Type.String) else tyOk(Type.Unit)
 
-def callSigList(argTys: List): String =
+def callSigList(argTys: List): TyRes =
   for {
     a = expectArity("Signal.list", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "List")) == 0) expectTy(argTyAt(argTys, 0), "List") else tyOk(tyMkOpaque("SignalList"))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.List)) == 0) expectTy(argTyAt(argTys, 0), Type.List) else tyOk(tyMkOpaque("SignalList"))
 
-def callSigGetList(argTys: List): String =
+def callSigGetList(argTys: List): TyRes =
   for {
     a = expectArity("Signal.getList", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else tyOk("List")
+  } yield if (tyIsOk(a) == 0) a else tyOk(Type.List)
 
-def callSigSetList(argTys: List): String =
+def callSigSetList(argTys: List): TyRes =
   for {
     a = expectArity("Signal.setList", 2, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), "List")) == 0) expectTy(argTyAt(argTys, 1), "List") else tyOk("Unit")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.List)) == 0) expectTy(argTyAt(argTys, 1), Type.List) else tyOk(Type.Unit)
 
-def callSigMap(argTys: List): String =
+def callSigMap(argTys: List): TyRes =
   for {
     a = expectArity("Signal.map", 2, List.len(argTys))
   } yield if (tyIsOk(a) == 0) a else tyOk(tyMkOpaque("SignalStr"))
 
-def callView(callee: String, argTys: List): String =
+def callView(callee: String, argTys: List): TyRes =
   if (streq(callee, "View.text") == 1) callViewText(argTys) else if (streq(callee, "View.bindText") == 1) callViewBindText(argTys) else if (streq(callee, "View.button") == 1) callViewButton(argTys) else if (streq(callee, "View.column") == 1) tyOk(tyMkOpaque("View")) else if (streq(callee, "View.row") == 1) tyOk(tyMkOpaque("View")) else if (streq(callee, "View.list") == 1) callViewList(argTys) else if (streq(callee, "View.each") == 1) callViewEach(argTys) else if (streq(callee, "View.scroll") == 1) callViewScroll(argTys) else if (streq(callee, "View.textField") == 1) callViewTextField(argTys) else if (streq(callee, "View.icon") == 1) callViewIcon(argTys) else if (streq(callee, "View.image") == 1) callViewImage(argTys) else if (streq(callee, "View.addChild") == 1) callViewAddChild(argTys) else if (streq(callee, "View.addTexts") == 1) callViewAddTexts(argTys) else if (streq(callee, "View.showWhen") == 1) callViewShowWhen(argTys) else tyErr(str3("unknown function ", callee, ""))
 
-def callViewText(argTys: List): String =
+def callViewText(argTys: List): TyRes =
   for {
     a = expectArity("View.text", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else tyOk(tyMkOpaque("View"))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else tyOk(tyMkOpaque("View"))
 
-def callViewBindText(argTys: List): String =
+def callViewBindText(argTys: List): TyRes =
   for {
     a = expectArity("View.bindText", 1, List.len(argTys))
   } yield if (tyIsOk(a) == 0) a else tyOk(tyMkOpaque("View"))
 
-def callViewButton(argTys: List): String =
+def callViewButton(argTys: List): TyRes =
   for {
     a = expectArity("View.button", 2, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "String")) == 0) expectTy(argTyAt(argTys, 0), "String") else tyOk(tyMkOpaque("View"))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else tyOk(tyMkOpaque("View"))
 
-def callViewList(argTys: List): String =
+def callViewList(argTys: List): TyRes =
   for {
     a = expectArity("View.list", 0, List.len(argTys))
   } yield if (tyIsOk(a) == 0) a else tyOk(tyMkOpaque("View"))
 
-def callViewEach(argTys: List): String =
+def callViewEach(argTys: List): TyRes =
   for {
     a = expectArity("View.each", 1, List.len(argTys))
   } yield if (tyIsOk(a) == 0) a else tyOk(tyMkOpaque("View"))
 
-def callViewScroll(argTys: List): String =
+def callViewScroll(argTys: List): TyRes =
   for {
     a = expectArity("View.scroll", 1, List.len(argTys))
   } yield if (tyIsOk(a) == 0) a else tyOk(tyMkOpaque("View"))
 
-def callViewTextField(argTys: List): String =
+def callViewTextField(argTys: List): TyRes =
   for {
     a = expectArity("View.textField", 2, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), "String")) == 0) expectTy(argTyAt(argTys, 1), "String") else tyOk(tyMkOpaque("View"))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.String)) == 0) expectTy(argTyAt(argTys, 1), Type.String) else tyOk(tyMkOpaque("View"))
 
-def callViewIcon(argTys: List): String =
+def callViewIcon(argTys: List): TyRes =
   for {
     a = expectArity("View.icon", 2, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "Int")) == 0) expectTy(argTyAt(argTys, 0), "Int") else if (tyIsOk(expectTy(argTyAt(argTys, 1), "Int")) == 0) expectTy(argTyAt(argTys, 1), "Int") else tyOk(tyMkOpaque("View"))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.Int)) == 0) expectTy(argTyAt(argTys, 0), Type.Int) else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.Int)) == 0) expectTy(argTyAt(argTys, 1), Type.Int) else tyOk(tyMkOpaque("View"))
 
-def callViewImage(argTys: List): String =
+def callViewImage(argTys: List): TyRes =
   for {
     a = expectArity("View.image", 4, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "Int")) == 0) expectTy(argTyAt(argTys, 0), "Int") else if (tyIsOk(expectTy(argTyAt(argTys, 1), "Int")) == 0) expectTy(argTyAt(argTys, 1), "Int") else if (tyIsOk(expectTy(argTyAt(argTys, 2), "Int")) == 0) expectTy(argTyAt(argTys, 2), "Int") else if (tyIsOk(expectTy(argTyAt(argTys, 3), "String")) == 0) expectTy(argTyAt(argTys, 3), "String") else tyOk(tyMkOpaque("View"))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.Int)) == 0) expectTy(argTyAt(argTys, 0), Type.Int) else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.Int)) == 0) expectTy(argTyAt(argTys, 1), Type.Int) else if (tyIsOk(expectTy(argTyAt(argTys, 2), Type.Int)) == 0) expectTy(argTyAt(argTys, 2), Type.Int) else if (tyIsOk(expectTy(argTyAt(argTys, 3), Type.String)) == 0) expectTy(argTyAt(argTys, 3), Type.String) else tyOk(tyMkOpaque("View"))
 
-def callViewAddChild(argTys: List): String =
+def callViewAddChild(argTys: List): TyRes =
   for {
     a = expectArity("View.addChild", 2, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else tyOk("Unit")
+  } yield if (tyIsOk(a) == 0) a else tyOk(Type.Unit)
 
-def callViewAddTexts(argTys: List): String =
+def callViewAddTexts(argTys: List): TyRes =
   for {
     a = expectArity("View.addTexts", 2, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), "List")) == 0) expectTy(argTyAt(argTys, 1), "List") else tyOk("Unit")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.List)) == 0) expectTy(argTyAt(argTys, 1), Type.List) else tyOk(Type.Unit)
 
-def callViewShowWhen(argTys: List): String =
+def callViewShowWhen(argTys: List): TyRes =
   for {
     a = expectArity("View.showWhen", 3, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), "Int")) == 0) expectTy(argTyAt(argTys, 1), "Int") else tyOk(tyMkOpaque("View"))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.Int)) == 0) expectTy(argTyAt(argTys, 1), Type.Int) else tyOk(tyMkOpaque("View"))
 
-def callTheme(callee: String, argTys: List): String =
+def callTheme(callee: String, argTys: List): TyRes =
   for {
     a = expectArity(callee, 0, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else tyOk("Int")
+  } yield if (tyIsOk(a) == 0) a else tyOk(Type.Int)
 
-def callColorRgb(argTys: List): String =
+def callColorRgb(argTys: List): TyRes =
   for {
     a = expectArity("Color.rgb", 3, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), "Int")) == 0) expectTy(argTyAt(argTys, 0), "Int") else if (tyIsOk(expectTy(argTyAt(argTys, 1), "Int")) == 0) expectTy(argTyAt(argTys, 1), "Int") else if (tyIsOk(expectTy(argTyAt(argTys, 2), "Int")) == 0) expectTy(argTyAt(argTys, 2), "Int") else tyOk("Int")
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.Int)) == 0) expectTy(argTyAt(argTys, 0), Type.Int) else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.Int)) == 0) expectTy(argTyAt(argTys, 1), Type.Int) else if (tyIsOk(expectTy(argTyAt(argTys, 2), Type.Int)) == 0) expectTy(argTyAt(argTys, 2), Type.Int) else tyOk(Type.Int)
 
-def callUiRun(argTys: List): String =
+def callUiRun(argTys: List): TyRes =
   for {
     a = expectArity("Ui.run", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else tyOk("IO[Unit]")
+  } yield if (tyIsOk(a) == 0) a else tyOk(tyMkIo(Type.Unit))
 
-def callUserFun(callee: String, argTys: List, funs: List): String =
+def callUserFun(callee: String, argTys: List, funs: List): TyRes =
   for {
     d = resolveFun(funsDefs(funs), callee, funsMod(funs))
-  } yield if (List.isEmpty(d) == 1) tyErr(str3("unknown function ", callee, "")) else if (resolveIsAmbiguous(d) == 1) tyErr(str4("ambiguous function ", callee, ": qualify as Module.", callee)) else callUserFunParams(callee, defParams(resolvedDef(d)), argTys, 0, normalizeTy(defRet(resolvedDef(d))))
+  } yield if (List.isEmpty(d) == 1) tyErr(str3("unknown function ", callee, "")) else if (resolveIsAmbiguous(d) == 1) tyErr(str4("ambiguous function ", callee, ": qualify as Module.", callee)) else callUserFunParams(callee, defParams(resolvedDef(d)), argTys, 0, normalizeTy(declRet(resolvedDef(d))))
 
-def callUserFunParams(callee: String, params: List, argTys: List, i: Int, ret: String): String =
-  if (List.len(params) != List.len(argTys)) tyErr(str4(callee, " expects ", Str.fromInt(List.len(params)), str3(" args, got ", Str.fromInt(List.len(argTys)), ""))) else if (i >= List.len(params)) tyOk(ret) else if (typesCompat(argTyAt(argTys, i), normalizeTy(paramType(List.at(params, i)))) == 0) tyErr(str4(callee, " arg type mismatch: expected ", normalizeTy(paramType(List.at(params, i))), str3(", got ", argTyAt(argTys, i), ""))) else callUserFunParams(callee, params, argTys, i + 1, ret)
+def callUserFunParams(callee: String, params: List, argTys: List, i: Int, ret: Type): TyRes =
+  if (List.len(params) != List.len(argTys)) tyErr(str4(callee, " expects ", Str.fromInt(List.len(params)), str3(" args, got ", Str.fromInt(List.len(argTys)), ""))) else if (i >= List.len(params)) tyOk(ret) else if (typesCompat(argTyAt(argTys, i), normalizeTy(paramTy(List.at(params, i)))) == 0) tyErr(str4(callee, " arg type mismatch: expected ", tyShow(normalizeTy(paramTy(List.at(params, i)))), str3(", got ", tyShow(argTyAt(argTys, i)), ""))) else callUserFunParams(callee, params, argTys, i + 1, ret)
 
