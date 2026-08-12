@@ -53,6 +53,8 @@ def checkPayloadFieldTyOne(en: String, cn: String, f: EnumField, ty: Type): TyRe
     case Type.String => tyOk(Type.Unit)
     case Type.List => tyOk(Type.Unit)
     case Type.Adt(name) => tyOk(Type.Unit)
+    case Type.Var(name) => tyOk(Type.Unit)
+    case Type.App(name, args) => tyOk(Type.Unit)
     case _ => tyErr(str5(en, ".", cn, str3(" field ", fieldName(f), ": Stage 0 payload types are Int, String, List, or an ADT, got "), tyShow(ty)))
   }
 
@@ -77,9 +79,19 @@ def resolveTypeIn(ty: Type, enums: List, imports: List, mod: String, tparams: Li
   ty match {
     case Type.Var(name) => if (listContainsStr(tparams, name) == 1) tyMkVar(name) else tyMkVar(name)
     case Type.Adt(name) => if (listContainsStr(tparams, name) == 1) tyMkVar(name) else resolveTypeAdt(name, enums, imports, mod)
+    case Type.App(name, args) => resolveTypeApp(name, args, enums, imports, mod, tparams)
     case Type.Io(inner) => Type.Io(resolveTypeIn(inner, enums, imports, mod, tparams))
     case _ => ty
   }
+
+def resolveTypeApp(name: String, args: List, enums: List, imports: List, mod: String, tparams: List): Type =
+  for {
+    e = resolveEnum(enums, imports, name, mod)
+    rargs = resolveTypeArgsIn(args, enums, imports, mod, tparams, List.empty())
+  } yield if (List.isEmpty(e) == 1) Type.App(name, rargs) else Type.App(enumId(List.head(e)), rargs)
+
+def resolveTypeArgsIn(args: List, enums: List, imports: List, mod: String, tparams: List, acc: List): List =
+  if (List.isEmpty(args) == 1) List.reverse(acc) else resolveTypeArgsIn(List.tail(args), enums, imports, mod, tparams, List.cons(resolveTypeIn(List.head(args), enums, imports, mod, tparams), acc))
 
 def resolveTypeAdt(name: String, enums: List, imports: List, mod: String): Type =
   for {
@@ -183,7 +195,7 @@ def inferExprMatch(e: Expr, enums: List, funs: List, env: List): TyRes =
     case Expr.Var(name, span) => inferVar(name, env)
     case Expr.Field(base, field, span) => inferField(base, field, enums, funs, env)
     case Expr.MethodCall(receiver, method, args, span) => inferMethodCall(receiver, method, args, enums, funs, env)
-    case Expr.Adt(enumName, caseName, args, span) => inferAdt(enumName, caseName, args, enums, funs, env)
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => inferAdt(enumName, caseName, args, enums, funs, env)
     case Expr.Let(name, value, body, span) => inferLet(name, value, body, enums, funs, env)
     case Expr.If(cond, thenB, elseB, span) => inferIf(cond, thenB, elseB, enums, funs, env)
     case Expr.BinOp(op, left, right, span) => inferBinOp(op, left, right, enums, funs, env)
@@ -249,20 +261,26 @@ def findImplMangledOne(d: Def, rest: List, bare: String, method: String): String
 
 def inferFieldTy(bt: Type, field: String, enums: List, mod: String, imports: List): TyRes =
   bt match {
-    case Type.Adt(id) => inferFieldOnAdt(id, field, enums, mod, imports)
+    case Type.Adt(id) => inferFieldOnAdt(id, List.empty(), field, enums, mod, imports)
+    case Type.App(id, args) => inferFieldOnAdt(id, args, field, enums, mod, imports)
     case _ => tyErr(str3("field access .", field, str3(" needs a record type, got ", tyShow(bt), "")))
   }
 
-def inferFieldOnAdt(id: String, field: String, enums: List, mod: String, imports: List): TyRes =
+def inferFieldOnAdt(id: String, targs: List, field: String, enums: List, mod: String, imports: List): TyRes =
   for {
     e = resolveEnum(enums, imports, id, mod)
-  } yield if (List.isEmpty(e) == 1) tyErr(str3("unknown enum ", id, "")) else if (isRecordLike(List.head(e)) == 0) tyErr(str3("field access .", field, str3(" requires a record type, got enum ", enumName(List.head(e)), ""))) else inferFieldLookup(List.head(e), field, enums, imports)
+  } yield if (List.isEmpty(e) == 1) tyErr(str3("unknown enum ", id, "")) else if (isRecordLike(List.head(e)) == 0) tyErr(str3("field access .", field, str3(" requires a record type, got enum ", enumName(List.head(e)), ""))) else inferFieldLookup(List.head(e), field, targs, enums, imports)
 
-def inferFieldLookup(e: EnumDef, field: String, enums: List, imports: List): TyRes =
+def inferFieldLookup(e: EnumDef, field: String, targs: List, enums: List, imports: List): TyRes =
   for {
     c = List.head(enumCases(e))
     hit = findFieldTy(caseFields(c), field)
-  } yield if (List.isEmpty(hit) == 1) tyErr(str4("record ", enumName(e), " has no field ", field)) else tyOk(resolveType(List.head(hit), enums, imports, enumModule(e)))
+    ss = targsSubst(enumTParams(e), targs, List.empty(), List.empty())
+    resolved = resolveTypeIn(List.head(hit), enums, imports, enumModule(e), enumTParams(e))
+  } yield if (List.isEmpty(hit) == 1) tyErr(str4("record ", enumName(e), " has no field ", field)) else tyOk(eraseVars(applySubst(resolved, List.head(ss)), List.head(List.tail(ss))))
+
+def targsSubst(tparams: List, targs: List, subst: List, skipped: List): List =
+  if (List.isEmpty(tparams) == 1) List.cons(subst, List.cons(skipped, List.empty())) else if (tyIsOpaque(List.head(targs)) == 1) targsSubst(List.tail(tparams), List.tail(targs), subst, List.cons(List.head(tparams), skipped)) else targsSubst(List.tail(tparams), List.tail(targs), substPut(subst, List.head(tparams), List.head(targs)), skipped)
 
 def findFieldTy(fields: List, name: String): List =
   if (List.isEmpty(fields) == 1) List.empty() else if (streq(fieldName(List.head(fields)), name) == 1) List.cons(fieldTy(List.head(fields)), List.empty()) else findFieldTy(List.tail(fields), name)
@@ -282,7 +300,20 @@ def inferAdtPayload(e: EnumDef, c: EnumCase, args: List, enums: List, funs: List
     id = enumId(e)
     pf = checkPayloadFields(id, c)
     fields = caseFields(c)
-  } yield if (tyIsOk(pf) == 0) pf else if (List.len(args) == List.len(fields)) inferAdtArgs(id, caseName(c), args, fields, enums, funs, env, enumModule(e)) else tyErr(str5(id, ".", caseName(c), " expects ", str3(Str.fromInt(List.len(fields)), " arg(s), got ", Str.fromInt(List.len(args)))))
+    tparams = enumTParams(e)
+  } yield if (tyIsOk(pf) == 0) pf else if (List.len(args) == List.len(fields)) if (List.isEmpty(tparams) == 1) inferAdtArgs(id, caseName(c), args, fields, enums, funs, env, enumModule(e)) else inferAdtGeneric(id, e, caseName(c), args, fields, tparams, enums, funs, env) else tyErr(str5(id, ".", caseName(c), " expects ", str3(Str.fromInt(List.len(fields)), " arg(s), got ", Str.fromInt(List.len(args)))))
+
+def inferAdtGeneric(id: String, e: EnumDef, cn: String, args: List, fields: List, tparams: List, enums: List, funs: List, env: List): TyRes =
+  for {
+    us = inferAdtUnify(args, fields, tparams, enums, funs, env, enumModule(e), List.empty())
+  } yield if (tyIsOk(List.head(us)) == 0) List.head(us) else tyOk(Type.App(id, substResultTypes(tparams, List.head(List.tail(us)), List.empty())))
+
+def inferAdtUnify(args: List, fields: List, tparams: List, enums: List, funs: List, env: List, enumMod: String, subst: List): List =
+  if (List.isEmpty(args) == 1) List.cons(tyOk(Type.Unit), List.cons(subst, List.empty())) else for {
+  ar = inferExpr(List.head(args), enums, funs, env)
+  want = resolveTypeIn(fieldTy(List.head(fields)), enums, funsImports(funs), enumMod, tparams)
+  us = unifyConstruct(want, tyVal(ar), subst)
+} yield if (tyIsOk(ar) == 0) List.cons(ar, List.cons(subst, List.empty())) else if (List.isEmpty(us) == 1) List.cons(tyErr(str4("type mismatch: expected ", tyShow(want), ", got ", tyShow(tyVal(ar)))), List.cons(subst, List.empty())) else inferAdtUnify(List.tail(args), List.tail(fields), tparams, enums, funs, env, enumMod, List.head(us))
 
 def inferAdtArgs(en: String, cn: String, args: List, fields: List, enums: List, funs: List, env: List, enumMod: String): TyRes =
   if (List.isEmpty(args) == 1) tyOk(tyMkAdt(en)) else for {
@@ -466,28 +497,31 @@ def inferMatchArms(st: Type, arms: List, enums: List, funs: List, env: List, acc
 def inferMatchArm(st: Type, arm: MatchArm, rest: List, enums: List, funs: List, env: List, acc: List): TyRes =
   for {
     pr = checkPattern(armPat(arm), st, enums)
-    env2 = patternExtendEnv(armPat(arm), enums, env)
+    env2 = patternExtendEnv(armPat(arm), st, enums, env)
     br = inferExpr(armBody(arm), enums, funs, env2)
   } yield if (tyIsOk(pr) == 0) pr else if (tyIsOk(br) == 0) br else if (List.isEmpty(acc) == 1) inferMatchArms(st, rest, enums, funs, env, List.cons(tyVal(br), List.empty())) else if (typesCompat(List.head(acc), tyVal(br)) == 0) tyErr(str4("match arms disagree: ", tyShow(List.head(acc)), " vs ", tyShow(tyVal(br)))) else inferMatchArms(st, rest, enums, funs, env, acc)
 
 def checkPattern(pat: Pattern, scrut: Type, enums: List): TyRes =
   pat match {
     case Pattern.Wild => tyOk(Type.Unit)
-    case Pattern.Adt(enumName, caseName, binds) => checkPatAdt(enumName, caseName, binds, scrut, enums)
+    case Pattern.Adt(enumName, caseName, binds, typeArgs) => checkPatAdt(enumName, caseName, binds, scrut, enums)
   }
 
 def checkPatAdt(en: String, cn: String, binds: List, scrut: Type, enums: List): TyRes =
   for {
     e = findEnum(enums, en)
-  } yield if (List.isEmpty(e) == 1) tyErr(str3("unknown enum ", en, " in pattern")) else checkPatAdtCase(en, cn, binds, scrut, enumCases(List.head(e)))
+  } yield if (List.isEmpty(e) == 1) tyErr(str3("unknown enum ", en, " in pattern")) else checkPatAdtCase(en, cn, binds, scrut, List.head(e))
 
-def checkPatAdtCase(en: String, cn: String, binds: List, scrut: Type, cases: List): TyRes =
+def checkPatAdtCase(en: String, cn: String, binds: List, scrut: Type, e: EnumDef): TyRes =
   for {
-    c = findCase(cases, cn)
-  } yield if (List.isEmpty(c) == 1) tyErr(str5("unknown case ", en, ".", cn, " in pattern")) else checkPatAdtScrut(en, cn, binds, scrut, List.head(c))
+    c = findCase(enumCases(e), cn)
+  } yield if (List.isEmpty(c) == 1) tyErr(str5("unknown case ", en, ".", cn, " in pattern")) else checkPatAdtScrut(en, cn, binds, scrut, e, List.head(c))
 
-def checkPatAdtScrut(en: String, cn: String, binds: List, scrut: Type, c: EnumCase): TyRes =
-  if (tyIsAdt(scrut) == 1) if (streq(tyAdtName(scrut), en) == 1) checkPatAdtBind(en, cn, binds, c) else tyErr(str5("pattern ", en, ".", cn, str3(" does not match scrutinee ", tyShow(scrut), ""))) else if (tyIsOpaque(scrut) == 1) checkPatAdtBind(en, cn, binds, c) else tyErr(str5("pattern ", en, ".", cn, str3(" does not match scrutinee ", tyShow(scrut), "")))
+def checkPatAdtScrut(en: String, cn: String, binds: List, scrut: Type, e: EnumDef, c: EnumCase): TyRes =
+  for {
+    tparams = enumTParams(e)
+    generic = if (List.isEmpty(tparams) == 1) 0 else 1
+  } yield if (tyIsAdt(scrut) == 1) if (streq(tyAdtName(scrut), en) == 1) if (generic == 0) checkPatAdtBind(en, cn, binds, c) else tyErr(str5("pattern ", en, ".", cn, str3(" does not match scrutinee ", tyShow(scrut), ""))) else tyErr(str5("pattern ", en, ".", cn, str3(" does not match scrutinee ", tyShow(scrut), ""))) else if (tyIsApp(scrut) == 1) if (streq(tyAppName(scrut), en) == 1) checkPatAdtBind(en, cn, binds, c) else tyErr(str5("pattern ", en, ".", cn, str3(" does not match scrutinee ", tyShow(scrut), ""))) else if (tyIsOpaque(scrut) == 1) if (generic == 0) checkPatAdtBind(en, cn, binds, c) else tyErr(str3("cannot match an untyped value against generic enum ", en, "")) else tyErr(str5("pattern ", en, ".", cn, str3(" does not match scrutinee ", tyShow(scrut), "")))
 
 def checkPatAdtBind(en: String, cn: String, binds: List, c: EnumCase): TyRes =
   for {
@@ -495,24 +529,26 @@ def checkPatAdtBind(en: String, cn: String, binds: List, c: EnumCase): TyRes =
     fields = caseFields(c)
   } yield if (tyIsOk(pf) == 0) pf else if (List.len(binds) == List.len(fields)) tyOk(Type.Unit) else if (List.isEmpty(fields) == 1) tyErr(str5("pattern ", en, ".", cn, " is nullary; remove payload binder")) else if (List.isEmpty(binds) == 1) tyErr(str5("pattern ", en, ".", cn, str3(" needs a payload binder, e.g. ", str4(en, ".", cn, "(x)"), ""))) else tyErr(str5("pattern ", en, ".", cn, str3(" expects ", Str.fromInt(List.len(fields)), str3(" binder(s), got ", Str.fromInt(List.len(binds)), ""))))
 
-def patternExtendEnv(pat: Pattern, enums: List, env: List): List =
+def patternExtendEnv(pat: Pattern, scrut: Type, enums: List, env: List): List =
   pat match {
     case Pattern.Wild => env
-    case Pattern.Adt(enumName, caseName, binds) => patternExtendEnvAdt(enumName, caseName, binds, enums, env)
+    case Pattern.Adt(enumName, caseName, binds, typeArgs) => patternExtendEnvAdt(enumName, caseName, binds, scrut, enums, env)
   }
 
-def patternExtendEnvAdt(en: String, cn: String, binds: List, enums: List, env: List): List =
-  if (List.isEmpty(binds) == 1) env else patternExtendEnvCase(en, cn, binds, enums, env)
+def patternExtendEnvAdt(en: String, cn: String, binds: List, scrut: Type, enums: List, env: List): List =
+  if (List.isEmpty(binds) == 1) env else patternExtendEnvCase(en, cn, binds, scrut, enums, env)
 
-def patternExtendEnvCase(en: String, cn: String, binds: List, enums: List, env: List): List =
+def patternExtendEnvCase(en: String, cn: String, binds: List, scrut: Type, enums: List, env: List): List =
   for {
     e = findEnum(enums, en)
     c = findCase(enumCases(List.head(e)), cn)
     fields = caseFields(List.head(c))
-  } yield patternBindFields(binds, fields, enums, enumModule(List.head(e)), env)
+    tparams = enumTParams(List.head(e))
+    ss = if (tyIsApp(scrut) == 1) if (streq(tyAppName(scrut), en) == 1) targsSubst(tparams, tyAppArgs(scrut), List.empty(), List.empty()) else List.cons(List.empty(), List.cons(List.empty(), List.empty())) else List.cons(List.empty(), List.cons(List.empty(), List.empty()))
+  } yield patternBindFields(binds, fields, tparams, List.head(ss), List.head(List.tail(ss)), enums, enumModule(List.head(e)), env)
 
-def patternBindFields(binds: List, fields: List, enums: List, enumMod: String, env: List): List =
-  if (List.isEmpty(binds) == 1) env else patternBindFields(List.tail(binds), List.tail(fields), enums, enumMod, tyEnvPut(env, List.head(binds), resolveType(fieldTy(List.head(fields)), enums, List.empty(), enumMod)))
+def patternBindFields(binds: List, fields: List, tparams: List, subst: List, skipped: List, enums: List, enumMod: String, env: List): List =
+  if (List.isEmpty(binds) == 1) env else patternBindFields(List.tail(binds), List.tail(fields), tparams, subst, skipped, enums, enumMod, tyEnvPut(env, List.head(binds), eraseVars(applySubst(resolveTypeIn(fieldTy(List.head(fields)), enums, List.empty(), enumMod, tparams), subst), skipped)))
 
 def expectArity(name: String, n: Int, got: Int): TyRes =
   if (n == got) tyOk(Type.Unit) else tyErr(str4(name, " expects ", Str.fromInt(n), str3(" args, got ", Str.fromInt(got), "")))
@@ -949,8 +985,13 @@ def callUserFunResolved(callee: String, d: Def, argTys: List, enums: List, impor
     tparams = defTypeParams(d)
   } yield if (List.isEmpty(tparams) == 1) callUserFunParams(callee, defParams(d), argTys, 0, resolveType(declRet(d), enums, imports, defModule(d)), enums, imports, defModule(d)) else callUserFunGeneric(callee, d, argTys, enums, imports, tparams, List.empty(), 0)
 
+def firstUnboundTParam(tparams: List, subst: List): String =
+  if (List.isEmpty(tparams) == 1) "" else if (List.isEmpty(substGet(subst, List.head(tparams))) == 1) List.head(tparams) else firstUnboundTParam(List.tail(tparams), subst)
+
 def callUserFunGeneric(callee: String, d: Def, argTys: List, enums: List, imports: List, tparams: List, subst: List, i: Int): TyRes =
-  if (List.len(defParams(d)) != List.len(argTys)) tyErr(str4(callee, " expects ", Str.fromInt(List.len(defParams(d))), str3(" args, got ", Str.fromInt(List.len(argTys)), ""))) else if (i >= List.len(defParams(d))) tyOk(applySubst(resolveTypeIn(declRet(d), enums, imports, defModule(d), tparams), subst)) else for {
+  if (List.len(defParams(d)) != List.len(argTys)) tyErr(str4(callee, " expects ", Str.fromInt(List.len(defParams(d))), str3(" args, got ", Str.fromInt(List.len(argTys)), ""))) else if (i >= List.len(defParams(d))) for {
+  unb = firstUnboundTParam(tparams, subst)
+} yield if (Str.len(unb) > 0) tyErr(str3("cannot infer type parameter ", unb, str3(" for ", callee, " - argument types are ambiguous"))) else tyOk(applySubst(resolveTypeIn(declRet(d), enums, imports, defModule(d), tparams), subst)) else for {
   want = resolveTypeIn(paramTy(List.at(defParams(d), i)), enums, imports, defModule(d), tparams)
   us = unifyTypes(want, argTyAt(argTys, i), subst)
 } yield if (List.isEmpty(us) == 1) tyErr(str4(callee, " arg type mismatch: expected ", tyShow(want), str3(", got ", tyShow(argTyAt(argTys, i)), ""))) else callUserFunGeneric(callee, d, argTys, enums, imports, tparams, List.head(us), i + 1)
@@ -992,7 +1033,7 @@ def desugarFieldFromEnum(base: Expr, field: String, e: EnumDef, span: Span): Exp
     idx = fieldIndex(caseFields(c), field, 0)
     binds = mkFieldBinds(List.len(caseFields(c)), 0, List.empty())
     body = Expr.Var(List.at(binds, idx), span)
-    arm = MatchArm.Arm(Pattern.Adt(enumId(e), caseName(c), binds), body)
+    arm = MatchArm.Arm(Pattern.Adt(enumId(e), caseName(c), binds, List.empty()), body)
   } yield if (idx < 0) base else Expr.Match(base, List.cons(arm, List.empty()), span)
 
 def resolveFieldsProg(prog: Prog): Prog =
@@ -1027,7 +1068,7 @@ def resolveFieldsExpr(e: Expr, enums: List, imports: List, mod: String, allDefs:
     case Expr.If(cond, thenB, elseB, span) => Expr.If(resolveFieldsExpr(cond, enums, imports, mod, allDefs, env), resolveFieldsExpr(thenB, enums, imports, mod, allDefs, env), resolveFieldsExpr(elseB, enums, imports, mod, allDefs, env), span)
     case Expr.BinOp(op, left, right, span) => Expr.BinOp(op, resolveFieldsExpr(left, enums, imports, mod, allDefs, env), resolveFieldsExpr(right, enums, imports, mod, allDefs, env), span)
     case Expr.Call(callee, args, span) => Expr.Call(callee, resolveFieldsExprList(args, enums, imports, mod, allDefs, env, List.empty()), span)
-    case Expr.Adt(enumName, caseName, args, span) => Expr.Adt(enumName, caseName, resolveFieldsExprList(args, enums, imports, mod, allDefs, env, List.empty()), span)
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => Expr.Adt(enumName, caseName, resolveFieldsExprList(args, enums, imports, mod, allDefs, env, List.empty()), typeArgs, span)
     case Expr.Match(scrut, arms, span) => Expr.Match(resolveFieldsExpr(scrut, enums, imports, mod, allDefs, env), resolveFieldsArms(arms, enums, imports, mod, allDefs, env, List.empty()), span)
     case Expr.Lambda(param, body, span) => Expr.Lambda(param, resolveFieldsExpr(body, enums, imports, mod, allDefs, env), span)
     case Expr.IoRace(left, right, span) => Expr.IoRace(resolveFieldsExpr(left, enums, imports, mod, allDefs, env), resolveFieldsExpr(right, enums, imports, mod, allDefs, env), span)
@@ -1092,13 +1133,106 @@ def applySubst(ty: Type, subst: List): Type =
   ty match {
     case Type.Var(name) => applySubstVar(name, subst, ty)
     case Type.Io(inner) => Type.Io(applySubst(inner, subst))
+    case Type.App(name, args) => Type.App(name, applySubstArgs(args, subst, List.empty()))
     case _ => ty
   }
+
+def applySubstArgs(args: List, subst: List, acc: List): List =
+  if (List.isEmpty(args) == 1) List.reverse(acc) else applySubstArgs(List.tail(args), subst, List.cons(applySubst(List.head(args), subst), acc))
+
+def eraseVars(ty: Type, names: List): Type =
+  ty match {
+    case Type.Var(name) => if (listContainsStr(names, name) == 1) Type.Opaque(name) else ty
+    case Type.Io(inner) => Type.Io(eraseVars(inner, names))
+    case Type.App(name, args) => Type.App(name, eraseVarsArgs(args, names, List.empty()))
+    case _ => ty
+  }
+
+def eraseVarsArgs(args: List, names: List, acc: List): List =
+  if (List.isEmpty(args) == 1) List.reverse(acc) else eraseVarsArgs(List.tail(args), names, List.cons(eraseVars(List.head(args), names), acc))
 
 def applySubstVar(name: String, subst: List, fallback: Type): Type =
   for {
     hit = substGet(subst, name)
   } yield if (List.isEmpty(hit) == 1) fallback else List.head(hit)
+
+def strStartsWith(s: String, prefix: String): Int =
+  if (Str.len(s) < Str.len(prefix)) 0 else streq(Str.slice(s, 0, Str.len(prefix)), prefix)
+
+def containsUnbound(t: Type): Int =
+  t match {
+    case Type.Opaque(n) => strStartsWith(n, "__unbound_")
+    case Type.Io(inner) => containsUnbound(inner)
+    case Type.App(name, args) => containsUnboundArgs(args)
+    case _ => 0
+  }
+
+def containsUnboundArgs(args: List): Int =
+  if (List.isEmpty(args) == 1) 0 else if (containsUnbound(List.head(args)) == 1) 1 else containsUnboundArgs(List.tail(args))
+
+def unifyConstruct(pattern: Type, concrete: Type, subst: List): List =
+  pattern match {
+    case Type.Opaque(n) => List.cons(subst, List.empty())
+    case Type.Var(n) => unifyConstructVar(n, concrete, subst)
+    case Type.Io(a) => unifyConstructIo(a, concrete, subst)
+    case Type.App(na, aa) => unifyConstructApp(na, aa, concrete, subst)
+    case _ => if (tyIsOpaque(concrete) == 1) List.cons(subst, List.empty()) else if (typesCompat(pattern, concrete) == 1) List.cons(subst, List.empty()) else List.empty()
+  }
+
+def unifyConstructVar(n: String, concrete: Type, subst: List): List =
+  for {
+    prev = substGet(subst, n)
+  } yield if (tyIsOpaque(concrete) == 1) List.cons(subst, List.empty()) else if (List.isEmpty(prev) == 0) if (typesCompat(List.head(prev), concrete) == 1) List.cons(subst, List.empty()) else List.empty() else if (containsUnbound(concrete) == 1) List.cons(subst, List.empty()) else List.cons(substPut(subst, n, concrete), List.empty())
+
+def unifyConstructIo(a: Type, concrete: Type, subst: List): List =
+  concrete match {
+    case Type.Io(b) => unifyConstruct(a, b, subst)
+    case Type.Opaque(n) => List.cons(subst, List.empty())
+    case _ => List.empty()
+  }
+
+def unifyConstructApp(na: String, aa: List, concrete: Type, subst: List): List =
+  concrete match {
+    case Type.App(nb, ab) => if (streq(na, nb) == 1) if (List.len(aa) == List.len(ab)) unifyConstructLists(aa, ab, subst) else List.empty() else List.empty()
+    case Type.Opaque(n) => List.cons(subst, List.empty())
+    case _ => List.empty()
+  }
+
+def unifyConstructLists(aa: List, ab: List, subst: List): List =
+  if (List.isEmpty(aa) == 1) List.cons(subst, List.empty()) else for {
+  us = unifyConstruct(List.head(aa), List.head(ab), subst)
+} yield if (List.isEmpty(us) == 1) List.empty() else unifyConstructLists(List.tail(aa), List.tail(ab), List.head(us))
+
+def substResultTypes(tparams: List, subst: List, acc: List): List =
+  if (List.isEmpty(tparams) == 1) List.reverse(acc) else for {
+  hit = substGet(subst, List.head(tparams))
+  piece = if (List.isEmpty(hit) == 1) Type.Opaque(Str.concat("__unbound_", List.head(tparams))) else List.head(hit)
+} yield substResultTypes(List.tail(tparams), subst, List.cons(piece, acc))
+
+def checkTargs(enumName: String, caseName: String, targs: List, tparams: List, span: Span): TyRes =
+  if (List.isEmpty(targs) == 1) tyOk(Type.Unit) else for {
+  one = checkTarg(enumName, caseName, List.head(targs), tparams, span)
+} yield if (tyIsOk(one) == 0) one else checkTargs(enumName, caseName, List.tail(targs), tparams, span)
+
+def checkTarg(enumName: String, caseName: String, ty: Type, tparams: List, span: Span): TyRes =
+  ty match {
+    case Type.Opaque(n) => if (strStartsWith(n, "__unbound_") == 1) withSpanIfBare(tyErr(str3("cannot infer type parameter ", Str.slice(n, 10, Str.len(n)), str3(" in ", enumName, Str.concat(Str.concat(".", caseName), " - bind it through the def's return type or a typed parameter")))), span) else tyOk(Type.Unit)
+    case Type.Var(n) => if (listContainsStr(tparams, n) == 1) tyOk(Type.Unit) else withSpanIfBare(tyErr(str3("cannot infer type parameter ", n, str3(" in ", enumName, Str.concat(Str.concat(".", caseName), " - bind it through the def's return type or a typed parameter")))), span)
+    case Type.App(name, args) => checkTargs(enumName, caseName, args, tparams, span)
+    case _ => tyOk(Type.Unit)
+  }
+
+def usableExpected(ty: Type, tparams: List): Int =
+  ty match {
+    case Type.Opaque(n) => 0
+    case Type.Var(n) => listContainsStr(tparams, n)
+    case Type.Io(inner) => usableExpected(inner, tparams)
+    case Type.App(name, args) => usableExpectedArgs(args, tparams)
+    case _ => 1
+  }
+
+def usableExpectedArgs(args: List, tparams: List): Int =
+  if (List.isEmpty(args) == 1) 1 else if (usableExpected(List.head(args), tparams) == 0) 0 else usableExpectedArgs(List.tail(args), tparams)
 
 def monoTypeOk(t: Type): Int =
   t match {
@@ -1108,20 +1242,36 @@ def monoTypeOk(t: Type): Int =
     case Type.Bool => 1
     case Type.List => 1
     case Type.Adt(name) => 1
+    case Type.App(name, args) => monoTypeOkArgs(args)
     case _ => 0
   }
+
+def monoTypeOkArgs(args: List): Int =
+  if (List.isEmpty(args) == 1) 1 else if (monoTypeOk(List.head(args)) == 0) 0 else monoTypeOkArgs(List.tail(args))
 
 def unifyTypes(pattern: Type, concrete: Type, subst: List): List =
   pattern match {
     case Type.Var(n) => unifyVar(n, concrete, subst)
     case Type.Io(a) => unifyIo(a, concrete, subst)
+    case Type.App(na, aa) => unifyApp(na, aa, concrete, subst)
     case _ => if (typesCompat(pattern, concrete) == 1) List.cons(subst, List.empty()) else List.empty()
   }
+
+def unifyApp(na: String, aa: List, concrete: Type, subst: List): List =
+  concrete match {
+    case Type.App(nb, ab) => if (streq(na, nb) == 1) if (List.len(aa) == List.len(ab)) unifyTypeLists(aa, ab, subst) else List.empty() else List.empty()
+    case _ => List.empty()
+  }
+
+def unifyTypeLists(aa: List, ab: List, subst: List): List =
+  if (List.isEmpty(aa) == 1) List.cons(subst, List.empty()) else for {
+  us = unifyTypes(List.head(aa), List.head(ab), subst)
+} yield if (List.isEmpty(us) == 1) List.empty() else unifyTypeLists(List.tail(aa), List.tail(ab), List.head(us))
 
 def unifyVar(n: String, concrete: Type, subst: List): List =
   for {
     prev = substGet(subst, n)
-  } yield if (List.isEmpty(prev) == 0) if (typesCompat(List.head(prev), concrete) == 1) List.cons(subst, List.empty()) else List.empty() else if (monoTypeOk(concrete) == 0) List.empty() else List.cons(substPut(subst, n, concrete), List.empty())
+  } yield if (List.isEmpty(prev) == 0) if (typesCompat(List.head(prev), concrete) == 1) List.cons(subst, List.empty()) else List.empty() else if (tyIsOpaque(concrete) == 1) List.cons(subst, List.empty()) else if (monoTypeOk(concrete) == 0) List.empty() else List.cons(substPut(subst, n, concrete), List.empty())
 
 def unifyIo(a: Type, concrete: Type, subst: List): List =
   concrete match {
@@ -1137,10 +1287,14 @@ def typeMangle(t: Type): String =
     case Type.Bool => "Bool"
     case Type.List => "List"
     case Type.Adt(id) => mangleDots(id, 0, "")
+    case Type.App(id, args) => Str.concat(mangleDots(id, 0, ""), typeMangleArgs(args, ""))
     case Type.Io(inner) => Str.concat("IO_", typeMangle(inner))
     case Type.Var(n) => n
     case Type.Opaque(n) => n
   }
+
+def typeMangleArgs(args: List, acc: String): String =
+  if (List.isEmpty(args) == 1) acc else typeMangleArgs(List.tail(args), Str.concat(acc, Str.concat("_", typeMangle(List.head(args)))))
 
 def mangleDots(s: String, i: Int, acc: String): String =
   if (i >= Str.len(s)) acc else if (Str.charAt(s, i) == 46) mangleDots(s, i + 1, Str.concat(acc, "_")) else mangleDots(s, i + 1, Str.concat(acc, Str.slice(s, i, i + 1)))
@@ -1175,6 +1329,390 @@ def appendMissingSpecs(defs: List, specs: List): List =
 def specializeParams(params: List, enums: List, imports: List, mod: String, tparams: List, subst: List, acc: List): List =
   if (List.isEmpty(params) == 1) List.reverse(acc) else specializeParams(List.tail(params), enums, imports, mod, tparams, subst, List.cons(Param.Param(paramName(List.head(params)), applySubst(resolveTypeIn(paramTy(List.head(params)), enums, imports, mod, tparams), subst)), acc))
 
+def elabPack(e: Expr, res: TyRes): List =
+  List.cons(e, List.cons(res, List.empty()))
+
+def elabExprOf(p: List): Expr =
+  List.head(p)
+
+def elabResOf(p: List): TyRes =
+  List.head(List.tail(p))
+
+def elabListOf(p: List): List =
+  List.head(p)
+
+def elabPatOf(p: List): Pattern =
+  List.head(p)
+
+def elaborateProg(prog: Prog): List =
+  for {
+    enums = progEnums(prog)
+    imports = progImports(prog)
+    defs = progDefs(prog)
+    dp = elaborateDefs(defs, enums, imports, defs, List.empty())
+  } yield if (tyIsOk(elabResOf(dp)) == 0) List.cons(List.empty(), List.cons(elabResOf(dp), List.empty())) else elaborateMain(prog, enums, imports, defs, List.head(dp))
+
+def elaborateDefs(defs: List, enums: List, imports: List, allDefs: List, acc: List): List =
+  if (List.isEmpty(defs) == 1) List.cons(List.reverse(acc), List.cons(tyOk(Type.Unit), List.empty())) else elaborateDefsOne(List.head(defs), List.tail(defs), enums, imports, allDefs, acc)
+
+def elaborateDefsOne(d: Def, rest: List, enums: List, imports: List, allDefs: List, acc: List): List =
+  for {
+    tparams = defTypeParams(d)
+    env = bindParams(defParams(d), enums, imports, defModule(d), tparams, List.empty())
+    expected = resolveTypeIn(declRet(d), enums, imports, defModule(d), tparams)
+    r = elaborateExpr(defBody(d), enums, mkFuns(defModule(d), allDefs, imports), env, List.cons(expected, List.empty()), tparams)
+    d2 = Def.Def(defName(d), defParams(d), defRet(d), elabExprOf(r), defModule(d), defIsPrivate(d), tparams)
+  } yield if (tyIsOk(elabResOf(r)) == 0) List.cons(List.empty(), List.cons(elabResOf(r), List.empty())) else elaborateDefs(rest, enums, imports, allDefs, List.cons(d2, acc))
+
+def elaborateMain(prog: Prog, enums: List, imports: List, allDefs: List, defs2: List): List =
+  for {
+    mainMod = progMainModule(prog)
+    r = elaborateExpr(progMain(prog), enums, mkFuns(mainMod, allDefs, imports), List.empty(), List.cons(tyMkIo(Type.Unit), List.empty()), List.empty())
+  } yield if (tyIsOk(elabResOf(r)) == 0) List.cons(List.empty(), List.cons(elabResOf(r), List.empty())) else List.cons(mkProgFull(progPkg(prog), progEnums(prog), defs2, elabExprOf(r), mainMod, imports, progTraits(prog), progImpls(prog)), List.cons(tyOk(Type.Unit), List.empty()))
+
+def elaborateExpr(e: Expr, enums: List, funs: List, env: List, expected: List, tparams: List): List =
+  e match {
+    case Expr.Unit(span) => elabPack(e, tyOk(Type.Unit))
+    case Expr.IntLit(digits, span) => elabPack(e, tyOk(Type.Unit))
+    case Expr.StrLit(value, span) => elabPack(e, tyOk(Type.Unit))
+    case Expr.Var(name, span) => elabPack(e, tyOk(Type.Unit))
+    case Expr.Delay(span) => elabPack(e, tyOk(Type.Unit))
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => elabAdt(enumName, caseName, args, typeArgs, span, enums, funs, env, expected, tparams)
+    case Expr.Match(scrut, arms, span) => elabMatch(scrut, arms, span, enums, funs, env, expected, tparams)
+    case Expr.Call(callee, args, span) => elabCall(callee, args, span, enums, funs, env, expected, tparams)
+    case Expr.Let(name, value, body, span) => elabLet(name, value, body, span, enums, funs, env, expected, tparams)
+    case Expr.FlatMap(inner, param, body, span) => elabFlatMap(inner, param, body, span, enums, funs, env, expected, tparams)
+    case Expr.Pure(arg, span) => elabPure(arg, span, enums, funs, env, expected, tparams)
+    case Expr.If(cond, thenB, elseB, span) => elabIf(cond, thenB, elseB, span, enums, funs, env, expected, tparams)
+    case Expr.Handle(inner, body, span) => elabHandle(inner, body, span, enums, funs, env, expected, tparams)
+    case Expr.Attempt(inner, span) => elabAttempt(inner, span, enums, funs, env, expected, tparams)
+    case Expr.Println(arg, span) => elabUnaryNone(arg, span, enums, funs, env, tparams, 1)
+    case Expr.Fail(arg, span) => elabUnaryNone(arg, span, enums, funs, env, tparams, 2)
+    case Expr.Sleep(arg, span) => elabUnaryNone(arg, span, enums, funs, env, tparams, 3)
+    case Expr.IoRace(left, right, span) => elabRace(left, right, span, enums, funs, env, expected, tparams)
+    case Expr.IoBoth(left, right, span) => elabBoth(left, right, span, enums, funs, env, expected, tparams)
+    case Expr.Field(base, field, span) => elabField(base, field, span, enums, funs, env, tparams)
+    case Expr.MethodCall(receiver, method, args, span) => elabMethod(receiver, method, args, span, enums, funs, env, tparams)
+    case Expr.ListLit(elems, span) => elabListLit(elems, span, enums, funs, env, tparams)
+    case Expr.Interp(parts, span) => elabInterp(parts, span, enums, funs, env, tparams)
+    case Expr.BinOp(op, left, right, span) => elabBinOp(op, left, right, span, enums, funs, env, tparams)
+    case Expr.Lambda(param, body, span) => elabLambda(param, body, span, enums, funs, env, tparams)
+  }
+
+def elabUnaryNone(arg: Expr, span: Span, enums: List, funs: List, env: List, tparams: List, kind: Int): List =
+  for {
+    r = elaborateExpr(arg, enums, funs, env, List.empty(), tparams)
+  } yield if (tyIsOk(elabResOf(r)) == 0) r else if (kind == 1) elabPack(Expr.Println(elabExprOf(r), span), tyOk(Type.Unit)) else if (kind == 2) elabPack(Expr.Fail(elabExprOf(r), span), tyOk(Type.Unit)) else elabPack(Expr.Sleep(elabExprOf(r), span), tyOk(Type.Unit))
+
+def elabIf(cond: Expr, thenB: Expr, elseB: Expr, span: Span, enums: List, funs: List, env: List, expected: List, tparams: List): List =
+  for {
+    rc = elaborateExpr(cond, enums, funs, env, List.empty(), tparams)
+    rt = elaborateExpr(thenB, enums, funs, env, expected, tparams)
+    re = elaborateExpr(elseB, enums, funs, env, expected, tparams)
+  } yield if (tyIsOk(elabResOf(rc)) == 0) rc else if (tyIsOk(elabResOf(rt)) == 0) rt else if (tyIsOk(elabResOf(re)) == 0) re else elabPack(Expr.If(elabExprOf(rc), elabExprOf(rt), elabExprOf(re), span), tyOk(Type.Unit))
+
+def elabHandle(inner: Expr, body: Expr, span: Span, enums: List, funs: List, env: List, expected: List, tparams: List): List =
+  for {
+    ri = elaborateExpr(inner, enums, funs, env, expected, tparams)
+    rb = elaborateExpr(body, enums, funs, env, expected, tparams)
+  } yield if (tyIsOk(elabResOf(ri)) == 0) ri else if (tyIsOk(elabResOf(rb)) == 0) rb else elabPack(Expr.Handle(elabExprOf(ri), elabExprOf(rb), span), tyOk(Type.Unit))
+
+def elabAttempt(inner: Expr, span: Span, enums: List, funs: List, env: List, expected: List, tparams: List): List =
+  for {
+    ri = elaborateExpr(inner, enums, funs, env, List.empty(), tparams)
+  } yield if (tyIsOk(elabResOf(ri)) == 0) ri else elabPack(Expr.Attempt(elabExprOf(ri), span), tyOk(Type.Unit))
+
+def elabRace(left: Expr, right: Expr, span: Span, enums: List, funs: List, env: List, expected: List, tparams: List): List =
+  for {
+    rl = elaborateExpr(left, enums, funs, env, expected, tparams)
+    rr = elaborateExpr(right, enums, funs, env, expected, tparams)
+  } yield if (tyIsOk(elabResOf(rl)) == 0) rl else if (tyIsOk(elabResOf(rr)) == 0) rr else elabPack(Expr.IoRace(elabExprOf(rl), elabExprOf(rr), span), tyOk(Type.Unit))
+
+def elabBoth(left: Expr, right: Expr, span: Span, enums: List, funs: List, env: List, expected: List, tparams: List): List =
+  for {
+    rl = elaborateExpr(left, enums, funs, env, List.empty(), tparams)
+    rr = elaborateExpr(right, enums, funs, env, List.empty(), tparams)
+  } yield if (tyIsOk(elabResOf(rl)) == 0) rl else if (tyIsOk(elabResOf(rr)) == 0) rr else elabPack(Expr.IoBoth(elabExprOf(rl), elabExprOf(rr), span), tyOk(Type.Unit))
+
+def elabField(base: Expr, field: String, span: Span, enums: List, funs: List, env: List, tparams: List): List =
+  for {
+    rb = elaborateExpr(base, enums, funs, env, List.empty(), tparams)
+  } yield if (tyIsOk(elabResOf(rb)) == 0) rb else elabPack(Expr.Field(elabExprOf(rb), field, span), tyOk(Type.Unit))
+
+def elabMethod(receiver: Expr, method: String, args: List, span: Span, enums: List, funs: List, env: List, tparams: List): List =
+  for {
+    rr = elaborateExpr(receiver, enums, funs, env, List.empty(), tparams)
+    ra = elabExprList(args, enums, funs, env, tparams, List.empty())
+  } yield if (tyIsOk(elabResOf(rr)) == 0) rr else if (tyIsOk(elabResOf(ra)) == 0) ra else elabPack(Expr.MethodCall(elabExprOf(rr), method, elabListOf(ra), span), tyOk(Type.Unit))
+
+def elabListLit(elems: List, span: Span, enums: List, funs: List, env: List, tparams: List): List =
+  for {
+    re = elabExprList(elems, enums, funs, env, tparams, List.empty())
+  } yield if (tyIsOk(elabResOf(re)) == 0) re else elabPack(Expr.ListLit(elabListOf(re), span), tyOk(Type.Unit))
+
+def elabInterp(parts: List, span: Span, enums: List, funs: List, env: List, tparams: List): List =
+  for {
+    rp = elabInterpParts(parts, enums, funs, env, tparams, List.empty())
+  } yield if (tyIsOk(elabResOf(rp)) == 0) rp else elabPack(Expr.Interp(elabListOf(rp), span), tyOk(Type.Unit))
+
+def elabInterpParts(parts: List, enums: List, funs: List, env: List, tparams: List, acc: List): List =
+  if (List.isEmpty(parts) == 1) List.cons(List.reverse(acc), List.cons(tyOk(Type.Unit), List.empty())) else elabInterpPartOne(List.head(parts), List.tail(parts), enums, funs, env, tparams, acc)
+
+def elabInterpPartOne(part: InterpPart, rest: List, enums: List, funs: List, env: List, tparams: List, acc: List): List =
+  part match {
+    case InterpPart.Lit(text) => elabInterpParts(rest, enums, funs, env, tparams, List.cons(part, acc))
+    case InterpPart.Hole(expr) => for {
+  r = elaborateExpr(expr, enums, funs, env, List.empty(), tparams)
+} yield if (tyIsOk(elabResOf(r)) == 0) r else elabInterpParts(rest, enums, funs, env, tparams, List.cons(InterpPart.Hole(elabExprOf(r)), acc))
+  }
+
+def elabBinOp(op: String, left: Expr, right: Expr, span: Span, enums: List, funs: List, env: List, tparams: List): List =
+  for {
+    rl = elaborateExpr(left, enums, funs, env, List.empty(), tparams)
+    rr = elaborateExpr(right, enums, funs, env, List.empty(), tparams)
+  } yield if (tyIsOk(elabResOf(rl)) == 0) rl else if (tyIsOk(elabResOf(rr)) == 0) rr else elabPack(Expr.BinOp(op, elabExprOf(rl), elabExprOf(rr), span), tyOk(Type.Unit))
+
+def elabLambda(param: String, body: Expr, span: Span, enums: List, funs: List, env: List, tparams: List): List =
+  for {
+    rb = elaborateExpr(body, enums, funs, env, List.empty(), tparams)
+  } yield if (tyIsOk(elabResOf(rb)) == 0) rb else elabPack(Expr.Lambda(param, elabExprOf(rb), span), tyOk(Type.Unit))
+
+def elabLet(name: String, value: Expr, body: Expr, span: Span, enums: List, funs: List, env: List, expected: List, tparams: List): List =
+  for {
+    rv = elaborateExpr(value, enums, funs, env, List.empty(), tparams)
+    vt = inferExpr(elabExprOf(rv), enums, funs, env)
+    env2 = if (tyIsOk(vt) == 1) tyEnvPut(env, name, tyVal(vt)) else env
+    rb = elaborateExpr(body, enums, funs, env2, expected, tparams)
+  } yield if (tyIsOk(elabResOf(rv)) == 0) rv else if (tyIsOk(vt) == 0) elabPack(elabExprOf(rv), vt) else if (tyIsOk(elabResOf(rb)) == 0) rb else elabPack(Expr.Let(name, elabExprOf(rv), elabExprOf(rb), span), tyOk(Type.Unit))
+
+def elabFlatMap(inner: Expr, param: String, body: Expr, span: Span, enums: List, funs: List, env: List, expected: List, tparams: List): List =
+  for {
+    ri = elaborateExpr(inner, enums, funs, env, List.empty(), tparams)
+    it = inferExpr(elabExprOf(ri), enums, funs, env)
+    env2 = if (tyIsOk(it) == 0) env else if (tyIsIo(tyVal(it)) == 0) env else if (Str.len(param) == 0) env else tyEnvPut(env, param, tyIoInner(tyVal(it)))
+    rb = elaborateExpr(body, enums, funs, env2, expected, tparams)
+  } yield if (tyIsOk(elabResOf(ri)) == 0) ri else if (tyIsOk(it) == 0) elabPack(elabExprOf(ri), it) else if (tyIsOk(elabResOf(rb)) == 0) rb else elabPack(Expr.FlatMap(elabExprOf(ri), param, elabExprOf(rb), span), tyOk(Type.Unit))
+
+def elabPure(arg: Expr, span: Span, enums: List, funs: List, env: List, expected: List, tparams: List): List =
+  for {
+    innerExp = if (List.isEmpty(expected) == 1) List.empty() else if (tyIsIo(List.head(expected)) == 1) List.cons(tyIoInner(List.head(expected)), List.empty()) else List.empty()
+    r = elaborateExpr(arg, enums, funs, env, innerExp, tparams)
+  } yield if (tyIsOk(elabResOf(r)) == 0) r else elabPack(Expr.Pure(elabExprOf(r), span), tyOk(Type.Unit))
+
+def elabExprList(xs: List, enums: List, funs: List, env: List, tparams: List, acc: List): List =
+  if (List.isEmpty(xs) == 1) List.cons(List.reverse(acc), List.cons(tyOk(Type.Unit), List.empty())) else for {
+  r = elaborateExpr(List.head(xs), enums, funs, env, List.empty(), tparams)
+} yield if (tyIsOk(elabResOf(r)) == 0) r else elabExprList(List.tail(xs), enums, funs, env, tparams, List.cons(elabExprOf(r), acc))
+
+def elabAdt(enumName: String, caseName: String, args: List, typeArgs: List, span: Span, enums: List, funs: List, env: List, expected: List, tparams: List): List =
+  for {
+    e = resolveEnum(enums, funsImports(funs), enumName, funsMod(funs))
+    node = Expr.Adt(enumName, caseName, args, typeArgs, span)
+  } yield if (List.isEmpty(e) == 1) elabPack(node, tyErr(str3("unknown enum ", enumName, ""))) else elabAdtCase(enumName, caseName, args, span, enums, funs, env, expected, tparams, List.head(e))
+
+def elabAdtCase(enumName: String, caseName: String, args: List, span: Span, enums: List, funs: List, env: List, expected: List, tparams: List, en: EnumDef): List =
+  for {
+    c = findCase(enumCases(en), caseName)
+    node = Expr.Adt(enumName, caseName, args, List.empty(), span)
+  } yield if (List.isEmpty(c) == 1) elabPack(node, tyErr(str4("unknown case ", enumName, ".", caseName))) else if (List.isEmpty(enumTParams(en)) == 1) elabAdtPlain(enumName, caseName, args, span, enums, funs, env, tparams) else elabAdtGeneric(enumName, caseName, args, span, enums, funs, env, expected, tparams, en, List.head(c))
+
+def elabAdtPlain(enumName: String, caseName: String, args: List, span: Span, enums: List, funs: List, env: List, tparams: List): List =
+  for {
+    ra = elabExprList(args, enums, funs, env, tparams, List.empty())
+  } yield if (tyIsOk(elabResOf(ra)) == 0) ra else elabPack(Expr.Adt(enumName, caseName, elabListOf(ra), List.empty(), span), tyOk(Type.Unit))
+
+def elabAdtGeneric(enumName: String, caseName: String, args: List, span: Span, enums: List, funs: List, env: List, expected: List, tparams: List, en: EnumDef, c: EnumCase): List =
+  for {
+    enTp = enumTParams(en)
+    us = elabUnifyCtorArgs(args, caseFields(c), enTp, enums, funs, env, enumModule(en), List.empty())
+    node = Expr.Adt(enumName, caseName, args, List.empty(), span)
+  } yield if (tyIsOk(elabResOf(us)) == 0) elabPack(node, elabResOf(us)) else elabAdtGeneric2(enumName, caseName, args, span, enums, funs, env, expected, tparams, en, c, List.head(us))
+
+def elabUnifyCtorArgs(args: List, fields: List, enTp: List, enums: List, funs: List, env: List, enumMod: String, subst: List): List =
+  if (List.isEmpty(args) == 1) List.cons(subst, List.cons(tyOk(Type.Unit), List.empty())) else for {
+  ar = inferExpr(List.head(args), enums, funs, env)
+  want = resolveTypeIn(fieldTy(List.head(fields)), enums, funsImports(funs), enumMod, enTp)
+  us = unifyConstruct(want, tyVal(ar), subst)
+} yield if (tyIsOk(ar) == 0) List.cons(List.empty(), List.cons(ar, List.empty())) else if (List.isEmpty(us) == 1) List.cons(List.empty(), List.cons(tyErr(str4("type mismatch: expected ", tyShow(want), ", got ", tyShow(tyVal(ar)))), List.empty())) else elabUnifyCtorArgs(List.tail(args), List.tail(fields), enTp, enums, funs, env, enumMod, List.head(us))
+
+def elabAdtGeneric2(enumName: String, caseName: String, args: List, span: Span, enums: List, funs: List, env: List, expected: List, tparams: List, en: EnumDef, c: EnumCase, subst: List): List =
+  for {
+    enTp = enumTParams(en)
+    id = enumId(en)
+    subst2 = elabFillExpected(enTp, id, expected, subst)
+    targs = substResultTypes(enTp, subst2, List.empty())
+    cr = checkTargs(enumName, caseName, targs, tparams, span)
+    node = Expr.Adt(enumName, caseName, args, targs, span)
+  } yield if (tyIsOk(cr) == 0) elabPack(node, cr) else elabAdtCtorArgs(enumName, caseName, args, targs, span, enums, funs, env, tparams, en, caseFields(c), enTp, subst2)
+
+def elabFillExpected(enTp: List, id: String, expected: List, subst: List): List =
+  if (List.isEmpty(expected) == 1) subst else if (tyIsApp(List.head(expected)) == 0) subst else if (streq(tyAppName(List.head(expected)), id) == 0) subst else if (List.len(tyAppArgs(List.head(expected))) == List.len(enTp)) elabFillExpectedZip(enTp, tyAppArgs(List.head(expected)), subst) else subst
+
+def elabFillExpectedZip(enTp: List, eargs: List, subst: List): List =
+  if (List.isEmpty(enTp) == 1) subst else for {
+  hit = substGet(subst, List.head(enTp))
+  ea = List.head(eargs)
+} yield if (List.isEmpty(hit) == 0) elabFillExpectedZip(List.tail(enTp), List.tail(eargs), subst) else if (tyIsOpaque(ea) == 1) elabFillExpectedZip(List.tail(enTp), List.tail(eargs), subst) else elabFillExpectedZip(List.tail(enTp), List.tail(eargs), substPut(subst, List.head(enTp), ea))
+
+def elabAdtCtorArgs(enumName: String, caseName: String, args: List, targs: List, span: Span, enums: List, funs: List, env: List, tparams: List, en: EnumDef, fields: List, enTp: List, subst: List): List =
+  if (List.isEmpty(args) == 1) elabPack(Expr.Adt(enumName, caseName, List.empty(), targs, span), tyOk(Type.Unit)) else for {
+  want = applySubst(resolveTypeIn(fieldTy(List.head(fields)), enums, funsImports(funs), enumModule(en), enTp), subst)
+  exp = if (usableExpected(want, tparams) == 1) List.cons(want, List.empty()) else List.empty()
+  r = elaborateExpr(List.head(args), enums, funs, env, exp, tparams)
+  node = Expr.Adt(enumName, caseName, args, targs, span)
+  rest = elabAdtCtorArgsCont(node, elabExprOf(r), List.tail(args), List.tail(fields), enums, funs, env, tparams, en, enTp, subst, List.empty())
+} yield if (tyIsOk(elabResOf(r)) == 0) r else rest
+
+def elabAdtCtorArgsCont(node: Expr, first: Expr, args: List, fields: List, enums: List, funs: List, env: List, tparams: List, en: EnumDef, enTp: List, subst: List, acc: List): List =
+  if (List.isEmpty(args) == 1) elabPack(elabAdtRebuild(node, List.reverse(List.cons(first, acc))), tyOk(Type.Unit)) else for {
+  want = applySubst(resolveTypeIn(fieldTy(List.head(fields)), enums, funsImports(funs), enumModule(en), enTp), subst)
+  exp = if (usableExpected(want, tparams) == 1) List.cons(want, List.empty()) else List.empty()
+  r = elaborateExpr(List.head(args), enums, funs, env, exp, tparams)
+} yield if (tyIsOk(elabResOf(r)) == 0) r else elabAdtCtorArgsCont(node, first, List.tail(args), List.tail(fields), enums, funs, env, tparams, en, enTp, subst, List.cons(elabExprOf(r), acc))
+
+def elabAdtRebuild(node: Expr, args: List): Expr =
+  node match {
+    case Expr.Adt(enumName, caseName, oldArgs, typeArgs, span) => Expr.Adt(enumName, caseName, args, typeArgs, span)
+    case _ => node
+  }
+
+def elabMatch(scrut: Expr, arms: List, span: Span, enums: List, funs: List, env: List, expected: List, tparams: List): List =
+  for {
+    rs = elaborateExpr(scrut, enums, funs, env, List.empty(), tparams)
+    st = inferExpr(elabExprOf(rs), enums, funs, env)
+    ra = elabArms(arms, tyVal(st), span, enums, funs, env, expected, tparams, List.empty())
+  } yield if (tyIsOk(elabResOf(rs)) == 0) rs else if (tyIsOk(st) == 0) elabPack(elabExprOf(rs), st) else if (tyIsOk(elabResOf(ra)) == 0) ra else elabPack(Expr.Match(elabExprOf(rs), elabListOf(ra), span), tyOk(Type.Unit))
+
+def elabArms(arms: List, st: Type, span: Span, enums: List, funs: List, env: List, expected: List, tparams: List, acc: List): List =
+  if (List.isEmpty(arms) == 1) List.cons(List.reverse(acc), List.cons(tyOk(Type.Unit), List.empty())) else elabArmOne(List.head(arms), List.tail(arms), st, span, enums, funs, env, expected, tparams, acc)
+
+def elabArmOne(arm: MatchArm, rest: List, st: Type, span: Span, enums: List, funs: List, env: List, expected: List, tparams: List, acc: List): List =
+  arm match {
+    case MatchArm.Arm(pat, body) => for {
+  pr = checkPattern(pat, st, enums)
+  pp = elabPattern(pat, st, span, enums, funs, tparams)
+  env2 = patternExtendEnv(pat, st, enums, env)
+  rb = elaborateExpr(body, enums, funs, env2, expected, tparams)
+} yield if (tyIsOk(pr) == 0) elabPack(Expr.Delay(dummySpan()), pr) else if (tyIsOk(elabResOf(pp)) == 0) pp else if (tyIsOk(elabResOf(rb)) == 0) rb else elabArms(rest, st, span, enums, funs, env, expected, tparams, List.cons(MatchArm.Arm(elabPatOf(pp), elabExprOf(rb)), acc))
+  }
+
+def patDummy(en: String, cn: String, binds: List): Pattern =
+  Pattern.Adt(en, cn, binds, List.empty())
+
+def elabPattern(pat: Pattern, st: Type, span: Span, enums: List, funs: List, tparams: List): List =
+  pat match {
+    case Pattern.Wild => List.cons(pat, List.cons(tyOk(Type.Unit), List.empty()))
+    case Pattern.Adt(enumName, caseName, binds, typeArgs) => elabPatternAdt(enumName, caseName, binds, st, span, enums, funs, tparams)
+  }
+
+def elabPatternAdt(enumName: String, caseName: String, binds: List, st: Type, span: Span, enums: List, funs: List, tparams: List): List =
+  for {
+    e = findEnum(enums, enumName)
+    enTp = if (List.isEmpty(e) == 1) List.empty() else enumTParams(List.head(e))
+    targs2 = if (List.isEmpty(enTp) == 1) List.empty() else elabPatTargs(st, enumName)
+    bad = if (List.isEmpty(enTp) == 1) 0 else elabPatBad(st, enumName)
+    cr = checkTargs(enumName, caseName, targs2, tparams, span)
+  } yield if (bad == 1) List.cons(patDummy(enumName, caseName, binds), List.cons(tyErr(str5("pattern ", enumName, ".", caseName, str3(" does not match scrutinee ", tyShow(st), ""))), List.empty())) else if (tyIsOk(cr) == 0) List.cons(patDummy(enumName, caseName, binds), List.cons(cr, List.empty())) else List.cons(Pattern.Adt(enumName, caseName, binds, targs2), List.cons(tyOk(Type.Unit), List.empty()))
+
+def elabPatTargs(st: Type, enumName: String): List =
+  if (tyIsApp(st) == 1) elabPatTargsApp(st, enumName) else List.empty()
+
+def elabPatTargsApp(st: Type, enumName: String): List =
+  if (streq(tyAppName(st), enumName) == 1) tyAppArgs(st) else List.empty()
+
+def elabPatBad(st: Type, enumName: String): Int =
+  if (tyIsApp(st) == 1) elabPatBadApp(st, enumName) else 1
+
+def elabPatBadApp(st: Type, enumName: String): Int =
+  if (streq(tyAppName(st), enumName) == 1) 0 else 1
+
+def elabCall(callee: String, args: List, span: Span, enums: List, funs: List, env: List, expected: List, tparams: List): List =
+  for {
+    hit = resolveFun(funsDefs(funs), funsImports(funs), callee, funsMod(funs))
+    unresolved = if (List.isEmpty(hit) == 1) 1 else if (resolveIsAmbiguous(hit) == 1) 1 else if (resolveIsPrivate(hit) == 1) 1 else 0
+    ra = elabExprList(args, enums, funs, env, tparams, List.empty())
+  } yield if (unresolved == 1) if (tyIsOk(elabResOf(ra)) == 0) ra else elabPack(Expr.Call(callee, elabListOf(ra), span), tyOk(Type.Unit)) else elabCallResolved(callee, resolvedDef(hit), args, span, enums, funs, env, tparams)
+
+def elabCallResolved(callee: String, d: Def, args: List, span: Span, enums: List, funs: List, env: List, tparams: List): List =
+  for {
+    dTp = defTypeParams(d)
+    us = elabUnifyCallArgs(args, defParams(d), dTp, enums, funs, env, defModule(d), List.empty())
+    node = Expr.Call(callee, args, span)
+  } yield if (List.len(args) == List.len(defParams(d))) if (tyIsOk(elabResOf(us)) == 0) elabPack(node, elabResOf(us)) else elabCallArgs(callee, args, span, enums, funs, env, tparams, d, defParams(d), dTp, List.head(us), List.empty()) else elabCallPlain(callee, args, span, enums, funs, env, tparams)
+
+def elabCallPlain(callee: String, args: List, span: Span, enums: List, funs: List, env: List, tparams: List): List =
+  for {
+    ra = elabExprList(args, enums, funs, env, tparams, List.empty())
+  } yield if (tyIsOk(elabResOf(ra)) == 0) ra else elabPack(Expr.Call(callee, elabListOf(ra), span), tyOk(Type.Unit))
+
+def elabUnifyCallArgs(args: List, params: List, dTp: List, enums: List, funs: List, env: List, defMod: String, subst: List): List =
+  if (List.isEmpty(args) == 1) List.cons(subst, List.cons(tyOk(Type.Unit), List.empty())) else if (List.isEmpty(params) == 1) List.cons(subst, List.cons(tyOk(Type.Unit), List.empty())) else for {
+  ar = inferExpr(List.head(args), enums, funs, env)
+  want = resolveTypeIn(paramTy(List.head(params)), enums, funsImports(funs), defMod, dTp)
+  us = unifyConstruct(want, tyVal(ar), subst)
+} yield if (tyIsOk(ar) == 0) elabUnifyCallArgs(List.tail(args), List.tail(params), dTp, enums, funs, env, defMod, subst) else if (List.isEmpty(us) == 1) List.cons(List.empty(), List.cons(tyErr(str4("type mismatch: expected ", tyShow(want), ", got ", tyShow(tyVal(ar)))), List.empty())) else elabUnifyCallArgs(List.tail(args), List.tail(params), dTp, enums, funs, env, defMod, List.head(us))
+
+def elabCallArgs(callee: String, args: List, span: Span, enums: List, funs: List, env: List, tparams: List, d: Def, params: List, dTp: List, subst: List, acc: List): List =
+  if (List.isEmpty(args) == 1) elabPack(Expr.Call(callee, List.reverse(acc), span), tyOk(Type.Unit)) else for {
+  want = applySubst(resolveTypeIn(paramTy(List.head(params)), enums, funsImports(funs), defModule(d), dTp), subst)
+  exp = if (usableExpected(want, tparams) == 1) List.cons(want, List.empty()) else List.empty()
+  r = elaborateExpr(List.head(args), enums, funs, env, exp, tparams)
+} yield if (tyIsOk(elabResOf(r)) == 0) r else elabCallArgs(callee, List.tail(args), span, enums, funs, env, tparams, d, List.tail(params), dTp, subst, List.cons(elabExprOf(r), acc))
+
+def substNodeTargs(e: Expr, subst: List): Expr =
+  e match {
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => Expr.Adt(enumName, caseName, substTargsList(args, subst, List.empty()), substTargsTypes(typeArgs, subst, List.empty()), span)
+    case Expr.Match(scrut, arms, span) => Expr.Match(substNodeTargs(scrut, subst), substTargsArms(arms, subst, List.empty()), span)
+    case Expr.If(cond, thenB, elseB, span) => Expr.If(substNodeTargs(cond, subst), substNodeTargs(thenB, subst), substNodeTargs(elseB, subst), span)
+    case Expr.Call(callee, args, span) => Expr.Call(callee, substTargsList(args, subst, List.empty()), span)
+    case Expr.Let(name, value, body, span) => Expr.Let(name, substNodeTargs(value, subst), substNodeTargs(body, subst), span)
+    case Expr.FlatMap(inner, param, body, span) => Expr.FlatMap(substNodeTargs(inner, subst), param, substNodeTargs(body, subst), span)
+    case Expr.Println(arg, span) => Expr.Println(substNodeTargs(arg, subst), span)
+    case Expr.Sleep(arg, span) => Expr.Sleep(substNodeTargs(arg, subst), span)
+    case Expr.Fail(arg, span) => Expr.Fail(substNodeTargs(arg, subst), span)
+    case Expr.Pure(arg, span) => Expr.Pure(substNodeTargs(arg, subst), span)
+    case Expr.Handle(inner, body, span) => Expr.Handle(substNodeTargs(inner, subst), substNodeTargs(body, subst), span)
+    case Expr.Attempt(inner, span) => Expr.Attempt(substNodeTargs(inner, subst), span)
+    case Expr.IoRace(left, right, span) => Expr.IoRace(substNodeTargs(left, subst), substNodeTargs(right, subst), span)
+    case Expr.IoBoth(left, right, span) => Expr.IoBoth(substNodeTargs(left, subst), substNodeTargs(right, subst), span)
+    case Expr.Field(base, field, span) => Expr.Field(substNodeTargs(base, subst), field, span)
+    case Expr.MethodCall(receiver, method, args, span) => Expr.MethodCall(substNodeTargs(receiver, subst), method, substTargsList(args, subst, List.empty()), span)
+    case Expr.ListLit(elems, span) => Expr.ListLit(substTargsList(elems, subst, List.empty()), span)
+    case Expr.Interp(parts, span) => Expr.Interp(substTargsParts(parts, subst, List.empty()), span)
+    case Expr.BinOp(op, left, right, span) => Expr.BinOp(op, substNodeTargs(left, subst), substNodeTargs(right, subst), span)
+    case Expr.Lambda(param, body, span) => Expr.Lambda(param, substNodeTargs(body, subst), span)
+    case _ => e
+  }
+
+def substTargsTypes(tys: List, subst: List, acc: List): List =
+  if (List.isEmpty(tys) == 1) List.reverse(acc) else substTargsTypes(List.tail(tys), subst, List.cons(applySubst(List.head(tys), subst), acc))
+
+def substTargsList(xs: List, subst: List, acc: List): List =
+  if (List.isEmpty(xs) == 1) List.reverse(acc) else substTargsList(List.tail(xs), subst, List.cons(substNodeTargs(List.head(xs), subst), acc))
+
+def substTargsArms(arms: List, subst: List, acc: List): List =
+  if (List.isEmpty(arms) == 1) List.reverse(acc) else substTargsArms(List.tail(arms), subst, List.cons(substTargsArm(List.head(arms), subst), acc))
+
+def substTargsArm(arm: MatchArm, subst: List): MatchArm =
+  arm match {
+    case MatchArm.Arm(pat, body) => MatchArm.Arm(substTargsPat(pat, subst), substNodeTargs(body, subst))
+  }
+
+def substTargsPat(pat: Pattern, subst: List): Pattern =
+  pat match {
+    case Pattern.Wild => pat
+    case Pattern.Adt(enumName, caseName, binds, typeArgs) => Pattern.Adt(enumName, caseName, binds, substTargsTypes(typeArgs, subst, List.empty()))
+  }
+
+def substTargsParts(parts: List, subst: List, acc: List): List =
+  if (List.isEmpty(parts) == 1) List.reverse(acc) else substTargsParts(List.tail(parts), subst, List.cons(substTargsPart(List.head(parts), subst), acc))
+
+def substTargsPart(part: InterpPart, subst: List): InterpPart =
+  part match {
+    case InterpPart.Lit(text) => part
+    case InterpPart.Hole(expr) => InterpPart.Hole(substNodeTargs(expr, subst))
+  }
+
 def monomorphizeProg(prog: Prog): Prog =
   for {
     enums = progEnums(prog)
@@ -1188,7 +1726,253 @@ def monomorphizeProg(prog: Prog): Prog =
     specs2 = monoS(mainPack)
     kept = dropGenericDefs(defs2, List.empty())
     outDefs = appendMissingSpecs(kept, specs2)
-  } yield mkProgFull(progPkg(prog), enums, outDefs, main2, progMainModule(prog), imports, progTraits(prog), progImpls(prog))
+  } yield specializeEnumsProg(mkProgFull(progPkg(prog), enums, outDefs, main2, progMainModule(prog), imports, progTraits(prog), progImpls(prog)))
+
+def collectAppsInType(ty: Type, acc: List): List =
+  ty match {
+    case Type.App(id, args) => collectAppsInArgs(args, List.cons(ty, acc))
+    case Type.Io(inner) => collectAppsInType(inner, acc)
+    case _ => acc
+  }
+
+def collectAppsInArgs(args: List, acc: List): List =
+  if (List.isEmpty(args) == 1) acc else collectAppsInArgs(List.tail(args), collectAppsInType(List.head(args), acc))
+
+def collectNodeTargs(e: Expr, acc: List): List =
+  e match {
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => collectNodeTargsList(args, if (List.isEmpty(typeArgs) == 1) acc else collectAppsInArgs(typeArgs, List.cons(Type.App(enumName, typeArgs), acc)))
+    case Expr.Match(scrut, arms, span) => collectNodeTargsArms(arms, collectNodeTargs(scrut, acc))
+    case Expr.If(cond, thenB, elseB, span) => collectNodeTargs(elseB, collectNodeTargs(thenB, collectNodeTargs(cond, acc)))
+    case Expr.Call(callee, args, span) => collectNodeTargsList(args, acc)
+    case Expr.Let(name, value, body, span) => collectNodeTargs(body, collectNodeTargs(value, acc))
+    case Expr.FlatMap(inner, param, body, span) => collectNodeTargs(body, collectNodeTargs(inner, acc))
+    case Expr.Println(arg, span) => collectNodeTargs(arg, acc)
+    case Expr.Sleep(arg, span) => collectNodeTargs(arg, acc)
+    case Expr.Fail(arg, span) => collectNodeTargs(arg, acc)
+    case Expr.Pure(arg, span) => collectNodeTargs(arg, acc)
+    case Expr.Attempt(inner, span) => collectNodeTargs(inner, acc)
+    case Expr.Handle(inner, body, span) => collectNodeTargs(body, collectNodeTargs(inner, acc))
+    case Expr.IoRace(left, right, span) => collectNodeTargs(right, collectNodeTargs(left, acc))
+    case Expr.IoBoth(left, right, span) => collectNodeTargs(right, collectNodeTargs(left, acc))
+    case Expr.Field(base, field, span) => collectNodeTargs(base, acc)
+    case Expr.MethodCall(receiver, method, args, span) => collectNodeTargsList(args, collectNodeTargs(receiver, acc))
+    case Expr.ListLit(elems, span) => collectNodeTargsList(elems, acc)
+    case Expr.Interp(parts, span) => collectNodeTargsParts(parts, acc)
+    case Expr.BinOp(op, left, right, span) => collectNodeTargs(right, collectNodeTargs(left, acc))
+    case Expr.Lambda(param, body, span) => collectNodeTargs(body, acc)
+    case _ => acc
+  }
+
+def collectNodeTargsList(xs: List, acc: List): List =
+  if (List.isEmpty(xs) == 1) acc else collectNodeTargsList(List.tail(xs), collectNodeTargs(List.head(xs), acc))
+
+def collectNodeTargsArms(arms: List, acc: List): List =
+  if (List.isEmpty(arms) == 1) acc else collectNodeTargsArms(List.tail(arms), collectNodeTargsArm(List.head(arms), acc))
+
+def collectNodeTargsArm(arm: MatchArm, acc: List): List =
+  arm match {
+    case MatchArm.Arm(pat, body) => collectNodeTargs(body, collectNodeTargsPat(pat, acc))
+  }
+
+def collectNodeTargsPat(pat: Pattern, acc: List): List =
+  pat match {
+    case Pattern.Wild => acc
+    case Pattern.Adt(enumName, caseName, binds, typeArgs) => if (List.isEmpty(typeArgs) == 1) acc else collectAppsInArgs(typeArgs, List.cons(Type.App(enumName, typeArgs), acc))
+  }
+
+def collectNodeTargsParts(parts: List, acc: List): List =
+  if (List.isEmpty(parts) == 1) acc else collectNodeTargsParts(List.tail(parts), collectNodeTargsPart(List.head(parts), acc))
+
+def collectNodeTargsPart(part: InterpPart, acc: List): List =
+  part match {
+    case InterpPart.Lit(text) => acc
+    case InterpPart.Hole(expr) => collectNodeTargs(expr, acc)
+  }
+
+def specCollectProg(defs: List, main: Expr, enums: List, imports: List): List =
+  collectNodeTargs(main, specCollectDefs(defs, enums, imports, List.empty()))
+
+def specCollectDefs(defs: List, enums: List, imports: List, acc: List): List =
+  if (List.isEmpty(defs) == 1) acc else specCollectDefs(List.tail(defs), enums, imports, specCollectDef(List.head(defs), enums, imports, acc))
+
+def specCollectDef(d: Def, enums: List, imports: List, acc: List): List =
+  collectNodeTargs(defBody(d), collectAppsInType(resolveType(declRet(d), enums, imports, defModule(d)), specCollectParams(defParams(d), enums, imports, defModule(d), acc)))
+
+def specCollectParams(params: List, enums: List, imports: List, mod: String, acc: List): List =
+  if (List.isEmpty(params) == 1) acc else specCollectParams(List.tail(params), enums, imports, mod, collectAppsInType(resolveType(paramTy(List.head(params)), enums, imports, mod), acc))
+
+def monoEnumName(en: EnumDef, args: List): String =
+  str3("__gen_", enumName(en), typeMangleArgs(args, ""))
+
+def cloneLookup(clones: List, id: String, args: List): List =
+  if (List.isEmpty(clones) == 1) List.empty() else cloneLookupOne(List.head(clones), List.tail(clones), id, args)
+
+def cloneLookupOne(ent: List, rest: List, id: String, args: List): List =
+  if (streq(List.head(ent), id) == 1) if (tyEqArgs(List.head(List.tail(ent)), args) == 1) List.tail(List.tail(ent)) else cloneLookup(rest, id, args) else cloneLookup(rest, id, args)
+
+def specCloneLoop(insts: List, i: Int, clones: List, cloneDefs: List, enums: List, imports: List): List =
+  if (i >= List.len(insts)) List.cons(clones, List.cons(List.reverse(cloneDefs), List.empty())) else specCloneOne(List.at(insts, i), insts, i, clones, cloneDefs, enums, imports)
+
+def specCloneOne(inst: Type, insts: List, i: Int, clones: List, cloneDefs: List, enums: List, imports: List): List =
+  for {
+    id = tyAppName(inst)
+    args = tyAppArgs(inst)
+    hit = cloneLookup(clones, id, args)
+  } yield if (List.isEmpty(hit) == 0) specCloneLoop(insts, i + 1, clones, cloneDefs, enums, imports) else if (monoTypeOkArgs(args) == 0) specCloneLoop(insts, i + 1, clones, cloneDefs, enums, imports) else specCloneEnum(id, args, insts, i, clones, cloneDefs, enums, imports)
+
+def specCloneEnum(id: String, args: List, insts: List, i: Int, clones: List, cloneDefs: List, enums: List, imports: List): List =
+  for {
+    e = findEnum(enums, id)
+  } yield if (List.isEmpty(e) == 1) specCloneLoop(insts, i + 1, clones, cloneDefs, enums, imports) else specCloneEnum2(id, args, insts, i, clones, cloneDefs, enums, imports, List.head(e))
+
+def specCloneEnum2(id: String, args: List, insts: List, i: Int, clones: List, cloneDefs: List, enums: List, imports: List, en: EnumDef): List =
+  for {
+    tparams = enumTParams(en)
+    subst = zipSubst(tparams, args, List.empty())
+    mangled = monoEnumName(en, args)
+    cloneId = qualKey(enumModule(en), mangled)
+    cp = specCloneCases(enumCases(en), enums, imports, enumModule(en), tparams, subst, List.empty(), List.empty())
+    cases2 = List.head(cp)
+    extra = List.head(List.tail(cp))
+    cloneDef = if (enumIsRecord(en) == 1) EnumDef.Record(enumModule(en), mangled, caseFields(List.head(cases2)), List.empty()) else EnumDef.Enum(enumModule(en), mangled, cases2, List.empty())
+    recCase = if (enumIsRecord(en) == 1) mangled else ""
+    ent = List.cons(id, List.cons(args, List.cons(cloneId, List.cons(recCase, List.empty()))))
+  } yield specCloneLoop(listConcat(insts, extra), i + 1, List.cons(ent, clones), List.cons(cloneDef, cloneDefs), enums, imports)
+
+def zipSubst(tparams: List, args: List, acc: List): List =
+  if (List.isEmpty(tparams) == 1) acc else zipSubst(List.tail(tparams), List.tail(args), substPut(acc, List.head(tparams), List.head(args)))
+
+def specCloneCases(cases: List, enums: List, imports: List, enumMod: String, tparams: List, subst: List, acc: List, extra: List): List =
+  if (List.isEmpty(cases) == 1) List.cons(List.reverse(acc), List.cons(extra, List.empty())) else for {
+  c = List.head(cases)
+  fp = specCloneFields(caseFields(c), enums, imports, enumMod, tparams, subst, List.empty(), extra)
+} yield specCloneCases(List.tail(cases), enums, imports, enumMod, tparams, subst, List.cons(EnumCase.Case(caseName(c), List.head(fp)), acc), List.head(List.tail(fp)))
+
+def specCloneFields(fields: List, enums: List, imports: List, enumMod: String, tparams: List, subst: List, acc: List, extra: List): List =
+  if (List.isEmpty(fields) == 1) List.cons(List.reverse(acc), List.cons(extra, List.empty())) else for {
+  f = List.head(fields)
+  s = applySubst(resolveTypeIn(fieldTy(f), enums, imports, enumMod, tparams), subst)
+} yield specCloneFields(List.tail(fields), enums, imports, enumMod, tparams, subst, List.cons(EnumField.Field(fieldName(f), s), acc), collectAppsInType(s, extra))
+
+def specializeEnumsProg(prog: Prog): Prog =
+  for {
+    enums = progEnums(prog)
+    imports = progImports(prog)
+    insts = specCollectProg(progDefs(prog), progMain(prog), enums, imports)
+    sp = specCloneLoop(insts, 0, List.empty(), List.empty(), enums, imports)
+    clones = List.head(sp)
+    cloneDefs = List.head(List.tail(sp))
+  } yield if (List.isEmpty(clones) == 1) prog else specApply(prog, clones, cloneDefs, enums, imports)
+
+def specApply(prog: Prog, clones: List, cloneDefs: List, enums: List, imports: List): Prog =
+  for {
+    defs2 = specConcretizeDefs(progDefs(prog), clones, enums, imports, List.empty())
+    main2 = rewriteEnumRefs(progMain(prog), clones)
+    cloneDefs2 = specConcretizeClones(cloneDefs, clones, List.empty())
+    enums2 = listConcat(nonGenericEnums(progEnums(prog), List.empty()), cloneDefs2)
+  } yield mkProgFull(progPkg(prog), enums2, defs2, main2, progMainModule(prog), progImports(prog), progTraits(prog), progImpls(prog))
+
+def nonGenericEnums(enums: List, acc: List): List =
+  if (List.isEmpty(enums) == 1) List.reverse(acc) else if (List.isEmpty(enumTParams(List.head(enums))) == 1) nonGenericEnums(List.tail(enums), List.cons(List.head(enums), acc)) else nonGenericEnums(List.tail(enums), acc)
+
+def specConcretizeDefs(defs: List, clones: List, enums: List, imports: List, acc: List): List =
+  if (List.isEmpty(defs) == 1) List.reverse(acc) else specConcretizeDefs(List.tail(defs), clones, enums, imports, List.cons(specConcretizeDef(List.head(defs), clones, enums, imports), acc))
+
+def specConcretizeDef(d: Def, clones: List, enums: List, imports: List): Def =
+  Def.Def(defName(d), specConcretizeParams(defParams(d), clones, enums, imports, defModule(d), List.empty()), concretizeType(resolveType(declRet(d), enums, imports, defModule(d)), clones), rewriteEnumRefs(defBody(d), clones), defModule(d), defIsPrivate(d), defTypeParams(d))
+
+def specConcretizeParams(params: List, clones: List, enums: List, imports: List, mod: String, acc: List): List =
+  if (List.isEmpty(params) == 1) List.reverse(acc) else specConcretizeParams(List.tail(params), clones, enums, imports, mod, List.cons(Param.Param(paramName(List.head(params)), concretizeType(resolveType(paramTy(List.head(params)), enums, imports, mod), clones)), acc))
+
+def specConcretizeClones(cloneDefs: List, clones: List, acc: List): List =
+  if (List.isEmpty(cloneDefs) == 1) List.reverse(acc) else specConcretizeClones(List.tail(cloneDefs), clones, List.cons(specConcretizeClone(List.head(cloneDefs), clones), acc))
+
+def specConcretizeClone(e: EnumDef, clones: List): EnumDef =
+  e match {
+    case EnumDef.Enum(module, name, cases, tparams) => EnumDef.Enum(module, name, specConcretizeCases(cases, clones, List.empty()), tparams)
+    case EnumDef.Record(module, name, fields, tparams) => EnumDef.Record(module, name, specConcretizeFields(fields, clones, List.empty()), tparams)
+  }
+
+def specConcretizeCases(cases: List, clones: List, acc: List): List =
+  if (List.isEmpty(cases) == 1) List.reverse(acc) else specConcretizeCases(List.tail(cases), clones, List.cons(EnumCase.Case(caseName(List.head(cases)), specConcretizeFields(caseFields(List.head(cases)), clones, List.empty())), acc))
+
+def specConcretizeFields(fields: List, clones: List, acc: List): List =
+  if (List.isEmpty(fields) == 1) List.reverse(acc) else specConcretizeFields(List.tail(fields), clones, List.cons(EnumField.Field(fieldName(List.head(fields)), concretizeType(fieldTy(List.head(fields)), clones)), acc))
+
+def concretizeType(ty: Type, clones: List): Type =
+  ty match {
+    case Type.App(id, args) => concretizeApp(id, args, clones)
+    case Type.Io(inner) => Type.Io(concretizeType(inner, clones))
+    case _ => ty
+  }
+
+def concretizeApp(id: String, args: List, clones: List): Type =
+  for {
+    hit = cloneLookup(clones, id, args)
+  } yield if (List.isEmpty(hit) == 1) Type.App(id, args) else Type.Adt(List.head(hit))
+
+def rewriteEnumRefs(e: Expr, clones: List): Expr =
+  e match {
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => rewriteAdtRef(enumName, caseName, rewriteRefsList(args, clones, List.empty()), typeArgs, span, clones)
+    case Expr.Match(scrut, arms, span) => Expr.Match(rewriteEnumRefs(scrut, clones), rewriteRefsArms(arms, clones, List.empty()), span)
+    case Expr.If(cond, thenB, elseB, span) => Expr.If(rewriteEnumRefs(cond, clones), rewriteEnumRefs(thenB, clones), rewriteEnumRefs(elseB, clones), span)
+    case Expr.Call(callee, args, span) => Expr.Call(callee, rewriteRefsList(args, clones, List.empty()), span)
+    case Expr.Let(name, value, body, span) => Expr.Let(name, rewriteEnumRefs(value, clones), rewriteEnumRefs(body, clones), span)
+    case Expr.FlatMap(inner, param, body, span) => Expr.FlatMap(rewriteEnumRefs(inner, clones), param, rewriteEnumRefs(body, clones), span)
+    case Expr.Println(arg, span) => Expr.Println(rewriteEnumRefs(arg, clones), span)
+    case Expr.Sleep(arg, span) => Expr.Sleep(rewriteEnumRefs(arg, clones), span)
+    case Expr.Fail(arg, span) => Expr.Fail(rewriteEnumRefs(arg, clones), span)
+    case Expr.Pure(arg, span) => Expr.Pure(rewriteEnumRefs(arg, clones), span)
+    case Expr.Handle(inner, body, span) => Expr.Handle(rewriteEnumRefs(inner, clones), rewriteEnumRefs(body, clones), span)
+    case Expr.Attempt(inner, span) => Expr.Attempt(rewriteEnumRefs(inner, clones), span)
+    case Expr.IoRace(left, right, span) => Expr.IoRace(rewriteEnumRefs(left, clones), rewriteEnumRefs(right, clones), span)
+    case Expr.IoBoth(left, right, span) => Expr.IoBoth(rewriteEnumRefs(left, clones), rewriteEnumRefs(right, clones), span)
+    case Expr.Field(base, field, span) => Expr.Field(rewriteEnumRefs(base, clones), field, span)
+    case Expr.MethodCall(receiver, method, args, span) => Expr.MethodCall(rewriteEnumRefs(receiver, clones), method, rewriteRefsList(args, clones, List.empty()), span)
+    case Expr.ListLit(elems, span) => Expr.ListLit(rewriteRefsList(elems, clones, List.empty()), span)
+    case Expr.Interp(parts, span) => Expr.Interp(rewriteRefsParts(parts, clones, List.empty()), span)
+    case Expr.BinOp(op, left, right, span) => Expr.BinOp(op, rewriteEnumRefs(left, clones), rewriteEnumRefs(right, clones), span)
+    case Expr.Lambda(param, body, span) => Expr.Lambda(param, rewriteEnumRefs(body, clones), span)
+    case _ => e
+  }
+
+def rewriteAdtRef(enumName: String, caseName: String, args: List, typeArgs: List, span: Span, clones: List): Expr =
+  if (List.isEmpty(typeArgs) == 1) Expr.Adt(enumName, caseName, args, typeArgs, span) else for {
+  hit = cloneLookup(clones, enumName, typeArgs)
+  cn = if (List.isEmpty(hit) == 1) caseName else if (Str.len(List.head(List.tail(hit))) == 0) caseName else List.head(List.tail(hit))
+  en2 = if (List.isEmpty(hit) == 1) enumName else List.head(hit)
+} yield if (List.isEmpty(hit) == 1) Expr.Adt(enumName, caseName, args, typeArgs, span) else Expr.Adt(en2, cn, args, List.empty(), span)
+
+def rewriteRefsList(xs: List, clones: List, acc: List): List =
+  if (List.isEmpty(xs) == 1) List.reverse(acc) else rewriteRefsList(List.tail(xs), clones, List.cons(rewriteEnumRefs(List.head(xs), clones), acc))
+
+def rewriteRefsArms(arms: List, clones: List, acc: List): List =
+  if (List.isEmpty(arms) == 1) List.reverse(acc) else rewriteRefsArms(List.tail(arms), clones, List.cons(rewriteRefsArm(List.head(arms), clones), acc))
+
+def rewriteRefsArm(arm: MatchArm, clones: List): MatchArm =
+  arm match {
+    case MatchArm.Arm(pat, body) => MatchArm.Arm(rewriteRefsPat(pat, clones), rewriteEnumRefs(body, clones))
+  }
+
+def rewriteRefsPat(pat: Pattern, clones: List): Pattern =
+  pat match {
+    case Pattern.Wild => pat
+    case Pattern.Adt(enumName, caseName, binds, typeArgs) => rewriteRefsPatAdt(enumName, caseName, binds, typeArgs, clones)
+  }
+
+def rewriteRefsPatAdt(enumName: String, caseName: String, binds: List, typeArgs: List, clones: List): Pattern =
+  if (List.isEmpty(typeArgs) == 1) Pattern.Adt(enumName, caseName, binds, typeArgs) else for {
+  hit = cloneLookup(clones, enumName, typeArgs)
+} yield if (List.isEmpty(hit) == 1) Pattern.Adt(enumName, caseName, binds, typeArgs) else Pattern.Adt(List.head(hit), caseName, binds, List.empty())
+
+def rewriteRefsParts(parts: List, clones: List, acc: List): List =
+  if (List.isEmpty(parts) == 1) List.reverse(acc) else rewriteRefsParts(List.tail(parts), clones, List.cons(rewriteRefsPart(List.head(parts), clones), acc))
+
+def rewriteRefsPart(part: InterpPart, clones: List): InterpPart =
+  part match {
+    case InterpPart.Lit(text) => part
+    case InterpPart.Hole(expr) => InterpPart.Hole(rewriteEnumRefs(expr, clones))
+  }
 
 def monoPackDefs(defs: List, specs: List): List =
   List.cons(defs, List.cons(specs, List.empty()))
@@ -1226,7 +2010,7 @@ def monoExpr(e: Expr, enums: List, funs: List, env: List, specs: List): List =
     case Expr.IoRace(left, right, span) => monoBinary(left, right, span, enums, funs, env, specs, 2)
     case Expr.IoBoth(left, right, span) => monoBinary(left, right, span, enums, funs, env, specs, 3)
     case Expr.ListLit(elems, span) => monoListLit(elems, span, enums, funs, env, specs)
-    case Expr.Adt(enumName, caseName, args, span) => monoAdt(enumName, caseName, args, span, enums, funs, env, specs)
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => monoAdt(enumName, caseName, args, typeArgs, span, enums, funs, env, specs)
     case Expr.MethodCall(receiver, method, args, span) => monoMethod(receiver, method, args, span, enums, funs, env, specs)
     case Expr.Field(base, field, span) => monoField(base, field, span, enums, funs, env, specs)
     case Expr.Lambda(param, body, span) => monoLambda(param, body, span, enums, funs, env, specs)
@@ -1263,16 +2047,16 @@ def monoIf(cond: Expr, thenB: Expr, elseB: Expr, span: Span, enums: List, funs: 
 
 def monoLet(name: String, value: Expr, body: Expr, span: Span, enums: List, funs: List, env: List, specs: List): List =
   for {
+    vr = inferExpr(value, enums, funs, env)
     vp = monoExpr(value, enums, funs, env, specs)
-    vr = inferExpr(monoE(vp), enums, funs, env)
     env2 = if (tyIsOk(vr) == 1) tyEnvPut(env, name, tyVal(vr)) else env
     bp = monoExpr(body, enums, funs, env2, monoS(vp))
   } yield monoPack(Expr.Let(name, monoE(vp), monoE(bp), span), monoS(bp))
 
 def monoFlatMap(inner: Expr, param: String, body: Expr, span: Span, enums: List, funs: List, env: List, specs: List): List =
   for {
+    ir = inferExpr(inner, enums, funs, env)
     ip = monoExpr(inner, enums, funs, env, specs)
-    ir = inferExpr(monoE(ip), enums, funs, env)
     env2 = if (tyIsOk(ir) == 0) env else if (tyIsIo(tyVal(ir)) == 0) env else if (Str.len(param) == 0) env else tyEnvPut(env, param, tyIoInner(tyVal(ir)))
     bp = monoExpr(body, enums, funs, env2, monoS(ip))
   } yield monoPack(Expr.FlatMap(monoE(ip), param, monoE(bp), span), monoS(bp))
@@ -1293,10 +2077,10 @@ def monoListLit(elems: List, span: Span, enums: List, funs: List, env: List, spe
     p = monoExprList(elems, enums, funs, env, specs, List.empty())
   } yield monoPack(Expr.ListLit(monoEList(p), span), monoSList(p))
 
-def monoAdt(enumName: String, caseName: String, args: List, span: Span, enums: List, funs: List, env: List, specs: List): List =
+def monoAdt(enumName: String, caseName: String, args: List, typeArgs: List, span: Span, enums: List, funs: List, env: List, specs: List): List =
   for {
     p = monoExprList(args, enums, funs, env, specs, List.empty())
-  } yield monoPack(Expr.Adt(enumName, caseName, monoEList(p), span), monoSList(p))
+  } yield monoPack(Expr.Adt(enumName, caseName, monoEList(p), typeArgs, span), monoSList(p))
 
 def monoMethod(receiver: Expr, method: String, args: List, span: Span, enums: List, funs: List, env: List, specs: List): List =
   for {
@@ -1306,8 +2090,9 @@ def monoMethod(receiver: Expr, method: String, args: List, span: Span, enums: Li
 
 def monoMatch(scrut: Expr, arms: List, span: Span, enums: List, funs: List, env: List, specs: List): List =
   for {
+    sr = inferExpr(scrut, enums, funs, env)
     sp = monoExpr(scrut, enums, funs, env, specs)
-    ap = monoArms(arms, enums, funs, env, monoS(sp), List.empty())
+    ap = monoArms(arms, tyVal(sr), enums, funs, env, monoS(sp), List.empty())
   } yield monoPack(Expr.Match(monoE(sp), monoEList(ap), span), monoSList(ap))
 
 def monoFor(binders: List, body: Expr, span: Span, enums: List, funs: List, env: List, specs: List): List =
@@ -1334,14 +2119,15 @@ def monoExprList(xs: List, enums: List, funs: List, env: List, specs: List, acc:
   p = monoExpr(List.head(xs), enums, funs, env, specs)
 } yield monoExprList(List.tail(xs), enums, funs, env, monoS(p), List.cons(monoE(p), acc))
 
-def monoArms(arms: List, enums: List, funs: List, env: List, specs: List, acc: List): List =
-  if (List.isEmpty(arms) == 1) monoPackList(List.reverse(acc), specs) else monoArmsOne(List.head(arms), List.tail(arms), enums, funs, env, specs, acc)
+def monoArms(arms: List, st: Type, enums: List, funs: List, env: List, specs: List, acc: List): List =
+  if (List.isEmpty(arms) == 1) monoPackList(List.reverse(acc), specs) else monoArmsOne(List.head(arms), List.tail(arms), st, enums, funs, env, specs, acc)
 
-def monoArmsOne(arm: MatchArm, rest: List, enums: List, funs: List, env: List, specs: List, acc: List): List =
+def monoArmsOne(arm: MatchArm, rest: List, st: Type, enums: List, funs: List, env: List, specs: List, acc: List): List =
   arm match {
     case MatchArm.Arm(pat, body) => for {
-  p = monoExpr(body, enums, funs, env, specs)
-} yield monoArms(rest, enums, funs, env, monoS(p), List.cons(MatchArm.Arm(pat, monoE(p)), acc))
+  env2 = patternExtendEnv(pat, st, enums, env)
+  p = monoExpr(body, enums, funs, env2, specs)
+} yield monoArms(rest, st, enums, funs, env, monoS(p), List.cons(MatchArm.Arm(pat, monoE(p)), acc))
   }
 
 def monoInterpParts(parts: List, enums: List, funs: List, env: List, specs: List, acc: List): List =
@@ -1357,20 +2143,26 @@ def monoInterpPartOne(part: InterpPart, rest: List, enums: List, funs: List, env
 
 def monoCall(callee: String, args: List, span: Span, enums: List, funs: List, env: List, specs: List): List =
   for {
+    hit = resolveFun(funsDefs(funs), funsImports(funs), callee, funsMod(funs))
+    origTys = monoCallOrigTys(hit, args, enums, funs, env)
     ap = monoExprList(args, enums, funs, env, specs, List.empty())
     args2 = monoEList(ap)
     specs2 = monoSList(ap)
-    hit = resolveFun(funsDefs(funs), funsImports(funs), callee, funsMod(funs))
-  } yield if (List.isEmpty(hit) == 1) monoPack(Expr.Call(callee, args2, span), specs2) else if (resolveIsAmbiguous(hit) == 1) monoPack(Expr.Call(callee, args2, span), specs2) else if (resolveIsPrivate(hit) == 1) monoPack(Expr.Call(callee, args2, span), specs2) else monoCallResolved(callee, resolvedDef(hit), args2, span, enums, funs, env, specs2)
+  } yield if (List.isEmpty(hit) == 1) monoPack(Expr.Call(callee, args2, span), specs2) else if (resolveIsAmbiguous(hit) == 1) monoPack(Expr.Call(callee, args2, span), specs2) else if (resolveIsPrivate(hit) == 1) monoPack(Expr.Call(callee, args2, span), specs2) else monoCallResolved(callee, resolvedDef(hit), args2, origTys, span, enums, funs, env, specs2)
 
-def monoCallResolved(callee: String, d: Def, args: List, span: Span, enums: List, funs: List, env: List, specs: List): List =
+def monoCallOrigTys(hit: List, args: List, enums: List, funs: List, env: List): List =
+  if (List.isEmpty(hit) == 1) List.empty() else if (resolveIsAmbiguous(hit) == 1) List.empty() else if (resolveIsPrivate(hit) == 1) List.empty() else monoCallOrigTys2(resolvedDef(hit), args, enums, funs, env)
+
+def monoCallOrigTys2(d: Def, args: List, enums: List, funs: List, env: List): List =
+  if (List.isEmpty(defTypeParams(d)) == 1) List.empty() else inferArgTys(args, enums, funs, env, List.empty())
+
+def monoCallResolved(callee: String, d: Def, args: List, origTys: List, span: Span, enums: List, funs: List, env: List, specs: List): List =
   for {
     tparams = defTypeParams(d)
-  } yield if (List.isEmpty(tparams) == 1) monoPack(Expr.Call(callee, args, span), specs) else monoCallGeneric(d, args, span, enums, funs, env, specs, tparams)
+  } yield if (List.isEmpty(tparams) == 1) monoPack(Expr.Call(callee, args, span), specs) else monoCallGeneric(d, args, origTys, span, enums, funs, env, specs, tparams)
 
-def monoCallGeneric(d: Def, args: List, span: Span, enums: List, funs: List, env: List, specs: List, tparams: List): List =
+def monoCallGeneric(d: Def, args: List, argTys: List, span: Span, enums: List, funs: List, env: List, specs: List, tparams: List): List =
   for {
-    argTys = inferArgTys(args, enums, funs, env, List.empty())
     substP = unifyParams(defParams(d), argTys, enums, funsImports(funs), defModule(d), tparams, List.empty(), 0)
   } yield if (List.isEmpty(substP) == 1) monoPack(Expr.Call(defName(d), args, span), specs) else monoCallGenericOk(d, args, span, enums, funsImports(funs), specs, tparams, List.head(substP))
 
@@ -1388,6 +2180,6 @@ def unifyParams(params: List, argTys: List, enums: List, imports: List, mod: Str
 def monoCallGenericOk(d: Def, args: List, span: Span, enums: List, imports: List, specs: List, tparams: List, subst: List): List =
   for {
     mangled = monoDefName(defName(d), subst, tparams)
-    specs2 = if (findSpecByName(specs, mangled) == 1) specs else List.cons(Def.Def(mangled, specializeParams(defParams(d), enums, imports, defModule(d), tparams, subst, List.empty()), applySubst(resolveTypeIn(declRet(d), enums, imports, defModule(d), tparams), subst), defBody(d), defModule(d), defIsPrivate(d), List.empty()), specs)
+    specs2 = if (findSpecByName(specs, mangled) == 1) specs else List.cons(Def.Def(mangled, specializeParams(defParams(d), enums, imports, defModule(d), tparams, subst, List.empty()), applySubst(resolveTypeIn(declRet(d), enums, imports, defModule(d), tparams), subst), substNodeTargs(defBody(d), subst), defModule(d), defIsPrivate(d), List.empty()), specs)
   } yield monoPack(Expr.Call(mangled, args, span), specs2)
 

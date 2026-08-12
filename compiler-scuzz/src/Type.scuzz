@@ -8,6 +8,7 @@ enum Type:
   case List
   case Io(inner: Type)
   case Adt(name: String)
+  case App(name: String, args: List)
   case Var(name: String)
   case Opaque(name: String)
 
@@ -28,9 +29,16 @@ def tyShow(t: Type): String =
     case Type.List => "List"
     case Type.Io(inner) => str3("IO[", tyShow(inner), "]")
     case Type.Adt(name) => Str.concat("Adt:", name)
+    case Type.App(name, args) => str4("App:", name, "[", tyShowArgs(args))
     case Type.Var(name) => Str.concat("Var:", name)
     case Type.Opaque(name) => Str.concat("Opaque:", name)
   }
+
+def tyShowArgs(args: List): String =
+  if (List.isEmpty(args) == 1) "]" else Str.concat(tyShow(List.head(args)), tyShowArgsCont(List.tail(args)))
+
+def tyShowArgsCont(rest: List): String =
+  if (List.isEmpty(rest) == 1) "]" else str3(",", tyShow(List.head(rest)), tyShowArgsCont(List.tail(rest)))
 
 def tyPretty(t: Type): String =
   t match {
@@ -41,9 +49,16 @@ def tyPretty(t: Type): String =
     case Type.List => "List"
     case Type.Io(inner) => str3("IO[", tyPretty(inner), "]")
     case Type.Adt(name) => name
+    case Type.App(name, args) => str3(name, "[", tyPrettyArgs(args))
     case Type.Var(name) => name
     case Type.Opaque(name) => name
   }
+
+def tyPrettyArgs(args: List): String =
+  if (List.isEmpty(args) == 1) "]" else Str.concat(tyPretty(List.head(args)), tyPrettyArgsCont(List.tail(args)))
+
+def tyPrettyArgsCont(rest: List): String =
+  if (List.isEmpty(rest) == 1) "]" else str3(", ", tyPretty(List.head(rest)), tyPrettyArgsCont(List.tail(rest)))
 
 def tyEq(a: Type, b: Type): Int =
   a match {
@@ -54,9 +69,22 @@ def tyEq(a: Type, b: Type): Int =
     case Type.List => tyEqList(b)
     case Type.Io(ia) => tyEqIo(ia, b)
     case Type.Adt(na) => tyEqAdt(na, b)
+    case Type.App(na, aa) => tyEqApp(na, aa, b)
     case Type.Var(na) => tyEqVar(na, b)
     case Type.Opaque(na) => tyEqOpaque(na, b)
   }
+
+def tyEqApp(na: String, aa: List, b: Type): Int =
+  b match {
+    case Type.App(nb, ab) => if (streq(na, nb) == 1) tyEqArgs(aa, ab) else 0
+    case _ => 0
+  }
+
+def tyEqArgs(aa: List, ab: List): Int =
+  if (List.isEmpty(aa) == 1) List.isEmpty(ab) else tyEqArgsCont(aa, ab)
+
+def tyEqArgsCont(aa: List, ab: List): Int =
+  if (List.isEmpty(ab) == 1) 0 else if (tyEq(List.head(aa), List.head(ab)) == 1) tyEqArgs(List.tail(aa), List.tail(ab)) else 0
 
 def tyEqUnit(b: Type): Int =
   b match {
@@ -120,8 +148,21 @@ def typesCompatCont(a: Type, b: Type): Int =
     case Type.Bool => typesCompatBool(b)
     case Type.Int => typesCompatInt(b)
     case Type.Io(ia) => typesCompatIo(b)
+    case Type.App(na, aa) => typesCompatApp(na, aa, b)
     case _ => 0
   }
+
+def typesCompatApp(na: String, aa: List, b: Type): Int =
+  b match {
+    case Type.App(nb, ab) => if (streq(na, nb) == 1) typesCompatArgs(aa, ab) else 0
+    case _ => 0
+  }
+
+def typesCompatArgs(aa: List, ab: List): Int =
+  if (List.isEmpty(aa) == 1) List.isEmpty(ab) else typesCompatArgsCont(aa, ab)
+
+def typesCompatArgsCont(aa: List, ab: List): Int =
+  if (List.isEmpty(ab) == 1) 0 else if (typesCompat(List.head(aa), List.head(ab)) == 1) typesCompatArgs(List.tail(aa), List.tail(ab)) else 0
 
 def typesCompatBool(b: Type): Int =
   b match {
@@ -170,6 +211,27 @@ def tyAdtName(t: Type): String =
 
 def tyMkAdt(name: String): Type =
   Type.Adt(name)
+
+def tyIsApp(t: Type): Int =
+  t match {
+    case Type.App(name, args) => 1
+    case _ => 0
+  }
+
+def tyAppName(t: Type): String =
+  t match {
+    case Type.App(name, args) => name
+    case _ => ""
+  }
+
+def tyAppArgs(t: Type): List =
+  t match {
+    case Type.App(name, args) => args
+    case _ => List.empty()
+  }
+
+def tyMkApp(name: String, args: List): Type =
+  Type.App(name, args)
 
 def tyIsOpaque(t: Type): Int =
   t match {

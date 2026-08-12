@@ -42,26 +42,32 @@ def progImpls(p: Prog): List =
 
 def enumModule(e: EnumDef): String =
   e match {
-    case EnumDef.Enum(module, name, cases) => module
-    case EnumDef.Record(module, name, fields) => module
+    case EnumDef.Enum(module, name, cases, tparams) => module
+    case EnumDef.Record(module, name, fields, tparams) => module
   }
 
 def enumName(e: EnumDef): String =
   e match {
-    case EnumDef.Enum(module, name, cases) => name
-    case EnumDef.Record(module, name, fields) => name
+    case EnumDef.Enum(module, name, cases, tparams) => name
+    case EnumDef.Record(module, name, fields, tparams) => name
   }
 
 def enumCases(e: EnumDef): List =
   e match {
-    case EnumDef.Enum(module, name, cases) => cases
-    case EnumDef.Record(module, name, fields) => List.cons(EnumCase.Case(name, fields), List.empty())
+    case EnumDef.Enum(module, name, cases, tparams) => cases
+    case EnumDef.Record(module, name, fields, tparams) => List.cons(EnumCase.Case(name, fields), List.empty())
+  }
+
+def enumTParams(e: EnumDef): List =
+  e match {
+    case EnumDef.Enum(module, name, cases, tparams) => tparams
+    case EnumDef.Record(module, name, fields, tparams) => tparams
   }
 
 def enumIsRecord(e: EnumDef): Int =
   e match {
-    case EnumDef.Enum(module, name, cases) => 0
-    case EnumDef.Record(module, name, fields) => 1
+    case EnumDef.Enum(module, name, cases, tparams) => 0
+    case EnumDef.Record(module, name, fields, tparams) => 1
   }
 
 def enumId(e: EnumDef): String =
@@ -175,7 +181,7 @@ def findWildArmOne(arm: MatchArm, rest: List): List =
 def findWildArmPat(pat: Pattern, arm: MatchArm, rest: List): List =
   pat match {
     case Pattern.Wild => List.cons(arm, List.empty())
-    case Pattern.Adt(enumName, caseName, binds) => findWildArm(rest)
+    case Pattern.Adt(enumName, caseName, binds, typeArgs) => findWildArm(rest)
   }
 
 def defName(d: Def): String =
@@ -363,7 +369,7 @@ def collectExpr(e: Expr, strs: List): List =
     case Expr.If(cond, thenB, elseB, span) => collectExpr(elseB, collectExpr(thenB, collectExpr(cond, strs)))
     case Expr.BinOp(op, left, right, span) => collectExpr(right, collectExpr(left, strs))
     case Expr.Call(callee, args, span) => collectArgs(args, strs)
-    case Expr.Adt(enumName, caseName, args, span) => collectArgs(args, strs)
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => collectArgs(args, strs)
     case Expr.IoRace(left, right, span) => collectExpr(right, collectExpr(left, strs))
     case Expr.IoBoth(left, right, span) => collectExpr(right, collectExpr(left, strs))
     case Expr.Lambda(param, body, span) => collectExpr(body, strs)
@@ -478,7 +484,7 @@ def emitExpr(e: Expr, strs: List, ctx: List, env: List, prefix: String, id: Int,
     case Expr.Attempt(inner, span) => emitAttempt(strs, inner, ctx, env, prefix, id, conts)
     case Expr.IoRace(left, right, span) => emitRaceBoth(strs, left, right, ctx, env, prefix, id, conts, "race")
     case Expr.IoBoth(left, right, span) => emitRaceBoth(strs, left, right, ctx, env, prefix, id, conts, "both")
-    case Expr.Adt(enumName, caseName, args, span) => emitAdt(strs, enumName, caseName, args, ctx, env, prefix, id, conts)
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => emitAdt(strs, enumName, caseName, args, ctx, env, prefix, id, conts)
     case Expr.Match(scrut, arms, span) => emitMatch(strs, scrut, arms, ctx, env, prefix, id, conts)
     case Expr.Lambda(param, body, span) => emitLambda(strs, param, body, ctx, env, prefix, id, conts)
     case Expr.Interp(parts, span) => emitInterp(strs, parts, ctx, env, prefix, id, conts)
@@ -633,7 +639,7 @@ def emitSwitchLabelOne(arm: MatchArm, rest: List, tags: List, prefix: String, mi
 def emitSwitchLabelPat(pat: Pattern, rest: List, tags: List, prefix: String, mid: Int, i: Int): String =
   pat match {
     case Pattern.Wild => emitSwitchLabels(rest, tags, prefix, mid, i + 1)
-    case Pattern.Adt(enumName, caseName, binds) => str5(" i32 ", tagLookup(tags, enumName, caseName), ", label %", str4(prefix, "_arm_", Str.fromInt(mid), str3("_", Str.fromInt(i), "")), emitSwitchLabels(rest, tags, prefix, mid, i + 1))
+    case Pattern.Adt(enumName, caseName, binds, typeArgs) => str5(" i32 ", tagLookup(tags, enumName, caseName), ", label %", str4(prefix, "_arm_", Str.fromInt(mid), str3("_", Str.fromInt(i), "")), emitSwitchLabels(rest, tags, prefix, mid, i + 1))
   }
 
 def emitMatch(strs: List, scrut: Expr, arms: List, ctx: List, env: List, prefix: String, id: Int, conts: String): Emit =
@@ -659,7 +665,7 @@ def emitMatchArmOne(arm: MatchArm, rest: List, strs: List, ctx: List, env: List,
 def emitMatchArmOnePat(pat: Pattern, arm: MatchArm, rest: List, strs: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, scrut: String, id: Int, conts: String, code: String, phi: String, kind: EmitKind, i: Int): Emit =
   pat match {
     case Pattern.Wild => emitMatchArms(strs, rest, ctx, env, prefix, mid, merge, scrut, id, conts, code, phi, kind, i + 1)
-    case Pattern.Adt(enumName, caseName, binds) => emitMatchArmBody(arm, rest, strs, ctx, env, prefix, mid, merge, scrut, id, conts, code, phi, kind, i)
+    case Pattern.Adt(enumName, caseName, binds, typeArgs) => emitMatchArmBody(arm, rest, strs, ctx, env, prefix, mid, merge, scrut, id, conts, code, phi, kind, i)
   }
 
 def emitMatchArmBody(arm: MatchArm, rest: List, strs: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, scrut: String, id: Int, conts: String, code: String, phi: String, kind: EmitKind, i: Int): Emit =
@@ -679,16 +685,22 @@ def emitPatBind(pat: Pattern, ctx: List, env: List, prefix: String, mid: Int, i:
 def emitPatBindPat(pat: Pattern, ctx: List, env: List, prefix: String, mid: Int, i: Int, scrut: String): List =
   pat match {
     case Pattern.Wild => pairSL("", env)
-    case Pattern.Adt(enumName, caseName, binds) => if (List.isEmpty(binds) == 1) pairSL("", env) else emitPatBindPayload(enumName, caseName, binds, ctx, env, prefix, mid, i, scrut)
+    case Pattern.Adt(enumName, caseName, binds, typeArgs) => if (List.isEmpty(binds) == 1) pairSL("", env) else emitPatBindPayload(enumName, caseName, binds, typeArgs, ctx, env, prefix, mid, i, scrut)
   }
 
-def emitPatBindPayload(enumName: String, caseName: String, binds: List, ctx: List, env: List, prefix: String, mid: Int, i: Int, scrut: String): List =
+def emitPatBindPayload(enumName: String, caseName: String, binds: List, typeArgs: List, ctx: List, env: List, prefix: String, mid: Int, i: Int, scrut: String): List =
   for {
     pl = str4(prefix, "_pl", Str.fromInt(mid), str3("_", Str.fromInt(i), ""))
     pty = payloadLookup(ctxPayloads(ctx), enumName, caseName)
-    tys = pty
+    tys = if (List.isEmpty(typeArgs) == 1) pty else overridePatTys(pty, typeArgs, 0, List.empty())
     code = str5("  %", pl, " = call ptr @sz_adt_payload(ptr ", scrut, ")\n")
   } yield if (List.len(binds) == 1) emitPatBindUnary(code, pl, List.head(binds), List.at(tys, 0), env, prefix, mid, i) else emitPatBindMulti(code, pl, binds, tys, env, prefix, mid, i, 0)
+
+def overridePatTys(tys: List, targs: List, i: Int, acc: List): List =
+  if (List.isEmpty(tys) == 1) List.reverse(acc) else overridePatTys(List.tail(tys), targs, i + 1, List.cons(patTyAt(List.head(tys), targs, i), acc))
+
+def patTyAt(ty: Type, targs: List, i: Int): Type =
+  if (i < List.len(targs)) List.at(targs, i) else ty
 
 def emitPatBindUnary(code: String, pl: String, bind: String, pty: Type, env: List, prefix: String, mid: Int, i: Int): List =
   for {
@@ -923,7 +935,7 @@ def emitMapLambdaMatch(e: Expr, strs: List, ctx: List, env: List, prefix: String
     case Expr.Var(name, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.Field(base, field, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.MethodCall(receiver, method, args, span) => mkS("", "null", EmitKind.Ptr, id, conts)
-    case Expr.Adt(enumName, caseName, args, span) => mkS("", "null", EmitKind.Ptr, id, conts)
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.Call(callee, args, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.BinOp(op, left, right, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.If(cond, thenB, elseB, span) => mkS("", "null", EmitKind.Ptr, id, conts)

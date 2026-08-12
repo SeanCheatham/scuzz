@@ -100,12 +100,12 @@ def prettyImplMethod(m: ImplMethod): String =
   }
 
 def prettyEnum(e: EnumDef): String =
-  if (enumIsRecord(e) == 1) prettyRecord(e) else str4("enum ", enumName(e), ":\n", prettyEnumCases(enumCases(e), ""))
+  if (enumIsRecord(e) == 1) prettyRecord(e) else str4("enum ", Str.concat(enumName(e), prettyTypeParams(enumTParams(e))), ":\n", prettyEnumCases(enumCases(e), ""))
 
 def prettyRecord(e: EnumDef): String =
   for {
     fields = caseFields(List.head(enumCases(e)))
-  } yield str4("record ", enumName(e), "(", str3(prettyEnumFields(fields, ""), ")\n", ""))
+  } yield str4("record ", Str.concat(enumName(e), prettyTypeParams(enumTParams(e))), "(", str3(prettyEnumFields(fields, ""), ")\n", ""))
 
 def prettyEnumCases(cases: List, acc: String): String =
   if (List.isEmpty(cases) == 1) acc else prettyEnumCases(List.tail(cases), Str.concat(acc, prettyEnumCase(List.head(cases))))
@@ -172,7 +172,7 @@ def prettyExprMatch(expr: Expr, indent: Int, pad: String): String =
     case Expr.Var(name, span) => Str.concat(pad, name)
     case Expr.Field(base, field, span) => str3(pad, trimStr(prettyExpr(base, 0)), str3(".", field, ""))
     case Expr.MethodCall(receiver, method, args, span) => str3(pad, trimStr(prettyExpr(receiver, 0)), str3(".", method, str3("(", prettyExprList(args, ""), ")")))
-    case Expr.Adt(enumName, caseName, args, span) => prettyAdt(enumName, caseName, args, pad)
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => prettyAdt(enumName, caseName, args, pad)
     case Expr.Lambda(param, body, span) => str4(pad, param, " => ", trimStr(prettyExpr(body, 0)))
     case Expr.Call(callee, args, span) => str4(pad, callee, str3("(", prettyExprList(args, ""), ")"), "")
     case Expr.If(cond, thenB, elseB, span) => prettyIf(cond, thenB, elseB, indent, pad)
@@ -244,7 +244,7 @@ def prettyArm(arm: MatchArm, indent: Int): String =
 def prettyPat(pat: Pattern): String =
   pat match {
     case Pattern.Wild => "_"
-    case Pattern.Adt(enumName, caseName, binds) => prettyPatAdt(enumName, caseName, binds)
+    case Pattern.Adt(enumName, caseName, binds, typeArgs) => prettyPatAdt(enumName, caseName, binds)
   }
 
 def prettyPatAdt(enumName: String, caseName: String, binds: List): String =

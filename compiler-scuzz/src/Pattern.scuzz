@@ -2,5 +2,5 @@ package scuzz.compiler
 
 enum Pattern:
   case Wild
-  case Adt(enumName: String, caseName: String, binds: List)
+  case Adt(enumName: String, caseName: String, binds: List, typeArgs: List)
 

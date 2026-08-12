@@ -16,6 +16,12 @@ def noneInt(): Opt[Int] =
 def wrap[T](x: T): Box[T] =
   Box(x)
 
+def leftOr[L, R](e: Either[L, R], fallback: L): L =
+  e match {
+    case Either.Left(x) => x
+    case Either.Right(y) => fallback
+  }
+
 def describe(e: Either[Int, String]): String =
   e match {
     case Either.Left(n) => Str.fromInt(n)
@@ -29,4 +35,5 @@ def describe(e: Either[Int, String]): String =
     b = wrap(4)
     _ <- IO.println(Str.concat("genum:box:", Str.fromInt(b.x)))
     _ <- IO.println(Str.concat("genum:either:", describe(Either.Right("ok"))))
+    _ <- IO.println(Str.concat("genum:multi:", Str.fromInt(leftOr(Either.Right("s"), 7))))
   } yield ()

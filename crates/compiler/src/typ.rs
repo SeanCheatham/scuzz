@@ -2691,9 +2691,12 @@ fn elaborate_expr(
             if let Ok(f) = funs.resolve(&callee, current_module) {
                 let mut subst: HashMap<String, Type> = HashMap::new();
                 for (a, p) in args.iter().zip(f.params.iter()) {
-                    let at = infer(a, enums, funs, methods, current_module, env)?;
-                    let want = resolve_type_in(&p.ty, enums, &f.module, &f.type_params)?;
-                    unify_construct(&want, &at, &mut subst)?;
+                    // Lambda args mention binder names that are unbound here;
+                    // they contribute nothing to the constructor substitution.
+                    if let Ok(at) = infer(a, enums, funs, methods, current_module, env) {
+                        let want = resolve_type_in(&p.ty, enums, &f.module, &f.type_params)?;
+                        unify_construct(&want, &at, &mut subst)?;
+                    }
                 }
                 let new_args = args
                     .into_iter()

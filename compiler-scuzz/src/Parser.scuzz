@@ -83,7 +83,18 @@ def parseTypeWith(file: String, tokens: List, i: Int, tparams: List): List =
   } yield parseTypeAfterName(file, tokens, pStr(nameP), pIdx(nameP), tparams)
 
 def parseTypeAfterName(file: String, tokens: List, name: String, i: Int, tparams: List): List =
-  if (streq(name, "IO") == 1) parseTypeIo(file, tokens, i, tparams) else okType(parseTypeBuiltinWith(name, tparams), i)
+  if (streq(name, "IO") == 1) parseTypeIo(file, tokens, i, tparams) else if (isTok(tokens, i, "LBracket") == 1) if (listContainsStr(tparams, name) == 1) okType(parseTypeBuiltinWith(name, tparams), i) else parseTypeApp(file, tokens, i + 1, name, tparams, List.empty()) else okType(parseTypeBuiltinWith(name, tparams), i)
+
+def parseTypeApp(file: String, tokens: List, i: Int, name: String, tparams: List, acc: List): List =
+  for {
+    argP = parseTypeWith(file, tokens, i, tparams)
+    j = pIdx(argP)
+  } yield if (isTok(tokens, j, "Comma") == 1) parseTypeApp(file, tokens, j + 1, name, tparams, List.cons(pType(argP), acc)) else parseTypeAppEnd(file, tokens, j, name, List.cons(pType(argP), acc))
+
+def parseTypeAppEnd(file: String, tokens: List, i: Int, name: String, acc: List): List =
+  for {
+    i1 = expectTok(tokens, i, "RBracket")
+  } yield okType(tyMkApp(name, List.reverse(acc)), i1)
 
 def parseTypeBuiltin(name: String): Type =
   parseTypeBuiltinWith(name, List.empty())
@@ -273,16 +284,16 @@ def parsePattern(file: String, tokens: List, i: Int): List =
 def parsePatternAdt(file: String, tokens: List, i: Int): List =
   for {
     nameP = parseIdent(file, tokens, i)
-  } yield if (isTok(tokens, pIdx(nameP), "Dot") == 1) parsePatternAdtDot(file, tokens, pIdx(nameP) + 1, pStr(nameP)) else if (isTok(tokens, pIdx(nameP), "LParen") == 1) parsePatternBinds(file, tokens, pIdx(nameP) + 1, pStr(nameP), pStr(nameP), List.empty()) else okPat(Pattern.Adt(pStr(nameP), pStr(nameP), List.empty()), pIdx(nameP))
+  } yield if (isTok(tokens, pIdx(nameP), "Dot") == 1) parsePatternAdtDot(file, tokens, pIdx(nameP) + 1, pStr(nameP)) else if (isTok(tokens, pIdx(nameP), "LParen") == 1) parsePatternBinds(file, tokens, pIdx(nameP) + 1, pStr(nameP), pStr(nameP), List.empty()) else okPat(Pattern.Adt(pStr(nameP), pStr(nameP), List.empty(), List.empty()), pIdx(nameP))
 
 def parsePatternAdtDot(file: String, tokens: List, i: Int, en: String): List =
   for {
     caseP = parseIdent(file, tokens, i)
     j = pIdx(caseP)
-  } yield if (isTok(tokens, j, "LParen") == 1) parsePatternBinds(file, tokens, j + 1, en, pStr(caseP), List.empty()) else okPat(Pattern.Adt(en, pStr(caseP), List.empty()), j)
+  } yield if (isTok(tokens, j, "LParen") == 1) parsePatternBinds(file, tokens, j + 1, en, pStr(caseP), List.empty()) else okPat(Pattern.Adt(en, pStr(caseP), List.empty(), List.empty()), j)
 
 def parsePatternBinds(file: String, tokens: List, i: Int, en: String, caseName: String, acc: List): List =
-  if (isTok(tokens, i, "RParen") == 1) okPat(Pattern.Adt(en, caseName, List.reverse(acc)), i + 1) else parsePatternBindsCont(file, tokens, i, en, caseName, acc)
+  if (isTok(tokens, i, "RParen") == 1) okPat(Pattern.Adt(en, caseName, List.reverse(acc), List.empty()), i + 1) else parsePatternBindsCont(file, tokens, i, en, caseName, acc)
 
 def parsePatternBindsCont(file: String, tokens: List, i: Int, en: String, caseName: String, acc: List): List =
   for {
@@ -294,7 +305,7 @@ def parsePatternBindsCont(file: String, tokens: List, i: Int, en: String, caseNa
 def parsePatternBindsEnd(file: String, tokens: List, i: Int, en: String, caseName: String, acc: List): List =
   for {
     i1 = expectTok(tokens, i, "RParen")
-  } yield okPat(Pattern.Adt(en, caseName, List.reverse(acc)), i1)
+  } yield okPat(Pattern.Adt(en, caseName, List.reverse(acc), List.empty()), i1)
 
 def parsePostfixDot(file: String, tokens: List, expr: Expr, i: Int): List =
   for {
@@ -319,7 +330,7 @@ def parseDotCallOrAdt(file: String, tokens: List, i: Int, enumName: String, star
     caseP = parseIdent(file, tokens, i)
     caseName = pStr(caseP)
     j = pIdx(caseP)
-  } yield if (isTok(tokens, j, "LParen") == 1) parseCallArgs(file, tokens, j + 1, str3(enumName, ".", caseName), startI) else if (isUpperIdent(enumName) == 1) okExpr(Expr.Adt(enumName, caseName, List.empty(), spanCover(file, tokens, startI, j)), j) else okExpr(Expr.Field(Expr.Var(enumName, tokSpan(file, tokAt(tokens, startI))), caseName, spanCover(file, tokens, startI, j)), j)
+  } yield if (isTok(tokens, j, "LParen") == 1) parseCallArgs(file, tokens, j + 1, str3(enumName, ".", caseName), startI) else if (isUpperIdent(enumName) == 1) okExpr(Expr.Adt(enumName, caseName, List.empty(), List.empty(), spanCover(file, tokens, startI, j)), j) else okExpr(Expr.Field(Expr.Var(enumName, tokSpan(file, tokAt(tokens, startI))), caseName, spanCover(file, tokens, startI, j)), j)
 
 def parseLambda(file: String, tokens: List, i: Int): List =
   for {
@@ -502,21 +513,20 @@ def parseDef(file: String, tokens: List, i: Int, isPrivate: Int): List =
     i0 = pIdx(nameP)
   } yield if (isTok(tokens, i0, "LBracket") == 1) parseDefWithTParams(file, tokens, i0 + 1, pStr(nameP), isPrivate) else parseDefAfterName(file, tokens, i0, pStr(nameP), isPrivate, List.empty())
 
-def parseTypeParams(file: String, tokens: List, i: Int): List =
+def parseTypeParams(file: String, tokens: List, i: Int, acc: List): List =
   for {
     nameP = parseIdent(file, tokens, i)
-    name = pStr(nameP)
     i1 = pIdx(nameP)
-  } yield if (isTok(tokens, i1, "Comma") == 1) parseTypeParamsSkip(file, tokens, i1 + 1) else for {
-  i2 = expectTok(tokens, i1, "RBracket")
-} yield ok(List.cons(name, List.empty()), i2)
+  } yield if (isTok(tokens, i1, "Comma") == 1) parseTypeParams(file, tokens, i1 + 1, List.cons(pStr(nameP), acc)) else parseTypeParamsEnd(file, tokens, i1, List.cons(pStr(nameP), acc))
 
-def parseTypeParamsSkip(file: String, tokens: List, i: Int): List =
-  if (isTok(tokens, i, "RBracket") == 1) ok(List.empty(), i + 1) else if (isTok(tokens, i, "Eof") == 1) ok(List.empty(), i) else parseTypeParamsSkip(file, tokens, i + 1)
+def parseTypeParamsEnd(file: String, tokens: List, i: Int, acc: List): List =
+  for {
+    i1 = expectTok(tokens, i, "RBracket")
+  } yield ok(List.reverse(acc), i1)
 
 def parseDefWithTParams(file: String, tokens: List, i: Int, name: String, isPrivate: Int): List =
   for {
-    tp = parseTypeParams(file, tokens, i)
+    tp = parseTypeParams(file, tokens, i, List.empty())
     tparams = pAst(tp)
   } yield if (List.isEmpty(tparams) == 1) parseDefAfterName(file, tokens, pIdx(tp), name, isPrivate, List.empty()) else parseDefAfterName(file, tokens, pIdx(tp), name, isPrivate, tparams)
 
@@ -549,43 +559,51 @@ def parseEnum(file: String, tokens: List, i: Int): List =
   for {
     nameP = parseIdent(file, tokens, i)
     i1 = pIdx(nameP)
-  } yield if (isTok(tokens, i1, "LBrace") == 1) parseEnumBrace(file, tokens, i1 + 1, pStr(nameP), List.empty()) else if (isTok(tokens, i1, "Colon") == 1) parseEnumColon(file, tokens, i1 + 1, pStr(nameP), List.empty()) else okEnum(EnumDef.Enum(moduleIdFromLabel(file), pStr(nameP), List.empty()), i1)
+  } yield if (isTok(tokens, i1, "LBracket") == 1) parseEnumTParams(file, tokens, i1 + 1, pStr(nameP)) else parseEnumBody(file, tokens, i1, pStr(nameP), List.empty())
 
-def parseEnumBrace(file: String, tokens: List, i: Int, name: String, acc: List): List =
-  if (isTok(tokens, i, "RBrace") == 1) okEnum(EnumDef.Enum(moduleIdFromLabel(file), name, List.reverse(acc)), i + 1) else parseEnumBraceCase(file, tokens, i, name, acc)
+def parseEnumTParams(file: String, tokens: List, i: Int, name: String): List =
+  for {
+    tp = parseTypeParams(file, tokens, i, List.empty())
+  } yield parseEnumBody(file, tokens, pIdx(tp), name, pAst(tp))
 
-def parseEnumBraceCase(file: String, tokens: List, i: Int, name: String, acc: List): List =
+def parseEnumBody(file: String, tokens: List, i: Int, name: String, tparams: List): List =
+  if (isTok(tokens, i, "LBrace") == 1) parseEnumBrace(file, tokens, i + 1, name, tparams, List.empty()) else if (isTok(tokens, i, "Colon") == 1) parseEnumColon(file, tokens, i + 1, name, tparams, List.empty()) else okEnum(EnumDef.Enum(moduleIdFromLabel(file), name, List.empty(), tparams), i)
+
+def parseEnumBrace(file: String, tokens: List, i: Int, name: String, tparams: List, acc: List): List =
+  if (isTok(tokens, i, "RBrace") == 1) okEnum(EnumDef.Enum(moduleIdFromLabel(file), name, List.reverse(acc), tparams), i + 1) else parseEnumBraceCase(file, tokens, i, name, tparams, acc)
+
+def parseEnumBraceCase(file: String, tokens: List, i: Int, name: String, tparams: List, acc: List): List =
   for {
     i1 = expectTok(tokens, i, "Case")
     caseP = parseIdent(file, tokens, i1)
-    fieldsP = parseEnumCaseFields(file, tokens, pIdx(caseP))
+    fieldsP = parseEnumCaseFields(file, tokens, pIdx(caseP), tparams)
     i2 = pIdx(fieldsP)
     acc2 = List.cons(EnumCase.Case(pStr(caseP), pAst(fieldsP)), acc)
-  } yield if (isTok(tokens, i2, "Comma") == 1) parseEnumBrace(file, tokens, i2 + 1, name, acc2) else parseEnumBrace(file, tokens, i2, name, acc2)
+  } yield if (isTok(tokens, i2, "Comma") == 1) parseEnumBrace(file, tokens, i2 + 1, name, tparams, acc2) else parseEnumBrace(file, tokens, i2, name, tparams, acc2)
 
-def parseEnumColon(file: String, tokens: List, i: Int, name: String, acc: List): List =
-  if (isTok(tokens, i, "Case") == 0) okEnum(EnumDef.Enum(moduleIdFromLabel(file), name, List.reverse(acc)), i) else parseEnumColonCase(file, tokens, i + 1, name, acc)
+def parseEnumColon(file: String, tokens: List, i: Int, name: String, tparams: List, acc: List): List =
+  if (isTok(tokens, i, "Case") == 0) okEnum(EnumDef.Enum(moduleIdFromLabel(file), name, List.reverse(acc), tparams), i) else parseEnumColonCase(file, tokens, i + 1, name, tparams, acc)
 
-def parseEnumColonCase(file: String, tokens: List, i: Int, name: String, acc: List): List =
+def parseEnumColonCase(file: String, tokens: List, i: Int, name: String, tparams: List, acc: List): List =
   for {
     caseP = parseIdent(file, tokens, i)
-    fieldsP = parseEnumCaseFields(file, tokens, pIdx(caseP))
-  } yield parseEnumColon(file, tokens, pIdx(fieldsP), name, List.cons(EnumCase.Case(pStr(caseP), pAst(fieldsP)), acc))
+    fieldsP = parseEnumCaseFields(file, tokens, pIdx(caseP), tparams)
+  } yield parseEnumColon(file, tokens, pIdx(fieldsP), name, tparams, List.cons(EnumCase.Case(pStr(caseP), pAst(fieldsP)), acc))
 
-def parseEnumCaseFields(file: String, tokens: List, i: Int): List =
-  if (isTok(tokens, i, "LParen") == 0) ok(List.empty(), i) else parseEnumCaseFieldsAcc(file, tokens, i + 1, List.empty())
+def parseEnumCaseFields(file: String, tokens: List, i: Int, tparams: List): List =
+  if (isTok(tokens, i, "LParen") == 0) ok(List.empty(), i) else parseEnumCaseFieldsAcc(file, tokens, i + 1, List.empty(), tparams)
 
-def parseEnumCaseFieldsAcc(file: String, tokens: List, i: Int, acc: List): List =
-  if (isTok(tokens, i, "RParen") == 1) ok(List.reverse(acc), i + 1) else parseEnumCaseFieldCont(file, tokens, i, acc)
+def parseEnumCaseFieldsAcc(file: String, tokens: List, i: Int, acc: List, tparams: List): List =
+  if (isTok(tokens, i, "RParen") == 1) ok(List.reverse(acc), i + 1) else parseEnumCaseFieldCont(file, tokens, i, acc, tparams)
 
-def parseEnumCaseFieldCont(file: String, tokens: List, i: Int, acc: List): List =
+def parseEnumCaseFieldCont(file: String, tokens: List, i: Int, acc: List, tparams: List): List =
   for {
     fnameP = parseIdent(file, tokens, i)
     i1 = expectTok(tokens, pIdx(fnameP), "Colon")
-    tyP = parseType(file, tokens, i1)
+    tyP = parseTypeWith(file, tokens, i1, tparams)
     acc2 = List.cons(EnumField.Field(pStr(fnameP), pType(tyP)), acc)
     j = pIdx(tyP)
-  } yield if (isTok(tokens, j, "Comma") == 1) parseEnumCaseFieldsAcc(file, tokens, j + 1, acc2) else parseEnumCaseFieldsEnd(file, tokens, j, acc2)
+  } yield if (isTok(tokens, j, "Comma") == 1) parseEnumCaseFieldsAcc(file, tokens, j + 1, acc2, tparams) else parseEnumCaseFieldsEnd(file, tokens, j, acc2)
 
 def parseEnumCaseFieldsEnd(file: String, tokens: List, i: Int, acc: List): List =
   for {
@@ -605,9 +623,19 @@ def parseTopRecord(file: String, tokens: List, i: Int, pkg: String, enums: List,
 def parseRecord(file: String, tokens: List, i: Int): List =
   for {
     nameP = parseIdent(file, tokens, i)
-    i1 = expectTok(tokens, pIdx(nameP), "LParen")
-    fieldsP = parseEnumCaseFieldsAcc(file, tokens, i1, List.empty())
-  } yield okEnum(EnumDef.Record(moduleIdFromLabel(file), pStr(nameP), pAst(fieldsP)), pIdx(fieldsP))
+    i1 = pIdx(nameP)
+  } yield if (isTok(tokens, i1, "LBracket") == 1) parseRecordTParams(file, tokens, i1 + 1, pStr(nameP)) else parseRecordBody(file, tokens, i1, pStr(nameP), List.empty())
+
+def parseRecordTParams(file: String, tokens: List, i: Int, name: String): List =
+  for {
+    tp = parseTypeParams(file, tokens, i, List.empty())
+  } yield parseRecordBody(file, tokens, pIdx(tp), name, pAst(tp))
+
+def parseRecordBody(file: String, tokens: List, i: Int, name: String, tparams: List): List =
+  for {
+    i1 = expectTok(tokens, i, "LParen")
+    fieldsP = parseEnumCaseFieldsAcc(file, tokens, i1, List.empty(), tparams)
+  } yield okEnum(EnumDef.Record(moduleIdFromLabel(file), name, pAst(fieldsP), tparams), pIdx(fieldsP))
 
 def parseTopTrait(file: String, tokens: List, i: Int, pkg: String, enums: List, traits: List, impls: List, defs: List, main: Expr, mainMod: String, imports: List): Prog =
   for {

@@ -80,7 +80,7 @@ def lowerExpr(e: Expr, enums: List, imports: List, mod: String): Expr =
     case Expr.If(cond, thenB, elseB, span) => Expr.If(lowerExpr(cond, enums, imports, mod), lowerExpr(thenB, enums, imports, mod), lowerExpr(elseB, enums, imports, mod), span)
     case Expr.BinOp(op, left, right, span) => Expr.BinOp(op, lowerExpr(left, enums, imports, mod), lowerExpr(right, enums, imports, mod), span)
     case Expr.Call(callee, args, span) => lowerCall(callee, lowerExprList(args, enums, imports, mod, List.empty()), span, enums, imports, mod)
-    case Expr.Adt(enumName, caseName, args, span) => lowerAdt(enumName, caseName, lowerExprList(args, enums, imports, mod, List.empty()), span, enums, imports, mod)
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => lowerAdt(enumName, caseName, lowerExprList(args, enums, imports, mod, List.empty()), typeArgs, span, enums, imports, mod)
     case Expr.Lambda(param, body, span) => Expr.Lambda(param, lowerExpr(body, enums, imports, mod), span)
     case Expr.Match(scrut, arms, span) => Expr.Match(lowerExpr(scrut, enums, imports, mod), lowerArms(arms, enums, imports, mod, List.empty()), span)
     case Expr.Println(arg, span) => Expr.Println(lowerExpr(arg, enums, imports, mod), span)
@@ -108,22 +108,22 @@ def lowerCall(callee: String, args: List, sp: Span, enums: List, imports: List, 
 def lowerCallBare(callee: String, args: List, sp: Span, enums: List, imports: List, mod: String): Expr =
   for {
     id = resolveRecordCtorId(enums, imports, callee, List.len(args), mod)
-  } yield if (Str.len(id) == 0) Expr.Call(callee, args, sp) else Expr.Adt(id, callee, args, sp)
+  } yield if (Str.len(id) == 0) Expr.Call(callee, args, sp) else Expr.Adt(id, callee, args, List.empty(), sp)
 
 def lowerCallDotted(en: String, cn: String, args: List, sp: Span, enums: List, imports: List, mod: String): Expr =
   for {
     id = resolveCtorId(enums, imports, en, cn, mod)
-  } yield if (Str.len(id) == 0) Expr.Call(str3(en, ".", cn), args, sp) else Expr.Adt(id, cn, args, sp)
+  } yield if (Str.len(id) == 0) Expr.Call(str3(en, ".", cn), args, sp) else Expr.Adt(id, cn, args, List.empty(), sp)
 
 def resolveRecordCtorId(enums: List, imports: List, name: String, arity: Int, currentModule: String): String =
   for {
     e = resolveEnum(enums, imports, name, currentModule)
   } yield if (List.isEmpty(e) == 1) "" else if (enumIsRecord(List.head(e)) == 0) "" else if (List.len(caseFields(List.head(enumCases(List.head(e))))) == arity) enumId(List.head(e)) else ""
 
-def lowerAdt(en: String, cn: String, args: List, sp: Span, enums: List, imports: List, mod: String): Expr =
+def lowerAdt(en: String, cn: String, args: List, typeArgs: List, sp: Span, enums: List, imports: List, mod: String): Expr =
   for {
     id = resolveCtorId(enums, imports, en, cn, mod)
-  } yield if (Str.len(id) == 0) if (List.isEmpty(args) == 1) Expr.Call(str3(en, ".", cn), args, sp) else Expr.Adt(en, cn, args, sp) else Expr.Adt(id, cn, args, sp)
+  } yield if (Str.len(id) == 0) if (List.isEmpty(args) == 1) Expr.Call(str3(en, ".", cn), args, sp) else Expr.Adt(en, cn, args, typeArgs, sp) else Expr.Adt(id, cn, args, typeArgs, sp)
 
 def lowerExprList(xs: List, enums: List, imports: List, mod: String, acc: List): List =
   if (List.isEmpty(xs) == 1) List.reverse(acc) else lowerExprList(List.tail(xs), enums, imports, mod, List.cons(lowerExpr(List.head(xs), enums, imports, mod), acc))
@@ -139,13 +139,13 @@ def lowerArm(arm: MatchArm, enums: List, imports: List, mod: String): MatchArm =
 def lowerPat(pat: Pattern, enums: List, imports: List, mod: String): Pattern =
   pat match {
     case Pattern.Wild => Pattern.Wild
-    case Pattern.Adt(enumName, caseName, binds) => lowerPatAdt(enumName, caseName, binds, enums, imports, mod)
+    case Pattern.Adt(enumName, caseName, binds, typeArgs) => lowerPatAdt(enumName, caseName, binds, enums, imports, mod)
   }
 
 def lowerPatAdt(en: String, cn: String, binds: List, enums: List, imports: List, mod: String): Pattern =
   for {
     id = resolveCtorId(enums, imports, en, cn, mod)
-  } yield if (Str.len(id) == 0) Pattern.Adt(en, cn, binds) else Pattern.Adt(id, cn, binds)
+  } yield if (Str.len(id) == 0) Pattern.Adt(en, cn, binds, List.empty()) else Pattern.Adt(id, cn, binds, List.empty())
 
 def lowerInterpParts(parts: List, enums: List, imports: List, mod: String, acc: List): List =
   if (List.isEmpty(parts) == 1) List.reverse(acc) else lowerInterpParts(List.tail(parts), enums, imports, mod, List.cons(lowerInterpPart(List.head(parts), enums, imports, mod), acc))

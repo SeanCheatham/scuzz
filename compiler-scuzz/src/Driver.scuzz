@@ -259,7 +259,9 @@ def checkProject(projectDir: String): IO[List] =
     for {
       prog = expandImplsProg(lowerProg(prog1))
       ty = typecheckProg(prog)
-    } yield IO.pure(List.cons(ty, List.cons(sources, List.empty())))
+      ep = elaborateProg(prog)
+      ty2 = if (tyIsOk(ty) == 0) ty else elabResOf(ep)
+    } yield IO.pure(List.cons(ty2, List.cons(sources, List.empty())))
   )
 )
     )
@@ -275,7 +277,8 @@ def compileAfterSources(projectDir: String, outDir: String, verify: Int, runtime
         prog0 = lowerProg(prog1)
         prog1b = expandImplsProg(prog0)
         ty = typecheckProg(prog1b)
-        progMono = monomorphizeProg(prog1b)
+        ep = elaborateProg(prog1b)
+        progMono = monomorphizeProg(List.head(ep))
         prog = resolveFieldsProg(progMono)
         ir = emitProgram(prog)
         ll = pathJoin(outDir, Str.concat(name, ".ll"))
@@ -285,7 +288,7 @@ def compileAfterSources(projectDir: String, outDir: String, verify: Int, runtime
         inc = pathJoin(runtimeDir, "include")
         embedder = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-desktop"), "build/libscuzz_embedder.a")
         mobile = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-mobile"), "build/libscuzz_mobile.a")
-      } yield if (tyIsOk(ty) == 0) IO.fail(tyMsg(ty)) else Fs.mkdirs(outDir).flatMap(_ =>
+      } yield if (tyIsOk(ty) == 0) IO.fail(tyMsg(ty)) else if (tyIsOk(elabResOf(ep)) == 0) IO.fail(tyMsg(elabResOf(ep))) else Fs.mkdirs(outDir).flatMap(_ =>
   Fs.write(ll, ir).flatMap(_ =>
     buildRuntime(runtimeDir, clang).flatMap(_ => linkProject(clang, ll, lib, ffi, inc, embedder, mobile, exe, withUi))
   )
