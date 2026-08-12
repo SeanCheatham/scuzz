@@ -1,27 +1,27 @@
 package scuzz.compiler
 
-def emptyProg(): List =
-  List.cons("Prog", List.cons("", List.cons(List.empty(), List.cons(List.empty(), List.cons(unitExpr(), List.cons("", List.empty()))))))
+def emptyProg(): Prog =
+  Prog.Prog("", List.empty(), List.empty(), unitExpr(), "")
 
-def mkProg(pkg: String, enums: List, defs: List, main: List, mainMod: String): List =
-  List.cons("Prog", List.cons(pkg, List.cons(enums, List.cons(defs, List.cons(main, List.cons(mainMod, List.empty()))))))
+def mkProg(pkg: String, enums: List, defs: List, main: Expr, mainMod: String): Prog =
+  Prog.Prog(pkg, enums, defs, main, mainMod)
 
-def setProgDefs(prog: List, defs: List): List =
-  mkProg(nodeStr(prog, 0), progEnums(prog), defs, progMain(prog), progMainModule(prog))
+def setProgDefs(prog: Prog, defs: List): Prog =
+  mkProg(progPkg(prog), progEnums(prog), defs, progMain(prog), progMainModule(prog))
 
-def setProgMain(prog: List, main: List): List =
-  mkProg(nodeStr(prog, 0), progEnums(prog), progDefs(prog), main, progMainModule(prog))
+def setProgMain(prog: Prog, main: Expr): Prog =
+  mkProg(progPkg(prog), progEnums(prog), progDefs(prog), main, progMainModule(prog))
 
-def chooseMain(a: List, b: List): List =
-  if (streq(exprTag(b), "Unit") == 1) a else b
+def chooseMain(a: Expr, b: Expr): Expr =
+  if (isUnitExpr(b) == 1) a else b
 
-def chooseMainModule(accMain: List, pMain: List, accMod: String, pMod: String): String =
-  if (streq(exprTag(pMain), "Unit") == 1) accMod else pMod
+def chooseMainModule(accMain: Expr, pMain: Expr, accMod: String, pMod: String): String =
+  if (isUnitExpr(pMain) == 1) accMod else pMod
 
-def mergeProg(acc: List, p: List): List =
-  mkProg(nodeStr(p, 0), listConcat(progEnums(acc), progEnums(p)), listConcat(progDefs(acc), progDefs(p)), chooseMain(progMain(acc), progMain(p)), chooseMainModule(progMain(acc), progMain(p), progMainModule(acc), progMainModule(p)))
+def mergeProg(acc: Prog, p: Prog): Prog =
+  mkProg(progPkg(p), listConcat(progEnums(acc), progEnums(p)), listConcat(progDefs(acc), progDefs(p)), chooseMain(progMain(acc), progMain(p)), chooseMainModule(progMain(acc), progMain(p), progMainModule(acc), progMainModule(p)))
 
-def parseSource(label: String, src: String): List =
+def parseSource(label: String, src: String): Prog =
   parseProgram(lex(src), label)
 
 def readUntilQuote(s: String, i: Int, acc: String): String =
@@ -107,13 +107,13 @@ def readSources(srcDir: String, names: List, acc: List): IO[List] =
 def readOverlayFiles(srcDir: String, kind: String, names: List, acc: List): IO[List] =
   if (List.isEmpty(names) == 1) IO.pure(List.reverse(acc)) else Fs.read(pathJoin(srcDir, List.head(names))).flatMap(text => readOverlayFiles(srcDir, kind, List.tail(names), List.cons(mkOverlay(kind, List.head(names), text), acc)))
 
-def mergeSources(sources: List, acc: List, mains: Int): IO[List] =
+def mergeSources(sources: List, acc: Prog, mains: Int): IO[Prog] =
   if (List.isEmpty(sources) == 1) if (mains == 0) IO.fail("no @main definition") else if (mains > 1) IO.fail("multiple @main definitions") else IO.pure(acc) else mergeSourcesOne(List.head(sources), List.tail(sources), acc, mains)
 
-def mergeSourcesOne(src: List, rest: List, acc: List, mains: Int): IO[List] =
+def mergeSourcesOne(src: List, rest: List, acc: Prog, mains: Int): IO[Prog] =
   for {
     p = parseSource(srcLabel(src), srcText(src))
-    n = if (streq(exprTag(progMain(p)), "Unit") == 1) 0 else 1
+    n = if (isUnitExpr(progMain(p)) == 1) 0 else 1
   } yield mergeSources(rest, mergeProg(acc, p), mains + n)
 
 def validateOverlayStems(stems: List, names: List): IO[Unit] =
@@ -153,79 +153,79 @@ def cxxLinkFlagsIo(): String =
 def runIfNeeded(exe: String, doRun: Int): IO[Unit] =
   if (doRun == 1) execOk(exe) else IO.pure(())
 
-def lawCall(name: String): List =
-  withSpan(List.cons("Call", List.cons(name, List.cons(List.empty(), List.empty()))), dummySpan())
+def lawCall(name: String): Expr =
+  Expr.Call(name, List.empty(), dummySpan())
 
-def lawAssertCall(name: String): List =
-  withSpan(List.cons("Call", List.cons("Law.assert", List.cons(List.cons(withSpan(List.cons("StrLit", List.cons(name, List.empty())), dummySpan()), List.cons(lawCall(name), List.empty())), List.empty()))), dummySpan())
+def lawAssertCall(name: String): Expr =
+  Expr.Call("Law.assert", List.cons(Expr.StrLit(name, dummySpan()), List.cons(lawCall(name), List.empty())), dummySpan())
 
-def wrapLawAssert(body: List, name: String): List =
-  withSpan(List.cons("FlatMap", List.cons(body, List.cons("_", List.cons(lawAssertCall(name), List.empty())))), coverSpan(exprSpan(body), dummySpan()))
+def wrapLawAssert(body: Expr, name: String): Expr =
+  Expr.FlatMap(body, "_", lawAssertCall(name), coverSpan(exprSpan(body), dummySpan()))
 
-def residualizeLaws(prog: List, lawNames: List): List =
+def residualizeLaws(prog: Prog, lawNames: List): Prog =
   if (List.isEmpty(lawNames) == 1) prog else setProgMain(prog, residualizeMain(progMain(prog), lawNames))
 
-def residualizeMain(body: List, lawNames: List): List =
+def residualizeMain(body: Expr, lawNames: List): Expr =
   if (List.isEmpty(lawNames) == 1) body else residualizeMain(wrapLawAssert(body, List.head(lawNames)), List.tail(lawNames))
 
 def checkSimParams(lp: List, sp: List, name: String, label: String, i: Int): IO[Unit] =
   if (i >= List.len(lp)) IO.pure(()) else if (streq(paramType(List.at(lp, i)), paramType(List.at(sp, i))) == 0) IO.fail(str4(label, ": sim def `", name, str3("` param `", paramName(List.at(sp, i)), "` type mismatch"))) else checkSimParams(lp, sp, name, label, i + 1)
 
-def checkSimMatch(live: List, sim: List, label: String): IO[Unit] =
+def checkSimMatch(live: Def, sim: Def, label: String): IO[Unit] =
   for {
     lp = defParams(live)
     sp = defParams(sim)
     name = defName(sim)
   } yield if (List.len(lp) != List.len(sp)) IO.fail(str4(label, ": sim def `", name, str3("` arity mismatch (live ", Str.fromInt(List.len(lp)), str3(", sim ", Str.fromInt(List.len(sp)), ")")))) else if (streq(defRet(live), defRet(sim)) == 0) IO.fail(str4(label, ": sim def `", name, "` return type mismatch")) else if (tyIsIo(defRet(live)) != tyIsIo(defRet(sim))) IO.fail(str4(label, ": sim def `", name, "` purity mismatch")) else checkSimParams(lp, sp, name, label, 0)
 
-def replaceSimDefAcc(defs: List, sim: List, label: String, acc: List, found: Int): IO[List] =
+def replaceSimDefAcc(defs: List, sim: Def, label: String, acc: List, found: Int): IO[List] =
   if (List.isEmpty(defs) == 1) if (found == 0) IO.fail(str5(label, ": sim def `", defName(sim), "` has no live twin", "")) else IO.pure(List.reverse(acc)) else if (streq(defName(List.head(defs)), defName(sim)) == 1) if (streq(defModule(List.head(defs)), defModule(sim)) == 1) checkSimMatch(List.head(defs), sim, label).flatMap(_ => replaceSimDefAcc(List.tail(defs), sim, label, List.cons(sim, acc), 1)) else replaceSimDefAcc(List.tail(defs), sim, label, List.cons(List.head(defs), acc), found) else replaceSimDefAcc(List.tail(defs), sim, label, List.cons(List.head(defs), acc), found)
 
-def replaceSimDef(defs: List, sim: List, label: String): IO[List] =
+def replaceSimDef(defs: List, sim: Def, label: String): IO[List] =
   replaceSimDefAcc(defs, sim, label, List.empty(), 0)
 
-def applySimDefs(prog: List, defs: List, label: String): IO[List] =
+def applySimDefs(prog: Prog, defs: List, label: String): IO[Prog] =
   if (List.isEmpty(defs) == 1) IO.pure(prog) else replaceSimDef(progDefs(prog), List.head(defs), label).flatMap(newDefs => applySimDefs(setProgDefs(prog, newDefs), List.tail(defs), label))
 
-def applyOneSim(prog: List, ov: List): IO[List] =
+def applyOneSim(prog: Prog, ov: List): IO[Prog] =
   for {
     p = parseSource(ovLabel(ov), ovText(ov))
     label = ovLabel(ov)
     defs = stampDefsModule(progDefs(p), simStem(label))
-  } yield if (streq(exprTag(progMain(p)), "Unit") == 0) IO.fail(str3(label, ": *.scuzz_sim must not define @main", "")) else if (List.isEmpty(progEnums(p)) == 0) IO.fail(str3(label, ": *.scuzz_sim must not define enums", "")) else applySimDefs(prog, defs, label)
+  } yield if (isUnitExpr(progMain(p)) == 0) IO.fail(str3(label, ": *.scuzz_sim must not define @main", "")) else if (List.isEmpty(progEnums(p)) == 0) IO.fail(str3(label, ": *.scuzz_sim must not define enums", "")) else applySimDefs(prog, defs, label)
 
-def applySims(prog: List, sims: List): IO[List] =
+def applySims(prog: Prog, sims: List): IO[Prog] =
   if (List.isEmpty(sims) == 1) IO.pure(prog) else applyOneSim(prog, List.head(sims)).flatMap(p2 => applySims(p2, List.tail(sims)))
 
 def lawRetOk(ret: String): Int =
   if (streq(ret, "Bool") == 1) 1 else if (streq(ret, "Int") == 1) 1 else 0
 
-def applyLawDefs(prog: List, defs: List, label: String, names: List): IO[List] =
+def applyLawDefs(prog: Prog, defs: List, label: String, names: List): IO[List] =
   if (List.isEmpty(defs) == 1) IO.pure(List.cons(prog, List.cons(names, List.empty()))) else applyLawDefOne(prog, List.head(defs), List.tail(defs), label, names)
 
-def applyLawDefOne(prog: List, d: List, rest: List, label: String, names: List): IO[List] =
+def applyLawDefOne(prog: Prog, d: Def, rest: List, label: String, names: List): IO[List] =
   for {
     name = defName(d)
     hit = findDefByQual(progDefs(prog), defModule(d), name)
   } yield if (List.isEmpty(hit) == 0) IO.fail(str5(label, ": law `", name, "` collides with a live/sim def", "")) else if (lawRetOk(defRet(d)) == 0) IO.fail(str4(label, ": law `", name, str3("` must return Bool (or Int), got ", defRet(d), ""))) else if (List.isEmpty(defParams(d)) == 0) IO.fail(str5(label, ": law `", name, "` must be nullary for residual checks", "")) else applyLawDefs(setProgDefs(prog, listConcat(progDefs(prog), List.cons(d, List.empty()))), rest, label, listConcat(names, List.cons(name, List.empty())))
 
-def applyOneLaw(prog: List, ov: List, names: List): IO[List] =
+def applyOneLaw(prog: Prog, ov: List, names: List): IO[List] =
   for {
     p = parseSource(ovLabel(ov), ovText(ov))
     label = ovLabel(ov)
     defs = stampDefsModule(progDefs(p), lawsStem(label))
-  } yield if (streq(exprTag(progMain(p)), "Unit") == 0) IO.fail(str3(label, ": *.scuzz_laws must not define @main", "")) else if (List.isEmpty(progEnums(p)) == 0) IO.fail(str3(label, ": *.scuzz_laws must not define enums", "")) else applyLawDefs(prog, defs, label, names)
+  } yield if (isUnitExpr(progMain(p)) == 0) IO.fail(str3(label, ": *.scuzz_laws must not define @main", "")) else if (List.isEmpty(progEnums(p)) == 0) IO.fail(str3(label, ": *.scuzz_laws must not define enums", "")) else applyLawDefs(prog, defs, label, names)
 
-def applyLaws(prog: List, laws: List, names: List): IO[List] =
+def applyLaws(prog: Prog, laws: List, names: List): IO[List] =
   if (List.isEmpty(laws) == 1) IO.pure(List.cons(prog, List.cons(names, List.empty()))) else applyOneLaw(prog, List.head(laws), names).flatMap(state => applyLaws(List.head(state), List.tail(laws), List.head(List.tail(state))))
 
 def filterOverlays(ovs: List, kind: String, acc: List): List =
   if (List.isEmpty(ovs) == 1) List.reverse(acc) else if (streq(ovKind(List.head(ovs)), kind) == 1) filterOverlays(List.tail(ovs), kind, List.cons(List.head(ovs), acc)) else filterOverlays(List.tail(ovs), kind, acc)
 
-def applyOverlays(live: List, overlays: List): IO[List] =
+def applyOverlays(live: Prog, overlays: List): IO[List] =
   applySims(live, filterOverlays(overlays, "sim", List.empty())).flatMap(p1 => applyLaws(p1, filterOverlays(overlays, "laws", List.empty()), List.empty()))
 
-def prepareVerifyProg(prog0: List, overlays: List): IO[List] =
+def prepareVerifyProg(prog0: Prog, overlays: List): IO[Prog] =
   applyOverlays(prog0, overlays).flatMap(applied => IO.pure(residualizeLaws(List.head(applied), List.head(List.tail(applied)))))
 
 def compileProject(projectDir: String, outDir: String, doRun: Int): IO[Unit] =
@@ -291,7 +291,7 @@ def compileAfterSources(projectDir: String, outDir: String, doRun: Int, verify: 
     )
   )
 
-def prepareCompileProg(prog0: List, overlays: List, verify: Int): IO[List] =
+def prepareCompileProg(prog0: Prog, overlays: List, verify: Int): IO[Prog] =
   if (verify == 0) IO.pure(prog0) else prepareVerifyProg(prog0, overlays)
 
 def loadGraphBundle(projectDir: String, toml: String): IO[List] =

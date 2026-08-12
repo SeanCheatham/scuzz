@@ -31,7 +31,7 @@ def tokEnd(t: Tok): Int =
     case Tok.Sym(kind, start, end) => end
   }
 
-def tokSpan(file: String, t: Tok): List =
+def tokSpan(file: String, t: Tok): Span =
   mkSpan(file, tokStart(t), tokEnd(t))
 
 def tokKind(t: Tok): String =

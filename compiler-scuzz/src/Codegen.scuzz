@@ -1,34 +1,59 @@
 package scuzz.compiler
 
-def progEnums(p: List): List =
-  nodeExpr(p, 1)
+def progPkg(p: Prog): String =
+  p match {
+    case Prog.Prog(pkg, enums, defs, main, mainModule) => pkg
+  }
 
-def progDefs(p: List): List =
-  nodeExpr(p, 2)
+def progEnums(p: Prog): List =
+  p match {
+    case Prog.Prog(pkg, enums, defs, main, mainModule) => enums
+  }
 
-def progMain(p: List): List =
-  nodeExpr(p, 3)
+def progDefs(p: Prog): List =
+  p match {
+    case Prog.Prog(pkg, enums, defs, main, mainModule) => defs
+  }
 
-def progMainModule(p: List): String =
-  nodeStr(p, 4)
+def progMain(p: Prog): Expr =
+  p match {
+    case Prog.Prog(pkg, enums, defs, main, mainModule) => main
+  }
 
-def enumName(e: List): String =
-  nodeStr(e, 0)
+def progMainModule(p: Prog): String =
+  p match {
+    case Prog.Prog(pkg, enums, defs, main, mainModule) => mainModule
+  }
 
-def enumCases(e: List): List =
-  nodeExpr(e, 1)
+def enumName(e: EnumDef): String =
+  e match {
+    case EnumDef.Enum(name, cases) => name
+  }
 
-def caseName(c: List): String =
-  nodeStr(c, 0)
+def enumCases(e: EnumDef): List =
+  e match {
+    case EnumDef.Enum(name, cases) => cases
+  }
 
-def caseFields(c: List): List =
-  nodeExpr(c, 1)
+def caseName(c: EnumCase): String =
+  c match {
+    case EnumCase.Case(name, fields) => name
+  }
 
-def fieldName(f: List): String =
-  nodeStr(f, 0)
+def caseFields(c: EnumCase): List =
+  c match {
+    case EnumCase.Case(name, fields) => fields
+  }
 
-def fieldType(f: List): String =
-  nodeStr(f, 1)
+def fieldName(f: EnumField): String =
+  f match {
+    case EnumField.Field(name, ty) => name
+  }
+
+def fieldType(f: EnumField): String =
+  f match {
+    case EnumField.Field(name, ty) => ty
+  }
 
 def emitCtx(defs: List, tags: List, payloads: List, mod: String): List =
   List.cons(defs, List.cons(tags, List.cons(payloads, List.cons(mod, List.empty()))))
@@ -54,7 +79,7 @@ def buildEnumTags(enums: List): List =
 def buildEnumTagsAcc(enums: List, acc: List): List =
   if (List.isEmpty(enums) == 1) acc else buildEnumTagsAcc(List.tail(enums), buildOneEnumTags(List.head(enums), acc))
 
-def buildOneEnumTags(e: List, acc: List): List =
+def buildOneEnumTags(e: EnumDef, acc: List): List =
   buildCaseTags(enumName(e), enumCases(e), 0, acc)
 
 def buildCaseTags(en: String, cases: List, i: Int, acc: List): List =
@@ -66,19 +91,19 @@ def buildEnumPayloads(enums: List): List =
 def buildEnumPayloadsAcc(enums: List, acc: List): List =
   if (List.isEmpty(enums) == 1) acc else buildEnumPayloadsAcc(List.tail(enums), buildOneEnumPayloads(List.head(enums), acc))
 
-def buildOneEnumPayloads(e: List, acc: List): List =
+def buildOneEnumPayloads(e: EnumDef, acc: List): List =
   buildCasePayloads(enumName(e), enumCases(e), acc)
 
 def buildCasePayloads(en: String, cases: List, acc: List): List =
   if (List.isEmpty(cases) == 1) acc else buildCasePayloads(en, List.tail(cases), buildCasePayloadOne(en, List.head(cases), acc))
 
-def buildCasePayloadOne(en: String, c: List, acc: List): List =
+def buildCasePayloadOne(en: String, c: EnumCase, acc: List): List =
   if (List.isEmpty(caseFields(c)) == 1) acc else List.cons(str4(en, ".", caseName(c), str3("=", joinFieldTypes(caseFields(c), ""), "")), acc)
 
 def joinFieldTypes(fields: List, acc: String): String =
   if (List.isEmpty(fields) == 1) acc else joinFieldTypesCont(List.head(fields), List.tail(fields), acc)
 
-def joinFieldTypesCont(f: List, rest: List, acc: String): String =
+def joinFieldTypesCont(f: EnumField, rest: List, acc: String): String =
   for {
     one = fieldType(f)
     acc2 = if (Str.len(acc) == 0) one else str3(acc, "\n", one)
@@ -105,47 +130,85 @@ def payloadLookupKey(payloads: List, key: String): String =
 def payloadLookupKeyCont(row: String, rest: List, key: String): String =
   if (startsWith(row, Str.concat(key, "=")) == 1) Str.slice(row, Str.len(key) + 1, Str.len(row)) else payloadLookupKey(rest, key)
 
-def armPat(arm: List): List =
-  nodeExpr(arm, 0)
+def armPat(arm: MatchArm): Pattern =
+  arm match {
+    case MatchArm.Arm(pat, body) => pat
+  }
 
-def armBody(arm: List): List =
-  nodeExpr(arm, 1)
+def armBody(arm: MatchArm): Expr =
+  arm match {
+    case MatchArm.Arm(pat, body) => body
+  }
 
 def findWildArm(arms: List): List =
-  if (List.isEmpty(arms) == 1) List.empty() else if (streq(exprTag(armPat(List.head(arms))), "PatWild") == 1) List.head(arms) else findWildArm(List.tail(arms))
+  if (List.isEmpty(arms) == 1) List.empty() else findWildArmOne(List.head(arms), List.tail(arms))
 
-def defName(d: List): String =
-  nodeStr(d, 0)
+def findWildArmOne(arm: MatchArm, rest: List): List =
+  findWildArmPat(armPat(arm), arm, rest)
 
-def defParams(d: List): List =
-  nodeExpr(d, 1)
+def findWildArmPat(pat: Pattern, arm: MatchArm, rest: List): List =
+  pat match {
+    case Pattern.Wild => List.cons(arm, List.empty())
+    case Pattern.Adt(enumName, caseName, binds) => findWildArm(rest)
+  }
 
-def defRet(d: List): String =
-  nodeStr(d, 2)
+def defName(d: Def): String =
+  d match {
+    case Def.Def(name, params, ret, body, module) => name
+  }
 
-def defBody(d: List): List =
-  nodeExpr(d, 3)
+def defParams(d: Def): List =
+  d match {
+    case Def.Def(name, params, ret, body, module) => params
+  }
 
-def defModule(d: List): String =
-  nodeStr(d, 4)
+def defRet(d: Def): String =
+  d match {
+    case Def.Def(name, params, ret, body, module) => ret
+  }
 
-def setDefModule(d: List, mod: String): List =
-  List.cons("Def", List.cons(defName(d), List.cons(defParams(d), List.cons(defRet(d), List.cons(defBody(d), List.cons(mod, List.empty()))))))
+def defBody(d: Def): Expr =
+  d match {
+    case Def.Def(name, params, ret, body, module) => body
+  }
+
+def defModule(d: Def): String =
+  d match {
+    case Def.Def(name, params, ret, body, module) => module
+  }
+
+def setDefModule(d: Def, mod: String): Def =
+  d match {
+    case Def.Def(name, params, ret, body, module) => Def.Def(name, params, ret, body, mod)
+  }
 
 def stampDefsModule(defs: List, mod: String): List =
   if (List.isEmpty(defs) == 1) List.empty() else List.cons(setDefModule(List.head(defs), mod), stampDefsModule(List.tail(defs), mod))
 
-def paramName(p: String): String =
-  paramNameFrom(Str.slice(p, 6, Str.len(p)))
+def paramName(p: Param): String =
+  p match {
+    case Param.Param(name, ty) => name
+  }
 
-def paramNameFrom(rest: String): String =
-  Str.slice(rest, 0, indexOfChar(rest, 58, 0))
+def paramType(p: Param): String =
+  p match {
+    case Param.Param(name, ty) => ty
+  }
 
-def paramType(p: String): String =
-  paramTypeFrom(Str.slice(p, 6, Str.len(p)))
+def funHit(d: Def): List =
+  List.cons("Hit", List.cons(d, List.empty()))
 
-def paramTypeFrom(rest: String): String =
-  Str.slice(rest, indexOfChar(rest, 58, 0) + 1, Str.len(rest))
+def funAmbiguous(): List =
+  List.cons("Ambiguous", List.empty())
+
+def resolvedDef(d: List): Def =
+  List.head(List.tail(d))
+
+def enumHit(e: EnumDef): List =
+  List.cons(e, List.empty())
+
+def caseHit(c: EnumCase): List =
+  List.cons(c, List.empty())
 
 def llvmTypeOf(ty: String): String =
   if (streq(ty, "Int") == 1) "i64" else if (streq(ty, "Bool") == 1) "i64" else "ptr"
@@ -157,10 +220,10 @@ def kindOfIoType(ty: String): String =
   if (streq(ty, "IO[Int]") == 1) "ioi" else "io"
 
 def findDef(defs: List, name: String): List =
-  if (List.isEmpty(defs) == 1) List.empty() else if (streq(defName(List.head(defs)), name) == 1) List.head(defs) else findDef(List.tail(defs), name)
+  if (List.isEmpty(defs) == 1) List.empty() else if (streq(defName(List.head(defs)), name) == 1) funHit(List.head(defs)) else findDef(List.tail(defs), name)
 
 def findDefByQual(defs: List, module: String, name: String): List =
-  if (List.isEmpty(defs) == 1) List.empty() else if (streq(defModule(List.head(defs)), module) == 1) if (streq(defName(List.head(defs)), name) == 1) List.head(defs) else findDefByQual(List.tail(defs), module, name) else findDefByQual(List.tail(defs), module, name)
+  if (List.isEmpty(defs) == 1) List.empty() else if (streq(defModule(List.head(defs)), module) == 1) if (streq(defName(List.head(defs)), name) == 1) funHit(List.head(defs)) else findDefByQual(List.tail(defs), module, name) else findDefByQual(List.tail(defs), module, name)
 
 def collectDefsByName(defs: List, name: String, acc: List): List =
   if (List.isEmpty(defs) == 1) List.reverse(acc) else if (streq(defName(List.head(defs)), name) == 1) collectDefsByName(List.tail(defs), name, List.cons(List.head(defs), acc)) else collectDefsByName(List.tail(defs), name, acc)
@@ -171,7 +234,7 @@ def resolveFunQual(defs: List, module: String, name: String): List =
 def resolveFunBareUnique(defs: List, name: String): List =
   for {
     hits = collectDefsByName(defs, name, List.empty())
-  } yield if (List.isEmpty(hits) == 1) List.empty() else if (List.isEmpty(List.tail(hits)) == 1) List.head(hits) else List.cons("Ambiguous", List.empty())
+  } yield if (List.isEmpty(hits) == 1) List.empty() else if (List.isEmpty(List.tail(hits)) == 1) funHit(List.head(hits)) else funAmbiguous()
 
 def resolveFunBare(defs: List, name: String, currentModule: String): List =
   for {
@@ -195,11 +258,33 @@ def strIndexAt(strs: List, s: String, i: Int): Int =
 def collectPush(strs: List, s: String): List =
   if (strContains(strs, s) == 1) strs else List.cons(s, strs)
 
-def collectExpr(e: List, strs: List): List =
-  collectExprTag(exprTag(e), e, strs)
-
-def collectExprTag(tag: String, e: List, strs: List): List =
-  if (streq(tag, "StrLit") == 1) collectPush(strs, nodeStr(e, 0)) else if (streq(tag, "Println") == 1) collectExpr(nodeExpr(e, 0), strs) else if (streq(tag, "Fail") == 1) collectExpr(nodeExpr(e, 0), strs) else if (streq(tag, "Pure") == 1) collectExpr(nodeExpr(e, 0), strs) else if (streq(tag, "Sleep") == 1) collectExpr(nodeExpr(e, 0), strs) else if (streq(tag, "FlatMap") == 1) collectExpr(nodeExpr(e, 2), collectExpr(nodeExpr(e, 0), strs)) else if (streq(tag, "Handle") == 1) collectExpr(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs)) else if (streq(tag, "Attempt") == 1) collectExpr(nodeExpr(e, 0), strs) else if (streq(tag, "Let") == 1) collectExpr(nodeExpr(e, 2), collectExpr(nodeExpr(e, 1), strs)) else if (streq(tag, "If") == 1) collectExpr(nodeExpr(e, 2), collectExpr(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs))) else if (streq(tag, "BinOp") == 1) collectExpr(nodeExpr(e, 2), collectExpr(nodeExpr(e, 1), strs)) else if (streq(tag, "Call") == 1) collectArgs(nodeExpr(e, 1), strs) else if (streq(tag, "Adt") == 1) collectArgs(nodeExpr(e, 2), strs) else if (streq(tag, "IoRace") == 1) collectExpr(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs)) else if (streq(tag, "IoBoth") == 1) collectExpr(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs)) else if (streq(tag, "Lambda") == 1) collectExpr(nodeExpr(e, 1), strs) else if (streq(tag, "Interp") == 1) collectInterpParts(nodeExpr(e, 0), strs) else if (streq(tag, "ListLit") == 1) collectArgs(nodeExpr(e, 0), strs) else if (streq(tag, "Match") == 1) collectMatchArms(nodeExpr(e, 1), collectExpr(nodeExpr(e, 0), strs)) else strs
+def collectExpr(e: Expr, strs: List): List =
+  e match {
+    case Expr.StrLit(value, span) => collectPush(strs, value)
+    case Expr.Println(arg, span) => collectExpr(arg, strs)
+    case Expr.Fail(arg, span) => collectExpr(arg, strs)
+    case Expr.Pure(arg, span) => collectExpr(arg, strs)
+    case Expr.Sleep(arg, span) => collectExpr(arg, strs)
+    case Expr.FlatMap(inner, param, body, span) => collectExpr(body, collectExpr(inner, strs))
+    case Expr.Handle(inner, body, span) => collectExpr(body, collectExpr(inner, strs))
+    case Expr.Attempt(inner, span) => collectExpr(inner, strs)
+    case Expr.Let(name, value, body, span) => collectExpr(body, collectExpr(value, strs))
+    case Expr.If(cond, thenB, elseB, span) => collectExpr(elseB, collectExpr(thenB, collectExpr(cond, strs)))
+    case Expr.BinOp(op, left, right, span) => collectExpr(right, collectExpr(left, strs))
+    case Expr.Call(callee, args, span) => collectArgs(args, strs)
+    case Expr.Adt(enumName, caseName, args, span) => collectArgs(args, strs)
+    case Expr.IoRace(left, right, span) => collectExpr(right, collectExpr(left, strs))
+    case Expr.IoBoth(left, right, span) => collectExpr(right, collectExpr(left, strs))
+    case Expr.Lambda(param, body, span) => collectExpr(body, strs)
+    case Expr.Interp(parts, span) => collectInterpParts(parts, strs)
+    case Expr.ListLit(elems, span) => collectArgs(elems, strs)
+    case Expr.Match(scrut, arms, span) => collectMatchArms(arms, collectExpr(scrut, strs))
+    case Expr.Unit(span) => strs
+    case Expr.IntLit(digits, span) => strs
+    case Expr.Var(name, span) => strs
+    case Expr.For(binders, body, span) => strs
+    case Expr.Delay(span) => strs
+  }
 
 def collectInterpParts(parts: List, strs: List): List =
   if (List.isEmpty(parts) == 1) strs else collectInterpParts(List.tail(parts), collectInterpPart(List.head(parts), strs))
@@ -219,7 +304,7 @@ def collectMatchArms(arms: List, strs: List): List =
 def collectDefs(defs: List, strs: List): List =
   if (List.isEmpty(defs) == 1) strs else collectDefs(List.tail(defs), collectExpr(defBody(List.head(defs)), strs))
 
-def collectProgram(prog: List): List =
+def collectProgram(prog: Prog): List =
   List.reverse(collectExpr(progMain(prog), collectDefs(progDefs(prog), List.empty())))
 
 def emitStrConsts(strs: List, i: Int, acc: String): String =
@@ -249,8 +334,8 @@ def emitHeader(strs: List): String =
 def ensureIoPair(code: String, kind: String, value: String, tmp: String): List =
   if (isIoKind(kind) == 1) pair(code, value) else if (streq(kind, "int") == 1) pair(str4(code, "  %", tmp, Str.concat(str4("_box = call ptr @sz_box_i64(i64 ", value, ")\n  %", tmp), str3(" = call ptr @sz_io_pure(ptr %", tmp, "_box)\n"))), Str.concat("%", tmp)) else pair(str4(code, "  %", tmp, str3(" = call ptr @sz_io_pure(ptr ", value, ")\n")), Str.concat("%", tmp))
 
-def emitSzString(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  if (streq(exprTag(e), "StrLit") == 1) emitSzStringLit(strs, nodeStr(e, 0), prefix, id, conts) else emitSzStringExpr(strs, e, ctx, env, prefix, id, conts)
+def emitSzString(strs: List, e: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+  if (isStrLitExpr(e) == 1) emitSzStringLit(strs, strLitExprValue(e), prefix, id, conts) else emitSzStringExpr(strs, e, ctx, env, prefix, id, conts)
 
 def emitSzStringLit(strs: List, s: String, prefix: String, id: Int, conts: String): List =
   for {
@@ -260,11 +345,11 @@ def emitSzStringLit(strs: List, s: String, prefix: String, id: Int, conts: Strin
     code2 = str4(code, prefix, "_ss = call ptr @sz_string_from_cstr(ptr %", str3(prefix, "_gep", ")\n"))
   } yield mkS(code2, str3("%", prefix, "_ss"), "ptr", id, conts)
 
-def emitSzStringExpr(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+def emitSzStringExpr(strs: List, e: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   emitExpr(e, strs, ctx, env, Str.concat(prefix, "_e"), id, conts)
 
-def emitCstr(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  if (streq(exprTag(e), "StrLit") == 1) emitCstrLit(strs, nodeStr(e, 0), prefix, id, conts) else emitCstrExpr(strs, e, ctx, env, prefix, id, conts)
+def emitCstr(strs: List, e: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+  if (isStrLitExpr(e) == 1) emitCstrLit(strs, strLitExprValue(e), prefix, id, conts) else emitCstrExpr(strs, e, ctx, env, prefix, id, conts)
 
 def emitCstrLit(strs: List, s: String, prefix: String, id: Int, conts: String): List =
   for {
@@ -273,28 +358,50 @@ def emitCstrLit(strs: List, s: String, prefix: String, id: Int, conts: String): 
     code = str4("  %", prefix, "_cstr = getelementptr inbounds [", str4(Str.fromInt(len), " x i8], ptr @.str", Str.fromInt(idx), ", i64 0, i64 0\n"))
   } yield mkS(code, str3("%", prefix, "_cstr"), "ptr", id, conts)
 
-def emitCstrExpr(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+def emitCstrExpr(strs: List, e: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   for {
     se = emitExpr(e, strs, ctx, env, Str.concat(prefix, "_s"), id, conts)
   } yield mkS(str4(sCode(se), "  %", prefix, str3("_cstr = call ptr @sz_string_cstr(ptr ", sValue(se), ")\n")), str3("%", prefix, "_cstr"), "ptr", sId(se), sConts(se))
 
-def emitExpr(e: List, strs: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  emitExprTag(exprTag(e), e, strs, ctx, env, prefix, id, conts)
+def emitExpr(e: Expr, strs: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+  e match {
+    case Expr.Unit(span) => mkS("", "null", "ptr", id, conts)
+    case Expr.IntLit(digits, span) => mkS("", digits, "int", id, conts)
+    case Expr.StrLit(value, span) => emitSzStringLit(strs, value, prefix, id, conts)
+    case Expr.Var(name, span) => mkS("", envGetVal(env, name), envGetKind(env, name), id, conts)
+    case Expr.Delay(span) => mkS(str3("  %", prefix, "_delay = call ptr @sz_io_delay(ptr @sz_delay_unit_thunk, ptr null)\n"), str3("%", prefix, "_delay"), "io", id, conts)
+    case Expr.Println(arg, span) => emitPrintln(strs, arg, ctx, env, prefix, id, conts)
+    case Expr.Fail(arg, span) => emitFail(strs, arg, ctx, env, prefix, id, conts)
+    case Expr.Pure(arg, span) => emitPure(strs, arg, ctx, env, prefix, id, conts)
+    case Expr.Sleep(arg, span) => emitSleep(strs, arg, ctx, env, prefix, id, conts)
+    case Expr.Let(name, value, body, span) => emitLet(strs, name, value, body, ctx, env, prefix, id, conts)
+    case Expr.If(cond, thenB, elseB, span) => emitIf(strs, cond, thenB, elseB, ctx, env, prefix, id, conts)
+    case Expr.BinOp(op, left, right, span) => emitBinOp(strs, op, left, right, ctx, env, prefix, id, conts)
+    case Expr.Call(callee, args, span) => emitCall(strs, callee, args, ctx, env, prefix, id, conts)
+    case Expr.FlatMap(inner, param, body, span) => emitFlatMap(strs, inner, param, body, ctx, env, prefix, id, conts)
+    case Expr.Handle(inner, body, span) => emitHandle(strs, inner, body, ctx, env, prefix, id, conts)
+    case Expr.Attempt(inner, span) => emitAttempt(strs, inner, ctx, env, prefix, id, conts)
+    case Expr.IoRace(left, right, span) => emitRaceBoth(strs, left, right, ctx, env, prefix, id, conts, "race")
+    case Expr.IoBoth(left, right, span) => emitRaceBoth(strs, left, right, ctx, env, prefix, id, conts, "both")
+    case Expr.Adt(enumName, caseName, args, span) => emitAdt(strs, enumName, caseName, args, ctx, env, prefix, id, conts)
+    case Expr.Match(scrut, arms, span) => emitMatch(strs, scrut, arms, ctx, env, prefix, id, conts)
+    case Expr.Lambda(param, body, span) => emitLambda(strs, param, body, ctx, env, prefix, id, conts)
+    case Expr.Interp(parts, span) => emitInterp(strs, parts, ctx, env, prefix, id, conts)
+    case Expr.ListLit(elems, span) => emitListLit(strs, elems, ctx, env, prefix, id, conts)
+    case Expr.For(binders, body, span) => mkS("", "null", "ptr", id, conts)
+  }
 
-def emitExprTag(tag: String, e: List, strs: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  if (streq(tag, "Unit") == 1) mkS("", "null", "ptr", id, conts) else if (streq(tag, "IntLit") == 1) mkS("", nodeStr(e, 0), "int", id, conts) else if (streq(tag, "StrLit") == 1) emitSzStringLit(strs, nodeStr(e, 0), prefix, id, conts) else if (streq(tag, "Var") == 1) mkS("", envGetVal(env, nodeStr(e, 0)), envGetKind(env, nodeStr(e, 0)), id, conts) else if (streq(tag, "Delay") == 1) mkS(str3("  %", prefix, "_delay = call ptr @sz_io_delay(ptr @sz_delay_unit_thunk, ptr null)\n"), str3("%", prefix, "_delay"), "io", id, conts) else if (streq(tag, "Println") == 1) emitPrintln(strs, nodeExpr(e, 0), ctx, env, prefix, id, conts) else if (streq(tag, "Fail") == 1) emitFail(strs, nodeExpr(e, 0), ctx, env, prefix, id, conts) else if (streq(tag, "Pure") == 1) emitPure(strs, nodeExpr(e, 0), ctx, env, prefix, id, conts) else if (streq(tag, "Sleep") == 1) emitSleep(strs, nodeExpr(e, 0), ctx, env, prefix, id, conts) else if (streq(tag, "Let") == 1) emitLet(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "If") == 1) emitIf(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "BinOp") == 1) emitBinOp(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Call") == 1) emitCall(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "FlatMap") == 1) emitFlatMap(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Handle") == 1) emitHandle(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Attempt") == 1) emitAttempt(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "IoRace") == 1) emitRaceBoth(strs, e, ctx, env, prefix, id, conts, "race") else if (streq(tag, "IoBoth") == 1) emitRaceBoth(strs, e, ctx, env, prefix, id, conts, "both") else if (streq(tag, "Adt") == 1) emitAdt(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Match") == 1) emitMatch(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Lambda") == 1) emitLambda(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "Interp") == 1) emitInterp(strs, e, ctx, env, prefix, id, conts) else if (streq(tag, "ListLit") == 1) emitListLit(strs, e, ctx, env, prefix, id, conts) else mkS("", "null", "ptr", id, conts)
-
-def emitPrintln(strs: List, arg: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+def emitPrintln(strs: List, arg: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   for {
     se = emitSzString(strs, arg, ctx, env, prefix, id, conts)
   } yield mkS(str4(sCode(se), "  %", prefix, str3("_io = call ptr @sz_io_println(ptr ", sValue(se), ")\n")), str3("%", prefix, "_io"), "io", sId(se), sConts(se))
 
-def emitFail(strs: List, arg: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+def emitFail(strs: List, arg: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   for {
     ce = emitCstr(strs, arg, ctx, env, prefix, id, conts)
   } yield mkS(str4(sCode(ce), "  %", prefix, str3("_io = call ptr @sz_io_fail_cstr(ptr ", sValue(ce), ")\n")), str3("%", prefix, "_io"), "io", sId(ce), sConts(ce))
 
-def emitPure(strs: List, inner: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+def emitPure(strs: List, inner: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   for {
     ie = emitExpr(inner, strs, ctx, env, Str.concat(prefix, "_p"), id, conts)
   } yield emitPureCont(ie, prefix)
@@ -302,7 +409,7 @@ def emitPure(strs: List, inner: List, ctx: List, env: List, prefix: String, id: 
 def emitPureCont(ie: List, prefix: String): List =
   if (streq(sKind(ie), "int") == 1) mkS(str4(sCode(ie), "  %", prefix, str6("_box = call ptr @sz_box_i64(i64 ", sValue(ie), ")\n  %", prefix, "_io = call ptr @sz_io_pure(ptr %", str3(prefix, "_box", ")\n"))), str3("%", prefix, "_io"), "ioi", sId(ie), sConts(ie)) else if (isIoKind(sKind(ie)) == 1) mkS(str4(sCode(ie), "  %", prefix, str3("_io = call ptr @sz_io_pure(ptr ", sValue(ie), ")\n")), str3("%", prefix, "_io"), sKind(ie), sId(ie), sConts(ie)) else mkS(str4(sCode(ie), "  %", prefix, str3("_io = call ptr @sz_io_pure(ptr ", sValue(ie), ")\n")), str3("%", prefix, "_io"), "io", sId(ie), sConts(ie))
 
-def emitSleep(strs: List, ms: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+def emitSleep(strs: List, ms: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   for {
     me = emitExpr(ms, strs, ctx, env, Str.concat(prefix, "_ms"), id, conts)
   } yield emitSleepCont(me, prefix)
@@ -310,20 +417,19 @@ def emitSleep(strs: List, ms: List, ctx: List, env: List, prefix: String, id: In
 def emitSleepCont(me: List, prefix: String): List =
   if (streq(sKind(me), "int") == 1) mkS(str4(sCode(me), "  %", prefix, str3("_sleep = call ptr @sz_io_sleep_ms(i64 ", sValue(me), ")\n")), str3("%", prefix, "_sleep"), "io", sId(me), sConts(me)) else mkS(str5(sCode(me), "  %", prefix, "_ms0 = add i64 0, 0\n  %", str4(prefix, "_sleep = call ptr @sz_io_sleep_ms(i64 %", prefix, "_ms0)\n")), str3("%", prefix, "_sleep"), "io", sId(me), sConts(me))
 
-def emitLet(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+def emitLet(strs: List, name: String, value: Expr, body: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   for {
-    name = nodeStr(e, 0)
-    ve = emitExpr(nodeExpr(e, 1), strs, ctx, env, str4(prefix, "_lv_", name, ""), id, conts)
+    ve = emitExpr(value, strs, ctx, env, str4(prefix, "_lv_", name, ""), id, conts)
     env2 = envPut(env, name, sValue(ve), sKind(ve))
-    be = emitExpr(nodeExpr(e, 2), strs, ctx, env2, str4(prefix, "_l_", name, ""), sId(ve), sConts(ve))
+    be = emitExpr(body, strs, ctx, env2, str4(prefix, "_l_", name, ""), sId(ve), sConts(ve))
   } yield mkS(Str.concat(sCode(ve), sCode(be)), sValue(be), sKind(be), sId(be), sConts(be))
 
-def emitIf(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+def emitIf(strs: List, condE: Expr, thenB: Expr, elseB: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   for {
-    ce = emitExpr(nodeExpr(e, 0), strs, ctx, env, Str.concat(prefix, "_ic"), id, conts)
-  } yield emitIfAfterCond(strs, e, ctx, env, prefix, ce)
+    ce = emitExpr(condE, strs, ctx, env, Str.concat(prefix, "_ic"), id, conts)
+  } yield emitIfAfterCond(strs, thenB, elseB, ctx, env, prefix, ce)
 
-def emitIfAfterCond(strs: List, e: List, ctx: List, env: List, prefix: String, ce: List): List =
+def emitIfAfterCond(strs: List, thenB: Expr, elseB: Expr, ctx: List, env: List, prefix: String, ce: List): List =
   for {
     id = sId(ce)
     cond = if (streq(sKind(ce), "int") == 1) sValue(ce) else str3("%", prefix, "_c0")
@@ -334,17 +440,16 @@ def emitIfAfterCond(strs: List, e: List, ctx: List, env: List, prefix: String, c
     elseJ = str4(prefix, "_ej_", Str.fromInt(id), "")
     merge = str4(prefix, "_merge_", Str.fromInt(id), "")
     head = str4(pre, "  %", prefix, str5("_cmp = icmp ne i64 ", cond, ", 0\n  br i1 %", prefix, str5("_cmp, label %", thenL, ", label %", elseL, "\n")))
-    te = emitExpr(nodeExpr(e, 1), strs, ctx, env, Str.concat(prefix, Str.concat("_t", Str.fromInt(id))), id + 1, sConts(ce))
-    ee = emitExpr(nodeExpr(e, 2), strs, ctx, env, Str.concat(prefix, Str.concat("_e", Str.fromInt(id))), sId(te), sConts(te))
+    te = emitExpr(thenB, strs, ctx, env, Str.concat(prefix, Str.concat("_t", Str.fromInt(id))), id + 1, sConts(ce))
+    ee = emitExpr(elseB, strs, ctx, env, Str.concat(prefix, Str.concat("_e", Str.fromInt(id))), sId(te), sConts(te))
     ty = if (streq(sKind(te), "int") == 1) "i64" else "ptr"
     body = str4(head, thenL, ":\n", str4(sCode(te), "  br label %", thenJ, str5("\n", thenJ, ":\n  br label %", merge, str4("\n", elseL, ":\n", str4(sCode(ee), "  br label %", elseJ, str5("\n", elseJ, ":\n  br label %", merge, str5("\n", merge, ":\n  %", prefix, str5("_phi = phi ", ty, " [ ", sValue(te), str5(", %", thenJ, " ], [ ", sValue(ee), str3(", %", elseJ, " ]\n"))))))))))
   } yield mkS(body, str3("%", prefix, "_phi"), sKind(te), sId(ee), sConts(ee))
 
-def emitBinOp(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+def emitBinOp(strs: List, op: String, left: Expr, right: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   for {
-    op = nodeStr(e, 0)
-    le = emitExpr(nodeExpr(e, 1), strs, ctx, env, Str.concat(prefix, "_l"), id, conts)
-    re = emitExpr(nodeExpr(e, 2), strs, ctx, env, Str.concat(prefix, "_r"), sId(le), sConts(le))
+    le = emitExpr(left, strs, ctx, env, Str.concat(prefix, "_l"), id, conts)
+    re = emitExpr(right, strs, ctx, env, Str.concat(prefix, "_r"), sId(le), sConts(le))
   } yield emitBinOpCont(op, le, re, prefix)
 
 def emitBinOpCont(op: String, le: List, re: List, prefix: String): List =
@@ -374,16 +479,15 @@ def icmpPred(op: String): String =
 def emitIcmp(op: String, code: String, lv: String, rv: String, prefix: String, id: Int, conts: String): List =
   mkS(str4(code, "  %", prefix, str5("_cmp = icmp ", icmpPred(op), " i64 ", lv, str6(", ", rv, "\n  %", prefix, "_v = zext i1 %", str3(prefix, "_cmp", " to i64\n")))), str3("%", prefix, "_v"), "int", id, conts)
 
-def emitAdt(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+def emitAdt(strs: List, enumName: String, caseName: String, args: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   for {
-    tag = tagLookup(ctxTags(ctx), nodeStr(e, 0), nodeStr(e, 1))
-    args = nodeExpr(e, 2)
-  } yield if (List.isEmpty(args) == 1) mkS(str5("  %", prefix, "_adt = call ptr @sz_adt_new(i32 ", tag, ", ptr null)\n"), str3("%", prefix, "_adt"), "ptr", id, conts) else if (List.len(args) == 1) emitAdtWithArg(strs, e, ctx, env, prefix, id, conts, tag, List.head(args)) else emitAdtMulti(strs, e, ctx, env, prefix, id, conts, tag, args)
+    tag = tagLookup(ctxTags(ctx), enumName, caseName)
+  } yield if (List.isEmpty(args) == 1) mkS(str5("  %", prefix, "_adt = call ptr @sz_adt_new(i32 ", tag, ", ptr null)\n"), str3("%", prefix, "_adt"), "ptr", id, conts) else if (List.len(args) == 1) emitAdtWithArg(strs, enumName, caseName, ctx, env, prefix, id, conts, tag, List.head(args)) else emitAdtMulti(strs, enumName, caseName, ctx, env, prefix, id, conts, tag, args)
 
-def emitAdtWithArg(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String, tag: String, arg: List): List =
+def emitAdtWithArg(strs: List, enumName: String, caseName: String, ctx: List, env: List, prefix: String, id: Int, conts: String, tag: String, arg: Expr): List =
   for {
     ae = emitExpr(arg, strs, ctx, env, Str.concat(prefix, "_ap"), id, conts)
-    pty = payloadLookup(ctxPayloads(ctx), nodeStr(e, 0), nodeStr(e, 1))
+    pty = payloadLookup(ctxPayloads(ctx), enumName, caseName)
   } yield emitAdtFinish(ae, prefix, tag, List.head(payloadTypeList(pty)))
 
 def emitAdtFinish(ae: List, prefix: String, tag: String, pty: String): List =
@@ -395,16 +499,16 @@ def emitAdtIntPayload(ae: List, prefix: String, tag: String): List =
     pre = if (streq(sKind(ae), "int") == 1) sCode(ae) else str4(sCode(ae), "  %", prefix, "_ap0 = add i64 0, 0\n")
   } yield mkS(str4(pre, "  %", prefix, str5("_box = call ptr @sz_box_i64(i64 ", v, ")\n  %", prefix, str4("_adt = call ptr @sz_adt_new(i32 ", tag, ", ptr %", Str.concat(prefix, "_box)\n")))), str3("%", prefix, "_adt"), "ptr", sId(ae), sConts(ae))
 
-def emitAdtMulti(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String, tag: String, args: List): List =
+def emitAdtMulti(strs: List, enumName: String, caseName: String, ctx: List, env: List, prefix: String, id: Int, conts: String, tag: String, args: List): List =
   for {
-    pty = payloadLookup(ctxPayloads(ctx), nodeStr(e, 0), nodeStr(e, 1))
+    pty = payloadLookup(ctxPayloads(ctx), enumName, caseName)
     tys = payloadTypeList(pty)
   } yield emitAdtMultiPack(strs, List.reverse(args), List.reverse(tys), ctx, env, prefix, id, conts, tag, List.len(args), str3("  %", prefix, "_pl0 = call ptr @sz_list_nil()\n"), str3("%", prefix, "_pl0"), 0)
 
 def emitAdtMultiPack(strs: List, argsRev: List, tysRev: List, ctx: List, env: List, prefix: String, id: Int, conts: String, tag: String, n: Int, code: String, cur: String, packed: Int): List =
   if (List.isEmpty(argsRev) == 1) mkS(str4(code, "  %", prefix, str5("_adt = call ptr @sz_adt_new(i32 ", tag, ", ptr ", cur, ")\n")), str3("%", prefix, "_adt"), "ptr", id, conts) else emitAdtMultiPackOne(strs, List.head(argsRev), List.head(tysRev), List.tail(argsRev), List.tail(tysRev), ctx, env, prefix, id, conts, tag, n, code, cur, packed)
 
-def emitAdtMultiPackOne(strs: List, arg: List, ty: String, argsRev: List, tysRev: List, ctx: List, env: List, prefix: String, id: Int, conts: String, tag: String, n: Int, code: String, cur: String, packed: Int): List =
+def emitAdtMultiPackOne(strs: List, arg: Expr, ty: String, argsRev: List, tysRev: List, ctx: List, env: List, prefix: String, id: Int, conts: String, tag: String, n: Int, code: String, cur: String, packed: Int): List =
   for {
     idx = n - 1 - packed
     ae = emitExpr(arg, strs, ctx, env, str3(prefix, "_ap", Str.fromInt(idx)), id, conts)
@@ -423,20 +527,23 @@ def emitAdtMultiBoxInt(ae: List, prefix: String, idx: Int, code: String, next: S
 def emitSwitchLabels(arms: List, tags: List, prefix: String, mid: Int, i: Int): String =
   if (List.isEmpty(arms) == 1) "" else emitSwitchLabelOne(List.head(arms), List.tail(arms), tags, prefix, mid, i)
 
-def emitSwitchLabelOne(arm: List, rest: List, tags: List, prefix: String, mid: Int, i: Int): String =
-  for {
-    pat = armPat(arm)
-  } yield if (streq(exprTag(pat), "PatWild") == 1) emitSwitchLabels(rest, tags, prefix, mid, i + 1) else str5(" i32 ", tagLookup(tags, nodeStr(pat, 0), nodeStr(pat, 1)), ", label %", str4(prefix, "_arm_", Str.fromInt(mid), str3("_", Str.fromInt(i), "")), emitSwitchLabels(rest, tags, prefix, mid, i + 1))
+def emitSwitchLabelOne(arm: MatchArm, rest: List, tags: List, prefix: String, mid: Int, i: Int): String =
+  emitSwitchLabelPat(armPat(arm), rest, tags, prefix, mid, i)
 
-def emitMatch(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  for {
-    se = emitExpr(nodeExpr(e, 0), strs, ctx, env, Str.concat(prefix, "_sc"), id, conts)
-  } yield emitMatchAfterScrut(strs, e, ctx, env, prefix, se)
+def emitSwitchLabelPat(pat: Pattern, rest: List, tags: List, prefix: String, mid: Int, i: Int): String =
+  pat match {
+    case Pattern.Wild => emitSwitchLabels(rest, tags, prefix, mid, i + 1)
+    case Pattern.Adt(enumName, caseName, binds) => str5(" i32 ", tagLookup(tags, enumName, caseName), ", label %", str4(prefix, "_arm_", Str.fromInt(mid), str3("_", Str.fromInt(i), "")), emitSwitchLabels(rest, tags, prefix, mid, i + 1))
+  }
 
-def emitMatchAfterScrut(strs: List, e: List, ctx: List, env: List, prefix: String, se: List): List =
+def emitMatch(strs: List, scrut: Expr, arms: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+  for {
+    se = emitExpr(scrut, strs, ctx, env, Str.concat(prefix, "_sc"), id, conts)
+  } yield emitMatchAfterScrut(strs, arms, ctx, env, prefix, se)
+
+def emitMatchAfterScrut(strs: List, arms: List, ctx: List, env: List, prefix: String, se: List): List =
   for {
     mid = sId(se)
-    arms = nodeExpr(e, 1)
     merge = str4(prefix, "_merge_", Str.fromInt(mid), "")
     defaultL = str4(prefix, "_default_", Str.fromInt(mid), "")
     sw = str4(sCode(se), "  %", prefix, str5("_tag = call i32 @sz_adt_tag(ptr ", sValue(se), ")\n  switch i32 %", prefix, str5("_tag, label %", defaultL, " [", emitSwitchLabels(arms, ctxTags(ctx), prefix, mid, 0), " ]\n")))
@@ -446,28 +553,39 @@ def emitMatchAfterScrut(strs: List, e: List, ctx: List, env: List, prefix: Strin
 def emitMatchArms(strs: List, arms: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, scrut: String, id: Int, conts: String, code: String, phi: String, kind: String, i: Int): List =
   if (List.isEmpty(arms) == 1) mkS(code, phi, kind, id, conts) else emitMatchArmOne(List.head(arms), List.tail(arms), strs, ctx, env, prefix, mid, merge, scrut, id, conts, code, phi, kind, i)
 
-def emitMatchArmOne(arm: List, rest: List, strs: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, scrut: String, id: Int, conts: String, code: String, phi: String, kind: String, i: Int): List =
-  if (streq(exprTag(armPat(arm)), "PatWild") == 1) emitMatchArms(strs, rest, ctx, env, prefix, mid, merge, scrut, id, conts, code, phi, kind, i + 1) else emitMatchArmBody(arm, rest, strs, ctx, env, prefix, mid, merge, scrut, id, conts, code, phi, kind, i)
+def emitMatchArmOne(arm: MatchArm, rest: List, strs: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, scrut: String, id: Int, conts: String, code: String, phi: String, kind: String, i: Int): List =
+  emitMatchArmOnePat(armPat(arm), arm, rest, strs, ctx, env, prefix, mid, merge, scrut, id, conts, code, phi, kind, i)
 
-def emitMatchArmBody(arm: List, rest: List, strs: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, scrut: String, id: Int, conts: String, code: String, phi: String, kind: String, i: Int): List =
+def emitMatchArmOnePat(pat: Pattern, arm: MatchArm, rest: List, strs: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, scrut: String, id: Int, conts: String, code: String, phi: String, kind: String, i: Int): List =
+  pat match {
+    case Pattern.Wild => emitMatchArms(strs, rest, ctx, env, prefix, mid, merge, scrut, id, conts, code, phi, kind, i + 1)
+    case Pattern.Adt(enumName, caseName, binds) => emitMatchArmBody(arm, rest, strs, ctx, env, prefix, mid, merge, scrut, id, conts, code, phi, kind, i)
+  }
+
+def emitMatchArmBody(arm: MatchArm, rest: List, strs: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, scrut: String, id: Int, conts: String, code: String, phi: String, kind: String, i: Int): List =
   for {
     label = str4(prefix, "_arm_", Str.fromInt(mid), str3("_", Str.fromInt(i), ""))
+    armJoin = str4(prefix, "_aj_", Str.fromInt(mid), str3("_", Str.fromInt(i), ""))
     bound = emitPatBind(armPat(arm), ctx, env, prefix, mid, i, scrut)
     ae = emitExpr(armBody(arm), strs, ctx, sndL(bound), str4(prefix, "_a", Str.fromInt(mid), str3("_", Str.fromInt(i), "")), id, conts)
-    code2 = str5(code, label, ":\n", fst(bound), str4(sCode(ae), "  br label %", merge, "\n"))
-    phi2 = if (streq(phi, "") == 1) str5(" [ ", sValue(ae), ", %", label, " ]") else str5(phi, ", [ ", sValue(ae), Str.concat(", %", label), " ]")
+    code2 = str5(code, label, ":\n", fst(bound), str4(sCode(ae), "  br label %", armJoin, str4("\n", armJoin, ":\n  br label %", str3(merge, "\n", ""))))
+    phi2 = if (streq(phi, "") == 1) str5(" [ ", sValue(ae), ", %", armJoin, " ]") else str5(phi, ", [ ", sValue(ae), Str.concat(", %", armJoin), " ]")
     kind2 = if (streq(phi, "") == 1) sKind(ae) else kind
   } yield emitMatchArms(strs, rest, ctx, env, prefix, mid, merge, scrut, sId(ae), sConts(ae), code2, phi2, kind2, i + 1)
 
-def emitPatBind(pat: List, ctx: List, env: List, prefix: String, mid: Int, i: Int, scrut: String): List =
-  for {
-    binds = nodeExpr(pat, 2)
-  } yield if (List.isEmpty(binds) == 1) pairSL("", env) else emitPatBindPayload(pat, ctx, env, prefix, mid, i, scrut, binds)
+def emitPatBind(pat: Pattern, ctx: List, env: List, prefix: String, mid: Int, i: Int, scrut: String): List =
+  emitPatBindPat(pat, ctx, env, prefix, mid, i, scrut)
 
-def emitPatBindPayload(pat: List, ctx: List, env: List, prefix: String, mid: Int, i: Int, scrut: String, binds: List): List =
+def emitPatBindPat(pat: Pattern, ctx: List, env: List, prefix: String, mid: Int, i: Int, scrut: String): List =
+  pat match {
+    case Pattern.Wild => pairSL("", env)
+    case Pattern.Adt(enumName, caseName, binds) => if (List.isEmpty(binds) == 1) pairSL("", env) else emitPatBindPayload(enumName, caseName, binds, ctx, env, prefix, mid, i, scrut)
+  }
+
+def emitPatBindPayload(enumName: String, caseName: String, binds: List, ctx: List, env: List, prefix: String, mid: Int, i: Int, scrut: String): List =
   for {
     pl = str4(prefix, "_pl", Str.fromInt(mid), str3("_", Str.fromInt(i), ""))
-    pty = payloadLookup(ctxPayloads(ctx), nodeStr(pat, 0), nodeStr(pat, 1))
+    pty = payloadLookup(ctxPayloads(ctx), enumName, caseName)
     tys = payloadTypeList(pty)
     code = str5("  %", pl, " = call ptr @sz_adt_payload(ptr ", scrut, ")\n")
   } yield if (List.len(binds) == 1) emitPatBindUnary(code, pl, List.head(binds), List.head(tys), env, prefix, mid, i) else emitPatBindMulti(code, pl, binds, tys, env, prefix, mid, i, 0)
@@ -499,12 +617,13 @@ def emitMatchDefault(strs: List, arms: List, ctx: List, env: List, prefix: Strin
 
 def emitMatchDefaultWild(strs: List, wild: List, ctx: List, env: List, prefix: String, mid: Int, merge: String, defaultL: String, ar: List): List =
   for {
-    ae = emitExpr(armBody(wild), strs, ctx, env, str4(prefix, "_aw", Str.fromInt(mid), ""), sId(ar), sConts(ar))
+    defaultJoin = str4(prefix, "_dj_", Str.fromInt(mid), "")
+    ae = emitExpr(armBody(List.head(wild)), strs, ctx, env, str4(prefix, "_aw", Str.fromInt(mid), ""), sId(ar), sConts(ar))
     phi0 = sValue(ar)
     kind0 = sKind(ar)
     kind2 = if (streq(phi0, "") == 1) sKind(ae) else kind0
-    phi2 = if (streq(phi0, "") == 1) str5(" [ ", sValue(ae), ", %", defaultL, " ]") else str5(phi0, ", [ ", sValue(ae), Str.concat(", %", defaultL), " ]")
-    code2 = str4(sCode(ar), defaultL, ":\n", str4(sCode(ae), "  br label %", merge, "\n"))
+    phi2 = if (streq(phi0, "") == 1) str5(" [ ", sValue(ae), ", %", defaultJoin, " ]") else str5(phi0, ", [ ", sValue(ae), Str.concat(", %", defaultJoin), " ]")
+    code2 = str4(sCode(ar), defaultL, ":\n", str4(sCode(ae), "  br label %", defaultJoin, str4("\n", defaultJoin, ":\n  br label %", str3(merge, "\n", ""))))
   } yield emitMatchFinish(code2, phi2, kind2, sId(ae), sConts(ae), prefix, merge)
 
 def emitMatchDefaultSynth(prefix: String, mid: Int, merge: String, defaultL: String, ar: List): List =
@@ -525,16 +644,16 @@ def emitMatchFinish(code: String, phi: String, kind: String, id: Int, conts: Str
     body = str4(code, merge, ":\n  %", str5(prefix, "_phi = phi ", ty, phi, "\n"))
   } yield mkS(body, str3("%", prefix, "_phi"), kind, id, conts)
 
-def emitAttempt(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+def emitAttempt(strs: List, inner: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   for {
-    ie = emitExpr(nodeExpr(e, 0), strs, ctx, env, Str.concat(prefix, "_at"), id, conts)
+    ie = emitExpr(inner, strs, ctx, env, Str.concat(prefix, "_at"), id, conts)
     p = ensureIoPair(sCode(ie), sKind(ie), sValue(ie), Str.concat(prefix, "_atio"))
   } yield mkS(str4(fst(p), "  %", prefix, str3("_attempt = call ptr @sz_io_attempt(ptr ", snd(p), ")\n")), str3("%", prefix, "_attempt"), "io", sId(ie), sConts(ie))
 
-def emitRaceBoth(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String, which: String): List =
+def emitRaceBoth(strs: List, left: Expr, right: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String, which: String): List =
   for {
-    le = emitExpr(nodeExpr(e, 0), strs, ctx, env, Str.concat(prefix, "_rl"), id, conts)
-    re = emitExpr(nodeExpr(e, 1), strs, ctx, env, Str.concat(prefix, "_rr"), sId(le), sConts(le))
+    le = emitExpr(left, strs, ctx, env, Str.concat(prefix, "_rl"), id, conts)
+    re = emitExpr(right, strs, ctx, env, Str.concat(prefix, "_rr"), sId(le), sConts(le))
     lp = ensureIoPair(sCode(le), sKind(le), sValue(le), Str.concat(prefix, "_rlio"))
     rp = ensureIoPair(Str.concat(fst(lp), sCode(re)), sKind(re), sValue(re), Str.concat(prefix, "_rrio"))
     fn = if (streq(which, "race") == 1) "@sz_io_race" else "@sz_io_both"
@@ -583,37 +702,36 @@ def flatMapResultKind(bodyKind: String): String =
 def flatMapBind(param: String, payload: String, env: List): List =
   if (streq(param, "_") == 1) pairSL("", env) else if (streq(payload, "int") == 1) pairSL(str3("  %", param, " = call i64 @sz_unbox_i64(ptr %value)\n"), envPut(env, param, Str.concat("%", param), "int")) else pairSL("", envPut(env, param, "%value", "ptr"))
 
-def emitHandle(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+def emitHandle(strs: List, inner: Expr, body: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   for {
     contName = Str.concat("sz_err_", Str.fromInt(id))
     names = captureNames(env, List.empty())
     up = unpackEnv(names, Str.concat("e", Str.fromInt(id)), env)
-    be = emitExpr(nodeExpr(e, 1), strs, ctx, sndL(up), Str.concat("e", Str.fromInt(id)), id + 1, conts)
+    be = emitExpr(body, strs, ctx, sndL(up), Str.concat("e", Str.fromInt(id)), id + 1, conts)
     wrap = ensureIoPair(sCode(be), sKind(be), sValue(be), Str.concat("e", Str.concat(Str.fromInt(id), "_wrap")))
     contDef = str4("define internal ptr @", contName, "(ptr %err, ptr %env) {\nentry:\n", str5(fst(up), fst(wrap), "  ret ptr ", snd(wrap), "\n}\n\n"))
-    ie = emitExpr(nodeExpr(e, 0), strs, ctx, env, Str.concat(prefix, "_he"), sId(be), Str.concat(sConts(be), contDef))
+    ie = emitExpr(inner, strs, ctx, env, Str.concat(prefix, "_he"), sId(be), Str.concat(sConts(be), contDef))
     ip = ensureIoPair(sCode(ie), sKind(ie), sValue(ie), Str.concat(prefix, "_heio"))
     packed = packEnv(env, Str.concat(prefix, "_ecap"), fst(ip))
   } yield mkS(str4(fst(packed), "  %", prefix, str5("_h = call ptr @sz_io_handle_error_with(ptr ", snd(ip), ", ptr @", contName, str3(", ptr ", snd(packed), ")\n"))), str3("%", prefix, "_h"), "io", sId(ie), sConts(ie))
 
-def emitFlatMap(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+def emitFlatMap(strs: List, innerE: Expr, param: String, body: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   for {
     contName = Str.concat("sz_cont_", Str.fromInt(id))
-    param = nodeStr(e, 1)
-    inner = emitExpr(nodeExpr(e, 0), strs, ctx, env, Str.concat(prefix, "_in"), id + 1, conts)
+    inner = emitExpr(innerE, strs, ctx, env, Str.concat(prefix, "_in"), id + 1, conts)
     payload = payloadOfKind(sKind(inner))
     names = captureNames(env, List.empty())
     up = unpackEnv(names, Str.concat("c", Str.fromInt(id)), env)
     bind = flatMapBind(param, payload, sndL(up))
-    be = emitExpr(nodeExpr(e, 2), strs, ctx, sndL(bind), Str.concat("c", Str.fromInt(id)), sId(inner), sConts(inner))
+    be = emitExpr(body, strs, ctx, sndL(bind), Str.concat("c", Str.fromInt(id)), sId(inner), sConts(inner))
     wrap = ensureIoPair(sCode(be), sKind(be), sValue(be), Str.concat("c", Str.concat(Str.fromInt(id), "_wrap")))
     contDef = str4("define internal ptr @", contName, "(ptr %value, ptr %env) {\nentry:\n", str3(fst(up), fst(bind), str4(fst(wrap), "  ret ptr ", snd(wrap), "\n}\n\n")))
     ip = ensureIoPair(sCode(inner), sKind(inner), sValue(inner), Str.concat(prefix, "_inio"))
     packed = packEnv(env, Str.concat(prefix, "_cap"), fst(ip))
   } yield mkS(str4(fst(packed), "  %", prefix, str5("_fm = call ptr @sz_io_flatmap(ptr ", snd(ip), ", ptr @", contName, str3(", ptr ", snd(packed), ")\n"))), str3("%", prefix, "_fm"), flatMapResultKind(sKind(be)), sId(be), Str.concat(sConts(be), contDef))
 
-def emitInterp(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  emitInterpParts(strs, nodeExpr(e, 0), ctx, env, prefix, id, conts, "", "", 0)
+def emitInterp(strs: List, parts: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+  emitInterpParts(strs, parts, ctx, env, prefix, id, conts, "", "", 0)
 
 def emitInterpParts(strs: List, parts: List, ctx: List, env: List, prefix: String, id: Int, conts: String, code: String, acc: String, i: Int): List =
   if (List.isEmpty(parts) == 1) if (streq(acc, "") == 1) emitSzStringLit(strs, "", prefix, id, conts) else mkS(code, acc, "ptr", id, conts) else emitInterpPart(strs, List.head(parts), List.tail(parts), ctx, env, prefix, id, conts, code, acc, i)
@@ -630,14 +748,13 @@ def emitInterpHole(strs: List, rest: List, ctx: List, env: List, prefix: String,
 def emitInterpPiece(strs: List, rest: List, ctx: List, env: List, prefix: String, id: Int, conts: String, code: String, acc: String, i: Int, pe: List): List =
   if (streq(acc, "") == 1) emitInterpParts(strs, rest, ctx, env, prefix, id, conts, str3(code, sCode(pe), ""), sValue(pe), i + 1) else emitInterpParts(strs, rest, ctx, env, prefix, id, conts, str4(code, sCode(pe), "  %", str6(prefix, "_c", Str.fromInt(i), " = call ptr @sz_string_concat(ptr ", acc, str3(", ptr ", sValue(pe), ")\n"))), str4("%", prefix, "_c", Str.fromInt(i)), i + 1)
 
-def emitLambda(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+def emitLambda(strs: List, param: String, body: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   for {
     fnName = Str.concat("sz_tap_", Str.fromInt(id))
-    param = nodeStr(e, 0)
     names = captureNames(env, List.empty())
     up = unpackEnv(names, Str.concat("t", Str.fromInt(id)), env)
     benv = lambdaBind(param, sndL(up))
-    be = emitExpr(nodeExpr(e, 1), strs, ctx, benv, Str.concat("t", Str.fromInt(id)), id + 1, conts)
+    be = emitExpr(body, strs, ctx, benv, Str.concat("t", Str.fromInt(id)), id + 1, conts)
     bodyEnd = if (isIoKind(sKind(be)) == 1) str4(sCode(be), "  %t", Str.fromInt(id), str3("_ur = call { i32, ptr, ptr } @sz_io_unsafe_run(ptr ", sValue(be), ")\n  ret void\n")) else str4(sCode(be), "  ret void\n", "", "")
     contDef = str4("define internal void @", fnName, "(ptr %self, ptr %env) {\nentry:\n", str4(fst(up), bodyEnd, "}\n\n", ""))
   } yield emitLambdaClosure(env, prefix, fnName, sId(be), Str.concat(sConts(be), contDef))
@@ -651,11 +768,8 @@ def emitLambdaClosure(env: List, prefix: String, fnName: String, id: Int, conts:
     code = str4(fst(packed), "  %", prefix, str5("_cl0 = call ptr @sz_list_nil()\n  %", prefix, "_cl1 = call ptr @sz_list_cons(ptr ", snd(packed), str6(", ptr %", prefix, "_cl0)\n  %", prefix, "_cl2 = call ptr @sz_list_cons(ptr @", str4(fnName, ", ptr %", prefix, "_cl1)\n"))))
   } yield mkS(code, str3("%", prefix, "_cl2"), "ptr", id, conts)
 
-def emitCall(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  for {
-    callee = nodeStr(e, 0)
-    args = nodeExpr(e, 1)
-  } yield if (streq(callee, "Signal.map") == 1) emitSignalMap(strs, args, ctx, env, prefix, id, conts) else emitCallArgs(strs, callee, args, ctx, env, prefix, id, conts)
+def emitCall(strs: List, callee: String, args: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+  if (streq(callee, "Signal.map") == 1) emitSignalMap(strs, args, ctx, env, prefix, id, conts) else emitCallArgs(strs, callee, args, ctx, env, prefix, id, conts)
 
 def emitCallArgs(strs: List, callee: String, args: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   for {
@@ -674,14 +788,44 @@ def emitSignalMap(strs: List, args: List, ctx: List, env: List, prefix: String, 
     code4 = str4(code3, "  %", prefix, str5("_v = call ptr @sz_lang_signal_map(ptr ", sValue(src), ", ptr %", prefix, str4("_fnp, ptr %", prefix, "_envp)\n", "")))
   } yield mkS(code4, str3("%", prefix, "_v"), "ptr", sId(mapper), sConts(mapper))
 
-def emitMapLambda(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+def emitMapLambda(strs: List, e: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+  emitMapLambdaMatch(e, strs, ctx, env, prefix, id, conts)
+
+def emitMapLambdaMatch(e: Expr, strs: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+  e match {
+    case Expr.Lambda(param, body, span) => emitMapLambdaBody(strs, param, body, ctx, env, prefix, id, conts)
+    case Expr.Unit(span) => mkS("", "null", "ptr", id, conts)
+    case Expr.IntLit(digits, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.StrLit(value, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.ListLit(elems, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.Interp(parts, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.Var(name, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.Adt(enumName, caseName, args, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.Call(callee, args, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.BinOp(op, left, right, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.If(cond, thenB, elseB, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.For(binders, body, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.Let(name, value, body, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.FlatMap(inner, param, body, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.Handle(inner, body, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.Attempt(inner, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.Match(scrut, arms, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.Println(arg, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.Fail(arg, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.Pure(arg, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.Sleep(arg, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.Delay(span) => mkS("", "null", "ptr", id, conts)
+    case Expr.IoRace(left, right, span) => mkS("", "null", "ptr", id, conts)
+    case Expr.IoBoth(left, right, span) => mkS("", "null", "ptr", id, conts)
+  }
+
+def emitMapLambdaBody(strs: List, param: String, body: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
   for {
     fnName = Str.concat("sz_map_", Str.fromInt(id))
-    param = nodeStr(e, 0)
     names = captureNames(env, List.empty())
     up = unpackEnv(names, Str.concat("m", Str.fromInt(id)), env)
     benv = mapLambdaBind(param, sndL(up))
-    be = emitExpr(nodeExpr(e, 1), strs, ctx, benv, Str.concat("m", Str.fromInt(id)), id + 1, conts)
+    be = emitExpr(body, strs, ctx, benv, Str.concat("m", Str.fromInt(id)), id + 1, conts)
     bodyEnd = mapLambdaRet(be, id)
     contDef = str4("define internal ptr @", fnName, "(i64 %n, ptr %env) {\nentry:\n", str4(fst(up), bodyEnd, "}\n\n", ""))
   } yield emitLambdaClosure(env, prefix, fnName, sId(be), Str.concat(sConts(be), contDef))
@@ -695,7 +839,7 @@ def mapLambdaRet(be: List, id: Int): String =
 def emitArgList(args: List, strs: List, ctx: List, env: List, prefix: String, i: Int, id: Int, conts: String, code: String, vals: List, kinds: List): List =
   if (List.isEmpty(args) == 1) List.cons(code, List.cons(Str.fromInt(id), List.cons(conts, List.cons(List.reverse(vals), List.cons(List.reverse(kinds), List.empty()))))) else emitArgListOne(List.head(args), List.tail(args), strs, ctx, env, prefix, i, id, conts, code, vals, kinds)
 
-def emitArgListOne(arg: List, rest: List, strs: List, ctx: List, env: List, prefix: String, i: Int, id: Int, conts: String, code: String, vals: List, kinds: List): List =
+def emitArgListOne(arg: Expr, rest: List, strs: List, ctx: List, env: List, prefix: String, i: Int, id: Int, conts: String, code: String, vals: List, kinds: List): List =
   for {
     ee = emitExpr(arg, strs, ctx, env, str4(prefix, "_arg", Str.fromInt(i), ""), id, conts)
   } yield emitArgList(rest, strs, ctx, env, prefix, i + 1, sId(ee), sConts(ee), Str.concat(code, sCode(ee)), List.cons(sValue(ee), vals), List.cons(sKind(ee), kinds))
@@ -777,13 +921,13 @@ def emitListCons(code: String, vals: List, kinds: List, id: Int, conts: String, 
 def emitListAppend(code: String, vals: List, kinds: List, id: Int, conts: String, prefix: String): List =
   if (streq(List.at(kinds, 1), "int") == 1) mkS(str4(code, "  %", prefix, str5("_el = call ptr @sz_box_i64(i64 ", List.at(vals, 1), ")\n  %", prefix, str5("_v = call ptr @sz_list_append(ptr ", List.at(vals, 0), ", ptr %", prefix, "_el)\n"))), str3("%", prefix, "_v"), "ptr", id, conts) else mkS(str4(code, "  %", prefix, str5("_v = call ptr @sz_list_append(ptr ", List.at(vals, 0), ", ptr ", List.at(vals, 1), ")\n")), str3("%", prefix, "_v"), "ptr", id, conts)
 
-def emitListLit(strs: List, e: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
-  emitListLitRev(strs, List.reverse(nodeExpr(e, 0)), ctx, env, prefix, id, conts, str3("  %", prefix, "_0 = call ptr @sz_list_nil()\n"), str3("%", prefix, "_0"), 1)
+def emitListLit(strs: List, elems: List, ctx: List, env: List, prefix: String, id: Int, conts: String): List =
+  emitListLitRev(strs, List.reverse(elems), ctx, env, prefix, id, conts, str3("  %", prefix, "_0 = call ptr @sz_list_nil()\n"), str3("%", prefix, "_0"), 1)
 
 def emitListLitRev(strs: List, revElems: List, ctx: List, env: List, prefix: String, id: Int, conts: String, code: String, cur: String, n: Int): List =
   if (List.isEmpty(revElems) == 1) mkS(code, cur, "ptr", id, conts) else emitListLitRevOne(List.head(revElems), List.tail(revElems), strs, ctx, env, prefix, id, conts, code, cur, n)
 
-def emitListLitRevOne(elem: List, rest: List, strs: List, ctx: List, env: List, prefix: String, id: Int, conts: String, code: String, cur: String, n: Int): List =
+def emitListLitRevOne(elem: Expr, rest: List, strs: List, ctx: List, env: List, prefix: String, id: Int, conts: String, code: String, cur: String, n: Int): List =
   for {
     ee = emitExpr(elem, strs, ctx, env, str4(prefix, "_e", Str.fromInt(n), ""), id, conts)
   } yield emitListLitRevCons(rest, strs, ctx, env, prefix, sId(ee), sConts(ee), str3(code, sCode(ee), ""), ee, cur, n)
@@ -800,9 +944,9 @@ def emitListLitRevAfterCons(rest: List, strs: List, ctx: List, env: List, prefix
 def emitUserCall(callee: String, code: String, vals: List, kinds: List, id: Int, conts: String, ctx: List, prefix: String): List =
   for {
     d = resolveFun(ctxDefs(ctx), callee, ctxModule(ctx))
-  } yield if (List.isEmpty(d) == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @sz_user_", callee, "()\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (resolveIsAmbiguous(d) == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @sz_user_", callee, "()\n")), str3("%", prefix, "_v"), "ptr", id, conts) else emitUserCallDef(code, vals, kinds, id, conts, d, prefix)
+  } yield if (List.isEmpty(d) == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @sz_user_", callee, "()\n")), str3("%", prefix, "_v"), "ptr", id, conts) else if (resolveIsAmbiguous(d) == 1) mkS(str4(code, "  %", prefix, str3("_v = call ptr @sz_user_", callee, "()\n")), str3("%", prefix, "_v"), "ptr", id, conts) else emitUserCallDef(code, vals, kinds, id, conts, resolvedDef(d), prefix)
 
-def emitUserCallDef(code: String, vals: List, kinds: List, id: Int, conts: String, d: List, prefix: String): List =
+def emitUserCallDef(code: String, vals: List, kinds: List, id: Int, conts: String, d: Def, prefix: String): List =
   for {
     retTy = llvmTypeOf(defRet(d))
     retKind = kindOfType(defRet(d))
@@ -813,7 +957,7 @@ def emitUserCallDef(code: String, vals: List, kinds: List, id: Int, conts: Strin
 def emitUserArgs(params: List, vals: List, kinds: List, code: String, prefix: String, i: Int, acc: String): List =
   if (List.isEmpty(params) == 1) pair(code, acc) else emitUserArgsOne(List.head(params), List.tail(params), vals, kinds, code, prefix, i, acc)
 
-def emitUserArgsOne(p: String, rest: List, vals: List, kinds: List, code: String, prefix: String, i: Int, acc: String): List =
+def emitUserArgsOne(p: Param, rest: List, vals: List, kinds: List, code: String, prefix: String, i: Int, acc: String): List =
   for {
     want = kindOfType(paramType(p))
     got = List.at(kinds, i)
@@ -824,7 +968,7 @@ def emitUserArgsOne(p: String, rest: List, vals: List, kinds: List, code: String
 def emitParams(params: List, i: Int, acc: String): String =
   if (List.isEmpty(params) == 1) acc else emitParamsOne(List.head(params), List.tail(params), i, acc)
 
-def emitParamsOne(p: String, rest: List, i: Int, acc: String): String =
+def emitParamsOne(p: Param, rest: List, i: Int, acc: String): String =
   for {
     sep = if (i == 0) "" else ", "
     part = str4(sep, llvmTypeOf(paramType(p)), " %", paramName(p))
@@ -844,7 +988,7 @@ def emitFundefRetIo(code: String, bodyKind: String, bodyVal: String): List =
     p = ensureIoPair(code, bodyKind, bodyVal, "ret_wrap")
   } yield pair(str3(fst(p), "  ret ptr ", snd(p)), "")
 
-def emitFundef(d: List, strs: List, ctx: List, id: Int, conts: String): List =
+def emitFundef(d: Def, strs: List, ctx: List, id: Int, conts: String): List =
   for {
     ret = llvmTypeOf(defRet(d))
     env = paramsEnv(defParams(d), List.empty())
@@ -858,19 +1002,19 @@ def emitFundef(d: List, strs: List, ctx: List, id: Int, conts: String): List =
 def emitDefs(defs: List, strs: List, allDefs: List, id: Int, conts: String, acc: String): List =
   if (List.isEmpty(defs) == 1) mkS(acc, "", "", id, conts) else emitDefsOne(List.head(defs), List.tail(defs), strs, allDefs, id, conts, acc)
 
-def emitDefsOne(d: List, rest: List, strs: List, allDefs: List, id: Int, conts: String, acc: String): List =
+def emitDefsOne(d: Def, rest: List, strs: List, allDefs: List, id: Int, conts: String, acc: String): List =
   for {
     fe = emitFundef(d, strs, allDefs, id, conts)
   } yield emitDefs(rest, strs, allDefs, sId(fe), sConts(fe), Str.concat(acc, sCode(fe)))
 
-def emitMain(prog: List, strs: List, ctx: List, defsIr: List): String =
+def emitMain(prog: Prog, strs: List, ctx: List, defsIr: List): String =
   for {
     body = emitExpr(progMain(prog), strs, setCtxModule(ctx, progMainModule(prog)), List.empty(), "build", sId(defsIr), sConts(defsIr))
     p = ensureIoPair(sCode(body), sKind(body), sValue(body), "wrapped")
     mainFn = str4("define i32 @main(i32 %argc, ptr %argv) {\nentry:\n", fst(p), "  %rc = call i32 @sz_runtime_main_args(ptr ", Str.concat(snd(p), ", i32 %argc, ptr %argv)\n  ret i32 %rc\n}\n"))
   } yield str4(sConts(body), sCode(defsIr), mainFn, "")
 
-def emitProgram(prog: List): String =
+def emitProgram(prog: Prog): String =
   for {
     strs = collectProgram(prog)
     tags = buildEnumTags(progEnums(prog))

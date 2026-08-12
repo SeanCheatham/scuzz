@@ -1,14 +1,14 @@
 package scuzz.compiler
 
-def lowerProg(prog: List): List =
+def lowerProg(prog: Prog): Prog =
   for {
     ctors = enumCtors(progEnums(prog), List.empty())
-  } yield List.cons("Prog", List.cons(nodeStr(prog, 0), List.cons(progEnums(prog), List.cons(lowerDefs(progDefs(prog), ctors, List.empty()), List.cons(lowerExpr(progMain(prog), ctors), List.cons(progMainModule(prog), List.empty()))))))
+  } yield Prog.Prog(progPkg(prog), progEnums(prog), lowerDefs(progDefs(prog), ctors, List.empty()), lowerExpr(progMain(prog), ctors), progMainModule(prog))
 
 def enumCtors(enums: List, acc: List): List =
   if (List.isEmpty(enums) == 1) acc else enumCtors(List.tail(enums), enumCtorsOne(List.head(enums), acc))
 
-def enumCtorsOne(e: List, acc: List): List =
+def enumCtorsOne(e: EnumDef, acc: List): List =
   enumCtorsCases(enumName(e), enumCases(e), acc)
 
 def enumCtorsCases(en: String, cases: List, acc: List): List =
@@ -25,19 +25,43 @@ def splitDotted(s: String): List =
 def lowerDefs(defs: List, ctors: List, acc: List): List =
   if (List.isEmpty(defs) == 1) List.reverse(acc) else lowerDefs(List.tail(defs), ctors, List.cons(lowerDef(List.head(defs), ctors), acc))
 
-def lowerDef(d: List, ctors: List): List =
-  List.cons("Def", List.cons(nodeStr(d, 0), List.cons(nodeExpr(d, 1), List.cons(nodeStr(d, 2), List.cons(lowerExpr(nodeExpr(d, 3), ctors), List.cons(nodeStr(d, 4), List.empty()))))))
+def lowerDef(d: Def, ctors: List): Def =
+  d match {
+    case Def.Def(name, params, ret, body, module) => Def.Def(name, params, ret, lowerExpr(body, ctors), module)
+  }
 
-def lowerExpr(e: List, ctors: List): List =
-  lowerExprTag(exprTag(e), e, ctors)
+def lowerExpr(e: Expr, ctors: List): Expr =
+  e match {
+    case Expr.For(binders, body, span) => desugarFor(binders, lowerExpr(body, ctors), span, ctors)
+    case Expr.Let(name, value, body, span) => Expr.Let(name, lowerExpr(value, ctors), lowerExpr(body, ctors), span)
+    case Expr.FlatMap(inner, param, body, span) => Expr.FlatMap(lowerExpr(inner, ctors), param, lowerExpr(body, ctors), span)
+    case Expr.Handle(inner, body, span) => Expr.Handle(lowerExpr(inner, ctors), lowerExpr(body, ctors), span)
+    case Expr.Attempt(inner, span) => Expr.Attempt(lowerExpr(inner, ctors), span)
+    case Expr.If(cond, thenB, elseB, span) => Expr.If(lowerExpr(cond, ctors), lowerExpr(thenB, ctors), lowerExpr(elseB, ctors), span)
+    case Expr.BinOp(op, left, right, span) => Expr.BinOp(op, lowerExpr(left, ctors), lowerExpr(right, ctors), span)
+    case Expr.Call(callee, args, span) => lowerCall(callee, lowerExprList(args, ctors, List.empty()), span, ctors)
+    case Expr.Adt(enumName, caseName, args, span) => Expr.Adt(enumName, caseName, lowerExprList(args, ctors, List.empty()), span)
+    case Expr.Lambda(param, body, span) => Expr.Lambda(param, lowerExpr(body, ctors), span)
+    case Expr.Match(scrut, arms, span) => Expr.Match(lowerExpr(scrut, ctors), lowerArms(arms, ctors, List.empty()), span)
+    case Expr.Println(arg, span) => Expr.Println(lowerExpr(arg, ctors), span)
+    case Expr.Fail(arg, span) => Expr.Fail(lowerExpr(arg, ctors), span)
+    case Expr.Pure(arg, span) => Expr.Pure(lowerExpr(arg, ctors), span)
+    case Expr.Sleep(arg, span) => Expr.Sleep(lowerExpr(arg, ctors), span)
+    case Expr.IoRace(left, right, span) => Expr.IoRace(lowerExpr(left, ctors), lowerExpr(right, ctors), span)
+    case Expr.IoBoth(left, right, span) => Expr.IoBoth(lowerExpr(left, ctors), lowerExpr(right, ctors), span)
+    case Expr.ListLit(elems, span) => Expr.ListLit(lowerExprList(elems, ctors, List.empty()), span)
+    case Expr.Interp(parts, span) => Expr.Interp(lowerInterpParts(parts, ctors, List.empty()), span)
+    case Expr.Unit(span) => e
+    case Expr.IntLit(digits, span) => e
+    case Expr.StrLit(value, span) => e
+    case Expr.Var(name, span) => e
+    case Expr.Delay(span) => e
+  }
 
-def lowerExprTag(tag: String, e: List, ctors: List): List =
-  if (streq(tag, "For") == 1) desugarFor(nodeExpr(e, 0), lowerExpr(nodeExpr(e, 1), ctors), exprSpan(e), ctors) else if (streq(tag, "Let") == 1) withSpan(List.cons("Let", List.cons(nodeStr(e, 0), List.cons(lowerExpr(nodeExpr(e, 1), ctors), List.cons(lowerExpr(nodeExpr(e, 2), ctors), List.empty())))), exprSpan(e)) else if (streq(tag, "FlatMap") == 1) withSpan(List.cons("FlatMap", List.cons(lowerExpr(nodeExpr(e, 0), ctors), List.cons(nodeStr(e, 1), List.cons(lowerExpr(nodeExpr(e, 2), ctors), List.empty())))), exprSpan(e)) else if (streq(tag, "Handle") == 1) withSpan(List.cons("Handle", List.cons(lowerExpr(nodeExpr(e, 0), ctors), List.cons(lowerExpr(nodeExpr(e, 1), ctors), List.empty()))), exprSpan(e)) else if (streq(tag, "Attempt") == 1) withSpan(List.cons("Attempt", List.cons(lowerExpr(nodeExpr(e, 0), ctors), List.empty())), exprSpan(e)) else if (streq(tag, "If") == 1) withSpan(List.cons("If", List.cons(lowerExpr(nodeExpr(e, 0), ctors), List.cons(lowerExpr(nodeExpr(e, 1), ctors), List.cons(lowerExpr(nodeExpr(e, 2), ctors), List.empty())))), exprSpan(e)) else if (streq(tag, "BinOp") == 1) withSpan(List.cons("BinOp", List.cons(nodeStr(e, 0), List.cons(lowerExpr(nodeExpr(e, 1), ctors), List.cons(lowerExpr(nodeExpr(e, 2), ctors), List.empty())))), exprSpan(e)) else if (streq(tag, "Call") == 1) lowerCall(nodeStr(e, 0), lowerExprList(nodeExpr(e, 1), ctors, List.empty()), exprSpan(e), ctors) else if (streq(tag, "Adt") == 1) withSpan(List.cons("Adt", List.cons(nodeStr(e, 0), List.cons(nodeStr(e, 1), List.cons(lowerExprList(nodeExpr(e, 2), ctors, List.empty()), List.empty())))), exprSpan(e)) else if (streq(tag, "Lambda") == 1) withSpan(List.cons("Lambda", List.cons(nodeStr(e, 0), List.cons(lowerExpr(nodeExpr(e, 1), ctors), List.empty()))), exprSpan(e)) else if (streq(tag, "Match") == 1) withSpan(List.cons("Match", List.cons(lowerExpr(nodeExpr(e, 0), ctors), List.cons(lowerArms(nodeExpr(e, 1), ctors, List.empty()), List.empty()))), exprSpan(e)) else if (streq(tag, "Println") == 1) withSpan(List.cons("Println", List.cons(lowerExpr(nodeExpr(e, 0), ctors), List.empty())), exprSpan(e)) else if (streq(tag, "Fail") == 1) withSpan(List.cons("Fail", List.cons(lowerExpr(nodeExpr(e, 0), ctors), List.empty())), exprSpan(e)) else if (streq(tag, "Pure") == 1) withSpan(List.cons("Pure", List.cons(lowerExpr(nodeExpr(e, 0), ctors), List.empty())), exprSpan(e)) else if (streq(tag, "Sleep") == 1) withSpan(List.cons("Sleep", List.cons(lowerExpr(nodeExpr(e, 0), ctors), List.empty())), exprSpan(e)) else if (streq(tag, "IoRace") == 1) withSpan(List.cons("IoRace", List.cons(lowerExpr(nodeExpr(e, 0), ctors), List.cons(lowerExpr(nodeExpr(e, 1), ctors), List.empty()))), exprSpan(e)) else if (streq(tag, "IoBoth") == 1) withSpan(List.cons("IoBoth", List.cons(lowerExpr(nodeExpr(e, 0), ctors), List.cons(lowerExpr(nodeExpr(e, 1), ctors), List.empty()))), exprSpan(e)) else if (streq(tag, "ListLit") == 1) withSpan(List.cons("ListLit", List.cons(lowerExprList(nodeExpr(e, 0), ctors, List.empty()), List.empty())), exprSpan(e)) else if (streq(tag, "Interp") == 1) withSpan(List.cons("Interp", List.cons(lowerInterpParts(nodeExpr(e, 0), ctors, List.empty()), List.empty())), exprSpan(e)) else e
-
-def lowerCall(callee: String, args: List, sp: List, ctors: List): List =
+def lowerCall(callee: String, args: List, sp: Span, ctors: List): Expr =
   for {
     parts = splitDotted(callee)
-  } yield if (List.isEmpty(parts) == 1) withSpan(List.cons("Call", List.cons(callee, List.cons(args, List.empty()))), sp) else if (ctorKnown(ctors, callee) == 1) withSpan(List.cons("Adt", List.cons(List.head(parts), List.cons(List.head(List.tail(parts)), List.cons(args, List.empty())))), sp) else withSpan(List.cons("Call", List.cons(callee, List.cons(args, List.empty()))), sp)
+  } yield if (List.isEmpty(parts) == 1) Expr.Call(callee, args, sp) else if (ctorKnown(ctors, callee) == 1) Expr.Adt(List.head(parts), List.head(List.tail(parts)), args, sp) else Expr.Call(callee, args, sp)
 
 def lowerExprList(xs: List, ctors: List, acc: List): List =
   if (List.isEmpty(xs) == 1) List.reverse(acc) else lowerExprList(List.tail(xs), ctors, List.cons(lowerExpr(List.head(xs), ctors), acc))
@@ -45,8 +69,10 @@ def lowerExprList(xs: List, ctors: List, acc: List): List =
 def lowerArms(arms: List, ctors: List, acc: List): List =
   if (List.isEmpty(arms) == 1) List.reverse(acc) else lowerArms(List.tail(arms), ctors, List.cons(lowerArm(List.head(arms), ctors), acc))
 
-def lowerArm(arm: List, ctors: List): List =
-  List.cons("Arm", List.cons(nodeExpr(arm, 0), List.cons(lowerExpr(nodeExpr(arm, 1), ctors), List.empty())))
+def lowerArm(arm: MatchArm, ctors: List): MatchArm =
+  arm match {
+    case MatchArm.Arm(pat, body) => MatchArm.Arm(pat, lowerExpr(body, ctors))
+  }
 
 def lowerInterpParts(parts: List, ctors: List, acc: List): List =
   if (List.isEmpty(parts) == 1) List.reverse(acc) else lowerInterpParts(List.tail(parts), ctors, List.cons(lowerInterpPart(List.head(parts), ctors), acc))
@@ -58,17 +84,29 @@ def lowerInterpPart(part: InterpPart, ctors: List): InterpPart =
   }
 
 def forBindersHaveDraw(binders: List): Int =
-  if (List.isEmpty(binders) == 1) 0 else if (streq(List.head(List.head(binders)), "Draw") == 1) 1 else forBindersHaveDraw(List.tail(binders))
+  if (List.isEmpty(binders) == 1) 0 else forBinderIsDraw(List.head(binders), List.tail(binders))
 
-def desugarFor(binders: List, body: List, sp: List, ctors: List): List =
-  if (forBindersHaveDraw(binders) == 1) desugarForBinders(binders, withSpan(List.cons("Pure", List.cons(body, List.empty())), sp), ctors) else desugarForBinders(binders, body, ctors)
+def forBinderIsDraw(b: ForBinder, rest: List): Int =
+  b match {
+    case ForBinder.Eq(name, value) => forBindersHaveDraw(rest)
+    case ForBinder.Draw(name, value) => 1
+  }
 
-def desugarForBinders(binders: List, body: List, ctors: List): List =
+def desugarFor(binders: List, body: Expr, sp: Span, ctors: List): Expr =
+  if (forBindersHaveDraw(binders) == 1) desugarForBinders(binders, Expr.Pure(body, sp), ctors) else desugarForBinders(binders, body, ctors)
+
+def desugarForBinders(binders: List, body: Expr, ctors: List): Expr =
   if (List.isEmpty(binders) == 1) body else wrapForBinder(List.head(binders), desugarForBinders(List.tail(binders), body, ctors), ctors)
 
-def wrapForBinder(b: List, body: List, ctors: List): List =
-  for {
-    value = lowerExpr(nodeExpr(b, 1), ctors)
-    sp = coverSpan(exprSpan(value), exprSpan(body))
-  } yield if (streq(List.head(b), "Eq") == 1) withSpan(List.cons("Let", List.cons(nodeStr(b, 0), List.cons(value, List.cons(body, List.empty())))), sp) else withSpan(List.cons("FlatMap", List.cons(value, List.cons(nodeStr(b, 0), List.cons(body, List.empty())))), sp)
+def wrapForBinder(b: ForBinder, body: Expr, ctors: List): Expr =
+  b match {
+    case ForBinder.Eq(name, value) => wrapForBinderEq(name, lowerExpr(value, ctors), body)
+    case ForBinder.Draw(name, value) => wrapForBinderDraw(name, lowerExpr(value, ctors), body)
+  }
+
+def wrapForBinderEq(name: String, value: Expr, body: Expr): Expr =
+  Expr.Let(name, value, body, coverSpan(exprSpan(value), exprSpan(body)))
+
+def wrapForBinderDraw(name: String, value: Expr, body: Expr): Expr =
+  Expr.FlatMap(value, name, body, coverSpan(exprSpan(value), exprSpan(body)))
 

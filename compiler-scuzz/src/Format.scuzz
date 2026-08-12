@@ -39,14 +39,14 @@ def padOf(indent: Int): String =
 def formatSource(source: String): String =
   prettyProg(parseSource("", source))
 
-def prettyProg(p: List): String =
-  prettyProgParts(nodeStr(p, 0), progEnums(p), progDefs(p), progMain(p))
+def prettyProg(p: Prog): String =
+  prettyProgParts(progPkg(p), progEnums(p), progDefs(p), progMain(p))
 
-def prettyProgParts(pkg: String, enums: List, defs: List, main: List): String =
+def prettyProgParts(pkg: String, enums: List, defs: List, main: Expr): String =
   for {
     head = prettyPkg(pkg)
     mid = Str.concat(prettyEnums(enums, ""), prettyDefs(defs, ""))
-  } yield if (streq(exprTag(main), "Unit") == 1) Str.concat(head, mid) else str4(head, mid, "@main def main: IO[Unit] =\n", Str.concat(prettyExpr(main, 1), "\n"))
+  } yield if (isUnitExpr(main) == 1) Str.concat(head, mid) else str4(head, mid, "@main def main: IO[Unit] =\n", Str.concat(prettyExpr(main, 1), "\n"))
 
 def prettyPkg(pkg: String): String =
   if (Str.len(pkg) == 0) "" else str3("package ", pkg, "\n\n")
@@ -54,13 +54,13 @@ def prettyPkg(pkg: String): String =
 def prettyEnums(enums: List, acc: String): String =
   if (List.isEmpty(enums) == 1) acc else prettyEnums(List.tail(enums), Str.concat(acc, Str.concat(prettyEnum(List.head(enums)), "\n")))
 
-def prettyEnum(e: List): String =
-  str4("enum ", nodeStr(e, 0), ":\n", prettyEnumCases(nodeExpr(e, 1), ""))
+def prettyEnum(e: EnumDef): String =
+  str4("enum ", enumName(e), ":\n", prettyEnumCases(enumCases(e), ""))
 
 def prettyEnumCases(cases: List, acc: String): String =
   if (List.isEmpty(cases) == 1) acc else prettyEnumCases(List.tail(cases), Str.concat(acc, prettyEnumCase(List.head(cases))))
 
-def prettyEnumCase(c: List): String =
+def prettyEnumCase(c: EnumCase): String =
   for {
     fields = caseFields(c)
   } yield if (List.isEmpty(fields) == 1) str4("  case ", caseName(c), "\n", "") else str5("  case ", caseName(c), "(", prettyEnumFields(fields, ""), ")\n")
@@ -68,7 +68,7 @@ def prettyEnumCase(c: List): String =
 def prettyEnumFields(fields: List, acc: String): String =
   if (List.isEmpty(fields) == 1) acc else prettyEnumFieldsCont(List.head(fields), List.tail(fields), acc)
 
-def prettyEnumFieldsCont(f: List, rest: List, acc: String): String =
+def prettyEnumFieldsCont(f: EnumField, rest: List, acc: String): String =
   for {
     one = str3(fieldName(f), ": ", fieldType(f))
     acc2 = if (Str.len(acc) == 0) one else str3(acc, ", ", one)
@@ -77,76 +77,105 @@ def prettyEnumFieldsCont(f: List, rest: List, acc: String): String =
 def prettyDefs(defs: List, acc: String): String =
   if (List.isEmpty(defs) == 1) acc else prettyDefs(List.tail(defs), Str.concat(acc, Str.concat(prettyDef(List.head(defs)), "\n\n")))
 
-def prettyDef(d: List): String =
-  str5("def ", nodeStr(d, 0), str3("(", prettyParams(nodeExpr(d, 1), ""), "): "), nodeStr(d, 2), str3(" =\n", prettyExpr(nodeExpr(d, 3), 1), ""))
+def prettyDef(d: Def): String =
+  str5("def ", defName(d), str3("(", prettyParams(defParams(d), ""), "): "), defRet(d), str3(" =\n", prettyExpr(defBody(d), 1), ""))
 
 def prettyParams(params: List, acc: String): String =
   if (List.isEmpty(params) == 1) acc else prettyParamsCont(List.head(params), List.tail(params), acc)
 
-def prettyParamsCont(p: String, rest: List, acc: String): String =
+def prettyParamsCont(p: Param, rest: List, acc: String): String =
   for {
-    name = Str.slice(p, 6, indexOfChar(p, 58, 6))
-    ty = Str.slice(p, indexOfChar(p, 58, 6) + 1, Str.len(p))
-    piece = str3(name, ": ", ty)
+    piece = str3(paramName(p), ": ", paramType(p))
   } yield if (Str.len(acc) == 0) prettyParams(rest, piece) else prettyParams(rest, str3(acc, ", ", piece))
 
-def prettyExpr(expr: List, indent: Int): String =
+def prettyExpr(expr: Expr, indent: Int): String =
   for {
-    tag = exprTag(expr)
     pad = padOf(indent)
-  } yield if (streq(tag, "Unit") == 1) Str.concat(pad, "()") else if (streq(tag, "IntLit") == 1) Str.concat(pad, nodeStr(expr, 0)) else if (streq(tag, "StrLit") == 1) str4(pad, "\"", escape(nodeStr(expr, 0)), "\"") else if (streq(tag, "ListLit") == 1) str4(pad, "[", prettyExprList(nodeExpr(expr, 0), ""), "]") else if (streq(tag, "Interp") == 1) str4(pad, "s\"", prettyInterpParts(nodeExpr(expr, 0), ""), "\"") else if (streq(tag, "Println") == 1) str4(pad, "IO.println(", trimStr(prettyExpr(nodeExpr(expr, 0), 0)), ")") else if (streq(tag, "Delay") == 1) Str.concat(pad, "IO.delay(() => ())") else if (streq(tag, "Sleep") == 1) str4(pad, "IO.sleep(", trimStr(prettyExpr(nodeExpr(expr, 0), 0)), ")") else if (streq(tag, "Fail") == 1) str4(pad, "IO.fail(", trimStr(prettyExpr(nodeExpr(expr, 0), 0)), ")") else if (streq(tag, "Pure") == 1) str4(pad, "IO.pure(", trimStr(prettyExpr(nodeExpr(expr, 0), 0)), ")") else if (streq(tag, "Var") == 1) Str.concat(pad, nodeStr(expr, 0)) else if (streq(tag, "Adt") == 1) prettyAdt(expr, pad) else if (streq(tag, "Lambda") == 1) str4(pad, nodeStr(expr, 0), " => ", trimStr(prettyExpr(nodeExpr(expr, 1), 0))) else if (streq(tag, "Call") == 1) str4(pad, nodeStr(expr, 0), str3("(", prettyExprList(nodeExpr(expr, 1), ""), ")"), "") else if (streq(tag, "If") == 1) prettyIf(expr, indent, pad) else if (streq(tag, "BinOp") == 1) str4(pad, trimStr(prettyExpr(nodeExpr(expr, 1), 0)), str3(" ", nodeStr(expr, 0), " "), trimStr(prettyExpr(nodeExpr(expr, 2), 0))) else if (streq(tag, "FlatMap") == 1) prettyFlatMap(expr, indent, pad) else if (streq(tag, "Handle") == 1) prettyHandle(expr, indent, pad) else if (streq(tag, "Attempt") == 1) str3(pad, trimStr(prettyExpr(nodeExpr(expr, 0), 0)), ".attempt") else if (streq(tag, "IoRace") == 1) str4(pad, "IO.race(", str3(trimStr(prettyExpr(nodeExpr(expr, 0), 0)), ", ", trimStr(prettyExpr(nodeExpr(expr, 1), 0))), ")") else if (streq(tag, "IoBoth") == 1) str4(pad, "IO.both(", str3(trimStr(prettyExpr(nodeExpr(expr, 0), 0)), ", ", trimStr(prettyExpr(nodeExpr(expr, 1), 0))), ")") else if (streq(tag, "Let") == 1) prettyFor(List.cons("For", List.cons(List.cons(List.cons("Eq", List.cons(nodeStr(expr, 0), List.cons(nodeExpr(expr, 1), List.empty()))), List.empty()), List.cons(nodeExpr(expr, 2), List.empty()))), indent, pad) else if (streq(tag, "For") == 1) prettyFor(expr, indent, pad) else if (streq(tag, "Match") == 1) prettyMatch(expr, indent, pad) else Str.concat(pad, "()")
+  } yield prettyExprMatch(expr, indent, pad)
 
-def prettyAdt(expr: List, pad: String): String =
+def prettyExprMatch(expr: Expr, indent: Int, pad: String): String =
+  expr match {
+    case Expr.Unit(span) => Str.concat(pad, "()")
+    case Expr.IntLit(digits, span) => Str.concat(pad, digits)
+    case Expr.StrLit(value, span) => str4(pad, "\"", escape(value), "\"")
+    case Expr.ListLit(elems, span) => str4(pad, "[", prettyExprList(elems, ""), "]")
+    case Expr.Interp(parts, span) => str4(pad, "s\"", prettyInterpParts(parts, ""), "\"")
+    case Expr.Println(arg, span) => str4(pad, "IO.println(", trimStr(prettyExpr(arg, 0)), ")")
+    case Expr.Delay(span) => Str.concat(pad, "IO.delay(() => ())")
+    case Expr.Sleep(arg, span) => str4(pad, "IO.sleep(", trimStr(prettyExpr(arg, 0)), ")")
+    case Expr.Fail(arg, span) => str4(pad, "IO.fail(", trimStr(prettyExpr(arg, 0)), ")")
+    case Expr.Pure(arg, span) => str4(pad, "IO.pure(", trimStr(prettyExpr(arg, 0)), ")")
+    case Expr.Var(name, span) => Str.concat(pad, name)
+    case Expr.Adt(enumName, caseName, args, span) => prettyAdt(enumName, caseName, args, pad)
+    case Expr.Lambda(param, body, span) => str4(pad, param, " => ", trimStr(prettyExpr(body, 0)))
+    case Expr.Call(callee, args, span) => str4(pad, callee, str3("(", prettyExprList(args, ""), ")"), "")
+    case Expr.If(cond, thenB, elseB, span) => prettyIf(cond, thenB, elseB, indent, pad)
+    case Expr.BinOp(op, left, right, span) => str4(pad, trimStr(prettyExpr(left, 0)), str3(" ", op, " "), trimStr(prettyExpr(right, 0)))
+    case Expr.FlatMap(inner, param, body, span) => prettyFlatMap(inner, param, body, indent, pad)
+    case Expr.Handle(inner, body, span) => prettyHandle(inner, body, indent, pad)
+    case Expr.Attempt(inner, span) => str3(pad, trimStr(prettyExpr(inner, 0)), ".attempt")
+    case Expr.IoRace(left, right, span) => str4(pad, "IO.race(", str3(trimStr(prettyExpr(left, 0)), ", ", trimStr(prettyExpr(right, 0))), ")")
+    case Expr.IoBoth(left, right, span) => str4(pad, "IO.both(", str3(trimStr(prettyExpr(left, 0)), ", ", trimStr(prettyExpr(right, 0))), ")")
+    case Expr.Let(name, value, body, span) => prettyFor(List.cons(ForBinder.Eq(name, value), List.empty()), body, indent, pad)
+    case Expr.For(binders, body, span) => prettyFor(binders, body, indent, pad)
+    case Expr.Match(scrut, arms, span) => prettyMatch(scrut, arms, indent, pad)
+  }
+
+def prettyAdt(enumName: String, caseName: String, args: List, pad: String): String =
   for {
-    args = nodeExpr(expr, 2)
-    base = str3(nodeStr(expr, 0), ".", nodeStr(expr, 1))
+    base = str3(enumName, ".", caseName)
   } yield if (List.isEmpty(args) == 1) Str.concat(pad, base) else str4(pad, base, str3("(", prettyExprList(args, ""), ")"), "")
 
-def prettyFor(expr: List, indent: Int, pad: String): String =
-  str4(pad, "for {\n", prettyForBinders(nodeExpr(expr, 0), indent + 1, ""), str3(pad, "} yield ", trimStr(prettyExpr(nodeExpr(expr, 1), 0))))
+def prettyFor(binders: List, body: Expr, indent: Int, pad: String): String =
+  str4(pad, "for {\n", prettyForBinders(binders, indent + 1, ""), str3(pad, "} yield ", trimStr(prettyExpr(body, 0))))
 
 def prettyForBinders(binders: List, indent: Int, acc: String): String =
   if (List.isEmpty(binders) == 1) acc else prettyForBinders(List.tail(binders), indent, Str.concat(acc, prettyForBinder(List.head(binders), indent)))
 
-def prettyForBinder(b: List, indent: Int): String =
-  if (streq(List.head(b), "Draw") == 1) str4(padOf(indent), nodeStr(b, 0), " <- ", str3(trimStr(prettyExpr(nodeExpr(b, 1), 0)), "\n", "")) else str4(padOf(indent), nodeStr(b, 0), " = ", str3(trimStr(prettyExpr(nodeExpr(b, 1), 0)), "\n", ""))
+def prettyForBinder(b: ForBinder, indent: Int): String =
+  b match {
+    case ForBinder.Eq(name, value) => str4(padOf(indent), name, " = ", str3(trimStr(prettyExpr(value, 0)), "\n", ""))
+    case ForBinder.Draw(name, value) => str4(padOf(indent), name, " <- ", str3(trimStr(prettyExpr(value, 0)), "\n", ""))
+  }
 
-def prettyIf(expr: List, indent: Int, pad: String): String =
-  str4(pad, str4("if (", trimStr(prettyExpr(nodeExpr(expr, 0), 0)), ") ", trimStr(prettyExpr(nodeExpr(expr, 1), 0))), " else ", trimStr(prettyExpr(nodeExpr(expr, 2), 0)))
+def prettyIf(cond: Expr, thenB: Expr, elseB: Expr, indent: Int, pad: String): String =
+  str4(pad, str4("if (", trimStr(prettyExpr(cond, 0)), ") ", trimStr(prettyExpr(thenB, 0))), " else ", trimStr(prettyExpr(elseB, 0)))
 
-def prettyFlatMap(expr: List, indent: Int, pad: String): String =
+def prettyFlatMap(inner: Expr, param: String, body: Expr, indent: Int, pad: String): String =
   for {
-    left = trimStr(prettyExpr(nodeExpr(expr, 0), 0))
-    right = prettyExpr(nodeExpr(expr, 2), indent + 1)
-    p = nodeStr(expr, 1)
-    bodyTag = exprTag(nodeExpr(expr, 2))
-  } yield if (streq(bodyTag, "Let") == 1) prettyFlatMapMulti(pad, left, p, right) else if (streq(bodyTag, "Match") == 1) prettyFlatMapMulti(pad, left, p, right) else if (streq(bodyTag, "FlatMap") == 1) prettyFlatMapMulti(pad, left, p, right) else if (strHasChar(right, 10, 0) == 1) prettyFlatMapMulti(pad, left, p, right) else str4(pad, left, str4(".flatMap(", p, " => ", trimStr(right)), ")")
+    left = trimStr(prettyExpr(inner, 0))
+    right = prettyExpr(body, indent + 1)
+  } yield if (isLetExpr(body) == 1) prettyFlatMapMulti(pad, left, param, right) else if (isMatchExpr(body) == 1) prettyFlatMapMulti(pad, left, param, right) else if (isFlatMapExpr(body) == 1) prettyFlatMapMulti(pad, left, param, right) else if (strHasChar(right, 10, 0) == 1) prettyFlatMapMulti(pad, left, param, right) else str4(pad, left, str4(".flatMap(", param, " => ", trimStr(right)), ")")
 
 def prettyFlatMapMulti(pad: String, left: String, p: String, right: String): String =
   str4(pad, left, str4(".flatMap(", p, " =>\n", right), str3("\n", pad, ")"))
 
-def prettyHandle(expr: List, indent: Int, pad: String): String =
+def prettyHandle(inner: Expr, body: Expr, indent: Int, pad: String): String =
   for {
-    left = trimStr(prettyExpr(nodeExpr(expr, 0), 0))
-    right = prettyExpr(nodeExpr(expr, 1), indent + 1)
+    left = trimStr(prettyExpr(inner, 0))
+    right = prettyExpr(body, indent + 1)
   } yield str4(pad, left, str3(".handleErrorWith(_ =>\n", right, "\n"), str3(pad, ")", ""))
 
-def prettyMatch(expr: List, indent: Int, pad: String): String =
-  str4(pad, trimStr(prettyExpr(nodeExpr(expr, 0), 0)), " match {\n", Str.concat(prettyArms(nodeExpr(expr, 1), indent + 1, ""), Str.concat(pad, "}")))
+def prettyMatch(scrut: Expr, arms: List, indent: Int, pad: String): String =
+  str4(pad, trimStr(prettyExpr(scrut, 0)), " match {\n", Str.concat(prettyArms(arms, indent + 1, ""), Str.concat(pad, "}")))
 
 def prettyArms(arms: List, indent: Int, acc: String): String =
   if (List.isEmpty(arms) == 1) acc else prettyArms(List.tail(arms), indent, Str.concat(acc, Str.concat(prettyArm(List.head(arms), indent), "\n")))
 
-def prettyArm(arm: List, indent: Int): String =
-  str4(padOf(indent), "case ", prettyPat(nodeExpr(arm, 0)), str3(" => ", trimStr(prettyExpr(nodeExpr(arm, 1), 0)), ""))
+def prettyArm(arm: MatchArm, indent: Int): String =
+  arm match {
+    case MatchArm.Arm(pat, body) => str4(padOf(indent), "case ", prettyPat(pat), str3(" => ", trimStr(prettyExpr(body, 0)), ""))
+  }
 
-def prettyPat(pat: List): String =
-  if (streq(exprTag(pat), "PatWild") == 1) "_" else prettyPatAdt(pat)
+def prettyPat(pat: Pattern): String =
+  pat match {
+    case Pattern.Wild => "_"
+    case Pattern.Adt(enumName, caseName, binds) => prettyPatAdt(enumName, caseName, binds)
+  }
 
-def prettyPatAdt(pat: List): String =
+def prettyPatAdt(enumName: String, caseName: String, binds: List): String =
   for {
-    binds = nodeExpr(pat, 2)
-    base = str3(nodeStr(pat, 0), ".", nodeStr(pat, 1))
+    base = str3(enumName, ".", caseName)
   } yield if (List.isEmpty(binds) == 1) base else str4(base, "(", prettyBindList(binds, ""), ")")
 
 def prettyBindList(binds: List, acc: String): String =
@@ -160,7 +189,7 @@ def prettyBindListCont(b: String, rest: List, acc: String): String =
 def prettyExprList(xs: List, acc: String): String =
   if (List.isEmpty(xs) == 1) acc else prettyExprListCont(List.head(xs), List.tail(xs), acc)
 
-def prettyExprListCont(e: List, rest: List, acc: String): String =
+def prettyExprListCont(e: Expr, rest: List, acc: String): String =
   for {
     piece = trimStr(prettyExpr(e, 0))
   } yield if (Str.len(acc) == 0) prettyExprList(rest, piece) else prettyExprList(rest, str3(acc, ", ", piece))
@@ -174,6 +203,6 @@ def prettyInterpPart(part: InterpPart): String =
     case InterpPart.Hole(expr) => prettyInterpHole(expr)
   }
 
-def prettyInterpHole(e: List): String =
-  if (streq(exprTag(e), "Var") == 1) Str.concat("$", nodeStr(e, 0)) else str3("${", trimStr(prettyExpr(e, 0)), "}")
+def prettyInterpHole(e: Expr): String =
+  if (isVarExpr(e) == 1) Str.concat("$", varExprName(e)) else str3("${", trimStr(prettyExpr(e, 0)), "}")
 

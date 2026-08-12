@@ -1,0 +1,11 @@
+package scuzz.compiler
+
+enum Param:
+  case Param(name: String, ty: String)
+
+enum Def:
+  case Def(name: String, params: List, ret: String, body: Expr, module: String)
+
+enum Prog:
+  case Prog(pkg: String, enums: List, defs: List, main: Expr, mainModule: String)
+

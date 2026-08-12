@@ -1,0 +1,6 @@
+package scuzz.compiler
+
+enum ForBinder:
+  case Eq(name: String, value: Expr)
+  case Draw(name: String, value: Expr)
+

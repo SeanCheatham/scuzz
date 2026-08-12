@@ -162,12 +162,6 @@ def llvmEscape(s: String): String =
 def listConcat(a: List, b: List): List =
   if (List.isEmpty(a) == 1) b else List.cons(List.head(a), listConcat(List.tail(a), b))
 
-def nodeStr(e: List, i: Int): String =
-  List.at(List.tail(e), i)
-
-def nodeExpr(e: List, i: Int): List =
-  List.at(List.tail(e), i)
-
 def mkS(code: String, value: String, kind: String, id: Int, conts: String): List =
   List.cons(code, List.cons(value, List.cons(kind, List.cons(Str.fromInt(id), List.cons(conts, List.empty())))))
 
@@ -219,22 +213,28 @@ def envGetVal(env: List, name: String): String =
 def envGetKind(env: List, name: String): String =
   envRestKind(envGet(env, name))
 
-def dummySpan(): List =
-  List.cons("", List.cons("0", List.cons("0", List.empty())))
+def dummySpan(): Span =
+  Span.Span("", 0, 0)
 
-def mkSpan(file: String, start: Int, end: Int): List =
-  List.cons(file, List.cons(Str.fromInt(start), List.cons(Str.fromInt(end), List.empty())))
+def mkSpan(file: String, start: Int, end: Int): Span =
+  Span.Span(file, start, end)
 
-def spanFile(sp: List): String =
-  List.head(sp)
+def spanFile(sp: Span): String =
+  sp match {
+    case Span.Span(file, start, end) => file
+  }
 
-def spanStart(sp: List): Int =
-  parseInt(List.head(List.tail(sp)))
+def spanStart(sp: Span): Int =
+  sp match {
+    case Span.Span(file, start, end) => start
+  }
 
-def spanEnd(sp: List): Int =
-  parseInt(List.head(List.tail(List.tail(sp))))
+def spanEnd(sp: Span): Int =
+  sp match {
+    case Span.Span(file, start, end) => end
+  }
 
-def coverSpan(a: List, b: List): List =
+def coverSpan(a: Span, b: Span): Span =
   for {
     file = if (Str.len(spanFile(a)) == 0) spanFile(b) else spanFile(a)
     s0 = spanStart(a)
@@ -245,14 +245,33 @@ def coverSpan(a: List, b: List): List =
     end = if (e0 > e1) e0 else e1
   } yield mkSpan(file, start, end)
 
-def listLast(xs: List): List =
-  if (List.isEmpty(List.tail(xs)) == 1) List.head(xs) else listLast(List.tail(xs))
-
-def withSpan(node: List, sp: List): List =
-  listConcat(node, List.cons(sp, List.empty()))
-
-def exprSpan(e: List): List =
-  listLast(e)
+def exprSpan(e: Expr): Span =
+  e match {
+    case Expr.Unit(span) => span
+    case Expr.IntLit(digits, span) => span
+    case Expr.StrLit(value, span) => span
+    case Expr.ListLit(elems, span) => span
+    case Expr.Interp(parts, span) => span
+    case Expr.Var(name, span) => span
+    case Expr.Adt(enumName, caseName, args, span) => span
+    case Expr.Call(callee, args, span) => span
+    case Expr.BinOp(op, left, right, span) => span
+    case Expr.If(cond, thenB, elseB, span) => span
+    case Expr.For(binders, body, span) => span
+    case Expr.Let(name, value, body, span) => span
+    case Expr.FlatMap(inner, param, body, span) => span
+    case Expr.Handle(inner, body, span) => span
+    case Expr.Attempt(inner, span) => span
+    case Expr.Lambda(param, body, span) => span
+    case Expr.Match(scrut, arms, span) => span
+    case Expr.Println(arg, span) => span
+    case Expr.Fail(arg, span) => span
+    case Expr.Pure(arg, span) => span
+    case Expr.Sleep(arg, span) => span
+    case Expr.Delay(span) => span
+    case Expr.IoRace(left, right, span) => span
+    case Expr.IoBoth(left, right, span) => span
+  }
 
 def offsetToLineCol(source: String, offset: Int): List =
   offsetToLineColAt(source, offset, 0, 1, 1)

@@ -1,0 +1,5 @@
+package scuzz.compiler
+
+enum MatchArm:
+  case Arm(pat: Pattern, body: Expr)
+

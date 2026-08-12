@@ -690,10 +690,10 @@ fn expect_ty(got: &Type, want: &Type) -> Result<(), TypeError> {
 fn check_payload_fields(enum_name: &str, case: &crate::ast::EnumCase) -> Result<(), TypeError> {
     for (fname, fty) in &case.fields {
         match fty {
-            Type::Int | Type::String | Type::List => {}
+            Type::Int | Type::String | Type::List | Type::Adt(_) => {}
             other => {
                 return Err(TypeError::Msg(format!(
-                    "{enum_name}.{} field {fname}: Stage 0 payload types are Int, String, or List, got {other:?}",
+                    "{enum_name}.{} field {fname}: Stage 0 payload types are Int, String, List, or an ADT, got {other:?}",
                     case.name
                 )))
             }
@@ -843,6 +843,24 @@ enum Pair:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("multi-field payload ADT should typecheck");
+    }
+
+    #[test]
+    fn typechecks_nested_adt_payload() {
+        let src = r#"
+enum Inner:
+  case Box(n: Int)
+enum Outer:
+  case Wrap(x: Inner)
+@main def main: IO[Unit] =
+  Outer.Wrap(Inner.Box(1)) match {
+    case Outer.Wrap(i) => i match {
+      case Inner.Box(n) => IO.println(Str.fromInt(n))
+    }
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("nested ADT payload should typecheck");
     }
 
     #[test]

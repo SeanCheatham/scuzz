@@ -941,6 +941,8 @@ fn emit_expr(
                     continue;
                 }
                 let label = format!("{prefix}_arm_{id}_{i}");
+                // Join block so nested if/match inside the arm is a valid PHI pred.
+                let arm_join = format!("{prefix}_aj_{id}_{i}");
                 writeln!(code, "{label}:").unwrap();
                 let mut bound_names: Vec<String> = Vec::new();
                 if let Pattern::Adt {
@@ -1028,8 +1030,10 @@ fn emit_expr(
                     result_kind = ae.kind;
                     result_payload = ae.payload;
                 }
+                writeln!(code, "  br label %{arm_join}").unwrap();
+                writeln!(code, "{arm_join}:").unwrap();
                 writeln!(code, "  br label %{merge}").unwrap();
-                phi_parts.push((ae.value, label));
+                phi_parts.push((ae.value, arm_join));
             }
 
             writeln!(code, "{default_label}:").unwrap();
@@ -1037,6 +1041,7 @@ fn emit_expr(
                 .iter()
                 .find(|a| matches!(a.pattern, Pattern::Wildcard))
             {
+                let default_join = format!("{prefix}_dj_{id}");
                 let ae = emit_expr(
                     &arm.body,
                     ctx,
@@ -1048,8 +1053,10 @@ fn emit_expr(
                     result_kind = ae.kind;
                     result_payload = ae.payload;
                 }
+                writeln!(code, "  br label %{default_join}").unwrap();
+                writeln!(code, "{default_join}:").unwrap();
                 writeln!(code, "  br label %{merge}").unwrap();
-                phi_parts.push((ae.value, default_label));
+                phi_parts.push((ae.value, default_join));
             } else {
                 let dflt = match result_kind {
                     Kind::Int => {

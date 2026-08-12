@@ -1,0 +1,5 @@
+package scuzz.compiler
+
+enum Span:
+  case Span(file: String, start: Int, end: Int)
+
