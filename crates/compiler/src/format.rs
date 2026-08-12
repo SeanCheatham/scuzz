@@ -63,6 +63,11 @@ fn pretty_program(p: &Program) -> String {
 }
 
 fn pretty_enum(e: &EnumDef) -> String {
+    let tparams = if e.type_params.is_empty() {
+        String::new()
+    } else {
+        format!("[{}]", e.type_params.join(", "))
+    };
     if e.is_record {
         let c = &e.cases[0];
         let parts: Vec<String> = c
@@ -70,11 +75,12 @@ fn pretty_enum(e: &EnumDef) -> String {
             .iter()
             .map(|(n, t)| format!("{n}: {}", pretty_type(t)))
             .collect();
-        return format!("record {}({})\n", e.name, parts.join(", "));
+        return format!("record {}{tparams}({})\n", e.name, parts.join(", "));
     }
     let mut out = String::new();
     out.push_str("enum ");
     out.push_str(&e.name);
+    out.push_str(&tparams);
     out.push_str(":\n");
     for c in &e.cases {
         out.push_str("  case ");
@@ -586,6 +592,32 @@ record Point(x: Int, y: Int)
         let src = "import A.tag\n@main def main: IO[Unit] =\n  IO.println(tag())\n";
         let out = format_source(src).unwrap();
         assert!(out.contains("import A.tag"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_generic_enum_and_record() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+enum Either[L, R]:
+  case Left(x: L)
+  case Right(y: R)
+record Box[T](x: T)
+def getOrElse[T](o: Opt[T], default: T): T = o match {
+  case Opt.Some(x) => x
+  case Opt.None => default
+}
+@main def main: IO[Unit] = IO.println(Str.fromInt(getOrElse(Opt.Some(1), 0)))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("enum Opt[T]:"), "missing enum tparams: {out}");
+        assert!(out.contains("enum Either[L, R]:"), "missing Either tparams: {out}");
+        assert!(out.contains("record Box[T](x: T)"), "missing record tparams: {out}");
+        assert!(out.contains("case Some(x: T)"));
+        assert!(out.contains("def getOrElse[T](o: Opt[T], default: T): T ="));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }
