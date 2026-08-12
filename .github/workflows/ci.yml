@@ -52,11 +52,12 @@ jobs:
           grep -q "Hello, Scuzz!" /tmp/hello.out
           grep -q "ready." /tmp/hello.out
 
-      - name: Effects + ADT + FS + impurity + incremental build
+      - name: Concurrency + ADT + FS + impurity + incremental build
         run: |
-          cargo run -p scuzz -- run examples/effects | tee /tmp/effects.out
-          grep -q "ref-ok" /tmp/effects.out
-          grep -q "both-ok" /tmp/effects.out
+          cargo run -p scuzz -- run examples/concurrency | tee /tmp/concurrency.out
+          grep -q "ref-ok" /tmp/concurrency.out
+          grep -q "queue-ok" /tmp/concurrency.out
+          grep -q "deferred-ok" /tmp/concurrency.out
           cargo run -p scuzz -- run examples/adt | tee /tmp/adt.out
           grep -q "adt:red" /tmp/adt.out
           cargo run -p scuzz -- run examples/fs | tee /tmp/fs.out

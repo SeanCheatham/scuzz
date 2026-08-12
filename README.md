@@ -110,7 +110,6 @@ cargo run -p scuzz -- run --headless examples/live
 | `examples/nav` | Lambda taps + `showWhen` + stay-open `Ui.run` + goldens |
 | `examples/live` | Stay-open Window (`Ui.run`; q/Esc) |
 | `examples/todo` | Todo — `List` / `Signal.list` / lambda Add·Save + goldens |
-| `examples/effects` | Blessed effects kit |
 | `examples/concurrency` | `Ref` / `Queue` / `Deferred` + `IO.race` / `IO.both` |
 | `examples/adt` | package / enum / match |
 | `examples/modules` | stem-namespaced defs across files |

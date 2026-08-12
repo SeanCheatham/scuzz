@@ -128,7 +128,7 @@ fn infer(
             expect_ty(&t, &Type::Int)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
-        ExprKind::IoDelayUnit | ExprKind::EffectsRunKit => Ok(Type::Io(Box::new(Type::Unit))),
+        ExprKind::IoDelayUnit => Ok(Type::Io(Box::new(Type::Unit))),
         ExprKind::IoPure(inner) => {
             let t = infer(inner, enums, funs, current_module, env)?;
             Ok(Type::Io(Box::new(t)))

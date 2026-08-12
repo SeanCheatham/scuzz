@@ -179,10 +179,6 @@ int main(void) {
     sz_pair_free(p);
   }
 
-  /* kit demo */
-  r = sz_io_unsafe_run(sz_effects_run_kit());
-  assert(r.ok);
-
   /* string ops */
   {
     SzString *a = sz_string_from_cstr("foo");

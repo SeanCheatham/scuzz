@@ -938,21 +938,6 @@ impl Parser {
                 let end = args.last().map(|a| a.span.clone()).unwrap_or(start.clone());
                 Ok(self.mk(ExprKind::Call { callee, args }, start.cover(&end)))
             }
-            Token::Ident(name) if name == "Effects" => {
-                self.bump();
-                self.expect(&Token::Dot)?;
-                let (method, _) = self.expect_ident()?;
-                if method != "runKit" {
-                    return Err(self.err(format!("unknown Effects.{method}")));
-                }
-                let end = if matches!(self.peek(), Token::LParen) {
-                    self.bump();
-                    self.expect(&Token::RParen)?
-                } else {
-                    start.clone()
-                };
-                Ok(self.mk(ExprKind::EffectsRunKit, start.cover(&end)))
-            }
             Token::Ident(name)
                 if matches!(
                     name.as_str(),

@@ -102,8 +102,6 @@ pub enum ExprKind {
     IoFail(Box<Expr>),
     /// `IO.pure(expr)`
     IoPure(Box<Expr>),
-    /// `Effects.runKit()`
-    EffectsRunKit,
     /// `left.flatMap(param => right)` — param None means `_`
     FlatMap {
         inner: Box<Expr>,

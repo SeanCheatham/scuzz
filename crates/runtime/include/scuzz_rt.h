@@ -341,9 +341,6 @@ SzIo *sz_law_assert(SzString *name, int64_t ok);
 int sz_runtime_main(SzIo *program);
 int sz_runtime_main_args(SzIo *program, int argc, char **argv);
 
-/* Blessed effects kit smoke (Ref/Deferred/Queue/race/sleep/errors) */
-SzIo *sz_effects_run_kit(void);
-
 /* Impurity kit + TestRuntime (Clock/Random/Fs/Net/Sys console fakes) */
 SzIo *sz_impurity_run_kit(void);
 

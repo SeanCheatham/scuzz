@@ -51,7 +51,6 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_adt_new(i32, ptr)").unwrap();
     writeln!(out, "declare i32 @sz_adt_tag(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_adt_payload(ptr)").unwrap();
-    writeln!(out, "declare ptr @sz_effects_run_kit()").unwrap();
     writeln!(out, "declare ptr @sz_list_nil()").unwrap();
     writeln!(out, "declare i32 @sz_list_is_empty(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_cons(ptr, ptr)").unwrap();
@@ -342,7 +341,6 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         }
         ExprKind::IoDelayUnit
         | ExprKind::Unit
-        | ExprKind::EffectsRunKit
         | ExprKind::Var(_)
         | ExprKind::IntLit(_) => {}
         ExprKind::AdtConstruct { args, .. } => {
@@ -728,11 +726,6 @@ fn emit_expr(
                 ie.kind
             };
             io_emitted(code, format!("%{prefix}_io"), payload)
-        }
-        ExprKind::EffectsRunKit => {
-            let mut code = String::new();
-            writeln!(code, "  %{prefix}_io = call ptr @sz_effects_run_kit()").unwrap();
-            io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
         }
         ExprKind::AdtConstruct {
             enum_name,

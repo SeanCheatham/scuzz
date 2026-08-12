@@ -132,7 +132,6 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
         ExprKind::IoSleep(e) => format!("{pad}IO.sleep({})", pretty_expr(e, 0).trim()),
         ExprKind::IoFail(e) => format!("{pad}IO.fail({})", pretty_expr(e, 0).trim()),
         ExprKind::IoPure(e) => format!("{pad}IO.pure({})", pretty_expr(e, 0).trim()),
-        ExprKind::EffectsRunKit => format!("{pad}Effects.runKit()"),
         ExprKind::Var(n) => format!("{pad}{n}"),
         ExprKind::AdtConstruct {
             enum_name,
