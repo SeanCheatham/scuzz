@@ -63,7 +63,7 @@ Build a pure `View` tree, hold state in `Signal`, run a session with `Ui.run`:
   } yield ()
 ```
 
-Lists: keep a `Signal.list`, render with `View.each(items)` (framework rebuilds children at layout). Wrap a scroll list in `View.expanded(…)` inside a Column so it fills leftover height; in a Row, `View.expanded` takes leftover width. `View.center(child)` fills the max slot and centers the child (see `examples/counter`). See also `examples/todo` and `examples/nav`.
+Lists: keep a `Signal.list`, render with `View.each(items)` (framework rebuilds children at layout). Wrap a scroll list in `View.expanded(…)` inside a Column so it fills leftover height; in a Row, `View.expanded` takes leftover width. `View.center(child)` fills the max slot and centers the child; `View.stack(…)` overlays children. See `examples/counter`, `examples/todo`, and `examples/nav`.
 
 `Ui.run` under Headless: mount → optional scripted text/tap (`tap_text` in toml / env) → snapshot → unmount. Window stays open when `[ui].default_runtime = "window"`.
 
@@ -110,7 +110,7 @@ src/
 | --- | --- |
 | `examples/hello` | IO println hello |
 | `examples/cli` | `Sys.args` + `Sys.readLine` |
-| `examples/counter` | `Signal.map` + `View.bindText` + `View.center` + button lambda + `Ui.run` + path dep on `shared` + laws/sim |
+| `examples/counter` | `Signal.map` + `View.bindText` + `View.center` / `View.stack` + button lambda + `Ui.run` + path dep on `shared` + laws/sim |
 | `examples/shared` | Library package (`{ path = "..." }`) with helpers + optional `*.scuzz_sim` |
 | `examples/todo` | `Signal.list` + `View.each`, Column `View.expanded` scroll, Rename via `setAt`, Fs load/save |
 | `examples/nav` | `showWhen`, multi-page, Row `View.expanded` title |

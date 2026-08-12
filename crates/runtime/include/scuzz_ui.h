@@ -127,6 +127,7 @@ typedef enum SzViewKind {
   SZ_VIEW_SCROLL,
   SZ_VIEW_EXPANDED, /* Column/Row flex child: leftover height or width */
   SZ_VIEW_CENTER,   /* fill max constraints; center child */
+  SZ_VIEW_STACK,    /* overlay children; paint back-to-front */
   SZ_VIEW_IMAGE,
   SZ_VIEW_ICON,
   SZ_VIEW_LABEL /* full-bleed bg + bar that toggles colors on tap */
@@ -149,6 +150,7 @@ SzView *sz_view_button(const char *label, SzViewTapFn on_tap, void *env);
 SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder);
 SzView *sz_view_column(void);
 SzView *sz_view_row(void);
+SzView *sz_view_stack(void);
 SzView *sz_view_list(void);
 /* Reactive list: children rebuilt from Signal.list at layout (`- item` texts). */
 SzView *sz_view_each(SzSignalList *sig);
@@ -250,6 +252,7 @@ SzView *sz_lang_view_text(SzString *text);
 SzView *sz_lang_view_button(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_column(void);
 SzView *sz_lang_view_row(void);
+SzView *sz_lang_view_stack(void);
 SzView *sz_lang_view_list(void);
 SzView *sz_lang_view_each(SzSignalList *sig);
 SzView *sz_lang_view_scroll(SzView *child);

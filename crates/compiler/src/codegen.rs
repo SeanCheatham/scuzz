@@ -108,6 +108,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare i64 @sz_color_rgb(i64, i64, i64)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_column()").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_row()").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_stack()").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_list()").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_each(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_scroll(ptr)").unwrap();
@@ -2277,6 +2278,7 @@ fn emit_call(
             prefix,
         ),
         "View.row" => emit_view_box("sz_lang_view_row", &mut code, &emitted_args, prefix),
+        "View.stack" => emit_view_box("sz_lang_view_stack", &mut code, &emitted_args, prefix),
         "View.list" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_lang_view_list()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)

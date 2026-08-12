@@ -1364,7 +1364,7 @@ fn infer_call(
             expect_ty(&arg_tys[2], &Type::Int)?;
             Ok(Type::Int)
         }
-        "View.column" | "View.row" => {
+        "View.column" | "View.row" | "View.stack" => {
             // Nullary or children: `View.column(a, b, …)` adds each child.
             Ok(Type::Opaque("View".into()))
         }

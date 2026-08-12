@@ -342,6 +342,29 @@ static void test_center(void) {
   sz_view_free(center);
 }
 
+static void test_stack(void) {
+  SzView *stack, *bot, *top;
+  const SzTheme *theme = sz_theme_default();
+  SzRect sf, bf, tf;
+
+  stack = sz_view_stack();
+  bot = sz_view_image(40, 40, 0xFF112233u, "");
+  top = sz_view_icon('+', 0xFFFFFFFFu);
+  sz_view_add_child(stack, bot);
+  sz_view_add_child(stack, top);
+  sz_view_layout(stack, 200.f, 200.f, theme);
+  assert(sz_view_kind(stack) == SZ_VIEW_STACK);
+  sf = sz_view_frame(stack);
+  bf = sz_view_frame(bot);
+  tf = sz_view_frame(top);
+  assert(sf.w >= bf.w);
+  assert(sf.h >= bf.h);
+  assert(sf.w < 200.f); /* loose: not fill viewport */
+  assert(fabsf(bf.x - tf.x) < 0.5f);
+  assert(fabsf(bf.y - tf.y) < 0.5f);
+  sz_view_free(stack);
+}
+
 static void test_mobile_pointer_scroll_lifecycle(void) {
   SzUiConfig cfg;
   SzSignalStr *draft;
@@ -701,6 +724,7 @@ int main(void) {
   test_expanded_column();
   test_expanded_row();
   test_center();
+  test_stack();
   test_mobile_pointer_scroll_lifecycle();
   test_a11y_and_anim();
   test_clear_and_set_texts();

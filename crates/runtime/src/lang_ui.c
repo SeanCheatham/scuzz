@@ -75,6 +75,8 @@ SzView *sz_lang_view_column(void) { return sz_view_column(); }
 
 SzView *sz_lang_view_row(void) { return sz_view_row(); }
 
+SzView *sz_lang_view_stack(void) { return sz_view_stack(); }
+
 SzView *sz_lang_view_list(void) { return sz_view_list(); }
 
 SzView *sz_lang_view_each(SzSignalList *sig) { return sz_view_each(sig); }

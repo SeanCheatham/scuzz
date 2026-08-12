@@ -98,7 +98,8 @@ void sz_view_add_child(SzView *parent, SzView *child) {
     return;
   if (parent->kind != SZ_VIEW_COLUMN && parent->kind != SZ_VIEW_ROW &&
       parent->kind != SZ_VIEW_LIST && parent->kind != SZ_VIEW_SCROLL &&
-      parent->kind != SZ_VIEW_EXPANDED && parent->kind != SZ_VIEW_CENTER)
+      parent->kind != SZ_VIEW_EXPANDED && parent->kind != SZ_VIEW_CENTER &&
+      parent->kind != SZ_VIEW_STACK)
     sz_panic("sz_view_add_child: parent cannot have children");
   if (parent->child_count >= parent->child_cap) {
     int ncap = parent->child_cap ? parent->child_cap * 2 : 4;
@@ -224,6 +225,7 @@ SzString *sz_view_a11y_dump(SzView *root) {
 
 SzView *sz_view_column(void) { return view_new(SZ_VIEW_COLUMN); }
 SzView *sz_view_row(void) { return view_new(SZ_VIEW_ROW); }
+SzView *sz_view_stack(void) { return view_new(SZ_VIEW_STACK); }
 SzView *sz_view_list(void) {
   SzView *v = view_new(SZ_VIEW_LIST);
   v->a11y_role = SZ_A11Y_LIST;
@@ -344,7 +346,8 @@ void sz_view_clear_children(SzView *parent) {
     return;
   if (parent->kind != SZ_VIEW_COLUMN && parent->kind != SZ_VIEW_ROW &&
       parent->kind != SZ_VIEW_LIST && parent->kind != SZ_VIEW_SCROLL &&
-      parent->kind != SZ_VIEW_EXPANDED && parent->kind != SZ_VIEW_CENTER)
+      parent->kind != SZ_VIEW_EXPANDED && parent->kind != SZ_VIEW_CENTER &&
+      parent->kind != SZ_VIEW_STACK)
     sz_panic("sz_view_clear_children: parent cannot have children");
   for (i = 0; i < parent->child_count; i++) {
     parent->children[i]->parent = NULL;
@@ -628,6 +631,39 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
     v->frame.h = inner_h + theme->pad * 2.f;
     break;
   }
+  case SZ_VIEW_STACK: {
+    float ix = x + theme->pad;
+    float iy = y + theme->pad;
+    float inner_w = max_w > 0.f ? max_w - theme->pad * 2.f : 0.f;
+    float inner_h = max_h > 0.f ? max_h - theme->pad * 2.f : 0.f;
+    float max_cw = 0.f;
+    float max_ch = 0.f;
+    if (inner_w < 0.f)
+      inner_w = 0.f;
+    if (inner_h < 0.f)
+      inner_h = 0.f;
+    for (i = 0; i < v->child_count; i++) {
+      SzView *ch = v->children[i];
+      if (!view_is_shown(ch)) {
+        layout_node(ch, ix, iy, inner_w, inner_h, theme);
+        continue;
+      }
+      layout_node(ch, ix, iy, inner_w > 0.f ? inner_w : max_w,
+                  inner_h > 0.f ? inner_h : max_h, theme);
+      if (ch->frame.w > max_cw)
+        max_cw = ch->frame.w;
+      if (ch->frame.h > max_ch)
+        max_ch = ch->frame.h;
+    }
+    /* StackFit.loose: size to largest child; clamp to max. */
+    v->frame.w = max_cw + theme->pad * 2.f;
+    v->frame.h = max_ch + theme->pad * 2.f;
+    if (max_w > 0.f && v->frame.w > max_w)
+      v->frame.w = max_w;
+    if (max_h > 0.f && v->frame.h > max_h)
+      v->frame.h = max_h;
+    break;
+  }
   case SZ_VIEW_SCROLL: {
     float inner_w = max_w - theme->pad * 2.f;
     float vh;
@@ -779,6 +815,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_SCROLL:
   case SZ_VIEW_EXPANDED:
   case SZ_VIEW_CENTER:
+  case SZ_VIEW_STACK:
     if (v->kind == SZ_VIEW_LIST || v->kind == SZ_VIEW_SCROLL)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     for (i = 0; i < v->child_count; i++)
