@@ -115,7 +115,7 @@ cargo run -p scuzz -- run --headless examples/live
 | `examples/modules` | stem modules, `private def`, `import`, enum-per-module |
 | `examples/record` | `record` + `p.x` field access |
 | `examples/trait` | `trait` / `impl` + static-dispatch methods |
-| `examples/generic` | Stage-0 monomorphized `def id[T](…)` |
+| `examples/generic` | Monomorphized `def id[T](…)` |
 | `examples/fs` | Blessed `Fs.*` (live) |
 | `examples/clock` | `Clock.realTime` / `monotonic` |
 | `examples/impurity` | `Impurity.runKit` + TestRuntime fakes |

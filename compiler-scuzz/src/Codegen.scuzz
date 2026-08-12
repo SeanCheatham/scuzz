@@ -180,37 +180,42 @@ def findWildArmPat(pat: Pattern, arm: MatchArm, rest: List): List =
 
 def defName(d: Def): String =
   d match {
-    case Def(name, params, ret, body, module, isPrivate) => name
+    case Def(name, params, ret, body, module, isPrivate, typeParams) => name
   }
 
 def defParams(d: Def): List =
   d match {
-    case Def(name, params, ret, body, module, isPrivate) => params
+    case Def(name, params, ret, body, module, isPrivate, typeParams) => params
   }
 
 def defRet(d: Def): Type =
   d match {
-    case Def(name, params, ret, body, module, isPrivate) => ret
+    case Def(name, params, ret, body, module, isPrivate, typeParams) => ret
   }
 
 def defBody(d: Def): Expr =
   d match {
-    case Def(name, params, ret, body, module, isPrivate) => body
+    case Def(name, params, ret, body, module, isPrivate, typeParams) => body
   }
 
 def defModule(d: Def): String =
   d match {
-    case Def(name, params, ret, body, module, isPrivate) => module
+    case Def(name, params, ret, body, module, isPrivate, typeParams) => module
   }
 
 def defIsPrivate(d: Def): Int =
   d match {
-    case Def(name, params, ret, body, module, isPrivate) => isPrivate
+    case Def(name, params, ret, body, module, isPrivate, typeParams) => isPrivate
+  }
+
+def defTypeParams(d: Def): List =
+  d match {
+    case Def(name, params, ret, body, module, isPrivate, typeParams) => typeParams
   }
 
 def setDefModule(d: Def, mod: String): Def =
   d match {
-    case Def(name, params, ret, body, module, isPrivate) => Def.Def(name, params, ret, body, mod, isPrivate)
+    case Def(name, params, ret, body, module, isPrivate, typeParams) => Def.Def(name, params, ret, body, mod, isPrivate, typeParams)
   }
 
 def stampDefsModule(defs: List, mod: String): List =

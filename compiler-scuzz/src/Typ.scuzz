@@ -12,7 +12,7 @@ def paramTy(p: Param): Type =
 
 def declRet(d: Def): Type =
   d match {
-    case Def(name, params, ret, body, module, isPrivate) => ret
+    case Def(name, params, ret, body, module, isPrivate, typeParams) => ret
   }
 
 def findEnum(enums: List, name: String): List =
@@ -67,13 +67,17 @@ def findDupDefOne(d: Def, rest: List, seen: List): String =
     q = qualKey(defModule(d), defName(d))
   } yield if (defSeen(seen, q) == 1) q else findDupDef(rest, List.cons(q, seen))
 
-def bindParams(params: List, enums: List, imports: List, mod: String, env: List): List =
-  if (List.isEmpty(params) == 1) env else bindParams(List.tail(params), enums, imports, mod, tyEnvPut(env, paramName(List.head(params)), resolveType(paramTy(List.head(params)), enums, imports, mod)))
+def bindParams(params: List, enums: List, imports: List, mod: String, tparams: List, env: List): List =
+  if (List.isEmpty(params) == 1) env else bindParams(List.tail(params), enums, imports, mod, tparams, tyEnvPut(env, paramName(List.head(params)), resolveTypeIn(paramTy(List.head(params)), enums, imports, mod, tparams)))
 
 def resolveType(ty: Type, enums: List, imports: List, mod: String): Type =
+  resolveTypeIn(ty, enums, imports, mod, List.empty())
+
+def resolveTypeIn(ty: Type, enums: List, imports: List, mod: String, tparams: List): Type =
   ty match {
-    case Type.Adt(name) => resolveTypeAdt(name, enums, imports, mod)
-    case Type.Io(inner) => Type.Io(resolveType(inner, enums, imports, mod))
+    case Type.Var(name) => if (listContainsStr(tparams, name) == 1) tyMkVar(name) else tyMkVar(name)
+    case Type.Adt(name) => if (listContainsStr(tparams, name) == 1) tyMkVar(name) else resolveTypeAdt(name, enums, imports, mod)
+    case Type.Io(inner) => Type.Io(resolveTypeIn(inner, enums, imports, mod, tparams))
     case _ => ty
   }
 
@@ -122,7 +126,7 @@ def expandOneImplMethods(module: String, traitName: String, forType: String, met
 
 def expandOneImplMethod(module: String, traitName: String, forType: String, m: ImplMethod): Def =
   m match {
-    case ImplMethod.Method(name, params, ret, body) => Def.Def(implMethodName(traitName, forType, name), List.cons(Param.Param("self", Type.Adt(forType)), params), ret, body, module, 0)
+    case ImplMethod.Method(name, params, ret, body) => Def.Def(implMethodName(traitName, forType, name), List.cons(Param.Param("self", Type.Adt(forType)), params), ret, body, module, 0, List.empty())
   }
 
 def importDupKey(im: Import): String =
@@ -150,9 +154,10 @@ def typecheckDefsThenMain(defs: List, enums: List, allDefs: List, imports: List,
 
 def typecheckDefsThenMainOne(d: Def, rest: List, enums: List, allDefs: List, imports: List, main: Expr, mainMod: String): TyRes =
   for {
-    env = bindParams(defParams(d), enums, imports, defModule(d), List.empty())
+    tparams = defTypeParams(d)
+    env = bindParams(defParams(d), enums, imports, defModule(d), tparams, List.empty())
     bodyR = inferExpr(defBody(d), enums, mkFuns(defModule(d), allDefs, imports), env)
-    ret = resolveType(declRet(d), enums, imports, defModule(d))
+    ret = resolveTypeIn(declRet(d), enums, imports, defModule(d), tparams)
   } yield if (tyIsOk(bodyR) == 0) bodyR else if (typesCompat(tyVal(bodyR), ret) == 0) tyErr(str5("def ", defName(d), " body ", tyShow(tyVal(bodyR)), str3(" does not match declared ", tyShow(ret), ""))) else typecheckDefsThenMain(rest, enums, allDefs, imports, main, mainMod)
 
 def checkMainTy(r: TyRes): TyRes =
@@ -900,7 +905,15 @@ def callUserFun(callee: String, argTys: List, funs: List, enums: List): TyRes =
   } yield if (List.isEmpty(d) == 1) tyErr(str3("unknown function ", callee, "")) else if (resolveIsAmbiguous(d) == 1) tyErr(str4("ambiguous function ", callee, ": qualify as Module.", callee)) else if (resolveIsPrivate(d) == 1) tyErr(str5("private def ", resolvePrivateModule(d), ".", resolvePrivateName(d), " is not visible here")) else callUserFunResolved(callee, resolvedDef(d), argTys, enums, funsImports(funs))
 
 def callUserFunResolved(callee: String, d: Def, argTys: List, enums: List, imports: List): TyRes =
-  callUserFunParams(callee, defParams(d), argTys, 0, resolveType(declRet(d), enums, imports, defModule(d)), enums, imports, defModule(d))
+  for {
+    tparams = defTypeParams(d)
+  } yield if (List.isEmpty(tparams) == 1) callUserFunParams(callee, defParams(d), argTys, 0, resolveType(declRet(d), enums, imports, defModule(d)), enums, imports, defModule(d)) else callUserFunGeneric(callee, d, argTys, enums, imports, tparams, List.empty(), 0)
+
+def callUserFunGeneric(callee: String, d: Def, argTys: List, enums: List, imports: List, tparams: List, subst: List, i: Int): TyRes =
+  if (List.len(defParams(d)) != List.len(argTys)) tyErr(str4(callee, " expects ", Str.fromInt(List.len(defParams(d))), str3(" args, got ", Str.fromInt(List.len(argTys)), ""))) else if (i >= List.len(defParams(d))) tyOk(applySubst(resolveTypeIn(declRet(d), enums, imports, defModule(d), tparams), subst)) else for {
+  want = resolveTypeIn(paramTy(List.at(defParams(d), i)), enums, imports, defModule(d), tparams)
+  us = unifyTypes(want, argTyAt(argTys, i), subst)
+} yield if (List.isEmpty(us) == 1) tyErr(str4(callee, " arg type mismatch: expected ", tyShow(want), str3(", got ", tyShow(argTyAt(argTys, i)), ""))) else callUserFunGeneric(callee, d, argTys, enums, imports, tparams, List.head(us), i + 1)
 
 def callUserFunParams(callee: String, params: List, argTys: List, i: Int, ret: Type, enums: List, imports: List, mod: String): TyRes =
   if (List.len(params) != List.len(argTys)) tyErr(str4(callee, " expects ", Str.fromInt(List.len(params)), str3(" args, got ", Str.fromInt(List.len(argTys)), ""))) else if (i >= List.len(params)) tyOk(ret) else callUserFunParamOne(callee, params, argTys, i, ret, enums, imports, mod)
@@ -956,7 +969,7 @@ def resolveFieldsDefs(defs: List, enums: List, imports: List, allDefs: List, acc
 
 def resolveFieldsDef(d: Def, enums: List, imports: List, allDefs: List): Def =
   d match {
-    case Def(name, params, ret, body, module, isPrivate) => Def.Def(name, params, ret, resolveFieldsExpr(body, enums, imports, module, allDefs, bindParams(params, enums, imports, module, List.empty())), module, isPrivate)
+    case Def(name, params, ret, body, module, isPrivate, typeParams) => Def.Def(name, params, ret, resolveFieldsExpr(body, enums, imports, module, allDefs, bindParams(params, enums, imports, module, typeParams, List.empty())), module, isPrivate, typeParams)
   }
 
 def resolveFieldsExpr(e: Expr, enums: List, imports: List, mod: String, allDefs: List, env: List): Expr =
@@ -1023,4 +1036,318 @@ def resolveFieldsArm(arm: MatchArm, enums: List, imports: List, mod: String, all
   arm match {
     case MatchArm.Arm(pat, body) => MatchArm.Arm(pat, resolveFieldsExpr(body, enums, imports, mod, allDefs, env))
   }
+
+def substGet(subst: List, name: String): List =
+  if (List.isEmpty(subst) == 1) List.empty() else substGetCont(List.head(subst), List.tail(subst), name)
+
+def substGetCont(b: TyBind, rest: List, name: String): List =
+  b match {
+    case TyBind.Bind(n, ty) => if (streq(n, name) == 1) List.cons(ty, List.empty()) else substGet(rest, name)
+  }
+
+def substPut(subst: List, name: String, ty: Type): List =
+  List.cons(TyBind.Bind(name, ty), subst)
+
+def applySubst(ty: Type, subst: List): Type =
+  ty match {
+    case Type.Var(name) => applySubstVar(name, subst, ty)
+    case Type.Io(inner) => Type.Io(applySubst(inner, subst))
+    case _ => ty
+  }
+
+def applySubstVar(name: String, subst: List, fallback: Type): Type =
+  for {
+    hit = substGet(subst, name)
+  } yield if (List.isEmpty(hit) == 1) fallback else List.head(hit)
+
+def monoTypeOk(t: Type): Int =
+  t match {
+    case Type.Unit => 1
+    case Type.Int => 1
+    case Type.String => 1
+    case Type.Bool => 1
+    case Type.List => 1
+    case Type.Adt(name) => 1
+    case _ => 0
+  }
+
+def unifyTypes(pattern: Type, concrete: Type, subst: List): List =
+  pattern match {
+    case Type.Var(n) => unifyVar(n, concrete, subst)
+    case Type.Io(a) => unifyIo(a, concrete, subst)
+    case _ => if (typesCompat(pattern, concrete) == 1) List.cons(subst, List.empty()) else List.empty()
+  }
+
+def unifyVar(n: String, concrete: Type, subst: List): List =
+  for {
+    prev = substGet(subst, n)
+  } yield if (List.isEmpty(prev) == 0) if (typesCompat(List.head(prev), concrete) == 1) List.cons(subst, List.empty()) else List.empty() else if (monoTypeOk(concrete) == 0) List.empty() else List.cons(substPut(subst, n, concrete), List.empty())
+
+def unifyIo(a: Type, concrete: Type, subst: List): List =
+  concrete match {
+    case Type.Io(b) => unifyTypes(a, b, subst)
+    case _ => List.empty()
+  }
+
+def typeMangle(t: Type): String =
+  t match {
+    case Type.Unit => "Unit"
+    case Type.Int => "Int"
+    case Type.String => "String"
+    case Type.Bool => "Bool"
+    case Type.List => "List"
+    case Type.Adt(id) => mangleDots(id, 0, "")
+    case Type.Io(inner) => Str.concat("IO_", typeMangle(inner))
+    case Type.Var(n) => n
+    case Type.Opaque(n) => n
+  }
+
+def mangleDots(s: String, i: Int, acc: String): String =
+  if (i >= Str.len(s)) acc else if (Str.charAt(s, i) == 46) mangleDots(s, i + 1, Str.concat(acc, "_")) else mangleDots(s, i + 1, Str.concat(acc, Str.slice(s, i, i + 1)))
+
+def monoDefName(defName: String, subst: List, tparams: List): String =
+  Str.concat("__gen_", Str.concat(defName, monoDefNameParams(tparams, subst, "")))
+
+def monoDefNameParams(tparams: List, subst: List, acc: String): String =
+  if (List.isEmpty(tparams) == 1) acc else for {
+  hit = substGet(subst, List.head(tparams))
+  piece = if (List.isEmpty(hit) == 1) "Unknown" else typeMangle(List.head(hit))
+} yield monoDefNameParams(List.tail(tparams), subst, Str.concat(acc, Str.concat("_", piece)))
+
+def monoPack(e: Expr, specs: List): List =
+  List.cons(e, List.cons(specs, List.empty()))
+
+def monoE(pack: List): Expr =
+  List.head(pack)
+
+def monoS(pack: List): List =
+  List.head(List.tail(pack))
+
+def findSpecByName(specs: List, name: String): Int =
+  if (List.isEmpty(specs) == 1) 0 else if (streq(defName(List.head(specs)), name) == 1) 1 else findSpecByName(List.tail(specs), name)
+
+def dropGenericDefs(defs: List, acc: List): List =
+  if (List.isEmpty(defs) == 1) List.reverse(acc) else if (List.isEmpty(defTypeParams(List.head(defs))) == 0) dropGenericDefs(List.tail(defs), acc) else dropGenericDefs(List.tail(defs), List.cons(List.head(defs), acc))
+
+def appendMissingSpecs(defs: List, specs: List): List =
+  if (List.isEmpty(specs) == 1) defs else if (findSpecByName(defs, defName(List.head(specs))) == 1) appendMissingSpecs(defs, List.tail(specs)) else appendMissingSpecs(List.cons(List.head(specs), defs), List.tail(specs))
+
+def specializeParams(params: List, enums: List, imports: List, mod: String, tparams: List, subst: List, acc: List): List =
+  if (List.isEmpty(params) == 1) List.reverse(acc) else specializeParams(List.tail(params), enums, imports, mod, tparams, subst, List.cons(Param.Param(paramName(List.head(params)), applySubst(resolveTypeIn(paramTy(List.head(params)), enums, imports, mod, tparams), subst)), acc))
+
+def monomorphizeProg(prog: Prog): Prog =
+  for {
+    enums = progEnums(prog)
+    imports = progImports(prog)
+    defs = progDefs(prog)
+    packDefs = monoDefs(defs, enums, imports, defs, List.empty(), List.empty())
+    defs2 = monoEDefs(packDefs)
+    specs1 = monoSDefs(packDefs)
+    mainPack = monoExpr(progMain(prog), enums, mkFuns(progMainModule(prog), defs, imports), List.empty(), specs1)
+    main2 = monoE(mainPack)
+    specs2 = monoS(mainPack)
+    kept = dropGenericDefs(defs2, List.empty())
+    outDefs = appendMissingSpecs(kept, specs2)
+  } yield mkProgFull(progPkg(prog), enums, outDefs, main2, progMainModule(prog), imports, progTraits(prog), progImpls(prog))
+
+def monoPackDefs(defs: List, specs: List): List =
+  List.cons(defs, List.cons(specs, List.empty()))
+
+def monoEDefs(pack: List): List =
+  List.head(pack)
+
+def monoSDefs(pack: List): List =
+  List.head(List.tail(pack))
+
+def monoDefs(defs: List, enums: List, imports: List, allDefs: List, acc: List, specs: List): List =
+  if (List.isEmpty(defs) == 1) monoPackDefs(List.reverse(acc), specs) else monoDefsOne(List.head(defs), List.tail(defs), enums, imports, allDefs, acc, specs)
+
+def monoDefsOne(d: Def, rest: List, enums: List, imports: List, allDefs: List, acc: List, specs: List): List =
+  for {
+    tparams = defTypeParams(d)
+    env = bindParams(defParams(d), enums, imports, defModule(d), tparams, List.empty())
+    pack = monoExpr(defBody(d), enums, mkFuns(defModule(d), allDefs, imports), env, specs)
+    d2 = Def.Def(defName(d), defParams(d), defRet(d), monoE(pack), defModule(d), defIsPrivate(d), tparams)
+  } yield monoDefs(rest, enums, imports, allDefs, List.cons(d2, acc), monoS(pack))
+
+def monoExpr(e: Expr, enums: List, funs: List, env: List, specs: List): List =
+  e match {
+    case Expr.Call(callee, args, span) => monoCall(callee, args, span, enums, funs, env, specs)
+    case Expr.Println(arg, span) => monoUnary(arg, span, enums, funs, env, specs, 1)
+    case Expr.Fail(arg, span) => monoUnary(arg, span, enums, funs, env, specs, 2)
+    case Expr.Pure(arg, span) => monoUnary(arg, span, enums, funs, env, specs, 3)
+    case Expr.Sleep(arg, span) => monoUnary(arg, span, enums, funs, env, specs, 4)
+    case Expr.Attempt(inner, span) => monoUnary(inner, span, enums, funs, env, specs, 5)
+    case Expr.Let(name, value, body, span) => monoLet(name, value, body, span, enums, funs, env, specs)
+    case Expr.FlatMap(inner, param, body, span) => monoFlatMap(inner, param, body, span, enums, funs, env, specs)
+    case Expr.Handle(inner, body, span) => monoBinary(inner, body, span, enums, funs, env, specs, 1)
+    case Expr.If(cond, thenB, elseB, span) => monoIf(cond, thenB, elseB, span, enums, funs, env, specs)
+    case Expr.BinOp(op, left, right, span) => monoBinOp(op, left, right, span, enums, funs, env, specs)
+    case Expr.IoRace(left, right, span) => monoBinary(left, right, span, enums, funs, env, specs, 2)
+    case Expr.IoBoth(left, right, span) => monoBinary(left, right, span, enums, funs, env, specs, 3)
+    case Expr.ListLit(elems, span) => monoListLit(elems, span, enums, funs, env, specs)
+    case Expr.Adt(enumName, caseName, args, span) => monoAdt(enumName, caseName, args, span, enums, funs, env, specs)
+    case Expr.MethodCall(receiver, method, args, span) => monoMethod(receiver, method, args, span, enums, funs, env, specs)
+    case Expr.Field(base, field, span) => monoField(base, field, span, enums, funs, env, specs)
+    case Expr.Lambda(param, body, span) => monoLambda(param, body, span, enums, funs, env, specs)
+    case Expr.Match(scrut, arms, span) => monoMatch(scrut, arms, span, enums, funs, env, specs)
+    case Expr.Interp(parts, span) => monoInterp(parts, span, enums, funs, env, specs)
+    case Expr.For(binders, body, span) => monoFor(binders, body, span, enums, funs, env, specs)
+    case _ => monoPack(e, specs)
+  }
+
+def monoUnary(arg: Expr, span: Span, enums: List, funs: List, env: List, specs: List, kind: Int): List =
+  for {
+    p = monoExpr(arg, enums, funs, env, specs)
+    a = monoE(p)
+  } yield if (kind == 1) monoPack(Expr.Println(a, span), monoS(p)) else if (kind == 2) monoPack(Expr.Fail(a, span), monoS(p)) else if (kind == 3) monoPack(Expr.Pure(a, span), monoS(p)) else if (kind == 4) monoPack(Expr.Sleep(a, span), monoS(p)) else monoPack(Expr.Attempt(a, span), monoS(p))
+
+def monoBinary(left: Expr, right: Expr, span: Span, enums: List, funs: List, env: List, specs: List, kind: Int): List =
+  for {
+    lp = monoExpr(left, enums, funs, env, specs)
+    rp = monoExpr(right, enums, funs, env, monoS(lp))
+  } yield if (kind == 1) monoPack(Expr.Handle(monoE(lp), monoE(rp), span), monoS(rp)) else if (kind == 2) monoPack(Expr.IoRace(monoE(lp), monoE(rp), span), monoS(rp)) else monoPack(Expr.IoBoth(monoE(lp), monoE(rp), span), monoS(rp))
+
+def monoBinOp(op: String, left: Expr, right: Expr, span: Span, enums: List, funs: List, env: List, specs: List): List =
+  for {
+    lp = monoExpr(left, enums, funs, env, specs)
+    rp = monoExpr(right, enums, funs, env, monoS(lp))
+  } yield monoPack(Expr.BinOp(op, monoE(lp), monoE(rp), span), monoS(rp))
+
+def monoIf(cond: Expr, thenB: Expr, elseB: Expr, span: Span, enums: List, funs: List, env: List, specs: List): List =
+  for {
+    cp = monoExpr(cond, enums, funs, env, specs)
+    tp = monoExpr(thenB, enums, funs, env, monoS(cp))
+    ep = monoExpr(elseB, enums, funs, env, monoS(tp))
+  } yield monoPack(Expr.If(monoE(cp), monoE(tp), monoE(ep), span), monoS(ep))
+
+def monoLet(name: String, value: Expr, body: Expr, span: Span, enums: List, funs: List, env: List, specs: List): List =
+  for {
+    vp = monoExpr(value, enums, funs, env, specs)
+    vr = inferExpr(monoE(vp), enums, funs, env)
+    env2 = if (tyIsOk(vr) == 1) tyEnvPut(env, name, tyVal(vr)) else env
+    bp = monoExpr(body, enums, funs, env2, monoS(vp))
+  } yield monoPack(Expr.Let(name, monoE(vp), monoE(bp), span), monoS(bp))
+
+def monoFlatMap(inner: Expr, param: String, body: Expr, span: Span, enums: List, funs: List, env: List, specs: List): List =
+  for {
+    ip = monoExpr(inner, enums, funs, env, specs)
+    ir = inferExpr(monoE(ip), enums, funs, env)
+    env2 = if (tyIsOk(ir) == 0) env else if (tyIsIo(tyVal(ir)) == 0) env else if (Str.len(param) == 0) env else tyEnvPut(env, param, tyIoInner(tyVal(ir)))
+    bp = monoExpr(body, enums, funs, env2, monoS(ip))
+  } yield monoPack(Expr.FlatMap(monoE(ip), param, monoE(bp), span), monoS(bp))
+
+def monoLambda(param: String, body: Expr, span: Span, enums: List, funs: List, env: List, specs: List): List =
+  for {
+    env2 = tyEnvPut(env, param, tyMkOpaque("Param"))
+    bp = monoExpr(body, enums, funs, env2, specs)
+  } yield monoPack(Expr.Lambda(param, monoE(bp), span), monoS(bp))
+
+def monoField(base: Expr, field: String, span: Span, enums: List, funs: List, env: List, specs: List): List =
+  for {
+    bp = monoExpr(base, enums, funs, env, specs)
+  } yield monoPack(Expr.Field(monoE(bp), field, span), monoS(bp))
+
+def monoListLit(elems: List, span: Span, enums: List, funs: List, env: List, specs: List): List =
+  for {
+    p = monoExprList(elems, enums, funs, env, specs, List.empty())
+  } yield monoPack(Expr.ListLit(monoEList(p), span), monoSList(p))
+
+def monoAdt(enumName: String, caseName: String, args: List, span: Span, enums: List, funs: List, env: List, specs: List): List =
+  for {
+    p = monoExprList(args, enums, funs, env, specs, List.empty())
+  } yield monoPack(Expr.Adt(enumName, caseName, monoEList(p), span), monoSList(p))
+
+def monoMethod(receiver: Expr, method: String, args: List, span: Span, enums: List, funs: List, env: List, specs: List): List =
+  for {
+    rp = monoExpr(receiver, enums, funs, env, specs)
+    ap = monoExprList(args, enums, funs, env, monoS(rp), List.empty())
+  } yield monoPack(Expr.MethodCall(monoE(rp), method, monoEList(ap), span), monoSList(ap))
+
+def monoMatch(scrut: Expr, arms: List, span: Span, enums: List, funs: List, env: List, specs: List): List =
+  for {
+    sp = monoExpr(scrut, enums, funs, env, specs)
+    ap = monoArms(arms, enums, funs, env, monoS(sp), List.empty())
+  } yield monoPack(Expr.Match(monoE(sp), monoEList(ap), span), monoSList(ap))
+
+def monoFor(binders: List, body: Expr, span: Span, enums: List, funs: List, env: List, specs: List): List =
+  for {
+    bp = monoExpr(body, enums, funs, env, specs)
+  } yield monoPack(Expr.For(binders, monoE(bp), span), monoS(bp))
+
+def monoInterp(parts: List, span: Span, enums: List, funs: List, env: List, specs: List): List =
+  for {
+    p = monoInterpParts(parts, enums, funs, env, specs, List.empty())
+  } yield monoPack(Expr.Interp(monoEList(p), span), monoSList(p))
+
+def monoPackList(xs: List, specs: List): List =
+  List.cons(xs, List.cons(specs, List.empty()))
+
+def monoEList(pack: List): List =
+  List.head(pack)
+
+def monoSList(pack: List): List =
+  List.head(List.tail(pack))
+
+def monoExprList(xs: List, enums: List, funs: List, env: List, specs: List, acc: List): List =
+  if (List.isEmpty(xs) == 1) monoPackList(List.reverse(acc), specs) else for {
+  p = monoExpr(List.head(xs), enums, funs, env, specs)
+} yield monoExprList(List.tail(xs), enums, funs, env, monoS(p), List.cons(monoE(p), acc))
+
+def monoArms(arms: List, enums: List, funs: List, env: List, specs: List, acc: List): List =
+  if (List.isEmpty(arms) == 1) monoPackList(List.reverse(acc), specs) else monoArmsOne(List.head(arms), List.tail(arms), enums, funs, env, specs, acc)
+
+def monoArmsOne(arm: MatchArm, rest: List, enums: List, funs: List, env: List, specs: List, acc: List): List =
+  arm match {
+    case MatchArm.Arm(pat, body) => for {
+  p = monoExpr(body, enums, funs, env, specs)
+} yield monoArms(rest, enums, funs, env, monoS(p), List.cons(MatchArm.Arm(pat, monoE(p)), acc))
+  }
+
+def monoInterpParts(parts: List, enums: List, funs: List, env: List, specs: List, acc: List): List =
+  if (List.isEmpty(parts) == 1) monoPackList(List.reverse(acc), specs) else monoInterpPartOne(List.head(parts), List.tail(parts), enums, funs, env, specs, acc)
+
+def monoInterpPartOne(part: InterpPart, rest: List, enums: List, funs: List, env: List, specs: List, acc: List): List =
+  part match {
+    case InterpPart.Lit(text) => monoInterpParts(rest, enums, funs, env, specs, List.cons(part, acc))
+    case InterpPart.Hole(expr) => for {
+  p = monoExpr(expr, enums, funs, env, specs)
+} yield monoInterpParts(rest, enums, funs, env, monoS(p), List.cons(InterpPart.Hole(monoE(p)), acc))
+  }
+
+def monoCall(callee: String, args: List, span: Span, enums: List, funs: List, env: List, specs: List): List =
+  for {
+    ap = monoExprList(args, enums, funs, env, specs, List.empty())
+    args2 = monoEList(ap)
+    specs2 = monoSList(ap)
+    hit = resolveFun(funsDefs(funs), funsImports(funs), callee, funsMod(funs))
+  } yield if (List.isEmpty(hit) == 1) monoPack(Expr.Call(callee, args2, span), specs2) else if (resolveIsAmbiguous(hit) == 1) monoPack(Expr.Call(callee, args2, span), specs2) else if (resolveIsPrivate(hit) == 1) monoPack(Expr.Call(callee, args2, span), specs2) else monoCallResolved(callee, resolvedDef(hit), args2, span, enums, funs, env, specs2)
+
+def monoCallResolved(callee: String, d: Def, args: List, span: Span, enums: List, funs: List, env: List, specs: List): List =
+  for {
+    tparams = defTypeParams(d)
+  } yield if (List.isEmpty(tparams) == 1) monoPack(Expr.Call(callee, args, span), specs) else monoCallGeneric(d, args, span, enums, funs, env, specs, tparams)
+
+def monoCallGeneric(d: Def, args: List, span: Span, enums: List, funs: List, env: List, specs: List, tparams: List): List =
+  for {
+    argTys = inferArgTys(args, enums, funs, env, List.empty())
+    substP = unifyParams(defParams(d), argTys, enums, funsImports(funs), defModule(d), tparams, List.empty(), 0)
+  } yield if (List.isEmpty(substP) == 1) monoPack(Expr.Call(defName(d), args, span), specs) else monoCallGenericOk(d, args, span, enums, funsImports(funs), specs, tparams, List.head(substP))
+
+def inferArgTys(args: List, enums: List, funs: List, env: List, acc: List): List =
+  if (List.isEmpty(args) == 1) List.reverse(acc) else for {
+  r = inferExpr(List.head(args), enums, funs, env)
+} yield if (tyIsOk(r) == 0) List.reverse(acc) else inferArgTys(List.tail(args), enums, funs, env, List.cons(tyVal(r), acc))
+
+def unifyParams(params: List, argTys: List, enums: List, imports: List, mod: String, tparams: List, subst: List, i: Int): List =
+  if (List.len(params) != List.len(argTys)) List.empty() else if (i >= List.len(params)) List.cons(subst, List.empty()) else for {
+  want = resolveTypeIn(paramTy(List.at(params, i)), enums, imports, mod, tparams)
+  us = unifyTypes(want, List.at(argTys, i), subst)
+} yield if (List.isEmpty(us) == 1) List.empty() else unifyParams(params, argTys, enums, imports, mod, tparams, List.head(us), i + 1)
+
+def monoCallGenericOk(d: Def, args: List, span: Span, enums: List, imports: List, specs: List, tparams: List, subst: List): List =
+  for {
+    mangled = monoDefName(defName(d), subst, tparams)
+    specs2 = if (findSpecByName(specs, mangled) == 1) specs else List.cons(Def.Def(mangled, specializeParams(defParams(d), enums, imports, defModule(d), tparams, subst, List.empty()), applySubst(resolveTypeIn(declRet(d), enums, imports, defModule(d), tparams), subst), defBody(d), defModule(d), defIsPrivate(d), List.empty()), specs)
+  } yield monoPack(Expr.Call(mangled, args, span), specs2)
 

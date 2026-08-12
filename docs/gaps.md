@@ -31,7 +31,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 - **Concurrency** — cooperative fibers + TestRuntime virtual-time jumps (`test_io.c`); Scuzz `Ref` / `Queue` / `Deferred` (String payloads) via Stage 0 + self-host (`examples/concurrency`). Later: OS threads, interruptible cancel mid-`nanosleep`, supervision trees.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting (`test_ui.c`, optional `test-asan`). Later: `Signal.list` collection, exit-time signal ownership / LSan-clean examples, a collector if list-churn demands it.
-- **File-as-module** — stem namespaces for defs and enums + `private def` + `import Module.name` on Stage 0 and self-host (`examples/modules`). **`record`** product types + `p.x` field access (`examples/record`). Thin **traits**/`impl` with static-dispatch method calls (`examples/trait`). Stage 0 **monomorphized** `def id[T](…)` (`examples/generic`; self-host pending). Later: richer generics — [`compatibility.md`](compatibility.md).
+- **File-as-module** — stem namespaces for defs and enums + `private def` + `import Module.name` on Stage 0 and self-host (`examples/modules`). **`record`** product types + `p.x` field access (`examples/record`). Thin **traits**/`impl` with static-dispatch method calls (`examples/trait`). Stage 0 and self-host **monomorphized** `def id[T](…)` (`examples/generic`). Later: richer generics — [`compatibility.md`](compatibility.md).
 
 ### Dependency forms beyond `path`
 

@@ -8,6 +8,7 @@ enum Type:
   case List
   case Io(inner: Type)
   case Adt(name: String)
+  case Var(name: String)
   case Opaque(name: String)
 
 enum TyBind:
@@ -27,6 +28,7 @@ def tyShow(t: Type): String =
     case Type.List => "List"
     case Type.Io(inner) => str3("IO[", tyShow(inner), "]")
     case Type.Adt(name) => Str.concat("Adt:", name)
+    case Type.Var(name) => Str.concat("Var:", name)
     case Type.Opaque(name) => Str.concat("Opaque:", name)
   }
 
@@ -39,6 +41,7 @@ def tyPretty(t: Type): String =
     case Type.List => "List"
     case Type.Io(inner) => str3("IO[", tyPretty(inner), "]")
     case Type.Adt(name) => name
+    case Type.Var(name) => name
     case Type.Opaque(name) => name
   }
 
@@ -51,6 +54,7 @@ def tyEq(a: Type, b: Type): Int =
     case Type.List => tyEqList(b)
     case Type.Io(ia) => tyEqIo(ia, b)
     case Type.Adt(na) => tyEqAdt(na, b)
+    case Type.Var(na) => tyEqVar(na, b)
     case Type.Opaque(na) => tyEqOpaque(na, b)
   }
 
@@ -99,6 +103,12 @@ def tyEqAdt(na: String, b: Type): Int =
 def tyEqOpaque(na: String, b: Type): Int =
   b match {
     case Type.Opaque(nb) => streq(na, nb)
+    case _ => 0
+  }
+
+def tyEqVar(na: String, b: Type): Int =
+  b match {
+    case Type.Var(nb) => streq(na, nb)
     case _ => 0
   }
 
@@ -169,6 +179,21 @@ def tyIsOpaque(t: Type): Int =
 
 def tyMkOpaque(name: String): Type =
   Type.Opaque(name)
+
+def tyIsVar(t: Type): Int =
+  t match {
+    case Type.Var(name) => 1
+    case _ => 0
+  }
+
+def tyVarName(t: Type): String =
+  t match {
+    case Type.Var(name) => name
+    case _ => ""
+  }
+
+def tyMkVar(name: String): Type =
+  Type.Var(name)
 
 def tyOk(t: Type): TyRes =
   TyRes.Ok(t)

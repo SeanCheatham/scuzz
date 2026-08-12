@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Dual-boot gate: Stage-0 → Stage-1 → Stage-2, plus a Stage-3 fixpoint.
 # Each stage must smoke examples/hello + examples/adt + examples/modules +
-# examples/record + examples/trait, pass the Headless goldens (counter/todo/nav),
-# smoke fuzz on examples/todo, smoke fuzz --exhaust --depth 1 on examples/counter,
-# and agree with Stage 0 on fmt --check for the compiler sources. Stage 2 must
-# re-emit byte-identical compiler IR.
+# examples/record + examples/trait + examples/generic, pass the Headless goldens
+# (counter/todo/nav), smoke fuzz on examples/todo, smoke fuzz --exhaust --depth 1
+# on examples/counter, and agree with Stage 0 on fmt --check for the compiler
+# sources. Stage 2 must re-emit byte-identical compiler IR.
 # Fail loudly: every stage must succeed; no masked exit codes.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -45,6 +45,11 @@ stage_checks() {
   trait_out="$("$bin" run examples/trait)"
   echo "$trait_out"
   echo "$trait_out" | grep -q "Point(3,5)"
+
+  echo "==> $stage runs examples/generic"
+  generic_out="$("$bin" run examples/generic)"
+  echo "$generic_out"
+  echo "$generic_out" | grep -q "7ok"
 
   echo "==> $stage golden tests (counter/todo/nav)"
   "$bin" test examples/counter

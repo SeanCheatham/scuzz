@@ -4,7 +4,7 @@ enum Param:
   case Param(name: String, ty: Type)
 
 enum Def:
-  case Def(name: String, params: List, ret: Type, body: Expr, module: String, isPrivate: Int)
+  case Def(name: String, params: List, ret: Type, body: Expr, module: String, isPrivate: Int, typeParams: List)
 
 enum Import:
   case Import(inModule: String, fromModule: String, name: String)

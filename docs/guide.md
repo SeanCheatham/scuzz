@@ -40,7 +40,7 @@ Console kit: `Sys.args(): IO[List]`, `Sys.readLine(): IO[String]` (EOF → `""`)
 - Literals: ints, strings, `()`, `s"…$x…"`, list literals `[a, b]`
 - Enums + **`record Name(f1: T1, …)`** (construct `Name(…)`, match `case Name(…)`, field `p.x` — see `examples/record` / `examples/adt`)
 - Thin **traits** / `impl` with static dispatch (`p.show()` — see `examples/trait`)
-- Thin **generics** (Stage 0): `def id[T](x: T): T = x` monomorphized at call sites (`examples/generic`)
+- Thin **generics**: `def id[T](x: T): T = x` monomorphized at call sites (`examples/generic`)
 - Blessed impurity only: `IO.println` / `sleep` / `fail` / `pure` / `race` / `both`, `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Fs.*`, `Sys.args` / `Sys.readLine` / `Sys.exec` / `Sys.getenv`, `Clock.*`, `Random.*`, `Net.httpGet`
 - No raw side effects in View build — taps may run `IO` via `sz_io_unsafe_run`
 
@@ -119,7 +119,7 @@ src/
 | `examples/concurrency` | `Ref` / `Queue` / `Deferred` park under `IO.both` / `IO.race` |
 | `examples/record` | `record Point(…)` + `p.x` field access |
 | `examples/trait` | `trait` / `impl` + `p.show()` static dispatch |
-| `examples/generic` | `def id[T](…)` monomorphized generics (Stage 0) |
+| `examples/generic` | `def id[T](…)` monomorphized generics |
 | `examples/modules` | stem modules, `private def`, `import`, enum-per-module |
 
 Full gallery: [README.md](../README.md#samples-gallery). Edit [vision.md](vision.md) when changing GC, Skia, effects, UI boundaries, or language direction.

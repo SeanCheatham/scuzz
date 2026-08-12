@@ -75,20 +75,26 @@ def parseIdent(file: String, tokens: List, i: Int): List =
   } yield if (isIdentTok(tok) == 1) okStr(identName(tok), i + 1) else okStr("", i)
 
 def parseType(file: String, tokens: List, i: Int): List =
+  parseTypeWith(file, tokens, i, List.empty())
+
+def parseTypeWith(file: String, tokens: List, i: Int, tparams: List): List =
   for {
     nameP = parseIdent(file, tokens, i)
-  } yield parseTypeAfterName(file, tokens, pStr(nameP), pIdx(nameP))
+  } yield parseTypeAfterName(file, tokens, pStr(nameP), pIdx(nameP), tparams)
 
-def parseTypeAfterName(file: String, tokens: List, name: String, i: Int): List =
-  if (streq(name, "IO") == 1) parseTypeIo(file, tokens, i) else okType(parseTypeBuiltin(name), i)
+def parseTypeAfterName(file: String, tokens: List, name: String, i: Int, tparams: List): List =
+  if (streq(name, "IO") == 1) parseTypeIo(file, tokens, i, tparams) else okType(parseTypeBuiltinWith(name, tparams), i)
 
 def parseTypeBuiltin(name: String): Type =
-  if (streq(name, "Unit") == 1) Type.Unit else if (streq(name, "Int") == 1) Type.Int else if (streq(name, "String") == 1) Type.String else if (streq(name, "Bool") == 1) Type.Bool else if (streq(name, "List") == 1) Type.List else tyMkAdt(name)
+  parseTypeBuiltinWith(name, List.empty())
 
-def parseTypeIo(file: String, tokens: List, i: Int): List =
+def parseTypeBuiltinWith(name: String, tparams: List): Type =
+  if (listContainsStr(tparams, name) == 1) tyMkVar(name) else if (streq(name, "Unit") == 1) Type.Unit else if (streq(name, "Int") == 1) Type.Int else if (streq(name, "String") == 1) Type.String else if (streq(name, "Bool") == 1) Type.Bool else if (streq(name, "List") == 1) Type.List else tyMkAdt(name)
+
+def parseTypeIo(file: String, tokens: List, i: Int, tparams: List): List =
   for {
     i1 = expectTok(tokens, i, "LBracket")
-    innerP = parseType(file, tokens, i1)
+    innerP = parseTypeWith(file, tokens, i1, tparams)
     i2 = expectTok(tokens, pIdx(innerP), "RBracket")
   } yield okType(tyMkIo(pType(innerP)), i2)
 
@@ -104,20 +110,30 @@ def parsePackageParts(file: String, tokens: List, i: Int, acc: String): List =
   } yield if (isTok(tokens, i1, "Dot") == 1) parsePackageParts(file, tokens, i1 + 1, next) else okStr(next, i1)
 
 def parseParam(file: String, tokens: List, i: Int): List =
+  parseParamWith(file, tokens, i, List.empty())
+
+def parseParamWith(file: String, tokens: List, i: Int, tparams: List): List =
   for {
     nameP = parseIdent(file, tokens, i)
     i1 = expectTok(tokens, pIdx(nameP), "Colon")
-    tyP = parseType(file, tokens, i1)
+    tyP = parseTypeWith(file, tokens, i1, tparams)
   } yield okParam(Param.Param(pStr(nameP), pType(tyP)), pIdx(tyP))
 
 def parseParams(file: String, tokens: List, i: Int, acc: List): List =
-  if (isTok(tokens, i, "RParen") == 1) ok(List.reverse(acc), i) else parseParamsCont(file, tokens, i, acc)
+  parseParamsWith(file, tokens, i, acc, List.empty())
+
+def parseParamsWith(file: String, tokens: List, i: Int, acc: List, tparams: List): List =
+  if (isTok(tokens, i, "RParen") == 1) ok(List.reverse(acc), i) else parseParamsContWith(file, tokens, i, acc, tparams)
 
 def parseParamsCont(file: String, tokens: List, i: Int, acc: List): List =
+  parseParamsContWith(file, tokens, i, acc, List.empty())
+
+def parseParamsContWith(file: String, tokens: List, i: Int, acc: List, tparams: List): List =
   for {
-    p = parseParam(file, tokens, i)
-    acc2 = List.cons(pParam(p), acc)
-  } yield if (isTok(tokens, pIdx(p), "Comma") == 1) parseParams(file, tokens, pIdx(p) + 1, acc2) else ok(List.reverse(acc2), pIdx(p))
+    pP = parseParamWith(file, tokens, i, tparams)
+    i1 = pIdx(pP)
+    acc2 = List.cons(pParam(pP), acc)
+  } yield if (isTok(tokens, i1, "Comma") == 1) parseParamsWith(file, tokens, i1 + 1, acc2, tparams) else ok(List.reverse(acc2), i1)
 
 def parseArgs(file: String, tokens: List, i: Int, acc: List): List =
   if (isTok(tokens, i, "RParen") == 1) ok(List.reverse(acc), i) else parseArgsCont(file, tokens, i, acc)
@@ -483,14 +499,37 @@ def parseIoArgs(file: String, tokens: List, i: Int, callee: String, startI: Int)
 def parseDef(file: String, tokens: List, i: Int, isPrivate: Int): List =
   for {
     nameP = parseIdent(file, tokens, i)
-    i1 = expectTok(tokens, pIdx(nameP), "LParen")
-    paramsP = parseParams(file, tokens, i1, List.empty())
+    i0 = pIdx(nameP)
+  } yield if (isTok(tokens, i0, "LBracket") == 1) parseDefWithTParams(file, tokens, i0 + 1, pStr(nameP), isPrivate) else parseDefAfterName(file, tokens, i0, pStr(nameP), isPrivate, List.empty())
+
+def parseTypeParams(file: String, tokens: List, i: Int): List =
+  for {
+    nameP = parseIdent(file, tokens, i)
+    name = pStr(nameP)
+    i1 = pIdx(nameP)
+  } yield if (isTok(tokens, i1, "Comma") == 1) parseTypeParamsSkip(file, tokens, i1 + 1) else for {
+  i2 = expectTok(tokens, i1, "RBracket")
+} yield ok(List.cons(name, List.empty()), i2)
+
+def parseTypeParamsSkip(file: String, tokens: List, i: Int): List =
+  if (isTok(tokens, i, "RBracket") == 1) ok(List.empty(), i + 1) else if (isTok(tokens, i, "Eof") == 1) ok(List.empty(), i) else parseTypeParamsSkip(file, tokens, i + 1)
+
+def parseDefWithTParams(file: String, tokens: List, i: Int, name: String, isPrivate: Int): List =
+  for {
+    tp = parseTypeParams(file, tokens, i)
+    tparams = pAst(tp)
+  } yield if (List.isEmpty(tparams) == 1) parseDefAfterName(file, tokens, pIdx(tp), name, isPrivate, List.empty()) else parseDefAfterName(file, tokens, pIdx(tp), name, isPrivate, tparams)
+
+def parseDefAfterName(file: String, tokens: List, i: Int, name: String, isPrivate: Int, tparams: List): List =
+  for {
+    i1 = expectTok(tokens, i, "LParen")
+    paramsP = parseParamsWith(file, tokens, i1, List.empty(), tparams)
     i2 = expectTok(tokens, pIdx(paramsP), "RParen")
     i3 = expectTok(tokens, i2, "Colon")
-    retP = parseType(file, tokens, i3)
+    retP = parseTypeWith(file, tokens, i3, tparams)
     i4 = expectTok(tokens, pIdx(retP), "Eq")
     bodyP = parseBlock(file, tokens, i4)
-  } yield okDef(Def.Def(pStr(nameP), pAst(paramsP), pType(retP), pExpr(bodyP), moduleIdFromLabel(file), isPrivate), pIdx(bodyP))
+  } yield okDef(Def.Def(name, pAst(paramsP), pType(retP), pExpr(bodyP), moduleIdFromLabel(file), isPrivate, tparams), pIdx(bodyP))
 
 def parseMain(file: String, tokens: List, i: Int): List =
   for {
