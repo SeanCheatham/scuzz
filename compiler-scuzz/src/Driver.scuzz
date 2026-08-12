@@ -3,9 +3,6 @@ package scuzz.compiler
 def emptyProg(): Prog =
   Prog.Prog("", List.empty(), List.empty(), unitExpr(), "", List.empty(), List.empty(), List.empty())
 
-def mkProg(pkg: String, enums: List, defs: List, main: Expr, mainMod: String, imports: List): Prog =
-  Prog.Prog(pkg, enums, defs, main, mainMod, imports, List.empty(), List.empty())
-
 def mkProgFull(pkg: String, enums: List, defs: List, main: Expr, mainMod: String, imports: List, traits: List, impls: List): Prog =
   Prog.Prog(pkg, enums, defs, main, mainMod, imports, traits, impls)
 
@@ -153,9 +150,6 @@ def linkCmdIo(clang: String, ll: String, lib: String, inc: String, exe: String):
 def cxxLinkFlagsIo(): String =
   "$(if [ \"`uname -s`\" = Darwin ]; then echo -framework CoreFoundation; else echo; fi)"
 
-def runIfNeeded(exe: String, doRun: Int): IO[Unit] =
-  if (doRun == 1) execOk(exe) else IO.pure(())
-
 def lawCall(name: String): Expr =
   Expr.Call(name, List.empty(), dummySpan())
 
@@ -235,25 +229,25 @@ def applyOverlays(live: Prog, overlays: List): IO[List] =
 def prepareVerifyProg(prog0: Prog, overlays: List): IO[Prog] =
   applyOverlays(prog0, overlays).flatMap(applied => IO.pure(residualizeLaws(List.head(applied), List.head(List.tail(applied)))))
 
-def compileProject(projectDir: String, outDir: String, doRun: Int): IO[Unit] =
+def compileProject(projectDir: String, outDir: String): IO[Unit] =
   Sys.getenv("SCUZZ_RUNTIME").flatMap(rtEnv =>
     resolveRuntimeEnv(rtEnv, projectDir).flatMap(runtimeDir =>
-      Sys.getenv("SCUZZ_CLANG").flatMap(clangEnv => compileProjectWith(projectDir, outDir, doRun, 0, runtimeDir, clangOrDefault(clangEnv)))
+      Sys.getenv("SCUZZ_CLANG").flatMap(clangEnv => compileProjectWith(projectDir, outDir, 0, runtimeDir, clangOrDefault(clangEnv)))
     )
   )
 
-def compileProjectVerify(projectDir: String, outDir: String, doRun: Int): IO[Unit] =
+def compileProjectVerify(projectDir: String, outDir: String): IO[Unit] =
   Sys.getenv("SCUZZ_RUNTIME").flatMap(rtEnv =>
     resolveRuntimeEnv(rtEnv, projectDir).flatMap(runtimeDir =>
-      Sys.getenv("SCUZZ_CLANG").flatMap(clangEnv => compileProjectWith(projectDir, outDir, doRun, 1, runtimeDir, clangOrDefault(clangEnv)))
+      Sys.getenv("SCUZZ_CLANG").flatMap(clangEnv => compileProjectWith(projectDir, outDir, 1, runtimeDir, clangOrDefault(clangEnv)))
     )
   )
 
-def compileProjectWith(projectDir: String, outDir: String, doRun: Int, verify: Int, runtimeDir: String, clang: String): IO[Unit] =
-  Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml => compileAfterToml(projectDir, outDir, doRun, verify, runtimeDir, clang, toml, readTomlName(toml)))
+def compileProjectWith(projectDir: String, outDir: String, verify: Int, runtimeDir: String, clang: String): IO[Unit] =
+  Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml => compileAfterToml(projectDir, outDir, verify, runtimeDir, clang, toml, readTomlName(toml)))
 
-def compileAfterToml(projectDir: String, outDir: String, doRun: Int, verify: Int, runtimeDir: String, clang: String, toml: String, name: String): IO[Unit] =
-  loadGraphBundle(projectDir, toml).flatMap(bundle => compileAfterSources(projectDir, outDir, doRun, verify, runtimeDir, clang, name, hasUiSection(toml), List.head(bundle), List.head(List.tail(bundle))))
+def compileAfterToml(projectDir: String, outDir: String, verify: Int, runtimeDir: String, clang: String, toml: String, name: String): IO[Unit] =
+  loadGraphBundle(projectDir, toml).flatMap(bundle => compileAfterSources(projectDir, outDir, verify, runtimeDir, clang, name, hasUiSection(toml), List.head(bundle), List.head(List.tail(bundle))))
 
 def checkProject(projectDir: String): IO[List] =
   Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml =>
@@ -274,7 +268,7 @@ def checkProject(projectDir: String): IO[List] =
 def linkProject(clang: String, ll: String, lib: String, ffi: String, inc: String, embedder: String, mobile: String, exe: String, withUi: Int): IO[Unit] =
   if (withUi == 0) execOk(linkCmdIo(clang, ll, lib, inc, exe)) else execOk(linkCmd(clang, ll, lib, pathJoin(ffi, "build/libsk_capi.a"), inc, pathJoin(ffi, "include"), embedder, mobile, exe))
 
-def compileAfterSources(projectDir: String, outDir: String, doRun: Int, verify: Int, runtimeDir: String, clang: String, name: String, withUi: Int, texts: List, overlays: List): IO[Unit] =
+def compileAfterSources(projectDir: String, outDir: String, verify: Int, runtimeDir: String, clang: String, name: String, withUi: Int, texts: List, overlays: List): IO[Unit] =
   mergeSources(texts, emptyProg(), 0).flatMap(prog0 =>
     prepareCompileProg(prog0, overlays, verify).flatMap(prog1 =>
       for {
@@ -293,9 +287,7 @@ def compileAfterSources(projectDir: String, outDir: String, doRun: Int, verify: 
         mobile = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-mobile"), "build/libscuzz_mobile.a")
       } yield if (tyIsOk(ty) == 0) IO.fail(tyMsg(ty)) else Fs.mkdirs(outDir).flatMap(_ =>
   Fs.write(ll, ir).flatMap(_ =>
-    buildRuntime(runtimeDir, clang).flatMap(_ =>
-      linkProject(clang, ll, lib, ffi, inc, embedder, mobile, exe, withUi).flatMap(_ => runIfNeeded(exe, doRun))
-    )
+    buildRuntime(runtimeDir, clang).flatMap(_ => linkProject(clang, ll, lib, ffi, inc, embedder, mobile, exe, withUi))
   )
 )
     )
@@ -313,7 +305,7 @@ def visitPackage(pkgDir: String, toml: String, viaDep: String, stack: List, done
   Fs.canonicalize(pkgDir).flatMap(canon => visitPackageCanon(canon, toml, viaDep, stack, done))
 
 def visitPackageCanon(canon: String, toml: String, viaDep: String, stack: List, done: List): IO[List] =
-  if (listContainsStr(stack, canon) == 1) IO.fail(str3("dependency cycle: ", joinChain(List.reverse(List.cons(cycleLabel(viaDep, canon), stack)), " -> "), "")) else if (listContainsStr(done, canon) == 1) IO.pure(List.cons(List.empty(), List.cons(List.empty(), List.cons(done, List.empty())))) else readTomlDeps(toml).flatMap(deps =>
+  if (listContainsStr(stack, canon) == 1) IO.fail(str3("dependency cycle: ", join(List.reverse(List.cons(cycleLabel(viaDep, canon), stack)), " -> "), "")) else if (listContainsStr(done, canon) == 1) IO.pure(List.cons(List.empty(), List.cons(List.empty(), List.cons(done, List.empty())))) else readTomlDeps(toml).flatMap(deps =>
   visitDeps(canon, deps, List.cons(canon, stack), done, List.empty(), List.empty()).flatMap(depState =>
     loadPackageBundle(canon).flatMap(bundle =>
       for {

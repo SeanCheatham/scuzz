@@ -61,10 +61,9 @@ def messageFormatJson(args: List): Int =
   if (streq(argValue(args, "--message-format", 0), "json") == 1) 1 else 0
 
 def packageTarget(args: List): String =
-  packageTargetAt(args, 0)
-
-def packageTargetAt(args: List, i: Int): String =
-  if (i >= List.len(args)) "all" else if (streq(List.at(args, i), "--target") == 1) if (i + 1 >= List.len(args)) "all" else List.at(args, i + 1) else packageTargetAt(args, i + 1)
+  for {
+    v = argValue(args, "--target", 0)
+  } yield if (Str.len(v) == 0) "all" else v
 
 def dispatch(args: List): IO[Unit] =
   if (List.isEmpty(args) == 1) IO.println(usage()) else dispatchSkipFlags(args, args)
@@ -73,10 +72,10 @@ def dispatchSkipFlags(args: List, all: List): IO[Unit] =
   if (List.isEmpty(args) == 1) IO.println(usage()) else if (isFlag(List.head(args)) == 1) if (startsWith(List.head(args), "--message-format=") == 1) dispatchSkipFlags(List.tail(args), all) else if (streq(List.head(args), "--message-format") == 1) if (List.len(args) < 2) IO.println(usage()) else dispatchSkipFlags(List.tail(List.tail(args)), all) else dispatchCmd(List.head(args), args, all) else dispatchCmd(List.head(args), args, all)
 
 def dispatchCmd(cmd: String, args: List, all: List): IO[Unit] =
-  if (isHelpToken(cmd) == 1) IO.println(helpTop()) else if (wantsHelp(args) == 1) IO.println(helpFor(cmd)) else if (streq(cmd, "build") == 1) dispatchBuild(defaultProject(args), 0) else if (streq(cmd, "run") == 1) cmdRun(defaultProject(args), argFlag(args, "--headless", 0)) else if (streq(cmd, "test") == 1) cmdTest(defaultProject(args), argFlag(args, "--update", 0), argFlag(args, "--runtime-tests", 0), argFlag(args, "--pixels", 0)) else if (streq(cmd, "check") == 1) cmdCheck(defaultProject(args), messageFormatJson(all)) else if (streq(cmd, "fuzz") == 1) cmdFuzzArgs(args) else if (streq(cmd, "fmt") == 1) cmdFmt(defaultProject(args), argFlag(args, "--check", 0)) else if (streq(cmd, "watch") == 1) cmdWatch(defaultProject(args)) else if (streq(cmd, "new") == 1) cmdNew(args) else if (streq(cmd, "package") == 1) cmdPackage(defaultProject(args), packageTarget(args)) else IO.println(str3("unknown command: ", cmd, Str.concat("\n", usage())))
+  if (isHelpToken(cmd) == 1) IO.println(helpTop()) else if (wantsHelp(args) == 1) IO.println(helpFor(cmd)) else if (streq(cmd, "build") == 1) dispatchBuild(defaultProject(args)) else if (streq(cmd, "run") == 1) cmdRun(defaultProject(args), argFlag(args, "--headless", 0)) else if (streq(cmd, "test") == 1) cmdTest(defaultProject(args), argFlag(args, "--update", 0), argFlag(args, "--runtime-tests", 0), argFlag(args, "--pixels", 0)) else if (streq(cmd, "check") == 1) cmdCheck(defaultProject(args), messageFormatJson(all)) else if (streq(cmd, "fuzz") == 1) cmdFuzzArgs(args) else if (streq(cmd, "fmt") == 1) cmdFmt(defaultProject(args), argFlag(args, "--check", 0)) else if (streq(cmd, "watch") == 1) cmdWatch(defaultProject(args)) else if (streq(cmd, "new") == 1) cmdNew(args) else if (streq(cmd, "package") == 1) cmdPackage(defaultProject(args), packageTarget(args)) else IO.println(str3("unknown command: ", cmd, Str.concat("\n", usage())))
 
-def dispatchBuild(projectDir: String, doRun: Int): IO[Unit] =
-  compileProject(projectDir, pathJoin(projectDir, "build"), doRun)
+def dispatchBuild(projectDir: String): IO[Unit] =
+  compileProject(projectDir, pathJoin(projectDir, "build"))
 
 def cmdCheck(projectDir: String, json: Int): IO[Unit] =
   checkProject(projectDir).flatMap(res =>

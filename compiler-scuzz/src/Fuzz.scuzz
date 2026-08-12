@@ -171,7 +171,7 @@ def cmdFuzz(projectDir: String, replay: String, iters: Int, seed: Int, exhaust: 
   Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml => fuzzChecked(projectDir, replay, iters, seed, exhaust, depth, toml))
 
 def fuzzChecked(projectDir: String, replay: String, iters: Int, seed: Int, exhaust: Int, depth: Int, toml: String): IO[Unit] =
-  if (hasUiSection(toml) == 0) IO.fail("scuzz fuzz needs a [ui] project (Headless event scripts)") else compileProjectVerify(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ => fuzzBuilt(projectDir, replay, iters, seed, exhaust, depth, toml))
+  if (hasUiSection(toml) == 0) IO.fail("scuzz fuzz needs a [ui] project (Headless event scripts)") else compileProjectVerify(projectDir, pathJoin(projectDir, "build")).flatMap(_ => fuzzBuilt(projectDir, replay, iters, seed, exhaust, depth, toml))
 
 def fuzzBuilt(projectDir: String, replay: String, iters: Int, seed: Int, exhaust: Int, depth: Int, toml: String): IO[Unit] =
   for {

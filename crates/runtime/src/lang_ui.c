@@ -193,14 +193,6 @@ static void scripted_button_tap(SzUiSession *session, int prefer_upper) {
   tap.kind = SZ_INPUT_TAP;
   tap.x = tx;
   tap.y = ty;
-  {
-    const char *sx = getenv("SCUZZ_UI_TAP_X");
-    const char *sy = getenv("SCUZZ_UI_TAP_Y");
-    if (sx)
-      tap.x = (float)atof(sx);
-    if (sy)
-      tap.y = (float)atof(sy);
-  }
   if (!sz_ui_inject_sync(session, &tap) || !sz_ui_pump_sync(session))
     sz_panic("Ui.run tap/pump failed");
 }

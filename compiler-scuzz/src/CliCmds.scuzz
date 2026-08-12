@@ -1,16 +1,16 @@
 package scuzz.compiler
 
 def uiMainTemplate(): String =
-  Str.concat("@main def main: IO[Unit] =\n  for {\n    count = Signal.int(0)\n    label = Signal.map(count, n => s\"count = $n\")\n    root = View.column(\n      View.text(\"Counter\"),\n      View.bindText(label),\n      View.row(View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)))\n    )\n    _ <- Ui.run(root)\n  } yield ()\n", "")
+  "@main def main: IO[Unit] =\n  for {\n    count = Signal.int(0)\n    label = Signal.map(count, n => s\"count = $n\")\n    root = View.column(\n      View.text(\"Counter\"),\n      View.bindText(label),\n      View.row(View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)))\n    )\n    _ <- Ui.run(root)\n  } yield ()\n"
 
 def helloMainTemplate(): String =
-  str3("@main def main: IO[Unit] =\n", "  IO.println(\"Hello, Scuzz!\").flatMap(_ => IO.println(\"ready.\"))\n", "")
+  Str.concat("@main def main: IO[Unit] =\n", "  IO.println(\"Hello, Scuzz!\").flatMap(_ => IO.println(\"ready.\"))\n")
 
 def uiToml(name: String): String =
-  Str.concat(str5("[package]\nname = \"", name, "\"\nversion = \"0.1.0\"\n\n[targets.native]\nkind = \"executable\"\nmain = \"Main\"\n\n[ui]\n", "default_runtime = \"headless\"\nheadless_size = [200, 120]\nheadless_scale = 1.0\n", str3("bundle_id = \"dev.scuzz.", name, "\"\n")), "")
+  str5("[package]\nname = \"", name, "\"\nversion = \"0.1.0\"\n\n[targets.native]\nkind = \"executable\"\nmain = \"Main\"\n\n[ui]\n", "default_runtime = \"headless\"\nheadless_size = [200, 120]\nheadless_scale = 1.0\n", str3("bundle_id = \"dev.scuzz.", name, "\"\n"))
 
 def helloToml(name: String): String =
-  str5("[package]\nname = \"", name, "\"\nversion = \"0.1.0\"\n\n[targets.native]\nkind = \"executable\"\nmain = \"Main\"\n", "", "")
+  str3("[package]\nname = \"", name, "\"\nversion = \"0.1.0\"\n\n[targets.native]\nkind = \"executable\"\nmain = \"Main\"\n")
 
 def cmdNew(args: List): IO[Unit] =
   if (List.len(args) < 2) IO.println("usage: scuzz new <name> [--ui] [--path <dir>]") else cmdNewResolved(newNameArg(args), args)
@@ -18,17 +18,13 @@ def cmdNew(args: List): IO[Unit] =
 def newNameArg(args: List): String =
   positionalAt(args, 1, 0)
 
-def argHasUi(args: List, i: Int): Int =
-  if (i >= List.len(args)) 0 else if (streq(List.at(args, i), "--ui") == 1) 1 else argHasUi(args, i + 1)
-
-def argPathValue(args: List, i: Int): String =
-  if (i >= List.len(args)) "." else if (streq(List.at(args, i), "--path") == 1) if (i + 1 >= List.len(args)) "." else List.at(args, i + 1) else argPathValue(args, i + 1)
-
 def newParentDir(args: List): String =
-  if (argFlag(args, "--path", 0) == 1) argPathValue(args, 0) else "."
+  for {
+    v = argValue(args, "--path", 0)
+  } yield if (Str.len(v) == 0) "." else v
 
 def cmdNewResolved(name: String, args: List): IO[Unit] =
-  if (streq(name, ".") == 1) IO.println("usage: scuzz new <name> [--ui] [--path <dir>]") else if (startsWith(name, "--") == 1) IO.println("usage: scuzz new <name> [--ui] [--path <dir>]") else writeNewProject(pathJoin(newParentDir(args), name), name, argHasUi(args, 0))
+  if (streq(name, ".") == 1) IO.println("usage: scuzz new <name> [--ui] [--path <dir>]") else if (startsWith(name, "--") == 1) IO.println("usage: scuzz new <name> [--ui] [--path <dir>]") else writeNewProject(pathJoin(newParentDir(args), name), name, argFlag(args, "--ui", 0))
 
 def writeNewProject(dir: String, name: String, ui: Int): IO[Unit] =
   if (ui == 1) writeNewUi(dir, name) else writeNewHello(dir, name)
@@ -58,7 +54,7 @@ def pixelsFlagEnv(pixels: Int): String =
 def cmdTest(projectDir: String, update: Int, runtimeTests: Int, pixels: Int): IO[Unit] =
   resolveRuntimeEnv("", projectDir).flatMap(runtimeDir =>
     maybeRuntimeTests(runtimeDir, runtimeTests).flatMap(_ =>
-      compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
+      compileProject(projectDir, pathJoin(projectDir, "build")).flatMap(_ =>
         Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml => afterTestCompile(projectDir, toml, update, pixels, runtimeDir))
       )
     )
@@ -103,7 +99,7 @@ def watchLoop(projectDir: String, lastFp: String, force: Int): IO[Unit] =
   )
 
 def maybeRebuild(projectDir: String, lastFp: String, force: Int): IO[String] =
-  if (force == 0) IO.pure(lastFp) else compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
+  if (force == 0) IO.pure(lastFp) else compileProject(projectDir, pathJoin(projectDir, "build")).flatMap(_ =>
   IO.println("rebuilt").flatMap(_ => IO.pure(lastFp))
 ).handleErrorWith(_ =>
   IO.println("scuzz watch build error").flatMap(_ => IO.pure(lastFp))
@@ -118,12 +114,12 @@ def fpTexts(texts: List, acc: String): IO[String] =
   if (List.isEmpty(texts) == 1) IO.pure(acc) else fpTexts(List.tail(texts), str3(acc, "\n", srcText(List.head(texts))))
 
 def cmdPackage(projectDir: String, target: String): IO[Unit] =
-  compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
+  compileProject(projectDir, pathJoin(projectDir, "build")).flatMap(_ =>
     resolveRuntimeEnv("", projectDir).flatMap(runtimeDir => execOk(str5("bash ", pathJoin(pathJoin(parentDir(parentDir(runtimeDir)), "scripts"), "package_project.sh"), " ", projectDir, Str.concat(" ", target))))
   )
 
 def cmdRun(projectDir: String, headless: Int): IO[Unit] =
-  compileProject(projectDir, pathJoin(projectDir, "build"), 0).flatMap(_ =>
+  compileProject(projectDir, pathJoin(projectDir, "build")).flatMap(_ =>
     Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml => runCompiled(projectDir, readTomlName(toml), toml, headless))
   )
 

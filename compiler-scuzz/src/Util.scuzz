@@ -36,15 +36,6 @@ def isIdentStart(c: Int): Int =
 def isIdentChar(c: Int): Int =
   if (isIdentStart(c) == 1) 1 else if (isDigit(c) == 1) 1 else if (c == 95) 1 else 0
 
-def listLen(xs: List): Int =
-  List.len(xs)
-
-def consStr(h: String, t: List): List =
-  List.cons(h, t)
-
-def reverse(xs: List): List =
-  List.reverse(xs)
-
 def join(xs: List, sep: String): String =
   List.join(xs, sep)
 
@@ -107,9 +98,6 @@ def insertDepSorted(dep: List, xs: List): List =
 
 def sortDeps(deps: List): List =
   if (List.isEmpty(deps) == 1) List.empty() else insertDepSorted(List.head(deps), sortDeps(List.tail(deps)))
-
-def joinChain(xs: List, sep: String): String =
-  if (List.isEmpty(xs) == 1) "" else if (List.isEmpty(List.tail(xs)) == 1) List.head(xs) else str3(List.head(xs), sep, joinChain(List.tail(xs), sep))
 
 def indexOfChar(s: String, ch: Int, i: Int): Int =
   if (i >= Str.len(s)) 0 - 1 else if (Str.charAt(s, i) == ch) i else indexOfChar(s, ch, i + 1)

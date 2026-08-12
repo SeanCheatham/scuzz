@@ -71,7 +71,7 @@ pub struct EnumDef {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumCase {
     pub name: String,
-    /// Empty = nullary. Stage 0 codegen supports at most one field (`Int` or `String`).
+    /// Empty = nullary. Multi-field payloads pack as `List` in `sz_adt_payload`.
     pub fields: Vec<(String, Type)>,
 }
 

@@ -118,14 +118,6 @@ fn main() -> ExitCode {
     }
 }
 
-fn diag_err(e: anyhow::Error, json: bool) -> anyhow::Error {
-    if !json {
-        return e;
-    }
-    let d = scuzz_compiler::Diagnostic::error(format!("{e:#}"));
-    anyhow::anyhow!("{}", scuzz_compiler::format_diagnostics(&[d], true))
-}
-
 fn real_main() -> Result<ExitCode> {
     let cli = Cli::parse();
     let json = cli.message_format == "json";
@@ -136,7 +128,7 @@ fn real_main() -> Result<ExitCode> {
             full,
             verify,
         } => {
-            let out = build(&path, &out_dir, !full, verify).map_err(|e| diag_err(e, json))?;
+            let out = build(&path, &out_dir, !full, verify)?;
             if out.cache_hit {
                 eprintln!("up-to-date {}", out.executable.display());
             } else {
@@ -731,7 +723,7 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
             }
             "ios" => {
                 copy_dir(&mobile_dir.join("shells/ios"), &dest)?;
-                patch_ios_bundle(&dest.join("Info.plist"), bundle_id)?;
+                patch_bundle_id(&dest.join("Info.plist"), bundle_id)?;
                 write_package_meta(&dest, &manifest.package.name, "ios", bundle_id)?;
             }
             _ => unreachable!(),
@@ -802,10 +794,6 @@ fn patch_bundle_id(manifest: &Path, bundle_id: &str) -> Result<()> {
     let patched = text.replace("dev.scuzz.app", bundle_id);
     std::fs::write(manifest, patched)?;
     Ok(())
-}
-
-fn patch_ios_bundle(plist: &Path, bundle_id: &str) -> Result<()> {
-    patch_bundle_id(plist, bundle_id)
 }
 
 fn copy_dir(src: &Path, dst: &Path) -> Result<()> {

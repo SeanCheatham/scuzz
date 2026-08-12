@@ -20,11 +20,6 @@ impl Span {
         Self::default()
     }
 
-    pub fn with_file(mut self, file: impl Into<String>) -> Self {
-        self.file = file.into();
-        self
-    }
-
     pub fn cover(self, other: &Span) -> Span {
         Span {
             file: if self.file.is_empty() {

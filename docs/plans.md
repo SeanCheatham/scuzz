@@ -2,4 +2,4 @@
 
 ## Next
 
-File-as-module residual: one more kernel generic slice that Stage 0 can emit before `compiler-scuzz/` depends on it — or skip if that is not a small Headless proof. Not OS threads, LSP, or Windows.
+No short-term kernel slice queued. Unblocked residuals and deferred work: [`gaps.md`](gaps.md). Not OS threads, LSP, Windows, device Mobile, or GPU presenters until those proofs are in scope.
