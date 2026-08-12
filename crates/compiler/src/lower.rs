@@ -34,6 +34,7 @@ fn lower_pattern(pat: Pattern, enums: &EnumIndex<'_>, current_module: &str) -> P
             enum_name,
             case_name,
             binds,
+            type_args,
         } => {
             let id = resolve_ctor(enums, &enum_name, &case_name, current_module)
                 .unwrap_or(enum_name);
@@ -41,6 +42,7 @@ fn lower_pattern(pat: Pattern, enums: &EnumIndex<'_>, current_module: &str) -> P
                 enum_name: id,
                 case_name,
                 binds,
+                type_args,
             }
         }
     }
@@ -212,6 +214,7 @@ pub fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Ex
                             enum_name: id,
                             case_name,
                             args,
+                            type_args: Vec::new(),
                         },
                         span,
                     );
@@ -223,6 +226,7 @@ pub fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Ex
                         enum_name: id,
                         case_name: callee.clone(),
                         args,
+                        type_args: Vec::new(),
                     },
                     span,
                 );
@@ -233,6 +237,7 @@ pub fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Ex
             enum_name,
             case_name,
             args,
+            type_args,
         } => {
             let args: Vec<Expr> = args
                 .into_iter()
@@ -244,6 +249,7 @@ pub fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Ex
                         enum_name: id,
                         case_name,
                         args,
+                        type_args,
                     },
                     span,
                 );
@@ -264,6 +270,7 @@ pub fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Ex
                     enum_name,
                     case_name,
                     args,
+                    type_args,
                 },
                 span,
             )
@@ -408,6 +415,7 @@ enum Opt:
                     enum_name,
                     case_name,
                     args,
+                    ..
                 } => {
                     assert_eq!(enum_name, "Opt");
                     assert_eq!(case_name, "Some");

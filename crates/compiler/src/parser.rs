@@ -375,10 +375,6 @@ impl Parser {
         if params.is_empty() {
             return Err(self.err("expected at least one type parameter"));
         }
-        // Stage-0 slice: one type parameter only.
-        if params.len() > 1 {
-            return Err(self.err("Stage 0 supports one type parameter per def"));
-        }
         Ok(params)
     }
 
@@ -410,13 +406,18 @@ impl Parser {
     fn parse_enum(&mut self) -> Result<EnumDef, ParseError> {
         self.expect(&Token::Enum)?;
         let (name, _) = self.expect_ident()?;
+        let type_params = if matches!(self.peek(), Token::LBracket) {
+            self.parse_type_params()?
+        } else {
+            Vec::new()
+        };
         let mut cases = Vec::new();
         match self.peek() {
             Token::LBrace => {
                 self.bump();
                 loop {
                     self.expect(&Token::Case)?;
-                    cases.push(self.parse_enum_case()?);
+                    cases.push(self.parse_enum_case(&type_params)?);
                     if matches!(self.peek(), Token::Comma) {
                         self.bump();
                         continue;
@@ -429,7 +430,7 @@ impl Parser {
                 self.bump();
                 while matches!(self.peek(), Token::Case) {
                     self.bump();
-                    cases.push(self.parse_enum_case()?);
+                    cases.push(self.parse_enum_case(&type_params)?);
                 }
             }
             other => {
@@ -444,6 +445,7 @@ impl Parser {
         Ok(EnumDef {
             module: self.module.clone(),
             name,
+            type_params,
             cases,
             is_record: false,
         })
@@ -453,12 +455,17 @@ impl Parser {
     fn parse_record(&mut self) -> Result<EnumDef, ParseError> {
         self.expect(&Token::Record)?;
         let (name, _) = self.expect_ident()?;
+        let type_params = if matches!(self.peek(), Token::LBracket) {
+            self.parse_type_params()?
+        } else {
+            Vec::new()
+        };
         self.expect(&Token::LParen)?;
         let mut fields = Vec::new();
         loop {
             let (fname, _) = self.expect_ident()?;
             self.expect(&Token::Colon)?;
-            let fty = self.parse_type()?;
+            let fty = self.parse_type_with_tparams(&type_params)?;
             fields.push((fname, fty));
             if matches!(self.peek(), Token::Comma) {
                 self.bump();
@@ -473,6 +480,7 @@ impl Parser {
         Ok(EnumDef {
             module: self.module.clone(),
             name: name.clone(),
+            type_params,
             cases: vec![EnumCase {
                 name: name.clone(),
                 fields,
@@ -564,26 +572,54 @@ impl Parser {
     fn parse_type_with_tparams(&mut self, type_params: &[String]) -> Result<Type, ParseError> {
         let (name, _) = self.expect_ident()?;
         if type_params.iter().any(|p| p == &name) {
+            if matches!(self.peek(), Token::LBracket) {
+                return Err(self.err(format!(
+                    "type parameter {name} takes no type arguments"
+                )));
+            }
             return Ok(Type::Var(name));
         }
         match name.as_str() {
-            "Unit" => Ok(Type::Unit),
-            "Int" => Ok(Type::Int),
-            "String" => Ok(Type::String),
-            "Bool" => Ok(Type::Bool),
-            "List" => Ok(Type::List),
+            "Unit" | "Int" | "String" | "Bool" | "List" => {
+                if matches!(self.peek(), Token::LBracket) {
+                    return Err(self.err(format!("{name} takes no type arguments")));
+                }
+                Ok(match name.as_str() {
+                    "Unit" => Type::Unit,
+                    "Int" => Type::Int,
+                    "String" => Type::String,
+                    "Bool" => Type::Bool,
+                    _ => Type::List,
+                })
+            }
             "IO" => {
                 self.expect(&Token::LBracket)?;
                 let inner = self.parse_type_with_tparams(type_params)?;
                 self.expect(&Token::RBracket)?;
                 Ok(Type::Io(Box::new(inner)))
             }
-            _ => Ok(Type::Adt(name)),
+            _ => {
+                if matches!(self.peek(), Token::LBracket) {
+                    self.bump();
+                    let mut args = Vec::new();
+                    loop {
+                        args.push(self.parse_type_with_tparams(type_params)?);
+                        if matches!(self.peek(), Token::Comma) {
+                            self.bump();
+                            continue;
+                        }
+                        break;
+                    }
+                    self.expect(&Token::RBracket)?;
+                    return Ok(Type::App(name, args));
+                }
+                Ok(Type::Adt(name))
+            }
         }
     }
 
-    /// `Name` or `Name(f1: T1, f2: T2, …)` (fields are Int|String only; checked in typer).
-    fn parse_enum_case(&mut self) -> Result<EnumCase, ParseError> {
+    /// `Name` or `Name(f1: T1, f2: T2, …)` (payload types checked in typer).
+    fn parse_enum_case(&mut self, type_params: &[String]) -> Result<EnumCase, ParseError> {
         let (name, _) = self.expect_ident()?;
         let mut fields = Vec::new();
         if matches!(self.peek(), Token::LParen) {
@@ -591,7 +627,7 @@ impl Parser {
             loop {
                 let (fname, _) = self.expect_ident()?;
                 self.expect(&Token::Colon)?;
-                let fty = self.parse_type()?;
+                let fty = self.parse_type_with_tparams(type_params)?;
                 fields.push((fname, fty));
                 if matches!(self.peek(), Token::Comma) {
                     self.bump();
@@ -934,6 +970,7 @@ impl Parser {
                         enum_name: name,
                         case_name,
                         binds,
+                        type_args: Vec::new(),
                     })
                 } else if matches!(self.peek(), Token::LParen) {
                     // Record / single-case sugar: `case Point(x, y)`.
@@ -942,6 +979,7 @@ impl Parser {
                         enum_name: name.clone(),
                         case_name: name,
                         binds,
+                        type_args: Vec::new(),
                     })
                 } else {
                     Err(self.err(format!(
@@ -1264,6 +1302,7 @@ impl Parser {
                                 enum_name: name,
                                 case_name,
                                 args: Vec::new(),
+                                type_args: Vec::new(),
                             },
                             start.cover(&case_span),
                         ))
@@ -1501,6 +1540,7 @@ enum Opt:
                         enum_name,
                         case_name,
                         binds,
+                        ..
                     } => {
                         assert_eq!(enum_name, "Opt");
                         assert_eq!(case_name, "Some");
@@ -1666,5 +1706,105 @@ enum Pair:
         .unwrap_err()
         .to_string();
         assert!(err.contains("duplicate def"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn parse_generic_enum_decl() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        assert_eq!(p.enums[0].type_params, &["T".to_string()]);
+        assert!(matches!(
+            &p.enums[0].cases[0].fields[0].1,
+            crate::ast::Type::Var(n) if n == "T"
+        ));
+    }
+
+    #[test]
+    fn parse_multi_param_enum_decl() {
+        let src = r#"
+enum Either[L, R]:
+  case Left(x: L)
+  case Right(y: R)
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        assert_eq!(p.enums[0].type_params, &["L".to_string(), "R".to_string()]);
+        assert!(matches!(
+            &p.enums[0].cases[1].fields[0].1,
+            crate::ast::Type::Var(n) if n == "R"
+        ));
+    }
+
+    #[test]
+    fn parse_generic_record_decl() {
+        let src = r#"
+record Pair[A, B](a: A, b: B)
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        assert!(p.enums[0].is_record);
+        assert_eq!(p.enums[0].type_params, &["A".to_string(), "B".to_string()]);
+        assert!(matches!(
+            &p.enums[0].cases[0].fields[1].1,
+            crate::ast::Type::Var(n) if n == "B"
+        ));
+    }
+
+    #[test]
+    fn parse_type_application_in_def_sig() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+def f(o: Opt[Int]): Int = 1
+def g[T](o: Opt[T]): Opt[T] = o
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        assert!(matches!(
+            &p.defs[0].params[0].ty,
+            crate::ast::Type::App(n, args)
+                if n == "Opt" && matches!(&args[0], crate::ast::Type::Int)
+        ));
+        assert!(matches!(
+            &p.defs[1].ret,
+            crate::ast::Type::App(n, args)
+                if n == "Opt" && matches!(&args[0], crate::ast::Type::Var(v) if v == "T")
+        ));
+    }
+
+    #[test]
+    fn parse_multi_param_def() {
+        let src = r#"
+def second[A, B](a: A, b: B): B = b
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        assert_eq!(p.defs[0].type_params, &["A".to_string(), "B".to_string()]);
+    }
+
+    #[test]
+    fn parse_rejects_type_args_on_type_param() {
+        let src = r#"
+def f[T](x: T[Int]): T = x
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let err = parse(src).unwrap_err().to_string();
+        assert!(err.contains("type parameter T takes no type arguments"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn parse_rejects_type_args_on_builtin() {
+        let src = r#"
+def f(x: List[Int]): Int = 1
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let err = parse(src).unwrap_err().to_string();
+        assert!(err.contains("List takes no type arguments"), "unexpected: {err}");
     }
 }

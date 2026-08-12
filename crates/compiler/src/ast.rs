@@ -62,6 +62,8 @@ pub struct EnumDef {
     /// File-stem module id (`Foo.scuzz` → `Foo`). Empty when parsed without a path.
     pub module: String,
     pub name: String,
+    /// `enum Opt[T]:` — monomorphized to per-instantiation clones before codegen.
+    pub type_params: Vec<String>,
     pub cases: Vec<EnumCase>,
     /// `record Name(…)` — single case with the same name; surface sugar for construct/match.
     pub is_record: bool,
@@ -206,6 +208,8 @@ pub enum ExprKind {
         enum_name: String,
         case_name: String,
         args: Vec<Expr>,
+        /// Instantiation args for generic enums, filled by elaboration; empty otherwise.
+        type_args: Vec<Type>,
     },
     /// `scrutinee match { case Pat => expr ... }`
     Match {
@@ -278,6 +282,8 @@ pub enum Pattern {
         enum_name: String,
         case_name: String,
         binds: Vec<String>,
+        /// Instantiation args for generic enums, filled by elaboration; empty otherwise.
+        type_args: Vec<Type>,
     },
     /// `_`
     Wildcard,
@@ -293,6 +299,8 @@ pub enum Type {
     Io(Box<Type>),
     /// Nominal enum type
     Adt(String),
+    /// Applied generic enum (`Opt[Int]`, `Either[L, R]`) — eliminated by monomorphization.
+    App(String, Vec<Type>),
     /// Type parameter (`T` in `def id[T](x: T): T`)
     Var(String),
     /// Untyped/opaque

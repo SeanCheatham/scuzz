@@ -455,6 +455,7 @@ fn rewrite_fields(
                             enum_name: eid,
                             case_name: case.name.clone(),
                             binds,
+                            type_args: Vec::new(),
                         },
                         body,
                     }],
@@ -756,6 +757,7 @@ fn rewrite_fields(
             enum_name,
             case_name,
             args,
+            type_args,
         } => Ok(Expr::new(
             ExprKind::AdtConstruct {
                 enum_name,
@@ -764,6 +766,7 @@ fn rewrite_fields(
                     .into_iter()
                     .map(|e| rewrite_fields(e, enums, funs, methods, current_module, env))
                     .collect::<Result<Vec<_>, _>>()?,
+                type_args,
             },
             span,
         )),
@@ -872,6 +875,7 @@ fn infer(
             enum_name,
             case_name,
             args,
+            ..
         } => {
             let (en, id) = lookup_enum(enums, enum_name, current_module)?;
             let case = en.cases.iter().find(|c| c.name == *case_name).ok_or_else(|| {
@@ -1545,6 +1549,7 @@ fn bind_pattern(
             enum_name,
             case_name,
             binds,
+            ..
         } => {
             let (en, id) = lookup_enum(enums, enum_name, current_module)?;
             let case = en.cases.iter().find(|c| c.name == *case_name).ok_or_else(|| {
@@ -1677,6 +1682,11 @@ fn type_mangle(t: &Type) -> String {
         Type::Bool => "Bool".into(),
         Type::List => "List".into(),
         Type::Adt(id) => id.replace('.', "_"),
+        Type::App(id, args) => format!(
+            "{}_{}",
+            id.replace('.', "_"),
+            args.iter().map(type_mangle).collect::<Vec<_>>().join("_")
+        ),
         Type::Io(inner) => format!("IO_{}", type_mangle(inner)),
         Type::Var(n) => n.clone(),
         Type::Opaque(n) => n.clone(),
@@ -2102,6 +2112,7 @@ fn mono_expr(
             enum_name,
             case_name,
             args,
+            type_args,
         } => Ok(Expr::new(
             ExprKind::AdtConstruct {
                 enum_name,
@@ -2110,6 +2121,7 @@ fn mono_expr(
                     .into_iter()
                     .map(|e| mono_expr(e, enums, funs, methods, current_module, env, specialized))
                     .collect::<Result<Vec<_>, _>>()?,
+                type_args,
             },
             span,
         )),

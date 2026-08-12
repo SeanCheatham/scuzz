@@ -148,6 +148,11 @@ fn pretty_type(t: &Type) -> String {
         Type::Bool => "Bool".into(),
         Type::List => "List".into(),
         Type::Io(inner) => format!("IO[{}]", pretty_type(inner)),
+        Type::App(n, args) => format!(
+            "{}[{}]",
+            n,
+            args.iter().map(pretty_type).collect::<Vec<_>>().join(", ")
+        ),
         Type::Adt(n) | Type::Opaque(n) | Type::Var(n) => n.clone(),
     }
 }
@@ -235,6 +240,7 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             enum_name,
             case_name,
             args,
+            ..
         } => {
             let bare = crate::resolve::enum_bare_name(enum_name);
             if bare == case_name.as_str() {
@@ -390,6 +396,7 @@ fn pretty_arm(arm: &MatchArm, indent: usize) -> String {
             enum_name,
             case_name,
             binds,
+            ..
         } => {
             let bare = crate::resolve::enum_bare_name(enum_name);
             if bare == case_name.as_str() {

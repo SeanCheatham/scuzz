@@ -299,6 +299,7 @@ mod tests {
         EnumDef {
             module: module.into(),
             name: name.into(),
+            type_params: vec![],
             cases: vec![EnumCase {
                 name: "X".into(),
                 fields: vec![],

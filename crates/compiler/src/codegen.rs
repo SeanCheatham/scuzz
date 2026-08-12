@@ -755,6 +755,7 @@ fn emit_expr(
             enum_name,
             case_name,
             args,
+            ..
         } => {
             let tag = ctx
                 .enum_tags
@@ -977,6 +978,7 @@ fn emit_expr(
                     enum_name,
                     case_name,
                     binds,
+                    ..
                 } = &arm.pattern
                 {
                     if !binds.is_empty() {
