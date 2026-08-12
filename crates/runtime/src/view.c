@@ -884,6 +884,8 @@ SzView *sz_view_hit_test(SzView *root, float x, float y) {
   return hit_node(root, x, y);
 }
 
+static const float k_text_field_inset = 6.f;
+
 static void paint_rect(SkCanvas *c, float x, float y, float w, float h,
                        uint32_t argb) {
   SkPaint *p = sk_paint_new();
@@ -952,9 +954,14 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
         sk_paint_delete(p);
       }
     }
-    paint_string(c, shown, v->frame.x + 6.f,
+    paint_string(c, shown, v->frame.x + k_text_field_inset,
                  v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
                  buf[0] ? theme->foreground : theme->muted, theme->font_px);
+    if (v->focused) {
+      SzRect caret = sz_view_caret_rect(v, theme);
+      if (caret.w > 0.f)
+        paint_rect(c, caret.x, caret.y, caret.w, caret.h, theme->primary);
+    }
     break;
   }
   case SZ_VIEW_ICON: {
@@ -1055,6 +1062,50 @@ int sz_view_has_focused_text_field(SzView *root) {
       return 1;
   }
   return 0;
+}
+
+static SzView *find_focused_text_field(SzView *root) {
+  int i;
+  SzView *found;
+  if (!root || !view_is_shown(root))
+    return NULL;
+  if (root->kind == SZ_VIEW_TEXT_FIELD && root->focused)
+    return root;
+  for (i = 0; i < root->child_count; i++) {
+    found = find_focused_text_field(root->children[i]);
+    if (found)
+      return found;
+  }
+  return NULL;
+}
+
+SzRect sz_view_caret_rect(SzView *root, const SzTheme *theme) {
+  SzRect z = {0, 0, 0, 0};
+  SzView *f;
+  char buf[256];
+  float x, y, h;
+  if (!root || !theme)
+    return z;
+  f = find_focused_text_field(root);
+  if (!f)
+    return z;
+  resolve_text(f, buf, sizeof buf);
+  x = f->frame.x + k_text_field_inset + text_width(buf, theme->font_px);
+  if (x > f->frame.x + f->frame.w - 2.f)
+    x = f->frame.x + f->frame.w - 2.f;
+  if (x < f->frame.x + k_text_field_inset)
+    x = f->frame.x + k_text_field_inset;
+  h = theme->font_px;
+  if (h > f->frame.h - 4.f)
+    h = f->frame.h - 4.f;
+  if (h < 1.f)
+    h = 1.f;
+  y = f->frame.y + (f->frame.h - h) * 0.5f;
+  z.x = x;
+  z.y = y;
+  z.w = 1.f;
+  z.h = h;
+  return z;
 }
 
 int sz_view_handle_tap(SzView *root, float x, float y) {

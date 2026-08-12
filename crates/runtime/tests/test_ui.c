@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200112L
 #include "scuzz_ui.h"
+#include "sk_capi.h"
 
 #include <assert.h>
 #include <math.h>
@@ -726,6 +727,47 @@ static void test_text_field_edit(void) {
   sz_signal_str_free(draft);
 }
 
+static void test_caret_metrics(void) {
+  SzSignalStr *draft;
+  SzView *root;
+  SzView *field;
+  const SzTheme *theme = sz_theme_default();
+  SzRect caret, fr;
+  float want;
+
+  draft = sz_signal_str("");
+  root = sz_view_column();
+  field = sz_view_text_field(draft, "type");
+  sz_view_add_child(root, field);
+  sz_view_layout(root, 200.f, 80.f, theme);
+  caret = sz_view_caret_rect(root, theme);
+  assert(caret.w == 0.f);
+
+  assert(sz_view_handle_text_edit(root, "i", 0));
+  sz_view_layout(root, 200.f, 80.f, theme);
+  fr = sz_view_frame(field);
+  caret = sz_view_caret_rect(root, theme);
+  want = fr.x + 6.f + sk_font_measure_string("i", theme->font_px);
+  assert(fabsf(caret.x - want) < 0.5f);
+  assert(caret.w >= 1.f - 0.5f);
+  assert(caret.h >= 1.f - 0.5f);
+
+  /* Same byte length, different glyphs: measured advance, not n * cell. */
+  sz_signal_str_set(draft, "ii");
+  sz_view_layout(root, 200.f, 80.f, theme);
+  caret = sz_view_caret_rect(root, theme);
+  want = fr.x + 6.f + sk_font_measure_string("ii", theme->font_px);
+  assert(fabsf(caret.x - want) < 0.5f);
+  sz_signal_str_set(draft, "WW");
+  sz_view_layout(root, 200.f, 80.f, theme);
+  caret = sz_view_caret_rect(root, theme);
+  want = fr.x + 6.f + sk_font_measure_string("WW", theme->font_px);
+  assert(fabsf(caret.x - want) < 0.5f);
+
+  sz_view_free(root);
+  sz_signal_str_free(draft);
+}
+
 /* Mount a static label and pump repeatedly: live_count stays flat. */
 static void test_alloc_pump_flat(void) {
   SzUiConfig cfg;
@@ -850,6 +892,7 @@ int main(void) {
   test_clear_children();
   test_view_each();
   test_text_field_edit();
+  test_caret_metrics();
   test_alloc_pump_flat();
   test_alloc_counter_pump_flat();
   puts("runtime ui tests ok");

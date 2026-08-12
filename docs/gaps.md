@@ -43,5 +43,6 @@ Path deps only (`manifest.rs`, `Toml.scuzz`). Git / versioned / hosted artifacts
 
 - **Flutter-style constraint layout** — recursive stacker today (`layout_node` in `view.c`). Locked direction: constraints down, sizes up. `View.expanded` takes leftover Column height or Row width (`examples/todo`, `examples/nav`); `View.center` fills and centers; `View.align(ax, ay, child)` places start/center/end (`examples/nav` Other page); `View.stack` overlays; `View.positioned(x, y, child)` offsets a Stack child (`examples/counter`); `View.padding(n, child)` deflates max/min (`examples/nav` Home); `View.sized(w, h, child)` is a tight slot (`examples/counter`); `View.minSize(w, h, child)` raises min (`examples/counter`). Min is enforced after measure; padding deflates min for the child.
 - **Windows desktop embedder** — same session protocol as X11/Cocoa; secondary platform.
+- **OS IME candidate windows** — focused TextField caret uses measured advance (`sz_view_caret_rect`); embedders do not yet place OS IME UI from it.
 - **LSP / editor tooling** — `fmt`, `check --message-format=json`, and `watch` exist; no language server.
 - **macOS in default CI** — macOS job is `workflow_dispatch`-only; Darwin regressions surface late.

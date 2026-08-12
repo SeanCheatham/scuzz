@@ -75,7 +75,7 @@ typedef struct SzTheme {
   float pad;
   float gap;
   float control_h;
-  float font_px; /* bitmap font cell size (default 8px) */
+  float font_px; /* paint/measure size (default 8px) */
   float radius;  /* 0 = sharp */
 } SzTheme;
 
@@ -198,6 +198,9 @@ float sz_view_scroll_y(const SzView *scroll);
 void sz_view_scroll_by(SzView *scroll, float dy);
 SzView *sz_view_scroll_at(SzView *root, float x, float y);
 int sz_view_has_focused_text_field(SzView *root);
+/* Caret in the focused TextField from measured text advance (not a cell grid).
+ * Empty rect if nothing is focused. `theme` supplies font_px (default theme OK). */
+SzRect sz_view_caret_rect(SzView *root, const SzTheme *theme);
 
 /* Accessibility hooks (Headless-dumpable; no OS AT bridge yet). */
 typedef enum SzA11yRole {
