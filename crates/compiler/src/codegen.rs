@@ -117,6 +117,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_positioned(i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_padding(i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_sized(i64, i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_min_size(i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_text_field(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_icon(i64, i64)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_image(i64, i64, i64, ptr)").unwrap();
@@ -2348,6 +2349,15 @@ fn emit_call(
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @sz_lang_view_sized(i64 {}, i64 {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "View.minSize" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_view_min_size(i64 {}, i64 {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
             )
             .unwrap();

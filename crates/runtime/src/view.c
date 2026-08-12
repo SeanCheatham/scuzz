@@ -65,6 +65,7 @@ struct SzView {
   int pos_y;
   /* View.padding: uniform inset. */
   int pad;
+  /* View.sized / View.minSize: requested w×h (img_* reused). */
 };
 
 static SzView *view_new(SzViewKind kind) {
@@ -99,7 +100,7 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_EXPANDED || kind == SZ_VIEW_CENTER ||
          kind == SZ_VIEW_ALIGN || kind == SZ_VIEW_STACK ||
          kind == SZ_VIEW_POSITIONED || kind == SZ_VIEW_PADDING ||
-         kind == SZ_VIEW_SIZED;
+         kind == SZ_VIEW_SIZED || kind == SZ_VIEW_MIN_SIZE;
 }
 
 SzViewKind sz_view_kind(const SzView *view) {
@@ -333,6 +334,15 @@ SzView *sz_view_sized(int w, int h, SzView *child) {
   return v;
 }
 
+SzView *sz_view_min_size(int w, int h, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_MIN_SIZE);
+  v->img_w = w > 0 ? w : 0;
+  v->img_h = h > 0 ? h : 0;
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
 SzView *sz_view_image(int w, int h, uint32_t argb, const char *caption) {
   SzView *v = view_new(SZ_VIEW_IMAGE);
   v->img_w = w > 0 ? w : 32;
@@ -420,8 +430,16 @@ static void resolve_text(const SzView *v, char *buf, size_t buflen) {
   }
 }
 
+static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h,
+                           float max_w, float max_h, const SzTheme *theme);
+
 static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
                         const SzTheme *theme) {
+  layout_node_ex(v, x, y, 0.f, 0.f, max_w, max_h, theme);
+}
+
+static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h,
+                           float max_w, float max_h, const SzTheme *theme) {
   float font = theme->font_px;
   char buf[256];
   int i;
@@ -484,6 +502,7 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
       inner_w = 0;
     if (v->kind == SZ_VIEW_COLUMN) {
       int col_shown = 0;
+      float h_budget = max_h > 0.f ? max_h : min_h;
       for (i = 0; i < v->child_count; i++) {
         if (!view_is_shown(v->children[i]))
           continue;
@@ -491,7 +510,7 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
         if (v->children[i]->kind == SZ_VIEW_EXPANDED)
           n_flex++;
       }
-      if (n_flex > 0 && max_h > 0) {
+      if (n_flex > 0 && h_budget > 0.f) {
         /* Measure non-flex children for leftover height. */
         for (i = 0; i < v->child_count; i++) {
           SzView *ch = v->children[i];
@@ -503,10 +522,10 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
         if (col_shown > 1)
           gaps = theme->gap * (float)(col_shown - 1);
         /* Not enough room for flex: fall back to intrinsic column layout. */
-        if (fixed_h + gaps + theme->pad * 2.f > max_h + 0.5f)
+        if (fixed_h + gaps + theme->pad * 2.f > h_budget + 0.5f)
           n_flex = 0;
         else {
-          flex_h = max_h - theme->pad * 2.f - fixed_h - gaps;
+          flex_h = h_budget - theme->pad * 2.f - fixed_h - gaps;
           if (flex_h < 0.f)
             flex_h = 0.f;
           if (n_flex > 1)
@@ -525,7 +544,7 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
             cy += ch->frame.h + theme->gap;
           }
           v->frame.w = max_w;
-          v->frame.h = max_h;
+          v->frame.h = h_budget;
           break;
         }
       }
@@ -623,12 +642,13 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
     float row_inner_h = max_h > 0 ? max_h - theme->pad * 2.f : 0.f;
     if (row_inner_h < 0.f)
       row_inner_h = 0.f;
+    float w_budget = max_w > 0.f ? max_w : min_w;
     for (i = 0; i < v->child_count; i++) {
       if (view_is_shown(v->children[i]) &&
           v->children[i]->kind == SZ_VIEW_EXPANDED)
         n_flex++;
     }
-    if (n_flex > 0 && max_w > 0) {
+    if (n_flex > 0 && w_budget > 0.f) {
       /* Measure non-flex at intrinsic width (large max_w). */
       for (i = 0; i < v->child_count; i++) {
         SzView *ch = v->children[i];
@@ -640,10 +660,10 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
       }
       if (shown > 1)
         gaps = theme->gap * (float)(shown - 1);
-      if (fixed_w + gaps + theme->pad * 2.f > max_w + 0.5f)
+      if (fixed_w + gaps + theme->pad * 2.f > w_budget + 0.5f)
         n_flex = 0;
       else {
-        flex_w = max_w - theme->pad * 2.f - fixed_w - gaps;
+        flex_w = w_budget - theme->pad * 2.f - fixed_w - gaps;
         if (flex_w < 0.f)
           flex_w = 0.f;
         if (n_flex > 1)
@@ -663,7 +683,7 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
           if (ch->frame.h > inner_h)
             inner_h = ch->frame.h;
         }
-        v->frame.w = max_w;
+        v->frame.w = w_budget;
         v->frame.h = inner_h + theme->pad * 2.f;
         break;
       }
@@ -749,10 +769,13 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
     float p = (float)v->pad;
     float inner_w = max_w > p * 2.f ? max_w - p * 2.f : 0.f;
     float inner_h = max_h > p * 2.f ? max_h - p * 2.f : 0.f;
+    float inner_min_w = min_w > p * 2.f ? min_w - p * 2.f : 0.f;
+    float inner_min_h = min_h > p * 2.f ? min_h - p * 2.f : 0.f;
     float cw = 0.f;
     float chh = 0.f;
     if (ch)
-      layout_node(ch, x + p, y + p, inner_w, inner_h, theme);
+      layout_node_ex(ch, x + p, y + p, inner_min_w, inner_min_h, inner_w,
+                     inner_h, theme);
     if (ch) {
       cw = ch->frame.w;
       chh = ch->frame.h;
@@ -779,6 +802,24 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
       layout_node(ch, x, y, tw, th, theme);
     break;
   }
+  case SZ_VIEW_MIN_SIZE: {
+    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
+    float child_min_w = (float)v->img_w;
+    float child_min_h = (float)v->img_h;
+    if (child_min_w < min_w)
+      child_min_w = min_w;
+    if (child_min_h < min_h)
+      child_min_h = min_h;
+    if (max_w > 0.f && child_min_w > max_w)
+      child_min_w = max_w;
+    if (max_h > 0.f && child_min_h > max_h)
+      child_min_h = max_h;
+    if (ch)
+      layout_node_ex(ch, x, y, child_min_w, child_min_h, max_w, max_h, theme);
+    v->frame.w = ch ? ch->frame.w : child_min_w;
+    v->frame.h = ch ? ch->frame.h : child_min_h;
+    break;
+  }
   case SZ_VIEW_SCROLL: {
     float inner_w = max_w - theme->pad * 2.f;
     float vh;
@@ -786,6 +827,8 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
       vh = v->pref_h;
     else if (max_h > 0)
       vh = max_h;
+    else if (min_h > 0)
+      vh = min_h;
     else
       vh = 0.f; /* Expanded flex slot may be empty; do not invent height */
     if (max_h > 0 && vh > max_h)
@@ -803,6 +846,14 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
     v->frame.h = 0;
     break;
   }
+  if (v->frame.w < min_w)
+    v->frame.w = min_w;
+  if (v->frame.h < min_h)
+    v->frame.h = min_h;
+  if (max_w > 0.f && v->frame.w > max_w)
+    v->frame.w = max_w;
+  if (max_h > 0.f && v->frame.h > max_h)
+    v->frame.h = max_h;
 }
 
 void sz_view_layout(SzView *root, float width, float height, const SzTheme *theme) {
@@ -930,6 +981,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_POSITIONED:
   case SZ_VIEW_PADDING:
   case SZ_VIEW_SIZED:
+  case SZ_VIEW_MIN_SIZE:
     if (v->kind == SZ_VIEW_LIST || v->kind == SZ_VIEW_SCROLL)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     for (i = 0; i < v->child_count; i++)

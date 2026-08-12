@@ -94,6 +94,9 @@ SzView *sz_lang_view_padding(int64_t pad, SzView *child) {
 SzView *sz_lang_view_sized(int64_t w, int64_t h, SzView *child) {
   return sz_view_sized((int)w, (int)h, child);
 }
+SzView *sz_lang_view_min_size(int64_t w, int64_t h, SzView *child) {
+  return sz_view_min_size((int)w, (int)h, child);
+}
 
 SzView *sz_lang_view_text_field(SzSignalStr *text, SzString *placeholder) {
   return sz_view_text_field(text, placeholder ? sz_string_cstr(placeholder) : "");

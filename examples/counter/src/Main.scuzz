@@ -7,7 +7,11 @@
         View.text(counterTitle()),
         View.bindText(label),
         View.row(
-          View.button("+1", _ => Signal.set(count, Signal.get(count) + 1)),
+          View.minSize(
+            80,
+            36,
+            View.button("+1", _ => Signal.set(count, Signal.get(count) + 1))
+          ),
           View.sized(
             32,
             32,

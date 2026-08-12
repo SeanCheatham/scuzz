@@ -132,6 +132,7 @@ typedef enum SzViewKind {
   SZ_VIEW_POSITIONED, /* Stack child: offset (x, y) from stack origin */
   SZ_VIEW_PADDING,  /* uniform inset; deflates max constraints */
   SZ_VIEW_SIZED,    /* tight w×h slot (clamped to incoming max) */
+  SZ_VIEW_MIN_SIZE, /* raise min w×h (clamped to incoming max) */
   SZ_VIEW_IMAGE,
   SZ_VIEW_ICON,
   SZ_VIEW_LABEL /* full-bleed bg + bar that toggles colors on tap */
@@ -170,6 +171,8 @@ SzView *sz_view_positioned(int x, int y, SzView *child);
 SzView *sz_view_padding(int pad, SzView *child);
 /* Tight w×h slot; clamped to incoming max. Child laid out at origin. */
 SzView *sz_view_sized(int w, int h, SzView *child);
+/* Floor on child size; 0 on an axis means no min. Clamped to incoming max. */
+SzView *sz_view_min_size(int w, int h, SzView *child);
 SzView *sz_view_image(int w, int h, uint32_t argb, const char *caption);
 SzView *sz_view_icon(char glyph, uint32_t argb);
 /* Full-bleed bg + bar that toggles colors on tap (C unit-test helper). */
@@ -271,6 +274,7 @@ SzView *sz_lang_view_align(int64_t ax, int64_t ay, SzView *child);
 SzView *sz_lang_view_positioned(int64_t x, int64_t y, SzView *child);
 SzView *sz_lang_view_padding(int64_t pad, SzView *child);
 SzView *sz_lang_view_sized(int64_t w, int64_t h, SzView *child);
+SzView *sz_lang_view_min_size(int64_t w, int64_t h, SzView *child);
 SzView *sz_lang_view_text_field(SzSignalStr *text, SzString *placeholder);
 SzView *sz_lang_view_icon(int64_t glyph, int64_t argb);
 SzView *sz_lang_view_image(int64_t w, int64_t h, int64_t argb, SzString *caption);
