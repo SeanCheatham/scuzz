@@ -60,7 +60,7 @@ def findDupDefOne(d: Def, rest: List, seen: List): String =
   } yield if (defSeen(seen, q) == 1) q else findDupDef(rest, List.cons(q, seen))
 
 def bindParams(params: List, env: List): List =
-  if (List.isEmpty(params) == 1) env else bindParams(List.tail(params), tyEnvPut(env, paramName(List.head(params)), normalizeTy(paramTy(List.head(params)))))
+  if (List.isEmpty(params) == 1) env else bindParams(List.tail(params), tyEnvPut(env, paramName(List.head(params)), paramTy(List.head(params))))
 
 def mkFuns(mod: String, defs: List): List =
   List.cons(mod, List.cons(defs, List.empty()))
@@ -84,7 +84,7 @@ def typecheckDefsThenMainOne(d: Def, rest: List, enums: List, allDefs: List, mai
   for {
     env = bindParams(defParams(d), List.empty())
     bodyR = inferExpr(defBody(d), enums, mkFuns(defModule(d), allDefs), env)
-    ret = normalizeTy(declRet(d))
+    ret = declRet(d)
   } yield if (tyIsOk(bodyR) == 0) bodyR else if (typesCompat(tyVal(bodyR), ret) == 0) tyErr(str5("def ", defName(d), " body ", tyShow(tyVal(bodyR)), str3(" does not match declared ", tyShow(ret), ""))) else typecheckDefsThenMain(rest, enums, allDefs, main, mainMod)
 
 def checkMainTy(r: TyRes): TyRes =
@@ -157,7 +157,7 @@ def inferAdtPayload(en: String, c: EnumCase, args: List, enums: List, funs: List
 def inferAdtArgs(en: String, cn: String, args: List, fields: List, enums: List, funs: List, env: List): TyRes =
   if (List.isEmpty(args) == 1) tyOk(tyMkAdt(en)) else for {
   ar = inferExpr(List.head(args), enums, funs, env)
-  want = normalizeTy(fieldTy(List.head(fields)))
+  want = fieldTy(List.head(fields))
 } yield if (tyIsOk(ar) == 0) ar else if (typesCompat(tyVal(ar), want) == 0) tyErr(str4("expected ", tyShow(want), ", got ", tyShow(tyVal(ar)))) else inferAdtArgs(en, cn, List.tail(args), List.tail(fields), enums, funs, env)
 
 def inferLet(name: String, value: Expr, body: Expr, enums: List, funs: List, env: List): TyRes =
@@ -382,7 +382,7 @@ def patternExtendEnvCase(en: String, cn: String, binds: List, enums: List, env: 
   } yield patternBindFields(binds, fields, env)
 
 def patternBindFields(binds: List, fields: List, env: List): List =
-  if (List.isEmpty(binds) == 1) env else patternBindFields(List.tail(binds), List.tail(fields), tyEnvPut(env, List.head(binds), normalizeTy(fieldTy(List.head(fields)))))
+  if (List.isEmpty(binds) == 1) env else patternBindFields(List.tail(binds), List.tail(fields), tyEnvPut(env, List.head(binds), fieldTy(List.head(fields))))
 
 def expectArity(name: String, n: Int, got: Int): TyRes =
   if (n == got) tyOk(Type.Unit) else tyErr(str4(name, " expects ", Str.fromInt(n), str3(" args, got ", Str.fromInt(got), "")))
@@ -723,8 +723,8 @@ def callUiRun(argTys: List): TyRes =
 def callUserFun(callee: String, argTys: List, funs: List): TyRes =
   for {
     d = resolveFun(funsDefs(funs), callee, funsMod(funs))
-  } yield if (List.isEmpty(d) == 1) tyErr(str3("unknown function ", callee, "")) else if (resolveIsAmbiguous(d) == 1) tyErr(str4("ambiguous function ", callee, ": qualify as Module.", callee)) else callUserFunParams(callee, defParams(resolvedDef(d)), argTys, 0, normalizeTy(declRet(resolvedDef(d))))
+  } yield if (List.isEmpty(d) == 1) tyErr(str3("unknown function ", callee, "")) else if (resolveIsAmbiguous(d) == 1) tyErr(str4("ambiguous function ", callee, ": qualify as Module.", callee)) else callUserFunParams(callee, defParams(resolvedDef(d)), argTys, 0, declRet(resolvedDef(d)))
 
 def callUserFunParams(callee: String, params: List, argTys: List, i: Int, ret: Type): TyRes =
-  if (List.len(params) != List.len(argTys)) tyErr(str4(callee, " expects ", Str.fromInt(List.len(params)), str3(" args, got ", Str.fromInt(List.len(argTys)), ""))) else if (i >= List.len(params)) tyOk(ret) else if (typesCompat(argTyAt(argTys, i), normalizeTy(paramTy(List.at(params, i)))) == 0) tyErr(str4(callee, " arg type mismatch: expected ", tyShow(normalizeTy(paramTy(List.at(params, i)))), str3(", got ", tyShow(argTyAt(argTys, i)), ""))) else callUserFunParams(callee, params, argTys, i + 1, ret)
+  if (List.len(params) != List.len(argTys)) tyErr(str4(callee, " expects ", Str.fromInt(List.len(params)), str3(" args, got ", Str.fromInt(List.len(argTys)), ""))) else if (i >= List.len(params)) tyOk(ret) else if (typesCompat(argTyAt(argTys, i), paramTy(List.at(params, i))) == 0) tyErr(str4(callee, " arg type mismatch: expected ", tyShow(paramTy(List.at(params, i))), str3(", got ", tyShow(argTyAt(argTys, i)), ""))) else callUserFunParams(callee, params, argTys, i + 1, ret)
 

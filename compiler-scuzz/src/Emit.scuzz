@@ -46,85 +46,63 @@ def sConts(s: Emit): String =
 def kindIsInt(k: EmitKind): Int =
   k match {
     case EmitKind.Int => 1
-    case EmitKind.Ptr => 0
-    case EmitKind.Io => 0
-    case EmitKind.IoInt => 0
+    case _ => 0
   }
 
 def kindIsPtr(k: EmitKind): Int =
   k match {
     case EmitKind.Ptr => 1
-    case EmitKind.Int => 0
-    case EmitKind.Io => 0
-    case EmitKind.IoInt => 0
+    case _ => 0
   }
 
 def isIoKind(k: EmitKind): Int =
   k match {
     case EmitKind.Io => 1
     case EmitKind.IoInt => 1
-    case EmitKind.Int => 0
-    case EmitKind.Ptr => 0
-  }
-
-def kindEq(a: EmitKind, b: EmitKind): Int =
-  a match {
-    case EmitKind.Int => kindIsInt(b)
-    case EmitKind.Ptr => kindIsPtr(b)
-    case EmitKind.Io => kindEqIo(b)
-    case EmitKind.IoInt => kindEqIoInt(b)
-  }
-
-def kindEqIo(b: EmitKind): Int =
-  b match {
-    case EmitKind.Io => 1
-    case EmitKind.Int => 0
-    case EmitKind.Ptr => 0
-    case EmitKind.IoInt => 0
-  }
-
-def kindEqIoInt(b: EmitKind): Int =
-  b match {
-    case EmitKind.IoInt => 1
-    case EmitKind.Int => 0
-    case EmitKind.Ptr => 0
-    case EmitKind.Io => 0
+    case _ => 0
   }
 
 def payloadOfKind(k: EmitKind): EmitKind =
   k match {
     case EmitKind.IoInt => EmitKind.Int
-    case EmitKind.Int => EmitKind.Ptr
-    case EmitKind.Ptr => EmitKind.Ptr
-    case EmitKind.Io => EmitKind.Ptr
+    case _ => EmitKind.Ptr
   }
 
 def llvmTyOfKind(k: EmitKind): String =
   k match {
     case EmitKind.Int => "i64"
-    case EmitKind.Ptr => "ptr"
-    case EmitKind.Io => "ptr"
-    case EmitKind.IoInt => "ptr"
+    case _ => "ptr"
   }
 
 def envPut(env: List, name: String, value: String, kind: EmitKind): List =
   List.cons(EnvBind.Bind(name, value, kind), env)
 
-def envGetVal(env: List, name: String): String =
-  if (List.isEmpty(env) == 1) "null" else envGetValCont(List.head(env), List.tail(env), name)
+def envMiss(): EnvBind =
+  EnvBind.Bind("", "null", EmitKind.Ptr)
 
-def envGetValCont(b: EnvBind, rest: List, name: String): String =
+def envGet(env: List, name: String): EnvBind =
+  if (List.isEmpty(env) == 1) envMiss() else envGetCont(List.head(env), List.tail(env), name)
+
+def envGetCont(b: EnvBind, rest: List, name: String): EnvBind =
   b match {
-    case EnvBind.Bind(n, value, kind) => if (streq(n, name) == 1) value else envGetVal(rest, name)
+    case EnvBind.Bind(n, value, kind) => if (streq(n, name) == 1) b else envGet(rest, name)
   }
+
+def envBindValue(b: EnvBind): String =
+  b match {
+    case EnvBind.Bind(n, value, kind) => value
+  }
+
+def envBindKind(b: EnvBind): EmitKind =
+  b match {
+    case EnvBind.Bind(n, value, kind) => kind
+  }
+
+def envGetVal(env: List, name: String): String =
+  envBindValue(envGet(env, name))
 
 def envGetKind(env: List, name: String): EmitKind =
-  if (List.isEmpty(env) == 1) EmitKind.Ptr else envGetKindCont(List.head(env), List.tail(env), name)
-
-def envGetKindCont(b: EnvBind, rest: List, name: String): EmitKind =
-  b match {
-    case EnvBind.Bind(n, value, kind) => if (streq(n, name) == 1) kind else envGetKind(rest, name)
-  }
+  envBindKind(envGet(env, name))
 
 def payloadRowKey(r: CasePayload): String =
   r match {

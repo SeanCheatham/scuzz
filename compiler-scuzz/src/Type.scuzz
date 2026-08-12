@@ -57,196 +57,90 @@ def tyEq(a: Type, b: Type): Int =
 def tyEqUnit(b: Type): Int =
   b match {
     case Type.Unit => 1
-    case Type.Int => 0
-    case Type.String => 0
-    case Type.Bool => 0
-    case Type.List => 0
-    case Type.Io(inner) => 0
-    case Type.Adt(name) => 0
-    case Type.Opaque(name) => 0
+    case _ => 0
   }
 
 def tyEqInt(b: Type): Int =
   b match {
     case Type.Int => 1
-    case Type.Unit => 0
-    case Type.String => 0
-    case Type.Bool => 0
-    case Type.List => 0
-    case Type.Io(inner) => 0
-    case Type.Adt(name) => 0
-    case Type.Opaque(name) => 0
+    case _ => 0
   }
 
 def tyEqString(b: Type): Int =
   b match {
     case Type.String => 1
-    case Type.Unit => 0
-    case Type.Int => 0
-    case Type.Bool => 0
-    case Type.List => 0
-    case Type.Io(inner) => 0
-    case Type.Adt(name) => 0
-    case Type.Opaque(name) => 0
+    case _ => 0
   }
 
 def tyEqBool(b: Type): Int =
   b match {
     case Type.Bool => 1
-    case Type.Unit => 0
-    case Type.Int => 0
-    case Type.String => 0
-    case Type.List => 0
-    case Type.Io(inner) => 0
-    case Type.Adt(name) => 0
-    case Type.Opaque(name) => 0
+    case _ => 0
   }
 
 def tyEqList(b: Type): Int =
   b match {
     case Type.List => 1
-    case Type.Unit => 0
-    case Type.Int => 0
-    case Type.String => 0
-    case Type.Bool => 0
-    case Type.Io(inner) => 0
-    case Type.Adt(name) => 0
-    case Type.Opaque(name) => 0
+    case _ => 0
   }
 
 def tyEqIo(ia: Type, b: Type): Int =
   b match {
     case Type.Io(ib) => tyEq(ia, ib)
-    case Type.Unit => 0
-    case Type.Int => 0
-    case Type.String => 0
-    case Type.Bool => 0
-    case Type.List => 0
-    case Type.Adt(name) => 0
-    case Type.Opaque(name) => 0
+    case _ => 0
   }
 
 def tyEqAdt(na: String, b: Type): Int =
   b match {
     case Type.Adt(nb) => streq(na, nb)
-    case Type.Unit => 0
-    case Type.Int => 0
-    case Type.String => 0
-    case Type.Bool => 0
-    case Type.List => 0
-    case Type.Io(inner) => 0
-    case Type.Opaque(name) => 0
+    case _ => 0
   }
 
 def tyEqOpaque(na: String, b: Type): Int =
   b match {
     case Type.Opaque(nb) => streq(na, nb)
-    case Type.Unit => 0
-    case Type.Int => 0
-    case Type.String => 0
-    case Type.Bool => 0
-    case Type.List => 0
-    case Type.Io(inner) => 0
-    case Type.Adt(name) => 0
+    case _ => 0
   }
 
 def typesCompat(a: Type, b: Type): Int =
-  if (tyEq(a, b) == 1) 1 else typesCompatCont(a, b)
+  if (tyEq(a, b) == 1) 1 else if (tyIsOpaque(a) == 1) 1 else if (tyIsOpaque(b) == 1) 1 else typesCompatCont(a, b)
 
 def typesCompatCont(a: Type, b: Type): Int =
   a match {
     case Type.Bool => typesCompatBool(b)
     case Type.Int => typesCompatInt(b)
     case Type.Io(ia) => typesCompatIo(b)
-    case Type.Opaque(name) => 1
-    case Type.Unit => typesCompatOpaqueRhs(b)
-    case Type.String => typesCompatOpaqueRhs(b)
-    case Type.List => typesCompatOpaqueRhs(b)
-    case Type.Adt(name) => typesCompatOpaqueRhs(b)
+    case _ => 0
   }
 
 def typesCompatBool(b: Type): Int =
   b match {
     case Type.Int => 1
-    case Type.Unit => 0
-    case Type.String => 0
-    case Type.Bool => 0
-    case Type.List => 0
-    case Type.Io(inner) => 0
-    case Type.Adt(name) => 0
-    case Type.Opaque(name) => 0
+    case _ => 0
   }
 
 def typesCompatInt(b: Type): Int =
   b match {
     case Type.Bool => 1
-    case Type.Unit => 0
-    case Type.Int => 0
-    case Type.String => 0
-    case Type.List => 0
-    case Type.Io(inner) => 0
-    case Type.Adt(name) => 0
-    case Type.Opaque(name) => 0
+    case _ => 0
   }
 
 def typesCompatIo(b: Type): Int =
   b match {
     case Type.Io(ib) => 1
-    case Type.Unit => 0
-    case Type.Int => 0
-    case Type.String => 0
-    case Type.Bool => 0
-    case Type.List => 0
-    case Type.Adt(name) => 0
-    case Type.Opaque(name) => 0
-  }
-
-def typesCompatOpaqueRhs(b: Type): Int =
-  b match {
-    case Type.Opaque(name) => 1
-    case Type.Unit => 0
-    case Type.Int => 0
-    case Type.String => 0
-    case Type.Bool => 0
-    case Type.List => 0
-    case Type.Io(inner) => 0
-    case Type.Adt(name) => 0
-  }
-
-def normalizeTy(t: Type): Type =
-  t match {
-    case Type.Io(inner) => tyMkIo(normalizeTy(inner))
-    case Type.Unit => t
-    case Type.Int => t
-    case Type.String => t
-    case Type.Bool => t
-    case Type.List => t
-    case Type.Adt(name) => t
-    case Type.Opaque(name) => t
+    case _ => 0
   }
 
 def tyIsIo(t: Type): Int =
   t match {
     case Type.Io(inner) => 1
-    case Type.Unit => 0
-    case Type.Int => 0
-    case Type.String => 0
-    case Type.Bool => 0
-    case Type.List => 0
-    case Type.Adt(name) => 0
-    case Type.Opaque(name) => 0
+    case _ => 0
   }
 
 def tyIoInner(t: Type): Type =
   t match {
     case Type.Io(inner) => inner
-    case Type.Unit => t
-    case Type.Int => t
-    case Type.String => t
-    case Type.Bool => t
-    case Type.List => t
-    case Type.Adt(name) => t
-    case Type.Opaque(name) => t
+    case _ => t
   }
 
 def tyMkIo(inner: Type): Type =
@@ -255,25 +149,13 @@ def tyMkIo(inner: Type): Type =
 def tyIsAdt(t: Type): Int =
   t match {
     case Type.Adt(name) => 1
-    case Type.Unit => 0
-    case Type.Int => 0
-    case Type.String => 0
-    case Type.Bool => 0
-    case Type.List => 0
-    case Type.Io(inner) => 0
-    case Type.Opaque(name) => 0
+    case _ => 0
   }
 
 def tyAdtName(t: Type): String =
   t match {
     case Type.Adt(name) => name
-    case Type.Unit => ""
-    case Type.Int => ""
-    case Type.String => ""
-    case Type.Bool => ""
-    case Type.List => ""
-    case Type.Io(inner) => ""
-    case Type.Opaque(name) => ""
+    case _ => ""
   }
 
 def tyMkAdt(name: String): Type =
@@ -282,13 +164,7 @@ def tyMkAdt(name: String): Type =
 def tyIsOpaque(t: Type): Int =
   t match {
     case Type.Opaque(name) => 1
-    case Type.Unit => 0
-    case Type.Int => 0
-    case Type.String => 0
-    case Type.Bool => 0
-    case Type.List => 0
-    case Type.Io(inner) => 0
-    case Type.Adt(name) => 0
+    case _ => 0
   }
 
 def tyMkOpaque(name: String): Type =
@@ -306,71 +182,56 @@ def tyErrAt(m: String, sp: Span): TyRes =
 def tyIsOk(r: TyRes): Int =
   r match {
     case TyRes.Ok(ty) => 1
-    case TyRes.Err(msg) => 0
-    case TyRes.At(file, start, end, msg) => 0
+    case _ => 0
   }
 
 def tyIsAt(r: TyRes): Int =
   r match {
     case TyRes.At(file, start, end, msg) => 1
-    case TyRes.Ok(ty) => 0
-    case TyRes.Err(msg) => 0
-  }
-
-def tyIsBareErr(r: TyRes): Int =
-  r match {
-    case TyRes.Err(msg) => 1
-    case TyRes.Ok(ty) => 0
-    case TyRes.At(file, start, end, msg) => 0
+    case _ => 0
   }
 
 def tyVal(r: TyRes): Type =
   r match {
     case TyRes.Ok(ty) => ty
-    case TyRes.Err(msg) => Type.Unit
-    case TyRes.At(file, start, end, msg) => Type.Unit
+    case _ => Type.Unit
   }
 
 def tyMsg(r: TyRes): String =
   r match {
     case TyRes.Err(msg) => msg
     case TyRes.At(file, start, end, msg) => msg
-    case TyRes.Ok(ty) => ""
+    case _ => ""
   }
 
 def tyAtFile(r: TyRes): String =
   r match {
     case TyRes.At(file, start, end, msg) => file
-    case TyRes.Ok(ty) => ""
-    case TyRes.Err(msg) => ""
+    case _ => ""
   }
 
 def tyAtStart(r: TyRes): Int =
   r match {
     case TyRes.At(file, start, end, msg) => start
-    case TyRes.Ok(ty) => 0
-    case TyRes.Err(msg) => 0
+    case _ => 0
   }
 
 def tyAtEnd(r: TyRes): Int =
   r match {
     case TyRes.At(file, start, end, msg) => end
-    case TyRes.Ok(ty) => 0
-    case TyRes.Err(msg) => 0
+    case _ => 0
   }
 
 def withSpanIfBare(r: TyRes, sp: Span): TyRes =
   r match {
     case TyRes.Err(msg) => tyErrAt(msg, sp)
-    case TyRes.Ok(ty) => r
-    case TyRes.At(file, start, end, msg) => r
+    case _ => r
   }
 
 def tySpanOf(r: TyRes): Span =
   r match {
     case TyRes.At(file, start, end, msg) => mkSpan(file, start, end)
-    case TyRes.Ok(ty) => dummySpan()
-    case TyRes.Err(msg) => dummySpan()
+    case _ => dummySpan()
   }
 
 def tyEnvPut(env: List, name: String, ty: Type): List =

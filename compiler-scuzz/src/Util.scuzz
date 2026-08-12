@@ -69,21 +69,6 @@ def pairLS(a: List, b: String): List =
 def fstL(p: List): List =
   List.head(p)
 
-def quad(code: String, value: String, kind: String, id: Int): List =
-  List.cons(code, List.cons(value, List.cons(kind, List.cons(Str.fromInt(id), List.empty()))))
-
-def qCode(q: List): String =
-  List.head(q)
-
-def qValue(q: List): String =
-  List.head(List.tail(q))
-
-def qKind(q: List): String =
-  List.head(List.tail(List.tail(q)))
-
-def qId(q: List): Int =
-  parseInt(List.head(List.tail(List.tail(List.tail(q)))))
-
 def parseInt(s: String): Int =
   parseIntAt(s, 0, 0)
 
