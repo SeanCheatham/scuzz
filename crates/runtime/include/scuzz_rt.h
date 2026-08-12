@@ -267,6 +267,8 @@ size_t sz_list_len(const SzList *xs);
 void *sz_list_at(const SzList *xs, size_t index);
 SzList *sz_list_reverse(SzList *xs);
 SzList *sz_list_append(SzList *xs, void *x);
+/* Free cons cells only; does not free heads. */
+void sz_list_free(SzList *xs);
 SzString *sz_list_join(const SzList *xs, const char *sep);
 
 /* Blessed filesystem IO (live or TestRuntime mem FS) */

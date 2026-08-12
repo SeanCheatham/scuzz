@@ -405,6 +405,21 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
+  /* List spine free: cons cells go away; heads are not owned. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *s = sz_string_from_cstr("milk");
+    SzList *xs;
+    sz_alloc_stats(&base_bytes, &base_count);
+    xs = sz_list_cons(s, sz_list_nil());
+    sz_list_free(xs);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+    sz_string_free(s);
+  }
+
   puts("runtime io tests ok");
   return 0;
 }

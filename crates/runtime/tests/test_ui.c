@@ -678,6 +678,70 @@ static void test_view_each(void) {
   sz_signal_list_free(items);
 }
 
+static void test_signal_list_spine_collect(void) {
+  SzSignalList *items;
+  SzList *xs;
+  SzString *first;
+  size_t base_count = 0, base_bytes = 0;
+  size_t live_count = 0, live_bytes = 0;
+  int i;
+
+  first = sz_string_from_cstr("a");
+  xs = sz_list_cons(first, sz_list_nil());
+  items = sz_signal_list(xs);
+  sz_alloc_stats(&base_bytes, &base_count);
+  /* Append copies the spine; set frees the unshared previous spine. */
+  for (i = 0; i < 30; i++) {
+    xs = sz_list_append(sz_signal_list_get(items), sz_string_from_cstr("x"));
+    sz_signal_list_set(items, xs);
+  }
+  sz_alloc_stats(&live_bytes, &live_count);
+  /* Linear in current length, not quadratic leftover spines. */
+  assert(live_count < base_count + 30 * 6);
+  assert(sz_list_len(sz_signal_list_get(items)) == 31);
+  sz_signal_list_free(items);
+}
+
+static void test_alloc_each_pump_flat(void) {
+  SzUiConfig cfg;
+  SzSignalList *items;
+  SzView *root;
+  SzUiSession *session;
+  size_t base_count = 0, base_bytes = 0;
+  size_t live_count = 0, live_bytes = 0;
+  size_t max_count = 0;
+  int i;
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 120;
+  cfg.scale = 1.0;
+
+  items = sz_signal_list(
+      sz_list_cons(sz_string_from_cstr("milk"), sz_list_nil()));
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_each(items));
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  assert(sz_ui_pump_sync(session));
+  sz_alloc_stats(&base_bytes, &base_count);
+  max_count = base_count;
+  for (i = 0; i < 2000; i++) {
+    assert(sz_ui_pump_sync(session));
+    sz_alloc_stats(&live_bytes, &live_count);
+    if (live_count > max_count)
+      max_count = live_count;
+  }
+  assert(live_count == base_count);
+  assert(live_bytes == base_bytes);
+  assert(max_count <= base_count + 8);
+
+  sz_ui_unmount(session);
+  sz_view_free(root);
+  sz_signal_list_free(items);
+}
+
 static void test_text_field_edit(void) {
   SzSignalStr *draft;
   SzView *root;
@@ -891,10 +955,12 @@ int main(void) {
   test_a11y_and_anim();
   test_clear_children();
   test_view_each();
+  test_signal_list_spine_collect();
   test_text_field_edit();
   test_caret_metrics();
   test_alloc_pump_flat();
   test_alloc_counter_pump_flat();
+  test_alloc_each_pump_flat();
   puts("runtime ui tests ok");
   return 0;
 }

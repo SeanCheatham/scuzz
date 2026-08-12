@@ -2,8 +2,9 @@
 
 #include <string.h>
 
-/* Linked list: NULL = Nil. Cons cells own neither head nor deep tail frees
- * for GC-v0 (arena-ish malloc; no collection). */
+/* Linked list: NULL = Nil. Cons cells do not own heads. Unshared spines are
+ * freed by Signal.list on set/free; shared tails (cons onto an existing list)
+ * stay. No tracing collector. */
 
 SzList *sz_list_nil(void) { return NULL; }
 
@@ -59,6 +60,14 @@ SzList *sz_list_append(SzList *xs, void *x) {
   if (!xs)
     return sz_list_cons(x, NULL);
   return sz_list_cons(xs->head, sz_list_append(xs->tail, x));
+}
+
+void sz_list_free(SzList *xs) {
+  while (xs) {
+    SzList *n = xs->tail;
+    sz_free(xs);
+    xs = n;
+  }
 }
 
 SzString *sz_list_join(const SzList *xs, const char *sep) {
