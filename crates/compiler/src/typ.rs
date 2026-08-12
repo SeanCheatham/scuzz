@@ -1962,16 +1962,23 @@ fn mono_expr(
     let span = expr.span.clone();
     match expr.kind {
         ExprKind::Call { callee, args } => {
+            // Infer arg types BEFORE rewriting: processed args may reference
+            // monomorphized callees the pre-mono index cannot resolve.
+            let orig_arg_tys: Option<Vec<Type>> = match funs.resolve(&callee, current_module) {
+                Ok(f) if !f.type_params.is_empty() => Some(
+                    args.iter()
+                        .map(|a| infer(a, enums, funs, methods, current_module, env))
+                        .collect::<Result<Vec<_>, _>>()?,
+                ),
+                _ => None,
+            };
             let args = args
                 .into_iter()
                 .map(|a| mono_expr(a, enums, funs, methods, current_module, env, specialized))
                 .collect::<Result<Vec<_>, _>>()?;
             if let Ok(f) = funs.resolve(&callee, current_module) {
                 if !f.type_params.is_empty() {
-                    let mut arg_tys = Vec::new();
-                    for a in &args {
-                        arg_tys.push(infer(a, enums, funs, methods, current_module, env)?);
-                    }
+                    let arg_tys = orig_arg_tys.expect("generic call arg types");
                     let mut subst: HashMap<String, Type> = HashMap::new();
                     for (p, a) in f.params.iter().zip(arg_tys.iter()) {
                         let want = resolve_type_in(&p.ty, enums, &f.module, &f.type_params)?;
@@ -2073,8 +2080,8 @@ fn mono_expr(
             span,
         )),
         ExprKind::FlatMap { inner, param, body } => {
-            let inner = mono_expr(*inner, enums, funs, methods, current_module, env, specialized)?;
             let it = infer(&inner, enums, funs, methods, current_module, env)?;
+            let inner = mono_expr(*inner, enums, funs, methods, current_module, env, specialized)?;
             let old = if let (Type::Io(inner_t), Some(ref p)) = (&it, &param) {
                 env.insert(p.clone(), (**inner_t).clone())
             } else {
@@ -2181,8 +2188,8 @@ fn mono_expr(
             span,
         )),
         ExprKind::Let { name, value, body } => {
-            let value = mono_expr(*value, enums, funs, methods, current_module, env, specialized)?;
             let vt = infer(&value, enums, funs, methods, current_module, env)?;
+            let value = mono_expr(*value, enums, funs, methods, current_module, env, specialized)?;
             let old = env.insert(name.clone(), vt);
             let body = mono_expr(*body, enums, funs, methods, current_module, env, specialized)?;
             if let Some(v) = old {
@@ -2223,9 +2230,9 @@ fn mono_expr(
             span,
         )),
         ExprKind::Match { scrutinee, arms } => {
+            let st = infer(&scrutinee, enums, funs, methods, current_module, env)?;
             let scrutinee =
                 mono_expr(*scrutinee, enums, funs, methods, current_module, env, specialized)?;
-            let st = infer(&scrutinee, enums, funs, methods, current_module, env)?;
             let mut out_arms = Vec::new();
             for arm in arms {
                 let bound = bind_pattern(&arm.pattern, &st, enums, current_module, env)?;
@@ -4058,8 +4065,25 @@ def wrap2(x: Int): Opt[Opt[Int]] = Opt.Some(Opt.Some(x))
     }
 
     #[test]
-    fn mono_multi_param_either_clone() {
+    fn mono_handles_generic_call_inside_for_binder() {
+        // A specialized call inside a `<-` binder must not be re-inferred
+        // against the pre-mono index (mangled names are not in it).
         let src = r#"
+def id[T](x: T): T = x
+@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(Str.fromInt(id(7)))
+    _ <- IO.println("done")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("typecheck");
+        let p = elaborate_generics(p).expect("elaborate");
+        monomorphize(p).expect("monomorphize");
+    }
+
+    #[test]
+    fn mono_multi_param_either_clone() {        let src = r#"
 enum Either[L, R]:
   case Left(x: L)
   case Right(y: R)

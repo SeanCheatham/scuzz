@@ -1,0 +1,4 @@
+enum Opt[T]:
+  case Some(x: T)
+  case None
+

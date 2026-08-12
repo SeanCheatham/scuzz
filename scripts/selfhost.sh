@@ -51,6 +51,14 @@ stage_checks() {
   echo "$generic_out"
   echo "$generic_out" | grep -q "7ok"
 
+  echo "==> $stage runs examples/genum"
+  genum_out="$("$bin" run examples/genum)"
+  echo "$genum_out"
+  echo "$genum_out" | grep -q "genum:some:3"
+  echo "$genum_out" | grep -q "genum:none:9"
+  echo "$genum_out" | grep -q "genum:box:4"
+  echo "$genum_out" | grep -q "genum:either:ok"
+
   echo "==> $stage golden tests (counter/todo/nav)"
   "$bin" test examples/counter
   "$bin" test examples/todo
