@@ -135,6 +135,7 @@ typedef enum SzViewKind {
   SZ_VIEW_MIN_SIZE, /* raise min w×h (clamped to incoming max) */
   SZ_VIEW_BACKGROUND, /* paint color; size to child */
   SZ_VIEW_ASPECT_RATIO, /* largest rw:rh box that fits max constraints */
+  SZ_VIEW_FRACTION, /* percent of incoming max; 0 = size to child on that axis */
   SZ_VIEW_IMAGE,
   SZ_VIEW_ICON,
   SZ_VIEW_LABEL /* full-bleed bg + bar that toggles colors on tap */
@@ -179,6 +180,8 @@ SzView *sz_view_min_size(int w, int h, SzView *child);
 SzView *sz_view_background(uint32_t argb, SzView *child);
 /* Largest rw:rh box that fits incoming max; child laid out in that tight slot. */
 SzView *sz_view_aspect_ratio(int rw, int rh, SzView *child);
+/* Percent of incoming max (1–100); 0 on an axis sizes to the child. */
+SzView *sz_view_fraction(int wpct, int hpct, SzView *child);
 SzView *sz_view_image(int w, int h, uint32_t argb, const char *caption);
 SzView *sz_view_icon(char glyph, uint32_t argb);
 /* Full-bleed bg + bar that toggles colors on tap (C unit-test helper). */
@@ -286,6 +289,7 @@ SzView *sz_lang_view_sized(int64_t w, int64_t h, SzView *child);
 SzView *sz_lang_view_min_size(int64_t w, int64_t h, SzView *child);
 SzView *sz_lang_view_background(int64_t argb, SzView *child);
 SzView *sz_lang_view_aspect_ratio(int64_t rw, int64_t rh, SzView *child);
+SzView *sz_lang_view_fraction(int64_t wpct, int64_t hpct, SzView *child);
 SzView *sz_lang_view_text_field(SzSignalStr *text, SzString *placeholder);
 SzView *sz_lang_view_icon(int64_t glyph, int64_t argb);
 SzView *sz_lang_view_image(int64_t w, int64_t h, int64_t argb, SzString *caption);

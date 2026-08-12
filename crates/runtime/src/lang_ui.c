@@ -103,6 +103,9 @@ SzView *sz_lang_view_background(int64_t argb, SzView *child) {
 SzView *sz_lang_view_aspect_ratio(int64_t rw, int64_t rh, SzView *child) {
   return sz_view_aspect_ratio((int)rw, (int)rh, child);
 }
+SzView *sz_lang_view_fraction(int64_t wpct, int64_t hpct, SzView *child) {
+  return sz_view_fraction((int)wpct, (int)hpct, child);
+}
 
 SzView *sz_lang_view_text_field(SzSignalStr *text, SzString *placeholder) {
   return sz_view_text_field(text, placeholder ? sz_string_cstr(placeholder) : "");

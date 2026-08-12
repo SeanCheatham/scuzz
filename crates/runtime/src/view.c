@@ -65,7 +65,7 @@ struct SzView {
   int pos_y;
   /* View.padding: uniform inset. */
   int pad;
-  /* View.sized / View.minSize / View.aspectRatio: requested w×h or ratio. */
+  /* View.sized / View.minSize / View.aspectRatio / View.fraction: w×h, ratio, or pct. */
 };
 
 static SzView *view_new(SzViewKind kind) {
@@ -101,7 +101,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_ALIGN || kind == SZ_VIEW_STACK ||
          kind == SZ_VIEW_POSITIONED || kind == SZ_VIEW_PADDING ||
          kind == SZ_VIEW_SIZED || kind == SZ_VIEW_MIN_SIZE ||
-         kind == SZ_VIEW_BACKGROUND || kind == SZ_VIEW_ASPECT_RATIO;
+         kind == SZ_VIEW_BACKGROUND || kind == SZ_VIEW_ASPECT_RATIO ||
+         kind == SZ_VIEW_FRACTION;
 }
 
 SzViewKind sz_view_kind(const SzView *view) {
@@ -356,6 +357,23 @@ SzView *sz_view_aspect_ratio(int rw, int rh, SzView *child) {
   SzView *v = view_new(SZ_VIEW_ASPECT_RATIO);
   v->img_w = rw > 0 ? rw : 1;
   v->img_h = rh > 0 ? rh : 1;
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
+SzView *sz_view_fraction(int wpct, int hpct, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_FRACTION);
+  if (wpct < 0)
+    wpct = 0;
+  if (wpct > 100)
+    wpct = 100;
+  if (hpct < 0)
+    hpct = 0;
+  if (hpct > 100)
+    hpct = 100;
+  v->img_w = wpct;
+  v->img_h = hpct;
   if (child)
     sz_view_add_child(v, child);
   return v;
@@ -873,6 +891,22 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       layout_node(ch, x, y, tw, th, theme);
     break;
   }
+  case SZ_VIEW_FRACTION: {
+    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
+    int wp = v->img_w;
+    int hp = v->img_h;
+    float child_max_w = max_w;
+    float child_max_h = max_h;
+    if (wp > 0 && max_w > 0.f)
+      child_max_w = max_w * (float)wp / 100.f;
+    if (hp > 0 && max_h > 0.f)
+      child_max_h = max_h * (float)hp / 100.f;
+    if (ch)
+      layout_node(ch, x, y, child_max_w, child_max_h, theme);
+    v->frame.w = wp > 0 ? child_max_w : (ch ? ch->frame.w : 0.f);
+    v->frame.h = hp > 0 ? child_max_h : (ch ? ch->frame.h : 0.f);
+    break;
+  }
   case SZ_VIEW_SCROLL: {
     float inner_w = max_w - theme->pad * 2.f;
     float vh;
@@ -1048,6 +1082,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_SIZED:
   case SZ_VIEW_MIN_SIZE:
   case SZ_VIEW_ASPECT_RATIO:
+  case SZ_VIEW_FRACTION:
     if (v->kind == SZ_VIEW_LIST || v->kind == SZ_VIEW_SCROLL)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     for (i = 0; i < v->child_count; i++)

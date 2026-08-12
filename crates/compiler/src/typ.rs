@@ -1424,6 +1424,12 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(Type::Opaque("View".into()))
         }
+        "View.fraction" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(Type::Opaque("View".into()))
+        }
         "View.textField" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[1], &Type::String)?;
