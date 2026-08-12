@@ -126,6 +126,7 @@ typedef enum SzViewKind {
   SZ_VIEW_LIST,
   SZ_VIEW_SCROLL,
   SZ_VIEW_EXPANDED, /* Column/Row flex child: leftover height or width */
+  SZ_VIEW_CENTER,   /* fill max constraints; center child */
   SZ_VIEW_IMAGE,
   SZ_VIEW_ICON,
   SZ_VIEW_LABEL /* full-bleed bg + bar that toggles colors on tap */
@@ -154,6 +155,7 @@ SzView *sz_view_each(SzSignalList *sig);
 SzView *sz_view_scroll(SzView *child);
 /* Column-only flex: child gets leftover height after non-Expanded siblings. */
 SzView *sz_view_expanded(SzView *child);
+SzView *sz_view_center(SzView *child);
 SzView *sz_view_image(int w, int h, uint32_t argb, const char *caption);
 SzView *sz_view_icon(char glyph, uint32_t argb);
 /* Full-bleed bg + bar that toggles colors on tap (C unit-test helper). */
@@ -252,6 +254,7 @@ SzView *sz_lang_view_list(void);
 SzView *sz_lang_view_each(SzSignalList *sig);
 SzView *sz_lang_view_scroll(SzView *child);
 SzView *sz_lang_view_expanded(SzView *child);
+SzView *sz_lang_view_center(SzView *child);
 SzView *sz_lang_view_text_field(SzSignalStr *text, SzString *placeholder);
 SzView *sz_lang_view_icon(int64_t glyph, int64_t argb);
 SzView *sz_lang_view_image(int64_t w, int64_t h, int64_t argb, SzString *caption);

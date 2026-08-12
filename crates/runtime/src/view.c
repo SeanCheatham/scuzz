@@ -98,7 +98,7 @@ void sz_view_add_child(SzView *parent, SzView *child) {
     return;
   if (parent->kind != SZ_VIEW_COLUMN && parent->kind != SZ_VIEW_ROW &&
       parent->kind != SZ_VIEW_LIST && parent->kind != SZ_VIEW_SCROLL &&
-      parent->kind != SZ_VIEW_EXPANDED)
+      parent->kind != SZ_VIEW_EXPANDED && parent->kind != SZ_VIEW_CENTER)
     sz_panic("sz_view_add_child: parent cannot have children");
   if (parent->child_count >= parent->child_cap) {
     int ncap = parent->child_cap ? parent->child_cap * 2 : 4;
@@ -275,6 +275,14 @@ SzView *sz_view_expanded(SzView *child) {
   return v;
 }
 
+SzView *sz_view_center(SzView *child) {
+  SzView *v = view_new(SZ_VIEW_CENTER);
+  /* Transparent wrapper: no a11y role; children still dump. */
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
 SzView *sz_view_image(int w, int h, uint32_t argb, const char *caption) {
   SzView *v = view_new(SZ_VIEW_IMAGE);
   v->img_w = w > 0 ? w : 32;
@@ -336,7 +344,7 @@ void sz_view_clear_children(SzView *parent) {
     return;
   if (parent->kind != SZ_VIEW_COLUMN && parent->kind != SZ_VIEW_ROW &&
       parent->kind != SZ_VIEW_LIST && parent->kind != SZ_VIEW_SCROLL &&
-      parent->kind != SZ_VIEW_EXPANDED)
+      parent->kind != SZ_VIEW_EXPANDED && parent->kind != SZ_VIEW_CENTER)
     sz_panic("sz_view_clear_children: parent cannot have children");
   for (i = 0; i < parent->child_count; i++) {
     parent->children[i]->parent = NULL;
@@ -512,6 +520,28 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
       ch->frame.y = y;
       ch->frame.w = v->frame.w;
       ch->frame.h = v->frame.h > 0.f ? v->frame.h : ch->frame.h;
+    }
+    break;
+  }
+  case SZ_VIEW_CENTER: {
+    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
+    float cw = 0.f;
+    float chh = 0.f;
+    if (ch)
+      layout_node(ch, x, y, max_w, max_h, theme);
+    if (ch) {
+      cw = ch->frame.w;
+      chh = ch->frame.h;
+    }
+    v->frame.w = max_w > 0.f ? max_w : cw;
+    v->frame.h = max_h > 0.f ? max_h : chh;
+    if (ch) {
+      ch->frame.x = x + (v->frame.w - cw) * 0.5f;
+      ch->frame.y = y + (v->frame.h - chh) * 0.5f;
+      /* Re-layout nested children at the centered origin. */
+      layout_node(ch, ch->frame.x, ch->frame.y, cw, chh, theme);
+      ch->frame.w = cw;
+      ch->frame.h = chh;
     }
     break;
   }
@@ -748,6 +778,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_LIST:
   case SZ_VIEW_SCROLL:
   case SZ_VIEW_EXPANDED:
+  case SZ_VIEW_CENTER:
     if (v->kind == SZ_VIEW_LIST || v->kind == SZ_VIEW_SCROLL)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     for (i = 0; i < v->child_count; i++)

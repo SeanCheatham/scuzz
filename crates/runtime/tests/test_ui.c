@@ -2,6 +2,7 @@
 #include "scuzz_ui.h"
 
 #include <assert.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -316,6 +317,29 @@ static void test_expanded_row(void) {
   assert(sz_view_frame(exp).w <= leftover + 0.5f);
   assert(sz_view_frame(mid).w >= leftover - 0.5f);
   sz_view_free(row);
+}
+
+static void test_center(void) {
+  SzView *center, *child;
+  const SzTheme *theme = sz_theme_default();
+  float max_w = 300.f;
+  float max_h = 200.f;
+  SzRect cf, chf;
+
+  child = sz_view_text("Hi");
+  center = sz_view_center(child);
+  sz_view_layout(center, max_w, max_h, theme);
+  assert(sz_view_kind(center) == SZ_VIEW_CENTER);
+  cf = sz_view_frame(center);
+  chf = sz_view_frame(child);
+  assert(cf.w == max_w);
+  assert(cf.h == max_h);
+  assert(chf.w > 0.f && chf.h > 0.f);
+  assert(chf.x >= cf.x - 0.5f);
+  assert(chf.y >= cf.y - 0.5f);
+  assert(fabsf(chf.x - (cf.x + (cf.w - chf.w) * 0.5f)) < 0.5f);
+  assert(fabsf(chf.y - (cf.y + (cf.h - chf.h) * 0.5f)) < 0.5f);
+  sz_view_free(center);
 }
 
 static void test_mobile_pointer_scroll_lifecycle(void) {
@@ -676,6 +700,7 @@ int main(void) {
   test_widgets();
   test_expanded_column();
   test_expanded_row();
+  test_center();
   test_mobile_pointer_scroll_lifecycle();
   test_a11y_and_anim();
   test_clear_and_set_texts();
