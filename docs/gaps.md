@@ -45,5 +45,4 @@ Path deps only (`manifest.rs`, `Toml.scuzz`). Git / versioned / hosted artifacts
 - **Windows desktop embedder** — same session protocol as X11/Cocoa; secondary platform.
 - **OS IME candidate windows** — focused TextField caret uses measured advance (`sz_view_caret_rect`); embedders do not yet place OS IME UI from it.
 - **LSP / editor tooling** — `fmt`, `check --message-format=json`, and `watch` exist; no language server. JSON diagnostics are the single editor protocol (`[{severity, message, file?, line?, column?}]`); LSP must wrap `scuzz check --message-format=json`. Do not add a second frontend or a parallel schema.
-- **Unknown `scuzz.toml` keys** — extra top-level tables are ignored today. Reject them later; do not add `[plugins]`.
 - **macOS in default CI** — macOS job is `workflow_dispatch`-only; Darwin regressions surface late.

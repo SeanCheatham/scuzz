@@ -85,6 +85,20 @@ if cargo run -p scuzz -- build testdata/typecheck/bad_main 2>/tmp/scuzz-bad0.err
 fi
 grep -q "arithmetic needs Int" /tmp/scuzz-bad0.err
 
+echo "==> Stage 0 rejects unknown scuzz.toml table"
+if cargo run -p scuzz -- build testdata/manifest/unknown_table 2>/tmp/scuzz-toml-table0.err; then
+  echo "expected unknown table error from Stage 0" >&2
+  exit 1
+fi
+grep -q "unknown scuzz.toml table \[plugins\]" /tmp/scuzz-toml-table0.err
+
+echo "==> Stage 0 rejects unknown scuzz.toml key"
+if cargo run -p scuzz -- build testdata/manifest/unknown_key 2>/tmp/scuzz-toml-key0.err; then
+  echo "expected unknown key error from Stage 0" >&2
+  exit 1
+fi
+grep -q "unknown scuzz.toml key \`license\` in \[package\]" /tmp/scuzz-toml-key0.err
+
 stage_checks "Stage 1" "$STAGE1"
 
 echo "==> Stage 1 rejects ill-typed program"
@@ -93,6 +107,20 @@ if "$STAGE1" build testdata/typecheck/bad_main 2>/tmp/scuzz-bad1.err; then
   exit 1
 fi
 grep -q "arithmetic needs Int" /tmp/scuzz-bad1.err
+
+echo "==> Stage 1 rejects unknown scuzz.toml table"
+if "$STAGE1" build testdata/manifest/unknown_table 2>/tmp/scuzz-toml-table1.err; then
+  echo "expected unknown table error from Stage 1" >&2
+  exit 1
+fi
+grep -q "unknown scuzz.toml table \[plugins\]" /tmp/scuzz-toml-table1.err
+
+echo "==> Stage 1 rejects unknown scuzz.toml key"
+if "$STAGE1" build testdata/manifest/unknown_key 2>/tmp/scuzz-toml-key1.err; then
+  echo "expected unknown key error from Stage 1" >&2
+  exit 1
+fi
+grep -q "unknown scuzz.toml key \`license\` in \[package\]" /tmp/scuzz-toml-key1.err
 
 echo "==> Stage 1 rebuilds compiler-scuzz (Stage 2)"
 "$STAGE1" build compiler-scuzz

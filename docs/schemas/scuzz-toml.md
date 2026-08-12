@@ -58,7 +58,7 @@ utils = { path = "../utils" }
 - Resolution is deterministic (sorted by dependency name). A package directory is compiled once even if reached through multiple paths.
 - Sources from the complete graph are **merged and typechecked as one program** (not separately compiled library artifacts). Exactly one `@main` is required for an executable root.
 - Cycles, missing packages/`src/`, duplicate names, empty paths, and unsupported value shapes are rejected.
-- Unknown dependency keys (`git`, `version`, …) are rejected. Extra top-level tables are ignored today — do not add `[plugins]`; reject unknown keys later rather than growing a settings DSL.
+- Unknown keys and extra top-level tables are rejected (`git` / `version` on a dependency, `[plugins]`, …). Do not add `[plugins]` or a settings DSL.
 
 ### `[ui]`
 

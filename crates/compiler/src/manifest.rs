@@ -5,6 +5,7 @@ use std::fmt;
 use std::path::Path;
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Manifest {
     pub package: Package,
     #[serde(default)]
@@ -17,10 +18,13 @@ pub struct Manifest {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Package {
     pub name: String,
     #[serde(default = "default_version")]
     pub version: String,
+    #[serde(default)]
+    pub description: String,
 }
 
 fn default_version() -> String {
@@ -28,12 +32,14 @@ fn default_version() -> String {
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct Targets {
     #[serde(default)]
     pub native: Option<NativeTarget>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct NativeTarget {
     #[serde(default = "default_kind")]
     pub kind: String,
@@ -106,6 +112,7 @@ impl<'de> Deserialize<'de> for PathDependency {
 }
 
 #[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct UiConfig {
     /// `"headless"`, `"window"`, or `"mobile"` — default runtime for `scuzz run`
     #[serde(default = "default_runtime")]
@@ -142,10 +149,18 @@ fn default_scale() -> f64 {
 
 impl UiConfig {
     pub fn width(&self) -> i32 {
-        self.headless_size.first().copied().filter(|w| *w > 0).unwrap_or(200)
+        self.headless_size
+            .first()
+            .copied()
+            .filter(|w| *w > 0)
+            .unwrap_or(200)
     }
     pub fn height(&self) -> i32 {
-        self.headless_size.get(1).copied().filter(|h| *h > 0).unwrap_or(120)
+        self.headless_size
+            .get(1)
+            .copied()
+            .filter(|h| *h > 0)
+            .unwrap_or(120)
     }
 }
 
@@ -155,9 +170,65 @@ pub fn load_manifest(path: &Path) -> anyhow::Result<Manifest> {
 }
 
 pub fn parse_manifest(text: &str) -> anyhow::Result<Manifest> {
+    let value: toml::Value = toml::from_str(text)?;
+    reject_unknown_manifest_keys(&value)?;
     let m: Manifest = toml::from_str(text)?;
     validate_manifest(&m)?;
     Ok(m)
+}
+
+const KNOWN_TABLES: &str = "package, targets.native, dependencies, ui";
+
+fn reject_unknown_manifest_keys(value: &toml::Value) -> anyhow::Result<()> {
+    let Some(table) = value.as_table() else {
+        anyhow::bail!("scuzz.toml must be a table");
+    };
+    for (key, val) in table {
+        match key.as_str() {
+            "package" => reject_table_keys(val, "package", &["name", "version", "description"])?,
+            "targets" => {
+                reject_table_keys(val, "targets", &["native"])?;
+                if let Some(native) = val.get("native") {
+                    reject_table_keys(native, "targets.native", &["kind", "main"])?;
+                }
+            }
+            "dependencies" => {}
+            "ui" => reject_table_keys(
+                val,
+                "ui",
+                &[
+                    "default_runtime",
+                    "headless_size",
+                    "headless_scale",
+                    "tap_button",
+                    "tap_text",
+                    "bundle_id",
+                ],
+            )?,
+            other if val.is_table() => {
+                anyhow::bail!("unknown scuzz.toml table [{other}]; known tables: {KNOWN_TABLES}")
+            }
+            other => anyhow::bail!(
+                "unknown scuzz.toml key `{other}` at top level; known tables: {KNOWN_TABLES}"
+            ),
+        }
+    }
+    Ok(())
+}
+
+fn reject_table_keys(val: &toml::Value, section: &str, known: &[&str]) -> anyhow::Result<()> {
+    let Some(table) = val.as_table() else {
+        return Ok(());
+    };
+    for key in table.keys() {
+        if !known.contains(&key.as_str()) {
+            anyhow::bail!(
+                "unknown scuzz.toml key `{key}` in [{section}]; known keys: {}",
+                known.join(", ")
+            );
+        }
+    }
+    Ok(())
 }
 
 fn validate_manifest(m: &Manifest) -> anyhow::Result<()> {
@@ -224,7 +295,10 @@ shared = { git = "https://example.com/x.git" }
         )
         .unwrap_err()
         .to_string();
-        assert!(err.contains("unsupported dependency key `git`"), "unexpected: {err}");
+        assert!(
+            err.contains("unsupported dependency key `git`"),
+            "unexpected: {err}"
+        );
     }
 
     #[test]
@@ -255,5 +329,88 @@ shared = { }
         .unwrap_err()
         .to_string();
         assert!(err.contains("requires `path"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn parses_package_description() {
+        let m = parse_manifest(
+            r#"
+[package]
+name = "app"
+description = "hello"
+"#,
+        )
+        .unwrap();
+        assert_eq!(m.package.description, "hello");
+    }
+
+    #[test]
+    fn rejects_unknown_top_level_table() {
+        let err = parse_manifest(
+            r#"
+[package]
+name = "app"
+[plugins]
+x = 1
+"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("unknown scuzz.toml table [plugins]"),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_package_key() {
+        let err = parse_manifest(
+            r#"
+[package]
+name = "app"
+license = "MIT"
+"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("unknown scuzz.toml key `license` in [package]"),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_ui_key() {
+        let err = parse_manifest(
+            r#"
+[package]
+name = "app"
+[ui]
+hot_reload = true
+"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("unknown scuzz.toml key `hot_reload` in [ui]"),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_root_key() {
+        let err = parse_manifest(
+            r#"
+edition = "2021"
+[package]
+name = "app"
+"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("unknown scuzz.toml key `edition` at top level"),
+            "unexpected: {err}"
+        );
     }
 }

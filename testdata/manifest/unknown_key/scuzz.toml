@@ -1,0 +1,8 @@
+[package]
+name = "unknown_key"
+version = "0.1.0"
+license = "MIT"
+
+[targets.native]
+kind = "executable"
+main = "Main"

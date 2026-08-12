@@ -61,7 +61,7 @@ One CLI. One typer. No second analyze frontend, no `*.g.scuzz` codegen, no `src/
 
 - **Watch** rebuilds when sources or `scuzz.toml` change (path deps included). It does not hot-reload a running process or preserve `Signal` state. Stage-0 `run --watch` rebuilds and reruns the process. Do not call this hot reload until a true reload exists.
 - **JSON diagnostics** (`scuzz check --message-format=json`) are the editor protocol: `[{severity, message, file?, line?, column?}]`. `check` emits them; other commands stay human until they use this same type. LSP, when added, wraps `scuzz check --message-format=json` — do not grow a second typer or a parallel schema.
-- **`scuzz.toml` is data** — package, path deps, `[ui]`. No plugin DSL, no `build.scuzz` hooks, no sbt-shaped settings. Unknown dependency keys are already rejected; do not add `[plugins]`.
+- **`scuzz.toml` is data** — package, path deps, `[ui]`. No plugin DSL, no `build.scuzz` hooks, no sbt-shaped settings. Unknown keys and extra top-level tables are rejected; do not add `[plugins]`.
 - **Fingerprint** (Stage 0 incremental): miss → rebuild. No `scuzz clean` ritual. Cache stays fail-closed (compiler/runtime identity belongs in the key when Stage 2 grows incremental). Stage 2 rebuilds every compile today.
 - **Missing tools:** fail on the first missing tool with one install line. No `flutter doctor` mega-checklist.
 - **`scuzz package` shells** are copy-patched templates (`shells/android`, `shells/ios`), not a Gradle/CocoaPods API.

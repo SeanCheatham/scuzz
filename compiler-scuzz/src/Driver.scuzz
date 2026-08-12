@@ -305,16 +305,18 @@ def visitPackage(pkgDir: String, toml: String, viaDep: String, stack: List, done
   Fs.canonicalize(pkgDir).flatMap(canon => visitPackageCanon(canon, toml, viaDep, stack, done))
 
 def visitPackageCanon(canon: String, toml: String, viaDep: String, stack: List, done: List): IO[List] =
-  if (listContainsStr(stack, canon) == 1) IO.fail(str3("dependency cycle: ", join(List.reverse(List.cons(cycleLabel(viaDep, canon), stack)), " -> "), "")) else if (listContainsStr(done, canon) == 1) IO.pure(List.cons(List.empty(), List.cons(List.empty(), List.cons(done, List.empty())))) else readTomlDeps(toml).flatMap(deps =>
-  visitDeps(canon, deps, List.cons(canon, stack), done, List.empty(), List.empty()).flatMap(depState =>
-    loadPackageBundle(canon).flatMap(bundle =>
-      for {
-        depTexts = List.head(depState)
-        depOvs = List.head(List.tail(depState))
-        depDone = List.head(List.tail(List.tail(depState)))
-        allTexts = listConcat(depTexts, List.head(bundle))
-        allOvs = listConcat(depOvs, List.head(List.tail(bundle)))
-      } yield IO.pure(List.cons(allTexts, List.cons(allOvs, List.cons(List.cons(canon, depDone), List.empty()))))
+  if (listContainsStr(stack, canon) == 1) IO.fail(str3("dependency cycle: ", join(List.reverse(List.cons(cycleLabel(viaDep, canon), stack)), " -> "), "")) else if (listContainsStr(done, canon) == 1) IO.pure(List.cons(List.empty(), List.cons(List.empty(), List.cons(done, List.empty())))) else validateScuzzToml(toml).flatMap(_ =>
+  readTomlDeps(toml).flatMap(deps =>
+    visitDeps(canon, deps, List.cons(canon, stack), done, List.empty(), List.empty()).flatMap(depState =>
+      loadPackageBundle(canon).flatMap(bundle =>
+        for {
+          depTexts = List.head(depState)
+          depOvs = List.head(List.tail(depState))
+          depDone = List.head(List.tail(List.tail(depState)))
+          allTexts = listConcat(depTexts, List.head(bundle))
+          allOvs = listConcat(depOvs, List.head(List.tail(bundle)))
+        } yield IO.pure(List.cons(allTexts, List.cons(allOvs, List.cons(List.cons(canon, depDone), List.empty()))))
+      )
     )
   )
 )
