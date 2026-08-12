@@ -13,6 +13,7 @@ Edit this file when a decision or next-step ordering changes.
 - **UI**: primary product face — one design language + Skia, as a **`Ui` effect** with Headless/Window/Mobile interpreters.
 - **Tooling**: one CLI (`scuzz`) for compile, link, assets, hot reload, packaging, deterministic `scuzz fuzz` over module **laws** + **sim** overlays.
 - **Bootstrap**: self-host is a hard goal. Stage-0 (Rust) exists only to get there.
+- **AI-Friendly**: Scuzz is meant to be read and written by LLMs.
 
 Upstream Scala Native is a *reference*, not a dependency. Divergence is intentional.
 
