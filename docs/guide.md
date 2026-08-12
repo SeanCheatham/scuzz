@@ -10,6 +10,7 @@ Short path from install to a Headless UI or IO app. For product thesis, design l
 scuzz new myapp --ui
 cd myapp
 scuzz check                  # parse + typecheck only
+scuzz check --help           # flags and copy-paste examples
 scuzz test                   # seeds goldens/ on first run, then compares
 scuzz run --headless         # writes build/snapshot.png
 scuzz fmt --check
@@ -44,7 +45,7 @@ Console kit: `Sys.args(): IO[List]`, `Sys.readLine(): IO[String]` (EOF → `""`)
 - Blessed impurity only: `IO.println` / `sleep` / `fail` / `pure` / `race` / `both`, `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Fs.*`, `Sys.args` / `Sys.readLine` / `Sys.exec` / `Sys.getenv`, `Clock.*`, `Random.*`, `Net.httpGet`
 - No raw side effects in View build — taps may run `IO` via `sz_io_unsafe_run`
 
-Product `fmt` / `build` / `run` / `test` / `check` / `fuzz` go through Stage 1/2 (`compiler-scuzz`). Stage-0 Rust hosts the bootstrap compiler.
+Product `fmt` / `build` / `run` / `test` / `check` / `fuzz` go through Stage 1/2 (`compiler-scuzz`). Stage-0 Rust hosts the bootstrap compiler. `scuzz --help` and `scuzz <command> --help` list flags and examples. `scuzz watch` rebuilds on source change (not Flutter hot reload; it does not preserve `Signal` state). `--message-format=json` applies to `check` only — that JSON is the editor protocol.
 
 ## View + Signal + Ui
 
@@ -99,7 +100,7 @@ src/
 
 - `[ui]` packages: `scuzz test` is Headless **structural** goldens on the **live** graph (signal store + a11y dump); PNG optional via `--pixels`. `scuzz fuzz` compiles the **verify** graph (sim + residual laws).
 - IO packages (no `[ui]`): `scuzz test` compiles and runs under `SCUZZ_TESTRT=1`, requiring exit 0
-- `scuzz check` typechecks live + sim twins + laws; `--message-format=json` for editors and tooling
+- `scuzz check` typechecks live + sim twins + laws; `--message-format=json` is the editor protocol (`check` only; LSP wraps this)
 - `scuzz fuzz --iters N` / `scuzz fuzz --exhaust --depth N` on TestRuntime + Headless; `--replay repro.toml` on failure (requires `[ui]`); oracle is residual laws + panic/`SzError`
 - Deterministic fakes: `TestRuntime` / `SCUZZ_TESTRT=1` for clock/random/FS/network/console in app binaries
 - Put non-determinism behind blessed `IO`; keep View construction pure

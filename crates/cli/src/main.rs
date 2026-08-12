@@ -12,10 +12,11 @@ use std::process::{Command, ExitCode};
 #[command(
     name = "scuzz",
     version,
-    about = "Scuzz Lang — Stage-0 bootstrap CLI (release CLI is compiler-scuzz)"
+    about = "Scuzz Lang — Stage-0 bootstrap CLI (release CLI is compiler-scuzz)",
+    after_help = "Examples:\n  scuzz check\n  scuzz check --message-format=json\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n\nJSON diagnostics are the check protocol (LSP wraps `scuzz check`).\n`watch` / `run --watch` rebuild (and rerun); they do not hot-reload state."
 )]
 struct Cli {
-    /// Diagnostic format: human (default) or json
+    /// Diagnostic format: human (default) or json (`check` protocol; LSP wraps check)
     #[arg(long, global = true, default_value = "human", value_parser = ["human", "json"])]
     message_format: String,
     #[command(subcommand)]
@@ -48,11 +49,11 @@ enum Commands {
         headless: bool,
         #[arg(long, default_value = "build")]
         out_dir: PathBuf,
-        /// Rebuild and rerun when sources change (hot reload)
+        /// Rebuild and rerun when sources change (process restart, not hot reload)
         #[arg(long)]
         watch: bool,
     },
-    /// Watch sources and rebuild on change (hot reload compile loop)
+    /// Watch sources and rebuild on change (compile loop, not hot reload)
     Watch {
         #[arg(default_value = ".")]
         path: PathBuf,
@@ -73,7 +74,7 @@ enum Commands {
         #[arg(long)]
         runtime_tests: bool,
     },
-    /// Parse + lower + typecheck only (no codegen / link)
+    /// Parse + lower + typecheck only (no codegen / link). JSON via --message-format=json.
     Check {
         #[arg(default_value = ".")]
         path: PathBuf,
@@ -378,7 +379,10 @@ fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
 
 fn watch_build(path: &Path, out_dir: &Path) -> Result<ExitCode> {
     let project_dir = resolve_dir(path)?;
-    eprintln!("scuzz watch {}", project_dir.display());
+    eprintln!(
+        "scuzz watch {} (rebuild on change; not hot reload)",
+        project_dir.display()
+    );
     loop {
         match build(path, &out_dir.to_path_buf(), false, false) {
             Ok(out) => eprintln!("rebuilt {}", out.executable.display()),
@@ -393,7 +397,10 @@ fn watch_build(path: &Path, out_dir: &Path) -> Result<ExitCode> {
 
 fn watch_run(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
     let project_dir = resolve_dir(path)?;
-    eprintln!("scuzz run --watch {}", project_dir.display());
+    eprintln!(
+        "scuzz run --watch {} (rebuild and rerun; not hot reload)",
+        project_dir.display()
+    );
     loop {
         match run_once(path, out_dir, headless) {
             Ok(_) => {}
@@ -411,7 +418,7 @@ fn fmt_project(path: &Path, check: bool) -> Result<ExitCode> {
     }
     let mut dirty = 0usize;
     let mut paths = Vec::new();
-    collect_scala(&src, &mut paths)?;
+    collect_scuzz_sources(&src, &mut paths)?;
     for p in paths {
         let text = std::fs::read_to_string(&p)?;
         let formatted = format_source(&text).with_context(|| format!("formatting {}", p.display()))?;
@@ -432,16 +439,14 @@ fn fmt_project(path: &Path, check: bool) -> Result<ExitCode> {
     Ok(ExitCode::SUCCESS)
 }
 
-fn collect_scala(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+fn collect_scuzz_sources(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
     for entry in std::fs::read_dir(dir)? {
         let entry = entry?;
         let path = entry.path();
         if path.is_dir() {
-            collect_scala(&path, out)?;
-        } else if let Some(ext) = path.extension().and_then(|e| e.to_str()) {
-            if matches!(ext, "scala" | "scuzz") {
-                out.push(path);
-            }
+            collect_scuzz_sources(&path, out)?;
+        } else if path.extension().and_then(|e| e.to_str()) == Some("scuzz") {
+            out.push(path);
         }
     }
     Ok(())

@@ -1,6 +1,6 @@
 # `scuzz.toml` schema
 
-Package manifest for Scuzz Lang projects. Not Maven POM-compatible.
+Package manifest for Scuzz Lang projects. Data only — not a plugin DSL, not Maven POM-compatible. No `[plugins]`, no `build.scuzz` hooks, no sbt-shaped settings.
 
 ## Example
 
@@ -33,7 +33,7 @@ bundle_id = "dev.scuzz.hello"  # used by `scuzz package`
 | --- | --- | --- |
 | `name` | string | Package name (snake/kebab/ident) |
 | `version` | string | Semver-ish |
-| `description` | string | Optional |
+| `description` | string | Optional prose; ignored by the toolchain today |
 
 ### `[targets.<name>]`
 
@@ -58,6 +58,7 @@ utils = { path = "../utils" }
 - Resolution is deterministic (sorted by dependency name). A package directory is compiled once even if reached through multiple paths.
 - Sources from the complete graph are **merged and typechecked as one program** (not separately compiled library artifacts). Exactly one `@main` is required for an executable root.
 - Cycles, missing packages/`src/`, duplicate names, empty paths, and unsupported value shapes are rejected.
+- Unknown dependency keys (`git`, `version`, …) are rejected. Extra top-level tables are ignored today — do not add `[plugins]`; reject unknown keys later rather than growing a settings DSL.
 
 ### `[ui]`
 

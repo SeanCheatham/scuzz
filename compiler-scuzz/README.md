@@ -16,4 +16,4 @@ cargo run -p scuzz -- build --full compiler-scuzz
 ./scripts/package_release.sh
 ```
 
-CLI: `scuzz (build|run|test|check|fuzz|fmt|watch|new|package) [args]` (writes `project/build/`). `fuzz` lives here (not Stage 0): seeded `--iters`, bounded `--exhaust --depth N`, and `--replay`. Stage-0 Rust remains bootstrap only.
+CLI: `scuzz (build|run|test|check|fuzz|fmt|watch|new|package) [args]` (writes `project/build/`). `scuzz --help` / `scuzz <command> --help` for flags and examples. `watch` rebuilds on change (not hot reload). `fuzz` lives here (not Stage 0): seeded `--iters`, bounded `--exhaust --depth N`, and `--replay`. Stage-0 Rust remains bootstrap only.

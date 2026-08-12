@@ -11,7 +11,7 @@ Edit this file when a decision or next-step ordering changes.
 - **Language**: purposeful Scala-inspired subset for UI apps, native CLI/server-shaped `IO` programs, and native codegen, with **built-in effect/IO/Streaming** (Cats Effect and FS2 spirit, not a cats/fs2 port). Aim: denser expr dialect (`for` as primary binder) — see [Language direction](#language-direction) below.
 - **Runtime**: custom native (LLVM). No JVM, no Java interop, no classpath/Maven.
 - **UI**: primary product face — one design language + Skia, as a **`Ui` effect** with Headless/Window/Mobile interpreters.
-- **Tooling**: one CLI (`scuzz`) for compile, link, assets, hot reload, packaging, deterministic `scuzz fuzz` over module **laws** + **sim** overlays.
+- **Tooling**: one CLI (`scuzz`) for compile, link, assets, watch (rebuild on change), packaging, deterministic `scuzz fuzz` over module **laws** + **sim** overlays.
 - **Bootstrap**: self-host is a hard goal. Stage-0 (Rust) exists only to get there.
 - **AI-Friendly**: Scuzz is meant to be read and written by LLMs.
 
@@ -39,6 +39,9 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 - Not SwiftUI / UIKit / WinUI wrappers
 - Not “every widget rebuild is an `IO`” (`View` build stays sync/pure)
 - Not example-based unit-test culture (`src/test`, Mockito, assert-equal fixtures) for apps — **laws + fuzz + sim** instead
+- Not Flutter hot reload / DevTools VM patching (`watch` rebuilds; it does not patch a running process)
+- Not an sbt / Gradle / `pubspec` plugin DSL (`scuzz.toml` is data)
+- Not Flutter platform channels
 
 ## Success bars
 
@@ -51,6 +54,17 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 ### Product name
 
 Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI / cargo package `scuzz`; Stage-0 crate `scuzz-compiler`; self-host tree `compiler-scuzz/`; manifest `scuzz.toml`; sources `*.scuzz` (plus stem-paired `*.scuzz_sim` / `*.scuzz_laws`); C ABI `sz_` / `Sz*` / `SZ_*`. No dual names or legacy aliases.
+
+### Tooling
+
+One CLI. One typer. No second analyze frontend, no `*.g.scuzz` codegen, no `src/test` runner.
+
+- **Watch** rebuilds when sources or `scuzz.toml` change (path deps included). It does not hot-reload a running process or preserve `Signal` state. Stage-0 `run --watch` rebuilds and reruns the process. Do not call this hot reload until a true reload exists.
+- **JSON diagnostics** (`scuzz check --message-format=json`) are the editor protocol: `[{severity, message, file?, line?, column?}]`. `check` emits them; other commands stay human until they use this same type. LSP, when added, wraps `scuzz check --message-format=json` — do not grow a second typer or a parallel schema.
+- **`scuzz.toml` is data** — package, path deps, `[ui]`. No plugin DSL, no `build.scuzz` hooks, no sbt-shaped settings. Unknown dependency keys are already rejected; do not add `[plugins]`.
+- **Fingerprint** (Stage 0 incremental): miss → rebuild. No `scuzz clean` ritual. Cache stays fail-closed (compiler/runtime identity belongs in the key when Stage 2 grows incremental). Stage 2 rebuilds every compile today.
+- **Missing tools:** fail on the first missing tool with one install line. No `flutter doctor` mega-checklist.
+- **`scuzz package` shells** are copy-patched templates (`shells/android`, `shells/ios`), not a Gradle/CocoaPods API.
 
 ### GC (v0)
 
@@ -193,11 +207,11 @@ Scripts are a line protocol — `tap <n>` / `text <s>` / `pump <k>` — played b
 
 ### Layout model
 
-When the widget set grows beyond column/row: **Flutter-style constraints** (constraints down, sizes up). `View.expanded(child)` takes leftover height in a Column or leftover width in a Row; `View.center(child)` fills the max slot and centers the child; `View.align(ax, ay, child)` places the child (`0` start / `1` center / `2` end on each axis); `View.stack(…)` overlays children (loose size to largest); `View.positioned(x, y, child)` offsets a Stack child from the stack origin; `View.padding(n, child)` deflates max (and min) constraints by a uniform inset; `View.sized(w, h, child)` is a tight w×h slot (clamped to incoming max); `View.minSize(w, h, child)` raises min width/height (`0` = no floor on that axis; clamped to incoming max). Do not drift into CSS-ish ad-hoc layout rules.
+When the widget set grows beyond column/row: **Flutter-style constraints** (constraints down, sizes up). `View.expanded(child)` takes leftover height in a Column or leftover width in a Row; `View.center(child)` fills the max slot and centers the child; `View.align(ax, ay, child)` places the child (`0` start / `1` center / `2` end on each axis); `View.stack(…)` overlays children (loose size to largest); `View.positioned(x, y, child)` offsets a Stack child from the stack origin; `View.padding(n, child)` deflates max (and min) constraints by a uniform inset; `View.sized(w, h, child)` is a tight w×h slot (clamped to incoming max); `View.minSize(w, h, child)` raises min width/height (`0` = no floor on that axis; clamped to incoming max). Do not drift into CSS-ish ad-hoc layout rules. Do not grow Flutter-style constraint-overflow dumps; diagnose via structural dumps + laws.
 
 ### UI testing
 
-**Laws + `scuzz fuzz`** are the primary correctness story for `[ui]` apps. Structural goldens (signal store + a11y dump) remain a **regression face** for silent shape drift — few, Headless-only, live graph — not a substitute for laws. PNG pixels stay optional (`scuzz test --pixels`). IO packages (no `[ui]`): laws + sim overlays under TestRuntime when present; otherwise `scuzz test` stays compile + `SCUZZ_TESTRT=1` exit-0 smoke. Tooling: `scuzz check` (typecheck live + sim + laws) and `--message-format=json`.
+**Laws + `scuzz fuzz`** are the primary correctness story for `[ui]` apps. Structural goldens (signal store + a11y dump) remain a **regression face** for silent shape drift — few, Headless-only, live graph — not a substitute for laws. PNG pixels stay optional (`scuzz test --pixels`). IO packages (no `[ui]`): laws + sim overlays under TestRuntime when present; otherwise `scuzz test` stays compile + `SCUZZ_TESTRT=1` exit-0 smoke. Tooling: `scuzz check` (typecheck live + sim + laws); `--message-format=json` on `check` is the editor protocol (LSP wraps it).
 
 ## Open work
 
@@ -216,6 +230,8 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-onl
 | Laws become brittle dump goldens | Laws talk to named module/signal surface; strict sim/live pairing in `check` |
 | Sim becomes Mockito | Only top-level same-name overlays; no stubbing pure `View`/`Signal`; kits stay TestRuntime |
 | “Almost Scala” confusion | Explicit non-goals; language direction above; [guide.md](guide.md) |
+| Watch sold as hot reload | Rebuild loop; no in-process reload until one exists |
+| IDE typer ≠ batch typer | One JSON schema; LSP wraps `scuzz check` |
 | Skia weight | pinned CPU prebuilt default; `sk_sw` opt-out (`SCUZZ_SKIA=sk_sw`) |
 | Window-only features | Headless peer rule |
 | Diluting Flutter-shaped focus | UI stays the v0 bar; IO is substrate + first-class packaging without a fourth peer |

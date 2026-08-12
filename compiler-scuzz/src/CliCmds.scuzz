@@ -91,7 +91,7 @@ def fmtOne(srcDir: String, name: String, check: Int): IO[Int] =
 )
 
 def cmdWatch(projectDir: String): IO[Unit] =
-  IO.println(str3("scuzz watch ", projectDir, "")).flatMap(_ =>
+  IO.println(str3("scuzz watch ", projectDir, " (rebuild on change; not hot reload)")).flatMap(_ =>
     srcFingerprint(projectDir).flatMap(fp => watchLoop(projectDir, fp, 1))
   )
 
