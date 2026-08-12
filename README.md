@@ -112,7 +112,10 @@ cargo run -p scuzz -- run --headless examples/live
 | `examples/todo` | Todo — `List` / `Signal.list` / lambda Add·Save + goldens |
 | `examples/concurrency` | `Ref` / `Queue` / `Deferred` + `IO.race` / `IO.both` |
 | `examples/adt` | package / enum / match |
-| `examples/modules` | stem-namespaced defs across files |
+| `examples/modules` | stem modules, `private def`, `import`, enum-per-module |
+| `examples/record` | `record` + `p.x` field access |
+| `examples/trait` | `trait` / `impl` + static-dispatch methods |
+| `examples/generic` | Stage-0 monomorphized `def id[T](…)` |
 | `examples/fs` | Blessed `Fs.*` (live) |
 | `examples/clock` | `Clock.realTime` / `monotonic` |
 | `examples/impurity` | `Impurity.runKit` + TestRuntime fakes |
@@ -120,7 +123,7 @@ cargo run -p scuzz -- run --headless examples/live
 ## Layout
 
 ```
-docs/                     vision, guide, compatibility, scuzz.toml schema
+docs/                     vision, gaps, guide, plans, compatibility, scuzz.toml schema
 crates/compiler/          Stage-0 parser / typer / LLVM codegen
 crates/cli/               Stage-0 scuzz tool (bootstrap)
 crates/runtime/           C runtime (IO kit, impurity, View/Ui)

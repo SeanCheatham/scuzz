@@ -52,7 +52,7 @@ jobs:
           grep -q "Hello, Scuzz!" /tmp/hello.out
           grep -q "ready." /tmp/hello.out
 
-      - name: Concurrency + ADT + FS + impurity + incremental build
+      - name: Concurrency + ADT + record/trait/generic + FS + impurity + incremental build
         run: |
           cargo run -p scuzz -- run examples/concurrency | tee /tmp/concurrency.out
           grep -q "ref-ok" /tmp/concurrency.out
@@ -60,6 +60,12 @@ jobs:
           grep -q "deferred-ok" /tmp/concurrency.out
           cargo run -p scuzz -- run examples/adt | tee /tmp/adt.out
           grep -q "adt:red" /tmp/adt.out
+          cargo run -p scuzz -- run examples/record | tee /tmp/record.out
+          grep -q "record:8" /tmp/record.out
+          cargo run -p scuzz -- run examples/trait | tee /tmp/trait.out
+          grep -q "Point(3,5)" /tmp/trait.out
+          cargo run -p scuzz -- run examples/generic | tee /tmp/generic.out
+          grep -q "7ok" /tmp/generic.out
           cargo run -p scuzz -- run examples/fs | tee /tmp/fs.out
           grep -q "fs:fs-note" /tmp/fs.out
           cargo run -p scuzz -- run examples/clock | tee /tmp/clock.out

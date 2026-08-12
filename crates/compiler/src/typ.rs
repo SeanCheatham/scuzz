@@ -1638,7 +1638,7 @@ fn type_mangle(t: &Type) -> String {
     }
 }
 
-pub fn gen_method_name(def_name: &str, subst: &HashMap<String, Type>, type_params: &[String]) -> String {
+fn mono_def_name(def_name: &str, subst: &HashMap<String, Type>, type_params: &[String]) -> String {
     let mut parts = vec![format!("__gen_{def_name}")];
     for p in type_params {
         let t = subst.get(p).expect("subst complete");
@@ -1731,7 +1731,7 @@ fn mono_expr(
                         let want = resolve_type_in(&p.ty, enums, &f.module, &f.type_params)?;
                         unify_types(&want, a, &mut subst)?;
                     }
-                    let mangled = gen_method_name(&f.name, &subst, &f.type_params);
+                    let mangled = mono_def_name(&f.name, &subst, &f.type_params);
                     if !specialized.contains_key(&mangled) {
                         let params: Result<Vec<_>, _> = f
                             .params
