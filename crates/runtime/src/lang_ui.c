@@ -88,6 +88,9 @@ SzView *sz_lang_view_align(int64_t ax, int64_t ay, SzView *child) {
 SzView *sz_lang_view_positioned(int64_t x, int64_t y, SzView *child) {
   return sz_view_positioned((int)x, (int)y, child);
 }
+SzView *sz_lang_view_padding(int64_t pad, SzView *child) {
+  return sz_view_padding((int)pad, child);
+}
 
 SzView *sz_lang_view_text_field(SzSignalStr *text, SzString *placeholder) {
   return sz_view_text_field(text, placeholder ? sz_string_cstr(placeholder) : "");

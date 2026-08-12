@@ -4,10 +4,13 @@
     count = Signal.int(0)
     countLabel = Signal.map(count, n => s"count = $n")
     pageLabel = Signal.map(page, n => s"page = $n")
-    home = View.column(
-      View.text("Home"),
-      View.bindText(countLabel),
-      View.button("+1", _ => Signal.set(count, Signal.get(count) + 1))
+    home = View.padding(
+      8,
+      View.column(
+        View.text("Home"),
+        View.bindText(countLabel),
+        View.button("+1", _ => Signal.set(count, Signal.get(count) + 1))
+      )
     )
     other = View.column(
       View.text("Other"),

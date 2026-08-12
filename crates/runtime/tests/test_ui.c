@@ -415,6 +415,25 @@ static void test_positioned(void) {
   sz_view_free(stack);
 }
 
+static void test_padding(void) {
+  SzView *pad, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect pf, chf;
+  float inset = 10.f;
+
+  child = sz_view_text("Hi");
+  pad = sz_view_padding(10, child);
+  sz_view_layout(pad, 200.f, 100.f, theme);
+  assert(sz_view_kind(pad) == SZ_VIEW_PADDING);
+  pf = sz_view_frame(pad);
+  chf = sz_view_frame(child);
+  assert(fabsf(chf.x - (pf.x + inset)) < 0.5f);
+  assert(fabsf(chf.y - (pf.y + inset)) < 0.5f);
+  assert(fabsf(pf.w - (chf.w + inset * 2.f)) < 0.5f);
+  assert(fabsf(pf.h - (chf.h + inset * 2.f)) < 0.5f);
+  sz_view_free(pad);
+}
+
 static void test_mobile_pointer_scroll_lifecycle(void) {
   SzUiConfig cfg;
   SzSignalStr *draft;
@@ -775,6 +794,7 @@ int main(void) {
   test_align();
   test_stack();
   test_positioned();
+  test_padding();
   test_mobile_pointer_scroll_lifecycle();
   test_a11y_and_anim();
   test_clear_children();
