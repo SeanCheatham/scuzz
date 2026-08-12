@@ -2,43 +2,70 @@ package scuzz.compiler
 
 def progPkg(p: Prog): String =
   p match {
-    case Prog.Prog(pkg, enums, defs, main, mainModule, imports) => pkg
+    case Prog(pkg, enums, defs, main, mainModule, imports, traits, impls) => pkg
   }
 
 def progEnums(p: Prog): List =
   p match {
-    case Prog.Prog(pkg, enums, defs, main, mainModule, imports) => enums
+    case Prog(pkg, enums, defs, main, mainModule, imports, traits, impls) => enums
   }
 
 def progDefs(p: Prog): List =
   p match {
-    case Prog.Prog(pkg, enums, defs, main, mainModule, imports) => defs
+    case Prog(pkg, enums, defs, main, mainModule, imports, traits, impls) => defs
   }
 
 def progMain(p: Prog): Expr =
   p match {
-    case Prog.Prog(pkg, enums, defs, main, mainModule, imports) => main
+    case Prog(pkg, enums, defs, main, mainModule, imports, traits, impls) => main
   }
 
 def progMainModule(p: Prog): String =
   p match {
-    case Prog.Prog(pkg, enums, defs, main, mainModule, imports) => mainModule
+    case Prog(pkg, enums, defs, main, mainModule, imports, traits, impls) => mainModule
   }
 
 def progImports(p: Prog): List =
   p match {
-    case Prog.Prog(pkg, enums, defs, main, mainModule, imports) => imports
+    case Prog(pkg, enums, defs, main, mainModule, imports, traits, impls) => imports
+  }
+
+def progTraits(p: Prog): List =
+  p match {
+    case Prog(pkg, enums, defs, main, mainModule, imports, traits, impls) => traits
+  }
+
+def progImpls(p: Prog): List =
+  p match {
+    case Prog(pkg, enums, defs, main, mainModule, imports, traits, impls) => impls
+  }
+
+def enumModule(e: EnumDef): String =
+  e match {
+    case EnumDef.Enum(module, name, cases) => module
+    case EnumDef.Record(module, name, fields) => module
   }
 
 def enumName(e: EnumDef): String =
   e match {
-    case EnumDef.Enum(name, cases) => name
+    case EnumDef.Enum(module, name, cases) => name
+    case EnumDef.Record(module, name, fields) => name
   }
 
 def enumCases(e: EnumDef): List =
   e match {
-    case EnumDef.Enum(name, cases) => cases
+    case EnumDef.Enum(module, name, cases) => cases
+    case EnumDef.Record(module, name, fields) => List.cons(EnumCase.Case(name, fields), List.empty())
   }
+
+def enumIsRecord(e: EnumDef): Int =
+  e match {
+    case EnumDef.Enum(module, name, cases) => 0
+    case EnumDef.Record(module, name, fields) => 1
+  }
+
+def enumId(e: EnumDef): String =
+  if (Str.len(enumModule(e)) == 0) enumName(e) else qualKey(enumModule(e), enumName(e))
 
 def caseName(c: EnumCase): String =
   c match {
@@ -88,7 +115,7 @@ def buildEnumTagsAcc(enums: List, acc: List): List =
   if (List.isEmpty(enums) == 1) acc else buildEnumTagsAcc(List.tail(enums), buildOneEnumTags(List.head(enums), acc))
 
 def buildOneEnumTags(e: EnumDef, acc: List): List =
-  buildCaseTags(enumName(e), enumCases(e), 0, acc)
+  buildCaseTags(enumId(e), enumCases(e), 0, acc)
 
 def buildCaseTags(en: String, cases: List, i: Int, acc: List): List =
   if (List.isEmpty(cases) == 1) acc else buildCaseTags(en, List.tail(cases), i + 1, List.cons(str4(en, ".", caseName(List.head(cases)), str3("=", Str.fromInt(i), "")), acc))
@@ -100,7 +127,7 @@ def buildEnumPayloadsAcc(enums: List, acc: List): List =
   if (List.isEmpty(enums) == 1) acc else buildEnumPayloadsAcc(List.tail(enums), buildOneEnumPayloads(List.head(enums), acc))
 
 def buildOneEnumPayloads(e: EnumDef, acc: List): List =
-  buildCasePayloads(enumName(e), enumCases(e), acc)
+  buildCasePayloads(enumId(e), enumCases(e), acc)
 
 def buildCasePayloads(en: String, cases: List, acc: List): List =
   if (List.isEmpty(cases) == 1) acc else buildCasePayloads(en, List.tail(cases), buildCasePayloadOne(en, List.head(cases), acc))
@@ -153,37 +180,37 @@ def findWildArmPat(pat: Pattern, arm: MatchArm, rest: List): List =
 
 def defName(d: Def): String =
   d match {
-    case Def.Def(name, params, ret, body, module, isPrivate) => name
+    case Def(name, params, ret, body, module, isPrivate) => name
   }
 
 def defParams(d: Def): List =
   d match {
-    case Def.Def(name, params, ret, body, module, isPrivate) => params
+    case Def(name, params, ret, body, module, isPrivate) => params
   }
 
 def defRet(d: Def): Type =
   d match {
-    case Def.Def(name, params, ret, body, module, isPrivate) => ret
+    case Def(name, params, ret, body, module, isPrivate) => ret
   }
 
 def defBody(d: Def): Expr =
   d match {
-    case Def.Def(name, params, ret, body, module, isPrivate) => body
+    case Def(name, params, ret, body, module, isPrivate) => body
   }
 
 def defModule(d: Def): String =
   d match {
-    case Def.Def(name, params, ret, body, module, isPrivate) => module
+    case Def(name, params, ret, body, module, isPrivate) => module
   }
 
 def defIsPrivate(d: Def): Int =
   d match {
-    case Def.Def(name, params, ret, body, module, isPrivate) => isPrivate
+    case Def(name, params, ret, body, module, isPrivate) => isPrivate
   }
 
 def setDefModule(d: Def, mod: String): Def =
   d match {
-    case Def.Def(name, params, ret, body, module, isPrivate) => Def.Def(name, params, ret, body, mod, isPrivate)
+    case Def(name, params, ret, body, module, isPrivate) => Def.Def(name, params, ret, body, mod, isPrivate)
   }
 
 def stampDefsModule(defs: List, mod: String): List =
@@ -191,12 +218,12 @@ def stampDefsModule(defs: List, mod: String): List =
 
 def paramName(p: Param): String =
   p match {
-    case Param.Param(name, ty) => name
+    case Param(name, ty) => name
   }
 
 def paramType(p: Param): Type =
   p match {
-    case Param.Param(name, ty) => ty
+    case Param(name, ty) => ty
   }
 
 def funHit(d: Def): List =
@@ -271,17 +298,17 @@ def resolveFunBareUnique(defs: List, name: String, currentModule: String): List 
 
 def importInModule(im: Import): String =
   im match {
-    case Import.Import(inModule, fromModule, name) => inModule
+    case Import(inModule, fromModule, name) => inModule
   }
 
 def importFromModule(im: Import): String =
   im match {
-    case Import.Import(inModule, fromModule, name) => fromModule
+    case Import(inModule, fromModule, name) => fromModule
   }
 
 def importName(im: Import): String =
   im match {
-    case Import.Import(inModule, fromModule, name) => name
+    case Import(inModule, fromModule, name) => name
   }
 
 def findImport(imports: List, inModule: String, name: String): List =
@@ -341,6 +368,8 @@ def collectExpr(e: Expr, strs: List): List =
     case Expr.Unit(span) => strs
     case Expr.IntLit(digits, span) => strs
     case Expr.Var(name, span) => strs
+    case Expr.Field(base, field, span) => collectExpr(base, strs)
+    case Expr.MethodCall(receiver, method, args, span) => collectArgs(args, collectExpr(receiver, strs))
     case Expr.For(binders, body, span) => strs
     case Expr.Delay(span) => strs
   }
@@ -428,6 +457,8 @@ def emitExpr(e: Expr, strs: List, ctx: List, env: List, prefix: String, id: Int,
     case Expr.IntLit(digits, span) => mkS("", digits, EmitKind.Int, id, conts)
     case Expr.StrLit(value, span) => emitSzStringLit(strs, value, prefix, id, conts)
     case Expr.Var(name, span) => emitVar(env, name, id, conts)
+    case Expr.Field(base, field, span) => mkS("", "null", EmitKind.Ptr, id, conts)
+    case Expr.MethodCall(receiver, method, args, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.Delay(span) => mkS(str3("  %", prefix, "_delay = call ptr @sz_io_delay(ptr @sz_delay_unit_thunk, ptr null)\n"), str3("%", prefix, "_delay"), EmitKind.Io, id, conts)
     case Expr.Println(arg, span) => emitPrintln(strs, arg, ctx, env, prefix, id, conts)
     case Expr.Fail(arg, span) => emitFail(strs, arg, ctx, env, prefix, id, conts)
@@ -867,6 +898,8 @@ def emitMapLambdaMatch(e: Expr, strs: List, ctx: List, env: List, prefix: String
     case Expr.ListLit(elems, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.Interp(parts, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.Var(name, span) => mkS("", "null", EmitKind.Ptr, id, conts)
+    case Expr.Field(base, field, span) => mkS("", "null", EmitKind.Ptr, id, conts)
+    case Expr.MethodCall(receiver, method, args, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.Adt(enumName, caseName, args, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.Call(callee, args, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.BinOp(op, left, right, span) => mkS("", "null", EmitKind.Ptr, id, conts)

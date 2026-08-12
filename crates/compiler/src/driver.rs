@@ -116,7 +116,12 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
         program.law_names = law_names;
     }
     let program = lower_program(program);
+    let program =
+        crate::typ::expand_impls(program).map_err(|e| anyhow::anyhow!("{e}"))?;
     typecheck(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let program =
+        crate::typ::monomorphize(program).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let program = crate::typ::resolve_field_access(program).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let ir = emit_llvm(&program);
     std::fs::write(&ll_path, &ir)?;

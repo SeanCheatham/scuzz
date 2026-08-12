@@ -1,0 +1,8 @@
+[package]
+name = "record"
+version = "0.1.0"
+description = "record sugar smoke"
+
+[targets.native]
+kind = "executable"
+main = "Main"

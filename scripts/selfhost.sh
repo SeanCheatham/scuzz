@@ -36,6 +36,11 @@ stage_checks() {
   echo "$modules_out"
   echo "$modules_out" | grep -q "ab"
 
+  echo "==> $stage runs examples/trait"
+  trait_out="$("$bin" run examples/trait)"
+  echo "$trait_out"
+  echo "$trait_out" | grep -q "Point(3,5)"
+
   echo "==> $stage golden tests (counter/todo/nav)"
   "$bin" test examples/counter
   "$bin" test examples/todo

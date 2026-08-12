@@ -40,12 +40,12 @@ def formatSource(source: String): String =
   prettyProg(parseSource("", source))
 
 def prettyProg(p: Prog): String =
-  prettyProgParts(progPkg(p), progEnums(p), progImports(p), progDefs(p), progMain(p))
+  prettyProgParts(progPkg(p), progEnums(p), progTraits(p), progImpls(p), progImports(p), progDefs(p), progMain(p))
 
-def prettyProgParts(pkg: String, enums: List, imports: List, defs: List, main: Expr): String =
+def prettyProgParts(pkg: String, enums: List, traits: List, impls: List, imports: List, defs: List, main: Expr): String =
   for {
     head = prettyPkg(pkg)
-    mid = str3(prettyEnums(enums, ""), prettyImports(imports, ""), prettyDefs(defs, ""))
+    mid = Str.concat(prettyEnums(enums, ""), Str.concat(prettyTraits(traits, ""), Str.concat(prettyImpls(impls, ""), Str.concat(prettyImports(imports, ""), prettyDefs(defs, "")))))
   } yield if (isUnitExpr(main) == 1) Str.concat(head, mid) else str4(head, mid, "@main def main: IO[Unit] =\n", Str.concat(prettyExpr(main, 1), "\n"))
 
 def prettyPkg(pkg: String): String =
@@ -60,8 +60,52 @@ def prettyImport(im: Import): String =
 def prettyEnums(enums: List, acc: String): String =
   if (List.isEmpty(enums) == 1) acc else prettyEnums(List.tail(enums), Str.concat(acc, Str.concat(prettyEnum(List.head(enums)), "\n")))
 
+def prettyTraits(traits: List, acc: String): String =
+  if (List.isEmpty(traits) == 1) acc else prettyTraits(List.tail(traits), Str.concat(acc, Str.concat(prettyTrait(List.head(traits)), "\n")))
+
+def prettyTrait(t: TraitDef): String =
+  t match {
+    case TraitDef.Trait(module, name, methods) => str4("trait ", name, ":\n", prettyTraitMethods(methods, ""))
+  }
+
+def prettyTraitMethods(methods: List, acc: String): String =
+  if (List.isEmpty(methods) == 1) acc else prettyTraitMethods(List.tail(methods), Str.concat(acc, prettyTraitMethod(List.head(methods))))
+
+def prettyTraitMethod(m: TraitMethod): String =
+  m match {
+    case TraitMethod.Method(name, params, ret) => for {
+  ps = prettyParams(params, "")
+} yield str3("  def ", name, str3("(", ps, str3("): ", tyPretty(ret), "\n")))
+  }
+
+def prettyImpls(impls: List, acc: String): String =
+  if (List.isEmpty(impls) == 1) acc else prettyImpls(List.tail(impls), Str.concat(acc, Str.concat(prettyImpl(List.head(impls)), "\n")))
+
+def prettyImpl(im: ImplDef): String =
+  im match {
+    case ImplDef.Impl(module, traitName, forType, methods) => for {
+  body = prettyImplMethods(methods, "")
+} yield str3("impl ", traitName, str3(" for ", forType, str3(":\n", body, "")))
+  }
+
+def prettyImplMethods(methods: List, acc: String): String =
+  if (List.isEmpty(methods) == 1) acc else prettyImplMethods(List.tail(methods), Str.concat(acc, prettyImplMethod(List.head(methods))))
+
+def prettyImplMethod(m: ImplMethod): String =
+  m match {
+    case ImplMethod.Method(name, params, ret, body) => for {
+  ps = prettyParams(params, "")
+  bd = prettyExpr(body, 2)
+} yield str3("  def ", name, str3("(", ps, str3("): ", tyPretty(ret), str3(" =\n", bd, "\n"))))
+  }
+
 def prettyEnum(e: EnumDef): String =
-  str4("enum ", enumName(e), ":\n", prettyEnumCases(enumCases(e), ""))
+  if (enumIsRecord(e) == 1) prettyRecord(e) else str4("enum ", enumName(e), ":\n", prettyEnumCases(enumCases(e), ""))
+
+def prettyRecord(e: EnumDef): String =
+  for {
+    fields = caseFields(List.head(enumCases(e)))
+  } yield str4("record ", enumName(e), "(", str3(prettyEnumFields(fields, ""), ")\n", ""))
 
 def prettyEnumCases(cases: List, acc: String): String =
   if (List.isEmpty(cases) == 1) acc else prettyEnumCases(List.tail(cases), Str.concat(acc, prettyEnumCase(List.head(cases))))
@@ -114,6 +158,8 @@ def prettyExprMatch(expr: Expr, indent: Int, pad: String): String =
     case Expr.Fail(arg, span) => str4(pad, "IO.fail(", trimStr(prettyExpr(arg, 0)), ")")
     case Expr.Pure(arg, span) => str4(pad, "IO.pure(", trimStr(prettyExpr(arg, 0)), ")")
     case Expr.Var(name, span) => Str.concat(pad, name)
+    case Expr.Field(base, field, span) => str3(pad, trimStr(prettyExpr(base, 0)), str3(".", field, ""))
+    case Expr.MethodCall(receiver, method, args, span) => str3(pad, trimStr(prettyExpr(receiver, 0)), str3(".", method, str3("(", prettyExprList(args, ""), ")")))
     case Expr.Adt(enumName, caseName, args, span) => prettyAdt(enumName, caseName, args, pad)
     case Expr.Lambda(param, body, span) => str4(pad, param, " => ", trimStr(prettyExpr(body, 0)))
     case Expr.Call(callee, args, span) => str4(pad, callee, str3("(", prettyExprList(args, ""), ")"), "")
@@ -131,7 +177,15 @@ def prettyExprMatch(expr: Expr, indent: Int, pad: String): String =
 
 def prettyAdt(enumName: String, caseName: String, args: List, pad: String): String =
   for {
-    base = str3(enumName, ".", caseName)
+    bare = enumBareFromId(enumName)
+  } yield if (streq(bare, caseName) == 1) prettyAdtRecord(bare, args, pad) else prettyAdtEnum(bare, caseName, args, pad)
+
+def prettyAdtRecord(bare: String, args: List, pad: String): String =
+  if (List.isEmpty(args) == 1) Str.concat(pad, bare) else str4(pad, bare, str3("(", prettyExprList(args, ""), ")"), "")
+
+def prettyAdtEnum(bare: String, caseName: String, args: List, pad: String): String =
+  for {
+    base = str3(bare, ".", caseName)
   } yield if (List.isEmpty(args) == 1) Str.concat(pad, base) else str4(pad, base, str3("(", prettyExprList(args, ""), ")"), "")
 
 def prettyFor(binders: List, body: Expr, indent: Int, pad: String): String =
@@ -183,8 +237,21 @@ def prettyPat(pat: Pattern): String =
 
 def prettyPatAdt(enumName: String, caseName: String, binds: List): String =
   for {
-    base = str3(enumName, ".", caseName)
+    bare = enumBareFromId(enumName)
+  } yield if (streq(bare, caseName) == 1) prettyPatRecord(bare, binds) else prettyPatEnum(bare, caseName, binds)
+
+def prettyPatRecord(bare: String, binds: List): String =
+  if (List.isEmpty(binds) == 1) bare else str4(bare, "(", prettyBindList(binds, ""), ")")
+
+def prettyPatEnum(bare: String, caseName: String, binds: List): String =
+  for {
+    base = str3(bare, ".", caseName)
   } yield if (List.isEmpty(binds) == 1) base else str4(base, "(", prettyBindList(binds, ""), ")")
+
+def enumBareFromId(id: String): String =
+  for {
+    parts = splitDotted(id)
+  } yield if (List.isEmpty(parts) == 1) id else List.head(List.tail(parts))
 
 def prettyBindList(binds: List, acc: String): String =
   if (List.isEmpty(binds) == 1) acc else prettyBindListCont(List.head(binds), List.tail(binds), acc)

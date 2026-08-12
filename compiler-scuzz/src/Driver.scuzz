@@ -1,16 +1,19 @@
 package scuzz.compiler
 
 def emptyProg(): Prog =
-  Prog.Prog("", List.empty(), List.empty(), unitExpr(), "", List.empty())
+  Prog.Prog("", List.empty(), List.empty(), unitExpr(), "", List.empty(), List.empty(), List.empty())
 
 def mkProg(pkg: String, enums: List, defs: List, main: Expr, mainMod: String, imports: List): Prog =
-  Prog.Prog(pkg, enums, defs, main, mainMod, imports)
+  Prog.Prog(pkg, enums, defs, main, mainMod, imports, List.empty(), List.empty())
+
+def mkProgFull(pkg: String, enums: List, defs: List, main: Expr, mainMod: String, imports: List, traits: List, impls: List): Prog =
+  Prog.Prog(pkg, enums, defs, main, mainMod, imports, traits, impls)
 
 def setProgDefs(prog: Prog, defs: List): Prog =
-  mkProg(progPkg(prog), progEnums(prog), defs, progMain(prog), progMainModule(prog), progImports(prog))
+  mkProgFull(progPkg(prog), progEnums(prog), defs, progMain(prog), progMainModule(prog), progImports(prog), progTraits(prog), progImpls(prog))
 
 def setProgMain(prog: Prog, main: Expr): Prog =
-  mkProg(progPkg(prog), progEnums(prog), progDefs(prog), main, progMainModule(prog), progImports(prog))
+  mkProgFull(progPkg(prog), progEnums(prog), progDefs(prog), main, progMainModule(prog), progImports(prog), progTraits(prog), progImpls(prog))
 
 def chooseMain(a: Expr, b: Expr): Expr =
   if (isUnitExpr(b) == 1) a else b
@@ -19,7 +22,7 @@ def chooseMainModule(accMain: Expr, pMain: Expr, accMod: String, pMod: String): 
   if (isUnitExpr(pMain) == 1) accMod else pMod
 
 def mergeProg(acc: Prog, p: Prog): Prog =
-  mkProg(progPkg(p), listConcat(progEnums(acc), progEnums(p)), listConcat(progDefs(acc), progDefs(p)), chooseMain(progMain(acc), progMain(p)), chooseMainModule(progMain(acc), progMain(p), progMainModule(acc), progMainModule(p)), listConcat(progImports(acc), progImports(p)))
+  mkProgFull(progPkg(p), listConcat(progEnums(acc), progEnums(p)), listConcat(progDefs(acc), progDefs(p)), chooseMain(progMain(acc), progMain(p)), chooseMainModule(progMain(acc), progMain(p), progMainModule(acc), progMainModule(p)), listConcat(progImports(acc), progImports(p)), listConcat(progTraits(acc), progTraits(p)), listConcat(progImpls(acc), progImpls(p)))
 
 def parseSource(label: String, src: String): Prog =
   parseProgram(lex(src), label)
@@ -260,7 +263,7 @@ def checkProject(projectDir: String): IO[List] =
       } yield mergeSources(sources, emptyProg(), 0).flatMap(prog0 =>
   prepareVerifyProg(prog0, List.head(List.tail(bundle))).flatMap(prog1 =>
     for {
-      prog = lowerProg(prog1)
+      prog = expandImplsProg(lowerProg(prog1))
       ty = typecheckProg(prog)
     } yield IO.pure(List.cons(ty, List.cons(sources, List.empty())))
   )
@@ -275,8 +278,10 @@ def compileAfterSources(projectDir: String, outDir: String, doRun: Int, verify: 
   mergeSources(texts, emptyProg(), 0).flatMap(prog0 =>
     prepareCompileProg(prog0, overlays, verify).flatMap(prog1 =>
       for {
-        prog = lowerProg(prog1)
-        ty = typecheckProg(prog)
+        prog0 = lowerProg(prog1)
+        prog1b = expandImplsProg(prog0)
+        ty = typecheckProg(prog1b)
+        prog = resolveFieldsProg(prog1b)
         ir = emitProgram(prog)
         ll = pathJoin(outDir, Str.concat(name, ".ll"))
         exe = pathJoin(outDir, name)

@@ -2,85 +2,158 @@ package scuzz.compiler
 
 def lowerProg(prog: Prog): Prog =
   for {
-    ctors = enumCtors(progEnums(prog), List.empty())
-  } yield Prog.Prog(progPkg(prog), progEnums(prog), lowerDefs(progDefs(prog), ctors, List.empty()), lowerExpr(progMain(prog), ctors), progMainModule(prog), progImports(prog))
+    enums = progEnums(prog)
+    imports = progImports(prog)
+    mainMod = progMainModule(prog)
+  } yield Prog.Prog(progPkg(prog), enums, lowerDefs(progDefs(prog), enums, imports, List.empty()), lowerExpr(progMain(prog), enums, imports, mainMod), mainMod, imports, progTraits(prog), lowerImpls(progImpls(prog), enums, imports, List.empty()))
 
-def enumCtors(enums: List, acc: List): List =
-  if (List.isEmpty(enums) == 1) acc else enumCtors(List.tail(enums), enumCtorsOne(List.head(enums), acc))
+def lowerImpls(impls: List, enums: List, imports: List, acc: List): List =
+  if (List.isEmpty(impls) == 1) List.reverse(acc) else lowerImpls(List.tail(impls), enums, imports, List.cons(lowerImpl(List.head(impls), enums, imports), acc))
 
-def enumCtorsOne(e: EnumDef, acc: List): List =
-  enumCtorsCases(enumName(e), enumCases(e), acc)
+def lowerImpl(im: ImplDef, enums: List, imports: List): ImplDef =
+  im match {
+    case ImplDef.Impl(module, traitName, forType, methods) => ImplDef.Impl(module, traitName, forType, lowerImplMethods(methods, enums, imports, module, List.empty()))
+  }
 
-def enumCtorsCases(en: String, cases: List, acc: List): List =
-  if (List.isEmpty(cases) == 1) acc else enumCtorsCases(en, List.tail(cases), List.cons(str3(en, ".", caseName(List.head(cases))), acc))
+def lowerImplMethods(methods: List, enums: List, imports: List, mod: String, acc: List): List =
+  if (List.isEmpty(methods) == 1) List.reverse(acc) else lowerImplMethods(List.tail(methods), enums, imports, mod, List.cons(lowerImplMethod(List.head(methods), enums, imports, mod), acc))
 
-def ctorKnown(ctors: List, key: String): Int =
-  if (List.isEmpty(ctors) == 1) 0 else if (streq(List.head(ctors), key) == 1) 1 else ctorKnown(List.tail(ctors), key)
+def lowerImplMethod(m: ImplMethod, enums: List, imports: List, mod: String): ImplMethod =
+  m match {
+    case ImplMethod.Method(name, params, ret, body) => ImplMethod.Method(name, params, ret, lowerExpr(body, enums, imports, mod))
+  }
 
 def splitDotted(s: String): List =
   for {
     d = indexOfChar(s, 46, 0)
   } yield if (d <= 0) List.empty() else if (indexOfChar(s, 46, d + 1) >= 0) List.empty() else if (d + 1 >= Str.len(s)) List.empty() else List.cons(Str.slice(s, 0, d), List.cons(Str.slice(s, d + 1, Str.len(s)), List.empty()))
 
-def lowerDefs(defs: List, ctors: List, acc: List): List =
-  if (List.isEmpty(defs) == 1) List.reverse(acc) else lowerDefs(List.tail(defs), ctors, List.cons(lowerDef(List.head(defs), ctors), acc))
+def findEnumByQual(enums: List, module: String, name: String): List =
+  if (List.isEmpty(enums) == 1) List.empty() else if (streq(enumModule(List.head(enums)), module) == 1) if (streq(enumName(List.head(enums)), name) == 1) enumHit(List.head(enums)) else findEnumByQual(List.tail(enums), module, name) else findEnumByQual(List.tail(enums), module, name)
 
-def lowerDef(d: Def, ctors: List): Def =
+def findEnumById(enums: List, id: String): List =
+  if (List.isEmpty(enums) == 1) List.empty() else if (streq(enumId(List.head(enums)), id) == 1) enumHit(List.head(enums)) else findEnumById(List.tail(enums), id)
+
+def collectEnumsByName(enums: List, name: String, acc: List): List =
+  if (List.isEmpty(enums) == 1) List.reverse(acc) else if (streq(enumName(List.head(enums)), name) == 1) collectEnumsByName(List.tail(enums), name, List.cons(List.head(enums), acc)) else collectEnumsByName(List.tail(enums), name, acc)
+
+def resolveEnum(enums: List, imports: List, name: String, currentModule: String): List =
+  for {
+    parts = splitDotted(name)
+  } yield if (List.isEmpty(parts) == 0) findEnumByQual(enums, List.head(parts), List.head(List.tail(parts))) else resolveEnumBare(enums, imports, name, currentModule)
+
+def resolveEnumBare(enums: List, imports: List, name: String, currentModule: String): List =
+  for {
+    local = findEnumByQual(enums, currentModule, name)
+  } yield if (List.isEmpty(local) == 0) local else resolveEnumImport(enums, imports, name, currentModule)
+
+def resolveEnumImport(enums: List, imports: List, name: String, currentModule: String): List =
+  for {
+    hit = findImport(imports, currentModule, name)
+  } yield if (List.isEmpty(hit) == 0) findEnumByQual(enums, importFromModule(List.head(hit)), name) else resolveEnumUnique(enums, name)
+
+def resolveEnumUnique(enums: List, name: String): List =
+  for {
+    all = collectEnumsByName(enums, name, List.empty())
+  } yield if (List.len(all) == 1) enumHit(List.head(all)) else List.empty()
+
+def resolveCtorId(enums: List, imports: List, enumName: String, caseName: String, currentModule: String): String =
+  for {
+    e = resolveEnum(enums, imports, enumName, currentModule)
+  } yield if (List.isEmpty(e) == 1) "" else if (enumHasCase(enumCases(List.head(e)), caseName) == 0) "" else enumId(List.head(e))
+
+def lowerDefs(defs: List, enums: List, imports: List, acc: List): List =
+  if (List.isEmpty(defs) == 1) List.reverse(acc) else lowerDefs(List.tail(defs), enums, imports, List.cons(lowerDef(List.head(defs), enums, imports), acc))
+
+def lowerDef(d: Def, enums: List, imports: List): Def =
   d match {
-    case Def.Def(name, params, ret, body, module, isPrivate) => Def.Def(name, params, ret, lowerExpr(body, ctors), module, isPrivate)
+    case Def(name, params, ret, body, module, isPrivate) => Def.Def(name, params, ret, lowerExpr(body, enums, imports, module), module, isPrivate)
   }
 
-def lowerExpr(e: Expr, ctors: List): Expr =
+def lowerExpr(e: Expr, enums: List, imports: List, mod: String): Expr =
   e match {
-    case Expr.For(binders, body, span) => desugarFor(binders, lowerExpr(body, ctors), span, ctors)
-    case Expr.Let(name, value, body, span) => Expr.Let(name, lowerExpr(value, ctors), lowerExpr(body, ctors), span)
-    case Expr.FlatMap(inner, param, body, span) => Expr.FlatMap(lowerExpr(inner, ctors), param, lowerExpr(body, ctors), span)
-    case Expr.Handle(inner, body, span) => Expr.Handle(lowerExpr(inner, ctors), lowerExpr(body, ctors), span)
-    case Expr.Attempt(inner, span) => Expr.Attempt(lowerExpr(inner, ctors), span)
-    case Expr.If(cond, thenB, elseB, span) => Expr.If(lowerExpr(cond, ctors), lowerExpr(thenB, ctors), lowerExpr(elseB, ctors), span)
-    case Expr.BinOp(op, left, right, span) => Expr.BinOp(op, lowerExpr(left, ctors), lowerExpr(right, ctors), span)
-    case Expr.Call(callee, args, span) => lowerCall(callee, lowerExprList(args, ctors, List.empty()), span, ctors)
-    case Expr.Adt(enumName, caseName, args, span) => Expr.Adt(enumName, caseName, lowerExprList(args, ctors, List.empty()), span)
-    case Expr.Lambda(param, body, span) => Expr.Lambda(param, lowerExpr(body, ctors), span)
-    case Expr.Match(scrut, arms, span) => Expr.Match(lowerExpr(scrut, ctors), lowerArms(arms, ctors, List.empty()), span)
-    case Expr.Println(arg, span) => Expr.Println(lowerExpr(arg, ctors), span)
-    case Expr.Fail(arg, span) => Expr.Fail(lowerExpr(arg, ctors), span)
-    case Expr.Pure(arg, span) => Expr.Pure(lowerExpr(arg, ctors), span)
-    case Expr.Sleep(arg, span) => Expr.Sleep(lowerExpr(arg, ctors), span)
-    case Expr.IoRace(left, right, span) => Expr.IoRace(lowerExpr(left, ctors), lowerExpr(right, ctors), span)
-    case Expr.IoBoth(left, right, span) => Expr.IoBoth(lowerExpr(left, ctors), lowerExpr(right, ctors), span)
-    case Expr.ListLit(elems, span) => Expr.ListLit(lowerExprList(elems, ctors, List.empty()), span)
-    case Expr.Interp(parts, span) => Expr.Interp(lowerInterpParts(parts, ctors, List.empty()), span)
+    case Expr.For(binders, body, span) => desugarFor(binders, lowerExpr(body, enums, imports, mod), span, enums, imports, mod)
+    case Expr.Let(name, value, body, span) => Expr.Let(name, lowerExpr(value, enums, imports, mod), lowerExpr(body, enums, imports, mod), span)
+    case Expr.FlatMap(inner, param, body, span) => Expr.FlatMap(lowerExpr(inner, enums, imports, mod), param, lowerExpr(body, enums, imports, mod), span)
+    case Expr.Handle(inner, body, span) => Expr.Handle(lowerExpr(inner, enums, imports, mod), lowerExpr(body, enums, imports, mod), span)
+    case Expr.Attempt(inner, span) => Expr.Attempt(lowerExpr(inner, enums, imports, mod), span)
+    case Expr.If(cond, thenB, elseB, span) => Expr.If(lowerExpr(cond, enums, imports, mod), lowerExpr(thenB, enums, imports, mod), lowerExpr(elseB, enums, imports, mod), span)
+    case Expr.BinOp(op, left, right, span) => Expr.BinOp(op, lowerExpr(left, enums, imports, mod), lowerExpr(right, enums, imports, mod), span)
+    case Expr.Call(callee, args, span) => lowerCall(callee, lowerExprList(args, enums, imports, mod, List.empty()), span, enums, imports, mod)
+    case Expr.Adt(enumName, caseName, args, span) => lowerAdt(enumName, caseName, lowerExprList(args, enums, imports, mod, List.empty()), span, enums, imports, mod)
+    case Expr.Lambda(param, body, span) => Expr.Lambda(param, lowerExpr(body, enums, imports, mod), span)
+    case Expr.Match(scrut, arms, span) => Expr.Match(lowerExpr(scrut, enums, imports, mod), lowerArms(arms, enums, imports, mod, List.empty()), span)
+    case Expr.Println(arg, span) => Expr.Println(lowerExpr(arg, enums, imports, mod), span)
+    case Expr.Fail(arg, span) => Expr.Fail(lowerExpr(arg, enums, imports, mod), span)
+    case Expr.Pure(arg, span) => Expr.Pure(lowerExpr(arg, enums, imports, mod), span)
+    case Expr.Sleep(arg, span) => Expr.Sleep(lowerExpr(arg, enums, imports, mod), span)
+    case Expr.IoRace(left, right, span) => Expr.IoRace(lowerExpr(left, enums, imports, mod), lowerExpr(right, enums, imports, mod), span)
+    case Expr.IoBoth(left, right, span) => Expr.IoBoth(lowerExpr(left, enums, imports, mod), lowerExpr(right, enums, imports, mod), span)
+    case Expr.ListLit(elems, span) => Expr.ListLit(lowerExprList(elems, enums, imports, mod, List.empty()), span)
+    case Expr.Interp(parts, span) => Expr.Interp(lowerInterpParts(parts, enums, imports, mod, List.empty()), span)
     case Expr.Unit(span) => e
     case Expr.IntLit(digits, span) => e
     case Expr.StrLit(value, span) => e
     case Expr.Var(name, span) => e
+    case Expr.Field(base, field, span) => Expr.Field(lowerExpr(base, enums, imports, mod), field, span)
+    case Expr.MethodCall(receiver, method, args, span) => Expr.MethodCall(lowerExpr(receiver, enums, imports, mod), method, lowerExprList(args, enums, imports, mod, List.empty()), span)
     case Expr.Delay(span) => e
   }
 
-def lowerCall(callee: String, args: List, sp: Span, ctors: List): Expr =
+def lowerCall(callee: String, args: List, sp: Span, enums: List, imports: List, mod: String): Expr =
   for {
     parts = splitDotted(callee)
-  } yield if (List.isEmpty(parts) == 1) Expr.Call(callee, args, sp) else if (ctorKnown(ctors, callee) == 1) Expr.Adt(List.head(parts), List.head(List.tail(parts)), args, sp) else Expr.Call(callee, args, sp)
+  } yield if (List.isEmpty(parts) == 1) lowerCallBare(callee, args, sp, enums, imports, mod) else lowerCallDotted(List.head(parts), List.head(List.tail(parts)), args, sp, enums, imports, mod)
 
-def lowerExprList(xs: List, ctors: List, acc: List): List =
-  if (List.isEmpty(xs) == 1) List.reverse(acc) else lowerExprList(List.tail(xs), ctors, List.cons(lowerExpr(List.head(xs), ctors), acc))
+def lowerCallBare(callee: String, args: List, sp: Span, enums: List, imports: List, mod: String): Expr =
+  for {
+    id = resolveRecordCtorId(enums, imports, callee, List.len(args), mod)
+  } yield if (Str.len(id) == 0) Expr.Call(callee, args, sp) else Expr.Adt(id, callee, args, sp)
 
-def lowerArms(arms: List, ctors: List, acc: List): List =
-  if (List.isEmpty(arms) == 1) List.reverse(acc) else lowerArms(List.tail(arms), ctors, List.cons(lowerArm(List.head(arms), ctors), acc))
+def lowerCallDotted(en: String, cn: String, args: List, sp: Span, enums: List, imports: List, mod: String): Expr =
+  for {
+    id = resolveCtorId(enums, imports, en, cn, mod)
+  } yield if (Str.len(id) == 0) Expr.Call(str3(en, ".", cn), args, sp) else Expr.Adt(id, cn, args, sp)
 
-def lowerArm(arm: MatchArm, ctors: List): MatchArm =
+def resolveRecordCtorId(enums: List, imports: List, name: String, arity: Int, currentModule: String): String =
+  for {
+    e = resolveEnum(enums, imports, name, currentModule)
+  } yield if (List.isEmpty(e) == 1) "" else if (enumIsRecord(List.head(e)) == 0) "" else if (List.len(caseFields(List.head(enumCases(List.head(e))))) == arity) enumId(List.head(e)) else ""
+
+def lowerAdt(en: String, cn: String, args: List, sp: Span, enums: List, imports: List, mod: String): Expr =
+  for {
+    id = resolveCtorId(enums, imports, en, cn, mod)
+  } yield if (Str.len(id) == 0) if (List.isEmpty(args) == 1) Expr.Call(str3(en, ".", cn), args, sp) else Expr.Adt(en, cn, args, sp) else Expr.Adt(id, cn, args, sp)
+
+def lowerExprList(xs: List, enums: List, imports: List, mod: String, acc: List): List =
+  if (List.isEmpty(xs) == 1) List.reverse(acc) else lowerExprList(List.tail(xs), enums, imports, mod, List.cons(lowerExpr(List.head(xs), enums, imports, mod), acc))
+
+def lowerArms(arms: List, enums: List, imports: List, mod: String, acc: List): List =
+  if (List.isEmpty(arms) == 1) List.reverse(acc) else lowerArms(List.tail(arms), enums, imports, mod, List.cons(lowerArm(List.head(arms), enums, imports, mod), acc))
+
+def lowerArm(arm: MatchArm, enums: List, imports: List, mod: String): MatchArm =
   arm match {
-    case MatchArm.Arm(pat, body) => MatchArm.Arm(pat, lowerExpr(body, ctors))
+    case MatchArm.Arm(pat, body) => MatchArm.Arm(lowerPat(pat, enums, imports, mod), lowerExpr(body, enums, imports, mod))
   }
 
-def lowerInterpParts(parts: List, ctors: List, acc: List): List =
-  if (List.isEmpty(parts) == 1) List.reverse(acc) else lowerInterpParts(List.tail(parts), ctors, List.cons(lowerInterpPart(List.head(parts), ctors), acc))
+def lowerPat(pat: Pattern, enums: List, imports: List, mod: String): Pattern =
+  pat match {
+    case Pattern.Wild => Pattern.Wild
+    case Pattern.Adt(enumName, caseName, binds) => lowerPatAdt(enumName, caseName, binds, enums, imports, mod)
+  }
 
-def lowerInterpPart(part: InterpPart, ctors: List): InterpPart =
+def lowerPatAdt(en: String, cn: String, binds: List, enums: List, imports: List, mod: String): Pattern =
+  for {
+    id = resolveCtorId(enums, imports, en, cn, mod)
+  } yield if (Str.len(id) == 0) Pattern.Adt(en, cn, binds) else Pattern.Adt(id, cn, binds)
+
+def lowerInterpParts(parts: List, enums: List, imports: List, mod: String, acc: List): List =
+  if (List.isEmpty(parts) == 1) List.reverse(acc) else lowerInterpParts(List.tail(parts), enums, imports, mod, List.cons(lowerInterpPart(List.head(parts), enums, imports, mod), acc))
+
+def lowerInterpPart(part: InterpPart, enums: List, imports: List, mod: String): InterpPart =
   part match {
     case InterpPart.Lit(text) => InterpPart.Lit(text)
-    case InterpPart.Hole(expr) => InterpPart.Hole(lowerExpr(expr, ctors))
+    case InterpPart.Hole(expr) => InterpPart.Hole(lowerExpr(expr, enums, imports, mod))
   }
 
 def forBindersHaveDraw(binders: List): Int =
@@ -92,16 +165,16 @@ def forBinderIsDraw(b: ForBinder, rest: List): Int =
     case ForBinder.Draw(name, value) => 1
   }
 
-def desugarFor(binders: List, body: Expr, sp: Span, ctors: List): Expr =
-  if (forBindersHaveDraw(binders) == 1) desugarForBinders(binders, Expr.Pure(body, sp), ctors) else desugarForBinders(binders, body, ctors)
+def desugarFor(binders: List, body: Expr, sp: Span, enums: List, imports: List, mod: String): Expr =
+  if (forBindersHaveDraw(binders) == 1) desugarForBinders(binders, Expr.Pure(body, sp), enums, imports, mod) else desugarForBinders(binders, body, enums, imports, mod)
 
-def desugarForBinders(binders: List, body: Expr, ctors: List): Expr =
-  if (List.isEmpty(binders) == 1) body else wrapForBinder(List.head(binders), desugarForBinders(List.tail(binders), body, ctors), ctors)
+def desugarForBinders(binders: List, body: Expr, enums: List, imports: List, mod: String): Expr =
+  if (List.isEmpty(binders) == 1) body else wrapForBinder(List.head(binders), desugarForBinders(List.tail(binders), body, enums, imports, mod), enums, imports, mod)
 
-def wrapForBinder(b: ForBinder, body: Expr, ctors: List): Expr =
+def wrapForBinder(b: ForBinder, body: Expr, enums: List, imports: List, mod: String): Expr =
   b match {
-    case ForBinder.Eq(name, value) => wrapForBinderEq(name, lowerExpr(value, ctors), body)
-    case ForBinder.Draw(name, value) => wrapForBinderDraw(name, lowerExpr(value, ctors), body)
+    case ForBinder.Eq(name, value) => wrapForBinderEq(name, lowerExpr(value, enums, imports, mod), body)
+    case ForBinder.Draw(name, value) => wrapForBinderDraw(name, lowerExpr(value, enums, imports, mod), body)
   }
 
 def wrapForBinderEq(name: String, value: Expr, body: Expr): Expr =

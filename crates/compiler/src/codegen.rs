@@ -20,7 +20,7 @@ pub fn emit_llvm(program: &Program) -> String {
 
     let enum_tags = build_enum_tags(&program.enums);
     let enum_payloads = build_enum_payloads(&program.enums);
-    let funs = FunIndex::build(&program.defs, &program.imports).expect("duplicate defs should be rejected earlier");
+    let funs = FunIndex::build(&program.defs, &program.imports, &program.enums).expect("duplicate defs should be rejected earlier");
 
     let mut out = String::new();
     writeln!(out, "; Scuzz Lang Stage-0 generated LLVM IR").unwrap();
@@ -222,8 +222,9 @@ fn val_emitted(code: String, value: String, kind: Kind) -> Emitted {
 fn build_enum_tags(enums: &[EnumDef]) -> HashMap<(String, String), i32> {
     let mut m = HashMap::new();
     for e in enums {
+        let id = crate::resolve::enum_id(&e.module, &e.name);
         for (i, c) in e.cases.iter().enumerate() {
-            m.insert((e.name.clone(), c.name.clone()), i as i32);
+            m.insert((id.clone(), c.name.clone()), i as i32);
         }
     }
     m
@@ -232,10 +233,11 @@ fn build_enum_tags(enums: &[EnumDef]) -> HashMap<(String, String), i32> {
 fn build_enum_payloads(enums: &[EnumDef]) -> HashMap<(String, String), Vec<Type>> {
     let mut m = HashMap::new();
     for e in enums {
+        let id = crate::resolve::enum_id(&e.module, &e.name);
         for c in &e.cases {
             if !c.fields.is_empty() {
                 m.insert(
-                    (e.name.clone(), c.name.clone()),
+                    (id.clone(), c.name.clone()),
                     c.fields.iter().map(|(_, ty)| ty.clone()).collect(),
                 );
             }
@@ -343,6 +345,15 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         | ExprKind::Unit
         | ExprKind::Var(_)
         | ExprKind::IntLit(_) => {}
+        ExprKind::Field { base, .. } => collect_strings(base, out),
+        ExprKind::MethodCall {
+            receiver, args, ..
+        } => {
+            collect_strings(receiver, out);
+            for a in args {
+                collect_strings(a, out);
+            }
+        }
         ExprKind::AdtConstruct { args, .. } => {
             for a in args {
                 collect_strings(a, out);
@@ -815,6 +826,8 @@ fn emit_expr(
                 .unwrap_or_else(|| ("null".into(), Kind::Ptr));
             val_emitted(String::new(), val, kind)
         }
+        ExprKind::Field { .. } => panic!("internal: unresolved field access in codegen"),
+        ExprKind::MethodCall { .. } => panic!("internal: unresolved method call in codegen"),
         ExprKind::Let { name, value, body } => {
             // Nested vals must not reuse the same LLVM name prefix.
             let ve = emit_expr(value, ctx, locals, &format!("{prefix}_lv_{name}"));

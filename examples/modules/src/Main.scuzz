@@ -1,4 +1,15 @@
 import A.tag
+import A.Msg
 
 @main def main: IO[Unit] =
-  IO.println(Str.concat(tag(), B.tag()))
+  for {
+    _ <- IO.println(Str.concat(tag(), B.tag()))
+    _ <- IO.println(greetFrom(Msg.Hi))
+    _ <- IO.println(B.greet())
+  } yield ()
+
+def greetFrom(m: Msg): String =
+  m match {
+    case Msg.Hi => "main-hi"
+    case Msg.Bye => "main-bye"
+  }

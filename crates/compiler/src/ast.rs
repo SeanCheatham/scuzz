@@ -7,12 +7,46 @@ pub struct Program {
     /// Dotted package path, e.g. `["scuzz", "compiler"]`.
     pub package: Vec<String>,
     pub enums: Vec<EnumDef>,
+    pub traits: Vec<TraitDef>,
+    pub impls: Vec<ImplDef>,
     pub defs: Vec<FunDef>,
     pub main: MainDef,
     /// `import Module.name` — bare `name` in `in_module` resolves to `from_module.name`.
     pub imports: Vec<Import>,
     /// Law def names residualized under TestRuntime (empty for live builds).
     pub law_names: Vec<String>,
+}
+
+/// `trait Show: def show(): String`
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitDef {
+    pub module: String,
+    pub name: String,
+    pub methods: Vec<TraitMethod>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TraitMethod {
+    pub name: String,
+    pub params: Vec<Param>,
+    pub ret: Type,
+}
+
+/// `impl Show for Point: def show(): String = …` (`self` is implicit in the body).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImplDef {
+    pub module: String,
+    pub trait_name: String,
+    pub for_type: String,
+    pub methods: Vec<ImplMethod>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ImplMethod {
+    pub name: String,
+    pub params: Vec<Param>,
+    pub ret: Type,
+    pub body: Expr,
 }
 
 /// Top-level `import FromModule.name` in file-stem module `in_module`.
@@ -25,8 +59,12 @@ pub struct Import {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnumDef {
+    /// File-stem module id (`Foo.scuzz` → `Foo`). Empty when parsed without a path.
+    pub module: String,
     pub name: String,
     pub cases: Vec<EnumCase>,
+    /// `record Name(…)` — single case with the same name; surface sugar for construct/match.
+    pub is_record: bool,
 }
 
 /// One `case Name` / `case Name(x: T)` in an enum.
@@ -44,6 +82,8 @@ pub struct FunDef {
     pub name: String,
     /// `private def` — visible only within `module`. Default public.
     pub is_private: bool,
+    /// `def foo[T](…)` — monomorphized before codegen.
+    pub type_params: Vec<String>,
     pub params: Vec<Param>,
     pub ret: Type,
     pub body: Expr,
@@ -150,6 +190,17 @@ pub enum ExprKind {
     },
     /// Local binding / parameter reference
     Var(String),
+    /// `p.x` record field projection (resolved to match before codegen).
+    Field {
+        base: Box<Expr>,
+        field: String,
+    },
+    /// `p.show(args)` trait method call (resolved to Call before codegen).
+    MethodCall {
+        receiver: Box<Expr>,
+        method: String,
+        args: Vec<Expr>,
+    },
     /// `Color.Red` / `Opt.Some(x)` ADT case construct
     AdtConstruct {
         enum_name: String,
@@ -242,6 +293,8 @@ pub enum Type {
     Io(Box<Type>),
     /// Nominal enum type
     Adt(String),
+    /// Type parameter (`T` in `def id[T](x: T): T`)
+    Var(String),
     /// Untyped/opaque
     Opaque(String),
 }

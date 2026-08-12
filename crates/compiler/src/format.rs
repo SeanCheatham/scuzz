@@ -1,6 +1,9 @@
 //! Minimal Scuzz Lang formatter: parse → pretty-print (kernel dialect).
 
-use crate::ast::{BinOp, EnumDef, Expr, ExprKind, ForBinder, FunDef, MatchArm, Pattern, Program, Type};
+use crate::ast::{
+    BinOp, EnumDef, Expr, ExprKind, ForBinder, FunDef, ImplDef, MatchArm, Pattern, Program,
+    TraitDef, Type,
+};
 use crate::parser::{parse, ParseError};
 use thiserror::Error;
 
@@ -25,6 +28,14 @@ fn pretty_program(p: &Program) -> String {
     }
     for e in &p.enums {
         out.push_str(&pretty_enum(e));
+        out.push('\n');
+    }
+    for t in &p.traits {
+        out.push_str(&pretty_trait(t));
+        out.push('\n');
+    }
+    for im in &p.impls {
+        out.push_str(&pretty_impl(im));
         out.push('\n');
     }
     for im in &p.imports {
@@ -52,6 +63,15 @@ fn pretty_program(p: &Program) -> String {
 }
 
 fn pretty_enum(e: &EnumDef) -> String {
+    if e.is_record {
+        let c = &e.cases[0];
+        let parts: Vec<String> = c
+            .fields
+            .iter()
+            .map(|(n, t)| format!("{n}: {}", pretty_type(t)))
+            .collect();
+        return format!("record {}({})\n", e.name, parts.join(", "));
+    }
     let mut out = String::new();
     out.push_str("enum ");
     out.push_str(&e.name);
@@ -74,6 +94,52 @@ fn pretty_enum(e: &EnumDef) -> String {
     out
 }
 
+fn pretty_trait(t: &TraitDef) -> String {
+    let mut out = String::new();
+    out.push_str("trait ");
+    out.push_str(&t.name);
+    out.push_str(":\n");
+    for m in &t.methods {
+        let params: Vec<String> = m
+            .params
+            .iter()
+            .map(|p| format!("{}: {}", p.name, pretty_type(&p.ty)))
+            .collect();
+        out.push_str(&format!(
+            "  def {}({}): {}\n",
+            m.name,
+            params.join(", "),
+            pretty_type(&m.ret)
+        ));
+    }
+    out
+}
+
+fn pretty_impl(im: &ImplDef) -> String {
+    let mut out = String::new();
+    out.push_str("impl ");
+    out.push_str(&im.trait_name);
+    out.push_str(" for ");
+    out.push_str(&im.for_type);
+    out.push_str(":\n");
+    for m in &im.methods {
+        let params: Vec<String> = m
+            .params
+            .iter()
+            .map(|p| format!("{}: {}", p.name, pretty_type(&p.ty)))
+            .collect();
+        out.push_str(&format!(
+            "  def {}({}): {} =\n{}",
+            m.name,
+            params.join(", "),
+            pretty_type(&m.ret),
+            pretty_expr(&m.body, 2)
+        ));
+        out.push('\n');
+    }
+    out
+}
+
 fn pretty_type(t: &Type) -> String {
     match t {
         Type::Unit => "Unit".into(),
@@ -82,7 +148,7 @@ fn pretty_type(t: &Type) -> String {
         Type::Bool => "Bool".into(),
         Type::List => "List".into(),
         Type::Io(inner) => format!("IO[{}]", pretty_type(inner)),
-        Type::Adt(n) | Type::Opaque(n) => n.clone(),
+        Type::Adt(n) | Type::Opaque(n) | Type::Var(n) => n.clone(),
     }
 }
 
@@ -93,10 +159,16 @@ fn pretty_def(d: &FunDef) -> String {
         .map(|p| format!("{}: {}", p.name, pretty_type(&p.ty)))
         .collect();
     let vis = if d.is_private { "private " } else { "" };
+    let tparams = if d.type_params.is_empty() {
+        String::new()
+    } else {
+        format!("[{}]", d.type_params.join(", "))
+    };
     format!(
-        "{}def {}({}): {} =\n{}",
+        "{}def {}{}({}): {} =\n{}",
         vis,
         d.name,
+        tparams,
         params.join(", "),
         pretty_type(&d.ret),
         pretty_expr(&d.body, 1)
@@ -143,19 +215,40 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
         ExprKind::IoFail(e) => format!("{pad}IO.fail({})", pretty_expr(e, 0).trim()),
         ExprKind::IoPure(e) => format!("{pad}IO.pure({})", pretty_expr(e, 0).trim()),
         ExprKind::Var(n) => format!("{pad}{n}"),
+        ExprKind::Field { base, field } => {
+            format!("{pad}{}.{}", pretty_expr(base, 0).trim(), field)
+        }
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+        } => {
+            let a: Vec<String> = args.iter().map(|e| pretty_expr(e, 0).trim().to_string()).collect();
+            format!(
+                "{pad}{}.{}({})",
+                pretty_expr(receiver, 0).trim(),
+                method,
+                a.join(", ")
+            )
+        }
         ExprKind::AdtConstruct {
             enum_name,
             case_name,
             args,
         } => {
-            if args.is_empty() {
-                format!("{pad}{enum_name}.{case_name}")
+            let bare = crate::resolve::enum_bare_name(enum_name);
+            if bare == case_name.as_str() {
+                if args.is_empty() {
+                    format!("{pad}{bare}")
+                } else {
+                    let a: Vec<_> = args.iter().map(|e| pretty_expr(e, 0).trim().to_string()).collect();
+                    format!("{pad}{bare}({})", a.join(", "))
+                }
+            } else if args.is_empty() {
+                format!("{pad}{bare}.{case_name}")
             } else {
-                let a: Vec<_> = args
-                    .iter()
-                    .map(|e| pretty_expr(e, 0).trim().to_string())
-                    .collect();
-                format!("{pad}{enum_name}.{case_name}({})", a.join(", "))
+                let a: Vec<_> = args.iter().map(|e| pretty_expr(e, 0).trim().to_string()).collect();
+                format!("{pad}{bare}.{case_name}({})", a.join(", "))
             }
         },
         ExprKind::Lambda { param, body } => {
@@ -298,10 +391,17 @@ fn pretty_arm(arm: &MatchArm, indent: usize) -> String {
             case_name,
             binds,
         } => {
-            if binds.is_empty() {
-                format!("{enum_name}.{case_name}")
+            let bare = crate::resolve::enum_bare_name(enum_name);
+            if bare == case_name.as_str() {
+                if binds.is_empty() {
+                    bare.to_string()
+                } else {
+                    format!("{bare}({})", binds.join(", "))
+                }
+            } else if binds.is_empty() {
+                format!("{bare}.{case_name}")
             } else {
-                format!("{enum_name}.{case_name}({})", binds.join(", "))
+                format!("{bare}.{case_name}({})", binds.join(", "))
             }
         }
     };
@@ -411,7 +511,24 @@ enum Pair:
         let out = format_source(src).unwrap();
         assert!(out.contains("case Pair(a: Int, b: String)"));
         assert!(out.contains("Pair.Pair(1, \"x\")"));
-        assert!(out.contains("case Pair.Pair(x, y) =>"));
+        assert!(out.contains("case Pair(x, y) =>"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_record_roundtrip() {
+        let src = r#"
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] =
+  Point(1, 2) match {
+    case Point(a, b) => IO.println(Str.fromInt(a))
+  }
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("record Point(x: Int, y: Int)"));
+        assert!(out.contains("Point(1, 2)"));
+        assert!(out.contains("case Point(a, b) =>"));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

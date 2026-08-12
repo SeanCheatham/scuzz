@@ -7,5 +7,12 @@ enum EnumCase:
   case Case(name: String, fields: List)
 
 enum EnumDef:
-  case Enum(name: String, cases: List)
+  case Enum(module: String, name: String, cases: List)
+  case Record(module: String, name: String, fields: List)
+
+enum TraitMethod:
+  case Method(name: String, params: List, ret: Type)
+
+enum TraitDef:
+  case Trait(module: String, name: String, methods: List)
 

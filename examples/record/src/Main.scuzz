@@ -1,0 +1,6 @@
+record Point(x: Int, y: Int)
+
+def sum(p: Point): Int = p.x + p.y
+
+@main def main: IO[Unit] =
+  IO.println(Str.concat("record:", Str.fromInt(sum(Point(3, 5)))))

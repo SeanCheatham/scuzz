@@ -1,0 +1,8 @@
+[package]
+name = "generic"
+version = "0.1.0"
+description = "thin monomorphized generics smoke"
+
+[targets.native]
+kind = "executable"
+main = "Main"

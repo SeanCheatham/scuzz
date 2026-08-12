@@ -1,0 +1,11 @@
+record Point(x: Int, y: Int)
+
+trait Show:
+  def show(): String
+
+impl Show for Point:
+  def show(): String =
+    Str.concat("Point(", Str.concat(Str.fromInt(self.x), Str.concat(",", Str.concat(Str.fromInt(self.y), ")"))))
+
+@main def main: IO[Unit] =
+  IO.println(Point(3, 5).show())

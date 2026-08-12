@@ -6,6 +6,9 @@ pub enum Token {
     AtMain, // @main
     Package,
     Enum,
+    Record,
+    Trait,
+    Impl,
     Case,
     Match,
     Def,
@@ -262,6 +265,9 @@ pub fn lex(input: &str) -> Result<Vec<SpannedToken>, LexError> {
                     let token = match ident.as_str() {
                         "package" => Token::Package,
                         "enum" => Token::Enum,
+                        "record" => Token::Record,
+                        "trait" => Token::Trait,
+                        "impl" => Token::Impl,
                         "case" => Token::Case,
                         "match" => Token::Match,
                         "def" => Token::Def,

@@ -1,5 +1,7 @@
-use crate::ast::{BinOp, EnumDef, Expr, ExprKind, Program, Type};
-use crate::resolve::{FunIndex, ResolveError};
+use crate::ast::{
+    BinOp, EnumDef, Expr, ExprKind, FunDef, ImplDef, Param, Program, TraitDef, Type,
+};
+use crate::resolve::{enum_bare_name, enum_id, EnumIndex, FunIndex, ResolveError};
 use crate::span::Span;
 use std::collections::HashMap;
 use thiserror::Error;
@@ -38,14 +40,178 @@ impl TypeError {
     }
 }
 
+/// Mangled def name for a monomorphized impl method.
+pub fn impl_method_name(trait_name: &str, for_type: &str, method: &str) -> String {
+    format!("__impl_{trait_name}_{for_type}_{method}")
+}
+
+#[derive(Debug, Clone)]
+struct MethodEntry {
+    mangled: String,
+    /// Parameter types after `self`, already resolved.
+    params: Vec<Type>,
+    ret: Type,
+}
+
+#[derive(Debug, Default)]
+struct MethodIndex {
+    /// `(type_id, method)` → entry. One method name per type.
+    by_type_method: HashMap<(String, String), MethodEntry>,
+}
+
+impl MethodIndex {
+    fn build(
+        impls: &[ImplDef],
+        traits: &[TraitDef],
+        enums: &EnumIndex<'_>,
+    ) -> Result<Self, TypeError> {
+        let mut by_type_method = HashMap::new();
+        for im in impls {
+            let tr = traits
+                .iter()
+                .find(|t| t.name == im.trait_name)
+                .ok_or_else(|| {
+                    TypeError::Msg(format!(
+                        "impl of unknown trait {}",
+                        im.trait_name
+                    ))
+                })?;
+            let for_id = enums.resolve_id(&im.for_type, &im.module).map_err(|e| {
+                TypeError::Msg(format!(
+                    "impl {} for {}: unknown type: {e}",
+                    im.trait_name, im.for_type
+                ))
+            })?;
+            for method in &im.methods {
+                let tm = tr.methods.iter().find(|m| m.name == method.name).ok_or_else(|| {
+                    TypeError::Msg(format!(
+                        "impl {} for {}: unknown method {}",
+                        im.trait_name, im.for_type, method.name
+                    ))
+                })?;
+                if tm.params.len() != method.params.len() {
+                    return Err(TypeError::Msg(format!(
+                        "impl {} for {}.{}: param count mismatch",
+                        im.trait_name, im.for_type, method.name
+                    )));
+                }
+                for (a, b) in tm.params.iter().zip(method.params.iter()) {
+                    let at = resolve_type(&a.ty, enums, &tr.module)?;
+                    let bt = resolve_type(&b.ty, enums, &im.module)?;
+                    if !types_compat(&at, &bt) {
+                        return Err(TypeError::Msg(format!(
+                            "impl {} for {}.{}: param type mismatch",
+                            im.trait_name, im.for_type, method.name
+                        )));
+                    }
+                }
+                let want_ret = resolve_type(&tm.ret, enums, &tr.module)?;
+                let got_ret = resolve_type(&method.ret, enums, &im.module)?;
+                if !types_compat(&want_ret, &got_ret) {
+                    return Err(TypeError::Msg(format!(
+                        "impl {} for {}.{}: return type mismatch",
+                        im.trait_name, im.for_type, method.name
+                    )));
+                }
+                let key = (for_id.clone(), method.name.clone());
+                if by_type_method.contains_key(&key) {
+                    return Err(TypeError::Msg(format!(
+                        "duplicate method {} for type {}",
+                        method.name, for_id
+                    )));
+                }
+                let params: Result<Vec<_>, _> = method
+                    .params
+                    .iter()
+                    .map(|p| resolve_type(&p.ty, enums, &im.module))
+                    .collect();
+                by_type_method.insert(
+                    key,
+                    MethodEntry {
+                        mangled: impl_method_name(
+                            &im.trait_name,
+                            enum_bare_name(&for_id),
+                            &method.name,
+                        ),
+                        params: params?,
+                        ret: got_ret,
+                    },
+                );
+            }
+            // Every trait method must be implemented.
+            for tm in &tr.methods {
+                if !im.methods.iter().any(|m| m.name == tm.name) {
+                    return Err(TypeError::Msg(format!(
+                        "impl {} for {}: missing method {}",
+                        im.trait_name, im.for_type, tm.name
+                    )));
+                }
+            }
+        }
+        Ok(Self { by_type_method })
+    }
+
+    fn lookup(&self, type_id: &str, method: &str) -> Result<&MethodEntry, TypeError> {
+        self.by_type_method
+            .get(&(type_id.to_string(), method.to_string()))
+            .ok_or_else(|| {
+                TypeError::Msg(format!("no impl method {method} for type {type_id}"))
+            })
+    }
+}
+
+/// Turn `impl` methods into ordinary defs (`self` first) for FunIndex / codegen.
+pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
+    let enums = EnumIndex::build(&program.enums, &program.imports).map_err(|e| {
+        TypeError::Msg(e.to_string())
+    })?;
+    // Validate via MethodIndex build.
+    let _ = MethodIndex::build(&program.impls, &program.traits, &enums)?;
+    for im in &program.impls {
+        let for_id = enums.resolve_id(&im.for_type, &im.module).map_err(|e| {
+            TypeError::Msg(e.to_string())
+        })?;
+        let bare = enum_bare_name(&for_id).to_string();
+        for method in &im.methods {
+            let mangled = impl_method_name(&im.trait_name, &bare, &method.name);
+            if program
+                .defs
+                .iter()
+                .any(|d| d.module == im.module && d.name == mangled)
+            {
+                return Err(TypeError::Msg(format!(
+                    "impl method name collision {mangled}"
+                )));
+            }
+            let mut params = vec![Param {
+                name: "self".into(),
+                ty: Type::Adt(im.for_type.clone()),
+            }];
+            params.extend(method.params.clone());
+            program.defs.push(FunDef {
+                module: im.module.clone(),
+                name: mangled,
+                is_private: false,
+                type_params: Vec::new(),
+                params,
+                ret: method.ret.clone(),
+                body: method.body.clone(),
+            });
+        }
+    }
+    Ok(program)
+}
+
 /// Structural check for the kernel dialect: @main is IO[Unit]; defs/calls resolve.
 pub fn typecheck(program: &Program) -> Result<(), TypeError> {
-    let enums: HashMap<&str, &EnumDef> = program
-        .enums
-        .iter()
-        .map(|e| (e.name.as_str(), e))
-        .collect();
-    let funs = FunIndex::build(&program.defs, &program.imports).map_err(|e| match e {
+    let enums = EnumIndex::build(&program.enums, &program.imports).map_err(|e| match e {
+        ResolveError::Duplicate { module, name } => {
+            TypeError::Msg(format!("duplicate enum {module}.{name}"))
+        }
+        other => TypeError::Msg(other.to_string()),
+    })?;
+    let methods = MethodIndex::build(&program.impls, &program.traits, &enums)?;
+    let funs = FunIndex::build(&program.defs, &program.imports, &program.enums).map_err(|e| match e {
         ResolveError::Duplicate { module, name } => {
             TypeError::Msg(format!("duplicate def {module}.{name}"))
         }
@@ -54,14 +220,18 @@ pub fn typecheck(program: &Program) -> Result<(), TypeError> {
     for d in &program.defs {
         let mut env: HashMap<String, Type> = HashMap::new();
         for p in &d.params {
-            env.insert(p.name.clone(), p.ty.clone());
+            env.insert(
+                p.name.clone(),
+                resolve_type_in(&p.ty, &enums, &d.module, &d.type_params)?,
+            );
         }
-        let body_ty = infer(&d.body, &enums, &funs, &d.module, &mut env)?;
-        if !types_compat(&body_ty, &d.ret) {
+        let body_ty = infer(&d.body, &enums, &funs, &methods, &d.module, &mut env)?;
+        let ret = resolve_type_in(&d.ret, &enums, &d.module, &d.type_params)?;
+        if !types_compat(&body_ty, &ret) {
             return Err(TypeError::At {
                 msg: format!(
                     "def {} body {:?} does not match declared {:?}",
-                    d.name, body_ty, d.ret
+                    d.name, body_ty, ret
                 ),
                 span: d.body.span.clone(),
             });
@@ -72,6 +242,7 @@ pub fn typecheck(program: &Program) -> Result<(), TypeError> {
         &program.main.body,
         &enums,
         &funs,
+        &methods,
         &program.main.module,
         &mut env,
     )?;
@@ -84,10 +255,541 @@ pub fn typecheck(program: &Program) -> Result<(), TypeError> {
     }
 }
 
+fn resolve_type(ty: &Type, enums: &EnumIndex<'_>, module: &str) -> Result<Type, TypeError> {
+    resolve_type_in(ty, enums, module, &[])
+}
+
+fn resolve_type_in(
+    ty: &Type,
+    enums: &EnumIndex<'_>,
+    module: &str,
+    type_params: &[String],
+) -> Result<Type, TypeError> {
+    match ty {
+        Type::Var(n) => {
+            if type_params.iter().any(|p| p == n) {
+                Ok(Type::Var(n.clone()))
+            } else {
+                Err(TypeError::Msg(format!("unknown type parameter {n}")))
+            }
+        }
+        Type::Adt(n) => {
+            if type_params.iter().any(|p| p == n) {
+                Ok(Type::Var(n.clone()))
+            } else {
+                let id = enums.resolve_id(n, module).map_err(|e| {
+                    TypeError::Msg(format!("unknown type {n}: {e}"))
+                })?;
+                Ok(Type::Adt(id))
+            }
+        }
+        Type::Io(inner) => Ok(Type::Io(Box::new(resolve_type_in(
+            inner,
+            enums,
+            module,
+            type_params,
+        )?))),
+        other => Ok(other.clone()),
+    }
+}
+
+fn lookup_enum<'a>(
+    enums: &'a EnumIndex<'a>,
+    enum_name: &str,
+    current_module: &str,
+) -> Result<(&'a EnumDef, String), TypeError> {
+    let en = enums.resolve(enum_name, current_module).map_err(|e| {
+        TypeError::Msg(format!("unknown enum {enum_name}: {e}"))
+    })?;
+    Ok((en, enum_id(&en.module, &en.name)))
+}
+
+fn is_record_like(e: &EnumDef) -> bool {
+    e.is_record || (e.cases.len() == 1 && e.cases[0].name == e.name)
+}
+
+fn field_type(
+    base_ty: &Type,
+    field: &str,
+    enums: &EnumIndex<'_>,
+    current_module: &str,
+) -> Result<Type, TypeError> {
+    let Type::Adt(id) = base_ty else {
+        return Err(TypeError::Msg(format!(
+            "field access .{field} needs a record type, got {base_ty:?}"
+        )));
+    };
+    let (en, _) = lookup_enum(enums, id, current_module)?;
+    if !is_record_like(en) {
+        return Err(TypeError::Msg(format!(
+            "field access .{field} requires a record type, got enum {}",
+            en.name
+        )));
+    }
+    let case = en.cases.first().ok_or_else(|| {
+        TypeError::Msg(format!("record {} has no cases", en.name))
+    })?;
+    let (_, fty) = case
+        .fields
+        .iter()
+        .find(|(n, _)| n == field)
+        .ok_or_else(|| {
+            TypeError::Msg(format!("record {} has no field {field}", en.name))
+        })?;
+    resolve_type(fty, enums, &en.module)
+}
+
+/// Rewrite `p.x` into a single-arm match and `p.m(…)` into a mangled Call.
+pub fn resolve_field_access(mut program: Program) -> Result<Program, TypeError> {
+    let enums_owned = program.enums.clone();
+    let imports_owned = program.imports.clone();
+    let defs_owned = program.defs.clone();
+    let traits_owned = program.traits.clone();
+    let impls_owned = program.impls.clone();
+    let enums = EnumIndex::build(&enums_owned, &imports_owned).map_err(|e| {
+        TypeError::Msg(e.to_string())
+    })?;
+    let methods = MethodIndex::build(&impls_owned, &traits_owned, &enums)?;
+    let funs = FunIndex::build(&defs_owned, &imports_owned, &enums_owned).map_err(|e| {
+        TypeError::Msg(e.to_string())
+    })?;
+    for d in &mut program.defs {
+        let mut env: HashMap<String, Type> = HashMap::new();
+        for p in &d.params {
+            env.insert(p.name.clone(), resolve_type(&p.ty, &enums, &d.module)?);
+        }
+        d.body = rewrite_fields(
+            std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)),
+            &enums,
+            &funs,
+            &methods,
+            &d.module,
+            &mut env,
+        )?;
+    }
+    let mut env: HashMap<String, Type> = HashMap::new();
+    let main_mod = program.main.module.clone();
+    program.main.body = rewrite_fields(
+        std::mem::replace(&mut program.main.body, Expr::dummy(ExprKind::Unit)),
+        &enums,
+        &funs,
+        &methods,
+        &main_mod,
+        &mut env,
+    )?;
+    Ok(program)
+}
+
+fn rewrite_fields(
+    expr: Expr,
+    enums: &EnumIndex<'_>,
+    funs: &FunIndex<'_>,
+    methods: &MethodIndex,
+    current_module: &str,
+    env: &mut HashMap<String, Type>,
+) -> Result<Expr, TypeError> {
+    let span = expr.span.clone();
+    match expr.kind {
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+        } => {
+            let receiver = rewrite_fields(*receiver, enums, funs, methods, current_module, env)?;
+            let args = args
+                .into_iter()
+                .map(|a| rewrite_fields(a, enums, funs, methods, current_module, env))
+                .collect::<Result<Vec<_>, _>>()?;
+            let rt = infer(&receiver, enums, funs, methods, current_module, env)?;
+            let Type::Adt(id) = &rt else {
+                return Err(TypeError::Msg(format!(
+                    "method .{method} needs a record/ADT receiver, got {rt:?}"
+                ))
+                .with_span_if_bare(&span));
+            };
+            let entry = methods.lookup(id, &method)?;
+            let mut call_args = vec![receiver];
+            call_args.extend(args);
+            Ok(Expr::new(
+                ExprKind::Call {
+                    callee: entry.mangled.clone(),
+                    args: call_args,
+                },
+                span,
+            ))
+        }
+        ExprKind::Field { base, field } => {
+            let base = rewrite_fields(*base, enums, funs, methods, current_module, env)?;
+            let bt = infer(&base, enums, funs, methods, current_module, env)?;
+            let Type::Adt(id) = &bt else {
+                return Err(TypeError::Msg(format!(
+                    "field access .{field} needs a record type, got {bt:?}"
+                )).with_span_if_bare(&span));
+            };
+            let (en, eid) = lookup_enum(enums, id, current_module)?;
+            if !is_record_like(en) {
+                return Err(TypeError::Msg(format!(
+                    "field access .{field} requires a record type, got enum {}",
+                    en.name
+                ))
+                .with_span_if_bare(&span));
+            }
+            let case = en.cases.first().unwrap();
+            let idx = case
+                .fields
+                .iter()
+                .position(|(n, _)| n == &field)
+                .ok_or_else(|| {
+                    TypeError::Msg(format!("record {} has no field {field}", en.name))
+                        .with_span_if_bare(&span)
+                })?;
+            let binds: Vec<String> = (0..case.fields.len())
+                .map(|i| format!("__f{i}"))
+                .collect();
+            let body = Expr::new(ExprKind::Var(binds[idx].clone()), span.clone());
+            Ok(Expr::new(
+                ExprKind::Match {
+                    scrutinee: Box::new(base),
+                    arms: vec![crate::ast::MatchArm {
+                        pattern: crate::ast::Pattern::Adt {
+                            enum_name: eid,
+                            case_name: case.name.clone(),
+                            binds,
+                        },
+                        body,
+                    }],
+                },
+                span,
+            ))
+        }
+        ExprKind::IoPrintln(e) => Ok(Expr::new(
+            ExprKind::IoPrintln(Box::new(rewrite_fields(
+                *e,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+            )?)),
+            span,
+        )),
+        ExprKind::IoSleep(e) => Ok(Expr::new(
+            ExprKind::IoSleep(Box::new(rewrite_fields(
+                *e,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+            )?)),
+            span,
+        )),
+        ExprKind::IoFail(e) => Ok(Expr::new(
+            ExprKind::IoFail(Box::new(rewrite_fields(
+                *e,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+            )?)),
+            span,
+        )),
+        ExprKind::IoPure(e) => Ok(Expr::new(
+            ExprKind::IoPure(Box::new(rewrite_fields(
+                *e,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+            )?)),
+            span,
+        )),
+        ExprKind::FlatMap { inner, param, body } => {
+            let inner = rewrite_fields(*inner, enums, funs, methods, current_module, env)?;
+            let it = infer(&inner, enums, funs, methods, current_module, env)?;
+            let Type::Io(inner_t) = it else {
+                return Ok(Expr::new(
+                    ExprKind::FlatMap {
+                        inner: Box::new(inner),
+                        param,
+                        body: Box::new(rewrite_fields(
+                            *body,
+                            enums,
+                            funs,
+                            methods,
+                            current_module,
+                            env,
+                        )?),
+                    },
+                    span,
+                ));
+            };
+            let old = if let Some(ref p) = param {
+                env.insert(p.clone(), (*inner_t).clone())
+            } else {
+                None
+            };
+            let body = rewrite_fields(*body, enums, funs, methods, current_module, env)?;
+            if let Some(p) = &param {
+                if let Some(v) = old {
+                    env.insert(p.clone(), v);
+                } else {
+                    env.remove(p);
+                }
+            }
+            Ok(Expr::new(
+                ExprKind::FlatMap {
+                    inner: Box::new(inner),
+                    param,
+                    body: Box::new(body),
+                },
+                span,
+            ))
+        }
+        ExprKind::HandleErrorWith { inner, body } => Ok(Expr::new(
+            ExprKind::HandleErrorWith {
+                inner: Box::new(rewrite_fields(
+                    *inner,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?),
+                body: Box::new(rewrite_fields(
+                    *body,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::Attempt { inner } => Ok(Expr::new(
+            ExprKind::Attempt {
+                inner: Box::new(rewrite_fields(
+                    *inner,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::IoRace { left, right } => Ok(Expr::new(
+            ExprKind::IoRace {
+                left: Box::new(rewrite_fields(
+                    *left,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?),
+                right: Box::new(rewrite_fields(
+                    *right,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::IoBoth { left, right } => Ok(Expr::new(
+            ExprKind::IoBoth {
+                left: Box::new(rewrite_fields(
+                    *left,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?),
+                right: Box::new(rewrite_fields(
+                    *right,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::Let { name, value, body } => {
+            let value = rewrite_fields(*value, enums, funs, methods, current_module, env)?;
+            let vt = infer(&value, enums, funs, methods, current_module, env)?;
+            let old = env.insert(name.clone(), vt);
+            let body = rewrite_fields(*body, enums, funs, methods, current_module, env)?;
+            if let Some(v) = old {
+                env.insert(name.clone(), v);
+            } else {
+                env.remove(&name);
+            }
+            Ok(Expr::new(
+                ExprKind::Let {
+                    name,
+                    value: Box::new(value),
+                    body: Box::new(body),
+                },
+                span,
+            ))
+        }
+        ExprKind::ListLit { elems } => Ok(Expr::new(
+            ExprKind::ListLit {
+                elems: elems
+                    .into_iter()
+                    .map(|e| rewrite_fields(e, enums, funs, methods, current_module, env))
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+            span,
+        )),
+        ExprKind::Interpolate { parts } => Ok(Expr::new(
+            ExprKind::Interpolate {
+                parts: parts
+                    .into_iter()
+                    .map(|p| match p {
+                        crate::ast::InterpPart::Lit(s) => Ok(crate::ast::InterpPart::Lit(s)),
+                        crate::ast::InterpPart::Expr(e) => Ok(crate::ast::InterpPart::Expr(
+                            rewrite_fields(e, enums, funs, methods, current_module, env)?,
+                        )),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+            span,
+        )),
+        ExprKind::Match { scrutinee, arms } => {
+            let scrutinee = rewrite_fields(*scrutinee, enums, funs, methods, current_module, env)?;
+            let st = infer(&scrutinee, enums, funs, methods, current_module, env)?;
+            let mut out_arms = Vec::new();
+            for arm in arms {
+                let bound = bind_pattern(&arm.pattern, &st, enums, current_module, env)?;
+                let body = rewrite_fields(arm.body, enums, funs, methods, current_module, env)?;
+                unbind_pattern(bound, env);
+                out_arms.push(crate::ast::MatchArm {
+                    pattern: arm.pattern,
+                    body,
+                });
+            }
+            Ok(Expr::new(
+                ExprKind::Match {
+                    scrutinee: Box::new(scrutinee),
+                    arms: out_arms,
+                },
+                span,
+            ))
+        }
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => Ok(Expr::new(
+            ExprKind::If {
+                cond: Box::new(rewrite_fields(
+                    *cond,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?),
+                then_branch: Box::new(rewrite_fields(
+                    *then_branch,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?),
+                else_branch: Box::new(rewrite_fields(
+                    *else_branch,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::Binary { op, left, right } => Ok(Expr::new(
+            ExprKind::Binary {
+                op,
+                left: Box::new(rewrite_fields(
+                    *left,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?),
+                right: Box::new(rewrite_fields(
+                    *right,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::Call { callee, args } => Ok(Expr::new(
+            ExprKind::Call {
+                callee,
+                args: args
+                    .into_iter()
+                    .map(|e| rewrite_fields(e, enums, funs, methods, current_module, env))
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+            span,
+        )),
+        ExprKind::AdtConstruct {
+            enum_name,
+            case_name,
+            args,
+        } => Ok(Expr::new(
+            ExprKind::AdtConstruct {
+                enum_name,
+                case_name,
+                args: args
+                    .into_iter()
+                    .map(|e| rewrite_fields(e, enums, funs, methods, current_module, env))
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+            span,
+        )),
+        ExprKind::Lambda { param, body } => Ok(Expr::new(
+            ExprKind::Lambda {
+                param,
+                body: Box::new(rewrite_fields(
+                    *body,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?),
+            },
+            span,
+        )),
+        other => Ok(Expr::new(other, span)),
+    }
+}
+
 fn infer(
     expr: &Expr,
-    enums: &HashMap<&str, &EnumDef>,
+    enums: &EnumIndex<'_>,
     funs: &FunIndex<'_>,
+    methods: &MethodIndex,
     current_module: &str,
     env: &mut HashMap<String, Type>,
 ) -> Result<Type, TypeError> {
@@ -98,7 +800,7 @@ fn infer(
         ExprKind::StrLit(_) => Ok(Type::String),
         ExprKind::ListLit { elems } => {
             for e in elems {
-                infer(e, enums, funs, current_module, env)?;
+                infer(e, enums, funs, methods, current_module, env)?;
             }
             Ok(Type::List)
         }
@@ -107,7 +809,7 @@ fn infer(
                 match part {
                     crate::ast::InterpPart::Lit(_) => {}
                     crate::ast::InterpPart::Expr(e) => {
-                        let t = infer(e, enums, funs, current_module, env)?;
+                        let t = infer(e, enums, funs, methods, current_module, env)?;
                         if !matches!(t, Type::String | Type::Int | Type::Opaque(_)) {
                             return Err(TypeError::Msg(format!(
                                 "interpolation hole must be String or Int, got {t:?}"
@@ -119,36 +821,63 @@ fn infer(
             Ok(Type::String)
         },
         ExprKind::IoPrintln(e) | ExprKind::IoFail(e) => {
-            let t = infer(e, enums, funs, current_module, env)?;
+            let t = infer(e, enums, funs, methods, current_module, env)?;
             expect_ty(&t, &Type::String)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         ExprKind::IoSleep(e) => {
-            let t = infer(e, enums, funs, current_module, env)?;
+            let t = infer(e, enums, funs, methods, current_module, env)?;
             expect_ty(&t, &Type::Int)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         ExprKind::IoDelayUnit => Ok(Type::Io(Box::new(Type::Unit))),
         ExprKind::IoPure(inner) => {
-            let t = infer(inner, enums, funs, current_module, env)?;
+            let t = infer(inner, enums, funs, methods, current_module, env)?;
             Ok(Type::Io(Box::new(t)))
         }
         ExprKind::Var(name) => env
             .get(name)
             .cloned()
             .ok_or_else(|| TypeError::Msg(format!("unbound variable {name}"))),
+        ExprKind::Field { base, field } => {
+            let bt = infer(base, enums, funs, methods, current_module, env)?;
+            field_type(&bt, field, enums, current_module)
+        },
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+        } => {
+            let rt = infer(receiver, enums, funs, methods, current_module, env)?;
+            let Type::Adt(id) = &rt else {
+                return Err(TypeError::Msg(format!(
+                    "method .{method} needs a record/ADT receiver, got {rt:?}"
+                )));
+            };
+            let entry = methods.lookup(id, method)?;
+            if args.len() != entry.params.len() {
+                return Err(TypeError::Msg(format!(
+                    ".{method} expects {} arg(s), got {}",
+                    entry.params.len(),
+                    args.len()
+                )));
+            }
+            for (arg, want) in args.iter().zip(entry.params.iter()) {
+                let at = infer(arg, enums, funs, methods, current_module, env)?;
+                expect_ty(&at, want)?;
+            }
+            Ok(entry.ret.clone())
+        },
         ExprKind::AdtConstruct {
             enum_name,
             case_name,
             args,
         } => {
-            let en = enums.get(enum_name.as_str()).ok_or_else(|| {
-                TypeError::Msg(format!("unknown enum {enum_name}"))
-            })?;
+            let (en, id) = lookup_enum(enums, enum_name, current_module)?;
             let case = en.cases.iter().find(|c| c.name == *case_name).ok_or_else(|| {
                 TypeError::Msg(format!("unknown case {enum_name}.{case_name}"))
             })?;
-            check_payload_fields(enum_name, case)?;
+            check_payload_fields(&id, case)?;
             if args.len() != case.fields.len() {
                 return Err(TypeError::Msg(format!(
                     "{enum_name}.{case_name} expects {} arg(s), got {}",
@@ -157,15 +886,16 @@ fn infer(
                 )));
             }
             for (arg, (_fname, fty)) in args.iter().zip(case.fields.iter()) {
-                let at = infer(arg, enums, funs, current_module, env)?;
-                expect_ty(&at, fty)?;
+                let at = infer(arg, enums, funs, methods, current_module, env)?;
+                let want = resolve_type(fty, enums, &en.module)?;
+                expect_ty(&at, &want)?;
             }
-            Ok(Type::Adt(enum_name.clone()))
+            Ok(Type::Adt(id))
         }
         ExprKind::Let { name, value, body } => {
-            let vt = infer(value, enums, funs, current_module, env)?;
+            let vt = infer(value, enums, funs, methods, current_module, env)?;
             let old = env.insert(name.clone(), vt);
-            let bt = infer(body, enums, funs, current_module, env)?;
+            let bt = infer(body, enums, funs, methods, current_module, env)?;
             if let Some(v) = old {
                 env.insert(name.clone(), v);
             } else {
@@ -178,14 +908,14 @@ fn infer(
             then_branch,
             else_branch,
         } => {
-            let ct = infer(cond, enums, funs, current_module, env)?;
+            let ct = infer(cond, enums, funs, methods, current_module, env)?;
             if !matches!(ct, Type::Int | Type::Bool) {
                 return Err(TypeError::Msg(format!(
                     "if condition must be Int/Bool, got {ct:?}"
                 )));
             }
-            let tt = infer(then_branch, enums, funs, current_module, env)?;
-            let et = infer(else_branch, enums, funs, current_module, env)?;
+            let tt = infer(then_branch, enums, funs, methods, current_module, env)?;
+            let et = infer(else_branch, enums, funs, methods, current_module, env)?;
             if !types_compat(&tt, &et) {
                 return Err(TypeError::Msg(format!(
                     "if branches disagree: {tt:?} vs {et:?}"
@@ -194,8 +924,8 @@ fn infer(
             Ok(tt)
         }
         ExprKind::Binary { op, left, right } => {
-            let lt = infer(left, enums, funs, current_module, env)?;
-            let rt = infer(right, enums, funs, current_module, env)?;
+            let lt = infer(left, enums, funs, methods, current_module, env)?;
+            let rt = infer(right, enums, funs, methods, current_module, env)?;
             match op {
                 BinOp::Add if matches!(lt, Type::String) && matches!(rt, Type::String) => {
                     Ok(Type::String)
@@ -237,13 +967,15 @@ fn infer(
                 }
             }
         }
-        ExprKind::Call { callee, args } => infer_call(callee, args, enums, funs, current_module, env),
+        ExprKind::Call { callee, args } => {
+            infer_call(callee, args, enums, funs, methods, current_module, env)
+        }
         ExprKind::Match { scrutinee, arms } => {
-            let st = infer(scrutinee, enums, funs, current_module, env)?;
+            let st = infer(scrutinee, enums, funs, methods, current_module, env)?;
             let mut result: Option<Type> = None;
             for arm in arms {
-                let bound = bind_pattern(&arm.pattern, &st, enums, env)?;
-                let bt = infer(&arm.body, enums, funs, current_module, env)?;
+                let bound = bind_pattern(&arm.pattern, &st, enums, current_module, env)?;
+                let bt = infer(&arm.body, enums, funs, methods, current_module, env)?;
                 unbind_pattern(bound, env);
                 match &result {
                     None => result = Some(bt),
@@ -258,7 +990,7 @@ fn infer(
             result.ok_or_else(|| TypeError::Msg("empty match".into()))
         }
         ExprKind::FlatMap { inner, param, body } => {
-            let it = infer(inner, enums, funs, current_module, env)?;
+            let it = infer(inner, enums, funs, methods, current_module, env)?;
             let Type::Io(inner_t) = it else {
                 return Err(TypeError::Msg("flatMap receiver must be IO[_]".into()));
             };
@@ -267,7 +999,7 @@ fn infer(
             } else {
                 None
             };
-            let bt = infer(body, enums, funs, current_module, env)?;
+            let bt = infer(body, enums, funs, methods, current_module, env)?;
             if let Some(p) = param {
                 if let Some(v) = old {
                     env.insert(p.clone(), v);
@@ -283,13 +1015,13 @@ fn infer(
             Ok(bt)
         }
         ExprKind::HandleErrorWith { inner, body } => {
-            let it = infer(inner, enums, funs, current_module, env)?;
+            let it = infer(inner, enums, funs, methods, current_module, env)?;
             if !matches!(it, Type::Io(_)) {
                 return Err(TypeError::Msg(
                     "handleErrorWith receiver must be IO[_]".into(),
                 ));
             }
-            let bt = infer(body, enums, funs, current_module, env)?;
+            let bt = infer(body, enums, funs, methods, current_module, env)?;
             if !matches!(bt, Type::Io(_)) {
                 return Err(TypeError::Msg(
                     "handleErrorWith body must return IO[_]".into(),
@@ -298,7 +1030,7 @@ fn infer(
             Ok(bt)
         }
         ExprKind::Attempt { inner } => {
-            let it = infer(inner, enums, funs, current_module, env)?;
+            let it = infer(inner, enums, funs, methods, current_module, env)?;
             if !matches!(it, Type::Io(_)) {
                 return Err(TypeError::Msg("attempt receiver must be IO[_]".into()));
             }
@@ -313,7 +1045,7 @@ fn infer(
                     env.insert(p.clone(), Type::Opaque("Param".into())),
                 )
             });
-            let _ = infer(body, enums, funs, current_module, env)?;
+            let _ = infer(body, enums, funs, methods, current_module, env)?;
             if let Some((p, old_val)) = old {
                 match old_val {
                     Some(v) => {
@@ -327,8 +1059,8 @@ fn infer(
             Ok(Type::Opaque("TapFn".into()))
         }
         ExprKind::IoRace { left, right } | ExprKind::IoBoth { left, right } => {
-            let lt = infer(left, enums, funs, current_module, env)?;
-            let rt = infer(right, enums, funs, current_module, env)?;
+            let lt = infer(left, enums, funs, methods, current_module, env)?;
+            let rt = infer(right, enums, funs, methods, current_module, env)?;
             if !matches!(lt, Type::Io(_)) || !matches!(rt, Type::Io(_)) {
                 return Err(TypeError::Msg(
                     "IO.race/both arguments must be IO[_]".into(),
@@ -348,14 +1080,15 @@ fn infer(
 fn infer_call(
     callee: &str,
     args: &[Expr],
-    enums: &HashMap<&str, &EnumDef>,
+    enums: &EnumIndex<'_>,
     funs: &FunIndex<'_>,
+    methods: &MethodIndex,
     current_module: &str,
     env: &mut HashMap<String, Type>,
 ) -> Result<Type, TypeError> {
     let mut arg_tys = Vec::new();
     for a in args {
-        arg_tys.push(infer(a, enums, funs, current_module, env)?);
+        arg_tys.push(infer(a, enums, funs, methods, current_module, env)?);
     }
     match callee {
         "Str.concat" => {
@@ -695,15 +1428,26 @@ fn infer_call(
                     arg_tys.len()
                 )));
             }
-            for (p, a) in f.params.iter().zip(arg_tys.iter()) {
-                if !types_compat(a, &p.ty) {
-                    return Err(TypeError::Msg(format!(
-                        "{callee} arg type mismatch: expected {:?}, got {:?}",
-                        p.ty, a
-                    )));
+            if f.type_params.is_empty() {
+                for (p, a) in f.params.iter().zip(arg_tys.iter()) {
+                    let want = resolve_type(&p.ty, enums, &f.module)?;
+                    if !types_compat(a, &want) {
+                        return Err(TypeError::Msg(format!(
+                            "{callee} arg type mismatch: expected {:?}, got {:?}",
+                            want, a
+                        )));
+                    }
                 }
+                resolve_type(&f.ret, enums, &f.module)
+            } else {
+                let mut subst: HashMap<String, Type> = HashMap::new();
+                for (p, a) in f.params.iter().zip(arg_tys.iter()) {
+                    let want = resolve_type_in(&p.ty, enums, &f.module, &f.type_params)?;
+                    unify_types(&want, a, &mut subst)?;
+                }
+                let ret = resolve_type_in(&f.ret, enums, &f.module, &f.type_params)?;
+                Ok(apply_subst(&ret, &subst))
             }
-            Ok(f.ret.clone())
         }
     }
 }
@@ -746,7 +1490,8 @@ fn check_payload_fields(enum_name: &str, case: &crate::ast::EnumCase) -> Result<
 fn bind_pattern(
     pat: &crate::ast::Pattern,
     scrut: &Type,
-    enums: &HashMap<&str, &EnumDef>,
+    enums: &EnumIndex<'_>,
+    current_module: &str,
     env: &mut HashMap<String, Type>,
 ) -> Result<Vec<(String, Option<Type>)>, TypeError> {
     match pat {
@@ -756,17 +1501,15 @@ fn bind_pattern(
             case_name,
             binds,
         } => {
-            let en = enums.get(enum_name.as_str()).ok_or_else(|| {
-                TypeError::Msg(format!("unknown enum {enum_name} in pattern"))
-            })?;
+            let (en, id) = lookup_enum(enums, enum_name, current_module)?;
             let case = en.cases.iter().find(|c| c.name == *case_name).ok_or_else(|| {
                 TypeError::Msg(format!(
                     "unknown case {enum_name}.{case_name} in pattern"
                 ))
             })?;
-            check_payload_fields(enum_name, case)?;
+            check_payload_fields(&id, case)?;
             match scrut {
-                Type::Adt(n) if n == enum_name => {}
+                Type::Adt(n) if n == &id => {}
                 Type::Opaque(_) => {}
                 other => {
                     return Err(TypeError::Msg(format!(
@@ -800,7 +1543,8 @@ fn bind_pattern(
             }
             let mut restored = Vec::new();
             for (name, (_, fty)) in binds.iter().zip(case.fields.iter()) {
-                let old = env.insert(name.clone(), fty.clone());
+                let fty = resolve_type(fty, enums, &en.module)?;
+                let old = env.insert(name.clone(), fty);
                 restored.push((name.clone(), old));
             }
             Ok(restored)
@@ -828,8 +1572,556 @@ fn types_compat(a: &Type, b: &Type) -> bool {
         (Type::List, Type::List) => true,
         (Type::Io(_), Type::Io(_)) => true,
         (Type::Adt(x), Type::Adt(y)) => x == y,
+        (Type::Var(x), Type::Var(y)) => x == y,
         (Type::Opaque(_), _) | (_, Type::Opaque(_)) => true,
         _ => false,
+    }
+}
+
+fn unify_types(
+    pattern: &Type,
+    concrete: &Type,
+    subst: &mut HashMap<String, Type>,
+) -> Result<(), TypeError> {
+    match (pattern, concrete) {
+        (Type::Var(n), t) => {
+            if let Some(prev) = subst.get(n) {
+                if !types_compat(prev, t) {
+                    return Err(TypeError::Msg(format!(
+                        "type parameter {n} constrained to both {prev:?} and {t:?}"
+                    )));
+                }
+            } else {
+                if !mono_type_ok(t) {
+                    return Err(TypeError::Msg(format!(
+                        "cannot monomorphize type parameter {n} to {t:?}"
+                    )));
+                }
+                subst.insert(n.clone(), t.clone());
+            }
+            Ok(())
+        }
+        (Type::Io(a), Type::Io(b)) => unify_types(a, b, subst),
+        (a, b) if types_compat(a, b) => Ok(()),
+        (a, b) => Err(TypeError::Msg(format!(
+            "type mismatch: expected {a:?}, got {b:?}"
+        ))),
+    }
+}
+
+fn mono_type_ok(t: &Type) -> bool {
+    matches!(
+        t,
+        Type::Unit | Type::Int | Type::String | Type::Bool | Type::List | Type::Adt(_)
+    )
+}
+
+fn apply_subst(ty: &Type, subst: &HashMap<String, Type>) -> Type {
+    match ty {
+        Type::Var(n) => subst.get(n).cloned().unwrap_or_else(|| ty.clone()),
+        Type::Io(inner) => Type::Io(Box::new(apply_subst(inner, subst))),
+        other => other.clone(),
+    }
+}
+
+fn type_mangle(t: &Type) -> String {
+    match t {
+        Type::Unit => "Unit".into(),
+        Type::Int => "Int".into(),
+        Type::String => "String".into(),
+        Type::Bool => "Bool".into(),
+        Type::List => "List".into(),
+        Type::Adt(id) => id.replace('.', "_"),
+        Type::Io(inner) => format!("IO_{}", type_mangle(inner)),
+        Type::Var(n) => n.clone(),
+        Type::Opaque(n) => n.clone(),
+    }
+}
+
+pub fn gen_method_name(def_name: &str, subst: &HashMap<String, Type>, type_params: &[String]) -> String {
+    let mut parts = vec![format!("__gen_{def_name}")];
+    for p in type_params {
+        let t = subst.get(p).expect("subst complete");
+        parts.push(type_mangle(t));
+    }
+    parts.join("_")
+}
+
+/// Specialize generic defs at call sites; drop templates.
+pub fn monomorphize(mut program: Program) -> Result<Program, TypeError> {
+    let enums_owned = program.enums.clone();
+    let imports_owned = program.imports.clone();
+    let traits_owned = program.traits.clone();
+    let impls_owned = program.impls.clone();
+    let defs_owned = program.defs.clone();
+    let enums = EnumIndex::build(&enums_owned, &imports_owned).map_err(|e| {
+        TypeError::Msg(e.to_string())
+    })?;
+    let methods = MethodIndex::build(&impls_owned, &traits_owned, &enums)?;
+    let funs = FunIndex::build(&defs_owned, &imports_owned, &enums_owned).map_err(|e| {
+        TypeError::Msg(e.to_string())
+    })?;
+
+    let mut specialized: HashMap<String, FunDef> = HashMap::new();
+    for d in &mut program.defs {
+        let mut env: HashMap<String, Type> = HashMap::new();
+        for p in &d.params {
+            env.insert(
+                p.name.clone(),
+                resolve_type_in(&p.ty, &enums, &d.module, &d.type_params)?,
+            );
+        }
+        d.body = mono_expr(
+            std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)),
+            &enums,
+            &funs,
+            &methods,
+            &d.module,
+            &mut env,
+            &mut specialized,
+        )?;
+    }
+    let mut env: HashMap<String, Type> = HashMap::new();
+    let main_mod = program.main.module.clone();
+    program.main.body = mono_expr(
+        std::mem::replace(&mut program.main.body, Expr::dummy(ExprKind::Unit)),
+        &enums,
+        &funs,
+        &methods,
+        &main_mod,
+        &mut env,
+        &mut specialized,
+    )?;
+
+    // Drop generic templates; keep non-generic defs + specialized clones.
+    program.defs.retain(|d| d.type_params.is_empty());
+    for (name, def) in specialized {
+        if program.defs.iter().any(|d| d.module == def.module && d.name == name) {
+            continue;
+        }
+        program.defs.push(def);
+    }
+    Ok(program)
+}
+
+fn mono_expr(
+    expr: Expr,
+    enums: &EnumIndex<'_>,
+    funs: &FunIndex<'_>,
+    methods: &MethodIndex,
+    current_module: &str,
+    env: &mut HashMap<String, Type>,
+    specialized: &mut HashMap<String, FunDef>,
+) -> Result<Expr, TypeError> {
+    let span = expr.span.clone();
+    match expr.kind {
+        ExprKind::Call { callee, args } => {
+            let args = args
+                .into_iter()
+                .map(|a| mono_expr(a, enums, funs, methods, current_module, env, specialized))
+                .collect::<Result<Vec<_>, _>>()?;
+            if let Ok(f) = funs.resolve(&callee, current_module) {
+                if !f.type_params.is_empty() {
+                    let mut arg_tys = Vec::new();
+                    for a in &args {
+                        arg_tys.push(infer(a, enums, funs, methods, current_module, env)?);
+                    }
+                    let mut subst: HashMap<String, Type> = HashMap::new();
+                    for (p, a) in f.params.iter().zip(arg_tys.iter()) {
+                        let want = resolve_type_in(&p.ty, enums, &f.module, &f.type_params)?;
+                        unify_types(&want, a, &mut subst)?;
+                    }
+                    let mangled = gen_method_name(&f.name, &subst, &f.type_params);
+                    if !specialized.contains_key(&mangled) {
+                        let params: Result<Vec<_>, _> = f
+                            .params
+                            .iter()
+                            .map(|p| {
+                                let ty = resolve_type_in(&p.ty, enums, &f.module, &f.type_params)?;
+                                Ok(Param {
+                                    name: p.name.clone(),
+                                    ty: apply_subst(&ty, &subst),
+                                })
+                            })
+                            .collect();
+                        let ret = apply_subst(
+                            &resolve_type_in(&f.ret, enums, &f.module, &f.type_params)?,
+                            &subst,
+                        );
+                        specialized.insert(
+                            mangled.clone(),
+                            FunDef {
+                                module: f.module.clone(),
+                                name: mangled.clone(),
+                                is_private: f.is_private,
+                                type_params: Vec::new(),
+                                params: params?,
+                                ret,
+                                body: f.body.clone(),
+                            },
+                        );
+                    }
+                    return Ok(Expr::new(
+                        ExprKind::Call {
+                            callee: mangled,
+                            args,
+                        },
+                        span,
+                    ));
+                }
+            }
+            Ok(Expr::new(ExprKind::Call { callee, args }, span))
+        }
+        ExprKind::IoPrintln(e) => Ok(Expr::new(
+            ExprKind::IoPrintln(Box::new(mono_expr(
+                *e,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                specialized,
+            )?)),
+            span,
+        )),
+        ExprKind::IoSleep(e) => Ok(Expr::new(
+            ExprKind::IoSleep(Box::new(mono_expr(
+                *e,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                specialized,
+            )?)),
+            span,
+        )),
+        ExprKind::IoFail(e) => Ok(Expr::new(
+            ExprKind::IoFail(Box::new(mono_expr(
+                *e,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                specialized,
+            )?)),
+            span,
+        )),
+        ExprKind::IoPure(e) => Ok(Expr::new(
+            ExprKind::IoPure(Box::new(mono_expr(
+                *e,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                specialized,
+            )?)),
+            span,
+        )),
+        ExprKind::FlatMap { inner, param, body } => {
+            let inner = mono_expr(*inner, enums, funs, methods, current_module, env, specialized)?;
+            let it = infer(&inner, enums, funs, methods, current_module, env)?;
+            let old = if let (Type::Io(inner_t), Some(ref p)) = (&it, &param) {
+                env.insert(p.clone(), (**inner_t).clone())
+            } else {
+                None
+            };
+            let body = mono_expr(*body, enums, funs, methods, current_module, env, specialized)?;
+            if let Some(p) = &param {
+                if let Some(v) = old {
+                    env.insert(p.clone(), v);
+                } else {
+                    env.remove(p);
+                }
+            }
+            Ok(Expr::new(
+                ExprKind::FlatMap {
+                    inner: Box::new(inner),
+                    param,
+                    body: Box::new(body),
+                },
+                span,
+            ))
+        }
+        ExprKind::HandleErrorWith { inner, body } => Ok(Expr::new(
+            ExprKind::HandleErrorWith {
+                inner: Box::new(mono_expr(
+                    *inner,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+                body: Box::new(mono_expr(
+                    *body,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::Attempt { inner } => Ok(Expr::new(
+            ExprKind::Attempt {
+                inner: Box::new(mono_expr(
+                    *inner,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::IoRace { left, right } => Ok(Expr::new(
+            ExprKind::IoRace {
+                left: Box::new(mono_expr(
+                    *left,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+                right: Box::new(mono_expr(
+                    *right,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::IoBoth { left, right } => Ok(Expr::new(
+            ExprKind::IoBoth {
+                left: Box::new(mono_expr(
+                    *left,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+                right: Box::new(mono_expr(
+                    *right,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::Let { name, value, body } => {
+            let value = mono_expr(*value, enums, funs, methods, current_module, env, specialized)?;
+            let vt = infer(&value, enums, funs, methods, current_module, env)?;
+            let old = env.insert(name.clone(), vt);
+            let body = mono_expr(*body, enums, funs, methods, current_module, env, specialized)?;
+            if let Some(v) = old {
+                env.insert(name.clone(), v);
+            } else {
+                env.remove(&name);
+            }
+            Ok(Expr::new(
+                ExprKind::Let {
+                    name,
+                    value: Box::new(value),
+                    body: Box::new(body),
+                },
+                span,
+            ))
+        }
+        ExprKind::ListLit { elems } => Ok(Expr::new(
+            ExprKind::ListLit {
+                elems: elems
+                    .into_iter()
+                    .map(|e| mono_expr(e, enums, funs, methods, current_module, env, specialized))
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+            span,
+        )),
+        ExprKind::Interpolate { parts } => Ok(Expr::new(
+            ExprKind::Interpolate {
+                parts: parts
+                    .into_iter()
+                    .map(|p| match p {
+                        crate::ast::InterpPart::Lit(s) => Ok(crate::ast::InterpPart::Lit(s)),
+                        crate::ast::InterpPart::Expr(e) => Ok(crate::ast::InterpPart::Expr(
+                            mono_expr(e, enums, funs, methods, current_module, env, specialized)?,
+                        )),
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+            span,
+        )),
+        ExprKind::Match { scrutinee, arms } => {
+            let scrutinee =
+                mono_expr(*scrutinee, enums, funs, methods, current_module, env, specialized)?;
+            let st = infer(&scrutinee, enums, funs, methods, current_module, env)?;
+            let mut out_arms = Vec::new();
+            for arm in arms {
+                let bound = bind_pattern(&arm.pattern, &st, enums, current_module, env)?;
+                let body =
+                    mono_expr(arm.body, enums, funs, methods, current_module, env, specialized)?;
+                unbind_pattern(bound, env);
+                out_arms.push(crate::ast::MatchArm {
+                    pattern: arm.pattern,
+                    body,
+                });
+            }
+            Ok(Expr::new(
+                ExprKind::Match {
+                    scrutinee: Box::new(scrutinee),
+                    arms: out_arms,
+                },
+                span,
+            ))
+        }
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => Ok(Expr::new(
+            ExprKind::If {
+                cond: Box::new(mono_expr(
+                    *cond,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+                then_branch: Box::new(mono_expr(
+                    *then_branch,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+                else_branch: Box::new(mono_expr(
+                    *else_branch,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::Binary { op, left, right } => Ok(Expr::new(
+            ExprKind::Binary {
+                op,
+                left: Box::new(mono_expr(
+                    *left,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+                right: Box::new(mono_expr(
+                    *right,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::AdtConstruct {
+            enum_name,
+            case_name,
+            args,
+        } => Ok(Expr::new(
+            ExprKind::AdtConstruct {
+                enum_name,
+                case_name,
+                args: args
+                    .into_iter()
+                    .map(|e| mono_expr(e, enums, funs, methods, current_module, env, specialized))
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+            span,
+        )),
+        ExprKind::Field { base, field } => Ok(Expr::new(
+            ExprKind::Field {
+                base: Box::new(mono_expr(
+                    *base,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+                field,
+            },
+            span,
+        )),
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+        } => Ok(Expr::new(
+            ExprKind::MethodCall {
+                receiver: Box::new(mono_expr(
+                    *receiver,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+                method,
+                args: args
+                    .into_iter()
+                    .map(|e| mono_expr(e, enums, funs, methods, current_module, env, specialized))
+                    .collect::<Result<Vec<_>, _>>()?,
+            },
+            span,
+        )),
+        ExprKind::Lambda { param, body } => Ok(Expr::new(
+            ExprKind::Lambda {
+                param,
+                body: Box::new(mono_expr(
+                    *body,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+            },
+            span,
+        )),
+        other => Ok(Expr::new(other, span)),
     }
 }
 

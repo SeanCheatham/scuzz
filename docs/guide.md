@@ -38,6 +38,9 @@ Console kit: `Sys.args(): IO[List]`, `Sys.readLine(): IO[String]` (EOF → `""`)
 - **`for { x = e; y <- io } yield r`** as the primary binder (pure `=`, effect `<-`). Nested `for` in `if` / lambda arms when multi-bind is needed.
 - No `val` / statement blocks
 - Literals: ints, strings, `()`, `s"…$x…"`, list literals `[a, b]`
+- Enums + **`record Name(f1: T1, …)`** (construct `Name(…)`, match `case Name(…)`, field `p.x` — see `examples/record` / `examples/adt`)
+- Thin **traits** / `impl` with static dispatch (`p.show()` — see `examples/trait`)
+- Thin **generics** (Stage 0): `def id[T](x: T): T = x` monomorphized at call sites (`examples/generic`)
 - Blessed impurity only: `IO.println` / `sleep` / `fail` / `pure` / `race` / `both`, `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Fs.*`, `Sys.args` / `Sys.readLine` / `Sys.exec` / `Sys.getenv`, `Clock.*`, `Random.*`, `Net.httpGet`
 - No raw side effects in View build — taps may run `IO` via `sz_io_unsafe_run`
 
@@ -73,7 +76,7 @@ Reusable local packages are ordinary projects without `@main`. Depend on them fr
 shared = { path = "../shared" }
 ```
 
-Dependency sources are merged into one program with the root (and any transitive path deps). See `examples/shared` + `examples/counter`, and [scuzz-toml.md](schemas/scuzz-toml.md). Same-package files are modules by stem (`Foo.scuzz` → `Foo`); `private def` stays in-module (default public); `import Module.name` brings a public def into bare scope. See `examples/modules` and [vision.md](vision.md#modules-and-source-shape).
+Dependency sources are merged into one program with the root (and any transitive path deps). See `examples/shared` + `examples/counter`, and [scuzz-toml.md](schemas/scuzz-toml.md). Same-package files are modules by stem (`Foo.scuzz` → `Foo`); `private def` stays in-module (default public); `import Module.name` brings a public def or enum into bare scope. Enums are namespaced like defs (same bare name in two modules is allowed). See `examples/modules` and [vision.md](vision.md#modules-and-source-shape).
 
 ## Laws, sim, and impurity
 
@@ -114,5 +117,9 @@ src/
 | `examples/live` | Stay-open Window (`Ui.run`; q/Esc) |
 | `examples/impurity` | Clock / Random / Fs / Net / Sys console kit |
 | `examples/concurrency` | `Ref` / `Queue` / `Deferred` park under `IO.both` / `IO.race` |
+| `examples/record` | `record Point(…)` + `p.x` field access |
+| `examples/trait` | `trait` / `impl` + `p.show()` static dispatch |
+| `examples/generic` | `def id[T](…)` monomorphized generics (Stage 0) |
+| `examples/modules` | stem modules, `private def`, `import`, enum-per-module |
 
 Full gallery: [README.md](../README.md#samples-gallery). Edit [vision.md](vision.md) when changing GC, Skia, effects, UI boundaries, or language direction.

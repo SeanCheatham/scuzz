@@ -1,6 +1,6 @@
 use crate::ast::{
-    BinOp, EnumCase, EnumDef, Expr, ExprKind, ForBinder, FunDef, Import, InterpPart, MainDef,
-    MatchArm, Param, Pattern, Program, Type,
+    BinOp, EnumCase, EnumDef, Expr, ExprKind, ForBinder, FunDef, ImplDef, ImplMethod, Import,
+    InterpPart, MainDef, MatchArm, Param, Pattern, Program, TraitDef, TraitMethod, Type,
 };
 use crate::lexer::{lex, InterpTok, LexError, SpannedToken, Token};
 use crate::resolve::module_id_from_label;
@@ -64,11 +64,13 @@ pub fn parse_file(source: &str, file: &str) -> Result<Program, ParseError> {
     p.parse_program()
 }
 
-/// Parse multiple source files into one program (packages must agree; enums merge globally;
-/// defs are namespaced by file-stem module — same bare name in two modules is allowed).
+/// Parse multiple source files into one program (packages must agree; defs and
+/// enums are namespaced by file-stem module — same bare name in two modules is allowed).
 pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError> {
     let mut package: Option<Vec<String>> = None;
     let mut enums: Vec<EnumDef> = Vec::new();
+    let mut traits: Vec<TraitDef> = Vec::new();
+    let mut impls: Vec<ImplDef> = Vec::new();
     let mut defs: Vec<FunDef> = Vec::new();
     let mut imports: Vec<Import> = Vec::new();
     let mut main: Option<MainDef> = None;
@@ -88,13 +90,41 @@ pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError
             }
         }
         for e in prog.enums {
-            if enums.iter().any(|x| x.name == e.name) {
+            if enums
+                .iter()
+                .any(|x| x.module == e.module && x.name == e.name)
+            {
                 return Err(ParseError::Msg(format!(
-                    "{name}: duplicate enum {}",
-                    e.name
+                    "{name}: duplicate enum {}.{}",
+                    e.module, e.name
                 )));
             }
             enums.push(e);
+        }
+        for t in prog.traits {
+            if traits
+                .iter()
+                .any(|x| x.module == t.module && x.name == t.name)
+            {
+                return Err(ParseError::Msg(format!(
+                    "{name}: duplicate trait {}.{}",
+                    t.module, t.name
+                )));
+            }
+            traits.push(t);
+        }
+        for im in prog.impls {
+            if impls.iter().any(|x| {
+                x.module == im.module
+                    && x.trait_name == im.trait_name
+                    && x.for_type == im.for_type
+            }) {
+                return Err(ParseError::Msg(format!(
+                    "{name}: duplicate impl {} for {}",
+                    im.trait_name, im.for_type
+                )));
+            }
+            impls.push(im);
         }
         for d in prog.defs {
             if defs
@@ -123,6 +153,8 @@ pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError
     Ok(Program {
         package: package.unwrap_or_default(),
         enums,
+        traits,
+        impls,
         defs,
         main,
         imports,
@@ -214,6 +246,8 @@ impl Parser {
         }
 
         let mut enums = Vec::new();
+        let mut traits = Vec::new();
+        let mut impls = Vec::new();
         let mut defs = Vec::new();
         let mut imports = Vec::new();
         let mut main = MainDef {
@@ -225,6 +259,9 @@ impl Parser {
         loop {
             match self.peek() {
                 Token::Enum => enums.push(self.parse_enum()?),
+                Token::Record => enums.push(self.parse_record()?),
+                Token::Trait => traits.push(self.parse_trait()?),
+                Token::Impl => impls.push(self.parse_impl()?),
                 Token::Import => imports.push(self.parse_import()?),
                 Token::Private => {
                     self.bump();
@@ -240,7 +277,7 @@ impl Parser {
                 Token::Eof => break,
                 other => {
                     return Err(self.err(format!(
-                        "expected enum/import/def/private def/@main, got {other:?}"
+                        "expected enum/record/trait/impl/import/def/private def/@main, got {other:?}"
                     )))
                 }
             }
@@ -249,6 +286,8 @@ impl Parser {
         Ok(Program {
             package,
             enums,
+            traits,
+            impls,
             defs,
             main,
             imports,
@@ -294,37 +333,78 @@ impl Parser {
     fn parse_def(&mut self, is_private: bool) -> Result<FunDef, ParseError> {
         self.expect(&Token::Def)?;
         let (name, _) = self.expect_ident()?;
+        let type_params = if matches!(self.peek(), Token::LBracket) {
+            self.parse_type_params()?
+        } else {
+            Vec::new()
+        };
         self.expect(&Token::LParen)?;
-        let mut params = Vec::new();
-        if !matches!(self.peek(), Token::RParen) {
-            loop {
-                let (pname, _) = self.expect_ident()?;
-                self.expect(&Token::Colon)?;
-                let pty = self.parse_type()?;
-                params.push(Param {
-                    name: pname,
-                    ty: pty,
-                });
-                if matches!(self.peek(), Token::Comma) {
-                    self.bump();
-                    continue;
-                }
-                break;
-            }
-        }
+        let params = self.parse_param_list_with_tparams(&type_params)?;
         self.expect(&Token::RParen)?;
         self.expect(&Token::Colon)?;
-        let ret = self.parse_type()?;
+        let ret = self.parse_type_with_tparams(&type_params)?;
         self.expect(&Token::Eq)?;
         let body = self.parse_expr()?;
         Ok(FunDef {
             module: self.module.clone(),
             name,
             is_private,
+            type_params,
             params,
             ret,
             body,
         })
+    }
+
+    fn parse_type_params(&mut self) -> Result<Vec<String>, ParseError> {
+        self.expect(&Token::LBracket)?;
+        let mut params = Vec::new();
+        loop {
+            let (name, _) = self.expect_ident()?;
+            if params.iter().any(|p| p == &name) {
+                return Err(self.err(format!("duplicate type parameter {name}")));
+            }
+            params.push(name);
+            if matches!(self.peek(), Token::Comma) {
+                self.bump();
+                continue;
+            }
+            break;
+        }
+        self.expect(&Token::RBracket)?;
+        if params.is_empty() {
+            return Err(self.err("expected at least one type parameter"));
+        }
+        // Stage-0 slice: one type parameter only.
+        if params.len() > 1 {
+            return Err(self.err("Stage 0 supports one type parameter per def"));
+        }
+        Ok(params)
+    }
+
+    fn parse_param_list_with_tparams(
+        &mut self,
+        type_params: &[String],
+    ) -> Result<Vec<Param>, ParseError> {
+        let mut params = Vec::new();
+        if matches!(self.peek(), Token::RParen) {
+            return Ok(params);
+        }
+        loop {
+            let (pname, _) = self.expect_ident()?;
+            self.expect(&Token::Colon)?;
+            let pty = self.parse_type_with_tparams(type_params)?;
+            params.push(Param {
+                name: pname,
+                ty: pty,
+            });
+            if matches!(self.peek(), Token::Comma) {
+                self.bump();
+                continue;
+            }
+            break;
+        }
+        Ok(params)
     }
 
     fn parse_enum(&mut self) -> Result<EnumDef, ParseError> {
@@ -361,7 +441,145 @@ impl Parser {
         if cases.is_empty() {
             return Err(self.err(format!("enum {name} has no cases")));
         }
-        Ok(EnumDef { name, cases })
+        Ok(EnumDef {
+            module: self.module.clone(),
+            name,
+            cases,
+            is_record: false,
+        })
+    }
+
+    /// `record Name(f1: T1, f2: T2, …)` — single-case enum sugar.
+    fn parse_record(&mut self) -> Result<EnumDef, ParseError> {
+        self.expect(&Token::Record)?;
+        let (name, _) = self.expect_ident()?;
+        self.expect(&Token::LParen)?;
+        let mut fields = Vec::new();
+        loop {
+            let (fname, _) = self.expect_ident()?;
+            self.expect(&Token::Colon)?;
+            let fty = self.parse_type()?;
+            fields.push((fname, fty));
+            if matches!(self.peek(), Token::Comma) {
+                self.bump();
+                continue;
+            }
+            break;
+        }
+        self.expect(&Token::RParen)?;
+        if fields.is_empty() {
+            return Err(self.err(format!("record {name} needs at least one field")));
+        }
+        Ok(EnumDef {
+            module: self.module.clone(),
+            name: name.clone(),
+            cases: vec![EnumCase {
+                name: name.clone(),
+                fields,
+            }],
+            is_record: true,
+        })
+    }
+
+    /// `trait Show: def show(): String`
+    fn parse_trait(&mut self) -> Result<TraitDef, ParseError> {
+        self.expect(&Token::Trait)?;
+        let (name, _) = self.expect_ident()?;
+        self.expect(&Token::Colon)?;
+        let mut methods = Vec::new();
+        while matches!(self.peek(), Token::Def) {
+            methods.push(self.parse_trait_method()?);
+        }
+        if methods.is_empty() {
+            return Err(self.err(format!("trait {name} has no methods")));
+        }
+        Ok(TraitDef {
+            module: self.module.clone(),
+            name,
+            methods,
+        })
+    }
+
+    fn parse_trait_method(&mut self) -> Result<TraitMethod, ParseError> {
+        self.expect(&Token::Def)?;
+        let (name, _) = self.expect_ident()?;
+        self.expect(&Token::LParen)?;
+        let params = self.parse_param_list()?;
+        self.expect(&Token::RParen)?;
+        self.expect(&Token::Colon)?;
+        let ret = self.parse_type()?;
+        Ok(TraitMethod { name, params, ret })
+    }
+
+    /// `impl Show for Point: def show(): String = …`
+    fn parse_impl(&mut self) -> Result<ImplDef, ParseError> {
+        self.expect(&Token::Impl)?;
+        let (trait_name, _) = self.expect_ident()?;
+        self.expect(&Token::For)?;
+        let (for_type, _) = self.expect_ident()?;
+        self.expect(&Token::Colon)?;
+        let mut methods = Vec::new();
+        while matches!(self.peek(), Token::Def) {
+            methods.push(self.parse_impl_method()?);
+        }
+        if methods.is_empty() {
+            return Err(self.err(format!(
+                "impl {trait_name} for {for_type} has no methods"
+            )));
+        }
+        Ok(ImplDef {
+            module: self.module.clone(),
+            trait_name,
+            for_type,
+            methods,
+        })
+    }
+
+    fn parse_impl_method(&mut self) -> Result<ImplMethod, ParseError> {
+        self.expect(&Token::Def)?;
+        let (name, _) = self.expect_ident()?;
+        self.expect(&Token::LParen)?;
+        let params = self.parse_param_list()?;
+        self.expect(&Token::RParen)?;
+        self.expect(&Token::Colon)?;
+        let ret = self.parse_type()?;
+        self.expect(&Token::Eq)?;
+        let body = self.parse_expr()?;
+        Ok(ImplMethod {
+            name,
+            params,
+            ret,
+            body,
+        })
+    }
+
+    fn parse_param_list(&mut self) -> Result<Vec<Param>, ParseError> {
+        self.parse_param_list_with_tparams(&[])
+    }
+
+    fn parse_type(&mut self) -> Result<Type, ParseError> {
+        self.parse_type_with_tparams(&[])
+    }
+
+    fn parse_type_with_tparams(&mut self, type_params: &[String]) -> Result<Type, ParseError> {
+        let (name, _) = self.expect_ident()?;
+        if type_params.iter().any(|p| p == &name) {
+            return Ok(Type::Var(name));
+        }
+        match name.as_str() {
+            "Unit" => Ok(Type::Unit),
+            "Int" => Ok(Type::Int),
+            "String" => Ok(Type::String),
+            "Bool" => Ok(Type::Bool),
+            "List" => Ok(Type::List),
+            "IO" => {
+                self.expect(&Token::LBracket)?;
+                let inner = self.parse_type_with_tparams(type_params)?;
+                self.expect(&Token::RBracket)?;
+                Ok(Type::Io(Box::new(inner)))
+            }
+            _ => Ok(Type::Adt(name)),
+        }
     }
 
     /// `Name` or `Name(f1: T1, f2: T2, …)` (fields are Int|String only; checked in typer).
@@ -384,24 +602,6 @@ impl Parser {
             self.expect(&Token::RParen)?;
         }
         Ok(EnumCase { name, fields })
-    }
-
-    fn parse_type(&mut self) -> Result<Type, ParseError> {
-        let (name, _) = self.expect_ident()?;
-        match name.as_str() {
-            "Unit" => Ok(Type::Unit),
-            "Int" => Ok(Type::Int),
-            "String" => Ok(Type::String),
-            "Bool" => Ok(Type::Bool),
-            "List" => Ok(Type::List),
-            "IO" => {
-                self.expect(&Token::LBracket)?;
-                let inner = self.parse_type()?;
-                self.expect(&Token::RBracket)?;
-                Ok(Type::Io(Box::new(inner)))
-            }
-            _ => Ok(Type::Adt(name)),
-        }
     }
 
     /// Expr body for `def` / `@main` / lambda (no statement-block grammar).
@@ -645,11 +845,32 @@ impl Parser {
                             );
                         }
                         other => {
-                            // Qual.method(args) already handled in primary for known modules.
-                            // Enum.Case is primary; here treat as error for unknown method.
-                            return Err(self.err(format!(
-                                "unsupported method .{other}"
-                            )));
+                            // `expr.method(args)` trait call, else `expr.field` projection.
+                            if matches!(self.peek(), Token::LParen) {
+                                let args = self.parse_args()?;
+                                let end = args
+                                    .last()
+                                    .map(|a| a.span.clone())
+                                    .unwrap_or_else(|| expr.span.clone());
+                                let span = expr.span.clone().cover(&end);
+                                expr = self.mk(
+                                    ExprKind::MethodCall {
+                                        receiver: Box::new(expr),
+                                        method: other.to_string(),
+                                        args,
+                                    },
+                                    span,
+                                );
+                            } else {
+                                let span = expr.span.clone();
+                                expr = self.mk(
+                                    ExprKind::Field {
+                                        base: Box::new(expr),
+                                        field: other.to_string(),
+                                    },
+                                    span,
+                                );
+                            }
                         }
                     }
                 }
@@ -704,34 +925,51 @@ impl Parser {
                 Ok(Pattern::Wildcard)
             }
             Token::Ident(_) => {
-                let (enum_name, _) = self.expect_ident()?;
-                self.expect(&Token::Dot)?;
-                let (case_name, _) = self.expect_ident()?;
-                let binds = if matches!(self.peek(), Token::LParen) {
+                let (name, _) = self.expect_ident()?;
+                if matches!(self.peek(), Token::Dot) {
                     self.bump();
-                    let mut binds = Vec::new();
-                    loop {
-                        let (b, _) = self.expect_ident()?;
-                        binds.push(b);
-                        if matches!(self.peek(), Token::Comma) {
-                            self.bump();
-                            continue;
-                        }
-                        break;
-                    }
-                    self.expect(&Token::RParen)?;
-                    binds
+                    let (case_name, _) = self.expect_ident()?;
+                    let binds = self.parse_pattern_binds()?;
+                    Ok(Pattern::Adt {
+                        enum_name: name,
+                        case_name,
+                        binds,
+                    })
+                } else if matches!(self.peek(), Token::LParen) {
+                    // Record / single-case sugar: `case Point(x, y)`.
+                    let binds = self.parse_pattern_binds()?;
+                    Ok(Pattern::Adt {
+                        enum_name: name.clone(),
+                        case_name: name,
+                        binds,
+                    })
                 } else {
-                    Vec::new()
-                };
-                Ok(Pattern::Adt {
-                    enum_name,
-                    case_name,
-                    binds,
-                })
+                    Err(self.err(format!(
+                        "expected `.Case` or `(binds)` after pattern {name}"
+                    )))
+                }
             }
             other => Err(self.err(format!("expected pattern, got {other:?}"))),
         }
+    }
+
+    fn parse_pattern_binds(&mut self) -> Result<Vec<String>, ParseError> {
+        if !matches!(self.peek(), Token::LParen) {
+            return Ok(Vec::new());
+        }
+        self.bump();
+        let mut binds = Vec::new();
+        loop {
+            let (b, _) = self.expect_ident()?;
+            binds.push(b);
+            if matches!(self.peek(), Token::Comma) {
+                self.bump();
+                continue;
+            }
+            break;
+        }
+        self.expect(&Token::RParen)?;
+        Ok(binds)
     }
 
     fn parse_lambda(&mut self) -> Result<(Option<String>, Expr), ParseError> {
@@ -1015,14 +1253,29 @@ impl Parser {
                             start.cover(&end),
                         ));
                     }
-                    Ok(self.mk(
-                        ExprKind::AdtConstruct {
-                            enum_name: name,
-                            case_name,
-                            args: Vec::new(),
-                        },
-                        start.cover(&case_span),
-                    ))
+                    // Capitalized `Color.Red` / `A.tag` stay ADT/module; lowercase `p.x` is field access.
+                    if name
+                        .chars()
+                        .next()
+                        .is_some_and(|c| c.is_ascii_uppercase())
+                    {
+                        Ok(self.mk(
+                            ExprKind::AdtConstruct {
+                                enum_name: name,
+                                case_name,
+                                args: Vec::new(),
+                            },
+                            start.cover(&case_span),
+                        ))
+                    } else {
+                        Ok(self.mk(
+                            ExprKind::Field {
+                                base: Box::new(self.mk(ExprKind::Var(name), start.clone())),
+                                field: case_name,
+                            },
+                            start.cover(&case_span),
+                        ))
+                    }
                 } else {
                     Ok(self.mk(ExprKind::Var(name), start))
                 }

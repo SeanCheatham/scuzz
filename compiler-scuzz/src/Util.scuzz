@@ -155,17 +155,17 @@ def mkSpan(file: String, start: Int, end: Int): Span =
 
 def spanFile(sp: Span): String =
   sp match {
-    case Span.Span(file, start, end) => file
+    case Span(file, start, end) => file
   }
 
 def spanStart(sp: Span): Int =
   sp match {
-    case Span.Span(file, start, end) => start
+    case Span(file, start, end) => start
   }
 
 def spanEnd(sp: Span): Int =
   sp match {
-    case Span.Span(file, start, end) => end
+    case Span(file, start, end) => end
   }
 
 def coverSpan(a: Span, b: Span): Span =
@@ -187,6 +187,8 @@ def exprSpan(e: Expr): Span =
     case Expr.ListLit(elems, span) => span
     case Expr.Interp(parts, span) => span
     case Expr.Var(name, span) => span
+    case Expr.Field(base, field, span) => span
+    case Expr.MethodCall(receiver, method, args, span) => span
     case Expr.Adt(enumName, caseName, args, span) => span
     case Expr.Call(callee, args, span) => span
     case Expr.BinOp(op, left, right, span) => span

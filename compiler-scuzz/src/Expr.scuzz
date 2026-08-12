@@ -7,6 +7,8 @@ enum Expr:
   case ListLit(elems: List, span: Span)
   case Interp(parts: List, span: Span)
   case Var(name: String, span: Span)
+  case Field(base: Expr, field: String, span: Span)
+  case MethodCall(receiver: Expr, method: String, args: List, span: Span)
   case Adt(enumName: String, caseName: String, args: List, span: Span)
   case Call(callee: String, args: List, span: Span)
   case BinOp(op: String, left: Expr, right: Expr, span: Span)
@@ -34,6 +36,8 @@ def isUnitExpr(e: Expr): Int =
     case Expr.ListLit(elems, span) => 0
     case Expr.Interp(parts, span) => 0
     case Expr.Var(name, span) => 0
+    case Expr.Field(base, field, span) => 0
+    case Expr.MethodCall(receiver, method, args, span) => 0
     case Expr.Adt(enumName, caseName, args, span) => 0
     case Expr.Call(callee, args, span) => 0
     case Expr.BinOp(op, left, right, span) => 0
@@ -62,6 +66,8 @@ def isVarExpr(e: Expr): Int =
     case Expr.ListLit(elems, span) => 0
     case Expr.Interp(parts, span) => 0
     case Expr.Var(name, span) => 1
+    case Expr.Field(base, field, span) => 0
+    case Expr.MethodCall(receiver, method, args, span) => 0
     case Expr.Adt(enumName, caseName, args, span) => 0
     case Expr.Call(callee, args, span) => 0
     case Expr.BinOp(op, left, right, span) => 0
@@ -90,6 +96,8 @@ def isLetExpr(e: Expr): Int =
     case Expr.ListLit(elems, span) => 0
     case Expr.Interp(parts, span) => 0
     case Expr.Var(name, span) => 0
+    case Expr.Field(base, field, span) => 0
+    case Expr.MethodCall(receiver, method, args, span) => 0
     case Expr.Adt(enumName, caseName, args, span) => 0
     case Expr.Call(callee, args, span) => 0
     case Expr.BinOp(op, left, right, span) => 0
@@ -118,6 +126,8 @@ def isMatchExpr(e: Expr): Int =
     case Expr.ListLit(elems, span) => 0
     case Expr.Interp(parts, span) => 0
     case Expr.Var(name, span) => 0
+    case Expr.Field(base, field, span) => 0
+    case Expr.MethodCall(receiver, method, args, span) => 0
     case Expr.Adt(enumName, caseName, args, span) => 0
     case Expr.Call(callee, args, span) => 0
     case Expr.BinOp(op, left, right, span) => 0
@@ -146,6 +156,8 @@ def isFlatMapExpr(e: Expr): Int =
     case Expr.ListLit(elems, span) => 0
     case Expr.Interp(parts, span) => 0
     case Expr.Var(name, span) => 0
+    case Expr.Field(base, field, span) => 0
+    case Expr.MethodCall(receiver, method, args, span) => 0
     case Expr.Adt(enumName, caseName, args, span) => 0
     case Expr.Call(callee, args, span) => 0
     case Expr.BinOp(op, left, right, span) => 0
@@ -174,6 +186,8 @@ def isStrLitExpr(e: Expr): Int =
     case Expr.ListLit(elems, span) => 0
     case Expr.Interp(parts, span) => 0
     case Expr.Var(name, span) => 0
+    case Expr.Field(base, field, span) => 0
+    case Expr.MethodCall(receiver, method, args, span) => 0
     case Expr.Adt(enumName, caseName, args, span) => 0
     case Expr.Call(callee, args, span) => 0
     case Expr.BinOp(op, left, right, span) => 0
@@ -197,6 +211,8 @@ def isStrLitExpr(e: Expr): Int =
 def varExprName(e: Expr): String =
   e match {
     case Expr.Var(name, span) => name
+    case Expr.Field(base, field, span) => ""
+    case Expr.MethodCall(receiver, method, args, span) => ""
     case Expr.Unit(span) => ""
     case Expr.IntLit(digits, span) => ""
     case Expr.StrLit(value, span) => ""
@@ -230,6 +246,8 @@ def strLitExprValue(e: Expr): String =
     case Expr.ListLit(elems, span) => ""
     case Expr.Interp(parts, span) => ""
     case Expr.Var(name, span) => ""
+    case Expr.Field(base, field, span) => ""
+    case Expr.MethodCall(receiver, method, args, span) => ""
     case Expr.Adt(enumName, caseName, args, span) => ""
     case Expr.Call(callee, args, span) => ""
     case Expr.BinOp(op, left, right, span) => ""
