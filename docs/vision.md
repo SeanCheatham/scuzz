@@ -91,7 +91,7 @@ Subset used by compiler sources and bootstrap examples. New features land in Sta
 - No `val` / statement blocks / `var` — expression dialect only.
 - `if` / `match`; literals incl. list `[a,b,c]` and `s"…"`
 - Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
-- Builtins: `Str.*`, `List.*`, Fs (`read` / `write` / `list` / `mkdirs` / `canonicalize`)/Sys (`args` / `readLine` / `exec` / `getenv`)/Clock/Random/Net, `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Signal.*` (incl. `Signal.map`), `View.*` (incl. nested `View.column`/`row`/`stack` children, `View.each`, `View.bindText`, Column/Row `View.expanded`, `View.center`, `View.align`, `View.positioned`, `View.padding`), `Ui.run`, Theme/Color, `Law.signalInt` / `Law.a11yHas` / `Law.assert` (residual under TestRuntime)
+- Builtins: `Str.*`, `List.*`, Fs (`read` / `write` / `list` / `mkdirs` / `canonicalize`)/Sys (`args` / `readLine` / `exec` / `getenv`)/Clock/Random/Net, `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Signal.*` (incl. `Signal.map`), `View.*` (incl. nested `View.column`/`row`/`stack` children, `View.each`, `View.bindText`, Column/Row `View.expanded`, `View.center`, `View.align`, `View.positioned`, `View.padding`, `View.sized`), `Ui.run`, Theme/Color, `Law.signalInt` / `Law.a11yHas` / `Law.assert` (residual under TestRuntime)
 - `IO` kit + `.flatMap` / `.handleErrorWith` / `.attempt`; lambdas `_ =>` / `name =>` for taps
 - No macros, no implicits, no HKT beyond `IO`, no null
 
@@ -193,7 +193,7 @@ Scripts are a line protocol — `tap <n>` / `text <s>` / `pump <k>` — played b
 
 ### Layout model
 
-When the widget set grows beyond column/row: **Flutter-style constraints** (constraints down, sizes up). `View.expanded(child)` takes leftover height in a Column or leftover width in a Row; `View.center(child)` fills the max slot and centers the child; `View.align(ax, ay, child)` places the child (`0` start / `1` center / `2` end on each axis); `View.stack(…)` overlays children (loose size to largest); `View.positioned(x, y, child)` offsets a Stack child from the stack origin; `View.padding(n, child)` deflates max constraints by a uniform inset. Do not drift into CSS-ish ad-hoc layout rules.
+When the widget set grows beyond column/row: **Flutter-style constraints** (constraints down, sizes up). `View.expanded(child)` takes leftover height in a Column or leftover width in a Row; `View.center(child)` fills the max slot and centers the child; `View.align(ax, ay, child)` places the child (`0` start / `1` center / `2` end on each axis); `View.stack(…)` overlays children (loose size to largest); `View.positioned(x, y, child)` offsets a Stack child from the stack origin; `View.padding(n, child)` deflates max constraints by a uniform inset; `View.sized(w, h, child)` is a tight w×h slot (clamped to incoming max). Do not drift into CSS-ish ad-hoc layout rules.
 
 ### UI testing
 

@@ -41,7 +41,7 @@ Path deps only (`manifest.rs`, `Toml.scuzz`). Git / versioned / hosted artifacts
 
 ### Deferred by decision
 
-- **Flutter-style constraint layout** — recursive stacker today (`layout_node` in `view.c`). Locked direction: constraints down, sizes up. `View.expanded` takes leftover Column height or Row width (`examples/todo`, `examples/nav`); `View.center` fills and centers; `View.align(ax, ay, child)` places start/center/end (`examples/nav` Other page); `View.stack` overlays; `View.positioned(x, y, child)` offsets a Stack child (`examples/counter`); `View.padding(n, child)` deflates max constraints (`examples/nav` Home). Later: min+max BoxConstraints.
+- **Flutter-style constraint layout** — recursive stacker today (`layout_node` in `view.c`). Locked direction: constraints down, sizes up. `View.expanded` takes leftover Column height or Row width (`examples/todo`, `examples/nav`); `View.center` fills and centers; `View.align(ax, ay, child)` places start/center/end (`examples/nav` Other page); `View.stack` overlays; `View.positioned(x, y, child)` offsets a Stack child (`examples/counter`); `View.padding(n, child)` deflates max constraints (`examples/nav` Home); `View.sized(w, h, child)` is a tight slot (`examples/counter`). Later: propagate min through `layout_node`.
 - **Windows desktop embedder** — same session protocol as X11/Cocoa; secondary platform.
 - **LSP / editor tooling** — `fmt`, `check --message-format=json`, and `watch` exist; no language server.
 - **macOS in default CI** — macOS job is `workflow_dispatch`-only; Darwin regressions surface late.
