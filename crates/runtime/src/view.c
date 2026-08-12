@@ -504,9 +504,14 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
         old_pref = ch->pref_h;
         ch->pref_h = 0.f;
       }
-      layout_node(ch, x, y, max_w, v->frame.h, theme);
+      layout_node(ch, x, y, max_w > 0 ? max_w : v->frame.w, v->frame.h, theme);
       if (ch->kind == SZ_VIEW_SCROLL)
         ch->pref_h = old_pref;
+      /* Tight flex slot: child fills Expanded (constraints down). */
+      ch->frame.x = x;
+      ch->frame.y = y;
+      ch->frame.w = v->frame.w;
+      ch->frame.h = v->frame.h > 0.f ? v->frame.h : ch->frame.h;
     }
     break;
   }
@@ -515,7 +520,60 @@ static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
     float inner_h = theme->control_h;
     float w = theme->pad;
     int shown = count_shown_children(v);
-    float child_max =
+    int n_flex = 0;
+    float fixed_w = 0.f;
+    float flex_w = 0.f;
+    float gaps = 0.f;
+    float child_max;
+    float row_inner_h = max_h > 0 ? max_h - theme->pad * 2.f : 0.f;
+    if (row_inner_h < 0.f)
+      row_inner_h = 0.f;
+    for (i = 0; i < v->child_count; i++) {
+      if (view_is_shown(v->children[i]) &&
+          v->children[i]->kind == SZ_VIEW_EXPANDED)
+        n_flex++;
+    }
+    if (n_flex > 0 && max_w > 0) {
+      /* Measure non-flex at intrinsic width (large max_w). */
+      for (i = 0; i < v->child_count; i++) {
+        SzView *ch = v->children[i];
+        if (!view_is_shown(ch) || ch->kind == SZ_VIEW_EXPANDED)
+          continue;
+        layout_node(ch, x + theme->pad, y + theme->pad, max_w, row_inner_h,
+                    theme);
+        fixed_w += ch->frame.w;
+      }
+      if (shown > 1)
+        gaps = theme->gap * (float)(shown - 1);
+      if (fixed_w + gaps + theme->pad * 2.f > max_w + 0.5f)
+        n_flex = 0;
+      else {
+        flex_w = max_w - theme->pad * 2.f - fixed_w - gaps;
+        if (flex_w < 0.f)
+          flex_w = 0.f;
+        if (n_flex > 1)
+          flex_w = flex_w / (float)n_flex;
+        cx = x + theme->pad;
+        for (i = 0; i < v->child_count; i++) {
+          SzView *ch = v->children[i];
+          if (!view_is_shown(ch)) {
+            layout_node(ch, cx, y + theme->pad, flex_w, row_inner_h, theme);
+            continue;
+          }
+          if (ch->kind == SZ_VIEW_EXPANDED)
+            layout_node(ch, cx, y + theme->pad, flex_w, row_inner_h, theme);
+          else
+            layout_node(ch, cx, y + theme->pad, max_w, row_inner_h, theme);
+          cx += ch->frame.w + theme->gap;
+          if (ch->frame.h > inner_h)
+            inner_h = ch->frame.h;
+        }
+        v->frame.w = max_w;
+        v->frame.h = inner_h + theme->pad * 2.f;
+        break;
+      }
+    }
+    child_max =
         shown > 0
             ? (max_w - theme->pad * 2.f - theme->gap * (float)(shown - 1)) /
                   (float)shown

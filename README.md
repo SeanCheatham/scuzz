@@ -107,7 +107,7 @@ cargo run -p scuzz -- run --headless examples/live
 | `examples/cli` | `Sys.args` + `Sys.readLine` |
 | `examples/hello_ui` | Headless `Ui` + goldens |
 | `examples/counter` | `Signal`/`View`/`Ui.run` + path dep + goldens |
-| `examples/nav` | Lambda taps + `showWhen` + stay-open `Ui.run` + goldens |
+| `examples/nav` | `showWhen` + Row `View.expanded` + goldens |
 | `examples/live` | Stay-open Window (`Ui.run`; q/Esc) |
 | `examples/todo` | Todo — `Signal.list` / `View.expanded` scroll / Add·Save + goldens |
 | `examples/concurrency` | `Ref` / `Queue` / `Deferred` + `IO.race` / `IO.both` |

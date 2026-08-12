@@ -125,7 +125,7 @@ typedef enum SzViewKind {
   SZ_VIEW_ROW,
   SZ_VIEW_LIST,
   SZ_VIEW_SCROLL,
-  SZ_VIEW_EXPANDED, /* Column flex child: takes leftover height */
+  SZ_VIEW_EXPANDED, /* Column/Row flex child: leftover height or width */
   SZ_VIEW_IMAGE,
   SZ_VIEW_ICON,
   SZ_VIEW_LABEL /* full-bleed bg + bar that toggles colors on tap */

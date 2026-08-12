@@ -16,6 +16,7 @@
     root = View.column(
       View.row(
         View.button("Home", _ => Signal.set(page, 0)),
+        View.expanded(View.bindText(pageLabel)),
         View.button("Other", _ => Signal.set(page, 1))
       ),
       View.showWhen(page, 0, home),

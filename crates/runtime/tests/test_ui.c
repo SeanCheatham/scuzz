@@ -293,6 +293,31 @@ static void test_expanded_column(void) {
   sz_view_free(col);
 }
 
+static void test_expanded_row(void) {
+  SzView *row, *left, *mid, *right, *exp;
+  const SzTheme *theme = sz_theme_default();
+  float max_w = 320.f;
+  float leftover;
+
+  row = sz_view_row();
+  left = sz_view_button("L", NULL, NULL);
+  mid = sz_view_text("mid");
+  exp = sz_view_expanded(mid);
+  right = sz_view_button("R", NULL, NULL);
+  sz_view_add_child(row, left);
+  sz_view_add_child(row, exp);
+  sz_view_add_child(row, right);
+  sz_view_layout(row, max_w, 80.f, theme);
+  assert(sz_view_kind(exp) == SZ_VIEW_EXPANDED);
+  assert(sz_view_frame(row).w == max_w);
+  leftover = max_w - theme->pad * 2.f - sz_view_frame(left).w -
+             sz_view_frame(right).w - theme->gap * 2.f;
+  assert(sz_view_frame(exp).w >= leftover - 0.5f);
+  assert(sz_view_frame(exp).w <= leftover + 0.5f);
+  assert(sz_view_frame(mid).w >= leftover - 0.5f);
+  sz_view_free(row);
+}
+
 static void test_mobile_pointer_scroll_lifecycle(void) {
   SzUiConfig cfg;
   SzSignalStr *draft;
@@ -650,6 +675,7 @@ int main(void) {
   test_button_set_and_show_when();
   test_widgets();
   test_expanded_column();
+  test_expanded_row();
   test_mobile_pointer_scroll_lifecycle();
   test_a11y_and_anim();
   test_clear_and_set_texts();

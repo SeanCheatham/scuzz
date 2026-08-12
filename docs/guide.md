@@ -63,7 +63,7 @@ Build a pure `View` tree, hold state in `Signal`, run a session with `Ui.run`:
   } yield ()
 ```
 
-Lists: keep a `Signal.list`, render with `View.each(items)` (framework rebuilds children at layout). Wrap a scroll list in `View.expanded(…)` inside a Column so it fills leftover height. See `examples/todo`.
+Lists: keep a `Signal.list`, render with `View.each(items)` (framework rebuilds children at layout). Wrap a scroll list in `View.expanded(…)` inside a Column so it fills leftover height; in a Row, `View.expanded` takes leftover width. See `examples/todo` and `examples/nav`.
 
 `Ui.run` under Headless: mount → optional scripted text/tap (`tap_text` in toml / env) → snapshot → unmount. Window stays open when `[ui].default_runtime = "window"`.
 
@@ -113,7 +113,7 @@ src/
 | `examples/counter` | `Signal.map` + `View.bindText` + button lambda + `Ui.run` + path dep on `shared` + laws/sim |
 | `examples/shared` | Library package (`{ path = "..." }`) with helpers + optional `*.scuzz_sim` |
 | `examples/todo` | `Signal.list` + `View.each`, Column `View.expanded` scroll, Rename via `setAt`, Fs load/save |
-| `examples/nav` | `showWhen`, multi-page |
+| `examples/nav` | `showWhen`, multi-page, Row `View.expanded` title |
 | `examples/live` | Stay-open Window (`Ui.run`; q/Esc) |
 | `examples/impurity` | Clock / Random / Fs / Net / Sys console kit |
 | `examples/concurrency` | `Ref` / `Queue` / `Deferred` park under `IO.both` / `IO.race` |
