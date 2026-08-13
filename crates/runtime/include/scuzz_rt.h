@@ -284,6 +284,7 @@ SzStream *sz_stream_eval(SzIo *io);
 SzStream *sz_stream_concat(SzStream *left, SzStream *right);
 SzStream *sz_stream_evalmap(SzStream *inner, SzCont f, void *env);
 SzStream *sz_stream_take(SzStream *inner, int64_t n);
+SzStream *sz_stream_drop(SzStream *inner, int64_t n);
 SzIo *sz_stream_compile_to_list(SzStream *s); /* IO[List] */
 SzIo *sz_stream_drain(SzStream *s);           /* IO[Unit] */
 

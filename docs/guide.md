@@ -42,7 +42,7 @@ Console kit: `Sys.args(): IO[List]`, `Sys.readLine(): IO[String]` (EOF → `""`;
 - Enums + **`record Name(f1: T1, …)`** (construct `Name(…)`, match `case Name(…)`, field `p.x` — see `examples/record` / `examples/adt`)
 - Thin **traits** / `impl` with static dispatch (`p.show()` — see `examples/trait`)
 - Thin **generics**: `def id[T](x: T): T = x` monomorphized at call sites (`examples/generic`); generic enums/records too — `enum Opt[T]:` / `record Box[T](x: T)`, instantiation inferred from ctor args or the expected type (`examples/genum`)
-- Blessed impurity only: `IO.println` / `sleep` / `fail` / `pure` / `race` / `both`, `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Resource.make` / `Resource.use` (String payload), `Stream.emit` / `emits` / `eval` / `concat` / `evalMap` / `take` / `compileToList` / `drain` (String payload), `Fs.*`, `Sys.args` / `Sys.readLine` / `Sys.exec` / `Sys.spawn` / `Sys.alive` / `Sys.getenv`, `Clock.*`, `Random.*`, `Net.httpGet` / `Net.serveOnce` / `Net.serve`
+- Blessed impurity only: `IO.println` / `sleep` / `fail` / `pure` / `race` / `both`, `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Resource.make` / `Resource.use` (String payload), `Stream.emit` / `emits` / `eval` / `concat` / `evalMap` / `take` / `drop` / `compileToList` / `drain` (String payload), `Fs.*`, `Sys.args` / `Sys.readLine` / `Sys.exec` / `Sys.spawn` / `Sys.alive` / `Sys.getenv`, `Clock.*`, `Random.*`, `Net.httpGet` / `Net.serveOnce` / `Net.serve`
 - No raw side effects in View build — taps may run `IO` via `sz_io_unsafe_run`
 
 Product `fmt` / `build` / `run` / `test` / `check` / `fuzz` go through Stage 1/2 (`compiler-scuzz`). Stage-0 Rust hosts the bootstrap compiler. `scuzz --help` and `scuzz <command> --help` list flags and examples. `scuzz watch` rebuilds on source change (not Flutter hot reload). `[ui]` `scuzz run --watch` keeps the process and stamp-reloads the View tree (Signals stay; new source is not loaded). The process rewrites `build/debug.dump` (signal store + a11y, same format as `scuzz test` goldens) on dirty pumps so agents can read live UI state. Append `tap` / `text` / `type` / `pump` / `scroll` / `backspace` lines to `build/inject.script` to drive the session (rewrite plays the whole file). `--message-format=json` applies to `check` only — that JSON is the editor protocol. `scuzz check` format-verifies `src/` then typechecks; `scuzz fmt` rewrites.
@@ -118,7 +118,7 @@ src/
 | `examples/impurity` | Clock / Random / Fs / Net / Sys console kit |
 | `examples/concurrency` | `Ref` / `Queue` / `Deferred` park under `IO.both` / `IO.race` |
 | `examples/resource` | `Resource.make` / `use` bracket (release on success and `IO` failure) |
-| `examples/stream` | `Stream.emit` / `evalMap` / `take` / `compileToList` / `drain` |
+| `examples/stream` | `Stream.emit` / `evalMap` / `take` / `drop` / `compileToList` / `drain` |
 | `examples/server` | `Net.serve` persistent HTTP/1.0 GET (TestRuntime drains injected paths) |
 | `examples/record` | `record Point(…)` + `p.x` field access |
 | `examples/trait` | `trait` / `impl` + `p.show()` static dispatch |

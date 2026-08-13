@@ -816,7 +816,7 @@ def callResourceUse(argTys: List): TyRes =
   } yield if (tyIsOk(a) == 0) a else tyOk(tyMkIo(Type.Unit))
 
 def callStream(callee: String, argTys: List): TyRes =
-  if (streq(callee, "Stream.emit") == 1) callStreamEmit(argTys) else if (streq(callee, "Stream.emits") == 1) callStreamEmits(argTys) else if (streq(callee, "Stream.eval") == 1) callStreamEval(argTys) else if (streq(callee, "Stream.concat") == 1) callStreamConcat(argTys) else if (streq(callee, "Stream.take") == 1) callStreamTake(argTys) else if (streq(callee, "Stream.evalMap") == 1) callStreamEvalMap(argTys) else if (streq(callee, "Stream.compileToList") == 1) callStreamCompile(argTys) else if (streq(callee, "Stream.drain") == 1) callStreamDrain(argTys) else tyErr(str3("unknown function ", callee, ""))
+  if (streq(callee, "Stream.emit") == 1) callStreamEmit(argTys) else if (streq(callee, "Stream.emits") == 1) callStreamEmits(argTys) else if (streq(callee, "Stream.eval") == 1) callStreamEval(argTys) else if (streq(callee, "Stream.concat") == 1) callStreamConcat(argTys) else if (streq(callee, "Stream.take") == 1) callStreamTake(argTys) else if (streq(callee, "Stream.drop") == 1) callStreamDrop(argTys) else if (streq(callee, "Stream.evalMap") == 1) callStreamEvalMap(argTys) else if (streq(callee, "Stream.compileToList") == 1) callStreamCompile(argTys) else if (streq(callee, "Stream.drain") == 1) callStreamDrain(argTys) else tyErr(str3("unknown function ", callee, ""))
 
 def callStreamEmit(argTys: List): TyRes =
   for {
@@ -841,6 +841,11 @@ def callStreamConcat(argTys: List): TyRes =
 def callStreamTake(argTys: List): TyRes =
   for {
     a = expectArity("Stream.take", 2, List.len(argTys))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.Int)) == 0) expectTy(argTyAt(argTys, 1), Type.Int) else tyOk(tyMkOpaque("Stream"))
+
+def callStreamDrop(argTys: List): TyRes =
+  for {
+    a = expectArity("Stream.drop", 2, List.len(argTys))
   } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 1), Type.Int)) == 0) expectTy(argTyAt(argTys, 1), Type.Int) else tyOk(tyMkOpaque("Stream"))
 
 def callStreamEvalMap(argTys: List): TyRes =

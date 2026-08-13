@@ -1394,6 +1394,11 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(Type::Opaque("Stream".into()))
         }
+        "Stream.drop" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(Type::Opaque("Stream".into()))
+        }
         "Stream.evalMap" => {
             expect_arity(callee, &arg_tys, 2)?;
             Ok(Type::Opaque("Stream".into()))
@@ -3646,6 +3651,18 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Stream.take should typecheck");
+    }
+
+    #[test]
+    fn typechecks_stream_drop() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs <- Stream.compileToList(Stream.drop(Stream.emits(["a", "b", "c"]), 1))
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Stream.drop should typecheck");
     }
 
     #[test]

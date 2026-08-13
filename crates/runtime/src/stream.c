@@ -8,7 +8,8 @@ enum {
   SZ_ST_EVAL = 2,
   SZ_ST_CONCAT = 3,
   SZ_ST_EVALMAP = 4,
-  SZ_ST_TAKE = 5
+  SZ_ST_TAKE = 5,
+  SZ_ST_DROP = 6
 };
 
 static SzStream *st_new(int tag, void *left, void *right, void *env) {
@@ -64,6 +65,14 @@ SzStream *sz_stream_take(SzStream *inner, int64_t n) {
   return st_new(SZ_ST_TAKE, inner, NULL, (void *)(intptr_t)n);
 }
 
+SzStream *sz_stream_drop(SzStream *inner, int64_t n) {
+  if (!inner)
+    inner = sz_stream_nil();
+  if (n <= 0)
+    return inner;
+  return st_new(SZ_ST_DROP, inner, NULL, (void *)(intptr_t)n);
+}
+
 typedef struct StEval {
   SzStream *tail;
   SzList *acc;
@@ -75,6 +84,11 @@ typedef struct StConcat {
   int64_t remain;
   int64_t acc_len;
 } StConcat;
+
+typedef struct StDrop {
+  int64_t n;
+  int64_t acc_len;
+} StDrop;
 
 typedef struct StMap {
   SzCont f;
@@ -113,6 +127,40 @@ static SzIo *after_concat(void *acc, void *env) {
       remain = 0;
   }
   return compile_into(right, (SzList *)acc, remain);
+}
+
+/* acc is newest-first. Drop the oldest n of the segment added after acc_len. */
+static SzList *drop_added(SzList *acc, int64_t acc_len, int64_t n) {
+  int64_t added = (int64_t)sz_list_len(acc) - acc_len;
+  int64_t keep;
+  int64_t i;
+  SzList *kept_rev = sz_list_nil();
+  SzList *p = acc;
+  if (n < 0)
+    n = 0;
+  if (added < 0)
+    added = 0;
+  keep = added - n;
+  if (keep < 0)
+    keep = 0;
+  for (i = 0; i < keep; i++) {
+    kept_rev = sz_list_cons(sz_list_head(p), kept_rev);
+    p = sz_list_tail(p);
+  }
+  for (i = 0; i < added - keep; i++)
+    p = sz_list_tail(p);
+  while (!sz_list_is_empty(kept_rev)) {
+    p = sz_list_cons(sz_list_head(kept_rev), p);
+    kept_rev = sz_list_tail(kept_rev);
+  }
+  return p;
+}
+
+static SzIo *after_drop(void *acc, void *env) {
+  StDrop *st = (StDrop *)env;
+  SzList *out = drop_added((SzList *)acc, st->acc_len, st->n);
+  sz_free(st);
+  return sz_io_pure(out);
 }
 
 static SzIo *fold_evalmap(SzList *xs, StMap *st);
@@ -154,6 +202,21 @@ static SzIo *compile_into(SzStream *s, SzList *acc, int64_t remain) {
         remain = n;
       s = (SzStream *)s->left;
       break;
+    }
+    case SZ_ST_DROP: {
+      int64_t n = (int64_t)(intptr_t)s->env;
+      int64_t inner_remain;
+      StDrop *st;
+      if (n <= 0) {
+        s = (SzStream *)s->left;
+        break;
+      }
+      inner_remain = remain < 0 ? remain : remain + n;
+      st = (StDrop *)sz_alloc(sizeof(StDrop));
+      st->n = n;
+      st->acc_len = (int64_t)sz_list_len(acc);
+      return sz_io_flatmap(compile_into((SzStream *)s->left, acc, inner_remain),
+                           after_drop, st);
     }
     case SZ_ST_CONS:
       acc = sz_list_cons(s->left, acc);

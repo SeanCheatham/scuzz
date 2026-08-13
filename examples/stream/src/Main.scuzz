@@ -6,4 +6,6 @@
     _ <- Stream.drain(Stream.evalMap(Stream.emit("d"), x => IO.println(s"drain:$x")))
     taken <- Stream.compileToList(Stream.take(Stream.emits(["x", "y", "z"]), 2))
     _ <- IO.println(Str.concat("take:", List.join(taken, ",")))
+    dropped <- Stream.compileToList(Stream.drop(Stream.emits(["x", "y", "z"]), 1))
+    _ <- IO.println(Str.concat("drop:", List.join(dropped, ",")))
   } yield ()

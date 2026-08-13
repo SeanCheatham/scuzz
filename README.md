@@ -113,7 +113,7 @@ cargo run -p scuzz -- run --headless examples/live
 | `examples/todo` | Todo — `Signal.list` / `View.expanded` scroll / Add·Save + goldens |
 | `examples/concurrency` | `Ref` / `Queue` / `Deferred` + `IO.race` / `IO.both` |
 | `examples/resource` | `Resource.make` / `use` bracket (release on success and failure) |
-| `examples/stream` | `Stream.emit` / `evalMap` / `take` / `compileToList` / `drain` |
+| `examples/stream` | `Stream.emit` / `evalMap` / `take` / `drop` / `compileToList` / `drain` |
 | `examples/server` | `Net.serve` persistent HTTP/1.0 GET |
 | `examples/adt` | package / enum / match |
 | `examples/modules` | stem modules, `private def`, `import`, enum-per-module |
