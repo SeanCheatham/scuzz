@@ -246,6 +246,10 @@ pub fn expr_has_law(e: &Expr) -> bool {
             inner,
             finalizer: body,
         }
+        | ExprKind::IoTimeout {
+            ms: inner,
+            inner: body,
+        }
         | ExprKind::IoRace {
             left: inner,
             right: body,
@@ -616,6 +620,13 @@ fn residualize_expr(expr: Expr, defs: &[FunDef], enums: &[crate::ast::EnumDef]) 
             ExprKind::IoEnsure {
                 inner: Box::new(residualize_expr(*inner, defs, enums)),
                 finalizer: Box::new(residualize_expr(*finalizer, defs, enums)),
+            },
+            span,
+        ),
+        ExprKind::IoTimeout { ms, inner } => Expr::new(
+            ExprKind::IoTimeout {
+                ms: Box::new(residualize_expr(*ms, defs, enums)),
+                inner: Box::new(residualize_expr(*inner, defs, enums)),
             },
             span,
         ),

@@ -729,6 +729,27 @@ fn rewrite_fields(
             },
             span,
         )),
+        ExprKind::IoTimeout { ms, inner } => Ok(Expr::new(
+            ExprKind::IoTimeout {
+                ms: Box::new(rewrite_fields(
+                    *ms,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?),
+                inner: Box::new(rewrite_fields(
+                    *inner,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?),
+            },
+            span,
+        )),
         ExprKind::Let { name, value, body } => {
             let value = rewrite_fields(*value, enums, funs, methods, current_module, env)?;
             let vt = infer(&value, enums, funs, methods, current_module, env)?;
@@ -1209,6 +1230,15 @@ fn infer(
                 if !matches!(ft, Type::Io(_)) {
                     return Err(TypeError::Msg("IO.ensure finalizer must be IO[_]".into()));
                 }
+                Ok(Type::Io(inner_ty))
+            }
+            ExprKind::IoTimeout { ms, inner } => {
+                let mt = infer(ms, enums, funs, methods, current_module, env)?;
+                expect_ty(&mt, &Type::Int)?;
+                let it = infer(inner, enums, funs, methods, current_module, env)?;
+                let Type::Io(inner_ty) = it else {
+                    return Err(TypeError::Msg("IO.timeout inner must be IO[_]".into()));
+                };
                 Ok(Type::Io(inner_ty))
             }
             ExprKind::For { .. } => Err(TypeError::Msg(
@@ -2427,6 +2457,29 @@ fn mono_expr(
             },
             span,
         )),
+        ExprKind::IoTimeout { ms, inner } => Ok(Expr::new(
+            ExprKind::IoTimeout {
+                ms: Box::new(mono_expr(
+                    *ms,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+                inner: Box::new(mono_expr(
+                    *inner,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+            },
+            span,
+        )),
         ExprKind::Let { name, value, body } => {
             let vt = infer(&value, enums, funs, methods, current_module, env)?;
             let value = mono_expr(
@@ -3286,6 +3339,31 @@ fn elaborate_expr(
             },
             span,
         )),
+        ExprKind::IoTimeout { ms, inner } => Ok(Expr::new(
+            ExprKind::IoTimeout {
+                ms: Box::new(elaborate_expr(
+                    *ms,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    None,
+                    tparams,
+                )?),
+                inner: Box::new(elaborate_expr(
+                    *inner,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    expected,
+                    tparams,
+                )?),
+            },
+            span,
+        )),
         ExprKind::Field { base, field } => Ok(Expr::new(
             ExprKind::Field {
                 base: Box::new(elaborate_expr(
@@ -3500,6 +3578,10 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
             inner: Box::new(subst_node_targs(*inner, subst)),
             finalizer: Box::new(subst_node_targs(*finalizer, subst)),
         },
+        ExprKind::IoTimeout { ms, inner } => ExprKind::IoTimeout {
+            ms: Box::new(subst_node_targs(*ms, subst)),
+            inner: Box::new(subst_node_targs(*inner, subst)),
+        },
         ExprKind::Field { base, field } => ExprKind::Field {
             base: Box::new(subst_node_targs(*base, subst)),
             field,
@@ -3643,6 +3725,10 @@ fn collect_node_targs(expr: &Expr, out: &mut Vec<(String, Vec<Type>)>) {
         | ExprKind::IoEnsure {
             inner: left,
             finalizer: right,
+        }
+        | ExprKind::IoTimeout {
+            ms: left,
+            inner: right,
         } => {
             collect_node_targs(left, out);
             collect_node_targs(right, out);
@@ -3792,6 +3878,10 @@ fn rewrite_enum_refs(
         ExprKind::IoEnsure { inner, finalizer } => ExprKind::IoEnsure {
             inner: Box::new(rewrite_enum_refs(*inner, clones)?),
             finalizer: Box::new(rewrite_enum_refs(*finalizer, clones)?),
+        },
+        ExprKind::IoTimeout { ms, inner } => ExprKind::IoTimeout {
+            ms: Box::new(rewrite_enum_refs(*ms, clones)?),
+            inner: Box::new(rewrite_enum_refs(*inner, clones)?),
         },
         ExprKind::Field { base, field } => ExprKind::Field {
             base: Box::new(rewrite_enum_refs(*base, clones)?),
@@ -3993,6 +4083,19 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Resource.make/use should typecheck");
+    }
+
+    #[test]
+    fn typechecks_io_timeout() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    got <- IO.timeout(50, IO.pure("ok"))
+    _ <- IO.println(got)
+    _ <- IO.timeout(1, IO.sleep(100)).handleErrorWith(_ => IO.println("timed-out"))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("IO.timeout should typecheck");
     }
 
     #[test]

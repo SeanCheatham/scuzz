@@ -82,6 +82,10 @@ stage_checks() {
   echo "$resource_out" | grep -q "release:token"
   echo "$resource_out" | grep -q "release:token2"
   echo "$resource_out" | grep -q "recovered"
+  echo "$resource_out" | grep -q "timeout-fast"
+  echo "$resource_out" | grep -q "got:ok"
+  echo "$resource_out" | grep -q "timed-out"
+  echo "$resource_out" | grep -q "release:to-tok"
 
   echo "==> $stage runs examples/stream"
   stream_out="$("$bin" run examples/stream)"

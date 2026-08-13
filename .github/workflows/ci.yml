@@ -63,6 +63,10 @@ jobs:
           grep -q "release:token" /tmp/resource.out
           grep -q "release:token2" /tmp/resource.out
           grep -q "recovered" /tmp/resource.out
+          grep -q "timeout-fast" /tmp/resource.out
+          grep -q "got:ok" /tmp/resource.out
+          grep -q "timed-out" /tmp/resource.out
+          grep -q "release:to-tok" /tmp/resource.out
           cargo run -p scuzz -- run examples/stream | tee /tmp/stream.out
           grep -q "a!,b!,c" /tmp/stream.out
           grep -q "drain:d" /tmp/stream.out

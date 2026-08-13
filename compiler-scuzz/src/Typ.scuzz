@@ -225,6 +225,7 @@ def inferExprMatch(e: Expr, enums: List, funs: List, env: List): TyRes =
     case Expr.IoRace(left, right, span) => inferIoPair(left, right, enums, funs, env)
     case Expr.IoBoth(left, right, span) => inferIoPair(left, right, enums, funs, env)
     case Expr.IoEnsure(inner, finalizer, span) => inferIoEnsure(inner, finalizer, enums, funs, env)
+    case Expr.IoTimeout(ms, inner, span) => inferIoTimeout(ms, inner, enums, funs, env)
     case Expr.For(binders, body, span) => tyErr("internal: unlowered `for` (run lower before typecheck)")
   }
 
@@ -509,6 +510,12 @@ def inferIoEnsure(inner: Expr, finalizer: Expr, enums: List, funs: List, env: Li
     ir = inferExpr(inner, enums, funs, env)
     fr = inferExpr(finalizer, enums, funs, env)
   } yield if (tyIsOk(ir) == 0) ir else if (tyIsOk(fr) == 0) fr else if (tyIsIo(tyVal(ir)) == 0) tyErr("IO.ensure inner must be IO[_]") else if (tyIsIo(tyVal(fr)) == 0) tyErr("IO.ensure finalizer must be IO[_]") else tyOk(tyVal(ir))
+
+def inferIoTimeout(ms: Expr, inner: Expr, enums: List, funs: List, env: List): TyRes =
+  for {
+    mr = inferExpr(ms, enums, funs, env)
+    ir = inferExpr(inner, enums, funs, env)
+  } yield if (tyIsOk(mr) == 0) mr else if (typesCompat(tyVal(mr), Type.Int) == 0) tyErr("IO.timeout ms must be Int") else if (tyIsOk(ir) == 0) ir else if (tyIsIo(tyVal(ir)) == 0) tyErr("IO.timeout inner must be IO[_]") else tyOk(tyVal(ir))
 
 def inferMatch(scrut: Expr, arms: List, enums: List, funs: List, env: List): TyRes =
   for {
@@ -1235,6 +1242,7 @@ def resolveFieldsExpr(e: Expr, enums: List, imports: List, mod: String, allDefs:
     case Expr.IoRace(left, right, span) => Expr.IoRace(resolveFieldsExpr(left, enums, imports, mod, allDefs, env), resolveFieldsExpr(right, enums, imports, mod, allDefs, env), span)
     case Expr.IoBoth(left, right, span) => Expr.IoBoth(resolveFieldsExpr(left, enums, imports, mod, allDefs, env), resolveFieldsExpr(right, enums, imports, mod, allDefs, env), span)
     case Expr.IoEnsure(inner, finalizer, span) => Expr.IoEnsure(resolveFieldsExpr(inner, enums, imports, mod, allDefs, env), resolveFieldsExpr(finalizer, enums, imports, mod, allDefs, env), span)
+    case Expr.IoTimeout(ms, inner, span) => Expr.IoTimeout(resolveFieldsExpr(ms, enums, imports, mod, allDefs, env), resolveFieldsExpr(inner, enums, imports, mod, allDefs, env), span)
     case Expr.ListLit(elems, span) => Expr.ListLit(resolveFieldsExprList(elems, enums, imports, mod, allDefs, env, List.empty()), span)
     case Expr.For(binders, body, span) => Expr.For(binders, resolveFieldsExpr(body, enums, imports, mod, allDefs, env), span)
     case _ => e
@@ -1553,6 +1561,7 @@ def elaborateExpr(e: Expr, enums: List, funs: List, env: List, expected: List, t
     case Expr.IoRace(left, right, span) => elabRace(left, right, span, enums, funs, env, expected, tparams)
     case Expr.IoBoth(left, right, span) => elabBoth(left, right, span, enums, funs, env, expected, tparams)
     case Expr.IoEnsure(inner, finalizer, span) => elabEnsure(inner, finalizer, span, enums, funs, env, expected, tparams)
+    case Expr.IoTimeout(ms, inner, span) => elabTimeout(ms, inner, span, enums, funs, env, expected, tparams)
     case Expr.Field(base, field, span) => elabField(base, field, span, enums, funs, env, tparams)
     case Expr.MethodCall(receiver, method, args, span) => elabMethod(receiver, method, args, span, enums, funs, env, tparams)
     case Expr.ListLit(elems, span) => elabListLit(elems, span, enums, funs, env, tparams)
@@ -1601,6 +1610,12 @@ def elabEnsure(inner: Expr, finalizer: Expr, span: Span, enums: List, funs: List
     rl = elaborateExpr(inner, enums, funs, env, expected, tparams)
     rr = elaborateExpr(finalizer, enums, funs, env, List.empty(), tparams)
   } yield if (tyIsOk(elabResOf(rl)) == 0) rl else if (tyIsOk(elabResOf(rr)) == 0) rr else elabPack(Expr.IoEnsure(elabExprOf(rl), elabExprOf(rr), span), elabResOf(rl))
+
+def elabTimeout(ms: Expr, inner: Expr, span: Span, enums: List, funs: List, env: List, expected: List, tparams: List): List =
+  for {
+    rm = elaborateExpr(ms, enums, funs, env, List.empty(), tparams)
+    ri = elaborateExpr(inner, enums, funs, env, expected, tparams)
+  } yield if (tyIsOk(elabResOf(rm)) == 0) rm else if (tyIsOk(elabResOf(ri)) == 0) ri else elabPack(Expr.IoTimeout(elabExprOf(rm), elabExprOf(ri), span), elabResOf(ri))
 
 def elabField(base: Expr, field: String, span: Span, enums: List, funs: List, env: List, tparams: List): List =
   for {
@@ -1844,6 +1859,7 @@ def substNodeTargs(e: Expr, subst: List): Expr =
     case Expr.IoRace(left, right, span) => Expr.IoRace(substNodeTargs(left, subst), substNodeTargs(right, subst), span)
     case Expr.IoBoth(left, right, span) => Expr.IoBoth(substNodeTargs(left, subst), substNodeTargs(right, subst), span)
     case Expr.IoEnsure(inner, finalizer, span) => Expr.IoEnsure(substNodeTargs(inner, subst), substNodeTargs(finalizer, subst), span)
+    case Expr.IoTimeout(ms, inner, span) => Expr.IoTimeout(substNodeTargs(ms, subst), substNodeTargs(inner, subst), span)
     case Expr.Field(base, field, span) => Expr.Field(substNodeTargs(base, subst), field, span)
     case Expr.MethodCall(receiver, method, args, span) => Expr.MethodCall(substNodeTargs(receiver, subst), method, substTargsList(args, subst, List.empty()), span)
     case Expr.ListLit(elems, span) => Expr.ListLit(substTargsList(elems, subst, List.empty()), span)
@@ -1924,6 +1940,7 @@ def collectNodeTargs(e: Expr, acc: List): List =
     case Expr.IoRace(left, right, span) => collectNodeTargs(right, collectNodeTargs(left, acc))
     case Expr.IoBoth(left, right, span) => collectNodeTargs(right, collectNodeTargs(left, acc))
     case Expr.IoEnsure(inner, finalizer, span) => collectNodeTargs(finalizer, collectNodeTargs(inner, acc))
+    case Expr.IoTimeout(ms, inner, span) => collectNodeTargs(inner, collectNodeTargs(ms, acc))
     case Expr.Field(base, field, span) => collectNodeTargs(base, acc)
     case Expr.MethodCall(receiver, method, args, span) => collectNodeTargsList(args, collectNodeTargs(receiver, acc))
     case Expr.ListLit(elems, span) => collectNodeTargsList(elems, acc)
@@ -2098,6 +2115,7 @@ def rewriteEnumRefs(e: Expr, clones: List): Expr =
     case Expr.IoRace(left, right, span) => Expr.IoRace(rewriteEnumRefs(left, clones), rewriteEnumRefs(right, clones), span)
     case Expr.IoBoth(left, right, span) => Expr.IoBoth(rewriteEnumRefs(left, clones), rewriteEnumRefs(right, clones), span)
     case Expr.IoEnsure(inner, finalizer, span) => Expr.IoEnsure(rewriteEnumRefs(inner, clones), rewriteEnumRefs(finalizer, clones), span)
+    case Expr.IoTimeout(ms, inner, span) => Expr.IoTimeout(rewriteEnumRefs(ms, clones), rewriteEnumRefs(inner, clones), span)
     case Expr.Field(base, field, span) => Expr.Field(rewriteEnumRefs(base, clones), field, span)
     case Expr.MethodCall(receiver, method, args, span) => Expr.MethodCall(rewriteEnumRefs(receiver, clones), method, rewriteRefsList(args, clones, List.empty()), span)
     case Expr.ListLit(elems, span) => Expr.ListLit(rewriteRefsList(elems, clones, List.empty()), span)
@@ -2181,6 +2199,7 @@ def monoExpr(e: Expr, enums: List, funs: List, env: List, specs: List): List =
     case Expr.IoRace(left, right, span) => monoBinary(left, right, span, enums, funs, env, specs, 2)
     case Expr.IoBoth(left, right, span) => monoBinary(left, right, span, enums, funs, env, specs, 3)
     case Expr.IoEnsure(inner, finalizer, span) => monoBinary(inner, finalizer, span, enums, funs, env, specs, 4)
+    case Expr.IoTimeout(ms, inner, span) => monoBinary(ms, inner, span, enums, funs, env, specs, 5)
     case Expr.ListLit(elems, span) => monoListLit(elems, span, enums, funs, env, specs)
     case Expr.Adt(enumName, caseName, args, typeArgs, span) => monoAdt(enumName, caseName, args, typeArgs, span, enums, funs, env, specs)
     case Expr.MethodCall(receiver, method, args, span) => monoMethod(receiver, method, args, span, enums, funs, env, specs)
@@ -2202,7 +2221,7 @@ def monoBinary(left: Expr, right: Expr, span: Span, enums: List, funs: List, env
   for {
     lp = monoExpr(left, enums, funs, env, specs)
     rp = monoExpr(right, enums, funs, env, monoS(lp))
-  } yield if (kind == 1) monoPack(Expr.Handle(monoE(lp), monoE(rp), span), monoS(rp)) else if (kind == 2) monoPack(Expr.IoRace(monoE(lp), monoE(rp), span), monoS(rp)) else if (kind == 3) monoPack(Expr.IoBoth(monoE(lp), monoE(rp), span), monoS(rp)) else monoPack(Expr.IoEnsure(monoE(lp), monoE(rp), span), monoS(rp))
+  } yield if (kind == 1) monoPack(Expr.Handle(monoE(lp), monoE(rp), span), monoS(rp)) else if (kind == 2) monoPack(Expr.IoRace(monoE(lp), monoE(rp), span), monoS(rp)) else if (kind == 3) monoPack(Expr.IoBoth(monoE(lp), monoE(rp), span), monoS(rp)) else if (kind == 4) monoPack(Expr.IoEnsure(monoE(lp), monoE(rp), span), monoS(rp)) else monoPack(Expr.IoTimeout(monoE(lp), monoE(rp), span), monoS(rp))
 
 def monoBinOp(op: String, left: Expr, right: Expr, span: Span, enums: List, funs: List, env: List, specs: List): List =
   for {

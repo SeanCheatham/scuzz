@@ -1211,6 +1211,23 @@ impl Parser {
                         let span = start.cover(&arg.span);
                         Ok(self.mk(ExprKind::IoPure(Box::new(arg)), span))
                     }
+                    "timeout" => {
+                        let args = self.parse_args()?;
+                        if args.len() != 2 {
+                            return Err(self.err("IO.timeout expects 2 args"));
+                        }
+                        let mut it = args.into_iter();
+                        let ms = it.next().unwrap();
+                        let inner = it.next().unwrap();
+                        let span = start.cover(&inner.span);
+                        Ok(self.mk(
+                            ExprKind::IoTimeout {
+                                ms: Box::new(ms),
+                                inner: Box::new(inner),
+                            },
+                            span,
+                        ))
+                    }
                     "race" | "both" | "ensure" => {
                         let args = self.parse_args()?;
                         if args.len() != 2 {

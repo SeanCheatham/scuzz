@@ -389,6 +389,15 @@ SzIo *sz_io_ensure(SzIo *inner, SzIo *finalizer) {
   return io;
 }
 
+SzIo *sz_io_timeout(int64_t ms, SzIo *inner) {
+  if (!inner)
+    sz_panic("sz_io_timeout(null)");
+  SzIo *io = sz_io_new(SZ_IO_TIMEOUT);
+  io->as.timeout.ms = ms < 0 ? 0 : ms;
+  io->as.timeout.inner = inner;
+  return io;
+}
+
 SzIo *sz_io_queue_take(SzQueue *q) {
   SzIo *io = sz_io_new(SZ_IO_QUEUE_TAKE);
   io->as.queue_take = q;
@@ -440,7 +449,12 @@ typedef enum FiberState {
   FIB_FINALIZING
 } FiberState;
 
-typedef enum JoinKind { JOIN_NONE = 0, JOIN_RACE = 1, JOIN_BOTH = 2 } JoinKind;
+typedef enum JoinKind {
+  JOIN_NONE = 0,
+  JOIN_RACE = 1,
+  JOIN_BOTH = 2,
+  JOIN_TIMEOUT = 3
+} JoinKind;
 
 typedef struct Fiber {
   ContFrame *stack;
@@ -861,6 +875,27 @@ static void join_child_done(Sched *s, Fiber *child, int ok, void *val,
     return;
   }
 
+  if (p->join_kind == JOIN_TIMEOUT) {
+    Fiber *sib = p->children[1 - slot];
+    if (sib)
+      fiber_cancel(s, sib);
+    p->join_kind = JOIN_NONE;
+    if (slot == 1) {
+      if (ok) {
+        p->state = FIB_READY;
+        p->cur = sz_io_pure(val);
+        ready_enqueue(s, p);
+      } else {
+        fiber_fail(s, p, err ? err : sz_error_new(1, "timeout inner failed"));
+      }
+    } else {
+      if (err)
+        sz_error_free(err);
+      fiber_fail(s, p, sz_error_new(1, "timeout"));
+    }
+    return;
+  }
+
   if (p->join_kind == JOIN_BOTH) {
     if (!ok) {
       Fiber *sib = p->children[1 - slot];
@@ -1115,6 +1150,19 @@ static int step_fiber(Sched *s, Fiber *f) {
     f->cur = cur->as.ensure.inner;
     ready_enqueue(s, f);
     return 0;
+  case SZ_IO_TIMEOUT: {
+    Fiber *timer = fiber_new(sz_io_sleep_ms(cur->as.timeout.ms), f, JOIN_TIMEOUT, 0);
+    Fiber *body = fiber_new(cur->as.timeout.inner, f, JOIN_TIMEOUT, 1);
+    f->children[0] = timer;
+    f->children[1] = body;
+    f->children_settled = 0;
+    f->join_kind = JOIN_TIMEOUT;
+    f->state = FIB_JOIN;
+    f->cur = NULL;
+    ready_enqueue(s, timer);
+    ready_enqueue(s, body);
+    return 0;
+  }
   case SZ_IO_QUEUE_TAKE: {
     SzQueue *q = cur->as.queue_take;
     if (!q) {

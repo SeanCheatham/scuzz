@@ -262,6 +262,7 @@ def residualizeExpr(e: Expr, defs: List, enums: List): Expr =
     case Expr.IoRace(left, right, span) => Expr.IoRace(residualizeExpr(left, defs, enums), residualizeExpr(right, defs, enums), span)
     case Expr.IoBoth(left, right, span) => Expr.IoBoth(residualizeExpr(left, defs, enums), residualizeExpr(right, defs, enums), span)
     case Expr.IoEnsure(inner, finalizer, span) => Expr.IoEnsure(residualizeExpr(inner, defs, enums), residualizeExpr(finalizer, defs, enums), span)
+    case Expr.IoTimeout(ms, inner, span) => Expr.IoTimeout(residualizeExpr(ms, defs, enums), residualizeExpr(inner, defs, enums), span)
     case _ => e
   }
 
@@ -355,6 +356,7 @@ def exprHasLaw(e: Expr): Int =
     case Expr.IoRace(left, right, span) => if (exprHasLaw(left) == 1) 1 else exprHasLaw(right)
     case Expr.IoBoth(left, right, span) => if (exprHasLaw(left) == 1) 1 else exprHasLaw(right)
     case Expr.IoEnsure(inner, finalizer, span) => if (exprHasLaw(inner) == 1) 1 else exprHasLaw(finalizer)
+    case Expr.IoTimeout(ms, inner, span) => if (exprHasLaw(ms) == 1) 1 else exprHasLaw(inner)
     case _ => 0
   }
 
@@ -465,6 +467,7 @@ def collectSometimesExpr(e: Expr, acc: List): List =
     case Expr.IoRace(left, right, span) => collectSometimesExpr(right, collectSometimesExpr(left, acc))
     case Expr.IoBoth(left, right, span) => collectSometimesExpr(right, collectSometimesExpr(left, acc))
     case Expr.IoEnsure(inner, finalizer, span) => collectSometimesExpr(finalizer, collectSometimesExpr(inner, acc))
+    case Expr.IoTimeout(ms, inner, span) => collectSometimesExpr(inner, collectSometimesExpr(ms, acc))
     case _ => acc
   }
 

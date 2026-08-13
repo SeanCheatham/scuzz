@@ -8,5 +8,11 @@
 )
     _ <- IO.ensure(IO.println("ensure-body"), IO.println("ensure-fin"))
     _ <- IO.race(Resource.use(Resource.make(IO.pure("race-tok"), t => IO.println(s"release:$t")), t => IO.sleep(100)), IO.sleep(1))
+    _ <- IO.timeout(50, IO.println("timeout-fast"))
+    got <- IO.timeout(50, IO.pure("ok"))
+    _ <- IO.println(s"got:$got")
+    _ <- IO.timeout(1, Resource.use(Resource.make(IO.pure("to-tok"), t => IO.println(s"release:$t")), t => IO.sleep(100))).handleErrorWith(_ =>
+  IO.println("timed-out")
+)
     _ <- IO.println("done")
   } yield ()

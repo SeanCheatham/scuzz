@@ -56,6 +56,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_io_race(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_both(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_ensure(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_timeout(i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_unsafe_run_or_die(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_adt_new(i32, ptr)").unwrap();
     writeln!(out, "declare i32 @sz_adt_tag(ptr)").unwrap();
@@ -350,6 +351,10 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         | ExprKind::IoEnsure {
             inner,
             finalizer: body,
+        }
+        | ExprKind::IoTimeout {
+            ms: inner,
+            inner: body,
         }
         | ExprKind::Binary {
             left: inner,
@@ -1287,6 +1292,25 @@ fn emit_expr(
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_ensure"), ie.payload)
+        }
+        ExprKind::IoTimeout { ms, inner } => {
+            let me = emit_expr(ms, ctx, locals, &format!("{prefix}_ms"));
+            let ie = emit_expr(inner, ctx, locals, &format!("{prefix}_ti"));
+            let mut code = me.code;
+            code.push_str(&ie.code);
+            let ms_val = if me.kind == Kind::Int {
+                me.value
+            } else {
+                writeln!(code, "  %{prefix}_ms0 = add i64 0, 0").unwrap();
+                format!("%{prefix}_ms0")
+            };
+            let iv = ensure_io(&mut code, ie.kind, &ie.value, &format!("{prefix}_tiio"));
+            writeln!(
+                code,
+                "  %{prefix}_timeout = call ptr @sz_io_timeout(i64 {ms_val}, ptr {iv})"
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_timeout"), ie.payload)
         }
     }
 }

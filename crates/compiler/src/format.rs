@@ -358,6 +358,11 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             pretty_expr(inner, 0).trim(),
             pretty_expr(finalizer, 0).trim()
         ),
+        ExprKind::IoTimeout { ms, inner } => format!(
+            "{pad}IO.timeout({}, {})",
+            pretty_expr(ms, 0).trim(),
+            pretty_expr(inner, 0).trim()
+        ),
         ExprKind::Let { name, value, body } => {
             // Core `Let` (post-lower): reprint as a one-binder `for`.
             pretty_expr(

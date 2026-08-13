@@ -191,6 +191,8 @@ pub enum ExprKind {
         inner: Box<Expr>,
         finalizer: Box<Expr>,
     },
+    /// `IO.timeout(ms, inner)` — race sleep-fail vs inner; preserves inner's `IO[T]`
+    IoTimeout { ms: Box<Expr>, inner: Box<Expr> },
     /// Lowered `for` pure binder: `name = value` then `body`
     Let {
         name: String,

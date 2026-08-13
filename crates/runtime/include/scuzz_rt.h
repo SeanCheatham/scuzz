@@ -114,7 +114,8 @@ typedef enum SzIoTag {
   SZ_IO_ENSURE,
   SZ_IO_QUEUE_TAKE,
   SZ_IO_DEFERRED_GET,
-  SZ_IO_POLL_FD
+  SZ_IO_POLL_FD,
+  SZ_IO_TIMEOUT
 } SzIoTag;
 
 struct SzIo {
@@ -151,6 +152,10 @@ struct SzIo {
       SzIo *inner;
       SzIo *finalizer;
     } ensure;
+    struct {
+      int64_t ms;
+      SzIo *inner;
+    } timeout;
     SzQueue *queue_take;
     SzDeferred *deferred_get;
     struct {
@@ -174,6 +179,8 @@ SzIo *sz_io_race(SzIo *left, SzIo *right);
 SzIo *sz_io_both(SzIo *left, SzIo *right);
 /* Run finalizer after inner succeeds, fails, or is cancelled (race loser). */
 SzIo *sz_io_ensure(SzIo *inner, SzIo *finalizer);
+/* First-to-settle of sleep(ms) vs inner; timer wins → fail "timeout" and cancel inner. */
+SzIo *sz_io_timeout(int64_t ms, SzIo *inner);
 /* Internal constructors used by queue/deferred kits. */
 SzIo *sz_io_queue_take(SzQueue *q);
 SzIo *sz_io_deferred_get(SzDeferred *d);

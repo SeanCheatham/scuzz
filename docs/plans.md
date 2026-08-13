@@ -2,4 +2,4 @@
 
 ## Next
 
-**`IO.timeout(ms)`** — blessed race of sleep-fail vs inner; cancel already runs ensure/Resource finalizers. Then language `Fiber`, then `forever` / `repeatN` / `retryN`.
+**Language `Fiber`** — fork / join / interrupt on the cooperative runtime. Then `forever` / `repeatN` / `retryN`.

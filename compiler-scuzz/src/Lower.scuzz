@@ -90,6 +90,7 @@ def lowerExpr(e: Expr, enums: List, imports: List, mod: String): Expr =
     case Expr.IoRace(left, right, span) => Expr.IoRace(lowerExpr(left, enums, imports, mod), lowerExpr(right, enums, imports, mod), span)
     case Expr.IoBoth(left, right, span) => Expr.IoBoth(lowerExpr(left, enums, imports, mod), lowerExpr(right, enums, imports, mod), span)
     case Expr.IoEnsure(inner, finalizer, span) => Expr.IoEnsure(lowerExpr(inner, enums, imports, mod), lowerExpr(finalizer, enums, imports, mod), span)
+    case Expr.IoTimeout(ms, inner, span) => Expr.IoTimeout(lowerExpr(ms, enums, imports, mod), lowerExpr(inner, enums, imports, mod), span)
     case Expr.ListLit(elems, span) => Expr.ListLit(lowerExprList(elems, enums, imports, mod, List.empty()), span)
     case Expr.Interp(parts, span) => Expr.Interp(lowerInterpParts(parts, enums, imports, mod, List.empty()), span)
     case Expr.Unit(span) => e

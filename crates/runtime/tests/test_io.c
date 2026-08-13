@@ -351,6 +351,41 @@ int main(void) {
     sz_testrt_reset();
   }
 
+  /* IO.timeout: inner wins and keeps its value. */
+  {
+    sz_testrt_install();
+    r = sz_io_unsafe_run(sz_io_timeout(50, sz_io_pure((void *)(intptr_t)7)));
+    assert(r.ok);
+    assert((intptr_t)r.value == 7);
+    sz_testrt_reset();
+  }
+
+  /* IO.timeout: inner failure is not rewritten as timeout. */
+  {
+    sz_testrt_install();
+    r = sz_io_unsafe_run(sz_io_timeout(50, sz_io_fail_cstr("boom")));
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "boom") != NULL);
+    sz_error_free(r.error);
+    sz_testrt_reset();
+  }
+
+  /* IO.timeout: sleep-fail wins; Resource release still runs. */
+  {
+    sz_testrt_install();
+    lang_released = 0;
+    lr = sz_lang_resource_make(sz_io_pure(sz_string_from_cstr("tok")),
+                               lang_release, NULL);
+    r = sz_io_unsafe_run(
+        sz_io_timeout(1, sz_lang_resource_use(lr, lang_use_sleep, NULL)));
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "timeout") != NULL);
+    assert(lang_released == 1);
+    sz_error_free(r.error);
+    sz_lang_resource_free(lr);
+    sz_testrt_reset();
+  }
+
   /* Ref */
   r = sz_io_unsafe_run(sz_io_flatmap(sz_ref_of_cstr("a"), after_ref, NULL));
   assert(r.ok);

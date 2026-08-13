@@ -81,7 +81,7 @@ No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** i
 
 ### IO and impurity
 
-One failure channel: `SzError` on `IO`. Blessed kits only — no app-level `IO.delay`. Cooperative single-threaded fibers (no OS threads for IO); `sleep` / empty `Queue.take` / incomplete `Deferred.get` / fd poll park. Cancel (race loser) runs `IO.ensure` / `Resource` finalizers. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net/console. Surface catalogs: [`guide.md`](guide.md). Panics abort via `sz_panic`.
+One failure channel: `SzError` on `IO`. Blessed kits only — no app-level `IO.delay`. Cooperative single-threaded fibers (no OS threads for IO); `sleep` / empty `Queue.take` / incomplete `Deferred.get` / fd poll park. Cancel (race loser / `IO.timeout`) runs `IO.ensure` / `Resource` finalizers. `IO.timeout(ms, inner)` is a blessed race of sleep-fail vs inner and keeps inner's `IO[T]`. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net/console. Surface catalogs: [`guide.md`](guide.md). Panics abort via `sz_panic`.
 
 ### `Ui` vs `View`
 
@@ -210,7 +210,7 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: `IO.timeout` (then language `Fiber`, then `forever` / `repeatN` / `retryN`) — [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
+Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: language `Fiber` (fork/join/interrupt), then `forever` / `repeatN` / `retryN` — [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features. UI is a primary path among CLI/server/desktop/mobile — not the only v0 bar.
 
