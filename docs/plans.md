@@ -2,4 +2,4 @@
 
 ## Next
 
-**Remaining UI examples on the Ui.run factory.** `Ui.run(_ => View)` re-runs construction on Stage 0 and self-host (`examples/counter`). Next: switch todo/nav/hello_ui/live the same way. Still not Flutter VM patching or CLI process keep-alive. Do not document `watch` as hot reload.
+**CLI keep-alive on stamp-watch.** UI examples use `Ui.run(_ => View)` so construction can re-run. Next: `run --watch` keeps the process and reloads the View tree without resetting Signals. Still not Flutter VM patching. Do not document `watch` as hot reload.

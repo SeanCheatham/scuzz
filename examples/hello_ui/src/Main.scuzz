@@ -2,6 +2,5 @@
   for {
     n = Signal.int(0)
     label = Signal.map(n, x => s"taps = $x")
-    root = View.column(View.text("Hello Headless"), View.bindText(label), View.button("tap", _ => Signal.set(n, Signal.get(n) + 1)))
-    _ <- Ui.run(root)
+    _ <- Ui.run(_ => View.column(View.text("Hello Headless"), View.bindText(label), View.button("tap", _ => Signal.set(n, Signal.get(n) + 1))))
   } yield ()

@@ -7,8 +7,13 @@ def setAt(xs: List, i: Int, v: String): List =
       path = if (Str.len(envPath) == 0) "/tmp/scuzz_todo.txt" else envPath
       draft = Signal.str("")
       items = Signal.list([])
-      list = View.each(items)
-      root = View.column(View.text("Todo"), View.row(View.textField(draft, "item"), View.button("Add", _ => for {
+      text <- Fs.read(path).handleErrorWith(_ =>
+  IO.pure("")
+)
+      loaded0 = Str.lines(text)
+      loaded = if (List.isEmpty(loaded0) == 1) ["milk"] else loaded0
+      _ = Signal.setList(items, loaded)
+      _ <- Ui.run(_ => View.column(View.text("Todo"), View.row(View.textField(draft, "item"), View.button("Add", _ => for {
   d = Signal.getStr(draft)
   n = Str.len(d)
 } yield if (n == 0) () else for {
@@ -17,17 +22,10 @@ def setAt(xs: List, i: Int, v: String): List =
 } yield Signal.setStr(draft, "")), View.button("Rename", _ => for {
   xs = Signal.getList(items)
   ys = setAt(xs, 0, "oat milk")
-} yield Signal.setList(items, ys))), View.expanded(View.scroll(list)), View.button("Save", _ => for {
+} yield Signal.setList(items, ys))), View.expanded(View.scroll(View.each(items))), View.button("Save", _ => for {
   xs = Signal.getList(items)
   body = if (List.isEmpty(xs) == 1) "" else Str.concat(List.join(xs, "\n"), "\n")
   _ <- Fs.write(path, body)
-} yield ()), View.button("Clear", _ => Signal.setList(items, [])))
-      text <- Fs.read(path).handleErrorWith(_ =>
-  IO.pure("")
-)
-      loaded0 = Str.lines(text)
-      loaded = if (List.isEmpty(loaded0) == 1) ["milk"] else loaded0
-      _ = Signal.setList(items, loaded)
-      _ <- Ui.run(root)
+} yield ()), View.button("Clear", _ => Signal.setList(items, []))))
     } yield ()
   )
