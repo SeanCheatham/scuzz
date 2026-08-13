@@ -84,19 +84,58 @@ def fuzzScriptText(events: List): String =
 def schedEnv(scheduleSeed: String): String =
   if (Str.len(scheduleSeed) == 0) "" else str3(" SCUZZ_SCHED_SEED=", scheduleSeed, "")
 
-def fuzzCmd(exe: String, script: String, dump: String, w: String, h: String, scheduleSeed: String): String =
-  Str.concat(str6("env SCUZZ_UI_RUNTIME=headless SCUZZ_TESTRT=1 SCUZZ_UI_SCRIPT=", script, " SCUZZ_FUZZ_DUMP=", dump, " SCUZZ_UI_WIDTH=", w), str5(" SCUZZ_UI_HEIGHT=", h, schedEnv(scheduleSeed), " ", exe))
+def fuzzCmd(exe: String, script: String, dump: String, w: String, h: String, scheduleSeed: String, sometimesDump: String): String =
+  Str.concat(str6("env SCUZZ_UI_RUNTIME=headless SCUZZ_TESTRT=1 SCUZZ_UI_SCRIPT=", script, " SCUZZ_FUZZ_DUMP=", dump, " SCUZZ_UI_WIDTH=", w), str6(" SCUZZ_UI_HEIGHT=", h, schedEnv(scheduleSeed), " SCUZZ_SOMETIMES_DUMP=", sometimesDump, Str.concat(" ", exe)))
 
-def fuzzCmdIo(exe: String, scheduleSeed: String): String =
-  if (Str.len(scheduleSeed) == 0) str3("env SCUZZ_TESTRT=1 ", exe, "") else str5("env SCUZZ_TESTRT=1 SCUZZ_SCHED_SEED=", scheduleSeed, " ", exe, "")
+def fuzzCmdIo(exe: String, scheduleSeed: String, sometimesDump: String): String =
+  if (Str.len(scheduleSeed) == 0) str5("env SCUZZ_TESTRT=1 SCUZZ_SOMETIMES_DUMP=", sometimesDump, " ", exe, "") else str5("env SCUZZ_TESTRT=1 SCUZZ_SCHED_SEED=", scheduleSeed, str3(" SCUZZ_SOMETIMES_DUMP=", sometimesDump, " "), exe, "")
+
+def fuzzLinesAcc(s: String, i: Int, acc: List): List =
+  if (i >= Str.len(s)) List.reverse(acc) else fuzzLinesOne(s, i, acc)
+
+def fuzzLinesOne(s: String, i: Int, acc: List): List =
+  for {
+    end = lineEndAt(s, i)
+    line = Str.slice(s, i, end)
+    next = end + 1
+  } yield if (Str.len(line) == 0) fuzzLinesAcc(s, next, acc) else fuzzLinesAcc(s, next, List.cons(line, acc))
+
+def unionStr(xs: List, ys: List): List =
+  if (List.isEmpty(ys) == 1) xs else if (listContainsStr(xs, List.head(ys)) == 1) unionStr(xs, List.tail(ys)) else unionStr(List.cons(List.head(ys), xs), List.tail(ys))
+
+def missingSometimes(declared: List, reached: List, acc: List): List =
+  if (List.isEmpty(declared) == 1) List.reverse(acc) else if (listContainsStr(reached, List.head(declared)) == 1) missingSometimes(List.tail(declared), reached, acc) else missingSometimes(List.tail(declared), reached, List.cons(List.head(declared), acc))
+
+def mergeSometimes(reachedPath: String, campaignPath: String): IO[Unit] =
+  Fs.read(reachedPath).flatMap(reached =>
+    Fs.read(campaignPath).flatMap(camp => Fs.write(campaignPath, sometimesDeclaredText(unionStr(fuzzLinesAcc(camp, 0, List.empty()), fuzzLinesAcc(reached, 0, List.empty())))))
+  )
+
+def checkSometimesMissing(missing: List): IO[Unit] =
+  if (List.isEmpty(missing) == 1) IO.pure(()) else IO.fail(str3("Law.sometimes never reached: ", join(missing, ", "), ""))
+
+def checkSometimesCampaign(projectDir: String, fuzzDir: String): IO[Unit] =
+  Fs.read(pathJoin(pathJoin(projectDir, "build"), "sometimes.declared")).flatMap(declText =>
+    Fs.read(pathJoin(fuzzDir, "sometimes.campaign")).flatMap(campText => checkSometimesMissing(missingSometimes(fuzzLinesAcc(declText, 0, List.empty()), fuzzLinesAcc(campText, 0, List.empty()), List.empty())))
+  )
 
 def fuzzExec(exe: String, fuzzDir: String, w: String, h: String, events: List, scheduleSeed: String): IO[Int] =
   Fs.write(pathJoin(fuzzDir, "script.txt"), fuzzScriptText(events)).flatMap(_ =>
-    Fs.write(pathJoin(fuzzDir, "dump.txt"), "").flatMap(_ => Sys.exec(fuzzCmd(exe, pathJoin(fuzzDir, "script.txt"), pathJoin(fuzzDir, "dump.txt"), w, h, scheduleSeed)))
+    Fs.write(pathJoin(fuzzDir, "dump.txt"), "").flatMap(_ =>
+      Fs.write(pathJoin(fuzzDir, "sometimes.reached"), "").flatMap(_ =>
+        Sys.exec(fuzzCmd(exe, pathJoin(fuzzDir, "script.txt"), pathJoin(fuzzDir, "dump.txt"), w, h, scheduleSeed, pathJoin(fuzzDir, "sometimes.reached"))).flatMap(code =>
+          mergeSometimes(pathJoin(fuzzDir, "sometimes.reached"), pathJoin(fuzzDir, "sometimes.campaign")).flatMap(_ => IO.pure(code))
+        )
+      )
+    )
   )
 
-def fuzzExecIo(exe: String, scheduleSeed: String): IO[Int] =
-  Sys.exec(fuzzCmdIo(exe, scheduleSeed))
+def fuzzExecIo(exe: String, fuzzDir: String, scheduleSeed: String): IO[Int] =
+  Fs.write(pathJoin(fuzzDir, "sometimes.reached"), "").flatMap(_ =>
+    Sys.exec(fuzzCmdIo(exe, scheduleSeed, pathJoin(fuzzDir, "sometimes.reached"))).flatMap(code =>
+      mergeSometimes(pathJoin(fuzzDir, "sometimes.reached"), pathJoin(fuzzDir, "sometimes.campaign")).flatMap(_ => IO.pure(code))
+    )
+  )
 
 def quoteEvents(events: List, acc: List): List =
   if (List.isEmpty(events) == 1) List.reverse(acc) else quoteEvents(List.tail(events), List.cons(str3("\"", List.head(events), "\""), acc))
@@ -122,7 +161,7 @@ def fuzzExhaustFail(projectDir: String, fuzzDir: String, depth: Int, scriptIndex
   )
 
 def fuzzLoop(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, nButtons: Int, hasText: Int, hasScroll: Int, seed: Int, iter: Int, iters: Int): IO[Unit] =
-  if (iter >= iters) IO.println(str5("scuzz fuzz ok (", Str.fromInt(iters), " scripts, seed ", Str.fromInt(seed), ")")) else fuzzIter(exe, fuzzDir, w, h, projectDir, nButtons, hasText, hasScroll, seed, iter, iters)
+  if (iter >= iters) checkSometimesCampaign(projectDir, fuzzDir).flatMap(_ => IO.println(str5("scuzz fuzz ok (", Str.fromInt(iters), " scripts, seed ", Str.fromInt(seed), ")"))) else fuzzIter(exe, fuzzDir, w, h, projectDir, nButtons, hasText, hasScroll, seed, iter, iters)
 
 def fuzzIter(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, nButtons: Int, hasText: Int, hasScroll: Int, seed: Int, iter: Int, iters: Int): IO[Unit] =
   for {
@@ -131,12 +170,12 @@ def fuzzIter(exe: String, fuzzDir: String, w: String, h: String, projectDir: Str
   } yield fuzzExec(exe, fuzzDir, w, h, events, Str.fromInt(sched)).flatMap(code => if (code == 0) fuzzLoop(exe, fuzzDir, w, h, projectDir, nButtons, hasText, hasScroll, seed, iter + 1, iters) else fuzzFail(projectDir, fuzzDir, seed + iter, sched, iter, events))
 
 def fuzzIoLoop(exe: String, fuzzDir: String, projectDir: String, seed: Int, iter: Int, iters: Int): IO[Unit] =
-  if (iter >= iters) IO.println(str5("scuzz fuzz ok (", Str.fromInt(iters), " schedules, seed ", Str.fromInt(seed), ")")) else fuzzIoIter(exe, fuzzDir, projectDir, seed, iter, iters)
+  if (iter >= iters) checkSometimesCampaign(projectDir, fuzzDir).flatMap(_ => IO.println(str5("scuzz fuzz ok (", Str.fromInt(iters), " schedules, seed ", Str.fromInt(seed), ")"))) else fuzzIoIter(exe, fuzzDir, projectDir, seed, iter, iters)
 
 def fuzzIoIter(exe: String, fuzzDir: String, projectDir: String, seed: Int, iter: Int, iters: Int): IO[Unit] =
   for {
     sched = seed + iter
-  } yield fuzzExecIo(exe, Str.fromInt(sched)).flatMap(code => if (code == 0) fuzzIoLoop(exe, fuzzDir, projectDir, seed, iter + 1, iters) else fuzzFail(projectDir, fuzzDir, seed + iter, sched, iter, List.empty()))
+  } yield fuzzExecIo(exe, fuzzDir, Str.fromInt(sched)).flatMap(code => if (code == 0) fuzzIoLoop(exe, fuzzDir, projectDir, seed, iter + 1, iters) else fuzzFail(projectDir, fuzzDir, seed + iter, sched, iter, List.empty()))
 
 def exhaustTapAcc(i: Int, nButtons: Int, acc: List): List =
   if (i >= nButtons) List.reverse(acc) else exhaustTapAcc(i + 1, nButtons, List.cons(strcat("tap ", Str.fromInt(i)), acc))
@@ -163,7 +202,7 @@ def exhaustExtendOver(exe: String, fuzzDir: String, w: String, h: String, projec
   if (List.isEmpty(remaining) == 1) IO.pure(scriptIndex) else exhaustExtend(exe, fuzzDir, w, h, projectDir, maxDepth, targetLen, alphabet, List.append(prefix, List.head(remaining)), scriptIndex).flatMap(next => exhaustExtendOver(exe, fuzzDir, w, h, projectDir, maxDepth, targetLen, alphabet, List.tail(remaining), prefix, next))
 
 def fuzzExhaustDepth(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, alphabet: List, depth: Int, maxDepth: Int, scriptIndex: Int): IO[Unit] =
-  if (depth > maxDepth) IO.println(str5("scuzz fuzz --exhaust ok (depth ", Str.fromInt(maxDepth), ", ", Str.fromInt(scriptIndex), " scripts)")) else exhaustExtend(exe, fuzzDir, w, h, projectDir, maxDepth, depth, alphabet, List.empty(), scriptIndex).flatMap(next => fuzzExhaustDepth(exe, fuzzDir, w, h, projectDir, alphabet, depth + 1, maxDepth, next))
+  if (depth > maxDepth) checkSometimesCampaign(projectDir, fuzzDir).flatMap(_ => IO.println(str5("scuzz fuzz --exhaust ok (depth ", Str.fromInt(maxDepth), ", ", Str.fromInt(scriptIndex), " scripts)"))) else exhaustExtend(exe, fuzzDir, w, h, projectDir, maxDepth, depth, alphabet, List.empty(), scriptIndex).flatMap(next => fuzzExhaustDepth(exe, fuzzDir, w, h, projectDir, alphabet, depth + 1, maxDepth, next))
 
 def fuzzExhaust(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, nButtons: Int, hasText: Int, hasScroll: Int, depth: Int): IO[Unit] =
   fuzzExhaustDepth(exe, fuzzDir, w, h, projectDir, exhaustAlphabet(nButtons, hasText, hasScroll), 1, depth, 0)
@@ -181,7 +220,7 @@ def fuzzProbeFields(exe: String, fuzzDir: String, w: String, h: String, projectD
   fuzzProbeCont(exe, fuzzDir, w, h, projectDir, seed, iters, exhaust, depth, nButtons, nFields, countPrefixLines(dump, "scroll:", 0, 0))
 
 def fuzzProbeCont(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, seed: Int, iters: Int, exhaust: Int, depth: Int, nButtons: Int, nFields: Int, nScrolls: Int): IO[Unit] =
-  if (nButtons + nFields + nScrolls == 0) IO.println("scuzz fuzz ok (no buttons, text fields, or scrolls; probe only)") else if (exhaust == 1) fuzzExhaust(exe, fuzzDir, w, h, projectDir, nButtons, boolPos(nFields), boolPos(nScrolls), depth) else fuzzLoop(exe, fuzzDir, w, h, projectDir, nButtons, boolPos(nFields), boolPos(nScrolls), seed, 0, iters)
+  if (nButtons + nFields + nScrolls == 0) checkSometimesCampaign(projectDir, fuzzDir).flatMap(_ => IO.println("scuzz fuzz ok (no buttons, text fields, or scrolls; probe only)")) else if (exhaust == 1) fuzzExhaust(exe, fuzzDir, w, h, projectDir, nButtons, boolPos(nFields), boolPos(nScrolls), depth) else fuzzLoop(exe, fuzzDir, w, h, projectDir, nButtons, boolPos(nFields), boolPos(nScrolls), seed, 0, iters)
 
 def fuzzReplay(exe: String, fuzzDir: String, w: String, h: String, replayPath: String, isUi: Int): IO[Unit] =
   Fs.read(replayPath).flatMap(text => fuzzReplayLoaded(exe, fuzzDir, w, h, replayPath, isUi, tomlGetArrayString(text, "fuzz", "events"), tomlGetInt(text, "fuzz", "seed", "0"), tomlGetInt(text, "fuzz", "schedule_seed", "")))
@@ -195,7 +234,7 @@ def schedReplayNote(scheduleSeed: String): String =
   if (Str.len(scheduleSeed) == 0) ")" else str3(", schedule_seed ", scheduleSeed, ")")
 
 def fuzzReplayRun(exe: String, fuzzDir: String, w: String, h: String, isUi: Int, events: List, scheduleSeed: String): IO[Int] =
-  if (isUi == 1) fuzzExec(exe, fuzzDir, w, h, events, scheduleSeed) else fuzzExecIo(exe, scheduleSeed)
+  if (isUi == 1) fuzzExec(exe, fuzzDir, w, h, events, scheduleSeed) else fuzzExecIo(exe, fuzzDir, scheduleSeed)
 
 def fuzzReplayResult(code: Int): IO[Unit] =
   if (code == 0) IO.println("fuzz replay ok (no failure)") else IO.println("fuzz replay reproduced a failure").flatMap(_ => IO.fail("fuzz replay failure"))
@@ -239,7 +278,9 @@ def fuzzBuilt(projectDir: String, replay: String, iters: Int, seed: Int, exhaust
     fuzzDir = pathJoin(pathJoin(projectDir, "build"), "fuzz")
     w = readTomlHeadlessW(toml)
     h = readTomlHeadlessH(toml)
-  } yield Fs.mkdirs(fuzzDir).flatMap(_ => fuzzDispatch(exe, fuzzDir, w, h, projectDir, replay, iters, seed, exhaust, depth, isUi))
+  } yield Fs.mkdirs(fuzzDir).flatMap(_ =>
+  Fs.write(pathJoin(fuzzDir, "sometimes.campaign"), "").flatMap(_ => fuzzDispatch(exe, fuzzDir, w, h, projectDir, replay, iters, seed, exhaust, depth, isUi))
+)
 
 def fuzzDispatch(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, replay: String, iters: Int, seed: Int, exhaust: Int, depth: Int, isUi: Int): IO[Unit] =
   if (Str.len(replay) > 0) fuzzReplay(exe, fuzzDir, w, h, replay, isUi) else if (isUi == 1) fuzzProbe(exe, fuzzDir, w, h, projectDir, seed, iters, exhaust, depth) else fuzzIoLoop(exe, fuzzDir, projectDir, seed, 0, iters)

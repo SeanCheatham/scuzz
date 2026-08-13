@@ -90,16 +90,17 @@ src/
 
 - Prefer sim overlays for app policy (API base URL, a `Backend` value); blessed kits stay one implementation with TestRuntime fakes on the wire
 - Laws are top-level `law name: Bool = …` in the live module; residual `Law.assert` runs only under `SCUZZ_TESTRT=1` (fuzz / mutation); live `build` / `run` erase them
+- `Law.check(name, ok, value)` is identity live and panics under TestRuntime when `ok` is false; `Law.sometimes(name)` records reachability; fuzz fails the campaign if a string-literal name is never hit
 - Observation builtins: `Law.signalInt(id)`, `Law.signalStr(id)`, `Law.signalListLen(id)`, `Law.signalListAt(id, i)`, `Law.a11yHas(needle)` (signal store + stashed a11y dump)
 - No `src/test` twin trees — only stem-paired `*.scuzz_sim`; no third-party test or mutation frameworks
-- Example: `examples/counter` + `examples/shared` (`Shared.scuzz_sim` swaps `counterTitle`; `Main.scuzz` laws check count / mapped label / button / sim title)
+- Example: `examples/counter` + `examples/shared` (`Shared.scuzz_sim` swaps `counterTitle`; `countLabel` uses `Law.check`; `+1` records `Law.sometimes("tappedPlus")`; `Main.scuzz` laws check count / mapped label / button / sim title)
 
 **Today:**
 
 - `[ui]` packages: `scuzz test` is Headless **structural** goldens on the **live** graph (signal store + a11y dump); PNG optional via `--pixels`. `scuzz fuzz` compiles the **verify** graph (sim + residual laws).
 - IO packages (no `[ui]`): `scuzz test` compiles and runs under `SCUZZ_TESTRT=1`, requiring exit 0
 - `scuzz check` format-verifies `src/` and typechecks live + sim twins + laws; `--message-format=json` is the editor protocol (`check` only; LSP wraps this)
-- `scuzz fuzz --iters N` searches event scripts × schedules (`[ui]`) or schedule seeds only (IO-only); `--exhaust --depth N` is `[ui]` event alphabet with FIFO schedule; `--replay repro.toml` restores events + optional `schedule_seed`; oracle is residual laws + panic/`SzError`
+- `scuzz fuzz --iters N` searches event scripts × schedules (`[ui]`) or schedule seeds only (IO-only); `--exhaust --depth N` is `[ui]` event alphabet with FIFO schedule; `--replay repro.toml` restores events + optional `schedule_seed`; oracles are residual laws, `Law.check`, panic/`SzError`, and campaign `Law.sometimes` reachability
 - Deterministic fakes: `TestRuntime` / `SCUZZ_TESTRT=1` for clock/random/FS/network/console in app binaries
 - Put non-determinism behind blessed `IO`; keep View construction pure
 - Built-in mutation (law-strength gate) is direction — see [gaps.md](gaps.md); do not add external mutators
@@ -110,8 +111,8 @@ src/
 | --- | --- |
 | `examples/hello` | IO println hello |
 | `examples/cli` | `Sys.args` + `Sys.readLine` |
-| `examples/counter` | `Signal.map` + `View.bindText` + `View.center` / `View.stack` / `View.positioned` / `View.sized` / `View.minSize` / `View.background` + button lambda + `Ui.run(_ => view)` factory + path dep on `shared` + laws/sim |
-| `examples/shared` | Library package (`{ path = "..." }`) with helpers + optional `*.scuzz_sim` |
+| `examples/counter` | `Signal.map` + `View.bindText` + `View.center` / `View.stack` / `View.positioned` / `View.sized` / `View.minSize` / `View.background` + button lambda + `Ui.run(_ => view)` factory + path dep on `shared` + laws/sim + `Law.sometimes` |
+| `examples/shared` | Library package (`{ path = "..." }`) with helpers + optional `*.scuzz_sim` + `Law.check` |
 | `examples/todo` | `Signal.list` + `View.each`, Column `View.expanded` scroll, Rename via `setAt`, Fs load/save + laws |
 | `examples/nav` | `showWhen`, multi-page, Row `View.expanded` title, `View.align` Other page, `View.padding` Home, `View.aspectRatio` / `View.fraction` Home banner + laws |
 | `examples/live` | Stay-open Window (`Ui.run`; q/Esc) |

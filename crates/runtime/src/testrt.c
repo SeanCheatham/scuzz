@@ -762,3 +762,57 @@ SzIo *sz_law_assert(SzString *name, int64_t ok) {
   fprintf(stderr, "scuzz: %s\n", buf);
   return sz_io_fail_cstr(buf);
 }
+
+void sz_law_check(SzString *name, int64_t ok) {
+  const char *tr = getenv("SCUZZ_TESTRT");
+  char buf[256];
+  if (!tr || tr[0] != '1')
+    return;
+  if (ok)
+    return;
+  snprintf(buf, sizeof buf, "law check failed: %s",
+           name ? sz_string_cstr(name) : "?");
+  fprintf(stderr, "scuzz: %s\n", buf);
+  sz_panic(buf);
+}
+
+#define SZ_SOMETIMES_MAX 64
+static char *g_sometimes[SZ_SOMETIMES_MAX];
+static int g_sometimes_n;
+
+void sz_law_sometimes(SzString *name) {
+  const char *tr = getenv("SCUZZ_TESTRT");
+  const char *s;
+  int i;
+  size_t n;
+  char *copy;
+  if (!tr || tr[0] != '1')
+    return;
+  s = name ? sz_string_cstr(name) : "";
+  if (!s[0])
+    return;
+  for (i = 0; i < g_sometimes_n; i++) {
+    if (strcmp(g_sometimes[i], s) == 0)
+      return;
+  }
+  if (g_sometimes_n >= SZ_SOMETIMES_MAX)
+    return;
+  n = strlen(s);
+  copy = (char *)sz_alloc(n + 1);
+  memcpy(copy, s, n + 1);
+  g_sometimes[g_sometimes_n++] = copy;
+}
+
+void sz_law_sometimes_flush(void) {
+  const char *path = getenv("SCUZZ_SOMETIMES_DUMP");
+  FILE *f;
+  int i;
+  if (!path || !path[0])
+    return;
+  f = fopen(path, "w");
+  if (!f)
+    return;
+  for (i = 0; i < g_sometimes_n; i++)
+    fprintf(f, "%s\n", g_sometimes[i]);
+  fclose(f);
+}

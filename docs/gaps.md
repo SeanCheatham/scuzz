@@ -29,15 +29,14 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### Near-term (verification pivot: in-source oracles + drivers)
 
-Vision locks **oracles in source, drivers as the test surface** ([`vision.md`](vision.md#laws-simulation-mutation-and-verification)). Stage 0 and `compiler-scuzz/` parse top-level `law name: Bool = …` in live `*.scuzz`, residualize under verify / check, and erase from live builds. Still missing: pure `Law.check`, `Law.sometimes`, `*.scuzz_drivers`, `where` refinements.
+Vision locks **oracles in source, drivers as the test surface** ([`vision.md`](vision.md#laws-simulation-mutation-and-verification)). Stage 0 and `compiler-scuzz/` parse top-level `law name: Bool = …` in live `*.scuzz` and provide `Law.check` / `Law.sometimes` (campaign aggregation in the fuzz CLI). Still missing: `*.scuzz_drivers`, `where` refinements.
 
 Slices, in order (each lands in Stage 0 **and** `compiler-scuzz/` per the dual-boot gate; each proven by migrating an example):
 
-1. **`Law.check` + `Law.sometimes`** — pure `Law.check(name, ok, value): T` (identity live, residual under verify) so invariants live in pure code; `Law.sometimes(name)` accumulates per run, campaign aggregation in the fuzz CLI.
-2. **`*.scuzz_drivers`** — impure parameterized overlay defs, verify-graph only, `Law.*` rejected inside; verify build publishes the driver table; fuzz alphabet + script protocol gain `drive <name> [args]` (`Int`/`String` args first); `repro.toml` records driver invocations.
-3. **`where` refinements** — on `def` params and `record` fields; checker synthesizes residual checks at call/construction; erased live; no SMT, no refined-type subtyping.
+1. **`*.scuzz_drivers`** — impure parameterized overlay defs, verify-graph only, `Law.*` rejected inside; verify build publishes the driver table; fuzz alphabet + script protocol gain `drive <name> [args]` (`Int`/`String` args first); `repro.toml` records driver invocations.
+2. **`where` refinements** — on `def` params and `record` fields; checker synthesizes residual checks at call/construction; erased live; no SMT, no refined-type subtyping.
 
-Open questions parked here: driver argument generation beyond `Int`/`String`; campaign-level `Law.sometimes` reporting shape; corpus-guided prefix extension (CLI-only, after `Law.sometimes` exists).
+Open questions parked here: driver argument generation beyond `Int`/`String`; corpus-guided prefix extension (CLI-only).
 
 ### Near-term (AI-friendly tooling)
 

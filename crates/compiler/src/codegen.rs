@@ -153,6 +153,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_law_signal_list_at(i64, i64)").unwrap();
     writeln!(out, "declare i64 @sz_law_a11y_has(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_law_assert(ptr, i64)").unwrap();
+    writeln!(out, "declare void @sz_law_check(ptr, i64)").unwrap();
+    writeln!(out, "declare void @sz_law_sometimes(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_box_i64(i64)").unwrap();
     writeln!(out, "declare i64 @sz_unbox_i64(ptr)").unwrap();
     writeln!(out, "declare i32 @sz_runtime_main_args(ptr, i32, ptr)").unwrap();
@@ -2765,6 +2767,24 @@ fn emit_call(
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Law.check" => {
+            writeln!(
+                code,
+                "  call void @sz_law_check(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, emitted_args[2].value.clone(), emitted_args[2].kind)
+        }
+        "Law.sometimes" => {
+            writeln!(
+                code,
+                "  call void @sz_law_sometimes(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, "null".into(), Kind::Ptr)
         }
         "View.text" => {
             writeln!(

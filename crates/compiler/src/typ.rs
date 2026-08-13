@@ -1546,6 +1546,22 @@ fn infer_call(
             }
             Ok(Type::Io(Box::new(Type::Unit)))
         }
+        "Law.check" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            if !matches!(arg_tys[1], Type::Bool | Type::Int) {
+                return Err(TypeError::Msg(format!(
+                    "Law.check ok must be Bool/Int, got {:?}",
+                    arg_tys[1]
+                )));
+            }
+            Ok(arg_tys[2].clone())
+        }
+        "Law.sometimes" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::Unit)
+        }
         "View.text" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
@@ -4055,6 +4071,19 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Law.signalListAt should typecheck");
+    }
+
+    #[test]
+    fn typechecks_law_check_sometimes() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ = Law.sometimes("hit")
+    s = Law.check("ok", 1, "x")
+    _ <- IO.println(s)
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Law.check / Law.sometimes should typecheck");
     }
 
     #[test]

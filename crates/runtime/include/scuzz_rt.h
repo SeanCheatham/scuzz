@@ -389,6 +389,9 @@ const char *sz_testrt_stdout_cstr(void);
 void sz_law_stash_a11y(const char *dump);
 int64_t sz_law_a11y_has(SzString *needle);
 SzIo *sz_law_assert(SzString *name, int64_t ok);
+void sz_law_check(SzString *name, int64_t ok);
+void sz_law_sometimes(SzString *name);
+void sz_law_sometimes_flush(void);
 
 /* Entrypoint helper used by @main codegen */
 int sz_runtime_main(SzIo *program);

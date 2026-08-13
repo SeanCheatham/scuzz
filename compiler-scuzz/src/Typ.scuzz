@@ -903,7 +903,7 @@ def callSignal(callee: String, argTys: List): TyRes =
   if (streq(callee, "Signal.int") == 1) callSigInt(argTys) else if (streq(callee, "Signal.get") == 1) callSigGet(argTys) else if (streq(callee, "Signal.set") == 1) callSigSet(argTys) else if (streq(callee, "Signal.str") == 1) callSigStr(argTys) else if (streq(callee, "Signal.getStr") == 1) callSigGetStr(argTys) else if (streq(callee, "Signal.setStr") == 1) callSigSetStr(argTys) else if (streq(callee, "Signal.list") == 1) callSigList(argTys) else if (streq(callee, "Signal.getList") == 1) callSigGetList(argTys) else if (streq(callee, "Signal.setList") == 1) callSigSetList(argTys) else if (streq(callee, "Signal.map") == 1) callSigMap(argTys) else tyErr(str3("unknown function ", callee, ""))
 
 def callLaw(callee: String, argTys: List): TyRes =
-  if (streq(callee, "Law.signalInt") == 1) callLawSignalInt(argTys) else if (streq(callee, "Law.signalStr") == 1) callLawSignalStr(argTys) else if (streq(callee, "Law.signalListLen") == 1) callLawSignalListLen(argTys) else if (streq(callee, "Law.signalListAt") == 1) callLawSignalListAt(argTys) else if (streq(callee, "Law.a11yHas") == 1) callLawA11yHas(argTys) else if (streq(callee, "Law.assert") == 1) callLawAssert(argTys) else tyErr(str3("unknown function ", callee, ""))
+  if (streq(callee, "Law.signalInt") == 1) callLawSignalInt(argTys) else if (streq(callee, "Law.signalStr") == 1) callLawSignalStr(argTys) else if (streq(callee, "Law.signalListLen") == 1) callLawSignalListLen(argTys) else if (streq(callee, "Law.signalListAt") == 1) callLawSignalListAt(argTys) else if (streq(callee, "Law.a11yHas") == 1) callLawA11yHas(argTys) else if (streq(callee, "Law.assert") == 1) callLawAssert(argTys) else if (streq(callee, "Law.check") == 1) callLawCheck(argTys) else if (streq(callee, "Law.sometimes") == 1) callLawSometimes(argTys) else tyErr(str3("unknown function ", callee, ""))
 
 def callLawSignalInt(argTys: List): TyRes =
   for {
@@ -934,6 +934,16 @@ def callLawAssert(argTys: List): TyRes =
   for {
     a = expectArity("Law.assert", 2, List.len(argTys))
   } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else if (lawAssertOkTy(argTyAt(argTys, 1)) == 0) tyErr(str3("Law.assert ok must be Bool/Int, got ", tyShow(argTyAt(argTys, 1)), "")) else tyOk(tyMkIo(Type.Unit))
+
+def callLawCheck(argTys: List): TyRes =
+  for {
+    a = expectArity("Law.check", 3, List.len(argTys))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else if (lawAssertOkTy(argTyAt(argTys, 1)) == 0) tyErr(str3("Law.check ok must be Bool/Int, got ", tyShow(argTyAt(argTys, 1)), "")) else tyOk(argTyAt(argTys, 2))
+
+def callLawSometimes(argTys: List): TyRes =
+  for {
+    a = expectArity("Law.sometimes", 1, List.len(argTys))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else tyOk(Type.Unit)
 
 def lawAssertOkTy(t: Type): Int =
   t match {

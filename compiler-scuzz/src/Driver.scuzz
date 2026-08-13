@@ -198,6 +198,78 @@ def lawRetOk(ret: Type): Int =
 def collectLawNames(defs: List, acc: List): List =
   if (List.isEmpty(defs) == 1) List.reverse(acc) else if (defIsLaw(List.head(defs)) == 1) collectLawNames(List.tail(defs), List.cons(defName(List.head(defs)), acc)) else collectLawNames(List.tail(defs), acc)
 
+def collectSometimesPush(acc: List, name: String): List =
+  if (listContainsStr(acc, name) == 1) acc else List.cons(name, acc)
+
+def collectSometimesProg(prog: Prog): List =
+  List.reverse(collectSometimesExpr(progMain(prog), collectSometimesDefs(progDefs(prog), List.empty())))
+
+def collectSometimesDefs(defs: List, acc: List): List =
+  if (List.isEmpty(defs) == 1) acc else collectSometimesDefs(List.tail(defs), collectSometimesExpr(defBody(List.head(defs)), acc))
+
+def collectSometimesExpr(e: Expr, acc: List): List =
+  e match {
+    case Expr.Call(callee, args, span) => collectSometimesCall(callee, args, acc)
+    case Expr.Let(name, value, body, span) => collectSometimesExpr(body, collectSometimesExpr(value, acc))
+    case Expr.FlatMap(inner, param, body, span) => collectSometimesExpr(body, collectSometimesExpr(inner, acc))
+    case Expr.Handle(inner, body, span) => collectSometimesExpr(body, collectSometimesExpr(inner, acc))
+    case Expr.If(cond, thenB, elseB, span) => collectSometimesExpr(elseB, collectSometimesExpr(thenB, collectSometimesExpr(cond, acc)))
+    case Expr.BinOp(op, left, right, span) => collectSometimesExpr(right, collectSometimesExpr(left, acc))
+    case Expr.Lambda(param, body, span) => collectSometimesExpr(body, acc)
+    case Expr.Match(scrut, arms, span) => collectSometimesArms(arms, collectSometimesExpr(scrut, acc))
+    case Expr.For(binders, body, span) => collectSometimesExpr(body, collectSometimesBinders(binders, acc))
+    case Expr.ListLit(elems, span) => collectSometimesArgs(elems, acc)
+    case Expr.Interp(parts, span) => collectSometimesParts(parts, acc)
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => collectSometimesArgs(args, acc)
+    case Expr.MethodCall(receiver, method, args, span) => collectSometimesArgs(args, collectSometimesExpr(receiver, acc))
+    case Expr.Field(base, field, span) => collectSometimesExpr(base, acc)
+    case Expr.Println(arg, span) => collectSometimesExpr(arg, acc)
+    case Expr.Fail(arg, span) => collectSometimesExpr(arg, acc)
+    case Expr.Pure(arg, span) => collectSometimesExpr(arg, acc)
+    case Expr.Sleep(arg, span) => collectSometimesExpr(arg, acc)
+    case Expr.Attempt(inner, span) => collectSometimesExpr(inner, acc)
+    case Expr.IoRace(left, right, span) => collectSometimesExpr(right, collectSometimesExpr(left, acc))
+    case Expr.IoBoth(left, right, span) => collectSometimesExpr(right, collectSometimesExpr(left, acc))
+    case Expr.IoEnsure(inner, finalizer, span) => collectSometimesExpr(finalizer, collectSometimesExpr(inner, acc))
+    case _ => acc
+  }
+
+def collectSometimesCall(callee: String, args: List, acc: List): List =
+  if (streq(callee, "Law.sometimes") == 0) collectSometimesArgs(args, acc) else if (List.isEmpty(args) == 1) acc else collectSometimesArgs(args, collectSometimesName(List.head(args), acc))
+
+def collectSometimesName(e: Expr, acc: List): List =
+  if (isStrLitExpr(e) == 0) acc else collectSometimesPush(acc, strLitExprValue(e))
+
+def collectSometimesArgs(args: List, acc: List): List =
+  if (List.isEmpty(args) == 1) acc else collectSometimesArgs(List.tail(args), collectSometimesExpr(List.head(args), acc))
+
+def collectSometimesArms(arms: List, acc: List): List =
+  if (List.isEmpty(arms) == 1) acc else collectSometimesArms(List.tail(arms), collectSometimesExpr(armBody(List.head(arms)), acc))
+
+def collectSometimesBinders(binders: List, acc: List): List =
+  if (List.isEmpty(binders) == 1) acc else collectSometimesBinders(List.tail(binders), collectSometimesBinder(List.head(binders), acc))
+
+def collectSometimesBinder(b: ForBinder, acc: List): List =
+  b match {
+    case ForBinder.Eq(name, value) => collectSometimesExpr(value, acc)
+    case ForBinder.Draw(name, value) => collectSometimesExpr(value, acc)
+  }
+
+def collectSometimesParts(parts: List, acc: List): List =
+  if (List.isEmpty(parts) == 1) acc else collectSometimesParts(List.tail(parts), collectSometimesPart(List.head(parts), acc))
+
+def collectSometimesPart(part: InterpPart, acc: List): List =
+  part match {
+    case InterpPart.Lit(text) => acc
+    case InterpPart.Hole(expr) => collectSometimesExpr(expr, acc)
+  }
+
+def sometimesDeclaredText(names: List): String =
+  if (List.isEmpty(names) == 1) "" else Str.concat(join(names, "\n"), "\n")
+
+def writeSometimesDeclared(outDir: String, verify: Int, prog: Prog): IO[Unit] =
+  if (verify == 0) IO.pure(()) else Fs.write(pathJoin(outDir, "sometimes.declared"), sometimesDeclaredText(collectSometimesProg(prog)))
+
 def eraseLawsDefs(defs: List, acc: List): List =
   if (List.isEmpty(defs) == 1) List.reverse(acc) else if (defIsLaw(List.head(defs)) == 1) eraseLawsDefs(List.tail(defs), acc) else eraseLawsDefs(List.tail(defs), List.cons(List.head(defs), acc))
 
@@ -278,8 +350,10 @@ def compileAfterSources(projectDir: String, outDir: String, verify: Int, runtime
         embedder = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-desktop"), "build/libscuzz_embedder.a")
         mobile = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-mobile"), "build/libscuzz_mobile.a")
       } yield if (tyIsOk(ty) == 0) IO.fail(tyMsg(ty)) else if (tyIsOk(elabResOf(ep)) == 0) IO.fail(tyMsg(elabResOf(ep))) else Fs.mkdirs(outDir).flatMap(_ =>
-  Fs.write(ll, ir).flatMap(_ =>
-    buildRuntime(runtimeDir, clang).flatMap(_ => linkProject(clang, ll, lib, ffi, inc, embedder, mobile, exe, withUi))
+  writeSometimesDeclared(outDir, verify, prog1b).flatMap(_ =>
+    Fs.write(ll, ir).flatMap(_ =>
+      buildRuntime(runtimeDir, clang).flatMap(_ => linkProject(clang, ll, lib, ffi, inc, embedder, mobile, exe, withUi))
+    )
   )
 )
     )
