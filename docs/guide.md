@@ -123,6 +123,7 @@ src/
 | `examples/record` | `record Point(…)` + `p.x` field access |
 | `examples/trait` | `trait` / `impl` + `p.show()` static dispatch |
 | `examples/generic` | `def id[T](…)` monomorphized generics |
+| `examples/genum` | generic `enum Opt[T]` / `record Box[T]` |
 | `examples/modules` | stem modules, `private def`, `import`, enum-per-module |
 
 Full gallery: [README.md](../README.md#samples-gallery). Edit [vision.md](vision.md) when changing GC, Skia, effects, UI boundaries, or language direction.

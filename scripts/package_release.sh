@@ -84,11 +84,6 @@ copy_crate() {
 
 copy_crate runtime include src Makefile
 copy_crate ffi-skia include src Makefile README.md
-# Shim source used only when rebuilding prebuilts; keep for completeness.
-if [[ -f "$ROOT/crates/ffi-skia/src/sk_capi_skia.cpp" ]]; then
-  mkdir -p "$OUT/crates/ffi-skia/src"
-  cp -f "$ROOT/crates/ffi-skia/src/sk_capi_skia.cpp" "$OUT/crates/ffi-skia/src/sk_capi_skia.cpp"
-fi
 copy_crate embedder-desktop include src Makefile
 copy_crate embedder-mobile include src Makefile shells
 

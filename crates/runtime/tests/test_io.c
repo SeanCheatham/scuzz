@@ -719,6 +719,7 @@ int main(void) {
     r = sz_io_unsafe_run(sz_fs_canonicalize(sz_string_from_cstr("build")));
     assert(r.ok);
     assert(sz_string_len((SzString *)r.value) > 0);
+    remove(path);
   }
 
   /* TestRuntime: Fs graph built before install still uses mem-FS. */

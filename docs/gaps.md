@@ -29,15 +29,14 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### Near-term (HUMANS alignment)
 
-- **Hot reload and debugging tools** — HUMANS wants Headless + in-process reload + debug, especially for agents. Headless is a peer runtime; `scuzz watch` only rebuilds. Session stamp-watch rebuilds the View tree without resetting Signals. `Ui.run(_ => View)` re-runs construction. `[ui]` `run --watch` keeps the process, writes `build/reload.stamp`, rewrites `build/debug.dump` on dirty pumps, and plays `build/inject.script` (`tap` / `text` / `type` / `pump` / `scroll` / `backspace`; `text` replaces, `type` appends, empty `type` is a no-op; append plays the suffix, rewrite plays the whole file; `test_session_inject_script`, `test_session_inject_scroll`, `test_session_inject_backspace`, `test_session_inject_type`). Do not document `watch` as hot reload.
+- **Hot reload and debugging tools** — HUMANS wants Headless + in-process reload + debug for agents. Headless is a peer; `scuzz watch` only rebuilds; `[ui]` `run --watch` stamp-reloads the View tree (Signals stay), writes `build/debug.dump`, and plays `build/inject.script`. Still missing: new machine code in-process and deeper agent debug UX. Do not document `watch` as hot reload.
 
 ### Residuals
 
-- **Net listen** — `Net.serveOnce` one GET; `Net.serve` keeps the listen socket (Stage 0 and self-host; `examples/server`). TestRuntime queues injected paths and drains them. Live listen, connection read/write, and `httpGet` (IPv4 literal or UDP A lookup) park on `poll` (`test_io.c`). IPv6 / CNAME-follow are out (code **6**).
-- **Console** — `Sys.readLine` parks on `poll` until stdin is readable; `Sys.exec` parks until the child exits (`test_io.c`). TestRuntime scripts lines.
-- **Concurrency** — cooperative fibers + TestRuntime virtual-time jumps (`test_io.c`); Scuzz `Ref` / `Queue` / `Deferred` (String payloads) via Stage 0 + self-host (`examples/concurrency`). Live / default ready-queue pick is FIFO; `scuzz fuzz --iters` uses seed-driven pick among n>1 (`SCUZZ_SCHED_SEED`). Live `IO.race` of sleeps waits only for the soonest wake; idle wait uses `poll` (and interruptible `nanosleep` when only timers remain). Later: OS threads, supervision trees.
-- **Memory** — counter-shaped Headless pumps stay flat under alloc accounting (`test_ui.c`, optional `test-asan`). `View.each` with a stable `Signal.list` is pump-flat; `Signal.list` frees unshared cons spines on set and string heads on free (`test_signal_list_spine_collect`). Shared tails (cons onto the current list) stay. Later: a collector if list-churn still demands it.
-- **File-as-module** — stem namespaces for defs and enums + `private def` + `import Module.name` on Stage 0 and self-host (`examples/modules`). **`record`** product types + `p.x` field access (`examples/record`). Thin **traits**/`impl` with static-dispatch method calls (`examples/trait`). Stage 0 and self-host **monomorphized** generics on defs (N type params; `examples/generic`) and on enums/records (`enum Opt[T]:` / `record Box[T](x: T)`; `examples/genum`). Later: richer generics — [`compatibility.md`](compatibility.md).
+- **Net** — IPv6 and CNAME-follow are out (impurity code **6**).
+- **Concurrency** — cooperative fibers only. Later: OS threads, supervision trees.
+- **Memory** — counter-shaped Headless pumps stay flat under alloc accounting; `Signal.list` frees unshared cons spines. Later: a collector if list-churn still demands it.
+- **Language surface** — richer generics beyond monomorphized defs/enums/records ([`compatibility.md`](compatibility.md)).
 
 ### Dependency forms beyond `path`
 
@@ -47,8 +46,8 @@ Path deps only (`manifest.rs`, `Toml.scuzz`). Git / versioned / hosted artifacts
 
 ### Deferred by decision
 
-- **Flutter-style constraint layout** — recursive stacker today (`layout_node` in `view.c`). Locked direction: constraints down, sizes up. `View.expanded` takes leftover Column height or Row width (`examples/todo`, `examples/nav`); `View.center` fills and centers; `View.align(ax, ay, child)` places start/center/end (`examples/nav` Other page); `View.stack` overlays; `View.positioned(x, y, child)` offsets a Stack child (`examples/counter`); `View.padding(n, child)` deflates max/min (`examples/nav` Home); `View.sized(w, h, child)` is a tight slot (`examples/counter`); `View.minSize(w, h, child)` raises min (`examples/counter`); `View.background(color, child)` paints behind the child (`examples/counter`); `View.aspectRatio(rw, rh, child)` fits an `rw:rh` box (`examples/nav` Home); `View.fraction(wpct, hpct, child)` takes that percent of max (`examples/nav` Home). Min is enforced after measure; padding deflates min for the child.
+- **Flutter-style constraint layout** — recursive stacker today (`layout_node` in `view.c`). Locked direction: constraints down, sizes up. Widget set is in [`vision.md`](vision.md#layout-model); do not grow CSS-ish rules or Flutter-style constraint-overflow dumps.
 - **Windows desktop embedder** — same session protocol as X11/Cocoa; secondary platform.
 - **OS IME candidate windows** — focused TextField caret uses measured advance (`sz_view_caret_rect`); embedders do not yet place OS IME UI from it.
-- **LSP / editor tooling** — `fmt`, `check --message-format=json` (format-verify + typecheck), and `watch` exist; no language server. JSON diagnostics are the single editor protocol (`[{severity, message, file?, line?, column?}]`); LSP must wrap `scuzz check --message-format=json`. Do not add a second frontend or a parallel schema.
+- **LSP / editor tooling** — `fmt`, `check --message-format=json`, and `watch` exist; no language server. JSON diagnostics are the single editor protocol; LSP must wrap `scuzz check --message-format=json`.
 - **macOS in default CI** — macOS job is `workflow_dispatch`-only; Darwin regressions surface late.
