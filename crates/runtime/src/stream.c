@@ -9,7 +9,8 @@ enum {
   SZ_ST_CONCAT = 3,
   SZ_ST_EVALMAP = 4,
   SZ_ST_TAKE = 5,
-  SZ_ST_DROP = 6
+  SZ_ST_DROP = 6,
+  SZ_ST_FILTER = 7
 };
 
 static SzStream *st_new(int tag, void *left, void *right, void *env) {
@@ -57,6 +58,14 @@ SzStream *sz_stream_evalmap(SzStream *inner, SzCont f, void *env) {
   return st_new(SZ_ST_EVALMAP, inner, (void *)f, env);
 }
 
+SzStream *sz_stream_filter(SzStream *inner, SzStreamPred pred, void *env) {
+  if (!inner)
+    inner = sz_stream_nil();
+  if (!pred)
+    sz_panic("sz_stream_filter(null pred)");
+  return st_new(SZ_ST_FILTER, inner, (void *)pred, env);
+}
+
 SzStream *sz_stream_take(SzStream *inner, int64_t n) {
   if (!inner)
     inner = sz_stream_nil();
@@ -89,6 +98,13 @@ typedef struct StDrop {
   int64_t n;
   int64_t acc_len;
 } StDrop;
+
+typedef struct StFilter {
+  SzStreamPred pred;
+  void *penv;
+  int64_t remain;
+  int64_t acc_len;
+} StFilter;
 
 typedef struct StMap {
   SzCont f;
@@ -159,6 +175,52 @@ static SzList *drop_added(SzList *acc, int64_t acc_len, int64_t n) {
 static SzIo *after_drop(void *acc, void *env) {
   StDrop *st = (StDrop *)env;
   SzList *out = drop_added((SzList *)acc, st->acc_len, st->n);
+  sz_free(st);
+  return sz_io_pure(out);
+}
+
+/* acc is newest-first. Keep matching items from the segment added after acc_len.
+   If remain >= 0, keep only the oldest `remain` matches. */
+static SzList *filter_added(SzList *acc, int64_t acc_len, SzStreamPred pred,
+                            void *penv, int64_t remain) {
+  int64_t added = (int64_t)sz_list_len(acc) - acc_len;
+  int64_t i;
+  SzList *p = acc;
+  SzList *oldest_first = sz_list_nil();
+  SzList *kept_nf = sz_list_nil();
+  SzList *kept_of;
+  int64_t nkeep;
+  int64_t n;
+  if (added < 0)
+    added = 0;
+  for (i = 0; i < added; i++) {
+    oldest_first = sz_list_cons(sz_list_head(p), oldest_first);
+    p = sz_list_tail(p);
+  }
+  while (!sz_list_is_empty(oldest_first)) {
+    void *h = sz_list_head(oldest_first);
+    oldest_first = sz_list_tail(oldest_first);
+    if (pred(h, penv) != 0)
+      kept_nf = sz_list_cons(h, kept_nf);
+  }
+  kept_of = sz_list_reverse(kept_nf);
+  n = (int64_t)sz_list_len(kept_of);
+  nkeep = remain < 0 ? n : remain;
+  if (nkeep > n)
+    nkeep = n;
+  if (nkeep < 0)
+    nkeep = 0;
+  for (i = 0; i < nkeep; i++) {
+    p = sz_list_cons(sz_list_head(kept_of), p);
+    kept_of = sz_list_tail(kept_of);
+  }
+  return p;
+}
+
+static SzIo *after_filter(void *acc, void *env) {
+  StFilter *st = (StFilter *)env;
+  SzList *out =
+      filter_added((SzList *)acc, st->acc_len, st->pred, st->penv, st->remain);
   sz_free(st);
   return sz_io_pure(out);
 }
@@ -246,6 +308,15 @@ static SzIo *compile_into(SzStream *s, SzList *acc, int64_t remain) {
       st->xs = NULL;
       return sz_io_flatmap(compile_into((SzStream *)s->left, sz_list_nil(), remain),
                            after_map_inner, st);
+    }
+    case SZ_ST_FILTER: {
+      StFilter *st = (StFilter *)sz_alloc(sizeof(StFilter));
+      st->pred = (SzStreamPred)s->right;
+      st->penv = s->env;
+      st->remain = remain;
+      st->acc_len = (int64_t)sz_list_len(acc);
+      return sz_io_flatmap(compile_into((SzStream *)s->left, acc, -1), after_filter,
+                           st);
     }
     default:
       sz_panic("sz_stream: bad tag");

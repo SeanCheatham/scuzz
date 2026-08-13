@@ -816,7 +816,7 @@ def callResourceUse(argTys: List): TyRes =
   } yield if (tyIsOk(a) == 0) a else tyOk(tyMkIo(Type.Unit))
 
 def callStream(callee: String, argTys: List): TyRes =
-  if (streq(callee, "Stream.emit") == 1) callStreamEmit(argTys) else if (streq(callee, "Stream.emits") == 1) callStreamEmits(argTys) else if (streq(callee, "Stream.eval") == 1) callStreamEval(argTys) else if (streq(callee, "Stream.concat") == 1) callStreamConcat(argTys) else if (streq(callee, "Stream.take") == 1) callStreamTake(argTys) else if (streq(callee, "Stream.drop") == 1) callStreamDrop(argTys) else if (streq(callee, "Stream.evalMap") == 1) callStreamEvalMap(argTys) else if (streq(callee, "Stream.compileToList") == 1) callStreamCompile(argTys) else if (streq(callee, "Stream.drain") == 1) callStreamDrain(argTys) else tyErr(str3("unknown function ", callee, ""))
+  if (streq(callee, "Stream.emit") == 1) callStreamEmit(argTys) else if (streq(callee, "Stream.emits") == 1) callStreamEmits(argTys) else if (streq(callee, "Stream.eval") == 1) callStreamEval(argTys) else if (streq(callee, "Stream.concat") == 1) callStreamConcat(argTys) else if (streq(callee, "Stream.take") == 1) callStreamTake(argTys) else if (streq(callee, "Stream.drop") == 1) callStreamDrop(argTys) else if (streq(callee, "Stream.evalMap") == 1) callStreamEvalMap(argTys) else if (streq(callee, "Stream.filter") == 1) callStreamFilter(argTys) else if (streq(callee, "Stream.compileToList") == 1) callStreamCompile(argTys) else if (streq(callee, "Stream.drain") == 1) callStreamDrain(argTys) else tyErr(str3("unknown function ", callee, ""))
 
 def callStreamEmit(argTys: List): TyRes =
   for {
@@ -851,6 +851,11 @@ def callStreamDrop(argTys: List): TyRes =
 def callStreamEvalMap(argTys: List): TyRes =
   for {
     a = expectArity("Stream.evalMap", 2, List.len(argTys))
+  } yield if (tyIsOk(a) == 0) a else tyOk(tyMkOpaque("Stream"))
+
+def callStreamFilter(argTys: List): TyRes =
+  for {
+    a = expectArity("Stream.filter", 2, List.len(argTys))
   } yield if (tyIsOk(a) == 0) a else tyOk(tyMkOpaque("Stream"))
 
 def callStreamCompile(argTys: List): TyRes =

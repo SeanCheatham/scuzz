@@ -98,6 +98,7 @@ typedef struct SzStream SzStream;
 
 typedef void *(*SzThunk)(void *env);
 typedef SzIo *(*SzCont)(void *value, void *env);
+typedef int64_t (*SzStreamPred)(void *value, void *env);
 typedef SzIo *(*SzErrorHandler)(SzError *err, void *env);
 typedef void *(*SzAcquire)(void *env);
 typedef void (*SzRelease)(void *value, void *env);
@@ -269,9 +270,9 @@ SzIo *sz_queue_offer_cstr(SzQueue *q, const char *value);
 SzIo *sz_queue_take(SzQueue *q); /* IO[A]; parks when empty under the fiber scheduler */
 size_t sz_queue_size(const SzQueue *q);
 
-/* Stream — finite pull (FS2 spirit): emit / eval / concat / evalMap / take. */
+/* Stream — finite pull (FS2 spirit): emit / eval / concat / evalMap / take / drop / filter. */
 struct SzStream {
-  int tag; /* 0 nil, 1 cons, 2 eval, 3 concat, 4 evalMap, 5 take */
+  int tag; /* 0 nil, 1 cons, 2 eval, 3 concat, 4 evalMap, 5 take, 6 drop, 7 filter */
   void *left;
   void *right;
   void *env;
@@ -283,6 +284,7 @@ SzStream *sz_stream_emits(SzList *xs);
 SzStream *sz_stream_eval(SzIo *io);
 SzStream *sz_stream_concat(SzStream *left, SzStream *right);
 SzStream *sz_stream_evalmap(SzStream *inner, SzCont f, void *env);
+SzStream *sz_stream_filter(SzStream *inner, SzStreamPred pred, void *env);
 SzStream *sz_stream_take(SzStream *inner, int64_t n);
 SzStream *sz_stream_drop(SzStream *inner, int64_t n);
 SzIo *sz_stream_compile_to_list(SzStream *s); /* IO[List] */

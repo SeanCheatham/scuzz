@@ -66,6 +66,7 @@ jobs:
           cargo run -p scuzz -- run examples/stream | tee /tmp/stream.out
           grep -q "a!,b!,c" /tmp/stream.out
           grep -q "drain:d" /tmp/stream.out
+          grep -q "filter:a,b" /tmp/stream.out
           cargo run -p scuzz -- run examples/adt | tee /tmp/adt.out
           grep -q "adt:red" /tmp/adt.out
           cargo run -p scuzz -- run examples/record | tee /tmp/record.out

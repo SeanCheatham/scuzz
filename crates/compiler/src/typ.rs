@@ -1403,6 +1403,10 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 2)?;
             Ok(Type::Opaque("Stream".into()))
         }
+        "Stream.filter" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            Ok(Type::Opaque("Stream".into()))
+        }
         "Stream.compileToList" => {
             expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Io(Box::new(Type::List)))
@@ -3663,6 +3667,18 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Stream.drop should typecheck");
+    }
+
+    #[test]
+    fn typechecks_stream_filter() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs <- Stream.compileToList(Stream.filter(Stream.emits(["a", "", "b"]), x => Str.len(x) > 0))
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Stream.filter should typecheck");
     }
 
     #[test]
