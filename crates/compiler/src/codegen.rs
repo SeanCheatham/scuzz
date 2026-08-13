@@ -69,6 +69,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_sys_args()").unwrap();
     writeln!(out, "declare ptr @sz_sys_read_line()").unwrap();
     writeln!(out, "declare ptr @sz_sys_exec(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_sys_spawn(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_sys_alive(i64)").unwrap();
     writeln!(out, "declare ptr @sz_sys_getenv(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_clock_real_time()").unwrap();
     writeln!(out, "declare ptr @sz_clock_monotonic()").unwrap();
@@ -2257,6 +2259,24 @@ fn emit_call(
             .unwrap();
             io_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
+        "Sys.spawn" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_sys_spawn(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Sys.alive" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_sys_alive(i64 {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
         "Sys.getenv" => {
             writeln!(
                 code,
@@ -2892,6 +2912,18 @@ mod tests {
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_net_serve_once"));
         assert!(ir.contains("sz_rcont_"));
+    }
+
+    #[test]
+    fn emit_sys_spawn_alive() {
+        let src = r#"@main def main: IO[Unit] =
+  Sys.spawn("true").flatMap(pid => Sys.alive(pid).flatMap(_ => IO.pure(())))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_sys_spawn"));
+        assert!(ir.contains("sz_sys_alive"));
     }
 
     #[test]

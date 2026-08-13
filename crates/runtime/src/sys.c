@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <unistd.h>
 
 /* Process / args / console kit for Stage-1 CLI + clang link (self-host). */
 
@@ -112,6 +113,53 @@ SzIo *sz_sys_exec(SzString *cmd) {
   if (!cmd)
     sz_panic("sz_sys_exec(null)");
   return sz_io_flatmap(sz_io_delay(sys_exec_result, cmd), unwrap_sys, NULL);
+}
+
+static void *sys_spawn_result(void *env) {
+  SzString *cmd = (SzString *)env;
+  SysResult *r = (SysResult *)sz_alloc(sizeof(SysResult));
+  pid_t pid;
+  const char *c = sz_string_cstr(cmd);
+  pid = fork();
+  if (pid < 0) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.spawn: fork failed");
+    return r;
+  }
+  if (pid == 0) {
+    execl("/bin/sh", "sh", "-c", c, (char *)NULL);
+    _exit(127);
+  }
+  r->is_err = 0;
+  r->as.ok = sz_box_i64((int64_t)pid);
+  return r;
+}
+
+SzIo *sz_sys_spawn(SzString *cmd) {
+  if (!cmd)
+    sz_panic("sz_sys_spawn(null)");
+  return sz_io_flatmap(sz_io_delay(sys_spawn_result, cmd), unwrap_sys, NULL);
+}
+
+static void *sys_alive_result(void *env) {
+  int64_t pid = *(int64_t *)env;
+  SysResult *r = (SysResult *)sz_alloc(sizeof(SysResult));
+  int status = 0;
+  pid_t w;
+  sz_free(env);
+  w = waitpid((pid_t)pid, &status, WNOHANG);
+  r->is_err = 0;
+  if (w == 0)
+    r->as.ok = sz_box_i64(1);
+  else
+    r->as.ok = sz_box_i64(0);
+  return r;
+}
+
+SzIo *sz_sys_alive(int64_t pid) {
+  int64_t *p = (int64_t *)sz_alloc(sizeof(int64_t));
+  *p = pid;
+  return sz_io_flatmap(sz_io_delay(sys_alive_result, p), unwrap_sys, NULL);
 }
 
 static void *sys_getenv_result(void *env) {

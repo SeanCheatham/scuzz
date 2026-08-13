@@ -318,6 +318,8 @@ void sz_sys_set_args(int argc, char **argv);
 SzIo *sz_sys_args(void);
 SzIo *sz_sys_read_line(void); /* IO[String]: one stdin line; EOF → "" */
 SzIo *sz_sys_exec(SzString *cmd);
+SzIo *sz_sys_spawn(SzString *cmd); /* IO[Int] pid; does not wait */
+SzIo *sz_sys_alive(int64_t pid);   /* IO[Int] 1 if running */
 SzIo *sz_sys_getenv(SzString *key);
 
 /* Blessed Clock / Random / Net (impurity boundary) */

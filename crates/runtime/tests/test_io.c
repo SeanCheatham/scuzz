@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <netinet/in.h>
 #include <pthread.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -534,6 +535,28 @@ int main(void) {
     assert(strstr(sz_testrt_stdout_cstr(), "a\nb\n") != NULL);
 
     sz_testrt_reset();
+  }
+
+  /* Sys.spawn returns a live pid; Sys.alive reaps after SIGTERM. */
+  {
+    SzIoResult r;
+    int64_t pid;
+    int i;
+    r = sz_io_unsafe_run(sz_sys_spawn(sz_string_from_cstr("sleep 5")));
+    assert(r.ok);
+    pid = sz_unbox_i64(r.value);
+    assert(pid > 0);
+    r = sz_io_unsafe_run(sz_sys_alive(pid));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 1);
+    kill((pid_t)pid, SIGTERM);
+    r = sz_io_unsafe_run(sz_sys_alive(pid));
+    for (i = 0; i < 50 && r.ok && sz_unbox_i64(r.value) == 1; i++) {
+      usleep(20000);
+      r = sz_io_unsafe_run(sz_sys_alive(pid));
+    }
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 0);
   }
 
   /* Live Net.serveOnce: client thread GET while this fiber accepts. */

@@ -4,13 +4,13 @@ def usage(): String =
   "scuzz (build|run|test|check|fuzz|fmt|watch|new|package) [args]\n  scuzz --help   scuzz <command> --help\n  --message-format=human|json   (JSON on check only)"
 
 def helpTop(): String =
-  Str.concat(usage(), "\n\nExamples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz check --message-format=json\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz fuzz --iters 16\n")
+  Str.concat(usage(), "\n\nExamples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz check --message-format=json\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n  scuzz fuzz --iters 16\n")
 
 def helpBuild(): String =
   "scuzz build [project]\n\nCompile to a native binary (LLVM + clang).\n\nExamples:\n  scuzz build\n  scuzz build examples/hello\n"
 
 def helpRun(): String =
-  "scuzz run [project] [--headless]\n\nBuild and run. --headless forces Headless (writes build/snapshot.png).\nDefault follows [ui].default_runtime when present.\n\nExamples:\n  scuzz run\n  scuzz run --headless\n  scuzz run examples/counter --headless\n"
+  "scuzz run [project] [--headless] [--watch]\n\nBuild and run. --headless forces Headless (writes build/snapshot.png).\nDefault follows [ui].default_runtime when present.\n[ui] --watch keeps the process and stamp-reloads the View tree (not source).\nIO-only --watch rebuilds and reruns after the process exits.\n\nExamples:\n  scuzz run\n  scuzz run --headless\n  scuzz run --watch --headless\n  scuzz run examples/counter --headless\n"
 
 def helpTest(): String =
   "scuzz test [project] [--update] [--pixels] [--runtime-tests]\n\n[ui]: Headless structural goldens (seed on first run). IO: TESTRT exit-0 smoke.\n\nExamples:\n  scuzz test\n  scuzz test --update\n  scuzz test --pixels\n"
@@ -72,7 +72,7 @@ def dispatchSkipFlags(args: List, all: List): IO[Unit] =
   if (List.isEmpty(args) == 1) IO.println(usage()) else if (isFlag(List.head(args)) == 1) if (startsWith(List.head(args), "--message-format=") == 1) dispatchSkipFlags(List.tail(args), all) else if (streq(List.head(args), "--message-format") == 1) if (List.len(args) < 2) IO.println(usage()) else dispatchSkipFlags(List.tail(List.tail(args)), all) else dispatchCmd(List.head(args), args, all) else dispatchCmd(List.head(args), args, all)
 
 def dispatchCmd(cmd: String, args: List, all: List): IO[Unit] =
-  if (isHelpToken(cmd) == 1) IO.println(helpTop()) else if (wantsHelp(args) == 1) IO.println(helpFor(cmd)) else if (streq(cmd, "build") == 1) dispatchBuild(defaultProject(args)) else if (streq(cmd, "run") == 1) cmdRun(defaultProject(args), argFlag(args, "--headless", 0)) else if (streq(cmd, "test") == 1) cmdTest(defaultProject(args), argFlag(args, "--update", 0), argFlag(args, "--runtime-tests", 0), argFlag(args, "--pixels", 0)) else if (streq(cmd, "check") == 1) cmdCheck(defaultProject(args), messageFormatJson(all)) else if (streq(cmd, "fuzz") == 1) cmdFuzzArgs(args) else if (streq(cmd, "fmt") == 1) cmdFmt(defaultProject(args), argFlag(args, "--check", 0)) else if (streq(cmd, "watch") == 1) cmdWatch(defaultProject(args)) else if (streq(cmd, "new") == 1) cmdNew(args) else if (streq(cmd, "package") == 1) cmdPackage(defaultProject(args), packageTarget(args)) else IO.println(str3("unknown command: ", cmd, Str.concat("\n", usage())))
+  if (isHelpToken(cmd) == 1) IO.println(helpTop()) else if (wantsHelp(args) == 1) IO.println(helpFor(cmd)) else if (streq(cmd, "build") == 1) dispatchBuild(defaultProject(args)) else if (streq(cmd, "run") == 1) cmdRun(defaultProject(args), argFlag(args, "--headless", 0), argFlag(args, "--watch", 0)) else if (streq(cmd, "test") == 1) cmdTest(defaultProject(args), argFlag(args, "--update", 0), argFlag(args, "--runtime-tests", 0), argFlag(args, "--pixels", 0)) else if (streq(cmd, "check") == 1) cmdCheck(defaultProject(args), messageFormatJson(all)) else if (streq(cmd, "fuzz") == 1) cmdFuzzArgs(args) else if (streq(cmd, "fmt") == 1) cmdFmt(defaultProject(args), argFlag(args, "--check", 0)) else if (streq(cmd, "watch") == 1) cmdWatch(defaultProject(args)) else if (streq(cmd, "new") == 1) cmdNew(args) else if (streq(cmd, "package") == 1) cmdPackage(defaultProject(args), packageTarget(args)) else IO.println(str3("unknown command: ", cmd, Str.concat("\n", usage())))
 
 def dispatchBuild(projectDir: String): IO[Unit] =
   compileProject(projectDir, pathJoin(projectDir, "build"))

@@ -1283,6 +1283,16 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::Io(Box::new(Type::Int)))
         }
+        "Sys.spawn" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::Io(Box::new(Type::Int)))
+        }
+        "Sys.alive" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            Ok(Type::Io(Box::new(Type::Int)))
+        }
         "Sys.getenv" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
@@ -3612,6 +3622,15 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Net.serveOnce should typecheck");
+    }
+
+    #[test]
+    fn typechecks_sys_spawn_alive() {
+        let src = r#"@main def main: IO[Unit] =
+  Sys.spawn("true").flatMap(pid => Sys.alive(pid).flatMap(_ => IO.pure(())))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Sys.spawn/alive should typecheck");
     }
 
     #[test]

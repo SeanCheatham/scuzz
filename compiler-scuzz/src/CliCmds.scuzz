@@ -133,10 +133,77 @@ def cmdPackage(projectDir: String, target: String): IO[Unit] =
     resolveRuntimeEnv("", projectDir).flatMap(runtimeDir => execOk(str5("bash ", pathJoin(pathJoin(parentDir(parentDir(runtimeDir)), "scripts"), "package_project.sh"), " ", projectDir, Str.concat(" ", target))))
   )
 
-def cmdRun(projectDir: String, headless: Int): IO[Unit] =
-  compileProject(projectDir, pathJoin(projectDir, "build")).flatMap(_ =>
-    Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml => runCompiled(projectDir, readTomlName(toml), toml, headless))
+def cmdRun(projectDir: String, headless: Int, watch: Int): IO[Unit] =
+  if (watch == 0) compileProject(projectDir, pathJoin(projectDir, "build")).flatMap(_ =>
+  Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml => runCompiled(projectDir, readTomlName(toml), toml, headless))
+) else Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml => cmdRunWatch(projectDir, readTomlName(toml), toml, headless))
+
+def cmdRunWatch(projectDir: String, name: String, toml: String, headless: Int): IO[Unit] =
+  if (hasUiSection(toml) == 0) runWatchRestart(projectDir, name, toml, headless) else runWatchUi(projectDir, name, toml, headless)
+
+def runWatchRestart(projectDir: String, name: String, toml: String, headless: Int): IO[Unit] =
+  IO.println(str3("scuzz run --watch ", projectDir, " (rebuild and rerun; not hot reload)")).flatMap(_ =>
+    srcFingerprint(projectDir).flatMap(fp => watchRestartLoop(projectDir, name, toml, headless, fp, 1))
   )
+
+def watchRestartLoop(projectDir: String, name: String, toml: String, headless: Int, lastFp: String, force: Int): IO[Unit] =
+  maybeRunCompiled(projectDir, name, toml, headless, force).flatMap(_ =>
+    IO.sleep(500).flatMap(_ =>
+      srcFingerprint(projectDir).flatMap(fp3 => if (streq(fp3, lastFp) == 1) watchRestartLoop(projectDir, name, toml, headless, lastFp, 0) else watchRestartLoop(projectDir, name, toml, headless, fp3, 1))
+    )
+  )
+
+def maybeRunCompiled(projectDir: String, name: String, toml: String, headless: Int, force: Int): IO[Unit] =
+  if (force == 0) IO.pure(()) else compileProject(projectDir, pathJoin(projectDir, "build")).flatMap(_ => runCompiled(projectDir, name, toml, headless)).handleErrorWith(_ =>
+  IO.println("scuzz watch run error")
+)
+
+def runWatchUi(projectDir: String, name: String, toml: String, headless: Int): IO[Unit] =
+  for {
+    stamp = pathJoin(pathJoin(projectDir, "build"), "reload.stamp")
+  } yield Fs.mkdirs(pathJoin(projectDir, "build")).flatMap(_ =>
+  Fs.write(stamp, "0\n").flatMap(_ =>
+    IO.println(str3("scuzz run --watch ", projectDir, " (keep process; stamp reloads View tree, not source)")).flatMap(_ =>
+      srcFingerprint(projectDir).flatMap(fp => spawnWatchUi(projectDir, name, toml, headless, stamp, fp, 0))
+    )
+  )
+)
+
+def spawnWatchUi(projectDir: String, name: String, toml: String, headless: Int, stamp: String, fp: String, gen: Int): IO[Unit] =
+  compileProject(projectDir, pathJoin(projectDir, "build")).flatMap(_ =>
+  Sys.spawn(uiKeepCmd(projectDir, name, toml, headless, stamp)).flatMap(pid =>
+    IO.println(str3("scuzz run --watch: running (pid ", Str.fromInt(pid), ")")).flatMap(_ => watchUiLoop(projectDir, name, toml, headless, stamp, fp, gen, pid))
+  )
+).handleErrorWith(_ =>
+    IO.println("scuzz watch run error").flatMap(_ =>
+      IO.sleep(500).flatMap(_ => spawnWatchUi(projectDir, name, toml, headless, stamp, fp, gen))
+    )
+  )
+
+def watchUiLoop(projectDir: String, name: String, toml: String, headless: Int, stamp: String, fp: String, gen: Int, pid: Int): IO[Unit] =
+  IO.sleep(500).flatMap(_ =>
+    Sys.alive(pid).flatMap(a =>
+      if (a == 0) spawnWatchUi(projectDir, name, toml, headless, stamp, fp, gen) else srcFingerprint(projectDir).flatMap(fp2 =>
+  if (streq(fp2, fp) == 1) watchUiLoop(projectDir, name, toml, headless, stamp, fp, gen, pid) else Fs.write(stamp, Str.concat(Str.fromInt(gen + 1), "\n")).flatMap(_ =>
+  IO.println(str3("scuzz: view reload stamp ", Str.fromInt(gen + 1), "")).flatMap(_ => watchUiLoop(projectDir, name, toml, headless, stamp, fp2, gen + 1, pid))
+)
+)
+    )
+  )
+
+def uiKeepCmd(projectDir: String, name: String, toml: String, headlessForce: Int, stamp: String): String =
+  for {
+    exe = pathJoin(pathJoin(projectDir, "build"), name)
+  } yield if (headlessForce == 1) uiKeepHeadless(exe, toml, stamp) else if (streq(readTomlDefaultRuntime(toml), "window") == 1) uiKeepWindow(exe, toml, stamp) else if (streq(readTomlDefaultRuntime(toml), "mobile") == 1) uiKeepMobile(exe, toml, stamp) else uiKeepHeadless(exe, toml, stamp)
+
+def uiKeepHeadless(exe: String, toml: String, stamp: String): String =
+  str5("env SCUZZ_UI_RELOAD_STAMP=", stamp, " SCUZZ_UI_RUNTIME=headless SCUZZ_UI_WIDTH=", readTomlHeadlessW(toml), str4(" SCUZZ_UI_HEIGHT=", readTomlHeadlessH(toml), " ", exe))
+
+def uiKeepWindow(exe: String, toml: String, stamp: String): String =
+  str5("env SCUZZ_UI_RELOAD_STAMP=", stamp, " SCUZZ_UI_RUNTIME=window SCUZZ_UI_WIDTH=", readTomlHeadlessW(toml), str4(" SCUZZ_UI_HEIGHT=", readTomlHeadlessH(toml), " ", exe))
+
+def uiKeepMobile(exe: String, toml: String, stamp: String): String =
+  str5("env SCUZZ_UI_RELOAD_STAMP=", stamp, " SCUZZ_UI_RUNTIME=mobile SCUZZ_MOBILE_SHELL=1 SCUZZ_UI_WIDTH=", readTomlHeadlessW(toml), str4(" SCUZZ_UI_HEIGHT=", readTomlHeadlessH(toml), " ", exe))
 
 def runCompiled(projectDir: String, name: String, toml: String, headlessForce: Int): IO[Unit] =
   if (headlessForce == 1) runHeadless(projectDir, name, toml) else if (hasUiSection(toml) == 0) execOk(pathJoin(pathJoin(projectDir, "build"), name)) else runWithDefaultRuntime(projectDir, name, toml)

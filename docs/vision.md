@@ -61,7 +61,7 @@ Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI / cargo package `scuz
 
 One CLI. One typer. No second analyze frontend, no `*.g.scuzz` codegen, no `src/test` runner.
 
-- **Watch** rebuilds when sources or `scuzz.toml` change (path deps included). It does not patch running machine code. Session stamp-watch swaps the View tree without resetting Signals. Stage 0 `run --watch` on `[ui]` keeps the process and writes `build/reload.stamp`. Stage 1/2 `watch` still only rebuilds. Debug tools remain; do not document `watch` as hot reload.
+- **Watch** rebuilds when sources or `scuzz.toml` change (path deps included). It does not patch running machine code. Session stamp-watch swaps the View tree without resetting Signals. `[ui]` `run --watch` keeps the process and writes `build/reload.stamp`. Debug tools remain; do not document `watch` as hot reload.
 - **Static hygiene** is `scuzz check`: format-verify `src/` + typecheck (live + sim + laws). `scuzz fmt` rewrites; `fmt --check` remains the dry-run. Further lints emit on `check` (same JSON diagnostics). No `lint` subcommand.
 - **JSON diagnostics** (`scuzz check --message-format=json`) are the editor protocol: `[{severity, message, file?, line?, column?}]`. `check` emits them; other commands stay human until they use this same type. LSP, when added, wraps `scuzz check --message-format=json` — do not grow a second typer or a parallel schema.
 - **`scuzz.toml` is data** — package, path deps, `[ui]`. No plugin DSL, no `build.scuzz` hooks, no sbt-shaped settings. Unknown keys and extra top-level tables are rejected; do not add `[plugins]`.
@@ -108,7 +108,7 @@ Subset used by compiler sources and bootstrap examples. New features land in Sta
 - No `val` / statement blocks / `var` — expression dialect only.
 - `if` / `match`; literals incl. list `[a,b,c]` and `s"…"`
 - Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
-- Builtins: `Str.*`, `List.*`, Fs (`read` / `write` / `list` / `mkdirs` / `canonicalize`)/Sys (`args` / `readLine` / `exec` / `getenv`)/Clock/Random/Net (`httpGet` / `serveOnce`), `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Resource.make` / `Resource.use` (String payload), `Stream.emit` / `emits` / `eval` / `concat` / `evalMap` / `compileToList` / `drain` (String payload), `Signal.*` (incl. `Signal.map`), `View.*` (nested `View.column`/`row`/`stack` children only; `View.each`, `View.bindText`, Column/Row `View.expanded`, `View.center`, `View.align`, `View.positioned`, `View.padding`, `View.sized`, `View.minSize`, `View.background`, `View.aspectRatio`, `View.fraction`), `Ui.run` (View or `_ => View` factory), Theme/Color, `Law.signalInt` / `Law.a11yHas` / `Law.assert` (residual under TestRuntime).
+- Builtins: `Str.*`, `List.*`, Fs (`read` / `write` / `list` / `mkdirs` / `canonicalize`)/Sys (`args` / `readLine` / `exec` / `spawn` / `alive` / `getenv`)/Clock/Random/Net (`httpGet` / `serveOnce`), `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Resource.make` / `Resource.use` (String payload), `Stream.emit` / `emits` / `eval` / `concat` / `evalMap` / `compileToList` / `drain` (String payload), `Signal.*` (incl. `Signal.map`), `View.*` (nested `View.column`/`row`/`stack` children only; `View.each`, `View.bindText`, Column/Row `View.expanded`, `View.center`, `View.align`, `View.positioned`, `View.padding`, `View.sized`, `View.minSize`, `View.background`, `View.aspectRatio`, `View.fraction`), `Ui.run` (View or `_ => View` factory), Theme/Color, `Law.signalInt` / `Law.a11yHas` / `Law.assert` (residual under TestRuntime).
 - `IO` kit + `.flatMap` / `.handleErrorWith` / `.attempt`; lambdas `_ =>` / `name =>` for taps
 - No macros, no implicits, no HKT beyond `IO`, no null
 
@@ -219,7 +219,7 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ## Open work
 
-Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters. Near-term: Stage 1/2 `run --watch` keep-alive, debug tools.
+Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters. Near-term: debug tools.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features. UI is a primary path among CLI/server/desktop/mobile — not the only v0 bar.
 
@@ -234,7 +234,7 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-onl
 | Laws become brittle dump goldens | Laws talk to named module/signal surface; strict sim/live pairing in `check` |
 | Sim becomes Mockito | Only top-level same-name overlays; no stubbing pure `View`/`Signal`; kits stay TestRuntime |
 | “Almost Scala” confusion | Explicit non-goals; language direction above; [guide.md](guide.md) |
-| Watch sold as hot reload | `watch` rebuilds; Stage 0 `[ui]` `run --watch` stamp-reloads Views; no new machine code; debug remains |
+| Watch sold as hot reload | `watch` rebuilds; `[ui]` `run --watch` stamp-reloads Views; no new machine code; debug remains |
 | IDE typer ≠ batch typer | One JSON schema; LSP wraps `scuzz check` |
 | Skia weight | pinned CPU prebuilt default; `sk_sw` opt-out (`SCUZZ_SKIA=sk_sw`) |
 | Window-only features | Headless peer rule |
