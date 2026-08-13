@@ -27,6 +27,9 @@ Requirements to **build** from this checkout: Rust (stable), `clang`, `make`, ne
 Installed apps need `clang` + `make` (and the Stage-2 release tree under `SCUZZ_HOME`). Linking `[ui]` apps against the packaged Skia CPU prebuilt also needs zlib / bzip2 / brotli on Linux (`zlib1g-dev libbz2-dev libbrotli-dev`); on macOS, Homebrew `brotli` / `bzip2` if the linker cannot find them.
 
 ```bash
+# Optional: fast pre-commit gate (conflict markers, rustfmt, -Werror compile on staged C)
+./scripts/install-githooks.sh
+
 # Package + install Stage-2 CLI + SDK (SCUZZ_HOME → ~/.local/share/scuzz)
 ./scripts/install.sh
 # ensure ~/.local/bin is on PATH
@@ -136,7 +139,7 @@ crates/ffi-skia/          sk_capi + CPU software backend
 crates/embedder-desktop/  Linux X11 / macOS Cocoa present for Window peer
 crates/embedder-mobile/   Mobile host shell + Android/iOS packaging templates
 compiler-scuzz/          Stage 1/2 Scuzz Lang compiler + CLI (release path)
-scripts/                  selfhost.sh, install.sh, package_release.sh, package_project.sh, fetch_skia.sh, run_goldens.sh
+scripts/                  selfhost.sh, install.sh, install-githooks.sh, package_release.sh, package_project.sh, fetch_skia.sh, run_goldens.sh
 examples/                 samples gallery (table above)
 third_party/skia/         prebuilt fetch notes
 ```

@@ -1,0 +1,107 @@
+#!/usr/bin/env bash
+# Fast local gate — not a CI substitute. Install: ./scripts/install-githooks.sh
+set -euo pipefail
+
+ROOT="$(git rev-parse --show-toplevel)"
+cd "$ROOT"
+
+STAGED="$(git diff --cached --name-only --diff-filter=ACMR)"
+if [[ -z "$STAGED" ]]; then
+  exit 0
+fi
+
+fail=0
+CC="${CC:-clang}"
+CFLAGS=(-std=c11 -Wall -Wextra -Werror -O2)
+
+# --- merge conflict markers in staged blob ---
+while IFS= read -r path; do
+  [[ -n "$path" ]] || continue
+  if git show ":$path" 2>/dev/null | grep -qE '^(<<<<<<<|=======|>>>>>>>)'; then
+    echo "pre-commit: conflict markers in staged file: $path" >&2
+    fail=1
+  fi
+done <<<"$STAGED"
+
+# --- rustfmt on staged .rs (working-tree path; run cargo fmt to fix) ---
+RS=()
+while IFS= read -r path; do
+  [[ "$path" == *.rs && -f "$path" ]] || continue
+  RS+=("$path")
+done <<<"$STAGED"
+
+if [[ ${#RS[@]} -gt 0 ]]; then
+  if ! command -v rustfmt >/dev/null 2>&1; then
+    echo "pre-commit: rustfmt not on PATH (see rust-toolchain.toml components)" >&2
+    fail=1
+  elif ! rustfmt --edition 2021 --check "${RS[@]}" >/dev/null 2>&1; then
+    echo "pre-commit: rustfmt --check failed on staged .rs (run: cargo fmt)" >&2
+    rustfmt --edition 2021 --check "${RS[@]}" >&2 || true
+    fail=1
+  fi
+fi
+
+# --- compile-only -Werror for staged C under crates/{runtime,ffi-skia,embedder-*} ---
+# Catches undeclared APIs (e.g. usleep under POSIX.1-2008) without linking Skia.
+compile_c() {
+  local src="$1"
+  local includes=()
+  case "$src" in
+    crates/runtime/*)
+      includes=(-Icrates/runtime/include -Icrates/ffi-skia/include
+        -Icrates/embedder-desktop/include -Icrates/embedder-mobile/include)
+      ;;
+    crates/ffi-skia/*)
+      includes=(-Icrates/ffi-skia/include)
+      ;;
+    crates/embedder-desktop/*)
+      includes=(-Icrates/embedder-desktop/include -Icrates/ffi-skia/include
+        -Icrates/runtime/include)
+      ;;
+    crates/embedder-mobile/*)
+      includes=(-Icrates/embedder-mobile/include -Icrates/runtime/include)
+      ;;
+    *)
+      return 0
+      ;;
+  esac
+  local out err
+  out="$(mktemp "${TMPDIR:-/tmp}/scuzz-precommit.XXXXXX.o")"
+  err="${out}.err"
+  if ! "$CC" "${CFLAGS[@]}" "${includes[@]}" -c "$src" -o "$out" 2>"$err"; then
+    echo "pre-commit: $CC -Werror compile failed: $src" >&2
+    cat "$err" >&2
+    fail=1
+  fi
+  rm -f "$out" "$err"
+}
+
+CSRC=()
+while IFS= read -r path; do
+  [[ -f "$path" ]] || continue
+  case "$path" in
+    crates/runtime/src/*.c | crates/runtime/tests/*.c | \
+    crates/ffi-skia/src/*.c | \
+    crates/embedder-desktop/src/*.c | \
+    crates/embedder-mobile/src/*.c)
+      CSRC+=("$path")
+      ;;
+  esac
+done <<<"$STAGED"
+
+if [[ ${#CSRC[@]} -gt 0 ]]; then
+  if ! command -v "$CC" >/dev/null 2>&1; then
+    echo "pre-commit: $CC not on PATH (needed for staged C)" >&2
+    fail=1
+  else
+    for src in "${CSRC[@]}"; do
+      compile_c "$src"
+    done
+  fi
+fi
+
+if [[ "$fail" -ne 0 ]]; then
+  echo "pre-commit: blocked (fix above, or git commit --no-verify to bypass)" >&2
+  exit 1
+fi
+exit 0
