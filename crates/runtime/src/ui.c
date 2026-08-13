@@ -93,6 +93,10 @@ struct SzUiSession {
   SzView *pointer_scroll;
   int64_t last_pump_ms; /* monotonic ms for animation dt */
   int has_pump_clock;
+  SzUiRebuildFn rebuild;
+  void *rebuild_env;
+  char *watch_path;
+  char *watch_fp;
 };
 
 static char *sz_strdup(const char *s) {
@@ -198,6 +202,71 @@ int sz_ui_session_replace_root(SzUiSession *session, SzView *root) {
   return 1;
 }
 
+enum { SZ_UI_STAMP_CAP = 4096 };
+
+static char *stamp_snapshot(const char *path) {
+  FILE *f;
+  char buf[SZ_UI_STAMP_CAP];
+  size_t n;
+  if (!path)
+    return sz_strdup("");
+  f = fopen(path, "rb");
+  if (!f)
+    return sz_strdup("");
+  n = fread(buf, 1, sizeof(buf) - 1, f);
+  fclose(f);
+  buf[n] = '\0';
+  return sz_strdup(buf);
+}
+
+static int stamp_changed(SzUiSession *session) {
+  char *now;
+  int changed;
+  if (!session || !session->watch_path)
+    return 0;
+  now = stamp_snapshot(session->watch_path);
+  changed = !session->watch_fp || strcmp(session->watch_fp, now) != 0;
+  if (changed) {
+    sz_free(session->watch_fp);
+    session->watch_fp = now;
+  } else {
+    sz_free(now);
+  }
+  return changed;
+}
+
+void sz_ui_session_set_rebuild(SzUiSession *session, SzUiRebuildFn fn,
+                               void *env) {
+  if (!session)
+    return;
+  session->rebuild = fn;
+  session->rebuild_env = env;
+}
+
+int sz_ui_session_watch(SzUiSession *session, const char *path) {
+  if (!session || !path || !path[0])
+    return 0;
+  sz_free(session->watch_path);
+  sz_free(session->watch_fp);
+  session->watch_path = sz_strdup(path);
+  session->watch_fp = stamp_snapshot(path);
+  return 1;
+}
+
+int sz_ui_session_reload(SzUiSession *session) {
+  SzView *root;
+  if (!session || !session->rebuild)
+    return 0;
+  root = session->rebuild(session->rebuild_env);
+  if (!root)
+    return 0;
+  if (root == session->root) {
+    session->dirty = 1;
+    return 1;
+  }
+  return sz_ui_session_replace_root(session, root);
+}
+
 void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value) {
   BridgeItem *it;
   if (!session || !sig)
@@ -264,6 +333,8 @@ void sz_ui_unmount(SzUiSession *session) {
     sk_surface_unref(session->surface);
   if (session->owns_view)
     sz_view_free(session->root);
+  sz_free(session->watch_path);
+  sz_free(session->watch_fp);
   sz_free(session);
 }
 
@@ -306,6 +377,8 @@ int sz_ui_pump_sync(SzUiSession *session) {
   /* Pull OS events before the frame (host-driven mobile / desktop shell). */
   drain_mobile_events(session);
   drain_desktop_events(session);
+  if (stamp_changed(session) && !sz_ui_session_reload(session))
+    return 0;
   /* Advance animations with monotonic Clock dt. */
   now_ms = sz_clock_monotonic_ms_sync();
   if (session->has_pump_clock) {

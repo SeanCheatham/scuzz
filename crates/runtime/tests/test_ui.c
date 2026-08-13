@@ -226,6 +226,106 @@ static void test_replace_root_keeps_signals(void) {
 }
 
 typedef struct {
+  SzSignalInt *count;
+  const char *path;
+  SzView *btn;
+} WatchRebuildEnv;
+
+static void write_stamp(const char *path, const char *contents) {
+  FILE *f = fopen(path, "w");
+  assert(f);
+  fputs(contents, f);
+  fclose(f);
+}
+
+static SzView *watch_rebuild(void *env) {
+  WatchRebuildEnv *e = (WatchRebuildEnv *)env;
+  char prefix[64] = "n=";
+  FILE *f;
+  SzView *root, *btn;
+  size_t n;
+  f = fopen(e->path, "r");
+  if (f) {
+    if (fgets(prefix, (int)sizeof(prefix), f)) {
+      n = strlen(prefix);
+      while (n > 0 && (prefix[n - 1] == '\n' || prefix[n - 1] == '\r'))
+        prefix[--n] = '\0';
+    }
+    fclose(f);
+  }
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_text_signal_int(e->count, prefix));
+  btn = sz_view_button("+", counter_tap, e->count);
+  sz_view_add_child(root, btn);
+  e->btn = btn;
+  return root;
+}
+
+static void test_watch_rebuild_keeps_signals(void) {
+  SzUiConfig cfg;
+  WatchRebuildEnv env;
+  SzView *root;
+  SzUiSession *session;
+  SzInputEvent tap;
+  SzString *dump1, *dump2, *a11y;
+  SzView *same;
+  const char *stamp = "/tmp/scuzz_ui_reload.stamp";
+
+  write_stamp(stamp, "n=");
+  env.count = sz_signal_int(0);
+  env.path = stamp;
+  env.btn = NULL;
+  root = watch_rebuild(&env);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 100;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  sz_ui_session_set_rebuild(session, watch_rebuild, &env);
+  assert(sz_ui_session_watch(session, stamp));
+  assert(sz_ui_pump_sync(session));
+  same = sz_ui_session_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_root(session) == same);
+
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SZ_INPUT_TAP;
+  tap.x = sz_view_frame(env.btn).x + 8.f;
+  tap.y = sz_view_frame(env.btn).y + 8.f;
+  assert(sz_ui_inject_sync(session, &tap));
+  assert(sz_signal_int_get(env.count) == 1);
+  dump1 = sz_signal_dump();
+
+  write_stamp(stamp, "v=");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_root(session) != same);
+  assert(sz_signal_int_get(env.count) == 1);
+  dump2 = sz_signal_dump();
+  assert(strcmp(sz_string_cstr(dump1), sz_string_cstr(dump2)) == 0);
+  a11y = sz_view_a11y_dump(sz_ui_session_root(session));
+  assert(strstr(sz_string_cstr(a11y), "text:v=") != NULL);
+  sz_string_free(a11y);
+  sz_string_free(dump1);
+  sz_string_free(dump2);
+
+  sz_view_layout(sz_ui_session_root(session), 200.f, 100.f, sz_theme_default());
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SZ_INPUT_TAP;
+  tap.x = sz_view_frame(env.btn).x + 8.f;
+  tap.y = sz_view_frame(env.btn).y + 8.f;
+  assert(sz_ui_inject_sync(session, &tap));
+  assert(sz_signal_int_get(env.count) == 2);
+
+  sz_ui_unmount(session);
+  sz_signal_int_free(env.count);
+  remove(stamp);
+}
+
+typedef struct {
   SzSignalInt *sig;
   int64_t value;
 } SetEnv;
@@ -1072,6 +1172,7 @@ int main(void) {
   test_label_session();
   test_signals_layout_hit();
   test_replace_root_keeps_signals();
+  test_watch_rebuild_keeps_signals();
   test_button_set_and_show_when();
   test_widgets();
   test_expanded_column();

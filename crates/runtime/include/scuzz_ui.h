@@ -244,6 +244,16 @@ void sz_ui_session_take_root(SzUiSession *session);
 /* Swap the View tree. Signals are not freed or reset. If the session owns the
  * view, the previous root is freed. Marks dirty so the next pump relayouts. */
 int sz_ui_session_replace_root(SzUiSession *session, SzView *root);
+/* Rebuild factory for stamp-watch / reload. Must return a new tree; Signals
+ * stay with the caller. env is not owned. */
+typedef SzView *(*SzUiRebuildFn)(void *env);
+void sz_ui_session_set_rebuild(SzUiSession *session, SzUiRebuildFn fn, void *env);
+/* Watch a stamp file. Next pump that sees different contents calls rebuild
+ * then replace_root. Missing file snapshots as empty. Headless, Window, and
+ * Mobile share this path. */
+int sz_ui_session_watch(SzUiSession *session, const char *path);
+/* Invoke the rebuild factory now. Pump calls this when the stamp changes. */
+int sz_ui_session_reload(SzUiSession *session);
 void sz_ui_unmount(SzUiSession *session);
 
 int sz_ui_pump_sync(SzUiSession *session);
