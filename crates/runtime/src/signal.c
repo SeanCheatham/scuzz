@@ -145,6 +145,16 @@ int64_t sz_law_signal_int(int64_t id) {
   return 0;
 }
 
+SzString *sz_law_signal_str(int64_t id) {
+  SigReg *r;
+  for (r = g_sig_head; r; r = r->next) {
+    if (r->id == (int)id && r->kind == SIG_STR)
+      return sz_string_from_cstr(
+          sz_signal_str_get((const SzSignalStr *)r->sig));
+  }
+  return sz_string_from_cstr("");
+}
+
 int64_t sz_law_signal_list_len(int64_t id) {
   SigReg *r;
   for (r = g_sig_head; r; r = r->next) {
