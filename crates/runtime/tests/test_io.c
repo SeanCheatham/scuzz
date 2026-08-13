@@ -87,6 +87,11 @@ static void *stream_bang_sync(void *v, void *env) {
   return sz_string_concat((SzString *)v, sz_string_from_cstr("!"));
 }
 
+static int64_t stream_empty(void *v, void *env) {
+  (void)env;
+  return sz_string_len((SzString *)v) == 0;
+}
+
 static SzIo *serve_path_ok(void *path, void *env) {
   (void)env;
   return sz_io_pure(
@@ -526,6 +531,56 @@ int main(void) {
     joined = sz_list_join((SzList *)r.value, ",");
     assert(strcmp(sz_string_cstr(joined), "a!") == 0);
     assert(delay_calls == 1);
+
+    xs = sz_list_cons(
+        sz_string_from_cstr("a"),
+        sz_list_cons(sz_string_from_cstr("b"),
+                     sz_list_cons(sz_string_from_cstr(""),
+                                  sz_list_cons(sz_string_from_cstr("c"),
+                                               sz_list_nil()))));
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_takewhile(sz_stream_emits(xs), stream_nonempty, NULL)));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a,b") == 0);
+
+    delay_calls = 0;
+    s = sz_stream_takewhile(
+        sz_stream_concat(
+            sz_stream_concat(sz_stream_eval(sz_io_delay(take_hit, (void *)"a")),
+                             sz_stream_eval(sz_io_delay(take_hit, (void *)""))),
+            sz_stream_eval(sz_io_delay(take_hit, (void *)"b"))),
+        stream_nonempty, NULL);
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(s));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a") == 0);
+    assert(delay_calls == 2);
+
+    xs = sz_list_cons(
+        sz_string_from_cstr(""),
+        sz_list_cons(sz_string_from_cstr(""),
+                     sz_list_cons(sz_string_from_cstr("a"),
+                                  sz_list_cons(sz_string_from_cstr("b"),
+                                               sz_list_nil()))));
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_dropwhile(sz_stream_emits(xs), stream_empty, NULL)));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a,b") == 0);
+
+    delay_calls = 0;
+    s = sz_stream_dropwhile(
+        sz_stream_concat(
+            sz_stream_concat(sz_stream_eval(sz_io_delay(take_hit, (void *)"")),
+                             sz_stream_eval(sz_io_delay(take_hit, (void *)""))),
+            sz_stream_eval(sz_io_delay(take_hit, (void *)"a"))),
+        stream_empty, NULL);
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(s));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a") == 0);
+    assert(delay_calls == 3);
   }
 
   /* sleep */

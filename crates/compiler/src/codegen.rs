@@ -99,6 +99,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_stream_evalmap(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_filter(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_map(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_takewhile(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_dropwhile(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_compile_to_list(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_drain(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_signal_int(i64)").unwrap();
@@ -1860,16 +1862,18 @@ fn emit_stream_evalmap(
     val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
 }
 
-fn emit_stream_filter(
+fn emit_stream_pred(
+    callee: &str,
+    rt: &str,
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
     locals: &mut HashMap<String, (String, Kind)>,
     prefix: &str,
 ) -> Emitted {
-    assert!(args.len() == 2, "Stream.filter expects 2 args");
+    assert!(args.len() == 2, "{callee} expects 2 args");
     let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
     let ExprKind::Lambda { param, body } = &args[1].kind else {
-        panic!("Stream.filter predicate must be a lambda");
+        panic!("{callee} predicate must be a lambda");
     };
     let lam = emit_pred_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
     let mut code = inner.code;
@@ -1877,11 +1881,20 @@ fn emit_stream_filter(
     unpack_closure(&mut code, &lam.value, prefix);
     writeln!(
         code,
-        "  %{prefix}_v = call ptr @sz_stream_filter(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
+        "  %{prefix}_v = call ptr @{rt}(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
         inner.value
     )
     .unwrap();
     val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+}
+
+fn emit_stream_filter(
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    emit_stream_pred("Stream.filter", "sz_stream_filter", args, ctx, locals, prefix)
 }
 
 fn emit_stream_map(
@@ -2174,6 +2187,26 @@ fn emit_call(
     }
     if callee == "Stream.filter" {
         return emit_stream_filter(args, ctx, locals, prefix);
+    }
+    if callee == "Stream.takeWhile" {
+        return emit_stream_pred(
+            "Stream.takeWhile",
+            "sz_stream_takewhile",
+            args,
+            ctx,
+            locals,
+            prefix,
+        );
+    }
+    if callee == "Stream.dropWhile" {
+        return emit_stream_pred(
+            "Stream.dropWhile",
+            "sz_stream_dropwhile",
+            args,
+            ctx,
+            locals,
+            prefix,
+        );
     }
     if callee == "Stream.map" {
         return emit_stream_map(args, ctx, locals, prefix);
@@ -3177,6 +3210,22 @@ mod tests {
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_stream_map"));
         assert!(ir.contains("sz_smap_"));
+    }
+
+    #[test]
+    fn emit_stream_takewhile_compile() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    s = Stream.takeWhile(Stream.emits(["a", "b", "", "c"]), x => Str.len(x) > 0)
+    xs <- Stream.compileToList(s)
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_stream_takewhile"));
+        assert!(ir.contains("sz_pred_"));
     }
 
     #[test]

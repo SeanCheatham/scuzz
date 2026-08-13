@@ -1411,6 +1411,14 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 2)?;
             Ok(Type::Opaque("Stream".into()))
         }
+        "Stream.takeWhile" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            Ok(Type::Opaque("Stream".into()))
+        }
+        "Stream.dropWhile" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            Ok(Type::Opaque("Stream".into()))
+        }
         "Stream.compileToList" => {
             expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Io(Box::new(Type::List)))
@@ -3695,6 +3703,30 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Stream.map should typecheck");
+    }
+
+    #[test]
+    fn typechecks_stream_takewhile() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs <- Stream.compileToList(Stream.takeWhile(Stream.emits(["a", "b", "", "c"]), x => Str.len(x) > 0))
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Stream.takeWhile should typecheck");
+    }
+
+    #[test]
+    fn typechecks_stream_dropwhile() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs <- Stream.compileToList(Stream.dropWhile(Stream.emits(["", "", "a", "b"]), x => Str.len(x) == 0))
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Stream.dropWhile should typecheck");
     }
 
     #[test]

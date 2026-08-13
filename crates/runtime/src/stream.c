@@ -11,7 +11,9 @@ enum {
   SZ_ST_TAKE = 5,
   SZ_ST_DROP = 6,
   SZ_ST_FILTER = 7,
-  SZ_ST_MAP = 8
+  SZ_ST_MAP = 8,
+  SZ_ST_TAKEWHILE = 9,
+  SZ_ST_DROPWHILE = 10
 };
 
 static SzStream *st_new(int tag, void *left, void *right, void *env) {
@@ -75,6 +77,22 @@ SzStream *sz_stream_map(SzStream *inner, SzStreamMapFn f, void *env) {
   return st_new(SZ_ST_MAP, inner, (void *)f, env);
 }
 
+SzStream *sz_stream_takewhile(SzStream *inner, SzStreamPred pred, void *env) {
+  if (!inner)
+    inner = sz_stream_nil();
+  if (!pred)
+    sz_panic("sz_stream_takewhile(null pred)");
+  return st_new(SZ_ST_TAKEWHILE, inner, (void *)pred, env);
+}
+
+SzStream *sz_stream_dropwhile(SzStream *inner, SzStreamPred pred, void *env) {
+  if (!inner)
+    inner = sz_stream_nil();
+  if (!pred)
+    sz_panic("sz_stream_dropwhile(null pred)");
+  return st_new(SZ_ST_DROPWHILE, inner, (void *)pred, env);
+}
+
 SzStream *sz_stream_take(SzStream *inner, int64_t n) {
   if (!inner)
     inner = sz_stream_nil();
@@ -128,8 +146,49 @@ typedef struct StSyncMap {
   SzList *outer_acc;
 } StSyncMap;
 
+typedef struct StTW {
+  SzStreamPred pred;
+  void *penv;
+  int stopped;
+} StTW;
+
+typedef struct StTWEval {
+  SzStream *tail;
+  SzList *acc;
+  int64_t remain;
+  SzStreamPred pred;
+  void *penv;
+  int *stopped;
+} StTWEval;
+
+typedef struct StTWConcat {
+  SzStream *right;
+  int64_t remain;
+  int64_t acc_len;
+  SzStreamPred pred;
+  void *penv;
+  int *stopped;
+} StTWConcat;
+
+typedef struct StTWCut {
+  SzStreamPred pred;
+  void *penv;
+  int64_t remain;
+  int64_t acc_len;
+  int *stopped;
+} StTWCut;
+
+typedef struct StDropWhile {
+  SzStreamPred pred;
+  void *penv;
+  int64_t remain;
+  int64_t acc_len;
+} StDropWhile;
+
 /* remain < 0 means unlimited. */
 static SzIo *compile_into(SzStream *s, SzList *acc, int64_t remain);
+static SzIo *takewhile_into(SzStream *s, SzList *acc, int64_t remain,
+                            SzStreamPred pred, void *penv, int *stopped);
 
 static int64_t remain_dec(int64_t remain) {
   return remain < 0 ? remain : remain - 1;
@@ -279,6 +338,138 @@ static SzIo *after_sync_map(void *inner_acc, void *env) {
   return sz_io_pure(acc);
 }
 
+static SzList *oldest_added(SzList *acc, int64_t acc_len, SzList **old_acc) {
+  int64_t added = (int64_t)sz_list_len(acc) - acc_len;
+  int64_t i;
+  SzList *p = acc;
+  SzList *oldest_first = sz_list_nil();
+  if (added < 0)
+    added = 0;
+  for (i = 0; i < added; i++) {
+    oldest_first = sz_list_cons(sz_list_head(p), oldest_first);
+    p = sz_list_tail(p);
+  }
+  *old_acc = p;
+  return oldest_first;
+}
+
+static SzList *cons_oldest_n(SzList *old_acc, SzList *oldest_first, int64_t nkeep) {
+  int64_t i;
+  if (nkeep < 0)
+    nkeep = 0;
+  for (i = 0; i < nkeep; i++) {
+    old_acc = sz_list_cons(sz_list_head(oldest_first), old_acc);
+    oldest_first = sz_list_tail(oldest_first);
+  }
+  return old_acc;
+}
+
+/* acc is newest-first. Keep a prefix of the added segment while pred holds. */
+static SzList *takewhile_added(SzList *acc, int64_t acc_len, SzStreamPred pred,
+                               void *penv, int64_t remain, int *stopped) {
+  SzList *old_acc;
+  SzList *oldest_first = oldest_added(acc, acc_len, &old_acc);
+  SzList *kept_nf = sz_list_nil();
+  SzList *kept_of;
+  int64_t n;
+  int64_t nkeep;
+  while (!sz_list_is_empty(oldest_first)) {
+    void *h = sz_list_head(oldest_first);
+    oldest_first = sz_list_tail(oldest_first);
+    if (pred(h, penv) == 0) {
+      if (stopped)
+        *stopped = 1;
+      break;
+    }
+    kept_nf = sz_list_cons(h, kept_nf);
+  }
+  kept_of = sz_list_reverse(kept_nf);
+  n = (int64_t)sz_list_len(kept_of);
+  nkeep = remain < 0 ? n : remain;
+  if (nkeep > n)
+    nkeep = n;
+  return cons_oldest_n(old_acc, kept_of, nkeep);
+}
+
+/* acc is newest-first. Skip a prefix of the added segment while pred holds. */
+static SzList *dropwhile_added(SzList *acc, int64_t acc_len, SzStreamPred pred,
+                               void *penv, int64_t remain) {
+  SzList *old_acc;
+  SzList *oldest_first = oldest_added(acc, acc_len, &old_acc);
+  int64_t n;
+  int64_t nkeep;
+  while (!sz_list_is_empty(oldest_first) &&
+         pred(sz_list_head(oldest_first), penv) != 0)
+    oldest_first = sz_list_tail(oldest_first);
+  n = (int64_t)sz_list_len(oldest_first);
+  nkeep = remain < 0 ? n : remain;
+  if (nkeep > n)
+    nkeep = n;
+  return cons_oldest_n(old_acc, oldest_first, nkeep);
+}
+
+static SzIo *tw_done(void *acc, void *env) {
+  sz_free(env);
+  return sz_io_pure(acc);
+}
+
+static SzIo *after_tw_eval(void *value, void *env) {
+  StTWEval *st = (StTWEval *)env;
+  SzList *acc = st->acc;
+  SzStream *tail = st->tail;
+  int64_t remain = st->remain;
+  SzStreamPred pred = st->pred;
+  void *penv = st->penv;
+  int *stopped = st->stopped;
+  sz_free(st);
+  if (pred(value, penv) == 0) {
+    if (stopped)
+      *stopped = 1;
+    return sz_io_pure(acc);
+  }
+  acc = sz_list_cons(value, acc);
+  return takewhile_into(tail, acc, remain_dec(remain), pred, penv, stopped);
+}
+
+static SzIo *after_tw_concat(void *acc, void *env) {
+  StTWConcat *st = (StTWConcat *)env;
+  SzStream *right = st->right;
+  int64_t remain = st->remain;
+  int64_t acc_len = st->acc_len;
+  SzStreamPred pred = st->pred;
+  void *penv = st->penv;
+  int *stopped = st->stopped;
+  int64_t added;
+  sz_free(st);
+  if (stopped && *stopped)
+    return sz_io_pure(acc);
+  if (remain >= 0) {
+    added = (int64_t)sz_list_len((SzList *)acc) - acc_len;
+    remain = remain - added;
+    if (remain < 0)
+      remain = 0;
+  }
+  if (remain == 0)
+    return sz_io_pure(acc);
+  return takewhile_into(right, (SzList *)acc, remain, pred, penv, stopped);
+}
+
+static SzIo *after_tw_cut(void *acc, void *env) {
+  StTWCut *st = (StTWCut *)env;
+  SzList *out = takewhile_added((SzList *)acc, st->acc_len, st->pred, st->penv,
+                                st->remain, st->stopped);
+  sz_free(st);
+  return sz_io_pure(out);
+}
+
+static SzIo *after_dropwhile(void *acc, void *env) {
+  StDropWhile *st = (StDropWhile *)env;
+  SzList *out =
+      dropwhile_added((SzList *)acc, st->acc_len, st->pred, st->penv, st->remain);
+  sz_free(st);
+  return sz_io_pure(out);
+}
+
 static SzIo *compile_into(SzStream *s, SzList *acc, int64_t remain) {
   while (s && s->tag != SZ_ST_NIL) {
     if (remain == 0)
@@ -354,8 +545,87 @@ static SzIo *compile_into(SzStream *s, SzList *acc, int64_t remain) {
       return sz_io_flatmap(compile_into((SzStream *)s->left, sz_list_nil(), remain),
                            after_sync_map, st);
     }
+    case SZ_ST_TAKEWHILE: {
+      StTW *st = (StTW *)sz_alloc(sizeof(StTW));
+      st->pred = (SzStreamPred)s->right;
+      st->penv = s->env;
+      st->stopped = 0;
+      return sz_io_flatmap(takewhile_into((SzStream *)s->left, acc, remain, st->pred,
+                                          st->penv, &st->stopped),
+                           tw_done, st);
+    }
+    case SZ_ST_DROPWHILE: {
+      StDropWhile *st = (StDropWhile *)sz_alloc(sizeof(StDropWhile));
+      st->pred = (SzStreamPred)s->right;
+      st->penv = s->env;
+      st->remain = remain;
+      st->acc_len = (int64_t)sz_list_len(acc);
+      return sz_io_flatmap(compile_into((SzStream *)s->left, acc, -1),
+                           after_dropwhile, st);
+    }
     default:
       sz_panic("sz_stream: bad tag");
+    }
+  }
+  return sz_io_pure(acc);
+}
+
+static SzIo *takewhile_into(SzStream *s, SzList *acc, int64_t remain,
+                            SzStreamPred pred, void *penv, int *stopped) {
+  while (s && s->tag != SZ_ST_NIL) {
+    if (remain == 0)
+      return sz_io_pure(acc);
+    switch (s->tag) {
+    case SZ_ST_TAKE: {
+      int64_t n = (int64_t)(intptr_t)s->env;
+      if (n <= 0)
+        return sz_io_pure(acc);
+      if (remain < 0 || n < remain)
+        remain = n;
+      s = (SzStream *)s->left;
+      break;
+    }
+    case SZ_ST_CONS:
+      if (pred(s->left, penv) == 0) {
+        if (stopped)
+          *stopped = 1;
+        return sz_io_pure(acc);
+      }
+      acc = sz_list_cons(s->left, acc);
+      s = (SzStream *)s->right;
+      remain = remain_dec(remain);
+      break;
+    case SZ_ST_EVAL: {
+      StTWEval *st = (StTWEval *)sz_alloc(sizeof(StTWEval));
+      st->tail = (SzStream *)s->right;
+      st->acc = acc;
+      st->remain = remain;
+      st->pred = pred;
+      st->penv = penv;
+      st->stopped = stopped;
+      return sz_io_flatmap((SzIo *)s->left, after_tw_eval, st);
+    }
+    case SZ_ST_CONCAT: {
+      StTWConcat *st = (StTWConcat *)sz_alloc(sizeof(StTWConcat));
+      st->right = (SzStream *)s->right;
+      st->remain = remain;
+      st->acc_len = (int64_t)sz_list_len(acc);
+      st->pred = pred;
+      st->penv = penv;
+      st->stopped = stopped;
+      return sz_io_flatmap(
+          takewhile_into((SzStream *)s->left, acc, remain, pred, penv, stopped),
+          after_tw_concat, st);
+    }
+    default: {
+      StTWCut *st = (StTWCut *)sz_alloc(sizeof(StTWCut));
+      st->pred = pred;
+      st->penv = penv;
+      st->remain = remain;
+      st->acc_len = (int64_t)sz_list_len(acc);
+      st->stopped = stopped;
+      return sz_io_flatmap(compile_into(s, acc, remain), after_tw_cut, st);
+    }
     }
   }
   return sz_io_pure(acc);

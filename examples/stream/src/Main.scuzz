@@ -12,4 +12,8 @@
     _ <- IO.println(Str.concat("filter:", List.join(filtered, ",")))
     mapped <- Stream.compileToList(Stream.map(Stream.emits(["a", "b"]), x => Str.concat(x, "!")))
     _ <- IO.println(Str.concat("map:", List.join(mapped, ",")))
+    tw <- Stream.compileToList(Stream.takeWhile(Stream.emits(["a", "b", "", "c"]), x => Str.len(x) > 0))
+    _ <- IO.println(Str.concat("takeWhile:", List.join(tw, ",")))
+    dw <- Stream.compileToList(Stream.dropWhile(Stream.emits(["", "", "a", "b"]), x => Str.len(x) == 0))
+    _ <- IO.println(Str.concat("dropWhile:", List.join(dw, ",")))
   } yield ()

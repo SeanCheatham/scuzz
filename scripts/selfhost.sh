@@ -92,6 +92,8 @@ stage_checks() {
   echo "$stream_out" | grep -q "drop:y,z"
   echo "$stream_out" | grep -q "filter:a,b"
   echo "$stream_out" | grep -q "map:a!,b!"
+  echo "$stream_out" | grep -q "takeWhile:a,b"
+  echo "$stream_out" | grep -q "dropWhile:a,b"
 
   echo "==> $stage tests examples/server"
   server_out="$("$bin" test examples/server)"
