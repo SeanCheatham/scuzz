@@ -2,7 +2,7 @@
 
 Scuzz Lang is a **Flutter-shaped product** with a **Scala-inspired language**, not a Scala 3 / Scala Native / Maven citizen.
 
-One doc for product intent, design locks, language direction, and open work. Keep/cut tables: [`compatibility.md`](compatibility.md). Manifest schema: [`schemas/scuzz-toml.md`](schemas/scuzz-toml.md). App path: [`guide.md`](guide.md).
+One doc for product intent, design locks, language direction, and open work. Keep/cut tables: [`compatibility.md`](compatibility.md). Manifest schema: [`schemas/scuzz-toml.md`](schemas/scuzz-toml.md). App path: [`guide.md`](guide.md). Testing strategy and its staging: [`testing.md`](testing.md).
 
 Edit this file when a decision or next-step ordering changes.
 
@@ -162,6 +162,8 @@ App correctness is **laws** searched by `scuzz fuzz`, not example-based unit tes
 | `scuzz build` (sim graph) | Layer `*.scuzz_sim` over live defs; emit residual law checks (armed under TestRuntime / fuzz only) |
 | `scuzz fuzz` | Search event scripts / IO schedules for law violations → `repro.toml` |
 | Later (optional) | Prove trivial law fragments statically; leave the rest as search |
+
+Direction beyond this: seed-driven fiber scheduling under fuzz (DST) and fuzz-verified `*.scuzz_tune` machine manifests — strategy and staging in [`testing.md`](testing.md).
 
 **File convention (stem-paired, no attribute tags):**
 
