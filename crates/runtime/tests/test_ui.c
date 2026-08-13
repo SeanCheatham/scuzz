@@ -466,6 +466,52 @@ static void test_session_debug_dump(void) {
   remove(path);
 }
 
+static void test_session_inject_script(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *btn;
+  SzSignalInt *count;
+  const char *path = "/tmp/scuzz_ui_inject.script";
+  FILE *f;
+
+  remove(path);
+  count = sz_signal_int(0);
+  root = sz_view_column();
+  btn = sz_view_button("+", counter_tap, count);
+  sz_view_add_child(root, btn);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 100;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_inject(session, path));
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(count) == 0);
+
+  write_stamp(path, "tap 0\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(count) == 1);
+
+  f = fopen(path, "a");
+  assert(f);
+  fputs("tap 0\n", f);
+  fclose(f);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(count) == 2);
+
+  write_stamp(path, "tap 0\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(count) == 3);
+
+  sz_ui_unmount(session);
+  sz_signal_int_free(count);
+  remove(path);
+}
+
 typedef struct {
   SzSignalInt *sig;
   int64_t value;
@@ -1317,6 +1363,7 @@ int main(void) {
   test_ui_run_rebuild();
   test_ui_run_rebuild_keepalive();
   test_session_debug_dump();
+  test_session_inject_script();
   test_button_set_and_show_when();
   test_widgets();
   test_expanded_column();

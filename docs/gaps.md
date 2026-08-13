@@ -29,7 +29,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### Near-term (HUMANS alignment)
 
-- **Hot reload and debugging tools** — HUMANS wants Headless + in-process reload + debug, especially for agents. Headless is a peer runtime; `scuzz watch` only rebuilds. Session stamp-watch rebuilds the View tree without resetting Signals. `Ui.run(_ => View)` re-runs construction. `[ui]` `run --watch` keeps the process, writes `build/reload.stamp`, and rewrites a live structural dump (`build/debug.dump`, same format as fuzz goldens) on dirty pumps (`test_session_debug_dump`). Live event inject remains. Do not document `watch` as hot reload.
+- **Hot reload and debugging tools** — HUMANS wants Headless + in-process reload + debug, especially for agents. Headless is a peer runtime; `scuzz watch` only rebuilds. Session stamp-watch rebuilds the View tree without resetting Signals. `Ui.run(_ => View)` re-runs construction. `[ui]` `run --watch` keeps the process, writes `build/reload.stamp`, rewrites `build/debug.dump` on dirty pumps, and plays `build/inject.script` (`tap` / `text` / `pump`; append plays the suffix, rewrite plays the whole file; `test_session_inject_script`). Do not document `watch` as hot reload.
 
 ### Residuals
 

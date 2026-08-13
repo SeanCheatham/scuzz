@@ -256,6 +256,9 @@ int sz_ui_session_watch(SzUiSession *session, const char *path);
  * pumps, stamp reload, and IO-bridge flushes. Agents read the file. */
 int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
 int sz_ui_session_write_dump(SzUiSession *session, const char *path);
+/* Watch an inject script (tap/text/pump). Next pump that sees new contents
+ * plays the suffix (append) or the whole file (rewrite). Missing = empty. */
+int sz_ui_session_set_inject(SzUiSession *session, const char *path);
 /* Invoke the rebuild factory now. Pump calls this when the stamp changes. */
 int sz_ui_session_reload(SzUiSession *session);
 void sz_ui_unmount(SzUiSession *session);
@@ -322,7 +325,8 @@ SzView *sz_lang_view_bind_text(SzSignalStr *sig);
 SzIo *sz_ui_run_view(SzView *root);
 /* Like sz_ui_run_view, but construction is a factory so stamp-watch can
  * re-run it. Watches SCUZZ_UI_RELOAD_STAMP when set. Writes
- * SCUZZ_UI_DEBUG_DUMP on dirty pumps when set. */
+ * SCUZZ_UI_DEBUG_DUMP on dirty pumps when set. Plays SCUZZ_UI_INJECT
+ * (tap/text/pump) when that file changes. */
 SzIo *sz_ui_run_rebuild(SzUiRebuildFn fn, void *env);
 
 #ifdef __cplusplus

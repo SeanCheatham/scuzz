@@ -2,4 +2,4 @@
 
 ## Next
 
-**Live event inject.** `[ui] run --watch` writes a live structural dump (`build/debug.dump` / `SCUZZ_UI_DEBUG_DUMP`) so agents can read signals + a11y without killing the process. They cannot yet tap/type into a keep-alive session. Next: a stamp-driven inject file using the existing tap/text/pump script protocol. Still not Flutter VM patching. Do not document `watch` as hot reload.
+**Persistent Net listen.** HUMANS Headless + stamp-watch + live dump + live inject are in. `Net.serveOnce` is still one HTTP/1.0 GET. Next: keep listening so a server can accept more than one request without restart. Still not Flutter VM patching.

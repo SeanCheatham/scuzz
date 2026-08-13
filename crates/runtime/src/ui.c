@@ -98,6 +98,9 @@ struct SzUiSession {
   char *watch_path;
   char *watch_fp;
   char *debug_dump_path;
+  char *inject_path;
+  char *inject_fp;
+  int inject_playing;
 };
 
 static char *sz_strdup(const char *s) {
@@ -262,6 +265,16 @@ int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path) {
   return 1;
 }
 
+int sz_ui_session_set_inject(SzUiSession *session, const char *path) {
+  if (!session || !path || !path[0])
+    return 0;
+  sz_free(session->inject_path);
+  sz_free(session->inject_fp);
+  session->inject_path = sz_strdup(path);
+  session->inject_fp = stamp_snapshot(path);
+  return 1;
+}
+
 int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
   FILE *f;
   SzString *signals;
@@ -365,6 +378,8 @@ void sz_ui_unmount(SzUiSession *session) {
   sz_free(session->watch_path);
   sz_free(session->watch_fp);
   sz_free(session->debug_dump_path);
+  sz_free(session->inject_path);
+  sz_free(session->inject_fp);
   sz_free(session);
 }
 
@@ -392,6 +407,146 @@ static void drain_desktop_events(SzUiSession *session) {
   }
 }
 
+static int collect_buttons(SzUiSession *session, SzView **buttons, int cap) {
+  SzView *r = session ? session->root : NULL;
+  int n_buttons = 0;
+  int yi, xi;
+  int w = sz_ui_session_width(session);
+  int h = sz_ui_session_height(session);
+  if (!r)
+    return 0;
+  for (yi = 0; yi < h; yi += 4) {
+    for (xi = 0; xi < w; xi += 4) {
+      SzView *hit = sz_view_hit_test(r, (float)xi, (float)yi);
+      int seen = 0;
+      int bi;
+      if (!hit || sz_view_kind(hit) != SZ_VIEW_BUTTON)
+        continue;
+      for (bi = 0; bi < n_buttons; bi++) {
+        if (buttons[bi] == hit) {
+          seen = 1;
+          break;
+        }
+      }
+      if (!seen && n_buttons < cap)
+        buttons[n_buttons++] = hit;
+    }
+  }
+  return n_buttons;
+}
+
+static void script_tap(SzUiSession *session, int n) {
+  SzView *buttons[64];
+  int count = collect_buttons(session, buttons, 64);
+  SzInputEvent tap;
+  SzRect fr;
+  float x, y;
+  int w = sz_ui_session_width(session);
+  int h = sz_ui_session_height(session);
+  if (n < 0 || n >= count) {
+    fprintf(stderr, "scuzz: script tap %d skipped (%d buttons)\n", n, count);
+    return;
+  }
+  fr = sz_view_frame(buttons[n]);
+  x = fr.x + fr.w * 0.5f;
+  y = fr.y + fr.h * 0.5f;
+  if (x < 0.f)
+    x = 0.f;
+  if (y < 0.f)
+    y = 0.f;
+  if (w > 0 && x >= (float)w)
+    x = (float)w - 1.f;
+  if (h > 0 && y >= (float)h)
+    y = (float)h - 1.f;
+  if (x < fr.x)
+    x = fr.x + 1.f;
+  if (y < fr.y)
+    y = fr.y + 1.f;
+  if (x >= fr.x + fr.w)
+    x = fr.x + fr.w - 1.f;
+  if (y >= fr.y + fr.h)
+    y = fr.y + fr.h - 1.f;
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SZ_INPUT_TAP;
+  tap.x = x;
+  tap.y = y;
+  if (!sz_ui_inject_sync(session, &tap))
+    sz_panic("Ui.run: script tap inject failed");
+}
+
+static void play_script_line(SzUiSession *session, char *line) {
+  size_t len = strlen(line);
+  if (len == 0 || line[0] == '#')
+    return;
+  if (strncmp(line, "tap ", 4) == 0 || strcmp(line, "tap") == 0)
+    script_tap(session, len > 3 ? atoi(line + 4) : 0);
+  else if (strncmp(line, "text ", 5) == 0 || strcmp(line, "text") == 0) {
+    SzInputEvent ev;
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = SZ_INPUT_TEXT;
+    ev.text = len > 4 ? line + 5 : "";
+    if (!sz_ui_inject_sync(session, &ev))
+      fprintf(stderr, "scuzz: script text skipped (no text field)\n");
+  } else if (strncmp(line, "pump ", 5) == 0 || strcmp(line, "pump") == 0) {
+    int k = len > 5 ? atoi(line + 5) : 1;
+    while (k-- > 1) {
+      if (!sz_ui_pump_sync(session))
+        sz_panic("Ui.run: script pump failed");
+    }
+  } else
+    sz_panic("Ui.run: unknown SCUZZ_UI_SCRIPT directive");
+  if (!sz_ui_pump_sync(session))
+    sz_panic("Ui.run: script pump failed");
+}
+
+static void play_ui_script_text(SzUiSession *session, char *text) {
+  char *p = text;
+  while (p && *p) {
+    char *nl = strchr(p, '\n');
+    char *line = p;
+    size_t len;
+    if (nl) {
+      *nl = '\0';
+      p = nl + 1;
+    } else
+      p += strlen(p);
+    len = strlen(line);
+    while (len > 0 && line[len - 1] == '\r')
+      line[--len] = '\0';
+    play_script_line(session, line);
+  }
+}
+
+/* Prefix-extend plays the suffix; rewrite plays the whole file. */
+static int take_inject(SzUiSession *session, char **out) {
+  char *now;
+  size_t old_n, now_n;
+  const char *play;
+  if (!session || !session->inject_path || !out)
+    return 0;
+  *out = NULL;
+  now = stamp_snapshot(session->inject_path);
+  if (session->inject_fp && strcmp(session->inject_fp, now) == 0) {
+    sz_free(now);
+    return 0;
+  }
+  old_n = session->inject_fp ? strlen(session->inject_fp) : 0;
+  now_n = strlen(now);
+  if (old_n > 0 && now_n >= old_n && memcmp(session->inject_fp, now, old_n) == 0)
+    play = now + old_n;
+  else
+    play = now;
+  if (!play[0]) {
+    sz_free(session->inject_fp);
+    session->inject_fp = now;
+    return 0;
+  }
+  *out = sz_strdup(play);
+  sz_free(session->inject_fp);
+  session->inject_fp = now;
+  return 1;
+}
+
 int sz_ui_pump_sync(SzUiSession *session) {
   size_t nbytes = 0;
   const uint8_t *rgba;
@@ -413,6 +568,16 @@ int sz_ui_pump_sync(SzUiSession *session) {
     if (!sz_ui_session_reload(session))
       return 0;
     need_dump = 1;
+  }
+  if (!session->inject_playing) {
+    char *delta = NULL;
+    if (take_inject(session, &delta)) {
+      session->inject_playing = 1;
+      play_ui_script_text(session, delta);
+      sz_free(delta);
+      session->inject_playing = 0;
+      need_dump = 1;
+    }
   }
   /* Advance animations with monotonic Clock dt. */
   now_ms = sz_clock_monotonic_ms_sync();

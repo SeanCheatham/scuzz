@@ -322,6 +322,11 @@ static void *thunk_run_rebuild(void *env) {
     if (dump && dump[0])
       sz_ui_session_set_debug_dump(session, dump);
   }
+  {
+    const char *inject = getenv("SCUZZ_UI_INJECT");
+    if (inject && inject[0])
+      sz_ui_session_set_inject(session, inject);
+  }
 
   if (!sz_ui_pump_sync(session))
     sz_panic("Ui.run pump failed");
