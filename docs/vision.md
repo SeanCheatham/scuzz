@@ -2,7 +2,7 @@
 
 Scuzz Lang is a **Flutter-shaped product** with a **Scala-inspired language**, not a Scala 3 / Scala Native / Maven citizen.
 
-One doc for product intent, design locks, language direction, and open work. Keep/cut tables: [`compatibility.md`](compatibility.md). Manifest schema: [`schemas/scuzz-toml.md`](schemas/scuzz-toml.md). App path: [`guide.md`](guide.md). Testing strategy and its staging: [`testing.md`](testing.md).
+One doc for product intent, design locks, language direction, and open work. Keep/cut tables: [`compatibility.md`](compatibility.md). Manifest schema: [`schemas/scuzz-toml.md`](schemas/scuzz-toml.md). App path: [`guide.md`](guide.md). Future empirical pre-optimization: [`optimization.md`](optimization.md).
 
 Edit this file when a decision or next-step ordering changes.
 
@@ -76,7 +76,7 @@ No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** i
 
 ### IO errors
 
-One failure channel: `SzError` (message + optional code) on `IO`. Ops: `flatMap`, `delay`, `fail`, `handleErrorWith`, `attempt`, plus blessed kit (`Resource`, `Ref`, `Deferred`, `Queue`, `sleep`, `race`, `both`). **Concurrency:** cooperative single-threaded fibers (live / default: FIFO ready queue, left-before-right fork; under `scuzz fuzz --iters`, `SCUZZ_SCHED_SEED` makes ready-fiber pick among n>1 seed-driven — see [`testing.md`](testing.md)); `sleep` / empty `Queue.take` / incomplete `Deferred.get` park; TestRuntime advances virtual time to the next wakeup when idle; live idle `nanosleep` is EINTR-interruptible so a cancelled sleeper cannot hold the run loop. No OS threads for IO. Impurity codes: Fs **2**, Sys (**3**; exec + `readLine`), Clock **4**, Random **5**, Net **6**. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net plus console (scripted stdin, optional argv override, println capture+echo). No checked exception hierarchy; panics abort via `sz_panic`.
+One failure channel: `SzError` (message + optional code) on `IO`. Ops: `flatMap`, `delay`, `fail`, `handleErrorWith`, `attempt`, plus blessed kit (`Resource`, `Ref`, `Deferred`, `Queue`, `sleep`, `race`, `both`). **Concurrency:** cooperative single-threaded fibers (live / default: FIFO ready queue, left-before-right fork; under `scuzz fuzz --iters`, `SCUZZ_SCHED_SEED` makes ready-fiber pick among n>1 seed-driven); `sleep` / empty `Queue.take` / incomplete `Deferred.get` park; TestRuntime advances virtual time to the next wakeup when idle; live idle `nanosleep` is EINTR-interruptible so a cancelled sleeper cannot hold the run loop. No OS threads for IO. Impurity codes: Fs **2**, Sys (**3**; exec + `readLine`), Clock **4**, Random **5**, Net **6**. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net plus console (scripted stdin, optional argv override, println capture+echo). No checked exception hierarchy; panics abort via `sz_panic`.
 
 ### `Ui` vs `View`
 
@@ -163,7 +163,7 @@ App correctness is **laws** searched by `scuzz fuzz`, not example-based unit tes
 | `scuzz fuzz` | Search event scripts / IO schedules for law violations → `repro.toml` |
 | Later (optional) | Prove trivial law fragments statically; leave the rest as search |
 
-Direction beyond this: fuzz-verified `*.scuzz_tune` machine manifests — strategy and staging in [`testing.md`](testing.md). Schedule search (DST) under fuzz is in place (same doc).
+Direction beyond this (not current work): fuzz-verified `*.scuzz_tune` machine manifests — [`optimization.md`](optimization.md).
 
 **File convention (stem-paired, no attribute tags):**
 
@@ -205,7 +205,7 @@ scuzz fuzz --exhaust --depth N      # [ui] bounded event search (FIFO schedule)
 scuzz fuzz --replay repro.toml      # deterministic replay (events + optional schedule_seed)
 ```
 
-Scripts are a line protocol — `tap <n>` / `text <s>` / `pump <k>` — played by the runtime (`SCUZZ_UI_SCRIPT`) across `pump` boundaries; on exit it writes the signal store + a11y view dump (`SCUZZ_FUZZ_DUMP`). The CLI probes the a11y dump for the typed event surface (buttons in scan order, text fields), generates seeded scripts (Lehmer/MINSTD LCG — the kernel dialect has no bitwise ops) or enumerates a finite alphabet under `--exhaust` (`tap <i>` for each button, `text` / `text a` when a field exists, `pump 1`), and writes `repro.toml` on failure. `--iters` also sets `SCUZZ_SCHED_SEED` (recorded as `schedule_seed` in `repro.toml`); live runs and `--exhaust` stay FIFO. IO-only packages search schedule seeds only (no event scripts); `--exhaust` requires `[ui]`. Exhaustive mode walks lengths `1..N` in stable order so shorter counterexamples win. `fuzz` lives in the Stage-1/2 CLI (not Stage 0); replay plays recorded events verbatim and restores `schedule_seed` when present. **Oracles:** module **laws** first (residual `Law.assert` under `SCUZZ_TESTRT=1`); panic/`SzError` exit still fails; structural dumps aid diagnosis (PNG last). Requires stable tap order, `pump` as time, no hidden nondeterminism. Strategy detail: [`testing.md`](testing.md).
+Scripts are a line protocol — `tap <n>` / `text <s>` / `pump <k>` — played by the runtime (`SCUZZ_UI_SCRIPT`) across `pump` boundaries; on exit it writes the signal store + a11y view dump (`SCUZZ_FUZZ_DUMP`). The CLI probes the a11y dump for the typed event surface (buttons in scan order, text fields), generates seeded scripts (Lehmer/MINSTD LCG — the kernel dialect has no bitwise ops) or enumerates a finite alphabet under `--exhaust` (`tap <i>` for each button, `text` / `text a` when a field exists, `pump 1`), and writes `repro.toml` on failure. `--iters` also sets `SCUZZ_SCHED_SEED` (recorded as `schedule_seed` in `repro.toml`); live runs and `--exhaust` stay FIFO. IO-only packages search schedule seeds only (no event scripts); `--exhaust` requires `[ui]`. Exhaustive mode walks lengths `1..N` in stable order so shorter counterexamples win. `fuzz` lives in the Stage-1/2 CLI (not Stage 0); replay plays recorded events verbatim and restores `schedule_seed` when present. **Oracles:** module **laws** first (residual `Law.assert` under `SCUZZ_TESTRT=1`); panic/`SzError` exit still fails; structural dumps aid diagnosis (PNG last). Requires stable tap order, `pump` as time, no hidden nondeterminism.
 
 ### Layout model
 

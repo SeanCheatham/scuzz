@@ -7,7 +7,7 @@
 | [`docs/vision.md`](docs/vision.md) | Product thesis, decisions, language direction, open work, risks |
 | [`docs/gaps.md`](docs/gaps.md) | Unknowns (unproven bets) and known gaps, ranked by risk |
 | [`docs/plans.md`](docs/plans.md) | Short-term next slice only (delete when done; no history) |
-| [`docs/testing.md`](docs/testing.md) | Testing strategy: laws + fuzz, schedule search (DST), empirical pre-optimization |
+| [`docs/optimization.md`](docs/optimization.md) | Future empirical pre-optimization (`*.scuzz_tune`); not current work |
 | [`docs/compatibility.md`](docs/compatibility.md) | Keep/cut vs Scala & Typelevel; platforms; self-host stages |
 | [`docs/guide.md`](docs/guide.md) | App author happy path |
 | [`docs/schemas/scuzz-toml.md`](docs/schemas/scuzz-toml.md) | Package manifest schema |
