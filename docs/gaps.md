@@ -29,7 +29,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### Near-term (HUMANS alignment)
 
-- **Hot reload and debugging tools** — HUMANS wants Headless + in-process reload + debug, especially for agents. Headless is a peer runtime; CLI `watch` only rebuilds. Session stamp-watch rebuilds the View tree without resetting Signals. Stage 0 `Ui.run(_ => View)` re-runs construction (`test_ui_run_rebuild`); self-host port, CLI keep-alive, and debug tools remain. Do not document CLI `watch` as hot reload.
+- **Hot reload and debugging tools** — HUMANS wants Headless + in-process reload + debug, especially for agents. Headless is a peer runtime; CLI `watch` only rebuilds. Session stamp-watch rebuilds the View tree without resetting Signals. `Ui.run(_ => View)` re-runs construction on Stage 0 and self-host (`examples/counter`). Remaining UI examples, CLI keep-alive, and debug tools remain. Do not document CLI `watch` as hot reload.
 
 ### Residuals
 

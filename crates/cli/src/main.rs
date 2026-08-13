@@ -258,12 +258,11 @@ bundle_id = "dev.scuzz.{package_name}"
   for {
     count = Signal.int(0)
     label = Signal.map(count, n => s"count = $n")
-    root = View.column(
+    _ <- Ui.run(_ => View.column(
       View.text("Counter"),
       View.bindText(label),
       View.row(View.button("+1", _ => Signal.set(count, Signal.get(count) + 1)))
-    )
-    _ <- Ui.run(root)
+    ))
   } yield ()
 "#,
                 )?;

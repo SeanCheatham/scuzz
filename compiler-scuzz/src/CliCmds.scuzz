@@ -1,7 +1,7 @@
 package scuzz.compiler
 
 def uiMainTemplate(): String =
-  "@main def main: IO[Unit] =\n  for {\n    count = Signal.int(0)\n    label = Signal.map(count, n => s\"count = $n\")\n    root = View.column(\n      View.text(\"Counter\"),\n      View.bindText(label),\n      View.row(View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)))\n    )\n    _ <- Ui.run(root)\n  } yield ()\n"
+  "@main def main: IO[Unit] =\n  for {\n    count = Signal.int(0)\n    label = Signal.map(count, n => s\"count = $n\")\n    _ <- Ui.run(_ => View.column(\n      View.text(\"Counter\"),\n      View.bindText(label),\n      View.row(View.button(\"+1\", _ => Signal.set(count, Signal.get(count) + 1)))\n    ))\n  } yield ()\n"
 
 def helloMainTemplate(): String =
   Str.concat("@main def main: IO[Unit] =\n", "  IO.println(\"Hello, Scuzz!\").flatMap(_ => IO.println(\"ready.\"))\n")

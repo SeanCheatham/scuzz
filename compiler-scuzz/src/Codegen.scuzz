@@ -422,7 +422,7 @@ def runtimeDeclaresB(): String =
   str5("declare ptr @sz_list_nil()\n", "declare i32 @sz_list_is_empty(ptr)\ndeclare ptr @sz_list_cons(ptr, ptr)\n", "declare ptr @sz_list_head(ptr)\ndeclare ptr @sz_list_tail(ptr)\n", "declare i64 @sz_list_len(ptr)\ndeclare ptr @sz_list_at(ptr, i64)\n", str5("declare ptr @sz_list_reverse(ptr)\ndeclare ptr @sz_list_join(ptr, ptr)\n", "declare ptr @sz_list_append(ptr, ptr)\ndeclare ptr @sz_fs_read(ptr)\n", "declare ptr @sz_fs_write(ptr, ptr)\ndeclare ptr @sz_fs_list(ptr)\n", "declare ptr @sz_fs_mkdirs(ptr)\ndeclare ptr @sz_fs_canonicalize(ptr)\ndeclare ptr @sz_sys_args()\n", str5("declare ptr @sz_sys_read_line()\ndeclare ptr @sz_sys_exec(ptr)\ndeclare ptr @sz_sys_getenv(ptr)\n", "declare ptr @sz_clock_real_time()\ndeclare ptr @sz_clock_monotonic()\n", "declare ptr @sz_random_next_int(i64)\ndeclare ptr @sz_net_http_get(ptr)\ndeclare ptr @sz_net_serve_once(i64, ptr, ptr)\n", "declare ptr @sz_impurity_run_kit()\ndeclare ptr @sz_ref_of(ptr)\ndeclare ptr @sz_ref_get(ptr)\ndeclare ptr @sz_ref_set(ptr, ptr)\ndeclare ptr @sz_queue_unbounded()\ndeclare ptr @sz_queue_offer(ptr, ptr)\ndeclare ptr @sz_queue_take(ptr)\ndeclare ptr @sz_deferred_empty()\ndeclare ptr @sz_deferred_complete(ptr, ptr)\ndeclare ptr @sz_deferred_get(ptr)\ndeclare ptr @sz_lang_resource_make(ptr, ptr, ptr)\ndeclare ptr @sz_lang_resource_use(ptr, ptr, ptr)\ndeclare ptr @sz_stream_emit(ptr)\ndeclare ptr @sz_stream_emits(ptr)\ndeclare ptr @sz_stream_eval(ptr)\ndeclare ptr @sz_stream_concat(ptr, ptr)\ndeclare ptr @sz_stream_evalmap(ptr, ptr, ptr)\ndeclare ptr @sz_stream_compile_to_list(ptr)\ndeclare ptr @sz_stream_drain(ptr)\ndeclare ptr @sz_lang_signal_int(i64)\n", str5("declare i64 @sz_lang_signal_get(ptr)\ndeclare ptr @sz_lang_signal_set(ptr, i64)\n", "declare ptr @sz_lang_signal_str(ptr)\ndeclare ptr @sz_lang_signal_str_get(ptr)\n", "declare ptr @sz_lang_signal_str_set(ptr, ptr)\ndeclare ptr @sz_lang_signal_list(ptr)\n", "declare ptr @sz_lang_signal_list_get(ptr)\ndeclare ptr @sz_lang_signal_list_set(ptr, ptr)\n", str3("declare ptr @sz_string_lines(ptr)\n", "declare ptr @sz_io_unsafe_run_or_die(ptr)\n", "")))))
 
 def runtimeDeclaresC(): String =
-  Str.concat(str5("declare ptr @sz_lang_view_text(ptr)\ndeclare ptr @sz_lang_view_bind_text(ptr)\n", "declare ptr @sz_lang_view_button(ptr, ptr, ptr)\n", "declare i64 @sz_theme_accent()\ndeclare i64 @sz_theme_primary()\n", "declare i64 @sz_theme_muted()\ndeclare i64 @sz_theme_foreground()\n", "declare i64 @sz_color_rgb(i64, i64, i64)\n"), str5("declare ptr @sz_lang_view_column()\ndeclare ptr @sz_lang_view_row()\ndeclare ptr @sz_lang_view_stack()\n", "declare ptr @sz_lang_view_each(ptr)\n", "declare ptr @sz_lang_view_scroll(ptr)\ndeclare ptr @sz_lang_view_expanded(ptr)\ndeclare ptr @sz_lang_view_center(ptr)\ndeclare ptr @sz_lang_view_align(i64, i64, ptr)\ndeclare ptr @sz_lang_view_positioned(i64, i64, ptr)\ndeclare ptr @sz_lang_view_padding(i64, ptr)\ndeclare ptr @sz_lang_view_sized(i64, i64, ptr)\ndeclare ptr @sz_lang_view_min_size(i64, i64, ptr)\ndeclare ptr @sz_lang_view_background(i64, ptr)\ndeclare ptr @sz_lang_view_aspect_ratio(i64, i64, ptr)\ndeclare ptr @sz_lang_view_fraction(i64, i64, ptr)\n", "declare ptr @sz_lang_view_text_field(ptr, ptr)\ndeclare ptr @sz_lang_view_icon(i64, i64)\n", str3("declare ptr @sz_lang_view_image(i64, i64, i64, ptr)\ndeclare ptr @sz_lang_view_add_child(ptr, ptr)\n", "declare ptr @sz_lang_view_show_when(ptr, i64, ptr)\n", "declare ptr @sz_lang_signal_map(ptr, ptr, ptr)\ndeclare ptr @sz_ui_run_view(ptr)\ndeclare i64 @sz_law_signal_int(i64)\ndeclare i64 @sz_law_a11y_has(ptr)\ndeclare ptr @sz_law_assert(ptr, i64)\ndeclare ptr @sz_box_i64(i64)\ndeclare i64 @sz_unbox_i64(ptr)\ndeclare i32 @sz_runtime_main_args(ptr, i32, ptr)\n\n")))
+  Str.concat(str5("declare ptr @sz_lang_view_text(ptr)\ndeclare ptr @sz_lang_view_bind_text(ptr)\n", "declare ptr @sz_lang_view_button(ptr, ptr, ptr)\n", "declare i64 @sz_theme_accent()\ndeclare i64 @sz_theme_primary()\n", "declare i64 @sz_theme_muted()\ndeclare i64 @sz_theme_foreground()\n", "declare i64 @sz_color_rgb(i64, i64, i64)\n"), str5("declare ptr @sz_lang_view_column()\ndeclare ptr @sz_lang_view_row()\ndeclare ptr @sz_lang_view_stack()\n", "declare ptr @sz_lang_view_each(ptr)\n", "declare ptr @sz_lang_view_scroll(ptr)\ndeclare ptr @sz_lang_view_expanded(ptr)\ndeclare ptr @sz_lang_view_center(ptr)\ndeclare ptr @sz_lang_view_align(i64, i64, ptr)\ndeclare ptr @sz_lang_view_positioned(i64, i64, ptr)\ndeclare ptr @sz_lang_view_padding(i64, ptr)\ndeclare ptr @sz_lang_view_sized(i64, i64, ptr)\ndeclare ptr @sz_lang_view_min_size(i64, i64, ptr)\ndeclare ptr @sz_lang_view_background(i64, ptr)\ndeclare ptr @sz_lang_view_aspect_ratio(i64, i64, ptr)\ndeclare ptr @sz_lang_view_fraction(i64, i64, ptr)\n", "declare ptr @sz_lang_view_text_field(ptr, ptr)\ndeclare ptr @sz_lang_view_icon(i64, i64)\n", str3("declare ptr @sz_lang_view_image(i64, i64, i64, ptr)\ndeclare ptr @sz_lang_view_add_child(ptr, ptr)\n", "declare ptr @sz_lang_view_show_when(ptr, i64, ptr)\n", "declare ptr @sz_lang_signal_map(ptr, ptr, ptr)\ndeclare ptr @sz_ui_run_view(ptr)\ndeclare ptr @sz_ui_run_rebuild(ptr, ptr)\ndeclare i64 @sz_law_signal_int(i64)\ndeclare i64 @sz_law_a11y_has(ptr)\ndeclare ptr @sz_law_assert(ptr, i64)\ndeclare ptr @sz_box_i64(i64)\ndeclare i64 @sz_unbox_i64(ptr)\ndeclare i32 @sz_runtime_main_args(ptr, i32, ptr)\n\n")))
 
 def delayThunk(): String =
   "define internal ptr @sz_delay_unit_thunk(ptr %env) {\nentry:\n  ret ptr null\n}\n\n"
@@ -899,7 +899,7 @@ def emitLambdaClosure(env: List, prefix: String, fnName: String, id: Int, conts:
   } yield mkS(code, str3("%", prefix, "_cl2"), EmitKind.Ptr, id, conts)
 
 def emitCall(strs: List, callee: String, args: List, ctx: List, env: List, prefix: String, id: Int, conts: String): Emit =
-  if (streq(callee, "Signal.map") == 1) emitSignalMap(strs, args, ctx, env, prefix, id, conts) else if (startsWith(callee, "Resource.") == 1) emitResource(strs, callee, args, ctx, env, prefix, id, conts) else if (streq(callee, "Stream.evalMap") == 1) emitStreamEvalMap(strs, args, ctx, env, prefix, id, conts) else if (streq(callee, "Net.serveOnce") == 1) emitNetServeOnce(strs, args, ctx, env, prefix, id, conts) else emitCallArgs(strs, callee, args, ctx, env, prefix, id, conts)
+  if (streq(callee, "Signal.map") == 1) emitSignalMap(strs, args, ctx, env, prefix, id, conts) else if (startsWith(callee, "Resource.") == 1) emitResource(strs, callee, args, ctx, env, prefix, id, conts) else if (streq(callee, "Stream.evalMap") == 1) emitStreamEvalMap(strs, args, ctx, env, prefix, id, conts) else if (streq(callee, "Net.serveOnce") == 1) emitNetServeOnce(strs, args, ctx, env, prefix, id, conts) else if (streq(callee, "Ui.run") == 1) emitUiRun(strs, args, ctx, env, prefix, id, conts) else emitCallArgs(strs, callee, args, ctx, env, prefix, id, conts)
 
 def emitCallArgs(strs: List, callee: String, args: List, ctx: List, env: List, prefix: String, id: Int, conts: String): Emit =
   for {
@@ -947,6 +947,64 @@ def emitNetServeOnce(strs: List, args: List, ctx: List, env: List, prefix: Strin
     code2 = str4(code1, "  %", prefix, str3("_fnt = call ptr @sz_list_tail(ptr ", sValue(lam), ")\n"))
     code3 = str4(code2, "  %", prefix, str4("_envp = call ptr @sz_list_head(ptr %", prefix, "_fnt)\n", ""))
   } yield mkS(str4(code3, "  %", prefix, str5("_v = call ptr @sz_net_serve_once(i64 ", sValue(first), ", ptr %", prefix, str4("_fnp, ptr %", prefix, "_envp)\n", ""))), str3("%", prefix, "_v"), EmitKind.Io, sId(lam), sConts(lam))
+
+def emitUiRun(strs: List, args: List, ctx: List, env: List, prefix: String, id: Int, conts: String): Emit =
+  emitUiRunMatch(List.head(args), strs, ctx, env, prefix, id, conts)
+
+def emitUiRunMatch(e: Expr, strs: List, ctx: List, env: List, prefix: String, id: Int, conts: String): Emit =
+  e match {
+    case Expr.Lambda(param, body, span) => emitUiRunRebuild(strs, param, body, ctx, env, prefix, id, conts)
+    case Expr.Unit(span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.IntLit(digits, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.StrLit(value, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.ListLit(elems, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.Interp(parts, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.Var(name, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.Field(base, field, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.MethodCall(receiver, method, args, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.Call(callee, args, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.BinOp(op, left, right, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.If(cond, thenB, elseB, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.For(binders, body, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.Let(name, value, body, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.FlatMap(inner, param, body, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.Handle(inner, body, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.Attempt(inner, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.Match(scrut, arms, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.Println(arg, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.Fail(arg, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.Pure(arg, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.Sleep(arg, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.Delay(span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.IoRace(left, right, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+    case Expr.IoBoth(left, right, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
+  }
+
+def emitUiRunView(e: Expr, strs: List, ctx: List, env: List, prefix: String, id: Int, conts: String): Emit =
+  for {
+    root = emitExpr(e, strs, ctx, env, Str.concat(prefix, "_a0"), id, conts)
+  } yield mkS(str4(sCode(root), "  %", prefix, str3("_v = call ptr @sz_ui_run_view(ptr ", sValue(root), ")\n")), str3("%", prefix, "_v"), EmitKind.Io, sId(root), sConts(root))
+
+def emitUiRunRebuild(strs: List, param: String, body: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): Emit =
+  for {
+    fnName = Str.concat("sz_uibuild_", Str.fromInt(id))
+    names = captureNames(env, List.empty())
+    up = unpackEnv(names, Str.concat("u", Str.fromInt(id)), env)
+    benv = rebuildBind(param, sndL(up))
+    be = emitExpr(body, strs, ctx, benv, Str.concat("u", Str.fromInt(id)), id + 1, conts)
+    bodyEnd = str4(sCode(be), "  ret ptr ", sValue(be), "\n")
+    contDef = str4("define internal ptr @", fnName, "(ptr %env) {\nentry:\n", str4(fst(up), bodyEnd, "}\n\n", ""))
+    lam = emitLambdaClosure(env, Str.concat(prefix, "_fn"), fnName, sId(be), Str.concat(sConts(be), contDef))
+    code0 = sCode(lam)
+    code1 = str4(code0, "  %", prefix, str3("_fnp = call ptr @sz_list_head(ptr ", sValue(lam), ")\n"))
+    code2 = str4(code1, "  %", prefix, str3("_fnt = call ptr @sz_list_tail(ptr ", sValue(lam), ")\n"))
+    code3 = str4(code2, "  %", prefix, str4("_envp = call ptr @sz_list_head(ptr %", prefix, "_fnt)\n", ""))
+    code4 = str4(code3, "  %", prefix, str5("_v = call ptr @sz_ui_run_rebuild(ptr %", prefix, "_fnp, ptr %", prefix, "_envp)\n"))
+  } yield mkS(code4, str3("%", prefix, "_v"), EmitKind.Io, sId(lam), sConts(lam))
+
+def rebuildBind(param: String, env: List): List =
+  if (streq(param, "_") == 1) env else envPut(env, param, "%env", EmitKind.Ptr)
 
 def emitIoContLambda(strs: List, e: Expr, ctx: List, env: List, prefix: String, id: Int, conts: String): Emit =
   emitIoContLambdaMatch(e, strs, ctx, env, prefix, id, conts)

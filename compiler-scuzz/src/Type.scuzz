@@ -254,6 +254,12 @@ def tyVarName(t: Type): String =
     case _ => ""
   }
 
+def tyOpaqueName(t: Type): String =
+  t match {
+    case Type.Opaque(name) => name
+    case _ => ""
+  }
+
 def tyMkVar(name: String): Type =
   Type.Var(name)
 

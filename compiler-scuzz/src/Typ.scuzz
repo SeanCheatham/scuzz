@@ -1027,7 +1027,10 @@ def callColorRgb(argTys: List): TyRes =
 def callUiRun(argTys: List): TyRes =
   for {
     a = expectArity("Ui.run", 1, List.len(argTys))
-  } yield if (tyIsOk(a) == 0) a else tyOk(tyMkIo(Type.Unit))
+  } yield if (tyIsOk(a) == 0) a else callUiRunArg(argTyAt(argTys, 0))
+
+def callUiRunArg(t: Type): TyRes =
+  if (streq(tyOpaqueName(t), "View") == 1) tyOk(tyMkIo(Type.Unit)) else if (streq(tyOpaqueName(t), "TapFn") == 1) tyOk(tyMkIo(Type.Unit)) else tyErr(str3("Ui.run expects View or _ => View, got ", tyShow(t), ""))
 
 def callUserFun(callee: String, argTys: List, funs: List, enums: List): TyRes =
   for {

@@ -88,7 +88,7 @@ One failure channel: `SzError` (message + optional code) on `IO`. Ops: `flatMap`
 | **`View`** | Widget tree | Sync/pure `build` |
 | **`Ui` / `UiSession`** | `mount` / `pump` / `inject` / `snapshot` | Effectful (`UiRuntime`) |
 
-Headless is a **peer** of Window/Mobile, not a test-only shim — product runtime for agents and CI. Frame boundary is `pump`. World effects stay blessed `IO`; bridge into signals via `sz_ui_bridge_post_*`. No UI feature without a Headless path. Taps: `View.button(label, _ => …)` first-class lambdas. Prefer `Signal.list` + `View.each` (framework rebuilds children at layout). Derived display: `Signal.map` + `View.bindText`. **View construction is nested and declarative** (`View.column(child, …)` / `View.row(…)` / `View.stack(…)`). Session `replace_root` swaps that tree without resetting Signals. Stage 0 `Ui.run(_ => view)` re-runs that construction; `Ui.run(view)` stays until self-host ports the factory.
+Headless is a **peer** of Window/Mobile, not a test-only shim — product runtime for agents and CI. Frame boundary is `pump`. World effects stay blessed `IO`; bridge into signals via `sz_ui_bridge_post_*`. No UI feature without a Headless path. Taps: `View.button(label, _ => …)` first-class lambdas. Prefer `Signal.list` + `View.each` (framework rebuilds children at layout). Derived display: `Signal.map` + `View.bindText`. **View construction is nested and declarative** (`View.column(child, …)` / `View.row(…)` / `View.stack(…)`). Session `replace_root` swaps that tree without resetting Signals. `Ui.run(_ => view)` re-runs that construction (Stage 0 and self-host); `Ui.run(view)` stays.
 
 ### IO apps vs Headless
 
@@ -108,7 +108,7 @@ Subset used by compiler sources and bootstrap examples. New features land in Sta
 - No `val` / statement blocks / `var` — expression dialect only.
 - `if` / `match`; literals incl. list `[a,b,c]` and `s"…"`
 - Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
-- Builtins: `Str.*`, `List.*`, Fs (`read` / `write` / `list` / `mkdirs` / `canonicalize`)/Sys (`args` / `readLine` / `exec` / `getenv`)/Clock/Random/Net (`httpGet` / `serveOnce`), `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Resource.make` / `Resource.use` (String payload), `Stream.emit` / `emits` / `eval` / `concat` / `evalMap` / `compileToList` / `drain` (String payload), `Signal.*` (incl. `Signal.map`), `View.*` (nested `View.column`/`row`/`stack` children only; `View.each`, `View.bindText`, Column/Row `View.expanded`, `View.center`, `View.align`, `View.positioned`, `View.padding`, `View.sized`, `View.minSize`, `View.background`, `View.aspectRatio`, `View.fraction`), `Ui.run` (View or Stage-0 `_ => View` factory), Theme/Color, `Law.signalInt` / `Law.a11yHas` / `Law.assert` (residual under TestRuntime).
+- Builtins: `Str.*`, `List.*`, Fs (`read` / `write` / `list` / `mkdirs` / `canonicalize`)/Sys (`args` / `readLine` / `exec` / `getenv`)/Clock/Random/Net (`httpGet` / `serveOnce`), `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Resource.make` / `Resource.use` (String payload), `Stream.emit` / `emits` / `eval` / `concat` / `evalMap` / `compileToList` / `drain` (String payload), `Signal.*` (incl. `Signal.map`), `View.*` (nested `View.column`/`row`/`stack` children only; `View.each`, `View.bindText`, Column/Row `View.expanded`, `View.center`, `View.align`, `View.positioned`, `View.padding`, `View.sized`, `View.minSize`, `View.background`, `View.aspectRatio`, `View.fraction`), `Ui.run` (View or `_ => View` factory), Theme/Color, `Law.signalInt` / `Law.a11yHas` / `Law.assert` (residual under TestRuntime).
 - `IO` kit + `.flatMap` / `.handleErrorWith` / `.attempt`; lambdas `_ =>` / `name =>` for taps
 - No macros, no implicits, no HKT beyond `IO`, no null
 
@@ -130,12 +130,11 @@ App-shaped Counter:
   for {
     count = Signal.int(0)
     label = Signal.map(count, n => s"count = $n")
-    root  = View.column(
+    _    <- Ui.run(_ => View.column(
               View.text("Counter"),
               View.bindText(label),
               View.row(View.button("+1", _ => Signal.set(count, Signal.get(count) + 1)))
-            )
-    _    <- Ui.run(root)
+            ))
   } yield ()
 ```
 
@@ -220,7 +219,7 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ## Open work
 
-Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters. Near-term: `Ui.run` factory on self-host, CLI keep-alive, debug tools.
+Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters. Near-term: remaining UI examples on the `Ui.run` factory, CLI keep-alive, debug tools.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features. UI is a primary path among CLI/server/desktop/mobile — not the only v0 bar.
 
