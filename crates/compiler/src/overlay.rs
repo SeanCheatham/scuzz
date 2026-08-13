@@ -43,7 +43,8 @@ pub fn apply_overlays(
         .collect();
 
     for sim in &sims {
-        let prog = parse(&sim.text).map_err(|e| OverlayError::Msg(format!("{}: {e}", sim.label)))?;
+        let prog =
+            parse(&sim.text).map_err(|e| OverlayError::Msg(format!("{}: {e}", sim.label)))?;
         if !prog.main.name.is_empty() {
             return Err(OverlayError::Msg(format!(
                 "{}: *.scuzz_sim must not define @main",

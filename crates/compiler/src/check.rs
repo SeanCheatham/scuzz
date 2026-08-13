@@ -60,7 +60,9 @@ impl Diagnostic {
 
     pub fn to_human(&self) -> String {
         match (&self.file, self.line, self.column) {
-            (Some(f), Some(l), Some(c)) => format!("{}:{}:{}: {}: {}", f, l, c, self.severity, self.message),
+            (Some(f), Some(l), Some(c)) => {
+                format!("{}:{}:{}: {}: {}", f, l, c, self.severity, self.message)
+            }
             (Some(f), Some(l), None) => format!("{}:{}: {}: {}", f, l, self.severity, self.message),
             (Some(f), None, None) => format!("{}: {}: {}", f, self.severity, self.message),
             _ => format!("{}: {}", self.severity, self.message),
@@ -175,8 +177,7 @@ fn format_check_src(project_dir: &Path) -> Result<Vec<Diagnostic>> {
     files.sort();
     let mut diags = Vec::new();
     for p in files {
-        let text = fs::read_to_string(&p)
-            .with_context(|| format!("reading {}", p.display()))?;
+        let text = fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?;
         match format_source(&text) {
             Ok(formatted) if formatted != text => {
                 let file = p
@@ -278,7 +279,10 @@ mod tests {
         let err = parse_file(src, "parse_bad.scuzz").unwrap_err();
         let span = err.span().expect("parse error should carry a span");
         let (line, _) = offset_to_line_col(src, span.start);
-        assert!(line >= 3, "expected error near junk tokens, got line {line}");
+        assert!(
+            line >= 3,
+            "expected error near junk tokens, got line {line}"
+        );
         let d = diagnostic_from_parse(err, &[("parse_bad.scuzz".into(), src.into())]);
         assert_eq!(d.line, Some(line));
         assert!(d.column.unwrap_or(0) >= 1);

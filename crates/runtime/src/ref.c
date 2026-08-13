@@ -6,8 +6,6 @@ SzRef *sz_ref_make(void *initial) {
   return r;
 }
 
-void sz_ref_free(SzRef *ref) { sz_free(ref); }
-
 static void *ref_of_thunk(void *env) { return env; }
 
 SzIo *sz_ref_of(void *initial) {

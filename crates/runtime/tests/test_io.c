@@ -41,28 +41,6 @@ static SzIo *cont_println(void *value, void *env) {
   return sz_io_println_cstr("after-flatmap");
 }
 
-static int released = 0;
-static void *acquire_token(void *env) {
-  (void)env;
-  return (void *)(intptr_t)7;
-}
-static void release_token(void *value, void *env) {
-  (void)env;
-  assert((intptr_t)value == 7);
-  released = 1;
-}
-static SzIo *use_token(void *acquired, void *env) {
-  (void)env;
-  assert((intptr_t)acquired == 7);
-  return sz_io_println_cstr("resource-used");
-}
-
-static SzIo *use_token_fail(void *acquired, void *env) {
-  (void)env;
-  assert((intptr_t)acquired == 7);
-  return sz_io_fail_cstr("use-failed");
-}
-
 static int lang_released = 0;
 static SzIo *lang_release(void *acquired, void *env) {
   (void)env;
@@ -86,12 +64,6 @@ static void *ensure_mark_thunk(void *env) {
   (void)env;
   ensured_flag = 1;
   return NULL;
-}
-
-static SzIo *use_token_sleep(void *acquired, void *env) {
-  (void)env;
-  assert((intptr_t)acquired == 7);
-  return sz_io_sleep_ms(100);
 }
 
 static SzIo *lang_use_sleep(void *acquired, void *env) {
@@ -162,72 +134,6 @@ static void *live_get_client(void *arg) {
   while (total + 1 < sizeof buf &&
          (n = read(fd, buf + total, sizeof buf - 1 - total)) > 0)
     total += (size_t)n;
-  close(fd);
-  return buf;
-}
-
-static int live_connect(int port) {
-  int fd = -1;
-  int i;
-  struct sockaddr_in addr;
-  memset(&addr, 0, sizeof addr);
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons((uint16_t)port);
-  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-  for (i = 0; i < 50; i++) {
-    sleep_us(10000);
-    fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0)
-      continue;
-    if (connect(fd, (struct sockaddr *)&addr, sizeof addr) == 0)
-      return fd;
-    close(fd);
-    fd = -1;
-  }
-  return -1;
-}
-
-static int live_http_get(int fd, const char *path, char *buf, size_t cap) {
-  char req[128];
-  ssize_t n;
-  size_t total = 0;
-  snprintf(req, sizeof req,
-           "GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
-           path);
-  if (write(fd, req, strlen(req)) < 0)
-    return 0;
-  while (total + 1 < cap &&
-         (n = read(fd, buf + total, cap - 1 - total)) > 0)
-    total += (size_t)n;
-  buf[total] = '\0';
-  return 1;
-}
-
-static void *live_get_two(void *arg) {
-  int port = *(int *)arg;
-  int fd;
-  size_t n1;
-  static char buf[2048];
-  memset(buf, 0, sizeof buf);
-  fd = live_connect(port);
-  if (fd < 0)
-    return NULL;
-  if (!live_http_get(fd, "/a", buf, sizeof buf)) {
-    close(fd);
-    return NULL;
-  }
-  close(fd);
-  n1 = strlen(buf);
-  if (n1 + 2 >= sizeof buf)
-    return buf;
-  buf[n1++] = '|';
-  fd = live_connect(port);
-  if (fd < 0)
-    return buf;
-  if (!live_http_get(fd, "/b", buf + n1, sizeof buf - n1)) {
-    close(fd);
-    return buf;
-  }
   close(fd);
   return buf;
 }
@@ -395,25 +301,7 @@ int main(void) {
     sz_either_free(e);
   }
 
-  /* Resource bracket */
-  released = 0;
-  SzResource *res = sz_resource_make(acquire_token, release_token, NULL);
-  SzIo *rio = sz_resource_use(res, use_token, NULL);
-  r = sz_io_unsafe_run(rio);
-  assert(r.ok);
-  assert(released == 1);
-  sz_resource_free(res);
-
-  /* Resource releases on use failure */
-  released = 0;
-  res = sz_resource_make(acquire_token, release_token, NULL);
-  r = sz_io_unsafe_run(sz_resource_use(res, use_token_fail, NULL));
-  assert(!r.ok);
-  assert(released == 1);
-  sz_error_free(r.error);
-  sz_resource_free(res);
-
-  /* Language Resource.make / use (IO acquire + IO release) */
+  /* Resource.make / use (IO acquire + IO release) */
   lang_released = 0;
   SzLangResource *lr = sz_lang_resource_make(
       sz_io_pure(sz_string_from_cstr("tok")), lang_release, NULL);
@@ -451,15 +339,6 @@ int main(void) {
   /* Resource releases when cancelled as race loser (TestRuntime: both park, then short wins). */
   {
     sz_testrt_install();
-    released = 0;
-    res = sz_resource_make(acquire_token, release_token, NULL);
-    r = sz_io_unsafe_run(
-        sz_io_race(sz_resource_use(res, use_token_sleep, NULL),
-                   sz_io_sleep_ms(1)));
-    assert(r.ok);
-    assert(released == 1);
-    sz_resource_free(res);
-
     lang_released = 0;
     lr = sz_lang_resource_make(sz_io_pure(sz_string_from_cstr("tok")),
                                lang_release, NULL);
@@ -1062,19 +941,6 @@ int main(void) {
     pthread_join(th, &ret);
     assert(r.ok);
     assert(ret && strstr((char *)ret, "ok:/x") != NULL);
-  }
-
-  /* Live Net.serve: same listen socket, two sequential GETs. */
-  {
-    pthread_t th;
-    int port = 18474;
-    void *ret = NULL;
-    pthread_create(&th, NULL, live_get_two, &port);
-    r = sz_io_unsafe_run(sz_net_serve_n(port, 2, serve_path_ok, NULL));
-    pthread_join(th, &ret);
-    assert(r.ok);
-    assert(ret && strstr((char *)ret, "ok:/a") != NULL);
-    assert(ret && strstr((char *)ret, "ok:/b") != NULL);
   }
 
   /* poll parks so a peer fiber can run before the fd is readable. */

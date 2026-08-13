@@ -550,10 +550,6 @@ const char *sz_testrt_net_last_serve_body(void) {
   return g_last_serve_body ? g_last_serve_body : "";
 }
 
-const char *sz_testrt_net_serve_path(void) {
-  return g_req_n > 0 && g_req[0][0] ? g_req[0] : "/";
-}
-
 void sz_testrt_net_set_last_serve_body(const char *body) {
   size_t n;
   sz_free(g_last_serve_body);

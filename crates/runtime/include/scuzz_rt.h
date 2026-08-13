@@ -84,12 +84,10 @@ typedef struct SzAdt {
 SzAdt *sz_adt_new(int32_t tag, void *payload);
 int32_t sz_adt_tag(const SzAdt *adt);
 void *sz_adt_payload(const SzAdt *adt);
-void sz_adt_free(SzAdt *adt);
 
 /* --- IO fiber skeleton + blessed kit ------------------------------------ */
 
 typedef struct SzIo SzIo;
-typedef struct SzResource SzResource;
 typedef struct SzLangResource SzLangResource;
 typedef struct SzRef SzRef;
 typedef struct SzDeferred SzDeferred;
@@ -101,8 +99,6 @@ typedef SzIo *(*SzCont)(void *value, void *env);
 typedef int64_t (*SzStreamPred)(void *value, void *env);
 typedef void *(*SzStreamMapFn)(void *value, void *env);
 typedef SzIo *(*SzErrorHandler)(SzError *err, void *env);
-typedef void *(*SzAcquire)(void *env);
-typedef void (*SzRelease)(void *value, void *env);
 
 typedef enum SzIoTag {
   SZ_IO_PURE = 1,
@@ -200,25 +196,10 @@ typedef struct SzIoResult {
 
 SzIoResult sz_io_unsafe_run(SzIo *io);
 void *sz_io_unsafe_run_or_die(SzIo *io);
-void sz_io_free(SzIo *io);
 
 /* Called from queue/deferred delay thunks to wake a parked fiber (returns 1 if woke). */
 int sz_fiber_wake_queue(SzQueue *q, void *value);
 void sz_fiber_wake_deferred(SzDeferred *d);
-
-/* Resource: acquire / release with bracket semantics (success, failure, cancel). */
-struct SzResource {
-  SzAcquire acquire;
-  SzRelease release;
-  void *env;
-  SzIo *(*use)(void *acquired, void *use_env);
-  void *use_env;
-};
-
-SzResource *sz_resource_make(SzAcquire acquire, SzRelease release, void *env);
-SzIo *sz_resource_use(SzResource *res, SzIo *(*use)(void *acquired, void *env),
-                      void *use_env);
-void sz_resource_free(SzResource *res);
 
 /* Language Resource.make / use: IO acquire + SzCont release/use (String payload). */
 struct SzLangResource {
@@ -238,7 +219,6 @@ struct SzRef {
 };
 
 SzRef *sz_ref_make(void *initial);
-void sz_ref_free(SzRef *ref);
 SzIo *sz_ref_of(void *initial);          /* IO[Ref] */
 SzIo *sz_ref_of_cstr(const char *initial);
 SzIo *sz_ref_get(SzRef *ref);            /* IO[A] */
@@ -278,7 +258,7 @@ SzIo *sz_queue_offer_cstr(SzQueue *q, const char *value);
 SzIo *sz_queue_take(SzQueue *q); /* IO[A]; parks when empty under the fiber scheduler */
 size_t sz_queue_size(const SzQueue *q);
 
-/* Stream — finite pull: emit / eval / concat / map / evalMap / take / drop / filter. */
+/* Stream — finite pull: emit / eval / concat / map / evalMap / filter / take / takeWhile / drop / dropWhile / find / exists. */
 struct SzStream {
   int tag; /* 0 nil … 9 takeWhile, 10 dropWhile, 11 find */
   void *left;
@@ -351,14 +331,12 @@ SzIo *sz_sys_getenv(SzString *key);
 SzIo *sz_clock_real_time(void);   /* IO[Int] wall epoch ms */
 SzIo *sz_clock_monotonic(void);   /* IO[Int] monotonic ms */
 int64_t sz_clock_monotonic_ms_sync(void); /* sync read for UI pump dt */
-void sz_clock_sleep_ms(int64_t ms); /* blocking sleep; EINTR restarts remaining */
 
 SzIo *sz_random_next_int(int64_t bound); /* IO[Int] in [0, bound) */
 
 SzIo *sz_net_http_get(SzString *url); /* IO[String] response body; live DNS parks */
 SzIo *sz_net_serve_once(int64_t port, SzCont handler, void *env); /* IO[Unit]; one GET */
 SzIo *sz_net_serve(int64_t port, SzCont handler, void *env); /* IO[Unit]; keep listen */
-SzIo *sz_net_serve_n(int64_t port, int64_t n, SzCont handler, void *env);
 /* Test-only: UDP nameserver for live httpGet DNS. NULL ip restores /etc/resolv.conf. */
 void sz_net_test_set_nameserver(const char *ipv4, int port);
 
@@ -392,7 +370,6 @@ char *sz_testrt_net_pop_request(void); /* owned; NULL if empty */
 int sz_testrt_net_is_fake(void);
 SzIo *sz_testrt_net_http_get(SzString *url);
 const char *sz_testrt_net_last_serve_body(void);
-const char *sz_testrt_net_serve_path(void);
 void sz_testrt_net_set_last_serve_body(const char *body);
 
 /* Console fakes: scripted stdin, optional argv override, println capture (+ echo). */

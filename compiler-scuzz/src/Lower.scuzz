@@ -98,7 +98,6 @@ def lowerExpr(e: Expr, enums: List, imports: List, mod: String): Expr =
     case Expr.Var(name, span) => e
     case Expr.Field(base, field, span) => Expr.Field(lowerExpr(base, enums, imports, mod), field, span)
     case Expr.MethodCall(receiver, method, args, span) => Expr.MethodCall(lowerExpr(receiver, enums, imports, mod), method, lowerExprList(args, enums, imports, mod, List.empty()), span)
-    case Expr.Delay(span) => e
   }
 
 def lowerCall(callee: String, args: List, sp: Span, enums: List, imports: List, mod: String): Expr =

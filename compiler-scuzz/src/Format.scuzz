@@ -165,7 +165,6 @@ def prettyExprMatch(expr: Expr, indent: Int, pad: String): String =
     case Expr.ListLit(elems, span) => str4(pad, "[", prettyExprList(elems, ""), "]")
     case Expr.Interp(parts, span) => str4(pad, "s\"", prettyInterpParts(parts, ""), "\"")
     case Expr.Println(arg, span) => str4(pad, "IO.println(", trimStr(prettyExpr(arg, 0)), ")")
-    case Expr.Delay(span) => Str.concat(pad, "IO.delay(() => ())")
     case Expr.Sleep(arg, span) => str4(pad, "IO.sleep(", trimStr(prettyExpr(arg, 0)), ")")
     case Expr.Fail(arg, span) => str4(pad, "IO.fail(", trimStr(prettyExpr(arg, 0)), ")")
     case Expr.Pure(arg, span) => str4(pad, "IO.pure(", trimStr(prettyExpr(arg, 0)), ")")

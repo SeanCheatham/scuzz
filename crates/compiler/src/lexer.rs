@@ -28,7 +28,7 @@ pub enum Token {
     RBrace,
     LBracket,
     RBracket,
-    Arrow, // =>
+    Arrow,     // =>
     LeftArrow, // <-
     Underscore,
     Plus,
@@ -315,7 +315,9 @@ fn read_string_lit(
         if ch == '\\' {
             i += 1;
             if i >= chars.len() {
-                return Err(LexError::UnterminatedString(byte_at_chars(char_byte, start)));
+                return Err(LexError::UnterminatedString(byte_at_chars(
+                    char_byte, start,
+                )));
             }
             let esc = chars[i];
             s.push(match esc {
@@ -332,7 +334,9 @@ fn read_string_lit(
         s.push(ch);
         i += 1;
     }
-    Err(LexError::UnterminatedString(byte_at_chars(char_byte, start)))
+    Err(LexError::UnterminatedString(byte_at_chars(
+        char_byte, start,
+    )))
 }
 
 fn read_interp_string(
@@ -354,7 +358,9 @@ fn read_interp_string(
         if ch == '\\' {
             i += 1;
             if i >= chars.len() {
-                return Err(LexError::UnterminatedString(byte_at_chars(char_byte, start)));
+                return Err(LexError::UnterminatedString(byte_at_chars(
+                    char_byte, start,
+                )));
             }
             let esc = chars[i];
             lit.push(match esc {
@@ -413,7 +419,9 @@ fn read_interp_string(
         lit.push(ch);
         i += 1;
     }
-    Err(LexError::UnterminatedString(byte_at_chars(char_byte, start)))
+    Err(LexError::UnterminatedString(byte_at_chars(
+        char_byte, start,
+    )))
 }
 
 fn compact_interp_parts(parts: Vec<InterpTok>) -> Vec<InterpTok> {
@@ -480,7 +488,10 @@ mod tests {
     fn span_line_for_second_line_token() {
         let src = "def a: Int = 1\n@main def main: IO[Unit] = IO.println(\"x\")";
         let toks = lex(src).unwrap();
-        let at_main = toks.iter().find(|t| matches!(t.token, Token::AtMain)).unwrap();
+        let at_main = toks
+            .iter()
+            .find(|t| matches!(t.token, Token::AtMain))
+            .unwrap();
         let (line, _) = crate::span::offset_to_line_col(src, at_main.span.start);
         assert_eq!(line, 2);
     }

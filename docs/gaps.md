@@ -27,13 +27,13 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ## Known gaps
 
-### Near-term (HUMANS alignment)
+### Near-term (AI-friendly tooling)
 
-- **Hot reload and debugging tools** — HUMANS wants Headless + in-process reload + debug for agents. Headless is a peer; `scuzz watch` only rebuilds; `[ui]` `run --watch` stamp-reloads the View tree (Signals stay), writes `build/debug.dump`, and plays `build/inject.script`. Still missing: new machine code in-process and deeper agent debug UX. Do not document `watch` as hot reload.
+- **Hot reload and debugging tools** — Headless + in-process reload + debug for agents. Headless is a peer; `scuzz watch` only rebuilds; `[ui]` `run --watch` stamp-reloads the View tree (Signals stay), writes `build/debug.dump`, and plays `build/inject.script`. Still missing: new machine code in-process and deeper agent debug UX. Do not document `watch` as hot reload.
 
 ### Residuals
 
-- **Net** — IPv6 and CNAME-follow are out (impurity code **6**).
+- **Net** — IPv6 and CNAME-follow are out.
 - **Concurrency** — cooperative fibers only; `IO.ensure` / `Resource` release on cancel. Next IO slices: `IO.timeout`, language `Fiber` (fork/join/interrupt), then `forever` / `repeatN` / `retryN`. Later: OS threads, supervision trees.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting; `Signal.list` frees unshared cons spines. Later: a collector if list-churn still demands it.
 - **Language surface** — richer generics beyond monomorphized defs/enums/records ([`compatibility.md`](compatibility.md)).

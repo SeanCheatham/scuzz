@@ -80,7 +80,7 @@ No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** i
 
 ### IO and impurity
 
-One failure channel: `SzError` on `IO`. Blessed kits only — no app-level `IO.delay`. Cooperative single-threaded fibers (no OS threads for IO); `sleep` / empty `Queue.take` / incomplete `Deferred.get` / fd poll park. Cancel (race loser) runs `IO.ensure` / `Resource` finalizers. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net/console. Surface catalogs and impurity codes: [`guide.md`](guide.md). Panics abort via `sz_panic`.
+One failure channel: `SzError` on `IO`. Blessed kits only — no app-level `IO.delay`. Cooperative single-threaded fibers (no OS threads for IO); `sleep` / empty `Queue.take` / incomplete `Deferred.get` / fd poll park. Cancel (race loser) runs `IO.ensure` / `Resource` finalizers. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net/console. Surface catalogs: [`guide.md`](guide.md). Panics abort via `sz_panic`.
 
 ### `Ui` vs `View`
 
@@ -125,7 +125,7 @@ Expression-only, effect-sequenced dialect — dense, deterministic, verification
 - Branch arms stay expressions; nested `for` when an arm needs names
 - Surface sugar elaborates to a small core (`Let`, `FlatMap`, `match`, ADTs, `IO`); self-host and checkers target the core
 
-App-shaped Counter:
+App-shaped Counter (full surface: [`guide.md`](guide.md)):
 
 ```scala
 @main def main: IO[Unit] =
@@ -133,9 +133,8 @@ App-shaped Counter:
     count = Signal.int(0)
     label = Signal.map(count, n => s"count = $n")
     _    <- Ui.run(_ => View.column(
-              View.text("Counter"),
               View.bindText(label),
-              View.row(View.button("+1", _ => Signal.set(count, Signal.get(count) + 1)))
+              View.button("+1", _ => Signal.set(count, Signal.get(count) + 1))
             ))
   } yield ()
 ```
@@ -202,7 +201,7 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
+Unknowns and known gaps: [`gaps.md`](gaps.md). Next IO slice: `IO.timeout` (then language `Fiber`, then `forever` / `repeatN` / `retryN`) — [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features. UI is a primary path among CLI/server/desktop/mobile — not the only v0 bar.
 

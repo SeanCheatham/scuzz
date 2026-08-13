@@ -20,7 +20,8 @@ pub fn emit_llvm(program: &Program) -> String {
 
     let enum_tags = build_enum_tags(&program.enums);
     let enum_payloads = build_enum_payloads(&program.enums);
-    let funs = FunIndex::build(&program.defs, &program.imports, &program.enums).expect("duplicate defs should be rejected earlier");
+    let funs = FunIndex::build(&program.defs, &program.imports, &program.enums)
+        .expect("duplicate defs should be rejected earlier");
 
     let mut out = String::new();
     writeln!(out, "; Scuzz Lang Stage-0 generated LLVM IR").unwrap();
@@ -166,12 +167,6 @@ pub fn emit_llvm(program: &Program) -> String {
         )
         .unwrap();
     }
-    writeln!(out).unwrap();
-
-    writeln!(out, "define internal ptr @sz_delay_unit_thunk(ptr %env) {{").unwrap();
-    writeln!(out, "entry:").unwrap();
-    writeln!(out, "  ret ptr null").unwrap();
-    writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
 
     // User defs are emitted below; LLVM allows call sites before the defining
@@ -331,9 +326,7 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         ExprKind::FlatMap { inner, body, .. }
         | ExprKind::HandleErrorWith { inner, body }
         | ExprKind::Let {
-            value: inner,
-            body,
-            ..
+            value: inner, body, ..
         }
         | ExprKind::IoRace {
             left: inner,
@@ -380,14 +373,9 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
                 collect_strings(e, out);
             }
         }
-        ExprKind::IoDelayUnit
-        | ExprKind::Unit
-        | ExprKind::Var(_)
-        | ExprKind::IntLit(_) => {}
+        ExprKind::Unit | ExprKind::Var(_) | ExprKind::IntLit(_) => {}
         ExprKind::Field { base, .. } => collect_strings(base, out),
-        ExprKind::MethodCall {
-            receiver, args, ..
-        } => {
+        ExprKind::MethodCall { receiver, args, .. } => {
             collect_strings(receiver, out);
             for a in args {
                 collect_strings(a, out);
@@ -472,12 +460,7 @@ fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
             let v = if body.kind == Kind::Ptr || body.kind == Kind::Io {
                 body.value
             } else if body.kind == Kind::Int {
-                writeln!(
-                    out,
-                    "  %ret_box = call ptr @sz_box_i64(i64 {})",
-                    body.value
-                )
-                .unwrap();
+                writeln!(out, "  %ret_box = call ptr @sz_box_i64(i64 {})", body.value).unwrap();
                 "%ret_box".into()
             } else {
                 "null".into()
@@ -525,11 +508,7 @@ fn pack_env(
     for (i, name) in names.iter().enumerate().rev() {
         let (val, kind) = locals.get(name).expect("capture name");
         let ptr = if *kind == Kind::Int {
-            writeln!(
-                code,
-                "  %{prefix}_b{i} = call ptr @sz_box_i64(i64 {val})"
-            )
-            .unwrap();
+            writeln!(code, "  %{prefix}_b{i} = call ptr @sz_box_i64(i64 {val})").unwrap();
             format!("%{prefix}_b{i}")
         } else {
             val.clone()
@@ -593,16 +572,8 @@ fn unpack_env_preamble(
     let mut cur = "%env".to_string();
     for (i, name) in names.iter().enumerate() {
         let kind = outer.get(name).map(|(_, k)| *k).unwrap_or(Kind::Ptr);
-        writeln!(
-            pre,
-            "  %{prefix}_h{i} = call ptr @sz_list_head(ptr {cur})"
-        )
-        .unwrap();
-        writeln!(
-            pre,
-            "  %{prefix}_t{i} = call ptr @sz_list_tail(ptr {cur})"
-        )
-        .unwrap();
+        writeln!(pre, "  %{prefix}_h{i} = call ptr @sz_list_head(ptr {cur})").unwrap();
+        writeln!(pre, "  %{prefix}_t{i} = call ptr @sz_list_tail(ptr {cur})").unwrap();
         match kind {
             Kind::Int => {
                 writeln!(
@@ -704,15 +675,6 @@ fn emit_expr(
         }
         ExprKind::ListLit { elems } => emit_list_lit(elems, ctx, locals, prefix),
         ExprKind::Interpolate { parts } => emit_interpolate(parts, ctx, locals, prefix),
-        ExprKind::IoDelayUnit => {
-            let mut code = String::new();
-            writeln!(
-                code,
-                "  %{prefix}_delay = call ptr @sz_io_delay(ptr @sz_delay_unit_thunk, ptr null)"
-            )
-            .unwrap();
-            io_emitted(code, format!("%{prefix}_delay"), Kind::Ptr)
-        }
         ExprKind::IoSleep(ms) => {
             let me = emit_expr(ms, ctx, locals, &format!("{prefix}_ms"));
             let mut code = me.code;
@@ -742,11 +704,7 @@ fn emit_expr(
         ExprKind::IoPrintln(arg) => {
             let mut code = String::new();
             let s = emit_sz_string(&mut code, ctx.strs, arg, ctx, locals, prefix);
-            writeln!(
-                code,
-                "  %{prefix}_io = call ptr @sz_io_println(ptr {s})"
-            )
-            .unwrap();
+            writeln!(code, "  %{prefix}_io = call ptr @sz_io_println(ptr {s})").unwrap();
             io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
         }
         ExprKind::IoPure(inner) => {
@@ -765,11 +723,7 @@ fn emit_expr(
             } else {
                 ie.value
             };
-            writeln!(
-                code,
-                "  %{prefix}_io = call ptr @sz_io_pure(ptr {ptr})"
-            )
-            .unwrap();
+            writeln!(code, "  %{prefix}_io = call ptr @sz_io_pure(ptr {ptr})").unwrap();
             let payload = if ie.kind == Kind::Io {
                 ie.payload
             } else {
@@ -808,11 +762,8 @@ fn emit_expr(
                                 writeln!(code, "  %{prefix}_ap0 = add i64 0, 0").unwrap();
                                 format!("%{prefix}_ap0")
                             };
-                            writeln!(
-                                code,
-                                "  %{prefix}_box = call ptr @sz_box_i64(i64 {v})"
-                            )
-                            .unwrap();
+                            writeln!(code, "  %{prefix}_box = call ptr @sz_box_i64(i64 {v})")
+                                .unwrap();
                             format!("%{prefix}_box")
                         }
                         _ => ae.value,
@@ -832,11 +783,8 @@ fn emit_expr(
                                     writeln!(code, "  %{prefix}_ap{i}i = add i64 0, 0").unwrap();
                                     format!("%{prefix}_ap{i}i")
                                 };
-                                writeln!(
-                                    code,
-                                    "  %{prefix}_bx{i} = call ptr @sz_box_i64(i64 {v})"
-                                )
-                                .unwrap();
+                                writeln!(code, "  %{prefix}_bx{i} = call ptr @sz_box_i64(i64 {v})")
+                                    .unwrap();
                                 format!("%{prefix}_bx{i}")
                             }
                             _ => ae.value.clone(),
@@ -904,11 +852,7 @@ fn emit_expr(
             let then_join = format!("{prefix}_tj_{id}");
             let else_join = format!("{prefix}_ej_{id}");
             let merge = format!("{prefix}_merge_{id}");
-            writeln!(
-                code,
-                "  %{prefix}_cmp = icmp ne i64 {cond_i64}, 0"
-            )
-            .unwrap();
+            writeln!(code, "  %{prefix}_cmp = icmp ne i64 {cond_i64}, 0").unwrap();
             writeln!(
                 code,
                 "  br i1 %{prefix}_cmp, label %{then_l}, label %{else_l}"
@@ -968,11 +912,7 @@ fn emit_expr(
             let merge = format!("{prefix}_merge_{id}");
             let default_label = format!("{prefix}_default_{id}");
 
-            write!(
-                code,
-                "  switch i32 %{prefix}_tag, label %{default_label} ["
-            )
-            .unwrap();
+            write!(code, "  switch i32 %{prefix}_tag, label %{default_label} [").unwrap();
             for (i, arm) in arms.iter().enumerate() {
                 if let Pattern::Adt {
                     enum_name,
@@ -1061,10 +1001,7 @@ fn emit_expr(
                                         );
                                     }
                                     _ => {
-                                        locals.insert(
-                                            b.clone(),
-                                            (format!("%{cell}"), Kind::Ptr),
-                                        );
+                                        locals.insert(b.clone(), (format!("%{cell}"), Kind::Ptr));
                                     }
                                 }
                                 bound_names.push(b.clone());
@@ -1072,12 +1009,7 @@ fn emit_expr(
                         }
                     }
                 }
-                let ae = emit_expr(
-                    &arm.body,
-                    ctx,
-                    locals,
-                    &format!("{prefix}_a{id}_{i}"),
-                );
+                let ae = emit_expr(&arm.body, ctx, locals, &format!("{prefix}_a{id}_{i}"));
                 for b in bound_names {
                     locals.remove(&b);
                 }
@@ -1093,17 +1025,9 @@ fn emit_expr(
             }
 
             writeln!(code, "{default_label}:").unwrap();
-            if let Some(arm) = arms
-                .iter()
-                .find(|a| matches!(a.pattern, Pattern::Wildcard))
-            {
+            if let Some(arm) = arms.iter().find(|a| matches!(a.pattern, Pattern::Wildcard)) {
                 let default_join = format!("{prefix}_dj_{id}");
-                let ae = emit_expr(
-                    &arm.body,
-                    ctx,
-                    locals,
-                    &format!("{prefix}_aw{id}"),
-                );
+                let ae = emit_expr(&arm.body, ctx, locals, &format!("{prefix}_aw{id}"));
                 code.push_str(&ae.code);
                 if phi_parts.is_empty() {
                     result_kind = ae.kind;
@@ -1121,11 +1045,8 @@ fn emit_expr(
                     }
                     Kind::Ptr => "null".into(),
                     Kind::Io => {
-                        writeln!(
-                            code,
-                            "  %{prefix}_dflt = call ptr @sz_io_pure(ptr null)"
-                        )
-                        .unwrap();
+                        writeln!(code, "  %{prefix}_dflt = call ptr @sz_io_pure(ptr null)")
+                            .unwrap();
                         format!("%{prefix}_dflt")
                     }
                 };
@@ -1176,23 +1097,14 @@ fn emit_expr(
 
             if let Some(p) = param {
                 if payload_kind == Kind::Int {
-                    writeln!(
-                        pre,
-                        "  %{p} = call i64 @sz_unbox_i64(ptr %value)"
-                    )
-                    .unwrap();
+                    writeln!(pre, "  %{p} = call i64 @sz_unbox_i64(ptr %value)").unwrap();
                     body_locals.insert(p.clone(), (format!("%{p}"), Kind::Int));
                 } else {
                     body_locals.insert(p.clone(), ("%value".into(), Kind::Ptr));
                 }
             }
 
-            let body_emitted = emit_expr(
-                body,
-                ctx,
-                &mut body_locals,
-                &format!("c{id}"),
-            );
+            let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("c{id}"));
 
             writeln!(
                 ctx.conts,
@@ -1219,12 +1131,7 @@ fn emit_expr(
                 &inner_emitted.value,
                 &format!("{prefix}_inio"),
             );
-            let env_ptr = pack_env(
-                &mut code,
-                locals,
-                &capture_names,
-                &format!("{prefix}_cap"),
-            );
+            let env_ptr = pack_env(&mut code, locals, &capture_names, &format!("{prefix}_cap"));
             writeln!(
                 code,
                 "  %{prefix}_fm = call ptr @sz_io_flatmap(ptr {inner_io}, ptr @{cont_name}, ptr {env_ptr})"
@@ -1273,12 +1180,7 @@ fn emit_expr(
                 &inner_emitted.value,
                 &format!("{prefix}_heio"),
             );
-            let env_ptr = pack_env(
-                &mut code,
-                locals,
-                &capture_names,
-                &format!("{prefix}_ecap"),
-            );
+            let env_ptr = pack_env(&mut code, locals, &capture_names, &format!("{prefix}_ecap"));
             writeln!(
                 code,
                 "  %{prefix}_h = call ptr @sz_io_handle_error_with(ptr {inner_io}, ptr @{cont_name}, ptr {env_ptr})"
@@ -1355,12 +1257,22 @@ fn emit_interpolate(
     prefix: &str,
 ) -> Emitted {
     if parts.is_empty() {
-        return emit_expr(&Expr::dummy(ExprKind::StrLit(String::new())), ctx, locals, prefix);
+        return emit_expr(
+            &Expr::dummy(ExprKind::StrLit(String::new())),
+            ctx,
+            locals,
+            prefix,
+        );
     }
     if parts.len() == 1 {
         match &parts[0] {
             crate::ast::InterpPart::Lit(s) => {
-                return emit_expr(&Expr::dummy(ExprKind::StrLit(s.clone())), ctx, locals, prefix);
+                return emit_expr(
+                    &Expr::dummy(ExprKind::StrLit(s.clone())),
+                    ctx,
+                    locals,
+                    prefix,
+                );
             }
             crate::ast::InterpPart::Expr(e) => {
                 let ee = emit_expr(e, ctx, locals, &format!("{prefix}_p0"));
@@ -1384,7 +1296,12 @@ fn emit_interpolate(
     for (i, part) in parts.iter().enumerate() {
         let piece = match part {
             crate::ast::InterpPart::Lit(s) => {
-                let e = emit_expr(&Expr::dummy(ExprKind::StrLit(s.clone())), ctx, locals, &format!("{prefix}_l{i}"));
+                let e = emit_expr(
+                    &Expr::dummy(ExprKind::StrLit(s.clone())),
+                    ctx,
+                    locals,
+                    &format!("{prefix}_l{i}"),
+                );
                 code.push_str(&e.code);
                 e.value
             }
@@ -1920,7 +1837,15 @@ fn emit_stream_filter(
     locals: &mut HashMap<String, (String, Kind)>,
     prefix: &str,
 ) -> Emitted {
-    emit_stream_pred("Stream.filter", "sz_stream_filter", args, ctx, locals, prefix, false)
+    emit_stream_pred(
+        "Stream.filter",
+        "sz_stream_filter",
+        args,
+        ctx,
+        locals,
+        prefix,
+        false,
+    )
 }
 
 fn emit_stream_map(
@@ -2002,11 +1927,7 @@ fn emit_rebuild_lambda(
 
     let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("u{id}"));
 
-    writeln!(
-        ctx.conts,
-        "define internal ptr @{fn_name}(ptr %env) {{"
-    )
-    .unwrap();
+    writeln!(ctx.conts, "define internal ptr @{fn_name}(ptr %env) {{").unwrap();
     writeln!(ctx.conts, "entry:").unwrap();
     ctx.conts.push_str(&pre);
     ctx.conts.push_str(&body_emitted.code);
@@ -2089,24 +2010,12 @@ fn emit_binary(
             le.value, re.value
         )
         .unwrap();
-        writeln!(
-            code,
-            "  %{prefix}_eq = zext i32 %{prefix}_eqi to i64"
-        )
-        .unwrap();
+        writeln!(code, "  %{prefix}_eq = zext i32 %{prefix}_eqi to i64").unwrap();
         if *op == BinOp::Eq {
             return val_emitted(code, format!("%{prefix}_eq"), Kind::Int);
         }
-        writeln!(
-            code,
-            "  %{prefix}_ne = icmp eq i64 %{prefix}_eq, 0"
-        )
-        .unwrap();
-        writeln!(
-            code,
-            "  %{prefix}_nev = zext i1 %{prefix}_ne to i64"
-        )
-        .unwrap();
+        writeln!(code, "  %{prefix}_ne = icmp eq i64 %{prefix}_eq, 0").unwrap();
+        writeln!(code, "  %{prefix}_nev = zext i1 %{prefix}_ne to i64").unwrap();
         return val_emitted(code, format!("%{prefix}_nev"), Kind::Int);
     }
 
@@ -2162,16 +2071,8 @@ fn emit_binary(
                 BinOp::Ge => "sge",
                 _ => unreachable!(),
             };
-            writeln!(
-                code,
-                "  %{prefix}_cmp = icmp {pred} i64 {lv}, {rv}"
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_v = zext i1 %{prefix}_cmp to i64"
-            )
-            .unwrap();
+            writeln!(code, "  %{prefix}_cmp = icmp {pred} i64 {lv}, {rv}").unwrap();
+            writeln!(code, "  %{prefix}_v = zext i1 %{prefix}_cmp to i64").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
     }
@@ -2272,12 +2173,7 @@ fn emit_call(
     }
     let mut emitted_args = Vec::new();
     for (i, a) in args.iter().enumerate() {
-        emitted_args.push(emit_expr(
-            a,
-            ctx,
-            locals,
-            &format!("{prefix}_arg{i}"),
-        ));
+        emitted_args.push(emit_expr(a, ctx, locals, &format!("{prefix}_arg{i}")));
     }
     let mut code = String::new();
     for a in &emitted_args {
@@ -2319,11 +2215,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_v = zext i32 %{prefix}_eqi to i64"
-            )
-            .unwrap();
+            writeln!(code, "  %{prefix}_v = zext i32 %{prefix}_eqi to i64").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Str.charAt" => {
@@ -2393,11 +2285,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_v = zext i32 %{prefix}_i to i64"
-            )
-            .unwrap();
+            writeln!(code, "  %{prefix}_v = zext i32 %{prefix}_i to i64").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "List.head" => {
@@ -2695,11 +2583,7 @@ fn emit_call(
                 &emitted_args[0].value,
                 &format!("{prefix}_eval"),
             );
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_stream_eval(ptr {io})"
-            )
-            .unwrap();
+            writeln!(code, "  %{prefix}_v = call ptr @sz_stream_eval(ptr {io})").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Stream.concat" => {
@@ -2952,12 +2836,7 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        "View.column" => emit_view_box(
-            "sz_lang_view_column",
-            &mut code,
-            &emitted_args,
-            prefix,
-        ),
+        "View.column" => emit_view_box("sz_lang_view_column", &mut code, &emitted_args, prefix),
         "View.row" => emit_view_box("sz_lang_view_row", &mut code, &emitted_args, prefix),
         "View.stack" => emit_view_box("sz_lang_view_stack", &mut code, &emitted_args, prefix),
         "View.each" => {
@@ -3126,12 +3005,7 @@ fn emit_call(
                     user_symbol(&f.module, &f.name),
                 )
             } else {
-                (
-                    "ptr",
-                    Kind::Ptr,
-                    Kind::Ptr,
-                    format!("sz_user_{other}"),
-                )
+                ("ptr", Kind::Ptr, Kind::Ptr, format!("sz_user_{other}"))
             };
             let mut arg_parts = Vec::new();
             if let Some(f) = f {
@@ -3530,9 +3404,15 @@ def noneInt(): Opt[Int] = Opt.None
   }
 "#;
         let ir = gen_ir(src);
-        assert!(ir.contains("call ptr @sz_box_i64"), "Int payload must be boxed");
+        assert!(
+            ir.contains("call ptr @sz_box_i64"),
+            "Int payload must be boxed"
+        );
         assert!(ir.contains("call ptr @sz_adt_new(i32 0, ptr %"));
-        assert!(ir.contains("call i64 @sz_unbox_i64"), "Int bind must be unboxed");
+        assert!(
+            ir.contains("call i64 @sz_unbox_i64"),
+            "Int bind must be unboxed"
+        );
         assert!(ir.contains("call ptr @sz_adt_new(i32 1, ptr null)"));
     }
 
@@ -3549,7 +3429,10 @@ enum Opt[T]:
   }
 "#;
         let ir = gen_ir(src);
-        assert!(!ir.contains("call ptr @sz_box_i64"), "String payload must pass through");
+        assert!(
+            !ir.contains("call ptr @sz_box_i64"),
+            "String payload must pass through"
+        );
         assert!(ir.contains("sz_adt_new"));
         assert!(ir.contains("sz_adt_payload"));
     }
@@ -3583,8 +3466,17 @@ record Pair[A, B](a: A, b: B)
   }
 "#;
         let ir = gen_ir(src);
-        assert!(ir.contains("call ptr @sz_box_i64"), "Int field must be boxed in the pack");
-        assert!(ir.contains("sz_list_cons"), "multi-field payload packs as list");
-        assert!(ir.contains("call i64 @sz_unbox_i64"), "Int field bind must be unboxed");
+        assert!(
+            ir.contains("call ptr @sz_box_i64"),
+            "Int field must be boxed in the pack"
+        );
+        assert!(
+            ir.contains("sz_list_cons"),
+            "multi-field payload packs as list"
+        );
+        assert!(
+            ir.contains("call i64 @sz_unbox_i64"),
+            "Int field bind must be unboxed"
+        );
     }
 }

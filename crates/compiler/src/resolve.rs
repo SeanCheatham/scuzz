@@ -83,10 +83,9 @@ impl std::fmt::Display for ResolveError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ResolveError::Unknown(c) => write!(f, "unknown function {c}"),
-            ResolveError::Ambiguous(c) => write!(
-                f,
-                "ambiguous function {c}: qualify as Module.{c}"
-            ),
+            ResolveError::Ambiguous(c) => {
+                write!(f, "ambiguous function {c}: qualify as Module.{c}")
+            }
             ResolveError::Private { module, name } => {
                 write!(f, "private def {module}.{name} is not visible here")
             }

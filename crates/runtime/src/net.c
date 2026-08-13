@@ -14,7 +14,7 @@
 
 /* Blessed Net.httpGet — live HTTP/1.0 GET or TestRuntime stub map.
  * Live hostnames resolve via UDP A (park on poll); IPv4 literals skip DNS.
- * Error code 6 (see docs/vision.md IO errors). */
+ * Failures use SzError code 6. */
 
 typedef struct {
   int is_err;
@@ -991,7 +991,7 @@ static SzIo *serve_on_err(SzError *err, void *env) {
   return sz_io_fail(err);
 }
 
-SzIo *sz_net_serve_n(int64_t port, int64_t n, SzCont handler, void *env) {
+static SzIo *net_serve_n(int64_t port, int64_t n, SzCont handler, void *env) {
   ServeSt *st;
   if (!handler)
     sz_panic("sz_net_serve(null handler)");
@@ -1006,9 +1006,9 @@ SzIo *sz_net_serve_n(int64_t port, int64_t n, SzCont handler, void *env) {
 }
 
 SzIo *sz_net_serve(int64_t port, SzCont handler, void *env) {
-  return sz_net_serve_n(port, 0, handler, env);
+  return net_serve_n(port, 0, handler, env);
 }
 
 SzIo *sz_net_serve_once(int64_t port, SzCont handler, void *env) {
-  return sz_net_serve_n(port, 1, handler, env);
+  return net_serve_n(port, 1, handler, env);
 }

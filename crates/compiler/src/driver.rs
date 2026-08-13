@@ -1,9 +1,7 @@
 use crate::codegen::emit_llvm;
 use crate::lower::lower_program;
 use crate::manifest::{load_manifest, Manifest};
-use crate::overlay::{
-    apply_overlays, overlay_kind_from_path, residualize_laws, OverlaySource,
-};
+use crate::overlay::{apply_overlays, overlay_kind_from_path, residualize_laws, OverlaySource};
 use crate::parser::parse_sources;
 use crate::typ::typecheck;
 use anyhow::{bail, Context, Result};
@@ -75,7 +73,10 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
         .filter(|s| !s.is_empty())
         .unwrap_or("app");
     if exe_name.contains('/') || exe_name.contains('\\') {
-        bail!("invalid package name for executable: {}", manifest.package.name);
+        bail!(
+            "invalid package name for executable: {}",
+            manifest.package.name
+        );
     }
 
     std::fs::create_dir_all(&opts.out_dir)?;
@@ -102,11 +103,10 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
         });
     }
 
-    let program =
-        parse_sources(&named).map_err(|e| anyhow::anyhow!("parse error: {e}"))?;
+    let program = parse_sources(&named).map_err(|e| anyhow::anyhow!("parse error: {e}"))?;
     let (mut program, law_names) = if opts.verify {
-        let (p, laws) = apply_overlays(program, &resolved.overlays)
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let (p, laws) =
+            apply_overlays(program, &resolved.overlays).map_err(|e| anyhow::anyhow!("{e}"))?;
         (p, laws)
     } else {
         (program, Vec::new())
@@ -116,12 +116,10 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
         program.law_names = law_names;
     }
     let program = lower_program(program);
-    let program =
-        crate::typ::expand_impls(program).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let program = crate::typ::expand_impls(program).map_err(|e| anyhow::anyhow!("{e}"))?;
     typecheck(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
     let program = crate::typ::elaborate_generics(program).map_err(|e| anyhow::anyhow!("{e}"))?;
-    let program =
-        crate::typ::monomorphize(program).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let program = crate::typ::monomorphize(program).map_err(|e| anyhow::anyhow!("{e}"))?;
     let program = crate::typ::resolve_field_access(program).map_err(|e| anyhow::anyhow!("{e}"))?;
 
     let ir = emit_llvm(&program);
@@ -134,7 +132,9 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
     let with_ui = manifest.ui.is_some();
 
     let mut link = Command::new(&opts.clang);
-    link.arg(&ll_path).arg(&lib).arg(format!("-I{}", include.display()));
+    link.arg(&ll_path)
+        .arg(&lib)
+        .arg(format!("-I{}", include.display()));
 
     // macOS: runtime parks main in CFRunLoop so AppKit can hop from the worker.
     if cfg!(target_os = "macos") {
@@ -171,7 +171,10 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
             .map(|s| s.trim() == "skia")
             .unwrap_or(false);
         if is_skia {
-            link.arg("-lz").arg("-lbz2").arg("-lbrotlidec").arg("-lbrotlicommon");
+            link.arg("-lz")
+                .arg("-lbz2")
+                .arg("-lbrotlidec")
+                .arg("-lbrotlicommon");
             if cfg!(target_os = "macos") {
                 // Residual CoreText / Carbon symbols in the Darwin Skia fat archive.
                 for fw in [
@@ -340,9 +343,12 @@ fn visit_package(
 
     if let Some(pos) = visiting.iter().position(|(_, p)| p == &canon) {
         let mut chain: Vec<String> = visiting[pos..].iter().map(|(n, _)| n.clone()).collect();
-        let self_name = via_dep
-            .map(|s| s.to_string())
-            .unwrap_or_else(|| visiting.last().map(|(n, _)| n.clone()).unwrap_or_else(|| "?".into()));
+        let self_name = via_dep.map(|s| s.to_string()).unwrap_or_else(|| {
+            visiting
+                .last()
+                .map(|(n, _)| n.clone())
+                .unwrap_or_else(|| "?".into())
+        });
         chain.push(self_name);
         bail!("dependency cycle: {}", chain.join(" -> "));
     }
@@ -418,11 +424,7 @@ fn visit_package(
             .to_string_lossy()
             .replace('\\', "/");
         let label = format!("{pkg_name}/{rel}");
-        sources.push(ResolvedSource {
-            label,
-            path,
-            text,
-        });
+        sources.push(ResolvedSource { label, path, text });
     }
 
     let pkg_overlays = find_overlays(&canon)?;
@@ -511,7 +513,9 @@ fn collect_sources(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-fn find_overlays(project_dir: &Path) -> Result<Vec<(PathBuf, String, crate::overlay::OverlayKind)>> {
+fn find_overlays(
+    project_dir: &Path,
+) -> Result<Vec<(PathBuf, String, crate::overlay::OverlayKind)>> {
     let src = project_dir.join("src");
     if !src.is_dir() {
         return Ok(Vec::new());
@@ -658,9 +662,7 @@ mod tests {
         };
         fs::write(
             dir.join("scuzz.toml"),
-            format!(
-                "[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n{dep_section}"
-            ),
+            format!("[package]\nname = \"{name}\"\nversion = \"0.1.0\"\n{dep_section}"),
         )
         .unwrap();
         let src = if main {
@@ -733,7 +735,11 @@ mod tests {
             "IO.println(Str.concat(leftId(), rightId()))",
         );
         let r = resolve_project(&app).unwrap();
-        let base_count = r.sources.iter().filter(|s| s.label.starts_with("base/")).count();
+        let base_count = r
+            .sources
+            .iter()
+            .filter(|s| s.label.starts_with("base/"))
+            .count();
         assert_eq!(base_count, 1);
         assert_eq!(r.package_dirs.len(), 4);
     }
@@ -793,11 +799,7 @@ mod tests {
         let tmp = tempdir().unwrap();
         let shared = tmp.path().join("shared");
         fs::create_dir_all(&shared).unwrap();
-        fs::write(
-            shared.join("scuzz.toml"),
-            "[package]\nname = \"shared\"\n",
-        )
-        .unwrap();
+        fs::write(shared.join("scuzz.toml"), "[package]\nname = \"shared\"\n").unwrap();
         let app = tmp.path().join("app");
         write_pkg(
             &app,
@@ -848,13 +850,7 @@ mod tests {
         let tmp = tempdir().unwrap();
         let shared = tmp.path().join("shared");
         let app = tmp.path().join("app");
-        write_pkg(
-            &shared,
-            "shared",
-            "",
-            true,
-            "IO.println(\"shared\")",
-        );
+        write_pkg(&shared, "shared", "", true, "IO.println(\"shared\")");
         write_pkg(
             &app,
             "app",
@@ -893,7 +889,11 @@ mod tests {
         );
         let r1 = resolve_project(&app).unwrap();
         let fp1 = fingerprint_resolved(&r1, false);
-        fs::write(shared.join("src/Lib.scuzz"), "def greet(): String = \"yo\"\n").unwrap();
+        fs::write(
+            shared.join("src/Lib.scuzz"),
+            "def greet(): String = \"yo\"\n",
+        )
+        .unwrap();
         let r2 = resolve_project(&app).unwrap();
         let fp2 = fingerprint_resolved(&r2, false);
         assert_ne!(fp1, fp2);

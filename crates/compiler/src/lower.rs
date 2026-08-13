@@ -36,8 +36,8 @@ fn lower_pattern(pat: Pattern, enums: &EnumIndex<'_>, current_module: &str) -> P
             binds,
             type_args,
         } => {
-            let id = resolve_ctor(enums, &enum_name, &case_name, current_module)
-                .unwrap_or(enum_name);
+            let id =
+                resolve_ctor(enums, &enum_name, &case_name, current_module).unwrap_or(enum_name);
             Pattern::Adt {
                 enum_name: id,
                 case_name,
@@ -334,31 +334,34 @@ fn desugar_for(
     } else {
         body
     };
-    binders.into_iter().rev().fold(body, |body, binder| match binder {
-        ForBinder::Eq { name, value } => {
-            let sp = value.span.clone().cover(&body.span);
-            Expr::new(
-                ExprKind::Let {
-                    name,
-                    value: Box::new(lower_expr(value, enums, current_module)),
-                    body: Box::new(body),
-                },
-                sp,
-            )
-        }
-        ForBinder::Draw { name, value } => {
-            let param = if name == "_" { None } else { Some(name) };
-            let sp = value.span.clone().cover(&body.span);
-            Expr::new(
-                ExprKind::FlatMap {
-                    inner: Box::new(lower_expr(value, enums, current_module)),
-                    param,
-                    body: Box::new(body),
-                },
-                sp,
-            )
-        }
-    })
+    binders
+        .into_iter()
+        .rev()
+        .fold(body, |body, binder| match binder {
+            ForBinder::Eq { name, value } => {
+                let sp = value.span.clone().cover(&body.span);
+                Expr::new(
+                    ExprKind::Let {
+                        name,
+                        value: Box::new(lower_expr(value, enums, current_module)),
+                        body: Box::new(body),
+                    },
+                    sp,
+                )
+            }
+            ForBinder::Draw { name, value } => {
+                let param = if name == "_" { None } else { Some(name) };
+                let sp = value.span.clone().cover(&body.span);
+                Expr::new(
+                    ExprKind::FlatMap {
+                        inner: Box::new(lower_expr(value, enums, current_module)),
+                        param,
+                        body: Box::new(body),
+                    },
+                    sp,
+                )
+            }
+        })
 }
 
 #[cfg(test)]

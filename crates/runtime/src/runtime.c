@@ -274,8 +274,6 @@ int32_t sz_adt_tag(const SzAdt *adt) { return adt ? adt->tag : -1; }
 
 void *sz_adt_payload(const SzAdt *adt) { return adt ? adt->payload : NULL; }
 
-void sz_adt_free(SzAdt *adt) { sz_free(adt); }
-
 SzPair *sz_pair_new(void *left, void *right) {
   SzPair *p = (SzPair *)sz_alloc(sizeof(SzPair));
   p->left = left;
@@ -416,11 +414,6 @@ static SzIo *sz_io_poll_fd(int fd, int events) {
 SzIo *sz_io_poll_readable(int fd) { return sz_io_poll_fd(fd, POLLIN); }
 
 SzIo *sz_io_poll_writable(int fd) { return sz_io_poll_fd(fd, POLLOUT); }
-
-void sz_io_free(SzIo *io) {
-  /* Shallow free; graphs are short-lived process heaps. */
-  sz_free(io);
-}
 
 /* --- cooperative fiber scheduler (single-threaded, deterministic) -------- */
 

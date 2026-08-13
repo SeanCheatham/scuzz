@@ -146,8 +146,6 @@ impl Expr {
 pub enum ExprKind {
     /// `IO.println(expr)`
     IoPrintln(Box<Expr>),
-    /// `IO.delay` — unit delay
-    IoDelayUnit,
     /// `IO.sleep(expr)`
     IoSleep(Box<Expr>),
     /// `IO.fail(expr)`
@@ -161,24 +159,13 @@ pub enum ExprKind {
         body: Box<Expr>,
     },
     /// `io.handleErrorWith(_ => body)`
-    HandleErrorWith {
-        inner: Box<Expr>,
-        body: Box<Expr>,
-    },
+    HandleErrorWith { inner: Box<Expr>, body: Box<Expr> },
     /// `io.attempt`
-    Attempt {
-        inner: Box<Expr>,
-    },
+    Attempt { inner: Box<Expr> },
     /// `IO.race(a, b)`
-    IoRace {
-        left: Box<Expr>,
-        right: Box<Expr>,
-    },
+    IoRace { left: Box<Expr>, right: Box<Expr> },
     /// `IO.both(a, b)`
-    IoBoth {
-        left: Box<Expr>,
-        right: Box<Expr>,
-    },
+    IoBoth { left: Box<Expr>, right: Box<Expr> },
     /// `IO.ensure(inner, finalizer)` — run finalizer on success, failure, and cancel
     IoEnsure {
         inner: Box<Expr>,
@@ -198,10 +185,7 @@ pub enum ExprKind {
     /// Local binding / parameter reference
     Var(String),
     /// `p.x` record field projection (resolved to match before codegen).
-    Field {
-        base: Box<Expr>,
-        field: String,
-    },
+    Field { base: Box<Expr>, field: String },
     /// `p.show(args)` trait method call (resolved to Call before codegen).
     MethodCall {
         receiver: Box<Expr>,
@@ -228,13 +212,9 @@ pub enum ExprKind {
     /// String literal
     StrLit(String),
     /// List literal `[a, b, c]`
-    ListLit {
-        elems: Vec<Expr>,
-    },
+    ListLit { elems: Vec<Expr> },
     /// `s"...$x..."` / `s"...${expr}..."` — typed concat (Int holes via `Str.fromInt`).
-    Interpolate {
-        parts: Vec<InterpPart>,
-    },
+    Interpolate { parts: Vec<InterpPart> },
     /// `if (cond) then else else_`
     If {
         cond: Box<Expr>,
@@ -248,10 +228,7 @@ pub enum ExprKind {
         right: Box<Expr>,
     },
     /// Builtin or user call: `Str.concat(a,b)`, `foo(x)`, `Fs.read(p)`
-    Call {
-        callee: String,
-        args: Vec<Expr>,
-    },
+    Call { callee: String, args: Vec<Expr> },
     /// `_ => expr` or `x => expr` — single-param lambda literal (tap callbacks).
     Lambda {
         param: Option<String>,

@@ -383,7 +383,6 @@ def collectExpr(e: Expr, strs: List): List =
     case Expr.Field(base, field, span) => collectExpr(base, strs)
     case Expr.MethodCall(receiver, method, args, span) => collectArgs(args, collectExpr(receiver, strs))
     case Expr.For(binders, body, span) => strs
-    case Expr.Delay(span) => strs
   }
 
 def collectInterpParts(parts: List, strs: List): List =
@@ -425,11 +424,8 @@ def runtimeDeclaresB(): String =
 def runtimeDeclaresC(): String =
   Str.concat(str5("declare ptr @sz_lang_view_text(ptr)\ndeclare ptr @sz_lang_view_bind_text(ptr)\n", "declare ptr @sz_lang_view_button(ptr, ptr, ptr)\n", "declare i64 @sz_theme_accent()\ndeclare i64 @sz_theme_primary()\n", "declare i64 @sz_theme_muted()\ndeclare i64 @sz_theme_foreground()\n", "declare i64 @sz_color_rgb(i64, i64, i64)\n"), str5("declare ptr @sz_lang_view_column()\ndeclare ptr @sz_lang_view_row()\ndeclare ptr @sz_lang_view_stack()\n", "declare ptr @sz_lang_view_each(ptr)\n", "declare ptr @sz_lang_view_scroll(ptr)\ndeclare ptr @sz_lang_view_expanded(ptr)\ndeclare ptr @sz_lang_view_center(ptr)\ndeclare ptr @sz_lang_view_align(i64, i64, ptr)\ndeclare ptr @sz_lang_view_positioned(i64, i64, ptr)\ndeclare ptr @sz_lang_view_padding(i64, ptr)\ndeclare ptr @sz_lang_view_sized(i64, i64, ptr)\ndeclare ptr @sz_lang_view_min_size(i64, i64, ptr)\ndeclare ptr @sz_lang_view_background(i64, ptr)\ndeclare ptr @sz_lang_view_aspect_ratio(i64, i64, ptr)\ndeclare ptr @sz_lang_view_fraction(i64, i64, ptr)\n", "declare ptr @sz_lang_view_text_field(ptr, ptr)\ndeclare ptr @sz_lang_view_icon(i64, i64)\n", str3("declare ptr @sz_lang_view_image(i64, i64, i64, ptr)\ndeclare ptr @sz_lang_view_add_child(ptr, ptr)\n", "declare ptr @sz_lang_view_show_when(ptr, i64, ptr)\n", "declare ptr @sz_lang_signal_map(ptr, ptr, ptr)\ndeclare ptr @sz_ui_run_view(ptr)\ndeclare ptr @sz_ui_run_rebuild(ptr, ptr)\ndeclare i64 @sz_law_signal_int(i64)\ndeclare ptr @sz_law_signal_str(i64)\ndeclare i64 @sz_law_signal_list_len(i64)\ndeclare ptr @sz_law_signal_list_at(i64, i64)\ndeclare i64 @sz_law_a11y_has(ptr)\ndeclare ptr @sz_law_assert(ptr, i64)\ndeclare ptr @sz_box_i64(i64)\ndeclare i64 @sz_unbox_i64(ptr)\ndeclare i32 @sz_runtime_main_args(ptr, i32, ptr)\n\n")))
 
-def delayThunk(): String =
-  "define internal ptr @sz_delay_unit_thunk(ptr %env) {\nentry:\n  ret ptr null\n}\n\n"
-
 def emitHeader(strs: List): String =
-  Str.concat("; Scuzz Lang Stage-1 generated LLVM IR\n\n", Str.concat(runtimeDeclares(), Str.concat(emitStrConsts(strs, 0, "\n"), Str.concat("\n", delayThunk()))))
+  Str.concat("; Scuzz Lang Stage-1 generated LLVM IR\n\n", Str.concat(runtimeDeclares(), Str.concat(emitStrConsts(strs, 0, "\n"), "\n")))
 
 def ensureIoPair(code: String, kind: EmitKind, value: String, tmp: String): List =
   if (isIoKind(kind) == 1) pair(code, value) else if (kindIsInt(kind) == 1) pair(str4(code, "  %", tmp, Str.concat(str4("_box = call ptr @sz_box_i64(i64 ", value, ")\n  %", tmp), str3(" = call ptr @sz_io_pure(ptr %", tmp, "_box)\n"))), Str.concat("%", tmp)) else pair(str4(code, "  %", tmp, str3(" = call ptr @sz_io_pure(ptr ", value, ")\n")), Str.concat("%", tmp))
@@ -471,7 +467,6 @@ def emitExpr(e: Expr, strs: List, ctx: List, env: List, prefix: String, id: Int,
     case Expr.Var(name, span) => emitVar(env, name, id, conts)
     case Expr.Field(base, field, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.MethodCall(receiver, method, args, span) => mkS("", "null", EmitKind.Ptr, id, conts)
-    case Expr.Delay(span) => mkS(str3("  %", prefix, "_delay = call ptr @sz_io_delay(ptr @sz_delay_unit_thunk, ptr null)\n"), str3("%", prefix, "_delay"), EmitKind.Io, id, conts)
     case Expr.Println(arg, span) => emitPrintln(strs, arg, ctx, env, prefix, id, conts)
     case Expr.Fail(arg, span) => emitFail(strs, arg, ctx, env, prefix, id, conts)
     case Expr.Pure(arg, span) => emitPure(strs, arg, ctx, env, prefix, id, conts)
@@ -1006,7 +1001,6 @@ def emitUiRunMatch(e: Expr, strs: List, ctx: List, env: List, prefix: String, id
     case Expr.Fail(arg, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
     case Expr.Pure(arg, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
     case Expr.Sleep(arg, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
-    case Expr.Delay(span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
     case Expr.IoRace(left, right, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
     case Expr.IoBoth(left, right, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
     case Expr.IoEnsure(inner, finalizer, span) => emitUiRunView(e, strs, ctx, env, prefix, id, conts)
@@ -1065,7 +1059,6 @@ def emitIoContLambdaMatch(e: Expr, strs: List, ctx: List, env: List, prefix: Str
     case Expr.Fail(arg, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.Pure(arg, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.Sleep(arg, span) => mkS("", "null", EmitKind.Ptr, id, conts)
-    case Expr.Delay(span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.IoRace(left, right, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.IoBoth(left, right, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.IoEnsure(inner, finalizer, span) => mkS("", "null", EmitKind.Ptr, id, conts)
@@ -1113,7 +1106,6 @@ def emitPredLambdaMatch(e: Expr, strs: List, ctx: List, env: List, prefix: Strin
     case Expr.Fail(arg, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.Pure(arg, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.Sleep(arg, span) => mkS("", "null", EmitKind.Ptr, id, conts)
-    case Expr.Delay(span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.IoRace(left, right, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.IoBoth(left, right, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.IoEnsure(inner, finalizer, span) => mkS("", "null", EmitKind.Ptr, id, conts)
@@ -1161,7 +1153,6 @@ def emitSmapLambdaMatch(e: Expr, strs: List, ctx: List, env: List, prefix: Strin
     case Expr.Fail(arg, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.Pure(arg, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.Sleep(arg, span) => mkS("", "null", EmitKind.Ptr, id, conts)
-    case Expr.Delay(span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.IoRace(left, right, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.IoBoth(left, right, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.IoEnsure(inner, finalizer, span) => mkS("", "null", EmitKind.Ptr, id, conts)
@@ -1221,7 +1212,6 @@ def emitMapLambdaMatch(e: Expr, strs: List, ctx: List, env: List, prefix: String
     case Expr.Fail(arg, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.Pure(arg, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.Sleep(arg, span) => mkS("", "null", EmitKind.Ptr, id, conts)
-    case Expr.Delay(span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.IoRace(left, right, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.IoBoth(left, right, span) => mkS("", "null", EmitKind.Ptr, id, conts)
     case Expr.IoEnsure(inner, finalizer, span) => mkS("", "null", EmitKind.Ptr, id, conts)

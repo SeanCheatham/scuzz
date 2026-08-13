@@ -24,7 +24,6 @@ enum Expr:
   case Fail(arg: Expr, span: Span)
   case Pure(arg: Expr, span: Span)
   case Sleep(arg: Expr, span: Span)
-  case Delay(span: Span)
   case IoRace(left: Expr, right: Expr, span: Span)
   case IoBoth(left: Expr, right: Expr, span: Span)
   case IoEnsure(inner: Expr, finalizer: Expr, span: Span)
@@ -54,7 +53,6 @@ def isUnitExpr(e: Expr): Int =
     case Expr.Fail(arg, span) => 0
     case Expr.Pure(arg, span) => 0
     case Expr.Sleep(arg, span) => 0
-    case Expr.Delay(span) => 0
     case Expr.IoRace(left, right, span) => 0
     case Expr.IoBoth(left, right, span) => 0
     case Expr.IoEnsure(inner, finalizer, span) => 0
@@ -85,7 +83,6 @@ def isVarExpr(e: Expr): Int =
     case Expr.Fail(arg, span) => 0
     case Expr.Pure(arg, span) => 0
     case Expr.Sleep(arg, span) => 0
-    case Expr.Delay(span) => 0
     case Expr.IoRace(left, right, span) => 0
     case Expr.IoBoth(left, right, span) => 0
     case Expr.IoEnsure(inner, finalizer, span) => 0
@@ -116,7 +113,6 @@ def isLetExpr(e: Expr): Int =
     case Expr.Fail(arg, span) => 0
     case Expr.Pure(arg, span) => 0
     case Expr.Sleep(arg, span) => 0
-    case Expr.Delay(span) => 0
     case Expr.IoRace(left, right, span) => 0
     case Expr.IoBoth(left, right, span) => 0
     case Expr.IoEnsure(inner, finalizer, span) => 0
@@ -147,7 +143,6 @@ def isMatchExpr(e: Expr): Int =
     case Expr.Fail(arg, span) => 0
     case Expr.Pure(arg, span) => 0
     case Expr.Sleep(arg, span) => 0
-    case Expr.Delay(span) => 0
     case Expr.IoRace(left, right, span) => 0
     case Expr.IoBoth(left, right, span) => 0
     case Expr.IoEnsure(inner, finalizer, span) => 0
@@ -178,7 +173,6 @@ def isFlatMapExpr(e: Expr): Int =
     case Expr.Fail(arg, span) => 0
     case Expr.Pure(arg, span) => 0
     case Expr.Sleep(arg, span) => 0
-    case Expr.Delay(span) => 0
     case Expr.IoRace(left, right, span) => 0
     case Expr.IoBoth(left, right, span) => 0
     case Expr.IoEnsure(inner, finalizer, span) => 0
@@ -209,7 +203,6 @@ def isStrLitExpr(e: Expr): Int =
     case Expr.Fail(arg, span) => 0
     case Expr.Pure(arg, span) => 0
     case Expr.Sleep(arg, span) => 0
-    case Expr.Delay(span) => 0
     case Expr.IoRace(left, right, span) => 0
     case Expr.IoBoth(left, right, span) => 0
     case Expr.IoEnsure(inner, finalizer, span) => 0
@@ -240,7 +233,6 @@ def varExprName(e: Expr): String =
     case Expr.Fail(arg, span) => ""
     case Expr.Pure(arg, span) => ""
     case Expr.Sleep(arg, span) => ""
-    case Expr.Delay(span) => ""
     case Expr.IoRace(left, right, span) => ""
     case Expr.IoBoth(left, right, span) => ""
     case Expr.IoEnsure(inner, finalizer, span) => ""
@@ -271,7 +263,6 @@ def strLitExprValue(e: Expr): String =
     case Expr.Fail(arg, span) => ""
     case Expr.Pure(arg, span) => ""
     case Expr.Sleep(arg, span) => ""
-    case Expr.Delay(span) => ""
     case Expr.IoRace(left, right, span) => ""
     case Expr.IoBoth(left, right, span) => ""
     case Expr.IoEnsure(inner, finalizer, span) => ""

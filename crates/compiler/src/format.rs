@@ -221,7 +221,6 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             format!("{pad}{body}")
         }
         ExprKind::IoPrintln(e) => format!("{pad}IO.println({})", pretty_expr(e, 0).trim()),
-        ExprKind::IoDelayUnit => format!("{pad}IO.delay(() => ())"),
         ExprKind::IoSleep(e) => format!("{pad}IO.sleep({})", pretty_expr(e, 0).trim()),
         ExprKind::IoFail(e) => format!("{pad}IO.fail({})", pretty_expr(e, 0).trim()),
         ExprKind::IoPure(e) => format!("{pad}IO.pure({})", pretty_expr(e, 0).trim()),
@@ -234,7 +233,10 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             method,
             args,
         } => {
-            let a: Vec<String> = args.iter().map(|e| pretty_expr(e, 0).trim().to_string()).collect();
+            let a: Vec<String> = args
+                .iter()
+                .map(|e| pretty_expr(e, 0).trim().to_string())
+                .collect();
             format!(
                 "{pad}{}.{}({})",
                 pretty_expr(receiver, 0).trim(),
@@ -253,16 +255,22 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
                 if args.is_empty() {
                     format!("{pad}{bare}")
                 } else {
-                    let a: Vec<_> = args.iter().map(|e| pretty_expr(e, 0).trim().to_string()).collect();
+                    let a: Vec<_> = args
+                        .iter()
+                        .map(|e| pretty_expr(e, 0).trim().to_string())
+                        .collect();
                     format!("{pad}{bare}({})", a.join(", "))
                 }
             } else if args.is_empty() {
                 format!("{pad}{bare}.{case_name}")
             } else {
-                let a: Vec<_> = args.iter().map(|e| pretty_expr(e, 0).trim().to_string()).collect();
+                let a: Vec<_> = args
+                    .iter()
+                    .map(|e| pretty_expr(e, 0).trim().to_string())
+                    .collect();
                 format!("{pad}{bare}.{case_name}({})", a.join(", "))
             }
-        },
+        }
         ExprKind::Lambda { param, body } => {
             let p = param.as_deref().unwrap_or("_");
             format!("{pad}{p} => {}", pretty_expr(body, 0).trim())
@@ -662,8 +670,14 @@ def getOrElse[T](o: Opt[T], default: T): T = o match {
 "#;
         let out = format_source(src).unwrap();
         assert!(out.contains("enum Opt[T]:"), "missing enum tparams: {out}");
-        assert!(out.contains("enum Either[L, R]:"), "missing Either tparams: {out}");
-        assert!(out.contains("record Box[T](x: T)"), "missing record tparams: {out}");
+        assert!(
+            out.contains("enum Either[L, R]:"),
+            "missing Either tparams: {out}"
+        );
+        assert!(
+            out.contains("record Box[T](x: T)"),
+            "missing record tparams: {out}"
+        );
         assert!(out.contains("case Some(x: T)"));
         assert!(out.contains("def getOrElse[T](o: Opt[T], default: T): T ="));
         let again = format_source(&out).unwrap();

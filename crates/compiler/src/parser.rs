@@ -115,9 +115,7 @@ pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError
         }
         for im in prog.impls {
             if impls.iter().any(|x| {
-                x.module == im.module
-                    && x.trait_name == im.trait_name
-                    && x.for_type == im.for_type
+                x.module == im.module && x.trait_name == im.trait_name && x.for_type == im.for_type
             }) {
                 return Err(ParseError::Msg(format!(
                     "{name}: duplicate impl {} for {}",
@@ -277,8 +275,8 @@ impl Parser {
                 Token::Eof => break,
                 other => {
                     return Err(self.err(format!(
-                        "expected enum/record/trait/impl/import/def/private def/@main, got {other:?}"
-                    )))
+                    "expected enum/record/trait/impl/import/def/private def/@main, got {other:?}"
+                )))
                 }
             }
         }
@@ -315,11 +313,7 @@ impl Parser {
         let ty = self.parse_type()?;
         match &ty {
             Type::Io(inner) if matches!(inner.as_ref(), Type::Unit) => {}
-            _ => {
-                return Err(self.err(
-                    "@main must have type IO[Unit] in Stage 0",
-                ))
-            }
+            _ => return Err(self.err("@main must have type IO[Unit] in Stage 0")),
         }
         self.expect(&Token::Eq)?;
         let body = self.parse_expr()?;
@@ -433,11 +427,7 @@ impl Parser {
                     cases.push(self.parse_enum_case(&type_params)?);
                 }
             }
-            other => {
-                return Err(self.err(format!(
-                    "enum body expected `:` or `{{`, got {other:?}"
-                )))
-            }
+            other => return Err(self.err(format!("enum body expected `:` or `{{`, got {other:?}"))),
         }
         if cases.is_empty() {
             return Err(self.err(format!("enum {name} has no cases")));
@@ -531,9 +521,7 @@ impl Parser {
             methods.push(self.parse_impl_method()?);
         }
         if methods.is_empty() {
-            return Err(self.err(format!(
-                "impl {trait_name} for {for_type} has no methods"
-            )));
+            return Err(self.err(format!("impl {trait_name} for {for_type} has no methods")));
         }
         Ok(ImplDef {
             module: self.module.clone(),
@@ -573,9 +561,7 @@ impl Parser {
         let (name, _) = self.expect_ident()?;
         if type_params.iter().any(|p| p == &name) {
             if matches!(self.peek(), Token::LBracket) {
-                return Err(self.err(format!(
-                    "type parameter {name} takes no type arguments"
-                )));
+                return Err(self.err(format!("type parameter {name} takes no type arguments")));
             }
             return Ok(Type::Var(name));
         }
@@ -672,9 +658,7 @@ impl Parser {
             match self.peek() {
                 Token::RBrace => break,
                 Token::Yield => {
-                    return Err(self.err(
-                        "`yield` belongs after `}`: `for { … } yield e`",
-                    ))
+                    return Err(self.err("`yield` belongs after `}`: `for { … } yield e`"))
                 }
                 _ => {
                     let name = self.parse_binder_name()?;
@@ -690,9 +674,9 @@ impl Parser {
                             binders.push(ForBinder::Draw { name, value });
                         }
                         other => {
-                            return Err(self.err(format!(
-                                "for binder expected `=` or `<-`, got {other:?}"
-                            )))
+                            return Err(
+                                self.err(format!("for binder expected `=` or `<-`, got {other:?}"))
+                            )
                         }
                     }
                 }
@@ -1028,9 +1012,7 @@ impl Parser {
                 self.expect(&Token::Arrow)?;
                 Ok((Some(name), self.parse_block()?))
             }
-            _ => Err(self.err(
-                "expected `_ => expr`, `() => expr`, or `name => expr`",
-            )),
+            _ => Err(self.err("expected `_ => expr`, `() => expr`, or `name => expr`")),
         }
     }
 
@@ -1152,16 +1134,6 @@ impl Parser {
                         let span = start.cover(&arg.span);
                         Ok(self.mk(ExprKind::IoPrintln(Box::new(arg)), span))
                     }
-                    "delay" => {
-                        self.expect(&Token::LParen)?;
-                        self.expect(&Token::LParen)?;
-                        self.expect(&Token::RParen)?;
-                        self.expect(&Token::Arrow)?;
-                        self.expect(&Token::LParen)?;
-                        self.expect(&Token::RParen)?;
-                        let end = self.expect(&Token::RParen)?;
-                        Ok(self.mk(ExprKind::IoDelayUnit, start.cover(&end)))
-                    }
                     "sleep" => {
                         let args = self.parse_args()?;
                         if args.len() != 1 {
@@ -1243,9 +1215,22 @@ impl Parser {
             Token::Ident(name)
                 if matches!(
                     name.as_str(),
-                    "Str" | "List" | "Fs" | "Sys" | "Clock" | "Random"
-                        | "Net" | "Impurity" | "Signal" | "View" | "Theme"
-                        | "Ref" | "Queue" | "Deferred" | "Resource" | "Stream"
+                    "Str"
+                        | "List"
+                        | "Fs"
+                        | "Sys"
+                        | "Clock"
+                        | "Random"
+                        | "Net"
+                        | "Impurity"
+                        | "Signal"
+                        | "View"
+                        | "Theme"
+                        | "Ref"
+                        | "Queue"
+                        | "Deferred"
+                        | "Resource"
+                        | "Stream"
                 ) =>
             {
                 self.bump();
@@ -1277,13 +1262,7 @@ impl Parser {
                 if matches!(self.peek(), Token::LParen) {
                     let args = self.parse_args()?;
                     let end = args.last().map(|a| a.span.clone()).unwrap_or(start.clone());
-                    return Ok(self.mk(
-                        ExprKind::Call {
-                            callee: name,
-                            args,
-                        },
-                        start.cover(&end),
-                    ));
+                    return Ok(self.mk(ExprKind::Call { callee: name, args }, start.cover(&end)));
                 }
                 if matches!(self.peek(), Token::Dot) {
                     self.bump();
@@ -1300,11 +1279,7 @@ impl Parser {
                         ));
                     }
                     // Capitalized `Color.Red` / `A.tag` stay ADT/module; lowercase `p.x` is field access.
-                    if name
-                        .chars()
-                        .next()
-                        .is_some_and(|c| c.is_ascii_uppercase())
-                    {
+                    if name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
                         Ok(self.mk(
                             ExprKind::AdtConstruct {
                                 enum_name: name,
@@ -1331,15 +1306,18 @@ impl Parser {
         }
     }
 
-    fn parse_interpolate(&mut self, parts: Vec<InterpTok>, start: Span) -> Result<Expr, ParseError> {
+    fn parse_interpolate(
+        &mut self,
+        parts: Vec<InterpTok>,
+        start: Span,
+    ) -> Result<Expr, ParseError> {
         let mut out = Vec::new();
         for part in parts {
             match part {
                 InterpTok::Lit(s) => out.push(InterpPart::Lit(s)),
-                InterpTok::Ident(name) => out.push(InterpPart::Expr(self.mk(
-                    ExprKind::Var(name),
-                    start.clone(),
-                ))),
+                InterpTok::Ident(name) => out.push(InterpPart::Expr(
+                    self.mk(ExprKind::Var(name), start.clone()),
+                )),
                 InterpTok::Brace(body) => {
                     let tokens = lex(&body).map_err(|e| ParseError::At {
                         msg: e.to_string(),
@@ -1365,7 +1343,6 @@ impl Parser {
         Ok(self.mk(ExprKind::Interpolate { parts: out }, start))
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -1631,9 +1608,7 @@ enum Opt:
                 }
                 match &arms[1].pattern {
                     Pattern::Adt {
-                        binds,
-                        case_name,
-                        ..
+                        binds, case_name, ..
                     } if case_name == "None" && binds.is_empty() => {}
                     other => panic!("expected nullary None, got {other:?}"),
                 }
@@ -1876,7 +1851,10 @@ def f[T](x: T[Int]): T = x
 @main def main: IO[Unit] = IO.println("x")
 "#;
         let err = parse(src).unwrap_err().to_string();
-        assert!(err.contains("type parameter T takes no type arguments"), "unexpected: {err}");
+        assert!(
+            err.contains("type parameter T takes no type arguments"),
+            "unexpected: {err}"
+        );
     }
 
     #[test]
@@ -1886,6 +1864,9 @@ def f(x: List[Int]): Int = 1
 @main def main: IO[Unit] = IO.println("x")
 "#;
         let err = parse(src).unwrap_err().to_string();
-        assert!(err.contains("List takes no type arguments"), "unexpected: {err}");
+        assert!(
+            err.contains("List takes no type arguments"),
+            "unexpected: {err}"
+        );
     }
 }

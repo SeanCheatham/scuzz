@@ -1,6 +1,4 @@
-use crate::ast::{
-    BinOp, EnumDef, Expr, ExprKind, FunDef, ImplDef, Param, Program, TraitDef, Type,
-};
+use crate::ast::{BinOp, EnumDef, Expr, ExprKind, FunDef, ImplDef, Param, Program, TraitDef, Type};
 use crate::resolve::{enum_bare_name, enum_id, EnumIndex, FunIndex, ResolveError};
 use crate::span::Span;
 use std::collections::HashMap;
@@ -71,10 +69,7 @@ impl MethodIndex {
                 .iter()
                 .find(|t| t.name == im.trait_name)
                 .ok_or_else(|| {
-                    TypeError::Msg(format!(
-                        "impl of unknown trait {}",
-                        im.trait_name
-                    ))
+                    TypeError::Msg(format!("impl of unknown trait {}", im.trait_name))
                 })?;
             let for_id = enums.resolve_id(&im.for_type, &im.module).map_err(|e| {
                 TypeError::Msg(format!(
@@ -83,12 +78,16 @@ impl MethodIndex {
                 ))
             })?;
             for method in &im.methods {
-                let tm = tr.methods.iter().find(|m| m.name == method.name).ok_or_else(|| {
-                    TypeError::Msg(format!(
-                        "impl {} for {}: unknown method {}",
-                        im.trait_name, im.for_type, method.name
-                    ))
-                })?;
+                let tm = tr
+                    .methods
+                    .iter()
+                    .find(|m| m.name == method.name)
+                    .ok_or_else(|| {
+                        TypeError::Msg(format!(
+                            "impl {} for {}: unknown method {}",
+                            im.trait_name, im.for_type, method.name
+                        ))
+                    })?;
                 if tm.params.len() != method.params.len() {
                     return Err(TypeError::Msg(format!(
                         "impl {} for {}.{}: param count mismatch",
@@ -154,23 +153,20 @@ impl MethodIndex {
     fn lookup(&self, type_id: &str, method: &str) -> Result<&MethodEntry, TypeError> {
         self.by_type_method
             .get(&(type_id.to_string(), method.to_string()))
-            .ok_or_else(|| {
-                TypeError::Msg(format!("no impl method {method} for type {type_id}"))
-            })
+            .ok_or_else(|| TypeError::Msg(format!("no impl method {method} for type {type_id}")))
     }
 }
 
 /// Turn `impl` methods into ordinary defs (`self` first) for FunIndex / codegen.
 pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
-    let enums = EnumIndex::build(&program.enums, &program.imports).map_err(|e| {
-        TypeError::Msg(e.to_string())
-    })?;
+    let enums = EnumIndex::build(&program.enums, &program.imports)
+        .map_err(|e| TypeError::Msg(e.to_string()))?;
     // Validate via MethodIndex build.
     let _ = MethodIndex::build(&program.impls, &program.traits, &enums)?;
     for im in &program.impls {
-        let for_id = enums.resolve_id(&im.for_type, &im.module).map_err(|e| {
-            TypeError::Msg(e.to_string())
-        })?;
+        let for_id = enums
+            .resolve_id(&im.for_type, &im.module)
+            .map_err(|e| TypeError::Msg(e.to_string()))?;
         let bare = enum_bare_name(&for_id).to_string();
         for method in &im.methods {
             let mangled = impl_method_name(&im.trait_name, &bare, &method.name);
@@ -211,12 +207,13 @@ pub fn typecheck(program: &Program) -> Result<(), TypeError> {
         other => TypeError::Msg(other.to_string()),
     })?;
     let methods = MethodIndex::build(&program.impls, &program.traits, &enums)?;
-    let funs = FunIndex::build(&program.defs, &program.imports, &program.enums).map_err(|e| match e {
-        ResolveError::Duplicate { module, name } => {
-            TypeError::Msg(format!("duplicate def {module}.{name}"))
-        }
-        other => TypeError::Msg(other.to_string()),
-    })?;
+    let funs =
+        FunIndex::build(&program.defs, &program.imports, &program.enums).map_err(|e| match e {
+            ResolveError::Duplicate { module, name } => {
+                TypeError::Msg(format!("duplicate def {module}.{name}"))
+            }
+            other => TypeError::Msg(other.to_string()),
+        })?;
     for en in &program.enums {
         let id = crate::resolve::enum_id(&en.module, &en.name);
         for case in &en.cases {
@@ -286,16 +283,16 @@ fn resolve_type_in(
             if type_params.iter().any(|p| p == n) {
                 Ok(Type::Var(n.clone()))
             } else {
-                let id = enums.resolve_id(n, module).map_err(|e| {
-                    TypeError::Msg(format!("unknown enum {n}: {e}"))
-                })?;
+                let id = enums
+                    .resolve_id(n, module)
+                    .map_err(|e| TypeError::Msg(format!("unknown enum {n}: {e}")))?;
                 Ok(Type::Adt(id))
             }
         }
         Type::App(n, args) => {
-            let en = enums.resolve(n, module).map_err(|e| {
-                TypeError::Msg(format!("unknown enum {n}: {e}"))
-            })?;
+            let en = enums
+                .resolve(n, module)
+                .map_err(|e| TypeError::Msg(format!("unknown enum {n}: {e}")))?;
             if en.type_params.is_empty() {
                 return Err(TypeError::Msg(format!(
                     "enum {n} is not generic; remove type arguments"
@@ -308,9 +305,9 @@ fn resolve_type_in(
                     args.len()
                 )));
             }
-            let id = enums.resolve_id(n, module).map_err(|e| {
-                TypeError::Msg(format!("unknown enum {n}: {e}"))
-            })?;
+            let id = enums
+                .resolve_id(n, module)
+                .map_err(|e| TypeError::Msg(format!("unknown enum {n}: {e}")))?;
             let rargs = args
                 .iter()
                 .map(|a| resolve_type_in(a, enums, module, type_params))
@@ -332,9 +329,9 @@ fn lookup_enum<'a>(
     enum_name: &str,
     current_module: &str,
 ) -> Result<(&'a EnumDef, String), TypeError> {
-    let en = enums.resolve(enum_name, current_module).map_err(|e| {
-        TypeError::Msg(format!("unknown enum {enum_name}: {e}"))
-    })?;
+    let en = enums
+        .resolve(enum_name, current_module)
+        .map_err(|e| TypeError::Msg(format!("unknown enum {enum_name}: {e}")))?;
     Ok((en, enum_id(&en.module, &en.name)))
 }
 
@@ -364,16 +361,15 @@ fn field_type(
             en.name
         )));
     }
-    let case = en.cases.first().ok_or_else(|| {
-        TypeError::Msg(format!("record {} has no cases", en.name))
-    })?;
+    let case = en
+        .cases
+        .first()
+        .ok_or_else(|| TypeError::Msg(format!("record {} has no cases", en.name)))?;
     let (_, fty) = case
         .fields
         .iter()
         .find(|(n, _)| n == field)
-        .ok_or_else(|| {
-            TypeError::Msg(format!("record {} has no field {field}", en.name))
-        })?;
+        .ok_or_else(|| TypeError::Msg(format!("record {} has no field {field}", en.name)))?;
     let resolved = resolve_type_in(fty, enums, &en.module, &en.type_params)?;
     let mut subst: HashMap<String, Type> = HashMap::new();
     let mut skipped: Vec<String> = Vec::new();
@@ -394,13 +390,11 @@ pub fn resolve_field_access(mut program: Program) -> Result<Program, TypeError> 
     let defs_owned = program.defs.clone();
     let traits_owned = program.traits.clone();
     let impls_owned = program.impls.clone();
-    let enums = EnumIndex::build(&enums_owned, &imports_owned).map_err(|e| {
-        TypeError::Msg(e.to_string())
-    })?;
+    let enums = EnumIndex::build(&enums_owned, &imports_owned)
+        .map_err(|e| TypeError::Msg(e.to_string()))?;
     let methods = MethodIndex::build(&impls_owned, &traits_owned, &enums)?;
-    let funs = FunIndex::build(&defs_owned, &imports_owned, &enums_owned).map_err(|e| {
-        TypeError::Msg(e.to_string())
-    })?;
+    let funs = FunIndex::build(&defs_owned, &imports_owned, &enums_owned)
+        .map_err(|e| TypeError::Msg(e.to_string()))?;
     for d in &mut program.defs {
         let mut env: HashMap<String, Type> = HashMap::new();
         for p in &d.params {
@@ -472,7 +466,8 @@ fn rewrite_fields(
             let Type::Adt(id) = &bt else {
                 return Err(TypeError::Msg(format!(
                     "field access .{field} needs a record type, got {bt:?}"
-                )).with_span_if_bare(&span));
+                ))
+                .with_span_if_bare(&span));
             };
             let (en, eid) = lookup_enum(enums, id, current_module)?;
             if !is_record_like(en) {
@@ -491,9 +486,7 @@ fn rewrite_fields(
                     TypeError::Msg(format!("record {} has no field {field}", en.name))
                         .with_span_if_bare(&span)
                 })?;
-            let binds: Vec<String> = (0..case.fields.len())
-                .map(|i| format!("__f{i}"))
-                .collect();
+            let binds: Vec<String> = (0..case.fields.len()).map(|i| format!("__f{i}")).collect();
             let body = Expr::new(ExprKind::Var(binds[idx].clone()), span.clone());
             Ok(Expr::new(
                 ExprKind::Match {
@@ -866,323 +859,321 @@ fn infer(
     env: &mut HashMap<String, Type>,
 ) -> Result<Type, TypeError> {
     (|| {
-    let result = match &expr.kind {
-        ExprKind::Unit => Ok(Type::Unit),
-        ExprKind::IntLit(_) => Ok(Type::Int),
-        ExprKind::StrLit(_) => Ok(Type::String),
-        ExprKind::ListLit { elems } => {
-            for e in elems {
-                infer(e, enums, funs, methods, current_module, env)?;
+        let result = match &expr.kind {
+            ExprKind::Unit => Ok(Type::Unit),
+            ExprKind::IntLit(_) => Ok(Type::Int),
+            ExprKind::StrLit(_) => Ok(Type::String),
+            ExprKind::ListLit { elems } => {
+                for e in elems {
+                    infer(e, enums, funs, methods, current_module, env)?;
+                }
+                Ok(Type::List)
             }
-            Ok(Type::List)
-        }
-        ExprKind::Interpolate { parts } => {
-            for part in parts {
-                match part {
-                    crate::ast::InterpPart::Lit(_) => {}
-                    crate::ast::InterpPart::Expr(e) => {
-                        let t = infer(e, enums, funs, methods, current_module, env)?;
-                        if !matches!(t, Type::String | Type::Int | Type::Opaque(_)) {
-                            return Err(TypeError::Msg(format!(
-                                "interpolation hole must be String or Int, got {t:?}"
-                            )));
+            ExprKind::Interpolate { parts } => {
+                for part in parts {
+                    match part {
+                        crate::ast::InterpPart::Lit(_) => {}
+                        crate::ast::InterpPart::Expr(e) => {
+                            let t = infer(e, enums, funs, methods, current_module, env)?;
+                            if !matches!(t, Type::String | Type::Int | Type::Opaque(_)) {
+                                return Err(TypeError::Msg(format!(
+                                    "interpolation hole must be String or Int, got {t:?}"
+                                )));
+                            }
+                        }
+                    }
+                }
+                Ok(Type::String)
+            }
+            ExprKind::IoPrintln(e) | ExprKind::IoFail(e) => {
+                let t = infer(e, enums, funs, methods, current_module, env)?;
+                expect_ty(&t, &Type::String)?;
+                Ok(Type::Io(Box::new(Type::Unit)))
+            }
+            ExprKind::IoSleep(e) => {
+                let t = infer(e, enums, funs, methods, current_module, env)?;
+                expect_ty(&t, &Type::Int)?;
+                Ok(Type::Io(Box::new(Type::Unit)))
+            }
+            ExprKind::IoPure(inner) => {
+                let t = infer(inner, enums, funs, methods, current_module, env)?;
+                Ok(Type::Io(Box::new(t)))
+            }
+            ExprKind::Var(name) => env
+                .get(name)
+                .cloned()
+                .ok_or_else(|| TypeError::Msg(format!("unbound variable {name}"))),
+            ExprKind::Field { base, field } => {
+                let bt = infer(base, enums, funs, methods, current_module, env)?;
+                field_type(&bt, field, enums, current_module)
+            }
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+            } => {
+                let rt = infer(receiver, enums, funs, methods, current_module, env)?;
+                let Type::Adt(id) = &rt else {
+                    return Err(TypeError::Msg(format!(
+                        "method .{method} needs a record/ADT receiver, got {rt:?}"
+                    )));
+                };
+                let entry = methods.lookup(id, method)?;
+                if args.len() != entry.params.len() {
+                    return Err(TypeError::Msg(format!(
+                        ".{method} expects {} arg(s), got {}",
+                        entry.params.len(),
+                        args.len()
+                    )));
+                }
+                for (arg, want) in args.iter().zip(entry.params.iter()) {
+                    let at = infer(arg, enums, funs, methods, current_module, env)?;
+                    expect_ty(&at, want)?;
+                }
+                Ok(entry.ret.clone())
+            }
+            ExprKind::AdtConstruct {
+                enum_name,
+                case_name,
+                args,
+                ..
+            } => {
+                let (en, id) = lookup_enum(enums, enum_name, current_module)?;
+                let case = en
+                    .cases
+                    .iter()
+                    .find(|c| c.name == *case_name)
+                    .ok_or_else(|| {
+                        TypeError::Msg(format!("unknown case {enum_name}.{case_name}"))
+                    })?;
+                check_payload_fields(&id, en, case)?;
+                if args.len() != case.fields.len() {
+                    return Err(TypeError::Msg(format!(
+                        "{enum_name}.{case_name} expects {} arg(s), got {}",
+                        case.fields.len(),
+                        args.len()
+                    )));
+                }
+                if en.type_params.is_empty() {
+                    for (arg, (_fname, fty)) in args.iter().zip(case.fields.iter()) {
+                        let at = infer(arg, enums, funs, methods, current_module, env)?;
+                        let want = resolve_type(fty, enums, &en.module)?;
+                        expect_ty(&at, &want)?;
+                    }
+                    Ok(Type::Adt(id))
+                } else {
+                    let mut subst: HashMap<String, Type> = HashMap::new();
+                    for (arg, (_fname, fty)) in args.iter().zip(case.fields.iter()) {
+                        let at = infer(arg, enums, funs, methods, current_module, env)?;
+                        let want = resolve_type_in(fty, enums, &en.module, &en.type_params)?;
+                        unify_construct(&want, &at, &mut subst)?;
+                    }
+                    // Params the args did not determine stay opaque placeholders;
+                    // elaboration resolves them from the expected type or errors.
+                    let targs = en
+                        .type_params
+                        .iter()
+                        .map(|p| {
+                            subst
+                                .get(p)
+                                .cloned()
+                                .unwrap_or_else(|| Type::Opaque(format!("__unbound_{p}")))
+                        })
+                        .collect();
+                    Ok(Type::App(id, targs))
+                }
+            }
+            ExprKind::Let { name, value, body } => {
+                let vt = infer(value, enums, funs, methods, current_module, env)?;
+                let old = env.insert(name.clone(), vt);
+                let bt = infer(body, enums, funs, methods, current_module, env)?;
+                if let Some(v) = old {
+                    env.insert(name.clone(), v);
+                } else {
+                    env.remove(name);
+                }
+                Ok(bt)
+            }
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                let ct = infer(cond, enums, funs, methods, current_module, env)?;
+                if !matches!(ct, Type::Int | Type::Bool) {
+                    return Err(TypeError::Msg(format!(
+                        "if condition must be Int/Bool, got {ct:?}"
+                    )));
+                }
+                let tt = infer(then_branch, enums, funs, methods, current_module, env)?;
+                let et = infer(else_branch, enums, funs, methods, current_module, env)?;
+                if !types_compat(&tt, &et) {
+                    return Err(TypeError::Msg(format!(
+                        "if branches disagree: {tt:?} vs {et:?}"
+                    )));
+                }
+                Ok(tt)
+            }
+            ExprKind::Binary { op, left, right } => {
+                let lt = infer(left, enums, funs, methods, current_module, env)?;
+                let rt = infer(right, enums, funs, methods, current_module, env)?;
+                match op {
+                    BinOp::Add if matches!(lt, Type::String) && matches!(rt, Type::String) => {
+                        Ok(Type::String)
+                    }
+                    BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
+                        if matches!(lt, Type::Int) && matches!(rt, Type::Int) {
+                            Ok(Type::Int)
+                        } else {
+                            Err(TypeError::Msg(format!(
+                                "arithmetic needs Int, got {lt:?} and {rt:?}"
+                            )))
+                        }
+                    }
+                    BinOp::Eq | BinOp::Ne => {
+                        if types_compat(&lt, &rt)
+                            || (matches!(lt, Type::String) && matches!(rt, Type::String))
+                        {
+                            Ok(Type::Int)
+                        } else {
+                            Err(TypeError::Msg(format!(
+                                "comparison type mismatch {lt:?} vs {rt:?}"
+                            )))
+                        }
+                    }
+                    BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                        if matches!(lt, Type::Int) && matches!(rt, Type::Int) {
+                            Ok(Type::Int)
+                        } else {
+                            Err(TypeError::Msg("ordered compare needs Int".into()))
+                        }
+                    }
+                    BinOp::And | BinOp::Or => {
+                        if matches!(lt, Type::Int | Type::Bool)
+                            && matches!(rt, Type::Int | Type::Bool)
+                        {
+                            Ok(Type::Int)
+                        } else {
+                            Err(TypeError::Msg("&&/|| need Int/Bool".into()))
                         }
                     }
                 }
             }
-            Ok(Type::String)
-        },
-        ExprKind::IoPrintln(e) | ExprKind::IoFail(e) => {
-            let t = infer(e, enums, funs, methods, current_module, env)?;
-            expect_ty(&t, &Type::String)?;
-            Ok(Type::Io(Box::new(Type::Unit)))
-        }
-        ExprKind::IoSleep(e) => {
-            let t = infer(e, enums, funs, methods, current_module, env)?;
-            expect_ty(&t, &Type::Int)?;
-            Ok(Type::Io(Box::new(Type::Unit)))
-        }
-        ExprKind::IoDelayUnit => Ok(Type::Io(Box::new(Type::Unit))),
-        ExprKind::IoPure(inner) => {
-            let t = infer(inner, enums, funs, methods, current_module, env)?;
-            Ok(Type::Io(Box::new(t)))
-        }
-        ExprKind::Var(name) => env
-            .get(name)
-            .cloned()
-            .ok_or_else(|| TypeError::Msg(format!("unbound variable {name}"))),
-        ExprKind::Field { base, field } => {
-            let bt = infer(base, enums, funs, methods, current_module, env)?;
-            field_type(&bt, field, enums, current_module)
-        },
-        ExprKind::MethodCall {
-            receiver,
-            method,
-            args,
-        } => {
-            let rt = infer(receiver, enums, funs, methods, current_module, env)?;
-            let Type::Adt(id) = &rt else {
-                return Err(TypeError::Msg(format!(
-                    "method .{method} needs a record/ADT receiver, got {rt:?}"
-                )));
-            };
-            let entry = methods.lookup(id, method)?;
-            if args.len() != entry.params.len() {
-                return Err(TypeError::Msg(format!(
-                    ".{method} expects {} arg(s), got {}",
-                    entry.params.len(),
-                    args.len()
-                )));
+            ExprKind::Call { callee, args } => {
+                infer_call(callee, args, enums, funs, methods, current_module, env)
             }
-            for (arg, want) in args.iter().zip(entry.params.iter()) {
-                let at = infer(arg, enums, funs, methods, current_module, env)?;
-                expect_ty(&at, want)?;
-            }
-            Ok(entry.ret.clone())
-        },
-        ExprKind::AdtConstruct {
-            enum_name,
-            case_name,
-            args,
-            ..
-        } => {
-            let (en, id) = lookup_enum(enums, enum_name, current_module)?;
-            let case = en.cases.iter().find(|c| c.name == *case_name).ok_or_else(|| {
-                TypeError::Msg(format!("unknown case {enum_name}.{case_name}"))
-            })?;
-            check_payload_fields(&id, en, case)?;
-            if args.len() != case.fields.len() {
-                return Err(TypeError::Msg(format!(
-                    "{enum_name}.{case_name} expects {} arg(s), got {}",
-                    case.fields.len(),
-                    args.len()
-                )));
-            }
-            if en.type_params.is_empty() {
-                for (arg, (_fname, fty)) in args.iter().zip(case.fields.iter()) {
-                    let at = infer(arg, enums, funs, methods, current_module, env)?;
-                    let want = resolve_type(fty, enums, &en.module)?;
-                    expect_ty(&at, &want)?;
-                }
-                Ok(Type::Adt(id))
-            } else {
-                let mut subst: HashMap<String, Type> = HashMap::new();
-                for (arg, (_fname, fty)) in args.iter().zip(case.fields.iter()) {
-                    let at = infer(arg, enums, funs, methods, current_module, env)?;
-                    let want = resolve_type_in(fty, enums, &en.module, &en.type_params)?;
-                    unify_construct(&want, &at, &mut subst)?;
-                }
-                // Params the args did not determine stay opaque placeholders;
-                // elaboration resolves them from the expected type or errors.
-                let targs = en
-                    .type_params
-                    .iter()
-                    .map(|p| {
-                        subst
-                            .get(p)
-                            .cloned()
-                            .unwrap_or_else(|| Type::Opaque(format!("__unbound_{p}")))
-                    })
-                    .collect();
-                Ok(Type::App(id, targs))
-            }
-        }
-        ExprKind::Let { name, value, body } => {
-            let vt = infer(value, enums, funs, methods, current_module, env)?;
-            let old = env.insert(name.clone(), vt);
-            let bt = infer(body, enums, funs, methods, current_module, env)?;
-            if let Some(v) = old {
-                env.insert(name.clone(), v);
-            } else {
-                env.remove(name);
-            }
-            Ok(bt)
-        }
-        ExprKind::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            let ct = infer(cond, enums, funs, methods, current_module, env)?;
-            if !matches!(ct, Type::Int | Type::Bool) {
-                return Err(TypeError::Msg(format!(
-                    "if condition must be Int/Bool, got {ct:?}"
-                )));
-            }
-            let tt = infer(then_branch, enums, funs, methods, current_module, env)?;
-            let et = infer(else_branch, enums, funs, methods, current_module, env)?;
-            if !types_compat(&tt, &et) {
-                return Err(TypeError::Msg(format!(
-                    "if branches disagree: {tt:?} vs {et:?}"
-                )));
-            }
-            Ok(tt)
-        }
-        ExprKind::Binary { op, left, right } => {
-            let lt = infer(left, enums, funs, methods, current_module, env)?;
-            let rt = infer(right, enums, funs, methods, current_module, env)?;
-            match op {
-                BinOp::Add if matches!(lt, Type::String) && matches!(rt, Type::String) => {
-                    Ok(Type::String)
-                }
-                BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
-                    if matches!(lt, Type::Int) && matches!(rt, Type::Int) {
-                        Ok(Type::Int)
-                    } else {
-                        Err(TypeError::Msg(format!(
-                            "arithmetic needs Int, got {lt:?} and {rt:?}"
-                        )))
+            ExprKind::Match { scrutinee, arms } => {
+                let st = infer(scrutinee, enums, funs, methods, current_module, env)?;
+                let mut result: Option<Type> = None;
+                for arm in arms {
+                    let bound = bind_pattern(&arm.pattern, &st, enums, current_module, env)?;
+                    let bt = infer(&arm.body, enums, funs, methods, current_module, env)?;
+                    unbind_pattern(bound, env);
+                    match &result {
+                        None => result = Some(bt),
+                        Some(prev) if types_compat(prev, &bt) => {}
+                        Some(prev) => {
+                            return Err(TypeError::Msg(format!(
+                                "match arms disagree: {prev:?} vs {bt:?}"
+                            )))
+                        }
                     }
                 }
-                BinOp::Eq | BinOp::Ne => {
-                    if types_compat(&lt, &rt)
-                        || (matches!(lt, Type::String) && matches!(rt, Type::String))
-                    {
-                        Ok(Type::Int)
-                    } else {
-                        Err(TypeError::Msg(format!(
-                            "comparison type mismatch {lt:?} vs {rt:?}"
-                        )))
-                    }
-                }
-                BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
-                    if matches!(lt, Type::Int) && matches!(rt, Type::Int) {
-                        Ok(Type::Int)
-                    } else {
-                        Err(TypeError::Msg("ordered compare needs Int".into()))
-                    }
-                }
-                BinOp::And | BinOp::Or => {
-                    if matches!(lt, Type::Int | Type::Bool) && matches!(rt, Type::Int | Type::Bool)
-                    {
-                        Ok(Type::Int)
-                    } else {
-                        Err(TypeError::Msg("&&/|| need Int/Bool".into()))
-                    }
-                }
+                result.ok_or_else(|| TypeError::Msg("empty match".into()))
             }
-        }
-        ExprKind::Call { callee, args } => {
-            infer_call(callee, args, enums, funs, methods, current_module, env)
-        }
-        ExprKind::Match { scrutinee, arms } => {
-            let st = infer(scrutinee, enums, funs, methods, current_module, env)?;
-            let mut result: Option<Type> = None;
-            for arm in arms {
-                let bound = bind_pattern(&arm.pattern, &st, enums, current_module, env)?;
-                let bt = infer(&arm.body, enums, funs, methods, current_module, env)?;
-                unbind_pattern(bound, env);
-                match &result {
-                    None => result = Some(bt),
-                    Some(prev) if types_compat(prev, &bt) => {}
-                    Some(prev) => {
-                        return Err(TypeError::Msg(format!(
-                            "match arms disagree: {prev:?} vs {bt:?}"
-                        )))
-                    }
-                }
-            }
-            result.ok_or_else(|| TypeError::Msg("empty match".into()))
-        }
-        ExprKind::FlatMap { inner, param, body } => {
-            let it = infer(inner, enums, funs, methods, current_module, env)?;
-            let Type::Io(inner_t) = it else {
-                return Err(TypeError::Msg("flatMap receiver must be IO[_]".into()));
-            };
-            let old = if let Some(p) = param {
-                env.insert(p.clone(), (*inner_t).clone())
-            } else {
-                None
-            };
-            let bt = infer(body, enums, funs, methods, current_module, env)?;
-            if let Some(p) = param {
-                if let Some(v) = old {
-                    env.insert(p.clone(), v);
+            ExprKind::FlatMap { inner, param, body } => {
+                let it = infer(inner, enums, funs, methods, current_module, env)?;
+                let Type::Io(inner_t) = it else {
+                    return Err(TypeError::Msg("flatMap receiver must be IO[_]".into()));
+                };
+                let old = if let Some(p) = param {
+                    env.insert(p.clone(), (*inner_t).clone())
                 } else {
-                    env.remove(p);
-                }
-            }
-            if !matches!(bt, Type::Io(_)) {
-                return Err(TypeError::Msg(
-                    "flatMap body must return IO[_]".into(),
-                ));
-            }
-            Ok(bt)
-        }
-        ExprKind::HandleErrorWith { inner, body } => {
-            let it = infer(inner, enums, funs, methods, current_module, env)?;
-            if !matches!(it, Type::Io(_)) {
-                return Err(TypeError::Msg(
-                    "handleErrorWith receiver must be IO[_]".into(),
-                ));
-            }
-            let bt = infer(body, enums, funs, methods, current_module, env)?;
-            if !matches!(bt, Type::Io(_)) {
-                return Err(TypeError::Msg(
-                    "handleErrorWith body must return IO[_]".into(),
-                ));
-            }
-            Ok(bt)
-        }
-        ExprKind::Attempt { inner } => {
-            let it = infer(inner, enums, funs, methods, current_module, env)?;
-            if !matches!(it, Type::Io(_)) {
-                return Err(TypeError::Msg("attempt receiver must be IO[_]".into()));
-            }
-            Ok(Type::Io(Box::new(Type::Opaque("Either".into()))))
-        }
-        ExprKind::Lambda { param, body } => {
-            // Param type is context-dependent (View for taps, Int for Signal.map).
-            // Bind as Opaque so both map and tap lambdas typecheck.
-            let old = param.as_ref().map(|p| {
-                (
-                    p.clone(),
-                    env.insert(p.clone(), Type::Opaque("Param".into())),
-                )
-            });
-            let _ = infer(body, enums, funs, methods, current_module, env)?;
-            if let Some((p, old_val)) = old {
-                match old_val {
-                    Some(v) => {
-                        env.insert(p, v);
-                    }
-                    None => {
-                        env.remove(&p);
+                    None
+                };
+                let bt = infer(body, enums, funs, methods, current_module, env)?;
+                if let Some(p) = param {
+                    if let Some(v) = old {
+                        env.insert(p.clone(), v);
+                    } else {
+                        env.remove(p);
                     }
                 }
+                if !matches!(bt, Type::Io(_)) {
+                    return Err(TypeError::Msg("flatMap body must return IO[_]".into()));
+                }
+                Ok(bt)
             }
-            Ok(Type::Opaque("TapFn".into()))
-        }
-        ExprKind::IoRace { left, right } | ExprKind::IoBoth { left, right } => {
-            let lt = infer(left, enums, funs, methods, current_module, env)?;
-            let rt = infer(right, enums, funs, methods, current_module, env)?;
-            if !matches!(lt, Type::Io(_)) || !matches!(rt, Type::Io(_)) {
-                return Err(TypeError::Msg(
-                    "IO.race/both arguments must be IO[_]".into(),
-                ));
+            ExprKind::HandleErrorWith { inner, body } => {
+                let it = infer(inner, enums, funs, methods, current_module, env)?;
+                if !matches!(it, Type::Io(_)) {
+                    return Err(TypeError::Msg(
+                        "handleErrorWith receiver must be IO[_]".into(),
+                    ));
+                }
+                let bt = infer(body, enums, funs, methods, current_module, env)?;
+                if !matches!(bt, Type::Io(_)) {
+                    return Err(TypeError::Msg(
+                        "handleErrorWith body must return IO[_]".into(),
+                    ));
+                }
+                Ok(bt)
             }
-            Ok(Type::Io(Box::new(Type::Unit)))
-        }
-        ExprKind::IoEnsure { inner, finalizer } => {
-            let it = infer(inner, enums, funs, methods, current_module, env)?;
-            let ft = infer(finalizer, enums, funs, methods, current_module, env)?;
-            let Type::Io(inner_ty) = it else {
-                return Err(TypeError::Msg(
-                    "IO.ensure inner must be IO[_]".into(),
-                ));
-            };
-            if !matches!(ft, Type::Io(_)) {
-                return Err(TypeError::Msg(
-                    "IO.ensure finalizer must be IO[_]".into(),
-                ));
+            ExprKind::Attempt { inner } => {
+                let it = infer(inner, enums, funs, methods, current_module, env)?;
+                if !matches!(it, Type::Io(_)) {
+                    return Err(TypeError::Msg("attempt receiver must be IO[_]".into()));
+                }
+                Ok(Type::Io(Box::new(Type::Opaque("Either".into()))))
             }
-            Ok(Type::Io(inner_ty))
-        }
-        ExprKind::For { .. } => Err(TypeError::Msg(
-            "internal: unlowered `for` (run lower before typecheck)".into(),
-        )),
-    };
-    result
+            ExprKind::Lambda { param, body } => {
+                // Param type is context-dependent (View for taps, Int for Signal.map).
+                // Bind as Opaque so both map and tap lambdas typecheck.
+                let old = param.as_ref().map(|p| {
+                    (
+                        p.clone(),
+                        env.insert(p.clone(), Type::Opaque("Param".into())),
+                    )
+                });
+                let _ = infer(body, enums, funs, methods, current_module, env)?;
+                if let Some((p, old_val)) = old {
+                    match old_val {
+                        Some(v) => {
+                            env.insert(p, v);
+                        }
+                        None => {
+                            env.remove(&p);
+                        }
+                    }
+                }
+                Ok(Type::Opaque("TapFn".into()))
+            }
+            ExprKind::IoRace { left, right } | ExprKind::IoBoth { left, right } => {
+                let lt = infer(left, enums, funs, methods, current_module, env)?;
+                let rt = infer(right, enums, funs, methods, current_module, env)?;
+                if !matches!(lt, Type::Io(_)) || !matches!(rt, Type::Io(_)) {
+                    return Err(TypeError::Msg(
+                        "IO.race/both arguments must be IO[_]".into(),
+                    ));
+                }
+                Ok(Type::Io(Box::new(Type::Unit)))
+            }
+            ExprKind::IoEnsure { inner, finalizer } => {
+                let it = infer(inner, enums, funs, methods, current_module, env)?;
+                let ft = infer(finalizer, enums, funs, methods, current_module, env)?;
+                let Type::Io(inner_ty) = it else {
+                    return Err(TypeError::Msg("IO.ensure inner must be IO[_]".into()));
+                };
+                if !matches!(ft, Type::Io(_)) {
+                    return Err(TypeError::Msg("IO.ensure finalizer must be IO[_]".into()));
+                }
+                Ok(Type::Io(inner_ty))
+            }
+            ExprKind::For { .. } => Err(TypeError::Msg(
+                "internal: unlowered `for` (run lower before typecheck)".into(),
+            )),
+        };
+        result
     })()
     .map_err(|e| e.with_span_if_bare(&expr.span))
 }
@@ -1684,9 +1675,9 @@ fn infer_call(
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         _ => {
-            let f = funs.resolve(callee, current_module).map_err(|e| {
-                TypeError::Msg(e.to_string())
-            })?;
+            let f = funs
+                .resolve(callee, current_module)
+                .map_err(|e| TypeError::Msg(e.to_string()))?;
             if f.params.len() != arg_tys.len() {
                 return Err(TypeError::Msg(format!(
                     "{callee} expects {} args, got {}",
@@ -1803,11 +1794,13 @@ fn bind_pattern(
             ..
         } => {
             let (en, id) = lookup_enum(enums, enum_name, current_module)?;
-            let case = en.cases.iter().find(|c| c.name == *case_name).ok_or_else(|| {
-                TypeError::Msg(format!(
-                    "unknown case {enum_name}.{case_name} in pattern"
-                ))
-            })?;
+            let case = en
+                .cases
+                .iter()
+                .find(|c| c.name == *case_name)
+                .ok_or_else(|| {
+                    TypeError::Msg(format!("unknown case {enum_name}.{case_name} in pattern"))
+                })?;
             check_payload_fields(&id, en, case)?;
             let mut subst: HashMap<String, Type> = HashMap::new();
             let mut skipped: Vec<String> = Vec::new();
@@ -1891,9 +1884,7 @@ fn types_compat(a: &Type, b: &Type) -> bool {
         (Type::Io(_), Type::Io(_)) => true,
         (Type::Adt(x), Type::Adt(y)) => x == y,
         (Type::App(x, a), Type::App(y, b)) => {
-            x == y
-                && a.len() == b.len()
-                && a.iter().zip(b.iter()).all(|(u, v)| types_compat(u, v))
+            x == y && a.len() == b.len() && a.iter().zip(b.iter()).all(|(u, v)| types_compat(u, v))
         }
         (Type::Var(x), Type::Var(y)) => x == y,
         (Type::Opaque(_), _) | (_, Type::Opaque(_)) => true,
@@ -2047,13 +2038,11 @@ pub fn monomorphize(mut program: Program) -> Result<Program, TypeError> {
     let traits_owned = program.traits.clone();
     let impls_owned = program.impls.clone();
     let defs_owned = program.defs.clone();
-    let enums = EnumIndex::build(&enums_owned, &imports_owned).map_err(|e| {
-        TypeError::Msg(e.to_string())
-    })?;
+    let enums = EnumIndex::build(&enums_owned, &imports_owned)
+        .map_err(|e| TypeError::Msg(e.to_string()))?;
     let methods = MethodIndex::build(&impls_owned, &traits_owned, &enums)?;
-    let funs = FunIndex::build(&defs_owned, &imports_owned, &enums_owned).map_err(|e| {
-        TypeError::Msg(e.to_string())
-    })?;
+    let funs = FunIndex::build(&defs_owned, &imports_owned, &enums_owned)
+        .map_err(|e| TypeError::Msg(e.to_string()))?;
 
     let mut specialized: HashMap<String, FunDef> = HashMap::new();
     for d in &mut program.defs {
@@ -2089,7 +2078,11 @@ pub fn monomorphize(mut program: Program) -> Result<Program, TypeError> {
     // Drop generic templates; keep non-generic defs + specialized clones.
     program.defs.retain(|d| d.type_params.is_empty());
     for (name, def) in specialized {
-        if program.defs.iter().any(|d| d.module == def.module && d.name == name) {
+        if program
+            .defs
+            .iter()
+            .any(|d| d.module == def.module && d.name == name)
+        {
             continue;
         }
         program.defs.push(def);
@@ -2228,13 +2221,29 @@ fn mono_expr(
         )),
         ExprKind::FlatMap { inner, param, body } => {
             let it = infer(&inner, enums, funs, methods, current_module, env)?;
-            let inner = mono_expr(*inner, enums, funs, methods, current_module, env, specialized)?;
+            let inner = mono_expr(
+                *inner,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                specialized,
+            )?;
             let old = if let (Type::Io(inner_t), Some(ref p)) = (&it, &param) {
                 env.insert(p.clone(), (**inner_t).clone())
             } else {
                 None
             };
-            let body = mono_expr(*body, enums, funs, methods, current_module, env, specialized)?;
+            let body = mono_expr(
+                *body,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                specialized,
+            )?;
             if let Some(p) = &param {
                 if let Some(v) = old {
                     env.insert(p.clone(), v);
@@ -2359,9 +2368,25 @@ fn mono_expr(
         )),
         ExprKind::Let { name, value, body } => {
             let vt = infer(&value, enums, funs, methods, current_module, env)?;
-            let value = mono_expr(*value, enums, funs, methods, current_module, env, specialized)?;
+            let value = mono_expr(
+                *value,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                specialized,
+            )?;
             let old = env.insert(name.clone(), vt);
-            let body = mono_expr(*body, enums, funs, methods, current_module, env, specialized)?;
+            let body = mono_expr(
+                *body,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                specialized,
+            )?;
             if let Some(v) = old {
                 env.insert(name.clone(), v);
             } else {
@@ -2401,13 +2426,27 @@ fn mono_expr(
         )),
         ExprKind::Match { scrutinee, arms } => {
             let st = infer(&scrutinee, enums, funs, methods, current_module, env)?;
-            let scrutinee =
-                mono_expr(*scrutinee, enums, funs, methods, current_module, env, specialized)?;
+            let scrutinee = mono_expr(
+                *scrutinee,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                specialized,
+            )?;
             let mut out_arms = Vec::new();
             for arm in arms {
                 let bound = bind_pattern(&arm.pattern, &st, enums, current_module, env)?;
-                let body =
-                    mono_expr(arm.body, enums, funs, methods, current_module, env, specialized)?;
+                let body = mono_expr(
+                    arm.body,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?;
                 unbind_pattern(bound, env);
                 out_arms.push(crate::ast::MatchArm {
                     pattern: arm.pattern,
@@ -2695,23 +2734,12 @@ fn elaborate_expr(
                 .cases
                 .iter()
                 .find(|c| c.name == case_name)
-                .ok_or_else(|| {
-                    TypeError::Msg(format!("unknown case {enum_name}.{case_name}"))
-                })?;
+                .ok_or_else(|| TypeError::Msg(format!("unknown case {enum_name}.{case_name}")))?;
             if en.type_params.is_empty() {
                 let args = args
                     .into_iter()
                     .map(|a| {
-                        elaborate_expr(
-                            a,
-                            enums,
-                            funs,
-                            methods,
-                            current_module,
-                            env,
-                            None,
-                            tparams,
-                        )
+                        elaborate_expr(a, enums, funs, methods, current_module, env, None, tparams)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 return Ok(Expr::new(
@@ -2789,7 +2817,14 @@ fn elaborate_expr(
         }
         ExprKind::Match { scrutinee, arms } => {
             let scrutinee = elaborate_expr(
-                *scrutinee, enums, funs, methods, current_module, env, None, tparams,
+                *scrutinee,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                None,
+                tparams,
             )?;
             let st = infer(&scrutinee, enums, funs, methods, current_module, env)?;
             let mut out_arms = Vec::new();
@@ -2826,7 +2861,14 @@ fn elaborate_expr(
                     }
                 };
                 let body = elaborate_expr(
-                    arm.body, enums, funs, methods, current_module, env, expected, tparams,
+                    arm.body,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    expected,
+                    tparams,
                 )?;
                 unbind_pattern(bound, env);
                 out_arms.push(crate::ast::MatchArm { pattern, body });
@@ -2846,13 +2888,34 @@ fn elaborate_expr(
         } => Ok(Expr::new(
             ExprKind::If {
                 cond: Box::new(elaborate_expr(
-                    *cond, enums, funs, methods, current_module, env, None, tparams,
+                    *cond,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    None,
+                    tparams,
                 )?),
                 then_branch: Box::new(elaborate_expr(
-                    *then_branch, enums, funs, methods, current_module, env, expected, tparams,
+                    *then_branch,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    expected,
+                    tparams,
                 )?),
                 else_branch: Box::new(elaborate_expr(
-                    *else_branch, enums, funs, methods, current_module, env, expected, tparams,
+                    *else_branch,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    expected,
+                    tparams,
                 )?),
             },
             span,
@@ -2893,21 +2956,18 @@ fn elaborate_expr(
                         )
                     })
                     .collect::<Result<Vec<_>, _>>()?;
-                Ok(Expr::new(ExprKind::Call { callee, args: new_args }, span))
+                Ok(Expr::new(
+                    ExprKind::Call {
+                        callee,
+                        args: new_args,
+                    },
+                    span,
+                ))
             } else {
                 let args = args
                     .into_iter()
                     .map(|a| {
-                        elaborate_expr(
-                            a,
-                            enums,
-                            funs,
-                            methods,
-                            current_module,
-                            env,
-                            None,
-                            tparams,
-                        )
+                        elaborate_expr(a, enums, funs, methods, current_module, env, None, tparams)
                     })
                     .collect::<Result<Vec<_>, _>>()?;
                 Ok(Expr::new(ExprKind::Call { callee, args }, span))
@@ -2915,12 +2975,26 @@ fn elaborate_expr(
         }
         ExprKind::Let { name, value, body } => {
             let value = elaborate_expr(
-                *value, enums, funs, methods, current_module, env, None, tparams,
+                *value,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                None,
+                tparams,
             )?;
             let vt = infer(&value, enums, funs, methods, current_module, env)?;
             let old = env.insert(name.clone(), vt);
             let body = elaborate_expr(
-                *body, enums, funs, methods, current_module, env, expected, tparams,
+                *body,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                expected,
+                tparams,
             )?;
             if let Some(v) = old {
                 env.insert(name.clone(), v);
@@ -2938,7 +3012,14 @@ fn elaborate_expr(
         }
         ExprKind::FlatMap { inner, param, body } => {
             let inner = elaborate_expr(
-                *inner, enums, funs, methods, current_module, env, None, tparams,
+                *inner,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                None,
+                tparams,
             )?;
             let it = infer(&inner, enums, funs, methods, current_module, env)?;
             let mut old = None;
@@ -2946,7 +3027,14 @@ fn elaborate_expr(
                 old = env.insert(p.clone(), (**inner_t).clone());
             }
             let body = elaborate_expr(
-                *body, enums, funs, methods, current_module, env, expected, tparams,
+                *body,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                expected,
+                tparams,
             )?;
             if let Some(p) = &param {
                 if let Some(v) = old {
@@ -2985,29 +3073,64 @@ fn elaborate_expr(
         }
         ExprKind::IoPrintln(inner) => Ok(Expr::new(
             ExprKind::IoPrintln(Box::new(elaborate_expr(
-                *inner, enums, funs, methods, current_module, env, None, tparams,
+                *inner,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                None,
+                tparams,
             )?)),
             span,
         )),
         ExprKind::IoSleep(inner) => Ok(Expr::new(
             ExprKind::IoSleep(Box::new(elaborate_expr(
-                *inner, enums, funs, methods, current_module, env, None, tparams,
+                *inner,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                None,
+                tparams,
             )?)),
             span,
         )),
         ExprKind::IoFail(inner) => Ok(Expr::new(
             ExprKind::IoFail(Box::new(elaborate_expr(
-                *inner, enums, funs, methods, current_module, env, None, tparams,
+                *inner,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                None,
+                tparams,
             )?)),
             span,
         )),
         ExprKind::HandleErrorWith { inner, body } => Ok(Expr::new(
             ExprKind::HandleErrorWith {
                 inner: Box::new(elaborate_expr(
-                    *inner, enums, funs, methods, current_module, env, expected, tparams,
+                    *inner,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    expected,
+                    tparams,
                 )?),
                 body: Box::new(elaborate_expr(
-                    *body, enums, funs, methods, current_module, env, expected, tparams,
+                    *body,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    expected,
+                    tparams,
                 )?),
             },
             span,
@@ -3015,7 +3138,14 @@ fn elaborate_expr(
         ExprKind::Attempt { inner } => Ok(Expr::new(
             ExprKind::Attempt {
                 inner: Box::new(elaborate_expr(
-                    *inner, enums, funs, methods, current_module, env, None, tparams,
+                    *inner,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    None,
+                    tparams,
                 )?),
             },
             span,
@@ -3023,10 +3153,24 @@ fn elaborate_expr(
         ExprKind::IoRace { left, right } => Ok(Expr::new(
             ExprKind::IoRace {
                 left: Box::new(elaborate_expr(
-                    *left, enums, funs, methods, current_module, env, expected, tparams,
+                    *left,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    expected,
+                    tparams,
                 )?),
                 right: Box::new(elaborate_expr(
-                    *right, enums, funs, methods, current_module, env, expected, tparams,
+                    *right,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    expected,
+                    tparams,
                 )?),
             },
             span,
@@ -3034,10 +3178,24 @@ fn elaborate_expr(
         ExprKind::IoBoth { left, right } => Ok(Expr::new(
             ExprKind::IoBoth {
                 left: Box::new(elaborate_expr(
-                    *left, enums, funs, methods, current_module, env, None, tparams,
+                    *left,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    None,
+                    tparams,
                 )?),
                 right: Box::new(elaborate_expr(
-                    *right, enums, funs, methods, current_module, env, None, tparams,
+                    *right,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    None,
+                    tparams,
                 )?),
             },
             span,
@@ -3045,10 +3203,24 @@ fn elaborate_expr(
         ExprKind::IoEnsure { inner, finalizer } => Ok(Expr::new(
             ExprKind::IoEnsure {
                 inner: Box::new(elaborate_expr(
-                    *inner, enums, funs, methods, current_module, env, expected, tparams,
+                    *inner,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    expected,
+                    tparams,
                 )?),
                 finalizer: Box::new(elaborate_expr(
-                    *finalizer, enums, funs, methods, current_module, env, None, tparams,
+                    *finalizer,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    None,
+                    tparams,
                 )?),
             },
             span,
@@ -3056,7 +3228,14 @@ fn elaborate_expr(
         ExprKind::Field { base, field } => Ok(Expr::new(
             ExprKind::Field {
                 base: Box::new(elaborate_expr(
-                    *base, enums, funs, methods, current_module, env, None, tparams,
+                    *base,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    None,
+                    tparams,
                 )?),
                 field,
             },
@@ -3069,22 +3248,20 @@ fn elaborate_expr(
         } => Ok(Expr::new(
             ExprKind::MethodCall {
                 receiver: Box::new(elaborate_expr(
-                    *receiver, enums, funs, methods, current_module, env, None, tparams,
+                    *receiver,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    None,
+                    tparams,
                 )?),
                 method,
                 args: args
                     .into_iter()
                     .map(|a| {
-                        elaborate_expr(
-                            a,
-                            enums,
-                            funs,
-                            methods,
-                            current_module,
-                            env,
-                            None,
-                            tparams,
-                        )
+                        elaborate_expr(a, enums, funs, methods, current_module, env, None, tparams)
                     })
                     .collect::<Result<Vec<_>, _>>()?,
             },
@@ -3095,16 +3272,7 @@ fn elaborate_expr(
                 elems: elems
                     .into_iter()
                     .map(|e| {
-                        elaborate_expr(
-                            e,
-                            enums,
-                            funs,
-                            methods,
-                            current_module,
-                            env,
-                            None,
-                            tparams,
-                        )
+                        elaborate_expr(e, enums, funs, methods, current_module, env, None, tparams)
                     })
                     .collect::<Result<Vec<_>, _>>()?,
             },
@@ -3116,8 +3284,8 @@ fn elaborate_expr(
                     .into_iter()
                     .map(|p| match p {
                         crate::ast::InterpPart::Lit(s) => Ok(crate::ast::InterpPart::Lit(s)),
-                        crate::ast::InterpPart::Expr(e) => Ok(crate::ast::InterpPart::Expr(
-                            elaborate_expr(
+                        crate::ast::InterpPart::Expr(e) => {
+                            Ok(crate::ast::InterpPart::Expr(elaborate_expr(
                                 e,
                                 enums,
                                 funs,
@@ -3126,8 +3294,8 @@ fn elaborate_expr(
                                 env,
                                 None,
                                 tparams,
-                            )?,
-                        )),
+                            )?))
+                        }
                     })
                     .collect::<Result<Vec<_>, _>>()?,
             },
@@ -3137,10 +3305,24 @@ fn elaborate_expr(
             ExprKind::Binary {
                 op,
                 left: Box::new(elaborate_expr(
-                    *left, enums, funs, methods, current_module, env, None, tparams,
+                    *left,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    None,
+                    tparams,
                 )?),
                 right: Box::new(elaborate_expr(
-                    *right, enums, funs, methods, current_module, env, None, tparams,
+                    *right,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    None,
+                    tparams,
                 )?),
             },
             span,
@@ -3149,7 +3331,14 @@ fn elaborate_expr(
             ExprKind::Lambda {
                 param,
                 body: Box::new(elaborate_expr(
-                    *body, enums, funs, methods, current_module, env, None, tparams,
+                    *body,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    None,
+                    tparams,
                 )?),
             },
             span,
@@ -3172,7 +3361,10 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
         } => ExprKind::AdtConstruct {
             enum_name,
             case_name,
-            args: args.into_iter().map(|a| subst_node_targs(a, subst)).collect(),
+            args: args
+                .into_iter()
+                .map(|a| subst_node_targs(a, subst))
+                .collect(),
             type_args: type_args.iter().map(|t| apply_subst(t, subst)).collect(),
         },
         ExprKind::Match { scrutinee, arms } => ExprKind::Match {
@@ -3209,7 +3401,10 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
         },
         ExprKind::Call { callee, args } => ExprKind::Call {
             callee,
-            args: args.into_iter().map(|a| subst_node_targs(a, subst)).collect(),
+            args: args
+                .into_iter()
+                .map(|a| subst_node_targs(a, subst))
+                .collect(),
         },
         ExprKind::Let { name, value, body } => ExprKind::Let {
             name,
@@ -3255,10 +3450,16 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
         } => ExprKind::MethodCall {
             receiver: Box::new(subst_node_targs(*receiver, subst)),
             method,
-            args: args.into_iter().map(|a| subst_node_targs(a, subst)).collect(),
+            args: args
+                .into_iter()
+                .map(|a| subst_node_targs(a, subst))
+                .collect(),
         },
         ExprKind::ListLit { elems } => ExprKind::ListLit {
-            elems: elems.into_iter().map(|e| subst_node_targs(e, subst)).collect(),
+            elems: elems
+                .into_iter()
+                .map(|e| subst_node_targs(e, subst))
+                .collect(),
         },
         ExprKind::Interpolate { parts } => ExprKind::Interpolate {
             parts: parts
@@ -3585,11 +3786,9 @@ fn concretize_type(
 ) -> Result<Type, TypeError> {
     match ty {
         Type::App(id, args) => {
-            let cid = clones
-                .get(&(id.clone(), args.clone()))
-                .ok_or_else(|| {
-                    TypeError::Msg(format!("internal: missing enum clone for {id}{args:?}"))
-                })?;
+            let cid = clones.get(&(id.clone(), args.clone())).ok_or_else(|| {
+                TypeError::Msg(format!("internal: missing enum clone for {id}{args:?}"))
+            })?;
             Ok(Type::Adt(cid.clone()))
         }
         Type::Io(inner) => Ok(Type::Io(Box::new(concretize_type(inner, clones)?))),
@@ -3631,9 +3830,9 @@ fn specialize_enums(mut program: Program) -> Result<Program, TypeError> {
                 "internal: non-concrete instantiation {id}{args:?} survived monomorphization"
             )));
         }
-        let en = enums.resolve(&id, "").map_err(|e| {
-            TypeError::Msg(format!("internal: unknown generic enum {id}: {e}"))
-        })?;
+        let en = enums
+            .resolve(&id, "")
+            .map_err(|e| TypeError::Msg(format!("internal: unknown generic enum {id}: {e}")))?;
         let subst: HashMap<String, Type> = en
             .type_params
             .iter()
@@ -3677,7 +3876,10 @@ fn specialize_enums(mut program: Program) -> Result<Program, TypeError> {
         }
         let r = resolve_type(&d.ret, &enums, &d.module)?;
         d.ret = concretize_type(&r, &clones)?;
-        d.body = rewrite_enum_refs(std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)), &clones)?;
+        d.body = rewrite_enum_refs(
+            std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)),
+            &clones,
+        )?;
     }
     program.main.body = rewrite_enum_refs(
         std::mem::replace(&mut program.main.body, Expr::dummy(ExprKind::Unit)),
@@ -4014,14 +4216,8 @@ enum Pair:
     #[test]
     fn duplicate_def_across_modules_ok() {
         let p = crate::parser::parse_sources(&[
-            (
-                "A.scuzz".into(),
-                "def tag(): String = \"a\"\n".into(),
-            ),
-            (
-                "B.scuzz".into(),
-                "def tag(): String = \"b\"\n".into(),
-            ),
+            ("A.scuzz".into(), "def tag(): String = \"a\"\n".into()),
+            ("B.scuzz".into(), "def tag(): String = \"b\"\n".into()),
             (
                 "Main.scuzz".into(),
                 "@main def main: IO[Unit] = IO.println(Str.concat(A.tag(), B.tag()))\n".into(),
@@ -4035,14 +4231,8 @@ enum Pair:
     #[test]
     fn bare_ambiguous_tag_requires_qualify() {
         let p = crate::parser::parse_sources(&[
-            (
-                "A.scuzz".into(),
-                "def tag(): String = \"a\"\n".into(),
-            ),
-            (
-                "B.scuzz".into(),
-                "def tag(): String = \"b\"\n".into(),
-            ),
+            ("A.scuzz".into(), "def tag(): String = \"a\"\n".into()),
+            ("B.scuzz".into(), "def tag(): String = \"b\"\n".into()),
             (
                 "Main.scuzz".into(),
                 "@main def main: IO[Unit] = IO.println(tag())\n".into(),
@@ -4100,14 +4290,8 @@ enum Pair:
     #[test]
     fn import_disambiguates_ambiguous_bare() {
         let p = crate::parser::parse_sources(&[
-            (
-                "A.scuzz".into(),
-                "def tag(): String = \"a\"\n".into(),
-            ),
-            (
-                "B.scuzz".into(),
-                "def tag(): String = \"b\"\n".into(),
-            ),
+            ("A.scuzz".into(), "def tag(): String = \"a\"\n".into()),
+            ("B.scuzz".into(), "def tag(): String = \"b\"\n".into()),
             (
                 "Main.scuzz".into(),
                 "import A.tag\n@main def main: IO[Unit] = IO.println(Str.concat(tag(), B.tag()))\n"
@@ -4481,7 +4665,8 @@ def id[T](x: T): T = x
     }
 
     #[test]
-    fn mono_multi_param_either_clone() {        let src = r#"
+    fn mono_multi_param_either_clone() {
+        let src = r#"
 enum Either[L, R]:
   case Left(x: L)
   case Right(y: R)
@@ -4493,7 +4678,9 @@ def describe(e: Either[Int, String]): String = e match {
 "#;
         let p = gen_pipeline(src);
         assert!(
-            p.enums.iter().any(|e| e.name.contains("__gen_Either_Int_String")),
+            p.enums
+                .iter()
+                .any(|e| e.name.contains("__gen_Either_Int_String")),
             "missing Either clone: {:?}",
             p.enums.iter().map(|e| &e.name).collect::<Vec<_>>()
         );

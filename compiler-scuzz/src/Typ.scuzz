@@ -188,7 +188,6 @@ def inferExprMatch(e: Expr, enums: List, funs: List, env: List): TyRes =
     case Expr.ListLit(elems, span) => inferListLit(elems, enums, funs, env)
     case Expr.Interp(parts, span) => inferInterp(parts, enums, funs, env)
     case Expr.Println(arg, span) => inferIoChild(arg, Type.String, enums, funs, env)
-    case Expr.Delay(span) => tyOk(tyMkIo(Type.Unit))
     case Expr.Sleep(arg, span) => inferIoChild(arg, Type.Int, enums, funs, env)
     case Expr.Fail(arg, span) => inferIoChild(arg, Type.String, enums, funs, env)
     case Expr.Pure(arg, span) => inferPure(arg, enums, funs, env)
@@ -1511,7 +1510,6 @@ def elaborateExpr(e: Expr, enums: List, funs: List, env: List, expected: List, t
     case Expr.IntLit(digits, span) => elabPack(e, tyOk(Type.Unit))
     case Expr.StrLit(value, span) => elabPack(e, tyOk(Type.Unit))
     case Expr.Var(name, span) => elabPack(e, tyOk(Type.Unit))
-    case Expr.Delay(span) => elabPack(e, tyOk(Type.Unit))
     case Expr.Adt(enumName, caseName, args, typeArgs, span) => elabAdt(enumName, caseName, args, typeArgs, span, enums, funs, env, expected, tparams)
     case Expr.Match(scrut, arms, span) => elabMatch(scrut, arms, span, enums, funs, env, expected, tparams)
     case Expr.Call(callee, args, span) => elabCall(callee, args, span, enums, funs, env, expected, tparams)
@@ -1735,7 +1733,7 @@ def elabArmOne(arm: MatchArm, rest: List, st: Type, span: Span, enums: List, fun
   pp = elabPattern(pat, st, span, enums, funs, tparams)
   env2 = patternExtendEnv(pat, st, enums, env)
   rb = elaborateExpr(body, enums, funs, env2, expected, tparams)
-} yield if (tyIsOk(pr) == 0) elabPack(Expr.Delay(dummySpan()), pr) else if (tyIsOk(elabResOf(pp)) == 0) pp else if (tyIsOk(elabResOf(rb)) == 0) rb else elabArms(rest, st, span, enums, funs, env, expected, tparams, List.cons(MatchArm.Arm(elabPatOf(pp), elabExprOf(rb)), acc))
+} yield if (tyIsOk(pr) == 0) elabPack(Expr.Unit(dummySpan()), pr) else if (tyIsOk(elabResOf(pp)) == 0) pp else if (tyIsOk(elabResOf(rb)) == 0) rb else elabArms(rest, st, span, enums, funs, env, expected, tparams, List.cons(MatchArm.Arm(elabPatOf(pp), elabExprOf(rb)), acc))
   }
 
 def patDummy(en: String, cn: String, binds: List): Pattern =

@@ -192,7 +192,6 @@ def exprSpan(e: Expr): Span =
     case Expr.Fail(arg, span) => span
     case Expr.Pure(arg, span) => span
     case Expr.Sleep(arg, span) => span
-    case Expr.Delay(span) => span
     case Expr.IoRace(left, right, span) => span
     case Expr.IoBoth(left, right, span) => span
     case Expr.IoEnsure(inner, finalizer, span) => span

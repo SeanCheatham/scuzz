@@ -486,18 +486,7 @@ def parseIo(file: String, tokens: List, i: Int, startI: Int): List =
     methodP = parseIdent(file, tokens, i1)
     method = pStr(methodP)
     i2 = pIdx(methodP)
-  } yield if (streq(method, "delay") == 1) parseIoDelay(file, tokens, i2, startI) else if (isTok(tokens, i2, "LParen") == 1) parseIoArgs(file, tokens, i2 + 1, Str.concat("IO.", method), startI) else okExpr(Expr.Call(Str.concat("IO.", method), List.empty(), spanCover(file, tokens, startI, i2)), i2)
-
-def parseIoDelay(file: String, tokens: List, i: Int, startI: Int): List =
-  for {
-    i1 = expectTok(tokens, i, "LParen")
-    i2 = expectTok(tokens, i1, "LParen")
-    i3 = expectTok(tokens, i2, "RParen")
-    i4 = expectTok(tokens, i3, "Arrow")
-    i5 = expectTok(tokens, i4, "LParen")
-    i6 = expectTok(tokens, i5, "RParen")
-    i7 = expectTok(tokens, i6, "RParen")
-  } yield okExpr(Expr.Delay(spanCover(file, tokens, startI, i7)), i7)
+  } yield if (isTok(tokens, i2, "LParen") == 1) parseIoArgs(file, tokens, i2 + 1, Str.concat("IO.", method), startI) else okExpr(Expr.Call(Str.concat("IO.", method), List.empty(), spanCover(file, tokens, startI, i2)), i2)
 
 def parseIoArgs(file: String, tokens: List, i: Int, callee: String, startI: Int): List =
   for {
