@@ -10,7 +10,7 @@ def helpBuild(): String =
   "scuzz build [project]\n\nCompile to a native binary (LLVM + clang).\n\nExamples:\n  scuzz build\n  scuzz build examples/hello\n"
 
 def helpRun(): String =
-  "scuzz run [project] [--headless] [--watch]\n\nBuild and run. --headless forces Headless (writes build/snapshot.png).\nDefault follows [ui].default_runtime when present.\n[ui] --watch keeps the process and stamp-reloads the View tree (not source).\nLive dump: build/debug.dump. Live inject: append tap/text/pump lines to build/inject.script.\nIO-only --watch rebuilds and reruns after the process exits.\n\nExamples:\n  scuzz run\n  scuzz run --headless\n  scuzz run --watch --headless\n  scuzz run examples/counter --headless\n"
+  "scuzz run [project] [--headless] [--watch]\n\nBuild and run. --headless forces Headless (writes build/snapshot.png).\nDefault follows [ui].default_runtime when present.\n[ui] --watch keeps the process and stamp-reloads the View tree (not source).\nLive dump: build/debug.dump. Live inject: append tap/text/pump/scroll lines to build/inject.script.\nIO-only --watch rebuilds and reruns after the process exits.\n\nExamples:\n  scuzz run\n  scuzz run --headless\n  scuzz run --watch --headless\n  scuzz run examples/counter --headless\n"
 
 def helpTest(): String =
   "scuzz test [project] [--update] [--pixels] [--runtime-tests]\n\n[ui]: Headless structural goldens (seed on first run). IO: TESTRT exit-0 smoke.\n\nExamples:\n  scuzz test\n  scuzz test --update\n  scuzz test --pixels\n"

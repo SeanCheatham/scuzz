@@ -512,6 +512,47 @@ static void test_session_inject_script(void) {
   remove(path);
 }
 
+static void test_session_inject_scroll(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *scroll, *list;
+  const char *path = "/tmp/scuzz_ui_inject_scroll.script";
+  float y0;
+
+  remove(path);
+  root = sz_view_column();
+  list = sz_view_list();
+  sz_view_add_child(list, sz_view_text("one"));
+  sz_view_add_child(list, sz_view_text("two"));
+  sz_view_add_child(list, sz_view_text("three"));
+  sz_view_add_child(list, sz_view_text("four"));
+  scroll = sz_view_scroll(list);
+  sz_view_add_child(root, scroll);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_inject(session, path));
+  assert(sz_ui_pump_sync(session));
+  y0 = sz_view_scroll_y(scroll);
+
+  write_stamp(path, "scroll 40\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_scroll_y(scroll) == y0 + 40.f);
+
+  write_stamp(path, "scroll\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_scroll_y(scroll) == y0 + 80.f);
+
+  sz_ui_unmount(session);
+  remove(path);
+}
+
 typedef struct {
   SzSignalInt *sig;
   int64_t value;
@@ -1386,6 +1427,7 @@ int main(void) {
   test_ui_run_rebuild_keepalive();
   test_session_debug_dump();
   test_session_inject_script();
+  test_session_inject_scroll();
   test_button_set_and_show_when();
   test_widgets();
   test_expanded_column();

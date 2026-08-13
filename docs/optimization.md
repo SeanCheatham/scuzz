@@ -39,7 +39,7 @@ Design constraints:
 Fuzz answers "does anything break?"; tuning answers "which strategy is fastest?" — a different oracle with two consequences:
 
 - **Virtual time measures nothing.** TestRuntime jumps to the next wakeup, so tuned and untuned programs look identical under it. Cost needs deterministic proxies (instruction counts, allocation accounting) or wall-clock measurement on the target machine. Wall-clock is what makes the manifest *machine*-specific.
-- **Fuzz scripts are the wrong workload.** They are adversarial/random, not representative. Tuning measures against a separate **bench corpus** — authored or recorded representative sessions reusing the same script line protocol (`tap` / `text` / `pump`).
+- **Fuzz scripts are the wrong workload.** They are adversarial/random, not representative. Tuning measures against a separate **bench corpus** — authored or recorded representative sessions reusing the same script line protocol (`tap` / `text` / `pump` / `scroll`).
 
 Pipeline: search generates candidate tunings → measure on bench corpus → fuzz-verify equivalence → emit `*.scuzz_tune` → tuned build applies it.
 

@@ -166,6 +166,53 @@ static int collect_buttons(SzUiSession *session, SzView **buttons, int cap) {
   return n_buttons;
 }
 
+static int collect_scrolls(SzUiSession *session, SzView **scrolls, int cap) {
+  SzView *r = sz_ui_session_root(session);
+  int n = 0;
+  int yi, xi;
+  int w = sz_ui_session_width(session);
+  int h = sz_ui_session_height(session);
+  if (!r)
+    return 0;
+  for (yi = 0; yi < h; yi += 4) {
+    for (xi = 0; xi < w; xi += 4) {
+      SzView *hit = sz_view_scroll_at(r, (float)xi, (float)yi);
+      int seen = 0;
+      int si;
+      if (!hit)
+        continue;
+      for (si = 0; si < n; si++) {
+        if (scrolls[si] == hit) {
+          seen = 1;
+          break;
+        }
+      }
+      if (!seen && n < cap)
+        scrolls[n++] = hit;
+    }
+  }
+  return n;
+}
+
+static void script_scroll(SzUiSession *session, float dy) {
+  SzView *scrolls[16];
+  int count = collect_scrolls(session, scrolls, 16);
+  SzInputEvent ev;
+  SzRect fr;
+  if (count <= 0) {
+    fprintf(stderr, "scuzz: script scroll skipped (no scroll)\n");
+    return;
+  }
+  fr = sz_view_frame(scrolls[0]);
+  memset(&ev, 0, sizeof ev);
+  ev.kind = SZ_INPUT_SCROLL;
+  ev.x = fr.x + fr.w * 0.5f;
+  ev.y = fr.y + fr.h * 0.5f;
+  ev.dy = dy;
+  if (!sz_ui_inject_sync(session, &ev))
+    fprintf(stderr, "scuzz: script scroll skipped (no scroll)\n");
+}
+
 static void scripted_button_tap(SzUiSession *session, int prefer_upper) {
   SzInputEvent tap;
   SzView *hit_btn = NULL;
@@ -212,6 +259,7 @@ static void scripted_button_tap(SzUiSession *session, int prefer_upper) {
      tap <n>    tap the nth button (scan order); missing target is a no-op
      text <s>   deliver <s> to the focused/first TextField; no field is a no-op
      pump <k>   pump k extra frames
+     scroll <dy> pan the first Scroll (positive = content up); no scroll is a no-op
    Blank lines and #-comments are skipped. Pump runs after every event. */
 
 static void script_tap(SzUiSession *session, int n) {
@@ -280,6 +328,8 @@ static void run_ui_script(SzUiSession *session, const char *path) {
         if (!sz_ui_pump_sync(session))
           sz_panic("Ui.run: script pump failed");
       }
+    } else if (strncmp(line, "scroll ", 7) == 0 || strcmp(line, "scroll") == 0) {
+      script_scroll(session, len > 6 ? (float)atoi(line + 7) : 40.f);
     } else {
       fclose(f);
       sz_panic("Ui.run: unknown SCUZZ_UI_SCRIPT directive");
