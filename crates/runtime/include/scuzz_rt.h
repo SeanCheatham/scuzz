@@ -179,6 +179,7 @@ typedef struct SzIoResult {
 } SzIoResult;
 
 SzIoResult sz_io_unsafe_run(SzIo *io);
+void *sz_io_unsafe_run_or_die(SzIo *io);
 void sz_io_free(SzIo *io);
 
 /* Called from queue/deferred delay thunks to wake a parked fiber (returns 1 if woke). */

@@ -1046,6 +1046,20 @@ static SzIoResult run_io(SzIo *root) {
 
 SzIoResult sz_io_unsafe_run(SzIo *root) { return run_io(root); }
 
+/* UI callbacks (taps, Signal.map over IO) have no error channel; an unhandled
+   failure mirrors main: report and die so fuzz/tests observe it. */
+void *sz_io_unsafe_run_or_die(SzIo *root) {
+  SzIoResult r = run_io(root);
+  if (!r.ok) {
+    fprintf(stderr, "scuzz: IO failed in UI callback: %s\n",
+            r.error ? sz_string_cstr(r.error->message) : "unknown");
+    if (r.error)
+      sz_error_free(r.error);
+    exit(1);
+  }
+  return r.value;
+}
+
 int sz_runtime_main(SzIo *program) {
   return sz_runtime_main_args(program, 0, NULL);
 }

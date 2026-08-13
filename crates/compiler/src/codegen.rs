@@ -47,11 +47,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_io_attempt(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_race(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_both(ptr, ptr)").unwrap();
-    writeln!(
-        out,
-        "declare void @sz_io_unsafe_run(ptr sret({{ i32, ptr, ptr }}), ptr)"
-    )
-    .unwrap();
+    writeln!(out, "declare ptr @sz_io_unsafe_run_or_die(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_adt_new(i32, ptr)").unwrap();
     writeln!(out, "declare i32 @sz_adt_tag(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_adt_payload(ptr)").unwrap();
@@ -1422,7 +1418,7 @@ fn emit_lambda(
     if body_emitted.kind == Kind::Io {
         writeln!(
             ctx.conts,
-            "  %t{id}_urs = alloca {{ i32, ptr, ptr }}\n  call void @sz_io_unsafe_run(ptr sret({{ i32, ptr, ptr }}) %t{id}_urs, ptr {})",
+            "  %t{id}_ur = call ptr @sz_io_unsafe_run_or_die(ptr {})",
             body_emitted.value
         )
         .unwrap();
@@ -1488,18 +1484,8 @@ fn emit_map_lambda(
     if body_emitted.kind == Kind::Io {
         writeln!(
             ctx.conts,
-            "  %m{id}_urs = alloca {{ i32, ptr, ptr }}\n  call void @sz_io_unsafe_run(ptr sret({{ i32, ptr, ptr }}) %m{id}_urs, ptr {})",
+            "  %m{id}_ok = call ptr @sz_io_unsafe_run_or_die(ptr {})",
             body_emitted.value
-        )
-        .unwrap();
-        writeln!(
-            ctx.conts,
-            "  %m{id}_ur = load {{ i32, ptr, ptr }}, ptr %m{id}_urs"
-        )
-        .unwrap();
-        writeln!(
-            ctx.conts,
-            "  %m{id}_ok = extractvalue {{ i32, ptr, ptr }} %m{id}_ur, 1"
         )
         .unwrap();
         writeln!(ctx.conts, "  ret ptr %m{id}_ok").unwrap();
