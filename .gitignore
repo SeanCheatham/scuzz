@@ -4,16 +4,11 @@
 *.ll
 *.bc
 /dist/
+build/
 **/.scuzz/
 *.png
 !examples/**/goldens/**/*.png
 .DS_Store
-examples/**/build/
-compiler-scuzz/build/
-crates/runtime/build/
-crates/ffi-skia/build/
-crates/embedder-desktop/build/
-crates/embedder-mobile/build/
 *.a
 *.so
 *.dylib
@@ -31,8 +26,6 @@ captures/
 *.apk
 *.aab
 *.iml
-crates/embedder-mobile/shells/android/build/
-crates/embedder-mobile/shells/ios/build/
 third_party/skia/prebuilt/
 
 scratchpad/
