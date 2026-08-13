@@ -150,7 +150,10 @@ struct SzIo {
     } both;
     SzQueue *queue_take;
     SzDeferred *deferred_get;
-    int poll_fd;
+    struct {
+      int fd;
+      int events;
+    } poll;
   } as;
 };
 
@@ -170,6 +173,7 @@ SzIo *sz_io_both(SzIo *left, SzIo *right);
 SzIo *sz_io_queue_take(SzQueue *q);
 SzIo *sz_io_deferred_get(SzDeferred *d);
 SzIo *sz_io_poll_readable(int fd); /* IO[Unit]; park until fd is readable */
+SzIo *sz_io_poll_writable(int fd); /* IO[Unit]; park until fd is writable */
 
 /* Run to completion on the calling thread.
  * Concurrency is cooperative single-threaded fibers: sleep/Queue/Deferred/poll

@@ -394,14 +394,19 @@ SzIo *sz_io_deferred_get(SzDeferred *d) {
   return io;
 }
 
-SzIo *sz_io_poll_readable(int fd) {
+static SzIo *sz_io_poll_fd(int fd, int events) {
   SzIo *io;
   if (fd < 0)
     return sz_io_fail_cstr("poll: invalid fd");
   io = sz_io_new(SZ_IO_POLL_FD);
-  io->as.poll_fd = fd;
+  io->as.poll.fd = fd;
+  io->as.poll.events = events ? events : POLLIN;
   return io;
 }
+
+SzIo *sz_io_poll_readable(int fd) { return sz_io_poll_fd(fd, POLLIN); }
+
+SzIo *sz_io_poll_writable(int fd) { return sz_io_poll_fd(fd, POLLOUT); }
 
 void sz_io_free(SzIo *io) {
   /* Shallow free; graphs are short-lived process heaps. */
@@ -439,6 +444,7 @@ typedef struct Fiber {
   FiberState state;
   int64_t wake_at;
   int poll_fd;
+  int poll_events;
   SzQueue *qwait;
   SzDeferred *dwait;
   struct Fiber *parent;
@@ -1029,15 +1035,15 @@ static int step_fiber(Sched *s, Fiber *f) {
   case SZ_IO_POLL_FD: {
     struct pollfd pfd;
     int n;
-    pfd.fd = cur->as.poll_fd;
-    pfd.events = POLLIN;
+    pfd.fd = cur->as.poll.fd;
+    pfd.events = (short)cur->as.poll.events;
     pfd.revents = 0;
     n = poll(&pfd, 1, 0);
     if (n < 0 && errno != EINTR) {
       fiber_fail(s, f, sz_error_new(6, "poll failed"));
       return 0;
     }
-    if (n > 0 && (pfd.revents & (POLLERR | POLLNVAL))) {
+    if (n > 0 && (pfd.revents & POLLNVAL)) {
       fiber_fail(s, f, sz_error_new(6, "poll failed"));
       return 0;
     }
@@ -1046,7 +1052,8 @@ static int step_fiber(Sched *s, Fiber *f) {
       ready_enqueue(s, f);
       return 0;
     }
-    f->poll_fd = cur->as.poll_fd;
+    f->poll_fd = cur->as.poll.fd;
+    f->poll_events = cur->as.poll.events;
     f->state = FIB_POLL;
     f->cur = NULL;
     poller_add(s, f);
@@ -1101,7 +1108,7 @@ static int fill_pollfds(Sched *s, struct pollfd *pfds, Fiber **fibs, int cap) {
   int n = 0;
   while (f && n < cap) {
     pfds[n].fd = f->poll_fd;
-    pfds[n].events = POLLIN;
+    pfds[n].events = (short)(f->poll_events ? f->poll_events : POLLIN);
     pfds[n].revents = 0;
     fibs[n] = f;
     n++;
@@ -1122,7 +1129,7 @@ static int wake_pollers(Sched *s, struct pollfd *pfds, Fiber **fibs, int n) {
     if (!rev)
       continue;
     poller_remove(s, f);
-    if (rev & (POLLERR | POLLNVAL)) {
+    if (rev & POLLNVAL) {
       fiber_fail(s, f, sz_error_new(6, "poll failed"));
     } else {
       f->cur = sz_io_pure(NULL);

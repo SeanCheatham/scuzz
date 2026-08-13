@@ -714,6 +714,21 @@ int main(void) {
     assert(ret && strstr((char *)ret, "ok:/x") != NULL);
   }
 
+  /* Live httpGet parks on connect/read; serve peer answers without a client thread. */
+  {
+    int port = 18476;
+    char url[64];
+    SzPair *pair;
+    snprintf(url, sizeof url, "http://127.0.0.1:%d/x", port);
+    r = sz_io_unsafe_run(sz_io_both(
+        sz_net_serve_once(port, serve_path_ok, NULL),
+        sz_net_http_get(sz_string_from_cstr(url))));
+    assert(r.ok);
+    pair = (SzPair *)r.value;
+    assert(pair && pair->right);
+    assert(strcmp(sz_string_cstr((SzString *)pair->right), "ok:/x") == 0);
+  }
+
   /* Alloc accounting: live_count returns to baseline after free. */
   {
     size_t base_bytes = 0, base_count = 0;

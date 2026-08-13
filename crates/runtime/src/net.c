@@ -34,6 +34,13 @@ static SzIo *unwrap_net(void *value, void *env) {
   return sz_io_pure(r->as.ok);
 }
 
+static int set_nonblock(int fd) {
+  int fl = fcntl(fd, F_GETFL, 0);
+  if (fl < 0)
+    return -1;
+  return fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+}
+
 static int parse_http_url(const char *url, char *host, size_t host_sz, char *path,
                           size_t path_sz, int *port) {
   const char *p;
@@ -69,101 +76,245 @@ static int parse_http_url(const char *url, char *host, size_t host_sz, char *pat
   return 1;
 }
 
-static void *net_http_get_live(void *env) {
-  SzString *url_s = (SzString *)env;
-  NetResult *r = (NetResult *)sz_alloc(sizeof(NetResult));
-  const char *url = sz_string_cstr(url_s);
+typedef struct GetSt {
+  SzString *url;
+  int fd;
   char host[256];
   char path[1024];
-  int port = 80;
+  char *req;
+  size_t req_len;
+  size_t req_off;
+  char *acc;
+  size_t total;
+} GetSt;
+
+static void get_free(GetSt *st) {
+  if (!st)
+    return;
+  if (st->fd >= 0) {
+    close(st->fd);
+    st->fd = -1;
+  }
+  sz_free(st->req);
+  sz_free(st->acc);
+  sz_free(st);
+}
+
+static void *get_connect(void *env) {
+  GetSt *st = (GetSt *)env;
+  NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
+  const char *url = sz_string_cstr(st->url);
   struct addrinfo hints;
   struct addrinfo *res = NULL;
-  int fd = -1;
   char port_str[16];
+  int port = 80;
+  int fd = -1;
   char req[2048];
-  char buf[4096];
-  size_t total = 0;
-  char *acc = NULL;
-  ssize_t n;
-  char *body;
+  size_t nreq;
 
-  if (!parse_http_url(url, host, sizeof host, path, sizeof path, &port)) {
+  if (!parse_http_url(url, st->host, sizeof st->host, st->path, sizeof st->path,
+                      &port)) {
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.httpGet: only http:// URLs supported");
     return r;
   }
-
   memset(&hints, 0, sizeof hints);
   hints.ai_socktype = SOCK_STREAM;
   hints.ai_family = AF_UNSPEC;
   snprintf(port_str, sizeof port_str, "%d", port);
-  if (getaddrinfo(host, port_str, &hints, &res) != 0 || !res) {
+  if (getaddrinfo(st->host, port_str, &hints, &res) != 0 || !res) {
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.httpGet: DNS failed");
     return r;
   }
   fd = socket(res->ai_family, res->ai_socktype, res->ai_protocol);
-  if (fd < 0 || connect(fd, res->ai_addr, res->ai_addrlen) != 0) {
+  if (fd < 0 || set_nonblock(fd) != 0) {
     if (fd >= 0)
       close(fd);
+    freeaddrinfo(res);
+    r->is_err = 1;
+    r->as.err = sz_error_new(6, "Net.httpGet: socket failed");
+    return r;
+  }
+  if (connect(fd, res->ai_addr, res->ai_addrlen) != 0 &&
+      errno != EINPROGRESS && errno != EAGAIN) {
+    close(fd);
     freeaddrinfo(res);
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.httpGet: connect failed");
     return r;
   }
   freeaddrinfo(res);
+  st->fd = fd;
+  nreq = (size_t)snprintf(req, sizeof req,
+                          "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n",
+                          st->path, st->host);
+  if (nreq >= sizeof req)
+    nreq = sizeof req - 1;
+  st->req = (char *)sz_alloc(nreq + 1);
+  memcpy(st->req, req, nreq + 1);
+  st->req_len = nreq;
+  st->req_off = 0;
+  st->acc = (char *)sz_alloc(1);
+  st->acc[0] = '\0';
+  st->total = 0;
+  r->is_err = 0;
+  return r;
+}
 
-  snprintf(req, sizeof req,
-           "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n", path,
-           host);
-  if (write(fd, req, strlen(req)) < 0) {
-    close(fd);
+static void *get_check_write(void *env) {
+  GetSt *st = (GetSt *)env;
+  NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
+  int so = 0;
+  socklen_t sl = sizeof so;
+  ssize_t n;
+
+  if (getsockopt(st->fd, SOL_SOCKET, SO_ERROR, &so, &sl) != 0 || so != 0) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(6, "Net.httpGet: connect failed");
+    return r;
+  }
+  n = write(st->fd, st->req + st->req_off, st->req_len - st->req_off);
+  if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+    r->retry = 1;
+    return r;
+  }
+  if (n <= 0) {
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.httpGet: write failed");
     return r;
   }
+  st->req_off += (size_t)n;
+  if (st->req_off < st->req_len)
+    r->retry = 1;
+  return r;
+}
 
-  acc = (char *)sz_alloc(1);
-  acc[0] = '\0';
-  while ((n = read(fd, buf, sizeof buf)) > 0) {
-    char *nacc = (char *)sz_alloc(total + (size_t)n + 1);
-    if (total)
-      memcpy(nacc, acc, total);
-    memcpy(nacc + total, buf, (size_t)n);
-    total += (size_t)n;
-    nacc[total] = '\0';
-    sz_free(acc);
-    acc = nacc;
+static void *get_read(void *env) {
+  GetSt *st = (GetSt *)env;
+  NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
+  char buf[4096];
+  ssize_t n;
+  char *body;
+
+  n = read(st->fd, buf, sizeof buf);
+  if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+    r->retry = 1;
+    return r;
   }
-  close(fd);
-
-  body = strstr(acc, "\r\n\r\n");
+  if (n < 0) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(6, "Net.httpGet: read failed");
+    return r;
+  }
+  if (n > 0) {
+    char *nacc = (char *)sz_alloc(st->total + (size_t)n + 1);
+    if (st->total)
+      memcpy(nacc, st->acc, st->total);
+    memcpy(nacc + st->total, buf, (size_t)n);
+    st->total += (size_t)n;
+    nacc[st->total] = '\0';
+    sz_free(st->acc);
+    st->acc = nacc;
+    r->retry = 1;
+    return r;
+  }
+  body = strstr(st->acc ? st->acc : "", "\r\n\r\n");
   if (!body) {
-    sz_free(acc);
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.httpGet: malformed response");
     return r;
   }
-  body += 4;
   r->is_err = 0;
-  r->as.ok = sz_string_from_cstr(body);
-  sz_free(acc);
+  r->as.ok = sz_string_from_cstr(body + 4);
   return r;
 }
 
+static SzIo *get_poll_write(void *value, void *env);
+static SzIo *get_poll_read(void *value, void *env);
+
+static SzIo *get_unwrap_write(void *value, void *env) {
+  GetSt *st = (GetSt *)env;
+  NetResult *r = (NetResult *)value;
+  if (r && r->retry) {
+    sz_free(r);
+    return get_poll_write(NULL, st);
+  }
+  return unwrap_net(value, NULL);
+}
+
+static SzIo *get_unwrap_read(void *value, void *env) {
+  GetSt *st = (GetSt *)env;
+  NetResult *r = (NetResult *)value;
+  if (r && r->retry) {
+    sz_free(r);
+    return get_poll_read(NULL, st);
+  }
+  return unwrap_net(value, NULL);
+}
+
+static SzIo *get_after_write_poll(void *value, void *env) {
+  GetSt *st = (GetSt *)env;
+  (void)value;
+  return sz_io_flatmap(sz_io_delay(get_check_write, st), get_unwrap_write, st);
+}
+
+static SzIo *get_poll_write(void *value, void *env) {
+  GetSt *st = (GetSt *)env;
+  (void)value;
+  return sz_io_flatmap(sz_io_poll_writable(st->fd), get_after_write_poll, st);
+}
+
+static SzIo *get_after_read_poll(void *value, void *env) {
+  GetSt *st = (GetSt *)env;
+  (void)value;
+  return sz_io_flatmap(sz_io_delay(get_read, st), get_unwrap_read, st);
+}
+
+static SzIo *get_poll_read(void *value, void *env) {
+  GetSt *st = (GetSt *)env;
+  (void)value;
+  return sz_io_flatmap(sz_io_poll_readable(st->fd), get_after_read_poll, st);
+}
+
+static SzIo *get_finish(void *body, void *env) {
+  get_free((GetSt *)env);
+  return sz_io_pure(body);
+}
+
+static SzIo *get_on_err(SzError *err, void *env) {
+  get_free((GetSt *)env);
+  return sz_io_fail(err);
+}
+
+static SzIo *get_after_connect(void *value, void *env) {
+  GetSt *st = (GetSt *)env;
+  SzIo *io;
+  (void)value;
+  io = get_poll_write(NULL, st);
+  io = sz_io_flatmap(io, get_poll_read, st);
+  return sz_io_flatmap(io, get_finish, st);
+}
+
 SzIo *sz_net_http_get(SzString *url) {
+  GetSt *st;
+  SzIo *io;
   if (!url)
     sz_panic("sz_net_http_get(null)");
   if (sz_testrt_net_is_fake())
     return sz_testrt_net_http_get(url);
-  return sz_io_flatmap(sz_io_delay(net_http_get_live, url), unwrap_net, NULL);
+  st = (GetSt *)sz_alloc_zero(sizeof(GetSt));
+  st->url = url;
+  st->fd = -1;
+  io = sz_io_flatmap(sz_io_delay(get_connect, st), unwrap_net, NULL);
+  io = sz_io_flatmap(io, get_after_connect, st);
+  return sz_io_handle_error_with(io, get_on_err, st);
 }
 
-/* HTTP/1.0 GET server. Listen is nonblocking; the fiber parks on poll until a
- * client is ready so other IO can run. Connection read/write still block.
- * TestRuntime injects paths and skips sockets. Error code 6.
- * serveOnce is one request; serve keeps the listen socket (n<=0 forever live,
- * or until the TestRuntime queue is empty). */
+/* HTTP/1.0 GET server. Listen and connection fds are nonblocking; the fiber
+ * parks on poll so other IO can run. TestRuntime injects paths and skips
+ * sockets. Error code 6. serveOnce is one request; serve keeps the listen
+ * socket (n<=0 forever live, or until the TestRuntime queue is empty). */
 
 typedef struct ServeSt {
   int64_t port;
@@ -173,6 +324,9 @@ typedef struct ServeSt {
   SzCont handler;
   void *henv;
   void *body;
+  char rbuf[4096];
+  size_t rlen;
+  size_t woff;
 } ServeSt;
 
 static void serve_close_conn(ServeSt *st) {
@@ -199,20 +353,6 @@ static void serve_free(ServeSt *st) {
     return;
   serve_close_fds(st);
   sz_free(st);
-}
-
-static int set_nonblock(int fd) {
-  int fl = fcntl(fd, F_GETFL, 0);
-  if (fl < 0)
-    return -1;
-  return fcntl(fd, F_SETFL, fl | O_NONBLOCK);
-}
-
-static int set_block(int fd) {
-  int fl = fcntl(fd, F_GETFL, 0);
-  if (fl < 0)
-    return -1;
-  return fcntl(fd, F_SETFL, fl & ~O_NONBLOCK);
 }
 
 static int parse_get_path(const char *req, char *path, size_t path_sz) {
@@ -280,17 +420,15 @@ static void *serve_ensure_listen(void *env) {
   return r;
 }
 
-static void *serve_accept_read(void *env) {
+static void *serve_accept(void *env) {
   ServeSt *st = (ServeSt *)env;
   NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
   int fd;
   int conn = -1;
-  char buf[4096];
-  size_t total = 0;
-  ssize_t n;
-  char path[1024];
 
   st->conn_fd = -1;
+  st->rlen = 0;
+  st->woff = 0;
 
   /* Chosen at step time so SCUZZ_TESTRT=1 install in runtime_main is visible. */
   if (sz_testrt_net_is_fake()) {
@@ -316,20 +454,45 @@ static void *serve_accept_read(void *env) {
     r->as.err = sz_error_new(6, "Net.serve: accept failed");
     return r;
   }
-  set_block(conn);
-  st->conn_fd = conn;
-
-  while (total + 1 < sizeof buf) {
-    n = read(conn, buf + total, sizeof buf - 1 - total);
-    if (n <= 0)
-      break;
-    total += (size_t)n;
-    buf[total] = '\0';
-    if (strstr(buf, "\r\n\r\n"))
-      break;
+  if (set_nonblock(conn) != 0) {
+    close(conn);
+    r->is_err = 1;
+    r->as.err = sz_error_new(6, "Net.serve: accept failed");
+    return r;
   }
-  buf[total] = '\0';
-  if (!parse_get_path(buf, path, sizeof path)) {
+  st->conn_fd = conn;
+  r->is_err = 0;
+  return r;
+}
+
+static void *serve_read_req(void *env) {
+  ServeSt *st = (ServeSt *)env;
+  NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
+  ssize_t n;
+  char path[1024];
+
+  n = read(st->conn_fd, st->rbuf + st->rlen, sizeof st->rbuf - 1 - st->rlen);
+  if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+    r->retry = 1;
+    return r;
+  }
+  if (n <= 0) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(6, "Net.serve: expected HTTP GET");
+    return r;
+  }
+  st->rlen += (size_t)n;
+  st->rbuf[st->rlen] = '\0';
+  if (!strstr(st->rbuf, "\r\n\r\n")) {
+    if (st->rlen + 1 >= sizeof st->rbuf) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.serve: expected HTTP GET");
+      return r;
+    }
+    r->retry = 1;
+    return r;
+  }
+  if (!parse_get_path(st->rbuf, path, sizeof path)) {
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.serve: expected HTTP GET");
     return r;
@@ -341,12 +504,17 @@ static void *serve_accept_read(void *env) {
 
 static void *serve_write_close(void *env) {
   ServeSt *st = (ServeSt *)env;
-  NetResult *r = (NetResult *)sz_alloc(sizeof(NetResult));
+  NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
   SzString *body = (SzString *)st->body;
   const char *data = body ? sz_string_cstr(body) : "";
   size_t len = body ? (size_t)sz_string_len(body) : 0;
   char hdr[160];
   int hn;
+  size_t total;
+  ssize_t n;
+  const char *src;
+  size_t src_off;
+  size_t src_len;
 
   if (sz_testrt_net_is_fake()) {
     sz_testrt_net_set_last_serve_body(data);
@@ -358,10 +526,34 @@ static void *serve_write_close(void *env) {
   hn = snprintf(hdr, sizeof hdr,
                 "HTTP/1.0 200 OK\r\nContent-Length: %zu\r\nConnection: close\r\n\r\n",
                 len);
-  if (hn < 0 || st->conn_fd < 0 || write(st->conn_fd, hdr, (size_t)hn) < 0 ||
-      (len > 0 && write(st->conn_fd, data, len) < 0)) {
+  if (hn < 0 || st->conn_fd < 0) {
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.serve: write failed");
+    return r;
+  }
+  total = (size_t)hn + len;
+  if (st->woff < (size_t)hn) {
+    src = hdr;
+    src_off = st->woff;
+    src_len = (size_t)hn;
+  } else {
+    src = data;
+    src_off = st->woff - (size_t)hn;
+    src_len = len;
+  }
+  n = write(st->conn_fd, src + src_off, src_len - src_off);
+  if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+    r->retry = 1;
+    return r;
+  }
+  if (n < 0) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(6, "Net.serve: write failed");
+    return r;
+  }
+  st->woff += (size_t)n;
+  if (st->woff < total) {
+    r->retry = 1;
     return r;
   }
   serve_close_conn(st);
@@ -373,8 +565,10 @@ static void *serve_write_close(void *env) {
 static SzIo *serve_round(ServeSt *st);
 
 static SzIo *serve_poll_then_accept(void *value, void *env);
+static SzIo *serve_poll_conn_read(void *value, void *env);
+static SzIo *serve_poll_conn_write(void *value, void *env);
 
-static SzIo *serve_unwrap_or_repoll(void *value, void *env) {
+static SzIo *serve_unwrap_accept(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
   NetResult *r = (NetResult *)value;
   if (r && r->retry) {
@@ -384,25 +578,73 @@ static SzIo *serve_unwrap_or_repoll(void *value, void *env) {
   return unwrap_net(value, NULL);
 }
 
-static SzIo *serve_after_poll(void *value, void *env) {
+static SzIo *serve_unwrap_read(void *value, void *env) {
+  ServeSt *st = (ServeSt *)env;
+  NetResult *r = (NetResult *)value;
+  if (r && r->retry) {
+    sz_free(r);
+    return serve_poll_conn_read(NULL, st);
+  }
+  return unwrap_net(value, NULL);
+}
+
+static SzIo *serve_unwrap_write(void *value, void *env) {
+  ServeSt *st = (ServeSt *)env;
+  NetResult *r = (NetResult *)value;
+  if (r && r->retry) {
+    sz_free(r);
+    return serve_poll_conn_write(NULL, st);
+  }
+  return unwrap_net(value, NULL);
+}
+
+static SzIo *serve_after_accept_poll(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
   (void)value;
-  return sz_io_flatmap(sz_io_delay(serve_accept_read, st), serve_unwrap_or_repoll,
-                       st);
+  return sz_io_flatmap(sz_io_delay(serve_accept, st), serve_unwrap_accept, st);
 }
 
 static SzIo *serve_poll_then_accept(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
   (void)value;
-  return sz_io_flatmap(sz_io_poll_readable(st->listen_fd), serve_after_poll, st);
+  return sz_io_flatmap(sz_io_poll_readable(st->listen_fd), serve_after_accept_poll,
+                       st);
+}
+
+static SzIo *serve_after_conn_read_poll(void *value, void *env) {
+  ServeSt *st = (ServeSt *)env;
+  (void)value;
+  return sz_io_flatmap(sz_io_delay(serve_read_req, st), serve_unwrap_read, st);
+}
+
+static SzIo *serve_poll_conn_read(void *value, void *env) {
+  ServeSt *st = (ServeSt *)env;
+  (void)value;
+  return sz_io_flatmap(sz_io_poll_readable(st->conn_fd), serve_after_conn_read_poll,
+                       st);
+}
+
+static SzIo *serve_after_conn_write_poll(void *value, void *env) {
+  ServeSt *st = (ServeSt *)env;
+  (void)value;
+  return sz_io_flatmap(sz_io_delay(serve_write_close, st), serve_unwrap_write, st);
+}
+
+static SzIo *serve_poll_conn_write(void *value, void *env) {
+  ServeSt *st = (ServeSt *)env;
+  (void)value;
+  return sz_io_flatmap(sz_io_poll_writable(st->conn_fd), serve_after_conn_write_poll,
+                       st);
 }
 
 static SzIo *serve_after_listen(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
+  SzIo *io;
   (void)value;
   if (sz_testrt_net_is_fake())
-    return sz_io_flatmap(sz_io_delay(serve_accept_read, st), unwrap_net, NULL);
-  return serve_poll_then_accept(NULL, st);
+    return sz_io_flatmap(sz_io_delay(serve_accept, st), unwrap_net, NULL);
+  io = serve_poll_then_accept(NULL, st);
+  return sz_io_flatmap(io, serve_poll_conn_read, st);
 }
 
 static SzIo *serve_after_write(void *value, void *env) {
@@ -425,7 +667,10 @@ static SzIo *serve_after_write(void *value, void *env) {
 static SzIo *serve_after_body(void *body, void *env) {
   ServeSt *st = (ServeSt *)env;
   st->body = body;
-  return sz_io_flatmap(sz_io_delay(serve_write_close, st), unwrap_net, NULL);
+  st->woff = 0;
+  if (sz_testrt_net_is_fake())
+    return sz_io_flatmap(sz_io_delay(serve_write_close, st), unwrap_net, NULL);
+  return serve_poll_conn_write(NULL, st);
 }
 
 static SzIo *serve_after_path(void *path, void *env) {
@@ -441,12 +686,8 @@ static SzIo *serve_round(ServeSt *st) {
     serve_free(st);
     return sz_io_pure(NULL);
   }
-  if (sz_testrt_net_is_fake())
-    prog = sz_io_flatmap(sz_io_delay(serve_accept_read, st), unwrap_net, NULL);
-  else {
-    prog = sz_io_flatmap(sz_io_delay(serve_ensure_listen, st), unwrap_net, NULL);
-    prog = sz_io_flatmap(prog, serve_after_listen, st);
-  }
+  prog = sz_io_flatmap(sz_io_delay(serve_ensure_listen, st), unwrap_net, NULL);
+  prog = sz_io_flatmap(prog, serve_after_listen, st);
   prog = sz_io_flatmap(prog, serve_after_path, st);
   return sz_io_flatmap(prog, serve_after_write, st);
 }

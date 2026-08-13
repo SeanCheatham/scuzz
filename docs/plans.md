@@ -2,4 +2,4 @@
 
 ## Next
 
-**Poll Net connection I/O.** HUMANS Headless + stamp-watch + live dump + live inject + `Net.serve` listen poll are in. Accepted connection read/write and `httpGet` still block the fiber. Still not Flutter VM patching.
+**Poll Sys.readLine.** HUMANS Headless + stamp-watch + live dump + live inject + Net listen/conn/`httpGet` poll are in. DNS `getaddrinfo` and stdin `readLine` still block the fiber. Still not Flutter VM patching.
