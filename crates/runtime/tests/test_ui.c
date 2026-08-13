@@ -594,6 +594,51 @@ static void test_session_inject_backspace(void) {
   remove(path);
 }
 
+static void test_session_inject_type(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *field;
+  SzSignalStr *draft;
+  const char *path = "/tmp/scuzz_ui_inject_type.script";
+
+  remove(path);
+  draft = sz_signal_str("");
+  root = sz_view_column();
+  field = sz_view_text_field(draft, "item");
+  sz_view_add_child(root, field);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_inject(session, path));
+  assert(sz_ui_pump_sync(session));
+
+  write_stamp(path, "text hi\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "hi") == 0);
+
+  write_stamp(path, "type !\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "hi!") == 0);
+
+  write_stamp(path, "type\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "hi!") == 0);
+
+  write_stamp(path, "text ab\ntype c\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "abc") == 0);
+
+  sz_ui_unmount(session);
+  sz_signal_str_free(draft);
+  remove(path);
+}
+
 typedef struct {
   SzSignalInt *sig;
   int64_t value;
@@ -1496,6 +1541,7 @@ int main(void) {
   test_session_inject_script();
   test_session_inject_scroll();
   test_session_inject_backspace();
+  test_session_inject_type();
   test_button_set_and_show_when();
   test_widgets();
   test_expanded_column();

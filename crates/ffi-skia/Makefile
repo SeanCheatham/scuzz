@@ -37,6 +37,7 @@ build/%.o: src/%.c include/sk_capi.h src/png_enc.h | build
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
 lib-sk-sw: $(OBJ) | build
+	rm -f build/libsk_capi.a
 	ar rcs build/libsk_capi.a $(OBJ)
 	echo sk_sw > build/sk_capi_backend
 

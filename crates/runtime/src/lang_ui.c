@@ -228,6 +228,17 @@ static void script_backspace(SzUiSession *session, int n) {
   }
 }
 
+static void script_type(SzUiSession *session, const char *text) {
+  SzInputEvent ev;
+  if (!text || !text[0])
+    return;
+  memset(&ev, 0, sizeof ev);
+  ev.kind = SZ_INPUT_TEXT_EDIT;
+  ev.text = text;
+  if (!sz_ui_inject_sync(session, &ev))
+    fprintf(stderr, "scuzz: script type skipped (no text field)\n");
+}
+
 static void scripted_button_tap(SzUiSession *session, int prefer_upper) {
   SzInputEvent tap;
   SzView *hit_btn = NULL;
@@ -272,7 +283,8 @@ static void scripted_button_tap(SzUiSession *session, int prefer_upper) {
 /* --- SCUZZ_UI_SCRIPT playback (fuzz / replay) ---------------------------- */
 /* Line protocol, one event per line, delivered across pump boundaries:
      tap <n>    tap the nth button (scan order); missing target is a no-op
-     text <s>   deliver <s> to the focused/first TextField; no field is a no-op
+     text <s>   replace the focused/first TextField with <s>; no field is a no-op
+     type <s>   append <s> to the focused/first TextField; empty is a no-op; no field is a no-op
      pump <k>   pump k extra frames
      scroll <dy> pan the first Scroll (positive = content up); no scroll is a no-op
      backspace <n> chop n bytes from the focused/first TextField (default 1); no field is a no-op
@@ -349,6 +361,8 @@ static void run_ui_script(SzUiSession *session, const char *path) {
     } else if (strncmp(line, "backspace ", 10) == 0 ||
                strcmp(line, "backspace") == 0) {
       script_backspace(session, len > 9 ? atoi(line + 10) : 1);
+    } else if (strncmp(line, "type ", 5) == 0 || strcmp(line, "type") == 0) {
+      script_type(session, len > 4 ? line + 5 : "");
     } else {
       fclose(f);
       sz_panic("Ui.run: unknown SCUZZ_UI_SCRIPT directive");

@@ -497,6 +497,17 @@ static void script_backspace(SzUiSession *session, int n) {
   }
 }
 
+static void script_type(SzUiSession *session, const char *text) {
+  SzInputEvent ev;
+  if (!text || !text[0])
+    return;
+  memset(&ev, 0, sizeof ev);
+  ev.kind = SZ_INPUT_TEXT_EDIT;
+  ev.text = text;
+  if (!sz_ui_inject_sync(session, &ev))
+    fprintf(stderr, "scuzz: script type skipped (no text field)\n");
+}
+
 static void script_tap(SzUiSession *session, int n) {
   SzView *buttons[64];
   int count = collect_buttons(session, buttons, 64);
@@ -559,6 +570,8 @@ static void play_script_line(SzUiSession *session, char *line) {
     script_scroll(session, len > 6 ? (float)atoi(line + 7) : 40.f);
   else if (strncmp(line, "backspace ", 10) == 0 || strcmp(line, "backspace") == 0)
     script_backspace(session, len > 9 ? atoi(line + 10) : 1);
+  else if (strncmp(line, "type ", 5) == 0 || strcmp(line, "type") == 0)
+    script_type(session, len > 4 ? line + 5 : "");
   else
     sz_panic("Ui.run: unknown SCUZZ_UI_SCRIPT directive");
   if (!sz_ui_pump_sync(session))

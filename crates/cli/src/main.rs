@@ -13,7 +13,7 @@ use std::process::{Command, ExitCode};
     name = "scuzz",
     version,
     about = "Scuzz Lang — Stage-0 bootstrap CLI (release CLI is compiler-scuzz)",
-    after_help = "Examples:\n  scuzz check\n  scuzz check --message-format=json\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n\nJSON diagnostics are the check protocol (LSP wraps `scuzz check`).\n`watch` rebuilds. `run --watch` on [ui] keeps the process and stamp-reloads the View tree (not source hot reload). Live dump: build/debug.dump. Live inject: build/inject.script (tap/text/pump/scroll/backspace)."
+    after_help = "Examples:\n  scuzz check\n  scuzz check --message-format=json\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n\nJSON diagnostics are the check protocol (LSP wraps `scuzz check`).\n`watch` rebuilds. `run --watch` on [ui] keeps the process and stamp-reloads the View tree (not source hot reload). Live dump: build/debug.dump. Live inject: build/inject.script (tap/text/type/pump/scroll/backspace)."
 )]
 struct Cli {
     /// Diagnostic format: human (default) or json (`check` protocol; LSP wraps check)

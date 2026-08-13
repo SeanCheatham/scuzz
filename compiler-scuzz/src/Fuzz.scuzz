@@ -19,7 +19,7 @@ def letterAt(i: Int): String =
   Str.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1)
 
 def fuzzKindCount(hasText: Int, hasScroll: Int): Int =
-  3 + hasText + hasText + hasScroll
+  3 + hasText + hasText + hasText + hasScroll
 
 def fuzzTap(s: Int, nButtons: Int): List =
   pair(strcat("tap ", Str.fromInt(lcgBelow(s, maxOf(nButtons, 1)))), Str.fromInt(s))
@@ -27,11 +27,14 @@ def fuzzTap(s: Int, nButtons: Int): List =
 def fuzzPump(s: Int): List =
   pair(strcat("pump ", Str.fromInt(1 + lcgBelow(s, 3))), Str.fromInt(s))
 
-def fuzzWordAcc(s: Int, n: Int, acc: String): List =
-  if (n == 0) pair(strcat("text ", acc), Str.fromInt(s)) else fuzzWordAcc(lcgNext(s), n - 1, Str.concat(acc, letterAt(lcgBelow(s, 26))))
+def fuzzWordAcc(prefix: String, s: Int, n: Int, acc: String): List =
+  if (n == 0) pair(strcat(prefix, acc), Str.fromInt(s)) else fuzzWordAcc(prefix, lcgNext(s), n - 1, Str.concat(acc, letterAt(lcgBelow(s, 26))))
 
 def fuzzText(s: Int): List =
-  fuzzWordAcc(lcgNext(s), 1 + lcgBelow(s, 7), "")
+  fuzzWordAcc("text ", lcgNext(s), 1 + lcgBelow(s, 7), "")
+
+def fuzzType(s: Int): List =
+  fuzzWordAcc("type ", lcgNext(s), 1 + lcgBelow(s, 7), "")
 
 def fuzzScroll(s: Int): List =
   pair("scroll 40", Str.fromInt(s))
@@ -45,6 +48,9 @@ def fuzzScrollOrText(s: Int, hasScroll: Int): List =
 def fuzzBackspaceOrText(s: Int, hasText: Int): List =
   if (hasText == 1) fuzzBackspace(s) else fuzzText(s)
 
+def fuzzTypeOrText(s: Int, hasText: Int): List =
+  if (hasText == 1) fuzzType(s) else fuzzText(s)
+
 def fuzzEvent(s: Int, nButtons: Int, hasText: Int, hasScroll: Int): List =
   fuzzEventAt(lcgNext(s), nButtons, hasText, hasScroll)
 
@@ -52,7 +58,7 @@ def fuzzEventAt(s: Int, nButtons: Int, hasText: Int, hasScroll: Int): List =
   fuzzEventKind(s, lcgBelow(s, fuzzKindCount(hasText, hasScroll)), nButtons, hasScroll, hasText)
 
 def fuzzEventKind(s: Int, k: Int, nButtons: Int, hasScroll: Int, hasText: Int): List =
-  if (k <= 1) fuzzTap(lcgNext(s), nButtons) else if (k == 2) fuzzPump(lcgNext(s)) else if (k == 3) fuzzScrollOrText(lcgNext(s), hasScroll) else if (k == 4) fuzzBackspaceOrText(lcgNext(s), hasText) else fuzzText(lcgNext(s))
+  if (k <= 1) fuzzTap(lcgNext(s), nButtons) else if (k == 2) fuzzPump(lcgNext(s)) else if (k == 3) fuzzScrollOrText(lcgNext(s), hasScroll) else if (k == 4) fuzzBackspaceOrText(lcgNext(s), hasText) else if (k == 5) fuzzTypeOrText(lcgNext(s), hasText) else fuzzText(lcgNext(s))
 
 def fuzzScript(seed: Int, nButtons: Int, hasText: Int, hasScroll: Int): List =
   fuzzScriptLen(lcgNext(lcgSeed(seed)), nButtons, hasText, hasScroll)
@@ -139,7 +145,7 @@ def exhaustAlphabet(nButtons: Int, hasText: Int, hasScroll: Int): List =
   exhaustAlphabetFinish(exhaustAlphabetScroll(exhaustAlphabetText(exhaustTapAcc(0, nButtons, List.empty()), hasText), hasScroll))
 
 def exhaustAlphabetText(taps: List, hasText: Int): List =
-  if (hasText == 1) List.append(List.append(List.append(taps, "text"), "text a"), "backspace") else taps
+  if (hasText == 1) List.append(List.append(List.append(List.append(taps, "text"), "text a"), "backspace"), "type a") else taps
 
 def exhaustAlphabetScroll(base: List, hasScroll: Int): List =
   if (hasScroll == 1) List.append(base, "scroll 40") else base
