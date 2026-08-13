@@ -80,19 +80,19 @@ Dependency sources are merged into one program with the root (and any transitive
 
 ## Laws, sim, and impurity
 
-App correctness is **laws** searched by `scuzz fuzz`, with stem-paired overlays — not example-based unit tests (see [vision.md](vision.md#laws-simulation-and-verification)).
+App correctness prefers **mutation, fuzzing, property-oriented laws, simulation, and determinism** — all built into `scuzz` / the language, not classical unit tests (see [vision.md](vision.md#laws-simulation-mutation-and-verification)).
 
 ```text
 src/
   Todo.scuzz           # live module
-  Todo.scuzz_sim       # same-name defs replace live under fuzz / TestRuntime
+  Todo.scuzz_sim       # same-name defs replace live under fuzz / TestRuntime / mutation
   Todo.scuzz_laws      # pure laws over signals / a11y dump / module vals
 ```
 
 - Prefer sim overlays for app policy (API base URL, a `Backend` value); blessed kits stay one implementation with TestRuntime fakes on the wire
-- Laws are nullary pure `Bool`/`Int` defs; residual `Law.assert` runs only under `SCUZZ_TESTRT=1` (fuzz)
+- Laws are nullary pure `Bool`/`Int` defs; residual `Law.assert` runs only under `SCUZZ_TESTRT=1` (fuzz / mutation)
 - Observation builtins: `Law.signalInt(id)`, `Law.signalStr(id)`, `Law.signalListLen(id)`, `Law.signalListAt(id, i)`, `Law.a11yHas(needle)` (signal store + stashed a11y dump)
-- No `src/test` twin trees — only stem-paired `*.scuzz_sim` / `*.scuzz_laws`
+- No `src/test` twin trees — only stem-paired `*.scuzz_sim` / `*.scuzz_laws`; no third-party test or mutation frameworks
 - Example: `examples/counter` + `examples/shared` (`Shared.scuzz_sim` swaps `counterTitle`; `Main.scuzz_laws` checks count / mapped label / button / sim title)
 
 **Today:**
@@ -103,6 +103,7 @@ src/
 - `scuzz fuzz --iters N` searches event scripts × schedules (`[ui]`) or schedule seeds only (IO-only); `--exhaust --depth N` is `[ui]` event alphabet with FIFO schedule; `--replay repro.toml` restores events + optional `schedule_seed`; oracle is residual laws + panic/`SzError`
 - Deterministic fakes: `TestRuntime` / `SCUZZ_TESTRT=1` for clock/random/FS/network/console in app binaries
 - Put non-determinism behind blessed `IO`; keep View construction pure
+- Built-in mutation (law-strength gate) is direction — see [gaps.md](gaps.md); do not add external mutators
 
 ## Examples to read next
 

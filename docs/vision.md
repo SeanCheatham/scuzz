@@ -11,7 +11,7 @@ Edit this file when a decision or next-step ordering changes.
 - **Language**: purposeful Scala-inspired subset for native UI, CLI, server, and mobile apps, with **built-in effect/IO/Streaming** (ZIO-inspired, not a ZIO or cats/fs2 port). Aim: denser expr dialect (`for` as primary binder) — see [Language direction](#language-direction).
 - **Runtime**: custom native (LLVM). Native binaries, not a VM. No JVM, no Java interop, no classpath/Maven.
 - **UI**: a primary product path, not the only one (Dart-shaped: GUI is first-class; so are CLI and server). One design language + Skia, as a **`Ui` effect** with Headless/Window/Mobile interpreters. Headless is a product runtime (agents, CI), not a test-only shim.
-- **Tooling**: one CLI (`scuzz`) for compile, link, assets, watch, packaging, deterministic `scuzz fuzz` over module **laws** + **sim** overlays. Static hygiene is `scuzz check` (format-verify + typecheck; further lints emit here, no `lint` subcommand). `scuzz fmt` rewrites.
+- **Tooling**: one opinionated CLI (`scuzz`) — compile, link, assets, watch, packaging, format, check, and the whole verification stack. One formatter, one check surface, one testing strategy. Batteries-included: mutation, fuzzing, property/laws, simulation, and determinism are **first-class in the language and `scuzz`**, not a third-party harness sprawl. Static hygiene is `scuzz check` (format-verify + typecheck; further lints emit here, no `lint` subcommand). `scuzz fmt` rewrites.
 - **Bootstrap**: self-host is a hard goal. Stage-0 (Rust) exists only to get there.
 - **AI-Friendly**: Headless, hot reload, and debugging tools aid agents. Headless is a peer runtime; `watch` only rebuilds; `[ui] run --watch` stamp-reloads Views, writes `build/debug.dump`, and plays `build/inject.script`.
 
@@ -21,14 +21,14 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 
 | Topic | Choice |
 | --- | --- |
-| UI testing / CI | Laws via `scuzz fuzz` (primary); structural goldens as regression face; PNG optional via `--pixels` |
+| UI testing / CI | Laws via `scuzz fuzz` (primary); mutation as law-strength gate; structural goldens as regression face; PNG optional via `--pixels` |
 | Static hygiene | `scuzz check` (format-verify + typecheck; lints on this command; no `lint` subcommand). `scuzz fmt` rewrites |
 | Codegen | LLVM IR |
 | Renderer (v0) | Skia via thin C ABI; Impeller deferred |
 | Build tool | DIY Mill/Cargo-like: `scuzz` (not sbt/Maven) |
 | Effects | Language + runtime builtins |
 | Impurity | All nondeterminism / external I/O through blessed `IO`; no app-level `IO.delay` escape hatch |
-| Tests | Module **laws** + **sim** overlays; TestRuntime fakes for blessed kits; no app-level unit-test culture |
+| Tests | One built-in strategy: **mutation + fuzz + laws (property) + sim + determinism** (TestRuntime); no classical unit-test culture, no external test frameworks |
 | Modules | `scuzz.toml` package = crate; `Foo.scuzz` = module (not JVM packages) |
 | Self-host | Stage 0 → 1 → 2 on the critical path; **release ships Stage 2** |
 | UI model | Pure `View` + effectful `Ui` session (`mount` / `pump` / `inject` / `snapshot`) |
@@ -41,7 +41,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 - Not SwiftUI / UIKit / WinUI wrappers
 - Not “every widget rebuild is an `IO`” (`View` build stays sync/pure)
 - Not imperative View trees (`View.addChild`); nested constructors only
-- Not example-based unit-test culture (`src/test`, Mockito, assert-equal fixtures) for apps — **laws + fuzz + sim** instead
+- Not classical / example-based unit-test culture (`src/test`, Mockito, assert-equal fixtures, third-party test runners) for apps — **mutation + fuzz + laws + sim + determinism**, all in `scuzz`, instead
 - Not Flutter DevTools / VM patching. In-process reload, a live structural dump, and stamp-driven inject are in; `watch` only rebuilds.
 - Not an sbt / Gradle / `pubspec` plugin DSL (`scuzz.toml` is data)
 - Not Flutter platform channels
@@ -60,10 +60,11 @@ Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI / cargo package `scuz
 
 ### Tooling
 
-One CLI. One typer. No second analyze frontend, no `*.g.scuzz` codegen, no `src/test` runner.
+One CLI. One typer. One formatter. One check surface. One testing strategy. No second analyze frontend, no `*.g.scuzz` codegen, no `src/test` runner, no bolted-on mutation/fuzz/property ecosystems.
 
 - **Watch** rebuilds when sources or `scuzz.toml` change. It does not patch running machine code. `[ui]` `run --watch` stamp-swaps the View tree without resetting Signals (see [`guide.md`](guide.md)). Do not document `watch` as hot reload.
 - **Static hygiene** is `scuzz check`; `scuzz fmt` rewrites. No `lint` subcommand.
+- **Verification** is batteries-included in `scuzz` and the language (laws, sim overlays, deterministic TestRuntime, fuzz search, mutation) — not optional crates or Maven/npm test plugins.
 - **JSON diagnostics** (`scuzz check --message-format=json`) are the editor protocol. LSP, when added, wraps that — do not grow a second typer or schema.
 - **`scuzz.toml` is data** — package, path deps, `[ui]`. No plugin DSL, no `build.scuzz` hooks. Unknown keys rejected; do not add `[plugins]`.
 - **Fingerprint** (Stage 0 incremental): miss → rebuild. No `scuzz clean` ritual. Stage 2 rebuilds every compile today.
@@ -155,37 +156,38 @@ Scala **nouns**, Rust/Cargo **verbs** — without JVM packages or Rust `struct`/
 
 Direction: payload **enums** / **`record`** + thin **traits**-as-interfaces; monomorphize generics early. No classes (mutable identity), no `var`, no classpath packages. Path deps remain the unit of reuse. `private def` is module-local (default public). No `pub` yet. Details and examples: [`guide.md`](guide.md), keep/cut: [`compatibility.md`](compatibility.md).
 
-### Laws, simulation, and verification
+### Laws, simulation, mutation, and verification
 
-App correctness is **laws** searched by `scuzz fuzz`, not example-based unit tests. Authors declare properties; the toolchain typechecks them and residualizes checks for TestRuntime / fuzz.
+App correctness is **not** classical unit tests. Prefer **mutation, fuzzing, property-oriented laws, simulation, and determinism** — all first-class in the language and `scuzz` tooling. Authors declare properties (laws); the toolchain typechecks them, residualizes checks for TestRuntime / fuzz, and uses mutation to pressure those oracles.
 
 | Phase | Role |
 | --- | --- |
 | `scuzz check` | Format-verify `src/`; laws and sim overlays typecheck; laws are pure; sim bindings match live types/purity |
-| `scuzz build` (sim graph) | Layer `*.scuzz_sim` over live defs; emit residual law checks (armed under TestRuntime / fuzz only) |
+| `scuzz build` (sim graph) | Layer `*.scuzz_sim` over live defs; emit residual law checks (armed under TestRuntime / fuzz / mutation only) |
 | `scuzz fuzz` | Search event scripts / IO schedules for law violations → `repro.toml` |
+| Mutation (built-in) | Mutate program / residual surface; surviving mutants mean weak laws — first-class CLI, not an external mutator |
 | Later (optional) | Prove trivial law fragments statically; leave the rest as search |
 
-Direction beyond this (not current work): fuzz-verified `*.scuzz_tune` — [`optimization.md`](optimization.md).
+Direction beyond this (not current work): fuzz-verified `*.scuzz_tune` — [`optimization.md`](optimization.md). Mutation CLI surface: [`gaps.md`](gaps.md).
 
 **File convention (stem-paired, no attribute tags):**
 
 ```text
 src/
   Todo.scuzz              # live module
-  Todo.scuzz_sim          # same names replace live defs under sim / fuzz
+  Todo.scuzz_sim          # same names replace live defs under sim / fuzz / mutation
   Todo.scuzz_laws         # pure laws over signals / a11y dump / module vals
 ```
 
 - Live/`scuzz run` loads `*.scuzz` only.
-- Fuzz/test layers sim then arms laws. Rename drift fails `check`.
-- No free-floating `tests/` package roots.
+- Fuzz / mutation / test layers sim then arms laws. Rename drift fails `check`.
+- No free-floating `tests/` package roots; no third-party test or mutation frameworks.
 - Prefer swapping values you own via `*.scuzz_sim`; blessed kits stay one implementation + TestRuntime fakes. Do not stub pure helpers, `View` builders, or `Signal` cells.
 - Observation surface: signal store + View/a11y dump — not Skia pixels. Kernel/runtime keep ordinary example tests; laws are for **Scuzz apps**.
 
 ### Verification posture
 
-Keep purity checkable (pure `A` vs `IO` vs session), total expr core, signals as an explicit store, immutable data by default, errors as values. Defer dependent types and runtime-heap proofs — residual laws + fuzz first; static proof only where cheap.
+Keep purity checkable (pure `A` vs `IO` vs session), total expr core, signals as an explicit store, immutable data by default, errors as values. Defer dependent types and runtime-heap proofs — residual laws + fuzz + mutation first; static proof only where cheap.
 
 ### `scuzz fuzz`
 
@@ -197,7 +199,7 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ### UI testing
 
-**Laws + `scuzz fuzz`** are primary for `[ui]` apps. **Structural goldens** (Headless signal + a11y dumps) are a regression face — few, live graph, not a substitute for laws. PNG optional (`scuzz test --pixels`). IO packages: laws + sim under TestRuntime when present; otherwise compile + TESTRT exit-0 smoke.
+**Laws + `scuzz fuzz` + built-in mutation** are primary for `[ui]` apps. **Structural goldens** (Headless signal + a11y dumps) are a regression face — few, live graph, not a substitute for laws. PNG optional (`scuzz test --pixels`). IO packages: laws + sim under TestRuntime when present; otherwise compile + TESTRT exit-0 smoke.
 
 ## Open work
 
@@ -213,8 +215,9 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-onl
 | Self-host / dialect drift | Kernel section above; port compiler early; Stage 0/1/2 CI |
 | Effects too weak or too heavy | Builtin IO; pure `View`; `Ui` at session boundary |
 | Hidden nondeterminism | Closed impurity + TestRuntime + deterministic `*.scuzz_sim` |
-| Laws become brittle dump goldens | Laws talk to named module/signal surface; strict sim/live pairing in `check` |
+| Laws become brittle dump goldens | Laws talk to named module/signal surface; strict sim/live pairing in `check`; mutation kills weak oracles |
 | Sim becomes Mockito | Only top-level same-name overlays; no stubbing pure `View`/`Signal`; kits stay TestRuntime |
+| Verification tool sprawl | One `scuzz` strategy — mutation/fuzz/laws/sim/determinism in-tree; no external test frameworks |
 | “Almost Scala” confusion | Explicit non-goals; language direction above; [guide.md](guide.md) |
 | Watch sold as hot reload | `watch` rebuilds; `[ui]` `run --watch` stamp-reloads Views; no new machine code |
 | IDE typer ≠ batch typer | One JSON schema; LSP wraps `scuzz check` |
