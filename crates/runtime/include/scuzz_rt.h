@@ -314,7 +314,7 @@ SzList *sz_list_append(SzList *xs, void *x);
 void sz_list_free(SzList *xs);
 SzString *sz_list_join(const SzList *xs, const char *sep);
 
-/* Blessed filesystem IO (live or TestRuntime mem FS) */
+/* Blessed filesystem IO (live or TestRuntime mem FS; chosen when the IO runs) */
 SzIo *sz_fs_read(SzString *path);
 SzIo *sz_fs_write(SzString *path, SzString *contents);
 SzIo *sz_fs_list(SzString *path);

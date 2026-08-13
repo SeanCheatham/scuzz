@@ -2,4 +2,4 @@
 
 ## Next
 
-**Step-time TestRuntime Fs.** HUMANS Headless + stamp-watch + live dump + live inject + Net/`readLine`/`httpGet` DNS/`Sys.exec` poll are in. `Fs.*` still picks live vs mem-FS when the IO graph is built, before `sz_testrt_install`. Still not Flutter VM patching.
+**GPU presenters.** HUMANS Headless + stamp-watch + dump/inject + poll kits + step-time TestRuntime `Fs.*` are in. Only CPU raster exists (`sk_sw` / pinned Skia CPU). A second `sk_capi` backend must keep structural goldens; unused stubs do not close the proof. Device Mobile stays blocked on NDK/Xcode. Still not Flutter VM patching.

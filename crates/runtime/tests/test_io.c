@@ -505,6 +505,25 @@ int main(void) {
     assert(sz_string_len((SzString *)r.value) > 0);
   }
 
+  /* TestRuntime: Fs graph built before install still uses mem-FS. */
+  {
+    SzIo *w = sz_fs_write(sz_string_from_cstr("step/x.txt"),
+                          sz_string_from_cstr("step-mem"));
+    SzIo *rd = sz_fs_read(sz_string_from_cstr("step/x.txt"));
+    SzIo *ls = sz_fs_list(sz_string_from_cstr("step"));
+    sz_testrt_install();
+    r = sz_io_unsafe_run(w);
+    assert(r.ok);
+    r = sz_io_unsafe_run(rd);
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "step-mem") == 0);
+    r = sz_io_unsafe_run(ls);
+    assert(r.ok);
+    assert(!sz_list_is_empty((SzList *)r.value));
+    assert(access("step/x.txt", F_OK) != 0);
+    sz_testrt_reset();
+  }
+
   /* TestRuntime: fake clock sleep without wall wait */
   {
     int64_t t0, t1;

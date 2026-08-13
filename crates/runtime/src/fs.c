@@ -4,12 +4,15 @@
 
 #include <dirent.h>
 #include <errno.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
 
-/* Blessed filesystem IO — live interpreter or TestRuntime mem FS. */
+/* Blessed filesystem IO — live interpreter or TestRuntime mem FS.
+ * Fake vs live is chosen when the IO runs (after sz_testrt_install in
+ * runtime_main), not when the graph is built. */
 
 typedef struct {
   int is_err;
@@ -76,19 +79,32 @@ static void *fs_read_result(void *env) {
   return r;
 }
 
+static void *fs_dispatch(void *env) {
+  (void)env;
+  return (void *)(intptr_t)(sz_testrt_fs_is_fake() ? 1 : 0);
+}
+
+static SzIo *fs_after_read(void *value, void *env) {
+  if ((intptr_t)value)
+    return sz_testrt_fs_read((SzString *)env);
+  return sz_io_flatmap(sz_io_delay(fs_read_result, env), unwrap_fs, NULL);
+}
+
 SzIo *sz_fs_read(SzString *path) {
   if (!path)
     sz_panic("sz_fs_read(null)");
-  if (sz_testrt_fs_is_fake())
-    return sz_testrt_fs_read(path);
-  return sz_io_flatmap(sz_io_delay(fs_read_result, path), unwrap_fs, NULL);
+  return sz_io_flatmap(sz_io_delay(fs_dispatch, NULL), fs_after_read, path);
 }
 
 static void *fs_write_result(void *env) {
   FsWriteEnv *e = (FsWriteEnv *)env;
+  SzString *path = e->path;
+  SzString *contents = e->contents;
   FsResult *r = (FsResult *)sz_alloc(sizeof(FsResult));
-  const char *p = sz_string_cstr(e->path);
-  FILE *f = fopen(p, "wb");
+  const char *p = sz_string_cstr(path);
+  FILE *f;
+  sz_free(e);
+  f = fopen(p, "wb");
   if (!f) {
     char msg[512];
     snprintf(msg, sizeof(msg), "Fs.write: cannot open %s: %s", p, strerror(errno));
@@ -96,7 +112,7 @@ static void *fs_write_result(void *env) {
     r->as.err = sz_error_new(2, msg);
     return r;
   }
-  SzString *c = e->contents;
+  SzString *c = contents;
   if (c && c->len) {
     if (fwrite(c->data, 1, c->len, f) != c->len) {
       fclose(f);
@@ -111,15 +127,24 @@ static void *fs_write_result(void *env) {
   return r;
 }
 
+static SzIo *fs_after_write(void *value, void *env) {
+  FsWriteEnv *e = (FsWriteEnv *)env;
+  if ((intptr_t)value) {
+    SzIo *io = sz_testrt_fs_write(e->path, e->contents);
+    sz_free(e);
+    return io;
+  }
+  return sz_io_flatmap(sz_io_delay(fs_write_result, e), unwrap_fs, NULL);
+}
+
 SzIo *sz_fs_write(SzString *path, SzString *contents) {
+  FsWriteEnv *e;
   if (!path)
     sz_panic("sz_fs_write(null path)");
-  if (sz_testrt_fs_is_fake())
-    return sz_testrt_fs_write(path, contents);
-  FsWriteEnv *e = (FsWriteEnv *)sz_alloc(sizeof(FsWriteEnv));
+  e = (FsWriteEnv *)sz_alloc(sizeof(FsWriteEnv));
   e->path = path;
   e->contents = contents ? contents : sz_string_from_cstr("");
-  return sz_io_flatmap(sz_io_delay(fs_write_result, e), unwrap_fs, NULL);
+  return sz_io_flatmap(sz_io_delay(fs_dispatch, NULL), fs_after_write, e);
 }
 
 static void *fs_list_result(void *env) {
@@ -147,12 +172,16 @@ static void *fs_list_result(void *env) {
   return r;
 }
 
+static SzIo *fs_after_list(void *value, void *env) {
+  if ((intptr_t)value)
+    return sz_testrt_fs_list((SzString *)env);
+  return sz_io_flatmap(sz_io_delay(fs_list_result, env), unwrap_fs, NULL);
+}
+
 SzIo *sz_fs_list(SzString *path) {
   if (!path)
     sz_panic("sz_fs_list(null)");
-  if (sz_testrt_fs_is_fake())
-    return sz_testrt_fs_list(path);
-  return sz_io_flatmap(sz_io_delay(fs_list_result, path), unwrap_fs, NULL);
+  return sz_io_flatmap(sz_io_delay(fs_dispatch, NULL), fs_after_list, path);
 }
 
 static void *fs_mkdirs_result(void *env) {
@@ -192,12 +221,16 @@ static void *fs_mkdirs_result(void *env) {
   return r;
 }
 
+static SzIo *fs_after_mkdirs(void *value, void *env) {
+  if ((intptr_t)value)
+    return sz_testrt_fs_mkdirs((SzString *)env);
+  return sz_io_flatmap(sz_io_delay(fs_mkdirs_result, env), unwrap_fs, NULL);
+}
+
 SzIo *sz_fs_mkdirs(SzString *path) {
   if (!path)
     sz_panic("sz_fs_mkdirs(null)");
-  if (sz_testrt_fs_is_fake())
-    return sz_testrt_fs_mkdirs(path);
-  return sz_io_flatmap(sz_io_delay(fs_mkdirs_result, path), unwrap_fs, NULL);
+  return sz_io_flatmap(sz_io_delay(fs_dispatch, NULL), fs_after_mkdirs, path);
 }
 
 static void *fs_canonicalize_result(void *env) {
@@ -218,10 +251,15 @@ static void *fs_canonicalize_result(void *env) {
   return r;
 }
 
+static SzIo *fs_after_canonicalize(void *value, void *env) {
+  if ((intptr_t)value)
+    return sz_testrt_fs_canonicalize((SzString *)env);
+  return sz_io_flatmap(sz_io_delay(fs_canonicalize_result, env), unwrap_fs, NULL);
+}
+
 SzIo *sz_fs_canonicalize(SzString *path) {
   if (!path)
     sz_panic("sz_fs_canonicalize(null)");
-  if (sz_testrt_fs_is_fake())
-    return sz_testrt_fs_canonicalize(path);
-  return sz_io_flatmap(sz_io_delay(fs_canonicalize_result, path), unwrap_fs, NULL);
+  return sz_io_flatmap(sz_io_delay(fs_dispatch, NULL), fs_after_canonicalize,
+                       path);
 }
