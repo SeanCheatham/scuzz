@@ -141,6 +141,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare i64 @sz_law_signal_int(i64)").unwrap();
     writeln!(out, "declare ptr @sz_law_signal_str(i64)").unwrap();
     writeln!(out, "declare i64 @sz_law_signal_list_len(i64)").unwrap();
+    writeln!(out, "declare ptr @sz_law_signal_list_at(i64, i64)").unwrap();
     writeln!(out, "declare i64 @sz_law_a11y_has(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_law_assert(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_box_i64(i64)").unwrap();
@@ -2570,6 +2571,15 @@ fn emit_call(
             )
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Law.signalListAt" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_law_signal_list_at(i64 {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Law.a11yHas" => {
             writeln!(

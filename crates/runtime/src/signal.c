@@ -165,6 +165,30 @@ int64_t sz_law_signal_list_len(int64_t id) {
   return 0;
 }
 
+SzString *sz_law_signal_list_at(int64_t id, int64_t index) {
+  SigReg *r;
+  const SzList *p;
+  int64_t i;
+  if (index < 0)
+    return sz_string_from_cstr("");
+  for (r = g_sig_head; r; r = r->next) {
+    if (r->id == (int)id && r->kind == SIG_LIST) {
+      p = sz_signal_list_get((const SzSignalList *)r->sig);
+      i = 0;
+      while (p) {
+        if (i == index) {
+          SzString *h = (SzString *)p->head;
+          return sz_string_from_cstr(h ? sz_string_cstr(h) : "");
+        }
+        p = p->tail;
+        i++;
+      }
+      return sz_string_from_cstr("");
+    }
+  }
+  return sz_string_from_cstr("");
+}
+
 SzSignalInt *sz_signal_int(int64_t initial) {
   SzSignalInt *s = (SzSignalInt *)sz_alloc(sizeof(SzSignalInt));
   s->value = initial;

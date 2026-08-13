@@ -1,6 +1,9 @@
 def listLenNonNeg(): Bool =
   Law.signalListLen(1) >= 0
 
+def itemPastEndEmpty(): Bool =
+  Str.len(Law.signalListAt(1, Law.signalListLen(1))) == 0
+
 def draftNonNeg(): Bool =
   Str.len(Law.signalStr(0)) >= 0
 

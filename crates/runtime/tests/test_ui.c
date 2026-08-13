@@ -1240,6 +1240,40 @@ static void test_law_signal_list_len(void) {
   sz_signal_list_free(items);
 }
 
+static void test_law_signal_list_at(void) {
+  SzSignalList *items;
+  SzList *xs;
+  SzString *got;
+  SzString *dump;
+  const char *s;
+  int id;
+
+  xs = sz_list_cons(sz_string_from_cstr("a"),
+                    sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
+  items = sz_signal_list(xs);
+  dump = sz_signal_dump();
+  s = strstr(sz_string_cstr(dump), "list[");
+  assert(s);
+  id = atoi(s + 5);
+  got = sz_law_signal_list_at(id, 0);
+  assert(strcmp(sz_string_cstr(got), "a") == 0);
+  sz_string_free(got);
+  got = sz_law_signal_list_at(id, 1);
+  assert(strcmp(sz_string_cstr(got), "b") == 0);
+  sz_string_free(got);
+  got = sz_law_signal_list_at(id, 2);
+  assert(strcmp(sz_string_cstr(got), "") == 0);
+  sz_string_free(got);
+  got = sz_law_signal_list_at(id, -1);
+  assert(strcmp(sz_string_cstr(got), "") == 0);
+  sz_string_free(got);
+  got = sz_law_signal_list_at(99999, 0);
+  assert(strcmp(sz_string_cstr(got), "") == 0);
+  sz_string_free(got);
+  sz_string_free(dump);
+  sz_signal_list_free(items);
+}
+
 static void test_law_signal_str(void) {
   SzSignalStr *draft;
   SzString *got;
@@ -1562,6 +1596,7 @@ int main(void) {
   test_view_each();
   test_signal_list_spine_collect();
   test_law_signal_list_len();
+  test_law_signal_list_at();
   test_law_signal_str();
   test_text_field_edit();
   test_caret_metrics();

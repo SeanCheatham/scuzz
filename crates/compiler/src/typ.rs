@@ -1467,6 +1467,12 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::Int)?;
             Ok(Type::Int)
         }
+        "Law.signalListAt" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(Type::String)
+        }
         "Law.a11yHas" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
@@ -3640,6 +3646,15 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Stream.take should typecheck");
+    }
+
+    #[test]
+    fn typechecks_law_signal_list_at() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Law.signalListAt(0, 0))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Law.signalListAt should typecheck");
     }
 
     #[test]

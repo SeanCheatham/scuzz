@@ -116,6 +116,7 @@ SzString *sz_signal_dump(void);
 int64_t sz_law_signal_int(int64_t id);
 SzString *sz_law_signal_str(int64_t id);
 int64_t sz_law_signal_list_len(int64_t id);
+SzString *sz_law_signal_list_at(int64_t id, int64_t index);
 
 /* --- declarative View tree ----------------------------------------------- */
 

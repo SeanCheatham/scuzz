@@ -91,7 +91,7 @@ src/
 
 - Prefer sim overlays for app policy (API base URL, a `Backend` value); blessed kits stay one implementation with TestRuntime fakes on the wire
 - Laws are nullary pure `Bool`/`Int` defs; residual `Law.assert` runs only under `SCUZZ_TESTRT=1` (fuzz)
-- Observation builtins: `Law.signalInt(id)`, `Law.signalStr(id)`, `Law.signalListLen(id)`, `Law.a11yHas(needle)` (signal store + stashed a11y dump)
+- Observation builtins: `Law.signalInt(id)`, `Law.signalStr(id)`, `Law.signalListLen(id)`, `Law.signalListAt(id, i)`, `Law.a11yHas(needle)` (signal store + stashed a11y dump)
 - No `src/test` twin trees — only stem-paired `*.scuzz_sim` / `*.scuzz_laws`
 - Example: `examples/counter` + `examples/shared` (`Shared.scuzz_sim` swaps `counterTitle`; `Main.scuzz_laws` checks count / mapped label / button / sim title)
 
