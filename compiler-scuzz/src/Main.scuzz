@@ -16,7 +16,7 @@ def helpTest(): String =
   "scuzz test [project] [--update] [--pixels] [--runtime-tests]\n\n[ui]: Headless structural goldens (seed on first run). IO: TESTRT exit-0 smoke.\n\nExamples:\n  scuzz test\n  scuzz test --update\n  scuzz test --pixels\n"
 
 def helpCheck(): String =
-  "scuzz check [project] [--message-format=human|json]\n\nTypecheck live + sim + laws. JSON is the editor protocol (LSP wraps check).\n\nExamples:\n  scuzz check\n  scuzz check --message-format=json\n"
+  "scuzz check [project] [--message-format=human|json]\n\nFormat-check src/, then typecheck live + sim + laws. JSON is the editor protocol (LSP wraps check).\n\nExamples:\n  scuzz check\n  scuzz check --message-format=json\n"
 
 def helpFuzz(): String =
   "scuzz fuzz [project] [--iters N] [--seed S] [--exhaust --depth N] [--replay FILE]\n\nSearch laws under TestRuntime. [ui]: event scripts × schedules; IO-only: schedules.\n--exhaust is [ui] event alphabet only (FIFO schedule).\n\nExamples:\n  scuzz fuzz --iters 16\n  scuzz fuzz --iters 16 examples/concurrency\n  scuzz fuzz --exhaust --depth 1\n  scuzz fuzz --replay build/fuzz/repro.toml\n"
@@ -78,18 +78,36 @@ def dispatchBuild(projectDir: String): IO[Unit] =
   compileProject(projectDir, pathJoin(projectDir, "build"))
 
 def cmdCheck(projectDir: String, json: Int): IO[Unit] =
-  checkProject(projectDir).flatMap(res =>
-    for {
-      ty = List.head(res)
-      sources = List.head(List.tail(res))
-    } yield if (tyIsOk(ty) == 1) if (json == 1) IO.println("[]") else IO.println("scuzz check ok") else emitCheckFail(ty, sources, json)
+  fmtDirtyFiles(projectDir).flatMap(dirty =>
+    checkProject(projectDir).flatMap(res => emitHygiene(dirty, List.head(res), List.head(List.tail(res)), json))
   )
 
-def emitCheckFail(ty: TyRes, sources: List, json: Int): IO[Unit] =
+def emitHygiene(dirty: List, ty: TyRes, sources: List, json: Int): IO[Unit] =
+  for {
+    fmtObjs = fmtDiagObjs(dirty, json)
+    tyObjs = tyDiagObjs(ty, sources, json)
+    objs = listConcat(fmtObjs, tyObjs)
+  } yield if (List.isEmpty(objs) == 1) if (json == 1) IO.println("[]") else IO.println("scuzz check ok") else emitHygieneFail(objs, json)
+
+def emitHygieneFail(objs: List, json: Int): IO[Unit] =
+  if (json == 1) IO.println(str3("[", join(objs, ","), "]")).flatMap(_ => IO.fail("check failed")) else IO.println(join(objs, "\n")).flatMap(_ => IO.fail("check failed"))
+
+def tyDiagObjs(ty: TyRes, sources: List, json: Int): List =
+  if (tyIsOk(ty) == 1) List.empty() else List.cons(tyDiagOne(ty, sources, json), List.empty())
+
+def tyDiagOne(ty: TyRes, sources: List, json: Int): String =
   for {
     msg = tyMsg(ty)
     loc = diagLoc(ty, sources)
-  } yield if (json == 1) IO.println(str3("[", diagJson(msg, loc), "]")).flatMap(_ => IO.fail(msg)) else IO.println(diagHuman(msg, loc)).flatMap(_ => IO.fail(msg))
+  } yield if (json == 1) diagJson(msg, loc) else diagHuman(msg, loc)
+
+def fmtDiagObjs(dirty: List, json: Int): List =
+  if (List.isEmpty(dirty) == 1) List.empty() else List.cons(fmtDiagOne(List.head(dirty), json), fmtDiagObjs(List.tail(dirty), json))
+
+def fmtDiagOne(path: String, json: Int): String =
+  for {
+    loc = List.cons(path, List.cons("1", List.cons("1", List.empty())))
+  } yield if (json == 1) diagJson("needs formatting (run scuzz fmt)", loc) else diagHuman("needs formatting (run scuzz fmt)", loc)
 
 def diagLoc(ty: TyRes, sources: List): List =
   if (tyIsAt(ty) == 0) List.empty() else diagLocFromSpan(tyAtFile(ty), tyAtStart(ty), sources)

@@ -1,12 +1,14 @@
 //! Parse + lower + typecheck without codegen/link.
 
+use crate::format::format_source;
 use crate::lower::lower_program;
 use crate::overlay::{apply_overlays, residualize_laws};
 use crate::parser::{parse_sources, ParseError};
 use crate::span::{offset_to_line_col, Span};
 use crate::typ::{typecheck, TypeError};
 use anyhow::{Context, Result};
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
@@ -30,6 +32,12 @@ impl Diagnostic {
 
     pub fn with_file(mut self, file: impl Into<String>) -> Self {
         self.file = Some(file.into());
+        self
+    }
+
+    pub fn with_loc(mut self, line: u32, column: u32) -> Self {
+        self.line = Some(line);
+        self.column = Some(column);
         self
     }
 
@@ -144,8 +152,55 @@ fn diagnostic_from_type(e: TypeError, sources: &[(String, String)]) -> Diagnosti
     d
 }
 
-/// Parse, lower, and typecheck a project (live + sim twins + pure laws). No LLVM emit or link.
+fn collect_scuzz_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_scuzz_files(&path, out)?;
+        } else if path.extension().and_then(|e| e.to_str()) == Some("scuzz") {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
+fn format_check_src(project_dir: &Path) -> Result<Vec<Diagnostic>> {
+    let src = project_dir.join("src");
+    let mut files = Vec::new();
+    collect_scuzz_files(&src, &mut files)?;
+    files.sort();
+    let mut diags = Vec::new();
+    for p in files {
+        let text = fs::read_to_string(&p)
+            .with_context(|| format!("reading {}", p.display()))?;
+        match format_source(&text) {
+            Ok(formatted) if formatted != text => {
+                let file = p
+                    .strip_prefix(project_dir)
+                    .unwrap_or(&p)
+                    .display()
+                    .to_string();
+                diags.push(
+                    Diagnostic::error("needs formatting (run scuzz fmt)")
+                        .with_file(file)
+                        .with_loc(1, 1),
+                );
+            }
+            Ok(_) => {}
+            Err(_) => {}
+        }
+    }
+    Ok(diags)
+}
+
+/// Format-check `src/`, then parse, lower, and typecheck (live + sim twins + pure laws).
+/// No LLVM emit or link. Format mismatches and type errors share one diagnostic list.
 pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
+    let mut diags = format_check_src(project_dir)?;
     let resolved = crate::driver::resolve_project(project_dir)
         .with_context(|| format!("resolving {}", project_dir.display()))?;
 
@@ -153,12 +208,16 @@ pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
 
     let program = match parse_sources(&named) {
         Ok(p) => p,
-        Err(e) => return Ok(vec![diagnostic_from_parse(e, &named)]),
+        Err(e) => {
+            diags.push(diagnostic_from_parse(e, &named));
+            return Ok(diags);
+        }
     };
     let (mut program, law_names) = match apply_overlays(program, &resolved.overlays) {
         Ok(v) => v,
         Err(e) => {
-            return Ok(vec![Diagnostic::error(e.to_string())]);
+            diags.push(Diagnostic::error(e.to_string()));
+            return Ok(diags);
         }
     };
     // Residualize so Law.assert / law calls typecheck the same way as verify builds.
@@ -166,11 +225,15 @@ pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
     program.law_names = law_names;
     let program = lower_program(program);
     if let Err(e) = typecheck(&program) {
-        return Ok(vec![diagnostic_from_type(e, &named)]);
+        diags.push(diagnostic_from_type(e, &named));
+        return Ok(diags);
     }
     match crate::typ::elaborate_generics(program) {
-        Ok(_) => Ok(vec![]),
-        Err(e) => Ok(vec![diagnostic_from_type(e, &named)]),
+        Ok(_) => Ok(diags),
+        Err(e) => {
+            diags.push(diagnostic_from_type(e, &named));
+            Ok(diags)
+        }
     }
 }
 
@@ -246,5 +309,51 @@ version = "0.0.0"
         let json = format_diagnostics(&diags, true);
         assert!(json.contains("\"line\":"));
         assert!(json.contains("\"column\":"));
+    }
+
+    #[test]
+    fn check_project_reports_unformatted() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            r#"[package]
+name = "fmt_test"
+version = "0.0.0"
+"#,
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let dirty = "@main def main: IO[Unit] =\n    IO.println(\"ok\")\n";
+        assert_ne!(crate::format::format_source(dirty).unwrap(), dirty);
+        fs::write(root.join("src/Main.scuzz"), dirty).unwrap();
+        let diags = check_project(root).unwrap();
+        assert_eq!(diags.len(), 1);
+        assert!(diags[0].message.contains("formatting"));
+        assert_eq!(diags[0].line, Some(1));
+        assert_eq!(diags[0].column, Some(1));
+        let json = format_diagnostics(&diags, true);
+        assert!(json.contains("needs formatting"));
+        assert!(json.contains("src/Main.scuzz"));
+    }
+
+    #[test]
+    fn check_project_ok_when_formatted() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            r#"[package]
+name = "fmt_ok"
+version = "0.0.0"
+"#,
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = "@main def main: IO[Unit] =\n  IO.println(\"ok\")\n";
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), formatted).unwrap();
+        let diags = check_project(root).unwrap();
+        assert!(diags.is_empty(), "{diags:?}");
     }
 }

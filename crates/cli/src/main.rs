@@ -74,7 +74,7 @@ enum Commands {
         #[arg(long)]
         runtime_tests: bool,
     },
-    /// Parse + lower + typecheck only (no codegen / link). JSON via --message-format=json.
+    /// Format-check src/ + parse + typecheck (no codegen / link). JSON via --message-format=json.
     Check {
         #[arg(default_value = ".")]
         path: PathBuf,

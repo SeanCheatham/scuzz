@@ -2,4 +2,4 @@
 
 ## Next
 
-**One static-hygiene command.** `fmt` and `check` are separate; there is no linter. Next: fold format + typecheck + lint into one author-facing command (`check`, with JSON diagnostics still the editor protocol). Do not add a third `lint` ritual.
+**Nested `View` only.** `View.addChild` is still used by `examples/todo`. Product surface is nested constructors. Next: remove `addChild` from Stage 0 and self-host; rewrite todo.

@@ -91,4 +91,4 @@ my-app/
     ios/
 ```
 
-Stage-0 accepts `*.scuzz` under `src/` (recursive). Units in the same package are merged; exactly one `@main` is required for executables. Stem-paired `*.scuzz_sim` / `*.scuzz_laws` load under `scuzz check` and verify/fuzz builds — see [vision.md](../vision.md#laws-simulation-and-verification). `scuzz fmt` formats only the selected project's `src/` (not dependency trees).
+Stage-0 accepts `*.scuzz` under `src/` (recursive). Units in the same package are merged; exactly one `@main` is required for executables. Stem-paired `*.scuzz_sim` / `*.scuzz_laws` load under `scuzz check` and verify/fuzz builds — see [vision.md](../vision.md#laws-simulation-and-verification). `scuzz fmt` and `scuzz check` format-verify only the selected project's `src/` (not dependency trees).

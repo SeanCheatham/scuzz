@@ -11,7 +11,7 @@ Edit this file when a decision or next-step ordering changes.
 - **Language**: purposeful Scala-inspired subset for native UI, CLI, server, and mobile apps, with **built-in effect/IO/Streaming** (Cats Effect and FS2 spirit, not a cats/fs2 port). Aim: denser expr dialect (`for` as primary binder) — see [Language direction](#language-direction) below.
 - **Runtime**: custom native (LLVM). Native binaries, not a VM. No JVM, no Java interop, no classpath/Maven.
 - **UI**: a primary product path, not the only one (Dart-shaped: GUI is first-class; so are CLI and server). One design language + Skia, as a **`Ui` effect** with Headless/Window/Mobile interpreters. Headless is a product runtime (agents, CI), not a test-only shim.
-- **Tooling**: one CLI (`scuzz`) for compile, link, assets, watch, packaging, deterministic `scuzz fuzz` over module **laws** + **sim** overlays. Static hygiene (format, typecheck, lint) is one author-facing command — today `fmt` and `check` are separate and there is no lint pass.
+- **Tooling**: one CLI (`scuzz`) for compile, link, assets, watch, packaging, deterministic `scuzz fuzz` over module **laws** + **sim** overlays. Static hygiene is `scuzz check` (format-verify + typecheck; further lints emit here, no `lint` subcommand). `scuzz fmt` rewrites.
 - **Bootstrap**: self-host is a hard goal. Stage-0 (Rust) exists only to get there.
 - **AI-Friendly**: Scuzz is meant to be read and written by LLMs. Headless, hot reload, and debugging tools are meant to aid agents; Headless is a peer runtime today, `watch` only rebuilds.
 
@@ -22,7 +22,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 | Topic | Choice |
 | --- | --- |
 | UI testing / CI | Laws via `scuzz fuzz` (primary); structural goldens as regression face; PNG optional via `--pixels` |
-| Static hygiene | One command for format + typecheck + lint (fold into `check`; no separate `lint` ritual) |
+| Static hygiene | `scuzz check` (format-verify + typecheck; lints on this command; no `lint` subcommand). `scuzz fmt` rewrites |
 | Codegen | LLVM IR |
 | Renderer (v0) | Skia via thin C ABI; Impeller deferred |
 | Build tool | DIY Mill/Cargo-like: `scuzz` (not sbt/Maven) |
@@ -62,7 +62,7 @@ Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI / cargo package `scuz
 One CLI. One typer. No second analyze frontend, no `*.g.scuzz` codegen, no `src/test` runner.
 
 - **Watch** rebuilds when sources or `scuzz.toml` change (path deps included). It does not patch a running process or preserve `Signal` state. Stage-0 `run --watch` rebuilds and reruns the process. In-process hot reload and debugging tools are a product goal (agents); do not document `watch` as that until it exists.
-- **Static hygiene** is one author-facing command: format + typecheck + lint. Today: `scuzz fmt` and `scuzz check`; no lint pass. Fold lint into `check` rather than a third subcommand. JSON diagnostics stay the editor protocol.
+- **Static hygiene** is `scuzz check`: format-verify `src/` + typecheck (live + sim + laws). `scuzz fmt` rewrites; `fmt --check` remains the dry-run. Further lints emit on `check` (same JSON diagnostics). No `lint` subcommand.
 - **JSON diagnostics** (`scuzz check --message-format=json`) are the editor protocol: `[{severity, message, file?, line?, column?}]`. `check` emits them; other commands stay human until they use this same type. LSP, when added, wraps `scuzz check --message-format=json` — do not grow a second typer or a parallel schema.
 - **`scuzz.toml` is data** — package, path deps, `[ui]`. No plugin DSL, no `build.scuzz` hooks, no sbt-shaped settings. Unknown keys and extra top-level tables are rejected; do not add `[plugins]`.
 - **Fingerprint** (Stage 0 incremental): miss → rebuild. No `scuzz clean` ritual. Cache stays fail-closed (compiler/runtime identity belongs in the key when Stage 2 grows incremental). Stage 2 rebuilds every compile today.
@@ -161,7 +161,7 @@ App correctness is **laws** searched by `scuzz fuzz`, not example-based unit tes
 
 | Phase | Role |
 | --- | --- |
-| `scuzz check` | Laws and sim overlays typecheck; laws are pure; sim bindings match live types/purity |
+| `scuzz check` | Format-verify `src/`; laws and sim overlays typecheck; laws are pure; sim bindings match live types/purity |
 | `scuzz build` (sim graph) | Layer `*.scuzz_sim` over live defs; emit residual law checks (armed under TestRuntime / fuzz only) |
 | `scuzz fuzz` | Search event scripts / IO schedules for law violations → `repro.toml` |
 | Later (optional) | Prove trivial law fragments statically; leave the rest as search |
@@ -216,11 +216,11 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ### UI testing
 
-**Laws + `scuzz fuzz`** are the primary correctness story for `[ui]` apps. **Structural goldens** are checked-in Headless dumps (signal store + a11y tree) compared byte-for-byte by `scuzz test` — a regression face for silent shape drift, few, live graph, not a substitute for laws. PNG pixels stay optional (`scuzz test --pixels`). IO packages (no `[ui]`): laws + sim overlays under TestRuntime when present; `scuzz fuzz --iters` searches schedule seeds; otherwise `scuzz test` stays compile + `SCUZZ_TESTRT=1` exit-0 smoke. Tooling: `scuzz check` (typecheck live + sim + laws); `--message-format=json` on `check` is the editor protocol (LSP wraps it). Fold format + lint into that same command rather than extra rituals.
+**Laws + `scuzz fuzz`** are the primary correctness story for `[ui]` apps. **Structural goldens** are checked-in Headless dumps (signal store + a11y tree) compared byte-for-byte by `scuzz test` — a regression face for silent shape drift, few, live graph, not a substitute for laws. PNG pixels stay optional (`scuzz test --pixels`). IO packages (no `[ui]`): laws + sim overlays under TestRuntime when present; `scuzz fuzz --iters` searches schedule seeds; otherwise `scuzz test` stays compile + `SCUZZ_TESTRT=1` exit-0 smoke. Tooling: `scuzz check` (format-verify `src/` + typecheck live + sim + laws); `--message-format=json` on `check` is the editor protocol (LSP wraps it). Further lints emit on `check`; `scuzz fmt` rewrites. No `lint` subcommand.
 
 ## Open work
 
-Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters. Near-term: one static-hygiene command, drop `View.addChild`, in-process reload/debug.
+Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters. Near-term: drop `View.addChild`, in-process reload/debug.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features. UI is a primary path among CLI/server/desktop/mobile — not the only v0 bar.
 

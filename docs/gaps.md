@@ -29,7 +29,6 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### Near-term (HUMANS alignment)
 
-- **One static-hygiene command** — `fmt` and `check` are separate; there is no linter. Fold format + typecheck + lint into one author-facing command (`check`, with JSON diagnostics still the editor protocol). Do not add a third `lint` ritual.
 - **Nested `View` only** — `View.addChild` is used by `examples/todo` (empty `View.column()` / `View.row()` then mutate). Product surface is nested constructors. Remove `addChild` from Stage 0 and self-host; rewrite todo.
 - **Hot reload and debugging tools** — HUMANS wants Headless + in-process reload + debug, especially for agents. Headless is a peer runtime today; `watch` only rebuilds. Do not document rebuild-as-reload.
 
@@ -51,5 +50,5 @@ Path deps only (`manifest.rs`, `Toml.scuzz`). Git / versioned / hosted artifacts
 - **Flutter-style constraint layout** — recursive stacker today (`layout_node` in `view.c`). Locked direction: constraints down, sizes up. `View.expanded` takes leftover Column height or Row width (`examples/todo`, `examples/nav`); `View.center` fills and centers; `View.align(ax, ay, child)` places start/center/end (`examples/nav` Other page); `View.stack` overlays; `View.positioned(x, y, child)` offsets a Stack child (`examples/counter`); `View.padding(n, child)` deflates max/min (`examples/nav` Home); `View.sized(w, h, child)` is a tight slot (`examples/counter`); `View.minSize(w, h, child)` raises min (`examples/counter`); `View.background(color, child)` paints behind the child (`examples/counter`); `View.aspectRatio(rw, rh, child)` fits an `rw:rh` box (`examples/nav` Home); `View.fraction(wpct, hpct, child)` takes that percent of max (`examples/nav` Home). Min is enforced after measure; padding deflates min for the child.
 - **Windows desktop embedder** — same session protocol as X11/Cocoa; secondary platform.
 - **OS IME candidate windows** — focused TextField caret uses measured advance (`sz_view_caret_rect`); embedders do not yet place OS IME UI from it.
-- **LSP / editor tooling** — `fmt`, `check --message-format=json`, and `watch` exist; no language server. JSON diagnostics are the single editor protocol (`[{severity, message, file?, line?, column?}]`); LSP must wrap `scuzz check --message-format=json`. Do not add a second frontend or a parallel schema.
+- **LSP / editor tooling** — `fmt`, `check --message-format=json` (format-verify + typecheck), and `watch` exist; no language server. JSON diagnostics are the single editor protocol (`[{severity, message, file?, line?, column?}]`); LSP must wrap `scuzz check --message-format=json`. Do not add a second frontend or a parallel schema.
 - **macOS in default CI** — macOS job is `workflow_dispatch`-only; Darwin regressions surface late.

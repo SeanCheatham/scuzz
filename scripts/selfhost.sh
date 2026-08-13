@@ -110,6 +110,13 @@ chmod +x "$STAGE1"
 echo "==> Stage 0 fmt --check (compiler-scuzz sources)"
 cargo run -p scuzz -- fmt --check compiler-scuzz
 
+echo "==> Stage 0 check rejects unformatted sources"
+if cargo run -p scuzz -- check testdata/fmt/needs_format 2>/tmp/scuzz-fmt0.err; then
+  echo "expected format error from Stage 0" >&2
+  exit 1
+fi
+grep -q "needs formatting" /tmp/scuzz-fmt0.err
+
 echo "==> Stage 0 rejects ill-typed program"
 if cargo run -p scuzz -- build testdata/typecheck/bad_main 2>/tmp/scuzz-bad0.err; then
   echo "expected type error from Stage 0" >&2
@@ -132,6 +139,13 @@ fi
 grep -q "unknown scuzz.toml key \`license\` in \[package\]" /tmp/scuzz-toml-key0.err
 
 stage_checks "Stage 1" "$STAGE1"
+
+echo "==> Stage 1 check rejects unformatted sources"
+if "$STAGE1" check testdata/fmt/needs_format > /tmp/scuzz-fmt1.out 2>/tmp/scuzz-fmt1.err; then
+  echo "expected format error from Stage 1" >&2
+  exit 1
+fi
+grep -q "needs formatting" /tmp/scuzz-fmt1.out /tmp/scuzz-fmt1.err
 
 echo "==> Stage 1 rejects ill-typed program"
 if "$STAGE1" build testdata/typecheck/bad_main 2>/tmp/scuzz-bad1.err; then
