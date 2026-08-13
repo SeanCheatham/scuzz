@@ -11,7 +11,17 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
+
+static void sleep_us(long us) {
+  struct timespec ts;
+  if (us <= 0)
+    return;
+  ts.tv_sec = us / 1000000L;
+  ts.tv_nsec = (us % 1000000L) * 1000L;
+  nanosleep(&ts, NULL);
+}
 
 static int delay_calls = 0;
 static void *delay_inc(void *env) {
@@ -134,7 +144,7 @@ static void *live_get_client(void *arg) {
   snprintf(req, sizeof req,
            "GET /x HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
   for (i = 0; i < 50; i++) {
-    usleep(10000);
+    sleep_us(10000);
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0)
       continue;
@@ -165,7 +175,7 @@ static int live_connect(int port) {
   addr.sin_port = htons((uint16_t)port);
   addr.sin_addr.s_addr = inet_addr("127.0.0.1");
   for (i = 0; i < 50; i++) {
-    usleep(10000);
+    sleep_us(10000);
     fd = socket(AF_INET, SOCK_STREAM, 0);
     if (fd < 0)
       continue;
@@ -233,7 +243,7 @@ static SzIo *assert_peer_quiet(void *value, void *env) {
 
 static void *pipe_late_write(void *arg) {
   int fd = *(int *)arg;
-  usleep(40000);
+  sleep_us(40000);
   g_peer_flag = 1;
   if (write(fd, "x", 1) < 0)
     return NULL;
@@ -241,7 +251,7 @@ static void *pipe_late_write(void *arg) {
 }
 
 static void *live_get_client_late(void *arg) {
-  usleep(50000);
+  sleep_us(50000);
   g_peer_flag = 1;
   return live_get_client(arg);
 }
@@ -272,7 +282,7 @@ static void *dns_late_a(void *arg) {
   socklen_t flen = sizeof from;
   ssize_t n;
   n = recvfrom(fd, buf, sizeof buf, 0, (struct sockaddr *)&from, &flen);
-  usleep(40000);
+  sleep_us(40000);
   g_peer_flag = 1;
   if (n < 12 || (size_t)n + 16 > sizeof buf)
     return NULL;
@@ -304,7 +314,7 @@ static void *dns_late_a(void *arg) {
 
 static void *stdin_late_write(void *arg) {
   int fd = *(int *)arg;
-  usleep(40000);
+  sleep_us(40000);
   g_peer_flag = 1;
   if (write(fd, "hello\n", 6) < 0)
     return NULL;
@@ -1010,7 +1020,7 @@ int main(void) {
     kill((pid_t)pid, SIGTERM);
     r = sz_io_unsafe_run(sz_sys_alive(pid));
     for (i = 0; i < 50 && r.ok && sz_unbox_i64(r.value) == 1; i++) {
-      usleep(20000);
+      sleep_us(20000);
       r = sz_io_unsafe_run(sz_sys_alive(pid));
     }
     assert(r.ok);
