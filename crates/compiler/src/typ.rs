@@ -1419,6 +1419,14 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 2)?;
             Ok(Type::Opaque("Stream".into()))
         }
+        "Stream.find" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            Ok(Type::Opaque("Stream".into()))
+        }
+        "Stream.exists" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            Ok(Type::Io(Box::new(Type::Bool)))
+        }
         "Stream.compileToList" => {
             expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Io(Box::new(Type::List)))
@@ -3727,6 +3735,30 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Stream.dropWhile should typecheck");
+    }
+
+    #[test]
+    fn typechecks_stream_find() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs <- Stream.compileToList(Stream.find(Stream.emits(["", "a", "b"]), x => Str.len(x) > 0))
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Stream.find should typecheck");
+    }
+
+    #[test]
+    fn typechecks_stream_exists() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    hit <- Stream.exists(Stream.emits(["", "a", "b"]), x => Str.len(x) > 0)
+    _ <- IO.println(Str.fromInt(hit))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Stream.exists should typecheck");
     }
 
     #[test]

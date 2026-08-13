@@ -13,7 +13,8 @@ enum {
   SZ_ST_FILTER = 7,
   SZ_ST_MAP = 8,
   SZ_ST_TAKEWHILE = 9,
-  SZ_ST_DROPWHILE = 10
+  SZ_ST_DROPWHILE = 10,
+  SZ_ST_FIND = 11
 };
 
 static SzStream *st_new(int tag, void *left, void *right, void *env) {
@@ -91,6 +92,14 @@ SzStream *sz_stream_dropwhile(SzStream *inner, SzStreamPred pred, void *env) {
   if (!pred)
     sz_panic("sz_stream_dropwhile(null pred)");
   return st_new(SZ_ST_DROPWHILE, inner, (void *)pred, env);
+}
+
+SzStream *sz_stream_find(SzStream *inner, SzStreamPred pred, void *env) {
+  if (!inner)
+    inner = sz_stream_nil();
+  if (!pred)
+    sz_panic("sz_stream_find(null pred)");
+  return st_new(SZ_ST_FIND, inner, (void *)pred, env);
 }
 
 SzStream *sz_stream_take(SzStream *inner, int64_t n) {
@@ -189,6 +198,8 @@ typedef struct StDropWhile {
 static SzIo *compile_into(SzStream *s, SzList *acc, int64_t remain);
 static SzIo *takewhile_into(SzStream *s, SzList *acc, int64_t remain,
                             SzStreamPred pred, void *penv, int *stopped);
+static SzIo *find_into(SzStream *s, SzList *acc, int64_t remain,
+                       SzStreamPred pred, void *penv, int *found);
 
 static int64_t remain_dec(int64_t remain) {
   return remain < 0 ? remain : remain - 1;
@@ -408,6 +419,25 @@ static SzList *dropwhile_added(SzList *acc, int64_t acc_len, SzStreamPred pred,
   return cons_oldest_n(old_acc, oldest_first, nkeep);
 }
 
+/* acc is newest-first. Skip added items until the first match; keep only that. */
+static SzList *find_added(SzList *acc, int64_t acc_len, SzStreamPred pred,
+                          void *penv, int64_t remain, int *found) {
+  SzList *old_acc;
+  SzList *oldest_first = oldest_added(acc, acc_len, &old_acc);
+  while (!sz_list_is_empty(oldest_first)) {
+    void *h = sz_list_head(oldest_first);
+    oldest_first = sz_list_tail(oldest_first);
+    if (pred(h, penv) != 0) {
+      if (found)
+        *found = 1;
+      if (remain == 0)
+        return old_acc;
+      return sz_list_cons(h, old_acc);
+    }
+  }
+  return old_acc;
+}
+
 static SzIo *tw_done(void *acc, void *env) {
   sz_free(env);
   return sz_io_pure(acc);
@@ -563,6 +593,15 @@ static SzIo *compile_into(SzStream *s, SzList *acc, int64_t remain) {
       return sz_io_flatmap(compile_into((SzStream *)s->left, acc, -1),
                            after_dropwhile, st);
     }
+    case SZ_ST_FIND: {
+      StTW *st = (StTW *)sz_alloc(sizeof(StTW));
+      st->pred = (SzStreamPred)s->right;
+      st->penv = s->env;
+      st->stopped = 0;
+      return sz_io_flatmap(find_into((SzStream *)s->left, acc, remain, st->pred,
+                                     st->penv, &st->stopped),
+                           tw_done, st);
+    }
     default:
       sz_panic("sz_stream: bad tag");
     }
@@ -631,6 +670,117 @@ static SzIo *takewhile_into(SzStream *s, SzList *acc, int64_t remain,
   return sz_io_pure(acc);
 }
 
+static SzIo *after_find_eval(void *value, void *env) {
+  StTWEval *st = (StTWEval *)env;
+  SzList *acc = st->acc;
+  SzStream *tail = st->tail;
+  int64_t remain = st->remain;
+  SzStreamPred pred = st->pred;
+  void *penv = st->penv;
+  int *found = st->stopped;
+  sz_free(st);
+  if (pred(value, penv) != 0) {
+    if (found)
+      *found = 1;
+    if (remain == 0)
+      return sz_io_pure(acc);
+    return sz_io_pure(sz_list_cons(value, acc));
+  }
+  return find_into(tail, acc, remain, pred, penv, found);
+}
+
+static SzIo *after_find_concat(void *acc, void *env) {
+  StTWConcat *st = (StTWConcat *)env;
+  SzStream *right = st->right;
+  int64_t remain = st->remain;
+  int64_t acc_len = st->acc_len;
+  SzStreamPred pred = st->pred;
+  void *penv = st->penv;
+  int *found = st->stopped;
+  int64_t added;
+  sz_free(st);
+  if (found && *found)
+    return sz_io_pure(acc);
+  if (remain >= 0) {
+    added = (int64_t)sz_list_len((SzList *)acc) - acc_len;
+    remain = remain - added;
+    if (remain < 0)
+      remain = 0;
+  }
+  if (remain == 0)
+    return sz_io_pure(acc);
+  return find_into(right, (SzList *)acc, remain, pred, penv, found);
+}
+
+static SzIo *after_find_cut(void *acc, void *env) {
+  StTWCut *st = (StTWCut *)env;
+  SzList *out = find_added((SzList *)acc, st->acc_len, st->pred, st->penv,
+                           st->remain, st->stopped);
+  sz_free(st);
+  return sz_io_pure(out);
+}
+
+static SzIo *find_into(SzStream *s, SzList *acc, int64_t remain,
+                       SzStreamPred pred, void *penv, int *found) {
+  while (s && s->tag != SZ_ST_NIL) {
+    if (remain == 0)
+      return sz_io_pure(acc);
+    switch (s->tag) {
+    case SZ_ST_TAKE: {
+      int64_t n = (int64_t)(intptr_t)s->env;
+      if (n <= 0)
+        return sz_io_pure(acc);
+      if (remain < 0 || n < remain)
+        remain = n;
+      s = (SzStream *)s->left;
+      break;
+    }
+    case SZ_ST_CONS:
+      if (pred(s->left, penv) != 0) {
+        if (found)
+          *found = 1;
+        if (remain == 0)
+          return sz_io_pure(acc);
+        return sz_io_pure(sz_list_cons(s->left, acc));
+      }
+      s = (SzStream *)s->right;
+      break;
+    case SZ_ST_EVAL: {
+      StTWEval *st = (StTWEval *)sz_alloc(sizeof(StTWEval));
+      st->tail = (SzStream *)s->right;
+      st->acc = acc;
+      st->remain = remain;
+      st->pred = pred;
+      st->penv = penv;
+      st->stopped = found;
+      return sz_io_flatmap((SzIo *)s->left, after_find_eval, st);
+    }
+    case SZ_ST_CONCAT: {
+      StTWConcat *st = (StTWConcat *)sz_alloc(sizeof(StTWConcat));
+      st->right = (SzStream *)s->right;
+      st->remain = remain;
+      st->acc_len = (int64_t)sz_list_len(acc);
+      st->pred = pred;
+      st->penv = penv;
+      st->stopped = found;
+      return sz_io_flatmap(
+          find_into((SzStream *)s->left, acc, remain, pred, penv, found),
+          after_find_concat, st);
+    }
+    default: {
+      StTWCut *st = (StTWCut *)sz_alloc(sizeof(StTWCut));
+      st->pred = pred;
+      st->penv = penv;
+      st->remain = remain;
+      st->acc_len = (int64_t)sz_list_len(acc);
+      st->stopped = found;
+      return sz_io_flatmap(compile_into(s, acc, remain), after_find_cut, st);
+    }
+    }
+  }
+  return sz_io_pure(acc);
+}
+
 static SzIo *reverse_acc(void *acc, void *env) {
   (void)env;
   return sz_io_pure(sz_list_reverse((SzList *)acc));
@@ -648,4 +798,15 @@ static SzIo *drain_discard(void *list, void *env) {
 
 SzIo *sz_stream_drain(SzStream *s) {
   return sz_io_flatmap(sz_stream_compile_to_list(s), drain_discard, NULL);
+}
+
+static SzIo *exists_from_list(void *list, void *env) {
+  (void)env;
+  int64_t n = (int64_t)sz_list_len((SzList *)list);
+  return sz_io_pure(sz_box_i64(n > 0 ? 1 : 0));
+}
+
+SzIo *sz_stream_exists(SzStream *s, SzStreamPred pred, void *env) {
+  return sz_io_flatmap(sz_stream_compile_to_list(sz_stream_find(s, pred, env)),
+                       exists_from_list, NULL);
 }

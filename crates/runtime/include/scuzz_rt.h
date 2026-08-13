@@ -273,7 +273,7 @@ size_t sz_queue_size(const SzQueue *q);
 
 /* Stream — finite pull (FS2 spirit): emit / eval / concat / map / evalMap / take / drop / filter. */
 struct SzStream {
-  int tag; /* 0 nil, 1 cons, 2 eval, 3 concat, 4 evalMap, 5 take, 6 drop, 7 filter, 8 map, 9 takeWhile, 10 dropWhile */
+  int tag; /* 0 nil … 9 takeWhile, 10 dropWhile, 11 find */
   void *left;
   void *right;
   void *env;
@@ -289,6 +289,8 @@ SzStream *sz_stream_filter(SzStream *inner, SzStreamPred pred, void *env);
 SzStream *sz_stream_map(SzStream *inner, SzStreamMapFn f, void *env);
 SzStream *sz_stream_takewhile(SzStream *inner, SzStreamPred pred, void *env);
 SzStream *sz_stream_dropwhile(SzStream *inner, SzStreamPred pred, void *env);
+SzStream *sz_stream_find(SzStream *inner, SzStreamPred pred, void *env);
+SzIo *sz_stream_exists(SzStream *s, SzStreamPred pred, void *env); /* IO[Bool] */
 SzStream *sz_stream_take(SzStream *inner, int64_t n);
 SzStream *sz_stream_drop(SzStream *inner, int64_t n);
 SzIo *sz_stream_compile_to_list(SzStream *s); /* IO[List] */

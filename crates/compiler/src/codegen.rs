@@ -101,6 +101,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_stream_map(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_takewhile(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_dropwhile(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_find(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_exists(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_compile_to_list(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_drain(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_signal_int(i64)").unwrap();
@@ -1869,6 +1871,7 @@ fn emit_stream_pred(
     ctx: &mut EmitCtx<'_>,
     locals: &mut HashMap<String, (String, Kind)>,
     prefix: &str,
+    as_io: bool,
 ) -> Emitted {
     assert!(args.len() == 2, "{callee} expects 2 args");
     let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
@@ -1885,7 +1888,11 @@ fn emit_stream_pred(
         inner.value
     )
     .unwrap();
-    val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+    if as_io {
+        io_emitted(code, format!("%{prefix}_v"), Kind::Int)
+    } else {
+        val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+    }
 }
 
 fn emit_stream_filter(
@@ -1894,7 +1901,7 @@ fn emit_stream_filter(
     locals: &mut HashMap<String, (String, Kind)>,
     prefix: &str,
 ) -> Emitted {
-    emit_stream_pred("Stream.filter", "sz_stream_filter", args, ctx, locals, prefix)
+    emit_stream_pred("Stream.filter", "sz_stream_filter", args, ctx, locals, prefix, false)
 }
 
 fn emit_stream_map(
@@ -2196,6 +2203,7 @@ fn emit_call(
             ctx,
             locals,
             prefix,
+            false,
         );
     }
     if callee == "Stream.dropWhile" {
@@ -2206,6 +2214,29 @@ fn emit_call(
             ctx,
             locals,
             prefix,
+            false,
+        );
+    }
+    if callee == "Stream.find" {
+        return emit_stream_pred(
+            "Stream.find",
+            "sz_stream_find",
+            args,
+            ctx,
+            locals,
+            prefix,
+            false,
+        );
+    }
+    if callee == "Stream.exists" {
+        return emit_stream_pred(
+            "Stream.exists",
+            "sz_stream_exists",
+            args,
+            ctx,
+            locals,
+            prefix,
+            true,
         );
     }
     if callee == "Stream.map" {
@@ -3225,6 +3256,37 @@ mod tests {
         crate::typ::typecheck(&p).expect("typecheck");
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_stream_takewhile"));
+        assert!(ir.contains("sz_pred_"));
+    }
+
+    #[test]
+    fn emit_stream_find_compile() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    s = Stream.find(Stream.emits(["", "a", "b"]), x => Str.len(x) > 0)
+    xs <- Stream.compileToList(s)
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_stream_find"));
+        assert!(ir.contains("sz_pred_"));
+    }
+
+    #[test]
+    fn emit_stream_exists_compile() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    hit <- Stream.exists(Stream.emits(["", "a", "b"]), x => Str.len(x) > 0)
+    _ <- IO.println(Str.fromInt(hit))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_stream_exists"));
         assert!(ir.contains("sz_pred_"));
     }
 

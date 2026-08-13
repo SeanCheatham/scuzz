@@ -581,6 +581,65 @@ int main(void) {
     joined = sz_list_join((SzList *)r.value, ",");
     assert(strcmp(sz_string_cstr(joined), "a") == 0);
     assert(delay_calls == 3);
+
+    xs = sz_list_cons(
+        sz_string_from_cstr(""),
+        sz_list_cons(sz_string_from_cstr("a"),
+                     sz_list_cons(sz_string_from_cstr("b"), sz_list_nil())));
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_find(sz_stream_emits(xs), stream_nonempty, NULL)));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a") == 0);
+
+    xs = sz_list_cons(sz_string_from_cstr(""),
+                      sz_list_cons(sz_string_from_cstr("a"), sz_list_nil()));
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_find(sz_stream_emits(xs), stream_empty, NULL)));
+    assert(r.ok);
+    assert(sz_list_len((SzList *)r.value) == 1);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_head((SzList *)r.value)),
+                  "") == 0);
+
+    xs = sz_list_cons(sz_string_from_cstr("a"),
+                      sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(
+        sz_stream_find(sz_stream_emits(xs), stream_empty, NULL)));
+    assert(r.ok);
+    assert(sz_list_len((SzList *)r.value) == 0);
+
+    delay_calls = 0;
+    s = sz_stream_find(
+        sz_stream_concat(
+            sz_stream_concat(sz_stream_eval(sz_io_delay(take_hit, (void *)"")),
+                             sz_stream_eval(sz_io_delay(take_hit, (void *)"a"))),
+            sz_stream_eval(sz_io_delay(take_hit, (void *)"b"))),
+        stream_nonempty, NULL);
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(s));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a") == 0);
+    assert(delay_calls == 2);
+
+    delay_calls = 0;
+    r = sz_io_unsafe_run(sz_stream_exists(
+        sz_stream_concat(
+            sz_stream_concat(sz_stream_eval(sz_io_delay(take_hit, (void *)"")),
+                             sz_stream_eval(sz_io_delay(take_hit, (void *)"a"))),
+            sz_stream_eval(sz_io_delay(take_hit, (void *)"b"))),
+        stream_nonempty, NULL));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 1);
+    assert(delay_calls == 2);
+
+    delay_calls = 0;
+    r = sz_io_unsafe_run(sz_stream_exists(
+        sz_stream_concat(sz_stream_eval(sz_io_delay(take_hit, (void *)"")),
+                         sz_stream_eval(sz_io_delay(take_hit, (void *)""))),
+        stream_nonempty, NULL));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 0);
+    assert(delay_calls == 2);
   }
 
   /* sleep */
