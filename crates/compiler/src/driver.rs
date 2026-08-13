@@ -550,15 +550,6 @@ fn collect_overlays(
             collect_overlays(&path, out)?;
         } else if let Some((stem, kind)) = overlay_kind_from_path(&path) {
             out.push((path, stem, kind));
-        } else if path
-            .file_name()
-            .and_then(|n| n.to_str())
-            .is_some_and(|n| n.ends_with(".scuzz_laws"))
-        {
-            anyhow::bail!(
-                "{}: *.scuzz_laws is removed; declare `law name: Bool = …` in the live *.scuzz module",
-                path.display()
-            );
         }
     }
     Ok(())

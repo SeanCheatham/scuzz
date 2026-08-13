@@ -160,6 +160,261 @@ impl Expr {
             span: Span::dummy(),
         }
     }
+
+    pub fn map_children(self, mut f: impl FnMut(Expr) -> Expr) -> Expr {
+        self.try_map_children(|e| Ok::<_, std::convert::Infallible>(f(e)))
+            .unwrap()
+    }
+
+    pub fn try_map_children<E>(
+        self,
+        mut f: impl FnMut(Expr) -> Result<Expr, E>,
+    ) -> Result<Self, E> {
+        let span = self.span;
+        let kind = match self.kind {
+            ExprKind::IoPrintln(x) => ExprKind::IoPrintln(Box::new(f(*x)?)),
+            ExprKind::IoSleep(x) => ExprKind::IoSleep(Box::new(f(*x)?)),
+            ExprKind::IoFail(x) => ExprKind::IoFail(Box::new(f(*x)?)),
+            ExprKind::IoPure(x) => ExprKind::IoPure(Box::new(f(*x)?)),
+            ExprKind::Attempt { inner } => ExprKind::Attempt {
+                inner: Box::new(f(*inner)?),
+            },
+            ExprKind::Field { base, field } => ExprKind::Field {
+                base: Box::new(f(*base)?),
+                field,
+            },
+            ExprKind::Lambda { param, body } => ExprKind::Lambda {
+                param,
+                body: Box::new(f(*body)?),
+            },
+            ExprKind::FlatMap { inner, param, body } => ExprKind::FlatMap {
+                inner: Box::new(f(*inner)?),
+                param,
+                body: Box::new(f(*body)?),
+            },
+            ExprKind::HandleErrorWith { inner, body } => ExprKind::HandleErrorWith {
+                inner: Box::new(f(*inner)?),
+                body: Box::new(f(*body)?),
+            },
+            ExprKind::Let { name, value, body } => ExprKind::Let {
+                name,
+                value: Box::new(f(*value)?),
+                body: Box::new(f(*body)?),
+            },
+            ExprKind::IoEnsure { inner, finalizer } => ExprKind::IoEnsure {
+                inner: Box::new(f(*inner)?),
+                finalizer: Box::new(f(*finalizer)?),
+            },
+            ExprKind::IoRace { left, right } => ExprKind::IoRace {
+                left: Box::new(f(*left)?),
+                right: Box::new(f(*right)?),
+            },
+            ExprKind::IoBoth { left, right } => ExprKind::IoBoth {
+                left: Box::new(f(*left)?),
+                right: Box::new(f(*right)?),
+            },
+            ExprKind::IoTimeout { ms, inner } => ExprKind::IoTimeout {
+                ms: Box::new(f(*ms)?),
+                inner: Box::new(f(*inner)?),
+            },
+            ExprKind::Binary { op, left, right } => ExprKind::Binary {
+                op,
+                left: Box::new(f(*left)?),
+                right: Box::new(f(*right)?),
+            },
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => ExprKind::If {
+                cond: Box::new(f(*cond)?),
+                then_branch: Box::new(f(*then_branch)?),
+                else_branch: Box::new(f(*else_branch)?),
+            },
+            ExprKind::MethodCall {
+                receiver,
+                method,
+                args,
+            } => ExprKind::MethodCall {
+                receiver: Box::new(f(*receiver)?),
+                method,
+                args: map_expr_vec(args, &mut f)?,
+            },
+            ExprKind::Call { callee, args } => ExprKind::Call {
+                callee,
+                args: map_expr_vec(args, &mut f)?,
+            },
+            ExprKind::AdtConstruct {
+                enum_name,
+                case_name,
+                args,
+                type_args,
+            } => ExprKind::AdtConstruct {
+                enum_name,
+                case_name,
+                args: map_expr_vec(args, &mut f)?,
+                type_args,
+            },
+            ExprKind::ListLit { elems } => ExprKind::ListLit {
+                elems: map_expr_vec(elems, &mut f)?,
+            },
+            ExprKind::For { binders, body } => {
+                let mut out = Vec::with_capacity(binders.len());
+                for b in binders {
+                    out.push(match b {
+                        ForBinder::Eq { name, value } => ForBinder::Eq {
+                            name,
+                            value: f(value)?,
+                        },
+                        ForBinder::Draw { name, value } => ForBinder::Draw {
+                            name,
+                            value: f(value)?,
+                        },
+                    });
+                }
+                ExprKind::For {
+                    binders: out,
+                    body: Box::new(f(*body)?),
+                }
+            }
+            ExprKind::Match { scrutinee, arms } => {
+                let mut out = Vec::with_capacity(arms.len());
+                for a in arms {
+                    out.push(MatchArm {
+                        pattern: a.pattern,
+                        body: f(a.body)?,
+                    });
+                }
+                ExprKind::Match {
+                    scrutinee: Box::new(f(*scrutinee)?),
+                    arms: out,
+                }
+            }
+            ExprKind::Interpolate { parts } => {
+                let mut out = Vec::with_capacity(parts.len());
+                for p in parts {
+                    out.push(match p {
+                        InterpPart::Lit(s) => InterpPart::Lit(s),
+                        InterpPart::Expr(e) => InterpPart::Expr(f(e)?),
+                    });
+                }
+                ExprKind::Interpolate { parts: out }
+            }
+            leaf @ (ExprKind::Var(_)
+            | ExprKind::Unit
+            | ExprKind::IntLit(_)
+            | ExprKind::StrLit(_)) => leaf,
+        };
+        Ok(Expr { kind, span })
+    }
+
+    pub fn for_each_child(&self, mut f: impl FnMut(&Expr)) {
+        match &self.kind {
+            ExprKind::IoPrintln(x)
+            | ExprKind::IoSleep(x)
+            | ExprKind::IoFail(x)
+            | ExprKind::IoPure(x)
+            | ExprKind::Attempt { inner: x }
+            | ExprKind::Field { base: x, .. }
+            | ExprKind::Lambda { body: x, .. } => f(x),
+            ExprKind::FlatMap { inner, body, .. }
+            | ExprKind::HandleErrorWith { inner, body }
+            | ExprKind::Let {
+                value: inner, body, ..
+            }
+            | ExprKind::IoEnsure {
+                inner,
+                finalizer: body,
+            }
+            | ExprKind::IoRace {
+                left: inner,
+                right: body,
+            }
+            | ExprKind::IoBoth {
+                left: inner,
+                right: body,
+            }
+            | ExprKind::Binary {
+                left: inner,
+                right: body,
+                ..
+            }
+            | ExprKind::IoTimeout {
+                ms: inner,
+                inner: body,
+            } => {
+                f(inner);
+                f(body);
+            }
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                f(cond);
+                f(then_branch);
+                f(else_branch);
+            }
+            ExprKind::MethodCall { receiver, args, .. } => {
+                f(receiver);
+                for a in args {
+                    f(a);
+                }
+            }
+            ExprKind::Call { args, .. }
+            | ExprKind::AdtConstruct { args, .. }
+            | ExprKind::ListLit { elems: args } => {
+                for a in args {
+                    f(a);
+                }
+            }
+            ExprKind::For { binders, body } => {
+                for b in binders {
+                    match b {
+                        ForBinder::Eq { value, .. } | ForBinder::Draw { value, .. } => f(value),
+                    }
+                }
+                f(body);
+            }
+            ExprKind::Match { scrutinee, arms } => {
+                f(scrutinee);
+                for a in arms {
+                    f(&a.body);
+                }
+            }
+            ExprKind::Interpolate { parts } => {
+                for p in parts {
+                    if let InterpPart::Expr(e) = p {
+                        f(e);
+                    }
+                }
+            }
+            ExprKind::Var(_) | ExprKind::Unit | ExprKind::IntLit(_) | ExprKind::StrLit(_) => {}
+        }
+    }
+}
+
+fn map_expr_vec<E>(
+    args: Vec<Expr>,
+    f: &mut impl FnMut(Expr) -> Result<Expr, E>,
+) -> Result<Vec<Expr>, E> {
+    let mut out = Vec::with_capacity(args.len());
+    for a in args {
+        out.push(f(a)?);
+    }
+    Ok(out)
+}
+
+impl Program {
+    pub fn map_bodies_mut(&mut self, mut f: impl FnMut(Expr) -> Expr) {
+        for d in &mut self.defs {
+            d.body = f(std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)));
+        }
+        self.main.body = f(std::mem::replace(
+            &mut self.main.body,
+            Expr::dummy(ExprKind::Unit),
+        ));
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

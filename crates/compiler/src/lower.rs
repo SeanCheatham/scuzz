@@ -2,7 +2,7 @@
 //! Also resolve `Enum.Case(args)` calls into `AdtConstruct` when the case is known
 //! (keeps `Color.rgb(...)` and other dotted builtins as `Call`).
 
-use crate::ast::{Expr, ExprKind, ForBinder, InterpPart, MatchArm, Pattern, Program};
+use crate::ast::{Expr, ExprKind, ForBinder, MatchArm, Pattern, Program};
 use crate::resolve::{enum_id, EnumIndex};
 use crate::span::Span;
 
@@ -87,135 +87,6 @@ pub fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Ex
             let body = lower_expr(*body, enums, current_module);
             desugar_for(binders, body, span, enums, current_module)
         }
-        ExprKind::IoPrintln(e) => Expr::new(
-            ExprKind::IoPrintln(Box::new(lower_expr(*e, enums, current_module))),
-            span,
-        ),
-        ExprKind::IoSleep(e) => Expr::new(
-            ExprKind::IoSleep(Box::new(lower_expr(*e, enums, current_module))),
-            span,
-        ),
-        ExprKind::IoFail(e) => Expr::new(
-            ExprKind::IoFail(Box::new(lower_expr(*e, enums, current_module))),
-            span,
-        ),
-        ExprKind::IoPure(e) => Expr::new(
-            ExprKind::IoPure(Box::new(lower_expr(*e, enums, current_module))),
-            span,
-        ),
-        ExprKind::FlatMap { inner, param, body } => Expr::new(
-            ExprKind::FlatMap {
-                inner: Box::new(lower_expr(*inner, enums, current_module)),
-                param,
-                body: Box::new(lower_expr(*body, enums, current_module)),
-            },
-            span,
-        ),
-        ExprKind::HandleErrorWith { inner, body } => Expr::new(
-            ExprKind::HandleErrorWith {
-                inner: Box::new(lower_expr(*inner, enums, current_module)),
-                body: Box::new(lower_expr(*body, enums, current_module)),
-            },
-            span,
-        ),
-        ExprKind::Attempt { inner } => Expr::new(
-            ExprKind::Attempt {
-                inner: Box::new(lower_expr(*inner, enums, current_module)),
-            },
-            span,
-        ),
-        ExprKind::IoRace { left, right } => Expr::new(
-            ExprKind::IoRace {
-                left: Box::new(lower_expr(*left, enums, current_module)),
-                right: Box::new(lower_expr(*right, enums, current_module)),
-            },
-            span,
-        ),
-        ExprKind::IoBoth { left, right } => Expr::new(
-            ExprKind::IoBoth {
-                left: Box::new(lower_expr(*left, enums, current_module)),
-                right: Box::new(lower_expr(*right, enums, current_module)),
-            },
-            span,
-        ),
-        ExprKind::IoEnsure { inner, finalizer } => Expr::new(
-            ExprKind::IoEnsure {
-                inner: Box::new(lower_expr(*inner, enums, current_module)),
-                finalizer: Box::new(lower_expr(*finalizer, enums, current_module)),
-            },
-            span,
-        ),
-        ExprKind::IoTimeout { ms, inner } => Expr::new(
-            ExprKind::IoTimeout {
-                ms: Box::new(lower_expr(*ms, enums, current_module)),
-                inner: Box::new(lower_expr(*inner, enums, current_module)),
-            },
-            span,
-        ),
-        ExprKind::Let { name, value, body } => Expr::new(
-            ExprKind::Let {
-                name,
-                value: Box::new(lower_expr(*value, enums, current_module)),
-                body: Box::new(lower_expr(*body, enums, current_module)),
-            },
-            span,
-        ),
-        ExprKind::ListLit { elems } => Expr::new(
-            ExprKind::ListLit {
-                elems: elems
-                    .into_iter()
-                    .map(|e| lower_expr(e, enums, current_module))
-                    .collect(),
-            },
-            span,
-        ),
-        ExprKind::Interpolate { parts } => Expr::new(
-            ExprKind::Interpolate {
-                parts: parts
-                    .into_iter()
-                    .map(|p| match p {
-                        InterpPart::Lit(s) => InterpPart::Lit(s),
-                        InterpPart::Expr(e) => {
-                            InterpPart::Expr(lower_expr(e, enums, current_module))
-                        }
-                    })
-                    .collect(),
-            },
-            span,
-        ),
-        ExprKind::Match { scrutinee, arms } => Expr::new(
-            ExprKind::Match {
-                scrutinee: Box::new(lower_expr(*scrutinee, enums, current_module)),
-                arms: arms
-                    .into_iter()
-                    .map(|a| MatchArm {
-                        pattern: lower_pattern(a.pattern, enums, current_module),
-                        body: lower_expr(a.body, enums, current_module),
-                    })
-                    .collect(),
-            },
-            span,
-        ),
-        ExprKind::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => Expr::new(
-            ExprKind::If {
-                cond: Box::new(lower_expr(*cond, enums, current_module)),
-                then_branch: Box::new(lower_expr(*then_branch, enums, current_module)),
-                else_branch: Box::new(lower_expr(*else_branch, enums, current_module)),
-            },
-            span,
-        ),
-        ExprKind::Binary { op, left, right } => Expr::new(
-            ExprKind::Binary {
-                op,
-                left: Box::new(lower_expr(*left, enums, current_module)),
-                right: Box::new(lower_expr(*right, enums, current_module)),
-            },
-            span,
-        ),
         ExprKind::Call { callee, args } => {
             let args: Vec<Expr> = args
                 .into_iter()
@@ -289,36 +160,20 @@ pub fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Ex
                 span,
             )
         }
-        ExprKind::Lambda { param, body } => Expr::new(
-            ExprKind::Lambda {
-                param,
-                body: Box::new(lower_expr(*body, enums, current_module)),
-            },
-            span,
-        ),
-        ExprKind::Field { base, field } => Expr::new(
-            ExprKind::Field {
-                base: Box::new(lower_expr(*base, enums, current_module)),
-                field,
-            },
-            span,
-        ),
-        ExprKind::MethodCall {
-            receiver,
-            method,
-            args,
-        } => Expr::new(
-            ExprKind::MethodCall {
-                receiver: Box::new(lower_expr(*receiver, enums, current_module)),
-                method,
-                args: args
+        ExprKind::Match { scrutinee, arms } => Expr::new(
+            ExprKind::Match {
+                scrutinee: Box::new(lower_expr(*scrutinee, enums, current_module)),
+                arms: arms
                     .into_iter()
-                    .map(|a| lower_expr(a, enums, current_module))
+                    .map(|a| MatchArm {
+                        pattern: lower_pattern(a.pattern, enums, current_module),
+                        body: lower_expr(a.body, enums, current_module),
+                    })
                     .collect(),
             },
             span,
         ),
-        other => Expr::new(other, span),
+        kind => Expr { kind, span }.map_children(|c| lower_expr(c, enums, current_module)),
     }
 }
 

@@ -310,22 +310,12 @@ def inferRequirePredTy(pred: Expr, receiverTy: Type, enums: List, funs: List, en
     case _ => inferRequirePredExprTy(pred, enums, funs, env)
   }
 
-def inferRequireLambda(param: String, body: Expr, receiverTy: Type, enums: List, funs: List, env: List, ret: Type): TyRes =
-  for {
-    pr = inferRequireLambdaTy(param, body, receiverTy, enums, funs, env)
-  } yield if (tyIsOk(pr) == 0) pr else tyOk(ret)
-
 def inferRequireLambdaTy(param: String, body: Expr, receiverTy: Type, enums: List, funs: List, env: List): TyRes =
   for {
     inner = if (tyIsIo(receiverTy) == 1) tyIoInner(receiverTy) else receiverTy
     env2 = if (streq(param, "_") == 1) env else tyEnvPut(env, param, inner)
     br = inferExpr(body, enums, funs, env2)
   } yield if (tyIsOk(br) == 0) br else if (predOkTy(tyVal(br)) == 0) tyErr(str3(".require lambda must return Bool/Int or IO[Bool/Int], got ", tyShow(tyVal(br)), "")) else br
-
-def inferRequirePredExpr(pred: Expr, receiverTy: Type, enums: List, funs: List, env: List, ret: Type): TyRes =
-  for {
-    pr = inferRequirePredExprTy(pred, enums, funs, env)
-  } yield if (tyIsOk(pr) == 0) pr else tyOk(ret)
 
 def inferRequirePredExprTy(pred: Expr, enums: List, funs: List, env: List): TyRes =
   for {

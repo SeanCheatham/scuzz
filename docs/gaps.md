@@ -27,7 +27,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ## Known gaps
 
-### Near-term (verification pivot: in-source oracles + drivers)
+### Near-term (in-source oracles + drivers)
 
 Vision locks **oracles in source, drivers as the test surface** ([`vision.md`](vision.md#laws-simulation-mutation-and-verification)). Stage 0 and `compiler-scuzz/` parse top-level `law name: Bool = …`, provide `.require` (type-preserving application; residual `Law.check` / sequenced `Law.assert`), `Law.check` / `Law.sometimes`, load stem-paired `*.scuzz_drivers`, and attach `where` refinements on `def` params and `record` fields. Unused laws fail `check`.
 
@@ -43,7 +43,7 @@ Open questions parked here: driver argument generation beyond `Int`/`String`; co
 - **Concurrency** — cooperative fibers only; `IO.ensure` / `Resource` release on cancel (including `IO.timeout`). Next IO slices: language `Fiber` (fork/join/interrupt), then `forever` / `repeatN` / `retryN`. Later: OS threads, supervision trees.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting; `Signal.list` frees unshared cons spines. Later: a collector if list-churn still demands it.
 - **Language surface** — richer generics beyond monomorphized defs/enums/records ([`compatibility.md`](compatibility.md)).
-- **Built-in mutation testing** — vision locks mutation as part of the one `scuzz` verification strategy (with fuzz, laws, sim, determinism). Laws + fuzz + TestRuntime exist; a first-class mutation command/surface does not yet. No external mutators. Mutation targets the in-source oracles above once the pivot lands; the compiler owning codegen means IR-level mutation, not source rewriting.
+- **Built-in mutation testing** — vision locks mutation as part of the one `scuzz` verification strategy (with fuzz, laws, sim, determinism). Laws + fuzz + TestRuntime exist; a first-class mutation command/surface does not yet. No external mutators. Mutation targets the in-source oracles (IR-level, not source rewriting).
 
 ### Dependency forms beyond `path`
 

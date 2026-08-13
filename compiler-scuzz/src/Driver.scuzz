@@ -36,9 +36,6 @@ def isSimName(name: String): Int =
 def isDriverName(name: String): Int =
   if (endsWith(name, ".scuzz_drivers") == 1) 1 else 0
 
-def isLawsName(name: String): Int =
-  if (endsWith(name, ".scuzz_laws") == 1) 1 else 0
-
 def liveStem(name: String): String =
   Str.slice(name, 0, Str.len(name) - 6)
 
@@ -797,21 +794,16 @@ def loadPackageBundle(pkgDir: String): IO[List] =
   IO.fail(str3("missing src/ in ", pkgDir, "")).flatMap(_ => IO.pure(List.cons(List.empty(), List.cons(List.empty(), List.empty()))))
 )
 
-def rejectLawsFiles(names: List): IO[Unit] =
-  if (List.isEmpty(names) == 1) IO.pure(()) else if (isLawsName(List.head(names)) == 1) IO.fail(str3(List.head(names), ": *.scuzz_laws is removed; declare `law name: Bool = …` in the live *.scuzz module", "")) else rejectLawsFiles(List.tail(names))
-
 def loadPackageFromNames(srcDir: String, names: List): IO[List] =
   for {
     stems = collectLiveStems(names, List.empty())
     simNames = filterSimNames(names, List.empty())
     driverNames = filterDriverNames(names, List.empty())
-  } yield rejectLawsFiles(names).flatMap(_ =>
-  validateOverlayStems(stems, simNames).flatMap(_ =>
-    validateOverlayStems(stems, driverNames).flatMap(_ =>
-      readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty()).flatMap(texts =>
-        readOverlayFiles(srcDir, "sim", simNames, List.empty()).flatMap(sims =>
-          readOverlayFiles(srcDir, "drivers", driverNames, List.empty()).flatMap(drvs => IO.pure(List.cons(texts, List.cons(listConcat(sims, drvs), List.empty()))))
-        )
+  } yield validateOverlayStems(stems, simNames).flatMap(_ =>
+  validateOverlayStems(stems, driverNames).flatMap(_ =>
+    readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty()).flatMap(texts =>
+      readOverlayFiles(srcDir, "sim", simNames, List.empty()).flatMap(sims =>
+        readOverlayFiles(srcDir, "drivers", driverNames, List.empty()).flatMap(drvs => IO.pure(List.cons(texts, List.cons(listConcat(sims, drvs), List.empty()))))
       )
     )
   )
