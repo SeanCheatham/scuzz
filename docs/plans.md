@@ -2,4 +2,4 @@
 
 ## Next
 
-**Server listen on self-host.** Stage 0 `Net.serveOnce` ships (`examples/server`; TestRuntime injects a GET path). Next: the same surface through `compiler-scuzz`. Live accept still blocks the fiber like `httpGet`.
+**One static-hygiene command.** `fmt` and `check` are separate; there is no linter. Next: fold format + typecheck + lint into one author-facing command (`check`, with JSON diagnostics still the editor protocol). Do not add a third `lint` ritual.

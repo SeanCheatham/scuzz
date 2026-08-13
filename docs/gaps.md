@@ -29,13 +29,13 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### Near-term (HUMANS alignment)
 
-- **Server listen/serve** — Stage 0 `Net.serveOnce(port, path => IO[String])` handles one HTTP/1.0 GET (`examples/server`; TestRuntime injects the path via `SCUZZ_TESTRT_NET_REQUEST`, default `/`). Live accept/read/write blocks the fiber like `httpGet` (code **6**). Self-host (`compiler-scuzz`) is the remaining slice. Persistent accept/poll loop is later.
 - **One static-hygiene command** — `fmt` and `check` are separate; there is no linter. Fold format + typecheck + lint into one author-facing command (`check`, with JSON diagnostics still the editor protocol). Do not add a third `lint` ritual.
 - **Nested `View` only** — `View.addChild` is used by `examples/todo` (empty `View.column()` / `View.row()` then mutate). Product surface is nested constructors. Remove `addChild` from Stage 0 and self-host; rewrite todo.
 - **Hot reload and debugging tools** — HUMANS wants Headless + in-process reload + debug, especially for agents. Headless is a peer runtime today; `watch` only rebuilds. Do not document rebuild-as-reload.
 
 ### Residuals
 
+- **Net listen** — `Net.serveOnce` one HTTP/1.0 GET on Stage 0 and self-host (`examples/server`; TestRuntime injects the path). Live accept blocks the fiber like `httpGet` (code **6**). Later: persistent accept/poll.
 - **Concurrency** — cooperative fibers + TestRuntime virtual-time jumps (`test_io.c`); Scuzz `Ref` / `Queue` / `Deferred` (String payloads) via Stage 0 + self-host (`examples/concurrency`). Live / default ready-queue pick is FIFO; `scuzz fuzz --iters` uses seed-driven pick among n>1 (`SCUZZ_SCHED_SEED`). Live `IO.race` of sleeps waits only for the soonest wake; idle `nanosleep` is EINTR-interruptible so a cancelled sleeper cannot hold the run loop. Later: OS threads, supervision trees.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting (`test_ui.c`, optional `test-asan`). `View.each` with a stable `Signal.list` is pump-flat; `Signal.list` frees unshared cons spines on set and string heads on free (`test_signal_list_spine_collect`). Shared tails (cons onto the current list) stay. Later: a collector if list-churn still demands it.
 - **File-as-module** — stem namespaces for defs and enums + `private def` + `import Module.name` on Stage 0 and self-host (`examples/modules`). **`record`** product types + `p.x` field access (`examples/record`). Thin **traits**/`impl` with static-dispatch method calls (`examples/trait`). Stage 0 and self-host **monomorphized** generics on defs (N type params; `examples/generic`) and on enums/records (`enum Opt[T]:` / `record Box[T](x: T)`; `examples/genum`). Later: richer generics — [`compatibility.md`](compatibility.md).
