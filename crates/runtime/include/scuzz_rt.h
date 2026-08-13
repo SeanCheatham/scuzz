@@ -114,7 +114,8 @@ typedef enum SzIoTag {
   SZ_IO_RACE,
   SZ_IO_BOTH,
   SZ_IO_QUEUE_TAKE,
-  SZ_IO_DEFERRED_GET
+  SZ_IO_DEFERRED_GET,
+  SZ_IO_POLL_FD
 } SzIoTag;
 
 struct SzIo {
@@ -149,6 +150,7 @@ struct SzIo {
     } both;
     SzQueue *queue_take;
     SzDeferred *deferred_get;
+    int poll_fd;
   } as;
 };
 
@@ -167,14 +169,16 @@ SzIo *sz_io_both(SzIo *left, SzIo *right);
 /* Internal constructors used by queue/deferred kits. */
 SzIo *sz_io_queue_take(SzQueue *q);
 SzIo *sz_io_deferred_get(SzDeferred *d);
+SzIo *sz_io_poll_readable(int fd); /* IO[Unit]; park until fd is readable */
 
 /* Run to completion on the calling thread.
- * Concurrency is cooperative single-threaded fibers: sleep/Queue/Deferred park;
- * race/both fork left-then-right onto a ready queue. Live / default: FIFO pick.
- * When SCUZZ_SCHED_SEED is set (fuzz), ready-fiber pick among n>1 is seed-driven
- * (Lehmer/MINSTD). TestRuntime jumps virtual time to the next wakeup when all
- * fibers are blocked on timers. Live idle sleep is interruptible (EINTR
- * re-checks soonest wake so a cancelled sleeper cannot hold the run loop). */
+ * Concurrency is cooperative single-threaded fibers: sleep/Queue/Deferred/poll
+ * park; race/both fork left-then-right onto a ready queue. Live / default: FIFO
+ * pick. When SCUZZ_SCHED_SEED is set (fuzz), ready-fiber pick among n>1 is
+ * seed-driven (Lehmer/MINSTD). TestRuntime jumps virtual time to the next wakeup
+ * when all fibers are blocked on timers. Live idle wait uses poll (and
+ * interruptible nanosleep when only timers remain) so a cancelled sleeper or a
+ * ready listen socket cannot hold the run loop. */
 typedef struct SzIoResult {
   int ok; /* 1 success, 0 error */
   void *value;

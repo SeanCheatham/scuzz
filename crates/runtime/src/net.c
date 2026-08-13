@@ -3,6 +3,7 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
+#include <fcntl.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <stdio.h>
@@ -16,6 +17,7 @@
 
 typedef struct {
   int is_err;
+  int retry; /* 1 = accept EAGAIN; caller should poll again */
   union {
     SzError *err;
     void *ok;
@@ -157,8 +159,9 @@ SzIo *sz_net_http_get(SzString *url) {
   return sz_io_flatmap(sz_io_delay(net_http_get_live, url), unwrap_net, NULL);
 }
 
-/* HTTP/1.0 GET server. Live accept/read/write blocks the fiber (same as
- * httpGet). TestRuntime injects paths and skips sockets. Error code 6.
+/* HTTP/1.0 GET server. Listen is nonblocking; the fiber parks on poll until a
+ * client is ready so other IO can run. Connection read/write still block.
+ * TestRuntime injects paths and skips sockets. Error code 6.
  * serveOnce is one request; serve keeps the listen socket (n<=0 forever live,
  * or until the TestRuntime queue is empty). */
 
@@ -198,6 +201,20 @@ static void serve_free(ServeSt *st) {
   sz_free(st);
 }
 
+static int set_nonblock(int fd) {
+  int fl = fcntl(fd, F_GETFL, 0);
+  if (fl < 0)
+    return -1;
+  return fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+}
+
+static int set_block(int fd) {
+  int fl = fcntl(fd, F_GETFL, 0);
+  if (fl < 0)
+    return -1;
+  return fcntl(fd, F_SETFL, fl & ~O_NONBLOCK);
+}
+
 static int parse_get_path(const char *req, char *path, size_t path_sz) {
   const char *p;
   const char *end;
@@ -218,22 +235,62 @@ static int parse_get_path(const char *req, char *path, size_t path_sz) {
   return 1;
 }
 
+static void *serve_ensure_listen(void *env) {
+  ServeSt *st = (ServeSt *)env;
+  NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
+  struct sockaddr_in addr;
+  int fd;
+  int one = 1;
+  int port;
+
+  if (sz_testrt_net_is_fake()) {
+    r->is_err = 0;
+    return r;
+  }
+  port = (int)st->port;
+  if (port <= 0 || port > 65535) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(6, "Net.serve: port must be 1..65535");
+    return r;
+  }
+  if (st->listen_fd >= 0) {
+    r->is_err = 0;
+    return r;
+  }
+  fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(6, "Net.serve: socket failed");
+    return r;
+  }
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+  memset(&addr, 0, sizeof addr);
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)port);
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  if (bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0 ||
+      listen(fd, 16) != 0 || set_nonblock(fd) != 0) {
+    close(fd);
+    r->is_err = 1;
+    r->as.err = sz_error_new(6, "Net.serve: bind/listen failed");
+    return r;
+  }
+  st->listen_fd = fd;
+  r->is_err = 0;
+  return r;
+}
+
 static void *serve_accept_read(void *env) {
   ServeSt *st = (ServeSt *)env;
-  NetResult *r = (NetResult *)sz_alloc(sizeof(NetResult));
-  struct sockaddr_in addr;
-  int fd = -1;
+  NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
+  int fd;
   int conn = -1;
-  int one = 1;
   char buf[4096];
   size_t total = 0;
   ssize_t n;
   char path[1024];
-  int port;
 
   st->conn_fd = -1;
-  if (st->listen_fd < 0)
-    st->listen_fd = -1;
 
   /* Chosen at step time so SCUZZ_TESTRT=1 install in runtime_main is visible. */
   if (sz_testrt_net_is_fake()) {
@@ -243,42 +300,23 @@ static void *serve_accept_read(void *env) {
     sz_free(path_s);
     return r;
   }
-  port = (int)st->port;
-  if (port <= 0 || port > 65535) {
+  fd = st->listen_fd;
+  if (fd < 0) {
     r->is_err = 1;
-    r->as.err = sz_error_new(6, "Net.serve: port must be 1..65535");
+    r->as.err = sz_error_new(6, "Net.serve: not listening");
     return r;
-  }
-
-  if (st->listen_fd >= 0)
-    fd = st->listen_fd;
-  else {
-    fd = socket(AF_INET, SOCK_STREAM, 0);
-    if (fd < 0) {
-      r->is_err = 1;
-      r->as.err = sz_error_new(6, "Net.serve: socket failed");
-      return r;
-    }
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
-    memset(&addr, 0, sizeof addr);
-    addr.sin_family = AF_INET;
-    addr.sin_port = htons((uint16_t)port);
-    addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-    if (bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0 ||
-        listen(fd, 16) != 0) {
-      close(fd);
-      r->is_err = 1;
-      r->as.err = sz_error_new(6, "Net.serve: bind/listen failed");
-      return r;
-    }
-    st->listen_fd = fd;
   }
   conn = accept(fd, NULL, NULL);
   if (conn < 0) {
+    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+      r->retry = 1;
+      return r;
+    }
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.serve: accept failed");
     return r;
   }
+  set_block(conn);
   st->conn_fd = conn;
 
   while (total + 1 < sizeof buf) {
@@ -334,6 +372,39 @@ static void *serve_write_close(void *env) {
 
 static SzIo *serve_round(ServeSt *st);
 
+static SzIo *serve_poll_then_accept(void *value, void *env);
+
+static SzIo *serve_unwrap_or_repoll(void *value, void *env) {
+  ServeSt *st = (ServeSt *)env;
+  NetResult *r = (NetResult *)value;
+  if (r && r->retry) {
+    sz_free(r);
+    return serve_poll_then_accept(NULL, st);
+  }
+  return unwrap_net(value, NULL);
+}
+
+static SzIo *serve_after_poll(void *value, void *env) {
+  ServeSt *st = (ServeSt *)env;
+  (void)value;
+  return sz_io_flatmap(sz_io_delay(serve_accept_read, st), serve_unwrap_or_repoll,
+                       st);
+}
+
+static SzIo *serve_poll_then_accept(void *value, void *env) {
+  ServeSt *st = (ServeSt *)env;
+  (void)value;
+  return sz_io_flatmap(sz_io_poll_readable(st->listen_fd), serve_after_poll, st);
+}
+
+static SzIo *serve_after_listen(void *value, void *env) {
+  ServeSt *st = (ServeSt *)env;
+  (void)value;
+  if (sz_testrt_net_is_fake())
+    return sz_io_flatmap(sz_io_delay(serve_accept_read, st), unwrap_net, NULL);
+  return serve_poll_then_accept(NULL, st);
+}
+
 static SzIo *serve_after_write(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
   (void)value;
@@ -370,7 +441,12 @@ static SzIo *serve_round(ServeSt *st) {
     serve_free(st);
     return sz_io_pure(NULL);
   }
-  prog = sz_io_flatmap(sz_io_delay(serve_accept_read, st), unwrap_net, NULL);
+  if (sz_testrt_net_is_fake())
+    prog = sz_io_flatmap(sz_io_delay(serve_accept_read, st), unwrap_net, NULL);
+  else {
+    prog = sz_io_flatmap(sz_io_delay(serve_ensure_listen, st), unwrap_net, NULL);
+    prog = sz_io_flatmap(prog, serve_after_listen, st);
+  }
   prog = sz_io_flatmap(prog, serve_after_path, st);
   return sz_io_flatmap(prog, serve_after_write, st);
 }

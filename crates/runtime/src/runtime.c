@@ -2,6 +2,7 @@
 #include "scuzz_rt.h"
 
 #include <errno.h>
+#include <poll.h>
 #include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -393,6 +394,15 @@ SzIo *sz_io_deferred_get(SzDeferred *d) {
   return io;
 }
 
+SzIo *sz_io_poll_readable(int fd) {
+  SzIo *io;
+  if (fd < 0)
+    return sz_io_fail_cstr("poll: invalid fd");
+  io = sz_io_new(SZ_IO_POLL_FD);
+  io->as.poll_fd = fd;
+  return io;
+}
+
 void sz_io_free(SzIo *io) {
   /* Shallow free; graphs are short-lived process heaps. */
   sz_free(io);
@@ -415,6 +425,7 @@ typedef enum FiberState {
   FIB_SLEEP,
   FIB_QWAIT,
   FIB_DWAIT,
+  FIB_POLL,
   FIB_JOIN,
   FIB_DONE,
   FIB_CANCELLED
@@ -427,6 +438,7 @@ typedef struct Fiber {
   SzIo *cur;
   FiberState state;
   int64_t wake_at;
+  int poll_fd;
   SzQueue *qwait;
   SzDeferred *dwait;
   struct Fiber *parent;
@@ -448,6 +460,7 @@ typedef struct Sched {
   Fiber *ready_head;
   Fiber *ready_tail;
   Fiber *sleepers;
+  Fiber *pollers;
   Fiber *root;
   Fiber *current;
   int sched_armed;   /* 1 when SCUZZ_SCHED_SEED is set */
@@ -650,6 +663,23 @@ static void def_waiter_remove(SzDeferred *d, Fiber *f) {
   }
 }
 
+static void poller_add(Sched *s, Fiber *f) {
+  f->wait_next = s->pollers;
+  s->pollers = f;
+}
+
+static void poller_remove(Sched *s, Fiber *f) {
+  Fiber **pp = &s->pollers;
+  while (*pp) {
+    if (*pp == f) {
+      *pp = f->wait_next;
+      f->wait_next = NULL;
+      return;
+    }
+    pp = &(*pp)->wait_next;
+  }
+}
+
 static Fiber *fiber_new(SzIo *cur, Fiber *parent, JoinKind jk, int slot) {
   Fiber *f = (Fiber *)sz_alloc_zero(sizeof(Fiber));
   f->cur = cur;
@@ -669,6 +699,8 @@ static void fiber_cancel(Sched *s, Fiber *f) {
     queue_waiter_remove(f->qwait, f);
   if (f->state == FIB_DWAIT && f->dwait)
     def_waiter_remove(f->dwait, f);
+  if (f->state == FIB_POLL)
+    poller_remove(s, f);
   if (f->children[0])
     fiber_cancel(s, f->children[0]);
   if (f->children[1])
@@ -994,6 +1026,32 @@ static int step_fiber(Sched *s, Fiber *f) {
     def_waiter_add(d, f);
     return 0;
   }
+  case SZ_IO_POLL_FD: {
+    struct pollfd pfd;
+    int n;
+    pfd.fd = cur->as.poll_fd;
+    pfd.events = POLLIN;
+    pfd.revents = 0;
+    n = poll(&pfd, 1, 0);
+    if (n < 0 && errno != EINTR) {
+      fiber_fail(s, f, sz_error_new(6, "poll failed"));
+      return 0;
+    }
+    if (n > 0 && (pfd.revents & (POLLERR | POLLNVAL))) {
+      fiber_fail(s, f, sz_error_new(6, "poll failed"));
+      return 0;
+    }
+    if (n > 0) {
+      f->cur = sz_io_pure(NULL);
+      ready_enqueue(s, f);
+      return 0;
+    }
+    f->poll_fd = cur->as.poll_fd;
+    f->state = FIB_POLL;
+    f->cur = NULL;
+    poller_add(s, f);
+    return 0;
+  }
   default:
     fiber_finish(s, f, 0, NULL, sz_error_new(4, "invalid IO tag"));
     return 0;
@@ -1036,34 +1094,100 @@ static int64_t next_wake_at(Sched *s) {
   return best;
 }
 
+enum { SZ_POLL_CAP = 64 };
+
+static int fill_pollfds(Sched *s, struct pollfd *pfds, Fiber **fibs, int cap) {
+  Fiber *f = s->pollers;
+  int n = 0;
+  while (f && n < cap) {
+    pfds[n].fd = f->poll_fd;
+    pfds[n].events = POLLIN;
+    pfds[n].revents = 0;
+    fibs[n] = f;
+    n++;
+    f = f->wait_next;
+  }
+  return n;
+}
+
+static int wake_pollers(Sched *s, struct pollfd *pfds, Fiber **fibs, int n) {
+  int i;
+  int woke = 0;
+  for (i = 0; i < n; i++) {
+    Fiber *f = fibs[i];
+    short rev;
+    if (!f || f->state != FIB_POLL)
+      continue;
+    rev = pfds[i].revents;
+    if (!rev)
+      continue;
+    poller_remove(s, f);
+    if (rev & (POLLERR | POLLNVAL)) {
+      fiber_fail(s, f, sz_error_new(6, "poll failed"));
+    } else {
+      f->cur = sz_io_pure(NULL);
+      ready_enqueue(s, f);
+    }
+    woke = 1;
+  }
+  return woke;
+}
+
 static int idle_advance(Sched *s) {
   for (;;) {
     int64_t now = sz_clock_monotonic_ms_sync();
     int64_t next = next_wake_at(s);
     int64_t delta;
-    if (next < 0)
+    struct pollfd pfds[SZ_POLL_CAP];
+    Fiber *fibs[SZ_POLL_CAP];
+    int npoll;
+    int timeout_ms;
+    int pr;
+    if (next >= 0 && next <= now)
+      return wake_sleepers(s, now);
+    npoll = fill_pollfds(s, pfds, fibs, SZ_POLL_CAP);
+    if (npoll <= 0 && next < 0)
       return 0;
-    if (next <= now)
-      return wake_sleepers(s, now);
-    delta = next - now;
-    if (sz_testrt_clock_is_fake()) {
-      sz_testrt_clock_advance(delta);
-      now = sz_clock_monotonic_ms_sync();
-      return wake_sleepers(s, now);
-    }
-    {
-      struct timespec ts;
-      struct timespec rem;
-      ts.tv_sec = (time_t)(delta / 1000);
-      ts.tv_nsec = (long)((delta % 1000) * 1000000L);
-      if (nanosleep(&ts, &rem) < 0 && errno == EINTR) {
-        /* Recompute soonest wake so a cancelled sleeper cannot keep us blocked. */
-        continue;
+    if (npoll <= 0) {
+      delta = next - now;
+      if (sz_testrt_clock_is_fake()) {
+        sz_testrt_clock_advance(delta);
+        now = sz_clock_monotonic_ms_sync();
+        return wake_sleepers(s, now);
       }
+      {
+        struct timespec ts;
+        struct timespec rem;
+        ts.tv_sec = (time_t)(delta / 1000);
+        ts.tv_nsec = (long)((delta % 1000) * 1000000L);
+        if (nanosleep(&ts, &rem) < 0 && errno == EINTR)
+          continue;
+      }
+      now = sz_clock_monotonic_ms_sync();
+      if (wake_sleepers(s, now))
+        return 1;
+      continue;
     }
+    if (next < 0)
+      timeout_ms = -1;
+    else {
+      delta = next - now;
+      if (delta < 0)
+        delta = 0;
+      if (delta > 86400000)
+        delta = 86400000;
+      timeout_ms = (int)delta;
+    }
+    pr = poll(pfds, (nfds_t)npoll, timeout_ms);
+    if (pr < 0 && errno == EINTR)
+      continue;
     now = sz_clock_monotonic_ms_sync();
+    if (pr > 0 && wake_pollers(s, pfds, fibs, npoll))
+      return 1;
     if (wake_sleepers(s, now))
       return 1;
+    if (pr < 0)
+      return 0;
   }
 }
 

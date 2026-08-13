@@ -183,6 +183,30 @@ static void *live_get_two(void *arg) {
   return buf;
 }
 
+static volatile int g_peer_flag;
+
+static SzIo *assert_peer_quiet(void *value, void *env) {
+  (void)value;
+  (void)env;
+  assert(g_peer_flag == 0);
+  return sz_io_pure(NULL);
+}
+
+static void *pipe_late_write(void *arg) {
+  int fd = *(int *)arg;
+  usleep(40000);
+  g_peer_flag = 1;
+  if (write(fd, "x", 1) < 0)
+    return NULL;
+  return NULL;
+}
+
+static void *live_get_client_late(void *arg) {
+  usleep(50000);
+  g_peer_flag = 1;
+  return live_get_client(arg);
+}
+
 static SzIo *recover_boom(SzError *err, void *env) {
   (void)env;
   assert(err && strstr(sz_string_cstr(err->message), "boom"));
@@ -655,6 +679,39 @@ int main(void) {
     assert(r.ok);
     assert(ret && strstr((char *)ret, "ok:/a") != NULL);
     assert(ret && strstr((char *)ret, "ok:/b") != NULL);
+  }
+
+  /* poll parks so a peer fiber can run before the fd is readable. */
+  {
+    pthread_t th;
+    int fds[2];
+    char c = 0;
+    assert(pipe(fds) == 0);
+    g_peer_flag = 0;
+    pthread_create(&th, NULL, pipe_late_write, &fds[1]);
+    r = sz_io_unsafe_run(sz_io_both(
+        sz_io_poll_readable(fds[0]),
+        sz_io_flatmap(sz_io_println_cstr("peer"), assert_peer_quiet, NULL)));
+    pthread_join(th, NULL);
+    assert(r.ok);
+    assert(read(fds[0], &c, 1) == 1 && c == 'x');
+    close(fds[0]);
+    close(fds[1]);
+  }
+
+  /* Live accept parks; a peer fiber runs before the client dials. */
+  {
+    pthread_t th;
+    int port = 18475;
+    void *ret = NULL;
+    g_peer_flag = 0;
+    pthread_create(&th, NULL, live_get_client_late, &port);
+    r = sz_io_unsafe_run(sz_io_both(
+        sz_net_serve_once(port, serve_path_ok, NULL),
+        sz_io_flatmap(sz_io_println_cstr("peer"), assert_peer_quiet, NULL)));
+    pthread_join(th, &ret);
+    assert(r.ok);
+    assert(ret && strstr((char *)ret, "ok:/x") != NULL);
   }
 
   /* Alloc accounting: live_count returns to baseline after free. */

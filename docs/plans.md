@@ -2,4 +2,4 @@
 
 ## Next
 
-**Nonblocking Net poll.** HUMANS Headless + stamp-watch + live dump + live inject + `Net.serve` persistent listen are in. Live accept still blocks the fiber. Next: poll so a server can share the run loop with other IO. Still not Flutter VM patching.
+**Poll Net connection I/O.** HUMANS Headless + stamp-watch + live dump + live inject + `Net.serve` listen poll are in. Accepted connection read/write and `httpGet` still block the fiber. Still not Flutter VM patching.
