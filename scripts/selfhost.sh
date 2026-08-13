@@ -3,9 +3,9 @@
 # Each stage must smoke examples/hello + examples/adt + examples/modules +
 # examples/record + examples/trait + examples/generic, pass the Headless goldens
 # (counter/todo/nav), smoke fuzz on examples/todo, smoke fuzz --exhaust --depth 1
-# on examples/counter, smoke IO-only fuzz on examples/concurrency, and agree with
-# Stage 0 on fmt --check for the compiler sources. Stage 2 must re-emit
-# byte-identical compiler IR.
+# on examples/counter, smoke IO-only fuzz on examples/concurrency, smoke
+# examples/resource, and agree with Stage 0 on fmt --check for the compiler
+# sources. Stage 2 must re-emit byte-identical compiler IR.
 # Fail loudly: every stage must succeed; no masked exit codes.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -74,6 +74,14 @@ stage_checks() {
 
   echo "==> $stage fuzz smoke (examples/concurrency, IO-only schedules)"
   "$bin" fuzz --iters 4 examples/concurrency
+
+  echo "==> $stage runs examples/resource"
+  resource_out="$("$bin" run examples/resource)"
+  echo "$resource_out"
+  echo "$resource_out" | grep -q "use:token"
+  echo "$resource_out" | grep -q "release:token"
+  echo "$resource_out" | grep -q "release:token2"
+  echo "$resource_out" | grep -q "recovered"
 
   echo "==> $stage fmt --check (compiler-scuzz sources)"
   "$bin" fmt --check compiler-scuzz

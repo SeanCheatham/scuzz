@@ -2,4 +2,4 @@
 
 ## Next
 
-**Resource on Stage 1/2.** Stage 0 already exposes `Resource.make` / `Resource.use` (String payload; bracket release on success and `IO` failure; `examples/resource`). Port parser / typer / codegen in `compiler-scuzz`, smoke the example through `scripts/selfhost.sh`, then close the gap. Kernel dialect only — no `Stream` or listen/serve in this slice.
+**FS2-shaped `Stream`.** `Resource.make` / `use` is on Stage 0 and self-host. Next: builtin pull/chunk combinators (FS2 spirit, not a port), residual under TestRuntime, a small example. Kernel dialect only — no listen/serve in this slice.
