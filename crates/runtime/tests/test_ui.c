@@ -325,6 +325,21 @@ static void test_watch_rebuild_keeps_signals(void) {
   remove(stamp);
 }
 
+static SzView *run_rebuild_factory(void *env) {
+  SzSignalInt *count = (SzSignalInt *)env;
+  SzView *root = sz_view_column();
+  sz_view_add_child(root, sz_view_text_signal_int(count, "n="));
+  return root;
+}
+
+static void test_ui_run_rebuild(void) {
+  SzSignalInt *count = sz_signal_int(7);
+  SzIoResult r = sz_io_unsafe_run(sz_ui_run_rebuild(run_rebuild_factory, count));
+  assert(r.ok);
+  assert(sz_signal_int_get(count) == 7);
+  sz_signal_int_free(count);
+}
+
 typedef struct {
   SzSignalInt *sig;
   int64_t value;
@@ -1173,6 +1188,7 @@ int main(void) {
   test_signals_layout_hit();
   test_replace_root_keeps_signals();
   test_watch_rebuild_keeps_signals();
+  test_ui_run_rebuild();
   test_button_set_and_show_when();
   test_widgets();
   test_expanded_column();

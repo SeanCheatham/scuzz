@@ -66,7 +66,7 @@ Build a pure `View` tree, hold state in `Signal`, run a session with `Ui.run`:
 
 Lists: keep a `Signal.list`, render with `View.each(items)` (framework rebuilds children at layout). Wrap a scroll list in `View.expanded(…)` inside a Column so it fills leftover height; in a Row, `View.expanded` takes leftover width. `View.center(child)` fills the max slot and centers the child; `View.align(ax, ay, child)` places the child (`0` start / `1` center / `2` end); `View.stack(…)` overlays children; `View.positioned(x, y, child)` offsets a Stack child; `View.padding(n, child)` insets uniformly; `View.sized(w, h, child)` is a tight slot; `View.minSize(w, h, child)` raises min size (`0` = no floor on that axis); `View.background(color, child)` paints `color` and sizes to the child; `View.aspectRatio(rw, rh, child)` is the largest `rw:rh` box that fits incoming max; `View.fraction(wpct, hpct, child)` takes that percent of incoming max (`0` = size to child on that axis). See `examples/counter`, `examples/todo`, and `examples/nav`.
 
-`Ui.run` under Headless: mount → optional scripted text/tap (`tap_text` in toml / env) → snapshot → unmount. Window stays open when `[ui].default_runtime = "window"`.
+`Ui.run` under Headless: mount → optional scripted text/tap (`tap_text` in toml / env) → snapshot → unmount. Window stays open when `[ui].default_runtime = "window"`. Stage 0 also accepts `Ui.run(_ => view)` so construction can re-run on stamp-watch; examples still pass a View until self-host ports the factory.
 
 ## Shared packages (path dependencies)
 

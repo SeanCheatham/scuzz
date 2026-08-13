@@ -1575,6 +1575,16 @@ fn infer_call(
         }
         "Ui.run" => {
             expect_arity(callee, &arg_tys, 1)?;
+            let ok = matches!(
+                &arg_tys[0],
+                Type::Opaque(n) if n == "View" || n == "TapFn"
+            );
+            if !ok {
+                return Err(TypeError::Msg(format!(
+                    "Ui.run expects View or _ => View, got {:?}",
+                    arg_tys[0]
+                )));
+            }
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         _ => {
@@ -3602,6 +3612,29 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Net.serveOnce should typecheck");
+    }
+
+    #[test]
+    fn typechecks_ui_run_rebuild_lambda() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.text("x"))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Ui.run factory should typecheck");
+    }
+
+    #[test]
+    fn rejects_ui_run_non_view() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(1)
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("Ui.run expects View"),
+            "expected Ui.run type error, got {}",
+            err.message()
+        );
     }
 
     #[test]

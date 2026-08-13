@@ -134,8 +134,9 @@ SzView *sz_lang_view_bind_text(SzSignalStr *sig) { return sz_view_text_signal_st
 /* --- Ui.run -------------------------------------------------------------- */
 
 typedef struct {
-  SzView *root;
-} RunViewEnv;
+  SzUiRebuildFn rebuild;
+  void *env;
+} RunRebuildEnv;
 
 /* Collect unique buttons in top-to-bottom, left-to-right scan order.
    Frames must be current (run after a pump). */
@@ -289,19 +290,33 @@ static void run_ui_script(SzUiSession *session, const char *path) {
   fclose(f);
 }
 
-static void *thunk_run_view(void *env) {
-  RunViewEnv *e = (RunViewEnv *)env;
+static SzView *constant_root(void *env) { return (SzView *)env; }
+
+static void *thunk_run_rebuild(void *env) {
+  RunRebuildEnv *e = (RunRebuildEnv *)env;
   SzUiConfig cfg;
   SzUiSession *session;
+  SzView *root;
+  const char *stamp;
   int interactive;
   int inject_text = 0;
 
   fill_cfg(&cfg, 0, 0);
 
-  session = sz_ui_mount(&cfg, e->root);
+  if (!e->rebuild)
+    sz_panic("Ui.run rebuild missing");
+  root = e->rebuild(e->env);
+  if (!root)
+    sz_panic("Ui.run rebuild returned null");
+
+  session = sz_ui_mount(&cfg, root);
   if (!session)
     sz_panic("Ui.run mount failed");
   sz_ui_session_take_root(session);
+  sz_ui_session_set_rebuild(session, e->rebuild, e->env);
+  stamp = getenv("SCUZZ_UI_RELOAD_STAMP");
+  if (stamp && stamp[0])
+    sz_ui_session_watch(session, stamp);
 
   if (!sz_ui_pump_sync(session))
     sz_panic("Ui.run pump failed");
@@ -354,8 +369,13 @@ static void *thunk_run_view(void *env) {
   return NULL;
 }
 
+SzIo *sz_ui_run_rebuild(SzUiRebuildFn fn, void *env) {
+  RunRebuildEnv *e = (RunRebuildEnv *)sz_alloc(sizeof(RunRebuildEnv));
+  e->rebuild = fn;
+  e->env = env;
+  return sz_io_delay(thunk_run_rebuild, e);
+}
+
 SzIo *sz_ui_run_view(SzView *root) {
-  RunViewEnv *e = (RunViewEnv *)sz_alloc(sizeof(RunViewEnv));
-  e->root = root;
-  return sz_io_delay(thunk_run_view, e);
+  return sz_ui_run_rebuild(constant_root, root);
 }

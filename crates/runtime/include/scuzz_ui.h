@@ -316,6 +316,9 @@ SzView *sz_lang_view_bind_text(SzSignalStr *sig);
 
 /* Mount prebuilt root → pump → optional scripted tap → snapshot → unmount. */
 SzIo *sz_ui_run_view(SzView *root);
+/* Like sz_ui_run_view, but construction is a factory so stamp-watch can
+ * re-run it. Watches SCUZZ_UI_RELOAD_STAMP when set. */
+SzIo *sz_ui_run_rebuild(SzUiRebuildFn fn, void *env);
 
 #ifdef __cplusplus
 }

@@ -133,6 +133,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_add_child(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_show_when(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_ui_run_view(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_ui_run_rebuild(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_law_signal_int(i64)").unwrap();
     writeln!(out, "declare i64 @sz_law_a11y_has(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_law_assert(ptr, i64)").unwrap();
@@ -1739,6 +1740,93 @@ fn emit_net_serve_once(
     io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
 }
 
+/// `_ => View…` factory for `Ui.run`: `ptr (*)(ptr env)` returning `SzView*`.
+fn emit_rebuild_lambda(
+    param: &Option<String>,
+    body: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    let id = *ctx.cont_id;
+    *ctx.cont_id += 1;
+    let fn_name = format!("sz_uibuild_{id}");
+
+    let capture_names = capture_name_order(locals);
+    let mut pre = String::new();
+    let mut body_locals: HashMap<String, (String, Kind)> = HashMap::new();
+    unpack_env_preamble(
+        &mut pre,
+        &mut body_locals,
+        locals,
+        &capture_names,
+        &format!("u{id}"),
+    );
+    if let Some(p) = param {
+        if p != "_" {
+            body_locals.insert(p.clone(), ("%env".into(), Kind::Ptr));
+        }
+    }
+
+    let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("u{id}"));
+
+    writeln!(
+        ctx.conts,
+        "define internal ptr @{fn_name}(ptr %env) {{"
+    )
+    .unwrap();
+    writeln!(ctx.conts, "entry:").unwrap();
+    ctx.conts.push_str(&pre);
+    ctx.conts.push_str(&body_emitted.code);
+    writeln!(ctx.conts, "  ret ptr {}", body_emitted.value).unwrap();
+    writeln!(ctx.conts, "}}").unwrap();
+    writeln!(ctx.conts).unwrap();
+
+    let mut code = String::new();
+    let env_ptr = pack_env(&mut code, locals, &capture_names, &format!("{prefix}_cap"));
+    writeln!(code, "  %{prefix}_cl0 = call ptr @sz_list_nil()").unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_cl1 = call ptr @sz_list_cons(ptr {env_ptr}, ptr %{prefix}_cl0)"
+    )
+    .unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_cl2 = call ptr @sz_list_cons(ptr @{fn_name}, ptr %{prefix}_cl1)"
+    )
+    .unwrap();
+    val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
+}
+
+fn emit_ui_run(
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 1, "Ui.run expects 1 arg");
+    if let ExprKind::Lambda { param, body } = &args[0].kind {
+        let lam = emit_rebuild_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
+        let mut code = lam.code;
+        unpack_closure(&mut code, &lam.value, prefix);
+        writeln!(
+            code,
+            "  %{prefix}_v = call ptr @sz_ui_run_rebuild(ptr %{prefix}_fnp, ptr %{prefix}_envp)"
+        )
+        .unwrap();
+        return io_emitted(code, format!("%{prefix}_v"), Kind::Ptr);
+    }
+    let root = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let mut code = root.code;
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @sz_ui_run_view(ptr {})",
+        root.value
+    )
+    .unwrap();
+    io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+}
+
 fn emit_binary(
     op: &BinOp,
     left: &Expr,
@@ -1893,6 +1981,9 @@ fn emit_call(
     }
     if callee == "Net.serveOnce" {
         return emit_net_serve_once(args, ctx, locals, prefix);
+    }
+    if callee == "Ui.run" {
+        return emit_ui_run(args, ctx, locals, prefix);
     }
     let mut emitted_args = Vec::new();
     for (i, a) in args.iter().enumerate() {
@@ -2801,6 +2892,33 @@ mod tests {
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_net_serve_once"));
         assert!(ir.contains("sz_rcont_"));
+    }
+
+    #[test]
+    fn emit_ui_run_rebuild_lambda() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.text("x"))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_ui_run_rebuild"));
+        assert!(ir.contains("sz_uibuild_"));
+        assert!(!ir.contains("call ptr @sz_ui_run_view"));
+    }
+
+    #[test]
+    fn emit_ui_run_view_still_emits() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    root = View.text("x")
+    _ <- Ui.run(root)
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("call ptr @sz_ui_run_view"));
     }
 
     #[test]
