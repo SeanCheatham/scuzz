@@ -19,7 +19,7 @@ def helpCheck(): String =
   "scuzz check [project] [--message-format=human|json]\n\nTypecheck live + sim + laws. JSON is the editor protocol (LSP wraps check).\n\nExamples:\n  scuzz check\n  scuzz check --message-format=json\n"
 
 def helpFuzz(): String =
-  "scuzz fuzz [project] [--iters N] [--seed S] [--exhaust --depth N] [--replay FILE]\n\nSearch laws under TestRuntime + Headless. Requires [ui].\n\nExamples:\n  scuzz fuzz --iters 16\n  scuzz fuzz --exhaust --depth 1\n  scuzz fuzz --replay build/fuzz/repro.toml\n"
+  "scuzz fuzz [project] [--iters N] [--seed S] [--exhaust --depth N] [--replay FILE]\n\nSearch laws under TestRuntime. [ui]: event scripts × schedules; IO-only: schedules.\n--exhaust is [ui] event alphabet only (FIFO schedule).\n\nExamples:\n  scuzz fuzz --iters 16\n  scuzz fuzz --iters 16 examples/concurrency\n  scuzz fuzz --exhaust --depth 1\n  scuzz fuzz --replay build/fuzz/repro.toml\n"
 
 def helpFmt(): String =
   "scuzz fmt [project] [--check]\n\nFormat *.scuzz under src/. --check is nonzero if files would change.\n\nExamples:\n  scuzz fmt\n  scuzz fmt --check\n"

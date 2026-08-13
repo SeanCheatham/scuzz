@@ -13,7 +13,7 @@
 - Animation + accessibility hooks (Headless-dumpable); theme polish tokens
 - Stage-2 CLI (release): `build|run|test|check|fuzz|watch|new|package|fmt` (`compiler-scuzz`); Stage-0 Rust for bootstrap only
 - Prebuilt Stage-2 release tree (`scripts/package_release.sh` → `dist/scuzz-<triple>.tar.gz`); `install.sh` installs under `PREFIX/share/scuzz`
-- Deterministic fuzz: `scuzz fuzz` (seeded `--iters`, bounded `--exhaust --depth N`, `--replay repro.toml`) on TestRuntime + Headless; residual module **laws** + sim overlays as the primary oracle
+- Deterministic fuzz: `scuzz fuzz` (seeded `--iters` scripts × schedules for `[ui]`, schedule seeds for IO-only; bounded `--exhaust --depth N` for `[ui]` events; `--replay repro.toml`) on TestRuntime; residual module **laws** + sim overlays as the primary oracle
 - Structural goldens (signal store + a11y dump); PNG optional via `scuzz test --pixels`; IO packages use TESTRT exit-0 smoke
 - Skia linked for `[ui]` packages only (IO-only link is Skia-free); default pinned Skia CPU via `third_party/skia/PIN` (`scripts/fetch_skia.sh`); opt out with `SCUZZ_SKIA=sk_sw` (in-tree software backend); as-needed `skia-cpu` workflow rebuilds the pin
 - Impeller deferred (see `docs/vision.md`)
@@ -75,6 +75,7 @@ env SCUZZ_TESTRT=1 cargo run -p scuzz -- run examples/fs
 # Deterministic fuzz (seeded / exhaustive; --replay build/fuzz/repro.toml on failure)
 scuzz fuzz --iters 16 examples/todo
 scuzz fuzz --exhaust --depth 1 examples/counter
+scuzz fuzz --iters 16 examples/concurrency
 
 # Dual-boot gate (Stage 1 → Stage 2: smoke + goldens + fmt parity + IR fixpoint)
 ./scripts/selfhost.sh

@@ -76,7 +76,7 @@ No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** i
 
 ### IO errors
 
-One failure channel: `SzError` (message + optional code) on `IO`. Ops: `flatMap`, `delay`, `fail`, `handleErrorWith`, `attempt`, plus blessed kit (`Resource`, `Ref`, `Deferred`, `Queue`, `sleep`, `race`, `both`). **Concurrency:** cooperative single-threaded fibers (FIFO ready queue, left-before-right fork); `sleep` / empty `Queue.take` / incomplete `Deferred.get` park; TestRuntime advances virtual time to the next wakeup when idle; live idle `nanosleep` is EINTR-interruptible so a cancelled sleeper cannot hold the run loop. No OS threads for IO. Impurity codes: Fs **2**, Sys (**3**; exec + `readLine`), Clock **4**, Random **5**, Net **6**. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net plus console (scripted stdin, optional argv override, println capture+echo). No checked exception hierarchy; panics abort via `sz_panic`.
+One failure channel: `SzError` (message + optional code) on `IO`. Ops: `flatMap`, `delay`, `fail`, `handleErrorWith`, `attempt`, plus blessed kit (`Resource`, `Ref`, `Deferred`, `Queue`, `sleep`, `race`, `both`). **Concurrency:** cooperative single-threaded fibers (live / default: FIFO ready queue, left-before-right fork; under `scuzz fuzz --iters`, `SCUZZ_SCHED_SEED` makes ready-fiber pick among n>1 seed-driven — see [`testing.md`](testing.md)); `sleep` / empty `Queue.take` / incomplete `Deferred.get` park; TestRuntime advances virtual time to the next wakeup when idle; live idle `nanosleep` is EINTR-interruptible so a cancelled sleeper cannot hold the run loop. No OS threads for IO. Impurity codes: Fs **2**, Sys (**3**; exec + `readLine`), Clock **4**, Random **5**, Net **6**. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net plus console (scripted stdin, optional argv override, println capture+echo). No checked exception hierarchy; panics abort via `sz_panic`.
 
 ### `Ui` vs `View`
 
@@ -98,7 +98,7 @@ IO-only is **not** a fourth runtime peer. Package contract: missing `[ui]` ⇒ S
 
 ### Kernel dialect
 
-Subset used by compiler sources and bootstrap examples. New features land in Stage 0 **before** `compiler-scuzz/` depends on them. Dual-boot gate: `scripts/selfhost.sh` — each stage smokes `examples/hello` + `examples/adt` + `examples/modules` + `examples/record` + `examples/trait` + `examples/generic` + `examples/genum`, passes the counter/todo/nav Headless goldens, smokes `fuzz` on `examples/todo` and `fuzz --exhaust --depth 1` on `examples/counter`, and agrees with Stage 0 on `fmt --check` for the compiler sources; Stage 2 must re-emit byte-identical compiler IR (Stage-3 fixpoint).
+Subset used by compiler sources and bootstrap examples. New features land in Stage 0 **before** `compiler-scuzz/` depends on them. Dual-boot gate: `scripts/selfhost.sh` — each stage smokes `examples/hello` + `examples/adt` + `examples/modules` + `examples/record` + `examples/trait` + `examples/generic` + `examples/genum`, passes the counter/todo/nav Headless goldens, smokes `fuzz` on `examples/todo`, `fuzz --exhaust --depth 1` on `examples/counter`, and IO-only `fuzz` on `examples/concurrency`, and agrees with Stage 0 on `fmt --check` for the compiler sources; Stage 2 must re-emit byte-identical compiler IR (Stage-3 fixpoint).
 
 - Optional `package`; top-level `def` / `private def` / `import Module.name` / `@main def …: IO[Unit]`; enums with N-field `Int`/`String`/`List`/ADT payloads (Stage 0 and self-host); **`record Name(f1: T1, …)`** as single-case enum sugar (`Name(args)` construct, `case Name(binds)` match, **`p.x` field access**); thin **traits** / `impl` with static-dispatch methods (`examples/trait`); monomorphized generics on defs (N type params; `examples/generic`) and on **enums/records** (`enum Opt[T]:` / `record Box[T](x: T)`, instantiation via ctor args or expected type; `examples/genum`); compiler sources use payload ADTs end-to-end (`Tok` … `Expr`, `Type`/`TyRes`, codegen `Emit`/`EnvBind`); multi-binder `match` — `examples/adt` exercises nullary/unary/multi-field/List payloads plus enum-typed def signatures; multi-field packs as `List` in the ADT payload; file-stem modules with `private def` module-local and `import` for bare disambiguation (`examples/modules`); enums are namespaced by file stem (same bare enum name allowed in two modules; `import Module.EnumName` brings type + cases into bare `Enum.*` scope)
 - **`for { binders } yield e`** as primary binder: `x = e` (pure), `x <- e` (effect; yield wraps with `IO.pure` when any `<-` is present). Nested `for` in `if` / lambda arms when multi-bind is needed.
@@ -163,7 +163,7 @@ App correctness is **laws** searched by `scuzz fuzz`, not example-based unit tes
 | `scuzz fuzz` | Search event scripts / IO schedules for law violations → `repro.toml` |
 | Later (optional) | Prove trivial law fragments statically; leave the rest as search |
 
-Direction beyond this: seed-driven fiber scheduling under fuzz (DST) and fuzz-verified `*.scuzz_tune` machine manifests — strategy and staging in [`testing.md`](testing.md).
+Direction beyond this: fuzz-verified `*.scuzz_tune` machine manifests — strategy and staging in [`testing.md`](testing.md). Schedule search (DST) under fuzz is in place (same doc).
 
 **File convention (stem-paired, no attribute tags):**
 
@@ -193,19 +193,19 @@ Keep purity checkable (pure `A` vs `IO` vs session), total expr core, signals as
 
 ### `scuzz fuzz`
 
-Deterministic TestRuntime + Headless event scripts (plus sim overlays when present):
+Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overlays when present):
 
 ```text
-(program + sim, seed/config, event script) → exit code + signal store + a11y view dump + law results
+(program + sim, seed/config, event script, schedule seed) → exit code + signal store + a11y view dump + law results
 ```
 
 ```bash
-scuzz fuzz [--iters N] [--seed S]   # typed random scripts until fail / N scripts
-scuzz fuzz --exhaust --depth N      # bounded systematic search (all scripts of length 1..N)
-scuzz fuzz --replay repro.toml      # deterministic replay of a recorded failure
+scuzz fuzz [--iters N] [--seed S]   # [ui]: scripts × schedules; IO-only: schedules
+scuzz fuzz --exhaust --depth N      # [ui] bounded event search (FIFO schedule)
+scuzz fuzz --replay repro.toml      # deterministic replay (events + optional schedule_seed)
 ```
 
-Scripts are a line protocol — `tap <n>` / `text <s>` / `pump <k>` — played by the runtime (`SCUZZ_UI_SCRIPT`) across `pump` boundaries; on exit it writes the signal store + a11y view dump (`SCUZZ_FUZZ_DUMP`). The CLI probes the a11y dump for the typed event surface (buttons in scan order, text fields), generates seeded scripts (Lehmer/MINSTD LCG — the kernel dialect has no bitwise ops) or enumerates a finite alphabet under `--exhaust` (`tap <i>` for each button, `text` / `text a` when a field exists, `pump 1`), and writes `repro.toml` (seed + events) on failure. Exhaustive mode walks lengths `1..N` in stable order so shorter counterexamples win. `fuzz` lives in the Stage-1/2 CLI (not Stage 0); replay plays recorded events verbatim, so it is independent of the generator. **Oracles:** module **laws** first (residual `Law.assert` under `SCUZZ_TESTRT=1`); panic/`SzError` exit still fails; structural dumps aid diagnosis (PNG last). Requires stable tap order, `pump` as time, no hidden nondeterminism.
+Scripts are a line protocol — `tap <n>` / `text <s>` / `pump <k>` — played by the runtime (`SCUZZ_UI_SCRIPT`) across `pump` boundaries; on exit it writes the signal store + a11y view dump (`SCUZZ_FUZZ_DUMP`). The CLI probes the a11y dump for the typed event surface (buttons in scan order, text fields), generates seeded scripts (Lehmer/MINSTD LCG — the kernel dialect has no bitwise ops) or enumerates a finite alphabet under `--exhaust` (`tap <i>` for each button, `text` / `text a` when a field exists, `pump 1`), and writes `repro.toml` on failure. `--iters` also sets `SCUZZ_SCHED_SEED` (recorded as `schedule_seed` in `repro.toml`); live runs and `--exhaust` stay FIFO. IO-only packages search schedule seeds only (no event scripts); `--exhaust` requires `[ui]`. Exhaustive mode walks lengths `1..N` in stable order so shorter counterexamples win. `fuzz` lives in the Stage-1/2 CLI (not Stage 0); replay plays recorded events verbatim and restores `schedule_seed` when present. **Oracles:** module **laws** first (residual `Law.assert` under `SCUZZ_TESTRT=1`); panic/`SzError` exit still fails; structural dumps aid diagnosis (PNG last). Requires stable tap order, `pump` as time, no hidden nondeterminism. Strategy detail: [`testing.md`](testing.md).
 
 ### Layout model
 
@@ -213,7 +213,7 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ### UI testing
 
-**Laws + `scuzz fuzz`** are the primary correctness story for `[ui]` apps. Structural goldens (signal store + a11y dump) remain a **regression face** for silent shape drift — few, Headless-only, live graph — not a substitute for laws. PNG pixels stay optional (`scuzz test --pixels`). IO packages (no `[ui]`): laws + sim overlays under TestRuntime when present; otherwise `scuzz test` stays compile + `SCUZZ_TESTRT=1` exit-0 smoke. Tooling: `scuzz check` (typecheck live + sim + laws); `--message-format=json` on `check` is the editor protocol (LSP wraps it).
+**Laws + `scuzz fuzz`** are the primary correctness story for `[ui]` apps. Structural goldens (signal store + a11y dump) remain a **regression face** for silent shape drift — few, Headless-only, live graph — not a substitute for laws. PNG pixels stay optional (`scuzz test --pixels`). IO packages (no `[ui]`): laws + sim overlays under TestRuntime when present; `scuzz fuzz --iters` searches schedule seeds; otherwise `scuzz test` stays compile + `SCUZZ_TESTRT=1` exit-0 smoke. Tooling: `scuzz check` (typecheck live + sim + laws); `--message-format=json` on `check` is the editor protocol (LSP wraps it).
 
 ## Open work
 

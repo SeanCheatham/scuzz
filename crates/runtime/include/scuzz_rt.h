@@ -168,10 +168,11 @@ SzIo *sz_io_deferred_get(SzDeferred *d);
 
 /* Run to completion on the calling thread.
  * Concurrency is cooperative single-threaded fibers: sleep/Queue/Deferred park;
- * race/both fork left-then-right onto a FIFO ready queue. TestRuntime jumps
- * virtual time to the next wakeup when all fibers are blocked on timers.
- * Live idle sleep is interruptible (EINTR re-checks soonest wake so a cancelled
- * sleeper cannot hold the run loop). */
+ * race/both fork left-then-right onto a ready queue. Live / default: FIFO pick.
+ * When SCUZZ_SCHED_SEED is set (fuzz), ready-fiber pick among n>1 is seed-driven
+ * (Lehmer/MINSTD). TestRuntime jumps virtual time to the next wakeup when all
+ * fibers are blocked on timers. Live idle sleep is interruptible (EINTR
+ * re-checks soonest wake so a cancelled sleeper cannot hold the run loop). */
 typedef struct SzIoResult {
   int ok; /* 1 success, 0 error */
   void *value;

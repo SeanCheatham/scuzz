@@ -191,6 +191,31 @@ jobs:
           if /tmp/stage2-scuzz fuzz --replay /tmp/scuzz-fuzzbug-ex/build/fuzz/repro.toml /tmp/scuzz-fuzzbug-ex; then
             echo "exhaust replay should have reproduced the failure" && exit 1
           fi
+          rm -rf /tmp/scuzz-schedbug
+          /tmp/stage2-scuzz new --path /tmp scuzz-schedbug
+          cat > /tmp/scuzz-schedbug/src/Main.scuzz <<'EOF'
+          @main def main: IO[Unit] =
+            for {
+              q <- Queue.unbounded()
+              _ <- IO.both(Queue.offer(q, "L"), Queue.offer(q, "R"))
+              first <- Queue.take(q)
+              _ <- if (Str.eq(first, "L") == 1) IO.pure(()) else IO.fail("expected L first")
+            } yield ()
+          EOF
+          /tmp/stage2-scuzz test /tmp/scuzz-schedbug
+          if /tmp/stage2-scuzz fuzz --iters 8 /tmp/scuzz-schedbug; then
+            echo "schedule fuzz should have found the interleaving bug" && exit 1
+          fi
+          test -f /tmp/scuzz-schedbug/build/fuzz/repro.toml
+          grep -q 'schedule_seed' /tmp/scuzz-schedbug/build/fuzz/repro.toml
+          if /tmp/stage2-scuzz fuzz --replay /tmp/scuzz-schedbug/build/fuzz/repro.toml /tmp/scuzz-schedbug; then
+            echo "schedule replay should have reproduced the failure" && exit 1
+          fi
+          grep -v schedule_seed /tmp/scuzz-schedbug/build/fuzz/repro.toml > /tmp/scuzz-schedbug/build/fuzz/repro-fifo.toml
+          if ! /tmp/stage2-scuzz fuzz --replay /tmp/scuzz-schedbug/build/fuzz/repro-fifo.toml /tmp/scuzz-schedbug; then
+            echo "FIFO replay (no schedule_seed) should pass" && exit 1
+          fi
+          /tmp/stage2-scuzz fuzz --iters 4 examples/concurrency
 
       - name: v0 new --ui happy path
         run: |

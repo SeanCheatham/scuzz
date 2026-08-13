@@ -1,30 +1,31 @@
 # Testing and empirical optimization strategy
 
-How Scuzz verifies programs today (laws + `scuzz fuzz`), and the direction that story grows into: **schedule search (DST)** for concurrency correctness, then **empirical pre-optimization** — machine-specific tuning discovered by search and verified by the same fuzzer. Mechanics of laws, sim overlays, and the fuzz CLI live in [`vision.md`](vision.md); this doc owns the strategy and its staging.
+How Scuzz verifies programs today (laws + `scuzz fuzz` + **schedule search / DST**), and the direction that story grows into: **empirical pre-optimization** — machine-specific tuning discovered by search and verified by the same fuzzer. Mechanics of laws, sim overlays, and the fuzz CLI live in [`vision.md`](vision.md); this doc owns the strategy and its staging.
 
 ## Why Scuzz can do this
 
 Separating *performance* from *meaning* only works if the language pins meaning down tightly enough that execution strategy can vary without changing observable behavior. Scuzz's existing design locks provide exactly that:
 
 - **Closed impurity.** All nondeterminism and external I/O go through blessed `IO`; no app-level escape hatch. Observational equivalence is well-defined: same signal store, same a11y dump, same law results.
-- **Deterministic fuzz contract.** `(program + sim, seed/config, event script) → exit code + signal store + a11y dump + law results` is a pure function of its inputs.
+- **Deterministic fuzz contract.** `(program + sim, seed/config, event script, schedule seed) → exit code + signal store + a11y dump + law results` is a pure function of its inputs.
 - **Laws as the oracle.** Correctness is declared properties over the signal store + a11y dump — not timing, not interleaving order, not pixels.
 
 The payoff: **the fuzzer doubles as an equivalence checker.** Any transformation that claims to preserve meaning (a different fiber schedule, a parallel execution strategy, a tuned build) is validated by replaying the same corpus and asserting identical observable outputs plus no law violations. Classic autotuners (Halide schedules, PGO, BOLT) must *assume* their transformations are safe; Scuzz search-verifies them against the fixed observation surface.
 
 ## Layer 1 — laws + fuzz (exists)
 
-The current story, owned by `vision.md`: authors declare laws, `scuzz fuzz` searches typed event scripts (seeded random or `--exhaust`), failures replay deterministically from `repro.toml`. The search space is **inputs**: taps, text, pumps.
+Authors declare laws; `scuzz fuzz` searches typed event scripts (seeded random or `--exhaust`), failures replay deterministically from `repro.toml`. Mechanics owned by [`vision.md`](vision.md). The search space for scripts is **inputs**: taps, text, pumps.
 
-## Layer 2 — schedule search / DST (direction)
+## Layer 2 — schedule search / DST (exists)
 
-Deterministic simulation testing extends the search space from inputs to **fiber interleavings**. Today the scheduler is a fixed policy (FIFO ready queue, left-before-right fork), so every fuzz run explores one schedule. The slice:
+Deterministic simulation testing extends the search space from inputs to **fiber interleavings**. Live / default runs keep FIFO ready-queue pick (left-before-right fork). Under `scuzz fuzz --iters`, when `SCUZZ_SCHED_SEED` is set, each ready-fiber pick among **n > 1** fibers is seed-driven (same Lehmer/MINSTD LCG as script generation). Queue/Deferred waiter wake order stays FIFO.
 
-- Make scheduler choices **seed-driven under fuzz**: at each scheduling point, the ready-fiber pick comes from the run's seeded generator instead of the fixed policy. Live runs keep the fixed policy.
-- `repro.toml` records the schedule seed alongside the event script; replay is exact.
-- Oracles are unchanged — laws, panic/`SzError` exit.
+- `[ui]` `--iters`: event scripts × schedule seeds; `repro.toml` records `seed`, `schedule_seed`, and `events`.
+- `[ui]` `--exhaust`: event alphabet only, **FIFO** schedule (omits `schedule_seed`) — exhaust × schedules is unbounded.
+- IO-only `--iters`: schedule seeds only (no event scripts); `--exhaust` requires `[ui]`.
+- Replay: missing `schedule_seed` → FIFO; present (including `0`) → exact schedule.
 
-This is a prerequisite for everything in Layer 3: auto-parallelization is only safe if adversarial schedules can be searched for law violations first. It also forces the scheduler seam (pluggable pick policy) that a parallel runtime needs anyway.
+Oracles are unchanged — laws, panic/`SzError` exit. This is a prerequisite for Layer 3 and the scheduler seam a parallel runtime needs anyway.
 
 ## Layer 3 — empirical pre-optimization (direction, post-parallelism)
 
@@ -61,7 +62,7 @@ Pipeline: search generates candidate tunings → measure on bench corpus → fuz
 
 | Stage | Slice | Proof |
 | --- | --- | --- |
-| 1 | Seed-driven fiber scheduling under `scuzz fuzz`; schedule seed in `repro.toml` | A seeded schedule finds (and deterministically replays) an interleaving bug a fixed-policy run cannot |
+| 1 | Seed-driven fiber scheduling under `scuzz fuzz`; schedule seed in `repro.toml` | A seeded schedule finds (and deterministically replays) an interleaving bug a fixed-policy run cannot (CI IO-only schedule-bug temp app) |
 | 2 | One hand-written knob on one construct + `*.scuzz_tune` applied at build; fuzz-equivalence gate | Tuned and default builds are fuzz-equivalent; the knob measurably changes a bench metric |
 | 3 | Search loop over stage 2 (auto-tuning) | Generated tune file beats the default build on the bench corpus and passes the gate |
 

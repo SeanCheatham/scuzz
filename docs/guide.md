@@ -101,7 +101,7 @@ src/
 - `[ui]` packages: `scuzz test` is Headless **structural** goldens on the **live** graph (signal store + a11y dump); PNG optional via `--pixels`. `scuzz fuzz` compiles the **verify** graph (sim + residual laws).
 - IO packages (no `[ui]`): `scuzz test` compiles and runs under `SCUZZ_TESTRT=1`, requiring exit 0
 - `scuzz check` typechecks live + sim twins + laws; `--message-format=json` is the editor protocol (`check` only; LSP wraps this)
-- `scuzz fuzz --iters N` / `scuzz fuzz --exhaust --depth N` on TestRuntime + Headless; `--replay repro.toml` on failure (requires `[ui]`); oracle is residual laws + panic/`SzError`
+- `scuzz fuzz --iters N` searches event scripts × schedules (`[ui]`) or schedule seeds only (IO-only); `--exhaust --depth N` is `[ui]` event alphabet with FIFO schedule; `--replay repro.toml` restores events + optional `schedule_seed`; oracle is residual laws + panic/`SzError`
 - Deterministic fakes: `TestRuntime` / `SCUZZ_TESTRT=1` for clock/random/FS/network/console in app binaries
 - Put non-determinism behind blessed `IO`; keep View construction pure
 

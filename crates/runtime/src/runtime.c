@@ -450,9 +450,36 @@ typedef struct Sched {
   Fiber *sleepers;
   Fiber *root;
   Fiber *current;
+  int sched_armed;   /* 1 when SCUZZ_SCHED_SEED is set */
+  int32_t sched_rng; /* Lehmer/MINSTD state in 1..2147483646 */
 } Sched;
 
 static Sched *g_sched = NULL;
+
+/* Same LCG as compiler-scuzz Fuzz.scuzz (kernel dialect has no bitwise ops). */
+enum { SZ_LCG_M = 2147483647, SZ_LCG_A = 48271, SZ_LCG_SEED_MOD = 2147483646 };
+
+static int32_t sched_lcg_seed(int32_t seed) {
+  int32_t m = seed % SZ_LCG_SEED_MOD;
+  if (m < 0)
+    m += SZ_LCG_SEED_MOD;
+  return m + 1;
+}
+
+static int32_t sched_lcg_next(int32_t s) {
+  return (int32_t)(((int64_t)s * (int64_t)SZ_LCG_A) % (int64_t)SZ_LCG_M);
+}
+
+static void sched_arm_from_env(Sched *s) {
+  const char *env = getenv("SCUZZ_SCHED_SEED");
+  s->sched_armed = 0;
+  s->sched_rng = 1;
+  if (!env)
+    return;
+  /* Present (including "0") arms seed-driven pick; absent keeps FIFO. */
+  s->sched_armed = 1;
+  s->sched_rng = sched_lcg_seed((int32_t)atoi(env));
+}
 
 static ContFrame *cont_push_flatmap(ContFrame *stack, SzCont cont, void *env) {
   ContFrame *f = (ContFrame *)sz_alloc(sizeof(ContFrame));
@@ -514,7 +541,18 @@ static void ready_enqueue(Sched *s, Fiber *f) {
   }
 }
 
-static Fiber *ready_dequeue(Sched *s) {
+static int ready_count(Sched *s) {
+  int n = 0;
+  Fiber *f = s->ready_head;
+  while (f) {
+    n++;
+    f = f->ready_next;
+  }
+  return n;
+}
+
+/* FIFO unlink of the head. */
+static Fiber *ready_dequeue_fifo(Sched *s) {
   Fiber *f = s->ready_head;
   if (!f)
     return NULL;
@@ -523,6 +561,42 @@ static Fiber *ready_dequeue(Sched *s) {
     s->ready_tail = NULL;
   f->ready_next = NULL;
   return f;
+}
+
+/* Unlink the k-th ready fiber (0-based). */
+static Fiber *ready_unlink_at(Sched *s, int k) {
+  Fiber *prev = NULL;
+  Fiber *f = s->ready_head;
+  int i;
+  if (k <= 0)
+    return ready_dequeue_fifo(s);
+  for (i = 0; f && i < k; i++) {
+    prev = f;
+    f = f->ready_next;
+  }
+  if (!f)
+    return ready_dequeue_fifo(s);
+  prev->ready_next = f->ready_next;
+  if (!f->ready_next)
+    s->ready_tail = prev;
+  f->ready_next = NULL;
+  return f;
+}
+
+/* Pick next ready fiber: FIFO when disarmed or n<=1; else seed-driven among n. */
+static Fiber *ready_dequeue(Sched *s) {
+  int n;
+  int k;
+  if (!s->ready_head)
+    return NULL;
+  if (!s->sched_armed)
+    return ready_dequeue_fifo(s);
+  n = ready_count(s);
+  if (n <= 1)
+    return ready_dequeue_fifo(s);
+  k = (int)(s->sched_rng % n);
+  s->sched_rng = sched_lcg_next(s->sched_rng);
+  return ready_unlink_at(s, k);
 }
 
 static void sleeper_add(Sched *s, Fiber *f) {
@@ -1006,6 +1080,7 @@ static SzIoResult run_io(SzIo *root) {
   }
 
   memset(&sched, 0, sizeof(sched));
+  sched_arm_from_env(&sched);
   sched.root = fiber_new(root, NULL, JOIN_NONE, 0);
   ready_enqueue(&sched, sched.root);
   g_sched = &sched;

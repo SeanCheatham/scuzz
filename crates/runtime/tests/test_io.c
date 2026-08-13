@@ -1,8 +1,10 @@
+#define _POSIX_C_SOURCE 200809L
 #include "scuzz_rt.h"
 
 #include <assert.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static int delay_calls = 0;
@@ -383,6 +385,39 @@ int main(void) {
       sz_pair_free(p);
     }
     sz_deferred_free(def);
+
+    sz_testrt_reset();
+  }
+
+  /* Seed-driven schedule pick (SCUZZ_SCHED_SEED): seed 0 → first 2-way pick is right. */
+  {
+    char saved[64];
+    const char *s;
+
+    sz_testrt_install();
+    setenv("SCUZZ_SCHED_SEED", "0", 1);
+
+    sz_testrt_stdout_reset();
+    r = sz_io_unsafe_run(
+        sz_io_both(sz_io_println_cstr("a"), sz_io_println_cstr("b")));
+    assert(r.ok);
+    s = sz_testrt_stdout_cstr();
+    assert(strstr(s, "b\na\n") != NULL);
+    assert(strlen(s) < sizeof(saved));
+    memcpy(saved, s, strlen(s) + 1);
+
+    sz_testrt_stdout_reset();
+    r = sz_io_unsafe_run(
+        sz_io_both(sz_io_println_cstr("a"), sz_io_println_cstr("b")));
+    assert(r.ok);
+    assert(strcmp(saved, sz_testrt_stdout_cstr()) == 0);
+
+    unsetenv("SCUZZ_SCHED_SEED");
+    sz_testrt_stdout_reset();
+    r = sz_io_unsafe_run(
+        sz_io_both(sz_io_println_cstr("a"), sz_io_println_cstr("b")));
+    assert(r.ok);
+    assert(strstr(sz_testrt_stdout_cstr(), "a\nb\n") != NULL);
 
     sz_testrt_reset();
   }
