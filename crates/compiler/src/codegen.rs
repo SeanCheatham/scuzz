@@ -2841,6 +2841,21 @@ fn emit_call(
             .unwrap();
             val_emitted(code, emitted_args[2].value.clone(), emitted_args[2].kind)
         }
+        "Law.force" => {
+            // IO[Bool/Int] → Int via unsafe_run + unbox (verify residual only).
+            writeln!(
+                code,
+                "  %{prefix}_fr = call ptr @sz_io_unsafe_run_or_die(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_unbox_i64(ptr %{prefix}_fr)"
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
         "Law.sometimes" => {
             writeln!(
                 code,
@@ -3302,6 +3317,30 @@ mod tests {
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_sys_spawn"));
         assert!(ir.contains("sz_sys_alive"));
+    }
+
+    #[test]
+    fn emit_require_residual_law_check_and_assert() {
+        let src = r#"
+law always: Bool = 1 == 1
+@main def main: IO[Unit] =
+  for {
+    n = 1.require("nonNeg", n => n >= 0)
+    _ <- IO.println(Str.fromInt(n)).require(always)
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let p = crate::typ::resolve_field_access(p).expect("resolve require");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_law_check"),
+            "expected Law.check in IR:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_law_assert"),
+            "expected Law.assert in IR:\n{ir}"
+        );
     }
 
     #[test]

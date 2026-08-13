@@ -1,9 +1,3 @@
-law countNonNeg: Bool =
-  Law.signalInt(0) >= 0
-
-law labelNonNeg: Bool =
-  Str.len(Law.signalStr(1)) >= 0
-
 law hasPlusButton: Bool =
   Law.a11yHas("button:+1")
 
@@ -19,5 +13,5 @@ def noteDrive(n: Int where n >= 0): Unit =
     label = Signal.map(count, n => countLabel(n))
     _ <- Ui.run(_ => View.center(View.column(View.background(Color.rgb(230, 240, 248), View.text(counterTitle())), View.bindText(label), View.row(View.minSize(80, 36, View.button("+1", _ => for {
   _ = Law.sometimes("tappedPlus")
-} yield Signal.set(count, Signal.get(count) + 1))), View.sized(32, 32, View.stack(View.image(24, 24, Color.rgb(61, 126, 166), ""), View.positioned(4, 4, View.icon(43, Theme.accent()))))))))
+} yield Signal.set(count, Signal.get(count) + 1))), View.sized(32, 32, View.stack(View.image(24, 24, Color.rgb(61, 126, 166), ""), View.positioned(4, 4, View.icon(43, Theme.accent())))))))).require(Signal.get(count) >= 0).require(Str.len(Signal.getStr(label)) >= 0).require(hasPlusButton).require(titleFromSim)
   } yield ()

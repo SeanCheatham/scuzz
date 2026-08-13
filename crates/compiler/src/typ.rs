@@ -464,6 +464,290 @@ pub fn resolve_field_access(mut program: Program) -> Result<Program, TypeError> 
     Ok(program)
 }
 
+fn require_pred_name(pred: &Expr) -> String {
+    match &pred.kind {
+        ExprKind::Var(n) => n.rsplit('.').next().unwrap_or(n).to_string(),
+        ExprKind::Call { callee, args } if args.is_empty() => {
+            callee.rsplit('.').next().unwrap_or(callee).to_string()
+        }
+        _ => "require".into(),
+    }
+}
+
+fn split_require_args(args: &[Expr]) -> Result<(String, Expr), TypeError> {
+    match args {
+        [pred] => Ok((require_pred_name(pred), pred.clone())),
+        [name, pred] => match &name.kind {
+            ExprKind::StrLit(s) => Ok((s.clone(), pred.clone())),
+            _ => Err(TypeError::Msg(
+                ".require name must be a string literal when two args are given".into(),
+            )),
+        },
+        _ => Err(TypeError::Msg(format!(
+            ".require expects 1 or 2 args, got {}",
+            args.len()
+        ))),
+    }
+}
+
+fn is_nullary_bool_law(
+    name: &str,
+    funs: &FunIndex<'_>,
+    current_module: &str,
+) -> Result<bool, TypeError> {
+    match funs.resolve(name, current_module) {
+        Ok(f) if f.is_law && f.params.is_empty() => Ok(matches!(f.ret, Type::Bool | Type::Int)),
+        Ok(f) if f.params.is_empty() && matches!(f.ret, Type::Bool | Type::Int) => Ok(true),
+        Ok(_) => Ok(false),
+        Err(crate::resolve::ResolveError::Unknown(_)) => Ok(false),
+        Err(e) => Err(TypeError::Msg(e.to_string())),
+    }
+}
+
+fn pred_ok_ty(t: &Type) -> bool {
+    match t {
+        Type::Bool | Type::Int => true,
+        Type::Io(inner) => matches!(**inner, Type::Bool | Type::Int),
+        _ => false,
+    }
+}
+
+fn infer_require_pred(
+    pred: &Expr,
+    receiver_ty: &Type,
+    enums: &EnumIndex<'_>,
+    funs: &FunIndex<'_>,
+    methods: &MethodIndex,
+    current_module: &str,
+    env: &mut HashMap<String, Type>,
+) -> Result<Type, TypeError> {
+    match &pred.kind {
+        ExprKind::Var(name) if is_nullary_bool_law(name, funs, current_module)? => Ok(Type::Bool),
+        ExprKind::Lambda { param, body } => {
+            let inner = match receiver_ty {
+                Type::Io(t) => t.as_ref(),
+                other => other,
+            };
+            let old = if let Some(p) = param {
+                if p != "_" {
+                    env.insert(p.clone(), inner.clone())
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            let bt = infer(body, enums, funs, methods, current_module, env)?;
+            if let Some(p) = param {
+                if p != "_" {
+                    match old {
+                        Some(v) => {
+                            env.insert(p.clone(), v);
+                        }
+                        None => {
+                            env.remove(p);
+                        }
+                    }
+                }
+            }
+            if !pred_ok_ty(&bt) {
+                return Err(TypeError::Msg(format!(
+                    ".require lambda must return Bool/Int or IO[Bool/Int], got {bt:?}"
+                )));
+            }
+            Ok(bt)
+        }
+        _ => {
+            let t = infer(pred, enums, funs, methods, current_module, env)?;
+            if !pred_ok_ty(&t) {
+                return Err(TypeError::Msg(format!(
+                    ".require predicate must be Bool/Int or IO[Bool/Int], got {t:?}"
+                )));
+            }
+            Ok(t)
+        }
+    }
+}
+
+fn infer_require_args(
+    args: &[Expr],
+    receiver_ty: &Type,
+    enums: &EnumIndex<'_>,
+    funs: &FunIndex<'_>,
+    methods: &MethodIndex,
+    current_module: &str,
+    env: &mut HashMap<String, Type>,
+) -> Result<(), TypeError> {
+    let (_name, pred) = split_require_args(args)?;
+    let _ = infer_require_pred(
+        &pred,
+        receiver_ty,
+        enums,
+        funs,
+        methods,
+        current_module,
+        env,
+    )?;
+    Ok(())
+}
+
+fn normalize_require_pred(
+    pred: Expr,
+    recv_var: &str,
+    funs: &FunIndex<'_>,
+    current_module: &str,
+) -> Expr {
+    let span = pred.span.clone();
+    match pred.kind {
+        ExprKind::Var(name)
+            if is_nullary_bool_law(&name, funs, current_module).unwrap_or(false) =>
+        {
+            Expr::new(
+                ExprKind::Call {
+                    callee: name,
+                    args: vec![],
+                },
+                span,
+            )
+        }
+        ExprKind::Lambda { param, body } => {
+            if let Some(p) = param {
+                if p == "_" {
+                    *body
+                } else {
+                    Expr::new(
+                        ExprKind::Let {
+                            name: p,
+                            value: Box::new(Expr::new(
+                                ExprKind::Var(recv_var.into()),
+                                span.clone(),
+                            )),
+                            body,
+                        },
+                        span,
+                    )
+                }
+            } else {
+                *body
+            }
+        }
+        other => Expr::new(other, span),
+    }
+}
+
+fn force_pred_if_io(pred: Expr, pred_ty: &Type) -> Expr {
+    if matches!(pred_ty, Type::Io(_)) {
+        let span = pred.span.clone();
+        Expr::new(
+            ExprKind::Call {
+                callee: "Law.force".into(),
+                args: vec![pred],
+            },
+            span,
+        )
+    } else {
+        pred
+    }
+}
+
+fn rewrite_require(
+    receiver: Expr,
+    args: Vec<Expr>,
+    span: Span,
+    enums: &EnumIndex<'_>,
+    funs: &FunIndex<'_>,
+    methods: &MethodIndex,
+    current_module: &str,
+    env: &mut HashMap<String, Type>,
+) -> Result<Expr, TypeError> {
+    let (name, pred) = split_require_args(&args)?;
+    let rt = infer(&receiver, enums, funs, methods, current_module, env)?;
+    let pred_ty = infer_require_pred(&pred, &rt, enums, funs, methods, current_module, env)?;
+    let name_lit = Expr::new(ExprKind::StrLit(name), span.clone());
+    match &rt {
+        Type::Io(_) => {
+            let recv_var = "__req";
+            let pred = normalize_require_pred(pred, recv_var, funs, current_module);
+            let pred_is_io = matches!(pred_ty, Type::Io(_));
+            let yield_v = Expr::new(
+                ExprKind::IoPure(Box::new(Expr::new(
+                    ExprKind::Var(recv_var.into()),
+                    span.clone(),
+                ))),
+                span.clone(),
+            );
+            let after_assert = Expr::new(
+                ExprKind::FlatMap {
+                    inner: Box::new(Expr::new(
+                        ExprKind::Call {
+                            callee: "Law.assert".into(),
+                            args: vec![
+                                name_lit,
+                                Expr::new(ExprKind::Var("__ok".into()), span.clone()),
+                            ],
+                        },
+                        span.clone(),
+                    )),
+                    param: Some("_".into()),
+                    body: Box::new(yield_v),
+                },
+                span.clone(),
+            );
+            let body = if pred_is_io {
+                Expr::new(
+                    ExprKind::FlatMap {
+                        inner: Box::new(pred),
+                        param: Some("__ok".into()),
+                        body: Box::new(after_assert),
+                    },
+                    span.clone(),
+                )
+            } else {
+                Expr::new(
+                    ExprKind::Let {
+                        name: "__ok".into(),
+                        value: Box::new(pred),
+                        body: Box::new(after_assert),
+                    },
+                    span.clone(),
+                )
+            };
+            Ok(Expr::new(
+                ExprKind::FlatMap {
+                    inner: Box::new(receiver),
+                    param: Some(recv_var.into()),
+                    body: Box::new(body),
+                },
+                span,
+            ))
+        }
+        _ => {
+            let recv_var = "__req";
+            let pred = normalize_require_pred(pred, recv_var, funs, current_module);
+            let pred = force_pred_if_io(pred, &pred_ty);
+            let check = Expr::new(
+                ExprKind::Call {
+                    callee: "Law.check".into(),
+                    args: vec![
+                        name_lit,
+                        pred,
+                        Expr::new(ExprKind::Var(recv_var.into()), span.clone()),
+                    ],
+                },
+                span.clone(),
+            );
+            Ok(Expr::new(
+                ExprKind::Let {
+                    name: recv_var.into(),
+                    value: Box::new(receiver),
+                    body: Box::new(check),
+                },
+                span,
+            ))
+        }
+    }
+}
+
 fn rewrite_fields(
     expr: Expr,
     enums: &EnumIndex<'_>,
@@ -484,6 +768,18 @@ fn rewrite_fields(
                 .into_iter()
                 .map(|a| rewrite_fields(a, enums, funs, methods, current_module, env))
                 .collect::<Result<Vec<_>, _>>()?;
+            if method == "require" {
+                return rewrite_require(
+                    receiver,
+                    args,
+                    span,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                );
+            }
             let rt = infer(&receiver, enums, funs, methods, current_module, env)?;
             let Type::Adt(id) = &rt else {
                 return Err(TypeError::Msg(format!(
@@ -976,6 +1272,10 @@ fn infer(
                 args,
             } => {
                 let rt = infer(receiver, enums, funs, methods, current_module, env)?;
+                if method == "require" {
+                    infer_require_args(args, &rt, enums, funs, methods, current_module, env)?;
+                    return Ok(rt);
+                }
                 let Type::Adt(id) = &rt else {
                     return Err(TypeError::Msg(format!(
                         "method .{method} needs a record/ADT receiver, got {rt:?}"
@@ -1627,6 +1927,15 @@ fn infer_call(
                 )));
             }
             Ok(arg_tys[2].clone())
+        }
+        "Law.force" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            match &arg_tys[0] {
+                Type::Io(inner) if matches!(**inner, Type::Bool | Type::Int) => Ok(Type::Int),
+                other => Err(TypeError::Msg(format!(
+                    "Law.force expects IO[Bool/Int], got {other:?}"
+                ))),
+            }
         }
         "Law.sometimes" => {
             expect_arity(callee, &arg_tys, 1)?;
@@ -4881,6 +5190,44 @@ def describe(e: Either[Int, String]): String = e match {
                 .any(|e| e.name.contains("__gen_Either_Int_String")),
             "missing Either clone: {:?}",
             p.enums.iter().map(|e| &e.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn typechecks_require_on_pure_and_io() {
+        let src = r#"
+law always: Bool = 1 == 1
+@main def main: IO[Unit] =
+  for {
+    n = 1.require(n => n >= 0)
+    _ <- IO.println(Str.fromInt(n)).require(always)
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect(".require should typecheck");
+    }
+
+    #[test]
+    fn resolve_require_to_law_check_and_assert() {
+        let src = r#"
+law always: Bool = 1 == 1
+@main def main: IO[Unit] =
+  for {
+    n = 1.require("nonNeg", n => n >= 0)
+    _ <- IO.println("x").require(always)
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).unwrap();
+        let p = resolve_field_access(p).expect("resolve require");
+        let dumped = format!("{:?}", p.main.body);
+        assert!(
+            dumped.contains("Law.check"),
+            "expected Law.check residual: {dumped}"
+        );
+        assert!(
+            dumped.contains("Law.assert"),
+            "expected Law.assert residual: {dumped}"
         );
     }
 }

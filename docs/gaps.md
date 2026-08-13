@@ -29,7 +29,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### Near-term (verification pivot: in-source oracles + drivers)
 
-Vision locks **oracles in source, drivers as the test surface** ([`vision.md`](vision.md#laws-simulation-mutation-and-verification)). Stage 0 and `compiler-scuzz/` parse top-level `law name: Bool = …`, provide `Law.check` / `Law.sometimes`, load stem-paired `*.scuzz_drivers`, and attach `where` refinements on `def` params and `record` fields (residual `Law.check` at call/construction under the verify graph).
+Vision locks **oracles in source, drivers as the test surface** ([`vision.md`](vision.md#laws-simulation-mutation-and-verification)). Stage 0 and `compiler-scuzz/` parse top-level `law name: Bool = …`, provide `.require` (type-preserving application; residual `Law.check` / sequenced `Law.assert`), `Law.check` / `Law.sometimes`, load stem-paired `*.scuzz_drivers`, and attach `where` refinements on `def` params and `record` fields. Unused laws fail `check`.
 
 Open questions parked here: driver argument generation beyond `Int`/`String`; corpus-guided prefix extension (CLI-only).
 

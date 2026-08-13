@@ -1,6 +1,6 @@
 //! Stem-paired `*.scuzz_sim` / `*.scuzz_drivers` overlays and in-source `law` residualization.
 
-use crate::ast::{Expr, ExprKind, FunDef, MainDef, Program, Type};
+use crate::ast::{Expr, ExprKind, FunDef, Program, Type};
 use crate::parser::{parse, ParseError};
 use thiserror::Error;
 
@@ -29,7 +29,8 @@ pub struct OverlaySource {
 
 /// Apply same-name sim replacements, then merge `*.scuzz_drivers`. In-source
 /// `law` defs stay on the program; call [`collect_law_names`] then
-/// [`residualize_laws`] under verify / check.
+/// [`check_laws_applied`] under verify / check. `.require` is rewritten
+/// type-directedly in field resolution (verify) or erased live.
 pub fn apply_overlays(
     mut live: Program,
     overlays: &[OverlaySource],
@@ -98,6 +99,398 @@ pub fn collect_law_names(program: &Program) -> Result<Vec<String>, OverlayError>
 pub fn erase_laws(program: &mut Program) {
     program.defs.retain(|d| !d.is_law);
     program.law_names.clear();
+}
+
+pub fn is_require_method(method: &str) -> bool {
+    method == "require"
+}
+
+/// Drop `.require` to the receiver so live `build` / `run` never evaluate the predicate.
+pub fn erase_requires(program: &mut Program) {
+    for d in &mut program.defs {
+        d.body = erase_require_expr(std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)));
+    }
+    program.main.body = erase_require_expr(std::mem::replace(
+        &mut program.main.body,
+        Expr::dummy(ExprKind::Unit),
+    ));
+}
+
+fn erase_require_expr(expr: Expr) -> Expr {
+    let span = expr.span.clone();
+    match expr.kind {
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args: _,
+        } if is_require_method(&method) => erase_require_expr(*receiver),
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+        } => Expr::new(
+            ExprKind::MethodCall {
+                receiver: Box::new(erase_require_expr(*receiver)),
+                method,
+                args: args.into_iter().map(erase_require_expr).collect(),
+            },
+            span,
+        ),
+        ExprKind::Call { callee, args } => Expr::new(
+            ExprKind::Call {
+                callee,
+                args: args.into_iter().map(erase_require_expr).collect(),
+            },
+            span,
+        ),
+        ExprKind::AdtConstruct {
+            enum_name,
+            case_name,
+            args,
+            type_args,
+        } => Expr::new(
+            ExprKind::AdtConstruct {
+                enum_name,
+                case_name,
+                args: args.into_iter().map(erase_require_expr).collect(),
+                type_args,
+            },
+            span,
+        ),
+        ExprKind::IoPrintln(x) => {
+            Expr::new(ExprKind::IoPrintln(Box::new(erase_require_expr(*x))), span)
+        }
+        ExprKind::IoSleep(x) => {
+            Expr::new(ExprKind::IoSleep(Box::new(erase_require_expr(*x))), span)
+        }
+        ExprKind::IoFail(x) => Expr::new(ExprKind::IoFail(Box::new(erase_require_expr(*x))), span),
+        ExprKind::IoPure(x) => Expr::new(ExprKind::IoPure(Box::new(erase_require_expr(*x))), span),
+        ExprKind::Attempt { inner } => Expr::new(
+            ExprKind::Attempt {
+                inner: Box::new(erase_require_expr(*inner)),
+            },
+            span,
+        ),
+        ExprKind::Lambda { param, body } => Expr::new(
+            ExprKind::Lambda {
+                param,
+                body: Box::new(erase_require_expr(*body)),
+            },
+            span,
+        ),
+        ExprKind::Field { base, field } => Expr::new(
+            ExprKind::Field {
+                base: Box::new(erase_require_expr(*base)),
+                field,
+            },
+            span,
+        ),
+        ExprKind::FlatMap { inner, param, body } => Expr::new(
+            ExprKind::FlatMap {
+                inner: Box::new(erase_require_expr(*inner)),
+                param,
+                body: Box::new(erase_require_expr(*body)),
+            },
+            span,
+        ),
+        ExprKind::HandleErrorWith { inner, body } => Expr::new(
+            ExprKind::HandleErrorWith {
+                inner: Box::new(erase_require_expr(*inner)),
+                body: Box::new(erase_require_expr(*body)),
+            },
+            span,
+        ),
+        ExprKind::Let { name, value, body } => Expr::new(
+            ExprKind::Let {
+                name,
+                value: Box::new(erase_require_expr(*value)),
+                body: Box::new(erase_require_expr(*body)),
+            },
+            span,
+        ),
+        ExprKind::IoEnsure { inner, finalizer } => Expr::new(
+            ExprKind::IoEnsure {
+                inner: Box::new(erase_require_expr(*inner)),
+                finalizer: Box::new(erase_require_expr(*finalizer)),
+            },
+            span,
+        ),
+        ExprKind::IoRace { left, right } => Expr::new(
+            ExprKind::IoRace {
+                left: Box::new(erase_require_expr(*left)),
+                right: Box::new(erase_require_expr(*right)),
+            },
+            span,
+        ),
+        ExprKind::IoBoth { left, right } => Expr::new(
+            ExprKind::IoBoth {
+                left: Box::new(erase_require_expr(*left)),
+                right: Box::new(erase_require_expr(*right)),
+            },
+            span,
+        ),
+        ExprKind::IoTimeout { ms, inner } => Expr::new(
+            ExprKind::IoTimeout {
+                ms: Box::new(erase_require_expr(*ms)),
+                inner: Box::new(erase_require_expr(*inner)),
+            },
+            span,
+        ),
+        ExprKind::Binary { op, left, right } => Expr::new(
+            ExprKind::Binary {
+                op,
+                left: Box::new(erase_require_expr(*left)),
+                right: Box::new(erase_require_expr(*right)),
+            },
+            span,
+        ),
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => Expr::new(
+            ExprKind::If {
+                cond: Box::new(erase_require_expr(*cond)),
+                then_branch: Box::new(erase_require_expr(*then_branch)),
+                else_branch: Box::new(erase_require_expr(*else_branch)),
+            },
+            span,
+        ),
+        ExprKind::For { binders, body } => Expr::new(
+            ExprKind::For {
+                binders: binders
+                    .into_iter()
+                    .map(|b| match b {
+                        crate::ast::ForBinder::Eq { name, value } => crate::ast::ForBinder::Eq {
+                            name,
+                            value: erase_require_expr(value),
+                        },
+                        crate::ast::ForBinder::Draw { name, value } => {
+                            crate::ast::ForBinder::Draw {
+                                name,
+                                value: erase_require_expr(value),
+                            }
+                        }
+                    })
+                    .collect(),
+                body: Box::new(erase_require_expr(*body)),
+            },
+            span,
+        ),
+        ExprKind::Match { scrutinee, arms } => Expr::new(
+            ExprKind::Match {
+                scrutinee: Box::new(erase_require_expr(*scrutinee)),
+                arms: arms
+                    .into_iter()
+                    .map(|a| crate::ast::MatchArm {
+                        pattern: a.pattern,
+                        body: erase_require_expr(a.body),
+                    })
+                    .collect(),
+            },
+            span,
+        ),
+        ExprKind::ListLit { elems } => Expr::new(
+            ExprKind::ListLit {
+                elems: elems.into_iter().map(erase_require_expr).collect(),
+            },
+            span,
+        ),
+        ExprKind::Interpolate { parts } => Expr::new(
+            ExprKind::Interpolate {
+                parts: parts
+                    .into_iter()
+                    .map(|p| match p {
+                        crate::ast::InterpPart::Expr(e) => {
+                            crate::ast::InterpPart::Expr(erase_require_expr(e))
+                        }
+                        lit => lit,
+                    })
+                    .collect(),
+            },
+            span,
+        ),
+        other => Expr::new(other, span),
+    }
+}
+
+/// Every `law` must appear in a `.require` predicate in live (non-law) code.
+pub fn check_laws_applied(program: &Program, law_names: &[String]) -> Result<(), OverlayError> {
+    if law_names.is_empty() {
+        return Ok(());
+    }
+    let mut used = std::collections::HashSet::new();
+    for d in &program.defs {
+        if d.is_law {
+            continue;
+        }
+        collect_required_laws(&d.body, law_names, &mut used);
+    }
+    collect_required_laws(&program.main.body, law_names, &mut used);
+    for name in law_names {
+        if !used.contains(name) {
+            return Err(OverlayError::Msg(format!(
+                "law `{name}` is never applied; use `.require({name})` on the value it constrains"
+            )));
+        }
+    }
+    Ok(())
+}
+
+fn callee_base_name(callee: &str) -> &str {
+    callee.rsplit('.').next().unwrap_or(callee)
+}
+
+fn collect_required_laws(
+    e: &Expr,
+    law_names: &[String],
+    used: &mut std::collections::HashSet<String>,
+) {
+    match &e.kind {
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+        } if is_require_method(method) => {
+            collect_required_laws(receiver, law_names, used);
+            for a in args {
+                mark_law_refs(a, law_names, used);
+                collect_required_laws(a, law_names, used);
+            }
+        }
+        ExprKind::MethodCall { receiver, args, .. } => {
+            collect_required_laws(receiver, law_names, used);
+            for a in args {
+                collect_required_laws(a, law_names, used);
+            }
+        }
+        ExprKind::Call { args, .. } | ExprKind::AdtConstruct { args, .. } => {
+            for a in args {
+                collect_required_laws(a, law_names, used);
+            }
+        }
+        ExprKind::IoPrintln(x)
+        | ExprKind::IoSleep(x)
+        | ExprKind::IoFail(x)
+        | ExprKind::IoPure(x)
+        | ExprKind::Attempt { inner: x }
+        | ExprKind::Field { base: x, .. }
+        | ExprKind::Lambda { body: x, .. } => collect_required_laws(x, law_names, used),
+        ExprKind::FlatMap { inner, body, .. }
+        | ExprKind::HandleErrorWith { inner, body }
+        | ExprKind::Let {
+            value: inner, body, ..
+        }
+        | ExprKind::IoEnsure {
+            inner,
+            finalizer: body,
+        }
+        | ExprKind::IoRace {
+            left: inner,
+            right: body,
+        }
+        | ExprKind::IoBoth {
+            left: inner,
+            right: body,
+        }
+        | ExprKind::Binary {
+            left: inner,
+            right: body,
+            ..
+        }
+        | ExprKind::IoTimeout {
+            ms: inner,
+            inner: body,
+        } => {
+            collect_required_laws(inner, law_names, used);
+            collect_required_laws(body, law_names, used);
+        }
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            collect_required_laws(cond, law_names, used);
+            collect_required_laws(then_branch, law_names, used);
+            collect_required_laws(else_branch, law_names, used);
+        }
+        ExprKind::For { binders, body } => {
+            for b in binders {
+                match b {
+                    crate::ast::ForBinder::Eq { value, .. }
+                    | crate::ast::ForBinder::Draw { value, .. } => {
+                        collect_required_laws(value, law_names, used)
+                    }
+                }
+            }
+            collect_required_laws(body, law_names, used);
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            collect_required_laws(scrutinee, law_names, used);
+            for a in arms {
+                collect_required_laws(&a.body, law_names, used);
+            }
+        }
+        ExprKind::ListLit { elems } => {
+            for a in elems {
+                collect_required_laws(a, law_names, used);
+            }
+        }
+        ExprKind::Interpolate { parts } => {
+            for p in parts {
+                if let crate::ast::InterpPart::Expr(e) = p {
+                    collect_required_laws(e, law_names, used);
+                }
+            }
+        }
+        ExprKind::Var(_) | ExprKind::Unit | ExprKind::IntLit(_) | ExprKind::StrLit(_) => {}
+    }
+}
+
+fn mark_law_refs(e: &Expr, law_names: &[String], used: &mut std::collections::HashSet<String>) {
+    match &e.kind {
+        ExprKind::Var(name) => {
+            let base = callee_base_name(name);
+            if law_names.iter().any(|n| n == base || n == name) {
+                used.insert(base.to_string());
+            }
+        }
+        ExprKind::Call { callee, args } => {
+            let base = callee_base_name(callee);
+            if law_names.iter().any(|n| n == base || n == callee.as_str()) {
+                used.insert(base.to_string());
+            }
+            for a in args {
+                mark_law_refs(a, law_names, used);
+            }
+        }
+        ExprKind::Lambda { body, .. } => mark_law_refs(body, law_names, used),
+        ExprKind::Binary { left, right, .. } => {
+            mark_law_refs(left, law_names, used);
+            mark_law_refs(right, law_names, used);
+        }
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => {
+            mark_law_refs(cond, law_names, used);
+            mark_law_refs(then_branch, law_names, used);
+            mark_law_refs(else_branch, law_names, used);
+        }
+        ExprKind::MethodCall { receiver, args, .. } => {
+            mark_law_refs(receiver, law_names, used);
+            for a in args {
+                mark_law_refs(a, law_names, used);
+            }
+        }
+        ExprKind::AdtConstruct { args, .. } => {
+            for a in args {
+                mark_law_refs(a, law_names, used);
+            }
+        }
+        _ => {}
+    }
 }
 
 fn replace_sim_def(live: &mut Program, sim: &FunDef, label: &str) -> Result<(), OverlayError> {
@@ -277,9 +670,11 @@ pub fn expr_has_law(e: &Expr) -> bool {
         ExprKind::Match { scrutinee, arms } => {
             expr_has_law(scrutinee) || arms.iter().any(|a| expr_has_law(&a.body))
         }
-        ExprKind::MethodCall { receiver, args, .. } => {
-            expr_has_law(receiver) || args.iter().any(expr_has_law)
-        }
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+        } => is_require_method(method) || expr_has_law(receiver) || args.iter().any(expr_has_law),
         ExprKind::AdtConstruct { args, .. } | ExprKind::ListLit { elems: args } => {
             args.iter().any(expr_has_law)
         }
@@ -308,36 +703,6 @@ pub fn driver_table_text(program: &Program) -> String {
         out.push('\n');
     }
     out
-}
-
-/// Wrap `@main` so each law runs after the program under TestRuntime (`Law.assert`).
-pub fn residualize_laws(program: &mut Program, law_names: &[String]) {
-    if law_names.is_empty() {
-        return;
-    }
-    let mut body = program.main.body.clone();
-    for name in law_names {
-        let assert_call = Expr::dummy(ExprKind::Call {
-            callee: "Law.assert".into(),
-            args: vec![
-                Expr::dummy(ExprKind::StrLit(name.clone())),
-                Expr::dummy(ExprKind::Call {
-                    callee: name.clone(),
-                    args: vec![],
-                }),
-            ],
-        });
-        body = Expr::dummy(ExprKind::FlatMap {
-            inner: Box::new(body),
-            param: Some("_".into()),
-            body: Box::new(assert_call),
-        });
-    }
-    program.main = MainDef {
-        module: program.main.module.clone(),
-        name: program.main.name.clone(),
-        body,
-    };
 }
 
 /// Rewrite calls and record construction so `where` predicates become `Law.check`
@@ -901,5 +1266,44 @@ mod tests {
             },
             other => panic!("expected IO.pure, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn unused_law_errors() {
+        let prog = parse_sources(&[(
+            "Main.scuzz".into(),
+            "law always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
+        )])
+        .unwrap();
+        let laws = collect_law_names(&prog).unwrap();
+        let err = check_laws_applied(&prog, &laws).unwrap_err();
+        assert!(err.to_string().contains("never applied"));
+    }
+
+    #[test]
+    fn applied_law_ok() {
+        let prog = parse_sources(&[(
+            "Main.scuzz".into(),
+            "law always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\").require(always)\n"
+                .into(),
+        )])
+        .unwrap();
+        let laws = collect_law_names(&prog).unwrap();
+        check_laws_applied(&prog, &laws).unwrap();
+    }
+
+    #[test]
+    fn erase_requires_drops_to_receiver() {
+        let mut prog = parse_sources(&[(
+            "Main.scuzz".into(),
+            "@main def main: IO[Unit] = IO.println(\"x\").require(1 == 1)\n".into(),
+        )])
+        .unwrap();
+        erase_requires(&mut prog);
+        let dumped = format!("{:?}", prog.main.body.kind);
+        assert!(
+            !dumped.contains("require"),
+            "expected require erased: {dumped}"
+        );
     }
 }

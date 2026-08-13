@@ -112,7 +112,7 @@ Locks (not an API catalog — see [`guide.md`](guide.md)):
 - Payload enums + `record` sugar + thin traits/`impl` (static dispatch) + monomorphized generics on defs/enums/records
 - File-stem modules; enums namespaced by stem; `import Module.name` for bare disambiguation
 - Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
-- Blessed kits + `Signal` / `View` / `Ui` / `Law.*` as documented in the guide
+- Blessed kits + `Signal` / `View` / `Ui` / `Law.*` / `.require` as documented in the guide
 - No macros, no implicits, no HKT beyond `IO`, no null
 
 ## Language direction
@@ -160,16 +160,16 @@ Direction: payload **enums** / **`record`** + thin **traits**-as-interfaces; mon
 
 App correctness is **not** classical unit tests. Prefer **mutation, fuzzing, property-oriented laws, simulation, and determinism** — all first-class in the language and `scuzz` tooling. The split is **oracles in source, drivers as the test surface**:
 
-- **Oracles live in the live module.** Top-level `law` declarations (pure, nullary `Bool`), inline `Law.check(name, ok, value)` in pure code (`Law.assert` in IO code), reachability `Law.sometimes(name)`, and `where` refinements on `def` params and `record` fields. All erase from live builds; armed under TestRuntime / fuzz / mutation.
-- **Drivers (`*.scuzz_drivers`) do things.** Impure, parameterized, oracle-free steps; `scuzz fuzz` composes them (generated args, random order / interleaving) alongside the UI event alphabet. `check` rejects `Law.*` calls in driver files — an assert inside a driver is a unit test in a costume.
-- **`Law.sometimes` keeps composition honest.** Reachability accumulates across a fuzz *campaign*; declared-but-never-reached states fail the campaign, so oracle-free drivers cannot pass vacuously. It is also the coverage/fitness signal for later corpus guidance.
+- **Oracles live in the live module.** Top-level `law` declarations (pure, nullary `Bool` predicates), explicit `.require(pred)` on values / `IO` (type-preserving; residual `Law.check` / sequenced `Law.assert` under verify), reachability `Law.sometimes(name)`, and `where` refinements on `def` params and `record` fields. All erase from live builds; armed under TestRuntime / fuzz / mutation. Laws are not auto-attached to `@main` — application is at the call site via `.require`.
+- **Drivers (`*.scuzz_drivers`) do things.** Impure, parameterized, oracle-free steps; `scuzz fuzz` composes them (generated args, random order / interleaving) alongside the UI event alphabet. `check` rejects `Law.*` and `.require` in driver files — an assert inside a driver is a unit test in a costume.
+- **`Law.sometimes` keeps composition honest.** Reachability accumulates across a fuzz *campaign*; declared-but-never-reached states fail the campaign, so oracle-free drivers cannot pass vacuously. It is also the coverage/fitness signal for later corpus guidance. It is a path marker (`Unit`), not a value method.
 - **Mutation pressures the oracles.** Surviving mutants mean weak laws/refinements.
 
 | Phase | Role |
 | --- | --- |
-| `scuzz check` | Format-verify `src/`; typecheck live + laws/refinements + sim + drivers; laws pure, drivers `IO`, no oracles in drivers; sim bindings match live types/purity |
-| `scuzz build` (verify graph) | Layer `*.scuzz_sim` over live defs; compile drivers; residualize law/refinement checks (armed under TestRuntime / fuzz / mutation only) |
-| `scuzz fuzz` | Compose drivers + event scripts / IO schedules. Per-run oracles: laws, refinements, panic/`SzError`. Per-campaign oracle: `Law.sometimes` reachability → `repro.toml` |
+| `scuzz check` | Format-verify `src/`; typecheck live + laws/refinements + sim + drivers; laws pure, drivers `IO`, no oracles in drivers; every `law` must appear in a `.require`; sim bindings match live types/purity |
+| `scuzz build` (verify graph) | Layer `*.scuzz_sim` over live defs; compile drivers; residualize `.require` / `where` checks (armed under TestRuntime / fuzz / mutation only) |
+| `scuzz fuzz` | Compose drivers + event scripts / IO schedules. Per-run oracles: `.require` residuals, refinements, panic/`SzError`. Per-campaign oracle: `Law.sometimes` reachability → `repro.toml` |
 | Mutation (built-in) | Mutate program / residual surface; surviving mutants mean weak oracles — first-class CLI, not an external mutator |
 | Later (optional) | Discharge trivial law/refinement fragments statically; leave the rest as search |
 
@@ -184,7 +184,7 @@ src/
   Todo.scuzz_drivers      # oracle-free workloads composed by scuzz fuzz
 ```
 
-- Live/`scuzz run` loads `*.scuzz` only; laws, inline checks, and refinements erase.
+- Live/`scuzz run` loads `*.scuzz` only; laws, `.require`, inline checks, and refinements erase.
 - No separate laws file: oracles belong next to the code they constrain, in `*.scuzz`.
 - Fuzz / mutation / test layers sim, then arms oracles. Rename drift fails `check`.
 - No free-floating `tests/` package roots; no third-party test or mutation frameworks.
@@ -194,7 +194,7 @@ src/
 
 ### Verification posture
 
-Keep purity checkable (pure `A` vs `IO` vs session), total expr core, signals as an explicit store, immutable data by default, errors as values. Refinements attach to **positions** (`def` params, `record` fields), not a refined-type algebra: checked dynamically at call / construction under the verify graph, erased live. They are deliberately the fragment that migrates to static discharge later with no author rewrite. Defer dependent types and runtime-heap proofs — residual oracles + fuzz + mutation first; static proof only where cheap.
+Keep purity checkable (pure `A` vs `IO` vs session), total expr core, signals as an explicit store, immutable data by default, errors as values. Refinements attach to **positions** (`def` params, `record` fields), not a refined-type algebra: checked dynamically at call / construction under the verify graph, erased live. `.require(pred)` attaches an oracle to a **value** (or `IO[A]` sequenced after the effect) while preserving the receiver type — even when `pred` is `IO[Bool]`. They are deliberately the fragment that migrates to static discharge later with no author rewrite. Defer dependent types and runtime-heap proofs — residual oracles + fuzz + mutation first; static proof only where cheap.
 
 ### `scuzz fuzz`
 

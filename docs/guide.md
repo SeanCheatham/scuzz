@@ -90,20 +90,21 @@ src/
 ```
 
 - Prefer sim overlays for app policy (API base URL, a `Backend` value); blessed kits stay one implementation with TestRuntime fakes on the wire
-- Laws are top-level `law name: Bool = …` in the live module; residual `Law.assert` runs only under `SCUZZ_TESTRT=1` (fuzz / mutation); live `build` / `run` erase them
+- Laws are top-level `law name: Bool = …` in the live module (reusable nullary predicates). Apply them explicitly with `.require(pred)` (or `.require("name", pred)`); live `build` / `run` erase laws and `.require` to the receiver
+- `.require` preserves the receiver type. Pure values residualize to `Law.check`; `IO[A]` sequences the check after the effect (`Law.assert`). Predicates may be `Bool`/`Int`, `IO[Bool]`/`IO[Int]`, `x => pred`, or a nullary `law` name
 - `where` on `def` params and `record` fields is a Bool predicate; the checker inserts `Law.check` at call / construction under the verify graph and erases it live
-- `Law.check(name, ok, value)` is identity live and panics under TestRuntime when `ok` is false; `Law.sometimes(name)` records reachability; fuzz fails the campaign if a string-literal name is never hit
+- `Law.check(name, ok, value)` is identity live and panics under TestRuntime when `ok` is false; `Law.sometimes(name)` records path reachability (`Unit`, not a value method); fuzz fails the campaign if a string-literal name is never hit
 - Observation builtins: `Law.signalInt(id)`, `Law.signalStr(id)`, `Law.signalListLen(id)`, `Law.signalListAt(id, i)`, `Law.a11yHas(needle)` (signal store + stashed a11y dump)
-- Drivers are new `IO[Unit]` defs (0 or 1 `Int`/`String` param); `check` rejects `Law.*` inside them; fuzz scripts gain `drive <name> [args]`
+- Drivers are new `IO[Unit]` defs (0 or 1 `Int`/`String` param); `check` rejects `Law.*` and `.require` inside them; fuzz scripts gain `drive <name> [args]`
 - No `src/test` twin trees — only stem-paired `*.scuzz_sim` / `*.scuzz_drivers`; no third-party test or mutation frameworks
-- Example: `examples/counter` + `examples/shared` (`Shared.scuzz_sim` swaps `counterTitle`; `countLabel` uses `Law.check`; `noteDrive(n: Int where n >= 0)` residualizes at `plusN`; `+1` records `Law.sometimes("tappedPlus")`; `Main.scuzz` laws check count / mapped label / button / sim title). `examples/record` uses `where` on `Point.x`.
+- Example: `examples/counter` + `examples/shared` (`Shared.scuzz_sim` swaps `counterTitle`; `countLabel` uses `.require`; `noteDrive(n: Int where n >= 0)` residualizes at `plusN`; `+1` records `Law.sometimes("tappedPlus")`; `Main.scuzz` applies count / label / button / sim-title oracles via `.require` on `Ui.run`). `examples/record` uses `where` on `Point.x`.
 
 **Today:**
 
-- `[ui]` packages: `scuzz test` is Headless **structural** goldens on the **live** graph (signal store + a11y dump); PNG optional via `--pixels`. `scuzz fuzz` compiles the **verify** graph (sim + residual laws + drivers).
+- `[ui]` packages: `scuzz test` is Headless **structural** goldens on the **live** graph (signal store + a11y dump); PNG optional via `--pixels`. `scuzz fuzz` compiles the **verify** graph (sim + residual `.require` / laws + drivers).
 - IO packages (no `[ui]`): `scuzz test` compiles and runs under `SCUZZ_TESTRT=1`, requiring exit 0
-- `scuzz check` format-verifies `src/` and typechecks live + sim twins + laws + drivers + `where` refinements; `--message-format=json` is the editor protocol (`check` only; LSP wraps this)
-- `scuzz fuzz --iters N` searches event scripts × schedules (`[ui]`) or schedule seeds only (IO-only); `--exhaust --depth N` is `[ui]` event alphabet (including `drive`) with FIFO schedule; `--replay repro.toml` restores events + optional `schedule_seed`; oracles are residual laws, `Law.check`, panic/`SzError`, and campaign `Law.sometimes` reachability
+- `scuzz check` format-verifies `src/` and typechecks live + sim twins + laws + drivers + `where` + `.require` (every `law` must be applied); `--message-format=json` is the editor protocol (`check` only; LSP wraps this)
+- `scuzz fuzz --iters N` searches event scripts × schedules (`[ui]`) or schedule seeds only (IO-only); `--exhaust --depth N` is `[ui]` event alphabet (including `drive`) with FIFO schedule; `--replay repro.toml` restores events + optional `schedule_seed`; oracles are residual `.require` / `Law.check`, panic/`SzError`, and campaign `Law.sometimes` reachability
 - Deterministic fakes: `TestRuntime` / `SCUZZ_TESTRT=1` for clock/random/FS/network/console in app binaries
 - Put non-determinism behind blessed `IO`; keep View construction pure
 - Built-in mutation (law-strength gate) is direction — see [gaps.md](gaps.md); do not add external mutators
@@ -114,10 +115,10 @@ src/
 | --- | --- |
 | `examples/hello` | IO println hello |
 | `examples/cli` | `Sys.args` + `Sys.readLine` |
-| `examples/counter` | `Signal.map` + `View.bindText` + `View.center` / `View.stack` / `View.positioned` / `View.sized` / `View.minSize` / `View.background` + button lambda + `Ui.run(_ => view)` factory + path dep on `shared` + laws/sim + `Law.sometimes` |
-| `examples/shared` | Library package (`{ path = "..." }`) with helpers + optional `*.scuzz_sim` + `Law.check` |
+| `examples/counter` | `Signal.map` + `View.bindText` + `View.center` / `View.stack` / `View.positioned` / `View.sized` / `View.minSize` / `View.background` + button lambda + `Ui.run(_ => view)` factory + path dep on `shared` + `.require` / sim + `Law.sometimes` |
+| `examples/shared` | Library package (`{ path = "..." }`) with helpers + optional `*.scuzz_sim` + `.require` |
 | `examples/todo` | `Signal.list` + `View.each`, Column `View.expanded` scroll, Rename via `setAt`, Fs load/save + laws |
-| `examples/nav` | `showWhen`, multi-page, Row `View.expanded` title, `View.align` Other page, `View.padding` Home, `View.aspectRatio` / `View.fraction` Home banner + laws |
+| `examples/nav` | `showWhen`, multi-page, Row `View.expanded` title, `View.align` Other page, `View.padding` Home, `View.aspectRatio` / `View.fraction` Home banner + `.require` |
 | `examples/live` | Stay-open Window (`Ui.run`; q/Esc) |
 | `examples/impurity` | Clock / Random / Fs / Net / Sys console kit |
 | `examples/concurrency` | `Ref` / `Queue` / `Deferred` park under `IO.both` / `IO.race` |

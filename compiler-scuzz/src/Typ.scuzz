@@ -258,10 +258,79 @@ def inferMethodCall(receiver: Expr, method: String, args: List, enums: List, fun
   } yield if (tyIsOk(rr) == 0) rr else inferMethodCallOnTy(tyVal(rr), method, args, enums, funs, env, receiver)
 
 def inferMethodCallOnTy(rt: Type, method: String, args: List, enums: List, funs: List, env: List, receiver: Expr): TyRes =
+  if (streq(method, "require") == 1) inferRequire(rt, args, enums, funs, env) else inferMethodCallOnTyAdt(rt, method, args, enums, funs, env, receiver)
+
+def inferMethodCallOnTyAdt(rt: Type, method: String, args: List, enums: List, funs: List, env: List, receiver: Expr): TyRes =
   rt match {
     case Type.Adt(id) => inferMethodCallOnAdt(id, method, args, enums, funs, env, receiver)
     case _ => tyErr(str3("method .", method, str3(" needs a record/ADT receiver, got ", tyShow(rt), "")))
   }
+
+def predOkTy(t: Type): Int =
+  t match {
+    case Type.Bool => 1
+    case Type.Int => 1
+    case Type.Io(inner) => if (tyIsBoolOrInt(inner) == 1) 1 else 0
+    case _ => 0
+  }
+
+def tyIsBoolOrInt(t: Type): Int =
+  t match {
+    case Type.Bool => 1
+    case Type.Int => 1
+    case _ => 0
+  }
+
+def isNullaryBoolLaw(name: String, funs: List): Int =
+  for {
+    d = resolveFun(funsDefs(funs), funsImports(funs), name, funsMod(funs))
+  } yield if (List.isEmpty(d) == 1) 0 else if (resolveIsAmbiguous(d) == 1) 0 else if (resolveIsPrivate(d) == 1) 0 else isNullaryBoolLawDef(resolvedDef(d))
+
+def isNullaryBoolLawDef(d: Def): Int =
+  if (List.isEmpty(defParams(d)) == 0) 0 else if (tyIsBoolOrInt(declRet(d)) == 0) 0 else 1
+
+def inferRequire(rt: Type, args: List, enums: List, funs: List, env: List): TyRes =
+  if (List.len(args) == 1) inferRequirePred(List.head(args), rt, enums, funs, env, rt) else if (List.len(args) == 2) inferRequireNamed(List.head(args), List.head(List.tail(args)), rt, enums, funs, env) else tyErr(str3(".require expects 1 or 2 args, got ", Str.fromInt(List.len(args)), ""))
+
+def inferRequireNamed(nameE: Expr, pred: Expr, rt: Type, enums: List, funs: List, env: List): TyRes =
+  nameE match {
+    case Expr.StrLit(value, span) => inferRequirePred(pred, rt, enums, funs, env, rt)
+    case _ => tyErr(".require name must be a string literal when two args are given")
+  }
+
+def inferRequirePred(pred: Expr, receiverTy: Type, enums: List, funs: List, env: List, ret: Type): TyRes =
+  for {
+    pr = inferRequirePredTy(pred, receiverTy, enums, funs, env)
+  } yield if (tyIsOk(pr) == 0) pr else tyOk(ret)
+
+def inferRequirePredTy(pred: Expr, receiverTy: Type, enums: List, funs: List, env: List): TyRes =
+  pred match {
+    case Expr.Var(name, span) => if (isNullaryBoolLaw(name, funs) == 1) tyOk(Type.Bool) else inferRequirePredExprTy(pred, enums, funs, env)
+    case Expr.Lambda(param, body, span) => inferRequireLambdaTy(param, body, receiverTy, enums, funs, env)
+    case _ => inferRequirePredExprTy(pred, enums, funs, env)
+  }
+
+def inferRequireLambda(param: String, body: Expr, receiverTy: Type, enums: List, funs: List, env: List, ret: Type): TyRes =
+  for {
+    pr = inferRequireLambdaTy(param, body, receiverTy, enums, funs, env)
+  } yield if (tyIsOk(pr) == 0) pr else tyOk(ret)
+
+def inferRequireLambdaTy(param: String, body: Expr, receiverTy: Type, enums: List, funs: List, env: List): TyRes =
+  for {
+    inner = if (tyIsIo(receiverTy) == 1) tyIoInner(receiverTy) else receiverTy
+    env2 = if (streq(param, "_") == 1) env else tyEnvPut(env, param, inner)
+    br = inferExpr(body, enums, funs, env2)
+  } yield if (tyIsOk(br) == 0) br else if (predOkTy(tyVal(br)) == 0) tyErr(str3(".require lambda must return Bool/Int or IO[Bool/Int], got ", tyShow(tyVal(br)), "")) else br
+
+def inferRequirePredExpr(pred: Expr, receiverTy: Type, enums: List, funs: List, env: List, ret: Type): TyRes =
+  for {
+    pr = inferRequirePredExprTy(pred, enums, funs, env)
+  } yield if (tyIsOk(pr) == 0) pr else tyOk(ret)
+
+def inferRequirePredExprTy(pred: Expr, enums: List, funs: List, env: List): TyRes =
+  for {
+    pr = inferExpr(pred, enums, funs, env)
+  } yield if (tyIsOk(pr) == 0) pr else if (predOkTy(tyVal(pr)) == 0) tyErr(str3(".require predicate must be Bool/Int or IO[Bool/Int], got ", tyShow(tyVal(pr)), "")) else pr
 
 def inferMethodCallOnAdt(id: String, method: String, args: List, enums: List, funs: List, env: List, receiver: Expr): TyRes =
   for {
@@ -928,7 +997,7 @@ def callSignal(callee: String, argTys: List): TyRes =
   if (streq(callee, "Signal.int") == 1) callSigInt(argTys) else if (streq(callee, "Signal.get") == 1) callSigGet(argTys) else if (streq(callee, "Signal.set") == 1) callSigSet(argTys) else if (streq(callee, "Signal.str") == 1) callSigStr(argTys) else if (streq(callee, "Signal.getStr") == 1) callSigGetStr(argTys) else if (streq(callee, "Signal.setStr") == 1) callSigSetStr(argTys) else if (streq(callee, "Signal.list") == 1) callSigList(argTys) else if (streq(callee, "Signal.getList") == 1) callSigGetList(argTys) else if (streq(callee, "Signal.setList") == 1) callSigSetList(argTys) else if (streq(callee, "Signal.map") == 1) callSigMap(argTys) else tyErr(str3("unknown function ", callee, ""))
 
 def callLaw(callee: String, argTys: List): TyRes =
-  if (streq(callee, "Law.signalInt") == 1) callLawSignalInt(argTys) else if (streq(callee, "Law.signalStr") == 1) callLawSignalStr(argTys) else if (streq(callee, "Law.signalListLen") == 1) callLawSignalListLen(argTys) else if (streq(callee, "Law.signalListAt") == 1) callLawSignalListAt(argTys) else if (streq(callee, "Law.a11yHas") == 1) callLawA11yHas(argTys) else if (streq(callee, "Law.assert") == 1) callLawAssert(argTys) else if (streq(callee, "Law.check") == 1) callLawCheck(argTys) else if (streq(callee, "Law.sometimes") == 1) callLawSometimes(argTys) else tyErr(str3("unknown function ", callee, ""))
+  if (streq(callee, "Law.signalInt") == 1) callLawSignalInt(argTys) else if (streq(callee, "Law.signalStr") == 1) callLawSignalStr(argTys) else if (streq(callee, "Law.signalListLen") == 1) callLawSignalListLen(argTys) else if (streq(callee, "Law.signalListAt") == 1) callLawSignalListAt(argTys) else if (streq(callee, "Law.a11yHas") == 1) callLawA11yHas(argTys) else if (streq(callee, "Law.assert") == 1) callLawAssert(argTys) else if (streq(callee, "Law.check") == 1) callLawCheck(argTys) else if (streq(callee, "Law.force") == 1) callLawForce(argTys) else if (streq(callee, "Law.sometimes") == 1) callLawSometimes(argTys) else tyErr(str3("unknown function ", callee, ""))
 
 def callLawSignalInt(argTys: List): TyRes =
   for {
@@ -964,6 +1033,17 @@ def callLawCheck(argTys: List): TyRes =
   for {
     a = expectArity("Law.check", 3, List.len(argTys))
   } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.String)) == 0) expectTy(argTyAt(argTys, 0), Type.String) else if (lawAssertOkTy(argTyAt(argTys, 1)) == 0) tyErr(str3("Law.check ok must be Bool/Int, got ", tyShow(argTyAt(argTys, 1)), "")) else tyOk(argTyAt(argTys, 2))
+
+def callLawForce(argTys: List): TyRes =
+  for {
+    a = expectArity("Law.force", 1, List.len(argTys))
+  } yield if (tyIsOk(a) == 0) a else callLawForceArg(argTyAt(argTys, 0))
+
+def callLawForceArg(t: Type): TyRes =
+  t match {
+    case Type.Io(inner) => if (tyIsBoolOrInt(inner) == 1) tyOk(Type.Int) else tyErr(str3("Law.force expects IO[Bool/Int], got ", tyShow(t), ""))
+    case _ => tyErr(str3("Law.force expects IO[Bool/Int], got ", tyShow(t), ""))
+  }
 
 def callLawSometimes(argTys: List): TyRes =
   for {
@@ -1262,8 +1342,61 @@ def resolveFieldsField(base: Expr, field: String, enums: List, imports: List, mo
 
 def resolveFieldsMethod(receiver: Expr, method: String, args: List, enums: List, imports: List, mod: String, allDefs: List, env: List, span: Span): Expr =
   for {
-    rr = inferExpr(receiver, enums, mkFuns(mod, allDefs, imports), env)
-  } yield if (tyIsOk(rr) == 0) Expr.MethodCall(receiver, method, args, span) else resolveFieldsMethodOnTy(tyVal(rr), method, args, receiver, allDefs, span)
+    funs = mkFuns(mod, allDefs, imports)
+    rr = inferExpr(receiver, enums, funs, env)
+  } yield if (tyIsOk(rr) == 0) Expr.MethodCall(receiver, method, args, span) else if (streq(method, "require") == 1) rewriteRequire(receiver, args, tyVal(rr), enums, funs, env, span) else resolveFieldsMethodOnTy(tyVal(rr), method, args, receiver, allDefs, span)
+
+def requirePredName(pred: Expr): String =
+  pred match {
+    case Expr.Var(name, span) => name
+    case Expr.Call(callee, args, span) => if (List.isEmpty(args) == 1) callee else "require"
+    case _ => "require"
+  }
+
+def splitRequireArgs(args: List): List =
+  if (List.len(args) == 1) List.cons(requirePredName(List.head(args)), List.cons(List.head(args), List.empty())) else if (List.len(args) == 2) splitRequireArgsNamed(List.head(args), List.head(List.tail(args))) else List.empty()
+
+def splitRequireArgsNamed(nameE: Expr, pred: Expr): List =
+  nameE match {
+    case Expr.StrLit(value, span) => List.cons(value, List.cons(pred, List.empty()))
+    case _ => List.empty()
+  }
+
+def normalizeRequirePred(pred: Expr, recvVar: String, funs: List): Expr =
+  pred match {
+    case Expr.Var(name, span) => if (isNullaryBoolLaw(name, funs) == 1) Expr.Call(name, List.empty(), span) else pred
+    case Expr.Lambda(param, body, span) => if (streq(param, "_") == 1) body else Expr.Let(param, Expr.Var(recvVar, span), body, span)
+    case _ => pred
+  }
+
+def forcePredIfIo(pred: Expr, predTy: Type): Expr =
+  if (tyIsIo(predTy) == 1) Expr.Call("Law.force", List.cons(pred, List.empty()), exprSpan(pred)) else pred
+
+def rewriteRequire(receiver: Expr, args: List, rt: Type, enums: List, funs: List, env: List, span: Span): Expr =
+  for {
+    parts = splitRequireArgs(args)
+  } yield if (List.isEmpty(parts) == 1) Expr.MethodCall(receiver, "require", args, span) else rewriteRequireParts(receiver, List.head(parts), List.head(List.tail(parts)), rt, enums, funs, env, span)
+
+def rewriteRequireParts(receiver: Expr, name: String, pred: Expr, rt: Type, enums: List, funs: List, env: List, span: Span): Expr =
+  for {
+    pr = inferRequirePredTy(pred, rt, enums, funs, env)
+  } yield if (tyIsOk(pr) == 0) Expr.MethodCall(receiver, "require", List.cons(pred, List.empty()), span) else if (tyIsIo(rt) == 1) rewriteRequireIo(receiver, name, pred, tyVal(pr), funs, span) else rewriteRequirePure(receiver, name, pred, tyVal(pr), funs, span)
+
+def rewriteRequirePure(receiver: Expr, name: String, pred: Expr, predTy: Type, funs: List, span: Span): Expr =
+  for {
+    recvVar = "__req"
+    pred2 = forcePredIfIo(normalizeRequirePred(pred, recvVar, funs), predTy)
+    check = Expr.Call("Law.check", List.cons(Expr.StrLit(name, span), List.cons(pred2, List.cons(Expr.Var(recvVar, span), List.empty()))), span)
+  } yield Expr.Let(recvVar, receiver, check, span)
+
+def rewriteRequireIo(receiver: Expr, name: String, pred: Expr, predTy: Type, funs: List, span: Span): Expr =
+  for {
+    recvVar = "__req"
+    pred2 = normalizeRequirePred(pred, recvVar, funs)
+    yieldV = Expr.Pure(Expr.Var(recvVar, span), span)
+    afterAssert = Expr.FlatMap(Expr.Call("Law.assert", List.cons(Expr.StrLit(name, span), List.cons(Expr.Var("__ok", span), List.empty())), span), "_", yieldV, span)
+    body = if (tyIsIo(predTy) == 1) Expr.FlatMap(pred2, "__ok", afterAssert, span) else Expr.Let("__ok", pred2, afterAssert, span)
+  } yield Expr.FlatMap(receiver, recvVar, body, span)
 
 def resolveFieldsMethodOnTy(rt: Type, method: String, args: List, receiver: Expr, allDefs: List, span: Span): Expr =
   rt match {

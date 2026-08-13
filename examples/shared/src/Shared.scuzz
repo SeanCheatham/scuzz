@@ -2,5 +2,5 @@ def counterTitle(): String =
   "Counter"
 
 def countLabel(n: Int): String =
-  Law.check("labelCount", n >= 0, s"count = $n")
+  s"count = $n".require("labelCount", n >= 0)
 

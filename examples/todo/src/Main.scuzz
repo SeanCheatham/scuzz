@@ -41,6 +41,6 @@ law hasClear: Bool =
   xs = Signal.getList(items)
   body = if (List.isEmpty(xs) == 1) "" else Str.concat(List.join(xs, "\n"), "\n")
   _ <- Fs.write(path, body)
-} yield ()), View.button("Clear", _ => Signal.setList(items, []))))
+} yield ()), View.button("Clear", _ => Signal.setList(items, [])))).require(listLenNonNeg).require(itemPastEndEmpty).require(draftNonNeg).require(hasAdd).require(hasClear)
     } yield ()
   )

@@ -165,15 +165,6 @@ def lawCall(name: String): Expr =
 def lawAssertCall(name: String): Expr =
   Expr.Call("Law.assert", List.cons(Expr.StrLit(name, dummySpan()), List.cons(lawCall(name), List.empty())), dummySpan())
 
-def wrapLawAssert(body: Expr, name: String): Expr =
-  Expr.FlatMap(body, "_", lawAssertCall(name), coverSpan(exprSpan(body), dummySpan()))
-
-def residualizeLaws(prog: Prog, lawNames: List): Prog =
-  if (List.isEmpty(lawNames) == 1) prog else setProgMain(prog, residualizeMain(progMain(prog), lawNames))
-
-def residualizeMain(body: Expr, lawNames: List): Expr =
-  if (List.isEmpty(lawNames) == 1) body else residualizeMain(wrapLawAssert(body, List.head(lawNames)), List.tail(lawNames))
-
 def residualizeRefinements(prog: Prog): Prog =
   setProgMain(setProgDefs(prog, residualizeDefs(progDefs(prog), progDefs(prog), progEnums(prog), List.empty())), residualizeExpr(progMain(prog), progDefs(prog), progEnums(prog)))
 
@@ -346,7 +337,7 @@ def exprHasLaw(e: Expr): Int =
     case Expr.ListLit(elems, span) => exprHasLawList(elems)
     case Expr.Interp(parts, span) => exprHasLawParts(parts)
     case Expr.Adt(enumName, caseName, args, typeArgs, span) => exprHasLawList(args)
-    case Expr.MethodCall(receiver, method, args, span) => if (exprHasLaw(receiver) == 1) 1 else exprHasLawList(args)
+    case Expr.MethodCall(receiver, method, args, span) => if (streq(method, "require") == 1) 1 else if (exprHasLaw(receiver) == 1) 1 else exprHasLawList(args)
     case Expr.Field(base, field, span) => exprHasLaw(base)
     case Expr.Println(arg, span) => exprHasLaw(arg)
     case Expr.Fail(arg, span) => exprHasLaw(arg)
@@ -510,6 +501,148 @@ def writeSometimesDeclared(outDir: String, verify: Int, prog: Prog): IO[Unit] =
 def eraseLawsDefs(defs: List, acc: List): List =
   if (List.isEmpty(defs) == 1) List.reverse(acc) else if (defIsLaw(List.head(defs)) == 1) eraseLawsDefs(List.tail(defs), acc) else eraseLawsDefs(List.tail(defs), List.cons(List.head(defs), acc))
 
+def eraseRequiresProg(prog: Prog): Prog =
+  setProgMain(setProgDefs(prog, eraseRequiresDefs(progDefs(prog), List.empty())), eraseRequireExpr(progMain(prog)))
+
+def eraseRequiresDefs(defs: List, acc: List): List =
+  if (List.isEmpty(defs) == 1) List.reverse(acc) else eraseRequiresDefs(List.tail(defs), List.cons(setDefBody(List.head(defs), eraseRequireExpr(defBody(List.head(defs)))), acc))
+
+def eraseRequireExpr(e: Expr): Expr =
+  e match {
+    case Expr.MethodCall(receiver, method, args, span) => if (streq(method, "require") == 1) eraseRequireExpr(receiver) else Expr.MethodCall(eraseRequireExpr(receiver), method, eraseRequireExprList(args, List.empty()), span)
+    case Expr.Call(callee, args, span) => Expr.Call(callee, eraseRequireExprList(args, List.empty()), span)
+    case Expr.Let(name, value, body, span) => Expr.Let(name, eraseRequireExpr(value), eraseRequireExpr(body), span)
+    case Expr.FlatMap(inner, param, body, span) => Expr.FlatMap(eraseRequireExpr(inner), param, eraseRequireExpr(body), span)
+    case Expr.Handle(inner, body, span) => Expr.Handle(eraseRequireExpr(inner), eraseRequireExpr(body), span)
+    case Expr.If(cond, thenB, elseB, span) => Expr.If(eraseRequireExpr(cond), eraseRequireExpr(thenB), eraseRequireExpr(elseB), span)
+    case Expr.BinOp(op, left, right, span) => Expr.BinOp(op, eraseRequireExpr(left), eraseRequireExpr(right), span)
+    case Expr.Lambda(param, body, span) => Expr.Lambda(param, eraseRequireExpr(body), span)
+    case Expr.Match(scrut, arms, span) => Expr.Match(eraseRequireExpr(scrut), eraseRequireArms(arms, List.empty()), span)
+    case Expr.For(binders, body, span) => Expr.For(eraseRequireBinders(binders, List.empty()), eraseRequireExpr(body), span)
+    case Expr.ListLit(elems, span) => Expr.ListLit(eraseRequireExprList(elems, List.empty()), span)
+    case Expr.Interp(parts, span) => Expr.Interp(eraseRequireParts(parts, List.empty()), span)
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => Expr.Adt(enumName, caseName, eraseRequireExprList(args, List.empty()), typeArgs, span)
+    case Expr.Field(base, field, span) => Expr.Field(eraseRequireExpr(base), field, span)
+    case Expr.Println(arg, span) => Expr.Println(eraseRequireExpr(arg), span)
+    case Expr.Fail(arg, span) => Expr.Fail(eraseRequireExpr(arg), span)
+    case Expr.Pure(arg, span) => Expr.Pure(eraseRequireExpr(arg), span)
+    case Expr.Sleep(arg, span) => Expr.Sleep(eraseRequireExpr(arg), span)
+    case Expr.Attempt(inner, span) => Expr.Attempt(eraseRequireExpr(inner), span)
+    case Expr.IoRace(left, right, span) => Expr.IoRace(eraseRequireExpr(left), eraseRequireExpr(right), span)
+    case Expr.IoBoth(left, right, span) => Expr.IoBoth(eraseRequireExpr(left), eraseRequireExpr(right), span)
+    case Expr.IoEnsure(inner, finalizer, span) => Expr.IoEnsure(eraseRequireExpr(inner), eraseRequireExpr(finalizer), span)
+    case Expr.IoTimeout(ms, inner, span) => Expr.IoTimeout(eraseRequireExpr(ms), eraseRequireExpr(inner), span)
+    case _ => e
+  }
+
+def eraseRequireExprList(xs: List, acc: List): List =
+  if (List.isEmpty(xs) == 1) List.reverse(acc) else eraseRequireExprList(List.tail(xs), List.cons(eraseRequireExpr(List.head(xs)), acc))
+
+def eraseRequireArms(arms: List, acc: List): List =
+  if (List.isEmpty(arms) == 1) List.reverse(acc) else eraseRequireArms(List.tail(arms), List.cons(eraseRequireArm(List.head(arms)), acc))
+
+def eraseRequireArm(arm: MatchArm): MatchArm =
+  arm match {
+    case MatchArm.Arm(pat, body) => MatchArm.Arm(pat, eraseRequireExpr(body))
+  }
+
+def eraseRequireBinders(binders: List, acc: List): List =
+  if (List.isEmpty(binders) == 1) List.reverse(acc) else eraseRequireBinders(List.tail(binders), List.cons(eraseRequireBinder(List.head(binders)), acc))
+
+def eraseRequireBinder(b: ForBinder): ForBinder =
+  b match {
+    case ForBinder.Eq(name, value) => ForBinder.Eq(name, eraseRequireExpr(value))
+    case ForBinder.Draw(name, value) => ForBinder.Draw(name, eraseRequireExpr(value))
+  }
+
+def eraseRequireParts(parts: List, acc: List): List =
+  if (List.isEmpty(parts) == 1) List.reverse(acc) else eraseRequireParts(List.tail(parts), List.cons(eraseRequirePart(List.head(parts)), acc))
+
+def eraseRequirePart(part: InterpPart): InterpPart =
+  part match {
+    case InterpPart.Lit(text) => part
+    case InterpPart.Hole(expr) => InterpPart.Hole(eraseRequireExpr(expr))
+  }
+
+def checkLawsApplied(prog: Prog, lawNames: List): IO[Unit] =
+  if (List.isEmpty(lawNames) == 1) IO.pure(()) else checkLawsAppliedUsed(lawNames, collectAppliedLaws(prog, lawNames, List.empty()))
+
+def checkLawsAppliedUsed(lawNames: List, used: List): IO[Unit] =
+  if (List.isEmpty(lawNames) == 1) IO.pure(()) else if (listContainsStr(used, List.head(lawNames)) == 0) IO.fail(str5("law `", List.head(lawNames), "` is never applied; use `.require(", List.head(lawNames), ")` on the value it constrains")) else checkLawsAppliedUsed(List.tail(lawNames), used)
+
+def collectAppliedLaws(prog: Prog, lawNames: List, used: List): List =
+  collectAppliedLawsDefs(progDefs(prog), lawNames, collectRequiredLaws(progMain(prog), lawNames, used))
+
+def collectAppliedLawsDefs(defs: List, lawNames: List, used: List): List =
+  if (List.isEmpty(defs) == 1) used else if (defIsLaw(List.head(defs)) == 1) collectAppliedLawsDefs(List.tail(defs), lawNames, used) else collectAppliedLawsDefs(List.tail(defs), lawNames, collectRequiredLaws(defBody(List.head(defs)), lawNames, used))
+
+def collectRequiredLaws(e: Expr, lawNames: List, used: List): List =
+  e match {
+    case Expr.MethodCall(receiver, method, args, span) => if (streq(method, "require") == 1) collectRequiredLawsList(args, lawNames, markLawRefsList(args, lawNames, collectRequiredLaws(receiver, lawNames, used))) else collectRequiredLawsList(args, lawNames, collectRequiredLaws(receiver, lawNames, used))
+    case Expr.Call(callee, args, span) => collectRequiredLawsList(args, lawNames, used)
+    case Expr.Let(name, value, body, span) => collectRequiredLaws(body, lawNames, collectRequiredLaws(value, lawNames, used))
+    case Expr.FlatMap(inner, param, body, span) => collectRequiredLaws(body, lawNames, collectRequiredLaws(inner, lawNames, used))
+    case Expr.Handle(inner, body, span) => collectRequiredLaws(body, lawNames, collectRequiredLaws(inner, lawNames, used))
+    case Expr.If(cond, thenB, elseB, span) => collectRequiredLaws(elseB, lawNames, collectRequiredLaws(thenB, lawNames, collectRequiredLaws(cond, lawNames, used)))
+    case Expr.BinOp(op, left, right, span) => collectRequiredLaws(right, lawNames, collectRequiredLaws(left, lawNames, used))
+    case Expr.Lambda(param, body, span) => collectRequiredLaws(body, lawNames, used)
+    case Expr.Match(scrut, arms, span) => collectRequiredLawsArms(arms, lawNames, collectRequiredLaws(scrut, lawNames, used))
+    case Expr.For(binders, body, span) => collectRequiredLaws(body, lawNames, collectRequiredLawsBinders(binders, lawNames, used))
+    case Expr.ListLit(elems, span) => collectRequiredLawsList(elems, lawNames, used)
+    case Expr.Interp(parts, span) => collectRequiredLawsParts(parts, lawNames, used)
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => collectRequiredLawsList(args, lawNames, used)
+    case Expr.Field(base, field, span) => collectRequiredLaws(base, lawNames, used)
+    case Expr.Println(arg, span) => collectRequiredLaws(arg, lawNames, used)
+    case Expr.Fail(arg, span) => collectRequiredLaws(arg, lawNames, used)
+    case Expr.Pure(arg, span) => collectRequiredLaws(arg, lawNames, used)
+    case Expr.Sleep(arg, span) => collectRequiredLaws(arg, lawNames, used)
+    case Expr.Attempt(inner, span) => collectRequiredLaws(inner, lawNames, used)
+    case Expr.IoRace(left, right, span) => collectRequiredLaws(right, lawNames, collectRequiredLaws(left, lawNames, used))
+    case Expr.IoBoth(left, right, span) => collectRequiredLaws(right, lawNames, collectRequiredLaws(left, lawNames, used))
+    case Expr.IoEnsure(inner, finalizer, span) => collectRequiredLaws(finalizer, lawNames, collectRequiredLaws(inner, lawNames, used))
+    case Expr.IoTimeout(ms, inner, span) => collectRequiredLaws(inner, lawNames, collectRequiredLaws(ms, lawNames, used))
+    case _ => used
+  }
+
+def collectRequiredLawsList(xs: List, lawNames: List, used: List): List =
+  if (List.isEmpty(xs) == 1) used else collectRequiredLawsList(List.tail(xs), lawNames, collectRequiredLaws(List.head(xs), lawNames, used))
+
+def collectRequiredLawsArms(arms: List, lawNames: List, used: List): List =
+  if (List.isEmpty(arms) == 1) used else collectRequiredLawsArms(List.tail(arms), lawNames, collectRequiredLaws(armBody(List.head(arms)), lawNames, used))
+
+def collectRequiredLawsBinders(binders: List, lawNames: List, used: List): List =
+  if (List.isEmpty(binders) == 1) used else collectRequiredLawsBinders(List.tail(binders), lawNames, collectRequiredLawsBinder(List.head(binders), lawNames, used))
+
+def collectRequiredLawsBinder(b: ForBinder, lawNames: List, used: List): List =
+  b match {
+    case ForBinder.Eq(name, value) => collectRequiredLaws(value, lawNames, used)
+    case ForBinder.Draw(name, value) => collectRequiredLaws(value, lawNames, used)
+  }
+
+def collectRequiredLawsParts(parts: List, lawNames: List, used: List): List =
+  if (List.isEmpty(parts) == 1) used else collectRequiredLawsParts(List.tail(parts), lawNames, collectRequiredLawsPart(List.head(parts), lawNames, used))
+
+def collectRequiredLawsPart(part: InterpPart, lawNames: List, used: List): List =
+  part match {
+    case InterpPart.Lit(text) => used
+    case InterpPart.Hole(expr) => collectRequiredLaws(expr, lawNames, used)
+  }
+
+def markLawRefsList(xs: List, lawNames: List, used: List): List =
+  if (List.isEmpty(xs) == 1) used else markLawRefsList(List.tail(xs), lawNames, markLawRefs(List.head(xs), lawNames, used))
+
+def markLawRefs(e: Expr, lawNames: List, used: List): List =
+  e match {
+    case Expr.Var(name, span) => if (listContainsStr(lawNames, name) == 1) if (listContainsStr(used, name) == 1) used else List.cons(name, used) else used
+    case Expr.Call(callee, args, span) => markLawRefsList(args, lawNames, if (listContainsStr(lawNames, callee) == 1) if (listContainsStr(used, callee) == 1) used else List.cons(callee, used) else used)
+    case Expr.Lambda(param, body, span) => markLawRefs(body, lawNames, used)
+    case Expr.BinOp(op, left, right, span) => markLawRefs(right, lawNames, markLawRefs(left, lawNames, used))
+    case Expr.If(cond, thenB, elseB, span) => markLawRefs(elseB, lawNames, markLawRefs(thenB, lawNames, markLawRefs(cond, lawNames, used)))
+    case Expr.MethodCall(receiver, method, args, span) => markLawRefsList(args, lawNames, markLawRefs(receiver, lawNames, used))
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => markLawRefsList(args, lawNames, used)
+    case _ => used
+  }
+
 def checkLawDefs(defs: List): IO[Unit] =
   if (List.isEmpty(defs) == 1) IO.pure(()) else checkLawDefOne(List.head(defs), List.tail(defs))
 
@@ -524,7 +657,11 @@ def filterOverlays(ovs: List, kind: String, acc: List): List =
 
 def prepareVerifyProg(prog0: Prog, overlays: List): IO[Prog] =
   applyOverlays(prog0, overlays).flatMap(p1 =>
-    checkLawDefs(progDefs(p1)).flatMap(_ => IO.pure(residualizeRefinements(residualizeLaws(p1, collectLawNames(progDefs(p1), List.empty())))))
+    for {
+      names = collectLawNames(progDefs(p1), List.empty())
+    } yield checkLawDefs(progDefs(p1)).flatMap(_ =>
+  checkLawsApplied(p1, names).flatMap(_ => IO.pure(residualizeRefinements(p1)))
+)
   )
 
 def compileProject(projectDir: String, outDir: String): IO[Unit] =
@@ -600,7 +737,7 @@ def compileAfterSources(projectDir: String, outDir: String, verify: Int, runtime
   )
 
 def prepareCompileProg(prog0: Prog, overlays: List, verify: Int): IO[Prog] =
-  if (verify == 0) IO.pure(setProgDefs(prog0, eraseLawsDefs(progDefs(prog0), List.empty()))) else prepareVerifyProg(prog0, overlays)
+  if (verify == 0) IO.pure(eraseRequiresProg(setProgDefs(prog0, eraseLawsDefs(progDefs(prog0), List.empty())))) else prepareVerifyProg(prog0, overlays)
 
 def loadGraphBundle(projectDir: String, toml: String): IO[List] =
   Fs.canonicalize(projectDir).flatMap(root =>

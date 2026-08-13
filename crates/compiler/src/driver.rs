@@ -2,8 +2,8 @@ use crate::codegen::emit_llvm;
 use crate::lower::lower_program;
 use crate::manifest::{load_manifest, Manifest};
 use crate::overlay::{
-    apply_overlays, collect_law_names, driver_table_text, erase_laws, overlay_kind_from_path,
-    residualize_laws, residualize_refinements, OverlaySource,
+    apply_overlays, check_laws_applied, collect_law_names, driver_table_text, erase_laws,
+    erase_requires, overlay_kind_from_path, residualize_refinements, OverlaySource,
 };
 use crate::parser::parse_sources;
 use crate::typ::typecheck;
@@ -114,11 +114,12 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
     };
     if opts.verify {
         let law_names = collect_law_names(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
-        residualize_laws(&mut program, &law_names);
+        check_laws_applied(&program, &law_names).map_err(|e| anyhow::anyhow!("{e}"))?;
         residualize_refinements(&mut program);
         program.law_names = law_names;
     } else {
         erase_laws(&mut program);
+        erase_requires(&mut program);
     }
     let program = lower_program(program);
     let program = crate::typ::expand_impls(program).map_err(|e| anyhow::anyhow!("{e}"))?;
