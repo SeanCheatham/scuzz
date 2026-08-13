@@ -1442,6 +1442,21 @@ mod tests {
     }
 
     #[test]
+    fn parse_net_serve_once() {
+        let src = r#"@main def main: IO[Unit] =
+  Net.serveOnce(8080, path => IO.pure(path))
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::Call { callee, args } if callee == "Net.serveOnce" => {
+                assert_eq!(args.len(), 2);
+                assert!(matches!(args[1].kind, ExprKind::Lambda { .. }));
+            }
+            other => panic!("expected Net.serveOnce, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_lambda_literal_named_param() {
         let src = r#"@main def main: IO[Unit] = View.button("+1", self => Signal.set(count, 1))"#;
         let p = parse(src).unwrap();

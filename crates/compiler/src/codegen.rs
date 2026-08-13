@@ -74,6 +74,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_clock_monotonic()").unwrap();
     writeln!(out, "declare ptr @sz_random_next_int(i64)").unwrap();
     writeln!(out, "declare ptr @sz_net_http_get(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_net_serve_once(i64, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_impurity_run_kit()").unwrap();
     writeln!(out, "declare ptr @sz_ref_of(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_ref_get(ptr)").unwrap();
@@ -1714,6 +1715,30 @@ fn emit_stream_evalmap(
     val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
 }
 
+fn emit_net_serve_once(
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 2, "Net.serveOnce expects 2 args");
+    let port = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let ExprKind::Lambda { param, body } = &args[1].kind else {
+        panic!("Net.serveOnce callback must be a lambda");
+    };
+    let lam = emit_io_cont_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
+    let mut code = port.code;
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @sz_net_serve_once(i64 {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
+        port.value
+    )
+    .unwrap();
+    io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+}
+
 fn emit_binary(
     op: &BinOp,
     left: &Expr,
@@ -1865,6 +1890,9 @@ fn emit_call(
     }
     if callee == "Stream.evalMap" {
         return emit_stream_evalmap(args, ctx, locals, prefix);
+    }
+    if callee == "Net.serveOnce" {
+        return emit_net_serve_once(args, ctx, locals, prefix);
     }
     let mut emitted_args = Vec::new();
     for (i, a) in args.iter().enumerate() {
@@ -2769,6 +2797,18 @@ mod tests {
         assert!(ir.contains("sz_stream_evalmap"));
         assert!(ir.contains("sz_stream_compile_to_list"));
         assert!(ir.contains("sz_stream_drain"));
+        assert!(ir.contains("sz_rcont_"));
+    }
+
+    #[test]
+    fn emit_net_serve_once() {
+        let src = r#"@main def main: IO[Unit] =
+  Net.serveOnce(8080, path => IO.pure(path))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_net_serve_once"));
         assert!(ir.contains("sz_rcont_"));
     }
 

@@ -29,7 +29,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### Near-term (HUMANS alignment)
 
-- **Server listen/serve** — `Net.httpGet` is client-only. Stdlib listen/bind (or a blessed HTTP server kit) on hosts that support it, with TestRuntime fakes and one `examples/` server. Same impurity story as `httpGet` (code **6**). Not a library ecosystem. Next slice: [`plans.md`](plans.md).
+- **Server listen/serve** — Stage 0 `Net.serveOnce(port, path => IO[String])` handles one HTTP/1.0 GET (`examples/server`; TestRuntime injects the path via `SCUZZ_TESTRT_NET_REQUEST`, default `/`). Live accept/read/write blocks the fiber like `httpGet` (code **6**). Self-host (`compiler-scuzz`) is the remaining slice. Persistent accept/poll loop is later.
 - **One static-hygiene command** — `fmt` and `check` are separate; there is no linter. Fold format + typecheck + lint into one author-facing command (`check`, with JSON diagnostics still the editor protocol). Do not add a third `lint` ritual.
 - **Nested `View` only** — `View.addChild` is used by `examples/todo` (empty `View.column()` / `View.row()` then mutate). Product surface is nested constructors. Remove `addChild` from Stage 0 and self-host; rewrite todo.
 - **Hot reload and debugging tools** — HUMANS wants Headless + in-process reload + debug, especially for agents. Headless is a peer runtime today; `watch` only rebuilds. Do not document rebuild-as-reload.

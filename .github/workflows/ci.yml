@@ -83,6 +83,8 @@ jobs:
           grep -q "impurity-ok" /tmp/impurity.out
           grep -q "fs:" /tmp/impurity.out
           grep -q "net:" /tmp/impurity.out
+          cargo run -p scuzz -- test examples/server | tee /tmp/server.out
+          grep -q "served:/" /tmp/server.out
           cargo run -p scuzz -- fmt --check examples/adt
           cargo run -p scuzz -- build examples/adt
           cargo run -p scuzz -- build examples/adt 2>&1 | tee /tmp/incr.out

@@ -620,6 +620,17 @@ record Point(x: Int, y: Int)
     }
 
     #[test]
+    fn formats_net_serve_once_roundtrip() {
+        let src = r#"@main def main: IO[Unit] =
+  Net.serveOnce(8080, path => IO.pure(path))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("Net.serveOnce("));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
     fn formats_import_roundtrip() {
         let src = "import A.tag\n@main def main: IO[Unit] =\n  IO.println(tag())\n";
         let out = format_source(src).unwrap();

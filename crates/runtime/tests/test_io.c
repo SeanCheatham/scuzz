@@ -1,11 +1,16 @@
 #define _POSIX_C_SOURCE 200809L
 #include "scuzz_rt.h"
 
+#include <arpa/inet.h>
 #include <assert.h>
+#include <netinet/in.h>
+#include <pthread.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <unistd.h>
 
 static int delay_calls = 0;
 static void *delay_inc(void *env) {
@@ -64,6 +69,51 @@ static SzIo *stream_bang(void *v, void *env) {
   (void)env;
   SzString *s = (SzString *)v;
   return sz_io_pure(sz_string_concat(s, sz_string_from_cstr("!")));
+}
+
+static SzIo *serve_path_ok(void *path, void *env) {
+  (void)env;
+  return sz_io_pure(
+      sz_string_concat(sz_string_from_cstr("ok:"), (SzString *)path));
+}
+
+static void *live_get_client(void *arg) {
+  int port = *(int *)arg;
+  int fd = -1;
+  int i;
+  struct sockaddr_in addr;
+  char req[128];
+  static char buf[1024];
+  ssize_t n;
+  size_t total = 0;
+  memset(buf, 0, sizeof buf);
+  memset(&addr, 0, sizeof addr);
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)port);
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  snprintf(req, sizeof req,
+           "GET /x HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+  for (i = 0; i < 50; i++) {
+    usleep(10000);
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+      continue;
+    if (connect(fd, (struct sockaddr *)&addr, sizeof addr) == 0)
+      break;
+    close(fd);
+    fd = -1;
+  }
+  if (fd < 0)
+    return NULL;
+  if (write(fd, req, strlen(req)) < 0) {
+    close(fd);
+    return NULL;
+  }
+  while (total + 1 < sizeof buf &&
+         (n = read(fd, buf + total, sizeof buf - 1 - total)) > 0)
+    total += (size_t)n;
+  close(fd);
+  return buf;
 }
 
 static SzIo *recover_boom(SzError *err, void *env) {
@@ -330,6 +380,11 @@ int main(void) {
     assert(r.ok);
     assert(strcmp(sz_string_cstr((SzString *)r.value), "pong") == 0);
 
+    sz_testrt_net_inject_request("/hello");
+    r = sz_io_unsafe_run(sz_net_serve_once(8080, serve_path_ok, NULL));
+    assert(r.ok);
+    assert(strcmp(sz_testrt_net_last_serve_body(), "ok:/hello") == 0);
+
     /* Console: argv override, stdin feed, println capture (+ echo) */
     {
       char *argv[] = {"x", "y"};
@@ -479,6 +534,18 @@ int main(void) {
     assert(strstr(sz_testrt_stdout_cstr(), "a\nb\n") != NULL);
 
     sz_testrt_reset();
+  }
+
+  /* Live Net.serveOnce: client thread GET while this fiber accepts. */
+  {
+    pthread_t th;
+    int port = 18473;
+    void *ret = NULL;
+    pthread_create(&th, NULL, live_get_client, &port);
+    r = sz_io_unsafe_run(sz_net_serve_once(port, serve_path_ok, NULL));
+    pthread_join(th, &ret);
+    assert(r.ok);
+    assert(ret && strstr((char *)ret, "ok:/x") != NULL);
   }
 
   /* Alloc accounting: live_count returns to baseline after free. */

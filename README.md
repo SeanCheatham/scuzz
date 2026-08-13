@@ -114,6 +114,7 @@ cargo run -p scuzz -- run --headless examples/live
 | `examples/concurrency` | `Ref` / `Queue` / `Deferred` + `IO.race` / `IO.both` |
 | `examples/resource` | `Resource.make` / `use` bracket (release on success and failure) |
 | `examples/stream` | `Stream.emit` / `evalMap` / `compileToList` / `drain` |
+| `examples/server` | `Net.serveOnce` one HTTP/1.0 GET |
 | `examples/adt` | package / enum / match |
 | `examples/modules` | stem modules, `private def`, `import`, enum-per-module |
 | `examples/record` | `record` + `p.x` field access |

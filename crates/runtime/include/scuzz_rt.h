@@ -329,6 +329,7 @@ void sz_clock_sleep_ms(int64_t ms); /* blocking sleep; EINTR restarts remaining 
 SzIo *sz_random_next_int(int64_t bound); /* IO[Int] in [0, bound) */
 
 SzIo *sz_net_http_get(SzString *url); /* IO[String] response body */
+SzIo *sz_net_serve_once(int64_t port, SzCont handler, void *env); /* IO[Unit]; one GET */
 
 /* TestRuntime — fake interpreters for deterministic scuzz test / unit tests */
 void sz_testrt_install(void); /* fake clock+rng+mem FS+stub net+sys/console */
@@ -353,8 +354,13 @@ SzIo *sz_testrt_fs_canonicalize(SzString *path);
 
 void sz_testrt_net_install(void);
 void sz_testrt_net_stub(const char *url, const char *body);
+void sz_testrt_net_inject_request(const char *path); /* inbound GET path for serveOnce */
 int sz_testrt_net_is_fake(void);
 SzIo *sz_testrt_net_http_get(SzString *url);
+SzIo *sz_testrt_net_serve_once(SzCont handler, void *env);
+const char *sz_testrt_net_last_serve_body(void);
+const char *sz_testrt_net_serve_path(void);
+void sz_testrt_net_set_last_serve_body(const char *body);
 
 /* Console fakes: scripted stdin, optional argv override, println capture (+ echo). */
 void sz_testrt_sys_install(void);
