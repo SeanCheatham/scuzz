@@ -19,7 +19,7 @@ def letterAt(i: Int): String =
   Str.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1)
 
 def fuzzKindCount(hasText: Int, hasScroll: Int): Int =
-  3 + hasText + hasScroll
+  3 + hasText + hasText + hasScroll
 
 def fuzzTap(s: Int, nButtons: Int): List =
   pair(strcat("tap ", Str.fromInt(lcgBelow(s, maxOf(nButtons, 1)))), Str.fromInt(s))
@@ -36,17 +36,23 @@ def fuzzText(s: Int): List =
 def fuzzScroll(s: Int): List =
   pair("scroll 40", Str.fromInt(s))
 
+def fuzzBackspace(s: Int): List =
+  pair("backspace", Str.fromInt(s))
+
 def fuzzScrollOrText(s: Int, hasScroll: Int): List =
   if (hasScroll == 1) fuzzScroll(s) else fuzzText(s)
+
+def fuzzBackspaceOrText(s: Int, hasText: Int): List =
+  if (hasText == 1) fuzzBackspace(s) else fuzzText(s)
 
 def fuzzEvent(s: Int, nButtons: Int, hasText: Int, hasScroll: Int): List =
   fuzzEventAt(lcgNext(s), nButtons, hasText, hasScroll)
 
 def fuzzEventAt(s: Int, nButtons: Int, hasText: Int, hasScroll: Int): List =
-  fuzzEventKind(s, lcgBelow(s, fuzzKindCount(hasText, hasScroll)), nButtons, hasScroll)
+  fuzzEventKind(s, lcgBelow(s, fuzzKindCount(hasText, hasScroll)), nButtons, hasScroll, hasText)
 
-def fuzzEventKind(s: Int, k: Int, nButtons: Int, hasScroll: Int): List =
-  if (k <= 1) fuzzTap(lcgNext(s), nButtons) else if (k == 2) fuzzPump(lcgNext(s)) else if (k == 3) fuzzScrollOrText(lcgNext(s), hasScroll) else fuzzText(lcgNext(s))
+def fuzzEventKind(s: Int, k: Int, nButtons: Int, hasScroll: Int, hasText: Int): List =
+  if (k <= 1) fuzzTap(lcgNext(s), nButtons) else if (k == 2) fuzzPump(lcgNext(s)) else if (k == 3) fuzzScrollOrText(lcgNext(s), hasScroll) else if (k == 4) fuzzBackspaceOrText(lcgNext(s), hasText) else fuzzText(lcgNext(s))
 
 def fuzzScript(seed: Int, nButtons: Int, hasText: Int, hasScroll: Int): List =
   fuzzScriptLen(lcgNext(lcgSeed(seed)), nButtons, hasText, hasScroll)
@@ -133,7 +139,7 @@ def exhaustAlphabet(nButtons: Int, hasText: Int, hasScroll: Int): List =
   exhaustAlphabetFinish(exhaustAlphabetScroll(exhaustAlphabetText(exhaustTapAcc(0, nButtons, List.empty()), hasText), hasScroll))
 
 def exhaustAlphabetText(taps: List, hasText: Int): List =
-  if (hasText == 1) List.append(List.append(taps, "text"), "text a") else taps
+  if (hasText == 1) List.append(List.append(List.append(taps, "text"), "text a"), "backspace") else taps
 
 def exhaustAlphabetScroll(base: List, hasScroll: Int): List =
   if (hasScroll == 1) List.append(base, "scroll 40") else base
