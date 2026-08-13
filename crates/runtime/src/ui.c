@@ -97,6 +97,7 @@ struct SzUiSession {
   void *rebuild_env;
   char *watch_path;
   char *watch_fp;
+  char *debug_dump_path;
 };
 
 static char *sz_strdup(const char *s) {
@@ -253,6 +254,34 @@ int sz_ui_session_watch(SzUiSession *session, const char *path) {
   return 1;
 }
 
+int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path) {
+  if (!session || !path || !path[0])
+    return 0;
+  sz_free(session->debug_dump_path);
+  session->debug_dump_path = sz_strdup(path);
+  return 1;
+}
+
+int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
+  FILE *f;
+  SzString *signals;
+  SzString *views;
+  if (!path || !path[0])
+    return 0;
+  f = fopen(path, "w");
+  if (!f)
+    return 0;
+  signals = sz_signal_dump();
+  views = (session && session->root) ? sz_view_a11y_dump(session->root)
+                                     : sz_string_from_cstr("");
+  fprintf(f, "[signals]\n%s\n[views]\n%s", sz_string_cstr(signals),
+          sz_string_cstr(views));
+  fclose(f);
+  sz_string_free(signals);
+  sz_string_free(views);
+  return 1;
+}
+
 int sz_ui_session_reload(SzUiSession *session) {
   SzView *root;
   if (!session || !session->rebuild)
@@ -335,6 +364,7 @@ void sz_ui_unmount(SzUiSession *session) {
     sz_view_free(session->root);
   sz_free(session->watch_path);
   sz_free(session->watch_fp);
+  sz_free(session->debug_dump_path);
   sz_free(session);
 }
 
@@ -370,15 +400,20 @@ int sz_ui_pump_sync(SzUiSession *session) {
   float scale;
   SzTheme paint_theme;
   const SzTheme *theme;
+  int need_dump;
   if (!session)
     return 0;
   if (session->lifecycle == SZ_LIFECYCLE_STOP)
     return 0;
+  need_dump = session->dirty || session->bridge_head != NULL;
   /* Pull OS events before the frame (host-driven mobile / desktop shell). */
   drain_mobile_events(session);
   drain_desktop_events(session);
-  if (stamp_changed(session) && !sz_ui_session_reload(session))
-    return 0;
+  if (stamp_changed(session)) {
+    if (!sz_ui_session_reload(session))
+      return 0;
+    need_dump = 1;
+  }
   /* Advance animations with monotonic Clock dt. */
   now_ms = sz_clock_monotonic_ms_sync();
   if (session->has_pump_clock) {
@@ -433,6 +468,8 @@ int sz_ui_pump_sync(SzUiSession *session) {
     }
   }
   sz_alloc_trace_on_pump();
+  if (need_dump && session->debug_dump_path)
+    sz_ui_session_write_dump(session, session->debug_dump_path);
   return 1;
 }
 
@@ -640,18 +677,12 @@ void sz_ui_demo_finish(SzUiSession *session) {
   }
   if (dump && dump[0]) {
     /* Structural oracle: signal store + a11y view dump (not pixels). */
-    FILE *f = fopen(dump, "w");
-    SzString *signals, *views;
-    if (!f)
+    SzString *views;
+    if (!sz_ui_session_write_dump(session, dump))
       sz_panic("fuzz dump open failed");
-    signals = sz_signal_dump();
     views = session && session->root ? sz_view_a11y_dump(session->root)
                                      : sz_string_from_cstr("");
-    fprintf(f, "[signals]\n%s\n[views]\n%s", sz_string_cstr(signals),
-            sz_string_cstr(views));
-    fclose(f);
     sz_law_stash_a11y(sz_string_cstr(views));
-    sz_string_free(signals);
     sz_string_free(views);
     fprintf(stderr, "scuzz: wrote fuzz dump %s\n", dump);
   } else if (session && session->root) {

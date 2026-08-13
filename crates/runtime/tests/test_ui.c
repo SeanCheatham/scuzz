@@ -370,22 +370,100 @@ static void test_ui_run_rebuild_keepalive(void) {
   pthread_t th;
   SzIoResult r;
   const char *stamp = "/tmp/scuzz_ui_keepalive.stamp";
+  const char *dump = "/tmp/scuzz_ui_keepalive.dump";
+  FILE *f;
+  char buf[2048];
+  size_t n;
 
   env.count = sz_signal_int(3);
   env.calls = 0;
   write_stamp(stamp, "0");
+  remove(dump);
   setenv("SCUZZ_UI_RELOAD_STAMP", stamp, 1);
+  setenv("SCUZZ_UI_DEBUG_DUMP", dump, 1);
   setenv("SCUZZ_LIVE_FRAMES", "8", 1);
   assert(pthread_create(&th, NULL, stamp_bump, (void *)stamp) == 0);
   r = sz_io_unsafe_run(sz_ui_run_rebuild(keep_factory, &env));
   pthread_join(th, NULL);
   unsetenv("SCUZZ_UI_RELOAD_STAMP");
+  unsetenv("SCUZZ_UI_DEBUG_DUMP");
   unsetenv("SCUZZ_LIVE_FRAMES");
   assert(r.ok);
   assert(sz_signal_int_get(env.count) == 3);
   assert(env.calls >= 2);
+  f = fopen(dump, "r");
+  assert(f);
+  n = fread(buf, 1, sizeof(buf) - 1, f);
+  fclose(f);
+  buf[n] = '\0';
+  assert(strstr(buf, "[signals]") != NULL);
+  assert(strstr(buf, "[views]") != NULL);
   sz_signal_int_free(env.count);
   remove(stamp);
+  remove(dump);
+}
+
+static char *slurp_cstr(const char *path) {
+  FILE *f = fopen(path, "r");
+  char *buf;
+  long n;
+  assert(f);
+  fseek(f, 0, SEEK_END);
+  n = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  buf = (char *)malloc((size_t)n + 1);
+  assert(buf);
+  n = (long)fread(buf, 1, (size_t)n, f);
+  fclose(f);
+  buf[n] = '\0';
+  return buf;
+}
+
+static void test_session_debug_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *btn;
+  SzSignalInt *count;
+  SzInputEvent tap;
+  const char *path = "/tmp/scuzz_ui_debug.dump";
+  char *a, *b;
+
+  count = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_text("Debug"));
+  btn = sz_view_button("+", counter_tap, count);
+  sz_view_add_child(root, btn);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 100;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_debug_dump(session, path));
+  assert(sz_ui_pump_sync(session));
+  a = slurp_cstr(path);
+  assert(strstr(a, "[signals]") != NULL);
+  assert(strstr(a, "[views]") != NULL);
+  assert(strstr(a, "text:Debug") != NULL);
+
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SZ_INPUT_TAP;
+  tap.x = sz_view_frame(btn).x + 8.f;
+  tap.y = sz_view_frame(btn).y + 8.f;
+  assert(sz_ui_inject_sync(session, &tap));
+  assert(sz_signal_int_get(count) == 1);
+  assert(sz_ui_pump_sync(session));
+  b = slurp_cstr(path);
+  assert(strcmp(a, b) != 0);
+  free(a);
+  free(b);
+
+  sz_ui_unmount(session);
+  sz_signal_int_free(count);
+  remove(path);
 }
 
 typedef struct {
@@ -1238,6 +1316,7 @@ int main(void) {
   test_watch_rebuild_keeps_signals();
   test_ui_run_rebuild();
   test_ui_run_rebuild_keepalive();
+  test_session_debug_dump();
   test_button_set_and_show_when();
   test_widgets();
   test_expanded_column();

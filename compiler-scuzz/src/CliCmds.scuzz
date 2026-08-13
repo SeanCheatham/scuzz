@@ -163,7 +163,7 @@ def runWatchUi(projectDir: String, name: String, toml: String, headless: Int): I
     stamp = pathJoin(pathJoin(projectDir, "build"), "reload.stamp")
   } yield Fs.mkdirs(pathJoin(projectDir, "build")).flatMap(_ =>
   Fs.write(stamp, "0\n").flatMap(_ =>
-    IO.println(str3("scuzz run --watch ", projectDir, " (keep process; stamp reloads View tree, not source)")).flatMap(_ =>
+    IO.println(str3("scuzz run --watch ", projectDir, " (keep process; stamp reloads View tree; live dump build/debug.dump)")).flatMap(_ =>
       srcFingerprint(projectDir).flatMap(fp => spawnWatchUi(projectDir, name, toml, headless, stamp, fp, 0))
     )
   )
@@ -194,16 +194,17 @@ def watchUiLoop(projectDir: String, name: String, toml: String, headless: Int, s
 def uiKeepCmd(projectDir: String, name: String, toml: String, headlessForce: Int, stamp: String): String =
   for {
     exe = pathJoin(pathJoin(projectDir, "build"), name)
-  } yield if (headlessForce == 1) uiKeepHeadless(exe, toml, stamp) else if (streq(readTomlDefaultRuntime(toml), "window") == 1) uiKeepWindow(exe, toml, stamp) else if (streq(readTomlDefaultRuntime(toml), "mobile") == 1) uiKeepMobile(exe, toml, stamp) else uiKeepHeadless(exe, toml, stamp)
+    dump = pathJoin(pathJoin(projectDir, "build"), "debug.dump")
+  } yield if (headlessForce == 1) uiKeepHeadless(exe, toml, stamp, dump) else if (streq(readTomlDefaultRuntime(toml), "window") == 1) uiKeepWindow(exe, toml, stamp, dump) else if (streq(readTomlDefaultRuntime(toml), "mobile") == 1) uiKeepMobile(exe, toml, stamp, dump) else uiKeepHeadless(exe, toml, stamp, dump)
 
-def uiKeepHeadless(exe: String, toml: String, stamp: String): String =
-  str5("env SCUZZ_UI_RELOAD_STAMP=", stamp, " SCUZZ_UI_RUNTIME=headless SCUZZ_UI_WIDTH=", readTomlHeadlessW(toml), str4(" SCUZZ_UI_HEIGHT=", readTomlHeadlessH(toml), " ", exe))
+def uiKeepHeadless(exe: String, toml: String, stamp: String, dump: String): String =
+  str5("env SCUZZ_UI_RELOAD_STAMP=", stamp, " SCUZZ_UI_DEBUG_DUMP=", dump, str5(" SCUZZ_UI_RUNTIME=headless SCUZZ_UI_WIDTH=", readTomlHeadlessW(toml), " SCUZZ_UI_HEIGHT=", readTomlHeadlessH(toml), Str.concat(" ", exe)))
 
-def uiKeepWindow(exe: String, toml: String, stamp: String): String =
-  str5("env SCUZZ_UI_RELOAD_STAMP=", stamp, " SCUZZ_UI_RUNTIME=window SCUZZ_UI_WIDTH=", readTomlHeadlessW(toml), str4(" SCUZZ_UI_HEIGHT=", readTomlHeadlessH(toml), " ", exe))
+def uiKeepWindow(exe: String, toml: String, stamp: String, dump: String): String =
+  str5("env SCUZZ_UI_RELOAD_STAMP=", stamp, " SCUZZ_UI_DEBUG_DUMP=", dump, str5(" SCUZZ_UI_RUNTIME=window SCUZZ_UI_WIDTH=", readTomlHeadlessW(toml), " SCUZZ_UI_HEIGHT=", readTomlHeadlessH(toml), Str.concat(" ", exe)))
 
-def uiKeepMobile(exe: String, toml: String, stamp: String): String =
-  str5("env SCUZZ_UI_RELOAD_STAMP=", stamp, " SCUZZ_UI_RUNTIME=mobile SCUZZ_MOBILE_SHELL=1 SCUZZ_UI_WIDTH=", readTomlHeadlessW(toml), str4(" SCUZZ_UI_HEIGHT=", readTomlHeadlessH(toml), " ", exe))
+def uiKeepMobile(exe: String, toml: String, stamp: String, dump: String): String =
+  str5("env SCUZZ_UI_RELOAD_STAMP=", stamp, " SCUZZ_UI_DEBUG_DUMP=", dump, str5(" SCUZZ_UI_RUNTIME=mobile SCUZZ_MOBILE_SHELL=1 SCUZZ_UI_WIDTH=", readTomlHeadlessW(toml), " SCUZZ_UI_HEIGHT=", readTomlHeadlessH(toml), Str.concat(" ", exe)))
 
 def runCompiled(projectDir: String, name: String, toml: String, headlessForce: Int): IO[Unit] =
   if (headlessForce == 1) runHeadless(projectDir, name, toml) else if (hasUiSection(toml) == 0) execOk(pathJoin(pathJoin(projectDir, "build"), name)) else runWithDefaultRuntime(projectDir, name, toml)

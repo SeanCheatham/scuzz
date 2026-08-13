@@ -13,7 +13,7 @@ Edit this file when a decision or next-step ordering changes.
 - **UI**: a primary product path, not the only one (Dart-shaped: GUI is first-class; so are CLI and server). One design language + Skia, as a **`Ui` effect** with Headless/Window/Mobile interpreters. Headless is a product runtime (agents, CI), not a test-only shim.
 - **Tooling**: one CLI (`scuzz`) for compile, link, assets, watch, packaging, deterministic `scuzz fuzz` over module **laws** + **sim** overlays. Static hygiene is `scuzz check` (format-verify + typecheck; further lints emit here, no `lint` subcommand). `scuzz fmt` rewrites.
 - **Bootstrap**: self-host is a hard goal. Stage-0 (Rust) exists only to get there.
-- **AI-Friendly**: Scuzz is meant to be read and written by LLMs. Headless, hot reload, and debugging tools are meant to aid agents; Headless is a peer runtime today, `watch` only rebuilds.
+- **AI-Friendly**: Scuzz is meant to be read and written by LLMs. Headless, hot reload, and debugging tools are meant to aid agents; Headless is a peer runtime, `watch` only rebuilds, `[ui] run --watch` stamp-reloads Views and writes `build/debug.dump`.
 
 Upstream Scala Native is a *reference*, not a dependency. Divergence is intentional.
 
@@ -41,7 +41,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 - Not “every widget rebuild is an `IO`” (`View` build stays sync/pure)
 - Not imperative View trees (`View.addChild`); nested constructors only
 - Not example-based unit-test culture (`src/test`, Mockito, assert-equal fixtures) for apps — **laws + fuzz + sim** instead
-- Not Flutter DevTools / VM patching. In-process reload and debug tools are a product goal; `watch` today only rebuilds.
+- Not Flutter DevTools / VM patching. In-process reload and a live structural dump are in; `watch` only rebuilds. Live event inject remains.
 - Not an sbt / Gradle / `pubspec` plugin DSL (`scuzz.toml` is data)
 - Not Flutter platform channels
 
@@ -61,7 +61,7 @@ Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI / cargo package `scuz
 
 One CLI. One typer. No second analyze frontend, no `*.g.scuzz` codegen, no `src/test` runner.
 
-- **Watch** rebuilds when sources or `scuzz.toml` change (path deps included). It does not patch running machine code. Session stamp-watch swaps the View tree without resetting Signals. `[ui]` `run --watch` keeps the process and writes `build/reload.stamp`. Debug tools remain; do not document `watch` as hot reload.
+- **Watch** rebuilds when sources or `scuzz.toml` change (path deps included). It does not patch running machine code. Session stamp-watch swaps the View tree without resetting Signals. `[ui]` `run --watch` keeps the process, writes `build/reload.stamp`, and rewrites `build/debug.dump` (signals + a11y) on dirty pumps. Live event inject remains; do not document `watch` as hot reload.
 - **Static hygiene** is `scuzz check`: format-verify `src/` + typecheck (live + sim + laws). `scuzz fmt` rewrites; `fmt --check` remains the dry-run. Further lints emit on `check` (same JSON diagnostics). No `lint` subcommand.
 - **JSON diagnostics** (`scuzz check --message-format=json`) are the editor protocol: `[{severity, message, file?, line?, column?}]`. `check` emits them; other commands stay human until they use this same type. LSP, when added, wraps `scuzz check --message-format=json` — do not grow a second typer or a parallel schema.
 - **`scuzz.toml` is data** — package, path deps, `[ui]`. No plugin DSL, no `build.scuzz` hooks, no sbt-shaped settings. Unknown keys and extra top-level tables are rejected; do not add `[plugins]`.
@@ -219,7 +219,7 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ## Open work
 
-Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters. Near-term: debug tools.
+Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters. Near-term: live event inject for keep-alive sessions.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features. UI is a primary path among CLI/server/desktop/mobile — not the only v0 bar.
 
@@ -234,7 +234,7 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-onl
 | Laws become brittle dump goldens | Laws talk to named module/signal surface; strict sim/live pairing in `check` |
 | Sim becomes Mockito | Only top-level same-name overlays; no stubbing pure `View`/`Signal`; kits stay TestRuntime |
 | “Almost Scala” confusion | Explicit non-goals; language direction above; [guide.md](guide.md) |
-| Watch sold as hot reload | `watch` rebuilds; `[ui]` `run --watch` stamp-reloads Views; no new machine code; debug remains |
+| Watch sold as hot reload | `watch` rebuilds; `[ui]` `run --watch` stamp-reloads Views and writes `build/debug.dump`; no new machine code; live inject remains |
 | IDE typer ≠ batch typer | One JSON schema; LSP wraps `scuzz check` |
 | Skia weight | pinned CPU prebuilt default; `sk_sw` opt-out (`SCUZZ_SKIA=sk_sw`) |
 | Window-only features | Headless peer rule |

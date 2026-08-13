@@ -317,6 +317,11 @@ static void *thunk_run_rebuild(void *env) {
   stamp = getenv("SCUZZ_UI_RELOAD_STAMP");
   if (stamp && stamp[0])
     sz_ui_session_watch(session, stamp);
+  {
+    const char *dump = getenv("SCUZZ_UI_DEBUG_DUMP");
+    if (dump && dump[0])
+      sz_ui_session_set_debug_dump(session, dump);
+  }
 
   if (!sz_ui_pump_sync(session))
     sz_panic("Ui.run pump failed");

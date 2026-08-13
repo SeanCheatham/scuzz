@@ -2,4 +2,4 @@
 
 ## Next
 
-**Debug tools.** Session stamp-watch and Stage 0/1/2 `[ui]` `run --watch` keep-alive are in. HUMANS still wants debugging tools for agents. Still not Flutter VM patching. Do not document `watch` as hot reload.
+**Live event inject.** `[ui] run --watch` writes a live structural dump (`build/debug.dump` / `SCUZZ_UI_DEBUG_DUMP`) so agents can read signals + a11y without killing the process. They cannot yet tap/type into a keep-alive session. Next: a stamp-driven inject file using the existing tap/text/pump script protocol. Still not Flutter VM patching. Do not document `watch` as hot reload.

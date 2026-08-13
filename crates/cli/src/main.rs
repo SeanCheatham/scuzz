@@ -13,7 +13,7 @@ use std::process::{Command, ExitCode};
     name = "scuzz",
     version,
     about = "Scuzz Lang — Stage-0 bootstrap CLI (release CLI is compiler-scuzz)",
-    after_help = "Examples:\n  scuzz check\n  scuzz check --message-format=json\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n\nJSON diagnostics are the check protocol (LSP wraps `scuzz check`).\n`watch` rebuilds. `run --watch` on [ui] keeps the process and stamp-reloads the View tree (not source hot reload)."
+    after_help = "Examples:\n  scuzz check\n  scuzz check --message-format=json\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n\nJSON diagnostics are the check protocol (LSP wraps `scuzz check`).\n`watch` rebuilds. `run --watch` on [ui] keeps the process and stamp-reloads the View tree (not source hot reload). Live structural dump: build/debug.dump."
 )]
 struct Cli {
     /// Diagnostic format: human (default) or json (`check` protocol; LSP wraps check)
@@ -404,7 +404,7 @@ fn watch_run(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
         }
     }
     eprintln!(
-        "scuzz run --watch {} (keep process; stamp reloads View tree, not source)",
+        "scuzz run --watch {} (keep process; stamp reloads View tree; live dump build/debug.dump)",
         project_dir.display()
     );
     watch_run_ui(&project_dir, path, out_dir, headless)
@@ -476,6 +476,10 @@ fn spawn_ui_keep(
     let out = build(path, &out_dir.to_path_buf(), true, false)?;
     let mut cmd = Command::new(&out.executable);
     cmd.env("SCUZZ_UI_RELOAD_STAMP", stamp);
+    cmd.env(
+        "SCUZZ_UI_DEBUG_DUMP",
+        project_dir.join("build").join("debug.dump"),
+    );
     if use_headless {
         cmd.env("SCUZZ_UI_RUNTIME", "headless");
         if let Some(ui) = &manifest.ui {
