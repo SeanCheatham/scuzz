@@ -84,6 +84,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_deferred_empty()").unwrap();
     writeln!(out, "declare ptr @sz_deferred_complete(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_deferred_get(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_resource_make(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_resource_use(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_signal_int(i64)").unwrap();
     writeln!(out, "declare i64 @sz_lang_signal_get(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_signal_set(ptr, i64)").unwrap();
@@ -1559,6 +1561,128 @@ fn emit_signal_map(
     val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
 }
 
+/// `t => IO[...]` continuation: `ptr (*)(ptr value, ptr env)` returning `SzIo*`.
+fn emit_io_cont_lambda(
+    param: &Option<String>,
+    body: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    let id = *ctx.cont_id;
+    *ctx.cont_id += 1;
+    let fn_name = format!("sz_rcont_{id}");
+
+    let capture_names = capture_name_order(locals);
+    let mut pre = String::new();
+    let mut body_locals: HashMap<String, (String, Kind)> = HashMap::new();
+    unpack_env_preamble(
+        &mut pre,
+        &mut body_locals,
+        locals,
+        &capture_names,
+        &format!("r{id}"),
+    );
+    if let Some(p) = param {
+        if p != "_" {
+            body_locals.insert(p.clone(), ("%value".into(), Kind::Ptr));
+        }
+    }
+
+    let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("r{id}"));
+
+    writeln!(
+        ctx.conts,
+        "define internal ptr @{fn_name}(ptr %value, ptr %env) {{"
+    )
+    .unwrap();
+    writeln!(ctx.conts, "entry:").unwrap();
+    ctx.conts.push_str(&pre);
+    ctx.conts.push_str(&body_emitted.code);
+    let ret = ensure_io(
+        ctx.conts,
+        body_emitted.kind,
+        &body_emitted.value,
+        &format!("r{id}_wrap"),
+    );
+    writeln!(ctx.conts, "  ret ptr {ret}").unwrap();
+    writeln!(ctx.conts, "}}").unwrap();
+    writeln!(ctx.conts).unwrap();
+
+    let mut code = String::new();
+    let env_ptr = pack_env(&mut code, locals, &capture_names, &format!("{prefix}_cap"));
+    writeln!(code, "  %{prefix}_cl0 = call ptr @sz_list_nil()").unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_cl1 = call ptr @sz_list_cons(ptr {env_ptr}, ptr %{prefix}_cl0)"
+    )
+    .unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_cl2 = call ptr @sz_list_cons(ptr @{fn_name}, ptr %{prefix}_cl1)"
+    )
+    .unwrap();
+    val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
+}
+
+fn unpack_closure(code: &mut String, closure: &str, prefix: &str) {
+    writeln!(
+        code,
+        "  %{prefix}_fnp = call ptr @sz_list_head(ptr {closure})"
+    )
+    .unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_fnt = call ptr @sz_list_tail(ptr {closure})"
+    )
+    .unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_envp = call ptr @sz_list_head(ptr %{prefix}_fnt)"
+    )
+    .unwrap();
+}
+
+fn emit_resource(
+    callee: &str,
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 2, "{callee} expects 2 args");
+    let first = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let ExprKind::Lambda { param, body } = &args[1].kind else {
+        panic!("{callee} callback must be a lambda");
+    };
+    let lam = emit_io_cont_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
+    let mut code = first.code;
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    if callee == "Resource.make" {
+        let acq = ensure_io(
+            &mut code,
+            first.kind,
+            &first.value,
+            &format!("{prefix}_acq"),
+        );
+        writeln!(
+            code,
+            "  %{prefix}_v = call ptr @sz_lang_resource_make(ptr {acq}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
+        )
+        .unwrap();
+        val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+    } else {
+        writeln!(
+            code,
+            "  %{prefix}_v = call ptr @sz_lang_resource_use(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
+            first.value
+        )
+        .unwrap();
+        io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+    }
+}
+
 fn emit_binary(
     op: &BinOp,
     left: &Expr,
@@ -1704,6 +1828,9 @@ fn emit_call(
 ) -> Emitted {
     if callee == "Signal.map" {
         return emit_signal_map(args, ctx, locals, prefix);
+    }
+    if callee == "Resource.make" || callee == "Resource.use" {
+        return emit_resource(callee, args, ctx, locals, prefix);
     }
     let mut emitted_args = Vec::new();
     for (i, a) in args.iter().enumerate() {
@@ -2516,6 +2643,22 @@ mod tests {
         assert!(ir.contains("define i32 @main(i32 %argc, ptr %argv)"));
         assert!(ir.contains("sz_io_println"));
         assert!(ir.contains("sz_runtime_main_args"));
+    }
+
+    #[test]
+    fn emit_resource_make_use() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    res = Resource.make(IO.pure("tok"), t => IO.println(t))
+    _ <- Resource.use(res, t => IO.println(t))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_lang_resource_make"));
+        assert!(ir.contains("sz_lang_resource_use"));
+        assert!(ir.contains("sz_rcont_"));
     }
 
     #[test]

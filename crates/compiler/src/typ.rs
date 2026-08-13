@@ -1346,6 +1346,15 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Io(Box::new(Type::String)))
         }
+        "Resource.make" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Io(Box::new(Type::String)))?;
+            Ok(Type::Opaque("Resource".into()))
+        }
+        "Resource.use" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
         "Signal.int" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
@@ -3521,6 +3530,20 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("payload ADT should typecheck");
+    }
+
+    #[test]
+    fn typechecks_resource_make_use() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    res = Resource.make(IO.pure("tok"), t => IO.println(t))
+    _ <- Resource.use(res, t => IO.println(t))
+    res2 = Resource.make(IO.pure("tok2"), t => IO.println(t))
+    _ <- Resource.use(res2, t => IO.fail("boom")).handleErrorWith(_ => IO.println("recovered"))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Resource.make/use should typecheck");
     }
 
     #[test]

@@ -588,6 +588,21 @@ record Point(x: Int, y: Int)
     }
 
     #[test]
+    fn formats_resource_roundtrip() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    res = Resource.make(IO.pure("tok"), t => IO.println(t))
+    _ <- Resource.use(res, t => IO.println(t))
+  } yield ()
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("Resource.make("));
+        assert!(out.contains("Resource.use("));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
     fn formats_import_roundtrip() {
         let src = "import A.tag\n@main def main: IO[Unit] =\n  IO.println(tag())\n";
         let out = format_source(src).unwrap();

@@ -1237,7 +1237,7 @@ impl Parser {
                     name.as_str(),
                     "Str" | "List" | "Fs" | "Sys" | "Clock" | "Random"
                         | "Net" | "Impurity" | "Signal" | "View" | "Theme"
-                        | "Ref" | "Queue" | "Deferred"
+                        | "Ref" | "Queue" | "Deferred" | "Resource"
                 ) =>
             {
                 self.bump();
@@ -1380,6 +1380,32 @@ mod tests {
                 assert!(matches!(args[1].kind, ExprKind::Lambda { param: None, .. }));
             }
             other => panic!("expected View.button call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_resource_make_use() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    res = Resource.make(IO.pure("tok"), t => IO.println(t))
+    _ <- Resource.use(res, t => IO.println(t))
+  } yield ()
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::For { binders, .. } => {
+                assert!(matches!(
+                    &binders[0],
+                    ForBinder::Eq { value, .. }
+                        if matches!(&value.kind, ExprKind::Call { callee, .. } if callee == "Resource.make")
+                ));
+                assert!(matches!(
+                    &binders[1],
+                    ForBinder::Draw { value, .. }
+                        if matches!(&value.kind, ExprKind::Call { callee, .. } if callee == "Resource.use")
+                ));
+            }
+            other => panic!("expected for, got {other:?}"),
         }
     }
 

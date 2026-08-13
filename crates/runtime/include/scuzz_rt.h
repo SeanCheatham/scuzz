@@ -90,6 +90,7 @@ void sz_adt_free(SzAdt *adt);
 
 typedef struct SzIo SzIo;
 typedef struct SzResource SzResource;
+typedef struct SzLangResource SzLangResource;
 typedef struct SzRef SzRef;
 typedef struct SzDeferred SzDeferred;
 typedef struct SzQueue SzQueue;
@@ -200,6 +201,18 @@ SzResource *sz_resource_make(SzAcquire acquire, SzRelease release, void *env);
 SzIo *sz_resource_use(SzResource *res, SzIo *(*use)(void *acquired, void *env),
                       void *use_env);
 void sz_resource_free(SzResource *res);
+
+/* Language Resource.make / use: IO acquire + SzCont release/use (String payload). */
+struct SzLangResource {
+  SzIo *acquire;
+  SzCont release;
+  void *release_env;
+};
+
+SzLangResource *sz_lang_resource_make(SzIo *acquire, SzCont release,
+                                      void *release_env);
+SzIo *sz_lang_resource_use(SzLangResource *res, SzCont use, void *use_env);
+void sz_lang_resource_free(SzLangResource *res);
 
 /* Ref — mutable cell (single-threaded). */
 struct SzRef {

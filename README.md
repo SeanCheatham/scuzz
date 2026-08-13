@@ -112,6 +112,7 @@ cargo run -p scuzz -- run --headless examples/live
 | `examples/live` | Stay-open Window (`Ui.run`; q/Esc) |
 | `examples/todo` | Todo — `Signal.list` / `View.expanded` scroll / Add·Save + goldens |
 | `examples/concurrency` | `Ref` / `Queue` / `Deferred` + `IO.race` / `IO.both` |
+| `examples/resource` | `Resource.make` / `use` bracket (release on success and failure) |
 | `examples/adt` | package / enum / match |
 | `examples/modules` | stem modules, `private def`, `import`, enum-per-module |
 | `examples/record` | `record` + `p.x` field access |

@@ -58,6 +58,11 @@ jobs:
           grep -q "ref-ok" /tmp/concurrency.out
           grep -q "queue-ok" /tmp/concurrency.out
           grep -q "deferred-ok" /tmp/concurrency.out
+          cargo run -p scuzz -- run examples/resource | tee /tmp/resource.out
+          grep -q "use:token" /tmp/resource.out
+          grep -q "release:token" /tmp/resource.out
+          grep -q "release:token2" /tmp/resource.out
+          grep -q "recovered" /tmp/resource.out
           cargo run -p scuzz -- run examples/adt | tee /tmp/adt.out
           grep -q "adt:red" /tmp/adt.out
           cargo run -p scuzz -- run examples/record | tee /tmp/record.out

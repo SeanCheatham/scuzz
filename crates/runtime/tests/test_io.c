@@ -42,6 +42,24 @@ static SzIo *use_token_fail(void *acquired, void *env) {
   return sz_io_fail_cstr("use-failed");
 }
 
+static int lang_released = 0;
+static SzIo *lang_release(void *acquired, void *env) {
+  (void)env;
+  assert(acquired);
+  lang_released = 1;
+  return sz_io_pure(NULL);
+}
+static SzIo *lang_use_ok(void *acquired, void *env) {
+  (void)env;
+  (void)acquired;
+  return sz_io_println_cstr("lang-resource-used");
+}
+static SzIo *lang_use_fail(void *acquired, void *env) {
+  (void)env;
+  (void)acquired;
+  return sz_io_fail_cstr("lang-use-failed");
+}
+
 static SzIo *recover_boom(SzError *err, void *env) {
   (void)env;
   assert(err && strstr(sz_string_cstr(err->message), "boom"));
@@ -133,6 +151,24 @@ int main(void) {
   assert(released == 1);
   sz_error_free(r.error);
   sz_resource_free(res);
+
+  /* Language Resource.make / use (IO acquire + IO release) */
+  lang_released = 0;
+  SzLangResource *lr = sz_lang_resource_make(
+      sz_io_pure(sz_string_from_cstr("tok")), lang_release, NULL);
+  r = sz_io_unsafe_run(sz_lang_resource_use(lr, lang_use_ok, NULL));
+  assert(r.ok);
+  assert(lang_released == 1);
+  sz_lang_resource_free(lr);
+
+  lang_released = 0;
+  lr = sz_lang_resource_make(sz_io_pure(sz_string_from_cstr("tok")),
+                             lang_release, NULL);
+  r = sz_io_unsafe_run(sz_lang_resource_use(lr, lang_use_fail, NULL));
+  assert(!r.ok);
+  assert(lang_released == 1);
+  sz_error_free(r.error);
+  sz_lang_resource_free(lr);
 
   /* Ref */
   r = sz_io_unsafe_run(sz_io_flatmap(sz_ref_of_cstr("a"), after_ref, NULL));

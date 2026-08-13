@@ -1,0 +1,8 @@
+[package]
+name = "resource"
+version = "0.1.0"
+description = "Resource.make / use bracket"
+
+[targets.native]
+kind = "executable"
+main = "Main"

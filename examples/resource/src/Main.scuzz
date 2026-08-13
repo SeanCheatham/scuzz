@@ -1,0 +1,8 @@
+@main def main: IO[Unit] =
+  for {
+    res = Resource.make(IO.pure("token"), t => IO.println(s"release:$t"))
+    _ <- Resource.use(res, t => IO.println(s"use:$t"))
+    res2 = Resource.make(IO.pure("token2"), t => IO.println(s"release:$t"))
+    _ <- Resource.use(res2, t => IO.fail("boom")).handleErrorWith(_ => IO.println("recovered"))
+    _ <- IO.println("done")
+  } yield ()
