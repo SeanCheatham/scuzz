@@ -164,6 +164,67 @@ static void test_signals_layout_hit(void) {
   sz_signal_int_free(count);
 }
 
+static void test_replace_root_keeps_signals(void) {
+  SzUiConfig cfg;
+  SzSignalInt *count;
+  SzView *root1, *root2, *btn1, *btn2;
+  SzUiSession *session;
+  SzInputEvent tap;
+  SzString *dump1, *dump2, *a11y;
+  const SzTheme *theme = sz_theme_default();
+
+  count = sz_signal_int(0);
+  root1 = sz_view_column();
+  sz_view_add_child(root1, sz_view_text_signal_int(count, "n="));
+  btn1 = sz_view_button("+", counter_tap, count);
+  sz_view_add_child(root1, btn1);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 100;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root1);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SZ_INPUT_TAP;
+  tap.x = sz_view_frame(btn1).x + 8.f;
+  tap.y = sz_view_frame(btn1).y + 8.f;
+  assert(sz_ui_inject_sync(session, &tap));
+  assert(sz_signal_int_get(count) == 1);
+  dump1 = sz_signal_dump();
+
+  root2 = sz_view_column();
+  sz_view_add_child(root2, sz_view_text_signal_int(count, "v="));
+  btn2 = sz_view_button("+", counter_tap, count);
+  sz_view_add_child(root2, btn2);
+  assert(sz_ui_session_replace_root(session, root2));
+  assert(sz_ui_session_root(session) == root2);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(count) == 1);
+  dump2 = sz_signal_dump();
+  assert(strcmp(sz_string_cstr(dump1), sz_string_cstr(dump2)) == 0);
+  a11y = sz_view_a11y_dump(root2);
+  assert(strstr(sz_string_cstr(a11y), "text:v=") != NULL);
+  sz_string_free(a11y);
+  sz_string_free(dump1);
+  sz_string_free(dump2);
+
+  sz_view_layout(root2, 200.f, 100.f, theme);
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SZ_INPUT_TAP;
+  tap.x = sz_view_frame(btn2).x + 8.f;
+  tap.y = sz_view_frame(btn2).y + 8.f;
+  assert(sz_ui_inject_sync(session, &tap));
+  assert(sz_signal_int_get(count) == 2);
+
+  sz_ui_unmount(session);
+  sz_signal_int_free(count);
+}
+
 typedef struct {
   SzSignalInt *sig;
   int64_t value;
@@ -1010,6 +1071,7 @@ static void test_alloc_counter_pump_flat(void) {
 int main(void) {
   test_label_session();
   test_signals_layout_hit();
+  test_replace_root_keeps_signals();
   test_button_set_and_show_when();
   test_widgets();
   test_expanded_column();

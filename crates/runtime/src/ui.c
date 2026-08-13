@@ -187,6 +187,17 @@ void sz_ui_session_take_root(SzUiSession *session) {
     session->owns_view = 1;
 }
 
+int sz_ui_session_replace_root(SzUiSession *session, SzView *root) {
+  if (!session || !root)
+    return 0;
+  if (session->owns_view)
+    sz_view_free(session->root);
+  session->root = root;
+  session->dirty = 1;
+  session->keyboard_visible = 0;
+  return 1;
+}
+
 void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value) {
   BridgeItem *it;
   if (!session || !sig)

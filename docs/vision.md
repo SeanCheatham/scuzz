@@ -61,7 +61,7 @@ Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI / cargo package `scuz
 
 One CLI. One typer. No second analyze frontend, no `*.g.scuzz` codegen, no `src/test` runner.
 
-- **Watch** rebuilds when sources or `scuzz.toml` change (path deps included). It does not patch a running process or preserve `Signal` state. Stage-0 `run --watch` rebuilds and reruns the process. In-process hot reload and debugging tools are a product goal (agents); do not document `watch` as that until it exists.
+- **Watch** rebuilds when sources or `scuzz.toml` change (path deps included). It does not patch a running process. Session `replace_root` swaps the View tree without freeing or resetting Signals (Headless). Source-watch reload and debug tools are still a product goal; do not document `watch` as hot reload.
 - **Static hygiene** is `scuzz check`: format-verify `src/` + typecheck (live + sim + laws). `scuzz fmt` rewrites; `fmt --check` remains the dry-run. Further lints emit on `check` (same JSON diagnostics). No `lint` subcommand.
 - **JSON diagnostics** (`scuzz check --message-format=json`) are the editor protocol: `[{severity, message, file?, line?, column?}]`. `check` emits them; other commands stay human until they use this same type. LSP, when added, wraps `scuzz check --message-format=json` — do not grow a second typer or a parallel schema.
 - **`scuzz.toml` is data** — package, path deps, `[ui]`. No plugin DSL, no `build.scuzz` hooks, no sbt-shaped settings. Unknown keys and extra top-level tables are rejected; do not add `[plugins]`.
@@ -88,7 +88,7 @@ One failure channel: `SzError` (message + optional code) on `IO`. Ops: `flatMap`
 | **`View`** | Widget tree | Sync/pure `build` |
 | **`Ui` / `UiSession`** | `mount` / `pump` / `inject` / `snapshot` | Effectful (`UiRuntime`) |
 
-Headless is a **peer** of Window/Mobile, not a test-only shim — product runtime for agents and CI. Frame boundary is `pump`. World effects stay blessed `IO`; bridge into signals via `sz_ui_bridge_post_*`. No UI feature without a Headless path. Taps: `View.button(label, _ => …)` first-class lambdas. Prefer `Signal.list` + `View.each` (framework rebuilds children at layout). Derived display: `Signal.map` + `View.bindText`. **View construction is nested and declarative** (`View.column(child, …)` / `View.row(…)` / `View.stack(…)`).
+Headless is a **peer** of Window/Mobile, not a test-only shim — product runtime for agents and CI. Frame boundary is `pump`. World effects stay blessed `IO`; bridge into signals via `sz_ui_bridge_post_*`. No UI feature without a Headless path. Taps: `View.button(label, _ => …)` first-class lambdas. Prefer `Signal.list` + `View.each` (framework rebuilds children at layout). Derived display: `Signal.map` + `View.bindText`. **View construction is nested and declarative** (`View.column(child, …)` / `View.row(…)` / `View.stack(…)`). Session `replace_root` swaps that tree without resetting Signals.
 
 ### IO apps vs Headless
 
@@ -220,7 +220,7 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ## Open work
 
-Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters. Near-term: in-process reload/debug.
+Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters. Near-term: source-watch reload, debug tools.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features. UI is a primary path among CLI/server/desktop/mobile — not the only v0 bar.
 

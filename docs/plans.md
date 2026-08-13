@@ -2,4 +2,4 @@
 
 ## Next
 
-**Hot reload and debugging tools.** HUMANS wants Headless + in-process reload + debug, especially for agents. Headless is a peer runtime today; `watch` only rebuilds. Next: in-process reload that preserves `Signal` state. Do not document rebuild-as-reload.
+**Source-watch reload.** Session `replace_root` keeps Signal values when the View tree is swapped (Headless). Next: rebuild the View tree on source change without resetting signals. Still not Flutter VM patching. Do not document `watch` as hot reload.

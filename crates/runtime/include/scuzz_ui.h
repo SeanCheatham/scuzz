@@ -241,6 +241,9 @@ void sz_anim_tick_all(int64_t dt_ms);
 SzUiSession *sz_ui_mount(const SzUiConfig *cfg, SzView *root);
 /* Transfer View ownership to the session (freed on unmount). */
 void sz_ui_session_take_root(SzUiSession *session);
+/* Swap the View tree. Signals are not freed or reset. If the session owns the
+ * view, the previous root is freed. Marks dirty so the next pump relayouts. */
+int sz_ui_session_replace_root(SzUiSession *session, SzView *root);
 void sz_ui_unmount(SzUiSession *session);
 
 int sz_ui_pump_sync(SzUiSession *session);

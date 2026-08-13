@@ -29,7 +29,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### Near-term (HUMANS alignment)
 
-- **Hot reload and debugging tools** — HUMANS wants Headless + in-process reload + debug, especially for agents. Headless is a peer runtime today; `watch` only rebuilds. Do not document rebuild-as-reload.
+- **Hot reload and debugging tools** — HUMANS wants Headless + in-process reload + debug, especially for agents. Headless is a peer runtime; `watch` only rebuilds. Session `replace_root` swaps the View tree without freeing or resetting Signals (`test_replace_root_keeps_signals`). Source-watch / CLI reload and debug tools remain. Do not document rebuild-as-reload.
 
 ### Residuals
 
