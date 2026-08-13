@@ -94,6 +94,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_stream_emits(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_eval(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_concat(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_take(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_stream_evalmap(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_compile_to_list(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_drain(ptr)").unwrap();
@@ -2430,6 +2431,15 @@ fn emit_call(
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @sz_stream_concat(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Stream.take" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_stream_take(ptr {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();

@@ -88,6 +88,7 @@ stage_checks() {
   echo "$stream_out"
   echo "$stream_out" | grep -q "a!,b!,c"
   echo "$stream_out" | grep -q "drain:d"
+  echo "$stream_out" | grep -q "take:x,y"
 
   echo "==> $stage tests examples/server"
   server_out="$("$bin" test examples/server)"
