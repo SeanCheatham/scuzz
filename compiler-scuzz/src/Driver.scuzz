@@ -33,6 +33,9 @@ def isScuzzName(name: String): Int =
 def isSimName(name: String): Int =
   if (endsWith(name, ".scuzz_sim") == 1) 1 else 0
 
+def isDriverName(name: String): Int =
+  if (endsWith(name, ".scuzz_drivers") == 1) 1 else 0
+
 def isLawsName(name: String): Int =
   if (endsWith(name, ".scuzz_laws") == 1) 1 else 0
 
@@ -41,6 +44,12 @@ def liveStem(name: String): String =
 
 def simStem(name: String): String =
   Str.slice(name, 0, Str.len(name) - 10)
+
+def driverStem(name: String): String =
+  Str.slice(name, 0, Str.len(name) - 14)
+
+def overlayStemOf(name: String): String =
+  if (isSimName(name) == 1) simStem(name) else driverStem(name)
 
 def isMainName(name: String): Int =
   if (streq(name, "Main.scuzz") == 1) 1 else if (streq(name, "main.scuzz") == 1) 1 else 0
@@ -59,6 +68,12 @@ def collectLiveStemsOne(name: String, rest: List, acc: List): List =
 
 def filterSimNames(names: List, acc: List): List =
   if (List.isEmpty(names) == 1) List.reverse(acc) else if (isSimName(List.head(names)) == 1) filterSimNames(List.tail(names), List.cons(List.head(names), acc)) else filterSimNames(List.tail(names), acc)
+
+def filterDriverNames(names: List, acc: List): List =
+  if (List.isEmpty(names) == 1) List.reverse(acc) else if (isDriverName(List.head(names)) == 1) filterDriverNames(List.tail(names), List.cons(List.head(names), acc)) else filterDriverNames(List.tail(names), acc)
+
+def fmtSourceNames(names: List): List =
+  listConcat(partitionSources(names, List.empty(), List.empty()), listConcat(filterSimNames(names, List.empty()), filterDriverNames(names, List.empty())))
 
 def ovKind(o: List): String =
   List.head(o)
@@ -115,7 +130,7 @@ def validateOverlayStems(stems: List, names: List): IO[Unit] =
 
 def validateOverlayStemOne(stems: List, name: String, rest: List): IO[Unit] =
   for {
-    stem = simStem(name)
+    stem = overlayStemOf(name)
   } yield if (listContainsStr(stems, stem) == 0) IO.fail(str4(name, ": overlay stem `", stem, str3("` has no live `", stem, ".scuzz` twin"))) else validateOverlayStems(stems, rest)
 
 def buildRuntime(runtimeDir: String, clang: String): IO[Unit] =
@@ -187,6 +202,110 @@ def applyOneSim(prog: Prog, ov: List): IO[Prog] =
 
 def applySims(prog: Prog, sims: List): IO[Prog] =
   if (List.isEmpty(sims) == 1) IO.pure(prog) else applyOneSim(prog, List.head(sims)).flatMap(p2 => applySims(p2, List.tail(sims)))
+
+def driverRetOk(ret: Type): Int =
+  if (tyIsIo(ret) == 0) 0 else if (tyEq(tyIoInner(ret), Type.Unit) == 1) 1 else 0
+
+def driverParamOk(t: Type): Int =
+  t match {
+    case Type.Int => 1
+    case Type.String => 1
+    case _ => 0
+  }
+
+def findDefNamed(defs: List, mod: String, name: String): Int =
+  if (List.isEmpty(defs) == 1) 0 else if (streq(defName(List.head(defs)), name) == 1) if (streq(defModule(List.head(defs)), mod) == 1) 1 else findDefNamed(List.tail(defs), mod, name) else findDefNamed(List.tail(defs), mod, name)
+
+def exprHasLaw(e: Expr): Int =
+  e match {
+    case Expr.Call(callee, args, span) => if (startsWith(callee, "Law.") == 1) 1 else exprHasLawList(args)
+    case Expr.Let(name, value, body, span) => if (exprHasLaw(value) == 1) 1 else exprHasLaw(body)
+    case Expr.FlatMap(inner, param, body, span) => if (exprHasLaw(inner) == 1) 1 else exprHasLaw(body)
+    case Expr.Handle(inner, body, span) => if (exprHasLaw(inner) == 1) 1 else exprHasLaw(body)
+    case Expr.If(cond, thenB, elseB, span) => if (exprHasLaw(cond) == 1) 1 else if (exprHasLaw(thenB) == 1) 1 else exprHasLaw(elseB)
+    case Expr.BinOp(op, left, right, span) => if (exprHasLaw(left) == 1) 1 else exprHasLaw(right)
+    case Expr.Lambda(param, body, span) => exprHasLaw(body)
+    case Expr.Match(scrut, arms, span) => if (exprHasLaw(scrut) == 1) 1 else exprHasLawArms(arms)
+    case Expr.For(binders, body, span) => if (exprHasLawBinders(binders) == 1) 1 else exprHasLaw(body)
+    case Expr.ListLit(elems, span) => exprHasLawList(elems)
+    case Expr.Interp(parts, span) => exprHasLawParts(parts)
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => exprHasLawList(args)
+    case Expr.MethodCall(receiver, method, args, span) => if (exprHasLaw(receiver) == 1) 1 else exprHasLawList(args)
+    case Expr.Field(base, field, span) => exprHasLaw(base)
+    case Expr.Println(arg, span) => exprHasLaw(arg)
+    case Expr.Fail(arg, span) => exprHasLaw(arg)
+    case Expr.Pure(arg, span) => exprHasLaw(arg)
+    case Expr.Sleep(arg, span) => exprHasLaw(arg)
+    case Expr.Attempt(inner, span) => exprHasLaw(inner)
+    case Expr.IoRace(left, right, span) => if (exprHasLaw(left) == 1) 1 else exprHasLaw(right)
+    case Expr.IoBoth(left, right, span) => if (exprHasLaw(left) == 1) 1 else exprHasLaw(right)
+    case Expr.IoEnsure(inner, finalizer, span) => if (exprHasLaw(inner) == 1) 1 else exprHasLaw(finalizer)
+    case _ => 0
+  }
+
+def exprHasLawList(xs: List): Int =
+  if (List.isEmpty(xs) == 1) 0 else if (exprHasLaw(List.head(xs)) == 1) 1 else exprHasLawList(List.tail(xs))
+
+def exprHasLawArms(arms: List): Int =
+  if (List.isEmpty(arms) == 1) 0 else if (exprHasLaw(armBody(List.head(arms))) == 1) 1 else exprHasLawArms(List.tail(arms))
+
+def exprHasLawBinders(binders: List): Int =
+  if (List.isEmpty(binders) == 1) 0 else if (exprHasLawBinder(List.head(binders)) == 1) 1 else exprHasLawBinders(List.tail(binders))
+
+def exprHasLawBinder(b: ForBinder): Int =
+  b match {
+    case ForBinder.Eq(name, value) => exprHasLaw(value)
+    case ForBinder.Draw(name, value) => exprHasLaw(value)
+  }
+
+def exprHasLawParts(parts: List): Int =
+  if (List.isEmpty(parts) == 1) 0 else if (exprHasLawPart(List.head(parts)) == 1) 1 else exprHasLawParts(List.tail(parts))
+
+def exprHasLawPart(part: InterpPart): Int =
+  part match {
+    case InterpPart.Lit(text) => 0
+    case InterpPart.Hole(expr) => exprHasLaw(expr)
+  }
+
+def checkDriverDef(prog: Prog, d: Def, label: String): IO[Unit] =
+  for {
+    name = defName(d)
+    params = defParams(d)
+  } yield if (defIsLaw(d) == 1) IO.fail(str3(label, ": *.scuzz_drivers must not declare a law", "")) else if (findDefNamed(progDefs(prog), defModule(d), name) == 1) IO.fail(str4(label, ": driver `", name, "` collides with a live def")) else if (driverRetOk(declRet(d)) == 0) IO.fail(str4(label, ": driver `", name, "` must return IO[Unit]")) else if (List.len(params) > 1) IO.fail(str4(label, ": driver `", name, "` takes at most one Int or String param")) else if (List.isEmpty(params) == 0) if (driverParamOk(paramType(List.head(params))) == 0) IO.fail(str4(label, ": driver `", name, "` param must be Int or String")) else if (exprHasLaw(defBody(d)) == 1) IO.fail(str4(label, ": driver `", name, "` must not call Law.*")) else IO.pure(()) else if (exprHasLaw(defBody(d)) == 1) IO.fail(str4(label, ": driver `", name, "` must not call Law.*")) else IO.pure(())
+
+def applyDriverDefs(prog: Prog, defs: List, label: String): IO[Prog] =
+  if (List.isEmpty(defs) == 1) IO.pure(prog) else checkDriverDef(prog, List.head(defs), label).flatMap(_ => applyDriverDefs(setProgDefs(prog, listConcat(progDefs(prog), List.cons(List.head(defs), List.empty()))), List.tail(defs), label))
+
+def applyOneDriver(prog: Prog, ov: List): IO[Prog] =
+  for {
+    p = parseSource(ovLabel(ov), ovText(ov))
+    label = ovLabel(ov)
+    defs = stampDefsModule(progDefs(p), driverStem(label))
+  } yield if (isUnitExpr(progMain(p)) == 0) IO.fail(str3(label, ": *.scuzz_drivers must not define @main", "")) else if (List.isEmpty(progEnums(p)) == 0) IO.fail(str3(label, ": *.scuzz_drivers must not define enums", "")) else applyDriverDefs(prog, defs, label)
+
+def applyDrivers(prog: Prog, ovs: List): IO[Prog] =
+  if (List.isEmpty(ovs) == 1) IO.pure(prog) else applyOneDriver(prog, List.head(ovs)).flatMap(p2 => applyDrivers(p2, List.tail(ovs)))
+
+def driverKindSuffix(params: List): String =
+  if (List.isEmpty(params) == 1) "" else if (tyEq(paramType(List.head(params)), Type.String) == 1) " s" else " i"
+
+def driverTableAcc(defs: List, acc: String): String =
+  if (List.isEmpty(defs) == 1) acc else driverTableAcc(List.tail(defs), Str.concat(acc, str3(defName(List.head(defs)), driverKindSuffix(defParams(List.head(defs))), "\n")))
+
+def driverTableFromOverlay(ov: List): String =
+  driverTableAcc(progDefs(parseSource(ovLabel(ov), ovText(ov))), "")
+
+def driverTableFromOverlays(ovs: List, acc: String): String =
+  if (List.isEmpty(ovs) == 1) acc else driverTableFromOverlays(List.tail(ovs), Str.concat(acc, driverTableFromOverlay(List.head(ovs))))
+
+def collectDriverNamesFromOverlays(ovs: List, acc: List): List =
+  if (List.isEmpty(ovs) == 1) List.reverse(acc) else collectDriverNamesFromOverlays(List.tail(ovs), collectDriverNamesFromDefs(progDefs(parseSource(ovLabel(List.head(ovs)), ovText(List.head(ovs)))), acc))
+
+def collectDriverNamesFromDefs(defs: List, acc: List): List =
+  if (List.isEmpty(defs) == 1) acc else collectDriverNamesFromDefs(List.tail(defs), List.cons(defName(List.head(defs)), acc))
+
+def writeDriversTable(outDir: String, verify: Int, overlays: List): IO[Unit] =
+  if (verify == 0) IO.pure(()) else Fs.write(pathJoin(outDir, "drivers.txt"), driverTableFromOverlays(filterOverlays(overlays, "drivers", List.empty()), ""))
 
 def lawRetOk(ret: Type): Int =
   ret match {
@@ -280,7 +399,7 @@ def checkLawDefOne(d: Def, rest: List): IO[Unit] =
   if (defIsLaw(d) == 0) checkLawDefs(rest) else if (lawRetOk(declRet(d)) == 0) IO.fail(str3("law `", defName(d), str3("` must return Bool (or Int), got ", tyShow(declRet(d)), ""))) else if (List.isEmpty(defParams(d)) == 0) IO.fail(str3("law `", defName(d), "` must be nullary for residual checks")) else checkLawDefs(rest)
 
 def applyOverlays(live: Prog, overlays: List): IO[Prog] =
-  applySims(live, filterOverlays(overlays, "sim", List.empty()))
+  applySims(live, filterOverlays(overlays, "sim", List.empty())).flatMap(p1 => applyDrivers(p1, filterOverlays(overlays, "drivers", List.empty())))
 
 def filterOverlays(ovs: List, kind: String, acc: List): List =
   if (List.isEmpty(ovs) == 1) List.reverse(acc) else if (streq(ovKind(List.head(ovs)), kind) == 1) filterOverlays(List.tail(ovs), kind, List.cons(List.head(ovs), acc)) else filterOverlays(List.tail(ovs), kind, acc)
@@ -341,7 +460,8 @@ def compileAfterSources(projectDir: String, outDir: String, verify: Int, runtime
         ep = elaborateProg(prog1b)
         progMono = monomorphizeProg(List.head(ep))
         prog = resolveFieldsProg(progMono)
-        ir = emitProgram(prog)
+        dnames = if (verify == 0) List.empty() else collectDriverNamesFromOverlays(filterOverlays(overlays, "drivers", List.empty()), List.empty())
+        ir = emitProgram(prog, dnames)
         ll = pathJoin(outDir, Str.concat(name, ".ll"))
         exe = pathJoin(outDir, name)
         lib = pathJoin(runtimeDir, "build/libscuzz_rt.a")
@@ -351,8 +471,10 @@ def compileAfterSources(projectDir: String, outDir: String, verify: Int, runtime
         mobile = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-mobile"), "build/libscuzz_mobile.a")
       } yield if (tyIsOk(ty) == 0) IO.fail(tyMsg(ty)) else if (tyIsOk(elabResOf(ep)) == 0) IO.fail(tyMsg(elabResOf(ep))) else Fs.mkdirs(outDir).flatMap(_ =>
   writeSometimesDeclared(outDir, verify, prog1b).flatMap(_ =>
-    Fs.write(ll, ir).flatMap(_ =>
-      buildRuntime(runtimeDir, clang).flatMap(_ => linkProject(clang, ll, lib, ffi, inc, embedder, mobile, exe, withUi))
+    writeDriversTable(outDir, verify, overlays).flatMap(_ =>
+      Fs.write(ll, ir).flatMap(_ =>
+        buildRuntime(runtimeDir, clang).flatMap(_ => linkProject(clang, ll, lib, ffi, inc, embedder, mobile, exe, withUi))
+      )
     )
   )
 )
@@ -427,10 +549,15 @@ def loadPackageFromNames(srcDir: String, names: List): IO[List] =
   for {
     stems = collectLiveStems(names, List.empty())
     simNames = filterSimNames(names, List.empty())
+    driverNames = filterDriverNames(names, List.empty())
   } yield rejectLawsFiles(names).flatMap(_ =>
   validateOverlayStems(stems, simNames).flatMap(_ =>
-    readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty()).flatMap(texts =>
-      readOverlayFiles(srcDir, "sim", simNames, List.empty()).flatMap(sims => IO.pure(List.cons(texts, List.cons(sims, List.empty()))))
+    validateOverlayStems(stems, driverNames).flatMap(_ =>
+      readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty()).flatMap(texts =>
+        readOverlayFiles(srcDir, "sim", simNames, List.empty()).flatMap(sims =>
+          readOverlayFiles(srcDir, "drivers", driverNames, List.empty()).flatMap(drvs => IO.pure(List.cons(texts, List.cons(listConcat(sims, drvs), List.empty()))))
+        )
+      )
     )
   )
 )

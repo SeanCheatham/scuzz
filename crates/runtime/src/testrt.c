@@ -816,3 +816,73 @@ void sz_law_sometimes_flush(void) {
     fprintf(f, "%s\n", g_sometimes[i]);
   fclose(f);
 }
+
+#define SZ_DRIVERS_MAX 32
+typedef struct {
+  char *name;
+  int nargs;
+  int is_str;
+  void *fn;
+} SzDriver;
+
+static SzDriver g_drivers[SZ_DRIVERS_MAX];
+static int g_drivers_n;
+
+void sz_driver_register(SzString *name, int64_t nargs, int64_t is_str, void *fn) {
+  const char *s = name ? sz_string_cstr(name) : "";
+  size_t n;
+  char *copy;
+  if (!fn || !s[0] || g_drivers_n >= SZ_DRIVERS_MAX)
+    return;
+  n = strlen(s);
+  copy = (char *)sz_alloc(n + 1);
+  memcpy(copy, s, n + 1);
+  g_drivers[g_drivers_n].name = copy;
+  g_drivers[g_drivers_n].nargs = (int)nargs;
+  g_drivers[g_drivers_n].is_str = (int)is_str;
+  g_drivers[g_drivers_n].fn = fn;
+  g_drivers_n++;
+}
+
+static SzDriver *sz_driver_find(const char *name) {
+  int i;
+  for (i = 0; i < g_drivers_n; i++) {
+    if (strcmp(g_drivers[i].name, name) == 0)
+      return &g_drivers[i];
+  }
+  return NULL;
+}
+
+void sz_driver_run_line(const char *spec) {
+  char name[64];
+  const char *rest;
+  SzDriver *d;
+  SzIo *io;
+  SzIoResult r;
+  int i = 0;
+  if (!spec)
+    spec = "";
+  while (spec[i] && spec[i] != ' ' && i < 63) {
+    name[i] = spec[i];
+    i++;
+  }
+  name[i] = 0;
+  rest = spec[i] == ' ' ? spec + i + 1 : "";
+  d = sz_driver_find(name);
+  if (!d) {
+    fprintf(stderr, "scuzz: unknown driver %s\n", name);
+    sz_panic("Ui.run: unknown driver");
+  }
+  if (d->nargs <= 0)
+    io = ((SzIo * (*)(void)) d->fn)();
+  else if (d->is_str)
+    io = ((SzIo * (*)(SzString *)) d->fn)(sz_string_from_cstr(rest));
+  else
+    io = ((SzIo * (*)(int64_t)) d->fn)((int64_t)atoi(rest));
+  r = sz_io_unsafe_run(io);
+  if (!r.ok) {
+    fprintf(stderr, "scuzz: driver %s failed: %s\n", name,
+            r.error ? sz_string_cstr(r.error->message) : "unknown");
+    sz_panic("Ui.run: driver failed");
+  }
+}

@@ -5,6 +5,7 @@ use scuzz_compiler::driver::{
 };
 use scuzz_compiler::format::format_source;
 use scuzz_compiler::manifest::load_manifest;
+use scuzz_compiler::overlay::is_fmt_source;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 
@@ -539,7 +540,7 @@ fn collect_scuzz_sources(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
         let path = entry.path();
         if path.is_dir() {
             collect_scuzz_sources(&path, out)?;
-        } else if path.extension().and_then(|e| e.to_str()) == Some("scuzz") {
+        } else if is_fmt_source(&path) {
             out.push(path);
         }
     }

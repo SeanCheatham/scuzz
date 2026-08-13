@@ -2,8 +2,8 @@ use crate::codegen::emit_llvm;
 use crate::lower::lower_program;
 use crate::manifest::{load_manifest, Manifest};
 use crate::overlay::{
-    apply_overlays, collect_law_names, erase_laws, overlay_kind_from_path, residualize_laws,
-    OverlaySource,
+    apply_overlays, collect_law_names, driver_table_text, erase_laws, overlay_kind_from_path,
+    residualize_laws, OverlaySource,
 };
 use crate::parser::parse_sources;
 use crate::typ::typecheck;
@@ -128,6 +128,12 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
 
     let ir = emit_llvm(&program);
     std::fs::write(&ll_path, &ir)?;
+    if opts.verify {
+        std::fs::write(
+            opts.out_dir.join("drivers.txt"),
+            driver_table_text(&program),
+        )?;
+    }
 
     build_runtime(&opts.runtime_dir, &opts.clang)?;
 

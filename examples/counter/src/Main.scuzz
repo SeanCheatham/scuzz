@@ -10,6 +10,9 @@ law hasPlusButton: Bool =
 law titleFromSim: Bool =
   Law.a11yHas("text:SimCounter")
 
+def noteDrive(n: Int): Unit =
+  Law.check("driveNonNeg", n >= 0, Law.sometimes("drovePlus"))
+
 @main def main: IO[Unit] =
   for {
     count = Signal.int(0)

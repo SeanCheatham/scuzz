@@ -282,6 +282,7 @@ mod tests {
             name: name.into(),
             is_private: false,
             is_law: false,
+            is_driver: false,
             type_params: vec![],
             params: vec![],
             ret: Type::String,

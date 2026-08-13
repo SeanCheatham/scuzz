@@ -157,6 +157,7 @@ pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError
         main,
         imports,
         law_names: Vec::new(),
+        driver_names: Vec::new(),
     })
 }
 
@@ -291,6 +292,7 @@ impl Parser {
             main,
             imports,
             law_names: Vec::new(),
+            driver_names: Vec::new(),
         })
     }
 
@@ -345,6 +347,7 @@ impl Parser {
             name,
             is_private,
             is_law: false,
+            is_driver: false,
             type_params,
             params,
             ret,
@@ -369,6 +372,7 @@ impl Parser {
             name,
             is_private: false,
             is_law: true,
+            is_driver: false,
             type_params: Vec::new(),
             params: Vec::new(),
             ret,

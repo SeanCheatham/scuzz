@@ -411,6 +411,12 @@ def collectDefs(defs: List, strs: List): List =
 def collectProgram(prog: Prog): List =
   List.reverse(collectExpr(progMain(prog), collectDefs(progDefs(prog), List.empty())))
 
+def collectProgramWith(prog: Prog, extra: List): List =
+  List.reverse(collectExpr(progMain(prog), collectDefs(progDefs(prog), collectDriverStrs(extra, List.empty()))))
+
+def collectDriverStrs(names: List, strs: List): List =
+  if (List.isEmpty(names) == 1) strs else collectDriverStrs(List.tail(names), collectPush(strs, List.head(names)))
+
 def emitStrConsts(strs: List, i: Int, acc: String): String =
   if (i >= List.len(strs)) acc else emitStrConsts(strs, i + 1, Str.concat(acc, emitOneStr(List.at(strs, i), i)))
 
@@ -427,7 +433,7 @@ def runtimeDeclaresB(): String =
   str5("declare ptr @sz_list_nil()\n", "declare i32 @sz_list_is_empty(ptr)\ndeclare ptr @sz_list_cons(ptr, ptr)\n", "declare ptr @sz_list_head(ptr)\ndeclare ptr @sz_list_tail(ptr)\n", "declare i64 @sz_list_len(ptr)\ndeclare ptr @sz_list_at(ptr, i64)\n", str5("declare ptr @sz_list_reverse(ptr)\ndeclare ptr @sz_list_join(ptr, ptr)\n", "declare ptr @sz_list_append(ptr, ptr)\ndeclare ptr @sz_fs_read(ptr)\n", "declare ptr @sz_fs_write(ptr, ptr)\ndeclare ptr @sz_fs_list(ptr)\n", "declare ptr @sz_fs_mkdirs(ptr)\ndeclare ptr @sz_fs_canonicalize(ptr)\ndeclare ptr @sz_sys_args()\n", str5("declare ptr @sz_sys_read_line()\ndeclare ptr @sz_sys_exec(ptr)\ndeclare ptr @sz_sys_spawn(ptr)\ndeclare ptr @sz_sys_alive(i64)\ndeclare ptr @sz_sys_getenv(ptr)\n", "declare ptr @sz_clock_real_time()\ndeclare ptr @sz_clock_monotonic()\n", "declare ptr @sz_random_next_int(i64)\ndeclare ptr @sz_net_http_get(ptr)\ndeclare ptr @sz_net_serve_once(i64, ptr, ptr)\ndeclare ptr @sz_net_serve(i64, ptr, ptr)\n", "declare ptr @sz_impurity_run_kit()\ndeclare ptr @sz_ref_of(ptr)\ndeclare ptr @sz_ref_get(ptr)\ndeclare ptr @sz_ref_set(ptr, ptr)\ndeclare ptr @sz_queue_unbounded()\ndeclare ptr @sz_queue_offer(ptr, ptr)\ndeclare ptr @sz_queue_take(ptr)\ndeclare ptr @sz_deferred_empty()\ndeclare ptr @sz_deferred_complete(ptr, ptr)\ndeclare ptr @sz_deferred_get(ptr)\ndeclare ptr @sz_lang_resource_make(ptr, ptr, ptr)\ndeclare ptr @sz_lang_resource_use(ptr, ptr, ptr)\ndeclare ptr @sz_stream_emit(ptr)\ndeclare ptr @sz_stream_emits(ptr)\ndeclare ptr @sz_stream_eval(ptr)\ndeclare ptr @sz_stream_concat(ptr, ptr)\ndeclare ptr @sz_stream_take(ptr, i64)\ndeclare ptr @sz_stream_drop(ptr, i64)\ndeclare ptr @sz_stream_evalmap(ptr, ptr, ptr)\ndeclare ptr @sz_stream_filter(ptr, ptr, ptr)\ndeclare ptr @sz_stream_map(ptr, ptr, ptr)\ndeclare ptr @sz_stream_takewhile(ptr, ptr, ptr)\ndeclare ptr @sz_stream_dropwhile(ptr, ptr, ptr)\ndeclare ptr @sz_stream_find(ptr, ptr, ptr)\ndeclare ptr @sz_stream_exists(ptr, ptr, ptr)\ndeclare ptr @sz_stream_compile_to_list(ptr)\ndeclare ptr @sz_stream_drain(ptr)\ndeclare ptr @sz_lang_signal_int(i64)\n", str5("declare i64 @sz_lang_signal_get(ptr)\ndeclare ptr @sz_lang_signal_set(ptr, i64)\n", "declare ptr @sz_lang_signal_str(ptr)\ndeclare ptr @sz_lang_signal_str_get(ptr)\n", "declare ptr @sz_lang_signal_str_set(ptr, ptr)\ndeclare ptr @sz_lang_signal_list(ptr)\n", "declare ptr @sz_lang_signal_list_get(ptr)\ndeclare ptr @sz_lang_signal_list_set(ptr, ptr)\n", str3("declare ptr @sz_string_lines(ptr)\n", "declare ptr @sz_io_unsafe_run_or_die(ptr)\n", "")))))
 
 def runtimeDeclaresC(): String =
-  Str.concat(str5("declare ptr @sz_lang_view_text(ptr)\ndeclare ptr @sz_lang_view_bind_text(ptr)\n", "declare ptr @sz_lang_view_button(ptr, ptr, ptr)\n", "declare i64 @sz_theme_accent()\ndeclare i64 @sz_theme_primary()\n", "declare i64 @sz_theme_muted()\ndeclare i64 @sz_theme_foreground()\n", "declare i64 @sz_color_rgb(i64, i64, i64)\n"), str5("declare ptr @sz_lang_view_column()\ndeclare ptr @sz_lang_view_row()\ndeclare ptr @sz_lang_view_stack()\n", "declare ptr @sz_lang_view_each(ptr)\n", "declare ptr @sz_lang_view_scroll(ptr)\ndeclare ptr @sz_lang_view_expanded(ptr)\ndeclare ptr @sz_lang_view_center(ptr)\ndeclare ptr @sz_lang_view_align(i64, i64, ptr)\ndeclare ptr @sz_lang_view_positioned(i64, i64, ptr)\ndeclare ptr @sz_lang_view_padding(i64, ptr)\ndeclare ptr @sz_lang_view_sized(i64, i64, ptr)\ndeclare ptr @sz_lang_view_min_size(i64, i64, ptr)\ndeclare ptr @sz_lang_view_background(i64, ptr)\ndeclare ptr @sz_lang_view_aspect_ratio(i64, i64, ptr)\ndeclare ptr @sz_lang_view_fraction(i64, i64, ptr)\n", "declare ptr @sz_lang_view_text_field(ptr, ptr)\ndeclare ptr @sz_lang_view_icon(i64, i64)\n", str3("declare ptr @sz_lang_view_image(i64, i64, i64, ptr)\ndeclare ptr @sz_lang_view_add_child(ptr, ptr)\n", "declare ptr @sz_lang_view_show_when(ptr, i64, ptr)\n", "declare ptr @sz_lang_signal_map(ptr, ptr, ptr)\ndeclare ptr @sz_ui_run_view(ptr)\ndeclare ptr @sz_ui_run_rebuild(ptr, ptr)\ndeclare i64 @sz_law_signal_int(i64)\ndeclare ptr @sz_law_signal_str(i64)\ndeclare i64 @sz_law_signal_list_len(i64)\ndeclare ptr @sz_law_signal_list_at(i64, i64)\ndeclare i64 @sz_law_a11y_has(ptr)\ndeclare ptr @sz_law_assert(ptr, i64)\ndeclare void @sz_law_check(ptr, i64)\ndeclare void @sz_law_sometimes(ptr)\ndeclare ptr @sz_box_i64(i64)\ndeclare i64 @sz_unbox_i64(ptr)\ndeclare i32 @sz_runtime_main_args(ptr, i32, ptr)\n\n")))
+  Str.concat(str5("declare ptr @sz_lang_view_text(ptr)\ndeclare ptr @sz_lang_view_bind_text(ptr)\n", "declare ptr @sz_lang_view_button(ptr, ptr, ptr)\n", "declare i64 @sz_theme_accent()\ndeclare i64 @sz_theme_primary()\n", "declare i64 @sz_theme_muted()\ndeclare i64 @sz_theme_foreground()\n", "declare i64 @sz_color_rgb(i64, i64, i64)\n"), str5("declare ptr @sz_lang_view_column()\ndeclare ptr @sz_lang_view_row()\ndeclare ptr @sz_lang_view_stack()\n", "declare ptr @sz_lang_view_each(ptr)\n", "declare ptr @sz_lang_view_scroll(ptr)\ndeclare ptr @sz_lang_view_expanded(ptr)\ndeclare ptr @sz_lang_view_center(ptr)\ndeclare ptr @sz_lang_view_align(i64, i64, ptr)\ndeclare ptr @sz_lang_view_positioned(i64, i64, ptr)\ndeclare ptr @sz_lang_view_padding(i64, ptr)\ndeclare ptr @sz_lang_view_sized(i64, i64, ptr)\ndeclare ptr @sz_lang_view_min_size(i64, i64, ptr)\ndeclare ptr @sz_lang_view_background(i64, ptr)\ndeclare ptr @sz_lang_view_aspect_ratio(i64, i64, ptr)\ndeclare ptr @sz_lang_view_fraction(i64, i64, ptr)\n", "declare ptr @sz_lang_view_text_field(ptr, ptr)\ndeclare ptr @sz_lang_view_icon(i64, i64)\n", str3("declare ptr @sz_lang_view_image(i64, i64, i64, ptr)\ndeclare ptr @sz_lang_view_add_child(ptr, ptr)\n", "declare ptr @sz_lang_view_show_when(ptr, i64, ptr)\n", "declare ptr @sz_lang_signal_map(ptr, ptr, ptr)\ndeclare ptr @sz_ui_run_view(ptr)\ndeclare ptr @sz_ui_run_rebuild(ptr, ptr)\ndeclare i64 @sz_law_signal_int(i64)\ndeclare ptr @sz_law_signal_str(i64)\ndeclare i64 @sz_law_signal_list_len(i64)\ndeclare ptr @sz_law_signal_list_at(i64, i64)\ndeclare i64 @sz_law_a11y_has(ptr)\ndeclare ptr @sz_law_assert(ptr, i64)\ndeclare void @sz_law_check(ptr, i64)\ndeclare void @sz_law_sometimes(ptr)\ndeclare void @sz_driver_register(ptr, i64, i64, ptr)\ndeclare ptr @sz_box_i64(i64)\ndeclare i64 @sz_unbox_i64(ptr)\ndeclare i32 @sz_runtime_main_args(ptr, i32, ptr)\n\n")))
 
 def emitHeader(strs: List): String =
   Str.concat("; Scuzz Lang Stage-1 generated LLVM IR\n\n", Str.concat(runtimeDeclares(), Str.concat(emitStrConsts(strs, 0, "\n"), "\n")))
@@ -1431,20 +1437,37 @@ def emitDefsOne(d: Def, rest: List, strs: List, allDefs: List, id: Int, conts: S
     fe = emitFundef(d, strs, allDefs, id, conts)
   } yield emitDefs(rest, strs, allDefs, sId(fe), sConts(fe), Str.concat(acc, sCode(fe)))
 
-def emitMain(prog: Prog, strs: List, ctx: List, defsIr: Emit): String =
+def emitMain(prog: Prog, strs: List, ctx: List, defsIr: Emit, driverNames: List): String =
   for {
     body = emitExpr(progMain(prog), strs, setCtxModule(ctx, progMainModule(prog)), List.empty(), "build", sId(defsIr), sConts(defsIr))
-    p = ensureIoPair(sCode(body), sKind(body), sValue(body), "wrapped")
+    regs = emitDriverRegs(driverNames, progDefs(prog), strs, 0, "")
+    p = ensureIoPair(str3(regs, sCode(body), ""), sKind(body), sValue(body), "wrapped")
     mainFn = str4("define i32 @main(i32 %argc, ptr %argv) {\nentry:\n", fst(p), "  %rc = call i32 @sz_runtime_main_args(ptr ", Str.concat(snd(p), ", i32 %argc, ptr %argv)\n  ret i32 %rc\n}\n"))
   } yield str4(sConts(body), sCode(defsIr), mainFn, "")
 
-def emitProgram(prog: Prog): String =
+def emitDriverRegs(names: List, defs: List, strs: List, i: Int, acc: String): String =
+  if (List.isEmpty(names) == 1) acc else emitDriverRegOne(List.head(names), List.tail(names), defs, strs, i, acc)
+
+def emitDriverRegOne(name: String, rest: List, defs: List, strs: List, i: Int, acc: String): String =
   for {
-    strs = collectProgram(prog)
+    d = List.head(collectDefsByName(defs, name, List.empty()))
+    nargs = List.len(defParams(d))
+    isStr = if (nargs == 0) 0 else if (tyEq(paramType(List.head(defParams(d))), Type.String) == 1) 1 else 0
+    idx = strIndexAt(strs, name, 0)
+    prefix = str3("drv", Str.fromInt(i), "")
+    len = Str.len(name) + 1
+    gep = str4("  %", prefix, "_gep = getelementptr inbounds [", str4(Str.fromInt(len), " x i8], ptr @.str", Str.fromInt(idx), ", i64 0, i64 0\n"))
+    ss = str4("  %", prefix, "_ss = call ptr @sz_string_from_cstr(ptr %", str3(prefix, "_gep)\n", ""))
+    call = str3("  call void @sz_driver_register(ptr %", prefix, str5("_ss, i64 ", Str.fromInt(nargs), ", i64 ", Str.fromInt(isStr), str3(", ptr @sz_user_", userSymbol(defModule(d), defName(d)), ")\n")))
+  } yield emitDriverRegs(rest, defs, strs, i + 1, str3(acc, str3(gep, ss, call), ""))
+
+def emitProgram(prog: Prog, driverNames: List): String =
+  for {
+    strs = collectProgramWith(prog, driverNames)
     tags = buildEnumTags(progEnums(prog))
     payloads = buildEnumPayloads(progEnums(prog))
     ctx = emitCtx(progDefs(prog), tags, payloads, "", progImports(prog))
     header = emitHeader(strs)
     defsIr = emitDefs(progDefs(prog), strs, ctx, 0, "", "")
-  } yield Str.concat(header, emitMain(prog, strs, ctx, defsIr))
+  } yield Str.concat(header, emitMain(prog, strs, ctx, defsIr, driverNames))
 

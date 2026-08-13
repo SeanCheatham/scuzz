@@ -18,8 +18,8 @@ def boolPos(n: Int): Int =
 def letterAt(i: Int): String =
   Str.slice("abcdefghijklmnopqrstuvwxyz", i, i + 1)
 
-def fuzzKindCount(hasText: Int, hasScroll: Int): Int =
-  3 + hasText + hasText + hasText + hasScroll
+def fuzzKindCount(hasText: Int, hasScroll: Int, hasDrive: Int): Int =
+  3 + hasDrive + hasText + hasText + hasText + hasScroll
 
 def fuzzTap(s: Int, nButtons: Int): List =
   pair(strcat("tap ", Str.fromInt(lcgBelow(s, maxOf(nButtons, 1)))), Str.fromInt(s))
@@ -51,26 +51,38 @@ def fuzzBackspaceOrText(s: Int, hasText: Int): List =
 def fuzzTypeOrText(s: Int, hasText: Int): List =
   if (hasText == 1) fuzzType(s) else fuzzText(s)
 
-def fuzzEvent(s: Int, nButtons: Int, hasText: Int, hasScroll: Int): List =
-  fuzzEventAt(lcgNext(s), nButtons, hasText, hasScroll)
+def driveLine(spec: String, s: Int): String =
+  if (endsWith(spec, " i") == 1) str4("drive ", Str.slice(spec, 0, Str.len(spec) - 2), " ", Str.fromInt(1 + lcgBelow(s, 3))) else if (endsWith(spec, " s") == 1) str4("drive ", Str.slice(spec, 0, Str.len(spec) - 2), " ", letterAt(lcgBelow(s, 26))) else str3("drive ", spec, "")
 
-def fuzzEventAt(s: Int, nButtons: Int, hasText: Int, hasScroll: Int): List =
-  fuzzEventKind(s, lcgBelow(s, fuzzKindCount(hasText, hasScroll)), nButtons, hasScroll, hasText)
+def fuzzDrive(s: Int, drivers: List): List =
+  fuzzDriveSpec(List.at(drivers, lcgBelow(s, List.len(drivers))), lcgNext(s))
 
-def fuzzEventKind(s: Int, k: Int, nButtons: Int, hasScroll: Int, hasText: Int): List =
-  if (k <= 1) fuzzTap(lcgNext(s), nButtons) else if (k == 2) fuzzPump(lcgNext(s)) else if (k == 3) fuzzScrollOrText(lcgNext(s), hasScroll) else if (k == 4) fuzzBackspaceOrText(lcgNext(s), hasText) else if (k == 5) fuzzTypeOrText(lcgNext(s), hasText) else fuzzText(lcgNext(s))
+def fuzzDriveSpec(spec: String, s: Int): List =
+  pair(driveLine(spec, s), Str.fromInt(s))
 
-def fuzzScript(seed: Int, nButtons: Int, hasText: Int, hasScroll: Int): List =
-  fuzzScriptLen(lcgNext(lcgSeed(seed)), nButtons, hasText, hasScroll)
+def fuzzEvent(s: Int, nButtons: Int, hasText: Int, hasScroll: Int, drivers: List): List =
+  fuzzEventAt(lcgNext(s), nButtons, hasText, hasScroll, drivers)
 
-def fuzzScriptLen(s: Int, nButtons: Int, hasText: Int, hasScroll: Int): List =
-  fuzzScriptAcc(s, 1 + lcgBelow(s, 12), nButtons, hasText, hasScroll, List.empty())
+def fuzzEventAt(s: Int, nButtons: Int, hasText: Int, hasScroll: Int, drivers: List): List =
+  fuzzEventKind(s, lcgBelow(s, fuzzKindCount(hasText, hasScroll, boolPos(List.len(drivers)))), nButtons, hasScroll, hasText, drivers)
 
-def fuzzScriptAcc(s: Int, remaining: Int, nButtons: Int, hasText: Int, hasScroll: Int, acc: List): List =
-  if (remaining == 0) List.reverse(acc) else fuzzScriptStep(fuzzEvent(s, nButtons, hasText, hasScroll), remaining, nButtons, hasText, hasScroll, acc)
+def fuzzEventKind(s: Int, k: Int, nButtons: Int, hasScroll: Int, hasText: Int, drivers: List): List =
+  if (k <= 1) fuzzTap(lcgNext(s), nButtons) else if (k == 2) fuzzPump(lcgNext(s)) else if (boolPos(List.len(drivers)) == 1) if (k == 3) fuzzDrive(lcgNext(s), drivers) else fuzzEventExtra(lcgNext(s), k - 4, hasScroll, hasText) else fuzzEventExtra(lcgNext(s), k - 3, hasScroll, hasText)
 
-def fuzzScriptStep(ev: List, remaining: Int, nButtons: Int, hasText: Int, hasScroll: Int, acc: List): List =
-  fuzzScriptAcc(parseInt(snd(ev)), remaining - 1, nButtons, hasText, hasScroll, List.cons(fst(ev), acc))
+def fuzzEventExtra(s: Int, k: Int, hasScroll: Int, hasText: Int): List =
+  if (k == 0) fuzzScrollOrText(s, hasScroll) else if (k == 1) fuzzBackspaceOrText(s, hasText) else if (k == 2) fuzzTypeOrText(s, hasText) else fuzzText(s)
+
+def fuzzScript(seed: Int, nButtons: Int, hasText: Int, hasScroll: Int, drivers: List): List =
+  fuzzScriptLen(lcgNext(lcgSeed(seed)), nButtons, hasText, hasScroll, drivers)
+
+def fuzzScriptLen(s: Int, nButtons: Int, hasText: Int, hasScroll: Int, drivers: List): List =
+  fuzzScriptAcc(s, 1 + lcgBelow(s, 12), nButtons, hasText, hasScroll, drivers, List.empty())
+
+def fuzzScriptAcc(s: Int, remaining: Int, nButtons: Int, hasText: Int, hasScroll: Int, drivers: List, acc: List): List =
+  if (remaining == 0) List.reverse(acc) else fuzzScriptStep(fuzzEvent(s, nButtons, hasText, hasScroll, drivers), remaining, nButtons, hasText, hasScroll, drivers, acc)
+
+def fuzzScriptStep(ev: List, remaining: Int, nButtons: Int, hasText: Int, hasScroll: Int, drivers: List, acc: List): List =
+  fuzzScriptAcc(parseInt(snd(ev)), remaining - 1, nButtons, hasText, hasScroll, drivers, List.cons(fst(ev), acc))
 
 def lineEndAt(s: String, i: Int): Int =
   if (i >= Str.len(s)) i else if (Str.charAt(s, i) == 10) i else lineEndAt(s, i + 1)
@@ -160,14 +172,14 @@ def fuzzExhaustFail(projectDir: String, fuzzDir: String, depth: Int, scriptIndex
     )
   )
 
-def fuzzLoop(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, nButtons: Int, hasText: Int, hasScroll: Int, seed: Int, iter: Int, iters: Int): IO[Unit] =
-  if (iter >= iters) checkSometimesCampaign(projectDir, fuzzDir).flatMap(_ => IO.println(str5("scuzz fuzz ok (", Str.fromInt(iters), " scripts, seed ", Str.fromInt(seed), ")"))) else fuzzIter(exe, fuzzDir, w, h, projectDir, nButtons, hasText, hasScroll, seed, iter, iters)
+def fuzzLoop(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, nButtons: Int, hasText: Int, hasScroll: Int, drivers: List, seed: Int, iter: Int, iters: Int): IO[Unit] =
+  if (iter >= iters) checkSometimesCampaign(projectDir, fuzzDir).flatMap(_ => IO.println(str5("scuzz fuzz ok (", Str.fromInt(iters), " scripts, seed ", Str.fromInt(seed), ")"))) else fuzzIter(exe, fuzzDir, w, h, projectDir, nButtons, hasText, hasScroll, drivers, seed, iter, iters)
 
-def fuzzIter(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, nButtons: Int, hasText: Int, hasScroll: Int, seed: Int, iter: Int, iters: Int): IO[Unit] =
+def fuzzIter(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, nButtons: Int, hasText: Int, hasScroll: Int, drivers: List, seed: Int, iter: Int, iters: Int): IO[Unit] =
   for {
-    events = fuzzScript(seed + iter, nButtons, hasText, hasScroll)
+    events = fuzzScript(seed + iter, nButtons, hasText, hasScroll, drivers)
     sched = seed + iter
-  } yield fuzzExec(exe, fuzzDir, w, h, events, Str.fromInt(sched)).flatMap(code => if (code == 0) fuzzLoop(exe, fuzzDir, w, h, projectDir, nButtons, hasText, hasScroll, seed, iter + 1, iters) else fuzzFail(projectDir, fuzzDir, seed + iter, sched, iter, events))
+  } yield fuzzExec(exe, fuzzDir, w, h, events, Str.fromInt(sched)).flatMap(code => if (code == 0) fuzzLoop(exe, fuzzDir, w, h, projectDir, nButtons, hasText, hasScroll, drivers, seed, iter + 1, iters) else fuzzFail(projectDir, fuzzDir, seed + iter, sched, iter, events))
 
 def fuzzIoLoop(exe: String, fuzzDir: String, projectDir: String, seed: Int, iter: Int, iters: Int): IO[Unit] =
   if (iter >= iters) checkSometimesCampaign(projectDir, fuzzDir).flatMap(_ => IO.println(str5("scuzz fuzz ok (", Str.fromInt(iters), " schedules, seed ", Str.fromInt(seed), ")"))) else fuzzIoIter(exe, fuzzDir, projectDir, seed, iter, iters)
@@ -180,8 +192,11 @@ def fuzzIoIter(exe: String, fuzzDir: String, projectDir: String, seed: Int, iter
 def exhaustTapAcc(i: Int, nButtons: Int, acc: List): List =
   if (i >= nButtons) List.reverse(acc) else exhaustTapAcc(i + 1, nButtons, List.cons(strcat("tap ", Str.fromInt(i)), acc))
 
-def exhaustAlphabet(nButtons: Int, hasText: Int, hasScroll: Int): List =
-  exhaustAlphabetFinish(exhaustAlphabetScroll(exhaustAlphabetText(exhaustTapAcc(0, nButtons, List.empty()), hasText), hasScroll))
+def exhaustAlphabet(nButtons: Int, hasText: Int, hasScroll: Int, drivers: List): List =
+  exhaustAlphabetFinish(exhaustAlphabetDrivers(exhaustAlphabetScroll(exhaustAlphabetText(exhaustTapAcc(0, nButtons, List.empty()), hasText), hasScroll), drivers))
+
+def exhaustAlphabetDrivers(base: List, drivers: List): List =
+  if (List.isEmpty(drivers) == 1) base else exhaustAlphabetDrivers(List.append(base, driveLine(List.head(drivers), 0)), List.tail(drivers))
 
 def exhaustAlphabetText(taps: List, hasText: Int): List =
   if (hasText == 1) List.append(List.append(List.append(List.append(taps, "text"), "text a"), "backspace"), "type a") else taps
@@ -204,8 +219,8 @@ def exhaustExtendOver(exe: String, fuzzDir: String, w: String, h: String, projec
 def fuzzExhaustDepth(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, alphabet: List, depth: Int, maxDepth: Int, scriptIndex: Int): IO[Unit] =
   if (depth > maxDepth) checkSometimesCampaign(projectDir, fuzzDir).flatMap(_ => IO.println(str5("scuzz fuzz --exhaust ok (depth ", Str.fromInt(maxDepth), ", ", Str.fromInt(scriptIndex), " scripts)"))) else exhaustExtend(exe, fuzzDir, w, h, projectDir, maxDepth, depth, alphabet, List.empty(), scriptIndex).flatMap(next => fuzzExhaustDepth(exe, fuzzDir, w, h, projectDir, alphabet, depth + 1, maxDepth, next))
 
-def fuzzExhaust(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, nButtons: Int, hasText: Int, hasScroll: Int, depth: Int): IO[Unit] =
-  fuzzExhaustDepth(exe, fuzzDir, w, h, projectDir, exhaustAlphabet(nButtons, hasText, hasScroll), 1, depth, 0)
+def fuzzExhaust(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, nButtons: Int, hasText: Int, hasScroll: Int, drivers: List, depth: Int): IO[Unit] =
+  fuzzExhaustDepth(exe, fuzzDir, w, h, projectDir, exhaustAlphabet(nButtons, hasText, hasScroll, drivers), 1, depth, 0)
 
 def fuzzProbe(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, seed: Int, iters: Int, exhaust: Int, depth: Int): IO[Unit] =
   fuzzExec(exe, fuzzDir, w, h, List.empty(), "").flatMap(code => if (code != 0) IO.fail("fuzz probe failed: app fails under TestRuntime before any event") else Fs.read(pathJoin(fuzzDir, "dump.txt")).flatMap(dump => fuzzProbeDump(exe, fuzzDir, w, h, projectDir, seed, iters, exhaust, depth, dump)))
@@ -220,7 +235,10 @@ def fuzzProbeFields(exe: String, fuzzDir: String, w: String, h: String, projectD
   fuzzProbeCont(exe, fuzzDir, w, h, projectDir, seed, iters, exhaust, depth, nButtons, nFields, countPrefixLines(dump, "scroll:", 0, 0))
 
 def fuzzProbeCont(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, seed: Int, iters: Int, exhaust: Int, depth: Int, nButtons: Int, nFields: Int, nScrolls: Int): IO[Unit] =
-  if (nButtons + nFields + nScrolls == 0) checkSometimesCampaign(projectDir, fuzzDir).flatMap(_ => IO.println("scuzz fuzz ok (no buttons, text fields, or scrolls; probe only)")) else if (exhaust == 1) fuzzExhaust(exe, fuzzDir, w, h, projectDir, nButtons, boolPos(nFields), boolPos(nScrolls), depth) else fuzzLoop(exe, fuzzDir, w, h, projectDir, nButtons, boolPos(nFields), boolPos(nScrolls), seed, 0, iters)
+  Fs.read(pathJoin(pathJoin(projectDir, "build"), "drivers.txt")).flatMap(dtext => fuzzProbeContDrivers(exe, fuzzDir, w, h, projectDir, seed, iters, exhaust, depth, nButtons, nFields, nScrolls, fuzzLinesAcc(dtext, 0, List.empty())))
+
+def fuzzProbeContDrivers(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, seed: Int, iters: Int, exhaust: Int, depth: Int, nButtons: Int, nFields: Int, nScrolls: Int, drivers: List): IO[Unit] =
+  if (nButtons + nFields + nScrolls == 0) checkSometimesCampaign(projectDir, fuzzDir).flatMap(_ => IO.println("scuzz fuzz ok (no buttons, text fields, or scrolls; probe only)")) else if (exhaust == 1) fuzzExhaust(exe, fuzzDir, w, h, projectDir, nButtons, boolPos(nFields), boolPos(nScrolls), drivers, depth) else fuzzLoop(exe, fuzzDir, w, h, projectDir, nButtons, boolPos(nFields), boolPos(nScrolls), drivers, seed, 0, iters)
 
 def fuzzReplay(exe: String, fuzzDir: String, w: String, h: String, replayPath: String, isUi: Int): IO[Unit] =
   Fs.read(replayPath).flatMap(text => fuzzReplayLoaded(exe, fuzzDir, w, h, replayPath, isUi, tomlGetArrayString(text, "fuzz", "events"), tomlGetInt(text, "fuzz", "seed", "0"), tomlGetInt(text, "fuzz", "schedule_seed", "")))

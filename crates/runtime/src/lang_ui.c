@@ -288,6 +288,7 @@ static void scripted_button_tap(SzUiSession *session, int prefer_upper) {
      pump <k>   pump k extra frames
      scroll <dy> pan the first Scroll (positive = content up); no scroll is a no-op
      backspace <n> chop n bytes from the focused/first TextField (default 1); no field is a no-op
+     drive <name> [args]  run a verify-graph driver (Int/String args)
    Blank lines and #-comments are skipped. Pump runs after every event. */
 
 static void script_tap(SzUiSession *session, int n) {
@@ -363,6 +364,8 @@ static void run_ui_script(SzUiSession *session, const char *path) {
       script_backspace(session, len > 9 ? atoi(line + 10) : 1);
     } else if (strncmp(line, "type ", 5) == 0 || strcmp(line, "type") == 0) {
       script_type(session, len > 4 ? line + 5 : "");
+    } else if (strncmp(line, "drive ", 6) == 0) {
+      sz_driver_run_line(line + 6);
     } else {
       fclose(f);
       sz_panic("Ui.run: unknown SCUZZ_UI_SCRIPT directive");

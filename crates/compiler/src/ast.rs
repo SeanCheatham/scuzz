@@ -15,6 +15,8 @@ pub struct Program {
     pub imports: Vec<Import>,
     /// Law def names residualized under TestRuntime (empty for live builds).
     pub law_names: Vec<String>,
+    /// Driver def names merged from `*.scuzz_drivers` (empty for live builds).
+    pub driver_names: Vec<String>,
 }
 
 /// `trait Show: def show(): String`
@@ -86,6 +88,8 @@ pub struct FunDef {
     pub is_private: bool,
     /// Top-level `law name: Bool = …` — erased from live builds; residualized under verify.
     pub is_law: bool,
+    /// Def merged from `*.scuzz_drivers` (verify graph only).
+    pub is_driver: bool,
     /// `def foo[T](…)` — monomorphized before codegen.
     pub type_params: Vec<String>,
     pub params: Vec<Param>,

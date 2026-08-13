@@ -1,0 +1,3 @@
+def plusN(n: Int): IO[Unit] =
+  IO.pure(noteDrive(n))
+

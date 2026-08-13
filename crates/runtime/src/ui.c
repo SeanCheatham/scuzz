@@ -572,6 +572,8 @@ static void play_script_line(SzUiSession *session, char *line) {
     script_backspace(session, len > 9 ? atoi(line + 10) : 1);
   else if (strncmp(line, "type ", 5) == 0 || strcmp(line, "type") == 0)
     script_type(session, len > 4 ? line + 5 : "");
+  else if (strncmp(line, "drive ", 6) == 0)
+    sz_driver_run_line(line + 6);
   else
     sz_panic("Ui.run: unknown SCUZZ_UI_SCRIPT directive");
   if (!sz_ui_pump_sync(session))

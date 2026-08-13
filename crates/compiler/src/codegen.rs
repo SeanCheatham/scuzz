@@ -17,6 +17,13 @@ pub fn emit_llvm(program: &Program) -> String {
         collect_strings(&d.body, &mut strs);
     }
     collect_strings(&program.main.body, &mut strs);
+    for d in &program.defs {
+        if d.is_driver {
+            if !strs.contains(&d.name) {
+                strs.push(d.name.clone());
+            }
+        }
+    }
 
     let enum_tags = build_enum_tags(&program.enums);
     let enum_payloads = build_enum_payloads(&program.enums);
@@ -155,6 +162,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_law_assert(ptr, i64)").unwrap();
     writeln!(out, "declare void @sz_law_check(ptr, i64)").unwrap();
     writeln!(out, "declare void @sz_law_sometimes(ptr)").unwrap();
+    writeln!(out, "declare void @sz_driver_register(ptr, i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_box_i64(i64)").unwrap();
     writeln!(out, "declare i64 @sz_unbox_i64(ptr)").unwrap();
     writeln!(out, "declare i32 @sz_runtime_main_args(ptr, i32, ptr)").unwrap();
@@ -201,6 +209,7 @@ pub fn emit_llvm(program: &Program) -> String {
 
     writeln!(out, "define i32 @main(i32 %argc, ptr %argv) {{").unwrap();
     writeln!(out, "entry:").unwrap();
+    emit_driver_registers(&mut out, program, &strs);
     out.push_str(&body_expr.code);
     let io_val = ensure_io(&mut out, body_expr.kind, &body_expr.value, "wrapped");
     writeln!(
@@ -472,6 +481,37 @@ fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
     }
     writeln!(out, "}}").unwrap();
     writeln!(out).unwrap();
+}
+
+fn emit_driver_registers(out: &mut String, program: &Program, strs: &[String]) {
+    for (i, d) in program.defs.iter().filter(|d| d.is_driver).enumerate() {
+        let idx = strs
+            .iter()
+            .position(|s| s == &d.name)
+            .expect("driver name interned");
+        let len = d.name.len() + 1;
+        let nargs = d.params.len() as i64;
+        let is_str = i64::from(matches!(
+            d.params.first().map(|p| &p.ty),
+            Some(Type::String)
+        ));
+        let sym = user_symbol(&d.module, &d.name);
+        writeln!(
+            out,
+            "  %drv{i}_gep = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "  %drv{i}_ss = call ptr @sz_string_from_cstr(ptr %drv{i}_gep)"
+        )
+        .unwrap();
+        writeln!(
+            out,
+            "  call void @sz_driver_register(ptr %drv{i}_ss, i64 {nargs}, i64 {is_str}, ptr @{sym})"
+        )
+        .unwrap();
+    }
 }
 
 fn ensure_io(code: &mut String, kind: Kind, value: &str, tmp: &str) -> String {

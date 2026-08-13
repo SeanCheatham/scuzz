@@ -70,10 +70,10 @@ def maybeRuntimeTests(runtimeDir: String, runtimeTests: Int): IO[Unit] =
   if (runtimeTests == 0) IO.pure(()) else execOk(str3("make -C ", runtimeDir, " test")).flatMap(_ => execOk(str3("make -C ", pathJoin(parentDir(runtimeDir), "ffi-skia"), " test")))
 
 def cmdFmt(projectDir: String, check: Int): IO[Unit] =
-  Fs.list(pathJoin(projectDir, "src")).flatMap(names => fmtFiles(pathJoin(projectDir, "src"), partitionSources(names, List.empty(), List.empty()), check, 0)).flatMap(dirty => if (check == 1) if (dirty == 0) IO.println("scuzz fmt ok") else IO.println(str3("scuzz fmt: ", Str.fromInt(dirty), " file(s) need formatting")).flatMap(_ => IO.fail("fmt --check failed")) else IO.println("scuzz fmt ok"))
+  Fs.list(pathJoin(projectDir, "src")).flatMap(names => fmtFiles(pathJoin(projectDir, "src"), fmtSourceNames(names), check, 0)).flatMap(dirty => if (check == 1) if (dirty == 0) IO.println("scuzz fmt ok") else IO.println(str3("scuzz fmt: ", Str.fromInt(dirty), " file(s) need formatting")).flatMap(_ => IO.fail("fmt --check failed")) else IO.println("scuzz fmt ok"))
 
 def fmtDirtyFiles(projectDir: String): IO[List] =
-  Fs.list(pathJoin(projectDir, "src")).flatMap(names => collectFmtDirty(pathJoin(projectDir, "src"), partitionSources(names, List.empty(), List.empty()), List.empty()))
+  Fs.list(pathJoin(projectDir, "src")).flatMap(names => collectFmtDirty(pathJoin(projectDir, "src"), fmtSourceNames(names), List.empty()))
 
 def collectFmtDirty(srcDir: String, names: List, acc: List): IO[List] =
   if (List.isEmpty(names) == 1) IO.pure(List.reverse(acc)) else fmtDirtyOne(srcDir, List.head(names)).flatMap(p => if (Str.len(p) == 0) collectFmtDirty(srcDir, List.tail(names), acc) else collectFmtDirty(srcDir, List.tail(names), List.cons(p, acc)))

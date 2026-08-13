@@ -2,7 +2,7 @@
 
 use crate::format::format_source;
 use crate::lower::lower_program;
-use crate::overlay::{apply_overlays, collect_law_names, residualize_laws};
+use crate::overlay::{apply_overlays, collect_law_names, is_fmt_source, residualize_laws};
 use crate::parser::{parse_sources, ParseError};
 use crate::span::{offset_to_line_col, Span};
 use crate::typ::{typecheck, TypeError};
@@ -163,7 +163,7 @@ fn collect_scuzz_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
         let path = entry.path();
         if path.is_dir() {
             collect_scuzz_files(&path, out)?;
-        } else if path.extension().and_then(|e| e.to_str()) == Some("scuzz") {
+        } else if is_fmt_source(&path) {
             out.push(path);
         }
     }
