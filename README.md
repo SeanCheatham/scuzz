@@ -1,156 +1,82 @@
 # Scuzz Lang
 
-**Scala-inspired native language + Flutter-like UI SDK** — ZIO-inspired builtin `IO`, UI-as-effect with **Headless as a first-class peer runtime**, staged self-hosting, and Skia-shaped canvas ABI.
+Scuzz is a Scala-inspired language for native UI, CLI, and server apps. It compiles to LLVM, has builtin `IO` (ZIO-shaped, not a ZIO port), and treats UI as a `Ui` effect. Headless, Window, and Mobile are all real runtimes.
 
-> Not Scala 3. Not the JVM. Not a ZIO or cats-effect port. Upstream Scala Native is a reference, not a dependency.
+Not Scala 3, not the JVM, not a cats-effect port. Scala Native is a reference, not a dependency.
 
-## Status
+## Goals
 
-**v0 app path.** Product intent and direction: [docs/vision.md](docs/vision.md).
+- **Language:** Scala-inspired subset for UI, CLI, server, and mobile. `for` is the binder (`=` pure, `<-` effect). I/O goes through `IO`.
+- **Runtime:** native LLVM. No VM, no Java, no classpath.
+- **UI:** `View` is pure, state lives in `Signal`, `Ui.run` is the session. Skia-shaped canvas.
+- **Tooling:** one CLI (`scuzz`) for build, run, format, check, fuzz, and package.
+- **Testing:** laws, fuzz, simulation, and determinism are built in, not a third-party harness.
 
-- Counter/Todo/nav as Scuzz Lang `Signal` / `View` / `Ui.run`; IO-only apps via `scuzz new` (no `--ui`)
-- Closed impurity boundary: `Clock` / `Random` / `Fs` / `Net` / `Sys` (args/readLine) / `IO.println` + `TestRuntime` fakes
-- Animation + accessibility hooks (Headless-dumpable); theme polish tokens
-- Stage-2 CLI (release): `build|run|test|check|fuzz|watch|new|package|fmt` (`compiler-scuzz`); Stage-0 Rust for bootstrap only
-- GitHub Releases ship Stage-2 tarballs (`linux-x86_64`, `darwin-arm64`); `install.sh` installs under `PREFIX/share/scuzz`
-- Deterministic fuzz: `scuzz fuzz` (seeded `--iters` scripts × schedules for `[ui]`, schedule seeds for IO-only; bounded `--exhaust --depth N` for `[ui]` events; `--replay repro.toml`) on TestRuntime; residual module **laws** + sim overlays as the primary oracle
-- Structural goldens (signal store + a11y dump); PNG optional via `scuzz test --pixels`; IO packages use TESTRT exit-0 smoke
-- Skia linked for `[ui]` packages only (IO-only link is Skia-free); default pinned Skia CPU via `third_party/skia/PIN` (`scripts/fetch_skia.sh`); opt out with `SCUZZ_SKIA=sk_sw` (in-tree software backend); as-needed `skia-cpu` workflow rebuilds the pin
-- Impeller deferred (see `docs/vision.md`)
+Product intent: [docs/vision.md](docs/vision.md). App path: [docs/guide.md](docs/guide.md).
 
-App authors: [docs/guide.md](docs/guide.md).
-
-## Quick start
-
-Requirements to **build** from this checkout: Rust (stable), `clang`, `make`, network once to fetch the pinned Skia CPU prebuilt (or `SCUZZ_SKIA=sk_sw` to skip). Optional for Window: Linux X11 (`libx11-dev` + display / `xvfb-run`) or macOS GUI session (Cocoa).
-
-Installed apps need `clang` + `make` (and the Stage-2 release tree under `SCUZZ_HOME`). Linking `[ui]` apps against the packaged Skia CPU prebuilt also needs zlib / bzip2 / brotli on Linux (`zlib1g-dev libbz2-dev libbrotli-dev`); on macOS, Homebrew `brotli` / `bzip2` if the linker cannot find them.
+## Install
 
 ```bash
-# Install the latest Stage-2 CLI + SDK (SCUZZ_HOME → ~/.local/share/scuzz)
 curl -fsSL https://github.com/SeanCheatham/scuzz/releases/latest/download/install.sh | sh
-# ensure ~/.local/bin is on PATH
-# pin a tag:
-#   SCUZZ_VERSION=v0.1.0 curl -fsSL https://github.com/SeanCheatham/scuzz/releases/latest/download/install.sh | sh
+```
 
-# From this checkout (packages Stage 2, then installs):
-./scripts/install.sh
+Installs `scuzz` under `~/.local/share/scuzz` with a wrapper at `~/.local/bin/scuzz`. Put that `bin` dir on `PATH`:
 
-# Optional: fast pre-commit gate (conflict markers, rustfmt, -Werror compile on staged C)
-./scripts/install-githooks.sh
+```bash
+export PATH="$HOME/.local/bin:$PATH"
+```
 
-# Or install a local tarball without rebuilding:
-#   ./scripts/package_release.sh
-#   RELEASE_TGZ=dist/scuzz-$(uname -s | tr A-Z a-z)-$(uname -m).tar.gz ./scripts/install.sh
+Apps need `clang` and `make`. Linux `[ui]` linking also needs zlib, bzip2, and brotli (`zlib1g-dev libbz2-dev libbrotli-dev`). Pin a release with `SCUZZ_VERSION=v0.1.0` on the same `curl | sh` line. From a checkout, `./scripts/install.sh` packages and installs it.
 
-# v0 happy path
+```bash
 scuzz new myapp --ui
 cd myapp
-scuzz test              # seeds goldens/ on first run, then compares
-scuzz run --headless    # writes build/snapshot.png
-# scuzz run             # Window when [ui].default_runtime = "window"
-
-# Or use the Stage-0 bootstrap CLI without installing
-cargo run -p scuzz -- new --ui --path /tmp myapp
-cargo run -p scuzz -- test /tmp/myapp
-cargo run -p scuzz -- run --headless /tmp/myapp
+scuzz test
+scuzz run --headless    # Window: scuzz run
 ```
 
-Other useful commands:
+`install.sh --help` lists flags and env vars.
+
+## Example
+
+A file-backed todo list (`Fs`, `Signal.list`, `View`). Full source: [`examples/todo`](examples/todo).
+
+```scala
+@main def main: IO[Unit] =
+  for {
+    envPath <- Sys.getenv("SCUZZ_TODO_PATH")
+    path = if (Str.len(envPath) == 0) "/tmp/scuzz_todo.txt" else envPath
+    draft = Signal.str("")
+    items = Signal.list([])
+    text <- Fs.read(path).handleErrorWith(_ => IO.pure(""))
+    loaded = Str.lines(text)
+    _ = Signal.setList(items, if (List.isEmpty(loaded) == 1) ["milk"] else loaded)
+    _ <- Ui.run(_ => View.column(
+      View.text("Todo"),
+      View.row(
+        View.textField(draft, "item"),
+        View.button("Add", _ => for {
+          d = Signal.getStr(draft)
+        } yield if (Str.len(d) == 0) () else for {
+          xs = List.append(Signal.getList(items), d)
+          _ = Signal.setList(items, xs)
+        } yield Signal.setStr(draft, ""))
+      ),
+      View.expanded(View.scroll(View.each(items))),
+      View.button("Save", _ => for {
+        xs = Signal.getList(items)
+        body = if (List.isEmpty(xs) == 1) "" else Str.concat(List.join(xs, "\n"), "\n")
+        _ <- Fs.write(path, body)
+      } yield ()),
+      View.button("Clear", _ => Signal.setList(items, []))
+    ))
+  } yield ()
+```
 
 ```bash
-# Runtime + UI unit tests (includes TestRuntime / anim / a11y)
-make -C crates/runtime test
-
-# Stage-0 bootstrap CLI
-cargo build -p scuzz
-
-# Impurity kit (fake Clock/Random/Fs/Net — no wall wait, no network)
-cargo run -p scuzz -- run examples/impurity
-
-# Live clock
-cargo run -p scuzz -- run examples/clock
-
-# Counter (Headless snapshot, no display)
-cargo run -p scuzz -- run --headless examples/counter
-
-# Golden tests (structural dumps; use --update to rewrite; --pixels for PNGs)
-cargo run -p scuzz -- test examples/counter
-
-# Optional: install process-wide TestRuntime for an app binary
-env SCUZZ_TESTRT=1 cargo run -p scuzz -- run examples/fs
-
-# Deterministic fuzz (seeded / exhaustive; --replay build/fuzz/repro.toml on failure)
-scuzz fuzz --iters 16 examples/todo
-scuzz fuzz --exhaust --depth 1 examples/counter
-scuzz fuzz --iters 16 examples/concurrency
-
-# Dual-boot gate (Stage 1 → Stage 2: smoke + goldens + fmt parity + IR fixpoint)
-./scripts/selfhost.sh
+scuzz run --headless examples/todo
 ```
-
-Window peer (blits via X11 on Linux or Cocoa on macOS):
-
-```bash
-# macOS / Linux with a display
-env SCUZZ_UI_RUNTIME=window cargo run -p scuzz -- run examples/live
-
-# Linux CI / no display (LIVE_FRAMES exits after N pumps; omit for interactive)
-xvfb-run -a env SCUZZ_UI_RUNTIME=window SCUZZ_LIVE_FRAMES=2 \
-  cargo run -p scuzz -- run examples/hello_ui
-```
-
-Stay-open Window demo (`examples/live`, default `[ui].default_runtime = "window"`):
-
-```bash
-cargo run -p scuzz -- run examples/live
-# Press q or Escape to quit. Headless one-shot:
-cargo run -p scuzz -- run --headless examples/live
-```
-
-## Samples gallery
-
-| Example | What it proves |
-| --- | --- |
-| `examples/hello` | `IO.println` |
-| `examples/cli` | `Sys.args` + `Sys.readLine` |
-| `examples/hello_ui` | Headless `Ui` + goldens |
-| `examples/counter` | `View.center` / `View.stack` / `View.positioned` / `View.sized` / `View.minSize` / `View.background` + `Signal`/`View`/`Ui.run` + path dep + goldens |
-| `examples/nav` | `showWhen` + Row `View.expanded` + `View.align` / `View.padding` / `View.aspectRatio` / `View.fraction` + goldens |
-| `examples/live` | Stay-open Window (`Ui.run`; q/Esc) |
-| `examples/todo` | Todo — `Signal.list` / `View.expanded` scroll / Add·Save + goldens |
-| `examples/concurrency` | `Ref` / `Queue` / `Deferred` + `IO.race` / `IO.both` + `Fiber.fork` / `join` / `interrupt` |
-| `examples/resource` | `Resource.make` / `use` + `IO.timeout` (release on success, failure, cancel) |
-| `examples/stream` | `Stream.emit` / `map` / `evalMap` / `filter` / `take` / `takeWhile` / `drop` / `dropWhile` / `find` / `exists` / `compileToList` / `drain` |
-| `examples/server` | `Net.serve` persistent HTTP/1.0 GET |
-| `examples/adt` | package / enum / match |
-| `examples/modules` | stem modules, `private def`, `import`, enum-per-module |
-| `examples/record` | `record` + `p.x` field access |
-| `examples/trait` | `trait` / `impl` + static-dispatch methods |
-| `examples/generic` | Monomorphized `def id[T](…)` |
-| `examples/genum` | Generic `enum Opt[T]` / `record Box[T]` |
-| `examples/fs` | Blessed `Fs.*` (live) |
-| `examples/clock` | `Clock.realTime` / `monotonic` |
-| `examples/impurity` | `Impurity.runKit` + TestRuntime fakes |
-
-## Layout
-
-```
-docs/                     vision, gaps, guide, compatibility, scuzz.toml schema
-crates/compiler/          Stage-0 parser / typer / LLVM codegen
-crates/cli/               Stage-0 scuzz tool (bootstrap)
-crates/runtime/           C runtime (IO kit, impurity, View/Ui)
-crates/ffi-skia/          sk_capi + CPU software backend
-crates/embedder-desktop/  Linux X11 / macOS Cocoa present for Window peer
-crates/embedder-mobile/   Mobile host shell + Android/iOS packaging templates
-compiler-scuzz/          Stage 1/2 Scuzz Lang compiler + CLI (release path)
-scripts/                  selfhost.sh, install.sh, install-githooks.sh, package_release.sh, package_project.sh, fetch_skia.sh, run_goldens.sh
-examples/                 samples gallery (table above)
-third_party/skia/         prebuilt fetch notes
-```
-
-Kernel dialect: [docs/vision.md](docs/vision.md#kernel-dialect).
 
 ## License
 
-Apache-2.0 (see workspace package metadata).
+Apache-2.0

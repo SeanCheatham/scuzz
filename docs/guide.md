@@ -132,4 +132,4 @@ src/
 | `examples/genum` | generic `enum Opt[T]` / `record Box[T]` |
 | `examples/modules` | stem modules, `private def`, `import`, enum-per-module |
 
-Full gallery: [README.md](../README.md#samples-gallery). Edit [vision.md](vision.md) when changing GC, Skia, effects, UI boundaries, or language direction.
+Edit [vision.md](vision.md) when changing GC, Skia, effects, UI boundaries, or language direction.

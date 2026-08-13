@@ -11,7 +11,7 @@
 | [`docs/compatibility.md`](docs/compatibility.md) | Keep/cut vs Scala & effect libs; platforms; self-host stages |
 | [`docs/guide.md`](docs/guide.md) | App author happy path |
 | [`docs/schemas/scuzz-toml.md`](docs/schemas/scuzz-toml.md) | Package manifest schema |
-| [`README.md`](README.md) | Quick start and current status only |
+| [`README.md`](README.md) | Pitch, install, one example |
 
 If a decision or next-step ordering changes, edit `vision.md`.
 
