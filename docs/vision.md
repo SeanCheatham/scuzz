@@ -21,14 +21,14 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 
 | Topic | Choice |
 | --- | --- |
-| UI testing / CI | Laws via `scuzz fuzz` (primary); mutation as law-strength gate; structural goldens as regression face; PNG optional via `--pixels` |
+| UI testing / CI | In-source laws + composed drivers via `scuzz fuzz` (primary); mutation as law-strength gate; structural goldens as regression face; PNG optional via `--pixels` |
 | Static hygiene | `scuzz check` (format-verify + typecheck; lints on this command; no `lint` subcommand). `scuzz fmt` rewrites |
 | Codegen | LLVM IR |
 | Renderer (v0) | Skia via thin C ABI; Impeller deferred |
 | Build tool | DIY Mill/Cargo-like: `scuzz` (not sbt/Maven) |
 | Effects | Language + runtime builtins |
 | Impurity | All nondeterminism / external I/O through blessed `IO`; no app-level `IO.delay` escape hatch |
-| Tests | One built-in strategy: **mutation + fuzz + laws (property) + sim + determinism** (TestRuntime); no classical unit-test culture, no external test frameworks |
+| Tests | One built-in strategy: **mutation + fuzz + laws (property) + sim + determinism** (TestRuntime). Oracles live **in source** (laws, inline checks, refinements); **drivers** are oracle-free workloads the fuzzer composes. No classical unit-test culture, no external test frameworks |
 | Modules | `scuzz.toml` package = crate; `Foo.scuzz` = module (not JVM packages) |
 | Self-host | Stage 0 → 1 → 2 on the critical path; **release ships Stage 2** |
 | UI model | Pure `View` + effectful `Ui` session (`mount` / `pump` / `inject` / `snapshot`) |
@@ -41,7 +41,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 - Not SwiftUI / UIKit / WinUI wrappers
 - Not “every widget rebuild is an `IO`” (`View` build stays sync/pure)
 - Not imperative View trees (`View.addChild`); nested constructors only
-- Not classical / example-based unit-test culture (`src/test`, Mockito, assert-equal fixtures, third-party test runners) for apps — **mutation + fuzz + laws + sim + determinism**, all in `scuzz`, instead
+- Not classical / example-based unit-test culture (`src/test`, Mockito, assert-equal fixtures, third-party test runners) for apps — **mutation + fuzz + laws + sim + determinism**, all in `scuzz`, instead. Examples survive only as oracle-free **drivers**; the objection is example-based *oracles*, not examples-as-workloads
 - Not Flutter DevTools / VM patching. In-process reload, a live structural dump, and stamp-driven inject are in; `watch` only rebuilds.
 - Not an sbt / Gradle / `pubspec` plugin DSL (`scuzz.toml` is data)
 - Not Flutter platform channels
@@ -56,7 +56,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 
 ### Product name
 
-Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI / cargo package `scuzz`; Stage-0 crate `scuzz-compiler`; self-host tree `compiler-scuzz/`; manifest `scuzz.toml`; sources `*.scuzz` (plus stem-paired `*.scuzz_sim` / `*.scuzz_laws`); C ABI `sz_` / `Sz*` / `SZ_*`. No dual names or legacy aliases.
+Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI / cargo package `scuzz`; Stage-0 crate `scuzz-compiler`; self-host tree `compiler-scuzz/`; manifest `scuzz.toml`; sources `*.scuzz` (plus stem-paired `*.scuzz_sim` / `*.scuzz_drivers`); C ABI `sz_` / `Sz*` / `SZ_*`. No dual names or legacy aliases.
 
 ### Tooling
 
@@ -158,40 +158,47 @@ Direction: payload **enums** / **`record`** + thin **traits**-as-interfaces; mon
 
 ### Laws, simulation, mutation, and verification
 
-App correctness is **not** classical unit tests. Prefer **mutation, fuzzing, property-oriented laws, simulation, and determinism** — all first-class in the language and `scuzz` tooling. Authors declare properties (laws); the toolchain typechecks them, residualizes checks for TestRuntime / fuzz, and uses mutation to pressure those oracles.
+App correctness is **not** classical unit tests. Prefer **mutation, fuzzing, property-oriented laws, simulation, and determinism** — all first-class in the language and `scuzz` tooling. The split is **oracles in source, drivers as the test surface**:
+
+- **Oracles live in the live module.** Top-level `law` declarations (pure, nullary `Bool`), inline `Law.check(name, ok, value)` in pure code (`Law.assert` in IO code), reachability `Law.sometimes(name)`, and `where` refinements on `def` params and `record` fields. All erase from live builds; armed under TestRuntime / fuzz / mutation.
+- **Drivers (`*.scuzz_drivers`) do things.** Impure, parameterized, oracle-free steps; `scuzz fuzz` composes them (generated args, random order / interleaving) alongside the UI event alphabet. `check` rejects `Law.*` calls in driver files — an assert inside a driver is a unit test in a costume.
+- **`Law.sometimes` keeps composition honest.** Reachability accumulates across a fuzz *campaign*; declared-but-never-reached states fail the campaign, so oracle-free drivers cannot pass vacuously. It is also the coverage/fitness signal for later corpus guidance.
+- **Mutation pressures the oracles.** Surviving mutants mean weak laws/refinements.
 
 | Phase | Role |
 | --- | --- |
-| `scuzz check` | Format-verify `src/`; laws and sim overlays typecheck; laws are pure; sim bindings match live types/purity |
-| `scuzz build` (sim graph) | Layer `*.scuzz_sim` over live defs; emit residual law checks (armed under TestRuntime / fuzz / mutation only) |
-| `scuzz fuzz` | Search event scripts / IO schedules for law violations → `repro.toml` |
-| Mutation (built-in) | Mutate program / residual surface; surviving mutants mean weak laws — first-class CLI, not an external mutator |
-| Later (optional) | Prove trivial law fragments statically; leave the rest as search |
+| `scuzz check` | Format-verify `src/`; typecheck live + laws/refinements + sim + drivers; laws pure, drivers `IO`, no oracles in drivers; sim bindings match live types/purity |
+| `scuzz build` (verify graph) | Layer `*.scuzz_sim` over live defs; compile drivers; residualize law/refinement checks (armed under TestRuntime / fuzz / mutation only) |
+| `scuzz fuzz` | Compose drivers + event scripts / IO schedules. Per-run oracles: laws, refinements, panic/`SzError`. Per-campaign oracle: `Law.sometimes` reachability → `repro.toml` |
+| Mutation (built-in) | Mutate program / residual surface; surviving mutants mean weak oracles — first-class CLI, not an external mutator |
+| Later (optional) | Discharge trivial law/refinement fragments statically; leave the rest as search |
 
-Direction beyond this (not current work): fuzz-verified `*.scuzz_tune` — [`optimization.md`](optimization.md). Mutation CLI surface: [`gaps.md`](gaps.md).
+Direction beyond this (not current work): fuzz-verified `*.scuzz_tune` — [`optimization.md`](optimization.md). Pivot slices and status: [`gaps.md`](gaps.md).
 
 **File convention (stem-paired, no attribute tags):**
 
 ```text
 src/
-  Todo.scuzz              # live module
+  Todo.scuzz              # live module: defs + laws + refinements (all oracles)
   Todo.scuzz_sim          # same names replace live defs under sim / fuzz / mutation
-  Todo.scuzz_laws         # pure laws over signals / a11y dump / module vals
+  Todo.scuzz_drivers      # oracle-free workloads composed by scuzz fuzz
 ```
 
-- Live/`scuzz run` loads `*.scuzz` only.
-- Fuzz / mutation / test layers sim then arms laws. Rename drift fails `check`.
+- Live/`scuzz run` loads `*.scuzz` only; laws, inline checks, and refinements erase.
+- No separate laws file: oracles belong next to the code they constrain, in `*.scuzz`.
+- Fuzz / mutation / test layers sim, then arms oracles. Rename drift fails `check`.
 - No free-floating `tests/` package roots; no third-party test or mutation frameworks.
 - Prefer swapping values you own via `*.scuzz_sim`; blessed kits stay one implementation + TestRuntime fakes. Do not stub pure helpers, `View` builders, or `Signal` cells.
-- Observation surface: signal store + View/a11y dump — not Skia pixels. Kernel/runtime keep ordinary example tests; laws are for **Scuzz apps**.
+- Driver params stay generator-friendly (`Int` / `String` first); drivers may call live defs but never assert correctness.
+- Observation surface: signal store + View/a11y dump — not Skia pixels. Kernel/runtime keep ordinary example tests; this strategy is for **Scuzz apps**.
 
 ### Verification posture
 
-Keep purity checkable (pure `A` vs `IO` vs session), total expr core, signals as an explicit store, immutable data by default, errors as values. Defer dependent types and runtime-heap proofs — residual laws + fuzz + mutation first; static proof only where cheap.
+Keep purity checkable (pure `A` vs `IO` vs session), total expr core, signals as an explicit store, immutable data by default, errors as values. Refinements attach to **positions** (`def` params, `record` fields), not a refined-type algebra: checked dynamically at call / construction under the verify graph, erased live. They are deliberately the fragment that migrates to static discharge later with no author rewrite. Defer dependent types and runtime-heap proofs — residual oracles + fuzz + mutation first; static proof only where cheap.
 
 ### `scuzz fuzz`
 
-Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overlays when present). Oracles: module **laws** first; panic/`SzError` still fails; structural dumps aid diagnosis (PNG last). Requires stable tap order, `pump` as time, no hidden nondeterminism. Flags, script verbs, and schedule seeds: [`guide.md`](guide.md). `fuzz` lives in the Stage-1/2 CLI (not Stage 0).
+Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overlays when present). The fuzz alphabet is the typed event surface (buttons, text fields) **plus declared drivers** (`drive <name> [args]` extends the script line protocol; the verify build publishes the driver table alongside the a11y dump). Oracles: in-source **laws/refinements** first; panic/`SzError` still fails; `Law.sometimes` reachability judges the campaign; structural dumps aid diagnosis (PNG last). `repro.toml` records events + driver invocations verbatim, so replay is generator-independent. Requires stable tap order, `pump` as time, no hidden nondeterminism. Determinism makes any failing prefix replayable — corpus-guided search (extend prefixes that satisfied new `Law.sometimes`) is a later CLI-only upgrade, no runtime machinery. Flags, script verbs, and schedule seeds: [`guide.md`](guide.md). `fuzz` lives in the Stage-1/2 CLI (not Stage 0).
 
 ### Layout model
 
@@ -199,11 +206,11 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ### UI testing
 
-**Laws + `scuzz fuzz` + built-in mutation** are primary for `[ui]` apps. **Structural goldens** (Headless signal + a11y dumps) are a regression face — few, live graph, not a substitute for laws. PNG optional (`scuzz test --pixels`). IO packages: laws + sim under TestRuntime when present; otherwise compile + TESTRT exit-0 smoke.
+**In-source laws + composed drivers via `scuzz fuzz` + built-in mutation** are primary for `[ui]` apps. **Structural goldens** (Headless signal + a11y dumps) are a regression face — few, live graph, not a substitute for laws. PNG optional (`scuzz test --pixels`). IO packages: laws + drivers + sim under TestRuntime when present; otherwise compile + TESTRT exit-0 smoke.
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). Next IO slice: `IO.timeout` (then language `Fiber`, then `forever` / `repeatN` / `retryN`) — [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
+Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: verification pivot (in-source laws → `Law.check` / `Law.sometimes` → drivers → refinements), then `IO.timeout` (then language `Fiber`, then `forever` / `repeatN` / `retryN`) — [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features. UI is a primary path among CLI/server/desktop/mobile — not the only v0 bar.
 
@@ -217,6 +224,8 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-onl
 | Hidden nondeterminism | Closed impurity + TestRuntime + deterministic `*.scuzz_sim` |
 | Laws become brittle dump goldens | Laws talk to named module/signal surface; strict sim/live pairing in `check`; mutation kills weak oracles |
 | Sim becomes Mockito | Only top-level same-name overlays; no stubbing pure `View`/`Signal`; kits stay TestRuntime |
+| Drivers become integration tests | `check` rejects `Law.*` in driver files; correctness lives only in live-module oracles |
+| Drivers pass vacuously | `Law.sometimes` reachability fails the campaign when declared states are never reached |
 | Verification tool sprawl | One `scuzz` strategy — mutation/fuzz/laws/sim/determinism in-tree; no external test frameworks |
 | “Almost Scala” confusion | Explicit non-goals; language direction above; [guide.md](guide.md) |
 | Watch sold as hot reload | `watch` rebuilds; `[ui]` `run --watch` stamp-reloads Views; no new machine code |

@@ -27,6 +27,19 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ## Known gaps
 
+### Near-term (verification pivot: in-source oracles + drivers)
+
+Vision locks **oracles in source, drivers as the test surface** ([`vision.md`](vision.md#laws-simulation-mutation-and-verification)). Implementation lags: Stage 0 still loads stem-paired `*.scuzz_laws` overlays (`overlay.rs` attaches nullary laws at `@main`); no `law` declaration, no pure `Law.check`, no `Law.sometimes`, no `*.scuzz_drivers`, no `where` refinements. `guide.md` and the examples describe the shipped `*.scuzz_laws` shape until the slices land.
+
+Slices, in order (each lands in Stage 0 **and** `compiler-scuzz/` per the dual-boot gate; each proven by migrating an example):
+
+1. **In-source `law` declarations** — `law name: Bool = …` in live `*.scuzz`; same residualization as today's overlay laws; delete `*.scuzz_laws` in the same change (overlay kind, examples, and the remaining references in `guide.md` / `schemas/scuzz-toml.md` / `compatibility.md` / `optimization.md`).
+2. **`Law.check` + `Law.sometimes`** — pure `Law.check(name, ok, value): T` (identity live, residual under verify) so invariants live in pure code; `Law.sometimes(name)` accumulates per run, campaign aggregation in the fuzz CLI.
+3. **`*.scuzz_drivers`** — impure parameterized overlay defs, verify-graph only, `Law.*` rejected inside; verify build publishes the driver table; fuzz alphabet + script protocol gain `drive <name> [args]` (`Int`/`String` args first); `repro.toml` records driver invocations.
+4. **`where` refinements** — on `def` params and `record` fields; checker synthesizes residual checks at call/construction; erased live; no SMT, no refined-type subtyping.
+
+Open questions parked here: driver argument generation beyond `Int`/`String`; campaign-level `Law.sometimes` reporting shape; corpus-guided prefix extension (CLI-only, after `Law.sometimes` exists).
+
 ### Near-term (AI-friendly tooling)
 
 - **Hot reload and debugging tools** — Headless + in-process reload + debug for agents. Headless is a peer; `scuzz watch` only rebuilds; `[ui]` `run --watch` stamp-reloads the View tree (Signals stay), writes `build/debug.dump`, and plays `build/inject.script`. Still missing: new machine code in-process and deeper agent debug UX. Do not document `watch` as hot reload.
@@ -37,7 +50,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 - **Concurrency** — cooperative fibers only; `IO.ensure` / `Resource` release on cancel. Next IO slices: `IO.timeout`, language `Fiber` (fork/join/interrupt), then `forever` / `repeatN` / `retryN`. Later: OS threads, supervision trees.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting; `Signal.list` frees unshared cons spines. Later: a collector if list-churn still demands it.
 - **Language surface** — richer generics beyond monomorphized defs/enums/records ([`compatibility.md`](compatibility.md)).
-- **Built-in mutation testing** — vision locks mutation as part of the one `scuzz` verification strategy (with fuzz, laws, sim, determinism). Laws + fuzz + TestRuntime exist; a first-class mutation command/surface does not yet. No external mutators.
+- **Built-in mutation testing** — vision locks mutation as part of the one `scuzz` verification strategy (with fuzz, laws, sim, determinism). Laws + fuzz + TestRuntime exist; a first-class mutation command/surface does not yet. No external mutators. Mutation targets the in-source oracles above once the pivot lands; the compiler owning codegen means IR-level mutation, not source rewriting.
 
 ### Dependency forms beyond `path`
 
