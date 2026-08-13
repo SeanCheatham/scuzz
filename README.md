@@ -12,7 +12,7 @@
 - Closed impurity boundary: `Clock` / `Random` / `Fs` / `Net` / `Sys` (args/readLine) / `IO.println` + `TestRuntime` fakes
 - Animation + accessibility hooks (Headless-dumpable); theme polish tokens
 - Stage-2 CLI (release): `build|run|test|check|fuzz|watch|new|package|fmt` (`compiler-scuzz`); Stage-0 Rust for bootstrap only
-- Prebuilt Stage-2 release tree (`scripts/package_release.sh` → `dist/scuzz-<triple>.tar.gz`); `install.sh` installs under `PREFIX/share/scuzz`
+- GitHub Releases ship Stage-2 tarballs (`linux-x86_64`, `darwin-arm64`); `install.sh` installs under `PREFIX/share/scuzz`
 - Deterministic fuzz: `scuzz fuzz` (seeded `--iters` scripts × schedules for `[ui]`, schedule seeds for IO-only; bounded `--exhaust --depth N` for `[ui]` events; `--replay repro.toml`) on TestRuntime; residual module **laws** + sim overlays as the primary oracle
 - Structural goldens (signal store + a11y dump); PNG optional via `scuzz test --pixels`; IO packages use TESTRT exit-0 smoke
 - Skia linked for `[ui]` packages only (IO-only link is Skia-free); default pinned Skia CPU via `third_party/skia/PIN` (`scripts/fetch_skia.sh`); opt out with `SCUZZ_SKIA=sk_sw` (in-tree software backend); as-needed `skia-cpu` workflow rebuilds the pin
@@ -27,14 +27,19 @@ Requirements to **build** from this checkout: Rust (stable), `clang`, `make`, ne
 Installed apps need `clang` + `make` (and the Stage-2 release tree under `SCUZZ_HOME`). Linking `[ui]` apps against the packaged Skia CPU prebuilt also needs zlib / bzip2 / brotli on Linux (`zlib1g-dev libbz2-dev libbrotli-dev`); on macOS, Homebrew `brotli` / `bzip2` if the linker cannot find them.
 
 ```bash
+# Install the latest Stage-2 CLI + SDK (SCUZZ_HOME → ~/.local/share/scuzz)
+curl -fsSL https://github.com/SeanCheatham/scuzz/releases/latest/download/install.sh | sh
+# ensure ~/.local/bin is on PATH
+# pin a tag:
+#   SCUZZ_VERSION=v0.1.0 curl -fsSL https://github.com/SeanCheatham/scuzz/releases/latest/download/install.sh | sh
+
+# From this checkout (packages Stage 2, then installs):
+./scripts/install.sh
+
 # Optional: fast pre-commit gate (conflict markers, rustfmt, -Werror compile on staged C)
 ./scripts/install-githooks.sh
 
-# Package + install Stage-2 CLI + SDK (SCUZZ_HOME → ~/.local/share/scuzz)
-./scripts/install.sh
-# ensure ~/.local/bin is on PATH
-
-# Or install a prebuilt tarball without rebuilding:
+# Or install a local tarball without rebuilding:
 #   ./scripts/package_release.sh
 #   RELEASE_TGZ=dist/scuzz-$(uname -s | tr A-Z a-z)-$(uname -m).tar.gz ./scripts/install.sh
 

@@ -14,6 +14,7 @@ cargo run -p scuzz -- build --full compiler-scuzz
 
 # Package Stage-2 tarball (uses existing CLI when present; else Stage 0 once)
 ./scripts/package_release.sh
+# Push a v* tag to publish GitHub Release assets; curl …/install.sh | sh to install
 ```
 
 CLI: `scuzz (build|run|test|check|fuzz|fmt|watch|new|package) [args]` (writes `project/build/`). `scuzz --help` / `scuzz <command> --help` for flags and examples. `watch` rebuilds on change (not hot reload). `fuzz` lives here (not Stage 0): seeded `--iters`, bounded `--exhaust --depth N`, and `--replay`. Stage-0 Rust remains bootstrap only.

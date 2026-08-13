@@ -5,8 +5,9 @@ Short path from install to a Headless UI or IO app. For product thesis, design l
 ## Happy path (UI)
 
 ```bash
-./scripts/install.sh          # packages Stage-2 + SDK → ~/.local/share/scuzz; wrapper → ~/.local/bin/scuzz
+curl -fsSL https://github.com/SeanCheatham/scuzz/releases/latest/download/install.sh | sh
 # ensure ~/.local/bin is on PATH (apps need clang + make; Linux [ui] also zlib/bz2/brotli)
+# from a checkout: ./scripts/install.sh  (packages Stage-2 + SDK → ~/.local/share/scuzz)
 scuzz new myapp --ui
 cd myapp
 scuzz check                  # format-verify src/ + typecheck
@@ -18,7 +19,7 @@ scuzz fmt                    # rewrite src/ (check already verifies format)
 
 Default `[ui]` link uses the pinned Skia CPU prebuilt (`third_party/skia/PIN`). Checkout builds fetch it on first `ffi-skia` make; opt out with `SCUZZ_SKIA=sk_sw`.
 
-From a prebuilt tarball (no checkout build): `RELEASE_TGZ=scuzz-<triple>.tar.gz ./scripts/install.sh`. Produce one with `./scripts/package_release.sh` (always Stage 2 — Scuzz Lang builds Scuzz Lang; Stage 0 only if no bootstrap CLI is present).
+From a prebuilt tarball (no checkout build): `RELEASE_TGZ=scuzz-<triple>.tar.gz ./scripts/install.sh`. Produce one with `./scripts/package_release.sh` (always Stage 2 — Scuzz Lang builds Scuzz Lang; Stage 0 only if no bootstrap CLI is present). Publish GitHub Release assets with `git tag v0.1.0 && git push origin v0.1.0` (`linux-x86_64`, `darwin-arm64`); `install.sh --help` lists flags and the `curl | sh` invocation.
 
 `scuzz new --ui` scaffolds `scuzz.toml` with `[ui]`, a Counter-shaped `src/Main.scuzz`, and Headless-friendly defaults.
 

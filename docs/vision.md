@@ -48,9 +48,9 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 
 ## Success bars
 
-**v0** — Install CLI → `scuzz new` (IO) or `scuzz new --ui` (Counter/Todo as `View` + builtin `IO`) → `scuzz test` and `scuzz run` (`--headless` for UI). Window when available. Language `Resource` / `Stream` / `Net.serve` ship (`examples/resource`, `examples/stream`, `examples/server`).
+**v0** — Install CLI (`curl …/install.sh | sh`, or checkout `./scripts/install.sh`) → `scuzz new` (IO) or `scuzz new --ui` (Counter/Todo as `View` + builtin `IO`) → `scuzz test` and `scuzz run` (`--headless` for UI). Window when available. Language `Resource` / `Stream` / `Net.serve` ship (`examples/resource`, `examples/stream`, `examples/server`).
 
-**v1** — Stage-2 self-host as the shipped `scuzz` (`package_release.sh` / `install.sh`); Rust Stage-0 is CI/bootstrap only. Dual-boot gate: `scripts/selfhost.sh`.
+**v1** — Stage-2 self-host as the shipped `scuzz` (GitHub Releases; `package_release.sh` / `install.sh`); Rust Stage-0 is CI/bootstrap only. Dual-boot gate: `scripts/selfhost.sh`.
 
 ## Decisions
 

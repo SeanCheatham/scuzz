@@ -50,6 +50,6 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 | --- | --- | --- |
 | 0 | Rust | Bootstrap only (`crates/cli`); CI / fresh checkout |
 | 1 | Scuzz Lang (built by Stage 0) | First Scuzz Lang-built CLI; rebuilds the compiler |
-| 2 | Scuzz Lang (built by Stage 1) | True self-host; **shipped** `scuzz` (`package_release.sh`) |
+| 2 | Scuzz Lang (built by Stage 1) | True self-host; **shipped** `scuzz` (GitHub Releases; `package_release.sh`) |
 
 Dual-boot gate: `scripts/selfhost.sh`. Kernel surface: [vision.md](vision.md#kernel-dialect). Release tarballs record `stage=2` in `VERSION`.

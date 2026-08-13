@@ -12,6 +12,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Installer help + GitHub dry-run
+        run: |
+          ./scripts/install.sh --help
+          SCUZZ_INSTALL_SOURCE=github SCUZZ_INSTALL_DRY_RUN=1 ./scripts/install.sh | tee /tmp/install-dry.out
+          grep -q 'source=github SeanCheatham/scuzz latest' /tmp/install-dry.out
+          grep -q 'api.github.com/repos/SeanCheatham/scuzz/releases' /tmp/install-dry.out
+          grep -q 'asset=scuzz-' /tmp/install-dry.out
+          SCUZZ_INSTALL_SOURCE=github SCUZZ_VERSION=v0.1.0 SCUZZ_INSTALL_DRY_RUN=1 ./scripts/install.sh | tee /tmp/install-pin.out
+          grep -q 'releases/download/v0.1.0/scuzz-' /tmp/install-pin.out
+          ./scripts/install.sh --dry-run | tee /tmp/install-checkout-dry.out
+          grep -q 'source=checkout' /tmp/install-checkout-dry.out
+          cat scripts/install.sh | sh -s -- --dry-run | tee /tmp/install-pipe.out
+          grep -q 'source=github SeanCheatham/scuzz latest' /tmp/install-pipe.out
+          grep -q 'api.github.com/repos/SeanCheatham/scuzz/releases' /tmp/install-pipe.out
+          tag="$(printf '%s\n' '"tag_name": "skia-cpu-v0.1"' '"tag_name": "v0.1.0-rc.1"' '"tag_name": "v0.2.0"' \
+            | awk -F'"' '/"tag_name":/ { if ($4 ~ /^v[0-9][^-]*$/) { print $4; exit } }')"
+          test "$tag" = v0.2.0
+
       - name: Install clang/make/X11/xvfb + Skia link deps
         run: |
           sudo apt-get update

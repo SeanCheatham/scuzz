@@ -115,7 +115,14 @@ else
 fi
 
 # package_project.sh resolves ROOT from scripts/.. — works inside the release tree.
+ver="${SCUZZ_VERSION:-}"
+if [[ -z "$ver" ]] && command -v git >/dev/null 2>&1 && git -C "$ROOT" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  ver="$(git -C "$ROOT" describe --tags --always --dirty 2>/dev/null || true)"
+fi
 {
+  if [[ -n "$ver" ]]; then
+    echo "version=$ver"
+  fi
   echo "triple=$TRIPLE"
   echo "stage=2"
   echo "built=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
