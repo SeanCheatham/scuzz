@@ -1452,6 +1452,11 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::Int)?;
             Ok(Type::Int)
         }
+        "Law.signalListLen" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            Ok(Type::Int)
+        }
         "Law.a11yHas" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;

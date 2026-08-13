@@ -145,6 +145,16 @@ int64_t sz_law_signal_int(int64_t id) {
   return 0;
 }
 
+int64_t sz_law_signal_list_len(int64_t id) {
+  SigReg *r;
+  for (r = g_sig_head; r; r = r->next) {
+    if (r->id == (int)id && r->kind == SIG_LIST)
+      return (int64_t)sz_list_len(
+          sz_signal_list_get((const SzSignalList *)r->sig));
+  }
+  return 0;
+}
+
 SzSignalInt *sz_signal_int(int64_t initial) {
   SzSignalInt *s = (SzSignalInt *)sz_alloc(sizeof(SzSignalInt));
   s->value = initial;

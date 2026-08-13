@@ -114,6 +114,7 @@ void sz_signal_list_free(SzSignalList *s);
 SzString *sz_signal_dump(void);
 /* Law observation: signal store by creation-order id (TestRuntime / fuzz). */
 int64_t sz_law_signal_int(int64_t id);
+int64_t sz_law_signal_list_len(int64_t id);
 
 /* --- declarative View tree ----------------------------------------------- */
 

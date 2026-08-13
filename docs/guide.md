@@ -91,7 +91,7 @@ src/
 
 - Prefer sim overlays for app policy (API base URL, a `Backend` value); blessed kits stay one implementation with TestRuntime fakes on the wire
 - Laws are nullary pure `Bool`/`Int` defs; residual `Law.assert` runs only under `SCUZZ_TESTRT=1` (fuzz)
-- Observation builtins: `Law.signalInt(id)`, `Law.a11yHas(needle)` (signal store + stashed a11y dump)
+- Observation builtins: `Law.signalInt(id)`, `Law.signalListLen(id)`, `Law.a11yHas(needle)` (signal store + stashed a11y dump)
 - No `src/test` twin trees — only stem-paired `*.scuzz_sim` / `*.scuzz_laws`
 - Example: `examples/counter` + `examples/shared` (`Shared.scuzz_sim` swaps `counterTitle`; `Main.scuzz_laws` checks count / button / sim title)
 
@@ -112,8 +112,8 @@ src/
 | `examples/cli` | `Sys.args` + `Sys.readLine` |
 | `examples/counter` | `Signal.map` + `View.bindText` + `View.center` / `View.stack` / `View.positioned` / `View.sized` / `View.minSize` / `View.background` + button lambda + `Ui.run(_ => view)` factory + path dep on `shared` + laws/sim |
 | `examples/shared` | Library package (`{ path = "..." }`) with helpers + optional `*.scuzz_sim` |
-| `examples/todo` | `Signal.list` + `View.each`, Column `View.expanded` scroll, Rename via `setAt`, Fs load/save |
-| `examples/nav` | `showWhen`, multi-page, Row `View.expanded` title, `View.align` Other page, `View.padding` Home, `View.aspectRatio` / `View.fraction` Home banner |
+| `examples/todo` | `Signal.list` + `View.each`, Column `View.expanded` scroll, Rename via `setAt`, Fs load/save + laws |
+| `examples/nav` | `showWhen`, multi-page, Row `View.expanded` title, `View.align` Other page, `View.padding` Home, `View.aspectRatio` / `View.fraction` Home banner + laws |
 | `examples/live` | Stay-open Window (`Ui.run`; q/Esc) |
 | `examples/impurity` | Clock / Random / Fs / Net / Sys console kit |
 | `examples/concurrency` | `Ref` / `Queue` / `Deferred` park under `IO.both` / `IO.race` |

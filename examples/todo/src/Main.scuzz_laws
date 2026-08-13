@@ -1,0 +1,8 @@
+def listLenNonNeg(): Bool =
+  Law.signalListLen(1) >= 0
+
+def hasAdd(): Bool =
+  Law.a11yHas("button:Add")
+
+def hasClear(): Bool =
+  Law.a11yHas("button:Clear")

@@ -1091,6 +1091,28 @@ static void test_view_each(void) {
   sz_signal_list_free(items);
 }
 
+static void test_law_signal_list_len(void) {
+  SzSignalList *items;
+  SzList *xs;
+  SzString *dump;
+  const char *s;
+  int id;
+
+  xs = sz_list_cons(sz_string_from_cstr("a"),
+                    sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
+  items = sz_signal_list(xs);
+  dump = sz_signal_dump();
+  s = strstr(sz_string_cstr(dump), "list[");
+  assert(s);
+  id = atoi(s + 5);
+  assert(sz_law_signal_list_len(id) == 2);
+  sz_signal_list_set(items, sz_list_nil());
+  assert(sz_law_signal_list_len(id) == 0);
+  assert(sz_law_signal_list_len(99999) == 0);
+  sz_string_free(dump);
+  sz_signal_list_free(items);
+}
+
 static void test_signal_list_spine_collect(void) {
   SzSignalList *items;
   SzList *xs;
@@ -1383,6 +1405,7 @@ int main(void) {
   test_clear_children();
   test_view_each();
   test_signal_list_spine_collect();
+  test_law_signal_list_len();
   test_text_field_edit();
   test_caret_metrics();
   test_alloc_pump_flat();

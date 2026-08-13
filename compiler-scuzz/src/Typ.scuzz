@@ -857,11 +857,16 @@ def callSignal(callee: String, argTys: List): TyRes =
   if (streq(callee, "Signal.int") == 1) callSigInt(argTys) else if (streq(callee, "Signal.get") == 1) callSigGet(argTys) else if (streq(callee, "Signal.set") == 1) callSigSet(argTys) else if (streq(callee, "Signal.str") == 1) callSigStr(argTys) else if (streq(callee, "Signal.getStr") == 1) callSigGetStr(argTys) else if (streq(callee, "Signal.setStr") == 1) callSigSetStr(argTys) else if (streq(callee, "Signal.list") == 1) callSigList(argTys) else if (streq(callee, "Signal.getList") == 1) callSigGetList(argTys) else if (streq(callee, "Signal.setList") == 1) callSigSetList(argTys) else if (streq(callee, "Signal.map") == 1) callSigMap(argTys) else tyErr(str3("unknown function ", callee, ""))
 
 def callLaw(callee: String, argTys: List): TyRes =
-  if (streq(callee, "Law.signalInt") == 1) callLawSignalInt(argTys) else if (streq(callee, "Law.a11yHas") == 1) callLawA11yHas(argTys) else if (streq(callee, "Law.assert") == 1) callLawAssert(argTys) else tyErr(str3("unknown function ", callee, ""))
+  if (streq(callee, "Law.signalInt") == 1) callLawSignalInt(argTys) else if (streq(callee, "Law.signalListLen") == 1) callLawSignalListLen(argTys) else if (streq(callee, "Law.a11yHas") == 1) callLawA11yHas(argTys) else if (streq(callee, "Law.assert") == 1) callLawAssert(argTys) else tyErr(str3("unknown function ", callee, ""))
 
 def callLawSignalInt(argTys: List): TyRes =
   for {
     a = expectArity("Law.signalInt", 1, List.len(argTys))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.Int)) == 0) expectTy(argTyAt(argTys, 0), Type.Int) else tyOk(Type.Int)
+
+def callLawSignalListLen(argTys: List): TyRes =
+  for {
+    a = expectArity("Law.signalListLen", 1, List.len(argTys))
   } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.Int)) == 0) expectTy(argTyAt(argTys, 0), Type.Int) else tyOk(Type.Int)
 
 def callLawA11yHas(argTys: List): TyRes =
