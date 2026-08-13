@@ -8,12 +8,12 @@ Edit this file when a decision or next-step ordering changes.
 
 ## Thesis
 
-- **Language**: purposeful Scala-inspired subset for UI apps, native CLI/server-shaped `IO` programs, and native codegen, with **built-in effect/IO/Streaming** (Cats Effect and FS2 spirit, not a cats/fs2 port). Aim: denser expr dialect (`for` as primary binder) — see [Language direction](#language-direction) below.
-- **Runtime**: custom native (LLVM). No JVM, no Java interop, no classpath/Maven.
-- **UI**: primary product face — one design language + Skia, as a **`Ui` effect** with Headless/Window/Mobile interpreters.
-- **Tooling**: one CLI (`scuzz`) for compile, link, assets, watch (rebuild on change), packaging, deterministic `scuzz fuzz` over module **laws** + **sim** overlays.
+- **Language**: purposeful Scala-inspired subset for native UI, CLI, server, and mobile apps, with **built-in effect/IO/Streaming** (Cats Effect and FS2 spirit, not a cats/fs2 port). Aim: denser expr dialect (`for` as primary binder) — see [Language direction](#language-direction) below.
+- **Runtime**: custom native (LLVM). Native binaries, not a VM. No JVM, no Java interop, no classpath/Maven.
+- **UI**: a primary product path, not the only one (Dart-shaped: GUI is first-class; so are CLI and server). One design language + Skia, as a **`Ui` effect** with Headless/Window/Mobile interpreters. Headless is a product runtime (agents, CI), not a test-only shim.
+- **Tooling**: one CLI (`scuzz`) for compile, link, assets, watch, packaging, deterministic `scuzz fuzz` over module **laws** + **sim** overlays. Static hygiene (format, typecheck, lint) is one author-facing command — today `fmt` and `check` are separate and there is no lint pass.
 - **Bootstrap**: self-host is a hard goal. Stage-0 (Rust) exists only to get there.
-- **AI-Friendly**: Scuzz is meant to be read and written by LLMs.
+- **AI-Friendly**: Scuzz is meant to be read and written by LLMs. Headless, hot reload, and debugging tools are meant to aid agents; Headless is a peer runtime today, `watch` only rebuilds.
 
 Upstream Scala Native is a *reference*, not a dependency. Divergence is intentional.
 
@@ -22,6 +22,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 | Topic | Choice |
 | --- | --- |
 | UI testing / CI | Laws via `scuzz fuzz` (primary); structural goldens as regression face; PNG optional via `--pixels` |
+| Static hygiene | One command for format + typecheck + lint (fold into `check`; no separate `lint` ritual) |
 | Codegen | LLVM IR |
 | Renderer (v0) | Skia via thin C ABI; Impeller deferred |
 | Build tool | DIY Mill/Cargo-like: `scuzz` (not sbt/Maven) |
@@ -38,14 +39,15 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 - Not a cats / cats-effect / Typelevel port
 - Not SwiftUI / UIKit / WinUI wrappers
 - Not “every widget rebuild is an `IO`” (`View` build stays sync/pure)
+- Not imperative View trees (`View.addChild`); nested constructors only
 - Not example-based unit-test culture (`src/test`, Mockito, assert-equal fixtures) for apps — **laws + fuzz + sim** instead
-- Not Flutter hot reload / DevTools VM patching (`watch` rebuilds; it does not patch a running process)
+- Not Flutter DevTools / VM patching. In-process reload and debug tools are a product goal; `watch` today only rebuilds.
 - Not an sbt / Gradle / `pubspec` plugin DSL (`scuzz.toml` is data)
 - Not Flutter platform channels
 
 ## Success bars
 
-**v0** — Install CLI → `scuzz new --ui` → Counter/Todo as `View` + builtin `IO` → `scuzz test` (Headless) and `scuzz run --headless` → `scuzz run` opens a window when available. IO-only path: `scuzz new` (no `--ui`) → `scuzz test` (TESTRT smoke) → `scuzz run`.
+**v0** — Install CLI → `scuzz new` (IO) or `scuzz new --ui` (Counter/Todo as `View` + builtin `IO`) → `scuzz test` and `scuzz run` (`--headless` for UI). Window when available. Language `Resource`, `Stream`, and server listen are next slices, not the v0 bar.
 
 **v1** — Stage-2 self-host as the shipped `scuzz` (`package_release.sh` / `install.sh`); Rust Stage-0 is CI/bootstrap only. Dual-boot gate: `scripts/selfhost.sh`.
 
@@ -59,7 +61,8 @@ Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI / cargo package `scuz
 
 One CLI. One typer. No second analyze frontend, no `*.g.scuzz` codegen, no `src/test` runner.
 
-- **Watch** rebuilds when sources or `scuzz.toml` change (path deps included). It does not hot-reload a running process or preserve `Signal` state. Stage-0 `run --watch` rebuilds and reruns the process. Do not call this hot reload until a true reload exists.
+- **Watch** rebuilds when sources or `scuzz.toml` change (path deps included). It does not patch a running process or preserve `Signal` state. Stage-0 `run --watch` rebuilds and reruns the process. In-process hot reload and debugging tools are a product goal (agents); do not document `watch` as that until it exists.
+- **Static hygiene** is one author-facing command: format + typecheck + lint. Today: `scuzz fmt` and `scuzz check`; no lint pass. Fold lint into `check` rather than a third subcommand. JSON diagnostics stay the editor protocol.
 - **JSON diagnostics** (`scuzz check --message-format=json`) are the editor protocol: `[{severity, message, file?, line?, column?}]`. `check` emits them; other commands stay human until they use this same type. LSP, when added, wraps `scuzz check --message-format=json` — do not grow a second typer or a parallel schema.
 - **`scuzz.toml` is data** — package, path deps, `[ui]`. No plugin DSL, no `build.scuzz` hooks, no sbt-shaped settings. Unknown keys and extra top-level tables are rejected; do not add `[plugins]`.
 - **Fingerprint** (Stage 0 incremental): miss → rebuild. No `scuzz clean` ritual. Cache stays fail-closed (compiler/runtime identity belongs in the key when Stage 2 grows incremental). Stage 2 rebuilds every compile today.
@@ -76,7 +79,7 @@ No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** i
 
 ### IO errors
 
-One failure channel: `SzError` (message + optional code) on `IO`. Ops: `flatMap`, `delay`, `fail`, `handleErrorWith`, `attempt`, plus blessed kit (`Resource`, `Ref`, `Deferred`, `Queue`, `sleep`, `race`, `both`). **Concurrency:** cooperative single-threaded fibers (live / default: FIFO ready queue, left-before-right fork; under `scuzz fuzz --iters`, `SCUZZ_SCHED_SEED` makes ready-fiber pick among n>1 seed-driven); `sleep` / empty `Queue.take` / incomplete `Deferred.get` park; TestRuntime advances virtual time to the next wakeup when idle; live idle `nanosleep` is EINTR-interruptible so a cancelled sleeper cannot hold the run loop. No OS threads for IO. Impurity codes: Fs **2**, Sys (**3**; exec + `readLine`), Clock **4**, Random **5**, Net **6**. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net plus console (scripted stdin, optional argv override, println capture+echo). No checked exception hierarchy; panics abort via `sz_panic`.
+One failure channel: `SzError` (message + optional code) on `IO`. Ops: `flatMap`, `delay`, `fail`, `handleErrorWith`, `attempt`, plus blessed kit (`Ref`, `Deferred`, `Queue`, `sleep`, `race`, `both`). **`Resource`** exists in C (`sz_resource_make` / `sz_resource_use`, bracket release on success and failure); language `Resource.make` / `use` is the next slice. **Streaming** is direction (FS2 spirit as a builtin), not a type yet. **Net** is client `httpGet`; listen/serve on hosts that support it is a near-term stdlib gap. **Concurrency:** cooperative single-threaded fibers (live / default: FIFO ready queue, left-before-right fork; under `scuzz fuzz --iters`, `SCUZZ_SCHED_SEED` makes ready-fiber pick among n>1 seed-driven); `sleep` / empty `Queue.take` / incomplete `Deferred.get` park; TestRuntime advances virtual time to the next wakeup when idle; live idle `nanosleep` is EINTR-interruptible so a cancelled sleeper cannot hold the run loop. No OS threads for IO. Impurity codes: Fs **2**, Sys (**3**; exec + `readLine`), Clock **4**, Random **5**, Net **6**. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net plus console (scripted stdin, optional argv override, println capture+echo). No checked exception hierarchy; panics abort via `sz_panic`.
 
 ### `Ui` vs `View`
 
@@ -85,13 +88,13 @@ One failure channel: `SzError` (message + optional code) on `IO`. Ops: `flatMap`
 | **`View`** | Widget tree | Sync/pure `build` |
 | **`Ui` / `UiSession`** | `mount` / `pump` / `inject` / `snapshot` | Effectful (`UiRuntime`) |
 
-Headless is a **peer** of Window/Mobile, not a test-only shim. Frame boundary is `pump`. World effects stay blessed `IO`; bridge into signals via `sz_ui_bridge_post_*`. No UI feature without a Headless path. Taps: `View.button(label, _ => …)` first-class lambdas. Prefer `Signal.list` + `View.each` (framework-owned list reconciliation at layout). Derived display: `Signal.map` + `View.bindText`.
+Headless is a **peer** of Window/Mobile, not a test-only shim — product runtime for agents and CI. Frame boundary is `pump`. World effects stay blessed `IO`; bridge into signals via `sz_ui_bridge_post_*`. No UI feature without a Headless path. Taps: `View.button(label, _ => …)` first-class lambdas. Prefer `Signal.list` + `View.each` (framework-owned list reconciliation at layout). Derived display: `Signal.map` + `View.bindText`. **View construction is nested and declarative** (`View.column(child, …)` / `View.row(…)` / `View.stack(…)`). `View.addChild` is not the product surface.
 
 ### IO apps vs Headless
 
 | Path | Meaning |
 | --- | --- |
-| **Headless** | `UiRuntime` peer — still `View` / Skia / structural dumps; CI path for UI |
+| **Headless** | `UiRuntime` peer — still `View` / Skia / structural dumps; product path for agents and CI |
 | **IO-only** | No `[ui]`, no `Ui.run`; `scuzz run` just execs the `@main: IO[Unit]` binary |
 
 IO-only is **not** a fourth runtime peer. Package contract: missing `[ui]` ⇒ Skia omitted from the app link, `scuzz test` runs `SCUZZ_TESTRT=1` exit-0 smoke (not a11y goldens), and `scuzz run` is plain exec. Console kit: `Sys.args`, `Sys.readLine`, `IO.println` (TestRuntime fakes stdin / optional argv / println capture). See `examples/hello`, `examples/cli`, impurity kits.
@@ -105,7 +108,7 @@ Subset used by compiler sources and bootstrap examples. New features land in Sta
 - No `val` / statement blocks / `var` — expression dialect only.
 - `if` / `match`; literals incl. list `[a,b,c]` and `s"…"`
 - Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
-- Builtins: `Str.*`, `List.*`, Fs (`read` / `write` / `list` / `mkdirs` / `canonicalize`)/Sys (`args` / `readLine` / `exec` / `getenv`)/Clock/Random/Net, `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Signal.*` (incl. `Signal.map`), `View.*` (incl. nested `View.column`/`row`/`stack` children, `View.each`, `View.bindText`, Column/Row `View.expanded`, `View.center`, `View.align`, `View.positioned`, `View.padding`, `View.sized`, `View.minSize`, `View.background`, `View.aspectRatio`, `View.fraction`), `Ui.run`, Theme/Color, `Law.signalInt` / `Law.a11yHas` / `Law.assert` (residual under TestRuntime)
+- Builtins: `Str.*`, `List.*`, Fs (`read` / `write` / `list` / `mkdirs` / `canonicalize`)/Sys (`args` / `readLine` / `exec` / `getenv`)/Clock/Random/Net (`httpGet`; listen/serve later), `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Signal.*` (incl. `Signal.map`), `View.*` (nested `View.column`/`row`/`stack` children only — no `addChild`; `View.each`, `View.bindText`, Column/Row `View.expanded`, `View.center`, `View.align`, `View.positioned`, `View.padding`, `View.sized`, `View.minSize`, `View.background`, `View.aspectRatio`, `View.fraction`), `Ui.run`, Theme/Color, `Law.signalInt` / `Law.a11yHas` / `Law.assert` (residual under TestRuntime). Language `Resource` and `Stream` are next, not kernel yet.
 - `IO` kit + `.flatMap` / `.handleErrorWith` / `.attempt`; lambdas `_ =>` / `name =>` for taps
 - No macros, no implicits, no HKT beyond `IO`, no null
 
@@ -138,7 +141,7 @@ App-shaped Counter:
 
 ### Density
 
-Clear-dense, not cryptic-dense: nested declarative `View`s (`View.column(child, …)` / `View.row(…)`), inference, single-expr forms, short update verbs, enums + match. Avoid implicits, deep HKT, and “everything is `IO`.”
+Clear-dense, not cryptic-dense: nested declarative `View`s (`View.column(child, …)` / `View.row(…)`), inference, single-expr forms, short update verbs, enums + match. Avoid implicits, deep HKT, “everything is `IO`,” and imperative `View.addChild`.
 
 ### Modules and source shape
 
@@ -213,13 +216,13 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ### UI testing
 
-**Laws + `scuzz fuzz`** are the primary correctness story for `[ui]` apps. Structural goldens (signal store + a11y dump) remain a **regression face** for silent shape drift — few, Headless-only, live graph — not a substitute for laws. PNG pixels stay optional (`scuzz test --pixels`). IO packages (no `[ui]`): laws + sim overlays under TestRuntime when present; `scuzz fuzz --iters` searches schedule seeds; otherwise `scuzz test` stays compile + `SCUZZ_TESTRT=1` exit-0 smoke. Tooling: `scuzz check` (typecheck live + sim + laws); `--message-format=json` on `check` is the editor protocol (LSP wraps it).
+**Laws + `scuzz fuzz`** are the primary correctness story for `[ui]` apps. **Structural goldens** are checked-in Headless dumps (signal store + a11y tree) compared byte-for-byte by `scuzz test` — a regression face for silent shape drift, few, live graph, not a substitute for laws. PNG pixels stay optional (`scuzz test --pixels`). IO packages (no `[ui]`): laws + sim overlays under TestRuntime when present; `scuzz fuzz --iters` searches schedule seeds; otherwise `scuzz test` stays compile + `SCUZZ_TESTRT=1` exit-0 smoke. Tooling: `scuzz check` (typecheck live + sim + laws); `--message-format=json` on `check` is the editor protocol (LSP wraps it). Fold format + lint into that same command rather than extra rituals.
 
 ## Open work
 
-Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
+Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters. Near-term: language `Resource`, FS2-shaped `Stream`, server listen/serve, one static-hygiene command, drop `View.addChild`, in-process reload/debug.
 
-App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features.
+App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features. UI is a primary path among CLI/server/desktop/mobile — not the only v0 bar.
 
 ## Risks
 
@@ -232,10 +235,11 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-onl
 | Laws become brittle dump goldens | Laws talk to named module/signal surface; strict sim/live pairing in `check` |
 | Sim becomes Mockito | Only top-level same-name overlays; no stubbing pure `View`/`Signal`; kits stay TestRuntime |
 | “Almost Scala” confusion | Explicit non-goals; language direction above; [guide.md](guide.md) |
-| Watch sold as hot reload | Rebuild loop; no in-process reload until one exists |
+| Watch sold as hot reload | Rebuild loop today; in-process reload/debug is a gap, not a non-goal |
 | IDE typer ≠ batch typer | One JSON schema; LSP wraps `scuzz check` |
 | Skia weight | pinned CPU prebuilt default; `sk_sw` opt-out (`SCUZZ_SKIA=sk_sw`) |
 | Window-only features | Headless peer rule |
-| Diluting Flutter-shaped focus | UI stays the v0 bar; IO is substrate + first-class packaging without a fourth peer |
+| Treating UI as the only product | UI is a primary path (Dart-shaped); CLI/server/desktop/mobile are peers; native binaries, not a VM |
+| Two View construction styles | Nested constructors only; remove `View.addChild` |
 | GC vs frame budget | `pump` boundary; measure |
 | Mobile packaging | Host Mobile peer first; device toolchains later |

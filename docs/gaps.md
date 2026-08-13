@@ -27,6 +27,15 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ## Known gaps
 
+### Near-term (HUMANS alignment)
+
+- **`Resource` as a language builtin** — C `sz_resource_make` / `sz_resource_use` already brackets acquire/release (including on `IO` failure). No `Resource.*` on the Scuzz surface. Next slice: [`plans.md`](plans.md). Proof: a small IO example that always runs release, plus TestRuntime coverage. Do not wait for Stream or servers.
+- **FS2-shaped `Stream`** — vision promises built-in Streaming; `Queue` is the closest primitive. Builtin pull/chunk combinators (Cats Effect / FS2 spirit, not a port), residual under TestRuntime. After Resource.
+- **Server listen/serve** — `Net.httpGet` is client-only. Stdlib listen/bind (or a blessed HTTP server kit) on hosts that support it, with TestRuntime fakes and one `examples/` server. Same impurity story as `httpGet` (code **6**). Not a library ecosystem.
+- **One static-hygiene command** — `fmt` and `check` are separate; there is no linter. Fold format + typecheck + lint into one author-facing command (`check`, with JSON diagnostics still the editor protocol). Do not add a third `lint` ritual.
+- **Nested `View` only** — `View.addChild` is used by `examples/todo` (empty `View.column()` / `View.row()` then mutate). Product surface is nested constructors. Remove `addChild` from Stage 0 and self-host; rewrite todo.
+- **Hot reload and debugging tools** — HUMANS wants Headless + in-process reload + debug, especially for agents. Headless is a peer runtime today; `watch` only rebuilds. Do not document rebuild-as-reload.
+
 ### Residuals
 
 - **Concurrency** — cooperative fibers + TestRuntime virtual-time jumps (`test_io.c`); Scuzz `Ref` / `Queue` / `Deferred` (String payloads) via Stage 0 + self-host (`examples/concurrency`). Live / default ready-queue pick is FIFO; `scuzz fuzz --iters` uses seed-driven pick among n>1 (`SCUZZ_SCHED_SEED`). Live `IO.race` of sleeps waits only for the soonest wake; idle `nanosleep` is EINTR-interruptible so a cancelled sleeper cannot hold the run loop. Later: OS threads, supervision trees.

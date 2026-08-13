@@ -2,4 +2,4 @@
 
 ## Next
 
-No short-term kernel slice queued. Unblocked residuals and deferred work: [`gaps.md`](gaps.md). Not OS threads, LSP, Windows, device Mobile, or GPU presenters until those proofs are in scope.
+**Resource as a Scuzz builtin.** Runtime `sz_resource_make` / `sz_resource_use` already exists. Expose bracket acquire/release on the language surface (Stage 0, then `compiler-scuzz`): cleanup on success and on `IO` failure, a small example, TestRuntime coverage. Kernel dialect only — no `Stream` or listen/serve in this slice.
