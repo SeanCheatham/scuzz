@@ -324,7 +324,7 @@ SzIo *sz_fs_canonicalize(SzString *path);
 /* Process / args / env / console for Stage-1 CLI + clang (console out = IO.println) */
 void sz_sys_set_args(int argc, char **argv);
 SzIo *sz_sys_args(void);
-SzIo *sz_sys_read_line(void); /* IO[String]: one stdin line; EOF → "" */
+SzIo *sz_sys_read_line(void); /* IO[String]: one stdin line; EOF → ""; parks on poll */
 SzIo *sz_sys_exec(SzString *cmd);
 SzIo *sz_sys_spawn(SzString *cmd); /* IO[Int] pid; does not wait */
 SzIo *sz_sys_alive(int64_t pid);   /* IO[Int] 1 if running */

@@ -207,6 +207,20 @@ static void *live_get_client_late(void *arg) {
   return live_get_client(arg);
 }
 
+static SzIo *after_sleep_http(void *value, void *env) {
+  (void)value;
+  return sz_net_http_get((SzString *)env);
+}
+
+static void *stdin_late_write(void *arg) {
+  int fd = *(int *)arg;
+  usleep(40000);
+  g_peer_flag = 1;
+  if (write(fd, "hello\n", 6) < 0)
+    return NULL;
+  return NULL;
+}
+
 static SzIo *recover_boom(SzError *err, void *env) {
   (void)env;
   assert(err && strstr(sz_string_cstr(err->message), "boom"));
@@ -716,17 +730,65 @@ int main(void) {
 
   /* Live httpGet parks on connect/read; serve peer answers without a client thread. */
   {
-    int port = 18476;
+    int port = 18576;
     char url[64];
     SzPair *pair;
     snprintf(url, sizeof url, "http://127.0.0.1:%d/x", port);
     r = sz_io_unsafe_run(sz_io_both(
         sz_net_serve_once(port, serve_path_ok, NULL),
-        sz_net_http_get(sz_string_from_cstr(url))));
+        sz_io_flatmap(sz_io_sleep_ms(30), after_sleep_http,
+                      sz_string_from_cstr(url))));
     assert(r.ok);
     pair = (SzPair *)r.value;
     assert(pair && pair->right);
     assert(strcmp(sz_string_cstr((SzString *)pair->right), "ok:/x") == 0);
+  }
+
+  /* Live Sys.readLine leftover: one write, two lines. */
+  {
+    int fds[2];
+    int saved = dup(STDIN_FILENO);
+    assert(saved >= 0);
+    assert(pipe(fds) == 0);
+    assert(dup2(fds[0], STDIN_FILENO) == 0);
+    close(fds[0]);
+    assert(write(fds[1], "a\nb\n", 4) == 4);
+    close(fds[1]);
+    r = sz_io_unsafe_run(sz_sys_read_line());
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "a") == 0);
+    r = sz_io_unsafe_run(sz_sys_read_line());
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "b") == 0);
+    assert(dup2(saved, STDIN_FILENO) == 0);
+    close(saved);
+  }
+
+  /* Live Sys.readLine parks; a peer fiber runs before stdin is written. */
+  {
+    pthread_t th;
+    int fds[2];
+    int saved = dup(STDIN_FILENO);
+    int wr;
+    SzPair *pair;
+    assert(saved >= 0);
+    assert(pipe(fds) == 0);
+    assert(dup2(fds[0], STDIN_FILENO) == 0);
+    close(fds[0]);
+    wr = fds[1];
+    g_peer_flag = 0;
+    pthread_create(&th, NULL, stdin_late_write, &wr);
+    r = sz_io_unsafe_run(sz_io_both(
+        sz_sys_read_line(),
+        sz_io_flatmap(sz_io_println_cstr("peer"), assert_peer_quiet, NULL)));
+    pthread_join(th, NULL);
+    assert(dup2(saved, STDIN_FILENO) == 0);
+    close(saved);
+    close(wr);
+    assert(r.ok);
+    pair = (SzPair *)r.value;
+    assert(pair && pair->left);
+    assert(strcmp(sz_string_cstr((SzString *)pair->left), "hello") == 0);
   }
 
   /* Alloc accounting: live_count returns to baseline after free. */

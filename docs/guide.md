@@ -31,7 +31,7 @@ scuzz test                   # compile + SCUZZ_TESTRT=1 exit-0 smoke
 scuzz run
 ```
 
-Console kit: `Sys.args(): IO[List]`, `Sys.readLine(): IO[String]` (EOF → `""`), `IO.println`. Under `SCUZZ_TESTRT=1`, TestRuntime scripts stdin (`SCUZZ_TESTRT_STDIN` or `sz_testrt_stdin_feed`), optionally overrides argv, and captures println (still echoes to live stdout). See `examples/cli` and `examples/hello`.
+Console kit: `Sys.args(): IO[List]`, `Sys.readLine(): IO[String]` (EOF → `""`; live parks on poll), `IO.println`. Under `SCUZZ_TESTRT=1`, TestRuntime scripts stdin (`SCUZZ_TESTRT_STDIN` or `sz_testrt_stdin_feed`), optionally overrides argv, and captures println (still echoes to live stdout). See `examples/cli` and `examples/hello`.
 
 ## Kernel language (what you write)
 

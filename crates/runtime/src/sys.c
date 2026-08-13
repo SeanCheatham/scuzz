@@ -2,7 +2,7 @@
 #include "scuzz_rt.h"
 
 #include <errno.h>
-#include <stdio.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
@@ -37,6 +37,7 @@ SzIo *sz_sys_args(void) {
 
 typedef struct {
   int is_err;
+  int retry;
   union {
     SzError *err;
     void *ok;
@@ -53,39 +54,140 @@ static SzIo *unwrap_sys(void *value, void *env) {
   return sz_io_pure(r->as.ok);
 }
 
-static void *sys_read_line_result(void *env) {
-  SysResult *r = (SysResult *)sz_alloc(sizeof(SysResult));
-  char *line = NULL;
-  size_t cap = 0;
-  ssize_t n;
-  (void)env;
-  n = getline(&line, &cap, stdin);
-  if (n < 0) {
-    int err = errno;
-    free(line);
-    if (feof(stdin)) {
-      clearerr(stdin);
-      r->is_err = 0;
-      r->as.ok = sz_string_from_cstr("");
-      return r;
-    }
-    r->is_err = 1;
-    r->as.err = sz_error_new(3, err ? strerror(err) : "Sys.readLine: read failed");
-    return r;
+static char *g_inbuf = NULL;
+static size_t g_inlen = 0;
+static size_t g_incap = 0;
+
+static int inbuf_grow(size_t need) {
+  char *nbuf;
+  size_t cap = g_incap ? g_incap : 256;
+  while (cap < need)
+    cap *= 2;
+  nbuf = (char *)sz_alloc(cap);
+  if (g_inlen)
+    memcpy(nbuf, g_inbuf, g_inlen);
+  sz_free(g_inbuf);
+  g_inbuf = nbuf;
+  g_incap = cap;
+  return 0;
+}
+
+static int inbuf_take_line(SysResult *r) {
+  size_t i;
+  size_t n;
+  for (i = 0; i < g_inlen; i++) {
+    if (g_inbuf[i] != '\n')
+      continue;
+    n = i;
+    if (n > 0 && g_inbuf[n - 1] == '\r')
+      n--;
+    r->is_err = 0;
+    r->as.ok = sz_string_from_bytes(g_inbuf, n);
+    i++;
+    if (i < g_inlen)
+      memmove(g_inbuf, g_inbuf + i, g_inlen - i);
+    g_inlen -= i;
+    return 1;
   }
-  /* Strip trailing \n and optional \r. */
-  while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r'))
-    n--;
+  return 0;
+}
+
+static void inbuf_take_eof(SysResult *r) {
+  size_t n = g_inlen;
   r->is_err = 0;
-  r->as.ok = sz_string_from_bytes(line, (size_t)n);
-  free(line);
+  if (n > 0 && g_inbuf[n - 1] == '\r')
+    n--;
+  r->as.ok = sz_string_from_bytes(g_inbuf ? g_inbuf : "", n);
+  g_inlen = 0;
+}
+
+static void *sys_read_dispatch(void *env) {
+  (void)env;
+  return (void *)(intptr_t)(sz_testrt_sys_is_fake() ? 1 : 0);
+}
+
+static void *sys_try_line(void *env) {
+  SysResult *r = (SysResult *)sz_alloc_zero(sizeof(SysResult));
+  (void)env;
+  if (inbuf_take_line(r))
+    return r;
+  r->retry = 1;
   return r;
 }
 
-SzIo *sz_sys_read_line(void) {
-  if (sz_testrt_sys_is_fake())
+static void *sys_read_more(void *env) {
+  SysResult *r = (SysResult *)sz_alloc_zero(sizeof(SysResult));
+  char tmp[256];
+  ssize_t n;
+  (void)env;
+  n = read(STDIN_FILENO, tmp, sizeof tmp);
+  if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+    r->retry = 1;
+    return r;
+  }
+  if (n < 0) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.readLine: read failed");
+    return r;
+  }
+  if (n == 0) {
+    inbuf_take_eof(r);
+    return r;
+  }
+  if (g_inlen + (size_t)n > g_incap)
+    inbuf_grow(g_inlen + (size_t)n);
+  memcpy(g_inbuf + g_inlen, tmp, (size_t)n);
+  g_inlen += (size_t)n;
+  if (inbuf_take_line(r))
+    return r;
+  r->retry = 1;
+  return r;
+}
+
+static SzIo *sys_poll_line(void *value, void *env);
+
+static SzIo *sys_unwrap_line(void *value, void *env) {
+  SysResult *r = (SysResult *)value;
+  (void)env;
+  if (r && r->retry) {
+    sz_free(r);
+    return sys_poll_line(NULL, NULL);
+  }
+  return unwrap_sys(value, NULL);
+}
+
+static SzIo *sys_after_poll(void *value, void *env) {
+  (void)value;
+  (void)env;
+  return sz_io_flatmap(sz_io_delay(sys_read_more, NULL), sys_unwrap_line, NULL);
+}
+
+static SzIo *sys_poll_line(void *value, void *env) {
+  (void)value;
+  (void)env;
+  return sz_io_flatmap(sz_io_poll_readable(STDIN_FILENO), sys_after_poll, NULL);
+}
+
+static SzIo *sys_after_try(void *value, void *env) {
+  SysResult *r = (SysResult *)value;
+  (void)env;
+  if (r && r->retry) {
+    sz_free(r);
+    return sys_poll_line(NULL, NULL);
+  }
+  return unwrap_sys(value, NULL);
+}
+
+static SzIo *sys_after_dispatch(void *value, void *env) {
+  (void)env;
+  if ((intptr_t)value)
     return sz_testrt_sys_read_line();
-  return sz_io_flatmap(sz_io_delay(sys_read_line_result, NULL), unwrap_sys, NULL);
+  return sz_io_flatmap(sz_io_delay(sys_try_line, NULL), sys_after_try, NULL);
+}
+
+SzIo *sz_sys_read_line(void) {
+  return sz_io_flatmap(sz_io_delay(sys_read_dispatch, NULL), sys_after_dispatch,
+                       NULL);
 }
 
 static void *sys_exec_result(void *env) {
