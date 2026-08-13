@@ -115,6 +115,7 @@ typedef enum SzIoTag {
   SZ_IO_SLEEP_MS,
   SZ_IO_RACE,
   SZ_IO_BOTH,
+  SZ_IO_ENSURE,
   SZ_IO_QUEUE_TAKE,
   SZ_IO_DEFERRED_GET,
   SZ_IO_POLL_FD
@@ -150,6 +151,10 @@ struct SzIo {
       SzIo *left;
       SzIo *right;
     } both;
+    struct {
+      SzIo *inner;
+      SzIo *finalizer;
+    } ensure;
     SzQueue *queue_take;
     SzDeferred *deferred_get;
     struct {
@@ -171,6 +176,8 @@ SzIo *sz_io_attempt(SzIo *inner);
 SzIo *sz_io_sleep_ms(int64_t ms);
 SzIo *sz_io_race(SzIo *left, SzIo *right);
 SzIo *sz_io_both(SzIo *left, SzIo *right);
+/* Run finalizer after inner succeeds, fails, or is cancelled (race loser). */
+SzIo *sz_io_ensure(SzIo *inner, SzIo *finalizer);
 /* Internal constructors used by queue/deferred kits. */
 SzIo *sz_io_queue_take(SzQueue *q);
 SzIo *sz_io_deferred_get(SzDeferred *d);
@@ -199,7 +206,7 @@ void sz_io_free(SzIo *io);
 int sz_fiber_wake_queue(SzQueue *q, void *value);
 void sz_fiber_wake_deferred(SzDeferred *d);
 
-/* Resource: acquire / release with bracket semantics (releases on failure). */
+/* Resource: acquire / release with bracket semantics (success, failure, cancel). */
 struct SzResource {
   SzAcquire acquire;
   SzRelease release;

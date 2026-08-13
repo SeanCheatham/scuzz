@@ -182,6 +182,7 @@ def prettyExprMatch(expr: Expr, indent: Int, pad: String): String =
     case Expr.Attempt(inner, span) => str3(pad, trimStr(prettyExpr(inner, 0)), ".attempt")
     case Expr.IoRace(left, right, span) => str4(pad, "IO.race(", str3(trimStr(prettyExpr(left, 0)), ", ", trimStr(prettyExpr(right, 0))), ")")
     case Expr.IoBoth(left, right, span) => str4(pad, "IO.both(", str3(trimStr(prettyExpr(left, 0)), ", ", trimStr(prettyExpr(right, 0))), ")")
+    case Expr.IoEnsure(inner, finalizer, span) => str4(pad, "IO.ensure(", str3(trimStr(prettyExpr(inner, 0)), ", ", trimStr(prettyExpr(finalizer, 0))), ")")
     case Expr.Let(name, value, body, span) => prettyFor(List.cons(ForBinder.Eq(name, value), List.empty()), body, indent, pad)
     case Expr.For(binders, body, span) => prettyFor(binders, body, indent, pad)
     case Expr.Match(scrut, arms, span) => prettyMatch(scrut, arms, indent, pad)

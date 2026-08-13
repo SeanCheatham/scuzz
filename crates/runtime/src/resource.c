@@ -5,19 +5,11 @@ typedef struct ResState {
   void *acquired;
 } ResState;
 
-static SzIo *res_after_use(void *use_value, void *env) {
-  ResState *st = (ResState *)env;
-  st->res->release(st->acquired, st->res->env);
-  void *v = use_value;
-  sz_free(st);
-  return sz_io_pure(v);
-}
-
-static SzIo *res_on_error(SzError *err, void *env) {
+static void *res_release_thunk(void *env) {
   ResState *st = (ResState *)env;
   st->res->release(st->acquired, st->res->env);
   sz_free(st);
-  return sz_io_fail(err);
+  return NULL;
 }
 
 static SzIo *res_after_acquire(void *acquired, void *env) {
@@ -26,9 +18,8 @@ static SzIo *res_after_acquire(void *acquired, void *env) {
   ResState *st = (ResState *)sz_alloc(sizeof(ResState));
   st->res = res;
   st->acquired = acquired;
-  /* Bracket: release on success (flatMap) and on failure (handleErrorWith). */
-  SzIo *after = sz_io_flatmap(use_io, res_after_use, st);
-  return sz_io_handle_error_with(after, res_on_error, st);
+  /* Bracket: release on success, failure, and cancel (race loser). */
+  return sz_io_ensure(use_io, sz_io_delay(res_release_thunk, st));
 }
 
 static void *res_acquire_thunk(void *env) {
@@ -64,61 +55,27 @@ typedef struct LangResSt {
   SzCont use;
   void *use_env;
   void *acquired;
-  void *use_value;
-  SzError *use_err;
 } LangResSt;
 
-static SzIo *lang_after_release_ok(void *ignored, void *env) {
+static SzIo *lang_fin_free_ok(void *ignored, void *env) {
   (void)ignored;
-  LangResSt *st = (LangResSt *)env;
-  void *v = st->use_value;
-  sz_free(st);
-  return sz_io_pure(v);
+  sz_free(env);
+  return sz_io_pure(NULL);
 }
 
-static SzIo *lang_after_release_err(void *ignored, void *env) {
-  (void)ignored;
-  LangResSt *st = (LangResSt *)env;
-  /* Keep st alive: the HANDLE frame below catches this fail and frees st. */
-  return sz_io_fail(st->use_err);
-}
-
-static SzIo *lang_release_fail_ok_path(SzError *err, void *env) {
+static SzIo *lang_fin_free_err(SzError *err, void *env) {
   sz_free(env);
   return sz_io_fail(err);
-}
-
-static SzIo *lang_release_fail_err_path(SzError *rel_err, void *env) {
-  LangResSt *st = (LangResSt *)env;
-  SzError *use_err = st->use_err;
-  sz_free(st);
-  if (rel_err != use_err)
-    sz_error_free(rel_err);
-  return sz_io_fail(use_err);
-}
-
-static SzIo *lang_after_use_ok(void *use_value, void *env) {
-  LangResSt *st = (LangResSt *)env;
-  st->use_value = use_value;
-  SzIo *rel = st->res->release(st->acquired, st->res->release_env);
-  SzIo *after = sz_io_flatmap(rel, lang_after_release_ok, st);
-  return sz_io_handle_error_with(after, lang_release_fail_ok_path, st);
-}
-
-static SzIo *lang_after_use_err(SzError *err, void *env) {
-  LangResSt *st = (LangResSt *)env;
-  st->use_err = err;
-  SzIo *rel = st->res->release(st->acquired, st->res->release_env);
-  SzIo *after = sz_io_flatmap(rel, lang_after_release_err, st);
-  return sz_io_handle_error_with(after, lang_release_fail_err_path, st);
 }
 
 static SzIo *lang_after_acquire(void *acquired, void *env) {
   LangResSt *st = (LangResSt *)env;
   st->acquired = acquired;
   SzIo *use_io = st->use(acquired, st->use_env);
-  SzIo *ok = sz_io_flatmap(use_io, lang_after_use_ok, st);
-  return sz_io_handle_error_with(ok, lang_after_use_err, st);
+  SzIo *rel = st->res->release(acquired, st->res->release_env);
+  SzIo *fin = sz_io_flatmap(rel, lang_fin_free_ok, st);
+  fin = sz_io_handle_error_with(fin, lang_fin_free_err, st);
+  return sz_io_ensure(use_io, fin);
 }
 
 SzLangResource *sz_lang_resource_make(SzIo *acquire, SzCont release,

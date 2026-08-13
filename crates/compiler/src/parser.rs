@@ -1189,7 +1189,7 @@ impl Parser {
                         let span = start.cover(&arg.span);
                         Ok(self.mk(ExprKind::IoPure(Box::new(arg)), span))
                     }
-                    "race" | "both" => {
+                    "race" | "both" | "ensure" => {
                         let args = self.parse_args()?;
                         if args.len() != 2 {
                             return Err(self.err(format!("IO.{method} expects 2 args")));
@@ -1206,11 +1206,19 @@ impl Parser {
                                 },
                                 span,
                             ))
-                        } else {
+                        } else if method == "both" {
                             Ok(self.mk(
                                 ExprKind::IoBoth {
                                     left: Box::new(left),
                                     right: Box::new(right),
+                                },
+                                span,
+                            ))
+                        } else {
+                            Ok(self.mk(
+                                ExprKind::IoEnsure {
+                                    inner: Box::new(left),
+                                    finalizer: Box::new(right),
                                 },
                                 span,
                             ))

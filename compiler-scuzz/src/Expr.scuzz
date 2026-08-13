@@ -27,6 +27,7 @@ enum Expr:
   case Delay(span: Span)
   case IoRace(left: Expr, right: Expr, span: Span)
   case IoBoth(left: Expr, right: Expr, span: Span)
+  case IoEnsure(inner: Expr, finalizer: Expr, span: Span)
 
 def isUnitExpr(e: Expr): Int =
   e match {
@@ -56,6 +57,7 @@ def isUnitExpr(e: Expr): Int =
     case Expr.Delay(span) => 0
     case Expr.IoRace(left, right, span) => 0
     case Expr.IoBoth(left, right, span) => 0
+    case Expr.IoEnsure(inner, finalizer, span) => 0
   }
 
 def isVarExpr(e: Expr): Int =
@@ -86,6 +88,7 @@ def isVarExpr(e: Expr): Int =
     case Expr.Delay(span) => 0
     case Expr.IoRace(left, right, span) => 0
     case Expr.IoBoth(left, right, span) => 0
+    case Expr.IoEnsure(inner, finalizer, span) => 0
   }
 
 def isLetExpr(e: Expr): Int =
@@ -116,6 +119,7 @@ def isLetExpr(e: Expr): Int =
     case Expr.Delay(span) => 0
     case Expr.IoRace(left, right, span) => 0
     case Expr.IoBoth(left, right, span) => 0
+    case Expr.IoEnsure(inner, finalizer, span) => 0
   }
 
 def isMatchExpr(e: Expr): Int =
@@ -146,6 +150,7 @@ def isMatchExpr(e: Expr): Int =
     case Expr.Delay(span) => 0
     case Expr.IoRace(left, right, span) => 0
     case Expr.IoBoth(left, right, span) => 0
+    case Expr.IoEnsure(inner, finalizer, span) => 0
   }
 
 def isFlatMapExpr(e: Expr): Int =
@@ -176,6 +181,7 @@ def isFlatMapExpr(e: Expr): Int =
     case Expr.Delay(span) => 0
     case Expr.IoRace(left, right, span) => 0
     case Expr.IoBoth(left, right, span) => 0
+    case Expr.IoEnsure(inner, finalizer, span) => 0
   }
 
 def isStrLitExpr(e: Expr): Int =
@@ -206,6 +212,7 @@ def isStrLitExpr(e: Expr): Int =
     case Expr.Delay(span) => 0
     case Expr.IoRace(left, right, span) => 0
     case Expr.IoBoth(left, right, span) => 0
+    case Expr.IoEnsure(inner, finalizer, span) => 0
   }
 
 def varExprName(e: Expr): String =
@@ -236,6 +243,7 @@ def varExprName(e: Expr): String =
     case Expr.Delay(span) => ""
     case Expr.IoRace(left, right, span) => ""
     case Expr.IoBoth(left, right, span) => ""
+    case Expr.IoEnsure(inner, finalizer, span) => ""
   }
 
 def strLitExprValue(e: Expr): String =
@@ -266,5 +274,6 @@ def strLitExprValue(e: Expr): String =
     case Expr.Delay(span) => ""
     case Expr.IoRace(left, right, span) => ""
     case Expr.IoBoth(left, right, span) => ""
+    case Expr.IoEnsure(inner, finalizer, span) => ""
   }
 

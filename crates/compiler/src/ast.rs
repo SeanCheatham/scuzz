@@ -179,6 +179,11 @@ pub enum ExprKind {
         left: Box<Expr>,
         right: Box<Expr>,
     },
+    /// `IO.ensure(inner, finalizer)` — run finalizer on success, failure, and cancel
+    IoEnsure {
+        inner: Box<Expr>,
+        finalizer: Box<Expr>,
+    },
     /// Lowered `for` pure binder: `name = value` then `body`
     Let {
         name: String,

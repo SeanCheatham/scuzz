@@ -195,6 +195,7 @@ def exprSpan(e: Expr): Span =
     case Expr.Delay(span) => span
     case Expr.IoRace(left, right, span) => span
     case Expr.IoBoth(left, right, span) => span
+    case Expr.IoEnsure(inner, finalizer, span) => span
   }
 
 def offsetToLineCol(source: String, offset: Int): List =

@@ -673,6 +673,27 @@ fn rewrite_fields(
             },
             span,
         )),
+        ExprKind::IoEnsure { inner, finalizer } => Ok(Expr::new(
+            ExprKind::IoEnsure {
+                inner: Box::new(rewrite_fields(
+                    *inner,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?),
+                finalizer: Box::new(rewrite_fields(
+                    *finalizer,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?),
+            },
+            span,
+        )),
         ExprKind::Let { name, value, body } => {
             let value = rewrite_fields(*value, enums, funs, methods, current_module, env)?;
             let vt = infer(&value, enums, funs, methods, current_module, env)?;
@@ -1141,6 +1162,21 @@ fn infer(
                 ));
             }
             Ok(Type::Io(Box::new(Type::Unit)))
+        }
+        ExprKind::IoEnsure { inner, finalizer } => {
+            let it = infer(inner, enums, funs, methods, current_module, env)?;
+            let ft = infer(finalizer, enums, funs, methods, current_module, env)?;
+            let Type::Io(inner_ty) = it else {
+                return Err(TypeError::Msg(
+                    "IO.ensure inner must be IO[_]".into(),
+                ));
+            };
+            if !matches!(ft, Type::Io(_)) {
+                return Err(TypeError::Msg(
+                    "IO.ensure finalizer must be IO[_]".into(),
+                ));
+            }
+            Ok(Type::Io(inner_ty))
         }
         ExprKind::For { .. } => Err(TypeError::Msg(
             "internal: unlowered `for` (run lower before typecheck)".into(),
@@ -2298,6 +2334,29 @@ fn mono_expr(
             },
             span,
         )),
+        ExprKind::IoEnsure { inner, finalizer } => Ok(Expr::new(
+            ExprKind::IoEnsure {
+                inner: Box::new(mono_expr(
+                    *inner,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+                finalizer: Box::new(mono_expr(
+                    *finalizer,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+            },
+            span,
+        )),
         ExprKind::Let { name, value, body } => {
             let vt = infer(&value, enums, funs, methods, current_module, env)?;
             let value = mono_expr(*value, enums, funs, methods, current_module, env, specialized)?;
@@ -2983,6 +3042,17 @@ fn elaborate_expr(
             },
             span,
         )),
+        ExprKind::IoEnsure { inner, finalizer } => Ok(Expr::new(
+            ExprKind::IoEnsure {
+                inner: Box::new(elaborate_expr(
+                    *inner, enums, funs, methods, current_module, env, expected, tparams,
+                )?),
+                finalizer: Box::new(elaborate_expr(
+                    *finalizer, enums, funs, methods, current_module, env, None, tparams,
+                )?),
+            },
+            span,
+        )),
         ExprKind::Field { base, field } => Ok(Expr::new(
             ExprKind::Field {
                 base: Box::new(elaborate_expr(
@@ -3170,6 +3240,10 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
             left: Box::new(subst_node_targs(*left, subst)),
             right: Box::new(subst_node_targs(*right, subst)),
         },
+        ExprKind::IoEnsure { inner, finalizer } => ExprKind::IoEnsure {
+            inner: Box::new(subst_node_targs(*inner, subst)),
+            finalizer: Box::new(subst_node_targs(*finalizer, subst)),
+        },
         ExprKind::Field { base, field } => ExprKind::Field {
             base: Box::new(subst_node_targs(*base, subst)),
             field,
@@ -3302,7 +3376,12 @@ fn collect_node_targs(expr: &Expr, out: &mut Vec<(String, Vec<Type>)>) {
             collect_node_targs(inner, out);
             collect_node_targs(body, out);
         }
-        ExprKind::IoRace { left, right } | ExprKind::IoBoth { left, right } => {
+        ExprKind::IoRace { left, right }
+        | ExprKind::IoBoth { left, right }
+        | ExprKind::IoEnsure {
+            inner: left,
+            finalizer: right,
+        } => {
             collect_node_targs(left, out);
             collect_node_targs(right, out);
         }
@@ -3447,6 +3526,10 @@ fn rewrite_enum_refs(
         ExprKind::IoBoth { left, right } => ExprKind::IoBoth {
             left: Box::new(rewrite_enum_refs(*left, clones)?),
             right: Box::new(rewrite_enum_refs(*right, clones)?),
+        },
+        ExprKind::IoEnsure { inner, finalizer } => ExprKind::IoEnsure {
+            inner: Box::new(rewrite_enum_refs(*inner, clones)?),
+            finalizer: Box::new(rewrite_enum_refs(*finalizer, clones)?),
         },
         ExprKind::Field { base, field } => ExprKind::Field {
             base: Box::new(rewrite_enum_refs(*base, clones)?),

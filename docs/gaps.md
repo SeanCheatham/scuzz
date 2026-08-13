@@ -34,7 +34,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 ### Residuals
 
 - **Net** — IPv6 and CNAME-follow are out (impurity code **6**).
-- **Concurrency** — cooperative fibers only. Later: OS threads, supervision trees.
+- **Concurrency** — cooperative fibers only; `IO.ensure` / `Resource` release on cancel. Next IO slices: `IO.timeout`, language `Fiber` (fork/join/interrupt), then `forever` / `repeatN` / `retryN`. Later: OS threads, supervision trees.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting; `Signal.list` frees unshared cons spines. Later: a collector if list-churn still demands it.
 - **Language surface** — richer generics beyond monomorphized defs/enums/records ([`compatibility.md`](compatibility.md)).
 

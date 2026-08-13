@@ -80,7 +80,7 @@ No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** i
 
 ### IO and impurity
 
-One failure channel: `SzError` on `IO`. Blessed kits only — no app-level `IO.delay`. Cooperative single-threaded fibers (no OS threads for IO); `sleep` / empty `Queue.take` / incomplete `Deferred.get` / fd poll park. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net/console. Surface catalogs and impurity codes: [`guide.md`](guide.md). Panics abort via `sz_panic`.
+One failure channel: `SzError` on `IO`. Blessed kits only — no app-level `IO.delay`. Cooperative single-threaded fibers (no OS threads for IO); `sleep` / empty `Queue.take` / incomplete `Deferred.get` / fd poll park. Cancel (race loser) runs `IO.ensure` / `Resource` finalizers. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net/console. Surface catalogs and impurity codes: [`guide.md`](guide.md). Panics abort via `sz_panic`.
 
 ### `Ui` vs `View`
 

@@ -138,6 +138,13 @@ pub fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Ex
             },
             span,
         ),
+        ExprKind::IoEnsure { inner, finalizer } => Expr::new(
+            ExprKind::IoEnsure {
+                inner: Box::new(lower_expr(*inner, enums, current_module)),
+                finalizer: Box::new(lower_expr(*finalizer, enums, current_module)),
+            },
+            span,
+        ),
         ExprKind::Let { name, value, body } => Expr::new(
             ExprKind::Let {
                 name,

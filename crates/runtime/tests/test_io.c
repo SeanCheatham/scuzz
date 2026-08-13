@@ -71,6 +71,25 @@ static SzIo *lang_use_fail(void *acquired, void *env) {
   return sz_io_fail_cstr("lang-use-failed");
 }
 
+static int ensured_flag = 0;
+static void *ensure_mark_thunk(void *env) {
+  (void)env;
+  ensured_flag = 1;
+  return NULL;
+}
+
+static SzIo *use_token_sleep(void *acquired, void *env) {
+  (void)env;
+  assert((intptr_t)acquired == 7);
+  return sz_io_sleep_ms(100);
+}
+
+static SzIo *lang_use_sleep(void *acquired, void *env) {
+  (void)env;
+  (void)acquired;
+  return sz_io_sleep_ms(100);
+}
+
 static SzIo *stream_bang(void *v, void *env) {
   (void)env;
   SzString *s = (SzString *)v;
@@ -401,6 +420,47 @@ int main(void) {
   assert(lang_released == 1);
   sz_error_free(r.error);
   sz_lang_resource_free(lr);
+
+  /* IO.ensure runs finalizer on success */
+  ensured_flag = 0;
+  r = sz_io_unsafe_run(
+      sz_io_ensure(sz_io_pure((void *)(intptr_t)1),
+                   sz_io_delay(ensure_mark_thunk, NULL)));
+  assert(r.ok);
+  assert((intptr_t)r.value == 1);
+  assert(ensured_flag == 1);
+
+  /* IO.ensure runs finalizer on failure */
+  ensured_flag = 0;
+  r = sz_io_unsafe_run(
+      sz_io_ensure(sz_io_fail_cstr("boom"), sz_io_delay(ensure_mark_thunk, NULL)));
+  assert(!r.ok);
+  assert(ensured_flag == 1);
+  sz_error_free(r.error);
+
+  /* Resource releases when cancelled as race loser (TestRuntime: both park, then short wins). */
+  {
+    sz_testrt_install();
+    released = 0;
+    res = sz_resource_make(acquire_token, release_token, NULL);
+    r = sz_io_unsafe_run(
+        sz_io_race(sz_resource_use(res, use_token_sleep, NULL),
+                   sz_io_sleep_ms(1)));
+    assert(r.ok);
+    assert(released == 1);
+    sz_resource_free(res);
+
+    lang_released = 0;
+    lr = sz_lang_resource_make(sz_io_pure(sz_string_from_cstr("tok")),
+                               lang_release, NULL);
+    r = sz_io_unsafe_run(
+        sz_io_race(sz_lang_resource_use(lr, lang_use_sleep, NULL),
+                   sz_io_sleep_ms(1)));
+    assert(r.ok);
+    assert(lang_released == 1);
+    sz_lang_resource_free(lr);
+    sz_testrt_reset();
+  }
 
   /* Ref */
   r = sz_io_unsafe_run(sz_io_flatmap(sz_ref_of_cstr("a"), after_ref, NULL));

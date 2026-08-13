@@ -382,6 +382,15 @@ SzIo *sz_io_both(SzIo *left, SzIo *right) {
   return io;
 }
 
+SzIo *sz_io_ensure(SzIo *inner, SzIo *finalizer) {
+  if (!inner || !finalizer)
+    sz_panic("sz_io_ensure(null)");
+  SzIo *io = sz_io_new(SZ_IO_ENSURE);
+  io->as.ensure.inner = inner;
+  io->as.ensure.finalizer = finalizer;
+  return io;
+}
+
 SzIo *sz_io_queue_take(SzQueue *q) {
   SzIo *io = sz_io_new(SZ_IO_QUEUE_TAKE);
   io->as.queue_take = q;
@@ -415,12 +424,13 @@ void sz_io_free(SzIo *io) {
 
 /* --- cooperative fiber scheduler (single-threaded, deterministic) -------- */
 
-typedef enum ContKind { CONT_FLATMAP = 1, CONT_HANDLE = 2 } ContKind;
+typedef enum ContKind { CONT_FLATMAP = 1, CONT_HANDLE = 2, CONT_ENSURE = 3 } ContKind;
 
 typedef struct ContFrame {
   ContKind kind;
   SzCont cont;
   SzErrorHandler handler;
+  SzIo *finalizer;
   void *env;
   struct ContFrame *next;
 } ContFrame;
@@ -433,7 +443,8 @@ typedef enum FiberState {
   FIB_POLL,
   FIB_JOIN,
   FIB_DONE,
-  FIB_CANCELLED
+  FIB_CANCELLED,
+  FIB_FINALIZING
 } FiberState;
 
 typedef enum JoinKind { JOIN_NONE = 0, JOIN_RACE = 1, JOIN_BOTH = 2 } JoinKind;
@@ -505,6 +516,7 @@ static ContFrame *cont_push_flatmap(ContFrame *stack, SzCont cont, void *env) {
   f->kind = CONT_FLATMAP;
   f->cont = cont;
   f->handler = NULL;
+  f->finalizer = NULL;
   f->env = env;
   f->next = stack;
   return f;
@@ -516,7 +528,19 @@ static ContFrame *cont_push_handle(ContFrame *stack, SzErrorHandler handler,
   f->kind = CONT_HANDLE;
   f->cont = NULL;
   f->handler = handler;
+  f->finalizer = NULL;
   f->env = env;
+  f->next = stack;
+  return f;
+}
+
+static ContFrame *cont_push_ensure(ContFrame *stack, SzIo *finalizer) {
+  ContFrame *f = (ContFrame *)sz_alloc(sizeof(ContFrame));
+  f->kind = CONT_ENSURE;
+  f->cont = NULL;
+  f->handler = NULL;
+  f->finalizer = finalizer;
+  f->env = NULL;
   f->next = stack;
   return f;
 }
@@ -546,10 +570,87 @@ static SzIo *attempt_err(SzError *err, void *env) {
   return sz_io_pure(sz_either_left(err));
 }
 
+typedef struct EnsureExit {
+  void *value;
+  SzError *err;
+} EnsureExit;
+
+static SzIo *ensure_after_attempt_ok(void *either_val, void *env) {
+  EnsureExit *e = (EnsureExit *)env;
+  void *v = e->value;
+  SzEither *ex = (SzEither *)either_val;
+  sz_free(e);
+  if (ex && ex->is_right) {
+    sz_either_free(ex);
+    return sz_io_pure(v);
+  }
+  {
+    SzError *err =
+        ex && !ex->is_right && ex->as.left
+            ? ex->as.left
+            : sz_error_new(2, "ensure finalizer failed");
+    if (ex)
+      sz_either_free(ex);
+    return sz_io_fail(err);
+  }
+}
+
+static SzIo *ensure_after_attempt_err(void *either_val, void *env) {
+  EnsureExit *e = (EnsureExit *)env;
+  SzError *orig = e->err;
+  SzEither *ex = (SzEither *)either_val;
+  sz_free(e);
+  if (ex && !ex->is_right && ex->as.left && ex->as.left != orig)
+    sz_error_free(ex->as.left);
+  if (ex)
+    sz_either_free(ex);
+  return sz_io_fail(orig);
+}
+
+static SzIo *ensure_run_fin_ok(SzIo *fin, void *value) {
+  EnsureExit *e = (EnsureExit *)sz_alloc(sizeof(EnsureExit));
+  e->value = value;
+  e->err = NULL;
+  return sz_io_flatmap(sz_io_attempt(fin), ensure_after_attempt_ok, e);
+}
+
+static SzIo *ensure_run_fin_err(SzIo *fin, SzError *err) {
+  EnsureExit *e = (EnsureExit *)sz_alloc(sizeof(EnsureExit));
+  e->value = NULL;
+  e->err = err;
+  return sz_io_flatmap(sz_io_attempt(fin), ensure_after_attempt_err, e);
+}
+
+static SzIo *ignore_then_io(void *ignored, void *env) {
+  (void)ignored;
+  return (SzIo *)env;
+}
+
+/* Sequence finalizers LIFO (top of stack first). Takes ownership of ENSURE
+ * frames' finalizer pointers; frees the whole cont stack. */
+static SzIo *drain_ensure_finalizers(ContFrame *stack) {
+  SzIo *acc = NULL;
+  ContFrame *c = stack;
+  while (c) {
+    ContFrame *next = c->next;
+    if (c->kind == CONT_ENSURE && c->finalizer) {
+      if (!acc)
+        acc = c->finalizer;
+      else
+        acc = sz_io_flatmap(acc, ignore_then_io, c->finalizer);
+    }
+    sz_free(c);
+    c = next;
+  }
+  return acc;
+}
+
 static void ready_enqueue(Sched *s, Fiber *f) {
   if (!f || f->state == FIB_CANCELLED || f->state == FIB_DONE)
     return;
-  f->state = FIB_READY;
+  /* Keep FIB_FINALIZING so cancel cleanup does not join_child_done as success. */
+  if (f->state != FIB_FINALIZING)
+    f->state = FIB_READY;
   f->ready_next = NULL;
   if (!s->ready_tail) {
     s->ready_head = f;
@@ -697,7 +798,9 @@ static Fiber *fiber_new(SzIo *cur, Fiber *parent, JoinKind jk, int slot) {
 }
 
 static void fiber_cancel(Sched *s, Fiber *f) {
-  if (!f || f->state == FIB_DONE || f->state == FIB_CANCELLED)
+  SzIo *cleanup;
+  if (!f || f->state == FIB_DONE || f->state == FIB_CANCELLED ||
+      f->state == FIB_FINALIZING)
     return;
   if (f->state == FIB_SLEEP)
     sleeper_remove(s, f);
@@ -711,10 +814,16 @@ static void fiber_cancel(Sched *s, Fiber *f) {
     fiber_cancel(s, f->children[0]);
   if (f->children[1])
     fiber_cancel(s, f->children[1]);
-  f->state = FIB_CANCELLED;
-  cont_free_all(f->stack);
+  cleanup = drain_ensure_finalizers(f->stack);
   f->stack = NULL;
   f->cur = NULL;
+  if (cleanup) {
+    f->state = FIB_FINALIZING;
+    f->cur = cleanup;
+    ready_enqueue(s, f);
+  } else {
+    f->state = FIB_CANCELLED;
+  }
 }
 
 static void fiber_resume_value(Sched *s, Fiber *f, void *value);
@@ -782,6 +891,15 @@ static void join_child_done(Sched *s, Fiber *child, int ok, void *val,
 static void fiber_finish(Sched *s, Fiber *f, int ok, void *val, SzError *err) {
   if (f->state == FIB_CANCELLED)
     return;
+  if (f->state == FIB_FINALIZING) {
+    cont_free_all(f->stack);
+    f->stack = NULL;
+    f->cur = NULL;
+    f->state = FIB_CANCELLED;
+    if (err)
+      sz_error_free(err);
+    return;
+  }
   cont_free_all(f->stack);
   f->stack = NULL;
   f->cur = NULL;
@@ -800,6 +918,13 @@ static void fiber_resume_value(Sched *s, Fiber *f, void *value) {
   f->stack = stack;
   if (!stack) {
     fiber_finish(s, f, 1, value, NULL);
+    return;
+  }
+  if (stack->kind == CONT_ENSURE) {
+    SzIo *fin = stack->finalizer;
+    f->stack = cont_pop(stack);
+    f->cur = ensure_run_fin_ok(fin, value);
+    ready_enqueue(s, f);
     return;
   }
   {
@@ -829,6 +954,13 @@ static void fiber_fail(Sched *s, Fiber *f, SzError *err) {
                      sz_error_new(2, "error handler returned null"));
         return;
       }
+      ready_enqueue(s, f);
+      return;
+    }
+    if (stack->kind == CONT_ENSURE) {
+      SzIo *fin = stack->finalizer;
+      f->stack = cont_pop(stack);
+      f->cur = ensure_run_fin_err(fin, err);
       ready_enqueue(s, f);
       return;
     }
@@ -985,6 +1117,11 @@ static int step_fiber(Sched *s, Fiber *f) {
     ready_enqueue(s, right);
     return 0;
   }
+  case SZ_IO_ENSURE:
+    f->stack = cont_push_ensure(f->stack, cur->as.ensure.finalizer);
+    f->cur = cur->as.ensure.inner;
+    ready_enqueue(s, f);
+    return 0;
   case SZ_IO_QUEUE_TAKE: {
     SzQueue *q = cur->as.queue_take;
     if (!q) {
@@ -1222,12 +1359,13 @@ static SzIoResult run_io(SzIo *root) {
       if (f->state == FIB_CANCELLED || f->state == FIB_DONE)
         continue;
       step_fiber(&sched, f);
-      if (sched.root->state == FIB_DONE || sched.root->state == FIB_CANCELLED)
-        break;
+      /* Drain ready (including cancel finalizers) before exiting on root done. */
       continue;
     }
     if (idle_advance(&sched))
       continue;
+    if (sched.root->state == FIB_DONE || sched.root->state == FIB_CANCELLED)
+      break;
     /* Deadlock: no ready fibers and nothing to wake. */
     break;
   }

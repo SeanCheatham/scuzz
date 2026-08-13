@@ -47,6 +47,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_io_attempt(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_race(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_both(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_ensure(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_unsafe_run_or_die(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_adt_new(i32, ptr)").unwrap();
     writeln!(out, "declare i32 @sz_adt_tag(ptr)").unwrap();
@@ -341,6 +342,10 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         | ExprKind::IoBoth {
             left: inner,
             right: body,
+        }
+        | ExprKind::IoEnsure {
+            inner,
+            finalizer: body,
         }
         | ExprKind::Binary {
             left: inner,
@@ -1324,6 +1329,20 @@ fn emit_expr(
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_both"), Kind::Ptr)
+        }
+        ExprKind::IoEnsure { inner, finalizer } => {
+            let ie = emit_expr(inner, ctx, locals, &format!("{prefix}_ei"));
+            let fe = emit_expr(finalizer, ctx, locals, &format!("{prefix}_ef"));
+            let mut code = ie.code;
+            code.push_str(&fe.code);
+            let iv = ensure_io(&mut code, ie.kind, &ie.value, &format!("{prefix}_eiio"));
+            let fv = ensure_io(&mut code, fe.kind, &fe.value, &format!("{prefix}_efio"));
+            writeln!(
+                code,
+                "  %{prefix}_ensure = call ptr @sz_io_ensure(ptr {iv}, ptr {fv})"
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_ensure"), ie.payload)
         }
     }
 }
