@@ -2,7 +2,9 @@
 
 use crate::format::format_source;
 use crate::lower::lower_program;
-use crate::overlay::{apply_overlays, collect_law_names, is_fmt_source, residualize_laws};
+use crate::overlay::{
+    apply_overlays, collect_law_names, is_fmt_source, residualize_laws, residualize_refinements,
+};
 use crate::parser::{parse_sources, ParseError};
 use crate::span::{offset_to_line_col, Span};
 use crate::typ::{typecheck, TypeError};
@@ -231,6 +233,7 @@ pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
     let mut program = program;
     // Residualize so Law.assert / law calls typecheck the same way as verify builds.
     residualize_laws(&mut program, &law_names);
+    residualize_refinements(&mut program);
     program.law_names = law_names;
     let program = lower_program(program);
     if let Err(e) = typecheck(&program) {

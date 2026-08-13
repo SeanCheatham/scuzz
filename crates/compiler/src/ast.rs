@@ -77,6 +77,18 @@ pub struct EnumCase {
     pub name: String,
     /// Empty = nullary. Multi-field payloads pack as `List` in `sz_adt_payload`.
     pub fields: Vec<(String, Type)>,
+    /// Parallel to `fields`; `where` predicates on record (or case) fields.
+    pub field_rfns: Vec<Option<Expr>>,
+}
+
+impl EnumCase {
+    pub fn field_rfn(&self, i: usize) -> Option<&Expr> {
+        self.field_rfns.get(i).and_then(|o| o.as_ref())
+    }
+
+    pub fn has_rfns(&self) -> bool {
+        self.field_rfns.iter().any(|o| o.is_some())
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -101,6 +113,8 @@ pub struct FunDef {
 pub struct Param {
     pub name: String,
     pub ty: Type,
+    /// `n: Int where n >= 0` — residualized at calls under the verify graph.
+    pub rfn: Option<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

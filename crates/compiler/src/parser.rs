@@ -411,12 +411,11 @@ impl Parser {
             return Ok(params);
         }
         loop {
-            let (pname, _) = self.expect_ident()?;
-            self.expect(&Token::Colon)?;
-            let pty = self.parse_type_with_tparams(type_params)?;
+            let (pname, pty, rfn) = self.parse_name_ty_rfn(type_params)?;
             params.push(Param {
                 name: pname,
                 ty: pty,
+                rfn,
             });
             if matches!(self.peek(), Token::Comma) {
                 self.bump();
@@ -425,6 +424,22 @@ impl Parser {
             break;
         }
         Ok(params)
+    }
+
+    fn parse_name_ty_rfn(
+        &mut self,
+        type_params: &[String],
+    ) -> Result<(String, Type, Option<Expr>), ParseError> {
+        let (name, _) = self.expect_ident()?;
+        self.expect(&Token::Colon)?;
+        let ty = self.parse_type_with_tparams(type_params)?;
+        let rfn = if matches!(self.peek(), Token::Where) {
+            self.bump();
+            Some(self.parse_or()?)
+        } else {
+            None
+        };
+        Ok((name, ty, rfn))
     }
 
     fn parse_enum(&mut self) -> Result<EnumDef, ParseError> {
@@ -482,11 +497,11 @@ impl Parser {
         };
         self.expect(&Token::LParen)?;
         let mut fields = Vec::new();
+        let mut field_rfns = Vec::new();
         loop {
-            let (fname, _) = self.expect_ident()?;
-            self.expect(&Token::Colon)?;
-            let fty = self.parse_type_with_tparams(&type_params)?;
+            let (fname, fty, rfn) = self.parse_name_ty_rfn(&type_params)?;
             fields.push((fname, fty));
+            field_rfns.push(rfn);
             if matches!(self.peek(), Token::Comma) {
                 self.bump();
                 continue;
@@ -504,6 +519,7 @@ impl Parser {
             cases: vec![EnumCase {
                 name: name.clone(),
                 fields,
+                field_rfns,
             }],
             is_record: true,
         })
@@ -638,13 +654,13 @@ impl Parser {
     fn parse_enum_case(&mut self, type_params: &[String]) -> Result<EnumCase, ParseError> {
         let (name, _) = self.expect_ident()?;
         let mut fields = Vec::new();
+        let mut field_rfns = Vec::new();
         if matches!(self.peek(), Token::LParen) {
             self.bump();
             loop {
-                let (fname, _) = self.expect_ident()?;
-                self.expect(&Token::Colon)?;
-                let fty = self.parse_type_with_tparams(type_params)?;
+                let (fname, fty, rfn) = self.parse_name_ty_rfn(type_params)?;
                 fields.push((fname, fty));
+                field_rfns.push(rfn);
                 if matches!(self.peek(), Token::Comma) {
                     self.bump();
                     continue;
@@ -653,7 +669,11 @@ impl Parser {
             }
             self.expect(&Token::RParen)?;
         }
-        Ok(EnumCase { name, fields })
+        Ok(EnumCase {
+            name,
+            fields,
+            field_rfns,
+        })
     }
 
     /// Expr body for `def` / `@main` / lambda (no statement-block grammar).
@@ -1535,6 +1555,27 @@ law always: Bool = 1 == 1
         assert_eq!(p.defs[0].name, "always");
         assert!(matches!(p.defs[0].ret, Type::Bool));
         assert!(p.defs[0].params.is_empty());
+    }
+
+    #[test]
+    fn parse_param_where() {
+        let src = r#"
+def note(n: Int where n >= 0): Unit = ()
+@main def main: IO[Unit] = IO.println("ok")
+"#;
+        let p = parse(src).unwrap();
+        assert!(p.defs[0].params[0].rfn.is_some());
+    }
+
+    #[test]
+    fn parse_record_field_where() {
+        let src = r#"
+record Point(x: Int where x >= 0, y: Int)
+@main def main: IO[Unit] = IO.println("ok")
+"#;
+        let p = parse(src).unwrap();
+        assert!(p.enums[0].cases[0].field_rfn(0).is_some());
+        assert!(p.enums[0].cases[0].field_rfn(1).is_none());
     }
 
     #[test]

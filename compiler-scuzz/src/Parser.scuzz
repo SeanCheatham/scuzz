@@ -128,7 +128,16 @@ def parseParamWith(file: String, tokens: List, i: Int, tparams: List): List =
     nameP = parseIdent(file, tokens, i)
     i1 = expectTok(tokens, pIdx(nameP), "Colon")
     tyP = parseTypeWith(file, tokens, i1, tparams)
-  } yield okParam(Param.Param(pStr(nameP), pType(tyP)), pIdx(tyP))
+    rfnP = parseOptionalWhere(file, tokens, pIdx(tyP))
+  } yield okParam(Param.Param(pStr(nameP), pType(tyP), pAst(rfnP)), pIdx(rfnP))
+
+def parseOptionalWhere(file: String, tokens: List, i: Int): List =
+  if (isTok(tokens, i, "Where") == 0) ok(List.empty(), i) else parseOptionalWhereExpr(file, tokens, i + 1)
+
+def parseOptionalWhereExpr(file: String, tokens: List, i: Int): List =
+  for {
+    e = parseOr(file, tokens, i)
+  } yield ok(List.cons(pExpr(e), List.empty()), pIdx(e))
 
 def parseParams(file: String, tokens: List, i: Int, acc: List): List =
   parseParamsWith(file, tokens, i, acc, List.empty())
@@ -599,8 +608,9 @@ def parseEnumCaseFieldCont(file: String, tokens: List, i: Int, acc: List, tparam
     fnameP = parseIdent(file, tokens, i)
     i1 = expectTok(tokens, pIdx(fnameP), "Colon")
     tyP = parseTypeWith(file, tokens, i1, tparams)
-    acc2 = List.cons(EnumField.Field(pStr(fnameP), pType(tyP)), acc)
-    j = pIdx(tyP)
+    rfnP = parseOptionalWhere(file, tokens, pIdx(tyP))
+    acc2 = List.cons(EnumField.Field(pStr(fnameP), pType(tyP), pAst(rfnP)), acc)
+    j = pIdx(rfnP)
   } yield if (isTok(tokens, j, "Comma") == 1) parseEnumCaseFieldsAcc(file, tokens, j + 1, acc2, tparams) else parseEnumCaseFieldsEnd(file, tokens, j, acc2)
 
 def parseEnumCaseFieldsEnd(file: String, tokens: List, i: Int, acc: List): List =

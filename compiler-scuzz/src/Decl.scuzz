@@ -1,7 +1,7 @@
 package scuzz.compiler
 
 enum Param:
-  case Param(name: String, ty: Type)
+  case Param(name: String, ty: Type, rfn: List)
 
 enum Def:
   case Def(name: String, params: List, ret: Type, body: Expr, module: String, isPrivate: Int, typeParams: List, isLaw: Int)

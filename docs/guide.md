@@ -91,17 +91,18 @@ src/
 
 - Prefer sim overlays for app policy (API base URL, a `Backend` value); blessed kits stay one implementation with TestRuntime fakes on the wire
 - Laws are top-level `law name: Bool = …` in the live module; residual `Law.assert` runs only under `SCUZZ_TESTRT=1` (fuzz / mutation); live `build` / `run` erase them
+- `where` on `def` params and `record` fields is a Bool predicate; the checker inserts `Law.check` at call / construction under the verify graph and erases it live
 - `Law.check(name, ok, value)` is identity live and panics under TestRuntime when `ok` is false; `Law.sometimes(name)` records reachability; fuzz fails the campaign if a string-literal name is never hit
 - Observation builtins: `Law.signalInt(id)`, `Law.signalStr(id)`, `Law.signalListLen(id)`, `Law.signalListAt(id, i)`, `Law.a11yHas(needle)` (signal store + stashed a11y dump)
 - Drivers are new `IO[Unit]` defs (0 or 1 `Int`/`String` param); `check` rejects `Law.*` inside them; fuzz scripts gain `drive <name> [args]`
 - No `src/test` twin trees — only stem-paired `*.scuzz_sim` / `*.scuzz_drivers`; no third-party test or mutation frameworks
-- Example: `examples/counter` + `examples/shared` (`Shared.scuzz_sim` swaps `counterTitle`; `countLabel` uses `Law.check`; `+1` records `Law.sometimes("tappedPlus")`; `Main.scuzz_drivers` `plusN` exercises `driveNonNeg` / `drovePlus`; `Main.scuzz` laws check count / mapped label / button / sim title)
+- Example: `examples/counter` + `examples/shared` (`Shared.scuzz_sim` swaps `counterTitle`; `countLabel` uses `Law.check`; `noteDrive(n: Int where n >= 0)` residualizes at `plusN`; `+1` records `Law.sometimes("tappedPlus")`; `Main.scuzz` laws check count / mapped label / button / sim title). `examples/record` uses `where` on `Point.x`.
 
 **Today:**
 
 - `[ui]` packages: `scuzz test` is Headless **structural** goldens on the **live** graph (signal store + a11y dump); PNG optional via `--pixels`. `scuzz fuzz` compiles the **verify** graph (sim + residual laws + drivers).
 - IO packages (no `[ui]`): `scuzz test` compiles and runs under `SCUZZ_TESTRT=1`, requiring exit 0
-- `scuzz check` format-verifies `src/` and typechecks live + sim twins + laws + drivers; `--message-format=json` is the editor protocol (`check` only; LSP wraps this)
+- `scuzz check` format-verifies `src/` and typechecks live + sim twins + laws + drivers + `where` refinements; `--message-format=json` is the editor protocol (`check` only; LSP wraps this)
 - `scuzz fuzz --iters N` searches event scripts × schedules (`[ui]`) or schedule seeds only (IO-only); `--exhaust --depth N` is `[ui]` event alphabet (including `drive`) with FIFO schedule; `--replay repro.toml` restores events + optional `schedule_seed`; oracles are residual laws, `Law.check`, panic/`SzError`, and campaign `Law.sometimes` reachability
 - Deterministic fakes: `TestRuntime` / `SCUZZ_TESTRT=1` for clock/random/FS/network/console in app binaries
 - Put non-determinism behind blessed `IO`; keep View construction pure

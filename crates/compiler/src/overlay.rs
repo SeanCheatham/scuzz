@@ -225,7 +225,7 @@ fn check_driver_def(live: &Program, d: &FunDef, label: &str) -> Result<(), Overl
     Ok(())
 }
 
-fn expr_has_law(e: &Expr) -> bool {
+pub fn expr_has_law(e: &Expr) -> bool {
     match &e.kind {
         ExprKind::Call { callee, args } => {
             callee.starts_with("Law.") || args.iter().any(expr_has_law)
@@ -334,6 +334,399 @@ pub fn residualize_laws(program: &mut Program, law_names: &[String]) {
         name: program.main.name.clone(),
         body,
     };
+}
+
+/// Rewrite calls and record construction so `where` predicates become `Law.check`
+/// at the use site. Live builds skip this.
+pub fn residualize_refinements(program: &mut Program) {
+    let defs = program.defs.clone();
+    let enums = program.enums.clone();
+    for d in &mut program.defs {
+        d.body = residualize_expr(
+            std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)),
+            &defs,
+            &enums,
+        );
+    }
+    program.main.body = residualize_expr(
+        std::mem::replace(&mut program.main.body, Expr::dummy(ExprKind::Unit)),
+        &defs,
+        &enums,
+    );
+}
+
+fn callee_base(callee: &str) -> &str {
+    callee.rsplit('.').next().unwrap_or(callee)
+}
+
+fn find_def<'a>(defs: &'a [FunDef], callee: &str) -> Option<&'a FunDef> {
+    defs.iter().find(|d| {
+        d.name == callee || (!d.module.is_empty() && format!("{}.{}", d.module, d.name) == callee)
+    })
+}
+
+fn find_record<'a>(
+    enums: &'a [crate::ast::EnumDef],
+    callee: &str,
+) -> Option<&'a crate::ast::EnumDef> {
+    enums.iter().find(|e| {
+        e.is_record
+            && (e.name == callee
+                || (!e.module.is_empty() && format!("{}.{}", e.module, e.name) == callee)
+                || callee_base(callee) == e.name)
+    })
+}
+
+fn law_check(name: String, pred: Expr, value: Expr) -> Expr {
+    Expr::dummy(ExprKind::Call {
+        callee: "Law.check".into(),
+        args: vec![Expr::dummy(ExprKind::StrLit(name)), pred, value],
+    })
+}
+
+fn wrap_refined(
+    label: &str,
+    names: &[(String, Option<Expr>)],
+    args: Vec<Expr>,
+    make_inner: impl FnOnce(Vec<Expr>) -> Expr,
+) -> Expr {
+    if names.iter().all(|(_, r)| r.is_none()) || names.len() != args.len() {
+        return make_inner(args);
+    }
+    let checked: Vec<Expr> = names
+        .iter()
+        .map(|(n, rfn)| {
+            let var = Expr::dummy(ExprKind::Var(n.clone()));
+            match rfn {
+                Some(pred) => law_check(format!("{label}.{n}"), pred.clone(), var),
+                None => var,
+            }
+        })
+        .collect();
+    let mut body = make_inner(checked);
+    let span = body.span.clone();
+    for ((n, _), arg) in names.iter().zip(args).rev() {
+        body = Expr::new(
+            ExprKind::Let {
+                name: n.clone(),
+                value: Box::new(arg),
+                body: Box::new(body),
+            },
+            span.clone(),
+        );
+    }
+    body
+}
+
+fn residualize_call(
+    callee: String,
+    args: Vec<Expr>,
+    span: crate::span::Span,
+    defs: &[FunDef],
+    enums: &[crate::ast::EnumDef],
+) -> Expr {
+    if let Some(d) = find_def(defs, &callee) {
+        if d.params.iter().any(|p| p.rfn.is_some()) {
+            let names: Vec<_> = d
+                .params
+                .iter()
+                .map(|p| (p.name.clone(), p.rfn.clone()))
+                .collect();
+            let c = callee.clone();
+            let sp = span.clone();
+            return wrap_refined(&d.name, &names, args, move |a| {
+                Expr::new(ExprKind::Call { callee: c, args: a }, sp)
+            });
+        }
+    }
+    if let Some(en) = find_record(enums, &callee) {
+        let c = &en.cases[0];
+        if c.has_rfns() {
+            let names: Vec<_> = c
+                .fields
+                .iter()
+                .enumerate()
+                .map(|(i, (n, _))| (n.clone(), c.field_rfn(i).cloned()))
+                .collect();
+            let call = callee.clone();
+            let sp = span.clone();
+            return wrap_refined(&en.name, &names, args, move |a| {
+                Expr::new(
+                    ExprKind::Call {
+                        callee: call,
+                        args: a,
+                    },
+                    sp,
+                )
+            });
+        }
+    }
+    Expr::new(ExprKind::Call { callee, args }, span)
+}
+
+fn residualize_adt(
+    enum_name: String,
+    case_name: String,
+    args: Vec<Expr>,
+    type_args: Vec<Type>,
+    span: crate::span::Span,
+    enums: &[crate::ast::EnumDef],
+) -> Expr {
+    let Some(en) = enums.iter().find(|e| {
+        e.name == enum_name
+            || (!e.module.is_empty() && format!("{}.{}", e.module, e.name) == enum_name)
+    }) else {
+        return Expr::new(
+            ExprKind::AdtConstruct {
+                enum_name,
+                case_name,
+                args,
+                type_args,
+            },
+            span,
+        );
+    };
+    let Some(c) = en.cases.iter().find(|c| c.name == case_name) else {
+        return Expr::new(
+            ExprKind::AdtConstruct {
+                enum_name,
+                case_name,
+                args,
+                type_args,
+            },
+            span,
+        );
+    };
+    if !c.has_rfns() {
+        return Expr::new(
+            ExprKind::AdtConstruct {
+                enum_name,
+                case_name,
+                args,
+                type_args,
+            },
+            span,
+        );
+    }
+    let names: Vec<_> = c
+        .fields
+        .iter()
+        .enumerate()
+        .map(|(i, (n, _))| (n.clone(), c.field_rfn(i).cloned()))
+        .collect();
+    let ename = enum_name.clone();
+    let cname = case_name.clone();
+    let targs = type_args.clone();
+    let sp = span.clone();
+    wrap_refined(&en.name, &names, args, move |a| {
+        Expr::new(
+            ExprKind::AdtConstruct {
+                enum_name: ename,
+                case_name: cname,
+                args: a,
+                type_args: targs,
+            },
+            sp,
+        )
+    })
+}
+
+fn residualize_expr(expr: Expr, defs: &[FunDef], enums: &[crate::ast::EnumDef]) -> Expr {
+    let span = expr.span.clone();
+    match expr.kind {
+        ExprKind::Call { callee, args } => {
+            let args = args
+                .into_iter()
+                .map(|a| residualize_expr(a, defs, enums))
+                .collect();
+            residualize_call(callee, args, span, defs, enums)
+        }
+        ExprKind::AdtConstruct {
+            enum_name,
+            case_name,
+            args,
+            type_args,
+        } => {
+            let args = args
+                .into_iter()
+                .map(|a| residualize_expr(a, defs, enums))
+                .collect();
+            residualize_adt(enum_name, case_name, args, type_args, span, enums)
+        }
+        ExprKind::IoPrintln(x) => Expr::new(
+            ExprKind::IoPrintln(Box::new(residualize_expr(*x, defs, enums))),
+            span,
+        ),
+        ExprKind::IoSleep(x) => Expr::new(
+            ExprKind::IoSleep(Box::new(residualize_expr(*x, defs, enums))),
+            span,
+        ),
+        ExprKind::IoFail(x) => Expr::new(
+            ExprKind::IoFail(Box::new(residualize_expr(*x, defs, enums))),
+            span,
+        ),
+        ExprKind::IoPure(x) => Expr::new(
+            ExprKind::IoPure(Box::new(residualize_expr(*x, defs, enums))),
+            span,
+        ),
+        ExprKind::Attempt { inner } => Expr::new(
+            ExprKind::Attempt {
+                inner: Box::new(residualize_expr(*inner, defs, enums)),
+            },
+            span,
+        ),
+        ExprKind::Field { base, field } => Expr::new(
+            ExprKind::Field {
+                base: Box::new(residualize_expr(*base, defs, enums)),
+                field,
+            },
+            span,
+        ),
+        ExprKind::Lambda { param, body } => Expr::new(
+            ExprKind::Lambda {
+                param,
+                body: Box::new(residualize_expr(*body, defs, enums)),
+            },
+            span,
+        ),
+        ExprKind::FlatMap { inner, param, body } => Expr::new(
+            ExprKind::FlatMap {
+                inner: Box::new(residualize_expr(*inner, defs, enums)),
+                param,
+                body: Box::new(residualize_expr(*body, defs, enums)),
+            },
+            span,
+        ),
+        ExprKind::HandleErrorWith { inner, body } => Expr::new(
+            ExprKind::HandleErrorWith {
+                inner: Box::new(residualize_expr(*inner, defs, enums)),
+                body: Box::new(residualize_expr(*body, defs, enums)),
+            },
+            span,
+        ),
+        ExprKind::Let { name, value, body } => Expr::new(
+            ExprKind::Let {
+                name,
+                value: Box::new(residualize_expr(*value, defs, enums)),
+                body: Box::new(residualize_expr(*body, defs, enums)),
+            },
+            span,
+        ),
+        ExprKind::IoEnsure { inner, finalizer } => Expr::new(
+            ExprKind::IoEnsure {
+                inner: Box::new(residualize_expr(*inner, defs, enums)),
+                finalizer: Box::new(residualize_expr(*finalizer, defs, enums)),
+            },
+            span,
+        ),
+        ExprKind::IoRace { left, right } => Expr::new(
+            ExprKind::IoRace {
+                left: Box::new(residualize_expr(*left, defs, enums)),
+                right: Box::new(residualize_expr(*right, defs, enums)),
+            },
+            span,
+        ),
+        ExprKind::IoBoth { left, right } => Expr::new(
+            ExprKind::IoBoth {
+                left: Box::new(residualize_expr(*left, defs, enums)),
+                right: Box::new(residualize_expr(*right, defs, enums)),
+            },
+            span,
+        ),
+        ExprKind::Binary { op, left, right } => Expr::new(
+            ExprKind::Binary {
+                op,
+                left: Box::new(residualize_expr(*left, defs, enums)),
+                right: Box::new(residualize_expr(*right, defs, enums)),
+            },
+            span,
+        ),
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } => Expr::new(
+            ExprKind::If {
+                cond: Box::new(residualize_expr(*cond, defs, enums)),
+                then_branch: Box::new(residualize_expr(*then_branch, defs, enums)),
+                else_branch: Box::new(residualize_expr(*else_branch, defs, enums)),
+            },
+            span,
+        ),
+        ExprKind::For { binders, body } => Expr::new(
+            ExprKind::For {
+                binders: binders
+                    .into_iter()
+                    .map(|b| match b {
+                        crate::ast::ForBinder::Eq { name, value } => crate::ast::ForBinder::Eq {
+                            name,
+                            value: residualize_expr(value, defs, enums),
+                        },
+                        crate::ast::ForBinder::Draw { name, value } => {
+                            crate::ast::ForBinder::Draw {
+                                name,
+                                value: residualize_expr(value, defs, enums),
+                            }
+                        }
+                    })
+                    .collect(),
+                body: Box::new(residualize_expr(*body, defs, enums)),
+            },
+            span,
+        ),
+        ExprKind::Match { scrutinee, arms } => Expr::new(
+            ExprKind::Match {
+                scrutinee: Box::new(residualize_expr(*scrutinee, defs, enums)),
+                arms: arms
+                    .into_iter()
+                    .map(|a| crate::ast::MatchArm {
+                        pattern: a.pattern,
+                        body: residualize_expr(a.body, defs, enums),
+                    })
+                    .collect(),
+            },
+            span,
+        ),
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+        } => Expr::new(
+            ExprKind::MethodCall {
+                receiver: Box::new(residualize_expr(*receiver, defs, enums)),
+                method,
+                args: args
+                    .into_iter()
+                    .map(|a| residualize_expr(a, defs, enums))
+                    .collect(),
+            },
+            span,
+        ),
+        ExprKind::ListLit { elems } => Expr::new(
+            ExprKind::ListLit {
+                elems: elems
+                    .into_iter()
+                    .map(|a| residualize_expr(a, defs, enums))
+                    .collect(),
+            },
+            span,
+        ),
+        ExprKind::Interpolate { parts } => Expr::new(
+            ExprKind::Interpolate {
+                parts: parts
+                    .into_iter()
+                    .map(|p| match p {
+                        crate::ast::InterpPart::Lit(s) => crate::ast::InterpPart::Lit(s),
+                        crate::ast::InterpPart::Expr(e) => {
+                            crate::ast::InterpPart::Expr(residualize_expr(e, defs, enums))
+                        }
+                    })
+                    .collect(),
+            },
+            span,
+        ),
+        other => Expr::new(other, span),
+    }
 }
 
 /// True when `path` is a stem-paired `*.scuzz_sim` or `*.scuzz_drivers` overlay.
@@ -465,5 +858,37 @@ mod tests {
         }];
         let err = apply_overlays(live, &overlays).unwrap_err();
         assert!(err.to_string().contains("must not call Law"));
+    }
+
+    #[test]
+    fn residualize_param_where_at_call() {
+        let mut prog = parse_sources(&[(
+            "Main.scuzz".into(),
+            "def note(n: Int where n >= 0): Unit = ()\n@main def main: IO[Unit] = IO.pure(note(1))\n"
+                .into(),
+        )])
+        .unwrap();
+        residualize_refinements(&mut prog);
+        let src = format!("{:?}", prog.main.body.kind);
+        assert!(src.contains("Law.check") || matches!(prog.main.body.kind, ExprKind::Let { .. }));
+        match &prog.main.body.kind {
+            ExprKind::IoPure(inner) => match &inner.kind {
+                ExprKind::Let { name, body, .. } => {
+                    assert_eq!(name, "n");
+                    match &body.kind {
+                        ExprKind::Call { callee, args } => {
+                            assert_eq!(callee, "note");
+                            match &args[0].kind {
+                                ExprKind::Call { callee, .. } => assert_eq!(callee, "Law.check"),
+                                other => panic!("expected Law.check arg, got {other:?}"),
+                            }
+                        }
+                        other => panic!("expected call, got {other:?}"),
+                    }
+                }
+                other => panic!("expected let, got {other:?}"),
+            },
+            other => panic!("expected IO.pure, got {other:?}"),
+        }
     }
 }

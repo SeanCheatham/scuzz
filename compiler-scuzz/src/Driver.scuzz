@@ -174,6 +174,121 @@ def residualizeLaws(prog: Prog, lawNames: List): Prog =
 def residualizeMain(body: Expr, lawNames: List): Expr =
   if (List.isEmpty(lawNames) == 1) body else residualizeMain(wrapLawAssert(body, List.head(lawNames)), List.tail(lawNames))
 
+def residualizeRefinements(prog: Prog): Prog =
+  setProgMain(setProgDefs(prog, residualizeDefs(progDefs(prog), progDefs(prog), progEnums(prog), List.empty())), residualizeExpr(progMain(prog), progDefs(prog), progEnums(prog)))
+
+def residualizeDefs(defs: List, all: List, enums: List, acc: List): List =
+  if (List.isEmpty(defs) == 1) List.reverse(acc) else residualizeDefs(List.tail(defs), all, enums, List.cons(setDefBody(List.head(defs), residualizeExpr(defBody(List.head(defs)), all, enums)), acc))
+
+def paramsHaveRfn(params: List): Int =
+  if (List.isEmpty(params) == 1) 0 else if (List.isEmpty(paramRfn(List.head(params))) == 0) 1 else paramsHaveRfn(List.tail(params))
+
+def fieldsHaveRfn(fields: List): Int =
+  if (List.isEmpty(fields) == 1) 0 else if (List.isEmpty(fieldRfn(List.head(fields))) == 0) 1 else fieldsHaveRfn(List.tail(fields))
+
+def findDefByCallee(defs: List, callee: String): List =
+  if (List.isEmpty(defs) == 1) List.empty() else if (streq(defName(List.head(defs)), callee) == 1) List.cons(List.head(defs), List.empty()) else if (streq(qualKey(defModule(List.head(defs)), defName(List.head(defs))), callee) == 1) List.cons(List.head(defs), List.empty()) else findDefByCallee(List.tail(defs), callee)
+
+def findRecordByCallee(enums: List, callee: String): List =
+  if (List.isEmpty(enums) == 1) List.empty() else if (enumIsRecord(List.head(enums)) == 0) findRecordByCallee(List.tail(enums), callee) else if (streq(enumName(List.head(enums)), callee) == 1) List.cons(List.head(enums), List.empty()) else if (streq(qualKey(enumModule(List.head(enums)), enumName(List.head(enums))), callee) == 1) List.cons(List.head(enums), List.empty()) else findRecordByCallee(List.tail(enums), callee)
+
+def lawCheck(name: String, pred: Expr, value: Expr): Expr =
+  Expr.Call("Law.check", List.cons(Expr.StrLit(name, dummySpan()), List.cons(pred, List.cons(value, List.empty()))), dummySpan())
+
+def checkedParamArg(label: String, p: Param): Expr =
+  if (List.isEmpty(paramRfn(p)) == 1) Expr.Var(paramName(p), dummySpan()) else lawCheck(str3(label, ".", paramName(p)), List.head(paramRfn(p)), Expr.Var(paramName(p), dummySpan()))
+
+def checkedParamArgs(label: String, params: List, acc: List): List =
+  if (List.isEmpty(params) == 1) List.reverse(acc) else checkedParamArgs(label, List.tail(params), List.cons(checkedParamArg(label, List.head(params)), acc))
+
+def wrapParamLets(params: List, args: List, body: Expr): Expr =
+  if (List.isEmpty(params) == 1) body else Expr.Let(paramName(List.head(params)), List.head(args), wrapParamLets(List.tail(params), List.tail(args), body), dummySpan())
+
+def refinedDefCall(callee: String, d: Def, args: List, span: Span): Expr =
+  if (paramsHaveRfn(defParams(d)) == 0) Expr.Call(callee, args, span) else if (List.len(defParams(d)) != List.len(args)) Expr.Call(callee, args, span) else wrapParamLets(defParams(d), args, Expr.Call(callee, checkedParamArgs(defName(d), defParams(d), List.empty()), span))
+
+def checkedFieldArg(label: String, f: EnumField): Expr =
+  if (List.isEmpty(fieldRfn(f)) == 1) Expr.Var(fieldName(f), dummySpan()) else lawCheck(str3(label, ".", fieldName(f)), List.head(fieldRfn(f)), Expr.Var(fieldName(f), dummySpan()))
+
+def checkedFieldArgs(label: String, fields: List, acc: List): List =
+  if (List.isEmpty(fields) == 1) List.reverse(acc) else checkedFieldArgs(label, List.tail(fields), List.cons(checkedFieldArg(label, List.head(fields)), acc))
+
+def wrapFieldLets(fields: List, args: List, body: Expr): Expr =
+  if (List.isEmpty(fields) == 1) body else Expr.Let(fieldName(List.head(fields)), List.head(args), wrapFieldLets(List.tail(fields), List.tail(args), body), dummySpan())
+
+def refinedRecordCall(callee: String, en: EnumDef, args: List, span: Span): Expr =
+  for {
+    fields = caseFields(List.head(enumCases(en)))
+  } yield if (fieldsHaveRfn(fields) == 0) Expr.Call(callee, args, span) else if (List.len(fields) != List.len(args)) Expr.Call(callee, args, span) else wrapFieldLets(fields, args, Expr.Call(callee, checkedFieldArgs(enumName(en), fields, List.empty()), span))
+
+def residualizeCall(callee: String, args: List, span: Span, defs: List, enums: List): Expr =
+  residualizeCallHit(callee, args, span, findDefByCallee(defs, callee), findRecordByCallee(enums, callee))
+
+def residualizeCallHit(callee: String, args: List, span: Span, defs: List, recs: List): Expr =
+  if (List.isEmpty(defs) == 0) refinedDefCall(callee, List.head(defs), args, span) else if (List.isEmpty(recs) == 0) refinedRecordCall(callee, List.head(recs), args, span) else Expr.Call(callee, args, span)
+
+def residualizeAdt(enumName: String, caseName: String, args: List, typeArgs: List, span: Span, enums: List): Expr =
+  residualizeAdtHit(enumName, caseName, args, typeArgs, span, findRecordByCallee(enums, enumName))
+
+def residualizeAdtHit(enumName: String, caseName: String, args: List, typeArgs: List, span: Span, recs: List): Expr =
+  if (List.isEmpty(recs) == 1) Expr.Adt(enumName, caseName, args, typeArgs, span) else residualizeAdtRecord(enumName, caseName, args, typeArgs, span, List.head(recs))
+
+def residualizeAdtRecord(enN: String, caseN: String, args: List, typeArgs: List, span: Span, en: EnumDef): Expr =
+  for {
+    fields = caseFields(List.head(enumCases(en)))
+  } yield if (fieldsHaveRfn(fields) == 0) Expr.Adt(enN, caseN, args, typeArgs, span) else if (List.len(fields) != List.len(args)) Expr.Adt(enN, caseN, args, typeArgs, span) else wrapFieldLets(fields, args, Expr.Adt(enN, caseN, checkedFieldArgs(enumName(en), fields, List.empty()), typeArgs, span))
+
+def residualizeExpr(e: Expr, defs: List, enums: List): Expr =
+  e match {
+    case Expr.Call(callee, args, span) => residualizeCall(callee, residualizeExprList(args, defs, enums, List.empty()), span, defs, enums)
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => residualizeAdt(enumName, caseName, residualizeExprList(args, defs, enums, List.empty()), typeArgs, span, enums)
+    case Expr.Let(name, value, body, span) => Expr.Let(name, residualizeExpr(value, defs, enums), residualizeExpr(body, defs, enums), span)
+    case Expr.FlatMap(inner, param, body, span) => Expr.FlatMap(residualizeExpr(inner, defs, enums), param, residualizeExpr(body, defs, enums), span)
+    case Expr.Handle(inner, body, span) => Expr.Handle(residualizeExpr(inner, defs, enums), residualizeExpr(body, defs, enums), span)
+    case Expr.If(cond, thenB, elseB, span) => Expr.If(residualizeExpr(cond, defs, enums), residualizeExpr(thenB, defs, enums), residualizeExpr(elseB, defs, enums), span)
+    case Expr.BinOp(op, left, right, span) => Expr.BinOp(op, residualizeExpr(left, defs, enums), residualizeExpr(right, defs, enums), span)
+    case Expr.Lambda(param, body, span) => Expr.Lambda(param, residualizeExpr(body, defs, enums), span)
+    case Expr.Match(scrut, arms, span) => Expr.Match(residualizeExpr(scrut, defs, enums), residualizeArms(arms, defs, enums, List.empty()), span)
+    case Expr.For(binders, body, span) => Expr.For(residualizeBinders(binders, defs, enums, List.empty()), residualizeExpr(body, defs, enums), span)
+    case Expr.ListLit(elems, span) => Expr.ListLit(residualizeExprList(elems, defs, enums, List.empty()), span)
+    case Expr.Interp(parts, span) => Expr.Interp(residualizeParts(parts, defs, enums, List.empty()), span)
+    case Expr.MethodCall(receiver, method, args, span) => Expr.MethodCall(residualizeExpr(receiver, defs, enums), method, residualizeExprList(args, defs, enums, List.empty()), span)
+    case Expr.Field(base, field, span) => Expr.Field(residualizeExpr(base, defs, enums), field, span)
+    case Expr.Println(arg, span) => Expr.Println(residualizeExpr(arg, defs, enums), span)
+    case Expr.Fail(arg, span) => Expr.Fail(residualizeExpr(arg, defs, enums), span)
+    case Expr.Pure(arg, span) => Expr.Pure(residualizeExpr(arg, defs, enums), span)
+    case Expr.Sleep(arg, span) => Expr.Sleep(residualizeExpr(arg, defs, enums), span)
+    case Expr.Attempt(inner, span) => Expr.Attempt(residualizeExpr(inner, defs, enums), span)
+    case Expr.IoRace(left, right, span) => Expr.IoRace(residualizeExpr(left, defs, enums), residualizeExpr(right, defs, enums), span)
+    case Expr.IoBoth(left, right, span) => Expr.IoBoth(residualizeExpr(left, defs, enums), residualizeExpr(right, defs, enums), span)
+    case Expr.IoEnsure(inner, finalizer, span) => Expr.IoEnsure(residualizeExpr(inner, defs, enums), residualizeExpr(finalizer, defs, enums), span)
+    case _ => e
+  }
+
+def residualizeExprList(xs: List, defs: List, enums: List, acc: List): List =
+  if (List.isEmpty(xs) == 1) List.reverse(acc) else residualizeExprList(List.tail(xs), defs, enums, List.cons(residualizeExpr(List.head(xs), defs, enums), acc))
+
+def residualizeArms(arms: List, defs: List, enums: List, acc: List): List =
+  if (List.isEmpty(arms) == 1) List.reverse(acc) else residualizeArms(List.tail(arms), defs, enums, List.cons(setArmBody(List.head(arms), residualizeExpr(armBody(List.head(arms)), defs, enums)), acc))
+
+def residualizeBinders(binders: List, defs: List, enums: List, acc: List): List =
+  if (List.isEmpty(binders) == 1) List.reverse(acc) else residualizeBinders(List.tail(binders), defs, enums, List.cons(residualizeBinder(List.head(binders), defs, enums), acc))
+
+def residualizeBinder(b: ForBinder, defs: List, enums: List): ForBinder =
+  b match {
+    case ForBinder.Eq(name, value) => ForBinder.Eq(name, residualizeExpr(value, defs, enums))
+    case ForBinder.Draw(name, value) => ForBinder.Draw(name, residualizeExpr(value, defs, enums))
+  }
+
+def residualizeParts(parts: List, defs: List, enums: List, acc: List): List =
+  if (List.isEmpty(parts) == 1) List.reverse(acc) else residualizeParts(List.tail(parts), defs, enums, List.cons(residualizePart(List.head(parts), defs, enums), acc))
+
+def residualizePart(part: InterpPart, defs: List, enums: List): InterpPart =
+  part match {
+    case InterpPart.Lit(text) => part
+    case InterpPart.Hole(expr) => InterpPart.Hole(residualizeExpr(expr, defs, enums))
+  }
+
 def checkSimParams(lp: List, sp: List, name: String, label: String, i: Int): IO[Unit] =
   if (i >= List.len(lp)) IO.pure(()) else if (tyEq(paramTy(List.at(lp, i)), paramTy(List.at(sp, i))) == 0) IO.fail(str4(label, ": sim def `", name, str3("` param `", paramName(List.at(sp, i)), "` type mismatch"))) else checkSimParams(lp, sp, name, label, i + 1)
 
@@ -406,7 +521,7 @@ def filterOverlays(ovs: List, kind: String, acc: List): List =
 
 def prepareVerifyProg(prog0: Prog, overlays: List): IO[Prog] =
   applyOverlays(prog0, overlays).flatMap(p1 =>
-    checkLawDefs(progDefs(p1)).flatMap(_ => IO.pure(residualizeLaws(p1, collectLawNames(progDefs(p1), List.empty()))))
+    checkLawDefs(progDefs(p1)).flatMap(_ => IO.pure(residualizeRefinements(residualizeLaws(p1, collectLawNames(progDefs(p1), List.empty())))))
   )
 
 def compileProject(projectDir: String, outDir: String): IO[Unit] =

@@ -3,7 +3,7 @@ use crate::lower::lower_program;
 use crate::manifest::{load_manifest, Manifest};
 use crate::overlay::{
     apply_overlays, collect_law_names, driver_table_text, erase_laws, overlay_kind_from_path,
-    residualize_laws, OverlaySource,
+    residualize_laws, residualize_refinements, OverlaySource,
 };
 use crate::parser::parse_sources;
 use crate::typ::typecheck;
@@ -115,6 +115,7 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
     if opts.verify {
         let law_names = collect_law_names(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
         residualize_laws(&mut program, &law_names);
+        residualize_refinements(&mut program);
         program.law_names = law_names;
     } else {
         erase_laws(&mut program);

@@ -73,7 +73,8 @@ fn pretty_enum(e: &EnumDef) -> String {
         let parts: Vec<String> = c
             .fields
             .iter()
-            .map(|(n, t)| format!("{n}: {}", pretty_type(t)))
+            .enumerate()
+            .map(|(i, (n, t))| pretty_binding(n, t, c.field_rfn(i)))
             .collect();
         return format!("record {}{tparams}({})\n", e.name, parts.join(", "));
     }
@@ -89,7 +90,8 @@ fn pretty_enum(e: &EnumDef) -> String {
             let parts: Vec<String> = c
                 .fields
                 .iter()
-                .map(|(n, t)| format!("{n}: {}", pretty_type(t)))
+                .enumerate()
+                .map(|(i, (n, t))| pretty_binding(n, t, c.field_rfn(i)))
                 .collect();
             out.push('(');
             out.push_str(&parts.join(", "));
@@ -109,7 +111,7 @@ fn pretty_trait(t: &TraitDef) -> String {
         let params: Vec<String> = m
             .params
             .iter()
-            .map(|p| format!("{}: {}", p.name, pretty_type(&p.ty)))
+            .map(|p| pretty_binding(&p.name, &p.ty, p.rfn.as_ref()))
             .collect();
         out.push_str(&format!(
             "  def {}({}): {}\n",
@@ -132,7 +134,7 @@ fn pretty_impl(im: &ImplDef) -> String {
         let params: Vec<String> = m
             .params
             .iter()
-            .map(|p| format!("{}: {}", p.name, pretty_type(&p.ty)))
+            .map(|p| pretty_binding(&p.name, &p.ty, p.rfn.as_ref()))
             .collect();
         out.push_str(&format!(
             "  def {}({}): {} =\n{}",
@@ -144,6 +146,18 @@ fn pretty_impl(im: &ImplDef) -> String {
         out.push('\n');
     }
     out
+}
+
+fn pretty_binding(name: &str, ty: &Type, rfn: Option<&Expr>) -> String {
+    match rfn {
+        Some(e) => format!(
+            "{}: {} where {}",
+            name,
+            pretty_type(ty),
+            pretty_expr(e, 0).trim()
+        ),
+        None => format!("{}: {}", name, pretty_type(ty)),
+    }
 }
 
 fn pretty_type(t: &Type) -> String {
@@ -175,7 +189,7 @@ fn pretty_def(d: &FunDef) -> String {
     let params: Vec<String> = d
         .params
         .iter()
-        .map(|p| format!("{}: {}", p.name, pretty_type(&p.ty)))
+        .map(|p| pretty_binding(&p.name, &p.ty, p.rfn.as_ref()))
         .collect();
     let vis = if d.is_private { "private " } else { "" };
     let tparams = if d.type_params.is_empty() {
@@ -497,6 +511,20 @@ law always: Bool = 1 == 1
         let out = format_source(src).unwrap();
         assert!(out.contains("law always: Bool ="));
         assert!(!out.contains("def always"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_where() {
+        let src = r#"
+def note(n: Int where n >= 0): Unit = ()
+record Point(x: Int where x >= 0, y: Int)
+@main def main: IO[Unit] = IO.println("ok")
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("n: Int where n >= 0"));
+        assert!(out.contains("x: Int where x >= 0"));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

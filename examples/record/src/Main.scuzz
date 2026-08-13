@@ -1,4 +1,4 @@
-record Point(x: Int, y: Int)
+record Point(x: Int where x >= 0, y: Int)
 
 def sum(p: Point): Int =
   p.x + p.y

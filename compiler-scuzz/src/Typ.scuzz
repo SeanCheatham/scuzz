@@ -2,12 +2,17 @@ package scuzz.compiler
 
 def fieldTy(f: EnumField): Type =
   f match {
-    case EnumField.Field(name, ty) => ty
+    case EnumField.Field(name, ty, rfn) => ty
   }
 
 def paramTy(p: Param): Type =
   p match {
-    case Param(name, ty) => ty
+    case Param(name, ty, rfn) => ty
+  }
+
+def paramRfn(p: Param): List =
+  p match {
+    case Param(name, ty, rfn) => rfn
   }
 
 def declRet(d: Def): Type =
@@ -138,7 +143,7 @@ def expandOneImplMethods(module: String, traitName: String, forType: String, met
 
 def expandOneImplMethod(module: String, traitName: String, forType: String, m: ImplMethod): Def =
   m match {
-    case ImplMethod.Method(name, params, ret, body) => Def.Def(implMethodName(traitName, forType, name), List.cons(Param.Param("self", Type.Adt(forType)), params), ret, body, module, 0, List.empty(), 0)
+    case ImplMethod.Method(name, params, ret, body) => Def.Def(implMethodName(traitName, forType, name), List.cons(Param.Param("self", Type.Adt(forType), List.empty()), params), ret, body, module, 0, List.empty(), 0)
   }
 
 def importDupKey(im: Import): String =
@@ -168,9 +173,22 @@ def typecheckDefsThenMainOne(d: Def, rest: List, enums: List, allDefs: List, imp
   for {
     tparams = defTypeParams(d)
     env = bindParams(defParams(d), enums, imports, defModule(d), tparams, List.empty())
+    rfnR = checkParamRfns(defParams(d), enums, mkFuns(defModule(d), allDefs, imports), env)
     bodyR = inferExpr(defBody(d), enums, mkFuns(defModule(d), allDefs, imports), env)
     ret = resolveTypeIn(declRet(d), enums, imports, defModule(d), tparams)
-  } yield if (tyIsOk(bodyR) == 0) bodyR else if (typesCompat(tyVal(bodyR), ret) == 0) tyErr(str5("def ", defName(d), " body ", tyShow(tyVal(bodyR)), str3(" does not match declared ", tyShow(ret), ""))) else typecheckDefsThenMain(rest, enums, allDefs, imports, main, mainMod)
+  } yield if (tyIsOk(rfnR) == 0) rfnR else if (tyIsOk(bodyR) == 0) bodyR else if (typesCompat(tyVal(bodyR), ret) == 0) tyErr(str5("def ", defName(d), " body ", tyShow(tyVal(bodyR)), str3(" does not match declared ", tyShow(ret), ""))) else typecheckDefsThenMain(rest, enums, allDefs, imports, main, mainMod)
+
+def checkParamRfns(params: List, enums: List, funs: List, env: List): TyRes =
+  if (List.isEmpty(params) == 1) tyOk(Type.Bool) else checkParamRfnOne(List.head(params), List.tail(params), enums, funs, env)
+
+def checkParamRfnOne(p: Param, rest: List, enums: List, funs: List, env: List): TyRes =
+  if (List.isEmpty(paramRfn(p)) == 1) checkParamRfns(rest, enums, funs, env) else checkParamRfnExpr(p, rest, enums, funs, env, List.head(paramRfn(p)))
+
+def checkParamRfnExpr(p: Param, rest: List, enums: List, funs: List, env: List, pred: Expr): TyRes =
+  if (exprHasLaw(pred) == 1) tyErr(str3("where on `", paramName(p), "` must not call Law.*")) else checkParamRfnTy(p, rest, enums, funs, env, inferExpr(pred, enums, funs, env))
+
+def checkParamRfnTy(p: Param, rest: List, enums: List, funs: List, env: List, r: TyRes): TyRes =
+  if (tyIsOk(r) == 0) r else if (tyEq(tyVal(r), Type.Bool) == 1) checkParamRfns(rest, enums, funs, env) else if (tyEq(tyVal(r), Type.Int) == 1) checkParamRfns(rest, enums, funs, env) else tyErr(str3("where on `", paramName(p), "` must be Bool (or Int)"))
 
 def checkMainTy(r: TyRes): TyRes =
   if (tyIsOk(r) == 0) r else if (tyEq(tyVal(r), tyMkIo(Type.Unit)) == 1) tyOk(tyMkIo(Type.Unit)) else tyErr(str3("@main body must be IO[Unit], got ", tyShow(tyVal(r)), ""))
@@ -1471,7 +1489,7 @@ def appendMissingSpecs(defs: List, specs: List): List =
   if (List.isEmpty(specs) == 1) defs else if (findSpecByName(defs, defName(List.head(specs))) == 1) appendMissingSpecs(defs, List.tail(specs)) else appendMissingSpecs(List.cons(List.head(specs), defs), List.tail(specs))
 
 def specializeParams(params: List, enums: List, imports: List, mod: String, tparams: List, subst: List, acc: List): List =
-  if (List.isEmpty(params) == 1) List.reverse(acc) else specializeParams(List.tail(params), enums, imports, mod, tparams, subst, List.cons(Param.Param(paramName(List.head(params)), applySubst(resolveTypeIn(paramTy(List.head(params)), enums, imports, mod, tparams), subst)), acc))
+  if (List.isEmpty(params) == 1) List.reverse(acc) else specializeParams(List.tail(params), enums, imports, mod, tparams, subst, List.cons(Param.Param(paramName(List.head(params)), applySubst(resolveTypeIn(paramTy(List.head(params)), enums, imports, mod, tparams), subst), paramRfn(List.head(params))), acc))
 
 def elabPack(e: Expr, res: TyRes): List =
   List.cons(e, List.cons(res, List.empty()))
@@ -2004,7 +2022,7 @@ def specCloneFields(fields: List, enums: List, imports: List, enumMod: String, t
   if (List.isEmpty(fields) == 1) List.cons(List.reverse(acc), List.cons(extra, List.empty())) else for {
   f = List.head(fields)
   s = applySubst(resolveTypeIn(fieldTy(f), enums, imports, enumMod, tparams), subst)
-} yield specCloneFields(List.tail(fields), enums, imports, enumMod, tparams, subst, List.cons(EnumField.Field(fieldName(f), s), acc), collectAppsInType(s, extra))
+} yield specCloneFields(List.tail(fields), enums, imports, enumMod, tparams, subst, List.cons(EnumField.Field(fieldName(f), s, fieldRfn(f)), acc), collectAppsInType(s, extra))
 
 def specializeEnumsProg(prog: Prog): Prog =
   for {
@@ -2034,7 +2052,7 @@ def specConcretizeDef(d: Def, clones: List, enums: List, imports: List): Def =
   Def.Def(defName(d), specConcretizeParams(defParams(d), clones, enums, imports, defModule(d), List.empty()), concretizeType(resolveType(declRet(d), enums, imports, defModule(d)), clones), rewriteEnumRefs(defBody(d), clones), defModule(d), defIsPrivate(d), defTypeParams(d), defIsLaw(d))
 
 def specConcretizeParams(params: List, clones: List, enums: List, imports: List, mod: String, acc: List): List =
-  if (List.isEmpty(params) == 1) List.reverse(acc) else specConcretizeParams(List.tail(params), clones, enums, imports, mod, List.cons(Param.Param(paramName(List.head(params)), concretizeType(resolveType(paramTy(List.head(params)), enums, imports, mod), clones)), acc))
+  if (List.isEmpty(params) == 1) List.reverse(acc) else specConcretizeParams(List.tail(params), clones, enums, imports, mod, List.cons(Param.Param(paramName(List.head(params)), concretizeType(resolveType(paramTy(List.head(params)), enums, imports, mod), clones), paramRfn(List.head(params))), acc))
 
 def specConcretizeClones(cloneDefs: List, clones: List, acc: List): List =
   if (List.isEmpty(cloneDefs) == 1) List.reverse(acc) else specConcretizeClones(List.tail(cloneDefs), clones, List.cons(specConcretizeClone(List.head(cloneDefs), clones), acc))
@@ -2049,7 +2067,7 @@ def specConcretizeCases(cases: List, clones: List, acc: List): List =
   if (List.isEmpty(cases) == 1) List.reverse(acc) else specConcretizeCases(List.tail(cases), clones, List.cons(EnumCase.Case(caseName(List.head(cases)), specConcretizeFields(caseFields(List.head(cases)), clones, List.empty())), acc))
 
 def specConcretizeFields(fields: List, clones: List, acc: List): List =
-  if (List.isEmpty(fields) == 1) List.reverse(acc) else specConcretizeFields(List.tail(fields), clones, List.cons(EnumField.Field(fieldName(List.head(fields)), concretizeType(fieldTy(List.head(fields)), clones)), acc))
+  if (List.isEmpty(fields) == 1) List.reverse(acc) else specConcretizeFields(List.tail(fields), clones, List.cons(EnumField.Field(fieldName(List.head(fields)), concretizeType(fieldTy(List.head(fields)), clones), fieldRfn(List.head(fields))), acc))
 
 def concretizeType(ty: Type, clones: List): Type =
   ty match {

@@ -85,12 +85,17 @@ def caseFields(c: EnumCase): List =
 
 def fieldName(f: EnumField): String =
   f match {
-    case EnumField.Field(name, ty) => name
+    case EnumField.Field(name, ty, rfn) => name
   }
 
 def fieldType(f: EnumField): Type =
   f match {
-    case EnumField.Field(name, ty) => ty
+    case EnumField.Field(name, ty, rfn) => ty
+  }
+
+def fieldRfn(f: EnumField): List =
+  f match {
+    case EnumField.Field(name, ty, rfn) => rfn
   }
 
 def emitCtx(defs: List, tags: List, payloads: List, mod: String, imports: List): List =
@@ -172,6 +177,9 @@ def armBody(arm: MatchArm): Expr =
     case MatchArm.Arm(pat, body) => body
   }
 
+def setArmBody(arm: MatchArm, body: Expr): MatchArm =
+  MatchArm.Arm(armPat(arm), body)
+
 def findWildArm(arms: List): List =
   if (List.isEmpty(arms) == 1) List.empty() else findWildArmOne(List.head(arms), List.tail(arms))
 
@@ -229,17 +237,22 @@ def setDefModule(d: Def, mod: String): Def =
     case Def(name, params, ret, body, module, isPrivate, typeParams, isLaw) => Def.Def(name, params, ret, body, mod, isPrivate, typeParams, isLaw)
   }
 
+def setDefBody(d: Def, body: Expr): Def =
+  d match {
+    case Def(name, params, ret, old, module, isPrivate, typeParams, isLaw) => Def.Def(name, params, ret, body, module, isPrivate, typeParams, isLaw)
+  }
+
 def stampDefsModule(defs: List, mod: String): List =
   if (List.isEmpty(defs) == 1) List.empty() else List.cons(setDefModule(List.head(defs), mod), stampDefsModule(List.tail(defs), mod))
 
 def paramName(p: Param): String =
   p match {
-    case Param(name, ty) => name
+    case Param(name, ty, rfn) => name
   }
 
 def paramType(p: Param): Type =
   p match {
-    case Param(name, ty) => ty
+    case Param(name, ty, rfn) => ty
   }
 
 def funHit(d: Def): List =

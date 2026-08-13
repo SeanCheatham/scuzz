@@ -304,6 +304,7 @@ mod tests {
             cases: vec![EnumCase {
                 name: "X".into(),
                 fields: vec![],
+                field_rfns: vec![],
             }],
             is_record: false,
         }

@@ -182,6 +182,7 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
             let mut params = vec![Param {
                 name: "self".into(),
                 ty: Type::Adt(im.for_type.clone()),
+                rfn: None,
             }];
             params.extend(method.params.clone());
             program.defs.push(FunDef {
@@ -220,8 +221,30 @@ pub fn typecheck(program: &Program) -> Result<(), TypeError> {
         let id = crate::resolve::enum_id(&en.module, &en.name);
         for case in &en.cases {
             check_payload_fields(&id, en, case)?;
-            for (_fname, fty) in &case.fields {
+            for (i, (fname, fty)) in case.fields.iter().enumerate() {
                 resolve_type_in(fty, &enums, &en.module, &en.type_params)?;
+                if let Some(rfn) = case.field_rfn(i) {
+                    if crate::overlay::expr_has_law(rfn) {
+                        return Err(TypeError::Msg(format!(
+                            "where on `{}.{}` must not call Law.*",
+                            en.name, fname
+                        )));
+                    }
+                    let mut env: HashMap<String, Type> = HashMap::new();
+                    for (n, t) in &case.fields {
+                        env.insert(
+                            n.clone(),
+                            resolve_type_in(t, &enums, &en.module, &en.type_params)?,
+                        );
+                    }
+                    let rty = infer(rfn, &enums, &funs, &methods, &en.module, &mut env)?;
+                    if !matches!(rty, Type::Bool | Type::Int) {
+                        return Err(TypeError::Msg(format!(
+                            "where on `{}.{}` must be Bool (or Int), got {rty:?}",
+                            en.name, fname
+                        )));
+                    }
+                }
             }
         }
     }
@@ -232,6 +255,23 @@ pub fn typecheck(program: &Program) -> Result<(), TypeError> {
                 p.name.clone(),
                 resolve_type_in(&p.ty, &enums, &d.module, &d.type_params)?,
             );
+        }
+        for p in &d.params {
+            if let Some(rfn) = &p.rfn {
+                if crate::overlay::expr_has_law(rfn) {
+                    return Err(TypeError::At {
+                        msg: format!("where on `{}` must not call Law.*", p.name),
+                        span: rfn.span.clone(),
+                    });
+                }
+                let rty = infer(rfn, &enums, &funs, &methods, &d.module, &mut env)?;
+                if !matches!(rty, Type::Bool | Type::Int) {
+                    return Err(TypeError::At {
+                        msg: format!("where on `{}` must be Bool (or Int), got {rty:?}", p.name),
+                        span: rfn.span.clone(),
+                    });
+                }
+            }
         }
         let body_ty = infer(&d.body, &enums, &funs, &methods, &d.module, &mut env)?;
         let ret = resolve_type_in(&d.ret, &enums, &d.module, &d.type_params)?;
@@ -2158,6 +2198,7 @@ fn mono_expr(
                                 Ok(Param {
                                     name: p.name.clone(),
                                     ty: apply_subst(&ty, &subst),
+                                    rfn: p.rfn.clone(),
                                 })
                             })
                             .collect();
@@ -3873,6 +3914,7 @@ fn specialize_enums(mut program: Program) -> Result<Program, TypeError> {
             cases.push(crate::ast::EnumCase {
                 name: case.name.clone(),
                 fields,
+                field_rfns: case.field_rfns.clone(),
             });
         }
         clones.insert((id, args), clone_id);
@@ -4086,6 +4128,26 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Law.check / Law.sometimes should typecheck");
+    }
+
+    #[test]
+    fn typechecks_param_where() {
+        let src = r#"
+def note(n: Int where n >= 0): Unit = ()
+@main def main: IO[Unit] = IO.pure(note(1))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("param where should typecheck");
+    }
+
+    #[test]
+    fn rejects_non_bool_where() {
+        let src = r#"
+def note(n: Int where "x"): Unit = ()
+@main def main: IO[Unit] = IO.pure(note(1))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        assert!(typecheck(&p).is_err());
     }
 
     #[test]
