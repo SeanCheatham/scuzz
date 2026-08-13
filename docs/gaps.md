@@ -29,7 +29,6 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### Near-term (HUMANS alignment)
 
-- **Nested `View` only** — `View.addChild` is used by `examples/todo` (empty `View.column()` / `View.row()` then mutate). Product surface is nested constructors. Remove `addChild` from Stage 0 and self-host; rewrite todo.
 - **Hot reload and debugging tools** — HUMANS wants Headless + in-process reload + debug, especially for agents. Headless is a peer runtime today; `watch` only rebuilds. Do not document rebuild-as-reload.
 
 ### Residuals

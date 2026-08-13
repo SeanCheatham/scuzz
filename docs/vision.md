@@ -88,7 +88,7 @@ One failure channel: `SzError` (message + optional code) on `IO`. Ops: `flatMap`
 | **`View`** | Widget tree | Sync/pure `build` |
 | **`Ui` / `UiSession`** | `mount` / `pump` / `inject` / `snapshot` | Effectful (`UiRuntime`) |
 
-Headless is a **peer** of Window/Mobile, not a test-only shim — product runtime for agents and CI. Frame boundary is `pump`. World effects stay blessed `IO`; bridge into signals via `sz_ui_bridge_post_*`. No UI feature without a Headless path. Taps: `View.button(label, _ => …)` first-class lambdas. Prefer `Signal.list` + `View.each` (framework-owned list reconciliation at layout). Derived display: `Signal.map` + `View.bindText`. **View construction is nested and declarative** (`View.column(child, …)` / `View.row(…)` / `View.stack(…)`). `View.addChild` is not the product surface.
+Headless is a **peer** of Window/Mobile, not a test-only shim — product runtime for agents and CI. Frame boundary is `pump`. World effects stay blessed `IO`; bridge into signals via `sz_ui_bridge_post_*`. No UI feature without a Headless path. Taps: `View.button(label, _ => …)` first-class lambdas. Prefer `Signal.list` + `View.each` (framework rebuilds children at layout). Derived display: `Signal.map` + `View.bindText`. **View construction is nested and declarative** (`View.column(child, …)` / `View.row(…)` / `View.stack(…)`).
 
 ### IO apps vs Headless
 
@@ -108,7 +108,7 @@ Subset used by compiler sources and bootstrap examples. New features land in Sta
 - No `val` / statement blocks / `var` — expression dialect only.
 - `if` / `match`; literals incl. list `[a,b,c]` and `s"…"`
 - Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
-- Builtins: `Str.*`, `List.*`, Fs (`read` / `write` / `list` / `mkdirs` / `canonicalize`)/Sys (`args` / `readLine` / `exec` / `getenv`)/Clock/Random/Net (`httpGet` / `serveOnce`), `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Resource.make` / `Resource.use` (String payload), `Stream.emit` / `emits` / `eval` / `concat` / `evalMap` / `compileToList` / `drain` (String payload), `Signal.*` (incl. `Signal.map`), `View.*` (nested `View.column`/`row`/`stack` children only — no `addChild`; `View.each`, `View.bindText`, Column/Row `View.expanded`, `View.center`, `View.align`, `View.positioned`, `View.padding`, `View.sized`, `View.minSize`, `View.background`, `View.aspectRatio`, `View.fraction`), `Ui.run`, Theme/Color, `Law.signalInt` / `Law.a11yHas` / `Law.assert` (residual under TestRuntime).
+- Builtins: `Str.*`, `List.*`, Fs (`read` / `write` / `list` / `mkdirs` / `canonicalize`)/Sys (`args` / `readLine` / `exec` / `getenv`)/Clock/Random/Net (`httpGet` / `serveOnce`), `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Resource.make` / `Resource.use` (String payload), `Stream.emit` / `emits` / `eval` / `concat` / `evalMap` / `compileToList` / `drain` (String payload), `Signal.*` (incl. `Signal.map`), `View.*` (nested `View.column`/`row`/`stack` children only; `View.each`, `View.bindText`, Column/Row `View.expanded`, `View.center`, `View.align`, `View.positioned`, `View.padding`, `View.sized`, `View.minSize`, `View.background`, `View.aspectRatio`, `View.fraction`), `Ui.run`, Theme/Color, `Law.signalInt` / `Law.a11yHas` / `Law.assert` (residual under TestRuntime).
 - `IO` kit + `.flatMap` / `.handleErrorWith` / `.attempt`; lambdas `_ =>` / `name =>` for taps
 - No macros, no implicits, no HKT beyond `IO`, no null
 
@@ -220,7 +220,7 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ## Open work
 
-Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters. Near-term: drop `View.addChild`, in-process reload/debug.
+Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters. Near-term: in-process reload/debug.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features. UI is a primary path among CLI/server/desktop/mobile — not the only v0 bar.
 
@@ -240,6 +240,5 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-onl
 | Skia weight | pinned CPU prebuilt default; `sk_sw` opt-out (`SCUZZ_SKIA=sk_sw`) |
 | Window-only features | Headless peer rule |
 | Treating UI as the only product | UI is a primary path (Dart-shaped); CLI/server/desktop/mobile are peers; native binaries, not a VM |
-| Two View construction styles | Nested constructors only; remove `View.addChild` |
 | GC vs frame budget | `pump` boundary; measure |
 | Mobile packaging | Host Mobile peer first; device toolchains later |

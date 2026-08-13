@@ -2659,15 +2659,6 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
-        "View.addChild" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_add_child(ptr {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
         "View.showWhen" => {
             writeln!(
                 code,

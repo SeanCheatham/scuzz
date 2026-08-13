@@ -1568,10 +1568,6 @@ fn infer_call(
             expect_ty(&arg_tys[3], &Type::String)?;
             Ok(Type::Opaque("View".into()))
         }
-        "View.addChild" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            Ok(Type::Unit)
-        }
         "View.showWhen" => {
             expect_arity(callee, &arg_tys, 3)?;
             expect_ty(&arg_tys[1], &Type::Int)?;
@@ -3606,6 +3602,21 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Net.serveOnce should typecheck");
+    }
+
+    #[test]
+    fn rejects_view_add_child() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(View.addChild(View.column(), View.text("x")))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("unknown function View.addChild")
+                || err.message().contains("View.addChild"),
+            "expected unknown View.addChild, got {}",
+            err.message()
+        );
     }
 
     #[test]
