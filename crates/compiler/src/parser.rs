@@ -1296,6 +1296,7 @@ impl Parser {
                         | "Ref"
                         | "Queue"
                         | "Deferred"
+                        | "Fiber"
                         | "Resource"
                         | "Stream"
                 ) =>

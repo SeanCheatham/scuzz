@@ -644,12 +644,18 @@ record Point(x: Int, y: Int)
     _ <- Deferred.complete(d, "go")
     g <- Deferred.get(d)
     _ <- IO.println(v)
+    f <- Fiber.fork(IO.pure("ok"))
+    _ <- Fiber.join(f)
+    _ <- Fiber.interrupt(f)
   } yield ()
 "#;
         let out = format_source(src).unwrap();
         assert!(out.contains("Ref.of("));
         assert!(out.contains("Queue.unbounded()"));
         assert!(out.contains("Deferred.empty()"));
+        assert!(out.contains("Fiber.fork("));
+        assert!(out.contains("Fiber.join("));
+        assert!(out.contains("Fiber.interrupt("));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

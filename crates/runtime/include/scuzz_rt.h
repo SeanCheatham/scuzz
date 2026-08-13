@@ -115,7 +115,10 @@ typedef enum SzIoTag {
   SZ_IO_QUEUE_TAKE,
   SZ_IO_DEFERRED_GET,
   SZ_IO_POLL_FD,
-  SZ_IO_TIMEOUT
+  SZ_IO_TIMEOUT,
+  SZ_IO_FORK,
+  SZ_IO_JOIN,
+  SZ_IO_INTERRUPT
 } SzIoTag;
 
 struct SzIo {
@@ -156,6 +159,8 @@ struct SzIo {
       int64_t ms;
       SzIo *inner;
     } timeout;
+    SzIo *fork_inner;
+    void *fiber; /* SZ_IO_JOIN / SZ_IO_INTERRUPT handle from Fiber.fork */
     SzQueue *queue_take;
     SzDeferred *deferred_get;
     struct {
@@ -181,6 +186,12 @@ SzIo *sz_io_both(SzIo *left, SzIo *right);
 SzIo *sz_io_ensure(SzIo *inner, SzIo *finalizer);
 /* First-to-settle of sleep(ms) vs inner; timer wins → fail "timeout" and cancel inner. */
 SzIo *sz_io_timeout(int64_t ms, SzIo *inner);
+/* Fork inner onto the cooperative scheduler; succeeds immediately with a fiber handle. */
+SzIo *sz_fiber_fork(SzIo *inner);
+/* Park until the forked fiber succeeds (value) or fails / is interrupted. */
+SzIo *sz_fiber_join(void *fiber);
+/* Cancel the fiber (ensure/Resource finalizers) and complete after it settles. */
+SzIo *sz_fiber_interrupt(void *fiber);
 /* Internal constructors used by queue/deferred kits. */
 SzIo *sz_io_queue_take(SzQueue *q);
 SzIo *sz_io_deferred_get(SzDeferred *d);
@@ -190,7 +201,8 @@ SzIo *sz_io_poll_writable(int fd); /* IO[Unit]; park until fd is writable */
 /* Run to completion on the calling thread.
  * Concurrency is cooperative single-threaded fibers: sleep/Queue/Deferred/poll
  * park (Net, Sys.readLine, Sys.exec, httpGet DNS). race/both fork left-then-right onto a
- * ready queue. Live / default: FIFO pick. When SCUZZ_SCHED_SEED is set (fuzz),
+ * ready queue. Fiber.fork starts a supervised child (join parks; interrupt cancels;
+ * unjoined children are cancelled when the root fiber completes). Live / default: FIFO pick. When SCUZZ_SCHED_SEED is set (fuzz),
  * ready-fiber pick among n>1 is seed-driven (Lehmer/MINSTD). TestRuntime jumps
  * virtual time to the next wakeup when all fibers are blocked on timers. Live
  * idle wait uses poll (and interruptible nanosleep when only timers remain) so

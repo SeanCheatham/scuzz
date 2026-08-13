@@ -40,7 +40,7 @@ Open questions parked here: driver argument generation beyond `Int`/`String`; co
 ### Residuals
 
 - **Net** — IPv6 and CNAME-follow are out.
-- **Concurrency** — cooperative fibers only; `IO.ensure` / `Resource` release on cancel (including `IO.timeout`). Next IO slices: language `Fiber` (fork/join/interrupt), then `forever` / `repeatN` / `retryN`. Later: OS threads, supervision trees.
+- **Concurrency** — cooperative fibers only; `IO.ensure` / `Resource` release on cancel (including `IO.timeout` / `Fiber.interrupt`). Language `Fiber.fork` / `join` / `interrupt` is in. Next IO slices: `forever` / `repeatN` / `retryN`. Later: OS threads, supervision trees.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting; `Signal.list` frees unshared cons spines. Later: a collector if list-churn still demands it.
 - **Language surface** — richer generics beyond monomorphized defs/enums/records ([`compatibility.md`](compatibility.md)).
 - **Built-in mutation testing** — vision locks mutation as part of the one `scuzz` verification strategy (with fuzz, laws, sim, determinism). Laws + fuzz + TestRuntime exist; a first-class mutation command/surface does not yet. No external mutators. Mutation targets the in-source oracles (IR-level, not source rewriting).

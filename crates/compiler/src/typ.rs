@@ -1480,6 +1480,21 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Io(Box::new(Type::String)))
         }
+        "Fiber.fork" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            if !matches!(arg_tys[0], Type::Io(_)) {
+                return Err(TypeError::Msg("Fiber.fork argument must be IO[_]".into()));
+            }
+            Ok(Type::Io(Box::new(Type::Opaque("Fiber".into()))))
+        }
+        "Fiber.join" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::Io(Box::new(Type::Opaque("Any".into()))))
+        }
+        "Fiber.interrupt" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
         "Resource.make" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::Io(Box::new(Type::String)))?;
@@ -4125,6 +4140,21 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("IO.timeout should typecheck");
+    }
+
+    #[test]
+    fn typechecks_fiber_fork_join_interrupt() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    f <- Fiber.fork(IO.pure("ok"))
+    v <- Fiber.join(f)
+    _ <- IO.println(v)
+    g <- Fiber.fork(IO.sleep(50))
+    _ <- Fiber.interrupt(g)
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Fiber.fork/join/interrupt should typecheck");
     }
 
     #[test]

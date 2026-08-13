@@ -114,7 +114,7 @@ cargo run -p scuzz -- run --headless examples/live
 | `examples/nav` | `showWhen` + Row `View.expanded` + `View.align` / `View.padding` / `View.aspectRatio` / `View.fraction` + goldens |
 | `examples/live` | Stay-open Window (`Ui.run`; q/Esc) |
 | `examples/todo` | Todo — `Signal.list` / `View.expanded` scroll / Add·Save + goldens |
-| `examples/concurrency` | `Ref` / `Queue` / `Deferred` + `IO.race` / `IO.both` |
+| `examples/concurrency` | `Ref` / `Queue` / `Deferred` + `IO.race` / `IO.both` + `Fiber.fork` / `join` / `interrupt` |
 | `examples/resource` | `Resource.make` / `use` + `IO.timeout` (release on success, failure, cancel) |
 | `examples/stream` | `Stream.emit` / `map` / `evalMap` / `filter` / `take` / `takeWhile` / `drop` / `dropWhile` / `find` / `exists` / `compileToList` / `drain` |
 | `examples/server` | `Net.serve` persistent HTTP/1.0 GET |

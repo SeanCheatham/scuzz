@@ -57,6 +57,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_io_both(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_ensure(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_timeout(i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_fiber_fork(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_fiber_join(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_fiber_interrupt(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_unsafe_run_or_die(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_adt_new(i32, ptr)").unwrap();
     writeln!(out, "declare i32 @sz_adt_tag(ptr)").unwrap();
@@ -2619,6 +2622,34 @@ fn emit_call(
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @sz_deferred_get(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Fiber.fork" => {
+            let iv = ensure_io(
+                &mut code,
+                emitted_args[0].kind,
+                &emitted_args[0].value,
+                &format!("{prefix}_fio"),
+            );
+            writeln!(code, "  %{prefix}_v = call ptr @sz_fiber_fork(ptr {iv})").unwrap();
+            io_emitted(code, format!("%{prefix}_v"), emitted_args[0].payload)
+        }
+        "Fiber.join" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_fiber_join(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Fiber.interrupt" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_fiber_interrupt(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();

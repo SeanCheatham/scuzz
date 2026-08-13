@@ -2,4 +2,4 @@
 
 ## Next
 
-**Language `Fiber`** — fork / join / interrupt on the cooperative runtime. Then `forever` / `repeatN` / `retryN`.
+**`forever` / `repeatN` / `retryN`** — looping combinators on cooperative `IO` / `Fiber`.

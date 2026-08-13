@@ -234,6 +234,13 @@ static SzIo *recover_boom(SzError *err, void *env) {
   return sz_io_println_cstr("recovered");
 }
 
+static SzIo *recover_unit(SzError *err, void *env) {
+  (void)env;
+  assert(err && strstr(sz_string_cstr(err->message), "interrupted"));
+  sz_error_free(err);
+  return sz_io_pure(NULL);
+}
+
 static SzIo *after_ref_get(void *value, void *env) {
   (void)env;
   SzString *s = (SzString *)value;
@@ -251,6 +258,27 @@ static SzIo *after_ref(void *value, void *env) {
   (void)env;
   SzRef *r = (SzRef *)value;
   return sz_io_flatmap(sz_ref_set_cstr(r, "b"), after_ref_set, r);
+}
+
+static SzIo *fiber_join_cont(void *fiber, void *env) {
+  (void)env;
+  return sz_fiber_join(fiber);
+}
+
+static SzIo *after_fork_ignore(void *fiber, void *env) {
+  (void)fiber;
+  (void)env;
+  return sz_io_pure(NULL);
+}
+
+static SzIo *fiber_join_recover(void *ignored, void *fiber) {
+  (void)ignored;
+  return sz_io_handle_error_with(sz_fiber_join(fiber), recover_unit, NULL);
+}
+
+static SzIo *fiber_interrupt_then_join(void *fiber, void *env) {
+  (void)env;
+  return sz_io_flatmap(sz_fiber_interrupt(fiber), fiber_join_recover, fiber);
 }
 
 static SzIo *after_sleep_tag(void *value, void *env) {
@@ -384,6 +412,42 @@ int main(void) {
     sz_error_free(r.error);
     sz_lang_resource_free(lr);
     sz_testrt_reset();
+  }
+
+  /* Fiber.fork/join: child value is the join result. */
+  {
+    SzIo *child = sz_io_pure((void *)(intptr_t)42);
+    r = sz_io_unsafe_run(
+        sz_io_flatmap(sz_fiber_fork(child), fiber_join_cont, NULL));
+    assert(r.ok);
+    assert((intptr_t)r.value == 42);
+  }
+
+  /* Fiber.interrupt cancels a sleeper; join fails; Resource release runs. */
+  {
+    sz_testrt_install();
+    lang_released = 0;
+    lr = sz_lang_resource_make(sz_io_pure(sz_string_from_cstr("tok")),
+                               lang_release, NULL);
+    r = sz_io_unsafe_run(sz_io_flatmap(
+        sz_fiber_fork(sz_lang_resource_use(lr, lang_use_sleep, NULL)),
+        fiber_interrupt_then_join, NULL));
+    assert(r.ok);
+    assert(lang_released == 1);
+    sz_lang_resource_free(lr);
+    sz_testrt_reset();
+  }
+
+  /* Unjoined fork is cancelled when the root completes (no long sleep). */
+  {
+    int64_t t0 = sz_clock_monotonic_ms_sync();
+    int64_t t1;
+    r = sz_io_unsafe_run(
+        sz_io_flatmap(sz_fiber_fork(sz_io_sleep_ms(300)), after_fork_ignore,
+                      NULL));
+    t1 = sz_clock_monotonic_ms_sync();
+    assert(r.ok);
+    assert(t1 - t0 < 80);
   }
 
   /* Ref */

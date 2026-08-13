@@ -398,6 +398,30 @@ SzIo *sz_io_timeout(int64_t ms, SzIo *inner) {
   return io;
 }
 
+SzIo *sz_fiber_fork(SzIo *inner) {
+  if (!inner)
+    sz_panic("sz_fiber_fork(null)");
+  SzIo *io = sz_io_new(SZ_IO_FORK);
+  io->as.fork_inner = inner;
+  return io;
+}
+
+SzIo *sz_fiber_join(void *fiber) {
+  if (!fiber)
+    return sz_io_fail_cstr("Fiber.join: null fiber");
+  SzIo *io = sz_io_new(SZ_IO_JOIN);
+  io->as.fiber = fiber;
+  return io;
+}
+
+SzIo *sz_fiber_interrupt(void *fiber) {
+  if (!fiber)
+    return sz_io_fail_cstr("Fiber.interrupt: null fiber");
+  SzIo *io = sz_io_new(SZ_IO_INTERRUPT);
+  io->as.fiber = fiber;
+  return io;
+}
+
 SzIo *sz_io_queue_take(SzQueue *q) {
   SzIo *io = sz_io_new(SZ_IO_QUEUE_TAKE);
   io->as.queue_take = q;
@@ -444,6 +468,7 @@ typedef enum FiberState {
   FIB_DWAIT,
   FIB_POLL,
   FIB_JOIN,
+  FIB_FWAIT,
   FIB_DONE,
   FIB_CANCELLED,
   FIB_FINALIZING
@@ -476,6 +501,11 @@ typedef struct Fiber {
   int result_ok;
   void *result_value;
   SzError *result_error;
+  int forked; /* 1 if created by Fiber.fork */
+  void *join_waiters; /* Fiber* list parked on Fiber.join / interrupt */
+  struct Fiber *fwait; /* target when state is FIB_FWAIT */
+  int fwait_join; /* 1 join (value/error), 0 interrupt (Unit on settle) */
+  struct Fiber *forked_next;
   struct Fiber *ready_next;
   struct Fiber *wait_next;
 } Fiber;
@@ -487,6 +517,7 @@ typedef struct Sched {
   Fiber *pollers;
   Fiber *root;
   Fiber *current;
+  Fiber *forked_live;
   int sched_armed;   /* 1 when SCUZZ_SCHED_SEED is set */
   int32_t sched_rng; /* Lehmer/MINSTD state in 1..2147483646 */
 } Sched;
@@ -726,6 +757,26 @@ static Fiber *ready_dequeue(Sched *s) {
   return ready_unlink_at(s, k);
 }
 
+static void ready_remove(Sched *s, Fiber *f) {
+  Fiber **pp;
+  Fiber *prev;
+  if (!f)
+    return;
+  pp = &s->ready_head;
+  prev = NULL;
+  while (*pp) {
+    if (*pp == f) {
+      *pp = f->ready_next;
+      if (s->ready_tail == f)
+        s->ready_tail = prev;
+      f->ready_next = NULL;
+      return;
+    }
+    prev = *pp;
+    pp = &(*pp)->ready_next;
+  }
+}
+
 static void sleeper_add(Sched *s, Fiber *f) {
   f->wait_next = s->sleepers;
   s->sleepers = f;
@@ -794,6 +845,53 @@ static void poller_remove(Sched *s, Fiber *f) {
   }
 }
 
+static void forked_live_add(Sched *s, Fiber *f) {
+  f->forked_next = s->forked_live;
+  s->forked_live = f;
+}
+
+static void forked_live_remove(Sched *s, Fiber *f) {
+  Fiber **pp = &s->forked_live;
+  while (*pp) {
+    if (*pp == f) {
+      *pp = f->forked_next;
+      f->forked_next = NULL;
+      return;
+    }
+    pp = &(*pp)->forked_next;
+  }
+}
+
+static void fiber_join_waiter_add(Fiber *target, Fiber *w) {
+  w->wait_next = (Fiber *)target->join_waiters;
+  target->join_waiters = w;
+}
+
+static void fiber_join_waiter_remove(Fiber *target, Fiber *w) {
+  Fiber **pp;
+  if (!target)
+    return;
+  pp = (Fiber **)&target->join_waiters;
+  while (*pp) {
+    if (*pp == w) {
+      *pp = w->wait_next;
+      w->wait_next = NULL;
+      return;
+    }
+    pp = &(*pp)->wait_next;
+  }
+}
+
+static SzError *fiber_interrupt_err(void) {
+  return sz_error_new(9, "fiber interrupted");
+}
+
+static SzError *error_copy_or_interrupt(SzError *err) {
+  if (!err)
+    return fiber_interrupt_err();
+  return sz_error_new(err->code, sz_string_cstr(err->message));
+}
+
 static Fiber *fiber_new(SzIo *cur, Fiber *parent, JoinKind jk, int slot) {
   Fiber *f = (Fiber *)sz_alloc_zero(sizeof(Fiber));
   f->cur = cur;
@@ -804,11 +902,19 @@ static Fiber *fiber_new(SzIo *cur, Fiber *parent, JoinKind jk, int slot) {
   return f;
 }
 
+static void fiber_resume_value(Sched *s, Fiber *f, void *value);
+static void fiber_fail(Sched *s, Fiber *f, SzError *err);
+static void fiber_wake_joiners(Sched *s, Fiber *target, int ok, void *val,
+                               SzError *err);
+static void fiber_settle_cancelled(Sched *s, Fiber *f);
+
 static void fiber_cancel(Sched *s, Fiber *f) {
   SzIo *cleanup;
+  Fiber *nested;
   if (!f || f->state == FIB_DONE || f->state == FIB_CANCELLED ||
       f->state == FIB_FINALIZING)
     return;
+  ready_remove(s, f);
   if (f->state == FIB_SLEEP)
     sleeper_remove(s, f);
   if (f->state == FIB_QWAIT && f->qwait)
@@ -817,10 +923,19 @@ static void fiber_cancel(Sched *s, Fiber *f) {
     def_waiter_remove(f->dwait, f);
   if (f->state == FIB_POLL)
     poller_remove(s, f);
+  if (f->state == FIB_FWAIT && f->fwait)
+    fiber_join_waiter_remove(f->fwait, f);
   if (f->children[0])
     fiber_cancel(s, f->children[0]);
   if (f->children[1])
     fiber_cancel(s, f->children[1]);
+  nested = s->forked_live;
+  while (nested) {
+    Fiber *next = nested->forked_next;
+    if (nested->parent == f)
+      fiber_cancel(s, nested);
+    nested = next;
+  }
   cleanup = drain_ensure_finalizers(f->stack);
   f->stack = NULL;
   f->cur = NULL;
@@ -829,12 +944,46 @@ static void fiber_cancel(Sched *s, Fiber *f) {
     f->cur = cleanup;
     ready_enqueue(s, f);
   } else {
-    f->state = FIB_CANCELLED;
+    fiber_settle_cancelled(s, f);
   }
 }
 
-static void fiber_resume_value(Sched *s, Fiber *f, void *value);
-static void fiber_fail(Sched *s, Fiber *f, SzError *err);
+static void fiber_wake_joiners(Sched *s, Fiber *target, int ok, void *val,
+                               SzError *err) {
+  Fiber *w;
+  if (!target)
+    return;
+  w = (Fiber *)target->join_waiters;
+  target->join_waiters = NULL;
+  while (w) {
+    Fiber *next = w->wait_next;
+    int want_join = w->fwait_join;
+    w->wait_next = NULL;
+    w->fwait = NULL;
+    if (w->state == FIB_FWAIT) {
+      if (!want_join) {
+        w->cur = sz_io_pure(NULL);
+        ready_enqueue(s, w);
+      } else if (ok) {
+        w->cur = sz_io_pure(val);
+        ready_enqueue(s, w);
+      } else {
+        fiber_fail(s, w, error_copy_or_interrupt(err));
+      }
+    }
+    w = next;
+  }
+}
+
+static void fiber_settle_cancelled(Sched *s, Fiber *f) {
+  f->state = FIB_CANCELLED;
+  f->result_ok = 0;
+  if (!f->result_error)
+    f->result_error = fiber_interrupt_err();
+  if (f->forked)
+    forked_live_remove(s, f);
+  fiber_wake_joiners(s, f, 0, NULL, f->result_error);
+}
 
 static void join_child_done(Sched *s, Fiber *child, int ok, void *val,
                             SzError *err) {
@@ -923,9 +1072,9 @@ static void fiber_finish(Sched *s, Fiber *f, int ok, void *val, SzError *err) {
     cont_free_all(f->stack);
     f->stack = NULL;
     f->cur = NULL;
-    f->state = FIB_CANCELLED;
     if (err)
       sz_error_free(err);
+    fiber_settle_cancelled(s, f);
     return;
   }
   cont_free_all(f->stack);
@@ -935,6 +1084,9 @@ static void fiber_finish(Sched *s, Fiber *f, int ok, void *val, SzError *err) {
   f->result_ok = ok;
   f->result_value = val;
   f->result_error = err;
+  if (f->forked)
+    forked_live_remove(s, f);
+  fiber_wake_joiners(s, f, ok, val, err);
   if (f->parent && f->parent->join_kind != JOIN_NONE)
     join_child_done(s, f, ok, val, err);
 }
@@ -1052,7 +1204,8 @@ static void park_sleep(Sched *s, Fiber *f, int64_t ms) {
 
 static int step_fiber(Sched *s, Fiber *f) {
   SzIo *cur;
-  if (f->state == FIB_CANCELLED || f->state == FIB_DONE || f->state == FIB_JOIN)
+  if (f->state == FIB_CANCELLED || f->state == FIB_DONE || f->state == FIB_JOIN ||
+      f->state == FIB_FWAIT)
     return 0;
   cur = f->cur;
   if (!cur) {
@@ -1161,6 +1314,65 @@ static int step_fiber(Sched *s, Fiber *f) {
     f->cur = NULL;
     ready_enqueue(s, timer);
     ready_enqueue(s, body);
+    return 0;
+  }
+  case SZ_IO_FORK: {
+    Fiber *child = fiber_new(cur->as.fork_inner, f, JOIN_NONE, 0);
+    child->forked = 1;
+    forked_live_add(s, child);
+    ready_enqueue(s, child);
+    f->cur = sz_io_pure((void *)child);
+    ready_enqueue(s, f);
+    return 0;
+  }
+  case SZ_IO_JOIN: {
+    Fiber *target = (Fiber *)cur->as.fiber;
+    if (!target) {
+      fiber_fail(s, f, sz_error_new(1, "null fiber"));
+      return 0;
+    }
+    if (target->state == FIB_DONE) {
+      if (target->result_ok) {
+        f->cur = sz_io_pure(target->result_value);
+        ready_enqueue(s, f);
+      } else {
+        fiber_fail(s, f, error_copy_or_interrupt(target->result_error));
+      }
+      return 0;
+    }
+    if (target->state == FIB_CANCELLED) {
+      fiber_fail(s, f, error_copy_or_interrupt(target->result_error));
+      return 0;
+    }
+    f->state = FIB_FWAIT;
+    f->fwait = target;
+    f->fwait_join = 1;
+    f->cur = NULL;
+    fiber_join_waiter_add(target, f);
+    return 0;
+  }
+  case SZ_IO_INTERRUPT: {
+    Fiber *target = (Fiber *)cur->as.fiber;
+    if (!target) {
+      fiber_fail(s, f, sz_error_new(1, "null fiber"));
+      return 0;
+    }
+    if (target->state == FIB_DONE || target->state == FIB_CANCELLED) {
+      f->cur = sz_io_pure(NULL);
+      ready_enqueue(s, f);
+      return 0;
+    }
+    fiber_cancel(s, target);
+    if (target->state == FIB_DONE || target->state == FIB_CANCELLED) {
+      f->cur = sz_io_pure(NULL);
+      ready_enqueue(s, f);
+      return 0;
+    }
+    f->state = FIB_FWAIT;
+    f->fwait = target;
+    f->fwait_join = 0;
+    f->cur = NULL;
+    fiber_join_waiter_add(target, f);
     return 0;
   }
   case SZ_IO_QUEUE_TAKE: {
@@ -1376,6 +1588,16 @@ static int idle_advance(Sched *s) {
   }
 }
 
+static void cancel_forked_orphans(Sched *s) {
+  Fiber *f = s->forked_live;
+  while (f) {
+    Fiber *next = f->forked_next;
+    if (f->state != FIB_DONE && f->state != FIB_CANCELLED)
+      fiber_cancel(s, f);
+    f = next;
+  }
+}
+
 static SzIoResult run_io(SzIo *root) {
   Sched sched;
   SzIoResult result;
@@ -1403,10 +1625,14 @@ static SzIoResult run_io(SzIo *root) {
       /* Drain ready (including cancel finalizers) before exiting on root done. */
       continue;
     }
+    if (sched.root->state == FIB_DONE || sched.root->state == FIB_CANCELLED) {
+      cancel_forked_orphans(&sched);
+      if (sched.ready_head)
+        continue;
+      break;
+    }
     if (idle_advance(&sched))
       continue;
-    if (sched.root->state == FIB_DONE || sched.root->state == FIB_CANCELLED)
-      break;
     /* Deadlock: no ready fibers and nothing to wake. */
     break;
   }
