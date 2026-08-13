@@ -10,4 +10,6 @@
     _ <- IO.println(Str.concat("drop:", List.join(dropped, ",")))
     filtered <- Stream.compileToList(Stream.filter(Stream.emits(["a", "", "b"]), x => Str.len(x) > 0))
     _ <- IO.println(Str.concat("filter:", List.join(filtered, ",")))
+    mapped <- Stream.compileToList(Stream.map(Stream.emits(["a", "b"]), x => Str.concat(x, "!")))
+    _ <- IO.println(Str.concat("map:", List.join(mapped, ",")))
   } yield ()

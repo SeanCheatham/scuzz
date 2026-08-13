@@ -10,7 +10,8 @@ enum {
   SZ_ST_EVALMAP = 4,
   SZ_ST_TAKE = 5,
   SZ_ST_DROP = 6,
-  SZ_ST_FILTER = 7
+  SZ_ST_FILTER = 7,
+  SZ_ST_MAP = 8
 };
 
 static SzStream *st_new(int tag, void *left, void *right, void *env) {
@@ -66,6 +67,14 @@ SzStream *sz_stream_filter(SzStream *inner, SzStreamPred pred, void *env) {
   return st_new(SZ_ST_FILTER, inner, (void *)pred, env);
 }
 
+SzStream *sz_stream_map(SzStream *inner, SzStreamMapFn f, void *env) {
+  if (!inner)
+    inner = sz_stream_nil();
+  if (!f)
+    sz_panic("sz_stream_map(null fn)");
+  return st_new(SZ_ST_MAP, inner, (void *)f, env);
+}
+
 SzStream *sz_stream_take(SzStream *inner, int64_t n) {
   if (!inner)
     inner = sz_stream_nil();
@@ -112,6 +121,12 @@ typedef struct StMap {
   SzList *outer_acc;
   SzList *xs;
 } StMap;
+
+typedef struct StSyncMap {
+  SzStreamMapFn f;
+  void *fenv;
+  SzList *outer_acc;
+} StSyncMap;
 
 /* remain < 0 means unlimited. */
 static SzIo *compile_into(SzStream *s, SzList *acc, int64_t remain);
@@ -251,6 +266,19 @@ static SzIo *after_map_inner(void *inner_acc, void *env) {
   return fold_evalmap(xs, st);
 }
 
+static SzIo *after_sync_map(void *inner_acc, void *env) {
+  StSyncMap *st = (StSyncMap *)env;
+  SzList *xs = sz_list_reverse((SzList *)inner_acc);
+  SzList *acc = st->outer_acc;
+  while (!sz_list_is_empty(xs)) {
+    void *h = sz_list_head(xs);
+    xs = sz_list_tail(xs);
+    acc = sz_list_cons(st->f(h, st->fenv), acc);
+  }
+  sz_free(st);
+  return sz_io_pure(acc);
+}
+
 static SzIo *compile_into(SzStream *s, SzList *acc, int64_t remain) {
   while (s && s->tag != SZ_ST_NIL) {
     if (remain == 0)
@@ -317,6 +345,14 @@ static SzIo *compile_into(SzStream *s, SzList *acc, int64_t remain) {
       st->acc_len = (int64_t)sz_list_len(acc);
       return sz_io_flatmap(compile_into((SzStream *)s->left, acc, -1), after_filter,
                            st);
+    }
+    case SZ_ST_MAP: {
+      StSyncMap *st = (StSyncMap *)sz_alloc(sizeof(StSyncMap));
+      st->f = (SzStreamMapFn)s->right;
+      st->fenv = s->env;
+      st->outer_acc = acc;
+      return sz_io_flatmap(compile_into((SzStream *)s->left, sz_list_nil(), remain),
+                           after_sync_map, st);
     }
     default:
       sz_panic("sz_stream: bad tag");

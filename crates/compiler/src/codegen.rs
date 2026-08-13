@@ -98,6 +98,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_stream_drop(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_stream_evalmap(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_filter(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_map(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_compile_to_list(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_stream_drain(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_signal_int(i64)").unwrap();
@@ -1705,6 +1706,78 @@ fn emit_pred_lambda(
     val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
 }
 
+/// `t => String` mapper: `ptr (*)(ptr value, ptr env)`.
+fn emit_smap_lambda(
+    param: &Option<String>,
+    body: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    let id = *ctx.cont_id;
+    *ctx.cont_id += 1;
+    let fn_name = format!("sz_smap_{id}");
+
+    let capture_names = capture_name_order(locals);
+    let mut pre = String::new();
+    let mut body_locals: HashMap<String, (String, Kind)> = HashMap::new();
+    unpack_env_preamble(
+        &mut pre,
+        &mut body_locals,
+        locals,
+        &capture_names,
+        &format!("sm{id}"),
+    );
+    if let Some(p) = param {
+        if p != "_" {
+            body_locals.insert(p.clone(), ("%value".into(), Kind::Ptr));
+        }
+    }
+
+    let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("sm{id}"));
+
+    writeln!(
+        ctx.conts,
+        "define internal ptr @{fn_name}(ptr %value, ptr %env) {{"
+    )
+    .unwrap();
+    writeln!(ctx.conts, "entry:").unwrap();
+    ctx.conts.push_str(&pre);
+    ctx.conts.push_str(&body_emitted.code);
+    if body_emitted.kind == Kind::Int {
+        writeln!(
+            ctx.conts,
+            "  %sm{id}_istr = call ptr @sz_string_from_int(i64 {})",
+            body_emitted.value
+        )
+        .unwrap();
+        writeln!(ctx.conts, "  ret ptr %sm{id}_istr").unwrap();
+    } else {
+        assert!(
+            body_emitted.kind == Kind::Ptr,
+            "Stream.map mapper must be String/Int"
+        );
+        writeln!(ctx.conts, "  ret ptr {}", body_emitted.value).unwrap();
+    }
+    writeln!(ctx.conts, "}}").unwrap();
+    writeln!(ctx.conts).unwrap();
+
+    let mut code = String::new();
+    let env_ptr = pack_env(&mut code, locals, &capture_names, &format!("{prefix}_cap"));
+    writeln!(code, "  %{prefix}_cl0 = call ptr @sz_list_nil()").unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_cl1 = call ptr @sz_list_cons(ptr {env_ptr}, ptr %{prefix}_cl0)"
+    )
+    .unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_cl2 = call ptr @sz_list_cons(ptr @{fn_name}, ptr %{prefix}_cl1)"
+    )
+    .unwrap();
+    val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
+}
+
 fn unpack_closure(code: &mut String, closure: &str, prefix: &str) {
     writeln!(
         code,
@@ -1805,6 +1878,30 @@ fn emit_stream_filter(
     writeln!(
         code,
         "  %{prefix}_v = call ptr @sz_stream_filter(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
+        inner.value
+    )
+    .unwrap();
+    val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+}
+
+fn emit_stream_map(
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 2, "Stream.map expects 2 args");
+    let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let ExprKind::Lambda { param, body } = &args[1].kind else {
+        panic!("Stream.map mapper must be a lambda");
+    };
+    let lam = emit_smap_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
+    let mut code = inner.code;
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @sz_stream_map(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
         inner.value
     )
     .unwrap();
@@ -2077,6 +2174,9 @@ fn emit_call(
     }
     if callee == "Stream.filter" {
         return emit_stream_filter(args, ctx, locals, prefix);
+    }
+    if callee == "Stream.map" {
+        return emit_stream_map(args, ctx, locals, prefix);
     }
     if callee == "Net.serveOnce" {
         return emit_net_serve("sz_net_serve_once", args, ctx, locals, prefix);
@@ -3061,6 +3161,22 @@ mod tests {
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_stream_filter"));
         assert!(ir.contains("sz_pred_"));
+    }
+
+    #[test]
+    fn emit_stream_map_compile() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    s = Stream.map(Stream.emits(["a", "b"]), x => Str.concat(x, "!"))
+    xs <- Stream.compileToList(s)
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_stream_map"));
+        assert!(ir.contains("sz_smap_"));
     }
 
     #[test]
