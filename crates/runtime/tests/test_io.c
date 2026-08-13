@@ -117,6 +117,72 @@ static void *live_get_client(void *arg) {
   return buf;
 }
 
+static int live_connect(int port) {
+  int fd = -1;
+  int i;
+  struct sockaddr_in addr;
+  memset(&addr, 0, sizeof addr);
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)port);
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  for (i = 0; i < 50; i++) {
+    usleep(10000);
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+      continue;
+    if (connect(fd, (struct sockaddr *)&addr, sizeof addr) == 0)
+      return fd;
+    close(fd);
+    fd = -1;
+  }
+  return -1;
+}
+
+static int live_http_get(int fd, const char *path, char *buf, size_t cap) {
+  char req[128];
+  ssize_t n;
+  size_t total = 0;
+  snprintf(req, sizeof req,
+           "GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n",
+           path);
+  if (write(fd, req, strlen(req)) < 0)
+    return 0;
+  while (total + 1 < cap &&
+         (n = read(fd, buf + total, cap - 1 - total)) > 0)
+    total += (size_t)n;
+  buf[total] = '\0';
+  return 1;
+}
+
+static void *live_get_two(void *arg) {
+  int port = *(int *)arg;
+  int fd;
+  size_t n1;
+  static char buf[2048];
+  memset(buf, 0, sizeof buf);
+  fd = live_connect(port);
+  if (fd < 0)
+    return NULL;
+  if (!live_http_get(fd, "/a", buf, sizeof buf)) {
+    close(fd);
+    return NULL;
+  }
+  close(fd);
+  n1 = strlen(buf);
+  if (n1 + 2 >= sizeof buf)
+    return buf;
+  buf[n1++] = '|';
+  fd = live_connect(port);
+  if (fd < 0)
+    return buf;
+  if (!live_http_get(fd, "/b", buf + n1, sizeof buf - n1)) {
+    close(fd);
+    return buf;
+  }
+  close(fd);
+  return buf;
+}
+
 static SzIo *recover_boom(SzError *err, void *env) {
   (void)env;
   assert(err && strstr(sz_string_cstr(err->message), "boom"));
@@ -386,6 +452,13 @@ int main(void) {
     assert(r.ok);
     assert(strcmp(sz_testrt_net_last_serve_body(), "ok:/hello") == 0);
 
+    sz_testrt_net_inject_request("/a");
+    sz_testrt_net_queue_request("/b");
+    r = sz_io_unsafe_run(sz_net_serve(8080, serve_path_ok, NULL));
+    assert(r.ok);
+    assert(strcmp(sz_testrt_net_last_serve_body(), "ok:/b") == 0);
+    assert(sz_testrt_net_serve_pending() == 0);
+
     /* Console: argv override, stdin feed, println capture (+ echo) */
     {
       char *argv[] = {"x", "y"};
@@ -569,6 +642,19 @@ int main(void) {
     pthread_join(th, &ret);
     assert(r.ok);
     assert(ret && strstr((char *)ret, "ok:/x") != NULL);
+  }
+
+  /* Live Net.serve: same listen socket, two sequential GETs. */
+  {
+    pthread_t th;
+    int port = 18474;
+    void *ret = NULL;
+    pthread_create(&th, NULL, live_get_two, &port);
+    r = sz_io_unsafe_run(sz_net_serve_n(port, 2, serve_path_ok, NULL));
+    pthread_join(th, &ret);
+    assert(r.ok);
+    assert(ret && strstr((char *)ret, "ok:/a") != NULL);
+    assert(ret && strstr((char *)ret, "ok:/b") != NULL);
   }
 
   /* Alloc accounting: live_count returns to baseline after free. */

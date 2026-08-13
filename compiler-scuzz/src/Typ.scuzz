@@ -726,7 +726,7 @@ def callRandom(argTys: List): TyRes =
   } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.Int)) == 0) expectTy(argTyAt(argTys, 0), Type.Int) else tyOk(tyMkIo(Type.Int))
 
 def callNet(callee: String, argTys: List): TyRes =
-  if (streq(callee, "Net.httpGet") == 1) callNetHttpGet(argTys) else if (streq(callee, "Net.serveOnce") == 1) callNetServeOnce(argTys) else tyErr(str3("unknown function ", callee, ""))
+  if (streq(callee, "Net.httpGet") == 1) callNetHttpGet(argTys) else if (streq(callee, "Net.serveOnce") == 1) callNetServeOnce(argTys) else if (streq(callee, "Net.serve") == 1) callNetServe(argTys) else tyErr(str3("unknown function ", callee, ""))
 
 def callNetHttpGet(argTys: List): TyRes =
   for {
@@ -736,6 +736,11 @@ def callNetHttpGet(argTys: List): TyRes =
 def callNetServeOnce(argTys: List): TyRes =
   for {
     a = expectArity("Net.serveOnce", 2, List.len(argTys))
+  } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.Int)) == 0) expectTy(argTyAt(argTys, 0), Type.Int) else tyOk(tyMkIo(Type.Unit))
+
+def callNetServe(argTys: List): TyRes =
+  for {
+    a = expectArity("Net.serve", 2, List.len(argTys))
   } yield if (tyIsOk(a) == 0) a else if (tyIsOk(expectTy(argTyAt(argTys, 0), Type.Int)) == 0) expectTy(argTyAt(argTys, 0), Type.Int) else tyOk(tyMkIo(Type.Unit))
 
 def callImpurity(argTys: List): TyRes =

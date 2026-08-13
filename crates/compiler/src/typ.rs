@@ -1312,7 +1312,7 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::Io(Box::new(Type::String)))
         }
-        "Net.serveOnce" => {
+        "Net.serveOnce" | "Net.serve" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
             Ok(Type::Io(Box::new(Type::Unit)))
@@ -3622,6 +3622,15 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Net.serveOnce should typecheck");
+    }
+
+    #[test]
+    fn typechecks_net_serve() {
+        let src = r#"@main def main: IO[Unit] =
+  Net.serve(8080, path => IO.println(s"served:$path"))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Net.serve should typecheck");
     }
 
     #[test]

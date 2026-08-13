@@ -77,6 +77,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_random_next_int(i64)").unwrap();
     writeln!(out, "declare ptr @sz_net_http_get(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_net_serve_once(i64, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_net_serve(i64, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_impurity_run_kit()").unwrap();
     writeln!(out, "declare ptr @sz_ref_of(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_ref_get(ptr)").unwrap();
@@ -1718,16 +1719,17 @@ fn emit_stream_evalmap(
     val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
 }
 
-fn emit_net_serve_once(
+fn emit_net_serve(
+    rt: &str,
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
     locals: &mut HashMap<String, (String, Kind)>,
     prefix: &str,
 ) -> Emitted {
-    assert!(args.len() == 2, "Net.serveOnce expects 2 args");
+    assert!(args.len() == 2, "{rt} expects 2 args");
     let port = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
     let ExprKind::Lambda { param, body } = &args[1].kind else {
-        panic!("Net.serveOnce callback must be a lambda");
+        panic!("{rt} callback must be a lambda");
     };
     let lam = emit_io_cont_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
     let mut code = port.code;
@@ -1735,7 +1737,7 @@ fn emit_net_serve_once(
     unpack_closure(&mut code, &lam.value, prefix);
     writeln!(
         code,
-        "  %{prefix}_v = call ptr @sz_net_serve_once(i64 {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
+        "  %{prefix}_v = call ptr @{rt}(i64 {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
         port.value
     )
     .unwrap();
@@ -1982,7 +1984,10 @@ fn emit_call(
         return emit_stream_evalmap(args, ctx, locals, prefix);
     }
     if callee == "Net.serveOnce" {
-        return emit_net_serve_once(args, ctx, locals, prefix);
+        return emit_net_serve("sz_net_serve_once", args, ctx, locals, prefix);
+    }
+    if callee == "Net.serve" {
+        return emit_net_serve("sz_net_serve", args, ctx, locals, prefix);
     }
     if callee == "Ui.run" {
         return emit_ui_run(args, ctx, locals, prefix);
@@ -2912,6 +2917,19 @@ mod tests {
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_net_serve_once"));
         assert!(ir.contains("sz_rcont_"));
+    }
+
+    #[test]
+    fn emit_net_serve_call() {
+        let src = r#"@main def main: IO[Unit] =
+  Net.serve(8080, path => IO.pure(path))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("call ptr @sz_net_serve("));
+        assert!(ir.contains("sz_rcont_"));
+        assert!(!ir.contains("call ptr @sz_net_serve_once("));
     }
 
     #[test]

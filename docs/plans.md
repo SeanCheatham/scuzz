@@ -2,4 +2,4 @@
 
 ## Next
 
-**Persistent Net listen.** HUMANS Headless + stamp-watch + live dump + live inject are in. `Net.serveOnce` is still one HTTP/1.0 GET. Next: keep listening so a server can accept more than one request without restart. Still not Flutter VM patching.
+**Nonblocking Net poll.** HUMANS Headless + stamp-watch + live dump + live inject + `Net.serve` persistent listen are in. Live accept still blocks the fiber. Next: poll so a server can share the run loop with other IO. Still not Flutter VM patching.

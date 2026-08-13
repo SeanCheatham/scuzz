@@ -431,12 +431,32 @@ typedef struct NetStub {
 
 static int g_net_fake = 0;
 static NetStub *g_stubs = NULL;
-static char *g_serve_path = NULL;
+enum { NET_REQ_CAP = 16 };
+static char *g_req[NET_REQ_CAP];
+static int g_req_n = 0;
 static char *g_last_serve_body = NULL;
 
+static void net_req_clear(void) {
+  int i;
+  for (i = 0; i < g_req_n; i++)
+    sz_free(g_req[i]);
+  g_req_n = 0;
+}
+
+static void net_req_push(const char *path) {
+  size_t n;
+  if (g_req_n >= NET_REQ_CAP)
+    sz_panic("Net: too many injected requests");
+  if (!path || !path[0])
+    path = "/";
+  n = strlen(path);
+  g_req[g_req_n] = (char *)sz_alloc(n + 1);
+  memcpy(g_req[g_req_n], path, n + 1);
+  g_req_n++;
+}
+
 static void net_clear_serve(void) {
-  sz_free(g_serve_path);
-  g_serve_path = NULL;
+  net_req_clear();
   sz_free(g_last_serve_body);
   g_last_serve_body = NULL;
 }
@@ -456,15 +476,30 @@ void sz_testrt_net_reset_live(void) {
 }
 
 void sz_testrt_net_inject_request(const char *path) {
-  size_t n;
   if (!g_net_fake)
     sz_testrt_net_install();
-  sz_free(g_serve_path);
-  if (!path || !path[0])
-    path = "/";
-  n = strlen(path);
-  g_serve_path = (char *)sz_alloc(n + 1);
-  memcpy(g_serve_path, path, n + 1);
+  net_req_clear();
+  net_req_push(path);
+}
+
+void sz_testrt_net_queue_request(const char *path) {
+  if (!g_net_fake)
+    sz_testrt_net_install();
+  net_req_push(path);
+}
+
+int sz_testrt_net_serve_pending(void) { return g_req_n; }
+
+char *sz_testrt_net_pop_request(void) {
+  char *p;
+  int i;
+  if (g_req_n <= 0)
+    return NULL;
+  p = g_req[0];
+  for (i = 1; i < g_req_n; i++)
+    g_req[i - 1] = g_req[i];
+  g_req_n--;
+  return p;
 }
 
 void sz_testrt_net_install(void) {
@@ -511,34 +546,12 @@ SzIo *sz_testrt_net_http_get(SzString *url) {
   return sz_io_flatmap(sz_io_delay(stub_http_get, url), unwrap_box, NULL);
 }
 
-static SzIo *serve_keep_body(void *body, void *env) {
-  SzString *s = (SzString *)body;
-  (void)env;
-  sz_free(g_last_serve_body);
-  g_last_serve_body = NULL;
-  if (s) {
-    const char *c = sz_string_cstr(s);
-    size_t n = strlen(c);
-    g_last_serve_body = (char *)sz_alloc(n + 1);
-    memcpy(g_last_serve_body, c, n + 1);
-  }
-  return sz_io_pure(NULL);
-}
-
-SzIo *sz_testrt_net_serve_once(SzCont handler, void *env) {
-  SzString *path;
-  if (!handler)
-    sz_panic("sz_testrt_net_serve_once(null)");
-  path = sz_string_from_cstr(g_serve_path ? g_serve_path : "/");
-  return sz_io_flatmap(handler(path, env), serve_keep_body, NULL);
-}
-
 const char *sz_testrt_net_last_serve_body(void) {
   return g_last_serve_body ? g_last_serve_body : "";
 }
 
 const char *sz_testrt_net_serve_path(void) {
-  return g_serve_path && g_serve_path[0] ? g_serve_path : "/";
+  return g_req_n > 0 && g_req[0][0] ? g_req[0] : "/";
 }
 
 void sz_testrt_net_set_last_serve_body(const char *body) {
