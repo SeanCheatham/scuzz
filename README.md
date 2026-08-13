@@ -1,8 +1,8 @@
 # Scuzz Lang
 
-**Scala-inspired native language + Flutter-like UI SDK** — builtin Cats-Effect-inspired `IO`, UI-as-effect with **Headless as a first-class peer runtime**, staged self-hosting, and Skia-shaped canvas ABI.
+**Scala-inspired native language + Flutter-like UI SDK** — ZIO-inspired builtin `IO`, UI-as-effect with **Headless as a first-class peer runtime**, staged self-hosting, and Skia-shaped canvas ABI.
 
-> Not Scala 3. Not the JVM. Not a cats-effect port. Upstream Scala Native is a reference, not a dependency.
+> Not Scala 3. Not the JVM. Not a ZIO or cats-effect port. Upstream Scala Native is a reference, not a dependency.
 
 ## Status
 

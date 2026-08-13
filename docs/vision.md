@@ -8,7 +8,7 @@ Edit this file when a decision or next-step ordering changes.
 
 ## Thesis
 
-- **Language**: purposeful Scala-inspired subset for native UI, CLI, server, and mobile apps, with **built-in effect/IO/Streaming** (Cats Effect and FS2 spirit, not a cats/fs2 port). Aim: denser expr dialect (`for` as primary binder) — see [Language direction](#language-direction).
+- **Language**: purposeful Scala-inspired subset for native UI, CLI, server, and mobile apps, with **built-in effect/IO/Streaming** (ZIO-inspired, not a ZIO or cats/fs2 port). Aim: denser expr dialect (`for` as primary binder) — see [Language direction](#language-direction).
 - **Runtime**: custom native (LLVM). Native binaries, not a VM. No JVM, no Java interop, no classpath/Maven.
 - **UI**: a primary product path, not the only one (Dart-shaped: GUI is first-class; so are CLI and server). One design language + Skia, as a **`Ui` effect** with Headless/Window/Mobile interpreters. Headless is a product runtime (agents, CI), not a test-only shim.
 - **Tooling**: one CLI (`scuzz`) for compile, link, assets, watch, packaging, deterministic `scuzz fuzz` over module **laws** + **sim** overlays. Static hygiene is `scuzz check` (format-verify + typecheck; further lints emit here, no `lint` subcommand). `scuzz fmt` rewrites.
@@ -36,6 +36,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 ## What Scuzz Lang is not
 
 - Not Scala 3, not the JVM, not Scala.js
+- Not a ZIO library port
 - Not a cats / cats-effect / Typelevel port
 - Not SwiftUI / UIKit / WinUI wrappers
 - Not “every widget rebuild is an `IO`” (`View` build stays sync/pure)

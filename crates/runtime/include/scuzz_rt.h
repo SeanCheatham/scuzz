@@ -271,7 +271,7 @@ SzIo *sz_queue_offer_cstr(SzQueue *q, const char *value);
 SzIo *sz_queue_take(SzQueue *q); /* IO[A]; parks when empty under the fiber scheduler */
 size_t sz_queue_size(const SzQueue *q);
 
-/* Stream — finite pull (FS2 spirit): emit / eval / concat / map / evalMap / take / drop / filter. */
+/* Stream — finite pull: emit / eval / concat / map / evalMap / take / drop / filter. */
 struct SzStream {
   int tag; /* 0 nil … 9 takeWhile, 10 dropWhile, 11 find */
   void *left;

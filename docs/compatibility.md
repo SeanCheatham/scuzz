@@ -18,6 +18,7 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 | Implicit conversions | Cut |
 | Java interop / Scala.js / JVM backends | Cut |
 | cats / cats-effect library compatibility | Cut |
+| ZIO library compatibility | Cut |
 
 ## Runtime & tooling
 
@@ -25,7 +26,7 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 | --- | --- | --- |
 | Binary format | Native ELF/Mach-O/PE via LLVM | JVM classfiles / JARs |
 | Dependencies | `scuzz.toml` path deps (data-only; no plugin DSL) | Maven Central / Ivy; git/versioned hosted artifacts (deferred); sbt/Gradle/`pubspec` plugins |
-| Effects | Builtin `IO` / `Resource` / concurrent kit + Clock/Random/Fs/Net/Sys | cats-effect runtime, ZIO, Future-as-default |
+| Effects | Builtin `IO` / `Resource` / concurrent kit + Clock/Random/Fs/Net/Sys | cats-effect runtime, ZIO-as-library, Future-as-default |
 | Test interpreters | TestRuntime fakes (clock/random/FS/net + argv/stdin/println capture); `SCUZZ_TESTRT=1`; stem-paired `*.scuzz_sim` / `*.scuzz_laws` | Wall-clock-only harnesses; ad-hoc FFI mocks; app-level Mockito / `src/test` unit trees |
 | UI | `View` + `Ui` + Skia (`sk_capi`; Impeller deferred) | Swing, JavaFX, Compose Multiplatform, Flutter widgets |
 | Watch | Rebuild on source change (`scuzz watch`) | Flutter hot reload / DevTools VM patching |
