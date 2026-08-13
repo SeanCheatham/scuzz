@@ -79,10 +79,9 @@ Optional. Used by `scuzz run` / `test` / `package`.
 my-app/
   scuzz.toml
   src/
-    Main.scuzz              # live module (*.scuzz under src/)
+    Main.scuzz              # live module (*.scuzz under src/; `law` decls erase from live builds)
     Other.scuzz             # multi-file packages / enums
     Main.scuzz_sim          # optional: same-name defs under fuzz / TestRuntime
-    Main.scuzz_laws         # optional: pure laws for scuzz fuzz
   .scuzz/
     fingerprint             # incremental compile cache (gitignored via **/.scuzz/)
   build/package/            # emitted by `scuzz package`
@@ -91,4 +90,4 @@ my-app/
     ios/
 ```
 
-Stage-0 accepts `*.scuzz` under `src/` (recursive). Units in the same package are merged; exactly one `@main` is required for executables. Stem-paired `*.scuzz_sim` / `*.scuzz_laws` load under `scuzz check` and verify/fuzz builds — see [vision.md](../vision.md#laws-simulation-mutation-and-verification). `scuzz fmt` and `scuzz check` format-verify only the selected project's `src/` (not dependency trees).
+Stage-0 accepts `*.scuzz` under `src/` (recursive). Units in the same package are merged; exactly one `@main` is required for executables. Stem-paired `*.scuzz_sim` and in-source `law` decls load under `scuzz check` and verify/fuzz builds — see [vision.md](../vision.md#laws-simulation-mutation-and-verification). `scuzz fmt` and `scuzz check` format-verify only the selected project's `src/` (not dependency trees).

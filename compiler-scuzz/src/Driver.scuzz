@@ -42,9 +42,6 @@ def liveStem(name: String): String =
 def simStem(name: String): String =
   Str.slice(name, 0, Str.len(name) - 10)
 
-def lawsStem(name: String): String =
-  Str.slice(name, 0, Str.len(name) - 11)
-
 def isMainName(name: String): Int =
   if (streq(name, "Main.scuzz") == 1) 1 else if (streq(name, "main.scuzz") == 1) 1 else 0
 
@@ -62,9 +59,6 @@ def collectLiveStemsOne(name: String, rest: List, acc: List): List =
 
 def filterSimNames(names: List, acc: List): List =
   if (List.isEmpty(names) == 1) List.reverse(acc) else if (isSimName(List.head(names)) == 1) filterSimNames(List.tail(names), List.cons(List.head(names), acc)) else filterSimNames(List.tail(names), acc)
-
-def filterLawsNames(names: List, acc: List): List =
-  if (List.isEmpty(names) == 1) List.reverse(acc) else if (isLawsName(List.head(names)) == 1) filterLawsNames(List.tail(names), List.cons(List.head(names), acc)) else filterLawsNames(List.tail(names), acc)
 
 def ovKind(o: List): String =
   List.head(o)
@@ -121,7 +115,7 @@ def validateOverlayStems(stems: List, names: List): IO[Unit] =
 
 def validateOverlayStemOne(stems: List, name: String, rest: List): IO[Unit] =
   for {
-    stem = if (isSimName(name) == 1) simStem(name) else lawsStem(name)
+    stem = simStem(name)
   } yield if (listContainsStr(stems, stem) == 0) IO.fail(str4(name, ": overlay stem `", stem, str3("` has no live `", stem, ".scuzz` twin"))) else validateOverlayStems(stems, rest)
 
 def buildRuntime(runtimeDir: String, clang: String): IO[Unit] =
@@ -173,7 +167,7 @@ def checkSimMatch(live: Def, sim: Def, label: String): IO[Unit] =
     lp = defParams(live)
     sp = defParams(sim)
     name = defName(sim)
-  } yield if (List.len(lp) != List.len(sp)) IO.fail(str4(label, ": sim def `", name, str3("` arity mismatch (live ", Str.fromInt(List.len(lp)), str3(", sim ", Str.fromInt(List.len(sp)), ")")))) else if (tyEq(declRet(live), declRet(sim)) == 0) IO.fail(str4(label, ": sim def `", name, "` return type mismatch")) else if (tyIsIo(declRet(live)) != tyIsIo(declRet(sim))) IO.fail(str4(label, ": sim def `", name, "` purity mismatch")) else checkSimParams(lp, sp, name, label, 0)
+  } yield if (defIsLaw(live) == 1) IO.fail(str4(label, ": sim def `", name, "` cannot replace a law")) else if (defIsLaw(sim) == 1) IO.fail(str3(label, ": *.scuzz_sim must not declare a law", "")) else if (List.len(lp) != List.len(sp)) IO.fail(str4(label, ": sim def `", name, str3("` arity mismatch (live ", Str.fromInt(List.len(lp)), str3(", sim ", Str.fromInt(List.len(sp)), ")")))) else if (tyEq(declRet(live), declRet(sim)) == 0) IO.fail(str4(label, ": sim def `", name, "` return type mismatch")) else if (tyIsIo(declRet(live)) != tyIsIo(declRet(sim))) IO.fail(str4(label, ": sim def `", name, "` purity mismatch")) else checkSimParams(lp, sp, name, label, 0)
 
 def replaceSimDefAcc(defs: List, sim: Def, label: String, acc: List, found: Int): IO[List] =
   if (List.isEmpty(defs) == 1) if (found == 0) IO.fail(str5(label, ": sim def `", defName(sim), "` has no live twin", "")) else IO.pure(List.reverse(acc)) else if (streq(defName(List.head(defs)), defName(sim)) == 1) if (streq(defModule(List.head(defs)), defModule(sim)) == 1) checkSimMatch(List.head(defs), sim, label).flatMap(_ => replaceSimDefAcc(List.tail(defs), sim, label, List.cons(sim, acc), 1)) else replaceSimDefAcc(List.tail(defs), sim, label, List.cons(List.head(defs), acc), found) else replaceSimDefAcc(List.tail(defs), sim, label, List.cons(List.head(defs), acc), found)
@@ -201,33 +195,28 @@ def lawRetOk(ret: Type): Int =
     case _ => 0
   }
 
-def applyLawDefs(prog: Prog, defs: List, label: String, names: List): IO[List] =
-  if (List.isEmpty(defs) == 1) IO.pure(List.cons(prog, List.cons(names, List.empty()))) else applyLawDefOne(prog, List.head(defs), List.tail(defs), label, names)
+def collectLawNames(defs: List, acc: List): List =
+  if (List.isEmpty(defs) == 1) List.reverse(acc) else if (defIsLaw(List.head(defs)) == 1) collectLawNames(List.tail(defs), List.cons(defName(List.head(defs)), acc)) else collectLawNames(List.tail(defs), acc)
 
-def applyLawDefOne(prog: Prog, d: Def, rest: List, label: String, names: List): IO[List] =
-  for {
-    name = defName(d)
-    hit = findDefByQual(progDefs(prog), defModule(d), name)
-  } yield if (List.isEmpty(hit) == 0) IO.fail(str5(label, ": law `", name, "` collides with a live/sim def", "")) else if (lawRetOk(declRet(d)) == 0) IO.fail(str4(label, ": law `", name, str3("` must return Bool (or Int), got ", tyShow(declRet(d)), ""))) else if (List.isEmpty(defParams(d)) == 0) IO.fail(str5(label, ": law `", name, "` must be nullary for residual checks", "")) else applyLawDefs(setProgDefs(prog, listConcat(progDefs(prog), List.cons(d, List.empty()))), rest, label, listConcat(names, List.cons(name, List.empty())))
+def eraseLawsDefs(defs: List, acc: List): List =
+  if (List.isEmpty(defs) == 1) List.reverse(acc) else if (defIsLaw(List.head(defs)) == 1) eraseLawsDefs(List.tail(defs), acc) else eraseLawsDefs(List.tail(defs), List.cons(List.head(defs), acc))
 
-def applyOneLaw(prog: Prog, ov: List, names: List): IO[List] =
-  for {
-    p = parseSource(ovLabel(ov), ovText(ov))
-    label = ovLabel(ov)
-    defs = stampDefsModule(progDefs(p), lawsStem(label))
-  } yield if (isUnitExpr(progMain(p)) == 0) IO.fail(str3(label, ": *.scuzz_laws must not define @main", "")) else if (List.isEmpty(progEnums(p)) == 0) IO.fail(str3(label, ": *.scuzz_laws must not define enums", "")) else applyLawDefs(prog, defs, label, names)
+def checkLawDefs(defs: List): IO[Unit] =
+  if (List.isEmpty(defs) == 1) IO.pure(()) else checkLawDefOne(List.head(defs), List.tail(defs))
 
-def applyLaws(prog: Prog, laws: List, names: List): IO[List] =
-  if (List.isEmpty(laws) == 1) IO.pure(List.cons(prog, List.cons(names, List.empty()))) else applyOneLaw(prog, List.head(laws), names).flatMap(state => applyLaws(List.head(state), List.tail(laws), List.head(List.tail(state))))
+def checkLawDefOne(d: Def, rest: List): IO[Unit] =
+  if (defIsLaw(d) == 0) checkLawDefs(rest) else if (lawRetOk(declRet(d)) == 0) IO.fail(str3("law `", defName(d), str3("` must return Bool (or Int), got ", tyShow(declRet(d)), ""))) else if (List.isEmpty(defParams(d)) == 0) IO.fail(str3("law `", defName(d), "` must be nullary for residual checks")) else checkLawDefs(rest)
+
+def applyOverlays(live: Prog, overlays: List): IO[Prog] =
+  applySims(live, filterOverlays(overlays, "sim", List.empty()))
 
 def filterOverlays(ovs: List, kind: String, acc: List): List =
   if (List.isEmpty(ovs) == 1) List.reverse(acc) else if (streq(ovKind(List.head(ovs)), kind) == 1) filterOverlays(List.tail(ovs), kind, List.cons(List.head(ovs), acc)) else filterOverlays(List.tail(ovs), kind, acc)
 
-def applyOverlays(live: Prog, overlays: List): IO[List] =
-  applySims(live, filterOverlays(overlays, "sim", List.empty())).flatMap(p1 => applyLaws(p1, filterOverlays(overlays, "laws", List.empty()), List.empty()))
-
 def prepareVerifyProg(prog0: Prog, overlays: List): IO[Prog] =
-  applyOverlays(prog0, overlays).flatMap(applied => IO.pure(residualizeLaws(List.head(applied), List.head(List.tail(applied)))))
+  applyOverlays(prog0, overlays).flatMap(p1 =>
+    checkLawDefs(progDefs(p1)).flatMap(_ => IO.pure(residualizeLaws(p1, collectLawNames(progDefs(p1), List.empty()))))
+  )
 
 def compileProject(projectDir: String, outDir: String): IO[Unit] =
   Sys.getenv("SCUZZ_RUNTIME").flatMap(rtEnv =>
@@ -297,7 +286,7 @@ def compileAfterSources(projectDir: String, outDir: String, verify: Int, runtime
   )
 
 def prepareCompileProg(prog0: Prog, overlays: List, verify: Int): IO[Prog] =
-  if (verify == 0) IO.pure(prog0) else prepareVerifyProg(prog0, overlays)
+  if (verify == 0) IO.pure(setProgDefs(prog0, eraseLawsDefs(progDefs(prog0), List.empty()))) else prepareVerifyProg(prog0, overlays)
 
 def loadGraphBundle(projectDir: String, toml: String): IO[List] =
   Fs.canonicalize(projectDir).flatMap(root =>
@@ -357,15 +346,17 @@ def loadPackageBundle(pkgDir: String): IO[List] =
   IO.fail(str3("missing src/ in ", pkgDir, "")).flatMap(_ => IO.pure(List.cons(List.empty(), List.cons(List.empty(), List.empty()))))
 )
 
+def rejectLawsFiles(names: List): IO[Unit] =
+  if (List.isEmpty(names) == 1) IO.pure(()) else if (isLawsName(List.head(names)) == 1) IO.fail(str3(List.head(names), ": *.scuzz_laws is removed; declare `law name: Bool = …` in the live *.scuzz module", "")) else rejectLawsFiles(List.tail(names))
+
 def loadPackageFromNames(srcDir: String, names: List): IO[List] =
   for {
     stems = collectLiveStems(names, List.empty())
     simNames = filterSimNames(names, List.empty())
-    lawNames = filterLawsNames(names, List.empty())
-  } yield validateOverlayStems(stems, listConcat(simNames, lawNames)).flatMap(_ =>
-  readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty()).flatMap(texts =>
-    readOverlayFiles(srcDir, "sim", simNames, List.empty()).flatMap(sims =>
-      readOverlayFiles(srcDir, "laws", lawNames, List.empty()).flatMap(laws => IO.pure(List.cons(texts, List.cons(listConcat(sims, laws), List.empty()))))
+  } yield rejectLawsFiles(names).flatMap(_ =>
+  validateOverlayStems(stems, simNames).flatMap(_ =>
+    readSources(srcDir, partitionSources(names, List.empty(), List.empty()), List.empty()).flatMap(texts =>
+      readOverlayFiles(srcDir, "sim", simNames, List.empty()).flatMap(sims => IO.pure(List.cons(texts, List.cons(sims, List.empty()))))
     )
   )
 )

@@ -1,8 +1,0 @@
-def countNonNeg(): Bool =
-  Law.signalInt(0) >= 0
-
-def hasHome(): Bool =
-  Law.a11yHas("button:Home")
-
-def hasOther(): Bool =
-  Law.a11yHas("button:Other")

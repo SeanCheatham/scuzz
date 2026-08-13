@@ -1,6 +1,21 @@
 def setAt(xs: List, i: Int, v: String): List =
   if (List.isEmpty(xs) == 1) List.empty() else if (i == 0) List.cons(v, List.tail(xs)) else List.cons(List.head(xs), setAt(List.tail(xs), i - 1, v))
 
+law listLenNonNeg: Bool =
+  Law.signalListLen(1) >= 0
+
+law itemPastEndEmpty: Bool =
+  Str.len(Law.signalListAt(1, Law.signalListLen(1))) == 0
+
+law draftNonNeg: Bool =
+  Str.len(Law.signalStr(0)) >= 0
+
+law hasAdd: Bool =
+  Law.a11yHas("button:Add")
+
+law hasClear: Bool =
+  Law.a11yHas("button:Clear")
+
 @main def main: IO[Unit] =
   Sys.getenv("SCUZZ_TODO_PATH").flatMap(envPath =>
     for {

@@ -128,6 +128,9 @@ def prettyDefs(defs: List, acc: String): String =
   if (List.isEmpty(defs) == 1) acc else prettyDefs(List.tail(defs), Str.concat(acc, Str.concat(prettyDef(List.head(defs)), "\n\n")))
 
 def prettyDef(d: Def): String =
+  if (defIsLaw(d) == 1) str5("law ", defName(d), ": ", tyPretty(defRet(d)), str3(" =\n", prettyExpr(defBody(d), 1), "")) else prettyFunDef(d)
+
+def prettyFunDef(d: Def): String =
   for {
     head = if (defIsPrivate(d) == 1) "private def " else "def "
     tparams = prettyTypeParams(defTypeParams(d))

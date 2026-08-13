@@ -528,7 +528,16 @@ def parseDefAfterName(file: String, tokens: List, i: Int, name: String, isPrivat
     retP = parseTypeWith(file, tokens, i3, tparams)
     i4 = expectTok(tokens, pIdx(retP), "Eq")
     bodyP = parseBlock(file, tokens, i4)
-  } yield okDef(Def.Def(name, pAst(paramsP), pType(retP), pExpr(bodyP), moduleIdFromLabel(file), isPrivate, tparams), pIdx(bodyP))
+  } yield okDef(Def.Def(name, pAst(paramsP), pType(retP), pExpr(bodyP), moduleIdFromLabel(file), isPrivate, tparams, 0), pIdx(bodyP))
+
+def parseLaw(file: String, tokens: List, i: Int): List =
+  for {
+    nameP = parseIdent(file, tokens, i)
+    i1 = expectTok(tokens, pIdx(nameP), "Colon")
+    retP = parseType(file, tokens, i1)
+    i2 = expectTok(tokens, pIdx(retP), "Eq")
+    bodyP = parseBlock(file, tokens, i2)
+  } yield okDef(Def.Def(pStr(nameP), List.empty(), pType(retP), pExpr(bodyP), moduleIdFromLabel(file), 0, List.empty(), 1), pIdx(bodyP))
 
 def parseMain(file: String, tokens: List, i: Int): List =
   for {
@@ -542,7 +551,7 @@ def parseMain(file: String, tokens: List, i: Int): List =
 def parseTop(file: String, tokens: List, i: Int, pkg: String, enums: List, traits: List, impls: List, defs: List, main: Expr, mainMod: String, imports: List): Prog =
   for {
     t = tokKind(tokAt(tokens, i))
-  } yield if (streq(t, "Eof") == 1) Prog.Prog(pkg, List.reverse(enums), List.reverse(defs), main, mainMod, List.reverse(imports), List.reverse(traits), List.reverse(impls)) else if (streq(t, "Enum") == 1) parseTopEnum(file, tokens, i + 1, pkg, enums, traits, impls, defs, main, mainMod, imports) else if (streq(t, "Record") == 1) parseTopRecord(file, tokens, i + 1, pkg, enums, traits, impls, defs, main, mainMod, imports) else if (streq(t, "Trait") == 1) parseTopTrait(file, tokens, i + 1, pkg, enums, traits, impls, defs, main, mainMod, imports) else if (streq(t, "Impl") == 1) parseTopImpl(file, tokens, i + 1, pkg, enums, traits, impls, defs, main, mainMod, imports) else if (streq(t, "Import") == 1) parseTopImport(file, tokens, i + 1, pkg, enums, traits, impls, defs, main, mainMod, imports) else if (streq(t, "Private") == 1) parseTopPrivateDef(file, tokens, i + 1, pkg, enums, traits, impls, defs, main, mainMod, imports) else if (streq(t, "Def") == 1) parseTopDef(file, tokens, i + 1, pkg, enums, traits, impls, defs, main, mainMod, imports) else if (streq(t, "AtMain") == 1) parseTopMain(file, tokens, i + 1, pkg, enums, traits, impls, defs, imports) else parseTop(file, tokens, i + 1, pkg, enums, traits, impls, defs, main, mainMod, imports)
+  } yield if (streq(t, "Eof") == 1) Prog.Prog(pkg, List.reverse(enums), List.reverse(defs), main, mainMod, List.reverse(imports), List.reverse(traits), List.reverse(impls)) else if (streq(t, "Enum") == 1) parseTopEnum(file, tokens, i + 1, pkg, enums, traits, impls, defs, main, mainMod, imports) else if (streq(t, "Record") == 1) parseTopRecord(file, tokens, i + 1, pkg, enums, traits, impls, defs, main, mainMod, imports) else if (streq(t, "Trait") == 1) parseTopTrait(file, tokens, i + 1, pkg, enums, traits, impls, defs, main, mainMod, imports) else if (streq(t, "Impl") == 1) parseTopImpl(file, tokens, i + 1, pkg, enums, traits, impls, defs, main, mainMod, imports) else if (streq(t, "Import") == 1) parseTopImport(file, tokens, i + 1, pkg, enums, traits, impls, defs, main, mainMod, imports) else if (streq(t, "Private") == 1) parseTopPrivateDef(file, tokens, i + 1, pkg, enums, traits, impls, defs, main, mainMod, imports) else if (streq(t, "Def") == 1) parseTopDef(file, tokens, i + 1, pkg, enums, traits, impls, defs, main, mainMod, imports) else if (streq(t, "Law") == 1) parseTopLaw(file, tokens, i + 1, pkg, enums, traits, impls, defs, main, mainMod, imports) else if (streq(t, "AtMain") == 1) parseTopMain(file, tokens, i + 1, pkg, enums, traits, impls, defs, imports) else parseTop(file, tokens, i + 1, pkg, enums, traits, impls, defs, main, mainMod, imports)
 
 def parseEnum(file: String, tokens: List, i: Int): List =
   for {
@@ -692,6 +701,11 @@ def implMethodName(traitName: String, forType: String, method: String): String =
 def parseTopDef(file: String, tokens: List, i: Int, pkg: String, enums: List, traits: List, impls: List, defs: List, main: Expr, mainMod: String, imports: List): Prog =
   for {
     d = parseDef(file, tokens, i, 0)
+  } yield parseTop(file, tokens, pIdx(d), pkg, enums, traits, impls, List.cons(pDef(d), defs), main, mainMod, imports)
+
+def parseTopLaw(file: String, tokens: List, i: Int, pkg: String, enums: List, traits: List, impls: List, defs: List, main: Expr, mainMod: String, imports: List): Prog =
+  for {
+    d = parseLaw(file, tokens, i)
   } yield parseTop(file, tokens, pIdx(d), pkg, enums, traits, impls, List.cons(pDef(d), defs), main, mainMod, imports)
 
 def parseTopPrivateDef(file: String, tokens: List, i: Int, pkg: String, enums: List, traits: List, impls: List, defs: List, main: Expr, mainMod: String, imports: List): Prog =

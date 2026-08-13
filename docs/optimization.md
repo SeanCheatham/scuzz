@@ -22,9 +22,8 @@ A stem-paired sidecar, following the existing overlay convention:
 
 ```text
 src/
-  Todo.scuzz          # meaning
+  Todo.scuzz          # meaning (defs + laws)
   Todo.scuzz_sim      # test-time substitution
-  Todo.scuzz_laws     # correctness spec
   Todo.scuzz_tune     # machine-specific execution strategy
 ```
 

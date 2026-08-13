@@ -281,6 +281,7 @@ mod tests {
             module: module.into(),
             name: name.into(),
             is_private: false,
+            is_law: false,
             type_params: vec![],
             params: vec![],
             ret: Type::String,

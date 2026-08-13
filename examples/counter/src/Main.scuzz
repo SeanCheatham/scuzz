@@ -1,3 +1,15 @@
+law countNonNeg: Bool =
+  Law.signalInt(0) >= 0
+
+law labelNonNeg: Bool =
+  Str.len(Law.signalStr(1)) >= 0
+
+law hasPlusButton: Bool =
+  Law.a11yHas("button:+1")
+
+law titleFromSim: Bool =
+  Law.a11yHas("text:SimCounter")
+
 @main def main: IO[Unit] =
   for {
     count = Signal.int(0)

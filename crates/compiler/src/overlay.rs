@@ -1,4 +1,4 @@
-//! Stem-paired `*.scuzz_sim` / `*.scuzz_laws` overlays for check / fuzz / TestRuntime.
+//! Stem-paired `*.scuzz_sim` overlays and in-source `law` residualization.
 
 use crate::ast::{Expr, ExprKind, FunDef, MainDef, Program, Type};
 use crate::parser::{parse, ParseError};
@@ -15,7 +15,6 @@ pub enum OverlayError {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OverlayKind {
     Sim,
-    Laws,
 }
 
 #[derive(Debug, Clone)]
@@ -27,22 +26,16 @@ pub struct OverlaySource {
     pub text: String,
 }
 
-/// Apply same-name sim replacements and attach pure laws. Returns the verify program
-/// (defs include laws) plus law names for residual emission under TestRuntime.
+/// Apply same-name sim replacements. In-source `law` defs stay on the program;
+/// call [`collect_law_names`] then [`residualize_laws`] under verify / check.
 pub fn apply_overlays(
     mut live: Program,
     overlays: &[OverlaySource],
-) -> Result<(Program, Vec<String>), OverlayError> {
-    let sims: Vec<&OverlaySource> = overlays
-        .iter()
-        .filter(|o| o.kind == OverlayKind::Sim)
-        .collect();
-    let laws: Vec<&OverlaySource> = overlays
-        .iter()
-        .filter(|o| o.kind == OverlayKind::Laws)
-        .collect();
-
-    for sim in &sims {
+) -> Result<Program, OverlayError> {
+    for sim in overlays {
+        if sim.kind != OverlayKind::Sim {
+            continue;
+        }
         let prog =
             parse(&sim.text).map_err(|e| OverlayError::Msg(format!("{}: {e}", sim.label)))?;
         if !prog.main.name.is_empty() {
@@ -63,54 +56,38 @@ pub fn apply_overlays(
             replace_sim_def(&mut live, &d, &sim.label)?;
         }
     }
+    Ok(live)
+}
 
-    let mut law_names = Vec::new();
-    for law in &laws {
-        let prog =
-            parse(&law.text).map_err(|e| OverlayError::Msg(format!("{}: {e}", law.label)))?;
-        if !prog.main.name.is_empty() {
+/// Names of in-source `law` declarations, in source order. Rejects a law that
+/// collides with a non-law def (already a parse duplicate) and checks return type.
+pub fn collect_law_names(program: &Program) -> Result<Vec<String>, OverlayError> {
+    let mut names = Vec::new();
+    for d in &program.defs {
+        if !d.is_law {
+            continue;
+        }
+        if !matches!(d.ret, Type::Bool | Type::Int) {
             return Err(OverlayError::Msg(format!(
-                "{}: *.scuzz_laws must not define @main",
-                law.label
+                "law `{}` must return Bool (or Int), got {:?}",
+                d.name, d.ret
             )));
         }
-        if !prog.enums.is_empty() {
+        if !d.params.is_empty() {
             return Err(OverlayError::Msg(format!(
-                "{}: *.scuzz_laws must not define enums",
-                law.label
+                "law `{}` must be nullary for residual checks",
+                d.name
             )));
         }
-        for d in prog.defs {
-            let mut d = d;
-            d.module = law.stem.clone();
-            if live
-                .defs
-                .iter()
-                .any(|x| x.module == d.module && x.name == d.name)
-            {
-                return Err(OverlayError::Msg(format!(
-                    "{}: law `{}` collides with a live/sim def",
-                    law.label, d.name
-                )));
-            }
-            if !matches!(d.ret, Type::Bool | Type::Int) {
-                return Err(OverlayError::Msg(format!(
-                    "{}: law `{}` must return Bool (or Int), got {:?}",
-                    law.label, d.name, d.ret
-                )));
-            }
-            if !d.params.is_empty() {
-                return Err(OverlayError::Msg(format!(
-                    "{}: law `{}` must be nullary for residual checks",
-                    law.label, d.name
-                )));
-            }
-            law_names.push(d.name.clone());
-            live.defs.push(d);
-        }
+        names.push(d.name.clone());
     }
+    Ok(names)
+}
 
-    Ok((live, law_names))
+/// Drop `law` defs so live `build` / `run` never emit them.
+pub fn erase_laws(program: &mut Program) {
+    program.defs.retain(|d| !d.is_law);
+    program.law_names.clear();
 }
 
 fn replace_sim_def(live: &mut Program, sim: &FunDef, label: &str) -> Result<(), OverlayError> {
@@ -125,6 +102,12 @@ fn replace_sim_def(live: &mut Program, sim: &FunDef, label: &str) -> Result<(), 
         )));
     };
     let live_def = &live.defs[idx];
+    if live_def.is_law {
+        return Err(OverlayError::Msg(format!(
+            "{label}: sim def `{}` cannot replace a law",
+            sim.name
+        )));
+    }
     if live_def.params.len() != sim.params.len() {
         return Err(OverlayError::Msg(format!(
             "{label}: sim def `{}` arity mismatch (live {}, sim {})",
@@ -189,17 +172,12 @@ pub fn residualize_laws(program: &mut Program, law_names: &[String]) {
     };
 }
 
-/// True when `path` is a stem-paired overlay (`*.scuzz_sim` / `*.scuzz_laws`).
+/// True when `path` is a stem-paired `*.scuzz_sim` overlay.
 pub fn overlay_kind_from_path(path: &std::path::Path) -> Option<(String, OverlayKind)> {
     let name = path.file_name()?.to_str()?;
     if let Some(stem) = name.strip_suffix(".scuzz_sim") {
         if !stem.is_empty() {
             return Some((stem.to_string(), OverlayKind::Sim));
-        }
-    }
-    if let Some(stem) = name.strip_suffix(".scuzz_laws") {
-        if !stem.is_empty() {
-            return Some((stem.to_string(), OverlayKind::Laws));
         }
     }
     None
@@ -211,34 +189,57 @@ mod tests {
     use crate::parser::parse_sources;
 
     #[test]
-    fn sim_replaces_and_laws_attach() {
+    fn sim_replaces_and_in_source_laws_attach() {
         let live = parse_sources(&[(
             "Main.scuzz".into(),
-            "def title(): String = \"Live\"\n@main def main: IO[Unit] = IO.println(title())\n"
+            "def title(): String = \"Live\"\nlaw always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(title())\n"
                 .into(),
         )])
         .unwrap();
-        let overlays = vec![
-            OverlaySource {
-                stem: "Main".into(),
-                kind: OverlayKind::Sim,
-                label: "Main.scuzz_sim".into(),
-                text: "def title(): String = \"Sim\"\n".into(),
-            },
-            OverlaySource {
-                stem: "Main".into(),
-                kind: OverlayKind::Laws,
-                label: "Main.scuzz_laws".into(),
-                text: "def always(): Bool = 1 == 1\n".into(),
-            },
-        ];
-        let (prog, laws) = apply_overlays(live, &overlays).unwrap();
+        let overlays = vec![OverlaySource {
+            stem: "Main".into(),
+            kind: OverlayKind::Sim,
+            label: "Main.scuzz_sim".into(),
+            text: "def title(): String = \"Sim\"\n".into(),
+        }];
+        let prog = apply_overlays(live, &overlays).unwrap();
+        let laws = collect_law_names(&prog).unwrap();
         assert_eq!(laws, vec!["always".to_string()]);
         let title = prog.defs.iter().find(|d| d.name == "title").unwrap();
         match &title.body.kind {
             crate::ast::ExprKind::StrLit(s) => assert_eq!(s, "Sim"),
             other => panic!("expected sim body, got {other:?}"),
         }
+        let law = prog.defs.iter().find(|d| d.name == "always").unwrap();
+        assert!(law.is_law);
+    }
+
+    #[test]
+    fn erase_drops_laws_from_live() {
+        let mut live = parse_sources(&[(
+            "Main.scuzz".into(),
+            "law always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
+        )])
+        .unwrap();
+        assert_eq!(live.defs.len(), 1);
+        erase_laws(&mut live);
+        assert!(live.defs.is_empty());
+    }
+
+    #[test]
+    fn sim_cannot_replace_a_law() {
+        let live = parse_sources(&[(
+            "Main.scuzz".into(),
+            "law title: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
+        )])
+        .unwrap();
+        let overlays = vec![OverlaySource {
+            stem: "Main".into(),
+            kind: OverlayKind::Sim,
+            label: "Main.scuzz_sim".into(),
+            text: "def title(): Bool = 1 == 1\n".into(),
+        }];
+        assert!(apply_overlays(live, &overlays).is_err());
     }
 
     #[test]

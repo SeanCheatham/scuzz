@@ -2,7 +2,7 @@
 
 use crate::format::format_source;
 use crate::lower::lower_program;
-use crate::overlay::{apply_overlays, residualize_laws};
+use crate::overlay::{apply_overlays, collect_law_names, residualize_laws};
 use crate::parser::{parse_sources, ParseError};
 use crate::span::{offset_to_line_col, Span};
 use crate::typ::{typecheck, TypeError};
@@ -198,7 +198,7 @@ fn format_check_src(project_dir: &Path) -> Result<Vec<Diagnostic>> {
     Ok(diags)
 }
 
-/// Format-check `src/`, then parse, lower, and typecheck (live + sim twins + pure laws).
+/// Format-check `src/`, then parse, lower, and typecheck (live + sim twins + in-source laws).
 /// No LLVM emit or link. Format mismatches and type errors share one diagnostic list.
 pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
     let mut diags = format_check_src(project_dir)?;
@@ -214,13 +214,21 @@ pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
             return Ok(diags);
         }
     };
-    let (mut program, law_names) = match apply_overlays(program, &resolved.overlays) {
-        Ok(v) => v,
+    let program = match apply_overlays(program, &resolved.overlays) {
+        Ok(p) => p,
         Err(e) => {
             diags.push(Diagnostic::error(e.to_string()));
             return Ok(diags);
         }
     };
+    let law_names = match collect_law_names(&program) {
+        Ok(n) => n,
+        Err(e) => {
+            diags.push(Diagnostic::error(e.to_string()));
+            return Ok(diags);
+        }
+    };
+    let mut program = program;
     // Residualize so Law.assert / law calls typecheck the same way as verify builds.
     residualize_laws(&mut program, &law_names);
     program.law_names = law_names;

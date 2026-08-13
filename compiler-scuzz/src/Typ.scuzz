@@ -12,7 +12,7 @@ def paramTy(p: Param): Type =
 
 def declRet(d: Def): Type =
   d match {
-    case Def(name, params, ret, body, module, isPrivate, typeParams) => ret
+    case Def(name, params, ret, body, module, isPrivate, typeParams, isLaw) => ret
   }
 
 def findEnum(enums: List, name: String): List =
@@ -138,7 +138,7 @@ def expandOneImplMethods(module: String, traitName: String, forType: String, met
 
 def expandOneImplMethod(module: String, traitName: String, forType: String, m: ImplMethod): Def =
   m match {
-    case ImplMethod.Method(name, params, ret, body) => Def.Def(implMethodName(traitName, forType, name), List.cons(Param.Param("self", Type.Adt(forType)), params), ret, body, module, 0, List.empty())
+    case ImplMethod.Method(name, params, ret, body) => Def.Def(implMethodName(traitName, forType, name), List.cons(Param.Param("self", Type.Adt(forType)), params), ret, body, module, 0, List.empty(), 0)
   }
 
 def importDupKey(im: Import): String =
@@ -1183,7 +1183,7 @@ def resolveFieldsDefs(defs: List, enums: List, imports: List, allDefs: List, acc
 
 def resolveFieldsDef(d: Def, enums: List, imports: List, allDefs: List): Def =
   d match {
-    case Def(name, params, ret, body, module, isPrivate, typeParams) => Def.Def(name, params, ret, resolveFieldsExpr(body, enums, imports, module, allDefs, bindParams(params, enums, imports, module, typeParams, List.empty())), module, isPrivate, typeParams)
+    case Def(name, params, ret, body, module, isPrivate, typeParams, isLaw) => Def.Def(name, params, ret, resolveFieldsExpr(body, enums, imports, module, allDefs, bindParams(params, enums, imports, module, typeParams, List.empty())), module, isPrivate, typeParams, isLaw)
   }
 
 def resolveFieldsExpr(e: Expr, enums: List, imports: List, mod: String, allDefs: List, env: List): Expr =
@@ -1495,7 +1495,7 @@ def elaborateDefsOne(d: Def, rest: List, enums: List, imports: List, allDefs: Li
     env = bindParams(defParams(d), enums, imports, defModule(d), tparams, List.empty())
     expected = resolveTypeIn(declRet(d), enums, imports, defModule(d), tparams)
     r = elaborateExpr(defBody(d), enums, mkFuns(defModule(d), allDefs, imports), env, List.cons(expected, List.empty()), tparams)
-    d2 = Def.Def(defName(d), defParams(d), defRet(d), elabExprOf(r), defModule(d), defIsPrivate(d), tparams)
+    d2 = Def.Def(defName(d), defParams(d), defRet(d), elabExprOf(r), defModule(d), defIsPrivate(d), tparams, defIsLaw(d))
   } yield if (tyIsOk(elabResOf(r)) == 0) List.cons(List.empty(), List.cons(elabResOf(r), List.empty())) else elaborateDefs(rest, enums, imports, allDefs, List.cons(d2, acc))
 
 def elaborateMain(prog: Prog, enums: List, imports: List, allDefs: List, defs2: List): List =
@@ -2021,7 +2021,7 @@ def specConcretizeDefs(defs: List, clones: List, enums: List, imports: List, acc
   if (List.isEmpty(defs) == 1) List.reverse(acc) else specConcretizeDefs(List.tail(defs), clones, enums, imports, List.cons(specConcretizeDef(List.head(defs), clones, enums, imports), acc))
 
 def specConcretizeDef(d: Def, clones: List, enums: List, imports: List): Def =
-  Def.Def(defName(d), specConcretizeParams(defParams(d), clones, enums, imports, defModule(d), List.empty()), concretizeType(resolveType(declRet(d), enums, imports, defModule(d)), clones), rewriteEnumRefs(defBody(d), clones), defModule(d), defIsPrivate(d), defTypeParams(d))
+  Def.Def(defName(d), specConcretizeParams(defParams(d), clones, enums, imports, defModule(d), List.empty()), concretizeType(resolveType(declRet(d), enums, imports, defModule(d)), clones), rewriteEnumRefs(defBody(d), clones), defModule(d), defIsPrivate(d), defTypeParams(d), defIsLaw(d))
 
 def specConcretizeParams(params: List, clones: List, enums: List, imports: List, mod: String, acc: List): List =
   if (List.isEmpty(params) == 1) List.reverse(acc) else specConcretizeParams(List.tail(params), clones, enums, imports, mod, List.cons(Param.Param(paramName(List.head(params)), concretizeType(resolveType(paramTy(List.head(params)), enums, imports, mod), clones)), acc))
@@ -2134,7 +2134,7 @@ def monoDefsOne(d: Def, rest: List, enums: List, imports: List, allDefs: List, a
     tparams = defTypeParams(d)
     env = bindParams(defParams(d), enums, imports, defModule(d), tparams, List.empty())
     pack = monoExpr(defBody(d), enums, mkFuns(defModule(d), allDefs, imports), env, specs)
-    d2 = Def.Def(defName(d), defParams(d), defRet(d), monoE(pack), defModule(d), defIsPrivate(d), tparams)
+    d2 = Def.Def(defName(d), defParams(d), defRet(d), monoE(pack), defModule(d), defIsPrivate(d), tparams, defIsLaw(d))
   } yield monoDefs(rest, enums, imports, allDefs, List.cons(d2, acc), monoS(pack))
 
 def monoExpr(e: Expr, enums: List, funs: List, env: List, specs: List): List =
@@ -2324,6 +2324,6 @@ def unifyParams(params: List, argTys: List, enums: List, imports: List, mod: Str
 def monoCallGenericOk(d: Def, args: List, span: Span, enums: List, imports: List, specs: List, tparams: List, subst: List): List =
   for {
     mangled = monoDefName(defName(d), subst, tparams)
-    specs2 = if (findSpecByName(specs, mangled) == 1) specs else List.cons(Def.Def(mangled, specializeParams(defParams(d), enums, imports, defModule(d), tparams, subst, List.empty()), applySubst(resolveTypeIn(declRet(d), enums, imports, defModule(d), tparams), subst), substNodeTargs(defBody(d), subst), defModule(d), defIsPrivate(d), List.empty()), specs)
+    specs2 = if (findSpecByName(specs, mangled) == 1) specs else List.cons(Def.Def(mangled, specializeParams(defParams(d), enums, imports, defModule(d), tparams, subst, List.empty()), applySubst(resolveTypeIn(declRet(d), enums, imports, defModule(d), tparams), subst), substNodeTargs(defBody(d), subst), defModule(d), defIsPrivate(d), List.empty(), 0), specs)
   } yield monoPack(Expr.Call(mangled, args, span), specs2)
 

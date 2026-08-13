@@ -67,7 +67,7 @@ def lowerDefs(defs: List, enums: List, imports: List, acc: List): List =
 
 def lowerDef(d: Def, enums: List, imports: List): Def =
   d match {
-    case Def(name, params, ret, body, module, isPrivate, typeParams) => Def.Def(name, params, ret, lowerExpr(body, enums, imports, module), module, isPrivate, typeParams)
+    case Def(name, params, ret, body, module, isPrivate, typeParams, isLaw) => Def.Def(name, params, ret, lowerExpr(body, enums, imports, module), module, isPrivate, typeParams, isLaw)
   }
 
 def lowerExpr(e: Expr, enums: List, imports: List, mod: String): Expr =

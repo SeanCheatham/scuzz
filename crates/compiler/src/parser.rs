@@ -266,6 +266,7 @@ impl Parser {
                     defs.push(self.parse_def(true)?);
                 }
                 Token::Def => defs.push(self.parse_def(false)?),
+                Token::Law => defs.push(self.parse_law()?),
                 Token::AtMain => {
                     if !main.name.is_empty() {
                         return Err(self.err("multiple @main"));
@@ -275,7 +276,7 @@ impl Parser {
                 Token::Eof => break,
                 other => {
                     return Err(self.err(format!(
-                    "expected enum/record/trait/impl/import/def/private def/@main, got {other:?}"
+                    "expected enum/record/trait/impl/import/def/private def/law/@main, got {other:?}"
                 )))
                 }
             }
@@ -343,8 +344,33 @@ impl Parser {
             module: self.module.clone(),
             name,
             is_private,
+            is_law: false,
             type_params,
             params,
+            ret,
+            body,
+        })
+    }
+
+    fn parse_law(&mut self) -> Result<FunDef, ParseError> {
+        self.expect(&Token::Law)?;
+        let (name, _) = self.expect_ident()?;
+        self.expect(&Token::Colon)?;
+        let ret = self.parse_type()?;
+        if !matches!(ret, Type::Bool | Type::Int) {
+            return Err(self.err(format!(
+                "law `{name}` must return Bool (or Int), got {ret:?}"
+            )));
+        }
+        self.expect(&Token::Eq)?;
+        let body = self.parse_expr()?;
+        Ok(FunDef {
+            module: self.module.clone(),
+            name,
+            is_private: false,
+            is_law: true,
+            type_params: Vec::new(),
+            params: Vec::new(),
             ret,
             body,
         })
@@ -1491,6 +1517,29 @@ def tag(): String = helper()
         assert!(p.defs[0].is_private);
         assert!(!p.defs[1].is_private);
         assert_eq!(p.defs[0].name, "helper");
+    }
+
+    #[test]
+    fn parse_law_declaration() {
+        let src = r#"
+law always: Bool = 1 == 1
+@main def main: IO[Unit] = IO.println("ok")
+"#;
+        let p = parse(src).unwrap();
+        assert_eq!(p.defs.len(), 1);
+        assert!(p.defs[0].is_law);
+        assert_eq!(p.defs[0].name, "always");
+        assert!(matches!(p.defs[0].ret, Type::Bool));
+        assert!(p.defs[0].params.is_empty());
+    }
+
+    #[test]
+    fn parse_law_rejects_non_bool() {
+        let src = r#"
+law bad: String = "x"
+@main def main: IO[Unit] = IO.println("ok")
+"#;
+        assert!(parse(src).is_err());
     }
 
     #[test]

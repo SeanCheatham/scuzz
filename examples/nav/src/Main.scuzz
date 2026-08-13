@@ -1,3 +1,12 @@
+law countNonNeg: Bool =
+  Law.signalInt(0) >= 0
+
+law hasHome: Bool =
+  Law.a11yHas("button:Home")
+
+law hasOther: Bool =
+  Law.a11yHas("button:Other")
+
 @main def main: IO[Unit] =
   for {
     page = Signal.int(0)

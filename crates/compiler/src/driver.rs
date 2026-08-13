@@ -1,7 +1,10 @@
 use crate::codegen::emit_llvm;
 use crate::lower::lower_program;
 use crate::manifest::{load_manifest, Manifest};
-use crate::overlay::{apply_overlays, overlay_kind_from_path, residualize_laws, OverlaySource};
+use crate::overlay::{
+    apply_overlays, collect_law_names, erase_laws, overlay_kind_from_path, residualize_laws,
+    OverlaySource,
+};
 use crate::parser::parse_sources;
 use crate::typ::typecheck;
 use anyhow::{bail, Context, Result};
@@ -21,7 +24,7 @@ pub struct CompileOptions {
     pub clang: String,
     /// Skip clang link when fingerprint matches (incremental).
     pub incremental: bool,
-    /// Apply `*.scuzz_sim` / residual `*.scuzz_laws` (fuzz / TestRuntime builds).
+    /// Apply `*.scuzz_sim` and residual in-source `law` decls (fuzz / TestRuntime builds).
     pub verify: bool,
 }
 
@@ -47,7 +50,7 @@ pub struct ResolvedSource {
 pub struct ResolvedProject {
     pub root_manifest: Manifest,
     pub sources: Vec<ResolvedSource>,
-    /// Stem-paired sim/laws overlays (not loaded for live `build`/`run`).
+    /// Stem-paired sim overlays (not loaded for live `build`/`run`).
     pub overlays: Vec<OverlaySource>,
     /// Canonical package directories in visit order (deps first).
     pub package_dirs: Vec<PathBuf>,
@@ -104,16 +107,17 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
     }
 
     let program = parse_sources(&named).map_err(|e| anyhow::anyhow!("parse error: {e}"))?;
-    let (mut program, law_names) = if opts.verify {
-        let (p, laws) =
-            apply_overlays(program, &resolved.overlays).map_err(|e| anyhow::anyhow!("{e}"))?;
-        (p, laws)
+    let mut program = if opts.verify {
+        apply_overlays(program, &resolved.overlays).map_err(|e| anyhow::anyhow!("{e}"))?
     } else {
-        (program, Vec::new())
+        program
     };
     if opts.verify {
+        let law_names = collect_law_names(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
         residualize_laws(&mut program, &law_names);
         program.law_names = law_names;
+    } else {
+        erase_laws(&mut program);
     }
     let program = lower_program(program);
     let program = crate::typ::expand_impls(program).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -538,6 +542,15 @@ fn collect_overlays(
             collect_overlays(&path, out)?;
         } else if let Some((stem, kind)) = overlay_kind_from_path(&path) {
             out.push((path, stem, kind));
+        } else if path
+            .file_name()
+            .and_then(|n| n.to_str())
+            .is_some_and(|n| n.ends_with(".scuzz_laws"))
+        {
+            anyhow::bail!(
+                "{}: *.scuzz_laws is removed; declare `law name: Bool = …` in the live *.scuzz module",
+                path.display()
+            );
         }
     }
     Ok(())

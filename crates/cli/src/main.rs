@@ -36,7 +36,7 @@ enum Commands {
         /// Force a full rebuild (ignore incremental fingerprint)
         #[arg(long)]
         full: bool,
-        /// Apply `*.scuzz_sim` + residual `*.scuzz_laws` (TestRuntime / fuzz graph)
+        /// Apply `*.scuzz_sim` + residual in-source `law` decls (TestRuntime / fuzz graph)
         #[arg(long)]
         verify: bool,
     },
@@ -290,10 +290,7 @@ main = "Main"
   IO.println("Hello, Scuzz!").flatMap(_ => IO.println("ready."))
 "#,
                 )?;
-                eprintln!(
-                    "created {} — next: scuzz test && scuzz run",
-                    dir.display()
-                );
+                eprintln!("created {} — next: scuzz test && scuzz run", dir.display());
             }
             Ok(ExitCode::SUCCESS)
         }
@@ -337,10 +334,7 @@ fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
             .unwrap_or(Path::new("."))
             .join("snapshot.png");
         apply_ui_env(&mut cmd, &manifest, &snap, /*tap*/ false);
-        eprintln!(
-            "scuzz run --headless → snapshot {}",
-            snap.display()
-        );
+        eprintln!("scuzz run --headless → snapshot {}", snap.display());
     } else if use_mobile {
         cmd.env("SCUZZ_UI_RUNTIME", "mobile");
         cmd.env("SCUZZ_MOBILE_SHELL", "1");
@@ -520,7 +514,8 @@ fn fmt_project(path: &Path, check: bool) -> Result<ExitCode> {
     collect_scuzz_sources(&src, &mut paths)?;
     for p in paths {
         let text = std::fs::read_to_string(&p)?;
-        let formatted = format_source(&text).with_context(|| format!("formatting {}", p.display()))?;
+        let formatted =
+            format_source(&text).with_context(|| format!("formatting {}", p.display()))?;
         if formatted != text {
             if check {
                 eprintln!("would reformat {}", p.display());
@@ -638,7 +633,13 @@ fn run_goldens(project_dir: &Path, exe: &Path, update: bool, pixels: bool) -> Re
     if dumps.is_empty() {
         let base = goldens.join(format!("{name}.dump"));
         let tap = goldens.join(format!("{name}_after_tap.dump"));
-        capture_structural(exe, &manifest, &base, out_dir.join(format!("{name}.actual.png")), false)?;
+        capture_structural(
+            exe,
+            &manifest,
+            &base,
+            out_dir.join(format!("{name}.actual.png")),
+            false,
+        )?;
         capture_structural(
             exe,
             &manifest,
@@ -651,7 +652,10 @@ fn run_goldens(project_dir: &Path, exe: &Path, update: bool, pixels: bool) -> Re
             let base_png = goldens.join(format!("{name}.png"));
             let tap_png = goldens.join(format!("{name}_after_tap.png"));
             std::fs::copy(out_dir.join(format!("{name}.actual.png")), &base_png)?;
-            std::fs::copy(out_dir.join(format!("{name}_after_tap.actual.png")), &tap_png)?;
+            std::fs::copy(
+                out_dir.join(format!("{name}_after_tap.actual.png")),
+                &tap_png,
+            )?;
             eprintln!("seeded pixel goldens: {}.png {}_after_tap.png", name, name);
         }
         return Ok(());
@@ -745,8 +749,8 @@ fn build(
     } else {
         project_dir.join(out_dir)
     };
-    let runtime_dir = find_runtime_dir(&std::env::current_dir()?)
-        .or_else(|_| find_runtime_dir(&project_dir))?;
+    let runtime_dir =
+        find_runtime_dir(&std::env::current_dir()?).or_else(|_| find_runtime_dir(&project_dir))?;
     let clang = std::env::var("SCUZZ_CLANG").unwrap_or_else(|_| "clang".into());
     compile_project(&CompileOptions {
         project_dir,
@@ -769,8 +773,8 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
     };
     std::fs::create_dir_all(&package_out)?;
 
-    let runtime_dir = find_runtime_dir(&std::env::current_dir()?)
-        .or_else(|_| find_runtime_dir(&project_dir))?;
+    let runtime_dir =
+        find_runtime_dir(&std::env::current_dir()?).or_else(|_| find_runtime_dir(&project_dir))?;
     let mobile_dir = runtime_dir
         .parent()
         .map(|p| p.join("embedder-mobile"))

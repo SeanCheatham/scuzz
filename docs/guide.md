@@ -84,16 +84,15 @@ App correctness prefers **mutation, fuzzing, property-oriented laws, simulation,
 
 ```text
 src/
-  Todo.scuzz           # live module
+  Todo.scuzz           # live module: defs + laws (oracles)
   Todo.scuzz_sim       # same-name defs replace live under fuzz / TestRuntime / mutation
-  Todo.scuzz_laws      # pure laws over signals / a11y dump / module vals
 ```
 
 - Prefer sim overlays for app policy (API base URL, a `Backend` value); blessed kits stay one implementation with TestRuntime fakes on the wire
-- Laws are nullary pure `Bool`/`Int` defs; residual `Law.assert` runs only under `SCUZZ_TESTRT=1` (fuzz / mutation)
+- Laws are top-level `law name: Bool = …` in the live module; residual `Law.assert` runs only under `SCUZZ_TESTRT=1` (fuzz / mutation); live `build` / `run` erase them
 - Observation builtins: `Law.signalInt(id)`, `Law.signalStr(id)`, `Law.signalListLen(id)`, `Law.signalListAt(id, i)`, `Law.a11yHas(needle)` (signal store + stashed a11y dump)
-- No `src/test` twin trees — only stem-paired `*.scuzz_sim` / `*.scuzz_laws`; no third-party test or mutation frameworks
-- Example: `examples/counter` + `examples/shared` (`Shared.scuzz_sim` swaps `counterTitle`; `Main.scuzz_laws` checks count / mapped label / button / sim title)
+- No `src/test` twin trees — only stem-paired `*.scuzz_sim`; no third-party test or mutation frameworks
+- Example: `examples/counter` + `examples/shared` (`Shared.scuzz_sim` swaps `counterTitle`; `Main.scuzz` laws check count / mapped label / button / sim title)
 
 **Today:**
 

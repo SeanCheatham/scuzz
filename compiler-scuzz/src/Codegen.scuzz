@@ -186,42 +186,47 @@ def findWildArmPat(pat: Pattern, arm: MatchArm, rest: List): List =
 
 def defName(d: Def): String =
   d match {
-    case Def(name, params, ret, body, module, isPrivate, typeParams) => name
+    case Def(name, params, ret, body, module, isPrivate, typeParams, isLaw) => name
   }
 
 def defParams(d: Def): List =
   d match {
-    case Def(name, params, ret, body, module, isPrivate, typeParams) => params
+    case Def(name, params, ret, body, module, isPrivate, typeParams, isLaw) => params
   }
 
 def defRet(d: Def): Type =
   d match {
-    case Def(name, params, ret, body, module, isPrivate, typeParams) => ret
+    case Def(name, params, ret, body, module, isPrivate, typeParams, isLaw) => ret
   }
 
 def defBody(d: Def): Expr =
   d match {
-    case Def(name, params, ret, body, module, isPrivate, typeParams) => body
+    case Def(name, params, ret, body, module, isPrivate, typeParams, isLaw) => body
   }
 
 def defModule(d: Def): String =
   d match {
-    case Def(name, params, ret, body, module, isPrivate, typeParams) => module
+    case Def(name, params, ret, body, module, isPrivate, typeParams, isLaw) => module
   }
 
 def defIsPrivate(d: Def): Int =
   d match {
-    case Def(name, params, ret, body, module, isPrivate, typeParams) => isPrivate
+    case Def(name, params, ret, body, module, isPrivate, typeParams, isLaw) => isPrivate
   }
 
 def defTypeParams(d: Def): List =
   d match {
-    case Def(name, params, ret, body, module, isPrivate, typeParams) => typeParams
+    case Def(name, params, ret, body, module, isPrivate, typeParams, isLaw) => typeParams
+  }
+
+def defIsLaw(d: Def): Int =
+  d match {
+    case Def(name, params, ret, body, module, isPrivate, typeParams, isLaw) => isLaw
   }
 
 def setDefModule(d: Def, mod: String): Def =
   d match {
-    case Def(name, params, ret, body, module, isPrivate, typeParams) => Def.Def(name, params, ret, body, mod, isPrivate, typeParams)
+    case Def(name, params, ret, body, module, isPrivate, typeParams, isLaw) => Def.Def(name, params, ret, body, mod, isPrivate, typeParams, isLaw)
   }
 
 def stampDefsModule(defs: List, mod: String): List =

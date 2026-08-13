@@ -84,6 +84,8 @@ pub struct FunDef {
     pub name: String,
     /// `private def` — visible only within `module`. Default public.
     pub is_private: bool,
+    /// Top-level `law name: Bool = …` — erased from live builds; residualized under verify.
+    pub is_law: bool,
     /// `def foo[T](…)` — monomorphized before codegen.
     pub type_params: Vec<String>,
     pub params: Vec<Param>,

@@ -164,6 +164,14 @@ fn pretty_type(t: &Type) -> String {
 }
 
 fn pretty_def(d: &FunDef) -> String {
+    if d.is_law {
+        return format!(
+            "law {}: {} =\n{}",
+            d.name,
+            pretty_type(&d.ret),
+            pretty_expr(&d.body, 1)
+        );
+    }
     let params: Vec<String> = d
         .params
         .iter()
@@ -478,6 +486,19 @@ def tag(): String = helper()
         assert!(out.contains("private def helper(): String ="));
         assert!(out.contains("def tag(): String ="));
         assert!(!out.contains("private def tag"));
+    }
+
+    #[test]
+    fn formats_law() {
+        let src = r#"
+law always: Bool = 1 == 1
+@main def main: IO[Unit] = IO.println("ok")
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("law always: Bool ="));
+        assert!(!out.contains("def always"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
     }
 
     #[test]
