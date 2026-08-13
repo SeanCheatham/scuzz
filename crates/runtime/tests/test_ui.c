@@ -4,9 +4,11 @@
 
 #include <assert.h>
 #include <math.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 static int files_equal(const char *a, const char *b) {
   FILE *fa = fopen(a, "rb");
@@ -338,6 +340,52 @@ static void test_ui_run_rebuild(void) {
   assert(r.ok);
   assert(sz_signal_int_get(count) == 7);
   sz_signal_int_free(count);
+}
+
+typedef struct {
+  SzSignalInt *count;
+  int calls;
+} KeepEnv;
+
+static SzView *keep_factory(void *env) {
+  KeepEnv *e = (KeepEnv *)env;
+  SzView *root;
+  e->calls++;
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_text_signal_int(e->count, "n="));
+  return root;
+}
+
+static void *stamp_bump(void *arg) {
+  struct timespec ts;
+  ts.tv_sec = 0;
+  ts.tv_nsec = 50000000L;
+  nanosleep(&ts, NULL);
+  write_stamp((const char *)arg, "bump");
+  return NULL;
+}
+
+static void test_ui_run_rebuild_keepalive(void) {
+  KeepEnv env;
+  pthread_t th;
+  SzIoResult r;
+  const char *stamp = "/tmp/scuzz_ui_keepalive.stamp";
+
+  env.count = sz_signal_int(3);
+  env.calls = 0;
+  write_stamp(stamp, "0");
+  setenv("SCUZZ_UI_RELOAD_STAMP", stamp, 1);
+  setenv("SCUZZ_LIVE_FRAMES", "8", 1);
+  assert(pthread_create(&th, NULL, stamp_bump, (void *)stamp) == 0);
+  r = sz_io_unsafe_run(sz_ui_run_rebuild(keep_factory, &env));
+  pthread_join(th, NULL);
+  unsetenv("SCUZZ_UI_RELOAD_STAMP");
+  unsetenv("SCUZZ_LIVE_FRAMES");
+  assert(r.ok);
+  assert(sz_signal_int_get(env.count) == 3);
+  assert(env.calls >= 2);
+  sz_signal_int_free(env.count);
+  remove(stamp);
 }
 
 typedef struct {
@@ -1189,6 +1237,7 @@ int main(void) {
   test_replace_root_keeps_signals();
   test_watch_rebuild_keeps_signals();
   test_ui_run_rebuild();
+  test_ui_run_rebuild_keepalive();
   test_button_set_and_show_when();
   test_widgets();
   test_expanded_column();

@@ -360,6 +360,25 @@ static void *thunk_run_rebuild(void *env) {
         nanosleep(&ts, NULL);
       }
     } while (sz_embedder_alive());
+  } else if (stamp && stamp[0]) {
+    const char *max_frames_env = getenv("SCUZZ_LIVE_FRAMES");
+    int64_t max_frames =
+        (max_frames_env && atoi(max_frames_env) > 0) ? atoi(max_frames_env) : 0;
+    int64_t frame = 0;
+    do {
+      if (!sz_ui_pump_sync(session))
+        sz_panic("Ui.run live pump failed");
+      frame++;
+      if (max_frames > 0 && frame >= max_frames)
+        break;
+      {
+        struct timespec ts;
+        ts.tv_sec = 0;
+        ts.tv_nsec = 16000000L;
+        nanosleep(&ts, NULL);
+      }
+    } while (1);
+    sz_ui_demo_finish(session);
   } else {
     sz_ui_demo_finish(session);
   }

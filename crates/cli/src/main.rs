@@ -13,7 +13,7 @@ use std::process::{Command, ExitCode};
     name = "scuzz",
     version,
     about = "Scuzz Lang — Stage-0 bootstrap CLI (release CLI is compiler-scuzz)",
-    after_help = "Examples:\n  scuzz check\n  scuzz check --message-format=json\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n\nJSON diagnostics are the check protocol (LSP wraps `scuzz check`).\n`watch` / `run --watch` rebuild (and rerun); they do not hot-reload state."
+    after_help = "Examples:\n  scuzz check\n  scuzz check --message-format=json\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n\nJSON diagnostics are the check protocol (LSP wraps `scuzz check`).\n`watch` rebuilds. `run --watch` on [ui] keeps the process and stamp-reloads the View tree (not source hot reload)."
 )]
 struct Cli {
     /// Diagnostic format: human (default) or json (`check` protocol; LSP wraps check)
@@ -49,7 +49,7 @@ enum Commands {
         headless: bool,
         #[arg(long, default_value = "build")]
         out_dir: PathBuf,
-        /// Rebuild and rerun when sources change (process restart, not hot reload)
+        /// Keep running; [ui] stamp-reloads the View tree (not source hot reload)
         #[arg(long)]
         watch: bool,
     },
@@ -388,17 +388,117 @@ fn watch_build(path: &Path, out_dir: &Path) -> Result<ExitCode> {
 
 fn watch_run(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
     let project_dir = resolve_dir(path)?;
+    let manifest = load_manifest(&project_dir.join("scuzz.toml"))
+        .with_context(|| format!("reading {}/scuzz.toml", project_dir.display()))?;
+    if manifest.ui.is_none() {
+        eprintln!(
+            "scuzz run --watch {} (rebuild and rerun; not hot reload)",
+            project_dir.display()
+        );
+        loop {
+            match run_once(path, out_dir, headless) {
+                Ok(_) => {}
+                Err(e) => eprintln!("scuzz watch run error: {e:#}"),
+            }
+            let _ = wait_for_source_change(&project_dir, 60_000)?;
+        }
+    }
     eprintln!(
-        "scuzz run --watch {} (rebuild and rerun; not hot reload)",
+        "scuzz run --watch {} (keep process; stamp reloads View tree, not source)",
         project_dir.display()
     );
-    loop {
-        match run_once(path, out_dir, headless) {
-            Ok(_) => {}
-            Err(e) => eprintln!("scuzz watch run error: {e:#}"),
-        }
-        let _ = wait_for_source_change(&project_dir, 60_000)?;
+    watch_run_ui(&project_dir, path, out_dir, headless)
+}
+
+fn watch_run_ui(
+    project_dir: &Path,
+    path: &Path,
+    out_dir: &Path,
+    headless: bool,
+) -> Result<ExitCode> {
+    let stamp = project_dir.join("build").join("reload.stamp");
+    if let Some(parent) = stamp.parent() {
+        std::fs::create_dir_all(parent)?;
     }
+    std::fs::write(&stamp, "0\n")?;
+    let mut child: Option<std::process::Child> = None;
+    let mut gen: u64 = 0;
+    loop {
+        let dead = match child.as_mut() {
+            Some(c) => c.try_wait()?.is_some(),
+            None => true,
+        };
+        if dead {
+            if let Some(mut c) = child.take() {
+                let _ = c.wait();
+            }
+            match spawn_ui_keep(path, out_dir, headless, &stamp) {
+                Ok(c) => {
+                    eprintln!("scuzz run --watch: running (pid {})", c.id());
+                    child = Some(c);
+                }
+                Err(e) => eprintln!("scuzz watch run error: {e:#}"),
+            }
+        }
+        if wait_for_source_change(project_dir, 60_000)? {
+            gen += 1;
+            std::fs::write(&stamp, format!("{gen}\n"))?;
+            eprintln!("scuzz: view reload stamp {gen}");
+        }
+    }
+}
+
+fn spawn_ui_keep(
+    path: &Path,
+    out_dir: &Path,
+    headless: bool,
+    stamp: &Path,
+) -> Result<std::process::Child> {
+    let project_dir = resolve_dir(path)?;
+    let manifest = load_manifest(&project_dir.join("scuzz.toml"))?;
+    let default_rt = manifest
+        .ui
+        .as_ref()
+        .map(|u| u.default_runtime.as_str())
+        .unwrap_or("");
+    let env_rt = std::env::var("SCUZZ_UI_RUNTIME").unwrap_or_default();
+    let effective = if headless {
+        "headless".to_string()
+    } else if !env_rt.is_empty() {
+        env_rt
+    } else {
+        default_rt.to_string()
+    };
+    let use_headless = effective.eq_ignore_ascii_case("headless");
+    let use_mobile = effective.eq_ignore_ascii_case("mobile");
+    let use_window = effective.eq_ignore_ascii_case("window")
+        || (!use_headless && !use_mobile && manifest.ui.is_some());
+    let out = build(path, &out_dir.to_path_buf(), true, false)?;
+    let mut cmd = Command::new(&out.executable);
+    cmd.env("SCUZZ_UI_RELOAD_STAMP", stamp);
+    if use_headless {
+        cmd.env("SCUZZ_UI_RUNTIME", "headless");
+        if let Some(ui) = &manifest.ui {
+            cmd.env("SCUZZ_UI_WIDTH", ui.width().to_string());
+            cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
+            cmd.env("SCUZZ_UI_SCALE", ui.headless_scale.to_string());
+        }
+    } else if use_mobile {
+        cmd.env("SCUZZ_UI_RUNTIME", "mobile");
+        cmd.env("SCUZZ_MOBILE_SHELL", "1");
+        if let Some(ui) = &manifest.ui {
+            cmd.env("SCUZZ_UI_WIDTH", ui.width().to_string());
+            cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
+        }
+    } else if use_window {
+        cmd.env("SCUZZ_UI_RUNTIME", "window");
+        if let Some(ui) = &manifest.ui {
+            cmd.env("SCUZZ_UI_WIDTH", ui.width().to_string());
+            cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
+        }
+    }
+    cmd.spawn()
+        .with_context(|| format!("running {}", out.executable.display()))
 }
 
 fn fmt_project(path: &Path, check: bool) -> Result<ExitCode> {
