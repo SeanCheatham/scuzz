@@ -177,7 +177,7 @@ SzIo *sz_io_poll_writable(int fd); /* IO[Unit]; park until fd is writable */
 
 /* Run to completion on the calling thread.
  * Concurrency is cooperative single-threaded fibers: sleep/Queue/Deferred/poll
- * park (Net, Sys.readLine, httpGet DNS). race/both fork left-then-right onto a
+ * park (Net, Sys.readLine, Sys.exec, httpGet DNS). race/both fork left-then-right onto a
  * ready queue. Live / default: FIFO pick. When SCUZZ_SCHED_SEED is set (fuzz),
  * ready-fiber pick among n>1 is seed-driven (Lehmer/MINSTD). TestRuntime jumps
  * virtual time to the next wakeup when all fibers are blocked on timers. Live
@@ -325,7 +325,7 @@ SzIo *sz_fs_canonicalize(SzString *path);
 void sz_sys_set_args(int argc, char **argv);
 SzIo *sz_sys_args(void);
 SzIo *sz_sys_read_line(void); /* IO[String]: one stdin line; EOF → ""; parks on poll */
-SzIo *sz_sys_exec(SzString *cmd);
+SzIo *sz_sys_exec(SzString *cmd); /* IO[Int] exit code; parks on poll until the child exits */
 SzIo *sz_sys_spawn(SzString *cmd); /* IO[Int] pid; does not wait */
 SzIo *sz_sys_alive(int64_t pid);   /* IO[Int] 1 if running */
 SzIo *sz_sys_getenv(SzString *key);

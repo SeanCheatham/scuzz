@@ -2,6 +2,7 @@
 #include "scuzz_rt.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
@@ -190,18 +191,79 @@ SzIo *sz_sys_read_line(void) {
                        NULL);
 }
 
-static void *sys_exec_result(void *env) {
-  SzString *cmd = (SzString *)env;
-  SysResult *r = (SysResult *)sz_alloc(sizeof(SysResult));
-  const char *c = sz_string_cstr(cmd);
-  int status = system(c);
-  if (status < 0) {
+typedef struct ExecSt {
+  SzString *cmd;
+  int read_fd;
+  pid_t pid;
+} ExecSt;
+
+static void exec_free(ExecSt *st) {
+  int status = 0;
+  if (!st)
+    return;
+  if (st->read_fd >= 0) {
+    close(st->read_fd);
+    st->read_fd = -1;
+  }
+  if (st->pid > 0)
+    (void)waitpid(st->pid, &status, WNOHANG);
+  sz_free(st);
+}
+
+static void *sys_exec_start(void *env) {
+  ExecSt *st = (ExecSt *)env;
+  SysResult *r = (SysResult *)sz_alloc_zero(sizeof(SysResult));
+  int fds[2];
+  pid_t pid;
+  const char *c = sz_string_cstr(st->cmd);
+
+  if (pipe(fds) != 0) {
     r->is_err = 1;
-    r->as.err = sz_error_new(3, "Sys.exec: system() failed");
+    r->as.err = sz_error_new(3, "Sys.exec: pipe failed");
     return r;
   }
-  /* Normalize to exit code when possible. */
-  int code = status;
+  pid = fork();
+  if (pid < 0) {
+    close(fds[0]);
+    close(fds[1]);
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.exec: fork failed");
+    return r;
+  }
+  if (pid == 0) {
+    close(fds[0]);
+    execl("/bin/sh", "sh", "-c", c, (char *)NULL);
+    _exit(127);
+  }
+  close(fds[1]);
+  (void)fcntl(fds[0], F_SETFD, FD_CLOEXEC);
+  st->read_fd = fds[0];
+  st->pid = pid;
+  r->is_err = 0;
+  return r;
+}
+
+static void *sys_exec_reap(void *env) {
+  ExecSt *st = (ExecSt *)env;
+  SysResult *r = (SysResult *)sz_alloc_zero(sizeof(SysResult));
+  int status = 0;
+  int code;
+  pid_t w;
+
+  do {
+    w = waitpid(st->pid, &status, 0);
+  } while (w < 0 && errno == EINTR);
+  if (st->read_fd >= 0) {
+    close(st->read_fd);
+    st->read_fd = -1;
+  }
+  st->pid = 0;
+  if (w < 0) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.exec: wait failed");
+    return r;
+  }
+  code = status;
 #ifdef WIFEXITED
   if (WIFEXITED(status))
     code = WEXITSTATUS(status);
@@ -211,10 +273,42 @@ static void *sys_exec_result(void *env) {
   return r;
 }
 
+static SzIo *exec_after_poll(void *value, void *env) {
+  (void)value;
+  return sz_io_flatmap(sz_io_delay(sys_exec_reap, env), unwrap_sys, NULL);
+}
+
+static SzIo *exec_finish(void *code, void *env) {
+  exec_free((ExecSt *)env);
+  return sz_io_pure(code);
+}
+
+static SzIo *exec_on_err(SzError *err, void *env) {
+  exec_free((ExecSt *)env);
+  return sz_io_fail(err);
+}
+
+static SzIo *exec_after_start(void *value, void *env) {
+  ExecSt *st = (ExecSt *)env;
+  SysResult *r = (SysResult *)value;
+  SzIo *io;
+  if (!r || r->is_err)
+    return unwrap_sys(value, NULL);
+  sz_free(r);
+  io = sz_io_flatmap(sz_io_poll_readable(st->read_fd), exec_after_poll, st);
+  return sz_io_flatmap(io, exec_finish, st);
+}
+
 SzIo *sz_sys_exec(SzString *cmd) {
+  ExecSt *st;
+  SzIo *io;
   if (!cmd)
     sz_panic("sz_sys_exec(null)");
-  return sz_io_flatmap(sz_io_delay(sys_exec_result, cmd), unwrap_sys, NULL);
+  st = (ExecSt *)sz_alloc_zero(sizeof(ExecSt));
+  st->cmd = cmd;
+  st->read_fd = -1;
+  io = sz_io_flatmap(sz_io_delay(sys_exec_start, st), exec_after_start, st);
+  return sz_io_handle_error_with(io, exec_on_err, st);
 }
 
 static void *sys_spawn_result(void *env) {

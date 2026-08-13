@@ -219,6 +219,12 @@ static SzIo *after_sleep_dns_http(void *value, void *env) {
       sz_io_flatmap(sz_io_println_cstr("peer"), assert_peer_quiet, NULL));
 }
 
+static SzIo *exec_then_flag(void *value, void *env) {
+  (void)env;
+  g_peer_flag = 1;
+  return sz_io_pure(value);
+}
+
 static void *dns_late_a(void *arg) {
   int fd = *(int *)arg;
   uint8_t buf[512];
@@ -713,6 +719,31 @@ int main(void) {
     }
     assert(r.ok);
     assert(sz_unbox_i64(r.value) == 0);
+  }
+
+  /* Sys.exec returns the shell exit code. */
+  {
+    r = sz_io_unsafe_run(sz_sys_exec(sz_string_from_cstr("true")));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 0);
+    r = sz_io_unsafe_run(sz_sys_exec(sz_string_from_cstr("exit 7")));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 7);
+  }
+
+  /* Sys.exec parks; a peer fiber runs before the child exits. */
+  {
+    SzPair *pair;
+    g_peer_flag = 0;
+    r = sz_io_unsafe_run(sz_io_both(
+        sz_io_flatmap(sz_sys_exec(sz_string_from_cstr("sleep 0.08")),
+                      exec_then_flag, NULL),
+        sz_io_flatmap(sz_io_println_cstr("peer"), assert_peer_quiet, NULL)));
+    assert(r.ok);
+    pair = (SzPair *)r.value;
+    assert(pair && pair->left);
+    assert(sz_unbox_i64(pair->left) == 0);
+    assert(g_peer_flag == 1);
   }
 
   /* Live Net.serveOnce: client thread GET while this fiber accepts. */
