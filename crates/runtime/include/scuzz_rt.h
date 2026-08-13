@@ -177,12 +177,12 @@ SzIo *sz_io_poll_writable(int fd); /* IO[Unit]; park until fd is writable */
 
 /* Run to completion on the calling thread.
  * Concurrency is cooperative single-threaded fibers: sleep/Queue/Deferred/poll
- * park; race/both fork left-then-right onto a ready queue. Live / default: FIFO
- * pick. When SCUZZ_SCHED_SEED is set (fuzz), ready-fiber pick among n>1 is
- * seed-driven (Lehmer/MINSTD). TestRuntime jumps virtual time to the next wakeup
- * when all fibers are blocked on timers. Live idle wait uses poll (and
- * interruptible nanosleep when only timers remain) so a cancelled sleeper or a
- * ready listen socket cannot hold the run loop. */
+ * park (Net, Sys.readLine, httpGet DNS). race/both fork left-then-right onto a
+ * ready queue. Live / default: FIFO pick. When SCUZZ_SCHED_SEED is set (fuzz),
+ * ready-fiber pick among n>1 is seed-driven (Lehmer/MINSTD). TestRuntime jumps
+ * virtual time to the next wakeup when all fibers are blocked on timers. Live
+ * idle wait uses poll (and interruptible nanosleep when only timers remain) so
+ * a cancelled sleeper or a ready listen socket cannot hold the run loop. */
 typedef struct SzIoResult {
   int ok; /* 1 success, 0 error */
   void *value;
@@ -338,10 +338,12 @@ void sz_clock_sleep_ms(int64_t ms); /* blocking sleep; EINTR restarts remaining 
 
 SzIo *sz_random_next_int(int64_t bound); /* IO[Int] in [0, bound) */
 
-SzIo *sz_net_http_get(SzString *url); /* IO[String] response body */
+SzIo *sz_net_http_get(SzString *url); /* IO[String] response body; live DNS parks */
 SzIo *sz_net_serve_once(int64_t port, SzCont handler, void *env); /* IO[Unit]; one GET */
 SzIo *sz_net_serve(int64_t port, SzCont handler, void *env); /* IO[Unit]; keep listen */
 SzIo *sz_net_serve_n(int64_t port, int64_t n, SzCont handler, void *env);
+/* Test-only: UDP nameserver for live httpGet DNS. NULL ip restores /etc/resolv.conf. */
+void sz_net_test_set_nameserver(const char *ipv4, int port);
 
 /* TestRuntime — fake interpreters for deterministic scuzz test / unit tests */
 void sz_testrt_install(void); /* fake clock+rng+mem FS+stub net+sys/console */

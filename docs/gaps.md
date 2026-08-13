@@ -33,7 +33,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### Residuals
 
-- **Net listen** — `Net.serveOnce` one GET; `Net.serve` keeps the listen socket (Stage 0 and self-host; `examples/server`). TestRuntime queues injected paths and drains them. Live listen, connection read/write, and `httpGet` park on `poll` (`test_io.c`). DNS `getaddrinfo` still blocks (code **6**).
+- **Net listen** — `Net.serveOnce` one GET; `Net.serve` keeps the listen socket (Stage 0 and self-host; `examples/server`). TestRuntime queues injected paths and drains them. Live listen, connection read/write, and `httpGet` (IPv4 literal or UDP A lookup) park on `poll` (`test_io.c`). IPv6 / CNAME-follow are out (code **6**).
 - **Console** — `Sys.readLine` parks on `poll` until stdin is readable (`test_io.c`). TestRuntime scripts lines. `Sys.exec` still blocks.
 - **Concurrency** — cooperative fibers + TestRuntime virtual-time jumps (`test_io.c`); Scuzz `Ref` / `Queue` / `Deferred` (String payloads) via Stage 0 + self-host (`examples/concurrency`). Live / default ready-queue pick is FIFO; `scuzz fuzz --iters` uses seed-driven pick among n>1 (`SCUZZ_SCHED_SEED`). Live `IO.race` of sleeps waits only for the soonest wake; idle wait uses `poll` (and interruptible `nanosleep` when only timers remain). Later: OS threads, supervision trees.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting (`test_ui.c`, optional `test-asan`). `View.each` with a stable `Signal.list` is pump-flat; `Signal.list` frees unshared cons spines on set and string heads on free (`test_signal_list_spine_collect`). Shared tails (cons onto the current list) stay. Later: a collector if list-churn still demands it.
