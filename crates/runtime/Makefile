@@ -5,7 +5,7 @@ FFI_SKIA := $(ROOT)/crates/ffi-skia
 EMBEDDER := $(ROOT)/crates/embedder-desktop
 MOBILE := $(ROOT)/crates/embedder-mobile
 INCLUDES := -Iinclude -I$(FFI_SKIA)/include -I$(EMBEDDER)/include -I$(MOBILE)/include
-SRC := src/runtime.c src/resource.c src/ref.c src/deferred.c src/queue.c \
+SRC := src/runtime.c src/resource.c src/ref.c src/deferred.c src/queue.c src/stream.c \
 	src/theme.c src/signal.c src/view.c src/ui.c \
 	src/lang_ui.c \
 	src/list.c src/fs.c src/sys.c src/clock.c src/random.c src/net.c \

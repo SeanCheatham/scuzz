@@ -94,6 +94,7 @@ typedef struct SzLangResource SzLangResource;
 typedef struct SzRef SzRef;
 typedef struct SzDeferred SzDeferred;
 typedef struct SzQueue SzQueue;
+typedef struct SzStream SzStream;
 
 typedef void *(*SzThunk)(void *env);
 typedef SzIo *(*SzCont)(void *value, void *env);
@@ -259,6 +260,23 @@ SzIo *sz_queue_offer(SzQueue *q, void *value);
 SzIo *sz_queue_offer_cstr(SzQueue *q, const char *value);
 SzIo *sz_queue_take(SzQueue *q); /* IO[A]; parks when empty under the fiber scheduler */
 size_t sz_queue_size(const SzQueue *q);
+
+/* Stream — finite pull (FS2 spirit): emit / eval / concat / evalMap, compile to List. */
+struct SzStream {
+  int tag; /* 0 nil, 1 cons, 2 eval, 3 concat, 4 evalMap */
+  void *left;
+  void *right;
+  void *env;
+};
+
+SzStream *sz_stream_nil(void);
+SzStream *sz_stream_emit(void *value);
+SzStream *sz_stream_emits(SzList *xs);
+SzStream *sz_stream_eval(SzIo *io);
+SzStream *sz_stream_concat(SzStream *left, SzStream *right);
+SzStream *sz_stream_evalmap(SzStream *inner, SzCont f, void *env);
+SzIo *sz_stream_compile_to_list(SzStream *s); /* IO[List] */
+SzIo *sz_stream_drain(SzStream *s);           /* IO[Unit] */
 
 /* Pair for IO.both results */
 typedef struct SzPair {

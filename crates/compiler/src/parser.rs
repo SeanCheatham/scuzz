@@ -1237,7 +1237,7 @@ impl Parser {
                     name.as_str(),
                     "Str" | "List" | "Fs" | "Sys" | "Clock" | "Random"
                         | "Net" | "Impurity" | "Signal" | "View" | "Theme"
-                        | "Ref" | "Queue" | "Deferred" | "Resource"
+                        | "Ref" | "Queue" | "Deferred" | "Resource" | "Stream"
                 ) =>
             {
                 self.bump();
@@ -1403,6 +1403,38 @@ mod tests {
                     &binders[1],
                     ForBinder::Draw { value, .. }
                         if matches!(&value.kind, ExprKind::Call { callee, .. } if callee == "Resource.use")
+                ));
+            }
+            other => panic!("expected for, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_stream_emit_compile() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    s = Stream.concat(Stream.emit("a"), Stream.eval(IO.pure("b")))
+    xs <- Stream.compileToList(s)
+    _ <- Stream.drain(Stream.emit("c"))
+  } yield ()
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::For { binders, .. } => {
+                assert!(matches!(
+                    &binders[0],
+                    ForBinder::Eq { value, .. }
+                        if matches!(&value.kind, ExprKind::Call { callee, .. } if callee == "Stream.concat")
+                ));
+                assert!(matches!(
+                    &binders[1],
+                    ForBinder::Draw { value, .. }
+                        if matches!(&value.kind, ExprKind::Call { callee, .. } if callee == "Stream.compileToList")
+                ));
+                assert!(matches!(
+                    &binders[2],
+                    ForBinder::Draw { value, .. }
+                        if matches!(&value.kind, ExprKind::Call { callee, .. } if callee == "Stream.drain")
                 ));
             }
             other => panic!("expected for, got {other:?}"),

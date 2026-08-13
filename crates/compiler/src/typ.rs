@@ -1355,6 +1355,37 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 2)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
+        "Stream.emit" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::Opaque("Stream".into()))
+        }
+        "Stream.emits" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::List)?;
+            Ok(Type::Opaque("Stream".into()))
+        }
+        "Stream.eval" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Io(Box::new(Type::String)))?;
+            Ok(Type::Opaque("Stream".into()))
+        }
+        "Stream.concat" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            Ok(Type::Opaque("Stream".into()))
+        }
+        "Stream.evalMap" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            Ok(Type::Opaque("Stream".into()))
+        }
+        "Stream.compileToList" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::Io(Box::new(Type::List)))
+        }
+        "Stream.drain" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
         "Signal.int" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
@@ -3544,6 +3575,23 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Resource.make/use should typecheck");
+    }
+
+    #[test]
+    fn typechecks_stream_emit_evalmap_compile() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    s = Stream.concat(
+      Stream.evalMap(Stream.emits(["a", "b"]), x => IO.pure(Str.concat(x, "!"))),
+      Stream.eval(IO.pure("c"))
+    )
+    xs <- Stream.compileToList(s)
+    _ <- IO.println(List.join(xs, ","))
+    _ <- Stream.drain(Stream.evalMap(Stream.emit("d"), x => IO.println(s"drain:$x")))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Stream.emit/evalMap/compileToList should typecheck");
     }
 
     #[test]

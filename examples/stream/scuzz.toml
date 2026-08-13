@@ -1,0 +1,8 @@
+[package]
+name = "stream"
+version = "0.1.0"
+description = "Stream.emit / evalMap / compileToList"
+
+[targets.native]
+kind = "executable"
+main = "Main"

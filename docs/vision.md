@@ -47,7 +47,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 
 ## Success bars
 
-**v0** — Install CLI → `scuzz new` (IO) or `scuzz new --ui` (Counter/Todo as `View` + builtin `IO`) → `scuzz test` and `scuzz run` (`--headless` for UI). Window when available. Language `Resource.make` / `use` ships (`examples/resource`); `Stream` and server listen are next slices, not the v0 bar.
+**v0** — Install CLI → `scuzz new` (IO) or `scuzz new --ui` (Counter/Todo as `View` + builtin `IO`) → `scuzz test` and `scuzz run` (`--headless` for UI). Window when available. Language `Resource.make` / `use` ships (`examples/resource`); Stage 0 `Stream` ships (`examples/stream`); self-host `Stream` and server listen are next slices, not the v0 bar.
 
 **v1** — Stage-2 self-host as the shipped `scuzz` (`package_release.sh` / `install.sh`); Rust Stage-0 is CI/bootstrap only. Dual-boot gate: `scripts/selfhost.sh`.
 
@@ -79,7 +79,7 @@ No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** i
 
 ### IO errors
 
-One failure channel: `SzError` (message + optional code) on `IO`. Ops: `flatMap`, `delay`, `fail`, `handleErrorWith`, `attempt`, plus blessed kit (`Ref`, `Deferred`, `Queue`, `sleep`, `race`, `both`). **`Resource.make` / `use`** (String payload) brackets acquire/release as `IO` — cleanup on success and on `IO` failure (`examples/resource`; Stage 0 and self-host). **Streaming** is direction (FS2 spirit as a builtin), not a type yet. **Net** is client `httpGet`; listen/serve on hosts that support it is a near-term stdlib gap. **Concurrency:** cooperative single-threaded fibers (live / default: FIFO ready queue, left-before-right fork; under `scuzz fuzz --iters`, `SCUZZ_SCHED_SEED` makes ready-fiber pick among n>1 seed-driven); `sleep` / empty `Queue.take` / incomplete `Deferred.get` park; TestRuntime advances virtual time to the next wakeup when idle; live idle `nanosleep` is EINTR-interruptible so a cancelled sleeper cannot hold the run loop. No OS threads for IO. Impurity codes: Fs **2**, Sys (**3**; exec + `readLine`), Clock **4**, Random **5**, Net **6**. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net plus console (scripted stdin, optional argv override, println capture+echo). No checked exception hierarchy; panics abort via `sz_panic`.
+One failure channel: `SzError` (message + optional code) on `IO`. Ops: `flatMap`, `delay`, `fail`, `handleErrorWith`, `attempt`, plus blessed kit (`Ref`, `Deferred`, `Queue`, `sleep`, `race`, `both`). **`Resource.make` / `use`** (String payload) brackets acquire/release as `IO` — cleanup on success and on `IO` failure (`examples/resource`; Stage 0 and self-host). **`Stream`** is a finite pull (FS2 spirit, not a port): `emit` / `emits` / `eval` / `concat` / `evalMap` / `compileToList` / `drain` (String payload; `examples/stream`; Stage 0). Self-host is next. **Net** is client `httpGet`; listen/serve on hosts that support it is a near-term stdlib gap. **Concurrency:** cooperative single-threaded fibers (live / default: FIFO ready queue, left-before-right fork; under `scuzz fuzz --iters`, `SCUZZ_SCHED_SEED` makes ready-fiber pick among n>1 seed-driven); `sleep` / empty `Queue.take` / incomplete `Deferred.get` park; TestRuntime advances virtual time to the next wakeup when idle; live idle `nanosleep` is EINTR-interruptible so a cancelled sleeper cannot hold the run loop. No OS threads for IO. Impurity codes: Fs **2**, Sys (**3**; exec + `readLine`), Clock **4**, Random **5**, Net **6**. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net plus console (scripted stdin, optional argv override, println capture+echo). No checked exception hierarchy; panics abort via `sz_panic`.
 
 ### `Ui` vs `View`
 
@@ -108,7 +108,7 @@ Subset used by compiler sources and bootstrap examples. New features land in Sta
 - No `val` / statement blocks / `var` — expression dialect only.
 - `if` / `match`; literals incl. list `[a,b,c]` and `s"…"`
 - Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
-- Builtins: `Str.*`, `List.*`, Fs (`read` / `write` / `list` / `mkdirs` / `canonicalize`)/Sys (`args` / `readLine` / `exec` / `getenv`)/Clock/Random/Net (`httpGet`; listen/serve later), `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Resource.make` / `Resource.use` (String payload), `Signal.*` (incl. `Signal.map`), `View.*` (nested `View.column`/`row`/`stack` children only — no `addChild`; `View.each`, `View.bindText`, Column/Row `View.expanded`, `View.center`, `View.align`, `View.positioned`, `View.padding`, `View.sized`, `View.minSize`, `View.background`, `View.aspectRatio`, `View.fraction`), `Ui.run`, Theme/Color, `Law.signalInt` / `Law.a11yHas` / `Law.assert` (residual under TestRuntime). Language `Stream` is next, not kernel yet.
+- Builtins: `Str.*`, `List.*`, Fs (`read` / `write` / `list` / `mkdirs` / `canonicalize`)/Sys (`args` / `readLine` / `exec` / `getenv`)/Clock/Random/Net (`httpGet`; listen/serve later), `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Resource.make` / `Resource.use` (String payload), `Stream.emit` / `emits` / `eval` / `concat` / `evalMap` / `compileToList` / `drain` (String payload; Stage 0; self-host next), `Signal.*` (incl. `Signal.map`), `View.*` (nested `View.column`/`row`/`stack` children only — no `addChild`; `View.each`, `View.bindText`, Column/Row `View.expanded`, `View.center`, `View.align`, `View.positioned`, `View.padding`, `View.sized`, `View.minSize`, `View.background`, `View.aspectRatio`, `View.fraction`), `Ui.run`, Theme/Color, `Law.signalInt` / `Law.a11yHas` / `Law.assert` (residual under TestRuntime).
 - `IO` kit + `.flatMap` / `.handleErrorWith` / `.attempt`; lambdas `_ =>` / `name =>` for taps
 - No macros, no implicits, no HKT beyond `IO`, no null
 
@@ -220,7 +220,7 @@ When the widget set grows beyond column/row: **Flutter-style constraints** (cons
 
 ## Open work
 
-Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters. Near-term: FS2-shaped `Stream`, server listen/serve, one static-hygiene command, drop `View.addChild`, in-process reload/debug.
+Unknowns and known gaps, ranked by risk: [`gaps.md`](gaps.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters. Near-term: `Stream` self-host, server listen/serve, one static-hygiene command, drop `View.addChild`, in-process reload/debug.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features. UI is a primary path among CLI/server/desktop/mobile — not the only v0 bar.
 

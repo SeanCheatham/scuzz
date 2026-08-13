@@ -86,6 +86,13 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_deferred_get(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_resource_make(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_resource_use(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_emit(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_emits(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_eval(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_concat(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_evalmap(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_compile_to_list(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_stream_drain(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_signal_int(i64)").unwrap();
     writeln!(out, "declare i64 @sz_lang_signal_get(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_signal_set(ptr, i64)").unwrap();
@@ -1683,6 +1690,30 @@ fn emit_resource(
     }
 }
 
+fn emit_stream_evalmap(
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 2, "Stream.evalMap expects 2 args");
+    let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let ExprKind::Lambda { param, body } = &args[1].kind else {
+        panic!("Stream.evalMap callback must be a lambda");
+    };
+    let lam = emit_io_cont_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
+    let mut code = inner.code;
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @sz_stream_evalmap(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
+        inner.value
+    )
+    .unwrap();
+    val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+}
+
 fn emit_binary(
     op: &BinOp,
     left: &Expr,
@@ -1831,6 +1862,9 @@ fn emit_call(
     }
     if callee == "Resource.make" || callee == "Resource.use" {
         return emit_resource(callee, args, ctx, locals, prefix);
+    }
+    if callee == "Stream.evalMap" {
+        return emit_stream_evalmap(args, ctx, locals, prefix);
     }
     let mut emitted_args = Vec::new();
     for (i, a) in args.iter().enumerate() {
@@ -2209,6 +2243,65 @@ fn emit_call(
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @sz_deferred_get(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Stream.emit" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_stream_emit(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Stream.emits" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_stream_emits(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Stream.eval" => {
+            let io = ensure_io(
+                &mut code,
+                emitted_args[0].kind,
+                &emitted_args[0].value,
+                &format!("{prefix}_eval"),
+            );
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_stream_eval(ptr {io})"
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Stream.concat" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_stream_concat(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Stream.compileToList" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_stream_compile_to_list(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Stream.drain" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_stream_drain(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -2658,6 +2751,24 @@ mod tests {
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_lang_resource_make"));
         assert!(ir.contains("sz_lang_resource_use"));
+        assert!(ir.contains("sz_rcont_"));
+    }
+
+    #[test]
+    fn emit_stream_evalmap_compile() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    s = Stream.evalMap(Stream.emit("a"), x => IO.pure(x))
+    xs <- Stream.compileToList(s)
+    _ <- Stream.drain(Stream.emit("b"))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_stream_evalmap"));
+        assert!(ir.contains("sz_stream_compile_to_list"));
+        assert!(ir.contains("sz_stream_drain"));
         assert!(ir.contains("sz_rcont_"));
     }
 

@@ -603,6 +603,23 @@ record Point(x: Int, y: Int)
     }
 
     #[test]
+    fn formats_stream_roundtrip() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    s = Stream.concat(Stream.emit("a"), Stream.eval(IO.pure("b")))
+    xs <- Stream.compileToList(s)
+    _ <- Stream.drain(Stream.evalMap(s, x => IO.println(x)))
+  } yield ()
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("Stream.concat("));
+        assert!(out.contains("Stream.compileToList("));
+        assert!(out.contains("Stream.evalMap("));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
     fn formats_import_roundtrip() {
         let src = "import A.tag\n@main def main: IO[Unit] =\n  IO.println(tag())\n";
         let out = format_source(src).unwrap();
