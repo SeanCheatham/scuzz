@@ -2,4 +2,4 @@
 
 ## Next
 
-**Stream on self-host.** Stage 0 `Stream.emit` / `emits` / `eval` / `concat` / `evalMap` / `compileToList` / `drain` ships (`examples/stream`). Next: the same surface through `compiler-scuzz` and `scripts/selfhost.sh`. Kernel dialect only — no listen/serve.
+**Server listen/serve.** `Net.httpGet` is client-only. Next: stdlib listen/bind (or a blessed HTTP server kit) on hosts that support it, with TestRuntime fakes and one `examples/` server. Same impurity story as `httpGet` (code **6**). Not a library ecosystem.
