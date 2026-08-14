@@ -274,6 +274,7 @@ int sz_ui_session_set_inject(SzUiSession *session, const char *path) {
 }
 
 static int collect_buttons(SzUiSession *session, SzView **buttons, int cap);
+static int collect_scrolls(SzUiSession *session, SzView **scrolls, int cap);
 
 static void fputs_dump_label(FILE *f, const char *label) {
   const char *p;
@@ -289,8 +290,9 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
   SzString *views;
   SzView *buttons[64];
   SzView *fields[64];
+  SzView *scrolls[64];
   SzView *field_target;
-  int n_buttons, n_fields, i;
+  int n_buttons, n_fields, n_scrolls, i;
   if (!path || !path[0])
     return 0;
   f = fopen(path, "w");
@@ -317,6 +319,13 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
   for (i = 0; i < n_fields; i++) {
     fprintf(f, "%d%s ", i, fields[i] == field_target ? "*" : "");
     fputs_dump_label(f, sz_view_a11y_label(fields[i]));
+    fputc('\n', f);
+  }
+  fprintf(f, "\n[scrolls]\n");
+  n_scrolls = collect_scrolls(session, scrolls, 64);
+  for (i = 0; i < n_scrolls; i++) {
+    fprintf(f, "%d ", i);
+    fputs_dump_label(f, sz_view_a11y_label(scrolls[i]));
     fputc('\n', f);
   }
   fclose(f);
@@ -493,16 +502,49 @@ static int collect_scrolls(SzUiSession *session, SzView **scrolls, int cap) {
   return n;
 }
 
-static void script_scroll(SzUiSession *session, float dy) {
-  SzView *scrolls[16];
-  int count = collect_scrolls(session, scrolls, 16);
-  SzInputEvent ev;
-  SzRect fr;
-  if (count <= 0) {
-    fprintf(stderr, "scuzz: script scroll skipped (no scroll)\n");
+static void script_parse_scroll(const char *rest, int *index, float *dy) {
+  const char *p = rest ? rest : "";
+  int a = 0;
+  *index = -1;
+  *dy = 40.f;
+  while (*p == ' ')
+    p++;
+  if (!*p)
+    return;
+  if (*p == '-') {
+    *dy = (float)atoi(p);
     return;
   }
-  fr = sz_view_frame(scrolls[0]);
+  if (*p < '0' || *p > '9')
+    return;
+  while (*p >= '0' && *p <= '9') {
+    a = a * 10 + (*p - '0');
+    p++;
+  }
+  while (*p == ' ')
+    p++;
+  if (*p) {
+    *index = a;
+    *dy = (float)atoi(p);
+    return;
+  }
+  *dy = (float)a;
+}
+
+static void script_scroll(SzUiSession *session, int index, float dy) {
+  SzView *scrolls[64];
+  int count = collect_scrolls(session, scrolls, 64);
+  SzInputEvent ev;
+  SzRect fr;
+  int n = index < 0 ? 0 : index;
+  if (count <= 0 || n >= count) {
+    if (index < 0)
+      fprintf(stderr, "scuzz: script scroll skipped (no scroll)\n");
+    else
+      fprintf(stderr, "scuzz: script scroll %d skipped (%d scrolls)\n", n, count);
+    return;
+  }
+  fr = sz_view_frame(scrolls[n]);
   memset(&ev, 0, sizeof ev);
   ev.kind = SZ_INPUT_SCROLL;
   ev.x = fr.x + fr.w * 0.5f;
@@ -659,8 +701,12 @@ static void play_script_line(SzUiSession *session, char *line) {
       if (!sz_ui_pump_sync(session))
         sz_panic("Ui.run: script pump failed");
     }
-  } else if (strncmp(line, "scroll ", 7) == 0 || strcmp(line, "scroll") == 0)
-    script_scroll(session, len > 6 ? (float)atoi(line + 7) : 40.f);
+  } else if (strncmp(line, "scroll ", 7) == 0 || strcmp(line, "scroll") == 0) {
+    int idx;
+    float dy;
+    script_parse_scroll(len > 6 ? line + 7 : "", &idx, &dy);
+    script_scroll(session, idx, dy);
+  }
   else if (strncmp(line, "backspace ", 10) == 0 || strcmp(line, "backspace") == 0) {
     int idx, n;
     script_parse_backspace(len > 9 ? line + 10 : "", &idx, &n);

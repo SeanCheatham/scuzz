@@ -254,7 +254,9 @@ int sz_ui_session_watch(SzUiSession *session, const char *path);
  * [taps] lists inject indices for `tap N` (scan order, cap 64).
  * [fields] lists TextFields in a11y order; `N*` is the text/type/backspace
  * target (focused, else first). `text N s` / `type N s` / `backspace N k`
- * target dump index N (one-token forms still use the starred field). */
+ * target dump index N (one-token forms still use the starred field).
+ * [scrolls] lists hittable Scrolls in scan order; `scroll N dy` pans index N
+ * (`scroll 40` stays the first). */
 int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
 int sz_ui_session_write_dump(SzUiSession *session, const char *path);
 /* Watch an inject script (tap/text/type/pump/scroll/backspace). Next pump that

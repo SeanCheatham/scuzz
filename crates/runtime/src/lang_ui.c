@@ -190,16 +190,49 @@ static int collect_scrolls(SzUiSession *session, SzView **scrolls, int cap) {
   return n;
 }
 
-static void script_scroll(SzUiSession *session, float dy) {
-  SzView *scrolls[16];
-  int count = collect_scrolls(session, scrolls, 16);
-  SzInputEvent ev;
-  SzRect fr;
-  if (count <= 0) {
-    fprintf(stderr, "scuzz: script scroll skipped (no scroll)\n");
+static void script_parse_scroll(const char *rest, int *index, float *dy) {
+  const char *p = rest ? rest : "";
+  int a = 0;
+  *index = -1;
+  *dy = 40.f;
+  while (*p == ' ')
+    p++;
+  if (!*p)
+    return;
+  if (*p == '-') {
+    *dy = (float)atoi(p);
     return;
   }
-  fr = sz_view_frame(scrolls[0]);
+  if (*p < '0' || *p > '9')
+    return;
+  while (*p >= '0' && *p <= '9') {
+    a = a * 10 + (*p - '0');
+    p++;
+  }
+  while (*p == ' ')
+    p++;
+  if (*p) {
+    *index = a;
+    *dy = (float)atoi(p);
+    return;
+  }
+  *dy = (float)a;
+}
+
+static void script_scroll(SzUiSession *session, int index, float dy) {
+  SzView *scrolls[64];
+  int count = collect_scrolls(session, scrolls, 64);
+  SzInputEvent ev;
+  SzRect fr;
+  int n = index < 0 ? 0 : index;
+  if (count <= 0 || n >= count) {
+    if (index < 0)
+      fprintf(stderr, "scuzz: script scroll skipped (no scroll)\n");
+    else
+      fprintf(stderr, "scuzz: script scroll %d skipped (%d scrolls)\n", n, count);
+    return;
+  }
+  fr = sz_view_frame(scrolls[n]);
   memset(&ev, 0, sizeof ev);
   ev.kind = SZ_INPUT_SCROLL;
   ev.x = fr.x + fr.w * 0.5f;
@@ -344,6 +377,7 @@ static void scripted_button_tap(SzUiSession *session, int prefer_upper) {
      type <n> <s>  append to dump-index n; `type 0` is still payload "0"
      pump <k>   pump k extra frames
      scroll <dy> pan the first Scroll (positive = content up); no scroll is a no-op
+     scroll <n> <dy>  pan dump-index n ([scrolls] scan order); `scroll 40` stays dy 40
      backspace <n> chop n bytes from the [fields] starred TextField (default 1); no field is a no-op
      backspace <n> <k>  chop k bytes from dump-index n
      drive <name> [args]  run a verify-graph driver (Int/String/Bool args)
@@ -420,7 +454,10 @@ static void run_ui_script(SzUiSession *session, const char *path) {
           sz_panic("Ui.run: script pump failed");
       }
     } else if (strncmp(line, "scroll ", 7) == 0 || strcmp(line, "scroll") == 0) {
-      script_scroll(session, len > 6 ? (float)atoi(line + 7) : 40.f);
+      int idx;
+      float dy;
+      script_parse_scroll(len > 6 ? line + 7 : "", &idx, &dy);
+      script_scroll(session, idx, dy);
     } else if (strncmp(line, "backspace ", 10) == 0 ||
                strcmp(line, "backspace") == 0) {
       int idx, n;

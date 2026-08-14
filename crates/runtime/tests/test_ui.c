@@ -406,6 +406,7 @@ static void test_ui_run_rebuild_keepalive(void) {
   assert(strstr(buf, "[views]") != NULL);
   assert(strstr(buf, "[taps]") != NULL);
   assert(strstr(buf, "[fields]") != NULL);
+  assert(strstr(buf, "[scrolls]") != NULL);
   sz_signal_int_free(env.count);
   remove(stamp);
   remove(dump);
@@ -470,6 +471,7 @@ static void test_session_debug_dump(void) {
   assert(strstr(a, "0* item") != NULL);
   assert(strstr(a, "1 search") != NULL);
   assert(strstr(a, "1* search") == NULL);
+  assert(strstr(a, "[scrolls]") != NULL);
 
   memset(&tap, 0, sizeof(tap));
   tap.kind = SZ_INPUT_TAP;
@@ -550,9 +552,9 @@ static void test_session_inject_script(void) {
 static void test_session_inject_scroll(void) {
   SzUiConfig cfg;
   SzUiSession *session;
-  SzView *root, *scroll, *list;
+  SzView *root, *row, *scroll, *scroll2, *list, *list2;
   const char *path = "/tmp/scuzz_ui_inject_scroll.script";
-  float y0;
+  float y0, y1;
 
   remove(path);
   root = sz_view_column();
@@ -561,8 +563,17 @@ static void test_session_inject_scroll(void) {
   sz_view_add_child(list, sz_view_text("two"));
   sz_view_add_child(list, sz_view_text("three"));
   sz_view_add_child(list, sz_view_text("four"));
+  list2 = sz_view_list();
+  sz_view_add_child(list2, sz_view_text("a"));
+  sz_view_add_child(list2, sz_view_text("b"));
+  sz_view_add_child(list2, sz_view_text("c"));
+  sz_view_add_child(list2, sz_view_text("d"));
   scroll = sz_view_scroll(list);
-  sz_view_add_child(root, scroll);
+  scroll2 = sz_view_scroll(list2);
+  row = sz_view_row();
+  sz_view_add_child(row, scroll);
+  sz_view_add_child(row, scroll2);
+  sz_view_add_child(root, row);
 
   memset(&cfg, 0, sizeof(cfg));
   cfg.kind = SZ_UI_RUNTIME_HEADLESS;
@@ -575,14 +586,22 @@ static void test_session_inject_scroll(void) {
   assert(sz_ui_session_set_inject(session, path));
   assert(sz_ui_pump_sync(session));
   y0 = sz_view_scroll_y(scroll);
+  y1 = sz_view_scroll_y(scroll2);
 
   write_stamp(path, "scroll 40\n");
   assert(sz_ui_pump_sync(session));
   assert(sz_view_scroll_y(scroll) == y0 + 40.f);
+  assert(sz_view_scroll_y(scroll2) == y1);
+
+  write_stamp(path, "scroll 1 40\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_scroll_y(scroll) == y0 + 40.f);
+  assert(sz_view_scroll_y(scroll2) == y1 + 40.f);
 
   write_stamp(path, "scroll\n");
   assert(sz_ui_pump_sync(session));
   assert(sz_view_scroll_y(scroll) == y0 + 80.f);
+  assert(sz_view_scroll_y(scroll2) == y1 + 40.f);
 
   sz_ui_unmount(session);
   remove(path);
