@@ -73,6 +73,9 @@ static SzView *view_new(SzViewKind kind) {
   return v;
 }
 
+static int view_is_shown(const SzView *v);
+static void resolve_text(const SzView *v, char *buf, size_t buflen);
+
 static int view_is_shown(const SzView *v) {
   if (!v)
     return 0;
@@ -155,6 +158,7 @@ SzView *sz_view_text_signal_int(SzSignalInt *sig, const char *prefix) {
 SzView *sz_view_text_signal_str(SzSignalStr *sig) {
   SzView *v = view_new(SZ_VIEW_TEXT);
   v->sig_str = sig;
+  v->a11y_role = SZ_A11Y_TEXT;
   return v;
 }
 
@@ -212,8 +216,15 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
     return;
   if (v->a11y_role != SZ_A11Y_NONE) {
     char line[256];
-    int n = snprintf(line, sizeof line, "%s:%s\n", a11y_role_name(v->a11y_role),
-                     v->a11y_label ? v->a11y_label : "");
+    char live[256];
+    const char *label = v->a11y_label ? v->a11y_label : "";
+    int n;
+    if (v->kind == SZ_VIEW_TEXT && (v->sig_int || v->sig_str)) {
+      resolve_text(v, live, sizeof live);
+      label = live;
+    }
+    n = snprintf(line, sizeof line, "%s:%s\n", a11y_role_name(v->a11y_role),
+                 label);
     if (n > 0 && *len + (size_t)n < cap) {
       memcpy(buf + *len, line, (size_t)n);
       *len += (size_t)n;

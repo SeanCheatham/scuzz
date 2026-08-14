@@ -154,6 +154,7 @@ typedef void (*SzViewTapFn)(SzView *self, void *env);
 
 SzView *sz_view_text(const char *text);
 SzView *sz_view_text_signal_int(SzSignalInt *sig, const char *prefix);
+/* bindText: a11y dump uses the live signal string. */
 SzView *sz_view_text_signal_str(SzSignalStr *sig);
 
 SzView *sz_view_button(const char *label, SzViewTapFn on_tap, void *env);

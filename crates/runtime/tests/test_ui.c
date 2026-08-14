@@ -1268,6 +1268,24 @@ static void test_a11y(void) {
   assert(strstr(sz_string_cstr(dump), "text:hi") != NULL);
   sz_string_free(dump);
   sz_view_free(col);
+
+  {
+    SzSignalStr *s;
+    SzView *bound;
+    s = sz_signal_str("one");
+    bound = sz_view_text_signal_str(s);
+    assert(sz_view_a11y_role(bound) == SZ_A11Y_TEXT);
+    dump = sz_view_a11y_dump(bound);
+    assert(strstr(sz_string_cstr(dump), "text:one") != NULL);
+    sz_string_free(dump);
+    sz_signal_str_set(s, "two");
+    dump = sz_view_a11y_dump(bound);
+    assert(strstr(sz_string_cstr(dump), "text:two") != NULL);
+    assert(strstr(sz_string_cstr(dump), "text:one") == NULL);
+    sz_string_free(dump);
+    sz_view_free(bound);
+    sz_signal_str_free(s);
+  }
 }
 
 static void test_clear_children(void) {

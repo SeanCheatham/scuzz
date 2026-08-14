@@ -4,6 +4,7 @@ str[1] = "count = 0"
 
 [views]
 text:Counter
+text:count = 0
 button:+1
 image:image
 

@@ -6,8 +6,10 @@ str[3] = "page = 1"
 
 [views]
 button:Home
+text:page = 1
 button:Other
 text:Other
+text:page = 1
 
 [taps]
 0 Home
