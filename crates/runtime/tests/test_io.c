@@ -128,6 +128,16 @@ static SzIo *serve_path_ok(void *path, void *env) {
       sz_string_concat(sz_string_from_cstr("ok:"), (SzString *)path));
 }
 
+static int g_serve_fail_n;
+
+static SzIo *serve_fail_then_ok(void *path, void *env) {
+  (void)env;
+  if (g_serve_fail_n++ == 0)
+    return sz_io_fail_cstr("handler boom");
+  return sz_io_pure(
+      sz_string_concat(sz_string_from_cstr("ok:"), (SzString *)path));
+}
+
 static SzIo *serve_big_ok(void *path, void *env) {
   enum { N = 4 * 1024 * 1024 };
   char *blob;
@@ -195,6 +205,11 @@ static void *live_get_client(void *arg) {
     total += (size_t)n;
   close(fd);
   return buf;
+}
+
+static void *two_live_gets(void *arg) {
+  live_get_client(arg);
+  return live_get_client(arg);
 }
 
 static void *delayed_live_get(void *arg) {
@@ -1435,6 +1450,13 @@ int main(void) {
     assert(strcmp(sz_testrt_net_last_serve_body(), "ok:/b") == 0);
     assert(sz_testrt_net_serve_pending() == 0);
 
+    g_serve_fail_n = 0;
+    sz_testrt_net_inject_request("/a");
+    sz_testrt_net_queue_request("/b");
+    r = sz_io_unsafe_run(sz_net_serve(8080, serve_fail_then_ok, NULL));
+    assert(r.ok);
+    assert(strcmp(sz_testrt_net_last_serve_body(), "ok:/b") == 0);
+
     /* Console: argv override, stdin feed, println capture (+ echo) */
     {
       char *argv[] = {"x", "y"};
@@ -1749,6 +1771,33 @@ int main(void) {
                                    sz_io_sleep_ms(400)));
     pthread_join(th_bad, NULL);
     pthread_join(th_get, &ret);
+    assert(r.ok);
+    assert(ret && strstr((char *)ret, "ok:/x") != NULL);
+  }
+
+  /* Handler fail: serveOnce fails. */
+  {
+    pthread_t th;
+    int port = 18592;
+    g_serve_fail_n = 0;
+    pthread_create(&th, NULL, live_get_client, &port);
+    r = sz_io_unsafe_run(sz_net_serve_once(port, serve_fail_then_ok, NULL));
+    pthread_join(th, NULL);
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "handler boom"));
+    sz_error_free(r.error);
+  }
+
+  /* Persistent serve: a failing handler does not block the next GET. */
+  {
+    pthread_t th;
+    int port = 18593;
+    void *ret = NULL;
+    g_serve_fail_n = 0;
+    pthread_create(&th, NULL, two_live_gets, &port);
+    r = sz_io_unsafe_run(sz_io_race(sz_net_serve(port, serve_fail_then_ok, NULL),
+                                   sz_io_sleep_ms(400)));
+    pthread_join(th, &ret);
     assert(r.ok);
     assert(ret && strstr((char *)ret, "ok:/x") != NULL);
   }

@@ -1045,8 +1045,9 @@ SzIo *sz_net_http_get(SzString *url) {
  * parks on poll so other IO can run. Live listen is 127.0.0.1 and ::1 (V6ONLY)
  * so httpGet literals on either loopback match. TestRuntime injects paths and
  * skips sockets. Request read and response write each wait at most 1000ms;
- * a timed-out, malformed, or reset client is dropped and persistent serve
- * accepts the next. Error code 6. serveOnce is one request; serve keeps the
+ * a timed-out, malformed, reset, or handler-failed client is dropped and
+ * persistent serve accepts the next. Error code 6. serveOnce is one request;
+ * serve keeps the
  * listen sockets (n<=0 forever live, or until the TestRuntime queue is empty). */
 
 typedef struct ServeSt {
@@ -1522,10 +1523,16 @@ static SzIo *serve_after_body(void *body, void *env) {
   return serve_poll_conn_write(NULL, st);
 }
 
+static SzIo *serve_on_handler_err(SzError *err, void *env) {
+  return serve_drop_conn((ServeSt *)env, err);
+}
+
 static SzIo *serve_after_path(void *path, void *env) {
   ServeSt *st = (ServeSt *)env;
   SzIo *io = st->handler(path, st->henv);
-  return sz_io_flatmap(io, serve_after_body, st);
+  io = sz_io_flatmap(io, serve_after_body, st);
+  io = sz_io_flatmap(io, serve_after_write, st);
+  return sz_io_handle_error_with(io, serve_on_handler_err, st);
 }
 
 static SzIo *serve_round(ServeSt *st) {
@@ -1537,8 +1544,7 @@ static SzIo *serve_round(ServeSt *st) {
   }
   prog = sz_io_flatmap(sz_io_delay(serve_ensure_listen, st), unwrap_net, NULL);
   prog = sz_io_flatmap(prog, serve_after_listen, st);
-  prog = sz_io_flatmap(prog, serve_after_path, st);
-  return sz_io_flatmap(prog, serve_after_write, st);
+  return sz_io_flatmap(prog, serve_after_path, st);
 }
 
 static SzIo *serve_on_err(SzError *err, void *env) {

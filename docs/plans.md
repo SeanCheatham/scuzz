@@ -2,4 +2,4 @@
 
 ## Next
 
-**Drop a failed request handler and keep `Net.serve` listening** — timed-out, malformed, and reset clients no longer kill persistent `Net.serve`. If the handler IO fails, the whole server still dies. Next: close that connection and accept the next request.
+**In-process machine-code reload** — Net hangs and bad clients/handlers are bounded. `[ui]` `run --watch` stamp-reloads the View tree; new machine code still requires a rebuild. Next: a vertical slice of in-process code reload, or the next ranked gap in [`gaps.md`](gaps.md) if that slice will not fit.
