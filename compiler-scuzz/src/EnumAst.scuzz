@@ -14,5 +14,5 @@ enum TraitMethod:
   case Method(name: String, params: List, ret: Type)
 
 enum TraitDef:
-  case Trait(module: String, name: String, methods: List)
+  case Trait(module: String, name: String, tparams: List, methods: List)
 

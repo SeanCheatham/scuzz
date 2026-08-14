@@ -150,6 +150,11 @@ fn pretty_trait(t: &TraitDef) -> String {
     let mut out = String::new();
     out.push_str("trait ");
     out.push_str(&t.name);
+    if !t.type_params.is_empty() {
+        out.push('[');
+        out.push_str(&t.type_params.join(", "));
+        out.push(']');
+    }
     out.push_str(":\n");
     for m in &t.methods {
         let params: Vec<String> = m
@@ -843,6 +848,19 @@ enum Opt[T]:
 "#;
         let out = format_source(src).unwrap();
         assert!(out.contains("  def getOrElse(default: T): T ="));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_generic_trait() {
+        let src = r#"
+trait Get[T]:
+  def getOrElse(default: T): T
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("trait Get[T]:"));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

@@ -2,4 +2,4 @@
 
 ## Next
 
-**Language surface — generic traits** — `impl Get for Opt` can mention `T` (`examples/trait`). Next: `trait Get[T]` so the type parameter is declared on the trait, not borrowed from the target. `watch` still only rebuilds.
+**Language surface — trait type args on impl** — `trait Get[T]` typechecks with `impl Get for Opt` (`examples/trait`). Next: `impl Get[Int] for Point` so a generic trait can target a non-generic type. `watch` still only rebuilds.

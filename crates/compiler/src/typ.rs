@@ -64,6 +64,15 @@ struct MethodIndex {
     by_type_method: HashMap<(String, String), MethodEntry>,
 }
 
+/// Map `trait Get[A]` params onto the impl target's params (`Opt[T]` → `A := T`).
+fn trait_receiver_subst(trait_tparams: &[String], for_tparams: &[String]) -> HashMap<String, Type> {
+    trait_tparams
+        .iter()
+        .zip(for_tparams.iter())
+        .map(|(a, b)| (a.clone(), Type::Var(b.clone())))
+        .collect()
+}
+
 impl MethodIndex {
     fn build(
         impls: &[ImplDef],
@@ -86,6 +95,15 @@ impl MethodIndex {
                 ))
             })?;
             let for_id = crate::resolve::enum_id(&for_en.module, &for_en.name);
+            if !tr.type_params.is_empty() && tr.type_params.len() != for_en.type_params.len() {
+                return Err(TypeError::Msg(format!(
+                    "impl {} for {}: trait expects {} type argument(s)",
+                    im.trait_name,
+                    im.for_type,
+                    tr.type_params.len()
+                )));
+            }
+            let trait_subst = trait_receiver_subst(&tr.type_params, &for_en.type_params);
             for method in &im.methods {
                 let tm = tr
                     .methods
@@ -104,7 +122,10 @@ impl MethodIndex {
                     )));
                 }
                 for (a, b) in tm.params.iter().zip(method.params.iter()) {
-                    let at = resolve_type_in(&a.ty, enums, &tr.module, &for_en.type_params)?;
+                    let at = apply_subst(
+                        &resolve_type_in(&a.ty, enums, &tr.module, &tr.type_params)?,
+                        &trait_subst,
+                    );
                     let bt = resolve_type_in(&b.ty, enums, &im.module, &for_en.type_params)?;
                     if !types_compat(&at, &bt) {
                         return Err(TypeError::Msg(format!(
@@ -113,7 +134,10 @@ impl MethodIndex {
                         )));
                     }
                 }
-                let want_ret = resolve_type_in(&tm.ret, enums, &tr.module, &for_en.type_params)?;
+                let want_ret = apply_subst(
+                    &resolve_type_in(&tm.ret, enums, &tr.module, &tr.type_params)?,
+                    &trait_subst,
+                );
                 let got_ret = resolve_type_in(&method.ret, enums, &im.module, &for_en.type_params)?;
                 if !types_compat(&want_ret, &got_ret) {
                     return Err(TypeError::Msg(format!(
@@ -4919,7 +4943,7 @@ impl Show for Opt:
 enum Opt[T]:
   case Some(x: T)
   case None
-trait Get:
+trait Get[T]:
   def getOrElse(default: T): T
 impl Get for Opt:
   def getOrElse(default: T): T =
@@ -4943,6 +4967,24 @@ impl Get for Opt:
         let p = resolve_field_access(p).expect("fields before mono labeled");
         let p = monomorphize(p).expect("mono labeled");
         resolve_field_access(p).expect("fields after mono labeled");
+    }
+
+    #[test]
+    fn rejects_generic_trait_on_non_generic_type() {
+        let src = r#"
+record Point(x: Int)
+trait Get[T]:
+  def getOrElse(default: T): T
+impl Get for Point:
+  def getOrElse(default: Int): Int = self.x
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let err = expand_impls(lower_program(parse(src).unwrap())).unwrap_err();
+        assert!(
+            err.message().contains("expects 1 type argument(s)"),
+            "unexpected: {}",
+            err.message()
+        );
     }
 
     #[test]

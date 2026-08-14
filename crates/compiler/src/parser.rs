@@ -541,14 +541,19 @@ impl Parser {
         })
     }
 
-    /// `trait Show: def show(): String`
+    /// `trait Show: def show(): String` / `trait Get[T]: def getOrElse(default: T): T`
     fn parse_trait(&mut self) -> Result<TraitDef, ParseError> {
         self.expect(&Token::Trait)?;
         let (name, _) = self.expect_ident()?;
+        let type_params = if matches!(self.peek(), Token::LBracket) {
+            self.parse_type_params()?
+        } else {
+            Vec::new()
+        };
         self.expect(&Token::Colon)?;
         let mut methods = Vec::new();
         while matches!(self.peek(), Token::Def) {
-            methods.push(self.parse_trait_method()?);
+            methods.push(self.parse_trait_method(&type_params)?);
         }
         if methods.is_empty() {
             return Err(self.err(format!("trait {name} has no methods")));
@@ -556,18 +561,19 @@ impl Parser {
         Ok(TraitDef {
             module: self.module.clone(),
             name,
+            type_params,
             methods,
         })
     }
 
-    fn parse_trait_method(&mut self) -> Result<TraitMethod, ParseError> {
+    fn parse_trait_method(&mut self, type_params: &[String]) -> Result<TraitMethod, ParseError> {
         self.expect(&Token::Def)?;
         let (name, _) = self.expect_ident()?;
         self.expect(&Token::LParen)?;
-        let params = self.parse_param_list()?;
+        let params = self.parse_param_list_with_tparams(type_params)?;
         self.expect(&Token::RParen)?;
         self.expect(&Token::Colon)?;
-        let ret = self.parse_type()?;
+        let ret = self.parse_type_with_tparams(type_params)?;
         Ok(TraitMethod { name, params, ret })
     }
 
@@ -636,10 +642,6 @@ impl Parser {
             ret,
             body,
         })
-    }
-
-    fn parse_param_list(&mut self) -> Result<Vec<Param>, ParseError> {
-        self.parse_param_list_with_tparams(&[])
     }
 
     fn parse_type(&mut self) -> Result<Type, ParseError> {
@@ -2007,6 +2009,26 @@ enum Opt[T]:
         assert_eq!(p.enums[0].methods.len(), 1);
         assert_eq!(p.enums[0].methods[0].name, "getOrElse");
         assert!(p.defs.is_empty());
+    }
+
+    #[test]
+    fn parse_generic_trait() {
+        let src = r#"
+trait Get[T]:
+  def getOrElse(default: T): T
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        assert_eq!(p.traits[0].name, "Get");
+        assert_eq!(p.traits[0].type_params, &["T".to_string()]);
+        assert!(matches!(
+            &p.traits[0].methods[0].params[0].ty,
+            crate::ast::Type::Var(n) if n == "T"
+        ));
+        assert!(matches!(
+            &p.traits[0].methods[0].ret,
+            crate::ast::Type::Var(n) if n == "T"
+        ));
     }
 
     #[test]

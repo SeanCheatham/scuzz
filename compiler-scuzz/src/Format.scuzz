@@ -74,7 +74,7 @@ def prettyTraits(traits: List, acc: String): String =
 
 def prettyTrait(t: TraitDef): String =
   t match {
-    case TraitDef.Trait(module, name, methods) => str4("trait ", name, ":\n", prettyTraitMethods(methods, ""))
+    case TraitDef.Trait(module, name, tparams, methods) => str4("trait ", name, prettyTypeParams(tparams), str3(":\n", prettyTraitMethods(methods, ""), ""))
   }
 
 def prettyTraitMethods(methods: List, acc: String): String =

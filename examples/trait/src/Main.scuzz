@@ -9,7 +9,7 @@ enum Opt[T]:
 trait Show:
   def show(): String
 
-trait Get:
+trait Get[T]:
   def getOrElse(default: T): T
 
 impl Show for Point:

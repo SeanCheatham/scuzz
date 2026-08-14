@@ -19,11 +19,13 @@ pub struct Program {
     pub driver_names: Vec<String>,
 }
 
-/// `trait Show: def show(): String`
+/// `trait Show:` / `trait Get[T]: def getOrElse(default: T): T`
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraitDef {
     pub module: String,
     pub name: String,
+    /// `trait Get[T]:` — instantiated from the impl target's type params.
+    pub type_params: Vec<String>,
     pub methods: Vec<TraitMethod>,
 }
 
