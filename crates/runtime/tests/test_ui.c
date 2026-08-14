@@ -10,6 +10,9 @@
 #include <string.h>
 #include <time.h>
 
+int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
+                  const SzTheme *theme);
+
 static int files_equal(const char *a, const char *b) {
   FILE *fa = fopen(a, "rb");
   FILE *fb = fopen(b, "rb");
@@ -1285,6 +1288,58 @@ static void test_max_size_inside_row(void) {
   sz_view_free(row);
 }
 
+static void test_clip_sizes_to_child(void) {
+  SzView *clip, *inner, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect cf, inf;
+
+  child = sz_view_text("Hi");
+  inner = sz_view_sized(40, 30, child);
+  clip = sz_view_clip(inner);
+  sz_view_layout(clip, 200.f, 200.f, theme);
+  assert(sz_view_kind(clip) == SZ_VIEW_CLIP);
+  cf = sz_view_frame(clip);
+  inf = sz_view_frame(inner);
+  assert(fabsf(cf.w - 40.f) < 0.5f);
+  assert(fabsf(cf.h - 30.f) < 0.5f);
+  assert(fabsf(inf.w - 40.f) < 0.5f);
+  assert(fabsf(inf.h - 30.f) < 0.5f);
+  sz_view_free(clip);
+}
+
+static int px_rgb(const uint8_t *px, int w, int x, int y, uint8_t r, uint8_t g,
+                  uint8_t b) {
+  const uint8_t *p = px + ((size_t)y * (size_t)w + (size_t)x) * 4;
+  return p[0] == r && p[1] == g && p[2] == b;
+}
+
+static void test_clip_paint_contains_overflow(void) {
+  SzView *root, *clip, *body;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+
+  body = sz_view_background(0xFF00AA00u, sz_view_sized(20, 80, sz_view_text("x")));
+  clip = sz_view_clip(sz_view_scroll(body));
+  root = sz_view_sized(40, 40, clip);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  /* Scroll child sits at pad 12 inside the 40×40 clip. */
+  assert(px_rgb(px, 80, 20, 20, 0x00, 0xAA, 0x00));
+  /* Same canvas, outside the clip frame: theme background. */
+  assert(px_rgb(px, 80, 20, 50, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 50, 20, 0xF5, 0xF5, 0xF5));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
 static void test_background(void) {
   SzView *bg, *child;
   const SzTheme *theme = sz_theme_default();
@@ -2557,6 +2612,8 @@ int main(void) {
   test_max_size_with_stretch();
   test_nested_max_size_uses_tighter_cap();
   test_max_size_inside_row();
+  test_clip_sizes_to_child();
+  test_clip_paint_contains_overflow();
   test_background();
   test_aspect_ratio();
   test_fraction();

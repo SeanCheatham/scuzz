@@ -40,7 +40,7 @@ Path deps only (`manifest.rs`). Git, versioned, and hosted artifacts are directi
 
 ### Deferred by decision
 
-- **Flutter-style constraint layout** — `layout_node_ex` passes min/max down. Tight slots: `View.sized`, `View.aspectRatio`, percent axes on `View.fraction`, `View.expanded` flex, and opt-in `View.stretch` (cross axis). `View.minSize` raises min. `View.maxSize` lowers max (`0` = no cap). Incoming max still wins when tighter. `View.text` wraps at newlines and at max width. Residual: Flutter-style constraint-overflow dumps (do not add).
+- **Flutter-style constraint layout** — `layout_node_ex` passes min/max down. Tight slots: `View.sized`, `View.aspectRatio`, percent axes on `View.fraction`, `View.expanded` flex, and opt-in `View.stretch` (cross axis). `View.minSize` raises min. `View.maxSize` lowers max (`0` = no cap). Incoming max still wins when tighter. `View.clip` clips paint to its frame. Scroll uses the same clip. `View.text` wraps at newlines and at max width. Residual: Flutter-style constraint-overflow dumps (do not add).
 - **Windows desktop embedder** — same session protocol as X11/Cocoa. Secondary platform.
 - **OS IME candidate windows** — focused TextField caret uses measured advance (`sz_view_caret_rect`). Embedders do not yet place OS IME UI from it.
 - **LSP / editor tooling** — `fmt`, `check --message-format=json`, `watch`, and `scuzz lsp` exist. LSP wraps `check` (didOpen/didChange overlay open buffers; didClose returns to disk). Hover, completion, and definition use that parse. JSON diagnostics stay the single schema.

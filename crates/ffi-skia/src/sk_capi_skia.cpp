@@ -145,6 +145,30 @@ void scuzz_skia_canvas_draw_string(void *canvas, const char *text, float x,
                          font, p->paint);
 }
 
+void scuzz_skia_canvas_save(void *canvas) {
+  auto *c = static_cast<CapCanvas *>(canvas);
+  if (c && c->raw)
+    c->raw->save();
+}
+
+void scuzz_skia_canvas_restore(void *canvas) {
+  auto *c = static_cast<CapCanvas *>(canvas);
+  if (c && c->raw)
+    c->raw->restore();
+}
+
+void scuzz_skia_canvas_clip_rect(void *canvas, float x, float y, float w,
+                                 float h) {
+  auto *c = static_cast<CapCanvas *>(canvas);
+  if (!c || !c->raw)
+    return;
+  if (w <= 0.f || h <= 0.f) {
+    c->raw->clipRect(SkRect::MakeXYWH(0, 0, 0, 0), true);
+    return;
+  }
+  c->raw->clipRect(SkRect::MakeXYWH(x, y, w, h), true);
+}
+
 void *scuzz_skia_paint_new(void) {
   auto *p = new CapPaint();
   p->paint.setAntiAlias(true);

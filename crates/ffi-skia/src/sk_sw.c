@@ -12,8 +12,19 @@ struct SkPaint {
   float text_size;
 };
 
+#define SK_CLIP_STACK 8
+
 struct SkCanvas {
   struct SkSurface *surface;
+  int clip_x0;
+  int clip_y0;
+  int clip_x1;
+  int clip_y1;
+  int save_n;
+  int save_x0[SK_CLIP_STACK];
+  int save_y0[SK_CLIP_STACK];
+  int save_x1[SK_CLIP_STACK];
+  int save_y1[SK_CLIP_STACK];
 };
 
 struct SkSurface {
@@ -52,6 +63,11 @@ SkSurface *sk_surface_make_raster_n32_premul(int width, int height) {
     return NULL;
   }
   s->canvas.surface = s;
+  s->canvas.clip_x0 = 0;
+  s->canvas.clip_y0 = 0;
+  s->canvas.clip_x1 = width;
+  s->canvas.clip_y1 = height;
+  s->canvas.save_n = 0;
   return s;
 }
 
@@ -88,6 +104,9 @@ const uint8_t *sk_surface_peek_pixels(const SkSurface *surface, size_t *out_size
 static void put_pixel(SkSurface *s, int x, int y, SkColor color) {
   uint8_t *p;
   if (!s || x < 0 || y < 0 || x >= s->width || y >= s->height)
+    return;
+  if (x < s->canvas.clip_x0 || y < s->canvas.clip_y0 || x >= s->canvas.clip_x1 ||
+      y >= s->canvas.clip_y1)
     return;
   p = s->pixels + ((size_t)y * (size_t)s->width + (size_t)x) * 4;
   if (color.a == 255) {
@@ -135,6 +154,49 @@ void sk_canvas_draw_rect(SkCanvas *canvas, float x, float y, float w, float h,
       for (ix = x0; ix < x1; ix++)
         put_pixel(canvas->surface, ix, iy, paint->color);
   }
+}
+
+void sk_canvas_save(SkCanvas *canvas) {
+  if (!canvas || canvas->save_n >= SK_CLIP_STACK)
+    return;
+  canvas->save_x0[canvas->save_n] = canvas->clip_x0;
+  canvas->save_y0[canvas->save_n] = canvas->clip_y0;
+  canvas->save_x1[canvas->save_n] = canvas->clip_x1;
+  canvas->save_y1[canvas->save_n] = canvas->clip_y1;
+  canvas->save_n++;
+}
+
+void sk_canvas_restore(SkCanvas *canvas) {
+  if (!canvas || canvas->save_n <= 0)
+    return;
+  canvas->save_n--;
+  canvas->clip_x0 = canvas->save_x0[canvas->save_n];
+  canvas->clip_y0 = canvas->save_y0[canvas->save_n];
+  canvas->clip_x1 = canvas->save_x1[canvas->save_n];
+  canvas->clip_y1 = canvas->save_y1[canvas->save_n];
+}
+
+void sk_canvas_clip_rect(SkCanvas *canvas, float x, float y, float w, float h) {
+  int x0, y0, x1, y1;
+  if (!canvas)
+    return;
+  if (w <= 0.f || h <= 0.f) {
+    canvas->clip_x1 = canvas->clip_x0;
+    canvas->clip_y1 = canvas->clip_y0;
+    return;
+  }
+  x0 = (int)x;
+  y0 = (int)y;
+  x1 = (int)(x + w);
+  y1 = (int)(y + h);
+  if (x0 > canvas->clip_x0)
+    canvas->clip_x0 = x0;
+  if (y0 > canvas->clip_y0)
+    canvas->clip_y0 = y0;
+  if (x1 < canvas->clip_x1)
+    canvas->clip_x1 = x1;
+  if (y1 < canvas->clip_y1)
+    canvas->clip_y1 = y1;
 }
 
 /* 8x8 ASCII font — printable 32..126; bits MSB = left. */

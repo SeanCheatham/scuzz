@@ -18,6 +18,10 @@ void scuzz_skia_canvas_draw_rect(void *canvas, float x, float y, float w,
                                  float h, const void *paint);
 void scuzz_skia_canvas_draw_string(void *canvas, const char *text, float x,
                                    float y, const void *paint);
+void scuzz_skia_canvas_save(void *canvas);
+void scuzz_skia_canvas_restore(void *canvas);
+void scuzz_skia_canvas_clip_rect(void *canvas, float x, float y, float w,
+                                 float h);
 void *scuzz_skia_paint_new(void);
 void scuzz_skia_paint_delete(void *paint);
 void scuzz_skia_paint_set_color(void *paint, uint8_t r, uint8_t g, uint8_t b,
@@ -82,6 +86,14 @@ void sk_canvas_draw_rect(SkCanvas *canvas, float x, float y, float w, float h,
 void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
                            const SkPaint *paint) {
   scuzz_skia_canvas_draw_string(canvas, text, x, y, paint);
+}
+
+void sk_canvas_save(SkCanvas *canvas) { scuzz_skia_canvas_save(canvas); }
+
+void sk_canvas_restore(SkCanvas *canvas) { scuzz_skia_canvas_restore(canvas); }
+
+void sk_canvas_clip_rect(SkCanvas *canvas, float x, float y, float w, float h) {
+  scuzz_skia_canvas_clip_rect(canvas, x, y, w, h);
 }
 
 SkPaint *sk_paint_new(void) { return (SkPaint *)scuzz_skia_paint_new(); }

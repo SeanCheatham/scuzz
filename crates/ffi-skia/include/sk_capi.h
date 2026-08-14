@@ -40,6 +40,10 @@ void sk_canvas_draw_rect(SkCanvas *canvas, float x, float y, float w, float h,
 /* Baseline-left text. Uses paint text size (default 8). */
 void sk_canvas_draw_string(SkCanvas *canvas, const char *text, float x, float y,
                            const SkPaint *paint);
+void sk_canvas_save(SkCanvas *canvas);
+void sk_canvas_restore(SkCanvas *canvas);
+/* Intersect the current clip with this rect. */
+void sk_canvas_clip_rect(SkCanvas *canvas, float x, float y, float w, float h);
 
 SkPaint *sk_paint_new(void);
 void sk_paint_delete(SkPaint *paint);

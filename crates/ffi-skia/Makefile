@@ -63,8 +63,13 @@ build/test_skia: tests/test_skia.c lib
 	fi; \
 	$(CC) $(CFLAGS) $(INCLUDES) tests/test_skia.c -Lbuild -lsk_capi $$extra -lpthread -o $@
 
-test: build/test_skia
+# Canvas clip against in-tree sk_sw. The pinned Skia archive does not export save/clip.
+build/test_sk_clip: tests/test_sk_clip.c src/sk_sw.c src/png_enc.c include/sk_capi.h src/png_enc.h | build
+	$(CC) $(CFLAGS) $(INCLUDES) tests/test_sk_clip.c src/sk_sw.c src/png_enc.c -o $@
+
+test: build/test_skia build/test_sk_clip
 	./build/test_skia
+	./build/test_sk_clip
 
 clean:
 	rm -rf build

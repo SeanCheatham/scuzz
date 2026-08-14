@@ -298,6 +298,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("View.each", "View.each(items: Signal): View"),
     ("View.expanded", "View.expanded(child: View): View"),
     ("View.stretch", "View.stretch(child: View): View"),
+    ("View.clip", "View.clip(child: View): View"),
     ("View.center", "View.center(child: View): View"),
     (
         "View.minSize",
@@ -406,5 +407,12 @@ mod tests {
             h.contains("View.maxSize(w: Int, h: Int, child: View): View"),
             "{h}"
         );
+    }
+
+    #[test]
+    fn hovers_view_clip() {
+        let src = "@main def main: IO[Unit] =\n  Ui.run(_ => View.clip(View.text(\"x\")))\n";
+        let h = hover_src(src, "clip");
+        assert!(h.contains("View.clip(child: View): View"), "{h}");
     }
 }
