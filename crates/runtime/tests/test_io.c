@@ -138,6 +138,43 @@ static void *live_get_client(void *arg) {
   return buf;
 }
 
+static void *ipv6_http_once(void *arg) {
+  int port = *(int *)arg;
+  int fd, cfd;
+  int one = 1;
+  struct sockaddr_in6 addr;
+  char buf[512];
+  const char *resp = "HTTP/1.0 200 OK\r\n\r\nok:/x";
+  ssize_t n;
+  fd = socket(AF_INET6, SOCK_STREAM, 0);
+  if (fd < 0)
+    return NULL;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+  memset(&addr, 0, sizeof addr);
+  addr.sin6_family = AF_INET6;
+  addr.sin6_port = htons((uint16_t)port);
+  if (inet_pton(AF_INET6, "::1", &addr.sin6_addr) != 1) {
+    close(fd);
+    return NULL;
+  }
+  if (bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0 || listen(fd, 1) != 0) {
+    close(fd);
+    return NULL;
+  }
+  cfd = accept(fd, NULL, NULL);
+  close(fd);
+  if (cfd < 0)
+    return NULL;
+  n = read(cfd, buf, sizeof buf);
+  (void)n;
+  if (write(cfd, resp, strlen(resp)) < 0) {
+    close(cfd);
+    return NULL;
+  }
+  close(cfd);
+  return (void *)1;
+}
+
 static volatile int g_peer_flag;
 
 static SzIo *assert_peer_quiet(void *value, void *env) {
@@ -1257,6 +1294,22 @@ int main(void) {
     pair = (SzPair *)r.value;
     assert(pair && pair->right);
     assert(strcmp(sz_string_cstr((SzString *)pair->right), "ok:/x") == 0);
+  }
+
+  /* IPv6 literals skip DNS: http://[::1]:port/x */
+  {
+    pthread_t th;
+    int port = 18579;
+    char url[64];
+    void *ret = NULL;
+    pthread_create(&th, NULL, ipv6_http_once, &port);
+    snprintf(url, sizeof url, "http://[::1]:%d/x", port);
+    r = sz_io_unsafe_run(sz_io_flatmap(sz_io_sleep_ms(30), after_sleep_http,
+                                      sz_string_from_cstr(url)));
+    pthread_join(th, &ret);
+    assert(r.ok);
+    assert(ret != NULL);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "ok:/x") == 0);
   }
 
   /* Live httpGet DNS parks on UDP poll; a peer fiber runs before the answer. */

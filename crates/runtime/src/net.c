@@ -14,7 +14,8 @@
 
 /* Blessed Net.httpGet — live HTTP/1.0 GET or TestRuntime stub map.
  * Live hostnames resolve via UDP A (park on poll); CNAME chains re-query
- * (cap 5). IPv4 literals skip DNS. Failures use SzError code 6. */
+ * (cap 5). IPv4 literals and `http://[::1]/` IPv6 literals skip DNS.
+ * AAAA lookup is later. Failures use SzError code 6. */
 
 typedef struct {
   int is_err;
@@ -43,13 +44,44 @@ static int set_nonblock(int fd) {
 }
 
 static int parse_http_url(const char *url, char *host, size_t host_sz, char *path,
-                          size_t path_sz, int *port) {
+                          size_t path_sz, int *port, int *is_v6) {
   const char *p;
   const char *slash;
+  const char *rb;
   size_t hlen;
-  if (!url || strncmp(url, "http://", 7) != 0)
+  if (!url || !is_v6 || strncmp(url, "http://", 7) != 0)
     return 0;
+  *is_v6 = 0;
+  *port = 80;
   p = url + 7;
+  if (p[0] == '[') {
+    rb = strchr(p, ']');
+    if (!rb)
+      return 0;
+    hlen = (size_t)(rb - (p + 1));
+    if (hlen == 0 || hlen + 1 > host_sz)
+      return 0;
+    memcpy(host, p + 1, hlen);
+    host[hlen] = '\0';
+    *is_v6 = 1;
+    p = rb + 1;
+    if (p[0] == ':') {
+      p++;
+      *port = atoi(p);
+      if (*port <= 0)
+        *port = 80;
+      while (*p && *p != '/')
+        p++;
+    }
+    if (p[0] == '\0') {
+      memcpy(path, "/", 2);
+      return 1;
+    }
+    if (p[0] != '/' || strlen(p) + 1 > path_sz)
+      return 0;
+    memcpy(path, p, strlen(p) + 1);
+    return 1;
+  }
   slash = strchr(p, '/');
   if (slash) {
     hlen = (size_t)(slash - p);
@@ -64,7 +96,6 @@ static int parse_http_url(const char *url, char *host, size_t host_sz, char *pat
     memcpy(host, p, strlen(p) + 1);
     memcpy(path, "/", 2);
   }
-  *port = 80;
   {
     char *colon = strchr(host, ':');
     if (colon) {
@@ -84,7 +115,8 @@ typedef struct GetSt {
   uint16_t dns_id;
   int dns_hops;
   int http_port;
-  struct sockaddr_in peer;
+  struct sockaddr_storage peer;
+  socklen_t peer_len;
   char host[256];
   char dns_name[256];
   char path[1024];
@@ -371,20 +403,39 @@ static void *get_start(void *env) {
   NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
   const char *url = sz_string_cstr(st->url);
   int port = 80;
-  struct in_addr addr;
+  int is_v6 = 0;
+  struct sockaddr_in *a4;
+  struct sockaddr_in6 *a6;
 
   if (!parse_http_url(url, st->host, sizeof st->host, st->path, sizeof st->path,
-                      &port)) {
+                      &port, &is_v6)) {
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.httpGet: only http:// URLs supported");
     return r;
   }
   st->http_port = port;
   memset(&st->peer, 0, sizeof st->peer);
-  st->peer.sin_family = AF_INET;
-  st->peer.sin_port = htons((uint16_t)port);
-  if (inet_pton(AF_INET, st->host, &addr) == 1) {
-    st->peer.sin_addr = addr;
+  if (is_v6) {
+    a6 = (struct sockaddr_in6 *)&st->peer;
+    a6->sin6_family = AF_INET6;
+#ifdef __APPLE__
+    a6->sin6_len = (uint8_t)sizeof(*a6);
+#endif
+    a6->sin6_port = htons((uint16_t)port);
+    st->peer_len = sizeof(*a6);
+    if (inet_pton(AF_INET6, st->host, &a6->sin6_addr) != 1) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.httpGet: invalid IPv6 literal");
+      return r;
+    }
+    r->is_err = 0;
+    return r;
+  }
+  a4 = (struct sockaddr_in *)&st->peer;
+  a4->sin_family = AF_INET;
+  a4->sin_port = htons((uint16_t)port);
+  st->peer_len = sizeof(*a4);
+  if (inet_pton(AF_INET, st->host, &a4->sin_addr) == 1) {
     r->is_err = 0;
     return r;
   }
@@ -425,7 +476,8 @@ static void *get_dns_recv(void *env) {
   }
   {
     char cname[256];
-    int kind = dns_parse_answer(buf, (size_t)n, st->dns_id, &st->peer.sin_addr,
+    int kind = dns_parse_answer(buf, (size_t)n, st->dns_id,
+                                &((struct sockaddr_in *)&st->peer)->sin_addr,
                                 cname, sizeof cname);
     if (kind == 1) {
       close(st->dns_fd);
@@ -452,10 +504,13 @@ static void *get_tcp_connect(void *env) {
   GetSt *st = (GetSt *)env;
   NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
   int fd;
+  int family;
   char req[2048];
+  char hosthdr[300];
   size_t nreq;
 
-  fd = socket(AF_INET, SOCK_STREAM, 0);
+  family = ((struct sockaddr *)&st->peer)->sa_family;
+  fd = socket(family, SOCK_STREAM, 0);
   if (fd < 0 || set_nonblock(fd) != 0) {
     if (fd >= 0)
       close(fd);
@@ -463,7 +518,7 @@ static void *get_tcp_connect(void *env) {
     r->as.err = sz_error_new(6, "Net.httpGet: socket failed");
     return r;
   }
-  if (connect(fd, (struct sockaddr *)&st->peer, sizeof st->peer) != 0 &&
+  if (connect(fd, (struct sockaddr *)&st->peer, st->peer_len) != 0 &&
       errno != EINPROGRESS && errno != EAGAIN) {
     close(fd);
     r->is_err = 1;
@@ -471,9 +526,13 @@ static void *get_tcp_connect(void *env) {
     return r;
   }
   st->fd = fd;
+  if (family == AF_INET6)
+    snprintf(hosthdr, sizeof hosthdr, "[%s]", st->host);
+  else
+    snprintf(hosthdr, sizeof hosthdr, "%s", st->host);
   nreq = (size_t)snprintf(req, sizeof req,
                           "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n",
-                          st->path, st->host);
+                          st->path, hosthdr);
   if (nreq >= sizeof req)
     nreq = sizeof req - 1;
   st->req = (char *)sz_alloc(nreq + 1);
