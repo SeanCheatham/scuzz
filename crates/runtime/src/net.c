@@ -13,9 +13,9 @@
 #include <unistd.h>
 
 /* Blessed Net.httpGet — live HTTP/1.0 GET or TestRuntime stub map.
- * Live hostnames resolve via UDP A (park on poll); CNAME chains re-query
- * (cap 5). IPv4 literals and `http://[::1]/` IPv6 literals skip DNS.
- * AAAA lookup is later. Failures use SzError code 6. */
+ * Live hostnames resolve via UDP A then AAAA on NODATA (park on poll);
+ * CNAME chains re-query (cap 5). IPv4 literals and `http://[::1]/` IPv6
+ * literals skip DNS. Failures use SzError code 6. */
 
 typedef struct {
   int is_err;
@@ -113,6 +113,7 @@ typedef struct GetSt {
   int fd;
   int dns_fd;
   uint16_t dns_id;
+  uint16_t dns_qtype;
   int dns_hops;
   int http_port;
   struct sockaddr_storage peer;
@@ -206,7 +207,7 @@ static size_t dns_put_name(uint8_t *dst, size_t cap, const char *host) {
 }
 
 static size_t dns_build_query(uint8_t *buf, size_t cap, uint16_t id,
-                              const char *host) {
+                              const char *host, uint16_t qtype) {
   size_t n;
   if (cap < 18)
     return 0;
@@ -217,7 +218,7 @@ static size_t dns_build_query(uint8_t *buf, size_t cap, uint16_t id,
   n = dns_put_name(buf + 12, cap - 16, host);
   if (n == 0)
     return 0;
-  wr16(buf + 12 + n, 1);     /* A */
+  wr16(buf + 12 + n, qtype);
   wr16(buf + 12 + n + 2, 1); /* IN */
   return 12 + n + 4;
 }
@@ -305,12 +306,14 @@ static int dns_read_name(const uint8_t *buf, size_t n, size_t *off, char *out,
   return 0;
 }
 
-/* 1 = A, 2 = CNAME only, 0 = fail. Scans AN/NS/AR so additional A records count. */
+/* 1 = A, 2 = CNAME only, 3 = AAAA, 4 = NODATA, 0 = fail. Prefers A over AAAA. */
 static int dns_parse_answer(const uint8_t *buf, size_t n, uint16_t id,
-                            struct in_addr *a_out, char *cname, size_t cname_cap) {
+                            struct in_addr *a_out, uint8_t *aaaa, char *cname,
+                            size_t cname_cap) {
   uint16_t flags, qd, rr, i;
   size_t o = 12;
   int got_a = 0;
+  int got_aaaa = 0;
   if (n < 12 || rd16(buf) != id)
     return 0;
   flags = rd16(buf + 2);
@@ -335,9 +338,12 @@ static int dns_parse_answer(const uint8_t *buf, size_t n, uint16_t id,
     o += 10;
     if (o + rdlen > n)
       return 0;
-    if (typ == 1 && cls == 1 && rdlen == 4 && !got_a) {
+    if (typ == 1 && cls == 1 && rdlen == 4 && !got_a && a_out) {
       memcpy(&a_out->s_addr, buf + o, 4);
       got_a = 1;
+    } else if (typ == 28 && cls == 1 && rdlen == 16 && !got_aaaa && aaaa) {
+      memcpy(aaaa, buf + o, 16);
+      got_aaaa = 1;
     } else if (typ == 5 && cls == 1 && cname && cname_cap && cname[0] == '\0') {
       size_t name_off = o;
       char tmp[256];
@@ -349,9 +355,11 @@ static int dns_parse_answer(const uint8_t *buf, size_t n, uint16_t id,
   }
   if (got_a)
     return 1;
+  if (got_aaaa)
+    return 3;
   if (cname && cname[0])
     return 2;
-  return 0;
+  return 4;
 }
 
 static int dns_send_query(GetSt *st) {
@@ -365,7 +373,7 @@ static int dns_send_query(GetSt *st) {
   if (g_dns_qid == 0)
     g_dns_qid = 1;
   st->dns_id = g_dns_qid;
-  qn = dns_build_query(q, sizeof q, st->dns_id, st->dns_name);
+  qn = dns_build_query(q, sizeof q, st->dns_id, st->dns_name, st->dns_qtype);
   if (qn == 0)
     return 0;
   if (st->dns_fd < 0) {
@@ -380,6 +388,21 @@ static int dns_send_query(GetSt *st) {
   }
   nsent = sendto(st->dns_fd, q, qn, 0, (struct sockaddr *)&ns, sizeof ns);
   return nsent == (ssize_t)qn;
+}
+
+static void peer_set_v6(GetSt *st, const uint8_t *addr16) {
+  struct sockaddr_in6 *a6;
+  if (!st || !addr16)
+    return;
+  memset(&st->peer, 0, sizeof st->peer);
+  a6 = (struct sockaddr_in6 *)&st->peer;
+  a6->sin6_family = AF_INET6;
+#ifdef __APPLE__
+  a6->sin6_len = (uint8_t)sizeof(*a6);
+#endif
+  a6->sin6_port = htons((uint16_t)st->http_port);
+  memcpy(&a6->sin6_addr, addr16, 16);
+  st->peer_len = sizeof(*a6);
 }
 
 static void get_free(GetSt *st) {
@@ -445,6 +468,7 @@ static void *get_start(void *env) {
     return r;
   }
   memcpy(st->dns_name, st->host, strlen(st->host) + 1);
+  st->dns_qtype = 1;
   if (!dns_send_query(st)) {
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.httpGet: DNS failed");
@@ -476,10 +500,18 @@ static void *get_dns_recv(void *env) {
   }
   {
     char cname[256];
+    uint8_t aaaa[16];
     int kind = dns_parse_answer(buf, (size_t)n, st->dns_id,
-                                &((struct sockaddr_in *)&st->peer)->sin_addr,
+                                &((struct sockaddr_in *)&st->peer)->sin_addr, aaaa,
                                 cname, sizeof cname);
     if (kind == 1) {
+      close(st->dns_fd);
+      st->dns_fd = -1;
+      r->is_err = 0;
+      return r;
+    }
+    if (kind == 3) {
+      peer_set_v6(st, aaaa);
       close(st->dns_fd);
       st->dns_fd = -1;
       r->is_err = 0;
@@ -489,6 +521,13 @@ static void *get_dns_recv(void *env) {
         strlen(cname) < sizeof st->dns_name) {
       st->dns_hops++;
       memcpy(st->dns_name, cname, strlen(cname) + 1);
+      if (dns_send_query(st)) {
+        r->retry = 1;
+        return r;
+      }
+    }
+    if (kind == 4 && st->dns_qtype == 1) {
+      st->dns_qtype = 28;
       if (dns_send_query(st)) {
         r->retry = 1;
         return r;
@@ -526,7 +565,7 @@ static void *get_tcp_connect(void *env) {
     return r;
   }
   st->fd = fd;
-  if (family == AF_INET6)
+  if (family == AF_INET6 && strchr(st->host, ':'))
     snprintf(hosthdr, sizeof hosthdr, "[%s]", st->host);
   else
     snprintf(hosthdr, sizeof hosthdr, "%s", st->host);

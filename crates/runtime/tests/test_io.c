@@ -325,6 +325,53 @@ static void *dns_late_cname(void *arg) {
   return NULL;
 }
 
+static void *dns_late_aaaa(void *arg) {
+  int fd = *(int *)arg;
+  uint8_t buf[512];
+  uint8_t ans[28];
+  struct sockaddr_in from;
+  socklen_t flen = sizeof from;
+  ssize_t n;
+  int i;
+  memset(ans, 0, sizeof ans);
+  ans[0] = 0xC0;
+  ans[1] = 0x0C;
+  ans[2] = 0;
+  ans[3] = 28;
+  ans[4] = 0;
+  ans[5] = 1;
+  ans[9] = 60;
+  ans[10] = 0;
+  ans[11] = 16;
+  ans[27] = 1;
+  for (i = 0; i < 2; i++) {
+    flen = sizeof from;
+    n = recvfrom(fd, buf, sizeof buf, 0, (struct sockaddr *)&from, &flen);
+    sleep_us(40000);
+    if (i == 0)
+      g_peer_flag = 1;
+    if (n < 12)
+      return NULL;
+    buf[2] = (uint8_t)(buf[2] | 0x80);
+    buf[3] = 0x80;
+    if (i == 0) {
+      buf[6] = 0;
+      buf[7] = 0;
+      if (sendto(fd, buf, (size_t)n, 0, (struct sockaddr *)&from, flen) < 0)
+        return NULL;
+    } else {
+      if ((size_t)n + 28 > sizeof buf)
+        return NULL;
+      buf[6] = 0;
+      buf[7] = 1;
+      memcpy(buf + n, ans, 28);
+      if (sendto(fd, buf, (size_t)n + 28, 0, (struct sockaddr *)&from, flen) < 0)
+        return NULL;
+    }
+  }
+  return NULL;
+}
+
 static void *stdin_late_write(void *arg) {
   int fd = *(int *)arg;
   sleep_us(40000);
@@ -1309,6 +1356,40 @@ int main(void) {
     pthread_join(th, &ret);
     assert(r.ok);
     assert(ret != NULL);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "ok:/x") == 0);
+  }
+
+  /* Hostname A NODATA then AAAA ::1, then HTTP on IPv6 loopback. */
+  {
+    pthread_t th_dns;
+    pthread_t th_http;
+    int dns_fd;
+    int http_port = 18580;
+    struct sockaddr_in addr;
+    socklen_t alen = sizeof addr;
+    char url[80];
+    void *http_ret = NULL;
+    dns_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    assert(dns_fd >= 0);
+    memset(&addr, 0, sizeof addr);
+    addr.sin_family = AF_INET;
+    addr.sin_port = 0;
+    assert(inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) == 1);
+    assert(bind(dns_fd, (struct sockaddr *)&addr, sizeof addr) == 0);
+    alen = sizeof addr;
+    assert(getsockname(dns_fd, (struct sockaddr *)&addr, &alen) == 0);
+    sz_net_test_set_nameserver("127.0.0.1", (int)ntohs(addr.sin_port));
+    pthread_create(&th_http, NULL, ipv6_http_once, &http_port);
+    pthread_create(&th_dns, NULL, dns_late_aaaa, &dns_fd);
+    snprintf(url, sizeof url, "http://scuzz.test:%d/x", http_port);
+    r = sz_io_unsafe_run(sz_io_flatmap(sz_io_sleep_ms(30), after_sleep_http,
+                                      sz_string_from_cstr(url)));
+    pthread_join(th_dns, NULL);
+    pthread_join(th_http, &http_ret);
+    close(dns_fd);
+    sz_net_test_set_nameserver(NULL, 0);
+    assert(r.ok);
+    assert(http_ret != NULL);
     assert(strcmp(sz_string_cstr((SzString *)r.value), "ok:/x") == 0);
   }
 

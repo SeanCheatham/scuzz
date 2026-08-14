@@ -37,11 +37,11 @@ Vision locks **oracles in source, drivers as the test surface** ([`vision.md`](v
 
 ### Residuals
 
-- **Net** — AAAA hostname lookup is out. `Net.httpGet` follows CNAME chains (cap 5) to an A; IPv4 literals and `http://[::1]/` IPv6 literals skip DNS.
+- **Net** — Happy Eyeballs (racing A+AAAA) is out. `Net.httpGet` follows CNAME chains (cap 5) to an A, then AAAA on NODATA; IPv4 literals and `http://[::1]/` IPv6 literals skip DNS.
 - **Concurrency** — cooperative fibers only; `IO.ensure` / `Resource` release on cancel (including `IO.timeout` / `Fiber.interrupt`). Language `Fiber.fork` / `join` / `interrupt` and `IO.forever` / `repeatN` / `retryN` are in. Later: OS threads, supervision trees.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting; `Signal.list` frees unshared cons spines. Later: a collector if list-churn still demands it.
 - **Language surface** — richer generics beyond monomorphized defs/enums/records ([`compatibility.md`](compatibility.md)).
-- **Mutation operators** — `scuzz mutate` (Stage 1/2) negates residual `Law.check` / `Law.assert` / `.require` predicates, flips relational/boolean ops inside them, swaps `+`/`-`, drops `&&` conjuncts, and swaps `0`↔`1` literals, then probes (idle + `--iters` fuzz). Survivors are weak or unreached oracles. Later: `*`/`/`. No external mutators.
+- **Mutation operators** — `scuzz mutate` (Stage 1/2) negates residual `Law.check` / `Law.assert` / `.require` predicates, flips relational/boolean ops inside them, swaps `+`/`-`, drops `&&` conjuncts, and swaps `0`↔`1` literals, then probes (idle + `--iters` fuzz). Survivors are weak or unreached oracles. Later: `*`/`/` (see [`plans.md`](plans.md)). No external mutators.
 
 ### Dependency forms beyond `path`
 
