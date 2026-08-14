@@ -342,6 +342,48 @@ pub fn check_project_with(
     }
 }
 
+/// Signature hover at a 0-based LSP position. Same parse as [`check_project_with`].
+pub fn hover_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    line: u32,
+    character: u32,
+) -> Result<Option<String>> {
+    let mut resolved = crate::driver::resolve_project(project_dir)
+        .with_context(|| format!("resolving {}", project_dir.display()))?;
+    apply_unsaved(&mut resolved, unsaved, project_dir);
+    let key = canonicalize_source_path(path);
+    let (label, text) =
+        match resolved
+            .sources
+            .iter()
+            .find(|s| canonicalize_source_path(&s.path) == key)
+        {
+            Some(s) => (s.label.clone(), s.text.clone()),
+            None => match resolved.overlays.iter().find(|o| {
+                !o.path.as_os_str().is_empty() && canonicalize_source_path(&o.path) == key
+            }) {
+                Some(o) => (o.label.clone(), o.text.clone()),
+                None => return Ok(None),
+            },
+        };
+    let named = named_sources(&resolved);
+    let program = match parse_sources(&named) {
+        Ok(p) => p,
+        Err(_) => return Ok(None),
+    };
+    let program = match apply_overlays(program, &resolved.overlays) {
+        Ok(p) => p,
+        Err(_) => return Ok(None),
+    };
+    let offset =
+        crate::span::line_col_to_offset(&text, line.saturating_add(1), character.saturating_add(1));
+    Ok(crate::hover::hover_in_source(
+        &program, &label, &text, offset,
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -504,5 +546,20 @@ version = "0.0.0"
             "{}",
             diags[0].message
         );
+    }
+
+    #[test]
+    fn hover_project_shows_println() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        let path = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let text = fs::read_to_string(&path).unwrap();
+        let off = text.find("println").unwrap();
+        let (line, col) = offset_to_line_col(&text, off);
+        let h = hover_project(root, &BTreeMap::new(), &path, line - 1, col - 1)
+            .unwrap()
+            .expect("hover");
+        assert!(h.contains("IO.println"), "{h}");
     }
 }

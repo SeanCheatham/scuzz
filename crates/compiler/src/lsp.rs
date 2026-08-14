@@ -1,7 +1,7 @@
 //! Small LSP wrapping `check_project`. Same diagnostics as `--message-format=json`.
-//! No second typer. Open buffers overlay disk text.
+//! No second typer. Open buffers overlay disk text. Hover shows signatures.
 
-use crate::check::{canonicalize_source_path, check_project_with, Diagnostic};
+use crate::check::{canonicalize_source_path, check_project_with, hover_project, Diagnostic};
 use crate::overlay::collect_fmt_sources;
 use anyhow::Result;
 use std::collections::BTreeMap;
@@ -29,7 +29,7 @@ pub fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> R
             if let Some(p) = root_from_init(&body) {
                 root = p;
             }
-            let caps = r#"{"capabilities":{"textDocumentSync":{"openClose":true,"change":1}}}"#;
+            let caps = r#"{"capabilities":{"textDocumentSync":{"openClose":true,"change":1},"hoverProvider":true}}"#;
             write_result(&mut writer, id, caps)?;
         } else if method == "shutdown" {
             write_result(&mut writer, id, "null")?;
@@ -46,6 +46,9 @@ pub fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> R
                 open.retain(|p, _| canonicalize_source_path(p) != key);
             }
             publish_check(&root, &open, &mut writer)?;
+        } else if method == "textDocument/hover" {
+            let result = hover_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/didSave" {
             publish_check(&root, &open, &mut writer)?;
         } else if method == "initialized" || method.is_empty() {
@@ -141,6 +144,21 @@ fn publish_check<W: Write>(
         write_notify(writer, "textDocument/publishDiagnostics", &params)?;
     }
     Ok(())
+}
+
+fn hover_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    let Some(path) = doc_path_from_message(body) else {
+        return "null".into();
+    };
+    let line = json_i64_field(body, "line").unwrap_or(0).max(0) as u32;
+    let character = json_i64_field(body, "character").unwrap_or(0).max(0) as u32;
+    match hover_project(root, open, &path, line, character) {
+        Ok(Some(text)) => format!(
+            r#"{{"contents":{{"kind":"plaintext","value":{}}}}}"#,
+            json_str(&text)
+        ),
+        _ => "null".into(),
+    }
 }
 
 fn src_files(root: &Path) -> Result<Vec<PathBuf>> {
@@ -243,8 +261,13 @@ fn json_string_field(body: &str, key: &str) -> Option<String> {
 }
 
 fn json_id(body: &str) -> Option<i64> {
-    let i = body.find("\"id\"")?;
-    let rest = body[i + 4..].trim_start().strip_prefix(':')?;
+    json_i64_field(body, "id")
+}
+
+fn json_i64_field(body: &str, key: &str) -> Option<i64> {
+    let pat = format!("\"{key}\"");
+    let i = body.find(&pat)?;
+    let rest = body[i + pat.len()..].trim_start().strip_prefix(':')?;
     let rest = rest.trim_start();
     let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
     digits.parse().ok()
@@ -376,5 +399,38 @@ mod tests {
             !after_close.contains("\"severity\":1"),
             "close must publish disk-clean diagnostics: {after_close}"
         );
+    }
+
+    #[test]
+    fn lsp_hover_returns_println_signature() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        let root_uri = format!("file://{}", fs::canonicalize(root).unwrap().display());
+        let main = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let main_uri = format!("file://{}", main.display());
+        let src = fs::read_to_string(&main).unwrap();
+        let off = src.find("println").unwrap();
+        let (line, col) = crate::span::offset_to_line_col(&src, off);
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let hover = format!(
+            r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{{"textDocument":{{"uri":{}}},"position":{{"line":{},"character":{}}}}}}}"#,
+            json_str(&main_uri),
+            line - 1,
+            col - 1
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&hover));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("hoverProvider"), "{text}");
+        assert!(text.contains("IO.println"), "{text}");
+        assert!(text.contains("\"id\":3"), "{text}");
     }
 }

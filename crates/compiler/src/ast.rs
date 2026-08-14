@@ -581,3 +581,21 @@ pub enum Type {
     /// Untyped/opaque
     Opaque(String),
 }
+
+impl std::fmt::Display for Type {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Type::Unit => write!(f, "Unit"),
+            Type::Int => write!(f, "Int"),
+            Type::String => write!(f, "String"),
+            Type::Bool => write!(f, "Bool"),
+            Type::List => write!(f, "List"),
+            Type::Io(t) => write!(f, "IO[{t}]"),
+            Type::Adt(n) | Type::Var(n) | Type::Opaque(n) => write!(f, "{n}"),
+            Type::App(n, args) => {
+                let inner: Vec<String> = args.iter().map(|a| a.to_string()).collect();
+                write!(f, "{n}[{}]", inner.join(", "))
+            }
+        }
+    }
+}

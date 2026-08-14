@@ -52,6 +52,24 @@ pub fn offset_to_line_col(source: &str, offset: usize) -> (u32, u32) {
     (line, col)
 }
 
+/// Convert 1-based line and column to a byte offset (column counts bytes, like [`offset_to_line_col`]).
+pub fn line_col_to_offset(source: &str, line: u32, column: u32) -> usize {
+    let mut cur_line = 1u32;
+    let mut cur_col = 1u32;
+    for (i, b) in source.bytes().enumerate() {
+        if cur_line == line && cur_col == column {
+            return i;
+        }
+        if b == b'\n' {
+            cur_line += 1;
+            cur_col = 1;
+        } else {
+            cur_col += 1;
+        }
+    }
+    source.len()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -66,5 +84,12 @@ mod tests {
         let src = "a\nbc";
         assert_eq!(offset_to_line_col(src, 2), (2, 1));
         assert_eq!(offset_to_line_col(src, 3), (2, 2));
+    }
+
+    #[test]
+    fn line_col_roundtrip() {
+        let src = "ab\ncd";
+        let (line, col) = offset_to_line_col(src, 3);
+        assert_eq!(line_col_to_offset(src, line, col), 3);
     }
 }
