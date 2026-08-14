@@ -108,7 +108,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_MAX_SIZE || kind == SZ_VIEW_CLIP ||
          kind == SZ_VIEW_OPACITY || kind == SZ_VIEW_MAX_LINES ||
          kind == SZ_VIEW_IGNORE_POINTER || kind == SZ_VIEW_ABSORB_POINTER ||
-         kind == SZ_VIEW_EXCLUDE_SEMANTICS || kind == SZ_VIEW_ELLIPSIS;
+         kind == SZ_VIEW_EXCLUDE_SEMANTICS || kind == SZ_VIEW_ELLIPSIS ||
+         kind == SZ_VIEW_TEXT_COLOR;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -461,6 +462,14 @@ SzView *sz_view_exclude_semantics(SzView *child) {
 
 SzView *sz_view_ellipsis(SzView *child) {
   SzView *v = view_new(SZ_VIEW_ELLIPSIS);
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
+SzView *sz_view_text_color(uint32_t argb, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_TEXT_COLOR);
+  v->bg_argb = argb;
   if (child)
     sz_view_add_child(v, child);
   return v;
@@ -1383,7 +1392,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   }
   case SZ_VIEW_IGNORE_POINTER:
   case SZ_VIEW_ABSORB_POINTER:
-  case SZ_VIEW_EXCLUDE_SEMANTICS: {
+  case SZ_VIEW_EXCLUDE_SEMANTICS:
+  case SZ_VIEW_TEXT_COLOR: {
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
     if (ch) {
       SzBoxConstraints cc;
@@ -1525,6 +1535,8 @@ static const float k_text_field_inset = 6.f;
 static int g_clip_on;
 static SzRect g_clip;
 static int g_opacity = 100;
+static int g_text_color_on;
+static uint32_t g_text_argb;
 
 static uint32_t apply_paint_alpha(uint32_t argb) {
   uint32_t a;
@@ -1682,7 +1694,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     wp.font_px = theme->font_px;
     wp.line_h = text_line_h(theme);
     wp.inner = inner;
-    wp.argb = theme->foreground;
+    wp.argb = g_text_color_on ? g_text_argb : theme->foreground;
     wp.cap = text_line_cap();
     wp.drawn = 0;
     wp.ellipsis = 0;
@@ -1785,6 +1797,17 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     g_ellipsis = prev;
     break;
   }
+  case SZ_VIEW_TEXT_COLOR: {
+    int prev_on = g_text_color_on;
+    uint32_t prev_argb = g_text_argb;
+    g_text_color_on = 1;
+    g_text_argb = v->bg_argb;
+    for (i = 0; i < v->child_count; i++)
+      paint_node(v->children[i], c, theme);
+    g_text_color_on = prev_on;
+    g_text_argb = prev_argb;
+    break;
+  }
   case SZ_VIEW_SCROLL:
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     paint_children_clipped(v, c, theme);
@@ -1826,6 +1849,7 @@ int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
   g_opacity = 100;
   g_max_lines = 0;
   g_ellipsis = 0;
+  g_text_color_on = 0;
   sk_canvas_clear(canvas, sk_color_argb(theme->background));
   sz_view_layout(root, (float)width, (float)height, theme);
   paint_node(root, canvas, theme);

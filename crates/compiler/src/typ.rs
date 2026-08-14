@@ -1923,6 +1923,14 @@ fn infer_call(
             expect_ty(&arg_tys[2], &Type::Int)?;
             Ok(Type::Int)
         }
+        "Color.rgba" => {
+            expect_arity(callee, &arg_tys, 4)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            expect_ty(&arg_tys[2], &Type::Int)?;
+            expect_ty(&arg_tys[3], &Type::Int)?;
+            Ok(Type::Int)
+        }
         "View.column" | "View.row" | "View.stack" => {
             // Nullary or children: `View.column(a, b, …)` adds each child.
             Ok(Type::Opaque("View".into()))
@@ -1998,6 +2006,11 @@ fn infer_call(
         }
         "View.ellipsis" => {
             expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::Opaque("View".into()))
+        }
+        "View.textColor" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
             Ok(Type::Opaque("View".into()))
         }
         "View.ignorePointer" => {
@@ -4911,6 +4924,24 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.ellipsis should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_text_color() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.textColor(Color.rgb(255, 0, 0), View.text("x")))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.textColor should typecheck");
+    }
+
+    #[test]
+    fn typechecks_color_rgba() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.background(Color.rgba(1, 2, 3, 4), View.text("x")))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Color.rgba should typecheck");
     }
 
     #[test]

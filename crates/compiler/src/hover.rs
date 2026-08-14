@@ -312,6 +312,15 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("View.maxLines", "View.maxLines(n: Int, child: View): View"),
     ("View.ellipsis", "View.ellipsis(child: View): View"),
     (
+        "View.textColor",
+        "View.textColor(color: Int, child: View): View",
+    ),
+    ("Color.rgb", "Color.rgb(r: Int, g: Int, b: Int): Int"),
+    (
+        "Color.rgba",
+        "Color.rgba(r: Int, g: Int, b: Int, a: Int): Int",
+    ),
+    (
         "View.ignorePointer",
         "View.ignorePointer(child: View): View",
     ),
@@ -456,6 +465,27 @@ mod tests {
         let src = "@main def main: IO[Unit] =\n  Ui.run(_ => View.ellipsis(View.text(\"x\")))\n";
         let h = hover_src(src, "ellipsis");
         assert!(h.contains("View.ellipsis(child: View): View"), "{h}");
+    }
+
+    #[test]
+    fn hovers_view_text_color() {
+        let src =
+            "@main def main: IO[Unit] =\n  Ui.run(_ => View.textColor(1, View.text(\"x\")))\n";
+        let h = hover_src(src, "textColor");
+        assert!(
+            h.contains("View.textColor(color: Int, child: View): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_color_rgba() {
+        let src = "@main def main: IO[Unit] =\n  Ui.run(_ => View.background(Color.rgba(1, 2, 3, 4), View.text(\"x\")))\n";
+        let h = hover_src(src, "rgba");
+        assert!(
+            h.contains("Color.rgba(r: Int, g: Int, b: Int, a: Int): Int"),
+            "{h}"
+        );
     }
 
     #[test]

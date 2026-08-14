@@ -333,6 +333,29 @@ enum Color:
     }
 
     #[test]
+    fn leaves_color_rgba_as_call() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  for {
+    c = Color.rgba(1, 2, 3, 4)
+  } yield IO.println("x")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        fn find_call(e: &Expr) -> bool {
+            match &e.kind {
+                ExprKind::Call { callee, .. } if callee == "Color.rgba" => true,
+                ExprKind::Let { value, body, .. } => find_call(value) || find_call(body),
+                ExprKind::AdtConstruct { .. } => false,
+                _ => false,
+            }
+        }
+        assert!(find_call(&p.main.body));
+    }
+
+    #[test]
     fn qualifies_enum_id_when_module_present() {
         use crate::parser::parse_sources;
         let p = lower_program(

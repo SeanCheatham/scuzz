@@ -2336,6 +2336,199 @@ static void test_ellipsis_paint_hides_extra_lines(void) {
   sz_view_free(root);
 }
 
+static void test_color_rgb_packs_opaque(void) {
+  assert((uint32_t)sz_color_rgb(230, 240, 248) == 0xFFE6F0F8u);
+  assert((uint32_t)sz_color_rgb(1, 2, 3) == 0xFF010203u);
+  assert((uint32_t)sz_color_rgb(-1, 256, 511) == 0xFFFF00FFu);
+}
+
+static void test_color_rgba_packs_alpha(void) {
+  assert((uint32_t)sz_color_rgba(1, 2, 3, 4) == 0x04010203u);
+  assert((uint32_t)sz_color_rgba(255, 0, 0, 255) == 0xFFFF0000u);
+  assert((uint32_t)sz_color_rgba(0, 0, 0, 0) == 0x00000000u);
+}
+
+static void test_text_color_sizes_to_child(void) {
+  SzView *wrap, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect wf, chf;
+
+  child = sz_view_sized(40, 30, sz_view_text("Hi"));
+  wrap = sz_view_text_color((uint32_t)sz_color_rgb(255, 0, 0), child);
+  sz_view_layout(wrap, 200.f, 200.f, theme);
+  assert(sz_view_kind(wrap) == SZ_VIEW_TEXT_COLOR);
+  wf = sz_view_frame(wrap);
+  chf = sz_view_frame(child);
+  assert(fabsf(wf.w - 40.f) < 0.5f);
+  assert(fabsf(wf.h - 30.f) < 0.5f);
+  assert(fabsf(chf.w - 40.f) < 0.5f);
+  assert(fabsf(chf.h - 30.f) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_text_color_keeps_a11y(void) {
+  SzView *wrap;
+  SzString *dump;
+
+  wrap = sz_view_text_color((uint32_t)sz_color_rgb(255, 0, 0), sz_view_text("hi"));
+  dump = sz_view_a11y_dump(wrap);
+  assert(strstr(sz_string_cstr(dump), "text:hi") != NULL);
+  sz_string_free(dump);
+  sz_view_free(wrap);
+}
+
+static int row_has_red(const uint8_t *px, int w, int y, int x0, int x1) {
+  int x;
+  for (x = x0; x < x1; x++) {
+    const uint8_t *p = px + ((size_t)y * (size_t)w + (size_t)x) * 4;
+    if (p[0] > 180 && p[1] < 80 && p[2] < 80)
+      return 1;
+  }
+  return 0;
+}
+
+static int row_has_blue(const uint8_t *px, int w, int y, int x0, int x1) {
+  int x;
+  for (x = x0; x < x1; x++) {
+    const uint8_t *p = px + ((size_t)y * (size_t)w + (size_t)x) * 4;
+    if (p[2] > 180 && p[0] < 80 && p[1] < 80)
+      return 1;
+  }
+  return 0;
+}
+
+static int band_has(int (*fn)(const uint8_t *, int, int, int, int), const uint8_t *px,
+                    int w, int y0, int y1, int x0, int x1) {
+  int y;
+  for (y = y0; y < y1 && y < 80; y++) {
+    if (fn(px, w, y, x0, x1))
+      return 1;
+  }
+  return 0;
+}
+
+static void test_text_color_paints_red(void) {
+  SzView *root;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  int y1;
+
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  y1 = (int)(theme->font_px + 6.f);
+
+  root = sz_view_text("MMMM");
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(!band_has(row_has_red, px, 80, 0, y1, 0, 40));
+  sz_view_free(root);
+
+  root = sz_view_text_color((uint32_t)sz_color_rgb(255, 0, 0), sz_view_text("MMMM"));
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(band_has(row_has_red, px, 80, 0, y1, 0, 40));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
+static void test_nested_text_color_inner_wins(void) {
+  SzView *root;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  int y1;
+
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  y1 = (int)(theme->font_px + 6.f);
+  root = sz_view_text_color(
+      (uint32_t)sz_color_rgb(255, 0, 0),
+      sz_view_text_color((uint32_t)sz_color_rgb(0, 0, 255), sz_view_text("MMMM")));
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(band_has(row_has_blue, px, 80, 0, y1, 0, 40));
+  assert(!band_has(row_has_red, px, 80, 0, y1, 0, 40));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
+static void test_text_color_does_not_recolor_button(void) {
+  SzView *root;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+  int y;
+
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  root = sz_view_text_color((uint32_t)sz_color_rgb(255, 0, 0),
+                            sz_view_button("Go", NULL, NULL));
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  f = sz_view_frame(root);
+  y = (int)(f.y + f.h * 0.5f);
+  assert(!row_has_red(px, 80, y, (int)f.x, (int)(f.x + f.w)));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
+static void test_bind_text_respects_text_color(void) {
+  SzSignalStr *s;
+  SzView *wrap;
+  SzString *dump;
+  const SzTheme *theme = sz_theme_default();
+
+  s = sz_signal_str("live");
+  wrap = sz_view_text_color((uint32_t)sz_color_rgb(0, 0, 255),
+                            sz_view_text_signal_str(s));
+  sz_view_layout(wrap, 200.f, 80.f, theme);
+  dump = sz_view_a11y_dump(wrap);
+  assert(strstr(sz_string_cstr(dump), "text:live") != NULL);
+  sz_string_free(dump);
+  sz_view_free(wrap);
+  sz_signal_str_free(s);
+}
+
+static void test_color_rgba_background_paints_alpha(void) {
+  SzView *root;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  root = sz_view_background((uint32_t)sz_color_rgba(255, 0, 0, 255),
+                            sz_view_sized(40, 40, sz_view_text("x")));
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(row_has_red(px, 80, 10, 4, 20));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
 static void test_ignore_pointer_sizes_to_child(void) {
   SzView *wrap, *child;
   const SzTheme *theme = sz_theme_default();
@@ -3265,6 +3458,15 @@ int main(void) {
   test_bind_text_respects_ellipsis();
   test_ellipsis_does_not_wrap_button();
   test_ellipsis_paint_hides_extra_lines();
+  test_color_rgb_packs_opaque();
+  test_color_rgba_packs_alpha();
+  test_text_color_sizes_to_child();
+  test_text_color_keeps_a11y();
+  test_text_color_paints_red();
+  test_nested_text_color_inner_wins();
+  test_text_color_does_not_recolor_button();
+  test_bind_text_respects_text_color();
+  test_color_rgba_background_paints_alpha();
   test_ignore_pointer_sizes_to_child();
   test_ignore_pointer_passes_tap_through();
   test_absorb_pointer_blocks_tap();

@@ -32,3 +32,11 @@ int64_t sz_color_rgb(int64_t r, int64_t g, int64_t b) {
   uint32_t bb = (uint32_t)(b & 255);
   return (int64_t)(0xFF000000u | (rr << 16) | (gg << 8) | bb);
 }
+
+int64_t sz_color_rgba(int64_t r, int64_t g, int64_t b, int64_t a) {
+  uint32_t rr = (uint32_t)(r & 255);
+  uint32_t gg = (uint32_t)(g & 255);
+  uint32_t bb = (uint32_t)(b & 255);
+  uint32_t aa = (uint32_t)(a & 255);
+  return (int64_t)((aa << 24) | (rr << 16) | (gg << 8) | bb);
+}

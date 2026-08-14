@@ -87,6 +87,7 @@ int64_t sz_theme_primary(void);
 int64_t sz_theme_muted(void);
 int64_t sz_theme_foreground(void);
 int64_t sz_color_rgb(int64_t r, int64_t g, int64_t b);
+int64_t sz_color_rgba(int64_t r, int64_t g, int64_t b, int64_t a);
 
 /* --- signals ------------------------------------------------------------- */
 
@@ -149,7 +150,8 @@ typedef enum SzViewKind {
   SZ_VIEW_IGNORE_POINTER, /* skip hit-test; taps pass through */
   SZ_VIEW_ABSORB_POINTER, /* skip child hit-test; block taps behind */
   SZ_VIEW_EXCLUDE_SEMANTICS, /* skip a11y dump and field collect for subtree */
-  SZ_VIEW_ELLIPSIS /* cap extra lines; paint ... on the last visible line */
+  SZ_VIEW_ELLIPSIS, /* cap extra lines; paint ... on the last visible line */
+  SZ_VIEW_TEXT_COLOR /* pass constraints; paint View.text with this ARGB */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -206,6 +208,8 @@ SzView *sz_view_absorb_pointer(SzView *child);
 SzView *sz_view_exclude_semantics(SzView *child);
 /* Pass constraints through; size to child. Cap extra wrapped lines and paint `...`. */
 SzView *sz_view_ellipsis(SzView *child);
+/* Pass constraints through; size to child; paint `View.text` with `argb`. */
+SzView *sz_view_text_color(uint32_t argb, SzView *child);
 /* Pass constraints through; size to child; paint `argb` behind the child. */
 SzView *sz_view_background(uint32_t argb, SzView *child);
 /* Largest rw:rh box that fits incoming max; child laid out in that tight slot. */
@@ -359,6 +363,7 @@ SzView *sz_lang_view_ignore_pointer(SzView *child);
 SzView *sz_lang_view_absorb_pointer(SzView *child);
 SzView *sz_lang_view_exclude_semantics(SzView *child);
 SzView *sz_lang_view_ellipsis(SzView *child);
+SzView *sz_lang_view_text_color(int64_t argb, SzView *child);
 SzView *sz_lang_view_background(int64_t argb, SzView *child);
 SzView *sz_lang_view_aspect_ratio(int64_t rw, int64_t rh, SzView *child);
 SzView *sz_lang_view_fraction(int64_t wpct, int64_t hpct, SzView *child);

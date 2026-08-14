@@ -284,6 +284,21 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_text_color_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.textC\n";
+        let labels = labels_at(src, "View.textC");
+        assert!(labels.iter().any(|l| l == "View.textColor"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_color_rgba_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => Color.rgb\n";
+        let labels = labels_at(src, "Color.rgb");
+        assert!(labels.iter().any(|l| l == "Color.rgb"), "{labels:?}");
+        assert!(labels.iter().any(|l| l == "Color.rgba"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_ignore_pointer_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.ig\n";
         let labels = labels_at(src, "View.ig");
