@@ -1633,6 +1633,20 @@ int main(void) {
     assert(strcmp(sz_string_cstr((SzString *)r.value), "ok:/x") == 0);
   }
 
+  /* TEST-NET-1 blackhole: connect fails in ~1s instead of hanging on the OS. */
+  {
+    int64_t t0 = sz_clock_monotonic_ms_sync();
+    int64_t t1;
+    r = sz_io_unsafe_run(
+        sz_net_http_get(sz_string_from_cstr("http://192.0.2.1:9/x")));
+    t1 = sz_clock_monotonic_ms_sync();
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "timed out"));
+    sz_error_free(r.error);
+    assert(t1 - t0 >= 900);
+    assert(t1 - t0 < 2500);
+  }
+
   /* Live httpGet DNS parks on UDP poll; a peer fiber runs before the answer. */
   {
     pthread_t th;

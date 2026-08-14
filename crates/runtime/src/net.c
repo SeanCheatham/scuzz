@@ -16,8 +16,9 @@
 /* Blessed Net.httpGet — live HTTP/1.0 GET or TestRuntime stub map.
  * Live hostnames query A and AAAA together (park on poll); CNAME chains
  * re-query both (cap 5). When both addresses exist, start AAAA first and wait
- * 250ms (RFC 8305) before the A connect so working IPv6 wins. IPv4 literals
- * and `http://[::1]/` skip DNS. Failures use SzError code 6. */
+ * 250ms (RFC 8305) before the A connect so working IPv6 wins. Connect waits
+ * at most 1000ms. IPv4 literals and `http://[::1]/` skip DNS. Failures use
+ * SzError code 6. */
 
 typedef struct {
   int is_err;
@@ -124,6 +125,7 @@ typedef struct GetSt {
   int a_done;
   int aaaa_done;
   int he_wait4;
+  int64_t connect_deadline_ms;
   int http_port;
   struct sockaddr_storage peer;
   struct sockaddr_storage peer4;
@@ -604,6 +606,7 @@ static void *get_dns_recv(void *env) {
 }
 
 #define HE_A_DELAY_MS 250
+#define HE_CONNECT_MS 1000
 
 static void *get_check_write(void *env);
 
@@ -670,6 +673,7 @@ static void *get_tcp_connect(void *env) {
       st->fd6 = -1;
     }
     get_build_req(st);
+    st->connect_deadline_ms = sz_clock_monotonic_ms_sync() + HE_CONNECT_MS;
     r->is_err = 0;
     return r;
   }
@@ -681,6 +685,7 @@ static void *get_tcp_connect(void *env) {
   }
   st->fd = fd;
   get_build_req(st);
+  st->connect_deadline_ms = sz_clock_monotonic_ms_sync() + HE_CONNECT_MS;
   r->is_err = 0;
   return r;
 }
@@ -751,6 +756,11 @@ static void *get_he_pick(GetSt *st) {
     r->as.err = sz_error_new(6, "Net.httpGet: connect failed");
     return r;
   }
+  if (sz_clock_monotonic_ms_sync() >= st->connect_deadline_ms) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(6, "Net.httpGet: connect timed out");
+    return r;
+  }
   r->retry = 1;
   return r;
 }
@@ -765,6 +775,15 @@ static void *get_check_write(void *env) {
   if (st->fd < 0)
     return get_he_pick(st);
   r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
+  if (!fd_pollout(st->fd)) {
+    if (sz_clock_monotonic_ms_sync() >= st->connect_deadline_ms) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.httpGet: connect timed out");
+      return r;
+    }
+    r->retry = 1;
+    return r;
+  }
 
   if (getsockopt(st->fd, SOL_SOCKET, SO_ERROR, &so, &sl) != 0 || so != 0) {
     r->is_err = 1;
@@ -870,6 +889,12 @@ static SzIo *get_poll_write(void *value, void *env) {
     ready = sz_io_poll_writable(st->fd6);
   else
     ready = sz_io_poll_writable(st->fd4);
+  {
+    int64_t left = st->connect_deadline_ms - sz_clock_monotonic_ms_sync();
+    if (left < 1)
+      left = 1;
+    ready = sz_io_race(ready, sz_io_sleep_ms(left));
+  }
   return sz_io_flatmap(ready, get_after_write_poll, st);
 }
 
