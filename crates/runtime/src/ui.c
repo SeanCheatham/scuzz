@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <dlfcn.h>
 
 /* Weak stubs — strong defs from embedder-desktop override when linked. */
 __attribute__((weak)) int sz_embedder_available(void) { return 0; }
@@ -99,6 +100,9 @@ struct SzUiSession {
   char *inject_path;
   char *inject_fp;
   int inject_playing;
+  void *code_handle;
+  void *code_stale;
+  int code_gen;
 };
 
 static char *sz_strdup(const char *s) {
@@ -336,6 +340,7 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
 
 int sz_ui_session_reload(SzUiSession *session) {
   SzView *root;
+  int ok;
   if (!session || !session->rebuild)
     return 0;
   root = session->rebuild(session->rebuild_env);
@@ -343,9 +348,64 @@ int sz_ui_session_reload(SzUiSession *session) {
     return 0;
   if (root == session->root) {
     session->dirty = 1;
-    return 1;
+    ok = 1;
+  } else
+    ok = sz_ui_session_replace_root(session, root);
+  if (ok && session->code_stale) {
+    dlclose(session->code_stale);
+    session->code_stale = NULL;
   }
-  return sz_ui_session_replace_root(session, root);
+  return ok;
+}
+
+static int copy_file(const char *src, const char *dst) {
+  FILE *in, *out;
+  char buf[4096];
+  size_t n;
+  in = fopen(src, "rb");
+  if (!in)
+    return 0;
+  out = fopen(dst, "wb");
+  if (!out) {
+    fclose(in);
+    return 0;
+  }
+  while ((n = fread(buf, 1, sizeof buf, in)) > 0) {
+    if (fwrite(buf, 1, n, out) != n) {
+      fclose(in);
+      fclose(out);
+      return 0;
+    }
+  }
+  fclose(in);
+  fclose(out);
+  return 1;
+}
+
+int sz_ui_session_load_code(SzUiSession *session, const char *path) {
+  char staged[1024];
+  void *h;
+  SzUiRebuildFn fn;
+  if (!session || !path || !path[0])
+    return 0;
+  session->code_gen++;
+  if (snprintf(staged, sizeof staged, "%s.load-%d", path, session->code_gen) >=
+      (int)sizeof staged)
+    return 0;
+  if (!copy_file(path, staged))
+    return 0;
+  h = dlopen(staged, RTLD_NOW | RTLD_LOCAL);
+  if (!h)
+    return 0;
+  fn = (SzUiRebuildFn)dlsym(h, "sz_ui_reload_rebuild");
+  if (!fn) {
+    dlclose(h);
+    return 0;
+  }
+  session->code_stale = session->code_handle;
+  session->code_handle = h;
+  session->rebuild = fn;
+  return 1;
 }
 
 void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value) {
@@ -414,6 +474,10 @@ void sz_ui_unmount(SzUiSession *session) {
     sk_surface_unref(session->surface);
   if (session->owns_view)
     sz_view_free(session->root);
+  if (session->code_stale)
+    dlclose(session->code_stale);
+  if (session->code_handle)
+    dlclose(session->code_handle);
   sz_free(session->watch_path);
   sz_free(session->watch_fp);
   sz_free(session->debug_dump_path);

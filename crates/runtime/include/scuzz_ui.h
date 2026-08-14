@@ -265,6 +265,10 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path);
 int sz_ui_session_set_inject(SzUiSession *session, const char *path);
 /* Invoke the rebuild factory now. Pump calls this when the stamp changes. */
 int sz_ui_session_reload(SzUiSession *session);
+/* dlopen `path` (copied to a unique sibling so the OS does not keep a stale
+ * image) and set the rebuild factory from exported `sz_ui_reload_rebuild`.
+ * Signals stay in `rebuild_env`. Does not rebuild until reload/stamp. */
+int sz_ui_session_load_code(SzUiSession *session, const char *path);
 void sz_ui_unmount(SzUiSession *session);
 /* Snapshot PNG / structural dump from SCUZZ_SNAPSHOT_PATH / SCUZZ_FUZZ_DUMP. */
 void sz_ui_session_finish(SzUiSession *session);

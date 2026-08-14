@@ -13,7 +13,7 @@ Edit this file when a decision or next-step ordering changes.
 - **UI**: a primary product path, not the only one (Dart-shaped: GUI is first-class; so are CLI and server). One design language + Skia, as a **`Ui` effect** with Headless/Window/Mobile interpreters. Headless is a product runtime (agents, CI), not a test-only shim.
 - **Tooling**: one opinionated CLI (`scuzz`) — compile, link, assets, watch, packaging, format, check, and the whole verification stack. One formatter, one check surface, one testing strategy. Batteries-included: mutation, fuzzing, property/laws, simulation, and determinism are **first-class in the language and `scuzz`**, not a third-party harness sprawl. Static hygiene is `scuzz check` (format-verify + typecheck; further lints emit here, no `lint` subcommand). `scuzz fmt` rewrites.
 - **Bootstrap**: self-host is a hard goal. Stage-0 (Rust) exists only to get there.
-- **AI-Friendly**: Headless, hot reload, and debugging tools aid agents. Headless is a peer runtime; `watch` only rebuilds; `[ui] run --watch` stamp-reloads Views, writes `build/debug.dump` (including `[taps]` / `[fields]` / `[scrolls]`), and plays `build/inject.script`.
+- **AI-Friendly**: Headless, hot reload, and debugging tools aid agents. Headless is a peer runtime; `watch` only rebuilds; `[ui] run --watch` stamp-reloads Views, writes `build/debug.dump` (including `[taps]` / `[fields]` / `[scrolls]`), and plays `build/inject.script`. The session can `dlopen` a rebuild dylib in-process; the CLI does not yet emit one.
 
 Upstream Scala Native is a *reference*, not a dependency. Divergence is intentional.
 
@@ -210,7 +210,7 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: in-process machine-code reload — [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
+Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: watch-load a rebuild dylib — [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features. UI is a primary path among CLI/server/desktop/mobile — not the only v0 bar.
 
@@ -228,7 +228,7 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-onl
 | Drivers pass vacuously | `Law.sometimes` reachability fails the campaign when declared states are never reached |
 | Verification tool sprawl | One `scuzz` strategy — mutation/fuzz/laws/sim/determinism in-tree; no external test frameworks |
 | “Almost Scala” confusion | Explicit non-goals; language direction above; [guide.md](guide.md) |
-| Watch sold as hot reload | `watch` rebuilds; `[ui]` `run --watch` stamp-reloads Views; no new machine code |
+| Watch sold as hot reload | `watch` rebuilds; `[ui]` `run --watch` stamp-reloads Views; session can `dlopen` a rebuild dylib; CLI does not yet emit one |
 | IDE typer ≠ batch typer | One JSON schema; LSP wraps `scuzz check` |
 | Skia weight | pinned CPU prebuilt default; `sk_sw` opt-out |
 | Window-only features | Headless peer rule |

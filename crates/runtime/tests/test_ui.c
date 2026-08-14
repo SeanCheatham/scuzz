@@ -1643,11 +1643,66 @@ static void test_alloc_counter_pump_flat(void) {
   sz_signal_int_free(count);
 }
 
+#ifdef __APPLE__
+#define RELOAD_A "build/reload_a.dylib"
+#define RELOAD_B "build/reload_b.dylib"
+#else
+#define RELOAD_A "build/reload_a.so"
+#define RELOAD_B "build/reload_b.so"
+#endif
+
+static void test_session_load_code(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *count;
+  SzString *a11y, *dump1, *dump2;
+
+  count = sz_signal_int(7);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_text("init"));
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 100;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  sz_ui_session_set_rebuild(session, NULL, count);
+  assert(sz_ui_session_load_code(session, RELOAD_A));
+  assert(sz_ui_session_reload(session));
+  a11y = sz_view_a11y_dump(sz_ui_session_root(session));
+  assert(strstr(sz_string_cstr(a11y), "text:A") != NULL);
+  assert(strstr(sz_string_cstr(a11y), "text:n=") != NULL);
+  sz_string_free(a11y);
+  assert(sz_signal_int_get(count) == 7);
+
+  sz_signal_int_set(count, 8);
+  dump1 = sz_signal_dump();
+  assert(sz_ui_session_load_code(session, RELOAD_B));
+  assert(sz_ui_session_reload(session));
+  a11y = sz_view_a11y_dump(sz_ui_session_root(session));
+  assert(strstr(sz_string_cstr(a11y), "text:B") != NULL);
+  assert(strstr(sz_string_cstr(a11y), "text:A") == NULL);
+  sz_string_free(a11y);
+  dump2 = sz_signal_dump();
+  assert(strcmp(sz_string_cstr(dump1), sz_string_cstr(dump2)) == 0);
+  assert(sz_signal_int_get(count) == 8);
+  sz_string_free(dump1);
+  sz_string_free(dump2);
+
+  sz_ui_unmount(session);
+  sz_signal_int_free(count);
+}
+
 int main(void) {
   test_session_snapshot();
   test_signals_layout_hit();
   test_replace_root_keeps_signals();
   test_watch_rebuild_keeps_signals();
+  test_session_load_code();
   test_ui_run_rebuild();
   test_ui_run_rebuild_keepalive();
   test_session_debug_dump();

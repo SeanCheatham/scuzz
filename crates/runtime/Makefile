@@ -40,14 +40,31 @@ SKIA_LINK = $$([ -f $(FFI_SKIA)/build/sk_capi_backend ] && grep -qx skia $(FFI_S
 	if [ "$$(uname -s)" = Darwin ]; then \
 	  echo -lc++ -lm -lz -lbz2 -lbrotlidec -lbrotlicommon -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon; \
 	else echo -lstdc++ -lm -lz -lbz2 -lbrotlidec -lbrotlicommon; fi)
-HOST_LINK = $$(if [ "$$(uname -s)" = Darwin ]; then echo -framework CoreFoundation; fi)
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+HOST_LINK := -framework CoreFoundation
+EXPORT_LINK :=
+RELOAD_EXT := dylib
+RELOAD_LIB := -dynamiclib -undefined dynamic_lookup
+else
+HOST_LINK := -ldl
+EXPORT_LINK := -rdynamic
+RELOAD_EXT := so
+RELOAD_LIB := -shared
+endif
+
+build/reload_a.$(RELOAD_EXT): tests/reload_a.c include/scuzz_ui.h | build
+	$(CC) $(CFLAGS) $(INCLUDES) -fPIC $(RELOAD_LIB) tests/reload_a.c -o $@
+
+build/reload_b.$(RELOAD_EXT): tests/reload_b.c include/scuzz_ui.h | build
+	$(CC) $(CFLAGS) $(INCLUDES) -fPIC $(RELOAD_LIB) tests/reload_b.c -o $@
 
 build/test_io: tests/test_io.c build/libscuzz_rt.a | build ffi-skia
 	$(CC) $(CFLAGS) $(INCLUDES) tests/test_io.c -Lbuild -L$(FFI_SKIA)/build \
 		-lscuzz_rt -lsk_capi -lpthread $(HOST_LINK) $(SKIA_LINK) -o $@
 
-build/test_ui: tests/test_ui.c build/libscuzz_rt.a | build ffi-skia
-	$(CC) $(CFLAGS) $(INCLUDES) tests/test_ui.c -Lbuild -L$(FFI_SKIA)/build \
+build/test_ui: tests/test_ui.c build/libscuzz_rt.a build/reload_a.$(RELOAD_EXT) build/reload_b.$(RELOAD_EXT) | build ffi-skia
+	$(CC) $(CFLAGS) $(INCLUDES) $(EXPORT_LINK) tests/test_ui.c -Lbuild -L$(FFI_SKIA)/build \
 		-lscuzz_rt -lsk_capi -lpthread $(HOST_LINK) $(SKIA_LINK) -o $@
 
 test: build/test_io build/test_ui

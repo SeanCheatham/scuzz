@@ -2,4 +2,4 @@
 
 ## Next
 
-**In-process machine-code reload** — inject targeting (`tap N`, `text N`, `scroll N dy`) is in. `[ui]` `run --watch` stamp-reloads the View tree; new machine code still requires a rebuild. Next: a vertical slice of in-process code reload, or the next ranked gap in [`gaps.md`](gaps.md) if that slice will not fit.
+**Watch-load a rebuild dylib** — the session can `dlopen` `sz_ui_reload_rebuild` and stamp-swap Views with new machine code. Next: `[ui]` `run --watch` rebuilds that dylib and calls `sz_ui_session_load_code` so source changes load new code without restarting. `watch` still only rebuilds.
