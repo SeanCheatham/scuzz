@@ -182,6 +182,11 @@ static void *live_get_client(void *arg) {
   return buf;
 }
 
+static void *delayed_live_get(void *arg) {
+  sleep_us(1200000);
+  return live_get_client(arg);
+}
+
 static void *connect_hold(void *arg) {
   int port = *(int *)arg;
   int fd = -1;
@@ -1576,6 +1581,22 @@ int main(void) {
     sz_error_free(r.error);
     assert(t1 - t0 >= 900);
     assert(t1 - t0 < 2500);
+  }
+
+  /* Persistent serve: a timed-out idle client does not block the next GET. */
+  {
+    pthread_t th_idle;
+    pthread_t th_get;
+    int port = 18587;
+    void *ret = NULL;
+    pthread_create(&th_idle, NULL, connect_hold, &port);
+    pthread_create(&th_get, NULL, delayed_live_get, &port);
+    r = sz_io_unsafe_run(sz_io_race(sz_net_serve(port, serve_path_ok, NULL),
+                                   sz_io_sleep_ms(2500)));
+    pthread_join(th_idle, NULL);
+    pthread_join(th_get, &ret);
+    assert(r.ok);
+    assert(ret && strstr((char *)ret, "ok:/x") != NULL);
   }
 
   /* Client GET then never reads: serve fails in ~1s instead of hanging on write. */

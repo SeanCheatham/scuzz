@@ -2,4 +2,4 @@
 
 ## Next
 
-**Keep `Net.serve` listening after a timed-out client** — request read and response write each wait at most 1s, but that error still tears down the whole server. Next: close the stalled connection and accept the next request so one idle client cannot kill a persistent `Net.serve`.
+**Drop a malformed `Net.serve` client and keep listening** — a timed-out client no longer kills persistent `Net.serve`. A peer that closes without a GET still fails the whole server with `expected HTTP GET`. Next: close that connection and accept the next request.

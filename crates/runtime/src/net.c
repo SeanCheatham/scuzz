@@ -24,6 +24,7 @@
 typedef struct {
   int is_err;
   int retry; /* 1 = accept EAGAIN; caller should poll again */
+  int drop;  /* 1 = close conn; persistent serve accepts the next client */
   union {
     SzError *err;
     void *ok;
@@ -1043,7 +1044,8 @@ SzIo *sz_net_http_get(SzString *url) {
 /* HTTP/1.0 GET server. Listen and connection fds are nonblocking; the fiber
  * parks on poll so other IO can run. Live listen is 127.0.0.1 and ::1 (V6ONLY)
  * so httpGet literals on either loopback match. TestRuntime injects paths and
- * skips sockets. Request read and response write each wait at most 1000ms.
+ * skips sockets. Request read and response write each wait at most 1000ms;
+ * a timed-out client is dropped and persistent serve accepts the next.
  * Error code 6. serveOnce is one request; serve keeps the
  * listen sockets (n<=0 forever live, or until the TestRuntime queue is empty). */
 
@@ -1254,6 +1256,7 @@ static void *serve_read_req(void *env) {
   if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
     if (sz_clock_monotonic_ms_sync() >= st->req_deadline_ms) {
       r->is_err = 1;
+      r->drop = 1;
       r->as.err = sz_error_new(6, "Net.serve: request timed out");
       return r;
     }
@@ -1275,6 +1278,7 @@ static void *serve_read_req(void *env) {
     }
     if (sz_clock_monotonic_ms_sync() >= st->req_deadline_ms) {
       r->is_err = 1;
+      r->drop = 1;
       r->as.err = sz_error_new(6, "Net.serve: request timed out");
       return r;
     }
@@ -1334,6 +1338,7 @@ static void *serve_write_close(void *env) {
   if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
     if (sz_clock_monotonic_ms_sync() >= st->write_deadline_ms) {
       r->is_err = 1;
+      r->drop = 1;
       r->as.err = sz_error_new(6, "Net.serve: write timed out");
       return r;
     }
@@ -1372,12 +1377,25 @@ static SzIo *serve_unwrap_accept(void *value, void *env) {
   return unwrap_net(value, NULL);
 }
 
+static SzIo *serve_drop_conn(ServeSt *st, SzError *err) {
+  serve_close_conn(st);
+  if (st->left == 1)
+    return sz_io_fail(err);
+  sz_error_free(err);
+  return serve_round(st);
+}
+
 static SzIo *serve_unwrap_read(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
   NetResult *r = (NetResult *)value;
   if (r && r->retry) {
     sz_free(r);
     return serve_poll_conn_read(NULL, st);
+  }
+  if (r && r->drop) {
+    SzError *err = r->as.err;
+    sz_free(r);
+    return serve_drop_conn(st, err);
   }
   return unwrap_net(value, NULL);
 }
@@ -1388,6 +1406,11 @@ static SzIo *serve_unwrap_write(void *value, void *env) {
   if (r && r->retry) {
     sz_free(r);
     return serve_poll_conn_write(NULL, st);
+  }
+  if (r && r->drop) {
+    SzError *err = r->as.err;
+    sz_free(r);
+    return serve_drop_conn(st, err);
   }
   return unwrap_net(value, NULL);
 }

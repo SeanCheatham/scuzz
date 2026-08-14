@@ -37,7 +37,7 @@ Vision locks **oracles in source, drivers as the test surface** ([`vision.md`](v
 
 ### Residuals
 
-- **Net** — a timed-out `Net.serve` client still fails the whole server IO. `Net.httpGet` queries A and AAAA together, starts AAAA first, waits 250ms before A (RFC 8305), races connects, and fails a hanging DNS lookup, TCP connect, or response read after 1s (partial DNS proceeds); CNAME chains re-query both (cap 5). IPv4 literals and `http://[::1]/` skip DNS. `Net.serve` listens on `127.0.0.1` and `::1` and fails a hanging request read or response write after 1s.
+- **Net** — a client that closes without a GET still fails persistent `Net.serve`. `Net.httpGet` queries A and AAAA together, starts AAAA first, waits 250ms before A (RFC 8305), races connects, and fails a hanging DNS lookup, TCP connect, or response read after 1s (partial DNS proceeds); CNAME chains re-query both (cap 5). IPv4 literals and `http://[::1]/` skip DNS. `Net.serve` listens on `127.0.0.1` and `::1`, bounds request read and response write at 1s, and drops a timed-out client so the next request can run.
 - **Concurrency** — cooperative fibers only; `IO.ensure` / `Resource` release on cancel (including `IO.timeout` / `Fiber.interrupt`). Language `Fiber.fork` / `join` / `interrupt` and `IO.forever` / `repeatN` / `retryN` are in. Later: OS threads, supervision trees.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting; `Signal.list` frees unshared cons spines. Later: a collector if list-churn still demands it.
 - **Language surface** — richer generics beyond monomorphized defs/enums/records ([`compatibility.md`](compatibility.md)).
