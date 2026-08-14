@@ -1045,8 +1045,8 @@ SzIo *sz_net_http_get(SzString *url) {
  * parks on poll so other IO can run. Live listen is 127.0.0.1 and ::1 (V6ONLY)
  * so httpGet literals on either loopback match. TestRuntime injects paths and
  * skips sockets. Request read and response write each wait at most 1000ms;
- * a timed-out client is dropped and persistent serve accepts the next.
- * Error code 6. serveOnce is one request; serve keeps the
+ * a timed-out or malformed client is dropped and persistent serve accepts
+ * the next. Error code 6. serveOnce is one request; serve keeps the
  * listen sockets (n<=0 forever live, or until the TestRuntime queue is empty). */
 
 typedef struct ServeSt {
@@ -1265,6 +1265,7 @@ static void *serve_read_req(void *env) {
   }
   if (n <= 0) {
     r->is_err = 1;
+    r->drop = 1;
     r->as.err = sz_error_new(6, "Net.serve: expected HTTP GET");
     return r;
   }
@@ -1273,6 +1274,7 @@ static void *serve_read_req(void *env) {
   if (!strstr(st->rbuf, "\r\n\r\n")) {
     if (st->rlen + 1 >= sizeof st->rbuf) {
       r->is_err = 1;
+      r->drop = 1;
       r->as.err = sz_error_new(6, "Net.serve: expected HTTP GET");
       return r;
     }
@@ -1287,6 +1289,7 @@ static void *serve_read_req(void *env) {
   }
   if (!parse_get_path(st->rbuf, path, sizeof path)) {
     r->is_err = 1;
+    r->drop = 1;
     r->as.err = sz_error_new(6, "Net.serve: expected HTTP GET");
     return r;
   }

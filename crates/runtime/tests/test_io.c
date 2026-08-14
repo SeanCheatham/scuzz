@@ -251,6 +251,35 @@ static void *get_then_hold(void *arg) {
   return (void *)1;
 }
 
+static void *connect_close(void *arg) {
+  int port = *(int *)arg;
+  int fd = -1;
+  int i;
+  struct sockaddr_in addr;
+  memset(&addr, 0, sizeof addr);
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)port);
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  for (i = 0; i < 50; i++) {
+    sleep_us(10000);
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+      continue;
+    if (connect(fd, (struct sockaddr *)&addr, sizeof addr) == 0)
+      break;
+    close(fd);
+    fd = -1;
+  }
+  if (fd >= 0)
+    close(fd);
+  return (void *)1;
+}
+
+static void *soon_live_get(void *arg) {
+  sleep_us(80000);
+  return live_get_client(arg);
+}
+
 static void *ipv6_http_once(void *arg) {
   int port = *(int *)arg;
   int fd, cfd;
@@ -1594,6 +1623,34 @@ int main(void) {
     r = sz_io_unsafe_run(sz_io_race(sz_net_serve(port, serve_path_ok, NULL),
                                    sz_io_sleep_ms(2500)));
     pthread_join(th_idle, NULL);
+    pthread_join(th_get, &ret);
+    assert(r.ok);
+    assert(ret && strstr((char *)ret, "ok:/x") != NULL);
+  }
+
+  /* Client connects and closes without a GET: serveOnce fails. */
+  {
+    pthread_t th;
+    int port = 18589;
+    pthread_create(&th, NULL, connect_close, &port);
+    r = sz_io_unsafe_run(sz_net_serve_once(port, serve_path_ok, NULL));
+    pthread_join(th, NULL);
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "expected HTTP GET"));
+    sz_error_free(r.error);
+  }
+
+  /* Persistent serve: a closed-without-GET client does not block the next GET. */
+  {
+    pthread_t th_bad;
+    pthread_t th_get;
+    int port = 18588;
+    void *ret = NULL;
+    pthread_create(&th_bad, NULL, connect_close, &port);
+    pthread_create(&th_get, NULL, soon_live_get, &port);
+    r = sz_io_unsafe_run(sz_io_race(sz_net_serve(port, serve_path_ok, NULL),
+                                   sz_io_sleep_ms(400)));
+    pthread_join(th_bad, NULL);
     pthread_join(th_get, &ret);
     assert(r.ok);
     assert(ret && strstr((char *)ret, "ok:/x") != NULL);
