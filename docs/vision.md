@@ -113,7 +113,7 @@ Locks (not an API catalog — see [`guide.md`](guide.md)):
 - Payload enums + `record` sugar (methods on generic records and enums) + thin traits/`impl` (static dispatch, including `trait Get[T]` / `impl Get[Int] for Point` / `impl Get[T] for Opt`) + monomorphized generics on defs/enums/records
 - File-stem modules; enums namespaced by stem; `import Module.name` for bare disambiguation
 - Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
-- Blessed kits + `Signal` / `View` / `Ui` / `Law.*` / `.require` as documented in the guide. Kit lambdas bind `String` (`List.filter` / `List.map` / `View.each` / `Stream.*` / `Resource` / `Net.serve`) or `Int` (`Signal.map`)
+- Blessed kits + `Signal` / `View` / `Ui` / `Law.*` / `.require` as documented in the guide. Kit lambdas bind `String` (`List.filter` / `List.map` / `View.each` / `Stream.*` / `Resource` / `Net.serve`) or `Int` (`Signal.map`). The lambda body must return the kit result (`View`, `Bool`, `String`, or `IO`)
 - No macros, no implicits, no HKT beyond `IO`, no null
 
 ## Language direction

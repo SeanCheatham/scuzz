@@ -934,18 +934,58 @@ fn rewrite_require(
     }
 }
 
-/// Kit lambdas bind a known item type. Bare lambdas (`View.button` tap, `Ui.run` factory) stay Opaque.
+/// Kit lambdas bind a known item type. Bare lambdas (`View.button` tap) stay Opaque.
 fn kit_lambda_param_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
-    if arg_i != 1 {
-        return None;
-    }
-    match callee {
-        "Signal.map" => Some(Type::Int),
-        "View.each" if nargs == 2 => Some(Type::String),
-        "List.filter" | "List.map" | "Stream.filter" | "Stream.map" | "Stream.takeWhile"
-        | "Stream.dropWhile" | "Stream.find" | "Stream.exists" | "Stream.evalMap"
-        | "Resource.make" | "Resource.use" | "Net.serve" | "Net.serveOnce" => Some(Type::String),
+    match (callee, arg_i) {
+        ("Ui.run", 0) => Some(Type::Opaque("Param".into())),
+        ("Signal.map", 1) => Some(Type::Int),
+        ("View.each", 1) if nargs == 2 => Some(Type::String),
+        (
+            "List.filter" | "List.map" | "Stream.filter" | "Stream.map" | "Stream.takeWhile"
+            | "Stream.dropWhile" | "Stream.find" | "Stream.exists" | "Stream.evalMap"
+            | "Resource.make" | "Resource.use" | "Net.serve" | "Net.serveOnce",
+            1,
+        ) => Some(Type::String),
         _ => None,
+    }
+}
+
+fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
+    match (callee, arg_i) {
+        ("Ui.run", 0) => Some(Type::Opaque("View".into())),
+        ("View.each", 1) if nargs == 2 => Some(Type::Opaque("View".into())),
+        ("Signal.map", 1) | ("List.map", 1) | ("Stream.map", 1) => Some(Type::String),
+        (
+            "List.filter" | "Stream.filter" | "Stream.takeWhile" | "Stream.dropWhile"
+            | "Stream.find" | "Stream.exists",
+            1,
+        ) => Some(Type::Bool),
+        (
+            "Stream.evalMap" | "Resource.make" | "Resource.use" | "Net.serve" | "Net.serveOnce",
+            1,
+        ) => Some(Type::Io(Box::new(Type::Unit))),
+        _ => None,
+    }
+}
+
+fn kit_ret_label(ty: &Type) -> &'static str {
+    match ty {
+        Type::Opaque(n) if n == "View" => "View",
+        Type::String => "String",
+        Type::Bool => "Bool",
+        Type::Io(_) => "IO[_]",
+        _ => "the expected type",
+    }
+}
+
+fn kit_lambda_body_ok(got: &Type, want: &Type) -> bool {
+    match want {
+        Type::Opaque(n) if n == "View" => matches!(got, Type::Opaque(g) if g == "View"),
+        // Map bodies stringify Int (see emit_smap_lambda).
+        Type::String => matches!(got, Type::String | Type::Int),
+        Type::Bool => matches!(got, Type::Bool | Type::Int),
+        Type::Io(_) => matches!(got, Type::Io(_)),
+        _ => types_compat(got, want),
     }
 }
 
@@ -1476,8 +1516,8 @@ fn infer(
                 Ok(Type::Io(Box::new(Type::Opaque("Either".into()))))
             }
             ExprKind::Lambda { param, body } => {
-                // Bare lambdas (View.button tap, Ui.run factory). Kit Call args bind
-                // String/Int in infer_call via infer_lambda_arg.
+                // Bare lambdas (View.button tap). Kit Call args bind String/Int
+                // and check the body type in infer_call via infer_lambda_arg.
                 let old = bind_opt(param.as_ref(), Type::Opaque("Param".into()), env);
                 let _ = infer(body, enums, funs, methods, current_module, env)?;
                 restore_opt(old, env);
@@ -1523,8 +1563,10 @@ fn infer(
 }
 
 fn infer_lambda_arg(
+    callee: &str,
     expr: &Expr,
     param_ty: Type,
+    ret_ty: Option<Type>,
     enums: &EnumIndex<'_>,
     funs: &FunIndex<'_>,
     methods: &MethodIndex,
@@ -1535,7 +1577,15 @@ fn infer_lambda_arg(
         let old = bind_opt(param.as_ref(), param_ty, env);
         let result = infer(body, enums, funs, methods, current_module, env);
         restore_opt(old, env);
-        result?;
+        let bt = result?;
+        if let Some(want) = ret_ty {
+            if !kit_lambda_body_ok(&bt, &want) {
+                return Err(TypeError::Msg(format!(
+                    "{callee} lambda must return {}, got {bt:?}",
+                    kit_ret_label(&want)
+                )));
+            }
+        }
         Ok(Type::Opaque("TapFn".into()))
     } else {
         infer(expr, enums, funs, methods, current_module, env)
@@ -1555,7 +1605,17 @@ fn infer_call(
     let nargs = args.len();
     for (i, a) in args.iter().enumerate() {
         arg_tys.push(if let Some(pty) = kit_lambda_param_ty(callee, i, nargs) {
-            infer_lambda_arg(a, pty, enums, funs, methods, current_module, env)?
+            infer_lambda_arg(
+                callee,
+                a,
+                pty,
+                kit_lambda_ret_ty(callee, i, nargs),
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+            )?
         } else {
             infer(a, enums, funs, methods, current_module, env)?
         });
@@ -4767,6 +4827,24 @@ enum Color:
     }
 
     #[test]
+    fn rejects_list_filter_non_bool() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = List.filter(["a"], x => x)
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("List.filter lambda must return Bool"),
+            "expected Bool body, got {}",
+            err.message()
+        );
+    }
+
+    #[test]
     fn typechecks_list_map() {
         let src = r#"@main def main: IO[Unit] =
   for {
@@ -4776,6 +4854,35 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.map should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_map_int_body() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = List.map(["a"], x => 1)
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.map Int body stringifies");
+    }
+
+    #[test]
+    fn rejects_list_map_view_body() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = List.map(["a"], x => View.text(x))
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("List.map lambda must return String"),
+            "expected String body, got {}",
+            err.message()
+        );
     }
 
     #[test]
@@ -4968,6 +5075,20 @@ def note(n: Int where "x"): Unit = ()
     }
 
     #[test]
+    fn rejects_net_serve_non_io() {
+        let src = r#"@main def main: IO[Unit] =
+  Net.serve(8080, path => path)
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("Net.serve lambda must return IO[_]"),
+            "expected IO handler, got {}",
+            err.message()
+        );
+    }
+
+    #[test]
     fn typechecks_sys_spawn_alive() {
         let src = r#"@main def main: IO[Unit] =
   Sys.spawn("true").flatMap(pid => Sys.alive(pid).flatMap(_ => IO.pure(())))
@@ -5001,6 +5122,20 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Ui.run factory should typecheck");
+    }
+
+    #[test]
+    fn rejects_ui_run_factory_non_view() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => 1)
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("Ui.run lambda must return View"),
+            "expected View factory, got {}",
+            err.message()
+        );
     }
 
     #[test]
@@ -5061,6 +5196,23 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.each mapper should typecheck");
+    }
+
+    #[test]
+    fn rejects_view_each_mapper_non_view() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    items = Signal.list(["milk"])
+    _ <- Ui.run(_ => View.each(items, s => s))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("View.each lambda must return View"),
+            "expected View mapper, got {}",
+            err.message()
+        );
     }
 
     #[test]
