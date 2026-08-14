@@ -2529,6 +2529,177 @@ static void test_color_rgba_background_paints_alpha(void) {
   sz_view_free(root);
 }
 
+static void test_gap_sizes_to_child(void) {
+  SzView *wrap, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect wf, chf;
+
+  child = sz_view_sized(40, 30, sz_view_text("Hi"));
+  wrap = sz_view_gap(12, child);
+  sz_view_layout(wrap, 200.f, 200.f, theme);
+  assert(sz_view_kind(wrap) == SZ_VIEW_GAP);
+  wf = sz_view_frame(wrap);
+  chf = sz_view_frame(child);
+  assert(fabsf(wf.w - 40.f) < 0.5f);
+  assert(fabsf(wf.h - 30.f) < 0.5f);
+  assert(fabsf(chf.w - 40.f) < 0.5f);
+  assert(fabsf(chf.h - 30.f) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static SzView *two_box_column(SzView **a, SzView **b) {
+  SzView *col = sz_view_column();
+  *a = sz_view_sized(20, 10, sz_view_text("a"));
+  *b = sz_view_sized(20, 10, sz_view_text("b"));
+  sz_view_add_child(col, *a);
+  sz_view_add_child(col, *b);
+  return col;
+}
+
+static void test_default_column_uses_theme_gap(void) {
+  SzView *col, *a, *b;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf;
+
+  col = two_box_column(&a, &b);
+  sz_view_layout(col, 200.f, 200.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  assert(fabsf(bf.y - (af.y + af.h) - theme->gap) < 0.5f);
+  sz_view_free(col);
+}
+
+static void test_gap_zero_stacks_column_flush(void) {
+  SzView *wrap, *col, *a, *b;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf;
+
+  col = two_box_column(&a, &b);
+  wrap = sz_view_gap(0, col);
+  sz_view_layout(wrap, 200.f, 200.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  assert(fabsf(bf.y - (af.y + af.h)) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_gap_n_spaces_column(void) {
+  SzView *wrap, *col, *a, *b;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf;
+
+  col = two_box_column(&a, &b);
+  wrap = sz_view_gap(20, col);
+  sz_view_layout(wrap, 200.f, 200.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  assert(fabsf(bf.y - (af.y + af.h) - 20.f) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_negative_gap_is_zero(void) {
+  SzView *wrap, *col, *a, *b;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf;
+
+  col = two_box_column(&a, &b);
+  wrap = sz_view_gap(-4, col);
+  sz_view_layout(wrap, 200.f, 200.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  assert(fabsf(bf.y - (af.y + af.h)) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_nested_gap_inner_wins(void) {
+  SzView *outer, *inner, *col, *a, *b;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf;
+
+  col = two_box_column(&a, &b);
+  inner = sz_view_gap(0, col);
+  outer = sz_view_gap(20, inner);
+  sz_view_layout(outer, 200.f, 200.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  assert(fabsf(bf.y - (af.y + af.h)) < 0.5f);
+  sz_view_free(outer);
+}
+
+static void test_gap_spaces_row(void) {
+  SzView *row, *a, *b, *wrap;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf;
+
+  row = sz_view_row();
+  a = sz_view_sized(20, 10, sz_view_text("a"));
+  b = sz_view_sized(20, 10, sz_view_text("b"));
+  sz_view_add_child(row, a);
+  sz_view_add_child(row, b);
+  wrap = sz_view_gap(16, row);
+  sz_view_layout(wrap, 200.f, 80.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  assert(fabsf(bf.x - (af.x + af.w) - 16.f) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_gap_zero_row_is_flush(void) {
+  SzView *row, *a, *b, *wrap;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf;
+
+  row = sz_view_row();
+  a = sz_view_sized(20, 10, sz_view_text("a"));
+  b = sz_view_sized(20, 10, sz_view_text("b"));
+  sz_view_add_child(row, a);
+  sz_view_add_child(row, b);
+  wrap = sz_view_gap(0, row);
+  sz_view_layout(wrap, 200.f, 80.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  assert(fabsf(bf.x - (af.x + af.w)) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_gap_zero_shrinks_column_height(void) {
+  SzView *wrap, *col, *a, *b;
+  const SzTheme *theme = sz_theme_default();
+  float plain_h, zero_h;
+
+  col = two_box_column(&a, &b);
+  sz_view_layout(col, 200.f, 200.f, theme);
+  plain_h = sz_view_frame(col).h;
+  sz_view_free(col);
+
+  col = two_box_column(&a, &b);
+  wrap = sz_view_gap(0, col);
+  sz_view_layout(wrap, 200.f, 200.f, theme);
+  zero_h = sz_view_frame(wrap).h;
+  assert(zero_h + 1.f < plain_h);
+  assert(fabsf(plain_h - zero_h - theme->gap) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_gap_does_not_change_stack(void) {
+  SzView *stack, *a, *b, *wrap;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf;
+
+  stack = sz_view_stack();
+  a = sz_view_sized(20, 10, sz_view_text("a"));
+  b = sz_view_sized(20, 10, sz_view_text("b"));
+  sz_view_add_child(stack, a);
+  sz_view_add_child(stack, b);
+  wrap = sz_view_gap(20, stack);
+  sz_view_layout(wrap, 200.f, 200.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  assert(fabsf(af.x - bf.x) < 0.5f);
+  assert(fabsf(af.y - bf.y) < 0.5f);
+  sz_view_free(wrap);
+}
+
 static void test_ignore_pointer_sizes_to_child(void) {
   SzView *wrap, *child;
   const SzTheme *theme = sz_theme_default();
@@ -3467,6 +3638,16 @@ int main(void) {
   test_text_color_does_not_recolor_button();
   test_bind_text_respects_text_color();
   test_color_rgba_background_paints_alpha();
+  test_gap_sizes_to_child();
+  test_default_column_uses_theme_gap();
+  test_gap_zero_stacks_column_flush();
+  test_gap_n_spaces_column();
+  test_negative_gap_is_zero();
+  test_nested_gap_inner_wins();
+  test_gap_spaces_row();
+  test_gap_zero_row_is_flush();
+  test_gap_zero_shrinks_column_height();
+  test_gap_does_not_change_stack();
   test_ignore_pointer_sizes_to_child();
   test_ignore_pointer_passes_tap_through();
   test_absorb_pointer_blocks_tap();

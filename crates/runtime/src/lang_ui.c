@@ -117,6 +117,9 @@ SzView *sz_lang_view_ellipsis(SzView *child) { return sz_view_ellipsis(child); }
 SzView *sz_lang_view_text_color(int64_t argb, SzView *child) {
   return sz_view_text_color((uint32_t)argb, child);
 }
+SzView *sz_lang_view_gap(int64_t n, SzView *child) {
+  return sz_view_gap((int)n, child);
+}
 SzView *sz_lang_view_background(int64_t argb, SzView *child) {
   return sz_view_background((uint32_t)argb, child);
 }

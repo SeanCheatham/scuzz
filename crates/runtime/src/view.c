@@ -109,7 +109,7 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_OPACITY || kind == SZ_VIEW_MAX_LINES ||
          kind == SZ_VIEW_IGNORE_POINTER || kind == SZ_VIEW_ABSORB_POINTER ||
          kind == SZ_VIEW_EXCLUDE_SEMANTICS || kind == SZ_VIEW_ELLIPSIS ||
-         kind == SZ_VIEW_TEXT_COLOR;
+         kind == SZ_VIEW_TEXT_COLOR || kind == SZ_VIEW_GAP;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -470,6 +470,14 @@ SzView *sz_view_ellipsis(SzView *child) {
 SzView *sz_view_text_color(uint32_t argb, SzView *child) {
   SzView *v = view_new(SZ_VIEW_TEXT_COLOR);
   v->bg_argb = argb;
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
+SzView *sz_view_gap(int n, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_GAP);
+  v->img_w = n > 0 ? n : 0;
   if (child)
     sz_view_add_child(v, child);
   return v;
@@ -838,6 +846,14 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
 
 static int g_max_lines;
 static int g_ellipsis;
+static int g_gap_on;
+static float g_gap;
+
+static float layout_gap(const SzTheme *theme) {
+  if (g_gap_on)
+    return g_gap;
+  return theme->gap;
+}
 
 static int tighten_max_lines(int n) {
   if (n <= 0)
@@ -965,7 +981,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
           fixed_h += ch->frame.h;
         }
         if (col_shown > 1)
-          gaps = theme->gap * (float)(col_shown - 1);
+          gaps = layout_gap(theme) * (float)(col_shown - 1);
         /* Not enough room for flex: fall back to intrinsic column layout. */
         if (fixed_h + gaps + theme->pad * 2.f > h_budget + 0.5f)
           n_flex = 0;
@@ -986,7 +1002,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
             layout_constrained(ch, x + theme->pad, cy,
                                column_child_box(ch, inner_w, max_h, flex_h, 1),
                                theme);
-            cy += ch->frame.h + theme->gap;
+            cy += ch->frame.h + layout_gap(theme);
           }
           v->frame.w = max_w;
           v->frame.h = h_budget;
@@ -1003,12 +1019,12 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       layout_constrained(v->children[i], x + theme->pad, cy,
                          column_child_box(v->children[i], inner_w, max_h, 0.f, 0),
                          theme);
-      cy += v->children[i]->frame.h + theme->gap;
-      h += v->children[i]->frame.h + theme->gap;
+      cy += v->children[i]->frame.h + layout_gap(theme);
+      h += v->children[i]->frame.h + layout_gap(theme);
       shown++;
     }
     if (shown > 0)
-      h -= theme->gap;
+      h -= layout_gap(theme);
     h += theme->pad;
     v->frame.w = max_w;
     v->frame.h = h;
@@ -1113,7 +1129,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
         fixed_w += ch->frame.w;
       }
       if (shown > 1)
-        gaps = theme->gap * (float)(shown - 1);
+        gaps = layout_gap(theme) * (float)(shown - 1);
       if (fixed_w + gaps + theme->pad * 2.f > w_budget + 0.5f)
         n_flex = 0;
       else {
@@ -1133,7 +1149,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
           layout_constrained(ch, cx, y + theme->pad,
                              row_child_box(ch, max_w, row_inner_h, flex_w, 1),
                              theme);
-          cx += ch->frame.w + theme->gap;
+          cx += ch->frame.w + layout_gap(theme);
           if (ch->frame.h > inner_h)
             inner_h = ch->frame.h;
         }
@@ -1144,7 +1160,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     }
     child_max =
         shown > 0
-            ? (max_w - theme->pad * 2.f - theme->gap * (float)(shown - 1)) /
+            ? (max_w - theme->pad * 2.f - layout_gap(theme) * (float)(shown - 1)) /
                   (float)shown
             : max_w;
     if (child_max < 0)
@@ -1159,13 +1175,13 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
                          row_child_box(v->children[i], child_max, row_inner_h, 0.f,
                                        0),
                          theme);
-      cx += v->children[i]->frame.w + theme->gap;
-      w += v->children[i]->frame.w + theme->gap;
+      cx += v->children[i]->frame.w + layout_gap(theme);
+      w += v->children[i]->frame.w + layout_gap(theme);
       if (v->children[i]->frame.h > inner_h)
         inner_h = v->children[i]->frame.h;
     }
     if (shown > 0)
-      w -= theme->gap;
+      w -= layout_gap(theme);
     w += theme->pad;
     v->frame.w = max_w > 0 ? max_w : w;
     v->frame.h = inner_h + theme->pad * 2.f;
@@ -1386,6 +1402,26 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       layout_constrained(ch, x, y, cc, theme);
     }
     g_ellipsis = prev;
+    v->frame.w = ch ? ch->frame.w : 0.f;
+    v->frame.h = ch ? ch->frame.h : 0.f;
+    break;
+  }
+  case SZ_VIEW_GAP: {
+    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
+    int prev_on = g_gap_on;
+    float prev = g_gap;
+    g_gap_on = 1;
+    g_gap = (float)v->img_w;
+    if (ch) {
+      SzBoxConstraints cc;
+      cc.min_w = min_w;
+      cc.min_h = min_h;
+      cc.max_w = max_w;
+      cc.max_h = max_h;
+      layout_constrained(ch, x, y, cc, theme);
+    }
+    g_gap_on = prev_on;
+    g_gap = prev;
     v->frame.w = ch ? ch->frame.w : 0.f;
     v->frame.h = ch ? ch->frame.h : 0.f;
     break;
@@ -1830,6 +1866,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_IGNORE_POINTER:
   case SZ_VIEW_ABSORB_POINTER:
   case SZ_VIEW_EXCLUDE_SEMANTICS:
+  case SZ_VIEW_GAP:
     if (v->kind == SZ_VIEW_LIST)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     for (i = 0; i < v->child_count; i++)
@@ -1850,6 +1887,7 @@ int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
   g_max_lines = 0;
   g_ellipsis = 0;
   g_text_color_on = 0;
+  g_gap_on = 0;
   sk_canvas_clear(canvas, sk_color_argb(theme->background));
   sz_view_layout(root, (float)width, (float)height, theme);
   paint_node(root, canvas, theme);

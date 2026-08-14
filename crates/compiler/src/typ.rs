@@ -2013,6 +2013,11 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::Int)?;
             Ok(Type::Opaque("View".into()))
         }
+        "View.gap" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            Ok(Type::Opaque("View".into()))
+        }
         "View.ignorePointer" => {
             expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Opaque("View".into()))
@@ -4933,6 +4938,15 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.textColor should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_gap() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.gap(0, View.column(View.text("a"), View.text("b"))))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.gap should typecheck");
     }
 
     #[test]

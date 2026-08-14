@@ -291,6 +291,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_gap_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.ga\n";
+        let labels = labels_at(src, "View.ga");
+        assert!(labels.iter().any(|l| l == "View.gap"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_color_rgba_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => Color.rgb\n";
         let labels = labels_at(src, "Color.rgb");
