@@ -91,8 +91,6 @@ struct SzUiSession {
   float pointer_down_x;
   float pointer_down_y;
   SzView *pointer_scroll;
-  int64_t last_pump_ms; /* monotonic ms for animation dt */
-  int has_pump_clock;
   SzUiRebuildFn rebuild;
   void *rebuild_env;
   char *watch_path;
@@ -631,7 +629,6 @@ static int take_inject(SzUiSession *session, char **out) {
 int sz_ui_pump_sync(SzUiSession *session) {
   size_t nbytes = 0;
   const uint8_t *rgba;
-  int64_t now_ms;
   int pw, ph;
   float scale;
   SzTheme paint_theme;
@@ -660,16 +657,6 @@ int sz_ui_pump_sync(SzUiSession *session) {
       need_dump = 1;
     }
   }
-  /* Advance animations with monotonic Clock dt. */
-  now_ms = sz_clock_monotonic_ms_sync();
-  if (session->has_pump_clock) {
-    int64_t dt = now_ms - session->last_pump_ms;
-    if (dt > 0)
-      sz_anim_tick_all(dt);
-  } else {
-    session->has_pump_clock = 1;
-  }
-  session->last_pump_ms = now_ms;
   /* UI-thread hop: apply signal writes posted from completed IO. */
   sz_ui_bridge_flush(session);
 
@@ -913,7 +900,7 @@ void sz_ui_resolve_headless_size(int *width, int *height, double *scale) {
   }
 }
 
-void sz_ui_demo_finish(SzUiSession *session) {
+void sz_ui_session_finish(SzUiSession *session) {
   const char *snap = getenv("SCUZZ_SNAPSHOT_PATH");
   const char *dump = getenv("SCUZZ_FUZZ_DUMP");
   if (snap && snap[0]) {

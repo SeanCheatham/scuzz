@@ -38,9 +38,16 @@ static int files_equal(const char *a, const char *b) {
   return 1;
 }
 
-static void test_label_session(void) {
+static void counter_tap(SzView *self, void *env) {
+  SzSignalInt *count = (SzSignalInt *)env;
+  (void)self;
+  sz_signal_int_set(count, sz_signal_int_get(count) + 1);
+}
+
+static void test_session_snapshot(void) {
   SzUiConfig cfg;
-  SzView *view;
+  SzSignalInt *count;
+  SzView *root, *btn, *view;
   SzUiSession *session;
   SzInputEvent tap;
   const char *path_a = "/tmp/scuzz_ui_a.png";
@@ -55,8 +62,12 @@ static void test_label_session(void) {
   cfg.height = 100;
   cfg.scale = 1.0;
 
-  view = sz_view_label("Hello", 0xFF142850u, 0xFFF0F0F0u);
-  session = sz_ui_mount(&cfg, view);
+  count = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_text_signal_int(count, "n="));
+  btn = sz_view_button("+", counter_tap, count);
+  sz_view_add_child(root, btn);
+  session = sz_ui_mount(&cfg, root);
   assert(session);
   assert(sz_ui_session_kind(session) == SZ_UI_RUNTIME_HEADLESS);
   assert(sz_ui_pump_sync(session));
@@ -70,19 +81,20 @@ static void test_label_session(void) {
 
   memset(&tap, 0, sizeof(tap));
   tap.kind = SZ_INPUT_TAP;
-  tap.x = 100;
-  tap.y = 50;
+  tap.x = sz_view_frame(btn).x + 4.f;
+  tap.y = sz_view_frame(btn).y + 4.f;
   assert(sz_ui_inject_sync(session, &tap));
   assert(sz_ui_pump_sync(session));
   assert(sz_ui_snapshot_png_sync(session, path_tap));
   assert(!files_equal(path_a, path_tap));
 
   sz_ui_unmount(session);
-  sz_view_free(view);
+  sz_view_free(root);
+  sz_signal_int_free(count);
 
   cfg.kind = SZ_UI_RUNTIME_WINDOW;
   cfg.title = "test";
-  view = sz_view_label("Win", 0xFF142850u, 0xFFF0F0F0u);
+  view = sz_view_text("Win");
   session = sz_ui_mount(&cfg, view);
   assert(session);
   assert(sz_ui_session_kind(session) == SZ_UI_RUNTIME_WINDOW);
@@ -93,7 +105,7 @@ static void test_label_session(void) {
 
   cfg.kind = SZ_UI_RUNTIME_MOBILE;
   cfg.title = "mobile";
-  view = sz_view_label("Mob", 0xFF142850u, 0xFFF0F0F0u);
+  view = sz_view_text("Mob");
   session = sz_ui_mount(&cfg, view);
   assert(session);
   assert(sz_ui_session_kind(session) == SZ_UI_RUNTIME_MOBILE);
@@ -105,12 +117,6 @@ static void test_label_session(void) {
   remove(path_a);
   remove(path_b);
   remove(path_tap);
-}
-
-static void counter_tap(SzView *self, void *env) {
-  SzSignalInt *count = (SzSignalInt *)env;
-  (void)self;
-  sz_signal_int_set(count, sz_signal_int_get(count) + 1);
 }
 
 static void test_signals_layout_hit(void) {
@@ -1123,13 +1129,10 @@ static void test_mobile_pointer_scroll_lifecycle(void) {
   sz_signal_str_free(draft);
 }
 
-static void test_a11y_and_anim(void) {
+static void test_a11y(void) {
   SzView *btn;
   SzView *col;
   SzString *dump;
-  SzAnimFloat *anim;
-  SzUiConfig cfg;
-  SzUiSession *session;
 
   btn = sz_view_button("Go", NULL, NULL);
   assert(sz_view_a11y_role(btn) == SZ_A11Y_BUTTON);
@@ -1140,34 +1143,7 @@ static void test_a11y_and_anim(void) {
   dump = sz_view_a11y_dump(col);
   assert(strstr(sz_string_cstr(dump), "button:Go") != NULL);
   assert(strstr(sz_string_cstr(dump), "text:hi") != NULL);
-
-  anim = sz_anim_float(0.f, 10.f, 100);
-  assert(!sz_anim_done(anim));
-  sz_anim_tick(anim, 50);
-  assert(sz_anim_value(anim) > 4.f && sz_anim_value(anim) < 6.f);
-  sz_anim_tick(anim, 50);
-  assert(sz_anim_done(anim));
-  assert(sz_anim_value(anim) == 10.f);
-
-  /* Pump advances registered anims via Clock dt (fake clock). */
-  sz_testrt_clock_install(1000);
-  {
-    SzAnimFloat *a2 = sz_anim_float(0.f, 1.f, 40);
-    memset(&cfg, 0, sizeof(cfg));
-    cfg.kind = SZ_UI_RUNTIME_HEADLESS;
-    cfg.width = 80;
-    cfg.height = 40;
-    session = sz_ui_mount(&cfg, col);
-    assert(session);
-    assert(sz_ui_pump_sync(session));
-    sz_testrt_clock_advance(40);
-    assert(sz_ui_pump_sync(session));
-    assert(sz_anim_done(a2));
-    sz_ui_unmount(session);
-    sz_anim_free(a2);
-  }
-  sz_testrt_reset();
-  sz_anim_free(anim);
+  sz_string_free(dump);
   sz_view_free(col);
 }
 
@@ -1475,7 +1451,7 @@ static void test_alloc_pump_flat(void) {
   cfg.height = 60;
   cfg.scale = 1.0;
 
-  view = sz_view_label("alloc", 0xFF142850u, 0xFFF0F0F0u);
+  view = sz_view_text("alloc");
   session = sz_ui_mount(&cfg, view);
   assert(session);
   assert(sz_ui_pump_sync(session));
@@ -1565,7 +1541,7 @@ static void test_alloc_counter_pump_flat(void) {
 }
 
 int main(void) {
-  test_label_session();
+  test_session_snapshot();
   test_signals_layout_hit();
   test_replace_root_keeps_signals();
   test_watch_rebuild_keeps_signals();
@@ -1591,7 +1567,7 @@ int main(void) {
   test_aspect_ratio();
   test_fraction();
   test_mobile_pointer_scroll_lifecycle();
-  test_a11y_and_anim();
+  test_a11y();
   test_clear_children();
   test_view_each();
   test_signal_list_spine_collect();

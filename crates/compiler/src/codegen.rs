@@ -10,7 +10,7 @@ enum Kind {
     Io,
 }
 
-/// Emit LLVM IR text for a Stage-0 program. Links against `libscuzz_rt`.
+/// Emit LLVM IR. Links against `libscuzz_rt`.
 pub fn emit_llvm(program: &Program) -> String {
     let mut strs: Vec<String> = Vec::new();
     for d in &program.defs {

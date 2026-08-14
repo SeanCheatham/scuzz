@@ -74,7 +74,7 @@ SzEither *sz_either_right(void *value);
 SzEither *sz_either_left(SzError *err);
 void sz_either_free(SzEither *e);
 
-/* --- ADT boxes (nullary / unary tagged values for Stage-0 enums) --------- */
+/* --- ADT boxes (nullary / unary tagged values) --------------------------- */
 
 typedef struct SzAdt {
   int32_t tag;

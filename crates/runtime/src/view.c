@@ -37,7 +37,6 @@ struct SzView {
   void *tap_env;
   uint32_t bg_argb;
   uint32_t fg_argb;
-  int toggled; /* LABEL */
   int img_w;
   int img_h;
   char glyph;
@@ -397,15 +396,6 @@ SzView *sz_view_icon(char glyph, uint32_t argb) {
   return v;
 }
 
-SzView *sz_view_label(const char *text, uint32_t bg_argb, uint32_t fg_argb) {
-  SzView *v = view_new(SZ_VIEW_LABEL);
-  v->text = sz_strdup(text);
-  v->bg_argb = bg_argb;
-  v->fg_argb = fg_argb;
-  v->interactive = 1;
-  return v;
-}
-
 static void sz_view_set_show_when(SzView *view, SzSignalInt *sig, int64_t value) {
   if (!view)
     return;
@@ -517,10 +507,6 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_IMAGE:
     v->frame.w = (float)v->img_w;
     v->frame.h = (float)v->img_h;
-    break;
-  case SZ_VIEW_LABEL:
-    v->frame.w = max_w;
-    v->frame.h = max_h;
     break;
   case SZ_VIEW_COLUMN:
   case SZ_VIEW_LIST: {
@@ -1003,16 +989,6 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     return;
 
   switch (v->kind) {
-  case SZ_VIEW_LABEL: {
-    uint32_t bg = v->toggled ? v->fg_argb : v->bg_argb;
-    uint32_t fg = v->toggled ? v->bg_argb : v->fg_argb;
-    float pad = 16.f;
-    float bar_h = 40.f;
-    sk_canvas_clear(c, sk_color_argb(bg));
-    paint_rect(c, pad, pad, v->frame.w - pad * 2.f, bar_h, fg);
-    paint_string(c, v->text, pad + 8.f, pad + 26.f, bg, theme->font_px);
-    return;
-  }
   case SZ_VIEW_TEXT:
     resolve_text(v, buf, sizeof buf);
     paint_string(c, buf, v->frame.x + 2.f, v->frame.y + theme->font_px + 2.f,
@@ -1098,8 +1074,7 @@ int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
                   const SzTheme *theme) {
   if (!root || !canvas || !theme)
     return 0;
-  if (root->kind != SZ_VIEW_LABEL)
-    sk_canvas_clear(canvas, sk_color_argb(theme->background));
+  sk_canvas_clear(canvas, sk_color_argb(theme->background));
   sz_view_layout(root, (float)width, (float)height, theme);
   paint_node(root, canvas, theme);
   return 1;
@@ -1209,10 +1184,6 @@ int sz_view_handle_tap(SzView *root, float x, float y) {
   hit = sz_view_hit_test(root, x, y);
   if (!hit)
     return 0;
-  if (hit->kind == SZ_VIEW_LABEL) {
-    hit->toggled = !hit->toggled;
-    return 1;
-  }
   if (hit->kind == SZ_VIEW_BUTTON && hit->on_tap) {
     hit->on_tap(hit, hit->tap_env);
     return 1;

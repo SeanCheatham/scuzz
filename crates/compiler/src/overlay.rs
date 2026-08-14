@@ -317,7 +317,7 @@ fn check_driver_def(live: &Program, d: &FunDef, label: &str) -> Result<(), Overl
     Ok(())
 }
 
-pub fn expr_has_law(e: &Expr) -> bool {
+pub(crate) fn expr_has_law(e: &Expr) -> bool {
     let here = match &e.kind {
         ExprKind::Call { callee, .. } => callee.starts_with("Law."),
         ExprKind::MethodCall { method, .. } => method == "require",

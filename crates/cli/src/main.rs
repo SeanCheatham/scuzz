@@ -307,20 +307,7 @@ fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
     let project_dir = resolve_dir(path)?;
     let manifest = load_manifest(&project_dir.join("scuzz.toml"))
         .with_context(|| format!("reading {}/scuzz.toml", project_dir.display()))?;
-    let default_rt = manifest
-        .ui
-        .as_ref()
-        .map(|u| u.default_runtime.as_str())
-        .unwrap_or("");
-    // Prefer CLI `--headless`, then inherited SCUZZ_UI_RUNTIME, then [ui].default_runtime.
-    let env_rt = std::env::var("SCUZZ_UI_RUNTIME").unwrap_or_default();
-    let effective = if headless {
-        "headless".to_string()
-    } else if !env_rt.is_empty() {
-        env_rt
-    } else {
-        default_rt.to_string()
-    };
+    let effective = effective_ui_runtime(&manifest, headless);
     let use_headless = effective.eq_ignore_ascii_case("headless");
     let use_mobile = effective.eq_ignore_ascii_case("mobile");
     let use_window = effective.eq_ignore_ascii_case("window")
@@ -451,19 +438,7 @@ fn spawn_ui_keep(
 ) -> Result<std::process::Child> {
     let project_dir = resolve_dir(path)?;
     let manifest = load_manifest(&project_dir.join("scuzz.toml"))?;
-    let default_rt = manifest
-        .ui
-        .as_ref()
-        .map(|u| u.default_runtime.as_str())
-        .unwrap_or("");
-    let env_rt = std::env::var("SCUZZ_UI_RUNTIME").unwrap_or_default();
-    let effective = if headless {
-        "headless".to_string()
-    } else if !env_rt.is_empty() {
-        env_rt
-    } else {
-        default_rt.to_string()
-    };
+    let effective = effective_ui_runtime(&manifest, headless);
     let use_headless = effective.eq_ignore_ascii_case("headless");
     let use_mobile = effective.eq_ignore_ascii_case("mobile");
     let use_window = effective.eq_ignore_ascii_case("window")
@@ -553,6 +528,21 @@ fn resolve_dir(path: &Path) -> Result<PathBuf> {
     } else {
         Ok(std::env::current_dir()?.join(path))
     }
+}
+
+fn effective_ui_runtime(manifest: &scuzz_compiler::manifest::Manifest, headless: bool) -> String {
+    if headless {
+        return "headless".into();
+    }
+    let env_rt = std::env::var("SCUZZ_UI_RUNTIME").unwrap_or_default();
+    if !env_rt.is_empty() {
+        return env_rt;
+    }
+    manifest
+        .ui
+        .as_ref()
+        .map(|u| u.default_runtime.clone())
+        .unwrap_or_default()
 }
 
 fn apply_ui_env(
@@ -874,12 +864,6 @@ exec "{exe}" "$@"
         std::fs::set_permissions(&run_sh, perms)?;
     }
     write_package_meta(dest, name, "host", bundle_id)?;
-    std::fs::write(
-        dest.join("README.md"),
-        format!(
-            "# {name} host mobile package\n\nRun `./run.sh` (sets `SCUZZ_UI_RUNTIME=mobile`).\n"
-        ),
-    )?;
     Ok(())
 }
 

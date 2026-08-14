@@ -8,10 +8,6 @@
 #include <string.h>
 #include <time.h>
 
-/* demo_finish lives in ui.c */
-void sz_ui_resolve_headless_size(int *width, int *height, double *scale);
-void sz_ui_demo_finish(SzUiSession *session);
-
 static void fill_cfg(SzUiConfig *cfg, int width, int height) {
   double scale = 1.0;
   const char *rt = getenv("SCUZZ_UI_RUNTIME");
@@ -474,9 +470,9 @@ static void *thunk_run_rebuild(void *env) {
         nanosleep(&ts, NULL);
       }
     } while (1);
-    sz_ui_demo_finish(session);
+    sz_ui_session_finish(session);
   } else {
-    sz_ui_demo_finish(session);
+    sz_ui_session_finish(session);
   }
 
   sz_ui_unmount(session);

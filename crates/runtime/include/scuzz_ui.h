@@ -140,8 +140,7 @@ typedef enum SzViewKind {
   SZ_VIEW_ASPECT_RATIO, /* largest rw:rh box that fits max constraints */
   SZ_VIEW_FRACTION, /* percent of incoming max; 0 = size to child on that axis */
   SZ_VIEW_IMAGE,
-  SZ_VIEW_ICON,
-  SZ_VIEW_LABEL /* full-bleed bg + bar that toggles colors on tap */
+  SZ_VIEW_ICON
 } SzViewKind;
 
 typedef struct SzRect {
@@ -187,8 +186,6 @@ SzView *sz_view_aspect_ratio(int rw, int rh, SzView *child);
 SzView *sz_view_fraction(int wpct, int hpct, SzView *child);
 SzView *sz_view_image(int w, int h, uint32_t argb, const char *caption);
 SzView *sz_view_icon(char glyph, uint32_t argb);
-/* Full-bleed bg + bar that toggles colors on tap (C unit-test helper). */
-SzView *sz_view_label(const char *text, uint32_t bg_argb, uint32_t fg_argb);
 /* Visible iff Signal.get(sig) == value; returns child. */
 SzView *sz_view_show_when(SzSignalInt *sig, int64_t value, SzView *child);
 
@@ -230,15 +227,6 @@ const char *sz_view_a11y_label(const SzView *view);
 /* Depth-first "role:label" lines joined by newlines (caller frees SzString). */
 SzString *sz_view_a11y_dump(SzView *root);
 
-/* Animation — float lerp; session pump ticks all registered anims. */
-typedef struct SzAnimFloat SzAnimFloat;
-SzAnimFloat *sz_anim_float(float from, float to, int64_t duration_ms);
-void sz_anim_free(SzAnimFloat *a);
-float sz_anim_value(const SzAnimFloat *a);
-int sz_anim_done(const SzAnimFloat *a);
-void sz_anim_tick(SzAnimFloat *a, int64_t dt_ms);
-void sz_anim_tick_all(int64_t dt_ms);
-
 /* --- session protocol ---------------------------------------------------- */
 
 SzUiSession *sz_ui_mount(const SzUiConfig *cfg, SzView *root);
@@ -266,6 +254,9 @@ int sz_ui_session_set_inject(SzUiSession *session, const char *path);
 /* Invoke the rebuild factory now. Pump calls this when the stamp changes. */
 int sz_ui_session_reload(SzUiSession *session);
 void sz_ui_unmount(SzUiSession *session);
+/* Snapshot PNG / structural dump from SCUZZ_SNAPSHOT_PATH / SCUZZ_FUZZ_DUMP. */
+void sz_ui_session_finish(SzUiSession *session);
+void sz_ui_resolve_headless_size(int *width, int *height, double *scale);
 
 int sz_ui_pump_sync(SzUiSession *session);
 int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event);

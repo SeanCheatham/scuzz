@@ -482,8 +482,8 @@ fn canonicalize_dir(path: &Path) -> Result<PathBuf> {
     Ok(canon)
 }
 
-/// Package-local sources only (no dependency walk). Used by `fmt` and tests.
-pub fn find_sources(project_dir: &Path) -> Result<Vec<PathBuf>> {
+/// Package-local `*.scuzz` sources (no dependency walk).
+fn find_sources(project_dir: &Path) -> Result<Vec<PathBuf>> {
     let src = project_dir.join("src");
     if !src.is_dir() {
         bail!("missing src/ in {}", project_dir.display());

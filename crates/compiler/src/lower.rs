@@ -1,12 +1,10 @@
-//! Desugar surface sugar (`for`) to the kernel core (`Let` / `FlatMap`).
-//! Also resolve `Enum.Case(args)` calls into `AdtConstruct` when the case is known
-//! (keeps `Color.rgb(...)` and other dotted builtins as `Call`).
+//! Desugar `for` to `Let` / `FlatMap`. Resolve `Enum.Case` to `AdtConstruct`.
 
 use crate::ast::{Expr, ExprKind, ForBinder, MatchArm, Pattern, Program};
 use crate::resolve::{enum_id, EnumIndex};
 use crate::span::Span;
 
-/// Lower all surface sugar in a program (in place conceptually — returns a new tree).
+/// Lower surface sugar in a program.
 pub fn lower_program(mut program: Program) -> Program {
     let enums = EnumIndex::build(&program.enums, &program.imports)
         .expect("duplicate enums should be rejected at parse");
@@ -80,7 +78,7 @@ fn resolve_record_ctor(
     }
 }
 
-pub fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Expr {
+fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Expr {
     let span = expr.span.clone();
     match expr.kind {
         ExprKind::For { binders, body } => {

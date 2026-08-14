@@ -1,4 +1,4 @@
-//! Typed-enough AST for the Stage-0 kernel dialect.
+//! AST for the kernel dialect.
 
 use crate::span::Span;
 
