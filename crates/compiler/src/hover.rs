@@ -316,6 +316,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.textColor(color: Int, child: View): View",
     ),
     ("View.gap", "View.gap(n: Int, child: View): View"),
+    ("View.fontSize", "View.fontSize(n: Int, child: View): View"),
     ("Color.rgb", "Color.rgb(r: Int, g: Int, b: Int): Int"),
     (
         "Color.rgba",
@@ -484,6 +485,17 @@ mod tests {
         let src = "@main def main: IO[Unit] =\n  Ui.run(_ => View.gap(0, View.text(\"x\")))\n";
         let h = hover_src(src, "gap");
         assert!(h.contains("View.gap(n: Int, child: View): View"), "{h}");
+    }
+
+    #[test]
+    fn hovers_view_font_size() {
+        let src =
+            "@main def main: IO[Unit] =\n  Ui.run(_ => View.fontSize(16, View.text(\"x\")))\n";
+        let h = hover_src(src, "fontSize");
+        assert!(
+            h.contains("View.fontSize(n: Int, child: View): View"),
+            "{h}"
+        );
     }
 
     #[test]

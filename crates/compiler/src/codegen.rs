@@ -163,6 +163,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_ellipsis(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_text_color(i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_gap(i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_font_size(i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_ignore_pointer(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_absorb_pointer(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_exclude_semantics(ptr)").unwrap();
@@ -3303,6 +3304,15 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "View.fontSize" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_view_font_size(i64 {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "View.ignorePointer" => {
             writeln!(
                 code,
@@ -3820,6 +3830,20 @@ law always: Bool = 1 == 1
         assert!(
             ir.contains("sz_lang_view_gap"),
             "expected View.gap in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_font_size() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.fontSize(16, View.text("x")))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_font_size"),
+            "expected View.fontSize in IR:\n{ir}"
         );
     }
 

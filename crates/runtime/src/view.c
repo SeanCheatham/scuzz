@@ -109,7 +109,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_OPACITY || kind == SZ_VIEW_MAX_LINES ||
          kind == SZ_VIEW_IGNORE_POINTER || kind == SZ_VIEW_ABSORB_POINTER ||
          kind == SZ_VIEW_EXCLUDE_SEMANTICS || kind == SZ_VIEW_ELLIPSIS ||
-         kind == SZ_VIEW_TEXT_COLOR || kind == SZ_VIEW_GAP;
+         kind == SZ_VIEW_TEXT_COLOR || kind == SZ_VIEW_GAP ||
+         kind == SZ_VIEW_FONT_SIZE;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -483,6 +484,14 @@ SzView *sz_view_gap(int n, SzView *child) {
   return v;
 }
 
+SzView *sz_view_font_size(int n, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_FONT_SIZE);
+  v->img_w = n > 0 ? n : 1;
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
 SzView *sz_view_background(uint32_t argb, SzView *child) {
   SzView *v = view_new(SZ_VIEW_BACKGROUND);
   v->bg_argb = argb;
@@ -752,10 +761,6 @@ static void accum_wrap_line(const char *s, int start, int end, float width,
   m->n++;
 }
 
-static float text_line_h(const SzTheme *theme) {
-  return theme->font_px + 6.f;
-}
-
 static void resolve_text(const SzView *v, char *buf, size_t buflen) {
   if (!buf || buflen == 0)
     return;
@@ -848,11 +853,19 @@ static int g_max_lines;
 static int g_ellipsis;
 static int g_gap_on;
 static float g_gap;
+static int g_font_px_on;
+static float g_font_px;
 
 static float layout_gap(const SzTheme *theme) {
   if (g_gap_on)
     return g_gap;
   return theme->gap;
+}
+
+static float layout_font_px(const SzTheme *theme) {
+  if (g_font_px_on)
+    return g_font_px;
+  return theme->font_px;
 }
 
 static int tighten_max_lines(int n) {
@@ -901,7 +914,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_TEXT: {
     SzWrapMetrics m;
     float inner;
-    float line_h = text_line_h(theme);
+    float font_px = layout_font_px(theme);
+    float line_h = font_px + 6.f;
     resolve_text(v, buf, sizeof buf);
     inner = 0.f;
     if (max_w > 4.f)
@@ -910,12 +924,12 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     m.n = 0;
     m.cap = text_line_cap();
     m.truncated = 0;
-    each_text_line(buf, font, inner, accum_wrap_line, &m);
+    each_text_line(buf, font_px, inner, accum_wrap_line, &m);
     if (m.n < 1)
       m.n = 1;
     v->frame.w = m.max_line_w + 4.f;
     if (g_ellipsis && m.truncated) {
-      float need = m.max_line_w + text_width("...", font) + 4.f;
+      float need = m.max_line_w + text_width("...", font_px) + 4.f;
       if (v->frame.w < need)
         v->frame.w = need;
     }
@@ -1426,6 +1440,26 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.h = ch ? ch->frame.h : 0.f;
     break;
   }
+  case SZ_VIEW_FONT_SIZE: {
+    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
+    int prev_on = g_font_px_on;
+    float prev = g_font_px;
+    g_font_px_on = 1;
+    g_font_px = (float)v->img_w;
+    if (ch) {
+      SzBoxConstraints cc;
+      cc.min_w = min_w;
+      cc.min_h = min_h;
+      cc.max_w = max_w;
+      cc.max_h = max_h;
+      layout_constrained(ch, x, y, cc, theme);
+    }
+    g_font_px_on = prev_on;
+    g_font_px = prev;
+    v->frame.w = ch ? ch->frame.w : 0.f;
+    v->frame.h = ch ? ch->frame.h : 0.f;
+    break;
+  }
   case SZ_VIEW_IGNORE_POINTER:
   case SZ_VIEW_ABSORB_POINTER:
   case SZ_VIEW_EXCLUDE_SEMANTICS:
@@ -1721,14 +1755,15 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_TEXT: {
     SzWrapPaint wp;
     float inner = 0.f;
+    float font_px = layout_font_px(theme);
     resolve_text(v, buf, sizeof buf);
     if (v->frame.w > 4.f)
       inner = v->frame.w - 4.f;
     wp.c = c;
     wp.x = v->frame.x + 2.f;
-    wp.y = v->frame.y + theme->font_px + 2.f;
-    wp.font_px = theme->font_px;
-    wp.line_h = text_line_h(theme);
+    wp.y = v->frame.y + font_px + 2.f;
+    wp.font_px = font_px;
+    wp.line_h = font_px + 6.f;
     wp.inner = inner;
     wp.argb = g_text_color_on ? g_text_argb : theme->foreground;
     wp.cap = text_line_cap();
@@ -1740,10 +1775,10 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       m.n = 0;
       m.cap = wp.cap;
       m.truncated = 0;
-      each_text_line(buf, theme->font_px, inner, accum_wrap_line, &m);
+      each_text_line(buf, font_px, inner, accum_wrap_line, &m);
       wp.ellipsis = m.truncated;
     }
-    each_text_line(buf, theme->font_px, inner, paint_wrap_line, &wp);
+    each_text_line(buf, font_px, inner, paint_wrap_line, &wp);
     break;
   }
   case SZ_VIEW_BUTTON:
@@ -1844,6 +1879,17 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     g_text_argb = prev_argb;
     break;
   }
+  case SZ_VIEW_FONT_SIZE: {
+    int prev_on = g_font_px_on;
+    float prev = g_font_px;
+    g_font_px_on = 1;
+    g_font_px = (float)v->img_w;
+    for (i = 0; i < v->child_count; i++)
+      paint_node(v->children[i], c, theme);
+    g_font_px_on = prev_on;
+    g_font_px = prev;
+    break;
+  }
   case SZ_VIEW_SCROLL:
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     paint_children_clipped(v, c, theme);
@@ -1888,6 +1934,7 @@ int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
   g_ellipsis = 0;
   g_text_color_on = 0;
   g_gap_on = 0;
+  g_font_px_on = 0;
   sk_canvas_clear(canvas, sk_color_argb(theme->background));
   sz_view_layout(root, (float)width, (float)height, theme);
   paint_node(root, canvas, theme);

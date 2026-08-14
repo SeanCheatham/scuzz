@@ -2700,6 +2700,141 @@ static void test_gap_does_not_change_stack(void) {
   sz_view_free(wrap);
 }
 
+static void test_font_size_sizes_to_child(void) {
+  SzView *wrap, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect wf, chf;
+
+  child = sz_view_sized(40, 30, sz_view_text("Hi"));
+  wrap = sz_view_font_size(16, child);
+  sz_view_layout(wrap, 200.f, 200.f, theme);
+  assert(sz_view_kind(wrap) == SZ_VIEW_FONT_SIZE);
+  wf = sz_view_frame(wrap);
+  chf = sz_view_frame(child);
+  assert(fabsf(wf.w - 40.f) < 0.5f);
+  assert(fabsf(wf.h - 30.f) < 0.5f);
+  assert(fabsf(chf.w - 40.f) < 0.5f);
+  assert(fabsf(chf.h - 30.f) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_font_size_grows_text_height(void) {
+  SzView *plain, *wrap;
+  const SzTheme *theme = sz_theme_default();
+  float plain_h, big_h;
+
+  plain = sz_view_text("Hi");
+  sz_view_layout(plain, 200.f, 200.f, theme);
+  plain_h = sz_view_frame(plain).h;
+  sz_view_free(plain);
+  assert(fabsf(plain_h - (theme->font_px + 6.f)) < 0.5f);
+
+  wrap = sz_view_font_size(16, sz_view_text("Hi"));
+  sz_view_layout(wrap, 200.f, 200.f, theme);
+  big_h = sz_view_frame(wrap).h;
+  assert(fabsf(big_h - (16.f + 6.f)) < 0.5f);
+  assert(big_h > plain_h + 1.f);
+  sz_view_free(wrap);
+}
+
+static void test_font_size_grows_text_width(void) {
+  SzView *plain, *wrap;
+  const SzTheme *theme = sz_theme_default();
+  float plain_w, big_w;
+
+  plain = sz_view_text("Hi");
+  sz_view_layout(plain, 1000.f, 200.f, theme);
+  plain_w = sz_view_frame(plain).w;
+  sz_view_free(plain);
+
+  wrap = sz_view_font_size(16, sz_view_text("Hi"));
+  sz_view_layout(wrap, 1000.f, 200.f, theme);
+  big_w = sz_view_frame(wrap).w;
+  assert(big_w > plain_w + 1.f);
+  sz_view_free(wrap);
+}
+
+static void test_nested_font_size_inner_wins(void) {
+  SzView *outer, *inner, *t;
+  const SzTheme *theme = sz_theme_default();
+
+  t = sz_view_text("Hi");
+  inner = sz_view_font_size(8, t);
+  outer = sz_view_font_size(24, inner);
+  sz_view_layout(outer, 200.f, 200.f, theme);
+  assert(fabsf(sz_view_frame(t).h - (8.f + 6.f)) < 0.5f);
+  sz_view_free(outer);
+}
+
+static void test_font_size_zero_is_one(void) {
+  SzView *wrap;
+  const SzTheme *theme = sz_theme_default();
+
+  wrap = sz_view_font_size(0, sz_view_text("Hi"));
+  sz_view_layout(wrap, 200.f, 200.f, theme);
+  assert(fabsf(sz_view_frame(wrap).h - 7.f) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_font_size_keeps_a11y(void) {
+  SzView *wrap;
+  SzString *dump;
+
+  wrap = sz_view_font_size(24, sz_view_text("hi"));
+  dump = sz_view_a11y_dump(wrap);
+  assert(strstr(sz_string_cstr(dump), "text:hi") != NULL);
+  sz_string_free(dump);
+  sz_view_free(wrap);
+}
+
+static void test_font_size_does_not_grow_button(void) {
+  SzView *wrap, *b;
+  const SzTheme *theme = sz_theme_default();
+  float btn_h;
+
+  b = sz_view_button("Go", NULL, NULL);
+  sz_view_layout(b, 200.f, 100.f, theme);
+  btn_h = sz_view_frame(b).h;
+  sz_view_free(b);
+
+  wrap = sz_view_font_size(24, sz_view_button("Go", NULL, NULL));
+  sz_view_layout(wrap, 200.f, 100.f, theme);
+  assert(fabsf(sz_view_frame(wrap).h - btn_h) < 0.5f);
+  assert(fabsf(btn_h - theme->control_h) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_bind_text_respects_font_size(void) {
+  SzSignalStr *s;
+  SzView *wrap;
+  const SzTheme *theme = sz_theme_default();
+
+  s = sz_signal_str("Hi");
+  wrap = sz_view_font_size(16, sz_view_text_signal_str(s));
+  sz_view_layout(wrap, 200.f, 200.f, theme);
+  assert(fabsf(sz_view_frame(wrap).h - (16.f + 6.f)) < 0.5f);
+  sz_view_free(wrap);
+  sz_signal_str_free(s);
+}
+
+static void test_font_size_wraps_sooner(void) {
+  SzView *plain, *wrap, *t;
+  const SzTheme *theme = sz_theme_default();
+  float one_w;
+  float line_h = 16.f + 6.f;
+
+  plain = sz_view_text("one");
+  sz_view_layout(plain, 1000.f, 100.f, theme);
+  one_w = sz_view_frame(plain).w;
+  sz_view_free(plain);
+
+  t = sz_view_text("one two");
+  wrap = sz_view_font_size(16, t);
+  sz_view_layout(wrap, one_w, 200.f, theme);
+  assert(sz_view_frame(wrap).h > line_h + 1.f);
+  sz_view_free(wrap);
+}
+
 static void test_ignore_pointer_sizes_to_child(void) {
   SzView *wrap, *child;
   const SzTheme *theme = sz_theme_default();
@@ -3648,6 +3783,15 @@ int main(void) {
   test_gap_zero_row_is_flush();
   test_gap_zero_shrinks_column_height();
   test_gap_does_not_change_stack();
+  test_font_size_sizes_to_child();
+  test_font_size_grows_text_height();
+  test_font_size_grows_text_width();
+  test_nested_font_size_inner_wins();
+  test_font_size_zero_is_one();
+  test_font_size_keeps_a11y();
+  test_font_size_does_not_grow_button();
+  test_bind_text_respects_font_size();
+  test_font_size_wraps_sooner();
   test_ignore_pointer_sizes_to_child();
   test_ignore_pointer_passes_tap_through();
   test_absorb_pointer_blocks_tap();

@@ -120,6 +120,9 @@ SzView *sz_lang_view_text_color(int64_t argb, SzView *child) {
 SzView *sz_lang_view_gap(int64_t n, SzView *child) {
   return sz_view_gap((int)n, child);
 }
+SzView *sz_lang_view_font_size(int64_t n, SzView *child) {
+  return sz_view_font_size((int)n, child);
+}
 SzView *sz_lang_view_background(int64_t argb, SzView *child) {
   return sz_view_background((uint32_t)argb, child);
 }

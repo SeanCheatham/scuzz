@@ -298,6 +298,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_font_size_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.fo\n";
+        let labels = labels_at(src, "View.fo");
+        assert!(labels.iter().any(|l| l == "View.fontSize"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_color_rgba_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => Color.rgb\n";
         let labels = labels_at(src, "Color.rgb");
