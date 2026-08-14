@@ -47,6 +47,15 @@ pub fn hover_in_source(
 }
 
 fn ident_at(source: &str, offset: usize) -> Option<(Option<String>, String)> {
+    ident_at_opts(source, offset, true)
+}
+
+/// Ident at `offset`. When `lookahead` is set, `IO` in `IO.println` resolves as `IO.println`.
+pub(crate) fn ident_at_opts(
+    source: &str,
+    offset: usize,
+    lookahead: bool,
+) -> Option<(Option<String>, String)> {
     let toks = lex(source).ok()?;
     let mut hit = None;
     for (i, t) in toks.iter().enumerate() {
@@ -67,7 +76,7 @@ fn ident_at(source: &str, offset: usize) -> Option<(Option<String>, String)> {
             return Some((Some(q.clone()), name.clone()));
         }
     }
-    if i + 2 < toks.len() && matches!(toks[i + 1].token, Token::Dot) {
+    if lookahead && i + 2 < toks.len() && matches!(toks[i + 1].token, Token::Dot) {
         if let Token::Ident(m) = &toks[i + 2].token {
             return Some((Some(name.clone()), m.clone()));
         }
@@ -75,14 +84,14 @@ fn ident_at(source: &str, offset: usize) -> Option<(Option<String>, String)> {
     Some((None, name.clone()))
 }
 
-fn def_named<'a>(program: &'a Program, module: &str, name: &str) -> Option<&'a FunDef> {
+pub(crate) fn def_named<'a>(program: &'a Program, module: &str, name: &str) -> Option<&'a FunDef> {
     program
         .defs
         .iter()
         .find(|d| d.module == module && d.name == name)
 }
 
-fn unique_def<'a>(program: &'a Program, name: &str) -> Option<&'a FunDef> {
+pub(crate) fn unique_def<'a>(program: &'a Program, name: &str) -> Option<&'a FunDef> {
     let hits: Vec<_> = program.defs.iter().filter(|d| d.name == name).collect();
     if hits.len() == 1 {
         Some(hits[0])
@@ -91,14 +100,18 @@ fn unique_def<'a>(program: &'a Program, name: &str) -> Option<&'a FunDef> {
     }
 }
 
-fn enum_named<'a>(program: &'a Program, module: &str, name: &str) -> Option<&'a EnumDef> {
+pub(crate) fn enum_named<'a>(
+    program: &'a Program,
+    module: &str,
+    name: &str,
+) -> Option<&'a EnumDef> {
     program
         .enums
         .iter()
         .find(|e| e.module == module && e.name == name)
 }
 
-fn unique_enum<'a>(program: &'a Program, name: &str) -> Option<&'a EnumDef> {
+pub(crate) fn unique_enum<'a>(program: &'a Program, name: &str) -> Option<&'a EnumDef> {
     let hits: Vec<_> = program.enums.iter().filter(|e| e.name == name).collect();
     if hits.len() == 1 {
         Some(hits[0])

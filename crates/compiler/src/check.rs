@@ -346,7 +346,14 @@ fn load_overlay_file(
     project_dir: &Path,
     unsaved: &BTreeMap<PathBuf, String>,
     path: &Path,
-) -> Result<Option<(String, String, Option<crate::ast::Program>)>> {
+) -> Result<
+    Option<(
+        crate::driver::ResolvedProject,
+        String,
+        String,
+        Option<crate::ast::Program>,
+    )>,
+> {
     let mut resolved = crate::driver::resolve_project(project_dir)
         .with_context(|| format!("resolving {}", project_dir.display()))?;
     apply_unsaved(&mut resolved, unsaved, project_dir);
@@ -369,7 +376,7 @@ fn load_overlay_file(
     let program = parse_sources(&named)
         .ok()
         .and_then(|p| apply_overlays(p, &resolved.overlays).ok());
-    Ok(Some((label, text, program)))
+    Ok(Some((resolved, label, text, program)))
 }
 
 /// Signature hover at a 0-based LSP position. Same parse as [`check_project_with`].
@@ -380,7 +387,8 @@ pub fn hover_project(
     line: u32,
     character: u32,
 ) -> Result<Option<String>> {
-    let Some((label, text, program)) = load_overlay_file(project_dir, unsaved, path)? else {
+    let Some((_resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
         return Ok(None);
     };
     let Some(program) = program else {
@@ -401,7 +409,8 @@ pub fn complete_project(
     line: u32,
     character: u32,
 ) -> Result<Vec<crate::complete::Completion>> {
-    let Some((label, text, program)) = load_overlay_file(project_dir, unsaved, path)? else {
+    let Some((_resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
         return Ok(Vec::new());
     };
     let offset =
@@ -412,6 +421,59 @@ pub fn complete_project(
         &text,
         offset,
     ))
+}
+
+/// Go-to-definition at a 0-based LSP position. Same parse as [`check_project_with`].
+pub fn definition_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    line: u32,
+    character: u32,
+) -> Result<Option<(PathBuf, u32, u32, u32, u32)>> {
+    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(None);
+    };
+    let Some(program) = program else {
+        return Ok(None);
+    };
+    let named = named_sources(&resolved);
+    let offset =
+        crate::span::line_col_to_offset(&text, line.saturating_add(1), character.saturating_add(1));
+    let Some(loc) =
+        crate::definition::definition_in_sources(&program, &named, &label, &text, offset)
+    else {
+        return Ok(None);
+    };
+    let dest = resolved
+        .sources
+        .iter()
+        .find(|s| s.label == loc.file)
+        .map(|s| s.path.clone())
+        .or_else(|| {
+            resolved
+                .overlays
+                .iter()
+                .find(|o| o.label == loc.file)
+                .map(|o| o.path.clone())
+        })
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| path.to_path_buf());
+    let src = named
+        .iter()
+        .find(|(l, _)| *l == loc.file)
+        .map(|(_, t)| t.as_str())
+        .unwrap_or(text.as_str());
+    let (sl, sc) = offset_to_line_col(src, loc.start);
+    let (el, ec) = offset_to_line_col(src, loc.end);
+    Ok(Some((
+        dest,
+        sl.saturating_sub(1),
+        sc.saturating_sub(1),
+        el.saturating_sub(1),
+        ec.saturating_sub(1),
+    )))
 }
 
 #[cfg(test)]
@@ -610,5 +672,32 @@ version = "0.0.0"
         let (line, col) = offset_to_line_col(src, off);
         let items = complete_project(root, &BTreeMap::new(), &path, line - 1, col - 1).unwrap();
         assert!(items.iter().any(|c| c.label == "IO.println"), "{items:?}");
+    }
+
+    #[test]
+    fn definition_project_jumps_to_def() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"def_ok\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src =
+            "def add(n: Int): Int = n\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(add(1)))\n";
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), &formatted).unwrap();
+        let path = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let call = formatted.rfind("add").unwrap();
+        let (line, col) = offset_to_line_col(&formatted, call);
+        let (dest, sl, sc, _el, _ec) =
+            definition_project(root, &BTreeMap::new(), &path, line - 1, col - 1)
+                .unwrap()
+                .expect("definition");
+        assert_eq!(canonicalize_source_path(&dest), path);
+        let decl = formatted.find("add").unwrap();
+        let (dl, dc) = offset_to_line_col(&formatted, decl);
+        assert_eq!((sl + 1, sc + 1), (dl, dc));
     }
 }

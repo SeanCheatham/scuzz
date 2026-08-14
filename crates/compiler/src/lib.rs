@@ -4,6 +4,7 @@ pub mod ast;
 pub mod check;
 pub mod codegen;
 pub mod complete;
+pub mod definition;
 pub mod driver;
 pub mod format;
 pub mod fuzz;
@@ -20,8 +21,8 @@ pub mod span;
 pub mod typ;
 
 pub use check::{
-    check_project, check_project_with, complete_project, format_diagnostics, hover_project,
-    Diagnostic,
+    check_project, check_project_with, complete_project, definition_project, format_diagnostics,
+    hover_project, Diagnostic,
 };
 pub use driver::{
     compile_prepared_program, compile_project, load_verify_program, CompileOptions, CompileOutput,
