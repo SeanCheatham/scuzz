@@ -16,6 +16,9 @@ impl Show for Point:
   def show(): String =
     Str.concat("Point(", Str.concat(Str.fromInt(self.x), Str.concat(",", Str.concat(Str.fromInt(self.y), ")"))))
 
+impl Get[Int] for Point:
+  def getOrElse(default: Int): Int = self.x
+
 impl Show for Box:
   def show(): String =
     "box"
@@ -37,6 +40,7 @@ impl Get for Opt:
 @main def main: IO[Unit] =
   for {
     _ <- IO.println(Point(3, 5).show())
+    _ <- IO.println(Str.concat("get:", Str.fromInt(Point(3, 5).getOrElse(0))))
     b = Box(4)
     _ <- IO.println(Str.concat("show:", b.show()))
     _ <- IO.println(Str.concat("show:", Opt.Some(1).show()))

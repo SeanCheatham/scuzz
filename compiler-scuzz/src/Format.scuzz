@@ -92,10 +92,14 @@ def prettyImpls(impls: List, acc: String): String =
 
 def prettyImpl(im: ImplDef): String =
   im match {
-    case ImplDef.Impl(module, traitName, forType, methods) => for {
+    case ImplDef.Impl(module, traitName, traitArgs, forType, methods) => for {
   body = prettyImplMethods(methods, "")
-} yield str3("impl ", traitName, str3(" for ", forType, str3(":\n", body, "")))
+  args = prettyImplTraitArgs(traitArgs)
+} yield str3("impl ", traitName, str3(args, " for ", str3(forType, str3(":\n", body, ""))))
   }
+
+def prettyImplTraitArgs(args: List): String =
+  if (List.isEmpty(args) == 1) "" else str3("[", tyPrettyArgs(args))
 
 def prettyImplMethods(methods: List, acc: String): String =
   if (List.isEmpty(methods) == 1) acc else prettyImplMethods(List.tail(methods), Str.concat(acc, prettyImplMethod(List.head(methods))))

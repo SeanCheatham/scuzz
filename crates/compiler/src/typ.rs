@@ -64,7 +64,45 @@ struct MethodIndex {
     by_type_method: HashMap<(String, String), MethodEntry>,
 }
 
-/// Map `trait Get[A]` params onto the impl target's params (`Opt[T]` → `A := T`).
+/// Instantiate `trait Get[T]` from explicit `impl Get[Int]` args, or from the target's params.
+fn impl_trait_subst(
+    tr: &TraitDef,
+    im: &ImplDef,
+    for_en: &EnumDef,
+    enums: &EnumIndex<'_>,
+) -> Result<HashMap<String, Type>, TypeError> {
+    if !im.trait_args.is_empty() {
+        if tr.type_params.is_empty() {
+            return Err(TypeError::Msg(format!(
+                "impl {} for {}: trait is not generic",
+                im.trait_name, im.for_type
+            )));
+        }
+        if im.trait_args.len() != tr.type_params.len() {
+            return Err(TypeError::Msg(format!(
+                "impl {} for {}: trait expects {} type argument(s)",
+                im.trait_name,
+                im.for_type,
+                tr.type_params.len()
+            )));
+        }
+        let mut subst = HashMap::new();
+        for (p, arg) in tr.type_params.iter().zip(im.trait_args.iter()) {
+            subst.insert(p.clone(), resolve_type(arg, enums, &im.module)?);
+        }
+        return Ok(subst);
+    }
+    if !tr.type_params.is_empty() && tr.type_params.len() != for_en.type_params.len() {
+        return Err(TypeError::Msg(format!(
+            "impl {} for {}: trait expects {} type argument(s)",
+            im.trait_name,
+            im.for_type,
+            tr.type_params.len()
+        )));
+    }
+    Ok(trait_receiver_subst(&tr.type_params, &for_en.type_params))
+}
+
 fn trait_receiver_subst(trait_tparams: &[String], for_tparams: &[String]) -> HashMap<String, Type> {
     trait_tparams
         .iter()
@@ -95,15 +133,7 @@ impl MethodIndex {
                 ))
             })?;
             let for_id = crate::resolve::enum_id(&for_en.module, &for_en.name);
-            if !tr.type_params.is_empty() && tr.type_params.len() != for_en.type_params.len() {
-                return Err(TypeError::Msg(format!(
-                    "impl {} for {}: trait expects {} type argument(s)",
-                    im.trait_name,
-                    im.for_type,
-                    tr.type_params.len()
-                )));
-            }
-            let trait_subst = trait_receiver_subst(&tr.type_params, &for_en.type_params);
+            let trait_subst = impl_trait_subst(tr, im, for_en, enums)?;
             for method in &im.methods {
                 let tm = tr
                     .methods
@@ -4985,6 +5015,32 @@ impl Get for Point:
             "unexpected: {}",
             err.message()
         );
+    }
+
+    #[test]
+    fn typechecks_impl_trait_args() {
+        let src = r#"
+record Point(x: Int)
+trait Get[T]:
+  def getOrElse(default: T): T
+impl Get[Int] for Point:
+  def getOrElse(default: Int): Int = self.x
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Point(3).getOrElse(0)))
+"#;
+        let p = expand_impls(lower_program(parse(src).unwrap())).expect("expand");
+        typecheck(&p).expect("impl Get[Int] for Point should typecheck");
+        let p = elaborate_generics(p).expect("elaborate");
+        let p = resolve_field_access(p).expect("fields before mono");
+        let p = monomorphize(p).expect("mono");
+        resolve_field_access(p).expect("fields after mono");
+        let p = parse_file(src, "trait/src/Main.scuzz").unwrap();
+        let p = expand_impls(lower_program(p)).expect("expand labeled");
+        typecheck(&p).expect("impl Get[Int] for Point with module should typecheck");
+        let p = elaborate_generics(p).expect("elaborate labeled");
+        let p = resolve_field_access(p).expect("fields before mono labeled");
+        let p = monomorphize(p).expect("mono labeled");
+        resolve_field_access(p).expect("fields after mono labeled");
     }
 
     #[test]

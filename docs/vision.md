@@ -109,7 +109,7 @@ Locks (not an API catalog — see [`guide.md`](guide.md)):
 
 - Expression dialect only: `for` primary binder (`=` pure, `<-` effect); no `val` / statement blocks / `var`
 - Optional `package`; top-level `def` / `private def` / `import`; `@main def …: IO[Unit]`
-- Payload enums + `record` sugar (methods on generic records and enums) + thin traits/`impl` (static dispatch, including `trait Get[T]` / `impl Get for Opt`) + monomorphized generics on defs/enums/records
+- Payload enums + `record` sugar (methods on generic records and enums) + thin traits/`impl` (static dispatch, including `trait Get[T]` / `impl Get[Int] for Point` / `impl Get for Opt`) + monomorphized generics on defs/enums/records
 - File-stem modules; enums namespaced by stem; `import Module.name` for bare disambiguation
 - Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
 - Blessed kits + `Signal` / `View` / `Ui` / `Law.*` / `.require` as documented in the guide
@@ -210,7 +210,7 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: trait type args on impl — [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
+Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: explicit trait args on generic impls — [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features. UI is a primary path among CLI/server/desktop/mobile — not the only v0 bar.
 

@@ -176,6 +176,17 @@ fn pretty_impl(im: &ImplDef) -> String {
     let mut out = String::new();
     out.push_str("impl ");
     out.push_str(&im.trait_name);
+    if !im.trait_args.is_empty() {
+        out.push('[');
+        out.push_str(
+            &im.trait_args
+                .iter()
+                .map(pretty_type)
+                .collect::<Vec<_>>()
+                .join(", "),
+        );
+        out.push(']');
+    }
     out.push_str(" for ");
     out.push_str(&im.for_type);
     out.push_str(":\n");
@@ -861,6 +872,22 @@ trait Get[T]:
 "#;
         let out = format_source(src).unwrap();
         assert!(out.contains("trait Get[T]:"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_impl_trait_args() {
+        let src = r#"
+record Point(x: Int)
+trait Get[T]:
+  def getOrElse(default: T): T
+impl Get[Int] for Point:
+  def getOrElse(default: Int): Int = self.x
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("impl Get[Int] for Point:"));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

@@ -13,7 +13,7 @@ enum ImplMethod:
   case Method(name: String, params: List, ret: Type, body: Expr)
 
 enum ImplDef:
-  case Impl(module: String, traitName: String, forType: String, methods: List)
+  case Impl(module: String, traitName: String, traitArgs: List, forType: String, methods: List)
 
 enum Prog:
   case Prog(pkg: String, enums: List, defs: List, main: Expr, mainModule: String, imports: List, traits: List, impls: List)

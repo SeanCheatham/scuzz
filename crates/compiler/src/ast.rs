@@ -36,11 +36,13 @@ pub struct TraitMethod {
     pub ret: Type,
 }
 
-/// `impl Show for Point: def show(): String = …` (`self` is implicit in the body).
+/// `impl Show for Point:` / `impl Get[Int] for Point:` (`self` is implicit in the body).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ImplDef {
     pub module: String,
     pub trait_name: String,
+    /// `impl Get[Int] for Point` — empty means instantiate from the target's type params.
+    pub trait_args: Vec<Type>,
     pub for_type: String,
     pub methods: Vec<ImplMethod>,
 }

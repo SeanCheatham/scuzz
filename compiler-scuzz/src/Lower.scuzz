@@ -22,7 +22,7 @@ def lowerImpls(impls: List, enums: List, imports: List, acc: List): List =
 
 def lowerImpl(im: ImplDef, enums: List, imports: List): ImplDef =
   im match {
-    case ImplDef.Impl(module, traitName, forType, methods) => ImplDef.Impl(module, traitName, forType, lowerImplMethods(methods, enums, imports, module, List.empty()))
+    case ImplDef.Impl(module, traitName, traitArgs, forType, methods) => ImplDef.Impl(module, traitName, traitArgs, forType, lowerImplMethods(methods, enums, imports, module, List.empty()))
   }
 
 def lowerImplMethods(methods: List, enums: List, imports: List, mod: String, acc: List): List =

@@ -577,10 +577,15 @@ impl Parser {
         Ok(TraitMethod { name, params, ret })
     }
 
-    /// `impl Show for Point: def show(): String = …`
+    /// `impl Show for Point:` / `impl Get[Int] for Point:`
     fn parse_impl(&mut self) -> Result<ImplDef, ParseError> {
         self.expect(&Token::Impl)?;
         let (trait_name, _) = self.expect_ident()?;
+        let trait_args = if matches!(self.peek(), Token::LBracket) {
+            self.parse_type_arg_list()?
+        } else {
+            Vec::new()
+        };
         self.expect(&Token::For)?;
         let (for_type, _) = self.expect_ident()?;
         self.expect(&Token::Colon)?;
@@ -594,9 +599,25 @@ impl Parser {
         Ok(ImplDef {
             module: self.module.clone(),
             trait_name,
+            trait_args,
             for_type,
             methods,
         })
+    }
+
+    fn parse_type_arg_list(&mut self) -> Result<Vec<Type>, ParseError> {
+        self.expect(&Token::LBracket)?;
+        let mut args = Vec::new();
+        loop {
+            args.push(self.parse_type()?);
+            if matches!(self.peek(), Token::Comma) {
+                self.bump();
+                continue;
+            }
+            break;
+        }
+        self.expect(&Token::RBracket)?;
+        Ok(args)
     }
 
     fn parse_trailing_methods(
@@ -2029,6 +2050,22 @@ trait Get[T]:
             &p.traits[0].methods[0].ret,
             crate::ast::Type::Var(n) if n == "T"
         ));
+    }
+
+    #[test]
+    fn parse_impl_trait_args() {
+        let src = r#"
+record Point(x: Int)
+trait Get[T]:
+  def getOrElse(default: T): T
+impl Get[Int] for Point:
+  def getOrElse(default: Int): Int = self.x
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        assert_eq!(p.impls[0].trait_name, "Get");
+        assert_eq!(p.impls[0].trait_args, vec![crate::ast::Type::Int]);
+        assert_eq!(p.impls[0].for_type, "Point");
     }
 
     #[test]

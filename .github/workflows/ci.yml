@@ -106,6 +106,7 @@ jobs:
           grep -q "record:8" /tmp/record.out
           cargo run -p scuzz -- run examples/trait | tee /tmp/trait.out
           grep -q "Point(3,5)" /tmp/trait.out
+          grep -q "get:3" /tmp/trait.out
           grep -q "show:box" /tmp/trait.out
           grep -q "show:some" /tmp/trait.out
           grep -q "get:2" /tmp/trait.out

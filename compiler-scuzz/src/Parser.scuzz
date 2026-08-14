@@ -719,11 +719,32 @@ def parseTraitMethodCont(file: String, tokens: List, i: Int, acc: List, tparams:
 def parseTopImpl(file: String, tokens: List, i: Int, pkg: String, enums: List, traits: List, impls: List, defs: List, main: Expr, mainMod: String, imports: List, src: String): Prog =
   for {
     traitP = parseIdent(file, tokens, i)
-    i1 = expectTok(tokens, pIdx(traitP), "For")
+    i0 = pIdx(traitP)
+  } yield if (isTok(tokens, i0, "LBracket") == 1) parseImplTraitArgs(file, tokens, i0 + 1, pkg, enums, traits, impls, defs, main, mainMod, imports, src, pStr(traitP)) else parseImplAfterTrait(file, tokens, i0, pkg, enums, traits, impls, defs, main, mainMod, imports, src, pStr(traitP), List.empty())
+
+def parseImplTraitArgs(file: String, tokens: List, i: Int, pkg: String, enums: List, traits: List, impls: List, defs: List, main: Expr, mainMod: String, imports: List, src: String, traitName: String): Prog =
+  for {
+    argsP = parseImplTypeArgs(file, tokens, i, List.empty())
+  } yield parseImplAfterTrait(file, tokens, pIdx(argsP), pkg, enums, traits, impls, defs, main, mainMod, imports, src, traitName, pAst(argsP))
+
+def parseImplTypeArgs(file: String, tokens: List, i: Int, acc: List): List =
+  for {
+    argP = parseType(file, tokens, i)
+    j = pIdx(argP)
+  } yield if (isTok(tokens, j, "Comma") == 1) parseImplTypeArgs(file, tokens, j + 1, List.cons(pType(argP), acc)) else parseImplTypeArgsEnd(file, tokens, j, List.cons(pType(argP), acc))
+
+def parseImplTypeArgsEnd(file: String, tokens: List, i: Int, acc: List): List =
+  for {
+    i1 = expectTok(tokens, i, "RBracket")
+  } yield ok(List.reverse(acc), i1)
+
+def parseImplAfterTrait(file: String, tokens: List, i: Int, pkg: String, enums: List, traits: List, impls: List, defs: List, main: Expr, mainMod: String, imports: List, src: String, traitName: String, traitArgs: List): Prog =
+  for {
+    i1 = expectTok(tokens, i, "For")
     forP = parseIdent(file, tokens, i1)
     i2 = expectTok(tokens, pIdx(forP), "Colon")
     methodsP = parseImplMethods(file, tokens, i2, List.empty())
-    im = ImplDef.Impl(moduleIdFromLabel(file), pStr(traitP), pStr(forP), pAst(methodsP))
+    im = ImplDef.Impl(moduleIdFromLabel(file), traitName, traitArgs, pStr(forP), pAst(methodsP))
   } yield parseTop(file, tokens, pIdx(methodsP), pkg, enums, traits, List.cons(im, impls), defs, main, mainMod, imports, src)
 
 def parseImplMethods(file: String, tokens: List, i: Int, acc: List): List =

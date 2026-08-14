@@ -136,7 +136,7 @@ def expandAllImpls(impls: List, enums: List, imports: List, acc: List): List =
 
 def expandOneImpl(im: ImplDef, enums: List, imports: List): List =
   im match {
-    case ImplDef.Impl(module, traitName, forType, methods) => expandOneImplMethods(module, traitName, forType, methods, enums, imports, List.empty())
+    case ImplDef.Impl(module, traitName, traitArgs, forType, methods) => expandOneImplMethods(module, traitName, forType, methods, enums, imports, List.empty())
   }
 
 def expandOneImplMethods(module: String, traitName: String, forType: String, methods: List, enums: List, imports: List, acc: List): List =
