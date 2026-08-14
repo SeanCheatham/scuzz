@@ -1045,8 +1045,8 @@ SzIo *sz_net_http_get(SzString *url) {
  * parks on poll so other IO can run. Live listen is 127.0.0.1 and ::1 (V6ONLY)
  * so httpGet literals on either loopback match. TestRuntime injects paths and
  * skips sockets. Request read and response write each wait at most 1000ms;
- * a timed-out or malformed client is dropped and persistent serve accepts
- * the next. Error code 6. serveOnce is one request; serve keeps the
+ * a timed-out, malformed, or reset client is dropped and persistent serve
+ * accepts the next. Error code 6. serveOnce is one request; serve keeps the
  * listen sockets (n<=0 forever live, or until the TestRuntime queue is empty). */
 
 typedef struct ServeSt {
@@ -1239,6 +1239,12 @@ static void *serve_accept(void *env) {
   {
     int snd = 4096;
     setsockopt(conn, SOL_SOCKET, SO_SNDBUF, &snd, sizeof snd);
+#ifdef SO_NOSIGPIPE
+    {
+      int nosig = 1;
+      setsockopt(conn, SOL_SOCKET, SO_NOSIGPIPE, &nosig, sizeof nosig);
+    }
+#endif
   }
   st->conn_fd = conn;
   st->req_deadline_ms = sz_clock_monotonic_ms_sync() + HE_REQ_MS;
@@ -1324,6 +1330,7 @@ static void *serve_write_close(void *env) {
                 len);
   if (hn < 0 || st->conn_fd < 0) {
     r->is_err = 1;
+    r->drop = 1;
     r->as.err = sz_error_new(6, "Net.serve: write failed");
     return r;
   }
@@ -1337,7 +1344,11 @@ static void *serve_write_close(void *env) {
     src_off = st->woff - (size_t)hn;
     src_len = len;
   }
+#ifdef MSG_NOSIGNAL
+  n = send(st->conn_fd, src + src_off, src_len - src_off, MSG_NOSIGNAL);
+#else
   n = write(st->conn_fd, src + src_off, src_len - src_off);
+#endif
   if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
     if (sz_clock_monotonic_ms_sync() >= st->write_deadline_ms) {
       r->is_err = 1;
@@ -1348,8 +1359,9 @@ static void *serve_write_close(void *env) {
     r->retry = 1;
     return r;
   }
-  if (n < 0) {
+  if (n <= 0) {
     r->is_err = 1;
+    r->drop = 1;
     r->as.err = sz_error_new(6, "Net.serve: write failed");
     return r;
   }

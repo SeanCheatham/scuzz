@@ -369,7 +369,7 @@ SzIo *sz_random_next_int(int64_t bound); /* IO[Int] in [0, bound) */
 
 SzIo *sz_net_http_get(SzString *url); /* IO[String] body; A+AAAA; 1s DNS/connect/read */
 SzIo *sz_net_serve_once(int64_t port, SzCont handler, void *env); /* IO[Unit]; one GET; 1s req/write; 127.0.0.1 + ::1 */
-SzIo *sz_net_serve(int64_t port, SzCont handler, void *env); /* IO[Unit]; keep listen; drop bad clients */
+SzIo *sz_net_serve(int64_t port, SzCont handler, void *env); /* IO[Unit]; keep listen; drop bad/reset clients */
 /* Test-only: UDP nameserver for live httpGet DNS. NULL ip restores /etc/resolv.conf. */
 void sz_net_test_set_nameserver(const char *ipv4, int port);
 

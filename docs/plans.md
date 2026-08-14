@@ -2,4 +2,4 @@
 
 ## Next
 
-**Drop a failed `Net.serve` write and keep listening** — timed-out and malformed clients no longer kill persistent `Net.serve`. A client that resets during the response still fails the whole server with `write failed`. Next: close that connection and accept the next request.
+**Drop a failed request handler and keep `Net.serve` listening** — timed-out, malformed, and reset clients no longer kill persistent `Net.serve`. If the handler IO fails, the whole server still dies. Next: close that connection and accept the next request.

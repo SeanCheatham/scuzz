@@ -143,6 +143,21 @@ static SzIo *serve_big_ok(void *path, void *env) {
   }
 }
 
+static SzIo *serve_padded_ok(void *path, void *env) {
+  enum { N = 64 * 1024 };
+  char *blob;
+  SzString *s;
+  (void)path;
+  (void)env;
+  blob = (char *)malloc(N);
+  assert(blob);
+  memset(blob, 'x', N);
+  memcpy(blob, "ok:/x", 5);
+  s = sz_string_from_bytes(blob, N);
+  free(blob);
+  return sz_io_pure(s);
+}
+
 static void *live_get_client(void *arg) {
   int port = *(int *)arg;
   int fd = -1;
@@ -247,6 +262,42 @@ static void *get_then_hold(void *arg) {
     return NULL;
   }
   sleep_us(2500000);
+  close(fd);
+  return (void *)1;
+}
+
+static void *get_then_rst(void *arg) {
+  int port = *(int *)arg;
+  int fd = -1;
+  int i;
+  struct sockaddr_in addr;
+  struct linger lin;
+  char req[128];
+  memset(&addr, 0, sizeof addr);
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)port);
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  snprintf(req, sizeof req,
+           "GET /x HTTP/1.0\r\nHost: 127.0.0.1\r\nConnection: close\r\n\r\n");
+  lin.l_onoff = 1;
+  lin.l_linger = 0;
+  for (i = 0; i < 50; i++) {
+    sleep_us(10000);
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+      continue;
+    if (connect(fd, (struct sockaddr *)&addr, sizeof addr) == 0)
+      break;
+    close(fd);
+    fd = -1;
+  }
+  if (fd < 0)
+    return NULL;
+  setsockopt(fd, SOL_SOCKET, SO_LINGER, &lin, sizeof lin);
+  if (write(fd, req, strlen(req)) < 0) {
+    close(fd);
+    return NULL;
+  }
   close(fd);
   return (void *)1;
 }
@@ -1672,6 +1723,34 @@ int main(void) {
     sz_error_free(r.error);
     assert(t1 - t0 >= 900);
     assert(t1 - t0 < 2500);
+  }
+
+  /* Client GET then RST: serveOnce fails with write failed. */
+  {
+    pthread_t th;
+    int port = 18590;
+    pthread_create(&th, NULL, get_then_rst, &port);
+    r = sz_io_unsafe_run(sz_net_serve_once(port, serve_padded_ok, NULL));
+    pthread_join(th, NULL);
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "write failed"));
+    sz_error_free(r.error);
+  }
+
+  /* Persistent serve: a reset-during-write client does not block the next GET. */
+  {
+    pthread_t th_bad;
+    pthread_t th_get;
+    int port = 18591;
+    void *ret = NULL;
+    pthread_create(&th_bad, NULL, get_then_rst, &port);
+    pthread_create(&th_get, NULL, soon_live_get, &port);
+    r = sz_io_unsafe_run(sz_io_race(sz_net_serve(port, serve_padded_ok, NULL),
+                                   sz_io_sleep_ms(400)));
+    pthread_join(th_bad, NULL);
+    pthread_join(th_get, &ret);
+    assert(r.ok);
+    assert(ret && strstr((char *)ret, "ok:/x") != NULL);
   }
 
   /* poll parks so a peer fiber can run before the fd is readable. */
