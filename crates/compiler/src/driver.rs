@@ -13,7 +13,12 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::Mutex;
 use std::time::SystemTime;
+
+/// Shared `crates/runtime` / `crates/ffi-skia` archives. Parallel `compile_project`
+/// (cargo test threads) must not `make`/`ar`/`ld` them at once or the linker can SIGSEGV.
+static NATIVE_LINK_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone)]
 pub struct CompileOptions {
@@ -138,6 +143,7 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
         )?;
     }
 
+    let _native = NATIVE_LINK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
     build_runtime(&opts.runtime_dir, &opts.clang)?;
 
     let lib = opts.runtime_dir.join("build/libscuzz_rt.a");
