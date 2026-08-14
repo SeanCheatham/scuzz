@@ -460,6 +460,7 @@ static void addr_set_v6(struct sockaddr_storage *ss, socklen_t *len,
 #define HE_DNS_MS 1000
 #define HE_READ_MS 1000
 #define HE_REQ_MS 1000
+#define HE_WRITE_MS 1000
 
 static void get_free(GetSt *st) {
   if (!st)
@@ -1042,8 +1043,8 @@ SzIo *sz_net_http_get(SzString *url) {
 /* HTTP/1.0 GET server. Listen and connection fds are nonblocking; the fiber
  * parks on poll so other IO can run. Live listen is 127.0.0.1 and ::1 (V6ONLY)
  * so httpGet literals on either loopback match. TestRuntime injects paths and
- * skips sockets. Request read waits at most 1000ms. Error code 6. serveOnce is
- * one request; serve keeps the
+ * skips sockets. Request read and response write each wait at most 1000ms.
+ * Error code 6. serveOnce is one request; serve keeps the
  * listen sockets (n<=0 forever live, or until the TestRuntime queue is empty). */
 
 typedef struct ServeSt {
@@ -1059,6 +1060,7 @@ typedef struct ServeSt {
   size_t rlen;
   size_t woff;
   int64_t req_deadline_ms;
+  int64_t write_deadline_ms;
 } ServeSt;
 
 static void serve_close_conn(ServeSt *st) {
@@ -1197,6 +1199,7 @@ static void *serve_accept(void *env) {
   st->conn_fd = -1;
   st->rlen = 0;
   st->woff = 0;
+  st->write_deadline_ms = 0;
 
   /* Chosen at step time so SCUZZ_TESTRT=1 install in runtime_main is visible. */
   if (sz_testrt_net_is_fake()) {
@@ -1230,6 +1233,10 @@ static void *serve_accept(void *env) {
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.serve: accept failed");
     return r;
+  }
+  {
+    int snd = 4096;
+    setsockopt(conn, SOL_SOCKET, SO_SNDBUF, &snd, sizeof snd);
   }
   st->conn_fd = conn;
   st->req_deadline_ms = sz_clock_monotonic_ms_sync() + HE_REQ_MS;
@@ -1325,6 +1332,11 @@ static void *serve_write_close(void *env) {
   }
   n = write(st->conn_fd, src + src_off, src_len - src_off);
   if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+    if (sz_clock_monotonic_ms_sync() >= st->write_deadline_ms) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.serve: write timed out");
+      return r;
+    }
     r->retry = 1;
     return r;
   }
@@ -1424,9 +1436,16 @@ static SzIo *serve_after_conn_write_poll(void *value, void *env) {
 
 static SzIo *serve_poll_conn_write(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
+  SzIo *ready;
+  int64_t left;
   (void)value;
-  return sz_io_flatmap(sz_io_poll_writable(st->conn_fd), serve_after_conn_write_poll,
-                       st);
+  if (st->write_deadline_ms == 0)
+    st->write_deadline_ms = sz_clock_monotonic_ms_sync() + HE_WRITE_MS;
+  left = st->write_deadline_ms - sz_clock_monotonic_ms_sync();
+  if (left < 1)
+    left = 1;
+  ready = sz_io_race(sz_io_poll_writable(st->conn_fd), sz_io_sleep_ms(left));
+  return sz_io_flatmap(ready, serve_after_conn_write_poll, st);
 }
 
 static SzIo *serve_after_listen(void *value, void *env) {

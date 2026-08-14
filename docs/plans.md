@@ -2,4 +2,4 @@
 
 ## Next
 
-**Response write timeout for `Net.serve`** — request read waits at most 1s. A client that never reads the response still parks the server fiber on write. Next: fail that wait after a bounded wait.
+**Keep `Net.serve` listening after a timed-out client** — request read and response write each wait at most 1s, but that error still tears down the whole server. Next: close the stalled connection and accept the next request so one idle client cannot kill a persistent `Net.serve`.
