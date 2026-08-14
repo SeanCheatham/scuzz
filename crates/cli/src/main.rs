@@ -18,7 +18,7 @@ use support::resolve_dir;
     name = "scuzz",
     version,
     about = "Scuzz Lang CLI",
-    after_help = "Examples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz check --message-format=json\n  scuzz lsp\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n  scuzz fuzz --iters 16\n  scuzz mutate --limit 16 --iters 4\n\nJSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check` (disk; not a second typer).\n`watch` rebuilds. `run --watch` on [ui] keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (not source hot reload). IO-only `run --watch` kills and reruns on source change. Live dump: build/debug.dump. Live inject: build/inject.script (tap/text/type/pump/scroll/backspace)."
+    after_help = "Examples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz check --message-format=json\n  scuzz lsp\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n  scuzz fuzz --iters 16\n  scuzz mutate --limit 16 --iters 4\n\nJSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check` (open buffers overlay disk; not a second typer).\n`watch` rebuilds. `run --watch` on [ui] keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (not source hot reload). IO-only `run --watch` kills and reruns on source change. Live dump: build/debug.dump. Live inject: build/inject.script (tap/text/type/pump/scroll/backspace)."
 )]
 struct Cli {
     /// Diagnostic format: human (default) or json (`check` protocol; LSP wraps check)
@@ -85,7 +85,9 @@ enum Commands {
         path: PathBuf,
     },
     /// Language server wrapping `scuzz check` JSON diagnostics (stdin/stdout LSP)
-    #[command(after_help = "Examples:\n  scuzz lsp\n  scuzz lsp examples/hello\n")]
+    #[command(
+        after_help = "Open buffers overlay disk text on didOpen / didChange / didClose. Same check typer.\n\nExamples:\n  scuzz lsp\n  scuzz lsp examples/hello\n"
+    )]
     Lsp {
         #[arg(default_value = ".")]
         path: PathBuf,

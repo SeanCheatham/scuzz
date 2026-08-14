@@ -2,6 +2,7 @@
 
 use crate::ast::{Expr, ExprKind, FunDef, Program, Type};
 use crate::parser::{parse, ParseError};
+use std::path::PathBuf;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -25,6 +26,8 @@ pub struct OverlaySource {
     pub kind: OverlayKind,
     pub label: String,
     pub text: String,
+    /// Disk path when loaded from a package. Empty in in-memory tests.
+    pub path: PathBuf,
 }
 
 /// Apply same-name sim replacements, then merge `*.scuzz_drivers`. In-source
@@ -588,6 +591,7 @@ mod tests {
         let overlays = vec![OverlaySource {
             stem: "Main".into(),
             kind: OverlayKind::Sim,
+            path: PathBuf::new(),
             label: "Main.scuzz_sim".into(),
             text: "def title(): String = \"Sim\"\n".into(),
         }];
@@ -625,6 +629,7 @@ mod tests {
         let overlays = vec![OverlaySource {
             stem: "Main".into(),
             kind: OverlayKind::Sim,
+            path: PathBuf::new(),
             label: "Main.scuzz_sim".into(),
             text: "def title(): Bool = 1 == 1\n".into(),
         }];
@@ -641,6 +646,7 @@ mod tests {
         let overlays = vec![OverlaySource {
             stem: "Main".into(),
             kind: OverlayKind::Sim,
+            path: PathBuf::new(),
             label: "Main.scuzz_sim".into(),
             text: "def missing(): String = \"x\"\n".into(),
         }];
@@ -657,6 +663,7 @@ mod tests {
         let overlays = vec![OverlaySource {
             stem: "Main".into(),
             kind: OverlayKind::Drivers,
+            path: PathBuf::new(),
             label: "Main.scuzz_drivers".into(),
             text: "def plusN(n: Int): IO[Unit] =\n  IO.pure(note(n))\n".into(),
         }];
@@ -673,6 +680,7 @@ mod tests {
         let overlays = vec![OverlaySource {
             stem: "Main".into(),
             kind: OverlayKind::Drivers,
+            path: PathBuf::new(),
             label: "Main.scuzz_drivers".into(),
             text: "def flagDrive(on: Bool): IO[Unit] =\n  IO.pure(note(if (on) 1 else 0))\n".into(),
         }];
@@ -687,6 +695,7 @@ mod tests {
         let overlays = vec![OverlaySource {
             stem: "Main".into(),
             kind: OverlayKind::Drivers,
+            path: PathBuf::new(),
             label: "Main.scuzz_drivers".into(),
             text: "def bad(): IO[Unit] =\n  Law.assert(\"x\", 1)\n".into(),
         }];

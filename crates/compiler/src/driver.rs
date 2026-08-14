@@ -521,6 +521,7 @@ fn visit_package(
             kind,
             label,
             text,
+            path,
         });
     }
 

@@ -1,7 +1,7 @@
 //! Small LSP wrapping `check_project`. Same diagnostics as `--message-format=json`.
-//! No second typer. Unsaved buffers are ignored until they hit disk.
+//! No second typer. Open buffers overlay disk text.
 
-use crate::check::{check_project, Diagnostic};
+use crate::check::{canonicalize_source_path, check_project_with, Diagnostic};
 use crate::overlay::collect_fmt_sources;
 use anyhow::Result;
 use std::collections::BTreeMap;
@@ -17,6 +17,7 @@ pub fn run_lsp(root: &Path) -> Result<()> {
 
 pub fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Result<()> {
     let mut root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+    let mut open: BTreeMap<PathBuf, String> = BTreeMap::new();
     let mut buf = BufReader::new(reader);
     loop {
         let Some(body) = read_message(&mut buf)? else {
@@ -28,17 +29,25 @@ pub fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> R
             if let Some(p) = root_from_init(&body) {
                 root = p;
             }
-            let caps = r#"{"capabilities":{"textDocumentSync":1}}"#;
+            let caps = r#"{"capabilities":{"textDocumentSync":{"openClose":true,"change":1}}}"#;
             write_result(&mut writer, id, caps)?;
         } else if method == "shutdown" {
             write_result(&mut writer, id, "null")?;
         } else if method == "exit" {
             break;
-        } else if method == "textDocument/didOpen"
-            || method == "textDocument/didSave"
-            || method == "textDocument/didChange"
-        {
-            publish_check(&root, &mut writer)?;
+        } else if method == "textDocument/didOpen" || method == "textDocument/didChange" {
+            if let Some((path, text)) = doc_text_from_message(&body) {
+                open.insert(path, text);
+            }
+            publish_check(&root, &open, &mut writer)?;
+        } else if method == "textDocument/didClose" {
+            if let Some(path) = doc_path_from_message(&body) {
+                let key = canonicalize_source_path(&path);
+                open.retain(|p, _| canonicalize_source_path(p) != key);
+            }
+            publish_check(&root, &open, &mut writer)?;
+        } else if method == "textDocument/didSave" {
+            publish_check(&root, &open, &mut writer)?;
         } else if method == "initialized" || method.is_empty() {
             continue;
         } else if let Some(n) = id {
@@ -103,14 +112,21 @@ fn write_notify<W: Write>(writer: &mut W, method: &str, params: &str) -> Result<
     )
 }
 
-fn publish_check<W: Write>(root: &Path, writer: &mut W) -> Result<()> {
-    let diags = match check_project(root) {
+fn publish_check<W: Write>(
+    root: &Path,
+    open: &BTreeMap<PathBuf, String>,
+    writer: &mut W,
+) -> Result<()> {
+    let diags = match check_project_with(root, open) {
         Ok(d) => d,
         Err(e) => vec![Diagnostic::error(e.to_string())],
     };
     let mut by_uri: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for path in src_files(root)? {
         by_uri.entry(file_uri(&path)).or_default();
+    }
+    for path in open.keys() {
+        by_uri.entry(file_uri(path)).or_default();
     }
     for d in &diags {
         let uri = diag_uri(root, d);
@@ -185,6 +201,17 @@ fn uri_to_path(uri: &str) -> PathBuf {
     let rest = uri.strip_prefix("file://").unwrap_or(uri);
     let rest = rest.strip_prefix("localhost").unwrap_or(rest);
     PathBuf::from(rest)
+}
+
+fn doc_path_from_message(body: &str) -> Option<PathBuf> {
+    let uri = json_string_field(body, "uri")?;
+    Some(canonicalize_source_path(&uri_to_path(&uri)))
+}
+
+fn doc_text_from_message(body: &str) -> Option<(PathBuf, String)> {
+    let path = doc_path_from_message(body)?;
+    let text = json_string_field(body, "text")?;
+    Some((path, text))
 }
 
 fn json_string_field(body: &str, key: &str) -> Option<String> {
@@ -290,5 +317,64 @@ mod tests {
         );
         assert!(text.contains("\"id\":1"), "{text}");
         assert!(text.contains("textDocumentSync"), "{text}");
+    }
+
+    fn write_ok_pkg(root: &Path) {
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"lsp_unsaved\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(
+            root.join("src/Main.scuzz"),
+            "@main def main: IO[Unit] =\n  IO.println(\"ok\")\n",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn lsp_unsaved_buffer_overlays_disk_until_close() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        let root_uri = format!("file://{}", fs::canonicalize(root).unwrap().display());
+        let main = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let main_uri = format!("file://{}", main.display());
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let bad = json_str("@main def main: IO[Unit] =\n  IO.println(1 + \"x\")\n");
+        let open = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didOpen","params":{{"textDocument":{{"uri":{},"languageId":"scuzz","version":1,"text":{}}}}}}}"#,
+            json_str(&main_uri),
+            bad
+        );
+        let close = format!(
+            r#"{{"jsonrpc":"2.0","method":"textDocument/didClose","params":{{"textDocument":{{"uri":{}}}}}}}"#,
+            json_str(&main_uri)
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(
+            r#"{"jsonrpc":"2.0","method":"initialized","params":{}}"#,
+        ));
+        input.extend(frame(&open));
+        input.extend(frame(&close));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(
+            text.contains("Int") || text.contains("String"),
+            "expected unsaved type error: {text}"
+        );
+        let last = text.rfind("publishDiagnostics").expect(&text);
+        let after_close = &text[last..];
+        assert!(
+            !after_close.contains("\"severity\":1"),
+            "close must publish disk-clean diagnostics: {after_close}"
+        );
     }
 }

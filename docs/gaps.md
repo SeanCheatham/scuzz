@@ -43,5 +43,5 @@ Path deps only (`manifest.rs`). Git, versioned, and hosted artifacts are directi
 - **Flutter-style constraint layout** — recursive stacker now (`layout_node` in `view.c`). Locked direction: constraints down, sizes up. Widget set is in [`vision.md`](vision.md#layout-model). Do not add CSS-like rules. Do not add Flutter-style constraint-overflow dumps.
 - **Windows desktop embedder** — same session protocol as X11/Cocoa. Secondary platform.
 - **OS IME candidate windows** — focused TextField caret uses measured advance (`sz_view_caret_rect`). Embedders do not yet place OS IME UI from it.
-- **LSP / editor tooling** — `fmt`, `check --message-format=json`, `watch`, and `scuzz lsp` exist. LSP wraps disk `check` (didOpen/didSave/didChange). No hover. No completion. No unsaved-buffer overlay. JSON diagnostics stay the single schema.
+- **LSP / editor tooling** — `fmt`, `check --message-format=json`, `watch`, and `scuzz lsp` exist. LSP wraps `check` (didOpen/didChange overlay open buffers; didClose returns to disk). No hover. No completion. JSON diagnostics stay the single schema.
 - **macOS in default CI** — macOS job is `workflow_dispatch` only. Darwin regressions show late.

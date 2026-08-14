@@ -3,15 +3,16 @@
 use crate::format::format_source;
 use crate::lower::lower_program;
 use crate::overlay::{
-    apply_overlays, check_laws_applied, collect_fmt_sources, collect_law_names,
-    residualize_refinements,
+    apply_overlays, check_laws_applied, collect_fmt_sources, collect_law_names, is_fmt_source,
+    overlay_kind_from_path, residualize_refinements, OverlaySource,
 };
 use crate::parser::{parse_sources, ParseError};
 use crate::span::{offset_to_line_col, Span};
 use crate::typ::{typecheck, TypeError};
 use anyhow::{Context, Result};
+use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
@@ -157,18 +158,116 @@ fn diagnostic_from_type(e: TypeError, sources: &[(String, String)]) -> Diagnosti
     d
 }
 
-fn format_check_src(project_dir: &Path) -> Result<Vec<Diagnostic>> {
-    let files = collect_fmt_sources(&project_dir.join("src"))?;
+/// Canonical path, or parent canonical + file name when the file is not on disk yet.
+pub(crate) fn canonicalize_source_path(p: &Path) -> PathBuf {
+    if let Ok(c) = fs::canonicalize(p) {
+        return c;
+    }
+    if let Some(parent) = p.parent() {
+        if let Ok(cp) = fs::canonicalize(parent) {
+            if let Some(name) = p.file_name() {
+                return cp.join(name);
+            }
+        }
+    }
+    p.to_path_buf()
+}
+
+fn lookup_unsaved<'a>(path: &Path, unsaved: &'a BTreeMap<PathBuf, String>) -> Option<&'a String> {
+    unsaved.get(path).or_else(|| {
+        let key = canonicalize_source_path(path);
+        unsaved.get(&key).or_else(|| {
+            unsaved
+                .iter()
+                .find(|(p, _)| canonicalize_source_path(p) == key)
+                .map(|(_, t)| t)
+        })
+    })
+}
+
+fn apply_unsaved(
+    resolved: &mut crate::driver::ResolvedProject,
+    unsaved: &BTreeMap<PathBuf, String>,
+    project_dir: &Path,
+) {
+    if unsaved.is_empty() {
+        return;
+    }
+    let mut matched = BTreeMap::new();
+    for src in &mut resolved.sources {
+        if let Some(text) = lookup_unsaved(&src.path, unsaved) {
+            src.text = text.clone();
+            matched.insert(canonicalize_source_path(&src.path), ());
+        }
+    }
+    for ov in &mut resolved.overlays {
+        if ov.path.as_os_str().is_empty() {
+            continue;
+        }
+        if let Some(text) = lookup_unsaved(&ov.path, unsaved) {
+            ov.text = text.clone();
+            matched.insert(canonicalize_source_path(&ov.path), ());
+        }
+    }
+    let root = canonicalize_source_path(project_dir);
+    let src_dir = root.join("src");
+    let pkg = resolved.root_manifest.package.name.clone();
+    for (path, text) in unsaved {
+        let key = canonicalize_source_path(path);
+        if matched.contains_key(&key) {
+            continue;
+        }
+        if !key.starts_with(&src_dir) {
+            continue;
+        }
+        let rel = key
+            .strip_prefix(&root)
+            .unwrap_or(&key)
+            .to_string_lossy()
+            .replace('\\', "/");
+        let label = format!("{pkg}/{rel}");
+        if let Some((stem, kind)) = overlay_kind_from_path(&key) {
+            resolved.overlays.push(OverlaySource {
+                stem,
+                kind,
+                label,
+                text: text.clone(),
+                path: key,
+            });
+        } else if key.extension().and_then(|e| e.to_str()) == Some("scuzz") {
+            resolved.sources.push(crate::driver::ResolvedSource {
+                label,
+                path: key,
+                text: text.clone(),
+            });
+        }
+    }
+}
+
+fn format_check_src(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+) -> Result<Vec<Diagnostic>> {
+    let mut files = collect_fmt_sources(&project_dir.join("src"))?;
+    for p in unsaved.keys() {
+        if is_fmt_source(p)
+            && !files
+                .iter()
+                .any(|f| canonicalize_source_path(f) == canonicalize_source_path(p))
+        {
+            files.push(p.clone());
+        }
+    }
+    let root = canonicalize_source_path(project_dir);
     let mut diags = Vec::new();
     for p in files {
-        let text = fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?;
+        let text = match lookup_unsaved(&p, unsaved) {
+            Some(t) => t.clone(),
+            None => fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?,
+        };
         match format_source(&text) {
             Ok(formatted) if formatted != text => {
-                let file = p
-                    .strip_prefix(project_dir)
-                    .unwrap_or(&p)
-                    .display()
-                    .to_string();
+                let file = p.strip_prefix(&root).unwrap_or(&p).display().to_string();
                 diags.push(
                     Diagnostic::error("needs formatting (run scuzz fmt)")
                         .with_file(file)
@@ -185,9 +284,18 @@ fn format_check_src(project_dir: &Path) -> Result<Vec<Diagnostic>> {
 /// Format-check `src/`, then parse, lower, and typecheck (live + sim twins + in-source laws).
 /// No LLVM emit. No link. Format mismatches and type errors share one diagnostic list.
 pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
-    let mut diags = format_check_src(project_dir)?;
-    let resolved = crate::driver::resolve_project(project_dir)
+    check_project_with(project_dir, &BTreeMap::new())
+}
+
+/// Same typer as [`check_project`]. Replace disk text for matching paths (LSP buffers).
+pub fn check_project_with(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+) -> Result<Vec<Diagnostic>> {
+    let mut diags = format_check_src(project_dir, unsaved)?;
+    let mut resolved = crate::driver::resolve_project(project_dir)
         .with_context(|| format!("resolving {}", project_dir.display()))?;
+    apply_unsaved(&mut resolved, unsaved, project_dir);
 
     let named = named_sources(&resolved);
 
@@ -346,5 +454,55 @@ version = "0.0.0"
         let json = format_diagnostics(&diags, true);
         assert!(json.contains("non-exhaustive"));
         assert!(json.contains("\"line\":"));
+    }
+
+    fn write_ok_pkg(root: &Path) {
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"unsaved_ok\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = "@main def main: IO[Unit] =\n  IO.println(\"ok\")\n";
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), formatted).unwrap();
+    }
+
+    #[test]
+    fn check_project_with_overlays_unsaved_type_error() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        assert!(check_project(root).unwrap().is_empty());
+        let mut unsaved = BTreeMap::new();
+        unsaved.insert(
+            canonicalize_source_path(&root.join("src/Main.scuzz")),
+            "@main def main: IO[Unit] =\n  IO.println(1 + \"x\")\n".into(),
+        );
+        let diags = check_project_with(root, &unsaved).unwrap();
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(
+            diags[0].message.contains("Int") || diags[0].message.contains("String"),
+            "{}",
+            diags[0].message
+        );
+        assert!(check_project(root).unwrap().is_empty());
+    }
+
+    #[test]
+    fn check_project_with_new_unsaved_module() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        let mut unsaved = BTreeMap::new();
+        let src = crate::format::format_source("def bad(): String = 1\n").unwrap();
+        unsaved.insert(canonicalize_source_path(&root.join("src/Foo.scuzz")), src);
+        let diags = check_project_with(root, &unsaved).unwrap();
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(
+            diags[0].message.contains("String") || diags[0].message.contains("Int"),
+            "{}",
+            diags[0].message
+        );
     }
 }
