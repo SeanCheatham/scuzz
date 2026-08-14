@@ -66,7 +66,7 @@ One CLI. One typer. One formatter. One check surface. One testing strategy. No s
 - **Watch** rebuilds when sources or `scuzz.toml` change. It does not patch running machine code. `[ui]` `run --watch` recompiles `build/reload.dylib`, stamps, and swaps the View tree without resetting Signals (see [`guide.md`](guide.md)). IO-only `run --watch` kills and reruns the process on source change. Do not document `watch` as hot reload.
 - **Static hygiene** is `scuzz check`. `scuzz fmt` rewrites. No `lint` subcommand.
 - **Verification** is built into `scuzz` and the language (laws, sim overlays, deterministic TestRuntime, fuzz search, mutation). Not optional crates or Maven/npm test plugins.
-- **JSON diagnostics** (`scuzz check --message-format=json`) are the editor protocol. `scuzz lsp` wraps that, overlays open buffers, and serves hover from the same parse. Do not grow a second typer or schema.
+- **JSON diagnostics** (`scuzz check --message-format=json`) are the editor protocol. `scuzz lsp` wraps that, overlays open buffers, and serves hover and completion from the same parse. Do not grow a second typer or schema.
 - **`scuzz.toml` is data** — package, path deps, `[ui]`. No plugin DSL. No `build.scuzz` hooks. Unknown keys rejected. Do not add `[plugins]`.
 - **Fingerprint** (incremental): miss → rebuild. No `scuzz clean` ritual.
 - **Missing tools:** fail on the first missing tool with one install line. No `flutter doctor` mega-checklist.

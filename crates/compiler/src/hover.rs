@@ -185,7 +185,7 @@ fn consider(best: &mut Option<(usize, String)>, span_len: usize, name: &str) {
     }
 }
 
-fn show_def(d: &FunDef) -> String {
+pub(crate) fn show_def(d: &FunDef) -> String {
     let vis = if d.is_private { "private " } else { "" };
     let tps = if d.type_params.is_empty() {
         String::new()
@@ -200,7 +200,7 @@ fn show_def(d: &FunDef) -> String {
     }
 }
 
-fn show_param(p: &Param) -> String {
+pub(crate) fn show_param(p: &Param) -> String {
     if p.rfn.is_some() {
         format!("{}: {} where …", p.name, p.ty)
     } else {
@@ -208,7 +208,7 @@ fn show_param(p: &Param) -> String {
     }
 }
 
-fn show_enum(en: &EnumDef) -> String {
+pub(crate) fn show_enum(en: &EnumDef) -> String {
     let tps = if en.type_params.is_empty() {
         String::new()
     } else {
@@ -245,56 +245,79 @@ fn show_enum(en: &EnumDef) -> String {
     }
 }
 
-fn kit_sig(callee: &str) -> Option<&'static str> {
-    Some(match callee {
-        "IO.println" => "IO.println(s: String): IO[Unit]",
-        "IO.sleep" => "IO.sleep(ms: Int): IO[Unit]",
-        "IO.fail" => "IO.fail(s: String): IO[Unit]",
-        "IO.pure" => "IO.pure(x: T): IO[T]",
-        "IO.timeout" => "IO.timeout(ms: Int, inner: IO[T]): IO[T]",
-        "IO.forever" => "IO.forever(inner: IO[T]): IO[Unit]",
-        "IO.repeatN" => "IO.repeatN(n: Int, inner: IO[T]): IO[T]",
-        "IO.retryN" => "IO.retryN(n: Int, inner: IO[T]): IO[T]",
-        "IO.race" => "IO.race(a: IO[T], b: IO[T]): IO[T]",
-        "IO.both" => "IO.both(a: IO[T], b: IO[T]): IO[(T, T)]",
-        "IO.ensure" => "IO.ensure(inner: IO[T], finalizer: IO[Unit]): IO[T]",
-        "Fiber.fork" => "Fiber.fork(inner: IO[T]): IO[Fiber]",
-        "Fiber.join" => "Fiber.join(f: Fiber): IO[T]",
-        "Fiber.interrupt" => "Fiber.interrupt(f: Fiber): IO[Unit]",
-        "Str.fromInt" => "Str.fromInt(n: Int): String",
-        "Signal.int" => "Signal.int(n: Int): Signal",
-        "Signal.get" => "Signal.get(s: Signal): Int",
-        "Signal.set" => "Signal.set(s: Signal, n: Int): Unit",
-        "Signal.str" => "Signal.str(s: String): Signal",
-        "Signal.map" => "Signal.map(s: Signal, f: Int => String): Signal",
-        "Signal.list" => "Signal.list(xs: List): Signal",
-        "View.text" => "View.text(s: String): View",
-        "View.bindText" => "View.bindText(s: Signal): View",
-        "View.button" => "View.button(label: String, onTap: _ => Unit): View",
-        "View.column" => "View.column(...): View",
-        "View.row" => "View.row(...): View",
-        "View.stack" => "View.stack(...): View",
-        "View.each" => "View.each(items: Signal): View",
-        "View.expanded" => "View.expanded(child: View): View",
-        "View.center" => "View.center(child: View): View",
-        "Ui.run" => "Ui.run(view: View): IO[Unit]",
-        "Law.check" => "Law.check(name: String, ok: Bool, value: T): T",
-        "Law.sometimes" => "Law.sometimes(name: String): Unit",
-        "Fs.read" => "Fs.read(path: String): IO[String]",
-        "Fs.write" => "Fs.write(path: String, body: String): IO[Unit]",
-        "Sys.args" => "Sys.args(): IO[List]",
-        "Sys.readLine" => "Sys.readLine(): IO[String]",
-        "Clock.nowMillis" => "Clock.nowMillis(): IO[Int]",
-        "Net.httpGet" => "Net.httpGet(url: String): IO[String]",
-        "Net.serve" => "Net.serve(port: Int, handle: String => String): IO[Unit]",
-        "Resource.make" => {
-            "Resource.make(acquire: IO[String], release: String => IO[Unit]): Resource"
-        }
-        "Resource.use" => "Resource.use(r: Resource, f: String => IO[T]): IO[T]",
-        "Stream.emit" => "Stream.emit(s: String): Stream",
-        "Stream.compileToList" => "Stream.compileToList(s: Stream): IO[List]",
-        _ => return None,
-    })
+pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
+    ("IO.println", "IO.println(s: String): IO[Unit]"),
+    ("IO.sleep", "IO.sleep(ms: Int): IO[Unit]"),
+    ("IO.fail", "IO.fail(s: String): IO[Unit]"),
+    ("IO.pure", "IO.pure(x: T): IO[T]"),
+    ("IO.timeout", "IO.timeout(ms: Int, inner: IO[T]): IO[T]"),
+    ("IO.forever", "IO.forever(inner: IO[T]): IO[Unit]"),
+    ("IO.repeatN", "IO.repeatN(n: Int, inner: IO[T]): IO[T]"),
+    ("IO.retryN", "IO.retryN(n: Int, inner: IO[T]): IO[T]"),
+    ("IO.race", "IO.race(a: IO[T], b: IO[T]): IO[T]"),
+    ("IO.both", "IO.both(a: IO[T], b: IO[T]): IO[(T, T)]"),
+    (
+        "IO.ensure",
+        "IO.ensure(inner: IO[T], finalizer: IO[Unit]): IO[T]",
+    ),
+    ("Fiber.fork", "Fiber.fork(inner: IO[T]): IO[Fiber]"),
+    ("Fiber.join", "Fiber.join(f: Fiber): IO[T]"),
+    ("Fiber.interrupt", "Fiber.interrupt(f: Fiber): IO[Unit]"),
+    ("Str.fromInt", "Str.fromInt(n: Int): String"),
+    ("Signal.int", "Signal.int(n: Int): Signal"),
+    ("Signal.get", "Signal.get(s: Signal): Int"),
+    ("Signal.set", "Signal.set(s: Signal, n: Int): Unit"),
+    ("Signal.str", "Signal.str(s: String): Signal"),
+    (
+        "Signal.map",
+        "Signal.map(s: Signal, f: Int => String): Signal",
+    ),
+    ("Signal.list", "Signal.list(xs: List): Signal"),
+    ("View.text", "View.text(s: String): View"),
+    ("View.bindText", "View.bindText(s: Signal): View"),
+    (
+        "View.button",
+        "View.button(label: String, onTap: _ => Unit): View",
+    ),
+    ("View.column", "View.column(...): View"),
+    ("View.row", "View.row(...): View"),
+    ("View.stack", "View.stack(...): View"),
+    ("View.each", "View.each(items: Signal): View"),
+    ("View.expanded", "View.expanded(child: View): View"),
+    ("View.center", "View.center(child: View): View"),
+    ("Ui.run", "Ui.run(view: View): IO[Unit]"),
+    (
+        "Law.check",
+        "Law.check(name: String, ok: Bool, value: T): T",
+    ),
+    ("Law.sometimes", "Law.sometimes(name: String): Unit"),
+    ("Fs.read", "Fs.read(path: String): IO[String]"),
+    ("Fs.write", "Fs.write(path: String, body: String): IO[Unit]"),
+    ("Sys.args", "Sys.args(): IO[List]"),
+    ("Sys.readLine", "Sys.readLine(): IO[String]"),
+    ("Clock.nowMillis", "Clock.nowMillis(): IO[Int]"),
+    ("Net.httpGet", "Net.httpGet(url: String): IO[String]"),
+    (
+        "Net.serve",
+        "Net.serve(port: Int, handle: String => String): IO[Unit]",
+    ),
+    (
+        "Resource.make",
+        "Resource.make(acquire: IO[String], release: String => IO[Unit]): Resource",
+    ),
+    (
+        "Resource.use",
+        "Resource.use(r: Resource, f: String => IO[T]): IO[T]",
+    ),
+    ("Stream.emit", "Stream.emit(s: String): Stream"),
+    (
+        "Stream.compileToList",
+        "Stream.compileToList(s: Stream): IO[List]",
+    ),
+];
+
+pub(crate) fn kit_sig(callee: &str) -> Option<&'static str> {
+    KIT_SIGS.iter().find(|(k, _)| *k == callee).map(|(_, s)| *s)
 }
 
 #[cfg(test)]

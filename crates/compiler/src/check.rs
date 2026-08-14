@@ -342,14 +342,11 @@ pub fn check_project_with(
     }
 }
 
-/// Signature hover at a 0-based LSP position. Same parse as [`check_project_with`].
-pub fn hover_project(
+fn load_overlay_file(
     project_dir: &Path,
     unsaved: &BTreeMap<PathBuf, String>,
     path: &Path,
-    line: u32,
-    character: u32,
-) -> Result<Option<String>> {
+) -> Result<Option<(String, String, Option<crate::ast::Program>)>> {
     let mut resolved = crate::driver::resolve_project(project_dir)
         .with_context(|| format!("resolving {}", project_dir.display()))?;
     apply_unsaved(&mut resolved, unsaved, project_dir);
@@ -369,18 +366,51 @@ pub fn hover_project(
             },
         };
     let named = named_sources(&resolved);
-    let program = match parse_sources(&named) {
-        Ok(p) => p,
-        Err(_) => return Ok(None),
+    let program = parse_sources(&named)
+        .ok()
+        .and_then(|p| apply_overlays(p, &resolved.overlays).ok());
+    Ok(Some((label, text, program)))
+}
+
+/// Signature hover at a 0-based LSP position. Same parse as [`check_project_with`].
+pub fn hover_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    line: u32,
+    character: u32,
+) -> Result<Option<String>> {
+    let Some((label, text, program)) = load_overlay_file(project_dir, unsaved, path)? else {
+        return Ok(None);
     };
-    let program = match apply_overlays(program, &resolved.overlays) {
-        Ok(p) => p,
-        Err(_) => return Ok(None),
+    let Some(program) = program else {
+        return Ok(None);
     };
     let offset =
         crate::span::line_col_to_offset(&text, line.saturating_add(1), character.saturating_add(1));
     Ok(crate::hover::hover_in_source(
         &program, &label, &text, offset,
+    ))
+}
+
+/// Completions at a 0-based LSP position. Same parse as [`check_project_with`].
+pub fn complete_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    line: u32,
+    character: u32,
+) -> Result<Vec<crate::complete::Completion>> {
+    let Some((label, text, program)) = load_overlay_file(project_dir, unsaved, path)? else {
+        return Ok(Vec::new());
+    };
+    let offset =
+        crate::span::line_col_to_offset(&text, line.saturating_add(1), character.saturating_add(1));
+    Ok(crate::complete::complete_in_source(
+        program.as_ref(),
+        &label,
+        &text,
+        offset,
     ))
 }
 
@@ -561,5 +591,24 @@ version = "0.0.0"
             .unwrap()
             .expect("hover");
         assert!(h.contains("IO.println"), "{h}");
+    }
+
+    #[test]
+    fn complete_project_offers_println_after_io_dot() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"complete_ok\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = "@main def main: IO[Unit] =\n  IO.\n";
+        fs::write(root.join("src/Main.scuzz"), src).unwrap();
+        let path = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let off = src.find("IO.").unwrap() + 3;
+        let (line, col) = offset_to_line_col(src, off);
+        let items = complete_project(root, &BTreeMap::new(), &path, line - 1, col - 1).unwrap();
+        assert!(items.iter().any(|c| c.label == "IO.println"), "{items:?}");
     }
 }

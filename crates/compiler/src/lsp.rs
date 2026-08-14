@@ -1,7 +1,9 @@
 //! Small LSP wrapping `check_project`. Same diagnostics as `--message-format=json`.
-//! No second typer. Open buffers overlay disk text. Hover shows signatures.
+//! No second typer. Open buffers overlay disk text. Hover and completion use that parse.
 
-use crate::check::{canonicalize_source_path, check_project_with, hover_project, Diagnostic};
+use crate::check::{
+    canonicalize_source_path, check_project_with, complete_project, hover_project, Diagnostic,
+};
 use crate::overlay::collect_fmt_sources;
 use anyhow::Result;
 use std::collections::BTreeMap;
@@ -29,7 +31,7 @@ pub fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> R
             if let Some(p) = root_from_init(&body) {
                 root = p;
             }
-            let caps = r#"{"capabilities":{"textDocumentSync":{"openClose":true,"change":1},"hoverProvider":true}}"#;
+            let caps = r#"{"capabilities":{"textDocumentSync":{"openClose":true,"change":1},"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]}}}"#;
             write_result(&mut writer, id, caps)?;
         } else if method == "shutdown" {
             write_result(&mut writer, id, "null")?;
@@ -48,6 +50,9 @@ pub fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> R
             publish_check(&root, &open, &mut writer)?;
         } else if method == "textDocument/hover" {
             let result = hover_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "textDocument/completion" {
+            let result = completion_result(&root, &open, &body);
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/didSave" {
             publish_check(&root, &open, &mut writer)?;
@@ -157,6 +162,32 @@ fn hover_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> St
             r#"{{"contents":{{"kind":"plaintext","value":{}}}}}"#,
             json_str(&text)
         ),
+        _ => "null".into(),
+    }
+}
+
+fn completion_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    let Some(path) = doc_path_from_message(body) else {
+        return "null".into();
+    };
+    let line = json_i64_field(body, "line").unwrap_or(0).max(0) as u32;
+    let character = json_i64_field(body, "character").unwrap_or(0).max(0) as u32;
+    match complete_project(root, open, &path, line, character) {
+        Ok(items) if !items.is_empty() => {
+            let parts: Vec<String> = items
+                .iter()
+                .map(|c| {
+                    format!(
+                        r#"{{"label":{},"kind":{},"detail":{},"insertText":{}}}"#,
+                        json_str(&c.label),
+                        c.kind,
+                        json_str(&c.detail),
+                        json_str(&c.insert_text)
+                    )
+                })
+                .collect();
+            format!(r#"{{"isIncomplete":false,"items":[{}]}}"#, parts.join(","))
+        }
         _ => "null".into(),
     }
 }
@@ -432,5 +463,44 @@ mod tests {
         assert!(text.contains("hoverProvider"), "{text}");
         assert!(text.contains("IO.println"), "{text}");
         assert!(text.contains("\"id\":3"), "{text}");
+    }
+
+    #[test]
+    fn lsp_completion_offers_println_after_dot() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"lsp_complete\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = "@main def main: IO[Unit] =\n  IO.\n";
+        fs::write(root.join("src/Main.scuzz"), src).unwrap();
+        let root_uri = format!("file://{}", fs::canonicalize(root).unwrap().display());
+        let main = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let main_uri = format!("file://{}", main.display());
+        let off = src.find("IO.").unwrap() + 3;
+        let (line, col) = crate::span::offset_to_line_col(src, off);
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let comp = format!(
+            r#"{{"jsonrpc":"2.0","id":4,"method":"textDocument/completion","params":{{"textDocument":{{"uri":{}}},"position":{{"line":{},"character":{}}}}}}}"#,
+            json_str(&main_uri),
+            line - 1,
+            col - 1
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&comp));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("completionProvider"), "{text}");
+        assert!(text.contains("IO.println"), "{text}");
+        assert!(text.contains("\"id\":4"), "{text}");
     }
 }
