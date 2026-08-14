@@ -542,16 +542,26 @@ pub struct MatchArm {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Pattern {
-    /// `Color.Red` / `Opt.Some(n)` / `Pair.Pair(x, y)` — `binds` are payload names (empty = nullary)
+    /// `Color.Red` / `Opt.Some(n)` / `Pair.Pair(x, y)` / `Opt.Some(Color.Red)` —
+    /// `binds` are nested payload patterns (empty = nullary).
     Adt {
         enum_name: String,
         case_name: String,
-        binds: Vec<String>,
+        binds: Vec<Pattern>,
         /// Instantiation args for generic enums, filled by elaboration; empty otherwise.
         type_args: Vec<Type>,
     },
     /// `_`
     Wildcard,
+    /// Payload name bind (`n` in `case Opt.Some(n)`).
+    Bind(String),
+}
+
+impl Pattern {
+    /// `_` or a name bind — matches any value at this position.
+    pub fn is_irrefutable(&self) -> bool {
+        matches!(self, Pattern::Wildcard | Pattern::Bind(_))
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

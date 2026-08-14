@@ -1055,6 +1055,10 @@ impl Parser {
     }
 
     fn parse_pattern(&mut self) -> Result<Pattern, ParseError> {
+        self.parse_pattern_at(false)
+    }
+
+    fn parse_pattern_at(&mut self, nested: bool) -> Result<Pattern, ParseError> {
         match self.peek() {
             Token::Underscore => {
                 self.bump();
@@ -1065,7 +1069,7 @@ impl Parser {
                 if matches!(self.peek(), Token::Dot) {
                     self.bump();
                     let (case_name, _) = self.expect_ident()?;
-                    let binds = self.parse_pattern_binds()?;
+                    let binds = self.parse_pattern_payloads()?;
                     Ok(Pattern::Adt {
                         enum_name: name,
                         case_name,
@@ -1074,13 +1078,15 @@ impl Parser {
                     })
                 } else if matches!(self.peek(), Token::LParen) {
                     // Record / single-case sugar: `case Point(x, y)`.
-                    let binds = self.parse_pattern_binds()?;
+                    let binds = self.parse_pattern_payloads()?;
                     Ok(Pattern::Adt {
                         enum_name: name.clone(),
                         case_name: name,
                         binds,
                         type_args: Vec::new(),
                     })
+                } else if nested {
+                    Ok(Pattern::Bind(name))
                 } else {
                     Err(self.err(format!(
                         "expected `.Case` or `(binds)` after pattern {name}"
@@ -1091,15 +1097,14 @@ impl Parser {
         }
     }
 
-    fn parse_pattern_binds(&mut self) -> Result<Vec<String>, ParseError> {
+    fn parse_pattern_payloads(&mut self) -> Result<Vec<Pattern>, ParseError> {
         if !matches!(self.peek(), Token::LParen) {
             return Ok(Vec::new());
         }
         self.bump();
         let mut binds = Vec::new();
         loop {
-            let (b, _) = self.expect_ident()?;
-            binds.push(b);
+            binds.push(self.parse_pattern_at(true)?);
             if matches!(self.peek(), Token::Comma) {
                 self.bump();
                 continue;
@@ -1835,7 +1840,10 @@ enum Opt:
                     } => {
                         assert_eq!(enum_name, "Opt");
                         assert_eq!(case_name, "Some");
-                        assert_eq!(binds, &["n".to_string()]);
+                        assert!(
+                            matches!(&binds[..], [Pattern::Bind(n)] if n == "n"),
+                            "{binds:?}"
+                        );
                     }
                     other => panic!("expected payload pattern, got {other:?}"),
                 }
@@ -1871,9 +1879,71 @@ enum Pair:
         match &p.main.body.kind {
             ExprKind::Match { arms, .. } => match &arms[0].pattern {
                 Pattern::Adt { binds, .. } => {
-                    assert_eq!(binds, &["x".to_string(), "y".to_string()]);
+                    assert!(
+                        matches!(
+                            &binds[..],
+                            [Pattern::Bind(x), Pattern::Bind(y)] if x == "x" && y == "y"
+                        ),
+                        "{binds:?}"
+                    );
                 }
                 other => panic!("expected multi-bind pattern, got {other:?}"),
+            },
+            other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_nested_adt_pattern() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+enum Wrap:
+  case Box(c: Color)
+  case Empty
+@main def main: IO[Unit] =
+  Wrap.Box(Color.Red) match {
+    case Wrap.Box(Color.Red) => IO.println("red")
+    case Wrap.Box(_) => IO.println("other")
+    case Wrap.Empty => IO.println("empty")
+  }
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => match &arms[0].pattern {
+                Pattern::Adt {
+                    enum_name,
+                    case_name,
+                    binds,
+                    ..
+                } => {
+                    assert_eq!(enum_name, "Wrap");
+                    assert_eq!(case_name, "Box");
+                    match &binds[..] {
+                        [Pattern::Adt {
+                            enum_name: inner_en,
+                            case_name: inner_cn,
+                            binds: inner_binds,
+                            ..
+                        }] => {
+                            assert_eq!(inner_en, "Color");
+                            assert_eq!(inner_cn, "Red");
+                            assert!(inner_binds.is_empty());
+                        }
+                        other => panic!("expected nested Color.Red, got {other:?}"),
+                    }
+                }
+                other => panic!("expected Wrap.Box pattern, got {other:?}"),
+            },
+            other => panic!("expected match, got {other:?}"),
+        }
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => match &arms[1].pattern {
+                Pattern::Adt { binds, .. } => {
+                    assert!(matches!(&binds[..], [Pattern::Wildcard]), "{binds:?}");
+                }
+                other => panic!("expected wildcard payload, got {other:?}"),
             },
             other => panic!("expected match, got {other:?}"),
         }

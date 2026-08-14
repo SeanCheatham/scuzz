@@ -496,8 +496,14 @@ fn binop_str(op: BinOp) -> &'static str {
 
 fn pretty_arm(arm: &MatchArm, indent: usize) -> String {
     let pad = "  ".repeat(indent);
-    let pat = match &arm.pattern {
+    let body = pretty_expr(&arm.body, 0).trim().to_string();
+    format!("{pad}case {} => {body}", pretty_pattern(&arm.pattern))
+}
+
+fn pretty_pattern(pat: &Pattern) -> String {
+    match pat {
         Pattern::Wildcard => "_".into(),
+        Pattern::Bind(name) => name.clone(),
         Pattern::Adt {
             enum_name,
             case_name,
@@ -505,21 +511,20 @@ fn pretty_arm(arm: &MatchArm, indent: usize) -> String {
             ..
         } => {
             let bare = crate::resolve::enum_bare_name(enum_name);
+            let inner: Vec<String> = binds.iter().map(pretty_pattern).collect();
             if bare == case_name.as_str() {
                 if binds.is_empty() {
                     bare.to_string()
                 } else {
-                    format!("{bare}({})", binds.join(", "))
+                    format!("{bare}({})", inner.join(", "))
                 }
             } else if binds.is_empty() {
                 format!("{bare}.{case_name}")
             } else {
-                format!("{bare}.{case_name}({})", binds.join(", "))
+                format!("{bare}.{case_name}({})", inner.join(", "))
             }
         }
-    };
-    let body = pretty_expr(&arm.body, 0).trim().to_string();
-    format!("{pad}case {pat} => {body}")
+    }
 }
 
 fn escape(s: &str) -> String {
@@ -799,6 +804,29 @@ record Box[T](x: T):
 "#;
         let out = format_source(src).unwrap();
         assert!(out.contains("Net.serveOnce("));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_nested_adt_pattern() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+enum Wrap:
+  case Box(c: Color)
+  case Empty
+@main def main: IO[Unit] =
+  Wrap.Box(Color.Red) match {
+    case Wrap.Box(Color.Red) => IO.println("red")
+    case Wrap.Box(_) => IO.println("other")
+    case Wrap.Empty => IO.println("empty")
+  }
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("case Wrap.Box(Color.Red) =>"));
+        assert!(out.contains("case Wrap.Box(_) =>"));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

@@ -2,4 +2,4 @@
 
 ## Next
 
-**Nested ADT patterns** — `case Opt.Some(Color.Red)` still binds names only; nested payload structure is not checked.
+**compiler-scuzz nested ADT patterns** — Stage 0 parses, typechecks, and emits `case Wrap.Box(Color.Red)`; Stage 1 still treats payload slots as names only.

@@ -1,7 +1,7 @@
 use crate::ast::{BinOp, EnumDef, Expr, ExprKind, FunDef, ImplDef, Param, Program, TraitDef, Type};
 use crate::resolve::{enum_bare_name, enum_id, EnumIndex, FunIndex, ResolveError};
 use crate::span::Span;
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -1016,8 +1016,8 @@ fn rewrite_fields(
                     TypeError::Msg(format!("record {} has no field {field}", en.name))
                         .with_span_if_bare(&span)
                 })?;
-            let binds: Vec<String> = (0..case.fields.len()).map(|i| format!("__f{i}")).collect();
-            let body = Expr::new(ExprKind::Var(binds[idx].clone()), span.clone());
+            let names: Vec<String> = (0..case.fields.len()).map(|i| format!("__f{i}")).collect();
+            let body = Expr::new(ExprKind::Var(names[idx].clone()), span.clone());
             Ok(Expr::new(
                 ExprKind::Match {
                     scrutinee: Box::new(base),
@@ -1025,7 +1025,7 @@ fn rewrite_fields(
                         pattern: crate::ast::Pattern::Adt {
                             enum_name: eid,
                             case_name: case.name.clone(),
-                            binds,
+                            binds: names.into_iter().map(crate::ast::Pattern::Bind).collect(),
                             type_args: Vec::new(),
                         },
                         body,
@@ -2140,6 +2140,10 @@ fn bind_pattern(
 ) -> Result<Vec<(String, Option<Type>)>, TypeError> {
     match pat {
         crate::ast::Pattern::Wildcard => Ok(Vec::new()),
+        crate::ast::Pattern::Bind(name) => {
+            let old = env.insert(name.clone(), scrut.clone());
+            Ok(vec![(name.clone(), old)])
+        }
         crate::ast::Pattern::Adt {
             enum_name,
             case_name,
@@ -2155,19 +2159,9 @@ fn bind_pattern(
                     TypeError::Msg(format!("unknown case {enum_name}.{case_name} in pattern"))
                 })?;
             check_payload_fields(&id, en, case)?;
-            let mut subst: HashMap<String, Type> = HashMap::new();
-            let mut skipped: Vec<String> = Vec::new();
             match scrut {
                 Type::Adt(n) if n == &id && en.type_params.is_empty() => {}
-                Type::App(n, targs) if n == &id => {
-                    for (p, t) in en.type_params.iter().zip(targs.iter()) {
-                        if matches!(t, Type::Opaque(_)) {
-                            skipped.push(p.clone());
-                        } else {
-                            subst.insert(p.clone(), t.clone());
-                        }
-                    }
-                }
+                Type::App(n, _) if n == &id => {}
                 Type::Opaque(_) if en.type_params.is_empty() => {}
                 Type::Opaque(_) => {
                     return Err(TypeError::Msg(format!(
@@ -2204,16 +2198,39 @@ fn bind_pattern(
                     binds.len()
                 )));
             }
+            let field_tys = payload_field_types(en, case, scrut, enums)?;
             let mut restored = Vec::new();
-            for (name, (_, fty)) in binds.iter().zip(case.fields.iter()) {
-                let resolved = resolve_type_in(fty, enums, &en.module, &en.type_params)?;
-                let fty = erase_vars(&apply_subst(&resolved, &subst), &skipped);
-                let old = env.insert(name.clone(), fty);
-                restored.push((name.clone(), old));
+            for (nested, fty) in binds.iter().zip(field_tys.iter()) {
+                restored.extend(bind_pattern(nested, fty, enums, current_module, env)?);
             }
             Ok(restored)
         }
     }
+}
+
+fn payload_field_types(
+    en: &crate::ast::EnumDef,
+    case: &crate::ast::EnumCase,
+    scrut: &Type,
+    enums: &EnumIndex<'_>,
+) -> Result<Vec<Type>, TypeError> {
+    let mut subst: HashMap<String, Type> = HashMap::new();
+    let mut skipped: Vec<String> = Vec::new();
+    if let Type::App(_, targs) = scrut {
+        for (p, t) in en.type_params.iter().zip(targs.iter()) {
+            if matches!(t, Type::Opaque(_)) {
+                skipped.push(p.clone());
+            } else {
+                subst.insert(p.clone(), t.clone());
+            }
+        }
+    }
+    let mut out = Vec::with_capacity(case.fields.len());
+    for (_, fty) in &case.fields {
+        let resolved = resolve_type_in(fty, enums, &en.module, &en.type_params)?;
+        out.push(erase_vars(&apply_subst(&resolved, &subst), &skipped));
+    }
+    Ok(out)
 }
 
 fn unbind_pattern(bound: Vec<(String, Option<Type>)>, env: &mut HashMap<String, Type>) {
@@ -2232,32 +2249,8 @@ fn check_match_exhaustive(
     enums: &EnumIndex<'_>,
     current_module: &str,
 ) -> Result<(), TypeError> {
-    if arms
-        .iter()
-        .any(|a| matches!(a.pattern, crate::ast::Pattern::Wildcard))
-    {
-        return Ok(());
-    }
-    let enum_name = match scrut {
-        Type::Adt(n) | Type::App(n, _) => n.as_str(),
-        _ => return Ok(()),
-    };
-    let Ok((en, _)) = lookup_enum(enums, enum_name, current_module) else {
-        return Ok(());
-    };
-    let covered: HashSet<&str> = arms
-        .iter()
-        .filter_map(|a| match &a.pattern {
-            crate::ast::Pattern::Adt { case_name, .. } => Some(case_name.as_str()),
-            _ => None,
-        })
-        .collect();
-    let missing: Vec<String> = en
-        .cases
-        .iter()
-        .filter(|c| !covered.contains(c.name.as_str()))
-        .map(|c| format!("{}.{}", en.name, c.name))
-        .collect();
+    let pats: Vec<&crate::ast::Pattern> = arms.iter().map(|a| &a.pattern).collect();
+    let missing = uncovered_pats(scrut, &pats, enums, current_module)?;
     if missing.is_empty() {
         Ok(())
     } else {
@@ -2265,6 +2258,120 @@ fn check_match_exhaustive(
             "non-exhaustive match: missing {}",
             missing.join(", ")
         )))
+    }
+}
+
+fn uncovered_pats(
+    scrut: &Type,
+    pats: &[&crate::ast::Pattern],
+    enums: &EnumIndex<'_>,
+    current_module: &str,
+) -> Result<Vec<String>, TypeError> {
+    if pats.iter().any(|p| p.is_irrefutable()) {
+        return Ok(Vec::new());
+    }
+    let type_name = match scrut {
+        Type::Adt(n) | Type::App(n, _) => n.as_str(),
+        _ => return Ok(Vec::new()),
+    };
+    let Ok((en, _)) = lookup_enum(enums, type_name, current_module) else {
+        return Ok(Vec::new());
+    };
+    let mut by_case: HashMap<&str, Vec<&[crate::ast::Pattern]>> = HashMap::new();
+    for p in pats {
+        if let crate::ast::Pattern::Adt {
+            case_name, binds, ..
+        } = p
+        {
+            by_case
+                .entry(case_name.as_str())
+                .or_default()
+                .push(binds.as_slice());
+        }
+    }
+    let mut missing = Vec::new();
+    for case in &en.cases {
+        match by_case.get(case.name.as_str()) {
+            None => missing.push(format!("{}.{}", en.name, case.name)),
+            Some(rows) => {
+                if rows.iter().any(|r| r.iter().all(|p| p.is_irrefutable())) {
+                    continue;
+                }
+                if case.fields.is_empty() {
+                    continue;
+                }
+                if case.fields.len() == 1 {
+                    let ftys = payload_field_types(en, case, scrut, enums)?;
+                    let col: Vec<&crate::ast::Pattern> =
+                        rows.iter().filter_map(|r| r.first()).collect();
+                    for m in uncovered_pats(&ftys[0], &col, enums, current_module)? {
+                        missing.push(format!("{}.{}({})", en.name, case.name, m));
+                    }
+                } else {
+                    missing.push(format!("{}.{}(...)", en.name, case.name));
+                }
+            }
+        }
+    }
+    Ok(missing)
+}
+
+fn elaborate_pattern(
+    pat: &crate::ast::Pattern,
+    scrut: &Type,
+    enums: &EnumIndex<'_>,
+    current_module: &str,
+    tparams: &[String],
+    span: &Span,
+) -> Result<crate::ast::Pattern, TypeError> {
+    match pat {
+        crate::ast::Pattern::Wildcard | crate::ast::Pattern::Bind(_) => Ok(pat.clone()),
+        crate::ast::Pattern::Adt {
+            enum_name,
+            case_name,
+            binds,
+            ..
+        } => {
+            let (en, id) = lookup_enum(enums, enum_name, current_module)?;
+            let targs: Vec<Type> = if en.type_params.is_empty() {
+                Vec::new()
+            } else {
+                match scrut {
+                    Type::App(eid, eargs) if eid == &id => eargs.clone(),
+                    other => {
+                        return Err(TypeError::Msg(format!(
+                            "pattern {enum_name}.{case_name} does not match scrutinee {other:?}"
+                        )))
+                    }
+                }
+            };
+            check_targs(enum_name, case_name, &targs, tparams, span)?;
+            let case = en
+                .cases
+                .iter()
+                .find(|c| c.name == *case_name)
+                .ok_or_else(|| {
+                    TypeError::Msg(format!("unknown case {enum_name}.{case_name} in pattern"))
+                })?;
+            let field_tys = payload_field_types(en, case, scrut, enums)?;
+            let mut out_binds = Vec::with_capacity(binds.len());
+            for (nested, fty) in binds.iter().zip(field_tys.iter()) {
+                out_binds.push(elaborate_pattern(
+                    nested,
+                    fty,
+                    enums,
+                    current_module,
+                    tparams,
+                    span,
+                )?);
+            }
+            Ok(crate::ast::Pattern::Adt {
+                enum_name: enum_name.clone(),
+                case_name: case_name.clone(),
+                binds: out_binds,
+                type_args: targs,
+            })
+        }
     }
 }
 
@@ -3251,36 +3358,8 @@ fn elaborate_expr(
             let mut out_arms = Vec::new();
             for arm in arms {
                 let bound = bind_pattern(&arm.pattern, &st, enums, current_module, env)?;
-                let pattern = match &arm.pattern {
-                    crate::ast::Pattern::Wildcard => arm.pattern.clone(),
-                    crate::ast::Pattern::Adt {
-                        enum_name,
-                        case_name,
-                        binds,
-                        ..
-                    } => {
-                        let (en, id) = lookup_enum(enums, enum_name, current_module)?;
-                        let targs: Vec<Type> = if en.type_params.is_empty() {
-                            Vec::new()
-                        } else {
-                            match &st {
-                                Type::App(eid, eargs) if eid == &id => eargs.clone(),
-                                other => {
-                                    return Err(TypeError::Msg(format!(
-                                        "pattern {enum_name}.{case_name} does not match scrutinee {other:?}"
-                                    )))
-                                }
-                            }
-                        };
-                        check_targs(enum_name, case_name, &targs, tparams, &span)?;
-                        crate::ast::Pattern::Adt {
-                            enum_name: enum_name.clone(),
-                            case_name: case_name.clone(),
-                            binds: binds.clone(),
-                            type_args: targs,
-                        }
-                    }
-                };
+                let pattern =
+                    elaborate_pattern(&arm.pattern, &st, enums, current_module, tparams, &span)?;
                 let body = elaborate_expr(
                     arm.body,
                     enums,
@@ -3819,17 +3898,7 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
                 .into_iter()
                 .map(|a| crate::ast::MatchArm {
                     pattern: match a.pattern {
-                        crate::ast::Pattern::Adt {
-                            enum_name,
-                            case_name,
-                            binds,
-                            type_args,
-                        } => crate::ast::Pattern::Adt {
-                            enum_name,
-                            case_name,
-                            binds,
-                            type_args: type_args.iter().map(|t| apply_subst(t, subst)).collect(),
-                        },
+                        crate::ast::Pattern::Adt { .. } => subst_pattern(a.pattern, subst),
                         p => p,
                     },
                     body: subst_node_targs(a.body, subst),
@@ -3936,6 +4005,23 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
     Expr::new(kind, span)
 }
 
+fn subst_pattern(pat: crate::ast::Pattern, subst: &HashMap<String, Type>) -> crate::ast::Pattern {
+    match pat {
+        crate::ast::Pattern::Adt {
+            enum_name,
+            case_name,
+            binds,
+            type_args,
+        } => crate::ast::Pattern::Adt {
+            enum_name,
+            case_name,
+            binds: binds.into_iter().map(|b| subst_pattern(b, subst)).collect(),
+            type_args: type_args.iter().map(|t| apply_subst(t, subst)).collect(),
+        },
+        p => p,
+    }
+}
+
 fn mono_enum_name(en: &EnumDef, args: &[Type]) -> String {
     let mut parts = vec![format!("__gen_{}", en.name)];
     for a in args {
@@ -3980,19 +4066,7 @@ fn collect_node_targs(expr: &Expr, out: &mut Vec<(String, Vec<Type>)>) {
         ExprKind::Match { scrutinee, arms } => {
             collect_node_targs(scrutinee, out);
             for a in arms {
-                if let crate::ast::Pattern::Adt {
-                    enum_name,
-                    type_args,
-                    ..
-                } = &a.pattern
-                {
-                    if !type_args.is_empty() {
-                        out.push((enum_name.clone(), type_args.clone()));
-                        for t in type_args {
-                            collect_apps_in_type(t, out);
-                        }
-                    }
-                }
+                collect_pattern_targs(&a.pattern, out);
                 collect_node_targs(&a.body, out);
             }
         }
@@ -4068,6 +4142,26 @@ fn collect_node_targs(expr: &Expr, out: &mut Vec<(String, Vec<Type>)>) {
     }
 }
 
+fn collect_pattern_targs(pat: &crate::ast::Pattern, out: &mut Vec<(String, Vec<Type>)>) {
+    if let crate::ast::Pattern::Adt {
+        enum_name,
+        binds,
+        type_args,
+        ..
+    } = pat
+    {
+        if !type_args.is_empty() {
+            out.push((enum_name.clone(), type_args.clone()));
+            for t in type_args {
+                collect_apps_in_type(t, out);
+            }
+        }
+        for b in binds {
+            collect_pattern_targs(b, out);
+        }
+    }
+}
+
 /// Rewrite elaborated construct/pattern nodes to their cloned enum ids.
 fn rewrite_enum_refs(
     expr: Expr,
@@ -4116,22 +4210,8 @@ fn rewrite_enum_refs(
             arms: arms
                 .into_iter()
                 .map(|a| {
-                    let pattern = match a.pattern {
-                        crate::ast::Pattern::Adt {
-                            enum_name,
-                            case_name,
-                            binds,
-                            type_args,
-                        } if !type_args.is_empty() => crate::ast::Pattern::Adt {
-                            enum_name: lookup(&enum_name, &type_args)?,
-                            case_name,
-                            binds,
-                            type_args: Vec::new(),
-                        },
-                        p => p,
-                    };
                     Ok(crate::ast::MatchArm {
-                        pattern,
+                        pattern: rewrite_pattern(a.pattern, clones)?,
                         body: rewrite_enum_refs(a.body, clones)?,
                     })
                 })
@@ -4235,6 +4315,49 @@ fn rewrite_enum_refs(
         other => other,
     };
     Ok(Expr::new(kind, span))
+}
+
+fn rewrite_pattern(
+    pat: crate::ast::Pattern,
+    clones: &HashMap<(String, Vec<Type>), String>,
+) -> Result<crate::ast::Pattern, TypeError> {
+    match pat {
+        crate::ast::Pattern::Adt {
+            enum_name,
+            case_name,
+            binds,
+            type_args,
+        } => {
+            let binds = binds
+                .into_iter()
+                .map(|b| rewrite_pattern(b, clones))
+                .collect::<Result<Vec<_>, _>>()?;
+            if type_args.is_empty() {
+                Ok(crate::ast::Pattern::Adt {
+                    enum_name,
+                    case_name,
+                    binds,
+                    type_args,
+                })
+            } else {
+                let id = clones
+                    .get(&(enum_name.clone(), type_args.clone()))
+                    .cloned()
+                    .ok_or_else(|| {
+                        TypeError::Msg(format!(
+                            "internal: missing enum clone for {enum_name}{type_args:?}"
+                        ))
+                    })?;
+                Ok(crate::ast::Pattern::Adt {
+                    enum_name: id,
+                    case_name,
+                    binds,
+                    type_args: Vec::new(),
+                })
+            }
+        }
+        p => Ok(p),
+    }
 }
 
 /// Replace applied types with their cloned enum ids (post-specialization).
@@ -4771,6 +4894,99 @@ enum Outer:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("nested ADT payload should typecheck");
+    }
+
+    #[test]
+    fn typechecks_nested_adt_pattern() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+enum Wrap:
+  case Box(c: Color)
+  case Empty
+@main def main: IO[Unit] =
+  Wrap.Box(Color.Red) match {
+    case Wrap.Box(Color.Red) => IO.println("red")
+    case Wrap.Box(Color.Blue) => IO.println("blue")
+    case Wrap.Empty => IO.println("empty")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("nested ADT pattern should typecheck");
+    }
+
+    #[test]
+    fn typechecks_nested_adt_pattern_wildcard_payload() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+enum Wrap:
+  case Box(c: Color)
+  case Empty
+@main def main: IO[Unit] =
+  Wrap.Box(Color.Red) match {
+    case Wrap.Box(Color.Red) => IO.println("red")
+    case Wrap.Box(_) => IO.println("other")
+    case Wrap.Empty => IO.println("empty")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("nested wildcard payload should be exhaustive");
+    }
+
+    #[test]
+    fn rejects_nonexhaustive_nested_adt_pattern() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+enum Wrap:
+  case Box(c: Color)
+  case Empty
+@main def main: IO[Unit] =
+  Wrap.Box(Color.Red) match {
+    case Wrap.Box(Color.Red) => IO.println("red")
+    case Wrap.Empty => IO.println("empty")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("non-exhaustive match: missing Wrap.Box(Color.Blue)"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_nested_pattern_type_mismatch() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+enum Opt:
+  case Some(x: Int)
+  case None
+enum Wrap:
+  case Box(c: Color)
+  case Empty
+@main def main: IO[Unit] =
+  Wrap.Box(Color.Red) match {
+    case Wrap.Box(Opt.None) => IO.println("x")
+    case Wrap.Box(_) => IO.println("other")
+    case Wrap.Empty => IO.println("empty")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("does not match scrutinee"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]

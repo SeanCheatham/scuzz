@@ -1,4 +1,4 @@
-use crate::ast::{BinOp, EnumDef, Expr, ExprKind, FunDef, Pattern, Program, Type};
+use crate::ast::{BinOp, EnumDef, Expr, ExprKind, FunDef, MatchArm, Pattern, Program, Type};
 use crate::resolve::{user_symbol, FunIndex};
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -718,6 +718,242 @@ fn emit_sz_string(
     se.value
 }
 
+fn emit_match(
+    scrutinee: &Expr,
+    arms: &[MatchArm],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    let se = emit_expr(scrutinee, ctx, locals, &format!("{prefix}_sc"));
+    let id = *ctx.cont_id;
+    *ctx.cont_id += 1;
+    let mut code = se.code;
+    let merge = format!("{prefix}_merge_{id}");
+    let default_label = format!("{prefix}_default_{id}");
+    let first = if arms.is_empty() {
+        default_label.clone()
+    } else {
+        format!("{prefix}_try_{id}_0")
+    };
+    writeln!(code, "  br label %{first}").unwrap();
+
+    let mut phi_parts: Vec<(String, String)> = Vec::new();
+    let mut result_kind = Kind::Io;
+    let mut result_payload = Kind::Ptr;
+
+    for (i, arm) in arms.iter().enumerate() {
+        let try_l = format!("{prefix}_try_{id}_{i}");
+        let next_l = if i + 1 < arms.len() {
+            format!("{prefix}_try_{id}_{}", i + 1)
+        } else {
+            default_label.clone()
+        };
+        let ok_l = format!("{prefix}_ok_{id}_{i}");
+        let join_l = format!("{prefix}_aj_{id}_{i}");
+        writeln!(code, "{try_l}:").unwrap();
+        let mut bound_names: Vec<String> = Vec::new();
+        emit_pat(
+            &arm.pattern,
+            &se.value,
+            Kind::Ptr,
+            ctx,
+            locals,
+            &format!("{prefix}_p{id}_{i}"),
+            &ok_l,
+            &next_l,
+            &mut code,
+            &mut bound_names,
+        );
+        writeln!(code, "{ok_l}:").unwrap();
+        let ae = emit_expr(&arm.body, ctx, locals, &format!("{prefix}_a{id}_{i}"));
+        for b in &bound_names {
+            locals.remove(b);
+        }
+        code.push_str(&ae.code);
+        if phi_parts.is_empty() {
+            result_kind = ae.kind;
+            result_payload = ae.payload;
+        }
+        writeln!(code, "  br label %{join_l}").unwrap();
+        writeln!(code, "{join_l}:").unwrap();
+        writeln!(code, "  br label %{merge}").unwrap();
+        phi_parts.push((ae.value, join_l));
+    }
+
+    writeln!(code, "{default_label}:").unwrap();
+    let dflt = match result_kind {
+        Kind::Int => {
+            writeln!(code, "  %{prefix}_dflt = add i64 0, 0").unwrap();
+            format!("%{prefix}_dflt")
+        }
+        Kind::Ptr => "null".into(),
+        Kind::Io => {
+            writeln!(code, "  %{prefix}_dflt = call ptr @sz_io_pure(ptr null)").unwrap();
+            format!("%{prefix}_dflt")
+        }
+    };
+    writeln!(code, "  br label %{merge}").unwrap();
+    phi_parts.push((dflt, default_label));
+
+    let ty = match result_kind {
+        Kind::Int => "i64",
+        Kind::Ptr | Kind::Io => "ptr",
+    };
+    writeln!(code, "{merge}:").unwrap();
+    write!(code, "  %{prefix}_phi = phi {ty}").unwrap();
+    for (i, (val, lab)) in phi_parts.iter().enumerate() {
+        if i > 0 {
+            write!(code, ",").unwrap();
+        }
+        write!(code, " [ {val}, %{lab} ]").unwrap();
+    }
+    writeln!(code).unwrap();
+    Emitted {
+        code,
+        value: format!("%{prefix}_phi"),
+        kind: result_kind,
+        payload: result_payload,
+    }
+}
+
+fn emit_pat(
+    pat: &Pattern,
+    value: &str,
+    kind: Kind,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+    ok_label: &str,
+    fail_label: &str,
+    code: &mut String,
+    bound_names: &mut Vec<String>,
+) {
+    match pat {
+        Pattern::Wildcard => {
+            writeln!(code, "  br label %{ok_label}").unwrap();
+        }
+        Pattern::Bind(name) => {
+            locals.insert(name.clone(), (value.to_string(), kind));
+            bound_names.push(name.clone());
+            writeln!(code, "  br label %{ok_label}").unwrap();
+        }
+        Pattern::Adt {
+            enum_name,
+            case_name,
+            binds,
+            ..
+        } => {
+            let sid = *ctx.cont_id;
+            *ctx.cont_id += 1;
+            let Some(&expected) = ctx.enum_tags.get(&(enum_name.clone(), case_name.clone())) else {
+                writeln!(code, "  br label %{fail_label}").unwrap();
+                return;
+            };
+            let tag = format!("{prefix}_tg{sid}");
+            let cmp = format!("{prefix}_eq{sid}");
+            let matched = format!("{prefix}_m{sid}");
+            writeln!(code, "  %{tag} = call i32 @sz_adt_tag(ptr {value})").unwrap();
+            writeln!(code, "  %{cmp} = icmp eq i32 %{tag}, {expected}").unwrap();
+            writeln!(
+                code,
+                "  br i1 %{cmp}, label %{matched}, label %{fail_label}"
+            )
+            .unwrap();
+            writeln!(code, "{matched}:").unwrap();
+            if binds.is_empty() {
+                writeln!(code, "  br label %{ok_label}").unwrap();
+                return;
+            }
+            let fields = emit_payload_fields(
+                enum_name,
+                case_name,
+                binds.len(),
+                value,
+                ctx,
+                &format!("{prefix}_f{sid}"),
+                code,
+            );
+            for (fi, nested) in binds.iter().enumerate() {
+                let (fval, fkind) = fields.get(fi).cloned().unwrap_or((value.to_string(), kind));
+                let next_ok = if fi + 1 == binds.len() {
+                    ok_label.to_string()
+                } else {
+                    format!("{prefix}_n{sid}_{fi}")
+                };
+                emit_pat(
+                    nested,
+                    &fval,
+                    fkind,
+                    ctx,
+                    locals,
+                    &format!("{prefix}_n{sid}_{fi}"),
+                    &next_ok,
+                    fail_label,
+                    code,
+                    bound_names,
+                );
+                if fi + 1 != binds.len() {
+                    writeln!(code, "{next_ok}:").unwrap();
+                }
+            }
+        }
+    }
+}
+
+fn emit_payload_fields(
+    enum_name: &str,
+    case_name: &str,
+    nbinds: usize,
+    adt_value: &str,
+    ctx: &EmitCtx<'_>,
+    prefix: &str,
+    code: &mut String,
+) -> Vec<(String, Kind)> {
+    let field_tys = ctx
+        .enum_payloads
+        .get(&(enum_name.to_string(), case_name.to_string()))
+        .cloned()
+        .unwrap_or_default();
+    writeln!(
+        code,
+        "  %{prefix}_pl = call ptr @sz_adt_payload(ptr {adt_value})"
+    )
+    .unwrap();
+    let mut out = Vec::with_capacity(nbinds);
+    if nbinds == 1 {
+        match field_tys.first() {
+            Some(Type::Int) | Some(Type::Bool) => {
+                writeln!(
+                    code,
+                    "  %{prefix}_b0 = call i64 @sz_unbox_i64(ptr %{prefix}_pl)"
+                )
+                .unwrap();
+                out.push((format!("%{prefix}_b0"), Kind::Int));
+            }
+            _ => out.push((format!("%{prefix}_pl"), Kind::Ptr)),
+        }
+    } else {
+        for fi in 0..nbinds {
+            let cell = format!("{prefix}_c{fi}");
+            writeln!(
+                code,
+                "  %{cell} = call ptr @sz_list_at(ptr %{prefix}_pl, i64 {fi})"
+            )
+            .unwrap();
+            match field_tys.get(fi) {
+                Some(Type::Int) | Some(Type::Bool) => {
+                    let bn = format!("{prefix}_b{fi}");
+                    writeln!(code, "  %{bn} = call i64 @sz_unbox_i64(ptr %{cell})").unwrap();
+                    out.push((format!("%{bn}"), Kind::Int));
+                }
+                _ => out.push((format!("%{cell}"), Kind::Ptr)),
+            }
+        }
+    }
+    out
+}
+
 fn emit_expr(
     expr: &Expr,
     ctx: &mut EmitCtx<'_>,
@@ -967,184 +1203,7 @@ fn emit_expr(
         ExprKind::Binary { op, left, right } => emit_binary(op, left, right, ctx, locals, prefix),
         ExprKind::Call { callee, args } => emit_call(callee, args, ctx, locals, prefix),
         ExprKind::For { .. } => panic!("internal: unlowered `for` in codegen"),
-        ExprKind::Match { scrutinee, arms } => {
-            let se = emit_expr(scrutinee, ctx, locals, &format!("{prefix}_sc"));
-            let id = *ctx.cont_id;
-            *ctx.cont_id += 1;
-            let mut code = se.code;
-            writeln!(
-                code,
-                "  %{prefix}_tag = call i32 @sz_adt_tag(ptr {})",
-                se.value
-            )
-            .unwrap();
-
-            let merge = format!("{prefix}_merge_{id}");
-            let default_label = format!("{prefix}_default_{id}");
-
-            write!(code, "  switch i32 %{prefix}_tag, label %{default_label} [").unwrap();
-            for (i, arm) in arms.iter().enumerate() {
-                if let Pattern::Adt {
-                    enum_name,
-                    case_name,
-                    ..
-                } = &arm.pattern
-                {
-                    if let Some(tag) = ctx.enum_tags.get(&(enum_name.clone(), case_name.clone())) {
-                        write!(code, " i32 {tag}, label %{prefix}_arm_{id}_{i}").unwrap();
-                    }
-                }
-            }
-            writeln!(code, " ]").unwrap();
-
-            let mut phi_parts: Vec<(String, String)> = Vec::new();
-            let mut result_kind = Kind::Io;
-            let mut result_payload = Kind::Ptr;
-
-            for (i, arm) in arms.iter().enumerate() {
-                if matches!(arm.pattern, Pattern::Wildcard) {
-                    continue;
-                }
-                let label = format!("{prefix}_arm_{id}_{i}");
-                // Join block so nested if/match inside the arm is a valid PHI pred.
-                let arm_join = format!("{prefix}_aj_{id}_{i}");
-                writeln!(code, "{label}:").unwrap();
-                let mut bound_names: Vec<String> = Vec::new();
-                if let Pattern::Adt {
-                    enum_name,
-                    case_name,
-                    binds,
-                    ..
-                } = &arm.pattern
-                {
-                    if !binds.is_empty() {
-                        writeln!(
-                            code,
-                            "  %{prefix}_pl{id}_{i} = call ptr @sz_adt_payload(ptr {})",
-                            se.value
-                        )
-                        .unwrap();
-                        let field_tys = ctx
-                            .enum_payloads
-                            .get(&(enum_name.clone(), case_name.clone()))
-                            .cloned()
-                            .unwrap_or_default();
-                        if binds.len() == 1 {
-                            let b = &binds[0];
-                            let llvm_name = format!("{prefix}_b{id}_{i}");
-                            match field_tys.first() {
-                                Some(Type::Int) => {
-                                    writeln!(
-                                        code,
-                                        "  %{llvm_name} = call i64 @sz_unbox_i64(ptr %{prefix}_pl{id}_{i})"
-                                    )
-                                    .unwrap();
-                                    locals.insert(b.clone(), (format!("%{llvm_name}"), Kind::Int));
-                                }
-                                _ => {
-                                    locals.insert(
-                                        b.clone(),
-                                        (format!("%{prefix}_pl{id}_{i}"), Kind::Ptr),
-                                    );
-                                }
-                            }
-                            bound_names.push(b.clone());
-                        } else {
-                            for (fi, b) in binds.iter().enumerate() {
-                                let cell = format!("{prefix}_c{id}_{i}_{fi}");
-                                writeln!(
-                                    code,
-                                    "  %{cell} = call ptr @sz_list_at(ptr %{prefix}_pl{id}_{i}, i64 {fi})"
-                                )
-                                .unwrap();
-                                match field_tys.get(fi) {
-                                    Some(Type::Int) => {
-                                        let llvm_name = format!("{prefix}_b{id}_{i}_{fi}");
-                                        writeln!(
-                                            code,
-                                            "  %{llvm_name} = call i64 @sz_unbox_i64(ptr %{cell})"
-                                        )
-                                        .unwrap();
-                                        locals.insert(
-                                            b.clone(),
-                                            (format!("%{llvm_name}"), Kind::Int),
-                                        );
-                                    }
-                                    _ => {
-                                        locals.insert(b.clone(), (format!("%{cell}"), Kind::Ptr));
-                                    }
-                                }
-                                bound_names.push(b.clone());
-                            }
-                        }
-                    }
-                }
-                let ae = emit_expr(&arm.body, ctx, locals, &format!("{prefix}_a{id}_{i}"));
-                for b in bound_names {
-                    locals.remove(&b);
-                }
-                code.push_str(&ae.code);
-                if phi_parts.is_empty() {
-                    result_kind = ae.kind;
-                    result_payload = ae.payload;
-                }
-                writeln!(code, "  br label %{arm_join}").unwrap();
-                writeln!(code, "{arm_join}:").unwrap();
-                writeln!(code, "  br label %{merge}").unwrap();
-                phi_parts.push((ae.value, arm_join));
-            }
-
-            writeln!(code, "{default_label}:").unwrap();
-            if let Some(arm) = arms.iter().find(|a| matches!(a.pattern, Pattern::Wildcard)) {
-                let default_join = format!("{prefix}_dj_{id}");
-                let ae = emit_expr(&arm.body, ctx, locals, &format!("{prefix}_aw{id}"));
-                code.push_str(&ae.code);
-                if phi_parts.is_empty() {
-                    result_kind = ae.kind;
-                    result_payload = ae.payload;
-                }
-                writeln!(code, "  br label %{default_join}").unwrap();
-                writeln!(code, "{default_join}:").unwrap();
-                writeln!(code, "  br label %{merge}").unwrap();
-                phi_parts.push((ae.value, default_join));
-            } else {
-                let dflt = match result_kind {
-                    Kind::Int => {
-                        writeln!(code, "  %{prefix}_dflt = add i64 0, 0").unwrap();
-                        format!("%{prefix}_dflt")
-                    }
-                    Kind::Ptr => "null".into(),
-                    Kind::Io => {
-                        writeln!(code, "  %{prefix}_dflt = call ptr @sz_io_pure(ptr null)")
-                            .unwrap();
-                        format!("%{prefix}_dflt")
-                    }
-                };
-                writeln!(code, "  br label %{merge}").unwrap();
-                phi_parts.push((dflt, default_label));
-            }
-
-            let ty = match result_kind {
-                Kind::Int => "i64",
-                Kind::Ptr | Kind::Io => "ptr",
-            };
-            writeln!(code, "{merge}:").unwrap();
-            write!(code, "  %{prefix}_phi = phi {ty}").unwrap();
-            for (i, (val, lab)) in phi_parts.iter().enumerate() {
-                if i > 0 {
-                    write!(code, ",").unwrap();
-                }
-                write!(code, " [ {val}, %{lab} ]").unwrap();
-            }
-            writeln!(code).unwrap();
-
-            Emitted {
-                code,
-                value: format!("%{prefix}_phi"),
-                kind: result_kind,
-                payload: result_payload,
-            }
-        }
+        ExprKind::Match { scrutinee, arms } => emit_match(scrutinee, arms, ctx, locals, prefix),
         ExprKind::FlatMap { inner, param, body } => {
             let id = *ctx.cont_id;
             *ctx.cont_id += 1;
@@ -3560,7 +3619,7 @@ enum Color { case Red, case Blue }
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_adt_new"));
         assert!(ir.contains("sz_adt_tag"));
-        assert!(ir.contains("switch i32"));
+        assert!(ir.contains("icmp eq i32"));
     }
 
     #[test]
@@ -3585,6 +3644,34 @@ enum Opt:
         // Some is tag 0, None tag 1 — payload non-null for Some.
         assert!(ir.contains("call ptr @sz_adt_new(i32 0, ptr %"));
         assert!(ir.contains("call ptr @sz_adt_new(i32 1, ptr null)") || !ir.contains("Opt.None("));
+    }
+
+    #[test]
+    fn emit_nested_adt_pattern() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+enum Wrap:
+  case Box(c: Color)
+  case Empty
+@main def main: IO[Unit] =
+  Wrap.Box(Color.Red) match {
+    case Wrap.Box(Color.Red) => IO.println("red")
+    case Wrap.Box(Color.Blue) => IO.println("blue")
+    case Wrap.Empty => IO.println("empty")
+  }
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_adt_tag"));
+        assert!(ir.contains("sz_adt_payload"));
+        let tag_calls = ir.matches("call i32 @sz_adt_tag").count();
+        assert!(
+            tag_calls >= 2,
+            "expected nested tag tests, got {tag_calls}:\n{ir}"
+        );
     }
 
     #[test]
@@ -3748,7 +3835,7 @@ def describe(e: Either[Int, String]): String = e match {
 "#;
         let ir = gen_ir(src);
         assert!(ir.contains("sz_adt_new"));
-        assert!(ir.contains("switch i32"));
+        assert!(ir.contains("icmp eq i32"));
         // Right is tag 1, String payload passes through unboxed.
         assert!(ir.contains("call ptr @sz_adt_new(i32 1, ptr %"));
     }

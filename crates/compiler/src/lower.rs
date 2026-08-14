@@ -39,6 +39,7 @@ pub fn lower_program(mut program: Program) -> Program {
 fn lower_pattern(pat: Pattern, enums: &EnumIndex<'_>, current_module: &str) -> Pattern {
     match pat {
         Pattern::Wildcard => Pattern::Wildcard,
+        Pattern::Bind(name) => Pattern::Bind(name),
         Pattern::Adt {
             enum_name,
             case_name,
@@ -50,7 +51,10 @@ fn lower_pattern(pat: Pattern, enums: &EnumIndex<'_>, current_module: &str) -> P
             Pattern::Adt {
                 enum_name: id,
                 case_name,
-                binds,
+                binds: binds
+                    .into_iter()
+                    .map(|b| lower_pattern(b, enums, current_module))
+                    .collect(),
                 type_args,
             }
         }
