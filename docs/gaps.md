@@ -37,7 +37,7 @@ Vision locks **oracles in source, drivers as the test surface** ([`vision.md`](v
 
 ### Residuals
 
-- **Net** — IPv6 and CNAME-follow are out.
+- **Net** — IPv6 is out. `Net.httpGet` follows CNAME chains (cap 5) to an A; IPv4 literals still skip DNS.
 - **Concurrency** — cooperative fibers only; `IO.ensure` / `Resource` release on cancel (including `IO.timeout` / `Fiber.interrupt`). Language `Fiber.fork` / `join` / `interrupt` and `IO.forever` / `repeatN` / `retryN` are in. Later: OS threads, supervision trees.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting; `Signal.list` frees unshared cons spines. Later: a collector if list-churn still demands it.
 - **Language surface** — richer generics beyond monomorphized defs/enums/records ([`compatibility.md`](compatibility.md)).

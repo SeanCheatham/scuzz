@@ -218,6 +218,76 @@ static void *dns_late_a(void *arg) {
   return NULL;
 }
 
+static void *dns_late_cname(void *arg) {
+  int fd = *(int *)arg;
+  uint8_t buf[512];
+  uint8_t cname[26];
+  uint8_t ans[16];
+  struct sockaddr_in from;
+  socklen_t flen = sizeof from;
+  ssize_t n;
+  n = recvfrom(fd, buf, sizeof buf, 0, (struct sockaddr *)&from, &flen);
+  sleep_us(40000);
+  g_peer_flag = 1;
+  if (n < 12 || (size_t)n + 26 > sizeof buf)
+    return NULL;
+  buf[2] = (uint8_t)(buf[2] | 0x80);
+  buf[3] = 0x80;
+  buf[6] = 0;
+  buf[7] = 1;
+  cname[0] = 0xC0;
+  cname[1] = 0x0C;
+  cname[2] = 0;
+  cname[3] = 5;
+  cname[4] = 0;
+  cname[5] = 1;
+  cname[6] = 0;
+  cname[7] = 0;
+  cname[8] = 0;
+  cname[9] = 60;
+  cname[10] = 0;
+  cname[11] = 14;
+  cname[12] = 1;
+  cname[13] = 'a';
+  cname[14] = 5;
+  memcpy(cname + 15, "scuzz", 5);
+  cname[20] = 4;
+  memcpy(cname + 21, "test", 4);
+  cname[25] = 0;
+  memcpy(buf + n, cname, 26);
+  if (sendto(fd, buf, (size_t)n + 26, 0, (struct sockaddr *)&from, flen) < 0)
+    return NULL;
+  flen = sizeof from;
+  n = recvfrom(fd, buf, sizeof buf, 0, (struct sockaddr *)&from, &flen);
+  sleep_us(40000);
+  if (n < 12 || (size_t)n + 16 > sizeof buf)
+    return NULL;
+  buf[2] = (uint8_t)(buf[2] | 0x80);
+  buf[3] = 0x80;
+  buf[6] = 0;
+  buf[7] = 1;
+  ans[0] = 0xC0;
+  ans[1] = 0x0C;
+  ans[2] = 0;
+  ans[3] = 1;
+  ans[4] = 0;
+  ans[5] = 1;
+  ans[6] = 0;
+  ans[7] = 0;
+  ans[8] = 0;
+  ans[9] = 60;
+  ans[10] = 0;
+  ans[11] = 4;
+  ans[12] = 127;
+  ans[13] = 0;
+  ans[14] = 0;
+  ans[15] = 1;
+  memcpy(buf + n, ans, 16);
+  if (sendto(fd, buf, (size_t)n + 16, 0, (struct sockaddr *)&from, flen) < 0)
+    return NULL;
+  return NULL;
+}
+
 static void *stdin_late_write(void *arg) {
   int fd = *(int *)arg;
   sleep_us(40000);
@@ -1211,6 +1281,44 @@ int main(void) {
     sz_net_test_set_nameserver("127.0.0.1", (int)ntohs(addr.sin_port));
     g_peer_flag = 0;
     pthread_create(&th, NULL, dns_late_a, &dns_fd);
+    snprintf(url, sizeof url, "http://scuzz.test:%d/x", http_port);
+    r = sz_io_unsafe_run(sz_io_both(
+        sz_net_serve_once(http_port, serve_path_ok, NULL),
+        sz_io_flatmap(sz_io_sleep_ms(30), after_sleep_dns_http,
+                      sz_string_from_cstr(url))));
+    pthread_join(th, NULL);
+    close(dns_fd);
+    sz_net_test_set_nameserver(NULL, 0);
+    assert(r.ok);
+    outer = (SzPair *)r.value;
+    assert(outer && outer->right);
+    inner = (SzPair *)outer->right;
+    assert(inner && inner->left);
+    assert(strcmp(sz_string_cstr((SzString *)inner->left), "ok:/x") == 0);
+  }
+
+  /* CNAME-only answer re-queries the target, then A. */
+  {
+    pthread_t th;
+    int dns_fd;
+    int http_port = 18578;
+    struct sockaddr_in addr;
+    socklen_t alen = sizeof addr;
+    char url[80];
+    SzPair *outer;
+    SzPair *inner;
+    dns_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    assert(dns_fd >= 0);
+    memset(&addr, 0, sizeof addr);
+    addr.sin_family = AF_INET;
+    addr.sin_port = 0;
+    assert(inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) == 1);
+    assert(bind(dns_fd, (struct sockaddr *)&addr, sizeof addr) == 0);
+    alen = sizeof addr;
+    assert(getsockname(dns_fd, (struct sockaddr *)&addr, &alen) == 0);
+    sz_net_test_set_nameserver("127.0.0.1", (int)ntohs(addr.sin_port));
+    g_peer_flag = 0;
+    pthread_create(&th, NULL, dns_late_cname, &dns_fd);
     snprintf(url, sizeof url, "http://scuzz.test:%d/x", http_port);
     r = sz_io_unsafe_run(sz_io_both(
         sz_net_serve_once(http_port, serve_path_ok, NULL),

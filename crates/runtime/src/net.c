@@ -13,8 +13,8 @@
 #include <unistd.h>
 
 /* Blessed Net.httpGet — live HTTP/1.0 GET or TestRuntime stub map.
- * Live hostnames resolve via UDP A (park on poll); IPv4 literals skip DNS.
- * Failures use SzError code 6. */
+ * Live hostnames resolve via UDP A (park on poll); CNAME chains re-query
+ * (cap 5). IPv4 literals skip DNS. Failures use SzError code 6. */
 
 typedef struct {
   int is_err;
@@ -82,9 +82,11 @@ typedef struct GetSt {
   int fd;
   int dns_fd;
   uint16_t dns_id;
+  int dns_hops;
   int http_port;
   struct sockaddr_in peer;
   char host[256];
+  char dns_name[256];
   char path[1024];
   char *req;
   size_t req_len;
@@ -221,23 +223,77 @@ static int dns_skip_name(const uint8_t *buf, size_t n, size_t *off) {
   return 0;
 }
 
-static int dns_parse_a(const uint8_t *buf, size_t n, uint16_t id,
-                       struct in_addr *out) {
-  uint16_t flags, qd, an, i;
+static int dns_read_name(const uint8_t *buf, size_t n, size_t *off, char *out,
+                         size_t cap) {
+  size_t o = *off;
+  size_t jumps = 0;
+  int jumped = 0;
+  size_t ret = 0;
+  size_t w = 0;
+  if (!out || cap == 0)
+    return 0;
+  out[0] = '\0';
+  while (o < n) {
+    uint8_t len = buf[o];
+    if ((len & 0xC0) == 0xC0) {
+      if (o + 1 >= n)
+        return 0;
+      if (!jumped) {
+        ret = o + 2;
+        jumped = 1;
+      }
+      o = (size_t)(((len & 0x3F) << 8) | buf[o + 1]);
+      if (++jumps > 10)
+        return 0;
+      continue;
+    }
+    if (len == 0) {
+      o++;
+      *off = jumped ? ret : o;
+      if (w >= cap)
+        return 0;
+      out[w] = '\0';
+      return 1;
+    }
+    if ((len & 0xC0) != 0)
+      return 0;
+    if (o + 1 + (size_t)len > n)
+      return 0;
+    if (w > 0) {
+      if (w + 1 >= cap)
+        return 0;
+      out[w++] = '.';
+    }
+    if (w + (size_t)len >= cap)
+      return 0;
+    memcpy(out + w, buf + o + 1, (size_t)len);
+    w += (size_t)len;
+    o += 1 + (size_t)len;
+  }
+  return 0;
+}
+
+/* 1 = A, 2 = CNAME only, 0 = fail. Scans AN/NS/AR so additional A records count. */
+static int dns_parse_answer(const uint8_t *buf, size_t n, uint16_t id,
+                            struct in_addr *a_out, char *cname, size_t cname_cap) {
+  uint16_t flags, qd, rr, i;
   size_t o = 12;
+  int got_a = 0;
   if (n < 12 || rd16(buf) != id)
     return 0;
   flags = rd16(buf + 2);
   if ((flags & 0x8000) == 0 || (flags & 0x000F) != 0)
     return 0;
   qd = rd16(buf + 4);
-  an = rd16(buf + 6);
+  rr = (uint16_t)(rd16(buf + 6) + rd16(buf + 8) + rd16(buf + 10));
+  if (cname && cname_cap)
+    cname[0] = '\0';
   for (i = 0; i < qd; i++) {
     if (!dns_skip_name(buf, n, &o) || o + 4 > n)
       return 0;
     o += 4;
   }
-  for (i = 0; i < an; i++) {
+  for (i = 0; i < rr; i++) {
     uint16_t typ, cls, rdlen;
     if (!dns_skip_name(buf, n, &o) || o + 10 > n)
       return 0;
@@ -247,13 +303,51 @@ static int dns_parse_a(const uint8_t *buf, size_t n, uint16_t id,
     o += 10;
     if (o + rdlen > n)
       return 0;
-    if (typ == 1 && cls == 1 && rdlen == 4) {
-      memcpy(&out->s_addr, buf + o, 4);
-      return 1;
+    if (typ == 1 && cls == 1 && rdlen == 4 && !got_a) {
+      memcpy(&a_out->s_addr, buf + o, 4);
+      got_a = 1;
+    } else if (typ == 5 && cls == 1 && cname && cname_cap && cname[0] == '\0') {
+      size_t name_off = o;
+      char tmp[256];
+      if (dns_read_name(buf, n, &name_off, tmp, sizeof tmp) == 1 && tmp[0] &&
+          strlen(tmp) < cname_cap)
+        memcpy(cname, tmp, strlen(tmp) + 1);
     }
     o += rdlen;
   }
+  if (got_a)
+    return 1;
+  if (cname && cname[0])
+    return 2;
   return 0;
+}
+
+static int dns_send_query(GetSt *st) {
+  struct sockaddr_in ns;
+  uint8_t q[512];
+  size_t qn;
+  ssize_t nsent;
+  if (!st || !nameserver_addr(&ns))
+    return 0;
+  g_dns_qid++;
+  if (g_dns_qid == 0)
+    g_dns_qid = 1;
+  st->dns_id = g_dns_qid;
+  qn = dns_build_query(q, sizeof q, st->dns_id, st->dns_name);
+  if (qn == 0)
+    return 0;
+  if (st->dns_fd < 0) {
+    st->dns_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    if (st->dns_fd < 0)
+      return 0;
+    if (set_nonblock(st->dns_fd) != 0) {
+      close(st->dns_fd);
+      st->dns_fd = -1;
+      return 0;
+    }
+  }
+  nsent = sendto(st->dns_fd, q, qn, 0, (struct sockaddr *)&ns, sizeof ns);
+  return nsent == (ssize_t)qn;
 }
 
 static void get_free(GetSt *st) {
@@ -278,10 +372,6 @@ static void *get_start(void *env) {
   const char *url = sz_string_cstr(st->url);
   int port = 80;
   struct in_addr addr;
-  struct sockaddr_in ns;
-  uint8_t q[512];
-  size_t qn;
-  ssize_t nsent;
 
   if (!parse_http_url(url, st->host, sizeof st->host, st->path, sizeof st->path,
                       &port)) {
@@ -298,31 +388,13 @@ static void *get_start(void *env) {
     r->is_err = 0;
     return r;
   }
-  if (!nameserver_addr(&ns)) {
+  if (strlen(st->host) >= sizeof st->dns_name) {
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.httpGet: DNS failed");
     return r;
   }
-  g_dns_qid++;
-  if (g_dns_qid == 0)
-    g_dns_qid = 1;
-  st->dns_id = g_dns_qid;
-  qn = dns_build_query(q, sizeof q, st->dns_id, st->host);
-  if (qn == 0) {
-    r->is_err = 1;
-    r->as.err = sz_error_new(6, "Net.httpGet: DNS failed");
-    return r;
-  }
-  st->dns_fd = socket(AF_INET, SOCK_DGRAM, 0);
-  if (st->dns_fd < 0) {
-    r->is_err = 1;
-    r->as.err = sz_error_new(6, "Net.httpGet: DNS failed");
-    return r;
-  }
-  nsent = sendto(st->dns_fd, q, qn, 0, (struct sockaddr *)&ns, sizeof ns);
-  if (nsent != (ssize_t)qn || set_nonblock(st->dns_fd) != 0) {
-    close(st->dns_fd);
-    st->dns_fd = -1;
+  memcpy(st->dns_name, st->host, strlen(st->host) + 1);
+  if (!dns_send_query(st)) {
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.httpGet: DNS failed");
     return r;
@@ -351,14 +423,28 @@ static void *get_dns_recv(void *env) {
     r->retry = 1;
     return r;
   }
-  if (!dns_parse_a(buf, (size_t)n, st->dns_id, &st->peer.sin_addr)) {
-    r->is_err = 1;
-    r->as.err = sz_error_new(6, "Net.httpGet: DNS failed");
-    return r;
+  {
+    char cname[256];
+    int kind = dns_parse_answer(buf, (size_t)n, st->dns_id, &st->peer.sin_addr,
+                                cname, sizeof cname);
+    if (kind == 1) {
+      close(st->dns_fd);
+      st->dns_fd = -1;
+      r->is_err = 0;
+      return r;
+    }
+    if (kind == 2 && st->dns_hops < 5 && strlen(cname) > 0 &&
+        strlen(cname) < sizeof st->dns_name) {
+      st->dns_hops++;
+      memcpy(st->dns_name, cname, strlen(cname) + 1);
+      if (dns_send_query(st)) {
+        r->retry = 1;
+        return r;
+      }
+    }
   }
-  close(st->dns_fd);
-  st->dns_fd = -1;
-  r->is_err = 0;
+  r->is_err = 1;
+  r->as.err = sz_error_new(6, "Net.httpGet: DNS failed");
   return r;
 }
 
