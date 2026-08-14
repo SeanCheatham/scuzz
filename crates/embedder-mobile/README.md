@@ -1,6 +1,6 @@
 # embedder-mobile
 
-OS presentation + input for `UiRuntime.Mobile`. Headless remains the CI peer for goldens.
+OS presentation and input for `UiRuntime.Mobile`. Headless remains the CI peer for goldens.
 
 ## Host shell (Linux CI)
 
@@ -22,4 +22,4 @@ hooks). Device builds still need NDK/Xcode wiring.
 | iOS | `shells/ios/` | Info.plist + C helpers; wire under Xcode for sim/device |
 | host | (this lib) | CI smoke of the Mobile peer |
 
-Same examples run unmodified via `SCUZZ_UI_RUNTIME=mobile`.
+Same examples run unmodified through `SCUZZ_UI_RUNTIME=mobile`.

@@ -4,33 +4,42 @@
 
 | Doc | Purpose |
 | --- | --- |
-| [`docs/vision.md`](docs/vision.md) | Product thesis, decisions, language direction, open work, risks |
-| [`docs/gaps.md`](docs/gaps.md) | Unknowns (unproven bets) and known gaps, ranked by risk |
-| [`docs/plans.md`](docs/plans.md) | Short-term next slice only (delete when done; no history) |
-| [`docs/optimization.md`](docs/optimization.md) | Future empirical pre-optimization (`*.scuzz_tune`); not current work |
-| [`docs/compatibility.md`](docs/compatibility.md) | Keep/cut vs Scala & effect libs; platforms; toolchain |
-| [`docs/guide.md`](docs/guide.md) | App author happy path |
+| [`docs/vision.md`](docs/vision.md) | Product intent, locks, language direction, open work, risks |
+| [`docs/gaps.md`](docs/gaps.md) | Unknowns and known gaps, ranked by risk |
+| [`docs/plans.md`](docs/plans.md) | Next short-term slice only. Delete the slice when it is done. Do not keep history. |
+| [`docs/optimization.md`](docs/optimization.md) | Later empirical pre-optimization (`*.scuzz_tune`). Not current work. |
+| [`docs/compatibility.md`](docs/compatibility.md) | Keep or cut vs Scala and effect libraries. Platforms. Toolchain. |
+| [`docs/guide.md`](docs/guide.md) | App author path from install to run |
 | [`docs/schemas/scuzz-toml.md`](docs/schemas/scuzz-toml.md) | Package manifest schema |
 | [`README.md`](README.md) | Pitch, install, one example |
 
-If a decision or next-step ordering changes, edit `vision.md`.
+If a decision or next-step order changes, edit `vision.md`.
 
-## Keep the codebase lightweight
+## Keep the codebase small
 
-Scuzz Lang is already a language + runtime + UI + tooling bet. **Ruthless subset and vertical slices win.**
+Scuzz Lang is a language, a runtime, UI, and tooling. Keep a small subset. Ship vertical slices.
 
-- **No docs sprawl.** Do not add README/GUIDE/ARCHITECTURE files per crate “for completeness.” Stub crates may have a short README pointing at role; otherwise document in `docs/` or in code comments. Update existing docs instead of creating siblings.
-- **No premature abstraction.** One clear implementation beats traits/factories/indirection for a single caller. Introduce seams when a second backend needs them (e.g. Headless vs Window), not before.
-- **No ecosystem theater.** No Maven/JVM/cats/ZIO compatibility layers, no “just in case” dependency graphs, no copying Scala Native structure for familiarity.
-- **Forwards-only.** Do not maintain backwards compatibility, migration shims, or legacy code paths—especially during the prototype / pre-v1 phase. Prefer deleting and rewriting call sites over keeping dual APIs.
-- **Vertical slice over scaffolding.** Prefer a working hello / Counter path to empty module trees and placeholder APIs.
-- **Headless-first for UI.** Never land Window-only UI behavior; Headless is a peer runtime (see `vision.md`).
-- **One compiler.** Toolchain is Rust (`crates/cli`). Language proof is `examples/` that exercise the kernel (`vision.md`).
-- **No agent- or tool-specific references in the repo.** Keep CI, docs, and code project-owned—not tied to a particular coding agent, branch naming scheme, or vendor workflow.
-- **No historical record-keeping in tree.** Present-tense docs and comments; no phase diaries, “landed” changelogs, or dangling references to removed paths.
+- **No extra docs.** Do not add README, GUIDE, or ARCHITECTURE files per crate for completeness. A stub crate may have a short README that states its role. Put other docs in `docs/` or in code comments. Update existing files. Do not add sibling files.
+- **No early abstraction.** Write one clear implementation for one caller. Add a seam only when a second backend needs it (Headless vs Desktop).
+- **No ecosystem theater.** Do not add Maven, JVM, cats, or ZIO compatibility layers. Do not add unused dependency graphs. Do not copy Scala Native structure for familiarity.
+- **Forwards only.** Do not keep backwards compatibility, migration shims, or legacy paths. Delete and rewrite call sites. Do not keep dual APIs.
+- **Vertical slice over scaffolding.** Prefer a working hello or Counter path to empty module trees and placeholder APIs.
+- **Headless first for UI.** Do not add Desktop-only UI behavior. Headless is a peer runtime. See `vision.md`.
+- **One compiler.** The toolchain is Rust (`crates/cli`). Language proof is `examples/` that exercise the kernel. See `vision.md`.
+- **No agent- or tool-specific references.** Keep CI, docs, and code owned by the project. Do not tie them to a coding agent, a branch naming scheme, or a vendor workflow.
+- **No history in the tree.** Write docs and comments in present tense. Do not keep phase diaries, landed changelogs, or references to removed paths.
+
+## Writing
+
+Write all docs, README files, and comments in ASD-STE100 Simplified Technical English.
+
+- Use short sentences. Put one idea in each sentence.
+- Use simple present tense. Use active voice. Use imperative for instructions.
+- Do not use slang, filler, or history.
+- Do not add files for completeness.
 
 ## Default workflow
 
-1. Check `docs/vision.md` for intent, locks, and current direction.
-2. Implement the smallest slice that proves the behavior (test or `examples/` when applicable).
-3. Update `vision.md` (or `compatibility.md` / `guide.md` when that file owns the topic).
+1. Read `docs/vision.md` for intent, locks, and current direction.
+2. Add the smallest slice that proves the behavior (a test or `examples/` when it applies).
+3. Update `vision.md`. If `compatibility.md` or `guide.md` owns the topic, update that file instead.

@@ -2,7 +2,7 @@
 # Assemble a self-contained scuzz release tree + tarball under dist/.
 #
 # The shipped `scuzz` is the Rust CLI (`crates/cli`). Layout matches SCUZZ_HOME
-# expectations (crates/ + scripts/). Host needs clang/make to link apps.
+# (crates/ + scripts/). Host needs clang/make to link apps.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"

@@ -1,4 +1,4 @@
-//! Parse + lower + typecheck without codegen/link.
+//! Parse, lower, and typecheck. No codegen. No link.
 
 use crate::format::format_source;
 use crate::lower::lower_program;
@@ -183,7 +183,7 @@ fn format_check_src(project_dir: &Path) -> Result<Vec<Diagnostic>> {
 }
 
 /// Format-check `src/`, then parse, lower, and typecheck (live + sim twins + in-source laws).
-/// No LLVM emit or link. Format mismatches and type errors share one diagnostic list.
+/// No LLVM emit. No link. Format mismatches and type errors share one diagnostic list.
 pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
     let mut diags = format_check_src(project_dir)?;
     let resolved = crate::driver::resolve_project(project_dir)
@@ -217,7 +217,7 @@ pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
         return Ok(diags);
     }
     let mut program = program;
-    // Residualize refinements so Law.check typechecks the same way as verify builds.
+    // Residualize refinements so Law.check typechecks like verify builds.
     residualize_refinements(&mut program);
     program.law_names = law_names;
     let program = lower_program(program);

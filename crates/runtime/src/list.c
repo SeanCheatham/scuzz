@@ -2,8 +2,8 @@
 
 #include <string.h>
 
-/* Linked list: NULL = Nil. Cons cells do not own heads. Unshared spines are
- * freed by Signal.list on set/free; shared tails (cons onto an existing list)
+/* Linked list: NULL = Nil. Cons cells do not own heads. Signal.list frees
+ * unshared spines on set/free. Shared tails (cons onto an existing list)
  * stay. No tracing collector. */
 
 SzList *sz_list_nil(void) { return NULL; }

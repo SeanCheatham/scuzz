@@ -5,7 +5,7 @@
 # under third_party/skia/prebuilt/<triple>/. Fail closed if the URL is missing
 # or the download fails.
 #
-# Opt out of Skia (in-tree sk_sw) with SCUZZ_SKIA=sk_sw — this script then
+# Opt out of Skia (in-tree sk_sw) with SCUZZ_SKIA=sk_sw. This script then
 # exits 0 without downloading.
 #
 #   SCUZZ_SKIA_URL=https://…/skia-{triple}-cpu.tar.gz ./scripts/fetch_skia.sh
@@ -48,7 +48,7 @@ if [[ -f "${DEST}/${TRIPLE}/libsk_capi.a" && -z "${SCUZZ_SKIA_FORCE:-}" ]]; then
 fi
 
 mkdir -p "${DEST}/${TRIPLE}"
-# Clear previous contents so stale companion libs do not linger.
+# Clear previous contents so stale companion libs do not remain.
 rm -rf "${DEST}/${TRIPLE:?}/"*
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT

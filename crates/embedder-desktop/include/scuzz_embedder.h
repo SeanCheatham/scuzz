@@ -10,7 +10,7 @@
 extern "C" {
 #endif
 
-/* Desktop Window presenter (Linux X11 / Darwin Cocoa).
+/* Desktop presenter (Linux X11 / Darwin Cocoa).
  * Weak stubs live in runtime when unlinked. */
 
 /* Nonzero if a display can be opened (DISPLAY+X11, or Cocoa GUI session). */
@@ -20,7 +20,7 @@ int sz_embedder_available(void);
  * Retina macOS typically returns 2.0. */
 double sz_embedder_display_scale(void);
 
-/* Nonzero while the desktop window session should keep pumping.
+/* Nonzero while the desktop window session must keep pumping.
  * Becomes 0 after the user quits (q / Escape / window close).
  * Weak stub returns 0 (one-shot demos). */
 int sz_embedder_alive(void);
@@ -36,7 +36,7 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
 void sz_embedder_shutdown(void);
 
 /* Pop one queued OS event into out. Returns 1 if an event was written.
- * present() enqueues taps / text edits; pump drains via this. */
+ * present() enqueues taps / text edits. pump drains through this. */
 int sz_embedder_poll_event(SzInputEvent *out);
 
 #ifdef __cplusplus

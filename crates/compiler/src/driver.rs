@@ -19,7 +19,7 @@ use std::sync::Mutex;
 use std::time::SystemTime;
 
 /// Shared `crates/runtime` / `crates/ffi-skia` archives. Parallel `compile_project`
-/// (cargo test threads) must not `make`/`ar`/`ld` them at once or the linker can SIGSEGV.
+/// (cargo test threads) must not `make`/`ar`/`ld` them at once. The linker can SIGSEGV.
 static NATIVE_LINK_LOCK: Mutex<()> = Mutex::new(());
 
 #[derive(Debug, Clone)]
@@ -199,7 +199,7 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
             .parent()
             .map(|p| p.join("ffi-skia"))
             .unwrap_or_else(|| PathBuf::from("crates/ffi-skia"));
-        // Ensure libsk_capi.a exists (pinned Skia by default; SCUZZ_SKIA=sk_sw opts out).
+        // Build libsk_capi.a if missing (pinned Skia by default; SCUZZ_SKIA=sk_sw opts out).
         let _ = Command::new("make")
             .arg("-C")
             .arg(&ffi_skia_dir)
@@ -560,8 +560,8 @@ fn find_sources(project_dir: &Path) -> Result<Vec<PathBuf>> {
     if candidates.is_empty() {
         bail!("no .scuzz sources in {}", src.display());
     }
-    // Main.* last so package/enum units parse first (order only affects error msgs;
-    // parse_sources merges). Prefer stable order: non-main first, then main.
+    // Main.* last so package/enum units parse first. Order only affects error msgs.
+    // parse_sources merges. Stable order: non-main first, then main.
     candidates.sort_by(|a, b| {
         let am = is_main_file(a);
         let bm = is_main_file(b);
@@ -659,7 +659,7 @@ fn build_runtime(runtime_dir: &Path, clang: &str) -> Result<()> {
         bail!("runtime build failed in {}", runtime_dir.display());
     }
 
-    // Best-effort embedder builds (optional; skipped if make fails).
+    // Optional embedder builds. Skip if make fails.
     if let Some(parent) = runtime_dir.parent() {
         for name in ["embedder-desktop", "embedder-mobile"] {
             let embedder = parent.join(name);
@@ -676,8 +676,8 @@ fn build_runtime(runtime_dir: &Path, clang: &str) -> Result<()> {
     Ok(())
 }
 
-/// Resolve `crates/runtime` (with `include/scuzz_rt.h`). Honors `SCUZZ_RUNTIME`
-/// then `SCUZZ_HOME/crates/runtime`, then walks parents from `start`.
+/// Resolve `crates/runtime` (with `include/scuzz_rt.h`). Use `SCUZZ_RUNTIME`,
+/// then `SCUZZ_HOME/crates/runtime`, then walk parents from `start`.
 pub fn find_runtime_dir(start: &Path) -> Result<PathBuf> {
     if let Ok(rt) = std::env::var("SCUZZ_RUNTIME") {
         if !rt.is_empty() {

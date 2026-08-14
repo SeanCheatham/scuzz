@@ -28,9 +28,9 @@ pub struct OverlaySource {
 }
 
 /// Apply same-name sim replacements, then merge `*.scuzz_drivers`. In-source
-/// `law` defs stay on the program; call [`collect_law_names`] then
+/// `law` defs stay on the program. Call [`collect_law_names`] then
 /// [`check_laws_applied`] under verify / check. `.require` is rewritten
-/// type-directedly in field resolution (verify) or erased live.
+/// by type in field resolution (verify) or erased live.
 pub fn apply_overlays(
     mut live: Program,
     overlays: &[OverlaySource],
@@ -70,8 +70,8 @@ pub fn apply_overlays(
     Ok(live)
 }
 
-/// Names of in-source `law` declarations, in source order. Rejects a law that
-/// collides with a non-law def (already a parse duplicate) and checks return type.
+/// Names of in-source `law` declarations, in source order. Reject a law that
+/// collides with a non-law def (already a parse duplicate). Check the return type.
 pub fn collect_law_names(program: &Program) -> Result<Vec<String>, OverlayError> {
     let mut names = Vec::new();
     for d in &program.defs {
@@ -95,13 +95,13 @@ pub fn collect_law_names(program: &Program) -> Result<Vec<String>, OverlayError>
     Ok(names)
 }
 
-/// Drop `law` defs so live `build` / `run` never emit them.
+/// Drop `law` defs. Live `build` / `run` must not emit them.
 pub fn erase_laws(program: &mut Program) {
     program.defs.retain(|d| !d.is_law);
     program.law_names.clear();
 }
 
-/// Drop `.require` to the receiver so live `build` / `run` never evaluate the predicate.
+/// Drop `.require` to the receiver. Live `build` / `run` must not evaluate the predicate.
 pub fn erase_requires(program: &mut Program) {
     program.map_bodies_mut(erase_require_expr);
 }
@@ -356,7 +356,7 @@ pub fn driver_table_text(program: &Program) -> String {
 }
 
 /// Rewrite calls and record construction so `where` predicates become `Law.check`
-/// at the use site. Live builds skip this.
+/// at the use site. Live builds skip this step.
 pub fn residualize_refinements(program: &mut Program) {
     let defs = program.defs.clone();
     let enums = program.enums.clone();
@@ -546,7 +546,7 @@ pub fn is_fmt_source(path: &std::path::Path) -> bool {
     )
 }
 
-/// Recursively collect format-checked sources under `dir` (sorted).
+/// Collect format-checked sources under `dir` (sorted, recursive).
 pub fn collect_fmt_sources(dir: &std::path::Path) -> std::io::Result<Vec<std::path::PathBuf>> {
     let mut out = Vec::new();
     collect_fmt_sources_into(dir, &mut out)?;

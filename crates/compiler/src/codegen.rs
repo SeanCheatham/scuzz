@@ -189,8 +189,8 @@ pub fn emit_llvm(program: &Program) -> String {
     }
     writeln!(out).unwrap();
 
-    // User defs are emitted below; LLVM allows call sites before the defining
-    // `define` in the same module (no separate `declare` — that would error).
+    // User defs are emitted below. LLVM allows call sites before the defining
+    // `define` in the same module. A separate `declare` errors.
 
     let mut cont_id = 0usize;
     let mut conts = String::new();
@@ -1212,7 +1212,7 @@ fn emit_expr(
             let inner_emitted = emit_expr(inner, ctx, locals, &format!("{prefix}_in"));
             let payload_kind = inner_emitted.payload;
 
-            // Cont is a separate LLVM function; capture enclosing locals via %env list.
+            // Cont is a separate LLVM function. Capture enclosing locals with %env list.
             let capture_names = capture_name_order(locals);
             let mut pre = String::new();
             let mut body_locals: HashMap<String, (String, Kind)> = HashMap::new();
@@ -1397,7 +1397,7 @@ fn emit_expr(
     }
 }
 
-/// Emit `s"..."` as left-fold `sz_string_concat`, coercing Int holes via `sz_string_from_int`.
+/// Emit `s"..."` as left-fold `sz_string_concat`. Coerce Int holes with `sz_string_from_int`.
 fn emit_interpolate(
     parts: &[crate::ast::InterpPart],
     ctx: &mut EmitCtx<'_>,
@@ -1486,9 +1486,9 @@ fn emit_interpolate(
 
 /// Emit a `_ => body` / `x => body` lambda literal as a closure value: a
 /// 2-element `SzList` `cons(fn_ptr, cons(env_ptr, nil))`. `fn_ptr` matches the
-/// C `SzViewTapFn` signature `void (*)(SzView *self, void *env)`; `env_ptr` is
+/// C `SzViewTapFn` signature `void (*)(SzView *self, void *env)`. `env_ptr` is
 /// the captured-locals list (same packing scheme as `flatMap` continuations).
-/// Consumers (currently only `View.button`) unpack the pair back out.
+/// Consumers (only `View.button` now) unpack the pair.
 fn emit_lambda(
     param: &Option<String>,
     body: &Expr,
@@ -3030,7 +3030,7 @@ fn emit_call(
             val_emitted(code, emitted_args[2].value.clone(), emitted_args[2].kind)
         }
         "Law.force" => {
-            // IO[Bool/Int] → Int via unsafe_run + unbox (verify residual only).
+            // IO[Bool/Int] → Int with unsafe_run + unbox (verify residual only).
             writeln!(
                 code,
                 "  %{prefix}_fr = call ptr @sz_io_unsafe_run_or_die(ptr {})",

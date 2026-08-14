@@ -33,12 +33,12 @@ jobs:
       - name: Install clang/make/X11/xvfb + Skia link deps
         run: |
           sudo apt-get update
-          # zlib/bz2/brotli: the release packs the pinned Skia CPU prebuilt;
-          # linking [ui] apps needs these (same as skia-cpu.yml runtime link set).
+          # zlib/bz2/brotli: the release packs the pinned Skia CPU prebuilt.
+          # Linking [ui] apps needs these (same as skia-cpu.yml runtime link set).
           sudo apt-get install -y clang make libx11-dev xvfb \
             zlib1g-dev libbz2-dev libbrotli-dev
 
-      - name: Install Rust (stable via rust-toolchain.toml)
+      - name: Install Rust (stable with rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@stable
 
       - name: Runtime + UI tests
@@ -133,7 +133,7 @@ jobs:
           cargo run -p scuzz -- build examples/adt
           cargo run -p scuzz -- build examples/adt 2>&1 | tee /tmp/incr.out
           grep -q "up-to-date" /tmp/incr.out
-          # Path-dep invalidation: changing a dependency source must rebuild the root.
+          # Path-dep invalidation: a change in a dependency source must rebuild the root.
           cargo run -p scuzz -- build --full examples/counter
           cargo run -p scuzz -- build examples/counter 2>&1 | tee /tmp/counter-incr.out
           grep -q "up-to-date" /tmp/counter-incr.out
@@ -266,7 +266,7 @@ jobs:
           cargo run -p scuzz -- mutate examples/record --limit 2 --iters 0
           cargo run -p scuzz -- mutate examples/counter --limit 1 --iters 0
 
-      - name: v0 new --ui happy path
+      - name: v0 new --ui path
         run: |
           rm -rf /tmp/scuzz-v0app
           cargo run -p scuzz -- new --ui --path /tmp scuzz-v0app
@@ -277,10 +277,10 @@ jobs:
           cargo run -p scuzz -- run --headless /tmp/scuzz-v0app
           test -f /tmp/scuzz-v0app/build/snapshot.png
 
-      - name: Window peer + X11 embedder (xvfb)
+      - name: Desktop peer + X11 embedder (xvfb)
         run: |
-          # SCUZZ_LIVE_FRAMES bounds stay-open Ui.run under Window (else hangs on xvfb).
-          timeout 30s xvfb-run -a env SCUZZ_UI_RUNTIME=window SCUZZ_LIVE_FRAMES=2 \
+          # SCUZZ_LIVE_FRAMES bounds stay-open Ui.run under Desktop (else hangs on xvfb).
+          timeout 30s xvfb-run -a env SCUZZ_UI_RUNTIME=desktop SCUZZ_LIVE_FRAMES=2 \
             SCUZZ_UI_WIDTH=200 SCUZZ_UI_HEIGHT=100 \
             ./examples/hello_ui/build/hello_ui 2>&1 | tee /tmp/win.out
           grep -q "desktop embedder" /tmp/win.out
@@ -300,7 +300,7 @@ jobs:
             ./examples/counter/build/package/host/run.sh 2>&1 | tee /tmp/pkg-host.out
           grep -q "scuzz mobile: present" /tmp/pkg-host.out
 
-  # macOS is 10× Linux Actions minutes; skip on push/PR until we ship Darwin more seriously.
+  # macOS uses more Actions minutes than Linux. Skip on push/PR.
   # Trigger manually: Actions → ci → Run workflow.
   macos:
     if: github.event_name == 'workflow_dispatch'
@@ -308,7 +308,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install Rust (stable via rust-toolchain.toml)
+      - name: Install Rust (stable with rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@stable
 
       - name: Install Homebrew Skia link deps

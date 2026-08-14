@@ -54,7 +54,7 @@ xxd -i -n scuzz_embedded_font "${FONT_TTF}" >"${FONT_INC}"
 
 # Hermetic CPU build. Force FreeType + custom fontmgr on all hosts (including
 # Darwin, where Skia defaults to CoreText and omits the freetype2 ninja target)
-# so sk_capi_skia.cpp's SkFontMgr_New_Custom_* path links.
+# so the SkFontMgr_New_Custom_* path in sk_capi_skia.cpp links.
 GN_ARGS=(
   'is_official_build=true'
   'is_component_build=false'
@@ -127,7 +127,7 @@ for dep in freetype2 harfbuzz zlib png jpeg skcms; do
 done
 
 # Prefer merging everything into one fat archive for simple linking.
-# Darwin: Apple libtool merges .a/.o without GNU ar -M (unsupported by BSD ar).
+# Darwin: Apple libtool merges .a/.o without GNU ar -M (BSD ar does not support it).
 # Linux: extract objects and use GNU ar (MRI script when the object count is large).
 if [[ "$(uname -s)" == "Darwin" ]]; then
   libtool -static -o "${PKG}/libsk_capi.a" "${ARCHIVES[@]}" "${SHIM_OBJS[@]}"

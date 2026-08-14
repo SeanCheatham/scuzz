@@ -1,7 +1,7 @@
 /* iOS packaging shell.
  *
- * UIApplicationDelegate drives mount → pump; UITouch / lifecycle map to
- * SzInputEvent. Compile-shaped stub — link libscuzz_rt + libsk_capi under
+ * UIApplicationDelegate drives mount → pump. UITouch / lifecycle map to
+ * SzInputEvent. Compile-shaped stub. Link libscuzz_rt + libsk_capi under
  * Xcode for a device/simulator binary.
  */
 

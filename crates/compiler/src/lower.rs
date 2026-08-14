@@ -152,8 +152,8 @@ fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Expr {
                     span,
                 );
             }
-            // Nullary `Ident.Ident` is AdtConstruct at parse; if not an enum case, treat as
-            // zero-arg module call (`A.tag`).
+            // Nullary `Ident.Ident` is AdtConstruct at parse. If it is not an enum case,
+            // treat it as a zero-arg module call (`A.tag`).
             if args.is_empty() {
                 return Expr::new(
                     ExprKind::Call {

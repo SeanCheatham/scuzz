@@ -177,7 +177,7 @@ static void *mem_write(void *env) {
     return r;
   }
   if (parent[0] != '\0' && !fs_find(parent)) {
-    /* Ensure parent dirs exist (mkdir -p style for write). */
+    /* Create parent dirs (mkdir -p style for write). */
     char tmp[1024];
     size_t len = strlen(parent);
     size_t i;
@@ -404,8 +404,8 @@ static void *mem_canonicalize(void *env) {
   char *path = canon_path(sz_string_cstr(path_s));
   MemNode *n = fs_find(path);
   if (!n) {
-    /* Allow canonicalize of non-existent leaf if parent exists as dir, matching
-       common realpath failure modes loosely: require exact mem node. */
+    /* Allow canonicalize of a missing leaf if the parent exists as a dir.
+       Match common realpath failure modes loosely: need an exact mem node. */
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.canonicalize: not found (mem)");
     sz_free(path);

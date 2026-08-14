@@ -20,7 +20,7 @@ struct SkSurface {
   int width;
   int height;
   uint8_t *pixels; /* RGBA8888 */
-  SkCanvas canvas; /* borrowed via sk_surface_get_canvas */
+  SkCanvas canvas; /* borrowed through sk_surface_get_canvas */
 };
 
 SkColor sk_color_rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {

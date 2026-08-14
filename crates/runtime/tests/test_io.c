@@ -1016,7 +1016,7 @@ int main(void) {
     sz_testrt_reset();
   }
 
-  /* IO.forever cancelled via Fiber.interrupt; Resource release still runs. */
+  /* IO.forever cancelled through Fiber.interrupt. Resource release still runs. */
   {
     sz_testrt_install();
     lang_released = 0;
@@ -1881,7 +1881,7 @@ int main(void) {
     assert(strcmp(sz_string_cstr((SzString *)pair->right), "ok:/x") == 0);
   }
 
-  /* Live Net.serveOnce on ::1: httpGet via IPv6 literal. */
+  /* Live Net.serveOnce on ::1: httpGet through IPv6 literal. */
   {
     int port = 18581;
     char url[64];

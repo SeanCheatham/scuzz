@@ -14,7 +14,7 @@ void sz_panic(const char *msg) __attribute__((noreturn));
 void *sz_alloc(size_t size);
 void *sz_alloc_zero(size_t size);
 void sz_free(void *ptr);
-/* Live heap via sz_alloc/sz_free (user bytes; excludes size header). */
+/* Live heap through sz_alloc/sz_free (user bytes; excludes size header). */
 void sz_alloc_stats(size_t *live_bytes, size_t *live_count);
 /* Reset peak / pump-sample counter; live stays accurate for outstanding allocs. */
 void sz_alloc_reset_stats(void);
@@ -191,7 +191,7 @@ SzIo *sz_io_race(SzIo *left, SzIo *right);
 SzIo *sz_io_both(SzIo *left, SzIo *right);
 /* Run finalizer after inner succeeds, fails, or is cancelled (race loser). */
 SzIo *sz_io_ensure(SzIo *inner, SzIo *finalizer);
-/* First-to-settle of sleep(ms) vs inner; timer wins → fail "timeout" and cancel inner. */
+/* First-to-settle of sleep(ms) vs inner. Timer wins → fail "timeout" and cancel inner. */
 SzIo *sz_io_timeout(int64_t ms, SzIo *inner);
 /* Rerun inner until it fails or the fiber is cancelled. Never succeeds. */
 SzIo *sz_io_forever(SzIo *inner);
@@ -199,7 +199,7 @@ SzIo *sz_io_forever(SzIo *inner);
 SzIo *sz_io_repeat_n(int64_t n, SzIo *inner);
 /* On failure, retry n extra times (n<0 → 0 extra). Last error if all fail. */
 SzIo *sz_io_retry_n(int64_t n, SzIo *inner);
-/* Fork inner onto the cooperative scheduler; succeeds immediately with a fiber handle. */
+/* Fork inner onto the cooperative scheduler. Succeeds at once with a fiber handle. */
 SzIo *sz_fiber_fork(SzIo *inner);
 /* Park until the forked fiber succeeds (value) or fails / is interrupted. */
 SzIo *sz_fiber_join(void *fiber);
@@ -212,15 +212,15 @@ SzIo *sz_io_poll_readable(int fd); /* IO[Unit]; park until fd is readable */
 SzIo *sz_io_poll_writable(int fd); /* IO[Unit]; park until fd is writable */
 
 /* Run to completion on the calling thread.
- * Concurrency is cooperative single-threaded fibers: sleep/Queue/Deferred/poll
+ * Concurrency is cooperative single-threaded fibers. sleep/Queue/Deferred/poll
  * park (Net, Sys.readLine, Sys.exec, httpGet DNS). race/both fork left-then-right onto a
  * ready queue. forever/repeatN/retryN rerun the same inner tree (yield each iteration).
- * Fiber.fork starts a supervised child (join parks; interrupt cancels;
- * unjoined children are cancelled when the root fiber completes). Live / default: FIFO pick. When SCUZZ_SCHED_SEED is set (fuzz),
+ * Fiber.fork starts a supervised child. join parks. interrupt cancels.
+ * Unjoined children cancel when the root fiber completes. Live / default: FIFO pick. When SCUZZ_SCHED_SEED is set (fuzz),
  * ready-fiber pick among n>1 is seed-driven (Lehmer/MINSTD). TestRuntime jumps
  * virtual time to the next wakeup when all fibers are blocked on timers. Live
- * idle wait uses poll (and interruptible nanosleep when only timers remain) so
- * a cancelled sleeper or a ready listen socket cannot hold the run loop. */
+ * idle wait uses poll (and interruptible nanosleep when only timers remain).
+ * A cancelled sleeper or a ready listen socket cannot hold the run loop. */
 typedef struct SzIoResult {
   int ok; /* 1 success, 0 error */
   void *value;

@@ -49,7 +49,7 @@ enum Commands {
     Run {
         #[arg(default_value = ".")]
         path: PathBuf,
-        /// Force Headless UiRuntime (no display required)
+        /// Force Headless UiRuntime (no display needed)
         #[arg(long)]
         headless: bool,
         #[arg(long, default_value = "build")]
@@ -79,7 +79,7 @@ enum Commands {
         #[arg(long)]
         runtime_tests: bool,
     },
-    /// Format-check src/ + parse + typecheck (no codegen / link). JSON via --message-format=json.
+    /// Format-check src/ + parse + typecheck (no codegen / link). JSON with --message-format=json.
     Check {
         #[arg(default_value = ".")]
         path: PathBuf,
@@ -94,7 +94,7 @@ enum Commands {
     Fmt {
         #[arg(default_value = ".")]
         path: PathBuf,
-        /// Check only (nonzero exit if would reformat)
+        /// Check only (nonzero exit if files need reformat)
         #[arg(long)]
         check: bool,
     },
@@ -111,7 +111,7 @@ enum Commands {
         /// Deterministic LCG seed
         #[arg(long, default_value_t = 42)]
         seed: i64,
-        /// Exhaustive [ui] event alphabet (requires --depth)
+        /// Exhaustive [ui] event alphabet (needs --depth)
         #[arg(long)]
         exhaust: bool,
         /// Exhaustion depth (with --exhaust)
@@ -378,7 +378,7 @@ fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
     let effective = effective_ui_runtime(&manifest, headless);
     let use_headless = effective.eq_ignore_ascii_case("headless");
     let use_mobile = effective.eq_ignore_ascii_case("mobile");
-    let use_window = effective.eq_ignore_ascii_case("window")
+    let use_desktop = effective.eq_ignore_ascii_case("desktop")
         || (!use_headless && !use_mobile && manifest.ui.is_some());
 
     let out = build(path, &out_dir.to_path_buf(), true, false)?;
@@ -399,14 +399,14 @@ fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
             cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
         }
         eprintln!("scuzz run → UiRuntime.Mobile (host shell)");
-    } else if use_window {
-        // Window peer + desktop embedder (X11 / Cocoa) when available.
-        cmd.env("SCUZZ_UI_RUNTIME", "window");
+    } else if use_desktop {
+        // Desktop peer + desktop embedder (X11 / Cocoa) when available.
+        cmd.env("SCUZZ_UI_RUNTIME", "desktop");
         if let Some(ui) = &manifest.ui {
             cmd.env("SCUZZ_UI_WIDTH", ui.width().to_string());
             cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
         }
-        eprintln!("scuzz run → UiRuntime.Window (desktop embedder)");
+        eprintln!("scuzz run → UiRuntime.Desktop (desktop embedder)");
     }
     let status = cmd
         .status()
@@ -542,7 +542,7 @@ fn spawn_ui_keep(
     let effective = effective_ui_runtime(&manifest, headless);
     let use_headless = effective.eq_ignore_ascii_case("headless");
     let use_mobile = effective.eq_ignore_ascii_case("mobile");
-    let use_window = effective.eq_ignore_ascii_case("window")
+    let use_desktop = effective.eq_ignore_ascii_case("desktop")
         || (!use_headless && !use_mobile && manifest.ui.is_some());
     let out = build(path, &out_dir.to_path_buf(), true, false)?;
     let mut cmd = Command::new(&out.executable);
@@ -573,8 +573,8 @@ fn spawn_ui_keep(
             cmd.env("SCUZZ_UI_WIDTH", ui.width().to_string());
             cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
         }
-    } else if use_window {
-        cmd.env("SCUZZ_UI_RUNTIME", "window");
+    } else if use_desktop {
+        cmd.env("SCUZZ_UI_RUNTIME", "desktop");
         if let Some(ui) = &manifest.ui {
             cmd.env("SCUZZ_UI_WIDTH", ui.width().to_string());
             cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
@@ -966,7 +966,7 @@ fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         let name = entry.file_name();
-        // Skip caches / VCS junk (e.g. .gradle) so packaging stays template-only.
+        // Skip caches / VCS junk (for example .gradle). Packaging stays template-only.
         if name.to_string_lossy().starts_with('.') {
             continue;
         }

@@ -13,8 +13,8 @@ static void fill_cfg(SzUiConfig *cfg, int width, int height) {
   const char *rt = getenv("SCUZZ_UI_RUNTIME");
   memset(cfg, 0, sizeof(*cfg));
   cfg->kind = SZ_UI_RUNTIME_HEADLESS;
-  if (rt && (strcmp(rt, "window") == 0 || strcmp(rt, "Window") == 0))
-    cfg->kind = SZ_UI_RUNTIME_WINDOW;
+  if (rt && (strcmp(rt, "desktop") == 0 || strcmp(rt, "Desktop") == 0))
+    cfg->kind = SZ_UI_RUNTIME_DESKTOP;
   else if (rt && (strcmp(rt, "mobile") == 0 || strcmp(rt, "Mobile") == 0))
     cfg->kind = SZ_UI_RUNTIME_MOBILE;
   cfg->width = width;
@@ -540,7 +540,7 @@ static void *thunk_run_rebuild(void *env) {
     scripted_button_tap(session, inject_text);
   }
 
-  interactive = cfg.kind == SZ_UI_RUNTIME_WINDOW && sz_embedder_available();
+  interactive = cfg.kind == SZ_UI_RUNTIME_DESKTOP && sz_embedder_available();
   if (interactive) {
     const char *max_frames_env = getenv("SCUZZ_LIVE_FRAMES");
     int64_t max_frames =

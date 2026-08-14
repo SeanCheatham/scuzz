@@ -12,7 +12,7 @@ pub struct Manifest {
     pub targets: Targets,
     #[serde(default)]
     pub ui: Option<UiConfig>,
-    /// Named path dependencies, sorted by name via `BTreeMap`.
+    /// Named path dependencies, sorted by name with `BTreeMap`.
     #[serde(default)]
     pub dependencies: BTreeMap<String, PathDependency>,
 }
@@ -114,7 +114,7 @@ impl<'de> Deserialize<'de> for PathDependency {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct UiConfig {
-    /// `"headless"`, `"window"`, or `"mobile"` — default runtime for `scuzz run`
+    /// `"headless"`, `"desktop"`, or `"mobile"` — default runtime for `scuzz run`
     #[serde(default = "default_runtime")]
     pub default_runtime: String,
     /// `[width, height]` for Headless / Mobile goldens

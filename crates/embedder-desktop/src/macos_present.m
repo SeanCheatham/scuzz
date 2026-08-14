@@ -35,7 +35,7 @@ int sz_embedder_alive(void) {
 }
 
 /* AppKit must run on the process main thread. The Scuzz IO runtime often
- * executes on a large-stack worker; hop via the main queue (main parks in
+ * executes on a large-stack worker. Hop through the main queue (main parks in
  * CFRunLoop — see sz_runtime_main_args). */
 static void on_main(void (^block)(void)) {
   if ([NSThread isMainThread]) {

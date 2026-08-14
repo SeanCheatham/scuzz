@@ -14,16 +14,16 @@
 #include <unistd.h>
 
 /* Blessed Net.httpGet — live HTTP/1.0 GET or TestRuntime stub map.
- * Live hostnames query A and AAAA together (park on poll); CNAME chains
+ * Live hostnames query A and AAAA together (park on poll). CNAME chains
  * re-query both (cap 5). When both addresses exist, start AAAA first and wait
  * 250ms (RFC 8305) before the A connect so working IPv6 wins. DNS, connect,
- * and the response read each wait at most 1000ms; a partial DNS answer
+ * and the response read each wait at most 1000ms. A partial DNS answer
  * proceeds. IPv4 literals and `http://[::1]/` skip DNS. Failures use SzError
  * code 6. */
 
 typedef struct {
   int is_err;
-  int retry; /* 1 = accept EAGAIN; caller should poll again */
+  int retry; /* 1 = accept EAGAIN; caller must poll again */
   int drop;  /* 1 = close conn; persistent serve accepts the next client */
   union {
     SzError *err;
@@ -1041,12 +1041,12 @@ SzIo *sz_net_http_get(SzString *url) {
   return sz_io_flatmap(sz_io_delay(get_dispatch, st), get_after_dispatch, st);
 }
 
-/* HTTP/1.0 GET server. Listen and connection fds are nonblocking; the fiber
+/* HTTP/1.0 GET server. Listen and connection fds are nonblocking. The fiber
  * parks on poll so other IO can run. Live listen is 127.0.0.1 and ::1 (V6ONLY)
  * so httpGet literals on either loopback match. TestRuntime injects paths and
- * skips sockets. Request read and response write each wait at most 1000ms;
- * a timed-out, malformed, reset, or handler-failed client is dropped and
- * persistent serve accepts the next. Error code 6. serveOnce is one request;
+ * skips sockets. Request read and response write each wait at most 1000ms.
+ * A timed-out, malformed, reset, or handler-failed client is dropped.
+ * Persistent serve accepts the next. Error code 6. serveOnce is one request.
  * serve keeps the
  * listen sockets (n<=0 forever live, or until the TestRuntime queue is empty). */
 

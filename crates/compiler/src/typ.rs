@@ -304,7 +304,7 @@ fn enum_self_ty(en: &EnumDef) -> Type {
 pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
     let enums = EnumIndex::build(&program.enums, &program.imports)
         .map_err(|e| TypeError::Msg(e.to_string()))?;
-    // Validate via MethodIndex build.
+    // Validate with MethodIndex build.
     let _ = MethodIndex::build(&program.impls, &program.traits, &enums, &program.enums)?;
     for im in &program.impls {
         let for_en = enums
@@ -1240,8 +1240,8 @@ fn infer(
                         let want = resolve_type_in(fty, enums, &en.module, &en.type_params)?;
                         unify_construct(&want, &at, &mut subst)?;
                     }
-                    // Params the args did not determine stay opaque placeholders;
-                    // elaboration resolves them from the expected type or errors.
+                    // Params the args did not determine stay opaque placeholders.
+                    // Elaboration resolves them from the expected type or errors.
                     let targs = en
                         .type_params
                         .iter()
@@ -2401,7 +2401,7 @@ fn unify_types(
 ) -> Result<(), TypeError> {
     match (pattern, concrete) {
         // Opaque carries no information (untyped List elements, ambiguous
-        // generic ctors); callers check subst completeness afterwards.
+        // generic ctors). Callers check subst completeness afterwards.
         (Type::Opaque(_), _) | (_, Type::Opaque(_)) => Ok(()),
         (Type::Var(n), t) => {
             if let Some(prev) = subst.get(n) {
@@ -2434,8 +2434,8 @@ fn unify_types(
     }
 }
 
-/// Like `unify_types`, but for generic enum construction: def-scope type
-/// parameters (`Var`) may bind — concretization happens at monomorphization.
+/// Like `unify_types`, but for generic enum construction. Def-scope type
+/// parameters (`Var`) may bind. Concretization happens at monomorphization.
 fn unify_construct(
     pattern: &Type,
     concrete: &Type,
@@ -2451,7 +2451,7 @@ fn unify_construct(
                     )));
                 }
             } else if !contains_unbound(t) {
-                // Placeholder-laden types carry no information; the expected
+                // Placeholder-laden types carry no information. The expected
                 // type at the construction site fills the parameter instead.
                 subst.insert(n.clone(), t.clone());
             }
@@ -2491,8 +2491,8 @@ fn apply_subst(ty: &Type, subst: &HashMap<String, Type>) -> Type {
     }
 }
 
-/// Replace leftover `Var`s (enum type parameters that stayed unbound, e.g.
-/// behind an `Opaque` scrutinee) with opaque types.
+/// Replace leftover `Var`s (enum type parameters that stayed unbound, for
+/// example behind an `Opaque` scrutinee) with opaque types.
 fn erase_vars(ty: &Type, names: &[String]) -> Type {
     match ty {
         Type::Var(n) if names.iter().any(|p| p == n) => Type::Opaque(n.clone()),
@@ -2604,7 +2604,7 @@ fn mono_expr(
     let span = expr.span.clone();
     match expr.kind {
         ExprKind::Call { callee, args } => {
-            // Infer arg types BEFORE rewriting: processed args may reference
+            // Infer arg types BEFORE rewriting. Processed args may reference
             // monomorphized callees the pre-mono index cannot resolve.
             let orig_arg_tys: Option<Vec<Type>> = match funs.resolve(&callee, current_module) {
                 Ok(f) if !f.type_params.is_empty() => Some(
@@ -3124,9 +3124,9 @@ fn mono_expr(
 }
 
 /// Annotate generic enum constructions/patterns with their instantiations
-/// (`type_args`). Runs after typecheck in both `check` and `build`; errors when
-/// an instantiation is determined neither by constructor args nor by the
-/// expected type at the construction site.
+/// (`type_args`). Runs after typecheck in both `check` and `build`. Errors when
+/// constructor args and the expected type at the construction site do not
+/// determine an instantiation.
 pub fn elaborate_generics(mut program: Program) -> Result<Program, TypeError> {
     let enums_owned = program.enums.clone();
     let imports_owned = program.imports.clone();
@@ -3173,8 +3173,8 @@ pub fn elaborate_generics(mut program: Program) -> Result<Program, TypeError> {
     Ok(program)
 }
 
-/// An expected type is usable for filling a construction's instantiation when
-/// it carries no opaque holes and its type variables are in scope.
+/// An expected type can fill a construction's instantiation when
+/// it has no opaque holes and its type variables are in scope.
 fn usable_expected(ty: &Type, tparams: &[String]) -> bool {
     match ty {
         Type::Opaque(_) => false,
@@ -3424,8 +3424,8 @@ fn elaborate_expr(
             if let Ok(f) = funs.resolve(&callee, current_module) {
                 let mut subst: HashMap<String, Type> = HashMap::new();
                 for (a, p) in args.iter().zip(f.params.iter()) {
-                    // Lambda args mention binder names that are unbound here;
-                    // they contribute nothing to the constructor substitution.
+                    // Lambda args mention binder names that are unbound here.
+                    // They contribute nothing to the constructor substitution.
                     if let Ok(at) = infer(a, enums, funs, methods, current_module, env) {
                         let want = resolve_type_in(&p.ty, enums, &f.module, &f.type_params)?;
                         unify_construct(&want, &at, &mut subst)?;
@@ -4377,7 +4377,7 @@ fn concretize_type(
     }
 }
 
-/// Clone generic enums per concrete instantiation; erase `App` everywhere.
+/// Clone generic enums per concrete instantiation. Erase `App` everywhere.
 /// Runs at the end of monomorphization so codegen only sees concrete enums.
 fn specialize_enums(mut program: Program) -> Result<Program, TypeError> {
     let enums_owned = program.enums.clone();
@@ -4484,7 +4484,7 @@ fn specialize_enums(mut program: Program) -> Result<Program, TypeError> {
     }
     program.enums.retain(|e| e.type_params.is_empty());
     program.enums.extend(clone_defs);
-    // Generic templates are gone; drop impls that targeted them so later
+    // Generic templates are gone. Drop impls that targeted them so later
     // MethodIndex rebuilds (second resolve_field_access) still typecheck.
     program
         .impls
@@ -5674,7 +5674,7 @@ def wrap2(x: Int): Opt[Opt[Int]] = Opt.Some(Opt.Some(x))
     #[test]
     fn mono_handles_generic_call_inside_for_binder() {
         // A specialized call inside a `<-` binder must not be re-inferred
-        // against the pre-mono index (mangled names are not in it).
+        // against the pre-mono index. Mangled names are not in it.
         let src = r#"
 def id[T](x: T): T = x
 @main def main: IO[Unit] =

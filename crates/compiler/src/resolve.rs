@@ -1,7 +1,7 @@
 //! File-as-module name resolution and LLVM symbol mangling.
 //!
-//! Module id = source file stem (`Foo.scuzz` → `Foo`). Defs and enums are
-//! namespaced. Bare names resolve locally first, then via `import Module.name`
+//! Module id is the source file stem (`Foo.scuzz` → `Foo`). Defs and enums are
+//! namespaced. Bare names resolve locally first, then through `import Module.name`
 //! in the current module, then to a unique cross-module **public** def/enum
 //! when unambiguous. `private def` is only visible within its module
 //! (qualified or bare). Enums have no privacy yet.

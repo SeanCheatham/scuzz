@@ -1,13 +1,13 @@
 [package]
 name = "live"
 version = "0.1.0"
-description = "Stay-open Window demo (q/Esc to quit)"
+description = "Stay-open Desktop demo (q/Esc to quit)"
 
 [targets.native]
 kind = "executable"
 main = "Main"
 
 [ui]
-default_runtime = "window"
+default_runtime = "desktop"
 headless_size = [320, 180]
 headless_scale = 1.0

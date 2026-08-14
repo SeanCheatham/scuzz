@@ -1,21 +1,21 @@
 # embedder-desktop
 
-OS window presentation for `UiRuntime.Window`. Headless remains the CI peer.
+OS window presentation for `UiRuntime.Desktop`. Headless remains the CI peer.
 
 `libscuzz_embedder.a` opens a native window and blits RGBA frames after `pump`.
 Linked when present.
 
 ## Linux (X11)
 
-- Requires `DISPLAY` (use `xvfb-run` in CI)
+- Needs `DISPLAY` (use `xvfb-run` in CI)
 - Press `q` / Escape to close during `present`
-- Without `DISPLAY`, Window stays offscreen
+- Without `DISPLAY`, Desktop stays offscreen
 - Link: `-lX11`
 - `sz_embedder_alive` is 0 after quit (stay-open apps stop pumping)
 
 ## macOS (Cocoa)
 
-- Requires a GUI session (main display); otherwise Window stays offscreen
+- Needs a GUI session (main display). Otherwise Desktop stays offscreen.
 - Press `q` / Escape to close during `present`
 - AppKit runs on the process main thread (`dispatch_sync` from the IO worker;
   `sz_runtime_main_args` parks main in the CFRunLoop)

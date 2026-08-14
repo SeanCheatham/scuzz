@@ -12,7 +12,7 @@ extern "C" {
 /* UiRuntime peer interpreters. Headless is first-class. */
 typedef enum SzUiRuntimeKind {
   SZ_UI_RUNTIME_HEADLESS = 1,
-  SZ_UI_RUNTIME_WINDOW = 2,
+  SZ_UI_RUNTIME_DESKTOP = 2,
   SZ_UI_RUNTIME_MOBILE = 3
 } SzUiRuntimeKind;
 
@@ -20,8 +20,8 @@ typedef struct SzUiConfig {
   SzUiRuntimeKind kind;
   int width;
   int height;
-  double scale; /* Window: display backing scale; Headless: from SCUZZ_UI_SCALE */
-  const char *title; /* Window / Mobile; may be NULL */
+  double scale; /* Desktop: display backing scale; Headless: from SCUZZ_UI_SCALE */
+  const char *title; /* Desktop / Mobile; may be NULL */
 } SzUiConfig;
 
 typedef enum SzPointerPhase {
@@ -244,21 +244,21 @@ void sz_ui_session_take_root(SzUiSession *session);
 /* Swap the View tree. Signals are not freed or reset. If the session owns the
  * view, the previous root is freed. Marks dirty so the next pump relayouts. */
 int sz_ui_session_replace_root(SzUiSession *session, SzView *root);
-/* Rebuild factory for stamp-watch / reload. Must return a new tree; Signals
+/* Rebuild factory for stamp-watch / reload. Must return a new tree. Signals
  * stay with the caller. env is not owned. */
 typedef SzView *(*SzUiRebuildFn)(void *env);
 void sz_ui_session_set_rebuild(SzUiSession *session, SzUiRebuildFn fn, void *env);
 /* Watch a stamp file. Next pump that sees different contents calls rebuild
- * then replace_root. Missing file snapshots as empty. Headless, Window, and
+ * then replace_root. Missing file snapshots as empty. Headless, Desktop, and
  * Mobile share this path. */
 int sz_ui_session_watch(SzUiSession *session, const char *path);
 /* Live structural dump (same format as SCUZZ_FUZZ_DUMP) rewritten on dirty
  * pumps, stamp reload, and IO-bridge flushes. Agents read the file.
  * [taps] lists inject indices for `tap N` (scan order, cap 64).
- * [fields] lists TextFields in a11y order; `N*` is the text/type/backspace
+ * [fields] lists TextFields in a11y order. `N*` is the text/type/backspace
  * target (focused, else first). Lines are `N placeholder="live"` (star on
- * the target). `text N s` / `type N s` / `backspace N k` target dump index N
- * (one-token forms still use the starred field).
+ * the target). `text N s` / `type N s` / `backspace N k` target dump index N.
+ * One-token forms still use the starred field.
  * [scrolls] lists hittable Scrolls in scan order; `scroll N dy` pans index N
  * (`scroll 40` stays the first). */
 int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);

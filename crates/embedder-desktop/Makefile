@@ -1,4 +1,4 @@
-# Window presenter: Linux X11 or Darwin Cocoa. Skipped elsewhere (Headless still works).
+# Desktop presenter: Linux X11 or Darwin Cocoa. Skipped elsewhere (Headless still works).
 UNAME_S := $(shell uname -s)
 CC ?= clang
 CFLAGS ?= -std=c11 -Wall -Wextra -Werror -O2

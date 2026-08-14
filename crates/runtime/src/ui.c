@@ -117,7 +117,7 @@ static char *sz_strdup(const char *s) {
 }
 
 static int runtime_kind_ok(SzUiRuntimeKind kind) {
-  return kind == SZ_UI_RUNTIME_HEADLESS || kind == SZ_UI_RUNTIME_WINDOW ||
+  return kind == SZ_UI_RUNTIME_HEADLESS || kind == SZ_UI_RUNTIME_DESKTOP ||
          kind == SZ_UI_RUNTIME_MOBILE;
 }
 
@@ -149,8 +149,8 @@ SzUiSession *sz_ui_mount(const SzUiConfig *cfg, SzView *root) {
   s->cfg = *cfg;
   if (s->cfg.scale <= 0.0)
     s->cfg.scale = 1.0;
-  /* Window: prefer OS backing scale so Retina text stays sharp. */
-  if (s->cfg.kind == SZ_UI_RUNTIME_WINDOW && sz_embedder_available()) {
+  /* Desktop: prefer OS backing scale so Retina text stays sharp. */
+  if (s->cfg.kind == SZ_UI_RUNTIME_DESKTOP && sz_embedder_available()) {
     double ds = sz_embedder_display_scale();
     if (ds > s->cfg.scale)
       s->cfg.scale = ds;
@@ -172,14 +172,14 @@ SzUiSession *sz_ui_mount(const SzUiConfig *cfg, SzView *root) {
   }
   s->canvas = sk_surface_get_canvas(s->surface);
   s->dirty = 1;
-  if (cfg->kind == SZ_UI_RUNTIME_WINDOW) {
+  if (cfg->kind == SZ_UI_RUNTIME_DESKTOP) {
     if (sz_embedder_available()) {
       fprintf(stderr,
-              "scuzz: UiRuntime.Window mounted (desktop embedder, scale=%.2f)\n",
+              "scuzz: UiRuntime.Desktop mounted (desktop embedder, scale=%.2f)\n",
               s->cfg.scale);
     } else {
       fprintf(stderr,
-              "scuzz: UiRuntime.Window mounted (offscreen; no desktop embedder)\n");
+              "scuzz: UiRuntime.Desktop mounted (offscreen; no desktop embedder)\n");
     }
   } else if (cfg->kind == SZ_UI_RUNTIME_MOBILE) {
     if (sz_mobile_available()) {
@@ -476,7 +476,7 @@ void sz_ui_unmount(SzUiSession *session) {
   if (!session)
     return;
   sz_ui_bridge_flush(session);
-  if (session->cfg.kind == SZ_UI_RUNTIME_WINDOW)
+  if (session->cfg.kind == SZ_UI_RUNTIME_DESKTOP)
     sz_embedder_shutdown();
   if (session->cfg.kind == SZ_UI_RUNTIME_MOBILE) {
     sz_mobile_set_keyboard(0);
@@ -512,7 +512,7 @@ static void drain_mobile_events(SzUiSession *session) {
 
 static void drain_desktop_events(SzUiSession *session) {
   SzInputEvent ev;
-  if (!session || session->cfg.kind != SZ_UI_RUNTIME_WINDOW)
+  if (!session || session->cfg.kind != SZ_UI_RUNTIME_DESKTOP)
     return;
   if (!sz_embedder_available())
     return;
@@ -900,7 +900,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
     paint_theme.radius *= scale;
     theme = &paint_theme;
   }
-  /* Paint in device pixels; layout is restored to logical points afterward
+  /* Paint in device pixels. Layout is restored to logical points afterward
    * so hit-testing / inject stay in the same space as embedder events. */
   if (!sz_view_paint(session->root, session->canvas, pw, ph, theme))
     return 0;
@@ -908,8 +908,8 @@ int sz_ui_pump_sync(SzUiSession *session) {
     sz_view_layout(session->root, (float)session->cfg.width,
                    (float)session->cfg.height, session->theme);
   session->dirty = 0;
-  /* Window peer: present to OS surface when embedder is available. */
-  if (session->cfg.kind == SZ_UI_RUNTIME_WINDOW && sz_embedder_available()) {
+  /* Desktop peer: present to OS surface when embedder is available. */
+  if (session->cfg.kind == SZ_UI_RUNTIME_DESKTOP && sz_embedder_available()) {
     rgba = sk_surface_peek_pixels(session->surface, &nbytes);
     if (rgba) {
       sz_embedder_present(session->cfg.title, session->cfg.width,
@@ -938,7 +938,7 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
   if (!session->root)
     return 0;
 
-  /* Ensure frames are current for hit / scroll targeting. */
+  /* Make frames current for hit / scroll targeting. */
   sz_view_layout(session->root, (float)session->cfg.width,
                  (float)session->cfg.height, session->theme);
 

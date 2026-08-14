@@ -60,7 +60,7 @@ jobs:
         if: runner.os == 'macOS'
         run: brew install brotli bzip2
 
-      - name: Install Rust (stable via rust-toolchain.toml)
+      - name: Install Rust (stable with rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@stable
 
       - name: Package release + install-from-tarball smoke

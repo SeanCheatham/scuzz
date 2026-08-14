@@ -92,12 +92,12 @@ static void test_session_snapshot(void) {
   sz_view_free(root);
   sz_signal_int_free(count);
 
-  cfg.kind = SZ_UI_RUNTIME_WINDOW;
+  cfg.kind = SZ_UI_RUNTIME_DESKTOP;
   cfg.title = "test";
   view = sz_view_text("Win");
   session = sz_ui_mount(&cfg, view);
   assert(session);
-  assert(sz_ui_session_kind(session) == SZ_UI_RUNTIME_WINDOW);
+  assert(sz_ui_session_kind(session) == SZ_UI_RUNTIME_DESKTOP);
   assert(sz_ui_pump_sync(session));
   assert(sz_ui_snapshot_png_sync(session, path_b));
   sz_ui_unmount(session);
@@ -1218,7 +1218,7 @@ static void test_mobile_pointer_scroll_lifecycle(void) {
   assert(sz_ui_inject_sync(session, &ev));
   assert(strcmp(sz_signal_str_get(draft), "milk") == 0);
 
-  /* Scroll gesture via POINTER move on the Scroll viewport. */
+  /* Scroll gesture through POINTER move on the Scroll viewport. */
   sz_view_layout(root, 200.f, 160.f, theme);
   y0 = sz_view_scroll_y(scroll);
   memset(&ev, 0, sizeof(ev));
@@ -1682,8 +1682,8 @@ static void test_alloc_counter_pump_flat(void) {
     if (live_count > max_count)
       max_count = live_count;
   }
-  /* live_count flat = no per-pump leak; live_bytes may grow a few bytes when
-   * the mapped label gains digits (e.g. "9" → "10"), same allocation count. */
+  /* live_count flat = no per-pump leak. live_bytes may grow a few bytes when
+   * the mapped label gains digits (for example "9" → "10"). Same allocation count. */
   assert(live_count == base_count);
   assert(live_bytes <= base_bytes + 32);
   assert(max_count <= base_count + 16);

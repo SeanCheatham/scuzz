@@ -20,7 +20,7 @@ struct SzSignalInt {
 
 struct SzSignalStr {
   char *value;
-  /* Derived from Signal.int via map (recomputed on get). */
+  /* Derived from Signal.int through map (recomputed on get). */
   SzSignalInt *map_src;
   SzSignalMapIntFn map_fn;
   void *map_env;
@@ -31,7 +31,7 @@ struct SzSignalList {
 };
 
 /* --- signal store registry (fuzz / dump oracle) --------------------------- */
-/* Every live signal, in creation order. Ids are monotonic so a dump stays
+/* Every live signal, in creation order. Ids are monotonic. A dump stays
    stable across frees. */
 
 typedef enum { SIG_INT = 1, SIG_STR = 2, SIG_LIST = 3 } SigKind;

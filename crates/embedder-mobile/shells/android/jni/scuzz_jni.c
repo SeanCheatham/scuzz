@@ -1,10 +1,10 @@
 /* Android JNI packaging shell.
  *
- * Maps MotionEvent / lifecycle / InputConnection onto SzInputEvent and drives
- * the same UiSession protocol as Headless / Window / host mobile shell.
+ * Maps MotionEvent / lifecycle / InputConnection onto SzInputEvent. Drives
+ * the same UiSession protocol as Headless / Desktop / host mobile shell.
  *
- * This file is a compile-shaped stub: it includes the C ABI and shows the
- * mount → inject → pump → present loop. Real JNI glue is filled when an NDK
+ * This file is a compile-shaped stub. It includes the C ABI and shows the
+ * mount → inject → pump → present loop. Fill real JNI glue when an NDK
  * toolchain is available.
  */
 
@@ -78,5 +78,5 @@ void scuzz_android_unmount(void) {
 }
 
 /* Strong mobile present for on-device shells: pixels are handed to a Surface
- * View by the Java side after peeking via a host-provided callback. Until the
+ * View by the Java side after peeking through a host-provided callback. Until the
  * NDK link step, prefer the host shell simulator on Linux CI. */

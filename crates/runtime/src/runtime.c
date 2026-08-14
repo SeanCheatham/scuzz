@@ -731,7 +731,7 @@ static SzIo *ignore_then_io(void *ignored, void *env) {
 }
 
 /* Sequence finalizers LIFO (top of stack first). Takes ownership of ENSURE
- * frames' finalizer pointers; frees the whole cont stack. */
+ * frames' finalizer pointers. Frees the whole cont stack. */
 static SzIo *drain_ensure_finalizers(ContFrame *stack) {
   SzIo *acc = NULL;
   ContFrame *c = stack;
@@ -1782,7 +1782,7 @@ static SzIoResult run_io(SzIo *root) {
 
 SzIoResult sz_io_unsafe_run(SzIo *root) { return run_io(root); }
 
-/* UI callbacks (taps, Signal.map over IO) have no error channel; an unhandled
+/* UI callbacks (taps, Signal.map over IO) have no error channel. An unhandled
    failure mirrors main: report and die so fuzz/tests observe it. */
 void *sz_io_unsafe_run_or_die(SzIo *root) {
   SzIoResult r = run_io(root);
@@ -1842,8 +1842,8 @@ static void *sz_runtime_main_worker(void *arg) {
 
 int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
   /* Run the program on a heap-allocated stack so generated IR (deep but
-   * bounded) does not depend on the process main-thread ulimit — required on
-   * macOS where `ulimit -s` cannot grow the main stack. */
+   * bounded) does not depend on the process main-thread ulimit. Required on
+   * macOS. `ulimit -s` cannot grow the main stack. */
   SzMainArgs args;
   pthread_t thr;
   pthread_attr_t attr;
@@ -1876,7 +1876,7 @@ int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
   }
 #if defined(__APPLE__)
   /* Keep the process main thread in the CFRunLoop so AppKit work (NSWindow)
-   * dispatched from the worker can run. A plain pthread_join would deadlock
+   * dispatched from the worker can run. A plain pthread_join deadlocks
    * with dispatch_sync to the main queue. */
   while (!g_sz_main_worker_done) {
     CFRunLoopRunInMode(kCFRunLoopDefaultMode, 0.05, true);

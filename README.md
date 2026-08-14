@@ -1,16 +1,16 @@
 # Scuzz Lang
 
-Scuzz is a Scala-inspired language for native UI, CLI, and server apps. It compiles to LLVM, has builtin `IO` (ZIO-shaped, not a ZIO port), and treats UI as a `Ui` effect. Headless, Window, and Mobile are all real runtimes.
+Scuzz is a Scala-inspired language for native UI, CLI, and server apps. It compiles to LLVM. Builtin `IO` is ZIO-shaped. It is not a ZIO port. UI is a `Ui` effect. Headless, Desktop, and Mobile are real runtimes.
 
-Not Scala 3, not the JVM, not a cats-effect port. Scala Native is a reference, not a dependency.
+Scuzz is not Scala 3. It is not the JVM. It is not a cats-effect port. Scala Native is a reference, not a dependency.
 
 ## Goals
 
 - **Language:** Scala-inspired subset for UI, CLI, server, and mobile. `for` is the binder (`=` pure, `<-` effect). I/O goes through `IO`.
 - **Runtime:** native LLVM. No VM, no Java, no classpath.
-- **UI:** `View` is pure, state lives in `Signal`, `Ui.run` is the session. Skia-shaped canvas.
+- **UI:** `View` is pure. State lives in `Signal`. `Ui.run` is the session. Canvas is Skia-shaped.
 - **Tooling:** one CLI (`scuzz`) for build, run, format, check, fuzz, and package.
-- **Testing:** laws, fuzz, simulation, and determinism are built in, not a third-party harness.
+- **Testing:** laws, fuzz, simulation, and determinism are built in. Do not add a third-party harness.
 
 Product intent: [docs/vision.md](docs/vision.md). App path: [docs/guide.md](docs/guide.md).
 
@@ -20,19 +20,19 @@ Product intent: [docs/vision.md](docs/vision.md). App path: [docs/guide.md](docs
 curl -fsSL https://github.com/SeanCheatham/scuzz/releases/latest/download/install.sh | sh
 ```
 
-Installs `scuzz` under `~/.local/share/scuzz` with a wrapper at `~/.local/bin/scuzz`. Put that `bin` dir on `PATH`:
+The script installs `scuzz` under `~/.local/share/scuzz`. It puts a wrapper at `~/.local/bin/scuzz`. Put that `bin` dir on `PATH`:
 
 ```bash
 export PATH="$HOME/.local/bin:$PATH"
 ```
 
-Apps need `clang` and `make`. Linux `[ui]` linking also needs zlib, bzip2, and brotli (`zlib1g-dev libbz2-dev libbrotli-dev`). Pin a release with `SCUZZ_VERSION=v0.1.0` on the same `curl | sh` line. From a checkout, `./scripts/install.sh` packages and installs it.
+Apps need `clang` and `make`. Linux `[ui]` linking also needs zlib, bzip2, and brotli (`zlib1g-dev libbz2-dev libbrotli-dev`). Pin a release with `SCUZZ_VERSION=v0.1.0` on the same `curl | sh` line. From a checkout, `./scripts/install.sh` packages and installs the tree.
 
 ```bash
 scuzz new myapp --ui
 cd myapp
 scuzz test
-scuzz run --headless    # Window: scuzz run
+scuzz run --headless    # Desktop: scuzz run
 ```
 
 `install.sh --help` lists flags and env vars.

@@ -1,5 +1,5 @@
-//! Tiny LSP wrapping `check_project` — same diagnostics as `--message-format=json`.
-//! No second typer; unsaved buffers are ignored until they hit disk.
+//! Small LSP wrapping `check_project`. Same diagnostics as `--message-format=json`.
+//! No second typer. Unsaved buffers are ignored until they hit disk.
 
 use crate::check::{check_project, Diagnostic};
 use crate::overlay::collect_fmt_sources;

@@ -4,7 +4,7 @@ use crate::span::Span;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Program {
-    /// Dotted package path, e.g. `["scuzz", "compiler"]`.
+    /// Dotted package path, for example `["scuzz", "compiler"]`.
     pub package: Vec<String>,
     pub enums: Vec<EnumDef>,
     pub traits: Vec<TraitDef>,
@@ -496,7 +496,7 @@ pub enum ExprKind {
     StrLit(String),
     /// List literal `[a, b, c]`
     ListLit { elems: Vec<Expr> },
-    /// `s"...$x..."` / `s"...${expr}..."` — typed concat (Int holes via `Str.fromInt`).
+    /// `s"...$x..."` / `s"...${expr}..."` — typed concat (Int holes through `Str.fromInt`).
     Interpolate { parts: Vec<InterpPart> },
     /// `if (cond) then else else_`
     If {

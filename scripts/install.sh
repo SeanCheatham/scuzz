@@ -3,7 +3,7 @@
 #
 # Installs a self-contained release tree under $PREFIX/share/scuzz and a
 # wrapper at $PREFIX/bin/scuzz that sets SCUZZ_HOME. App builds need
-# clang/make; Linux [ui] linking against the packaged Skia CPU prebuilt also
+# clang/make. Linux [ui] linking against the packaged Skia CPU prebuilt also
 # needs zlib/bzip2/brotli. Rust/cargo is not required when installing from a
 # prebuilt artifact (RELEASE_TGZ / RELEASE_DIR / GitHub Release). From a
 # checkout, `package_release.sh` builds the Rust CLI.
@@ -122,8 +122,8 @@ is_latest_version() {
   [ -z "$SCUZZ_VERSION" ] || [ "$SCUZZ_VERSION" = "latest" ]
 }
 
-# Skia CPU releases share this repo; pick the newest tag matching v[0-9]* rather
-# than GitHub's /releases/latest (which may be skia-cpu-v*).
+# Skia CPU releases share this repo. Pick the newest tag matching v[0-9]*.
+# Do not use GitHub's /releases/latest (it may be skia-cpu-v*).
 resolve_release_tag() {
   if ! is_latest_version; then
     TAG="$SCUZZ_VERSION"
@@ -337,7 +337,7 @@ echo "  SCUZZ_HOME=$SHARE"
 if [ -f "$SHARE/VERSION" ]; then
   echo "  $(tr '\n' ' ' <"$SHARE/VERSION")"
 fi
-echo "Ensure $BIN is on PATH (clang + make required to build apps;"
+echo "Put $BIN on PATH (clang + make required to build apps;"
 echo "  Linux [ui] also needs zlib/bzip2/brotli: zlib1g-dev libbz2-dev libbrotli-dev), then:"
 echo "  scuzz new myapp --ui"
 echo "  cd myapp && scuzz test && scuzz run --headless"

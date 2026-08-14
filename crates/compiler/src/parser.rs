@@ -65,8 +65,8 @@ pub fn parse_file(source: &str, file: &str) -> Result<Program, ParseError> {
     p.parse_program()
 }
 
-/// Parse multiple source files into one program (packages must agree; defs and
-/// enums are namespaced by file-stem module — same bare name in two modules is allowed).
+/// Parse multiple source files into one program. Packages must agree. Defs and
+/// enums are namespaced by file-stem module. The same bare name in two modules is allowed.
 pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError> {
     let mut package: Option<Vec<String>> = None;
     let mut enums: Vec<EnumDef> = Vec::new();
@@ -631,7 +631,7 @@ impl Parser {
         Ok(methods)
     }
 
-    /// Enum methods sit in the colon body (`  def …`). A column-0 `def` is a following free def.
+    /// Enum methods sit in the colon body (`  def …`). A column-0 `def` is the next free def.
     fn parse_indented_methods(
         &mut self,
         type_params: &[String],

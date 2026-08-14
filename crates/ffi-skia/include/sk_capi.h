@@ -1,7 +1,7 @@
 /* Thin Skia-shaped C ABI for Scuzz Lang.
  *
  * Default backend is a fetched Skia CPU prebuilt (third_party/skia/PIN).
- * In-tree sk_sw remains available via SCUZZ_SKIA=sk_sw for offline/exotic
+ * In-tree sk_sw stays available with SCUZZ_SKIA=sk_sw for offline/exotic
  * hosts (see third_party/skia/README.md). Callers depend only on this header.
  */
 #ifndef SK_CAPI_H

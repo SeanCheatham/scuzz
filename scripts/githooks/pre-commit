@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Fast local gate — not a CI substitute. Install: ./scripts/install-githooks.sh
+# Fast local gate. Not a CI substitute. Install: ./scripts/install-githooks.sh
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
@@ -42,7 +42,7 @@ if [[ ${#RS[@]} -gt 0 ]]; then
 fi
 
 # --- compile-only -Werror for staged C under crates/{runtime,ffi-skia,embedder-*} ---
-# Catches undeclared APIs (e.g. usleep under POSIX.1-2008) without linking Skia.
+# Catches undeclared APIs (for example usleep under POSIX.1-2008) without linking Skia.
 compile_c() {
   local src="$1"
   local includes=()
