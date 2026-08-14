@@ -2,4 +2,4 @@
 
 ## Next
 
-**DNS query timeout for `Net.httpGet`** — TCP connect waits at most 1s. A nameserver that never answers still parks on UDP recv until the OS gives up. Next: fail DNS after a bounded wait.
+**HTTP read timeout for `Net.httpGet`** — DNS and TCP connect each wait at most 1s. A peer that accepts and never sends still parks on read until the OS gives up. Next: fail the response wait after a bounded wait.

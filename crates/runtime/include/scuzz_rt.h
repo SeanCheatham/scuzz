@@ -367,7 +367,7 @@ int64_t sz_clock_monotonic_ms_sync(void); /* sync read for UI pump dt */
 
 SzIo *sz_random_next_int(int64_t bound); /* IO[Int] in [0, bound) */
 
-SzIo *sz_net_http_get(SzString *url); /* IO[String] body; A+AAAA; 250ms v6 pref; 1s connect */
+SzIo *sz_net_http_get(SzString *url); /* IO[String] body; A+AAAA; 250ms v6 pref; 1s DNS+connect */
 SzIo *sz_net_serve_once(int64_t port, SzCont handler, void *env); /* IO[Unit]; one GET; 127.0.0.1 + ::1 */
 SzIo *sz_net_serve(int64_t port, SzCont handler, void *env); /* IO[Unit]; keep listen; 127.0.0.1 + ::1 */
 /* Test-only: UDP nameserver for live httpGet DNS. NULL ip restores /etc/resolv.conf. */

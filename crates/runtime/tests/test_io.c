@@ -1647,6 +1647,36 @@ int main(void) {
     assert(t1 - t0 < 2500);
   }
 
+  /* Silent nameserver: DNS fails in ~1s instead of parking on UDP recv. */
+  {
+    int dns_fd;
+    struct sockaddr_in addr;
+    socklen_t alen = sizeof addr;
+    int64_t t0;
+    int64_t t1;
+    dns_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    assert(dns_fd >= 0);
+    memset(&addr, 0, sizeof addr);
+    addr.sin_family = AF_INET;
+    addr.sin_port = 0;
+    assert(inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) == 1);
+    assert(bind(dns_fd, (struct sockaddr *)&addr, sizeof addr) == 0);
+    alen = sizeof addr;
+    assert(getsockname(dns_fd, (struct sockaddr *)&addr, &alen) == 0);
+    sz_net_test_set_nameserver("127.0.0.1", (int)ntohs(addr.sin_port));
+    t0 = sz_clock_monotonic_ms_sync();
+    r = sz_io_unsafe_run(
+        sz_net_http_get(sz_string_from_cstr("http://silent.test/x")));
+    t1 = sz_clock_monotonic_ms_sync();
+    close(dns_fd);
+    sz_net_test_set_nameserver(NULL, 0);
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "DNS timed out"));
+    sz_error_free(r.error);
+    assert(t1 - t0 >= 900);
+    assert(t1 - t0 < 2500);
+  }
+
   /* Live httpGet DNS parks on UDP poll; a peer fiber runs before the answer. */
   {
     pthread_t th;
