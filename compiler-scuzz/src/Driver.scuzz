@@ -314,6 +314,7 @@ def driverParamOk(t: Type): Int =
   t match {
     case Type.Int => 1
     case Type.String => 1
+    case Type.Bool => 1
     case _ => 0
   }
 
@@ -376,7 +377,7 @@ def checkDriverDef(prog: Prog, d: Def, label: String): IO[Unit] =
   for {
     name = defName(d)
     params = defParams(d)
-  } yield if (defIsLaw(d) == 1) IO.fail(str3(label, ": *.scuzz_drivers must not declare a law", "")) else if (findDefNamed(progDefs(prog), defModule(d), name) == 1) IO.fail(str4(label, ": driver `", name, "` collides with a live def")) else if (driverRetOk(declRet(d)) == 0) IO.fail(str4(label, ": driver `", name, "` must return IO[Unit]")) else if (List.len(params) > 1) IO.fail(str4(label, ": driver `", name, "` takes at most one Int or String param")) else if (List.isEmpty(params) == 0) if (driverParamOk(paramType(List.head(params))) == 0) IO.fail(str4(label, ": driver `", name, "` param must be Int or String")) else if (exprHasLaw(defBody(d)) == 1) IO.fail(str4(label, ": driver `", name, "` must not call Law.*")) else IO.pure(()) else if (exprHasLaw(defBody(d)) == 1) IO.fail(str4(label, ": driver `", name, "` must not call Law.*")) else IO.pure(())
+  } yield if (defIsLaw(d) == 1) IO.fail(str3(label, ": *.scuzz_drivers must not declare a law", "")) else if (findDefNamed(progDefs(prog), defModule(d), name) == 1) IO.fail(str4(label, ": driver `", name, "` collides with a live def")) else if (driverRetOk(declRet(d)) == 0) IO.fail(str4(label, ": driver `", name, "` must return IO[Unit]")) else if (List.len(params) > 1) IO.fail(str4(label, ": driver `", name, "` takes at most one Int, String, or Bool param")) else if (List.isEmpty(params) == 0) if (driverParamOk(paramType(List.head(params))) == 0) IO.fail(str4(label, ": driver `", name, "` param must be Int, String, or Bool")) else if (exprHasLaw(defBody(d)) == 1) IO.fail(str4(label, ": driver `", name, "` must not call Law.*")) else IO.pure(()) else if (exprHasLaw(defBody(d)) == 1) IO.fail(str4(label, ": driver `", name, "` must not call Law.*")) else IO.pure(())
 
 def applyDriverDefs(prog: Prog, defs: List, label: String): IO[Prog] =
   if (List.isEmpty(defs) == 1) IO.pure(prog) else checkDriverDef(prog, List.head(defs), label).flatMap(_ => applyDriverDefs(setProgDefs(prog, listConcat(progDefs(prog), List.cons(List.head(defs), List.empty()))), List.tail(defs), label))
@@ -392,7 +393,7 @@ def applyDrivers(prog: Prog, ovs: List): IO[Prog] =
   if (List.isEmpty(ovs) == 1) IO.pure(prog) else applyOneDriver(prog, List.head(ovs)).flatMap(p2 => applyDrivers(p2, List.tail(ovs)))
 
 def driverKindSuffix(params: List): String =
-  if (List.isEmpty(params) == 1) "" else if (tyEq(paramType(List.head(params)), Type.String) == 1) " s" else " i"
+  if (List.isEmpty(params) == 1) "" else if (tyEq(paramType(List.head(params)), Type.String) == 1) " s" else if (tyEq(paramType(List.head(params)), Type.Bool) == 1) " b" else " i"
 
 def driverTableAcc(defs: List, acc: String): String =
   if (List.isEmpty(defs) == 1) acc else driverTableAcc(List.tail(defs), Str.concat(acc, str3(defName(List.head(defs)), driverKindSuffix(defParams(List.head(defs))), "\n")))

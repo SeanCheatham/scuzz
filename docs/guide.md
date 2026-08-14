@@ -96,7 +96,7 @@ src/
 - `where` on `def` params and `record` fields is a Bool predicate; the checker inserts `Law.check` at call / construction under the verify graph and erases it live
 - `Law.check(name, ok, value)` is identity live and panics under TestRuntime when `ok` is false; `Law.sometimes(name)` records path reachability (`Unit`, not a value method); fuzz fails the campaign if a string-literal name is never hit
 - Observation builtins: `Law.signalInt(id)`, `Law.signalStr(id)`, `Law.signalListLen(id)`, `Law.signalListAt(id, i)`, `Law.a11yHas(needle)` (signal store + stashed a11y dump)
-- Drivers are new `IO[Unit]` defs (0 or 1 `Int`/`String` param); `check` rejects `Law.*` and `.require` inside them; fuzz scripts gain `drive <name> [args]`
+- Drivers are new `IO[Unit]` defs (0 or 1 `Int`/`String`/`Bool` param); `check` rejects `Law.*` and `.require` inside them; fuzz scripts gain `drive <name> [args]` (`true`/`false` for Bool)
 - No `src/test` twin trees — only stem-paired `*.scuzz_sim` / `*.scuzz_drivers`; no third-party test or mutation frameworks
 - Example: `examples/counter` + `examples/shared` (`Shared.scuzz_sim` swaps `counterTitle`; `countLabel` uses `.require`; `noteDrive(n: Int where n >= 0)` residualizes at `plusN`; `+1` records `Law.sometimes("tappedPlus")`; `Main.scuzz` applies count / label / button / sim-title oracles via `.require` on `Ui.run`). `examples/record` uses `where` on `Point.x`.
 

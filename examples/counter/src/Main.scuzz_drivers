@@ -1,3 +1,6 @@
 def plusN(n: Int): IO[Unit] =
   IO.pure(noteDrive(n))
 
+def flagDrive(on: Bool): IO[Unit] =
+  IO.pure(noteDrive(if (on) 1 else 0))
+

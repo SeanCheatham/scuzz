@@ -284,7 +284,7 @@ static void scripted_button_tap(SzUiSession *session, int prefer_upper) {
      pump <k>   pump k extra frames
      scroll <dy> pan the first Scroll (positive = content up); no scroll is a no-op
      backspace <n> chop n bytes from the focused/first TextField (default 1); no field is a no-op
-     drive <name> [args]  run a verify-graph driver (Int/String args)
+     drive <name> [args]  run a verify-graph driver (Int/String/Bool args)
    Blank lines and #-comments are skipped. Pump runs after every event. */
 
 static void script_tap(SzUiSession *session, int n) {

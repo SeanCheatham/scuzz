@@ -296,14 +296,14 @@ fn check_driver_def(live: &Program, d: &FunDef, label: &str) -> Result<(), Overl
     }
     if d.params.len() > 1 {
         return Err(OverlayError::Msg(format!(
-            "{label}: driver `{}` takes at most one Int or String param",
+            "{label}: driver `{}` takes at most one Int, String, or Bool param",
             d.name
         )));
     }
     for p in &d.params {
-        if !matches!(p.ty, Type::Int | Type::String) {
+        if !matches!(p.ty, Type::Int | Type::String | Type::Bool) {
             return Err(OverlayError::Msg(format!(
-                "{label}: driver `{}` param `{}` must be Int or String",
+                "{label}: driver `{}` param `{}` must be Int, String, or Bool",
                 d.name, p.name
             )));
         }
@@ -335,7 +335,7 @@ pub(crate) fn expr_has_law(e: &Expr) -> bool {
     found
 }
 
-/// Table lines for `build/drivers.txt`: `name`, `name i`, or `name s`.
+/// Table lines for `build/drivers.txt`: `name`, `name i`, `name s`, or `name b`.
 pub fn driver_table_text(program: &Program) -> String {
     let mut out = String::new();
     for d in &program.defs {
@@ -346,6 +346,7 @@ pub fn driver_table_text(program: &Program) -> String {
         if let Some(p) = d.params.first() {
             match p.ty {
                 Type::String => out.push_str(" s"),
+                Type::Bool => out.push_str(" b"),
                 _ => out.push_str(" i"),
             }
         }
@@ -637,6 +638,20 @@ mod tests {
         assert_eq!(prog.driver_names, vec!["plusN".to_string()]);
         assert!(prog.defs.iter().any(|d| d.is_driver && d.name == "plusN"));
         assert_eq!(driver_table_text(&prog), "plusN i\n");
+
+        let live = parse_sources(&[(
+            "Main.scuzz".into(),
+            "def note(n: Int): Unit = ()\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
+        )])
+        .unwrap();
+        let overlays = vec![OverlaySource {
+            stem: "Main".into(),
+            kind: OverlayKind::Drivers,
+            label: "Main.scuzz_drivers".into(),
+            text: "def flagDrive(on: Bool): IO[Unit] =\n  IO.pure(note(if (on) 1 else 0))\n".into(),
+        }];
+        let prog = apply_overlays(live, &overlays).unwrap();
+        assert_eq!(driver_table_text(&prog), "flagDrive b\n");
 
         let live = parse_sources(&[(
             "Main.scuzz".into(),

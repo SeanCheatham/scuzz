@@ -51,8 +51,11 @@ def fuzzBackspaceOrText(s: Int, hasText: Int): List =
 def fuzzTypeOrText(s: Int, hasText: Int): List =
   if (hasText == 1) fuzzType(s) else fuzzText(s)
 
+def driveBool(s: Int): String =
+  if (lcgBelow(s, 2) == 0) "false" else "true"
+
 def driveLine(spec: String, s: Int): String =
-  if (endsWith(spec, " i") == 1) str4("drive ", Str.slice(spec, 0, Str.len(spec) - 2), " ", Str.fromInt(1 + lcgBelow(s, 3))) else if (endsWith(spec, " s") == 1) str4("drive ", Str.slice(spec, 0, Str.len(spec) - 2), " ", letterAt(lcgBelow(s, 26))) else str3("drive ", spec, "")
+  if (endsWith(spec, " i") == 1) str4("drive ", Str.slice(spec, 0, Str.len(spec) - 2), " ", Str.fromInt(1 + lcgBelow(s, 3))) else if (endsWith(spec, " s") == 1) str4("drive ", Str.slice(spec, 0, Str.len(spec) - 2), " ", letterAt(lcgBelow(s, 26))) else if (endsWith(spec, " b") == 1) str4("drive ", Str.slice(spec, 0, Str.len(spec) - 2), " ", driveBool(s)) else str3("drive ", spec, "")
 
 def fuzzDrive(s: Int, drivers: List): List =
   fuzzDriveSpec(List.at(drivers, lcgBelow(s, List.len(drivers))), lcgNext(s))

@@ -821,14 +821,14 @@ void sz_law_sometimes_flush(void) {
 typedef struct {
   char *name;
   int nargs;
-  int is_str;
+  int kind; /* 0=Int, 1=String, 2=Bool (i64 0/1) */
   void *fn;
 } SzDriver;
 
 static SzDriver g_drivers[SZ_DRIVERS_MAX];
 static int g_drivers_n;
 
-void sz_driver_register(SzString *name, int64_t nargs, int64_t is_str, void *fn) {
+void sz_driver_register(SzString *name, int64_t nargs, int64_t kind, void *fn) {
   const char *s = name ? sz_string_cstr(name) : "";
   size_t n;
   char *copy;
@@ -839,7 +839,7 @@ void sz_driver_register(SzString *name, int64_t nargs, int64_t is_str, void *fn)
   memcpy(copy, s, n + 1);
   g_drivers[g_drivers_n].name = copy;
   g_drivers[g_drivers_n].nargs = (int)nargs;
-  g_drivers[g_drivers_n].is_str = (int)is_str;
+  g_drivers[g_drivers_n].kind = (int)kind;
   g_drivers[g_drivers_n].fn = fn;
   g_drivers_n++;
 }
@@ -875,8 +875,13 @@ void sz_driver_run_line(const char *spec) {
   }
   if (d->nargs <= 0)
     io = ((SzIo * (*)(void)) d->fn)();
-  else if (d->is_str)
+  else if (d->kind == 1)
     io = ((SzIo * (*)(SzString *)) d->fn)(sz_string_from_cstr(rest));
+  else if (d->kind == 2)
+    io = ((SzIo * (*)(int64_t)) d->fn)(
+        (rest[0] && (strcmp(rest, "true") == 0 || strcmp(rest, "1") == 0))
+            ? 1
+            : 0);
   else
     io = ((SzIo * (*)(int64_t)) d->fn)((int64_t)atoi(rest));
   r = sz_io_unsafe_run(io);

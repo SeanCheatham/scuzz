@@ -425,7 +425,7 @@ SzIo *sz_law_assert(SzString *name, int64_t ok);
 void sz_law_check(SzString *name, int64_t ok);
 void sz_law_sometimes(SzString *name);
 void sz_law_sometimes_flush(void);
-void sz_driver_register(SzString *name, int64_t nargs, int64_t is_str, void *fn);
+void sz_driver_register(SzString *name, int64_t nargs, int64_t kind, void *fn);
 void sz_driver_run_line(const char *spec);
 
 /* Entrypoint helper used by @main codegen */

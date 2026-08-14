@@ -502,10 +502,11 @@ fn emit_driver_registers(out: &mut String, program: &Program, strs: &[String]) {
             .expect("driver name interned");
         let len = d.name.len() + 1;
         let nargs = d.params.len() as i64;
-        let is_str = i64::from(matches!(
-            d.params.first().map(|p| &p.ty),
-            Some(Type::String)
-        ));
+        let kind = match d.params.first().map(|p| &p.ty) {
+            Some(Type::String) => 1,
+            Some(Type::Bool) => 2,
+            _ => 0,
+        };
         let sym = user_symbol(&d.module, &d.name);
         writeln!(
             out,
@@ -519,7 +520,7 @@ fn emit_driver_registers(out: &mut String, program: &Program, strs: &[String]) {
         .unwrap();
         writeln!(
             out,
-            "  call void @sz_driver_register(ptr %drv{i}_ss, i64 {nargs}, i64 {is_str}, ptr @{sym})"
+            "  call void @sz_driver_register(ptr %drv{i}_ss, i64 {nargs}, i64 {kind}, ptr @{sym})"
         )
         .unwrap();
     }

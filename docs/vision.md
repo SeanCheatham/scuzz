@@ -189,7 +189,7 @@ src/
 - Fuzz / mutation / test layers sim, then arms oracles. Rename drift fails `check`.
 - No free-floating `tests/` package roots; no third-party test or mutation frameworks.
 - Prefer swapping values you own via `*.scuzz_sim`; blessed kits stay one implementation + TestRuntime fakes. Do not stub pure helpers, `View` builders, or `Signal` cells.
-- Driver params stay generator-friendly (`Int` / `String` first); drivers may call live defs but never assert correctness.
+- Driver params stay generator-friendly (`Int` / `String` / `Bool`); drivers may call live defs but never assert correctness.
 - Observation surface: signal store + View/a11y dump — not Skia pixels. Kernel/runtime keep ordinary example tests; this strategy is for **Scuzz apps**.
 
 ### Verification posture
@@ -210,7 +210,7 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: richer fuzz driver arguments — [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
+Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: dump-novelty fuzz prefixes — [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features. UI is a primary path among CLI/server/desktop/mobile — not the only v0 bar.
 
