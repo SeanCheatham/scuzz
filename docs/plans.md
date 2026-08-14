@@ -2,4 +2,4 @@
 
 ## Next
 
-**Happy Eyeballs for `Net.httpGet`** — hostnames query A then AAAA on NODATA. Next: race both lookups/connects so dual-stack names are not stalled by a dead A.
+**Mutate `%` inside residual oracles** — `scuzz mutate` already swaps `+`/`-` and `*`/`/`. Next: replace `%` in those predicates.
