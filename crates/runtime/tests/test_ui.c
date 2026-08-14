@@ -1838,6 +1838,134 @@ static void test_mobile_pointer_scroll_lifecycle(void) {
   sz_signal_str_free(draft);
 }
 
+static void test_text_stays_one_line_when_unbounded(void) {
+  SzView *t;
+  const SzTheme *theme = sz_theme_default();
+  float line_h = theme->font_px + 6.f;
+
+  t = sz_view_text("one two three");
+  sz_view_layout(t, 1000.f, 100.f, theme);
+  assert(fabsf(sz_view_frame(t).h - line_h) < 0.5f);
+  sz_view_free(t);
+}
+
+static void test_text_wraps_at_newline(void) {
+  SzView *t;
+  const SzTheme *theme = sz_theme_default();
+  float line_h = theme->font_px + 6.f;
+  SzString *dump;
+
+  t = sz_view_text("one\ntwo");
+  sz_view_layout(t, 1000.f, 200.f, theme);
+  assert(fabsf(sz_view_frame(t).h - 2.f * line_h) < 0.5f);
+  dump = sz_view_a11y_dump(t);
+  assert(strstr(sz_string_cstr(dump), "text:one") != NULL);
+  sz_string_free(dump);
+  sz_view_free(t);
+}
+
+static void test_text_wraps_at_space(void) {
+  SzView *one, *both;
+  const SzTheme *theme = sz_theme_default();
+  float line_h = theme->font_px + 6.f;
+  float one_w;
+
+  one = sz_view_text("one");
+  sz_view_layout(one, 1000.f, 100.f, theme);
+  one_w = sz_view_frame(one).w;
+  sz_view_free(one);
+
+  both = sz_view_text("one two");
+  sz_view_layout(both, one_w, 200.f, theme);
+  assert(sz_view_frame(both).h >= 2.f * line_h - 0.5f);
+  assert(sz_view_frame(both).w <= one_w + 0.5f);
+  sz_view_free(both);
+}
+
+static void test_text_hard_wraps_long_word(void) {
+  SzView *t;
+  const SzTheme *theme = sz_theme_default();
+  float line_h = theme->font_px + 6.f;
+  float one_w;
+
+  t = sz_view_text("M");
+  sz_view_layout(t, 1000.f, 100.f, theme);
+  one_w = sz_view_frame(t).w;
+  sz_view_free(t);
+
+  t = sz_view_text("MMMM");
+  sz_view_layout(t, one_w, 200.f, theme);
+  assert(sz_view_frame(t).h >= 2.f * line_h - 0.5f);
+  assert(sz_view_frame(t).w <= one_w + 0.5f);
+  sz_view_free(t);
+}
+
+static void test_text_wrap_grows_column(void) {
+  SzView *col, *t, *btn;
+  const SzTheme *theme = sz_theme_default();
+  float line_h = theme->font_px + 6.f;
+  float one_w;
+  float col_h;
+
+  t = sz_view_text("one");
+  sz_view_layout(t, 1000.f, 100.f, theme);
+  one_w = sz_view_frame(t).w;
+  sz_view_free(t);
+
+  col = sz_view_column();
+  t = sz_view_text("one two");
+  btn = sz_view_button("Go", NULL, NULL);
+  sz_view_add_child(col, t);
+  sz_view_add_child(col, btn);
+  sz_view_layout(col, one_w + theme->pad * 2.f, 400.f, theme);
+  col_h = sz_view_frame(col).h;
+  assert(sz_view_frame(t).h >= 2.f * line_h - 0.5f);
+  assert(col_h >= sz_view_frame(t).h + sz_view_frame(btn).h + theme->pad * 2.f -
+                      0.5f);
+  sz_view_free(col);
+}
+
+static void test_bind_text_wraps_at_newline(void) {
+  SzSignalStr *s;
+  SzView *t;
+  const SzTheme *theme = sz_theme_default();
+  float line_h = theme->font_px + 6.f;
+
+  s = sz_signal_str("one\ntwo");
+  t = sz_view_text_signal_str(s);
+  sz_view_layout(t, 1000.f, 200.f, theme);
+  assert(fabsf(sz_view_frame(t).h - 2.f * line_h) < 0.5f);
+  sz_view_free(t);
+  sz_signal_str_free(s);
+}
+
+static void test_button_does_not_wrap(void) {
+  SzView *b;
+  const SzTheme *theme = sz_theme_default();
+  float full_h;
+
+  b = sz_view_button("one two", NULL, NULL);
+  sz_view_layout(b, 1000.f, 100.f, theme);
+  full_h = sz_view_frame(b).h;
+  sz_view_free(b);
+
+  b = sz_view_button("one two", NULL, NULL);
+  sz_view_layout(b, 20.f, 100.f, theme);
+  assert(fabsf(sz_view_frame(b).h - full_h) < 0.5f);
+  sz_view_free(b);
+}
+
+static void test_text_blank_line_from_newline(void) {
+  SzView *t;
+  const SzTheme *theme = sz_theme_default();
+  float line_h = theme->font_px + 6.f;
+
+  t = sz_view_text("one\n\ntwo");
+  sz_view_layout(t, 1000.f, 200.f, theme);
+  assert(fabsf(sz_view_frame(t).h - 3.f * line_h) < 0.5f);
+  sz_view_free(t);
+}
+
 static void test_a11y(void) {
   SzView *btn;
   SzView *col;
@@ -2450,6 +2578,14 @@ int main(void) {
   test_expanded_wrapping_stretch_still_flexes();
   test_stretch_row_does_not_take_leftover_width();
   test_mobile_pointer_scroll_lifecycle();
+  test_text_stays_one_line_when_unbounded();
+  test_text_wraps_at_newline();
+  test_text_wraps_at_space();
+  test_text_hard_wraps_long_word();
+  test_text_wrap_grows_column();
+  test_bind_text_wraps_at_newline();
+  test_button_does_not_wrap();
+  test_text_blank_line_from_newline();
   test_a11y();
   test_clear_children();
   test_view_each();

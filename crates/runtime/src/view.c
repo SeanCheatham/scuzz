@@ -504,6 +504,135 @@ static float text_width(const char *s, float font_px) {
   return sk_font_measure_string(s ? s : "", font_px);
 }
 
+static int utf8_clen(const char *s, int i) {
+  unsigned char c;
+  if (!s || s[i] == '\0')
+    return 0;
+  c = (unsigned char)s[i];
+  if (c < 0x80)
+    return 1;
+  if ((c & 0xe0) == 0xc0)
+    return 2;
+  if ((c & 0xf0) == 0xe0)
+    return 3;
+  if ((c & 0xf8) == 0xf0)
+    return 4;
+  return 1;
+}
+
+static float span_width(const char *s, int start, int end, float font_px) {
+  char tmp[256];
+  int n;
+  if (!s || end <= start)
+    return 0.f;
+  n = end - start;
+  if (n >= (int)sizeof tmp)
+    n = (int)sizeof tmp - 1;
+  memcpy(tmp, s + start, (size_t)n);
+  tmp[n] = '\0';
+  return text_width(tmp, font_px);
+}
+
+typedef void (*SzTextLineFn)(const char *s, int start, int end, float width,
+                             void *env);
+
+static void emit_text_line(const char *s, int start, int end, float font_px,
+                           SzTextLineFn fn, void *env) {
+  while (end > start && s[end - 1] == ' ')
+    end--;
+  if (fn)
+    fn(s, start, end, span_width(s, start, end, font_px), env);
+}
+
+/* Wrap one paragraph. max_inner <= 0 means no width wrap. */
+static void wrap_paragraph(const char *s, int start, int end, float font_px,
+                           float max_inner, SzTextLineFn fn, void *env) {
+  int i = start;
+  int line = start;
+  int last_space = -1;
+  if (start >= end) {
+    emit_text_line(s, start, end, font_px, fn, env);
+    return;
+  }
+  while (i < end) {
+    int clen = utf8_clen(s, i);
+    int next;
+    float w;
+    if (clen < 1)
+      clen = 1;
+    if (i + clen > end)
+      clen = end - i;
+    next = i + clen;
+    if (s[i] == ' ')
+      last_space = i;
+    w = span_width(s, line, next, font_px);
+    if (max_inner > 0.f && w > max_inner && next > line) {
+      if (last_space >= line) {
+        emit_text_line(s, line, last_space, font_px, fn, env);
+        line = last_space + 1;
+        while (line < end && s[line] == ' ')
+          line++;
+        last_space = -1;
+        i = line;
+        continue;
+      }
+      if (i == line) {
+        emit_text_line(s, line, next, font_px, fn, env);
+        line = next;
+        last_space = -1;
+        i = next;
+        continue;
+      }
+      emit_text_line(s, line, i, font_px, fn, env);
+      line = i;
+      last_space = -1;
+      continue;
+    }
+    i = next;
+  }
+  if (line < end || line == start)
+    emit_text_line(s, line, end, font_px, fn, env);
+}
+
+static void each_text_line(const char *s, float font_px, float max_inner,
+                           SzTextLineFn fn, void *env) {
+  int i = 0;
+  int para = 0;
+  if (!s)
+    s = "";
+  for (;;) {
+    if (s[i] == '\0' || s[i] == '\n') {
+      wrap_paragraph(s, para, i, font_px, max_inner, fn, env);
+      if (s[i] == '\0')
+        break;
+      i++;
+      para = i;
+      continue;
+    }
+    i++;
+  }
+}
+
+typedef struct SzWrapMetrics {
+  float max_line_w;
+  int n;
+} SzWrapMetrics;
+
+static void accum_wrap_line(const char *s, int start, int end, float width,
+                            void *env) {
+  SzWrapMetrics *m = (SzWrapMetrics *)env;
+  (void)s;
+  (void)start;
+  (void)end;
+  if (width > m->max_line_w)
+    m->max_line_w = width;
+  m->n++;
+}
+
+static float text_line_h(const SzTheme *theme) {
+  return theme->font_px + 6.f;
+}
+
 static void resolve_text(const SzView *v, char *buf, size_t buflen) {
   if (!buf || buflen == 0)
     return;
@@ -618,13 +747,25 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   }
 
   switch (v->kind) {
-  case SZ_VIEW_TEXT:
+  case SZ_VIEW_TEXT: {
+    SzWrapMetrics m;
+    float inner;
+    float line_h = text_line_h(theme);
     resolve_text(v, buf, sizeof buf);
-    v->frame.w = text_width(buf, font) + 4.f;
-    v->frame.h = font + 6.f;
-    if (v->frame.w > max_w && max_w > 0)
+    inner = 0.f;
+    if (max_w > 4.f)
+      inner = max_w - 4.f;
+    m.max_line_w = 0.f;
+    m.n = 0;
+    each_text_line(buf, font, inner, accum_wrap_line, &m);
+    if (m.n < 1)
+      m.n = 1;
+    v->frame.w = m.max_line_w + 4.f;
+    v->frame.h = (float)m.n * line_h;
+    if (max_w > 0.f && v->frame.w > max_w)
       v->frame.w = max_w;
     break;
+  }
   case SZ_VIEW_BUTTON:
     resolve_text(v, buf, sizeof buf);
     v->frame.w = text_width(buf, font) + theme->pad * 2.f;
@@ -1187,6 +1328,33 @@ static void paint_string(SkCanvas *c, const char *s, float x, float y,
   sk_paint_delete(p);
 }
 
+typedef struct SzWrapPaint {
+  SkCanvas *c;
+  float x;
+  float y;
+  float font_px;
+  float line_h;
+  uint32_t argb;
+} SzWrapPaint;
+
+static void paint_wrap_line(const char *s, int start, int end, float width,
+                            void *env) {
+  SzWrapPaint *wp = (SzWrapPaint *)env;
+  char tmp[256];
+  int n;
+  (void)width;
+  n = end - start;
+  if (n < 0)
+    n = 0;
+  if (n >= (int)sizeof tmp)
+    n = (int)sizeof tmp - 1;
+  if (n > 0)
+    memcpy(tmp, s + start, (size_t)n);
+  tmp[n] = '\0';
+  paint_string(wp->c, tmp, wp->x, wp->y, wp->argb, wp->font_px);
+  wp->y += wp->line_h;
+}
+
 static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   char buf[256];
   int i;
@@ -1196,11 +1364,21 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     return;
 
   switch (v->kind) {
-  case SZ_VIEW_TEXT:
+  case SZ_VIEW_TEXT: {
+    SzWrapPaint wp;
+    float inner = 0.f;
     resolve_text(v, buf, sizeof buf);
-    paint_string(c, buf, v->frame.x + 2.f, v->frame.y + theme->font_px + 2.f,
-                 theme->foreground, theme->font_px);
+    if (v->frame.w > 4.f)
+      inner = v->frame.w - 4.f;
+    wp.c = c;
+    wp.x = v->frame.x + 2.f;
+    wp.y = v->frame.y + theme->font_px + 2.f;
+    wp.font_px = theme->font_px;
+    wp.line_h = text_line_h(theme);
+    wp.argb = theme->foreground;
+    each_text_line(buf, theme->font_px, inner, paint_wrap_line, &wp);
     break;
+  }
   case SZ_VIEW_BUTTON:
     resolve_text(v, buf, sizeof buf);
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->primary);
