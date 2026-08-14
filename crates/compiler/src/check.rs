@@ -258,7 +258,14 @@ mod tests {
     use crate::parser::parse_file;
     use crate::typ::typecheck;
     use std::fs;
+    use std::path::{Path, PathBuf};
     use tempfile::tempdir;
+
+    fn testdata(name: &str) -> PathBuf {
+        Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../testdata")
+            .join(name)
+    }
 
     #[test]
     fn type_error_reports_line_and_column() {
@@ -304,23 +311,7 @@ mod tests {
 
     #[test]
     fn check_project_json_includes_location() {
-        let dir = tempdir().unwrap();
-        let root = dir.path();
-        fs::write(
-            root.join("scuzz.toml"),
-            r#"[package]
-name = "diag_test"
-version = "0.0.0"
-"#,
-        )
-        .unwrap();
-        fs::create_dir_all(root.join("src")).unwrap();
-        fs::write(
-            root.join("src/Main.scuzz"),
-            "@main def main: IO[Unit] =\n  IO.println(1)\n",
-        )
-        .unwrap();
-        let diags = check_project(root).unwrap();
+        let diags = check_project(&testdata("typecheck/bad_main")).unwrap();
         assert_eq!(diags.len(), 1);
         assert!(diags[0].line.unwrap_or(0) >= 2);
         assert!(diags[0].column.unwrap_or(0) >= 1);
@@ -331,21 +322,7 @@ version = "0.0.0"
 
     #[test]
     fn check_project_reports_unformatted() {
-        let dir = tempdir().unwrap();
-        let root = dir.path();
-        fs::write(
-            root.join("scuzz.toml"),
-            r#"[package]
-name = "fmt_test"
-version = "0.0.0"
-"#,
-        )
-        .unwrap();
-        fs::create_dir_all(root.join("src")).unwrap();
-        let dirty = "@main def main: IO[Unit] =\n    IO.println(\"ok\")\n";
-        assert_ne!(crate::format::format_source(dirty).unwrap(), dirty);
-        fs::write(root.join("src/Main.scuzz"), dirty).unwrap();
-        let diags = check_project(root).unwrap();
+        let diags = check_project(&testdata("fmt/needs_format")).unwrap();
         assert_eq!(diags.len(), 1);
         assert!(diags[0].message.contains("formatting"));
         assert_eq!(diags[0].line, Some(1));
@@ -377,31 +354,7 @@ version = "0.0.0"
 
     #[test]
     fn check_project_json_includes_nonexhaustive() {
-        let dir = tempdir().unwrap();
-        let root = dir.path();
-        fs::write(
-            root.join("scuzz.toml"),
-            r#"[package]
-name = "nex_test"
-version = "0.0.0"
-"#,
-        )
-        .unwrap();
-        fs::create_dir_all(root.join("src")).unwrap();
-        let src = crate::format::format_source(
-            "\
-enum Color:
-  case Red
-  case Blue
-@main def main: IO[Unit] =
-  Color.Red match {
-    case Color.Red => IO.println(\"r\")
-  }
-",
-        )
-        .unwrap();
-        fs::write(root.join("src/Main.scuzz"), src).unwrap();
-        let diags = check_project(root).unwrap();
+        let diags = check_project(&testdata("typecheck/nonexhaustive")).unwrap();
         assert_eq!(diags.len(), 1, "{diags:?}");
         assert!(
             diags[0].message.contains("non-exhaustive"),

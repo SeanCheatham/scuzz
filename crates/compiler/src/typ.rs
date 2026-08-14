@@ -2249,7 +2249,7 @@ fn check_match_exhaustive(
         .iter()
         .filter_map(|a| match &a.pattern {
             crate::ast::Pattern::Adt { case_name, .. } => Some(case_name.as_str()),
-            crate::ast::Pattern::Wildcard => None,
+            _ => None,
         })
         .collect();
     let missing: Vec<String> = en

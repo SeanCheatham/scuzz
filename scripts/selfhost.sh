@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
-# Dual-boot gate: Stage-0 → Stage-1 → Stage-2, plus a Stage-3 fixpoint.
-# Each stage must smoke examples/hello + examples/adt + examples/modules +
-# examples/record + examples/trait + examples/generic, pass the Headless goldens
-# (counter/todo/nav), smoke fuzz on examples/todo, smoke fuzz --exhaust --depth 1
-# on examples/counter, smoke IO-only fuzz on examples/concurrency, smoke mutate
-# on examples/hello (no residual oracles), examples/record --limit 1 (kill), and
-# examples/counter --limit 1 --iters 0 (.require kill), smoke
-# examples/resource + examples/stream + examples/server, and agree with Stage 0 on fmt --check for the compiler
-# sources. Stage 2 must re-emit byte-identical compiler IR.
+# Dual-boot gate: Stage-0 → Stage-1 → Stage-2, plus a Stage-3 IR fixpoint.
 # Fail loudly: every stage must succeed; no masked exit codes.
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
+
+reject() {
+  msg="$1"
+  needle="$2"
+  shift 2
+  if "$@" >/tmp/scuzz-rej.out 2>/tmp/scuzz-rej.err; then
+    echo "$msg" >&2
+    exit 1
+  fi
+  grep -q "$needle" /tmp/scuzz-rej.out /tmp/scuzz-rej.err
+}
 
 stage_checks() {
   stage="$1"
@@ -134,7 +137,16 @@ stage_checks() {
 
   echo "==> $stage fmt --check (compiler-scuzz sources)"
   "$bin" fmt --check compiler-scuzz
+
+  echo "==> $stage check (compiler-scuzz sources)"
+  "$bin" check compiler-scuzz
 }
+
+echo "==> Stage 0 fmt --check (compiler-scuzz sources)"
+cargo run -p scuzz -- fmt --check compiler-scuzz
+
+echo "==> Stage 0 check (compiler-scuzz sources)"
+cargo run -p scuzz -- check compiler-scuzz
 
 echo "==> Stage 0 builds Stage 1 (compiler-scuzz)"
 cargo run -p scuzz -- build --full compiler-scuzz
@@ -145,80 +157,47 @@ STAGE2="/tmp/stage2-scuzz"
 cp -f compiler-scuzz/build/scuzz "$STAGE1"
 chmod +x "$STAGE1"
 
-echo "==> Stage 0 fmt --check (compiler-scuzz sources)"
-cargo run -p scuzz -- fmt --check compiler-scuzz
-
 echo "==> Stage 0 check rejects unformatted sources"
-if cargo run -p scuzz -- check testdata/fmt/needs_format 2>/tmp/scuzz-fmt0.err; then
-  echo "expected format error from Stage 0" >&2
-  exit 1
-fi
-grep -q "needs formatting" /tmp/scuzz-fmt0.err
+reject "expected format error from Stage 0" "needs formatting" \
+  cargo run -p scuzz -- check testdata/fmt/needs_format
 
 echo "==> Stage 0 rejects ill-typed program"
-if cargo run -p scuzz -- build testdata/typecheck/bad_main 2>/tmp/scuzz-bad0.err; then
-  echo "expected type error from Stage 0" >&2
-  exit 1
-fi
-grep -q "arithmetic needs Int" /tmp/scuzz-bad0.err
+reject "expected type error from Stage 0" "arithmetic needs Int" \
+  cargo run -p scuzz -- build testdata/typecheck/bad_main
 
 echo "==> Stage 0 rejects non-exhaustive match"
-if cargo run -p scuzz -- check testdata/typecheck/nonexhaustive > /tmp/scuzz-nex0.out 2>/tmp/scuzz-nex0.err; then
-  echo "expected non-exhaustive match from Stage 0" >&2
-  exit 1
-fi
-grep -q "non-exhaustive match" /tmp/scuzz-nex0.out /tmp/scuzz-nex0.err
+reject "expected non-exhaustive match from Stage 0" "non-exhaustive match" \
+  cargo run -p scuzz -- check testdata/typecheck/nonexhaustive
 
 echo "==> Stage 0 rejects unknown scuzz.toml table"
-if cargo run -p scuzz -- build testdata/manifest/unknown_table 2>/tmp/scuzz-toml-table0.err; then
-  echo "expected unknown table error from Stage 0" >&2
-  exit 1
-fi
-grep -q "unknown scuzz.toml table \[plugins\]" /tmp/scuzz-toml-table0.err
+reject "expected unknown table error from Stage 0" "unknown scuzz.toml table \[plugins\]" \
+  cargo run -p scuzz -- build testdata/manifest/unknown_table
 
 echo "==> Stage 0 rejects unknown scuzz.toml key"
-if cargo run -p scuzz -- build testdata/manifest/unknown_key 2>/tmp/scuzz-toml-key0.err; then
-  echo "expected unknown key error from Stage 0" >&2
-  exit 1
-fi
-grep -q "unknown scuzz.toml key \`license\` in \[package\]" /tmp/scuzz-toml-key0.err
+reject "expected unknown key error from Stage 0" "unknown scuzz.toml key \`license\` in \[package\]" \
+  cargo run -p scuzz -- build testdata/manifest/unknown_key
 
 stage_checks "Stage 1" "$STAGE1"
 
 echo "==> Stage 1 check rejects unformatted sources"
-if "$STAGE1" check testdata/fmt/needs_format > /tmp/scuzz-fmt1.out 2>/tmp/scuzz-fmt1.err; then
-  echo "expected format error from Stage 1" >&2
-  exit 1
-fi
-grep -q "needs formatting" /tmp/scuzz-fmt1.out /tmp/scuzz-fmt1.err
+reject "expected format error from Stage 1" "needs formatting" \
+  "$STAGE1" check testdata/fmt/needs_format
 
 echo "==> Stage 1 rejects ill-typed program"
-if "$STAGE1" build testdata/typecheck/bad_main 2>/tmp/scuzz-bad1.err; then
-  echo "expected type error from Stage 1" >&2
-  exit 1
-fi
-grep -q "arithmetic needs Int" /tmp/scuzz-bad1.err
+reject "expected type error from Stage 1" "arithmetic needs Int" \
+  "$STAGE1" build testdata/typecheck/bad_main
 
 echo "==> Stage 1 rejects non-exhaustive match"
-if "$STAGE1" check testdata/typecheck/nonexhaustive > /tmp/scuzz-nex1.out 2>/tmp/scuzz-nex1.err; then
-  echo "expected non-exhaustive match from Stage 1" >&2
-  exit 1
-fi
-grep -q "non-exhaustive match" /tmp/scuzz-nex1.out /tmp/scuzz-nex1.err
+reject "expected non-exhaustive match from Stage 1" "non-exhaustive match" \
+  "$STAGE1" check testdata/typecheck/nonexhaustive
 
 echo "==> Stage 1 rejects unknown scuzz.toml table"
-if "$STAGE1" build testdata/manifest/unknown_table 2>/tmp/scuzz-toml-table1.err; then
-  echo "expected unknown table error from Stage 1" >&2
-  exit 1
-fi
-grep -q "unknown scuzz.toml table \[plugins\]" /tmp/scuzz-toml-table1.err
+reject "expected unknown table error from Stage 1" "unknown scuzz.toml table \[plugins\]" \
+  "$STAGE1" build testdata/manifest/unknown_table
 
 echo "==> Stage 1 rejects unknown scuzz.toml key"
-if "$STAGE1" build testdata/manifest/unknown_key 2>/tmp/scuzz-toml-key1.err; then
-  echo "expected unknown key error from Stage 1" >&2
-  exit 1
-fi
-grep -q "unknown scuzz.toml key \`license\` in \[package\]" /tmp/scuzz-toml-key1.err
+reject "expected unknown key error from Stage 1" "unknown scuzz.toml key \`license\` in \[package\]" \
+  "$STAGE1" build testdata/manifest/unknown_key
 
 echo "==> Stage 1 rebuilds compiler-scuzz (Stage 2)"
 "$STAGE1" build compiler-scuzz
