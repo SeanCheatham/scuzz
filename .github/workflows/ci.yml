@@ -108,6 +108,7 @@ jobs:
           grep -q "Point(3,5)" /tmp/trait.out
           grep -q "show:box" /tmp/trait.out
           grep -q "show:some" /tmp/trait.out
+          grep -q "get:2" /tmp/trait.out
           cargo run -p scuzz -- run examples/generic | tee /tmp/generic.out
           grep -q "7ok" /tmp/generic.out
           cargo run -p scuzz -- run examples/fs | tee /tmp/fs.out

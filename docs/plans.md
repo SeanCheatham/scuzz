@@ -2,4 +2,4 @@
 
 ## Next
 
-**Language surface — `impl` methods that use the type parameter** — `impl Show for Opt` typechecks (`examples/trait`). Next: `impl Get for Opt` with `def getOrElse(default: T): T` so an impl method can mention `T`. `watch` still only rebuilds.
+**Language surface — generic traits** — `impl Get for Opt` can mention `T` (`examples/trait`). Next: `trait Get[T]` so the type parameter is declared on the trait, not borrowed from the target. `watch` still only rebuilds.

@@ -9,6 +9,9 @@ enum Opt[T]:
 trait Show:
   def show(): String
 
+trait Get:
+  def getOrElse(default: T): T
+
 impl Show for Point:
   def show(): String =
     Str.concat("Point(", Str.concat(Str.fromInt(self.x), Str.concat(",", Str.concat(Str.fromInt(self.y), ")"))))
@@ -24,10 +27,18 @@ impl Show for Opt:
       case Opt.None => "none"
     }
 
+impl Get for Opt:
+  def getOrElse(default: T): T =
+    self match {
+      case Opt.Some(x) => x
+      case Opt.None => default
+    }
+
 @main def main: IO[Unit] =
   for {
     _ <- IO.println(Point(3, 5).show())
     b = Box(4)
     _ <- IO.println(Str.concat("show:", b.show()))
     _ <- IO.println(Str.concat("show:", Opt.Some(1).show()))
+    _ <- IO.println(Str.concat("get:", Str.fromInt(Opt.Some(2).getOrElse(0))))
   } yield ()

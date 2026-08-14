@@ -104,7 +104,7 @@ impl MethodIndex {
                     )));
                 }
                 for (a, b) in tm.params.iter().zip(method.params.iter()) {
-                    let at = resolve_type(&a.ty, enums, &tr.module)?;
+                    let at = resolve_type_in(&a.ty, enums, &tr.module, &for_en.type_params)?;
                     let bt = resolve_type_in(&b.ty, enums, &im.module, &for_en.type_params)?;
                     if !types_compat(&at, &bt) {
                         return Err(TypeError::Msg(format!(
@@ -113,7 +113,7 @@ impl MethodIndex {
                         )));
                     }
                 }
-                let want_ret = resolve_type(&tm.ret, enums, &tr.module)?;
+                let want_ret = resolve_type_in(&tm.ret, enums, &tr.module, &for_en.type_params)?;
                 let got_ret = resolve_type_in(&method.ret, enums, &im.module, &for_en.type_params)?;
                 if !types_compat(&want_ret, &got_ret) {
                     return Err(TypeError::Msg(format!(
@@ -4907,6 +4907,38 @@ impl Show for Opt:
         let p = parse_file(src, "trait/src/Main.scuzz").unwrap();
         let p = expand_impls(lower_program(p)).expect("expand labeled");
         typecheck(&p).expect("generic enum impl with module should typecheck");
+        let p = elaborate_generics(p).expect("elaborate labeled");
+        let p = resolve_field_access(p).expect("fields before mono labeled");
+        let p = monomorphize(p).expect("mono labeled");
+        resolve_field_access(p).expect("fields after mono labeled");
+    }
+
+    #[test]
+    fn typechecks_impl_method_mentions_tparam() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+trait Get:
+  def getOrElse(default: T): T
+impl Get for Opt:
+  def getOrElse(default: T): T =
+    self match {
+      case Opt.Some(x) => x
+      case Opt.None => default
+    }
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Opt.Some(2).getOrElse(0)))
+"#;
+        let p = expand_impls(lower_program(parse(src).unwrap())).expect("expand");
+        typecheck(&p).expect("impl method mentioning T should typecheck");
+        let p = elaborate_generics(p).expect("elaborate");
+        let p = resolve_field_access(p).expect("fields before mono");
+        let p = monomorphize(p).expect("mono");
+        resolve_field_access(p).expect("fields after mono");
+        let p = parse_file(src, "trait/src/Main.scuzz").unwrap();
+        let p = expand_impls(lower_program(p)).expect("expand labeled");
+        typecheck(&p).expect("impl method mentioning T with module should typecheck");
         let p = elaborate_generics(p).expect("elaborate labeled");
         let p = resolve_field_access(p).expect("fields before mono labeled");
         let p = monomorphize(p).expect("mono labeled");

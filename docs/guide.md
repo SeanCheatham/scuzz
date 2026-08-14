@@ -41,7 +41,7 @@ Console kit: `Sys.args(): IO[List]`, `Sys.readLine(): IO[String]` (EOF → `""`;
 - No `val` / statement blocks
 - Literals: ints, strings, `()`, `s"…$x…"`, list literals `[a, b]`
 - Enums + **`record Name(f1: T1, …)`** (construct `Name(…)`, match `case Name(…)`, field `p.x` — see `examples/record` / `examples/adt`)
-- Thin **traits** / `impl` with static dispatch (`p.show()` — including `impl Show for Box` / `impl Show for Opt` on generic records and enums; see `examples/trait`)
+- Thin **traits** / `impl` with static dispatch (`p.show()` — including `impl Show for Box` / `impl Show for Opt` / `impl Get for Opt` with `getOrElse(default: T): T`; see `examples/trait`)
 - Thin **generics**: `def id[T](x: T): T = x` monomorphized at call sites (`examples/generic`); generic enums/records too — `enum Opt[T]:` with `o.getOrElse(0)` / `record Box[T](x: T): def get(): T = self.x` (type methods are indented `def`s after cases or after record `:`, same shape as `impl`), instantiation inferred from ctor args or the expected type (`examples/genum`)
 - Blessed impurity only: `IO.println` / `sleep` / `fail` / `pure` / `race` / `both` / `ensure` / `timeout` / `forever` / `repeatN` / `retryN`, `Fiber.fork` / `join` / `interrupt`, `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Resource.make` / `Resource.use` (String payload; release on success, failure, and cancel), `Stream.emit` / `emits` / `eval` / `concat` / `map` / `evalMap` / `filter` / `take` / `takeWhile` / `drop` / `dropWhile` / `find` / `exists` / `compileToList` / `drain` (String payload; `exists` is `IO[Bool]`), `Fs.*`, `Sys.args` / `Sys.readLine` / `Sys.exec` / `Sys.spawn` / `Sys.alive` / `Sys.getenv`, `Clock.*`, `Random.*`, `Net.httpGet` / `Net.serveOnce` / `Net.serve`
 - No raw side effects in View build — taps may run `IO` via `sz_io_unsafe_run`
@@ -127,7 +127,7 @@ src/
 | `examples/stream` | `Stream.emit` / `map` / `evalMap` / `filter` / `take` / `takeWhile` / `drop` / `dropWhile` / `find` / `exists` / `compileToList` / `drain` |
 | `examples/server` | `Net.serve` persistent HTTP/1.0 GET (TestRuntime drains injected paths) |
 | `examples/record` | `record Point(…)` + `p.x` field access + `where` on `x` / `y` |
-| `examples/trait` | `trait` / `impl` + `p.show()` static dispatch, including `impl Show for Box` / `impl Show for Opt` |
+| `examples/trait` | `trait` / `impl` + `p.show()` / `o.getOrElse(0)` static dispatch, including generic records and enums |
 | `examples/generic` | `def id[T](…)` monomorphized generics |
 | `examples/genum` | generic `enum Opt[T]` with `o.getOrElse(0)` / `record Box[T]` with `b.get()` |
 | `examples/modules` | stem modules, `private def`, `import`, enum-per-module |
