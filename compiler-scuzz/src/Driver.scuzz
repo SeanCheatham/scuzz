@@ -148,7 +148,16 @@ def skiaExtraLinkFlags(ffi: String): String =
   str5("$(test -f ", pathJoin(ffi, "build/sk_capi_backend"), " && grep -qx skia ", pathJoin(ffi, "build/sk_capi_backend"), " && if [ \"`uname -s`\" = Darwin ]; then echo -lz -lbz2 -lbrotlidec -lbrotlicommon -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon; else echo -lz -lbz2 -lbrotlidec -lbrotlicommon; fi)")
 
 def linkCmd(clang: String, ll: String, lib: String, skia: String, inc: String, skInc: String, embedder: String, mobile: String, exe: String): String =
-  str4(clang, " ", ll, str4(" ", lib, " ", str4(skia, " -I", inc, str4(" -I", skInc, " -lpthread ", str5(cxxLinkFlags(), " ", skiaExtraLinkFlags(parentDir(parentDir(skia))), " ", str5(embedderLinkFlags(embedder), " ", mobileLinkFlags(mobile), " -o ", exe))))))
+  str4(clang, " ", ll, str4(" ", lib, " ", str4(skia, " -I", inc, str4(" -I", skInc, " -lpthread ", str5(cxxLinkFlags(), " ", skiaExtraLinkFlags(parentDir(parentDir(skia))), " ", str5(embedderLinkFlags(embedder), " ", mobileLinkFlags(mobile), " ", str4(uiExportFlags(), " -o ", exe, "")))))))
+
+def uiExportFlags(): String =
+  "$(if [ \"`uname -s`\" = Darwin ]; then echo; else echo -rdynamic; fi)"
+
+def reloadDylibCmd(clang: String, ll: String, out: String): String =
+  str5(clang, " ", ll, " ", str3("$(if [ \"`uname -s`\" = Darwin ]; then echo -dynamiclib -undefined dynamic_lookup; else echo -shared -fPIC; fi) -o ", out, ""))
+
+def linkReloadIfUi(clang: String, ll: String, outDir: String, withUi: Int): IO[Unit] =
+  if (withUi == 0) IO.pure(()) else execOk(reloadDylibCmd(clang, ll, pathJoin(outDir, "reload.dylib")))
 
 def linkCmdIo(clang: String, ll: String, lib: String, inc: String, exe: String): String =
   str5(clang, " ", ll, " ", str4(lib, " -I", inc, str3(" -lpthread ", cxxLinkFlagsIo(), str3(" -o ", exe, ""))))
@@ -729,7 +738,7 @@ def compilePrepared(projectDir: String, outDir: String, verify: Int, runtimeDir:
   writeSometimesDeclared(outDir, verify, prog1b).flatMap(_ =>
     writeDriversTable(outDir, verify, overlays).flatMap(_ =>
       Fs.write(ll, ir).flatMap(_ =>
-        buildRuntime(runtimeDir, clang).flatMap(_ => linkProject(clang, ll, lib, ffi, inc, embedder, mobile, exe, withUi))
+        buildRuntime(runtimeDir, clang).flatMap(_ => linkProject(clang, ll, lib, ffi, inc, embedder, mobile, exe, withUi).flatMap(_ => linkReloadIfUi(clang, ll, outDir, withUi)))
       )
     )
   )

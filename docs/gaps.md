@@ -33,7 +33,7 @@ Vision locks **oracles in source, drivers as the test surface** ([`vision.md`](v
 
 ### Near-term (AI-friendly tooling)
 
-- **Hot reload and debugging tools** — Headless + in-process reload + debug for agents. Headless is a peer; `scuzz watch` only rebuilds; `[ui]` `run --watch` stamp-reloads the View tree (Signals stay), writes `build/debug.dump` (signals + a11y + `[taps]` / `[fields]` / `[scrolls]`, with `tap N`, `text N s` / `type N s` / `backspace N k`, `scroll N dy`), and plays `build/inject.script`. On stamp change the session `dlopen`s `SCUZZ_UI_RELOAD_CODE` (`build/reload.dylib`) when that file exists (`sz_ui_session_load_code`). Still missing: compiler emitting that dylib on watch. Do not document `watch` as hot reload.
+- **Hot reload and debugging tools** — Headless + in-process reload + debug for agents. Headless is a peer; `scuzz watch` only rebuilds; `[ui]` `run --watch` stamp-reloads the View tree (Signals stay), writes `build/debug.dump` (signals + a11y + `[taps]` / `[fields]` / `[scrolls]`, with `tap N`, `text N s` / `type N s` / `backspace N k`, `scroll N dy`), and plays `build/inject.script`. `[ui]` build emits `build/reload.dylib` (`sz_ui_reload_rebuild`); stamp-watch `dlopen`s it (`SCUZZ_UI_RELOAD_CODE`). Still unproven: a Scuzz source View change appears live without restart. Do not document `watch` as hot reload.
 
 ### Residuals
 

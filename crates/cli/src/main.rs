@@ -14,7 +14,7 @@ use std::process::{Command, ExitCode};
     name = "scuzz",
     version,
     about = "Scuzz Lang — Stage-0 bootstrap CLI (release CLI is compiler-scuzz)",
-    after_help = "Examples:\n  scuzz check\n  scuzz check --message-format=json\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n\nJSON diagnostics are the check protocol (LSP wraps `scuzz check`).\n`watch` rebuilds. `run --watch` on [ui] keeps the process and stamp-reloads the View tree (not source hot reload); loads build/reload.dylib when present. Live dump: build/debug.dump. Live inject: build/inject.script (tap/text/type/pump/scroll/backspace)."
+    after_help = "Examples:\n  scuzz check\n  scuzz check --message-format=json\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n\nJSON diagnostics are the check protocol (LSP wraps `scuzz check`).\n`watch` rebuilds. `run --watch` on [ui] keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (not source hot reload). Live dump: build/debug.dump. Live inject: build/inject.script (tap/text/type/pump/scroll/backspace)."
 )]
 struct Cli {
     /// Diagnostic format: human (default) or json (`check` protocol; LSP wraps check)
@@ -386,7 +386,7 @@ fn watch_run(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
         }
     }
     eprintln!(
-        "scuzz run --watch {} (keep process; stamp reloads View tree; loads build/reload.dylib if present; live dump build/debug.dump; inject build/inject.script)",
+        "scuzz run --watch {} (keep process; recompiles build/reload.dylib then stamp-reloads View tree; live dump build/debug.dump; inject build/inject.script)",
         project_dir.display()
     );
     watch_run_ui(&project_dir, path, out_dir, headless)
@@ -423,9 +423,14 @@ fn watch_run_ui(
             }
         }
         if wait_for_source_change(project_dir, 60_000)? {
-            gen += 1;
-            std::fs::write(&stamp, format!("{gen}\n"))?;
-            eprintln!("scuzz: view reload stamp {gen}");
+            match build(path, &out_dir.to_path_buf(), true, false) {
+                Ok(_) => {
+                    gen += 1;
+                    std::fs::write(&stamp, format!("{gen}\n"))?;
+                    eprintln!("scuzz: view reload stamp {gen}");
+                }
+                Err(e) => eprintln!("scuzz watch compile error: {e:#}"),
+            }
         }
     }
 }

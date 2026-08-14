@@ -1056,7 +1056,7 @@ def emitUiRunRebuild(strs: List, param: String, body: Expr, ctx: List, env: List
     benv = rebuildBind(param, sndL(up))
     be = emitExpr(body, strs, ctx, benv, Str.concat("u", Str.fromInt(id)), id + 1, conts)
     bodyEnd = str4(sCode(be), "  ret ptr ", sValue(be), "\n")
-    contDef = str4("define internal ptr @", fnName, "(ptr %env) {\nentry:\n", str4(fst(up), bodyEnd, "}\n\n", ""))
+    contDef = str4("define internal ptr @", fnName, "(ptr %env) {\nentry:\n", str4(fst(up), bodyEnd, "}\n\n", str3("define ptr @sz_ui_reload_rebuild(ptr %env) {\nentry:\n  %v = call ptr @", fnName, "(ptr %env)\n  ret ptr %v\n}\n\n")))
     lam = emitLambdaClosure(env, Str.concat(prefix, "_fn"), fnName, sId(be), Str.concat(sConts(be), contDef))
     code0 = sCode(lam)
     code1 = str4(code0, "  %", prefix, str3("_fnp = call ptr @sz_list_head(ptr ", sValue(lam), ")\n"))

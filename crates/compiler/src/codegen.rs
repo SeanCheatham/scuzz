@@ -191,6 +191,7 @@ pub fn emit_llvm(program: &Program) -> String {
 
     let mut cont_id = 0usize;
     let mut conts = String::new();
+    let mut reload_fn: Option<String> = None;
     let mut ctx = EmitCtx {
         strs: &strs,
         enum_tags: &enum_tags,
@@ -199,6 +200,7 @@ pub fn emit_llvm(program: &Program) -> String {
         current_module: "",
         cont_id: &mut cont_id,
         conts: &mut conts,
+        reload_fn: &mut reload_fn,
     };
 
     let mut fundef_ir = String::new();
@@ -210,6 +212,7 @@ pub fn emit_llvm(program: &Program) -> String {
     ctx.current_module = program.main.module.as_str();
     let mut locals: HashMap<String, (String, Kind)> = HashMap::new();
     let body_expr = emit_expr(&program.main.body, &mut ctx, &mut locals, "build");
+    let reload_name = ctx.reload_fn.clone();
 
     out.push_str(&conts);
     out.push_str(&fundef_ir);
@@ -227,6 +230,15 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "  ret i32 %rc").unwrap();
     writeln!(out, "}}").unwrap();
 
+    if let Some(name) = reload_name {
+        writeln!(out).unwrap();
+        writeln!(out, "define ptr @sz_ui_reload_rebuild(ptr %env) {{").unwrap();
+        writeln!(out, "entry:").unwrap();
+        writeln!(out, "  %v = call ptr @{name}(ptr %env)").unwrap();
+        writeln!(out, "  ret ptr %v").unwrap();
+        writeln!(out, "}}").unwrap();
+    }
+
     out
 }
 
@@ -239,6 +251,7 @@ struct EmitCtx<'a> {
     current_module: &'a str,
     cont_id: &'a mut usize,
     conts: &'a mut String,
+    reload_fn: &'a mut Option<String>,
 }
 
 struct Emitted {
@@ -2007,6 +2020,7 @@ fn emit_rebuild_lambda(
     writeln!(ctx.conts, "  ret ptr {}", body_emitted.value).unwrap();
     writeln!(ctx.conts, "}}").unwrap();
     writeln!(ctx.conts).unwrap();
+    *ctx.reload_fn = Some(fn_name.clone());
 
     let mut code = String::new();
     let env_ptr = pack_env(&mut code, locals, &capture_names, &format!("{prefix}_cap"));
@@ -3458,6 +3472,7 @@ law always: Bool = 1 == 1
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_ui_run_rebuild"));
         assert!(ir.contains("sz_uibuild_"));
+        assert!(ir.contains("sz_ui_reload_rebuild"));
         assert!(!ir.contains("call ptr @sz_ui_run_view"));
     }
 
@@ -3473,6 +3488,7 @@ law always: Bool = 1 == 1
         crate::typ::typecheck(&p).expect("typecheck");
         let ir = emit_llvm(&p);
         assert!(ir.contains("call ptr @sz_ui_run_view"));
+        assert!(!ir.contains("sz_ui_reload_rebuild"));
     }
 
     #[test]

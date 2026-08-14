@@ -240,11 +240,19 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
         }
     }
 
-    link.arg("-lpthread").arg("-o").arg(&exe);
+    link.arg("-lpthread");
+    if with_ui && cfg!(target_os = "linux") {
+        link.arg("-rdynamic");
+    }
+    link.arg("-o").arg(&exe);
     let status = link.status().with_context(|| "spawning clang")?;
 
     if !status.success() {
         bail!("clang failed to link {}", exe.display());
+    }
+
+    if with_ui {
+        link_reload_dylib(&opts.clang, &ll_path, &opts.out_dir.join("reload.dylib"))?;
     }
 
     std::fs::write(&fp_path, &fingerprint)?;
@@ -267,11 +275,32 @@ fn push_force_load(link: &mut Command, archive: &Path) {
     }
 }
 
+fn link_reload_dylib(clang: &str, ll: &Path, out: &Path) -> Result<()> {
+    let mut cmd = Command::new(clang);
+    cmd.arg(ll);
+    if cfg!(target_os = "macos") {
+        cmd.arg("-dynamiclib")
+            .arg("-undefined")
+            .arg("dynamic_lookup");
+    } else {
+        cmd.arg("-shared").arg("-fPIC");
+    }
+    cmd.arg("-o").arg(out);
+    let status = cmd
+        .status()
+        .with_context(|| "spawning clang for reload.dylib")?;
+    if !status.success() {
+        bail!("clang failed to link {}", out.display());
+    }
+    Ok(())
+}
+
 fn fingerprint_resolved(resolved: &ResolvedProject, verify: bool) -> String {
     let mut h = DefaultHasher::new();
     resolved.root_manifest.package.name.hash(&mut h);
     if resolved.root_manifest.ui.is_some() {
         "ui=1".hash(&mut h);
+        "reload-dylib=1".hash(&mut h);
     } else {
         "ui=0".hash(&mut h);
     }

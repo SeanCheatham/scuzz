@@ -163,7 +163,7 @@ def runWatchUi(projectDir: String, name: String, toml: String, headless: Int): I
     stamp = pathJoin(pathJoin(projectDir, "build"), "reload.stamp")
   } yield Fs.mkdirs(pathJoin(projectDir, "build")).flatMap(_ =>
   Fs.write(stamp, "0\n").flatMap(_ =>
-    IO.println(str3("scuzz run --watch ", projectDir, " (keep process; stamp reloads View tree; loads build/reload.dylib if present; live dump build/debug.dump; inject build/inject.script)")).flatMap(_ =>
+    IO.println(str3("scuzz run --watch ", projectDir, " (keep process; recompiles build/reload.dylib then stamp-reloads View tree; live dump build/debug.dump; inject build/inject.script)")).flatMap(_ =>
       srcFingerprint(projectDir).flatMap(fp => spawnWatchUi(projectDir, name, toml, headless, stamp, fp, 0))
     )
   )
@@ -184,8 +184,12 @@ def watchUiLoop(projectDir: String, name: String, toml: String, headless: Int, s
   IO.sleep(500).flatMap(_ =>
     Sys.alive(pid).flatMap(a =>
       if (a == 0) spawnWatchUi(projectDir, name, toml, headless, stamp, fp, gen) else srcFingerprint(projectDir).flatMap(fp2 =>
-  if (streq(fp2, fp) == 1) watchUiLoop(projectDir, name, toml, headless, stamp, fp, gen, pid) else Fs.write(stamp, Str.concat(Str.fromInt(gen + 1), "\n")).flatMap(_ =>
+  if (streq(fp2, fp) == 1) watchUiLoop(projectDir, name, toml, headless, stamp, fp, gen, pid) else compileProject(projectDir, pathJoin(projectDir, "build")).flatMap(_ =>
+  Fs.write(stamp, Str.concat(Str.fromInt(gen + 1), "\n")).flatMap(_ =>
   IO.println(str3("scuzz: view reload stamp ", Str.fromInt(gen + 1), "")).flatMap(_ => watchUiLoop(projectDir, name, toml, headless, stamp, fp2, gen + 1, pid))
+)
+).handleErrorWith(_ =>
+  IO.println("scuzz watch compile error").flatMap(_ => watchUiLoop(projectDir, name, toml, headless, stamp, fp2, gen, pid))
 )
 )
     )

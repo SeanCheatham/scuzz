@@ -13,7 +13,7 @@ Edit this file when a decision or next-step ordering changes.
 - **UI**: a primary product path, not the only one (Dart-shaped: GUI is first-class; so are CLI and server). One design language + Skia, as a **`Ui` effect** with Headless/Window/Mobile interpreters. Headless is a product runtime (agents, CI), not a test-only shim.
 - **Tooling**: one opinionated CLI (`scuzz`) — compile, link, assets, watch, packaging, format, check, and the whole verification stack. One formatter, one check surface, one testing strategy. Batteries-included: mutation, fuzzing, property/laws, simulation, and determinism are **first-class in the language and `scuzz`**, not a third-party harness sprawl. Static hygiene is `scuzz check` (format-verify + typecheck; further lints emit here, no `lint` subcommand). `scuzz fmt` rewrites.
 - **Bootstrap**: self-host is a hard goal. Stage-0 (Rust) exists only to get there.
-- **AI-Friendly**: Headless, hot reload, and debugging tools aid agents. Headless is a peer runtime; `watch` only rebuilds; `[ui] run --watch` stamp-reloads Views, writes `build/debug.dump` (including `[taps]` / `[fields]` / `[scrolls]`), and plays `build/inject.script`. Stamp-watch `dlopen`s `build/reload.dylib` when present; the compiler does not yet emit one.
+- **AI-Friendly**: Headless, hot reload, and debugging tools aid agents. Headless is a peer runtime; `watch` only rebuilds; `[ui] run --watch` stamp-reloads Views, writes `build/debug.dump` (including `[taps]` / `[fields]` / `[scrolls]`), and plays `build/inject.script`. `[ui]` build emits `build/reload.dylib`; stamp-watch `dlopen`s it.
 
 Upstream Scala Native is a *reference*, not a dependency. Divergence is intentional.
 
@@ -62,7 +62,7 @@ Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI / cargo package `scuz
 
 One CLI. One typer. One formatter. One check surface. One testing strategy. No second analyze frontend, no `*.g.scuzz` codegen, no `src/test` runner, no bolted-on mutation/fuzz/property ecosystems.
 
-- **Watch** rebuilds when sources or `scuzz.toml` change. It does not patch running machine code. `[ui]` `run --watch` stamp-swaps the View tree without resetting Signals and `dlopen`s `build/reload.dylib` when present (see [`guide.md`](guide.md)). Do not document `watch` as hot reload.
+- **Watch** rebuilds when sources or `scuzz.toml` change. It does not patch running machine code. `[ui]` `run --watch` recompiles `build/reload.dylib`, stamps, and swaps the View tree without resetting Signals (see [`guide.md`](guide.md)). Do not document `watch` as hot reload.
 - **Static hygiene** is `scuzz check`; `scuzz fmt` rewrites. No `lint` subcommand.
 - **Verification** is batteries-included in `scuzz` and the language (laws, sim overlays, deterministic TestRuntime, fuzz search, mutation) — not optional crates or Maven/npm test plugins.
 - **JSON diagnostics** (`scuzz check --message-format=json`) are the editor protocol. LSP, when added, wraps that — do not grow a second typer or schema.
@@ -228,7 +228,7 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-onl
 | Drivers pass vacuously | `Law.sometimes` reachability fails the campaign when declared states are never reached |
 | Verification tool sprawl | One `scuzz` strategy — mutation/fuzz/laws/sim/determinism in-tree; no external test frameworks |
 | “Almost Scala” confusion | Explicit non-goals; language direction above; [guide.md](guide.md) |
-| Watch sold as hot reload | `watch` rebuilds; `[ui]` `run --watch` stamp-reloads Views and `dlopen`s `build/reload.dylib` when present; compiler does not yet emit one |
+| Watch sold as hot reload | `watch` rebuilds; `[ui]` `run --watch` recompiles `build/reload.dylib` then stamp-reloads Views |
 | IDE typer ≠ batch typer | One JSON schema; LSP wraps `scuzz check` |
 | Skia weight | pinned CPU prebuilt default; `sk_sw` opt-out |
 | Window-only features | Headless peer rule |
