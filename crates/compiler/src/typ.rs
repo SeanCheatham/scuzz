@@ -1569,6 +1569,11 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::List)?;
             Ok(Type::List)
         }
+        "List.map" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::List)?;
+            Ok(Type::List)
+        }
         "Fs.read" | "Fs.list" | "Fs.mkdirs" | "Fs.canonicalize" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
@@ -4667,6 +4672,18 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.filter should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_map() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = List.map(["a", "b"], x => Str.concat(x, "!"))
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.map should typecheck");
     }
 
     #[test]

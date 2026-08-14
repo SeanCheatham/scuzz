@@ -72,6 +72,14 @@ SzList *sz_list_filter(SzList *xs, SzListPred pred, void *env) {
   return sz_list_filter(xs->tail, pred, env);
 }
 
+SzList *sz_list_map(SzList *xs, SzListMapFn fn, void *env) {
+  if (!fn)
+    sz_panic("sz_list_map(null fn)");
+  if (!xs)
+    return NULL;
+  return sz_list_cons(fn(xs->head, env), sz_list_map(xs->tail, fn, env));
+}
+
 void sz_list_free(SzList *xs) {
   while (xs) {
     SzList *n = xs->tail;

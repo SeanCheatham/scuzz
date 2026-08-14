@@ -39,7 +39,7 @@ scuzz run --headless    # Desktop: scuzz run
 
 ## Example
 
-A file-backed todo list (`Fs`, `Signal.list`, `View`). Full source: [`examples/todo`](examples/todo).
+A file-backed todo list (`Fs`, `Signal.list`, `View`). Rows can mark done and delete. Full source: [`examples/todo`](examples/todo).
 
 ```scala
 @main def main: IO[Unit] =

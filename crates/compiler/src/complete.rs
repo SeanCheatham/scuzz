@@ -298,6 +298,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_list_map_after_dot() {
+        let src = "@main def main: IO[Unit] = List.ma\n";
+        let labels = labels_at(src, "List.ma");
+        assert!(labels.iter().any(|l| l == "List.map"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_kit_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.\n";
         let labels = labels_at(src, "View.");

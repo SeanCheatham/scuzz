@@ -78,6 +78,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_join(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_append(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_filter(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_map(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_write(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_list(ptr)").unwrap();
@@ -2127,10 +2128,21 @@ fn emit_stream_map(
     locals: &mut HashMap<String, (String, Kind)>,
     prefix: &str,
 ) -> Emitted {
-    assert!(args.len() == 2, "Stream.map expects 2 args");
+    emit_ptr_map("Stream.map", "sz_stream_map", args, ctx, locals, prefix)
+}
+
+fn emit_ptr_map(
+    callee: &str,
+    rt: &str,
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 2, "{callee} expects 2 args");
     let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
     let ExprKind::Lambda { param, body } = &args[1].kind else {
-        panic!("Stream.map mapper must be a lambda");
+        panic!("{callee} mapper must be a lambda");
     };
     let lam = emit_smap_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
     let mut code = inner.code;
@@ -2138,7 +2150,7 @@ fn emit_stream_map(
     unpack_closure(&mut code, &lam.value, prefix);
     writeln!(
         code,
-        "  %{prefix}_v = call ptr @sz_stream_map(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
+        "  %{prefix}_v = call ptr @{rt}(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
         inner.value
     )
     .unwrap();
@@ -2393,6 +2405,9 @@ fn emit_call(
             prefix,
             false,
         );
+    }
+    if callee == "List.map" {
+        return emit_ptr_map("List.map", "sz_list_map", args, ctx, locals, prefix);
     }
     if callee == "Resource.make" || callee == "Resource.use" {
         return emit_resource(callee, args, ctx, locals, prefix);
@@ -3717,6 +3732,21 @@ mod tests {
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_list_filter"));
         assert!(ir.contains("sz_pred_"));
+    }
+
+    #[test]
+    fn emit_list_map_compile() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = List.map(["a", "b"], x => Str.concat(x, "!"))
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_map"));
+        assert!(ir.contains("sz_smap_"));
     }
 
     #[test]

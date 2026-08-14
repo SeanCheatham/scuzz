@@ -1,6 +1,15 @@
 def setAt(xs: List, i: Int, v: String): List =
   if (List.isEmpty(xs) == 1) List.empty() else if (i == 0) List.cons(v, List.tail(xs)) else List.cons(List.head(xs), setAt(List.tail(xs), i - 1, v))
 
+def itemDone(s: String): Int =
+  if (Str.len(s) == 0) 0 else if (Str.charAt(s, 0) == 35) 1 else 0
+
+def itemLabel(s: String): String =
+  if (itemDone(s) == 1) Str.slice(s, 1, Str.len(s)) else s
+
+def flipDone(s: String): String =
+  if (itemDone(s) == 1) itemLabel(s) else Str.concat("#", s)
+
 law listLenNonNeg: Bool =
   Law.signalListLen(1) >= 0
 
@@ -37,7 +46,7 @@ law hasClear: Bool =
 } yield Signal.setStr(draft, "")), View.button("Rename", _ => for {
   xs = Signal.getList(items)
   ys = setAt(xs, 0, "oat milk")
-} yield Signal.setList(items, ys))), View.expanded(View.scroll(View.each(items, s => View.row(View.expanded(View.text(s)), View.button("Del", _ => Signal.setList(items, List.filter(Signal.getList(items), x => x != s))))))), View.button("Save", _ => for {
+} yield Signal.setList(items, ys))), View.expanded(View.scroll(View.each(items, s => View.row(View.expanded(View.text(itemLabel(s))), View.button(if (itemDone(s) == 1) "Undo" else "Done", _ => Signal.setList(items, List.map(Signal.getList(items), x => if (x == s) flipDone(x) else x))), View.button("Del", _ => Signal.setList(items, List.filter(Signal.getList(items), x => x != s))))))), View.button("Save", _ => for {
   xs = Signal.getList(items)
   body = if (List.isEmpty(xs) == 1) "" else Str.concat(List.join(xs, "\n"), "\n")
   _ <- Fs.write(path, body)

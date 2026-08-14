@@ -832,6 +832,16 @@ static int64_t keep_none(void *head, void *env) {
   return 0;
 }
 
+static void *map_bang(void *head, void *env) {
+  (void)env;
+  return sz_string_concat((SzString *)head, sz_string_from_cstr("!"));
+}
+
+static void *map_id(void *head, void *env) {
+  (void)env;
+  return head;
+}
+
 static SzIo *after_sleep_tag(void *value, void *env) {
   (void)value;
   return sz_io_pure(env);
@@ -2280,6 +2290,30 @@ int main(void) {
     sz_string_free(a);
     sz_string_free(b);
     sz_string_free(c);
+  }
+
+  /* List.map: new spine, mapped heads, empty stays empty. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_nil()));
+    SzList *ys;
+    SzList *id;
+    ys = sz_list_map(xs, map_bang, NULL);
+    assert(sz_list_len(ys) == 2);
+    assert(strcmp(sz_string_cstr((SzString *)ys->head), "a!") == 0);
+    assert(ys->tail && strcmp(sz_string_cstr((SzString *)ys->tail->head), "b!") == 0);
+    assert(ys->head != a);
+    id = sz_list_map(xs, map_id, NULL);
+    assert(id->head == a);
+    assert(id->tail && id->tail->head == b);
+    sz_list_free(ys);
+    sz_list_free(id);
+    ys = sz_list_map(NULL, map_bang, NULL);
+    assert(sz_list_is_empty(ys));
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
   }
 
   puts("runtime io tests ok");
