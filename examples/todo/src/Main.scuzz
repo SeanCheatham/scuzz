@@ -37,7 +37,7 @@ law hasClear: Bool =
 } yield Signal.setStr(draft, "")), View.button("Rename", _ => for {
   xs = Signal.getList(items)
   ys = setAt(xs, 0, "oat milk")
-} yield Signal.setList(items, ys))), View.expanded(View.scroll(View.each(items))), View.button("Save", _ => for {
+} yield Signal.setList(items, ys))), View.expanded(View.scroll(View.each(items, s => View.row(View.expanded(View.text(s)), View.button("Del", _ => Signal.setList(items, List.filter(Signal.getList(items), x => x != s))))))), View.button("Save", _ => for {
   xs = Signal.getList(items)
   body = if (List.isEmpty(xs) == 1) "" else Str.concat(List.join(xs, "\n"), "\n")
   _ <- Fs.write(path, body)

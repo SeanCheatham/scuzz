@@ -821,6 +821,17 @@ static SzIo *always_fail_cont(void *value, void *env) {
   return sz_io_fail_cstr("always");
 }
 
+static int64_t keep_not_b(void *head, void *env) {
+  (void)env;
+  return strcmp(sz_string_cstr((SzString *)head), "b") != 0;
+}
+
+static int64_t keep_none(void *head, void *env) {
+  (void)head;
+  (void)env;
+  return 0;
+}
+
 static SzIo *after_sleep_tag(void *value, void *env) {
   (void)value;
   return sz_io_pure(env);
@@ -2245,6 +2256,30 @@ int main(void) {
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
     sz_string_free(s);
+  }
+
+  /* List.filter: keep order, share heads, drop unmatched. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzString *c = sz_string_from_cstr("a");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_cons(c, sz_list_nil())));
+    SzList *ys;
+    ys = sz_list_filter(xs, keep_not_b, NULL);
+    assert(sz_list_len(ys) == 2);
+    assert(ys->head == a);
+    assert(ys->tail && ys->tail->head == c);
+    assert(sz_list_len(xs) == 3);
+    sz_list_free(ys);
+    ys = sz_list_filter(xs, keep_none, NULL);
+    assert(sz_list_is_empty(ys));
+    sz_list_free(ys);
+    ys = sz_list_filter(NULL, keep_not_b, NULL);
+    assert(sz_list_is_empty(ys));
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
   }
 
   puts("runtime io tests ok");

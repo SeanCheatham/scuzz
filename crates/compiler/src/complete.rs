@@ -291,6 +291,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_list_filter_after_dot() {
+        let src = "@main def main: IO[Unit] = List.fi\n";
+        let labels = labels_at(src, "List.fi");
+        assert!(labels.iter().any(|l| l == "List.filter"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_kit_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.\n";
         let labels = labels_at(src, "View.");

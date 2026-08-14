@@ -62,7 +62,10 @@ A file-backed todo list (`Fs`, `Signal.list`, `View`). Full source: [`examples/t
           _ = Signal.setList(items, xs)
         } yield Signal.setStr(draft, ""))
       ),
-      View.expanded(View.scroll(View.each(items))),
+      View.expanded(View.scroll(View.each(items, s => View.row(
+        View.expanded(View.text(s)),
+        View.button("Del", _ => Signal.setList(items, List.filter(Signal.getList(items), x => x != s)))
+      )))),
       View.button("Save", _ => for {
         xs = Signal.getList(items)
         body = if (List.isEmpty(xs) == 1) "" else Str.concat(List.join(xs, "\n"), "\n")

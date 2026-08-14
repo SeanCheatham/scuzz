@@ -62,6 +62,16 @@ SzList *sz_list_append(SzList *xs, void *x) {
   return sz_list_cons(xs->head, sz_list_append(xs->tail, x));
 }
 
+SzList *sz_list_filter(SzList *xs, SzListPred pred, void *env) {
+  if (!pred)
+    sz_panic("sz_list_filter(null pred)");
+  if (!xs)
+    return NULL;
+  if (pred(xs->head, env))
+    return sz_list_cons(xs->head, sz_list_filter(xs->tail, pred, env));
+  return sz_list_filter(xs->tail, pred, env);
+}
+
 void sz_list_free(SzList *xs) {
   while (xs) {
     SzList *n = xs->tail;

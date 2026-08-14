@@ -9,15 +9,17 @@ button:Add
 button:Rename
 scroll:scroll
 list:list
-text:- oat milk
+text:oat milk
+button:Del
 button:Save
 button:Clear
 
 [taps]
 0 Add
 1 Rename
-2 Save
-3 Clear
+2 Del
+3 Save
+4 Clear
 
 [fields]
 0* item=""

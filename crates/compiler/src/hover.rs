@@ -286,6 +286,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Signal.map(s: Signal, f: Int => String): Signal",
     ),
     ("Signal.list", "Signal.list(xs: List): Signal"),
+    (
+        "List.filter",
+        "List.filter(xs: List, pred: String => Bool): List",
+    ),
     ("View.text", "View.text(s: String): View"),
     ("View.bindText", "View.bindText(s: Signal): View"),
     (
@@ -488,6 +492,18 @@ mod tests {
         let h = hover_src(src, "each");
         assert!(
             h.contains("View.each(items: Signal, row: String => View): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_list_filter() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.filter(["a", "b"], x => x != "b"), ","))
+"#;
+        let h = hover_src(src, "filter");
+        assert!(
+            h.contains("List.filter(xs: List, pred: String => Bool): List"),
             "{h}"
         );
     }

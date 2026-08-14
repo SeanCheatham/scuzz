@@ -77,6 +77,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_reverse(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_join(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_append(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_filter(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_write(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_list(ptr)").unwrap();
@@ -1887,7 +1888,7 @@ fn emit_pred_lambda(
     let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("p{id}"));
     assert!(
         body_emitted.kind == Kind::Int,
-        "Stream.filter predicate must be Bool/Int"
+        "predicate lambda must return Bool/Int"
     );
 
     writeln!(
@@ -2381,6 +2382,17 @@ fn emit_call(
     }
     if callee == "View.each" {
         return emit_view_each(args, ctx, locals, prefix);
+    }
+    if callee == "List.filter" {
+        return emit_stream_pred(
+            "List.filter",
+            "sz_list_filter",
+            args,
+            ctx,
+            locals,
+            prefix,
+            false,
+        );
     }
     if callee == "Resource.make" || callee == "Resource.use" {
         return emit_resource(callee, args, ctx, locals, prefix);
@@ -3689,6 +3701,21 @@ mod tests {
         crate::typ::typecheck(&p).expect("typecheck");
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_stream_filter"));
+        assert!(ir.contains("sz_pred_"));
+    }
+
+    #[test]
+    fn emit_list_filter_compile() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = List.filter(["a", "b", "a"], x => x != "b")
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_filter"));
         assert!(ir.contains("sz_pred_"));
     }
 

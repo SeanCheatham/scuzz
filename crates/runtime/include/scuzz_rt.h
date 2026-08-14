@@ -331,6 +331,8 @@ struct SzList {
   struct SzList *tail;
 };
 
+typedef int64_t (*SzListPred)(void *head, void *env);
+
 SzList *sz_list_nil(void);
 int sz_list_is_empty(const SzList *xs);
 SzList *sz_list_cons(void *head, SzList *tail);
@@ -340,6 +342,8 @@ size_t sz_list_len(const SzList *xs);
 void *sz_list_at(const SzList *xs, size_t index);
 SzList *sz_list_reverse(SzList *xs);
 SzList *sz_list_append(SzList *xs, void *x);
+/* Keep heads for which `pred` is nonzero. New spine; does not own heads. */
+SzList *sz_list_filter(SzList *xs, SzListPred pred, void *env);
 /* Free cons cells only; does not free heads. */
 void sz_list_free(SzList *xs);
 SzString *sz_list_join(const SzList *xs, const char *sep);
