@@ -1,7 +1,7 @@
 //! Desugar `for` to `Let` / `FlatMap`. Resolve `Enum.Case` to `AdtConstruct`.
 
 use crate::ast::{Expr, ExprKind, ForBinder, MatchArm, Pattern, Program};
-use crate::resolve::{enum_id, EnumIndex};
+use crate::resolve::{enum_id, split_dotted, EnumIndex};
 use crate::span::Span;
 
 /// Lower surface sugar in a program.
@@ -106,11 +106,11 @@ fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Expr {
                 .map(|e| lower_expr(e, enums, current_module))
                 .collect();
             if let Some((enum_name, case_name)) = split_dotted(&callee) {
-                if let Some(id) = resolve_ctor(enums, &enum_name, &case_name, current_module) {
+                if let Some(id) = resolve_ctor(enums, enum_name, case_name, current_module) {
                     return Expr::new(
                         ExprKind::AdtConstruct {
                             enum_name: id,
-                            case_name,
+                            case_name: case_name.to_string(),
                             args,
                             type_args: Vec::new(),
                         },
@@ -188,10 +188,6 @@ fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Expr {
         ),
         kind => Expr { kind, span }.map_children(|c| lower_expr(c, enums, current_module)),
     }
-}
-
-fn split_dotted(callee: &str) -> Option<(String, String)> {
-    crate::resolve::split_dotted(callee).map(|(a, b)| (a.to_string(), b.to_string()))
 }
 
 fn desugar_for(

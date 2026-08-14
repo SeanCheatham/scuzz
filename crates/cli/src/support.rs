@@ -1,6 +1,7 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 use scuzz_compiler::driver::{find_runtime_dir, CompileOptions};
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 pub fn resolve_dir(path: &Path) -> Result<PathBuf> {
     if path.is_absolute() {
@@ -33,4 +34,37 @@ pub fn compile_opts(
         incremental,
         verify,
     })
+}
+
+pub struct TestrtUi<'a> {
+    pub script: &'a Path,
+    pub dump: &'a Path,
+    pub width: i32,
+    pub height: i32,
+}
+
+/// Run a verify-graph binary under TestRuntime. `ui` sets Headless + script/dump.
+pub fn run_testrt(
+    exe: &Path,
+    reached: &Path,
+    schedule_seed: &str,
+    ui: Option<TestrtUi<'_>>,
+) -> Result<i32> {
+    let mut cmd = Command::new(exe);
+    cmd.env("SCUZZ_TESTRT", "1")
+        .env("SCUZZ_SOMETIMES_DUMP", reached);
+    if let Some(ui) = ui {
+        cmd.env("SCUZZ_UI_RUNTIME", "headless")
+            .env("SCUZZ_UI_SCRIPT", ui.script)
+            .env("SCUZZ_FUZZ_DUMP", ui.dump)
+            .env("SCUZZ_UI_WIDTH", ui.width.to_string())
+            .env("SCUZZ_UI_HEIGHT", ui.height.to_string());
+    }
+    if !schedule_seed.is_empty() {
+        cmd.env("SCUZZ_SCHED_SEED", schedule_seed);
+    }
+    let status = cmd
+        .status()
+        .with_context(|| format!("running {}", exe.display()))?;
+    Ok(status.code().unwrap_or(1))
 }

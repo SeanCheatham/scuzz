@@ -1,11 +1,11 @@
-use crate::support::{compile_opts, resolve_dir};
-use anyhow::{bail, Context, Result};
+use crate::support::{compile_opts, resolve_dir, run_testrt, TestrtUi};
+use anyhow::{bail, Result};
 use scuzz_compiler::compile_prepared_program;
 use scuzz_compiler::driver::load_verify_program;
-use scuzz_compiler::fuzz::{count_prefix_lines, fuzz_script, lines_nonempty};
+use scuzz_compiler::fuzz::{count_prefix_lines, fuzz_script, lines_nonempty, script_text};
 use scuzz_compiler::mutate::{mutate_apply, mutate_count};
 use std::path::Path;
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 
 pub fn cmd_mutate(path: &Path, limit: i64, iters: i64, seed: i64) -> Result<ExitCode> {
     if limit <= 0 {
@@ -133,31 +133,21 @@ fn mutate_exec_ui_events(
     let script = out_dir.join("script.txt");
     let dump = out_dir.join("dump.txt");
     let reached = out_dir.join("sometimes.reached");
-    let text = if events.is_empty() {
-        String::new()
-    } else {
-        let mut s = events.join("\n");
-        s.push('\n');
-        s
-    };
+    let text = script_text(events);
     std::fs::write(&script, text)?;
     std::fs::write(&dump, "")?;
     std::fs::write(&reached, "")?;
-    let mut cmd = Command::new(exe);
-    cmd.env("SCUZZ_UI_RUNTIME", "headless")
-        .env("SCUZZ_TESTRT", "1")
-        .env("SCUZZ_UI_SCRIPT", &script)
-        .env("SCUZZ_FUZZ_DUMP", &dump)
-        .env("SCUZZ_UI_WIDTH", w.to_string())
-        .env("SCUZZ_UI_HEIGHT", h.to_string())
-        .env("SCUZZ_SOMETIMES_DUMP", &reached);
-    if !schedule_seed.is_empty() {
-        cmd.env("SCUZZ_SCHED_SEED", schedule_seed);
-    }
-    let status = cmd
-        .status()
-        .with_context(|| format!("running {}", exe.display()))?;
-    Ok(status.code().unwrap_or(1))
+    run_testrt(
+        exe,
+        &reached,
+        schedule_seed,
+        Some(TestrtUi {
+            script: &script,
+            dump: &dump,
+            width: w,
+            height: h,
+        }),
+    )
 }
 
 fn mutate_exec_io(
@@ -184,14 +174,5 @@ fn mutate_exec_io(
 fn mutate_exec_io_at(exe: &Path, out_dir: &Path, schedule_seed: &str) -> Result<i32> {
     let reached = out_dir.join("sometimes.reached");
     std::fs::write(&reached, "")?;
-    let mut cmd = Command::new(exe);
-    cmd.env("SCUZZ_TESTRT", "1")
-        .env("SCUZZ_SOMETIMES_DUMP", &reached);
-    if !schedule_seed.is_empty() {
-        cmd.env("SCUZZ_SCHED_SEED", schedule_seed);
-    }
-    let status = cmd
-        .status()
-        .with_context(|| format!("running {}", exe.display()))?;
-    Ok(status.code().unwrap_or(1))
+    run_testrt(exe, &reached, schedule_seed, None)
 }

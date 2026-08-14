@@ -546,6 +546,32 @@ pub fn is_fmt_source(path: &std::path::Path) -> bool {
     )
 }
 
+/// Recursively collect format-checked sources under `dir` (sorted).
+pub fn collect_fmt_sources(dir: &std::path::Path) -> std::io::Result<Vec<std::path::PathBuf>> {
+    let mut out = Vec::new();
+    collect_fmt_sources_into(dir, &mut out)?;
+    out.sort();
+    Ok(out)
+}
+
+fn collect_fmt_sources_into(
+    dir: &std::path::Path,
+    out: &mut Vec<std::path::PathBuf>,
+) -> std::io::Result<()> {
+    if !dir.is_dir() {
+        return Ok(());
+    }
+    for entry in std::fs::read_dir(dir)? {
+        let path = entry?.path();
+        if path.is_dir() {
+            collect_fmt_sources_into(&path, out)?;
+        } else if is_fmt_source(&path) {
+            out.push(path);
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

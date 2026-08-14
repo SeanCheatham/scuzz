@@ -2,7 +2,7 @@
 //! No second typer; unsaved buffers are ignored until they hit disk.
 
 use crate::check::{check_project, Diagnostic};
-use crate::overlay::is_fmt_source;
+use crate::overlay::collect_fmt_sources;
 use anyhow::Result;
 use std::collections::BTreeMap;
 use std::fs;
@@ -128,25 +128,7 @@ fn publish_check<W: Write>(root: &Path, writer: &mut W) -> Result<()> {
 }
 
 fn src_files(root: &Path) -> Result<Vec<PathBuf>> {
-    let mut out = Vec::new();
-    collect_src(&root.join("src"), &mut out)?;
-    out.sort();
-    Ok(out)
-}
-
-fn collect_src(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
-    if !dir.is_dir() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(dir)? {
-        let path = entry?.path();
-        if path.is_dir() {
-            collect_src(&path, out)?;
-        } else if is_fmt_source(&path) {
-            out.push(path);
-        }
-    }
-    Ok(())
+    Ok(collect_fmt_sources(&root.join("src"))?)
 }
 
 fn lsp_diagnostic_json(d: &Diagnostic) -> String {

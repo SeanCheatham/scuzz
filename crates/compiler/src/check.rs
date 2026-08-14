@@ -3,14 +3,15 @@
 use crate::format::format_source;
 use crate::lower::lower_program;
 use crate::overlay::{
-    apply_overlays, check_laws_applied, collect_law_names, is_fmt_source, residualize_refinements,
+    apply_overlays, check_laws_applied, collect_fmt_sources, collect_law_names,
+    residualize_refinements,
 };
 use crate::parser::{parse_sources, ParseError};
 use crate::span::{offset_to_line_col, Span};
 use crate::typ::{typecheck, TypeError};
 use anyhow::{Context, Result};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 #[derive(Debug, Clone)]
 pub struct Diagnostic {
@@ -156,27 +157,8 @@ fn diagnostic_from_type(e: TypeError, sources: &[(String, String)]) -> Diagnosti
     d
 }
 
-fn collect_scuzz_files(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
-    if !dir.is_dir() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            collect_scuzz_files(&path, out)?;
-        } else if is_fmt_source(&path) {
-            out.push(path);
-        }
-    }
-    Ok(())
-}
-
 fn format_check_src(project_dir: &Path) -> Result<Vec<Diagnostic>> {
-    let src = project_dir.join("src");
-    let mut files = Vec::new();
-    collect_scuzz_files(&src, &mut files)?;
-    files.sort();
+    let files = collect_fmt_sources(&project_dir.join("src"))?;
     let mut diags = Vec::new();
     for p in files {
         let text = fs::read_to_string(&p).with_context(|| format!("reading {}", p.display()))?;

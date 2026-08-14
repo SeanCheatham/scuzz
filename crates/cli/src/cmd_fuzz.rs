@@ -1,4 +1,4 @@
-use crate::support::{compile_opts, resolve_dir};
+use crate::support::{compile_opts, resolve_dir, run_testrt, TestrtUi};
 use anyhow::{bail, Context, Result};
 use scuzz_compiler::compile_project;
 use scuzz_compiler::fuzz::{
@@ -8,7 +8,7 @@ use scuzz_compiler::fuzz::{
 };
 use scuzz_compiler::manifest::load_manifest;
 use std::path::Path;
-use std::process::{Command, ExitCode};
+use std::process::ExitCode;
 
 pub fn cmd_fuzz(
     path: &Path,
@@ -420,38 +420,27 @@ fn fuzz_exec(
     std::fs::write(&script, script_text(events))?;
     std::fs::write(&dump, "")?;
     std::fs::write(&reached, "")?;
-    let mut cmd = Command::new(exe);
-    cmd.env("SCUZZ_UI_RUNTIME", "headless")
-        .env("SCUZZ_TESTRT", "1")
-        .env("SCUZZ_UI_SCRIPT", &script)
-        .env("SCUZZ_FUZZ_DUMP", &dump)
-        .env("SCUZZ_UI_WIDTH", w.to_string())
-        .env("SCUZZ_UI_HEIGHT", h.to_string())
-        .env("SCUZZ_SOMETIMES_DUMP", &reached);
-    if !schedule_seed.is_empty() {
-        cmd.env("SCUZZ_SCHED_SEED", schedule_seed);
-    }
-    let status = cmd
-        .status()
-        .with_context(|| format!("running {}", exe.display()))?;
+    let code = run_testrt(
+        exe,
+        &reached,
+        schedule_seed,
+        Some(TestrtUi {
+            script: &script,
+            dump: &dump,
+            width: w,
+            height: h,
+        }),
+    )?;
     merge_sometimes(&reached, &fuzz_dir.join("sometimes.campaign"))?;
-    Ok(status.code().unwrap_or(1))
+    Ok(code)
 }
 
 fn fuzz_exec_io(exe: &Path, fuzz_dir: &Path, schedule_seed: &str) -> Result<i32> {
     let reached = fuzz_dir.join("sometimes.reached");
     std::fs::write(&reached, "")?;
-    let mut cmd = Command::new(exe);
-    cmd.env("SCUZZ_TESTRT", "1")
-        .env("SCUZZ_SOMETIMES_DUMP", &reached);
-    if !schedule_seed.is_empty() {
-        cmd.env("SCUZZ_SCHED_SEED", schedule_seed);
-    }
-    let status = cmd
-        .status()
-        .with_context(|| format!("running {}", exe.display()))?;
+    let code = run_testrt(exe, &reached, schedule_seed, None)?;
     merge_sometimes(&reached, &fuzz_dir.join("sometimes.campaign"))?;
-    Ok(status.code().unwrap_or(1))
+    Ok(code)
 }
 
 fn read_drivers(project_dir: &Path) -> Vec<String> {

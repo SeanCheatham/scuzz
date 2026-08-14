@@ -1,7 +1,7 @@
 //! Residual-oracle mutation: negate / flip / arith / drop `&&` / `0`↔`1` inside
 //! `Law.check` / `Law.assert` / `.require` predicates.
 
-use crate::ast::{BinOp, Expr, ExprKind, InterpPart, Program};
+use crate::ast::{BinOp, Expr, ExprKind, Program};
 
 fn is_oracle_callee(callee: &str) -> bool {
     callee == "Law.check" || callee == "Law.assert"
@@ -71,338 +71,33 @@ fn require_pred_index(args: &[Expr]) -> Option<usize> {
 fn mutate_expr(e: Expr, target: i32, seen: i32, in_oracle: bool) -> (Expr, i32) {
     let span = e.span.clone();
     match e.kind {
-        ExprKind::IntLit(n) => {
-            if in_oracle && (n == 0 || n == 1) {
-                if seen == target {
-                    (
-                        Expr::new(ExprKind::IntLit(if n == 0 { 1 } else { 0 }), span),
-                        seen + 1,
-                    )
-                } else {
-                    (Expr::new(ExprKind::IntLit(n), span), seen + 1)
-                }
-            } else {
-                (Expr::new(ExprKind::IntLit(n), span), seen)
-            }
+        ExprKind::IntLit(n) if in_oracle && (n == 0 || n == 1) => {
+            let flipped = if n == 0 { 1 } else { 0 };
+            let out = if seen == target { flipped } else { n };
+            (Expr::new(ExprKind::IntLit(out), span), seen + 1)
         }
-        ExprKind::Call { callee, args } => {
-            if is_oracle_callee(&callee) {
-                mutate_oracle(callee, args, span, target, seen)
-            } else {
-                let (args, seen) = mutate_expr_list(args, target, seen, in_oracle);
-                (Expr::new(ExprKind::Call { callee, args }, span), seen)
-            }
+        ExprKind::Call { callee, args } if is_oracle_callee(&callee) => {
+            mutate_oracle(callee, args, span, target, seen)
         }
         ExprKind::MethodCall {
             receiver,
             method,
             args,
-        } => {
-            if method == "require" {
-                mutate_require(*receiver, args, span, target, seen)
-            } else {
-                let (receiver, seen) = mutate_expr(*receiver, target, seen, in_oracle);
-                let (args, seen) = mutate_expr_list(args, target, seen, in_oracle);
-                (
-                    Expr::new(
-                        ExprKind::MethodCall {
-                            receiver: Box::new(receiver),
-                            method,
-                            args,
-                        },
-                        span,
-                    ),
-                    seen,
-                )
-            }
+        } if method == "require" => mutate_require(*receiver, args, span, target, seen),
+        ExprKind::Binary { op, left, right } if in_oracle => {
+            let n = bin_site_count(op);
+            let (left, seen_l) = mutate_expr(*left, target, seen + n, true);
+            let (right, seen_r) = mutate_expr(*right, target, seen_l, true);
+            (bin_mutant(op, left, right, span, target, seen), seen_r)
         }
-        ExprKind::Binary { op, left, right } => {
-            if in_oracle {
-                let n = bin_site_count(op);
-                let (left, seen_l) = mutate_expr(*left, target, seen + n, true);
-                let (right, seen_r) = mutate_expr(*right, target, seen_l, true);
-                let expr = bin_mutant(op, left, right, span, target, seen);
-                (expr, seen_r)
-            } else {
-                let (left, seen) = mutate_expr(*left, target, seen, false);
-                let (right, seen) = mutate_expr(*right, target, seen, false);
-                (
-                    Expr::new(
-                        ExprKind::Binary {
-                            op,
-                            left: Box::new(left),
-                            right: Box::new(right),
-                        },
-                        span,
-                    ),
-                    seen,
-                )
-            }
-        }
-        ExprKind::AdtConstruct {
-            enum_name,
-            case_name,
-            args,
-            type_args,
-        } => {
-            let (args, seen) = mutate_expr_list(args, target, seen, in_oracle);
-            (
-                Expr::new(
-                    ExprKind::AdtConstruct {
-                        enum_name,
-                        case_name,
-                        args,
-                        type_args,
-                    },
-                    span,
-                ),
-                seen,
-            )
-        }
-        ExprKind::Let { name, value, body } => {
-            let (value, seen) = mutate_expr(*value, target, seen, in_oracle);
-            let (body, seen) = mutate_expr(*body, target, seen, in_oracle);
-            (
-                Expr::new(
-                    ExprKind::Let {
-                        name,
-                        value: Box::new(value),
-                        body: Box::new(body),
-                    },
-                    span,
-                ),
-                seen,
-            )
-        }
-        ExprKind::FlatMap { inner, param, body } => {
-            let (inner, seen) = mutate_expr(*inner, target, seen, in_oracle);
-            let (body, seen) = mutate_expr(*body, target, seen, in_oracle);
-            (
-                Expr::new(
-                    ExprKind::FlatMap {
-                        inner: Box::new(inner),
-                        param,
-                        body: Box::new(body),
-                    },
-                    span,
-                ),
-                seen,
-            )
-        }
-        ExprKind::HandleErrorWith { inner, body } => {
-            let (inner, seen) = mutate_expr(*inner, target, seen, in_oracle);
-            let (body, seen) = mutate_expr(*body, target, seen, in_oracle);
-            (
-                Expr::new(
-                    ExprKind::HandleErrorWith {
-                        inner: Box::new(inner),
-                        body: Box::new(body),
-                    },
-                    span,
-                ),
-                seen,
-            )
-        }
-        ExprKind::If {
-            cond,
-            then_branch,
-            else_branch,
-        } => {
-            let (cond, seen) = mutate_expr(*cond, target, seen, in_oracle);
-            let (then_branch, seen) = mutate_expr(*then_branch, target, seen, in_oracle);
-            let (else_branch, seen) = mutate_expr(*else_branch, target, seen, in_oracle);
-            (
-                Expr::new(
-                    ExprKind::If {
-                        cond: Box::new(cond),
-                        then_branch: Box::new(then_branch),
-                        else_branch: Box::new(else_branch),
-                    },
-                    span,
-                ),
-                seen,
-            )
-        }
-        ExprKind::Lambda { param, body } => {
-            let (body, seen) = mutate_expr(*body, target, seen, in_oracle);
-            (
-                Expr::new(
-                    ExprKind::Lambda {
-                        param,
-                        body: Box::new(body),
-                    },
-                    span,
-                ),
-                seen,
-            )
-        }
-        ExprKind::Match { scrutinee, arms } => {
-            let (scrutinee, mut seen) = mutate_expr(*scrutinee, target, seen, in_oracle);
-            let mut out = Vec::with_capacity(arms.len());
-            for mut arm in arms {
-                let (body, s) = mutate_expr(arm.body, target, seen, in_oracle);
-                arm.body = body;
-                seen = s;
-                out.push(arm);
-            }
-            (
-                Expr::new(
-                    ExprKind::Match {
-                        scrutinee: Box::new(scrutinee),
-                        arms: out,
-                    },
-                    span,
-                ),
-                seen,
-            )
-        }
-        ExprKind::For { binders, body } => {
+        kind => {
             let mut seen = seen;
-            let mut out = Vec::with_capacity(binders.len());
-            for b in binders {
-                match b {
-                    crate::ast::ForBinder::Eq { name, value } => {
-                        let (value, s) = mutate_expr(value, target, seen, in_oracle);
-                        seen = s;
-                        out.push(crate::ast::ForBinder::Eq { name, value });
-                    }
-                    crate::ast::ForBinder::Draw { name, value } => {
-                        let (value, s) = mutate_expr(value, target, seen, in_oracle);
-                        seen = s;
-                        out.push(crate::ast::ForBinder::Draw { name, value });
-                    }
-                }
-            }
-            let (body, seen) = mutate_expr(*body, target, seen, in_oracle);
-            (
-                Expr::new(
-                    ExprKind::For {
-                        binders: out,
-                        body: Box::new(body),
-                    },
-                    span,
-                ),
-                seen,
-            )
-        }
-        ExprKind::ListLit { elems } => {
-            let (elems, seen) = mutate_expr_list(elems, target, seen, in_oracle);
-            (Expr::new(ExprKind::ListLit { elems }, span), seen)
-        }
-        ExprKind::Interpolate { parts } => {
-            let mut seen = seen;
-            let mut out = Vec::with_capacity(parts.len());
-            for p in parts {
-                match p {
-                    InterpPart::Lit(t) => out.push(InterpPart::Lit(t)),
-                    InterpPart::Expr(e) => {
-                        let (e, s) = mutate_expr(e, target, seen, in_oracle);
-                        seen = s;
-                        out.push(InterpPart::Expr(e));
-                    }
-                }
-            }
-            (Expr::new(ExprKind::Interpolate { parts: out }, span), seen)
-        }
-        ExprKind::Field { base, field } => {
-            let (base, seen) = mutate_expr(*base, target, seen, in_oracle);
-            (
-                Expr::new(
-                    ExprKind::Field {
-                        base: Box::new(base),
-                        field,
-                    },
-                    span,
-                ),
-                seen,
-            )
-        }
-        ExprKind::IoPrintln(arg) => {
-            let (arg, seen) = mutate_expr(*arg, target, seen, in_oracle);
-            (Expr::new(ExprKind::IoPrintln(Box::new(arg)), span), seen)
-        }
-        ExprKind::IoFail(arg) => {
-            let (arg, seen) = mutate_expr(*arg, target, seen, in_oracle);
-            (Expr::new(ExprKind::IoFail(Box::new(arg)), span), seen)
-        }
-        ExprKind::IoPure(arg) => {
-            let (arg, seen) = mutate_expr(*arg, target, seen, in_oracle);
-            (Expr::new(ExprKind::IoPure(Box::new(arg)), span), seen)
-        }
-        ExprKind::IoSleep(arg) => {
-            let (arg, seen) = mutate_expr(*arg, target, seen, in_oracle);
-            (Expr::new(ExprKind::IoSleep(Box::new(arg)), span), seen)
-        }
-        ExprKind::Attempt { inner } => {
-            let (inner, seen) = mutate_expr(*inner, target, seen, in_oracle);
-            (
-                Expr::new(
-                    ExprKind::Attempt {
-                        inner: Box::new(inner),
-                    },
-                    span,
-                ),
-                seen,
-            )
-        }
-        ExprKind::IoRace { left, right } => {
-            let (left, seen) = mutate_expr(*left, target, seen, in_oracle);
-            let (right, seen) = mutate_expr(*right, target, seen, in_oracle);
-            (
-                Expr::new(
-                    ExprKind::IoRace {
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    },
-                    span,
-                ),
-                seen,
-            )
-        }
-        ExprKind::IoBoth { left, right } => {
-            let (left, seen) = mutate_expr(*left, target, seen, in_oracle);
-            let (right, seen) = mutate_expr(*right, target, seen, in_oracle);
-            (
-                Expr::new(
-                    ExprKind::IoBoth {
-                        left: Box::new(left),
-                        right: Box::new(right),
-                    },
-                    span,
-                ),
-                seen,
-            )
-        }
-        ExprKind::IoEnsure { inner, finalizer } => {
-            let (inner, seen) = mutate_expr(*inner, target, seen, in_oracle);
-            let (finalizer, seen) = mutate_expr(*finalizer, target, seen, in_oracle);
-            (
-                Expr::new(
-                    ExprKind::IoEnsure {
-                        inner: Box::new(inner),
-                        finalizer: Box::new(finalizer),
-                    },
-                    span,
-                ),
-                seen,
-            )
-        }
-        ExprKind::IoTimeout { ms, inner } => {
-            let (ms, seen) = mutate_expr(*ms, target, seen, in_oracle);
-            let (inner, seen) = mutate_expr(*inner, target, seen, in_oracle);
-            (
-                Expr::new(
-                    ExprKind::IoTimeout {
-                        ms: Box::new(ms),
-                        inner: Box::new(inner),
-                    },
-                    span,
-                ),
-                seen,
-            )
-        }
-        leaf @ (ExprKind::Var(_) | ExprKind::Unit | ExprKind::StrLit(_)) => {
-            (Expr { kind: leaf, span }, seen)
+            let expr = Expr { kind, span }.map_children(|c| {
+                let (out, next) = mutate_expr(c, target, seen, in_oracle);
+                seen = next;
+                out
+            });
+            (expr, seen)
         }
     }
 }
@@ -548,18 +243,13 @@ fn bin_mutant(
     }
 }
 
-fn mutate_prog_at(program: Program, target: i32) -> (Program, i32) {
-    let mut program = program;
+fn mutate_prog_at(mut program: Program, target: i32) -> (Program, i32) {
     let mut seen = 0;
-    for d in &mut program.defs {
-        let body = std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit));
+    program.map_bodies_mut(|body| {
         let (body, s) = mutate_expr(body, target, seen, false);
-        d.body = body;
         seen = s;
-    }
-    let main = std::mem::replace(&mut program.main.body, Expr::dummy(ExprKind::Unit));
-    let (main, seen) = mutate_expr(main, target, seen, false);
-    program.main.body = main;
+        body
+    });
     (program, seen)
 }
 

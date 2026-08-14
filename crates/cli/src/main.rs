@@ -8,7 +8,7 @@ use scuzz_compiler::compile_project;
 use scuzz_compiler::driver::{find_runtime_dir, wait_for_source_change};
 use scuzz_compiler::format::format_source;
 use scuzz_compiler::manifest::load_manifest;
-use scuzz_compiler::overlay::is_fmt_source;
+use scuzz_compiler::overlay::collect_fmt_sources;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use support::resolve_dir;
@@ -591,9 +591,7 @@ fn fmt_project(path: &Path, check: bool) -> Result<ExitCode> {
         bail!("missing src/ in {}", project_dir.display());
     }
     let mut dirty = 0usize;
-    let mut paths = Vec::new();
-    collect_scuzz_sources(&src, &mut paths)?;
-    for p in paths {
+    for p in collect_fmt_sources(&src)? {
         let text = std::fs::read_to_string(&p)?;
         let formatted =
             format_source(&text).with_context(|| format!("formatting {}", p.display()))?;
@@ -612,19 +610,6 @@ fn fmt_project(path: &Path, check: bool) -> Result<ExitCode> {
     }
     eprintln!("scuzz fmt ok");
     Ok(ExitCode::SUCCESS)
-}
-
-fn collect_scuzz_sources(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
-    for entry in std::fs::read_dir(dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            collect_scuzz_sources(&path, out)?;
-        } else if is_fmt_source(&path) {
-            out.push(path);
-        }
-    }
-    Ok(())
 }
 
 fn effective_ui_runtime(manifest: &scuzz_compiler::manifest::Manifest, headless: bool) -> String {

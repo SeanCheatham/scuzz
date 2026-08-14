@@ -52,12 +52,9 @@ copy_crate ffi-skia include src Makefile README.md
 copy_crate embedder-desktop include src Makefile
 copy_crate embedder-mobile include src Makefile shells
 
-cp -f "$ROOT/scripts/run_goldens.sh" "$OUT/scripts/run_goldens.sh"
-cp -f "$ROOT/scripts/package_project.sh" "$OUT/scripts/package_project.sh"
 cp -f "$ROOT/scripts/fetch_skia.sh" "$OUT/scripts/fetch_skia.sh"
 cp -f "$ROOT/scripts/skia_triple.sh" "$OUT/scripts/skia_triple.sh"
-chmod +x "$OUT/scripts/run_goldens.sh" "$OUT/scripts/package_project.sh" \
-  "$OUT/scripts/fetch_skia.sh" "$OUT/scripts/skia_triple.sh"
+chmod +x "$OUT/scripts/fetch_skia.sh" "$OUT/scripts/skia_triple.sh"
 
 # Skia pin + prebuilt for UI text (default backend). Opt out: SCUZZ_SKIA=sk_sw.
 # fetch_skia.sh substitutes {triple} so Linux/macOS releases get the matching asset.

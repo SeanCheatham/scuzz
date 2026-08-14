@@ -27,21 +27,10 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ## Known gaps
 
-### Near-term (in-source oracles + drivers)
-
-Vision locks **oracles in source, drivers as the test surface** ([`vision.md`](vision.md#laws-simulation-mutation-and-verification)). The Rust compiler parses top-level `law name: Bool = …`, provides `.require` (type-preserving application; residual `Law.check` / sequenced `Law.assert`), `Law.check` / `Law.sometimes`, loads stem-paired `*.scuzz_drivers`, and attaches `where` refinements on `def` params and `record` fields. Unused laws fail `check`. `[ui]` fuzz keeps prefixes that hit new `Law.sometimes` names or a new Headless dump; IO-only keeps schedule seeds that hit new sometimes names.
-
-### Near-term (AI-friendly tooling)
-
-- **Hot reload and debugging tools** — Headless + in-process reload + debug for agents. Headless is a peer; `scuzz watch` only rebuilds; `[ui]` `run --watch` stamp-reloads the View tree (Signals stay), writes `build/debug.dump` (signals + a11y including live `View.bindText` + `[taps]` / `[fields]` `N* placeholder="live"` / `[scrolls]`, with `tap N`, `text N s` / `type N s` / `backspace N k`, `scroll N dy`), and plays `build/inject.script`. `[ui]` build emits `build/reload.dylib`; stamp-watch `dlopen`s it. A Headless source View-label change appears in the dump without restart (Signals stay). IO-only `run --watch` kills and reruns on source change. Do not document `watch` as hot reload.
-
 ### Residuals
 
-- **Net** — `Net.httpGet` queries A and AAAA together, starts AAAA first, waits 250ms before A (RFC 8305), races connects, and fails a hanging DNS lookup, TCP connect, or response read after 1s (partial DNS proceeds); CNAME chains re-query both (cap 5). IPv4 literals and `http://[::1]/` skip DNS. `Net.serve` listens on `127.0.0.1` and `::1`, bounds request read and response write at 1s, and drops a timed-out, malformed, reset, or handler-failed client so the next request can run.
-- **Concurrency** — cooperative fibers only; `IO.ensure` / `Resource` release on cancel (including `IO.timeout` / `Fiber.interrupt`). Language `Fiber.fork` / `join` / `interrupt` and `IO.forever` / `repeatN` / `retryN` are in. Later: OS threads, supervision trees.
+- **Concurrency** — cooperative fibers only. Later: OS threads, supervision trees.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting; `Signal.list` frees unshared cons spines. Later: a collector if list-churn still demands it.
-- **Language surface** — richer generics beyond monomorphized defs/enums/records, record/enum methods, generic `impl`, `trait Get[T]`, `impl Get[Int] for Point`, and `impl Get[T] for Opt` ([`compatibility.md`](compatibility.md)).
-- **Mutation operators** — `scuzz mutate` negates residual `Law.check` / `Law.assert` / `.require` predicates, flips relational/boolean ops inside them, swaps `+`/`-`, `*`/`/`, and `%`→`*`, drops `&&` conjuncts, and swaps `0`↔`1` literals, then probes (idle + `--iters` fuzz). Survivors are weak or unreached oracles. No external mutators.
 
 ### Dependency forms beyond `path`
 

@@ -7,15 +7,15 @@ const LCG_A: i64 = 48_271;
 const LCG_SEED_MOD: i64 = 2_147_483_646;
 const LETTERS: &[u8] = b"abcdefghijklmnopqrstuvwxyz";
 
-pub fn lcg_seed(seed: i64) -> i64 {
+fn lcg_seed(seed: i64) -> i64 {
     seed.rem_euclid(LCG_SEED_MOD) + 1
 }
 
-pub fn lcg_next(s: i64) -> i64 {
+fn lcg_next(s: i64) -> i64 {
     s.wrapping_mul(LCG_A).rem_euclid(LCG_M)
 }
 
-pub fn lcg_below(s: i64, n: i64) -> i64 {
+fn lcg_below(s: i64, n: i64) -> i64 {
     if n <= 0 {
         0
     } else {
@@ -55,7 +55,7 @@ fn drive_bool(s: i64) -> &'static str {
     }
 }
 
-pub fn drive_line(spec: &str, s: i64) -> String {
+fn drive_line(spec: &str, s: i64) -> String {
     if let Some(name) = spec.strip_suffix(" i") {
         format!("drive {name} {}", 1 + lcg_below(s, 3))
     } else if let Some(name) = spec.strip_suffix(" s") {
@@ -175,7 +175,7 @@ pub fn fuzz_script(
     fuzz_script_acc(s, len, n_buttons, has_text, has_scroll, drivers, Vec::new())
 }
 
-pub fn fuzz_extend_prefix(
+fn fuzz_extend_prefix(
     prefix: &[String],
     s: i64,
     n_buttons: i64,
@@ -216,7 +216,7 @@ pub fn fuzz_pick_script(
     }
 }
 
-pub fn fuzz_perturb_sched(base: &str, s: i64) -> String {
+fn fuzz_perturb_sched(base: &str, s: i64) -> String {
     let n: i64 = base.parse().unwrap_or(0);
     (n + 1 + lcg_below(s, 16)).to_string()
 }
