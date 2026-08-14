@@ -1082,4 +1082,63 @@ mod tests {
         let _ = child.kill();
         let _ = child.wait();
     }
+
+    fn write_io_watch(dir: &Path, marker: &Path, msg: &str) {
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(
+            dir.join("scuzz.toml"),
+            "[package]\nname = \"io_watch\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("src/Main.scuzz"),
+            format!(
+                "@main def main: IO[Unit] =\n  for {{\n    _ <- Fs.write(\"{}\", \"{}\")\n    _ <- IO.sleep(30000)\n  }} yield ()\n",
+                marker.display(),
+                msg
+            ),
+        )
+        .unwrap();
+    }
+
+    fn compile_io_watch(dir: &Path) -> CompileOutput {
+        let runtime_dir =
+            find_runtime_dir(Path::new(env!("CARGO_MANIFEST_DIR"))).expect("crates/runtime");
+        compile_project(&CompileOptions {
+            project_dir: dir.to_path_buf(),
+            runtime_dir,
+            out_dir: dir.join("build"),
+            clang: std::env::var("SCUZZ_CLANG").unwrap_or_else(|_| "clang".into()),
+            incremental: false,
+            verify: false,
+        })
+        .expect("compile io_watch")
+    }
+
+    #[test]
+    fn io_watch_kills_and_reruns_after_source_change() {
+        let tmp = tempdir().unwrap();
+        let app = tmp.path().join("app");
+        let marker = app.join("marker.txt");
+        write_io_watch(&app, &marker, "alpha");
+        let out = compile_io_watch(&app);
+        let mut child = std::process::Command::new(&out.executable)
+            .spawn()
+            .expect("spawn io_watch");
+        let first = wait_dump_contains(&marker, "alpha", &mut child, 8_000);
+        assert_eq!(first.trim(), "alpha");
+
+        write_io_watch(&app, &marker, "beta");
+        let _ = child.kill();
+        let _ = child.wait();
+        let out = compile_io_watch(&app);
+        let mut child = std::process::Command::new(&out.executable)
+            .spawn()
+            .expect("respawn io_watch");
+        let second = wait_dump_contains(&marker, "beta", &mut child, 8_000);
+        assert_eq!(second.trim(), "beta");
+
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 }

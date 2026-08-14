@@ -6,6 +6,7 @@
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/wait.h>
 #include <unistd.h>
 
@@ -356,6 +357,25 @@ SzIo *sz_sys_alive(int64_t pid) {
   int64_t *p = (int64_t *)sz_alloc(sizeof(int64_t));
   *p = pid;
   return sz_io_flatmap(sz_io_delay(sys_alive_result, p), unwrap_sys, NULL);
+}
+
+static void *sys_kill_result(void *env) {
+  int64_t pid = *(int64_t *)env;
+  SysResult *r = (SysResult *)sz_alloc(sizeof(SysResult));
+  sz_free(env);
+  r->is_err = 0;
+  r->as.ok = NULL;
+  if (pid > 0 && kill((pid_t)pid, SIGTERM) != 0 && errno != ESRCH) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.kill: kill failed");
+  }
+  return r;
+}
+
+SzIo *sz_sys_kill(int64_t pid) {
+  int64_t *p = (int64_t *)sz_alloc(sizeof(int64_t));
+  *p = pid;
+  return sz_io_flatmap(sz_io_delay(sys_kill_result, p), unwrap_sys, NULL);
 }
 
 static void *sys_getenv_result(void *env) {

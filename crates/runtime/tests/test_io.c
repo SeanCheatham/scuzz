@@ -1630,7 +1630,25 @@ int main(void) {
     assert(sz_unbox_i64(r.value) == 0);
   }
 
-  /* Sys.exec returns the shell exit code. */
+  /* Sys.kill sends SIGTERM; Sys.alive then reports the child gone. */
+  {
+    SzIoResult r;
+    int64_t pid;
+    int i;
+    r = sz_io_unsafe_run(sz_sys_spawn(sz_string_from_cstr("sleep 5")));
+    assert(r.ok);
+    pid = sz_unbox_i64(r.value);
+    assert(pid > 0);
+    r = sz_io_unsafe_run(sz_sys_kill(pid));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_sys_alive(pid));
+    for (i = 0; i < 50 && r.ok && sz_unbox_i64(r.value) == 1; i++) {
+      sleep_us(20000);
+      r = sz_io_unsafe_run(sz_sys_alive(pid));
+    }
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 0);
+  }
   {
     r = sz_io_unsafe_run(sz_sys_exec(sz_string_from_cstr("true")));
     assert(r.ok);

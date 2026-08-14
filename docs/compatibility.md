@@ -29,7 +29,7 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 | Effects | Builtin `IO` / `Resource` / concurrent kit + Clock/Random/Fs/Net/Sys | cats-effect runtime, ZIO-as-library, Future-as-default |
 | Test interpreters | Built-in verification: TestRuntime fakes (`SCUZZ_TESTRT=1`); in-source `law` + `.require` + stem-paired `*.scuzz_sim` / `*.scuzz_drivers`; `scuzz fuzz`; `scuzz mutate` (negate/flip/arith/drop residual oracles) | Wall-clock-only harnesses; ad-hoc FFI mocks; app-level Mockito / `src/test` unit trees; third-party mutation/fuzz frameworks |
 | UI | `View` + `Ui` + Skia (`sk_capi`; Impeller deferred) | Swing, JavaFX, Compose Multiplatform, Flutter widgets |
-| Watch | Rebuild on source change (`scuzz watch`) | Flutter hot reload / DevTools VM patching |
+| Watch | Rebuild on source change (`scuzz watch`); IO-only `run --watch` kills and reruns; `[ui]` stamp-reloads | Flutter hot reload / DevTools VM patching |
 | Diagnostics | `scuzz check --message-format=json` (LSP wraps `check`) | Separate IDE typer; analyze-vs-check; `*.g.scuzz` codegen |
 | Packaging | Copy-patched `shells/android` / `shells/ios` templates | Gradle/CocoaPods as Scuzz APIs; Flutter platform channels |
 

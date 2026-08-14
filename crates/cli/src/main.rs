@@ -14,7 +14,7 @@ use std::process::{Command, ExitCode};
     name = "scuzz",
     version,
     about = "Scuzz Lang — Stage-0 bootstrap CLI (release CLI is compiler-scuzz)",
-    after_help = "Examples:\n  scuzz check\n  scuzz check --message-format=json\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n\nJSON diagnostics are the check protocol (LSP wraps `scuzz check`).\n`watch` rebuilds. `run --watch` on [ui] keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (not source hot reload). Live dump: build/debug.dump. Live inject: build/inject.script (tap/text/type/pump/scroll/backspace)."
+    after_help = "Examples:\n  scuzz check\n  scuzz check --message-format=json\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n\nJSON diagnostics are the check protocol (LSP wraps `scuzz check`).\n`watch` rebuilds. `run --watch` on [ui] keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (not source hot reload). IO-only `run --watch` kills and reruns on source change. Live dump: build/debug.dump. Live inject: build/inject.script (tap/text/type/pump/scroll/backspace)."
 )]
 struct Cli {
     /// Diagnostic format: human (default) or json (`check` protocol; LSP wraps check)
@@ -50,7 +50,7 @@ enum Commands {
         headless: bool,
         #[arg(long, default_value = "build")]
         out_dir: PathBuf,
-        /// Keep running; [ui] stamp-reloads the View tree (not source hot reload)
+        /// Keep running; [ui] stamp-reloads the View tree; IO-only kills and reruns on source change
         #[arg(long)]
         watch: bool,
     },
@@ -374,22 +374,50 @@ fn watch_run(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
         .with_context(|| format!("reading {}/scuzz.toml", project_dir.display()))?;
     if manifest.ui.is_none() {
         eprintln!(
-            "scuzz run --watch {} (rebuild and rerun; not hot reload)",
+            "scuzz run --watch {} (rebuild and rerun on source change; kills a still-running process; not hot reload)",
             project_dir.display()
         );
-        loop {
-            match run_once(path, out_dir, headless) {
-                Ok(_) => {}
-                Err(e) => eprintln!("scuzz watch run error: {e:#}"),
-            }
-            let _ = wait_for_source_change(&project_dir, 60_000)?;
-        }
+        return watch_run_io(&project_dir, path, out_dir);
     }
     eprintln!(
         "scuzz run --watch {} (keep process; recompiles build/reload.dylib then stamp-reloads View tree; live dump build/debug.dump; inject build/inject.script)",
         project_dir.display()
     );
     watch_run_ui(&project_dir, path, out_dir, headless)
+}
+
+fn watch_run_io(project_dir: &Path, path: &Path, out_dir: &Path) -> Result<ExitCode> {
+    loop {
+        let mut child = match build(path, &out_dir.to_path_buf(), true, false) {
+            Ok(out) => match Command::new(&out.executable).spawn() {
+                Ok(c) => {
+                    eprintln!("scuzz run --watch: running (pid {})", c.id());
+                    c
+                }
+                Err(e) => {
+                    eprintln!("scuzz watch run error: {e:#}");
+                    let _ = wait_for_source_change(project_dir, 60_000)?;
+                    continue;
+                }
+            },
+            Err(e) => {
+                eprintln!("scuzz watch run error: {e:#}");
+                let _ = wait_for_source_change(project_dir, 60_000)?;
+                continue;
+            }
+        };
+        loop {
+            if wait_for_source_change(project_dir, 400)? {
+                let _ = child.kill();
+                let _ = child.wait();
+                break;
+            }
+            if child.try_wait()?.is_some() {
+                let _ = wait_for_source_change(project_dir, 60_000)?;
+                break;
+            }
+        }
+    }
 }
 
 fn watch_run_ui(

@@ -358,6 +358,7 @@ SzIo *sz_sys_read_line(void); /* IO[String]: one stdin line; EOF → ""; parks o
 SzIo *sz_sys_exec(SzString *cmd); /* IO[Int] exit code; parks on poll until the child exits */
 SzIo *sz_sys_spawn(SzString *cmd); /* IO[Int] pid; does not wait */
 SzIo *sz_sys_alive(int64_t pid);   /* IO[Int] 1 if running */
+SzIo *sz_sys_kill(int64_t pid);    /* IO[Unit] SIGTERM; no-op if already gone */
 SzIo *sz_sys_getenv(SzString *key);
 
 /* Blessed Clock / Random / Net (impurity boundary) */

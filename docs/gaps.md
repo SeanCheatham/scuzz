@@ -33,7 +33,7 @@ Vision locks **oracles in source, drivers as the test surface** ([`vision.md`](v
 
 ### Near-term (AI-friendly tooling)
 
-- **Hot reload and debugging tools** — Headless + in-process reload + debug for agents. Headless is a peer; `scuzz watch` only rebuilds; `[ui]` `run --watch` stamp-reloads the View tree (Signals stay), writes `build/debug.dump` (signals + a11y including live `View.bindText` + `[taps]` / `[fields]` `N* placeholder="live"` / `[scrolls]`, with `tap N`, `text N s` / `type N s` / `backspace N k`, `scroll N dy`), and plays `build/inject.script`. `[ui]` build emits `build/reload.dylib`; stamp-watch `dlopen`s it. A Headless source View-label change appears in the dump without restart (Signals stay). Do not document `watch` as hot reload.
+- **Hot reload and debugging tools** — Headless + in-process reload + debug for agents. Headless is a peer; `scuzz watch` only rebuilds; `[ui]` `run --watch` stamp-reloads the View tree (Signals stay), writes `build/debug.dump` (signals + a11y including live `View.bindText` + `[taps]` / `[fields]` `N* placeholder="live"` / `[scrolls]`, with `tap N`, `text N s` / `type N s` / `backspace N k`, `scroll N dy`), and plays `build/inject.script`. `[ui]` build emits `build/reload.dylib`; stamp-watch `dlopen`s it. A Headless source View-label change appears in the dump without restart (Signals stay). IO-only `run --watch` kills and reruns on source change. Do not document `watch` as hot reload.
 
 ### Residuals
 
