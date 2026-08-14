@@ -607,13 +607,11 @@ void sz_testrt_stdout_reset(void) {
   g_stdout_len = 0;
 }
 
-void sz_testrt_stdout_append(const char *line) {
-  size_t n;
+void sz_testrt_stdout_write(const char *bytes, size_t n) {
   size_t need;
-  if (!line)
-    line = "";
-  n = strlen(line);
-  need = g_stdout_len + n + 2; /* line + '\n' + NUL */
+  if (!bytes)
+    bytes = "";
+  need = g_stdout_len + n + 1; /* bytes + NUL */
   if (need > g_stdout_cap) {
     size_t cap = g_stdout_cap ? g_stdout_cap : 64;
     char *nb;
@@ -626,10 +624,17 @@ void sz_testrt_stdout_append(const char *line) {
     g_stdout_buf = nb;
     g_stdout_cap = cap;
   }
-  memcpy(g_stdout_buf + g_stdout_len, line, n);
+  if (n)
+    memcpy(g_stdout_buf + g_stdout_len, bytes, n);
   g_stdout_len += n;
-  g_stdout_buf[g_stdout_len++] = '\n';
   g_stdout_buf[g_stdout_len] = '\0';
+}
+
+void sz_testrt_stdout_append(const char *line) {
+  if (!line)
+    line = "";
+  sz_testrt_stdout_write(line, strlen(line));
+  sz_testrt_stdout_write("\n", 1);
 }
 
 const char *sz_testrt_stdout_cstr(void) {
@@ -696,6 +701,31 @@ static void *testrt_read_line_thunk(void *env) {
 
 SzIo *sz_testrt_sys_read_line(void) {
   return sz_io_delay(testrt_read_line_thunk, NULL);
+}
+
+static void *testrt_read_n_thunk(void *env) {
+  int64_t n = *(int64_t *)env;
+  size_t want;
+  size_t avail;
+  size_t take;
+  void *s;
+  sz_free(env);
+  if (n <= 0)
+    return sz_string_from_cstr("");
+  if (!g_stdin_buf || g_stdin_off >= g_stdin_len)
+    return sz_string_from_cstr("");
+  want = (size_t)n;
+  avail = g_stdin_len - g_stdin_off;
+  take = want < avail ? want : avail;
+  s = sz_string_from_bytes(g_stdin_buf + g_stdin_off, take);
+  g_stdin_off += take;
+  return s;
+}
+
+SzIo *sz_testrt_sys_read(int64_t n) {
+  int64_t *p = (int64_t *)sz_alloc(sizeof(int64_t));
+  *p = n;
+  return sz_io_delay(testrt_read_n_thunk, p);
 }
 
 void sz_testrt_sys_install(void) {

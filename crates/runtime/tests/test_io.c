@@ -1480,6 +1480,18 @@ int main(void) {
       assert(r.ok);
       assert(strcmp(sz_string_cstr((SzString *)r.value), "") == 0);
 
+      sz_testrt_stdin_feed("abcdef");
+      sz_testrt_stdout_reset();
+      r = sz_io_unsafe_run(sz_sys_read(3));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), "abc") == 0);
+      r = sz_io_unsafe_run(sz_sys_read(3));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), "def") == 0);
+      r = sz_io_unsafe_run(sz_sys_write(sz_string_from_cstr("raw")));
+      assert(r.ok);
+      assert(strstr(sz_testrt_stdout_cstr(), "raw") != NULL);
+
       r = sz_io_unsafe_run(sz_io_println_cstr("cap"));
       assert(r.ok);
       assert(strstr(sz_testrt_stdout_cstr(), "cap\n") != NULL);

@@ -1,10 +1,10 @@
 package scuzz.compiler
 
 def usage(): String =
-  "scuzz (build|run|test|check|fuzz|mutate|fmt|watch|new|package) [args]\n  scuzz --help   scuzz <command> --help\n  --message-format=human|json   (JSON on check only)"
+  "scuzz (build|run|test|check|lsp|fuzz|mutate|fmt|watch|new|package) [args]\n  scuzz --help   scuzz <command> --help\n  --message-format=human|json   (JSON on check only)"
 
 def helpTop(): String =
-  Str.concat(usage(), "\n\nExamples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz check --message-format=json\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n  scuzz fuzz --iters 16\n  scuzz mutate --limit 16 --iters 4\n")
+  Str.concat(usage(), "\n\nExamples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz check --message-format=json\n  scuzz lsp\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n  scuzz fuzz --iters 16\n  scuzz mutate --limit 16 --iters 4\n")
 
 def helpBuild(): String =
   "scuzz build [project]\n\nCompile to a native binary (LLVM + clang).\n\nExamples:\n  scuzz build\n  scuzz build examples/hello\n"
@@ -16,7 +16,10 @@ def helpTest(): String =
   "scuzz test [project] [--update] [--pixels] [--runtime-tests]\n\n[ui]: Headless structural goldens (seed on first run). IO: TESTRT exit-0 smoke.\n\nExamples:\n  scuzz test\n  scuzz test --update\n  scuzz test --pixels\n"
 
 def helpCheck(): String =
-  "scuzz check [project] [--message-format=human|json]\n\nFormat-check src/, then typecheck live + sim + laws. JSON is the editor protocol (LSP wraps check).\n\nExamples:\n  scuzz check\n  scuzz check --message-format=json\n"
+  "scuzz check [project] [--message-format=human|json]\n\nFormat-check src/, then typecheck live + sim + laws. JSON is the editor protocol (`scuzz lsp` wraps check).\n\nExamples:\n  scuzz check\n  scuzz check --message-format=json\n"
+
+def helpLsp(): String =
+  "scuzz lsp [project]\n\nLanguage server on stdin/stdout. Wraps `scuzz check` (disk diagnostics; not a second typer).\nUnsaved buffers wait for save. No hover or completion.\n\nExamples:\n  scuzz lsp\n  scuzz lsp examples/hello\n"
 
 def helpFuzz(): String =
   "scuzz fuzz [project] [--iters N] [--seed S] [--exhaust --depth N] [--replay FILE]\n\nSearch laws under TestRuntime. [ui]: event scripts × schedules; IO-only: schedules.\n[ui] scripts that hit new Law.sometimes names or a new Headless dump.txt are kept;\nlater iters extend those prefixes. IO-only keeps schedule seeds that hit new\nLaw.sometimes names and perturbs them. `drive` samples Int, String, and Bool.\n--exhaust is [ui] event alphabet only (FIFO).\n\nExamples:\n  scuzz fuzz --iters 16\n  scuzz fuzz --iters 16 examples/concurrency\n  scuzz fuzz --exhaust --depth 1\n  scuzz fuzz --replay build/fuzz/repro.toml\n"
@@ -37,7 +40,7 @@ def helpPackage(): String =
   "scuzz package [project] [--target host|android|ios|all]\n\nEmit copy-patched mobile packaging shells (not a Gradle/CocoaPods API).\n\nExamples:\n  scuzz package\n  scuzz package --target host\n"
 
 def helpFor(cmd: String): String =
-  if (streq(cmd, "build") == 1) helpBuild() else if (streq(cmd, "run") == 1) helpRun() else if (streq(cmd, "test") == 1) helpTest() else if (streq(cmd, "check") == 1) helpCheck() else if (streq(cmd, "fuzz") == 1) helpFuzz() else if (streq(cmd, "mutate") == 1) helpMutate() else if (streq(cmd, "fmt") == 1) helpFmt() else if (streq(cmd, "watch") == 1) helpWatch() else if (streq(cmd, "new") == 1) helpNew() else if (streq(cmd, "package") == 1) helpPackage() else str3("unknown command: ", cmd, Str.concat("\n", usage()))
+  if (streq(cmd, "build") == 1) helpBuild() else if (streq(cmd, "run") == 1) helpRun() else if (streq(cmd, "test") == 1) helpTest() else if (streq(cmd, "check") == 1) helpCheck() else if (streq(cmd, "lsp") == 1) helpLsp() else if (streq(cmd, "fuzz") == 1) helpFuzz() else if (streq(cmd, "mutate") == 1) helpMutate() else if (streq(cmd, "fmt") == 1) helpFmt() else if (streq(cmd, "watch") == 1) helpWatch() else if (streq(cmd, "new") == 1) helpNew() else if (streq(cmd, "package") == 1) helpPackage() else str3("unknown command: ", cmd, Str.concat("\n", usage()))
 
 def isHelpToken(s: String): Int =
   if (streq(s, "--help") == 1) 1 else if (streq(s, "-h") == 1) 1 else if (streq(s, "help") == 1) 1 else 0
@@ -75,7 +78,7 @@ def dispatchSkipFlags(args: List, all: List): IO[Unit] =
   if (List.isEmpty(args) == 1) IO.println(usage()) else if (isFlag(List.head(args)) == 1) if (startsWith(List.head(args), "--message-format=") == 1) dispatchSkipFlags(List.tail(args), all) else if (streq(List.head(args), "--message-format") == 1) if (List.len(args) < 2) IO.println(usage()) else dispatchSkipFlags(List.tail(List.tail(args)), all) else dispatchCmd(List.head(args), args, all) else dispatchCmd(List.head(args), args, all)
 
 def dispatchCmd(cmd: String, args: List, all: List): IO[Unit] =
-  if (isHelpToken(cmd) == 1) IO.println(helpTop()) else if (wantsHelp(args) == 1) IO.println(helpFor(cmd)) else if (streq(cmd, "build") == 1) dispatchBuild(defaultProject(args)) else if (streq(cmd, "run") == 1) cmdRun(defaultProject(args), argFlag(args, "--headless", 0), argFlag(args, "--watch", 0)) else if (streq(cmd, "test") == 1) cmdTest(defaultProject(args), argFlag(args, "--update", 0), argFlag(args, "--runtime-tests", 0), argFlag(args, "--pixels", 0)) else if (streq(cmd, "check") == 1) cmdCheck(defaultProject(args), messageFormatJson(all)) else if (streq(cmd, "fuzz") == 1) cmdFuzzArgs(args) else if (streq(cmd, "mutate") == 1) cmdMutateArgs(args) else if (streq(cmd, "fmt") == 1) cmdFmt(defaultProject(args), argFlag(args, "--check", 0)) else if (streq(cmd, "watch") == 1) cmdWatch(defaultProject(args)) else if (streq(cmd, "new") == 1) cmdNew(args) else if (streq(cmd, "package") == 1) cmdPackage(defaultProject(args), packageTarget(args)) else IO.println(str3("unknown command: ", cmd, Str.concat("\n", usage())))
+  if (isHelpToken(cmd) == 1) IO.println(helpTop()) else if (wantsHelp(args) == 1) IO.println(helpFor(cmd)) else if (streq(cmd, "build") == 1) dispatchBuild(defaultProject(args)) else if (streq(cmd, "run") == 1) cmdRun(defaultProject(args), argFlag(args, "--headless", 0), argFlag(args, "--watch", 0)) else if (streq(cmd, "test") == 1) cmdTest(defaultProject(args), argFlag(args, "--update", 0), argFlag(args, "--runtime-tests", 0), argFlag(args, "--pixels", 0)) else if (streq(cmd, "check") == 1) cmdCheck(defaultProject(args), messageFormatJson(all)) else if (streq(cmd, "lsp") == 1) cmdLsp(defaultProject(args)) else if (streq(cmd, "fuzz") == 1) cmdFuzzArgs(args) else if (streq(cmd, "mutate") == 1) cmdMutateArgs(args) else if (streq(cmd, "fmt") == 1) cmdFmt(defaultProject(args), argFlag(args, "--check", 0)) else if (streq(cmd, "watch") == 1) cmdWatch(defaultProject(args)) else if (streq(cmd, "new") == 1) cmdNew(args) else if (streq(cmd, "package") == 1) cmdPackage(defaultProject(args), packageTarget(args)) else IO.println(str3("unknown command: ", cmd, Str.concat("\n", usage())))
 
 def dispatchBuild(projectDir: String): IO[Unit] =
   compileProject(projectDir, pathJoin(projectDir, "build"))

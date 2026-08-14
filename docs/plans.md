@@ -2,4 +2,4 @@
 
 ## Next
 
-**Editor protocol — no LSP yet** — IO-only `run --watch` kills and reruns on source change. JSON diagnostics exist (`scuzz check --message-format=json`). Next: a tiny LSP that wraps that JSON, or leave editors on `check`.
+**Match exhaustiveness in `check`** — `scuzz lsp` wraps disk `check` (didOpen/didSave/didChange; unsaved buffers wait for save; no hover/completion). Next: missing-case diagnostics in the same JSON schema so LSP shows them without a second typer.

@@ -126,6 +126,8 @@ jobs:
           cargo run -p scuzz -- check examples/adt
           cargo run -p scuzz -- check --message-format=json examples/hello | tee /tmp/hello-check.json
           grep -q '^\[\]$' /tmp/hello-check.json
+          cargo run -p scuzz -- lsp --help | tee /tmp/lsp-help.txt
+          grep -q "scuzz check" /tmp/lsp-help.txt
           if cargo run -p scuzz -- check testdata/fmt/needs_format 2>/tmp/fmt-check.err; then echo "expected format error" && exit 1; fi
           grep -q "needs formatting" /tmp/fmt-check.err
           cargo run -p scuzz -- build examples/adt

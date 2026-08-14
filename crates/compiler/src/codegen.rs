@@ -84,6 +84,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_fs_canonicalize(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_sys_args()").unwrap();
     writeln!(out, "declare ptr @sz_sys_read_line()").unwrap();
+    writeln!(out, "declare ptr @sz_sys_read(i64)").unwrap();
+    writeln!(out, "declare ptr @sz_sys_write(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_sys_exec(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_sys_spawn(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_sys_alive(i64)").unwrap();
@@ -2509,6 +2511,24 @@ fn emit_call(
             writeln!(code, "  %{prefix}_v = call ptr @sz_sys_read_line()").unwrap();
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "Sys.read" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_sys_read(i64 {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Sys.write" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_sys_write(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "Sys.exec" => {
             writeln!(
                 code,
@@ -3457,6 +3477,18 @@ mod tests {
         crate::typ::typecheck(&p).expect("typecheck");
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_sys_kill"));
+    }
+
+    #[test]
+    fn emit_sys_read_write() {
+        let src = r#"@main def main: IO[Unit] =
+  Sys.read(4).flatMap(s => Sys.write(s))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_sys_read"));
+        assert!(ir.contains("sz_sys_write"));
     }
 
     #[test]

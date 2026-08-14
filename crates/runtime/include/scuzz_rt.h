@@ -355,6 +355,8 @@ SzIo *sz_fs_canonicalize(SzString *path);
 void sz_sys_set_args(int argc, char **argv);
 SzIo *sz_sys_args(void);
 SzIo *sz_sys_read_line(void); /* IO[String]: one stdin line; EOF → ""; parks on poll */
+SzIo *sz_sys_read(int64_t n); /* IO[String]: n stdin bytes (or fewer at EOF); parks on poll */
+SzIo *sz_sys_write(SzString *s); /* IO[Unit]: stdout bytes, no newline */
 SzIo *sz_sys_exec(SzString *cmd); /* IO[Int] exit code; parks on poll until the child exits */
 SzIo *sz_sys_spawn(SzString *cmd); /* IO[Int] pid; does not wait */
 SzIo *sz_sys_alive(int64_t pid);   /* IO[Int] 1 if running */
@@ -415,8 +417,10 @@ int sz_testrt_sys_has_args_override(void);
 SzList *sz_testrt_sys_args_list(void); /* snapshot of override (or empty) */
 void sz_testrt_stdin_feed(const char *text); /* newline-separated lines */
 SzIo *sz_testrt_sys_read_line(void);
+SzIo *sz_testrt_sys_read(int64_t n);
 void sz_testrt_stdout_reset(void);
 void sz_testrt_stdout_append(const char *line); /* appends line + '\n' */
+void sz_testrt_stdout_write(const char *bytes, size_t n); /* raw; no extra newline */
 const char *sz_testrt_stdout_cstr(void);
 
 /* Laws — residual checks armed only under SCUZZ_TESTRT=1 */

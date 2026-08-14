@@ -740,7 +740,9 @@ def compilePrepared(projectDir: String, outDir: String, verify: Int, runtimeDir:
   writeSometimesDeclared(outDir, verify, prog1b).flatMap(_ =>
     writeDriversTable(outDir, verify, overlays).flatMap(_ =>
       Fs.write(ll, ir).flatMap(_ =>
-        buildRuntime(runtimeDir, clang).flatMap(_ => linkProject(clang, ll, lib, ffi, inc, embedder, mobile, exe, withUi).flatMap(_ => linkReloadIfUi(clang, ll, outDir, withUi)))
+        buildRuntime(runtimeDir, clang).flatMap(_ =>
+          linkProject(clang, ll, lib, ffi, inc, embedder, mobile, exe, withUi).flatMap(_ => linkReloadIfUi(clang, ll, outDir, withUi))
+        )
       )
     )
   )

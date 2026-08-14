@@ -159,15 +159,16 @@ def spawnWatchIo(projectDir: String, name: String, toml: String, headless: Int, 
 
 def watchIoLoop(projectDir: String, name: String, toml: String, headless: Int, fp: String, pid: Int): IO[Unit] =
   IO.sleep(500).flatMap(_ =>
-    srcFingerprint(projectDir).flatMap(fp2 =>
-      if (streq(fp2, fp) == 1) watchIoLoop(projectDir, name, toml, headless, fp, pid) else restartWatchIo(projectDir, name, toml, headless, fp2, pid)
-    )
+    srcFingerprint(projectDir).flatMap(fp2 => if (streq(fp2, fp) == 1) watchIoLoop(projectDir, name, toml, headless, fp, pid) else restartWatchIo(projectDir, name, toml, headless, fp2, pid))
   )
 
 def restartWatchIo(projectDir: String, name: String, toml: String, headless: Int, fp: String, pid: Int): IO[Unit] =
   Sys.alive(pid).flatMap(a =>
-    (if (a == 0) IO.pure(()) else Sys.kill(pid)).flatMap(_ => spawnWatchIo(projectDir, name, toml, headless, fp))
+    maybeKillPid(a, pid).flatMap(_ => spawnWatchIo(projectDir, name, toml, headless, fp))
   )
+
+def maybeKillPid(alive: Int, pid: Int): IO[Unit] =
+  if (alive == 0) IO.pure(()) else Sys.kill(pid)
 
 def runWatchUi(projectDir: String, name: String, toml: String, headless: Int): IO[Unit] =
   for {
@@ -197,8 +198,8 @@ def watchUiLoop(projectDir: String, name: String, toml: String, headless: Int, s
       if (a == 0) spawnWatchUi(projectDir, name, toml, headless, stamp, fp, gen) else srcFingerprint(projectDir).flatMap(fp2 =>
   if (streq(fp2, fp) == 1) watchUiLoop(projectDir, name, toml, headless, stamp, fp, gen, pid) else compileProject(projectDir, pathJoin(projectDir, "build")).flatMap(_ =>
   Fs.write(stamp, Str.concat(Str.fromInt(gen + 1), "\n")).flatMap(_ =>
-  IO.println(str3("scuzz: view reload stamp ", Str.fromInt(gen + 1), "")).flatMap(_ => watchUiLoop(projectDir, name, toml, headless, stamp, fp2, gen + 1, pid))
-)
+    IO.println(str3("scuzz: view reload stamp ", Str.fromInt(gen + 1), "")).flatMap(_ => watchUiLoop(projectDir, name, toml, headless, stamp, fp2, gen + 1, pid))
+  )
 ).handleErrorWith(_ =>
   IO.println("scuzz watch compile error").flatMap(_ => watchUiLoop(projectDir, name, toml, headless, stamp, fp2, gen, pid))
 )

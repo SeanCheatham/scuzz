@@ -129,6 +129,9 @@ stage_checks() {
   echo "$server_out"
   echo "$server_out" | grep -q "served:/"
 
+  echo "==> $stage lsp --help"
+  "$bin" lsp --help | grep -q "scuzz check"
+
   echo "==> $stage fmt --check (compiler-scuzz sources)"
   "$bin" fmt --check compiler-scuzz
 }

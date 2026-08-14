@@ -4,6 +4,7 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <signal.h>
@@ -190,6 +191,139 @@ static SzIo *sys_after_dispatch(void *value, void *env) {
 SzIo *sz_sys_read_line(void) {
   return sz_io_flatmap(sz_io_delay(sys_read_dispatch, NULL), sys_after_dispatch,
                        NULL);
+}
+
+static int inbuf_take_n(SysResult *r, size_t n) {
+  if (g_inlen < n)
+    return 0;
+  r->is_err = 0;
+  r->as.ok = sz_string_from_bytes(g_inbuf ? g_inbuf : "", n);
+  if (n < g_inlen)
+    memmove(g_inbuf, g_inbuf + n, g_inlen - n);
+  g_inlen -= n;
+  return 1;
+}
+
+static void *sys_try_n(void *env) {
+  size_t n = (size_t) * (int64_t *)env;
+  SysResult *r = (SysResult *)sz_alloc_zero(sizeof(SysResult));
+  if (inbuf_take_n(r, n))
+    return r;
+  r->retry = 1;
+  return r;
+}
+
+static void *sys_read_more_n(void *env) {
+  size_t want = (size_t) * (int64_t *)env;
+  SysResult *r = (SysResult *)sz_alloc_zero(sizeof(SysResult));
+  char tmp[256];
+  ssize_t n;
+  n = read(STDIN_FILENO, tmp, sizeof tmp);
+  if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+    r->retry = 1;
+    return r;
+  }
+  if (n < 0) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.read: read failed");
+    return r;
+  }
+  if (n == 0) {
+    size_t take = g_inlen < want ? g_inlen : want;
+    r->is_err = 0;
+    r->as.ok = sz_string_from_bytes(g_inbuf ? g_inbuf : "", take);
+    if (take < g_inlen)
+      memmove(g_inbuf, g_inbuf + take, g_inlen - take);
+    g_inlen -= take;
+    return r;
+  }
+  if (g_inlen + (size_t)n > g_incap)
+    inbuf_grow(g_inlen + (size_t)n);
+  memcpy(g_inbuf + g_inlen, tmp, (size_t)n);
+  g_inlen += (size_t)n;
+  if (inbuf_take_n(r, want))
+    return r;
+  r->retry = 1;
+  return r;
+}
+
+static SzIo *sys_poll_n(void *value, void *env);
+
+static SzIo *sys_unwrap_n(void *value, void *env) {
+  SysResult *r = (SysResult *)value;
+  if (r && r->retry) {
+    sz_free(r);
+    return sys_poll_n(NULL, env);
+  }
+  sz_free(env);
+  return unwrap_sys(value, NULL);
+}
+
+static SzIo *sys_after_poll_n(void *value, void *env) {
+  (void)value;
+  return sz_io_flatmap(sz_io_delay(sys_read_more_n, env), sys_unwrap_n, env);
+}
+
+static SzIo *sys_poll_n(void *value, void *env) {
+  (void)value;
+  return sz_io_flatmap(sz_io_poll_readable(STDIN_FILENO), sys_after_poll_n, env);
+}
+
+static SzIo *sys_after_try_n(void *value, void *env) {
+  SysResult *r = (SysResult *)value;
+  if (r && r->retry) {
+    sz_free(r);
+    return sys_poll_n(NULL, env);
+  }
+  sz_free(env);
+  return unwrap_sys(value, NULL);
+}
+
+static SzIo *sys_after_dispatch_n(void *value, void *env) {
+  int64_t n = *(int64_t *)env;
+  if ((intptr_t)value) {
+    sz_free(env);
+    return sz_testrt_sys_read(n);
+  }
+  if (n <= 0) {
+    SysResult *r = (SysResult *)sz_alloc_zero(sizeof(SysResult));
+    r->as.ok = sz_string_from_cstr("");
+    sz_free(env);
+    return unwrap_sys(r, NULL);
+  }
+  return sz_io_flatmap(sz_io_delay(sys_try_n, env), sys_after_try_n, env);
+}
+
+SzIo *sz_sys_read(int64_t n) {
+  int64_t *p = (int64_t *)sz_alloc(sizeof(int64_t));
+  *p = n < 0 ? 0 : n;
+  return sz_io_flatmap(sz_io_delay(sys_read_dispatch, NULL), sys_after_dispatch_n,
+                       p);
+}
+
+static void *sys_write_result(void *env) {
+  SzString *s = (SzString *)env;
+  SysResult *r = (SysResult *)sz_alloc(sizeof(SysResult));
+  const char *p = s ? sz_string_cstr(s) : "";
+  size_t n = s ? s->len : 0;
+  r->is_err = 0;
+  r->as.ok = NULL;
+  if (sz_testrt_sys_is_fake())
+    sz_testrt_stdout_write(p, n);
+  if (n > 0 && fwrite(p, 1, n, stdout) != n) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.write: write failed");
+  } else if (fflush(stdout) != 0) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.write: flush failed");
+  }
+  return r;
+}
+
+SzIo *sz_sys_write(SzString *s) {
+  if (!s)
+    sz_panic("sz_sys_write(null)");
+  return sz_io_flatmap(sz_io_delay(sys_write_result, s), unwrap_sys, NULL);
 }
 
 typedef struct ExecSt {
