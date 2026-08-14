@@ -64,7 +64,7 @@ struct SzView {
   int pos_y;
   /* View.padding: uniform inset. */
   int pad;
-  /* View.sized / View.minSize / View.aspectRatio / View.fraction: w×h, ratio, or pct. */
+  /* View.sized / View.minSize / View.maxSize / View.aspectRatio / View.fraction: w×h, ratio, or pct. */
 };
 
 static SzView *view_new(SzViewKind kind) {
@@ -104,7 +104,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_POSITIONED || kind == SZ_VIEW_PADDING ||
          kind == SZ_VIEW_SIZED || kind == SZ_VIEW_MIN_SIZE ||
          kind == SZ_VIEW_BACKGROUND || kind == SZ_VIEW_ASPECT_RATIO ||
-         kind == SZ_VIEW_FRACTION || kind == SZ_VIEW_STRETCH;
+         kind == SZ_VIEW_FRACTION || kind == SZ_VIEW_STRETCH ||
+         kind == SZ_VIEW_MAX_SIZE;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -396,6 +397,15 @@ SzView *sz_view_min_size(int w, int h, SzView *child) {
   return v;
 }
 
+SzView *sz_view_max_size(int w, int h, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_MAX_SIZE);
+  v->img_w = w > 0 ? w : 0;
+  v->img_h = h > 0 ? h : 0;
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
 SzView *sz_view_background(uint32_t argb, SzView *child) {
   SzView *v = view_new(SZ_VIEW_BACKGROUND);
   v->bg_argb = argb;
@@ -568,6 +578,15 @@ static SzBoxConstraints row_child_box(SzView *ch, float max_w, float inner_h,
   if (view_is_cross_stretch(ch))
     return box_tight_height(max_w, inner_h);
   return box_loose(max_w, inner_h);
+}
+
+/* 0 cap means no extra ceiling. Incoming max wins when it is tighter. */
+static float cap_max_axis(float incoming, float cap) {
+  if (cap <= 0.f)
+    return incoming;
+  if (incoming <= 0.f || cap < incoming)
+    return cap;
+  return incoming;
 }
 
 static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h,
@@ -990,6 +1009,28 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.h = ch ? ch->frame.h : child_min_h;
     break;
   }
+  case SZ_VIEW_MAX_SIZE: {
+    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
+    float child_max_w = cap_max_axis(max_w, (float)v->img_w);
+    float child_max_h = cap_max_axis(max_h, (float)v->img_h);
+    float child_min_w = min_w;
+    float child_min_h = min_h;
+    if (child_max_w > 0.f && child_min_w > child_max_w)
+      child_min_w = child_max_w;
+    if (child_max_h > 0.f && child_min_h > child_max_h)
+      child_min_h = child_max_h;
+    if (ch) {
+      SzBoxConstraints cc;
+      cc.min_w = child_min_w;
+      cc.min_h = child_min_h;
+      cc.max_w = child_max_w;
+      cc.max_h = child_max_h;
+      layout_constrained(ch, x, y, cc, theme);
+    }
+    v->frame.w = ch ? ch->frame.w : child_min_w;
+    v->frame.h = ch ? ch->frame.h : child_min_h;
+    break;
+  }
   case SZ_VIEW_BACKGROUND: {
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
     if (ch) {
@@ -1224,6 +1265,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_PADDING:
   case SZ_VIEW_SIZED:
   case SZ_VIEW_MIN_SIZE:
+  case SZ_VIEW_MAX_SIZE:
   case SZ_VIEW_ASPECT_RATIO:
   case SZ_VIEW_FRACTION:
     if (v->kind == SZ_VIEW_LIST || v->kind == SZ_VIEW_SCROLL)

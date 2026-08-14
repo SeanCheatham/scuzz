@@ -253,4 +253,11 @@ mod tests {
         assert!(labels.iter().any(|l| l == "View.stretch"), "{labels:?}");
         assert!(labels.iter().any(|l| l == "View.stack"), "{labels:?}");
     }
+
+    #[test]
+    fn completes_view_max_size_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.max\n";
+        let labels = labels_at(src, "View.max");
+        assert!(labels.iter().any(|l| l == "View.maxSize"), "{labels:?}");
+    }
 }

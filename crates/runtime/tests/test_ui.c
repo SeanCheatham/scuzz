@@ -1100,6 +1100,191 @@ static void test_min_size(void) {
   sz_view_free(box);
 }
 
+static void test_max_size_caps_sized(void) {
+  SzView *box, *inner, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect bf, inf, chf;
+
+  child = sz_view_text("Hi");
+  inner = sz_view_sized(80, 50, child);
+  box = sz_view_max_size(40, 30, inner);
+  sz_view_layout(box, 200.f, 200.f, theme);
+  assert(sz_view_kind(box) == SZ_VIEW_MAX_SIZE);
+  bf = sz_view_frame(box);
+  inf = sz_view_frame(inner);
+  chf = sz_view_frame(child);
+  assert(fabsf(bf.w - 40.f) < 0.5f);
+  assert(fabsf(bf.h - 30.f) < 0.5f);
+  assert(fabsf(inf.w - 40.f) < 0.5f);
+  assert(fabsf(inf.h - 30.f) < 0.5f);
+  assert(fabsf(chf.w - 40.f) < 0.5f);
+  assert(fabsf(chf.h - 30.f) < 0.5f);
+  sz_view_free(box);
+}
+
+static void test_max_size_does_not_grow_child(void) {
+  SzView *box, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect bf, chf, loose;
+
+  child = sz_view_text("Hi");
+  sz_view_layout(child, 200.f, 200.f, theme);
+  loose = sz_view_frame(child);
+  sz_view_free(child);
+
+  child = sz_view_text("Hi");
+  box = sz_view_max_size(80, 50, child);
+  sz_view_layout(box, 200.f, 200.f, theme);
+  bf = sz_view_frame(box);
+  chf = sz_view_frame(child);
+  assert(fabsf(bf.w - loose.w) < 0.5f);
+  assert(fabsf(bf.h - loose.h) < 0.5f);
+  assert(fabsf(chf.w - loose.w) < 0.5f);
+  assert(fabsf(chf.h - loose.h) < 0.5f);
+  assert(bf.w + 1.f < 80.f);
+  sz_view_free(box);
+}
+
+static void test_max_size_zero_axis_is_uncapped(void) {
+  SzView *box, *inner, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect bf;
+
+  child = sz_view_text("Hi");
+  inner = sz_view_sized(80, 50, child);
+  box = sz_view_max_size(0, 30, inner);
+  sz_view_layout(box, 200.f, 200.f, theme);
+  bf = sz_view_frame(box);
+  assert(fabsf(bf.w - 80.f) < 0.5f);
+  assert(fabsf(bf.h - 30.f) < 0.5f);
+  sz_view_free(box);
+
+  child = sz_view_text("Hi");
+  inner = sz_view_sized(80, 50, child);
+  box = sz_view_max_size(40, 0, inner);
+  sz_view_layout(box, 200.f, 200.f, theme);
+  bf = sz_view_frame(box);
+  assert(fabsf(bf.w - 40.f) < 0.5f);
+  assert(fabsf(bf.h - 50.f) < 0.5f);
+  sz_view_free(box);
+}
+
+static void test_incoming_max_wins_over_max_size(void) {
+  SzView *box, *inner, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect bf;
+
+  child = sz_view_text("Hi");
+  inner = sz_view_sized(80, 50, child);
+  box = sz_view_max_size(60, 40, inner);
+  sz_view_layout(box, 20.f, 16.f, theme);
+  bf = sz_view_frame(box);
+  assert(fabsf(bf.w - 20.f) < 0.5f);
+  assert(fabsf(bf.h - 16.f) < 0.5f);
+  sz_view_free(box);
+}
+
+static void test_min_size_inside_max_size_clamps(void) {
+  SzView *cap, *floor, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect cf, ff, chf;
+
+  child = sz_view_text("Hi");
+  floor = sz_view_min_size(80, 50, child);
+  cap = sz_view_max_size(40, 30, floor);
+  sz_view_layout(cap, 200.f, 200.f, theme);
+  cf = sz_view_frame(cap);
+  ff = sz_view_frame(floor);
+  chf = sz_view_frame(child);
+  assert(fabsf(cf.w - 40.f) < 0.5f);
+  assert(fabsf(cf.h - 30.f) < 0.5f);
+  assert(fabsf(ff.w - 40.f) < 0.5f);
+  assert(fabsf(ff.h - 30.f) < 0.5f);
+  assert(fabsf(chf.w - 40.f) < 0.5f);
+  assert(fabsf(chf.h - 30.f) < 0.5f);
+  sz_view_free(cap);
+}
+
+static void test_max_size_inside_column(void) {
+  SzView *col, *box, *inner, *child, *sib;
+  const SzTheme *theme = sz_theme_default();
+  SzRect bf, sf;
+
+  col = sz_view_column();
+  child = sz_view_text("Hi");
+  inner = sz_view_sized(80, 50, child);
+  box = sz_view_max_size(40, 30, inner);
+  sib = sz_view_button("Go", NULL, NULL);
+  sz_view_add_child(col, box);
+  sz_view_add_child(col, sib);
+  sz_view_layout(col, 240.f, 200.f, theme);
+  bf = sz_view_frame(box);
+  sf = sz_view_frame(sib);
+  assert(fabsf(bf.w - 40.f) < 0.5f);
+  assert(fabsf(bf.h - 30.f) < 0.5f);
+  assert(sf.w + 1.f < 240.f - theme->pad * 2.f);
+  sz_view_free(col);
+}
+
+static void test_max_size_with_stretch(void) {
+  SzView *col, *wrap, *cap, *inner, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect wf, cf;
+  float inner_w;
+
+  col = sz_view_column();
+  child = sz_view_text("Hi");
+  inner = sz_view_sized(10, 50, child);
+  cap = sz_view_max_size(0, 20, inner);
+  wrap = sz_view_stretch(cap);
+  sz_view_add_child(col, wrap);
+  sz_view_layout(col, 220.f, 160.f, theme);
+  wf = sz_view_frame(wrap);
+  cf = sz_view_frame(cap);
+  inner_w = 220.f - theme->pad * 2.f;
+  assert(fabsf(wf.w - inner_w) < 0.5f);
+  assert(fabsf(cf.w - inner_w) < 0.5f);
+  assert(fabsf(cf.h - 20.f) < 0.5f);
+  sz_view_free(col);
+}
+
+static void test_nested_max_size_uses_tighter_cap(void) {
+  SzView *outer, *inner, *box, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect of;
+
+  child = sz_view_text("Hi");
+  box = sz_view_sized(100, 80, child);
+  inner = sz_view_max_size(40, 30, box);
+  outer = sz_view_max_size(80, 60, inner);
+  sz_view_layout(outer, 200.f, 200.f, theme);
+  of = sz_view_frame(outer);
+  assert(fabsf(of.w - 40.f) < 0.5f);
+  assert(fabsf(of.h - 30.f) < 0.5f);
+  assert(fabsf(sz_view_frame(inner).w - 40.f) < 0.5f);
+  assert(fabsf(sz_view_frame(box).w - 40.f) < 0.5f);
+  sz_view_free(outer);
+}
+
+static void test_max_size_inside_row(void) {
+  SzView *row, *box, *inner, *child, *sib;
+  const SzTheme *theme = sz_theme_default();
+  SzRect bf;
+
+  row = sz_view_row();
+  child = sz_view_text("Hi");
+  inner = sz_view_sized(80, 50, child);
+  box = sz_view_max_size(40, 30, inner);
+  sib = sz_view_button("Go", NULL, NULL);
+  sz_view_add_child(row, box);
+  sz_view_add_child(row, sib);
+  sz_view_layout(row, 320.f, 80.f, theme);
+  bf = sz_view_frame(box);
+  assert(fabsf(bf.w - 40.f) < 0.5f);
+  assert(fabsf(bf.h - 30.f) < 0.5f);
+  sz_view_free(row);
+}
+
 static void test_background(void) {
   SzView *bg, *child;
   const SzTheme *theme = sz_theme_default();
@@ -2235,6 +2420,15 @@ int main(void) {
   test_padding();
   test_sized();
   test_min_size();
+  test_max_size_caps_sized();
+  test_max_size_does_not_grow_child();
+  test_max_size_zero_axis_is_uncapped();
+  test_incoming_max_wins_over_max_size();
+  test_min_size_inside_max_size_clamps();
+  test_max_size_inside_column();
+  test_max_size_with_stretch();
+  test_nested_max_size_uses_tighter_cap();
+  test_max_size_inside_row();
   test_background();
   test_aspect_ratio();
   test_fraction();

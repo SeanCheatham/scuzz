@@ -203,7 +203,7 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ### Layout model
 
-**Flutter-style constraints** (constraints down, sizes up). Tight slots: `sized`, `aspectRatio`, percent axes on `fraction`, `expanded` flex, and opt-in `stretch` (cross axis). Column/row do not stretch non-flex children unless wrapped in `View.stretch`. Do not drift into CSS-ish ad-hoc rules. Do not grow Flutter-style constraint-overflow dumps. Diagnose through structural dumps + laws. Shipped widgets (`column` / `row` / `stack` / `expanded` / `stretch` / `center` / `align` / `positioned` / `padding` / `sized` / `minSize` / `background` / `aspectRatio` / `fraction`): [`guide.md`](guide.md).
+**Flutter-style constraints** (constraints down, sizes up). Tight slots: `sized`, `aspectRatio`, percent axes on `fraction`, `expanded` flex, and opt-in `stretch` (cross axis). `minSize` raises min. `maxSize` lowers max (`0` = no cap). Incoming max still wins when tighter. Column/row do not stretch non-flex children unless wrapped in `View.stretch`. Do not drift into CSS-ish ad-hoc rules. Do not grow Flutter-style constraint-overflow dumps. Diagnose through structural dumps + laws. Shipped widgets (`column` / `row` / `stack` / `expanded` / `stretch` / `center` / `align` / `positioned` / `padding` / `sized` / `minSize` / `maxSize` / `background` / `aspectRatio` / `fraction`): [`guide.md`](guide.md).
 
 ### UI testing
 

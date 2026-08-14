@@ -141,7 +141,8 @@ typedef enum SzViewKind {
   SZ_VIEW_FRACTION, /* percent of incoming max; 0 = size to child on that axis */
   SZ_VIEW_IMAGE,
   SZ_VIEW_ICON,
-  SZ_VIEW_STRETCH /* Column/Row: tight cross-axis; main axis stays intrinsic */
+  SZ_VIEW_STRETCH, /* Column/Row: tight cross-axis; main axis stays intrinsic */
+  SZ_VIEW_MAX_SIZE /* lower max w×h; 0 = no cap on that axis */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -182,6 +183,8 @@ SzView *sz_view_padding(int pad, SzView *child);
 SzView *sz_view_sized(int w, int h, SzView *child);
 /* Floor on child size; 0 on an axis means no min. Clamped to incoming max. */
 SzView *sz_view_min_size(int w, int h, SzView *child);
+/* Ceiling on child size; 0 on an axis means no cap. Incoming max still wins when tighter. */
+SzView *sz_view_max_size(int w, int h, SzView *child);
 /* Pass constraints through; size to child; paint `argb` behind the child. */
 SzView *sz_view_background(uint32_t argb, SzView *child);
 /* Largest rw:rh box that fits incoming max; child laid out in that tight slot. */
@@ -327,6 +330,7 @@ SzView *sz_lang_view_positioned(int64_t x, int64_t y, SzView *child);
 SzView *sz_lang_view_padding(int64_t pad, SzView *child);
 SzView *sz_lang_view_sized(int64_t w, int64_t h, SzView *child);
 SzView *sz_lang_view_min_size(int64_t w, int64_t h, SzView *child);
+SzView *sz_lang_view_max_size(int64_t w, int64_t h, SzView *child);
 SzView *sz_lang_view_background(int64_t argb, SzView *child);
 SzView *sz_lang_view_aspect_ratio(int64_t rw, int64_t rh, SzView *child);
 SzView *sz_lang_view_fraction(int64_t wpct, int64_t hpct, SzView *child);

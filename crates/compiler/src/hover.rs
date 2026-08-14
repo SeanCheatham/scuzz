@@ -299,6 +299,14 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("View.expanded", "View.expanded(child: View): View"),
     ("View.stretch", "View.stretch(child: View): View"),
     ("View.center", "View.center(child: View): View"),
+    (
+        "View.minSize",
+        "View.minSize(w: Int, h: Int, child: View): View",
+    ),
+    (
+        "View.maxSize",
+        "View.maxSize(w: Int, h: Int, child: View): View",
+    ),
     ("Ui.run", "Ui.run(view: View): IO[Unit]"),
     (
         "Law.check",
@@ -387,5 +395,16 @@ mod tests {
         let src = "@main def main: IO[Unit] =\n  Ui.run(_ => View.stretch(View.text(\"x\")))\n";
         let h = hover_src(src, "stretch");
         assert!(h.contains("View.stretch(child: View): View"), "{h}");
+    }
+
+    #[test]
+    fn hovers_view_max_size() {
+        let src =
+            "@main def main: IO[Unit] =\n  Ui.run(_ => View.maxSize(40, 30, View.text(\"x\")))\n";
+        let h = hover_src(src, "maxSize");
+        assert!(
+            h.contains("View.maxSize(w: Int, h: Int, child: View): View"),
+            "{h}"
+        );
     }
 }

@@ -155,6 +155,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_padding(i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_sized(i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_min_size(i64, i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_max_size(i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_background(i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_aspect_ratio(i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_fraction(i64, i64, ptr)").unwrap();
@@ -3217,6 +3218,15 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "View.maxSize" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_view_max_size(i64 {}, i64 {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "View.background" => {
             writeln!(
                 code,
@@ -3609,6 +3619,20 @@ law always: Bool = 1 == 1
         assert!(
             ir.contains("sz_lang_view_stretch"),
             "expected View.stretch in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_max_size() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.maxSize(40, 30, View.text("x")))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_max_size"),
+            "expected View.maxSize in IR:\n{ir}"
         );
     }
 
