@@ -238,6 +238,37 @@ static void *ipv4_http_once(void *arg) {
   return (void *)1;
 }
 
+static void *ipv4_http_hold(void *arg) {
+  int port = *(int *)arg;
+  int fd, cfd;
+  int one = 1;
+  struct sockaddr_in addr;
+  char buf[512];
+  ssize_t n;
+  fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0)
+    return NULL;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+  memset(&addr, 0, sizeof addr);
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)port);
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  if (bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0 || listen(fd, 1) != 0) {
+    close(fd);
+    return NULL;
+  }
+  cfd = accept(fd, NULL, NULL);
+  close(fd);
+  if (cfd < 0)
+    return NULL;
+  n = read(cfd, buf, sizeof buf);
+  (void)n;
+  while ((n = read(cfd, buf, sizeof buf)) > 0)
+    ;
+  close(cfd);
+  return (void *)1;
+}
+
 static volatile int g_peer_flag;
 
 static SzIo *assert_peer_quiet(void *value, void *env) {
@@ -1672,6 +1703,27 @@ int main(void) {
     sz_net_test_set_nameserver(NULL, 0);
     assert(!r.ok);
     assert(r.error && strstr(sz_string_cstr(r.error->message), "DNS timed out"));
+    sz_error_free(r.error);
+    assert(t1 - t0 >= 900);
+    assert(t1 - t0 < 2500);
+  }
+
+  /* Peer accepts and never responds: read fails in ~1s instead of hanging. */
+  {
+    pthread_t th;
+    int port = 18584;
+    char url[64];
+    int64_t t0;
+    int64_t t1;
+    pthread_create(&th, NULL, ipv4_http_hold, &port);
+    snprintf(url, sizeof url, "http://127.0.0.1:%d/x", port);
+    t0 = sz_clock_monotonic_ms_sync();
+    r = sz_io_unsafe_run(sz_io_flatmap(sz_io_sleep_ms(30), after_sleep_http,
+                                      sz_string_from_cstr(url)));
+    t1 = sz_clock_monotonic_ms_sync();
+    pthread_join(th, NULL);
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "read timed out"));
     sz_error_free(r.error);
     assert(t1 - t0 >= 900);
     assert(t1 - t0 < 2500);

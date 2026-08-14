@@ -2,4 +2,4 @@
 
 ## Next
 
-**HTTP read timeout for `Net.httpGet`** — DNS and TCP connect each wait at most 1s. A peer that accepts and never sends still parks on read until the OS gives up. Next: fail the response wait after a bounded wait.
+**Request read timeout for `Net.serve`** — `Net.httpGet` bounds DNS, connect, and response read at 1s. A client that connects and never sends a GET still parks the server fiber on request read. Next: fail that wait after a bounded wait.

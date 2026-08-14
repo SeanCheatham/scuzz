@@ -16,9 +16,10 @@
 /* Blessed Net.httpGet — live HTTP/1.0 GET or TestRuntime stub map.
  * Live hostnames query A and AAAA together (park on poll); CNAME chains
  * re-query both (cap 5). When both addresses exist, start AAAA first and wait
- * 250ms (RFC 8305) before the A connect so working IPv6 wins. DNS and connect
- * each wait at most 1000ms; a partial DNS answer proceeds. IPv4 literals and
- * `http://[::1]/` skip DNS. Failures use SzError code 6. */
+ * 250ms (RFC 8305) before the A connect so working IPv6 wins. DNS, connect,
+ * and the response read each wait at most 1000ms; a partial DNS answer
+ * proceeds. IPv4 literals and `http://[::1]/` skip DNS. Failures use SzError
+ * code 6. */
 
 typedef struct {
   int is_err;
@@ -127,6 +128,7 @@ typedef struct GetSt {
   int he_wait4;
   int64_t dns_deadline_ms;
   int64_t connect_deadline_ms;
+  int64_t read_deadline_ms;
   int http_port;
   struct sockaddr_storage peer;
   struct sockaddr_storage peer4;
@@ -456,6 +458,7 @@ static void addr_set_v6(struct sockaddr_storage *ss, socklen_t *len,
 #define HE_A_DELAY_MS 250
 #define HE_CONNECT_MS 1000
 #define HE_DNS_MS 1000
+#define HE_READ_MS 1000
 
 static void get_free(GetSt *st) {
   if (!st)
@@ -830,6 +833,11 @@ static void *get_read(void *env) {
 
   n = read(st->fd, buf, sizeof buf);
   if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+    if (sz_clock_monotonic_ms_sync() >= st->read_deadline_ms) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.httpGet: read timed out");
+      return r;
+    }
     r->retry = 1;
     return r;
   }
@@ -921,8 +929,16 @@ static SzIo *get_after_read_poll(void *value, void *env) {
 
 static SzIo *get_poll_read(void *value, void *env) {
   GetSt *st = (GetSt *)env;
+  SzIo *ready;
+  int64_t left;
   (void)value;
-  return sz_io_flatmap(sz_io_poll_readable(st->fd), get_after_read_poll, st);
+  if (st->read_deadline_ms == 0)
+    st->read_deadline_ms = sz_clock_monotonic_ms_sync() + HE_READ_MS;
+  left = st->read_deadline_ms - sz_clock_monotonic_ms_sync();
+  if (left < 1)
+    left = 1;
+  ready = sz_io_race(sz_io_poll_readable(st->fd), sz_io_sleep_ms(left));
+  return sz_io_flatmap(ready, get_after_read_poll, st);
 }
 
 static SzIo *get_finish(void *body, void *env) {
