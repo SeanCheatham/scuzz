@@ -2,4 +2,4 @@
 
 ## Next
 
-**Language surface — generic `impl`** — methods on `record Box[T]` exist (`examples/genum`). Next: `impl Show for Box` so a trait method on a generic record typechecks. `watch` still only rebuilds.
+**Language surface — methods on generic enums** — `impl Show for Box` typechecks (`examples/trait`). Next: one method on `enum Opt[T]` so `o.getOrElse(0)` typechecks without a free `def`. `watch` still only rebuilds.

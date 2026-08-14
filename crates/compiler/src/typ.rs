@@ -54,7 +54,7 @@ struct MethodEntry {
     /// Parameter types after `self`, already resolved.
     params: Vec<Type>,
     ret: Type,
-    /// Record type parameters (`Box[T]`); empty for trait impls.
+    /// Type parameters of a generic receiver (`Box[T]`); empty for non-generic impls.
     type_params: Vec<String>,
 }
 
@@ -79,12 +79,13 @@ impl MethodIndex {
                 .ok_or_else(|| {
                     TypeError::Msg(format!("impl of unknown trait {}", im.trait_name))
                 })?;
-            let for_id = enums.resolve_id(&im.for_type, &im.module).map_err(|e| {
+            let for_en = enums.resolve(&im.for_type, &im.module).map_err(|e| {
                 TypeError::Msg(format!(
                     "impl {} for {}: unknown type: {e}",
                     im.trait_name, im.for_type
                 ))
             })?;
+            let for_id = crate::resolve::enum_id(&for_en.module, &for_en.name);
             for method in &im.methods {
                 let tm = tr
                     .methods
@@ -104,7 +105,7 @@ impl MethodIndex {
                 }
                 for (a, b) in tm.params.iter().zip(method.params.iter()) {
                     let at = resolve_type(&a.ty, enums, &tr.module)?;
-                    let bt = resolve_type(&b.ty, enums, &im.module)?;
+                    let bt = resolve_type_in(&b.ty, enums, &im.module, &for_en.type_params)?;
                     if !types_compat(&at, &bt) {
                         return Err(TypeError::Msg(format!(
                             "impl {} for {}.{}: param type mismatch",
@@ -113,7 +114,7 @@ impl MethodIndex {
                     }
                 }
                 let want_ret = resolve_type(&tm.ret, enums, &tr.module)?;
-                let got_ret = resolve_type(&method.ret, enums, &im.module)?;
+                let got_ret = resolve_type_in(&method.ret, enums, &im.module, &for_en.type_params)?;
                 if !types_compat(&want_ret, &got_ret) {
                     return Err(TypeError::Msg(format!(
                         "impl {} for {}.{}: return type mismatch",
@@ -130,7 +131,7 @@ impl MethodIndex {
                 let params: Result<Vec<_>, _> = method
                     .params
                     .iter()
-                    .map(|p| resolve_type(&p.ty, enums, &im.module))
+                    .map(|p| resolve_type_in(&p.ty, enums, &im.module, &for_en.type_params))
                     .collect();
                 by_type_method.insert(
                     key,
@@ -142,7 +143,7 @@ impl MethodIndex {
                         ),
                         params: params?,
                         ret: got_ret,
-                        type_params: Vec::new(),
+                        type_params: for_en.type_params.clone(),
                     },
                 );
             }
@@ -230,6 +231,20 @@ fn method_receiver_parts<'a>(
     }
 }
 
+fn enum_self_ty(en: &EnumDef) -> Type {
+    if en.type_params.is_empty() {
+        Type::Adt(en.name.clone())
+    } else {
+        Type::App(
+            en.name.clone(),
+            en.type_params
+                .iter()
+                .map(|p| Type::Var(p.clone()))
+                .collect(),
+        )
+    }
+}
+
 /// Turn `impl` methods into ordinary defs (`self` first) for FunIndex / codegen.
 pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
     let enums = EnumIndex::build(&program.enums, &program.imports)
@@ -237,10 +252,14 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
     // Validate via MethodIndex build.
     let _ = MethodIndex::build(&program.impls, &program.traits, &enums, &program.enums)?;
     for im in &program.impls {
+        let for_en = enums
+            .resolve(&im.for_type, &im.module)
+            .map_err(|e| TypeError::Msg(e.to_string()))?;
         let for_id = enums
             .resolve_id(&im.for_type, &im.module)
             .map_err(|e| TypeError::Msg(e.to_string()))?;
         let bare = enum_bare_name(&for_id).to_string();
+        let self_ty = enum_self_ty(for_en);
         for method in &im.methods {
             let mangled = impl_method_name(&im.trait_name, &bare, &method.name);
             if program
@@ -254,7 +273,7 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
             }
             let mut params = vec![Param {
                 name: "self".into(),
-                ty: Type::Adt(im.for_type.clone()),
+                ty: self_ty.clone(),
                 rfn: None,
             }];
             params.extend(method.params.clone());
@@ -264,7 +283,7 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
                 is_private: false,
                 is_law: false,
                 is_driver: false,
-                type_params: Vec::new(),
+                type_params: for_en.type_params.clone(),
                 params,
                 ret: method.ret.clone(),
                 body: method.body.clone(),
@@ -277,17 +296,7 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
             if !en.is_record {
                 continue;
             }
-            let self_ty = if en.type_params.is_empty() {
-                Type::Adt(en.name.clone())
-            } else {
-                Type::App(
-                    en.name.clone(),
-                    en.type_params
-                        .iter()
-                        .map(|p| Type::Var(p.clone()))
-                        .collect(),
-                )
-            };
+            let self_ty = enum_self_ty(en);
             for method in &en.methods {
                 let mangled = rec_method_name(&en.name, &method.name);
                 if program
@@ -4236,6 +4245,11 @@ fn specialize_enums(mut program: Program) -> Result<Program, TypeError> {
     }
     program.enums.retain(|e| e.type_params.is_empty());
     program.enums.extend(clone_defs);
+    // Generic templates are gone; drop impls that targeted them so later
+    // MethodIndex rebuilds (second resolve_field_access) still typecheck.
+    program
+        .impls
+        .retain(|im| program.enums.iter().any(|e| e.name == im.for_type));
     Ok(program)
 }
 
@@ -4243,7 +4257,7 @@ fn specialize_enums(mut program: Program) -> Result<Program, TypeError> {
 mod tests {
     use super::*;
     use crate::lower::lower_program;
-    use crate::parser::parse;
+    use crate::parser::{parse, parse_file};
 
     #[test]
     fn typechecks_payload_adt() {
@@ -4816,6 +4830,31 @@ record Box[T](x: T):
 "#;
         let p = expand_impls(lower_program(parse(src).unwrap())).expect("expand");
         typecheck(&p).expect("generic record method should typecheck");
+    }
+
+    #[test]
+    fn typechecks_generic_impl() {
+        let src = r#"
+record Box[T](x: T)
+trait Show:
+  def show(): String
+impl Show for Box:
+  def show(): String =
+    "box"
+@main def main: IO[Unit] =
+  for {
+    b = Box(4)
+  } yield IO.println(b.show())
+"#;
+        let p = expand_impls(lower_program(parse(src).unwrap())).expect("expand");
+        typecheck(&p).expect("generic impl should typecheck");
+        let p = elaborate_generics(p).expect("elaborate");
+        let p = resolve_field_access(p).expect("fields before mono");
+        let p = monomorphize(p).expect("mono");
+        resolve_field_access(p).expect("fields after mono");
+        let p = parse_file(src, "trait/src/Main.scuzz").unwrap();
+        let p = expand_impls(lower_program(p)).expect("expand labeled");
+        typecheck(&p).expect("generic impl with module should typecheck");
     }
 
     #[test]

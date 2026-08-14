@@ -48,6 +48,7 @@ stage_checks() {
   trait_out="$("$bin" run examples/trait)"
   echo "$trait_out"
   echo "$trait_out" | grep -q "Point(3,5)"
+  echo "$trait_out" | grep -q "show:box"
 
   echo "==> $stage runs examples/generic"
   generic_out="$("$bin" run examples/generic)"

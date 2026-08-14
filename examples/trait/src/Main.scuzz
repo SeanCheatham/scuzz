@@ -1,5 +1,7 @@
 record Point(x: Int, y: Int)
 
+record Box[T](x: T)
+
 trait Show:
   def show(): String
 
@@ -7,5 +9,13 @@ impl Show for Point:
   def show(): String =
     Str.concat("Point(", Str.concat(Str.fromInt(self.x), Str.concat(",", Str.concat(Str.fromInt(self.y), ")"))))
 
+impl Show for Box:
+  def show(): String =
+    "box"
+
 @main def main: IO[Unit] =
-  IO.println(Point(3, 5).show())
+  for {
+    _ <- IO.println(Point(3, 5).show())
+    b = Box(4)
+    _ <- IO.println(Str.concat("show:", b.show()))
+  } yield ()

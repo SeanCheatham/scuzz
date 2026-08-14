@@ -127,25 +127,31 @@ def typecheckProg(prog: Prog): TyRes =
 
 def expandImplsProg(prog: Prog): Prog =
   for {
-    extra = expandAllImpls(progImpls(prog), List.empty())
+    extra = expandAllImpls(progImpls(prog), progEnums(prog), progImports(prog), List.empty())
     rec = expandAllRecordMethods(progEnums(prog), List.empty())
   } yield setProgDefs(prog, listConcat(progDefs(prog), listConcat(extra, rec)))
 
-def expandAllImpls(impls: List, acc: List): List =
-  if (List.isEmpty(impls) == 1) List.reverse(acc) else expandAllImpls(List.tail(impls), listConcat(expandOneImpl(List.head(impls), List.empty()), acc))
+def expandAllImpls(impls: List, enums: List, imports: List, acc: List): List =
+  if (List.isEmpty(impls) == 1) List.reverse(acc) else expandAllImpls(List.tail(impls), enums, imports, listConcat(expandOneImpl(List.head(impls), enums, imports), acc))
 
-def expandOneImpl(im: ImplDef, acc: List): List =
+def expandOneImpl(im: ImplDef, enums: List, imports: List): List =
   im match {
-    case ImplDef.Impl(module, traitName, forType, methods) => expandOneImplMethods(module, traitName, forType, methods, acc)
+    case ImplDef.Impl(module, traitName, forType, methods) => expandOneImplMethods(module, traitName, forType, methods, enums, imports, List.empty())
   }
 
-def expandOneImplMethods(module: String, traitName: String, forType: String, methods: List, acc: List): List =
-  if (List.isEmpty(methods) == 1) List.reverse(acc) else expandOneImplMethods(module, traitName, forType, List.tail(methods), List.cons(expandOneImplMethod(module, traitName, forType, List.head(methods)), acc))
+def expandOneImplMethods(module: String, traitName: String, forType: String, methods: List, enums: List, imports: List, acc: List): List =
+  if (List.isEmpty(methods) == 1) List.reverse(acc) else expandOneImplMethods(module, traitName, forType, List.tail(methods), enums, imports, List.cons(expandOneImplMethod(module, traitName, forType, List.head(methods), enums, imports), acc))
 
-def expandOneImplMethod(module: String, traitName: String, forType: String, m: ImplMethod): Def =
+def expandOneImplMethod(module: String, traitName: String, forType: String, m: ImplMethod, enums: List, imports: List): Def =
   m match {
-    case ImplMethod.Method(name, params, ret, body) => Def.Def(implMethodName(traitName, forType, name), List.cons(Param.Param("self", Type.Adt(forType), List.empty()), params), ret, body, module, 0, List.empty(), 0)
+    case ImplMethod.Method(name, params, ret, body) => expandOneImplMethodDef(module, traitName, forType, name, params, ret, body, enums, imports)
   }
+
+def expandOneImplMethodDef(module: String, traitName: String, forType: String, name: String, params: List, ret: Type, body: Expr, enums: List, imports: List): Def =
+  for {
+    en = resolveEnum(enums, imports, forType, module)
+    tparams = if (List.isEmpty(en) == 1) List.empty() else enumTParams(List.head(en))
+  } yield Def.Def(implMethodName(traitName, forType, name), List.cons(Param.Param("self", recSelfTy(forType, tparams), List.empty()), params), ret, body, module, 0, tparams, 0)
 
 def expandAllRecordMethods(enums: List, acc: List): List =
   if (List.isEmpty(enums) == 1) List.reverse(acc) else expandAllRecordMethods(List.tail(enums), listConcat(expandOneRecordMethods(List.head(enums), List.empty()), acc))

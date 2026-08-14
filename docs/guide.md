@@ -41,7 +41,7 @@ Console kit: `Sys.args(): IO[List]`, `Sys.readLine(): IO[String]` (EOF → `""`;
 - No `val` / statement blocks
 - Literals: ints, strings, `()`, `s"…$x…"`, list literals `[a, b]`
 - Enums + **`record Name(f1: T1, …)`** (construct `Name(…)`, match `case Name(…)`, field `p.x` — see `examples/record` / `examples/adt`)
-- Thin **traits** / `impl` with static dispatch (`p.show()` — see `examples/trait`)
+- Thin **traits** / `impl` with static dispatch (`p.show()` — including `impl Show for Box` on a generic record; see `examples/trait`)
 - Thin **generics**: `def id[T](x: T): T = x` monomorphized at call sites (`examples/generic`); generic enums/records too — `enum Opt[T]:` / `record Box[T](x: T): def get(): T = self.x` (record methods are consecutive `def`s after `:`, same as `impl`), instantiation inferred from ctor args or the expected type (`examples/genum`)
 - Blessed impurity only: `IO.println` / `sleep` / `fail` / `pure` / `race` / `both` / `ensure` / `timeout` / `forever` / `repeatN` / `retryN`, `Fiber.fork` / `join` / `interrupt`, `Ref.*` / `Queue.*` / `Deferred.*` (String payloads), `Resource.make` / `Resource.use` (String payload; release on success, failure, and cancel), `Stream.emit` / `emits` / `eval` / `concat` / `map` / `evalMap` / `filter` / `take` / `takeWhile` / `drop` / `dropWhile` / `find` / `exists` / `compileToList` / `drain` (String payload; `exists` is `IO[Bool]`), `Fs.*`, `Sys.args` / `Sys.readLine` / `Sys.exec` / `Sys.spawn` / `Sys.alive` / `Sys.getenv`, `Clock.*`, `Random.*`, `Net.httpGet` / `Net.serveOnce` / `Net.serve`
 - No raw side effects in View build — taps may run `IO` via `sz_io_unsafe_run`
@@ -127,7 +127,7 @@ src/
 | `examples/stream` | `Stream.emit` / `map` / `evalMap` / `filter` / `take` / `takeWhile` / `drop` / `dropWhile` / `find` / `exists` / `compileToList` / `drain` |
 | `examples/server` | `Net.serve` persistent HTTP/1.0 GET (TestRuntime drains injected paths) |
 | `examples/record` | `record Point(…)` + `p.x` field access + `where` on `x` / `y` |
-| `examples/trait` | `trait` / `impl` + `p.show()` static dispatch |
+| `examples/trait` | `trait` / `impl` + `p.show()` static dispatch, including `impl Show for Box` |
 | `examples/generic` | `def id[T](…)` monomorphized generics |
 | `examples/genum` | generic `enum Opt[T]` / `record Box[T]` with `b.get()` |
 | `examples/modules` | stem modules, `private def`, `import`, enum-per-module |
