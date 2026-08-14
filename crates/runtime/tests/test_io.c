@@ -1343,6 +1343,22 @@ int main(void) {
     assert(strcmp(sz_string_cstr((SzString *)pair->right), "ok:/x") == 0);
   }
 
+  /* Live Net.serveOnce on ::1: httpGet via IPv6 literal. */
+  {
+    int port = 18581;
+    char url[64];
+    SzPair *pair;
+    snprintf(url, sizeof url, "http://[::1]:%d/x", port);
+    r = sz_io_unsafe_run(sz_io_both(
+        sz_net_serve_once(port, serve_path_ok, NULL),
+        sz_io_flatmap(sz_io_sleep_ms(30), after_sleep_http,
+                      sz_string_from_cstr(url))));
+    assert(r.ok);
+    pair = (SzPair *)r.value;
+    assert(pair && pair->right);
+    assert(strcmp(sz_string_cstr((SzString *)pair->right), "ok:/x") == 0);
+  }
+
   /* IPv6 literals skip DNS: http://[::1]:port/x */
   {
     pthread_t th;

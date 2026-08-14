@@ -37,7 +37,7 @@ Vision locks **oracles in source, drivers as the test surface** ([`vision.md`](v
 
 ### Residuals
 
-- **Net** — Happy Eyeballs (racing A+AAAA) is out. `Net.httpGet` follows CNAME chains (cap 5) to an A, then AAAA on NODATA; IPv4 literals and `http://[::1]/` IPv6 literals skip DNS.
+- **Net** — Happy Eyeballs (racing A+AAAA) is out. `Net.httpGet` follows CNAME chains (cap 5) to an A, then AAAA on NODATA; IPv4 literals and `http://[::1]/` IPv6 literals skip DNS. `Net.serve` listens on `127.0.0.1` and `::1`.
 - **Concurrency** — cooperative fibers only; `IO.ensure` / `Resource` release on cancel (including `IO.timeout` / `Fiber.interrupt`). Language `Fiber.fork` / `join` / `interrupt` and `IO.forever` / `repeatN` / `retryN` are in. Later: OS threads, supervision trees.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting; `Signal.list` frees unshared cons spines. Later: a collector if list-churn still demands it.
 - **Language surface** — richer generics beyond monomorphized defs/enums/records ([`compatibility.md`](compatibility.md)).

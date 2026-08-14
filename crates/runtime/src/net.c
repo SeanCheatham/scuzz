@@ -790,14 +790,16 @@ SzIo *sz_net_http_get(SzString *url) {
 }
 
 /* HTTP/1.0 GET server. Listen and connection fds are nonblocking; the fiber
- * parks on poll so other IO can run. TestRuntime injects paths and skips
- * sockets. Error code 6. serveOnce is one request; serve keeps the listen
- * socket (n<=0 forever live, or until the TestRuntime queue is empty). */
+ * parks on poll so other IO can run. Live listen is 127.0.0.1 and ::1 (V6ONLY)
+ * so httpGet literals on either loopback match. TestRuntime injects paths and
+ * skips sockets. Error code 6. serveOnce is one request; serve keeps the
+ * listen sockets (n<=0 forever live, or until the TestRuntime queue is empty). */
 
 typedef struct ServeSt {
   int64_t port;
   int64_t left; /* >0 remaining; <=0 forever (TESTRT drains the queue) */
   int listen_fd;
+  int listen6_fd;
   int conn_fd;
   SzCont handler;
   void *henv;
@@ -823,6 +825,10 @@ static void serve_close_fds(ServeSt *st) {
   if (st->listen_fd >= 0) {
     close(st->listen_fd);
     st->listen_fd = -1;
+  }
+  if (st->listen6_fd >= 0) {
+    close(st->listen6_fd);
+    st->listen6_fd = -1;
   }
 }
 
@@ -853,12 +859,55 @@ static int parse_get_path(const char *req, char *path, size_t path_sz) {
   return 1;
 }
 
-static void *serve_ensure_listen(void *env) {
-  ServeSt *st = (ServeSt *)env;
-  NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
+static int serve_bind_v4(int port) {
   struct sockaddr_in addr;
   int fd;
   int one = 1;
+  fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0)
+    return -1;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+  memset(&addr, 0, sizeof addr);
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)port);
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  if (bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0 ||
+      listen(fd, 16) != 0 || set_nonblock(fd) != 0) {
+    close(fd);
+    return -1;
+  }
+  return fd;
+}
+
+static int serve_bind_v6(int port) {
+  struct sockaddr_in6 addr;
+  int fd;
+  int one = 1;
+  fd = socket(AF_INET6, SOCK_STREAM, 0);
+  if (fd < 0)
+    return -1;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+#ifdef IPV6_V6ONLY
+  setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &one, sizeof one);
+#endif
+  memset(&addr, 0, sizeof addr);
+  addr.sin6_family = AF_INET6;
+#ifdef __APPLE__
+  addr.sin6_len = (uint8_t)sizeof(addr);
+#endif
+  addr.sin6_port = htons((uint16_t)port);
+  if (inet_pton(AF_INET6, "::1", &addr.sin6_addr) != 1 ||
+      bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0 ||
+      listen(fd, 16) != 0 || set_nonblock(fd) != 0) {
+    close(fd);
+    return -1;
+  }
+  return fd;
+}
+
+static void *serve_ensure_listen(void *env) {
+  ServeSt *st = (ServeSt *)env;
+  NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
   int port;
 
   if (sz_testrt_net_is_fake()) {
@@ -875,25 +924,14 @@ static void *serve_ensure_listen(void *env) {
     r->is_err = 0;
     return r;
   }
-  fd = socket(AF_INET, SOCK_STREAM, 0);
-  if (fd < 0) {
-    r->is_err = 1;
-    r->as.err = sz_error_new(6, "Net.serve: socket failed");
-    return r;
-  }
-  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
-  memset(&addr, 0, sizeof addr);
-  addr.sin_family = AF_INET;
-  addr.sin_port = htons((uint16_t)port);
-  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
-  if (bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0 ||
-      listen(fd, 16) != 0 || set_nonblock(fd) != 0) {
-    close(fd);
+  st->listen_fd = serve_bind_v4(port);
+  st->listen6_fd = serve_bind_v6(port);
+  if (st->listen_fd < 0 || st->listen6_fd < 0) {
+    serve_close_fds(st);
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.serve: bind/listen failed");
     return r;
   }
-  st->listen_fd = fd;
   r->is_err = 0;
   return r;
 }
@@ -917,12 +955,15 @@ static void *serve_accept(void *env) {
     return r;
   }
   fd = st->listen_fd;
-  if (fd < 0) {
+  if (fd < 0 && st->listen6_fd < 0) {
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.serve: not listening");
     return r;
   }
-  conn = accept(fd, NULL, NULL);
+  conn = fd >= 0 ? accept(fd, NULL, NULL) : -1;
+  if (conn < 0 && (fd < 0 || errno == EAGAIN || errno == EWOULDBLOCK) &&
+      st->listen6_fd >= 0)
+    conn = accept(st->listen6_fd, NULL, NULL);
   if (conn < 0) {
     if (errno == EAGAIN || errno == EWOULDBLOCK) {
       r->retry = 1;
@@ -1084,9 +1125,14 @@ static SzIo *serve_after_accept_poll(void *value, void *env) {
 
 static SzIo *serve_poll_then_accept(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
+  SzIo *ready;
   (void)value;
-  return sz_io_flatmap(sz_io_poll_readable(st->listen_fd), serve_after_accept_poll,
-                       st);
+  if (st->listen6_fd >= 0)
+    ready = sz_io_race(sz_io_poll_readable(st->listen_fd),
+                       sz_io_poll_readable(st->listen6_fd));
+  else
+    ready = sz_io_poll_readable(st->listen_fd);
+  return sz_io_flatmap(ready, serve_after_accept_poll, st);
 }
 
 static SzIo *serve_after_conn_read_poll(void *value, void *env) {
@@ -1183,6 +1229,7 @@ static SzIo *net_serve_n(int64_t port, int64_t n, SzCont handler, void *env) {
   st->port = port;
   st->left = n > 0 ? n : -1;
   st->listen_fd = -1;
+  st->listen6_fd = -1;
   st->conn_fd = -1;
   st->handler = handler;
   st->henv = env;
