@@ -405,6 +405,7 @@ static void test_ui_run_rebuild_keepalive(void) {
   assert(strstr(buf, "[signals]") != NULL);
   assert(strstr(buf, "[views]") != NULL);
   assert(strstr(buf, "[taps]") != NULL);
+  assert(strstr(buf, "[fields]") != NULL);
   sz_signal_int_free(env.count);
   remove(stamp);
   remove(dump);
@@ -429,23 +430,29 @@ static char *slurp_cstr(const char *path) {
 static void test_session_debug_dump(void) {
   SzUiConfig cfg;
   SzUiSession *session;
-  SzView *root, *btn;
+  SzView *root, *btn, *search;
   SzSignalInt *count;
+  SzSignalStr *draft, *query;
   SzInputEvent tap;
   const char *path = "/tmp/scuzz_ui_debug.dump";
-  char *a, *b;
+  char *a, *b, *c;
 
   count = sz_signal_int(0);
+  draft = sz_signal_str("");
+  query = sz_signal_str("");
   root = sz_view_column();
   sz_view_add_child(root, sz_view_text("Debug"));
   btn = sz_view_button("+", counter_tap, count);
   sz_view_add_child(root, btn);
   sz_view_add_child(root, sz_view_button("-", counter_tap, count));
+  sz_view_add_child(root, sz_view_text_field(draft, "item"));
+  search = sz_view_text_field(query, "search");
+  sz_view_add_child(root, search);
 
   memset(&cfg, 0, sizeof(cfg));
   cfg.kind = SZ_UI_RUNTIME_HEADLESS;
   cfg.width = 200;
-  cfg.height = 100;
+  cfg.height = 200;
   cfg.scale = 1.0;
   session = sz_ui_mount(&cfg, root);
   assert(session);
@@ -459,6 +466,10 @@ static void test_session_debug_dump(void) {
   assert(strstr(a, "[taps]") != NULL);
   assert(strstr(a, "0 +") != NULL);
   assert(strstr(a, "1 -") != NULL);
+  assert(strstr(a, "[fields]") != NULL);
+  assert(strstr(a, "0* item") != NULL);
+  assert(strstr(a, "1 search") != NULL);
+  assert(strstr(a, "1* search") == NULL);
 
   memset(&tap, 0, sizeof(tap));
   tap.kind = SZ_INPUT_TAP;
@@ -470,10 +481,23 @@ static void test_session_debug_dump(void) {
   b = slurp_cstr(path);
   assert(strcmp(a, b) != 0);
   free(a);
+
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SZ_INPUT_TAP;
+  tap.x = sz_view_frame(search).x + 8.f;
+  tap.y = sz_view_frame(search).y + 8.f;
+  assert(sz_ui_inject_sync(session, &tap));
+  assert(sz_ui_pump_sync(session));
+  c = slurp_cstr(path);
+  assert(strstr(c, "1* search") != NULL);
+  assert(strstr(c, "0* item") == NULL);
   free(b);
+  free(c);
 
   sz_ui_unmount(session);
   sz_signal_int_free(count);
+  sz_signal_str_free(draft);
+  sz_signal_str_free(query);
   remove(path);
 }
 

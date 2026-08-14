@@ -279,11 +279,11 @@ static void scripted_button_tap(SzUiSession *session, int prefer_upper) {
 /* --- SCUZZ_UI_SCRIPT playback (fuzz / replay) ---------------------------- */
 /* Line protocol, one event per line, delivered across pump boundaries:
      tap <n>    tap the nth button (scan order; [taps] in the dump); missing target is a no-op
-     text <s>   replace the focused/first TextField with <s>; no field is a no-op
-     type <s>   append <s> to the focused/first TextField; empty is a no-op; no field is a no-op
+     text <s>   replace the [fields] starred TextField with <s>; no field is a no-op
+     type <s>   append <s> to the [fields] starred TextField; empty is a no-op; no field is a no-op
      pump <k>   pump k extra frames
      scroll <dy> pan the first Scroll (positive = content up); no scroll is a no-op
-     backspace <n> chop n bytes from the focused/first TextField (default 1); no field is a no-op
+     backspace <n> chop n bytes from the [fields] starred TextField (default 1); no field is a no-op
      drive <name> [args]  run a verify-graph driver (Int/String/Bool args)
    Blank lines and #-comments are skipped. Pump runs after every event. */
 

@@ -1196,48 +1196,37 @@ int sz_view_handle_tap(SzView *root, float x, float y) {
   return 0;
 }
 
-/* Focused TextField, else first TextField in DFS order. */
-static SzView *find_text_field(SzView *root) {
+static int collect_text_fields_node(SzView *v, SzView **out, int cap, int n) {
   int i;
-  SzView *target = NULL;
-  SzView **stack = NULL;
-  int sp = 0, scap = 0;
-  SzView *first = NULL;
+  if (!v || !view_is_shown(v) || n >= cap)
+    return n;
+  if (v->kind == SZ_VIEW_TEXT_FIELD)
+    out[n++] = v;
+  for (i = 0; i < v->child_count && n < cap; i++)
+    n = collect_text_fields_node(v->children[i], out, cap, n);
+  return n;
+}
 
-  if (!root)
-    return NULL;
+int sz_view_collect_text_fields(SzView *root, SzView **out, int cap) {
+  if (!root || !out || cap <= 0)
+    return 0;
+  return collect_text_fields_node(root, out, cap, 0);
+}
 
-  stack = (SzView **)sz_alloc(sizeof(SzView *) * 32);
-  scap = 32;
-  stack[sp++] = root;
-  while (sp > 0) {
-    SzView *n = stack[--sp];
-    if (n->kind == SZ_VIEW_TEXT_FIELD) {
-      if (!first)
-        first = n;
-      if (n->focused) {
-        target = n;
-        break;
-      }
-    }
-    for (i = 0; i < n->child_count; i++) {
-      if (sp >= scap) {
-        int ncap = scap * 2;
-        SzView **ns = (SzView **)sz_alloc(sizeof(SzView *) * (size_t)ncap);
-        memcpy(ns, stack, (size_t)scap * sizeof(SzView *));
-        sz_free(stack);
-        stack = ns;
-        scap = ncap;
-      }
-      stack[sp++] = n->children[i];
-    }
+/* Focused TextField, else first shown field in a11y (preorder) order. */
+SzView *sz_view_text_field_target(SzView *root) {
+  SzView *fields[64];
+  int n = sz_view_collect_text_fields(root, fields, 64);
+  int i;
+  for (i = 0; i < n; i++) {
+    if (fields[i]->focused)
+      return fields[i];
   }
-  sz_free(stack);
-  return target ? target : first;
+  return n > 0 ? fields[0] : NULL;
 }
 
 int sz_view_handle_text(SzView *root, const char *text) {
-  SzView *target = find_text_field(root);
+  SzView *target = sz_view_text_field_target(root);
   if (!target || !target->sig_str)
     return 0;
   sz_signal_str_set(target->sig_str, text ? text : "");
@@ -1246,7 +1235,7 @@ int sz_view_handle_text(SzView *root, const char *text) {
 }
 
 int sz_view_handle_text_edit(SzView *root, const char *text, int backspace) {
-  SzView *target = find_text_field(root);
+  SzView *target = sz_view_text_field_target(root);
   const char *cur;
   size_t n;
   char *buf;

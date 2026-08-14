@@ -288,7 +288,9 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
   SzString *signals;
   SzString *views;
   SzView *buttons[64];
-  int n_buttons, i;
+  SzView *fields[64];
+  SzView *field_target;
+  int n_buttons, n_fields, i;
   if (!path || !path[0])
     return 0;
   f = fopen(path, "w");
@@ -303,6 +305,18 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
   for (i = 0; i < n_buttons; i++) {
     fprintf(f, "%d ", i);
     fputs_dump_label(f, sz_view_a11y_label(buttons[i]));
+    fputc('\n', f);
+  }
+  fprintf(f, "\n[fields]\n");
+  n_fields = (session && session->root)
+                 ? sz_view_collect_text_fields(session->root, fields, 64)
+                 : 0;
+  field_target = (session && session->root)
+                     ? sz_view_text_field_target(session->root)
+                     : NULL;
+  for (i = 0; i < n_fields; i++) {
+    fprintf(f, "%d%s ", i, fields[i] == field_target ? "*" : "");
+    fputs_dump_label(f, sz_view_a11y_label(fields[i]));
     fputc('\n', f);
   }
   fclose(f);

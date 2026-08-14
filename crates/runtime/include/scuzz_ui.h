@@ -207,6 +207,10 @@ float sz_view_scroll_y(const SzView *scroll);
 void sz_view_scroll_by(SzView *scroll, float dy);
 SzView *sz_view_scroll_at(SzView *root, float x, float y);
 int sz_view_has_focused_text_field(SzView *root);
+/* Shown TextFields in a11y preorder (cap 64 for dump / inject). */
+int sz_view_collect_text_fields(SzView *root, SzView **out, int cap);
+/* Focused field, else the first collected field (`text`/`type`/`backspace`). */
+SzView *sz_view_text_field_target(SzView *root);
 /* Caret in the focused TextField from measured text advance (not a cell grid).
  * Empty rect if nothing is focused. `theme` supplies font_px (default theme OK). */
 SzRect sz_view_caret_rect(SzView *root, const SzTheme *theme);
@@ -245,7 +249,9 @@ void sz_ui_session_set_rebuild(SzUiSession *session, SzUiRebuildFn fn, void *env
 int sz_ui_session_watch(SzUiSession *session, const char *path);
 /* Live structural dump (same format as SCUZZ_FUZZ_DUMP) rewritten on dirty
  * pumps, stamp reload, and IO-bridge flushes. Agents read the file.
- * [taps] lists inject indices for `tap N` (scan order, cap 64). */
+ * [taps] lists inject indices for `tap N` (scan order, cap 64).
+ * [fields] lists TextFields in a11y order; `N*` is the text/type/backspace
+ * target (focused, else first). */
 int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
 int sz_ui_session_write_dump(SzUiSession *session, const char *path);
 /* Watch an inject script (tap/text/type/pump/scroll/backspace). Next pump that
