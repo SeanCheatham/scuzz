@@ -78,6 +78,9 @@ jobs:
           grep -q "deferred-ok" /tmp/concurrency.out
           grep -q "fork-ok" /tmp/concurrency.out
           grep -q "interrupted" /tmp/concurrency.out
+          grep -q "repeat-ok" /tmp/concurrency.out
+          grep -q "retry-ok" /tmp/concurrency.out
+          grep -q "forever-stopped" /tmp/concurrency.out
           cargo run -p scuzz -- run examples/resource | tee /tmp/resource.out
           grep -q "use:token" /tmp/resource.out
           grep -q "release:token" /tmp/resource.out

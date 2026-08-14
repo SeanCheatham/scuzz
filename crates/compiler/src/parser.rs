@@ -1228,6 +1228,34 @@ impl Parser {
                             span,
                         ))
                     }
+                    "forever" => {
+                        let args = self.parse_args()?;
+                        if args.len() != 1 {
+                            return Err(self.err("IO.forever expects 1 arg"));
+                        }
+                        let end = args.last().map(|a| a.span.clone()).unwrap_or(start.clone());
+                        Ok(self.mk(
+                            ExprKind::Call {
+                                callee: "IO.forever".into(),
+                                args,
+                            },
+                            start.cover(&end),
+                        ))
+                    }
+                    "repeatN" | "retryN" => {
+                        let args = self.parse_args()?;
+                        if args.len() != 2 {
+                            return Err(self.err(format!("IO.{method} expects 2 args")));
+                        }
+                        let end = args.last().map(|a| a.span.clone()).unwrap_or(start.clone());
+                        Ok(self.mk(
+                            ExprKind::Call {
+                                callee: format!("IO.{method}"),
+                                args,
+                            },
+                            start.cover(&end),
+                        ))
+                    }
                     "race" | "both" | "ensure" => {
                         let args = self.parse_args()?;
                         if args.len() != 2 {
@@ -1421,6 +1449,38 @@ mod tests {
         let p = parse(r#"@main def main: IO[Unit] = IO.println("Hello")"#).unwrap();
         assert_eq!(p.main.name, "main");
         assert!(matches!(p.main.body.kind, ExprKind::IoPrintln(_)));
+    }
+
+    #[test]
+    fn parse_io_forever_repeat_retry_as_calls() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.forever(IO.sleep(1))
+    _ <- IO.repeatN(2, IO.pure("x"))
+    _ <- IO.retryN(1, IO.pure("y"))
+  } yield ()
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::For { binders, .. } => {
+                assert!(matches!(
+                    &binders[0],
+                    ForBinder::Draw { value, .. }
+                        if matches!(&value.kind, ExprKind::Call { callee, .. } if callee == "IO.forever")
+                ));
+                assert!(matches!(
+                    &binders[1],
+                    ForBinder::Draw { value, .. }
+                        if matches!(&value.kind, ExprKind::Call { callee, .. } if callee == "IO.repeatN")
+                ));
+                assert!(matches!(
+                    &binders[2],
+                    ForBinder::Draw { value, .. }
+                        if matches!(&value.kind, ExprKind::Call { callee, .. } if callee == "IO.retryN")
+                ));
+            }
+            other => panic!("expected for, got {other:?}"),
+        }
     }
 
     #[test]

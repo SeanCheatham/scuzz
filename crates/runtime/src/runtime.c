@@ -398,6 +398,33 @@ SzIo *sz_io_timeout(int64_t ms, SzIo *inner) {
   return io;
 }
 
+SzIo *sz_io_forever(SzIo *inner) {
+  if (!inner)
+    sz_panic("sz_io_forever(null)");
+  SzIo *io = sz_io_new(SZ_IO_FOREVER);
+  io->as.loop.inner = inner;
+  io->as.loop.n = 0;
+  return io;
+}
+
+SzIo *sz_io_repeat_n(int64_t n, SzIo *inner) {
+  if (!inner)
+    sz_panic("sz_io_repeat_n(null)");
+  SzIo *io = sz_io_new(SZ_IO_REPEAT_N);
+  io->as.loop.inner = inner;
+  io->as.loop.n = n < 0 ? 0 : n;
+  return io;
+}
+
+SzIo *sz_io_retry_n(int64_t n, SzIo *inner) {
+  if (!inner)
+    sz_panic("sz_io_retry_n(null)");
+  SzIo *io = sz_io_new(SZ_IO_RETRY_N);
+  io->as.loop.inner = inner;
+  io->as.loop.n = n < 0 ? 0 : n;
+  return io;
+}
+
 SzIo *sz_fiber_fork(SzIo *inner) {
   if (!inner)
     sz_panic("sz_fiber_fork(null)");
@@ -450,7 +477,19 @@ SzIo *sz_io_poll_writable(int fd) { return sz_io_poll_fd(fd, POLLOUT); }
 
 /* --- cooperative fiber scheduler (single-threaded, deterministic) -------- */
 
-typedef enum ContKind { CONT_FLATMAP = 1, CONT_HANDLE = 2, CONT_ENSURE = 3 } ContKind;
+typedef enum ContKind {
+  CONT_FLATMAP = 1,
+  CONT_HANDLE = 2,
+  CONT_ENSURE = 3,
+  CONT_LOOP = 4
+} ContKind;
+
+typedef enum LoopKind {
+  LOOP_NONE = 0,
+  LOOP_FOREVER = 1,
+  LOOP_REPEAT = 2,
+  LOOP_RETRY = 3
+} LoopKind;
 
 typedef struct ContFrame {
   ContKind kind;
@@ -458,6 +497,9 @@ typedef struct ContFrame {
   SzErrorHandler handler;
   SzIo *finalizer;
   void *env;
+  LoopKind loop_kind;
+  SzIo *loop_inner;
+  int64_t loop_left;
   struct ContFrame *next;
 } ContFrame;
 
@@ -556,6 +598,9 @@ static ContFrame *cont_push_flatmap(ContFrame *stack, SzCont cont, void *env) {
   f->handler = NULL;
   f->finalizer = NULL;
   f->env = env;
+  f->loop_kind = LOOP_NONE;
+  f->loop_inner = NULL;
+  f->loop_left = 0;
   f->next = stack;
   return f;
 }
@@ -568,6 +613,9 @@ static ContFrame *cont_push_handle(ContFrame *stack, SzErrorHandler handler,
   f->handler = handler;
   f->finalizer = NULL;
   f->env = env;
+  f->loop_kind = LOOP_NONE;
+  f->loop_inner = NULL;
+  f->loop_left = 0;
   f->next = stack;
   return f;
 }
@@ -579,6 +627,24 @@ static ContFrame *cont_push_ensure(ContFrame *stack, SzIo *finalizer) {
   f->handler = NULL;
   f->finalizer = finalizer;
   f->env = NULL;
+  f->loop_kind = LOOP_NONE;
+  f->loop_inner = NULL;
+  f->loop_left = 0;
+  f->next = stack;
+  return f;
+}
+
+static ContFrame *cont_push_loop(ContFrame *stack, LoopKind lk, SzIo *inner,
+                                int64_t left) {
+  ContFrame *f = (ContFrame *)sz_alloc(sizeof(ContFrame));
+  f->kind = CONT_LOOP;
+  f->cont = NULL;
+  f->handler = NULL;
+  f->finalizer = NULL;
+  f->env = NULL;
+  f->loop_kind = lk;
+  f->loop_inner = inner;
+  f->loop_left = left < 0 ? 0 : left;
   f->next = stack;
   return f;
 }
@@ -1100,6 +1166,23 @@ static void fiber_resume_value(Sched *s, Fiber *f, void *value) {
     fiber_finish(s, f, 1, value, NULL);
     return;
   }
+  if (stack->kind == CONT_LOOP) {
+    if (stack->loop_kind == LOOP_FOREVER ||
+        (stack->loop_kind == LOOP_REPEAT && stack->loop_left > 0)) {
+      if (stack->loop_kind == LOOP_REPEAT)
+        stack->loop_left--;
+      f->cur = stack->loop_inner;
+      if (!f->cur) {
+        fiber_finish(s, f, 0, NULL, sz_error_new(5, "loop inner is null"));
+        return;
+      }
+      ready_enqueue(s, f);
+      return;
+    }
+    f->stack = cont_pop(stack);
+    fiber_resume_value(s, f, value);
+    return;
+  }
   if (stack->kind == CONT_ENSURE) {
     SzIo *fin = stack->finalizer;
     f->stack = cont_pop(stack);
@@ -1141,6 +1224,19 @@ static void fiber_fail(Sched *s, Fiber *f, SzError *err) {
       SzIo *fin = stack->finalizer;
       f->stack = cont_pop(stack);
       f->cur = ensure_run_fin_err(fin, err);
+      ready_enqueue(s, f);
+      return;
+    }
+    if (stack->kind == CONT_LOOP && stack->loop_kind == LOOP_RETRY &&
+        stack->loop_left > 0) {
+      stack->loop_left--;
+      if (err)
+        sz_error_free(err);
+      f->cur = stack->loop_inner;
+      if (!f->cur) {
+        fiber_finish(s, f, 0, NULL, sz_error_new(5, "retry inner is null"));
+        return;
+      }
       ready_enqueue(s, f);
       return;
     }
@@ -1316,6 +1412,35 @@ static int step_fiber(Sched *s, Fiber *f) {
     ready_enqueue(s, body);
     return 0;
   }
+  case SZ_IO_FOREVER:
+    f->stack = cont_push_loop(f->stack, LOOP_FOREVER, cur->as.loop.inner, 0);
+    f->cur = cur->as.loop.inner;
+    if (!f->cur) {
+      fiber_finish(s, f, 0, NULL, sz_error_new(5, "forever inner is null"));
+      return 0;
+    }
+    ready_enqueue(s, f);
+    return 0;
+  case SZ_IO_REPEAT_N:
+    f->stack =
+        cont_push_loop(f->stack, LOOP_REPEAT, cur->as.loop.inner, cur->as.loop.n);
+    f->cur = cur->as.loop.inner;
+    if (!f->cur) {
+      fiber_finish(s, f, 0, NULL, sz_error_new(5, "repeatN inner is null"));
+      return 0;
+    }
+    ready_enqueue(s, f);
+    return 0;
+  case SZ_IO_RETRY_N:
+    f->stack =
+        cont_push_loop(f->stack, LOOP_RETRY, cur->as.loop.inner, cur->as.loop.n);
+    f->cur = cur->as.loop.inner;
+    if (!f->cur) {
+      fiber_finish(s, f, 0, NULL, sz_error_new(5, "retryN inner is null"));
+      return 0;
+    }
+    ready_enqueue(s, f);
+    return 0;
   case SZ_IO_FORK: {
     Fiber *child = fiber_new(cur->as.fork_inner, f, JOIN_NONE, 0);
     child->forked = 1;

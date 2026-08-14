@@ -57,6 +57,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_io_both(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_ensure(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_timeout(i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_forever(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_repeat_n(i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_retry_n(i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fiber_fork(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fiber_join(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fiber_interrupt(ptr)").unwrap();
@@ -2655,6 +2658,56 @@ fn emit_call(
             .unwrap();
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "IO.forever" => {
+            let iv = ensure_io(
+                &mut code,
+                emitted_args[0].kind,
+                &emitted_args[0].value,
+                &format!("{prefix}_fio"),
+            );
+            writeln!(code, "  %{prefix}_v = call ptr @sz_io_forever(ptr {iv})").unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "IO.repeatN" => {
+            let n = if emitted_args[0].kind == Kind::Int {
+                emitted_args[0].value.clone()
+            } else {
+                writeln!(code, "  %{prefix}_n0 = add i64 0, 0").unwrap();
+                format!("%{prefix}_n0")
+            };
+            let iv = ensure_io(
+                &mut code,
+                emitted_args[1].kind,
+                &emitted_args[1].value,
+                &format!("{prefix}_rio"),
+            );
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_io_repeat_n(i64 {n}, ptr {iv})"
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), emitted_args[1].payload)
+        }
+        "IO.retryN" => {
+            let n = if emitted_args[0].kind == Kind::Int {
+                emitted_args[0].value.clone()
+            } else {
+                writeln!(code, "  %{prefix}_n0 = add i64 0, 0").unwrap();
+                format!("%{prefix}_n0")
+            };
+            let iv = ensure_io(
+                &mut code,
+                emitted_args[1].kind,
+                &emitted_args[1].value,
+                &format!("{prefix}_tio"),
+            );
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_io_retry_n(i64 {n}, ptr {iv})"
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), emitted_args[1].payload)
+        }
         "Stream.emit" => {
             writeln!(
                 code,
@@ -3214,6 +3267,26 @@ mod tests {
         assert!(ir.contains("sz_lang_resource_make"));
         assert!(ir.contains("sz_lang_resource_use"));
         assert!(ir.contains("sz_rcont_"));
+    }
+
+    #[test]
+    fn emit_io_forever_repeat_retry() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n <- IO.repeatN(2, IO.pure("ok"))
+    _ <- IO.println(n)
+    t <- IO.retryN(1, IO.pure("ok"))
+    _ <- IO.println(t)
+    h <- Fiber.fork(IO.forever(IO.sleep(1)))
+    _ <- Fiber.interrupt(h)
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_io_forever"));
+        assert!(ir.contains("sz_io_repeat_n"));
+        assert!(ir.contains("sz_io_retry_n"));
     }
 
     #[test]

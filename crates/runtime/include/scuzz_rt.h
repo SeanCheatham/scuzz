@@ -118,7 +118,10 @@ typedef enum SzIoTag {
   SZ_IO_TIMEOUT,
   SZ_IO_FORK,
   SZ_IO_JOIN,
-  SZ_IO_INTERRUPT
+  SZ_IO_INTERRUPT,
+  SZ_IO_FOREVER,
+  SZ_IO_REPEAT_N,
+  SZ_IO_RETRY_N
 } SzIoTag;
 
 struct SzIo {
@@ -159,6 +162,10 @@ struct SzIo {
       int64_t ms;
       SzIo *inner;
     } timeout;
+    struct {
+      int64_t n; /* extra repeats / retries; unused for forever */
+      SzIo *inner;
+    } loop;
     SzIo *fork_inner;
     void *fiber; /* SZ_IO_JOIN / SZ_IO_INTERRUPT handle from Fiber.fork */
     SzQueue *queue_take;
@@ -186,6 +193,12 @@ SzIo *sz_io_both(SzIo *left, SzIo *right);
 SzIo *sz_io_ensure(SzIo *inner, SzIo *finalizer);
 /* First-to-settle of sleep(ms) vs inner; timer wins → fail "timeout" and cancel inner. */
 SzIo *sz_io_timeout(int64_t ms, SzIo *inner);
+/* Rerun inner until it fails or the fiber is cancelled. Never succeeds. */
+SzIo *sz_io_forever(SzIo *inner);
+/* Run inner once, then n extra times (n<0 → 0 extra). Last success value. */
+SzIo *sz_io_repeat_n(int64_t n, SzIo *inner);
+/* On failure, retry n extra times (n<0 → 0 extra). Last error if all fail. */
+SzIo *sz_io_retry_n(int64_t n, SzIo *inner);
 /* Fork inner onto the cooperative scheduler; succeeds immediately with a fiber handle. */
 SzIo *sz_fiber_fork(SzIo *inner);
 /* Park until the forked fiber succeeds (value) or fails / is interrupted. */
@@ -201,7 +214,8 @@ SzIo *sz_io_poll_writable(int fd); /* IO[Unit]; park until fd is writable */
 /* Run to completion on the calling thread.
  * Concurrency is cooperative single-threaded fibers: sleep/Queue/Deferred/poll
  * park (Net, Sys.readLine, Sys.exec, httpGet DNS). race/both fork left-then-right onto a
- * ready queue. Fiber.fork starts a supervised child (join parks; interrupt cancels;
+ * ready queue. forever/repeatN/retryN rerun the same inner tree (yield each iteration).
+ * Fiber.fork starts a supervised child (join parks; interrupt cancels;
  * unjoined children are cancelled when the root fiber completes). Live / default: FIFO pick. When SCUZZ_SCHED_SEED is set (fuzz),
  * ready-fiber pick among n>1 is seed-driven (Lehmer/MINSTD). TestRuntime jumps
  * virtual time to the next wakeup when all fibers are blocked on timers. Live

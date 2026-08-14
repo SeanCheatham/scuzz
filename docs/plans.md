@@ -2,4 +2,4 @@
 
 ## Next
 
-**`forever` / `repeatN` / `retryN`** — looping combinators on cooperative `IO` / `Fiber`.
+**Built-in mutation testing** — first-class `scuzz` mutation surface over residual oracles (IR-level, not source rewriting). Surviving mutants mean weak laws/refinements.

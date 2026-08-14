@@ -661,6 +661,26 @@ record Point(x: Int, y: Int)
     }
 
     #[test]
+    fn formats_io_forever_repeat_retry_roundtrip() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n <- IO.repeatN(2, IO.pure("ok"))
+    t <- IO.retryN(1, IO.pure("ok"))
+    h <- Fiber.fork(IO.forever(IO.sleep(1)))
+    _ <- Fiber.interrupt(h)
+    _ <- IO.println(n)
+    _ <- IO.println(t)
+  } yield ()
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("IO.repeatN("));
+        assert!(out.contains("IO.retryN("));
+        assert!(out.contains("IO.forever("));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
     fn formats_resource_roundtrip() {
         let src = r#"@main def main: IO[Unit] =
   for {

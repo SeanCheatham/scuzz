@@ -1495,6 +1495,21 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
+        "IO.forever" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            if !matches!(arg_tys[0], Type::Io(_)) {
+                return Err(TypeError::Msg("IO.forever argument must be IO[_]".into()));
+            }
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
+        "IO.repeatN" | "IO.retryN" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            let Type::Io(inner_ty) = arg_tys[1].clone() else {
+                return Err(TypeError::Msg(format!("{callee} inner must be IO[_]")));
+            };
+            Ok(Type::Io(inner_ty))
+        }
         "Resource.make" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::Io(Box::new(Type::String)))?;
@@ -4155,6 +4170,23 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Fiber.fork/join/interrupt should typecheck");
+    }
+
+    #[test]
+    fn typechecks_io_forever_repeat_retry() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n <- IO.repeatN(2, IO.pure("repeat-ok"))
+    _ <- IO.println(n)
+    t <- IO.retryN(1, IO.pure("retry-ok"))
+    _ <- IO.println(t)
+    h <- Fiber.fork(IO.forever(IO.sleep(50)))
+    _ <- Fiber.interrupt(h)
+    _ <- Fiber.join(h).handleErrorWith(_ => IO.println("forever-stopped"))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("IO.forever/repeatN/retryN should typecheck");
     }
 
     #[test]

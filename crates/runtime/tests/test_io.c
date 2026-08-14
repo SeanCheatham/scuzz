@@ -281,6 +281,26 @@ static SzIo *fiber_interrupt_then_join(void *fiber, void *env) {
   return sz_io_flatmap(sz_fiber_interrupt(fiber), fiber_join_recover, fiber);
 }
 
+static int retry_hits = 0;
+static void *retry_count(void *env) {
+  (void)env;
+  retry_hits++;
+  return (void *)(intptr_t)retry_hits;
+}
+
+static SzIo *retry_until_3(void *value, void *env) {
+  (void)env;
+  if ((intptr_t)value < 3)
+    return sz_io_fail_cstr("not-yet");
+  return sz_io_pure(value);
+}
+
+static SzIo *always_fail_cont(void *value, void *env) {
+  (void)value;
+  (void)env;
+  return sz_io_fail_cstr("always");
+}
+
 static SzIo *after_sleep_tag(void *value, void *env) {
   (void)value;
   return sz_io_pure(env);
@@ -410,6 +430,84 @@ int main(void) {
     assert(r.error && strstr(sz_string_cstr(r.error->message), "timeout") != NULL);
     assert(lang_released == 1);
     sz_error_free(r.error);
+    sz_lang_resource_free(lr);
+    sz_testrt_reset();
+  }
+
+  /* IO.repeatN: n extra runs after the first; last value wins. */
+  delay_calls = 0;
+  r = sz_io_unsafe_run(sz_io_repeat_n(2, sz_io_delay(delay_inc, NULL)));
+  assert(r.ok);
+  assert((intptr_t)r.value == 42);
+  assert(delay_calls == 3);
+
+  delay_calls = 0;
+  r = sz_io_unsafe_run(sz_io_repeat_n(0, sz_io_delay(delay_inc, NULL)));
+  assert(r.ok);
+  assert(delay_calls == 1);
+
+  delay_calls = 0;
+  r = sz_io_unsafe_run(sz_io_repeat_n(-3, sz_io_delay(delay_inc, NULL)));
+  assert(r.ok);
+  assert(delay_calls == 1);
+
+  delay_calls = 0;
+  r = sz_io_unsafe_run(sz_io_repeat_n(5, sz_io_fail_cstr("boom")));
+  assert(!r.ok);
+  assert(delay_calls == 0);
+  assert(r.error && strstr(sz_string_cstr(r.error->message), "boom") != NULL);
+  sz_error_free(r.error);
+
+  /* IO.retryN: extra retries on failure; last success / last error. */
+  retry_hits = 0;
+  r = sz_io_unsafe_run(sz_io_retry_n(
+      5, sz_io_flatmap(sz_io_delay(retry_count, NULL), retry_until_3, NULL)));
+  assert(r.ok);
+  assert((intptr_t)r.value == 3);
+  assert(retry_hits == 3);
+
+  retry_hits = 0;
+  r = sz_io_unsafe_run(sz_io_retry_n(
+      1, sz_io_flatmap(sz_io_delay(retry_count, NULL), always_fail_cont, NULL)));
+  assert(!r.ok);
+  assert(retry_hits == 2);
+  assert(r.error && strstr(sz_string_cstr(r.error->message), "always") != NULL);
+  sz_error_free(r.error);
+
+  retry_hits = 0;
+  r = sz_io_unsafe_run(sz_io_retry_n(
+      0, sz_io_flatmap(sz_io_delay(retry_count, NULL), always_fail_cont, NULL)));
+  assert(!r.ok);
+  assert(retry_hits == 1);
+  sz_error_free(r.error);
+
+  retry_hits = 0;
+  r = sz_io_unsafe_run(sz_io_retry_n(2, sz_io_pure((void *)(intptr_t)9)));
+  assert(r.ok);
+  assert((intptr_t)r.value == 9);
+  assert(retry_hits == 0);
+
+  /* IO.forever: race loser when a sibling sleeper wins (TestRuntime). */
+  {
+    sz_testrt_install();
+    r = sz_io_unsafe_run(
+        sz_io_race(sz_io_forever(sz_io_sleep_ms(1)), sz_io_sleep_ms(5)));
+    assert(r.ok);
+    sz_testrt_reset();
+  }
+
+  /* IO.forever cancelled via Fiber.interrupt; Resource release still runs. */
+  {
+    sz_testrt_install();
+    lang_released = 0;
+    lr = sz_lang_resource_make(sz_io_pure(sz_string_from_cstr("tok")),
+                               lang_release, NULL);
+    r = sz_io_unsafe_run(sz_io_flatmap(
+        sz_fiber_fork(sz_io_forever(
+            sz_lang_resource_use(lr, lang_use_sleep, NULL))),
+        fiber_interrupt_then_join, NULL));
+    assert(r.ok);
+    assert(lang_released == 1);
     sz_lang_resource_free(lr);
     sz_testrt_reset();
   }
