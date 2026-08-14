@@ -126,6 +126,9 @@ SzView *sz_lang_view_font_size(int64_t n, SzView *child) {
 SzView *sz_lang_view_border(int64_t n, int64_t argb, SzView *child) {
   return sz_view_border((int)n, (uint32_t)argb, child);
 }
+SzView *sz_lang_view_radius(int64_t n, SzView *child) {
+  return sz_view_radius((int)n, child);
+}
 SzView *sz_lang_view_background(int64_t argb, SzView *child) {
   return sz_view_background((uint32_t)argb, child);
 }

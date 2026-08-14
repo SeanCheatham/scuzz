@@ -321,6 +321,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.border",
         "View.border(n: Int, color: Int, child: View): View",
     ),
+    ("View.radius", "View.radius(n: Int, child: View): View"),
     ("Color.rgb", "Color.rgb(r: Int, g: Int, b: Int): Int"),
     (
         "Color.rgba",
@@ -437,6 +438,7 @@ mod tests {
                 "View.border",
                 "View.border(2, Color.rgb(255, 0, 0), View.text(\"x\"))",
             ),
+            ("View.radius", "View.radius(8, View.text(\"x\"))"),
             ("View.ignorePointer", "View.ignorePointer(View.text(\"x\"))"),
             ("View.absorbPointer", "View.absorbPointer(View.text(\"x\"))"),
             (

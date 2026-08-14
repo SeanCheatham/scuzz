@@ -154,7 +154,8 @@ typedef enum SzViewKind {
   SZ_VIEW_TEXT_COLOR, /* pass constraints; paint View.text with this ARGB */
   SZ_VIEW_GAP, /* pass constraints; Column/Row/List child spacing in px */
   SZ_VIEW_FONT_SIZE, /* pass constraints; View.text measure/paint size in px */
-  SZ_VIEW_BORDER /* pass constraints; paint n px stroke in color inside the frame */
+  SZ_VIEW_BORDER, /* pass constraints; paint n px stroke in color inside the frame */
+  SZ_VIEW_RADIUS /* pass constraints; clip paint to a rounded rect of n px */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -219,6 +220,8 @@ SzView *sz_view_gap(int n, SzView *child);
 SzView *sz_view_font_size(int n, SzView *child);
 /* Pass constraints through; size to child; paint `n` px `argb` stroke inside the frame. */
 SzView *sz_view_border(int n, uint32_t argb, SzView *child);
+/* Pass constraints through; size to child; clip paint to a rounded rect of `n` px (`0` = square). */
+SzView *sz_view_radius(int n, SzView *child);
 /* Pass constraints through; size to child; paint `argb` behind the child. */
 SzView *sz_view_background(uint32_t argb, SzView *child);
 /* Largest rw:rh box that fits incoming max; child laid out in that tight slot. */
@@ -376,6 +379,7 @@ SzView *sz_lang_view_text_color(int64_t argb, SzView *child);
 SzView *sz_lang_view_gap(int64_t n, SzView *child);
 SzView *sz_lang_view_font_size(int64_t n, SzView *child);
 SzView *sz_lang_view_border(int64_t n, int64_t argb, SzView *child);
+SzView *sz_lang_view_radius(int64_t n, SzView *child);
 SzView *sz_lang_view_background(int64_t argb, SzView *child);
 SzView *sz_lang_view_aspect_ratio(int64_t rw, int64_t rh, SzView *child);
 SzView *sz_lang_view_fraction(int64_t wpct, int64_t hpct, SzView *child);

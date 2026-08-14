@@ -270,6 +270,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_radius_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.ra\n";
+        let labels = labels_at(src, "View.ra");
+        assert!(labels.iter().any(|l| l == "View.radius"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_kit_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.\n";
         let labels = labels_at(src, "View.");

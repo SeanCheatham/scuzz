@@ -2,6 +2,7 @@
 
 #include "sk_capi.h"
 
+#include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
@@ -109,7 +110,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_IGNORE_POINTER || kind == SZ_VIEW_ABSORB_POINTER ||
          kind == SZ_VIEW_EXCLUDE_SEMANTICS || kind == SZ_VIEW_ELLIPSIS ||
          kind == SZ_VIEW_TEXT_COLOR || kind == SZ_VIEW_GAP ||
-         kind == SZ_VIEW_FONT_SIZE || kind == SZ_VIEW_BORDER;
+         kind == SZ_VIEW_FONT_SIZE || kind == SZ_VIEW_BORDER ||
+         kind == SZ_VIEW_RADIUS;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -495,6 +497,14 @@ SzView *sz_view_border(int n, uint32_t argb, SzView *child) {
   SzView *v = view_new(SZ_VIEW_BORDER);
   v->img_w = n > 0 ? n : 0;
   v->bg_argb = argb;
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
+SzView *sz_view_radius(int n, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_RADIUS);
+  v->img_w = n > 0 ? n : 0;
   if (child)
     sz_view_add_child(v, child);
   return v;
@@ -1372,6 +1382,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_EXCLUDE_SEMANTICS:
   case SZ_VIEW_TEXT_COLOR:
   case SZ_VIEW_BORDER:
+  case SZ_VIEW_RADIUS:
     layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     break;
   case SZ_VIEW_MAX_LINES: {
@@ -1539,6 +1550,9 @@ static SzRect g_clip;
 static int g_opacity = 100;
 static int g_text_color_on;
 static uint32_t g_text_argb;
+static int g_radius_on;
+static float g_radius;
+static SzRect g_radius_rect;
 
 static uint32_t apply_paint_alpha(uint32_t argb) {
   uint32_t a;
@@ -1571,6 +1585,48 @@ static int rects_intersect(SzRect a, SzRect b, SzRect *out) {
   return 1;
 }
 
+static float clamp_radius(float r, float w, float h) {
+  if (r < 0.f)
+    r = 0.f;
+  if (r * 2.f > w)
+    r = w * 0.5f;
+  if (r * 2.f > h)
+    r = h * 0.5f;
+  return r;
+}
+
+/* Horizontal span of the radius clip at row `y`. */
+static int rrect_x_span(SzRect r, float radius, float y, float *x0, float *x1) {
+  float rr, dy, dx, inside, cy;
+  if (y < r.y || y >= r.y + r.h)
+    return 0;
+  rr = clamp_radius(radius, r.w, r.h);
+  *x0 = r.x;
+  *x1 = r.x + r.w;
+  if (rr < 0.5f)
+    return 1;
+  if (y + 1.f <= r.y + rr) {
+    cy = r.y + rr;
+    dy = cy - (y + 0.5f);
+    inside = rr * rr - dy * dy;
+    if (inside < 0.f)
+      inside = 0.f;
+    dx = sqrtf(inside);
+    *x0 = r.x + rr - dx;
+    *x1 = r.x + r.w - rr + dx;
+  } else if (y >= r.y + r.h - rr) {
+    cy = r.y + r.h - rr;
+    dy = (y + 0.5f) - cy;
+    inside = rr * rr - dy * dy;
+    if (inside < 0.f)
+      inside = 0.f;
+    dx = sqrtf(inside);
+    *x0 = r.x + rr - dx;
+    *x1 = r.x + r.w - rr + dx;
+  }
+  return 1;
+}
+
 static void paint_rect(SkCanvas *c, float x, float y, float w, float h,
                        uint32_t argb) {
   SzRect req, cut;
@@ -1588,12 +1644,32 @@ static void paint_rect(SkCanvas *c, float x, float y, float w, float h,
     y = cut.y;
     w = cut.w;
     h = cut.h;
+  } else {
+    cut = req;
   }
   p = sk_paint_new();
   if (!p)
     return;
   sk_paint_set_color(p, sk_color_argb(apply_paint_alpha(argb)));
-  sk_canvas_draw_rect(c, x, y, w, h, p);
+  if (g_radius_on && g_radius >= 0.5f) {
+    float row = cut.y;
+    float y1 = cut.y + cut.h;
+    while (row < y1) {
+      float row_h = 1.f;
+      float rx0, rx1, sx, sw;
+      if (row + row_h > y1)
+        row_h = y1 - row;
+      if (rrect_x_span(g_radius_rect, g_radius, row, &rx0, &rx1)) {
+        sx = cut.x > rx0 ? cut.x : rx0;
+        sw = (cut.x + cut.w < rx1 ? cut.x + cut.w : rx1) - sx;
+        if (sw > 0.f)
+          sk_canvas_draw_rect(c, sx, row, sw, row_h, p);
+      }
+      row += row_h;
+    }
+  } else {
+    sk_canvas_draw_rect(c, x, y, w, h, p);
+  }
   sk_paint_delete(p);
 }
 
@@ -1783,6 +1859,19 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       paint_node(v->children[i], c, theme);
     paint_border(c, v->frame, v->img_w, v->bg_argb);
     break;
+  case SZ_VIEW_RADIUS: {
+    int prev_on = g_radius_on;
+    float prev_r = g_radius;
+    SzRect prev_rect = g_radius_rect;
+    g_radius_on = 1;
+    g_radius = (float)v->img_w;
+    g_radius_rect = v->frame;
+    paint_children_clipped(v, c, theme);
+    g_radius_on = prev_on;
+    g_radius = prev_r;
+    g_radius_rect = prev_rect;
+    break;
+  }
   case SZ_VIEW_IMAGE:
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, v->bg_argb);
     if (v->text && v->text[0])
@@ -1885,6 +1974,7 @@ int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
   g_clip_on = 0;
   g_opacity = 100;
   g_text_color_on = 0;
+  g_radius_on = 0;
   sk_canvas_clear(canvas, sk_color_argb(theme->background));
   sz_view_layout(root, (float)width, (float)height, theme);
   paint_node(root, canvas, theme);

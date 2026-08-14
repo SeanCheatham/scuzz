@@ -2995,6 +2995,188 @@ static void test_border_does_not_grow_button(void) {
   sz_view_free(wrap);
 }
 
+static SzView *radius_green_box(int r) {
+  return sz_view_radius(
+      r, sz_view_background(0xFF00AA00u, sz_view_sized(40, 40, sz_view_text("x"))));
+}
+
+static void test_radius_sizes_to_child(void) {
+  SzView *wrap, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect wf, chf;
+
+  child = sz_view_sized(40, 30, sz_view_text("Hi"));
+  wrap = sz_view_radius(8, child);
+  sz_view_layout(wrap, 200.f, 200.f, theme);
+  assert(sz_view_kind(wrap) == SZ_VIEW_RADIUS);
+  wf = sz_view_frame(wrap);
+  chf = sz_view_frame(child);
+  assert(fabsf(wf.w - 40.f) < 0.5f);
+  assert(fabsf(wf.h - 30.f) < 0.5f);
+  assert(fabsf(chf.w - 40.f) < 0.5f);
+  assert(fabsf(chf.h - 30.f) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_radius_keeps_a11y(void) {
+  SzView *wrap;
+  SzString *dump;
+
+  wrap = sz_view_radius(8, sz_view_text("hi"));
+  dump = sz_view_a11y_dump(wrap);
+  assert(strstr(sz_string_cstr(dump), "text:hi") != NULL);
+  sz_string_free(dump);
+  sz_view_free(wrap);
+}
+
+static void test_radius_zero_fills_corners(void) {
+  SzView *root;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+
+  root = radius_green_box(0);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, 0, 0, 0x00, 0xAA, 0x00));
+  assert(px_rgb(px, 80, 20, 20, 0x00, 0xAA, 0x00));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
+static void test_negative_radius_is_zero(void) {
+  SzView *root;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+
+  root = radius_green_box(-4);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, 0, 0, 0x00, 0xAA, 0x00));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
+static void test_radius_clips_corners(void) {
+  SzView *root;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+
+  root = radius_green_box(12);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, 0, 0, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 39, 0, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 0, 39, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 20, 20, 0x00, 0xAA, 0x00));
+  assert(px_rgb(px, 80, 1, 20, 0x00, 0xAA, 0x00));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
+static void test_nested_radius_inner_wins(void) {
+  SzView *root;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+
+  root = sz_view_radius(20, radius_green_box(8));
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, 0, 0, 0xF5, 0xF5, 0xF5));
+  /* Inside r=8, outside r=20. Inner radius must win. */
+  assert(px_rgb(px, 80, 12, 1, 0x00, 0xAA, 0x00));
+  assert(px_rgb(px, 80, 20, 20, 0x00, 0xAA, 0x00));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
+static void test_radius_clips_border_corners(void) {
+  SzView *root;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+
+  root = sz_view_radius(
+      12, sz_view_border(4, 0xFFFF0000u,
+                         sz_view_background(0xFF00AA00u,
+                                            sz_view_sized(40, 40, sz_view_text("x")))));
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, 0, 0, 0xF5, 0xF5, 0xF5));
+  assert(px_rgb(px, 80, 0, 20, 0xFF, 0x00, 0x00));
+  assert(px_rgb(px, 80, 20, 20, 0x00, 0xAA, 0x00));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
+static void test_radius_hit_test_reaches_child(void) {
+  SzView *wrap, *hit;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  wrap = sz_view_radius(8, sz_view_button("Go", NULL, NULL));
+  sz_view_layout(wrap, 200.f, 200.f, theme);
+  f = sz_view_frame(wrap);
+  hit = sz_view_hit_test(wrap, f.x + f.w * 0.5f, f.y + f.h * 0.5f);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_BUTTON);
+  sz_view_free(wrap);
+}
+
+static void test_radius_does_not_grow_button(void) {
+  SzView *wrap, *b;
+  const SzTheme *theme = sz_theme_default();
+  float btn_h;
+
+  b = sz_view_button("Go", NULL, NULL);
+  sz_view_layout(b, 200.f, 200.f, theme);
+  btn_h = sz_view_frame(b).h;
+  sz_view_free(b);
+
+  wrap = sz_view_radius(8, sz_view_button("Go", NULL, NULL));
+  sz_view_layout(wrap, 200.f, 200.f, theme);
+  assert(fabsf(sz_view_frame(wrap).h - btn_h) < 0.5f);
+  assert(fabsf(btn_h - theme->control_h) < 0.5f);
+  sz_view_free(wrap);
+}
+
 static void test_ignore_pointer_sizes_to_child(void) {
   SzView *wrap, *child;
   const SzTheme *theme = sz_theme_default();
@@ -3959,6 +4141,15 @@ int main(void) {
   test_thick_border_fills_small_frame();
   test_border_hit_test_reaches_child();
   test_border_does_not_grow_button();
+  test_radius_sizes_to_child();
+  test_radius_keeps_a11y();
+  test_radius_zero_fills_corners();
+  test_negative_radius_is_zero();
+  test_radius_clips_corners();
+  test_nested_radius_inner_wins();
+  test_radius_clips_border_corners();
+  test_radius_hit_test_reaches_child();
+  test_radius_does_not_grow_button();
   test_ignore_pointer_sizes_to_child();
   test_ignore_pointer_passes_tap_through();
   test_absorb_pointer_blocks_tap();

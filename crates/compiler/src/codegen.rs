@@ -165,6 +165,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_gap(i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_font_size(i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_border(i64, i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_radius(i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_ignore_pointer(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_absorb_pointer(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_exclude_semantics(ptr)").unwrap();
@@ -3323,6 +3324,15 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "View.radius" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_view_radius(i64 {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "View.ignorePointer" => {
             writeln!(
                 code,
@@ -3759,6 +3769,7 @@ law always: Bool = 1 == 1
                 "View.border(2, Color.rgb(255, 0, 0), View.text(\"x\"))",
                 "sz_lang_view_border",
             ),
+            ("View.radius(8, View.text(\"x\"))", "sz_lang_view_radius"),
             (
                 "View.ignorePointer(View.text(\"x\"))",
                 "sz_lang_view_ignore_pointer",
