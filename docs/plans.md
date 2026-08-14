@@ -2,4 +2,4 @@
 
 ## Next
 
-**Richer `scuzz mutate`** — negate of residual `Law.check` / `Law.assert` is in (idle TestRuntime probe, `--limit N`). Remaining: more IR operators, and per-mutant fuzz scripts/schedules so tap-path oracles are exercised.
+**More `scuzz mutate` operators** — idle probe + per-mutant fuzz (`--iters` / `--seed`) and negate of residual `Law.check` / `Law.assert` / `.require` are in. Remaining: IR operators beyond predicate negate.

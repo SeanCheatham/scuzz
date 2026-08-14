@@ -17,4 +17,4 @@ cargo run -p scuzz -- build --full compiler-scuzz
 # Push a v* tag to publish GitHub Release assets; curl …/install.sh | sh to install
 ```
 
-CLI: `scuzz (build|run|test|check|fuzz|mutate|fmt|watch|new|package) [args]` (writes `project/build/`). `scuzz --help` / `scuzz <command> --help` for flags and examples. `watch` rebuilds on change (not hot reload). `fuzz` and `mutate` live here (not Stage 0): seeded `--iters` / `--exhaust --depth N` / `--replay`, and residual-oracle `--limit N` probes. Stage-0 Rust remains bootstrap only.
+CLI: `scuzz (build|run|test|check|fuzz|mutate|fmt|watch|new|package) [args]` (writes `project/build/`). `scuzz --help` / `scuzz <command> --help` for flags and examples. `watch` rebuilds on change (not hot reload). `fuzz` and `mutate` live here (not Stage 0): seeded `--iters` / `--exhaust --depth N` / `--replay`, and residual-oracle `--limit N` plus per-mutant `--iters` probes. Stage-0 Rust remains bootstrap only.

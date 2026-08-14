@@ -4,7 +4,8 @@
 # examples/record + examples/trait + examples/generic, pass the Headless goldens
 # (counter/todo/nav), smoke fuzz on examples/todo, smoke fuzz --exhaust --depth 1
 # on examples/counter, smoke IO-only fuzz on examples/concurrency, smoke mutate
-# on examples/hello (no residual oracles) and examples/record --limit 1 (kill), smoke
+# on examples/hello (no residual oracles), examples/record --limit 1 (kill), and
+# examples/counter --limit 1 --iters 0 (.require kill), smoke
 # examples/resource + examples/stream + examples/server, and agree with Stage 0 on fmt --check for the compiler
 # sources. Stage 2 must re-emit byte-identical compiler IR.
 # Fail loudly: every stage must succeed; no masked exit codes.
@@ -85,6 +86,11 @@ stage_checks() {
   mutate_kill="$("$bin" mutate examples/record --limit 1)"
   echo "$mutate_kill"
   echo "$mutate_kill" | grep -q "scuzz mutate ok"
+
+  echo "==> $stage mutate kill smoke (examples/counter --limit 1 --iters 0)"
+  mutate_ui="$("$bin" mutate examples/counter --limit 1 --iters 0)"
+  echo "$mutate_ui"
+  echo "$mutate_ui" | grep -q "scuzz mutate ok"
 
   echo "==> $stage runs examples/resource"
   resource_out="$("$bin" run examples/resource)"

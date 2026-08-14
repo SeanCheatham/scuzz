@@ -136,10 +136,26 @@ def mutateInterp(parts: List, span: Span, target: Int, seen: Int): List =
   } yield mPack(Expr.Interp(mList(a), span), mSeen(a))
 
 def mutateMethod(receiver: Expr, method: String, args: List, span: Span, target: Int, seen: Int): List =
+  if (streq(method, "require") == 1) mutateRequire(receiver, args, span, target, seen) else mutateMethodPlain(receiver, method, args, span, target, seen)
+
+def mutateMethodPlain(receiver: Expr, method: String, args: List, span: Span, target: Int, seen: Int): List =
   for {
     r = mutateExpr(receiver, target, seen)
     a = mutateExprList(args, target, mSeen(r), List.empty())
   } yield mPack(Expr.MethodCall(mExpr(r), method, mList(a), span), mSeen(a))
+
+def requirePredIndex(args: List): Int =
+  if (List.isEmpty(splitRequireArgs(args)) == 1) 0 - 1 else if (List.len(args) == 1) 0 else 1
+
+def mutateRequire(receiver: Expr, args: List, span: Span, target: Int, seen: Int): List =
+  if (requirePredIndex(args) < 0) mutateMethodPlain(receiver, "require", args, span, target, seen) else mutateRequireHit(receiver, args, span, target, seen, requirePredIndex(args))
+
+def mutateRequireHit(receiver: Expr, args: List, span: Span, target: Int, seen: Int, predIdx: Int): List =
+  for {
+    args2 = if (seen == target) listSetAt(args, predIdx, negatePred(List.at(args, predIdx))) else args
+    r = mutateExpr(receiver, target, seen + 1)
+    a = mutateExprList(args2, target, mSeen(r), List.empty())
+  } yield mPack(Expr.MethodCall(mExpr(r), "require", mList(a), span), mSeen(a))
 
 def mutateField(base: Expr, field: String, span: Span, target: Int, seen: Int): List =
   for {
@@ -236,45 +252,45 @@ def minInt(a: Int, b: Int): Int =
   if (a < b) a else b
 
 def isMutateValueFlag(s: String): Int =
-  if (streq(s, "--limit") == 1) 1 else 0
+  if (streq(s, "--limit") == 1) 1 else if (streq(s, "--iters") == 1) 1 else if (streq(s, "--seed") == 1) 1 else 0
 
 def mutateProjectArg(args: List, i: Int): String =
   if (i >= List.len(args)) "." else if (isMutateValueFlag(List.at(args, i)) == 1) mutateProjectArg(args, i + 2) else if (isFlag(List.at(args, i)) == 1) mutateProjectArg(args, i + 1) else List.at(args, i)
 
 def cmdMutateArgs(args: List): IO[Unit] =
-  cmdMutateLimit(mutateProjectArg(args, 1), parseInt(argValueAt(args, "--limit", "16", 0)))
+  cmdMutateValidated(mutateProjectArg(args, 1), parseInt(argValueAt(args, "--limit", "16", 0)), parseInt(argValueAt(args, "--iters", "4", 0)), parseInt(argValueAt(args, "--seed", "42", 0)))
 
-def cmdMutateLimit(projectDir: String, limit: Int): IO[Unit] =
-  if (limit <= 0) IO.fail("mutate --limit N requires N > 0") else cmdMutate(projectDir, limit)
+def cmdMutateValidated(projectDir: String, limit: Int, iters: Int, seed: Int): IO[Unit] =
+  if (limit <= 0) IO.fail("mutate --limit N requires N > 0") else if (iters < 0) IO.fail("mutate --iters N requires N >= 0") else cmdMutate(projectDir, limit, iters, seed)
 
-def cmdMutate(projectDir: String, limit: Int): IO[Unit] =
+def cmdMutate(projectDir: String, limit: Int, iters: Int, seed: Int): IO[Unit] =
   Sys.getenv("SCUZZ_RUNTIME").flatMap(rtEnv =>
     resolveRuntimeEnv(rtEnv, projectDir).flatMap(runtimeDir =>
       Sys.getenv("SCUZZ_CLANG").flatMap(clangEnv =>
-        Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml => cmdMutateToml(projectDir, limit, runtimeDir, clangOrDefault(clangEnv), toml))
+        Fs.read(pathJoin(projectDir, "scuzz.toml")).flatMap(toml => cmdMutateToml(projectDir, limit, iters, seed, runtimeDir, clangOrDefault(clangEnv), toml))
       )
     )
   )
 
-def cmdMutateToml(projectDir: String, limit: Int, runtimeDir: String, clang: String, toml: String): IO[Unit] =
+def cmdMutateToml(projectDir: String, limit: Int, iters: Int, seed: Int, runtimeDir: String, clang: String, toml: String): IO[Unit] =
   loadGraphBundle(projectDir, toml).flatMap(bundle =>
     mergeSources(List.head(bundle), emptyProg(), 0).flatMap(prog0 =>
-      prepareVerifyProg(prog0, List.head(List.tail(bundle))).flatMap(prog1 => cmdMutateProg(projectDir, limit, runtimeDir, clang, toml, prog1, List.head(List.tail(bundle))))
+      prepareVerifyProg(prog0, List.head(List.tail(bundle))).flatMap(prog1 => cmdMutateProg(projectDir, limit, iters, seed, runtimeDir, clang, toml, prog1, List.head(List.tail(bundle))))
     )
   )
 
-def cmdMutateProg(projectDir: String, limit: Int, runtimeDir: String, clang: String, toml: String, prog: Prog, overlays: List): IO[Unit] =
+def cmdMutateProg(projectDir: String, limit: Int, iters: Int, seed: Int, runtimeDir: String, clang: String, toml: String, prog: Prog, overlays: List): IO[Unit] =
   for {
     n = mutateCount(prog)
-  } yield if (n == 0) IO.println("scuzz mutate: no residual Law.check / Law.assert sites") else cmdMutateSites(projectDir, minInt(n, limit), n, runtimeDir, clang, toml, prog, overlays)
+  } yield if (n == 0) IO.println("scuzz mutate: no residual Law.check / Law.assert / .require sites") else cmdMutateSites(projectDir, minInt(n, limit), n, iters, seed, runtimeDir, clang, toml, prog, overlays)
 
-def cmdMutateSites(projectDir: String, take: Int, total: Int, runtimeDir: String, clang: String, toml: String, prog: Prog, overlays: List): IO[Unit] =
-  IO.println(str5("scuzz mutate: ", Str.fromInt(take), " of ", Str.fromInt(total), " residual oracle sites (negate Law.check / Law.assert)")).flatMap(_ => mutateLoop(projectDir, take, runtimeDir, clang, toml, prog, overlays, 0, 0, 0))
+def cmdMutateSites(projectDir: String, take: Int, total: Int, iters: Int, seed: Int, runtimeDir: String, clang: String, toml: String, prog: Prog, overlays: List): IO[Unit] =
+  IO.println(str6("scuzz mutate: ", Str.fromInt(take), " of ", Str.fromInt(total), " residual oracle sites; idle probe + ", str3(Str.fromInt(iters), " fuzz iters", ""))).flatMap(_ => mutateLoop(projectDir, take, iters, seed, runtimeDir, clang, toml, prog, overlays, 0, 0, 0))
 
-def mutateLoop(projectDir: String, take: Int, runtimeDir: String, clang: String, toml: String, prog: Prog, overlays: List, i: Int, killed: Int, survived: Int): IO[Unit] =
-  if (i >= take) mutateFinish(killed, survived, take) else mutateOne(projectDir, take, runtimeDir, clang, toml, prog, overlays, i, killed, survived)
+def mutateLoop(projectDir: String, take: Int, iters: Int, seed: Int, runtimeDir: String, clang: String, toml: String, prog: Prog, overlays: List, i: Int, killed: Int, survived: Int): IO[Unit] =
+  if (i >= take) mutateFinish(killed, survived, take, iters) else mutateOne(projectDir, take, iters, seed, runtimeDir, clang, toml, prog, overlays, i, killed, survived)
 
-def mutateOne(projectDir: String, take: Int, runtimeDir: String, clang: String, toml: String, prog: Prog, overlays: List, i: Int, killed: Int, survived: Int): IO[Unit] =
+def mutateOne(projectDir: String, take: Int, iters: Int, seed: Int, runtimeDir: String, clang: String, toml: String, prog: Prog, overlays: List, i: Int, killed: Int, survived: Int): IO[Unit] =
   for {
     name = readTomlName(toml)
     withUi = hasUiSection(toml)
@@ -284,28 +300,57 @@ def mutateOne(projectDir: String, take: Int, runtimeDir: String, clang: String, 
     w = readTomlHeadlessW(toml)
     h = readTomlHeadlessH(toml)
   } yield compilePrepared(projectDir, outDir, 1, runtimeDir, clang, name, withUi, mutant, overlays).flatMap(_ =>
-  mutateExec(exe, outDir, withUi, w, h).flatMap(code => mutateAfterRun(projectDir, take, runtimeDir, clang, toml, prog, overlays, i, killed, survived, code))
+  mutateExec(exe, outDir, withUi, w, h, i, iters, seed).flatMap(code => mutateAfterRun(projectDir, take, iters, seed, runtimeDir, clang, toml, prog, overlays, i, killed, survived, code))
 )
 
-def mutateExec(exe: String, outDir: String, withUi: Int, w: String, h: String): IO[Int] =
-  if (withUi == 1) mutateExecUi(exe, outDir, w, h) else mutateExecIo(exe, outDir)
+def mutateIterSeed(seed: Int, mutantIndex: Int, iter: Int): Int =
+  seed + mutantIndex * 32 + iter
 
-def mutateExecUi(exe: String, outDir: String, w: String, h: String): IO[Int] =
-  Fs.write(pathJoin(outDir, "script.txt"), "\n").flatMap(_ =>
+def mutateExec(exe: String, outDir: String, withUi: Int, w: String, h: String, mutantIndex: Int, iters: Int, seed: Int): IO[Int] =
+  if (withUi == 1) mutateExecUi(exe, outDir, w, h, mutantIndex, iters, seed) else mutateExecIo(exe, outDir, mutantIndex, iters, seed)
+
+def mutateExecUi(exe: String, outDir: String, w: String, h: String, mutantIndex: Int, iters: Int, seed: Int): IO[Int] =
+  mutateExecUiEvents(exe, outDir, w, h, List.empty(), "").flatMap(code => if (code != 0) IO.pure(code) else mutateExecUiAfterIdle(exe, outDir, w, h, mutantIndex, iters, seed))
+
+def mutateExecUiAfterIdle(exe: String, outDir: String, w: String, h: String, mutantIndex: Int, iters: Int, seed: Int): IO[Int] =
+  if (iters <= 0) IO.pure(0) else Fs.read(pathJoin(outDir, "dump.txt")).flatMap(dump => mutateExecUiDump(exe, outDir, w, h, mutantIndex, iters, seed, dump))
+
+def mutateExecUiDump(exe: String, outDir: String, w: String, h: String, mutantIndex: Int, iters: Int, seed: Int, dump: String): IO[Int] =
+  mutateExecUiWidgets(exe, outDir, w, h, mutantIndex, iters, seed, countPrefixLines(dump, "button:", 0, 0), countPrefixLines(dump, "textfield:", 0, 0), countPrefixLines(dump, "scroll:", 0, 0))
+
+def mutateExecUiWidgets(exe: String, outDir: String, w: String, h: String, mutantIndex: Int, iters: Int, seed: Int, nButtons: Int, nFields: Int, nScrolls: Int): IO[Int] =
+  if (nButtons + nFields + nScrolls == 0) IO.pure(0) else Fs.read(pathJoin(outDir, "drivers.txt")).flatMap(dtext => mutateUiIters(exe, outDir, w, h, nButtons, boolPos(nFields), boolPos(nScrolls), fuzzLinesAcc(dtext, 0, List.empty()), mutantIndex, iters, seed, 0))
+
+def mutateUiIters(exe: String, outDir: String, w: String, h: String, nButtons: Int, hasText: Int, hasScroll: Int, drivers: List, mutantIndex: Int, iters: Int, seed: Int, iter: Int): IO[Int] =
+  if (iter >= iters) IO.pure(0) else mutateUiIter(exe, outDir, w, h, nButtons, hasText, hasScroll, drivers, mutantIndex, iters, seed, iter)
+
+def mutateUiIter(exe: String, outDir: String, w: String, h: String, nButtons: Int, hasText: Int, hasScroll: Int, drivers: List, mutantIndex: Int, iters: Int, seed: Int, iter: Int): IO[Int] =
+  for {
+    s = mutateIterSeed(seed, mutantIndex, iter)
+  } yield mutateExecUiEvents(exe, outDir, w, h, fuzzScript(s, nButtons, hasText, hasScroll, drivers), Str.fromInt(s)).flatMap(code => if (code != 0) IO.pure(code) else mutateUiIters(exe, outDir, w, h, nButtons, hasText, hasScroll, drivers, mutantIndex, iters, seed, iter + 1))
+
+def mutateExecUiEvents(exe: String, outDir: String, w: String, h: String, events: List, scheduleSeed: String): IO[Int] =
+  Fs.write(pathJoin(outDir, "script.txt"), fuzzScriptText(events)).flatMap(_ =>
     Fs.write(pathJoin(outDir, "dump.txt"), "").flatMap(_ =>
-      Fs.write(pathJoin(outDir, "sometimes.reached"), "").flatMap(_ => Sys.exec(fuzzCmd(exe, pathJoin(outDir, "script.txt"), pathJoin(outDir, "dump.txt"), w, h, "", pathJoin(outDir, "sometimes.reached"))))
+      Fs.write(pathJoin(outDir, "sometimes.reached"), "").flatMap(_ => Sys.exec(fuzzCmd(exe, pathJoin(outDir, "script.txt"), pathJoin(outDir, "dump.txt"), w, h, scheduleSeed, pathJoin(outDir, "sometimes.reached"))))
     )
   )
 
-def mutateExecIo(exe: String, outDir: String): IO[Int] =
-  Fs.write(pathJoin(outDir, "sometimes.reached"), "").flatMap(_ => Sys.exec(fuzzCmdIo(exe, "", pathJoin(outDir, "sometimes.reached"))))
+def mutateExecIo(exe: String, outDir: String, mutantIndex: Int, iters: Int, seed: Int): IO[Int] =
+  mutateExecIoAt(exe, outDir, "").flatMap(code => if (code != 0) IO.pure(code) else mutateIoIters(exe, outDir, mutantIndex, iters, seed, 0))
 
-def mutateAfterRun(projectDir: String, take: Int, runtimeDir: String, clang: String, toml: String, prog: Prog, overlays: List, i: Int, killed: Int, survived: Int, code: Int): IO[Unit] =
-  if (code == 0) mutateReport(i, "survived").flatMap(_ => mutateLoop(projectDir, take, runtimeDir, clang, toml, prog, overlays, i + 1, killed, survived + 1)) else mutateReport(i, "killed").flatMap(_ => mutateLoop(projectDir, take, runtimeDir, clang, toml, prog, overlays, i + 1, killed + 1, survived))
+def mutateIoIters(exe: String, outDir: String, mutantIndex: Int, iters: Int, seed: Int, iter: Int): IO[Int] =
+  if (iter >= iters) IO.pure(0) else mutateExecIoAt(exe, outDir, Str.fromInt(mutateIterSeed(seed, mutantIndex, iter))).flatMap(code => if (code != 0) IO.pure(code) else mutateIoIters(exe, outDir, mutantIndex, iters, seed, iter + 1))
+
+def mutateExecIoAt(exe: String, outDir: String, scheduleSeed: String): IO[Int] =
+  Fs.write(pathJoin(outDir, "sometimes.reached"), "").flatMap(_ => Sys.exec(fuzzCmdIo(exe, scheduleSeed, pathJoin(outDir, "sometimes.reached"))))
+
+def mutateAfterRun(projectDir: String, take: Int, iters: Int, seed: Int, runtimeDir: String, clang: String, toml: String, prog: Prog, overlays: List, i: Int, killed: Int, survived: Int, code: Int): IO[Unit] =
+  if (code == 0) mutateReport(i, "survived").flatMap(_ => mutateLoop(projectDir, take, iters, seed, runtimeDir, clang, toml, prog, overlays, i + 1, killed, survived + 1)) else mutateReport(i, "killed").flatMap(_ => mutateLoop(projectDir, take, iters, seed, runtimeDir, clang, toml, prog, overlays, i + 1, killed + 1, survived))
 
 def mutateReport(i: Int, status: String): IO[Unit] =
   IO.println(str5("  mutant ", Str.fromInt(i), ": ", status, ""))
 
-def mutateFinish(killed: Int, survived: Int, take: Int): IO[Unit] =
-  IO.println(str6("scuzz mutate: ", Str.fromInt(killed), " killed, ", Str.fromInt(survived), " survived (", str3(Str.fromInt(take), " ran)", ""))).flatMap(_ => if (survived == 0) IO.println("scuzz mutate ok") else IO.println(str3("surviving mutants mean weak or unreachable residual oracles; rerun: scuzz mutate --limit ", Str.fromInt(take), "")).flatMap(_ => IO.fail("mutate survivors")))
+def mutateFinish(killed: Int, survived: Int, take: Int, iters: Int): IO[Unit] =
+  IO.println(str6("scuzz mutate: ", Str.fromInt(killed), " killed, ", Str.fromInt(survived), " survived (", str3(Str.fromInt(take), " ran)", ""))).flatMap(_ => if (survived == 0) IO.println("scuzz mutate ok") else IO.println(str5("surviving mutants mean weak or unreachable residual oracles; rerun: scuzz mutate --limit ", Str.fromInt(take), " --iters ", Str.fromInt(iters), "")).flatMap(_ => IO.fail("mutate survivors")))
 
