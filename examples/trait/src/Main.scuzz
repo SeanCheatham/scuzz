@@ -2,6 +2,10 @@ record Point(x: Int, y: Int)
 
 record Box[T](x: T)
 
+enum Opt[T]:
+  case Some(x: T)
+  case None
+
 trait Show:
   def show(): String
 
@@ -13,9 +17,17 @@ impl Show for Box:
   def show(): String =
     "box"
 
+impl Show for Opt:
+  def show(): String =
+    self match {
+      case Opt.Some(x) => "some"
+      case Opt.None => "none"
+    }
+
 @main def main: IO[Unit] =
   for {
     _ <- IO.println(Point(3, 5).show())
     b = Box(4)
     _ <- IO.println(Str.concat("show:", b.show()))
+    _ <- IO.println(Str.concat("show:", Opt.Some(1).show()))
   } yield ()

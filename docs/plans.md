@@ -2,4 +2,4 @@
 
 ## Next
 
-**Language surface — generic `impl` for generic enums** — `enum Opt[T]` methods typecheck (`examples/genum`). Next: `impl Show for Opt` so a trait method on a generic enum typechecks. `watch` still only rebuilds.
+**Language surface — `impl` methods that use the type parameter** — `impl Show for Opt` typechecks (`examples/trait`). Next: `impl Get for Opt` with `def getOrElse(default: T): T` so an impl method can mention `T`. `watch` still only rebuilds.

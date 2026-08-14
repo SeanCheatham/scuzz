@@ -151,13 +151,14 @@ def expandOneImplMethodDef(module: String, traitName: String, forType: String, n
   for {
     en = resolveEnum(enums, imports, forType, module)
     tparams = if (List.isEmpty(en) == 1) List.empty() else enumTParams(List.head(en))
-  } yield Def.Def(implMethodName(traitName, forType, name), List.cons(Param.Param("self", recSelfTy(forType, tparams), List.empty()), params), ret, body, module, 0, tparams, 0)
+    selfName = if (List.isEmpty(en) == 1) forType else enumId(List.head(en))
+  } yield Def.Def(implMethodName(traitName, forType, name), List.cons(Param.Param("self", recSelfTy(selfName, tparams), List.empty()), params), ret, body, module, 0, tparams, 0)
 
 def expandAllRecordMethods(enums: List, acc: List): List =
   if (List.isEmpty(enums) == 1) List.reverse(acc) else expandAllRecordMethods(List.tail(enums), listConcat(expandOneRecordMethods(List.head(enums), List.empty()), acc))
 
 def expandOneRecordMethods(en: EnumDef, acc: List): List =
-  if (List.isEmpty(enumMethods(en)) == 1) List.reverse(acc) else expandRecordMethodList(enumModule(en), enumName(en), enumTParams(en), recSelfTy(enumName(en), enumTParams(en)), enumMethods(en), acc)
+  if (List.isEmpty(enumMethods(en)) == 1) List.reverse(acc) else expandRecordMethodList(enumModule(en), enumName(en), enumTParams(en), recSelfTy(enumId(en), enumTParams(en)), enumMethods(en), acc)
 
 def recSelfTy(name: String, tparams: List): Type =
   if (List.isEmpty(tparams) == 1) Type.Adt(name) else Type.App(name, tparamsAsVars(tparams, List.empty()))

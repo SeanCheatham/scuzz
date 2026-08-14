@@ -229,11 +229,12 @@ fn method_receiver_parts<'a>(
 }
 
 fn enum_self_ty(en: &EnumDef) -> Type {
+    let id = crate::resolve::enum_id(&en.module, &en.name);
     if en.type_params.is_empty() {
-        Type::Adt(en.name.clone())
+        Type::Adt(id)
     } else {
         Type::App(
-            en.name.clone(),
+            id,
             en.type_params
                 .iter()
                 .map(|p| Type::Var(p.clone()))
@@ -4182,6 +4183,13 @@ fn specialize_enums(mut program: Program) -> Result<Program, TypeError> {
             .collect();
         let mangled = mono_enum_name(en, &args);
         let clone_id = crate::resolve::enum_id(&en.module, &mangled);
+        if clone_defs
+            .iter()
+            .any(|e| e.module == en.module && e.name == mangled)
+        {
+            clones.insert((id, args), clone_id);
+            continue;
+        }
         let mut cases = Vec::new();
         for case in &en.cases {
             let mut fields = Vec::new();
@@ -4871,6 +4879,38 @@ impl Show for Box:
         let p = parse_file(src, "trait/src/Main.scuzz").unwrap();
         let p = expand_impls(lower_program(p)).expect("expand labeled");
         typecheck(&p).expect("generic impl with module should typecheck");
+    }
+
+    #[test]
+    fn typechecks_generic_enum_impl() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+trait Show:
+  def show(): String
+impl Show for Opt:
+  def show(): String =
+    self match {
+      case Opt.Some(x) => "some"
+      case Opt.None => "none"
+    }
+@main def main: IO[Unit] =
+  IO.println(Opt.Some(1).show())
+"#;
+        let p = expand_impls(lower_program(parse(src).unwrap())).expect("expand");
+        typecheck(&p).expect("generic enum impl should typecheck");
+        let p = elaborate_generics(p).expect("elaborate");
+        let p = resolve_field_access(p).expect("fields before mono");
+        let p = monomorphize(p).expect("mono");
+        resolve_field_access(p).expect("fields after mono");
+        let p = parse_file(src, "trait/src/Main.scuzz").unwrap();
+        let p = expand_impls(lower_program(p)).expect("expand labeled");
+        typecheck(&p).expect("generic enum impl with module should typecheck");
+        let p = elaborate_generics(p).expect("elaborate labeled");
+        let p = resolve_field_access(p).expect("fields before mono labeled");
+        let p = monomorphize(p).expect("mono labeled");
+        resolve_field_access(p).expect("fields after mono labeled");
     }
 
     #[test]
