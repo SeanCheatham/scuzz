@@ -167,6 +167,35 @@ static void *live_get_client(void *arg) {
   return buf;
 }
 
+static void *connect_hold(void *arg) {
+  int port = *(int *)arg;
+  int fd = -1;
+  int i;
+  struct sockaddr_in addr;
+  char buf[8];
+  ssize_t n;
+  memset(&addr, 0, sizeof addr);
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)port);
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  for (i = 0; i < 50; i++) {
+    sleep_us(10000);
+    fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0)
+      continue;
+    if (connect(fd, (struct sockaddr *)&addr, sizeof addr) == 0)
+      break;
+    close(fd);
+    fd = -1;
+  }
+  if (fd < 0)
+    return NULL;
+  while ((n = read(fd, buf, sizeof buf)) > 0)
+    ;
+  close(fd);
+  return (void *)1;
+}
+
 static void *ipv6_http_once(void *arg) {
   int port = *(int *)arg;
   int fd, cfd;
@@ -1479,6 +1508,24 @@ int main(void) {
     pthread_join(th, &ret);
     assert(r.ok);
     assert(ret && strstr((char *)ret, "ok:/x") != NULL);
+  }
+
+  /* Client connects and never sends GET: serve fails in ~1s instead of hanging. */
+  {
+    pthread_t th;
+    int port = 18585;
+    int64_t t0;
+    int64_t t1;
+    pthread_create(&th, NULL, connect_hold, &port);
+    t0 = sz_clock_monotonic_ms_sync();
+    r = sz_io_unsafe_run(sz_net_serve_once(port, serve_path_ok, NULL));
+    t1 = sz_clock_monotonic_ms_sync();
+    pthread_join(th, NULL);
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "request timed out"));
+    sz_error_free(r.error);
+    assert(t1 - t0 >= 900);
+    assert(t1 - t0 < 2500);
   }
 
   /* poll parks so a peer fiber can run before the fd is readable. */

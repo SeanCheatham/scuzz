@@ -459,6 +459,7 @@ static void addr_set_v6(struct sockaddr_storage *ss, socklen_t *len,
 #define HE_CONNECT_MS 1000
 #define HE_DNS_MS 1000
 #define HE_READ_MS 1000
+#define HE_REQ_MS 1000
 
 static void get_free(GetSt *st) {
   if (!st)
@@ -1041,7 +1042,8 @@ SzIo *sz_net_http_get(SzString *url) {
 /* HTTP/1.0 GET server. Listen and connection fds are nonblocking; the fiber
  * parks on poll so other IO can run. Live listen is 127.0.0.1 and ::1 (V6ONLY)
  * so httpGet literals on either loopback match. TestRuntime injects paths and
- * skips sockets. Error code 6. serveOnce is one request; serve keeps the
+ * skips sockets. Request read waits at most 1000ms. Error code 6. serveOnce is
+ * one request; serve keeps the
  * listen sockets (n<=0 forever live, or until the TestRuntime queue is empty). */
 
 typedef struct ServeSt {
@@ -1056,6 +1058,7 @@ typedef struct ServeSt {
   char rbuf[4096];
   size_t rlen;
   size_t woff;
+  int64_t req_deadline_ms;
 } ServeSt;
 
 static void serve_close_conn(ServeSt *st) {
@@ -1229,6 +1232,7 @@ static void *serve_accept(void *env) {
     return r;
   }
   st->conn_fd = conn;
+  st->req_deadline_ms = sz_clock_monotonic_ms_sync() + HE_REQ_MS;
   r->is_err = 0;
   return r;
 }
@@ -1241,6 +1245,11 @@ static void *serve_read_req(void *env) {
 
   n = read(st->conn_fd, st->rbuf + st->rlen, sizeof st->rbuf - 1 - st->rlen);
   if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+    if (sz_clock_monotonic_ms_sync() >= st->req_deadline_ms) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.serve: request timed out");
+      return r;
+    }
     r->retry = 1;
     return r;
   }
@@ -1255,6 +1264,11 @@ static void *serve_read_req(void *env) {
     if (st->rlen + 1 >= sizeof st->rbuf) {
       r->is_err = 1;
       r->as.err = sz_error_new(6, "Net.serve: expected HTTP GET");
+      return r;
+    }
+    if (sz_clock_monotonic_ms_sync() >= st->req_deadline_ms) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.serve: request timed out");
       return r;
     }
     r->retry = 1;
@@ -1392,9 +1406,14 @@ static SzIo *serve_after_conn_read_poll(void *value, void *env) {
 
 static SzIo *serve_poll_conn_read(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
+  SzIo *ready;
+  int64_t left;
   (void)value;
-  return sz_io_flatmap(sz_io_poll_readable(st->conn_fd), serve_after_conn_read_poll,
-                       st);
+  left = st->req_deadline_ms - sz_clock_monotonic_ms_sync();
+  if (left < 1)
+    left = 1;
+  ready = sz_io_race(sz_io_poll_readable(st->conn_fd), sz_io_sleep_ms(left));
+  return sz_io_flatmap(ready, serve_after_conn_read_poll, st);
 }
 
 static SzIo *serve_after_conn_write_poll(void *value, void *env) {
