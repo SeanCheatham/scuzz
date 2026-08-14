@@ -853,6 +853,9 @@ int sz_ui_pump_sync(SzUiSession *session) {
   drain_mobile_events(session);
   drain_desktop_events(session);
   if (stamp_changed(session)) {
+    const char *code = getenv("SCUZZ_UI_RELOAD_CODE");
+    if (code && code[0])
+      sz_ui_session_load_code(session, code);
     if (!sz_ui_session_reload(session))
       return 0;
     need_dump = 1;

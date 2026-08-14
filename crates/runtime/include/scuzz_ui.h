@@ -267,7 +267,8 @@ int sz_ui_session_set_inject(SzUiSession *session, const char *path);
 int sz_ui_session_reload(SzUiSession *session);
 /* dlopen `path` (copied to a unique sibling so the OS does not keep a stale
  * image) and set the rebuild factory from exported `sz_ui_reload_rebuild`.
- * Signals stay in `rebuild_env`. Does not rebuild until reload/stamp. */
+ * Signals stay in `rebuild_env`. Does not rebuild until reload/stamp.
+ * Stamp-watch loads `SCUZZ_UI_RELOAD_CODE` (if set) before rebuild. */
 int sz_ui_session_load_code(SzUiSession *session, const char *path);
 void sz_ui_unmount(SzUiSession *session);
 /* Snapshot PNG / structural dump from SCUZZ_SNAPSHOT_PATH / SCUZZ_FUZZ_DUMP. */
@@ -335,9 +336,11 @@ SzView *sz_lang_view_bind_text(SzSignalStr *sig);
 /* Mount prebuilt root → pump → optional scripted tap → snapshot → unmount. */
 SzIo *sz_ui_run_view(SzView *root);
 /* Like sz_ui_run_view, but construction is a factory so stamp-watch can
- * re-run it. Watches SCUZZ_UI_RELOAD_STAMP when set. Writes
- * SCUZZ_UI_DEBUG_DUMP on dirty pumps when set. Plays SCUZZ_UI_INJECT
- * (tap/text/type/pump/scroll/backspace) when that file changes. */
+ * re-run it. Watches SCUZZ_UI_RELOAD_STAMP when set. On stamp change,
+ * loads SCUZZ_UI_RELOAD_CODE (dylib exporting sz_ui_reload_rebuild) if
+ * that file exists, then rebuilds. Writes SCUZZ_UI_DEBUG_DUMP on dirty
+ * pumps when set. Plays SCUZZ_UI_INJECT (tap/text/type/pump/scroll/
+ * backspace) when that file changes. */
 SzIo *sz_ui_run_rebuild(SzUiRebuildFn fn, void *env);
 
 #ifdef __cplusplus

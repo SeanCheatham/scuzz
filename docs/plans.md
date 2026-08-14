@@ -2,4 +2,4 @@
 
 ## Next
 
-**Watch-load a rebuild dylib** — the session can `dlopen` `sz_ui_reload_rebuild` and stamp-swap Views with new machine code. Next: `[ui]` `run --watch` rebuilds that dylib and calls `sz_ui_session_load_code` so source changes load new code without restarting. `watch` still only rebuilds.
+**Emit a rebuild dylib on `[ui]` watch** — stamp-watch already `dlopen`s `SCUZZ_UI_RELOAD_CODE` (`build/reload.dylib`) then rebuilds Views. Next: clang-link that dylib (`define ptr @sz_ui_reload_rebuild` wrapping the rebuild lambda; same IR; Darwin `-undefined dynamic_lookup` / Linux `-shared`; do not link a second runtime) so source changes load new machine code without restarting. `watch` still only rebuilds.
