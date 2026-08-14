@@ -12,6 +12,7 @@
 
 int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
                   const SzTheme *theme);
+int sz_view_handle_tap(SzView *root, float x, float y);
 
 static int files_equal(const char *a, const char *b) {
   FILE *fa = fopen(a, "rb");
@@ -2167,6 +2168,130 @@ static void test_max_lines_does_not_wrap_button(void) {
   sz_view_free(wrap);
 }
 
+static void test_ignore_pointer_sizes_to_child(void) {
+  SzView *wrap, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect wf, chf;
+
+  child = sz_view_sized(40, 30, sz_view_text("Hi"));
+  wrap = sz_view_ignore_pointer(child);
+  sz_view_layout(wrap, 200.f, 200.f, theme);
+  assert(sz_view_kind(wrap) == SZ_VIEW_IGNORE_POINTER);
+  wf = sz_view_frame(wrap);
+  chf = sz_view_frame(child);
+  assert(fabsf(wf.w - 40.f) < 0.5f);
+  assert(fabsf(wf.h - 30.f) < 0.5f);
+  assert(fabsf(chf.w - 40.f) < 0.5f);
+  assert(fabsf(chf.h - 30.f) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_ignore_pointer_passes_tap_through(void) {
+  SzView *stack, *behind, *front, *wrap, *hit;
+  SzSignalInt *a, *b;
+  const SzTheme *theme = sz_theme_default();
+  SzRect ff;
+
+  a = sz_signal_int(0);
+  b = sz_signal_int(0);
+  stack = sz_view_stack();
+  behind = sz_view_button("Go", counter_tap, a);
+  front = sz_view_button("Go", counter_tap, b);
+  wrap = sz_view_ignore_pointer(front);
+  sz_view_add_child(stack, behind);
+  sz_view_add_child(stack, wrap);
+  sz_view_layout(stack, 200.f, 100.f, theme);
+  ff = sz_view_frame(front);
+  hit = sz_view_hit_test(stack, ff.x + 4.f, ff.y + 4.f);
+  assert(hit == behind);
+  assert(sz_view_handle_tap(stack, ff.x + 4.f, ff.y + 4.f));
+  assert(sz_signal_int_get(a) == 1);
+  assert(sz_signal_int_get(b) == 0);
+  sz_view_free(stack);
+  sz_signal_int_free(a);
+  sz_signal_int_free(b);
+}
+
+static void test_absorb_pointer_blocks_tap(void) {
+  SzView *stack, *behind, *front, *wrap, *hit;
+  SzSignalInt *a, *b;
+  const SzTheme *theme = sz_theme_default();
+  SzRect ff;
+
+  a = sz_signal_int(0);
+  b = sz_signal_int(0);
+  stack = sz_view_stack();
+  behind = sz_view_button("Go", counter_tap, a);
+  front = sz_view_button("Go", counter_tap, b);
+  wrap = sz_view_absorb_pointer(front);
+  sz_view_add_child(stack, behind);
+  sz_view_add_child(stack, wrap);
+  sz_view_layout(stack, 200.f, 100.f, theme);
+  ff = sz_view_frame(front);
+  hit = sz_view_hit_test(stack, ff.x + 4.f, ff.y + 4.f);
+  assert(hit == wrap);
+  assert(sz_view_kind(hit) == SZ_VIEW_ABSORB_POINTER);
+  assert(!sz_view_handle_tap(stack, ff.x + 4.f, ff.y + 4.f));
+  assert(sz_signal_int_get(a) == 0);
+  assert(sz_signal_int_get(b) == 0);
+  sz_view_free(stack);
+  sz_signal_int_free(a);
+  sz_signal_int_free(b);
+}
+
+static void test_stack_front_button_wins_without_ignore(void) {
+  SzView *stack, *behind, *front, *hit;
+  SzSignalInt *a, *b;
+  const SzTheme *theme = sz_theme_default();
+  SzRect ff;
+
+  a = sz_signal_int(0);
+  b = sz_signal_int(0);
+  stack = sz_view_stack();
+  behind = sz_view_button("Go", counter_tap, a);
+  front = sz_view_button("Go", counter_tap, b);
+  sz_view_add_child(stack, behind);
+  sz_view_add_child(stack, front);
+  sz_view_layout(stack, 200.f, 100.f, theme);
+  ff = sz_view_frame(front);
+  hit = sz_view_hit_test(stack, ff.x + 4.f, ff.y + 4.f);
+  assert(hit == front);
+  assert(sz_view_handle_tap(stack, ff.x + 4.f, ff.y + 4.f));
+  assert(sz_signal_int_get(a) == 0);
+  assert(sz_signal_int_get(b) == 1);
+  sz_view_free(stack);
+  sz_signal_int_free(a);
+  sz_signal_int_free(b);
+}
+
+static void test_ignore_pointer_skips_scroll_at(void) {
+  SzView *wrap, *scroll, *body;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  body = sz_view_sized(20, 80, sz_view_text("x"));
+  scroll = sz_view_scroll(body);
+  wrap = sz_view_ignore_pointer(sz_view_sized(80, 40, scroll));
+  sz_view_layout(wrap, 80.f, 40.f, theme);
+  f = sz_view_frame(wrap);
+  assert(sz_view_scroll_at(wrap, f.x + 4.f, f.y + 4.f) == NULL);
+  sz_view_free(wrap);
+}
+
+static void test_absorb_pointer_skips_scroll_at(void) {
+  SzView *wrap, *scroll, *body;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  body = sz_view_sized(20, 80, sz_view_text("x"));
+  scroll = sz_view_scroll(body);
+  wrap = sz_view_absorb_pointer(sz_view_sized(80, 40, scroll));
+  sz_view_layout(wrap, 80.f, 40.f, theme);
+  f = sz_view_frame(wrap);
+  assert(sz_view_scroll_at(wrap, f.x + 4.f, f.y + 4.f) == NULL);
+  sz_view_free(wrap);
+}
+
 static void test_button_does_not_wrap(void) {
   SzView *b;
   const SzTheme *theme = sz_theme_default();
@@ -2822,6 +2947,12 @@ int main(void) {
   test_nested_max_lines_uses_tighter_cap();
   test_bind_text_respects_max_lines();
   test_max_lines_does_not_wrap_button();
+  test_ignore_pointer_sizes_to_child();
+  test_ignore_pointer_passes_tap_through();
+  test_absorb_pointer_blocks_tap();
+  test_stack_front_button_wins_without_ignore();
+  test_ignore_pointer_skips_scroll_at();
+  test_absorb_pointer_skips_scroll_at();
   test_button_does_not_wrap();
   test_text_blank_line_from_newline();
   test_a11y();

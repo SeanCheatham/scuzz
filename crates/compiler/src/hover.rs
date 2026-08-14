@@ -310,6 +310,14 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.maxSize(w: Int, h: Int, child: View): View",
     ),
     ("View.maxLines", "View.maxLines(n: Int, child: View): View"),
+    (
+        "View.ignorePointer",
+        "View.ignorePointer(child: View): View",
+    ),
+    (
+        "View.absorbPointer",
+        "View.absorbPointer(child: View): View",
+    ),
     ("Ui.run", "Ui.run(view: View): IO[Unit]"),
     (
         "Law.check",
@@ -436,5 +444,21 @@ mod tests {
             h.contains("View.maxLines(n: Int, child: View): View"),
             "{h}"
         );
+    }
+
+    #[test]
+    fn hovers_view_ignore_pointer() {
+        let src =
+            "@main def main: IO[Unit] =\n  Ui.run(_ => View.ignorePointer(View.text(\"x\")))\n";
+        let h = hover_src(src, "ignorePointer");
+        assert!(h.contains("View.ignorePointer(child: View): View"), "{h}");
+    }
+
+    #[test]
+    fn hovers_view_absorb_pointer() {
+        let src =
+            "@main def main: IO[Unit] =\n  Ui.run(_ => View.absorbPointer(View.text(\"x\")))\n";
+        let h = hover_src(src, "absorbPointer");
+        assert!(h.contains("View.absorbPointer(child: View): View"), "{h}");
     }
 }

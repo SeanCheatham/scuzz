@@ -275,4 +275,24 @@ mod tests {
         let labels = labels_at(src, "View.op");
         assert!(labels.iter().any(|l| l == "View.opacity"), "{labels:?}");
     }
+
+    #[test]
+    fn completes_view_ignore_pointer_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.ig\n";
+        let labels = labels_at(src, "View.ig");
+        assert!(
+            labels.iter().any(|l| l == "View.ignorePointer"),
+            "{labels:?}"
+        );
+    }
+
+    #[test]
+    fn completes_view_absorb_pointer_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.ab\n";
+        let labels = labels_at(src, "View.ab");
+        assert!(
+            labels.iter().any(|l| l == "View.absorbPointer"),
+            "{labels:?}"
+        );
+    }
 }

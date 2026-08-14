@@ -106,7 +106,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_BACKGROUND || kind == SZ_VIEW_ASPECT_RATIO ||
          kind == SZ_VIEW_FRACTION || kind == SZ_VIEW_STRETCH ||
          kind == SZ_VIEW_MAX_SIZE || kind == SZ_VIEW_CLIP ||
-         kind == SZ_VIEW_OPACITY || kind == SZ_VIEW_MAX_LINES;
+         kind == SZ_VIEW_OPACITY || kind == SZ_VIEW_MAX_LINES ||
+         kind == SZ_VIEW_IGNORE_POINTER || kind == SZ_VIEW_ABSORB_POINTER;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -429,6 +430,20 @@ SzView *sz_view_opacity(int pct, SzView *child) {
 SzView *sz_view_max_lines(int n, SzView *child) {
   SzView *v = view_new(SZ_VIEW_MAX_LINES);
   v->img_w = n > 0 ? n : 0;
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
+SzView *sz_view_ignore_pointer(SzView *child) {
+  SzView *v = view_new(SZ_VIEW_IGNORE_POINTER);
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
+SzView *sz_view_absorb_pointer(SzView *child) {
+  SzView *v = view_new(SZ_VIEW_ABSORB_POINTER);
   if (child)
     sz_view_add_child(v, child);
   return v;
@@ -1273,6 +1288,21 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.h = ch ? ch->frame.h : 0.f;
     break;
   }
+  case SZ_VIEW_IGNORE_POINTER:
+  case SZ_VIEW_ABSORB_POINTER: {
+    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
+    if (ch) {
+      SzBoxConstraints cc;
+      cc.min_w = min_w;
+      cc.min_h = min_h;
+      cc.max_w = max_w;
+      cc.max_h = max_h;
+      layout_constrained(ch, x, y, cc, theme);
+    }
+    v->frame.w = ch ? ch->frame.w : 0.f;
+    v->frame.h = ch ? ch->frame.h : 0.f;
+    break;
+  }
   case SZ_VIEW_ASPECT_RATIO: {
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
     float rw = (float)(v->img_w > 0 ? v->img_w : 1);
@@ -1379,6 +1409,10 @@ static SzView *hit_node(SzView *v, float x, float y) {
   SzView *hit;
   if (!v || !view_is_shown(v) || !point_in(&v->frame, x, y))
     return NULL;
+  if (v->kind == SZ_VIEW_IGNORE_POINTER)
+    return NULL;
+  if (v->kind == SZ_VIEW_ABSORB_POINTER)
+    return v;
   /* Front-to-back: last child wins. */
   for (i = v->child_count - 1; i >= 0; i--) {
     hit = hit_node(v->children[i], x, y);
@@ -1653,6 +1687,8 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_MAX_SIZE:
   case SZ_VIEW_ASPECT_RATIO:
   case SZ_VIEW_FRACTION:
+  case SZ_VIEW_IGNORE_POINTER:
+  case SZ_VIEW_ABSORB_POINTER:
     if (v->kind == SZ_VIEW_LIST)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     for (i = 0; i < v->child_count; i++)
@@ -1704,6 +1740,8 @@ static SzView *scroll_at_node(SzView *v, float x, float y) {
   int i;
   SzView *found;
   if (!v || !point_in(&v->frame, x, y))
+    return NULL;
+  if (v->kind == SZ_VIEW_IGNORE_POINTER || v->kind == SZ_VIEW_ABSORB_POINTER)
     return NULL;
   for (i = v->child_count - 1; i >= 0; i--) {
     found = scroll_at_node(v->children[i], x, y);
