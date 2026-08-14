@@ -934,6 +934,68 @@ fn rewrite_require(
     }
 }
 
+/// Kit lambdas bind a known item type. Bare lambdas (`View.button` tap, `Ui.run` factory) stay Opaque.
+fn kit_lambda_param_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
+    if arg_i != 1 {
+        return None;
+    }
+    match callee {
+        "Signal.map" => Some(Type::Int),
+        "View.each" if nargs == 2 => Some(Type::String),
+        "List.filter" | "List.map" | "Stream.filter" | "Stream.map" | "Stream.takeWhile"
+        | "Stream.dropWhile" | "Stream.find" | "Stream.exists" | "Stream.evalMap"
+        | "Resource.make" | "Resource.use" | "Net.serve" | "Net.serveOnce" => Some(Type::String),
+        _ => None,
+    }
+}
+
+fn bind_opt(
+    param: Option<&String>,
+    ty: Type,
+    env: &mut HashMap<String, Type>,
+) -> Option<(String, Option<Type>)> {
+    param.map(|p| (p.clone(), env.insert(p.clone(), ty)))
+}
+
+fn restore_opt(old: Option<(String, Option<Type>)>, env: &mut HashMap<String, Type>) {
+    if let Some((p, old_val)) = old {
+        match old_val {
+            Some(v) => {
+                env.insert(p, v);
+            }
+            None => {
+                env.remove(&p);
+            }
+        }
+    }
+}
+
+fn rewrite_lambda_arg(
+    expr: Expr,
+    param_ty: Type,
+    enums: &EnumIndex<'_>,
+    funs: &FunIndex<'_>,
+    methods: &MethodIndex,
+    current_module: &str,
+    env: &mut HashMap<String, Type>,
+) -> Result<Expr, TypeError> {
+    if let ExprKind::Lambda { param, body } = expr.kind {
+        let span = expr.span;
+        let old = bind_opt(param.as_ref(), param_ty, env);
+        let body = rewrite_fields(*body, enums, funs, methods, current_module, env)?;
+        restore_opt(old, env);
+        Ok(Expr::new(
+            ExprKind::Lambda {
+                param,
+                body: Box::new(body),
+            },
+            span,
+        ))
+    } else {
+        rewrite_fields(expr, enums, funs, methods, current_module, env)
+    }
+}
+
 fn rewrite_fields(
     expr: Expr,
     enums: &EnumIndex<'_>,
@@ -1115,6 +1177,19 @@ fn rewrite_fields(
                 },
                 span,
             ))
+        }
+        ExprKind::Call { callee, args } => {
+            let nargs = args.len();
+            let mut out = Vec::with_capacity(nargs);
+            for (i, a) in args.into_iter().enumerate() {
+                let rewritten = if let Some(pty) = kit_lambda_param_ty(&callee, i, nargs) {
+                    rewrite_lambda_arg(a, pty, enums, funs, methods, current_module, env)?
+                } else {
+                    rewrite_fields(a, enums, funs, methods, current_module, env)?
+                };
+                out.push(rewritten);
+            }
+            Ok(Expr::new(ExprKind::Call { callee, args: out }, span))
         }
         kind => Ok(Expr { kind, span }
             .try_map_children(|c| rewrite_fields(c, enums, funs, methods, current_module, env))?),
@@ -1401,25 +1476,11 @@ fn infer(
                 Ok(Type::Io(Box::new(Type::Opaque("Either".into()))))
             }
             ExprKind::Lambda { param, body } => {
-                // Param type is context-dependent (View for taps, Int for Signal.map).
-                // Bind as Opaque so both map and tap lambdas typecheck.
-                let old = param.as_ref().map(|p| {
-                    (
-                        p.clone(),
-                        env.insert(p.clone(), Type::Opaque("Param".into())),
-                    )
-                });
+                // Bare lambdas (View.button tap, Ui.run factory). Kit Call args bind
+                // String/Int in infer_call via infer_lambda_arg.
+                let old = bind_opt(param.as_ref(), Type::Opaque("Param".into()), env);
                 let _ = infer(body, enums, funs, methods, current_module, env)?;
-                if let Some((p, old_val)) = old {
-                    match old_val {
-                        Some(v) => {
-                            env.insert(p, v);
-                        }
-                        None => {
-                            env.remove(&p);
-                        }
-                    }
-                }
+                restore_opt(old, env);
                 Ok(Type::Opaque("TapFn".into()))
             }
             ExprKind::IoRace { left, right } | ExprKind::IoBoth { left, right } => {
@@ -1461,6 +1522,26 @@ fn infer(
     .map_err(|e| e.with_span_if_bare(&expr.span))
 }
 
+fn infer_lambda_arg(
+    expr: &Expr,
+    param_ty: Type,
+    enums: &EnumIndex<'_>,
+    funs: &FunIndex<'_>,
+    methods: &MethodIndex,
+    current_module: &str,
+    env: &mut HashMap<String, Type>,
+) -> Result<Type, TypeError> {
+    if let ExprKind::Lambda { param, body } = &expr.kind {
+        let old = bind_opt(param.as_ref(), param_ty, env);
+        let result = infer(body, enums, funs, methods, current_module, env);
+        restore_opt(old, env);
+        result?;
+        Ok(Type::Opaque("TapFn".into()))
+    } else {
+        infer(expr, enums, funs, methods, current_module, env)
+    }
+}
+
 fn infer_call(
     callee: &str,
     args: &[Expr],
@@ -1471,8 +1552,13 @@ fn infer_call(
     env: &mut HashMap<String, Type>,
 ) -> Result<Type, TypeError> {
     let mut arg_tys = Vec::new();
-    for a in args {
-        arg_tys.push(infer(a, enums, funs, methods, current_module, env)?);
+    let nargs = args.len();
+    for (i, a) in args.iter().enumerate() {
+        arg_tys.push(if let Some(pty) = kit_lambda_param_ty(callee, i, nargs) {
+            infer_lambda_arg(a, pty, enums, funs, methods, current_module, env)?
+        } else {
+            infer(a, enums, funs, methods, current_module, env)?
+        });
     }
     match callee {
         "Str.concat" => {
@@ -4687,6 +4773,54 @@ enum Color:
     }
 
     #[test]
+    fn rejects_list_map_fromint_on_string() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = List.map(["a"], x => Str.fromInt(x))
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("expected Int, got String"),
+            "expected String/Int mismatch, got {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn typechecks_signal_map() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    count = Signal.int(0)
+    label = Signal.map(count, n => Str.fromInt(n))
+    _ <- Ui.run(_ => View.bindText(label))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Signal.map should typecheck");
+    }
+
+    #[test]
+    fn rejects_signal_map_concat_int() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    count = Signal.int(0)
+    label = Signal.map(count, n => Str.concat("n=", n))
+    _ <- Ui.run(_ => View.bindText(label))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("expected String, got Int"),
+            "expected Int/String mismatch, got {}",
+            err.message()
+        );
+    }
+
+    #[test]
     fn typechecks_stream_map() {
         let src = r#"@main def main: IO[Unit] =
   for {
@@ -4900,6 +5034,23 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.each mapper should typecheck");
+    }
+
+    #[test]
+    fn rejects_view_each_fromint_on_string() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    items = Signal.list(["milk"])
+    _ <- Ui.run(_ => View.each(items, s => View.text(Str.fromInt(s))))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("expected Int, got String"),
+            "expected String/Int mismatch, got {}",
+            err.message()
+        );
     }
 
     #[test]
