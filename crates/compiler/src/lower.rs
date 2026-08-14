@@ -6,7 +6,8 @@ use crate::span::Span;
 
 /// Lower surface sugar in a program.
 pub fn lower_program(mut program: Program) -> Program {
-    let enums = EnumIndex::build(&program.enums, &program.imports)
+    let enums_snap = program.enums.clone();
+    let enums = EnumIndex::build(&enums_snap, &program.imports)
         .expect("duplicate enums should be rejected at parse");
     for d in &mut program.defs {
         let module = d.module.clone();
@@ -22,6 +23,16 @@ pub fn lower_program(mut program: Program) -> Program {
         &enums,
         &main_mod,
     );
+    for en in &mut program.enums {
+        let module = en.module.clone();
+        for m in &mut en.methods {
+            m.body = lower_expr(
+                std::mem::replace(&mut m.body, Expr::dummy(ExprKind::Unit)),
+                &enums,
+                &module,
+            );
+        }
+    }
     program
 }
 

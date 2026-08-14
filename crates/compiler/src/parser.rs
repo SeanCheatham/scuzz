@@ -483,10 +483,12 @@ impl Parser {
             type_params,
             cases,
             is_record: false,
+            methods: Vec::new(),
         })
     }
 
     /// `record Name(f1: T1, f2: T2, …)` — single-case enum sugar.
+    /// Optional `:` + `def` methods (`self` implicit), same shape as `impl` methods.
     fn parse_record(&mut self) -> Result<EnumDef, ParseError> {
         self.expect(&Token::Record)?;
         let (name, _) = self.expect_ident()?;
@@ -512,6 +514,19 @@ impl Parser {
         if fields.is_empty() {
             return Err(self.err(format!("record {name} needs at least one field")));
         }
+        let methods = if matches!(self.peek(), Token::Colon) {
+            self.bump();
+            let mut methods = Vec::new();
+            while matches!(self.peek(), Token::Def) {
+                methods.push(self.parse_impl_method(&type_params)?);
+            }
+            if methods.is_empty() {
+                return Err(self.err(format!("record {name} has no methods")));
+            }
+            methods
+        } else {
+            Vec::new()
+        };
         Ok(EnumDef {
             module: self.module.clone(),
             name: name.clone(),
@@ -522,6 +537,7 @@ impl Parser {
                 field_rfns,
             }],
             is_record: true,
+            methods,
         })
     }
 
@@ -564,7 +580,7 @@ impl Parser {
         self.expect(&Token::Colon)?;
         let mut methods = Vec::new();
         while matches!(self.peek(), Token::Def) {
-            methods.push(self.parse_impl_method()?);
+            methods.push(self.parse_impl_method(&[])?);
         }
         if methods.is_empty() {
             return Err(self.err(format!("impl {trait_name} for {for_type} has no methods")));
@@ -577,14 +593,14 @@ impl Parser {
         })
     }
 
-    fn parse_impl_method(&mut self) -> Result<ImplMethod, ParseError> {
+    fn parse_impl_method(&mut self, type_params: &[String]) -> Result<ImplMethod, ParseError> {
         self.expect(&Token::Def)?;
         let (name, _) = self.expect_ident()?;
         self.expect(&Token::LParen)?;
-        let params = self.parse_param_list()?;
+        let params = self.parse_param_list_with_tparams(type_params)?;
         self.expect(&Token::RParen)?;
         self.expect(&Token::Colon)?;
-        let ret = self.parse_type()?;
+        let ret = self.parse_type_with_tparams(type_params)?;
         self.expect(&Token::Eq)?;
         let body = self.parse_expr()?;
         Ok(ImplMethod {
@@ -1361,6 +1377,11 @@ impl Parser {
                     return Ok(self.mk(ExprKind::Call { callee: name, args }, start.cover(&end)));
                 }
                 if matches!(self.peek(), Token::Dot) {
+                    // Lowercase `b.get()` / `b.x` go through postfix (method / field).
+                    // Capitalized `Opt.Some(…)` / `Color.Red` stay ADT/module in primary.
+                    if !name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
+                        return Ok(self.mk(ExprKind::Var(name), start));
+                    }
                     self.bump();
                     let (case_name, case_span) = self.expect_ident()?;
                     if matches!(self.peek(), Token::LParen) {
@@ -1374,26 +1395,15 @@ impl Parser {
                             start.cover(&end),
                         ));
                     }
-                    // Capitalized `Color.Red` / `A.tag` stay ADT/module; lowercase `p.x` is field access.
-                    if name.chars().next().is_some_and(|c| c.is_ascii_uppercase()) {
-                        Ok(self.mk(
-                            ExprKind::AdtConstruct {
-                                enum_name: name,
-                                case_name,
-                                args: Vec::new(),
-                                type_args: Vec::new(),
-                            },
-                            start.cover(&case_span),
-                        ))
-                    } else {
-                        Ok(self.mk(
-                            ExprKind::Field {
-                                base: Box::new(self.mk(ExprKind::Var(name), start.clone())),
-                                field: case_name,
-                            },
-                            start.cover(&case_span),
-                        ))
-                    }
+                    Ok(self.mk(
+                        ExprKind::AdtConstruct {
+                            enum_name: name,
+                            case_name,
+                            args: Vec::new(),
+                            type_args: Vec::new(),
+                        },
+                        start.cover(&case_span),
+                    ))
                 } else {
                     Ok(self.mk(ExprKind::Var(name), start))
                 }

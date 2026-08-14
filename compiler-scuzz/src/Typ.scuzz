@@ -128,7 +128,8 @@ def typecheckProg(prog: Prog): TyRes =
 def expandImplsProg(prog: Prog): Prog =
   for {
     extra = expandAllImpls(progImpls(prog), List.empty())
-  } yield setProgDefs(prog, listConcat(progDefs(prog), extra))
+    rec = expandAllRecordMethods(progEnums(prog), List.empty())
+  } yield setProgDefs(prog, listConcat(progDefs(prog), listConcat(extra, rec)))
 
 def expandAllImpls(impls: List, acc: List): List =
   if (List.isEmpty(impls) == 1) List.reverse(acc) else expandAllImpls(List.tail(impls), listConcat(expandOneImpl(List.head(impls), List.empty()), acc))
@@ -144,6 +145,26 @@ def expandOneImplMethods(module: String, traitName: String, forType: String, met
 def expandOneImplMethod(module: String, traitName: String, forType: String, m: ImplMethod): Def =
   m match {
     case ImplMethod.Method(name, params, ret, body) => Def.Def(implMethodName(traitName, forType, name), List.cons(Param.Param("self", Type.Adt(forType), List.empty()), params), ret, body, module, 0, List.empty(), 0)
+  }
+
+def expandAllRecordMethods(enums: List, acc: List): List =
+  if (List.isEmpty(enums) == 1) List.reverse(acc) else expandAllRecordMethods(List.tail(enums), listConcat(expandOneRecordMethods(List.head(enums), List.empty()), acc))
+
+def expandOneRecordMethods(en: EnumDef, acc: List): List =
+  if (enumIsRecord(en) == 0) List.reverse(acc) else expandRecordMethodList(enumModule(en), enumName(en), enumTParams(en), recSelfTy(enumName(en), enumTParams(en)), enumMethods(en), acc)
+
+def recSelfTy(name: String, tparams: List): Type =
+  if (List.isEmpty(tparams) == 1) Type.Adt(name) else Type.App(name, tparamsAsVars(tparams, List.empty()))
+
+def tparamsAsVars(tparams: List, acc: List): List =
+  if (List.isEmpty(tparams) == 1) List.reverse(acc) else tparamsAsVars(List.tail(tparams), List.cons(Type.Var(List.head(tparams)), acc))
+
+def expandRecordMethodList(module: String, recName: String, tparams: List, selfTy: Type, methods: List, acc: List): List =
+  if (List.isEmpty(methods) == 1) List.reverse(acc) else expandRecordMethodList(module, recName, tparams, selfTy, List.tail(methods), List.cons(expandOneRecordMethod(module, recName, tparams, selfTy, List.head(methods)), acc))
+
+def expandOneRecordMethod(module: String, recName: String, tparams: List, selfTy: Type, m: ImplMethod): Def =
+  m match {
+    case ImplMethod.Method(name, params, ret, body) => Def.Def(recMethodName(recName, name), List.cons(Param.Param("self", selfTy, List.empty()), params), ret, body, module, 0, tparams, 0)
   }
 
 def importDupKey(im: Import): String =
@@ -263,6 +284,7 @@ def inferMethodCallOnTy(rt: Type, method: String, args: List, enums: List, funs:
 def inferMethodCallOnTyAdt(rt: Type, method: String, args: List, enums: List, funs: List, env: List, receiver: Expr): TyRes =
   rt match {
     case Type.Adt(id) => inferMethodCallOnAdt(id, method, args, enums, funs, env, receiver)
+    case Type.App(id, argsT) => inferMethodCallOnAdt(id, method, args, enums, funs, env, receiver)
     case _ => tyErr(str3("method .", method, str3(" needs a record/ADT receiver, got ", tyShow(rt), "")))
   }
 
@@ -334,8 +356,9 @@ def findImplMangled(defs: List, bare: String, method: String): String =
 def findImplMangledOne(d: Def, rest: List, bare: String, method: String): String =
   for {
     name = defName(d)
+    recName = recMethodName(bare, method)
     suf = str3("_", bare, str3("_", method, ""))
-  } yield if (startsWith(name, "__impl_") == 1) if (endsWith(name, suf) == 1) name else findImplMangled(rest, bare, method) else findImplMangled(rest, bare, method)
+  } yield if (streq(name, recName) == 1) name else if (startsWith(name, "__impl_") == 1) if (endsWith(name, suf) == 1) name else findImplMangled(rest, bare, method) else findImplMangled(rest, bare, method)
 
 def inferFieldTy(bt: Type, field: String, enums: List, mod: String, imports: List): TyRes =
   bt match {
@@ -1293,6 +1316,7 @@ def desugarFieldToMatch2(base: Expr, field: String, enums: List, imports: List, 
 def desugarFieldFromTy(base: Expr, field: String, bt: Type, enums: List, imports: List, mod: String, span: Span): Expr =
   bt match {
     case Type.Adt(id) => desugarFieldFromId(base, field, id, enums, imports, mod, span)
+    case Type.App(id, args) => Expr.Field(base, field, span)
     case _ => base
   }
 
@@ -1427,6 +1451,7 @@ def rewriteRequireIo(receiver: Expr, name: String, pred: Expr, predTy: Type, fun
 def resolveFieldsMethodOnTy(rt: Type, method: String, args: List, receiver: Expr, allDefs: List, span: Span): Expr =
   rt match {
     case Type.Adt(id) => resolveFieldsMethodOnAdt(id, method, args, receiver, allDefs, span)
+    case Type.App(id, argsT) => resolveFieldsMethodOnAdt(id, method, args, receiver, allDefs, span)
     case _ => Expr.MethodCall(receiver, method, args, span)
   }
 
@@ -2180,7 +2205,7 @@ def specCloneEnum2(id: String, args: List, insts: List, i: Int, clones: List, cl
     cp = specCloneCases(enumCases(en), enums, imports, enumModule(en), tparams, subst, List.empty(), List.empty())
     cases2 = List.head(cp)
     extra = List.head(List.tail(cp))
-    cloneDef = if (enumIsRecord(en) == 1) EnumDef.Record(enumModule(en), mangled, caseFields(List.head(cases2)), List.empty()) else EnumDef.Enum(enumModule(en), mangled, cases2, List.empty())
+    cloneDef = if (enumIsRecord(en) == 1) EnumDef.Record(enumModule(en), mangled, caseFields(List.head(cases2)), List.empty(), List.empty()) else EnumDef.Enum(enumModule(en), mangled, cases2, List.empty())
     recCase = if (enumIsRecord(en) == 1) mangled else ""
     ent = List.cons(id, List.cons(args, List.cons(cloneId, List.cons(recCase, List.empty()))))
   } yield specCloneLoop(listConcat(insts, extra), i + 1, List.cons(ent, clones), List.cons(cloneDef, cloneDefs), enums, imports)
@@ -2236,7 +2261,7 @@ def specConcretizeClones(cloneDefs: List, clones: List, acc: List): List =
 def specConcretizeClone(e: EnumDef, clones: List): EnumDef =
   e match {
     case EnumDef.Enum(module, name, cases, tparams) => EnumDef.Enum(module, name, specConcretizeCases(cases, clones, List.empty()), tparams)
-    case EnumDef.Record(module, name, fields, tparams) => EnumDef.Record(module, name, specConcretizeFields(fields, clones, List.empty()), tparams)
+    case EnumDef.Record(module, name, fields, tparams, methods) => EnumDef.Record(module, name, specConcretizeFields(fields, clones, List.empty()), tparams, methods)
   }
 
 def specConcretizeCases(cases: List, clones: List, acc: List): List =

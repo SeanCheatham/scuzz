@@ -2,8 +2,6 @@ enum Either[L, R]:
   case Left(x: L)
   case Right(y: R)
 
-record Box[T](x: T)
-
 def getOrElse[T](o: Opt[T], default: T): T =
   o match {
     case Opt.Some(x) => x
@@ -28,12 +26,16 @@ def describe(e: Either[Int, String]): String =
     case Either.Right(s) => s
   }
 
+record Box[T](x: T):
+  def get(): T =
+    self.x
+
 @main def main: IO[Unit] =
   for {
     _ <- IO.println(Str.concat("genum:some:", Str.fromInt(getOrElse(Opt.Some(3), 0))))
     _ <- IO.println(Str.concat("genum:none:", Str.fromInt(getOrElse(noneInt(), 9))))
     b = wrap(4)
-    _ <- IO.println(Str.concat("genum:box:", Str.fromInt(b.x)))
+    _ <- IO.println(Str.concat("genum:box:", Str.fromInt(b.get())))
     _ <- IO.println(Str.concat("genum:either:", describe(Either.Right("ok"))))
     _ <- IO.println(Str.concat("genum:multi:", Str.fromInt(leftOr(Either.Right("s"), 7))))
   } yield ()

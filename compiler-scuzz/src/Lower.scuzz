@@ -5,7 +5,17 @@ def lowerProg(prog: Prog): Prog =
     enums = progEnums(prog)
     imports = progImports(prog)
     mainMod = progMainModule(prog)
-  } yield Prog.Prog(progPkg(prog), enums, lowerDefs(progDefs(prog), enums, imports, List.empty()), lowerExpr(progMain(prog), enums, imports, mainMod), mainMod, imports, progTraits(prog), lowerImpls(progImpls(prog), enums, imports, List.empty()))
+    enums2 = lowerEnums(enums, enums, imports, List.empty())
+  } yield Prog.Prog(progPkg(prog), enums2, lowerDefs(progDefs(prog), enums2, imports, List.empty()), lowerExpr(progMain(prog), enums2, imports, mainMod), mainMod, imports, progTraits(prog), lowerImpls(progImpls(prog), enums2, imports, List.empty()))
+
+def lowerEnums(enums: List, all: List, imports: List, acc: List): List =
+  if (List.isEmpty(enums) == 1) List.reverse(acc) else lowerEnums(List.tail(enums), all, imports, List.cons(lowerEnum(List.head(enums), all, imports), acc))
+
+def lowerEnum(e: EnumDef, enums: List, imports: List): EnumDef =
+  e match {
+    case EnumDef.Enum(module, name, cases, tparams) => e
+    case EnumDef.Record(module, name, fields, tparams, methods) => EnumDef.Record(module, name, fields, tparams, lowerImplMethods(methods, enums, imports, module, List.empty()))
+  }
 
 def lowerImpls(impls: List, enums: List, imports: List, acc: List): List =
   if (List.isEmpty(impls) == 1) List.reverse(acc) else lowerImpls(List.tail(impls), enums, imports, List.cons(lowerImpl(List.head(impls), enums, imports), acc))

@@ -45,7 +45,7 @@ def prettyProg(p: Prog): String =
 def prettyProgParts(pkg: String, enums: List, traits: List, impls: List, imports: List, defs: List, main: Expr): String =
   for {
     head = prettyPkg(pkg)
-    mid = Str.concat(prettyEnums(enums, ""), Str.concat(prettyTraits(traits, ""), Str.concat(prettyImpls(impls, ""), Str.concat(prettyImports(imports, ""), prettyDefs(defs, "")))))
+    mid = Str.concat(prettyEnumsPlain(enums, ""), Str.concat(prettyTraits(traits, ""), Str.concat(prettyImpls(impls, ""), Str.concat(prettyImports(imports, ""), Str.concat(prettyDefs(defs, ""), prettyEnumsMethods(enums, ""))))))
   } yield if (isUnitExpr(main) == 1) Str.concat(head, mid) else str4(head, mid, "@main def main: IO[Unit] =\n", Str.concat(prettyExpr(main, 1), "\n"))
 
 def prettyPkg(pkg: String): String =
@@ -58,7 +58,16 @@ def prettyImport(im: Import): String =
   str4("import ", importFromModule(im), ".", Str.concat(importName(im), "\n"))
 
 def prettyEnums(enums: List, acc: String): String =
-  if (List.isEmpty(enums) == 1) acc else prettyEnums(List.tail(enums), Str.concat(acc, Str.concat(prettyEnum(List.head(enums)), "\n")))
+  prettyEnumsPlain(enums, acc)
+
+def enumHasMethods(e: EnumDef): Int =
+  if (List.isEmpty(enumMethods(e)) == 1) 0 else 1
+
+def prettyEnumsPlain(enums: List, acc: String): String =
+  if (List.isEmpty(enums) == 1) acc else if (enumHasMethods(List.head(enums)) == 1) prettyEnumsPlain(List.tail(enums), acc) else prettyEnumsPlain(List.tail(enums), Str.concat(acc, Str.concat(prettyEnum(List.head(enums)), "\n")))
+
+def prettyEnumsMethods(enums: List, acc: String): String =
+  if (List.isEmpty(enums) == 1) acc else if (enumHasMethods(List.head(enums)) == 0) prettyEnumsMethods(List.tail(enums), acc) else prettyEnumsMethods(List.tail(enums), Str.concat(acc, Str.concat(prettyEnum(List.head(enums)), "\n")))
 
 def prettyTraits(traits: List, acc: String): String =
   if (List.isEmpty(traits) == 1) acc else prettyTraits(List.tail(traits), Str.concat(acc, Str.concat(prettyTrait(List.head(traits)), "\n")))
@@ -105,7 +114,9 @@ def prettyEnum(e: EnumDef): String =
 def prettyRecord(e: EnumDef): String =
   for {
     fields = caseFields(List.head(enumCases(e)))
-  } yield str4("record ", Str.concat(enumName(e), prettyTypeParams(enumTParams(e))), "(", str3(prettyEnumFields(fields, ""), ")\n", ""))
+    head = str4("record ", Str.concat(enumName(e), prettyTypeParams(enumTParams(e))), "(", str3(prettyEnumFields(fields, ""), ")", ""))
+    methods = enumMethods(e)
+  } yield if (List.isEmpty(methods) == 1) str3(head, "\n", "") else str3(head, ":\n", prettyImplMethods(methods, ""))
 
 def prettyEnumCases(cases: List, acc: String): String =
   if (List.isEmpty(cases) == 1) acc else prettyEnumCases(List.tail(cases), Str.concat(acc, prettyEnumCase(List.head(cases))))

@@ -125,6 +125,7 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
     let program = crate::typ::expand_impls(program).map_err(|e| anyhow::anyhow!("{e}"))?;
     typecheck(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
     let program = crate::typ::elaborate_generics(program).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let program = crate::typ::resolve_field_access(program).map_err(|e| anyhow::anyhow!("{e}"))?;
     let program = crate::typ::monomorphize(program).map_err(|e| anyhow::anyhow!("{e}"))?;
     let program = crate::typ::resolve_field_access(program).map_err(|e| anyhow::anyhow!("{e}"))?;
 

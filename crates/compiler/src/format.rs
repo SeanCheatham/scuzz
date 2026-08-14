@@ -27,8 +27,10 @@ fn pretty_program(p: &Program) -> String {
         out.push_str("\n\n");
     }
     for e in &p.enums {
-        out.push_str(&pretty_enum(e));
-        out.push('\n');
+        if e.methods.is_empty() {
+            out.push_str(&pretty_enum(e));
+            out.push('\n');
+        }
     }
     for t in &p.traits {
         out.push_str(&pretty_trait(t));
@@ -51,6 +53,12 @@ fn pretty_program(p: &Program) -> String {
     for d in &p.defs {
         out.push_str(&pretty_def(d));
         out.push_str("\n\n");
+    }
+    for e in &p.enums {
+        if !e.methods.is_empty() {
+            out.push_str(&pretty_enum(e));
+            out.push('\n');
+        }
     }
     if !p.main.name.is_empty() {
         out.push_str("@main def ");
@@ -76,7 +84,28 @@ fn pretty_enum(e: &EnumDef) -> String {
             .enumerate()
             .map(|(i, (n, t))| pretty_binding(n, t, c.field_rfn(i)))
             .collect();
-        return format!("record {}{tparams}({})\n", e.name, parts.join(", "));
+        let mut out = format!("record {}{tparams}({})", e.name, parts.join(", "));
+        if e.methods.is_empty() {
+            out.push('\n');
+            return out;
+        }
+        out.push_str(":\n");
+        for m in &e.methods {
+            let params: Vec<String> = m
+                .params
+                .iter()
+                .map(|p| pretty_binding(&p.name, &p.ty, p.rfn.as_ref()))
+                .collect();
+            out.push_str(&format!(
+                "  def {}({}): {} =\n{}",
+                m.name,
+                params.join(", "),
+                pretty_type(&m.ret),
+                pretty_expr(&m.body, 2)
+            ));
+            out.push('\n');
+        }
+        return out;
     }
     let mut out = String::new();
     out.push_str("enum ");
@@ -609,6 +638,26 @@ record Point(x: Int, y: Int)
         assert!(out.contains("record Point(x: Int, y: Int)"));
         assert!(out.contains("Point(1, 2)"));
         assert!(out.contains("case Point(a, b) =>"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_generic_record_method_roundtrip() {
+        let src = r#"
+def wrap[T](x: T): Box[T] =
+  Box(x)
+record Box[T](x: T):
+  def get(): T =
+    self.x
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(wrap(4).get()))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("record Box[T](x: T):"));
+        assert!(out.contains("def get(): T ="));
+        assert!(out.contains("def wrap[T](x: T): Box[T] ="));
+        assert!(out.find("def wrap").unwrap() < out.find("record Box").unwrap());
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

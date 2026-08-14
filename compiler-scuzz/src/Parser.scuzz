@@ -470,7 +470,10 @@ def parseIdentExpr(file: String, tokens: List, i: Int, name: String): List =
   if (streq(name, "IO") == 1) parseIo(file, tokens, i + 1, i) else if (streq(name, "Str") == 1) parseModuleCall(file, tokens, i + 1, "Str", i) else if (streq(name, "List") == 1) parseModuleCall(file, tokens, i + 1, "List", i) else if (streq(name, "Fs") == 1) parseModuleCall(file, tokens, i + 1, "Fs", i) else if (streq(name, "Sys") == 1) parseModuleCall(file, tokens, i + 1, "Sys", i) else if (streq(name, "Clock") == 1) parseModuleCall(file, tokens, i + 1, "Clock", i) else if (streq(name, "Random") == 1) parseModuleCall(file, tokens, i + 1, "Random", i) else if (streq(name, "Net") == 1) parseModuleCall(file, tokens, i + 1, "Net", i) else if (streq(name, "Impurity") == 1) parseModuleCall(file, tokens, i + 1, "Impurity", i) else if (streq(name, "Ref") == 1) parseModuleCall(file, tokens, i + 1, "Ref", i) else if (streq(name, "Queue") == 1) parseModuleCall(file, tokens, i + 1, "Queue", i) else if (streq(name, "Deferred") == 1) parseModuleCall(file, tokens, i + 1, "Deferred", i) else if (streq(name, "Fiber") == 1) parseModuleCall(file, tokens, i + 1, "Fiber", i) else if (streq(name, "Resource") == 1) parseModuleCall(file, tokens, i + 1, "Resource", i) else if (streq(name, "Stream") == 1) parseModuleCall(file, tokens, i + 1, "Stream", i) else if (streq(name, "Signal") == 1) parseModuleCall(file, tokens, i + 1, "Signal", i) else if (streq(name, "Theme") == 1) parseModuleCall(file, tokens, i + 1, "Theme", i) else if (streq(name, "View") == 1) parseModuleCall(file, tokens, i + 1, "View", i) else if (streq(name, "Ui") == 1) parseModuleCall(file, tokens, i + 1, "Ui", i) else if (streq(name, "Lexer") == 1) parseModuleCall(file, tokens, i + 1, "Lexer", i) else parseCallOrVar(file, tokens, i + 1, name, i)
 
 def parseCallOrVar(file: String, tokens: List, i: Int, name: String, startI: Int): List =
-  if (isTok(tokens, i, "LParen") == 1) parseCallArgs(file, tokens, i + 1, name, startI) else if (isTok(tokens, i, "Dot") == 1) parseDotCallOrAdt(file, tokens, i + 1, name, startI) else okExpr(Expr.Var(name, tokSpan(file, tokAt(tokens, startI))), i)
+  if (isTok(tokens, i, "LParen") == 1) parseCallArgs(file, tokens, i + 1, name, startI) else if (isTok(tokens, i, "Dot") == 1) parseCallOrVarDot(file, tokens, i, name, startI) else okExpr(Expr.Var(name, tokSpan(file, tokAt(tokens, startI))), i)
+
+def parseCallOrVarDot(file: String, tokens: List, i: Int, name: String, startI: Int): List =
+  if (isUpperIdent(name) == 1) parseDotCallOrAdt(file, tokens, i + 1, name, startI) else okExpr(Expr.Var(name, tokSpan(file, tokAt(tokens, startI))), i)
 
 def parseCallArgs(file: String, tokens: List, i: Int, callee: String, startI: Int): List =
   for {
@@ -643,7 +646,15 @@ def parseRecordBody(file: String, tokens: List, i: Int, name: String, tparams: L
   for {
     i1 = expectTok(tokens, i, "LParen")
     fieldsP = parseEnumCaseFieldsAcc(file, tokens, i1, List.empty(), tparams)
-  } yield okEnum(EnumDef.Record(moduleIdFromLabel(file), name, pAst(fieldsP), tparams), pIdx(fieldsP))
+  } yield parseRecordAfterFields(file, tokens, pIdx(fieldsP), name, tparams, pAst(fieldsP))
+
+def parseRecordAfterFields(file: String, tokens: List, i: Int, name: String, tparams: List, fields: List): List =
+  if (isTok(tokens, i, "Colon") == 1) parseRecordMethods(file, tokens, i + 1, name, tparams, fields) else okEnum(EnumDef.Record(moduleIdFromLabel(file), name, fields, tparams, List.empty()), i)
+
+def parseRecordMethods(file: String, tokens: List, i: Int, name: String, tparams: List, fields: List): List =
+  for {
+    methodsP = parseImplMethodsWith(file, tokens, i, List.empty(), tparams)
+  } yield okEnum(EnumDef.Record(moduleIdFromLabel(file), name, fields, tparams, pAst(methodsP)), pIdx(methodsP))
 
 def parseTopTrait(file: String, tokens: List, i: Int, pkg: String, enums: List, traits: List, impls: List, defs: List, main: Expr, mainMod: String, imports: List): Prog =
   for {
@@ -689,24 +700,33 @@ def parseTopImpl(file: String, tokens: List, i: Int, pkg: String, enums: List, t
   } yield parseTop(file, tokens, pIdx(methodsP), pkg, enums, traits, List.cons(im, impls), defs, main, mainMod, imports)
 
 def parseImplMethods(file: String, tokens: List, i: Int, acc: List): List =
-  if (isTok(tokens, i, "Def") == 0) ok(List.reverse(acc), i) else parseImplMethodCont(file, tokens, i, acc)
+  parseImplMethodsWith(file, tokens, i, acc, List.empty())
+
+def parseImplMethodsWith(file: String, tokens: List, i: Int, acc: List, tparams: List): List =
+  if (isTok(tokens, i, "Def") == 0) ok(List.reverse(acc), i) else parseImplMethodContWith(file, tokens, i, acc, tparams)
 
 def parseImplMethodCont(file: String, tokens: List, i: Int, acc: List): List =
+  parseImplMethodContWith(file, tokens, i, acc, List.empty())
+
+def parseImplMethodContWith(file: String, tokens: List, i: Int, acc: List, tparams: List): List =
   for {
     i1 = expectTok(tokens, i, "Def")
     nameP = parseIdent(file, tokens, i1)
     i2 = expectTok(tokens, pIdx(nameP), "LParen")
-    paramsP = parseParams(file, tokens, i2, List.empty())
+    paramsP = parseParamsWith(file, tokens, i2, List.empty(), tparams)
     i3 = expectTok(tokens, pIdx(paramsP), "RParen")
     i4 = expectTok(tokens, i3, "Colon")
-    retP = parseType(file, tokens, i4)
+    retP = parseTypeWith(file, tokens, i4, tparams)
     i5 = expectTok(tokens, pIdx(retP), "Eq")
     bodyP = parseBlock(file, tokens, i5)
     m = ImplMethod.Method(pStr(nameP), pAst(paramsP), pType(retP), pExpr(bodyP))
-  } yield parseImplMethods(file, tokens, pIdx(bodyP), List.cons(m, acc))
+  } yield parseImplMethodsWith(file, tokens, pIdx(bodyP), List.cons(m, acc), tparams)
 
 def implMethodName(traitName: String, forType: String, method: String): String =
   str3("__impl_", traitName, str3("_", forType, str3("_", method, "")))
+
+def recMethodName(forType: String, method: String): String =
+  str3("__rec_", forType, str3("_", method, ""))
 
 def parseTopDef(file: String, tokens: List, i: Int, pkg: String, enums: List, traits: List, impls: List, defs: List, main: Expr, mainMod: String, imports: List): Prog =
   for {

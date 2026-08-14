@@ -8,7 +8,7 @@ enum EnumCase:
 
 enum EnumDef:
   case Enum(module: String, name: String, cases: List, tparams: List)
-  case Record(module: String, name: String, fields: List, tparams: List)
+  case Record(module: String, name: String, fields: List, tparams: List, methods: List)
 
 enum TraitMethod:
   case Method(name: String, params: List, ret: Type)

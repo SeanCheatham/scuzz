@@ -69,6 +69,8 @@ pub struct EnumDef {
     pub cases: Vec<EnumCase>,
     /// `record Name(…)` — single case with the same name; surface sugar for construct/match.
     pub is_record: bool,
+    /// `record Box[T](x: T): def get(): T = self.x` — expanded to `__rec_Box_get` before typecheck.
+    pub methods: Vec<ImplMethod>,
 }
 
 /// One `case Name` / `case Name(x: T)` in an enum.

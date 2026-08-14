@@ -307,6 +307,7 @@ mod tests {
                 field_rfns: vec![],
             }],
             is_record: false,
+            methods: vec![],
         }
     }
 

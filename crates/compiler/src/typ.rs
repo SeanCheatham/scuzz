@@ -43,12 +43,19 @@ pub fn impl_method_name(trait_name: &str, for_type: &str, method: &str) -> Strin
     format!("__impl_{trait_name}_{for_type}_{method}")
 }
 
+/// Mangled def name for a record method (`record Box[T]: def get()` → `__rec_Box_get`).
+pub fn rec_method_name(for_type: &str, method: &str) -> String {
+    format!("__rec_{for_type}_{method}")
+}
+
 #[derive(Debug, Clone)]
 struct MethodEntry {
     mangled: String,
     /// Parameter types after `self`, already resolved.
     params: Vec<Type>,
     ret: Type,
+    /// Record type parameters (`Box[T]`); empty for trait impls.
+    type_params: Vec<String>,
 }
 
 #[derive(Debug, Default)]
@@ -62,6 +69,7 @@ impl MethodIndex {
         impls: &[ImplDef],
         traits: &[TraitDef],
         enums: &EnumIndex<'_>,
+        enum_defs: &[EnumDef],
     ) -> Result<Self, TypeError> {
         let mut by_type_method = HashMap::new();
         for im in impls {
@@ -134,6 +142,7 @@ impl MethodIndex {
                         ),
                         params: params?,
                         ret: got_ret,
+                        type_params: Vec::new(),
                     },
                 );
             }
@@ -147,6 +156,36 @@ impl MethodIndex {
                 }
             }
         }
+        for en in enum_defs {
+            if !en.is_record {
+                continue;
+            }
+            let for_id = crate::resolve::enum_id(&en.module, &en.name);
+            for method in &en.methods {
+                let key = (for_id.clone(), method.name.clone());
+                if by_type_method.contains_key(&key) {
+                    return Err(TypeError::Msg(format!(
+                        "duplicate method {} for type {}",
+                        method.name, for_id
+                    )));
+                }
+                let params: Result<Vec<_>, _> = method
+                    .params
+                    .iter()
+                    .map(|p| resolve_type_in(&p.ty, enums, &en.module, &en.type_params))
+                    .collect();
+                let ret = resolve_type_in(&method.ret, enums, &en.module, &en.type_params)?;
+                by_type_method.insert(
+                    key,
+                    MethodEntry {
+                        mangled: rec_method_name(&en.name, &method.name),
+                        params: params?,
+                        ret,
+                        type_params: en.type_params.clone(),
+                    },
+                );
+            }
+        }
         Ok(Self { by_type_method })
     }
 
@@ -157,12 +196,46 @@ impl MethodIndex {
     }
 }
 
+fn instantiate_method(entry: &MethodEntry, targs: &[Type]) -> Result<(Vec<Type>, Type), TypeError> {
+    if !entry.type_params.is_empty() && targs.len() != entry.type_params.len() {
+        return Err(TypeError::Msg(format!(
+            "method .{} needs a generic receiver",
+            entry.mangled
+        )));
+    }
+    let mut subst = HashMap::new();
+    for (p, t) in entry.type_params.iter().zip(targs.iter()) {
+        subst.insert(p.clone(), t.clone());
+    }
+    Ok((
+        entry
+            .params
+            .iter()
+            .map(|t| apply_subst(t, &subst))
+            .collect(),
+        apply_subst(&entry.ret, &subst),
+    ))
+}
+
+fn method_receiver_parts<'a>(
+    ty: &'a Type,
+    method: &str,
+) -> Result<(&'a str, &'a [Type]), TypeError> {
+    match ty {
+        Type::Adt(id) => Ok((id, &[])),
+        Type::App(id, args) => Ok((id, args)),
+        other => Err(TypeError::Msg(format!(
+            "method .{method} needs a record/ADT receiver, got {other:?}"
+        ))),
+    }
+}
+
 /// Turn `impl` methods into ordinary defs (`self` first) for FunIndex / codegen.
 pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
     let enums = EnumIndex::build(&program.enums, &program.imports)
         .map_err(|e| TypeError::Msg(e.to_string()))?;
     // Validate via MethodIndex build.
-    let _ = MethodIndex::build(&program.impls, &program.traits, &enums)?;
+    let _ = MethodIndex::build(&program.impls, &program.traits, &enums, &program.enums)?;
     for im in &program.impls {
         let for_id = enums
             .resolve_id(&im.for_type, &im.module)
@@ -198,6 +271,57 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
             });
         }
     }
+    let record_methods: Vec<FunDef> = {
+        let mut extra = Vec::new();
+        for en in &program.enums {
+            if !en.is_record {
+                continue;
+            }
+            let self_ty = if en.type_params.is_empty() {
+                Type::Adt(en.name.clone())
+            } else {
+                Type::App(
+                    en.name.clone(),
+                    en.type_params
+                        .iter()
+                        .map(|p| Type::Var(p.clone()))
+                        .collect(),
+                )
+            };
+            for method in &en.methods {
+                let mangled = rec_method_name(&en.name, &method.name);
+                if program
+                    .defs
+                    .iter()
+                    .any(|d| d.module == en.module && d.name == mangled)
+                    || extra.iter().any(|d: &FunDef| d.name == mangled)
+                {
+                    return Err(TypeError::Msg(format!(
+                        "record method name collision {mangled}"
+                    )));
+                }
+                let mut params = vec![Param {
+                    name: "self".into(),
+                    ty: self_ty.clone(),
+                    rfn: None,
+                }];
+                params.extend(method.params.clone());
+                extra.push(FunDef {
+                    module: en.module.clone(),
+                    name: mangled,
+                    is_private: false,
+                    is_law: false,
+                    is_driver: false,
+                    type_params: en.type_params.clone(),
+                    params,
+                    ret: method.ret.clone(),
+                    body: method.body.clone(),
+                });
+            }
+        }
+        extra
+    };
+    program.defs.extend(record_methods);
     Ok(program)
 }
 
@@ -209,7 +333,7 @@ pub fn typecheck(program: &Program) -> Result<(), TypeError> {
         }
         other => TypeError::Msg(other.to_string()),
     })?;
-    let methods = MethodIndex::build(&program.impls, &program.traits, &enums)?;
+    let methods = MethodIndex::build(&program.impls, &program.traits, &enums, &program.enums)?;
     let funs =
         FunIndex::build(&program.defs, &program.imports, &program.enums).map_err(|e| match e {
             ResolveError::Duplicate { module, name } => {
@@ -434,13 +558,16 @@ pub fn resolve_field_access(mut program: Program) -> Result<Program, TypeError> 
     let impls_owned = program.impls.clone();
     let enums = EnumIndex::build(&enums_owned, &imports_owned)
         .map_err(|e| TypeError::Msg(e.to_string()))?;
-    let methods = MethodIndex::build(&impls_owned, &traits_owned, &enums)?;
+    let methods = MethodIndex::build(&impls_owned, &traits_owned, &enums, &enums_owned)?;
     let funs = FunIndex::build(&defs_owned, &imports_owned, &enums_owned)
         .map_err(|e| TypeError::Msg(e.to_string()))?;
     for d in &mut program.defs {
         let mut env: HashMap<String, Type> = HashMap::new();
         for p in &d.params {
-            env.insert(p.name.clone(), resolve_type(&p.ty, &enums, &d.module)?);
+            env.insert(
+                p.name.clone(),
+                resolve_type_in(&p.ty, &enums, &d.module, &d.type_params)?,
+            );
         }
         d.body = rewrite_fields(
             std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)),
@@ -781,13 +908,10 @@ fn rewrite_fields(
                 );
             }
             let rt = infer(&receiver, enums, funs, methods, current_module, env)?;
-            let Type::Adt(id) = &rt else {
-                return Err(TypeError::Msg(format!(
-                    "method .{method} needs a record/ADT receiver, got {rt:?}"
-                ))
-                .with_span_if_bare(&span));
-            };
+            let (id, targs) =
+                method_receiver_parts(&rt, &method).map_err(|e| e.with_span_if_bare(&span))?;
             let entry = methods.lookup(id, &method)?;
+            let _ = instantiate_method(entry, targs)?;
             let mut call_args = vec![receiver];
             call_args.extend(args);
             Ok(Expr::new(
@@ -801,6 +925,15 @@ fn rewrite_fields(
         ExprKind::Field { base, field } => {
             let base = rewrite_fields(*base, enums, funs, methods, current_module, env)?;
             let bt = infer(&base, enums, funs, methods, current_module, env)?;
+            if matches!(&bt, Type::App(_, _)) {
+                return Ok(Expr::new(
+                    ExprKind::Field {
+                        base: Box::new(base),
+                        field,
+                    },
+                    span,
+                ));
+            }
             let Type::Adt(id) = &bt else {
                 return Err(TypeError::Msg(format!(
                     "field access .{field} needs a record type, got {bt:?}"
@@ -996,24 +1129,21 @@ fn infer(
                     infer_require_args(args, &rt, enums, funs, methods, current_module, env)?;
                     return Ok(rt);
                 }
-                let Type::Adt(id) = &rt else {
-                    return Err(TypeError::Msg(format!(
-                        "method .{method} needs a record/ADT receiver, got {rt:?}"
-                    )));
-                };
+                let (id, targs) = method_receiver_parts(&rt, method)?;
                 let entry = methods.lookup(id, method)?;
-                if args.len() != entry.params.len() {
+                let (params, ret) = instantiate_method(entry, targs)?;
+                if args.len() != params.len() {
                     return Err(TypeError::Msg(format!(
                         ".{method} expects {} arg(s), got {}",
-                        entry.params.len(),
+                        params.len(),
                         args.len()
                     )));
                 }
-                for (arg, want) in args.iter().zip(entry.params.iter()) {
+                for (arg, want) in args.iter().zip(params.iter()) {
                     let at = infer(arg, enums, funs, methods, current_module, env)?;
                     expect_ty(&at, want)?;
                 }
-                Ok(entry.ret.clone())
+                Ok(ret)
             }
             ExprKind::AdtConstruct {
                 enum_name,
@@ -2187,7 +2317,7 @@ pub fn monomorphize(mut program: Program) -> Result<Program, TypeError> {
     let defs_owned = program.defs.clone();
     let enums = EnumIndex::build(&enums_owned, &imports_owned)
         .map_err(|e| TypeError::Msg(e.to_string()))?;
-    let methods = MethodIndex::build(&impls_owned, &traits_owned, &enums)?;
+    let methods = MethodIndex::build(&impls_owned, &traits_owned, &enums, &enums_owned)?;
     let funs = FunIndex::build(&defs_owned, &imports_owned, &enums_owned)
         .map_err(|e| TypeError::Msg(e.to_string()))?;
 
@@ -2780,7 +2910,7 @@ pub fn elaborate_generics(mut program: Program) -> Result<Program, TypeError> {
     let defs_owned = program.defs.clone();
     let enums = EnumIndex::build(&enums_owned, &imports_owned)
         .map_err(|e| TypeError::Msg(e.to_string()))?;
-    let methods = MethodIndex::build(&impls_owned, &traits_owned, &enums)?;
+    let methods = MethodIndex::build(&impls_owned, &traits_owned, &enums, &enums_owned)?;
     let funs = FunIndex::build(&defs_owned, &imports_owned, &enums_owned)
         .map_err(|e| TypeError::Msg(e.to_string()))?;
     for d in &mut program.defs {
@@ -4073,6 +4203,7 @@ fn specialize_enums(mut program: Program) -> Result<Program, TypeError> {
             type_params: Vec::new(),
             cases,
             is_record: en.is_record,
+            methods: Vec::new(),
         });
     }
 
@@ -4670,6 +4801,21 @@ def unbox[T](b: Box[T]): T = b.x
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("generic record field access should typecheck");
+    }
+
+    #[test]
+    fn typechecks_generic_record_method() {
+        let src = r#"
+record Box[T](x: T):
+  def get(): T =
+    self.x
+@main def main: IO[Unit] =
+  for {
+    b = Box(4)
+  } yield IO.println(Str.fromInt(b.get()))
+"#;
+        let p = expand_impls(lower_program(parse(src).unwrap())).expect("expand");
+        typecheck(&p).expect("generic record method should typecheck");
     }
 
     #[test]
