@@ -162,7 +162,7 @@ App correctness is **not** classical unit tests. Prefer **mutation, fuzzing, pro
 
 - **Oracles live in the live module.** Top-level `law` declarations (pure, nullary `Bool` predicates), explicit `.require(pred)` on values / `IO` (type-preserving; residual `Law.check` / sequenced `Law.assert` under verify), reachability `Law.sometimes(name)`, and `where` refinements on `def` params and `record` fields. All erase from live builds; armed under TestRuntime / fuzz / mutation. Application is at the call site via `.require`.
 - **Drivers (`*.scuzz_drivers`) do things.** Impure, parameterized, oracle-free steps; `scuzz fuzz` composes them (generated args, random order / interleaving) alongside the UI event alphabet. `check` rejects `Law.*` and `.require` in driver files — an assert inside a driver is a unit test in a costume.
-- **`Law.sometimes` keeps composition honest.** Reachability accumulates across a fuzz *campaign*; declared-but-never-reached states fail the campaign, so oracle-free drivers cannot pass vacuously. It is also the coverage/fitness signal for later corpus guidance. It is a path marker (`Unit`), not a value method.
+- **`Law.sometimes` keeps composition honest.** Reachability accumulates across a fuzz *campaign*; declared-but-never-reached states fail the campaign, so oracle-free drivers cannot pass vacuously. It is a coverage/fitness signal for corpus guidance, alongside Headless dump novelty. It is a path marker (`Unit`), not a value method.
 - **Mutation pressures the oracles.** Surviving mutants mean weak laws/refinements.
 
 | Phase | Role |
@@ -198,7 +198,7 @@ Keep purity checkable (pure `A` vs `IO` vs session), total expr core, signals as
 
 ### `scuzz fuzz`
 
-Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overlays when present). The fuzz alphabet is the typed event surface (buttons, text fields) **plus declared drivers** (`drive <name> [args]` extends the script line protocol; the verify build publishes the driver table alongside the a11y dump). Oracles: in-source **laws/refinements** first; panic/`SzError` still fails; `Law.sometimes` reachability judges the campaign; structural dumps aid diagnosis (PNG last). `repro.toml` records events + driver invocations verbatim, so replay is generator-independent. Requires stable tap order, `pump` as time, no hidden nondeterminism. Determinism makes any failing prefix replayable. Seeded `--iters` keeps prefixes that hit new `Law.sometimes` names and extends them (CLI-only; no runtime machinery). Flags, script verbs, and schedule seeds: [`guide.md`](guide.md). `fuzz` lives in the Stage-1/2 CLI (not Stage 0).
+Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overlays when present). The fuzz alphabet is the typed event surface (buttons, text fields) **plus declared drivers** (`drive <name> [args]` extends the script line protocol; the verify build publishes the driver table alongside the a11y dump). Oracles: in-source **laws/refinements** first; panic/`SzError` still fails; `Law.sometimes` reachability judges the campaign; structural dumps aid diagnosis (PNG last). `repro.toml` records events + driver invocations verbatim, so replay is generator-independent. Requires stable tap order, `pump` as time, no hidden nondeterminism. Determinism makes any failing prefix replayable. Seeded `--iters` keeps prefixes that hit new `Law.sometimes` names or a new Headless `dump.txt` and extends them (CLI-only; no runtime machinery). Flags, script verbs, and schedule seeds: [`guide.md`](guide.md). `fuzz` lives in the Stage-1/2 CLI (not Stage 0).
 
 ### Layout model
 
@@ -210,7 +210,7 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: dump-novelty fuzz prefixes — [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
+Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: IO-only fuzz corpus — [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features. UI is a primary path among CLI/server/desktop/mobile — not the only v0 bar.
 

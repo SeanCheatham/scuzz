@@ -31,7 +31,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 Vision locks **oracles in source, drivers as the test surface** ([`vision.md`](vision.md#laws-simulation-mutation-and-verification)). Stage 0 and `compiler-scuzz/` parse top-level `law name: Bool = …`, provide `.require` (type-preserving application; residual `Law.check` / sequenced `Law.assert`), `Law.check` / `Law.sometimes`, load stem-paired `*.scuzz_drivers`, and attach `where` refinements on `def` params and `record` fields. Unused laws fail `check`.
 
-Open questions parked here: dump-novelty as a second fuzz-corpus signal (today only new `Law.sometimes` names).
+Open questions parked here: IO-only fuzz has no corpus (today only `[ui]` prefixes).
 
 ### Near-term (AI-friendly tooling)
 

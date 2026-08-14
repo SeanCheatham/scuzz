@@ -2,4 +2,4 @@
 
 ## Next
 
-**Dump-novelty fuzz prefixes** — seeded `--iters` already extends prefixes that hit new `Law.sometimes` names. Next: also keep prefixes whose Headless `dump.txt` changed, so UI state without a sometimes marker still guides search.
+**IO-only fuzz corpus** — `[ui]` seeded `--iters` keeps prefixes that hit new `Law.sometimes` names or a new Headless dump. IO-only fuzz still does not keep interesting schedule seeds for later `--iters`.
