@@ -27,7 +27,7 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 | Binary format | Native ELF/Mach-O/PE via LLVM | JVM classfiles / JARs |
 | Dependencies | `scuzz.toml` path deps (data-only; no plugin DSL) | Maven Central / Ivy; git/versioned hosted artifacts (deferred); sbt/Gradle/`pubspec` plugins |
 | Effects | Builtin `IO` / `Resource` / concurrent kit + Clock/Random/Fs/Net/Sys | cats-effect runtime, ZIO-as-library, Future-as-default |
-| Test interpreters | Built-in verification: TestRuntime fakes (`SCUZZ_TESTRT=1`); in-source `law` + `.require` + stem-paired `*.scuzz_sim` / `*.scuzz_drivers`; `scuzz fuzz`; mutation (direction) | Wall-clock-only harnesses; ad-hoc FFI mocks; app-level Mockito / `src/test` unit trees; third-party mutation/fuzz frameworks |
+| Test interpreters | Built-in verification: TestRuntime fakes (`SCUZZ_TESTRT=1`); in-source `law` + `.require` + stem-paired `*.scuzz_sim` / `*.scuzz_drivers`; `scuzz fuzz`; `scuzz mutate` (negate residual oracles) | Wall-clock-only harnesses; ad-hoc FFI mocks; app-level Mockito / `src/test` unit trees; third-party mutation/fuzz frameworks |
 | UI | `View` + `Ui` + Skia (`sk_capi`; Impeller deferred) | Swing, JavaFX, Compose Multiplatform, Flutter widgets |
 | Watch | Rebuild on source change (`scuzz watch`) | Flutter hot reload / DevTools VM patching |
 | Diagnostics | `scuzz check --message-format=json` (LSP wraps `check`) | Separate IDE typer; analyze-vs-check; `*.g.scuzz` codegen |

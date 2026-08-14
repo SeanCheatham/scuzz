@@ -2,4 +2,4 @@
 
 ## Next
 
-**Built-in mutation testing** — first-class `scuzz` mutation surface over residual oracles (IR-level, not source rewriting). Surviving mutants mean weak laws/refinements.
+**Richer `scuzz mutate`** — negate of residual `Law.check` / `Law.assert` is in (idle TestRuntime probe, `--limit N`). Remaining: more IR operators, and per-mutant fuzz scripts/schedules so tap-path oracles are exercised.

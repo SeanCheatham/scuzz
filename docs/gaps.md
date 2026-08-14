@@ -43,7 +43,7 @@ Open questions parked here: driver argument generation beyond `Int`/`String`; co
 - **Concurrency** — cooperative fibers only; `IO.ensure` / `Resource` release on cancel (including `IO.timeout` / `Fiber.interrupt`). Language `Fiber.fork` / `join` / `interrupt` and `IO.forever` / `repeatN` / `retryN` are in. Later: OS threads, supervision trees.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting; `Signal.list` frees unshared cons spines. Later: a collector if list-churn still demands it.
 - **Language surface** — richer generics beyond monomorphized defs/enums/records ([`compatibility.md`](compatibility.md)).
-- **Built-in mutation testing** — vision locks mutation as part of the one `scuzz` verification strategy (with fuzz, laws, sim, determinism). Laws + fuzz + TestRuntime exist; a first-class mutation command/surface does not yet. No external mutators. Mutation targets the in-source oracles (IR-level, not source rewriting).
+- **Richer mutation** — `scuzz mutate` (Stage 1/2) negates residual `Law.check` / `Law.assert` predicates and probes each mutant once under TestRuntime. Survivors are weak or unreached oracles. Still missing: more IR operators, and per-mutant fuzz scripts/schedules. No external mutators.
 
 ### Dependency forms beyond `path`
 

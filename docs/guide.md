@@ -106,9 +106,9 @@ src/
 - IO packages (no `[ui]`): `scuzz test` compiles and runs under `SCUZZ_TESTRT=1`, requiring exit 0
 - `scuzz check` format-verifies `src/` and typechecks live + sim twins + laws + drivers + `where` + `.require` (every `law` must be applied); `--message-format=json` is the editor protocol (`check` only; LSP wraps this)
 - `scuzz fuzz --iters N` searches event scripts × schedules (`[ui]`) or schedule seeds only (IO-only); `--exhaust --depth N` is `[ui]` event alphabet (including `drive`) with FIFO schedule; `--replay repro.toml` restores events + optional `schedule_seed`; oracles are residual `.require` / `Law.check`, panic/`SzError`, and campaign `Law.sometimes` reachability
+- `scuzz mutate --limit N` (Stage 1/2 CLI) negates residual `Law.check` / `Law.assert` predicates and runs one TestRuntime probe per mutant (idle `[ui]` script). Kill = the probe fails; survivors mean weak or unreached oracles. No sites (e.g. `examples/hello`) exits 0. Do not add external mutators
 - Deterministic fakes: `TestRuntime` / `SCUZZ_TESTRT=1` for clock/random/FS/network/console in app binaries
 - Put non-determinism behind blessed `IO`; keep View construction pure
-- Built-in mutation (law-strength gate) is direction — see [gaps.md](gaps.md); do not add external mutators
 
 ## Examples to read next
 

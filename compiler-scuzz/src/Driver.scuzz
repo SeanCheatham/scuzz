@@ -704,24 +704,27 @@ def linkProject(clang: String, ll: String, lib: String, ffi: String, inc: String
 
 def compileAfterSources(projectDir: String, outDir: String, verify: Int, runtimeDir: String, clang: String, name: String, withUi: Int, texts: List, overlays: List): IO[Unit] =
   mergeSources(texts, emptyProg(), 0).flatMap(prog0 =>
-    prepareCompileProg(prog0, overlays, verify).flatMap(prog1 =>
-      for {
-        prog0 = lowerProg(prog1)
-        prog1b = expandImplsProg(prog0)
-        ty = typecheckProg(prog1b)
-        ep = elaborateProg(prog1b)
-        progMono = monomorphizeProg(List.head(ep))
-        prog = resolveFieldsProg(progMono)
-        dnames = if (verify == 0) List.empty() else collectDriverNamesFromOverlays(filterOverlays(overlays, "drivers", List.empty()), List.empty())
-        ir = emitProgram(prog, dnames)
-        ll = pathJoin(outDir, Str.concat(name, ".ll"))
-        exe = pathJoin(outDir, name)
-        lib = pathJoin(runtimeDir, "build/libscuzz_rt.a")
-        ffi = pathJoin(parentDir(runtimeDir), "ffi-skia")
-        inc = pathJoin(runtimeDir, "include")
-        embedder = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-desktop"), "build/libscuzz_embedder.a")
-        mobile = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-mobile"), "build/libscuzz_mobile.a")
-      } yield if (tyIsOk(ty) == 0) IO.fail(tyMsg(ty)) else if (tyIsOk(elabResOf(ep)) == 0) IO.fail(tyMsg(elabResOf(ep))) else Fs.mkdirs(outDir).flatMap(_ =>
+    prepareCompileProg(prog0, overlays, verify).flatMap(prog1 => compilePrepared(projectDir, outDir, verify, runtimeDir, clang, name, withUi, prog1, overlays))
+  )
+
+def compilePrepared(projectDir: String, outDir: String, verify: Int, runtimeDir: String, clang: String, name: String, withUi: Int, prog1: Prog, overlays: List): IO[Unit] =
+  for {
+    prog0 = lowerProg(prog1)
+    prog1b = expandImplsProg(prog0)
+    ty = typecheckProg(prog1b)
+    ep = elaborateProg(prog1b)
+    progMono = monomorphizeProg(List.head(ep))
+    prog = resolveFieldsProg(progMono)
+    dnames = if (verify == 0) List.empty() else collectDriverNamesFromOverlays(filterOverlays(overlays, "drivers", List.empty()), List.empty())
+    ir = emitProgram(prog, dnames)
+    ll = pathJoin(outDir, Str.concat(name, ".ll"))
+    exe = pathJoin(outDir, name)
+    lib = pathJoin(runtimeDir, "build/libscuzz_rt.a")
+    ffi = pathJoin(parentDir(runtimeDir), "ffi-skia")
+    inc = pathJoin(runtimeDir, "include")
+    embedder = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-desktop"), "build/libscuzz_embedder.a")
+    mobile = pathJoin(pathJoin(parentDir(runtimeDir), "embedder-mobile"), "build/libscuzz_mobile.a")
+  } yield if (tyIsOk(ty) == 0) IO.fail(tyMsg(ty)) else if (tyIsOk(elabResOf(ep)) == 0) IO.fail(tyMsg(elabResOf(ep))) else Fs.mkdirs(outDir).flatMap(_ =>
   writeSometimesDeclared(outDir, verify, prog1b).flatMap(_ =>
     writeDriversTable(outDir, verify, overlays).flatMap(_ =>
       Fs.write(ll, ir).flatMap(_ =>
@@ -730,8 +733,6 @@ def compileAfterSources(projectDir: String, outDir: String, verify: Int, runtime
     )
   )
 )
-    )
-  )
 
 def prepareCompileProg(prog0: Prog, overlays: List, verify: Int): IO[Prog] =
   if (verify == 0) IO.pure(eraseRequiresProg(setProgDefs(prog0, eraseLawsDefs(progDefs(prog0), List.empty())))) else prepareVerifyProg(prog0, overlays)
