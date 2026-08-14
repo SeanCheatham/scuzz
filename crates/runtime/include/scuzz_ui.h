@@ -244,7 +244,8 @@ void sz_ui_session_set_rebuild(SzUiSession *session, SzUiRebuildFn fn, void *env
  * Mobile share this path. */
 int sz_ui_session_watch(SzUiSession *session, const char *path);
 /* Live structural dump (same format as SCUZZ_FUZZ_DUMP) rewritten on dirty
- * pumps, stamp reload, and IO-bridge flushes. Agents read the file. */
+ * pumps, stamp reload, and IO-bridge flushes. Agents read the file.
+ * [taps] lists inject indices for `tap N` (scan order, cap 64). */
 int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
 int sz_ui_session_write_dump(SzUiSession *session, const char *path);
 /* Watch an inject script (tap/text/type/pump/scroll/backspace). Next pump that

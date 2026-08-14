@@ -9,3 +9,7 @@ button:Home
 button:Other
 text:Home
 button:+1
+
+[taps]
+0 Home
+1 Other

@@ -33,7 +33,7 @@ Vision locks **oracles in source, drivers as the test surface** ([`vision.md`](v
 
 ### Near-term (AI-friendly tooling)
 
-- **Hot reload and debugging tools** — Headless + in-process reload + debug for agents. Headless is a peer; `scuzz watch` only rebuilds; `[ui]` `run --watch` stamp-reloads the View tree (Signals stay), writes `build/debug.dump`, and plays `build/inject.script`. Still missing: new machine code in-process and deeper agent debug UX. Do not document `watch` as hot reload.
+- **Hot reload and debugging tools** — Headless + in-process reload + debug for agents. Headless is a peer; `scuzz watch` only rebuilds; `[ui]` `run --watch` stamp-reloads the View tree (Signals stay), writes `build/debug.dump` (signals + a11y + `[taps]` for `tap N`), and plays `build/inject.script`. Still missing: new machine code in-process, and remaining agent debug (`[fields]` for `text`/`type`). Do not document `watch` as hot reload.
 
 ### Residuals
 

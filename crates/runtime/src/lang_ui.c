@@ -278,7 +278,7 @@ static void scripted_button_tap(SzUiSession *session, int prefer_upper) {
 
 /* --- SCUZZ_UI_SCRIPT playback (fuzz / replay) ---------------------------- */
 /* Line protocol, one event per line, delivered across pump boundaries:
-     tap <n>    tap the nth button (scan order); missing target is a no-op
+     tap <n>    tap the nth button (scan order; [taps] in the dump); missing target is a no-op
      text <s>   replace the focused/first TextField with <s>; no field is a no-op
      type <s>   append <s> to the focused/first TextField; empty is a no-op; no field is a no-op
      pump <k>   pump k extra frames

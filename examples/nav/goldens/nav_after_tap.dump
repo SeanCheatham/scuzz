@@ -8,3 +8,7 @@ str[3] = "page = 1"
 button:Home
 button:Other
 text:Other
+
+[taps]
+0 Home
+1 Other

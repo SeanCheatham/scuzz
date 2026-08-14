@@ -273,10 +273,22 @@ int sz_ui_session_set_inject(SzUiSession *session, const char *path) {
   return 1;
 }
 
+static int collect_buttons(SzUiSession *session, SzView **buttons, int cap);
+
+static void fputs_dump_label(FILE *f, const char *label) {
+  const char *p;
+  if (!label)
+    return;
+  for (p = label; *p; p++)
+    fputc((*p == '\n' || *p == '\r') ? ' ' : *p, f);
+}
+
 int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
   FILE *f;
   SzString *signals;
   SzString *views;
+  SzView *buttons[64];
+  int n_buttons, i;
   if (!path || !path[0])
     return 0;
   f = fopen(path, "w");
@@ -285,8 +297,14 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
   signals = sz_signal_dump();
   views = (session && session->root) ? sz_view_a11y_dump(session->root)
                                      : sz_string_from_cstr("");
-  fprintf(f, "[signals]\n%s\n[views]\n%s", sz_string_cstr(signals),
+  fprintf(f, "[signals]\n%s\n[views]\n%s\n[taps]\n", sz_string_cstr(signals),
           sz_string_cstr(views));
+  n_buttons = collect_buttons(session, buttons, 64);
+  for (i = 0; i < n_buttons; i++) {
+    fprintf(f, "%d ", i);
+    fputs_dump_label(f, sz_view_a11y_label(buttons[i]));
+    fputc('\n', f);
+  }
   fclose(f);
   sz_string_free(signals);
   sz_string_free(views);
@@ -909,7 +927,7 @@ void sz_ui_session_finish(SzUiSession *session) {
     fprintf(stderr, "scuzz: wrote snapshot %s\n", snap);
   }
   if (dump && dump[0]) {
-    /* Structural oracle: signal store + a11y view dump (not pixels). */
+    /* Structural oracle: signal store + a11y + tap indices (not pixels). */
     SzString *views;
     if (!sz_ui_session_write_dump(session, dump))
       sz_panic("fuzz dump open failed");

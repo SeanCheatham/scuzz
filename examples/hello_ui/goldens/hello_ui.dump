@@ -5,3 +5,6 @@ str[1] = "taps = 0"
 [views]
 text:Hello Headless
 button:tap
+
+[taps]
+0 tap

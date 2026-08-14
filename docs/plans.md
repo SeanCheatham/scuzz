@@ -2,4 +2,4 @@
 
 ## Next
 
-**In-process machine-code reload** — Net hangs and bad clients/handlers are bounded. `[ui]` `run --watch` stamp-reloads the View tree; new machine code still requires a rebuild. Next: a vertical slice of in-process code reload, or the next ranked gap in [`gaps.md`](gaps.md) if that slice will not fit.
+**Numbered text fields in `debug.dump`** — `[taps]` lists inject indices for `tap N`. Next: a `[fields]` section in the same order `text` / `type` / `backspace` use, so agents can see which field those verbs hit. Machine-code reload remains the larger hot-reload gap.

@@ -6,3 +6,6 @@ str[1] = "count = 1"
 text:Counter
 button:+1
 image:image
+
+[taps]
+0 +1

@@ -12,3 +12,9 @@ list:list
 text:- oat milk
 button:Save
 button:Clear
+
+[taps]
+0 Add
+1 Rename
+2 Save
+3 Clear

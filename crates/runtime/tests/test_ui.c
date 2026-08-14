@@ -404,6 +404,7 @@ static void test_ui_run_rebuild_keepalive(void) {
   buf[n] = '\0';
   assert(strstr(buf, "[signals]") != NULL);
   assert(strstr(buf, "[views]") != NULL);
+  assert(strstr(buf, "[taps]") != NULL);
   sz_signal_int_free(env.count);
   remove(stamp);
   remove(dump);
@@ -439,6 +440,7 @@ static void test_session_debug_dump(void) {
   sz_view_add_child(root, sz_view_text("Debug"));
   btn = sz_view_button("+", counter_tap, count);
   sz_view_add_child(root, btn);
+  sz_view_add_child(root, sz_view_button("-", counter_tap, count));
 
   memset(&cfg, 0, sizeof(cfg));
   cfg.kind = SZ_UI_RUNTIME_HEADLESS;
@@ -454,6 +456,9 @@ static void test_session_debug_dump(void) {
   assert(strstr(a, "[signals]") != NULL);
   assert(strstr(a, "[views]") != NULL);
   assert(strstr(a, "text:Debug") != NULL);
+  assert(strstr(a, "[taps]") != NULL);
+  assert(strstr(a, "0 +") != NULL);
+  assert(strstr(a, "1 -") != NULL);
 
   memset(&tap, 0, sizeof(tap));
   tap.kind = SZ_INPUT_TAP;
