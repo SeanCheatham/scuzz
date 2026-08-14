@@ -318,6 +318,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.absorbPointer",
         "View.absorbPointer(child: View): View",
     ),
+    (
+        "View.excludeSemantics",
+        "View.excludeSemantics(child: View): View",
+    ),
     ("Ui.run", "Ui.run(view: View): IO[Unit]"),
     (
         "Law.check",
@@ -460,5 +464,16 @@ mod tests {
             "@main def main: IO[Unit] =\n  Ui.run(_ => View.absorbPointer(View.text(\"x\")))\n";
         let h = hover_src(src, "absorbPointer");
         assert!(h.contains("View.absorbPointer(child: View): View"), "{h}");
+    }
+
+    #[test]
+    fn hovers_view_exclude_semantics() {
+        let src =
+            "@main def main: IO[Unit] =\n  Ui.run(_ => View.excludeSemantics(View.text(\"x\")))\n";
+        let h = hover_src(src, "excludeSemantics");
+        assert!(
+            h.contains("View.excludeSemantics(child: View): View"),
+            "{h}"
+        );
     }
 }

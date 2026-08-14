@@ -2292,6 +2292,148 @@ static void test_absorb_pointer_skips_scroll_at(void) {
   sz_view_free(wrap);
 }
 
+static void test_exclude_semantics_sizes_to_child(void) {
+  SzView *wrap, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect wf, chf;
+
+  child = sz_view_sized(40, 30, sz_view_text("Hi"));
+  wrap = sz_view_exclude_semantics(child);
+  sz_view_layout(wrap, 200.f, 200.f, theme);
+  assert(sz_view_kind(wrap) == SZ_VIEW_EXCLUDE_SEMANTICS);
+  wf = sz_view_frame(wrap);
+  chf = sz_view_frame(child);
+  assert(fabsf(wf.w - 40.f) < 0.5f);
+  assert(fabsf(wf.h - 30.f) < 0.5f);
+  assert(fabsf(chf.w - 40.f) < 0.5f);
+  assert(fabsf(chf.h - 30.f) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_exclude_semantics_hides_from_dump(void) {
+  SzView *col, *wrap;
+  SzString *dump;
+
+  col = sz_view_column();
+  wrap = sz_view_exclude_semantics(sz_view_button("Secret", NULL, NULL));
+  sz_view_add_child(col, wrap);
+  sz_view_add_child(col, sz_view_text("hi"));
+  dump = sz_view_a11y_dump(col);
+  assert(strstr(sz_string_cstr(dump), "button:Secret") == NULL);
+  assert(strstr(sz_string_cstr(dump), "text:hi") != NULL);
+  sz_string_free(dump);
+  sz_view_free(col);
+}
+
+static void test_exclude_semantics_hides_nested(void) {
+  SzView *inner, *wrap;
+  SzString *dump;
+
+  inner = sz_view_column();
+  sz_view_add_child(inner, sz_view_text("one"));
+  sz_view_add_child(inner, sz_view_text("two"));
+  wrap = sz_view_exclude_semantics(inner);
+  dump = sz_view_a11y_dump(wrap);
+  assert(strstr(sz_string_cstr(dump), "text:one") == NULL);
+  assert(strstr(sz_string_cstr(dump), "text:two") == NULL);
+  assert(sz_string_cstr(dump)[0] == '\0');
+  sz_string_free(dump);
+  sz_view_free(wrap);
+}
+
+static void test_exclude_semantics_hides_bind_text(void) {
+  SzSignalStr *s;
+  SzView *wrap;
+  SzString *dump;
+
+  s = sz_signal_str("live");
+  wrap = sz_view_exclude_semantics(sz_view_text_signal_str(s));
+  dump = sz_view_a11y_dump(wrap);
+  assert(strstr(sz_string_cstr(dump), "text:live") == NULL);
+  sz_string_free(dump);
+  sz_signal_str_set(s, "later");
+  dump = sz_view_a11y_dump(wrap);
+  assert(strstr(sz_string_cstr(dump), "text:later") == NULL);
+  sz_string_free(dump);
+  sz_view_free(wrap);
+  sz_signal_str_free(s);
+}
+
+static void test_exclude_semantics_still_tappable(void) {
+  SzView *wrap, *btn, *hit;
+  SzSignalInt *n;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  n = sz_signal_int(0);
+  btn = sz_view_button("Go", counter_tap, n);
+  wrap = sz_view_exclude_semantics(btn);
+  sz_view_layout(wrap, 200.f, 100.f, theme);
+  f = sz_view_frame(btn);
+  hit = sz_view_hit_test(wrap, f.x + 4.f, f.y + 4.f);
+  assert(hit == btn);
+  assert(sz_view_handle_tap(wrap, f.x + 4.f, f.y + 4.f));
+  assert(sz_signal_int_get(n) == 1);
+  sz_view_free(wrap);
+  sz_signal_int_free(n);
+}
+
+static void test_exclude_semantics_keeps_scroll_at(void) {
+  SzView *wrap, *scroll, *body;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  body = sz_view_sized(20, 80, sz_view_text("x"));
+  scroll = sz_view_scroll(body);
+  wrap = sz_view_exclude_semantics(sz_view_sized(80, 40, scroll));
+  sz_view_layout(wrap, 80.f, 40.f, theme);
+  f = sz_view_frame(wrap);
+  assert(sz_view_scroll_at(wrap, f.x + 4.f, f.y + 4.f) == scroll);
+  sz_view_free(wrap);
+}
+
+static void test_exclude_semantics_skips_field_collect(void) {
+  SzView *col, *hidden, *shown;
+  SzView *fields[8];
+  SzSignalStr *a, *b;
+  SzString *dump;
+  int n;
+  const SzTheme *theme = sz_theme_default();
+
+  a = sz_signal_str("secret");
+  b = sz_signal_str("ok");
+  hidden = sz_view_text_field(a, "hidden");
+  shown = sz_view_text_field(b, "shown");
+  col = sz_view_column();
+  sz_view_add_child(col, sz_view_exclude_semantics(hidden));
+  sz_view_add_child(col, shown);
+  sz_view_layout(col, 200.f, 120.f, theme);
+  n = sz_view_collect_text_fields(col, fields, 8);
+  assert(n == 1);
+  assert(fields[0] == shown);
+  dump = sz_view_a11y_dump(col);
+  assert(strstr(sz_string_cstr(dump), "textfield:hidden") == NULL);
+  assert(strstr(sz_string_cstr(dump), "textfield:shown") != NULL);
+  sz_string_free(dump);
+  sz_view_free(col);
+  sz_signal_str_free(a);
+  sz_signal_str_free(b);
+}
+
+static void test_exclude_semantics_sibling_button_stays(void) {
+  SzView *col;
+  SzString *dump;
+
+  col = sz_view_column();
+  sz_view_add_child(col, sz_view_exclude_semantics(sz_view_button("Skip", NULL, NULL)));
+  sz_view_add_child(col, sz_view_button("Keep", NULL, NULL));
+  dump = sz_view_a11y_dump(col);
+  assert(strstr(sz_string_cstr(dump), "button:Skip") == NULL);
+  assert(strstr(sz_string_cstr(dump), "button:Keep") != NULL);
+  sz_string_free(dump);
+  sz_view_free(col);
+}
+
 static void test_button_does_not_wrap(void) {
   SzView *b;
   const SzTheme *theme = sz_theme_default();
@@ -2953,6 +3095,14 @@ int main(void) {
   test_stack_front_button_wins_without_ignore();
   test_ignore_pointer_skips_scroll_at();
   test_absorb_pointer_skips_scroll_at();
+  test_exclude_semantics_sizes_to_child();
+  test_exclude_semantics_hides_from_dump();
+  test_exclude_semantics_hides_nested();
+  test_exclude_semantics_hides_bind_text();
+  test_exclude_semantics_still_tappable();
+  test_exclude_semantics_keeps_scroll_at();
+  test_exclude_semantics_skips_field_collect();
+  test_exclude_semantics_sibling_button_stays();
   test_button_does_not_wrap();
   test_text_blank_line_from_newline();
   test_a11y();

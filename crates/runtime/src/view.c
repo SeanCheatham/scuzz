@@ -107,7 +107,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_FRACTION || kind == SZ_VIEW_STRETCH ||
          kind == SZ_VIEW_MAX_SIZE || kind == SZ_VIEW_CLIP ||
          kind == SZ_VIEW_OPACITY || kind == SZ_VIEW_MAX_LINES ||
-         kind == SZ_VIEW_IGNORE_POINTER || kind == SZ_VIEW_ABSORB_POINTER;
+         kind == SZ_VIEW_IGNORE_POINTER || kind == SZ_VIEW_ABSORB_POINTER ||
+         kind == SZ_VIEW_EXCLUDE_SEMANTICS;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -250,6 +251,8 @@ static const char *a11y_role_name(SzA11yRole role) {
 static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
   int i;
   if (!v || !buf || !len || !view_is_shown(v))
+    return;
+  if (v->kind == SZ_VIEW_EXCLUDE_SEMANTICS)
     return;
   if (v->a11y_role != SZ_A11Y_NONE) {
     char line[256];
@@ -444,6 +447,13 @@ SzView *sz_view_ignore_pointer(SzView *child) {
 
 SzView *sz_view_absorb_pointer(SzView *child) {
   SzView *v = view_new(SZ_VIEW_ABSORB_POINTER);
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
+SzView *sz_view_exclude_semantics(SzView *child) {
+  SzView *v = view_new(SZ_VIEW_EXCLUDE_SEMANTICS);
   if (child)
     sz_view_add_child(v, child);
   return v;
@@ -1289,7 +1299,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     break;
   }
   case SZ_VIEW_IGNORE_POINTER:
-  case SZ_VIEW_ABSORB_POINTER: {
+  case SZ_VIEW_ABSORB_POINTER:
+  case SZ_VIEW_EXCLUDE_SEMANTICS: {
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
     if (ch) {
       SzBoxConstraints cc;
@@ -1689,6 +1700,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_FRACTION:
   case SZ_VIEW_IGNORE_POINTER:
   case SZ_VIEW_ABSORB_POINTER:
+  case SZ_VIEW_EXCLUDE_SEMANTICS:
     if (v->kind == SZ_VIEW_LIST)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     for (i = 0; i < v->child_count; i++)
@@ -1834,6 +1846,8 @@ int sz_view_handle_tap(SzView *root, float x, float y) {
 static int collect_text_fields_node(SzView *v, SzView **out, int cap, int n) {
   int i;
   if (!v || !view_is_shown(v) || n >= cap)
+    return n;
+  if (v->kind == SZ_VIEW_EXCLUDE_SEMANTICS)
     return n;
   if (v->kind == SZ_VIEW_TEXT_FIELD)
     out[n++] = v;

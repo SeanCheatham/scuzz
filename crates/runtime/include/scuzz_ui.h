@@ -147,7 +147,8 @@ typedef enum SzViewKind {
   SZ_VIEW_OPACITY,  /* pass constraints; scale paint alpha (0–100) */
   SZ_VIEW_MAX_LINES, /* cap wrapped text lines; 0 = no cap */
   SZ_VIEW_IGNORE_POINTER, /* skip hit-test; taps pass through */
-  SZ_VIEW_ABSORB_POINTER  /* skip child hit-test; block taps behind */
+  SZ_VIEW_ABSORB_POINTER, /* skip child hit-test; block taps behind */
+  SZ_VIEW_EXCLUDE_SEMANTICS /* skip a11y dump and field collect for subtree */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -200,6 +201,8 @@ SzView *sz_view_max_lines(int n, SzView *child);
 SzView *sz_view_ignore_pointer(SzView *child);
 /* Skip child hit-test; this frame blocks taps behind. */
 SzView *sz_view_absorb_pointer(SzView *child);
+/* Pass constraints through; size to child; skip a11y dump and field collect. */
+SzView *sz_view_exclude_semantics(SzView *child);
 /* Pass constraints through; size to child; paint `argb` behind the child. */
 SzView *sz_view_background(uint32_t argb, SzView *child);
 /* Largest rw:rh box that fits incoming max; child laid out in that tight slot. */
@@ -351,6 +354,7 @@ SzView *sz_lang_view_opacity(int64_t pct, SzView *child);
 SzView *sz_lang_view_max_lines(int64_t n, SzView *child);
 SzView *sz_lang_view_ignore_pointer(SzView *child);
 SzView *sz_lang_view_absorb_pointer(SzView *child);
+SzView *sz_lang_view_exclude_semantics(SzView *child);
 SzView *sz_lang_view_background(int64_t argb, SzView *child);
 SzView *sz_lang_view_aspect_ratio(int64_t rw, int64_t rh, SzView *child);
 SzView *sz_lang_view_fraction(int64_t wpct, int64_t hpct, SzView *child);

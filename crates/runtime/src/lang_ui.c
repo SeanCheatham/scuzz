@@ -110,6 +110,9 @@ SzView *sz_lang_view_ignore_pointer(SzView *child) {
 SzView *sz_lang_view_absorb_pointer(SzView *child) {
   return sz_view_absorb_pointer(child);
 }
+SzView *sz_lang_view_exclude_semantics(SzView *child) {
+  return sz_view_exclude_semantics(child);
+}
 SzView *sz_lang_view_background(int64_t argb, SzView *child) {
   return sz_view_background((uint32_t)argb, child);
 }

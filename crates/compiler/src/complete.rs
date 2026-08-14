@@ -295,4 +295,14 @@ mod tests {
             "{labels:?}"
         );
     }
+
+    #[test]
+    fn completes_view_exclude_semantics_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.ex\n";
+        let labels = labels_at(src, "View.ex");
+        assert!(
+            labels.iter().any(|l| l == "View.excludeSemantics"),
+            "{labels:?}"
+        );
+    }
 }
