@@ -2,4 +2,4 @@
 
 ## Next
 
-**More `scuzz mutate` operators** — idle probe + per-mutant fuzz (`--iters` / `--seed`) and negate of residual `Law.check` / `Law.assert` / `.require` are in. Remaining: IR operators beyond predicate negate.
+**Corpus-guided fuzz prefixes** — `scuzz fuzz` is seeded random scripts plus bounded `--exhaust`. Next: CLI-only prefix extension from `Law.sometimes` / dump coverage so later iters grow scripts that already reached new states. Driver args stay `Int`/`String` for this slice.

@@ -43,7 +43,7 @@ Open questions parked here: driver argument generation beyond `Int`/`String`; co
 - **Concurrency** — cooperative fibers only; `IO.ensure` / `Resource` release on cancel (including `IO.timeout` / `Fiber.interrupt`). Language `Fiber.fork` / `join` / `interrupt` and `IO.forever` / `repeatN` / `retryN` are in. Later: OS threads, supervision trees.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting; `Signal.list` frees unshared cons spines. Later: a collector if list-churn still demands it.
 - **Language surface** — richer generics beyond monomorphized defs/enums/records ([`compatibility.md`](compatibility.md)).
-- **More mutation operators** — `scuzz mutate` (Stage 1/2) negates residual `Law.check` / `Law.assert` / `.require` predicates and probes each mutant (idle TestRuntime run, then `--iters` fuzz scripts/schedules). Survivors are weak or unreached oracles. Still missing: IR operators beyond predicate negate. No external mutators.
+- **Mutation operators** — `scuzz mutate` (Stage 1/2) negates residual `Law.check` / `Law.assert` / `.require` predicates, flips relational/boolean ops inside them, and swaps `0`↔`1` literals, then probes (idle + `--iters` fuzz). Survivors are weak or unreached oracles. Later: arithmetic / drop-conjunct. No external mutators.
 
 ### Dependency forms beyond `path`
 

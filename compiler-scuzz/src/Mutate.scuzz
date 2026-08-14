@@ -24,222 +24,263 @@ def isOracleCallee(callee: String): Int =
 def negatePred(pred: Expr): Expr =
   Expr.If(pred, Expr.IntLit("0", dummySpan()), Expr.IntLit("1", dummySpan()), dummySpan())
 
-def listSetAt(xs: List, i: Int, v: Expr): List =
-  if (List.isEmpty(xs) == 1) xs else if (i == 0) List.cons(v, List.tail(xs)) else List.cons(List.head(xs), listSetAt(List.tail(xs), i - 1, v))
+def flipOp(op: String): String =
+  if (streq(op, "==") == 1) "!=" else if (streq(op, "!=") == 1) "==" else if (streq(op, "<") == 1) ">=" else if (streq(op, "<=") == 1) ">" else if (streq(op, ">") == 1) "<=" else if (streq(op, ">=") == 1) "<" else if (streq(op, "&&") == 1) "||" else if (streq(op, "||") == 1) "&&" else op
 
-def mutateExpr(e: Expr, target: Int, seen: Int): List =
+def isFlipOp(op: String): Int =
+  if (streq(flipOp(op), op) == 1) 0 else 1
+
+def is01Lit(digits: String): Int =
+  if (streq(digits, "0") == 1) 1 else if (streq(digits, "1") == 1) 1 else 0
+
+def flip01(digits: String): String =
+  if (streq(digits, "0") == 1) "1" else "0"
+
+def mutateExpr(e: Expr, target: Int, seen: Int, inOracle: Int): List =
   e match {
-    case Expr.Call(callee, args, span) => mutateCall(callee, args, span, target, seen)
-    case Expr.Adt(enumName, caseName, args, typeArgs, span) => mutateAdt(enumName, caseName, args, typeArgs, span, target, seen)
-    case Expr.Let(name, value, body, span) => mutateLet(name, value, body, span, target, seen)
-    case Expr.FlatMap(inner, param, body, span) => mutateFlat(inner, param, body, span, target, seen)
-    case Expr.Handle(inner, body, span) => mutateHandle(inner, body, span, target, seen)
-    case Expr.If(cond, thenB, elseB, span) => mutateIf(cond, thenB, elseB, span, target, seen)
-    case Expr.BinOp(op, left, right, span) => mutateBin(op, left, right, span, target, seen)
-    case Expr.Lambda(param, body, span) => mutateLam(param, body, span, target, seen)
-    case Expr.Match(scrut, arms, span) => mutateMatch(scrut, arms, span, target, seen)
-    case Expr.For(binders, body, span) => mutateFor(binders, body, span, target, seen)
-    case Expr.ListLit(elems, span) => mutateListLit(elems, span, target, seen)
-    case Expr.Interp(parts, span) => mutateInterp(parts, span, target, seen)
-    case Expr.MethodCall(receiver, method, args, span) => mutateMethod(receiver, method, args, span, target, seen)
-    case Expr.Field(base, field, span) => mutateField(base, field, span, target, seen)
-    case Expr.Println(arg, span) => mutateUnary("println", arg, span, target, seen)
-    case Expr.Fail(arg, span) => mutateUnary("fail", arg, span, target, seen)
-    case Expr.Pure(arg, span) => mutateUnary("pure", arg, span, target, seen)
-    case Expr.Sleep(arg, span) => mutateUnary("sleep", arg, span, target, seen)
-    case Expr.Attempt(inner, span) => mutateUnary("attempt", inner, span, target, seen)
-    case Expr.IoRace(left, right, span) => mutateIo2("race", left, right, span, target, seen)
-    case Expr.IoBoth(left, right, span) => mutateIo2("both", left, right, span, target, seen)
-    case Expr.IoEnsure(inner, finalizer, span) => mutateIo2("ensure", inner, finalizer, span, target, seen)
-    case Expr.IoTimeout(ms, inner, span) => mutateIo2("timeout", ms, inner, span, target, seen)
+    case Expr.IntLit(digits, span) => mutateIntLit(digits, span, target, seen, inOracle)
+    case Expr.Call(callee, args, span) => mutateCall(callee, args, span, target, seen, inOracle)
+    case Expr.Adt(enumName, caseName, args, typeArgs, span) => mutateAdt(enumName, caseName, args, typeArgs, span, target, seen, inOracle)
+    case Expr.Let(name, value, body, span) => mutateLet(name, value, body, span, target, seen, inOracle)
+    case Expr.FlatMap(inner, param, body, span) => mutateFlat(inner, param, body, span, target, seen, inOracle)
+    case Expr.Handle(inner, body, span) => mutateHandle(inner, body, span, target, seen, inOracle)
+    case Expr.If(cond, thenB, elseB, span) => mutateIf(cond, thenB, elseB, span, target, seen, inOracle)
+    case Expr.BinOp(op, left, right, span) => mutateBin(op, left, right, span, target, seen, inOracle)
+    case Expr.Lambda(param, body, span) => mutateLam(param, body, span, target, seen, inOracle)
+    case Expr.Match(scrut, arms, span) => mutateMatch(scrut, arms, span, target, seen, inOracle)
+    case Expr.For(binders, body, span) => mutateFor(binders, body, span, target, seen, inOracle)
+    case Expr.ListLit(elems, span) => mutateListLit(elems, span, target, seen, inOracle)
+    case Expr.Interp(parts, span) => mutateInterp(parts, span, target, seen, inOracle)
+    case Expr.MethodCall(receiver, method, args, span) => mutateMethod(receiver, method, args, span, target, seen, inOracle)
+    case Expr.Field(base, field, span) => mutateField(base, field, span, target, seen, inOracle)
+    case Expr.Println(arg, span) => mutateUnary("println", arg, span, target, seen, inOracle)
+    case Expr.Fail(arg, span) => mutateUnary("fail", arg, span, target, seen, inOracle)
+    case Expr.Pure(arg, span) => mutateUnary("pure", arg, span, target, seen, inOracle)
+    case Expr.Sleep(arg, span) => mutateUnary("sleep", arg, span, target, seen, inOracle)
+    case Expr.Attempt(inner, span) => mutateUnary("attempt", inner, span, target, seen, inOracle)
+    case Expr.IoRace(left, right, span) => mutateIo2("race", left, right, span, target, seen, inOracle)
+    case Expr.IoBoth(left, right, span) => mutateIo2("both", left, right, span, target, seen, inOracle)
+    case Expr.IoEnsure(inner, finalizer, span) => mutateIo2("ensure", inner, finalizer, span, target, seen, inOracle)
+    case Expr.IoTimeout(ms, inner, span) => mutateIo2("timeout", ms, inner, span, target, seen, inOracle)
     case _ => mPack(e, seen)
   }
 
-def mutateCall(callee: String, args: List, span: Span, target: Int, seen: Int): List =
-  if (isOracleCallee(callee) == 0) mutateCallPlain(callee, args, span, target, seen) else mutateOracle(callee, args, span, target, seen)
+def mutateIntLit(digits: String, span: Span, target: Int, seen: Int, inOracle: Int): List =
+  if (inOracle == 0) mPack(Expr.IntLit(digits, span), seen) else if (is01Lit(digits) == 0) mPack(Expr.IntLit(digits, span), seen) else if (seen == target) mPack(Expr.IntLit(flip01(digits), span), seen + 1) else mPack(Expr.IntLit(digits, span), seen + 1)
 
-def mutateCallPlain(callee: String, args: List, span: Span, target: Int, seen: Int): List =
+def mutateCall(callee: String, args: List, span: Span, target: Int, seen: Int, inOracle: Int): List =
+  if (isOracleCallee(callee) == 0) mutateCallPlain(callee, args, span, target, seen, inOracle) else mutateOracle(callee, args, span, target, seen)
+
+def mutateCallPlain(callee: String, args: List, span: Span, target: Int, seen: Int, inOracle: Int): List =
   for {
-    a = mutateExprList(args, target, seen, List.empty())
+    a = mutateExprList(args, target, seen, List.empty(), inOracle)
   } yield mPack(Expr.Call(callee, mList(a), span), mSeen(a))
 
 def mutateOracle(callee: String, args: List, span: Span, target: Int, seen: Int): List =
-  if (List.len(args) < 2) mutateCallPlain(callee, args, span, target, seen) else mutateOracleArgs(callee, args, span, target, seen)
+  if (List.len(args) < 2) mutateCallPlain(callee, args, span, target, seen, 0) else mutateOracleArgs(callee, args, span, target, seen)
 
 def mutateOracleArgs(callee: String, args: List, span: Span, target: Int, seen: Int): List =
   for {
-    args2 = if (seen == target) listSetAt(args, 1, negatePred(List.at(args, 1))) else args
-    a = mutateExprList(args2, target, seen + 1, List.empty())
-  } yield mPack(Expr.Call(callee, mList(a), span), mSeen(a))
+    n = mutateExpr(List.head(args), target, seen + 1, 0)
+    p = mutateExpr(List.at(args, 1), target, mSeen(n), 1)
+    rest = mutateExprList(List.tail(List.tail(args)), target, mSeen(p), List.empty(), 0)
+    predOut = if (seen == target) negatePred(List.at(args, 1)) else mExpr(p)
+  } yield mPack(Expr.Call(callee, List.cons(mExpr(n), List.cons(predOut, mList(rest))), span), mSeen(rest))
 
-def mutateAdt(enumName: String, caseName: String, args: List, typeArgs: List, span: Span, target: Int, seen: Int): List =
+def mutateAdt(enumName: String, caseName: String, args: List, typeArgs: List, span: Span, target: Int, seen: Int, inOracle: Int): List =
   for {
-    a = mutateExprList(args, target, seen, List.empty())
+    a = mutateExprList(args, target, seen, List.empty(), inOracle)
   } yield mPack(Expr.Adt(enumName, caseName, mList(a), typeArgs, span), mSeen(a))
 
-def mutateLet(name: String, value: Expr, body: Expr, span: Span, target: Int, seen: Int): List =
+def mutateLet(name: String, value: Expr, body: Expr, span: Span, target: Int, seen: Int, inOracle: Int): List =
   for {
-    v = mutateExpr(value, target, seen)
-    b = mutateExpr(body, target, mSeen(v))
+    v = mutateExpr(value, target, seen, inOracle)
+    b = mutateExpr(body, target, mSeen(v), inOracle)
   } yield mPack(Expr.Let(name, mExpr(v), mExpr(b), span), mSeen(b))
 
-def mutateFlat(inner: Expr, param: String, body: Expr, span: Span, target: Int, seen: Int): List =
+def mutateFlat(inner: Expr, param: String, body: Expr, span: Span, target: Int, seen: Int, inOracle: Int): List =
   for {
-    i = mutateExpr(inner, target, seen)
-    b = mutateExpr(body, target, mSeen(i))
+    i = mutateExpr(inner, target, seen, inOracle)
+    b = mutateExpr(body, target, mSeen(i), inOracle)
   } yield mPack(Expr.FlatMap(mExpr(i), param, mExpr(b), span), mSeen(b))
 
-def mutateHandle(inner: Expr, body: Expr, span: Span, target: Int, seen: Int): List =
+def mutateHandle(inner: Expr, body: Expr, span: Span, target: Int, seen: Int, inOracle: Int): List =
   for {
-    i = mutateExpr(inner, target, seen)
-    b = mutateExpr(body, target, mSeen(i))
+    i = mutateExpr(inner, target, seen, inOracle)
+    b = mutateExpr(body, target, mSeen(i), inOracle)
   } yield mPack(Expr.Handle(mExpr(i), mExpr(b), span), mSeen(b))
 
-def mutateIf(cond: Expr, thenB: Expr, elseB: Expr, span: Span, target: Int, seen: Int): List =
+def mutateIf(cond: Expr, thenB: Expr, elseB: Expr, span: Span, target: Int, seen: Int, inOracle: Int): List =
   for {
-    c = mutateExpr(cond, target, seen)
-    t = mutateExpr(thenB, target, mSeen(c))
-    e = mutateExpr(elseB, target, mSeen(t))
+    c = mutateExpr(cond, target, seen, inOracle)
+    t = mutateExpr(thenB, target, mSeen(c), inOracle)
+    e = mutateExpr(elseB, target, mSeen(t), inOracle)
   } yield mPack(Expr.If(mExpr(c), mExpr(t), mExpr(e), span), mSeen(e))
 
-def mutateBin(op: String, left: Expr, right: Expr, span: Span, target: Int, seen: Int): List =
+def mutateBin(op: String, left: Expr, right: Expr, span: Span, target: Int, seen: Int, inOracle: Int): List =
+  if (inOracle == 1) if (isFlipOp(op) == 1) mutateBinFlip(op, left, right, span, target, seen) else mutateBinKids(op, left, right, span, target, seen, 1) else mutateBinKids(op, left, right, span, target, seen, 0)
+
+def mutateBinFlip(op: String, left: Expr, right: Expr, span: Span, target: Int, seen: Int): List =
   for {
-    l = mutateExpr(left, target, seen)
-    r = mutateExpr(right, target, mSeen(l))
+    op2 = if (seen == target) flipOp(op) else op
+    l = mutateExpr(left, target, seen + 1, 1)
+    r = mutateExpr(right, target, mSeen(l), 1)
+  } yield mPack(Expr.BinOp(op2, mExpr(l), mExpr(r), span), mSeen(r))
+
+def mutateBinKids(op: String, left: Expr, right: Expr, span: Span, target: Int, seen: Int, inOracle: Int): List =
+  for {
+    l = mutateExpr(left, target, seen, inOracle)
+    r = mutateExpr(right, target, mSeen(l), inOracle)
   } yield mPack(Expr.BinOp(op, mExpr(l), mExpr(r), span), mSeen(r))
 
-def mutateLam(param: String, body: Expr, span: Span, target: Int, seen: Int): List =
+def mutateLam(param: String, body: Expr, span: Span, target: Int, seen: Int, inOracle: Int): List =
   for {
-    b = mutateExpr(body, target, seen)
+    b = mutateExpr(body, target, seen, inOracle)
   } yield mPack(Expr.Lambda(param, mExpr(b), span), mSeen(b))
 
-def mutateMatch(scrut: Expr, arms: List, span: Span, target: Int, seen: Int): List =
+def mutateMatch(scrut: Expr, arms: List, span: Span, target: Int, seen: Int, inOracle: Int): List =
   for {
-    s = mutateExpr(scrut, target, seen)
-    a = mutateArms(arms, target, mSeen(s), List.empty())
+    s = mutateExpr(scrut, target, seen, inOracle)
+    a = mutateArms(arms, target, mSeen(s), List.empty(), inOracle)
   } yield mPack(Expr.Match(mExpr(s), mList(a), span), mSeen(a))
 
-def mutateFor(binders: List, body: Expr, span: Span, target: Int, seen: Int): List =
+def mutateFor(binders: List, body: Expr, span: Span, target: Int, seen: Int, inOracle: Int): List =
   for {
-    b = mutateBinders(binders, target, seen, List.empty())
-    e = mutateExpr(body, target, mSeen(b))
+    b = mutateBinders(binders, target, seen, List.empty(), inOracle)
+    e = mutateExpr(body, target, mSeen(b), inOracle)
   } yield mPack(Expr.For(mList(b), mExpr(e), span), mSeen(e))
 
-def mutateListLit(elems: List, span: Span, target: Int, seen: Int): List =
+def mutateListLit(elems: List, span: Span, target: Int, seen: Int, inOracle: Int): List =
   for {
-    a = mutateExprList(elems, target, seen, List.empty())
+    a = mutateExprList(elems, target, seen, List.empty(), inOracle)
   } yield mPack(Expr.ListLit(mList(a), span), mSeen(a))
 
-def mutateInterp(parts: List, span: Span, target: Int, seen: Int): List =
+def mutateInterp(parts: List, span: Span, target: Int, seen: Int, inOracle: Int): List =
   for {
-    a = mutateParts(parts, target, seen, List.empty())
+    a = mutateParts(parts, target, seen, List.empty(), inOracle)
   } yield mPack(Expr.Interp(mList(a), span), mSeen(a))
 
-def mutateMethod(receiver: Expr, method: String, args: List, span: Span, target: Int, seen: Int): List =
-  if (streq(method, "require") == 1) mutateRequire(receiver, args, span, target, seen) else mutateMethodPlain(receiver, method, args, span, target, seen)
+def mutateMethod(receiver: Expr, method: String, args: List, span: Span, target: Int, seen: Int, inOracle: Int): List =
+  if (streq(method, "require") == 1) mutateRequire(receiver, args, span, target, seen) else mutateMethodPlain(receiver, method, args, span, target, seen, inOracle)
 
-def mutateMethodPlain(receiver: Expr, method: String, args: List, span: Span, target: Int, seen: Int): List =
+def mutateMethodPlain(receiver: Expr, method: String, args: List, span: Span, target: Int, seen: Int, inOracle: Int): List =
   for {
-    r = mutateExpr(receiver, target, seen)
-    a = mutateExprList(args, target, mSeen(r), List.empty())
+    r = mutateExpr(receiver, target, seen, inOracle)
+    a = mutateExprList(args, target, mSeen(r), List.empty(), inOracle)
   } yield mPack(Expr.MethodCall(mExpr(r), method, mList(a), span), mSeen(a))
 
 def requirePredIndex(args: List): Int =
   if (List.isEmpty(splitRequireArgs(args)) == 1) 0 - 1 else if (List.len(args) == 1) 0 else 1
 
 def mutateRequire(receiver: Expr, args: List, span: Span, target: Int, seen: Int): List =
-  if (requirePredIndex(args) < 0) mutateMethodPlain(receiver, "require", args, span, target, seen) else mutateRequireHit(receiver, args, span, target, seen, requirePredIndex(args))
+  if (requirePredIndex(args) < 0) mutateMethodPlain(receiver, "require", args, span, target, seen, 0) else mutateRequireHit(receiver, args, span, target, seen, requirePredIndex(args))
 
 def mutateRequireHit(receiver: Expr, args: List, span: Span, target: Int, seen: Int, predIdx: Int): List =
   for {
-    args2 = if (seen == target) listSetAt(args, predIdx, negatePred(List.at(args, predIdx))) else args
-    r = mutateExpr(receiver, target, seen + 1)
-    a = mutateExprList(args2, target, mSeen(r), List.empty())
+    r = mutateExpr(receiver, target, seen + 1, 0)
+    a = mutateRequireArgs(args, target, mSeen(r), List.empty(), 0, predIdx, seen)
   } yield mPack(Expr.MethodCall(mExpr(r), "require", mList(a), span), mSeen(a))
 
-def mutateField(base: Expr, field: String, span: Span, target: Int, seen: Int): List =
+def mutateRequireArgs(xs: List, target: Int, seen: Int, acc: List, i: Int, predIdx: Int, negSite: Int): List =
+  if (List.isEmpty(xs) == 1) mListPack(List.reverse(acc), seen) else mutateRequireArgsOne(List.head(xs), List.tail(xs), target, seen, acc, i, predIdx, negSite)
+
+def mutateRequireArgsOne(x: Expr, rest: List, target: Int, seen: Int, acc: List, i: Int, predIdx: Int, negSite: Int): List =
+  if (i == predIdx) mutateRequirePredArg(x, rest, target, seen, acc, i, predIdx, negSite) else mutateRequireOtherArg(x, rest, target, seen, acc, i, predIdx, negSite)
+
+def mutateRequirePredArg(x: Expr, rest: List, target: Int, seen: Int, acc: List, i: Int, predIdx: Int, negSite: Int): List =
   for {
-    b = mutateExpr(base, target, seen)
+    p = mutateExpr(x, target, seen, 1)
+    out = if (negSite == target) negatePred(x) else mExpr(p)
+  } yield mutateRequireArgs(rest, target, mSeen(p), List.cons(out, acc), i + 1, predIdx, negSite)
+
+def mutateRequireOtherArg(x: Expr, rest: List, target: Int, seen: Int, acc: List, i: Int, predIdx: Int, negSite: Int): List =
+  for {
+    p = mutateExpr(x, target, seen, 0)
+  } yield mutateRequireArgs(rest, target, mSeen(p), List.cons(mExpr(p), acc), i + 1, predIdx, negSite)
+
+def mutateField(base: Expr, field: String, span: Span, target: Int, seen: Int, inOracle: Int): List =
+  for {
+    b = mutateExpr(base, target, seen, inOracle)
   } yield mPack(Expr.Field(mExpr(b), field, span), mSeen(b))
 
-def mutateUnary(which: String, arg: Expr, span: Span, target: Int, seen: Int): List =
+def mutateUnary(which: String, arg: Expr, span: Span, target: Int, seen: Int, inOracle: Int): List =
   for {
-    a = mutateExpr(arg, target, seen)
+    a = mutateExpr(arg, target, seen, inOracle)
   } yield mutateUnaryPack(which, mExpr(a), span, mSeen(a))
 
 def mutateUnaryPack(which: String, arg: Expr, span: Span, seen: Int): List =
   if (streq(which, "println") == 1) mPack(Expr.Println(arg, span), seen) else if (streq(which, "fail") == 1) mPack(Expr.Fail(arg, span), seen) else if (streq(which, "pure") == 1) mPack(Expr.Pure(arg, span), seen) else if (streq(which, "sleep") == 1) mPack(Expr.Sleep(arg, span), seen) else mPack(Expr.Attempt(arg, span), seen)
 
-def mutateIo2(which: String, left: Expr, right: Expr, span: Span, target: Int, seen: Int): List =
+def mutateIo2(which: String, left: Expr, right: Expr, span: Span, target: Int, seen: Int, inOracle: Int): List =
   for {
-    l = mutateExpr(left, target, seen)
-    r = mutateExpr(right, target, mSeen(l))
+    l = mutateExpr(left, target, seen, inOracle)
+    r = mutateExpr(right, target, mSeen(l), inOracle)
   } yield mutateIo2Pack(which, mExpr(l), mExpr(r), span, mSeen(r))
 
 def mutateIo2Pack(which: String, left: Expr, right: Expr, span: Span, seen: Int): List =
   if (streq(which, "race") == 1) mPack(Expr.IoRace(left, right, span), seen) else if (streq(which, "both") == 1) mPack(Expr.IoBoth(left, right, span), seen) else if (streq(which, "ensure") == 1) mPack(Expr.IoEnsure(left, right, span), seen) else mPack(Expr.IoTimeout(left, right, span), seen)
 
-def mutateExprList(xs: List, target: Int, seen: Int, acc: List): List =
-  if (List.isEmpty(xs) == 1) mListPack(List.reverse(acc), seen) else mutateExprListOne(List.head(xs), List.tail(xs), target, seen, acc)
+def mutateExprList(xs: List, target: Int, seen: Int, acc: List, inOracle: Int): List =
+  if (List.isEmpty(xs) == 1) mListPack(List.reverse(acc), seen) else mutateExprListOne(List.head(xs), List.tail(xs), target, seen, acc, inOracle)
 
-def mutateExprListOne(x: Expr, rest: List, target: Int, seen: Int, acc: List): List =
+def mutateExprListOne(x: Expr, rest: List, target: Int, seen: Int, acc: List, inOracle: Int): List =
   for {
-    p = mutateExpr(x, target, seen)
-  } yield mutateExprList(rest, target, mSeen(p), List.cons(mExpr(p), acc))
+    p = mutateExpr(x, target, seen, inOracle)
+  } yield mutateExprList(rest, target, mSeen(p), List.cons(mExpr(p), acc), inOracle)
 
-def mutateArms(arms: List, target: Int, seen: Int, acc: List): List =
-  if (List.isEmpty(arms) == 1) mListPack(List.reverse(acc), seen) else mutateArmsOne(List.head(arms), List.tail(arms), target, seen, acc)
+def mutateArms(arms: List, target: Int, seen: Int, acc: List, inOracle: Int): List =
+  if (List.isEmpty(arms) == 1) mListPack(List.reverse(acc), seen) else mutateArmsOne(List.head(arms), List.tail(arms), target, seen, acc, inOracle)
 
-def mutateArmsOne(arm: MatchArm, rest: List, target: Int, seen: Int, acc: List): List =
+def mutateArmsOne(arm: MatchArm, rest: List, target: Int, seen: Int, acc: List, inOracle: Int): List =
   for {
-    p = mutateExpr(armBody(arm), target, seen)
-  } yield mutateArms(rest, target, mSeen(p), List.cons(setArmBody(arm, mExpr(p)), acc))
+    p = mutateExpr(armBody(arm), target, seen, inOracle)
+  } yield mutateArms(rest, target, mSeen(p), List.cons(setArmBody(arm, mExpr(p)), acc), inOracle)
 
-def mutateBinders(binders: List, target: Int, seen: Int, acc: List): List =
-  if (List.isEmpty(binders) == 1) mListPack(List.reverse(acc), seen) else mutateBindersOne(List.head(binders), List.tail(binders), target, seen, acc)
+def mutateBinders(binders: List, target: Int, seen: Int, acc: List, inOracle: Int): List =
+  if (List.isEmpty(binders) == 1) mListPack(List.reverse(acc), seen) else mutateBindersOne(List.head(binders), List.tail(binders), target, seen, acc, inOracle)
 
-def mutateBindersOne(b: ForBinder, rest: List, target: Int, seen: Int, acc: List): List =
+def mutateBindersOne(b: ForBinder, rest: List, target: Int, seen: Int, acc: List, inOracle: Int): List =
   b match {
-    case ForBinder.Eq(name, value) => mutateBinderEq(name, value, rest, target, seen, acc)
-    case ForBinder.Draw(name, value) => mutateBinderDraw(name, value, rest, target, seen, acc)
+    case ForBinder.Eq(name, value) => mutateBinderEq(name, value, rest, target, seen, acc, inOracle)
+    case ForBinder.Draw(name, value) => mutateBinderDraw(name, value, rest, target, seen, acc, inOracle)
   }
 
-def mutateBinderEq(name: String, value: Expr, rest: List, target: Int, seen: Int, acc: List): List =
+def mutateBinderEq(name: String, value: Expr, rest: List, target: Int, seen: Int, acc: List, inOracle: Int): List =
   for {
-    p = mutateExpr(value, target, seen)
-  } yield mutateBinders(rest, target, mSeen(p), List.cons(ForBinder.Eq(name, mExpr(p)), acc))
+    p = mutateExpr(value, target, seen, inOracle)
+  } yield mutateBinders(rest, target, mSeen(p), List.cons(ForBinder.Eq(name, mExpr(p)), acc), inOracle)
 
-def mutateBinderDraw(name: String, value: Expr, rest: List, target: Int, seen: Int, acc: List): List =
+def mutateBinderDraw(name: String, value: Expr, rest: List, target: Int, seen: Int, acc: List, inOracle: Int): List =
   for {
-    p = mutateExpr(value, target, seen)
-  } yield mutateBinders(rest, target, mSeen(p), List.cons(ForBinder.Draw(name, mExpr(p)), acc))
+    p = mutateExpr(value, target, seen, inOracle)
+  } yield mutateBinders(rest, target, mSeen(p), List.cons(ForBinder.Draw(name, mExpr(p)), acc), inOracle)
 
-def mutateParts(parts: List, target: Int, seen: Int, acc: List): List =
-  if (List.isEmpty(parts) == 1) mListPack(List.reverse(acc), seen) else mutatePartsOne(List.head(parts), List.tail(parts), target, seen, acc)
+def mutateParts(parts: List, target: Int, seen: Int, acc: List, inOracle: Int): List =
+  if (List.isEmpty(parts) == 1) mListPack(List.reverse(acc), seen) else mutatePartsOne(List.head(parts), List.tail(parts), target, seen, acc, inOracle)
 
-def mutatePartsOne(part: InterpPart, rest: List, target: Int, seen: Int, acc: List): List =
+def mutatePartsOne(part: InterpPart, rest: List, target: Int, seen: Int, acc: List, inOracle: Int): List =
   part match {
-    case InterpPart.Lit(text) => mutateParts(rest, target, seen, List.cons(part, acc))
-    case InterpPart.Hole(expr) => mutatePartHole(expr, rest, target, seen, acc)
+    case InterpPart.Lit(text) => mutateParts(rest, target, seen, List.cons(part, acc), inOracle)
+    case InterpPart.Hole(expr) => mutatePartHole(expr, rest, target, seen, acc, inOracle)
   }
 
-def mutatePartHole(expr: Expr, rest: List, target: Int, seen: Int, acc: List): List =
+def mutatePartHole(expr: Expr, rest: List, target: Int, seen: Int, acc: List, inOracle: Int): List =
   for {
-    p = mutateExpr(expr, target, seen)
-  } yield mutateParts(rest, target, mSeen(p), List.cons(InterpPart.Hole(mExpr(p)), acc))
+    p = mutateExpr(expr, target, seen, inOracle)
+  } yield mutateParts(rest, target, mSeen(p), List.cons(InterpPart.Hole(mExpr(p)), acc), inOracle)
 
 def mutateDefs(defs: List, target: Int, seen: Int, acc: List): List =
   if (List.isEmpty(defs) == 1) mListPack(List.reverse(acc), seen) else mutateDefsOne(List.head(defs), List.tail(defs), target, seen, acc)
 
 def mutateDefsOne(d: Def, rest: List, target: Int, seen: Int, acc: List): List =
   for {
-    p = mutateExpr(defBody(d), target, seen)
+    p = mutateExpr(defBody(d), target, seen, 0)
   } yield mutateDefs(rest, target, mSeen(p), List.cons(setDefBody(d, mExpr(p)), acc))
 
 def mutateProgAt(prog: Prog, target: Int): List =
   for {
     d = mutateDefs(progDefs(prog), target, 0, List.empty())
-    m = mutateExpr(progMain(prog), target, mSeen(d))
+    m = mutateExpr(progMain(prog), target, mSeen(d), 0)
   } yield mProgPack(setProgMain(setProgDefs(prog, mList(d)), mExpr(m)), mSeen(m))
 
 def mutateCount(prog: Prog): Int =
@@ -285,7 +326,7 @@ def cmdMutateProg(projectDir: String, limit: Int, iters: Int, seed: Int, runtime
   } yield if (n == 0) IO.println("scuzz mutate: no residual Law.check / Law.assert / .require sites") else cmdMutateSites(projectDir, minInt(n, limit), n, iters, seed, runtimeDir, clang, toml, prog, overlays)
 
 def cmdMutateSites(projectDir: String, take: Int, total: Int, iters: Int, seed: Int, runtimeDir: String, clang: String, toml: String, prog: Prog, overlays: List): IO[Unit] =
-  IO.println(str6("scuzz mutate: ", Str.fromInt(take), " of ", Str.fromInt(total), " residual oracle sites; idle probe + ", str3(Str.fromInt(iters), " fuzz iters", ""))).flatMap(_ => mutateLoop(projectDir, take, iters, seed, runtimeDir, clang, toml, prog, overlays, 0, 0, 0))
+  IO.println(str6("scuzz mutate: ", Str.fromInt(take), " of ", Str.fromInt(total), " residual oracle sites (negate/flip/0-1); idle + ", str3(Str.fromInt(iters), " fuzz iters", ""))).flatMap(_ => mutateLoop(projectDir, take, iters, seed, runtimeDir, clang, toml, prog, overlays, 0, 0, 0))
 
 def mutateLoop(projectDir: String, take: Int, iters: Int, seed: Int, runtimeDir: String, clang: String, toml: String, prog: Prog, overlays: List, i: Int, killed: Int, survived: Int): IO[Unit] =
   if (i >= take) mutateFinish(killed, survived, take, iters) else mutateOne(projectDir, take, iters, seed, runtimeDir, clang, toml, prog, overlays, i, killed, survived)

@@ -82,8 +82,8 @@ stage_checks() {
   echo "$mutate_out"
   echo "$mutate_out" | grep -q "no residual Law.check"
 
-  echo "==> $stage mutate kill smoke (examples/record --limit 1)"
-  mutate_kill="$("$bin" mutate examples/record --limit 1)"
+  echo "==> $stage mutate kill smoke (examples/record --limit 2 --iters 0)"
+  mutate_kill="$("$bin" mutate examples/record --limit 2 --iters 0)"
   echo "$mutate_kill"
   echo "$mutate_kill" | grep -q "scuzz mutate ok"
 
