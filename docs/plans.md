@@ -2,4 +2,4 @@
 
 ## Next
 
-**Mutate `*`/`/` inside residual oracles** — `scuzz mutate` already swaps `+`/`-`. Next: replace `*`/`/` in those predicates (last arithmetic leftover).
+**`Net.serve` IPv6 listen** — `Net.httpGet` reaches IPv6 via literals and AAAA. `Net.serve` still binds IPv4 `127.0.0.1` only. Next: listen on `::1` (or dual-stack) so Headless/local servers match the client.
