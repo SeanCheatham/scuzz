@@ -20,7 +20,7 @@ button:Clear
 3 Clear
 
 [fields]
-0* item
+0* item=""
 
 [scrolls]
 0 scroll

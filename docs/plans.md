@@ -2,4 +2,4 @@
 
 ## Next
 
-**Show TextField contents in the dump** — `[fields]` labels are placeholders (`0* item`), not the live `Signal.str`. Next: dump the current string so agents can read typed text without correlating signal ids. `watch` still only rebuilds.
+**Language surface — methods on generic records** — monomorphized `def`s / enums / records exist (`examples/generic`, `examples/genum`). Next: one method on `record Box[T]` so `b.get` typechecks without a free `def`. `watch` still only rebuilds.

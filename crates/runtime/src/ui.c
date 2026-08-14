@@ -288,6 +288,16 @@ static void fputs_dump_label(FILE *f, const char *label) {
     fputc((*p == '\n' || *p == '\r') ? ' ' : *p, f);
 }
 
+static void fputs_dump_quoted(FILE *f, const char *s) {
+  const char *p;
+  fputc('"', f);
+  if (s) {
+    for (p = s; *p; p++)
+      fputc((*p == '\n' || *p == '\r' || *p == '"') ? ' ' : *p, f);
+  }
+  fputc('"', f);
+}
+
 int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
   FILE *f;
   SzString *signals;
@@ -323,6 +333,8 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
   for (i = 0; i < n_fields; i++) {
     fprintf(f, "%d%s ", i, fields[i] == field_target ? "*" : "");
     fputs_dump_label(f, sz_view_a11y_label(fields[i]));
+    fputc('=', f);
+    fputs_dump_quoted(f, sz_view_text_field_value(fields[i]));
     fputc('\n', f);
   }
   fprintf(f, "\n[scrolls]\n");

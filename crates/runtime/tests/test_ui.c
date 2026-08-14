@@ -488,10 +488,22 @@ static void test_session_debug_dump(void) {
   assert(strstr(a, "0 +") != NULL);
   assert(strstr(a, "1 -") != NULL);
   assert(strstr(a, "[fields]") != NULL);
-  assert(strstr(a, "0* item") != NULL);
-  assert(strstr(a, "1 search") != NULL);
+  assert(strstr(a, "0* item=\"\"") != NULL);
+  assert(strstr(a, "1 search=\"\"") != NULL);
   assert(strstr(a, "1* search") == NULL);
   assert(strstr(a, "[scrolls]") != NULL);
+
+  {
+    SzInputEvent text;
+    memset(&text, 0, sizeof(text));
+    text.kind = SZ_INPUT_TEXT;
+    text.text = "hi";
+    assert(sz_ui_inject_sync(session, &text));
+    assert(sz_ui_pump_sync(session));
+    free(a);
+    a = slurp_cstr(path);
+    assert(strstr(a, "0* item=\"hi\"") != NULL);
+  }
 
   memset(&tap, 0, sizeof(tap));
   tap.kind = SZ_INPUT_TAP;
@@ -511,7 +523,8 @@ static void test_session_debug_dump(void) {
   assert(sz_ui_inject_sync(session, &tap));
   assert(sz_ui_pump_sync(session));
   c = slurp_cstr(path);
-  assert(strstr(c, "1* search") != NULL);
+  assert(strstr(c, "1* search=\"\"") != NULL);
+  assert(strstr(c, "0 item=\"hi\"") != NULL);
   assert(strstr(c, "0* item") == NULL);
   free(b);
   free(c);

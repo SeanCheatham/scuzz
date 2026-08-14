@@ -191,6 +191,12 @@ const char *sz_view_a11y_label(const SzView *view) {
   return view && view->a11y_label ? view->a11y_label : "";
 }
 
+const char *sz_view_text_field_value(const SzView *view) {
+  if (!view || view->kind != SZ_VIEW_TEXT_FIELD || !view->sig_str)
+    return "";
+  return sz_signal_str_get(view->sig_str);
+}
+
 static const char *a11y_role_name(SzA11yRole role) {
   switch (role) {
   case SZ_A11Y_BUTTON:

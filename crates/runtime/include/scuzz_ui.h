@@ -231,6 +231,8 @@ typedef enum SzA11yRole {
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
 const char *sz_view_a11y_label(const SzView *view);
+/* Live TextField string, or "" if not a field. */
+const char *sz_view_text_field_value(const SzView *view);
 /* Depth-first "role:label" lines joined by newlines (caller frees SzString). */
 SzString *sz_view_a11y_dump(SzView *root);
 
@@ -254,8 +256,9 @@ int sz_ui_session_watch(SzUiSession *session, const char *path);
  * pumps, stamp reload, and IO-bridge flushes. Agents read the file.
  * [taps] lists inject indices for `tap N` (scan order, cap 64).
  * [fields] lists TextFields in a11y order; `N*` is the text/type/backspace
- * target (focused, else first). `text N s` / `type N s` / `backspace N k`
- * target dump index N (one-token forms still use the starred field).
+ * target (focused, else first). Lines are `N placeholder="live"` (star on
+ * the target). `text N s` / `type N s` / `backspace N k` target dump index N
+ * (one-token forms still use the starred field).
  * [scrolls] lists hittable Scrolls in scan order; `scroll N dy` pans index N
  * (`scroll 40` stays the first). */
 int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
