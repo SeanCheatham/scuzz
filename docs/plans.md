@@ -2,4 +2,4 @@
 
 ## Next
 
-**Mutate arithmetic / drop-conjunct** — `scuzz mutate` already negates residual oracles, flips comparisons, and swaps `0`↔`1`. Next: replace `+`/`-` and drop `&&` conjuncts inside those predicates.
+**In-process machine-code reload** — `[ui]` `run --watch` stamp-reloads the View tree (Signals stay). New source is not loaded into the running process.

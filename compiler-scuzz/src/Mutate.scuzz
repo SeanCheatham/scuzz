@@ -30,6 +30,18 @@ def flipOp(op: String): String =
 def isFlipOp(op: String): Int =
   if (streq(flipOp(op), op) == 1) 0 else 1
 
+def isArithOp(op: String): Int =
+  if (streq(op, "+") == 1) 1 else if (streq(op, "-") == 1) 1 else 0
+
+def flipArith(op: String): String =
+  if (streq(op, "+") == 1) "-" else "+"
+
+def andDropCount(op: String): Int =
+  if (streq(op, "&&") == 1) 2 else 0
+
+def binSiteCount(op: String): Int =
+  if (isFlipOp(op) == 1) 1 + andDropCount(op) else if (isArithOp(op) == 1) 1 else 0
+
 def is01Lit(digits: String): Int =
   if (streq(digits, "0") == 1) 1 else if (streq(digits, "1") == 1) 1 else 0
 
@@ -118,14 +130,26 @@ def mutateIf(cond: Expr, thenB: Expr, elseB: Expr, span: Span, target: Int, seen
   } yield mPack(Expr.If(mExpr(c), mExpr(t), mExpr(e), span), mSeen(e))
 
 def mutateBin(op: String, left: Expr, right: Expr, span: Span, target: Int, seen: Int, inOracle: Int): List =
-  if (inOracle == 1) if (isFlipOp(op) == 1) mutateBinFlip(op, left, right, span, target, seen) else mutateBinKids(op, left, right, span, target, seen, 1) else mutateBinKids(op, left, right, span, target, seen, 0)
+  if (inOracle == 0) mutateBinKids(op, left, right, span, target, seen, 0) else mutateBinOracle(op, left, right, span, target, seen)
 
-def mutateBinFlip(op: String, left: Expr, right: Expr, span: Span, target: Int, seen: Int): List =
+def mutateBinOracle(op: String, left: Expr, right: Expr, span: Span, target: Int, seen: Int): List =
   for {
-    op2 = if (seen == target) flipOp(op) else op
-    l = mutateExpr(left, target, seen + 1, 1)
+    n = binSiteCount(op)
+    l = mutateExpr(left, target, seen + n, 1)
     r = mutateExpr(right, target, mSeen(l), 1)
-  } yield mPack(Expr.BinOp(op2, mExpr(l), mExpr(r), span), mSeen(r))
+  } yield mPack(binMutant(op, mExpr(l), mExpr(r), span, target, seen), mSeen(r))
+
+def binMutant(op: String, left: Expr, right: Expr, span: Span, target: Int, seen: Int): Expr =
+  if (isFlipOp(op) == 1) binMutantFlip(op, left, right, span, target, seen) else if (isArithOp(op) == 1) binMutantArith(op, left, right, span, target, seen) else Expr.BinOp(op, left, right, span)
+
+def binMutantArith(op: String, left: Expr, right: Expr, span: Span, target: Int, seen: Int): Expr =
+  if (seen == target) Expr.BinOp(flipArith(op), left, right, span) else Expr.BinOp(op, left, right, span)
+
+def binMutantFlip(op: String, left: Expr, right: Expr, span: Span, target: Int, seen: Int): Expr =
+  if (seen == target) Expr.BinOp(flipOp(op), left, right, span) else if (streq(op, "&&") == 1) binMutantAnd(left, right, span, target, seen) else Expr.BinOp(op, left, right, span)
+
+def binMutantAnd(left: Expr, right: Expr, span: Span, target: Int, seen: Int): Expr =
+  if (seen + 1 == target) left else if (seen + 2 == target) right else Expr.BinOp("&&", left, right, span)
 
 def mutateBinKids(op: String, left: Expr, right: Expr, span: Span, target: Int, seen: Int, inOracle: Int): List =
   for {
@@ -326,7 +350,7 @@ def cmdMutateProg(projectDir: String, limit: Int, iters: Int, seed: Int, runtime
   } yield if (n == 0) IO.println("scuzz mutate: no residual Law.check / Law.assert / .require sites") else cmdMutateSites(projectDir, minInt(n, limit), n, iters, seed, runtimeDir, clang, toml, prog, overlays)
 
 def cmdMutateSites(projectDir: String, take: Int, total: Int, iters: Int, seed: Int, runtimeDir: String, clang: String, toml: String, prog: Prog, overlays: List): IO[Unit] =
-  IO.println(str6("scuzz mutate: ", Str.fromInt(take), " of ", Str.fromInt(total), " residual oracle sites (negate/flip/0-1); idle + ", str3(Str.fromInt(iters), " fuzz iters", ""))).flatMap(_ => mutateLoop(projectDir, take, iters, seed, runtimeDir, clang, toml, prog, overlays, 0, 0, 0))
+  IO.println(str6("scuzz mutate: ", Str.fromInt(take), " of ", Str.fromInt(total), " residual oracle sites (negate/flip/0-1/arith/drop); idle + ", str3(Str.fromInt(iters), " fuzz iters", ""))).flatMap(_ => mutateLoop(projectDir, take, iters, seed, runtimeDir, clang, toml, prog, overlays, 0, 0, 0))
 
 def mutateLoop(projectDir: String, take: Int, iters: Int, seed: Int, runtimeDir: String, clang: String, toml: String, prog: Prog, overlays: List, i: Int, killed: Int, survived: Int): IO[Unit] =
   if (i >= take) mutateFinish(killed, survived, take, iters) else mutateOne(projectDir, take, iters, seed, runtimeDir, clang, toml, prog, overlays, i, killed, survived)

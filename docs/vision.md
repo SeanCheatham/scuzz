@@ -170,7 +170,7 @@ App correctness is **not** classical unit tests. Prefer **mutation, fuzzing, pro
 | `scuzz check` | Format-verify `src/`; typecheck live + laws/refinements + sim + drivers; laws pure, drivers `IO`, no oracles in drivers; every `law` must appear in a `.require`; sim bindings match live types/purity |
 | `scuzz build` (verify graph) | Layer `*.scuzz_sim` over live defs; compile drivers; residualize `.require` / `where` checks (armed under TestRuntime / fuzz / mutation only) |
 | `scuzz fuzz` | Compose drivers + event scripts / IO schedules. Per-run oracles: `.require` residuals, refinements, panic/`SzError`. Per-campaign oracle: `Law.sometimes` reachability → `repro.toml` |
-| `scuzz mutate` | Negate residual `Law.check` / `Law.assert` / `.require`; flip relational/boolean ops and `0`↔`1` inside those predicates; idle probe plus `--iters` fuzz; surviving mutants mean weak or unreached oracles |
+| `scuzz mutate` | Negate residual `Law.check` / `Law.assert` / `.require`; flip relational/boolean ops, swap `+`/`-`, drop `&&` conjuncts, and `0`↔`1` inside those predicates; idle probe plus `--iters` fuzz; surviving mutants mean weak or unreached oracles |
 | Later (optional) | Discharge trivial law/refinement fragments statically; leave the rest as search |
 
 Direction beyond this (not current work): fuzz-verified `*.scuzz_tune` — [`optimization.md`](optimization.md). Pivot slices and status: [`gaps.md`](gaps.md).
@@ -210,7 +210,7 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: mutate arithmetic / drop-conjunct — [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
+Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: in-process machine-code reload — [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features. UI is a primary path among CLI/server/desktop/mobile — not the only v0 bar.
 

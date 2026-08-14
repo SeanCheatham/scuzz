@@ -98,7 +98,7 @@ src/
 - Observation builtins: `Law.signalInt(id)`, `Law.signalStr(id)`, `Law.signalListLen(id)`, `Law.signalListAt(id, i)`, `Law.a11yHas(needle)` (signal store + stashed a11y dump)
 - Drivers are new `IO[Unit]` defs (0 or 1 `Int`/`String`/`Bool` param); `check` rejects `Law.*` and `.require` inside them; fuzz scripts gain `drive <name> [args]` (`true`/`false` for Bool)
 - No `src/test` twin trees — only stem-paired `*.scuzz_sim` / `*.scuzz_drivers`; no third-party test or mutation frameworks
-- Example: `examples/counter` + `examples/shared` (`Shared.scuzz_sim` swaps `counterTitle`; `countLabel` uses `.require`; `noteDrive(n: Int where n >= 0)` residualizes at `plusN`; `+1` records `Law.sometimes("tappedPlus")`; `Main.scuzz` applies count / label / button / sim-title oracles via `.require` on `Ui.run`). `examples/record` uses `where` on `Point.x`.
+- Example: `examples/counter` + `examples/shared` (`Shared.scuzz_sim` swaps `counterTitle`; `countLabel` uses `.require`; `noteDrive(n: Int where n >= 0)` residualizes at `plusN`; `+1` records `Law.sometimes("tappedPlus")`; `Main.scuzz` applies count / label / button / sim-title oracles via `.require` on `Ui.run`). `examples/record` uses `where` on `Point.x` / `Point.y`.
 
 **Today:**
 
@@ -106,7 +106,7 @@ src/
 - IO packages (no `[ui]`): `scuzz test` compiles and runs under `SCUZZ_TESTRT=1`, requiring exit 0
 - `scuzz check` format-verifies `src/` and typechecks live + sim twins + laws + drivers + `where` + `.require` (every `law` must be applied); `--message-format=json` is the editor protocol (`check` only; LSP wraps this)
 - `scuzz fuzz --iters N` searches event scripts × schedules (`[ui]`) or schedule seeds only (IO-only); `[ui]` scripts that hit new `Law.sometimes` names or a new Headless `dump.txt` are kept and later iters extend those prefixes; IO-only keeps schedule seeds that hit new sometimes names and perturbs them; `--exhaust --depth N` is `[ui]` event alphabet (including `drive`) with FIFO schedule; `--replay repro.toml` restores events + optional `schedule_seed`; oracles are residual `.require` / `Law.check`, panic/`SzError`, and campaign `Law.sometimes` reachability
-- `scuzz mutate --limit N` (Stage 1/2 CLI) mutates residual `Law.check` / `Law.assert` / `.require` predicates (negate, flip `==`/`</<=/>/>=/&&/||`, swap `0`↔`1`). Each mutant gets an idle TestRuntime probe, then `--iters` fuzz scripts (`[ui]`) or schedule seeds (IO). Kill = any probe fails; survivors mean weak or unreached oracles. `--iters 0` is idle only. No sites (e.g. `examples/hello`) exits 0. Do not add external mutators
+- `scuzz mutate --limit N` (Stage 1/2 CLI) mutates residual `Law.check` / `Law.assert` / `.require` predicates (negate, flip `==`/`</<=/>/>=/&&/||`, swap `+`/`-`, drop `&&` conjuncts, swap `0`↔`1`). Each mutant gets an idle TestRuntime probe, then `--iters` fuzz scripts (`[ui]`) or schedule seeds (IO). Kill = any probe fails; survivors mean weak or unreached oracles. `--iters 0` is idle only. No sites (e.g. `examples/hello`) exits 0. Do not add external mutators
 - Deterministic fakes: `TestRuntime` / `SCUZZ_TESTRT=1` for clock/random/FS/network/console in app binaries
 - Put non-determinism behind blessed `IO`; keep View construction pure
 
@@ -126,7 +126,7 @@ src/
 | `examples/resource` | `Resource.make` / `use` bracket (release on success, `IO` failure, race cancel, and `IO.timeout`) + `IO.ensure` |
 | `examples/stream` | `Stream.emit` / `map` / `evalMap` / `filter` / `take` / `takeWhile` / `drop` / `dropWhile` / `find` / `exists` / `compileToList` / `drain` |
 | `examples/server` | `Net.serve` persistent HTTP/1.0 GET (TestRuntime drains injected paths) |
-| `examples/record` | `record Point(…)` + `p.x` field access |
+| `examples/record` | `record Point(…)` + `p.x` field access + `where` on `x` / `y` |
 | `examples/trait` | `trait` / `impl` + `p.show()` static dispatch |
 | `examples/generic` | `def id[T](…)` monomorphized generics |
 | `examples/genum` | generic `enum Opt[T]` / `record Box[T]` |

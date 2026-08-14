@@ -86,6 +86,7 @@ stage_checks() {
   mutate_kill="$("$bin" mutate examples/record --limit 2 --iters 0)"
   echo "$mutate_kill"
   echo "$mutate_kill" | grep -q "scuzz mutate ok"
+  echo "$mutate_kill" | grep -q "arith/drop"
 
   echo "==> $stage mutate kill smoke (examples/counter --limit 1 --iters 0)"
   mutate_ui="$("$bin" mutate examples/counter --limit 1 --iters 0)"
