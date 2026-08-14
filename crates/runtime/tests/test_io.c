@@ -204,6 +204,40 @@ static void *ipv6_http_once(void *arg) {
   return (void *)1;
 }
 
+static void *ipv4_http_once(void *arg) {
+  int port = *(int *)arg;
+  int fd, cfd;
+  int one = 1;
+  struct sockaddr_in addr;
+  char buf[512];
+  const char *resp = "HTTP/1.0 200 OK\r\n\r\nok:/x";
+  ssize_t n;
+  fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0)
+    return NULL;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+  memset(&addr, 0, sizeof addr);
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)port);
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  if (bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0 || listen(fd, 1) != 0) {
+    close(fd);
+    return NULL;
+  }
+  cfd = accept(fd, NULL, NULL);
+  close(fd);
+  if (cfd < 0)
+    return NULL;
+  n = read(cfd, buf, sizeof buf);
+  (void)n;
+  if (write(cfd, resp, strlen(resp)) < 0) {
+    close(cfd);
+    return NULL;
+  }
+  close(cfd);
+  return (void *)1;
+}
+
 static volatile int g_peer_flag;
 
 static SzIo *assert_peer_quiet(void *value, void *env) {
@@ -409,6 +443,57 @@ static void *dns_he_dead_a(void *arg) {
   a[11] = 4;
   a[12] = 192;
   a[14] = 2;
+  a[15] = 1;
+  memset(aaaa, 0, sizeof aaaa);
+  aaaa[0] = 0xC0;
+  aaaa[1] = 0x0C;
+  aaaa[3] = 28;
+  aaaa[5] = 1;
+  aaaa[9] = 60;
+  aaaa[11] = 16;
+  aaaa[27] = 1;
+  for (i = 0; i < 2; i++) {
+    flen = sizeof from;
+    n = recvfrom(fd, buf, sizeof buf, 0, (struct sockaddr *)&from, &flen);
+    sleep_us(40000);
+    if (n < 12)
+      return NULL;
+    if (dns_qtype_of(buf, n) == 1) {
+      if ((size_t)n + 16 > sizeof buf)
+        return NULL;
+      dns_set_qr(buf, 1);
+      memcpy(buf + n, a, 16);
+      if (sendto(fd, buf, (size_t)n + 16, 0, (struct sockaddr *)&from, flen) < 0)
+        return NULL;
+    } else {
+      if ((size_t)n + 28 > sizeof buf)
+        return NULL;
+      dns_set_qr(buf, 1);
+      memcpy(buf + n, aaaa, 28);
+      if (sendto(fd, buf, (size_t)n + 28, 0, (struct sockaddr *)&from, flen) < 0)
+        return NULL;
+    }
+  }
+  return NULL;
+}
+
+static void *dns_he_v4_loopback(void *arg) {
+  int fd = *(int *)arg;
+  uint8_t buf[512];
+  uint8_t a[16];
+  uint8_t aaaa[28];
+  struct sockaddr_in from;
+  socklen_t flen;
+  ssize_t n;
+  int i;
+  memset(a, 0, sizeof a);
+  a[0] = 0xC0;
+  a[1] = 0x0C;
+  a[3] = 1;
+  a[5] = 1;
+  a[9] = 60;
+  a[11] = 4;
+  a[12] = 127;
   a[15] = 1;
   memset(aaaa, 0, sizeof aaaa);
   aaaa[0] = 0xC0;
@@ -1502,6 +1587,40 @@ int main(void) {
     sz_net_test_set_nameserver("127.0.0.1", (int)ntohs(addr.sin_port));
     pthread_create(&th_http, NULL, ipv6_http_once, &http_port);
     pthread_create(&th_dns, NULL, dns_he_dead_a, &dns_fd);
+    snprintf(url, sizeof url, "http://scuzz.test:%d/x", http_port);
+    r = sz_io_unsafe_run(sz_io_flatmap(sz_io_sleep_ms(30), after_sleep_http,
+                                      sz_string_from_cstr(url)));
+    pthread_join(th_dns, NULL);
+    pthread_join(th_http, &http_ret);
+    close(dns_fd);
+    sz_net_test_set_nameserver(NULL, 0);
+    assert(r.ok);
+    assert(http_ret != NULL);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "ok:/x") == 0);
+  }
+
+  /* Dual-stack DNS: v6 ::1 refused, then A 127.0.0.1 after preference delay. */
+  {
+    pthread_t th_dns;
+    pthread_t th_http;
+    int dns_fd;
+    int http_port = 18583;
+    struct sockaddr_in addr;
+    socklen_t alen = sizeof addr;
+    char url[80];
+    void *http_ret = NULL;
+    dns_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    assert(dns_fd >= 0);
+    memset(&addr, 0, sizeof addr);
+    addr.sin_family = AF_INET;
+    addr.sin_port = 0;
+    assert(inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) == 1);
+    assert(bind(dns_fd, (struct sockaddr *)&addr, sizeof addr) == 0);
+    alen = sizeof addr;
+    assert(getsockname(dns_fd, (struct sockaddr *)&addr, &alen) == 0);
+    sz_net_test_set_nameserver("127.0.0.1", (int)ntohs(addr.sin_port));
+    pthread_create(&th_http, NULL, ipv4_http_once, &http_port);
+    pthread_create(&th_dns, NULL, dns_he_v4_loopback, &dns_fd);
     snprintf(url, sizeof url, "http://scuzz.test:%d/x", http_port);
     r = sz_io_unsafe_run(sz_io_flatmap(sz_io_sleep_ms(30), after_sleep_http,
                                       sz_string_from_cstr(url)));

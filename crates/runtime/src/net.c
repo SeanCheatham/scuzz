@@ -15,9 +15,9 @@
 
 /* Blessed Net.httpGet — live HTTP/1.0 GET or TestRuntime stub map.
  * Live hostnames query A and AAAA together (park on poll); CNAME chains
- * re-query both (cap 5). When both addresses exist, TCP connects race so a
- * dead A cannot stall IPv6. IPv4 literals and `http://[::1]/` skip DNS.
- * Failures use SzError code 6. */
+ * re-query both (cap 5). When both addresses exist, start AAAA first and wait
+ * 250ms (RFC 8305) before the A connect so working IPv6 wins. IPv4 literals
+ * and `http://[::1]/` skip DNS. Failures use SzError code 6. */
 
 typedef struct {
   int is_err;
@@ -123,6 +123,7 @@ typedef struct GetSt {
   int got_aaaa;
   int a_done;
   int aaaa_done;
+  int he_wait4;
   int http_port;
   struct sockaddr_storage peer;
   struct sockaddr_storage peer4;
@@ -602,6 +603,8 @@ static void *get_dns_recv(void *env) {
   }
 }
 
+#define HE_A_DELAY_MS 250
+
 static void *get_check_write(void *env);
 
 static int tcp_begin(const struct sockaddr *sa, socklen_t len) {
@@ -648,17 +651,18 @@ static void *get_tcp_connect(void *env) {
   NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
   int fd;
 
-  if (st->got_a)
-    st->fd4 = tcp_begin((struct sockaddr *)&st->peer4, st->peer4_len);
   if (st->got_aaaa)
     st->fd6 = tcp_begin((struct sockaddr *)&st->peer6, st->peer6_len);
+  if (st->got_a && st->fd6 < 0)
+    st->fd4 = tcp_begin((struct sockaddr *)&st->peer4, st->peer4_len);
+  st->he_wait4 = st->got_a && st->fd6 >= 0;
   if (st->got_a || st->got_aaaa) {
     if (st->fd4 < 0 && st->fd6 < 0) {
       r->is_err = 1;
       r->as.err = sz_error_new(6, "Net.httpGet: connect failed");
       return r;
     }
-    if (st->fd4 >= 0 && st->fd6 >= 0)
+    if (st->he_wait4 || (st->fd4 >= 0 && st->fd6 >= 0))
       st->fd = -1;
     else {
       st->fd = st->fd4 >= 0 ? st->fd4 : st->fd6;
@@ -705,6 +709,15 @@ static void he_take(GetSt *st, int win, int lose) {
   st->fd = win;
   st->fd4 = -1;
   st->fd6 = -1;
+  st->he_wait4 = 0;
+}
+
+static int he_start_v4(GetSt *st) {
+  st->he_wait4 = 0;
+  if (!st->got_a || st->fd4 >= 0)
+    return 1;
+  st->fd4 = tcp_begin((struct sockaddr *)&st->peer4, st->peer4_len);
+  return st->fd4 >= 0;
 }
 
 static void *get_he_pick(GetSt *st) {
@@ -731,6 +744,8 @@ static void *get_he_pick(GetSt *st) {
     close(st->fd4);
     st->fd4 = -1;
   }
+  if (st->he_wait4 && st->fd4 < 0)
+    he_start_v4(st);
   if (st->fd4 < 0 && st->fd6 < 0) {
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.httpGet: connect failed");
@@ -849,6 +864,8 @@ static SzIo *get_poll_write(void *value, void *env) {
     ready = sz_io_poll_writable(st->fd);
   else if (st->fd4 >= 0 && st->fd6 >= 0)
     ready = sz_io_race(sz_io_poll_writable(st->fd4), sz_io_poll_writable(st->fd6));
+  else if (st->he_wait4 && st->fd6 >= 0)
+    ready = sz_io_race(sz_io_poll_writable(st->fd6), sz_io_sleep_ms(HE_A_DELAY_MS));
   else if (st->fd6 >= 0)
     ready = sz_io_poll_writable(st->fd6);
   else
