@@ -292,6 +292,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.button",
         "View.button(label: String, onTap: _ => Unit): View",
     ),
+    (
+        "View.checkbox",
+        "View.checkbox(sig: Signal, label: String): View",
+    ),
     ("View.column", "View.column(...): View"),
     ("View.row", "View.row(...): View"),
     ("View.stack", "View.stack(...): View"),
@@ -453,6 +457,21 @@ mod tests {
             let sig = kit_sig(callee).expect(callee);
             assert!(h.contains(sig), "{callee}: {h}");
         }
+    }
+
+    #[test]
+    fn hovers_view_checkbox() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    c = Signal.int(0)
+    _ <- Ui.run(_ => View.checkbox(c, "Done"))
+  } yield ()
+"#;
+        let h = hover_src(src, "checkbox");
+        assert!(
+            h.contains("View.checkbox(sig: Signal, label: String): View"),
+            "{h}"
+        );
     }
 
     #[test]

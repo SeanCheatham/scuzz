@@ -3177,6 +3177,151 @@ static void test_radius_does_not_grow_button(void) {
   sz_view_free(wrap);
 }
 
+static void test_checkbox_sizes(void) {
+  SzView *box;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  box = sz_view_checkbox(sig, "Done");
+  sz_view_layout(box, 200.f, 200.f, theme);
+  assert(sz_view_kind(box) == SZ_VIEW_CHECKBOX);
+  f = sz_view_frame(box);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  assert(f.w > 12.f);
+  sz_view_free(box);
+  sz_signal_int_free(sig);
+}
+
+static void test_checkbox_a11y_off_on(void) {
+  SzView *box;
+  SzSignalInt *sig;
+  SzString *dump;
+
+  sig = sz_signal_int(0);
+  box = sz_view_checkbox(sig, "Done");
+  dump = sz_view_a11y_dump(box);
+  assert(strstr(sz_string_cstr(dump), "checkbox:Done=0") != NULL);
+  sz_string_free(dump);
+  sz_signal_int_set(sig, 1);
+  dump = sz_view_a11y_dump(box);
+  assert(strstr(sz_string_cstr(dump), "checkbox:Done=1") != NULL);
+  sz_string_free(dump);
+  sz_view_free(box);
+  sz_signal_int_free(sig);
+}
+
+static void test_checkbox_nonzero_is_on(void) {
+  SzView *box;
+  SzSignalInt *sig;
+  SzString *dump;
+
+  sig = sz_signal_int(7);
+  box = sz_view_checkbox(sig, "X");
+  dump = sz_view_a11y_dump(box);
+  assert(strstr(sz_string_cstr(dump), "checkbox:X=1") != NULL);
+  sz_string_free(dump);
+  sz_view_free(box);
+  sz_signal_int_free(sig);
+}
+
+static void test_checkbox_tap_toggles(void) {
+  SzView *box;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  box = sz_view_checkbox(sig, "Done");
+  sz_view_layout(box, 200.f, 200.f, theme);
+  f = sz_view_frame(box);
+  assert(sz_view_handle_tap(box, f.x + f.w * 0.5f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 1);
+  assert(sz_view_handle_tap(box, f.x + 2.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 0);
+  sz_view_free(box);
+  sz_signal_int_free(sig);
+}
+
+static void test_checkbox_hit_test(void) {
+  SzView *box, *hit;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  box = sz_view_checkbox(sig, "Done");
+  sz_view_layout(box, 200.f, 200.f, theme);
+  f = sz_view_frame(box);
+  hit = sz_view_hit_test(box, f.x + f.w * 0.5f, f.y + f.h * 0.5f);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_CHECKBOX);
+  assert(sz_view_is_tap_target(hit));
+  sz_view_free(box);
+  sz_signal_int_free(sig);
+}
+
+static void test_checkbox_paint_off_on(void) {
+  SzView *root;
+  SzSignalInt *sig;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+
+  sig = sz_signal_int(0);
+  root = sz_view_checkbox(sig, "Done");
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  /* Box center: unchecked is theme background, not primary fill. */
+  assert(px_rgb(px, 80, 6, 16, 0xF5, 0xF5, 0xF5));
+  sz_signal_int_set(sig, 1);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, 6, 16, 0x14, 0x28, 0x50));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+  sz_signal_int_free(sig);
+}
+
+static void test_checkbox_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_checkbox.dump";
+  char *dump;
+
+  sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_checkbox(sig, "Done"));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "checkbox:Done=0") != NULL);
+  assert(strstr(dump, "[taps]") != NULL);
+  assert(strstr(dump, "Done") != NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
 static void test_ignore_pointer_sizes_to_child(void) {
   SzView *wrap, *child;
   const SzTheme *theme = sz_theme_default();
@@ -4150,6 +4295,13 @@ int main(void) {
   test_radius_clips_border_corners();
   test_radius_hit_test_reaches_child();
   test_radius_does_not_grow_button();
+  test_checkbox_sizes();
+  test_checkbox_a11y_off_on();
+  test_checkbox_nonzero_is_on();
+  test_checkbox_tap_toggles();
+  test_checkbox_hit_test();
+  test_checkbox_paint_off_on();
+  test_checkbox_in_taps_dump();
   test_ignore_pointer_sizes_to_child();
   test_ignore_pointer_passes_tap_through();
   test_absorb_pointer_blocks_tap();

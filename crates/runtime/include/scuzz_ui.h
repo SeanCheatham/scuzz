@@ -155,7 +155,8 @@ typedef enum SzViewKind {
   SZ_VIEW_GAP, /* pass constraints; Column/Row/List child spacing in px */
   SZ_VIEW_FONT_SIZE, /* pass constraints; View.text measure/paint size in px */
   SZ_VIEW_BORDER, /* pass constraints; paint n px stroke in color inside the frame */
-  SZ_VIEW_RADIUS /* pass constraints; clip paint to a rounded rect of n px */
+  SZ_VIEW_RADIUS, /* pass constraints; clip paint to a rounded rect of n px */
+  SZ_VIEW_CHECKBOX /* Signal.int 0/1 box + label; tap flips */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -173,6 +174,8 @@ SzView *sz_view_text_signal_int(SzSignalInt *sig, const char *prefix);
 SzView *sz_view_text_signal_str(SzSignalStr *sig);
 
 SzView *sz_view_button(const char *label, SzViewTapFn on_tap, void *env);
+/* Tap flips `sig` between 0 and 1. `label` is a11y + painted text. */
+SzView *sz_view_checkbox(SzSignalInt *sig, const char *label);
 SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder);
 SzView *sz_view_column(void);
 SzView *sz_view_row(void);
@@ -239,6 +242,8 @@ void sz_view_free(SzView *view);
 
 SzViewKind sz_view_kind(const SzView *view);
 SzRect sz_view_frame(const SzView *view);
+/* Button or checkbox: `tap N` / hit-test collect. */
+int sz_view_is_tap_target(const SzView *view);
 
 /* Layout + hit-test (also run inside pump / inject). */
 void sz_view_layout(SzView *root, float width, float height, const SzTheme *theme);
@@ -269,7 +274,8 @@ typedef enum SzA11yRole {
   SZ_A11Y_TEXT_FIELD = 3,
   SZ_A11Y_IMAGE = 4,
   SZ_A11Y_LIST = 5,
-  SZ_A11Y_SCROLL = 6
+  SZ_A11Y_SCROLL = 6,
+  SZ_A11Y_CHECKBOX = 7
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
@@ -354,6 +360,7 @@ void *sz_lang_signal_list_set(SzSignalList *s, SzList *v);
 SzView *sz_lang_view_text(SzString *text);
 /* First-class tap closure: `tap`/`env` come from a compiled `_ => ...` lambda. */
 SzView *sz_lang_view_button(SzString *label, SzViewTapFn tap, void *env);
+SzView *sz_lang_view_checkbox(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_column(void);
 SzView *sz_lang_view_row(void);
 SzView *sz_lang_view_stack(void);

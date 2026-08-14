@@ -535,7 +535,7 @@ static int collect_buttons(SzUiSession *session, SzView **buttons, int cap) {
       SzView *hit = sz_view_hit_test(r, (float)xi, (float)yi);
       int seen = 0;
       int bi;
-      if (!hit || sz_view_kind(hit) != SZ_VIEW_BUTTON)
+      if (!hit || !sz_view_is_tap_target(hit))
         continue;
       for (bi = 0; bi < n_buttons; bi++) {
         if (buttons[bi] == hit) {

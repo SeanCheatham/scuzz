@@ -146,6 +146,11 @@ SzViewKind sz_view_kind(const SzView *view) {
   return view ? view->kind : (SzViewKind)0;
 }
 
+int sz_view_is_tap_target(const SzView *view) {
+  return view &&
+         (view->kind == SZ_VIEW_BUTTON || view->kind == SZ_VIEW_CHECKBOX);
+}
+
 SzRect sz_view_frame(const SzView *view) {
   SzRect z = {0, 0, 0, 0};
   return view ? view->frame : z;
@@ -208,6 +213,16 @@ SzView *sz_view_button(const char *label, SzViewTapFn on_tap, void *env) {
   return v;
 }
 
+SzView *sz_view_checkbox(SzSignalInt *sig, const char *label) {
+  SzView *v = view_new(SZ_VIEW_CHECKBOX);
+  v->sig_int = sig;
+  v->text = sz_strdup(label ? label : "");
+  v->interactive = 1;
+  v->a11y_role = SZ_A11Y_CHECKBOX;
+  v->a11y_label = sz_strdup(label ? label : "");
+  return v;
+}
+
 SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder) {
   SzView *v = view_new(SZ_VIEW_TEXT_FIELD);
   v->sig_str = text;
@@ -246,6 +261,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "list";
   case SZ_A11Y_SCROLL:
     return "scroll";
+  case SZ_A11Y_CHECKBOX:
+    return "checkbox";
   default:
     return "none";
   }
@@ -264,6 +281,12 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
     int n;
     if (v->kind == SZ_VIEW_TEXT && (v->sig_int || v->sig_str)) {
       resolve_text(v, live, sizeof live);
+      label = live;
+    }
+    if (v->kind == SZ_VIEW_CHECKBOX) {
+      int on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
+      snprintf(live, sizeof live, "%s=%d", v->a11y_label ? v->a11y_label : "",
+               on ? 1 : 0);
       label = live;
     }
     n = snprintf(line, sizeof line, "%s:%s\n", a11y_role_name(v->a11y_role),
@@ -977,6 +1000,22 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     if (max_w > 0 && v->frame.w > max_w)
       v->frame.w = max_w;
     break;
+  case SZ_VIEW_CHECKBOX: {
+    float box = font + 4.f;
+    float gap = layout_gap(theme);
+    resolve_text(v, buf, sizeof buf);
+    if (box < 12.f)
+      box = 12.f;
+    if (box > theme->control_h - 4.f)
+      box = theme->control_h - 4.f;
+    v->frame.h = theme->control_h;
+    v->frame.w = box + gap + text_width(buf, font);
+    if (v->frame.w < box)
+      v->frame.w = box;
+    if (max_w > 0 && v->frame.w > max_w)
+      v->frame.w = max_w;
+    break;
+  }
   case SZ_VIEW_TEXT_FIELD:
     v->frame.w = max_w > 0 ? max_w : 120.f;
     v->frame.h = theme->control_h;
@@ -1816,6 +1855,34 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     ty = v->frame.y + (v->frame.h + theme->font_px) * 0.5f;
     paint_string(c, buf, tx, ty, theme->on_primary, theme->font_px);
     break;
+  case SZ_VIEW_CHECKBOX: {
+    float box = theme->font_px + 4.f;
+    float gap;
+    float bx, by;
+    int on;
+    SzRect br;
+    if (box < 12.f)
+      box = 12.f;
+    if (box > theme->control_h - 4.f)
+      box = theme->control_h - 4.f;
+    gap = layout_gap(theme);
+    bx = v->frame.x;
+    by = v->frame.y + (v->frame.h - box) * 0.5f;
+    br.x = bx;
+    br.y = by;
+    br.w = box;
+    br.h = box;
+    on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
+    if (on)
+      paint_rect(c, bx, by, box, box, theme->primary);
+    else
+      paint_border(c, br, 2, theme->border);
+    resolve_text(v, buf, sizeof buf);
+    paint_string(c, buf, bx + box + gap,
+                 v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
+                 theme->foreground, theme->font_px);
+    break;
+  }
   case SZ_VIEW_TEXT_FIELD: {
     const char *shown;
     resolve_text(v, buf, sizeof buf);
@@ -2089,6 +2156,11 @@ int sz_view_handle_tap(SzView *root, float x, float y) {
     return 0;
   if (hit->kind == SZ_VIEW_BUTTON && hit->on_tap) {
     hit->on_tap(hit, hit->tap_env);
+    return 1;
+  }
+  if (hit->kind == SZ_VIEW_CHECKBOX && hit->sig_int) {
+    int64_t n = sz_signal_int_get(hit->sig_int);
+    sz_signal_int_set(hit->sig_int, n == 0 ? 1 : 0);
     return 1;
   }
   if (hit->kind == SZ_VIEW_TEXT_FIELD) {
