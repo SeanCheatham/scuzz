@@ -40,7 +40,7 @@ Path deps only (`manifest.rs`). Git, versioned, and hosted artifacts are directi
 
 ### Deferred by decision
 
-- **Flutter-style constraint layout** — `layout_node_ex` passes min/max down. `View.sized`, `View.aspectRatio`, percent axes on `View.fraction`, and `View.expanded` flex slots are tight. Column/row non-flex children stay loose on the cross axis. Residual: CrossAxisAlignment.stretch. Do not add Flutter-style constraint-overflow dumps.
+- **Flutter-style constraint layout** — `layout_node_ex` passes min/max down. Tight slots: `View.sized`, `View.aspectRatio`, percent axes on `View.fraction`, `View.expanded` flex, and opt-in `View.stretch` (cross axis). Column/row non-flex children stay loose unless wrapped in `View.stretch`. Residual: Flutter-style constraint-overflow dumps (do not add).
 - **Windows desktop embedder** — same session protocol as X11/Cocoa. Secondary platform.
 - **OS IME candidate windows** — focused TextField caret uses measured advance (`sz_view_caret_rect`). Embedders do not yet place OS IME UI from it.
 - **LSP / editor tooling** — `fmt`, `check --message-format=json`, `watch`, and `scuzz lsp` exist. LSP wraps `check` (didOpen/didChange overlay open buffers; didClose returns to disk). Hover, completion, and definition use that parse. JSON diagnostics stay the single schema.

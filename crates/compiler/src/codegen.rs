@@ -148,6 +148,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_each(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_scroll(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_expanded(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_stretch(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_center(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_align(i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_positioned(i64, i64, ptr)").unwrap();
@@ -3153,6 +3154,15 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "View.stretch" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_view_stretch(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "View.center" => {
             writeln!(
                 code,
@@ -3586,6 +3596,20 @@ law always: Bool = 1 == 1
         assert!(ir.contains("sz_uibuild_"));
         assert!(ir.contains("sz_ui_reload_rebuild"));
         assert!(!ir.contains("call ptr @sz_ui_run_view"));
+    }
+
+    #[test]
+    fn emit_view_stretch() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.stretch(View.text("x")))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_stretch"),
+            "expected View.stretch in IR:\n{ir}"
+        );
     }
 
     #[test]

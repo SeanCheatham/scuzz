@@ -104,7 +104,35 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_POSITIONED || kind == SZ_VIEW_PADDING ||
          kind == SZ_VIEW_SIZED || kind == SZ_VIEW_MIN_SIZE ||
          kind == SZ_VIEW_BACKGROUND || kind == SZ_VIEW_ASPECT_RATIO ||
-         kind == SZ_VIEW_FRACTION;
+         kind == SZ_VIEW_FRACTION || kind == SZ_VIEW_STRETCH;
+}
+
+/* Expanded, or Stretch wrapping Expanded. */
+static int view_is_flex(const SzView *v) {
+  while (v) {
+    if (v->kind == SZ_VIEW_EXPANDED)
+      return 1;
+    if (v->kind == SZ_VIEW_STRETCH && v->child_count > 0) {
+      v = v->children[0];
+      continue;
+    }
+    return 0;
+  }
+  return 0;
+}
+
+/* Stretch, or Expanded wrapping Stretch. */
+static int view_is_cross_stretch(const SzView *v) {
+  while (v) {
+    if (v->kind == SZ_VIEW_STRETCH)
+      return 1;
+    if (v->kind == SZ_VIEW_EXPANDED && v->child_count > 0) {
+      v = v->children[0];
+      continue;
+    }
+    return 0;
+  }
+  return 0;
 }
 
 SzViewKind sz_view_kind(const SzView *view) {
@@ -297,6 +325,13 @@ SzView *sz_view_scroll(SzView *child) {
 
 SzView *sz_view_expanded(SzView *child) {
   SzView *v = view_new(SZ_VIEW_EXPANDED);
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
+SzView *sz_view_stretch(SzView *child) {
+  SzView *v = view_new(SZ_VIEW_STRETCH);
   if (child)
     sz_view_add_child(v, child);
   return v;
@@ -517,6 +552,24 @@ static SzBoxConstraints box_tight_height(float max_w, float h) {
   return c;
 }
 
+static SzBoxConstraints column_child_box(SzView *ch, float inner_w, float max_h,
+                                         float flex_h, int flexing) {
+  if (flexing && view_is_flex(ch))
+    return box_tight(inner_w, flex_h);
+  if (view_is_cross_stretch(ch))
+    return box_tight_width(inner_w, max_h);
+  return box_loose(inner_w, max_h);
+}
+
+static SzBoxConstraints row_child_box(SzView *ch, float max_w, float inner_h,
+                                      float flex_w, int flexing) {
+  if (flexing && view_is_flex(ch))
+    return box_tight(flex_w, inner_h);
+  if (view_is_cross_stretch(ch))
+    return box_tight_height(max_w, inner_h);
+  return box_loose(max_w, inner_h);
+}
+
 static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h,
                            float max_w, float max_h, const SzTheme *theme);
 
@@ -595,17 +648,18 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
         if (!view_is_shown(v->children[i]))
           continue;
         col_shown++;
-        if (v->children[i]->kind == SZ_VIEW_EXPANDED)
+        if (view_is_flex(v->children[i]))
           n_flex++;
       }
       if (n_flex > 0 && h_budget > 0.f) {
         /* Measure non-flex children for leftover height. */
         for (i = 0; i < v->child_count; i++) {
           SzView *ch = v->children[i];
-          if (!view_is_shown(ch) || ch->kind == SZ_VIEW_EXPANDED)
+          if (!view_is_shown(ch) || view_is_flex(ch))
             continue;
           layout_constrained(ch, x + theme->pad, y + theme->pad,
-                             box_loose(inner_w, max_h), theme);
+                             column_child_box(ch, inner_w, max_h, 0.f, 0),
+                             theme);
           fixed_h += ch->frame.h;
         }
         if (col_shown > 1)
@@ -627,12 +681,9 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
                                  theme);
               continue;
             }
-            if (ch->kind == SZ_VIEW_EXPANDED)
-              layout_constrained(ch, x + theme->pad, cy, box_tight(inner_w, flex_h),
-                                 theme);
-            else
-              layout_constrained(ch, x + theme->pad, cy, box_loose(inner_w, max_h),
-                                 theme);
+            layout_constrained(ch, x + theme->pad, cy,
+                               column_child_box(ch, inner_w, max_h, flex_h, 1),
+                               theme);
             cy += ch->frame.h + theme->gap;
           }
           v->frame.w = max_w;
@@ -648,7 +699,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
         continue;
       }
       layout_constrained(v->children[i], x + theme->pad, cy,
-                         box_loose(inner_w, max_h), theme);
+                         column_child_box(v->children[i], inner_w, max_h, 0.f, 0),
+                         theme);
       cy += v->children[i]->frame.h + theme->gap;
       h += v->children[i]->frame.h + theme->gap;
       shown++;
@@ -680,6 +732,19 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       if (ch->kind == SZ_VIEW_SCROLL)
         ch->pref_h = old_pref;
     }
+    break;
+  }
+  case SZ_VIEW_STRETCH: {
+    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
+    SzBoxConstraints cc;
+    cc.min_w = min_w;
+    cc.min_h = min_h;
+    cc.max_w = max_w;
+    cc.max_h = max_h;
+    if (ch)
+      layout_constrained(ch, x, y, cc, theme);
+    v->frame.w = ch ? ch->frame.w : min_w;
+    v->frame.h = ch ? ch->frame.h : min_h;
     break;
   }
   case SZ_VIEW_CENTER:
@@ -732,18 +797,17 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       row_inner_h = 0.f;
     float w_budget = max_w > 0.f ? max_w : min_w;
     for (i = 0; i < v->child_count; i++) {
-      if (view_is_shown(v->children[i]) &&
-          v->children[i]->kind == SZ_VIEW_EXPANDED)
+      if (view_is_shown(v->children[i]) && view_is_flex(v->children[i]))
         n_flex++;
     }
     if (n_flex > 0 && w_budget > 0.f) {
       /* Measure non-flex at intrinsic width (large max_w). */
       for (i = 0; i < v->child_count; i++) {
         SzView *ch = v->children[i];
-        if (!view_is_shown(ch) || ch->kind == SZ_VIEW_EXPANDED)
+        if (!view_is_shown(ch) || view_is_flex(ch))
           continue;
         layout_constrained(ch, x + theme->pad, y + theme->pad,
-                           box_loose(max_w, row_inner_h), theme);
+                           row_child_box(ch, max_w, row_inner_h, 0.f, 0), theme);
         fixed_w += ch->frame.w;
       }
       if (shown > 1)
@@ -764,12 +828,9 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
                                box_loose(flex_w, row_inner_h), theme);
             continue;
           }
-          if (ch->kind == SZ_VIEW_EXPANDED)
-            layout_constrained(ch, cx, y + theme->pad,
-                               box_tight(flex_w, row_inner_h), theme);
-          else
-            layout_constrained(ch, cx, y + theme->pad,
-                               box_loose(max_w, row_inner_h), theme);
+          layout_constrained(ch, cx, y + theme->pad,
+                             row_child_box(ch, max_w, row_inner_h, flex_w, 1),
+                             theme);
           cx += ch->frame.w + theme->gap;
           if (ch->frame.h > inner_h)
             inner_h = ch->frame.h;
@@ -793,7 +854,9 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
         continue;
       }
       layout_constrained(v->children[i], cx, y + theme->pad,
-                         box_loose(child_max, max_h), theme);
+                         row_child_box(v->children[i], child_max, row_inner_h, 0.f,
+                                       0),
+                         theme);
       cx += v->children[i]->frame.w + theme->gap;
       w += v->children[i]->frame.w + theme->gap;
       if (v->children[i]->frame.h > inner_h)
@@ -1153,6 +1216,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_LIST:
   case SZ_VIEW_SCROLL:
   case SZ_VIEW_EXPANDED:
+  case SZ_VIEW_STRETCH:
   case SZ_VIEW_CENTER:
   case SZ_VIEW_ALIGN:
   case SZ_VIEW_STACK:

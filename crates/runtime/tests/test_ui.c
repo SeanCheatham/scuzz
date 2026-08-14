@@ -1380,6 +1380,179 @@ static void test_expanded_row_text_fills_width(void) {
   sz_view_free(row);
 }
 
+static void test_stretch_column_fills_width(void) {
+  SzView *col, *label, *wrap, *sib;
+  const SzTheme *theme = sz_theme_default();
+  SzRect cf, wf, lf, sf;
+  float inner;
+
+  col = sz_view_column();
+  label = sz_view_text("Hi");
+  wrap = sz_view_stretch(label);
+  sib = sz_view_button("Go", NULL, NULL);
+  sz_view_add_child(col, wrap);
+  sz_view_add_child(col, sib);
+  sz_view_layout(col, 240.f, 200.f, theme);
+  cf = sz_view_frame(col);
+  wf = sz_view_frame(wrap);
+  lf = sz_view_frame(label);
+  sf = sz_view_frame(sib);
+  inner = cf.w - theme->pad * 2.f;
+  assert(sz_view_kind(wrap) == SZ_VIEW_STRETCH);
+  assert(fabsf(wf.w - inner) < 0.5f);
+  assert(fabsf(lf.w - inner) < 0.5f);
+  assert(sf.w + 1.f < inner);
+  assert(wf.h + 0.5f < cf.h);
+  sz_view_free(col);
+}
+
+static void test_stretch_row_fills_height(void) {
+  SzView *row, *left, *mid, *wrap;
+  const SzTheme *theme = sz_theme_default();
+  SzRect rf, wf, mf;
+  float inner_h;
+
+  row = sz_view_row();
+  left = sz_view_button("L", NULL, NULL);
+  mid = sz_view_text("Hi");
+  wrap = sz_view_stretch(mid);
+  sz_view_add_child(row, left);
+  sz_view_add_child(row, wrap);
+  sz_view_layout(row, 320.f, 80.f, theme);
+  rf = sz_view_frame(row);
+  wf = sz_view_frame(wrap);
+  mf = sz_view_frame(mid);
+  inner_h = rf.h - theme->pad * 2.f;
+  assert(fabsf(wf.h - inner_h) < 0.5f);
+  assert(fabsf(mf.h - inner_h) < 0.5f);
+  assert(wf.w + 1.f < rf.w - theme->pad * 2.f);
+  sz_view_free(row);
+}
+
+static void test_stretch_does_not_take_flex_height(void) {
+  SzView *col, *title, *body, *wrap, *btn, *exp;
+  const SzTheme *theme = sz_theme_default();
+  float max_h = 280.f;
+  float leftover;
+  float body_h;
+
+  col = sz_view_column();
+  title = sz_view_text("Title");
+  body = sz_view_text("Hi");
+  wrap = sz_view_stretch(body);
+  btn = sz_view_button("Go", NULL, NULL);
+  exp = sz_view_expanded(sz_view_text("flex"));
+  sz_view_add_child(col, title);
+  sz_view_add_child(col, wrap);
+  sz_view_add_child(col, exp);
+  sz_view_add_child(col, btn);
+  sz_view_layout(col, 200.f, max_h, theme);
+  leftover = max_h - theme->pad * 2.f - sz_view_frame(title).h -
+             sz_view_frame(wrap).h - sz_view_frame(btn).h - theme->gap * 3.f;
+  body_h = sz_view_frame(body).h;
+  assert(sz_view_frame(exp).h >= leftover - 0.5f);
+  assert(body_h + 8.f < leftover);
+  assert(fabsf(sz_view_frame(body).w -
+               (200.f - theme->pad * 2.f)) < 0.5f);
+  sz_view_free(col);
+}
+
+static void test_stretch_background_fills_column(void) {
+  SzView *col, *bg, *child, *wrap;
+  const SzTheme *theme = sz_theme_default();
+  SzRect cf, gf;
+  float inner;
+
+  col = sz_view_column();
+  child = sz_view_text("Hi");
+  bg = sz_view_background(0xFFE6F0F8u, child);
+  wrap = sz_view_stretch(bg);
+  sz_view_add_child(col, wrap);
+  sz_view_layout(col, 220.f, 120.f, theme);
+  cf = sz_view_frame(col);
+  gf = sz_view_frame(bg);
+  inner = cf.w - theme->pad * 2.f;
+  assert(fabsf(gf.w - inner) < 0.5f);
+  assert(fabsf(sz_view_frame(child).w - inner) < 0.5f);
+  sz_view_free(col);
+}
+
+static void test_stretch_wrapping_expanded_still_flexes(void) {
+  SzView *col, *title, *body, *exp, *wrap, *btn;
+  const SzTheme *theme = sz_theme_default();
+  float max_h = 260.f;
+  float leftover;
+
+  col = sz_view_column();
+  title = sz_view_text("T");
+  body = sz_view_text("Hi");
+  exp = sz_view_expanded(body);
+  wrap = sz_view_stretch(exp);
+  btn = sz_view_button("Go", NULL, NULL);
+  sz_view_add_child(col, title);
+  sz_view_add_child(col, wrap);
+  sz_view_add_child(col, btn);
+  sz_view_layout(col, 200.f, max_h, theme);
+  leftover = max_h - theme->pad * 2.f - sz_view_frame(title).h -
+             sz_view_frame(btn).h - theme->gap * 2.f;
+  assert(fabsf(sz_view_frame(wrap).h - leftover) < 0.5f);
+  assert(fabsf(sz_view_frame(exp).h - leftover) < 0.5f);
+  assert(fabsf(sz_view_frame(body).h - leftover) < 0.5f);
+  assert(fabsf(sz_view_frame(body).w -
+               (200.f - theme->pad * 2.f)) < 0.5f);
+  sz_view_free(col);
+}
+
+static void test_expanded_wrapping_stretch_still_flexes(void) {
+  SzView *col, *title, *body, *wrap, *exp, *btn;
+  const SzTheme *theme = sz_theme_default();
+  float max_h = 260.f;
+  float leftover;
+
+  col = sz_view_column();
+  title = sz_view_text("T");
+  body = sz_view_text("Hi");
+  wrap = sz_view_stretch(body);
+  exp = sz_view_expanded(wrap);
+  btn = sz_view_button("Go", NULL, NULL);
+  sz_view_add_child(col, title);
+  sz_view_add_child(col, exp);
+  sz_view_add_child(col, btn);
+  sz_view_layout(col, 200.f, max_h, theme);
+  leftover = max_h - theme->pad * 2.f - sz_view_frame(title).h -
+             sz_view_frame(btn).h - theme->gap * 2.f;
+  assert(fabsf(sz_view_frame(exp).h - leftover) < 0.5f);
+  assert(fabsf(sz_view_frame(wrap).h - leftover) < 0.5f);
+  assert(fabsf(sz_view_frame(body).h - leftover) < 0.5f);
+  sz_view_free(col);
+}
+
+static void test_stretch_row_does_not_take_leftover_width(void) {
+  SzView *row, *left, *mid, *wrap, *right, *exp;
+  const SzTheme *theme = sz_theme_default();
+  float max_w = 320.f;
+  float leftover;
+
+  row = sz_view_row();
+  left = sz_view_button("L", NULL, NULL);
+  mid = sz_view_text("Hi");
+  wrap = sz_view_stretch(mid);
+  exp = sz_view_expanded(sz_view_text("flex"));
+  right = sz_view_button("R", NULL, NULL);
+  sz_view_add_child(row, left);
+  sz_view_add_child(row, wrap);
+  sz_view_add_child(row, exp);
+  sz_view_add_child(row, right);
+  sz_view_layout(row, max_w, 80.f, theme);
+  leftover = max_w - theme->pad * 2.f - sz_view_frame(left).w -
+             sz_view_frame(wrap).w - sz_view_frame(right).w - theme->gap * 3.f;
+  assert(sz_view_frame(exp).w >= leftover - 0.5f);
+  assert(sz_view_frame(wrap).w + 8.f < leftover);
+  assert(fabsf(sz_view_frame(mid).h -
+               (80.f - theme->pad * 2.f)) < 0.5f);
+  sz_view_free(row);
+}
+
 static void test_mobile_pointer_scroll_lifecycle(void) {
   SzUiConfig cfg;
   SzSignalStr *draft;
@@ -2075,6 +2248,13 @@ int main(void) {
   test_background_forwards_tight_slot();
   test_center_second_pass_keeps_child_size();
   test_expanded_row_text_fills_width();
+  test_stretch_column_fills_width();
+  test_stretch_row_fills_height();
+  test_stretch_does_not_take_flex_height();
+  test_stretch_background_fills_column();
+  test_stretch_wrapping_expanded_still_flexes();
+  test_expanded_wrapping_stretch_still_flexes();
+  test_stretch_row_does_not_take_leftover_width();
   test_mobile_pointer_scroll_lifecycle();
   test_a11y();
   test_clear_children();

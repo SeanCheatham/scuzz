@@ -245,4 +245,12 @@ mod tests {
         assert!(labels.iter().any(|l| l.contains("Red")), "{labels:?}");
         assert!(labels.iter().any(|l| l.contains("Blue")), "{labels:?}");
     }
+
+    #[test]
+    fn completes_view_stretch_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.st\n";
+        let labels = labels_at(src, "View.st");
+        assert!(labels.iter().any(|l| l == "View.stretch"), "{labels:?}");
+        assert!(labels.iter().any(|l| l == "View.stack"), "{labels:?}");
+    }
 }

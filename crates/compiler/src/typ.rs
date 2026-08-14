@@ -1939,6 +1939,10 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Opaque("View".into()))
         }
+        "View.stretch" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::Opaque("View".into()))
+        }
         "View.center" => {
             expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Opaque("View".into()))
@@ -4817,6 +4821,15 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Ui.run factory should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_stretch() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.column(View.stretch(View.text("x")), View.button("Go", _ => ())))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.stretch should typecheck");
     }
 
     #[test]

@@ -140,7 +140,8 @@ typedef enum SzViewKind {
   SZ_VIEW_ASPECT_RATIO, /* largest rw:rh box that fits max constraints */
   SZ_VIEW_FRACTION, /* percent of incoming max; 0 = size to child on that axis */
   SZ_VIEW_IMAGE,
-  SZ_VIEW_ICON
+  SZ_VIEW_ICON,
+  SZ_VIEW_STRETCH /* Column/Row: tight cross-axis; main axis stays intrinsic */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -168,6 +169,8 @@ SzView *sz_view_each(SzSignalList *sig);
 SzView *sz_view_scroll(SzView *child);
 /* Column leftover height or Row leftover width after non-Expanded siblings. */
 SzView *sz_view_expanded(SzView *child);
+/* Tight cross-axis in Column (width) or Row (height). Main axis stays intrinsic. */
+SzView *sz_view_stretch(SzView *child);
 SzView *sz_view_center(SzView *child);
 /* ax/ay: 0=start (left/top), 1=center, 2=end (right/bottom). */
 SzView *sz_view_align(int ax, int ay, SzView *child);
@@ -317,6 +320,7 @@ SzView *sz_lang_view_stack(void);
 SzView *sz_lang_view_each(SzSignalList *sig);
 SzView *sz_lang_view_scroll(SzView *child);
 SzView *sz_lang_view_expanded(SzView *child);
+SzView *sz_lang_view_stretch(SzView *child);
 SzView *sz_lang_view_center(SzView *child);
 SzView *sz_lang_view_align(int64_t ax, int64_t ay, SzView *child);
 SzView *sz_lang_view_positioned(int64_t x, int64_t y, SzView *child);

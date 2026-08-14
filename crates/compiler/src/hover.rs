@@ -297,6 +297,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("View.stack", "View.stack(...): View"),
     ("View.each", "View.each(items: Signal): View"),
     ("View.expanded", "View.expanded(child: View): View"),
+    ("View.stretch", "View.stretch(child: View): View"),
     ("View.center", "View.center(child: View): View"),
     ("Ui.run", "Ui.run(view: View): IO[Unit]"),
     (
@@ -379,5 +380,12 @@ mod tests {
         let h = hover_src(src, "Color");
         assert!(h.contains("enum Color:"), "{h}");
         assert!(h.contains("Red"), "{h}");
+    }
+
+    #[test]
+    fn hovers_view_stretch() {
+        let src = "@main def main: IO[Unit] =\n  Ui.run(_ => View.stretch(View.text(\"x\")))\n";
+        let h = hover_src(src, "stretch");
+        assert!(h.contains("View.stretch(child: View): View"), "{h}");
     }
 }
