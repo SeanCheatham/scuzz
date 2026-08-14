@@ -259,6 +259,7 @@ mod tests {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.max\n";
         let labels = labels_at(src, "View.max");
         assert!(labels.iter().any(|l| l == "View.maxSize"), "{labels:?}");
+        assert!(labels.iter().any(|l| l == "View.maxLines"), "{labels:?}");
     }
 
     #[test]

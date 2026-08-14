@@ -101,6 +101,9 @@ SzView *sz_lang_view_clip(SzView *child) { return sz_view_clip(child); }
 SzView *sz_lang_view_opacity(int64_t pct, SzView *child) {
   return sz_view_opacity((int)pct, child);
 }
+SzView *sz_lang_view_max_lines(int64_t n, SzView *child) {
+  return sz_view_max_lines((int)n, child);
+}
 SzView *sz_lang_view_background(int64_t argb, SzView *child) {
   return sz_view_background((uint32_t)argb, child);
 }

@@ -309,6 +309,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.maxSize",
         "View.maxSize(w: Int, h: Int, child: View): View",
     ),
+    ("View.maxLines", "View.maxLines(n: Int, child: View): View"),
     ("Ui.run", "Ui.run(view: View): IO[Unit]"),
     (
         "Law.check",
@@ -423,6 +424,16 @@ mod tests {
         let h = hover_src(src, "opacity");
         assert!(
             h.contains("View.opacity(pct: Int, child: View): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_view_max_lines() {
+        let src = "@main def main: IO[Unit] =\n  Ui.run(_ => View.maxLines(2, View.text(\"x\")))\n";
+        let h = hover_src(src, "maxLines");
+        assert!(
+            h.contains("View.maxLines(n: Int, child: View): View"),
             "{h}"
         );
     }

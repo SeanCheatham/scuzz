@@ -64,7 +64,7 @@ struct SzView {
   int pos_y;
   /* View.padding: uniform inset. */
   int pad;
-  /* View.sized / View.minSize / View.maxSize / View.aspectRatio / View.fraction / View.opacity: w×h, ratio, or pct. */
+  /* View.sized / View.minSize / View.maxSize / View.aspectRatio / View.fraction / View.opacity / View.maxLines: w×h, ratio, or pct. */
 };
 
 static SzView *view_new(SzViewKind kind) {
@@ -106,7 +106,7 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_BACKGROUND || kind == SZ_VIEW_ASPECT_RATIO ||
          kind == SZ_VIEW_FRACTION || kind == SZ_VIEW_STRETCH ||
          kind == SZ_VIEW_MAX_SIZE || kind == SZ_VIEW_CLIP ||
-         kind == SZ_VIEW_OPACITY;
+         kind == SZ_VIEW_OPACITY || kind == SZ_VIEW_MAX_LINES;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -426,6 +426,14 @@ SzView *sz_view_opacity(int pct, SzView *child) {
   return v;
 }
 
+SzView *sz_view_max_lines(int n, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_MAX_LINES);
+  v->img_w = n > 0 ? n : 0;
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
 SzView *sz_view_background(uint32_t argb, SzView *child) {
   SzView *v = view_new(SZ_VIEW_BACKGROUND);
   v->bg_argb = argb;
@@ -636,6 +644,7 @@ static void each_text_line(const char *s, float font_px, float max_inner,
 typedef struct SzWrapMetrics {
   float max_line_w;
   int n;
+  int cap; /* 0 = unlimited */
 } SzWrapMetrics;
 
 static void accum_wrap_line(const char *s, int start, int end, float width,
@@ -644,6 +653,8 @@ static void accum_wrap_line(const char *s, int start, int end, float width,
   (void)s;
   (void)start;
   (void)end;
+  if (m->cap > 0 && m->n >= m->cap)
+    return;
   if (width > m->max_line_w)
     m->max_line_w = width;
   m->n++;
@@ -741,6 +752,16 @@ static float cap_max_axis(float incoming, float cap) {
 static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h,
                            float max_w, float max_h, const SzTheme *theme);
 
+static int g_max_lines;
+
+static int tighten_max_lines(int n) {
+  if (n <= 0)
+    return g_max_lines;
+  if (g_max_lines <= 0 || n < g_max_lines)
+    return n;
+  return g_max_lines;
+}
+
 static void layout_constrained(SzView *v, float x, float y, SzBoxConstraints c,
                                const SzTheme *theme) {
   layout_node_ex(v, x, y, c.min_w, c.min_h, c.max_w, c.max_h, theme);
@@ -777,6 +798,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       inner = max_w - 4.f;
     m.max_line_w = 0.f;
     m.n = 0;
+    m.cap = g_max_lines;
     each_text_line(buf, font, inner, accum_wrap_line, &m);
     if (m.n < 1)
       m.n = 1;
@@ -1234,6 +1256,23 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.h = ch ? ch->frame.h : 0.f;
     break;
   }
+  case SZ_VIEW_MAX_LINES: {
+    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
+    int prev = g_max_lines;
+    g_max_lines = tighten_max_lines(v->img_w);
+    if (ch) {
+      SzBoxConstraints cc;
+      cc.min_w = min_w;
+      cc.min_h = min_h;
+      cc.max_w = max_w;
+      cc.max_h = max_h;
+      layout_constrained(ch, x, y, cc, theme);
+    }
+    g_max_lines = prev;
+    v->frame.w = ch ? ch->frame.w : 0.f;
+    v->frame.h = ch ? ch->frame.h : 0.f;
+    break;
+  }
   case SZ_VIEW_ASPECT_RATIO: {
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
     float rw = (float)(v->img_w > 0 ? v->img_w : 1);
@@ -1440,6 +1479,8 @@ typedef struct SzWrapPaint {
   float font_px;
   float line_h;
   uint32_t argb;
+  int cap;
+  int drawn;
 } SzWrapPaint;
 
 static void paint_wrap_line(const char *s, int start, int end, float width,
@@ -1448,6 +1489,8 @@ static void paint_wrap_line(const char *s, int start, int end, float width,
   char tmp[256];
   int n;
   (void)width;
+  if (wp->cap > 0 && wp->drawn >= wp->cap)
+    return;
   n = end - start;
   if (n < 0)
     n = 0;
@@ -1458,6 +1501,7 @@ static void paint_wrap_line(const char *s, int start, int end, float width,
   tmp[n] = '\0';
   paint_string(wp->c, tmp, wp->x, wp->y, wp->argb, wp->font_px);
   wp->y += wp->line_h;
+  wp->drawn++;
 }
 
 static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme);
@@ -1506,6 +1550,8 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     wp.font_px = theme->font_px;
     wp.line_h = text_line_h(theme);
     wp.argb = theme->foreground;
+    wp.cap = g_max_lines;
+    wp.drawn = 0;
     each_text_line(buf, theme->font_px, inner, paint_wrap_line, &wp);
     break;
   }
@@ -1580,6 +1626,14 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     g_opacity = prev;
     break;
   }
+  case SZ_VIEW_MAX_LINES: {
+    int prev = g_max_lines;
+    g_max_lines = tighten_max_lines(v->img_w);
+    for (i = 0; i < v->child_count; i++)
+      paint_node(v->children[i], c, theme);
+    g_max_lines = prev;
+    break;
+  }
   case SZ_VIEW_SCROLL:
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     paint_children_clipped(v, c, theme);
@@ -1616,6 +1670,7 @@ int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
     return 0;
   g_clip_on = 0;
   g_opacity = 100;
+  g_max_lines = 0;
   sk_canvas_clear(canvas, sk_color_argb(theme->background));
   sz_view_layout(root, (float)width, (float)height, theme);
   paint_node(root, canvas, theme);

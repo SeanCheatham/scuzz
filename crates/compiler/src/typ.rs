@@ -1991,6 +1991,11 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::Int)?;
             Ok(Type::Opaque("View".into()))
         }
+        "View.maxLines" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            Ok(Type::Opaque("View".into()))
+        }
         "View.background" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
@@ -4872,6 +4877,15 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.opacity should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_max_lines() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.maxLines(2, View.text("x")))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.maxLines should typecheck");
     }
 
     #[test]

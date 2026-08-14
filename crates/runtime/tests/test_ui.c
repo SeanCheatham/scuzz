@@ -2071,6 +2071,102 @@ static void test_bind_text_wraps_at_newline(void) {
   sz_signal_str_free(s);
 }
 
+static void test_max_lines_caps_newlines(void) {
+  SzView *wrap, *t;
+  const SzTheme *theme = sz_theme_default();
+  float line_h = theme->font_px + 6.f;
+  SzString *dump;
+
+  t = sz_view_text("one\ntwo\nthree");
+  wrap = sz_view_max_lines(2, t);
+  sz_view_layout(wrap, 1000.f, 200.f, theme);
+  assert(sz_view_kind(wrap) == SZ_VIEW_MAX_LINES);
+  assert(fabsf(sz_view_frame(wrap).h - 2.f * line_h) < 0.5f);
+  assert(fabsf(sz_view_frame(t).h - 2.f * line_h) < 0.5f);
+  dump = sz_view_a11y_dump(t);
+  assert(strstr(sz_string_cstr(dump), "three") != NULL);
+  sz_string_free(dump);
+  sz_view_free(wrap);
+}
+
+static void test_max_lines_zero_is_uncapped(void) {
+  SzView *wrap, *t;
+  const SzTheme *theme = sz_theme_default();
+  float line_h = theme->font_px + 6.f;
+
+  t = sz_view_text("one\ntwo\nthree");
+  wrap = sz_view_max_lines(0, t);
+  sz_view_layout(wrap, 1000.f, 200.f, theme);
+  assert(fabsf(sz_view_frame(wrap).h - 3.f * line_h) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_max_lines_caps_soft_wrap(void) {
+  SzView *one, *wrap, *t;
+  const SzTheme *theme = sz_theme_default();
+  float line_h = theme->font_px + 6.f;
+  float one_w;
+
+  one = sz_view_text("one");
+  sz_view_layout(one, 1000.f, 100.f, theme);
+  one_w = sz_view_frame(one).w;
+  sz_view_free(one);
+
+  t = sz_view_text("one two");
+  wrap = sz_view_max_lines(1, t);
+  sz_view_layout(wrap, one_w, 200.f, theme);
+  assert(fabsf(sz_view_frame(wrap).h - line_h) < 0.5f);
+  assert(sz_view_frame(t).w <= one_w + 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_nested_max_lines_uses_tighter_cap(void) {
+  SzView *outer, *inner, *t;
+  const SzTheme *theme = sz_theme_default();
+  float line_h = theme->font_px + 6.f;
+
+  t = sz_view_text("a\nb\nc\nd");
+  inner = sz_view_max_lines(3, t);
+  outer = sz_view_max_lines(2, inner);
+  sz_view_layout(outer, 1000.f, 200.f, theme);
+  assert(fabsf(sz_view_frame(outer).h - 2.f * line_h) < 0.5f);
+  assert(fabsf(sz_view_frame(t).h - 2.f * line_h) < 0.5f);
+  sz_view_free(outer);
+}
+
+static void test_bind_text_respects_max_lines(void) {
+  SzSignalStr *s;
+  SzView *t, *wrap;
+  const SzTheme *theme = sz_theme_default();
+  float line_h = theme->font_px + 6.f;
+
+  s = sz_signal_str("one\ntwo\nthree");
+  t = sz_view_text_signal_str(s);
+  wrap = sz_view_max_lines(2, t);
+  sz_view_layout(wrap, 1000.f, 200.f, theme);
+  assert(fabsf(sz_view_frame(wrap).h - 2.f * line_h) < 0.5f);
+  sz_view_free(wrap);
+  sz_signal_str_free(s);
+}
+
+static void test_max_lines_does_not_wrap_button(void) {
+  SzView *wrap, *b;
+  const SzTheme *theme = sz_theme_default();
+  float btn_h;
+
+  b = sz_view_button("one\ntwo\nthree", NULL, NULL);
+  sz_view_layout(b, 1000.f, 100.f, theme);
+  btn_h = sz_view_frame(b).h;
+  sz_view_free(b);
+
+  b = sz_view_button("one\ntwo\nthree", NULL, NULL);
+  wrap = sz_view_max_lines(1, b);
+  sz_view_layout(wrap, 1000.f, 100.f, theme);
+  assert(fabsf(sz_view_frame(wrap).h - btn_h) < 0.5f);
+  assert(fabsf(btn_h - theme->control_h) < 0.5f);
+  sz_view_free(wrap);
+}
+
 static void test_button_does_not_wrap(void) {
   SzView *b;
   const SzTheme *theme = sz_theme_default();
@@ -2720,6 +2816,12 @@ int main(void) {
   test_text_hard_wraps_long_word();
   test_text_wrap_grows_column();
   test_bind_text_wraps_at_newline();
+  test_max_lines_caps_newlines();
+  test_max_lines_zero_is_uncapped();
+  test_max_lines_caps_soft_wrap();
+  test_nested_max_lines_uses_tighter_cap();
+  test_bind_text_respects_max_lines();
+  test_max_lines_does_not_wrap_button();
   test_button_does_not_wrap();
   test_text_blank_line_from_newline();
   test_a11y();
