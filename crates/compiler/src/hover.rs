@@ -317,6 +317,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ),
     ("View.gap", "View.gap(n: Int, child: View): View"),
     ("View.fontSize", "View.fontSize(n: Int, child: View): View"),
+    (
+        "View.border",
+        "View.border(n: Int, color: Int, child: View): View",
+    ),
     ("Color.rgb", "Color.rgb(r: Int, g: Int, b: Int): Int"),
     (
         "Color.rgba",
@@ -429,6 +433,10 @@ mod tests {
             ("View.textColor", "View.textColor(1, View.text(\"x\"))"),
             ("View.gap", "View.gap(0, View.text(\"x\"))"),
             ("View.fontSize", "View.fontSize(16, View.text(\"x\"))"),
+            (
+                "View.border",
+                "View.border(2, Color.rgb(255, 0, 0), View.text(\"x\"))",
+            ),
             ("View.ignorePointer", "View.ignorePointer(View.text(\"x\"))"),
             ("View.absorbPointer", "View.absorbPointer(View.text(\"x\"))"),
             (

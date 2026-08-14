@@ -263,6 +263,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_border_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.bo\n";
+        let labels = labels_at(src, "View.bo");
+        assert!(labels.iter().any(|l| l == "View.border"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_kit_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.\n";
         let labels = labels_at(src, "View.");

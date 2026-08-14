@@ -109,7 +109,7 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_IGNORE_POINTER || kind == SZ_VIEW_ABSORB_POINTER ||
          kind == SZ_VIEW_EXCLUDE_SEMANTICS || kind == SZ_VIEW_ELLIPSIS ||
          kind == SZ_VIEW_TEXT_COLOR || kind == SZ_VIEW_GAP ||
-         kind == SZ_VIEW_FONT_SIZE;
+         kind == SZ_VIEW_FONT_SIZE || kind == SZ_VIEW_BORDER;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -486,6 +486,15 @@ SzView *sz_view_gap(int n, SzView *child) {
 SzView *sz_view_font_size(int n, SzView *child) {
   SzView *v = view_new(SZ_VIEW_FONT_SIZE);
   v->img_w = n > 0 ? n : 1;
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
+SzView *sz_view_border(int n, uint32_t argb, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_BORDER);
+  v->img_w = n > 0 ? n : 0;
+  v->bg_argb = argb;
   if (child)
     sz_view_add_child(v, child);
   return v;
@@ -1362,6 +1371,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_ABSORB_POINTER:
   case SZ_VIEW_EXCLUDE_SEMANTICS:
   case SZ_VIEW_TEXT_COLOR:
+  case SZ_VIEW_BORDER:
     layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     break;
   case SZ_VIEW_MAX_LINES: {
@@ -1587,6 +1597,26 @@ static void paint_rect(SkCanvas *c, float x, float y, float w, float h,
   sk_paint_delete(p);
 }
 
+/* Stroke stays inside the frame so Headless pixels do not overflow. */
+static void paint_border(SkCanvas *c, SzRect f, int width, uint32_t argb) {
+  float t;
+  if (width <= 0 || f.w <= 0.f || f.h <= 0.f)
+    return;
+  t = (float)width;
+  if (t > f.w)
+    t = f.w;
+  if (t > f.h)
+    t = f.h;
+  if (t * 2.f >= f.w || t * 2.f >= f.h) {
+    paint_rect(c, f.x, f.y, f.w, f.h, argb);
+    return;
+  }
+  paint_rect(c, f.x, f.y, f.w, t, argb);
+  paint_rect(c, f.x, f.y + f.h - t, f.w, t, argb);
+  paint_rect(c, f.x, f.y + t, t, f.h - 2.f * t, argb);
+  paint_rect(c, f.x + f.w - t, f.y + t, t, f.h - 2.f * t, argb);
+}
+
 static void paint_string(SkCanvas *c, const char *s, float x, float y,
                          uint32_t argb, float font_px) {
   SkPaint *p;
@@ -1747,6 +1777,11 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, v->bg_argb);
     for (i = 0; i < v->child_count; i++)
       paint_node(v->children[i], c, theme);
+    break;
+  case SZ_VIEW_BORDER:
+    for (i = 0; i < v->child_count; i++)
+      paint_node(v->children[i], c, theme);
+    paint_border(c, v->frame, v->img_w, v->bg_argb);
     break;
   case SZ_VIEW_IMAGE:
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, v->bg_argb);

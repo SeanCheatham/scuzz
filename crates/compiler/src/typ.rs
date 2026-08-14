@@ -1961,7 +1961,7 @@ fn infer_call(
             Ok(Type::Opaque("View".into()))
         }
         "View.align" | "View.positioned" | "View.sized" | "View.minSize" | "View.maxSize"
-        | "View.aspectRatio" | "View.fraction" => {
+        | "View.aspectRatio" | "View.fraction" | "View.border" => {
             expect_arity(callee, &arg_tys, 3)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
             expect_ty(&arg_tys[1], &Type::Int)?;
@@ -4809,6 +4809,7 @@ def note(n: Int where "x"): Unit = ()
             "View.textColor(Color.rgb(255, 0, 0), View.text(\"x\"))",
             "View.gap(0, View.column(View.text(\"a\"), View.text(\"b\")))",
             "View.fontSize(16, View.text(\"x\"))",
+            "View.border(2, Color.rgb(255, 0, 0), View.text(\"x\"))",
             "View.ignorePointer(View.button(\"Go\", _ => ()))",
             "View.absorbPointer(View.button(\"Go\", _ => ()))",
             "View.excludeSemantics(View.button(\"Go\", _ => ()))",
