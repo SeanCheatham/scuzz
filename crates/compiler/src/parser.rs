@@ -2069,6 +2069,28 @@ impl Get[Int] for Point:
     }
 
     #[test]
+    fn parse_impl_trait_args_on_generic() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+trait Get[T]:
+  def getOrElse(default: T): T
+impl Get[T] for Opt:
+  def getOrElse(default: T): T =
+    self match {
+      case Opt.Some(x) => x
+      case Opt.None => default
+    }
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        assert_eq!(p.impls[0].trait_name, "Get");
+        assert_eq!(p.impls[0].for_type, "Opt");
+        assert_eq!(p.impls[0].trait_args.len(), 1);
+    }
+
+    #[test]
     fn parse_enum_does_not_swallow_following_def() {
         let src = r#"
 enum Opt[T]:

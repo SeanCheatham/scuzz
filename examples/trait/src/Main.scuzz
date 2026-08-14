@@ -30,7 +30,7 @@ impl Show for Opt:
       case Opt.None => "none"
     }
 
-impl Get for Opt:
+impl Get[T] for Opt:
   def getOrElse(default: T): T =
     self match {
       case Opt.Some(x) => x

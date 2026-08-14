@@ -891,4 +891,26 @@ impl Get[Int] for Point:
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }
+
+    #[test]
+    fn formats_impl_trait_args_on_generic() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+trait Get[T]:
+  def getOrElse(default: T): T
+impl Get[T] for Opt:
+  def getOrElse(default: T): T =
+    self match {
+      case Opt.Some(x) => x
+      case Opt.None => default
+    }
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("impl Get[T] for Opt:"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
 }

@@ -88,7 +88,10 @@ fn impl_trait_subst(
         }
         let mut subst = HashMap::new();
         for (p, arg) in tr.type_params.iter().zip(im.trait_args.iter()) {
-            subst.insert(p.clone(), resolve_type(arg, enums, &im.module)?);
+            subst.insert(
+                p.clone(),
+                resolve_type_in(arg, enums, &im.module, &for_en.type_params)?,
+            );
         }
         return Ok(subst);
     }
@@ -5037,6 +5040,38 @@ impl Get[Int] for Point:
         let p = parse_file(src, "trait/src/Main.scuzz").unwrap();
         let p = expand_impls(lower_program(p)).expect("expand labeled");
         typecheck(&p).expect("impl Get[Int] for Point with module should typecheck");
+        let p = elaborate_generics(p).expect("elaborate labeled");
+        let p = resolve_field_access(p).expect("fields before mono labeled");
+        let p = monomorphize(p).expect("mono labeled");
+        resolve_field_access(p).expect("fields after mono labeled");
+    }
+
+    #[test]
+    fn typechecks_impl_trait_args_on_generic() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+trait Get[T]:
+  def getOrElse(default: T): T
+impl Get[T] for Opt:
+  def getOrElse(default: T): T =
+    self match {
+      case Opt.Some(x) => x
+      case Opt.None => default
+    }
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Opt.Some(2).getOrElse(0)))
+"#;
+        let p = expand_impls(lower_program(parse(src).unwrap())).expect("expand");
+        typecheck(&p).expect("impl Get[T] for Opt should typecheck");
+        let p = elaborate_generics(p).expect("elaborate");
+        let p = resolve_field_access(p).expect("fields before mono");
+        let p = monomorphize(p).expect("mono");
+        resolve_field_access(p).expect("fields after mono");
+        let p = parse_file(src, "trait/src/Main.scuzz").unwrap();
+        let p = expand_impls(lower_program(p)).expect("expand labeled");
+        typecheck(&p).expect("impl Get[T] for Opt with module should typecheck");
         let p = elaborate_generics(p).expect("elaborate labeled");
         let p = resolve_field_access(p).expect("fields before mono labeled");
         let p = monomorphize(p).expect("mono labeled");

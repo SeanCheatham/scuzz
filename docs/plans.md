@@ -2,4 +2,4 @@
 
 ## Next
 
-**Language surface — explicit trait args on generic impls** — `impl Get[Int] for Point` typechecks (`examples/trait`). Next: `impl Get[T] for Opt` so the inferred form can be written out. `watch` still only rebuilds.
+**Hot reload — `scuzz watch` still only rebuilds** — `impl Get[T] for Opt` typechecks (`examples/trait`). `[ui]` `run --watch` stamp-reloads the View tree. Next: an IO-only source change picked up without restarting the process, or leave watch as rebuild-only.
