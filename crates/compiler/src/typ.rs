@@ -935,7 +935,7 @@ fn rewrite_require(
 }
 
 /// Kit lambdas bind a known item type. Bare lambdas (`View.button` tap) stay Opaque.
-fn kit_lambda_param_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
+pub(crate) fn kit_lambda_param_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
     match (callee, arg_i) {
         ("Ui.run", 0) => Some(Type::Opaque("Param".into())),
         ("Signal.map", 1) => Some(Type::Int),
@@ -1664,6 +1664,11 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::List)
+        }
+        "Str.trim" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::String)
         }
         "List.empty" => {
             expect_arity(callee, &arg_tys, 0)?;
@@ -4904,6 +4909,15 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Str.startsWith should typecheck");
+    }
+
+    #[test]
+    fn typechecks_str_trim() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.trim("  x  "))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Str.trim should typecheck");
     }
 
     #[test]

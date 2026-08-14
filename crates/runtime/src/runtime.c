@@ -199,6 +199,24 @@ int64_t sz_string_starts_with(const SzString *s, const SzString *prefix) {
   return sz_string_index_of(s, prefix) == 0 ? 1 : 0;
 }
 
+static int str_is_ws(unsigned char c) {
+  return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+SzString *sz_string_trim(const SzString *s) {
+  size_t i;
+  size_t j;
+  if (!s || !s->data || s->len == 0)
+    return sz_string_from_cstr("");
+  i = 0;
+  j = s->len;
+  while (i < j && str_is_ws((unsigned char)s->data[i]))
+    i++;
+  while (j > i && str_is_ws((unsigned char)s->data[j - 1]))
+    j--;
+  return sz_string_from_bytes(s->data + i, j - i);
+}
+
 SzList *sz_string_lines(const SzString *s) {
   SzList *acc = NULL;
   size_t i = 0;

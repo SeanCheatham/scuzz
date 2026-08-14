@@ -45,6 +45,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_string_from_int(i64)").unwrap();
     writeln!(out, "declare i64 @sz_string_index_of(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_string_starts_with(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_string_trim(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_lines(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_println(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_pure(ptr)").unwrap();
@@ -2568,6 +2569,15 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "Str.trim" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_string_trim(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "List.empty" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_list_nil()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
@@ -3803,6 +3813,17 @@ mod tests {
         crate::typ::typecheck(&p).expect("typecheck");
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_string_starts_with"));
+    }
+
+    #[test]
+    fn emit_str_trim_compile() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.trim("  x  "))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_string_trim"));
     }
 
     #[test]

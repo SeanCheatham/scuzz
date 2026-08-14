@@ -1,8 +1,9 @@
 //! Signature hover from the same parse as `check`. No second typer.
 
-use crate::ast::{EnumDef, Expr, ExprKind, FunDef, Param, Program};
+use crate::ast::{EnumDef, Expr, ExprKind, FunDef, Param, Program, Type};
 use crate::lexer::{lex, Token};
 use crate::resolve::module_id_from_label;
+use crate::typ::kit_lambda_param_ty;
 
 /// Hover text at a byte offset in `source` (`file` is the parse label).
 pub fn hover_in_source(
@@ -157,9 +158,47 @@ fn binder_in_program(program: &Program, file: &str, name: &str, offset: usize) -
 }
 
 fn binder_in_expr(expr: &Expr, name: &str, offset: usize) -> Option<String> {
+    let locals = kit_lambda_locals(expr, offset);
+    for (n, ty) in locals.iter().rev() {
+        if n == name {
+            return Some(format!("{n}: {ty}"));
+        }
+    }
     let mut best: Option<(usize, String)> = None;
     walk_binders(expr, name, offset, &mut best);
     best.map(|(_, s)| s)
+}
+
+/// Kit lambda params whose span covers `offset` (outer first). Skip `_`.
+pub(crate) fn kit_lambda_locals(expr: &Expr, offset: usize) -> Vec<(String, Type)> {
+    let mut out = Vec::new();
+    collect_kit_locals(expr, offset, &mut out);
+    out
+}
+
+fn collect_kit_locals(expr: &Expr, offset: usize, out: &mut Vec<(String, Type)>) {
+    match &expr.kind {
+        ExprKind::Call { callee, args } => {
+            let n = args.len();
+            for (i, a) in args.iter().enumerate() {
+                if let Some(pty) = kit_lambda_param_ty(callee, i, n) {
+                    if let ExprKind::Lambda {
+                        param: Some(p),
+                        body,
+                    } = &a.kind
+                    {
+                        if a.span.start <= offset && offset <= a.span.end && p != "_" {
+                            out.push((p.clone(), pty));
+                        }
+                        collect_kit_locals(body, offset, out);
+                        continue;
+                    }
+                }
+                collect_kit_locals(a, offset, out);
+            }
+        }
+        _ => expr.for_each_child(|c| collect_kit_locals(c, offset, out)),
+    }
 }
 
 fn walk_binders(expr: &Expr, name: &str, offset: usize, best: &mut Option<(usize, String)>) {
@@ -281,6 +320,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Str.startsWith",
         "Str.startsWith(s: String, prefix: String): Int",
     ),
+    ("Str.trim", "Str.trim(s: String): String"),
     ("Signal.int", "Signal.int(n: Int): Signal"),
     ("Signal.get", "Signal.get(s: Signal): Int"),
     ("Signal.set", "Signal.set(s: Signal, n: Int): Unit"),
@@ -551,6 +591,44 @@ mod tests {
             h.contains("Str.startsWith(s: String, prefix: String): Int"),
             "{h}"
         );
+    }
+
+    #[test]
+    fn hovers_str_trim() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.trim("  x  "))
+"#;
+        let h = hover_src(src, "trim");
+        assert!(h.contains("Str.trim(s: String): String"), "{h}");
+    }
+
+    #[test]
+    fn hovers_view_each_row_param() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    items = Signal.list(["milk"])
+    _ <- Ui.run(_ => View.each(items, row => View.text(row)))
+  } yield ()
+"#;
+        let offset = src.find("View.text(row)").unwrap() + "View.text(".len();
+        let program = parse_file(src, "Main.scuzz").unwrap();
+        let h = hover_in_source(&program, "Main.scuzz", src, offset).unwrap();
+        assert!(h.contains("row: String"), "{h}");
+    }
+
+    #[test]
+    fn hovers_signal_map_param() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    count = Signal.int(0)
+    label = Signal.map(count, n => Str.fromInt(n))
+    _ <- Ui.run(_ => View.bindText(label))
+  } yield ()
+"#;
+        let offset = src.find("Str.fromInt(n)").unwrap() + "Str.fromInt(".len();
+        let program = parse_file(src, "Main.scuzz").unwrap();
+        let h = hover_in_source(&program, "Main.scuzz", src, offset).unwrap();
+        assert!(h.contains("n: Int"), "{h}");
     }
 
     #[test]

@@ -39,7 +39,7 @@ law hasClear: Bool =
       _ = Signal.setList(items, loaded)
       _ <- Ui.run(_ => View.column(View.text("Todo"), View.row(View.textField(draft, "item"), View.button("Add", _ => for {
   _ = Law.sometimes("tappedAdd")
-  d = Signal.getStr(draft)
+  d = Str.trim(Signal.getStr(draft))
   n = Str.len(d)
 } yield if (n == 0) () else for {
   xs = List.append(Signal.getList(items), d)

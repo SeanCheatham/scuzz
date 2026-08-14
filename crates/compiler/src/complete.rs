@@ -1,7 +1,7 @@
 //! Completions from the same parse as `check`. No second typer.
 
 use crate::ast::Program;
-use crate::hover::{show_def, show_enum, show_param, KIT_SIGS};
+use crate::hover::{kit_lambda_locals, show_def, show_enum, show_param, KIT_SIGS};
 use crate::lexer::{lex, Token};
 use crate::resolve::module_id_from_label;
 use std::collections::BTreeSet;
@@ -161,6 +161,20 @@ pub fn complete_in_source(
                 }
             }
         }
+        let mut bodies: Vec<&crate::ast::Expr> = p.defs.iter().map(|d| &d.body).collect();
+        bodies.push(&p.main.body);
+        for body in bodies {
+            for (name, ty) in kit_lambda_locals(body, offset) {
+                if name.starts_with(&prefix) {
+                    push(Completion {
+                        label: name.clone(),
+                        kind: KIND_VAR,
+                        detail: format!("{name}: {ty}"),
+                        insert_text: name,
+                    });
+                }
+            }
+        }
     }
     out.sort_by(|a, b| a.label.cmp(&b.label));
     out
@@ -316,6 +330,32 @@ mod tests {
         let src = "@main def main: IO[Unit] = Str.st\n";
         let labels = labels_at(src, "Str.st");
         assert!(labels.iter().any(|l| l == "Str.startsWith"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_trim_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.tr\n";
+        let labels = labels_at(src, "Str.tr");
+        assert!(labels.iter().any(|l| l == "Str.trim"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_view_each_row_param() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    items = Signal.list(["milk"])
+    _ <- Ui.run(_ => View.each(items, row => View.text(row)))
+  } yield ()
+"#;
+        let program = parse_file(src, "Main.scuzz").unwrap();
+        let at = "View.text(ro";
+        let offset = src.find(at).unwrap() + at.len();
+        let hits: Vec<_> = complete_in_source(Some(&program), "Main.scuzz", src, offset);
+        assert!(
+            hits.iter()
+                .any(|c| c.label == "row" && c.detail.contains("row: String")),
+            "{hits:?}"
+        );
     }
 
     #[test]

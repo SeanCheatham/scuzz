@@ -1376,6 +1376,14 @@ int main(void) {
     assert(sz_string_starts_with(c, b) == 0);
     assert(sz_string_starts_with(c, sz_string_from_cstr("")) == 1);
     assert(sz_string_starts_with(c, sz_string_from_cstr("foobarbaz")) == 0);
+    {
+      SzString *tr = sz_string_trim(sz_string_from_cstr("  foo\t"));
+      assert(strcmp(sz_string_cstr(tr), "foo") == 0);
+      tr = sz_string_trim(sz_string_from_cstr("bar"));
+      assert(strcmp(sz_string_cstr(tr), "bar") == 0);
+      tr = sz_string_trim(sz_string_from_cstr(" \t\n"));
+      assert(sz_string_len(tr) == 0);
+    }
     assert(strcmp(sz_string_cstr(sz_string_from_int(42)), "42") == 0);
   }
 
