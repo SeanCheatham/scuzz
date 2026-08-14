@@ -1067,8 +1067,8 @@ static void test_sized(void) {
   chf = sz_view_frame(child);
   assert(fabsf(bf.w - want_w) < 0.5f);
   assert(fabsf(bf.h - want_h) < 0.5f);
-  assert(chf.w <= want_w + 0.5f);
-  assert(chf.h <= want_h + 0.5f);
+  assert(fabsf(chf.w - want_w) < 0.5f);
+  assert(fabsf(chf.h - want_h) < 0.5f);
   assert(fabsf(chf.x - bf.x) < 0.5f);
   assert(fabsf(chf.y - bf.y) < 0.5f);
   sz_view_free(box);
@@ -1130,6 +1130,8 @@ static void test_aspect_ratio(void) {
   bf = sz_view_frame(box);
   assert(fabsf(bf.w - 160.f) < 0.5f);
   assert(fabsf(bf.h - 90.f) < 0.5f);
+  assert(fabsf(sz_view_frame(child).w - 160.f) < 0.5f);
+  assert(fabsf(sz_view_frame(child).h - 90.f) < 0.5f);
   sz_view_free(box);
 
   child = sz_view_text("Hi");
@@ -1160,9 +1162,222 @@ static void test_fraction(void) {
   box = sz_view_fraction(50, 50, child);
   sz_view_layout(box, 200.f, 100.f, theme);
   bf = sz_view_frame(box);
+  chf = sz_view_frame(child);
   assert(fabsf(bf.w - 100.f) < 0.5f);
   assert(fabsf(bf.h - 50.f) < 0.5f);
+  assert(fabsf(chf.w - 100.f) < 0.5f);
+  assert(fabsf(chf.h - 50.f) < 0.5f);
   sz_view_free(box);
+}
+
+static void test_expanded_text_fills_tight_slot(void) {
+  SzView *col, *title, *body, *btn, *exp;
+  const SzTheme *theme = sz_theme_default();
+  float max_h = 280.f;
+  float leftover;
+
+  col = sz_view_column();
+  title = sz_view_text("Title");
+  body = sz_view_text("Hi");
+  exp = sz_view_expanded(body);
+  btn = sz_view_button("Go", NULL, NULL);
+  sz_view_add_child(col, title);
+  sz_view_add_child(col, exp);
+  sz_view_add_child(col, btn);
+  sz_view_layout(col, 200.f, max_h, theme);
+  leftover = max_h - theme->pad * 2.f - sz_view_frame(title).h -
+             sz_view_frame(btn).h - theme->gap * 2.f;
+  assert(fabsf(sz_view_frame(exp).h - leftover) < 0.5f);
+  assert(fabsf(sz_view_frame(body).h - leftover) < 0.5f);
+  assert(fabsf(sz_view_frame(body).w - sz_view_frame(exp).w) < 0.5f);
+  assert(fabsf(sz_view_frame(body).x - sz_view_frame(exp).x) < 0.5f);
+  assert(fabsf(sz_view_frame(body).y - sz_view_frame(exp).y) < 0.5f);
+  sz_view_free(col);
+}
+
+static void test_min_size_inside_expanded(void) {
+  SzView *col, *title, *child, *box, *exp;
+  const SzTheme *theme = sz_theme_default();
+  float max_h = 240.f;
+
+  col = sz_view_column();
+  title = sz_view_text("T");
+  child = sz_view_text("Hi");
+  box = sz_view_min_size(0, 40, child);
+  exp = sz_view_expanded(box);
+  sz_view_add_child(col, title);
+  sz_view_add_child(col, exp);
+  sz_view_layout(col, 180.f, max_h, theme);
+  assert(sz_view_frame(exp).h > 40.f);
+  assert(fabsf(sz_view_frame(box).h - sz_view_frame(exp).h) < 0.5f);
+  assert(fabsf(sz_view_frame(child).h - sz_view_frame(exp).h) < 0.5f);
+  sz_view_free(col);
+}
+
+static void test_column_non_flex_stays_intrinsic(void) {
+  SzView *col, *label, *btn;
+  const SzTheme *theme = sz_theme_default();
+  SzRect cf, lf, bf;
+  float inner;
+
+  col = sz_view_column();
+  label = sz_view_text("Hi");
+  btn = sz_view_button("Go", NULL, NULL);
+  sz_view_add_child(col, label);
+  sz_view_add_child(col, btn);
+  sz_view_layout(col, 240.f, 200.f, theme);
+  cf = sz_view_frame(col);
+  lf = sz_view_frame(label);
+  bf = sz_view_frame(btn);
+  inner = cf.w - theme->pad * 2.f;
+  assert(fabsf(cf.w - 240.f) < 0.5f);
+  assert(lf.w + 1.f < inner);
+  assert(bf.w + 1.f < inner);
+  sz_view_free(col);
+}
+
+static void test_row_non_flex_stays_intrinsic(void) {
+  SzView *row, *left, *mid, *right;
+  const SzTheme *theme = sz_theme_default();
+  SzRect rf, mf;
+  float inner;
+
+  row = sz_view_row();
+  left = sz_view_button("L", NULL, NULL);
+  mid = sz_view_text("mid");
+  right = sz_view_button("R", NULL, NULL);
+  sz_view_add_child(row, left);
+  sz_view_add_child(row, mid);
+  sz_view_add_child(row, right);
+  sz_view_layout(row, 320.f, 80.f, theme);
+  rf = sz_view_frame(row);
+  mf = sz_view_frame(mid);
+  inner = rf.w - theme->pad * 2.f;
+  assert(fabsf(rf.w - 320.f) < 0.5f);
+  assert(mf.w + 1.f < inner);
+  sz_view_free(row);
+}
+
+static void test_sized_inside_column_keeps_box(void) {
+  SzView *col, *box, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect bf;
+
+  col = sz_view_column();
+  child = sz_view_text("Hi");
+  box = sz_view_sized(80, 50, child);
+  sz_view_add_child(col, box);
+  sz_view_layout(col, 240.f, 200.f, theme);
+  bf = sz_view_frame(box);
+  assert(fabsf(bf.w - 80.f) < 0.5f);
+  assert(fabsf(bf.h - 50.f) < 0.5f);
+  assert(fabsf(sz_view_frame(child).w - 80.f) < 0.5f);
+  assert(fabsf(sz_view_frame(child).h - 50.f) < 0.5f);
+  sz_view_free(col);
+}
+
+static void test_padding_forwards_min_size(void) {
+  SzView *box, *pad, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect bf, pf, chf;
+  float inset = 10.f;
+
+  child = sz_view_text("Hi");
+  pad = sz_view_padding(10, child);
+  box = sz_view_min_size(80, 50, pad);
+  sz_view_layout(box, 200.f, 200.f, theme);
+  bf = sz_view_frame(box);
+  pf = sz_view_frame(pad);
+  chf = sz_view_frame(child);
+  assert(bf.w >= 80.f - 0.5f);
+  assert(bf.h >= 50.f - 0.5f);
+  assert(fabsf(pf.w - bf.w) < 0.5f);
+  assert(fabsf(pf.h - bf.h) < 0.5f);
+  assert(fabsf(chf.w - (pf.w - inset * 2.f)) < 0.5f);
+  assert(fabsf(chf.h - (pf.h - inset * 2.f)) < 0.5f);
+  sz_view_free(box);
+}
+
+static void test_fraction_width_only_tightens_width(void) {
+  SzView *box, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect bf, chf;
+  float intrinsic_h;
+
+  child = sz_view_text("Hi");
+  box = sz_view_fraction(50, 0, child);
+  sz_view_layout(box, 200.f, 100.f, theme);
+  bf = sz_view_frame(box);
+  chf = sz_view_frame(child);
+  intrinsic_h = chf.h;
+  assert(fabsf(bf.w - 100.f) < 0.5f);
+  assert(fabsf(chf.w - 100.f) < 0.5f);
+  assert(fabsf(bf.h - intrinsic_h) < 0.5f);
+  assert(chf.h < 100.f - 0.5f);
+  sz_view_free(box);
+}
+
+static void test_background_forwards_tight_slot(void) {
+  SzView *box, *bg, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect bf, gf, chf;
+
+  child = sz_view_text("Hi");
+  bg = sz_view_background(0xFFE6F0F8u, child);
+  box = sz_view_sized(90, 60, bg);
+  sz_view_layout(box, 200.f, 200.f, theme);
+  bf = sz_view_frame(box);
+  gf = sz_view_frame(bg);
+  chf = sz_view_frame(child);
+  assert(fabsf(bf.w - 90.f) < 0.5f);
+  assert(fabsf(bf.h - 60.f) < 0.5f);
+  assert(fabsf(gf.w - 90.f) < 0.5f);
+  assert(fabsf(gf.h - 60.f) < 0.5f);
+  assert(fabsf(chf.w - 90.f) < 0.5f);
+  assert(fabsf(chf.h - 60.f) < 0.5f);
+  sz_view_free(box);
+}
+
+static void test_center_second_pass_keeps_child_size(void) {
+  SzView *wrap, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect wf, chf;
+
+  child = sz_view_text("Hi");
+  wrap = sz_view_center(child);
+  sz_view_layout(wrap, 200.f, 160.f, theme);
+  wf = sz_view_frame(wrap);
+  chf = sz_view_frame(child);
+  assert(fabsf(wf.w - 200.f) < 0.5f);
+  assert(fabsf(wf.h - 160.f) < 0.5f);
+  assert(chf.w + 1.f < wf.w);
+  assert(chf.h + 1.f < wf.h);
+  assert(chf.x > wf.x + 0.5f);
+  assert(chf.y > wf.y + 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_expanded_row_text_fills_width(void) {
+  SzView *row, *left, *mid, *right, *exp;
+  const SzTheme *theme = sz_theme_default();
+  float max_w = 320.f;
+  float leftover;
+
+  row = sz_view_row();
+  left = sz_view_button("L", NULL, NULL);
+  mid = sz_view_text("mid");
+  exp = sz_view_expanded(mid);
+  right = sz_view_button("R", NULL, NULL);
+  sz_view_add_child(row, left);
+  sz_view_add_child(row, exp);
+  sz_view_add_child(row, right);
+  sz_view_layout(row, max_w, 80.f, theme);
+  leftover = max_w - theme->pad * 2.f - sz_view_frame(left).w -
+             sz_view_frame(right).w - theme->gap * 2.f;
+  assert(fabsf(sz_view_frame(exp).w - leftover) < 0.5f);
+  assert(fabsf(sz_view_frame(mid).w - leftover) < 0.5f);
+  assert(fabsf(sz_view_frame(mid).h - sz_view_frame(exp).h) < 0.5f);
+  sz_view_free(row);
 }
 
 static void test_mobile_pointer_scroll_lifecycle(void) {
@@ -1850,6 +2065,16 @@ int main(void) {
   test_background();
   test_aspect_ratio();
   test_fraction();
+  test_expanded_text_fills_tight_slot();
+  test_min_size_inside_expanded();
+  test_column_non_flex_stays_intrinsic();
+  test_row_non_flex_stays_intrinsic();
+  test_sized_inside_column_keeps_box();
+  test_padding_forwards_min_size();
+  test_fraction_width_only_tightens_width();
+  test_background_forwards_tight_slot();
+  test_center_second_pass_keeps_child_size();
+  test_expanded_row_text_fills_width();
   test_mobile_pointer_scroll_lifecycle();
   test_a11y();
   test_clear_children();

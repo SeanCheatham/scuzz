@@ -473,12 +473,61 @@ static void resolve_text(const SzView *v, char *buf, size_t buflen) {
   }
 }
 
+/* Constraints down, sizes up. min==max is a tight slot (Sized, Expanded flex). */
+typedef struct SzBoxConstraints {
+  float min_w;
+  float min_h;
+  float max_w;
+  float max_h;
+} SzBoxConstraints;
+
+static SzBoxConstraints box_loose(float max_w, float max_h) {
+  SzBoxConstraints c;
+  c.min_w = 0.f;
+  c.min_h = 0.f;
+  c.max_w = max_w;
+  c.max_h = max_h;
+  return c;
+}
+
+static SzBoxConstraints box_tight(float w, float h) {
+  SzBoxConstraints c;
+  c.min_w = w;
+  c.min_h = h;
+  c.max_w = w;
+  c.max_h = h;
+  return c;
+}
+
+static SzBoxConstraints box_tight_width(float w, float max_h) {
+  SzBoxConstraints c;
+  c.min_w = w;
+  c.min_h = 0.f;
+  c.max_w = w;
+  c.max_h = max_h;
+  return c;
+}
+
+static SzBoxConstraints box_tight_height(float max_w, float h) {
+  SzBoxConstraints c;
+  c.min_w = 0.f;
+  c.min_h = h;
+  c.max_w = max_w;
+  c.max_h = h;
+  return c;
+}
+
 static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h,
                            float max_w, float max_h, const SzTheme *theme);
 
+static void layout_constrained(SzView *v, float x, float y, SzBoxConstraints c,
+                               const SzTheme *theme) {
+  layout_node_ex(v, x, y, c.min_w, c.min_h, c.max_w, c.max_h, theme);
+}
+
 static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
                         const SzTheme *theme) {
-  layout_node_ex(v, x, y, 0.f, 0.f, max_w, max_h, theme);
+  layout_constrained(v, x, y, box_loose(max_w, max_h), theme);
 }
 
 static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h,
@@ -555,7 +604,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
           SzView *ch = v->children[i];
           if (!view_is_shown(ch) || ch->kind == SZ_VIEW_EXPANDED)
             continue;
-          layout_node(ch, x + theme->pad, y + theme->pad, inner_w, max_h, theme);
+          layout_constrained(ch, x + theme->pad, y + theme->pad,
+                             box_loose(inner_w, max_h), theme);
           fixed_h += ch->frame.h;
         }
         if (col_shown > 1)
@@ -573,13 +623,16 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
           for (i = 0; i < v->child_count; i++) {
             SzView *ch = v->children[i];
             if (!view_is_shown(ch)) {
-              layout_node(ch, x + theme->pad, cy, inner_w, max_h, theme);
+              layout_constrained(ch, x + theme->pad, cy, box_loose(inner_w, max_h),
+                                 theme);
               continue;
             }
             if (ch->kind == SZ_VIEW_EXPANDED)
-              layout_node(ch, x + theme->pad, cy, inner_w, flex_h, theme);
+              layout_constrained(ch, x + theme->pad, cy, box_tight(inner_w, flex_h),
+                                 theme);
             else
-              layout_node(ch, x + theme->pad, cy, inner_w, max_h, theme);
+              layout_constrained(ch, x + theme->pad, cy, box_loose(inner_w, max_h),
+                                 theme);
             cy += ch->frame.h + theme->gap;
           }
           v->frame.w = max_w;
@@ -590,10 +643,12 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     }
     for (i = 0; i < v->child_count; i++) {
       if (!view_is_shown(v->children[i])) {
-        layout_node(v->children[i], x + theme->pad, cy, inner_w, max_h, theme);
+        layout_constrained(v->children[i], x + theme->pad, cy,
+                           box_loose(inner_w, max_h), theme);
         continue;
       }
-      layout_node(v->children[i], x + theme->pad, cy, inner_w, max_h, theme);
+      layout_constrained(v->children[i], x + theme->pad, cy,
+                         box_loose(inner_w, max_h), theme);
       cy += v->children[i]->frame.h + theme->gap;
       h += v->children[i]->frame.h + theme->gap;
       shown++;
@@ -610,22 +665,20 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_EXPANDED: {
     float old_pref = 0.f;
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
-    v->frame.w = max_w;
-    v->frame.h = max_h > 0 ? max_h : 0.f;
+    float slot_w = max_w > 0.f ? max_w : min_w;
+    float slot_h = max_h > 0.f ? max_h : min_h;
+    v->frame.w = slot_w;
+    v->frame.h = slot_h;
     if (ch) {
       /* Scroll defaults to pref_h=64; inside Expanded, fill the flex slot. */
       if (ch->kind == SZ_VIEW_SCROLL) {
         old_pref = ch->pref_h;
         ch->pref_h = 0.f;
       }
-      layout_node(ch, x, y, max_w > 0 ? max_w : v->frame.w, v->frame.h, theme);
+      /* Tight slot: child sizes up to the flex box. No post-layout overwrite. */
+      layout_constrained(ch, x, y, box_tight(slot_w, slot_h), theme);
       if (ch->kind == SZ_VIEW_SCROLL)
         ch->pref_h = old_pref;
-      /* Tight flex slot: child fills Expanded (constraints down). */
-      ch->frame.x = x;
-      ch->frame.y = y;
-      ch->frame.w = v->frame.w;
-      ch->frame.h = v->frame.h > 0.f ? v->frame.h : ch->frame.h;
     }
     break;
   }
@@ -639,7 +692,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     float ox;
     float oy;
     if (ch)
-      layout_node(ch, x, y, max_w, max_h, theme);
+      layout_constrained(ch, x, y, box_loose(max_w, max_h), theme);
     if (ch) {
       cw = ch->frame.w;
       chh = ch->frame.h;
@@ -659,12 +712,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     else
       oy = (v->frame.h - chh) * 0.5f;
     if (ch) {
-      ch->frame.x = x + ox;
-      ch->frame.y = y + oy;
-      /* Re-layout nested children at the aligned origin. */
-      layout_node(ch, ch->frame.x, ch->frame.y, cw, chh, theme);
-      ch->frame.w = cw;
-      ch->frame.h = chh;
+      /* Re-layout at the aligned origin with a tight measured slot. */
+      layout_constrained(ch, x + ox, y + oy, box_tight(cw, chh), theme);
     }
     break;
   }
@@ -693,8 +742,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
         SzView *ch = v->children[i];
         if (!view_is_shown(ch) || ch->kind == SZ_VIEW_EXPANDED)
           continue;
-        layout_node(ch, x + theme->pad, y + theme->pad, max_w, row_inner_h,
-                    theme);
+        layout_constrained(ch, x + theme->pad, y + theme->pad,
+                           box_loose(max_w, row_inner_h), theme);
         fixed_w += ch->frame.w;
       }
       if (shown > 1)
@@ -711,13 +760,16 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
         for (i = 0; i < v->child_count; i++) {
           SzView *ch = v->children[i];
           if (!view_is_shown(ch)) {
-            layout_node(ch, cx, y + theme->pad, flex_w, row_inner_h, theme);
+            layout_constrained(ch, cx, y + theme->pad,
+                               box_loose(flex_w, row_inner_h), theme);
             continue;
           }
           if (ch->kind == SZ_VIEW_EXPANDED)
-            layout_node(ch, cx, y + theme->pad, flex_w, row_inner_h, theme);
+            layout_constrained(ch, cx, y + theme->pad,
+                               box_tight(flex_w, row_inner_h), theme);
           else
-            layout_node(ch, cx, y + theme->pad, max_w, row_inner_h, theme);
+            layout_constrained(ch, cx, y + theme->pad,
+                               box_loose(max_w, row_inner_h), theme);
           cx += ch->frame.w + theme->gap;
           if (ch->frame.h > inner_h)
             inner_h = ch->frame.h;
@@ -736,10 +788,12 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       child_max = 0;
     for (i = 0; i < v->child_count; i++) {
       if (!view_is_shown(v->children[i])) {
-        layout_node(v->children[i], cx, y + theme->pad, child_max, max_h, theme);
+        layout_constrained(v->children[i], cx, y + theme->pad,
+                           box_loose(child_max, max_h), theme);
         continue;
       }
-      layout_node(v->children[i], cx, y + theme->pad, child_max, max_h, theme);
+      layout_constrained(v->children[i], cx, y + theme->pad,
+                         box_loose(child_max, max_h), theme);
       cx += v->children[i]->frame.w + theme->gap;
       w += v->children[i]->frame.w + theme->gap;
       if (v->children[i]->frame.h > inner_h)
@@ -766,11 +820,13 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     for (i = 0; i < v->child_count; i++) {
       SzView *ch = v->children[i];
       if (!view_is_shown(ch)) {
-        layout_node(ch, ix, iy, inner_w, inner_h, theme);
+        layout_constrained(ch, ix, iy, box_loose(inner_w, inner_h), theme);
         continue;
       }
-      layout_node(ch, ix, iy, inner_w > 0.f ? inner_w : max_w,
-                  inner_h > 0.f ? inner_h : max_h, theme);
+      layout_constrained(ch, ix, iy,
+                         box_loose(inner_w > 0.f ? inner_w : max_w,
+                                   inner_h > 0.f ? inner_h : max_h),
+                         theme);
       if (ch->frame.w > max_cw)
         max_cw = ch->frame.w;
       if (ch->frame.h > max_ch)
@@ -794,7 +850,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     float child_max_w = max_w > px ? max_w - px : 0.f;
     float child_max_h = max_h > py ? max_h - py : 0.f;
     if (ch)
-      layout_node(ch, x + px, y + py, child_max_w, child_max_h, theme);
+      layout_constrained(ch, x + px, y + py, box_loose(child_max_w, child_max_h),
+                         theme);
     if (ch) {
       cw = ch->frame.w;
       chh = ch->frame.h;
@@ -812,9 +869,14 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     float inner_min_h = min_h > p * 2.f ? min_h - p * 2.f : 0.f;
     float cw = 0.f;
     float chh = 0.f;
-    if (ch)
-      layout_node_ex(ch, x + p, y + p, inner_min_w, inner_min_h, inner_w,
-                     inner_h, theme);
+    if (ch) {
+      SzBoxConstraints inner;
+      inner.min_w = inner_min_w;
+      inner.min_h = inner_min_h;
+      inner.max_w = inner_w;
+      inner.max_h = inner_h;
+      layout_constrained(ch, x + p, y + p, inner, theme);
+    }
     if (ch) {
       cw = ch->frame.w;
       chh = ch->frame.h;
@@ -838,7 +900,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.w = tw;
     v->frame.h = th;
     if (ch)
-      layout_node(ch, x, y, tw, th, theme);
+      layout_constrained(ch, x, y, box_tight(tw, th), theme);
     break;
   }
   case SZ_VIEW_MIN_SIZE: {
@@ -853,16 +915,28 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       child_min_w = max_w;
     if (max_h > 0.f && child_min_h > max_h)
       child_min_h = max_h;
-    if (ch)
-      layout_node_ex(ch, x, y, child_min_w, child_min_h, max_w, max_h, theme);
+    if (ch) {
+      SzBoxConstraints cc;
+      cc.min_w = child_min_w;
+      cc.min_h = child_min_h;
+      cc.max_w = max_w;
+      cc.max_h = max_h;
+      layout_constrained(ch, x, y, cc, theme);
+    }
     v->frame.w = ch ? ch->frame.w : child_min_w;
     v->frame.h = ch ? ch->frame.h : child_min_h;
     break;
   }
   case SZ_VIEW_BACKGROUND: {
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
-    if (ch)
-      layout_node_ex(ch, x, y, min_w, min_h, max_w, max_h, theme);
+    if (ch) {
+      SzBoxConstraints cc;
+      cc.min_w = min_w;
+      cc.min_h = min_h;
+      cc.max_w = max_w;
+      cc.max_h = max_h;
+      layout_constrained(ch, x, y, cc, theme);
+    }
     v->frame.w = ch ? ch->frame.w : 0.f;
     v->frame.h = ch ? ch->frame.h : 0.f;
     break;
@@ -891,7 +965,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.w = tw;
     v->frame.h = th;
     if (ch)
-      layout_node(ch, x, y, tw, th, theme);
+      layout_constrained(ch, x, y, box_tight(tw, th), theme);
     break;
   }
   case SZ_VIEW_FRACTION: {
@@ -904,8 +978,18 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       child_max_w = max_w * (float)wp / 100.f;
     if (hp > 0 && max_h > 0.f)
       child_max_h = max_h * (float)hp / 100.f;
-    if (ch)
-      layout_node(ch, x, y, child_max_w, child_max_h, theme);
+    if (ch) {
+      SzBoxConstraints cc;
+      if (wp > 0 && hp > 0)
+        cc = box_tight(child_max_w, child_max_h);
+      else if (wp > 0)
+        cc = box_tight_width(child_max_w, child_max_h);
+      else if (hp > 0)
+        cc = box_tight_height(child_max_w, child_max_h);
+      else
+        cc = box_loose(child_max_w, child_max_h);
+      layout_constrained(ch, x, y, cc, theme);
+    }
     v->frame.w = wp > 0 ? child_max_w : (ch ? ch->frame.w : 0.f);
     v->frame.h = hp > 0 ? child_max_h : (ch ? ch->frame.h : 0.f);
     break;
@@ -926,8 +1010,10 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.w = max_w;
     v->frame.h = vh;
     if (v->scroll_child) {
-      layout_node(v->scroll_child, x + theme->pad, y + theme->pad - v->scroll_y,
-                  inner_w > 0 ? inner_w : max_w, 10000.f, theme);
+      layout_constrained(v->scroll_child, x + theme->pad,
+                         y + theme->pad - v->scroll_y,
+                         box_loose(inner_w > 0 ? inner_w : max_w, 10000.f),
+                         theme);
     }
     break;
   }
