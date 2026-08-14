@@ -2,4 +2,4 @@
 
 ## Next
 
-**Prove a live View-label change** — `[ui] build` emits `build/reload.dylib` (`sz_ui_reload_rebuild`); `run --watch` recompiles it then stamps. Next: a Headless counter string change appears in `debug.dump` without restarting (Scuzz capture env vs new dylib). `watch` still only rebuilds.
+**Dump bindText in `[views]`** — `sz_view_text_signal_str` has no a11y role, so mapped labels are missing from `debug.dump` (goldens skip `count = 0` / `taps = 0`). Next: emit the live string so agents can read Signal-bound text. `watch` still only rebuilds.

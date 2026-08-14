@@ -961,4 +961,94 @@ mod tests {
             "unexpected: {err}"
         );
     }
+
+    fn write_reload_ui(dir: &Path, title: &str) {
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(
+            dir.join("scuzz.toml"),
+            "[package]\nname = \"reload_label\"\nversion = \"0.1.0\"\n\n[ui]\ndefault_runtime = \"headless\"\nheadless_size = [200, 100]\nheadless_scale = 1.0\n",
+        )
+        .unwrap();
+        fs::write(
+            dir.join("src/Main.scuzz"),
+            format!(
+                "@main def main: IO[Unit] =\n  for {{\n    count = Signal.int(7)\n    label = Signal.map(count, n => Str.concat(\"n=\", Str.fromInt(n)))\n    _ <- Ui.run(_ => View.column(View.text(\"{title}\"), View.bindText(label)))\n  }} yield ()\n"
+            ),
+        )
+        .unwrap();
+    }
+
+    fn compile_reload_ui(dir: &Path) -> CompileOutput {
+        let runtime_dir =
+            find_runtime_dir(Path::new(env!("CARGO_MANIFEST_DIR"))).expect("crates/runtime");
+        compile_project(&CompileOptions {
+            project_dir: dir.to_path_buf(),
+            runtime_dir,
+            out_dir: dir.join("build"),
+            clang: std::env::var("SCUZZ_CLANG").unwrap_or_else(|_| "clang".into()),
+            incremental: false,
+            verify: false,
+        })
+        .expect("compile reload_label")
+    }
+
+    fn wait_dump_contains(
+        path: &Path,
+        needle: &str,
+        child: &mut std::process::Child,
+        ms: u64,
+    ) -> String {
+        let start = std::time::Instant::now();
+        loop {
+            if let Ok(Some(status)) = child.try_wait() {
+                panic!("ui process exited {status} before dump contained {needle:?}");
+            }
+            if let Ok(text) = fs::read_to_string(path) {
+                if text.contains(needle) {
+                    return text;
+                }
+            }
+            if start.elapsed().as_millis() as u64 >= ms {
+                let got = fs::read_to_string(path).unwrap_or_default();
+                panic!("timed out waiting for {needle:?} in dump:\n{got}");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
+    #[test]
+    fn live_reload_dylib_swaps_view_label() {
+        let tmp = tempdir().unwrap();
+        let app = tmp.path().join("app");
+        write_reload_ui(&app, "Alpha");
+        let out = compile_reload_ui(&app);
+        let dylib = app.join("build").join("reload.dylib");
+        assert!(dylib.is_file(), "expected {}", dylib.display());
+
+        let stamp = app.join("build").join("reload.stamp");
+        let dump = app.join("build").join("debug.dump");
+        fs::write(&stamp, "0\n").unwrap();
+        let mut child = std::process::Command::new(&out.executable)
+            .env("SCUZZ_UI_RUNTIME", "headless")
+            .env("SCUZZ_UI_WIDTH", "200")
+            .env("SCUZZ_UI_HEIGHT", "100")
+            .env("SCUZZ_UI_RELOAD_STAMP", &stamp)
+            .env("SCUZZ_UI_RELOAD_CODE", &dylib)
+            .env("SCUZZ_UI_DEBUG_DUMP", &dump)
+            .spawn()
+            .expect("spawn reload_label");
+        let first = wait_dump_contains(&dump, "text:Alpha", &mut child, 8_000);
+        assert!(first.contains("int[0] = 7"), "{first}");
+        assert!(!first.contains("text:Beta"), "{first}");
+
+        write_reload_ui(&app, "Beta");
+        compile_reload_ui(&app);
+        fs::write(&stamp, "1\n").unwrap();
+        let second = wait_dump_contains(&dump, "text:Beta", &mut child, 8_000);
+        assert!(second.contains("int[0] = 7"), "{second}");
+        assert!(!second.contains("text:Alpha"), "{second}");
+
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 }
