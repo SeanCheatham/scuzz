@@ -3722,129 +3722,49 @@ law always: Bool = 1 == 1
     }
 
     #[test]
-    fn emit_view_stretch() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.stretch(View.text("x")))
-"#;
-        let p = crate::lower::lower_program(parse(src).unwrap());
-        crate::typ::typecheck(&p).expect("typecheck");
-        let ir = emit_llvm(&p);
-        assert!(
-            ir.contains("sz_lang_view_stretch"),
-            "expected View.stretch in IR:\n{ir}"
-        );
-    }
-
-    #[test]
-    fn emit_view_max_size() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.maxSize(40, 30, View.text("x")))
-"#;
-        let p = crate::lower::lower_program(parse(src).unwrap());
-        crate::typ::typecheck(&p).expect("typecheck");
-        let ir = emit_llvm(&p);
-        assert!(
-            ir.contains("sz_lang_view_max_size"),
-            "expected View.maxSize in IR:\n{ir}"
-        );
-    }
-
-    #[test]
-    fn emit_view_clip() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.clip(View.text("x")))
-"#;
-        let p = crate::lower::lower_program(parse(src).unwrap());
-        crate::typ::typecheck(&p).expect("typecheck");
-        let ir = emit_llvm(&p);
-        assert!(
-            ir.contains("sz_lang_view_clip"),
-            "expected View.clip in IR:\n{ir}"
-        );
-    }
-
-    #[test]
-    fn emit_view_opacity() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.opacity(50, View.text("x")))
-"#;
-        let p = crate::lower::lower_program(parse(src).unwrap());
-        crate::typ::typecheck(&p).expect("typecheck");
-        let ir = emit_llvm(&p);
-        assert!(
-            ir.contains("sz_lang_view_opacity"),
-            "expected View.opacity in IR:\n{ir}"
-        );
-    }
-
-    #[test]
-    fn emit_view_max_lines() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.maxLines(2, View.text("x")))
-"#;
-        let p = crate::lower::lower_program(parse(src).unwrap());
-        crate::typ::typecheck(&p).expect("typecheck");
-        let ir = emit_llvm(&p);
-        assert!(
-            ir.contains("sz_lang_view_max_lines"),
-            "expected View.maxLines in IR:\n{ir}"
-        );
-    }
-
-    #[test]
-    fn emit_view_ellipsis() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.ellipsis(View.text("x")))
-"#;
-        let p = crate::lower::lower_program(parse(src).unwrap());
-        crate::typ::typecheck(&p).expect("typecheck");
-        let ir = emit_llvm(&p);
-        assert!(
-            ir.contains("sz_lang_view_ellipsis"),
-            "expected View.ellipsis in IR:\n{ir}"
-        );
-    }
-
-    #[test]
-    fn emit_view_text_color() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.textColor(Color.rgb(255, 0, 0), View.text("x")))
-"#;
-        let p = crate::lower::lower_program(parse(src).unwrap());
-        crate::typ::typecheck(&p).expect("typecheck");
-        let ir = emit_llvm(&p);
-        assert!(
-            ir.contains("sz_lang_view_text_color"),
-            "expected View.textColor in IR:\n{ir}"
-        );
-    }
-
-    #[test]
-    fn emit_view_gap() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.gap(0, View.text("x")))
-"#;
-        let p = crate::lower::lower_program(parse(src).unwrap());
-        crate::typ::typecheck(&p).expect("typecheck");
-        let ir = emit_llvm(&p);
-        assert!(
-            ir.contains("sz_lang_view_gap"),
-            "expected View.gap in IR:\n{ir}"
-        );
-    }
-
-    #[test]
-    fn emit_view_font_size() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.fontSize(16, View.text("x")))
-"#;
-        let p = crate::lower::lower_program(parse(src).unwrap());
-        crate::typ::typecheck(&p).expect("typecheck");
-        let ir = emit_llvm(&p);
-        assert!(
-            ir.contains("sz_lang_view_font_size"),
-            "expected View.fontSize in IR:\n{ir}"
-        );
+    fn emit_view_wrappers() {
+        let cases = [
+            ("View.stretch(View.text(\"x\"))", "sz_lang_view_stretch"),
+            (
+                "View.maxSize(40, 30, View.text(\"x\"))",
+                "sz_lang_view_max_size",
+            ),
+            ("View.clip(View.text(\"x\"))", "sz_lang_view_clip"),
+            ("View.opacity(50, View.text(\"x\"))", "sz_lang_view_opacity"),
+            (
+                "View.maxLines(2, View.text(\"x\"))",
+                "sz_lang_view_max_lines",
+            ),
+            ("View.ellipsis(View.text(\"x\"))", "sz_lang_view_ellipsis"),
+            (
+                "View.textColor(Color.rgb(255, 0, 0), View.text(\"x\"))",
+                "sz_lang_view_text_color",
+            ),
+            ("View.gap(0, View.text(\"x\"))", "sz_lang_view_gap"),
+            (
+                "View.fontSize(16, View.text(\"x\"))",
+                "sz_lang_view_font_size",
+            ),
+            (
+                "View.ignorePointer(View.text(\"x\"))",
+                "sz_lang_view_ignore_pointer",
+            ),
+            (
+                "View.absorbPointer(View.text(\"x\"))",
+                "sz_lang_view_absorb_pointer",
+            ),
+            (
+                "View.excludeSemantics(View.text(\"x\"))",
+                "sz_lang_view_exclude_semantics",
+            ),
+        ];
+        for (call, sym) in cases {
+            let src = format!("@main def main: IO[Unit] =\n  Ui.run(_ => {call})\n");
+            let p = crate::lower::lower_program(parse(&src).unwrap());
+            crate::typ::typecheck(&p).expect("typecheck");
+            let ir = emit_llvm(&p);
+            assert!(ir.contains(sym), "expected {sym} in IR for {call}:\n{ir}");
+        }
     }
 
     #[test]
@@ -3858,48 +3778,6 @@ law always: Bool = 1 == 1
         assert!(
             ir.contains("sz_color_rgba"),
             "expected Color.rgba in IR:\n{ir}"
-        );
-    }
-
-    #[test]
-    fn emit_view_ignore_pointer() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.ignorePointer(View.text("x")))
-"#;
-        let p = crate::lower::lower_program(parse(src).unwrap());
-        crate::typ::typecheck(&p).expect("typecheck");
-        let ir = emit_llvm(&p);
-        assert!(
-            ir.contains("sz_lang_view_ignore_pointer"),
-            "expected View.ignorePointer in IR:\n{ir}"
-        );
-    }
-
-    #[test]
-    fn emit_view_absorb_pointer() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.absorbPointer(View.text("x")))
-"#;
-        let p = crate::lower::lower_program(parse(src).unwrap());
-        crate::typ::typecheck(&p).expect("typecheck");
-        let ir = emit_llvm(&p);
-        assert!(
-            ir.contains("sz_lang_view_absorb_pointer"),
-            "expected View.absorbPointer in IR:\n{ir}"
-        );
-    }
-
-    #[test]
-    fn emit_view_exclude_semantics() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.excludeSemantics(View.text("x")))
-"#;
-        let p = crate::lower::lower_program(parse(src).unwrap());
-        crate::typ::typecheck(&p).expect("typecheck");
-        let ir = emit_llvm(&p);
-        assert!(
-            ir.contains("sz_lang_view_exclude_semantics"),
-            "expected View.excludeSemantics in IR:\n{ir}"
         );
     }
 

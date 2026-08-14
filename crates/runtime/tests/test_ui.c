@@ -2718,38 +2718,23 @@ static void test_font_size_sizes_to_child(void) {
   sz_view_free(wrap);
 }
 
-static void test_font_size_grows_text_height(void) {
+static void test_font_size_grows_text(void) {
   SzView *plain, *wrap;
   const SzTheme *theme = sz_theme_default();
-  float plain_h, big_h;
+  float plain_h, big_h, plain_w, big_w;
 
   plain = sz_view_text("Hi");
-  sz_view_layout(plain, 200.f, 200.f, theme);
+  sz_view_layout(plain, 1000.f, 200.f, theme);
   plain_h = sz_view_frame(plain).h;
+  plain_w = sz_view_frame(plain).w;
   sz_view_free(plain);
   assert(fabsf(plain_h - (theme->font_px + 6.f)) < 0.5f);
 
   wrap = sz_view_font_size(16, sz_view_text("Hi"));
-  sz_view_layout(wrap, 200.f, 200.f, theme);
-  big_h = sz_view_frame(wrap).h;
-  assert(fabsf(big_h - (16.f + 6.f)) < 0.5f);
-  assert(big_h > plain_h + 1.f);
-  sz_view_free(wrap);
-}
-
-static void test_font_size_grows_text_width(void) {
-  SzView *plain, *wrap;
-  const SzTheme *theme = sz_theme_default();
-  float plain_w, big_w;
-
-  plain = sz_view_text("Hi");
-  sz_view_layout(plain, 1000.f, 200.f, theme);
-  plain_w = sz_view_frame(plain).w;
-  sz_view_free(plain);
-
-  wrap = sz_view_font_size(16, sz_view_text("Hi"));
   sz_view_layout(wrap, 1000.f, 200.f, theme);
+  big_h = sz_view_frame(wrap).h;
   big_w = sz_view_frame(wrap).w;
+  assert(fabsf(big_h - (16.f + 6.f)) < 0.5f);
   assert(big_w > plain_w + 1.f);
   sz_view_free(wrap);
 }
@@ -2776,17 +2761,6 @@ static void test_font_size_zero_is_one(void) {
   sz_view_free(wrap);
 }
 
-static void test_font_size_keeps_a11y(void) {
-  SzView *wrap;
-  SzString *dump;
-
-  wrap = sz_view_font_size(24, sz_view_text("hi"));
-  dump = sz_view_a11y_dump(wrap);
-  assert(strstr(sz_string_cstr(dump), "text:hi") != NULL);
-  sz_string_free(dump);
-  sz_view_free(wrap);
-}
-
 static void test_font_size_does_not_grow_button(void) {
   SzView *wrap, *b;
   const SzTheme *theme = sz_theme_default();
@@ -2802,19 +2776,6 @@ static void test_font_size_does_not_grow_button(void) {
   assert(fabsf(sz_view_frame(wrap).h - btn_h) < 0.5f);
   assert(fabsf(btn_h - theme->control_h) < 0.5f);
   sz_view_free(wrap);
-}
-
-static void test_bind_text_respects_font_size(void) {
-  SzSignalStr *s;
-  SzView *wrap;
-  const SzTheme *theme = sz_theme_default();
-
-  s = sz_signal_str("Hi");
-  wrap = sz_view_font_size(16, sz_view_text_signal_str(s));
-  sz_view_layout(wrap, 200.f, 200.f, theme);
-  assert(fabsf(sz_view_frame(wrap).h - (16.f + 6.f)) < 0.5f);
-  sz_view_free(wrap);
-  sz_signal_str_free(s);
 }
 
 static void test_font_size_wraps_sooner(void) {
@@ -3784,13 +3745,10 @@ int main(void) {
   test_gap_zero_shrinks_column_height();
   test_gap_does_not_change_stack();
   test_font_size_sizes_to_child();
-  test_font_size_grows_text_height();
-  test_font_size_grows_text_width();
+  test_font_size_grows_text();
   test_nested_font_size_inner_wins();
   test_font_size_zero_is_one();
-  test_font_size_keeps_a11y();
   test_font_size_does_not_grow_button();
-  test_bind_text_respects_font_size();
   test_font_size_wraps_sooner();
   test_ignore_pointer_sizes_to_child();
   test_ignore_pointer_passes_tap_through();

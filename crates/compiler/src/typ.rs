@@ -1943,110 +1943,25 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Opaque("View".into()))
         }
-        "View.expanded" => {
+        "View.expanded"
+        | "View.stretch"
+        | "View.center"
+        | "View.clip"
+        | "View.ellipsis"
+        | "View.ignorePointer"
+        | "View.absorbPointer"
+        | "View.excludeSemantics" => {
             expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Opaque("View".into()))
         }
-        "View.stretch" => {
-            expect_arity(callee, &arg_tys, 1)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.center" => {
-            expect_arity(callee, &arg_tys, 1)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.align" => {
-            expect_arity(callee, &arg_tys, 3)?;
-            expect_ty(&arg_tys[0], &Type::Int)?;
-            expect_ty(&arg_tys[1], &Type::Int)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.positioned" => {
-            expect_arity(callee, &arg_tys, 3)?;
-            expect_ty(&arg_tys[0], &Type::Int)?;
-            expect_ty(&arg_tys[1], &Type::Int)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.padding" => {
+        "View.padding" | "View.opacity" | "View.maxLines" | "View.textColor" | "View.gap"
+        | "View.fontSize" | "View.background" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
             Ok(Type::Opaque("View".into()))
         }
-        "View.sized" => {
-            expect_arity(callee, &arg_tys, 3)?;
-            expect_ty(&arg_tys[0], &Type::Int)?;
-            expect_ty(&arg_tys[1], &Type::Int)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.minSize" => {
-            expect_arity(callee, &arg_tys, 3)?;
-            expect_ty(&arg_tys[0], &Type::Int)?;
-            expect_ty(&arg_tys[1], &Type::Int)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.maxSize" => {
-            expect_arity(callee, &arg_tys, 3)?;
-            expect_ty(&arg_tys[0], &Type::Int)?;
-            expect_ty(&arg_tys[1], &Type::Int)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.clip" => {
-            expect_arity(callee, &arg_tys, 1)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.opacity" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            expect_ty(&arg_tys[0], &Type::Int)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.maxLines" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            expect_ty(&arg_tys[0], &Type::Int)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.ellipsis" => {
-            expect_arity(callee, &arg_tys, 1)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.textColor" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            expect_ty(&arg_tys[0], &Type::Int)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.gap" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            expect_ty(&arg_tys[0], &Type::Int)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.fontSize" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            expect_ty(&arg_tys[0], &Type::Int)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.ignorePointer" => {
-            expect_arity(callee, &arg_tys, 1)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.absorbPointer" => {
-            expect_arity(callee, &arg_tys, 1)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.excludeSemantics" => {
-            expect_arity(callee, &arg_tys, 1)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.background" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            expect_ty(&arg_tys[0], &Type::Int)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.aspectRatio" => {
-            expect_arity(callee, &arg_tys, 3)?;
-            expect_ty(&arg_tys[0], &Type::Int)?;
-            expect_ty(&arg_tys[1], &Type::Int)?;
-            Ok(Type::Opaque("View".into()))
-        }
-        "View.fraction" => {
+        "View.align" | "View.positioned" | "View.sized" | "View.minSize" | "View.maxSize"
+        | "View.aspectRatio" | "View.fraction" => {
             expect_arity(callee, &arg_tys, 3)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
             expect_ty(&arg_tys[1], &Type::Int)?;
@@ -4883,84 +4798,25 @@ def note(n: Int where "x"): Unit = ()
     }
 
     #[test]
-    fn typechecks_view_stretch() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.column(View.stretch(View.text("x")), View.button("Go", _ => ())))
-"#;
-        let p = lower_program(parse(src).unwrap());
-        typecheck(&p).expect("View.stretch should typecheck");
-    }
-
-    #[test]
-    fn typechecks_view_max_size() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.maxSize(40, 30, View.text("x")))
-"#;
-        let p = lower_program(parse(src).unwrap());
-        typecheck(&p).expect("View.maxSize should typecheck");
-    }
-
-    #[test]
-    fn typechecks_view_clip() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.clip(View.text("x")))
-"#;
-        let p = lower_program(parse(src).unwrap());
-        typecheck(&p).expect("View.clip should typecheck");
-    }
-
-    #[test]
-    fn typechecks_view_opacity() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.opacity(50, View.text("x")))
-"#;
-        let p = lower_program(parse(src).unwrap());
-        typecheck(&p).expect("View.opacity should typecheck");
-    }
-
-    #[test]
-    fn typechecks_view_max_lines() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.maxLines(2, View.text("x")))
-"#;
-        let p = lower_program(parse(src).unwrap());
-        typecheck(&p).expect("View.maxLines should typecheck");
-    }
-
-    #[test]
-    fn typechecks_view_ellipsis() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.ellipsis(View.text("x")))
-"#;
-        let p = lower_program(parse(src).unwrap());
-        typecheck(&p).expect("View.ellipsis should typecheck");
-    }
-
-    #[test]
-    fn typechecks_view_text_color() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.textColor(Color.rgb(255, 0, 0), View.text("x")))
-"#;
-        let p = lower_program(parse(src).unwrap());
-        typecheck(&p).expect("View.textColor should typecheck");
-    }
-
-    #[test]
-    fn typechecks_view_gap() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.gap(0, View.column(View.text("a"), View.text("b"))))
-"#;
-        let p = lower_program(parse(src).unwrap());
-        typecheck(&p).expect("View.gap should typecheck");
-    }
-
-    #[test]
-    fn typechecks_view_font_size() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.fontSize(16, View.text("x")))
-"#;
-        let p = lower_program(parse(src).unwrap());
-        typecheck(&p).expect("View.fontSize should typecheck");
+    fn typechecks_view_wrappers() {
+        for call in [
+            "View.column(View.stretch(View.text(\"x\")), View.button(\"Go\", _ => ()))",
+            "View.maxSize(40, 30, View.text(\"x\"))",
+            "View.clip(View.text(\"x\"))",
+            "View.opacity(50, View.text(\"x\"))",
+            "View.maxLines(2, View.text(\"x\"))",
+            "View.ellipsis(View.text(\"x\"))",
+            "View.textColor(Color.rgb(255, 0, 0), View.text(\"x\"))",
+            "View.gap(0, View.column(View.text(\"a\"), View.text(\"b\")))",
+            "View.fontSize(16, View.text(\"x\"))",
+            "View.ignorePointer(View.button(\"Go\", _ => ()))",
+            "View.absorbPointer(View.button(\"Go\", _ => ()))",
+            "View.excludeSemantics(View.button(\"Go\", _ => ()))",
+        ] {
+            let src = format!("@main def main: IO[Unit] =\n  Ui.run(_ => {call})\n");
+            let p = lower_program(parse(&src).unwrap());
+            typecheck(&p).unwrap_or_else(|e| panic!("{call} should typecheck: {e:?}"));
+        }
     }
 
     #[test]
@@ -4970,33 +4826,6 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Color.rgba should typecheck");
-    }
-
-    #[test]
-    fn typechecks_view_ignore_pointer() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.ignorePointer(View.button("Go", _ => ())))
-"#;
-        let p = lower_program(parse(src).unwrap());
-        typecheck(&p).expect("View.ignorePointer should typecheck");
-    }
-
-    #[test]
-    fn typechecks_view_absorb_pointer() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.absorbPointer(View.button("Go", _ => ())))
-"#;
-        let p = lower_program(parse(src).unwrap());
-        typecheck(&p).expect("View.absorbPointer should typecheck");
-    }
-
-    #[test]
-    fn typechecks_view_exclude_semantics() {
-        let src = r#"@main def main: IO[Unit] =
-  Ui.run(_ => View.excludeSemantics(View.button("Go", _ => ())))
-"#;
-        let p = lower_program(parse(src).unwrap());
-        typecheck(&p).expect("View.excludeSemantics should typecheck");
     }
 
     #[test]

@@ -64,7 +64,6 @@ struct SzView {
   int pos_y;
   /* View.padding: uniform inset. */
   int pad;
-  /* View.sized / View.minSize / View.maxSize / View.aspectRatio / View.fraction / View.opacity / View.maxLines: w×h, ratio, or pct. */
 };
 
 static SzView *view_new(SzViewKind kind) {
@@ -853,8 +852,7 @@ static int g_max_lines;
 static int g_ellipsis;
 static int g_gap_on;
 static float g_gap;
-static int g_font_px_on;
-static float g_font_px;
+static float g_font_px; /* 0 = theme font */
 
 static float layout_gap(const SzTheme *theme) {
   if (g_gap_on)
@@ -863,9 +861,7 @@ static float layout_gap(const SzTheme *theme) {
 }
 
 static float layout_font_px(const SzTheme *theme) {
-  if (g_font_px_on)
-    return g_font_px;
-  return theme->font_px;
+  return g_font_px > 0.f ? g_font_px : theme->font_px;
 }
 
 static int tighten_max_lines(int n) {
@@ -888,6 +884,21 @@ static int text_line_cap(void) {
 static void layout_constrained(SzView *v, float x, float y, SzBoxConstraints c,
                                const SzTheme *theme) {
   layout_node_ex(v, x, y, c.min_w, c.min_h, c.max_w, c.max_h, theme);
+}
+
+static void layout_pass_child(SzView *v, float x, float y, float min_w, float min_h,
+                              float max_w, float max_h, const SzTheme *theme) {
+  SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
+  if (ch) {
+    SzBoxConstraints cc;
+    cc.min_w = min_w;
+    cc.min_h = min_h;
+    cc.max_w = max_w;
+    cc.max_h = max_h;
+    layout_constrained(ch, x, y, cc, theme);
+  }
+  v->frame.w = ch ? ch->frame.w : 0.f;
+  v->frame.h = ch ? ch->frame.h : 0.f;
 }
 
 static void layout_node(SzView *v, float x, float y, float max_w, float max_h,
@@ -1344,137 +1355,44 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.h = ch ? ch->frame.h : child_min_h;
     break;
   }
-  case SZ_VIEW_BACKGROUND: {
-    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
-    if (ch) {
-      SzBoxConstraints cc;
-      cc.min_w = min_w;
-      cc.min_h = min_h;
-      cc.max_w = max_w;
-      cc.max_h = max_h;
-      layout_constrained(ch, x, y, cc, theme);
-    }
-    v->frame.w = ch ? ch->frame.w : 0.f;
-    v->frame.h = ch ? ch->frame.h : 0.f;
+  case SZ_VIEW_BACKGROUND:
+  case SZ_VIEW_CLIP:
+  case SZ_VIEW_OPACITY:
+  case SZ_VIEW_IGNORE_POINTER:
+  case SZ_VIEW_ABSORB_POINTER:
+  case SZ_VIEW_EXCLUDE_SEMANTICS:
+  case SZ_VIEW_TEXT_COLOR:
+    layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     break;
-  }
-  case SZ_VIEW_CLIP: {
-    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
-    if (ch) {
-      SzBoxConstraints cc;
-      cc.min_w = min_w;
-      cc.min_h = min_h;
-      cc.max_w = max_w;
-      cc.max_h = max_h;
-      layout_constrained(ch, x, y, cc, theme);
-    }
-    v->frame.w = ch ? ch->frame.w : 0.f;
-    v->frame.h = ch ? ch->frame.h : 0.f;
-    break;
-  }
-  case SZ_VIEW_OPACITY: {
-    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
-    if (ch) {
-      SzBoxConstraints cc;
-      cc.min_w = min_w;
-      cc.min_h = min_h;
-      cc.max_w = max_w;
-      cc.max_h = max_h;
-      layout_constrained(ch, x, y, cc, theme);
-    }
-    v->frame.w = ch ? ch->frame.w : 0.f;
-    v->frame.h = ch ? ch->frame.h : 0.f;
-    break;
-  }
   case SZ_VIEW_MAX_LINES: {
-    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
     int prev = g_max_lines;
     g_max_lines = tighten_max_lines(v->img_w);
-    if (ch) {
-      SzBoxConstraints cc;
-      cc.min_w = min_w;
-      cc.min_h = min_h;
-      cc.max_w = max_w;
-      cc.max_h = max_h;
-      layout_constrained(ch, x, y, cc, theme);
-    }
+    layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     g_max_lines = prev;
-    v->frame.w = ch ? ch->frame.w : 0.f;
-    v->frame.h = ch ? ch->frame.h : 0.f;
     break;
   }
   case SZ_VIEW_ELLIPSIS: {
-    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
     int prev = g_ellipsis;
     g_ellipsis = 1;
-    if (ch) {
-      SzBoxConstraints cc;
-      cc.min_w = min_w;
-      cc.min_h = min_h;
-      cc.max_w = max_w;
-      cc.max_h = max_h;
-      layout_constrained(ch, x, y, cc, theme);
-    }
+    layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     g_ellipsis = prev;
-    v->frame.w = ch ? ch->frame.w : 0.f;
-    v->frame.h = ch ? ch->frame.h : 0.f;
     break;
   }
   case SZ_VIEW_GAP: {
-    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
     int prev_on = g_gap_on;
     float prev = g_gap;
     g_gap_on = 1;
     g_gap = (float)v->img_w;
-    if (ch) {
-      SzBoxConstraints cc;
-      cc.min_w = min_w;
-      cc.min_h = min_h;
-      cc.max_w = max_w;
-      cc.max_h = max_h;
-      layout_constrained(ch, x, y, cc, theme);
-    }
+    layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     g_gap_on = prev_on;
     g_gap = prev;
-    v->frame.w = ch ? ch->frame.w : 0.f;
-    v->frame.h = ch ? ch->frame.h : 0.f;
     break;
   }
   case SZ_VIEW_FONT_SIZE: {
-    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
-    int prev_on = g_font_px_on;
     float prev = g_font_px;
-    g_font_px_on = 1;
     g_font_px = (float)v->img_w;
-    if (ch) {
-      SzBoxConstraints cc;
-      cc.min_w = min_w;
-      cc.min_h = min_h;
-      cc.max_w = max_w;
-      cc.max_h = max_h;
-      layout_constrained(ch, x, y, cc, theme);
-    }
-    g_font_px_on = prev_on;
+    layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     g_font_px = prev;
-    v->frame.w = ch ? ch->frame.w : 0.f;
-    v->frame.h = ch ? ch->frame.h : 0.f;
-    break;
-  }
-  case SZ_VIEW_IGNORE_POINTER:
-  case SZ_VIEW_ABSORB_POINTER:
-  case SZ_VIEW_EXCLUDE_SEMANTICS:
-  case SZ_VIEW_TEXT_COLOR: {
-    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
-    if (ch) {
-      SzBoxConstraints cc;
-      cc.min_w = min_w;
-      cc.min_h = min_h;
-      cc.max_w = max_w;
-      cc.max_h = max_h;
-      layout_constrained(ch, x, y, cc, theme);
-    }
-    v->frame.w = ch ? ch->frame.w : 0.f;
-    v->frame.h = ch ? ch->frame.h : 0.f;
     break;
   }
   case SZ_VIEW_ASPECT_RATIO: {
@@ -1571,6 +1489,10 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
 void sz_view_layout(SzView *root, float width, float height, const SzTheme *theme) {
   if (!root || !theme)
     return;
+  g_max_lines = 0;
+  g_ellipsis = 0;
+  g_gap_on = 0;
+  g_font_px = 0.f;
   layout_node(root, 0.f, 0.f, width, height, theme);
 }
 
@@ -1880,13 +1802,10 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     break;
   }
   case SZ_VIEW_FONT_SIZE: {
-    int prev_on = g_font_px_on;
     float prev = g_font_px;
-    g_font_px_on = 1;
     g_font_px = (float)v->img_w;
     for (i = 0; i < v->child_count; i++)
       paint_node(v->children[i], c, theme);
-    g_font_px_on = prev_on;
     g_font_px = prev;
     break;
   }
@@ -1930,11 +1849,7 @@ int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
     return 0;
   g_clip_on = 0;
   g_opacity = 100;
-  g_max_lines = 0;
-  g_ellipsis = 0;
   g_text_color_on = 0;
-  g_gap_on = 0;
-  g_font_px_on = 0;
   sk_canvas_clear(canvas, sk_color_argb(theme->background));
   sz_view_layout(root, (float)width, (float)height, theme);
   paint_node(root, canvas, theme);

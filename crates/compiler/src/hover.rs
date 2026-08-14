@@ -418,84 +418,31 @@ mod tests {
     }
 
     #[test]
-    fn hovers_view_stretch() {
-        let src = "@main def main: IO[Unit] =\n  Ui.run(_ => View.stretch(View.text(\"x\")))\n";
-        let h = hover_src(src, "stretch");
-        assert!(h.contains("View.stretch(child: View): View"), "{h}");
-    }
-
-    #[test]
-    fn hovers_view_max_size() {
-        let src =
-            "@main def main: IO[Unit] =\n  Ui.run(_ => View.maxSize(40, 30, View.text(\"x\")))\n";
-        let h = hover_src(src, "maxSize");
-        assert!(
-            h.contains("View.maxSize(w: Int, h: Int, child: View): View"),
-            "{h}"
-        );
-    }
-
-    #[test]
-    fn hovers_view_clip() {
-        let src = "@main def main: IO[Unit] =\n  Ui.run(_ => View.clip(View.text(\"x\")))\n";
-        let h = hover_src(src, "clip");
-        assert!(h.contains("View.clip(child: View): View"), "{h}");
-    }
-
-    #[test]
-    fn hovers_view_opacity() {
-        let src = "@main def main: IO[Unit] =\n  Ui.run(_ => View.opacity(50, View.text(\"x\")))\n";
-        let h = hover_src(src, "opacity");
-        assert!(
-            h.contains("View.opacity(pct: Int, child: View): View"),
-            "{h}"
-        );
-    }
-
-    #[test]
-    fn hovers_view_max_lines() {
-        let src = "@main def main: IO[Unit] =\n  Ui.run(_ => View.maxLines(2, View.text(\"x\")))\n";
-        let h = hover_src(src, "maxLines");
-        assert!(
-            h.contains("View.maxLines(n: Int, child: View): View"),
-            "{h}"
-        );
-    }
-
-    #[test]
-    fn hovers_view_ellipsis() {
-        let src = "@main def main: IO[Unit] =\n  Ui.run(_ => View.ellipsis(View.text(\"x\")))\n";
-        let h = hover_src(src, "ellipsis");
-        assert!(h.contains("View.ellipsis(child: View): View"), "{h}");
-    }
-
-    #[test]
-    fn hovers_view_text_color() {
-        let src =
-            "@main def main: IO[Unit] =\n  Ui.run(_ => View.textColor(1, View.text(\"x\")))\n";
-        let h = hover_src(src, "textColor");
-        assert!(
-            h.contains("View.textColor(color: Int, child: View): View"),
-            "{h}"
-        );
-    }
-
-    #[test]
-    fn hovers_view_gap() {
-        let src = "@main def main: IO[Unit] =\n  Ui.run(_ => View.gap(0, View.text(\"x\")))\n";
-        let h = hover_src(src, "gap");
-        assert!(h.contains("View.gap(n: Int, child: View): View"), "{h}");
-    }
-
-    #[test]
-    fn hovers_view_font_size() {
-        let src =
-            "@main def main: IO[Unit] =\n  Ui.run(_ => View.fontSize(16, View.text(\"x\")))\n";
-        let h = hover_src(src, "fontSize");
-        assert!(
-            h.contains("View.fontSize(n: Int, child: View): View"),
-            "{h}"
-        );
+    fn hovers_view_kit_sigs() {
+        let calls = [
+            ("View.stretch", "View.stretch(View.text(\"x\"))"),
+            ("View.maxSize", "View.maxSize(40, 30, View.text(\"x\"))"),
+            ("View.clip", "View.clip(View.text(\"x\"))"),
+            ("View.opacity", "View.opacity(50, View.text(\"x\"))"),
+            ("View.maxLines", "View.maxLines(2, View.text(\"x\"))"),
+            ("View.ellipsis", "View.ellipsis(View.text(\"x\"))"),
+            ("View.textColor", "View.textColor(1, View.text(\"x\"))"),
+            ("View.gap", "View.gap(0, View.text(\"x\"))"),
+            ("View.fontSize", "View.fontSize(16, View.text(\"x\"))"),
+            ("View.ignorePointer", "View.ignorePointer(View.text(\"x\"))"),
+            ("View.absorbPointer", "View.absorbPointer(View.text(\"x\"))"),
+            (
+                "View.excludeSemantics",
+                "View.excludeSemantics(View.text(\"x\"))",
+            ),
+        ];
+        for (callee, call) in calls {
+            let needle = callee.rsplit('.').next().unwrap();
+            let src = format!("@main def main: IO[Unit] =\n  Ui.run(_ => {call})\n");
+            let h = hover_src(&src, needle);
+            let sig = kit_sig(callee).expect(callee);
+            assert!(h.contains(sig), "{callee}: {h}");
+        }
     }
 
     #[test]
@@ -504,33 +451,6 @@ mod tests {
         let h = hover_src(src, "rgba");
         assert!(
             h.contains("Color.rgba(r: Int, g: Int, b: Int, a: Int): Int"),
-            "{h}"
-        );
-    }
-
-    #[test]
-    fn hovers_view_ignore_pointer() {
-        let src =
-            "@main def main: IO[Unit] =\n  Ui.run(_ => View.ignorePointer(View.text(\"x\")))\n";
-        let h = hover_src(src, "ignorePointer");
-        assert!(h.contains("View.ignorePointer(child: View): View"), "{h}");
-    }
-
-    #[test]
-    fn hovers_view_absorb_pointer() {
-        let src =
-            "@main def main: IO[Unit] =\n  Ui.run(_ => View.absorbPointer(View.text(\"x\")))\n";
-        let h = hover_src(src, "absorbPointer");
-        assert!(h.contains("View.absorbPointer(child: View): View"), "{h}");
-    }
-
-    #[test]
-    fn hovers_view_exclude_semantics() {
-        let src =
-            "@main def main: IO[Unit] =\n  Ui.run(_ => View.excludeSemantics(View.text(\"x\")))\n";
-        let h = hover_src(src, "excludeSemantics");
-        assert!(
-            h.contains("View.excludeSemantics(child: View): View"),
             "{h}"
         );
     }

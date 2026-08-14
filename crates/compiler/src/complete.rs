@@ -263,45 +263,17 @@ mod tests {
     }
 
     #[test]
-    fn completes_view_clip_after_dot() {
-        let src = "@main def main: IO[Unit] = Ui.run(_ => View.cl\n";
-        let labels = labels_at(src, "View.cl");
-        assert!(labels.iter().any(|l| l == "View.clip"), "{labels:?}");
-    }
-
-    #[test]
-    fn completes_view_opacity_after_dot() {
-        let src = "@main def main: IO[Unit] = Ui.run(_ => View.op\n";
-        let labels = labels_at(src, "View.op");
-        assert!(labels.iter().any(|l| l == "View.opacity"), "{labels:?}");
-    }
-
-    #[test]
-    fn completes_view_ellipsis_after_dot() {
-        let src = "@main def main: IO[Unit] = Ui.run(_ => View.el\n";
-        let labels = labels_at(src, "View.el");
-        assert!(labels.iter().any(|l| l == "View.ellipsis"), "{labels:?}");
-    }
-
-    #[test]
-    fn completes_view_text_color_after_dot() {
-        let src = "@main def main: IO[Unit] = Ui.run(_ => View.textC\n";
-        let labels = labels_at(src, "View.textC");
-        assert!(labels.iter().any(|l| l == "View.textColor"), "{labels:?}");
-    }
-
-    #[test]
-    fn completes_view_gap_after_dot() {
-        let src = "@main def main: IO[Unit] = Ui.run(_ => View.ga\n";
-        let labels = labels_at(src, "View.ga");
-        assert!(labels.iter().any(|l| l == "View.gap"), "{labels:?}");
-    }
-
-    #[test]
-    fn completes_view_font_size_after_dot() {
-        let src = "@main def main: IO[Unit] = Ui.run(_ => View.fo\n";
-        let labels = labels_at(src, "View.fo");
-        assert!(labels.iter().any(|l| l == "View.fontSize"), "{labels:?}");
+    fn completes_view_kit_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.\n";
+        let labels = labels_at(src, "View.");
+        for (callee, _) in KIT_SIGS {
+            if callee.starts_with("View.") {
+                assert!(
+                    labels.iter().any(|l| l == *callee),
+                    "missing {callee} in {labels:?}"
+                );
+            }
+        }
     }
 
     #[test]
@@ -310,35 +282,5 @@ mod tests {
         let labels = labels_at(src, "Color.rgb");
         assert!(labels.iter().any(|l| l == "Color.rgb"), "{labels:?}");
         assert!(labels.iter().any(|l| l == "Color.rgba"), "{labels:?}");
-    }
-
-    #[test]
-    fn completes_view_ignore_pointer_after_dot() {
-        let src = "@main def main: IO[Unit] = Ui.run(_ => View.ig\n";
-        let labels = labels_at(src, "View.ig");
-        assert!(
-            labels.iter().any(|l| l == "View.ignorePointer"),
-            "{labels:?}"
-        );
-    }
-
-    #[test]
-    fn completes_view_absorb_pointer_after_dot() {
-        let src = "@main def main: IO[Unit] = Ui.run(_ => View.ab\n";
-        let labels = labels_at(src, "View.ab");
-        assert!(
-            labels.iter().any(|l| l == "View.absorbPointer"),
-            "{labels:?}"
-        );
-    }
-
-    #[test]
-    fn completes_view_exclude_semantics_after_dot() {
-        let src = "@main def main: IO[Unit] = Ui.run(_ => View.ex\n";
-        let labels = labels_at(src, "View.ex");
-        assert!(
-            labels.iter().any(|l| l == "View.excludeSemantics"),
-            "{labels:?}"
-        );
     }
 }
