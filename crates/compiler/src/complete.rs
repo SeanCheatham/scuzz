@@ -284,6 +284,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_each_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.ea\n";
+        let labels = labels_at(src, "View.ea");
+        assert!(labels.iter().any(|l| l == "View.each"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_kit_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.\n";
         let labels = labels_at(src, "View.");

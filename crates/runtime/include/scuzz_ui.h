@@ -167,6 +167,8 @@ typedef struct SzView SzView;
 typedef struct SzUiSession SzUiSession;
 
 typedef void (*SzViewTapFn)(SzView *self, void *env);
+/* Mapper must not free `item`. The list owns the string. */
+typedef SzView *(*SzViewEachFn)(SzString *item, void *env);
 
 SzView *sz_view_text(const char *text);
 SzView *sz_view_text_signal_int(SzSignalInt *sig, const char *prefix);
@@ -183,6 +185,8 @@ SzView *sz_view_stack(void);
 SzView *sz_view_list(void);
 /* Reactive list: children rebuilt from Signal.list at layout (`- item` texts). */
 SzView *sz_view_each(SzSignalList *sig);
+/* Like `sz_view_each`, but `fn` builds each child from the item string. */
+SzView *sz_view_each_map(SzSignalList *sig, SzViewEachFn fn, void *env);
 SzView *sz_view_scroll(SzView *child);
 /* Column leftover height or Row leftover width after non-Expanded siblings. */
 SzView *sz_view_expanded(SzView *child);
@@ -365,6 +369,7 @@ SzView *sz_lang_view_column(void);
 SzView *sz_lang_view_row(void);
 SzView *sz_lang_view_stack(void);
 SzView *sz_lang_view_each(SzSignalList *sig);
+SzView *sz_lang_view_each_map(SzSignalList *sig, SzViewEachFn fn, void *env);
 SzView *sz_lang_view_scroll(SzView *child);
 SzView *sz_lang_view_expanded(SzView *child);
 SzView *sz_lang_view_stretch(SzView *child);

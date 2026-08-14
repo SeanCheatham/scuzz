@@ -3698,6 +3698,86 @@ static void test_view_each(void) {
   sz_signal_list_free(items);
 }
 
+static SzView *each_map_text(SzString *item, void *env) {
+  (void)env;
+  return sz_view_text(item ? sz_string_cstr(item) : "");
+}
+
+static SzView *each_map_button(SzString *item, void *env) {
+  return sz_view_button(item ? sz_string_cstr(item) : "", counter_tap, env);
+}
+
+static void test_view_each_map_text(void) {
+  SzSignalList *items;
+  SzView *list;
+  const SzTheme *theme = sz_theme_default();
+  SzList *xs;
+  const char *dump;
+
+  xs = sz_list_cons(sz_string_from_cstr("milk"), sz_list_nil());
+  items = sz_signal_list(xs);
+  list = sz_view_each_map(items, each_map_text, NULL);
+  sz_view_layout(list, 200.f, 120.f, theme);
+  dump = sz_string_cstr(sz_view_a11y_dump(list));
+  assert(strstr(dump, "text:milk") != NULL);
+  assert(strstr(dump, "text:- milk") == NULL);
+
+  xs = sz_list_cons(sz_string_from_cstr("eggs"), sz_list_nil());
+  sz_signal_list_set(items, xs);
+  sz_view_layout(list, 200.f, 120.f, theme);
+  dump = sz_string_cstr(sz_view_a11y_dump(list));
+  assert(strstr(dump, "text:eggs") != NULL);
+  assert(strstr(dump, "text:milk") == NULL);
+
+  sz_view_free(list);
+  sz_signal_list_free(items);
+}
+
+static void test_view_each_map_button(void) {
+  SzSignalList *items;
+  SzSignalInt *count;
+  SzView *list, *hit;
+  const SzTheme *theme = sz_theme_default();
+  SzList *xs;
+  SzRect f;
+  SzUiConfig cfg;
+  SzUiSession *session;
+  const char *path = "/tmp/scuzz_ui_each_map.dump";
+  char *dump;
+
+  xs = sz_list_cons(sz_string_from_cstr("milk"), sz_list_nil());
+  items = sz_signal_list(xs);
+  count = sz_signal_int(0);
+  list = sz_view_each_map(items, each_map_button, count);
+  sz_view_layout(list, 200.f, 120.f, theme);
+  assert(strstr(sz_string_cstr(sz_view_a11y_dump(list)), "button:milk") != NULL);
+  f = sz_view_frame(list);
+  hit = sz_view_hit_test(list, f.x + theme->pad + 4.f, f.y + theme->pad + 4.f);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_BUTTON);
+  assert(sz_view_is_tap_target(hit));
+  assert(sz_view_handle_tap(list, f.x + theme->pad + 4.f, f.y + theme->pad + 4.f));
+  assert(sz_signal_int_get(count) == 1);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, list);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "[taps]") != NULL);
+  assert(strstr(dump, "milk") != NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(count);
+  sz_signal_list_free(items);
+  remove(path);
+}
+
 static void test_law_signal_list_len(void) {
   SzSignalList *items;
   SzList *xs;
@@ -4321,6 +4401,8 @@ int main(void) {
   test_a11y();
   test_clear_children();
   test_view_each();
+  test_view_each_map_text();
+  test_view_each_map_button();
   test_signal_list_spine_collect();
   test_law_signal_list_len();
   test_law_signal_list_at();

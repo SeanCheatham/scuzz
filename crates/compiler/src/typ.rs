@@ -1942,7 +1942,12 @@ fn infer_call(
             Ok(Type::Opaque("View".into()))
         }
         "View.each" => {
-            expect_arity(callee, &arg_tys, 1)?;
+            if arg_tys.len() != 1 && arg_tys.len() != 2 {
+                return Err(TypeError::Msg(format!(
+                    "View.each expects 1 or 2 args, got {}",
+                    arg_tys.len()
+                )));
+            }
             Ok(Type::Opaque("View".into()))
         }
         "View.scroll" => {
@@ -4837,6 +4842,44 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.checkbox should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_each() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    items = Signal.list(["milk"])
+    _ <- Ui.run(_ => View.each(items))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.each should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_each_mapper() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    items = Signal.list(["milk"])
+    _ <- Ui.run(_ => View.each(items, s => View.text(s)))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.each mapper should typecheck");
+    }
+
+    #[test]
+    fn rejects_view_each_wrong_arity() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.each())
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("View.each expects 1 or 2 args"),
+            "expected arity error, got {}",
+            err.message()
+        );
     }
 
     #[test]

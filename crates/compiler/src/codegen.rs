@@ -148,6 +148,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_row()").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_stack()").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_each(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_each_map(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_scroll(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_expanded(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_stretch(ptr)").unwrap();
@@ -1644,6 +1645,113 @@ fn emit_map_lambda(
     val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
 }
 
+/// `s => view` for `View.each`: `ptr (*)(ptr item, ptr env)` returning a SzView.
+fn emit_each_lambda(
+    param: &Option<String>,
+    body: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    let id = *ctx.cont_id;
+    *ctx.cont_id += 1;
+    let fn_name = format!("sz_each_{id}");
+
+    let capture_names = capture_name_order(locals);
+    let mut pre = String::new();
+    let mut body_locals: HashMap<String, (String, Kind)> = HashMap::new();
+    unpack_env_preamble(
+        &mut pre,
+        &mut body_locals,
+        locals,
+        &capture_names,
+        &format!("e{id}"),
+    );
+    if let Some(p) = param {
+        if p != "_" {
+            body_locals.insert(p.clone(), ("%item".into(), Kind::Ptr));
+        }
+    }
+
+    let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("e{id}"));
+
+    writeln!(
+        ctx.conts,
+        "define internal ptr @{fn_name}(ptr %item, ptr %env) {{"
+    )
+    .unwrap();
+    writeln!(ctx.conts, "entry:").unwrap();
+    ctx.conts.push_str(&pre);
+    ctx.conts.push_str(&body_emitted.code);
+    writeln!(ctx.conts, "  ret ptr {}", body_emitted.value).unwrap();
+    writeln!(ctx.conts, "}}").unwrap();
+    writeln!(ctx.conts).unwrap();
+
+    let mut code = String::new();
+    let env_ptr = pack_env(&mut code, locals, &capture_names, &format!("{prefix}_cap"));
+    writeln!(code, "  %{prefix}_cl0 = call ptr @sz_list_nil()").unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_cl1 = call ptr @sz_list_cons(ptr {env_ptr}, ptr %{prefix}_cl0)"
+    )
+    .unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_cl2 = call ptr @sz_list_cons(ptr @{fn_name}, ptr %{prefix}_cl1)"
+    )
+    .unwrap();
+    val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
+}
+
+fn emit_view_each(
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    let src = emit_expr(&args[0], ctx, locals, &format!("{prefix}_src"));
+    if args.len() == 1 {
+        let mut code = src.code;
+        writeln!(
+            code,
+            "  %{prefix}_v = call ptr @sz_lang_view_each(ptr {})",
+            src.value
+        )
+        .unwrap();
+        return val_emitted(code, format!("%{prefix}_v"), Kind::Ptr);
+    }
+    let ExprKind::Lambda { param, body } = &args[1].kind else {
+        panic!("View.each mapper must be a lambda");
+    };
+    let mapper = emit_each_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
+    let mut code = src.code;
+    code.push_str(&mapper.code);
+    writeln!(
+        code,
+        "  %{prefix}_fnp = call ptr @sz_list_head(ptr {})",
+        mapper.value
+    )
+    .unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_fnt = call ptr @sz_list_tail(ptr {})",
+        mapper.value
+    )
+    .unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_envp = call ptr @sz_list_head(ptr %{prefix}_fnt)"
+    )
+    .unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @sz_lang_view_each_map(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
+        src.value
+    )
+    .unwrap();
+    val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+}
+
 fn emit_signal_map(
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
@@ -2270,6 +2378,9 @@ fn emit_call(
 ) -> Emitted {
     if callee == "Signal.map" {
         return emit_signal_map(args, ctx, locals, prefix);
+    }
+    if callee == "View.each" {
+        return emit_view_each(args, ctx, locals, prefix);
     }
     if callee == "Resource.make" || callee == "Resource.use" {
         return emit_resource(callee, args, ctx, locals, prefix);
@@ -3163,15 +3274,6 @@ fn emit_call(
         "View.column" => emit_view_box("sz_lang_view_column", &mut code, &emitted_args, prefix),
         "View.row" => emit_view_box("sz_lang_view_row", &mut code, &emitted_args, prefix),
         "View.stack" => emit_view_box("sz_lang_view_stack", &mut code, &emitted_args, prefix),
-        "View.each" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_each(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
         "View.scroll" => {
             writeln!(
                 code,
@@ -3816,6 +3918,48 @@ law always: Bool = 1 == 1
         assert!(
             ir.contains("sz_lang_view_checkbox"),
             "expected sz_lang_view_checkbox in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_each() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    items = Signal.list(["milk"])
+    _ <- Ui.run(_ => View.each(items))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("call ptr @sz_lang_view_each("),
+            "expected sz_lang_view_each call in IR:\n{ir}"
+        );
+        assert!(
+            !ir.contains("call ptr @sz_lang_view_each_map("),
+            "one-arg View.each must not emit mapper:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_each_mapper() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    items = Signal.list(["milk"])
+    _ <- Ui.run(_ => View.each(items, s => View.text(s)))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_each_map"),
+            "expected sz_lang_view_each_map in IR:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_each_"),
+            "expected sz_each_ mapper in IR:\n{ir}"
         );
     }
 

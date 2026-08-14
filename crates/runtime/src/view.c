@@ -56,6 +56,8 @@ struct SzView {
   /* View.each: rebuild children from Signal.list at layout (pull). */
   SzSignalList *each_sig;
   SzList *each_seen; /* last synced list pointer (not owned) */
+  SzViewEachFn each_fn;
+  void *each_env;
 
   /* View.align: 0=start, 1=center, 2=end on each axis. */
   int align_x;
@@ -327,6 +329,13 @@ SzView *sz_view_each(SzSignalList *sig) {
   return v;
 }
 
+SzView *sz_view_each_map(SzSignalList *sig, SzViewEachFn fn, void *env) {
+  SzView *v = sz_view_each(sig);
+  v->each_fn = fn;
+  v->each_env = env;
+  return v;
+}
+
 static void sync_each(SzView *v) {
   SzList *xs;
   SzList *p;
@@ -338,9 +347,15 @@ static void sync_each(SzView *v) {
   sz_view_clear_children(v);
   for (p = xs; p; p = p->tail) {
     SzString *s = (SzString *)p->head;
-    char line[256];
-    snprintf(line, sizeof line, "- %s", s ? sz_string_cstr(s) : "");
-    sz_view_add_child(v, sz_view_text(line));
+    if (v->each_fn) {
+      SzView *row = v->each_fn(s, v->each_env);
+      if (row)
+        sz_view_add_child(v, row);
+    } else {
+      char line[256];
+      snprintf(line, sizeof line, "- %s", s ? sz_string_cstr(s) : "");
+      sz_view_add_child(v, sz_view_text(line));
+    }
   }
   v->each_seen = xs;
 }

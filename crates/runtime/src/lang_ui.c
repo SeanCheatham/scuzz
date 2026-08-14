@@ -78,6 +78,9 @@ SzView *sz_lang_view_row(void) { return sz_view_row(); }
 SzView *sz_lang_view_stack(void) { return sz_view_stack(); }
 
 SzView *sz_lang_view_each(SzSignalList *sig) { return sz_view_each(sig); }
+SzView *sz_lang_view_each_map(SzSignalList *sig, SzViewEachFn fn, void *env) {
+  return sz_view_each_map(sig, fn, env);
+}
 
 SzView *sz_lang_view_scroll(SzView *child) { return sz_view_scroll(child); }
 SzView *sz_lang_view_expanded(SzView *child) { return sz_view_expanded(child); }

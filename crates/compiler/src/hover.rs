@@ -299,7 +299,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("View.column", "View.column(...): View"),
     ("View.row", "View.row(...): View"),
     ("View.stack", "View.stack(...): View"),
-    ("View.each", "View.each(items: Signal): View"),
+    (
+        "View.each",
+        "View.each(items: Signal, row: String => View): View",
+    ),
     ("View.expanded", "View.expanded(child: View): View"),
     ("View.stretch", "View.stretch(child: View): View"),
     ("View.clip", "View.clip(child: View): View"),
@@ -470,6 +473,21 @@ mod tests {
         let h = hover_src(src, "checkbox");
         assert!(
             h.contains("View.checkbox(sig: Signal, label: String): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_view_each() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    items = Signal.list(["milk"])
+    _ <- Ui.run(_ => View.each(items, s => View.text(s)))
+  } yield ()
+"#;
+        let h = hover_src(src, "each");
+        assert!(
+            h.contains("View.each(items: Signal, row: String => View): View"),
             "{h}"
         );
     }
