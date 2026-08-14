@@ -1225,6 +1225,26 @@ SzView *sz_view_text_field_target(SzView *root) {
   return n > 0 ? fields[0] : NULL;
 }
 
+static SzView *text_field_at(SzView *root, int index) {
+  SzView *fields[64];
+  int n;
+  if (index < 0)
+    return sz_view_text_field_target(root);
+  n = sz_view_collect_text_fields(root, fields, 64);
+  if (index >= n)
+    return NULL;
+  return fields[index];
+}
+
+int sz_view_focus_text_field_at(SzView *root, int index) {
+  SzView *t = text_field_at(root, index);
+  if (!t)
+    return 0;
+  clear_focus(root);
+  t->focused = 1;
+  return 1;
+}
+
 int sz_view_handle_text(SzView *root, const char *text) {
   SzView *target = sz_view_text_field_target(root);
   if (!target || !target->sig_str)

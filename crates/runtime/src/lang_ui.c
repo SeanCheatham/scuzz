@@ -209,10 +209,67 @@ static void script_scroll(SzUiSession *session, float dy) {
     fprintf(stderr, "scuzz: script scroll skipped (no scroll)\n");
 }
 
-static void script_backspace(SzUiSession *session, int n) {
+/* `N payload` → index N and payload; otherwise index -1 and rest unchanged
+ * so `text 0` still means replace-with-"0" on the starred field. */
+static const char *script_field_payload(const char *rest, int *index) {
+  const char *p = rest ? rest : "";
+  int n = 0;
+  *index = -1;
+  if (*p < '0' || *p > '9')
+    return p;
+  while (*p >= '0' && *p <= '9') {
+    n = n * 10 + (*p - '0');
+    p++;
+  }
+  if (*p == ' ') {
+    *index = n;
+    return p + 1;
+  }
+  return rest ? rest : "";
+}
+
+static void script_parse_backspace(const char *rest, int *index, int *count) {
+  const char *p = rest ? rest : "";
+  int a = 0, b = 0;
+  *index = -1;
+  *count = 1;
+  if (*p < '0' || *p > '9')
+    return;
+  while (*p >= '0' && *p <= '9') {
+    a = a * 10 + (*p - '0');
+    p++;
+  }
+  if (*p == ' ') {
+    p++;
+    if (*p >= '0' && *p <= '9') {
+      while (*p >= '0' && *p <= '9') {
+        b = b * 10 + (*p - '0');
+        p++;
+      }
+      *index = a;
+      *count = b < 1 ? 1 : b;
+      return;
+    }
+  }
+  *count = a < 1 ? 1 : a;
+}
+
+static int script_focus_field(SzUiSession *session, int index) {
+  if (session && sz_view_focus_text_field_at(sz_ui_session_root(session), index))
+    return 1;
+  if (index < 0)
+    fprintf(stderr, "scuzz: script skipped (no text field)\n");
+  else
+    fprintf(stderr, "scuzz: script field %d skipped\n", index);
+  return 0;
+}
+
+static void script_backspace(SzUiSession *session, int index, int n) {
   SzInputEvent ev;
   if (n < 1)
     n = 1;
+  if (!script_focus_field(session, index))
+    return;
   memset(&ev, 0, sizeof ev);
   ev.kind = SZ_INPUT_TEXT_EDIT;
   ev.text = "";
@@ -224,9 +281,11 @@ static void script_backspace(SzUiSession *session, int n) {
   }
 }
 
-static void script_type(SzUiSession *session, const char *text) {
+static void script_type(SzUiSession *session, int index, const char *text) {
   SzInputEvent ev;
   if (!text || !text[0])
+    return;
+  if (!script_focus_field(session, index))
     return;
   memset(&ev, 0, sizeof ev);
   ev.kind = SZ_INPUT_TEXT_EDIT;
@@ -280,10 +339,13 @@ static void scripted_button_tap(SzUiSession *session, int prefer_upper) {
 /* Line protocol, one event per line, delivered across pump boundaries:
      tap <n>    tap the nth button (scan order; [taps] in the dump); missing target is a no-op
      text <s>   replace the [fields] starred TextField with <s>; no field is a no-op
+     text <n> <s>  replace dump-index n (a11y order); `text 0` is still payload "0"
      type <s>   append <s> to the [fields] starred TextField; empty is a no-op; no field is a no-op
+     type <n> <s>  append to dump-index n; `type 0` is still payload "0"
      pump <k>   pump k extra frames
      scroll <dy> pan the first Scroll (positive = content up); no scroll is a no-op
      backspace <n> chop n bytes from the [fields] starred TextField (default 1); no field is a no-op
+     backspace <n> <k>  chop k bytes from dump-index n
      drive <name> [args]  run a verify-graph driver (Int/String/Bool args)
    Blank lines and #-comments are skipped. Pump runs after every event. */
 
@@ -342,11 +404,15 @@ static void run_ui_script(SzUiSession *session, const char *path) {
       script_tap(session, len > 3 ? atoi(line + 4) : 0);
     } else if (strncmp(line, "text ", 5) == 0 || strcmp(line, "text") == 0) {
       SzInputEvent ev;
+      int idx;
+      const char *payload = script_field_payload(len > 4 ? line + 5 : "", &idx);
       memset(&ev, 0, sizeof(ev));
       ev.kind = SZ_INPUT_TEXT;
-      ev.text = len > 4 ? line + 5 : "";
-      if (!sz_ui_inject_sync(session, &ev))
-        fprintf(stderr, "scuzz: script text skipped (no text field)\n");
+      ev.text = payload;
+      if (script_focus_field(session, idx)) {
+        if (!sz_ui_inject_sync(session, &ev))
+          fprintf(stderr, "scuzz: script text skipped (no text field)\n");
+      }
     } else if (strncmp(line, "pump ", 5) == 0 || strcmp(line, "pump") == 0) {
       int k = len > 5 ? atoi(line + 5) : 1;
       while (k-- > 1) {
@@ -357,9 +423,13 @@ static void run_ui_script(SzUiSession *session, const char *path) {
       script_scroll(session, len > 6 ? (float)atoi(line + 7) : 40.f);
     } else if (strncmp(line, "backspace ", 10) == 0 ||
                strcmp(line, "backspace") == 0) {
-      script_backspace(session, len > 9 ? atoi(line + 10) : 1);
+      int idx, n;
+      script_parse_backspace(len > 9 ? line + 10 : "", &idx, &n);
+      script_backspace(session, idx, n);
     } else if (strncmp(line, "type ", 5) == 0 || strcmp(line, "type") == 0) {
-      script_type(session, len > 4 ? line + 5 : "");
+      int idx;
+      const char *payload = script_field_payload(len > 4 ? line + 5 : "", &idx);
+      script_type(session, idx, payload);
     } else if (strncmp(line, "drive ", 6) == 0) {
       sz_driver_run_line(line + 6);
     } else {

@@ -2,4 +2,4 @@
 
 ## Next
 
-**Indexed `text` / `type` / `backspace`** — `[fields]` lists TextFields and marks the focused/first target. Next: `text N` / `type N` / `backspace N` so agents can target a field by dump index. Machine-code reload remains the larger hot-reload gap.
+**Numbered scrolls in `debug.dump`** — `[taps]` / `[fields]` and `text N` / `type N` / `backspace N` are in. Next: a `[scrolls]` section and `scroll N dy` so agents can pan a dump-index Scroll (`scroll 40` stays the first). Machine-code reload remains the larger hot-reload gap.
