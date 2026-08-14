@@ -37,19 +37,13 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 
 | Target | Language/runtime/UI-core | Window / Mobile embedder | Notes |
 | --- | --- | --- | --- |
-| Linux headless (CI/cloud) | Yes | N/A | Default CI; goldens + self-host + TestRuntime |
+| Linux headless (CI/cloud) | Yes | N/A | Default CI; goldens + TestRuntime |
 | Linux desktop | Yes | X11 | `embedder-desktop` when `DISPLAY` is set |
 | Linux mobile host shell | Yes | Host shell | `embedder-mobile` + `SCUZZ_MOBILE_SHELL=1` |
 | macOS desktop | Yes | Cocoa blit | peer to Linux X11 |
 | Windows desktop | Yes | Secondary | Later (same session protocol) |
 | iOS / Android | Shared app code | Packaging shells | `scuzz package`; NDK/Xcode for device |
 
-## Self-host stages
+## Toolchain
 
-| Stage | Host | Role |
-| --- | --- | --- |
-| 0 | Rust | Bootstrap only (`crates/cli`); CI / fresh checkout |
-| 1 | Scuzz Lang (built by Stage 0) | First Scuzz Lang-built CLI; rebuilds the compiler |
-| 2 | Scuzz Lang (built by Stage 1) | True self-host; **shipped** `scuzz` (GitHub Releases; `package_release.sh`) |
-
-Dual-boot gate: `scripts/selfhost.sh`. Kernel surface: [vision.md](vision.md#kernel-dialect). Release tarballs record `stage=2` in `VERSION`.
+The compiler and CLI are Rust (`crates/compiler`, `crates/cli`). Kernel surface: [vision.md](vision.md#kernel-dialect). Self-host is deferred; do not grow a parallel Scuzz-written compiler.

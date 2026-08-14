@@ -1,6 +1,6 @@
 # Scuzz Lang runtime (C)
 
-Minimal native runtime linked into Stage-0 / Stage-1 / Stage-2 binaries. Design locks: [`docs/vision.md`](../../docs/vision.md).
+Minimal native runtime linked into `scuzz` binaries. Design locks: [`docs/vision.md`](../../docs/vision.md).
 
 ## Contents
 

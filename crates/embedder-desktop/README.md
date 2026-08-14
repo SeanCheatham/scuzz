@@ -3,7 +3,7 @@
 OS window presentation for `UiRuntime.Window`. Headless remains the CI peer.
 
 `libscuzz_embedder.a` opens a native window and blits RGBA frames after `pump`.
-Linked by Stage 0 / Stage 1 / Stage 2 when present.
+Linked when present.
 
 ## Linux (X11)
 

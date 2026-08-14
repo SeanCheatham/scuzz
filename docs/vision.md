@@ -11,8 +11,8 @@ Edit this file when a decision or next-step ordering changes.
 - **Language**: purposeful Scala-inspired subset for native UI, CLI, server, and mobile apps, with **built-in effect/IO/Streaming** (ZIO-inspired, not a ZIO or cats/fs2 port). Aim: denser expr dialect (`for` as primary binder) — see [Language direction](#language-direction).
 - **Runtime**: custom native (LLVM). Native binaries, not a VM. No JVM, no Java interop, no classpath/Maven.
 - **UI**: a primary product path, not the only one (Dart-shaped: GUI is first-class; so are CLI and server). One design language + Skia, as a **`Ui` effect** with Headless/Window/Mobile interpreters. Headless is a product runtime (agents, CI), not a test-only shim.
-- **Tooling**: one opinionated CLI (`scuzz`) — compile, link, assets, watch, packaging, format, check, and the whole verification stack. One formatter, one check surface, one testing strategy. Batteries-included: mutation, fuzzing, property/laws, simulation, and determinism are **first-class in the language and `scuzz`**, not a third-party harness sprawl. Static hygiene is `scuzz check` (format-verify + typecheck; further lints emit here, no `lint` subcommand). `scuzz fmt` rewrites.
-- **Bootstrap**: self-host is a hard goal. Stage-0 (Rust) exists only to get there.
+- **Tooling**: one opinionated CLI (`scuzz`) — compile, link, assets, watch, packaging, format, check, and the whole verification stack. One formatter, one check surface, one testing strategy. Batteries-included: mutation, fuzzing, property/laws, simulation, and determinism are **first-class in the language and `scuzz`**, not a third-party harness sprawl. Static hygiene is `scuzz check` (format-verify + typecheck; further lints emit here, no `lint` subcommand). `scuzz fmt` rewrites. Compiler, CLI, and toolchain are **Rust** (`crates/compiler`, `crates/cli`).
+- **Language proof**: examples that exercise the surface (`examples/`), not a self-hosted compiler. Self-host is deferred.
 - **AI-Friendly**: Headless, hot reload, and debugging tools aid agents. Headless is a peer runtime; `watch` only rebuilds; `[ui] run --watch` stamp-reloads Views, writes `build/debug.dump` (including `[taps]` / `[fields]` live strings / `[scrolls]` and live `View.bindText`), and plays `build/inject.script`. `[ui]` build emits `build/reload.dylib`; stamp-watch `dlopen`s it so a source View-label change appears live (Signals stay). IO-only `run --watch` kills and reruns on source change. `scuzz lsp` wraps `scuzz check` JSON diagnostics.
 
 Upstream Scala Native is a *reference*, not a dependency. Divergence is intentional.
@@ -30,7 +30,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 | Impurity | All nondeterminism / external I/O through blessed `IO`; no app-level `IO.delay` escape hatch |
 | Tests | One built-in strategy: **mutation + fuzz + laws (property) + sim + determinism** (TestRuntime). Oracles live **in source** (laws, inline checks, refinements); **drivers** are oracle-free workloads the fuzzer composes. No classical unit-test culture, no external test frameworks |
 | Modules | `scuzz.toml` package = crate; `Foo.scuzz` = module (not JVM packages) |
-| Self-host | Stage 0 → 1 → 2 on the critical path; **release ships Stage 2** |
+| Toolchain | Rust (`crates/cli`); one compiler; self-host deferred |
 | UI model | Pure `View` + effectful `Ui` session (`mount` / `pump` / `inject` / `snapshot`) |
 
 ## What Scuzz Lang is not
@@ -45,18 +45,19 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 - Not Flutter DevTools / VM patching. In-process reload, a live structural dump, and stamp-driven inject are in; `watch` only rebuilds; IO-only `run --watch` kills and reruns.
 - Not an sbt / Gradle / `pubspec` plugin DSL (`scuzz.toml` is data)
 - Not Flutter platform channels
+- Not a self-hosted compiler as a product bar — `scuzz` is Rust; Scuzz programs are apps and examples
 
 ## Success bars
 
 **v0** — Install CLI (`curl …/install.sh | sh`, or checkout `./scripts/install.sh`) → `scuzz new` (IO) or `scuzz new --ui` (Counter/Todo as `View` + builtin `IO`) → `scuzz test` and `scuzz run` (`--headless` for UI). Window when available. Language `Resource` / `Stream` / `Net.serve` ship (`examples/resource`, `examples/stream`, `examples/server`).
 
-**v1** — Stage-2 self-host as the shipped `scuzz` (GitHub Releases; `package_release.sh` / `install.sh`); Rust Stage-0 is CI/bootstrap only. Dual-boot gate: `scripts/selfhost.sh`.
+**v1** — Shipped `scuzz` is the Rust CLI (GitHub Releases; `package_release.sh` / `install.sh`). Kernel surface is proven by examples, not by compiling `scuzz` in Scuzz. `fuzz` / `mutate` live on that same CLI.
 
 ## Decisions
 
 ### Product name
 
-Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI / cargo package `scuzz`; Stage-0 crate `scuzz-compiler`; self-host tree `compiler-scuzz/`; manifest `scuzz.toml`; sources `*.scuzz` (plus stem-paired `*.scuzz_sim` / `*.scuzz_drivers`); C ABI `sz_` / `Sz*` / `SZ_*`. No dual names or legacy aliases.
+Brand in prose: **Scuzz Lang** (short form **Scuzz**). CLI / cargo package `scuzz`; compiler crate `scuzz-compiler`; manifest `scuzz.toml`; sources `*.scuzz` (plus stem-paired `*.scuzz_sim` / `*.scuzz_drivers`); C ABI `sz_` / `Sz*` / `SZ_*`. No dual names or legacy aliases.
 
 ### Tooling
 
@@ -67,7 +68,7 @@ One CLI. One typer. One formatter. One check surface. One testing strategy. No s
 - **Verification** is batteries-included in `scuzz` and the language (laws, sim overlays, deterministic TestRuntime, fuzz search, mutation) — not optional crates or Maven/npm test plugins.
 - **JSON diagnostics** (`scuzz check --message-format=json`) are the editor protocol. `scuzz lsp` wraps that — do not grow a second typer or schema.
 - **`scuzz.toml` is data** — package, path deps, `[ui]`. No plugin DSL, no `build.scuzz` hooks. Unknown keys rejected; do not add `[plugins]`.
-- **Fingerprint** (Stage 0 incremental): miss → rebuild. No `scuzz clean` ritual. Stage 2 rebuilds every compile today.
+- **Fingerprint** (incremental): miss → rebuild. No `scuzz clean` ritual.
 - **Missing tools:** fail on the first missing tool with one install line. No `flutter doctor` mega-checklist.
 - **`scuzz package` shells** are copy-patched templates (`shells/android`, `shells/ios`), not a Gradle/CocoaPods API.
 
@@ -103,7 +104,7 @@ Missing `[ui]` ⇒ Skia omitted from the link; `scuzz test` is TESTRT exit-0 smo
 
 ### Kernel dialect
 
-Subset used by compiler sources and bootstrap examples. New features land in Stage 0 **before** `compiler-scuzz/` depends on them. Dual-boot gate: `scripts/selfhost.sh` (smoke examples, Headless goldens, fuzz, fmt parity, Stage-2 IR fixpoint).
+The language `scuzz` implements. Proof is examples that exercise each construct (`examples/hello`, `adt`, `record`, `trait`, `generic`, `genum`, `modules`, `counter`, …), not a second compiler written in Scuzz. Do not grow a parallel Scuzz-written toolchain.
 
 Locks (not an API catalog — see [`guide.md`](guide.md)):
 
@@ -124,7 +125,7 @@ Expression-only, effect-sequenced dialect — dense, deterministic, verification
 - **`for` as primary binder**: `x = e` (pure alias), `x <- e` (effect)
 - **No statement blocks**, no `var`, no `val`
 - Branch arms stay expressions; nested `for` when an arm needs names
-- Surface sugar elaborates to a small core (`Let`, `FlatMap`, `match`, ADTs, `IO`); self-host and checkers target the core
+- Surface sugar elaborates to a small core (`Let`, `FlatMap`, `match`, ADTs, `IO`); the compiler and checkers target the core
 
 App-shaped Counter (full surface: [`guide.md`](guide.md)):
 
@@ -198,7 +199,7 @@ Keep purity checkable (pure `A` vs `IO` vs session), total expr core, signals as
 
 ### `scuzz fuzz`
 
-Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overlays when present). The fuzz alphabet is the typed event surface (buttons, text fields) **plus declared drivers** (`drive <name> [args]` extends the script line protocol; the verify build publishes the driver table alongside the a11y dump). Oracles: in-source **laws/refinements** first; panic/`SzError` still fails; `Law.sometimes` reachability judges the campaign; structural dumps aid diagnosis (PNG last). `repro.toml` records events + driver invocations verbatim, so replay is generator-independent. Requires stable tap order, `pump` as time, no hidden nondeterminism. Determinism makes any failing prefix replayable. Seeded `--iters` keeps `[ui]` prefixes that hit new `Law.sometimes` names or a new Headless `dump.txt`, and IO-only schedule seeds that hit new sometimes names, then extends/perturbs them (CLI-only; no runtime machinery). Flags, script verbs, and schedule seeds: [`guide.md`](guide.md). `fuzz` lives in the Stage-1/2 CLI (not Stage 0).
+Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overlays when present). The fuzz alphabet is the typed event surface (buttons, text fields) **plus declared drivers** (`drive <name> [args]` extends the script line protocol; the verify build publishes the driver table alongside the a11y dump). Oracles: in-source **laws/refinements** first; panic/`SzError` still fails; `Law.sometimes` reachability judges the campaign; structural dumps aid diagnosis (PNG last). `repro.toml` records events + driver invocations verbatim, so replay is generator-independent. Requires stable tap order, `pump` as time, no hidden nondeterminism. Determinism makes any failing prefix replayable. Seeded `--iters` keeps `[ui]` prefixes that hit new `Law.sometimes` names or a new Headless `dump.txt`, and IO-only schedule seeds that hit new sometimes names, then extends/perturbs them (CLI-only; no runtime machinery). Flags, script verbs, and schedule seeds: [`guide.md`](guide.md). `fuzz` / `mutate` belong on the product (Rust) CLI.
 
 ### Layout model
 
@@ -210,7 +211,7 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: port nested ADT patterns to `compiler-scuzz/` — [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
+Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: one Rust toolchain — [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features. UI is a primary path among CLI/server/desktop/mobile — not the only v0 bar.
 
@@ -219,7 +220,8 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-onl
 | Risk | Mitigation |
 | --- | --- |
 | Language + UI + tooling is huge | Ruthless subset; vertical slices; Counter before generality |
-| Self-host / dialect drift | Kernel section above; port compiler early; Stage 0/1/2 CI |
+| Dialect unexercised by apps | Kernel examples that stress each construct; `check` / `test` / `fuzz` on `examples/` |
+| Two compilers | One Rust `scuzz`; do not grow `compiler-scuzz/` |
 | Effects too weak or too heavy | Builtin IO; pure `View`; `Ui` at session boundary |
 | Hidden nondeterminism | Closed impurity + TestRuntime + deterministic `*.scuzz_sim` |
 | Laws become brittle dump goldens | Laws talk to named module/signal surface; strict sim/live pairing in `check`; mutation kills weak oracles |

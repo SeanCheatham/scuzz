@@ -24,8 +24,8 @@ files). `crates/ffi-skia/Makefile` copies that archive into
 headers are required by callers — only `sk_capi.h`. Prefer a single fat
 `libsk_capi.a` (shim + Skia objects + embedded font). Companion archives in the
 same directory are also linked. Linking the Skia prebuilt needs
-`-lstdc++`/`-lc++` `-lm -lz -lbz2 -lbrotlidec -lbrotlicommon` (Stage 0 / self-host
-add these when `build/sk_capi_backend` is `skia`). On Darwin also link
+`-lstdc++`/`-lc++` `-lm -lz -lbz2 -lbrotlidec -lbrotlicommon` (`scuzz`
+adds these when `build/sk_capi_backend` is `skia`). On Darwin also link
 CoreFoundation / CoreGraphics / CoreText / Foundation / Carbon. On Linux install
 `zlib1g-dev libbz2-dev libbrotli-dev`; on macOS, Homebrew `brotli` / `bzip2` if
 the linker cannot find them.

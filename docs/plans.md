@@ -2,4 +2,4 @@
 
 ## Next
 
-**compiler-scuzz nested ADT patterns** — Stage 0 parses, typechecks, and emits `case Wrap.Box(Color.Red)`; Stage 1 still treats payload slots as names only.
+**One Rust toolchain** — Product `scuzz` is `crates/cli`. Port `fuzz` / `mutate` onto that CLI. Do not add features to `compiler-scuzz/`. Drop the Stage-2 release path and dual-boot gate.

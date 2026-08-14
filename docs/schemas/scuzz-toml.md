@@ -91,4 +91,4 @@ my-app/
     ios/
 ```
 
-Stage-0 accepts `*.scuzz` under `src/` (recursive). Units in the same package are merged; exactly one `@main` is required for executables. Stem-paired `*.scuzz_sim` / `*.scuzz_drivers` and in-source `law` decls load under `scuzz check` and verify/fuzz builds — see [vision.md](../vision.md#laws-simulation-mutation-and-verification). `scuzz fmt` and `scuzz check` format-verify only the selected project's `src/` (not dependency trees).
+The compiler accepts `*.scuzz` under `src/` (recursive). Units in the same package are merged; exactly one `@main` is required for executables. Stem-paired `*.scuzz_sim` / `*.scuzz_drivers` and in-source `law` decls load under `scuzz check` and verify/fuzz builds — see [vision.md](../vision.md#laws-simulation-mutation-and-verification). `scuzz fmt` and `scuzz check` format-verify only the selected project's `src/` (not dependency trees).
