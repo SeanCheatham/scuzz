@@ -13,7 +13,7 @@ def lowerEnums(enums: List, all: List, imports: List, acc: List): List =
 
 def lowerEnum(e: EnumDef, enums: List, imports: List): EnumDef =
   e match {
-    case EnumDef.Enum(module, name, cases, tparams) => e
+    case EnumDef.Enum(module, name, cases, tparams, methods) => EnumDef.Enum(module, name, cases, tparams, lowerImplMethods(methods, enums, imports, module, List.empty()))
     case EnumDef.Record(module, name, fields, tparams, methods) => EnumDef.Record(module, name, fields, tparams, lowerImplMethods(methods, enums, imports, module, List.empty()))
   }
 

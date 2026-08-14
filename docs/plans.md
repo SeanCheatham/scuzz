@@ -2,4 +2,4 @@
 
 ## Next
 
-**Language surface — methods on generic enums** — `impl Show for Box` typechecks (`examples/trait`). Next: one method on `enum Opt[T]` so `o.getOrElse(0)` typechecks without a free `def`. `watch` still only rebuilds.
+**Language surface — generic `impl` for generic enums** — `enum Opt[T]` methods typecheck (`examples/genum`). Next: `impl Show for Opt` so a trait method on a generic enum typechecks. `watch` still only rebuilds.

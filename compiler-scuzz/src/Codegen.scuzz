@@ -42,37 +42,37 @@ def progImpls(p: Prog): List =
 
 def enumModule(e: EnumDef): String =
   e match {
-    case EnumDef.Enum(module, name, cases, tparams) => module
+    case EnumDef.Enum(module, name, cases, tparams, methods) => module
     case EnumDef.Record(module, name, fields, tparams, methods) => module
   }
 
 def enumName(e: EnumDef): String =
   e match {
-    case EnumDef.Enum(module, name, cases, tparams) => name
+    case EnumDef.Enum(module, name, cases, tparams, methods) => name
     case EnumDef.Record(module, name, fields, tparams, methods) => name
   }
 
 def enumCases(e: EnumDef): List =
   e match {
-    case EnumDef.Enum(module, name, cases, tparams) => cases
+    case EnumDef.Enum(module, name, cases, tparams, methods) => cases
     case EnumDef.Record(module, name, fields, tparams, methods) => List.cons(EnumCase.Case(name, fields), List.empty())
   }
 
 def enumTParams(e: EnumDef): List =
   e match {
-    case EnumDef.Enum(module, name, cases, tparams) => tparams
+    case EnumDef.Enum(module, name, cases, tparams, methods) => tparams
     case EnumDef.Record(module, name, fields, tparams, methods) => tparams
   }
 
 def enumIsRecord(e: EnumDef): Int =
   e match {
-    case EnumDef.Enum(module, name, cases, tparams) => 0
+    case EnumDef.Enum(module, name, cases, tparams, methods) => 0
     case EnumDef.Record(module, name, fields, tparams, methods) => 1
   }
 
 def enumMethods(e: EnumDef): List =
   e match {
-    case EnumDef.Enum(module, name, cases, tparams) => List.empty()
+    case EnumDef.Enum(module, name, cases, tparams, methods) => methods
     case EnumDef.Record(module, name, fields, tparams, methods) => methods
   }
 

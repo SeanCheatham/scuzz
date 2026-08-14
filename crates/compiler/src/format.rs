@@ -128,6 +128,21 @@ fn pretty_enum(e: &EnumDef) -> String {
         }
         out.push('\n');
     }
+    for m in &e.methods {
+        let params: Vec<String> = m
+            .params
+            .iter()
+            .map(|p| pretty_binding(&p.name, &p.ty, p.rfn.as_ref()))
+            .collect();
+        out.push_str(&format!(
+            "  def {}({}): {} =\n{}",
+            m.name,
+            params.join(", "),
+            pretty_type(&m.ret),
+            pretty_expr(&m.body, 2)
+        ));
+        out.push('\n');
+    }
     out
 }
 
@@ -809,6 +824,25 @@ def getOrElse[T](o: Opt[T], default: T): T = o match {
         );
         assert!(out.contains("case Some(x: T)"));
         assert!(out.contains("def getOrElse[T](o: Opt[T], default: T): T ="));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_generic_enum_method() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+  def getOrElse(default: T): T =
+    self match {
+      case Opt.Some(x) => x
+      case Opt.None => default
+    }
+@main def main: IO[Unit] = IO.println(Str.fromInt(Opt.Some(1).getOrElse(0)))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("  def getOrElse(default: T): T ="));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

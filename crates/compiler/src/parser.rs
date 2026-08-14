@@ -4,7 +4,7 @@ use crate::ast::{
 };
 use crate::lexer::{lex, InterpTok, LexError, SpannedToken, Token};
 use crate::resolve::module_id_from_label;
-use crate::span::Span;
+use crate::span::{offset_to_line_col, Span};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -60,6 +60,7 @@ pub fn parse_file(source: &str, file: &str) -> Result<Program, ParseError> {
         i: 0,
         file: file.to_string(),
         module,
+        source: source.to_string(),
     };
     p.parse_program()
 }
@@ -166,6 +167,7 @@ struct Parser {
     i: usize,
     file: String,
     module: String,
+    source: String,
 }
 
 impl Parser {
@@ -477,13 +479,14 @@ impl Parser {
         if cases.is_empty() {
             return Err(self.err(format!("enum {name} has no cases")));
         }
+        let methods = self.parse_indented_methods(&type_params)?;
         Ok(EnumDef {
             module: self.module.clone(),
             name,
             type_params,
             cases,
             is_record: false,
-            methods: Vec::new(),
+            methods,
         })
     }
 
@@ -516,10 +519,7 @@ impl Parser {
         }
         let methods = if matches!(self.peek(), Token::Colon) {
             self.bump();
-            let mut methods = Vec::new();
-            while matches!(self.peek(), Token::Def) {
-                methods.push(self.parse_impl_method(&type_params)?);
-            }
+            let methods = self.parse_trailing_methods(&type_params)?;
             if methods.is_empty() {
                 return Err(self.err(format!("record {name} has no methods")));
             }
@@ -591,6 +591,33 @@ impl Parser {
             for_type,
             methods,
         })
+    }
+
+    fn parse_trailing_methods(
+        &mut self,
+        type_params: &[String],
+    ) -> Result<Vec<ImplMethod>, ParseError> {
+        let mut methods = Vec::new();
+        while matches!(self.peek(), Token::Def) {
+            methods.push(self.parse_impl_method(type_params)?);
+        }
+        Ok(methods)
+    }
+
+    /// Enum methods sit in the colon body (`  def …`). A column-0 `def` is a following free def.
+    fn parse_indented_methods(
+        &mut self,
+        type_params: &[String],
+    ) -> Result<Vec<ImplMethod>, ParseError> {
+        let mut methods = Vec::new();
+        while matches!(self.peek(), Token::Def) && self.peek_column() > 1 {
+            methods.push(self.parse_impl_method(type_params)?);
+        }
+        Ok(methods)
+    }
+
+    fn peek_column(&self) -> u32 {
+        offset_to_line_col(&self.source, self.current_span().start).1
     }
 
     fn parse_impl_method(&mut self, type_params: &[String]) -> Result<ImplMethod, ParseError> {
@@ -1434,6 +1461,7 @@ impl Parser {
                         i: 0,
                         file: self.file.clone(),
                         module: self.module.clone(),
+                        source: body.clone(),
                     };
                     let e = nested.parse_expr()?;
                     if !matches!(nested.peek(), Token::Eof) {
@@ -1960,6 +1988,43 @@ enum Opt[T]:
             &p.enums[0].cases[0].fields[0].1,
             crate::ast::Type::Var(n) if n == "T"
         ));
+    }
+
+    #[test]
+    fn parse_generic_enum_method() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+  def getOrElse(default: T): T =
+    self match {
+      case Opt.Some(x) => x
+      case Opt.None => default
+    }
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        assert_eq!(p.enums[0].methods.len(), 1);
+        assert_eq!(p.enums[0].methods[0].name, "getOrElse");
+        assert!(p.defs.is_empty());
+    }
+
+    #[test]
+    fn parse_enum_does_not_swallow_following_def() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+def getOrElse[T](o: Opt[T], default: T): T =
+  o match {
+    case Opt.Some(x) => x
+    case Opt.None => default
+  }
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        assert!(p.enums[0].methods.is_empty());
+        assert_eq!(p.defs[0].name, "getOrElse");
     }
 
     #[test]

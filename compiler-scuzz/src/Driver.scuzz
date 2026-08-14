@@ -22,7 +22,7 @@ def mergeProg(acc: Prog, p: Prog): Prog =
   mkProgFull(progPkg(p), listConcat(progEnums(acc), progEnums(p)), listConcat(progDefs(acc), progDefs(p)), chooseMain(progMain(acc), progMain(p)), chooseMainModule(progMain(acc), progMain(p), progMainModule(acc), progMainModule(p)), listConcat(progImports(acc), progImports(p)), listConcat(progTraits(acc), progTraits(p)), listConcat(progImpls(acc), progImpls(p)))
 
 def parseSource(label: String, src: String): Prog =
-  parseProgram(lex(src), label)
+  parseProgram(lex(src), label, src)
 
 def readUntilQuote(s: String, i: Int, acc: String): String =
   if (i >= Str.len(s)) acc else if (Str.charAt(s, i) == 34) acc else readUntilQuote(s, i + 1, Str.concat(acc, Str.slice(s, i, i + 1)))

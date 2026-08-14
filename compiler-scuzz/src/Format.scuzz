@@ -109,7 +109,13 @@ def prettyImplMethod(m: ImplMethod): String =
   }
 
 def prettyEnum(e: EnumDef): String =
-  if (enumIsRecord(e) == 1) prettyRecord(e) else str4("enum ", Str.concat(enumName(e), prettyTypeParams(enumTParams(e))), ":\n", prettyEnumCases(enumCases(e), ""))
+  if (enumIsRecord(e) == 1) prettyRecord(e) else prettyEnumPlain(e)
+
+def prettyEnumPlain(e: EnumDef): String =
+  for {
+    head = str4("enum ", Str.concat(enumName(e), prettyTypeParams(enumTParams(e))), ":\n", prettyEnumCases(enumCases(e), ""))
+    methods = enumMethods(e)
+  } yield if (List.isEmpty(methods) == 1) head else str3(head, prettyImplMethods(methods, ""), "")
 
 def prettyRecord(e: EnumDef): String =
   for {

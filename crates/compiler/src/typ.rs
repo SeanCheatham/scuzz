@@ -43,7 +43,7 @@ pub fn impl_method_name(trait_name: &str, for_type: &str, method: &str) -> Strin
     format!("__impl_{trait_name}_{for_type}_{method}")
 }
 
-/// Mangled def name for a record method (`record Box[T]: def get()` → `__rec_Box_get`).
+/// Mangled def name for a type method (`record Box[T]: def get()` / `enum Opt[T]: def getOrElse()` → `__rec_*`).
 pub fn rec_method_name(for_type: &str, method: &str) -> String {
     format!("__rec_{for_type}_{method}")
 }
@@ -158,9 +158,6 @@ impl MethodIndex {
             }
         }
         for en in enum_defs {
-            if !en.is_record {
-                continue;
-            }
             let for_id = crate::resolve::enum_id(&en.module, &en.name);
             for method in &en.methods {
                 let key = (for_id.clone(), method.name.clone());
@@ -290,12 +287,9 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
             });
         }
     }
-    let record_methods: Vec<FunDef> = {
+    let extra_methods: Vec<FunDef> = {
         let mut extra = Vec::new();
         for en in &program.enums {
-            if !en.is_record {
-                continue;
-            }
             let self_ty = enum_self_ty(en);
             for method in &en.methods {
                 let mangled = rec_method_name(&en.name, &method.name);
@@ -305,9 +299,7 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
                     .any(|d| d.module == en.module && d.name == mangled)
                     || extra.iter().any(|d: &FunDef| d.name == mangled)
                 {
-                    return Err(TypeError::Msg(format!(
-                        "record method name collision {mangled}"
-                    )));
+                    return Err(TypeError::Msg(format!("method name collision {mangled}")));
                 }
                 let mut params = vec![Param {
                     name: "self".into(),
@@ -330,7 +322,7 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
         }
         extra
     };
-    program.defs.extend(record_methods);
+    program.defs.extend(extra_methods);
     Ok(program)
 }
 
@@ -4830,6 +4822,30 @@ record Box[T](x: T):
 "#;
         let p = expand_impls(lower_program(parse(src).unwrap())).expect("expand");
         typecheck(&p).expect("generic record method should typecheck");
+    }
+
+    #[test]
+    fn typechecks_generic_enum_method() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+  def getOrElse(default: T): T =
+    self match {
+      case Opt.Some(x) => x
+      case Opt.None => default
+    }
+@main def main: IO[Unit] =
+  for {
+    n = Opt.Some(3).getOrElse(0)
+  } yield IO.println(Str.fromInt(n))
+"#;
+        let p = expand_impls(lower_program(parse(src).unwrap())).expect("expand");
+        typecheck(&p).expect("generic enum method should typecheck");
+        let p = elaborate_generics(p).expect("elaborate");
+        let p = resolve_field_access(p).expect("fields before mono");
+        let p = monomorphize(p).expect("mono");
+        resolve_field_access(p).expect("fields after mono");
     }
 
     #[test]
