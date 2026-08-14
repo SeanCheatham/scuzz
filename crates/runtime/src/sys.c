@@ -11,7 +11,7 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-/* Process / args / console kit for Stage-1 CLI + clang link (self-host). */
+/* Process / args / console kit (Sys.args, IO.println, clang link). */
 
 static char **g_argv = NULL;
 static int g_argc = 0;

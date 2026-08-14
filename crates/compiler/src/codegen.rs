@@ -31,7 +31,7 @@ pub fn emit_llvm(program: &Program) -> String {
         .expect("duplicate defs should be rejected earlier");
 
     let mut out = String::new();
-    writeln!(out, "; Scuzz Lang Stage-0 generated LLVM IR").unwrap();
+    writeln!(out, "; Scuzz Lang generated LLVM IR").unwrap();
     // Omit target triple / datalayout: clang uses the host defaults (macOS arm64, Linux x86_64, …).
     writeln!(out).unwrap();
 

@@ -1,4 +1,6 @@
+use crate::ast::Program;
 use crate::codegen::emit_llvm;
+use crate::fuzz::sometimes_declared_text;
 use crate::lower::lower_program;
 use crate::manifest::{load_manifest, Manifest};
 use crate::overlay::{
@@ -63,18 +65,7 @@ pub struct ResolvedProject {
     pub manifest_paths: Vec<PathBuf>,
 }
 
-pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
-    let resolved = resolve_project(&opts.project_dir)?;
-    let manifest = resolved.root_manifest.clone();
-
-    let named: Vec<(String, String)> = resolved
-        .sources
-        .iter()
-        .map(|s| (s.label.clone(), s.text.clone()))
-        .collect();
-    let fingerprint = fingerprint_resolved(&resolved, opts.verify);
-
-    // Join must use a relative file name — absolute package names would replace out_dir.
+fn executable_name(manifest: &Manifest) -> Result<String> {
     let exe_name = Path::new(&manifest.package.name)
         .file_name()
         .and_then(|s| s.to_str())
@@ -86,6 +77,46 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
             manifest.package.name
         );
     }
+    Ok(exe_name.to_string())
+}
+
+fn prepare_program(resolved: &ResolvedProject, verify: bool) -> Result<Program> {
+    let named: Vec<(String, String)> = resolved
+        .sources
+        .iter()
+        .map(|s| (s.label.clone(), s.text.clone()))
+        .collect();
+    let program = parse_sources(&named).map_err(|e| anyhow::anyhow!("parse error: {e}"))?;
+    let mut program = if verify {
+        apply_overlays(program, &resolved.overlays).map_err(|e| anyhow::anyhow!("{e}"))?
+    } else {
+        program
+    };
+    if verify {
+        let law_names = collect_law_names(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
+        check_laws_applied(&program, &law_names).map_err(|e| anyhow::anyhow!("{e}"))?;
+        residualize_refinements(&mut program);
+        program.law_names = law_names;
+    } else {
+        erase_laws(&mut program);
+        erase_requires(&mut program);
+    }
+    Ok(program)
+}
+
+/// Parse + overlay + residualize a verify-graph program (mutation applies here).
+pub fn load_verify_program(project_dir: &Path) -> Result<(Program, Manifest)> {
+    let resolved = resolve_project(project_dir)?;
+    let manifest = resolved.root_manifest.clone();
+    let program = prepare_program(&resolved, true)?;
+    Ok((program, manifest))
+}
+
+pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
+    let resolved = resolve_project(&opts.project_dir)?;
+    let manifest = resolved.root_manifest.clone();
+    let fingerprint = fingerprint_resolved(&resolved, opts.verify);
+    let exe_name = executable_name(&manifest)?;
 
     std::fs::create_dir_all(&opts.out_dir)?;
     let cache_dir = opts.project_dir.join(".scuzz");
@@ -95,7 +126,7 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
     } else {
         "fingerprint"
     });
-    let exe = opts.out_dir.join(exe_name);
+    let exe = opts.out_dir.join(&exe_name);
     let ll_path = opts.out_dir.join(format!("{exe_name}.ll"));
 
     if opts.incremental
@@ -111,21 +142,22 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
         });
     }
 
-    let program = parse_sources(&named).map_err(|e| anyhow::anyhow!("parse error: {e}"))?;
-    let mut program = if opts.verify {
-        apply_overlays(program, &resolved.overlays).map_err(|e| anyhow::anyhow!("{e}"))?
-    } else {
-        program
-    };
-    if opts.verify {
-        let law_names = collect_law_names(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
-        check_laws_applied(&program, &law_names).map_err(|e| anyhow::anyhow!("{e}"))?;
-        residualize_refinements(&mut program);
-        program.law_names = law_names;
-    } else {
-        erase_laws(&mut program);
-        erase_requires(&mut program);
-    }
+    let program = prepare_program(&resolved, opts.verify)?;
+    let out = compile_prepared_program(opts, program)?;
+    std::fs::write(&fp_path, &fingerprint)?;
+    Ok(out)
+}
+
+/// Lower, typecheck, emit, and link an already-prepared program (no fingerprint).
+pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Result<CompileOutput> {
+    let manifest = load_manifest(&opts.project_dir.join("scuzz.toml"))
+        .with_context(|| format!("reading {}/scuzz.toml", opts.project_dir.display()))?;
+    let exe_name = executable_name(&manifest)?;
+    std::fs::create_dir_all(&opts.out_dir)?;
+    let exe = opts.out_dir.join(&exe_name);
+    let ll_path = opts.out_dir.join(format!("{exe_name}.ll"));
+
+    let declared = sometimes_declared_text(&program);
     let program = lower_program(program);
     let program = crate::typ::expand_impls(program).map_err(|e| anyhow::anyhow!("{e}"))?;
     typecheck(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -141,6 +173,7 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
             opts.out_dir.join("drivers.txt"),
             driver_table_text(&program),
         )?;
+        std::fs::write(opts.out_dir.join("sometimes.declared"), declared)?;
     }
 
     let _native = NATIVE_LINK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -261,8 +294,6 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
     if with_ui {
         link_reload_dylib(&opts.clang, &ll_path, &opts.out_dir.join("reload.dylib"))?;
     }
-
-    std::fs::write(&fp_path, &fingerprint)?;
 
     Ok(CompileOutput {
         executable: exe,
@@ -645,8 +676,25 @@ fn build_runtime(runtime_dir: &Path, clang: &str) -> Result<()> {
     Ok(())
 }
 
-/// Walk parents from `start` looking for `crates/runtime` (with `include/scuzz_rt.h`).
+/// Resolve `crates/runtime` (with `include/scuzz_rt.h`). Honors `SCUZZ_RUNTIME`
+/// then `SCUZZ_HOME/crates/runtime`, then walks parents from `start`.
 pub fn find_runtime_dir(start: &Path) -> Result<PathBuf> {
+    if let Ok(rt) = std::env::var("SCUZZ_RUNTIME") {
+        if !rt.is_empty() {
+            let p = PathBuf::from(rt);
+            if p.join("include/scuzz_rt.h").is_file() {
+                return Ok(p);
+            }
+        }
+    }
+    if let Ok(home) = std::env::var("SCUZZ_HOME") {
+        if !home.is_empty() {
+            let p = PathBuf::from(home).join("crates/runtime");
+            if p.join("include/scuzz_rt.h").is_file() {
+                return Ok(p);
+            }
+        }
+    }
     let mut cur = start.to_path_buf();
     loop {
         let candidate = cur.join("crates/runtime");

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Emit mobile packaging shells (used by Stage-1/2 `scuzz package`).
+# Emit mobile packaging shells (`scuzz package`).
 set -euo pipefail
 project="${1:-.}"
 target="${2:-all}"

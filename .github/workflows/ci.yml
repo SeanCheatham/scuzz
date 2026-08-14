@@ -33,7 +33,7 @@ jobs:
       - name: Install clang/make/X11/xvfb + Skia link deps
         run: |
           sudo apt-get update
-          # zlib/bz2/brotli: Stage-2 release packs the pinned Skia CPU prebuilt;
+          # zlib/bz2/brotli: the release packs the pinned Skia CPU prebuilt;
           # linking [ui] apps needs these (same as skia-cpu.yml runtime link set).
           sudo apt-get install -y clang make libx11-dev xvfb \
             zlib1g-dev libbz2-dev libbrotli-dev
@@ -144,17 +144,12 @@ jobs:
           cp /tmp/shared-orig.scuzz examples/shared/src/Shared.scuzz
           cargo run -p scuzz -- build --full examples/counter
 
-      - name: Self-host dual-boot
-        run: ./scripts/selfhost.sh
-
-      - name: Package Stage-2 release + install-from-tarball smoke
+      - name: Package release + install-from-tarball smoke
         run: |
           TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
-          # Stage 1 from selfhost rebuilds compiler-scuzz → Stage 2 (no cargo).
-          SCUZZ_BOOTSTRAP=/tmp/stage1-scuzz ./scripts/package_release.sh
+          ./scripts/package_release.sh
           test -f "dist/scuzz-${TRIPLE}.tar.gz"
           test -x "dist/scuzz-${TRIPLE}/bin/scuzz"
-          grep -q '^stage=2$' "dist/scuzz-${TRIPLE}/VERSION"
           SKIA_TRIPLE="$(./scripts/skia_triple.sh)"
           test -f "dist/scuzz-${TRIPLE}/third_party/skia/prebuilt/${SKIA_TRIPLE}/libsk_capi.a"
           PREFIX=/tmp/scuzz-prefix
@@ -170,11 +165,8 @@ jobs:
           grep -qx skia "$PREFIX/share/scuzz/crates/ffi-skia/build/sk_capi_backend"
           scuzz run --headless /tmp/scuzz-release-app
           test -f /tmp/scuzz-release-app/build/snapshot.png
-          # Installed Stage-2 CLI is self-sufficient: rebuild the compiler without Rust.
-          scuzz build "$GITHUB_WORKSPACE/compiler-scuzz"
-          test -x "$GITHUB_WORKSPACE/compiler-scuzz/build/scuzz"
 
-      - name: Upload Stage-2 release artifact
+      - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
           name: scuzz-linux-x86_64
@@ -196,13 +188,13 @@ jobs:
           test -f examples/nav/build/snapshot.png
           cargo run -p scuzz -- test examples/nav
 
-      - name: Deterministic fuzz (bounded) + repro replay (Stage-2 CLI)
+      - name: Deterministic fuzz (bounded) + repro replay
         run: |
-          /tmp/stage2-scuzz fuzz --iters 16 examples/counter
-          /tmp/stage2-scuzz fuzz --iters 16 examples/todo
-          /tmp/stage2-scuzz fuzz --exhaust --depth 1 examples/counter
+          cargo run -p scuzz -- fuzz --iters 16 examples/counter
+          cargo run -p scuzz -- fuzz --iters 16 examples/todo
+          cargo run -p scuzz -- fuzz --exhaust --depth 1 examples/counter
           rm -rf /tmp/scuzz-fuzzbug
-          /tmp/stage2-scuzz new --ui --path /tmp scuzz-fuzzbug
+          cargo run -p scuzz -- new --ui --path /tmp scuzz-fuzzbug
           cat > /tmp/scuzz-fuzzbug/src/Main.scuzz <<'EOF'
           @main def main: IO[Unit] =
             for {
@@ -216,15 +208,15 @@ jobs:
               _ <- Ui.run(root)
             } yield ()
           EOF
-          if /tmp/stage2-scuzz fuzz --iters 8 /tmp/scuzz-fuzzbug; then
+          if cargo run -p scuzz -- fuzz --iters 8 /tmp/scuzz-fuzzbug; then
             echo "fuzz should have found the failure" && exit 1
           fi
           test -f /tmp/scuzz-fuzzbug/build/fuzz/repro.toml
-          if /tmp/stage2-scuzz fuzz --replay /tmp/scuzz-fuzzbug/build/fuzz/repro.toml /tmp/scuzz-fuzzbug; then
+          if cargo run -p scuzz -- fuzz --replay /tmp/scuzz-fuzzbug/build/fuzz/repro.toml /tmp/scuzz-fuzzbug; then
             echo "replay should have reproduced the failure" && exit 1
           fi
           rm -rf /tmp/scuzz-fuzzbug-ex
-          /tmp/stage2-scuzz new --ui --path /tmp scuzz-fuzzbug-ex
+          cargo run -p scuzz -- new --ui --path /tmp scuzz-fuzzbug-ex
           cat > /tmp/scuzz-fuzzbug-ex/src/Main.scuzz <<'EOF'
           @main def main: IO[Unit] =
             for {
@@ -238,15 +230,15 @@ jobs:
               _ <- Ui.run(root)
             } yield ()
           EOF
-          if /tmp/stage2-scuzz fuzz --exhaust --depth 1 /tmp/scuzz-fuzzbug-ex; then
+          if cargo run -p scuzz -- fuzz --exhaust --depth 1 /tmp/scuzz-fuzzbug-ex; then
             echo "exhaust should have found the failure" && exit 1
           fi
           test -f /tmp/scuzz-fuzzbug-ex/build/fuzz/repro.toml
-          if /tmp/stage2-scuzz fuzz --replay /tmp/scuzz-fuzzbug-ex/build/fuzz/repro.toml /tmp/scuzz-fuzzbug-ex; then
+          if cargo run -p scuzz -- fuzz --replay /tmp/scuzz-fuzzbug-ex/build/fuzz/repro.toml /tmp/scuzz-fuzzbug-ex; then
             echo "exhaust replay should have reproduced the failure" && exit 1
           fi
           rm -rf /tmp/scuzz-schedbug
-          /tmp/stage2-scuzz new --path /tmp scuzz-schedbug
+          cargo run -p scuzz -- new --path /tmp scuzz-schedbug
           cat > /tmp/scuzz-schedbug/src/Main.scuzz <<'EOF'
           @main def main: IO[Unit] =
             for {
@@ -256,20 +248,23 @@ jobs:
               _ <- if (Str.eq(first, "L") == 1) IO.pure(()) else IO.fail("expected L first")
             } yield ()
           EOF
-          /tmp/stage2-scuzz test /tmp/scuzz-schedbug
-          if /tmp/stage2-scuzz fuzz --iters 8 /tmp/scuzz-schedbug; then
+          cargo run -p scuzz -- test /tmp/scuzz-schedbug
+          if cargo run -p scuzz -- fuzz --iters 8 /tmp/scuzz-schedbug; then
             echo "schedule fuzz should have found the interleaving bug" && exit 1
           fi
           test -f /tmp/scuzz-schedbug/build/fuzz/repro.toml
           grep -q 'schedule_seed' /tmp/scuzz-schedbug/build/fuzz/repro.toml
-          if /tmp/stage2-scuzz fuzz --replay /tmp/scuzz-schedbug/build/fuzz/repro.toml /tmp/scuzz-schedbug; then
+          if cargo run -p scuzz -- fuzz --replay /tmp/scuzz-schedbug/build/fuzz/repro.toml /tmp/scuzz-schedbug; then
             echo "schedule replay should have reproduced the failure" && exit 1
           fi
           grep -v schedule_seed /tmp/scuzz-schedbug/build/fuzz/repro.toml > /tmp/scuzz-schedbug/build/fuzz/repro-fifo.toml
-          if ! /tmp/stage2-scuzz fuzz --replay /tmp/scuzz-schedbug/build/fuzz/repro-fifo.toml /tmp/scuzz-schedbug; then
+          if ! cargo run -p scuzz -- fuzz --replay /tmp/scuzz-schedbug/build/fuzz/repro-fifo.toml /tmp/scuzz-schedbug; then
             echo "FIFO replay (no schedule_seed) should pass" && exit 1
           fi
-          /tmp/stage2-scuzz fuzz --iters 4 examples/concurrency
+          cargo run -p scuzz -- fuzz --iters 4 examples/concurrency
+          cargo run -p scuzz -- mutate examples/hello
+          cargo run -p scuzz -- mutate examples/record --limit 2 --iters 0
+          cargo run -p scuzz -- mutate examples/counter --limit 1 --iters 0
 
       - name: v0 new --ui happy path
         run: |
@@ -281,11 +276,6 @@ jobs:
           cargo run -p scuzz -- test /tmp/scuzz-v0app
           cargo run -p scuzz -- run --headless /tmp/scuzz-v0app
           test -f /tmp/scuzz-v0app/build/snapshot.png
-          /tmp/stage2-scuzz new --ui --path /tmp scuzz-v0s2
-          /tmp/stage2-scuzz test /tmp/scuzz-v0s2
-          test -f /tmp/scuzz-v0s2/goldens/scuzz-v0s2.dump
-          /tmp/stage2-scuzz run --headless /tmp/scuzz-v0s2
-          test -f /tmp/scuzz-v0s2/build/snapshot.png
 
       - name: Window peer + X11 embedder (xvfb)
         run: |
@@ -338,18 +328,12 @@ jobs:
           make -C crates/embedder-mobile lib CC=clang
           cargo build -p scuzz
 
-      - name: Self-host dual-boot (default stack)
-        run: |
-          export LIBRARY_PATH="$(brew --prefix)/lib:$(brew --prefix bzip2)/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
-          ./scripts/selfhost.sh
-
-      - name: Package Stage-2 release + install smoke
+      - name: Package release + install smoke
         run: |
           export LIBRARY_PATH="$(brew --prefix)/lib:$(brew --prefix bzip2)/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
           TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
-          SCUZZ_BOOTSTRAP=/tmp/stage1-scuzz ./scripts/package_release.sh
+          ./scripts/package_release.sh
           test -f "dist/scuzz-${TRIPLE}.tar.gz"
-          grep -q '^stage=2$' "dist/scuzz-${TRIPLE}/VERSION"
           SKIA_TRIPLE="$(./scripts/skia_triple.sh)"
           test -f "dist/scuzz-${TRIPLE}/third_party/skia/prebuilt/${SKIA_TRIPLE}/libsk_capi.a"
           PREFIX=/tmp/scuzz-prefix
@@ -363,7 +347,7 @@ jobs:
           grep -qx skia "$PREFIX/share/scuzz/crates/ffi-skia/build/sk_capi_backend"
           scuzz run --headless /tmp/scuzz-release-app
 
-      - name: Upload Stage-2 release artifact
+      - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
           name: scuzz-macos-arm64

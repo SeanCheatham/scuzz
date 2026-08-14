@@ -1,20 +1,24 @@
+mod cmd_fuzz;
+mod cmd_mutate;
+mod support;
+
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
-use scuzz_compiler::driver::{
-    compile_project, find_runtime_dir, wait_for_source_change, CompileOptions,
-};
+use scuzz_compiler::compile_project;
+use scuzz_compiler::driver::{find_runtime_dir, wait_for_source_change};
 use scuzz_compiler::format::format_source;
 use scuzz_compiler::manifest::load_manifest;
 use scuzz_compiler::overlay::is_fmt_source;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
+use support::resolve_dir;
 
 #[derive(Parser, Debug)]
 #[command(
     name = "scuzz",
     version,
-    about = "Scuzz Lang — Stage-0 bootstrap CLI (release CLI is compiler-scuzz)",
-    after_help = "Examples:\n  scuzz check\n  scuzz check --message-format=json\n  scuzz lsp\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n\nJSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check` (disk; not a second typer).\n`watch` rebuilds. `run --watch` on [ui] keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (not source hot reload). IO-only `run --watch` kills and reruns on source change. Live dump: build/debug.dump. Live inject: build/inject.script (tap/text/type/pump/scroll/backspace)."
+    about = "Scuzz Lang CLI",
+    after_help = "Examples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz check --message-format=json\n  scuzz lsp\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n  scuzz fuzz --iters 16\n  scuzz mutate --limit 16 --iters 4\n\nJSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check` (disk; not a second typer).\n`watch` rebuilds. `run --watch` on [ui] keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (not source hot reload). IO-only `run --watch` kills and reruns on source change. Live dump: build/debug.dump. Live inject: build/inject.script (tap/text/type/pump/scroll/backspace)."
 )]
 struct Cli {
     /// Diagnostic format: human (default) or json (`check` protocol; LSP wraps check)
@@ -93,6 +97,46 @@ enum Commands {
         /// Check only (nonzero exit if would reformat)
         #[arg(long)]
         check: bool,
+    },
+    /// Search in-source laws under TestRuntime ([ui] events × schedules; IO-only schedules)
+    #[command(
+        after_help = "Examples:\n  scuzz fuzz --iters 16\n  scuzz fuzz --iters 16 examples/concurrency\n  scuzz fuzz --exhaust --depth 1\n  scuzz fuzz --replay build/fuzz/repro.toml\n"
+    )]
+    Fuzz {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Seeded search iterations (scripts or schedule seeds)
+        #[arg(long, default_value_t = 32)]
+        iters: i64,
+        /// Deterministic LCG seed
+        #[arg(long, default_value_t = 42)]
+        seed: i64,
+        /// Exhaustive [ui] event alphabet (requires --depth)
+        #[arg(long)]
+        exhaust: bool,
+        /// Exhaustion depth (with --exhaust)
+        #[arg(long)]
+        depth: Option<i64>,
+        /// Replay a repro.toml (events + optional schedule_seed)
+        #[arg(long)]
+        replay: Option<PathBuf>,
+    },
+    /// Mutate residual Law.check / Law.assert / .require predicates and probe
+    #[command(
+        after_help = "Examples:\n  scuzz mutate\n  scuzz mutate --limit 16 --iters 4\n  scuzz mutate examples/counter --limit 4 --iters 8\n  scuzz mutate examples/hello\n"
+    )]
+    Mutate {
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Max residual oracle sites to probe
+        #[arg(long, default_value_t = 16)]
+        limit: i64,
+        /// Fuzz iters per mutant after the idle probe (`0` is idle only)
+        #[arg(long, default_value_t = 4)]
+        iters: i64,
+        /// Deterministic LCG seed
+        #[arg(long, default_value_t = 42)]
+        seed: i64,
     },
     /// Create a new Scuzz Lang project
     New {
@@ -305,6 +349,20 @@ main = "Main"
             }
             Ok(ExitCode::SUCCESS)
         }
+        Commands::Fuzz {
+            path,
+            iters,
+            seed,
+            exhaust,
+            depth,
+            replay,
+        } => cmd_fuzz::cmd_fuzz(&path, replay.as_deref(), iters, seed, exhaust, depth),
+        Commands::Mutate {
+            path,
+            limit,
+            iters,
+            seed,
+        } => cmd_mutate::cmd_mutate(&path, limit, iters, seed),
         Commands::Package {
             path,
             target,
@@ -569,14 +627,6 @@ fn collect_scuzz_sources(dir: &Path, out: &mut Vec<PathBuf>) -> Result<()> {
     Ok(())
 }
 
-fn resolve_dir(path: &Path) -> Result<PathBuf> {
-    if path.is_absolute() {
-        Ok(path.to_path_buf())
-    } else {
-        Ok(std::env::current_dir()?.join(path))
-    }
-}
-
 fn effective_ui_runtime(manifest: &scuzz_compiler::manifest::Manifest, headless: bool) -> String {
     if headless {
         return "headless".into();
@@ -781,23 +831,7 @@ fn build(
     incremental: bool,
     verify: bool,
 ) -> Result<scuzz_compiler::CompileOutput> {
-    let project_dir = resolve_dir(path)?;
-    let out_dir = if out_dir.is_absolute() {
-        out_dir.to_path_buf()
-    } else {
-        project_dir.join(out_dir)
-    };
-    let runtime_dir =
-        find_runtime_dir(&std::env::current_dir()?).or_else(|_| find_runtime_dir(&project_dir))?;
-    let clang = std::env::var("SCUZZ_CLANG").unwrap_or_else(|_| "clang".into());
-    compile_project(&CompileOptions {
-        project_dir,
-        runtime_dir,
-        out_dir,
-        clang,
-        incremental,
-        verify,
-    })
+    compile_project(&support::compile_opts(path, out_dir, incremental, verify)?)
 }
 
 fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode> {

@@ -25,7 +25,7 @@ Scuzz Lang is already a language + runtime + UI + tooling bet. **Ruthless subset
 - **Forwards-only.** Do not maintain backwards compatibility, migration shims, or legacy code paths—especially during the prototype / pre-v1 phase. Prefer deleting and rewriting call sites over keeping dual APIs.
 - **Vertical slice over scaffolding.** Prefer a working hello / Counter path to empty module trees and placeholder APIs.
 - **Headless-first for UI.** Never land Window-only UI behavior; Headless is a peer runtime (see `vision.md`).
-- **One compiler.** Toolchain is Rust (`crates/cli`). Do not grow a parallel Scuzz-written compiler. Language proof is `examples/` that exercise the kernel (`vision.md`).
+- **One compiler.** Toolchain is Rust (`crates/cli`). Language proof is `examples/` that exercise the kernel (`vision.md`).
 - **No agent- or tool-specific references in the repo.** Keep CI, docs, and code project-owned—not tied to a particular coding agent, branch naming scheme, or vendor workflow.
 - **No historical record-keeping in tree.** Present-tense docs and comments; no phase diaries, “landed” changelogs, or dangling references to removed paths.
 

@@ -35,10 +35,6 @@ Vision locks **oracles in source, drivers as the test surface** ([`vision.md`](v
 
 - **Hot reload and debugging tools** — Headless + in-process reload + debug for agents. Headless is a peer; `scuzz watch` only rebuilds; `[ui]` `run --watch` stamp-reloads the View tree (Signals stay), writes `build/debug.dump` (signals + a11y including live `View.bindText` + `[taps]` / `[fields]` `N* placeholder="live"` / `[scrolls]`, with `tap N`, `text N s` / `type N s` / `backspace N k`, `scroll N dy`), and plays `build/inject.script`. `[ui]` build emits `build/reload.dylib`; stamp-watch `dlopen`s it. A Headless source View-label change appears in the dump without restart (Signals stay). IO-only `run --watch` kills and reruns on source change. Do not document `watch` as hot reload.
 
-### Near-term (one Rust toolchain)
-
-Product `scuzz` is `crates/cli`. `fuzz` / `mutate` still live in `compiler-scuzz/`. Dual-boot and the Stage-2 release path are leftover — [`plans.md`](plans.md).
-
 ### Residuals
 
 - **Net** — `Net.httpGet` queries A and AAAA together, starts AAAA first, waits 250ms before A (RFC 8305), races connects, and fails a hanging DNS lookup, TCP connect, or response read after 1s (partial DNS proceeds); CNAME chains re-query both (cap 5). IPv4 literals and `http://[::1]/` skip DNS. `Net.serve` listens on `127.0.0.1` and `::1`, bounds request read and response write at 1s, and drops a timed-out, malformed, reset, or handler-failed client so the next request can run.
@@ -60,4 +56,3 @@ Path deps only (`manifest.rs`). Git / versioned / hosted artifacts are direction
 - **OS IME candidate windows** — focused TextField caret uses measured advance (`sz_view_caret_rect`); embedders do not yet place OS IME UI from it.
 - **LSP / editor tooling** — `fmt`, `check --message-format=json`, `watch`, and `scuzz lsp` exist. LSP wraps disk `check` (didOpen/didSave/didChange); no hover/completion and no unsaved-buffer overlay. JSON diagnostics stay the single schema.
 - **macOS in default CI** — macOS job is `workflow_dispatch`-only; Darwin regressions surface late.
-- **Self-host** — compiler and CLI stay Rust. Language proof is kernel examples, not compiling `scuzz` in Scuzz. Revisit only if a single-implementation cutover is worth a snapshot bootstrap; do not keep two living compilers in the meantime.

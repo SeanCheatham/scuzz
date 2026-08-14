@@ -325,7 +325,7 @@ typedef struct SzPair {
 SzPair *sz_pair_new(void *left, void *right);
 void sz_pair_free(SzPair *p);
 
-/* Linked list (NULL = Nil) for kernel dialect / Stage-1 compiler */
+/* Linked list (NULL = Nil) */
 struct SzList {
   void *head;
   struct SzList *tail;
@@ -351,7 +351,7 @@ SzIo *sz_fs_list(SzString *path);
 SzIo *sz_fs_mkdirs(SzString *path);
 SzIo *sz_fs_canonicalize(SzString *path);
 
-/* Process / args / env / console for Stage-1 CLI + clang (console out = IO.println) */
+/* Process / args / env / console (console out = IO.println) */
 void sz_sys_set_args(int argc, char **argv);
 SzIo *sz_sys_args(void);
 SzIo *sz_sys_read_line(void); /* IO[String]: one stdin line; EOF → ""; parks on poll */

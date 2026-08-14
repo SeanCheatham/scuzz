@@ -1,4 +1,4 @@
-# Publish Stage-2 scuzz tarballs to a GitHub Release.
+# Publish scuzz tarballs to a GitHub Release.
 # Push a v* tag (or Run workflow with that tag). Not part of default CI.
 name: release
 
@@ -52,7 +52,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          # libx11-dev: compiler-scuzz / [ui] apps compile embedder-desktop (x11_present.c).
+          # libx11-dev: [ui] apps compile embedder-desktop (x11_present.c).
           sudo apt-get install -y clang make libx11-dev \
             zlib1g-dev libbz2-dev libbrotli-dev
 
@@ -63,7 +63,7 @@ jobs:
       - name: Install Rust (stable via rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Package Stage-2 release + install-from-tarball smoke
+      - name: Package release + install-from-tarball smoke
         env:
           SCUZZ_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
@@ -75,7 +75,6 @@ jobs:
           test -f "dist/scuzz-${TRIPLE}.tar.gz"
           test -x "dist/scuzz-${TRIPLE}/bin/scuzz"
           grep -q "^version=${SCUZZ_VERSION}$" "dist/scuzz-${TRIPLE}/VERSION"
-          grep -q '^stage=2$' "dist/scuzz-${TRIPLE}/VERSION"
           PREFIX=/tmp/scuzz-prefix
           rm -rf "$PREFIX"
           RELEASE_TGZ="$PWD/dist/scuzz-${TRIPLE}.tar.gz" PREFIX="$PREFIX" ./scripts/install.sh
@@ -86,7 +85,7 @@ jobs:
           scuzz test /tmp/scuzz-release-app
           scuzz run --headless /tmp/scuzz-release-app
 
-      - name: Upload Stage-2 release artifact
+      - name: Upload release artifact
         uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.artifact }}
@@ -131,7 +130,7 @@ jobs:
           generate_release_notes: true
           prerelease: ${{ contains(github.event.inputs.tag || github.ref_name, '-') }}
           body: |
-            Stage-2 `scuzz` (`linux-x86_64`, `darwin-arm64`).
+            Rust `scuzz` (`linux-x86_64`, `darwin-arm64`).
 
             ```bash
             curl -fsSL https://github.com/${{ github.repository }}/releases/latest/download/install.sh | sh

@@ -12,7 +12,7 @@ Edit this file when a decision or next-step ordering changes.
 - **Runtime**: custom native (LLVM). Native binaries, not a VM. No JVM, no Java interop, no classpath/Maven.
 - **UI**: a primary product path, not the only one (Dart-shaped: GUI is first-class; so are CLI and server). One design language + Skia, as a **`Ui` effect** with Headless/Window/Mobile interpreters. Headless is a product runtime (agents, CI), not a test-only shim.
 - **Tooling**: one opinionated CLI (`scuzz`) — compile, link, assets, watch, packaging, format, check, and the whole verification stack. One formatter, one check surface, one testing strategy. Batteries-included: mutation, fuzzing, property/laws, simulation, and determinism are **first-class in the language and `scuzz`**, not a third-party harness sprawl. Static hygiene is `scuzz check` (format-verify + typecheck; further lints emit here, no `lint` subcommand). `scuzz fmt` rewrites. Compiler, CLI, and toolchain are **Rust** (`crates/compiler`, `crates/cli`).
-- **Language proof**: examples that exercise the surface (`examples/`), not a self-hosted compiler. Self-host is deferred.
+- **Language proof**: examples that exercise the surface (`examples/`), not a self-hosted compiler.
 - **AI-Friendly**: Headless, hot reload, and debugging tools aid agents. Headless is a peer runtime; `watch` only rebuilds; `[ui] run --watch` stamp-reloads Views, writes `build/debug.dump` (including `[taps]` / `[fields]` live strings / `[scrolls]` and live `View.bindText`), and plays `build/inject.script`. `[ui]` build emits `build/reload.dylib`; stamp-watch `dlopen`s it so a source View-label change appears live (Signals stay). IO-only `run --watch` kills and reruns on source change. `scuzz lsp` wraps `scuzz check` JSON diagnostics.
 
 Upstream Scala Native is a *reference*, not a dependency. Divergence is intentional.
@@ -30,7 +30,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 | Impurity | All nondeterminism / external I/O through blessed `IO`; no app-level `IO.delay` escape hatch |
 | Tests | One built-in strategy: **mutation + fuzz + laws (property) + sim + determinism** (TestRuntime). Oracles live **in source** (laws, inline checks, refinements); **drivers** are oracle-free workloads the fuzzer composes. No classical unit-test culture, no external test frameworks |
 | Modules | `scuzz.toml` package = crate; `Foo.scuzz` = module (not JVM packages) |
-| Toolchain | Rust (`crates/cli`); one compiler; self-host deferred |
+| Toolchain | Rust (`crates/cli`); one compiler |
 | UI model | Pure `View` + effectful `Ui` session (`mount` / `pump` / `inject` / `snapshot`) |
 
 ## What Scuzz Lang is not
@@ -51,7 +51,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 
 **v0** — Install CLI (`curl …/install.sh | sh`, or checkout `./scripts/install.sh`) → `scuzz new` (IO) or `scuzz new --ui` (Counter/Todo as `View` + builtin `IO`) → `scuzz test` and `scuzz run` (`--headless` for UI). Window when available. Language `Resource` / `Stream` / `Net.serve` ship (`examples/resource`, `examples/stream`, `examples/server`).
 
-**v1** — Shipped `scuzz` is the Rust CLI (GitHub Releases; `package_release.sh` / `install.sh`). Kernel surface is proven by examples, not by compiling `scuzz` in Scuzz. `fuzz` / `mutate` live on that same CLI.
+**v1** — Shipped `scuzz` is the Rust CLI (GitHub Releases; `package_release.sh` / `install.sh`). Kernel surface is proven by examples. `fuzz` / `mutate` live on that CLI.
 
 ## Decisions
 
@@ -104,7 +104,7 @@ Missing `[ui]` ⇒ Skia omitted from the link; `scuzz test` is TESTRT exit-0 smo
 
 ### Kernel dialect
 
-The language `scuzz` implements. Proof is examples that exercise each construct (`examples/hello`, `adt`, `record`, `trait`, `generic`, `genum`, `modules`, `counter`, …), not a second compiler written in Scuzz. Do not grow a parallel Scuzz-written toolchain.
+The language `scuzz` implements. Proof is examples that exercise each construct (`examples/hello`, `adt`, `record`, `trait`, `generic`, `genum`, `modules`, `counter`, …).
 
 Locks (not an API catalog — see [`guide.md`](guide.md)):
 
@@ -199,7 +199,7 @@ Keep purity checkable (pure `A` vs `IO` vs session), total expr core, signals as
 
 ### `scuzz fuzz`
 
-Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overlays when present). The fuzz alphabet is the typed event surface (buttons, text fields) **plus declared drivers** (`drive <name> [args]` extends the script line protocol; the verify build publishes the driver table alongside the a11y dump). Oracles: in-source **laws/refinements** first; panic/`SzError` still fails; `Law.sometimes` reachability judges the campaign; structural dumps aid diagnosis (PNG last). `repro.toml` records events + driver invocations verbatim, so replay is generator-independent. Requires stable tap order, `pump` as time, no hidden nondeterminism. Determinism makes any failing prefix replayable. Seeded `--iters` keeps `[ui]` prefixes that hit new `Law.sometimes` names or a new Headless `dump.txt`, and IO-only schedule seeds that hit new sometimes names, then extends/perturbs them (CLI-only; no runtime machinery). Flags, script verbs, and schedule seeds: [`guide.md`](guide.md). `fuzz` / `mutate` belong on the product (Rust) CLI.
+Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overlays when present). The fuzz alphabet is the typed event surface (buttons, text fields) **plus declared drivers** (`drive <name> [args]` extends the script line protocol; the verify build publishes the driver table alongside the a11y dump). Oracles: in-source **laws/refinements** first; panic/`SzError` still fails; `Law.sometimes` reachability judges the campaign; structural dumps aid diagnosis (PNG last). `repro.toml` records events + driver invocations verbatim, so replay is generator-independent. Requires stable tap order, `pump` as time, no hidden nondeterminism. Determinism makes any failing prefix replayable. Seeded `--iters` keeps `[ui]` prefixes that hit new `Law.sometimes` names or a new Headless `dump.txt`, and IO-only schedule seeds that hit new sometimes names, then extends/perturbs them (CLI-only; no runtime machinery). Flags, script verbs, and schedule seeds: [`guide.md`](guide.md).
 
 ### Layout model
 
@@ -211,7 +211,7 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: one Rust toolchain — [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
+Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: [`plans.md`](plans.md). Open unknowns: device Mobile (blocked on NDK/Xcode), GPU presenters.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-only UI features. UI is a primary path among CLI/server/desktop/mobile — not the only v0 bar.
 
@@ -221,7 +221,6 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth; no Window-onl
 | --- | --- |
 | Language + UI + tooling is huge | Ruthless subset; vertical slices; Counter before generality |
 | Dialect unexercised by apps | Kernel examples that stress each construct; `check` / `test` / `fuzz` on `examples/` |
-| Two compilers | One Rust `scuzz`; do not grow `compiler-scuzz/` |
 | Effects too weak or too heavy | Builtin IO; pure `View`; `Ui` at session boundary |
 | Hidden nondeterminism | Closed impurity + TestRuntime + deterministic `*.scuzz_sim` |
 | Laws become brittle dump goldens | Laws talk to named module/signal surface; strict sim/live pairing in `check`; mutation kills weak oracles |

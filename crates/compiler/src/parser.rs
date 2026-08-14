@@ -318,7 +318,7 @@ impl Parser {
         let ty = self.parse_type()?;
         match &ty {
             Type::Io(inner) if matches!(inner.as_ref(), Type::Unit) => {}
-            _ => return Err(self.err("@main must have type IO[Unit] in Stage 0")),
+            _ => return Err(self.err("@main must have type IO[Unit]")),
         }
         self.expect(&Token::Eq)?;
         let body = self.parse_expr()?;

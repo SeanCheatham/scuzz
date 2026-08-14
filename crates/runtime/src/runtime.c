@@ -566,7 +566,7 @@ typedef struct Sched {
 
 static Sched *g_sched = NULL;
 
-/* Same LCG as compiler-scuzz Fuzz.scuzz (kernel dialect has no bitwise ops). */
+/* Same LCG as `scuzz fuzz` schedule search (`crates/compiler/src/fuzz.rs`). */
 enum { SZ_LCG_M = 2147483647, SZ_LCG_A = 48271, SZ_LCG_SEED_MOD = 2147483646 };
 
 static int32_t sched_lcg_seed(int32_t seed) {
@@ -1841,7 +1841,7 @@ static void *sz_runtime_main_worker(void *arg) {
 }
 
 int sz_runtime_main_args(SzIo *program, int argc, char **argv) {
-  /* Run the program on a heap-allocated stack so Stage-1 emit (deep but
+  /* Run the program on a heap-allocated stack so generated IR (deep but
    * bounded) does not depend on the process main-thread ulimit — required on
    * macOS where `ulimit -s` cannot grow the main stack. */
   SzMainArgs args;

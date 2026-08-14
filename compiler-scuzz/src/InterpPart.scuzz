@@ -1,6 +1,0 @@
-package scuzz.compiler
-
-enum InterpPart:
-  case Lit(text: String)
-  case Hole(expr: Expr)
-

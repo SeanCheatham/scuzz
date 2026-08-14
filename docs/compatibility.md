@@ -46,4 +46,4 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 
 ## Toolchain
 
-The compiler and CLI are Rust (`crates/compiler`, `crates/cli`). Kernel surface: [vision.md](vision.md#kernel-dialect). Self-host is deferred; do not grow a parallel Scuzz-written compiler.
+The compiler and CLI are Rust (`crates/compiler`, `crates/cli`). Kernel surface: [vision.md](vision.md#kernel-dialect).

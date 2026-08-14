@@ -3,7 +3,7 @@ name = "scuzz-compiler"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "Scuzz Lang Stage-0 bootstrap compiler (Rust)"
+description = "Scuzz Lang compiler"
 
 [dependencies]
 anyhow.workspace = true

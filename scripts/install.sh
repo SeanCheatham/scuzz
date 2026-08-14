@@ -1,11 +1,12 @@
 #!/bin/sh
-# Install Stage-2 `scuzz` into PREFIX (default: ~/.local).
+# Install `scuzz` into PREFIX (default: ~/.local).
 #
 # Installs a self-contained release tree under $PREFIX/share/scuzz and a
 # wrapper at $PREFIX/bin/scuzz that sets SCUZZ_HOME. App builds need
 # clang/make; Linux [ui] linking against the packaged Skia CPU prebuilt also
 # needs zlib/bzip2/brotli. Rust/cargo is not required when installing from a
-# prebuilt artifact (RELEASE_TGZ / RELEASE_DIR / GitHub Release).
+# prebuilt artifact (RELEASE_TGZ / RELEASE_DIR / GitHub Release). From a
+# checkout, `package_release.sh` builds the Rust CLI.
 #
 # Sources (first match):
 #   RELEASE_DIR / RELEASE_TGZ — local tree or tarball
@@ -30,7 +31,7 @@ TAG=""
 
 usage() {
   cat <<EOF
-Install Stage-2 scuzz into PREFIX (default: ~/.local).
+Install scuzz into PREFIX (default: ~/.local).
 
 Usage:
   curl -fsSL https://github.com/${DEFAULT_REPO}/releases/latest/download/install.sh | sh
@@ -276,9 +277,8 @@ elif [ "$SOURCE" = "checkout" ]; then
     die "not a Scuzz checkout (missing scripts/package_release.sh)." \
       "curl -fsSL https://github.com/${SCUZZ_REPO}/releases/latest/download/install.sh | sh"
   fi
-  echo "==> packaging Stage-2 release (no RELEASE_DIR / RELEASE_TGZ)"
+  echo "==> packaging release (no RELEASE_DIR / RELEASE_TGZ)"
   DIST_ROOT="${DIST_ROOT:-$ROOT/dist}" \
-    SCUZZ_BOOTSTRAP="${SCUZZ_BOOTSTRAP:-}" \
     "$ROOT/scripts/package_release.sh"
   RELEASE="$ROOT/dist/scuzz-$TRIPLE"
   if [ ! -x "$RELEASE/bin/scuzz" ]; then
