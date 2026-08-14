@@ -98,6 +98,9 @@ SzView *sz_lang_view_max_size(int64_t w, int64_t h, SzView *child) {
   return sz_view_max_size((int)w, (int)h, child);
 }
 SzView *sz_lang_view_clip(SzView *child) { return sz_view_clip(child); }
+SzView *sz_lang_view_opacity(int64_t pct, SzView *child) {
+  return sz_view_opacity((int)pct, child);
+}
 SzView *sz_lang_view_background(int64_t argb, SzView *child) {
   return sz_view_background((uint32_t)argb, child);
 }

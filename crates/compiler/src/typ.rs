@@ -1986,6 +1986,11 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Opaque("View".into()))
         }
+        "View.opacity" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            Ok(Type::Opaque("View".into()))
+        }
         "View.background" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
@@ -4858,6 +4863,15 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.clip should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_opacity() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.opacity(50, View.text("x")))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.opacity should typecheck");
     }
 
     #[test]

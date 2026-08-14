@@ -267,4 +267,11 @@ mod tests {
         let labels = labels_at(src, "View.cl");
         assert!(labels.iter().any(|l| l == "View.clip"), "{labels:?}");
     }
+
+    #[test]
+    fn completes_view_opacity_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.op\n";
+        let labels = labels_at(src, "View.op");
+        assert!(labels.iter().any(|l| l == "View.opacity"), "{labels:?}");
+    }
 }

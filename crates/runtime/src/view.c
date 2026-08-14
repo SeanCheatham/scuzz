@@ -64,7 +64,7 @@ struct SzView {
   int pos_y;
   /* View.padding: uniform inset. */
   int pad;
-  /* View.sized / View.minSize / View.maxSize / View.aspectRatio / View.fraction: w×h, ratio, or pct. */
+  /* View.sized / View.minSize / View.maxSize / View.aspectRatio / View.fraction / View.opacity: w×h, ratio, or pct. */
 };
 
 static SzView *view_new(SzViewKind kind) {
@@ -105,7 +105,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_SIZED || kind == SZ_VIEW_MIN_SIZE ||
          kind == SZ_VIEW_BACKGROUND || kind == SZ_VIEW_ASPECT_RATIO ||
          kind == SZ_VIEW_FRACTION || kind == SZ_VIEW_STRETCH ||
-         kind == SZ_VIEW_MAX_SIZE || kind == SZ_VIEW_CLIP;
+         kind == SZ_VIEW_MAX_SIZE || kind == SZ_VIEW_CLIP ||
+         kind == SZ_VIEW_OPACITY;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -408,6 +409,18 @@ SzView *sz_view_max_size(int w, int h, SzView *child) {
 
 SzView *sz_view_clip(SzView *child) {
   SzView *v = view_new(SZ_VIEW_CLIP);
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
+SzView *sz_view_opacity(int pct, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_OPACITY);
+  if (pct < 0)
+    pct = 0;
+  if (pct > 100)
+    pct = 100;
+  v->img_w = pct;
   if (child)
     sz_view_add_child(v, child);
   return v;
@@ -1207,6 +1220,20 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.h = ch ? ch->frame.h : 0.f;
     break;
   }
+  case SZ_VIEW_OPACITY: {
+    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
+    if (ch) {
+      SzBoxConstraints cc;
+      cc.min_w = min_w;
+      cc.min_h = min_h;
+      cc.max_w = max_w;
+      cc.max_h = max_h;
+      layout_constrained(ch, x, y, cc, theme);
+    }
+    v->frame.w = ch ? ch->frame.w : 0.f;
+    v->frame.h = ch ? ch->frame.h : 0.f;
+    break;
+  }
   case SZ_VIEW_ASPECT_RATIO: {
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
     float rw = (float)(v->img_w > 0 ? v->img_w : 1);
@@ -1330,6 +1357,18 @@ static const float k_text_field_inset = 6.f;
 
 static int g_clip_on;
 static SzRect g_clip;
+static int g_opacity = 100;
+
+static uint32_t apply_paint_alpha(uint32_t argb) {
+  uint32_t a;
+  if (g_opacity >= 100)
+    return argb;
+  if (g_opacity <= 0)
+    return argb & 0x00ffffffu;
+  a = (argb >> 24) & 0xffu;
+  a = (a * (uint32_t)g_opacity) / 100u;
+  return (a << 24) | (argb & 0x00ffffffu);
+}
 
 static int rects_intersect(SzRect a, SzRect b, SzRect *out) {
   float x0 = a.x > b.x ? a.x : b.x;
@@ -1372,7 +1411,7 @@ static void paint_rect(SkCanvas *c, float x, float y, float w, float h,
   p = sk_paint_new();
   if (!p)
     return;
-  sk_paint_set_color(p, sk_color_argb(argb));
+  sk_paint_set_color(p, sk_color_argb(apply_paint_alpha(argb)));
   sk_canvas_draw_rect(c, x, y, w, h, p);
   sk_paint_delete(p);
 }
@@ -1388,7 +1427,7 @@ static void paint_string(SkCanvas *c, const char *s, float x, float y,
   p = sk_paint_new();
   if (!p)
     return;
-  sk_paint_set_color(p, sk_color_argb(argb));
+  sk_paint_set_color(p, sk_color_argb(apply_paint_alpha(argb)));
   sk_paint_set_text_size(p, font_px);
   sk_canvas_draw_string(c, s ? s : "", x, y, p);
   sk_paint_delete(p);
@@ -1486,7 +1525,8 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     {
       SkPaint *p = sk_paint_new();
       if (p) {
-        sk_paint_set_color(p, sk_color_argb(v->focused ? theme->primary : theme->border));
+        sk_paint_set_color(p, sk_color_argb(apply_paint_alpha(
+            v->focused ? theme->primary : theme->border)));
         sk_paint_set_stroke(p, 1);
         sk_paint_set_stroke_width(p, v->focused ? 2.f : 1.f);
         sk_canvas_draw_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, p);
@@ -1524,6 +1564,22 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_CLIP:
     paint_children_clipped(v, c, theme);
     break;
+  case SZ_VIEW_OPACITY: {
+    int prev = g_opacity;
+    int pct = v->img_w;
+    int next = (prev * pct) / 100;
+    if (next < 0)
+      next = 0;
+    if (next > 100)
+      next = 100;
+    g_opacity = next;
+    if (g_opacity > 0) {
+      for (i = 0; i < v->child_count; i++)
+        paint_node(v->children[i], c, theme);
+    }
+    g_opacity = prev;
+    break;
+  }
   case SZ_VIEW_SCROLL:
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     paint_children_clipped(v, c, theme);
@@ -1559,6 +1615,7 @@ int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
   if (!root || !canvas || !theme)
     return 0;
   g_clip_on = 0;
+  g_opacity = 100;
   sk_canvas_clear(canvas, sk_color_argb(theme->background));
   sz_view_layout(root, (float)width, (float)height, theme);
   paint_node(root, canvas, theme);

@@ -1340,6 +1340,83 @@ static void test_clip_paint_contains_overflow(void) {
   sz_view_free(root);
 }
 
+static void test_opacity_sizes_to_child(void) {
+  SzView *wrap, *inner, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect wf, inf;
+
+  child = sz_view_text("Hi");
+  inner = sz_view_sized(40, 30, child);
+  wrap = sz_view_opacity(50, inner);
+  sz_view_layout(wrap, 200.f, 200.f, theme);
+  assert(sz_view_kind(wrap) == SZ_VIEW_OPACITY);
+  wf = sz_view_frame(wrap);
+  inf = sz_view_frame(inner);
+  assert(fabsf(wf.w - 40.f) < 0.5f);
+  assert(fabsf(wf.h - 30.f) < 0.5f);
+  assert(fabsf(inf.w - 40.f) < 0.5f);
+  assert(fabsf(inf.h - 30.f) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static SzView *opacity_green_box(int pct) {
+  return sz_view_sized(
+      40, 40,
+      sz_view_opacity(pct, sz_view_background(0xFF00AA00u, sz_view_sized(
+                                                               40, 40, sz_view_text("x")))));
+}
+
+static void test_opacity_paint_scales_alpha(void) {
+  SzView *root;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  uint8_t r50, g50, b50;
+
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+
+  root = opacity_green_box(100);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, 20, 20, 0x00, 0xAA, 0x00));
+  sz_view_free(root);
+
+  root = opacity_green_box(0);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px_rgb(px, 80, 20, 20, 0xF5, 0xF5, 0xF5));
+  sz_view_free(root);
+
+  root = opacity_green_box(50);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(!px_rgb(px, 80, 20, 20, 0x00, 0xAA, 0x00));
+  assert(!px_rgb(px, 80, 20, 20, 0xF5, 0xF5, 0xF5));
+  r50 = px[(20 * 80 + 20) * 4];
+  g50 = px[(20 * 80 + 20) * 4 + 1];
+  b50 = px[(20 * 80 + 20) * 4 + 2];
+  assert(g50 > 0xAA && g50 < 0xF5);
+  assert(r50 > 0x00 && r50 < 0xF5);
+  (void)b50;
+  sz_view_free(root);
+
+  root = sz_view_sized(
+      40, 40,
+      sz_view_opacity(50, sz_view_opacity(50, sz_view_background(
+                                                 0xFF00AA00u, sz_view_sized(40, 40, sz_view_text("x"))))));
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px[(20 * 80 + 20) * 4 + 1] > g50);
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
 static void test_background(void) {
   SzView *bg, *child;
   const SzTheme *theme = sz_theme_default();
@@ -2614,6 +2691,8 @@ int main(void) {
   test_max_size_inside_row();
   test_clip_sizes_to_child();
   test_clip_paint_contains_overflow();
+  test_opacity_sizes_to_child();
+  test_opacity_paint_scales_alpha();
   test_background();
   test_aspect_ratio();
   test_fraction();

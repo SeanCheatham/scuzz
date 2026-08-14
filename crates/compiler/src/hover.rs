@@ -299,6 +299,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("View.expanded", "View.expanded(child: View): View"),
     ("View.stretch", "View.stretch(child: View): View"),
     ("View.clip", "View.clip(child: View): View"),
+    ("View.opacity", "View.opacity(pct: Int, child: View): View"),
     ("View.center", "View.center(child: View): View"),
     (
         "View.minSize",
@@ -414,5 +415,15 @@ mod tests {
         let src = "@main def main: IO[Unit] =\n  Ui.run(_ => View.clip(View.text(\"x\")))\n";
         let h = hover_src(src, "clip");
         assert!(h.contains("View.clip(child: View): View"), "{h}");
+    }
+
+    #[test]
+    fn hovers_view_opacity() {
+        let src = "@main def main: IO[Unit] =\n  Ui.run(_ => View.opacity(50, View.text(\"x\")))\n";
+        let h = hover_src(src, "opacity");
+        assert!(
+            h.contains("View.opacity(pct: Int, child: View): View"),
+            "{h}"
+        );
     }
 }
