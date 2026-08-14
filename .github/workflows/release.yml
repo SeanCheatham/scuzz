@@ -48,11 +48,12 @@ jobs:
               ;;
           esac
 
-      - name: Install clang/make + Skia link deps
+      - name: Install clang/make + X11 + Skia link deps
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y clang make \
+          # libx11-dev: compiler-scuzz / [ui] apps compile embedder-desktop (x11_present.c).
+          sudo apt-get install -y clang make libx11-dev \
             zlib1g-dev libbz2-dev libbrotli-dev
 
       - name: Install Homebrew Skia link deps
