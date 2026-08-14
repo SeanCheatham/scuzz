@@ -41,6 +41,7 @@ int sz_string_eq(const SzString *a, const SzString *b);
 int64_t sz_string_char_at(const SzString *s, int64_t index); /* byte as i64; -1 OOB */
 SzString *sz_string_from_int(int64_t n);
 int64_t sz_string_index_of(const SzString *s, const SzString *needle);
+int64_t sz_string_starts_with(const SzString *s, const SzString *prefix);
 
 typedef struct SzList SzList;
 /* Split on `\n` / `\r\n`; skip empty lines. */
@@ -343,6 +344,7 @@ size_t sz_list_len(const SzList *xs);
 void *sz_list_at(const SzList *xs, size_t index);
 SzList *sz_list_reverse(SzList *xs);
 SzList *sz_list_append(SzList *xs, void *x);
+SzList *sz_list_set_at(SzList *xs, int64_t index, void *v);
 /* Keep heads for which `pred` is nonzero. New spine; does not own heads. */
 SzList *sz_list_filter(SzList *xs, SzListPred pred, void *env);
 /* New spine. `fn` must not free `head`. Does not own heads. */

@@ -277,6 +277,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Fiber.join", "Fiber.join(f: Fiber): IO[T]"),
     ("Fiber.interrupt", "Fiber.interrupt(f: Fiber): IO[Unit]"),
     ("Str.fromInt", "Str.fromInt(n: Int): String"),
+    (
+        "Str.startsWith",
+        "Str.startsWith(s: String, prefix: String): Int",
+    ),
     ("Signal.int", "Signal.int(n: Int): Signal"),
     ("Signal.get", "Signal.get(s: Signal): Int"),
     ("Signal.set", "Signal.set(s: Signal, n: Int): Unit"),
@@ -291,6 +295,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.filter(xs: List, pred: String => Bool): List",
     ),
     ("List.map", "List.map(xs: List, f: String => String): List"),
+    (
+        "List.setAt",
+        "List.setAt(xs: List, i: Int, v: String): List",
+    ),
     ("View.text", "View.text(s: String): View"),
     ("View.bindText", "View.bindText(s: Signal): View"),
     (
@@ -517,6 +525,30 @@ mod tests {
         let h = hover_src(src, "map");
         assert!(
             h.contains("List.map(xs: List, f: String => String): List"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_list_set_at() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.setAt(["a"], 0, "b"), ","))
+"#;
+        let h = hover_src(src, "setAt");
+        assert!(
+            h.contains("List.setAt(xs: List, i: Int, v: String): List"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_str_starts_with() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (Str.startsWith("ab", "a") == 1) "y" else "n")
+"#;
+        let h = hover_src(src, "startsWith");
+        assert!(
+            h.contains("Str.startsWith(s: String, prefix: String): Int"),
             "{h}"
         );
     }

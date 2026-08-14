@@ -62,6 +62,26 @@ SzList *sz_list_append(SzList *xs, void *x) {
   return sz_list_cons(xs->head, sz_list_append(xs->tail, x));
 }
 
+static SzList *sz_list_copy(SzList *xs) {
+  if (!xs)
+    return NULL;
+  return sz_list_cons(xs->head, sz_list_copy(xs->tail));
+}
+
+/* Replace the head at `index`. Copy the spine so `xs` stays. Out of range
+ * (empty, negative, or past the end) returns `xs`. */
+SzList *sz_list_set_at(SzList *xs, int64_t index, void *v) {
+  SzList *rest;
+  if (!xs || index < 0)
+    return xs;
+  if (index == 0)
+    return sz_list_cons(v, sz_list_copy(xs->tail));
+  rest = sz_list_set_at(xs->tail, index - 1, v);
+  if (rest == xs->tail)
+    return xs;
+  return sz_list_cons(xs->head, rest);
+}
+
 SzList *sz_list_filter(SzList *xs, SzListPred pred, void *env) {
   if (!pred)
     sz_panic("sz_list_filter(null pred)");

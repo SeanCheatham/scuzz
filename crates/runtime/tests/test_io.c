@@ -1372,6 +1372,10 @@ int main(void) {
     SzString *sl = sz_string_slice(c, 3, 6);
     assert(strcmp(sz_string_cstr(sl), "bar") == 0);
     assert(sz_string_index_of(c, b) == 3);
+    assert(sz_string_starts_with(c, a) == 1);
+    assert(sz_string_starts_with(c, b) == 0);
+    assert(sz_string_starts_with(c, sz_string_from_cstr("")) == 1);
+    assert(sz_string_starts_with(c, sz_string_from_cstr("foobarbaz")) == 0);
     assert(strcmp(sz_string_cstr(sz_string_from_int(42)), "42") == 0);
   }
 
@@ -2314,6 +2318,36 @@ int main(void) {
     sz_list_free(xs);
     sz_string_free(a);
     sz_string_free(b);
+  }
+
+  /* List.setAt: replace in bounds; past-end and negative keep the list. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzString *c = sz_string_from_cstr("c");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_nil()));
+    SzList *ys;
+    ys = sz_list_set_at(xs, 0, c);
+    assert(sz_list_len(ys) == 2);
+    assert(ys->head == c);
+    assert(ys->tail && ys->tail->head == b);
+    assert(xs->head == a);
+    sz_list_free(ys);
+    ys = sz_list_set_at(xs, 1, c);
+    assert(sz_list_len(ys) == 2);
+    assert(ys->head == a);
+    assert(ys->tail && ys->tail->head == c);
+    sz_list_free(ys);
+    ys = sz_list_set_at(xs, 2, c);
+    assert(ys == xs);
+    ys = sz_list_set_at(xs, -1, c);
+    assert(ys == xs);
+    ys = sz_list_set_at(NULL, 0, c);
+    assert(sz_list_is_empty(ys));
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
   }
 
   puts("runtime io tests ok");

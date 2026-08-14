@@ -305,6 +305,20 @@ mod tests {
     }
 
     #[test]
+    fn completes_list_set_at_after_dot() {
+        let src = "@main def main: IO[Unit] = List.se\n";
+        let labels = labels_at(src, "List.se");
+        assert!(labels.iter().any(|l| l == "List.setAt"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_starts_with_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.st\n";
+        let labels = labels_at(src, "Str.st");
+        assert!(labels.iter().any(|l| l == "Str.startsWith"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_kit_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.\n";
         let labels = labels_at(src, "View.");

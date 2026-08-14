@@ -1567,7 +1567,7 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::String)
         }
-        "Str.len" | "Str.charAt" | "Str.indexOf" => {
+        "Str.len" | "Str.charAt" | "Str.indexOf" | "Str.startsWith" => {
             if callee == "Str.len" {
                 expect_arity(callee, &arg_tys, 1)?;
                 expect_ty(&arg_tys[0], &Type::String)?;
@@ -1648,6 +1648,12 @@ fn infer_call(
         "List.append" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::List)?;
+            Ok(Type::List)
+        }
+        "List.setAt" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::List)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(Type::List)
         }
         "List.filter" => {
@@ -4770,6 +4776,27 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.map should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_set_at() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = List.setAt(["a", "b"], 0, "c")
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.setAt should typecheck");
+    }
+
+    #[test]
+    fn typechecks_str_starts_with() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (Str.startsWith("done:milk", "done:") == 1) "yes" else "no")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Str.startsWith should typecheck");
     }
 
     #[test]

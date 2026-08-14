@@ -44,6 +44,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare i64 @sz_string_char_at(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_string_from_int(i64)").unwrap();
     writeln!(out, "declare i64 @sz_string_index_of(ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_string_starts_with(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_lines(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_println(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_pure(ptr)").unwrap();
@@ -77,6 +78,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_reverse(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_join(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_append(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_set_at(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_filter(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_map(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
@@ -2548,6 +2550,15 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
+        "Str.startsWith" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_string_starts_with(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
         "Str.lines" => {
             writeln!(
                 code,
@@ -2667,6 +2678,26 @@ fn emit_call(
                 code,
                 "  %{prefix}_v = call ptr @sz_list_append(ptr {}, ptr {elem})",
                 emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "List.setAt" => {
+            let elem = if emitted_args[2].kind == Kind::Int {
+                writeln!(
+                    code,
+                    "  %{prefix}_el = call ptr @sz_box_i64(i64 {})",
+                    emitted_args[2].value
+                )
+                .unwrap();
+                format!("%{prefix}_el")
+            } else {
+                emitted_args[2].value.clone()
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_set_at(ptr {}, i64 {}, ptr {elem})",
+                emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
@@ -3747,6 +3778,31 @@ mod tests {
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_list_map"));
         assert!(ir.contains("sz_smap_"));
+    }
+
+    #[test]
+    fn emit_list_set_at_compile() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = List.setAt(["a", "b"], 0, "c")
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_set_at"));
+    }
+
+    #[test]
+    fn emit_str_starts_with_compile() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (Str.startsWith("ab", "a") == 1) "yes" else "no")
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_string_starts_with"));
     }
 
     #[test]

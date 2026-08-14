@@ -195,6 +195,10 @@ int64_t sz_string_index_of(const SzString *s, const SzString *needle) {
   return -1;
 }
 
+int64_t sz_string_starts_with(const SzString *s, const SzString *prefix) {
+  return sz_string_index_of(s, prefix) == 0 ? 1 : 0;
+}
+
 SzList *sz_string_lines(const SzString *s) {
   SzList *acc = NULL;
   size_t i = 0;
