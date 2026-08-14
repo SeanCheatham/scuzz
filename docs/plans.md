@@ -2,4 +2,4 @@
 
 ## Next
 
-**Match exhaustiveness in `check`** — `scuzz lsp` wraps disk `check` (didOpen/didSave/didChange; unsaved buffers wait for save; no hover/completion). Next: missing-case diagnostics in the same JSON schema so LSP shows them without a second typer.
+**Nested ADT patterns** — `check` rejects a non-exhaustive enum/record `match` unless `_` is present (`non-exhaustive match: missing Color.Blue` in the same JSON schema `scuzz lsp` already wraps). Next: nested payload patterns (`case Opt.Some(Color.Red)`) still bind names only.

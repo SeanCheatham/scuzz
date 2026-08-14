@@ -1,7 +1,7 @@
 use crate::ast::{BinOp, EnumDef, Expr, ExprKind, FunDef, ImplDef, Param, Program, TraitDef, Type};
 use crate::resolve::{enum_bare_name, enum_id, EnumIndex, FunIndex, ResolveError};
 use crate::span::Span;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -1351,7 +1351,9 @@ fn infer(
                         }
                     }
                 }
-                result.ok_or_else(|| TypeError::Msg("empty match".into()))
+                let ty = result.ok_or_else(|| TypeError::Msg("empty match".into()))?;
+                check_match_exhaustive(&st, arms, enums, current_module)?;
+                Ok(ty)
             }
             ExprKind::FlatMap { inner, param, body } => {
                 let it = infer(inner, enums, funs, methods, current_module, env)?;
@@ -2221,6 +2223,48 @@ fn unbind_pattern(bound: Vec<(String, Option<Type>)>, env: &mut HashMap<String, 
         } else {
             env.remove(&name);
         }
+    }
+}
+
+fn check_match_exhaustive(
+    scrut: &Type,
+    arms: &[crate::ast::MatchArm],
+    enums: &EnumIndex<'_>,
+    current_module: &str,
+) -> Result<(), TypeError> {
+    if arms
+        .iter()
+        .any(|a| matches!(a.pattern, crate::ast::Pattern::Wildcard))
+    {
+        return Ok(());
+    }
+    let enum_name = match scrut {
+        Type::Adt(n) | Type::App(n, _) => n.as_str(),
+        _ => return Ok(()),
+    };
+    let Ok((en, _)) = lookup_enum(enums, enum_name, current_module) else {
+        return Ok(());
+    };
+    let covered: HashSet<&str> = arms
+        .iter()
+        .filter_map(|a| match &a.pattern {
+            crate::ast::Pattern::Adt { case_name, .. } => Some(case_name.as_str()),
+            crate::ast::Pattern::Wildcard => None,
+        })
+        .collect();
+    let missing: Vec<String> = en
+        .cases
+        .iter()
+        .filter(|c| !covered.contains(c.name.as_str()))
+        .map(|c| format!("{}.{}", en.name, c.name))
+        .collect();
+    if missing.is_empty() {
+        Ok(())
+    } else {
+        Err(TypeError::Msg(format!(
+            "non-exhaustive match: missing {}",
+            missing.join(", ")
+        )))
     }
 }
 
@@ -4345,6 +4389,43 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("payload ADT should typecheck");
+    }
+
+    #[test]
+    fn rejects_nonexhaustive_match() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  Color.Red match {
+    case Color.Red => IO.println("r")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("non-exhaustive match: missing Color.Blue"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn typechecks_match_with_wildcard() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  Color.Red match {
+    case Color.Red => IO.println("r")
+    case _ => IO.println("other")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("wildcard should make match exhaustive");
     }
 
     #[test]

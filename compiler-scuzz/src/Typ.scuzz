@@ -609,7 +609,13 @@ def inferIoTimeout(ms: Expr, inner: Expr, enums: List, funs: List, env: List): T
 def inferMatch(scrut: Expr, arms: List, enums: List, funs: List, env: List): TyRes =
   for {
     sr = inferExpr(scrut, enums, funs, env)
-  } yield if (tyIsOk(sr) == 0) sr else inferMatchArms(tyVal(sr), arms, enums, funs, env, List.empty())
+  } yield if (tyIsOk(sr) == 0) sr else inferMatchThenExhaust(tyVal(sr), arms, enums, funs, env)
+
+def inferMatchThenExhaust(st: Type, arms: List, enums: List, funs: List, env: List): TyRes =
+  for {
+    ar = inferMatchArms(st, arms, enums, funs, env, List.empty())
+    ex = checkMatchExhaustive(st, arms, enums, funs)
+  } yield if (tyIsOk(ar) == 0) ar else if (tyIsOk(ex) == 0) ex else ar
 
 def inferMatchArms(st: Type, arms: List, enums: List, funs: List, env: List, acc: List): TyRes =
   if (List.isEmpty(arms) == 1) if (List.isEmpty(acc) == 1) tyErr("empty match") else tyOk(List.head(acc)) else inferMatchArm(st, List.head(arms), List.tail(arms), enums, funs, env, acc)
@@ -620,6 +626,53 @@ def inferMatchArm(st: Type, arm: MatchArm, rest: List, enums: List, funs: List, 
     env2 = patternExtendEnv(armPat(arm), st, enums, env)
     br = inferExpr(armBody(arm), enums, funs, env2)
   } yield if (tyIsOk(pr) == 0) pr else if (tyIsOk(br) == 0) br else if (List.isEmpty(acc) == 1) inferMatchArms(st, rest, enums, funs, env, List.cons(tyVal(br), List.empty())) else if (typesCompat(List.head(acc), tyVal(br)) == 0) tyErr(str4("match arms disagree: ", tyShow(List.head(acc)), " vs ", tyShow(tyVal(br)))) else inferMatchArms(st, rest, enums, funs, env, acc)
+
+def checkMatchExhaustive(st: Type, arms: List, enums: List, funs: List): TyRes =
+  if (armsHaveWild(arms) == 1) tyOk(Type.Unit) else checkMatchExhaustiveAdt(st, arms, enums, funs)
+
+def armsHaveWild(arms: List): Int =
+  if (List.isEmpty(arms) == 1) 0 else if (patIsWild(armPat(List.head(arms))) == 1) 1 else armsHaveWild(List.tail(arms))
+
+def patIsWild(pat: Pattern): Int =
+  pat match {
+    case Pattern.Wild => 1
+    case Pattern.Adt(enumName, caseName, binds, typeArgs) => 0
+  }
+
+def checkMatchExhaustiveAdt(st: Type, arms: List, enums: List, funs: List): TyRes =
+  for {
+    en = matchScrutEnumName(st)
+  } yield if (streq(en, "") == 1) tyOk(Type.Unit) else checkMatchExhaustiveEnum(en, arms, enums, funs)
+
+def matchScrutEnumName(st: Type): String =
+  if (tyIsAdt(st) == 1) tyAdtName(st) else if (tyIsApp(st) == 1) tyAppName(st) else ""
+
+def checkMatchExhaustiveEnum(en: String, arms: List, enums: List, funs: List): TyRes =
+  for {
+    e = lookupMatchEnum(enums, funs, en)
+  } yield if (List.isEmpty(e) == 1) tyOk(Type.Unit) else checkMatchMissing(List.head(e), coveredCaseNames(arms, List.empty()))
+
+def lookupMatchEnum(enums: List, funs: List, en: String): List =
+  for {
+    byId = findEnum(enums, en)
+  } yield if (List.isEmpty(byId) == 0) byId else resolveEnum(enums, funsImports(funs), en, funsMod(funs))
+
+def coveredCaseNames(arms: List, acc: List): List =
+  if (List.isEmpty(arms) == 1) acc else coveredCaseNames(List.tail(arms), coveredPatName(armPat(List.head(arms)), acc))
+
+def coveredPatName(pat: Pattern, acc: List): List =
+  pat match {
+    case Pattern.Wild => acc
+    case Pattern.Adt(enumName, caseName, binds, typeArgs) => List.cons(caseName, acc)
+  }
+
+def checkMatchMissing(e: EnumDef, covered: List): TyRes =
+  for {
+    missing = missingCases(enumCases(e), covered, enumName(e), List.empty())
+  } yield if (List.isEmpty(missing) == 1) tyOk(Type.Unit) else tyErr(str3("non-exhaustive match: missing ", join(missing, ", "), ""))
+
+def missingCases(cases: List, covered: List, en: String, acc: List): List =
+  if (List.isEmpty(cases) == 1) List.reverse(acc) else if (listContainsStr(covered, caseName(List.head(cases))) == 1) missingCases(List.tail(cases), covered, en, acc) else missingCases(List.tail(cases), covered, en, List.cons(str3(en, ".", caseName(List.head(cases))), acc))
 
 def checkPattern(pat: Pattern, scrut: Type, enums: List): TyRes =
   pat match {

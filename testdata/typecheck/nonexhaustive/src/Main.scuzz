@@ -1,0 +1,8 @@
+enum Color:
+  case Red
+  case Blue
+
+@main def main: IO[Unit] =
+  Color.Red match {
+    case Color.Red => IO.println("r")
+  }

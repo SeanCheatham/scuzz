@@ -162,6 +162,13 @@ if cargo run -p scuzz -- build testdata/typecheck/bad_main 2>/tmp/scuzz-bad0.err
 fi
 grep -q "arithmetic needs Int" /tmp/scuzz-bad0.err
 
+echo "==> Stage 0 rejects non-exhaustive match"
+if cargo run -p scuzz -- check testdata/typecheck/nonexhaustive > /tmp/scuzz-nex0.out 2>/tmp/scuzz-nex0.err; then
+  echo "expected non-exhaustive match from Stage 0" >&2
+  exit 1
+fi
+grep -q "non-exhaustive match" /tmp/scuzz-nex0.out /tmp/scuzz-nex0.err
+
 echo "==> Stage 0 rejects unknown scuzz.toml table"
 if cargo run -p scuzz -- build testdata/manifest/unknown_table 2>/tmp/scuzz-toml-table0.err; then
   echo "expected unknown table error from Stage 0" >&2
@@ -191,6 +198,13 @@ if "$STAGE1" build testdata/typecheck/bad_main 2>/tmp/scuzz-bad1.err; then
   exit 1
 fi
 grep -q "arithmetic needs Int" /tmp/scuzz-bad1.err
+
+echo "==> Stage 1 rejects non-exhaustive match"
+if "$STAGE1" check testdata/typecheck/nonexhaustive > /tmp/scuzz-nex1.out 2>/tmp/scuzz-nex1.err; then
+  echo "expected non-exhaustive match from Stage 1" >&2
+  exit 1
+fi
+grep -q "non-exhaustive match" /tmp/scuzz-nex1.out /tmp/scuzz-nex1.err
 
 echo "==> Stage 1 rejects unknown scuzz.toml table"
 if "$STAGE1" build testdata/manifest/unknown_table 2>/tmp/scuzz-toml-table1.err; then

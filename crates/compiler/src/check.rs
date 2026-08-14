@@ -374,4 +374,42 @@ version = "0.0.0"
         let diags = check_project(root).unwrap();
         assert!(diags.is_empty(), "{diags:?}");
     }
+
+    #[test]
+    fn check_project_json_includes_nonexhaustive() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            r#"[package]
+name = "nex_test"
+version = "0.0.0"
+"#,
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = crate::format::format_source(
+            "\
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  Color.Red match {
+    case Color.Red => IO.println(\"r\")
+  }
+",
+        )
+        .unwrap();
+        fs::write(root.join("src/Main.scuzz"), src).unwrap();
+        let diags = check_project(root).unwrap();
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(
+            diags[0].message.contains("non-exhaustive"),
+            "{}",
+            diags[0].message
+        );
+        let json = format_diagnostics(&diags, true);
+        assert!(json.contains("non-exhaustive"));
+        assert!(json.contains("\"line\":"));
+    }
 }
