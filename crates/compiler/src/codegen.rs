@@ -159,6 +159,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_clip(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_opacity(i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_max_lines(i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_ellipsis(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_ignore_pointer(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_absorb_pointer(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_exclude_semantics(ptr)").unwrap();
@@ -3260,6 +3261,15 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "View.ellipsis" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_view_ellipsis(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "View.ignorePointer" => {
             writeln!(
                 code,
@@ -3735,6 +3745,20 @@ law always: Bool = 1 == 1
         assert!(
             ir.contains("sz_lang_view_max_lines"),
             "expected View.maxLines in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_ellipsis() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.ellipsis(View.text("x")))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_ellipsis"),
+            "expected View.ellipsis in IR:\n{ir}"
         );
     }
 

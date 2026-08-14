@@ -310,6 +310,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.maxSize(w: Int, h: Int, child: View): View",
     ),
     ("View.maxLines", "View.maxLines(n: Int, child: View): View"),
+    ("View.ellipsis", "View.ellipsis(child: View): View"),
     (
         "View.ignorePointer",
         "View.ignorePointer(child: View): View",
@@ -448,6 +449,13 @@ mod tests {
             h.contains("View.maxLines(n: Int, child: View): View"),
             "{h}"
         );
+    }
+
+    #[test]
+    fn hovers_view_ellipsis() {
+        let src = "@main def main: IO[Unit] =\n  Ui.run(_ => View.ellipsis(View.text(\"x\")))\n";
+        let h = hover_src(src, "ellipsis");
+        assert!(h.contains("View.ellipsis(child: View): View"), "{h}");
     }
 
     #[test]

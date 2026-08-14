@@ -108,7 +108,7 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_MAX_SIZE || kind == SZ_VIEW_CLIP ||
          kind == SZ_VIEW_OPACITY || kind == SZ_VIEW_MAX_LINES ||
          kind == SZ_VIEW_IGNORE_POINTER || kind == SZ_VIEW_ABSORB_POINTER ||
-         kind == SZ_VIEW_EXCLUDE_SEMANTICS;
+         kind == SZ_VIEW_EXCLUDE_SEMANTICS || kind == SZ_VIEW_ELLIPSIS;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -459,6 +459,13 @@ SzView *sz_view_exclude_semantics(SzView *child) {
   return v;
 }
 
+SzView *sz_view_ellipsis(SzView *child) {
+  SzView *v = view_new(SZ_VIEW_ELLIPSIS);
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
 SzView *sz_view_background(uint32_t argb, SzView *child) {
   SzView *v = view_new(SZ_VIEW_BACKGROUND);
   v->bg_argb = argb;
@@ -573,6 +580,46 @@ static int utf8_clen(const char *s, int i) {
   return 1;
 }
 
+static int utf8_prev(const char *s, int n) {
+  if (!s || n <= 0)
+    return 0;
+  n--;
+  while (n > 0 && ((unsigned char)s[n] & 0xc0) == 0x80)
+    n--;
+  return n;
+}
+
+static void ellipsize_to_width(char *line, size_t cap, float max_w, float font_px) {
+  char out[256];
+  int n;
+  if (!line || cap < 4) {
+    if (line)
+      line[0] = '\0';
+    return;
+  }
+  n = (int)strlen(line);
+  while (n >= 0) {
+    int keep = n;
+    if (keep > (int)cap - 4)
+      keep = (int)cap - 4;
+    if (keep < 0)
+      keep = 0;
+    memcpy(out, line, (size_t)keep);
+    memcpy(out + keep, "...", 4);
+    if (text_width(out, font_px) <= max_w) {
+      memcpy(line, out, (size_t)keep + 4);
+      return;
+    }
+    if (keep == 0)
+      break;
+    n = utf8_prev(line, keep);
+  }
+  if (text_width("...", font_px) <= max_w)
+    memcpy(line, "...", 4);
+  else
+    line[0] = '\0';
+}
+
 static float span_width(const char *s, int start, int end, float font_px) {
   char tmp[256];
   int n;
@@ -670,6 +717,7 @@ typedef struct SzWrapMetrics {
   float max_line_w;
   int n;
   int cap; /* 0 = unlimited */
+  int truncated;
 } SzWrapMetrics;
 
 static void accum_wrap_line(const char *s, int start, int end, float width,
@@ -678,8 +726,10 @@ static void accum_wrap_line(const char *s, int start, int end, float width,
   (void)s;
   (void)start;
   (void)end;
-  if (m->cap > 0 && m->n >= m->cap)
+  if (m->cap > 0 && m->n >= m->cap) {
+    m->truncated = 1;
     return;
+  }
   if (width > m->max_line_w)
     m->max_line_w = width;
   m->n++;
@@ -778,6 +828,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
                            float max_w, float max_h, const SzTheme *theme);
 
 static int g_max_lines;
+static int g_ellipsis;
 
 static int tighten_max_lines(int n) {
   if (n <= 0)
@@ -785,6 +836,15 @@ static int tighten_max_lines(int n) {
   if (g_max_lines <= 0 || n < g_max_lines)
     return n;
   return g_max_lines;
+}
+
+/* Positive maxLines wins. Ellipsis without a cap keeps one line. */
+static int text_line_cap(void) {
+  if (g_max_lines > 0)
+    return g_max_lines;
+  if (g_ellipsis)
+    return 1;
+  return 0;
 }
 
 static void layout_constrained(SzView *v, float x, float y, SzBoxConstraints c,
@@ -823,11 +883,17 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       inner = max_w - 4.f;
     m.max_line_w = 0.f;
     m.n = 0;
-    m.cap = g_max_lines;
+    m.cap = text_line_cap();
+    m.truncated = 0;
     each_text_line(buf, font, inner, accum_wrap_line, &m);
     if (m.n < 1)
       m.n = 1;
     v->frame.w = m.max_line_w + 4.f;
+    if (g_ellipsis && m.truncated) {
+      float need = m.max_line_w + text_width("...", font) + 4.f;
+      if (v->frame.w < need)
+        v->frame.w = need;
+    }
     v->frame.h = (float)m.n * line_h;
     if (max_w > 0.f && v->frame.w > max_w)
       v->frame.w = max_w;
@@ -1298,6 +1364,23 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.h = ch ? ch->frame.h : 0.f;
     break;
   }
+  case SZ_VIEW_ELLIPSIS: {
+    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
+    int prev = g_ellipsis;
+    g_ellipsis = 1;
+    if (ch) {
+      SzBoxConstraints cc;
+      cc.min_w = min_w;
+      cc.min_h = min_h;
+      cc.max_w = max_w;
+      cc.max_h = max_h;
+      layout_constrained(ch, x, y, cc, theme);
+    }
+    g_ellipsis = prev;
+    v->frame.w = ch ? ch->frame.w : 0.f;
+    v->frame.h = ch ? ch->frame.h : 0.f;
+    break;
+  }
   case SZ_VIEW_IGNORE_POINTER:
   case SZ_VIEW_ABSORB_POINTER:
   case SZ_VIEW_EXCLUDE_SEMANTICS: {
@@ -1523,9 +1606,11 @@ typedef struct SzWrapPaint {
   float y;
   float font_px;
   float line_h;
+  float inner;
   uint32_t argb;
   int cap;
   int drawn;
+  int ellipsis;
 } SzWrapPaint;
 
 static void paint_wrap_line(const char *s, int start, int end, float width,
@@ -1544,6 +1629,8 @@ static void paint_wrap_line(const char *s, int start, int end, float width,
   if (n > 0)
     memcpy(tmp, s + start, (size_t)n);
   tmp[n] = '\0';
+  if (wp->ellipsis && wp->cap > 0 && wp->drawn == wp->cap - 1)
+    ellipsize_to_width(tmp, sizeof tmp, wp->inner, wp->font_px);
   paint_string(wp->c, tmp, wp->x, wp->y, wp->argb, wp->font_px);
   wp->y += wp->line_h;
   wp->drawn++;
@@ -1594,9 +1681,20 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     wp.y = v->frame.y + theme->font_px + 2.f;
     wp.font_px = theme->font_px;
     wp.line_h = text_line_h(theme);
+    wp.inner = inner;
     wp.argb = theme->foreground;
-    wp.cap = g_max_lines;
+    wp.cap = text_line_cap();
     wp.drawn = 0;
+    wp.ellipsis = 0;
+    if (g_ellipsis && wp.cap > 0) {
+      SzWrapMetrics m;
+      m.max_line_w = 0.f;
+      m.n = 0;
+      m.cap = wp.cap;
+      m.truncated = 0;
+      each_text_line(buf, theme->font_px, inner, accum_wrap_line, &m);
+      wp.ellipsis = m.truncated;
+    }
     each_text_line(buf, theme->font_px, inner, paint_wrap_line, &wp);
     break;
   }
@@ -1679,6 +1777,14 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     g_max_lines = prev;
     break;
   }
+  case SZ_VIEW_ELLIPSIS: {
+    int prev = g_ellipsis;
+    g_ellipsis = 1;
+    for (i = 0; i < v->child_count; i++)
+      paint_node(v->children[i], c, theme);
+    g_ellipsis = prev;
+    break;
+  }
   case SZ_VIEW_SCROLL:
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     paint_children_clipped(v, c, theme);
@@ -1719,6 +1825,7 @@ int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
   g_clip_on = 0;
   g_opacity = 100;
   g_max_lines = 0;
+  g_ellipsis = 0;
   sk_canvas_clear(canvas, sk_color_argb(theme->background));
   sz_view_layout(root, (float)width, (float)height, theme);
   paint_node(root, canvas, theme);

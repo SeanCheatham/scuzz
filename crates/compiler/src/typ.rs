@@ -1996,6 +1996,10 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::Int)?;
             Ok(Type::Opaque("View".into()))
         }
+        "View.ellipsis" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            Ok(Type::Opaque("View".into()))
+        }
         "View.ignorePointer" => {
             expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Opaque("View".into()))
@@ -4898,6 +4902,15 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.maxLines should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_ellipsis() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.ellipsis(View.text("x")))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.ellipsis should typecheck");
     }
 
     #[test]

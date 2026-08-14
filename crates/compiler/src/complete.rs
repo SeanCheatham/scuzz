@@ -277,6 +277,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_ellipsis_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.el\n";
+        let labels = labels_at(src, "View.el");
+        assert!(labels.iter().any(|l| l == "View.ellipsis"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_ignore_pointer_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.ig\n";
         let labels = labels_at(src, "View.ig");

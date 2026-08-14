@@ -2168,6 +2168,174 @@ static void test_max_lines_does_not_wrap_button(void) {
   sz_view_free(wrap);
 }
 
+static void test_ellipsis_sizes_to_child(void) {
+  SzView *wrap, *child;
+  const SzTheme *theme = sz_theme_default();
+  SzRect wf, chf;
+
+  child = sz_view_sized(40, 30, sz_view_text("Hi"));
+  wrap = sz_view_ellipsis(child);
+  sz_view_layout(wrap, 200.f, 200.f, theme);
+  assert(sz_view_kind(wrap) == SZ_VIEW_ELLIPSIS);
+  wf = sz_view_frame(wrap);
+  chf = sz_view_frame(child);
+  assert(fabsf(wf.w - 40.f) < 0.5f);
+  assert(fabsf(wf.h - 30.f) < 0.5f);
+  assert(fabsf(chf.w - 40.f) < 0.5f);
+  assert(fabsf(chf.h - 30.f) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_ellipsis_keeps_one_line(void) {
+  SzView *wrap, *t;
+  const SzTheme *theme = sz_theme_default();
+  float line_h = theme->font_px + 6.f;
+  SzString *dump;
+
+  t = sz_view_text("one\ntwo\nthree");
+  wrap = sz_view_ellipsis(t);
+  sz_view_layout(wrap, 1000.f, 200.f, theme);
+  assert(fabsf(sz_view_frame(wrap).h - line_h) < 0.5f);
+  assert(fabsf(sz_view_frame(t).h - line_h) < 0.5f);
+  dump = sz_view_a11y_dump(t);
+  assert(strstr(sz_string_cstr(dump), "three") != NULL);
+  sz_string_free(dump);
+  sz_view_free(wrap);
+}
+
+static void test_ellipsis_short_text_stays_one_line(void) {
+  SzView *wrap, *t;
+  const SzTheme *theme = sz_theme_default();
+  float line_h = theme->font_px + 6.f;
+
+  t = sz_view_text("Hi");
+  wrap = sz_view_ellipsis(t);
+  sz_view_layout(wrap, 1000.f, 200.f, theme);
+  assert(fabsf(sz_view_frame(wrap).h - line_h) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_ellipsis_with_max_lines_keeps_cap(void) {
+  SzView *wrap, *t;
+  const SzTheme *theme = sz_theme_default();
+  float line_h = theme->font_px + 6.f;
+  SzString *dump;
+
+  t = sz_view_text("one\ntwo\nthree\nfour");
+  wrap = sz_view_ellipsis(sz_view_max_lines(2, t));
+  sz_view_layout(wrap, 1000.f, 200.f, theme);
+  assert(fabsf(sz_view_frame(wrap).h - 2.f * line_h) < 0.5f);
+  dump = sz_view_a11y_dump(t);
+  assert(strstr(sz_string_cstr(dump), "four") != NULL);
+  sz_string_free(dump);
+  sz_view_free(wrap);
+}
+
+static void test_ellipsis_caps_soft_wrap(void) {
+  SzView *one, *wrap, *t;
+  const SzTheme *theme = sz_theme_default();
+  float line_h = theme->font_px + 6.f;
+  float one_w;
+
+  one = sz_view_text("one");
+  sz_view_layout(one, 1000.f, 100.f, theme);
+  one_w = sz_view_frame(one).w;
+  sz_view_free(one);
+
+  t = sz_view_text("one two");
+  wrap = sz_view_ellipsis(t);
+  sz_view_layout(wrap, one_w, 200.f, theme);
+  assert(fabsf(sz_view_frame(wrap).h - line_h) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_bind_text_respects_ellipsis(void) {
+  SzSignalStr *s;
+  SzView *t, *wrap;
+  const SzTheme *theme = sz_theme_default();
+  float line_h = theme->font_px + 6.f;
+
+  s = sz_signal_str("one\ntwo\nthree");
+  t = sz_view_text_signal_str(s);
+  wrap = sz_view_ellipsis(t);
+  sz_view_layout(wrap, 1000.f, 200.f, theme);
+  assert(fabsf(sz_view_frame(wrap).h - line_h) < 0.5f);
+  sz_view_free(wrap);
+  sz_signal_str_free(s);
+}
+
+static void test_ellipsis_does_not_wrap_button(void) {
+  SzView *wrap, *b;
+  const SzTheme *theme = sz_theme_default();
+  float btn_h;
+
+  b = sz_view_button("one\ntwo\nthree", NULL, NULL);
+  sz_view_layout(b, 1000.f, 100.f, theme);
+  btn_h = sz_view_frame(b).h;
+  sz_view_free(b);
+
+  b = sz_view_button("one\ntwo\nthree", NULL, NULL);
+  wrap = sz_view_ellipsis(b);
+  sz_view_layout(wrap, 1000.f, 100.f, theme);
+  assert(fabsf(sz_view_frame(wrap).h - btn_h) < 0.5f);
+  assert(fabsf(btn_h - theme->control_h) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static int row_has_dark(const uint8_t *px, int w, int y, int x0, int x1) {
+  int x;
+  for (x = x0; x < x1; x++) {
+    const uint8_t *p = px + ((size_t)y * (size_t)w + (size_t)x) * 4;
+    if (p[0] < 80 && p[1] < 80 && p[2] < 80)
+      return 1;
+  }
+  return 0;
+}
+
+static void test_ellipsis_paint_hides_extra_lines(void) {
+  SzView *root;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  float line_h = theme->font_px + 6.f;
+  int y2;
+
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+
+  root = sz_view_text("one\ntwo\nthree");
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  y2 = (int)line_h + 2;
+  {
+    int y;
+    int saw = 0;
+    for (y = y2; y < y2 + (int)line_h && y < 80; y++) {
+      if (row_has_dark(px, 80, y, 0, 40))
+        saw = 1;
+    }
+    assert(saw);
+  }
+  sz_view_free(root);
+
+  root = sz_view_ellipsis(sz_view_text("one\ntwo\nthree"));
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  {
+    int y;
+    for (y = y2; y < y2 + (int)line_h && y < 80; y++)
+      assert(!row_has_dark(px, 80, y, 0, 40));
+  }
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
 static void test_ignore_pointer_sizes_to_child(void) {
   SzView *wrap, *child;
   const SzTheme *theme = sz_theme_default();
@@ -3089,6 +3257,14 @@ int main(void) {
   test_nested_max_lines_uses_tighter_cap();
   test_bind_text_respects_max_lines();
   test_max_lines_does_not_wrap_button();
+  test_ellipsis_sizes_to_child();
+  test_ellipsis_keeps_one_line();
+  test_ellipsis_short_text_stays_one_line();
+  test_ellipsis_with_max_lines_keeps_cap();
+  test_ellipsis_caps_soft_wrap();
+  test_bind_text_respects_ellipsis();
+  test_ellipsis_does_not_wrap_button();
+  test_ellipsis_paint_hides_extra_lines();
   test_ignore_pointer_sizes_to_child();
   test_ignore_pointer_passes_tap_through();
   test_absorb_pointer_blocks_tap();
