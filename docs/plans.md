@@ -2,4 +2,4 @@
 
 ## Next
 
-**IO-only fuzz corpus** — `[ui]` seeded `--iters` keeps prefixes that hit new `Law.sometimes` names or a new Headless dump. IO-only fuzz still does not keep interesting schedule seeds for later `--iters`.
+**Mutate arithmetic / drop-conjunct** — `scuzz mutate` already negates residual oracles, flips comparisons, and swaps `0`↔`1`. Next: replace `+`/`-` and drop `&&` conjuncts inside those predicates.

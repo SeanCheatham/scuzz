@@ -29,9 +29,7 @@ When a gap closes or its assessment changes, update this file and (if direction 
 
 ### Near-term (in-source oracles + drivers)
 
-Vision locks **oracles in source, drivers as the test surface** ([`vision.md`](vision.md#laws-simulation-mutation-and-verification)). Stage 0 and `compiler-scuzz/` parse top-level `law name: Bool = …`, provide `.require` (type-preserving application; residual `Law.check` / sequenced `Law.assert`), `Law.check` / `Law.sometimes`, load stem-paired `*.scuzz_drivers`, and attach `where` refinements on `def` params and `record` fields. Unused laws fail `check`.
-
-Open questions parked here: IO-only fuzz has no corpus (today only `[ui]` prefixes).
+Vision locks **oracles in source, drivers as the test surface** ([`vision.md`](vision.md#laws-simulation-mutation-and-verification)). Stage 0 and `compiler-scuzz/` parse top-level `law name: Bool = …`, provide `.require` (type-preserving application; residual `Law.check` / sequenced `Law.assert`), `Law.check` / `Law.sometimes`, load stem-paired `*.scuzz_drivers`, and attach `where` refinements on `def` params and `record` fields. Unused laws fail `check`. `[ui]` fuzz keeps prefixes that hit new `Law.sometimes` names or a new Headless dump; IO-only keeps schedule seeds that hit new sometimes names.
 
 ### Near-term (AI-friendly tooling)
 

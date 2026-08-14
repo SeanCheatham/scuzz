@@ -108,6 +108,24 @@ def pairLL(a: List, b: List): List =
 def corpusPushIf(corpus: List, events: List, reached: List, oldCamp: List, dump: String, seen: List): List =
   if (corpusKeep(reached, oldCamp, dump, seen) == 0) pairLL(corpus, seen) else pairLL(corpusPush(corpus, events), dumpPush(seen, dump))
 
+def schedPush(corpus: List, sched: String): List =
+  if (listContainsStr(corpus, sched) == 1) corpus else List.cons(sched, listTake(corpus, 31, List.empty()))
+
+def schedPushIf(corpus: List, sched: String, reached: List, oldCamp: List): List =
+  if (List.isEmpty(missingSometimes(reached, oldCamp, List.empty())) == 1) corpus else schedPush(corpus, sched)
+
+def fuzzPickSched(seed: Int, iter: Int, corpus: List): String =
+  if (List.isEmpty(corpus) == 1) Str.fromInt(seed + iter) else fuzzPickSchedCoin(lcgNext(lcgSeed(seed + iter)), seed, iter, corpus)
+
+def fuzzPickSchedCoin(s: Int, seed: Int, iter: Int, corpus: List): String =
+  if (lcgBelow(s, 2) == 0) Str.fromInt(seed + iter) else fuzzPickSchedExtend(lcgNext(s), corpus)
+
+def fuzzPickSchedExtend(s: Int, corpus: List): String =
+  fuzzPerturbSched(List.at(corpus, lcgBelow(s, List.len(corpus))), lcgNext(s))
+
+def fuzzPerturbSched(base: String, s: Int): String =
+  Str.fromInt(parseInt(base) + 1 + lcgBelow(s, 16))
+
 def fuzzExtendPrefix(prefix: List, s: Int, nButtons: Int, hasText: Int, hasScroll: Int, drivers: List): List =
   fuzzScriptAcc(s, 1 + lcgBelow(s, 4), nButtons, hasText, hasScroll, drivers, List.reverse(prefix))
 
@@ -228,13 +246,19 @@ def fuzzIterOk(exe: String, fuzzDir: String, w: String, h: String, projectDir: S
 def fuzzIterOkPacked(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, nButtons: Int, hasText: Int, hasScroll: Int, drivers: List, seed: Int, iter: Int, iters: Int, packed: List): IO[Unit] =
   fuzzLoop(exe, fuzzDir, w, h, projectDir, nButtons, hasText, hasScroll, drivers, seed, iter + 1, iters, fstL(packed), sndL(packed))
 
-def fuzzIoLoop(exe: String, fuzzDir: String, projectDir: String, seed: Int, iter: Int, iters: Int): IO[Unit] =
-  if (iter >= iters) checkSometimesCampaign(projectDir, fuzzDir).flatMap(_ => IO.println(str5("scuzz fuzz ok (", Str.fromInt(iters), " schedules, seed ", Str.fromInt(seed), ")"))) else fuzzIoIter(exe, fuzzDir, projectDir, seed, iter, iters)
+def fuzzIoLoop(exe: String, fuzzDir: String, projectDir: String, seed: Int, iter: Int, iters: Int, corpus: List): IO[Unit] =
+  if (iter >= iters) checkSometimesCampaign(projectDir, fuzzDir).flatMap(_ => IO.println(str6("scuzz fuzz ok (", Str.fromInt(iters), " schedules, seed ", Str.fromInt(seed), ", ", str3(Str.fromInt(List.len(corpus)), " corpus seeds)", "")))) else fuzzIoIter(exe, fuzzDir, projectDir, seed, iter, iters, corpus)
 
-def fuzzIoIter(exe: String, fuzzDir: String, projectDir: String, seed: Int, iter: Int, iters: Int): IO[Unit] =
+def fuzzIoIter(exe: String, fuzzDir: String, projectDir: String, seed: Int, iter: Int, iters: Int, corpus: List): IO[Unit] =
   for {
-    sched = seed + iter
-  } yield fuzzExecIo(exe, fuzzDir, Str.fromInt(sched)).flatMap(code => if (code == 0) fuzzIoLoop(exe, fuzzDir, projectDir, seed, iter + 1, iters) else fuzzFail(projectDir, fuzzDir, seed + iter, sched, iter, List.empty()))
+    sched = fuzzPickSched(seed, iter, corpus)
+    campPath = pathJoin(fuzzDir, "sometimes.campaign")
+  } yield Fs.read(campPath).flatMap(oldCamp =>
+  fuzzExecIo(exe, fuzzDir, sched).flatMap(code => if (code == 0) fuzzIoIterOk(exe, fuzzDir, projectDir, seed, iter, iters, corpus, sched, oldCamp) else fuzzFail(projectDir, fuzzDir, seed + iter, parseInt(sched), iter, List.empty()))
+)
+
+def fuzzIoIterOk(exe: String, fuzzDir: String, projectDir: String, seed: Int, iter: Int, iters: Int, corpus: List, sched: String, oldCamp: String): IO[Unit] =
+  Fs.read(pathJoin(fuzzDir, "sometimes.reached")).flatMap(reached => fuzzIoLoop(exe, fuzzDir, projectDir, seed, iter + 1, iters, schedPushIf(corpus, sched, fuzzLinesAcc(reached, 0, List.empty()), fuzzLinesAcc(oldCamp, 0, List.empty()))))
 
 def exhaustTapAcc(i: Int, nButtons: Int, acc: List): List =
   if (i >= nButtons) List.reverse(acc) else exhaustTapAcc(i + 1, nButtons, List.cons(strcat("tap ", Str.fromInt(i)), acc))
@@ -348,5 +372,5 @@ def fuzzBuilt(projectDir: String, replay: String, iters: Int, seed: Int, exhaust
 )
 
 def fuzzDispatch(exe: String, fuzzDir: String, w: String, h: String, projectDir: String, replay: String, iters: Int, seed: Int, exhaust: Int, depth: Int, isUi: Int): IO[Unit] =
-  if (Str.len(replay) > 0) fuzzReplay(exe, fuzzDir, w, h, replay, isUi) else if (isUi == 1) fuzzProbe(exe, fuzzDir, w, h, projectDir, seed, iters, exhaust, depth) else fuzzIoLoop(exe, fuzzDir, projectDir, seed, 0, iters)
+  if (Str.len(replay) > 0) fuzzReplay(exe, fuzzDir, w, h, replay, isUi) else if (isUi == 1) fuzzProbe(exe, fuzzDir, w, h, projectDir, seed, iters, exhaust, depth) else fuzzIoLoop(exe, fuzzDir, projectDir, seed, 0, iters, List.empty())
 
