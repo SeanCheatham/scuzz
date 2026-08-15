@@ -875,6 +875,18 @@ static SzBoxConstraints box_tight_height(float max_w, float h) {
   return c;
 }
 
+/* Row cross size. max_h 0 is unbounded (Scroll content) and stays intrinsic.
+ * A positive max, even loose, is the cross slot for stretch / expanded. */
+static float row_cross_inner(float min_h, float max_h, const SzTheme *theme) {
+  float cap;
+  (void)min_h;
+  if (max_h > 0.f) {
+    cap = max_h - theme->pad * 2.f;
+    return cap > 0.f ? cap : 0.f;
+  }
+  return theme->control_h;
+}
+
 static SzBoxConstraints column_child_box(SzView *ch, float inner_w, float max_h,
                                          float flex_h, int flexing) {
   if (flexing && view_is_flex(ch))
@@ -1222,9 +1234,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     float flex_w = 0.f;
     float gaps = 0.f;
     float child_max;
-    float row_inner_h = max_h > 0 ? max_h - theme->pad * 2.f : 0.f;
-    if (row_inner_h < 0.f)
-      row_inner_h = 0.f;
+    float row_inner_h = row_cross_inner(min_h, max_h, theme);
     float w_budget = max_w > 0.f ? max_w : min_w;
     for (i = 0; i < v->child_count; i++) {
       if (view_is_shown(v->children[i]) && view_is_flex(v->children[i]))
@@ -1239,6 +1249,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
         layout_constrained(ch, x + theme->pad, y + theme->pad,
                            row_child_box(ch, max_w, row_inner_h, 0.f, 0), theme);
         fixed_w += ch->frame.w;
+        if (max_h <= 0.f && ch->frame.h > row_inner_h)
+          row_inner_h = ch->frame.h;
       }
       if (shown > 1)
         gaps = layout_gap(theme) * (float)(shown - 1);
@@ -1553,9 +1565,10 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.w = max_w;
     v->frame.h = vh;
     if (v->scroll_child) {
+      /* Height 0 = unbounded. A fake large max makes Expanded rows fill it. */
       layout_constrained(v->scroll_child, x + theme->pad,
                          y + theme->pad - v->scroll_y,
-                         box_loose(inner_w > 0 ? inner_w : max_w, 10000.f),
+                         box_loose(inner_w > 0 ? inner_w : max_w, 0.f),
                          theme);
     }
     break;

@@ -4030,6 +4030,74 @@ static void test_view_each_map_button(void) {
   remove(path);
 }
 
+static SzView *each_map_studio_row(SzString *item, void *env) {
+  SzView *row = sz_view_row();
+  const char *s = item ? sz_string_cstr(item) : "";
+  (void)env;
+  sz_view_add_child(row, sz_view_expanded(sz_view_text(s)));
+  sz_view_add_child(row, sz_view_button("Del", NULL, NULL));
+  return row;
+}
+
+static void test_each_expanded_row_in_scroll(void) {
+  SzSignalList *items;
+  SzView *col, *list, *scroll, *exp;
+  SzList *xs;
+  SzUiConfig cfg;
+  SzUiSession *session;
+  const char *path = "/tmp/scuzz_ui_each_scroll.dump";
+  char *dump;
+  const char *taps;
+  const char *p0;
+  const char *p1;
+  const char *c0;
+  const char *c1;
+  int y0;
+  int y1;
+
+  xs = sz_list_cons(sz_string_from_cstr("eggs"),
+                    sz_list_cons(sz_string_from_cstr("milk"), sz_list_nil()));
+  items = sz_signal_list(xs);
+  col = sz_view_column();
+  list = sz_view_each_map(items, each_map_studio_row, NULL);
+  scroll = sz_view_scroll(list);
+  exp = sz_view_expanded(scroll);
+  sz_view_add_child(col, sz_view_text("title"));
+  sz_view_add_child(col, exp);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 400;
+  cfg.height = 280;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, col);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "text:milk") != NULL);
+  assert(strstr(dump, "text:eggs") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  p0 = strstr(taps, "Del ");
+  assert(p0 != NULL);
+  p1 = strstr(p0 + 4, "Del ");
+  assert(p1 != NULL);
+  c0 = strchr(p0, ',');
+  c1 = strchr(p1, ',');
+  assert(c0 && c1);
+  y0 = atoi(c0 + 1);
+  y1 = atoi(c1 + 1);
+  /* Unbounded scroll height must not stretch each Expanded row. */
+  assert(y1 > y0);
+  assert(y1 - y0 < 80);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_list_free(items);
+  remove(path);
+}
+
 static void test_law_signal_list_len(void) {
   SzSignalList *items;
   SzList *xs;
@@ -4659,6 +4727,7 @@ int main(void) {
   test_view_each();
   test_view_each_map_text();
   test_view_each_map_button();
+  test_each_expanded_row_in_scroll();
   test_signal_list_spine_collect();
   test_law_signal_list_len();
   test_law_signal_list_at();
