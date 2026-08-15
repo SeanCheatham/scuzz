@@ -48,6 +48,7 @@ list:list
 listtile:milk
 iconbutton:i
 outlined:Edit
+textbutton:Open
 button:Done
 button:Del
 button:Save

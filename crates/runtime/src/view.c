@@ -164,6 +164,7 @@ int sz_view_is_tap_target(const SzView *view) {
           view->kind == SZ_VIEW_ICON_BUTTON ||
           view->kind == SZ_VIEW_FAB ||
           view->kind == SZ_VIEW_OUTLINED_BUTTON ||
+          view->kind == SZ_VIEW_TEXT_BUTTON ||
           view->kind == SZ_VIEW_CHECKBOX_LIST_TILE ||
           view->kind == SZ_VIEW_SWITCH_LIST_TILE ||
           view->kind == SZ_VIEW_RADIO_LIST_TILE ||
@@ -262,6 +263,17 @@ SzView *sz_view_outlined_button(const char *label, SzViewTapFn on_tap,
   v->tap_env = env;
   v->interactive = 1;
   v->a11y_role = SZ_A11Y_OUTLINED;
+  v->a11y_label = sz_strdup(label ? label : "");
+  return v;
+}
+
+SzView *sz_view_text_button(const char *label, SzViewTapFn on_tap, void *env) {
+  SzView *v = view_new(SZ_VIEW_TEXT_BUTTON);
+  v->text = sz_strdup(label ? label : "");
+  v->on_tap = on_tap;
+  v->tap_env = env;
+  v->interactive = 1;
+  v->a11y_role = SZ_A11Y_TEXT_BUTTON;
   v->a11y_label = sz_strdup(label ? label : "");
   return v;
 }
@@ -560,6 +572,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "tooltip";
   case SZ_A11Y_OUTLINED:
     return "outlined";
+  case SZ_A11Y_TEXT_BUTTON:
+    return "textbutton";
   default:
     return "none";
   }
@@ -1371,6 +1385,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   }
   case SZ_VIEW_BUTTON:
   case SZ_VIEW_OUTLINED_BUTTON:
+  case SZ_VIEW_TEXT_BUTTON:
     resolve_text(v, buf, sizeof buf);
     v->frame.w = text_width(buf, font) + theme->pad * 2.f;
     v->frame.h = theme->control_h;
@@ -2545,6 +2560,12 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     paint_string(c, buf, tx, ty, theme->foreground, theme->font_px);
     break;
   }
+  case SZ_VIEW_TEXT_BUTTON:
+    resolve_text(v, buf, sizeof buf);
+    tx = v->frame.x + theme->pad;
+    ty = v->frame.y + (v->frame.h + theme->font_px) * 0.5f;
+    paint_string(c, buf, tx, ty, theme->foreground, theme->font_px);
+    break;
   case SZ_VIEW_ICON_BUTTON: {
     SzRect br = v->frame;
     resolve_text(v, buf, sizeof buf);
@@ -3229,7 +3250,8 @@ int sz_view_handle_tap(SzView *root, float x, float y) {
   if (!hit)
     return 0;
   if ((hit->kind == SZ_VIEW_BUTTON || hit->kind == SZ_VIEW_ICON_BUTTON ||
-       hit->kind == SZ_VIEW_FAB || hit->kind == SZ_VIEW_OUTLINED_BUTTON) &&
+       hit->kind == SZ_VIEW_FAB || hit->kind == SZ_VIEW_OUTLINED_BUTTON ||
+       hit->kind == SZ_VIEW_TEXT_BUTTON) &&
       hit->on_tap) {
     hit->on_tap(hit, hit->tap_env);
     return 1;

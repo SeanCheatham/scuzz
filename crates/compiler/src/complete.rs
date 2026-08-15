@@ -389,6 +389,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_text_button_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.textB\n";
+        let labels = labels_at(src, "View.textB");
+        assert!(labels.iter().any(|l| l == "View.textButton"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_tooltip_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.tool\n";
         let labels = labels_at(src, "View.tool");
