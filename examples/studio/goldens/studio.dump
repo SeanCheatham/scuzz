@@ -47,6 +47,7 @@ expansion:More=0
 list:list
 listtile:milk
 iconbutton:i
+outlined:Edit
 button:Done
 button:Del
 button:Save

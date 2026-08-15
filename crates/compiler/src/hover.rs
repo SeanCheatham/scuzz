@@ -354,6 +354,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.fab(label: String, onTap: _ => Unit): View",
     ),
     (
+        "View.outlinedButton",
+        "View.outlinedButton(label: String, onTap: _ => Unit): View",
+    ),
+    (
         "View.tooltip",
         "View.tooltip(message: String, child: View): View",
     ),
@@ -770,6 +774,18 @@ mod tests {
         let h = hover_src(src, "fab");
         assert!(
             h.contains("View.fab(label: String, onTap: _ => Unit): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_view_outlined_button() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.outlinedButton("Edit", _ => ()))
+"#;
+        let h = hover_src(src, "outlinedButton");
+        assert!(
+            h.contains("View.outlinedButton(label: String, onTap: _ => Unit): View"),
             "{h}"
         );
     }

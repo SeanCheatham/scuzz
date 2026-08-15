@@ -6720,6 +6720,296 @@ static void test_tooltip_empty_message_a11y(void) {
   sz_view_free(tip);
 }
 
+static void test_outlined_button_sizes(void) {
+  SzView *b, *filled;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, ff;
+
+  sig = sz_signal_int(0);
+  b = sz_view_outlined_button("Edit", counter_tap, sig);
+  filled = sz_view_button("Edit", counter_tap, sig);
+  sz_view_layout(b, 200.f, 200.f, theme);
+  sz_view_layout(filled, 200.f, 200.f, theme);
+  assert(sz_view_kind(b) == SZ_VIEW_OUTLINED_BUTTON);
+  f = sz_view_frame(b);
+  ff = sz_view_frame(filled);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  assert(fabsf(f.w - ff.w) < 0.5f);
+  assert(fabsf(f.h - ff.h) < 0.5f);
+  assert(f.w >= 48.f);
+  sz_view_free(b);
+  sz_view_free(filled);
+  sz_signal_int_free(sig);
+}
+
+static void test_outlined_button_empty_min_width(void) {
+  SzView *b;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  b = sz_view_outlined_button("", NULL, NULL);
+  sz_view_layout(b, 200.f, 200.f, theme);
+  f = sz_view_frame(b);
+  assert(fabsf(f.w - 48.f) < 0.5f);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  sz_view_free(b);
+}
+
+static void test_outlined_button_null_label(void) {
+  SzView *b;
+  SzString *dump;
+  const SzTheme *theme = sz_theme_default();
+
+  b = sz_view_outlined_button(NULL, NULL, NULL);
+  sz_view_layout(b, 200.f, 80.f, theme);
+  dump = sz_view_a11y_dump(b);
+  assert(strstr(sz_string_cstr(dump), "outlined:") != NULL);
+  sz_string_free(dump);
+  sz_view_free(b);
+}
+
+static void test_outlined_button_clamps_max_w(void) {
+  SzView *b;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  b = sz_view_outlined_button("Edit", NULL, NULL);
+  sz_view_layout(b, 20.f, 80.f, theme);
+  f = sz_view_frame(b);
+  assert(fabsf(f.w - 20.f) < 0.5f);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  sz_view_free(b);
+}
+
+static void test_outlined_button_does_not_wrap(void) {
+  SzView *b;
+  const SzTheme *theme = sz_theme_default();
+  float full_h;
+
+  b = sz_view_outlined_button("one two", NULL, NULL);
+  sz_view_layout(b, 1000.f, 100.f, theme);
+  full_h = sz_view_frame(b).h;
+  sz_view_free(b);
+
+  b = sz_view_outlined_button("one two", NULL, NULL);
+  sz_view_layout(b, 20.f, 100.f, theme);
+  assert(fabsf(sz_view_frame(b).h - full_h) < 0.5f);
+  sz_view_free(b);
+}
+
+static void test_outlined_button_a11y(void) {
+  SzView *b;
+  SzSignalInt *sig;
+  SzString *dump;
+
+  sig = sz_signal_int(0);
+  b = sz_view_outlined_button("Edit", counter_tap, sig);
+  dump = sz_view_a11y_dump(b);
+  assert(strstr(sz_string_cstr(dump), "outlined:Edit") != NULL);
+  sz_string_free(dump);
+  sz_view_free(b);
+  sz_signal_int_free(sig);
+}
+
+static void test_outlined_button_a11y_distinct(void) {
+  SzView *b;
+  SzSignalInt *sig;
+  SzString *dump;
+  const char *s;
+
+  sig = sz_signal_int(0);
+  b = sz_view_outlined_button("Edit", counter_tap, sig);
+  dump = sz_view_a11y_dump(b);
+  s = sz_string_cstr(dump);
+  assert(strstr(s, "outlined:Edit") != NULL);
+  assert(strstr(s, "button:") == NULL);
+  assert(strstr(s, "iconbutton:") == NULL);
+  assert(strstr(s, "fab:") == NULL);
+  sz_string_free(dump);
+  sz_view_free(b);
+  sz_signal_int_free(sig);
+}
+
+static void test_outlined_button_tap(void) {
+  SzView *b;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  b = sz_view_outlined_button("Edit", counter_tap, sig);
+  sz_view_layout(b, 200.f, 80.f, theme);
+  f = sz_view_frame(b);
+  assert(sz_view_is_tap_target(b));
+  assert(sz_view_handle_tap(b, f.x + 4.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 1);
+  sz_view_free(b);
+  sz_signal_int_free(sig);
+}
+
+static void test_outlined_button_tap_twice(void) {
+  SzView *b;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  b = sz_view_outlined_button("Edit", counter_tap, sig);
+  sz_view_layout(b, 200.f, 80.f, theme);
+  f = sz_view_frame(b);
+  assert(sz_view_handle_tap(b, f.x + 4.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 1);
+  assert(sz_view_handle_tap(b, f.x + 4.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 2);
+  sz_view_free(b);
+  sz_signal_int_free(sig);
+}
+
+static void test_outlined_button_null_tap(void) {
+  SzView *b;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  b = sz_view_outlined_button("Edit", NULL, NULL);
+  sz_view_layout(b, 200.f, 80.f, theme);
+  f = sz_view_frame(b);
+  assert(sz_view_is_tap_target(b));
+  assert(!sz_view_handle_tap(b, f.x + 4.f, f.y + f.h * 0.5f));
+  sz_view_free(b);
+}
+
+static void test_outlined_button_miss(void) {
+  SzView *b;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  b = sz_view_outlined_button("Edit", counter_tap, sig);
+  sz_view_layout(b, 200.f, 80.f, theme);
+  f = sz_view_frame(b);
+  assert(!sz_view_handle_tap(b, f.x - 8.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 0);
+  sz_view_free(b);
+  sz_signal_int_free(sig);
+}
+
+static void test_outlined_button_hit_test(void) {
+  SzView *b, *hit;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  b = sz_view_outlined_button("Edit", counter_tap, sig);
+  sz_view_layout(b, 200.f, 80.f, theme);
+  f = sz_view_frame(b);
+  hit = sz_view_hit_test(b, f.x + 4.f, f.y + f.h * 0.5f);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_OUTLINED_BUTTON);
+  sz_view_free(b);
+  sz_signal_int_free(sig);
+}
+
+static void test_outlined_button_paint(void) {
+  SzView *root;
+  SzSignalInt *sig;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  root = sz_view_outlined_button("Edit", counter_tap, sig);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  f = sz_view_frame(root);
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  /* Fill is surface, not primary. */
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0xFF, 0xFF, 0xFF));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+  sz_signal_int_free(sig);
+}
+
+static void test_outlined_button_paint_not_primary(void) {
+  SzView *filled, *outlined;
+  SzSignalInt *sig;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  filled = sz_view_button("Edit", counter_tap, sig);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(filled, canvas, 80, 80, theme));
+  f = sz_view_frame(filled);
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0x14, 0x28, 0x50));
+  sk_surface_unref(surf);
+  sz_view_free(filled);
+
+  outlined = sz_view_outlined_button("Edit", counter_tap, sig);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(outlined, canvas, 80, 80, theme));
+  f = sz_view_frame(outlined);
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(!px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 8.f), 0x14, 0x28, 0x50));
+  sk_surface_unref(surf);
+  sz_view_free(outlined);
+  sz_signal_int_free(sig);
+}
+
+static void test_outlined_button_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_outlined.dump";
+  char *dump;
+  const char *taps;
+
+  sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_outlined_button("Edit", counter_tap, sig));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "outlined:Edit") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "Edit") != NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
 static void test_radio_sizes(void) {
   SzView *r;
   SzSignalInt *sig;
@@ -8570,6 +8860,21 @@ int main(void) {
   test_tooltip_child_in_taps_dump();
   test_tooltip_same_origin();
   test_tooltip_empty_message_a11y();
+  test_outlined_button_sizes();
+  test_outlined_button_empty_min_width();
+  test_outlined_button_null_label();
+  test_outlined_button_clamps_max_w();
+  test_outlined_button_does_not_wrap();
+  test_outlined_button_a11y();
+  test_outlined_button_a11y_distinct();
+  test_outlined_button_tap();
+  test_outlined_button_tap_twice();
+  test_outlined_button_null_tap();
+  test_outlined_button_miss();
+  test_outlined_button_hit_test();
+  test_outlined_button_paint();
+  test_outlined_button_paint_not_primary();
+  test_outlined_button_in_taps_dump();
   test_radio_sizes();
   test_radio_a11y_off_on();
   test_radio_tap_writes_value();

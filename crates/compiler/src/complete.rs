@@ -379,6 +379,16 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_outlined_button_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.outl\n";
+        let labels = labels_at(src, "View.outl");
+        assert!(
+            labels.iter().any(|l| l == "View.outlinedButton"),
+            "{labels:?}"
+        );
+    }
+
+    #[test]
     fn completes_view_tooltip_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.tool\n";
         let labels = labels_at(src, "View.tool");
