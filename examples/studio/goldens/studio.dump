@@ -6,8 +6,9 @@ int[3] = 0
 int[4] = 40
 int[5] = 0
 int[6] = 0
-str[7] = "count = 0"
-str[8] = "page = 0"
+int[7] = 0
+str[8] = "count = 0"
+str[9] = "page = 0"
 
 [views]
 radio:Home=1
@@ -29,6 +30,7 @@ button:Rename
 scroll:scroll
 card:card
 divider:divider
+expansion:More=0
 list:list
 listtile:milk
 button:Done

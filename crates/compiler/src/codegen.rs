@@ -152,6 +152,11 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_badge(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_card(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_divider()").unwrap();
+    writeln!(
+        out,
+        "declare ptr @sz_lang_view_expansion_tile(ptr, ptr, ptr)"
+    )
+    .unwrap();
     writeln!(out, "declare i64 @sz_theme_accent()").unwrap();
     writeln!(out, "declare i64 @sz_theme_primary()").unwrap();
     writeln!(out, "declare i64 @sz_theme_muted()").unwrap();
@@ -3417,6 +3422,15 @@ fn emit_call(
             writeln!(code, "  %{prefix}_v = call ptr @sz_lang_view_divider()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "View.expansionTile" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_view_expansion_tile(ptr {}, ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "Theme.accent" => {
             writeln!(code, "  %{prefix}_v = call i64 @sz_theme_accent()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
@@ -4355,6 +4369,23 @@ law always: Bool = 1 == 1
         assert!(
             ir.contains("sz_lang_view_divider"),
             "expected sz_lang_view_divider in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_expansion_tile() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.expansionTile(n, "More", View.text("x")))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_expansion_tile"),
+            "expected sz_lang_view_expansion_tile in IR:\n{ir}"
         );
     }
 

@@ -6,8 +6,9 @@ int[3] = 0
 int[4] = 40
 int[5] = 0
 int[6] = 0
-str[7] = "count = 0"
-str[8] = "page = 1"
+int[7] = 0
+str[8] = "count = 0"
+str[9] = "page = 1"
 
 [views]
 radio:Home=0
@@ -22,6 +23,7 @@ button:Rename
 scroll:scroll
 card:card
 divider:divider
+expansion:More=0
 list:list
 listtile:milk
 button:Done
@@ -36,10 +38,11 @@ button:Clear
 3 On 152,88 37x32
 4 Pin 197,88 32x32
 5 Rename 237,88 58x32
-6 Done 212,216 48x32
-7 Del 268,216 48x32
-8 Save 12,476 48x32
-9 Clear 12,516 48x32
+6 More 48,192 304x32
+7 Done 212,256 48x32
+8 Del 268,256 48x32
+9 Save 12,476 48x32
+10 Clear 12,516 48x32
 
 [fields]
 0* item=""

@@ -2160,6 +2160,13 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 0)?;
             Ok(Type::Opaque("View".into()))
         }
+        "View.expansionTile" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("SignalInt".into()))?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            expect_ty(&arg_tys[2], &Type::Opaque("View".into()))?;
+            Ok(Type::Opaque("View".into()))
+        }
         "View.grid" => {
             if arg_tys.is_empty() {
                 return Err(TypeError::Msg(
@@ -5359,6 +5366,18 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.divider should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_expansion_tile() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.expansionTile(n, "More", View.text("x")))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.expansionTile should typecheck");
     }
 
     #[test]

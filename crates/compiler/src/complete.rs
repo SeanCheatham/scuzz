@@ -356,6 +356,16 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_expansion_tile_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.expan\n";
+        let labels = labels_at(src, "View.expan");
+        assert!(
+            labels.iter().any(|l| l == "View.expansionTile"),
+            "{labels:?}"
+        );
+    }
+
+    #[test]
     fn completes_view_slider_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.sl\n";
         let labels = labels_at(src, "View.sl");

@@ -367,6 +367,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("View.badge", "View.badge(sig: Signal, child: View): View"),
     ("View.card", "View.card(child: View): View"),
     ("View.divider", "View.divider(): View"),
+    (
+        "View.expansionTile",
+        "View.expansionTile(sig: Signal, title: String, child: View): View",
+    ),
     ("View.scroll", "View.scroll(child: View): View"),
     ("View.scrollH", "View.scrollH(child: View): View"),
     ("View.column", "View.column(...): View"),
@@ -671,6 +675,21 @@ mod tests {
 "#;
         let h = hover_src(src, "divider");
         assert!(h.contains("View.divider(): View"), "{h}");
+    }
+
+    #[test]
+    fn hovers_view_expansion_tile() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.expansionTile(n, "More", View.text("x")))
+  } yield ()
+"#;
+        let h = hover_src(src, "expansionTile");
+        assert!(
+            h.contains("View.expansionTile(sig: Signal, title: String, child: View): View"),
+            "{h}"
+        );
     }
 
     #[test]

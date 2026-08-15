@@ -5061,6 +5061,162 @@ static void test_divider_not_in_taps_dump(void) {
   remove(path);
 }
 
+static void test_expansion_tile_sizes_collapsed(void) {
+  SzView *tile;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  tile = sz_view_expansion_tile(sig, "More", sz_view_text("hint"));
+  sz_view_layout(tile, 200.f, 200.f, theme);
+  assert(sz_view_kind(tile) == SZ_VIEW_EXPANSION_TILE);
+  f = sz_view_frame(tile);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  assert(fabsf(f.w - 200.f) < 0.5f);
+  sz_view_free(tile);
+  sz_signal_int_free(sig);
+}
+
+static void test_expansion_tile_sizes_expanded(void) {
+  SzView *tile, *child;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, cf;
+
+  sig = sz_signal_int(1);
+  child = sz_view_text("hint");
+  tile = sz_view_expansion_tile(sig, "More", child);
+  sz_view_layout(tile, 200.f, 200.f, theme);
+  f = sz_view_frame(tile);
+  cf = sz_view_frame(child);
+  assert(f.h > theme->control_h);
+  assert(fabsf(f.h - (theme->control_h + cf.h)) < 0.5f);
+  sz_view_free(tile);
+  sz_signal_int_free(sig);
+}
+
+static void test_expansion_tile_a11y(void) {
+  SzView *tile;
+  SzSignalInt *sig;
+  SzString *dump;
+
+  sig = sz_signal_int(0);
+  tile = sz_view_expansion_tile(sig, "More", sz_view_text("hint"));
+  dump = sz_view_a11y_dump(tile);
+  assert(strstr(sz_string_cstr(dump), "expansion:More=0") != NULL);
+  assert(strstr(sz_string_cstr(dump), "hint") == NULL);
+  sz_string_free(dump);
+  sz_signal_int_set(sig, 1);
+  dump = sz_view_a11y_dump(tile);
+  assert(strstr(sz_string_cstr(dump), "expansion:More=1") != NULL);
+  assert(strstr(sz_string_cstr(dump), "text:hint") != NULL);
+  sz_string_free(dump);
+  sz_view_free(tile);
+  sz_signal_int_free(sig);
+}
+
+static void test_expansion_tile_tap_toggles(void) {
+  SzView *tile;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  tile = sz_view_expansion_tile(sig, "More", sz_view_text("hint"));
+  sz_view_layout(tile, 200.f, 80.f, theme);
+  f = sz_view_frame(tile);
+  assert(sz_view_handle_tap(tile, f.x + 8.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 1);
+  sz_view_layout(tile, 200.f, 80.f, theme);
+  f = sz_view_frame(tile);
+  assert(sz_view_handle_tap(tile, f.x + 8.f, f.y + theme->control_h * 0.5f));
+  assert(sz_signal_int_get(sig) == 0);
+  sz_view_free(tile);
+  sz_signal_int_free(sig);
+}
+
+static void test_expansion_tile_child_tap(void) {
+  SzView *tile, *btn, *hit;
+  SzSignalInt *open, *count;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  open = sz_signal_int(1);
+  count = sz_signal_int(0);
+  btn = sz_view_button("Go", counter_tap, count);
+  tile = sz_view_expansion_tile(open, "More", btn);
+  sz_view_layout(tile, 200.f, 120.f, theme);
+  f = sz_view_frame(btn);
+  hit = sz_view_hit_test(tile, f.x + 4.f, f.y + f.h * 0.5f);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_BUTTON);
+  assert(sz_view_handle_tap(tile, f.x + 4.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(count) == 1);
+  assert(sz_signal_int_get(open) == 1);
+  sz_view_free(tile);
+  sz_signal_int_free(open);
+  sz_signal_int_free(count);
+}
+
+static void test_expansion_tile_paint(void) {
+  SzView *root;
+  SzSignalInt *sig;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  root = sz_view_expansion_tile(sig, "More", sz_view_text("hint"));
+  surf = sk_surface_make_raster_n32_premul(120, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 120, 80, theme));
+  f = sz_view_frame(root);
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 120 * 80 * 4);
+  assert(px_rgb(px, 120, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFF, 0xFF));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+  sz_signal_int_free(sig);
+}
+
+static void test_expansion_tile_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_expansion.dump";
+  char *dump;
+  const char *taps;
+
+  sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_expansion_tile(sig, "More", sz_view_text("hint")));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "expansion:More=0") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "More") != NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
 static void test_radio_sizes(void) {
   SzView *r;
   SzSignalInt *sig;
@@ -6835,6 +6991,13 @@ int main(void) {
   test_divider_paint_line();
   test_divider_in_column();
   test_divider_not_in_taps_dump();
+  test_expansion_tile_sizes_collapsed();
+  test_expansion_tile_sizes_expanded();
+  test_expansion_tile_a11y();
+  test_expansion_tile_tap_toggles();
+  test_expansion_tile_child_tap();
+  test_expansion_tile_paint();
+  test_expansion_tile_in_taps_dump();
   test_radio_sizes();
   test_radio_a11y_off_on();
   test_radio_tap_writes_value();

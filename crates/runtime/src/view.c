@@ -119,7 +119,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_TEXT_COLOR || kind == SZ_VIEW_GAP ||
          kind == SZ_VIEW_FONT_SIZE || kind == SZ_VIEW_BORDER ||
          kind == SZ_VIEW_RADIUS || kind == SZ_VIEW_LIST_TILE ||
-         kind == SZ_VIEW_BADGE || kind == SZ_VIEW_CARD;
+         kind == SZ_VIEW_BADGE || kind == SZ_VIEW_CARD ||
+         kind == SZ_VIEW_EXPANSION_TILE;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -158,7 +159,8 @@ int sz_view_is_tap_target(const SzView *view) {
   return view &&
          (view->kind == SZ_VIEW_BUTTON || view->kind == SZ_VIEW_CHECKBOX ||
           view->kind == SZ_VIEW_SLIDER || view->kind == SZ_VIEW_RADIO ||
-          view->kind == SZ_VIEW_SWITCH || view->kind == SZ_VIEW_CHIP);
+          view->kind == SZ_VIEW_SWITCH || view->kind == SZ_VIEW_CHIP ||
+          view->kind == SZ_VIEW_EXPANSION_TILE);
 }
 
 SzRect sz_view_frame(const SzView *view) {
@@ -317,6 +319,21 @@ SzView *sz_view_divider(void) {
   return v;
 }
 
+SzView *sz_view_expansion_tile(SzSignalInt *sig, const char *title, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_EXPANSION_TILE);
+  v->sig_int = sig;
+  v->text = sz_strdup(title ? title : "");
+  v->interactive = 1;
+  v->a11y_role = SZ_A11Y_EXPANSION;
+  v->a11y_label = sz_strdup(title ? title : "");
+  if (child) {
+    child->show_when_sig = sig;
+    child->show_when_value = 1;
+    sz_view_add_child(v, child);
+  }
+  return v;
+}
+
 static int64_t slider_clamp(int64_t n) {
   if (n < 0)
     return 0;
@@ -402,6 +419,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "card";
   case SZ_A11Y_DIVIDER:
     return "divider";
+  case SZ_A11Y_EXPANSION:
+    return "expansion";
   default:
     return "none";
   }
@@ -423,7 +442,7 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
       label = live;
     }
     if (v->kind == SZ_VIEW_CHECKBOX || v->kind == SZ_VIEW_SWITCH ||
-        v->kind == SZ_VIEW_CHIP) {
+        v->kind == SZ_VIEW_CHIP || v->kind == SZ_VIEW_EXPANSION_TILE) {
       int on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
       snprintf(live, sizeof live, "%s=%d", v->a11y_label ? v->a11y_label : "",
                on ? 1 : 0);
@@ -1301,6 +1320,20 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.w = max_w > 0 ? max_w : 120.f;
     v->frame.h = 8.f;
     break;
+  case SZ_VIEW_EXPANSION_TILE: {
+    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
+    float hh = theme->control_h;
+    float child_max_h;
+    v->frame.w = max_w > 0 ? max_w : 120.f;
+    v->frame.h = hh;
+    if (ch && view_is_shown(ch)) {
+      child_max_h = max_h > hh ? max_h - hh : 0.f;
+      layout_constrained(ch, x, y + hh, box_loose(v->frame.w, child_max_h),
+                         theme);
+      v->frame.h = hh + ch->frame.h;
+    }
+    break;
+  }
   case SZ_VIEW_TEXT_FIELD:
     v->frame.w = max_w > 0 ? max_w : 120.f;
     v->frame.h = theme->control_h;
@@ -2418,6 +2451,24 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     paint_rect(c, v->frame.x, ly, v->frame.w, t, theme->muted);
     break;
   }
+  case SZ_VIEW_EXPANSION_TILE: {
+    int on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
+    float hh = theme->control_h;
+    char mark[2];
+    resolve_text(v, buf, sizeof buf);
+    paint_rect(c, v->frame.x, v->frame.y, v->frame.w, hh, theme->surface);
+    paint_string(c, buf, v->frame.x + theme->pad,
+                 v->frame.y + (hh + theme->font_px) * 0.5f, theme->foreground,
+                 theme->font_px);
+    mark[0] = on ? 'v' : '>';
+    mark[1] = '\0';
+    paint_string(c, mark, v->frame.x + v->frame.w - theme->pad - 8.f,
+                 v->frame.y + (hh + theme->font_px) * 0.5f, theme->muted,
+                 theme->font_px);
+    for (i = 0; i < v->child_count; i++)
+      paint_node(v->children[i], c, theme);
+    break;
+  }
   case SZ_VIEW_RADIO: {
     float box = theme->font_px + 4.f;
     float gap;
@@ -2773,7 +2824,7 @@ int sz_view_handle_tap(SzView *root, float x, float y) {
     return 1;
   }
   if ((hit->kind == SZ_VIEW_CHECKBOX || hit->kind == SZ_VIEW_SWITCH ||
-       hit->kind == SZ_VIEW_CHIP) &&
+       hit->kind == SZ_VIEW_CHIP || hit->kind == SZ_VIEW_EXPANSION_TILE) &&
       hit->sig_int) {
     int64_t n = sz_signal_int_get(hit->sig_int);
     sz_signal_int_set(hit->sig_int, n == 0 ? 1 : 0);
