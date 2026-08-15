@@ -61,6 +61,8 @@ typedef struct SzError {
 
 SzError *sz_error_new(int32_t code, const char *msg);
 void sz_error_free(SzError *err);
+SzString *sz_error_message(const SzError *err);
+int32_t sz_error_code(const SzError *err);
 
 /* --- Either (attempt results) -------------------------------------------- */
 
@@ -188,6 +190,8 @@ SzIo *sz_io_println(SzString *msg);
 SzIo *sz_io_println_cstr(const char *msg);
 SzIo *sz_io_handle_error_with(SzIo *inner, SzErrorHandler handler, void *env);
 SzIo *sz_io_attempt(SzIo *inner);
+SzIo *sz_io_attempt_as_result(SzIo *inner);
+SzAdt *sz_either_to_result(SzEither *e);
 SzIo *sz_io_sleep_ms(int64_t ms);
 SzIo *sz_io_race(SzIo *left, SzIo *right);
 SzIo *sz_io_both(SzIo *left, SzIo *right);

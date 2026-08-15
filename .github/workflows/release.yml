@@ -82,6 +82,7 @@ jobs:
           unset SCUZZ_HOME SCUZZ_RUNTIME || true
           rm -rf /tmp/scuzz-release-app
           scuzz new --ui --path /tmp scuzz-release-app
+          scuzz test --update /tmp/scuzz-release-app
           scuzz test /tmp/scuzz-release-app
           scuzz run --headless /tmp/scuzz-release-app
 

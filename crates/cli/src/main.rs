@@ -31,6 +31,9 @@ struct Cli {
 #[derive(Subcommand, Debug)]
 enum Commands {
     /// Compile a Scuzz Lang project to a native executable (LLVM)
+    #[command(
+        after_help = "Examples:\n  scuzz build\n  scuzz build --full examples/hello\n  scuzz build --verify examples/counter\n"
+    )]
     Build {
         /// Project directory containing scuzz.toml
         #[arg(default_value = ".")]
@@ -68,6 +71,9 @@ enum Commands {
         dump: Option<PathBuf>,
     },
     /// Watch sources and rebuild on change (compile loop, not hot reload)
+    #[command(
+        after_help = "Examples:\n  scuzz watch\n  scuzz watch examples/hello\n  scuzz run --watch --headless\n"
+    )]
     Watch {
         #[arg(default_value = ".")]
         path: PathBuf,
@@ -75,6 +81,9 @@ enum Commands {
         out_dir: PathBuf,
     },
     /// Run tests: Headless structural goldens for [ui] packages; IO smoke (TESTRT exit 0) otherwise
+    #[command(
+        after_help = "Examples:\n  scuzz test\n  scuzz test --update\n  scuzz test --pixels examples/counter\n  scuzz test examples/io\n\n[ui] packages need goldens/. Seed with --update, then compare without it. Missing scuzz.toml fails."
+    )]
     Test {
         #[arg(default_value = ".")]
         path: PathBuf,
@@ -86,6 +95,9 @@ enum Commands {
         pixels: bool,
     },
     /// Format-check src/ + parse + typecheck (no codegen / link). JSON with --message-format=json.
+    #[command(
+        after_help = "Examples:\n  scuzz check\n  scuzz check examples/kernel\n  scuzz check --message-format=json\n"
+    )]
     Check {
         #[arg(default_value = ".")]
         path: PathBuf,
@@ -99,6 +111,9 @@ enum Commands {
         path: PathBuf,
     },
     /// Format Scuzz Lang sources under src/
+    #[command(
+        after_help = "Examples:\n  scuzz fmt\n  scuzz fmt --check\n  scuzz fmt examples/hello\n"
+    )]
     Fmt {
         #[arg(default_value = ".")]
         path: PathBuf,
@@ -150,6 +165,9 @@ enum Commands {
         oracles: bool,
     },
     /// Create a new Scuzz Lang project
+    #[command(
+        after_help = "Examples:\n  scuzz new mycli\n  scuzz new myapp --ui\n  scuzz new myapp --ui --path /tmp\n"
+    )]
     New {
         name: String,
         #[arg(long, default_value = ".")]
@@ -159,6 +177,9 @@ enum Commands {
         ui: bool,
     },
     /// Emit mobile packaging shells (android / ios / host)
+    #[command(
+        after_help = "Examples:\n  scuzz package --target host\n  scuzz package --target all examples/counter\n  scuzz package --target ios\n"
+    )]
     Package {
         #[arg(default_value = ".")]
         path: PathBuf,
@@ -229,6 +250,11 @@ fn real_main() -> Result<ExitCode> {
             script,
             dump,
         } => {
+            if watch && (script.is_some() || dump.is_some()) {
+                bail!(
+                    "scuzz run --watch does not accept --script or --dump. Run without --watch: scuzz run --headless --script PATH --dump PATH"
+                );
+            }
             if watch {
                 return watch_run(&path, &out_dir, headless);
             }
@@ -247,14 +273,18 @@ fn real_main() -> Result<ExitCode> {
             pixels,
         } => {
             let project_dir = resolve_dir(&path)?;
-            if project_dir.join("scuzz.toml").is_file() {
-                let out = build(&path, &PathBuf::from("build"), false, false)?;
-                eprintln!("project compile smoke ok");
-                if out.manifest.ui.is_none() {
-                    run_io_smoke(&out.executable)?;
-                } else {
-                    run_goldens(&project_dir, &out.executable, update, pixels)?;
-                }
+            if !project_dir.join("scuzz.toml").is_file() {
+                bail!(
+                    "missing scuzz.toml in {}. Create a package with `scuzz new myapp` or `scuzz new myapp --ui`.",
+                    project_dir.display()
+                );
+            }
+            let out = build(&path, &PathBuf::from("build"), false, false)?;
+            eprintln!("project compile smoke ok");
+            if out.manifest.ui.is_none() {
+                run_io_smoke(&out.executable)?;
+            } else {
+                run_goldens(&project_dir, &out.executable, update, pixels)?;
             }
             eprintln!("scuzz test ok");
             Ok(ExitCode::SUCCESS)
@@ -307,7 +337,7 @@ bundle_id = "dev.scuzz.{package_name}"
 "#,
                 )?;
                 eprintln!(
-                    "created {} (ui) — next: scuzz test (seeds goldens) && scuzz run --headless",
+                    "created {} (ui) — next: scuzz test --update && scuzz test && scuzz run --headless",
                     dir.display()
                 );
             } else {
@@ -536,7 +566,7 @@ fn watch_run_ui(
                 Err(e) => eprintln!("scuzz watch run error: {e:#}"),
             }
         }
-        if wait_for_source_change(project_dir, 60_000)? {
+        if wait_for_source_change(project_dir, 400)? {
             match build(path, &out_dir.to_path_buf(), true, false) {
                 Ok(_) => {
                     gen += 1;
@@ -692,7 +722,10 @@ fn run_io_smoke(exe: &Path) -> Result<()> {
 fn run_goldens(project_dir: &Path, exe: &Path, update: bool, pixels: bool) -> Result<()> {
     let goldens = project_dir.join("goldens");
     if !goldens.is_dir() {
-        return Ok(());
+        bail!(
+            "missing goldens/ for [ui] package {}. Seed with `scuzz test --update`.",
+            project_dir.display()
+        );
     }
     let manifest = load_manifest(&project_dir.join("scuzz.toml"))?;
     let name = manifest.package.name.as_str();
@@ -713,6 +746,12 @@ fn run_goldens(project_dir: &Path, exe: &Path, update: bool, pixels: bool) -> Re
     pngs.sort();
 
     if dumps.is_empty() {
+        if !update {
+            bail!(
+                "no structural goldens in {}. Seed with `scuzz test --update`.",
+                goldens.display()
+            );
+        }
         let base = goldens.join(format!("{name}.dump"));
         let tap = goldens.join(format!("{name}_after_tap.dump"));
         capture_structural(
@@ -829,6 +868,16 @@ fn build(
 }
 
 fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode> {
+    let target_lc = target.to_ascii_lowercase();
+    let targets: Vec<&str> = if target_lc == "all" {
+        vec!["host", "android", "ios"]
+    } else if matches!(target_lc.as_str(), "host" | "android" | "ios") {
+        vec![target_lc.as_str()]
+    } else {
+        bail!(
+            "unknown package target '{target}' (host|android|ios|all). Example: scuzz package --target host"
+        );
+    };
     let project_dir = resolve_dir(path)?;
     let manifest = load_manifest(&project_dir.join("scuzz.toml"))
         .with_context(|| format!("reading {}/scuzz.toml", project_dir.display()))?;
@@ -862,14 +911,6 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
     }
 
     let compiled = build(path, &PathBuf::from("build"), true, false)?;
-    let target_lc = target.to_ascii_lowercase();
-    let targets: Vec<&str> = if target_lc == "all" {
-        vec!["host", "android", "ios"]
-    } else if matches!(target_lc.as_str(), "host" | "android" | "ios") {
-        vec![target_lc.as_str()]
-    } else {
-        bail!("unknown package target '{target_lc}' (host|android|ios|all)");
-    };
 
     let bundle_id = manifest
         .ui
@@ -912,23 +953,28 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
 }
 
 fn write_host_package(dest: &Path, exe: &Path, name: &str, bundle_id: &str) -> Result<()> {
+    let dest_exe = dest.join(name);
+    std::fs::copy(exe, &dest_exe)
+        .with_context(|| format!("copying {} into {}", exe.display(), dest_exe.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mut perms = std::fs::metadata(&dest_exe)?.permissions();
+        perms.set_mode(0o755);
+        std::fs::set_permissions(&dest_exe, perms)?;
+    }
     let run_sh = dest.join("run.sh");
-    let exe_abs = if exe.is_absolute() {
-        exe.to_path_buf()
-    } else {
-        std::env::current_dir()?.join(exe)
-    };
     std::fs::write(
         &run_sh,
         format!(
             r#"#!/usr/bin/env bash
 # Host Mobile shell smoke. Same app binary; Mobile peer + host embedder.
 set -euo pipefail
+DIR="$(cd "$(dirname "$0")" && pwd)"
 export SCUZZ_UI_RUNTIME=mobile
 export SCUZZ_MOBILE_SHELL=1
-exec "{exe}" "$@"
-"#,
-            exe = exe_abs.display()
+exec "$DIR/{name}" "$@"
+"#
         ),
     )?;
     #[cfg(unix)]

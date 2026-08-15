@@ -263,6 +263,14 @@ void sz_error_free(SzError *err) {
   sz_free(err);
 }
 
+SzString *sz_error_message(const SzError *err) {
+  if (!err || !err->message)
+    return sz_string_from_cstr("error");
+  return sz_string_from_cstr(sz_string_cstr(err->message));
+}
+
+int32_t sz_error_code(const SzError *err) { return err ? err->code : 0; }
+
 SzEither *sz_either_right(void *value) {
   SzEither *e = (SzEither *)sz_alloc_zero(sizeof(SzEither));
   e->is_right = 1;
@@ -283,6 +291,32 @@ void sz_either_free(SzEither *e) {
   if (!e->is_right && e->as.left)
     sz_error_free(e->as.left);
   sz_free(e);
+}
+
+SzAdt *sz_either_to_result(SzEither *e) {
+  SzAdt *adt;
+  if (e && e->is_right) {
+    adt = sz_adt_new(1, e->as.right);
+    e->as.right = NULL;
+  } else {
+    const char *msg = "error";
+    if (e && !e->is_right && e->as.left && e->as.left->message)
+      msg = sz_string_cstr(e->as.left->message);
+    adt = sz_adt_new(0, sz_string_from_cstr(msg));
+  }
+  sz_either_free(e);
+  return adt;
+}
+
+static SzIo *attempt_as_result_cont(void *value, void *env) {
+  (void)env;
+  return sz_io_pure(sz_either_to_result((SzEither *)value));
+}
+
+SzIo *sz_io_attempt_as_result(SzIo *inner) {
+  if (!inner)
+    sz_panic("sz_io_attempt_as_result(null)");
+  return sz_io_flatmap(sz_io_attempt(inner), attempt_as_result_cont, NULL);
 }
 
 SzAdt *sz_adt_new(int32_t tag, void *payload) {

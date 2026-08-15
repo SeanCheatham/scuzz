@@ -53,6 +53,7 @@ pub fn offset_to_line_col(source: &str, offset: usize) -> (u32, u32) {
 }
 
 /// Convert 1-based line and column to a byte offset (column counts bytes, like [`offset_to_line_col`]).
+#[cfg(test)]
 pub fn line_col_to_offset(source: &str, line: u32, column: u32) -> usize {
     let mut cur_line = 1u32;
     let mut cur_col = 1u32;
@@ -70,6 +71,56 @@ pub fn line_col_to_offset(source: &str, line: u32, column: u32) -> usize {
     source.len()
 }
 
+/// Convert a byte offset into a 0-based LSP position (UTF-16 columns).
+pub fn offset_to_utf16_pos(source: &str, offset: usize) -> (u32, u32) {
+    let offset = offset.min(source.len());
+    let mut line = 0u32;
+    let mut col = 0u32;
+    let mut i = 0usize;
+    for ch in source.chars() {
+        let len = ch.len_utf8();
+        if i + len > offset {
+            break;
+        }
+        i += len;
+        if ch == '\n' {
+            line += 1;
+            col = 0;
+        } else {
+            col += ch.len_utf16() as u32;
+        }
+    }
+    (line, col)
+}
+
+/// Convert a 0-based LSP position (UTF-16 columns) to a byte offset.
+pub fn utf16_pos_to_offset(source: &str, line: u32, character: u32) -> usize {
+    let mut cur_line = 0u32;
+    let mut i = 0usize;
+    let mut chars = source.chars();
+    while cur_line < line {
+        match chars.next() {
+            Some('\n') => {
+                i += 1;
+                cur_line += 1;
+            }
+            Some(ch) => i += ch.len_utf8(),
+            None => return source.len(),
+        }
+    }
+    let mut col = 0u32;
+    while col < character {
+        match chars.next() {
+            Some('\n') | None => break,
+            Some(ch) => {
+                i += ch.len_utf8();
+                col += ch.len_utf16() as u32;
+            }
+        }
+    }
+    i.min(source.len())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -77,6 +128,15 @@ mod tests {
     #[test]
     fn line_col_first_byte() {
         assert_eq!(offset_to_line_col("abc", 0), (1, 1));
+    }
+
+    #[test]
+    fn utf16_pos_counts_multibyte() {
+        let src = "a😀b";
+        let grin = src.find('😀').unwrap();
+        assert_eq!(offset_to_utf16_pos(src, grin), (0, 1));
+        assert_eq!(utf16_pos_to_offset(src, 0, 1), grin);
+        assert_eq!(utf16_pos_to_offset(src, 0, 3), grin + '😀'.len_utf8());
     }
 
     #[test]

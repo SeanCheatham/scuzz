@@ -56,6 +56,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_io_sleep_ms(i64)").unwrap();
     writeln!(out, "declare ptr @sz_io_handle_error_with(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_attempt(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_attempt_as_result(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_error_message(ptr)").unwrap();
+    writeln!(out, "declare void @sz_panic(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_race(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_both(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_ensure(ptr, ptr)").unwrap();
@@ -266,6 +269,11 @@ pub fn emit_llvm(program: &Program) -> String {
         )
         .unwrap();
     }
+    writeln!(
+        out,
+        "@.div0 = private unnamed_addr constant [17 x i8] c\"division by zero\\00\", align 1"
+    )
+    .unwrap();
     writeln!(out).unwrap();
 
     // User defs are emitted below. LLVM allows call sites before the defining
@@ -438,7 +446,7 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         | ExprKind::Attempt { inner: e } => collect_strings(e, out),
         ExprKind::Lambda { body, .. } => collect_strings(body, out),
         ExprKind::FlatMap { inner, body, .. }
-        | ExprKind::HandleErrorWith { inner, body }
+        | ExprKind::HandleErrorWith { inner, body, .. }
         | ExprKind::Let {
             value: inner, body, ..
         }
@@ -1440,7 +1448,7 @@ fn emit_expr(
             .unwrap();
             io_emitted(code, format!("%{prefix}_fm"), body_emitted.payload)
         }
-        ExprKind::HandleErrorWith { inner, body } => {
+        ExprKind::HandleErrorWith { inner, param, body } => {
             let id = *ctx.cont_id;
             *ctx.cont_id += 1;
             let cont_name = format!("sz_err_{id}");
@@ -1454,6 +1462,10 @@ fn emit_expr(
                 &capture_names,
                 &format!("e{id}"),
             );
+            if let Some(p) = param {
+                writeln!(pre, "  %{p}_msg = call ptr @sz_error_message(ptr %err)").unwrap();
+                body_locals.insert(p.clone(), (format!("%{p}_msg"), Kind::Ptr));
+            }
             let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("e{id}"));
             writeln!(
                 ctx.conts,
@@ -1500,7 +1512,7 @@ fn emit_expr(
             );
             writeln!(
                 code,
-                "  %{prefix}_attempt = call ptr @sz_io_attempt(ptr {inner_io})"
+                "  %{prefix}_attempt = call ptr @sz_io_attempt_as_result(ptr {inner_io})"
             )
             .unwrap();
             io_emitted(code, format!("%{prefix}_attempt"), Kind::Ptr)
@@ -2456,6 +2468,9 @@ fn emit_binary(
     locals: &mut HashMap<String, (String, Kind)>,
     prefix: &str,
 ) -> Emitted {
+    if matches!(op, BinOp::And | BinOp::Or) {
+        return emit_short_circuit(*op == BinOp::And, left, right, ctx, locals, prefix);
+    }
     let le = emit_expr(left, ctx, locals, &format!("{prefix}_l"));
     let re = emit_expr(right, ctx, locals, &format!("{prefix}_r"));
     let mut code = le.code;
@@ -2503,22 +2518,33 @@ fn emit_binary(
             writeln!(code, "  %{prefix}_v = mul i64 {lv}, {rv}").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        BinOp::Div => {
-            writeln!(code, "  %{prefix}_v = sdiv i64 {lv}, {rv}").unwrap();
+        BinOp::Div | BinOp::Mod => {
+            let id = *ctx.cont_id;
+            *ctx.cont_id += 1;
+            let zero_l = format!("{prefix}_d0_{id}");
+            let ok_l = format!("{prefix}_dok_{id}");
+            writeln!(code, "  %{prefix}_z{id} = icmp eq i64 {rv}, 0").unwrap();
+            writeln!(
+                code,
+                "  br i1 %{prefix}_z{id}, label %{zero_l}, label %{ok_l}"
+            )
+            .unwrap();
+            writeln!(code, "{zero_l}:").unwrap();
+            writeln!(
+                code,
+                "  call void @sz_panic(ptr getelementptr inbounds ([17 x i8], ptr @.div0, i64 0, i64 0))"
+            )
+            .unwrap();
+            writeln!(code, "  unreachable").unwrap();
+            writeln!(code, "{ok_l}:").unwrap();
+            if *op == BinOp::Div {
+                writeln!(code, "  %{prefix}_v = sdiv i64 {lv}, {rv}").unwrap();
+            } else {
+                writeln!(code, "  %{prefix}_v = srem i64 {lv}, {rv}").unwrap();
+            }
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        BinOp::Mod => {
-            writeln!(code, "  %{prefix}_v = srem i64 {lv}, {rv}").unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
-        }
-        BinOp::And => {
-            writeln!(code, "  %{prefix}_v = and i64 {lv}, {rv}").unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
-        }
-        BinOp::Or => {
-            writeln!(code, "  %{prefix}_v = or i64 {lv}, {rv}").unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
-        }
+        BinOp::And | BinOp::Or => unreachable!("short-circuit ops emit separately"),
         BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
             let pred = match op {
                 BinOp::Eq => "eq",
@@ -2534,6 +2560,62 @@ fn emit_binary(
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
     }
+}
+
+fn emit_short_circuit(
+    is_and: bool,
+    left: &Expr,
+    right: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, (String, Kind)>,
+    prefix: &str,
+) -> Emitted {
+    let id = *ctx.cont_id;
+    *ctx.cont_id += 1;
+    let after_l = format!("{prefix}_al_{id}");
+    let rhs_l = format!("{prefix}_rhs_{id}");
+    let after_r = format!("{prefix}_ar_{id}");
+    let done_l = format!("{prefix}_sc_{id}");
+    let le = emit_expr(left, ctx, locals, &format!("{prefix}_l"));
+    let mut code = le.code;
+    let lv = as_i64(&mut code, le.kind, &le.value, &format!("{prefix}_l0"));
+    writeln!(code, "  br label %{after_l}").unwrap();
+    writeln!(code, "{after_l}:").unwrap();
+    writeln!(code, "  %{prefix}_nz{id} = icmp ne i64 {lv}, 0").unwrap();
+    if is_and {
+        writeln!(
+            code,
+            "  br i1 %{prefix}_nz{id}, label %{rhs_l}, label %{done_l}"
+        )
+        .unwrap();
+    } else {
+        writeln!(
+            code,
+            "  br i1 %{prefix}_nz{id}, label %{done_l}, label %{rhs_l}"
+        )
+        .unwrap();
+    }
+    writeln!(code, "{rhs_l}:").unwrap();
+    let re = emit_expr(right, ctx, locals, &format!("{prefix}_r"));
+    code.push_str(&re.code);
+    let rv = as_i64(&mut code, re.kind, &re.value, &format!("{prefix}_r0"));
+    writeln!(code, "  br label %{after_r}").unwrap();
+    writeln!(code, "{after_r}:").unwrap();
+    writeln!(code, "  %{prefix}_rnz{id} = icmp ne i64 {rv}, 0").unwrap();
+    writeln!(
+        code,
+        "  %{prefix}_rb{id} = zext i1 %{prefix}_rnz{id} to i64"
+    )
+    .unwrap();
+    writeln!(code, "  br label %{done_l}").unwrap();
+    writeln!(code, "{done_l}:").unwrap();
+    let early = if is_and { "0" } else { "1" };
+    writeln!(
+        code,
+        "  %{prefix}_v = phi i64 [ {early}, %{after_l} ], [ %{prefix}_rb{id}, %{after_r} ]"
+    )
+    .unwrap();
+    val_emitted(code, format!("%{prefix}_v"), Kind::Int)
 }
 
 fn emit_view_box(
@@ -4412,7 +4494,7 @@ mod tests {
     #[test]
     fn emit_str_starts_with_compile() {
         let src = r#"@main def main: IO[Unit] =
-  IO.println(if (Str.startsWith("ab", "a") == 1) "yes" else "no")
+  IO.println(if (Str.startsWith("ab", "a")) "yes" else "no")
 "#;
         let p = crate::lower::lower_program(parse(src).unwrap());
         crate::typ::typecheck(&p).expect("typecheck");

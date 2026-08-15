@@ -1,6 +1,7 @@
 //! Deterministic fuzz alphabet, corpus, and `repro.toml` (CLI search; no runtime machinery).
 
 use crate::ast::{Expr, ExprKind, Program};
+use serde::Deserialize;
 
 const LCG_M: i64 = 2_147_483_647;
 const LCG_A: i64 = 48_271;
@@ -131,9 +132,19 @@ fn fuzz_event_kind(
     drivers: &[String],
 ) -> (String, i64) {
     if k <= 1 {
-        let s = lcg_next(s);
-        let n = n_buttons.max(1);
-        (format!("tap {}", lcg_below(s, n)), s)
+        if n_buttons > 0 {
+            let s = lcg_next(s);
+            let n = n_buttons.max(1);
+            (format!("tap {}", lcg_below(s, n)), s)
+        } else if !drivers.is_empty() {
+            let s = lcg_next(s);
+            let spec = &drivers[lcg_below(s, drivers.len() as i64) as usize];
+            let s = lcg_next(s);
+            (drive_line(spec, s), s)
+        } else {
+            let s = lcg_next(s);
+            (format!("pump {}", 1 + lcg_below(s, 3)), s)
+        }
     } else if k == 2 {
         let s = lcg_next(s);
         (format!("pump {}", 1 + lcg_below(s, 3)), s)
@@ -370,77 +381,33 @@ fn collect_sometimes(e: &Expr, acc: &mut Vec<String>) {
     e.for_each_child(|c| collect_sometimes(c, acc));
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, Deserialize)]
 pub struct Repro {
+    #[serde(default)]
     pub seed: i64,
     pub schedule_seed: Option<String>,
+    #[serde(default)]
     pub events: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReproFile {
+    #[serde(default)]
+    fuzz: Repro,
+}
+
+pub fn parse_repro(text: &str) -> Result<Repro, String> {
+    let parsed: ReproFile = toml::from_str(text).map_err(|e| e.to_string())?;
+    Ok(parsed.fuzz)
 }
 
 pub fn repro_text(seed: i64, schedule_seed: &str, events: &[String]) -> String {
     let mut out = format!("[fuzz]\nseed = {seed}\n");
     if !schedule_seed.is_empty() {
-        out.push_str(&format!("schedule_seed = {schedule_seed}\n"));
+        out.push_str(&format!("schedule_seed = \"{schedule_seed}\"\n"));
     }
     let quoted: Vec<String> = events.iter().map(|e| format!("\"{e}\"")).collect();
     out.push_str(&format!("events = [{}]\n", quoted.join(", ")));
-    out
-}
-
-pub fn parse_repro(text: &str) -> Repro {
-    let mut repro = Repro::default();
-    let mut in_fuzz = false;
-    for raw in text.lines() {
-        let line = raw.trim();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        if line.starts_with('[') {
-            in_fuzz = line == "[fuzz]";
-            continue;
-        }
-        if !in_fuzz {
-            continue;
-        }
-        if let Some(rest) = line.strip_prefix("seed") {
-            if let Some(v) = rest.trim().strip_prefix('=') {
-                repro.seed = v.trim().parse().unwrap_or(0);
-            }
-        } else if let Some(rest) = line.strip_prefix("schedule_seed") {
-            if let Some(v) = rest.trim().strip_prefix('=') {
-                let s = v.trim().to_string();
-                if !s.is_empty() {
-                    repro.schedule_seed = Some(s);
-                }
-            }
-        } else if let Some(rest) = line.strip_prefix("events") {
-            if let Some(v) = rest.trim().strip_prefix('=') {
-                repro.events = parse_toml_string_array(v.trim());
-            }
-        }
-    }
-    repro
-}
-
-fn parse_toml_string_array(s: &str) -> Vec<String> {
-    let s = s.trim();
-    let s = s.strip_prefix('[').unwrap_or(s);
-    let s = s.strip_suffix(']').unwrap_or(s);
-    let mut out = Vec::new();
-    let mut cur = String::new();
-    let mut in_str = false;
-    for ch in s.chars() {
-        if ch == '"' {
-            if in_str {
-                out.push(std::mem::take(&mut cur));
-                in_str = false;
-            } else {
-                in_str = true;
-            }
-        } else if in_str {
-            cur.push(ch);
-        }
-    }
     out
 }
 
@@ -476,10 +443,16 @@ mod tests {
     #[test]
     fn repro_roundtrip() {
         let text = repro_text(7, "9", &["tap 0".into(), "pump 1".into()]);
-        let r = parse_repro(&text);
+        let r = parse_repro(&text).expect("repro toml");
         assert_eq!(r.seed, 7);
         assert_eq!(r.schedule_seed.as_deref(), Some("9"));
         assert_eq!(r.events, vec!["tap 0", "pump 1"]);
+    }
+
+    #[test]
+    fn parse_repro_rejects_invalid_toml() {
+        assert!(parse_repro("not toml").is_err());
+        assert!(parse_repro("[fuzz]\nevents = 1\n").is_err());
     }
 
     #[test]

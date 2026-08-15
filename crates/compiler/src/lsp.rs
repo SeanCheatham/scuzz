@@ -63,7 +63,12 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
         } else if method == "initialized" || method.is_empty() {
             continue;
         } else if let Some(n) = id {
-            write_result(&mut writer, Some(n), "null")?;
+            write_error(
+                &mut writer,
+                Some(n),
+                -32601,
+                &format!("method not found: {method}"),
+            )?;
         }
     }
     Ok(())
@@ -105,11 +110,27 @@ fn write_msg<W: Write>(writer: &mut W, body: &str) -> Result<()> {
     Ok(())
 }
 
-fn write_result<W: Write>(writer: &mut W, id: Option<i64>, result: &str) -> Result<()> {
-    let n = id.unwrap_or(0);
+fn write_result<W: Write>(writer: &mut W, id: Option<String>, result: &str) -> Result<()> {
+    let n = id.unwrap_or_else(|| "null".into());
     write_msg(
         writer,
         &format!(r#"{{"jsonrpc":"2.0","id":{n},"result":{result}}}"#),
+    )
+}
+
+fn write_error<W: Write>(
+    writer: &mut W,
+    id: Option<String>,
+    code: i64,
+    message: &str,
+) -> Result<()> {
+    let n = id.unwrap_or_else(|| "null".into());
+    write_msg(
+        writer,
+        &format!(
+            r#"{{"jsonrpc":"2.0","id":{n},"error":{{"code":{code},"message":{}}}}}"#,
+            json_str(message)
+        ),
     )
 }
 
@@ -218,8 +239,17 @@ fn src_files(root: &Path) -> Result<Vec<PathBuf>> {
 fn lsp_diagnostic_json(d: &Diagnostic) -> String {
     let line = d.line.unwrap_or(1).saturating_sub(1);
     let col = d.column.unwrap_or(1).saturating_sub(1);
+    let mut end_line = d.end_line.unwrap_or(d.line.unwrap_or(1)).saturating_sub(1);
+    let mut end_col = d
+        .end_column
+        .unwrap_or(d.column.unwrap_or(1))
+        .saturating_sub(1);
+    if end_line < line || (end_line == line && end_col <= col) {
+        end_line = line;
+        end_col = col.saturating_add(1);
+    }
     format!(
-        r#"{{"range":{{"start":{{"line":{line},"character":{col}}},"end":{{"line":{line},"character":{col}}}}},"severity":1,"message":{}}}"#,
+        r#"{{"range":{{"start":{{"line":{line},"character":{col}}},"end":{{"line":{end_line},"character":{end_col}}}}},"severity":1,"message":{}}}"#,
         json_str(&d.message)
     )
 }
@@ -251,7 +281,16 @@ fn diag_path(root: &Path, file: &str) -> PathBuf {
 
 fn file_uri(path: &Path) -> String {
     let abs = fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    format!("file://{}", abs.display())
+    let mut out = String::from("file://");
+    for b in abs.to_string_lossy().as_bytes() {
+        match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => {
+                out.push(*b as char)
+            }
+            _ => out.push_str(&format!("%{:02X}", b)),
+        }
+    }
+    out
 }
 
 fn root_from_init(body: &str) -> Option<PathBuf> {
@@ -268,7 +307,27 @@ fn root_from_init(body: &str) -> Option<PathBuf> {
 fn uri_to_path(uri: &str) -> PathBuf {
     let rest = uri.strip_prefix("file://").unwrap_or(uri);
     let rest = rest.strip_prefix("localhost").unwrap_or(rest);
-    PathBuf::from(rest)
+    PathBuf::from(percent_decode(rest))
+}
+
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(v) =
+                u8::from_str_radix(std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or(""), 16)
+            {
+                out.push(v);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn doc_path_from_message(body: &str) -> Option<PathBuf> {
@@ -310,8 +369,36 @@ fn json_string_field(body: &str, key: &str) -> Option<String> {
     Some(out)
 }
 
-fn json_id(body: &str) -> Option<i64> {
-    json_i64_field(body, "id")
+fn json_id(body: &str) -> Option<String> {
+    let pat = "\"id\"";
+    let i = body.find(pat)?;
+    let rest = body[i + pat.len()..].trim_start().strip_prefix(':')?;
+    let rest = rest.trim_start();
+    if rest.starts_with('"') {
+        let s = json_string_field(body, "id")?;
+        return Some(json_str(&s));
+    }
+    if rest.starts_with("null") {
+        return Some("null".into());
+    }
+    let mut n = String::new();
+    let mut chars = rest.chars();
+    if rest.starts_with('-') {
+        n.push('-');
+        chars.next();
+    }
+    for c in chars {
+        if c.is_ascii_digit() {
+            n.push(c);
+        } else {
+            break;
+        }
+    }
+    if n.is_empty() || n == "-" {
+        None
+    } else {
+        Some(n)
+    }
 }
 
 fn json_i64_field(body: &str, key: &str) -> Option<i64> {
@@ -444,15 +531,15 @@ mod tests {
         let main_uri = format!("file://{}", main.display());
         let src = fs::read_to_string(&main).unwrap();
         let off = src.find("println").unwrap();
-        let (line, col) = crate::span::offset_to_line_col(&src, off);
+        let (line, col) = crate::span::offset_to_utf16_pos(&src, off);
         let init = format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
         );
         let hover = format!(
             r#"{{"jsonrpc":"2.0","id":3,"method":"textDocument/hover","params":{{"textDocument":{{"uri":{}}},"position":{{"line":{},"character":{}}}}}}}"#,
             json_str(&main_uri),
-            line - 1,
-            col - 1
+            line,
+            col
         );
         let mut input = Vec::new();
         input.extend(frame(&init));
@@ -483,15 +570,15 @@ mod tests {
         let main = canonicalize_source_path(&root.join("src/Main.scuzz"));
         let main_uri = format!("file://{}", main.display());
         let off = src.find("IO.").unwrap() + 3;
-        let (line, col) = crate::span::offset_to_line_col(src, off);
+        let (line, col) = crate::span::offset_to_utf16_pos(src, off);
         let init = format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
         );
         let comp = format!(
             r#"{{"jsonrpc":"2.0","id":4,"method":"textDocument/completion","params":{{"textDocument":{{"uri":{}}},"position":{{"line":{},"character":{}}}}}}}"#,
             json_str(&main_uri),
-            line - 1,
-            col - 1
+            line,
+            col
         );
         let mut input = Vec::new();
         input.extend(frame(&init));
@@ -524,15 +611,15 @@ mod tests {
         let main = canonicalize_source_path(&root.join("src/Main.scuzz"));
         let main_uri = format!("file://{}", main.display());
         let call = formatted.rfind("add").unwrap();
-        let (line, col) = crate::span::offset_to_line_col(&formatted, call);
+        let (line, col) = crate::span::offset_to_utf16_pos(&formatted, call);
         let init = format!(
             r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
         );
         let defn = format!(
             r#"{{"jsonrpc":"2.0","id":5,"method":"textDocument/definition","params":{{"textDocument":{{"uri":{}}},"position":{{"line":{},"character":{}}}}}}}"#,
             json_str(&main_uri),
-            line - 1,
-            col - 1
+            line,
+            col
         );
         let mut input = Vec::new();
         input.extend(frame(&init));
@@ -545,5 +632,43 @@ mod tests {
         assert!(text.contains("definitionProvider"), "{text}");
         assert!(text.contains("\"id\":5"), "{text}");
         assert!(text.contains("\"line\":0"), "{text}");
+    }
+
+    #[test]
+    fn lsp_unknown_method_returns_protocol_error() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        let mut input = Vec::new();
+        input.extend(frame(
+            r#"{"jsonrpc":"2.0","id":"abc","method":"textDocument/foo","params":{}}"#,
+        ));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("\"id\":\"abc\""), "{text}");
+        assert!(text.contains("-32601"), "{text}");
+        assert!(text.contains("method not found"), "{text}");
+    }
+
+    #[test]
+    fn lsp_encodes_file_uri() {
+        assert_eq!(percent_decode("file:///tmp/a%20b"), "file:///tmp/a b");
+        let p = PathBuf::from("/tmp/hello world");
+        let uri = {
+            let mut out = String::from("file://");
+            for b in p.to_string_lossy().as_bytes() {
+                match b {
+                    b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'/' | b'-' | b'_' | b'.' | b'~' => {
+                        out.push(*b as char)
+                    }
+                    _ => out.push_str(&format!("%{:02X}", b)),
+                }
+            }
+            out
+        };
+        assert!(uri.contains("%20"), "{uri}");
+        assert_eq!(uri_to_path(&uri), p);
     }
 }

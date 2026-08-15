@@ -312,24 +312,26 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "IO.ensure",
         "IO.ensure(inner: IO[T], finalizer: IO[Unit]): IO[T]",
     ),
-    ("Fiber.fork", "Fiber.fork(inner: IO[T]): IO[Fiber]"),
-    ("Fiber.join", "Fiber.join(f: Fiber): IO[T]"),
-    ("Fiber.interrupt", "Fiber.interrupt(f: Fiber): IO[Unit]"),
+    ("Fiber.fork", "Fiber.fork(inner: IO[T]): IO[Fiber[T]]"),
+    ("Fiber.join", "Fiber.join(f: Fiber[T]): IO[T]"),
+    ("Fiber.interrupt", "Fiber.interrupt(f: Fiber[T]): IO[Unit]"),
     ("Str.fromInt", "Str.fromInt(n: Int): String"),
     (
         "Str.startsWith",
-        "Str.startsWith(s: String, prefix: String): Int",
+        "Str.startsWith(s: String, prefix: String): Bool",
     ),
     ("Str.trim", "Str.trim(s: String): String"),
-    ("Signal.int", "Signal.int(n: Int): Signal"),
-    ("Signal.get", "Signal.get(s: Signal): Int"),
-    ("Signal.set", "Signal.set(s: Signal, n: Int): Unit"),
-    ("Signal.str", "Signal.str(s: String): Signal"),
+    ("Signal.int", "Signal.int(n: Int): SignalInt"),
+    ("Signal.get", "Signal.get(s: SignalInt): Int"),
+    ("Signal.set", "Signal.set(s: SignalInt, n: Int): Unit"),
+    ("Signal.str", "Signal.str(s: String): SignalStr"),
     (
         "Signal.map",
-        "Signal.map(s: Signal, f: Int => String): Signal",
+        "Signal.map(s: SignalInt, f: Int => String): SignalStr",
     ),
-    ("Signal.list", "Signal.list(xs: List[T]): Signal"),
+    ("Signal.list", "Signal.list(xs: List[T]): SignalList"),
+    ("List.isEmpty", "List.isEmpty(xs: List[T]): Bool"),
+    ("Str.eq", "Str.eq(a: String, b: String): Bool"),
     (
         "List.filter",
         "List.filter(xs: List[T], pred: T => Bool): List[T]",
@@ -340,7 +342,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.setAt(xs: List[T], i: Int, v: T): List[T]",
     ),
     ("View.text", "View.text(s: String): View"),
-    ("View.bindText", "View.bindText(s: Signal): View"),
+    ("View.bindText", "View.bindText(s: SignalStr): View"),
     (
         "View.button",
         "View.button(label: String, onTap: _ => Unit): View",
@@ -380,11 +382,11 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ),
     (
         "View.visibility",
-        "View.visibility(sig: Signal, child: View): View",
+        "View.visibility(sig: SignalInt, child: View): View",
     ),
     (
         "View.offstage",
-        "View.offstage(sig: Signal, child: View): View",
+        "View.offstage(sig: SignalInt, child: View): View",
     ),
     (
         "View.unconstrainedBox",
@@ -392,31 +394,34 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ),
     (
         "View.checkbox",
-        "View.checkbox(sig: Signal, label: String): View",
+        "View.checkbox(sig: SignalInt, label: String): View",
     ),
     (
         "View.radio",
-        "View.radio(sig: Signal, value: Int, label: String): View",
+        "View.radio(sig: SignalInt, value: Int, label: String): View",
     ),
-    ("View.slider", "View.slider(sig: Signal): View"),
-    ("View.progress", "View.progress(sig: Signal): View"),
+    ("View.slider", "View.slider(sig: SignalInt): View"),
+    ("View.progress", "View.progress(sig: SignalInt): View"),
     (
         "View.circularProgress",
-        "View.circularProgress(sig: Signal): View",
+        "View.circularProgress(sig: SignalInt): View",
     ),
     ("View.avatar", "View.avatar(label: String): View"),
     (
         "View.switch",
-        "View.switch(sig: Signal, label: String): View",
+        "View.switch(sig: SignalInt, label: String): View",
     ),
-    ("View.chip", "View.chip(sig: Signal, label: String): View"),
+    (
+        "View.chip",
+        "View.chip(sig: SignalInt, label: String): View",
+    ),
     (
         "View.filterChip",
-        "View.filterChip(sig: Signal, label: String): View",
+        "View.filterChip(sig: SignalInt, label: String): View",
     ),
     (
         "View.choiceChip",
-        "View.choiceChip(sig: Signal, value: Int, label: String): View",
+        "View.choiceChip(sig: SignalInt, value: Int, label: String): View",
     ),
     (
         "View.actionChip",
@@ -424,7 +429,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ),
     (
         "View.inputChip",
-        "View.inputChip(sig: Signal, label: String): View",
+        "View.inputChip(sig: SignalInt, label: String): View",
     ),
     (
         "View.listTile",
@@ -432,27 +437,30 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ),
     (
         "View.checkboxListTile",
-        "View.checkboxListTile(sig: Signal, title: String): View",
+        "View.checkboxListTile(sig: SignalInt, title: String): View",
     ),
     (
         "View.switchListTile",
-        "View.switchListTile(sig: Signal, title: String): View",
+        "View.switchListTile(sig: SignalInt, title: String): View",
     ),
     (
         "View.radioListTile",
-        "View.radioListTile(sig: Signal, value: Int, title: String): View",
+        "View.radioListTile(sig: SignalInt, value: Int, title: String): View",
     ),
     (
         "View.segmented",
-        "View.segmented(sig: Signal, left: String, right: String): View",
+        "View.segmented(sig: SignalInt, left: String, right: String): View",
     ),
-    ("View.badge", "View.badge(sig: Signal, child: View): View"),
+    (
+        "View.badge",
+        "View.badge(sig: SignalInt, child: View): View",
+    ),
     ("View.card", "View.card(child: View): View"),
     ("View.divider", "View.divider(): View"),
     ("View.verticalDivider", "View.verticalDivider(): View"),
     (
         "View.expansionTile",
-        "View.expansionTile(sig: Signal, title: String, child: View): View",
+        "View.expansionTile(sig: SignalInt, title: String, child: View): View",
     ),
     ("View.scroll", "View.scroll(child: View): View"),
     ("View.scrollH", "View.scrollH(child: View): View"),
@@ -463,7 +471,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("View.stack", "View.stack(...): View"),
     (
         "View.each",
-        "View.each(items: Signal, row: String => View): View",
+        "View.each(items: SignalList, row: String => View): View",
     ),
     ("View.expanded", "View.expanded(child: View): View"),
     ("View.stretch", "View.stretch(child: View): View"),
@@ -514,34 +522,76 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Law.check(name: String, ok: Bool, value: T): T",
     ),
     ("Law.sometimes", "Law.sometimes(name: String): Unit"),
+    ("Law.force", "Law.force(inner: IO[Bool]): Bool"),
+    ("Law.assert", "Law.assert(name: String, ok: Bool): IO[Unit]"),
+    ("Ref.of", "Ref.of(s: String): IO[Ref[String]]"),
+    ("Ref.get", "Ref.get(r: Ref[String]): IO[String]"),
+    ("Ref.set", "Ref.set(r: Ref[String], s: String): IO[Unit]"),
+    ("Queue.unbounded", "Queue.unbounded(): IO[Queue[String]]"),
+    (
+        "Queue.offer",
+        "Queue.offer(q: Queue[String], s: String): IO[Unit]",
+    ),
+    ("Queue.take", "Queue.take(q: Queue[String]): IO[String]"),
+    ("Deferred.empty", "Deferred.empty(): IO[Deferred[String]]"),
+    (
+        "Deferred.complete",
+        "Deferred.complete(d: Deferred[String], s: String): IO[Unit]",
+    ),
+    (
+        "Deferred.get",
+        "Deferred.get(d: Deferred[String]): IO[String]",
+    ),
+    ("Str.concat", "Str.concat(a: String, b: String): String"),
+    ("List.cons", "List.cons(x: T, xs: List[T]): List[T]"),
+    ("List.append", "List.append(xs: List[T], x: T): List[T]"),
     ("Fs.read", "Fs.read(path: String): IO[String]"),
     ("Fs.write", "Fs.write(path: String, body: String): IO[Unit]"),
     ("Sys.args", "Sys.args(): IO[List]"),
     ("Sys.readLine", "Sys.readLine(): IO[String]"),
-    ("Clock.nowMillis", "Clock.nowMillis(): IO[Int]"),
+    ("Clock.realTime", "Clock.realTime(): IO[Int]"),
+    ("Clock.monotonic", "Clock.monotonic(): IO[Int]"),
     ("Net.httpGet", "Net.httpGet(url: String): IO[String]"),
     (
         "Net.serve",
-        "Net.serve(port: Int, handle: String => String): IO[Unit]",
+        "Net.serve(port: Int, handle: String => IO[Unit]): IO[Unit]",
     ),
     (
         "Resource.make",
-        "Resource.make(acquire: IO[String], release: String => IO[Unit]): Resource",
+        "Resource.make(acquire: IO[String], release: String => IO[Unit]): Resource[String]",
     ),
     (
         "Resource.use",
-        "Resource.use(r: Resource, f: String => IO[T]): IO[T]",
+        "Resource.use(r: Resource[String], f: String => IO[T]): IO[T]",
     ),
-    ("Stream.emit", "Stream.emit(s: String): Stream"),
+    ("Stream.emit", "Stream.emit(s: String): Stream[String]"),
     (
         "Stream.compileToList",
-        "Stream.compileToList(s: Stream): IO[List]",
+        "Stream.compileToList(s: Stream[String]): IO[List[String]]",
     ),
 ];
 
 pub(crate) fn kit_sig(callee: &str) -> Option<&'static str> {
     KIT_SIGS.iter().find(|(k, _)| *k == callee).map(|(_, s)| *s)
 }
+
+#[cfg(test)]
+const TYPED_KIT_CALLEES: &[&str] = &[
+    "Str.startsWith",
+    "Str.eq",
+    "List.isEmpty",
+    "Law.force",
+    "Fiber.fork",
+    "Fiber.join",
+    "Ref.of",
+    "Queue.unbounded",
+    "Deferred.empty",
+    "Resource.make",
+    "Stream.emit",
+    "View.bindText",
+    "Signal.get",
+    "Signal.str",
+];
 
 #[cfg(test)]
 mod tests {
@@ -645,7 +695,7 @@ mod tests {
 "#;
         let h = hover_src(src, "checkbox");
         assert!(
-            h.contains("View.checkbox(sig: Signal, label: String): View"),
+            h.contains("View.checkbox(sig: SignalInt, label: String): View"),
             "{h}"
         );
     }
@@ -660,7 +710,7 @@ mod tests {
 "#;
         let h = hover_src(src, "radio");
         assert!(
-            h.contains("View.radio(sig: Signal, value: Int, label: String): View"),
+            h.contains("View.radio(sig: SignalInt, value: Int, label: String): View"),
             "{h}"
         );
     }
@@ -674,7 +724,7 @@ mod tests {
   } yield ()
 "#;
         let h = hover_src(src, "slider");
-        assert!(h.contains("View.slider(sig: Signal): View"), "{h}");
+        assert!(h.contains("View.slider(sig: SignalInt): View"), "{h}");
     }
 
     #[test]
@@ -686,7 +736,7 @@ mod tests {
   } yield ()
 "#;
         let h = hover_src(src, "progress");
-        assert!(h.contains("View.progress(sig: Signal): View"), "{h}");
+        assert!(h.contains("View.progress(sig: SignalInt): View"), "{h}");
     }
 
     #[test]
@@ -699,7 +749,7 @@ mod tests {
 "#;
         let h = hover_src(src, "circularProgress");
         assert!(
-            h.contains("View.circularProgress(sig: Signal): View"),
+            h.contains("View.circularProgress(sig: SignalInt): View"),
             "{h}"
         );
     }
@@ -723,7 +773,7 @@ mod tests {
 "#;
         let h = hover_src(src, "switch");
         assert!(
-            h.contains("View.switch(sig: Signal, label: String): View"),
+            h.contains("View.switch(sig: SignalInt, label: String): View"),
             "{h}"
         );
     }
@@ -738,7 +788,7 @@ mod tests {
 "#;
         let h = hover_src(src, "chip");
         assert!(
-            h.contains("View.chip(sig: Signal, label: String): View"),
+            h.contains("View.chip(sig: SignalInt, label: String): View"),
             "{h}"
         );
     }
@@ -753,7 +803,7 @@ mod tests {
 "#;
         let h = hover_src(src, "filterChip");
         assert!(
-            h.contains("View.filterChip(sig: Signal, label: String): View"),
+            h.contains("View.filterChip(sig: SignalInt, label: String): View"),
             "{h}"
         );
     }
@@ -768,7 +818,7 @@ mod tests {
 "#;
         let h = hover_src(src, "choiceChip");
         assert!(
-            h.contains("View.choiceChip(sig: Signal, value: Int, label: String): View"),
+            h.contains("View.choiceChip(sig: SignalInt, value: Int, label: String): View"),
             "{h}"
         );
     }
@@ -795,7 +845,7 @@ mod tests {
 "#;
         let h = hover_src(src, "inputChip");
         assert!(
-            h.contains("View.inputChip(sig: Signal, label: String): View"),
+            h.contains("View.inputChip(sig: SignalInt, label: String): View"),
             "{h}"
         );
     }
@@ -822,7 +872,7 @@ mod tests {
 "#;
         let h = hover_src(src, "checkboxListTile");
         assert!(
-            h.contains("View.checkboxListTile(sig: Signal, title: String): View"),
+            h.contains("View.checkboxListTile(sig: SignalInt, title: String): View"),
             "{h}"
         );
     }
@@ -837,7 +887,7 @@ mod tests {
 "#;
         let h = hover_src(src, "switchListTile");
         assert!(
-            h.contains("View.switchListTile(sig: Signal, title: String): View"),
+            h.contains("View.switchListTile(sig: SignalInt, title: String): View"),
             "{h}"
         );
     }
@@ -852,7 +902,7 @@ mod tests {
 "#;
         let h = hover_src(src, "radioListTile");
         assert!(
-            h.contains("View.radioListTile(sig: Signal, value: Int, title: String): View"),
+            h.contains("View.radioListTile(sig: SignalInt, value: Int, title: String): View"),
             "{h}"
         );
     }
@@ -867,7 +917,7 @@ mod tests {
 "#;
         let h = hover_src(src, "segmented");
         assert!(
-            h.contains("View.segmented(sig: Signal, left: String, right: String): View"),
+            h.contains("View.segmented(sig: SignalInt, left: String, right: String): View"),
             "{h}"
         );
     }
@@ -975,7 +1025,7 @@ mod tests {
 "#;
         let h = hover_src(src, "visibility");
         assert!(
-            h.contains("View.visibility(sig: Signal, child: View): View"),
+            h.contains("View.visibility(sig: SignalInt, child: View): View"),
             "{h}"
         );
     }
@@ -990,7 +1040,7 @@ mod tests {
 "#;
         let h = hover_src(src, "offstage");
         assert!(
-            h.contains("View.offstage(sig: Signal, child: View): View"),
+            h.contains("View.offstage(sig: SignalInt, child: View): View"),
             "{h}"
         );
     }
@@ -1017,7 +1067,7 @@ mod tests {
 "#;
         let h = hover_src(src, "badge");
         assert!(
-            h.contains("View.badge(sig: Signal, child: View): View"),
+            h.contains("View.badge(sig: SignalInt, child: View): View"),
             "{h}"
         );
     }
@@ -1059,7 +1109,7 @@ mod tests {
 "#;
         let h = hover_src(src, "expansionTile");
         assert!(
-            h.contains("View.expansionTile(sig: Signal, title: String, child: View): View"),
+            h.contains("View.expansionTile(sig: SignalInt, title: String, child: View): View"),
             "{h}"
         );
     }
@@ -1086,7 +1136,7 @@ mod tests {
 "#;
         let h = hover_src(src, "each");
         assert!(
-            h.contains("View.each(items: Signal, row: String => View): View"),
+            h.contains("View.each(items: SignalList, row: String => View): View"),
             "{h}"
         );
     }
@@ -1130,11 +1180,11 @@ mod tests {
     #[test]
     fn hovers_str_starts_with() {
         let src = r#"@main def main: IO[Unit] =
-  IO.println(if (Str.startsWith("ab", "a") == 1) "y" else "n")
+  IO.println(if (Str.startsWith("ab", "a")) "y" else "n")
 "#;
         let h = hover_src(src, "startsWith");
         assert!(
-            h.contains("Str.startsWith(s: String, prefix: String): Int"),
+            h.contains("Str.startsWith(s: String, prefix: String): Bool"),
             "{h}"
         );
     }
@@ -1184,6 +1234,21 @@ mod tests {
         assert!(
             h.contains("Color.rgba(r: Int, g: Int, b: Int, a: Int): Int"),
             "{h}"
+        );
+    }
+
+    #[test]
+    fn kit_sigs_are_unique_and_cover_typed_kits() {
+        let mut seen = std::collections::BTreeSet::new();
+        for (k, _) in KIT_SIGS {
+            assert!(seen.insert(*k), "duplicate kit sig {k}");
+        }
+        for name in TYPED_KIT_CALLEES {
+            assert!(kit_sig(name).is_some(), "missing kit sig for {name}");
+        }
+        assert_eq!(
+            kit_sig("View.bindText"),
+            Some("View.bindText(s: SignalStr): View")
         );
     }
 }

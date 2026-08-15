@@ -198,8 +198,9 @@ impl Expr {
                 param,
                 body: Box::new(f(*body)?),
             },
-            ExprKind::HandleErrorWith { inner, body } => ExprKind::HandleErrorWith {
+            ExprKind::HandleErrorWith { inner, param, body } => ExprKind::HandleErrorWith {
                 inner: Box::new(f(*inner)?),
+                param,
                 body: Box::new(f(*body)?),
             },
             ExprKind::Let { name, value, body } => ExprKind::Let {
@@ -325,7 +326,7 @@ impl Expr {
             | ExprKind::Field { base: x, .. }
             | ExprKind::Lambda { body: x, .. } => f(x),
             ExprKind::FlatMap { inner, body, .. }
-            | ExprKind::HandleErrorWith { inner, body }
+            | ExprKind::HandleErrorWith { inner, body, .. }
             | ExprKind::Let {
                 value: inner, body, ..
             }
@@ -444,8 +445,12 @@ pub enum ExprKind {
         param: Option<String>,
         body: Box<Expr>,
     },
-    /// `io.handleErrorWith(_ => body)`
-    HandleErrorWith { inner: Box<Expr>, body: Box<Expr> },
+    /// `io.handleErrorWith(err => body)` — param None means `_`
+    HandleErrorWith {
+        inner: Box<Expr>,
+        param: Option<String>,
+        body: Box<Expr>,
+    },
     /// `io.attempt`
     Attempt { inner: Box<Expr> },
     /// `IO.race(a, b)`

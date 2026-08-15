@@ -2,7 +2,9 @@ use crate::support::{compile_opts, resolve_dir, run_testrt, TestrtUi};
 use anyhow::{bail, Result};
 use scuzz_compiler::compile_prepared_program;
 use scuzz_compiler::driver::load_verify_program;
-use scuzz_compiler::fuzz::{count_prefix_lines, fuzz_script, lines_nonempty, script_text};
+use scuzz_compiler::fuzz::{
+    count_prefix_lines, drive_script_lines, fuzz_script, lines_nonempty, script_text,
+};
 use scuzz_compiler::mutate::{mutate_apply_mode, mutate_count_mode, MutateMode};
 use std::path::Path;
 use std::process::ExitCode;
@@ -72,6 +74,13 @@ pub fn cmd_mutate(
         }
     }
     println!("scuzz mutate: {killed} killed, {survived} survived ({take} ran)");
+    std::fs::create_dir_all(project_dir.join("build").join("mutate"))?;
+    std::fs::write(
+        project_dir.join("build").join("mutate").join("summary.toml"),
+        format!(
+            "[mutate]\nkilled = {killed}\nsurvived = {survived}\nran = {take}\nseed = {seed}\niters = {iters}\noracles = {oracles}\n"
+        ),
+    )?;
     if survived == 0 {
         println!("scuzz mutate ok");
         Ok(ExitCode::SUCCESS)
@@ -125,11 +134,11 @@ fn mutate_exec_ui(
     let n_buttons = count_prefix_lines(&dump, "button:");
     let n_fields = count_prefix_lines(&dump, "textfield:");
     let n_scrolls = count_prefix_lines(&dump, "scroll:");
-    if n_buttons + n_fields + n_scrolls == 0 {
-        return Ok(0);
-    }
     let drivers =
         lines_nonempty(&std::fs::read_to_string(out_dir.join("drivers.txt")).unwrap_or_default());
+    if n_buttons + n_fields + n_scrolls == 0 && drivers.is_empty() {
+        return Ok(0);
+    }
     for iter in 0..iters {
         let s = mutate_iter_seed(seed, mutant_index, iter);
         let events = fuzz_script(s, n_buttons, n_fields > 0, n_scrolls > 0, &drivers);
@@ -177,13 +186,16 @@ fn mutate_exec_io(
     iters: i64,
     seed: i64,
 ) -> Result<i32> {
-    let code = mutate_exec_io_at(exe, out_dir, "")?;
+    let code = mutate_exec_io_at(exe, out_dir, "", &[])?;
     if code != 0 {
         return Ok(code);
     }
+    let drivers =
+        lines_nonempty(&std::fs::read_to_string(out_dir.join("drivers.txt")).unwrap_or_default());
     for iter in 0..iters {
         let s = mutate_iter_seed(seed, mutant_index, iter);
-        let code = mutate_exec_io_at(exe, out_dir, &s.to_string())?;
+        let drives = drive_script_lines(s, &drivers);
+        let code = mutate_exec_io_at(exe, out_dir, &s.to_string(), &drives)?;
         if code != 0 {
             return Ok(code);
         }
@@ -191,8 +203,20 @@ fn mutate_exec_io(
     Ok(0)
 }
 
-fn mutate_exec_io_at(exe: &Path, out_dir: &Path, schedule_seed: &str) -> Result<i32> {
+fn mutate_exec_io_at(
+    exe: &Path,
+    out_dir: &Path,
+    schedule_seed: &str,
+    drives: &[String],
+) -> Result<i32> {
     let reached = out_dir.join("sometimes.reached");
+    let drive_path = out_dir.join("drive.txt");
     std::fs::write(&reached, "")?;
-    run_testrt(exe, &reached, schedule_seed, None, None)
+    std::fs::write(&drive_path, script_text(drives))?;
+    let drive = if drives.is_empty() {
+        None
+    } else {
+        Some(drive_path.as_path())
+    };
+    crate::support::run_testrt(exe, &reached, schedule_seed, None, drive)
 }

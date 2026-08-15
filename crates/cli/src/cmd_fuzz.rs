@@ -21,6 +21,9 @@ pub fn cmd_fuzz(
     if let Some(replay) = replay {
         return fuzz_replay(path, replay);
     }
+    if iters < 0 {
+        bail!("fuzz --iters N requires N >= 0");
+    }
     if exhaust {
         let depth = depth.ok_or_else(|| anyhow::anyhow!("fuzz --exhaust requires --depth N"))?;
         if depth <= 0 {
@@ -78,7 +81,7 @@ fn fuzz_replay(path: &Path, replay_path: &Path) -> Result<ExitCode> {
     let h = manifest.ui.as_ref().map(|u| u.height()).unwrap_or(120);
     let text = std::fs::read_to_string(replay_path)
         .with_context(|| format!("reading {}", replay_path.display()))?;
-    let repro = parse_repro(&text);
+    let repro = parse_repro(&text).map_err(|e| anyhow::anyhow!("repro.toml: {e}"))?;
     let sched_note = match &repro.schedule_seed {
         Some(s) => format!(", schedule_seed {s})"),
         None => ")".into(),
@@ -125,9 +128,9 @@ fn fuzz_probe(
     let n_fields = count_prefix_lines(&dump, "textfield:");
     let n_scrolls = count_prefix_lines(&dump, "scroll:");
     let drivers = read_drivers(project_dir);
-    if n_buttons + n_fields + n_scrolls == 0 {
+    if n_buttons + n_fields + n_scrolls == 0 && drivers.is_empty() {
         check_sometimes_campaign(project_dir, fuzz_dir)?;
-        println!("scuzz fuzz ok (no buttons, text fields, or scrolls; probe only)");
+        println!("scuzz fuzz ok (no buttons, text fields, scrolls, or drivers; probe only)");
         return Ok(ExitCode::SUCCESS);
     }
     if exhaust {
@@ -238,6 +241,19 @@ fn fuzz_loop(
         seed,
         corpus.len()
     );
+    write_fuzz_summary(
+        fuzz_dir,
+        project_dir,
+        seed,
+        iters,
+        true,
+        &read_drivers(project_dir),
+        &[],
+        &lines_nonempty(
+            &std::fs::read_to_string(fuzz_dir.join("sometimes.campaign")).unwrap_or_default(),
+        ),
+        None,
+    )?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -285,6 +301,19 @@ fn fuzz_io_loop(
         seed,
         corpus.len()
     );
+    write_fuzz_summary(
+        fuzz_dir,
+        project_dir,
+        seed,
+        iters,
+        true,
+        &drivers,
+        &[],
+        &lines_nonempty(
+            &std::fs::read_to_string(fuzz_dir.join("sometimes.campaign")).unwrap_or_default(),
+        ),
+        None,
+    )?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -321,6 +350,19 @@ fn fuzz_exhaust(
         "scuzz fuzz --exhaust ok (depth {}, {} scripts)",
         max_depth, script_index
     );
+    write_fuzz_summary(
+        fuzz_dir,
+        project_dir,
+        0,
+        script_index,
+        true,
+        &read_drivers(project_dir),
+        &[],
+        &lines_nonempty(
+            &std::fs::read_to_string(fuzz_dir.join("sometimes.campaign")).unwrap_or_default(),
+        ),
+        None,
+    )?;
     Ok(ExitCode::SUCCESS)
 }
 
@@ -435,6 +477,19 @@ fn fuzz_fail(
         project_dir.display(),
         repro.display()
     );
+    let _ = write_fuzz_summary(
+        fuzz_dir,
+        project_dir,
+        script_seed,
+        iter + 1,
+        false,
+        &read_drivers(project_dir),
+        &shrunk,
+        &lines_nonempty(
+            &std::fs::read_to_string(fuzz_dir.join("sometimes.campaign")).unwrap_or_default(),
+        ),
+        Some(&repro),
+    );
     bail!("fuzz failure");
 }
 
@@ -461,6 +516,19 @@ fn fuzz_exhaust_fail(
         "replay: scuzz fuzz {} --replay {}",
         project_dir.display(),
         repro.display()
+    );
+    let _ = write_fuzz_summary(
+        fuzz_dir,
+        project_dir,
+        depth,
+        script_index + 1,
+        false,
+        &read_drivers(project_dir),
+        &shrunk,
+        &lines_nonempty(
+            &std::fs::read_to_string(fuzz_dir.join("sometimes.campaign")).unwrap_or_default(),
+        ),
+        Some(&repro),
     );
     bail!("fuzz exhaust failure");
 }
@@ -498,6 +566,47 @@ fn merge_sometimes(reached_path: &Path, campaign_path: &Path) -> Result<()> {
         s
     };
     std::fs::write(campaign_path, text)?;
+    Ok(())
+}
+
+fn toml_str_array(items: &[String]) -> String {
+    items
+        .iter()
+        .map(|s| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn write_fuzz_summary(
+    fuzz_dir: &Path,
+    project_dir: &Path,
+    seed: i64,
+    iters: i64,
+    ok: bool,
+    drivers: &[String],
+    events: &[String],
+    reached: &[String],
+    repro: Option<&Path>,
+) -> Result<()> {
+    let repro_path = repro.map(|p| p.display().to_string()).unwrap_or_default();
+    let replay = match repro {
+        Some(p) => format!(
+            "scuzz fuzz {} --replay {}",
+            project_dir.display(),
+            p.display()
+        ),
+        None => String::new(),
+    };
+    let text = format!(
+        "[fuzz]\nok = {ok}\nseed = {seed}\niters = {iters}\ndrivers = [{drivers}]\nevents = [{events}]\nreachability = [{reached}]\nrepro = \"{repro}\"\nreplay = \"{replay}\"\n",
+        ok = if ok { "true" } else { "false" },
+        drivers = toml_str_array(drivers),
+        events = toml_str_array(events),
+        reached = toml_str_array(reached),
+        repro = repro_path.replace('\\', "\\\\").replace('"', "\\\""),
+        replay = replay.replace('\\', "\\\\").replace('"', "\\\""),
+    );
+    std::fs::write(fuzz_dir.join("summary.toml"), text)?;
     Ok(())
 }
 

@@ -62,6 +62,8 @@ Optional. Used by `scuzz run` / `test` / `package`.
 | `tap_text` | string (optional) | Text injected before the scripted tap (`SCUZZ_UI_TEXT`) |
 | `bundle_id` | string | Android package / iOS `CFBundleIdentifier` for `scuzz package` |
 
+Invalid `default_runtime`, non-positive `headless_size`, non-positive `headless_scale`, or an empty `bundle_id` fail load.
+
 ## Source layout (convention)
 
 ```

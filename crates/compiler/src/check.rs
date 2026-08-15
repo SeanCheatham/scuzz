@@ -7,7 +7,7 @@ use crate::overlay::{
     overlay_kind_from_path, residualize_refinements, OverlaySource,
 };
 use crate::parser::{parse_sources, parse_sources_recovering, ParseError};
-use crate::span::{offset_to_line_col, Span};
+use crate::span::{offset_to_utf16_pos, Span};
 use crate::typ::{typecheck_all, TypeError};
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
@@ -21,6 +21,8 @@ pub struct Diagnostic {
     pub file: Option<String>,
     pub line: Option<u32>,
     pub column: Option<u32>,
+    pub end_line: Option<u32>,
+    pub end_column: Option<u32>,
 }
 
 impl Diagnostic {
@@ -31,6 +33,8 @@ impl Diagnostic {
             file: None,
             line: None,
             column: None,
+            end_line: None,
+            end_column: None,
         }
     }
 
@@ -55,9 +59,12 @@ impl Diagnostic {
             .map(|(_, t)| t.as_str())
             .or_else(|| sources.first().map(|(_, t)| t.as_str()));
         if let Some(src) = text {
-            let (line, column) = offset_to_line_col(src, span.start);
-            self.line = Some(line);
-            self.column = Some(column);
+            let (line, column) = offset_to_utf16_pos(src, span.start);
+            let (end_line, end_column) = offset_to_utf16_pos(src, span.end);
+            self.line = Some(line.saturating_add(1));
+            self.column = Some(column.saturating_add(1));
+            self.end_line = Some(end_line.saturating_add(1));
+            self.end_column = Some(end_column.saturating_add(1));
         }
         self
     }
@@ -329,6 +336,8 @@ pub fn check_project_with(
     residualize_refinements(&mut program);
     program.law_names = law_names;
     let program = lower_program(program);
+    let mut program = program;
+    crate::typ::inject_builtin_enums(&mut program.enums);
     let type_errs = typecheck_all(&program);
     let had_type_err = !type_errs.is_empty();
     for e in type_errs {
@@ -398,8 +407,7 @@ pub fn hover_project(
     let Some(program) = program else {
         return Ok(None);
     };
-    let offset =
-        crate::span::line_col_to_offset(&text, line.saturating_add(1), character.saturating_add(1));
+    let offset = crate::span::utf16_pos_to_offset(&text, line, character);
     Ok(crate::hover::hover_in_source(
         &program, &label, &text, offset,
     ))
@@ -417,8 +425,7 @@ pub fn complete_project(
     else {
         return Ok(Vec::new());
     };
-    let offset =
-        crate::span::line_col_to_offset(&text, line.saturating_add(1), character.saturating_add(1));
+    let offset = crate::span::utf16_pos_to_offset(&text, line, character);
     Ok(crate::complete::complete_in_source(
         program.as_ref(),
         &label,
@@ -443,8 +450,7 @@ pub fn definition_project(
         return Ok(None);
     };
     let named = named_sources(&resolved);
-    let offset =
-        crate::span::line_col_to_offset(&text, line.saturating_add(1), character.saturating_add(1));
+    let offset = crate::span::utf16_pos_to_offset(&text, line, character);
     let Some(loc) =
         crate::definition::definition_in_sources(&program, &named, &label, &text, offset)
     else {
@@ -469,21 +475,16 @@ pub fn definition_project(
         .find(|(l, _)| *l == loc.file)
         .map(|(_, t)| t.as_str())
         .unwrap_or(text.as_str());
-    let (sl, sc) = offset_to_line_col(src, loc.start);
-    let (el, ec) = offset_to_line_col(src, loc.end);
-    Ok(Some((
-        dest,
-        sl.saturating_sub(1),
-        sc.saturating_sub(1),
-        el.saturating_sub(1),
-        ec.saturating_sub(1),
-    )))
+    let (sl, sc) = offset_to_utf16_pos(src, loc.start);
+    let (el, ec) = offset_to_utf16_pos(src, loc.end);
+    Ok(Some((dest, sl, sc, el, ec)))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::parser::parse_file;
+    use crate::span::offset_to_line_col;
     use crate::typ::typecheck;
     use std::fs;
     use std::path::{Path, PathBuf};
@@ -652,8 +653,8 @@ version = "0.0.0"
         let path = canonicalize_source_path(&root.join("src/Main.scuzz"));
         let text = fs::read_to_string(&path).unwrap();
         let off = text.find("println").unwrap();
-        let (line, col) = offset_to_line_col(&text, off);
-        let h = hover_project(root, &BTreeMap::new(), &path, line - 1, col - 1)
+        let (line, col) = offset_to_utf16_pos(&text, off);
+        let h = hover_project(root, &BTreeMap::new(), &path, line, col)
             .unwrap()
             .expect("hover");
         assert!(h.contains("IO.println"), "{h}");
@@ -673,8 +674,8 @@ version = "0.0.0"
         fs::write(root.join("src/Main.scuzz"), src).unwrap();
         let path = canonicalize_source_path(&root.join("src/Main.scuzz"));
         let off = src.find("IO.").unwrap() + 3;
-        let (line, col) = offset_to_line_col(src, off);
-        let items = complete_project(root, &BTreeMap::new(), &path, line - 1, col - 1).unwrap();
+        let (line, col) = offset_to_utf16_pos(src, off);
+        let items = complete_project(root, &BTreeMap::new(), &path, line, col).unwrap();
         assert!(items.iter().any(|c| c.label == "IO.println"), "{items:?}");
     }
 
@@ -694,15 +695,14 @@ version = "0.0.0"
         fs::write(root.join("src/Main.scuzz"), &formatted).unwrap();
         let path = canonicalize_source_path(&root.join("src/Main.scuzz"));
         let call = formatted.rfind("add").unwrap();
-        let (line, col) = offset_to_line_col(&formatted, call);
-        let (dest, sl, sc, _el, _ec) =
-            definition_project(root, &BTreeMap::new(), &path, line - 1, col - 1)
-                .unwrap()
-                .expect("definition");
+        let (line, col) = offset_to_utf16_pos(&formatted, call);
+        let (dest, sl, sc, _el, _ec) = definition_project(root, &BTreeMap::new(), &path, line, col)
+            .unwrap()
+            .expect("definition");
         assert_eq!(canonicalize_source_path(&dest), path);
         let decl = formatted.find("add").unwrap();
-        let (dl, dc) = offset_to_line_col(&formatted, decl);
-        assert_eq!((sl + 1, sc + 1), (dl, dc));
+        let (dl, dc) = offset_to_utf16_pos(&formatted, decl);
+        assert_eq!((sl, sc), (dl, dc));
     }
 
     #[test]

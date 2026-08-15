@@ -31,6 +31,7 @@ Apps need `clang` and `make`. Linux `[ui]` linking also needs zlib, bzip2, and b
 ```bash
 scuzz new myapp --ui
 cd myapp
+scuzz test --update
 scuzz test
 scuzz run --headless    # Desktop: scuzz run
 ```

@@ -209,6 +209,26 @@ fn validate_manifest(m: &Manifest) -> anyhow::Result<()> {
             anyhow::bail!("dependency `{name}` path must not be empty");
         }
     }
+    if let Some(ui) = &m.ui {
+        if !matches!(
+            ui.default_runtime.as_str(),
+            "headless" | "desktop" | "mobile"
+        ) {
+            anyhow::bail!(
+                "[ui] default_runtime must be headless, desktop, or mobile (got {})",
+                ui.default_runtime
+            );
+        }
+        if ui.headless_size.len() != 2 || ui.headless_size[0] <= 0 || ui.headless_size[1] <= 0 {
+            anyhow::bail!("[ui] headless_size must be [width, height] with positive ints");
+        }
+        if ui.headless_scale <= 0.0 {
+            anyhow::bail!("[ui] headless_scale must be > 0");
+        }
+        if ui.bundle_id.is_empty() || ui.bundle_id.contains(' ') || ui.bundle_id.contains('/') {
+            anyhow::bail!("[ui] bundle_id must be a non-empty dotted id");
+        }
+    }
     Ok(())
 }
 
@@ -363,6 +383,25 @@ license = "MIT"
         .to_string();
         assert!(
             err.contains("unknown scuzz.toml key `license` in [package]"),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_invalid_ui_runtime() {
+        let err = parse_manifest(
+            r#"
+[package]
+name = "app"
+[ui]
+default_runtime = "web"
+headless_size = [200, 120]
+"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("default_runtime must be headless"),
             "unexpected: {err}"
         );
     }

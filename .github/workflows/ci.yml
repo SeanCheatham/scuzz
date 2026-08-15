@@ -7,8 +7,23 @@ on:
   workflow_dispatch:
 
 jobs:
+  rustfmt-clippy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (stable with rustfmt + clippy)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: rustfmt
+        run: cargo fmt --all -- --check
+      - name: clippy
+        run: cargo clippy -p scuzz -p scuzz-compiler --all-targets -- -D warnings -A clippy::too_many_arguments -A clippy::type_complexity -A clippy::if_same_then_else -A clippy::collapsible_if -A clippy::redundant_guards -A clippy::useless_format -A clippy::identity_op -A clippy::len_zero -A clippy::unnecessary_to_owned
+
   linux-headless:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@v4
 
@@ -152,6 +167,7 @@ jobs:
           test "$(command -v scuzz)" = "$PREFIX/bin/scuzz"
           rm -rf /tmp/scuzz-release-app
           scuzz new --ui --path /tmp scuzz-release-app
+          scuzz test --update /tmp/scuzz-release-app
           scuzz test /tmp/scuzz-release-app
           test -f /tmp/scuzz-release-app/goldens/scuzz-release-app.dump
           grep -qx skia "$PREFIX/share/scuzz/crates/ffi-skia/build/sk_capi_backend"
@@ -238,7 +254,7 @@ jobs:
               q <- Queue.unbounded()
               _ <- IO.both(Queue.offer(q, "L"), Queue.offer(q, "R"))
               first <- Queue.take(q)
-              _ <- if (Str.eq(first, "L") == 1) IO.pure(()) else IO.fail("expected L first")
+              _ <- if (Str.eq(first, "L")) IO.pure(()) else IO.fail("expected L first")
             } yield ()
           EOF
           cargo run -p scuzz -- test /tmp/scuzz-schedbug
@@ -264,7 +280,7 @@ jobs:
         run: |
           rm -rf /tmp/scuzz-v0app
           cargo run -p scuzz -- new --ui --path /tmp scuzz-v0app
-          cargo run -p scuzz -- test /tmp/scuzz-v0app
+          cargo run -p scuzz -- test --update /tmp/scuzz-v0app
           test -f /tmp/scuzz-v0app/goldens/scuzz-v0app.dump
           test -f /tmp/scuzz-v0app/goldens/scuzz-v0app_after_tap.dump
           cargo run -p scuzz -- test /tmp/scuzz-v0app
@@ -295,7 +311,31 @@ jobs:
             ./examples/counter/build/package/host/run.sh 2>&1 | tee /tmp/pkg-host.out
           grep -q "scuzz mobile: present" /tmp/pkg-host.out
 
-  # macOS uses more Actions minutes than Linux. Skip on push/PR.
+  # Bounded Darwin coverage on every push/PR. Full packaging stays workflow_dispatch.
+  macos-smoke:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install Rust (stable with rust-toolchain.toml)
+        uses: dtolnay/rust-toolchain@stable
+      - name: Install Homebrew Skia link deps
+        run: brew install brotli bzip2
+      - name: Runtime tests
+        run: |
+          export LIBRARY_PATH="$(brew --prefix)/lib:$(brew --prefix bzip2)/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+          make -C crates/runtime test CC=clang
+      - name: Compiler unit tests
+        run: cargo test -p scuzz-compiler
+      - name: Hello smoke
+        run: |
+          export LIBRARY_PATH="$(brew --prefix)/lib:$(brew --prefix bzip2)/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
+          cargo build -p scuzz
+          cargo run -p scuzz -- build --full examples/hello
+          cargo run -p scuzz -- test examples/hello
+          cargo run -p scuzz -- check examples/kernel
+
+  # Full macOS packaging. Skip on push/PR.
   # Trigger manually: Actions → ci → Run workflow.
   macos:
     if: github.event_name == 'workflow_dispatch'
@@ -338,6 +378,7 @@ jobs:
           unset SCUZZ_HOME SCUZZ_RUNTIME || true
           rm -rf /tmp/scuzz-release-app
           scuzz new --ui --path /tmp scuzz-release-app
+          scuzz test --update /tmp/scuzz-release-app
           scuzz test /tmp/scuzz-release-app
           grep -qx skia "$PREFIX/share/scuzz/crates/ffi-skia/build/sk_capi_backend"
           scuzz run --headless /tmp/scuzz-release-app

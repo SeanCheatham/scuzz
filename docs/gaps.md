@@ -43,5 +43,5 @@ Path deps only (`manifest.rs`). Git, versioned, and hosted artifacts are directi
 - **Flutter-style constraint layout** — constraints down, sizes up. Widget catalog: [`guide.md`](guide.md). Residual: Flutter-style constraint-overflow dumps (do not add).
 - **Windows desktop embedder** — same session protocol as X11/Cocoa. Secondary platform.
 - **OS IME candidate windows** — focused TextField caret uses measured advance (`sz_view_caret_rect`). Embedders do not yet place OS IME UI from it.
-- **LSP / editor tooling** — `fmt`, `check --message-format=json`, `watch`, and `scuzz lsp` exist. LSP wraps `check` (didOpen/didChange overlay open buffers; didClose returns to disk). Hover, completion, and definition use that parse. JSON diagnostics stay the single schema. `check` reports more than one parse or type error per run.
-- **macOS in default CI** — macOS job is `workflow_dispatch` only. Darwin regressions show late.
+- **LSP / editor tooling** — `fmt`, `check --message-format=json`, `watch`, and `scuzz lsp` exist. LSP wraps `check` (didOpen/didChange overlay open buffers; didClose returns to disk). Positions are UTF-16. Hover, completion, and definition use that parse. Unknown methods return JSON-RPC `-32601`. JSON diagnostics stay the single schema. `check` reports more than one parse or type error per run.
+- **macOS in default CI** — `macos-smoke` runs on push/PR (runtime tests, compiler tests, hello). Full macOS packaging stays `workflow_dispatch`.

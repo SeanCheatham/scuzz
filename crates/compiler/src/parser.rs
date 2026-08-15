@@ -689,10 +689,13 @@ impl Parser {
         loop {
             let (pname, pty, rfn) = self.parse_name_ty_rfn(type_params)?;
             params.push(Param {
-                name: pname,
+                name: pname.clone(),
                 ty: pty,
                 rfn,
             });
+            if params.iter().filter(|p| p.name == pname).count() > 1 {
+                return Err(self.err(format!("duplicate parameter {pname}")));
+            }
             if matches!(self.peek(), Token::Comma) {
                 self.bump();
                 continue;
@@ -726,13 +729,19 @@ impl Parser {
         } else {
             Vec::new()
         };
-        let mut cases = Vec::new();
+        let mut cases: Vec<crate::ast::EnumCase> = Vec::new();
         match self.peek() {
             Token::LBrace => {
                 self.bump();
                 loop {
                     self.expect(&Token::Case)?;
-                    cases.push(self.parse_enum_case(&type_params)?);
+                    let case = self.parse_enum_case(&type_params)?;
+                    if cases.iter().any(|c| c.name == case.name) {
+                        return Err(
+                            self.err(format!("duplicate case {} in enum {name}", case.name))
+                        );
+                    }
+                    cases.push(case);
                     if matches!(self.peek(), Token::Comma) {
                         self.bump();
                         continue;
@@ -745,7 +754,13 @@ impl Parser {
                 self.bump();
                 while matches!(self.peek(), Token::Case) {
                     self.bump();
-                    cases.push(self.parse_enum_case(&type_params)?);
+                    let case = self.parse_enum_case(&type_params)?;
+                    if cases.iter().any(|c| c.name == case.name) {
+                        return Err(
+                            self.err(format!("duplicate case {} in enum {name}", case.name))
+                        );
+                    }
+                    cases.push(case);
                 }
             }
             other => return Err(self.err(format!("enum body expected `:` or `{{`, got {other:?}"))),
@@ -775,10 +790,13 @@ impl Parser {
             Vec::new()
         };
         self.expect(&Token::LParen)?;
-        let mut fields = Vec::new();
+        let mut fields: Vec<(String, Type)> = Vec::new();
         let mut field_rfns = Vec::new();
         loop {
             let (fname, fty, rfn) = self.parse_name_ty_rfn(&type_params)?;
+            if fields.iter().any(|(n, _)| n == &fname) {
+                return Err(self.err(format!("duplicate field {fname}")));
+            }
             fields.push((fname, fty));
             field_rfns.push(rfn);
             if matches!(self.peek(), Token::Comma) {
@@ -825,9 +843,13 @@ impl Parser {
             Vec::new()
         };
         self.expect(&Token::Colon)?;
-        let mut methods = Vec::new();
+        let mut methods: Vec<crate::ast::TraitMethod> = Vec::new();
         while matches!(self.peek(), Token::Def) {
-            methods.push(self.parse_trait_method(&type_params)?);
+            let method = self.parse_trait_method(&type_params)?;
+            if methods.iter().any(|m| m.name == method.name) {
+                return Err(self.err(format!("duplicate method {} in trait {name}", method.name)));
+            }
+            methods.push(method);
         }
         if methods.is_empty() {
             return Err(self.err(format!("trait {name} has no methods")));
@@ -944,6 +966,22 @@ impl Parser {
     }
 
     fn parse_type_with_tparams(&mut self, type_params: &[String]) -> Result<Type, ParseError> {
+        let left = self.parse_type_atom(type_params)?;
+        if matches!(self.peek(), Token::Arrow) {
+            self.bump();
+            let right = self.parse_type_with_tparams(type_params)?;
+            return Ok(Type::Fun(Box::new(left), Box::new(right)));
+        }
+        Ok(left)
+    }
+
+    fn parse_type_atom(&mut self, type_params: &[String]) -> Result<Type, ParseError> {
+        if matches!(self.peek(), Token::LParen) {
+            self.bump();
+            let inner = self.parse_type_with_tparams(type_params)?;
+            self.expect(&Token::RParen)?;
+            return Ok(inner);
+        }
         let (name, _) = self.expect_ident()?;
         if type_params.iter().any(|p| p == &name) {
             if matches!(self.peek(), Token::LBracket) {
@@ -998,12 +1036,15 @@ impl Parser {
     /// `Name` or `Name(f1: T1, f2: T2, …)` (payload types checked in typer).
     fn parse_enum_case(&mut self, type_params: &[String]) -> Result<EnumCase, ParseError> {
         let (name, _) = self.expect_ident()?;
-        let mut fields = Vec::new();
+        let mut fields: Vec<(String, Type)> = Vec::new();
         let mut field_rfns = Vec::new();
         if matches!(self.peek(), Token::LParen) {
             self.bump();
             loop {
                 let (fname, fty, rfn) = self.parse_name_ty_rfn(type_params)?;
+                if fields.iter().any(|(n, _)| n == &fname) {
+                    return Err(self.err(format!("duplicate field {fname}")));
+                }
                 fields.push((fname, fty));
                 field_rfns.push(rfn);
                 if matches!(self.peek(), Token::Comma) {
@@ -1235,12 +1276,13 @@ impl Parser {
                         }
                         "handleErrorWith" => {
                             self.expect(&Token::LParen)?;
-                            let (_param, body) = self.parse_lambda()?;
+                            let (param, body) = self.parse_lambda()?;
                             self.expect(&Token::RParen)?;
                             let span = expr.span.clone().cover(&body.span);
                             expr = self.mk(
                                 ExprKind::HandleErrorWith {
                                     inner: Box::new(expr),
+                                    param,
                                     body: Box::new(body),
                                 },
                                 span,
@@ -2529,6 +2571,31 @@ def g[T](o: Opt[T]): Opt[T] = o
             crate::ast::Type::App(n, args)
                 if n == "Opt" && matches!(&args[0], crate::ast::Type::Var(v) if v == "T")
         ));
+    }
+
+    #[test]
+    fn parse_function_type_in_def_sig() {
+        let src = r#"
+def apply(f: Int => String, n: Int): String = f(n)
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        assert!(matches!(
+            &p.defs[0].params[0].ty,
+            crate::ast::Type::Fun(a, b)
+                if matches!(a.as_ref(), crate::ast::Type::Int)
+                    && matches!(b.as_ref(), crate::ast::Type::String)
+        ));
+    }
+
+    #[test]
+    fn parse_rejects_duplicate_parameter() {
+        let src = r#"
+def add(n: Int, n: Int): Int = n
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let err = parse(src).unwrap_err().to_string();
+        assert!(err.contains("duplicate parameter n"), "{err}");
     }
 
     #[test]

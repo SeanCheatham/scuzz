@@ -115,7 +115,7 @@ pub fn load_verify_program(project_dir: &Path) -> Result<(Program, Manifest)> {
 pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
     let resolved = resolve_project(&opts.project_dir)?;
     let manifest = resolved.root_manifest.clone();
-    let fingerprint = fingerprint_resolved(&resolved, opts.verify);
+    let fingerprint = fingerprint_compile(opts, &resolved);
     let exe_name = executable_name(&manifest)?;
 
     std::fs::create_dir_all(&opts.out_dir)?;
@@ -158,6 +158,8 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
     let ll_path = opts.out_dir.join(format!("{exe_name}.ll"));
 
     let declared = sometimes_declared_text(&program);
+    let mut program = program;
+    crate::typ::inject_builtin_enums(&mut program.enums);
     let program = lower_program(program);
     let program = crate::typ::expand_impls(program).map_err(|e| anyhow::anyhow!("{e}"))?;
     typecheck(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -200,12 +202,24 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
             .map(|p| p.join("ffi-skia"))
             .unwrap_or_else(|| PathBuf::from("crates/ffi-skia"));
         // Build libsk_capi.a if missing (pinned Skia by default; SCUZZ_SKIA=sk_sw opts out).
-        let _ = Command::new("make")
+        let skia_status = Command::new("make")
             .arg("-C")
             .arg(&ffi_skia_dir)
             .arg("lib")
             .env("CC", &opts.clang)
-            .status();
+            .status()
+            .with_context(|| {
+                format!(
+                    "missing make while building Skia C API in {} — install clang and make",
+                    ffi_skia_dir.display()
+                )
+            })?;
+        if !skia_status.success() {
+            bail!(
+                "Skia C API build failed in {} — install clang and make, then retry",
+                ffi_skia_dir.display()
+            );
+        }
         let skia_lib = ffi_skia_dir.join("build/libsk_capi.a");
         let skia_include = ffi_skia_dir.join("include");
         link.arg(&skia_lib)
@@ -333,39 +347,113 @@ fn link_reload_dylib(clang: &str, ll: &Path, out: &Path) -> Result<()> {
     Ok(())
 }
 
-fn fingerprint_resolved(resolved: &ResolvedProject, verify: bool) -> String {
+fn fingerprint_compile(opts: &CompileOptions, resolved: &ResolvedProject) -> String {
     let mut h = DefaultHasher::new();
-    resolved.root_manifest.package.name.hash(&mut h);
+    env!("CARGO_PKG_VERSION").hash(&mut h);
+    opts.clang.hash(&mut h);
+    hash_clang_identity(&opts.clang, &mut h);
+    opts.verify.hash(&mut h);
+    opts.out_dir.to_string_lossy().hash(&mut h);
+    std::env::consts::OS.hash(&mut h);
+    std::env::consts::ARCH.hash(&mut h);
+    std::env::var("SCUZZ_SKIA").unwrap_or_default().hash(&mut h);
+    std::env::var("SCUZZ_CLANG")
+        .unwrap_or_default()
+        .hash(&mut h);
+    if let Ok(exe) = std::env::current_exe() {
+        if let Ok(meta) = std::fs::metadata(exe) {
+            meta.len().hash(&mut h);
+            if let Ok(m) = meta.modified() {
+                m.hash(&mut h);
+            }
+        }
+    }
+    hash_tree(&opts.runtime_dir.join("include"), &mut h);
+    hash_tree(&opts.runtime_dir.join("src"), &mut h);
+    hash_file(&opts.runtime_dir.join("Makefile"), &mut h);
+    if let Some(parent) = opts.runtime_dir.parent() {
+        hash_file(&parent.join("ffi-skia/build/sk_capi_backend"), &mut h);
+        hash_file(&parent.join("ffi-skia/Makefile"), &mut h);
+        if let Some(root) = parent.parent() {
+            hash_file(&root.join("third_party/skia/PIN"), &mut h);
+        }
+    }
+    fingerprint_resolved_into(resolved, opts.verify, &mut h);
+    format!("{:016x}", h.finish())
+}
+
+fn hash_clang_identity(clang: &str, h: &mut DefaultHasher) {
+    if let Ok(out) = Command::new(clang).arg("--version").output() {
+        out.stdout.hash(h);
+        out.stderr.hash(h);
+    }
+}
+
+fn hash_file(path: &Path, h: &mut DefaultHasher) {
+    path.to_string_lossy().hash(h);
+    if let Ok(bytes) = std::fs::read(path) {
+        bytes.hash(h);
+    }
+}
+
+fn hash_tree(dir: &Path, h: &mut DefaultHasher) {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return;
+    };
+    let mut paths: Vec<PathBuf> = entries.flatten().map(|e| e.path()).collect();
+    paths.sort();
+    for p in paths {
+        if p.is_dir() {
+            hash_tree(&p, h);
+        } else if p
+            .extension()
+            .and_then(|e| e.to_str())
+            .is_some_and(|e| matches!(e, "c" | "h" | "S" | "mk"))
+            || p.file_name().and_then(|n| n.to_str()) == Some("Makefile")
+        {
+            hash_file(&p, h);
+        }
+    }
+}
+
+fn fingerprint_resolved_into(resolved: &ResolvedProject, verify: bool, h: &mut DefaultHasher) {
+    resolved.root_manifest.package.name.hash(h);
     if resolved.root_manifest.ui.is_some() {
-        "ui=1".hash(&mut h);
-        "reload-dylib=1".hash(&mut h);
+        "ui=1".hash(h);
+        "reload-dylib=1".hash(h);
     } else {
-        "ui=0".hash(&mut h);
+        "ui=0".hash(h);
     }
     if verify {
-        "verify=1".hash(&mut h);
+        "verify=1".hash(h);
     } else {
-        "verify=0".hash(&mut h);
+        "verify=0".hash(h);
     }
     for (dir, manifest_path) in resolved
         .package_dirs
         .iter()
         .zip(resolved.manifest_paths.iter())
     {
-        dir.to_string_lossy().hash(&mut h);
+        dir.to_string_lossy().hash(h);
         let text = std::fs::read_to_string(manifest_path).unwrap_or_default();
-        text.hash(&mut h);
+        text.hash(h);
     }
     for src in &resolved.sources {
-        src.label.hash(&mut h);
-        src.text.hash(&mut h);
+        src.label.hash(h);
+        src.text.hash(h);
     }
     if verify {
         for ov in &resolved.overlays {
-            ov.label.hash(&mut h);
-            ov.text.hash(&mut h);
+            ov.label.hash(h);
+            ov.text.hash(h);
         }
     }
+}
+
+#[cfg(test)]
+fn fingerprint_resolved(resolved: &ResolvedProject, verify: bool) -> String {
+    let mut h = DefaultHasher::new();
+    fingerprint_resolved_into(resolved, verify, &mut h);
     format!("{:016x}", h.finish())
 }
 
@@ -665,12 +753,21 @@ fn build_runtime(runtime_dir: &Path, clang: &str) -> Result<()> {
         for name in ["embedder-desktop", "embedder-mobile"] {
             let embedder = parent.join(name);
             if embedder.join("Makefile").is_file() {
-                let _ = Command::new("make")
+                let status = Command::new("make")
                     .arg("-C")
                     .arg(&embedder)
                     .arg("lib")
                     .env("CC", clang)
-                    .status();
+                    .status()
+                    .with_context(|| {
+                        format!("missing make while building {}", embedder.display())
+                    })?;
+                if !status.success() {
+                    bail!(
+                        "embedder build failed in {} — install clang and make, then retry",
+                        embedder.display()
+                    );
+                }
             }
         }
     }
@@ -710,12 +807,12 @@ pub fn find_runtime_dir(start: &Path) -> Result<PathBuf> {
 
 /// Poll sources + manifests (including path deps) until change or timeout.
 pub fn wait_for_source_change(project_dir: &Path, idle_ms: u64) -> Result<bool> {
-    let last = project_mtime(project_dir)?;
+    let last = project_snapshot(project_dir)?;
     let start = SystemTime::now();
     loop {
         std::thread::sleep(std::time::Duration::from_millis(200));
-        let now = project_mtime(project_dir)?;
-        if now > last {
+        let now = project_snapshot(project_dir)?;
+        if now != last {
             return Ok(true);
         }
         if start.elapsed()?.as_millis() as u64 >= idle_ms {
@@ -724,24 +821,34 @@ pub fn wait_for_source_change(project_dir: &Path, idle_ms: u64) -> Result<bool> 
     }
 }
 
-fn project_mtime(project_dir: &Path) -> Result<SystemTime> {
+fn project_snapshot(project_dir: &Path) -> Result<Vec<(String, u64, u128)>> {
     let resolved = resolve_project(project_dir)?;
     let mut paths: Vec<PathBuf> = resolved.manifest_paths.clone();
     for s in &resolved.sources {
         paths.push(s.path.clone());
     }
-    latest_mtime(&paths)
-}
-
-fn latest_mtime(paths: &[PathBuf]) -> Result<SystemTime> {
-    let mut latest = SystemTime::UNIX_EPOCH;
-    for p in paths {
-        let m = std::fs::metadata(p)?.modified()?;
-        if m > latest {
-            latest = m;
-        }
+    for ov in &resolved.overlays {
+        paths.push(ov.path.clone());
     }
-    Ok(latest)
+    paths.sort();
+    let mut out = Vec::new();
+    for p in paths {
+        let meta = match std::fs::metadata(&p) {
+            Ok(m) => m,
+            Err(_) => {
+                out.push((p.to_string_lossy().into_owned(), 0, 0));
+                continue;
+            }
+        };
+        let mtime = meta
+            .modified()
+            .ok()
+            .and_then(|t| t.duration_since(SystemTime::UNIX_EPOCH).ok())
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        out.push((p.to_string_lossy().into_owned(), meta.len(), mtime));
+    }
+    Ok(out)
 }
 
 #[cfg(test)]
@@ -1024,6 +1131,27 @@ mod tests {
         let r2 = resolve_project(&app).unwrap();
         let fp2 = fingerprint_resolved(&r2, false);
         assert_ne!(fp1, fp2);
+    }
+
+    #[test]
+    fn fingerprint_compile_includes_clang_version() {
+        let tmp = tempdir().unwrap();
+        let app = tmp.path().join("app");
+        write_pkg(&app, "app", "", true, "IO.println(\"x\")");
+        let resolved = resolve_project(&app).unwrap();
+        let opts = CompileOptions {
+            project_dir: app.clone(),
+            runtime_dir: PathBuf::from("crates/runtime"),
+            out_dir: app.join("build"),
+            clang: "clang".into(),
+            incremental: true,
+            verify: false,
+        };
+        let fp = fingerprint_compile(&opts, &resolved);
+        assert_eq!(fp.len(), 16);
+        let mut h = DefaultHasher::new();
+        hash_clang_identity("clang", &mut h);
+        let _ = h.finish();
     }
 
     #[test]

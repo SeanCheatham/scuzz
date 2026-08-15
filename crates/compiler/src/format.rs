@@ -407,10 +407,11 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
                 format!("{pad}{left}.flatMap({p} =>\n{right}\n{pad})")
             }
         }
-        ExprKind::HandleErrorWith { inner, body } => {
+        ExprKind::HandleErrorWith { inner, param, body } => {
             let left = pretty_expr(inner, 0).trim().to_string();
             let right = pretty_expr(body, indent + 1);
-            format!("{pad}{left}.handleErrorWith(_ =>\n{right}\n{pad})")
+            let p = param.as_deref().unwrap_or("_");
+            format!("{pad}{left}.handleErrorWith({p} =>\n{right}\n{pad})")
         }
         ExprKind::Attempt { inner } => {
             let left = pretty_expr(inner, 0).trim().to_string();

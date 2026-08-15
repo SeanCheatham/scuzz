@@ -258,6 +258,7 @@ fn with_pass_indexes<R>(
     program: &mut Program,
     f: impl FnOnce(&mut Program, &EnumIndex<'_>, &MethodIndex, &FunIndex<'_>) -> Result<R, TypeError>,
 ) -> Result<R, TypeError> {
+    inject_builtin_enums(&mut program.enums);
     let enums_owned = program.enums.clone();
     let imports_owned = program.imports.clone();
     let defs_owned = program.defs.clone();
@@ -322,6 +323,7 @@ fn enum_self_ty(en: &EnumDef) -> Type {
 
 /// Turn `impl` methods into ordinary defs (`self` first) for FunIndex / codegen.
 pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
+    inject_builtin_enums(&mut program.enums);
     let enums = EnumIndex::build(&program.enums, &program.imports)
         .map_err(|e| TypeError::Msg(e.to_string()))?;
     // Validate with MethodIndex build.
@@ -412,10 +414,40 @@ pub fn typecheck(program: &Program) -> Result<(), TypeError> {
         .map_or(Ok(()), Err)
 }
 
+pub fn inject_builtin_enums(enums: &mut Vec<EnumDef>) {
+    if !enums.iter().any(|e| e.name == "Result") {
+        enums.push(builtin_result_enum());
+    }
+}
+
+fn builtin_result_enum() -> EnumDef {
+    EnumDef {
+        module: String::new(),
+        name: "Result".into(),
+        type_params: vec!["T".into()],
+        cases: vec![
+            crate::ast::EnumCase {
+                name: "Err".into(),
+                fields: vec![("msg".into(), Type::String)],
+                field_rfns: vec![None],
+            },
+            crate::ast::EnumCase {
+                name: "Ok".into(),
+                fields: vec![("value".into(), Type::Var("T".into()))],
+                field_rfns: vec![None],
+            },
+        ],
+        is_record: false,
+        methods: Vec::new(),
+    }
+}
+
 /// Same checks as [`typecheck`]. Continues past def-level failures.
 pub fn typecheck_all(program: &Program) -> Vec<TypeError> {
     let mut errs = Vec::new();
-    let enums = match EnumIndex::build(&program.enums, &program.imports) {
+    let mut enums_storage = program.enums.clone();
+    inject_builtin_enums(&mut enums_storage);
+    let enums = match EnumIndex::build(&enums_storage, &program.imports) {
         Ok(e) => e,
         Err(e) => {
             return vec![match e {
@@ -584,6 +616,13 @@ fn resolve_type_in(
             }
         }
         Type::App(n, args) => {
+            if is_handle_ctor(n) {
+                let rargs = args
+                    .iter()
+                    .map(|a| resolve_type_in(a, enums, module, type_params))
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(Type::App(n.clone(), rargs));
+            }
             let en = enums
                 .resolve(n, module)
                 .map_err(|e| TypeError::Msg(format!("unknown enum {n}: {e}")))?;
@@ -1032,6 +1071,22 @@ fn kit_lambda_param_ty_at(
     }
 }
 
+fn user_fun_lambda_expected(
+    callee: &str,
+    arg_i: usize,
+    enums: &EnumIndex<'_>,
+    funs: &FunIndex<'_>,
+    current_module: &str,
+) -> Option<(Type, Option<Type>)> {
+    let f = funs.resolve(callee, current_module).ok()?;
+    let p = f.params.get(arg_i)?;
+    let want = resolve_type_in(&p.ty, enums, &f.module, &f.type_params).ok()?;
+    match want {
+        Type::Fun(a, b) => Some((*a, Some(*b))),
+        _ => None,
+    }
+}
+
 fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
     match (callee, arg_i) {
         ("Ui.run", 0) => Some(Type::Opaque("View".into())),
@@ -1342,7 +1397,7 @@ fn infer(
                     let t = infer(e, enums, funs, methods, current_module, env)?;
                     elem = Some(match elem {
                         None => t,
-                        Some(prev) => prefer_elem(&prev, &t),
+                        Some(prev) => prefer_elem(&prev, &t)?,
                     });
                 }
                 Ok(Type::List(Box::new(
@@ -1355,7 +1410,7 @@ fn infer(
                         crate::ast::InterpPart::Lit(_) => {}
                         crate::ast::InterpPart::Expr(e) => {
                             let t = infer(e, enums, funs, methods, current_module, env)?;
-                            if !matches!(t, Type::String | Type::Int | Type::Opaque(_)) {
+                            if !matches!(t, Type::String | Type::Int) && !is_meta_opaque(&t) {
                                 return Err(TypeError::Msg(format!(
                                     "interpolation hole must be String or Int, got {t:?}"
                                 )));
@@ -1504,6 +1559,11 @@ fn infer(
                     }
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
                         if matches!(lt, Type::Int) && matches!(rt, Type::Int) {
+                            if matches!(op, BinOp::Div | BinOp::Mod)
+                                && matches!(right.kind, ExprKind::IntLit(0))
+                            {
+                                return Err(TypeError::Msg("division by zero".into()));
+                            }
                             Ok(Type::Int)
                         } else {
                             Err(TypeError::Msg(format!(
@@ -1539,7 +1599,23 @@ fn infer(
                 }
             }
             ExprKind::Call { callee, args } => {
-                infer_call(callee, args, enums, funs, methods, current_module, env)
+                if let Some(Type::Fun(param_ty, ret_ty)) = env.get(callee).cloned() {
+                    if args.len() != 1 {
+                        return Err(TypeError::Msg(format!(
+                            "{callee} expects 1 arg, got {}",
+                            args.len()
+                        )));
+                    }
+                    let at = infer(&args[0], enums, funs, methods, current_module, env)?;
+                    if !types_compat(&at, &param_ty) {
+                        return Err(TypeError::Msg(format!(
+                            "{callee} arg type mismatch: expected {param_ty:?}, got {at:?}"
+                        )));
+                    }
+                    Ok(*ret_ty)
+                } else {
+                    infer_call(callee, args, enums, funs, methods, current_module, env)
+                }
             }
             ExprKind::Match { scrutinee, arms } => {
                 let st = infer(scrutinee, enums, funs, methods, current_module, env)?;
@@ -1585,14 +1661,16 @@ fn infer(
                 }
                 Ok(bt)
             }
-            ExprKind::HandleErrorWith { inner, body } => {
+            ExprKind::HandleErrorWith { inner, param, body } => {
                 let it = infer(inner, enums, funs, methods, current_module, env)?;
                 if !matches!(it, Type::Io(_)) {
                     return Err(TypeError::Msg(
                         "handleErrorWith receiver must be IO[_]".into(),
                     ));
                 }
+                let old = bind_opt(param.as_ref(), Type::String, env);
                 let bt = infer(body, enums, funs, methods, current_module, env)?;
+                restore_opt(old, env);
                 if !matches!(bt, Type::Io(_)) {
                     return Err(TypeError::Msg(
                         "handleErrorWith body must return IO[_]".into(),
@@ -1602,10 +1680,13 @@ fn infer(
             }
             ExprKind::Attempt { inner } => {
                 let it = infer(inner, enums, funs, methods, current_module, env)?;
-                if !matches!(it, Type::Io(_)) {
+                let Type::Io(inner_ty) = it else {
                     return Err(TypeError::Msg("attempt receiver must be IO[_]".into()));
-                }
-                Ok(Type::Io(Box::new(Type::Opaque("Either".into()))))
+                };
+                Ok(Type::Io(Box::new(Type::App(
+                    "Result".into(),
+                    vec![*inner_ty],
+                ))))
             }
             ExprKind::Lambda { param, body } => {
                 // Bare lambdas (View.button tap). Kit Call args bind String/Int
@@ -1709,6 +1790,20 @@ fn infer_call(
                     current_module,
                     env,
                 )?
+            } else if let Some((pty, rty)) =
+                user_fun_lambda_expected(callee, i, enums, funs, current_module)
+            {
+                infer_lambda_arg(
+                    callee,
+                    a,
+                    pty,
+                    rty,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?
             } else {
                 infer(a, enums, funs, methods, current_module, env)?
             },
@@ -1721,7 +1816,7 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::String)
         }
-        "Str.len" | "Str.charAt" | "Str.indexOf" | "Str.startsWith" => {
+        "Str.len" | "Str.charAt" | "Str.indexOf" => {
             if callee == "Str.len" {
                 expect_arity(callee, &arg_tys, 1)?;
                 expect_ty(&arg_tys[0], &Type::String)?;
@@ -1736,18 +1831,18 @@ fn infer_call(
             }
             Ok(Type::Int)
         }
+        "Str.startsWith" | "Str.eq" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            Ok(Type::Bool)
+        }
         "Str.slice" => {
             expect_arity(callee, &arg_tys, 3)?;
             expect_ty(&arg_tys[0], &Type::String)?;
             expect_ty(&arg_tys[1], &Type::Int)?;
             expect_ty(&arg_tys[2], &Type::Int)?;
             Ok(Type::String)
-        }
-        "Str.eq" => {
-            expect_arity(callee, &arg_tys, 2)?;
-            expect_ty(&arg_tys[0], &Type::String)?;
-            expect_ty(&arg_tys[1], &Type::String)?;
-            Ok(Type::Int)
         }
         "Str.fromInt" => {
             expect_arity(callee, &arg_tys, 1)?;
@@ -1770,13 +1865,13 @@ fn infer_call(
         }
         "List.cons" => {
             expect_arity(callee, &arg_tys, 2)?;
-            let elem = prefer_elem(&arg_tys[0], &list_elem(&arg_tys[1])?);
+            let elem = prefer_elem(&arg_tys[0], &list_elem(&arg_tys[1])?)?;
             Ok(list_of(elem))
         }
         "List.isEmpty" => {
             expect_arity(callee, &arg_tys, 1)?;
             list_elem(&arg_tys[0])?;
-            Ok(Type::Int)
+            Ok(Type::Bool)
         }
         "List.head" | "List.at" => {
             if callee == "List.head" {
@@ -1805,12 +1900,12 @@ fn infer_call(
         }
         "List.append" => {
             expect_arity(callee, &arg_tys, 2)?;
-            let elem = prefer_elem(&list_elem(&arg_tys[0])?, &arg_tys[1]);
+            let elem = prefer_elem(&list_elem(&arg_tys[0])?, &arg_tys[1])?;
             Ok(list_of(elem))
         }
         "List.setAt" => {
             expect_arity(callee, &arg_tys, 3)?;
-            let elem = prefer_elem(&list_elem(&arg_tys[0])?, &arg_tys[2]);
+            let elem = prefer_elem(&list_elem(&arg_tys[0])?, &arg_tys[2])?;
             expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(list_of(elem))
         }
@@ -1914,56 +2009,68 @@ fn infer_call(
         "Ref.of" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
-            Ok(Type::Io(Box::new(Type::Opaque("Ref".into()))))
+            Ok(Type::Io(Box::new(handle_ty("Ref", Type::String))))
         }
         "Ref.get" => {
             expect_arity(callee, &arg_tys, 1)?;
+            expect_handle(&arg_tys[0], "Ref")?;
             Ok(Type::Io(Box::new(Type::String)))
         }
         "Ref.set" => {
             expect_arity(callee, &arg_tys, 2)?;
+            expect_handle(&arg_tys[0], "Ref")?;
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         "Queue.unbounded" => {
             expect_arity(callee, &arg_tys, 0)?;
-            Ok(Type::Io(Box::new(Type::Opaque("Queue".into()))))
+            Ok(Type::Io(Box::new(handle_ty("Queue", Type::String))))
         }
         "Queue.offer" => {
             expect_arity(callee, &arg_tys, 2)?;
+            expect_handle(&arg_tys[0], "Queue")?;
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         "Queue.take" => {
             expect_arity(callee, &arg_tys, 1)?;
+            expect_handle(&arg_tys[0], "Queue")?;
             Ok(Type::Io(Box::new(Type::String)))
         }
         "Deferred.empty" => {
             expect_arity(callee, &arg_tys, 0)?;
-            Ok(Type::Io(Box::new(Type::Opaque("Deferred".into()))))
+            Ok(Type::Io(Box::new(handle_ty("Deferred", Type::String))))
         }
         "Deferred.complete" => {
             expect_arity(callee, &arg_tys, 2)?;
+            expect_handle(&arg_tys[0], "Deferred")?;
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         "Deferred.get" => {
             expect_arity(callee, &arg_tys, 1)?;
+            expect_handle(&arg_tys[0], "Deferred")?;
             Ok(Type::Io(Box::new(Type::String)))
         }
         "Fiber.fork" => {
             expect_arity(callee, &arg_tys, 1)?;
-            if !matches!(arg_tys[0], Type::Io(_)) {
+            let Type::Io(inner) = arg_tys[0].clone() else {
                 return Err(TypeError::Msg("Fiber.fork argument must be IO[_]".into()));
-            }
-            Ok(Type::Io(Box::new(Type::Opaque("Fiber".into()))))
+            };
+            Ok(Type::Io(Box::new(handle_ty("Fiber", *inner))))
         }
         "Fiber.join" => {
             expect_arity(callee, &arg_tys, 1)?;
-            Ok(Type::Io(Box::new(Type::Opaque("Any".into()))))
+            let args = expect_handle(&arg_tys[0], "Fiber")?;
+            let payload = args
+                .first()
+                .cloned()
+                .unwrap_or_else(|| Type::Opaque("Any".into()));
+            Ok(Type::Io(Box::new(payload)))
         }
         "Fiber.interrupt" => {
             expect_arity(callee, &arg_tys, 1)?;
+            expect_handle(&arg_tys[0], "Fiber")?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         "IO.forever" => {
@@ -1984,75 +2091,89 @@ fn infer_call(
         "Resource.make" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::Io(Box::new(Type::String)))?;
-            Ok(Type::Opaque("Resource".into()))
+            Ok(handle_ty("Resource", Type::String))
         }
         "Resource.use" => {
             expect_arity(callee, &arg_tys, 2)?;
+            expect_handle(&arg_tys[0], "Resource")?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         "Stream.emit" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
-            Ok(Type::Opaque("Stream".into()))
+            Ok(handle_ty("Stream", Type::String))
         }
         "Stream.emits" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &list_of(Type::String))?;
-            Ok(Type::Opaque("Stream".into()))
+            Ok(handle_ty("Stream", Type::String))
         }
         "Stream.eval" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::Io(Box::new(Type::String)))?;
-            Ok(Type::Opaque("Stream".into()))
+            Ok(handle_ty("Stream", Type::String))
         }
         "Stream.concat" => {
             expect_arity(callee, &arg_tys, 2)?;
-            Ok(Type::Opaque("Stream".into()))
+            expect_handle(&arg_tys[0], "Stream")?;
+            expect_handle(&arg_tys[1], "Stream")?;
+            Ok(handle_ty("Stream", Type::String))
         }
         "Stream.take" => {
             expect_arity(callee, &arg_tys, 2)?;
+            expect_handle(&arg_tys[0], "Stream")?;
             expect_ty(&arg_tys[1], &Type::Int)?;
-            Ok(Type::Opaque("Stream".into()))
+            Ok(handle_ty("Stream", Type::String))
         }
         "Stream.drop" => {
             expect_arity(callee, &arg_tys, 2)?;
+            expect_handle(&arg_tys[0], "Stream")?;
             expect_ty(&arg_tys[1], &Type::Int)?;
-            Ok(Type::Opaque("Stream".into()))
+            Ok(handle_ty("Stream", Type::String))
         }
         "Stream.evalMap" => {
             expect_arity(callee, &arg_tys, 2)?;
-            Ok(Type::Opaque("Stream".into()))
+            expect_handle(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", Type::String))
         }
         "Stream.filter" => {
             expect_arity(callee, &arg_tys, 2)?;
-            Ok(Type::Opaque("Stream".into()))
+            expect_handle(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", Type::String))
         }
         "Stream.map" => {
             expect_arity(callee, &arg_tys, 2)?;
-            Ok(Type::Opaque("Stream".into()))
+            expect_handle(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", Type::String))
         }
         "Stream.takeWhile" => {
             expect_arity(callee, &arg_tys, 2)?;
-            Ok(Type::Opaque("Stream".into()))
+            expect_handle(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", Type::String))
         }
         "Stream.dropWhile" => {
             expect_arity(callee, &arg_tys, 2)?;
-            Ok(Type::Opaque("Stream".into()))
+            expect_handle(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", Type::String))
         }
         "Stream.find" => {
             expect_arity(callee, &arg_tys, 2)?;
-            Ok(Type::Opaque("Stream".into()))
+            expect_handle(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", Type::String))
         }
         "Stream.exists" => {
             expect_arity(callee, &arg_tys, 2)?;
+            expect_handle(&arg_tys[0], "Stream")?;
             Ok(Type::Io(Box::new(Type::Bool)))
         }
         "Stream.compileToList" => {
             expect_arity(callee, &arg_tys, 1)?;
+            expect_handle(&arg_tys[0], "Stream")?;
             Ok(Type::Io(Box::new(list_of(Type::String))))
         }
         "Stream.drain" => {
             expect_arity(callee, &arg_tys, 1)?;
+            expect_handle(&arg_tys[0], "Stream")?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         "Signal.int" => {
@@ -2062,10 +2183,12 @@ fn infer_call(
         }
         "Signal.get" => {
             expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("SignalInt".into()))?;
             Ok(Type::Int)
         }
         "Signal.set" => {
             expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("SignalInt".into()))?;
             expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(Type::Unit)
         }
@@ -2076,10 +2199,12 @@ fn infer_call(
         }
         "Signal.getStr" => {
             expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("SignalStr".into()))?;
             Ok(Type::String)
         }
         "Signal.setStr" => {
             expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("SignalStr".into()))?;
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::Unit)
         }
@@ -2090,15 +2215,18 @@ fn infer_call(
         }
         "Signal.getList" => {
             expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("SignalList".into()))?;
             Ok(list_of(Type::String))
         }
         "Signal.setList" => {
             expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("SignalList".into()))?;
             list_elem(&arg_tys[1])?;
             Ok(Type::Unit)
         }
         "Signal.map" => {
             expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("SignalInt".into()))?;
             Ok(Type::Opaque("SignalStr".into()))
         }
         "Law.signalInt" => {
@@ -2152,7 +2280,7 @@ fn infer_call(
         "Law.force" => {
             expect_arity(callee, &arg_tys, 1)?;
             match &arg_tys[0] {
-                Type::Io(inner) if matches!(**inner, Type::Bool) => Ok(Type::Int),
+                Type::Io(inner) if matches!(**inner, Type::Bool) => Ok(Type::Bool),
                 other => Err(TypeError::Msg(format!(
                     "Law.force expects IO[Bool], got {other:?}"
                 ))),
@@ -2170,6 +2298,7 @@ fn infer_call(
         }
         "View.bindText" => {
             expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("SignalStr".into()))?;
             Ok(Type::Opaque("View".into()))
         }
         "View.button" => {
@@ -2706,15 +2835,50 @@ fn check_match_exhaustive(
     enums: &EnumIndex<'_>,
     current_module: &str,
 ) -> Result<(), TypeError> {
+    for arm in arms {
+        check_unique_binds(&arm.pattern)?;
+    }
     let pats: Vec<&crate::ast::Pattern> = arms.iter().map(|a| &a.pattern).collect();
     let missing = uncovered_pats(scrut, &pats, enums, current_module)?;
-    if missing.is_empty() {
-        Ok(())
-    } else {
-        Err(TypeError::Msg(format!(
+    if !missing.is_empty() {
+        return Err(TypeError::Msg(format!(
             "non-exhaustive match: missing {}",
             missing.join(", ")
-        )))
+        )));
+    }
+    for i in 1..pats.len() {
+        let prev = &pats[..i];
+        if uncovered_pats(scrut, prev, enums, current_module)?.is_empty() {
+            return Err(TypeError::Msg(format!("unreachable match arm {}", i + 1)));
+        }
+    }
+    Ok(())
+}
+
+fn check_unique_binds(pat: &crate::ast::Pattern) -> Result<(), TypeError> {
+    let mut names = Vec::new();
+    collect_bind_names(pat, &mut names);
+    let mut seen = HashMap::new();
+    for n in names {
+        if n == "_" {
+            continue;
+        }
+        if seen.insert(n.clone(), ()).is_some() {
+            return Err(TypeError::Msg(format!("duplicate pattern binder {n}")));
+        }
+    }
+    Ok(())
+}
+
+fn collect_bind_names(pat: &crate::ast::Pattern, out: &mut Vec<String>) {
+    match pat {
+        crate::ast::Pattern::Bind(n) => out.push(n.clone()),
+        crate::ast::Pattern::Adt { binds, .. } => {
+            for b in binds {
+                collect_bind_names(b, out);
+            }
+        }
+        crate::ast::Pattern::Wildcard => {}
     }
 }
 
@@ -2724,53 +2888,90 @@ fn uncovered_pats(
     enums: &EnumIndex<'_>,
     current_module: &str,
 ) -> Result<Vec<String>, TypeError> {
-    if pats.iter().any(|p| p.is_irrefutable()) {
+    let rows: Vec<Vec<crate::ast::Pattern>> = pats.iter().map(|p| vec![(*p).clone()]).collect();
+    uncovered_product(std::slice::from_ref(scrut), &rows, enums, current_module)
+}
+
+fn uncovered_product(
+    tys: &[Type],
+    rows: &[Vec<crate::ast::Pattern>],
+    enums: &EnumIndex<'_>,
+    current_module: &str,
+) -> Result<Vec<String>, TypeError> {
+    if rows.iter().any(|r| r.iter().all(|p| p.is_irrefutable())) {
         return Ok(Vec::new());
     }
-    let type_name = match scrut {
-        Type::Adt(n) | Type::App(n, _) => n.as_str(),
-        _ => return Ok(Vec::new()),
-    };
-    let Ok((en, _)) = lookup_enum(enums, type_name, current_module) else {
-        return Ok(Vec::new());
-    };
-    let mut by_case: HashMap<&str, Vec<&[crate::ast::Pattern]>> = HashMap::new();
-    for p in pats {
-        if let crate::ast::Pattern::Adt {
-            case_name, binds, ..
-        } = p
-        {
-            by_case
-                .entry(case_name.as_str())
-                .or_default()
-                .push(binds.as_slice());
-        }
+    if tys.is_empty() {
+        return Ok(if rows.is_empty() {
+            vec!["()".into()]
+        } else {
+            Vec::new()
+        });
     }
-    let mut missing = Vec::new();
-    for case in &en.cases {
-        match by_case.get(case.name.as_str()) {
-            None => missing.push(format!("{}.{}", en.name, case.name)),
-            Some(rows) => {
-                if rows.iter().any(|r| r.iter().all(|p| p.is_irrefutable())) {
+    let head = &tys[0];
+    let tail = &tys[1..];
+    match head {
+        Type::Adt(n) | Type::App(n, _) => {
+            let Ok((en, _)) = lookup_enum(enums, n, current_module) else {
+                return Ok(Vec::new());
+            };
+            let mut missing = Vec::new();
+            for case in &en.cases {
+                let mut spec: Vec<Vec<crate::ast::Pattern>> = Vec::new();
+                for r in rows {
+                    match r.first() {
+                        Some(p) if p.is_irrefutable() => {
+                            let mut rest = vec![crate::ast::Pattern::Wildcard; case.fields.len()];
+                            rest.extend(r.iter().skip(1).cloned());
+                            spec.push(rest);
+                        }
+                        Some(crate::ast::Pattern::Adt {
+                            case_name, binds, ..
+                        }) if case_name == &case.name => {
+                            let mut rest = binds.clone();
+                            while rest.len() < case.fields.len() {
+                                rest.push(crate::ast::Pattern::Wildcard);
+                            }
+                            rest.extend(r.iter().skip(1).cloned());
+                            spec.push(rest);
+                        }
+                        _ => {}
+                    }
+                }
+                if spec.is_empty() {
+                    missing.push(format!("{}.{}", en.name, case.name));
                     continue;
                 }
-                if case.fields.is_empty() {
-                    continue;
-                }
-                if case.fields.len() == 1 {
-                    let ftys = payload_field_types(en, case, scrut, enums)?;
-                    let col: Vec<&crate::ast::Pattern> =
-                        rows.iter().filter_map(|r| r.first()).collect();
-                    for m in uncovered_pats(&ftys[0], &col, enums, current_module)? {
+                let mut nested = payload_field_types(en, case, head, enums)?;
+                nested.extend(tail.iter().cloned());
+                for m in uncovered_product(&nested, &spec, enums, current_module)? {
+                    if case.fields.is_empty() && tail.is_empty() {
+                        missing.push(format!("{}.{}", en.name, case.name));
+                    } else {
                         missing.push(format!("{}.{}({})", en.name, case.name, m));
                     }
-                } else {
-                    missing.push(format!("{}.{}(...)", en.name, case.name));
                 }
+            }
+            Ok(missing)
+        }
+        _ => {
+            if rows
+                .iter()
+                .any(|r| r.first().is_some_and(|p| p.is_irrefutable()))
+            {
+                let rest: Vec<Vec<crate::ast::Pattern>> = rows
+                    .iter()
+                    .filter(|r| r.first().is_some_and(|p| p.is_irrefutable()))
+                    .map(|r| r.iter().skip(1).cloned().collect())
+                    .collect();
+                uncovered_product(tail, &rest, enums, current_module)
+            } else if rows.is_empty() {
+                Ok(vec![head.to_string()])
+            } else {
+                Ok(Vec::new())
             }
         }
     }
-    Ok(missing)
 }
 
 fn elaborate_pattern(
@@ -2840,31 +3041,65 @@ fn types_compat(a: &Type, b: &Type) -> bool {
         (Type::String, Type::String) => true,
         (Type::List(x), Type::List(y)) => types_compat(x, y),
         (Type::Fun(a0, a1), Type::Fun(b0, b1)) => types_compat(a0, b0) && types_compat(a1, b1),
-        (Type::Io(_), Type::Io(_)) => true,
+        (Type::Io(x), Type::Io(y)) => types_compat(x, y),
         (Type::Adt(x), Type::Adt(y)) => x == y,
         (Type::App(x, a), Type::App(y, b)) => {
             x == y && a.len() == b.len() && a.iter().zip(b.iter()).all(|(u, v)| types_compat(u, v))
         }
         (Type::Var(x), Type::Var(y)) => x == y,
-        (Type::Opaque(_), _) | (_, Type::Opaque(_)) => true,
+        (Type::Opaque(x), Type::Opaque(y)) if x == y => true,
+        (Type::Opaque(_), _) if is_meta_opaque(a) => true,
+        (_, Type::Opaque(_)) if is_meta_opaque(b) => true,
         _ => false,
+    }
+}
+
+fn is_meta_opaque(t: &Type) -> bool {
+    match t {
+        Type::Opaque(n) => {
+            matches!(n.as_str(), "Elem" | "Param" | "Any" | "Rewrite" | "TapFn")
+                || n.starts_with("__unbound_")
+        }
+        _ => false,
+    }
+}
+
+fn is_handle_ctor(name: &str) -> bool {
+    matches!(
+        name,
+        "Fiber" | "Ref" | "Queue" | "Deferred" | "Resource" | "Stream"
+    )
+}
+
+fn handle_ty(name: &str, payload: Type) -> Type {
+    Type::App(name.to_string(), vec![payload])
+}
+
+fn expect_handle<'a>(got: &'a Type, name: &str) -> Result<&'a [Type], TypeError> {
+    match got {
+        Type::App(n, args) if n == name => Ok(args),
+        other => Err(TypeError::Msg(format!("expected {name}[_], got {other:?}"))),
     }
 }
 
 fn list_elem(t: &Type) -> Result<Type, TypeError> {
     match t {
         Type::List(e) => Ok((**e).clone()),
-        Type::Opaque(_) => Ok(Type::Opaque("Elem".into())),
+        Type::Opaque(_) if is_meta_opaque(t) => Ok(Type::Opaque("Elem".into())),
         other => Err(TypeError::Msg(format!("expected List[_], got {other:?}"))),
     }
 }
 
-fn prefer_elem(a: &Type, b: &Type) -> Type {
-    match (a, b) {
-        (Type::Opaque(_), t) => t.clone(),
-        (t, Type::Opaque(_)) => t.clone(),
-        (x, _) => x.clone(),
+fn prefer_elem(a: &Type, b: &Type) -> Result<Type, TypeError> {
+    if types_compat(a, b) {
+        if is_meta_opaque(a) {
+            return Ok(b.clone());
+        }
+        return Ok(a.clone());
     }
+    Err(TypeError::Msg(format!(
+        "list element type mismatch: {a:?} vs {b:?}"
+    )))
 }
 
 fn list_of(t: Type) -> Type {
@@ -2877,9 +3112,9 @@ fn unify_types(
     subst: &mut HashMap<String, Type>,
 ) -> Result<(), TypeError> {
     match (pattern, concrete) {
-        // Opaque carries no information (untyped List elements, ambiguous
-        // generic ctors). Callers check subst completeness afterwards.
-        (Type::Opaque(_), _) | (_, Type::Opaque(_)) => Ok(()),
+        (Type::Opaque(_), _) if is_meta_opaque(pattern) => Ok(()),
+        (_, Type::Opaque(_)) if is_meta_opaque(concrete) => Ok(()),
+        (Type::Opaque(x), Type::Opaque(y)) if x == y => Ok(()),
         (Type::Var(n), t) => {
             if let Some(prev) = subst.get(n) {
                 if !types_compat(prev, t) {
@@ -2924,7 +3159,9 @@ fn unify_construct(
     subst: &mut HashMap<String, Type>,
 ) -> Result<(), TypeError> {
     match (pattern, concrete) {
-        (Type::Opaque(_), _) | (_, Type::Opaque(_)) => Ok(()),
+        (Type::Opaque(_), _) if is_meta_opaque(pattern) => Ok(()),
+        (_, Type::Opaque(_)) if is_meta_opaque(concrete) => Ok(()),
+        (Type::Opaque(x), Type::Opaque(y)) if x == y => Ok(()),
         (Type::Var(n), t) => {
             if let Some(prev) = subst.get(n) {
                 if !types_compat(prev, t) {
@@ -3033,6 +3270,7 @@ fn mono_def_name(def_name: &str, subst: &HashMap<String, Type>, type_params: &[S
 
 /// Specialize generic defs at call sites; drop templates.
 pub fn monomorphize(mut program: Program) -> Result<Program, TypeError> {
+    inject_builtin_enums(&mut program.enums);
     let mut specialized: HashMap<String, FunDef> = HashMap::new();
     with_pass_indexes(&mut program, |program, enums, methods, funs| {
         for d in &mut program.defs {
@@ -3255,7 +3493,7 @@ fn mono_expr(
                 span,
             ))
         }
-        ExprKind::HandleErrorWith { inner, body } => Ok(Expr::new(
+        ExprKind::HandleErrorWith { inner, param, body } => Ok(Expr::new(
             ExprKind::HandleErrorWith {
                 inner: Box::new(mono_expr(
                     *inner,
@@ -3266,15 +3504,21 @@ fn mono_expr(
                     env,
                     specialized,
                 )?),
-                body: Box::new(mono_expr(
-                    *body,
-                    enums,
-                    funs,
-                    methods,
-                    current_module,
-                    env,
-                    specialized,
-                )?),
+                param: param.clone(),
+                body: {
+                    let old = bind_opt(param.as_ref(), Type::String, env);
+                    let body = mono_expr(
+                        *body,
+                        enums,
+                        funs,
+                        methods,
+                        current_module,
+                        env,
+                        specialized,
+                    )?;
+                    restore_opt(old, env);
+                    Box::new(body)
+                },
             },
             span,
         )),
@@ -3618,6 +3862,7 @@ fn mono_expr(
 /// constructor args and the expected type at the construction site do not
 /// determine an instantiation.
 pub fn elaborate_generics(mut program: Program) -> Result<Program, TypeError> {
+    inject_builtin_enums(&mut program.enums);
     with_pass_indexes(&mut program, |program, enums, methods, funs| {
         for d in &mut program.defs {
             let mut env: HashMap<String, Type> = HashMap::new();
@@ -4093,7 +4338,7 @@ fn elaborate_expr(
             )?)),
             span,
         )),
-        ExprKind::HandleErrorWith { inner, body } => Ok(Expr::new(
+        ExprKind::HandleErrorWith { inner, param, body } => Ok(Expr::new(
             ExprKind::HandleErrorWith {
                 inner: Box::new(elaborate_expr(
                     *inner,
@@ -4105,6 +4350,7 @@ fn elaborate_expr(
                     expected,
                     tparams,
                 )?),
+                param,
                 body: Box::new(elaborate_expr(
                     *body,
                     enums,
@@ -4418,8 +4664,9 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
         ExprKind::IoSleep(e) => ExprKind::IoSleep(Box::new(subst_node_targs(*e, subst))),
         ExprKind::IoFail(e) => ExprKind::IoFail(Box::new(subst_node_targs(*e, subst))),
         ExprKind::IoPure(e) => ExprKind::IoPure(Box::new(subst_node_targs(*e, subst))),
-        ExprKind::HandleErrorWith { inner, body } => ExprKind::HandleErrorWith {
+        ExprKind::HandleErrorWith { inner, param, body } => ExprKind::HandleErrorWith {
             inner: Box::new(subst_node_targs(*inner, subst)),
+            param,
             body: Box::new(subst_node_targs(*body, subst)),
         },
         ExprKind::Attempt { inner } => ExprKind::Attempt {
@@ -4517,12 +4764,18 @@ fn mono_enum_name(en: &EnumDef, args: &[Type]) -> String {
 fn collect_apps_in_type(ty: &Type, out: &mut Vec<(String, Vec<Type>)>) {
     match ty {
         Type::App(id, args) => {
-            out.push((id.clone(), args.clone()));
+            if !is_handle_ctor(id) {
+                out.push((id.clone(), args.clone()));
+            }
             for a in args {
                 collect_apps_in_type(a, out);
             }
         }
-        Type::Io(inner) => collect_apps_in_type(inner, out),
+        Type::Io(inner) | Type::List(inner) => collect_apps_in_type(inner, out),
+        Type::Fun(a, b) => {
+            collect_apps_in_type(a, out);
+            collect_apps_in_type(b, out);
+        }
         _ => {}
     }
 }
@@ -4580,7 +4833,7 @@ fn collect_node_targs(expr: &Expr, out: &mut Vec<(String, Vec<Type>)>) {
         | ExprKind::IoFail(e)
         | ExprKind::IoPure(e)
         | ExprKind::Attempt { inner: e } => collect_node_targs(e, out),
-        ExprKind::HandleErrorWith { inner, body } => {
+        ExprKind::HandleErrorWith { inner, body, .. } => {
             collect_node_targs(inner, out);
             collect_node_targs(body, out);
         }
@@ -4730,8 +4983,9 @@ fn rewrite_enum_refs(
         ExprKind::IoSleep(e) => ExprKind::IoSleep(Box::new(rewrite_enum_refs(*e, clones)?)),
         ExprKind::IoFail(e) => ExprKind::IoFail(Box::new(rewrite_enum_refs(*e, clones)?)),
         ExprKind::IoPure(e) => ExprKind::IoPure(Box::new(rewrite_enum_refs(*e, clones)?)),
-        ExprKind::HandleErrorWith { inner, body } => ExprKind::HandleErrorWith {
+        ExprKind::HandleErrorWith { inner, param, body } => ExprKind::HandleErrorWith {
             inner: Box::new(rewrite_enum_refs(*inner, clones)?),
+            param,
             body: Box::new(rewrite_enum_refs(*body, clones)?),
         },
         ExprKind::Attempt { inner } => ExprKind::Attempt {
@@ -4850,12 +5104,24 @@ fn concretize_type(
 ) -> Result<Type, TypeError> {
     match ty {
         Type::App(id, args) => {
+            if is_handle_ctor(id) {
+                let nargs = args
+                    .iter()
+                    .map(|a| concretize_type(a, clones))
+                    .collect::<Result<Vec<_>, _>>()?;
+                return Ok(Type::App(id.clone(), nargs));
+            }
             let cid = clones.get(&(id.clone(), args.clone())).ok_or_else(|| {
                 TypeError::Msg(format!("internal: missing enum clone for {id}{args:?}"))
             })?;
             Ok(Type::Adt(cid.clone()))
         }
         Type::Io(inner) => Ok(Type::Io(Box::new(concretize_type(inner, clones)?))),
+        Type::List(inner) => Ok(Type::List(Box::new(concretize_type(inner, clones)?))),
+        Type::Fun(a, b) => Ok(Type::Fun(
+            Box::new(concretize_type(a, clones)?),
+            Box::new(concretize_type(b, clones)?),
+        )),
         other => Ok(other.clone()),
     }
 }
@@ -4995,6 +5261,89 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("payload ADT should typecheck");
+    }
+
+    #[test]
+    fn rejects_io_payload_mismatch() {
+        let src = r#"
+def asString(): IO[String] = IO.pure("x")
+@main def main: IO[Unit] = asString()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(err.contains("IO") || err.contains("String"), "{err}");
+    }
+
+    #[test]
+    fn rejects_mixed_list_literal() {
+        let src = r#"
+@main def main: IO[Unit] = IO.println(List.join([1, "x"], ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(
+            err.contains("list element type mismatch") || err.contains("expected"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn fiber_join_preserves_payload() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    f <- Fiber.fork(IO.pure("ok"))
+    v <- Fiber.join(f)
+    _ <- IO.println(v)
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Fiber.join String payload");
+    }
+
+    #[test]
+    fn rejects_signal_str_as_signal_int() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    s = Signal.str("x")
+    _ <- Ui.run(_ => View.checkbox(s, "n"))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(
+            err.contains("SignalInt") || err.contains("SignalStr") || err.contains("expected"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_unreachable_match_arm() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  Color.Red match {
+    case _ => IO.println("all")
+    case Color.Red => IO.println("r")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(err.contains("unreachable match arm"), "{err}");
+    }
+
+    #[test]
+    fn first_order_function_type_on_def() {
+        let src = r#"
+def apply(f: Int => String, n: Int): String = f(n)
+@main def main: IO[Unit] =
+  IO.println(apply(x => Str.fromInt(x), 1))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Int => String param");
     }
 
     #[test]
@@ -5227,7 +5576,7 @@ enum Color:
     #[test]
     fn typechecks_str_starts_with() {
         let src = r#"@main def main: IO[Unit] =
-  IO.println(if (Str.startsWith("done:milk", "done:") == 1) "yes" else "no")
+  IO.println(if (Str.startsWith("done:milk", "done:")) "yes" else "no")
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Str.startsWith should typecheck");

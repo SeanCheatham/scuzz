@@ -12,7 +12,8 @@ scuzz new myapp --ui
 cd myapp
 scuzz check                  # format-verify src/ + typecheck
 scuzz check --help           # flags and copy-paste examples
-scuzz test                   # seeds goldens/ on first run, then compares
+scuzz test --update          # seed goldens/ for a new [ui] package
+scuzz test                   # compare Headless dumps (fails if goldens are missing)
 scuzz run --headless         # writes build/snapshot.png
 scuzz fmt                    # rewrite src/ (check already verifies format)
 ```
@@ -40,7 +41,7 @@ Console kit: `Sys.args(): IO[List[String]]`, `Sys.readLine(): IO[String]` (EOF �
 - **`for { x = e; y <- io } yield r`** as the primary binder (pure `=`, effect `<-`). Nested `for` in `if` / lambda arms when multi-bind is needed.
 - No `val` / statement blocks
 - Literals: ints, `true` / `false`, strings, `()`, `s"…$x…"`, list literals `[a, b]`
-- Types: `Unit`, `Int`, `String`, `Bool`, `List[T]`, `IO[T]`, nominal enums. `true` / `false` are `Bool`. `Bool` is not `Int`. `if` needs `Bool`. Comparisons and `&&` / `||` return `Bool`
+- Types: `Unit`, `Int`, `String`, `Bool`, `List[T]`, `IO[T]`, `A => B`, `Fiber[A]` / `Ref[A]` / `Queue[A]` / `Deferred[A]` / `Resource[A]` / `Stream[A]`, nominal enums. `true` / `false` are `Bool`. `Bool` is not `Int`. `if` needs `Bool`. Comparisons and `&&` / `||` return `Bool`. `attempt` returns `IO[Result[A]]` (`enum Result[T]: Err(msg: String) | Ok(value: T)`). `handleErrorWith(err => …)` binds `err` as `String`.
 - Enums + **`record Name(f1: T1, …)`** (construct `Name(…)`, match `case Name(…)`, field `p.x` — see `examples/kernel`). Matching an enum or record must cover every case or include `_`. `check` reports `non-exhaustive match: missing Color.Blue`. Nested payload patterns work (`case Wrap.Box(Color.Red)`). A specialized nested case without a catch-all is non-exhaustive (`missing Wrap.Box(Color.Blue)`).
 - Thin **traits** / `impl` with static dispatch (`p.show()` / `p.getOrElse(0)` — including `impl Get[Int] for Point` and `impl Get[T] for Opt`; see `examples/kernel`)
 - Thin **generics**: `def id[T](x: T): T = x` monomorphized at call sites (`examples/kernel`); generic enums/records too — `enum Opt[T]:` with `o.getOrElse(0)` / `record Box[T](x: T): def get(): T = self.x` (type methods are indented `def`s after cases or after record `:`, same shape as `impl`). Instantiation inferred from ctor args or the expected type (`examples/kernel`).
@@ -100,7 +101,7 @@ src/
 
 - Prefer sim overlays for app policy (API base URL, a `Backend` value). Blessed kits stay one implementation with TestRuntime fakes on the wire.
 - Laws are top-level `law name: Bool = …` or `law name(a: Int, b: String): Bool = …` in the live module. Nullary laws apply with `.require(pred)` (or `.require("name", pred)`). Parameterized laws take generator-friendly `Int` / `String` / `Bool` params; `scuzz fuzz` drives them. Live `build` / `run` erase laws and `.require` to the receiver.
-- `.require` preserves the receiver type. Pure values residualize to `Law.check`. `IO[A]` sequences the check after the effect (`Law.assert`). Predicates may be `Bool`, `IO[Bool]`, `x => pred`, or a nullary `law` name.
+- `.require` preserves the receiver type. Pure values residualize to `Law.check`. `IO[A]` sequences the check after the effect (`Law.assert`). Predicates may be `Bool`, `IO[Bool]`, `x => pred`, or a nullary `law` name. `io.attempt` is `IO[Result[A]]`. Match `Result.Ok` / `Result.Err`. `io.handleErrorWith(err => …)` binds `err` as the error message `String`.
 - `where` on `def` params and `record` fields is a Bool predicate. The checker inserts `Law.check` at call / construction under the verify graph and erases it live.
 - `Law.check(name, ok, value)` is identity live and panics under TestRuntime when `ok` is false. `Law.sometimes(name)` records path reachability (`Unit`, not a value method). Fuzz fails the campaign if a string-literal name is never hit.
 - Observation builtins: `Law.signalInt(id)`, `Law.signalStr(id)`, `Law.signalListLen(id)`, `Law.signalListAt(id, i)`, `Law.a11yHas(needle)` (signal store + stashed a11y dump)
@@ -110,7 +111,7 @@ src/
 
 **Now:**
 
-- `[ui]` packages: `scuzz test` is Headless **structural** goldens on the **live** graph (signal store + a11y dump + tap/field/scroll indices). PNG optional through `--pixels`. Seed and compare PNG goldens under the in-tree `sk_sw` backend (`SCUZZ_SKIA=sk_sw`) so pixels stay platform-deterministic. `scuzz fuzz` compiles the **verify** graph (sim + residual `.require` / laws + drivers).
+- `[ui]` packages: `scuzz test` is Headless **structural** goldens on the **live** graph (signal store + a11y dump + tap/field/scroll indices). PNG optional through `--pixels`. Seed with `scuzz test --update`. Missing `goldens/` or empty dumps fail without `--update`. Seed and compare PNG goldens under the in-tree `sk_sw` backend (`SCUZZ_SKIA=sk_sw`) so pixels stay platform-deterministic. `scuzz fuzz` compiles the **verify** graph (sim + residual `.require` / laws + drivers).
 - IO packages (no `[ui]`): `scuzz test` compiles and runs under `SCUZZ_TESTRT=1`, requiring exit 0
 - `scuzz check` format-verifies `src/` and typechecks live + sim twins + laws + drivers + `where` + `.require` (every nullary `law` must be applied). `--message-format=json` is the editor protocol (`check` only). `scuzz lsp` wraps that JSON over stdin/stdout (open buffers overlay disk on didOpen/didChange; didClose uses disk; hover, completion, and definition use the same parse). One run reports every parse and type diagnostic
 - `scuzz fuzz --iters N` searches event scripts × schedules (`[ui]`) or schedule seeds plus parameterized-law drives (IO-only). `[ui]` scripts that hit new `Law.sometimes` names or a new Headless `dump.txt` are kept, replayed once more (dump must match), and later iters extend those prefixes. IO-only keeps schedule seeds that hit new sometimes names and perturbs them. `--exhaust --depth N` is `[ui]` event alphabet (including `drive`) with FIFO schedule. `--replay repro.toml` restores a shrunk event list + optional `schedule_seed`. Oracles are residual `.require` / `Law.check`, panic/`SzError`, dump determinism, and campaign `Law.sometimes` reachability
