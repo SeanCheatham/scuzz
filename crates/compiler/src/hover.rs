@@ -385,6 +385,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.radioListTile",
         "View.radioListTile(sig: Signal, value: Int, title: String): View",
     ),
+    (
+        "View.segmented",
+        "View.segmented(sig: Signal, left: String, right: String): View",
+    ),
     ("View.badge", "View.badge(sig: Signal, child: View): View"),
     ("View.card", "View.card(child: View): View"),
     ("View.divider", "View.divider(): View"),
@@ -731,6 +735,21 @@ mod tests {
         let h = hover_src(src, "radioListTile");
         assert!(
             h.contains("View.radioListTile(sig: Signal, value: Int, title: String): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_view_segmented() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.segmented(n, "List", "Grid"))
+  } yield ()
+"#;
+        let h = hover_src(src, "segmented");
+        assert!(
+            h.contains("View.segmented(sig: Signal, left: String, right: String): View"),
             "{h}"
         );
     }

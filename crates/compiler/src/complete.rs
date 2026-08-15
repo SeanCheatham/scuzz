@@ -365,6 +365,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_segmented_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.seg\n";
+        let labels = labels_at(src, "View.seg");
+        assert!(labels.iter().any(|l| l == "View.segmented"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_badge_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.ba\n";
         let labels = labels_at(src, "View.ba");

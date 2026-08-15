@@ -118,6 +118,11 @@ SzView *sz_lang_view_radio_list_tile(SzSignalInt *sig, int64_t value,
   return sz_view_radio_list_tile(sig, value, title ? sz_string_cstr(title) : "");
 }
 
+SzView *sz_lang_view_segmented(SzSignalInt *sig, SzString *left, SzString *right) {
+  return sz_view_segmented(sig, left ? sz_string_cstr(left) : "",
+                           right ? sz_string_cstr(right) : "");
+}
+
 SzView *sz_lang_view_badge(SzSignalInt *sig, SzView *child) {
   return sz_view_badge(sig, child);
 }
@@ -477,7 +482,7 @@ static void scripted_button_tap(SzUiSession *session, int prefer_upper) {
 
 /* --- SCUZZ_UI_SCRIPT playback (fuzz / replay) ---------------------------- */
 /* Line protocol, one event per line, delivered across pump boundaries:
-     tap <n>    tap the nth button, checkbox, radio, switch, chip, expansion, icon button, checkbox list tile, switch list tile, or radio list tile (scan order; [taps] in the dump); missing target is a no-op
+     tap <n>    tap the nth button, checkbox, radio, switch, chip, expansion, icon button, checkbox list tile, switch list tile, radio list tile, or segmented (scan order; [taps] in the dump); missing target is a no-op
      xy <x> <y> inject TAP at logical point; miss does not panic
      text <s>   replace the [fields] starred TextField with <s>; no field is a no-op
      text <n> <s>  replace dump-index n (a11y order); `text 0` is still payload "0"

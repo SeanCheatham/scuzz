@@ -164,7 +164,8 @@ int sz_view_is_tap_target(const SzView *view) {
           view->kind == SZ_VIEW_ICON_BUTTON ||
           view->kind == SZ_VIEW_CHECKBOX_LIST_TILE ||
           view->kind == SZ_VIEW_SWITCH_LIST_TILE ||
-          view->kind == SZ_VIEW_RADIO_LIST_TILE);
+          view->kind == SZ_VIEW_RADIO_LIST_TILE ||
+          view->kind == SZ_VIEW_SEGMENTED);
 }
 
 SzRect sz_view_frame(const SzView *view) {
@@ -363,6 +364,17 @@ SzView *sz_view_radio_list_tile(SzSignalInt *sig, int64_t value,
   return v;
 }
 
+SzView *sz_view_segmented(SzSignalInt *sig, const char *left, const char *right) {
+  SzView *v = view_new(SZ_VIEW_SEGMENTED);
+  v->sig_int = sig;
+  v->text = sz_strdup(left ? left : "");
+  v->prefix = sz_strdup(right ? right : "");
+  v->interactive = 1;
+  v->a11y_role = SZ_A11Y_SEGMENTED;
+  v->a11y_label = sz_strdup("segmented");
+  return v;
+}
+
 SzView *sz_view_badge(SzSignalInt *sig, SzView *child) {
   SzView *v = view_new(SZ_VIEW_BADGE);
   v->sig_int = sig;
@@ -505,6 +517,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "switchtile";
   case SZ_A11Y_RADIO_TILE:
     return "radiotile";
+  case SZ_A11Y_SEGMENTED:
+    return "segmented";
   default:
     return "none";
   }
@@ -548,6 +562,11 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
     }
     if (v->kind == SZ_VIEW_BADGE) {
       int64_t n = v->sig_int ? sz_signal_int_get(v->sig_int) : 0;
+      snprintf(live, sizeof live, "%lld", (long long)n);
+      label = live;
+    }
+    if (v->kind == SZ_VIEW_SEGMENTED) {
+      int64_t n = v->sig_int && sz_signal_int_get(v->sig_int) != 0 ? 1 : 0;
       snprintf(live, sizeof live, "%lld", (long long)n);
       label = live;
     }
@@ -1404,6 +1423,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_CHECKBOX_LIST_TILE:
   case SZ_VIEW_SWITCH_LIST_TILE:
   case SZ_VIEW_RADIO_LIST_TILE:
+  case SZ_VIEW_SEGMENTED:
     v->frame.w = max_w > 0 ? max_w : 120.f;
     v->frame.h = theme->control_h;
     break;
@@ -2660,6 +2680,31 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
                  theme->foreground, theme->font_px);
     break;
   }
+  case SZ_VIEW_SEGMENTED: {
+    float hw = v->frame.w * 0.5f;
+    float ty;
+    int on;
+    const char *left;
+    const char *right;
+    SzRect br = v->frame;
+    on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
+    left = v->text ? v->text : "";
+    right = v->prefix ? v->prefix : "";
+    paint_rect(c, v->frame.x, v->frame.y, hw, v->frame.h,
+               on ? theme->surface : theme->primary);
+    paint_rect(c, v->frame.x + hw, v->frame.y, v->frame.w - hw, v->frame.h,
+               on ? theme->primary : theme->surface);
+    paint_border(c, br, (int)(scale_px(theme, 1.f) + 0.5f), theme->border);
+    ty = v->frame.y + (v->frame.h + theme->font_px) * 0.5f;
+    paint_string(c, left,
+                 v->frame.x + (hw - text_width(left, theme->font_px)) * 0.5f, ty,
+                 on ? theme->foreground : theme->on_primary, theme->font_px);
+    paint_string(c, right,
+                 v->frame.x + hw +
+                     (hw - text_width(right, theme->font_px)) * 0.5f,
+                 ty, on ? theme->on_primary : theme->foreground, theme->font_px);
+    break;
+  }
   case SZ_VIEW_BADGE: {
     float d;
     float bx, by;
@@ -3126,6 +3171,11 @@ int sz_view_handle_tap(SzView *root, float x, float y) {
   if ((hit->kind == SZ_VIEW_RADIO || hit->kind == SZ_VIEW_RADIO_LIST_TILE) &&
       hit->sig_int) {
     sz_signal_int_set(hit->sig_int, hit->radio_value);
+    return 1;
+  }
+  if (hit->kind == SZ_VIEW_SEGMENTED && hit->sig_int) {
+    float mid = hit->frame.x + hit->frame.w * 0.5f;
+    sz_signal_int_set(hit->sig_int, x < mid ? 0 : 1);
     return 1;
   }
   if (hit->kind == SZ_VIEW_SLIDER)
