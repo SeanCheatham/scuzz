@@ -354,6 +354,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.fab(label: String, onTap: _ => Unit): View",
     ),
     (
+        "View.tooltip",
+        "View.tooltip(message: String, child: View): View",
+    ),
+    (
         "View.checkbox",
         "View.checkbox(sig: Signal, label: String): View",
     ),
@@ -766,6 +770,18 @@ mod tests {
         let h = hover_src(src, "fab");
         assert!(
             h.contains("View.fab(label: String, onTap: _ => Unit): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_view_tooltip() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.tooltip("Sean", View.avatar("S")))
+"#;
+        let h = hover_src(src, "tooltip");
+        assert!(
+            h.contains("View.tooltip(message: String, child: View): View"),
             "{h}"
         );
     }

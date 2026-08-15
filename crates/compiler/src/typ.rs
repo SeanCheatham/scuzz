@@ -2179,6 +2179,12 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::Opaque("View".into()))?;
             Ok(Type::Opaque("View".into()))
         }
+        "View.tooltip" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            expect_ty(&arg_tys[1], &Type::Opaque("View".into()))?;
+            Ok(Type::Opaque("View".into()))
+        }
         "Theme.accent" | "Theme.primary" | "Theme.muted" | "Theme.foreground" => {
             expect_arity(callee, &arg_tys, 0)?;
             Ok(Type::Int)
@@ -5464,6 +5470,15 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.fab should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_tooltip() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.tooltip("Sean", View.avatar("S")))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.tooltip should typecheck");
     }
 
     #[test]

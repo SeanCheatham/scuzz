@@ -6523,6 +6523,203 @@ static void test_fab_a11y_distinct(void) {
   sz_signal_int_free(sig);
 }
 
+static void test_tooltip_sizes(void) {
+  SzView *tip, *av;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, cf;
+
+  av = sz_view_avatar("S");
+  tip = sz_view_tooltip("Sean", av);
+  sz_view_layout(tip, 200.f, 200.f, theme);
+  assert(sz_view_kind(tip) == SZ_VIEW_TOOLTIP);
+  f = sz_view_frame(tip);
+  cf = sz_view_frame(av);
+  assert(fabsf(f.w - cf.w) < 0.5f);
+  assert(fabsf(f.h - cf.h) < 0.5f);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  sz_view_free(tip);
+}
+
+static void test_tooltip_empty_sizes(void) {
+  SzView *tip;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  tip = sz_view_tooltip("Sean", NULL);
+  sz_view_layout(tip, 200.f, 200.f, theme);
+  f = sz_view_frame(tip);
+  assert(fabsf(f.w) < 0.5f);
+  assert(fabsf(f.h) < 0.5f);
+  sz_view_free(tip);
+}
+
+static void test_tooltip_a11y(void) {
+  SzView *tip;
+  SzString *dump;
+  const char *s;
+
+  tip = sz_view_tooltip("Sean", sz_view_avatar("S"));
+  dump = sz_view_a11y_dump(tip);
+  s = sz_string_cstr(dump);
+  assert(strstr(s, "tooltip:Sean") != NULL);
+  assert(strstr(s, "avatar:S") != NULL);
+  sz_string_free(dump);
+  sz_view_free(tip);
+}
+
+static void test_tooltip_not_tap_target(void) {
+  SzView *tip;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  tip = sz_view_tooltip("Sean", sz_view_avatar("S"));
+  sz_view_layout(tip, 200.f, 80.f, theme);
+  f = sz_view_frame(tip);
+  assert(!sz_view_is_tap_target(tip));
+  assert(sz_view_hit_test(tip, f.x + 4.f, f.y + f.h * 0.5f) == NULL);
+  sz_view_free(tip);
+}
+
+static void test_tooltip_child_tap(void) {
+  SzView *tip, *btn, *hit;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  btn = sz_view_button("Go", counter_tap, sig);
+  tip = sz_view_tooltip("hint", btn);
+  sz_view_layout(tip, 200.f, 80.f, theme);
+  f = sz_view_frame(btn);
+  hit = sz_view_hit_test(tip, f.x + 4.f, f.y + f.h * 0.5f);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_BUTTON);
+  assert(sz_view_handle_tap(tip, f.x + 4.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 1);
+  sz_view_free(tip);
+  sz_signal_int_free(sig);
+}
+
+static void test_tooltip_paint_child(void) {
+  SzView *root, *av;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+  int mx, my;
+
+  av = sz_view_avatar("S");
+  root = sz_view_tooltip("Sean", av);
+  sz_view_layout(root, 80.f, 80.f, theme);
+  f = sz_view_frame(av);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  mx = (int)(f.x + f.w * 0.5f);
+  my = (int)(f.y + 6.f);
+  /* Child disc fill is primary. Tooltip adds no pad fill. */
+  assert(px_rgb(px, 80, mx, my, 0x14, 0x28, 0x50));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
+static void test_tooltip_not_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  const char *path = "/tmp/scuzz_ui_tooltip.dump";
+  char *dump;
+  const char *taps;
+
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_tooltip("Sean", sz_view_avatar("S")));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "tooltip:Sean") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "Sean") == NULL);
+  assert(strstr(taps, "tooltip") == NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  remove(path);
+}
+
+static void test_tooltip_child_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_tooltip_child.dump";
+  char *dump;
+  const char *taps;
+
+  sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_tooltip("hint", sz_view_button("Go", counter_tap, sig)));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "tooltip:hint") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "Go") != NULL);
+  assert(strstr(taps, "hint") == NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
+static void test_tooltip_same_origin(void) {
+  SzView *tip, *av;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, cf;
+
+  av = sz_view_avatar("S");
+  tip = sz_view_tooltip("Sean", av);
+  sz_view_layout(tip, 200.f, 200.f, theme);
+  f = sz_view_frame(tip);
+  cf = sz_view_frame(av);
+  assert(fabsf(f.x - cf.x) < 0.5f);
+  assert(fabsf(f.y - cf.y) < 0.5f);
+  sz_view_free(tip);
+}
+
+static void test_tooltip_empty_message_a11y(void) {
+  SzView *tip;
+  SzString *dump;
+
+  tip = sz_view_tooltip("", sz_view_avatar("S"));
+  dump = sz_view_a11y_dump(tip);
+  assert(strstr(sz_string_cstr(dump), "tooltip:") != NULL);
+  assert(strstr(sz_string_cstr(dump), "avatar:S") != NULL);
+  sz_string_free(dump);
+  sz_view_free(tip);
+}
+
 static void test_radio_sizes(void) {
   SzView *r;
   SzSignalInt *sig;
@@ -8363,6 +8560,16 @@ int main(void) {
   test_fab_in_taps_dump();
   test_fab_tap_twice();
   test_fab_a11y_distinct();
+  test_tooltip_sizes();
+  test_tooltip_empty_sizes();
+  test_tooltip_a11y();
+  test_tooltip_not_tap_target();
+  test_tooltip_child_tap();
+  test_tooltip_paint_child();
+  test_tooltip_not_in_taps_dump();
+  test_tooltip_child_in_taps_dump();
+  test_tooltip_same_origin();
+  test_tooltip_empty_message_a11y();
   test_radio_sizes();
   test_radio_a11y_off_on();
   test_radio_tap_writes_value();

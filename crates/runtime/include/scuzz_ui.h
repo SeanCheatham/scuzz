@@ -181,7 +181,8 @@ typedef enum SzViewKind {
   SZ_VIEW_SWITCH_LIST_TILE,   /* Signal.int 0/1 full-width title + trailing switch */
   SZ_VIEW_RADIO_LIST_TILE,    /* Signal.int group; full-width title + leading radio */
   SZ_VIEW_SEGMENTED,          /* Signal.int 0/1; two labeled halves; tap writes 0/1 */
-  SZ_VIEW_FAB                 /* circular primary tap; same closure as button */
+  SZ_VIEW_FAB,                /* circular primary tap; same closure as button */
+  SZ_VIEW_TOOLTIP             /* message + child; sizes to the child; not a tap */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -239,6 +240,8 @@ SzView *sz_view_expansion_tile(SzSignalInt *sig, const char *title, SzView *chil
 SzView *sz_view_icon_button(const char *label, SzViewTapFn on_tap, void *env);
 /* Circular `control_h` tap. `label` is a11y + painted glyph. Same closure as button. */
 SzView *sz_view_fab(const char *label, SzViewTapFn on_tap, void *env);
+/* Sizes to `child`. `message` is a11y. Not a tap target. */
+SzView *sz_view_tooltip(const char *message, SzView *child);
 /* 8 px slot, `control_h` tall, muted vertical hairline. Not a tap target. */
 SzView *sz_view_vertical_divider(void);
 SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder);
@@ -371,7 +374,8 @@ typedef enum SzA11yRole {
   SZ_A11Y_SWITCH_TILE = 23,
   SZ_A11Y_RADIO_TILE = 24,
   SZ_A11Y_SEGMENTED = 25,
-  SZ_A11Y_FAB = 26
+  SZ_A11Y_FAB = 26,
+  SZ_A11Y_TOOLTIP = 27
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
@@ -482,6 +486,7 @@ SzView *sz_lang_view_expansion_tile(SzSignalInt *sig, SzString *title,
                                    SzView *child);
 SzView *sz_lang_view_icon_button(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_fab(SzString *label, SzViewTapFn tap, void *env);
+SzView *sz_lang_view_tooltip(SzString *message, SzView *child);
 SzView *sz_lang_view_vertical_divider(void);
 SzView *sz_lang_view_column(void);
 SzView *sz_lang_view_row(void);

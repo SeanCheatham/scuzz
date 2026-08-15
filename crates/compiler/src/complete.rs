@@ -379,6 +379,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_tooltip_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.tool\n";
+        let labels = labels_at(src, "View.tool");
+        assert!(labels.iter().any(|l| l == "View.tooltip"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_badge_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.ba\n";
         let labels = labels_at(src, "View.ba");

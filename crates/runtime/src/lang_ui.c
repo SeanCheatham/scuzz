@@ -133,6 +133,10 @@ SzView *sz_lang_view_badge(SzSignalInt *sig, SzView *child) {
 
 SzView *sz_lang_view_card(SzView *child) { return sz_view_card(child); }
 
+SzView *sz_lang_view_tooltip(SzString *message, SzView *child) {
+  return sz_view_tooltip(message ? sz_string_cstr(message) : "", child);
+}
+
 SzView *sz_lang_view_divider(void) { return sz_view_divider(); }
 
 SzView *sz_lang_view_expansion_tile(SzSignalInt *sig, SzString *title,

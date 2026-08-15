@@ -120,7 +120,7 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_FONT_SIZE || kind == SZ_VIEW_BORDER ||
          kind == SZ_VIEW_RADIUS || kind == SZ_VIEW_LIST_TILE ||
          kind == SZ_VIEW_BADGE || kind == SZ_VIEW_CARD ||
-         kind == SZ_VIEW_EXPANSION_TILE;
+         kind == SZ_VIEW_EXPANSION_TILE || kind == SZ_VIEW_TOOLTIP;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -406,6 +406,16 @@ SzView *sz_view_card(SzView *child) {
   return v;
 }
 
+SzView *sz_view_tooltip(const char *message, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_TOOLTIP);
+  v->text = sz_strdup(message ? message : "");
+  v->a11y_role = SZ_A11Y_TOOLTIP;
+  v->a11y_label = sz_strdup(message ? message : "");
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
 SzView *sz_view_divider(void) {
   SzView *v = view_new(SZ_VIEW_DIVIDER);
   v->a11y_role = SZ_A11Y_DIVIDER;
@@ -533,6 +543,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "segmented";
   case SZ_A11Y_FAB:
     return "fab";
+  case SZ_A11Y_TOOLTIP:
+    return "tooltip";
   default:
     return "none";
   }
@@ -2023,6 +2035,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_BORDER:
   case SZ_VIEW_RADIUS:
   case SZ_VIEW_BADGE:
+  case SZ_VIEW_TOOLTIP:
     layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     break;
   case SZ_VIEW_MAX_LINES: {
@@ -3041,6 +3054,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_ABSORB_POINTER:
   case SZ_VIEW_EXCLUDE_SEMANTICS:
   case SZ_VIEW_GAP:
+  case SZ_VIEW_TOOLTIP:
     if (v->kind == SZ_VIEW_LIST)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     for (i = 0; i < v->child_count; i++)
