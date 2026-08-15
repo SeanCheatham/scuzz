@@ -397,6 +397,16 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_circular_progress_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.circ\n";
+        let labels = labels_at(src, "View.circ");
+        assert!(
+            labels.iter().any(|l| l == "View.circularProgress"),
+            "{labels:?}"
+        );
+    }
+
+    #[test]
     fn completes_view_switch_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.sw\n";
         let labels = labels_at(src, "View.sw");

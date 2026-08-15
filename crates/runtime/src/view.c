@@ -282,6 +282,14 @@ SzView *sz_view_progress(SzSignalInt *sig) {
   return v;
 }
 
+SzView *sz_view_circular_progress(SzSignalInt *sig) {
+  SzView *v = view_new(SZ_VIEW_CIRCULAR_PROGRESS);
+  v->sig_int = sig;
+  v->a11y_role = SZ_A11Y_CIRCULAR;
+  v->a11y_label = sz_strdup("circular");
+  return v;
+}
+
 SzView *sz_view_switch(SzSignalInt *sig, const char *label) {
   SzView *v = view_new(SZ_VIEW_SWITCH);
   v->sig_int = sig;
@@ -444,6 +452,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "iconbutton";
   case SZ_A11Y_VDIV:
     return "vdiv";
+  case SZ_A11Y_CIRCULAR:
+    return "circular";
   default:
     return "none";
   }
@@ -477,7 +487,8 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
                on ? 1 : 0);
       label = live;
     }
-    if (v->kind == SZ_VIEW_SLIDER || v->kind == SZ_VIEW_PROGRESS) {
+    if (v->kind == SZ_VIEW_SLIDER || v->kind == SZ_VIEW_PROGRESS ||
+        v->kind == SZ_VIEW_CIRCULAR_PROGRESS) {
       int64_t n = v->sig_int ? slider_clamp(sz_signal_int_get(v->sig_int)) : 0;
       snprintf(live, sizeof live, "%lld", (long long)n);
       label = live;
@@ -1352,6 +1363,14 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     if (max_w > 0 && v->frame.w > max_w)
       v->frame.w = max_w;
     v->frame.h = 8.f;
+    break;
+  case SZ_VIEW_CIRCULAR_PROGRESS:
+    v->frame.w = theme->control_h;
+    v->frame.h = theme->control_h;
+    if (max_w > 0 && v->frame.w > max_w)
+      v->frame.w = max_w;
+    if (max_h > 0 && v->frame.h > max_h)
+      v->frame.h = max_h;
     break;
   case SZ_VIEW_DIVIDER:
     v->frame.w = max_w > 0 ? max_w : 120.f;
@@ -2233,6 +2252,35 @@ static void paint_border(SkCanvas *c, SzRect f, int width, uint32_t argb) {
   paint_rect(c, f.x + f.w - t, f.y + t, t, f.h - 2.f * t, argb);
 }
 
+/* Clockwise from the top edge. `frac` is 0–1 of the perimeter. */
+static void paint_ring_frac(SkCanvas *c, SzRect f, float t, float frac,
+                            uint32_t argb) {
+  float w = f.w;
+  float h = f.h;
+  if (t < 1.f)
+    t = 1.f;
+  if (frac <= 0.f || w <= 0.f || h <= 0.f)
+    return;
+  if (frac > 1.f)
+    frac = 1.f;
+  if (frac > 0.f) {
+    float p = frac < 0.25f ? frac / 0.25f : 1.f;
+    paint_rect(c, f.x, f.y, w * p, t, argb);
+  }
+  if (frac > 0.25f) {
+    float p = frac < 0.5f ? (frac - 0.25f) / 0.25f : 1.f;
+    paint_rect(c, f.x + w - t, f.y, t, h * p, argb);
+  }
+  if (frac > 0.5f) {
+    float p = frac < 0.75f ? (frac - 0.5f) / 0.25f : 1.f;
+    paint_rect(c, f.x + w * (1.f - p), f.y + h - t, w * p, t, argb);
+  }
+  if (frac > 0.75f) {
+    float p = (frac - 0.75f) / 0.25f;
+    paint_rect(c, f.x, f.y + h * (1.f - p), t, h * p, argb);
+  }
+}
+
 static void paint_string(SkCanvas *c, const char *s, float x, float y,
                          uint32_t argb, float font_px) {
   SkPaint *p;
@@ -2585,6 +2633,17 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->muted);
     if (fw > 0.f)
       paint_rect(c, v->frame.x, v->frame.y, fw, v->frame.h, theme->primary);
+    break;
+  }
+  case SZ_VIEW_CIRCULAR_PROGRESS: {
+    float n;
+    float t;
+    n = (float)slider_clamp(v->sig_int ? sz_signal_int_get(v->sig_int) : 0);
+    t = scale_px(theme, 4.f);
+    if (t < 2.f)
+      t = 2.f;
+    paint_border(c, v->frame, (int)(t + 0.5f), theme->muted);
+    paint_ring_frac(c, v->frame, t, n / 100.f, theme->primary);
     break;
   }
   case SZ_VIEW_TEXT_FIELD: {

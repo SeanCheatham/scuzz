@@ -24,6 +24,7 @@ text:q or Esc quits
 textfield:item
 button:Add
 vdiv:vdiv
+circular:40
 switch:On=0
 badge:0
 chip:Pin=0
@@ -45,10 +46,10 @@ button:Clear
 1 Tasks 264,24 25x32
 2 +1 44,254 48x32
 3 slider 32,306 336x32
-4 Add 84,416 48x32
-5 On 156,416 37x32
-6 Pin 201,416 32x32
-7 Rename 241,416 52x32
+4 Add 75,416 43x32
+5 On 183,416 37x32
+6 Pin 228,416 32x32
+7 Rename 268,416 43x32
 8 Save 12,476 48x32
 9 Clear 12,516 48x32
 

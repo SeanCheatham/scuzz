@@ -174,7 +174,8 @@ typedef enum SzViewKind {
   SZ_VIEW_DIVIDER,   /* full-width hairline; display only */
   SZ_VIEW_EXPANSION_TILE, /* Signal.int header; child shows when on */
   SZ_VIEW_ICON_BUTTON,    /* square label tap; same closure as button */
-  SZ_VIEW_VERTICAL_DIVIDER /* 8 px slot, control_h; muted hairline */
+  SZ_VIEW_VERTICAL_DIVIDER, /* 8 px slot, control_h; muted hairline */
+  SZ_VIEW_CIRCULAR_PROGRESS /* Signal.int 0-100 square ring; display only */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -202,6 +203,8 @@ SzView *sz_view_radio(SzSignalInt *sig, int64_t value, const char *label);
 SzView *sz_view_slider(SzSignalInt *sig);
 /* Paints a 0–100 bar from `sig`. Not a tap target. */
 SzView *sz_view_progress(SzSignalInt *sig);
+/* Paints a 0–100 square ring from `sig`. Not a tap target. */
+SzView *sz_view_circular_progress(SzSignalInt *sig);
 /* Tap flips `sig` between 0 and 1. `label` is a11y + painted text. */
 SzView *sz_view_switch(SzSignalInt *sig, const char *label);
 /* Tap flips `sig` between 0 and 1. `label` fills the chip. */
@@ -343,7 +346,8 @@ typedef enum SzA11yRole {
   SZ_A11Y_DIVIDER = 16,
   SZ_A11Y_EXPANSION = 17,
   SZ_A11Y_ICON_BUTTON = 18,
-  SZ_A11Y_VDIV = 19
+  SZ_A11Y_VDIV = 19,
+  SZ_A11Y_CIRCULAR = 20
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
@@ -437,6 +441,7 @@ SzView *sz_lang_view_checkbox(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_radio(SzSignalInt *sig, int64_t value, SzString *label);
 SzView *sz_lang_view_slider(SzSignalInt *sig);
 SzView *sz_lang_view_progress(SzSignalInt *sig);
+SzView *sz_lang_view_circular_progress(SzSignalInt *sig);
 SzView *sz_lang_view_switch(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_chip(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_list_tile(SzString *title, SzView *trailing);

@@ -360,6 +360,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("View.slider", "View.slider(sig: Signal): View"),
     ("View.progress", "View.progress(sig: Signal): View"),
     (
+        "View.circularProgress",
+        "View.circularProgress(sig: Signal): View",
+    ),
+    (
         "View.switch",
         "View.switch(sig: Signal, label: String): View",
     ),
@@ -605,6 +609,21 @@ mod tests {
 "#;
         let h = hover_src(src, "progress");
         assert!(h.contains("View.progress(sig: Signal): View"), "{h}");
+    }
+
+    #[test]
+    fn hovers_view_circular_progress() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(40)
+    _ <- Ui.run(_ => View.circularProgress(n))
+  } yield ()
+"#;
+        let h = hover_src(src, "circularProgress");
+        assert!(
+            h.contains("View.circularProgress(sig: Signal): View"),
+            "{h}"
+        );
     }
 
     #[test]
