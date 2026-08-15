@@ -5641,6 +5641,129 @@ static void test_circular_progress_not_in_taps_dump(void) {
   remove(path);
 }
 
+static void test_avatar_sizes(void) {
+  SzView *a;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  a = sz_view_avatar("S");
+  sz_view_layout(a, 200.f, 200.f, theme);
+  assert(sz_view_kind(a) == SZ_VIEW_AVATAR);
+  f = sz_view_frame(a);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  assert(fabsf(f.w - theme->control_h) < 0.5f);
+  sz_view_free(a);
+}
+
+static void test_avatar_a11y(void) {
+  SzView *a;
+  SzString *dump;
+
+  a = sz_view_avatar("S");
+  dump = sz_view_a11y_dump(a);
+  assert(strstr(sz_string_cstr(dump), "avatar:S") != NULL);
+  sz_string_free(dump);
+  sz_view_free(a);
+}
+
+static void test_avatar_not_tap_target(void) {
+  SzView *a;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  a = sz_view_avatar("S");
+  sz_view_layout(a, 80.f, 80.f, theme);
+  f = sz_view_frame(a);
+  assert(!sz_view_is_tap_target(a));
+  assert(sz_view_hit_test(a, f.x + f.w * 0.5f, f.y + f.h * 0.5f) == NULL);
+  assert(sz_view_handle_tap(a, f.x + f.w * 0.5f, f.y + f.h * 0.5f) == 0);
+  sz_view_free(a);
+}
+
+static void test_avatar_paint_disc(void) {
+  SzView *root;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+  int mx, my, cx, cy;
+
+  root = sz_view_avatar("S");
+  sz_view_layout(root, 80.f, 80.f, theme);
+  f = sz_view_frame(root);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  mx = (int)(f.x + f.w * 0.5f);
+  my = (int)(f.y + 6.f);
+  cx = (int)(f.x + 1.f);
+  cy = (int)(f.y + 1.f);
+  /* Disc fill is primary. Square corner stays the canvas background. */
+  assert(px_rgb(px, 80, mx, my, 0x14, 0x28, 0x50));
+  assert(px_rgb(px, 80, cx, cy, 0xF5, 0xF5, 0xF5));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
+static void test_avatar_in_row(void) {
+  SzView *row, *a;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, af;
+
+  row = sz_view_row();
+  a = sz_view_avatar("S");
+  sz_view_add_child(row, sz_view_button("Go", NULL, NULL));
+  sz_view_add_child(row, a);
+  sz_view_layout(row, 200.f, 200.f, theme);
+  f = sz_view_frame(row);
+  af = sz_view_frame(a);
+  assert(fabsf(af.w - theme->control_h) < 0.5f);
+  assert(fabsf(af.h - theme->control_h) < 0.5f);
+  assert(fabsf(f.h - (theme->control_h + theme->pad * 2.f)) < 0.5f);
+  sz_view_free(row);
+}
+
+static void test_avatar_not_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_avatar.dump";
+  char *dump;
+  const char *taps;
+
+  sig = sz_signal_int(0);
+  root = sz_view_row();
+  sz_view_add_child(root, sz_view_avatar("S"));
+  sz_view_add_child(root, sz_view_button("Go", counter_tap, sig));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "avatar:S") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "avatar") == NULL);
+  assert(strstr(taps, "Go") != NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
 static void test_radio_sizes(void) {
   SzView *r;
   SzSignalInt *sig;
@@ -7442,6 +7565,12 @@ int main(void) {
   test_circular_progress_paint_ring();
   test_circular_progress_in_row();
   test_circular_progress_not_in_taps_dump();
+  test_avatar_sizes();
+  test_avatar_a11y();
+  test_avatar_not_tap_target();
+  test_avatar_paint_disc();
+  test_avatar_in_row();
+  test_avatar_not_in_taps_dump();
   test_radio_sizes();
   test_radio_a11y_off_on();
   test_radio_tap_writes_value();

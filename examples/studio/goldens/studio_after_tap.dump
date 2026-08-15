@@ -25,6 +25,7 @@ button:Rename
 scroll:scroll
 card:card
 divider:divider
+avatar:S
 expansion:More=0
 list:list
 listtile:milk
@@ -41,10 +42,10 @@ button:Clear
 3 On 183,88 37x32
 4 Pin 228,88 32x32
 5 Rename 268,88 43x32
-6 More 48,192 304x32
-7 i 172,256 32x32
-8 Done 212,256 43x32
-9 Del 263,256 43x32
+6 More 48,232 304x32
+7 i 172,296 32x32
+8 Done 212,296 43x32
+9 Del 263,296 43x32
 10 Save 12,476 48x32
 11 Clear 12,516 48x32
 

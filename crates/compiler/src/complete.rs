@@ -407,6 +407,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_avatar_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.av\n";
+        let labels = labels_at(src, "View.av");
+        assert!(labels.iter().any(|l| l == "View.avatar"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_switch_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.sw\n";
         let labels = labels_at(src, "View.sw");

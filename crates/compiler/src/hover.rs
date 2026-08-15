@@ -363,6 +363,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.circularProgress",
         "View.circularProgress(sig: Signal): View",
     ),
+    ("View.avatar", "View.avatar(label: String): View"),
     (
         "View.switch",
         "View.switch(sig: Signal, label: String): View",
@@ -624,6 +625,15 @@ mod tests {
             h.contains("View.circularProgress(sig: Signal): View"),
             "{h}"
         );
+    }
+
+    #[test]
+    fn hovers_view_avatar() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.avatar("S"))
+"#;
+        let h = hover_src(src, "avatar");
+        assert!(h.contains("View.avatar(label: String): View"), "{h}");
     }
 
     #[test]

@@ -290,6 +290,14 @@ SzView *sz_view_circular_progress(SzSignalInt *sig) {
   return v;
 }
 
+SzView *sz_view_avatar(const char *label) {
+  SzView *v = view_new(SZ_VIEW_AVATAR);
+  v->text = sz_strdup(label ? label : "");
+  v->a11y_role = SZ_A11Y_AVATAR;
+  v->a11y_label = sz_strdup(label ? label : "");
+  return v;
+}
+
 SzView *sz_view_switch(SzSignalInt *sig, const char *label) {
   SzView *v = view_new(SZ_VIEW_SWITCH);
   v->sig_int = sig;
@@ -454,6 +462,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "vdiv";
   case SZ_A11Y_CIRCULAR:
     return "circular";
+  case SZ_A11Y_AVATAR:
+    return "avatar";
   default:
     return "none";
   }
@@ -1365,6 +1375,14 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.h = 8.f;
     break;
   case SZ_VIEW_CIRCULAR_PROGRESS:
+    v->frame.w = theme->control_h;
+    v->frame.h = theme->control_h;
+    if (max_w > 0 && v->frame.w > max_w)
+      v->frame.w = max_w;
+    if (max_h > 0 && v->frame.h > max_h)
+      v->frame.h = max_h;
+    break;
+  case SZ_VIEW_AVATAR:
     v->frame.w = theme->control_h;
     v->frame.h = theme->control_h;
     if (max_w > 0 && v->frame.w > max_w)
@@ -2644,6 +2662,25 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       t = 2.f;
     paint_border(c, v->frame, (int)(t + 0.5f), theme->muted);
     paint_ring_frac(c, v->frame, t, n / 100.f, theme->primary);
+    break;
+  }
+  case SZ_VIEW_AVATAR: {
+    int prev_on = g_radius_on;
+    float prev_r = g_radius;
+    SzRect prev_rect = g_radius_rect;
+    float r = v->frame.w < v->frame.h ? v->frame.w * 0.5f : v->frame.h * 0.5f;
+    resolve_text(v, buf, sizeof buf);
+    g_radius_on = 1;
+    g_radius = r;
+    g_radius_rect = v->frame;
+    paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->primary);
+    g_radius_on = prev_on;
+    g_radius = prev_r;
+    g_radius_rect = prev_rect;
+    paint_string(c, buf,
+                 v->frame.x + (v->frame.w - text_width(buf, theme->font_px)) * 0.5f,
+                 v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
+                 theme->on_primary, theme->font_px);
     break;
   }
   case SZ_VIEW_TEXT_FIELD: {
