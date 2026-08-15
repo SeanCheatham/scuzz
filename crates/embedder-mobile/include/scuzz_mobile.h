@@ -33,6 +33,10 @@ void sz_mobile_set_keyboard(int visible);
 /* Pop one queued OS event into out. Returns 1 if an event was written. */
 int sz_mobile_poll_event(SzInputEvent *out);
 
+/* Nonzero while the shell keeps the app live. Ui.run pumps until this is 0.
+ * Host shell returns 0 so the CI smoke stays a single frame. */
+int sz_mobile_alive(void);
+
 /* Host / test helper: push an event into the shell queue. */
 int sz_mobile_push_event(const SzInputEvent *event);
 

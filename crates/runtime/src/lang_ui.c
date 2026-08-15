@@ -2,6 +2,7 @@
 
 #include "scuzz_ui.h"
 #include "scuzz_embedder.h"
+#include "scuzz_mobile.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -777,6 +778,27 @@ static void *thunk_run_rebuild(void *env) {
         nanosleep(&ts, NULL);
       }
     } while (1);
+    sz_ui_session_finish(session);
+  } else if (cfg.kind == SZ_UI_RUNTIME_MOBILE && sz_mobile_available()) {
+    /* Live Mobile shell (iOS sim/device): pump until the shell goes away.
+     * Host shell reports alive=0, so the CI smoke stays a single frame. */
+    const char *max_frames_env = getenv("SCUZZ_LIVE_FRAMES");
+    int64_t max_frames =
+        (max_frames_env && atoi(max_frames_env) > 0) ? atoi(max_frames_env) : 0;
+    int64_t frame = 0;
+    while (sz_mobile_alive()) {
+      if (!sz_ui_pump_sync(session))
+        sz_panic("Ui.run live pump failed");
+      frame++;
+      if (max_frames > 0 && frame >= max_frames)
+        break;
+      {
+        struct timespec ts;
+        ts.tv_sec = 0;
+        ts.tv_nsec = 16000000L; /* ~60fps cap */
+        nanosleep(&ts, NULL);
+      }
+    }
     sz_ui_session_finish(session);
   } else {
     sz_ui_session_finish(session);

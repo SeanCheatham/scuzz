@@ -52,6 +52,7 @@ __attribute__((weak)) int sz_mobile_poll_event(SzInputEvent *out) {
   (void)out;
   return 0;
 }
+__attribute__((weak)) int sz_mobile_alive(void) { return 0; }
 
 /* Implemented in view.c */
 int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,

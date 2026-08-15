@@ -13,13 +13,28 @@ present (`--whole-archive` so strong symbols override weak stubs in `libscuzz_rt
 
 ## Packaging shells
 
-`scuzz package` copies **non-buildable templates** from `shells/` (layout + JNI/ObjC
-hooks). Device builds still need NDK/Xcode wiring.
+`scuzz package` copies **templates** from `shells/` (layout + JNI/ObjC
+hooks). The iOS shell builds for the simulator; Android still needs NDK wiring.
 
 | Target | Path | Role |
 | --- | --- | --- |
 | Android | `shells/android/` | Manifest + JNI stub; wire NDK / activity for device |
-| iOS | `shells/ios/` | Info.plist + C helpers; wire under Xcode for sim/device |
+| iOS | `shells/ios/` | ObjC shell (present / touch / keyboard) + `build_sim.sh`; builds a signed sim `.app` under Xcode |
 | host | (this lib) | CI smoke of the Mobile peer |
+
+iOS simulator proof (macOS arm64 + Xcode):
+
+```bash
+crates/embedder-mobile/shells/ios/build_sim.sh examples/counter
+xcrun simctl install booted examples/counter/build/ios-sim/counter.app
+xcrun simctl launch booted dev.scuzz.app
+```
+
+The shell owns `main` + `UIApplicationMain`. The app `main` is renamed to
+`scuzz_app_main` in a copy of the IR and runs on a worker thread. It mounts
+`UiRuntime.Mobile` through `SCUZZ_UI_RUNTIME=mobile` and pumps until
+`sz_mobile_alive` returns 0. Frames cross to the main queue as RGBA8888
+(`sz_mobile_present`). Touches enter the pump through the same event queue as
+the host shell. Soft keyboard: show/hide only (text events are future work).
 
 Same examples run unmodified through `SCUZZ_UI_RUNTIME=mobile`.

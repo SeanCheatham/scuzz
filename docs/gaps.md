@@ -11,11 +11,11 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ### 1. Mobile on real devices
 
-**Status.** Blocked on Android NDK and/or Xcode. `crates/embedder-mobile/` is a host shell (`SCUZZ_MOBILE_SHELL=1`) plus packaging stubs (`shells/android/`, `shells/ios/`). No NDK/Xcode build has run. Makefiles and CI do not invoke those toolchains.
+**Status.** iOS simulator proven: `shells/ios/build_sim.sh` cross-compiles the LLVM app + C runtime + `sk_sw` for `arm64-apple-ios-simulator`, links the ObjC shell (`shells/ios/main.m` + `ScuzzShell.m`), and signs a `.app`. `examples/counter` mounts `UiRuntime.Mobile` in a booted sim and presents live frames. Android stays blocked on the NDK (`shells/android/` is a manifest + JNI stub). Real devices stay open (provisioning, no simulator sandbox).
 
-**Unproven.** Cross-compile of LLVM app + C runtime + `sk_sw` for arm64, JNI/ObjC embedding, surface/present, and touch/soft-keyboard on hardware.
+**Unproven.** Android cross-compile and JNI/ObjC embedding on hardware. Touch and soft-keyboard text input on hardware. `scuzz package --target ios` still copies templates; the CLI does not drive `build_sim.sh` yet.
 
-**Proof.** One example (counter) runs on one device or simulator with `scuzz package` plus the platform toolchain. More stubs do not close the proof.
+**Proof.** One example (counter) runs on one device or simulator with `scuzz package` plus the platform toolchain. iOS sim meets the bar through the shell script; the CLI wiring and Android/device runs stay open.
 
 ### 2. GPU presenters (Impeller / Skia GPU)
 

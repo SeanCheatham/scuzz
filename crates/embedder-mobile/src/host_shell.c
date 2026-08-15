@@ -48,6 +48,9 @@ int sz_mobile_poll_event(SzInputEvent *out) {
   return 1;
 }
 
+/* Host shell stays a single-frame smoke; Ui.run exits the live Mobile loop. */
+int sz_mobile_alive(void) { return 0; }
+
 void sz_mobile_set_keyboard(int visible) {
   g_keyboard = visible ? 1 : 0;
   if (shell_enabled()) {

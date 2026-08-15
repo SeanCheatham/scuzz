@@ -281,7 +281,8 @@ jobs:
           cargo run -p scuzz -- package --target all examples/counter
           test -x examples/counter/build/package/host/run.sh
           test -f examples/counter/build/package/android/jni/scuzz_jni.c
-          test -f examples/counter/build/package/ios/ScuzzAppDelegate.m
+          test -f examples/counter/build/package/ios/main.m
+          test -f examples/counter/build/package/ios/build_sim.sh
           env SCUZZ_UI_WIDTH=200 SCUZZ_UI_HEIGHT=120 \
             ./examples/counter/build/package/host/run.sh 2>&1 | tee /tmp/pkg-host.out
           grep -q "scuzz mobile: present" /tmp/pkg-host.out
