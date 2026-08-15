@@ -179,6 +179,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_card(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_tooltip(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_placeholder(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_semantics(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_divider()").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_vertical_divider()").unwrap();
     writeln!(
@@ -3676,6 +3677,15 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "View.semantics" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_view_semantics(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "View.divider" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_lang_view_divider()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
@@ -4825,6 +4835,20 @@ law always: Bool = 1 == 1
         assert!(
             ir.contains("sz_lang_view_placeholder"),
             "expected sz_lang_view_placeholder in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_semantics() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.semantics("mark", View.avatar("S")))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_semantics"),
+            "expected sz_lang_view_semantics in IR:\n{ir}"
         );
     }
 

@@ -7563,6 +7563,278 @@ static void test_placeholder_child_in_taps_dump(void) {
   remove(path);
 }
 
+static void test_semantics_sizes(void) {
+  SzView *sem, *av;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, cf;
+
+  av = sz_view_avatar("S");
+  sem = sz_view_semantics("mark", av);
+  sz_view_layout(sem, 200.f, 200.f, theme);
+  assert(sz_view_kind(sem) == SZ_VIEW_SEMANTICS);
+  f = sz_view_frame(sem);
+  cf = sz_view_frame(av);
+  assert(fabsf(f.w - cf.w) < 0.5f);
+  assert(fabsf(f.h - cf.h) < 0.5f);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  sz_view_free(sem);
+}
+
+static void test_semantics_empty_sizes(void) {
+  SzView *sem;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sem = sz_view_semantics("mark", NULL);
+  sz_view_layout(sem, 200.f, 200.f, theme);
+  f = sz_view_frame(sem);
+  assert(fabsf(f.w) < 0.5f);
+  assert(fabsf(f.h) < 0.5f);
+  sz_view_free(sem);
+}
+
+static void test_semantics_same_origin(void) {
+  SzView *sem, *av;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, cf;
+
+  av = sz_view_avatar("S");
+  sem = sz_view_semantics("mark", av);
+  sz_view_layout(sem, 200.f, 200.f, theme);
+  f = sz_view_frame(sem);
+  cf = sz_view_frame(av);
+  assert(fabsf(f.x - cf.x) < 0.5f);
+  assert(fabsf(f.y - cf.y) < 0.5f);
+  sz_view_free(sem);
+}
+
+static void test_semantics_a11y(void) {
+  SzView *sem;
+  SzString *dump;
+  const char *s;
+
+  sem = sz_view_semantics("mark", sz_view_avatar("S"));
+  dump = sz_view_a11y_dump(sem);
+  s = sz_string_cstr(dump);
+  assert(strncmp(s, "semantics:", 10) == 0);
+  assert(strstr(s, "semantics:mark") != NULL);
+  assert(strstr(s, "avatar:S") != NULL);
+  sz_string_free(dump);
+  sz_view_free(sem);
+}
+
+static void test_semantics_a11y_nested(void) {
+  SzView *sem;
+  SzString *dump;
+  const char *s;
+
+  sem = sz_view_semantics(
+      "mark", sz_view_placeholder(sz_view_tooltip("Sean", sz_view_avatar("S"))));
+  dump = sz_view_a11y_dump(sem);
+  s = sz_string_cstr(dump);
+  assert(strstr(s, "semantics:mark") != NULL);
+  assert(strstr(s, "placeholder:ph") != NULL);
+  assert(strstr(s, "tooltip:Sean") != NULL);
+  assert(strstr(s, "avatar:S") != NULL);
+  sz_string_free(dump);
+  sz_view_free(sem);
+}
+
+static void test_semantics_empty_label(void) {
+  SzView *sem;
+  SzString *dump;
+
+  sem = sz_view_semantics("", sz_view_avatar("S"));
+  dump = sz_view_a11y_dump(sem);
+  assert(strstr(sz_string_cstr(dump), "semantics:") != NULL);
+  assert(strstr(sz_string_cstr(dump), "avatar:S") != NULL);
+  sz_string_free(dump);
+  sz_view_free(sem);
+}
+
+static void test_semantics_null_label(void) {
+  SzView *sem;
+  SzString *dump;
+
+  sem = sz_view_semantics(NULL, sz_view_avatar("S"));
+  dump = sz_view_a11y_dump(sem);
+  assert(strstr(sz_string_cstr(dump), "semantics:") != NULL);
+  sz_string_free(dump);
+  sz_view_free(sem);
+}
+
+static void test_semantics_not_tap_target(void) {
+  SzView *sem;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sem = sz_view_semantics("mark", sz_view_avatar("S"));
+  sz_view_layout(sem, 200.f, 80.f, theme);
+  f = sz_view_frame(sem);
+  assert(!sz_view_is_tap_target(sem));
+  assert(sz_view_hit_test(sem, f.x + 4.f, f.y + f.h * 0.5f) == NULL);
+  sz_view_free(sem);
+}
+
+static void test_semantics_child_tap(void) {
+  SzView *sem, *btn, *hit;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  btn = sz_view_button("Go", counter_tap, sig);
+  sem = sz_view_semantics("mark", btn);
+  sz_view_layout(sem, 200.f, 80.f, theme);
+  f = sz_view_frame(btn);
+  hit = sz_view_hit_test(sem, f.x + 4.f, f.y + f.h * 0.5f);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_BUTTON);
+  assert(sz_view_handle_tap(sem, f.x + 4.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 1);
+  sz_view_free(sem);
+  sz_signal_int_free(sig);
+}
+
+static void test_semantics_paint_child(void) {
+  SzView *root, *av;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+  int mx, my;
+
+  av = sz_view_avatar("S");
+  root = sz_view_semantics("mark", av);
+  sz_view_layout(root, 80.f, 80.f, theme);
+  f = sz_view_frame(av);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  mx = (int)(f.x + f.w * 0.5f);
+  my = (int)(f.y + 6.f);
+  assert(px_rgb(px, 80, mx, my, 0x14, 0x28, 0x50));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
+static void test_semantics_paint_no_mark(void) {
+  SzView *root, *child;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  child = sz_view_background(0xFF00AA00u, sz_view_sized(40, 40, sz_view_text("x")));
+  root = sz_view_semantics("mark", child);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  f = sz_view_frame(root);
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 20.f), 0x00, 0xAA, 0x00));
+  /* Top edge stays the child fill. Semantics does not paint a box mark. */
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)f.y, 0x00, 0xAA, 0x00));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
+static void test_semantics_paint_empty(void) {
+  SzView *root;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+
+  root = sz_view_semantics("mark", NULL);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, 8, 8, 0xF5, 0xF5, 0xF5));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
+static void test_semantics_not_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  const char *path = "/tmp/scuzz_ui_semantics.dump";
+  char *dump;
+  const char *taps;
+
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_semantics("mark", sz_view_avatar("S")));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "semantics:mark") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "mark") == NULL);
+  assert(strstr(taps, "semantics") == NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  remove(path);
+}
+
+static void test_semantics_child_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_semantics_child.dump";
+  char *dump;
+  const char *taps;
+
+  sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_semantics("mark", sz_view_button("Go", counter_tap, sig)));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "semantics:mark") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "Go") != NULL);
+  assert(strstr(taps, "mark") == NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
 static void test_filter_chip_sizes(void) {
   SzView *ch, *plain;
   SzSignalInt *sig;
@@ -10537,6 +10809,20 @@ int main(void) {
   test_placeholder_paint_empty();
   test_placeholder_not_in_taps_dump();
   test_placeholder_child_in_taps_dump();
+  test_semantics_sizes();
+  test_semantics_empty_sizes();
+  test_semantics_same_origin();
+  test_semantics_a11y();
+  test_semantics_a11y_nested();
+  test_semantics_empty_label();
+  test_semantics_null_label();
+  test_semantics_not_tap_target();
+  test_semantics_child_tap();
+  test_semantics_paint_child();
+  test_semantics_paint_no_mark();
+  test_semantics_paint_empty();
+  test_semantics_not_in_taps_dump();
+  test_semantics_child_in_taps_dump();
   test_filter_chip_sizes();
   test_filter_chip_empty_min_width();
   test_filter_chip_null_label();

@@ -167,6 +167,10 @@ SzView *sz_lang_view_placeholder(SzView *child) {
   return sz_view_placeholder(child);
 }
 
+SzView *sz_lang_view_semantics(SzString *label, SzView *child) {
+  return sz_view_semantics(label ? sz_string_cstr(label) : "", child);
+}
+
 SzView *sz_lang_view_divider(void) { return sz_view_divider(); }
 
 SzView *sz_lang_view_expansion_tile(SzSignalInt *sig, SzString *title,

@@ -438,6 +438,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_semantics_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.sema\n";
+        let labels = labels_at(src, "View.sema");
+        assert!(labels.iter().any(|l| l == "View.semantics"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_badge_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.ba\n";
         let labels = labels_at(src, "View.ba");

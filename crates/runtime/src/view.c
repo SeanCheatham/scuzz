@@ -121,7 +121,7 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_RADIUS || kind == SZ_VIEW_LIST_TILE ||
          kind == SZ_VIEW_BADGE || kind == SZ_VIEW_CARD ||
          kind == SZ_VIEW_EXPANSION_TILE || kind == SZ_VIEW_TOOLTIP ||
-         kind == SZ_VIEW_PLACEHOLDER;
+         kind == SZ_VIEW_PLACEHOLDER || kind == SZ_VIEW_SEMANTICS;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -497,6 +497,16 @@ SzView *sz_view_placeholder(SzView *child) {
   return v;
 }
 
+SzView *sz_view_semantics(const char *label, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_SEMANTICS);
+  v->text = sz_strdup(label ? label : "");
+  v->a11y_role = SZ_A11Y_SEMANTICS;
+  v->a11y_label = sz_strdup(label ? label : "");
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
 SzView *sz_view_divider(void) {
   SzView *v = view_new(SZ_VIEW_DIVIDER);
   v->a11y_role = SZ_A11Y_DIVIDER;
@@ -640,6 +650,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "textbutton";
   case SZ_A11Y_PLACEHOLDER:
     return "placeholder";
+  case SZ_A11Y_SEMANTICS:
+    return "semantics";
   default:
     return "none";
   }
@@ -2156,6 +2168,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_BADGE:
   case SZ_VIEW_TOOLTIP:
   case SZ_VIEW_PLACEHOLDER:
+  case SZ_VIEW_SEMANTICS:
     layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     break;
   case SZ_VIEW_MAX_LINES: {
@@ -3303,6 +3316,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_EXCLUDE_SEMANTICS:
   case SZ_VIEW_GAP:
   case SZ_VIEW_TOOLTIP:
+  case SZ_VIEW_SEMANTICS:
     if (v->kind == SZ_VIEW_LIST)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     for (i = 0; i < v->child_count; i++)

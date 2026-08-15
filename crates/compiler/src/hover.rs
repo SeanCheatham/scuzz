@@ -367,6 +367,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ),
     ("View.placeholder", "View.placeholder(child: View): View"),
     (
+        "View.semantics",
+        "View.semantics(label: String, child: View): View",
+    ),
+    (
         "View.checkbox",
         "View.checkbox(sig: Signal, label: String): View",
     ),
@@ -899,6 +903,18 @@ mod tests {
 "#;
         let h = hover_src(src, "placeholder");
         assert!(h.contains("View.placeholder(child: View): View"), "{h}");
+    }
+
+    #[test]
+    fn hovers_view_semantics() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.semantics("mark", View.avatar("S")))
+"#;
+        let h = hover_src(src, "semantics");
+        assert!(
+            h.contains("View.semantics(label: String, child: View): View"),
+            "{h}"
+        );
     }
 
     #[test]

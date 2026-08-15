@@ -596,6 +596,9 @@ static void format_last_hit_desc(SzView *hit, char *buf, size_t cap) {
   case SZ_A11Y_PLACEHOLDER:
     role = "placeholder";
     break;
+  case SZ_A11Y_SEMANTICS:
+    role = "semantics";
+    break;
   case SZ_A11Y_SWITCH:
     role = "switch";
     break;
