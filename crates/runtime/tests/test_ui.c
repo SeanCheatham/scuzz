@@ -4787,6 +4787,147 @@ static void test_badge_child_in_taps_dump(void) {
   remove(path);
 }
 
+static void test_card_sizes(void) {
+  SzView *card, *btn;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, cf;
+
+  sig = sz_signal_int(0);
+  btn = sz_view_button("Go", counter_tap, sig);
+  card = sz_view_card(btn);
+  sz_view_layout(card, 200.f, 200.f, theme);
+  assert(sz_view_kind(card) == SZ_VIEW_CARD);
+  f = sz_view_frame(card);
+  cf = sz_view_frame(btn);
+  assert(fabsf(f.w - (cf.w + theme->pad * 2.f)) < 0.5f);
+  assert(fabsf(f.h - (cf.h + theme->pad * 2.f)) < 0.5f);
+  sz_view_free(card);
+  sz_signal_int_free(sig);
+}
+
+static void test_card_empty_sizes(void) {
+  SzView *card;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  card = sz_view_card(NULL);
+  sz_view_layout(card, 200.f, 200.f, theme);
+  f = sz_view_frame(card);
+  assert(fabsf(f.w - theme->pad * 2.f) < 0.5f);
+  assert(fabsf(f.h - theme->pad * 2.f) < 0.5f);
+  sz_view_free(card);
+}
+
+static void test_card_a11y(void) {
+  SzView *card;
+  SzString *dump;
+
+  card = sz_view_card(sz_view_text("Hi"));
+  dump = sz_view_a11y_dump(card);
+  assert(strstr(sz_string_cstr(dump), "card:card") != NULL);
+  assert(strstr(sz_string_cstr(dump), "text:Hi") != NULL);
+  sz_string_free(dump);
+  sz_view_free(card);
+}
+
+static void test_card_not_tap_target(void) {
+  SzView *card;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  card = sz_view_card(sz_view_text("Hi"));
+  sz_view_layout(card, 200.f, 80.f, theme);
+  f = sz_view_frame(card);
+  assert(!sz_view_is_tap_target(card));
+  assert(sz_view_hit_test(card, f.x + 2.f, f.y + 2.f) == NULL);
+  sz_view_free(card);
+}
+
+static void test_card_child_tap(void) {
+  SzView *card, *btn, *hit;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  btn = sz_view_button("Go", counter_tap, sig);
+  card = sz_view_card(btn);
+  sz_view_layout(card, 200.f, 80.f, theme);
+  f = sz_view_frame(btn);
+  hit = sz_view_hit_test(card, f.x + 4.f, f.y + f.h * 0.5f);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_BUTTON);
+  assert(sz_view_handle_tap(card, f.x + 4.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 1);
+  sz_view_free(card);
+  sz_signal_int_free(sig);
+}
+
+static void test_card_paint_pad(void) {
+  SzView *root, *btn;
+  SzSignalInt *sig;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, cf;
+
+  sig = sz_signal_int(0);
+  btn = sz_view_button("Go", counter_tap, sig);
+  root = sz_view_card(btn);
+  surf = sk_surface_make_raster_n32_premul(120, 120);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 120, 120, theme));
+  f = sz_view_frame(root);
+  cf = sz_view_frame(btn);
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 120 * 120 * 4);
+  /* Pad ring is surface. Child button fill is primary. */
+  assert(px_rgb(px, 120, (int)(f.x + 2.f), (int)(f.y + 2.f), 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 120, (int)(cf.x + 8.f), (int)(cf.y + 4.f), 0x14, 0x28, 0x50));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+  sz_signal_int_free(sig);
+}
+
+static void test_card_child_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_card.dump";
+  char *dump;
+  const char *taps;
+
+  sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_card(sz_view_button("Go", counter_tap, sig)));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "card:card") != NULL);
+  assert(strstr(dump, "button:Go") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "card") == NULL);
+  assert(strstr(taps, "Go") != NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
 static void test_radio_sizes(void) {
   SzView *r;
   SzSignalInt *sig;
@@ -6547,6 +6688,13 @@ int main(void) {
   test_badge_child_tap();
   test_badge_paint_mark();
   test_badge_child_in_taps_dump();
+  test_card_sizes();
+  test_card_empty_sizes();
+  test_card_a11y();
+  test_card_not_tap_target();
+  test_card_child_tap();
+  test_card_paint_pad();
+  test_card_child_in_taps_dump();
   test_radio_sizes();
   test_radio_a11y_off_on();
   test_radio_tap_writes_value();

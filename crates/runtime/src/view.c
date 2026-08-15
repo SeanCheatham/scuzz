@@ -119,7 +119,7 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_TEXT_COLOR || kind == SZ_VIEW_GAP ||
          kind == SZ_VIEW_FONT_SIZE || kind == SZ_VIEW_BORDER ||
          kind == SZ_VIEW_RADIUS || kind == SZ_VIEW_LIST_TILE ||
-         kind == SZ_VIEW_BADGE;
+         kind == SZ_VIEW_BADGE || kind == SZ_VIEW_CARD;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -301,6 +301,15 @@ SzView *sz_view_badge(SzSignalInt *sig, SzView *child) {
   return v;
 }
 
+SzView *sz_view_card(SzView *child) {
+  SzView *v = view_new(SZ_VIEW_CARD);
+  v->a11y_role = SZ_A11Y_CARD;
+  v->a11y_label = sz_strdup("card");
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
 static int64_t slider_clamp(int64_t n) {
   if (n < 0)
     return 0;
@@ -382,6 +391,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "listtile";
   case SZ_A11Y_BADGE:
     return "badge";
+  case SZ_A11Y_CARD:
+    return "card";
   default:
     return "none";
   }
@@ -1709,6 +1720,35 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       v->frame.h = max_h;
     break;
   }
+  case SZ_VIEW_CARD: {
+    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
+    float p = theme->pad;
+    float inner_w = max_w > p * 2.f ? max_w - p * 2.f : 0.f;
+    float inner_h = max_h > p * 2.f ? max_h - p * 2.f : 0.f;
+    float inner_min_w = min_w > p * 2.f ? min_w - p * 2.f : 0.f;
+    float inner_min_h = min_h > p * 2.f ? min_h - p * 2.f : 0.f;
+    float cw = 0.f;
+    float chh = 0.f;
+    if (ch) {
+      SzBoxConstraints inner;
+      inner.min_w = inner_min_w;
+      inner.min_h = inner_min_h;
+      inner.max_w = inner_w;
+      inner.max_h = inner_h;
+      layout_constrained(ch, x + p, y + p, inner, theme);
+    }
+    if (ch) {
+      cw = ch->frame.w;
+      chh = ch->frame.h;
+    }
+    v->frame.w = cw + p * 2.f;
+    v->frame.h = chh + p * 2.f;
+    if (max_w > 0.f && v->frame.w > max_w)
+      v->frame.w = max_w;
+    if (max_h > 0.f && v->frame.h > max_h)
+      v->frame.h = max_h;
+    break;
+  }
   case SZ_VIEW_SIZED: {
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
     float tw = scale_px(theme, (float)v->img_w);
@@ -2340,6 +2380,18 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       font = 8.f;
     paint_string(c, buf, bx + 2.f, by + (d + font) * 0.5f, theme->on_primary,
                  font);
+    break;
+  }
+  case SZ_VIEW_CARD: {
+    SzRect br;
+    paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
+    for (i = 0; i < v->child_count; i++)
+      paint_node(v->children[i], c, theme);
+    br.x = v->frame.x;
+    br.y = v->frame.y;
+    br.w = v->frame.w;
+    br.h = v->frame.h;
+    paint_border(c, br, (int)(scale_px(theme, 1.f) + 0.5f), theme->border);
     break;
   }
   case SZ_VIEW_RADIO: {

@@ -2185,7 +2185,8 @@ fn infer_call(
         | "View.ellipsis"
         | "View.ignorePointer"
         | "View.absorbPointer"
-        | "View.excludeSemantics" => {
+        | "View.excludeSemantics"
+        | "View.card" => {
             expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Opaque("View".into()))
         }
@@ -5336,6 +5337,15 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.badge should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_card() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.card(View.text("x")))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.card should typecheck");
     }
 
     #[test]

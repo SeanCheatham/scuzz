@@ -27,6 +27,7 @@ badge:0
 chip:Pin=0
 button:Rename
 scroll:scroll
+card:card
 list:list
 listtile:milk
 button:Done

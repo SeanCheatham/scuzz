@@ -365,6 +365,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.listTile(title: String, trailing: View): View",
     ),
     ("View.badge", "View.badge(sig: Signal, child: View): View"),
+    ("View.card", "View.card(child: View): View"),
     ("View.scroll", "View.scroll(child: View): View"),
     ("View.scrollH", "View.scrollH(child: View): View"),
     ("View.column", "View.column(...): View"),
@@ -651,6 +652,15 @@ mod tests {
             h.contains("View.badge(sig: Signal, child: View): View"),
             "{h}"
         );
+    }
+
+    #[test]
+    fn hovers_view_card() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.card(View.text("x")))
+"#;
+        let h = hover_src(src, "card");
+        assert!(h.contains("View.card(child: View): View"), "{h}");
     }
 
     #[test]

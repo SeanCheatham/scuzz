@@ -342,6 +342,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_card_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.car\n";
+        let labels = labels_at(src, "View.car");
+        assert!(labels.iter().any(|l| l == "View.card"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_slider_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.sl\n";
         let labels = labels_at(src, "View.sl");

@@ -20,6 +20,7 @@ badge:0
 chip:Pin=0
 button:Rename
 scroll:scroll
+card:card
 list:list
 listtile:milk
 button:Done
@@ -34,8 +35,8 @@ button:Clear
 3 On 152,88 37x32
 4 Pin 197,88 32x32
 5 Rename 237,88 58x32
-6 Done 236,176 48x32
-7 Del 292,176 48x32
+6 Done 224,188 48x32
+7 Del 280,188 48x32
 8 Save 12,476 48x32
 9 Clear 12,516 48x32
 
