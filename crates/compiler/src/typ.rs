@@ -406,104 +406,153 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
 
 /// Structural check for the kernel dialect: @main is IO[Unit]; defs/calls resolve.
 pub fn typecheck(program: &Program) -> Result<(), TypeError> {
-    let enums = EnumIndex::build(&program.enums, &program.imports).map_err(|e| match e {
-        ResolveError::Duplicate { module, name } => {
-            TypeError::Msg(format!("duplicate enum {module}.{name}"))
+    typecheck_all(program)
+        .into_iter()
+        .next()
+        .map_or(Ok(()), Err)
+}
+
+/// Same checks as [`typecheck`]. Continues past def-level failures.
+pub fn typecheck_all(program: &Program) -> Vec<TypeError> {
+    let mut errs = Vec::new();
+    let enums = match EnumIndex::build(&program.enums, &program.imports) {
+        Ok(e) => e,
+        Err(e) => {
+            return vec![match e {
+                ResolveError::Duplicate { module, name } => {
+                    TypeError::Msg(format!("duplicate enum {module}.{name}"))
+                }
+                other => TypeError::Msg(other.to_string()),
+            }];
         }
-        other => TypeError::Msg(other.to_string()),
-    })?;
-    let methods = MethodIndex::build(&program.impls, &program.traits, &enums, &program.enums)?;
-    let funs =
-        FunIndex::build(&program.defs, &program.imports, &program.enums).map_err(|e| match e {
-            ResolveError::Duplicate { module, name } => {
-                TypeError::Msg(format!("duplicate def {module}.{name}"))
-            }
-            other => TypeError::Msg(other.to_string()),
-        })?;
+    };
+    let methods = match MethodIndex::build(&program.impls, &program.traits, &enums, &program.enums)
+    {
+        Ok(m) => m,
+        Err(e) => return vec![e],
+    };
+    let funs = match FunIndex::build(&program.defs, &program.imports, &program.enums) {
+        Ok(f) => f,
+        Err(e) => {
+            return vec![match e {
+                ResolveError::Duplicate { module, name } => {
+                    TypeError::Msg(format!("duplicate def {module}.{name}"))
+                }
+                other => TypeError::Msg(other.to_string()),
+            }];
+        }
+    };
     for en in &program.enums {
         let id = crate::resolve::enum_id(&en.module, &en.name);
         for case in &en.cases {
-            check_payload_fields(&id, en, case)?;
+            if let Err(e) = check_payload_fields(&id, en, case) {
+                errs.push(e);
+            }
             for (i, (fname, fty)) in case.fields.iter().enumerate() {
-                resolve_type_in(fty, &enums, &en.module, &en.type_params)?;
+                if let Err(e) = resolve_type_in(fty, &enums, &en.module, &en.type_params) {
+                    errs.push(e);
+                    continue;
+                }
                 if let Some(rfn) = case.field_rfn(i) {
                     if crate::overlay::expr_has_law(rfn) {
-                        return Err(TypeError::Msg(format!(
+                        errs.push(TypeError::Msg(format!(
                             "where on `{}.{}` must not call Law.*",
                             en.name, fname
                         )));
+                        continue;
                     }
                     let mut env: HashMap<String, Type> = HashMap::new();
                     for (n, t) in &case.fields {
-                        env.insert(
-                            n.clone(),
-                            resolve_type_in(t, &enums, &en.module, &en.type_params)?,
-                        );
+                        match resolve_type_in(t, &enums, &en.module, &en.type_params) {
+                            Ok(ty) => {
+                                env.insert(n.clone(), ty);
+                            }
+                            Err(e) => {
+                                errs.push(e);
+                            }
+                        }
                     }
-                    let rty = infer(rfn, &enums, &funs, &methods, &en.module, &mut env)?;
-                    if !matches!(rty, Type::Bool | Type::Int) {
-                        return Err(TypeError::Msg(format!(
-                            "where on `{}.{}` must be Bool (or Int), got {rty:?}",
+                    match infer(rfn, &enums, &funs, &methods, &en.module, &mut env) {
+                        Ok(rty) if matches!(rty, Type::Bool) => {}
+                        Ok(rty) => errs.push(TypeError::Msg(format!(
+                            "where on `{}.{}` must be Bool, got {rty:?}",
                             en.name, fname
-                        )));
+                        ))),
+                        Err(e) => errs.push(e),
                     }
                 }
             }
         }
     }
     for d in &program.defs {
-        let mut env: HashMap<String, Type> = HashMap::new();
-        for p in &d.params {
-            env.insert(
-                p.name.clone(),
-                resolve_type_in(&p.ty, &enums, &d.module, &d.type_params)?,
-            );
-        }
-        for p in &d.params {
-            if let Some(rfn) = &p.rfn {
-                if crate::overlay::expr_has_law(rfn) {
-                    return Err(TypeError::At {
-                        msg: format!("where on `{}` must not call Law.*", p.name),
-                        span: rfn.span.clone(),
-                    });
-                }
-                let rty = infer(rfn, &enums, &funs, &methods, &d.module, &mut env)?;
-                if !matches!(rty, Type::Bool | Type::Int) {
-                    return Err(TypeError::At {
-                        msg: format!("where on `{}` must be Bool (or Int), got {rty:?}", p.name),
-                        span: rfn.span.clone(),
-                    });
-                }
-            }
-        }
-        let body_ty = infer(&d.body, &enums, &funs, &methods, &d.module, &mut env)?;
-        let ret = resolve_type_in(&d.ret, &enums, &d.module, &d.type_params)?;
-        if !types_compat(&body_ty, &ret) {
-            return Err(TypeError::At {
-                msg: format!(
-                    "def {} body {:?} does not match declared {:?}",
-                    d.name, body_ty, ret
-                ),
-                span: d.body.span.clone(),
-            });
+        if let Err(e) = typecheck_def(d, &enums, &funs, &methods) {
+            errs.push(e);
         }
     }
+    if program.main.name.is_empty() {
+        return errs;
+    }
     let mut env: HashMap<String, Type> = HashMap::new();
-    let ty = infer(
+    match infer(
         &program.main.body,
         &enums,
         &funs,
         &methods,
         &program.main.module,
         &mut env,
-    )?;
-    match ty {
-        Type::Io(inner) if matches!(*inner, Type::Unit) => Ok(()),
-        other => Err(TypeError::At {
+    ) {
+        Ok(Type::Io(inner)) if matches!(*inner, Type::Unit) => {}
+        Ok(other) => errs.push(TypeError::At {
             msg: format!("@main body must be IO[Unit], got {other:?}"),
             span: program.main.body.span.clone(),
         }),
+        Err(e) => errs.push(e),
     }
+    errs
+}
+
+fn typecheck_def(
+    d: &FunDef,
+    enums: &EnumIndex<'_>,
+    funs: &FunIndex<'_>,
+    methods: &MethodIndex,
+) -> Result<(), TypeError> {
+    let mut env: HashMap<String, Type> = HashMap::new();
+    for p in &d.params {
+        env.insert(
+            p.name.clone(),
+            resolve_type_in(&p.ty, enums, &d.module, &d.type_params)?,
+        );
+    }
+    for p in &d.params {
+        if let Some(rfn) = &p.rfn {
+            if crate::overlay::expr_has_law(rfn) {
+                return Err(TypeError::At {
+                    msg: format!("where on `{}` must not call Law.*", p.name),
+                    span: rfn.span.clone(),
+                });
+            }
+            let rty = infer(rfn, enums, funs, methods, &d.module, &mut env)?;
+            if !matches!(rty, Type::Bool) {
+                return Err(TypeError::At {
+                    msg: format!("where on `{}` must be Bool, got {rty:?}", p.name),
+                    span: rfn.span.clone(),
+                });
+            }
+        }
+    }
+    let body_ty = infer(&d.body, enums, funs, methods, &d.module, &mut env)?;
+    let ret = resolve_type_in(&d.ret, enums, &d.module, &d.type_params)?;
+    if !types_compat(&body_ty, &ret) {
+        return Err(TypeError::At {
+            msg: format!(
+                "def {} body {:?} does not match declared {:?}",
+                d.name, body_ty, ret
+            ),
+            span: d.body.span.clone(),
+        });
+    }
+    Ok(())
 }
 
 fn resolve_type(ty: &Type, enums: &EnumIndex<'_>, module: &str) -> Result<Type, TypeError> {
@@ -565,6 +614,16 @@ fn resolve_type_in(
             module,
             type_params,
         )?))),
+        Type::List(inner) => Ok(Type::List(Box::new(resolve_type_in(
+            inner,
+            enums,
+            module,
+            type_params,
+        )?))),
+        Type::Fun(a, b) => Ok(Type::Fun(
+            Box::new(resolve_type_in(a, enums, module, type_params)?),
+            Box::new(resolve_type_in(b, enums, module, type_params)?),
+        )),
         other => Ok(other.clone()),
     }
 }
@@ -695,8 +754,8 @@ fn is_nullary_bool_law(
     current_module: &str,
 ) -> Result<bool, TypeError> {
     match funs.resolve(name, current_module) {
-        Ok(f) if f.is_law && f.params.is_empty() => Ok(matches!(f.ret, Type::Bool | Type::Int)),
-        Ok(f) if f.params.is_empty() && matches!(f.ret, Type::Bool | Type::Int) => Ok(true),
+        Ok(f) if f.is_law && f.params.is_empty() => Ok(matches!(f.ret, Type::Bool)),
+        Ok(f) if f.params.is_empty() && matches!(f.ret, Type::Bool) => Ok(true),
         Ok(_) => Ok(false),
         Err(crate::resolve::ResolveError::Unknown(_)) => Ok(false),
         Err(e) => Err(TypeError::Msg(e.to_string())),
@@ -705,8 +764,8 @@ fn is_nullary_bool_law(
 
 fn pred_ok_ty(t: &Type) -> bool {
     match t {
-        Type::Bool | Type::Int => true,
-        Type::Io(inner) => matches!(**inner, Type::Bool | Type::Int),
+        Type::Bool => true,
+        Type::Io(inner) => matches!(**inner, Type::Bool),
         _ => false,
     }
 }
@@ -751,7 +810,7 @@ fn infer_require_pred(
             }
             if !pred_ok_ty(&bt) {
                 return Err(TypeError::Msg(format!(
-                    ".require lambda must return Bool/Int or IO[Bool/Int], got {bt:?}"
+                    ".require lambda must return Bool or IO[Bool], got {bt:?}"
                 )));
             }
             Ok(bt)
@@ -760,7 +819,7 @@ fn infer_require_pred(
             let t = infer(pred, enums, funs, methods, current_module, env)?;
             if !pred_ok_ty(&t) {
                 return Err(TypeError::Msg(format!(
-                    ".require predicate must be Bool/Int or IO[Bool/Int], got {t:?}"
+                    ".require predicate must be Bool or IO[Bool], got {t:?}"
                 )));
             }
             Ok(t)
@@ -949,14 +1008,24 @@ fn rewrite_require(
 
 /// Kit lambdas bind a known item type. Bare lambdas (`View.button` tap) stay Opaque.
 pub(crate) fn kit_lambda_param_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
+    kit_lambda_param_ty_at(callee, arg_i, nargs, &[])
+}
+
+fn kit_lambda_param_ty_at(
+    callee: &str,
+    arg_i: usize,
+    nargs: usize,
+    prior: &[Type],
+) -> Option<Type> {
     match (callee, arg_i) {
         ("Ui.run", 0) => Some(Type::Opaque("Param".into())),
         ("Signal.map", 1) => Some(Type::Int),
         ("View.each", 1) if nargs == 2 => Some(Type::String),
+        ("List.filter" | "List.map", 1) => prior.first().and_then(|t| list_elem(t).ok()),
         (
-            "List.filter" | "List.map" | "Stream.filter" | "Stream.map" | "Stream.takeWhile"
-            | "Stream.dropWhile" | "Stream.find" | "Stream.exists" | "Stream.evalMap"
-            | "Resource.make" | "Resource.use" | "Net.serve" | "Net.serveOnce",
+            "Stream.filter" | "Stream.map" | "Stream.takeWhile" | "Stream.dropWhile"
+            | "Stream.find" | "Stream.exists" | "Stream.evalMap" | "Resource.make" | "Resource.use"
+            | "Net.serve" | "Net.serveOnce",
             1,
         ) => Some(Type::String),
         _ => None,
@@ -967,7 +1036,7 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
     match (callee, arg_i) {
         ("Ui.run", 0) => Some(Type::Opaque("View".into())),
         ("View.each", 1) if nargs == 2 => Some(Type::Opaque("View".into())),
-        ("Signal.map", 1) | ("List.map", 1) | ("Stream.map", 1) => Some(Type::String),
+        ("Signal.map", 1) | ("Stream.map", 1) => Some(Type::String),
         (
             "List.filter" | "Stream.filter" | "Stream.takeWhile" | "Stream.dropWhile"
             | "Stream.find" | "Stream.exists",
@@ -994,9 +1063,8 @@ fn kit_ret_label(ty: &Type) -> &'static str {
 fn kit_lambda_body_ok(got: &Type, want: &Type) -> bool {
     match want {
         Type::Opaque(n) if n == "View" => matches!(got, Type::Opaque(g) if g == "View"),
-        // Map bodies stringify Int (see emit_smap_lambda).
         Type::String => matches!(got, Type::String | Type::Int),
-        Type::Bool => matches!(got, Type::Bool | Type::Int),
+        Type::Bool => matches!(got, Type::Bool),
         Type::Io(_) => matches!(got, Type::Io(_)),
         _ => types_compat(got, want),
     }
@@ -1234,12 +1302,17 @@ fn rewrite_fields(
         ExprKind::Call { callee, args } => {
             let nargs = args.len();
             let mut out = Vec::with_capacity(nargs);
+            let mut prior: Vec<Type> = Vec::new();
             for (i, a) in args.into_iter().enumerate() {
-                let rewritten = if let Some(pty) = kit_lambda_param_ty(&callee, i, nargs) {
+                let rewritten = if let Some(pty) = kit_lambda_param_ty_at(&callee, i, nargs, &prior)
+                {
                     rewrite_lambda_arg(a, pty, enums, funs, methods, current_module, env)?
                 } else {
                     rewrite_fields(a, enums, funs, methods, current_module, env)?
                 };
+                let ty = infer(&rewritten, enums, funs, methods, current_module, env)
+                    .unwrap_or_else(|_| Type::Opaque("Rewrite".into()));
+                prior.push(ty);
                 out.push(rewritten);
             }
             Ok(Expr::new(ExprKind::Call { callee, args: out }, span))
@@ -1261,12 +1334,20 @@ fn infer(
         let result = match &expr.kind {
             ExprKind::Unit => Ok(Type::Unit),
             ExprKind::IntLit(_) => Ok(Type::Int),
+            ExprKind::BoolLit(_) => Ok(Type::Bool),
             ExprKind::StrLit(_) => Ok(Type::String),
             ExprKind::ListLit { elems } => {
+                let mut elem: Option<Type> = None;
                 for e in elems {
-                    infer(e, enums, funs, methods, current_module, env)?;
+                    let t = infer(e, enums, funs, methods, current_module, env)?;
+                    elem = Some(match elem {
+                        None => t,
+                        Some(prev) => prefer_elem(&prev, &t),
+                    });
                 }
-                Ok(Type::List)
+                Ok(Type::List(Box::new(
+                    elem.unwrap_or_else(|| Type::Opaque("Elem".into())),
+                )))
             }
             ExprKind::Interpolate { parts } => {
                 for part in parts {
@@ -1400,9 +1481,9 @@ fn infer(
                 else_branch,
             } => {
                 let ct = infer(cond, enums, funs, methods, current_module, env)?;
-                if !matches!(ct, Type::Int | Type::Bool) {
+                if !matches!(ct, Type::Bool) {
                     return Err(TypeError::Msg(format!(
-                        "if condition must be Int/Bool, got {ct:?}"
+                        "if condition must be Bool, got {ct:?}"
                     )));
                 }
                 let tt = infer(then_branch, enums, funs, methods, current_module, env)?;
@@ -1434,7 +1515,7 @@ fn infer(
                         if types_compat(&lt, &rt)
                             || (matches!(lt, Type::String) && matches!(rt, Type::String))
                         {
-                            Ok(Type::Int)
+                            Ok(Type::Bool)
                         } else {
                             Err(TypeError::Msg(format!(
                                 "comparison type mismatch {lt:?} vs {rt:?}"
@@ -1443,18 +1524,16 @@ fn infer(
                     }
                     BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
                         if matches!(lt, Type::Int) && matches!(rt, Type::Int) {
-                            Ok(Type::Int)
+                            Ok(Type::Bool)
                         } else {
                             Err(TypeError::Msg("ordered compare needs Int".into()))
                         }
                     }
                     BinOp::And | BinOp::Or => {
-                        if matches!(lt, Type::Int | Type::Bool)
-                            && matches!(rt, Type::Int | Type::Bool)
-                        {
-                            Ok(Type::Int)
+                        if matches!(lt, Type::Bool) && matches!(rt, Type::Bool) {
+                            Ok(Type::Bool)
                         } else {
-                            Err(TypeError::Msg("&&/|| need Int/Bool".into()))
+                            Err(TypeError::Msg("&&/|| need Bool".into()))
                         }
                     }
                 }
@@ -1587,7 +1666,7 @@ fn infer_lambda_arg(
     env: &mut HashMap<String, Type>,
 ) -> Result<Type, TypeError> {
     if let ExprKind::Lambda { param, body } = &expr.kind {
-        let old = bind_opt(param.as_ref(), param_ty, env);
+        let old = bind_opt(param.as_ref(), param_ty.clone(), env);
         let result = infer(body, enums, funs, methods, current_module, env);
         restore_opt(old, env);
         let bt = result?;
@@ -1599,7 +1678,7 @@ fn infer_lambda_arg(
                 )));
             }
         }
-        Ok(Type::Opaque("TapFn".into()))
+        Ok(Type::Fun(Box::new(param_ty), Box::new(bt)))
     } else {
         infer(expr, enums, funs, methods, current_module, env)
     }
@@ -1617,21 +1696,23 @@ fn infer_call(
     let mut arg_tys = Vec::new();
     let nargs = args.len();
     for (i, a) in args.iter().enumerate() {
-        arg_tys.push(if let Some(pty) = kit_lambda_param_ty(callee, i, nargs) {
-            infer_lambda_arg(
-                callee,
-                a,
-                pty,
-                kit_lambda_ret_ty(callee, i, nargs),
-                enums,
-                funs,
-                methods,
-                current_module,
-                env,
-            )?
-        } else {
-            infer(a, enums, funs, methods, current_module, env)?
-        });
+        arg_tys.push(
+            if let Some(pty) = kit_lambda_param_ty_at(callee, i, nargs, &arg_tys) {
+                infer_lambda_arg(
+                    callee,
+                    a,
+                    pty,
+                    kit_lambda_ret_ty(callee, i, nargs),
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?
+            } else {
+                infer(a, enums, funs, methods, current_module, env)?
+            },
+        );
     }
     match callee {
         "Str.concat" => {
@@ -1676,7 +1757,7 @@ fn infer_call(
         "Str.lines" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
-            Ok(Type::List)
+            Ok(list_of(Type::String))
         }
         "Str.trim" => {
             expect_arity(callee, &arg_tys, 1)?;
@@ -1685,16 +1766,16 @@ fn infer_call(
         }
         "List.empty" => {
             expect_arity(callee, &arg_tys, 0)?;
-            Ok(Type::List)
+            Ok(list_of(Type::Opaque("Elem".into())))
         }
         "List.cons" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_ty(&arg_tys[1], &Type::List)?;
-            Ok(Type::List)
+            let elem = prefer_elem(&arg_tys[0], &list_elem(&arg_tys[1])?);
+            Ok(list_of(elem))
         }
         "List.isEmpty" => {
             expect_arity(callee, &arg_tys, 1)?;
-            expect_ty(&arg_tys[0], &Type::List)?;
+            list_elem(&arg_tys[0])?;
             Ok(Type::Int)
         }
         "List.head" | "List.at" => {
@@ -1704,52 +1785,56 @@ fn infer_call(
                 expect_arity(callee, &arg_tys, 2)?;
                 expect_ty(&arg_tys[1], &Type::Int)?;
             }
-            expect_ty(&arg_tys[0], &Type::List)?;
-            Ok(Type::Opaque("Any".into()))
+            list_elem(&arg_tys[0])
         }
         "List.tail" | "List.reverse" => {
             expect_arity(callee, &arg_tys, 1)?;
-            expect_ty(&arg_tys[0], &Type::List)?;
-            Ok(Type::List)
+            list_elem(&arg_tys[0])?;
+            Ok(arg_tys[0].clone())
         }
         "List.len" => {
             expect_arity(callee, &arg_tys, 1)?;
-            expect_ty(&arg_tys[0], &Type::List)?;
+            list_elem(&arg_tys[0])?;
             Ok(Type::Int)
         }
         "List.join" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_ty(&arg_tys[0], &Type::List)?;
+            expect_ty(&arg_tys[0], &list_of(Type::String))?;
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::String)
         }
         "List.append" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_ty(&arg_tys[0], &Type::List)?;
-            Ok(Type::List)
+            let elem = prefer_elem(&list_elem(&arg_tys[0])?, &arg_tys[1]);
+            Ok(list_of(elem))
         }
         "List.setAt" => {
             expect_arity(callee, &arg_tys, 3)?;
-            expect_ty(&arg_tys[0], &Type::List)?;
+            let elem = prefer_elem(&list_elem(&arg_tys[0])?, &arg_tys[2]);
             expect_ty(&arg_tys[1], &Type::Int)?;
-            Ok(Type::List)
+            Ok(list_of(elem))
         }
         "List.filter" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_ty(&arg_tys[0], &Type::List)?;
-            Ok(Type::List)
+            let elem = list_elem(&arg_tys[0])?;
+            Ok(list_of(elem))
         }
         "List.map" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_ty(&arg_tys[0], &Type::List)?;
-            Ok(Type::List)
+            list_elem(&arg_tys[0])?;
+            let out = match &arg_tys[1] {
+                Type::Fun(_, ret) => (**ret).clone(),
+                Type::Opaque(_) => Type::Opaque("Elem".into()),
+                other => other.clone(),
+            };
+            Ok(list_of(out))
         }
         "Fs.read" | "Fs.list" | "Fs.mkdirs" | "Fs.canonicalize" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(match callee {
                 "Fs.read" => Type::Io(Box::new(Type::String)),
-                "Fs.list" => Type::Io(Box::new(Type::List)),
+                "Fs.list" => Type::Io(Box::new(list_of(Type::String))),
                 "Fs.canonicalize" => Type::Io(Box::new(Type::String)),
                 _ => Type::Io(Box::new(Type::Unit)),
             })
@@ -1762,7 +1847,7 @@ fn infer_call(
         }
         "Sys.args" => {
             expect_arity(callee, &arg_tys, 0)?;
-            Ok(Type::Io(Box::new(Type::List)))
+            Ok(Type::Io(Box::new(list_of(Type::String))))
         }
         "Sys.readLine" => {
             expect_arity(callee, &arg_tys, 0)?;
@@ -1912,7 +1997,7 @@ fn infer_call(
         }
         "Stream.emits" => {
             expect_arity(callee, &arg_tys, 1)?;
-            expect_ty(&arg_tys[0], &Type::List)?;
+            expect_ty(&arg_tys[0], &list_of(Type::String))?;
             Ok(Type::Opaque("Stream".into()))
         }
         "Stream.eval" => {
@@ -1964,7 +2049,7 @@ fn infer_call(
         }
         "Stream.compileToList" => {
             expect_arity(callee, &arg_tys, 1)?;
-            Ok(Type::Io(Box::new(Type::List)))
+            Ok(Type::Io(Box::new(list_of(Type::String))))
         }
         "Stream.drain" => {
             expect_arity(callee, &arg_tys, 1)?;
@@ -2000,16 +2085,16 @@ fn infer_call(
         }
         "Signal.list" => {
             expect_arity(callee, &arg_tys, 1)?;
-            expect_ty(&arg_tys[0], &Type::List)?;
+            list_elem(&arg_tys[0])?;
             Ok(Type::Opaque("SignalList".into()))
         }
         "Signal.getList" => {
             expect_arity(callee, &arg_tys, 1)?;
-            Ok(Type::List)
+            Ok(list_of(Type::String))
         }
         "Signal.setList" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_ty(&arg_tys[1], &Type::List)?;
+            list_elem(&arg_tys[1])?;
             Ok(Type::Unit)
         }
         "Signal.map" => {
@@ -2045,9 +2130,9 @@ fn infer_call(
         "Law.assert" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::String)?;
-            if !matches!(arg_tys[1], Type::Bool | Type::Int) {
+            if !matches!(arg_tys[1], Type::Bool) {
                 return Err(TypeError::Msg(format!(
-                    "Law.assert ok must be Bool/Int, got {:?}",
+                    "Law.assert ok must be Bool, got {:?}",
                     arg_tys[1]
                 )));
             }
@@ -2056,9 +2141,9 @@ fn infer_call(
         "Law.check" => {
             expect_arity(callee, &arg_tys, 3)?;
             expect_ty(&arg_tys[0], &Type::String)?;
-            if !matches!(arg_tys[1], Type::Bool | Type::Int) {
+            if !matches!(arg_tys[1], Type::Bool) {
                 return Err(TypeError::Msg(format!(
-                    "Law.check ok must be Bool/Int, got {:?}",
+                    "Law.check ok must be Bool, got {:?}",
                     arg_tys[1]
                 )));
             }
@@ -2067,9 +2152,9 @@ fn infer_call(
         "Law.force" => {
             expect_arity(callee, &arg_tys, 1)?;
             match &arg_tys[0] {
-                Type::Io(inner) if matches!(**inner, Type::Bool | Type::Int) => Ok(Type::Int),
+                Type::Io(inner) if matches!(**inner, Type::Bool) => Ok(Type::Int),
                 other => Err(TypeError::Msg(format!(
-                    "Law.force expects IO[Bool/Int], got {other:?}"
+                    "Law.force expects IO[Bool], got {other:?}"
                 ))),
             }
         }
@@ -2383,10 +2468,13 @@ fn infer_call(
         }
         "Ui.run" => {
             expect_arity(callee, &arg_tys, 1)?;
-            let ok = matches!(
-                &arg_tys[0],
-                Type::Opaque(n) if n == "View" || n == "TapFn"
-            );
+            let ok = match &arg_tys[0] {
+                Type::Opaque(n) if n == "View" || n == "TapFn" => true,
+                Type::Fun(_, ret) => {
+                    matches!(ret.as_ref(), Type::Opaque(n) if n == "View")
+                }
+                _ => false,
+            };
             if !ok {
                 return Err(TypeError::Msg(format!(
                     "Ui.run expects View or _ => View, got {:?}",
@@ -2474,7 +2562,8 @@ fn check_payload_ty(
     fty: &Type,
 ) -> Result<(), TypeError> {
     match fty {
-        Type::Int | Type::String | Type::List | Type::Adt(_) => Ok(()),
+        Type::Int | Type::String | Type::Bool | Type::Adt(_) => Ok(()),
+        Type::List(inner) => check_payload_ty(enum_name, en, case, fname, inner),
         Type::App(_, args) => {
             for a in args {
                 check_payload_ty(enum_name, en, case, fname, a)?;
@@ -2492,7 +2581,7 @@ fn check_payload_ty(
             }
         }
         other => Err(TypeError::Msg(format!(
-            "{enum_name}.{} field {fname}: payload types are Int, String, List, an ADT, or the enum's type parameter(s), got {other:?}",
+            "{enum_name}.{} field {fname}: payload types are Int, String, Bool, List[T], an ADT, or the enum's type parameter(s), got {other:?}",
             case.name
         ))),
     }
@@ -2748,9 +2837,9 @@ fn types_compat(a: &Type, b: &Type) -> bool {
         (Type::Unit, Type::Unit) => true,
         (Type::Int, Type::Int) => true,
         (Type::Bool, Type::Bool) => true,
-        (Type::Bool, Type::Int) | (Type::Int, Type::Bool) => true,
         (Type::String, Type::String) => true,
-        (Type::List, Type::List) => true,
+        (Type::List(x), Type::List(y)) => types_compat(x, y),
+        (Type::Fun(a0, a1), Type::Fun(b0, b1)) => types_compat(a0, b0) && types_compat(a1, b1),
         (Type::Io(_), Type::Io(_)) => true,
         (Type::Adt(x), Type::Adt(y)) => x == y,
         (Type::App(x, a), Type::App(y, b)) => {
@@ -2760,6 +2849,26 @@ fn types_compat(a: &Type, b: &Type) -> bool {
         (Type::Opaque(_), _) | (_, Type::Opaque(_)) => true,
         _ => false,
     }
+}
+
+fn list_elem(t: &Type) -> Result<Type, TypeError> {
+    match t {
+        Type::List(e) => Ok((**e).clone()),
+        Type::Opaque(_) => Ok(Type::Opaque("Elem".into())),
+        other => Err(TypeError::Msg(format!("expected List[_], got {other:?}"))),
+    }
+}
+
+fn prefer_elem(a: &Type, b: &Type) -> Type {
+    match (a, b) {
+        (Type::Opaque(_), t) => t.clone(),
+        (t, Type::Opaque(_)) => t.clone(),
+        (x, _) => x.clone(),
+    }
+}
+
+fn list_of(t: Type) -> Type {
+    Type::List(Box::new(t))
 }
 
 fn unify_types(
@@ -2789,6 +2898,11 @@ fn unify_types(
             Ok(())
         }
         (Type::Io(a), Type::Io(b)) => unify_types(a, b, subst),
+        (Type::List(a), Type::List(b)) => unify_types(a, b, subst),
+        (Type::Fun(a0, a1), Type::Fun(b0, b1)) => {
+            unify_types(a0, b0, subst)?;
+            unify_types(a1, b1, subst)
+        }
         (Type::App(x, a), Type::App(y, b)) if x == y && a.len() == b.len() => {
             for (u, v) in a.iter().zip(b.iter()) {
                 unify_types(u, v, subst)?;
@@ -2826,6 +2940,11 @@ fn unify_construct(
             Ok(())
         }
         (Type::Io(a), Type::Io(b)) => unify_construct(a, b, subst),
+        (Type::List(a), Type::List(b)) => unify_construct(a, b, subst),
+        (Type::Fun(a0, a1), Type::Fun(b0, b1)) => {
+            unify_construct(a0, b0, subst)?;
+            unify_construct(a1, b1, subst)
+        }
         (Type::App(x, a), Type::App(y, b)) if x == y && a.len() == b.len() => {
             for (u, v) in a.iter().zip(b.iter()) {
                 unify_construct(u, v, subst)?;
@@ -2841,7 +2960,7 @@ fn unify_construct(
 
 fn mono_type_ok(t: &Type) -> bool {
     match t {
-        Type::Unit | Type::Int | Type::String | Type::Bool | Type::List | Type::Adt(_) => true,
+        Type::Unit | Type::Int | Type::String | Type::Bool | Type::List(_) | Type::Adt(_) => true,
         Type::App(_, args) => args.iter().all(mono_type_ok),
         _ => false,
     }
@@ -2851,6 +2970,11 @@ fn apply_subst(ty: &Type, subst: &HashMap<String, Type>) -> Type {
     match ty {
         Type::Var(n) => subst.get(n).cloned().unwrap_or_else(|| ty.clone()),
         Type::Io(inner) => Type::Io(Box::new(apply_subst(inner, subst))),
+        Type::List(inner) => Type::List(Box::new(apply_subst(inner, subst))),
+        Type::Fun(a, b) => Type::Fun(
+            Box::new(apply_subst(a, subst)),
+            Box::new(apply_subst(b, subst)),
+        ),
         Type::App(n, args) => Type::App(
             n.clone(),
             args.iter().map(|a| apply_subst(a, subst)).collect(),
@@ -2865,6 +2989,11 @@ fn erase_vars(ty: &Type, names: &[String]) -> Type {
     match ty {
         Type::Var(n) if names.iter().any(|p| p == n) => Type::Opaque(n.clone()),
         Type::Io(inner) => Type::Io(Box::new(erase_vars(inner, names))),
+        Type::List(inner) => Type::List(Box::new(erase_vars(inner, names))),
+        Type::Fun(a, b) => Type::Fun(
+            Box::new(erase_vars(a, names)),
+            Box::new(erase_vars(b, names)),
+        ),
         Type::App(n, args) => Type::App(
             n.clone(),
             args.iter().map(|a| erase_vars(a, names)).collect(),
@@ -2879,7 +3008,8 @@ fn type_mangle(t: &Type) -> String {
         Type::Int => "Int".into(),
         Type::String => "String".into(),
         Type::Bool => "Bool".into(),
-        Type::List => "List".into(),
+        Type::List(inner) => format!("List_{}", type_mangle(inner)),
+        Type::Fun(a, b) => format!("Fun_{}_{}", type_mangle(a), type_mangle(b)),
         Type::Adt(id) => id.replace('.', "_"),
         Type::App(id, args) => format!(
             "{}_{}",
@@ -5063,28 +5193,23 @@ enum Color:
         let src = r#"@main def main: IO[Unit] =
   for {
     xs = List.map(["a"], x => 1)
-    _ <- IO.println(List.join(xs, ","))
+    _ <- IO.println(Str.fromInt(List.len(xs)))
   } yield ()
 "#;
         let p = lower_program(parse(src).unwrap());
-        typecheck(&p).expect("List.map Int body stringifies");
+        typecheck(&p).expect("List.map Int body returns List[Int]");
     }
 
     #[test]
-    fn rejects_list_map_view_body() {
+    fn typechecks_list_map_view_body() {
         let src = r#"@main def main: IO[Unit] =
   for {
-    xs = List.map(["a"], x => View.text(x))
-    _ <- IO.println(List.join(xs, ","))
+    _ = List.map(["a"], x => View.text(x))
+    _ <- IO.println("ok")
   } yield ()
 "#;
         let p = lower_program(parse(src).unwrap());
-        let err = typecheck(&p).unwrap_err();
-        assert!(
-            err.message().contains("List.map lambda must return String"),
-            "expected String body, got {}",
-            err.message()
-        );
+        typecheck(&p).expect("List.map may return List[View]");
     }
 
     #[test]
@@ -5218,7 +5343,7 @@ enum Color:
         let src = r#"@main def main: IO[Unit] =
   for {
     hit <- Stream.exists(Stream.emits(["", "a", "b"]), x => Str.len(x) > 0)
-    _ <- IO.println(Str.fromInt(hit))
+    _ <- IO.println(if (hit) "1" else "0")
   } yield ()
 "#;
         let p = lower_program(parse(src).unwrap());
@@ -5239,7 +5364,7 @@ enum Color:
         let src = r#"@main def main: IO[Unit] =
   for {
     _ = Law.sometimes("hit")
-    s = Law.check("ok", 1, "x")
+    s = Law.check("ok", true, "x")
     _ <- IO.println(s)
   } yield ()
 "#;
@@ -5859,7 +5984,7 @@ def note(n: Int where "x"): Unit = ()
     fn typechecks_list_payload_adt() {
         let src = r#"
 enum Box:
-  case Of(xs: List)
+  case Of(xs: List[String])
   case Empty
 @main def main: IO[Unit] =
   Box.Of(List.cons("a", List.empty())) match {
@@ -6487,7 +6612,7 @@ enum Bad[T]:
 enum Opt[T]:
   case Some(x: T)
   case None
-@main def main: IO[Unit] = List.head(["a"]) match {
+@main def main: IO[Unit] = List.head(List.empty()) match {
   case Opt.Some(n) => IO.println("some")
   case Opt.None => IO.println("none")
 }
@@ -6753,6 +6878,60 @@ law always: Bool = 1 == 1
         assert!(
             dumped.contains("Law.assert"),
             "expected Law.assert residual: {dumped}"
+        );
+    }
+
+    #[test]
+    fn typechecks_bool_literals() {
+        let src = r#"
+@main def main: IO[Unit] = if (true) IO.println("a") else IO.println("b")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("true/false if");
+    }
+
+    #[test]
+    fn rejects_int_if_condition() {
+        let src = r#"
+@main def main: IO[Unit] = if (1) IO.println("a") else IO.println("b")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("if condition must be Bool"),
+            "got {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn typechecks_list_int_map_and_filter() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    ys = List.filter([1, 2, 0], x => x > 0)
+    xs = List.map(ys, x => x + 1)
+    _ <- IO.println(Str.fromInt(List.head(xs)))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List[Int] map/filter");
+    }
+
+    #[test]
+    fn typecheck_all_reports_two_def_errors() {
+        let src = r#"
+def a(): Int = "x"
+def b(): String = 1
+@main def main: IO[Unit] = IO.println("ok")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let errs = typecheck_all(&p);
+        assert!(
+            errs.len() >= 2,
+            "expected two def errors, got {}: {:?}",
+            errs.len(),
+            errs
         );
     }
 }

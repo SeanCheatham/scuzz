@@ -2,6 +2,9 @@ enum Msg:
   case Hi
   case Bye
 
+def one(): Int =
+  1
+
 private def hidden(): String =
   "a"
 

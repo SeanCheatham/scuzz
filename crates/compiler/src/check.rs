@@ -6,9 +6,9 @@ use crate::overlay::{
     apply_overlays, check_laws_applied, collect_fmt_sources, collect_law_names, is_fmt_source,
     overlay_kind_from_path, residualize_refinements, OverlaySource,
 };
-use crate::parser::{parse_sources, ParseError};
+use crate::parser::{parse_sources, parse_sources_recovering, ParseError};
 use crate::span::{offset_to_line_col, Span};
-use crate::typ::{typecheck, TypeError};
+use crate::typ::{typecheck_all, TypeError};
 use anyhow::{Context, Result};
 use std::collections::BTreeMap;
 use std::fs;
@@ -299,12 +299,12 @@ pub fn check_project_with(
 
     let named = named_sources(&resolved);
 
-    let program = match parse_sources(&named) {
-        Ok(p) => p,
-        Err(e) => {
-            diags.push(diagnostic_from_parse(e, &named));
-            return Ok(diags);
-        }
+    let (maybe_program, parse_errs) = parse_sources_recovering(&named);
+    for e in parse_errs {
+        diags.push(diagnostic_from_parse(e, &named));
+    }
+    let Some(program) = maybe_program else {
+        return Ok(diags);
     };
     let program = match apply_overlays(program, &resolved.overlays) {
         Ok(p) => p,
@@ -329,8 +329,12 @@ pub fn check_project_with(
     residualize_refinements(&mut program);
     program.law_names = law_names;
     let program = lower_program(program);
-    if let Err(e) = typecheck(&program) {
+    let type_errs = typecheck_all(&program);
+    let had_type_err = !type_errs.is_empty();
+    for e in type_errs {
         diags.push(diagnostic_from_type(e, &named));
+    }
+    if had_type_err {
         return Ok(diags);
     }
     match crate::typ::elaborate_generics(program) {
@@ -699,5 +703,32 @@ version = "0.0.0"
         let decl = formatted.find("add").unwrap();
         let (dl, dc) = offset_to_line_col(&formatted, decl);
         assert_eq!((sl + 1, sc + 1), (dl, dc));
+    }
+
+    #[test]
+    fn check_project_reports_two_type_errors() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"multi_err\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = "\
+def a(): Int = \"x\"
+def b(): String = 1
+@main def main: IO[Unit] =
+  IO.println(\"ok\")
+";
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), formatted).unwrap();
+        let diags = check_project(root).unwrap();
+        assert!(
+            diags.len() >= 2,
+            "expected two type errors, got {}: {:?}",
+            diags.len(),
+            diags
+        );
     }
 }

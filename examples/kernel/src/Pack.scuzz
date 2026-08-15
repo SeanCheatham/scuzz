@@ -1,6 +1,6 @@
 package demo.color
 
 enum Pack:
-  case Of(xs: List)
+  case Of(xs: List[String])
   case Empty
 

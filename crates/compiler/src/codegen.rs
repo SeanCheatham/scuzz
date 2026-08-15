@@ -22,6 +22,8 @@ pub fn emit_llvm(program: &Program) -> String {
             if !strs.contains(&d.name) {
                 strs.push(d.name.clone());
             }
+        } else if d.is_law && !d.params.is_empty() && !strs.contains(&d.name) {
+            strs.push(d.name.clone());
         }
     }
 
@@ -296,6 +298,7 @@ pub fn emit_llvm(program: &Program) -> String {
 
     out.push_str(&conts);
     out.push_str(&fundef_ir);
+    emit_law_drive_tramps(&mut out, program, &strs);
 
     writeln!(out, "define i32 @main(i32 %argc, ptr %argv) {{").unwrap();
     writeln!(out, "entry:").unwrap();
@@ -488,7 +491,7 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
                 collect_strings(e, out);
             }
         }
-        ExprKind::Unit | ExprKind::Var(_) | ExprKind::IntLit(_) => {}
+        ExprKind::Unit | ExprKind::Var(_) | ExprKind::IntLit(_) | ExprKind::BoolLit(_) => {}
         ExprKind::Field { base, .. } => collect_strings(base, out),
         ExprKind::MethodCall { receiver, args, .. } => {
             collect_strings(receiver, out);
@@ -587,36 +590,128 @@ fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
     writeln!(out).unwrap();
 }
 
-fn emit_driver_registers(out: &mut String, program: &Program, strs: &[String]) {
-    for (i, d) in program.defs.iter().filter(|d| d.is_driver).enumerate() {
-        let idx = strs
-            .iter()
-            .position(|s| s == &d.name)
-            .expect("driver name interned");
-        let len = d.name.len() + 1;
-        let nargs = d.params.len() as i64;
-        let kind = match d.params.first().map(|p| &p.ty) {
-            Some(Type::String) => 1,
-            Some(Type::Bool) => 2,
+fn pack_param_kinds(params: &[crate::ast::Param]) -> i64 {
+    let mut kind = 0i64;
+    let mut place = 1i64;
+    for p in params {
+        let k = match p.ty {
+            Type::String => 1,
+            Type::Bool => 2,
             _ => 0,
         };
-        let sym = user_symbol(&d.module, &d.name);
-        writeln!(
-            out,
-            "  %drv{i}_gep = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "  %drv{i}_ss = call ptr @sz_string_from_cstr(ptr %drv{i}_gep)"
-        )
-        .unwrap();
-        writeln!(
-            out,
-            "  call void @sz_driver_register(ptr %drv{i}_ss, i64 {nargs}, i64 {kind}, ptr @{sym})"
-        )
-        .unwrap();
+        kind += k * place;
+        place *= 4;
     }
+    kind
+}
+
+fn emit_driver_registers(out: &mut String, program: &Program, strs: &[String]) {
+    let mut i = 0usize;
+    for d in program.defs.iter().filter(|d| d.is_driver) {
+        emit_one_driver_register(out, d, strs, i, &user_symbol(&d.module, &d.name));
+        i += 1;
+    }
+    for d in program
+        .defs
+        .iter()
+        .filter(|d| d.is_law && !d.params.is_empty())
+    {
+        let tramp = format!("{}__drv", user_symbol(&d.module, &d.name));
+        emit_one_driver_register(out, d, strs, i, &tramp);
+        i += 1;
+    }
+}
+
+fn emit_law_drive_tramps(out: &mut String, program: &Program, strs: &[String]) {
+    for d in program
+        .defs
+        .iter()
+        .filter(|d| d.is_law && !d.params.is_empty())
+    {
+        let tramp = format!("{}__drv", user_symbol(&d.module, &d.name));
+        emit_law_drive_tramp(out, d, strs, &tramp);
+    }
+}
+
+fn emit_one_driver_register(out: &mut String, d: &FunDef, strs: &[String], i: usize, sym: &str) {
+    let idx = strs
+        .iter()
+        .position(|s| s == &d.name)
+        .expect("driver name interned");
+    let len = d.name.len() + 1;
+    let nargs = d.params.len() as i64;
+    let kind = pack_param_kinds(&d.params);
+    writeln!(
+        out,
+        "  %drv{i}_gep = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  %drv{i}_ss = call ptr @sz_string_from_cstr(ptr %drv{i}_gep)"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  call void @sz_driver_register(ptr %drv{i}_ss, i64 {nargs}, i64 {kind}, ptr @{sym})"
+    )
+    .unwrap();
+}
+
+fn emit_law_drive_tramp(out: &mut String, d: &FunDef, strs: &[String], tramp: &str) {
+    let law = user_symbol(&d.module, &d.name);
+    let idx = strs
+        .iter()
+        .position(|s| s == &d.name)
+        .expect("law name interned");
+    let len = d.name.len() + 1;
+    if d.params.len() <= 1 {
+        let (arg_ty, arg_name) = match d.params.first().map(|p| &p.ty) {
+            Some(Type::String) => ("ptr", "%a"),
+            Some(_) | None => ("i64", "%a"),
+        };
+        let params = if d.params.is_empty() {
+            String::new()
+        } else {
+            format!("{arg_ty} {arg_name}")
+        };
+        writeln!(out, "define internal ptr @{tramp}({params}) {{").unwrap();
+        writeln!(out, "entry:").unwrap();
+        if d.params.is_empty() {
+            writeln!(out, "  %ok = call i64 @{law}()").unwrap();
+        } else {
+            writeln!(out, "  %ok = call i64 @{law}({arg_ty} {arg_name})").unwrap();
+        }
+    } else {
+        writeln!(out, "define internal ptr @{tramp}(ptr %args) {{").unwrap();
+        writeln!(out, "entry:").unwrap();
+        let mut cur = "%args".to_string();
+        let mut call_args = Vec::new();
+        for (i, p) in d.params.iter().enumerate() {
+            writeln!(out, "  %h{i} = call ptr @sz_list_head(ptr {cur})").unwrap();
+            writeln!(out, "  %t{i} = call ptr @sz_list_tail(ptr {cur})").unwrap();
+            match p.ty {
+                Type::String => {
+                    call_args.push(format!("ptr %h{i}"));
+                }
+                _ => {
+                    writeln!(out, "  %v{i} = call i64 @sz_unbox_i64(ptr %h{i})").unwrap();
+                    call_args.push(format!("i64 %v{i}"));
+                }
+            }
+            cur = format!("%t{i}");
+        }
+        writeln!(out, "  %ok = call i64 @{law}({})", call_args.join(", ")).unwrap();
+    }
+    writeln!(
+        out,
+        "  %nm_gep = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
+    )
+    .unwrap();
+    writeln!(out, "  %nm = call ptr @sz_string_from_cstr(ptr %nm_gep)").unwrap();
+    writeln!(out, "  %io = call ptr @sz_law_assert(ptr %nm, i64 %ok)").unwrap();
+    writeln!(out, "  ret ptr %io").unwrap();
+    writeln!(out, "}}").unwrap();
 }
 
 fn ensure_io(code: &mut String, kind: Kind, value: &str, tmp: &str) -> String {
@@ -1040,6 +1135,11 @@ fn emit_expr(
     match &expr.kind {
         ExprKind::Unit => val_emitted(String::new(), "null".into(), Kind::Ptr),
         ExprKind::IntLit(n) => val_emitted(String::new(), format!("{n}"), Kind::Int),
+        ExprKind::BoolLit(b) => val_emitted(
+            String::new(),
+            if *b { "1".into() } else { "0".into() },
+            Kind::Int,
+        ),
         ExprKind::StrLit(s) => {
             let idx = str_index(ctx.strs, s);
             let len = s.len() + 1;
@@ -1223,12 +1323,7 @@ fn emit_expr(
             *ctx.cont_id += 1;
             let ce = emit_expr(cond, ctx, locals, &format!("{prefix}_ic"));
             let mut code = ce.code;
-            let cond_i64 = if ce.kind == Kind::Int {
-                ce.value
-            } else {
-                writeln!(code, "  %{prefix}_c0 = add i64 0, 0").unwrap();
-                format!("%{prefix}_c0")
-            };
+            let cond_i64 = as_i64(&mut code, ce.kind, &ce.value, &format!("{prefix}_c0"));
             let then_l = format!("{prefix}_then_{id}");
             let else_l = format!("{prefix}_else_{id}");
             // Join blocks so nested if/match inside a branch are valid PHI preds.
@@ -1978,13 +2073,15 @@ fn emit_pred_lambda(
     val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
 }
 
-/// `t => String` mapper: `ptr (*)(ptr value, ptr env)`.
+/// `t => ptr` mapper: `ptr (*)(ptr value, ptr env)`.
+/// Stream.map stringifies Int bodies. List.map boxes Int bodies.
 fn emit_smap_lambda(
     param: &Option<String>,
     body: &Expr,
     ctx: &mut EmitCtx<'_>,
     locals: &mut HashMap<String, (String, Kind)>,
     prefix: &str,
+    box_int: bool,
 ) -> Emitted {
     let id = *ctx.cont_id;
     *ctx.cont_id += 1;
@@ -2017,17 +2114,27 @@ fn emit_smap_lambda(
     ctx.conts.push_str(&pre);
     ctx.conts.push_str(&body_emitted.code);
     if body_emitted.kind == Kind::Int {
-        writeln!(
-            ctx.conts,
-            "  %sm{id}_istr = call ptr @sz_string_from_int(i64 {})",
-            body_emitted.value
-        )
-        .unwrap();
-        writeln!(ctx.conts, "  ret ptr %sm{id}_istr").unwrap();
+        if box_int {
+            writeln!(
+                ctx.conts,
+                "  %sm{id}_box = call ptr @sz_box_i64(i64 {})",
+                body_emitted.value
+            )
+            .unwrap();
+            writeln!(ctx.conts, "  ret ptr %sm{id}_box").unwrap();
+        } else {
+            writeln!(
+                ctx.conts,
+                "  %sm{id}_istr = call ptr @sz_string_from_int(i64 {})",
+                body_emitted.value
+            )
+            .unwrap();
+            writeln!(ctx.conts, "  ret ptr %sm{id}_istr").unwrap();
+        }
     } else {
         assert!(
             body_emitted.kind == Kind::Ptr,
-            "Stream.map mapper must be String/Int"
+            "map mapper must be a pointer or Int"
         );
         writeln!(ctx.conts, "  ret ptr {}", body_emitted.value).unwrap();
     }
@@ -2186,7 +2293,15 @@ fn emit_stream_map(
     locals: &mut HashMap<String, (String, Kind)>,
     prefix: &str,
 ) -> Emitted {
-    emit_ptr_map("Stream.map", "sz_stream_map", args, ctx, locals, prefix)
+    emit_ptr_map(
+        "Stream.map",
+        "sz_stream_map",
+        args,
+        ctx,
+        locals,
+        prefix,
+        false,
+    )
 }
 
 fn emit_ptr_map(
@@ -2196,13 +2311,14 @@ fn emit_ptr_map(
     ctx: &mut EmitCtx<'_>,
     locals: &mut HashMap<String, (String, Kind)>,
     prefix: &str,
+    box_int: bool,
 ) -> Emitted {
     assert!(args.len() == 2, "{callee} expects 2 args");
     let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
     let ExprKind::Lambda { param, body } = &args[1].kind else {
         panic!("{callee} mapper must be a lambda");
     };
-    let lam = emit_smap_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
+    let lam = emit_smap_lambda(param, body, ctx, locals, &format!("{prefix}_fn"), box_int);
     let mut code = inner.code;
     code.push_str(&lam.code);
     unpack_closure(&mut code, &lam.value, prefix);
@@ -2324,6 +2440,14 @@ fn emit_ui_run(
     io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
 }
 
+fn as_i64(code: &mut String, kind: Kind, value: &str, tmp: &str) -> String {
+    if kind == Kind::Int {
+        return value.to_string();
+    }
+    writeln!(code, "  %{tmp} = call i64 @sz_unbox_i64(ptr {value})").unwrap();
+    format!("%{tmp}")
+}
+
 fn emit_binary(
     op: &BinOp,
     left: &Expr,
@@ -2363,18 +2487,8 @@ fn emit_binary(
         return val_emitted(code, format!("%{prefix}_nev"), Kind::Int);
     }
 
-    let lv = if le.kind == Kind::Int {
-        le.value
-    } else {
-        writeln!(code, "  %{prefix}_l0 = add i64 0, 0").unwrap();
-        format!("%{prefix}_l0")
-    };
-    let rv = if re.kind == Kind::Int {
-        re.value
-    } else {
-        writeln!(code, "  %{prefix}_r0 = add i64 0, 0").unwrap();
-        format!("%{prefix}_r0")
-    };
+    let lv = as_i64(&mut code, le.kind, &le.value, &format!("{prefix}_l0"));
+    let rv = as_i64(&mut code, re.kind, &re.value, &format!("{prefix}_r0"));
 
     match op {
         BinOp::Add => {
@@ -2483,7 +2597,7 @@ fn emit_call(
         );
     }
     if callee == "List.map" {
-        return emit_ptr_map("List.map", "sz_list_map", args, ctx, locals, prefix);
+        return emit_ptr_map("List.map", "sz_list_map", args, ctx, locals, prefix, true);
     }
     if callee == "Resource.make" || callee == "Resource.use" {
         return emit_resource(callee, args, ctx, locals, prefix);
@@ -2607,10 +2721,15 @@ fn emit_call(
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Str.fromInt" => {
+            let n = as_i64(
+                &mut code,
+                emitted_args[0].kind,
+                &emitted_args[0].value,
+                &format!("{prefix}_n"),
+            );
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @sz_string_from_int(i64 {})",
-                emitted_args[0].value
+                "  %{prefix}_v = call ptr @sz_string_from_int(i64 {n})"
             )
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
@@ -4121,8 +4240,8 @@ fn emit_call(
                     let (lval, lty) = match (want, a.kind) {
                         (Kind::Int, Kind::Int) => (a.value.clone(), "i64"),
                         (Kind::Int, _) => {
-                            writeln!(code, "  %{prefix}_a{i} = add i64 0, 0").unwrap();
-                            (format!("%{prefix}_a{i}"), "i64")
+                            let v = as_i64(&mut code, a.kind, &a.value, &format!("{prefix}_a{i}"));
+                            (v, "i64")
                         }
                         (_, Kind::Int) => {
                             writeln!(
@@ -4365,7 +4484,7 @@ mod tests {
         let src = r#"@main def main: IO[Unit] =
   for {
     hit <- Stream.exists(Stream.emits(["", "a", "b"]), x => Str.len(x) > 0)
-    _ <- IO.println(Str.fromInt(hit))
+    _ <- IO.println(if (hit) "1" else "0")
   } yield ()
 "#;
         let p = crate::lower::lower_program(parse(src).unwrap());

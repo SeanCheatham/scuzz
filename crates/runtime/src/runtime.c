@@ -1848,6 +1848,11 @@ static void *sz_runtime_main_worker(void *arg) {
       sz_error_free(r.error);
     a->rc = 1;
   } else {
+    {
+      const char *ds = getenv("SCUZZ_DRIVE_SCRIPT");
+      if (ds && ds[0])
+        sz_driver_run_script(ds);
+    }
     a->rc = 0;
   }
 #if defined(__APPLE__)

@@ -49,6 +49,7 @@ pub fn run_testrt(
     reached: &Path,
     schedule_seed: &str,
     ui: Option<TestrtUi<'_>>,
+    drive_script: Option<&Path>,
 ) -> Result<i32> {
     let mut cmd = Command::new(exe);
     cmd.env("SCUZZ_TESTRT", "1")
@@ -59,6 +60,9 @@ pub fn run_testrt(
             .env("SCUZZ_FUZZ_DUMP", ui.dump)
             .env("SCUZZ_UI_WIDTH", ui.width.to_string())
             .env("SCUZZ_UI_HEIGHT", ui.height.to_string());
+    }
+    if let Some(p) = drive_script {
+        cmd.env("SCUZZ_DRIVE_SCRIPT", p);
     }
     if !schedule_seed.is_empty() {
         cmd.env("SCUZZ_SCHED_SEED", schedule_seed);

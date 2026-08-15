@@ -65,6 +65,55 @@ pub fn parse_file(source: &str, file: &str) -> Result<Program, ParseError> {
     p.parse_program()
 }
 
+fn empty_program(file: &str) -> Program {
+    Program {
+        package: Vec::new(),
+        enums: Vec::new(),
+        traits: Vec::new(),
+        impls: Vec::new(),
+        defs: Vec::new(),
+        main: MainDef {
+            module: module_id_from_label(file),
+            name: String::new(),
+            body: Expr::dummy(ExprKind::Unit),
+        },
+        imports: Vec::new(),
+        law_names: Vec::new(),
+        driver_names: Vec::new(),
+    }
+}
+
+/// Parse one file and recover to the next top-level item after an error.
+pub fn parse_file_recovering(source: &str, file: &str) -> (Program, Vec<ParseError>) {
+    let mut tokens = match lex(source) {
+        Ok(t) => t,
+        Err(e) => {
+            let off = e.offset();
+            return (
+                empty_program(file),
+                vec![ParseError::At {
+                    msg: e.to_string(),
+                    span: Span::new(file.to_string(), off, off),
+                }],
+            );
+        }
+    };
+    for t in &mut tokens {
+        if t.span.file.is_empty() {
+            t.span.file = file.to_string();
+        }
+    }
+    let module = module_id_from_label(file);
+    let mut p = Parser {
+        tokens,
+        i: 0,
+        file: file.to_string(),
+        module,
+        source: source.to_string(),
+    };
+    p.parse_program_recovering()
+}
+
 /// Parse multiple source files into one program. Packages must agree. Defs and
 /// enums are namespaced by file-stem module. The same bare name in two modules is allowed.
 pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError> {
@@ -162,6 +211,115 @@ pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError
     })
 }
 
+/// Parse many files. Recover inside each file. Collect every parse error.
+pub fn parse_sources_recovering(
+    sources: &[(String, String)],
+) -> (Option<Program>, Vec<ParseError>) {
+    let mut errors = Vec::new();
+    let mut package: Option<Vec<String>> = None;
+    let mut enums: Vec<EnumDef> = Vec::new();
+    let mut traits: Vec<TraitDef> = Vec::new();
+    let mut impls: Vec<ImplDef> = Vec::new();
+    let mut defs: Vec<FunDef> = Vec::new();
+    let mut imports: Vec<Import> = Vec::new();
+    let mut main: Option<MainDef> = None;
+
+    for (name, src) in sources {
+        let (prog, file_errs) = parse_file_recovering(src, name);
+        errors.extend(file_errs);
+        if !prog.package.is_empty() {
+            match &package {
+                None => package = Some(prog.package.clone()),
+                Some(p) if *p == prog.package => {}
+                Some(p) => errors.push(ParseError::Msg(format!(
+                    "{name}: package {:?} conflicts with {:?}",
+                    prog.package, p
+                ))),
+            }
+        }
+        for e in prog.enums {
+            if enums
+                .iter()
+                .any(|x| x.module == e.module && x.name == e.name)
+            {
+                errors.push(ParseError::Msg(format!(
+                    "{name}: duplicate enum {}.{}",
+                    e.module, e.name
+                )));
+                continue;
+            }
+            enums.push(e);
+        }
+        for t in prog.traits {
+            if traits
+                .iter()
+                .any(|x| x.module == t.module && x.name == t.name)
+            {
+                errors.push(ParseError::Msg(format!(
+                    "{name}: duplicate trait {}.{}",
+                    t.module, t.name
+                )));
+                continue;
+            }
+            traits.push(t);
+        }
+        for im in prog.impls {
+            if impls.iter().any(|x| {
+                x.module == im.module && x.trait_name == im.trait_name && x.for_type == im.for_type
+            }) {
+                errors.push(ParseError::Msg(format!(
+                    "{name}: duplicate impl {} for {}",
+                    im.trait_name, im.for_type
+                )));
+                continue;
+            }
+            impls.push(im);
+        }
+        for d in prog.defs {
+            if defs
+                .iter()
+                .any(|x| x.module == d.module && x.name == d.name)
+            {
+                errors.push(ParseError::Msg(format!(
+                    "{name}: duplicate def {}.{}",
+                    d.module, d.name
+                )));
+                continue;
+            }
+            defs.push(d);
+        }
+        imports.extend(prog.imports);
+        if !prog.main.name.is_empty() {
+            if main.is_some() {
+                errors.push(ParseError::Msg(format!(
+                    "{name}: multiple @main definitions"
+                )));
+            } else {
+                main = Some(prog.main);
+            }
+        }
+    }
+
+    let Some(main) = main else {
+        errors.push(ParseError::Msg("no @main definition".into()));
+        return (None, errors);
+    };
+    (
+        Some(Program {
+            package: package.unwrap_or_default(),
+            enums,
+            traits,
+            impls,
+            defs,
+            main,
+            imports,
+            law_names: Vec::new(),
+            driver_names: Vec::new(),
+        }),
+        errors,
+    )
+}
+
 struct Parser {
     tokens: Vec<SpannedToken>,
     i: usize,
@@ -235,14 +393,63 @@ impl Parser {
         }
     }
 
+    fn at_item_start(&self) -> bool {
+        matches!(
+            self.peek(),
+            Token::Enum
+                | Token::Record
+                | Token::Trait
+                | Token::Impl
+                | Token::Import
+                | Token::Private
+                | Token::Def
+                | Token::Law
+                | Token::AtMain
+                | Token::Eof
+        )
+    }
+
+    fn skip_to_item(&mut self) {
+        if !matches!(self.peek(), Token::Eof) {
+            self.bump();
+        }
+        while !self.at_item_start() {
+            self.bump();
+        }
+    }
+
     fn parse_program(&mut self) -> Result<Program, ParseError> {
+        let (p, errs) = self.parse_program_recovering();
+        match errs.into_iter().next() {
+            Some(e) => Err(e),
+            None => Ok(p),
+        }
+    }
+
+    fn parse_program_recovering(&mut self) -> (Program, Vec<ParseError>) {
+        let mut errors = Vec::new();
         let mut package = Vec::new();
         if matches!(self.peek(), Token::Package) {
             self.bump();
-            package.push(self.expect_ident()?.0);
-            while matches!(self.peek(), Token::Dot) {
-                self.bump();
-                package.push(self.expect_ident()?.0);
+            match self.expect_ident() {
+                Ok((n, _)) => {
+                    package.push(n);
+                    while matches!(self.peek(), Token::Dot) {
+                        self.bump();
+                        match self.expect_ident() {
+                            Ok((n, _)) => package.push(n),
+                            Err(e) => {
+                                errors.push(e);
+                                self.skip_to_item();
+                                break;
+                            }
+                        }
+                    }
+                }
+                Err(e) => {
+                    errors.push(e);
+                    self.skip_to_item();
+                }
             }
         }
 
@@ -259,43 +466,104 @@ impl Parser {
 
         loop {
             match self.peek() {
-                Token::Enum => enums.push(self.parse_enum()?),
-                Token::Record => enums.push(self.parse_record()?),
-                Token::Trait => traits.push(self.parse_trait()?),
-                Token::Impl => impls.push(self.parse_impl()?),
-                Token::Import => imports.push(self.parse_import()?),
+                Token::Enum => match self.parse_enum() {
+                    Ok(e) => enums.push(e),
+                    Err(e) => {
+                        errors.push(e);
+                        self.skip_to_item();
+                    }
+                },
+                Token::Record => match self.parse_record() {
+                    Ok(e) => enums.push(e),
+                    Err(e) => {
+                        errors.push(e);
+                        self.skip_to_item();
+                    }
+                },
+                Token::Trait => match self.parse_trait() {
+                    Ok(t) => traits.push(t),
+                    Err(e) => {
+                        errors.push(e);
+                        self.skip_to_item();
+                    }
+                },
+                Token::Impl => match self.parse_impl() {
+                    Ok(i) => impls.push(i),
+                    Err(e) => {
+                        errors.push(e);
+                        self.skip_to_item();
+                    }
+                },
+                Token::Import => match self.parse_import() {
+                    Ok(i) => imports.push(i),
+                    Err(e) => {
+                        errors.push(e);
+                        self.skip_to_item();
+                    }
+                },
                 Token::Private => {
                     self.bump();
-                    defs.push(self.parse_def(true)?);
+                    match self.parse_def(true) {
+                        Ok(d) => defs.push(d),
+                        Err(e) => {
+                            errors.push(e);
+                            self.skip_to_item();
+                        }
+                    }
                 }
-                Token::Def => defs.push(self.parse_def(false)?),
-                Token::Law => defs.push(self.parse_law()?),
+                Token::Def => match self.parse_def(false) {
+                    Ok(d) => defs.push(d),
+                    Err(e) => {
+                        errors.push(e);
+                        self.skip_to_item();
+                    }
+                },
+                Token::Law => match self.parse_law() {
+                    Ok(d) => defs.push(d),
+                    Err(e) => {
+                        errors.push(e);
+                        self.skip_to_item();
+                    }
+                },
                 Token::AtMain => {
                     if !main.name.is_empty() {
-                        return Err(self.err("multiple @main"));
+                        errors.push(self.err("multiple @main"));
+                        self.skip_to_item();
+                    } else {
+                        match self.parse_main() {
+                            Ok(m) => main = m,
+                            Err(e) => {
+                                errors.push(e);
+                                self.skip_to_item();
+                            }
+                        }
                     }
-                    main = self.parse_main()?;
                 }
                 Token::Eof => break,
                 other => {
-                    return Err(self.err(format!(
+                    let msg = format!(
                     "expected enum/record/trait/impl/import/def/private def/law/@main, got {other:?}"
-                )))
+                );
+                    errors.push(self.err(msg));
+                    self.skip_to_item();
                 }
             }
         }
 
-        Ok(Program {
-            package,
-            enums,
-            traits,
-            impls,
-            defs,
-            main,
-            imports,
-            law_names: Vec::new(),
-            driver_names: Vec::new(),
-        })
+        (
+            Program {
+                package,
+                enums,
+                traits,
+                impls,
+                defs,
+                main,
+                imports,
+                law_names: Vec::new(),
+                driver_names: Vec::new(),
+            },
+            errors,
+        )
     }
 
     fn parse_import(&mut self) -> Result<Import, ParseError> {
@@ -360,12 +628,18 @@ impl Parser {
     fn parse_law(&mut self) -> Result<FunDef, ParseError> {
         self.expect(&Token::Law)?;
         let (name, _) = self.expect_ident()?;
+        let params = if matches!(self.peek(), Token::LParen) {
+            self.bump();
+            let params = self.parse_param_list_with_tparams(&[])?;
+            self.expect(&Token::RParen)?;
+            params
+        } else {
+            Vec::new()
+        };
         self.expect(&Token::Colon)?;
         let ret = self.parse_type()?;
-        if !matches!(ret, Type::Bool | Type::Int) {
-            return Err(self.err(format!(
-                "law `{name}` must return Bool (or Int), got {ret:?}"
-            )));
+        if !matches!(ret, Type::Bool) {
+            return Err(self.err(format!("law `{name}` must return Bool, got {ret:?}")));
         }
         self.expect(&Token::Eq)?;
         let body = self.parse_expr()?;
@@ -376,7 +650,7 @@ impl Parser {
             is_law: true,
             is_driver: false,
             type_params: Vec::new(),
-            params: Vec::new(),
+            params,
             ret,
             body,
         })
@@ -678,7 +952,7 @@ impl Parser {
             return Ok(Type::Var(name));
         }
         match name.as_str() {
-            "Unit" | "Int" | "String" | "Bool" | "List" => {
+            "Unit" | "Int" | "String" | "Bool" => {
                 if matches!(self.peek(), Token::LBracket) {
                     return Err(self.err(format!("{name} takes no type arguments")));
                 }
@@ -686,9 +960,14 @@ impl Parser {
                     "Unit" => Type::Unit,
                     "Int" => Type::Int,
                     "String" => Type::String,
-                    "Bool" => Type::Bool,
-                    _ => Type::List,
+                    _ => Type::Bool,
                 })
+            }
+            "List" => {
+                self.expect(&Token::LBracket)?;
+                let inner = self.parse_type_with_tparams(type_params)?;
+                self.expect(&Token::RBracket)?;
+                Ok(Type::List(Box::new(inner)))
             }
             "IO" => {
                 self.expect(&Token::LBracket)?;
@@ -1206,6 +1485,14 @@ impl Parser {
                 let end = self.bump().span;
                 Ok(self.mk(ExprKind::IntLit(n), start.cover(&end)))
             }
+            Token::True => {
+                let end = self.bump().span;
+                Ok(self.mk(ExprKind::BoolLit(true), start.cover(&end)))
+            }
+            Token::False => {
+                let end = self.bump().span;
+                Ok(self.mk(ExprKind::BoolLit(false), start.cover(&end)))
+            }
             Token::StringLit(s) => {
                 let end = self.bump().span;
                 Ok(self.mk(ExprKind::StrLit(s), start.cover(&end)))
@@ -1685,6 +1972,18 @@ def tag(): String = helper()
         assert!(p.defs[0].is_private);
         assert!(!p.defs[1].is_private);
         assert_eq!(p.defs[0].name, "helper");
+    }
+
+    #[test]
+    fn parse_law_with_params() {
+        let src = r#"
+law addComm(a: Int, b: Int): Bool = a + b == b + a
+@main def main: IO[Unit] = IO.println("ok")
+"#;
+        let p = parse(src).unwrap();
+        assert!(p.defs[0].is_law);
+        assert_eq!(p.defs[0].params.len(), 2);
+        assert!(matches!(p.defs[0].params[0].ty, Type::Int));
     }
 
     #[test]
@@ -2258,13 +2557,70 @@ def f[T](x: T[Int]): T = x
     #[test]
     fn parse_rejects_type_args_on_builtin() {
         let src = r#"
-def f(x: List[Int]): Int = 1
+def f(x: Int[String]): Int = 1
 @main def main: IO[Unit] = IO.println("x")
 "#;
         let err = parse(src).unwrap_err().to_string();
         assert!(
-            err.contains("List takes no type arguments"),
+            err.contains("Int takes no type arguments"),
             "unexpected: {err}"
         );
+    }
+
+    #[test]
+    fn parse_list_type_arg() {
+        let src = r#"
+def f(x: List[Int]): Int = 1
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        assert!(matches!(
+            &p.defs[0].params[0].ty,
+            Type::List(inner) if matches!(**inner, Type::Int)
+        ));
+    }
+
+    #[test]
+    fn parse_bool_literals() {
+        let src = r#"
+@main def main: IO[Unit] = if (true) IO.println("a") else IO.println("b")
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::If { cond, .. } => {
+                assert!(matches!(cond.kind, ExprKind::BoolLit(true)));
+            }
+            other => panic!("expected If, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_rejects_bare_list() {
+        let src = r#"
+def f(x: List): Int = 1
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let err = parse(src).unwrap_err().to_string();
+        assert!(
+            err.contains("expected") || err.contains("["),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_recovers_to_next_top_level_item() {
+        let src = r#"
+def a( : Int = 1
+def b(): Int = 2
+@main def main: IO[Unit] = IO.println("ok")
+"#;
+        let (p, errs) = parse_file_recovering(src, "rec.scuzz");
+        assert!(errs.len() >= 1, "{errs:?}");
+        assert!(
+            p.defs.iter().any(|d| d.name == "b"),
+            "expected recovered def b: {:?}",
+            p.defs.iter().map(|d| &d.name).collect::<Vec<_>>()
+        );
+        assert_eq!(p.main.name, "main");
     }
 }

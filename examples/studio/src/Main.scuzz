@@ -20,7 +20,7 @@ law hasTasks: Bool =
   Law.a11yHas("radio:Tasks")
 
 law hasProgress: Bool =
-  Law.a11yHas("progress:") || Law.a11yHas("radio:Home=1") == 0
+  Law.a11yHas("progress:") || Law.a11yHas("radio:Home=1") == false
 
 law hasSwitch: Bool =
   Law.a11yHas("switch:On")
@@ -98,7 +98,7 @@ law hasSemantics: Bool =
   Law.a11yHas("semantics:")
 
 law hasMerge: Bool =
-  Law.a11yHas("merge:") || Law.a11yHas("radio:Home=1") == 0
+  Law.a11yHas("merge:") || Law.a11yHas("radio:Home=1") == false
 
 law hasInkWell: Bool =
   Law.a11yHas("inkwell:")

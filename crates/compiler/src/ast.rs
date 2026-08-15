@@ -309,6 +309,7 @@ impl Expr {
             leaf @ (ExprKind::Var(_)
             | ExprKind::Unit
             | ExprKind::IntLit(_)
+            | ExprKind::BoolLit(_)
             | ExprKind::StrLit(_)) => leaf,
         };
         Ok(Expr { kind, span })
@@ -395,7 +396,11 @@ impl Expr {
                     }
                 }
             }
-            ExprKind::Var(_) | ExprKind::Unit | ExprKind::IntLit(_) | ExprKind::StrLit(_) => {}
+            ExprKind::Var(_)
+            | ExprKind::Unit
+            | ExprKind::IntLit(_)
+            | ExprKind::BoolLit(_)
+            | ExprKind::StrLit(_) => {}
         }
     }
 }
@@ -492,6 +497,8 @@ pub enum ExprKind {
     Unit,
     /// Integer literal
     IntLit(i64),
+    /// `true` / `false`
+    BoolLit(bool),
     /// String literal
     StrLit(String),
     /// List literal `[a, b, c]`
@@ -570,7 +577,10 @@ pub enum Type {
     Int,
     String,
     Bool,
-    List,
+    /// Homogeneous cons list. Runtime is untyped pointers; the argument is a check-time element type.
+    List(Box<Type>),
+    /// Single-parameter function type (`T => U`) for kit lambdas.
+    Fun(Box<Type>, Box<Type>),
     Io(Box<Type>),
     /// Nominal enum type
     Adt(String),
@@ -589,7 +599,8 @@ impl std::fmt::Display for Type {
             Type::Int => write!(f, "Int"),
             Type::String => write!(f, "String"),
             Type::Bool => write!(f, "Bool"),
-            Type::List => write!(f, "List"),
+            Type::List(t) => write!(f, "List[{t}]"),
+            Type::Fun(a, b) => write!(f, "{a} => {b}"),
             Type::Io(t) => write!(f, "IO[{t}]"),
             Type::Adt(n) | Type::Var(n) | Type::Opaque(n) => write!(f, "{n}"),
             Type::App(n, args) => {

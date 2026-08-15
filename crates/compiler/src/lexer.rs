@@ -20,6 +20,8 @@ pub enum Token {
     Yield,
     If,
     Else,
+    True,
+    False,
     Colon,
     Eq,
     Dot,
@@ -281,6 +283,8 @@ pub fn lex(input: &str) -> Result<Vec<SpannedToken>, LexError> {
                         "yield" => Token::Yield,
                         "if" => Token::If,
                         "else" => Token::Else,
+                        "true" => Token::True,
+                        "false" => Token::False,
                         _ => Token::Ident(ident),
                     };
                     tokens.push(SpannedToken {

@@ -3,11 +3,17 @@ use anyhow::{bail, Result};
 use scuzz_compiler::compile_prepared_program;
 use scuzz_compiler::driver::load_verify_program;
 use scuzz_compiler::fuzz::{count_prefix_lines, fuzz_script, lines_nonempty, script_text};
-use scuzz_compiler::mutate::{mutate_apply, mutate_count};
+use scuzz_compiler::mutate::{mutate_apply_mode, mutate_count_mode, MutateMode};
 use std::path::Path;
 use std::process::ExitCode;
 
-pub fn cmd_mutate(path: &Path, limit: i64, iters: i64, seed: i64) -> Result<ExitCode> {
+pub fn cmd_mutate(
+    path: &Path,
+    limit: i64,
+    iters: i64,
+    seed: i64,
+    oracles: bool,
+) -> Result<ExitCode> {
     if limit <= 0 {
         bail!("mutate --limit N requires N > 0");
     }
@@ -16,20 +22,32 @@ pub fn cmd_mutate(path: &Path, limit: i64, iters: i64, seed: i64) -> Result<Exit
     }
     let project_dir = resolve_dir(path)?;
     let (prog, manifest) = load_verify_program(&project_dir)?;
-    let total = mutate_count(&prog) as i64;
+    let mode = if oracles {
+        MutateMode::Oracles
+    } else {
+        MutateMode::Program
+    };
+    let total = mutate_count_mode(&prog, mode) as i64;
     if total == 0 {
-        println!("scuzz mutate: no residual Law.check / Law.assert / .require sites");
+        if oracles {
+            println!("scuzz mutate: no residual Law.check / Law.assert / .require sites");
+        } else {
+            println!("scuzz mutate: no live-code mutation sites");
+        }
         return Ok(ExitCode::SUCCESS);
     }
     let take = total.min(limit);
-    println!(
-        "scuzz mutate: {take} of {total} residual oracle sites (negate/flip/0-1/arith/drop); idle + {iters} fuzz iters"
-    );
+    let kind = if oracles {
+        "residual oracle sites (negate/flip/0-1/arith/drop)"
+    } else {
+        "live-code sites (flip/if/0-1/sibling)"
+    };
+    println!("scuzz mutate: {take} of {total} {kind}; idle + {iters} fuzz iters");
     let mut killed = 0i64;
     let mut survived = 0i64;
     for i in 0..take {
         let out_dir = project_dir.join("build").join("mutate").join(i.to_string());
-        let mutant = mutate_apply(prog.clone(), i as i32);
+        let mutant = mutate_apply_mode(prog.clone(), i as i32, mode);
         let opts = compile_opts(&project_dir, &out_dir, false, true)?;
         let compiled = compile_prepared_program(&opts, mutant)?;
         let w = manifest.ui.as_ref().map(|u| u.width()).unwrap_or(200);
@@ -58,8 +76,9 @@ pub fn cmd_mutate(path: &Path, limit: i64, iters: i64, seed: i64) -> Result<Exit
         println!("scuzz mutate ok");
         Ok(ExitCode::SUCCESS)
     } else {
+        let flag = if oracles { " --oracles" } else { "" };
         println!(
-            "surviving mutants mean weak or unreachable residual oracles; rerun: scuzz mutate --limit {take} --iters {iters}"
+            "surviving mutants mean weak or unreachable residual oracles; rerun: scuzz mutate{flag} --limit {take} --iters {iters}"
         );
         bail!("mutate survivors");
     }
@@ -147,6 +166,7 @@ fn mutate_exec_ui_events(
             width: w,
             height: h,
         }),
+        None,
     )
 }
 
@@ -174,5 +194,5 @@ fn mutate_exec_io(
 fn mutate_exec_io_at(exe: &Path, out_dir: &Path, schedule_seed: &str) -> Result<i32> {
     let reached = out_dir.join("sometimes.reached");
     std::fs::write(&reached, "")?;
-    run_testrt(exe, &reached, schedule_seed, None)
+    run_testrt(exe, &reached, schedule_seed, None, None)
 }

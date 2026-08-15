@@ -884,6 +884,33 @@ static SzDriver *sz_driver_find(const char *name) {
   return NULL;
 }
 
+static int64_t sz_driver_kind_at(int64_t packed, int i) {
+  int j;
+  int64_t p = 1;
+  for (j = 0; j < i; j++)
+    p *= 4;
+  return (packed / p) % 4;
+}
+
+static int sz_driver_split_rest(const char *rest, char tok[][64], int maxn) {
+  int n = 0;
+  int i = 0;
+  while (rest[i] && n < maxn) {
+    while (rest[i] == ' ' || rest[i] == '\t' || rest[i] == '\n')
+      i++;
+    if (!rest[i])
+      break;
+    int k = 0;
+    while (rest[i] && rest[i] != ' ' && rest[i] != '\t' && rest[i] != '\n' &&
+           k < 63) {
+      tok[n][k++] = rest[i++];
+    }
+    tok[n][k] = 0;
+    n++;
+  }
+  return n;
+}
+
 void sz_driver_run_line(const char *spec) {
   char name[64];
   const char *rest;
@@ -906,19 +933,65 @@ void sz_driver_run_line(const char *spec) {
   }
   if (d->nargs <= 0)
     io = ((SzIo * (*)(void)) d->fn)();
-  else if (d->kind == 1)
-    io = ((SzIo * (*)(SzString *)) d->fn)(sz_string_from_cstr(rest));
-  else if (d->kind == 2)
-    io = ((SzIo * (*)(int64_t)) d->fn)(
-        (rest[0] && (strcmp(rest, "true") == 0 || strcmp(rest, "1") == 0))
-            ? 1
-            : 0);
-  else
-    io = ((SzIo * (*)(int64_t)) d->fn)((int64_t)atoi(rest));
+  else if (d->nargs == 1) {
+    if (d->kind == 1)
+      io = ((SzIo * (*)(SzString *)) d->fn)(sz_string_from_cstr(rest));
+    else if (d->kind == 2)
+      io = ((SzIo * (*)(int64_t)) d->fn)(
+          (rest[0] && (strcmp(rest, "true") == 0 || strcmp(rest, "1") == 0))
+              ? 1
+              : 0);
+    else
+      io = ((SzIo * (*)(int64_t)) d->fn)((int64_t)atoi(rest));
+  } else {
+    char tok[4][64];
+    int ntok = sz_driver_split_rest(rest, tok, 4);
+    SzList *args = sz_list_nil();
+    int j;
+    for (j = d->nargs - 1; j >= 0; j--) {
+      const char *t = j < ntok ? tok[j] : "";
+      int64_t k = sz_driver_kind_at(d->kind, j);
+      void *head;
+      if (k == 1)
+        head = sz_string_from_cstr(t);
+      else if (k == 2)
+        head = sz_box_i64((t[0] && (strcmp(t, "true") == 0 || strcmp(t, "1") == 0))
+                              ? 1
+                              : 0);
+      else
+        head = sz_box_i64((int64_t)atoi(t));
+      args = sz_list_cons(head, args);
+    }
+    io = ((SzIo * (*)(SzList *)) d->fn)(args);
+  }
   r = sz_io_unsafe_run(io);
   if (!r.ok) {
     fprintf(stderr, "scuzz: driver %s failed: %s\n", name,
             r.error ? sz_string_cstr(r.error->message) : "unknown");
     sz_panic("Ui.run: driver failed");
   }
+}
+
+void sz_driver_run_script(const char *path) {
+  FILE *f;
+  char line[256];
+  if (!path || !path[0])
+    return;
+  f = fopen(path, "r");
+  if (!f)
+    return;
+  while (fgets(line, (int)sizeof(line), f)) {
+    size_t n = strlen(line);
+    while (n > 0 && (line[n - 1] == '\n' || line[n - 1] == '\r')) {
+      line[n - 1] = 0;
+      n--;
+    }
+    if (line[0] == 0 || line[0] == '#')
+      continue;
+    if (strncmp(line, "drive ", 6) == 0)
+      sz_driver_run_line(line + 6);
+    else
+      sz_driver_run_line(line);
+  }
+  fclose(f);
 }

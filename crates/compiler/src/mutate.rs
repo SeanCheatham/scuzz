@@ -1,7 +1,18 @@
-//! Residual-oracle mutation: negate / flip / arith / drop `&&` / `0`↔`1` inside
-//! `Law.check` / `Law.assert` / `.require` predicates.
+//! Mutation of live `def` bodies and residual oracle predicates.
+//!
+//! Program mode mutates live code and keeps residual oracles armed.
+//! Oracle mode mutates `Law.check` / `Law.assert` / `.require` predicates.
 
-use crate::ast::{BinOp, Expr, ExprKind, Program};
+use crate::ast::{BinOp, EnumDef, Expr, ExprKind, FunDef, Program};
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MutateMode {
+    /// Mutate live `def` / `@main` bodies. Skip law and driver bodies and
+    /// residual oracle predicates.
+    Program,
+    /// Mutate residual `Law.check` / `Law.assert` / `.require` predicates.
+    Oracles,
+}
 
 fn is_oracle_callee(callee: &str) -> bool {
     callee == "Law.check" || callee == "Law.assert"
@@ -12,8 +23,8 @@ fn negate_pred(pred: Expr) -> Expr {
     Expr::new(
         ExprKind::If {
             cond: Box::new(pred),
-            then_branch: Box::new(Expr::new(ExprKind::IntLit(0), span.clone())),
-            else_branch: Box::new(Expr::new(ExprKind::IntLit(1), span.clone())),
+            then_branch: Box::new(Expr::new(ExprKind::BoolLit(false), span.clone())),
+            else_branch: Box::new(Expr::new(ExprKind::BoolLit(true), span.clone())),
         },
         span,
     )
@@ -68,32 +79,117 @@ fn require_pred_index(args: &[Expr]) -> Option<usize> {
     }
 }
 
-fn mutate_expr(e: Expr, target: i32, seen: i32, in_oracle: bool) -> (Expr, i32) {
+fn sibling_cases<'a>(
+    enums: &'a [EnumDef],
+    enum_name: &str,
+    case_name: &str,
+    nargs: usize,
+) -> Vec<&'a str> {
+    let Some(en) = enums.iter().find(|e| {
+        e.name == enum_name
+            || (!e.module.is_empty() && format!("{}.{}", e.module, e.name) == enum_name)
+            || enum_name.ends_with(&format!(".{}", e.name))
+    }) else {
+        return Vec::new();
+    };
+    en.cases
+        .iter()
+        .filter(|c| c.name != case_name && c.fields.len() == nargs)
+        .map(|c| c.name.as_str())
+        .collect()
+}
+
+struct MutCx<'a> {
+    mode: MutateMode,
+    enums: &'a [EnumDef],
+}
+
+fn live_site(mode: MutateMode, in_oracle: bool) -> bool {
+    match mode {
+        MutateMode::Program => !in_oracle,
+        MutateMode::Oracles => in_oracle,
+    }
+}
+
+fn mutate_expr(e: Expr, target: i32, seen: i32, in_oracle: bool, cx: &MutCx<'_>) -> (Expr, i32) {
     let span = e.span.clone();
     match e.kind {
-        ExprKind::IntLit(n) if in_oracle && (n == 0 || n == 1) => {
+        ExprKind::IntLit(n) if (n == 0 || n == 1) && live_site(cx.mode, in_oracle) => {
             let flipped = if n == 0 { 1 } else { 0 };
             let out = if seen == target { flipped } else { n };
             (Expr::new(ExprKind::IntLit(out), span), seen + 1)
         }
         ExprKind::Call { callee, args } if is_oracle_callee(&callee) => {
-            mutate_oracle(callee, args, span, target, seen)
+            mutate_oracle(callee, args, span, target, seen, cx)
         }
         ExprKind::MethodCall {
             receiver,
             method,
             args,
-        } if method == "require" => mutate_require(*receiver, args, span, target, seen),
-        ExprKind::Binary { op, left, right } if in_oracle => {
+        } if method == "require" => mutate_require(*receiver, args, span, target, seen, cx),
+        ExprKind::Binary { op, left, right } if live_site(cx.mode, in_oracle) => {
             let n = bin_site_count(op);
-            let (left, seen_l) = mutate_expr(*left, target, seen + n, true);
-            let (right, seen_r) = mutate_expr(*right, target, seen_l, true);
+            let (left, seen_l) = mutate_expr(*left, target, seen + n, in_oracle, cx);
+            let (right, seen_r) = mutate_expr(*right, target, seen_l, in_oracle, cx);
             (bin_mutant(op, left, right, span, target, seen), seen_r)
+        }
+        ExprKind::If {
+            cond,
+            then_branch,
+            else_branch,
+        } if cx.mode == MutateMode::Program && !in_oracle => {
+            let swap = seen;
+            let (cond, seen) = mutate_expr(*cond, target, seen + 1, false, cx);
+            let (then_branch, seen) = mutate_expr(*then_branch, target, seen, false, cx);
+            let (else_branch, seen) = mutate_expr(*else_branch, target, seen, false, cx);
+            let (then_branch, else_branch) = if swap == target {
+                (else_branch, then_branch)
+            } else {
+                (then_branch, else_branch)
+            };
+            (
+                Expr::new(
+                    ExprKind::If {
+                        cond: Box::new(cond),
+                        then_branch: Box::new(then_branch),
+                        else_branch: Box::new(else_branch),
+                    },
+                    span,
+                ),
+                seen,
+            )
+        }
+        ExprKind::AdtConstruct {
+            enum_name,
+            case_name,
+            args,
+            type_args,
+        } if cx.mode == MutateMode::Program && !in_oracle => {
+            let sibs = sibling_cases(cx.enums, &enum_name, &case_name, args.len());
+            let n = sibs.len() as i32;
+            let chosen = if target >= seen && target < seen + n {
+                sibs[(target - seen) as usize].to_string()
+            } else {
+                case_name.clone()
+            };
+            let (args, seen) = mutate_expr_list(args, target, seen + n, false, cx);
+            (
+                Expr::new(
+                    ExprKind::AdtConstruct {
+                        enum_name,
+                        case_name: chosen,
+                        args,
+                        type_args,
+                    },
+                    span,
+                ),
+                seen,
+            )
         }
         kind => {
             let mut seen = seen;
             let expr = Expr { kind, span }.map_children(|c| {
-                let (out, next) = mutate_expr(c, target, seen, in_oracle);
+                let (out, next) = mutate_expr(c, target, seen, in_oracle, cx);
                 seen = next;
                 out
             });
@@ -107,10 +203,11 @@ fn mutate_expr_list(
     target: i32,
     mut seen: i32,
     in_oracle: bool,
+    cx: &MutCx<'_>,
 ) -> (Vec<Expr>, i32) {
     let mut out = Vec::with_capacity(xs.len());
     for x in xs {
-        let (e, s) = mutate_expr(x, target, seen, in_oracle);
+        let (e, s) = mutate_expr(x, target, seen, in_oracle, cx);
         seen = s;
         out.push(e);
     }
@@ -123,17 +220,22 @@ fn mutate_oracle(
     span: crate::span::Span,
     target: i32,
     seen: i32,
+    cx: &MutCx<'_>,
 ) -> (Expr, i32) {
+    if cx.mode == MutateMode::Program {
+        let (args, seen) = mutate_expr_list(args, target, seen, true, cx);
+        return (Expr::new(ExprKind::Call { callee, args }, span), seen);
+    }
     if args.len() < 2 {
-        let (args, seen) = mutate_expr_list(args, target, seen, false);
+        let (args, seen) = mutate_expr_list(args, target, seen, false, cx);
         return (Expr::new(ExprKind::Call { callee, args }, span), seen);
     }
     let mut args = args;
     let rest: Vec<Expr> = args.split_off(2);
     let pred_orig = args[1].clone();
-    let (name_e, seen_n) = mutate_expr(args[0].clone(), target, seen + 1, false);
-    let (pred_m, seen_p) = mutate_expr(args[1].clone(), target, seen_n, true);
-    let (rest, seen_r) = mutate_expr_list(rest, target, seen_p, false);
+    let (name_e, seen_n) = mutate_expr(args[0].clone(), target, seen + 1, false, cx);
+    let (pred_m, seen_p) = mutate_expr(args[1].clone(), target, seen_n, true, cx);
+    let (rest, seen_r) = mutate_expr_list(rest, target, seen_p, false, cx);
     let pred_out = if seen == target {
         negate_pred(pred_orig)
     } else {
@@ -153,10 +255,26 @@ fn mutate_require(
     span: crate::span::Span,
     target: i32,
     seen: i32,
+    cx: &MutCx<'_>,
 ) -> (Expr, i32) {
+    if cx.mode == MutateMode::Program {
+        let (receiver, seen) = mutate_expr(receiver, target, seen, false, cx);
+        let (args, seen) = mutate_expr_list(args, target, seen, true, cx);
+        return (
+            Expr::new(
+                ExprKind::MethodCall {
+                    receiver: Box::new(receiver),
+                    method: "require".into(),
+                    args,
+                },
+                span,
+            ),
+            seen,
+        );
+    }
     let Some(pred_idx) = require_pred_index(&args) else {
-        let (receiver, seen) = mutate_expr(receiver, target, seen, false);
-        let (args, seen) = mutate_expr_list(args, target, seen, false);
+        let (receiver, seen) = mutate_expr(receiver, target, seen, false, cx);
+        let (args, seen) = mutate_expr_list(args, target, seen, false, cx);
         return (
             Expr::new(
                 ExprKind::MethodCall {
@@ -170,12 +288,12 @@ fn mutate_require(
         );
     };
     let neg_site = seen;
-    let (receiver, mut seen) = mutate_expr(receiver, target, seen + 1, false);
+    let (receiver, mut seen) = mutate_expr(receiver, target, seen + 1, false, cx);
     let mut out = Vec::with_capacity(args.len());
     for (i, x) in args.into_iter().enumerate() {
         if i == pred_idx {
             let orig = x.clone();
-            let (p, s) = mutate_expr(x, target, seen, true);
+            let (p, s) = mutate_expr(x, target, seen, true, cx);
             seen = s;
             out.push(if neg_site == target {
                 negate_pred(orig)
@@ -183,7 +301,7 @@ fn mutate_require(
                 p
             });
         } else {
-            let (p, s) = mutate_expr(x, target, seen, false);
+            let (p, s) = mutate_expr(x, target, seen, false, cx);
             seen = s;
             out.push(p);
         }
@@ -243,34 +361,63 @@ fn bin_mutant(
     }
 }
 
-fn mutate_prog_at(mut program: Program, target: i32) -> (Program, i32) {
+fn mutate_def_body(d: &FunDef, cx: &MutCx<'_>) -> bool {
+    match cx.mode {
+        MutateMode::Program => !d.is_law && !d.is_driver,
+        MutateMode::Oracles => true,
+    }
+}
+
+fn mutate_prog_at(mut program: Program, target: i32, mode: MutateMode) -> (Program, i32) {
+    let enums = program.enums.clone();
+    let cx = MutCx {
+        mode,
+        enums: &enums,
+    };
     let mut seen = 0;
-    program.map_bodies_mut(|body| {
-        let (body, s) = mutate_expr(body, target, seen, false);
+    for d in &mut program.defs {
+        if !mutate_def_body(d, &cx) {
+            continue;
+        }
+        let body = std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit));
+        let (body, s) = mutate_expr(body, target, seen, false, &cx);
         seen = s;
-        body
-    });
+        d.body = body;
+    }
+    let body = std::mem::replace(&mut program.main.body, Expr::dummy(ExprKind::Unit));
+    let (body, s) = mutate_expr(body, target, seen, false, &cx);
+    seen = s;
+    program.main.body = body;
     (program, seen)
 }
 
 /// Count residual oracle mutation sites on a verify-prepared program.
 pub fn mutate_count(program: &Program) -> i32 {
-    mutate_prog_at(program.clone(), -1).1
+    mutate_count_mode(program, MutateMode::Oracles)
 }
 
-/// Apply site `target` (0-based) on a verify-prepared program.
+/// Apply oracle site `target` (0-based) on a verify-prepared program.
 pub fn mutate_apply(program: Program, target: i32) -> Program {
-    mutate_prog_at(program, target).0
+    mutate_apply_mode(program, target, MutateMode::Oracles)
+}
+
+pub fn mutate_count_mode(program: &Program, mode: MutateMode) -> i32 {
+    mutate_prog_at(program.clone(), -1, mode).1
+}
+
+pub fn mutate_apply_mode(program: Program, target: i32, mode: MutateMode) -> Program {
+    mutate_prog_at(program, target, mode).0
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::lower::lower_program;
     use crate::overlay::residualize_refinements;
     use crate::parser::parse;
 
     #[test]
-    fn hello_has_no_sites() {
+    fn hello_has_no_oracle_sites() {
         let p = parse(
             r#"
 @main def main: IO[Unit] =
@@ -313,5 +460,59 @@ record Point(x: Int where x >= 0, y: Int where y == y)
             dumped.contains("If") || dumped.contains("IntLit(0)"),
             "expected negated pred: {dumped}"
         );
+    }
+
+    #[test]
+    fn program_mode_flips_add_in_live_def() {
+        let p = lower_program(
+            parse(
+                r#"
+def sum(a: Int, b: Int): Int = a + b
+@main def main: IO[Unit] = IO.println("x")
+"#,
+            )
+            .unwrap(),
+        );
+        let n = mutate_count_mode(&p, MutateMode::Program);
+        assert!(n >= 1, "expected live arith site, got {n}");
+        let m = mutate_apply_mode(p, 0, MutateMode::Program);
+        let dumped = format!("{:?}", m.defs[0].body.kind);
+        assert!(dumped.contains("Sub"), "expected + flipped to -: {dumped}");
+    }
+
+    #[test]
+    fn program_mode_skips_oracle_predicates() {
+        let p = parse(
+            r#"
+@main def main: IO[Unit] =
+  IO.println("x").require(1 == 1)
+"#,
+        )
+        .unwrap();
+        let n = mutate_count_mode(&p, MutateMode::Program);
+        assert_eq!(n, 0, "require pred is not a live-code site");
+    }
+
+    #[test]
+    fn program_mode_swaps_if_arms() {
+        let p = parse(
+            r#"
+def pick(n: Int): Int = if (n > 0) 1 else 2
+@main def main: IO[Unit] = IO.println("x")
+"#,
+        )
+        .unwrap();
+        let n = mutate_count_mode(&p, MutateMode::Program);
+        assert!(n >= 1);
+        let mut found = false;
+        for i in 0..n {
+            let m = mutate_apply_mode(p.clone(), i, MutateMode::Program);
+            let dumped = format!("{:?}", m.defs[0].body.kind);
+            if dumped.contains("IntLit(2)") && dumped.contains("IntLit(1)") {
+                found = true;
+                break;
+            }
+        }
+        assert!(found, "expected an if-arm swap among {n} sites");
     }
 }

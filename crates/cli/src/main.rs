@@ -129,14 +129,14 @@ enum Commands {
         #[arg(long)]
         replay: Option<PathBuf>,
     },
-    /// Mutate residual Law.check / Law.assert / .require predicates and probe
+    /// Mutate live def bodies (or residual oracles with --oracles) and probe
     #[command(
-        after_help = "Examples:\n  scuzz mutate\n  scuzz mutate --limit 16 --iters 4\n  scuzz mutate examples/counter --limit 4 --iters 8\n  scuzz mutate examples/hello\n"
+        after_help = "Examples:\n  scuzz mutate\n  scuzz mutate --limit 16 --iters 4\n  scuzz mutate --oracles examples/counter --limit 4 --iters 8\n  scuzz mutate examples/hello\n"
     )]
     Mutate {
         #[arg(default_value = ".")]
         path: PathBuf,
-        /// Max residual oracle sites to probe
+        /// Max mutation sites to probe
         #[arg(long, default_value_t = 16)]
         limit: i64,
         /// Fuzz iters per mutant after the idle probe (`0` is idle only)
@@ -145,6 +145,9 @@ enum Commands {
         /// Deterministic LCG seed
         #[arg(long, default_value_t = 42)]
         seed: i64,
+        /// Mutate residual Law.check / Law.assert / .require predicates
+        #[arg(long)]
+        oracles: bool,
     },
     /// Create a new Scuzz Lang project
     New {
@@ -340,7 +343,8 @@ version = "0.1.0"
             limit,
             iters,
             seed,
-        } => cmd_mutate::cmd_mutate(&path, limit, iters, seed),
+            oracles,
+        } => cmd_mutate::cmd_mutate(&path, limit, iters, seed, oracles),
         Commands::Package {
             path,
             target,

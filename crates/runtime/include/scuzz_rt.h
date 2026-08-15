@@ -436,6 +436,7 @@ void sz_law_sometimes(SzString *name);
 void sz_law_sometimes_flush(void);
 void sz_driver_register(SzString *name, int64_t nargs, int64_t kind, void *fn);
 void sz_driver_run_line(const char *spec);
+void sz_driver_run_script(const char *path);
 
 /* Entrypoint helper used by @main codegen */
 int sz_runtime_main_args(SzIo *program, int argc, char **argv);

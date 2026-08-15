@@ -254,7 +254,7 @@ pub(crate) fn show_def(d: &FunDef) -> String {
 
 pub(crate) fn show_param(p: &Param) -> String {
     if p.rfn.is_some() {
-        format!("{}: {} where …", p.name, p.ty)
+        format!("{}: {} where ...", p.name, p.ty)
     } else {
         format!("{}: {}", p.name, p.ty)
     }
@@ -329,15 +329,15 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Signal.map",
         "Signal.map(s: Signal, f: Int => String): Signal",
     ),
-    ("Signal.list", "Signal.list(xs: List): Signal"),
+    ("Signal.list", "Signal.list(xs: List[T]): Signal"),
     (
         "List.filter",
-        "List.filter(xs: List, pred: String => Bool): List",
+        "List.filter(xs: List[T], pred: T => Bool): List[T]",
     ),
-    ("List.map", "List.map(xs: List, f: String => String): List"),
+    ("List.map", "List.map(xs: List[T], f: T => U): List[U]"),
     (
         "List.setAt",
-        "List.setAt(xs: List, i: Int, v: String): List",
+        "List.setAt(xs: List[T], i: Int, v: T): List[T]",
     ),
     ("View.text", "View.text(s: String): View"),
     ("View.bindText", "View.bindText(s: Signal): View"),
@@ -1098,7 +1098,7 @@ mod tests {
 "#;
         let h = hover_src(src, "filter");
         assert!(
-            h.contains("List.filter(xs: List, pred: String => Bool): List"),
+            h.contains("List.filter(xs: List[T], pred: T => Bool): List[T]"),
             "{h}"
         );
     }
@@ -1110,7 +1110,7 @@ mod tests {
 "#;
         let h = hover_src(src, "map");
         assert!(
-            h.contains("List.map(xs: List, f: String => String): List"),
+            h.contains("List.map(xs: List[T], f: T => U): List[U]"),
             "{h}"
         );
     }
@@ -1122,7 +1122,7 @@ mod tests {
 "#;
         let h = hover_src(src, "setAt");
         assert!(
-            h.contains("List.setAt(xs: List, i: Int, v: String): List"),
+            h.contains("List.setAt(xs: List[T], i: Int, v: T): List[T]"),
             "{h}"
         );
     }

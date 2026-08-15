@@ -19,8 +19,8 @@ def run(): IO[Unit] =
     found <- Stream.compileToList(Stream.find(Stream.emits(["", "a", "b"]), x => Str.len(x) > 0))
     _ <- IO.println(Str.concat("find:", List.join(found, ",")))
     hit <- Stream.exists(Stream.emits(["", "a", "b"]), x => Str.len(x) > 0)
-    _ <- IO.println(Str.concat("exists:", Str.fromInt(hit)))
+    _ <- IO.println(Str.concat("exists:", if (hit) "1" else "0"))
     miss <- Stream.exists(Stream.emits(["", ""]), x => Str.len(x) > 0)
-    _ <- IO.println(Str.concat("miss:", Str.fromInt(miss)))
+    _ <- IO.println(Str.concat("miss:", if (miss) "1" else "0"))
   } yield ()
 

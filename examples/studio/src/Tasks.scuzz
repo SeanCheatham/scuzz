@@ -28,9 +28,9 @@ def flipDone(s: String): String =
 def noteAdd(s: String): Unit =
   Law.sometimes("droveAdd")
 
-def loadList(text: String): List =
+def loadList(text: String): List[String] =
   if (List.isEmpty(Str.lines(text)) == 1) ["milk"] else Str.lines(text)
 
-def saveBody(xs: List): String =
+def saveBody(xs: List[String]): String =
   if (List.isEmpty(xs) == 1) "" else Str.concat(List.join(xs, "\n"), "\n")
 

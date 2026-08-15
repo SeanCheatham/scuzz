@@ -38,12 +38,22 @@ impl Get[T] for Opt:
 
 import A.tag
 import A.Msg
+import A.one
 
 def id[T](x: T): T =
   x
 
 def sum(p: Point): Int =
   p.x + p.y
+
+law sumPositive: Bool =
+  sum(Point(3, 5)) > 0
+
+law onePositive: Bool =
+  one() > 0
+
+law addComm(a: Int, b: Int): Bool =
+  a + b == b + a
 
 def noneInt(): Opt[Int] =
   Opt.None
@@ -119,7 +129,7 @@ record Box[T](x: T):
   case Pack.Of(ys) => IO.println(Str.concat("adt:box:", List.join(ys, ",")))
   case Pack.Empty => IO.println("adt:box:empty")
 }
-    _ <- IO.println(Str.concat("record:", Str.fromInt(sum(Point(3, 5)))))
+    _ <- IO.println(Str.concat("record:", Str.fromInt(sum(Point(3, 5))))).require(sumPositive).require(onePositive)
     _ <- IO.println(Point(3, 5).show())
     _ <- IO.println(Str.concat("get:", Str.fromInt(Point(3, 5).getOrElse(0))))
     b = Box(4)

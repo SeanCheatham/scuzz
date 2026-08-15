@@ -2,9 +2,9 @@ use crate::support::{compile_opts, resolve_dir, run_testrt, TestrtUi};
 use anyhow::{bail, Context, Result};
 use scuzz_compiler::compile_project;
 use scuzz_compiler::fuzz::{
-    corpus_keep, corpus_push, count_prefix_lines, dump_push, exhaust_alphabet, fuzz_pick_sched,
-    fuzz_pick_script, lines_nonempty, missing_from, parse_repro, repro_text, sched_push,
-    script_text,
+    corpus_keep, corpus_push, count_prefix_lines, drive_script_lines, dump_push, exhaust_alphabet,
+    fuzz_pick_sched, fuzz_pick_script, lines_nonempty, missing_from, parse_repro, repro_text,
+    sched_push, script_text,
 };
 use scuzz_compiler::manifest::load_manifest;
 use std::path::Path;
@@ -94,7 +94,7 @@ fn fuzz_replay(path: &Path, replay_path: &Path) -> Result<ExitCode> {
     let code = if is_ui {
         fuzz_exec(&out.executable, &fuzz_dir, w, h, &repro.events, &sched)?
     } else {
-        fuzz_exec_io(&out.executable, &fuzz_dir, &sched)?
+        fuzz_exec_io(&out.executable, &fuzz_dir, &sched, &repro.events)?
     };
     if code == 0 {
         println!("fuzz replay ok (no failure)");
@@ -192,13 +192,41 @@ fn fuzz_loop(
         );
         let code = fuzz_exec(exe, fuzz_dir, w, h, &events, &sched.to_string())?;
         if code != 0 {
-            return fuzz_fail(project_dir, fuzz_dir, seed + iter, sched, iter, &events);
+            return fuzz_fail(
+                exe,
+                project_dir,
+                fuzz_dir,
+                w,
+                h,
+                seed + iter,
+                sched,
+                iter,
+                &events,
+            );
         }
         let reached = lines_nonempty(
             &std::fs::read_to_string(fuzz_dir.join("sometimes.reached")).unwrap_or_default(),
         );
         let dump = std::fs::read_to_string(fuzz_dir.join("dump.txt")).unwrap_or_default();
         if corpus_keep(&reached, &old_camp, &dump, &seen) {
+            let dump2_code = fuzz_exec(exe, fuzz_dir, w, h, &events, &sched.to_string())?;
+            if dump2_code != 0 {
+                return fuzz_fail(
+                    exe,
+                    project_dir,
+                    fuzz_dir,
+                    w,
+                    h,
+                    seed + iter,
+                    sched,
+                    iter,
+                    &events,
+                );
+            }
+            let dump2 = std::fs::read_to_string(fuzz_dir.join("dump.txt")).unwrap_or_default();
+            if dump2 != dump {
+                bail!("fuzz dump mismatch on replay (nondeterministic Headless dump)");
+            }
             dump_push(&mut seen, dump);
             corpus_push(&mut corpus, events);
         }
@@ -221,15 +249,27 @@ fn fuzz_io_loop(
     iters: i64,
 ) -> Result<ExitCode> {
     let mut corpus: Vec<String> = Vec::new();
+    let drivers = read_drivers(project_dir);
     for iter in 0..iters {
         let sched = fuzz_pick_sched(seed, iter, &corpus);
+        let drives = drive_script_lines(seed + iter, &drivers);
         let old_camp = lines_nonempty(
             &std::fs::read_to_string(fuzz_dir.join("sometimes.campaign")).unwrap_or_default(),
         );
-        let code = fuzz_exec_io(exe, fuzz_dir, &sched)?;
+        let code = fuzz_exec_io(exe, fuzz_dir, &sched, &drives)?;
         if code != 0 {
             let sched_n: i64 = sched.parse().unwrap_or(0);
-            return fuzz_fail(project_dir, fuzz_dir, seed + iter, sched_n, iter, &[]);
+            return fuzz_fail(
+                exe,
+                project_dir,
+                fuzz_dir,
+                0,
+                0,
+                seed + iter,
+                sched_n,
+                iter,
+                &drives,
+            );
         }
         let reached = lines_nonempty(
             &std::fs::read_to_string(fuzz_dir.join("sometimes.reached")).unwrap_or_default(),
@@ -301,7 +341,16 @@ fn exhaust_extend(
         if code == 0 {
             return Ok(script_index + 1);
         }
-        fuzz_exhaust_fail(project_dir, fuzz_dir, max_depth, script_index, prefix)?;
+        fuzz_exhaust_fail(
+            exe,
+            project_dir,
+            fuzz_dir,
+            w,
+            h,
+            max_depth,
+            script_index,
+            prefix,
+        )?;
         return Ok(script_index);
     }
     let mut idx = script_index;
@@ -324,22 +373,62 @@ fn exhaust_extend(
     Ok(idx)
 }
 
+fn shrink_events(
+    exe: &Path,
+    fuzz_dir: &Path,
+    w: i32,
+    h: i32,
+    schedule_seed: &str,
+    events: &[String],
+) -> Result<Vec<String>> {
+    let mut cur = events.to_vec();
+    loop {
+        let mut progressed = false;
+        let mut i = 0;
+        while i < cur.len() {
+            let mut cand = cur.clone();
+            cand.remove(i);
+            let code = if w == 0 && h == 0 {
+                fuzz_exec_io(exe, fuzz_dir, schedule_seed, &cand)?
+            } else {
+                fuzz_exec(exe, fuzz_dir, w, h, &cand, schedule_seed)?
+            };
+            if code != 0 {
+                cur = cand;
+                progressed = true;
+            } else {
+                i += 1;
+            }
+        }
+        if !progressed {
+            break;
+        }
+    }
+    Ok(cur)
+}
+
 fn fuzz_fail(
+    exe: &Path,
     project_dir: &Path,
     fuzz_dir: &Path,
+    w: i32,
+    h: i32,
     script_seed: i64,
     schedule_seed: i64,
     iter: i64,
     events: &[String],
 ) -> Result<ExitCode> {
+    let shrunk = shrink_events(exe, fuzz_dir, w, h, &schedule_seed.to_string(), events)?;
     let repro = fuzz_dir.join("repro.toml");
     std::fs::write(
         &repro,
-        repro_text(script_seed, &schedule_seed.to_string(), events),
+        repro_text(script_seed, &schedule_seed.to_string(), &shrunk),
     )?;
     println!(
-        "fuzz failure at script {iter} (seed {script_seed}); wrote {}",
-        repro.display()
+        "fuzz failure at script {iter} (seed {script_seed}); wrote {} ({} events, shrunk from {})",
+        repro.display(),
+        shrunk.len(),
+        events.len()
     );
     println!(
         "replay: scuzz fuzz {} --replay {}",
@@ -350,17 +439,23 @@ fn fuzz_fail(
 }
 
 fn fuzz_exhaust_fail(
+    exe: &Path,
     project_dir: &Path,
     fuzz_dir: &Path,
+    w: i32,
+    h: i32,
     depth: i64,
     script_index: i64,
     events: &[String],
 ) -> Result<()> {
+    let shrunk = shrink_events(exe, fuzz_dir, w, h, "", events)?;
     let repro = fuzz_dir.join("repro.toml");
-    std::fs::write(&repro, repro_text(depth, "", events))?;
+    std::fs::write(&repro, repro_text(depth, "", &shrunk))?;
     println!(
-        "fuzz --exhaust failure at script {script_index} (depth {depth}); wrote {}",
-        repro.display()
+        "fuzz --exhaust failure at script {script_index} (depth {depth}); wrote {} ({} events, shrunk from {})",
+        repro.display(),
+        shrunk.len(),
+        events.len()
     );
     println!(
         "replay: scuzz fuzz {} --replay {}",
@@ -430,15 +525,28 @@ fn fuzz_exec(
             width: w,
             height: h,
         }),
+        None,
     )?;
     merge_sometimes(&reached, &fuzz_dir.join("sometimes.campaign"))?;
     Ok(code)
 }
 
-fn fuzz_exec_io(exe: &Path, fuzz_dir: &Path, schedule_seed: &str) -> Result<i32> {
+fn fuzz_exec_io(
+    exe: &Path,
+    fuzz_dir: &Path,
+    schedule_seed: &str,
+    drives: &[String],
+) -> Result<i32> {
     let reached = fuzz_dir.join("sometimes.reached");
+    let drive_path = fuzz_dir.join("drive.txt");
     std::fs::write(&reached, "")?;
-    let code = run_testrt(exe, &reached, schedule_seed, None)?;
+    std::fs::write(&drive_path, script_text(drives))?;
+    let drive = if drives.is_empty() {
+        None
+    } else {
+        Some(drive_path.as_path())
+    };
+    let code = run_testrt(exe, &reached, schedule_seed, None, drive)?;
     merge_sometimes(&reached, &fuzz_dir.join("sometimes.campaign"))?;
     Ok(code)
 }

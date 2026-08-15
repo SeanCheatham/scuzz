@@ -112,8 +112,8 @@ Locks (not an API catalog — see [`guide.md`](guide.md)):
 - Optional `package`; top-level `def` / `private def` / `import`; `@main def …: IO[Unit]`
 - Payload enums + `record` sugar (methods on generic records and enums) + thin traits/`impl` (static dispatch, including `trait Get[T]` / `impl Get[Int] for Point` / `impl Get[T] for Opt`) + monomorphized generics on defs/enums/records
 - File-stem modules; enums namespaced by stem; `import Module.name` for bare disambiguation
-- Types: `Unit`, `Int`, `String`, `Bool`, `List`, `IO[T]`, nominal enums
-- Blessed kits + `Signal` / `View` / `Ui` / `Law.*` / `.require` as documented in the guide. Kit lambdas bind `String` (`List.filter` / `List.map` / `View.each` / `Stream.*` / `Resource` / `Net.serve`) or `Int` (`Signal.map`). The lambda body must return the kit result (`View`, `Bool`, `String`, or `IO`)
+- Types: `Unit`, `Int`, `String`, `Bool`, `List[T]`, `IO[T]`, nominal enums. `true` / `false` are `Bool`. `Bool` is not `Int`
+- Blessed kits + `Signal` / `View` / `Ui` / `Law.*` / `.require` as documented in the guide. Kit lambdas bind the list element type (`List.filter` / `List.map`), `String` (`View.each` / `Stream.*` / `Resource` / `Net.serve`), or `Int` (`Signal.map`). The lambda body must return the kit result (`View`, `Bool`, `String`, `T` for `List.map`, or `IO`)
 - No macros, no implicits, no HKT beyond `IO`, no null
 
 ## Language direction
@@ -161,17 +161,17 @@ Direction: payload **enums** / **`record`** + thin **traits**-as-interfaces. Mon
 
 App correctness is **not** classical unit tests. Prefer **mutation, fuzzing, property-oriented laws, simulation, and determinism**. All are first-class in the language and `scuzz` tooling. The split is **oracles in source, drivers as the test surface**:
 
-- **Oracles live in the live module.** Top-level `law` declarations (pure, nullary `Bool` predicates), explicit `.require(pred)` on values / `IO` (type-preserving; residual `Law.check` / sequenced `Law.assert` under verify), reachability `Law.sometimes(name)`, and `where` refinements on `def` params and `record` fields. All erase from live builds. Armed under TestRuntime / fuzz / mutation. Application is at the call site through `.require`.
+- **Oracles live in the live module.** Top-level `law` declarations (pure `Bool` predicates; nullary or generator-friendly `Int` / `String` / `Bool` params), explicit `.require(pred)` on values / `IO` (type-preserving; residual `Law.check` / sequenced `Law.assert` under verify), reachability `Law.sometimes(name)`, and `where` refinements on `def` params and `record` fields. All erase from live builds. Armed under TestRuntime / fuzz / mutation. Nullary laws apply at the call site through `.require`. Parameterized laws are instantiated by `scuzz fuzz`.
 - **Drivers (`*.scuzz_drivers`) do things.** Impure, parameterized, oracle-free steps. `scuzz fuzz` composes them (generated args, random order / interleaving) alongside the UI event alphabet. `check` rejects `Law.*` and `.require` in driver files. An assert inside a driver is a unit test in disguise.
 - **`Law.sometimes` keeps composition honest.** Reachability accumulates across a fuzz *campaign*. Declared-but-never-reached states fail the campaign. Oracle-free drivers cannot pass vacuously. It is a coverage/fitness signal for corpus guidance, alongside Headless dump novelty. It is a path marker (`Unit`), not a value method.
-- **Mutation pressures the oracles.** Surviving mutants mean weak laws/refinements.
+- **Mutation pressures the oracles.** Default `scuzz mutate` mutates live code and requires residual oracles to kill the mutant. `--oracles` mutates residual predicates. Surviving mutants mean weak, unreached, or missing laws/refinements.
 
 | Phase | Role |
 | --- | --- |
-| `scuzz check` | Format-verify `src/`; typecheck live + laws/refinements + sim + drivers; laws pure, drivers `IO`, no oracles in drivers; every `law` must appear in a `.require`; sim bindings match live types/purity |
-| `scuzz build` (verify graph) | Layer `*.scuzz_sim` over live defs; compile drivers; residualize `.require` / `where` checks (armed under TestRuntime / fuzz / mutation only) |
-| `scuzz fuzz` | Compose drivers + event scripts / IO schedules. Per-run oracles: `.require` residuals, refinements, panic/`SzError`. Per-campaign oracle: `Law.sometimes` reachability → `repro.toml` |
-| `scuzz mutate` | Negate residual `Law.check` / `Law.assert` / `.require`; flip relational/boolean ops, swap `+`/`-`, `*`/`/`, and `%`→`*`, drop `&&` conjuncts, and `0`↔`1` inside those predicates; idle probe plus `--iters` fuzz; surviving mutants mean weak or unreached oracles |
+| `scuzz check` | Format-verify `src/`; typecheck live + laws/refinements + sim + drivers; laws pure, drivers `IO`, no oracles in drivers; every nullary `law` must appear in a `.require`; parameterized laws stay generator-friendly; sim bindings match live types/purity. Reports every parse and type diagnostic in the run |
+| `scuzz build` (verify graph) | Layer `*.scuzz_sim` over live defs; compile drivers; residualize `.require` / `where` checks (armed under TestRuntime / fuzz / mutation only); publish parameterized laws as drive targets |
+| `scuzz fuzz` | Compose drivers + parameterized laws + event scripts / IO schedules. Shrink a failing prefix before `repro.toml`. `[ui]` kept prefixes run twice; dump mismatch fails. Per-run oracles: `.require` residuals, refinements, panic/`SzError`. Per-campaign oracle: `Law.sometimes` reachability → `repro.toml` |
+| `scuzz mutate` | Mutate live `def` bodies (flip ops, swap `if` arms, `0`↔`1`, sibling constructors); keep residual oracles armed. `--oracles` mutates residual `Law.check` / `Law.assert` / `.require` predicates. Idle probe plus `--iters` fuzz; surviving mutants mean weak or unreached oracles |
 | Later (optional) | Discharge trivial law/refinement fragments statically; leave the rest as search |
 
 Direction beyond this (not current work): fuzz-verified `*.scuzz_tune` — [`optimization.md`](optimization.md). Pivot slices and status: [`gaps.md`](gaps.md).
@@ -199,7 +199,7 @@ Keep purity checkable (pure `A` vs `IO` vs session). Total expr core. Signals as
 
 ### `scuzz fuzz`
 
-Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overlays when present). The fuzz alphabet is the typed event surface (buttons, text fields) **plus declared drivers** (`drive <name> [args]` extends the script line protocol; the verify build publishes the driver table alongside the a11y dump). Oracles: in-source **laws/refinements** first. Panic/`SzError` still fails. `Law.sometimes` reachability judges the campaign. Structural dumps aid diagnosis (PNG last). `repro.toml` records events + driver invocations verbatim, so replay is generator-independent. Needs stable tap order, `pump` as time, no hidden nondeterminism. Determinism makes any failing prefix replayable. Seeded `--iters` keeps `[ui]` prefixes that hit new `Law.sometimes` names or a new Headless `dump.txt`, and IO-only schedule seeds that hit new sometimes names, then extends/perturbs them (CLI-only; no runtime machinery). Flags, script verbs, and schedule seeds: [`guide.md`](guide.md).
+Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overlays when present). The fuzz alphabet is the typed event surface (buttons, text fields) **plus declared drivers** (`drive <name> [args]` extends the script line protocol; the verify build publishes the driver table alongside the a11y dump) **plus parameterized laws** (same `drive` verb). Oracles: in-source **laws/refinements** first. Panic/`SzError` still fails. `Law.sometimes` reachability judges the campaign. Structural dumps aid diagnosis (PNG last). `repro.toml` records a **shrunk** event list + driver invocations, so replay is generator-independent. `[ui]` kept prefixes run twice; a dump mismatch fails the campaign. Needs stable tap order, `pump` as time, no hidden nondeterminism. Determinism makes any failing prefix replayable. Seeded `--iters` keeps `[ui]` prefixes that hit new `Law.sometimes` names or a new Headless `dump.txt`, and IO-only schedule seeds that hit new sometimes names, then extends/perturbs them (CLI-only; no runtime machinery). Flags, script verbs, and schedule seeds: [`guide.md`](guide.md).
 
 ### Layout model
 

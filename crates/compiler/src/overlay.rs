@@ -81,17 +81,25 @@ pub fn collect_law_names(program: &Program) -> Result<Vec<String>, OverlayError>
         if !d.is_law {
             continue;
         }
-        if !matches!(d.ret, Type::Bool | Type::Int) {
+        if !matches!(d.ret, Type::Bool) {
             return Err(OverlayError::Msg(format!(
-                "law `{}` must return Bool (or Int), got {:?}",
+                "law `{}` must return Bool, got {:?}",
                 d.name, d.ret
             )));
         }
-        if !d.params.is_empty() {
+        if d.params.len() > 3 {
             return Err(OverlayError::Msg(format!(
-                "law `{}` must be nullary for residual checks",
+                "law `{}` takes at most three Int, String, or Bool params",
                 d.name
             )));
+        }
+        for p in &d.params {
+            if !matches!(p.ty, Type::Int | Type::String | Type::Bool) {
+                return Err(OverlayError::Msg(format!(
+                    "law `{}` param `{}` must be Int, String, or Bool",
+                    d.name, p.name
+                )));
+            }
         }
         names.push(d.name.clone());
     }
@@ -137,10 +145,14 @@ pub fn check_laws_applied(program: &Program, law_names: &[String]) -> Result<(),
         collect_required_laws(&d.body, law_names, &mut used);
     }
     collect_required_laws(&program.main.body, law_names, &mut used);
-    for name in law_names {
-        if !used.contains(name) {
+    for d in &program.defs {
+        if !d.is_law || !d.params.is_empty() {
+            continue;
+        }
+        if !used.contains(&d.name) {
             return Err(OverlayError::Msg(format!(
-                "law `{name}` is never applied; use `.require({name})` on the value it constrains"
+                "law `{}` is never applied; use `.require({})` on the value it constrains",
+                d.name, d.name
             )));
         }
     }
@@ -338,24 +350,30 @@ pub(crate) fn expr_has_law(e: &Expr) -> bool {
     found
 }
 
-/// Table lines for `build/drivers.txt`: `name`, `name i`, `name s`, or `name b`.
+/// Table lines for `build/drivers.txt`: `name`, `name i`, `name s`, `name b`,
+/// or several kind tokens (`name i i`). Includes parameterized laws.
 pub fn driver_table_text(program: &Program) -> String {
     let mut out = String::new();
     for d in &program.defs {
-        if !d.is_driver {
-            continue;
+        if d.is_driver {
+            push_drive_spec(&mut out, d);
+        } else if d.is_law && !d.params.is_empty() {
+            push_drive_spec(&mut out, d);
         }
-        out.push_str(&d.name);
-        if let Some(p) = d.params.first() {
-            match p.ty {
-                Type::String => out.push_str(" s"),
-                Type::Bool => out.push_str(" b"),
-                _ => out.push_str(" i"),
-            }
-        }
-        out.push('\n');
     }
     out
+}
+
+fn push_drive_spec(out: &mut String, d: &FunDef) {
+    out.push_str(&d.name);
+    for p in &d.params {
+        match p.ty {
+            Type::String => out.push_str(" s"),
+            Type::Bool => out.push_str(" b"),
+            _ => out.push_str(" i"),
+        }
+    }
+    out.push('\n');
 }
 
 /// Rewrite calls and record construction so `where` predicates become `Law.check`
@@ -745,6 +763,18 @@ mod tests {
         let laws = collect_law_names(&prog).unwrap();
         let err = check_laws_applied(&prog, &laws).unwrap_err();
         assert!(err.to_string().contains("never applied"));
+    }
+
+    #[test]
+    fn parameterized_law_need_not_require() {
+        let prog = parse_sources(&[(
+            "Main.scuzz".into(),
+            "law addComm(a: Int, b: Int): Bool = a + b == b + a\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
+        )])
+        .unwrap();
+        let laws = collect_law_names(&prog).unwrap();
+        check_laws_applied(&prog, &laws).unwrap();
+        assert_eq!(driver_table_text(&prog).trim(), "addComm i i");
     }
 
     #[test]

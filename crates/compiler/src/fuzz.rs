@@ -55,16 +55,47 @@ fn drive_bool(s: i64) -> &'static str {
     }
 }
 
-fn drive_line(spec: &str, s: i64) -> String {
-    if let Some(name) = spec.strip_suffix(" i") {
-        format!("drive {name} {}", 1 + lcg_below(s, 3))
-    } else if let Some(name) = spec.strip_suffix(" s") {
-        format!("drive {name} {}", letter_at(lcg_below(s, 26)))
-    } else if let Some(name) = spec.strip_suffix(" b") {
-        format!("drive {name} {}", drive_bool(s))
-    } else {
-        format!("drive {spec}")
+fn drive_spec_parts(spec: &str) -> (String, Vec<char>) {
+    let mut parts = spec.split_whitespace();
+    let name = parts.next().unwrap_or("").to_string();
+    let kinds: Vec<char> = parts.filter_map(|p| p.chars().next()).collect();
+    (name, kinds)
+}
+
+fn drive_line(spec: &str, mut s: i64) -> String {
+    let (name, kinds) = drive_spec_parts(spec);
+    if kinds.is_empty() {
+        return format!("drive {name}");
     }
+    let mut args = Vec::new();
+    for k in kinds {
+        match k {
+            's' => {
+                args.push(letter_at(lcg_below(s, 26)));
+                s = lcg_next(s);
+            }
+            'b' => {
+                args.push(drive_bool(s).to_string());
+                s = lcg_next(s);
+            }
+            _ => {
+                args.push((1 + lcg_below(s, 3)).to_string());
+                s = lcg_next(s);
+            }
+        }
+    }
+    format!("drive {name} {}", args.join(" "))
+}
+
+/// One `drive` line per driver table spec, with generated args.
+pub fn drive_script_lines(seed: i64, drivers: &[String]) -> Vec<String> {
+    let mut s = lcg_next(lcg_seed(seed));
+    let mut out = Vec::new();
+    for spec in drivers {
+        out.push(drive_line(spec, s));
+        s = lcg_next(s);
+    }
+    out
 }
 
 fn fuzz_event(
@@ -449,6 +480,15 @@ mod tests {
         assert_eq!(r.seed, 7);
         assert_eq!(r.schedule_seed.as_deref(), Some("9"));
         assert_eq!(r.events, vec!["tap 0", "pump 1"]);
+    }
+
+    #[test]
+    fn drive_line_two_int_params() {
+        let a = drive_line("addComm i i", 1);
+        let b = drive_line("addComm i i", 1);
+        assert_eq!(a, b);
+        assert!(a.starts_with("drive addComm "), "{a}");
+        assert_eq!(a.split_whitespace().count(), 4);
     }
 
     #[test]

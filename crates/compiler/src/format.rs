@@ -226,7 +226,8 @@ fn pretty_type(t: &Type) -> String {
         Type::Int => "Int".into(),
         Type::String => "String".into(),
         Type::Bool => "Bool".into(),
-        Type::List => "List".into(),
+        Type::List(inner) => format!("List[{}]", pretty_type(inner)),
+        Type::Fun(a, b) => format!("{} => {}", pretty_type(a), pretty_type(b)),
         Type::Io(inner) => format!("IO[{}]", pretty_type(inner)),
         Type::App(n, args) => format!(
             "{}[{}]",
@@ -239,9 +240,19 @@ fn pretty_type(t: &Type) -> String {
 
 fn pretty_def(d: &FunDef) -> String {
     if d.is_law {
+        let params: Vec<String> = d
+            .params
+            .iter()
+            .map(|p| pretty_binding(&p.name, &p.ty, p.rfn.as_ref()))
+            .collect();
+        let sig = if params.is_empty() {
+            d.name.clone()
+        } else {
+            format!("{}({})", d.name, params.join(", "))
+        };
         return format!(
             "law {}: {} =\n{}",
-            d.name,
+            sig,
             pretty_type(&d.ret),
             pretty_expr(&d.body, 1)
         );
@@ -273,6 +284,8 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
     match &expr.kind {
         ExprKind::Unit => format!("{pad}()"),
         ExprKind::IntLit(n) => format!("{pad}{n}"),
+        ExprKind::BoolLit(true) => format!("{pad}true"),
+        ExprKind::BoolLit(false) => format!("{pad}false"),
         ExprKind::StrLit(s) => format!("{pad}\"{}\"", escape(s)),
         ExprKind::ListLit { elems } => {
             let a: Vec<_> = elems

@@ -256,8 +256,9 @@ jobs:
           fi
           cargo run -p scuzz -- fuzz --iters 4 examples/io
           cargo run -p scuzz -- mutate examples/hello
-          cargo run -p scuzz -- mutate examples/kernel --limit 2 --iters 0
-          cargo run -p scuzz -- mutate examples/counter --limit 1 --iters 0
+          cargo run -p scuzz -- mutate --oracles examples/kernel --limit 2 --iters 0
+          cargo run -p scuzz -- mutate --oracles examples/counter --limit 1 --iters 0
+          cargo run -p scuzz -- mutate examples/kernel --limit 1 --iters 0
 
       - name: v0 new --ui path
         run: |

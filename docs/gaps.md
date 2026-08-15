@@ -13,9 +13,9 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 **Status.** iOS simulator proven: `crates/embedder-mobile/shells/ios/build_sim.sh` cross-compiles the LLVM app + C runtime + `sk_sw` for `arm64-apple-ios-simulator`, links the ObjC shell (`crates/embedder-mobile/shells/ios/main.m` + `ScuzzShell.m`), and signs a `.app`. `examples/counter` mounts `UiRuntime.Mobile` in a booted sim and presents live frames. Android stays blocked on the NDK (`crates/embedder-mobile/shells/android/` is a manifest + JNI stub). Real devices stay open (provisioning, no simulator sandbox).
 
-**Unproven.** Android cross-compile and JNI/ObjC embedding on hardware. Touch and soft-keyboard text input on hardware. `scuzz package --target ios` still copies templates; the CLI does not drive `build_sim.sh` yet.
+**Unproven.** Android cross-compile and JNI/ObjC embedding on hardware. Touch and soft-keyboard text input on hardware. `scuzz package --target ios` still copies templates; the CLI does not drive `build_sim.sh` yet. Soft-keyboard text input (`SZ_INPUT_TEXT_EDIT`) on sim is open.
 
-**Proof.** One example (counter) runs on one device or simulator with `scuzz package` plus the platform toolchain. iOS sim meets the bar through the shell script; the CLI wiring and Android/device runs stay open.
+**Proof.** One example (counter) runs on one device or simulator with `scuzz package` plus the platform toolchain. iOS sim meets the bar through the shell script; the CLI wiring, sim TextField input, and Android/device runs stay open.
 
 ### 2. GPU presenters (Impeller / Skia GPU)
 
@@ -43,5 +43,5 @@ Path deps only (`manifest.rs`). Git, versioned, and hosted artifacts are directi
 - **Flutter-style constraint layout** — constraints down, sizes up. Widget catalog: [`guide.md`](guide.md). Residual: Flutter-style constraint-overflow dumps (do not add).
 - **Windows desktop embedder** — same session protocol as X11/Cocoa. Secondary platform.
 - **OS IME candidate windows** — focused TextField caret uses measured advance (`sz_view_caret_rect`). Embedders do not yet place OS IME UI from it.
-- **LSP / editor tooling** — `fmt`, `check --message-format=json`, `watch`, and `scuzz lsp` exist. LSP wraps `check` (didOpen/didChange overlay open buffers; didClose returns to disk). Hover, completion, and definition use that parse. JSON diagnostics stay the single schema.
+- **LSP / editor tooling** — `fmt`, `check --message-format=json`, `watch`, and `scuzz lsp` exist. LSP wraps `check` (didOpen/didChange overlay open buffers; didClose returns to disk). Hover, completion, and definition use that parse. JSON diagnostics stay the single schema. `check` reports more than one parse or type error per run.
 - **macOS in default CI** — macOS job is `workflow_dispatch` only. Darwin regressions show late.
