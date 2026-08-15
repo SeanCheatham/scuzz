@@ -366,6 +366,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_icon_button_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.iconB\n";
+        let labels = labels_at(src, "View.iconB");
+        assert!(labels.iter().any(|l| l == "View.iconButton"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_slider_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.sl\n";
         let labels = labels_at(src, "View.sl");

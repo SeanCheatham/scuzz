@@ -26,6 +26,7 @@ divider:divider
 expansion:More=0
 list:list
 listtile:milk
+iconbutton:i
 button:Done
 button:Del
 button:Save
@@ -39,10 +40,11 @@ button:Clear
 4 Pin 197,88 32x32
 5 Rename 237,88 58x32
 6 More 48,192 304x32
-7 Done 212,256 48x32
-8 Del 268,256 48x32
-9 Save 12,476 48x32
-10 Clear 12,516 48x32
+7 i 172,256 32x32
+8 Done 212,256 43x32
+9 Del 263,256 43x32
+10 Save 12,476 48x32
+11 Clear 12,516 48x32
 
 [fields]
 0* item=""

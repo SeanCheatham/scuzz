@@ -5217,6 +5217,130 @@ static void test_expansion_tile_in_taps_dump(void) {
   remove(path);
 }
 
+static void test_icon_button_sizes(void) {
+  SzView *b;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  b = sz_view_icon_button("i", counter_tap, sig);
+  sz_view_layout(b, 200.f, 200.f, theme);
+  assert(sz_view_kind(b) == SZ_VIEW_ICON_BUTTON);
+  f = sz_view_frame(b);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  assert(fabsf(f.w - theme->control_h) < 0.5f);
+  sz_view_free(b);
+  sz_signal_int_free(sig);
+}
+
+static void test_icon_button_a11y(void) {
+  SzView *b;
+  SzSignalInt *sig;
+  SzString *dump;
+
+  sig = sz_signal_int(0);
+  b = sz_view_icon_button("i", counter_tap, sig);
+  dump = sz_view_a11y_dump(b);
+  assert(strstr(sz_string_cstr(dump), "iconbutton:i") != NULL);
+  sz_string_free(dump);
+  sz_view_free(b);
+  sz_signal_int_free(sig);
+}
+
+static void test_icon_button_tap(void) {
+  SzView *b;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  b = sz_view_icon_button("i", counter_tap, sig);
+  sz_view_layout(b, 200.f, 80.f, theme);
+  f = sz_view_frame(b);
+  assert(sz_view_is_tap_target(b));
+  assert(sz_view_handle_tap(b, f.x + 4.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 1);
+  sz_view_free(b);
+  sz_signal_int_free(sig);
+}
+
+static void test_icon_button_hit_test(void) {
+  SzView *b, *hit;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  b = sz_view_icon_button("i", counter_tap, sig);
+  sz_view_layout(b, 200.f, 80.f, theme);
+  f = sz_view_frame(b);
+  hit = sz_view_hit_test(b, f.x + 4.f, f.y + f.h * 0.5f);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_ICON_BUTTON);
+  sz_view_free(b);
+  sz_signal_int_free(sig);
+}
+
+static void test_icon_button_paint(void) {
+  SzView *root;
+  SzSignalInt *sig;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  root = sz_view_icon_button("i", counter_tap, sig);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  f = sz_view_frame(root);
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  /* Fill is surface, not primary. */
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFF, 0xFF));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+  sz_signal_int_free(sig);
+}
+
+static void test_icon_button_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_iconbutton.dump";
+  char *dump;
+  const char *taps;
+
+  sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_icon_button("i", counter_tap, sig));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "iconbutton:i") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "i") != NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
 static void test_radio_sizes(void) {
   SzView *r;
   SzSignalInt *sig;
@@ -6998,6 +7122,12 @@ int main(void) {
   test_expansion_tile_child_tap();
   test_expansion_tile_paint();
   test_expansion_tile_in_taps_dump();
+  test_icon_button_sizes();
+  test_icon_button_a11y();
+  test_icon_button_tap();
+  test_icon_button_hit_test();
+  test_icon_button_paint();
+  test_icon_button_in_taps_dump();
   test_radio_sizes();
   test_radio_a11y_off_on();
   test_radio_tap_writes_value();

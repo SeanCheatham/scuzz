@@ -33,6 +33,7 @@ divider:divider
 expansion:More=0
 list:list
 listtile:milk
+iconbutton:i
 button:Done
 button:Del
 button:Save

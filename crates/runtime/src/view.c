@@ -160,7 +160,8 @@ int sz_view_is_tap_target(const SzView *view) {
          (view->kind == SZ_VIEW_BUTTON || view->kind == SZ_VIEW_CHECKBOX ||
           view->kind == SZ_VIEW_SLIDER || view->kind == SZ_VIEW_RADIO ||
           view->kind == SZ_VIEW_SWITCH || view->kind == SZ_VIEW_CHIP ||
-          view->kind == SZ_VIEW_EXPANSION_TILE);
+          view->kind == SZ_VIEW_EXPANSION_TILE ||
+          view->kind == SZ_VIEW_ICON_BUTTON);
 }
 
 SzRect sz_view_frame(const SzView *view) {
@@ -222,6 +223,17 @@ SzView *sz_view_button(const char *label, SzViewTapFn on_tap, void *env) {
   v->interactive = 1;
   v->a11y_role = SZ_A11Y_BUTTON;
   v->a11y_label = sz_strdup(label);
+  return v;
+}
+
+SzView *sz_view_icon_button(const char *label, SzViewTapFn on_tap, void *env) {
+  SzView *v = view_new(SZ_VIEW_ICON_BUTTON);
+  v->text = sz_strdup(label ? label : "");
+  v->on_tap = on_tap;
+  v->tap_env = env;
+  v->interactive = 1;
+  v->a11y_role = SZ_A11Y_ICON_BUTTON;
+  v->a11y_label = sz_strdup(label ? label : "");
   return v;
 }
 
@@ -421,6 +433,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "divider";
   case SZ_A11Y_EXPANSION:
     return "expansion";
+  case SZ_A11Y_ICON_BUTTON:
+    return "iconbutton";
   default:
     return "none";
   }
@@ -1228,6 +1242,12 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.h = theme->control_h;
     if (v->frame.w < 48.f)
       v->frame.w = 48.f;
+    if (max_w > 0 && v->frame.w > max_w)
+      v->frame.w = max_w;
+    break;
+  case SZ_VIEW_ICON_BUTTON:
+    v->frame.w = theme->control_h;
+    v->frame.h = theme->control_h;
     if (max_w > 0 && v->frame.w > max_w)
       v->frame.w = max_w;
     break;
@@ -2319,6 +2339,16 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     ty = v->frame.y + (v->frame.h + theme->font_px) * 0.5f;
     paint_string(c, buf, tx, ty, theme->on_primary, theme->font_px);
     break;
+  case SZ_VIEW_ICON_BUTTON: {
+    SzRect br = v->frame;
+    resolve_text(v, buf, sizeof buf);
+    paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
+    paint_border(c, br, (int)(scale_px(theme, 1.f) + 0.5f), theme->border);
+    paint_string(c, buf, v->frame.x + (v->frame.w - text_width(buf, theme->font_px)) * 0.5f,
+                 v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
+                 theme->foreground, theme->font_px);
+    break;
+  }
   case SZ_VIEW_CHECKBOX: {
     float box = theme->font_px + 4.f;
     float gap;
@@ -2819,7 +2849,8 @@ int sz_view_handle_tap(SzView *root, float x, float y) {
   hit = sz_view_hit_test(root, x, y);
   if (!hit)
     return 0;
-  if (hit->kind == SZ_VIEW_BUTTON && hit->on_tap) {
+  if ((hit->kind == SZ_VIEW_BUTTON || hit->kind == SZ_VIEW_ICON_BUTTON) &&
+      hit->on_tap) {
     hit->on_tap(hit, hit->tap_env);
     return 1;
   }

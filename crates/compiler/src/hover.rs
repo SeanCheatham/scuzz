@@ -346,6 +346,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.button(label: String, onTap: _ => Unit): View",
     ),
     (
+        "View.iconButton",
+        "View.iconButton(label: String, onTap: _ => Unit): View",
+    ),
+    (
         "View.checkbox",
         "View.checkbox(sig: Signal, label: String): View",
     ),
@@ -688,6 +692,18 @@ mod tests {
         let h = hover_src(src, "expansionTile");
         assert!(
             h.contains("View.expansionTile(sig: Signal, title: String, child: View): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_view_icon_button() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.iconButton("i", _ => ()))
+"#;
+        let h = hover_src(src, "iconButton");
+        assert!(
+            h.contains("View.iconButton(label: String, onTap: _ => Unit): View"),
             "{h}"
         );
     }

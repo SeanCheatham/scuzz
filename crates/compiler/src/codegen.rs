@@ -142,6 +142,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_text(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_bind_text(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_button(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_icon_button(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_checkbox(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_radio(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_slider(ptr)").unwrap();
@@ -1527,7 +1528,7 @@ fn emit_interpolate(
 /// 2-element `SzList` `cons(fn_ptr, cons(env_ptr, nil))`. `fn_ptr` matches the
 /// C `SzViewTapFn` signature `void (*)(SzView *self, void *env)`. `env_ptr` is
 /// the captured-locals list (same packing scheme as `flatMap` continuations).
-/// Consumers (only `View.button` now) unpack the pair.
+/// Consumers (`View.button`, `View.iconButton`) unpack the pair.
 fn emit_lambda(
     param: &Option<String>,
     body: &Expr,
@@ -3328,6 +3329,32 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "View.iconButton" => {
+            writeln!(
+                code,
+                "  %{prefix}_fnp = call ptr @sz_list_head(ptr {})",
+                emitted_args[1].value
+            )
+            .unwrap();
+            writeln!(
+                code,
+                "  %{prefix}_fnt = call ptr @sz_list_tail(ptr {})",
+                emitted_args[1].value
+            )
+            .unwrap();
+            writeln!(
+                code,
+                "  %{prefix}_envp = call ptr @sz_list_head(ptr %{prefix}_fnt)"
+            )
+            .unwrap();
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_view_icon_button(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "View.checkbox" => {
             writeln!(
                 code,
@@ -4386,6 +4413,20 @@ law always: Bool = 1 == 1
         assert!(
             ir.contains("sz_lang_view_expansion_tile"),
             "expected sz_lang_view_expansion_tile in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_icon_button() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.iconButton("i", _ => ()))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_icon_button"),
+            "expected sz_lang_view_icon_button in IR:\n{ir}"
         );
     }
 
