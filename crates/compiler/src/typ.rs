@@ -2155,6 +2155,12 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::Opaque("View".into()))
         }
+        "View.inputChip" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("SignalInt".into()))?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            Ok(Type::Opaque("View".into()))
+        }
         "View.choiceChip" => {
             expect_arity(callee, &arg_tys, 3)?;
             expect_ty(&arg_tys[0], &Type::Opaque("SignalInt".into()))?;
@@ -5461,6 +5467,18 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.actionChip should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_input_chip() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.inputChip(n, "In"))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.inputChip should typecheck");
     }
 
     #[test]

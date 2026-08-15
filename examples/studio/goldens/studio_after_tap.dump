@@ -46,6 +46,7 @@ textbutton:Open
 filterchip:Tag=0
 choicechip:Day=1
 actionchip:Go
+inputchip:In=0
 button:Done
 button:Del
 button:Save

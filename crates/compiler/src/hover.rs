@@ -399,6 +399,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.actionChip(label: String, onTap: _ => Unit): View",
     ),
     (
+        "View.inputChip",
+        "View.inputChip(sig: Signal, label: String): View",
+    ),
+    (
         "View.listTile",
         "View.listTile(title: String, trailing: View): View",
     ),
@@ -749,6 +753,21 @@ mod tests {
         let h = hover_src(src, "actionChip");
         assert!(
             h.contains("View.actionChip(label: String, onTap: _ => Unit): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_view_input_chip() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.inputChip(n, "In"))
+  } yield ()
+"#;
+        let h = hover_src(src, "inputChip");
+        assert!(
+            h.contains("View.inputChip(sig: Signal, label: String): View"),
             "{h}"
         );
     }

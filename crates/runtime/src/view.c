@@ -163,6 +163,7 @@ int sz_view_is_tap_target(const SzView *view) {
           view->kind == SZ_VIEW_CHOICE_CHIP ||
           view->kind == SZ_VIEW_SWITCH || view->kind == SZ_VIEW_CHIP ||
           view->kind == SZ_VIEW_FILTER_CHIP ||
+          view->kind == SZ_VIEW_INPUT_CHIP ||
           view->kind == SZ_VIEW_EXPANSION_TILE ||
           view->kind == SZ_VIEW_ICON_BUTTON ||
           view->kind == SZ_VIEW_FAB ||
@@ -395,6 +396,16 @@ SzView *sz_view_action_chip(const char *label, SzViewTapFn on_tap, void *env) {
   return v;
 }
 
+SzView *sz_view_input_chip(SzSignalInt *sig, const char *label) {
+  SzView *v = view_new(SZ_VIEW_INPUT_CHIP);
+  v->sig_int = sig;
+  v->text = sz_strdup(label ? label : "");
+  v->interactive = 1;
+  v->a11y_role = SZ_A11Y_INPUT_CHIP;
+  v->a11y_label = sz_strdup(label ? label : "");
+  return v;
+}
+
 SzView *sz_view_list_tile(const char *title, SzView *trailing) {
   SzView *v = view_new(SZ_VIEW_LIST_TILE);
   v->text = sz_strdup(title ? title : "");
@@ -591,6 +602,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "choicechip";
   case SZ_A11Y_ACTION_CHIP:
     return "actionchip";
+  case SZ_A11Y_INPUT_CHIP:
+    return "inputchip";
   case SZ_A11Y_LIST_TILE:
     return "listtile";
   case SZ_A11Y_BADGE:
@@ -649,6 +662,7 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
     }
     if (v->kind == SZ_VIEW_CHECKBOX || v->kind == SZ_VIEW_SWITCH ||
         v->kind == SZ_VIEW_CHIP || v->kind == SZ_VIEW_FILTER_CHIP ||
+        v->kind == SZ_VIEW_INPUT_CHIP ||
         v->kind == SZ_VIEW_EXPANSION_TILE ||
         v->kind == SZ_VIEW_CHECKBOX_LIST_TILE ||
         v->kind == SZ_VIEW_SWITCH_LIST_TILE) {
@@ -1510,7 +1524,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     if (max_w > 0 && v->frame.w > max_w)
       v->frame.w = max_w;
     break;
-  case SZ_VIEW_FILTER_CHIP: {
+  case SZ_VIEW_FILTER_CHIP:
+  case SZ_VIEW_INPUT_CHIP: {
     float box = font + 4.f;
     float gap = layout_gap(theme);
     resolve_text(v, buf, sizeof buf);
@@ -2832,6 +2847,37 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
                  on ? theme->on_primary : theme->foreground, theme->font_px);
     break;
   }
+  case SZ_VIEW_INPUT_CHIP: {
+    int on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
+    SzRect br = v->frame;
+    SzRect mark;
+    float box = theme->font_px + 4.f;
+    float bx, by;
+    if (box < 12.f)
+      box = 12.f;
+    if (box > theme->control_h - 4.f)
+      box = theme->control_h - 4.f;
+    resolve_text(v, buf, sizeof buf);
+    if (on)
+      paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h,
+                 theme->primary);
+    else {
+      paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h,
+                 theme->surface);
+      paint_border(c, br, (int)(scale_px(theme, 2.f) + 0.5f), theme->border);
+    }
+    paint_string(c, buf, v->frame.x + theme->pad,
+                 v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
+                 on ? theme->on_primary : theme->foreground, theme->font_px);
+    bx = v->frame.x + v->frame.w - theme->pad - box;
+    by = v->frame.y + (v->frame.h - box) * 0.5f;
+    mark.x = bx;
+    mark.y = by;
+    mark.w = box;
+    mark.h = box;
+    paint_placeholder_mark(c, mark, on ? theme->on_primary : theme->muted);
+    break;
+  }
   case SZ_VIEW_LIST_TILE: {
     resolve_text(v, buf, sizeof buf);
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
@@ -3420,6 +3466,7 @@ int sz_view_handle_tap(SzView *root, float x, float y) {
   }
   if ((hit->kind == SZ_VIEW_CHECKBOX || hit->kind == SZ_VIEW_SWITCH ||
        hit->kind == SZ_VIEW_CHIP || hit->kind == SZ_VIEW_FILTER_CHIP ||
+       hit->kind == SZ_VIEW_INPUT_CHIP ||
        hit->kind == SZ_VIEW_EXPANSION_TILE ||
        hit->kind == SZ_VIEW_CHECKBOX_LIST_TILE ||
        hit->kind == SZ_VIEW_SWITCH_LIST_TILE) &&

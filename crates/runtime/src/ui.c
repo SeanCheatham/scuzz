@@ -611,6 +611,9 @@ static void format_last_hit_desc(SzView *hit, char *buf, size_t cap) {
   case SZ_A11Y_ACTION_CHIP:
     role = "actionchip";
     break;
+  case SZ_A11Y_INPUT_CHIP:
+    role = "inputchip";
+    break;
   case SZ_A11Y_LIST_TILE:
     role = "listtile";
     break;
