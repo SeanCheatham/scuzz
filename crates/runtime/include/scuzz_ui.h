@@ -176,7 +176,8 @@ typedef enum SzViewKind {
   SZ_VIEW_ICON_BUTTON,    /* square label tap; same closure as button */
   SZ_VIEW_VERTICAL_DIVIDER, /* 8 px slot, control_h; muted hairline */
   SZ_VIEW_CIRCULAR_PROGRESS, /* Signal.int 0-100 square ring; display only */
-  SZ_VIEW_AVATAR             /* control_h disc + label; display only */
+  SZ_VIEW_AVATAR,            /* control_h disc + label; display only */
+  SZ_VIEW_CHECKBOX_LIST_TILE /* Signal.int 0/1 full-width title row; tap flips */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -214,6 +215,8 @@ SzView *sz_view_switch(SzSignalInt *sig, const char *label);
 SzView *sz_view_chip(SzSignalInt *sig, const char *label);
 /* Full-width title row. Optional `trailing` sits on the right. Not a tap target. */
 SzView *sz_view_list_tile(const char *title, SzView *trailing);
+/* Full-width title row. Tap flips `sig` between 0 and 1. */
+SzView *sz_view_checkbox_list_tile(SzSignalInt *sig, const char *title);
 /* Overlay `sig` as a count on `child`. Sizes to the child. Not a tap target. */
 SzView *sz_view_badge(SzSignalInt *sig, SzView *child);
 /* Surface, theme pad, and a 1 px border around `child`. Not a tap target. */
@@ -351,7 +354,8 @@ typedef enum SzA11yRole {
   SZ_A11Y_ICON_BUTTON = 18,
   SZ_A11Y_VDIV = 19,
   SZ_A11Y_CIRCULAR = 20,
-  SZ_A11Y_AVATAR = 21
+  SZ_A11Y_AVATAR = 21,
+  SZ_A11Y_CHECK_TILE = 22
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
@@ -450,6 +454,7 @@ SzView *sz_lang_view_avatar(SzString *label);
 SzView *sz_lang_view_switch(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_chip(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_list_tile(SzString *title, SzView *trailing);
+SzView *sz_lang_view_checkbox_list_tile(SzSignalInt *sig, SzString *title);
 SzView *sz_lang_view_badge(SzSignalInt *sig, SzView *child);
 SzView *sz_lang_view_card(SzView *child);
 SzView *sz_lang_view_divider(void);

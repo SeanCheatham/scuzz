@@ -335,6 +335,16 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_checkbox_list_tile_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.checkboxL\n";
+        let labels = labels_at(src, "View.checkboxL");
+        assert!(
+            labels.iter().any(|l| l == "View.checkboxListTile"),
+            "{labels:?}"
+        );
+    }
+
+    #[test]
     fn completes_view_badge_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.ba\n";
         let labels = labels_at(src, "View.ba");

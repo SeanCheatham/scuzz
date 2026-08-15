@@ -569,6 +569,9 @@ static void format_last_hit_desc(SzView *hit, char *buf, size_t cap) {
   case SZ_A11Y_AVATAR:
     role = "avatar";
     break;
+  case SZ_A11Y_CHECK_TILE:
+    role = "checktile";
+    break;
   case SZ_A11Y_SWITCH:
     role = "switch";
     break;
