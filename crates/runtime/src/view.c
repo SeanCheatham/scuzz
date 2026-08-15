@@ -91,6 +91,11 @@ static int view_is_shown(const SzView *v) {
   return 1;
 }
 
+static int view_visibility_on(const SzView *v) {
+  return v && v->kind == SZ_VIEW_VISIBILITY && v->sig_int &&
+         sz_signal_int_get(v->sig_int) != 0;
+}
+
 static int count_shown_children(const SzView *v) {
   int i, n = 0;
   if (!v)
@@ -122,7 +127,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_BADGE || kind == SZ_VIEW_CARD ||
          kind == SZ_VIEW_EXPANSION_TILE || kind == SZ_VIEW_TOOLTIP ||
          kind == SZ_VIEW_PLACEHOLDER || kind == SZ_VIEW_SEMANTICS ||
-         kind == SZ_VIEW_MERGE_SEMANTICS || kind == SZ_VIEW_INK_WELL;
+         kind == SZ_VIEW_MERGE_SEMANTICS || kind == SZ_VIEW_INK_WELL ||
+         kind == SZ_VIEW_VISIBILITY;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -533,6 +539,16 @@ SzView *sz_view_ink_well(const char *label, SzViewTapFn on_tap, void *env,
   return v;
 }
 
+SzView *sz_view_visibility(SzSignalInt *sig, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_VISIBILITY);
+  v->sig_int = sig;
+  v->a11y_role = SZ_A11Y_VISIBILITY;
+  v->a11y_label = sz_strdup("visibility");
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
 SzView *sz_view_divider(void) {
   SzView *v = view_new(SZ_VIEW_DIVIDER);
   v->a11y_role = SZ_A11Y_DIVIDER;
@@ -682,6 +698,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "merge";
   case SZ_A11Y_INK_WELL:
     return "inkwell";
+  case SZ_A11Y_VISIBILITY:
+    return "visibility";
   default:
     return "none";
   }
@@ -736,6 +754,10 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
       snprintf(live, sizeof live, "%lld", (long long)n);
       label = live;
     }
+    if (v->kind == SZ_VIEW_VISIBILITY) {
+      snprintf(live, sizeof live, "%d", view_visibility_on(v) ? 1 : 0);
+      label = live;
+    }
     n = snprintf(line, sizeof line, "%s:%s\n", a11y_role_name(v->a11y_role),
                  label);
     if (n > 0 && *len + (size_t)n < cap) {
@@ -745,6 +767,8 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
     }
   }
   if (v->kind == SZ_VIEW_MERGE_SEMANTICS)
+    return;
+  if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
     return;
   for (i = 0; i < v->child_count; i++)
     a11y_dump_node(v->children[i], buf, cap, len);
@@ -2203,6 +2227,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_SEMANTICS:
   case SZ_VIEW_MERGE_SEMANTICS:
   case SZ_VIEW_INK_WELL:
+  case SZ_VIEW_VISIBILITY:
     layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     break;
   case SZ_VIEW_MAX_LINES: {
@@ -2368,6 +2393,8 @@ static SzView *hit_node(SzView *v, float x, float y) {
   if (!v || !view_is_shown(v) || !point_in(&v->frame, x, y))
     return NULL;
   if (v->kind == SZ_VIEW_IGNORE_POINTER)
+    return NULL;
+  if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
     return NULL;
   if (v->kind == SZ_VIEW_ABSORB_POINTER)
     return v;
@@ -2665,6 +2692,8 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   float tx, ty;
 
   if (!v || !c || !view_is_shown(v))
+    return;
+  if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
     return;
 
   switch (v->kind) {
@@ -3353,6 +3382,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_SEMANTICS:
   case SZ_VIEW_MERGE_SEMANTICS:
   case SZ_VIEW_INK_WELL:
+  case SZ_VIEW_VISIBILITY:
     if (v->kind == SZ_VIEW_LIST)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     for (i = 0; i < v->child_count; i++)
@@ -3553,6 +3583,8 @@ static int collect_text_fields_node(SzView *v, SzView **out, int cap, int n) {
     return n;
   if (v->kind == SZ_VIEW_EXCLUDE_SEMANTICS ||
       v->kind == SZ_VIEW_MERGE_SEMANTICS)
+    return n;
+  if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
     return n;
   if (v->kind == SZ_VIEW_TEXT_FIELD)
     out[n++] = v;

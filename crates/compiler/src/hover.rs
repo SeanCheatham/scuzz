@@ -379,6 +379,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.inkWell(label: String, onTap: _ => Unit, child: View): View",
     ),
     (
+        "View.visibility",
+        "View.visibility(sig: Signal, child: View): View",
+    ),
+    (
         "View.checkbox",
         "View.checkbox(sig: Signal, label: String): View",
     ),
@@ -945,6 +949,21 @@ mod tests {
         let h = hover_src(src, "inkWell");
         assert!(
             h.contains("View.inkWell(label: String, onTap: _ => Unit, child: View): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_view_visibility() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(1)
+    _ <- Ui.run(_ => View.visibility(n, View.avatar("S")))
+  } yield ()
+"#;
+        let h = hover_src(src, "visibility");
+        assert!(
+            h.contains("View.visibility(sig: Signal, child: View): View"),
             "{h}"
         );
     }

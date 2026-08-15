@@ -180,6 +180,10 @@ SzView *sz_lang_view_ink_well(SzString *label, SzViewTapFn tap, void *env,
   return sz_view_ink_well(label ? sz_string_cstr(label) : "", tap, env, child);
 }
 
+SzView *sz_lang_view_visibility(SzSignalInt *sig, SzView *child) {
+  return sz_view_visibility(sig, child);
+}
+
 SzView *sz_lang_view_divider(void) { return sz_view_divider(); }
 
 SzView *sz_lang_view_expansion_tile(SzSignalInt *sig, SzString *title,
