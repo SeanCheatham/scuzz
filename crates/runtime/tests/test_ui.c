@@ -1529,10 +1529,47 @@ static void test_clip_sizes_to_child(void) {
   sz_view_free(clip);
 }
 
+/* Skia N32 peek is RGBA on Darwin and BGRA on Linux. Map R/B once. */
+static int g_px_r = 0;
+static int g_px_b = 2;
+static int g_px_mapped;
+
+static void px_map_channels(void) {
+  SkSurface *surf;
+  SkCanvas *canvas;
+  SkPaint *paint;
+  const uint8_t *px;
+  size_t n = 0;
+  if (g_px_mapped)
+    return;
+  g_px_mapped = 1;
+  surf = sk_surface_make_raster_n32_premul(4, 4);
+  if (!surf)
+    return;
+  canvas = sk_surface_get_canvas(surf);
+  paint = sk_paint_new();
+  if (!canvas || !paint) {
+    if (paint)
+      sk_paint_delete(paint);
+    sk_surface_unref(surf);
+    return;
+  }
+  sk_paint_set_color(paint, sk_color_rgba(255, 0, 0, 255));
+  sk_canvas_draw_rect(canvas, 0, 0, 4, 4, paint);
+  px = sk_surface_peek_pixels(surf, &n);
+  if (px && n >= 4 && px[2] > 200 && px[0] < 50) {
+    g_px_r = 2;
+    g_px_b = 0;
+  }
+  sk_paint_delete(paint);
+  sk_surface_unref(surf);
+}
+
 static int px_rgb(const uint8_t *px, int w, int x, int y, uint8_t r, uint8_t g,
                   uint8_t b) {
   const uint8_t *p = px + ((size_t)y * (size_t)w + (size_t)x) * 4;
-  return p[0] == r && p[1] == g && p[2] == b;
+  px_map_channels();
+  return p[g_px_r] == r && p[1] == g && p[g_px_b] == b;
 }
 
 static void test_clip_paint_contains_overflow(void) {
@@ -3242,9 +3279,10 @@ static void test_text_color_keeps_a11y(void) {
 
 static int row_has_red(const uint8_t *px, int w, int y, int x0, int x1) {
   int x;
+  px_map_channels();
   for (x = x0; x < x1; x++) {
     const uint8_t *p = px + ((size_t)y * (size_t)w + (size_t)x) * 4;
-    if (p[0] > 180 && p[1] < 80 && p[2] < 80)
+    if (p[g_px_r] > 180 && p[1] < 80 && p[g_px_b] < 80)
       return 1;
   }
   return 0;
@@ -3252,9 +3290,10 @@ static int row_has_red(const uint8_t *px, int w, int y, int x0, int x1) {
 
 static int row_has_blue(const uint8_t *px, int w, int y, int x0, int x1) {
   int x;
+  px_map_channels();
   for (x = x0; x < x1; x++) {
     const uint8_t *p = px + ((size_t)y * (size_t)w + (size_t)x) * 4;
-    if (p[2] > 180 && p[0] < 80 && p[1] < 80)
+    if (p[g_px_b] > 180 && p[g_px_r] < 80 && p[1] < 80)
       return 1;
   }
   return 0;
