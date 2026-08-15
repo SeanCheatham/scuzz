@@ -133,7 +133,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_EXPANSION_TILE || kind == SZ_VIEW_TOOLTIP ||
          kind == SZ_VIEW_PLACEHOLDER || kind == SZ_VIEW_SEMANTICS ||
          kind == SZ_VIEW_MERGE_SEMANTICS || kind == SZ_VIEW_INK_WELL ||
-         kind == SZ_VIEW_VISIBILITY || kind == SZ_VIEW_OFFSTAGE;
+         kind == SZ_VIEW_VISIBILITY || kind == SZ_VIEW_OFFSTAGE ||
+         kind == SZ_VIEW_UNCONSTRAINED_BOX;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -564,6 +565,15 @@ SzView *sz_view_offstage(SzSignalInt *sig, SzView *child) {
   return v;
 }
 
+SzView *sz_view_unconstrained_box(SzView *child) {
+  SzView *v = view_new(SZ_VIEW_UNCONSTRAINED_BOX);
+  v->a11y_role = SZ_A11Y_UNCONSTRAINED;
+  v->a11y_label = sz_strdup("box");
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
 SzView *sz_view_divider(void) {
   SzView *v = view_new(SZ_VIEW_DIVIDER);
   v->a11y_role = SZ_A11Y_DIVIDER;
@@ -717,6 +727,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "visibility";
   case SZ_A11Y_OFFSTAGE:
     return "offstage";
+  case SZ_A11Y_UNCONSTRAINED:
+    return "unconstrained";
   default:
     return "none";
   }
@@ -2260,6 +2272,10 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       v->frame.h = 0.f;
     }
     break;
+  case SZ_VIEW_UNCONSTRAINED_BOX:
+    /* Child gets unbounded max (0). Incoming max still clamps this frame. */
+    layout_pass_child(v, x, y, 0.f, 0.f, 0.f, 0.f, theme);
+    break;
   case SZ_VIEW_MAX_LINES: {
     int prev = g_max_lines;
     g_max_lines = tighten_max_lines(v->img_w);
@@ -3418,6 +3434,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_INK_WELL:
   case SZ_VIEW_VISIBILITY:
   case SZ_VIEW_OFFSTAGE:
+  case SZ_VIEW_UNCONSTRAINED_BOX:
     if (v->kind == SZ_VIEW_LIST)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     for (i = 0; i < v->child_count; i++)

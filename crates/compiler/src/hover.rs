@@ -387,6 +387,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.offstage(sig: Signal, child: View): View",
     ),
     (
+        "View.unconstrainedBox",
+        "View.unconstrainedBox(child: View): View",
+    ),
+    (
         "View.checkbox",
         "View.checkbox(sig: Signal, label: String): View",
     ),
@@ -616,6 +620,10 @@ mod tests {
             (
                 "View.excludeSemantics",
                 "View.excludeSemantics(View.text(\"x\"))",
+            ),
+            (
+                "View.unconstrainedBox",
+                "View.unconstrainedBox(View.text(\"x\"))",
             ),
         ];
         for (callee, call) in calls {
@@ -983,6 +991,18 @@ mod tests {
         let h = hover_src(src, "offstage");
         assert!(
             h.contains("View.offstage(sig: Signal, child: View): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_view_unconstrained_box() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.unconstrainedBox(View.avatar("S")))
+"#;
+        let h = hover_src(src, "unconstrainedBox");
+        assert!(
+            h.contains("View.unconstrainedBox(child: View): View"),
             "{h}"
         );
     }

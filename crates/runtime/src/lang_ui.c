@@ -188,6 +188,10 @@ SzView *sz_lang_view_offstage(SzSignalInt *sig, SzView *child) {
   return sz_view_offstage(sig, child);
 }
 
+SzView *sz_lang_view_unconstrained_box(SzView *child) {
+  return sz_view_unconstrained_box(child);
+}
+
 SzView *sz_lang_view_divider(void) { return sz_view_divider(); }
 
 SzView *sz_lang_view_expansion_tile(SzSignalInt *sig, SzString *title,

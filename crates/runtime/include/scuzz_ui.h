@@ -194,7 +194,8 @@ typedef enum SzViewKind {
   SZ_VIEW_MERGE_SEMANTICS,    /* a11y label + child; sizes to the child; omits child a11y */
   SZ_VIEW_INK_WELL,           /* label tap + child; sizes to the child; same closure as button */
   SZ_VIEW_VISIBILITY,         /* Signal.int; sizes to the child; off keeps size, skips paint */
-  SZ_VIEW_OFFSTAGE            /* Signal.int; lays out the child; off reports size 0, skips paint */
+  SZ_VIEW_OFFSTAGE,           /* Signal.int; lays out the child; off reports size 0, skips paint */
+  SZ_VIEW_UNCONSTRAINED_BOX   /* sizes to the child; child lays out with unbounded max */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -279,6 +280,8 @@ SzView *sz_view_ink_well(const char *label, SzViewTapFn on_tap, void *env,
 SzView *sz_view_visibility(SzSignalInt *sig, SzView *child);
 /* Lays out `child`. Off reports size 0, skips paint and child a11y. Not a tap. */
 SzView *sz_view_offstage(SzSignalInt *sig, SzView *child);
+/* Sizes to `child`. Child lays out with unbounded max. Not a tap. */
+SzView *sz_view_unconstrained_box(SzView *child);
 /* 8 px slot, `control_h` tall, muted vertical hairline. Not a tap target. */
 SzView *sz_view_vertical_divider(void);
 SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder);
@@ -424,7 +427,8 @@ typedef enum SzA11yRole {
   SZ_A11Y_MERGE = 36,
   SZ_A11Y_INK_WELL = 37,
   SZ_A11Y_VISIBILITY = 38,
-  SZ_A11Y_OFFSTAGE = 39
+  SZ_A11Y_OFFSTAGE = 39,
+  SZ_A11Y_UNCONSTRAINED = 40
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
@@ -549,6 +553,7 @@ SzView *sz_lang_view_ink_well(SzString *label, SzViewTapFn tap, void *env,
                              SzView *child);
 SzView *sz_lang_view_visibility(SzSignalInt *sig, SzView *child);
 SzView *sz_lang_view_offstage(SzSignalInt *sig, SzView *child);
+SzView *sz_lang_view_unconstrained_box(SzView *child);
 SzView *sz_lang_view_vertical_divider(void);
 SzView *sz_lang_view_column(void);
 SzView *sz_lang_view_row(void);
