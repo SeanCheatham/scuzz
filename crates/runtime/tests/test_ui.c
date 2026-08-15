@@ -2739,6 +2739,37 @@ static void test_font_size_grows_text(void) {
   sz_view_free(wrap);
 }
 
+static void test_logical_px_match_device_scale(void) {
+  SzView *col, *btn;
+  SzTheme logical = *sz_theme_default();
+  SzTheme device;
+  float y1, y2;
+
+  col = sz_view_column();
+  sz_view_add_child(col, sz_view_padding(
+                             8, sz_view_font_size(18, sz_view_text("Studio"))));
+  btn = sz_view_button("+1", NULL, NULL);
+  sz_view_add_child(col, btn);
+
+  sz_view_layout(col, 200.f, 400.f, &logical);
+  y1 = sz_view_frame(btn).y;
+
+  device = logical;
+  device.font_px *= 2.f;
+  device.pad *= 2.f;
+  device.gap *= 2.f;
+  device.control_h *= 2.f;
+  device.radius *= 2.f;
+  device.px_scale = 2.f;
+  sz_view_layout(col, 400.f, 800.f, &device);
+  y2 = sz_view_frame(btn).y;
+
+  /* Author px (fontSize / padding) must scale with the backing factor so
+   * device-pixel paint frames stay aligned with logical hit-test frames. */
+  assert(fabsf(y2 - y1 * 2.f) < 1.5f);
+  sz_view_free(col);
+}
+
 static void test_nested_font_size_inner_wins(void) {
   SzView *outer, *inner, *t;
   const SzTheme *theme = sz_theme_default();
@@ -4352,6 +4383,7 @@ int main(void) {
   test_gap_does_not_change_stack();
   test_font_size_sizes_to_child();
   test_font_size_grows_text();
+  test_logical_px_match_device_scale();
   test_nested_font_size_inner_wins();
   test_font_size_zero_is_one();
   test_font_size_does_not_grow_button();

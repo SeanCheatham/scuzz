@@ -504,10 +504,8 @@ static void drain_mobile_events(SzUiSession *session) {
     return;
   if (!sz_mobile_available())
     return;
-  while (sz_mobile_poll_event(&ev)) {
-    if (!sz_ui_inject_sync(session, &ev))
-      break;
-  }
+  while (sz_mobile_poll_event(&ev))
+    (void)sz_ui_inject_sync(session, &ev);
 }
 
 static void drain_desktop_events(SzUiSession *session) {
@@ -516,10 +514,8 @@ static void drain_desktop_events(SzUiSession *session) {
     return;
   if (!sz_embedder_available())
     return;
-  while (sz_embedder_poll_event(&ev)) {
-    if (!sz_ui_inject_sync(session, &ev))
-      break;
-  }
+  while (sz_embedder_poll_event(&ev))
+    (void)sz_ui_inject_sync(session, &ev);
 }
 
 static int collect_buttons(SzUiSession *session, SzView **buttons, int cap) {
@@ -898,6 +894,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
     paint_theme.gap *= scale;
     paint_theme.control_h *= scale;
     paint_theme.radius *= scale;
+    paint_theme.px_scale = scale;
     theme = &paint_theme;
   }
   /* Paint in device pixels. Layout is restored to logical points afterward
@@ -994,6 +991,8 @@ int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event) {
 
   switch (event->kind) {
   case SZ_INPUT_TAP:
+    sz_view_layout(session->root, (float)session->cfg.width,
+                   (float)session->cfg.height, session->theme);
     if (!sz_view_handle_tap(session->root, event->x, event->y))
       return 0;
     sync_keyboard(session);

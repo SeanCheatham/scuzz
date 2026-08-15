@@ -921,6 +921,19 @@ static float layout_font_px(const SzTheme *theme) {
   return g_font_px > 0.f ? g_font_px : theme->font_px;
 }
 
+static float theme_px_scale(const SzTheme *theme) {
+  float s = theme ? theme->px_scale : 1.f;
+  return s > 0.01f ? s : 1.f;
+}
+
+static float scale_px(const SzTheme *theme, float n) {
+  return n * theme_px_scale(theme);
+}
+
+static float text_line_h(const SzTheme *theme, float font_px) {
+  return font_px + scale_px(theme, 6.f);
+}
+
 static int tighten_max_lines(int n) {
   if (n <= 0)
     return g_max_lines;
@@ -983,11 +996,12 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     SzWrapMetrics m;
     float inner;
     float font_px = layout_font_px(theme);
-    float line_h = font_px + 6.f;
+    float line_h = text_line_h(theme, font_px);
+    float inset = scale_px(theme, 4.f);
     resolve_text(v, buf, sizeof buf);
     inner = 0.f;
-    if (max_w > 4.f)
-      inner = max_w - 4.f;
+    if (max_w > inset)
+      inner = max_w - inset;
     m.max_line_w = 0.f;
     m.n = 0;
     m.cap = text_line_cap();
@@ -995,9 +1009,9 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     each_text_line(buf, font_px, inner, accum_wrap_line, &m);
     if (m.n < 1)
       m.n = 1;
-    v->frame.w = m.max_line_w + 4.f;
+    v->frame.w = m.max_line_w + inset;
     if (g_ellipsis && m.truncated) {
-      float need = m.max_line_w + text_width("...", font_px) + 4.f;
+      float need = m.max_line_w + text_width("...", font_px) + inset;
       if (v->frame.w < need)
         v->frame.w = need;
     }
@@ -1036,12 +1050,12 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.h = theme->control_h;
     break;
   case SZ_VIEW_ICON:
-    v->frame.w = font + 4.f;
-    v->frame.h = font + 4.f;
+    v->frame.w = font + scale_px(theme, 4.f);
+    v->frame.h = font + scale_px(theme, 4.f);
     break;
   case SZ_VIEW_IMAGE:
-    v->frame.w = (float)v->img_w;
-    v->frame.h = (float)v->img_h;
+    v->frame.w = scale_px(theme, (float)v->img_w);
+    v->frame.h = scale_px(theme, (float)v->img_h);
     break;
   case SZ_VIEW_COLUMN:
   case SZ_VIEW_LIST: {
@@ -1322,8 +1336,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   }
   case SZ_VIEW_POSITIONED: {
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
-    float px = (float)v->pos_x;
-    float py = (float)v->pos_y;
+    float px = scale_px(theme, (float)v->pos_x);
+    float py = scale_px(theme, (float)v->pos_y);
     float cw = 0.f;
     float chh = 0.f;
     float child_max_w = max_w > px ? max_w - px : 0.f;
@@ -1341,7 +1355,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   }
   case SZ_VIEW_PADDING: {
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
-    float p = (float)v->pad;
+    float p = scale_px(theme, (float)v->pad);
     float inner_w = max_w > p * 2.f ? max_w - p * 2.f : 0.f;
     float inner_h = max_h > p * 2.f ? max_h - p * 2.f : 0.f;
     float inner_min_w = min_w > p * 2.f ? min_w - p * 2.f : 0.f;
@@ -1370,8 +1384,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   }
   case SZ_VIEW_SIZED: {
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
-    float tw = (float)v->img_w;
-    float th = (float)v->img_h;
+    float tw = scale_px(theme, (float)v->img_w);
+    float th = scale_px(theme, (float)v->img_h);
     if (max_w > 0.f && tw > max_w)
       tw = max_w;
     if (max_h > 0.f && th > max_h)
@@ -1384,8 +1398,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   }
   case SZ_VIEW_MIN_SIZE: {
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
-    float child_min_w = (float)v->img_w;
-    float child_min_h = (float)v->img_h;
+    float child_min_w = scale_px(theme, (float)v->img_w);
+    float child_min_h = scale_px(theme, (float)v->img_h);
     if (child_min_w < min_w)
       child_min_w = min_w;
     if (child_min_h < min_h)
@@ -1408,8 +1422,8 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   }
   case SZ_VIEW_MAX_SIZE: {
     SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
-    float child_max_w = cap_max_axis(max_w, (float)v->img_w);
-    float child_max_h = cap_max_axis(max_h, (float)v->img_h);
+    float child_max_w = cap_max_axis(max_w, scale_px(theme, (float)v->img_w));
+    float child_max_h = cap_max_axis(max_h, scale_px(theme, (float)v->img_h));
     float child_min_w = min_w;
     float child_min_h = min_h;
     if (child_max_w > 0.f && child_min_w > child_max_w)
@@ -1457,7 +1471,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     int prev_on = g_gap_on;
     float prev = g_gap;
     g_gap_on = 1;
-    g_gap = (float)v->img_w;
+    g_gap = scale_px(theme, (float)v->img_w);
     layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     g_gap_on = prev_on;
     g_gap = prev;
@@ -1465,7 +1479,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   }
   case SZ_VIEW_FONT_SIZE: {
     float prev = g_font_px;
-    g_font_px = (float)v->img_w;
+    g_font_px = scale_px(theme, (float)v->img_w);
     layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     g_font_px = prev;
     break;
@@ -1839,13 +1853,13 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     float inner = 0.f;
     float font_px = layout_font_px(theme);
     resolve_text(v, buf, sizeof buf);
-    if (v->frame.w > 4.f)
-      inner = v->frame.w - 4.f;
+    if (v->frame.w > scale_px(theme, 4.f))
+      inner = v->frame.w - scale_px(theme, 4.f);
     wp.c = c;
-    wp.x = v->frame.x + 2.f;
-    wp.y = v->frame.y + font_px + 2.f;
+    wp.x = v->frame.x + scale_px(theme, 2.f);
+    wp.y = v->frame.y + font_px + scale_px(theme, 2.f);
     wp.font_px = font_px;
-    wp.line_h = font_px + 6.f;
+    wp.line_h = text_line_h(theme, font_px);
     wp.inner = inner;
     wp.argb = g_text_color_on ? g_text_argb : theme->foreground;
     wp.cap = text_line_cap();
@@ -1891,7 +1905,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     if (on)
       paint_rect(c, bx, by, box, box, theme->primary);
     else
-      paint_border(c, br, 2, theme->border);
+      paint_border(c, br, (int)(scale_px(theme, 2.f) + 0.5f), theme->border);
     resolve_text(v, buf, sizeof buf);
     paint_string(c, buf, bx + box + gap,
                  v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
@@ -1939,14 +1953,15 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_BORDER:
     for (i = 0; i < v->child_count; i++)
       paint_node(v->children[i], c, theme);
-    paint_border(c, v->frame, v->img_w, v->bg_argb);
+    paint_border(c, v->frame, (int)(scale_px(theme, (float)v->img_w) + 0.5f),
+                 v->bg_argb);
     break;
   case SZ_VIEW_RADIUS: {
     int prev_on = g_radius_on;
     float prev_r = g_radius;
     SzRect prev_rect = g_radius_rect;
     g_radius_on = 1;
-    g_radius = (float)v->img_w;
+    g_radius = scale_px(theme, (float)v->img_w);
     g_radius_rect = v->frame;
     paint_children_clipped(v, c, theme);
     g_radius_on = prev_on;
@@ -2009,7 +2024,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   }
   case SZ_VIEW_FONT_SIZE: {
     float prev = g_font_px;
-    g_font_px = (float)v->img_w;
+    g_font_px = scale_px(theme, (float)v->img_w);
     for (i = 0; i < v->child_count; i++)
       paint_node(v->children[i], c, theme);
     g_font_px = prev;
