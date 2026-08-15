@@ -557,6 +557,9 @@ static void format_last_hit_desc(SzView *hit, char *buf, size_t cap) {
   case SZ_A11Y_SLIDER:
     role = "slider";
     break;
+  case SZ_A11Y_RADIO:
+    role = "radio";
+    break;
   default:
     break;
   }

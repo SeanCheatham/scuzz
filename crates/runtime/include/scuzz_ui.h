@@ -163,7 +163,8 @@ typedef enum SzViewKind {
   SZ_VIEW_CHECKBOX, /* Signal.int 0/1 box + label; tap flips */
   SZ_VIEW_WRAP,     /* flow children into runs; wrap when remaining width is short */
   SZ_VIEW_SLIDER,   /* Signal.int 0-100 track; tap/drag writes from hit x */
-  SZ_VIEW_GRID      /* n equal columns; new row after n shown children */
+  SZ_VIEW_GRID,     /* n equal columns; new row after n shown children */
+  SZ_VIEW_RADIO     /* Signal.int group; tap writes this value */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -185,6 +186,8 @@ SzView *sz_view_text_signal_str(SzSignalStr *sig);
 SzView *sz_view_button(const char *label, SzViewTapFn on_tap, void *env);
 /* Tap flips `sig` between 0 and 1. `label` is a11y + painted text. */
 SzView *sz_view_checkbox(SzSignalInt *sig, const char *label);
+/* Tap writes `value` into `sig`. Radios that share `sig` form a group. */
+SzView *sz_view_radio(SzSignalInt *sig, int64_t value, const char *label);
 /* Tap/drag writes `sig` from hit x, clamped 0–100. */
 SzView *sz_view_slider(SzSignalInt *sig);
 SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder);
@@ -299,7 +302,8 @@ typedef enum SzA11yRole {
   SZ_A11Y_LIST = 5,
   SZ_A11Y_SCROLL = 6,
   SZ_A11Y_CHECKBOX = 7,
-  SZ_A11Y_SLIDER = 8
+  SZ_A11Y_SLIDER = 8,
+  SZ_A11Y_RADIO = 9
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
@@ -390,6 +394,7 @@ SzView *sz_lang_view_text(SzString *text);
 /* First-class tap closure: `tap`/`env` come from a compiled `_ => ...` lambda. */
 SzView *sz_lang_view_button(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_checkbox(SzSignalInt *sig, SzString *label);
+SzView *sz_lang_view_radio(SzSignalInt *sig, int64_t value, SzString *label);
 SzView *sz_lang_view_slider(SzSignalInt *sig);
 SzView *sz_lang_view_column(void);
 SzView *sz_lang_view_row(void);

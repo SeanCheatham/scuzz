@@ -349,6 +349,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.checkbox",
         "View.checkbox(sig: Signal, label: String): View",
     ),
+    (
+        "View.radio",
+        "View.radio(sig: Signal, value: Int, label: String): View",
+    ),
     ("View.slider", "View.slider(sig: Signal): View"),
     ("View.scroll", "View.scroll(child: View): View"),
     ("View.scrollH", "View.scrollH(child: View): View"),
@@ -538,6 +542,21 @@ mod tests {
         let h = hover_src(src, "checkbox");
         assert!(
             h.contains("View.checkbox(sig: Signal, label: String): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_view_radio() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.radio(n, 1, "On"))
+  } yield ()
+"#;
+        let h = hover_src(src, "radio");
+        assert!(
+            h.contains("View.radio(sig: Signal, value: Int, label: String): View"),
             "{h}"
         );
     }

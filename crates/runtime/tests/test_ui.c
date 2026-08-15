@@ -4216,6 +4216,165 @@ static void test_checkbox_in_taps_dump(void) {
   remove(path);
 }
 
+static void test_radio_sizes(void) {
+  SzView *r;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  r = sz_view_radio(sig, 1, "On");
+  sz_view_layout(r, 200.f, 200.f, theme);
+  assert(sz_view_kind(r) == SZ_VIEW_RADIO);
+  f = sz_view_frame(r);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  assert(f.w > 12.f);
+  sz_view_free(r);
+  sz_signal_int_free(sig);
+}
+
+static void test_radio_a11y_off_on(void) {
+  SzView *r;
+  SzSignalInt *sig;
+  SzString *dump;
+
+  sig = sz_signal_int(0);
+  r = sz_view_radio(sig, 1, "On");
+  dump = sz_view_a11y_dump(r);
+  assert(strstr(sz_string_cstr(dump), "radio:On=0") != NULL);
+  sz_string_free(dump);
+  sz_signal_int_set(sig, 1);
+  dump = sz_view_a11y_dump(r);
+  assert(strstr(sz_string_cstr(dump), "radio:On=1") != NULL);
+  sz_string_free(dump);
+  sz_view_free(r);
+  sz_signal_int_free(sig);
+}
+
+static void test_radio_tap_writes_value(void) {
+  SzView *r;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  r = sz_view_radio(sig, 2, "Two");
+  sz_view_layout(r, 200.f, 200.f, theme);
+  f = sz_view_frame(r);
+  assert(sz_view_handle_tap(r, f.x + f.w * 0.5f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 2);
+  assert(sz_view_handle_tap(r, f.x + 2.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 2);
+  sz_view_free(r);
+  sz_signal_int_free(sig);
+}
+
+static void test_radio_group_exclusive(void) {
+  SzView *col, *a, *b;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzString *dump;
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  col = sz_view_column();
+  a = sz_view_radio(sig, 0, "Home");
+  b = sz_view_radio(sig, 1, "Tasks");
+  sz_view_add_child(col, a);
+  sz_view_add_child(col, b);
+  sz_view_layout(col, 200.f, 200.f, theme);
+  dump = sz_view_a11y_dump(col);
+  assert(strstr(sz_string_cstr(dump), "radio:Home=1") != NULL);
+  assert(strstr(sz_string_cstr(dump), "radio:Tasks=0") != NULL);
+  sz_string_free(dump);
+  f = sz_view_frame(b);
+  assert(sz_view_handle_tap(col, f.x + 2.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 1);
+  dump = sz_view_a11y_dump(col);
+  assert(strstr(sz_string_cstr(dump), "radio:Home=0") != NULL);
+  assert(strstr(sz_string_cstr(dump), "radio:Tasks=1") != NULL);
+  sz_string_free(dump);
+  sz_view_free(col);
+  sz_signal_int_free(sig);
+}
+
+static void test_radio_hit_test(void) {
+  SzView *r, *hit;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  r = sz_view_radio(sig, 1, "On");
+  sz_view_layout(r, 200.f, 200.f, theme);
+  f = sz_view_frame(r);
+  hit = sz_view_hit_test(r, f.x + 2.f, f.y + f.h * 0.5f);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_RADIO);
+  assert(sz_view_is_tap_target(hit));
+  sz_view_free(r);
+  sz_signal_int_free(sig);
+}
+
+static void test_radio_paint_off_on(void) {
+  SzView *root;
+  SzSignalInt *sig;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+
+  sig = sz_signal_int(0);
+  root = sz_view_radio(sig, 1, "On");
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, 6, 16, 0xF5, 0xF5, 0xF5));
+  sz_signal_int_set(sig, 1);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, 6, 16, 0x14, 0x28, 0x50));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+  sz_signal_int_free(sig);
+}
+
+static void test_radio_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_radio.dump";
+  char *dump;
+
+  sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_radio(sig, 1, "On"));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "radio:On=0") != NULL);
+  assert(strstr(dump, "[taps]") != NULL);
+  assert(strstr(dump, "On") != NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
 static void test_slider_sizes(void) {
   SzView *sl;
   SzSignalInt *sig;
@@ -5637,6 +5796,13 @@ int main(void) {
   test_checkbox_hit_test();
   test_checkbox_paint_off_on();
   test_checkbox_in_taps_dump();
+  test_radio_sizes();
+  test_radio_a11y_off_on();
+  test_radio_tap_writes_value();
+  test_radio_group_exclusive();
+  test_radio_hit_test();
+  test_radio_paint_off_on();
+  test_radio_in_taps_dump();
   test_slider_sizes();
   test_slider_a11y();
   test_slider_clamps_a11y();

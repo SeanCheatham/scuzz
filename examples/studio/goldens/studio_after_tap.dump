@@ -8,9 +8,9 @@ str[5] = "count = 0"
 str[6] = "page = 1"
 
 [views]
-button:Home
+radio:Home=0
 text:page = 1
-button:Tasks
+radio:Tasks=1
 textfield:item
 button:Add
 button:Rename
@@ -23,8 +23,8 @@ button:Save
 button:Clear
 
 [taps]
-0 Home 24,24 48x32
-1 Tasks 264,24 48x32
+0 Home 24,24 25x32
+1 Tasks 264,24 25x32
 2 Add 144,88 48x32
 3 Rename 200,88 58x32
 4 Done 248,176 48x32
@@ -39,4 +39,4 @@ button:Clear
 0 scroll
 
 [last_hit]
-xy 288.0 40.0 -> button:Tasks
+xy 276.5 40.0 -> radio:Tasks

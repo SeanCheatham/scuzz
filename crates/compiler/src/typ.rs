@@ -2085,6 +2085,13 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::Opaque("View".into()))
         }
+        "View.radio" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("SignalInt".into()))?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            expect_ty(&arg_tys[2], &Type::String)?;
+            Ok(Type::Opaque("View".into()))
+        }
         "View.slider" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::Opaque("SignalInt".into()))?;
@@ -5203,6 +5210,18 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.checkbox should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_radio() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.radio(n, 1, "On"))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.radio should typecheck");
     }
 
     #[test]

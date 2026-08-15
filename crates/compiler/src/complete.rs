@@ -302,6 +302,14 @@ mod tests {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.ra\n";
         let labels = labels_at(src, "View.ra");
         assert!(labels.iter().any(|l| l == "View.radius"), "{labels:?}");
+        assert!(labels.iter().any(|l| l == "View.radio"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_view_radio_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.radio\n";
+        let labels = labels_at(src, "View.radio");
+        assert!(labels.iter().any(|l| l == "View.radio"), "{labels:?}");
     }
 
     #[test]

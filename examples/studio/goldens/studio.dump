@@ -8,9 +8,9 @@ str[5] = "count = 0"
 str[6] = "page = 0"
 
 [views]
-button:Home
+radio:Home=1
 text:page = 0
-button:Tasks
+radio:Tasks=0
 text:Studio
 text:count = 0
 scroll:scrollh
@@ -29,8 +29,8 @@ button:Save
 button:Clear
 
 [taps]
-0 Home 24,24 48x32
-1 Tasks 264,24 48x32
+0 Home 24,24 25x32
+1 Tasks 264,24 25x32
 2 +1 44,254 48x32
 3 slider 32,306 336x32
 4 Add 144,400 48x32
