@@ -342,6 +342,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_action_chip_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.acti\n";
+        let labels = labels_at(src, "View.acti");
+        assert!(labels.iter().any(|l| l == "View.actionChip"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_list_tile_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.li\n";
         let labels = labels_at(src, "View.li");

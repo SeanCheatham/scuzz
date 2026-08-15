@@ -52,6 +52,7 @@ outlined:Edit
 textbutton:Open
 filterchip:Tag=0
 choicechip:Day=1
+actionchip:Go
 button:Done
 button:Del
 button:Save

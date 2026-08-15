@@ -187,7 +187,8 @@ typedef enum SzViewKind {
   SZ_VIEW_TOOLTIP,            /* message + child; sizes to the child; not a tap */
   SZ_VIEW_PLACEHOLDER,        /* sizes to the child; muted box mark; not a tap */
   SZ_VIEW_FILTER_CHIP,        /* Signal.int 0/1 chip with a leading check; tap flips */
-  SZ_VIEW_CHOICE_CHIP         /* Signal.int group; chip tap writes this value */
+  SZ_VIEW_CHOICE_CHIP,        /* Signal.int group; chip tap writes this value */
+  SZ_VIEW_ACTION_CHIP         /* label tap; chip paint; same closure as button */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -227,6 +228,8 @@ SzView *sz_view_chip(SzSignalInt *sig, const char *label);
 SzView *sz_view_filter_chip(SzSignalInt *sig, const char *label);
 /* Tap writes `value` into `sig`. Chips that share `sig` form a group. */
 SzView *sz_view_choice_chip(SzSignalInt *sig, int64_t value, const char *label);
+/* Label tap with chip paint. Same closure as button. */
+SzView *sz_view_action_chip(const char *label, SzViewTapFn on_tap, void *env);
 /* Full-width title row. Optional `trailing` sits on the right. Not a tap target. */
 SzView *sz_view_list_tile(const char *title, SzView *trailing);
 /* Full-width title row. Tap flips `sig` between 0 and 1. */
@@ -395,7 +398,8 @@ typedef enum SzA11yRole {
   SZ_A11Y_TEXT_BUTTON = 29,
   SZ_A11Y_PLACEHOLDER = 30,
   SZ_A11Y_FILTER_CHIP = 31,
-  SZ_A11Y_CHOICE_CHIP = 32
+  SZ_A11Y_CHOICE_CHIP = 32,
+  SZ_A11Y_ACTION_CHIP = 33
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
@@ -495,6 +499,7 @@ SzView *sz_lang_view_switch(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_chip(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_filter_chip(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_choice_chip(SzSignalInt *sig, int64_t value, SzString *label);
+SzView *sz_lang_view_action_chip(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_list_tile(SzString *title, SzView *trailing);
 SzView *sz_lang_view_checkbox_list_tile(SzSignalInt *sig, SzString *title);
 SzView *sz_lang_view_switch_list_tile(SzSignalInt *sig, SzString *title);

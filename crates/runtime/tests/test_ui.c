@@ -8095,6 +8095,290 @@ static void test_choice_chip_in_taps_dump(void) {
   remove(path);
 }
 
+static void test_action_chip_sizes(void) {
+  SzView *ch, *wide;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, wf;
+
+  sig = sz_signal_int(0);
+  ch = sz_view_action_chip("Go", counter_tap, sig);
+  wide = sz_view_action_chip("Go now", counter_tap, sig);
+  sz_view_layout(ch, 200.f, 200.f, theme);
+  sz_view_layout(wide, 200.f, 200.f, theme);
+  assert(sz_view_kind(ch) == SZ_VIEW_ACTION_CHIP);
+  f = sz_view_frame(ch);
+  wf = sz_view_frame(wide);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  assert(f.w >= 32.f);
+  assert(wf.w > f.w);
+  sz_view_free(ch);
+  sz_view_free(wide);
+  sz_signal_int_free(sig);
+}
+
+static void test_action_chip_empty_min_width(void) {
+  SzView *ch;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  ch = sz_view_action_chip("", NULL, NULL);
+  sz_view_layout(ch, 200.f, 200.f, theme);
+  f = sz_view_frame(ch);
+  assert(f.w >= 32.f);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  sz_view_free(ch);
+}
+
+static void test_action_chip_null_label(void) {
+  SzView *ch;
+  SzString *dump;
+
+  ch = sz_view_action_chip(NULL, NULL, NULL);
+  dump = sz_view_a11y_dump(ch);
+  assert(strstr(sz_string_cstr(dump), "actionchip:") != NULL);
+  sz_string_free(dump);
+  sz_view_free(ch);
+}
+
+static void test_action_chip_clamps_max_w(void) {
+  SzView *ch;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  ch = sz_view_action_chip("Go", NULL, NULL);
+  sz_view_layout(ch, 20.f, 80.f, theme);
+  f = sz_view_frame(ch);
+  assert(fabsf(f.w - 20.f) < 0.5f);
+  sz_view_free(ch);
+}
+
+static void test_action_chip_does_not_wrap(void) {
+  SzView *ch;
+  const SzTheme *theme = sz_theme_default();
+  float full_h;
+
+  ch = sz_view_action_chip("one two", NULL, NULL);
+  sz_view_layout(ch, 1000.f, 100.f, theme);
+  full_h = sz_view_frame(ch).h;
+  sz_view_free(ch);
+
+  ch = sz_view_action_chip("one two", NULL, NULL);
+  sz_view_layout(ch, 20.f, 100.f, theme);
+  assert(fabsf(sz_view_frame(ch).h - full_h) < 0.5f);
+  sz_view_free(ch);
+}
+
+static void test_action_chip_a11y(void) {
+  SzView *ch;
+  SzSignalInt *sig;
+  SzString *dump;
+
+  sig = sz_signal_int(0);
+  ch = sz_view_action_chip("Go", counter_tap, sig);
+  dump = sz_view_a11y_dump(ch);
+  assert(strstr(sz_string_cstr(dump), "actionchip:Go") != NULL);
+  sz_string_free(dump);
+  sz_view_free(ch);
+  sz_signal_int_free(sig);
+}
+
+static void test_action_chip_a11y_distinct(void) {
+  SzView *ch;
+  SzSignalInt *sig;
+  SzString *dump;
+  const char *s;
+
+  sig = sz_signal_int(0);
+  ch = sz_view_action_chip("Go", counter_tap, sig);
+  dump = sz_view_a11y_dump(ch);
+  s = sz_string_cstr(dump);
+  assert(strncmp(s, "actionchip:", 11) == 0);
+  assert(strstr(s, "actionchip:Go") != NULL);
+  sz_string_free(dump);
+  sz_view_free(ch);
+  sz_signal_int_free(sig);
+}
+
+static void test_action_chip_tap(void) {
+  SzView *ch;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  ch = sz_view_action_chip("Go", counter_tap, sig);
+  sz_view_layout(ch, 200.f, 80.f, theme);
+  f = sz_view_frame(ch);
+  assert(sz_view_is_tap_target(ch));
+  assert(sz_view_handle_tap(ch, f.x + 4.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 1);
+  sz_view_free(ch);
+  sz_signal_int_free(sig);
+}
+
+static void test_action_chip_tap_twice(void) {
+  SzView *ch;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  ch = sz_view_action_chip("Go", counter_tap, sig);
+  sz_view_layout(ch, 200.f, 80.f, theme);
+  f = sz_view_frame(ch);
+  assert(sz_view_handle_tap(ch, f.x + 4.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 1);
+  assert(sz_view_handle_tap(ch, f.x + 4.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 2);
+  sz_view_free(ch);
+  sz_signal_int_free(sig);
+}
+
+static void test_action_chip_null_tap(void) {
+  SzView *ch;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  ch = sz_view_action_chip("Go", NULL, NULL);
+  sz_view_layout(ch, 200.f, 80.f, theme);
+  f = sz_view_frame(ch);
+  assert(sz_view_is_tap_target(ch));
+  assert(!sz_view_handle_tap(ch, f.x + 4.f, f.y + f.h * 0.5f));
+  sz_view_free(ch);
+}
+
+static void test_action_chip_miss(void) {
+  SzView *ch;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  ch = sz_view_action_chip("Go", counter_tap, sig);
+  sz_view_layout(ch, 200.f, 80.f, theme);
+  f = sz_view_frame(ch);
+  assert(!sz_view_handle_tap(ch, f.x - 8.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 0);
+  sz_view_free(ch);
+  sz_signal_int_free(sig);
+}
+
+static void test_action_chip_hit_test(void) {
+  SzView *ch, *hit;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  ch = sz_view_action_chip("Go", counter_tap, sig);
+  sz_view_layout(ch, 200.f, 80.f, theme);
+  f = sz_view_frame(ch);
+  hit = sz_view_hit_test(ch, f.x + 4.f, f.y + f.h * 0.5f);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_ACTION_CHIP);
+  assert(sz_view_is_tap_target(hit));
+  sz_view_free(ch);
+  sz_signal_int_free(sig);
+}
+
+static void test_action_chip_paint(void) {
+  SzView *root;
+  SzSignalInt *sig;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  root = sz_view_action_chip("Go", counter_tap, sig);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  f = sz_view_frame(root);
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  /* Fill is surface, not primary. */
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFF, 0xFF));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+  sz_signal_int_free(sig);
+}
+
+static void test_action_chip_paint_not_primary(void) {
+  SzView *filled, *chip;
+  SzSignalInt *sig;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  filled = sz_view_button("Go", counter_tap, sig);
+  chip = sz_view_action_chip("Go", counter_tap, sig);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(filled, canvas, 80, 80, theme));
+  f = sz_view_frame(filled);
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0x14, 0x28, 0x50));
+  sk_surface_unref(surf);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(chip, canvas, 80, 80, theme));
+  f = sz_view_frame(chip);
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFF, 0xFF));
+  sk_surface_unref(surf);
+  sz_view_free(filled);
+  sz_view_free(chip);
+  sz_signal_int_free(sig);
+}
+
+static void test_action_chip_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_actionchip.dump";
+  char *dump;
+  const char *taps;
+
+  sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_action_chip("Go", counter_tap, sig));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "actionchip:Go") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "Go") != NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
 static void test_radio_sizes(void) {
   SzView *r;
   SzSignalInt *sig;
@@ -10013,6 +10297,21 @@ int main(void) {
   test_choice_chip_paint_off_on();
   test_choice_chip_group_exclusive();
   test_choice_chip_in_taps_dump();
+  test_action_chip_sizes();
+  test_action_chip_empty_min_width();
+  test_action_chip_null_label();
+  test_action_chip_clamps_max_w();
+  test_action_chip_does_not_wrap();
+  test_action_chip_a11y();
+  test_action_chip_a11y_distinct();
+  test_action_chip_tap();
+  test_action_chip_tap_twice();
+  test_action_chip_null_tap();
+  test_action_chip_miss();
+  test_action_chip_hit_test();
+  test_action_chip_paint();
+  test_action_chip_paint_not_primary();
+  test_action_chip_in_taps_dump();
   test_radio_sizes();
   test_radio_a11y_off_on();
   test_radio_tap_writes_value();

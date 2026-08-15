@@ -168,6 +168,7 @@ int sz_view_is_tap_target(const SzView *view) {
           view->kind == SZ_VIEW_FAB ||
           view->kind == SZ_VIEW_OUTLINED_BUTTON ||
           view->kind == SZ_VIEW_TEXT_BUTTON ||
+          view->kind == SZ_VIEW_ACTION_CHIP ||
           view->kind == SZ_VIEW_CHECKBOX_LIST_TILE ||
           view->kind == SZ_VIEW_SWITCH_LIST_TILE ||
           view->kind == SZ_VIEW_RADIO_LIST_TILE ||
@@ -383,6 +384,17 @@ SzView *sz_view_choice_chip(SzSignalInt *sig, int64_t value, const char *label) 
   return v;
 }
 
+SzView *sz_view_action_chip(const char *label, SzViewTapFn on_tap, void *env) {
+  SzView *v = view_new(SZ_VIEW_ACTION_CHIP);
+  v->text = sz_strdup(label ? label : "");
+  v->on_tap = on_tap;
+  v->tap_env = env;
+  v->interactive = 1;
+  v->a11y_role = SZ_A11Y_ACTION_CHIP;
+  v->a11y_label = sz_strdup(label ? label : "");
+  return v;
+}
+
 SzView *sz_view_list_tile(const char *title, SzView *trailing) {
   SzView *v = view_new(SZ_VIEW_LIST_TILE);
   v->text = sz_strdup(title ? title : "");
@@ -577,6 +589,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "filterchip";
   case SZ_A11Y_CHOICE_CHIP:
     return "choicechip";
+  case SZ_A11Y_ACTION_CHIP:
+    return "actionchip";
   case SZ_A11Y_LIST_TILE:
     return "listtile";
   case SZ_A11Y_BADGE:
@@ -1487,6 +1501,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   }
   case SZ_VIEW_CHIP:
   case SZ_VIEW_CHOICE_CHIP:
+  case SZ_VIEW_ACTION_CHIP:
     resolve_text(v, buf, sizeof buf);
     v->frame.w = text_width(buf, font) + theme->pad * 2.f;
     v->frame.h = theme->control_h;
@@ -2771,6 +2786,16 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
                  on ? theme->on_primary : theme->foreground, theme->font_px);
     break;
   }
+  case SZ_VIEW_ACTION_CHIP: {
+    SzRect br = v->frame;
+    resolve_text(v, buf, sizeof buf);
+    paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
+    paint_border(c, br, (int)(scale_px(theme, 2.f) + 0.5f), theme->border);
+    paint_string(c, buf, v->frame.x + theme->pad,
+                 v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
+                 theme->foreground, theme->font_px);
+    break;
+  }
   case SZ_VIEW_FILTER_CHIP: {
     int on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
     SzRect br = v->frame;
@@ -3388,7 +3413,7 @@ int sz_view_handle_tap(SzView *root, float x, float y) {
     return 0;
   if ((hit->kind == SZ_VIEW_BUTTON || hit->kind == SZ_VIEW_ICON_BUTTON ||
        hit->kind == SZ_VIEW_FAB || hit->kind == SZ_VIEW_OUTLINED_BUTTON ||
-       hit->kind == SZ_VIEW_TEXT_BUTTON) &&
+       hit->kind == SZ_VIEW_TEXT_BUTTON || hit->kind == SZ_VIEW_ACTION_CHIP) &&
       hit->on_tap) {
     hit->on_tap(hit, hit->tap_env);
     return 1;
