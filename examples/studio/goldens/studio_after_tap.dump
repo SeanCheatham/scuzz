@@ -29,6 +29,7 @@ button:Rename
 scroll:scroll
 card:card
 divider:divider
+placeholder:ph
 tooltip:Sean
 avatar:S
 checktile:Star=0

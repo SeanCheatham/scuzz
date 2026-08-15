@@ -365,6 +365,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.tooltip",
         "View.tooltip(message: String, child: View): View",
     ),
+    ("View.placeholder", "View.placeholder(child: View): View"),
     (
         "View.checkbox",
         "View.checkbox(sig: Signal, label: String): View",
@@ -816,6 +817,15 @@ mod tests {
             h.contains("View.tooltip(message: String, child: View): View"),
             "{h}"
         );
+    }
+
+    #[test]
+    fn hovers_view_placeholder() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.placeholder(View.avatar("S")))
+"#;
+        let h = hover_src(src, "placeholder");
+        assert!(h.contains("View.placeholder(child: View): View"), "{h}");
     }
 
     #[test]

@@ -403,6 +403,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_placeholder_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.place\n";
+        let labels = labels_at(src, "View.place");
+        assert!(labels.iter().any(|l| l == "View.placeholder"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_badge_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.ba\n";
         let labels = labels_at(src, "View.ba");

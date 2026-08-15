@@ -184,7 +184,8 @@ typedef enum SzViewKind {
   SZ_VIEW_FAB,                /* circular primary tap; same closure as button */
   SZ_VIEW_OUTLINED_BUTTON,    /* surface + border tap; same closure as button */
   SZ_VIEW_TEXT_BUTTON,        /* foreground label tap; same closure as button */
-  SZ_VIEW_TOOLTIP             /* message + child; sizes to the child; not a tap */
+  SZ_VIEW_TOOLTIP,            /* message + child; sizes to the child; not a tap */
+  SZ_VIEW_PLACEHOLDER         /* sizes to the child; muted box mark; not a tap */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -248,6 +249,8 @@ SzView *sz_view_outlined_button(const char *label, SzViewTapFn on_tap, void *env
 SzView *sz_view_text_button(const char *label, SzViewTapFn on_tap, void *env);
 /* Sizes to `child`. `message` is a11y. Not a tap target. */
 SzView *sz_view_tooltip(const char *message, SzView *child);
+/* Sizes to `child`. Paints a muted box mark. Not a tap target. */
+SzView *sz_view_placeholder(SzView *child);
 /* 8 px slot, `control_h` tall, muted vertical hairline. Not a tap target. */
 SzView *sz_view_vertical_divider(void);
 SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder);
@@ -383,7 +386,8 @@ typedef enum SzA11yRole {
   SZ_A11Y_FAB = 26,
   SZ_A11Y_TOOLTIP = 27,
   SZ_A11Y_OUTLINED = 28,
-  SZ_A11Y_TEXT_BUTTON = 29
+  SZ_A11Y_TEXT_BUTTON = 29,
+  SZ_A11Y_PLACEHOLDER = 30
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
@@ -497,6 +501,7 @@ SzView *sz_lang_view_fab(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_outlined_button(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_text_button(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_tooltip(SzString *message, SzView *child);
+SzView *sz_lang_view_placeholder(SzView *child);
 SzView *sz_lang_view_vertical_divider(void);
 SzView *sz_lang_view_column(void);
 SzView *sz_lang_view_row(void);

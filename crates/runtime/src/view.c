@@ -120,7 +120,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_FONT_SIZE || kind == SZ_VIEW_BORDER ||
          kind == SZ_VIEW_RADIUS || kind == SZ_VIEW_LIST_TILE ||
          kind == SZ_VIEW_BADGE || kind == SZ_VIEW_CARD ||
-         kind == SZ_VIEW_EXPANSION_TILE || kind == SZ_VIEW_TOOLTIP;
+         kind == SZ_VIEW_EXPANSION_TILE || kind == SZ_VIEW_TOOLTIP ||
+         kind == SZ_VIEW_PLACEHOLDER;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -441,6 +442,15 @@ SzView *sz_view_tooltip(const char *message, SzView *child) {
   return v;
 }
 
+SzView *sz_view_placeholder(SzView *child) {
+  SzView *v = view_new(SZ_VIEW_PLACEHOLDER);
+  v->a11y_role = SZ_A11Y_PLACEHOLDER;
+  v->a11y_label = sz_strdup("ph");
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
 SzView *sz_view_divider(void) {
   SzView *v = view_new(SZ_VIEW_DIVIDER);
   v->a11y_role = SZ_A11Y_DIVIDER;
@@ -574,6 +584,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "outlined";
   case SZ_A11Y_TEXT_BUTTON:
     return "textbutton";
+  case SZ_A11Y_PLACEHOLDER:
+    return "placeholder";
   default:
     return "none";
   }
@@ -2067,6 +2079,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_RADIUS:
   case SZ_VIEW_BADGE:
   case SZ_VIEW_TOOLTIP:
+  case SZ_VIEW_PLACEHOLDER:
     layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     break;
   case SZ_VIEW_MAX_LINES: {
@@ -2396,6 +2409,24 @@ static void paint_border(SkCanvas *c, SzRect f, int width, uint32_t argb) {
   paint_rect(c, f.x, f.y + f.h - t, f.w, t, argb);
   paint_rect(c, f.x, f.y + t, t, f.h - 2.f * t, argb);
   paint_rect(c, f.x + f.w - t, f.y + t, t, f.h - 2.f * t, argb);
+}
+
+static void paint_placeholder_mark(SkCanvas *c, SzRect f, uint32_t argb) {
+  int i, steps;
+  float n;
+  paint_border(c, f, 1, argb);
+  n = f.w < f.h ? f.w : f.h;
+  steps = (int)(n + 0.5f);
+  if (steps < 2)
+    return;
+  for (i = 0; i < steps; i++) {
+    float t = (float)i / (float)(steps - 1);
+    float x = f.x + t * (f.w - 1.f);
+    float y0 = f.y + t * (f.h - 1.f);
+    float y1 = f.y + (1.f - t) * (f.h - 1.f);
+    paint_rect(c, x, y0, 1.f, 1.f, argb);
+    paint_rect(c, x, y1, 1.f, 1.f, argb);
+  }
 }
 
 /* Clockwise from the top edge. `frac` is 0–1 of the perimeter. */
@@ -3107,6 +3138,13 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     for (i = 0; i < v->child_count; i++)
       paint_node(v->children[i], c, theme);
     break;
+  case SZ_VIEW_PLACEHOLDER: {
+    SzRect f = v->frame;
+    for (i = 0; i < v->child_count; i++)
+      paint_node(v->children[i], c, theme);
+    paint_placeholder_mark(c, f, theme->muted);
+    break;
+  }
   default:
     break;
   }
