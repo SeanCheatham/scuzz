@@ -121,7 +121,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_RADIUS || kind == SZ_VIEW_LIST_TILE ||
          kind == SZ_VIEW_BADGE || kind == SZ_VIEW_CARD ||
          kind == SZ_VIEW_EXPANSION_TILE || kind == SZ_VIEW_TOOLTIP ||
-         kind == SZ_VIEW_PLACEHOLDER || kind == SZ_VIEW_SEMANTICS;
+         kind == SZ_VIEW_PLACEHOLDER || kind == SZ_VIEW_SEMANTICS ||
+         kind == SZ_VIEW_MERGE_SEMANTICS;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -507,6 +508,16 @@ SzView *sz_view_semantics(const char *label, SzView *child) {
   return v;
 }
 
+SzView *sz_view_merge_semantics(const char *label, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_MERGE_SEMANTICS);
+  v->text = sz_strdup(label ? label : "");
+  v->a11y_role = SZ_A11Y_MERGE;
+  v->a11y_label = sz_strdup(label ? label : "");
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
 SzView *sz_view_divider(void) {
   SzView *v = view_new(SZ_VIEW_DIVIDER);
   v->a11y_role = SZ_A11Y_DIVIDER;
@@ -652,6 +663,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "placeholder";
   case SZ_A11Y_SEMANTICS:
     return "semantics";
+  case SZ_A11Y_MERGE:
+    return "merge";
   default:
     return "none";
   }
@@ -714,6 +727,8 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
       buf[*len] = '\0';
     }
   }
+  if (v->kind == SZ_VIEW_MERGE_SEMANTICS)
+    return;
   for (i = 0; i < v->child_count; i++)
     a11y_dump_node(v->children[i], buf, cap, len);
 }
@@ -2169,6 +2184,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_TOOLTIP:
   case SZ_VIEW_PLACEHOLDER:
   case SZ_VIEW_SEMANTICS:
+  case SZ_VIEW_MERGE_SEMANTICS:
     layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     break;
   case SZ_VIEW_MAX_LINES: {
@@ -3317,6 +3333,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_GAP:
   case SZ_VIEW_TOOLTIP:
   case SZ_VIEW_SEMANTICS:
+  case SZ_VIEW_MERGE_SEMANTICS:
     if (v->kind == SZ_VIEW_LIST)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     for (i = 0; i < v->child_count; i++)
@@ -3514,7 +3531,8 @@ static int collect_text_fields_node(SzView *v, SzView **out, int cap, int n) {
   int i;
   if (!v || !view_is_shown(v) || n >= cap)
     return n;
-  if (v->kind == SZ_VIEW_EXCLUDE_SEMANTICS)
+  if (v->kind == SZ_VIEW_EXCLUDE_SEMANTICS ||
+      v->kind == SZ_VIEW_MERGE_SEMANTICS)
     return n;
   if (v->kind == SZ_VIEW_TEXT_FIELD)
     out[n++] = v;

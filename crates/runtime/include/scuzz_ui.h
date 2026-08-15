@@ -190,7 +190,8 @@ typedef enum SzViewKind {
   SZ_VIEW_CHOICE_CHIP,        /* Signal.int group; chip tap writes this value */
   SZ_VIEW_ACTION_CHIP,        /* label tap; chip paint; same closure as button */
   SZ_VIEW_INPUT_CHIP,         /* Signal.int 0/1 chip with a trailing X; tap flips */
-  SZ_VIEW_SEMANTICS           /* a11y label + child; sizes to the child; not a tap */
+  SZ_VIEW_SEMANTICS,          /* a11y label + child; sizes to the child; not a tap */
+  SZ_VIEW_MERGE_SEMANTICS     /* a11y label + child; sizes to the child; omits child a11y */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -266,6 +267,8 @@ SzView *sz_view_tooltip(const char *message, SzView *child);
 SzView *sz_view_placeholder(SzView *child);
 /* Sizes to `child`. `label` is a11y. Not a tap target. */
 SzView *sz_view_semantics(const char *label, SzView *child);
+/* Sizes to `child`. `label` is a11y. Omits the child subtree from a11y. Not a tap. */
+SzView *sz_view_merge_semantics(const char *label, SzView *child);
 /* 8 px slot, `control_h` tall, muted vertical hairline. Not a tap target. */
 SzView *sz_view_vertical_divider(void);
 SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder);
@@ -407,7 +410,8 @@ typedef enum SzA11yRole {
   SZ_A11Y_CHOICE_CHIP = 32,
   SZ_A11Y_ACTION_CHIP = 33,
   SZ_A11Y_INPUT_CHIP = 34,
-  SZ_A11Y_SEMANTICS = 35
+  SZ_A11Y_SEMANTICS = 35,
+  SZ_A11Y_MERGE = 36
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
@@ -527,6 +531,7 @@ SzView *sz_lang_view_text_button(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_tooltip(SzString *message, SzView *child);
 SzView *sz_lang_view_placeholder(SzView *child);
 SzView *sz_lang_view_semantics(SzString *label, SzView *child);
+SzView *sz_lang_view_merge_semantics(SzString *label, SzView *child);
 SzView *sz_lang_view_vertical_divider(void);
 SzView *sz_lang_view_column(void);
 SzView *sz_lang_view_row(void);

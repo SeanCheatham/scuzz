@@ -445,6 +445,16 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_merge_semantics_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.merg\n";
+        let labels = labels_at(src, "View.merg");
+        assert!(
+            labels.iter().any(|l| l == "View.mergeSemantics"),
+            "{labels:?}"
+        );
+    }
+
+    #[test]
     fn completes_view_badge_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.ba\n";
         let labels = labels_at(src, "View.ba");

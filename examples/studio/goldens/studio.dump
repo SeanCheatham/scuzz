@@ -18,6 +18,7 @@ str[13] = "page = 0"
 radio:Home=1
 text:page = 0
 radio:Tasks=0
+merge:logo
 text:Studio
 text:count = 0
 scroll:scrollh

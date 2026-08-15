@@ -371,6 +371,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.semantics(label: String, child: View): View",
     ),
     (
+        "View.mergeSemantics",
+        "View.mergeSemantics(label: String, child: View): View",
+    ),
+    (
         "View.checkbox",
         "View.checkbox(sig: Signal, label: String): View",
     ),
@@ -913,6 +917,18 @@ mod tests {
         let h = hover_src(src, "semantics");
         assert!(
             h.contains("View.semantics(label: String, child: View): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_view_merge_semantics() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.mergeSemantics("logo", View.avatar("S")))
+"#;
+        let h = hover_src(src, "mergeSemantics");
+        assert!(
+            h.contains("View.mergeSemantics(label: String, child: View): View"),
             "{h}"
         );
     }
