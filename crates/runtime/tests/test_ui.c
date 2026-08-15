@@ -4928,6 +4928,139 @@ static void test_card_child_in_taps_dump(void) {
   remove(path);
 }
 
+static void test_divider_sizes(void) {
+  SzView *d;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  d = sz_view_divider();
+  sz_view_layout(d, 200.f, 200.f, theme);
+  assert(sz_view_kind(d) == SZ_VIEW_DIVIDER);
+  f = sz_view_frame(d);
+  assert(fabsf(f.h - 8.f) < 0.5f);
+  assert(fabsf(f.w - 200.f) < 0.5f);
+  sz_view_free(d);
+}
+
+static void test_divider_unbounded_width(void) {
+  SzView *d;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  d = sz_view_divider();
+  sz_view_layout(d, 0.f, 80.f, theme);
+  f = sz_view_frame(d);
+  assert(fabsf(f.w - 120.f) < 0.5f);
+  assert(fabsf(f.h - 8.f) < 0.5f);
+  sz_view_free(d);
+}
+
+static void test_divider_a11y(void) {
+  SzView *d;
+  SzString *dump;
+
+  d = sz_view_divider();
+  dump = sz_view_a11y_dump(d);
+  assert(strstr(sz_string_cstr(dump), "divider:divider") != NULL);
+  sz_string_free(dump);
+  sz_view_free(d);
+}
+
+static void test_divider_not_tap_target(void) {
+  SzView *d;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  d = sz_view_divider();
+  sz_view_layout(d, 200.f, 80.f, theme);
+  f = sz_view_frame(d);
+  assert(!sz_view_is_tap_target(d));
+  assert(sz_view_hit_test(d, f.x + f.w * 0.5f, f.y + f.h * 0.5f) == NULL);
+  assert(sz_view_handle_tap(d, f.x + f.w * 0.5f, f.y + f.h * 0.5f) == 0);
+  sz_view_free(d);
+}
+
+static void test_divider_paint_line(void) {
+  SzView *root;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+  int lx, ly, by;
+
+  root = sz_view_divider();
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  f = sz_view_frame(root);
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  lx = (int)(f.x + 8.f);
+  ly = (int)(f.y + f.h * 0.5f);
+  by = (int)(f.y + 1.f);
+  /* Hairline is muted. Slot above the line stays the canvas background. */
+  assert(px_rgb(px, 80, lx, ly, 0x6A, 0x6A, 0x6A));
+  assert(px_rgb(px, 80, lx, by, 0xF5, 0xF5, 0xF5));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
+static void test_divider_in_column(void) {
+  SzView *col, *d;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, df;
+
+  col = sz_view_column();
+  d = sz_view_divider();
+  sz_view_add_child(col, sz_view_text("Hi"));
+  sz_view_add_child(col, d);
+  sz_view_layout(col, 200.f, 200.f, theme);
+  f = sz_view_frame(col);
+  df = sz_view_frame(d);
+  assert(fabsf(df.h - 8.f) < 0.5f);
+  assert(f.h > df.h);
+  sz_view_free(col);
+}
+
+static void test_divider_not_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_divider.dump";
+  char *dump;
+  const char *taps;
+
+  sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_divider());
+  sz_view_add_child(root, sz_view_button("Go", counter_tap, sig));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "divider:divider") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "divider") == NULL);
+  assert(strstr(taps, "Go") != NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
 static void test_radio_sizes(void) {
   SzView *r;
   SzSignalInt *sig;
@@ -6695,6 +6828,13 @@ int main(void) {
   test_card_child_tap();
   test_card_paint_pad();
   test_card_child_in_taps_dump();
+  test_divider_sizes();
+  test_divider_unbounded_width();
+  test_divider_a11y();
+  test_divider_not_tap_target();
+  test_divider_paint_line();
+  test_divider_in_column();
+  test_divider_not_in_taps_dump();
   test_radio_sizes();
   test_radio_a11y_off_on();
   test_radio_tap_writes_value();

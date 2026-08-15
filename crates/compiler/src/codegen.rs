@@ -151,6 +151,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_list_tile(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_badge(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_card(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_divider()").unwrap();
     writeln!(out, "declare i64 @sz_theme_accent()").unwrap();
     writeln!(out, "declare i64 @sz_theme_primary()").unwrap();
     writeln!(out, "declare i64 @sz_theme_muted()").unwrap();
@@ -3412,6 +3413,10 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "View.divider" => {
+            writeln!(code, "  %{prefix}_v = call ptr @sz_lang_view_divider()").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "Theme.accent" => {
             writeln!(code, "  %{prefix}_v = call i64 @sz_theme_accent()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
@@ -4127,6 +4132,7 @@ law always: Bool = 1 == 1
             ),
             ("View.clip(View.text(\"x\"))", "sz_lang_view_clip"),
             ("View.card(View.text(\"x\"))", "sz_lang_view_card"),
+            ("View.divider()", "sz_lang_view_divider"),
             ("View.opacity(50, View.text(\"x\"))", "sz_lang_view_opacity"),
             (
                 "View.maxLines(2, View.text(\"x\"))",
@@ -4335,6 +4341,20 @@ law always: Bool = 1 == 1
         assert!(
             ir.contains("sz_lang_view_card"),
             "expected sz_lang_view_card in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_divider() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.divider())
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_divider"),
+            "expected sz_lang_view_divider in IR:\n{ir}"
         );
     }
 

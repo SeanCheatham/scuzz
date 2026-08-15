@@ -310,6 +310,13 @@ SzView *sz_view_card(SzView *child) {
   return v;
 }
 
+SzView *sz_view_divider(void) {
+  SzView *v = view_new(SZ_VIEW_DIVIDER);
+  v->a11y_role = SZ_A11Y_DIVIDER;
+  v->a11y_label = sz_strdup("divider");
+  return v;
+}
+
 static int64_t slider_clamp(int64_t n) {
   if (n < 0)
     return 0;
@@ -393,6 +400,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "badge";
   case SZ_A11Y_CARD:
     return "card";
+  case SZ_A11Y_DIVIDER:
+    return "divider";
   default:
     return "none";
   }
@@ -1286,6 +1295,10 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       v->frame.w = 48.f;
     if (max_w > 0 && v->frame.w > max_w)
       v->frame.w = max_w;
+    v->frame.h = 8.f;
+    break;
+  case SZ_VIEW_DIVIDER:
+    v->frame.w = max_w > 0 ? max_w : 120.f;
     v->frame.h = 8.f;
     break;
   case SZ_VIEW_TEXT_FIELD:
@@ -2392,6 +2405,17 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     br.w = v->frame.w;
     br.h = v->frame.h;
     paint_border(c, br, (int)(scale_px(theme, 1.f) + 0.5f), theme->border);
+    break;
+  }
+  case SZ_VIEW_DIVIDER: {
+    float t = scale_px(theme, 2.f);
+    float ly;
+    if (t < 2.f)
+      t = 2.f;
+    if (t > v->frame.h)
+      t = v->frame.h;
+    ly = v->frame.y + (v->frame.h - t) * 0.5f;
+    paint_rect(c, v->frame.x, ly, v->frame.w, t, theme->muted);
     break;
   }
   case SZ_VIEW_RADIO: {

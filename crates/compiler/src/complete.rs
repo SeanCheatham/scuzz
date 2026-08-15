@@ -349,6 +349,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_divider_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.di\n";
+        let labels = labels_at(src, "View.di");
+        assert!(labels.iter().any(|l| l == "View.divider"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_slider_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.sl\n";
         let labels = labels_at(src, "View.sl");

@@ -28,6 +28,7 @@ chip:Pin=0
 button:Rename
 scroll:scroll
 card:card
+divider:divider
 list:list
 listtile:milk
 button:Done

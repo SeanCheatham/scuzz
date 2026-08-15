@@ -97,6 +97,8 @@ SzView *sz_lang_view_badge(SzSignalInt *sig, SzView *child) {
 
 SzView *sz_lang_view_card(SzView *child) { return sz_view_card(child); }
 
+SzView *sz_lang_view_divider(void) { return sz_view_divider(); }
+
 SzView *sz_lang_view_column(void) { return sz_view_column(); }
 
 SzView *sz_lang_view_row(void) { return sz_view_row(); }

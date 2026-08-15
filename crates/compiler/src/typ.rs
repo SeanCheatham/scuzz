@@ -2156,6 +2156,10 @@ fn infer_call(
             // Nullary or children: `View.column(a, b, …)` adds each child.
             Ok(Type::Opaque("View".into()))
         }
+        "View.divider" => {
+            expect_arity(callee, &arg_tys, 0)?;
+            Ok(Type::Opaque("View".into()))
+        }
         "View.grid" => {
             if arg_tys.is_empty() {
                 return Err(TypeError::Msg(
@@ -5346,6 +5350,15 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.card should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_divider() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.divider())
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.divider should typecheck");
     }
 
     #[test]
