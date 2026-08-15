@@ -5903,6 +5903,152 @@ static void test_checkbox_list_tile_in_taps_dump(void) {
   remove(path);
 }
 
+static void test_switch_list_tile_sizes(void) {
+  SzView *t;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  t = sz_view_switch_list_tile(sig, "Quiet");
+  sz_view_layout(t, 200.f, 200.f, theme);
+  assert(sz_view_kind(t) == SZ_VIEW_SWITCH_LIST_TILE);
+  f = sz_view_frame(t);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  assert(fabsf(f.w - 200.f) < 0.5f);
+  sz_view_free(t);
+  sz_signal_int_free(sig);
+}
+
+static void test_switch_list_tile_a11y(void) {
+  SzView *t;
+  SzSignalInt *sig;
+  SzString *dump;
+
+  sig = sz_signal_int(0);
+  t = sz_view_switch_list_tile(sig, "Quiet");
+  dump = sz_view_a11y_dump(t);
+  assert(strstr(sz_string_cstr(dump), "switchtile:Quiet=0") != NULL);
+  sz_string_free(dump);
+  sz_signal_int_set(sig, 1);
+  dump = sz_view_a11y_dump(t);
+  assert(strstr(sz_string_cstr(dump), "switchtile:Quiet=1") != NULL);
+  sz_string_free(dump);
+  sz_view_free(t);
+  sz_signal_int_free(sig);
+}
+
+static void test_switch_list_tile_tap(void) {
+  SzView *t;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  t = sz_view_switch_list_tile(sig, "Quiet");
+  sz_view_layout(t, 200.f, 80.f, theme);
+  f = sz_view_frame(t);
+  assert(sz_view_is_tap_target(t));
+  assert(sz_view_handle_tap(t, f.x + 8.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 1);
+  assert(sz_view_handle_tap(t, f.x + 8.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 0);
+  sz_view_free(t);
+  sz_signal_int_free(sig);
+}
+
+static void test_switch_list_tile_hit_test(void) {
+  SzView *t, *hit;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  t = sz_view_switch_list_tile(sig, "Quiet");
+  sz_view_layout(t, 200.f, 80.f, theme);
+  f = sz_view_frame(t);
+  hit = sz_view_hit_test(t, f.x + 8.f, f.y + f.h * 0.5f);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_SWITCH_LIST_TILE);
+  sz_view_free(t);
+  sz_signal_int_free(sig);
+}
+
+static void test_switch_list_tile_paint(void) {
+  SzView *root;
+  SzSignalInt *sig;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+  float box, tw;
+  int sx, sy;
+
+  sig = sz_signal_int(0);
+  root = sz_view_switch_list_tile(sig, "Quiet");
+  sz_view_layout(root, 80.f, 80.f, theme);
+  f = sz_view_frame(root);
+  box = theme->font_px + 4.f;
+  if (box < 12.f)
+    box = 12.f;
+  if (box > theme->control_h - 4.f)
+    box = theme->control_h - 4.f;
+  tw = box * 2.f;
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  sx = (int)(f.x + f.w - theme->pad - tw + 6.f);
+  sy = (int)(f.y + f.h * 0.5f);
+  /* Off thumb is surface. On track fill is primary. */
+  assert(px_rgb(px, 80, sx, sy, 0xFF, 0xFF, 0xFF));
+  sz_signal_int_set(sig, 1);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, sx, sy, 0x14, 0x28, 0x50));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+  sz_signal_int_free(sig);
+}
+
+static void test_switch_list_tile_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_switchtile.dump";
+  char *dump;
+  const char *taps;
+
+  sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_switch_list_tile(sig, "Quiet"));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "switchtile:Quiet=0") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "Quiet") != NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
 static void test_radio_sizes(void) {
   SzView *r;
   SzSignalInt *sig;
@@ -7716,6 +7862,12 @@ int main(void) {
   test_checkbox_list_tile_hit_test();
   test_checkbox_list_tile_paint();
   test_checkbox_list_tile_in_taps_dump();
+  test_switch_list_tile_sizes();
+  test_switch_list_tile_a11y();
+  test_switch_list_tile_tap();
+  test_switch_list_tile_hit_test();
+  test_switch_list_tile_paint();
+  test_switch_list_tile_in_taps_dump();
   test_radio_sizes();
   test_radio_a11y_off_on();
   test_radio_tap_writes_value();

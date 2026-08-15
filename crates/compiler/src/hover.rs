@@ -377,6 +377,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.checkboxListTile",
         "View.checkboxListTile(sig: Signal, title: String): View",
     ),
+    (
+        "View.switchListTile",
+        "View.switchListTile(sig: Signal, title: String): View",
+    ),
     ("View.badge", "View.badge(sig: Signal, child: View): View"),
     ("View.card", "View.card(child: View): View"),
     ("View.divider", "View.divider(): View"),
@@ -693,6 +697,21 @@ mod tests {
         let h = hover_src(src, "checkboxListTile");
         assert!(
             h.contains("View.checkboxListTile(sig: Signal, title: String): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_view_switch_list_tile() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.switchListTile(n, "Quiet"))
+  } yield ()
+"#;
+        let h = hover_src(src, "switchListTile");
+        assert!(
+            h.contains("View.switchListTile(sig: Signal, title: String): View"),
             "{h}"
         );
     }

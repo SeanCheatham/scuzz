@@ -58,6 +58,9 @@ law hasAvatar: Bool =
 law hasCheckTile: Bool =
   Law.a11yHas("checktile:")
 
+law hasSwitchTile: Bool =
+  Law.a11yHas("switchtile:")
+
 @main def main: IO[Unit] =
   Sys.getenv("SCUZZ_TODO_PATH").flatMap(envPath =>
     for {
@@ -71,6 +74,7 @@ law hasCheckTile: Bool =
       pin = Signal.int(0)
       more = Signal.int(0)
       star = Signal.int(0)
+      quiet = Signal.int(0)
       countLabel = Signal.map(count, n => s"count = $n")
       pageLabel = Signal.map(page, n => s"page = $n")
       text <- Fs.read(path).handleErrorWith(_ =>
@@ -88,12 +92,12 @@ law hasCheckTile: Bool =
 } yield Signal.setStr(draft, "")), View.verticalDivider(), View.circularProgress(level), View.switch(live, "On"), View.badge(count, View.chip(pin, "Pin")), View.button("Rename", _ => for {
   xs = Signal.getList(items)
   ys = List.setAt(xs, 0, "oat milk")
-} yield Signal.setList(items, ys))), View.expanded(View.scroll(View.card(View.column(View.divider(), View.avatar("S"), View.checkboxListTile(star, "Star"), View.expansionTile(more, "More", View.text("hint")), View.each(items, s => View.listTile(Tasks.itemLabel(s), View.row(View.iconButton("i", _ => Law.sometimes("tappedInfo")), View.button(if (Tasks.itemDone(s) == 1) "Undo" else "Done", _ => for {
+} yield Signal.setList(items, ys))), View.expanded(View.scroll(View.card(View.column(View.divider(), View.avatar("S"), View.checkboxListTile(star, "Star"), View.switchListTile(quiet, "Quiet"), View.expansionTile(more, "More", View.text("hint")), View.each(items, s => View.listTile(Tasks.itemLabel(s), View.row(View.iconButton("i", _ => Law.sometimes("tappedInfo")), View.button(if (Tasks.itemDone(s) == 1) "Undo" else "Done", _ => for {
   _ = Law.sometimes("tappedDone")
 } yield Signal.setList(items, List.map(Signal.getList(items), x => if (x == s) Tasks.flipDone(x) else x))), View.button("Del", _ => Signal.setList(items, List.filter(Signal.getList(items), x => x != s)))))))))), View.button("Save", _ => for {
   xs = Signal.getList(items)
   body = Tasks.saveBody(xs)
   _ <- Fs.write(path, body)
-} yield ()), View.button("Clear", _ => Signal.setList(items, [])))).require(listLenNonNeg).require(itemPastEndEmpty).require(draftNonNeg).require(hasAdd).require(hasClear).require(hasHome).require(hasTasks).require(hasProgress).require(hasSwitch).require(hasChip).require(hasListTile).require(hasBadge).require(hasCard).require(hasDivider).require(hasExpansion).require(hasIconButton).require(hasVerticalDivider).require(hasCircularProgress).require(hasAvatar).require(hasCheckTile).require(Signal.get(count) >= 0)
+} yield ()), View.button("Clear", _ => Signal.setList(items, [])))).require(listLenNonNeg).require(itemPastEndEmpty).require(draftNonNeg).require(hasAdd).require(hasClear).require(hasHome).require(hasTasks).require(hasProgress).require(hasSwitch).require(hasChip).require(hasListTile).require(hasBadge).require(hasCard).require(hasDivider).require(hasExpansion).require(hasIconButton).require(hasVerticalDivider).require(hasCircularProgress).require(hasAvatar).require(hasCheckTile).require(hasSwitchTile).require(Signal.get(count) >= 0)
     } yield ()
   )

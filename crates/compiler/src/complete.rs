@@ -345,6 +345,16 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_switch_list_tile_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.switchL\n";
+        let labels = labels_at(src, "View.switchL");
+        assert!(
+            labels.iter().any(|l| l == "View.switchListTile"),
+            "{labels:?}"
+        );
+    }
+
+    #[test]
     fn completes_view_badge_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.ba\n";
         let labels = labels_at(src, "View.ba");
