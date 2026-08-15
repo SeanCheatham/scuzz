@@ -18,7 +18,7 @@ use support::resolve_dir;
     name = "scuzz",
     version,
     about = "Scuzz Lang CLI",
-    after_help = "Examples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz check --message-format=json\n  scuzz lsp\n  scuzz test\n  scuzz run --headless\n  scuzz run examples/studio\n  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio\n  scuzz watch\n  scuzz run --watch --headless\n  scuzz fuzz --iters 16\n  scuzz mutate --limit 16 --iters 4\n\nJSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check` (open buffers overlay disk; not a second typer).\n`watch` rebuilds. `run --watch` on [ui] keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (not source hot reload). IO-only `run --watch` kills and reruns on source change. Live dump: build/debug.dump. Live inject: build/inject.script (tap/xy/text/type/pump/scroll/backspace). Desktop/Mobile record: build/record.script."
+    after_help = "Examples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz check --message-format=json\n  scuzz lsp\n  scuzz test\n  scuzz run --headless\n  scuzz run examples/studio\n  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio\n  scuzz watch\n  scuzz run --watch --headless\n  scuzz fuzz --iters 16\n  scuzz mutate --limit 16 --iters 4\n\nJSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check` (open buffers overlay disk; not a second typer).\n`scuzz check` is the linter. `watch` rebuilds. `[ui] run --watch` is hot reload: it keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (Signals stay). IO-only `run --watch` kills and reruns on source change. Live dump: build/debug.dump. Live inject: build/inject.script (tap/xy/text/type/pump/scroll/backspace). Desktop/Mobile record: build/record.script."
 )]
 struct Cli {
     /// Diagnostic format: human (default) or json (`check` protocol; LSP wraps check)
@@ -50,7 +50,7 @@ enum Commands {
     },
     /// Build and run a Scuzz Lang project
     #[command(
-        after_help = "Examples:\n  scuzz run\n  scuzz run --headless\n  scuzz run examples/studio\n  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio\n  scuzz run --watch --headless\n\nDesktop/Mobile `run` writes build/record.script (live OS input) and build/debug.dump. Replay Headless with --script and --dump. `build/inject.script` stays watch playback only."
+        after_help = "Examples:\n  scuzz run\n  scuzz run --headless\n  scuzz run examples/studio\n  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio\n  scuzz run --watch --headless\n\nDesktop/Mobile `run` writes build/record.script (live OS input) and build/debug.dump. Replay Headless with --script and --dump. `[ui] run --watch` is hot reload. `build/inject.script` stays watch playback only."
     )]
     Run {
         #[arg(default_value = ".")]
@@ -60,7 +60,7 @@ enum Commands {
         headless: bool,
         #[arg(long, default_value = "build")]
         out_dir: PathBuf,
-        /// Keep running; [ui] stamp-reloads the View tree; IO-only kills and reruns on source change
+        /// Keep running; [ui] hot-reloads the View tree; IO-only kills and reruns on source change
         #[arg(long)]
         watch: bool,
         /// Inject script path (SCUZZ_UI_SCRIPT); played after the first pump
@@ -94,7 +94,7 @@ enum Commands {
         #[arg(long)]
         pixels: bool,
     },
-    /// Format-check src/ + parse + typecheck (no codegen / link). JSON with --message-format=json.
+    /// Format-verify src/ + parse + typecheck (the linter; no codegen / link). JSON with --message-format=json.
     #[command(
         after_help = "Examples:\n  scuzz check\n  scuzz check examples/kernel\n  scuzz check --message-format=json\n"
     )]
@@ -496,7 +496,7 @@ fn watch_run(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
         return watch_run_io(&project_dir, path, out_dir);
     }
     eprintln!(
-        "scuzz run --watch {} (keep process; recompiles build/reload.dylib then stamp-reloads View tree; live dump build/debug.dump; inject build/inject.script)",
+        "scuzz run --watch {} (hot reload: recompiles build/reload.dylib then stamp-reloads View tree; live dump build/debug.dump; inject build/inject.script)",
         project_dir.display()
     );
     watch_run_ui(&project_dir, path, out_dir, headless)

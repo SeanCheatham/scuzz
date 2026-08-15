@@ -370,8 +370,8 @@ SzIo *sz_sys_args(void);
 SzIo *sz_sys_read_line(void); /* IO[String]: one stdin line; EOF → ""; parks on poll */
 SzIo *sz_sys_read(int64_t n); /* IO[String]: n stdin bytes (or fewer at EOF); parks on poll */
 SzIo *sz_sys_write(SzString *s); /* IO[Unit]: stdout bytes, no newline */
-SzIo *sz_sys_exec(SzString *cmd); /* IO[Int] exit code; parks on poll until the child exits */
-SzIo *sz_sys_spawn(SzString *cmd); /* IO[Int] pid; does not wait */
+SzIo *sz_sys_exec(SzString *cmd); /* IO[Int] exit code; parks on poll; fails under TestRuntime */
+SzIo *sz_sys_spawn(SzString *cmd); /* IO[Int] pid; does not wait; fails under TestRuntime */
 SzIo *sz_sys_alive(int64_t pid);   /* IO[Int] 1 if running */
 SzIo *sz_sys_kill(int64_t pid);    /* IO[Unit] SIGTERM; no-op if already gone */
 SzIo *sz_sys_getenv(SzString *key);
@@ -389,7 +389,7 @@ SzIo *sz_net_serve(int64_t port, SzCont handler, void *env); /* IO[Unit]; keep l
 /* Test-only: UDP nameserver for live httpGet DNS. NULL ip restores /etc/resolv.conf. */
 void sz_net_test_set_nameserver(const char *ipv4, int port);
 
-/* TestRuntime — fake interpreters for deterministic scuzz test / unit tests */
+/* TestRuntime — fake interpreters for deterministic scuzz test / fuzz */
 void sz_testrt_install(void); /* fake clock+rng+mem FS+stub net+sys/console */
 void sz_testrt_reset(void);   /* restore live interpreters */
 

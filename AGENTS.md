@@ -4,6 +4,7 @@
 
 | Doc | Purpose |
 | --- | --- |
+| [`HUMANS.md`](HUMANS.md) | Human source of truth for product intent. Agents read it. Agents never edit it. |
 | [`docs/vision.md`](docs/vision.md) | Product intent, locks, language direction, open work, risks |
 | [`docs/gaps.md`](docs/gaps.md) | Unknowns and known gaps, ranked by risk |
 | [`docs/plans.md`](docs/plans.md) | Next short-term slice only. Delete the slice when it is done. Do not keep history. |
@@ -13,7 +14,7 @@
 | [`docs/schemas/scuzz-toml.md`](docs/schemas/scuzz-toml.md) | Package manifest schema |
 | [`README.md`](README.md) | Pitch, install, one example |
 
-If a decision or next-step order changes, edit `vision.md`.
+If a decision or next-step order changes, edit `vision.md`. Keep `vision.md` aligned with `HUMANS.md`.
 
 ## Keep the codebase small
 
@@ -40,6 +41,7 @@ Write all docs, README files, and comments in ASD-STE100 Simplified Technical En
 
 ## Default workflow
 
-1. Read `docs/vision.md` for intent, locks, and current direction.
-2. Add the smallest slice that proves the behavior (a test or `examples/` when it applies).
-3. Update `vision.md`. If `compatibility.md` or `guide.md` owns the topic, update that file instead.
+1. Read `HUMANS.md` for product intent. Do not edit it.
+2. Read `docs/vision.md` for locks and current direction.
+3. Add the smallest slice that proves the behavior (a test or `examples/` when it applies).
+4. Update `vision.md`. If `compatibility.md` or `guide.md` owns the topic, update that file instead.

@@ -11,7 +11,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-/* Process / args / console kit (Sys.args, IO.println, clang link). */
+/* Process / args / console kit (Sys.args, IO.println, clang link).
+ * TestRuntime rejects Sys.exec / Sys.spawn so sim cannot fork a child. */
 
 static char **g_argv = NULL;
 static int g_argc = 0;
@@ -439,6 +440,8 @@ SzIo *sz_sys_exec(SzString *cmd) {
   SzIo *io;
   if (!cmd)
     sz_panic("sz_sys_exec(null)");
+  if (sz_testrt_sys_is_fake())
+    return sz_io_fail_cstr("Sys.exec: rejected under TestRuntime");
   st = (ExecSt *)sz_alloc_zero(sizeof(ExecSt));
   st->cmd = cmd;
   st->read_fd = -1;
@@ -469,6 +472,8 @@ static void *sys_spawn_result(void *env) {
 SzIo *sz_sys_spawn(SzString *cmd) {
   if (!cmd)
     sz_panic("sz_sys_spawn(null)");
+  if (sz_testrt_sys_is_fake())
+    return sz_io_fail_cstr("Sys.spawn: rejected under TestRuntime");
   return sz_io_flatmap(sz_io_delay(sys_spawn_result, cmd), unwrap_sys, NULL);
 }
 

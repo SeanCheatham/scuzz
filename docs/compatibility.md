@@ -27,10 +27,10 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 | Binary format | Native ELF/Mach-O/PE through LLVM | JVM classfiles / JARs |
 | Dependencies | `scuzz.toml` path deps (data only; no plugin DSL) | Maven Central / Ivy; git/versioned hosted artifacts (deferred); sbt/Gradle/`pubspec` plugins |
 | Effects | Builtin `IO` / `Resource` / concurrent kit + Clock/Random/Fs/Net/Sys | cats-effect runtime, ZIO-as-library, Future-as-default |
-| Test interpreters | Built-in verification: TestRuntime fakes (`SCUZZ_TESTRT=1`); in-source `law` + `.require` + stem-paired `*.scuzz_sim` / `*.scuzz_drivers`; `scuzz fuzz` (shrink + dump determinism); `scuzz mutate` (live-code mutants; `--oracles` for residual predicates) | Wall-clock-only harnesses; ad-hoc FFI mocks; app-level Mockito / `src/test` unit trees; third-party mutation/fuzz frameworks |
+| Test interpreters | Built-in verification: hermetic TestRuntime fakes (`SCUZZ_TESTRT=1`; no live sockets; `Sys.exec` / `Sys.spawn` fail); in-source `law` + `.require` + stem-paired `*.scuzz_sim` / `*.scuzz_drivers`; `scuzz fuzz` (shrink + dump determinism); `scuzz mutate` (live-code mutants; `--oracles` for residual predicates) | Wall-clock-only harnesses; ad-hoc FFI mocks; app-level Mockito / `src/test` unit trees; third-party mutation/fuzz frameworks; live network beyond stubs under sim |
 | UI | `View` + `Ui` + Skia (`sk_capi`; Impeller deferred) | Swing, JavaFX, Compose Multiplatform, Flutter widgets |
-| Watch | Rebuild on source change (`scuzz watch`); IO-only `run --watch` kills and reruns; `[ui]` stamp-reloads | Flutter hot reload / DevTools VM patching |
-| Diagnostics | `scuzz check --message-format=json`; `scuzz lsp` wraps `check` | Separate IDE typer; analyze-vs-check; `*.g.scuzz` codegen |
+| Watch | Rebuild on source change (`scuzz watch`); IO-only `run --watch` kills and reruns; `[ui] run --watch` is hot reload (stamp-reload Views) | Flutter DevTools / VM patching |
+| Diagnostics | `scuzz check` is the linter (`--message-format=json`); `scuzz lsp` wraps `check` | Separate IDE typer; analyze-vs-check; `lint` subcommand; `*.g.scuzz` codegen |
 | Packaging | Copy-patched `crates/embedder-mobile/shells/android` / `crates/embedder-mobile/shells/ios` templates | Gradle/CocoaPods as Scuzz APIs; Flutter platform channels |
 
 ## Platforms (Headless first)
@@ -43,7 +43,8 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 | macOS desktop | Yes | Cocoa blit | peer to Linux X11 |
 | Windows desktop | Yes | Secondary | Later (same session protocol) |
 | iOS / Android | Shared app code | Packaging shells | `scuzz package`; NDK/Xcode for device |
+| Web / browser | No | N/A | Not a current target |
 
 ## Toolchain
 
-The compiler and CLI are Rust (`crates/compiler`, `crates/cli`). Kernel surface: [vision.md](vision.md#kernel-dialect).
+The compiler and CLI are Rust (`crates/compiler`, `crates/cli`). Kernel surface: [vision.md](vision.md#kernel-dialect). One formatter. One linter (`scuzz check`). One testing strategy.

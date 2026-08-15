@@ -1,16 +1,17 @@
 # Scuzz Lang
 
-Scuzz is a Scala-inspired language for native UI, CLI, and server apps. It compiles to LLVM. Builtin `IO` is ZIO-shaped. It is not a ZIO port. UI is a `Ui` effect. Headless, Desktop, and Mobile are real runtimes.
+Scuzz is a Scala-inspired language for native CLI, server, desktop, and mobile apps. It compiles to LLVM. Builtin `IO` is ZIO-shaped. It is not a ZIO port. UI is a `Ui` effect. Headless, Desktop, and Mobile are real runtimes.
 
-Scuzz is not Scala 3. It is not the JVM. It is not a cats-effect port. Scala Native is a reference, not a dependency.
+Scuzz is not Scala 3. It is not the JVM. It is not a cats-effect port. Scala Native is a reference, not a dependency. Web is not a current target.
 
 ## Goals
 
-- **Language:** Scala-inspired subset for UI, CLI, server, and mobile. `for` is the binder (`=` pure, `<-` effect). I/O goes through `IO`.
+- **Language:** Scala-inspired subset for CLI, server, desktop, and mobile. `for` is the binder (`=` pure, `<-` effect). I/O goes through `IO`. Dense source aims for Scala-like token efficiency.
 - **Runtime:** native LLVM. No VM, no Java, no classpath.
-- **UI:** `View` is pure. State lives in `Signal`. `Ui.run` is the session. Canvas is Skia-shaped.
-- **Tooling:** one CLI (`scuzz`) for build, run, format, check, fuzz, and package.
-- **Testing:** laws, fuzz, simulation, and determinism are built in. Do not add a third-party harness.
+- **UI:** `View` is pure. State lives in `Signal`. `Ui.run` is the session. Canvas is Skia-shaped. Headless is a peer runtime.
+- **Tooling:** one CLI (`scuzz`) for build, run, format, check, fuzz, mutate, and package. One formatter. One linter (`scuzz check`). `[ui] run --watch` is hot reload.
+- **Testing:** mutation, fuzz, laws, simulation, and determinism are built in. Oracles live in source. Drivers are oracle-free. Simulation is hermetic. Do not add a third-party harness.
+- **Batteries:** the language and standard kits cover common cases. No ecosystem library sprawl.
 
 Product intent: [docs/vision.md](docs/vision.md). App path: [docs/guide.md](docs/guide.md).
 

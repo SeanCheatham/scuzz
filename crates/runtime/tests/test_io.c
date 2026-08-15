@@ -1703,6 +1703,23 @@ int main(void) {
     assert(sz_unbox_i64(r.value) == 7);
   }
 
+  /* TestRuntime rejects Sys.exec / Sys.spawn so sim cannot fork a child. */
+  {
+    SzIoResult tr;
+    sz_testrt_install();
+    tr = sz_io_unsafe_run(sz_sys_exec(sz_string_from_cstr("true")));
+    assert(!tr.ok);
+    assert(tr.error &&
+           strstr(sz_string_cstr(tr.error->message), "TestRuntime") != NULL);
+    sz_error_free(tr.error);
+    tr = sz_io_unsafe_run(sz_sys_spawn(sz_string_from_cstr("true")));
+    assert(!tr.ok);
+    assert(tr.error &&
+           strstr(sz_string_cstr(tr.error->message), "TestRuntime") != NULL);
+    sz_error_free(tr.error);
+    sz_testrt_reset();
+  }
+
   /* Sys.exec parks; a peer fiber runs before the child exits. */
   {
     SzPair *pair;
