@@ -2165,6 +2165,10 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 0)?;
             Ok(Type::Opaque("View".into()))
         }
+        "View.verticalDivider" => {
+            expect_arity(callee, &arg_tys, 0)?;
+            Ok(Type::Opaque("View".into()))
+        }
         "View.expansionTile" => {
             expect_arity(callee, &arg_tys, 3)?;
             expect_ty(&arg_tys[0], &Type::Opaque("SignalInt".into()))?;
@@ -5371,6 +5375,15 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.divider should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_vertical_divider() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.verticalDivider())
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.verticalDivider should typecheck");
     }
 
     #[test]

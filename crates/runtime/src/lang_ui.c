@@ -71,6 +71,8 @@ SzView *sz_lang_view_icon_button(SzString *label, SzViewTapFn tap, void *env) {
   return sz_view_icon_button(label ? sz_string_cstr(label) : "", tap, env);
 }
 
+SzView *sz_lang_view_vertical_divider(void) { return sz_view_vertical_divider(); }
+
 SzView *sz_lang_view_checkbox(SzSignalInt *sig, SzString *label) {
   return sz_view_checkbox(sig, label ? sz_string_cstr(label) : "");
 }

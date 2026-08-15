@@ -356,6 +356,16 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_vertical_divider_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.vert\n";
+        let labels = labels_at(src, "View.vert");
+        assert!(
+            labels.iter().any(|l| l == "View.verticalDivider"),
+            "{labels:?}"
+        );
+    }
+
+    #[test]
     fn completes_view_expansion_tile_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.expan\n";
         let labels = labels_at(src, "View.expan");

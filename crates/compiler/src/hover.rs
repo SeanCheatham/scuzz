@@ -371,6 +371,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("View.badge", "View.badge(sig: Signal, child: View): View"),
     ("View.card", "View.card(child: View): View"),
     ("View.divider", "View.divider(): View"),
+    ("View.verticalDivider", "View.verticalDivider(): View"),
     (
         "View.expansionTile",
         "View.expansionTile(sig: Signal, title: String, child: View): View",
@@ -679,6 +680,15 @@ mod tests {
 "#;
         let h = hover_src(src, "divider");
         assert!(h.contains("View.divider(): View"), "{h}");
+    }
+
+    #[test]
+    fn hovers_view_vertical_divider() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.verticalDivider())
+"#;
+        let h = hover_src(src, "verticalDivider");
+        assert!(h.contains("View.verticalDivider(): View"), "{h}");
     }
 
     #[test]

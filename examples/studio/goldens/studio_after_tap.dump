@@ -16,6 +16,7 @@ text:page = 1
 radio:Tasks=1
 textfield:item
 button:Add
+vdiv:vdiv
 switch:On=0
 badge:0
 chip:Pin=0
@@ -35,10 +36,10 @@ button:Clear
 [taps]
 0 Home 24,24 25x32
 1 Tasks 264,24 25x32
-2 Add 96,88 48x32
-3 On 152,88 37x32
-4 Pin 197,88 32x32
-5 Rename 237,88 58x32
+2 Add 84,88 48x32
+3 On 156,88 37x32
+4 Pin 201,88 32x32
+5 Rename 241,88 52x32
 6 More 48,192 304x32
 7 i 172,256 32x32
 8 Done 212,256 43x32

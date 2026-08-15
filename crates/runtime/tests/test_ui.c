@@ -5341,6 +5341,140 @@ static void test_icon_button_in_taps_dump(void) {
   remove(path);
 }
 
+static void test_vertical_divider_sizes(void) {
+  SzView *d;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  d = sz_view_vertical_divider();
+  sz_view_layout(d, 200.f, 200.f, theme);
+  assert(sz_view_kind(d) == SZ_VIEW_VERTICAL_DIVIDER);
+  f = sz_view_frame(d);
+  assert(fabsf(f.w - 8.f) < 0.5f);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  sz_view_free(d);
+}
+
+static void test_vertical_divider_tight_height(void) {
+  SzView *d;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  d = sz_view_vertical_divider();
+  sz_view_layout(d, 80.f, 20.f, theme);
+  f = sz_view_frame(d);
+  assert(fabsf(f.h - 20.f) < 0.5f);
+  assert(fabsf(f.w - 8.f) < 0.5f);
+  sz_view_free(d);
+}
+
+static void test_vertical_divider_a11y(void) {
+  SzView *d;
+  SzString *dump;
+
+  d = sz_view_vertical_divider();
+  dump = sz_view_a11y_dump(d);
+  assert(strstr(sz_string_cstr(dump), "vdiv:vdiv") != NULL);
+  sz_string_free(dump);
+  sz_view_free(d);
+}
+
+static void test_vertical_divider_not_tap_target(void) {
+  SzView *d;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  d = sz_view_vertical_divider();
+  sz_view_layout(d, 80.f, 80.f, theme);
+  f = sz_view_frame(d);
+  assert(!sz_view_is_tap_target(d));
+  assert(sz_view_hit_test(d, f.x + f.w * 0.5f, f.y + f.h * 0.5f) == NULL);
+  assert(sz_view_handle_tap(d, f.x + f.w * 0.5f, f.y + f.h * 0.5f) == 0);
+  sz_view_free(d);
+}
+
+static void test_vertical_divider_paint_line(void) {
+  SzView *root;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+  int lx, ly, bx;
+
+  root = sz_view_vertical_divider();
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  f = sz_view_frame(root);
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  lx = (int)(f.x + f.w * 0.5f);
+  ly = (int)(f.y + 8.f);
+  bx = (int)(f.x + 1.f);
+  /* Hairline is muted. Slot left of the line stays the canvas background. */
+  assert(px_rgb(px, 80, lx, ly, 0x6A, 0x6A, 0x6A));
+  assert(px_rgb(px, 80, bx, ly, 0xF5, 0xF5, 0xF5));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
+static void test_vertical_divider_in_row(void) {
+  SzView *row, *d;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, df;
+
+  row = sz_view_row();
+  d = sz_view_vertical_divider();
+  sz_view_add_child(row, sz_view_button("Go", NULL, NULL));
+  sz_view_add_child(row, d);
+  sz_view_layout(row, 200.f, 200.f, theme);
+  f = sz_view_frame(row);
+  df = sz_view_frame(d);
+  assert(fabsf(df.w - 8.f) < 0.5f);
+  assert(fabsf(df.h - theme->control_h) < 0.5f);
+  assert(fabsf(f.h - (theme->control_h + theme->pad * 2.f)) < 0.5f);
+  sz_view_free(row);
+}
+
+static void test_vertical_divider_not_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_vdiv.dump";
+  char *dump;
+  const char *taps;
+
+  sig = sz_signal_int(0);
+  root = sz_view_row();
+  sz_view_add_child(root, sz_view_vertical_divider());
+  sz_view_add_child(root, sz_view_button("Go", counter_tap, sig));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "vdiv:vdiv") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "vdiv") == NULL);
+  assert(strstr(taps, "Go") != NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
 static void test_radio_sizes(void) {
   SzView *r;
   SzSignalInt *sig;
@@ -7128,6 +7262,13 @@ int main(void) {
   test_icon_button_hit_test();
   test_icon_button_paint();
   test_icon_button_in_taps_dump();
+  test_vertical_divider_sizes();
+  test_vertical_divider_tight_height();
+  test_vertical_divider_a11y();
+  test_vertical_divider_not_tap_target();
+  test_vertical_divider_paint_line();
+  test_vertical_divider_in_row();
+  test_vertical_divider_not_in_taps_dump();
   test_radio_sizes();
   test_radio_a11y_off_on();
   test_radio_tap_writes_value();

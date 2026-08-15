@@ -237,6 +237,13 @@ SzView *sz_view_icon_button(const char *label, SzViewTapFn on_tap, void *env) {
   return v;
 }
 
+SzView *sz_view_vertical_divider(void) {
+  SzView *v = view_new(SZ_VIEW_VERTICAL_DIVIDER);
+  v->a11y_role = SZ_A11Y_VDIV;
+  v->a11y_label = sz_strdup("vdiv");
+  return v;
+}
+
 SzView *sz_view_checkbox(SzSignalInt *sig, const char *label) {
   SzView *v = view_new(SZ_VIEW_CHECKBOX);
   v->sig_int = sig;
@@ -435,6 +442,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "expansion";
   case SZ_A11Y_ICON_BUTTON:
     return "iconbutton";
+  case SZ_A11Y_VDIV:
+    return "vdiv";
   default:
     return "none";
   }
@@ -1250,6 +1259,14 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.h = theme->control_h;
     if (max_w > 0 && v->frame.w > max_w)
       v->frame.w = max_w;
+    break;
+  case SZ_VIEW_VERTICAL_DIVIDER:
+    v->frame.w = 8.f;
+    v->frame.h = theme->control_h;
+    if (max_w > 0 && v->frame.w > max_w)
+      v->frame.w = max_w;
+    if (max_h > 0 && v->frame.h > max_h)
+      v->frame.h = max_h;
     break;
   case SZ_VIEW_CHECKBOX:
   case SZ_VIEW_RADIO: {
@@ -2347,6 +2364,17 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     paint_string(c, buf, v->frame.x + (v->frame.w - text_width(buf, theme->font_px)) * 0.5f,
                  v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
                  theme->foreground, theme->font_px);
+    break;
+  }
+  case SZ_VIEW_VERTICAL_DIVIDER: {
+    float t = scale_px(theme, 2.f);
+    float lx;
+    if (t < 2.f)
+      t = 2.f;
+    if (t > v->frame.w)
+      t = v->frame.w;
+    lx = v->frame.x + (v->frame.w - t) * 0.5f;
+    paint_rect(c, lx, v->frame.y, t, v->frame.h, theme->muted);
     break;
   }
   case SZ_VIEW_CHECKBOX: {

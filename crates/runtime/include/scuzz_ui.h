@@ -173,7 +173,8 @@ typedef enum SzViewKind {
   SZ_VIEW_CARD,      /* surface + pad + border around one child */
   SZ_VIEW_DIVIDER,   /* full-width hairline; display only */
   SZ_VIEW_EXPANSION_TILE, /* Signal.int header; child shows when on */
-  SZ_VIEW_ICON_BUTTON     /* square label tap; same closure as button */
+  SZ_VIEW_ICON_BUTTON,    /* square label tap; same closure as button */
+  SZ_VIEW_VERTICAL_DIVIDER /* 8 px slot, control_h; muted hairline */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -217,6 +218,8 @@ SzView *sz_view_divider(void);
 SzView *sz_view_expansion_tile(SzSignalInt *sig, const char *title, SzView *child);
 /* Square `control_h` tap. `label` is a11y + painted glyph. */
 SzView *sz_view_icon_button(const char *label, SzViewTapFn on_tap, void *env);
+/* 8 px slot, `control_h` tall, muted vertical hairline. Not a tap target. */
+SzView *sz_view_vertical_divider(void);
 SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder);
 SzView *sz_view_column(void);
 SzView *sz_view_row(void);
@@ -339,7 +342,8 @@ typedef enum SzA11yRole {
   SZ_A11Y_CARD = 15,
   SZ_A11Y_DIVIDER = 16,
   SZ_A11Y_EXPANSION = 17,
-  SZ_A11Y_ICON_BUTTON = 18
+  SZ_A11Y_ICON_BUTTON = 18,
+  SZ_A11Y_VDIV = 19
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
@@ -442,6 +446,7 @@ SzView *sz_lang_view_divider(void);
 SzView *sz_lang_view_expansion_tile(SzSignalInt *sig, SzString *title,
                                    SzView *child);
 SzView *sz_lang_view_icon_button(SzString *label, SzViewTapFn tap, void *env);
+SzView *sz_lang_view_vertical_divider(void);
 SzView *sz_lang_view_column(void);
 SzView *sz_lang_view_row(void);
 SzView *sz_lang_view_wrap(void);
