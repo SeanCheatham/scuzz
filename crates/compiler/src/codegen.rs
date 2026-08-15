@@ -146,6 +146,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_radio(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_slider(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_progress(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_switch(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_theme_accent()").unwrap();
     writeln!(out, "declare i64 @sz_theme_primary()").unwrap();
     writeln!(out, "declare i64 @sz_theme_muted()").unwrap();
@@ -3353,6 +3354,15 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "View.switch" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_view_switch(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "Theme.accent" => {
             writeln!(code, "  %{prefix}_v = call i64 @sz_theme_accent()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
@@ -4174,6 +4184,23 @@ law always: Bool = 1 == 1
         assert!(
             ir.contains("sz_lang_view_progress"),
             "expected sz_lang_view_progress in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_switch() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.switch(n, "On"))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_switch"),
+            "expected sz_lang_view_switch in IR:\n{ir}"
         );
     }
 

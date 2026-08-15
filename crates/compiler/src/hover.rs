@@ -355,6 +355,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ),
     ("View.slider", "View.slider(sig: Signal): View"),
     ("View.progress", "View.progress(sig: Signal): View"),
+    (
+        "View.switch",
+        "View.switch(sig: Signal, label: String): View",
+    ),
     ("View.scroll", "View.scroll(child: View): View"),
     ("View.scrollH", "View.scrollH(child: View): View"),
     ("View.column", "View.column(...): View"),
@@ -584,6 +588,21 @@ mod tests {
 "#;
         let h = hover_src(src, "progress");
         assert!(h.contains("View.progress(sig: Signal): View"), "{h}");
+    }
+
+    #[test]
+    fn hovers_view_switch() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.switch(n, "On"))
+  } yield ()
+"#;
+        let h = hover_src(src, "switch");
+        assert!(
+            h.contains("View.switch(sig: Signal, label: String): View"),
+            "{h}"
+        );
     }
 
     #[test]

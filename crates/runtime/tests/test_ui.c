@@ -4216,6 +4216,151 @@ static void test_checkbox_in_taps_dump(void) {
   remove(path);
 }
 
+static void test_switch_sizes(void) {
+  SzView *sw;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  sw = sz_view_switch(sig, "On");
+  sz_view_layout(sw, 200.f, 200.f, theme);
+  assert(sz_view_kind(sw) == SZ_VIEW_SWITCH);
+  f = sz_view_frame(sw);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  assert(f.w > 24.f);
+  sz_view_free(sw);
+  sz_signal_int_free(sig);
+}
+
+static void test_switch_a11y_off_on(void) {
+  SzView *sw;
+  SzSignalInt *sig;
+  SzString *dump;
+
+  sig = sz_signal_int(0);
+  sw = sz_view_switch(sig, "On");
+  dump = sz_view_a11y_dump(sw);
+  assert(strstr(sz_string_cstr(dump), "switch:On=0") != NULL);
+  sz_string_free(dump);
+  sz_signal_int_set(sig, 1);
+  dump = sz_view_a11y_dump(sw);
+  assert(strstr(sz_string_cstr(dump), "switch:On=1") != NULL);
+  sz_string_free(dump);
+  sz_view_free(sw);
+  sz_signal_int_free(sig);
+}
+
+static void test_switch_nonzero_is_on(void) {
+  SzView *sw;
+  SzSignalInt *sig;
+  SzString *dump;
+
+  sig = sz_signal_int(7);
+  sw = sz_view_switch(sig, "X");
+  dump = sz_view_a11y_dump(sw);
+  assert(strstr(sz_string_cstr(dump), "switch:X=1") != NULL);
+  sz_string_free(dump);
+  sz_view_free(sw);
+  sz_signal_int_free(sig);
+}
+
+static void test_switch_tap_toggles(void) {
+  SzView *sw;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  sw = sz_view_switch(sig, "On");
+  sz_view_layout(sw, 200.f, 200.f, theme);
+  f = sz_view_frame(sw);
+  assert(sz_view_handle_tap(sw, f.x + f.w * 0.5f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 1);
+  assert(sz_view_handle_tap(sw, f.x + 2.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 0);
+  sz_view_free(sw);
+  sz_signal_int_free(sig);
+}
+
+static void test_switch_hit_test(void) {
+  SzView *sw, *hit;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  sw = sz_view_switch(sig, "On");
+  sz_view_layout(sw, 200.f, 200.f, theme);
+  f = sz_view_frame(sw);
+  hit = sz_view_hit_test(sw, f.x + f.w * 0.5f, f.y + f.h * 0.5f);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_SWITCH);
+  assert(sz_view_is_tap_target(hit));
+  sz_view_free(sw);
+  sz_signal_int_free(sig);
+}
+
+static void test_switch_paint_off_on(void) {
+  SzView *root;
+  SzSignalInt *sig;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+
+  sig = sz_signal_int(0);
+  root = sz_view_switch(sig, "On");
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  /* Left of track: off thumb is surface, on fill is primary. */
+  assert(px_rgb(px, 80, 6, 16, 0xFF, 0xFF, 0xFF));
+  sz_signal_int_set(sig, 1);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, 6, 16, 0x14, 0x28, 0x50));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+  sz_signal_int_free(sig);
+}
+
+static void test_switch_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_switch.dump";
+  char *dump;
+
+  sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_switch(sig, "On"));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "switch:On=0") != NULL);
+  assert(strstr(dump, "[taps]") != NULL);
+  assert(strstr(dump, "On") != NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
 static void test_radio_sizes(void) {
   SzView *r;
   SzSignalInt *sig;
@@ -5949,6 +6094,13 @@ int main(void) {
   test_checkbox_hit_test();
   test_checkbox_paint_off_on();
   test_checkbox_in_taps_dump();
+  test_switch_sizes();
+  test_switch_a11y_off_on();
+  test_switch_nonzero_is_on();
+  test_switch_tap_toggles();
+  test_switch_hit_test();
+  test_switch_paint_off_on();
+  test_switch_in_taps_dump();
   test_radio_sizes();
   test_radio_a11y_off_on();
   test_radio_tap_writes_value();

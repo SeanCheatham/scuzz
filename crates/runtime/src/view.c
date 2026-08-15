@@ -156,7 +156,8 @@ SzViewKind sz_view_kind(const SzView *view) {
 int sz_view_is_tap_target(const SzView *view) {
   return view &&
          (view->kind == SZ_VIEW_BUTTON || view->kind == SZ_VIEW_CHECKBOX ||
-          view->kind == SZ_VIEW_SLIDER || view->kind == SZ_VIEW_RADIO);
+          view->kind == SZ_VIEW_SLIDER || view->kind == SZ_VIEW_RADIO ||
+          view->kind == SZ_VIEW_SWITCH);
 }
 
 SzRect sz_view_frame(const SzView *view) {
@@ -259,6 +260,16 @@ SzView *sz_view_progress(SzSignalInt *sig) {
   return v;
 }
 
+SzView *sz_view_switch(SzSignalInt *sig, const char *label) {
+  SzView *v = view_new(SZ_VIEW_SWITCH);
+  v->sig_int = sig;
+  v->text = sz_strdup(label ? label : "");
+  v->interactive = 1;
+  v->a11y_role = SZ_A11Y_SWITCH;
+  v->a11y_label = sz_strdup(label ? label : "");
+  return v;
+}
+
 static int64_t slider_clamp(int64_t n) {
   if (n < 0)
     return 0;
@@ -332,6 +343,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "radio";
   case SZ_A11Y_PROGRESS:
     return "progress";
+  case SZ_A11Y_SWITCH:
+    return "switch";
   default:
     return "none";
   }
@@ -352,7 +365,7 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
       resolve_text(v, live, sizeof live);
       label = live;
     }
-    if (v->kind == SZ_VIEW_CHECKBOX) {
+    if (v->kind == SZ_VIEW_CHECKBOX || v->kind == SZ_VIEW_SWITCH) {
       int on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
       snprintf(live, sizeof live, "%s=%d", v->a11y_label ? v->a11y_label : "",
                on ? 1 : 0);
@@ -1149,6 +1162,24 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.w = box + gap + text_width(buf, font);
     if (v->frame.w < box)
       v->frame.w = box;
+    if (max_w > 0 && v->frame.w > max_w)
+      v->frame.w = max_w;
+    break;
+  }
+  case SZ_VIEW_SWITCH: {
+    float box = font + 4.f;
+    float gap = layout_gap(theme);
+    float track;
+    resolve_text(v, buf, sizeof buf);
+    if (box < 12.f)
+      box = 12.f;
+    if (box > theme->control_h - 4.f)
+      box = theme->control_h - 4.f;
+    track = box * 2.f;
+    v->frame.h = theme->control_h;
+    v->frame.w = track + gap + text_width(buf, font);
+    if (v->frame.w < track)
+      v->frame.w = track;
     if (max_w > 0 && v->frame.w > max_w)
       v->frame.w = max_w;
     break;
@@ -2152,6 +2183,32 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
                  theme->foreground, theme->font_px);
     break;
   }
+  case SZ_VIEW_SWITCH: {
+    float box = theme->font_px + 4.f;
+    float gap;
+    float bx, by;
+    float tw, th, thumb, tx;
+    int on;
+    if (box < 12.f)
+      box = 12.f;
+    if (box > theme->control_h - 4.f)
+      box = theme->control_h - 4.f;
+    gap = layout_gap(theme);
+    tw = box * 2.f;
+    th = box;
+    bx = v->frame.x;
+    by = v->frame.y + (v->frame.h - th) * 0.5f;
+    on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
+    paint_rect(c, bx, by, tw, th, on ? theme->primary : theme->muted);
+    thumb = th > 4.f ? th - 4.f : th;
+    tx = on ? bx + tw - thumb - 2.f : bx + 2.f;
+    paint_rect(c, tx, by + (th - thumb) * 0.5f, thumb, thumb, theme->surface);
+    resolve_text(v, buf, sizeof buf);
+    paint_string(c, buf, bx + tw + gap,
+                 v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
+                 theme->foreground, theme->font_px);
+    break;
+  }
   case SZ_VIEW_RADIO: {
     float box = theme->font_px + 4.f;
     float gap;
@@ -2506,7 +2563,8 @@ int sz_view_handle_tap(SzView *root, float x, float y) {
     hit->on_tap(hit, hit->tap_env);
     return 1;
   }
-  if (hit->kind == SZ_VIEW_CHECKBOX && hit->sig_int) {
+  if ((hit->kind == SZ_VIEW_CHECKBOX || hit->kind == SZ_VIEW_SWITCH) &&
+      hit->sig_int) {
     int64_t n = sz_signal_int_get(hit->sig_int);
     sz_signal_int_set(hit->sig_int, n == 0 ? 1 : 0);
     return 1;

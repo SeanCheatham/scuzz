@@ -4,8 +4,9 @@ list[1] = ["milk"]
 int[2] = 0
 int[3] = 0
 int[4] = 40
-str[5] = "count = 0"
-str[6] = "page = 0"
+int[5] = 0
+str[6] = "count = 0"
+str[7] = "page = 0"
 
 [views]
 radio:Home=1
@@ -20,6 +21,7 @@ progress:40
 text:q or Esc quits
 textfield:item
 button:Add
+switch:On=0
 button:Rename
 scroll:scroll
 list:list
@@ -34,10 +36,11 @@ button:Clear
 1 Tasks 264,24 25x32
 2 +1 44,254 48x32
 3 slider 32,306 336x32
-4 Add 144,416 48x32
-5 Rename 200,416 58x32
-6 Save 12,476 48x32
-7 Clear 12,516 48x32
+4 Add 114,416 48x32
+5 On 170,416 37x32
+6 Rename 215,416 58x32
+7 Save 12,476 48x32
+8 Clear 12,516 48x32
 
 [fields]
 0* item=""

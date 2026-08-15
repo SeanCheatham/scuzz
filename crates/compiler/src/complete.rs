@@ -334,6 +334,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_switch_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.sw\n";
+        let labels = labels_at(src, "View.sw");
+        assert!(labels.iter().any(|l| l == "View.switch"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_scroll_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.sc\n";
         let labels = labels_at(src, "View.sc");
