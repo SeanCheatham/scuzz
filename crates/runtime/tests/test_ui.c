@@ -4632,6 +4632,159 @@ static void test_slider_live_records_xy(void) {
   remove(record);
 }
 
+static void test_progress_sizes(void) {
+  SzView *p;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(40);
+  p = sz_view_progress(sig);
+  sz_view_layout(p, 200.f, 200.f, theme);
+  assert(sz_view_kind(p) == SZ_VIEW_PROGRESS);
+  f = sz_view_frame(p);
+  assert(fabsf(f.h - 8.f) < 0.5f);
+  assert(fabsf(f.w - 200.f) < 0.5f);
+  sz_view_free(p);
+  sz_signal_int_free(sig);
+}
+
+static void test_progress_unbounded_width(void) {
+  SzView *p;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(40);
+  p = sz_view_progress(sig);
+  sz_view_layout(p, 0.f, 80.f, theme);
+  f = sz_view_frame(p);
+  assert(fabsf(f.w - 120.f) < 0.5f);
+  sz_view_free(p);
+  sz_signal_int_free(sig);
+}
+
+static void test_progress_a11y(void) {
+  SzView *p;
+  SzSignalInt *sig;
+  SzString *dump;
+
+  sig = sz_signal_int(40);
+  p = sz_view_progress(sig);
+  dump = sz_view_a11y_dump(p);
+  assert(strstr(sz_string_cstr(dump), "progress:40") != NULL);
+  sz_string_free(dump);
+  sz_signal_int_set(sig, 7);
+  dump = sz_view_a11y_dump(p);
+  assert(strstr(sz_string_cstr(dump), "progress:7") != NULL);
+  sz_string_free(dump);
+  sz_view_free(p);
+  sz_signal_int_free(sig);
+}
+
+static void test_progress_clamps_a11y(void) {
+  SzView *p;
+  SzSignalInt *sig;
+  SzString *dump;
+
+  sig = sz_signal_int(150);
+  p = sz_view_progress(sig);
+  dump = sz_view_a11y_dump(p);
+  assert(strstr(sz_string_cstr(dump), "progress:100") != NULL);
+  sz_string_free(dump);
+  sz_signal_int_set(sig, -3);
+  dump = sz_view_a11y_dump(p);
+  assert(strstr(sz_string_cstr(dump), "progress:0") != NULL);
+  sz_string_free(dump);
+  sz_view_free(p);
+  sz_signal_int_free(sig);
+}
+
+static void test_progress_not_tap_target(void) {
+  SzView *p;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(40);
+  p = sz_view_progress(sig);
+  sz_view_layout(p, 200.f, 80.f, theme);
+  f = sz_view_frame(p);
+  assert(!sz_view_is_tap_target(p));
+  assert(sz_view_hit_test(p, f.x + f.w * 0.5f, f.y + f.h * 0.5f) == NULL);
+  assert(sz_view_handle_tap(p, f.x + f.w * 0.5f, f.y + f.h * 0.5f) == 0);
+  assert(sz_signal_int_get(sig) == 40);
+  sz_view_free(p);
+  sz_signal_int_free(sig);
+}
+
+static void test_progress_paint_fill(void) {
+  SzView *root;
+  SzSignalInt *sig;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(100);
+  root = sz_view_progress(sig);
+  sz_view_layout(root, 80.f, 80.f, theme);
+  f = sz_view_frame(root);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + f.h * 0.5f), 0x14, 0x28,
+                0x50));
+  sz_signal_int_set(sig, 0);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + f.h * 0.5f), 0x6A, 0x6A,
+                0x6A));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+  sz_signal_int_free(sig);
+}
+
+static void test_progress_not_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_progress.dump";
+  char *dump;
+  const char *taps;
+
+  sig = sz_signal_int(40);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_progress(sig));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "progress:40") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "progress") == NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
 static void test_ignore_pointer_sizes_to_child(void) {
   SzView *wrap, *child;
   const SzTheme *theme = sz_theme_default();
@@ -5813,6 +5966,13 @@ int main(void) {
   test_slider_in_taps_dump();
   test_slider_pointer_drag();
   test_slider_live_records_xy();
+  test_progress_sizes();
+  test_progress_unbounded_width();
+  test_progress_a11y();
+  test_progress_clamps_a11y();
+  test_progress_not_tap_target();
+  test_progress_paint_fill();
+  test_progress_not_in_taps_dump();
   test_ignore_pointer_sizes_to_child();
   test_ignore_pointer_passes_tap_through();
   test_absorb_pointer_blocks_tap();

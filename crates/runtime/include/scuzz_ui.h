@@ -164,7 +164,8 @@ typedef enum SzViewKind {
   SZ_VIEW_WRAP,     /* flow children into runs; wrap when remaining width is short */
   SZ_VIEW_SLIDER,   /* Signal.int 0-100 track; tap/drag writes from hit x */
   SZ_VIEW_GRID,     /* n equal columns; new row after n shown children */
-  SZ_VIEW_RADIO     /* Signal.int group; tap writes this value */
+  SZ_VIEW_RADIO,    /* Signal.int group; tap writes this value */
+  SZ_VIEW_PROGRESS  /* Signal.int 0-100 bar; display only */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -190,6 +191,8 @@ SzView *sz_view_checkbox(SzSignalInt *sig, const char *label);
 SzView *sz_view_radio(SzSignalInt *sig, int64_t value, const char *label);
 /* Tap/drag writes `sig` from hit x, clamped 0–100. */
 SzView *sz_view_slider(SzSignalInt *sig);
+/* Paints a 0–100 bar from `sig`. Not a tap target. */
+SzView *sz_view_progress(SzSignalInt *sig);
 SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder);
 SzView *sz_view_column(void);
 SzView *sz_view_row(void);
@@ -303,7 +306,8 @@ typedef enum SzA11yRole {
   SZ_A11Y_SCROLL = 6,
   SZ_A11Y_CHECKBOX = 7,
   SZ_A11Y_SLIDER = 8,
-  SZ_A11Y_RADIO = 9
+  SZ_A11Y_RADIO = 9,
+  SZ_A11Y_PROGRESS = 10
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
@@ -396,6 +400,7 @@ SzView *sz_lang_view_button(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_checkbox(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_radio(SzSignalInt *sig, int64_t value, SzString *label);
 SzView *sz_lang_view_slider(SzSignalInt *sig);
+SzView *sz_lang_view_progress(SzSignalInt *sig);
 SzView *sz_lang_view_column(void);
 SzView *sz_lang_view_row(void);
 SzView *sz_lang_view_wrap(void);

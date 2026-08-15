@@ -327,6 +327,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_progress_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.pr\n";
+        let labels = labels_at(src, "View.pr");
+        assert!(labels.iter().any(|l| l == "View.progress"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_scroll_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.sc\n";
         let labels = labels_at(src, "View.sc");

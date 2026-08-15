@@ -16,6 +16,7 @@ text:count = 0
 scroll:scrollh
 button:+1
 slider:40
+progress:40
 text:q or Esc quits
 textfield:item
 button:Add
@@ -33,8 +34,8 @@ button:Clear
 1 Tasks 264,24 25x32
 2 +1 44,254 48x32
 3 slider 32,306 336x32
-4 Add 144,400 48x32
-5 Rename 200,400 58x32
+4 Add 144,416 48x32
+5 Rename 200,416 58x32
 6 Save 12,476 48x32
 7 Clear 12,516 48x32
 
@@ -43,4 +44,3 @@ button:Clear
 
 [scrolls]
 0 scrollh
-1 scroll

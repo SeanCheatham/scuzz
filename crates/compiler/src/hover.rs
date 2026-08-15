@@ -354,6 +354,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.radio(sig: Signal, value: Int, label: String): View",
     ),
     ("View.slider", "View.slider(sig: Signal): View"),
+    ("View.progress", "View.progress(sig: Signal): View"),
     ("View.scroll", "View.scroll(child: View): View"),
     ("View.scrollH", "View.scrollH(child: View): View"),
     ("View.column", "View.column(...): View"),
@@ -571,6 +572,18 @@ mod tests {
 "#;
         let h = hover_src(src, "slider");
         assert!(h.contains("View.slider(sig: Signal): View"), "{h}");
+    }
+
+    #[test]
+    fn hovers_view_progress() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(40)
+    _ <- Ui.run(_ => View.progress(n))
+  } yield ()
+"#;
+        let h = hover_src(src, "progress");
+        assert!(h.contains("View.progress(sig: Signal): View"), "{h}");
     }
 
     #[test]

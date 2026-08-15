@@ -560,6 +560,9 @@ static void format_last_hit_desc(SzView *hit, char *buf, size_t cap) {
   case SZ_A11Y_RADIO:
     role = "radio";
     break;
+  case SZ_A11Y_PROGRESS:
+    role = "progress";
+    break;
   default:
     break;
   }

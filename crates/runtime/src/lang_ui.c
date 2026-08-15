@@ -77,6 +77,8 @@ SzView *sz_lang_view_radio(SzSignalInt *sig, int64_t value, SzString *label) {
 
 SzView *sz_lang_view_slider(SzSignalInt *sig) { return sz_view_slider(sig); }
 
+SzView *sz_lang_view_progress(SzSignalInt *sig) { return sz_view_progress(sig); }
+
 SzView *sz_lang_view_column(void) { return sz_view_column(); }
 
 SzView *sz_lang_view_row(void) { return sz_view_row(); }

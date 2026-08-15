@@ -251,6 +251,14 @@ SzView *sz_view_slider(SzSignalInt *sig) {
   return v;
 }
 
+SzView *sz_view_progress(SzSignalInt *sig) {
+  SzView *v = view_new(SZ_VIEW_PROGRESS);
+  v->sig_int = sig;
+  v->a11y_role = SZ_A11Y_PROGRESS;
+  v->a11y_label = sz_strdup("progress");
+  return v;
+}
+
 static int64_t slider_clamp(int64_t n) {
   if (n < 0)
     return 0;
@@ -322,6 +330,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "slider";
   case SZ_A11Y_RADIO:
     return "radio";
+  case SZ_A11Y_PROGRESS:
+    return "progress";
   default:
     return "none";
   }
@@ -354,7 +364,7 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
                on ? 1 : 0);
       label = live;
     }
-    if (v->kind == SZ_VIEW_SLIDER) {
+    if (v->kind == SZ_VIEW_SLIDER || v->kind == SZ_VIEW_PROGRESS) {
       int64_t n = v->sig_int ? slider_clamp(sz_signal_int_get(v->sig_int)) : 0;
       snprintf(live, sizeof live, "%lld", (long long)n);
       label = live;
@@ -1150,6 +1160,14 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     if (max_w > 0 && v->frame.w > max_w)
       v->frame.w = max_w;
     v->frame.h = theme->control_h;
+    break;
+  case SZ_VIEW_PROGRESS:
+    v->frame.w = max_w > 0 ? max_w : 120.f;
+    if (v->frame.w < 48.f)
+      v->frame.w = 48.f;
+    if (max_w > 0 && v->frame.w > max_w)
+      v->frame.w = max_w;
+    v->frame.h = 8.f;
     break;
   case SZ_VIEW_TEXT_FIELD:
     v->frame.w = max_w > 0 ? max_w : 120.f;
@@ -2182,6 +2200,16 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     paint_rect(c, v->frame.x, v->frame.y + (v->frame.h - track_h) * 0.5f,
                tx - v->frame.x + thumb * 0.5f, track_h, theme->primary);
     paint_rect(c, tx, ty, thumb, thumb, theme->primary);
+    break;
+  }
+  case SZ_VIEW_PROGRESS: {
+    float n;
+    float fw;
+    n = (float)slider_clamp(v->sig_int ? sz_signal_int_get(v->sig_int) : 0);
+    fw = v->frame.w * (n / 100.f);
+    paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->muted);
+    if (fw > 0.f)
+      paint_rect(c, v->frame.x, v->frame.y, fw, v->frame.h, theme->primary);
     break;
   }
   case SZ_VIEW_TEXT_FIELD: {
