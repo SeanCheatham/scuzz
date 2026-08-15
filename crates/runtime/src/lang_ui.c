@@ -91,6 +91,10 @@ SzView *sz_lang_view_list_tile(SzString *title, SzView *trailing) {
   return sz_view_list_tile(title ? sz_string_cstr(title) : "", trailing);
 }
 
+SzView *sz_lang_view_badge(SzSignalInt *sig, SzView *child) {
+  return sz_view_badge(sig, child);
+}
+
 SzView *sz_lang_view_column(void) { return sz_view_column(); }
 
 SzView *sz_lang_view_row(void) { return sz_view_row(); }

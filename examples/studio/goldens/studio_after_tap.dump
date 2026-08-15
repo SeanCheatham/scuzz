@@ -16,6 +16,7 @@ radio:Tasks=1
 textfield:item
 button:Add
 switch:On=0
+badge:0
 chip:Pin=0
 button:Rename
 scroll:scroll

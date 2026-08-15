@@ -118,7 +118,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_EXCLUDE_SEMANTICS || kind == SZ_VIEW_ELLIPSIS ||
          kind == SZ_VIEW_TEXT_COLOR || kind == SZ_VIEW_GAP ||
          kind == SZ_VIEW_FONT_SIZE || kind == SZ_VIEW_BORDER ||
-         kind == SZ_VIEW_RADIUS || kind == SZ_VIEW_LIST_TILE;
+         kind == SZ_VIEW_RADIUS || kind == SZ_VIEW_LIST_TILE ||
+         kind == SZ_VIEW_BADGE;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -290,6 +291,16 @@ SzView *sz_view_list_tile(const char *title, SzView *trailing) {
   return v;
 }
 
+SzView *sz_view_badge(SzSignalInt *sig, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_BADGE);
+  v->sig_int = sig;
+  v->a11y_role = SZ_A11Y_BADGE;
+  v->a11y_label = sz_strdup("badge");
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
 static int64_t slider_clamp(int64_t n) {
   if (n < 0)
     return 0;
@@ -369,6 +380,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "chip";
   case SZ_A11Y_LIST_TILE:
     return "listtile";
+  case SZ_A11Y_BADGE:
+    return "badge";
   default:
     return "none";
   }
@@ -404,6 +417,11 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
     }
     if (v->kind == SZ_VIEW_SLIDER || v->kind == SZ_VIEW_PROGRESS) {
       int64_t n = v->sig_int ? slider_clamp(sz_signal_int_get(v->sig_int)) : 0;
+      snprintf(live, sizeof live, "%lld", (long long)n);
+      label = live;
+    }
+    if (v->kind == SZ_VIEW_BADGE) {
+      int64_t n = v->sig_int ? sz_signal_int_get(v->sig_int) : 0;
       snprintf(live, sizeof live, "%lld", (long long)n);
       label = live;
     }
@@ -1760,6 +1778,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_TEXT_COLOR:
   case SZ_VIEW_BORDER:
   case SZ_VIEW_RADIUS:
+  case SZ_VIEW_BADGE:
     layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     break;
   case SZ_VIEW_MAX_LINES: {
@@ -2293,6 +2312,34 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
                  theme->foreground, theme->font_px);
     for (i = 0; i < v->child_count; i++)
       paint_node(v->children[i], c, theme);
+    break;
+  }
+  case SZ_VIEW_BADGE: {
+    float d;
+    float bx, by;
+    float font;
+    int64_t n;
+    for (i = 0; i < v->child_count; i++)
+      paint_node(v->children[i], c, theme);
+    d = 14.f;
+    if (d > v->frame.w)
+      d = v->frame.w;
+    if (d > v->frame.h)
+      d = v->frame.h;
+    if (d < 1.f)
+      break;
+    bx = v->frame.x + v->frame.w - d;
+    by = v->frame.y;
+    paint_rect(c, bx, by, d, d, theme->primary);
+    n = v->sig_int ? sz_signal_int_get(v->sig_int) : 0;
+    if (n < 0)
+      n = 0;
+    snprintf(buf, sizeof buf, "%lld", (long long)n);
+    font = d * 0.6f;
+    if (font < 8.f)
+      font = 8.f;
+    paint_string(c, buf, bx + 2.f, by + (d + font) * 0.5f, theme->on_primary,
+                 font);
     break;
   }
   case SZ_VIEW_RADIO: {

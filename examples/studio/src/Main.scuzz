@@ -31,6 +31,9 @@ law hasChip: Bool =
 law hasListTile: Bool =
   Law.a11yHas("listtile:")
 
+law hasBadge: Bool =
+  Law.a11yHas("badge:")
+
 @main def main: IO[Unit] =
   Sys.getenv("SCUZZ_TODO_PATH").flatMap(envPath =>
     for {
@@ -56,7 +59,7 @@ law hasListTile: Bool =
 } yield if (n == 0) () else for {
   xs = List.append(Signal.getList(items), d)
   _ = Signal.setList(items, xs)
-} yield Signal.setStr(draft, "")), View.switch(live, "On"), View.chip(pin, "Pin"), View.button("Rename", _ => for {
+} yield Signal.setStr(draft, "")), View.switch(live, "On"), View.badge(count, View.chip(pin, "Pin")), View.button("Rename", _ => for {
   xs = Signal.getList(items)
   ys = List.setAt(xs, 0, "oat milk")
 } yield Signal.setList(items, ys))), View.expanded(View.scroll(View.each(items, s => View.listTile(Tasks.itemLabel(s), View.row(View.button(if (Tasks.itemDone(s) == 1) "Undo" else "Done", _ => for {
@@ -65,6 +68,6 @@ law hasListTile: Bool =
   xs = Signal.getList(items)
   body = Tasks.saveBody(xs)
   _ <- Fs.write(path, body)
-} yield ()), View.button("Clear", _ => Signal.setList(items, [])))).require(listLenNonNeg).require(itemPastEndEmpty).require(draftNonNeg).require(hasAdd).require(hasClear).require(hasHome).require(hasTasks).require(hasProgress).require(hasSwitch).require(hasChip).require(hasListTile).require(Signal.get(count) >= 0)
+} yield ()), View.button("Clear", _ => Signal.setList(items, [])))).require(listLenNonNeg).require(itemPastEndEmpty).require(draftNonNeg).require(hasAdd).require(hasClear).require(hasHome).require(hasTasks).require(hasProgress).require(hasSwitch).require(hasChip).require(hasListTile).require(hasBadge).require(Signal.get(count) >= 0)
     } yield ()
   )

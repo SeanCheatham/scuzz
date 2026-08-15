@@ -4636,6 +4636,157 @@ static void test_list_tile_trailing_in_taps_dump(void) {
   remove(path);
 }
 
+static void test_badge_sizes(void) {
+  SzView *badge, *ch;
+  SzSignalInt *sig, *pin;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, cf;
+
+  pin = sz_signal_int(0);
+  sig = sz_signal_int(3);
+  ch = sz_view_chip(pin, "Pin");
+  badge = sz_view_badge(sig, ch);
+  sz_view_layout(badge, 200.f, 200.f, theme);
+  assert(sz_view_kind(badge) == SZ_VIEW_BADGE);
+  f = sz_view_frame(badge);
+  cf = sz_view_frame(ch);
+  assert(fabsf(f.w - cf.w) < 0.5f);
+  assert(fabsf(f.h - cf.h) < 0.5f);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  sz_view_free(badge);
+  sz_signal_int_free(sig);
+  sz_signal_int_free(pin);
+}
+
+static void test_badge_a11y(void) {
+  SzView *badge;
+  SzSignalInt *sig, *pin;
+  SzString *dump;
+
+  pin = sz_signal_int(0);
+  sig = sz_signal_int(0);
+  badge = sz_view_badge(sig, sz_view_chip(pin, "Pin"));
+  dump = sz_view_a11y_dump(badge);
+  assert(strstr(sz_string_cstr(dump), "badge:0") != NULL);
+  assert(strstr(sz_string_cstr(dump), "chip:Pin=0") != NULL);
+  sz_string_free(dump);
+  sz_signal_int_set(sig, 3);
+  dump = sz_view_a11y_dump(badge);
+  assert(strstr(sz_string_cstr(dump), "badge:3") != NULL);
+  sz_string_free(dump);
+  sz_view_free(badge);
+  sz_signal_int_free(sig);
+  sz_signal_int_free(pin);
+}
+
+static void test_badge_not_tap_target(void) {
+  SzView *badge;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(3);
+  badge = sz_view_badge(sig, sz_view_text("x"));
+  sz_view_layout(badge, 200.f, 80.f, theme);
+  f = sz_view_frame(badge);
+  assert(!sz_view_is_tap_target(badge));
+  assert(sz_view_hit_test(badge, f.x + 4.f, f.y + f.h * 0.5f) == NULL);
+  assert(sz_view_handle_tap(badge, f.x + 4.f, f.y + f.h * 0.5f) == 0);
+  assert(sz_signal_int_get(sig) == 3);
+  sz_view_free(badge);
+  sz_signal_int_free(sig);
+}
+
+static void test_badge_child_tap(void) {
+  SzView *badge, *ch, *hit;
+  SzSignalInt *sig, *pin;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  pin = sz_signal_int(0);
+  sig = sz_signal_int(3);
+  ch = sz_view_chip(pin, "Pin");
+  badge = sz_view_badge(sig, ch);
+  sz_view_layout(badge, 200.f, 80.f, theme);
+  f = sz_view_frame(ch);
+  hit = sz_view_hit_test(badge, f.x + 8.f, f.y + f.h * 0.5f);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_CHIP);
+  assert(sz_view_handle_tap(badge, f.x + 8.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(pin) == 1);
+  assert(sz_signal_int_get(sig) == 3);
+  sz_view_free(badge);
+  sz_signal_int_free(sig);
+  sz_signal_int_free(pin);
+}
+
+static void test_badge_paint_mark(void) {
+  SzView *root;
+  SzSignalInt *sig, *pin;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  pin = sz_signal_int(0);
+  sig = sz_signal_int(3);
+  root = sz_view_badge(sig, sz_view_chip(pin, "Pin"));
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  f = sz_view_frame(root);
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  /* Off chip fill stays surface; badge mark is primary at top-right. */
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFF, 0xFF));
+  assert(px_rgb(px, 80, (int)(f.x + f.w - 4.f), (int)(f.y + 4.f), 0x14, 0x28,
+                0x50));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+  sz_signal_int_free(sig);
+  sz_signal_int_free(pin);
+}
+
+static void test_badge_child_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig, *pin;
+  const char *path = "/tmp/scuzz_ui_badge.dump";
+  char *dump;
+  const char *taps;
+
+  pin = sz_signal_int(0);
+  sig = sz_signal_int(3);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_badge(sig, sz_view_chip(pin, "Pin")));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "badge:3") != NULL);
+  assert(strstr(dump, "chip:Pin=0") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "badge") == NULL);
+  assert(strstr(taps, "Pin") != NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  sz_signal_int_free(pin);
+  remove(path);
+}
+
 static void test_radio_sizes(void) {
   SzView *r;
   SzSignalInt *sig;
@@ -6390,6 +6541,12 @@ int main(void) {
   test_list_tile_trailing_tap();
   test_list_tile_paint();
   test_list_tile_trailing_in_taps_dump();
+  test_badge_sizes();
+  test_badge_a11y();
+  test_badge_not_tap_target();
+  test_badge_child_tap();
+  test_badge_paint_mark();
+  test_badge_child_in_taps_dump();
   test_radio_sizes();
   test_radio_a11y_off_on();
   test_radio_tap_writes_value();
