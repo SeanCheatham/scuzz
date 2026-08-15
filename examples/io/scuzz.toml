@@ -2,7 +2,3 @@
 name = "io"
 version = "0.1.0"
 description = "Blessed IO kits: Clock, Fs, impurity, concurrency, Resource, Stream, Net.serve"
-
-[targets.native]
-kind = "executable"
-main = "Main"

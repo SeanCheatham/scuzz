@@ -3,10 +3,6 @@ name = "studio"
 version = "0.1.0"
 description = "Desktop stay-open app: layout, file-backed list, laws"
 
-[targets.native]
-kind = "executable"
-main = "Main"
-
 [ui]
 default_runtime = "desktop"
 headless_size = [400, 560]

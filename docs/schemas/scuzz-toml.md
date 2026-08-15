@@ -10,10 +10,6 @@ name = "hello"
 version = "0.1.0"
 description = "Scuzz Lang hello world"
 
-[targets.native]
-kind = "executable"
-main = "Main"
-
 [dependencies]
 shared = { path = "../shared" }
 
@@ -35,16 +31,9 @@ bundle_id = "dev.scuzz.hello"  # used by `scuzz package`
 | `version` | string | Semver-ish |
 | `description` | string | Optional prose. The toolchain ignores it. |
 
-### `[targets.<name>]`
-
-| Key | Type | Notes |
-| --- | --- | --- |
-| `kind` | `"executable"` \| `"lib"` | v0: executable |
-| `main` | string | Entry module / `@main` symbol hint |
-
 ### `[dependencies]`
 
-v0: named local path dependencies only. No git, hosted, version, or registry forms.
+Named local path dependencies only. No git, hosted, version, or registry forms.
 
 ```toml
 [dependencies]
@@ -70,7 +59,7 @@ Optional. Used by `scuzz run` / `test` / `package`.
 | `headless_size` | `[w, h]` | Logical pixels for Headless / goldens / Mobile host |
 | `headless_scale` | float | Headless session scale (default 1). Desktop uses OS backing scale when higher. |
 | `tap_button` | int (optional) | 0-based button index for `_after_tap` goldens (`SCUZZ_UI_TAP_N`) |
-| `tap_text` | string (optional) | Text injected before the scripted tap (`SCUZZ_UI_TEXT`). Used by TextField apps like Todo. |
+| `tap_text` | string (optional) | Text injected before the scripted tap (`SCUZZ_UI_TEXT`) |
 | `bundle_id` | string | Android package / iOS `CFBundleIdentifier` for `scuzz package` |
 
 ## Source layout (convention)

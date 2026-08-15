@@ -2,7 +2,3 @@
 name = "hello"
 version = "0.1.0"
 description = "IO hello world"
-
-[targets.native]
-kind = "executable"
-main = "Main"

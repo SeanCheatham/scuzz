@@ -13,6 +13,7 @@ pub enum TypeError {
 }
 
 impl TypeError {
+    #[cfg(test)]
     pub fn message(&self) -> &str {
         match self {
             TypeError::Msg(m) => m.as_str(),

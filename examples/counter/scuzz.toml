@@ -2,10 +2,6 @@
 name = "counter"
 version = "0.1.0"
 
-[targets.native]
-kind = "executable"
-main = "Main"
-
 [dependencies]
 shared = { path = "../shared" }
 

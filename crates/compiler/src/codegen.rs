@@ -49,7 +49,6 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_string_lines(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_println(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_pure(ptr)").unwrap();
-    writeln!(out, "declare ptr @sz_io_delay(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_flatmap(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_fail_cstr(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_sleep_ms(i64)").unwrap();

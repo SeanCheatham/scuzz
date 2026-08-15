@@ -1,31 +1,26 @@
 //! Scuzz Lang compiler: parse kernel dialect → LLVM IR → native link.
 
-pub mod ast;
-pub mod check;
-pub mod codegen;
-pub mod complete;
-pub mod definition;
+pub(crate) mod ast;
+pub(crate) mod check;
+pub(crate) mod codegen;
+pub(crate) mod complete;
+pub(crate) mod definition;
 pub mod driver;
 pub mod format;
 pub mod fuzz;
-pub mod hover;
-pub mod lexer;
-pub mod lower;
-pub mod lsp;
+pub(crate) mod hover;
+pub(crate) mod lexer;
+pub(crate) mod lower;
+pub(crate) mod lsp;
 pub mod manifest;
 pub mod mutate;
-pub mod overlay;
-pub mod parser;
-pub mod resolve;
-pub mod span;
-pub mod typ;
+pub(crate) mod overlay;
+pub(crate) mod parser;
+pub(crate) mod resolve;
+pub(crate) mod span;
+pub(crate) mod typ;
 
-pub use check::{
-    check_project, check_project_with, complete_project, definition_project, format_diagnostics,
-    hover_project, Diagnostic,
-};
-pub use driver::{
-    compile_prepared_program, compile_project, load_verify_program, CompileOptions, CompileOutput,
-};
+pub use check::{check_project, format_diagnostics};
+pub use driver::{compile_prepared_program, compile_project, CompileOutput};
 pub use lsp::run_lsp;
-pub use span::{line_col_to_offset, offset_to_line_col, Span};
+pub use overlay::collect_fmt_sources;

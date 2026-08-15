@@ -9,8 +9,6 @@ use std::path::Path;
 pub struct Manifest {
     pub package: Package,
     #[serde(default)]
-    pub targets: Targets,
-    #[serde(default)]
     pub ui: Option<UiConfig>,
     /// Named path dependencies, sorted by name with `BTreeMap`.
     #[serde(default)]
@@ -31,30 +29,7 @@ fn default_version() -> String {
     "0.0.0".into()
 }
 
-#[derive(Debug, Clone, Default, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct Targets {
-    #[serde(default)]
-    pub native: Option<NativeTarget>,
-}
-
-#[derive(Debug, Clone, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct NativeTarget {
-    #[serde(default = "default_kind")]
-    pub kind: String,
-    #[serde(default = "default_main")]
-    pub main: String,
-}
-
-fn default_kind() -> String {
-    "executable".into()
-}
-fn default_main() -> String {
-    "Main".into()
-}
-
-/// v0 local path dependency: `{ path = "..." }` only.
+/// Local path dependency: `{ path = "..." }` only.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathDependency {
     pub path: String,
@@ -177,7 +152,7 @@ pub fn parse_manifest(text: &str) -> anyhow::Result<Manifest> {
     Ok(m)
 }
 
-const KNOWN_TABLES: &str = "package, targets.native, dependencies, ui";
+const KNOWN_TABLES: &str = "package, dependencies, ui";
 
 fn reject_unknown_manifest_keys(value: &toml::Value) -> anyhow::Result<()> {
     let Some(table) = value.as_table() else {
@@ -186,12 +161,6 @@ fn reject_unknown_manifest_keys(value: &toml::Value) -> anyhow::Result<()> {
     for (key, val) in table {
         match key.as_str() {
             "package" => reject_table_keys(val, "package", &["name", "version", "description"])?,
-            "targets" => {
-                reject_table_keys(val, "targets", &["native"])?;
-                if let Some(native) = val.get("native") {
-                    reject_table_keys(native, "targets.native", &["kind", "main"])?;
-                }
-            }
             "dependencies" => {}
             "ui" => reject_table_keys(
                 val,
@@ -358,6 +327,25 @@ x = 1
         .to_string();
         assert!(
             err.contains("unknown scuzz.toml table [plugins]"),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_targets_table() {
+        let err = parse_manifest(
+            r#"
+[package]
+name = "app"
+[targets.native]
+kind = "executable"
+main = "Main"
+"#,
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(
+            err.contains("unknown scuzz.toml table [targets]"),
             "unexpected: {err}"
         );
     }

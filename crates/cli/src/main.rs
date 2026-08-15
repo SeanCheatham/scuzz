@@ -4,11 +4,11 @@ mod support;
 
 use anyhow::{bail, Context, Result};
 use clap::{Parser, Subcommand};
+use scuzz_compiler::collect_fmt_sources;
 use scuzz_compiler::compile_project;
 use scuzz_compiler::driver::{find_runtime_dir, wait_for_source_change};
 use scuzz_compiler::format::format_source;
 use scuzz_compiler::manifest::load_manifest;
-use scuzz_compiler::overlay::collect_fmt_sources;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitCode};
 use support::resolve_dir;
@@ -314,10 +314,6 @@ fn real_main() -> Result<ExitCode> {
 name = "{package_name}"
 version = "0.1.0"
 
-[targets.native]
-kind = "executable"
-main = "Main"
-
 [ui]
 default_runtime = "headless"
 headless_size = [200, 120]
@@ -351,10 +347,6 @@ bundle_id = "dev.scuzz.{package_name}"
                         r#"[package]
 name = "{package_name}"
 version = "0.1.0"
-
-[targets.native]
-kind = "executable"
-main = "Main"
 "#
                     ),
                 )?;
@@ -690,7 +682,7 @@ fn apply_ui_env(
 ) {
     cmd.env("SCUZZ_SNAPSHOT_PATH", snapshot);
     cmd.env("SCUZZ_UI_RUNTIME", "headless");
-    // Isolate Todo/Fs path so goldens do not share /tmp/scuzz_todo.txt.
+    // Isolate studio Fs path so golden runs do not share one temp file.
     let todo_path = std::env::temp_dir().join(format!(
         "scuzz-todo-{}-{}",
         std::process::id(),
