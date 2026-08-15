@@ -44,7 +44,7 @@ if [ ! -x "$SCUZZ" ]; then
   SCUZZ="$ROOT/target/release/scuzz"
 fi
 # App IR (host binary is a byproduct; the .ll is what this script consumes).
-# sk_sw keeps the host link free of the Skia prebuilt's brotli dependency.
+# sk_sw avoids the macOS Skia CPU prebuilt on the iOS simulator link.
 SCUZZ_SKIA=sk_sw "$SCUZZ" build "$PROJ"
 
 # App object. Rename main so the shell owns the process entry. The IR names

@@ -56,9 +56,9 @@ build/test_skia: tests/test_skia.c lib
 	@extra=""; \
 	if [ -f build/sk_capi_backend ] && grep -qx skia build/sk_capi_backend; then \
 	  if [ "$$(uname -s)" = Darwin ]; then \
-	    extra="-lc++ -lm -lz -lbz2 -lbrotlidec -lbrotlicommon -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon"; \
+	    extra="-lc++ -lm -lz -lbz2 -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon"; \
 	  else \
-	    extra="-lstdc++ -lm -lz -lbz2 -lbrotlidec -lbrotlicommon"; \
+	    extra="-lstdc++ -lm -lz -lbz2"; \
 	  fi; \
 	fi; \
 	$(CC) $(CFLAGS) $(INCLUDES) tests/test_skia.c -Lbuild -lsk_capi $$extra -lpthread -o $@

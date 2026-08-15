@@ -24,11 +24,12 @@ files). `crates/ffi-skia/Makefile` copies that archive into
 need no Skia headers — only `sk_capi.h`. Prefer a single fat
 `libsk_capi.a` (shim + Skia objects + embedded font). Companion archives in the
 same directory are also linked. Linking the Skia prebuilt needs
-`-lstdc++`/`-lc++` `-lm -lz -lbz2 -lbrotlidec -lbrotlicommon` (`scuzz`
-adds these when `build/sk_capi_backend` is `skia`). On Darwin also link
-CoreFoundation / CoreGraphics / CoreText / Foundation / Carbon. On Linux install
-`zlib1g-dev libbz2-dev libbrotli-dev`. On macOS, Homebrew `brotli` / `bzip2` if
-the linker cannot find them.
+`-lstdc++`/`-lc++` `-lm -lz -lbz2` (`scuzz` adds these when
+`build/sk_capi_backend` is `skia`). On Darwin also link CoreFoundation /
+CoreGraphics / CoreText / Foundation / Carbon. The fat archive does not
+need host brotli. `build_skia_prebuilt.sh` sets `skia_use_freetype_woff2=false`,
+merges any `libbrotli*.a` Skia produced, and fails if `libsk_capi.a` still has
+undefined Brotli symbols. On Linux install `zlib1g-dev libbz2-dev`.
 
 **Pin / release:** `third_party/skia/PIN` records the as-needed `skia-cpu-vN`
 URL template (`url=…/skia-{triple}-cpu.tar.gz`). `scripts/package_release.sh`

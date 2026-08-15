@@ -54,11 +54,7 @@ jobs:
           sudo apt-get update
           # libx11-dev: [ui] apps compile embedder-desktop (x11_present.c).
           sudo apt-get install -y clang make libx11-dev \
-            zlib1g-dev libbz2-dev libbrotli-dev
-
-      - name: Install Homebrew Skia link deps
-        if: runner.os == 'macOS'
-        run: brew install brotli bzip2
+            zlib1g-dev libbz2-dev
 
       - name: Install Rust (stable with rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@stable
@@ -67,9 +63,6 @@ jobs:
         env:
           SCUZZ_VERSION: ${{ github.event.inputs.tag || github.ref_name }}
         run: |
-          if [ "$(uname -s)" = "Darwin" ]; then
-            export LIBRARY_PATH="$(brew --prefix)/lib:$(brew --prefix bzip2)/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
-          fi
           TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
           ./scripts/package_release.sh
           test -f "dist/scuzz-${TRIPLE}.tar.gz"
@@ -138,4 +131,4 @@ jobs:
             ```
 
             Pin a tag with `SCUZZ_VERSION=${{ github.event.inputs.tag || github.ref_name }}`.
-            Apps need `clang` + `make`. Linux `[ui]` also needs `zlib1g-dev libbz2-dev libbrotli-dev`.
+            Apps need `clang` + `make`. Linux `[ui]` also needs `zlib1g-dev libbz2-dev`.

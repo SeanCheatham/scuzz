@@ -237,10 +237,9 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
             .map(|s| s.trim() == "skia")
             .unwrap_or(false);
         if is_skia {
-            link.arg("-lz")
-                .arg("-lbz2")
-                .arg("-lbrotlidec")
-                .arg("-lbrotlicommon");
+            // zlib/bz2 stay on the link line (SDK or -dev packages). The fat
+            // archive does not need host brotli (WOFF2 off; packer fails if it leaks).
+            link.arg("-lz").arg("-lbz2");
             if cfg!(target_os = "macos") {
                 // Residual CoreText / Carbon symbols in the Darwin Skia fat archive.
                 for fw in [

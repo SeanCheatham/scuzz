@@ -4,7 +4,7 @@
 # Installs a self-contained release tree under $PREFIX/share/scuzz and a
 # wrapper at $PREFIX/bin/scuzz that sets SCUZZ_HOME. App builds need
 # clang/make. Linux [ui] linking against the packaged Skia CPU prebuilt also
-# needs zlib/bzip2/brotli. Rust/cargo is not required when installing from a
+# needs zlib/bzip2. Rust/cargo is not required when installing from a
 # prebuilt artifact (RELEASE_TGZ / RELEASE_DIR / GitHub Release). From a
 # checkout, `package_release.sh` builds the Rust CLI.
 #
@@ -346,6 +346,6 @@ if [ -f "$SHARE/VERSION" ]; then
   echo "  $(tr '\n' ' ' <"$SHARE/VERSION")"
 fi
 echo "Put $BIN on PATH (clang + make required to build apps;"
-echo "  Linux [ui] also needs zlib/bzip2/brotli: zlib1g-dev libbz2-dev libbrotli-dev), then:"
+echo "  Linux [ui] also needs zlib/bzip2: zlib1g-dev libbz2-dev), then:"
 echo "  scuzz new myapp --ui"
 echo "  cd myapp && scuzz test && scuzz run --headless"

@@ -6,7 +6,7 @@ Short path from install to a Headless UI or IO app. For product thesis, design l
 
 ```bash
 curl -fsSL https://github.com/SeanCheatham/scuzz/releases/latest/download/install.sh | sh
-# put ~/.local/bin on PATH (apps need clang + make; Linux [ui] also zlib/bz2/brotli)
+# put ~/.local/bin on PATH (apps need clang + make; Linux [ui] also zlib/bz2)
 # from a checkout: ./scripts/install.sh  (packages scuzz + SDK → ~/.local/share/scuzz)
 scuzz new myapp --ui
 cd myapp

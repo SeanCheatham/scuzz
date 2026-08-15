@@ -48,10 +48,10 @@ jobs:
       - name: Install clang/make/X11/xvfb + Skia link deps
         run: |
           sudo apt-get update
-          # zlib/bz2/brotli: the release packs the pinned Skia CPU prebuilt.
-          # Linking [ui] apps needs these (same as skia-cpu.yml runtime link set).
+          # zlib/bz2: SDK/dev packages for the Skia CPU prebuilt. Brotli stays
+          # inside libsk_capi.a.
           sudo apt-get install -y clang make libx11-dev xvfb \
-            zlib1g-dev libbz2-dev libbrotli-dev
+            zlib1g-dev libbz2-dev
 
       - name: Install Rust (stable with rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@stable
@@ -317,17 +317,12 @@ jobs:
       - uses: actions/checkout@v4
       - name: Install Rust (stable with rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@stable
-      - name: Install Homebrew Skia link deps
-        run: brew install brotli bzip2
       - name: Runtime tests
-        run: |
-          export LIBRARY_PATH="$(brew --prefix)/lib:$(brew --prefix bzip2)/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
-          make -C crates/runtime test CC=clang
+        run: make -C crates/runtime test CC=clang
       - name: Compiler unit tests
         run: cargo test -p scuzz-compiler
       - name: Hello smoke
         run: |
-          export LIBRARY_PATH="$(brew --prefix)/lib:$(brew --prefix bzip2)/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
           cargo build -p scuzz
           cargo run -p scuzz -- build --full examples/hello
           cargo run -p scuzz -- test examples/hello
@@ -344,17 +339,11 @@ jobs:
       - name: Install Rust (stable with rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Install Homebrew Skia link deps
-        run: brew install brotli bzip2
-
       - name: Runtime + UI tests
-        run: |
-          export LIBRARY_PATH="$(brew --prefix)/lib:$(brew --prefix bzip2)/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
-          make -C crates/runtime test CC=clang
+        run: make -C crates/runtime test CC=clang
 
       - name: Build CLI + embedders
         run: |
-          export LIBRARY_PATH="$(brew --prefix)/lib:$(brew --prefix bzip2)/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
           make -C crates/ffi-skia lib CC=clang
           grep -qx skia crates/ffi-skia/build/sk_capi_backend
           make -C crates/embedder-desktop lib CC=clang
@@ -363,7 +352,6 @@ jobs:
 
       - name: Package release + install smoke
         run: |
-          export LIBRARY_PATH="$(brew --prefix)/lib:$(brew --prefix bzip2)/lib${LIBRARY_PATH:+:$LIBRARY_PATH}"
           TRIPLE="$(uname -s | tr '[:upper:]' '[:lower:]')-$(uname -m)"
           ./scripts/package_release.sh
           test -f "dist/scuzz-${TRIPLE}.tar.gz"
