@@ -209,12 +209,11 @@ jobs:
             for {
               count = Signal.int(0)
               label = Signal.map(count, n => s"count = $n")
-              root = View.column(
+              _ <- Ui.run(_ => View.column(
                 View.text("Bug"),
                 View.bindText(label),
                 View.row(View.button("boom", _ => Fs.read("/definitely/missing")))
-              )
-              _ <- Ui.run(root)
+              ))
             } yield ()
           EOF
           if cargo run -p scuzz -- fuzz --iters 8 /tmp/scuzz-fuzzbug; then
@@ -231,12 +230,11 @@ jobs:
             for {
               count = Signal.int(0)
               label = Signal.map(count, n => s"count = $n")
-              root = View.column(
+              _ <- Ui.run(_ => View.column(
                 View.text("Bug"),
                 View.bindText(label),
                 View.row(View.button("boom", _ => Fs.read("/definitely/missing")))
-              )
-              _ <- Ui.run(root)
+              ))
             } yield ()
           EOF
           if cargo run -p scuzz -- fuzz --exhaust --depth 1 /tmp/scuzz-fuzzbug-ex; then

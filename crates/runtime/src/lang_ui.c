@@ -313,8 +313,6 @@ typedef struct {
 } RunRebuildEnv;
 
 
-static SzView *constant_root(void *env) { return (SzView *)env; }
-
 static void *thunk_run_rebuild(void *env) {
   RunRebuildEnv *e = (RunRebuildEnv *)env;
   SzUiConfig cfg;
@@ -453,8 +451,4 @@ SzIo *sz_ui_run_rebuild(SzUiRebuildFn fn, void *env) {
   e->rebuild = fn;
   e->env = env;
   return sz_io_delay(thunk_run_rebuild, e);
-}
-
-SzIo *sz_ui_run_view(SzView *root) {
-  return sz_ui_run_rebuild(constant_root, root);
 }

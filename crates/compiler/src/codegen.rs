@@ -244,7 +244,6 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_image(i64, i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_add_child(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_show_when(ptr, i64, ptr)").unwrap();
-    writeln!(out, "declare ptr @sz_ui_run_view(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_ui_run_rebuild(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_law_signal_int(i64)").unwrap();
     writeln!(out, "declare ptr @sz_law_signal_str(i64)").unwrap();
@@ -2430,23 +2429,15 @@ fn emit_ui_run(
     prefix: &str,
 ) -> Emitted {
     assert!(args.len() == 1, "Ui.run expects 1 arg");
-    if let ExprKind::Lambda { param, body } = &args[0].kind {
-        let lam = emit_rebuild_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
-        let mut code = lam.code;
-        unpack_closure(&mut code, &lam.value, prefix);
-        writeln!(
-            code,
-            "  %{prefix}_v = call ptr @sz_ui_run_rebuild(ptr %{prefix}_fnp, ptr %{prefix}_envp)"
-        )
-        .unwrap();
-        return io_emitted(code, format!("%{prefix}_v"), Kind::Ptr);
-    }
-    let root = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
-    let mut code = root.code;
+    let ExprKind::Lambda { param, body } = &args[0].kind else {
+        panic!("Ui.run expects _ => View");
+    };
+    let lam = emit_rebuild_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
+    let mut code = lam.code;
+    unpack_closure(&mut code, &lam.value, prefix);
     writeln!(
         code,
-        "  %{prefix}_v = call ptr @sz_ui_run_view(ptr {})",
-        root.value
+        "  %{prefix}_v = call ptr @sz_ui_run_rebuild(ptr %{prefix}_fnp, ptr %{prefix}_envp)"
     )
     .unwrap();
     io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
@@ -4293,15 +4284,6 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
-        "Ui.run" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_ui_run_view(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
         other => {
             let f = ctx.funs.resolve(other, ctx.current_module).ok();
             let (ret_ty, ret_kind, payload, sym) = if let Some(f) = f {
@@ -5347,21 +5329,6 @@ law always: Bool = 1 == 1
             ir.contains("sz_color_rgba"),
             "expected Color.rgba in IR:\n{ir}"
         );
-    }
-
-    #[test]
-    fn emit_ui_run_view_still_emits() {
-        let src = r#"@main def main: IO[Unit] =
-  for {
-    root = View.text("x")
-    _ <- Ui.run(root)
-  } yield ()
-"#;
-        let p = crate::lower::lower_program(parse(src).unwrap());
-        crate::typ::typecheck(&p).expect("typecheck");
-        let ir = emit_llvm(&p);
-        assert!(ir.contains("call ptr @sz_ui_run_view"));
-        assert!(!ir.contains("sz_ui_reload_rebuild"));
     }
 
     #[test]

@@ -516,7 +516,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.excludeSemantics",
         "View.excludeSemantics(child: View): View",
     ),
-    ("Ui.run", "Ui.run(view: View): IO[Unit]"),
+    ("Ui.run", "Ui.run(_ => View): IO[Unit]"),
     (
         "Law.check",
         "Law.check(name: String, ok: Bool, value: T): T",
@@ -630,6 +630,13 @@ mod tests {
         let program = parse_file(src, "Main.scuzz").unwrap();
         let h = hover_in_source(&program, "Main.scuzz", src, offset).unwrap();
         assert!(h.contains("IO.println"), "{h}");
+    }
+
+    #[test]
+    fn hovers_ui_run() {
+        let src = "@main def main: IO[Unit] =\n  Ui.run(_ => View.text(\"x\"))\n";
+        let h = hover_src(src, "Ui.run");
+        assert!(h.contains("Ui.run(_ => View): IO[Unit]"), "{h}");
     }
 
     #[test]

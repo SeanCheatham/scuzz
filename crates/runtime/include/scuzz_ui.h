@@ -599,14 +599,13 @@ typedef SzString *(*SzSignalMapIntFn)(int64_t v, void *env);
 SzSignalStr *sz_lang_signal_map(SzSignalInt *src, SzSignalMapIntFn fn, void *env);
 SzView *sz_lang_view_bind_text(SzSignalStr *sig);
 
-/* Mount prebuilt root → pump → optional scripted tap → snapshot → unmount. */
-SzIo *sz_ui_run_view(SzView *root);
-/* Like sz_ui_run_view, but construction is a factory so stamp-watch can
- * re-run it. Watches SCUZZ_UI_RELOAD_STAMP when set. On stamp change,
- * loads SCUZZ_UI_RELOAD_CODE (dylib exporting sz_ui_reload_rebuild) if
- * that file exists, then rebuilds. Writes SCUZZ_UI_DEBUG_DUMP on dirty
- * pumps when set. Plays SCUZZ_UI_INJECT (tap/text/type/pump/scroll/
- * backspace) when that file changes. */
+/* Mount factory View → pump → optional scripted tap → snapshot → unmount.
+ * Construction is a factory so stamp-watch can re-run it. Watches
+ * SCUZZ_UI_RELOAD_STAMP when set. On stamp change, loads
+ * SCUZZ_UI_RELOAD_CODE (dylib exporting sz_ui_reload_rebuild) if that
+ * file exists, then rebuilds. Writes SCUZZ_UI_DEBUG_DUMP on dirty pumps
+ * when set. Plays SCUZZ_UI_INJECT (tap/text/type/pump/scroll/backspace)
+ * when that file changes. */
 SzIo *sz_ui_run_rebuild(SzUiRebuildFn fn, void *env);
 
 #ifdef __cplusplus

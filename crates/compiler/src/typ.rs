@@ -1760,6 +1760,8 @@ fn infer_lambda_arg(
             }
         }
         Ok(Type::Fun(Box::new(param_ty), Box::new(bt)))
+    } else if callee == "Ui.run" {
+        Err(TypeError::Msg("Ui.run expects _ => View".into()))
     } else {
         infer(expr, enums, funs, methods, current_module, env)
     }
@@ -2598,7 +2600,6 @@ fn infer_call(
         "Ui.run" => {
             expect_arity(callee, &arg_tys, 1)?;
             let ok = match &arg_tys[0] {
-                Type::Opaque(n) if n == "View" || n == "TapFn" => true,
                 Type::Fun(_, ret) => {
                     matches!(ret.as_ref(), Type::Opaque(n) if n == "View")
                 }
@@ -2606,7 +2607,7 @@ fn infer_call(
             };
             if !ok {
                 return Err(TypeError::Msg(format!(
-                    "Ui.run expects View or _ => View, got {:?}",
+                    "Ui.run expects _ => View, got {:?}",
                     arg_tys[0]
                 )));
             }
@@ -6308,8 +6309,25 @@ def note(n: Int where "x"): Unit = ()
         let p = lower_program(parse(src).unwrap());
         let err = typecheck(&p).unwrap_err();
         assert!(
-            err.message().contains("Ui.run expects View"),
+            err.message().contains("Ui.run expects _ => View"),
             "expected Ui.run type error, got {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_ui_run_bare_view() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    root = View.text("x")
+    _ <- Ui.run(root)
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("Ui.run expects _ => View"),
+            "expected factory-only Ui.run, got {}",
             err.message()
         );
     }
@@ -6317,7 +6335,7 @@ def note(n: Int where "x"): Unit = ()
     #[test]
     fn rejects_view_add_child() {
         let src = r#"@main def main: IO[Unit] =
-  Ui.run(View.addChild(View.column(), View.text("x")))
+  Ui.run(_ => View.addChild(View.column(), View.text("x")))
 "#;
         let p = lower_program(parse(src).unwrap());
         let err = typecheck(&p).unwrap_err();

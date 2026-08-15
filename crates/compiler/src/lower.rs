@@ -200,7 +200,7 @@ fn desugar_for(
     let has_draw = binders.iter().any(|b| matches!(b, ForBinder::Draw { .. }));
     let body = if has_draw {
         // `<-` desugars like monadic `map` on the final yield: wrap pure results.
-        // Effects belong in `<-` binders (`_ <- Ui.run(root); yield ()`).
+        // Effects belong in `<-` binders (`_ <- Ui.run(_ => root); yield ()`).
         Expr::new(ExprKind::IoPure(Box::new(body)), span.clone())
     } else {
         body
