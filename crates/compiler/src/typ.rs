@@ -2113,6 +2113,15 @@ fn infer_call(
             // Nullary or children: `View.column(a, b, …)` adds each child.
             Ok(Type::Opaque("View".into()))
         }
+        "View.grid" => {
+            if arg_tys.is_empty() {
+                return Err(TypeError::Msg(
+                    "View.grid expects column count, got 0 args".into(),
+                ));
+            }
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            Ok(Type::Opaque("View".into()))
+        }
         "View.each" => {
             if arg_tys.len() != 1 && arg_tys.len() != 2 {
                 return Err(TypeError::Msg(format!(
@@ -5162,6 +5171,7 @@ def note(n: Int where "x"): Unit = ()
         for call in [
             "View.column(View.stretch(View.text(\"x\")), View.button(\"Go\", _ => ()))",
             "View.wrap(View.text(\"a\"), View.text(\"b\"))",
+            "View.grid(2, View.text(\"a\"), View.text(\"b\"))",
             "View.scrollH(View.text(\"x\"))",
             "View.maxSize(40, 30, View.text(\"x\"))",
             "View.clip(View.text(\"x\"))",

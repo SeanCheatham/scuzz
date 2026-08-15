@@ -24,7 +24,7 @@ button:Clear
 
 [taps]
 0 Home 24,24 48x32
-1 Tasks 130,24 48x32
+1 Tasks 264,24 48x32
 2 Add 144,88 48x32
 3 Rename 200,88 58x32
 4 Done 248,176 48x32
@@ -39,4 +39,4 @@ button:Clear
 0 scroll
 
 [last_hit]
-xy 154.0 40.0 -> button:Tasks
+xy 288.0 40.0 -> button:Tasks

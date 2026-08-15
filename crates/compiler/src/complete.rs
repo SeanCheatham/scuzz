@@ -276,6 +276,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_grid_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.gr\n";
+        let labels = labels_at(src, "View.gr");
+        assert!(labels.iter().any(|l| l == "View.grid"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_max_size_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.max\n";
         let labels = labels_at(src, "View.max");

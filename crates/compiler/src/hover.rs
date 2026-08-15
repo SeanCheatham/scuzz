@@ -355,6 +355,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("View.column", "View.column(...): View"),
     ("View.row", "View.row(...): View"),
     ("View.wrap", "View.wrap(...): View"),
+    ("View.grid", "View.grid(n: Int, ...): View"),
     ("View.stack", "View.stack(...): View"),
     (
         "View.each",
@@ -491,6 +492,10 @@ mod tests {
         let calls = [
             ("View.stretch", "View.stretch(View.text(\"x\"))"),
             ("View.wrap", "View.wrap(View.text(\"a\"), View.text(\"b\"))"),
+            (
+                "View.grid",
+                "View.grid(2, View.text(\"a\"), View.text(\"b\"))",
+            ),
             ("View.scroll", "View.scroll(View.text(\"x\"))"),
             ("View.scrollH", "View.scrollH(View.text(\"x\"))"),
             ("View.maxSize", "View.maxSize(40, 30, View.text(\"x\"))"),

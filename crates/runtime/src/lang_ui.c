@@ -78,6 +78,7 @@ SzView *sz_lang_view_column(void) { return sz_view_column(); }
 SzView *sz_lang_view_row(void) { return sz_view_row(); }
 
 SzView *sz_lang_view_wrap(void) { return sz_view_wrap(); }
+SzView *sz_lang_view_grid(int64_t cols) { return sz_view_grid((int)cols); }
 
 SzView *sz_lang_view_stack(void) { return sz_view_stack(); }
 

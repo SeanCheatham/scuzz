@@ -2011,6 +2011,246 @@ static void test_wrap_in_column_grows_height(void) {
   sz_view_free(col);
 }
 
+static SzView *grid_two_sized(int cols, int w1, int h1, int w2, int h2) {
+  SzView *g = sz_view_grid(cols);
+  sz_view_add_child(g, sz_view_sized(w1, h1, sz_view_text("a")));
+  sz_view_add_child(g, sz_view_sized(w2, h2, sz_view_text("b")));
+  return g;
+}
+
+static void test_grid_kind(void) {
+  SzView *g = sz_view_grid(2);
+  assert(sz_view_kind(g) == SZ_VIEW_GRID);
+  sz_view_free(g);
+}
+
+static void test_grid_two_cols_one_row(void) {
+  SzView *g, *a, *b;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf, gf;
+  float inner;
+  float cell;
+
+  g = sz_view_grid(2);
+  a = sz_view_sized(20, 10, sz_view_text("a"));
+  b = sz_view_sized(20, 10, sz_view_text("b"));
+  sz_view_add_child(g, a);
+  sz_view_add_child(g, b);
+  sz_view_layout(g, 200.f, 80.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  gf = sz_view_frame(g);
+  inner = 200.f - theme->pad * 2.f;
+  cell = (inner - theme->gap) / 2.f;
+  assert(fabsf(bf.y - af.y) < 0.5f);
+  assert(fabsf(bf.x - (af.x + cell) - theme->gap) < 0.5f);
+  assert(fabsf(gf.w - 200.f) < 0.5f);
+  assert(fabsf(gf.h - (theme->pad * 2.f + 10.f)) < 0.5f);
+  sz_view_free(g);
+}
+
+static void test_grid_third_child_new_row(void) {
+  SzView *g, *a, *b, *c;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, cf, gf;
+
+  g = sz_view_grid(2);
+  a = sz_view_sized(20, 10, sz_view_text("a"));
+  b = sz_view_sized(20, 10, sz_view_text("b"));
+  c = sz_view_sized(20, 10, sz_view_text("c"));
+  sz_view_add_child(g, a);
+  sz_view_add_child(g, b);
+  sz_view_add_child(g, c);
+  sz_view_layout(g, 200.f, 80.f, theme);
+  af = sz_view_frame(a);
+  cf = sz_view_frame(c);
+  gf = sz_view_frame(g);
+  assert(fabsf(cf.x - af.x) < 0.5f);
+  assert(fabsf(cf.y - (af.y + af.h) - theme->gap) < 0.5f);
+  assert(fabsf(gf.h - (theme->pad * 2.f + 10.f + theme->gap + 10.f)) < 0.5f);
+  sz_view_free(g);
+}
+
+static void test_grid_fills_max_width(void) {
+  SzView *g = grid_two_sized(2, 20, 10, 20, 10);
+  const SzTheme *theme = sz_theme_default();
+  SzRect gf;
+
+  sz_view_layout(g, 200.f, 80.f, theme);
+  gf = sz_view_frame(g);
+  assert(fabsf(gf.w - 200.f) < 0.5f);
+  sz_view_free(g);
+}
+
+static void test_grid_unbounded_sizes_to_cells(void) {
+  SzView *g, *a, *b;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf, gf;
+
+  g = sz_view_grid(2);
+  a = sz_view_sized(20, 10, sz_view_text("a"));
+  b = sz_view_sized(20, 10, sz_view_text("b"));
+  sz_view_add_child(g, a);
+  sz_view_add_child(g, b);
+  sz_view_layout(g, 0.f, 80.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  gf = sz_view_frame(g);
+  assert(fabsf(bf.y - af.y) < 0.5f);
+  assert(fabsf(bf.x - (af.x + af.w) - theme->gap) < 0.5f);
+  assert(fabsf(gf.w - (theme->pad * 2.f + 20.f + theme->gap + 20.f)) < 0.5f);
+  sz_view_free(g);
+}
+
+static void test_grid_empty_is_pad(void) {
+  SzView *g = sz_view_grid(3);
+  const SzTheme *theme = sz_theme_default();
+  SzRect gf;
+
+  sz_view_layout(g, 200.f, 80.f, theme);
+  gf = sz_view_frame(g);
+  assert(fabsf(gf.w - 200.f) < 0.5f);
+  assert(fabsf(gf.h - theme->pad * 2.f) < 0.5f);
+  sz_view_free(g);
+}
+
+static void test_grid_a11y_dumps_children(void) {
+  SzView *g = sz_view_grid(2);
+  SzString *dump;
+
+  sz_view_add_child(g, sz_view_button("Home", NULL, NULL));
+  sz_view_add_child(g, sz_view_button("Tasks", NULL, NULL));
+  dump = sz_view_a11y_dump(g);
+  assert(strstr(sz_string_cstr(dump), "button:Home") != NULL);
+  assert(strstr(sz_string_cstr(dump), "button:Tasks") != NULL);
+  sz_string_free(dump);
+  sz_view_free(g);
+}
+
+static void test_grid_hit_test_second_row(void) {
+  SzView *g, *a, *b, *hit;
+  const SzTheme *theme = sz_theme_default();
+  SzRect bf;
+
+  g = sz_view_grid(1);
+  a = sz_view_button("A", NULL, NULL);
+  b = sz_view_button("B", NULL, NULL);
+  sz_view_add_child(g, a);
+  sz_view_add_child(g, b);
+  sz_view_layout(g, 200.f, 120.f, theme);
+  bf = sz_view_frame(b);
+  assert(bf.y > sz_view_frame(a).y + 0.5f);
+  hit = sz_view_hit_test(g, bf.x + 2.f, bf.y + 2.f);
+  assert(hit == b);
+  sz_view_free(g);
+}
+
+static void test_grid_gap_zero_is_flush(void) {
+  SzView *g, *a, *b, *wrap;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf;
+
+  g = sz_view_grid(2);
+  a = sz_view_sized(20, 10, sz_view_text("a"));
+  b = sz_view_sized(20, 10, sz_view_text("b"));
+  sz_view_add_child(g, a);
+  sz_view_add_child(g, b);
+  wrap = sz_view_gap(0, g);
+  sz_view_layout(wrap, 0.f, 80.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  assert(fabsf(bf.x - (af.x + af.w)) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_grid_gap_spaces_rows(void) {
+  SzView *g, *a, *b, *wrap;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf;
+
+  g = sz_view_grid(1);
+  a = sz_view_sized(20, 10, sz_view_text("a"));
+  b = sz_view_sized(20, 10, sz_view_text("b"));
+  sz_view_add_child(g, a);
+  sz_view_add_child(g, b);
+  wrap = sz_view_gap(16, g);
+  sz_view_layout(wrap, 200.f, 80.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  assert(bf.y > af.y + af.h + 0.5f);
+  assert(fabsf(bf.y - (af.y + af.h) - 16.f) < 0.5f);
+  sz_view_free(wrap);
+}
+
+static void test_grid_show_when_skips_cell(void) {
+  SzView *g, *a, *mid, *b;
+  SzSignalInt *page;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf;
+  float inner;
+  float cell;
+
+  page = sz_signal_int(1);
+  g = sz_view_grid(2);
+  a = sz_view_sized(20, 10, sz_view_text("a"));
+  mid = sz_view_sized(40, 10, sz_view_text("mid"));
+  b = sz_view_sized(20, 10, sz_view_text("b"));
+  sz_view_add_child(g, a);
+  sz_view_add_child(g, sz_view_show_when(page, 0, mid));
+  sz_view_add_child(g, b);
+  sz_view_layout(g, 200.f, 80.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  inner = 200.f - theme->pad * 2.f;
+  cell = (inner - theme->gap) / 2.f;
+  assert(fabsf(bf.y - af.y) < 0.5f);
+  assert(fabsf(bf.x - (af.x + cell) - theme->gap) < 0.5f);
+  sz_view_free(g);
+  sz_signal_int_free(page);
+}
+
+static void test_grid_cols_less_than_one_is_one(void) {
+  SzView *g, *a, *b;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf;
+
+  g = sz_view_grid(0);
+  a = sz_view_sized(20, 10, sz_view_text("a"));
+  b = sz_view_sized(20, 10, sz_view_text("b"));
+  sz_view_add_child(g, a);
+  sz_view_add_child(g, b);
+  sz_view_layout(g, 200.f, 80.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  assert(bf.y > af.y + af.h + 0.5f);
+  sz_view_free(g);
+}
+
+static void test_grid_in_column_grows_height(void) {
+  SzView *col, *g, *a, *b, *c;
+  const SzTheme *theme = sz_theme_default();
+  SzRect cf, gf;
+  float one_row_h;
+
+  g = sz_view_grid(2);
+  a = sz_view_sized(20, 10, sz_view_text("a"));
+  b = sz_view_sized(20, 10, sz_view_text("b"));
+  c = sz_view_sized(20, 10, sz_view_text("c"));
+  sz_view_add_child(g, a);
+  sz_view_add_child(g, b);
+  col = sz_view_column();
+  sz_view_add_child(col, g);
+  sz_view_layout(col, 200.f, 200.f, theme);
+  one_row_h = sz_view_frame(g).h;
+  sz_view_add_child(g, c);
+  sz_view_layout(col, 200.f, 200.f, theme);
+  gf = sz_view_frame(g);
+  cf = sz_view_frame(col);
+  assert(gf.h > one_row_h + 0.5f);
+  assert(cf.h > gf.h - 0.5f);
+  sz_view_free(col);
+}
+
 static SzView *scroll_h_wide_row(SzView **row, SzView **left, SzView **right) {
   *row = sz_view_row();
   *left = sz_view_sized(80, 16, sz_view_text("L"));
@@ -5291,6 +5531,19 @@ int main(void) {
   test_wrap_gap_spaces_runs();
   test_wrap_show_when_skips();
   test_wrap_in_column_grows_height();
+  test_grid_kind();
+  test_grid_two_cols_one_row();
+  test_grid_third_child_new_row();
+  test_grid_fills_max_width();
+  test_grid_unbounded_sizes_to_cells();
+  test_grid_empty_is_pad();
+  test_grid_a11y_dumps_children();
+  test_grid_hit_test_second_row();
+  test_grid_gap_zero_is_flush();
+  test_grid_gap_spaces_rows();
+  test_grid_show_when_skips_cell();
+  test_grid_cols_less_than_one_is_one();
+  test_grid_in_column_grows_height();
   test_scroll_h_kind();
   test_scroll_h_sizes_viewport();
   test_scroll_h_unbounded_fits_child();

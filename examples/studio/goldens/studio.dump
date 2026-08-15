@@ -30,7 +30,7 @@ button:Clear
 
 [taps]
 0 Home 24,24 48x32
-1 Tasks 130,24 48x32
+1 Tasks 264,24 48x32
 2 +1 44,254 48x32
 3 slider 32,306 336x32
 4 Add 144,400 48x32

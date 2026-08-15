@@ -102,7 +102,7 @@ static int count_shown_children(const SzView *v) {
 
 static int view_accepts_children(SzViewKind kind) {
   return kind == SZ_VIEW_COLUMN || kind == SZ_VIEW_ROW ||
-         kind == SZ_VIEW_WRAP || kind == SZ_VIEW_LIST ||
+         kind == SZ_VIEW_WRAP || kind == SZ_VIEW_GRID || kind == SZ_VIEW_LIST ||
          kind == SZ_VIEW_SCROLL ||
          kind == SZ_VIEW_EXPANDED || kind == SZ_VIEW_CENTER ||
          kind == SZ_VIEW_ALIGN || kind == SZ_VIEW_STACK ||
@@ -361,6 +361,12 @@ SzString *sz_view_a11y_dump(SzView *root) {
 SzView *sz_view_column(void) { return view_new(SZ_VIEW_COLUMN); }
 SzView *sz_view_row(void) { return view_new(SZ_VIEW_ROW); }
 SzView *sz_view_wrap(void) { return view_new(SZ_VIEW_WRAP); }
+
+SzView *sz_view_grid(int cols) {
+  SzView *v = view_new(SZ_VIEW_GRID);
+  v->img_w = cols < 1 ? 1 : cols;
+  return v;
+}
 SzView *sz_view_stack(void) { return view_new(SZ_VIEW_STACK); }
 SzView *sz_view_list(void) {
   SzView *v = view_new(SZ_VIEW_LIST);
@@ -1422,6 +1428,56 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.w = content_w + pad * 2.f;
     break;
   }
+  case SZ_VIEW_GRID: {
+    float pad = theme->pad;
+    float gap = layout_gap(theme);
+    int cols = v->img_w < 1 ? 1 : v->img_w;
+    int unbounded = !(max_w > pad * 2.f);
+    float inner_w = unbounded ? 0.f : max_w - pad * 2.f;
+    float cell_w = 0.f;
+    float cx = x + pad;
+    float cy = y + pad;
+    float row_h = 0.f;
+    float content_w = 0.f;
+    int n_in_row = 0;
+    if (!unbounded) {
+      cell_w = (inner_w - gap * (float)(cols - 1)) / (float)cols;
+      if (cell_w < 0.f)
+        cell_w = 0.f;
+    }
+    for (i = 0; i < v->child_count; i++) {
+      SzView *ch = v->children[i];
+      float child_max = unbounded ? 0.f : cell_w;
+      float used;
+      if (!view_is_shown(ch)) {
+        layout_constrained(ch, cx, cy, box_loose(child_max, 0.f), theme);
+        continue;
+      }
+      if (n_in_row >= cols) {
+        cx = x + pad;
+        cy += row_h + gap;
+        row_h = 0.f;
+        n_in_row = 0;
+      }
+      layout_constrained(ch, cx, cy, box_loose(child_max, 0.f), theme);
+      if (ch->frame.h > row_h)
+        row_h = ch->frame.h;
+      if (unbounded)
+        cx += ch->frame.w + gap;
+      else
+        cx += cell_w + gap;
+      n_in_row++;
+      used = cx - (x + pad) - gap;
+      if (used > content_w)
+        content_w = used;
+    }
+    if (n_in_row > 0)
+      v->frame.h = (cy - y) + row_h + pad;
+    else
+      v->frame.h = pad * 2.f;
+    v->frame.w = unbounded ? content_w + pad * 2.f : max_w;
+    break;
+  }
   case SZ_VIEW_STACK: {
     float ix = x + theme->pad;
     float iy = y + theme->pad;
@@ -2201,6 +2257,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_COLUMN:
   case SZ_VIEW_ROW:
   case SZ_VIEW_WRAP:
+  case SZ_VIEW_GRID:
   case SZ_VIEW_LIST:
   case SZ_VIEW_EXPANDED:
   case SZ_VIEW_STRETCH:

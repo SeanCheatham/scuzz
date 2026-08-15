@@ -153,6 +153,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_column()").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_row()").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_wrap()").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_grid(i64)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_stack()").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_each(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_each_map(ptr, ptr, ptr)").unwrap();
@@ -2388,6 +2389,24 @@ fn emit_view_box(
     val_emitted(std::mem::take(code), format!("%{prefix}_v"), Kind::Ptr)
 }
 
+fn emit_view_grid(code: &mut String, emitted_args: &[Emitted], prefix: &str) -> Emitted {
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @sz_lang_view_grid(i64 {})",
+        emitted_args[0].value
+    )
+    .unwrap();
+    for (i, child) in emitted_args.iter().skip(1).enumerate() {
+        writeln!(
+            code,
+            "  %{prefix}_ac{i} = call ptr @sz_lang_view_add_child(ptr %{prefix}_v, ptr {})",
+            child.value
+        )
+        .unwrap();
+    }
+    val_emitted(std::mem::take(code), format!("%{prefix}_v"), Kind::Ptr)
+}
+
 fn emit_call(
     callee: &str,
     args: &[Expr],
@@ -3354,6 +3373,7 @@ fn emit_call(
         "View.column" => emit_view_box("sz_lang_view_column", &mut code, &emitted_args, prefix),
         "View.row" => emit_view_box("sz_lang_view_row", &mut code, &emitted_args, prefix),
         "View.wrap" => emit_view_box("sz_lang_view_wrap", &mut code, &emitted_args, prefix),
+        "View.grid" => emit_view_grid(&mut code, &emitted_args, prefix),
         "View.stack" => emit_view_box("sz_lang_view_stack", &mut code, &emitted_args, prefix),
         "View.scroll" => {
             writeln!(
@@ -4016,6 +4036,10 @@ law always: Bool = 1 == 1
             (
                 "View.wrap(View.text(\"a\"), View.text(\"b\"))",
                 "sz_lang_view_wrap",
+            ),
+            (
+                "View.grid(2, View.text(\"a\"), View.text(\"b\"))",
+                "sz_lang_view_grid",
             ),
             ("View.scrollH(View.text(\"x\"))", "sz_lang_view_scroll_h"),
             (
