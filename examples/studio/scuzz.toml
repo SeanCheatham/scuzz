@@ -1,14 +1,14 @@
 [package]
 name = "studio"
 version = "0.1.0"
-description = "Multi-page Headless app: layout, file-backed list, laws"
+description = "Desktop stay-open app: layout, file-backed list, laws"
 
 [targets.native]
 kind = "executable"
 main = "Main"
 
 [ui]
-default_runtime = "headless"
-headless_size = [240, 420]
+default_runtime = "desktop"
+headless_size = [400, 560]
 headless_scale = 1.0
 tap_button = 1

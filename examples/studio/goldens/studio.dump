@@ -15,6 +15,7 @@ text:Studio
 text:count = 0
 button:+1
 checkbox:compact=0
+text:q or Esc quits
 textfield:item
 button:Add
 button:Rename
@@ -35,6 +36,8 @@ button:Clear
 5 Rename
 6 Done
 7 Del
+8 Save
+9 Clear
 
 [fields]
 0* item=""

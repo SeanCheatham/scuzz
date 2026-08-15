@@ -39,7 +39,7 @@ scuzz run --headless    # Desktop: scuzz run
 
 ## Example
 
-A multi-page Headless app (`showWhen`, `Signal.list`, `Fs`, `View`). Home shows layout widgets. Tasks is a file-backed list. Full source: [`examples/studio`](examples/studio).
+A multi-page Desktop app (`showWhen`, `Signal.list`, `Fs`, `View`). Home shows layout widgets. Tasks is a file-backed list. The window stays open. Press q or Esc to quit. Full source: [`examples/studio`](examples/studio).
 
 ```scala
 @main def main: IO[Unit] =
@@ -72,6 +72,7 @@ A multi-page Headless app (`showWhen`, `Signal.list`, `Fs`, `View`). Home shows 
 ```
 
 ```bash
+scuzz run examples/studio            # Desktop window; q or Esc quits
 scuzz run --headless examples/studio
 ```
 

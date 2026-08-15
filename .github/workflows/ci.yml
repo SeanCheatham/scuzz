@@ -267,8 +267,8 @@ jobs:
         run: |
           # SCUZZ_LIVE_FRAMES bounds stay-open Ui.run under Desktop (else hangs on xvfb).
           timeout 30s xvfb-run -a env SCUZZ_UI_RUNTIME=desktop SCUZZ_LIVE_FRAMES=2 \
-            SCUZZ_UI_WIDTH=200 SCUZZ_UI_HEIGHT=100 \
-            ./examples/counter/build/counter 2>&1 | tee /tmp/win.out
+            SCUZZ_UI_WIDTH=400 SCUZZ_UI_HEIGHT=560 \
+            ./examples/studio/build/studio 2>&1 | tee /tmp/win.out
           grep -q "desktop embedder" /tmp/win.out
           grep -q "X11 window" /tmp/win.out
 
