@@ -18,7 +18,7 @@ use support::resolve_dir;
     name = "scuzz",
     version,
     about = "Scuzz Lang CLI",
-    after_help = "Examples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz check --message-format=json\n  scuzz lsp\n  scuzz test\n  scuzz run --headless\n  scuzz watch\n  scuzz run --watch --headless\n  scuzz fuzz --iters 16\n  scuzz mutate --limit 16 --iters 4\n\nJSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check` (open buffers overlay disk; not a second typer).\n`watch` rebuilds. `run --watch` on [ui] keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (not source hot reload). IO-only `run --watch` kills and reruns on source change. Live dump: build/debug.dump. Live inject: build/inject.script (tap/text/type/pump/scroll/backspace)."
+    after_help = "Examples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz check --message-format=json\n  scuzz lsp\n  scuzz test\n  scuzz run --headless\n  scuzz run examples/studio\n  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio\n  scuzz watch\n  scuzz run --watch --headless\n  scuzz fuzz --iters 16\n  scuzz mutate --limit 16 --iters 4\n\nJSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check` (open buffers overlay disk; not a second typer).\n`watch` rebuilds. `run --watch` on [ui] keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (not source hot reload). IO-only `run --watch` kills and reruns on source change. Live dump: build/debug.dump. Live inject: build/inject.script (tap/xy/text/type/pump/scroll/backspace). Desktop/Mobile record: build/record.script."
 )]
 struct Cli {
     /// Diagnostic format: human (default) or json (`check` protocol; LSP wraps check)
@@ -46,6 +46,9 @@ enum Commands {
         verify: bool,
     },
     /// Build and run a Scuzz Lang project
+    #[command(
+        after_help = "Examples:\n  scuzz run\n  scuzz run --headless\n  scuzz run examples/studio\n  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio\n  scuzz run --watch --headless\n\nDesktop/Mobile `run` writes build/record.script (live OS input) and build/debug.dump. Replay Headless with --script and --dump. `build/inject.script` stays watch playback only."
+    )]
     Run {
         #[arg(default_value = ".")]
         path: PathBuf,
@@ -57,6 +60,12 @@ enum Commands {
         /// Keep running; [ui] stamp-reloads the View tree; IO-only kills and reruns on source change
         #[arg(long)]
         watch: bool,
+        /// Inject script path (SCUZZ_UI_SCRIPT); played after the first pump
+        #[arg(long, value_name = "PATH")]
+        script: Option<PathBuf>,
+        /// Structural dump path at finish (SCUZZ_FUZZ_DUMP)
+        #[arg(long, value_name = "PATH")]
+        dump: Option<PathBuf>,
     },
     /// Watch sources and rebuild on change (compile loop, not hot reload)
     Watch {
@@ -217,11 +226,19 @@ fn real_main() -> Result<ExitCode> {
             headless,
             out_dir,
             watch,
+            script,
+            dump,
         } => {
             if watch {
                 return watch_run(&path, &out_dir, headless);
             }
-            run_once(&path, &out_dir, headless)
+            run_once(
+                &path,
+                &out_dir,
+                headless,
+                script.as_deref(),
+                dump.as_deref(),
+            )
         }
         Commands::Watch { path, out_dir } => watch_build(&path, &out_dir),
         Commands::Test {
@@ -373,7 +390,13 @@ main = "Main"
     }
 }
 
-fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
+fn run_once(
+    path: &Path,
+    out_dir: &Path,
+    headless: bool,
+    script: Option<&Path>,
+    dump: Option<&Path>,
+) -> Result<ExitCode> {
     let project_dir = resolve_dir(path)?;
     let manifest = load_manifest(&project_dir.join("scuzz.toml"))
         .with_context(|| format!("reading {}/scuzz.toml", project_dir.display()))?;
@@ -400,6 +423,14 @@ fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
             cmd.env("SCUZZ_UI_WIDTH", ui.width().to_string());
             cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
         }
+        cmd.env(
+            "SCUZZ_UI_RECORD",
+            project_dir.join("build").join("record.script"),
+        );
+        cmd.env(
+            "SCUZZ_UI_DEBUG_DUMP",
+            project_dir.join("build").join("debug.dump"),
+        );
         eprintln!("scuzz run → UiRuntime.Mobile (host shell)");
     } else if use_desktop {
         // Desktop peer + desktop embedder (X11 / Cocoa) when available.
@@ -408,7 +439,21 @@ fn run_once(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
             cmd.env("SCUZZ_UI_WIDTH", ui.width().to_string());
             cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
         }
+        cmd.env(
+            "SCUZZ_UI_RECORD",
+            project_dir.join("build").join("record.script"),
+        );
+        cmd.env(
+            "SCUZZ_UI_DEBUG_DUMP",
+            project_dir.join("build").join("debug.dump"),
+        );
         eprintln!("scuzz run → UiRuntime.Desktop (desktop embedder)");
+    }
+    if let Some(script) = script {
+        cmd.env("SCUZZ_UI_SCRIPT", script);
+    }
+    if let Some(dump) = dump {
+        cmd.env("SCUZZ_FUZZ_DUMP", dump);
     }
     let status = cmd
         .status()
@@ -575,12 +620,20 @@ fn spawn_ui_keep(
             cmd.env("SCUZZ_UI_WIDTH", ui.width().to_string());
             cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
         }
+        cmd.env(
+            "SCUZZ_UI_RECORD",
+            project_dir.join("build").join("record.script"),
+        );
     } else if use_desktop {
         cmd.env("SCUZZ_UI_RUNTIME", "desktop");
         if let Some(ui) = &manifest.ui {
             cmd.env("SCUZZ_UI_WIDTH", ui.width().to_string());
             cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
         }
+        cmd.env(
+            "SCUZZ_UI_RECORD",
+            project_dir.join("build").join("record.script"),
+        );
     }
     cmd.spawn()
         .with_context(|| format!("running {}", out.executable.display()))

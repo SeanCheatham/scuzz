@@ -28,16 +28,16 @@ button:Save
 button:Clear
 
 [taps]
-0 Home
-1 Tasks
-2 +1
-3 compact
-4 Add
-5 Rename
-6 Done
-7 Del
-8 Save
-9 Clear
+0 Home 24,24 48x32
+1 Tasks 130,24 48x32
+2 +1 44,254 48x32
+3 compact 100,254 25x32
+4 Add 144,360 48x32
+5 Rename 200,360 58x32
+6 Done 248,448 48x32
+7 Del 304,448 48x32
+8 Save 12,476 48x32
+9 Clear 12,516 48x32
 
 [fields]
 0* item=""

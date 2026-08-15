@@ -13,6 +13,7 @@
 int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
                   const SzTheme *theme);
 int sz_view_handle_tap(SzView *root, float x, float y);
+int sz_ui_session_live_inject(SzUiSession *session, const SzInputEvent *event);
 
 static int files_equal(const char *a, const char *b) {
   FILE *fa = fopen(a, "rb");
@@ -491,6 +492,13 @@ static void test_session_debug_dump(void) {
   assert(strstr(a, "[taps]") != NULL);
   assert(strstr(a, "0 +") != NULL);
   assert(strstr(a, "1 -") != NULL);
+  {
+    const char *taps = strstr(a, "[taps]\n");
+    assert(taps != NULL);
+    assert(strstr(taps, ",") != NULL);
+    assert(strstr(taps, "x") != NULL);
+  }
+  assert(strstr(a, "[last_hit]") == NULL);
   assert(strstr(a, "[fields]") != NULL);
   assert(strstr(a, "0* item=\"\"") != NULL);
   assert(strstr(a, "1 search=\"\"") != NULL);
@@ -530,6 +538,8 @@ static void test_session_debug_dump(void) {
   assert(strstr(c, "1* search=\"\"") != NULL);
   assert(strstr(c, "0 item=\"hi\"") != NULL);
   assert(strstr(c, "0* item") == NULL);
+  assert(strstr(c, "[last_hit]") != NULL);
+  assert(strstr(c, "-> button:+") != NULL || strstr(c, "-> textfield:search") != NULL);
   free(b);
   free(c);
 
@@ -538,6 +548,217 @@ static void test_session_debug_dump(void) {
   sz_signal_str_free(draft);
   sz_signal_str_free(query);
   remove(path);
+}
+
+static void test_xy_hit_and_miss(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *btn;
+  SzSignalInt *count;
+  SzInputEvent tap;
+  const char *path = "/tmp/scuzz_ui_xy.dump";
+  const char *script = "/tmp/scuzz_ui_xy.script";
+  char *dump;
+  SzRect fr;
+
+  count = sz_signal_int(0);
+  root = sz_view_column();
+  btn = sz_view_button("+1", counter_tap, count);
+  sz_view_add_child(root, btn);
+  sz_view_add_child(root, sz_view_text("pad"));
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 160;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_debug_dump(session, path));
+  assert(sz_ui_pump_sync(session));
+  fr = sz_view_frame(btn);
+
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SZ_INPUT_TAP;
+  tap.x = fr.x + fr.w * 0.5f;
+  tap.y = fr.y + fr.h * 0.5f;
+  assert(sz_ui_inject_sync(session, &tap));
+  assert(sz_signal_int_get(count) == 1);
+  assert(sz_ui_pump_sync(session));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "[last_hit]") != NULL);
+  assert(strstr(dump, "-> button:+1") != NULL);
+  free(dump);
+
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SZ_INPUT_TAP;
+  tap.x = 190.f;
+  tap.y = 150.f;
+  assert(sz_ui_inject_sync(session, &tap));
+  assert(sz_signal_int_get(count) == 1);
+  assert(sz_ui_pump_sync(session));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "-> NULL") != NULL);
+  free(dump);
+
+  remove(script);
+  assert(sz_ui_session_set_inject(session, script));
+  {
+    char line[128];
+    snprintf(line, sizeof line, "xy %.1f %.1f\nxy 190.0 150.0\n",
+             fr.x + fr.w * 0.5f, fr.y + fr.h * 0.5f);
+    write_stamp(script, line);
+  }
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(count) == 2);
+
+  sz_ui_unmount(session);
+  sz_signal_int_free(count);
+  remove(path);
+  remove(script);
+}
+
+static void test_record_live_not_script(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *btn;
+  SzSignalInt *count;
+  SzInputEvent tap;
+  const char *record = "/tmp/scuzz_ui_record.script";
+  const char *inject = "/tmp/scuzz_ui_record_inject.script";
+  char *body;
+  SzRect fr;
+  size_t n0;
+
+  remove(record);
+  remove(inject);
+  count = sz_signal_int(0);
+  root = sz_view_column();
+  btn = sz_view_button("+1", counter_tap, count);
+  sz_view_add_child(root, btn);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 100;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_record(session, record));
+  assert(sz_ui_pump_sync(session));
+  fr = sz_view_frame(btn);
+
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SZ_INPUT_TAP;
+  tap.x = fr.x + fr.w * 0.5f;
+  tap.y = fr.y + fr.h * 0.5f;
+  assert(sz_ui_session_live_inject(session, &tap));
+  assert(sz_signal_int_get(count) == 1);
+  body = slurp_cstr(record);
+  assert(strstr(body, "tap 0") != NULL);
+  n0 = strlen(body);
+  free(body);
+
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SZ_INPUT_TAP;
+  tap.x = 190.f;
+  tap.y = 90.f;
+  assert(sz_ui_session_live_inject(session, &tap));
+  body = slurp_cstr(record);
+  assert(strstr(body, "xy ") != NULL);
+  n0 = strlen(body);
+  free(body);
+
+  assert(sz_ui_session_set_inject(session, inject));
+  write_stamp(inject, "tap 0\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(count) == 2);
+  body = slurp_cstr(record);
+  assert(strlen(body) == n0);
+  free(body);
+
+  sz_ui_unmount(session);
+  sz_signal_int_free(count);
+  remove(record);
+  remove(inject);
+}
+
+static void test_studio_shaped_xy(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *home, *banner, *inc_btn, *add_btn;
+  SzSignalInt *count;
+  SzSignalInt *page;
+  SzInputEvent tap;
+  const char *record = "/tmp/scuzz_ui_studio_xy.script";
+  const char *dump = "/tmp/scuzz_ui_studio_xy.dump";
+  char *body;
+  SzRect fr, banner_fr;
+
+  remove(record);
+  count = sz_signal_int(0);
+  page = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_button("Home", NULL, NULL));
+  home = sz_view_column();
+  banner = sz_view_background(0xFF3D7EA6u, sz_view_center(sz_view_text("Studio")));
+  sz_view_add_child(home, sz_view_aspect_ratio(6, 1, banner));
+  sz_view_add_child(home, sz_view_text("count = 0"));
+  inc_btn = sz_view_button("+1", counter_tap, count);
+  sz_view_add_child(home, inc_btn);
+  add_btn = sz_view_button("Add", NULL, NULL);
+  sz_view_add_child(home, add_btn);
+  sz_view_add_child(root, sz_view_show_when(page, 0, home));
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 400;
+  cfg.height = 560;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_record(session, record));
+  assert(sz_ui_session_set_debug_dump(session, dump));
+  assert(sz_ui_pump_sync(session));
+
+  fr = sz_view_frame(inc_btn);
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SZ_INPUT_TAP;
+  tap.x = fr.x + fr.w * 0.5f;
+  tap.y = fr.y + fr.h * 0.5f;
+  assert(sz_ui_session_live_inject(session, &tap));
+  assert(sz_signal_int_get(count) == 1);
+  assert(sz_ui_pump_sync(session));
+  body = slurp_cstr(dump);
+  assert(strstr(body, "-> button:+1") != NULL);
+  free(body);
+  body = slurp_cstr(record);
+  assert(strstr(body, "tap ") != NULL);
+  free(body);
+
+  banner_fr = sz_view_frame(banner);
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SZ_INPUT_TAP;
+  tap.x = banner_fr.x + banner_fr.w * 0.5f;
+  tap.y = banner_fr.y + banner_fr.h * 0.5f;
+  assert(sz_ui_session_live_inject(session, &tap));
+  assert(sz_signal_int_get(count) == 1);
+  assert(sz_ui_pump_sync(session));
+  body = slurp_cstr(dump);
+  assert(strstr(body, "-> NULL") != NULL);
+  free(body);
+  body = slurp_cstr(record);
+  assert(strstr(body, "xy ") != NULL);
+  free(body);
+
+  sz_ui_unmount(session);
+  sz_signal_int_free(count);
+  sz_signal_int_free(page);
+  remove(record);
+  remove(dump);
 }
 
 static void test_session_inject_script(void) {
@@ -4292,6 +4513,9 @@ int main(void) {
   test_ui_run_rebuild();
   test_ui_run_rebuild_keepalive();
   test_session_debug_dump();
+  test_xy_hit_and_miss();
+  test_record_live_not_script();
+  test_studio_shaped_xy();
   test_session_inject_script();
   test_session_inject_scroll();
   test_session_inject_backspace();

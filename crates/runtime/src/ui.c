@@ -100,6 +100,11 @@ struct SzUiSession {
   char *inject_path;
   char *inject_fp;
   int inject_playing;
+  char *record_path;
+  int last_hit_seen;
+  float last_hit_x;
+  float last_hit_y;
+  char *last_hit_desc;
   void *code_handle;
   void *code_stale;
   int code_gen;
@@ -277,6 +282,20 @@ int sz_ui_session_set_inject(SzUiSession *session, const char *path) {
   return 1;
 }
 
+int sz_ui_session_set_record(SzUiSession *session, const char *path) {
+  FILE *f;
+  if (!session || !path || !path[0])
+    return 0;
+  sz_free(session->record_path);
+  session->record_path = sz_strdup(path);
+  /* Truncate so each process is one session. */
+  f = fopen(path, "w");
+  if (!f)
+    return 0;
+  fclose(f);
+  return 1;
+}
+
 static int collect_buttons(SzUiSession *session, SzView **buttons, int cap);
 static int collect_scrolls(SzUiSession *session, SzView **scrolls, int cap);
 
@@ -319,9 +338,10 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
           sz_string_cstr(views));
   n_buttons = collect_buttons(session, buttons, 64);
   for (i = 0; i < n_buttons; i++) {
+    SzRect fr = sz_view_frame(buttons[i]);
     fprintf(f, "%d ", i);
     fputs_dump_label(f, sz_view_a11y_label(buttons[i]));
-    fputc('\n', f);
+    fprintf(f, " %.0f,%.0f %.0fx%.0f\n", fr.x, fr.y, fr.w, fr.h);
   }
   fprintf(f, "\n[fields]\n");
   n_fields = (session && session->root)
@@ -343,6 +363,11 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
     fprintf(f, "%d ", i);
     fputs_dump_label(f, sz_view_a11y_label(scrolls[i]));
     fputc('\n', f);
+  }
+  if (session && session->last_hit_seen) {
+    fprintf(f, "\n[last_hit]\nxy %.1f %.1f -> %s\n", session->last_hit_x,
+            session->last_hit_y,
+            session->last_hit_desc ? session->last_hit_desc : "NULL");
   }
   fclose(f);
   sz_string_free(signals);
@@ -495,7 +520,117 @@ void sz_ui_unmount(SzUiSession *session) {
   sz_free(session->debug_dump_path);
   sz_free(session->inject_path);
   sz_free(session->inject_fp);
+  sz_free(session->record_path);
+  sz_free(session->last_hit_desc);
   sz_free(session);
+}
+
+static void format_last_hit_desc(SzView *hit, char *buf, size_t cap) {
+  const char *role = "none";
+  if (!hit) {
+    snprintf(buf, cap, "NULL");
+    return;
+  }
+  switch (sz_view_a11y_role(hit)) {
+  case SZ_A11Y_BUTTON:
+    role = "button";
+    break;
+  case SZ_A11Y_TEXT:
+    role = "text";
+    break;
+  case SZ_A11Y_TEXT_FIELD:
+    role = "textfield";
+    break;
+  case SZ_A11Y_IMAGE:
+    role = "image";
+    break;
+  case SZ_A11Y_LIST:
+    role = "list";
+    break;
+  case SZ_A11Y_SCROLL:
+    role = "scroll";
+    break;
+  case SZ_A11Y_CHECKBOX:
+    role = "checkbox";
+    break;
+  default:
+    break;
+  }
+  snprintf(buf, cap, "%s:%s", role, sz_view_a11y_label(hit));
+}
+
+static void session_set_last_hit(SzUiSession *session, float x, float y,
+                                 SzView *hit_if_fired) {
+  char desc[256];
+  if (!session)
+    return;
+  format_last_hit_desc(hit_if_fired, desc, sizeof desc);
+  session->last_hit_seen = 1;
+  session->last_hit_x = x;
+  session->last_hit_y = y;
+  sz_free(session->last_hit_desc);
+  session->last_hit_desc = sz_strdup(desc);
+}
+
+static int find_tap_index_at(SzUiSession *session, float x, float y) {
+  SzView *buttons[64];
+  SzView *hit;
+  int n, i;
+  if (!session || !session->root)
+    return -1;
+  sz_view_layout(session->root, (float)session->cfg.width,
+                 (float)session->cfg.height, session->theme);
+  hit = sz_view_hit_test(session->root, x, y);
+  if (!hit || !sz_view_is_tap_target(hit))
+    return -1;
+  n = collect_buttons(session, buttons, 64);
+  for (i = 0; i < n; i++) {
+    if (buttons[i] == hit)
+      return i;
+  }
+  return -1;
+}
+
+static void record_tap_or_xy(SzUiSession *session, FILE *f, float x, float y) {
+  int idx = find_tap_index_at(session, x, y);
+  if (idx >= 0)
+    fprintf(f, "tap %d\n", idx);
+  else
+    fprintf(f, "xy %.1f %.1f\n", x, y);
+}
+
+/* Append one OS event to the record file. Script / inject playback must not
+ * call this. */
+static void record_live_event(SzUiSession *session, const SzInputEvent *ev) {
+  FILE *f;
+  if (!session || !session->record_path || !ev)
+    return;
+  f = fopen(session->record_path, "a");
+  if (!f)
+    return;
+  if (ev->kind == SZ_INPUT_TAP) {
+    record_tap_or_xy(session, f, ev->x, ev->y);
+  } else if (ev->kind == SZ_INPUT_TEXT_EDIT) {
+    if (!ev->text || !ev->text[0])
+      fputs("backspace\n", f);
+    else
+      fprintf(f, "type %s\n", ev->text);
+  } else if (ev->kind == SZ_INPUT_POINTER &&
+             ev->pointer_phase == SZ_POINTER_UP && session->pointer_down) {
+    float dx = ev->x - session->pointer_down_x;
+    float dy = ev->y - session->pointer_down_y;
+    if (dx * dx + dy * dy <= 64.f)
+      record_tap_or_xy(session, f, ev->x, ev->y);
+  }
+  fclose(f);
+}
+
+/* Live OS path: record then inject. Tests call this to simulate drain. */
+int sz_ui_session_live_inject(SzUiSession *session, const SzInputEvent *event) {
+  if (!session || !event)
+    return 0;
+  record_live_event(session, event);
+  return sz_ui_inject_sync(session, event);
 }
 
 static void drain_mobile_events(SzUiSession *session) {
@@ -505,7 +640,7 @@ static void drain_mobile_events(SzUiSession *session) {
   if (!sz_mobile_available())
     return;
   while (sz_mobile_poll_event(&ev))
-    (void)sz_ui_inject_sync(session, &ev);
+    (void)sz_ui_session_live_inject(session, &ev);
 }
 
 static void drain_desktop_events(SzUiSession *session) {
@@ -515,7 +650,7 @@ static void drain_desktop_events(SzUiSession *session) {
   if (!sz_embedder_available())
     return;
   while (sz_embedder_poll_event(&ev))
-    (void)sz_ui_inject_sync(session, &ev);
+    (void)sz_ui_session_live_inject(session, &ev);
 }
 
 static int collect_buttons(SzUiSession *session, SzView **buttons, int cap) {
@@ -750,13 +885,29 @@ static void script_tap(SzUiSession *session, int n) {
     sz_panic("Ui.run: script tap inject failed");
 }
 
+static void script_xy(SzUiSession *session, float x, float y) {
+  SzInputEvent tap;
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SZ_INPUT_TAP;
+  tap.x = x;
+  tap.y = y;
+  if (!sz_ui_inject_sync(session, &tap))
+    sz_panic("Ui.run: script xy inject failed");
+}
+
 static void play_script_line(SzUiSession *session, char *line) {
   size_t len = strlen(line);
   if (len == 0 || line[0] == '#')
     return;
   if (strncmp(line, "tap ", 4) == 0 || strcmp(line, "tap") == 0)
     script_tap(session, len > 3 ? atoi(line + 4) : 0);
-  else if (strncmp(line, "text ", 5) == 0 || strcmp(line, "text") == 0) {
+  else if (strncmp(line, "xy ", 3) == 0) {
+    float x = 0.f, y = 0.f;
+    if (sscanf(line + 3, "%f %f", &x, &y) == 2)
+      script_xy(session, x, y);
+    else
+      sz_panic("Ui.run: xy needs x y");
+  } else if (strncmp(line, "text ", 5) == 0 || strcmp(line, "text") == 0) {
     SzInputEvent ev;
     int idx;
     const char *payload = script_field_payload(len > 4 ? line + 5 : "", &idx);
@@ -860,6 +1011,8 @@ int sz_ui_pump_sync(SzUiSession *session) {
   /* Pull OS events before the frame (host-driven mobile / desktop shell). */
   drain_mobile_events(session);
   drain_desktop_events(session);
+  if (session->dirty)
+    need_dump = 1;
   if (stamp_changed(session)) {
     const char *code = getenv("SCUZZ_UI_RELOAD_CODE");
     if (code && code[0])
@@ -969,10 +1122,11 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
     session->pointer_down = 0;
     session->pointer_scroll = NULL;
     if (dx * dx + dy * dy <= tap_slop2) {
-      if (!sz_view_handle_tap(session->root, event->x, event->y)) {
-        /* Miss is still a successful pointer up. */
-      }
-      sync_keyboard(session);
+      SzView *hit = sz_view_hit_test(session->root, event->x, event->y);
+      int fired = sz_view_handle_tap(session->root, event->x, event->y);
+      session_set_last_hit(session, event->x, event->y, fired ? hit : NULL);
+      if (fired)
+        sync_keyboard(session);
       session->dirty = 1;
     }
     return 1;
@@ -990,14 +1144,20 @@ int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event) {
     return 0;
 
   switch (event->kind) {
-  case SZ_INPUT_TAP:
+  case SZ_INPUT_TAP: {
+    SzView *hit;
+    int fired;
     sz_view_layout(session->root, (float)session->cfg.width,
                    (float)session->cfg.height, session->theme);
-    if (!sz_view_handle_tap(session->root, event->x, event->y))
-      return 0;
-    sync_keyboard(session);
+    hit = sz_view_hit_test(session->root, event->x, event->y);
+    fired = sz_view_handle_tap(session->root, event->x, event->y);
+    session_set_last_hit(session, event->x, event->y, fired ? hit : NULL);
+    if (fired)
+      sync_keyboard(session);
+    /* Miss is a successful inject; mark dirty so live dump rewrites. */
     session->dirty = 1;
     return 1;
+  }
   case SZ_INPUT_TEXT:
     if (!sz_view_handle_text(session->root, event->text))
       return 0;

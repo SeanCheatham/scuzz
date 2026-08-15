@@ -23,17 +23,20 @@ button:Save
 button:Clear
 
 [taps]
-0 Home
-1 Tasks
-2 Add
-3 Rename
-4 Done
-5 Del
-6 Save
-7 Clear
+0 Home 24,24 48x32
+1 Tasks 130,24 48x32
+2 Add 144,88 48x32
+3 Rename 200,88 58x32
+4 Done 248,176 48x32
+5 Del 304,176 48x32
+6 Save 12,476 48x32
+7 Clear 12,516 48x32
 
 [fields]
 0* item=""
 
 [scrolls]
 0 scroll
+
+[last_hit]
+xy 154.0 40.0 -> button:Tasks

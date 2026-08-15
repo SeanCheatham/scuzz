@@ -317,13 +317,18 @@ int sz_ui_session_watch(SzUiSession *session, const char *path);
  * the target). `text N s` / `type N s` / `backspace N k` target dump index N.
  * One-token forms still use the starred field.
  * [scrolls] lists hittable Scrolls in scan order; `scroll N dy` pans index N
- * (`scroll 40` stays the first). */
+ * (`scroll 40` stays the first).
+ * [last_hit] appears after a TAP in this session: `xy x y -> role:label` or
+ * `-> NULL`. */
 int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
 int sz_ui_session_write_dump(SzUiSession *session, const char *path);
-/* Watch an inject script (tap/text/type/pump/scroll/backspace). Next pump that
+/* Watch an inject script (tap/text/type/pump/scroll/backspace/xy). Next pump that
  * sees new contents plays the suffix (append) or the whole file (rewrite).
  * Missing = empty. */
 int sz_ui_session_set_inject(SzUiSession *session, const char *path);
+/* Live record path (Desktop / Mobile drain). Truncates on set. Appends only from
+ * OS drain, never from script / inject playback. */
+int sz_ui_session_set_record(SzUiSession *session, const char *path);
 /* Invoke the rebuild factory now. Pump calls this when the stamp changes. */
 int sz_ui_session_reload(SzUiSession *session);
 /* dlopen `path` (copied to a unique sibling so the OS does not keep a stale

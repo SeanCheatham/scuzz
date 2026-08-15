@@ -414,6 +414,7 @@ static void scripted_button_tap(SzUiSession *session, int prefer_upper) {
 /* --- SCUZZ_UI_SCRIPT playback (fuzz / replay) ---------------------------- */
 /* Line protocol, one event per line, delivered across pump boundaries:
      tap <n>    tap the nth button or checkbox (scan order; [taps] in the dump); missing target is a no-op
+     xy <x> <y> inject TAP at logical point; miss does not panic
      text <s>   replace the [fields] starred TextField with <s>; no field is a no-op
      text <n> <s>  replace dump-index n (a11y order); `text 0` is still payload "0"
      type <s>   append <s> to the [fields] starred TextField; empty is a no-op; no field is a no-op
@@ -466,6 +467,16 @@ static void script_tap(SzUiSession *session, int n) {
     sz_panic("Ui.run: script tap inject failed");
 }
 
+static void script_xy(SzUiSession *session, float x, float y) {
+  SzInputEvent tap;
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SZ_INPUT_TAP;
+  tap.x = x;
+  tap.y = y;
+  if (!sz_ui_inject_sync(session, &tap))
+    sz_panic("Ui.run: script xy inject failed");
+}
+
 static void run_ui_script(SzUiSession *session, const char *path) {
   FILE *f = fopen(path, "r");
   char line[1024];
@@ -479,6 +490,14 @@ static void run_ui_script(SzUiSession *session, const char *path) {
       continue;
     if (strncmp(line, "tap ", 4) == 0 || strcmp(line, "tap") == 0) {
       script_tap(session, len > 3 ? atoi(line + 4) : 0);
+    } else if (strncmp(line, "xy ", 3) == 0) {
+      float x = 0.f, y = 0.f;
+      if (sscanf(line + 3, "%f %f", &x, &y) == 2)
+        script_xy(session, x, y);
+      else {
+        fclose(f);
+        sz_panic("Ui.run: xy needs x y");
+      }
     } else if (strncmp(line, "text ", 5) == 0 || strcmp(line, "text") == 0) {
       SzInputEvent ev;
       int idx;
@@ -559,6 +578,11 @@ static void *thunk_run_rebuild(void *env) {
     if (inject && inject[0])
       sz_ui_session_set_inject(session, inject);
   }
+  {
+    const char *record = getenv("SCUZZ_UI_RECORD");
+    if (record && record[0])
+      sz_ui_session_set_record(session, record);
+  }
 
   if (!sz_ui_pump_sync(session))
     sz_panic("Ui.run pump failed");
@@ -602,6 +626,7 @@ static void *thunk_run_rebuild(void *env) {
         nanosleep(&ts, NULL);
       }
     } while (sz_embedder_alive());
+    sz_ui_session_finish(session);
   } else if (stamp && stamp[0]) {
     const char *max_frames_env = getenv("SCUZZ_LIVE_FRAMES");
     int64_t max_frames =
