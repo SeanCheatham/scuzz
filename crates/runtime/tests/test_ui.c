@@ -8154,6 +8154,363 @@ static void test_merge_semantics_skips_field_collect(void) {
   sz_signal_str_free(b);
 }
 
+static void test_ink_well_sizes(void) {
+  SzView *ink, *av;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, cf;
+
+  sig = sz_signal_int(0);
+  av = sz_view_avatar("S");
+  ink = sz_view_ink_well("face", counter_tap, sig, av);
+  sz_view_layout(ink, 200.f, 200.f, theme);
+  assert(sz_view_kind(ink) == SZ_VIEW_INK_WELL);
+  f = sz_view_frame(ink);
+  cf = sz_view_frame(av);
+  assert(fabsf(f.w - cf.w) < 0.5f);
+  assert(fabsf(f.h - cf.h) < 0.5f);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  sz_view_free(ink);
+  sz_signal_int_free(sig);
+}
+
+static void test_ink_well_empty_sizes(void) {
+  SzView *ink;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  ink = sz_view_ink_well("face", NULL, NULL, NULL);
+  sz_view_layout(ink, 200.f, 200.f, theme);
+  f = sz_view_frame(ink);
+  assert(fabsf(f.w) < 0.5f);
+  assert(fabsf(f.h) < 0.5f);
+  sz_view_free(ink);
+}
+
+static void test_ink_well_same_origin(void) {
+  SzView *ink, *av;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, cf;
+
+  av = sz_view_avatar("S");
+  ink = sz_view_ink_well("face", NULL, NULL, av);
+  sz_view_layout(ink, 200.f, 200.f, theme);
+  f = sz_view_frame(ink);
+  cf = sz_view_frame(av);
+  assert(fabsf(f.x - cf.x) < 0.5f);
+  assert(fabsf(f.y - cf.y) < 0.5f);
+  sz_view_free(ink);
+}
+
+static void test_ink_well_a11y(void) {
+  SzView *ink;
+  SzString *dump;
+  const char *s;
+
+  ink = sz_view_ink_well("face", NULL, NULL, sz_view_avatar("S"));
+  dump = sz_view_a11y_dump(ink);
+  s = sz_string_cstr(dump);
+  assert(strncmp(s, "inkwell:", 8) == 0);
+  assert(strstr(s, "inkwell:face") != NULL);
+  assert(strstr(s, "avatar:S") != NULL);
+  sz_string_free(dump);
+  sz_view_free(ink);
+}
+
+static void test_ink_well_a11y_nested(void) {
+  SzView *ink;
+  SzString *dump;
+  const char *s;
+
+  ink = sz_view_ink_well(
+      "face", NULL, NULL,
+      sz_view_placeholder(sz_view_tooltip("Sean", sz_view_avatar("S"))));
+  dump = sz_view_a11y_dump(ink);
+  s = sz_string_cstr(dump);
+  assert(strstr(s, "inkwell:face") != NULL);
+  assert(strstr(s, "placeholder:ph") != NULL);
+  assert(strstr(s, "tooltip:Sean") != NULL);
+  assert(strstr(s, "avatar:S") != NULL);
+  sz_string_free(dump);
+  sz_view_free(ink);
+}
+
+static void test_ink_well_a11y_distinct(void) {
+  SzView *col;
+  SzString *dump;
+  const char *s;
+
+  col = sz_view_column();
+  sz_view_add_child(col, sz_view_button("Go", NULL, NULL));
+  sz_view_add_child(col, sz_view_ink_well("face", NULL, NULL, sz_view_avatar("S")));
+  dump = sz_view_a11y_dump(col);
+  s = sz_string_cstr(dump);
+  assert(strstr(s, "button:Go") != NULL);
+  assert(strstr(s, "inkwell:face") != NULL);
+  assert(strncmp(s, "inkwell:", 8) != 0);
+  sz_string_free(dump);
+  sz_view_free(col);
+}
+
+static void test_ink_well_empty_label(void) {
+  SzView *ink;
+  SzString *dump;
+
+  ink = sz_view_ink_well("", NULL, NULL, sz_view_avatar("S"));
+  dump = sz_view_a11y_dump(ink);
+  assert(strstr(sz_string_cstr(dump), "inkwell:") != NULL);
+  assert(strstr(sz_string_cstr(dump), "avatar:S") != NULL);
+  sz_string_free(dump);
+  sz_view_free(ink);
+}
+
+static void test_ink_well_null_label(void) {
+  SzView *ink;
+  SzString *dump;
+
+  ink = sz_view_ink_well(NULL, NULL, NULL, sz_view_avatar("S"));
+  dump = sz_view_a11y_dump(ink);
+  assert(strstr(sz_string_cstr(dump), "inkwell:") != NULL);
+  sz_string_free(dump);
+  sz_view_free(ink);
+}
+
+static void test_ink_well_is_tap_target(void) {
+  SzView *ink;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  ink = sz_view_ink_well("face", NULL, NULL, sz_view_avatar("S"));
+  sz_view_layout(ink, 200.f, 80.f, theme);
+  f = sz_view_frame(ink);
+  assert(sz_view_is_tap_target(ink));
+  assert(sz_view_hit_test(ink, f.x + 4.f, f.y + f.h * 0.5f) == ink);
+  sz_view_free(ink);
+}
+
+static void test_ink_well_tap(void) {
+  SzView *ink;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  ink = sz_view_ink_well("face", counter_tap, sig, sz_view_avatar("S"));
+  sz_view_layout(ink, 200.f, 80.f, theme);
+  f = sz_view_frame(ink);
+  assert(sz_view_handle_tap(ink, f.x + 4.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 1);
+  sz_view_free(ink);
+  sz_signal_int_free(sig);
+}
+
+static void test_ink_well_tap_twice(void) {
+  SzView *ink;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  ink = sz_view_ink_well("face", counter_tap, sig, sz_view_avatar("S"));
+  sz_view_layout(ink, 200.f, 80.f, theme);
+  f = sz_view_frame(ink);
+  assert(sz_view_handle_tap(ink, f.x + 4.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 1);
+  assert(sz_view_handle_tap(ink, f.x + 4.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 2);
+  sz_view_free(ink);
+  sz_signal_int_free(sig);
+}
+
+static void test_ink_well_null_tap(void) {
+  SzView *ink;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  ink = sz_view_ink_well("face", NULL, NULL, sz_view_avatar("S"));
+  sz_view_layout(ink, 200.f, 80.f, theme);
+  f = sz_view_frame(ink);
+  assert(sz_view_is_tap_target(ink));
+  assert(!sz_view_handle_tap(ink, f.x + 4.f, f.y + f.h * 0.5f));
+  sz_view_free(ink);
+}
+
+static void test_ink_well_miss(void) {
+  SzView *ink;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  ink = sz_view_ink_well("face", counter_tap, sig, sz_view_avatar("S"));
+  sz_view_layout(ink, 200.f, 80.f, theme);
+  f = sz_view_frame(ink);
+  assert(!sz_view_handle_tap(ink, f.x - 8.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 0);
+  sz_view_free(ink);
+  sz_signal_int_free(sig);
+}
+
+static void test_ink_well_child_button_wins(void) {
+  SzView *ink, *btn, *hit;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  btn = sz_view_button("Go", counter_tap, sig);
+  ink = sz_view_ink_well("face", NULL, NULL, btn);
+  sz_view_layout(ink, 200.f, 80.f, theme);
+  f = sz_view_frame(btn);
+  hit = sz_view_hit_test(ink, f.x + 4.f, f.y + f.h * 0.5f);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_BUTTON);
+  assert(sz_view_handle_tap(ink, f.x + 4.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 1);
+  sz_view_free(ink);
+  sz_signal_int_free(sig);
+}
+
+static void test_ink_well_paint_child(void) {
+  SzView *root, *av;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+  int mx, my;
+
+  av = sz_view_avatar("S");
+  root = sz_view_ink_well("face", NULL, NULL, av);
+  sz_view_layout(root, 80.f, 80.f, theme);
+  f = sz_view_frame(av);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  mx = (int)(f.x + f.w * 0.5f);
+  my = (int)(f.y + 6.f);
+  assert(px_rgb(px, 80, mx, my, 0x14, 0x28, 0x50));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
+static void test_ink_well_paint_no_mark(void) {
+  SzView *root, *child;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  child = sz_view_background(0xFF00AA00u, sz_view_sized(40, 40, sz_view_text("x")));
+  root = sz_view_ink_well("face", NULL, NULL, child);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  f = sz_view_frame(root);
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 20.f), 0x00, 0xAA, 0x00));
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)f.y, 0x00, 0xAA, 0x00));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
+static void test_ink_well_paint_empty(void) {
+  SzView *root;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+
+  root = sz_view_ink_well("face", NULL, NULL, NULL);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, 8, 8, 0xF5, 0xF5, 0xF5));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
+static void test_ink_well_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_ink_well.dump";
+  char *dump;
+  const char *taps;
+
+  sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_ink_well("face", counter_tap, sig, sz_view_avatar("S")));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "inkwell:face") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "face") != NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
+static void test_ink_well_child_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_ink_well_child.dump";
+  char *dump;
+  const char *taps;
+
+  sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_ink_well("face", NULL, NULL, sz_view_button("Go", counter_tap, sig)));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "inkwell:face") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "Go") != NULL);
+  assert(strstr(taps, "face") == NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
 static void test_filter_chip_sizes(void) {
   SzView *ch, *plain;
   SzSignalInt *sig;
@@ -11158,6 +11515,25 @@ int main(void) {
   test_merge_semantics_not_in_taps_dump();
   test_merge_semantics_child_in_taps_dump();
   test_merge_semantics_skips_field_collect();
+  test_ink_well_sizes();
+  test_ink_well_empty_sizes();
+  test_ink_well_same_origin();
+  test_ink_well_a11y();
+  test_ink_well_a11y_nested();
+  test_ink_well_a11y_distinct();
+  test_ink_well_empty_label();
+  test_ink_well_null_label();
+  test_ink_well_is_tap_target();
+  test_ink_well_tap();
+  test_ink_well_tap_twice();
+  test_ink_well_null_tap();
+  test_ink_well_miss();
+  test_ink_well_child_button_wins();
+  test_ink_well_paint_child();
+  test_ink_well_paint_no_mark();
+  test_ink_well_paint_empty();
+  test_ink_well_in_taps_dump();
+  test_ink_well_child_in_taps_dump();
   test_filter_chip_sizes();
   test_filter_chip_empty_min_width();
   test_filter_chip_null_label();

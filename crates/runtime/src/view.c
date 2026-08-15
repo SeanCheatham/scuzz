@@ -122,7 +122,7 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_BADGE || kind == SZ_VIEW_CARD ||
          kind == SZ_VIEW_EXPANSION_TILE || kind == SZ_VIEW_TOOLTIP ||
          kind == SZ_VIEW_PLACEHOLDER || kind == SZ_VIEW_SEMANTICS ||
-         kind == SZ_VIEW_MERGE_SEMANTICS;
+         kind == SZ_VIEW_MERGE_SEMANTICS || kind == SZ_VIEW_INK_WELL;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -171,6 +171,7 @@ int sz_view_is_tap_target(const SzView *view) {
           view->kind == SZ_VIEW_OUTLINED_BUTTON ||
           view->kind == SZ_VIEW_TEXT_BUTTON ||
           view->kind == SZ_VIEW_ACTION_CHIP ||
+          view->kind == SZ_VIEW_INK_WELL ||
           view->kind == SZ_VIEW_CHECKBOX_LIST_TILE ||
           view->kind == SZ_VIEW_SWITCH_LIST_TILE ||
           view->kind == SZ_VIEW_RADIO_LIST_TILE ||
@@ -518,6 +519,20 @@ SzView *sz_view_merge_semantics(const char *label, SzView *child) {
   return v;
 }
 
+SzView *sz_view_ink_well(const char *label, SzViewTapFn on_tap, void *env,
+                         SzView *child) {
+  SzView *v = view_new(SZ_VIEW_INK_WELL);
+  v->text = sz_strdup(label ? label : "");
+  v->on_tap = on_tap;
+  v->tap_env = env;
+  v->interactive = 1;
+  v->a11y_role = SZ_A11Y_INK_WELL;
+  v->a11y_label = sz_strdup(label ? label : "");
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
 SzView *sz_view_divider(void) {
   SzView *v = view_new(SZ_VIEW_DIVIDER);
   v->a11y_role = SZ_A11Y_DIVIDER;
@@ -665,6 +680,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "semantics";
   case SZ_A11Y_MERGE:
     return "merge";
+  case SZ_A11Y_INK_WELL:
+    return "inkwell";
   default:
     return "none";
   }
@@ -2185,6 +2202,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_PLACEHOLDER:
   case SZ_VIEW_SEMANTICS:
   case SZ_VIEW_MERGE_SEMANTICS:
+  case SZ_VIEW_INK_WELL:
     layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     break;
   case SZ_VIEW_MAX_LINES: {
@@ -3334,6 +3352,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_TOOLTIP:
   case SZ_VIEW_SEMANTICS:
   case SZ_VIEW_MERGE_SEMANTICS:
+  case SZ_VIEW_INK_WELL:
     if (v->kind == SZ_VIEW_LIST)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     for (i = 0; i < v->child_count; i++)
@@ -3490,7 +3509,8 @@ int sz_view_handle_tap(SzView *root, float x, float y) {
     return 0;
   if ((hit->kind == SZ_VIEW_BUTTON || hit->kind == SZ_VIEW_ICON_BUTTON ||
        hit->kind == SZ_VIEW_FAB || hit->kind == SZ_VIEW_OUTLINED_BUTTON ||
-       hit->kind == SZ_VIEW_TEXT_BUTTON || hit->kind == SZ_VIEW_ACTION_CHIP) &&
+       hit->kind == SZ_VIEW_TEXT_BUTTON || hit->kind == SZ_VIEW_ACTION_CHIP ||
+       hit->kind == SZ_VIEW_INK_WELL) &&
       hit->on_tap) {
     hit->on_tap(hit, hit->tap_env);
     return 1;

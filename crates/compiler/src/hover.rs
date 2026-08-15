@@ -375,6 +375,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.mergeSemantics(label: String, child: View): View",
     ),
     (
+        "View.inkWell",
+        "View.inkWell(label: String, onTap: _ => Unit, child: View): View",
+    ),
+    (
         "View.checkbox",
         "View.checkbox(sig: Signal, label: String): View",
     ),
@@ -929,6 +933,18 @@ mod tests {
         let h = hover_src(src, "mergeSemantics");
         assert!(
             h.contains("View.mergeSemantics(label: String, child: View): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_view_ink_well() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.inkWell("face", _ => (), View.avatar("S")))
+"#;
+        let h = hover_src(src, "inkWell");
+        assert!(
+            h.contains("View.inkWell(label: String, onTap: _ => Unit, child: View): View"),
             "{h}"
         );
     }

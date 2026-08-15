@@ -175,6 +175,11 @@ SzView *sz_lang_view_merge_semantics(SzString *label, SzView *child) {
   return sz_view_merge_semantics(label ? sz_string_cstr(label) : "", child);
 }
 
+SzView *sz_lang_view_ink_well(SzString *label, SzViewTapFn tap, void *env,
+                             SzView *child) {
+  return sz_view_ink_well(label ? sz_string_cstr(label) : "", tap, env, child);
+}
+
 SzView *sz_lang_view_divider(void) { return sz_view_divider(); }
 
 SzView *sz_lang_view_expansion_tile(SzSignalInt *sig, SzString *title,

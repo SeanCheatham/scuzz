@@ -150,6 +150,11 @@ pub fn emit_llvm(program: &Program) -> String {
     )
     .unwrap();
     writeln!(out, "declare ptr @sz_lang_view_text_button(ptr, ptr, ptr)").unwrap();
+    writeln!(
+        out,
+        "declare ptr @sz_lang_view_ink_well(ptr, ptr, ptr, ptr)"
+    )
+    .unwrap();
     writeln!(out, "declare ptr @sz_lang_view_checkbox(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_radio(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_slider(ptr)").unwrap();
@@ -1558,7 +1563,7 @@ fn emit_interpolate(
 /// 2-element `SzList` `cons(fn_ptr, cons(env_ptr, nil))`. `fn_ptr` matches the
 /// C `SzViewTapFn` signature `void (*)(SzView *self, void *env)`. `env_ptr` is
 /// the captured-locals list (same packing scheme as `flatMap` continuations).
-/// Consumers (`View.button`, `View.iconButton`, `View.fab`, `View.outlinedButton`, `View.textButton`, `View.actionChip`) unpack the pair.
+/// Consumers (`View.button`, `View.iconButton`, `View.fab`, `View.outlinedButton`, `View.textButton`, `View.actionChip`, `View.inkWell`) unpack the pair.
 fn emit_lambda(
     param: &Option<String>,
     body: &Expr,
@@ -3696,6 +3701,32 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "View.inkWell" => {
+            writeln!(
+                code,
+                "  %{prefix}_fnp = call ptr @sz_list_head(ptr {})",
+                emitted_args[1].value
+            )
+            .unwrap();
+            writeln!(
+                code,
+                "  %{prefix}_fnt = call ptr @sz_list_tail(ptr {})",
+                emitted_args[1].value
+            )
+            .unwrap();
+            writeln!(
+                code,
+                "  %{prefix}_envp = call ptr @sz_list_head(ptr %{prefix}_fnt)"
+            )
+            .unwrap();
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_view_ink_well(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp, ptr {})",
+                emitted_args[0].value, emitted_args[2].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "View.divider" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_lang_view_divider()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
@@ -4873,6 +4904,20 @@ law always: Bool = 1 == 1
         assert!(
             ir.contains("sz_lang_view_merge_semantics"),
             "expected sz_lang_view_merge_semantics in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_ink_well() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.inkWell("face", _ => (), View.avatar("S")))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_ink_well"),
+            "expected sz_lang_view_ink_well in IR:\n{ir}"
         );
     }
 

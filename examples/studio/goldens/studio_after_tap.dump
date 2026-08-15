@@ -32,6 +32,7 @@ divider:divider
 semantics:mark
 placeholder:ph
 tooltip:Sean
+inkwell:face
 avatar:S
 checktile:Star=0
 switchtile:Quiet=0
@@ -60,14 +61,15 @@ button:Clear
 3 On 183,88 37x32
 4 Pin 228,88 32x32
 5 Rename 268,88 43x32
-6 Star 48,232 304x32
-7 Quiet 48,272 304x32
-8 Night 48,312 304x32
-9 segmented 48,352 304x32
-10 + 48,392 32x32
-11 More 48,432 304x32
-12 Save 12,476 48x32
-13 Clear 12,516 48x32
+6 face 48,192 32x32
+7 Star 48,232 304x32
+8 Quiet 48,272 304x32
+9 Night 48,312 304x32
+10 segmented 48,352 304x32
+11 + 48,392 32x32
+12 More 48,432 304x32
+13 Save 12,476 48x32
+14 Clear 12,516 48x32
 
 [fields]
 0* item=""
