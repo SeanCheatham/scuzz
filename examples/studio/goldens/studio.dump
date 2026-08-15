@@ -9,8 +9,9 @@ int[6] = 0
 int[7] = 0
 int[8] = 0
 int[9] = 0
-str[10] = "count = 0"
-str[11] = "page = 0"
+int[10] = 0
+str[11] = "count = 0"
+str[12] = "page = 0"
 
 [views]
 radio:Home=1
@@ -37,6 +38,7 @@ divider:divider
 avatar:S
 checktile:Star=0
 switchtile:Quiet=0
+radiotile:Night=0
 expansion:More=0
 list:list
 listtile:milk

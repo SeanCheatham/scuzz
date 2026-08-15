@@ -178,7 +178,8 @@ typedef enum SzViewKind {
   SZ_VIEW_CIRCULAR_PROGRESS, /* Signal.int 0-100 square ring; display only */
   SZ_VIEW_AVATAR,            /* control_h disc + label; display only */
   SZ_VIEW_CHECKBOX_LIST_TILE, /* Signal.int 0/1 full-width title row; tap flips */
-  SZ_VIEW_SWITCH_LIST_TILE    /* Signal.int 0/1 full-width title + trailing switch */
+  SZ_VIEW_SWITCH_LIST_TILE,   /* Signal.int 0/1 full-width title + trailing switch */
+  SZ_VIEW_RADIO_LIST_TILE     /* Signal.int group; full-width title + leading radio */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -220,6 +221,8 @@ SzView *sz_view_list_tile(const char *title, SzView *trailing);
 SzView *sz_view_checkbox_list_tile(SzSignalInt *sig, const char *title);
 /* Full-width title row with a trailing switch. Tap flips `sig` between 0 and 1. */
 SzView *sz_view_switch_list_tile(SzSignalInt *sig, const char *title);
+/* Full-width title row with a leading radio. Tap writes `value` into `sig`. */
+SzView *sz_view_radio_list_tile(SzSignalInt *sig, int64_t value, const char *title);
 /* Overlay `sig` as a count on `child`. Sizes to the child. Not a tap target. */
 SzView *sz_view_badge(SzSignalInt *sig, SzView *child);
 /* Surface, theme pad, and a 1 px border around `child`. Not a tap target. */
@@ -359,7 +362,8 @@ typedef enum SzA11yRole {
   SZ_A11Y_CIRCULAR = 20,
   SZ_A11Y_AVATAR = 21,
   SZ_A11Y_CHECK_TILE = 22,
-  SZ_A11Y_SWITCH_TILE = 23
+  SZ_A11Y_SWITCH_TILE = 23,
+  SZ_A11Y_RADIO_TILE = 24
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
@@ -460,6 +464,8 @@ SzView *sz_lang_view_chip(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_list_tile(SzString *title, SzView *trailing);
 SzView *sz_lang_view_checkbox_list_tile(SzSignalInt *sig, SzString *title);
 SzView *sz_lang_view_switch_list_tile(SzSignalInt *sig, SzString *title);
+SzView *sz_lang_view_radio_list_tile(SzSignalInt *sig, int64_t value,
+                                    SzString *title);
 SzView *sz_lang_view_badge(SzSignalInt *sig, SzView *child);
 SzView *sz_lang_view_card(SzView *child);
 SzView *sz_lang_view_divider(void);

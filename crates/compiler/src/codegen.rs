@@ -158,6 +158,11 @@ pub fn emit_llvm(program: &Program) -> String {
     )
     .unwrap();
     writeln!(out, "declare ptr @sz_lang_view_switch_list_tile(ptr, ptr)").unwrap();
+    writeln!(
+        out,
+        "declare ptr @sz_lang_view_radio_list_tile(ptr, i64, ptr)"
+    )
+    .unwrap();
     writeln!(out, "declare ptr @sz_lang_view_badge(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_card(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_divider()").unwrap();
@@ -3472,6 +3477,15 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "View.radioListTile" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_view_radio_list_tile(ptr {}, i64 {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "View.badge" => {
             writeln!(
                 code,
@@ -4470,6 +4484,23 @@ law always: Bool = 1 == 1
         assert!(
             ir.contains("sz_lang_view_switch_list_tile"),
             "expected sz_lang_view_switch_list_tile in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_radio_list_tile() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.radioListTile(n, 1, "Night"))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_radio_list_tile"),
+            "expected sz_lang_view_radio_list_tile in IR:\n{ir}"
         );
     }
 

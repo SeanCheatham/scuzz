@@ -163,7 +163,8 @@ int sz_view_is_tap_target(const SzView *view) {
           view->kind == SZ_VIEW_EXPANSION_TILE ||
           view->kind == SZ_VIEW_ICON_BUTTON ||
           view->kind == SZ_VIEW_CHECKBOX_LIST_TILE ||
-          view->kind == SZ_VIEW_SWITCH_LIST_TILE);
+          view->kind == SZ_VIEW_SWITCH_LIST_TILE ||
+          view->kind == SZ_VIEW_RADIO_LIST_TILE);
 }
 
 SzRect sz_view_frame(const SzView *view) {
@@ -350,6 +351,18 @@ SzView *sz_view_switch_list_tile(SzSignalInt *sig, const char *title) {
   return v;
 }
 
+SzView *sz_view_radio_list_tile(SzSignalInt *sig, int64_t value,
+                               const char *title) {
+  SzView *v = view_new(SZ_VIEW_RADIO_LIST_TILE);
+  v->sig_int = sig;
+  v->radio_value = value;
+  v->text = sz_strdup(title ? title : "");
+  v->interactive = 1;
+  v->a11y_role = SZ_A11Y_RADIO_TILE;
+  v->a11y_label = sz_strdup(title ? title : "");
+  return v;
+}
+
 SzView *sz_view_badge(SzSignalInt *sig, SzView *child) {
   SzView *v = view_new(SZ_VIEW_BADGE);
   v->sig_int = sig;
@@ -490,6 +503,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "checktile";
   case SZ_A11Y_SWITCH_TILE:
     return "switchtile";
+  case SZ_A11Y_RADIO_TILE:
+    return "radiotile";
   default:
     return "none";
   }
@@ -519,7 +534,7 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
                on ? 1 : 0);
       label = live;
     }
-    if (v->kind == SZ_VIEW_RADIO) {
+    if (v->kind == SZ_VIEW_RADIO || v->kind == SZ_VIEW_RADIO_LIST_TILE) {
       int on = v->sig_int && sz_signal_int_get(v->sig_int) == v->radio_value;
       snprintf(live, sizeof live, "%s=%d", v->a11y_label ? v->a11y_label : "",
                on ? 1 : 0);
@@ -1388,6 +1403,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   }
   case SZ_VIEW_CHECKBOX_LIST_TILE:
   case SZ_VIEW_SWITCH_LIST_TILE:
+  case SZ_VIEW_RADIO_LIST_TILE:
     v->frame.w = max_w > 0 ? max_w : 120.f;
     v->frame.h = theme->control_h;
     break;
@@ -2613,6 +2629,37 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
                  theme->foreground, theme->font_px);
     break;
   }
+  case SZ_VIEW_RADIO_LIST_TILE: {
+    float box = theme->font_px + 4.f;
+    float gap;
+    float bx, by;
+    float inset;
+    int on;
+    SzRect br;
+    if (box < 12.f)
+      box = 12.f;
+    if (box > theme->control_h - 4.f)
+      box = theme->control_h - 4.f;
+    gap = layout_gap(theme);
+    paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
+    bx = v->frame.x + theme->pad;
+    by = v->frame.y + (v->frame.h - box) * 0.5f;
+    br.x = bx;
+    br.y = by;
+    br.w = box;
+    br.h = box;
+    paint_border(c, br, (int)(scale_px(theme, 2.f) + 0.5f), theme->border);
+    on = v->sig_int && sz_signal_int_get(v->sig_int) == v->radio_value;
+    inset = box > 8.f ? 3.f : 1.f;
+    if (on)
+      paint_rect(c, bx + inset, by + inset, box - inset * 2.f, box - inset * 2.f,
+                 theme->primary);
+    resolve_text(v, buf, sizeof buf);
+    paint_string(c, buf, bx + box + gap,
+                 v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
+                 theme->foreground, theme->font_px);
+    break;
+  }
   case SZ_VIEW_BADGE: {
     float d;
     float bx, by;
@@ -3076,7 +3123,8 @@ int sz_view_handle_tap(SzView *root, float x, float y) {
     sz_signal_int_set(hit->sig_int, n == 0 ? 1 : 0);
     return 1;
   }
-  if (hit->kind == SZ_VIEW_RADIO && hit->sig_int) {
+  if ((hit->kind == SZ_VIEW_RADIO || hit->kind == SZ_VIEW_RADIO_LIST_TILE) &&
+      hit->sig_int) {
     sz_signal_int_set(hit->sig_int, hit->radio_value);
     return 1;
   }

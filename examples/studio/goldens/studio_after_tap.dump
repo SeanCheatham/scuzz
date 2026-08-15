@@ -9,8 +9,9 @@ int[6] = 0
 int[7] = 0
 int[8] = 0
 int[9] = 0
-str[10] = "count = 0"
-str[11] = "page = 1"
+int[10] = 0
+str[11] = "count = 0"
+str[12] = "page = 1"
 
 [views]
 radio:Home=0
@@ -30,6 +31,7 @@ divider:divider
 avatar:S
 checktile:Star=0
 switchtile:Quiet=0
+radiotile:Night=0
 expansion:More=0
 list:list
 listtile:milk
@@ -48,12 +50,13 @@ button:Clear
 5 Rename 268,88 43x32
 6 Star 48,232 304x32
 7 Quiet 48,272 304x32
-8 More 48,312 304x32
-9 i 172,376 32x32
-10 Done 212,376 43x32
-11 Del 263,376 43x32
-12 Save 12,476 48x32
-13 Clear 12,516 48x32
+8 Night 48,312 304x32
+9 More 48,352 304x32
+10 i 172,416 32x32
+11 Done 212,416 43x32
+12 Del 263,416 43x32
+13 Save 12,476 48x32
+14 Clear 12,516 48x32
 
 [fields]
 0* item=""
