@@ -185,7 +185,8 @@ typedef enum SzViewKind {
   SZ_VIEW_OUTLINED_BUTTON,    /* surface + border tap; same closure as button */
   SZ_VIEW_TEXT_BUTTON,        /* foreground label tap; same closure as button */
   SZ_VIEW_TOOLTIP,            /* message + child; sizes to the child; not a tap */
-  SZ_VIEW_PLACEHOLDER         /* sizes to the child; muted box mark; not a tap */
+  SZ_VIEW_PLACEHOLDER,        /* sizes to the child; muted box mark; not a tap */
+  SZ_VIEW_FILTER_CHIP         /* Signal.int 0/1 chip with a leading check; tap flips */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -221,6 +222,8 @@ SzView *sz_view_avatar(const char *label);
 SzView *sz_view_switch(SzSignalInt *sig, const char *label);
 /* Tap flips `sig` between 0 and 1. `label` fills the chip. */
 SzView *sz_view_chip(SzSignalInt *sig, const char *label);
+/* Tap flips `sig` between 0 and 1. Leading check when on. */
+SzView *sz_view_filter_chip(SzSignalInt *sig, const char *label);
 /* Full-width title row. Optional `trailing` sits on the right. Not a tap target. */
 SzView *sz_view_list_tile(const char *title, SzView *trailing);
 /* Full-width title row. Tap flips `sig` between 0 and 1. */
@@ -387,7 +390,8 @@ typedef enum SzA11yRole {
   SZ_A11Y_TOOLTIP = 27,
   SZ_A11Y_OUTLINED = 28,
   SZ_A11Y_TEXT_BUTTON = 29,
-  SZ_A11Y_PLACEHOLDER = 30
+  SZ_A11Y_PLACEHOLDER = 30,
+  SZ_A11Y_FILTER_CHIP = 31
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
@@ -485,6 +489,7 @@ SzView *sz_lang_view_circular_progress(SzSignalInt *sig);
 SzView *sz_lang_view_avatar(SzString *label);
 SzView *sz_lang_view_switch(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_chip(SzSignalInt *sig, SzString *label);
+SzView *sz_lang_view_filter_chip(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_list_tile(SzString *title, SzView *trailing);
 SzView *sz_lang_view_checkbox_list_tile(SzSignalInt *sig, SzString *title);
 SzView *sz_lang_view_switch_list_tile(SzSignalInt *sig, SzString *title);

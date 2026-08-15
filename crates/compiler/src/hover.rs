@@ -387,6 +387,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ),
     ("View.chip", "View.chip(sig: Signal, label: String): View"),
     (
+        "View.filterChip",
+        "View.filterChip(sig: Signal, label: String): View",
+    ),
+    (
         "View.listTile",
         "View.listTile(title: String, trailing: View): View",
     ),
@@ -695,6 +699,21 @@ mod tests {
         let h = hover_src(src, "chip");
         assert!(
             h.contains("View.chip(sig: Signal, label: String): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_view_filter_chip() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.filterChip(n, "Tag"))
+  } yield ()
+"#;
+        let h = hover_src(src, "filterChip");
+        assert!(
+            h.contains("View.filterChip(sig: Signal, label: String): View"),
             "{h}"
         );
     }

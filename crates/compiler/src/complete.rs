@@ -328,6 +328,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_filter_chip_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.filt\n";
+        let labels = labels_at(src, "View.filt");
+        assert!(labels.iter().any(|l| l == "View.filterChip"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_list_tile_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.li\n";
         let labels = labels_at(src, "View.li");
