@@ -372,6 +372,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_fab_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.fa\n";
+        let labels = labels_at(src, "View.fa");
+        assert!(labels.iter().any(|l| l == "View.fab"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_badge_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.ba\n";
         let labels = labels_at(src, "View.ba");

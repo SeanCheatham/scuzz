@@ -41,6 +41,7 @@ checktile:Star=0
 switchtile:Quiet=0
 radiotile:Night=0
 segmented:0
+fab:+
 expansion:More=0
 list:list
 listtile:milk

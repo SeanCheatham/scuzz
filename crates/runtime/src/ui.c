@@ -581,6 +581,9 @@ static void format_last_hit_desc(SzView *hit, char *buf, size_t cap) {
   case SZ_A11Y_SEGMENTED:
     role = "segmented";
     break;
+  case SZ_A11Y_FAB:
+    role = "fab";
+    break;
   case SZ_A11Y_SWITCH:
     role = "switch";
     break;

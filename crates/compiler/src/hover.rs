@@ -350,6 +350,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.iconButton(label: String, onTap: _ => Unit): View",
     ),
     (
+        "View.fab",
+        "View.fab(label: String, onTap: _ => Unit): View",
+    ),
+    (
         "View.checkbox",
         "View.checkbox(sig: Signal, label: String): View",
     ),
@@ -750,6 +754,18 @@ mod tests {
         let h = hover_src(src, "segmented");
         assert!(
             h.contains("View.segmented(sig: Signal, left: String, right: String): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_view_fab() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.fab("+", _ => ()))
+"#;
+        let h = hover_src(src, "fab");
+        assert!(
+            h.contains("View.fab(label: String, onTap: _ => Unit): View"),
             "{h}"
         );
     }

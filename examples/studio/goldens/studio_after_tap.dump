@@ -34,6 +34,7 @@ checktile:Star=0
 switchtile:Quiet=0
 radiotile:Night=0
 segmented:0
+fab:+
 expansion:More=0
 list:list
 listtile:milk
@@ -54,12 +55,10 @@ button:Clear
 7 Quiet 48,272 304x32
 8 Night 48,312 304x32
 9 segmented 48,352 304x32
-10 More 48,392 304x32
-11 i 172,456 32x32
-12 Done 212,456 43x32
-13 Del 263,456 43x32
-14 Save 12,476 48x32
-15 Clear 12,516 48x32
+10 + 48,392 32x32
+11 More 48,432 304x32
+12 Save 12,476 48x32
+13 Clear 12,516 48x32
 
 [fields]
 0* item=""
