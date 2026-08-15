@@ -84,9 +84,6 @@ enum Commands {
         /// Also compare / seed PNG pixel goldens
         #[arg(long)]
         pixels: bool,
-        /// Also run crates/runtime + ffi-skia C unit tests
-        #[arg(long)]
-        runtime_tests: bool,
     },
     /// Format-check src/ + parse + typecheck (no codegen / link). JSON with --message-format=json.
     Check {
@@ -245,37 +242,7 @@ fn real_main() -> Result<ExitCode> {
             path,
             update,
             pixels,
-            runtime_tests,
         } => {
-            if runtime_tests {
-                let runtime = find_runtime_dir(&std::env::current_dir()?)?;
-                let status = Command::new("make")
-                    .arg("-C")
-                    .arg(&runtime)
-                    .arg("test")
-                    .status()
-                    .context("runtime tests")?;
-                if !status.success() {
-                    bail!("runtime tests failed");
-                }
-
-                let ffi = runtime
-                    .parent()
-                    .map(|p| p.join("ffi-skia"))
-                    .unwrap_or_else(|| PathBuf::from("crates/ffi-skia"));
-                if ffi.join("Makefile").is_file() {
-                    let st = Command::new("make")
-                        .arg("-C")
-                        .arg(&ffi)
-                        .arg("test")
-                        .status()
-                        .context("ffi-skia tests")?;
-                    if !st.success() {
-                        bail!("ffi-skia tests failed");
-                    }
-                }
-            }
-
             let project_dir = resolve_dir(&path)?;
             if project_dir.join("scuzz.toml").is_file() {
                 let out = build(&path, &PathBuf::from("build"), false, false)?;
@@ -382,6 +349,30 @@ version = "0.1.0"
     }
 }
 
+/// Mobile/Desktop peer env: runtime kind, logical size, live input record.
+fn apply_peer_env(
+    cmd: &mut Command,
+    manifest: &scuzz_compiler::manifest::Manifest,
+    project_dir: &Path,
+    mobile: bool,
+) {
+    cmd.env(
+        "SCUZZ_UI_RUNTIME",
+        if mobile { "mobile" } else { "desktop" },
+    );
+    if mobile {
+        cmd.env("SCUZZ_MOBILE_SHELL", "1");
+    }
+    if let Some(ui) = &manifest.ui {
+        cmd.env("SCUZZ_UI_WIDTH", ui.width().to_string());
+        cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
+    }
+    cmd.env(
+        "SCUZZ_UI_RECORD",
+        project_dir.join("build").join("record.script"),
+    );
+}
+
 fn run_once(
     path: &Path,
     out_dir: &Path,
@@ -409,16 +400,7 @@ fn run_once(
         apply_ui_env(&mut cmd, &manifest, &snap, /*tap*/ false);
         eprintln!("scuzz run --headless → snapshot {}", snap.display());
     } else if use_mobile {
-        cmd.env("SCUZZ_UI_RUNTIME", "mobile");
-        cmd.env("SCUZZ_MOBILE_SHELL", "1");
-        if let Some(ui) = &manifest.ui {
-            cmd.env("SCUZZ_UI_WIDTH", ui.width().to_string());
-            cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
-        }
-        cmd.env(
-            "SCUZZ_UI_RECORD",
-            project_dir.join("build").join("record.script"),
-        );
+        apply_peer_env(&mut cmd, &manifest, &project_dir, true);
         cmd.env(
             "SCUZZ_UI_DEBUG_DUMP",
             project_dir.join("build").join("debug.dump"),
@@ -426,15 +408,7 @@ fn run_once(
         eprintln!("scuzz run → UiRuntime.Mobile (host shell)");
     } else if use_desktop {
         // Desktop peer + desktop embedder (X11 / Cocoa) when available.
-        cmd.env("SCUZZ_UI_RUNTIME", "desktop");
-        if let Some(ui) = &manifest.ui {
-            cmd.env("SCUZZ_UI_WIDTH", ui.width().to_string());
-            cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
-        }
-        cmd.env(
-            "SCUZZ_UI_RECORD",
-            project_dir.join("build").join("record.script"),
-        );
+        apply_peer_env(&mut cmd, &manifest, &project_dir, false);
         cmd.env(
             "SCUZZ_UI_DEBUG_DUMP",
             project_dir.join("build").join("debug.dump"),
@@ -464,7 +438,8 @@ fn watch_build(path: &Path, out_dir: &Path) -> Result<ExitCode> {
         project_dir.display()
     );
     loop {
-        match build(path, &out_dir.to_path_buf(), false, false) {
+        match build(path, &out_dir.to_path_buf(), true, false) {
+            Ok(out) if out.cache_hit => eprintln!("up-to-date {}", out.executable.display()),
             Ok(out) => eprintln!("rebuilt {}", out.executable.display()),
             Err(e) => eprintln!("scuzz watch build error: {e:#}"),
         }
@@ -606,26 +581,9 @@ fn spawn_ui_keep(
             cmd.env("SCUZZ_UI_SCALE", ui.headless_scale.to_string());
         }
     } else if use_mobile {
-        cmd.env("SCUZZ_UI_RUNTIME", "mobile");
-        cmd.env("SCUZZ_MOBILE_SHELL", "1");
-        if let Some(ui) = &manifest.ui {
-            cmd.env("SCUZZ_UI_WIDTH", ui.width().to_string());
-            cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
-        }
-        cmd.env(
-            "SCUZZ_UI_RECORD",
-            project_dir.join("build").join("record.script"),
-        );
+        apply_peer_env(&mut cmd, &manifest, &project_dir, true);
     } else if use_desktop {
-        cmd.env("SCUZZ_UI_RUNTIME", "desktop");
-        if let Some(ui) = &manifest.ui {
-            cmd.env("SCUZZ_UI_WIDTH", ui.width().to_string());
-            cmd.env("SCUZZ_UI_HEIGHT", ui.height().to_string());
-        }
-        cmd.env(
-            "SCUZZ_UI_RECORD",
-            project_dir.join("build").join("record.script"),
-        );
+        apply_peer_env(&mut cmd, &manifest, &project_dir, false);
     }
     cmd.spawn()
         .with_context(|| format!("running {}", out.executable.display()))

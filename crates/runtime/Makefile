@@ -7,7 +7,7 @@ MOBILE := $(ROOT)/crates/embedder-mobile
 INCLUDES := -Iinclude -I$(FFI_SKIA)/include -I$(EMBEDDER)/include -I$(MOBILE)/include
 SRC := src/runtime.c src/resource.c src/ref.c src/deferred.c src/queue.c src/stream.c \
 	src/theme.c src/signal.c src/view.c src/ui.c \
-	src/lang_ui.c \
+	src/ui_script.c src/lang_ui.c \
 	src/list.c src/fs.c src/sys.c src/clock.c src/random.c src/net.c \
 	src/testrt.c src/impurity.c
 OBJ := $(SRC:src/%.c=build/%.o)
@@ -26,7 +26,7 @@ ffi-skia:
 	# instrumented objects for later non-ASan `make -C ffi-skia test`.
 	$(MAKE) -C $(FFI_SKIA) lib CC=$(CC) CFLAGS='$(FFI_SKIA_CFLAGS)'
 
-build/%.o: src/%.c include/scuzz_rt.h include/scuzz_ui.h | build ffi-skia
+build/%.o: src/%.c include/scuzz_rt.h include/scuzz_ui.h src/rt_util.h src/ui_script.h | build ffi-skia
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
 lib: build/libscuzz_rt.a

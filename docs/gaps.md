@@ -11,7 +11,7 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ### 1. Mobile on real devices
 
-**Status.** iOS simulator proven: `shells/ios/build_sim.sh` cross-compiles the LLVM app + C runtime + `sk_sw` for `arm64-apple-ios-simulator`, links the ObjC shell (`shells/ios/main.m` + `ScuzzShell.m`), and signs a `.app`. `examples/counter` mounts `UiRuntime.Mobile` in a booted sim and presents live frames. Android stays blocked on the NDK (`shells/android/` is a manifest + JNI stub). Real devices stay open (provisioning, no simulator sandbox).
+**Status.** iOS simulator proven: `crates/embedder-mobile/shells/ios/build_sim.sh` cross-compiles the LLVM app + C runtime + `sk_sw` for `arm64-apple-ios-simulator`, links the ObjC shell (`crates/embedder-mobile/shells/ios/main.m` + `ScuzzShell.m`), and signs a `.app`. `examples/counter` mounts `UiRuntime.Mobile` in a booted sim and presents live frames. Android stays blocked on the NDK (`crates/embedder-mobile/shells/android/` is a manifest + JNI stub). Real devices stay open (provisioning, no simulator sandbox).
 
 **Unproven.** Android cross-compile and JNI/ObjC embedding on hardware. Touch and soft-keyboard text input on hardware. `scuzz package --target ios` still copies templates; the CLI does not drive `build_sim.sh` yet.
 

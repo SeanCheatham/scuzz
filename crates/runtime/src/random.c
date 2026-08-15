@@ -14,8 +14,6 @@ void sz_testrt_random_install(uint64_t seed) {
   g_state = seed ? seed : 1;
 }
 
-int sz_testrt_random_is_fake(void) { return g_fake; }
-
 void sz_testrt_random_reset_live(void) { g_fake = 0; }
 
 static uint64_t live_seed(void) {

@@ -109,7 +109,7 @@ src/
 
 **Now:**
 
-- `[ui]` packages: `scuzz test` is Headless **structural** goldens on the **live** graph (signal store + a11y dump + tap/field/scroll indices). PNG optional through `--pixels`. `scuzz fuzz` compiles the **verify** graph (sim + residual `.require` / laws + drivers).
+- `[ui]` packages: `scuzz test` is Headless **structural** goldens on the **live** graph (signal store + a11y dump + tap/field/scroll indices). PNG optional through `--pixels`. Seed and compare PNG goldens under the in-tree `sk_sw` backend (`SCUZZ_SKIA=sk_sw`) so pixels stay platform-deterministic. `scuzz fuzz` compiles the **verify** graph (sim + residual `.require` / laws + drivers).
 - IO packages (no `[ui]`): `scuzz test` compiles and runs under `SCUZZ_TESTRT=1`, requiring exit 0
 - `scuzz check` format-verifies `src/` and typechecks live + sim twins + laws + drivers + `where` + `.require` (every `law` must be applied). `--message-format=json` is the editor protocol (`check` only). `scuzz lsp` wraps that JSON over stdin/stdout (open buffers overlay disk on didOpen/didChange; didClose uses disk; hover, completion, and definition use the same parse)
 - `scuzz fuzz --iters N` searches event scripts × schedules (`[ui]`) or schedule seeds only (IO-only). `[ui]` scripts that hit new `Law.sometimes` names or a new Headless `dump.txt` are kept and later iters extend those prefixes. IO-only keeps schedule seeds that hit new sometimes names and perturbs them. `--exhaust --depth N` is `[ui]` event alphabet (including `drive`) with FIFO schedule. `--replay repro.toml` restores events + optional `schedule_seed`. Oracles are residual `.require` / `Law.check`, panic/`SzError`, and campaign `Law.sometimes` reachability.

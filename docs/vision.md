@@ -70,7 +70,7 @@ One CLI. One typer. One formatter. One check surface. One testing strategy. No s
 - **`scuzz.toml` is data** — package, path deps, `[ui]`. No plugin DSL. No `build.scuzz` hooks. Unknown keys rejected. Do not add `[plugins]`.
 - **Fingerprint** (incremental): miss → rebuild. No `scuzz clean` ritual.
 - **Missing tools:** fail on the first missing tool with one install line. No `flutter doctor` mega-checklist.
-- **`scuzz package` shells** are copy-patched templates (`shells/android`, `shells/ios`), not a Gradle/CocoaPods API.
+- **`scuzz package` shells** are copy-patched templates (`crates/embedder-mobile/shells/android`, `crates/embedder-mobile/shells/ios`), not a Gradle/CocoaPods API.
 
 ### GC (v0)
 
@@ -213,7 +213,7 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: [`plans.md`](plans.md). Open unknowns: Mobile on Android + real devices (iOS simulator proven), GPU presenters.
 
-App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. iOS simulator runs `examples/counter` through `shells/ios/build_sim.sh`; Android and device builds stay open.
+App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. iOS simulator runs `examples/counter` through `crates/embedder-mobile/shells/ios/build_sim.sh`; Android and device builds stay open.
 
 ## Risks
 

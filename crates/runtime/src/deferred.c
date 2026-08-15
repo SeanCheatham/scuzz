@@ -49,34 +49,6 @@ SzIo *sz_deferred_complete_cstr(SzDeferred *d, const char *value) {
   return sz_deferred_complete(d, sz_string_from_cstr(value ? value : ""));
 }
 
-typedef struct DefFailEnv {
-  SzDeferred *d;
-  SzError *err;
-} DefFailEnv;
-
-static void *deferred_fail_thunk(void *env) {
-  DefFailEnv *e = (DefFailEnv *)env;
-  if (!e->d->completed) {
-    e->d->completed = 1;
-    e->d->ok = 0;
-    e->d->error = e->err;
-    sz_fiber_wake_deferred(e->d);
-  } else {
-    sz_error_free(e->err);
-  }
-  sz_free(e);
-  return NULL;
-}
-
-SzIo *sz_deferred_fail(SzDeferred *d, SzError *err) {
-  if (!d)
-    sz_panic("sz_deferred_fail(null)");
-  DefFailEnv *e = (DefFailEnv *)sz_alloc(sizeof(DefFailEnv));
-  e->d = d;
-  e->err = err ? err : sz_error_new(1, "deferred fail");
-  return sz_io_delay(deferred_fail_thunk, e);
-}
-
 SzIo *sz_deferred_get(SzDeferred *d) {
   if (!d)
     sz_panic("sz_deferred_get(null)");

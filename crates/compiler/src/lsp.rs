@@ -3,7 +3,7 @@
 
 use crate::check::{
     canonicalize_source_path, check_project_with, complete_project, definition_project,
-    hover_project, Diagnostic,
+    hover_project, json_str, Diagnostic,
 };
 use crate::overlay::collect_fmt_sources;
 use anyhow::Result;
@@ -18,7 +18,7 @@ pub fn run_lsp(root: &Path) -> Result<()> {
     run_lsp_io(root, stdin.lock(), stdout.lock())
 }
 
-pub fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Result<()> {
+fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Result<()> {
     let mut root = fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
     let mut open: BTreeMap<PathBuf, String> = BTreeMap::new();
     let mut buf = BufReader::new(reader);
@@ -321,23 +321,6 @@ fn json_i64_field(body: &str, key: &str) -> Option<i64> {
     let rest = rest.trim_start();
     let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
     digits.parse().ok()
-}
-
-fn json_str(s: &str) -> String {
-    let mut out = String::from("\"");
-    for ch in s.chars() {
-        match ch {
-            '"' => out.push_str("\\\""),
-            '\\' => out.push_str("\\\\"),
-            '\n' => out.push_str("\\n"),
-            '\r' => out.push_str("\\r"),
-            '\t' => out.push_str("\\t"),
-            c if c.is_control() => out.push_str(&format!("\\u{:04x}", c as u32)),
-            c => out.push(c),
-        }
-    }
-    out.push('"');
-    out
 }
 
 #[cfg(test)]

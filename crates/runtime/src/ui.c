@@ -4,6 +4,9 @@
 #include "scuzz_mobile.h"
 #include "sk_capi.h"
 
+#include "rt_util.h"
+#include "ui_script.h"
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -111,17 +114,6 @@ struct SzUiSession {
   void *code_stale;
   int code_gen;
 };
-
-static char *sz_strdup(const char *s) {
-  size_t n;
-  char *out;
-  if (!s)
-    s = "";
-  n = strlen(s);
-  out = (char *)sz_alloc(n + 1);
-  memcpy(out, s, n + 1);
-  return out;
-}
 
 static int runtime_kind_ok(SzUiRuntimeKind kind) {
   return kind == SZ_UI_RUNTIME_HEADLESS || kind == SZ_UI_RUNTIME_DESKTOP ||
@@ -298,9 +290,6 @@ int sz_ui_session_set_record(SzUiSession *session, const char *path) {
   return 1;
 }
 
-static int collect_buttons(SzUiSession *session, SzView **buttons, int cap);
-static int collect_scrolls(SzUiSession *session, SzView **scrolls, int cap);
-
 static void fputs_dump_label(FILE *f, const char *label) {
   const char *p;
   if (!label)
@@ -338,7 +327,7 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
                                      : sz_string_from_cstr("");
   fprintf(f, "[signals]\n%s\n[views]\n%s\n[taps]\n", sz_string_cstr(signals),
           sz_string_cstr(views));
-  n_buttons = collect_buttons(session, buttons, 64);
+  n_buttons = sz_ui_collect_buttons(session, buttons, 64);
   for (i = 0; i < n_buttons; i++) {
     SzRect fr = sz_view_frame(buttons[i]);
     fprintf(f, "%d ", i);
@@ -360,7 +349,7 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
     fputc('\n', f);
   }
   fprintf(f, "\n[scrolls]\n");
-  n_scrolls = collect_scrolls(session, scrolls, 64);
+  n_scrolls = sz_ui_collect_scrolls(session, scrolls, 64);
   for (i = 0; i < n_scrolls; i++) {
     fprintf(f, "%d ", i);
     fputs_dump_label(f, sz_view_a11y_label(scrolls[i]));
@@ -686,7 +675,7 @@ static int find_tap_index_at(SzUiSession *session, float x, float y) {
     return -1;
   if (sz_view_kind(hit) == SZ_VIEW_SLIDER)
     return -1;
-  n = collect_buttons(session, buttons, 64);
+  n = sz_ui_collect_buttons(session, buttons, 64);
   for (i = 0; i < n; i++) {
     if (buttons[i] == hit)
       return i;
@@ -758,318 +747,6 @@ static void drain_desktop_events(SzUiSession *session) {
     (void)sz_ui_session_live_inject(session, &ev);
 }
 
-static int collect_buttons(SzUiSession *session, SzView **buttons, int cap) {
-  SzView *r = session ? session->root : NULL;
-  int n_buttons = 0;
-  int yi, xi;
-  int w = sz_ui_session_width(session);
-  int h = sz_ui_session_height(session);
-  if (!r)
-    return 0;
-  for (yi = 0; yi < h; yi += 4) {
-    for (xi = 0; xi < w; xi += 4) {
-      SzView *hit = sz_view_hit_test(r, (float)xi, (float)yi);
-      int seen = 0;
-      int bi;
-      if (!hit || !sz_view_is_tap_target(hit))
-        continue;
-      for (bi = 0; bi < n_buttons; bi++) {
-        if (buttons[bi] == hit) {
-          seen = 1;
-          break;
-        }
-      }
-      if (!seen && n_buttons < cap)
-        buttons[n_buttons++] = hit;
-    }
-  }
-  return n_buttons;
-}
-
-static int collect_scrolls(SzUiSession *session, SzView **scrolls, int cap) {
-  SzView *r = session ? session->root : NULL;
-  int n = 0;
-  int yi, xi;
-  int w = sz_ui_session_width(session);
-  int h = sz_ui_session_height(session);
-  if (!r)
-    return 0;
-  for (yi = 0; yi < h; yi += 4) {
-    for (xi = 0; xi < w; xi += 4) {
-      SzView *hit = sz_view_scroll_at(r, (float)xi, (float)yi);
-      int seen = 0;
-      int si;
-      if (!hit)
-        continue;
-      for (si = 0; si < n; si++) {
-        if (scrolls[si] == hit) {
-          seen = 1;
-          break;
-        }
-      }
-      if (!seen && n < cap)
-        scrolls[n++] = hit;
-    }
-  }
-  return n;
-}
-
-static void script_parse_scroll(const char *rest, int *index, float *dy) {
-  const char *p = rest ? rest : "";
-  int a = 0;
-  *index = -1;
-  *dy = 40.f;
-  while (*p == ' ')
-    p++;
-  if (!*p)
-    return;
-  if (*p == '-') {
-    *dy = (float)atoi(p);
-    return;
-  }
-  if (*p < '0' || *p > '9')
-    return;
-  while (*p >= '0' && *p <= '9') {
-    a = a * 10 + (*p - '0');
-    p++;
-  }
-  while (*p == ' ')
-    p++;
-  if (*p) {
-    *index = a;
-    *dy = (float)atoi(p);
-    return;
-  }
-  *dy = (float)a;
-}
-
-static void script_scroll(SzUiSession *session, int index, float dy) {
-  SzView *scrolls[64];
-  int count = collect_scrolls(session, scrolls, 64);
-  SzInputEvent ev;
-  SzRect fr;
-  int n = index < 0 ? 0 : index;
-  if (count <= 0 || n >= count) {
-    if (index < 0)
-      fprintf(stderr, "scuzz: script scroll skipped (no scroll)\n");
-    else
-      fprintf(stderr, "scuzz: script scroll %d skipped (%d scrolls)\n", n, count);
-    return;
-  }
-  fr = sz_view_frame(scrolls[n]);
-  memset(&ev, 0, sizeof ev);
-  ev.kind = SZ_INPUT_SCROLL;
-  ev.x = fr.x + fr.w * 0.5f;
-  ev.y = fr.y + fr.h * 0.5f;
-  ev.dy = dy;
-  if (!sz_ui_inject_sync(session, &ev))
-    fprintf(stderr, "scuzz: script scroll skipped (no scroll)\n");
-}
-
-/* `N payload` → index N and payload; otherwise index -1 and rest unchanged
- * so `text 0` still means replace-with-"0" on the starred field. */
-static const char *script_field_payload(const char *rest, int *index) {
-  const char *p = rest ? rest : "";
-  int n = 0;
-  *index = -1;
-  if (*p < '0' || *p > '9')
-    return p;
-  while (*p >= '0' && *p <= '9') {
-    n = n * 10 + (*p - '0');
-    p++;
-  }
-  if (*p == ' ') {
-    *index = n;
-    return p + 1;
-  }
-  return rest ? rest : "";
-}
-
-static void script_parse_backspace(const char *rest, int *index, int *count) {
-  const char *p = rest ? rest : "";
-  int a = 0, b = 0;
-  *index = -1;
-  *count = 1;
-  if (*p < '0' || *p > '9')
-    return;
-  while (*p >= '0' && *p <= '9') {
-    a = a * 10 + (*p - '0');
-    p++;
-  }
-  if (*p == ' ') {
-    p++;
-    if (*p >= '0' && *p <= '9') {
-      while (*p >= '0' && *p <= '9') {
-        b = b * 10 + (*p - '0');
-        p++;
-      }
-      *index = a;
-      *count = b < 1 ? 1 : b;
-      return;
-    }
-  }
-  *count = a < 1 ? 1 : a;
-}
-
-static int script_focus_field(SzUiSession *session, int index) {
-  if (session && sz_view_focus_text_field_at(session->root, index))
-    return 1;
-  if (index < 0)
-    fprintf(stderr, "scuzz: script skipped (no text field)\n");
-  else
-    fprintf(stderr, "scuzz: script field %d skipped\n", index);
-  return 0;
-}
-
-static void script_backspace(SzUiSession *session, int index, int n) {
-  SzInputEvent ev;
-  if (n < 1)
-    n = 1;
-  if (!script_focus_field(session, index))
-    return;
-  memset(&ev, 0, sizeof ev);
-  ev.kind = SZ_INPUT_TEXT_EDIT;
-  ev.text = "";
-  while (n-- > 0) {
-    if (!sz_ui_inject_sync(session, &ev)) {
-      fprintf(stderr, "scuzz: script backspace skipped (no text field)\n");
-      return;
-    }
-  }
-}
-
-static void script_type(SzUiSession *session, int index, const char *text) {
-  SzInputEvent ev;
-  if (!text || !text[0])
-    return;
-  if (!script_focus_field(session, index))
-    return;
-  memset(&ev, 0, sizeof ev);
-  ev.kind = SZ_INPUT_TEXT_EDIT;
-  ev.text = text;
-  if (!sz_ui_inject_sync(session, &ev))
-    fprintf(stderr, "scuzz: script type skipped (no text field)\n");
-}
-
-static void script_tap(SzUiSession *session, int n) {
-  SzView *buttons[64];
-  int count = collect_buttons(session, buttons, 64);
-  SzInputEvent tap;
-  SzRect fr;
-  float x, y;
-  int w = sz_ui_session_width(session);
-  int h = sz_ui_session_height(session);
-  if (n < 0 || n >= count) {
-    fprintf(stderr, "scuzz: script tap %d skipped (%d buttons)\n", n, count);
-    return;
-  }
-  fr = sz_view_frame(buttons[n]);
-  x = fr.x + fr.w * 0.5f;
-  y = fr.y + fr.h * 0.5f;
-  if (x < 0.f)
-    x = 0.f;
-  if (y < 0.f)
-    y = 0.f;
-  if (w > 0 && x >= (float)w)
-    x = (float)w - 1.f;
-  if (h > 0 && y >= (float)h)
-    y = (float)h - 1.f;
-  if (x < fr.x)
-    x = fr.x + 1.f;
-  if (y < fr.y)
-    y = fr.y + 1.f;
-  if (x >= fr.x + fr.w)
-    x = fr.x + fr.w - 1.f;
-  if (y >= fr.y + fr.h)
-    y = fr.y + fr.h - 1.f;
-  memset(&tap, 0, sizeof(tap));
-  tap.kind = SZ_INPUT_TAP;
-  tap.x = x;
-  tap.y = y;
-  if (!sz_ui_inject_sync(session, &tap))
-    sz_panic("Ui.run: script tap inject failed");
-}
-
-static void script_xy(SzUiSession *session, float x, float y) {
-  SzInputEvent tap;
-  memset(&tap, 0, sizeof(tap));
-  tap.kind = SZ_INPUT_TAP;
-  tap.x = x;
-  tap.y = y;
-  if (!sz_ui_inject_sync(session, &tap))
-    sz_panic("Ui.run: script xy inject failed");
-}
-
-static void play_script_line(SzUiSession *session, char *line) {
-  size_t len = strlen(line);
-  if (len == 0 || line[0] == '#')
-    return;
-  if (strncmp(line, "tap ", 4) == 0 || strcmp(line, "tap") == 0)
-    script_tap(session, len > 3 ? atoi(line + 4) : 0);
-  else if (strncmp(line, "xy ", 3) == 0) {
-    float x = 0.f, y = 0.f;
-    if (sscanf(line + 3, "%f %f", &x, &y) == 2)
-      script_xy(session, x, y);
-    else
-      sz_panic("Ui.run: xy needs x y");
-  } else if (strncmp(line, "text ", 5) == 0 || strcmp(line, "text") == 0) {
-    SzInputEvent ev;
-    int idx;
-    const char *payload = script_field_payload(len > 4 ? line + 5 : "", &idx);
-    memset(&ev, 0, sizeof(ev));
-    ev.kind = SZ_INPUT_TEXT;
-    ev.text = payload;
-    if (script_focus_field(session, idx)) {
-      if (!sz_ui_inject_sync(session, &ev))
-        fprintf(stderr, "scuzz: script text skipped (no text field)\n");
-    }
-  } else if (strncmp(line, "pump ", 5) == 0 || strcmp(line, "pump") == 0) {
-    int k = len > 5 ? atoi(line + 5) : 1;
-    while (k-- > 1) {
-      if (!sz_ui_pump_sync(session))
-        sz_panic("Ui.run: script pump failed");
-    }
-  } else if (strncmp(line, "scroll ", 7) == 0 || strcmp(line, "scroll") == 0) {
-    int idx;
-    float dy;
-    script_parse_scroll(len > 6 ? line + 7 : "", &idx, &dy);
-    script_scroll(session, idx, dy);
-  }
-  else if (strncmp(line, "backspace ", 10) == 0 || strcmp(line, "backspace") == 0) {
-    int idx, n;
-    script_parse_backspace(len > 9 ? line + 10 : "", &idx, &n);
-    script_backspace(session, idx, n);
-  } else if (strncmp(line, "type ", 5) == 0 || strcmp(line, "type") == 0) {
-    int idx;
-    const char *payload = script_field_payload(len > 4 ? line + 5 : "", &idx);
-    script_type(session, idx, payload);
-  }
-  else if (strncmp(line, "drive ", 6) == 0)
-    sz_driver_run_line(line + 6);
-  else
-    sz_panic("Ui.run: unknown SCUZZ_UI_SCRIPT directive");
-  if (!sz_ui_pump_sync(session))
-    sz_panic("Ui.run: script pump failed");
-}
-
-static void play_ui_script_text(SzUiSession *session, char *text) {
-  char *p = text;
-  while (p && *p) {
-    char *nl = strchr(p, '\n');
-    char *line = p;
-    size_t len;
-    if (nl) {
-      *nl = '\0';
-      p = nl + 1;
-    } else
-      p += strlen(p);
-    len = strlen(line);
-    while (len > 0 && line[len - 1] == '\r')
-      line[--len] = '\0';
-    play_script_line(session, line);
-  }
-}
-
 /* Prefix-extend plays the suffix; rewrite plays the whole file. */
 static int take_inject(SzUiSession *session, char **out) {
   char *now;
@@ -1130,7 +807,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
     char *delta = NULL;
     if (take_inject(session, &delta)) {
       session->inject_playing = 1;
-      play_ui_script_text(session, delta);
+      sz_ui_script_play_text(session, delta);
       sz_free(delta);
       session->inject_playing = 0;
       need_dump = 1;

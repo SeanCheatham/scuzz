@@ -40,12 +40,12 @@ impl TypeError {
 }
 
 /// Mangled def name for a monomorphized impl method.
-pub fn impl_method_name(trait_name: &str, for_type: &str, method: &str) -> String {
+fn impl_method_name(trait_name: &str, for_type: &str, method: &str) -> String {
     format!("__impl_{trait_name}_{for_type}_{method}")
 }
 
 /// Mangled def name for a type method (`record Box[T]: def get()` / `enum Opt[T]: def getOrElse()` → `__rec_*`).
-pub fn rec_method_name(for_type: &str, method: &str) -> String {
+fn rec_method_name(for_type: &str, method: &str) -> String {
     format!("__rec_{for_type}_{method}")
 }
 
@@ -250,6 +250,25 @@ impl MethodIndex {
             .get(&(type_id.to_string(), method.to_string()))
             .ok_or_else(|| TypeError::Msg(format!("no impl method {method} for type {type_id}")))
     }
+}
+
+/// Shared pass setup: clone the program tables, build the three indexes, then
+/// hand `&mut Program` back to the closure so the pass can rewrite in place.
+fn with_pass_indexes<R>(
+    program: &mut Program,
+    f: impl FnOnce(&mut Program, &EnumIndex<'_>, &MethodIndex, &FunIndex<'_>) -> Result<R, TypeError>,
+) -> Result<R, TypeError> {
+    let enums_owned = program.enums.clone();
+    let imports_owned = program.imports.clone();
+    let defs_owned = program.defs.clone();
+    let traits_owned = program.traits.clone();
+    let impls_owned = program.impls.clone();
+    let enums = EnumIndex::build(&enums_owned, &imports_owned)
+        .map_err(|e| TypeError::Msg(e.to_string()))?;
+    let methods = MethodIndex::build(&impls_owned, &traits_owned, &enums, &enums_owned)?;
+    let funs = FunIndex::build(&defs_owned, &imports_owned, &enums_owned)
+        .map_err(|e| TypeError::Msg(e.to_string()))?;
+    f(program, &enums, &methods, &funs)
 }
 
 fn instantiate_method(entry: &MethodEntry, targs: &[Type]) -> Result<(Vec<Type>, Type), TypeError> {
@@ -611,43 +630,36 @@ fn field_type(
 
 /// Rewrite `p.x` into a single-arm match and `p.m(…)` into a mangled Call.
 pub fn resolve_field_access(mut program: Program) -> Result<Program, TypeError> {
-    let enums_owned = program.enums.clone();
-    let imports_owned = program.imports.clone();
-    let defs_owned = program.defs.clone();
-    let traits_owned = program.traits.clone();
-    let impls_owned = program.impls.clone();
-    let enums = EnumIndex::build(&enums_owned, &imports_owned)
-        .map_err(|e| TypeError::Msg(e.to_string()))?;
-    let methods = MethodIndex::build(&impls_owned, &traits_owned, &enums, &enums_owned)?;
-    let funs = FunIndex::build(&defs_owned, &imports_owned, &enums_owned)
-        .map_err(|e| TypeError::Msg(e.to_string()))?;
-    for d in &mut program.defs {
-        let mut env: HashMap<String, Type> = HashMap::new();
-        for p in &d.params {
-            env.insert(
-                p.name.clone(),
-                resolve_type_in(&p.ty, &enums, &d.module, &d.type_params)?,
-            );
+    with_pass_indexes(&mut program, |program, enums, methods, funs| {
+        for d in &mut program.defs {
+            let mut env: HashMap<String, Type> = HashMap::new();
+            for p in &d.params {
+                env.insert(
+                    p.name.clone(),
+                    resolve_type_in(&p.ty, enums, &d.module, &d.type_params)?,
+                );
+            }
+            d.body = rewrite_fields(
+                std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)),
+                enums,
+                funs,
+                methods,
+                &d.module,
+                &mut env,
+            )?;
         }
-        d.body = rewrite_fields(
-            std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)),
-            &enums,
-            &funs,
-            &methods,
-            &d.module,
+        let mut env: HashMap<String, Type> = HashMap::new();
+        let main_mod = program.main.module.clone();
+        program.main.body = rewrite_fields(
+            std::mem::replace(&mut program.main.body, Expr::dummy(ExprKind::Unit)),
+            enums,
+            funs,
+            methods,
+            &main_mod,
             &mut env,
         )?;
-    }
-    let mut env: HashMap<String, Type> = HashMap::new();
-    let main_mod = program.main.module.clone();
-    program.main.body = rewrite_fields(
-        std::mem::replace(&mut program.main.body, Expr::dummy(ExprKind::Unit)),
-        &enums,
-        &funs,
-        &methods,
-        &main_mod,
-        &mut env,
-    )?;
+        Ok(())
+    })?;
     Ok(program)
 }
 
@@ -2891,47 +2903,39 @@ fn mono_def_name(def_name: &str, subst: &HashMap<String, Type>, type_params: &[S
 
 /// Specialize generic defs at call sites; drop templates.
 pub fn monomorphize(mut program: Program) -> Result<Program, TypeError> {
-    let enums_owned = program.enums.clone();
-    let imports_owned = program.imports.clone();
-    let traits_owned = program.traits.clone();
-    let impls_owned = program.impls.clone();
-    let defs_owned = program.defs.clone();
-    let enums = EnumIndex::build(&enums_owned, &imports_owned)
-        .map_err(|e| TypeError::Msg(e.to_string()))?;
-    let methods = MethodIndex::build(&impls_owned, &traits_owned, &enums, &enums_owned)?;
-    let funs = FunIndex::build(&defs_owned, &imports_owned, &enums_owned)
-        .map_err(|e| TypeError::Msg(e.to_string()))?;
-
     let mut specialized: HashMap<String, FunDef> = HashMap::new();
-    for d in &mut program.defs {
-        let mut env: HashMap<String, Type> = HashMap::new();
-        for p in &d.params {
-            env.insert(
-                p.name.clone(),
-                resolve_type_in(&p.ty, &enums, &d.module, &d.type_params)?,
-            );
+    with_pass_indexes(&mut program, |program, enums, methods, funs| {
+        for d in &mut program.defs {
+            let mut env: HashMap<String, Type> = HashMap::new();
+            for p in &d.params {
+                env.insert(
+                    p.name.clone(),
+                    resolve_type_in(&p.ty, enums, &d.module, &d.type_params)?,
+                );
+            }
+            d.body = mono_expr(
+                std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)),
+                enums,
+                funs,
+                methods,
+                &d.module,
+                &mut env,
+                &mut specialized,
+            )?;
         }
-        d.body = mono_expr(
-            std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)),
-            &enums,
-            &funs,
-            &methods,
-            &d.module,
+        let mut env: HashMap<String, Type> = HashMap::new();
+        let main_mod = program.main.module.clone();
+        program.main.body = mono_expr(
+            std::mem::replace(&mut program.main.body, Expr::dummy(ExprKind::Unit)),
+            enums,
+            funs,
+            methods,
+            &main_mod,
             &mut env,
             &mut specialized,
         )?;
-    }
-    let mut env: HashMap<String, Type> = HashMap::new();
-    let main_mod = program.main.module.clone();
-    program.main.body = mono_expr(
-        std::mem::replace(&mut program.main.body, Expr::dummy(ExprKind::Unit)),
-        &enums,
-        &funs,
-        &methods,
-        &main_mod,
-        &mut env,
-        &mut specialized,
-    )?;
+        Ok(())
+    })?;
 
     // Drop generic templates; keep non-generic defs + specialized clones.
     program.defs.retain(|d| d.type_params.is_empty());
@@ -3484,48 +3488,41 @@ fn mono_expr(
 /// constructor args and the expected type at the construction site do not
 /// determine an instantiation.
 pub fn elaborate_generics(mut program: Program) -> Result<Program, TypeError> {
-    let enums_owned = program.enums.clone();
-    let imports_owned = program.imports.clone();
-    let traits_owned = program.traits.clone();
-    let impls_owned = program.impls.clone();
-    let defs_owned = program.defs.clone();
-    let enums = EnumIndex::build(&enums_owned, &imports_owned)
-        .map_err(|e| TypeError::Msg(e.to_string()))?;
-    let methods = MethodIndex::build(&impls_owned, &traits_owned, &enums, &enums_owned)?;
-    let funs = FunIndex::build(&defs_owned, &imports_owned, &enums_owned)
-        .map_err(|e| TypeError::Msg(e.to_string()))?;
-    for d in &mut program.defs {
-        let mut env: HashMap<String, Type> = HashMap::new();
-        for p in &d.params {
-            env.insert(
-                p.name.clone(),
-                resolve_type_in(&p.ty, &enums, &d.module, &d.type_params)?,
-            );
+    with_pass_indexes(&mut program, |program, enums, methods, funs| {
+        for d in &mut program.defs {
+            let mut env: HashMap<String, Type> = HashMap::new();
+            for p in &d.params {
+                env.insert(
+                    p.name.clone(),
+                    resolve_type_in(&p.ty, enums, &d.module, &d.type_params)?,
+                );
+            }
+            let expected = resolve_type_in(&d.ret, enums, &d.module, &d.type_params)?;
+            d.body = elaborate_expr(
+                std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)),
+                enums,
+                funs,
+                methods,
+                &d.module,
+                &mut env,
+                Some(&expected),
+                &d.type_params,
+            )?;
         }
-        let expected = resolve_type_in(&d.ret, &enums, &d.module, &d.type_params)?;
-        d.body = elaborate_expr(
-            std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)),
-            &enums,
-            &funs,
-            &methods,
-            &d.module,
+        let mut env: HashMap<String, Type> = HashMap::new();
+        let main_mod = program.main.module.clone();
+        program.main.body = elaborate_expr(
+            std::mem::replace(&mut program.main.body, Expr::dummy(ExprKind::Unit)),
+            enums,
+            funs,
+            methods,
+            &main_mod,
             &mut env,
-            Some(&expected),
-            &d.type_params,
+            Some(&Type::Io(Box::new(Type::Unit))),
+            &[],
         )?;
-    }
-    let mut env: HashMap<String, Type> = HashMap::new();
-    let main_mod = program.main.module.clone();
-    program.main.body = elaborate_expr(
-        std::mem::replace(&mut program.main.body, Expr::dummy(ExprKind::Unit)),
-        &enums,
-        &funs,
-        &methods,
-        &main_mod,
-        &mut env,
-        Some(&Type::Io(Box::new(Type::Unit))),
-        &[],
-    )?;
+        Ok(())
+    })?;
     Ok(program)
 }
 

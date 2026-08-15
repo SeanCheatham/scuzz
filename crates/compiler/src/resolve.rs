@@ -19,7 +19,7 @@ pub fn user_symbol(module: &str, name: &str) -> String {
 }
 
 /// Qualified key `Module.name` used in the fun/enum index.
-pub fn qual_key(module: &str, name: &str) -> String {
+fn qual_key(module: &str, name: &str) -> String {
     format!("{module}.{name}")
 }
 

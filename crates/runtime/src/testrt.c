@@ -8,8 +8,9 @@
 
 void sz_testrt_clock_reset_live(void);
 void sz_testrt_random_reset_live(void);
-void sz_testrt_fs_reset_live(void);
-void sz_testrt_net_reset_live(void);
+static void sz_testrt_fs_reset_live(void);
+static void sz_testrt_net_reset_live(void);
+static void sz_testrt_net_install(void);
 
 /* --- mem FS -------------------------------------------------------------- */
 
@@ -24,7 +25,7 @@ typedef struct MemNode {
 static int g_fs_fake = 0;
 static MemNode *g_fs = NULL;
 
-void sz_testrt_fs_reset_live(void) {
+static void sz_testrt_fs_reset_live(void) {
   MemNode *n = g_fs;
   while (n) {
     MemNode *next = n->next;
@@ -37,7 +38,7 @@ void sz_testrt_fs_reset_live(void) {
   g_fs_fake = 0;
 }
 
-void sz_testrt_fs_install(void) {
+static void sz_testrt_fs_install(void) {
   sz_testrt_fs_reset_live();
   g_fs_fake = 1;
   /* Root directory exists. */
@@ -461,7 +462,7 @@ static void net_clear_serve(void) {
   g_last_serve_body = NULL;
 }
 
-void sz_testrt_net_reset_live(void) {
+static void sz_testrt_net_reset_live(void) {
   NetStub *s = g_stubs;
   while (s) {
     NetStub *n = s->next;
@@ -502,7 +503,7 @@ char *sz_testrt_net_pop_request(void) {
   return p;
 }
 
-void sz_testrt_net_install(void) {
+static void sz_testrt_net_install(void) {
   const char *req;
   sz_testrt_net_reset_live();
   g_net_fake = 1;
@@ -588,7 +589,7 @@ static void free_fake_argv(void) {
   g_args_override = 0;
 }
 
-void sz_testrt_sys_reset_live(void) {
+static void sz_testrt_sys_reset_live(void) {
   free_fake_argv();
   sz_free(g_stdin_buf);
   g_stdin_buf = NULL;
@@ -728,7 +729,7 @@ SzIo *sz_testrt_sys_read(int64_t n) {
   return sz_io_delay(testrt_read_n_thunk, p);
 }
 
-void sz_testrt_sys_install(void) {
+static void sz_testrt_sys_install(void) {
   const char *feed;
   sz_testrt_sys_reset_live();
   g_sys_fake = 1;

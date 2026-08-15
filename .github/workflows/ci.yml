@@ -26,9 +26,9 @@ jobs:
           cat scripts/install.sh | sh -s -- --dry-run | tee /tmp/install-pipe.out
           grep -q 'source=github SeanCheatham/scuzz latest' /tmp/install-pipe.out
           grep -q 'api.github.com/repos/SeanCheatham/scuzz/releases' /tmp/install-pipe.out
-          tag="$(printf '%s\n' '"tag_name": "skia-cpu-v0.1"' '"tag_name": "v0.1.0-rc.1"' '"tag_name": "v0.2.0"' \
-            | awk -F'"' '/"tag_name":/ { if ($4 ~ /^v[0-9][^-]*$/) { print $4; exit } }')"
-          test "$tag" = v0.2.0
+          printf '%s\n' '"tag_name": "skia-cpu-v0.1"' '"tag_name": "v0.1.0-rc.1"' '"tag_name": "v0.2.0"' > /tmp/releases.json
+          SCUZZ_RELEASES_JSON=/tmp/releases.json SCUZZ_INSTALL_SOURCE=github SCUZZ_INSTALL_DRY_RUN=1 ./scripts/install.sh | tee /tmp/install-tag.out
+          grep -q 'tag=v0.2.0' /tmp/install-tag.out
 
       - name: Install clang/make/X11/xvfb + Skia link deps
         run: |
@@ -173,6 +173,13 @@ jobs:
           cargo run -p scuzz -- run --headless examples/studio
           test -f examples/studio/build/snapshot.png
           cargo run -p scuzz -- test examples/studio
+
+      - name: Pixel goldens (sk_sw software backend)
+        run: |
+          SCUZZ_SKIA=sk_sw make -C crates/ffi-skia clean lib CC=clang
+          rm -rf examples/counter/build
+          SCUZZ_SKIA=sk_sw cargo run -p scuzz -- test --pixels examples/counter
+          make -C crates/ffi-skia clean lib CC=clang
 
       - name: Deterministic fuzz (bounded) + repro replay
         run: |
@@ -345,3 +352,10 @@ jobs:
         run: |
           cargo run -p scuzz -- test examples/counter
           cargo run -p scuzz -- test examples/studio
+
+      - name: Pixel goldens (sk_sw software backend)
+        run: |
+          SCUZZ_SKIA=sk_sw make -C crates/ffi-skia clean lib
+          rm -rf examples/counter/build
+          SCUZZ_SKIA=sk_sw cargo run -p scuzz -- test --pixels examples/counter
+          make -C crates/ffi-skia clean lib

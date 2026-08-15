@@ -31,7 +31,7 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 | UI | `View` + `Ui` + Skia (`sk_capi`; Impeller deferred) | Swing, JavaFX, Compose Multiplatform, Flutter widgets |
 | Watch | Rebuild on source change (`scuzz watch`); IO-only `run --watch` kills and reruns; `[ui]` stamp-reloads | Flutter hot reload / DevTools VM patching |
 | Diagnostics | `scuzz check --message-format=json`; `scuzz lsp` wraps `check` | Separate IDE typer; analyze-vs-check; `*.g.scuzz` codegen |
-| Packaging | Copy-patched `shells/android` / `shells/ios` templates | Gradle/CocoaPods as Scuzz APIs; Flutter platform channels |
+| Packaging | Copy-patched `crates/embedder-mobile/shells/android` / `crates/embedder-mobile/shells/ios` templates | Gradle/CocoaPods as Scuzz APIs; Flutter platform channels |
 
 ## Platforms (Headless first)
 

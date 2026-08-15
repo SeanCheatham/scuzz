@@ -274,7 +274,6 @@ void sz_deferred_free(SzDeferred *d);
 SzIo *sz_deferred_empty(void); /* IO[Deferred] */
 SzIo *sz_deferred_complete(SzDeferred *d, void *value);
 SzIo *sz_deferred_complete_cstr(SzDeferred *d, const char *value);
-SzIo *sz_deferred_fail(SzDeferred *d, SzError *err);
 SzIo *sz_deferred_get(SzDeferred *d); /* IO[A]; parks until complete under the fiber scheduler */
 
 /* Queue — unbounded FIFO of void*. */
@@ -396,9 +395,7 @@ int sz_testrt_clock_is_fake(void);
 int64_t sz_testrt_clock_now_ms(void);
 
 void sz_testrt_random_install(uint64_t seed);
-int sz_testrt_random_is_fake(void);
 
-void sz_testrt_fs_install(void);
 int sz_testrt_fs_is_fake(void);
 /* Mem-FS IO used by fs.c when fake is active (same SzError codes as live). */
 SzIo *sz_testrt_fs_read(SzString *path);
@@ -407,7 +404,6 @@ SzIo *sz_testrt_fs_list(SzString *path);
 SzIo *sz_testrt_fs_mkdirs(SzString *path);
 SzIo *sz_testrt_fs_canonicalize(SzString *path);
 
-void sz_testrt_net_install(void);
 void sz_testrt_net_stub(const char *url, const char *body);
 void sz_testrt_net_inject_request(const char *path); /* replace queue with one GET path */
 void sz_testrt_net_queue_request(const char *path);  /* append a GET path */
@@ -419,8 +415,6 @@ const char *sz_testrt_net_last_serve_body(void);
 void sz_testrt_net_set_last_serve_body(const char *body);
 
 /* Console fakes: scripted stdin, optional argv override, println capture (+ echo). */
-void sz_testrt_sys_install(void);
-void sz_testrt_sys_reset_live(void);
 int sz_testrt_sys_is_fake(void);
 void sz_testrt_sys_set_args(int argc, char **argv); /* user args only; overrides live */
 int sz_testrt_sys_has_args_override(void);
@@ -444,7 +438,6 @@ void sz_driver_register(SzString *name, int64_t nargs, int64_t kind, void *fn);
 void sz_driver_run_line(const char *spec);
 
 /* Entrypoint helper used by @main codegen */
-int sz_runtime_main(SzIo *program);
 int sz_runtime_main_args(SzIo *program, int argc, char **argv);
 
 /* Impurity kit + TestRuntime (Clock/Random/Fs/Net/Sys console fakes) */

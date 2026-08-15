@@ -2,21 +2,12 @@
 
 #include "sk_capi.h"
 
+#include "rt_util.h"
+
 #include <math.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <string.h>
-
-static char *sz_strdup(const char *s) {
-  size_t n;
-  char *out;
-  if (!s)
-    s = "";
-  n = strlen(s);
-  out = (char *)sz_alloc(n + 1);
-  memcpy(out, s, n + 1);
-  return out;
-}
 
 struct SzView {
   SzViewKind kind;

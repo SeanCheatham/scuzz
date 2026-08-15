@@ -34,18 +34,18 @@ impl Diagnostic {
         }
     }
 
-    pub fn with_file(mut self, file: impl Into<String>) -> Self {
+    pub(crate) fn with_file(mut self, file: impl Into<String>) -> Self {
         self.file = Some(file.into());
         self
     }
 
-    pub fn with_loc(mut self, line: u32, column: u32) -> Self {
+    pub(crate) fn with_loc(mut self, line: u32, column: u32) -> Self {
         self.line = Some(line);
         self.column = Some(column);
         self
     }
 
-    pub fn with_span(mut self, span: &Span, sources: &[(String, String)]) -> Self {
+    pub(crate) fn with_span(mut self, span: &Span, sources: &[(String, String)]) -> Self {
         if !span.file.is_empty() {
             self.file = Some(span.file.clone());
         }
@@ -62,7 +62,7 @@ impl Diagnostic {
         self
     }
 
-    pub fn to_human(&self) -> String {
+    pub(crate) fn to_human(&self) -> String {
         match (&self.file, self.line, self.column) {
             (Some(f), Some(l), Some(c)) => {
                 format!("{}:{}:{}: {}: {}", f, l, c, self.severity, self.message)
@@ -73,7 +73,7 @@ impl Diagnostic {
         }
     }
 
-    pub fn to_json(&self) -> String {
+    pub(crate) fn to_json(&self) -> String {
         let mut out = String::from("{");
         out.push_str(&format!("\"severity\":{}", json_str(&self.severity)));
         out.push_str(&format!(",\"message\":{}", json_str(&self.message)));
@@ -91,7 +91,7 @@ impl Diagnostic {
     }
 }
 
-fn json_str(s: &str) -> String {
+pub(crate) fn json_str(s: &str) -> String {
     let mut out = String::from("\"");
     for ch in s.chars() {
         match ch {

@@ -131,9 +131,14 @@ resolve_release_tag() {
   fi
   ensure_work
   json="$WORK/releases.json"
-  api="https://api.github.com/repos/${SCUZZ_REPO}/releases?per_page=100"
-  fetch "$json" "$api" || die "could not list GitHub releases" \
-    "tried: $api"
+  if [ -n "${SCUZZ_RELEASES_JSON:-}" ]; then
+    # Test fixture: read releases JSON from this file instead of the API.
+    json="$SCUZZ_RELEASES_JSON"
+  else
+    api="https://api.github.com/repos/${SCUZZ_REPO}/releases?per_page=100"
+    fetch "$json" "$api" || die "could not list GitHub releases" \
+      "tried: $api"
+  fi
   TAG="$(awk -F'"' '/"tag_name":/ {
     if ($4 ~ /^v[0-9][^-]*$/) { print $4; exit }
   }' "$json")"
@@ -207,11 +212,11 @@ pick_source() {
     return
   fi
   case "${SCUZZ_INSTALL_SOURCE}" in
-    github|release|download)
+    github)
       SOURCE=github
       return
       ;;
-    checkout|local|package)
+    checkout)
       SOURCE=checkout
       return
       ;;
@@ -250,7 +255,10 @@ if [ -n "$DRY_RUN" ]; then
       ;;
     github)
       echo "source=github $SCUZZ_REPO $SCUZZ_VERSION"
-      if is_latest_version; then
+      if [ -n "${SCUZZ_RELEASES_JSON:-}" ]; then
+        resolve_release_tag
+        echo "tag=$TAG"
+      elif is_latest_version; then
         echo "releases=https://api.github.com/repos/${SCUZZ_REPO}/releases?per_page=100"
         echo "asset=$ASSET"
       else

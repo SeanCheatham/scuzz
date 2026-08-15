@@ -1818,10 +1818,6 @@ void *sz_io_unsafe_run_or_die(SzIo *root) {
   return r.value;
 }
 
-int sz_runtime_main(SzIo *program) {
-  return sz_runtime_main_args(program, 0, NULL);
-}
-
 typedef struct {
   SzIo *program;
   int argc;
