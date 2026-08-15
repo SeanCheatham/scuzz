@@ -106,6 +106,9 @@ law hasInkWell: Bool =
 law hasVisibility: Bool =
   Law.a11yHas("visibility:")
 
+law hasOffstage: Bool =
+  Law.a11yHas("offstage:")
+
 @main def main: IO[Unit] =
   Sys.getenv("SCUZZ_TODO_PATH").flatMap(envPath =>
     for {
@@ -139,12 +142,12 @@ law hasVisibility: Bool =
 } yield Signal.setStr(draft, "")), View.verticalDivider(), View.circularProgress(level), View.switch(live, "On"), View.badge(count, View.chip(pin, "Pin")), View.button("Rename", _ => for {
   xs = Signal.getList(items)
   ys = List.setAt(xs, 0, "oat milk")
-} yield Signal.setList(items, ys))), View.expanded(View.scroll(View.card(View.column(View.divider(), View.visibility(level, View.semantics("mark", View.placeholder(View.tooltip("Sean", View.inkWell("face", _ => Law.sometimes("tappedFace"), View.avatar("S")))))), View.checkboxListTile(star, "Star"), View.switchListTile(quiet, "Quiet"), View.radioListTile(mode, 1, "Night"), View.segmented(seg, "List", "Grid"), View.fab("+", _ => Law.sometimes("tappedFab")), View.expansionTile(more, "More", View.text("hint")), View.each(items, s => View.listTile(Tasks.itemLabel(s), View.row(View.iconButton("i", _ => Law.sometimes("tappedInfo")), View.outlinedButton("Edit", _ => Law.sometimes("tappedEdit")), View.textButton("Open", _ => Law.sometimes("tappedOpen")), View.filterChip(star, "Tag"), View.choiceChip(mode, 0, "Day"), View.actionChip("Go", _ => Law.sometimes("tappedGo")), View.inputChip(star, "In"), View.button(if (Tasks.itemDone(s) == 1) "Undo" else "Done", _ => for {
+} yield Signal.setList(items, ys))), View.expanded(View.scroll(View.card(View.column(View.divider(), View.offstage(level, View.visibility(level, View.semantics("mark", View.placeholder(View.tooltip("Sean", View.inkWell("face", _ => Law.sometimes("tappedFace"), View.avatar("S"))))))), View.checkboxListTile(star, "Star"), View.switchListTile(quiet, "Quiet"), View.radioListTile(mode, 1, "Night"), View.segmented(seg, "List", "Grid"), View.fab("+", _ => Law.sometimes("tappedFab")), View.expansionTile(more, "More", View.text("hint")), View.each(items, s => View.listTile(Tasks.itemLabel(s), View.row(View.iconButton("i", _ => Law.sometimes("tappedInfo")), View.outlinedButton("Edit", _ => Law.sometimes("tappedEdit")), View.textButton("Open", _ => Law.sometimes("tappedOpen")), View.filterChip(star, "Tag"), View.choiceChip(mode, 0, "Day"), View.actionChip("Go", _ => Law.sometimes("tappedGo")), View.inputChip(star, "In"), View.button(if (Tasks.itemDone(s) == 1) "Undo" else "Done", _ => for {
   _ = Law.sometimes("tappedDone")
 } yield Signal.setList(items, List.map(Signal.getList(items), x => if (x == s) Tasks.flipDone(x) else x))), View.button("Del", _ => Signal.setList(items, List.filter(Signal.getList(items), x => x != s)))))))))), View.button("Save", _ => for {
   xs = Signal.getList(items)
   body = Tasks.saveBody(xs)
   _ <- Fs.write(path, body)
-} yield ()), View.button("Clear", _ => Signal.setList(items, [])))).require(listLenNonNeg).require(itemPastEndEmpty).require(draftNonNeg).require(hasAdd).require(hasClear).require(hasHome).require(hasTasks).require(hasProgress).require(hasSwitch).require(hasChip).require(hasListTile).require(hasBadge).require(hasCard).require(hasDivider).require(hasExpansion).require(hasIconButton).require(hasVerticalDivider).require(hasCircularProgress).require(hasAvatar).require(hasCheckTile).require(hasSwitchTile).require(hasRadioTile).require(hasSegmented).require(hasFab).require(hasTooltip).require(hasOutlined).require(hasTextButton).require(hasPlaceholder).require(hasFilterChip).require(hasChoiceChip).require(hasActionChip).require(hasInputChip).require(hasSemantics).require(hasMerge).require(hasInkWell).require(hasVisibility).require(Signal.get(count) >= 0)
+} yield ()), View.button("Clear", _ => Signal.setList(items, [])))).require(listLenNonNeg).require(itemPastEndEmpty).require(draftNonNeg).require(hasAdd).require(hasClear).require(hasHome).require(hasTasks).require(hasProgress).require(hasSwitch).require(hasChip).require(hasListTile).require(hasBadge).require(hasCard).require(hasDivider).require(hasExpansion).require(hasIconButton).require(hasVerticalDivider).require(hasCircularProgress).require(hasAvatar).require(hasCheckTile).require(hasSwitchTile).require(hasRadioTile).require(hasSegmented).require(hasFab).require(hasTooltip).require(hasOutlined).require(hasTextButton).require(hasPlaceholder).require(hasFilterChip).require(hasChoiceChip).require(hasActionChip).require(hasInputChip).require(hasSemantics).require(hasMerge).require(hasInkWell).require(hasVisibility).require(hasOffstage).require(Signal.get(count) >= 0)
     } yield ()
   )

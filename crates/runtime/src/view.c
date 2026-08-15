@@ -96,6 +96,11 @@ static int view_visibility_on(const SzView *v) {
          sz_signal_int_get(v->sig_int) != 0;
 }
 
+static int view_offstage_shown(const SzView *v) {
+  return v && v->kind == SZ_VIEW_OFFSTAGE && v->sig_int &&
+         sz_signal_int_get(v->sig_int) != 0;
+}
+
 static int count_shown_children(const SzView *v) {
   int i, n = 0;
   if (!v)
@@ -128,7 +133,7 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_EXPANSION_TILE || kind == SZ_VIEW_TOOLTIP ||
          kind == SZ_VIEW_PLACEHOLDER || kind == SZ_VIEW_SEMANTICS ||
          kind == SZ_VIEW_MERGE_SEMANTICS || kind == SZ_VIEW_INK_WELL ||
-         kind == SZ_VIEW_VISIBILITY;
+         kind == SZ_VIEW_VISIBILITY || kind == SZ_VIEW_OFFSTAGE;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -549,6 +554,16 @@ SzView *sz_view_visibility(SzSignalInt *sig, SzView *child) {
   return v;
 }
 
+SzView *sz_view_offstage(SzSignalInt *sig, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_OFFSTAGE);
+  v->sig_int = sig;
+  v->a11y_role = SZ_A11Y_OFFSTAGE;
+  v->a11y_label = sz_strdup("offstage");
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
 SzView *sz_view_divider(void) {
   SzView *v = view_new(SZ_VIEW_DIVIDER);
   v->a11y_role = SZ_A11Y_DIVIDER;
@@ -700,6 +715,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "inkwell";
   case SZ_A11Y_VISIBILITY:
     return "visibility";
+  case SZ_A11Y_OFFSTAGE:
+    return "offstage";
   default:
     return "none";
   }
@@ -758,6 +775,10 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
       snprintf(live, sizeof live, "%d", view_visibility_on(v) ? 1 : 0);
       label = live;
     }
+    if (v->kind == SZ_VIEW_OFFSTAGE) {
+      snprintf(live, sizeof live, "%d", view_offstage_shown(v) ? 1 : 0);
+      label = live;
+    }
     n = snprintf(line, sizeof line, "%s:%s\n", a11y_role_name(v->a11y_role),
                  label);
     if (n > 0 && *len + (size_t)n < cap) {
@@ -769,6 +790,8 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
   if (v->kind == SZ_VIEW_MERGE_SEMANTICS)
     return;
   if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
+    return;
+  if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
     return;
   for (i = 0; i < v->child_count; i++)
     a11y_dump_node(v->children[i], buf, cap, len);
@@ -2230,6 +2253,13 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_VISIBILITY:
     layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
     break;
+  case SZ_VIEW_OFFSTAGE:
+    layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
+    if (!view_offstage_shown(v)) {
+      v->frame.w = 0.f;
+      v->frame.h = 0.f;
+    }
+    break;
   case SZ_VIEW_MAX_LINES: {
     int prev = g_max_lines;
     g_max_lines = tighten_max_lines(v->img_w);
@@ -2395,6 +2425,8 @@ static SzView *hit_node(SzView *v, float x, float y) {
   if (v->kind == SZ_VIEW_IGNORE_POINTER)
     return NULL;
   if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
+    return NULL;
+  if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
     return NULL;
   if (v->kind == SZ_VIEW_ABSORB_POINTER)
     return v;
@@ -2694,6 +2726,8 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   if (!v || !c || !view_is_shown(v))
     return;
   if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
+    return;
+  if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
     return;
 
   switch (v->kind) {
@@ -3383,6 +3417,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_MERGE_SEMANTICS:
   case SZ_VIEW_INK_WELL:
   case SZ_VIEW_VISIBILITY:
+  case SZ_VIEW_OFFSTAGE:
     if (v->kind == SZ_VIEW_LIST)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
     for (i = 0; i < v->child_count; i++)
@@ -3585,6 +3620,8 @@ static int collect_text_fields_node(SzView *v, SzView **out, int cap, int n) {
       v->kind == SZ_VIEW_MERGE_SEMANTICS)
     return n;
   if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
+    return n;
+  if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
     return n;
   if (v->kind == SZ_VIEW_TEXT_FIELD)
     out[n++] = v;

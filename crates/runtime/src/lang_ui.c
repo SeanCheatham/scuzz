@@ -184,6 +184,10 @@ SzView *sz_lang_view_visibility(SzSignalInt *sig, SzView *child) {
   return sz_view_visibility(sig, child);
 }
 
+SzView *sz_lang_view_offstage(SzSignalInt *sig, SzView *child) {
+  return sz_view_offstage(sig, child);
+}
+
 SzView *sz_lang_view_divider(void) { return sz_view_divider(); }
 
 SzView *sz_lang_view_expansion_tile(SzSignalInt *sig, SzString *title,

@@ -37,6 +37,7 @@ button:Rename
 scroll:scroll
 card:card
 divider:divider
+offstage:1
 visibility:1
 semantics:mark
 placeholder:ph

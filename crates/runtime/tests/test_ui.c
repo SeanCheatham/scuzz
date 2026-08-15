@@ -8914,6 +8914,412 @@ static void test_visibility_skips_field_collect_off(void) {
   sz_signal_int_free(sig);
 }
 
+static void test_offstage_sizes_on(void) {
+  SzView *off, *av;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, cf;
+
+  sig = sz_signal_int(1);
+  av = sz_view_avatar("S");
+  off = sz_view_offstage(sig, av);
+  sz_view_layout(off, 200.f, 200.f, theme);
+  assert(sz_view_kind(off) == SZ_VIEW_OFFSTAGE);
+  f = sz_view_frame(off);
+  cf = sz_view_frame(av);
+  assert(fabsf(f.w - cf.w) < 0.5f);
+  assert(fabsf(f.h - cf.h) < 0.5f);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  sz_view_free(off);
+  sz_signal_int_free(sig);
+}
+
+static void test_offstage_sizes_off(void) {
+  SzView *off, *av, *vis;
+  SzSignalInt *sig, *vsig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, cf, vf;
+
+  sig = sz_signal_int(0);
+  av = sz_view_avatar("S");
+  off = sz_view_offstage(sig, av);
+  sz_view_layout(off, 200.f, 200.f, theme);
+  f = sz_view_frame(off);
+  cf = sz_view_frame(av);
+  assert(fabsf(f.w) < 0.5f);
+  assert(fabsf(f.h) < 0.5f);
+  assert(fabsf(cf.h - theme->control_h) < 0.5f);
+  vsig = sz_signal_int(0);
+  vis = sz_view_visibility(vsig, sz_view_avatar("S"));
+  sz_view_layout(vis, 200.f, 200.f, theme);
+  vf = sz_view_frame(vis);
+  assert(fabsf(vf.h - theme->control_h) < 0.5f);
+  assert(vf.h > f.h + 1.f);
+  sz_view_free(off);
+  sz_view_free(vis);
+  sz_signal_int_free(sig);
+  sz_signal_int_free(vsig);
+}
+
+static void test_offstage_empty_sizes(void) {
+  SzView *off;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(1);
+  off = sz_view_offstage(sig, NULL);
+  sz_view_layout(off, 200.f, 200.f, theme);
+  f = sz_view_frame(off);
+  assert(fabsf(f.w) < 0.5f);
+  assert(fabsf(f.h) < 0.5f);
+  sz_view_free(off);
+  sz_signal_int_free(sig);
+}
+
+static void test_offstage_same_origin(void) {
+  SzView *off, *av;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, cf;
+
+  sig = sz_signal_int(1);
+  av = sz_view_avatar("S");
+  off = sz_view_offstage(sig, av);
+  sz_view_layout(off, 200.f, 200.f, theme);
+  f = sz_view_frame(off);
+  cf = sz_view_frame(av);
+  assert(fabsf(f.x - cf.x) < 0.5f);
+  assert(fabsf(f.y - cf.y) < 0.5f);
+  sz_view_free(off);
+  sz_signal_int_free(sig);
+}
+
+static void test_offstage_a11y_on(void) {
+  SzView *off;
+  SzSignalInt *sig;
+  SzString *dump;
+  const char *s;
+
+  sig = sz_signal_int(1);
+  off = sz_view_offstage(sig, sz_view_avatar("S"));
+  dump = sz_view_a11y_dump(off);
+  s = sz_string_cstr(dump);
+  assert(strncmp(s, "offstage:", 9) == 0);
+  assert(strstr(s, "offstage:1") != NULL);
+  assert(strstr(s, "avatar:S") != NULL);
+  sz_string_free(dump);
+  sz_view_free(off);
+  sz_signal_int_free(sig);
+}
+
+static void test_offstage_a11y_off(void) {
+  SzView *off;
+  SzSignalInt *sig;
+  SzString *dump;
+  const char *s;
+
+  sig = sz_signal_int(0);
+  off = sz_view_offstage(sig, sz_view_avatar("S"));
+  dump = sz_view_a11y_dump(off);
+  s = sz_string_cstr(dump);
+  assert(strstr(s, "offstage:0") != NULL);
+  assert(strstr(s, "avatar:S") == NULL);
+  sz_string_free(dump);
+  sz_view_free(off);
+  sz_signal_int_free(sig);
+}
+
+static void test_offstage_nonzero_is_on(void) {
+  SzView *off;
+  SzSignalInt *sig;
+  SzString *dump;
+
+  sig = sz_signal_int(40);
+  off = sz_view_offstage(sig, sz_view_avatar("S"));
+  dump = sz_view_a11y_dump(off);
+  assert(strstr(sz_string_cstr(dump), "offstage:1") != NULL);
+  assert(strstr(sz_string_cstr(dump), "avatar:S") != NULL);
+  sz_string_free(dump);
+  sz_view_free(off);
+  sz_signal_int_free(sig);
+}
+
+static void test_offstage_not_tap_target(void) {
+  SzView *off;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(1);
+  off = sz_view_offstage(sig, sz_view_avatar("S"));
+  sz_view_layout(off, 200.f, 80.f, theme);
+  f = sz_view_frame(off);
+  assert(!sz_view_is_tap_target(off));
+  assert(sz_view_hit_test(off, f.x + 4.f, f.y + f.h * 0.5f) == NULL);
+  sz_view_free(off);
+  sz_signal_int_free(sig);
+}
+
+static void test_offstage_child_tap_on(void) {
+  SzView *off, *btn, *hit;
+  SzSignalInt *off_sig, *tap_sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  off_sig = sz_signal_int(1);
+  tap_sig = sz_signal_int(0);
+  btn = sz_view_button("Go", counter_tap, tap_sig);
+  off = sz_view_offstage(off_sig, btn);
+  sz_view_layout(off, 200.f, 80.f, theme);
+  f = sz_view_frame(btn);
+  hit = sz_view_hit_test(off, f.x + 4.f, f.y + f.h * 0.5f);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_BUTTON);
+  assert(sz_view_handle_tap(off, f.x + 4.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(tap_sig) == 1);
+  sz_view_free(off);
+  sz_signal_int_free(off_sig);
+  sz_signal_int_free(tap_sig);
+}
+
+static void test_offstage_child_tap_off(void) {
+  SzView *off, *btn;
+  SzSignalInt *off_sig, *tap_sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  off_sig = sz_signal_int(0);
+  tap_sig = sz_signal_int(0);
+  btn = sz_view_button("Go", counter_tap, tap_sig);
+  off = sz_view_offstage(off_sig, btn);
+  sz_view_layout(off, 200.f, 80.f, theme);
+  f = sz_view_frame(btn);
+  assert(sz_view_hit_test(off, f.x + 4.f, f.y + f.h * 0.5f) == NULL);
+  assert(!sz_view_handle_tap(off, f.x + 4.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(tap_sig) == 0);
+  sz_view_free(off);
+  sz_signal_int_free(off_sig);
+  sz_signal_int_free(tap_sig);
+}
+
+static void test_offstage_paint_on(void) {
+  SzView *root, *av;
+  SzSignalInt *sig;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+  int mx, my;
+
+  sig = sz_signal_int(1);
+  av = sz_view_avatar("S");
+  root = sz_view_offstage(sig, av);
+  sz_view_layout(root, 80.f, 80.f, theme);
+  f = sz_view_frame(av);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  mx = (int)(f.x + f.w * 0.5f);
+  my = (int)(f.y + 6.f);
+  assert(px_rgb(px, 80, mx, my, 0x14, 0x28, 0x50));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+  sz_signal_int_free(sig);
+}
+
+static void test_offstage_paint_off(void) {
+  SzView *root, *child;
+  SzSignalInt *sig;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  child = sz_view_background(0xFF00AA00u, sz_view_sized(40, 40, sz_view_text("x")));
+  root = sz_view_offstage(sig, child);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  f = sz_view_frame(child);
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 20.f), 0xF5, 0xF5, 0xF5));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+  sz_signal_int_free(sig);
+}
+
+static void test_offstage_paint_empty(void) {
+  SzView *root;
+  SzSignalInt *sig;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+
+  sig = sz_signal_int(1);
+  root = sz_view_offstage(sig, NULL);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, 8, 8, 0xF5, 0xF5, 0xF5));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+  sz_signal_int_free(sig);
+}
+
+static void test_offstage_not_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_offstage.dump";
+  char *dump;
+  const char *taps;
+
+  sig = sz_signal_int(1);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_offstage(sig, sz_view_avatar("S")));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "offstage:1") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "offstage") == NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
+static void test_offstage_child_in_taps_on(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *off_sig, *tap_sig;
+  const char *path = "/tmp/scuzz_ui_offstage_child.dump";
+  char *dump;
+  const char *taps;
+
+  off_sig = sz_signal_int(1);
+  tap_sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_offstage(off_sig, sz_view_button("Go", counter_tap, tap_sig)));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "offstage:1") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "Go") != NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(off_sig);
+  sz_signal_int_free(tap_sig);
+  remove(path);
+}
+
+static void test_offstage_child_not_in_taps_off(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *off_sig, *tap_sig;
+  const char *path = "/tmp/scuzz_ui_offstage_off.dump";
+  char *dump;
+  const char *taps;
+
+  off_sig = sz_signal_int(0);
+  tap_sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_offstage(off_sig, sz_view_button("Go", counter_tap, tap_sig)));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "offstage:0") != NULL);
+  assert(strstr(dump, "button:Go") == NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "Go") == NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(off_sig);
+  sz_signal_int_free(tap_sig);
+  remove(path);
+}
+
+static void test_offstage_skips_field_collect_off(void) {
+  SzView *col, *hidden, *shown;
+  SzView *fields[8];
+  SzSignalStr *a, *b;
+  SzSignalInt *sig;
+  SzString *dump;
+  int n;
+  const SzTheme *theme = sz_theme_default();
+
+  sig = sz_signal_int(0);
+  a = sz_signal_str("secret");
+  b = sz_signal_str("ok");
+  hidden = sz_view_text_field(a, "hidden");
+  shown = sz_view_text_field(b, "shown");
+  col = sz_view_column();
+  sz_view_add_child(col, sz_view_offstage(sig, hidden));
+  sz_view_add_child(col, shown);
+  sz_view_layout(col, 200.f, 120.f, theme);
+  n = sz_view_collect_text_fields(col, fields, 8);
+  assert(n == 1);
+  assert(fields[0] == shown);
+  dump = sz_view_a11y_dump(col);
+  assert(strstr(sz_string_cstr(dump), "textfield:hidden") == NULL);
+  assert(strstr(sz_string_cstr(dump), "offstage:0") != NULL);
+  assert(strstr(sz_string_cstr(dump), "textfield:shown") != NULL);
+  sz_string_free(dump);
+  sz_view_free(col);
+  sz_signal_str_free(a);
+  sz_signal_str_free(b);
+  sz_signal_int_free(sig);
+}
+
 static void test_filter_chip_sizes(void) {
   SzView *ch, *plain;
   SzSignalInt *sig;
@@ -11954,6 +12360,23 @@ int main(void) {
   test_visibility_child_in_taps_on();
   test_visibility_child_not_in_taps_off();
   test_visibility_skips_field_collect_off();
+  test_offstage_sizes_on();
+  test_offstage_sizes_off();
+  test_offstage_empty_sizes();
+  test_offstage_same_origin();
+  test_offstage_a11y_on();
+  test_offstage_a11y_off();
+  test_offstage_nonzero_is_on();
+  test_offstage_not_tap_target();
+  test_offstage_child_tap_on();
+  test_offstage_child_tap_off();
+  test_offstage_paint_on();
+  test_offstage_paint_off();
+  test_offstage_paint_empty();
+  test_offstage_not_in_taps_dump();
+  test_offstage_child_in_taps_on();
+  test_offstage_child_not_in_taps_off();
+  test_offstage_skips_field_collect_off();
   test_filter_chip_sizes();
   test_filter_chip_empty_min_width();
   test_filter_chip_null_label();

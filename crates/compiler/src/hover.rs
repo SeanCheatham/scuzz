@@ -383,6 +383,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.visibility(sig: Signal, child: View): View",
     ),
     (
+        "View.offstage",
+        "View.offstage(sig: Signal, child: View): View",
+    ),
+    (
         "View.checkbox",
         "View.checkbox(sig: Signal, label: String): View",
     ),
@@ -964,6 +968,21 @@ mod tests {
         let h = hover_src(src, "visibility");
         assert!(
             h.contains("View.visibility(sig: Signal, child: View): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_view_offstage() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(1)
+    _ <- Ui.run(_ => View.offstage(n, View.avatar("S")))
+  } yield ()
+"#;
+        let h = hover_src(src, "offstage");
+        assert!(
+            h.contains("View.offstage(sig: Signal, child: View): View"),
             "{h}"
         );
     }
