@@ -160,6 +160,7 @@ int sz_view_is_tap_target(const SzView *view) {
   return view &&
          (view->kind == SZ_VIEW_BUTTON || view->kind == SZ_VIEW_CHECKBOX ||
           view->kind == SZ_VIEW_SLIDER || view->kind == SZ_VIEW_RADIO ||
+          view->kind == SZ_VIEW_CHOICE_CHIP ||
           view->kind == SZ_VIEW_SWITCH || view->kind == SZ_VIEW_CHIP ||
           view->kind == SZ_VIEW_FILTER_CHIP ||
           view->kind == SZ_VIEW_EXPANSION_TILE ||
@@ -371,6 +372,17 @@ SzView *sz_view_filter_chip(SzSignalInt *sig, const char *label) {
   return v;
 }
 
+SzView *sz_view_choice_chip(SzSignalInt *sig, int64_t value, const char *label) {
+  SzView *v = view_new(SZ_VIEW_CHOICE_CHIP);
+  v->sig_int = sig;
+  v->radio_value = value;
+  v->text = sz_strdup(label ? label : "");
+  v->interactive = 1;
+  v->a11y_role = SZ_A11Y_CHOICE_CHIP;
+  v->a11y_label = sz_strdup(label ? label : "");
+  return v;
+}
+
 SzView *sz_view_list_tile(const char *title, SzView *trailing) {
   SzView *v = view_new(SZ_VIEW_LIST_TILE);
   v->text = sz_strdup(title ? title : "");
@@ -563,6 +575,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "chip";
   case SZ_A11Y_FILTER_CHIP:
     return "filterchip";
+  case SZ_A11Y_CHOICE_CHIP:
+    return "choicechip";
   case SZ_A11Y_LIST_TILE:
     return "listtile";
   case SZ_A11Y_BADGE:
@@ -629,7 +643,8 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
                on ? 1 : 0);
       label = live;
     }
-    if (v->kind == SZ_VIEW_RADIO || v->kind == SZ_VIEW_RADIO_LIST_TILE) {
+    if (v->kind == SZ_VIEW_RADIO || v->kind == SZ_VIEW_RADIO_LIST_TILE ||
+        v->kind == SZ_VIEW_CHOICE_CHIP) {
       int on = v->sig_int && sz_signal_int_get(v->sig_int) == v->radio_value;
       snprintf(live, sizeof live, "%s=%d", v->a11y_label ? v->a11y_label : "",
                on ? 1 : 0);
@@ -1471,6 +1486,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     break;
   }
   case SZ_VIEW_CHIP:
+  case SZ_VIEW_CHOICE_CHIP:
     resolve_text(v, buf, sizeof buf);
     v->frame.w = text_width(buf, font) + theme->pad * 2.f;
     v->frame.h = theme->control_h;
@@ -2738,6 +2754,23 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
                  on ? theme->on_primary : theme->foreground, theme->font_px);
     break;
   }
+  case SZ_VIEW_CHOICE_CHIP: {
+    int on = v->sig_int && sz_signal_int_get(v->sig_int) == v->radio_value;
+    SzRect br = v->frame;
+    resolve_text(v, buf, sizeof buf);
+    if (on)
+      paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h,
+                 theme->primary);
+    else {
+      paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h,
+                 theme->surface);
+      paint_border(c, br, (int)(scale_px(theme, 2.f) + 0.5f), theme->border);
+    }
+    paint_string(c, buf, v->frame.x + theme->pad,
+                 v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
+                 on ? theme->on_primary : theme->foreground, theme->font_px);
+    break;
+  }
   case SZ_VIEW_FILTER_CHIP: {
     int on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
     SzRect br = v->frame;
@@ -3370,7 +3403,8 @@ int sz_view_handle_tap(SzView *root, float x, float y) {
     sz_signal_int_set(hit->sig_int, n == 0 ? 1 : 0);
     return 1;
   }
-  if ((hit->kind == SZ_VIEW_RADIO || hit->kind == SZ_VIEW_RADIO_LIST_TILE) &&
+  if ((hit->kind == SZ_VIEW_RADIO || hit->kind == SZ_VIEW_RADIO_LIST_TILE ||
+       hit->kind == SZ_VIEW_CHOICE_CHIP) &&
       hit->sig_int) {
     sz_signal_int_set(hit->sig_int, hit->radio_value);
     return 1;

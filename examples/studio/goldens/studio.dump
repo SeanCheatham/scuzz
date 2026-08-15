@@ -51,6 +51,7 @@ iconbutton:i
 outlined:Edit
 textbutton:Open
 filterchip:Tag=0
+choicechip:Day=1
 button:Done
 button:Del
 button:Save

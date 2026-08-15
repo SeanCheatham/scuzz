@@ -2150,6 +2150,13 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::Opaque("View".into()))
         }
+        "View.choiceChip" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("SignalInt".into()))?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            expect_ty(&arg_tys[2], &Type::String)?;
+            Ok(Type::Opaque("View".into()))
+        }
         "View.listTile" => {
             if arg_tys.is_empty() || arg_tys.len() > 2 {
                 return Err(TypeError::Msg(format!(
@@ -5428,6 +5435,18 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.filterChip should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_choice_chip() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.choiceChip(n, 0, "Day"))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.choiceChip should typecheck");
     }
 
     #[test]

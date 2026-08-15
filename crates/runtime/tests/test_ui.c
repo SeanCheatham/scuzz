@@ -7830,6 +7830,271 @@ static void test_filter_chip_in_taps_dump(void) {
   remove(path);
 }
 
+static void test_choice_chip_sizes(void) {
+  SzView *ch, *plain;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f, pf;
+
+  sig = sz_signal_int(0);
+  ch = sz_view_choice_chip(sig, 0, "Day");
+  plain = sz_view_chip(sig, "Day");
+  sz_view_layout(ch, 200.f, 200.f, theme);
+  sz_view_layout(plain, 200.f, 200.f, theme);
+  assert(sz_view_kind(ch) == SZ_VIEW_CHOICE_CHIP);
+  f = sz_view_frame(ch);
+  pf = sz_view_frame(plain);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  assert(f.w >= 32.f);
+  assert(fabsf(f.w - pf.w) < 0.5f);
+  sz_view_free(ch);
+  sz_view_free(plain);
+  sz_signal_int_free(sig);
+}
+
+static void test_choice_chip_empty_min_width(void) {
+  SzView *ch;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  ch = sz_view_choice_chip(sig, 0, "");
+  sz_view_layout(ch, 200.f, 200.f, theme);
+  f = sz_view_frame(ch);
+  assert(f.w >= 32.f);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  sz_view_free(ch);
+  sz_signal_int_free(sig);
+}
+
+static void test_choice_chip_null_label(void) {
+  SzView *ch;
+  SzSignalInt *sig;
+  SzString *dump;
+
+  sig = sz_signal_int(0);
+  ch = sz_view_choice_chip(sig, 0, NULL);
+  dump = sz_view_a11y_dump(ch);
+  assert(strstr(sz_string_cstr(dump), "choicechip:") != NULL);
+  sz_string_free(dump);
+  sz_view_free(ch);
+  sz_signal_int_free(sig);
+}
+
+static void test_choice_chip_clamps_max_w(void) {
+  SzView *ch;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  ch = sz_view_choice_chip(sig, 0, "Day");
+  sz_view_layout(ch, 20.f, 80.f, theme);
+  f = sz_view_frame(ch);
+  assert(fabsf(f.w - 20.f) < 0.5f);
+  sz_view_free(ch);
+  sz_signal_int_free(sig);
+}
+
+static void test_choice_chip_a11y_off_on(void) {
+  SzView *ch;
+  SzSignalInt *sig;
+  SzString *dump;
+
+  sig = sz_signal_int(1);
+  ch = sz_view_choice_chip(sig, 0, "Day");
+  dump = sz_view_a11y_dump(ch);
+  assert(strstr(sz_string_cstr(dump), "choicechip:Day=0") != NULL);
+  sz_string_free(dump);
+  sz_signal_int_set(sig, 0);
+  dump = sz_view_a11y_dump(ch);
+  assert(strstr(sz_string_cstr(dump), "choicechip:Day=1") != NULL);
+  sz_string_free(dump);
+  sz_view_free(ch);
+  sz_signal_int_free(sig);
+}
+
+static void test_choice_chip_a11y_distinct(void) {
+  SzView *ch;
+  SzSignalInt *sig;
+  SzString *dump;
+  const char *s;
+
+  sig = sz_signal_int(1);
+  ch = sz_view_choice_chip(sig, 0, "Day");
+  dump = sz_view_a11y_dump(ch);
+  s = sz_string_cstr(dump);
+  assert(strncmp(s, "choicechip:", 11) == 0);
+  assert(strstr(s, "choicechip:Day=0") != NULL);
+  sz_string_free(dump);
+  sz_view_free(ch);
+  sz_signal_int_free(sig);
+}
+
+static void test_choice_chip_wrong_value_is_off(void) {
+  SzView *ch;
+  SzSignalInt *sig;
+  SzString *dump;
+
+  sig = sz_signal_int(7);
+  ch = sz_view_choice_chip(sig, 0, "Day");
+  dump = sz_view_a11y_dump(ch);
+  assert(strstr(sz_string_cstr(dump), "choicechip:Day=0") != NULL);
+  sz_string_free(dump);
+  sz_view_free(ch);
+  sz_signal_int_free(sig);
+}
+
+static void test_choice_chip_tap_writes_value(void) {
+  SzView *ch;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(1);
+  ch = sz_view_choice_chip(sig, 0, "Day");
+  sz_view_layout(ch, 200.f, 200.f, theme);
+  f = sz_view_frame(ch);
+  assert(sz_view_is_tap_target(ch));
+  assert(sz_view_handle_tap(ch, f.x + f.w * 0.5f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 0);
+  assert(sz_view_handle_tap(ch, f.x + 2.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 0);
+  sz_view_free(ch);
+  sz_signal_int_free(sig);
+}
+
+static void test_choice_chip_miss(void) {
+  SzView *ch;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(1);
+  ch = sz_view_choice_chip(sig, 0, "Day");
+  sz_view_layout(ch, 200.f, 80.f, theme);
+  f = sz_view_frame(ch);
+  assert(!sz_view_handle_tap(ch, f.x - 8.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 1);
+  sz_view_free(ch);
+  sz_signal_int_free(sig);
+}
+
+static void test_choice_chip_hit_test(void) {
+  SzView *ch, *hit;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  ch = sz_view_choice_chip(sig, 0, "Day");
+  sz_view_layout(ch, 200.f, 200.f, theme);
+  f = sz_view_frame(ch);
+  hit = sz_view_hit_test(ch, f.x + f.w * 0.5f, f.y + f.h * 0.5f);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_CHOICE_CHIP);
+  assert(sz_view_is_tap_target(hit));
+  sz_view_free(ch);
+  sz_signal_int_free(sig);
+}
+
+static void test_choice_chip_paint_off_on(void) {
+  SzView *root;
+  SzSignalInt *sig;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(1);
+  root = sz_view_choice_chip(sig, 0, "Day");
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  f = sz_view_frame(root);
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  /* Top of chip fill, above the label. Off is surface; on is primary. */
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0xFF, 0xFF, 0xFF));
+  sz_signal_int_set(sig, 0);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + 4.f), 0x14, 0x28, 0x50));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+  sz_signal_int_free(sig);
+}
+
+static void test_choice_chip_group_exclusive(void) {
+  SzView *col, *chip, *radio;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzString *dump;
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  col = sz_view_column();
+  chip = sz_view_choice_chip(sig, 0, "Day");
+  radio = sz_view_radio(sig, 1, "Night");
+  sz_view_add_child(col, chip);
+  sz_view_add_child(col, radio);
+  sz_view_layout(col, 200.f, 200.f, theme);
+  dump = sz_view_a11y_dump(col);
+  assert(strstr(sz_string_cstr(dump), "choicechip:Day=1") != NULL);
+  assert(strstr(sz_string_cstr(dump), "radio:Night=0") != NULL);
+  sz_string_free(dump);
+  f = sz_view_frame(radio);
+  assert(sz_view_handle_tap(col, f.x + 2.f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 1);
+  dump = sz_view_a11y_dump(col);
+  assert(strstr(sz_string_cstr(dump), "choicechip:Day=0") != NULL);
+  assert(strstr(sz_string_cstr(dump), "radio:Night=1") != NULL);
+  sz_string_free(dump);
+  f = sz_view_frame(chip);
+  assert(sz_view_handle_tap(col, f.x + f.w * 0.5f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 0);
+  sz_view_free(col);
+  sz_signal_int_free(sig);
+}
+
+static void test_choice_chip_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_choicechip.dump";
+  char *dump;
+  const char *taps;
+
+  sig = sz_signal_int(1);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_choice_chip(sig, 0, "Day"));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "choicechip:Day=0") != NULL);
+  taps = strstr(dump, "[taps]\n");
+  assert(taps != NULL);
+  assert(strstr(taps, "Day") != NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
 static void test_radio_sizes(void) {
   SzView *r;
   SzSignalInt *sig;
@@ -9735,6 +10000,19 @@ int main(void) {
   test_filter_chip_paint_off_on();
   test_filter_chip_paint_mark_on();
   test_filter_chip_in_taps_dump();
+  test_choice_chip_sizes();
+  test_choice_chip_empty_min_width();
+  test_choice_chip_null_label();
+  test_choice_chip_clamps_max_w();
+  test_choice_chip_a11y_off_on();
+  test_choice_chip_a11y_distinct();
+  test_choice_chip_wrong_value_is_off();
+  test_choice_chip_tap_writes_value();
+  test_choice_chip_miss();
+  test_choice_chip_hit_test();
+  test_choice_chip_paint_off_on();
+  test_choice_chip_group_exclusive();
+  test_choice_chip_in_taps_dump();
   test_radio_sizes();
   test_radio_a11y_off_on();
   test_radio_tap_writes_value();
