@@ -71,6 +71,8 @@ SzView *sz_lang_view_checkbox(SzSignalInt *sig, SzString *label) {
   return sz_view_checkbox(sig, label ? sz_string_cstr(label) : "");
 }
 
+SzView *sz_lang_view_slider(SzSignalInt *sig) { return sz_view_slider(sig); }
+
 SzView *sz_lang_view_column(void) { return sz_view_column(); }
 
 SzView *sz_lang_view_row(void) { return sz_view_row(); }

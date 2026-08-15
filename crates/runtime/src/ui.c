@@ -92,6 +92,7 @@ struct SzUiSession {
   float pointer_down_x;
   float pointer_down_y;
   SzView *pointer_scroll;
+  SzView *pointer_slider;
   SzUiRebuildFn rebuild;
   void *rebuild_env;
   char *watch_path;
@@ -553,6 +554,9 @@ static void format_last_hit_desc(SzView *hit, char *buf, size_t cap) {
   case SZ_A11Y_CHECKBOX:
     role = "checkbox";
     break;
+  case SZ_A11Y_SLIDER:
+    role = "slider";
+    break;
   default:
     break;
   }
@@ -582,6 +586,8 @@ static int find_tap_index_at(SzUiSession *session, float x, float y) {
                  (float)session->cfg.height, session->theme);
   hit = sz_view_hit_test(session->root, x, y);
   if (!hit || !sz_view_is_tap_target(hit))
+    return -1;
+  if (sz_view_kind(hit) == SZ_VIEW_SLIDER)
     return -1;
   n = collect_buttons(session, buttons, 64);
   for (i = 0; i < n; i++) {
@@ -619,7 +625,9 @@ static void record_live_event(SzUiSession *session, const SzInputEvent *ev) {
              ev->pointer_phase == SZ_POINTER_UP && session->pointer_down) {
     float dx = ev->x - session->pointer_down_x;
     float dy = ev->y - session->pointer_down_y;
-    if (dx * dx + dy * dy <= 64.f)
+    if (session->pointer_slider)
+      fprintf(f, "xy %.1f %.1f\n", ev->x, ev->y);
+    else if (dx * dx + dy * dy <= 64.f)
       record_tap_or_xy(session, f, ev->x, ev->y);
   }
   fclose(f);
@@ -1093,20 +1101,33 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
                  (float)session->cfg.height, session->theme);
 
   switch (event->pointer_phase) {
-  case SZ_POINTER_DOWN:
+  case SZ_POINTER_DOWN: {
+    SzView *hit = sz_view_hit_test(session->root, event->x, event->y);
     session->pointer_down = 1;
     session->pointer_x = event->x;
     session->pointer_y = event->y;
     session->pointer_down_x = event->x;
     session->pointer_down_y = event->y;
-    session->pointer_scroll = sz_view_scroll_at(session->root, event->x, event->y);
+    if (hit && sz_view_kind(hit) == SZ_VIEW_SLIDER) {
+      session->pointer_slider = hit;
+      session->pointer_scroll = NULL;
+      sz_view_slider_set_at(hit, event->x);
+    } else {
+      session->pointer_slider = NULL;
+      session->pointer_scroll =
+          sz_view_scroll_at(session->root, event->x, event->y);
+    }
     session->dirty = 1;
     return 1;
+  }
   case SZ_POINTER_MOVE:
     if (!session->pointer_down)
       return 0;
     dy = event->y - session->pointer_y;
-    if (session->pointer_scroll && (dy > 0.5f || dy < -0.5f)) {
+    if (session->pointer_slider) {
+      sz_view_slider_set_at(session->pointer_slider, event->x);
+      session->dirty = 1;
+    } else if (session->pointer_scroll && (dy > 0.5f || dy < -0.5f)) {
       /* Finger down → content follows (positive finger dy scrolls content up). */
       sz_view_scroll_by(session->pointer_scroll, -dy);
       session->dirty = 1;
@@ -1121,6 +1142,14 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
     dy = event->y - session->pointer_down_y;
     session->pointer_down = 0;
     session->pointer_scroll = NULL;
+    if (session->pointer_slider) {
+      SzView *sl = session->pointer_slider;
+      sz_view_slider_set_at(sl, event->x);
+      session_set_last_hit(session, event->x, event->y, sl);
+      session->pointer_slider = NULL;
+      session->dirty = 1;
+      return 1;
+    }
     if (dx * dx + dy * dy <= tap_slop2) {
       SzView *hit = sz_view_hit_test(session->root, event->x, event->y);
       int fired = sz_view_handle_tap(session->root, event->x, event->y);

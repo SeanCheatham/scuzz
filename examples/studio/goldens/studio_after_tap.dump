@@ -3,7 +3,7 @@ str[0] = ""
 list[1] = ["milk"]
 int[2] = 1
 int[3] = 0
-int[4] = 0
+int[4] = 40
 str[5] = "count = 0"
 str[6] = "page = 1"
 

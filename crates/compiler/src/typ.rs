@@ -2085,6 +2085,11 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::Opaque("View".into()))
         }
+        "View.slider" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("SignalInt".into()))?;
+            Ok(Type::Opaque("View".into()))
+        }
         "Theme.accent" | "Theme.primary" | "Theme.muted" | "Theme.foreground" => {
             expect_arity(callee, &arg_tys, 0)?;
             Ok(Type::Int)
@@ -5187,6 +5192,18 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.checkbox should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_slider() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(40)
+    _ <- Ui.run(_ => View.slider(n))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.slider should typecheck");
     }
 
     #[test]

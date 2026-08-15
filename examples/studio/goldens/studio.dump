@@ -3,7 +3,7 @@ str[0] = ""
 list[1] = ["milk"]
 int[2] = 0
 int[3] = 0
-int[4] = 0
+int[4] = 40
 str[5] = "count = 0"
 str[6] = "page = 0"
 
@@ -14,7 +14,7 @@ button:Tasks
 text:Studio
 text:count = 0
 button:+1
-checkbox:compact=0
+slider:40
 text:q or Esc quits
 textfield:item
 button:Add
@@ -31,13 +31,11 @@ button:Clear
 0 Home 24,24 48x32
 1 Tasks 130,24 48x32
 2 +1 44,254 48x32
-3 compact 100,254 25x32
-4 Add 144,360 48x32
-5 Rename 200,360 58x32
-6 Done 248,448 48x32
-7 Del 304,448 48x32
-8 Save 12,476 48x32
-9 Clear 12,516 48x32
+3 slider 32,306 336x32
+4 Add 144,400 48x32
+5 Rename 200,400 58x32
+6 Save 12,476 48x32
+7 Clear 12,516 48x32
 
 [fields]
 0* item=""

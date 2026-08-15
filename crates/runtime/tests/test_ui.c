@@ -3788,6 +3788,263 @@ static void test_checkbox_in_taps_dump(void) {
   remove(path);
 }
 
+static void test_slider_sizes(void) {
+  SzView *sl;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(40);
+  sl = sz_view_slider(sig);
+  sz_view_layout(sl, 200.f, 200.f, theme);
+  assert(sz_view_kind(sl) == SZ_VIEW_SLIDER);
+  f = sz_view_frame(sl);
+  assert(fabsf(f.h - theme->control_h) < 0.5f);
+  assert(fabsf(f.w - 200.f) < 0.5f);
+  sz_view_free(sl);
+  sz_signal_int_free(sig);
+}
+
+static void test_slider_a11y(void) {
+  SzView *sl;
+  SzSignalInt *sig;
+  SzString *dump;
+
+  sig = sz_signal_int(40);
+  sl = sz_view_slider(sig);
+  dump = sz_view_a11y_dump(sl);
+  assert(strstr(sz_string_cstr(dump), "slider:40") != NULL);
+  sz_string_free(dump);
+  sz_signal_int_set(sig, 7);
+  dump = sz_view_a11y_dump(sl);
+  assert(strstr(sz_string_cstr(dump), "slider:7") != NULL);
+  sz_string_free(dump);
+  sz_view_free(sl);
+  sz_signal_int_free(sig);
+}
+
+static void test_slider_clamps_a11y(void) {
+  SzView *sl;
+  SzSignalInt *sig;
+  SzString *dump;
+
+  sig = sz_signal_int(150);
+  sl = sz_view_slider(sig);
+  dump = sz_view_a11y_dump(sl);
+  assert(strstr(sz_string_cstr(dump), "slider:100") != NULL);
+  sz_string_free(dump);
+  sz_signal_int_set(sig, -3);
+  dump = sz_view_a11y_dump(sl);
+  assert(strstr(sz_string_cstr(dump), "slider:0") != NULL);
+  sz_string_free(dump);
+  sz_view_free(sl);
+  sz_signal_int_free(sig);
+}
+
+static void test_slider_tap_sets_from_x(void) {
+  SzView *sl;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  sl = sz_view_slider(sig);
+  sz_view_layout(sl, 200.f, 80.f, theme);
+  f = sz_view_frame(sl);
+  assert(sz_view_handle_tap(sl, f.x + f.w * 0.5f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 50);
+  assert(sz_view_handle_tap(sl, f.x + f.w * 0.25f, f.y + f.h * 0.5f));
+  assert(sz_signal_int_get(sig) == 25);
+  sz_view_free(sl);
+  sz_signal_int_free(sig);
+}
+
+static void test_slider_tap_clamps_edges(void) {
+  SzView *sl;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(40);
+  sl = sz_view_slider(sig);
+  sz_view_layout(sl, 200.f, 80.f, theme);
+  f = sz_view_frame(sl);
+  assert(sz_view_handle_tap(sl, f.x - 8.f, f.y + f.h * 0.5f) == 0);
+  assert(sz_view_slider_set_at(sl, f.x - 8.f));
+  assert(sz_signal_int_get(sig) == 0);
+  assert(sz_view_slider_set_at(sl, f.x + f.w + 8.f));
+  assert(sz_signal_int_get(sig) == 100);
+  sz_view_free(sl);
+  sz_signal_int_free(sig);
+}
+
+static void test_slider_hit_test(void) {
+  SzView *sl, *hit;
+  SzSignalInt *sig;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(40);
+  sl = sz_view_slider(sig);
+  sz_view_layout(sl, 200.f, 80.f, theme);
+  f = sz_view_frame(sl);
+  hit = sz_view_hit_test(sl, f.x + f.w * 0.5f, f.y + f.h * 0.5f);
+  assert(hit && sz_view_kind(hit) == SZ_VIEW_SLIDER);
+  assert(sz_view_is_tap_target(hit));
+  sz_view_free(sl);
+  sz_signal_int_free(sig);
+}
+
+static void test_slider_paint_fill(void) {
+  SzView *root;
+  SzSignalInt *sig;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(100);
+  root = sz_view_slider(sig);
+  sz_view_layout(root, 80.f, 80.f, theme);
+  f = sz_view_frame(root);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, (int)(f.x + 8.f), (int)(f.y + f.h * 0.5f), 0x14, 0x28,
+                0x50));
+  sz_signal_int_set(sig, 0);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  assert(px_rgb(px, 80, (int)(f.x + f.w - 8.f), (int)(f.y + f.h * 0.5f), 0x6A,
+                0x6A, 0x6A));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+  sz_signal_int_free(sig);
+}
+
+static void test_slider_in_taps_dump(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+  SzSignalInt *sig;
+  const char *path = "/tmp/scuzz_ui_slider.dump";
+  char *dump;
+
+  sig = sz_signal_int(40);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_slider(sig));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_write_dump(session, path));
+  dump = slurp_cstr(path);
+  assert(strstr(dump, "slider:40") != NULL);
+  assert(strstr(dump, "[taps]") != NULL);
+  assert(strstr(dump, "slider") != NULL);
+  free(dump);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(path);
+}
+
+static void test_slider_pointer_drag(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *sl;
+  SzSignalInt *sig;
+  SzInputEvent ev;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+
+  sig = sz_signal_int(0);
+  sl = sz_view_slider(sig);
+  root = sz_view_column();
+  sz_view_add_child(root, sl);
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  sz_view_layout(root, 200.f, 80.f, theme);
+  f = sz_view_frame(sl);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_POINTER;
+  ev.pointer_phase = SZ_POINTER_DOWN;
+  ev.x = f.x + 4.f;
+  ev.y = f.y + f.h * 0.5f;
+  assert(sz_ui_inject_sync(session, &ev));
+  ev.pointer_phase = SZ_POINTER_MOVE;
+  ev.x = f.x + f.w * 0.8f;
+  assert(sz_ui_inject_sync(session, &ev));
+  ev.pointer_phase = SZ_POINTER_UP;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_signal_int_get(sig) == 80);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+}
+
+static void test_slider_live_records_xy(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *sl;
+  SzSignalInt *sig;
+  SzInputEvent ev;
+  const char *record = "/tmp/scuzz_ui_slider.script";
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+  char *body;
+
+  remove(record);
+  sig = sz_signal_int(0);
+  sl = sz_view_slider(sig);
+  root = sz_view_column();
+  sz_view_add_child(root, sl);
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_DESKTOP;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_record(session, record));
+  assert(sz_ui_pump_sync(session));
+  sz_view_layout(root, 200.f, 80.f, theme);
+  f = sz_view_frame(sl);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_POINTER;
+  ev.pointer_phase = SZ_POINTER_DOWN;
+  ev.x = f.x + f.w * 0.2f;
+  ev.y = f.y + f.h * 0.5f;
+  assert(sz_ui_session_live_inject(session, &ev));
+  ev.pointer_phase = SZ_POINTER_UP;
+  assert(sz_ui_session_live_inject(session, &ev));
+  body = slurp_cstr(record);
+  assert(strstr(body, "xy ") != NULL);
+  assert(strstr(body, "tap ") == NULL);
+  free(body);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+  remove(record);
+}
+
 static void test_ignore_pointer_sizes_to_child(void) {
   SzView *wrap, *child;
   const SzTheme *theme = sz_theme_default();
@@ -4932,6 +5189,16 @@ int main(void) {
   test_checkbox_hit_test();
   test_checkbox_paint_off_on();
   test_checkbox_in_taps_dump();
+  test_slider_sizes();
+  test_slider_a11y();
+  test_slider_clamps_a11y();
+  test_slider_tap_sets_from_x();
+  test_slider_tap_clamps_edges();
+  test_slider_hit_test();
+  test_slider_paint_fill();
+  test_slider_in_taps_dump();
+  test_slider_pointer_drag();
+  test_slider_live_records_xy();
   test_ignore_pointer_sizes_to_child();
   test_ignore_pointer_passes_tap_through();
   test_absorb_pointer_blocks_tap();

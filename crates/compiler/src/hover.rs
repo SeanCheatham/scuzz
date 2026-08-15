@@ -349,6 +349,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.checkbox",
         "View.checkbox(sig: Signal, label: String): View",
     ),
+    ("View.slider", "View.slider(sig: Signal): View"),
     ("View.column", "View.column(...): View"),
     ("View.row", "View.row(...): View"),
     ("View.wrap", "View.wrap(...): View"),
@@ -530,6 +531,18 @@ mod tests {
             h.contains("View.checkbox(sig: Signal, label: String): View"),
             "{h}"
         );
+    }
+
+    #[test]
+    fn hovers_view_slider() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(40)
+    _ <- Ui.run(_ => View.slider(n))
+  } yield ()
+"#;
+        let h = hover_src(src, "slider");
+        assert!(h.contains("View.slider(sig: Signal): View"), "{h}");
     }
 
     #[test]

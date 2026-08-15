@@ -151,7 +151,8 @@ SzViewKind sz_view_kind(const SzView *view) {
 
 int sz_view_is_tap_target(const SzView *view) {
   return view &&
-         (view->kind == SZ_VIEW_BUTTON || view->kind == SZ_VIEW_CHECKBOX);
+         (view->kind == SZ_VIEW_BUTTON || view->kind == SZ_VIEW_CHECKBOX ||
+          view->kind == SZ_VIEW_SLIDER);
 }
 
 SzRect sz_view_frame(const SzView *view) {
@@ -226,6 +227,42 @@ SzView *sz_view_checkbox(SzSignalInt *sig, const char *label) {
   return v;
 }
 
+SzView *sz_view_slider(SzSignalInt *sig) {
+  SzView *v = view_new(SZ_VIEW_SLIDER);
+  v->sig_int = sig;
+  v->interactive = 1;
+  v->a11y_role = SZ_A11Y_SLIDER;
+  v->a11y_label = sz_strdup("slider");
+  return v;
+}
+
+static int64_t slider_clamp(int64_t n) {
+  if (n < 0)
+    return 0;
+  if (n > 100)
+    return 100;
+  return n;
+}
+
+int sz_view_slider_set_at(SzView *view, float x) {
+  float t;
+  int64_t n;
+  if (!view || view->kind != SZ_VIEW_SLIDER || !view->sig_int)
+    return 0;
+  if (view->frame.w <= 0.f)
+    n = 0;
+  else {
+    t = (x - view->frame.x) / view->frame.w;
+    if (t < 0.f)
+      t = 0.f;
+    if (t > 1.f)
+      t = 1.f;
+    n = (int64_t)(t * 100.f + 0.5f);
+  }
+  sz_signal_int_set(view->sig_int, slider_clamp(n));
+  return 1;
+}
+
 SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder) {
   SzView *v = view_new(SZ_VIEW_TEXT_FIELD);
   v->sig_str = text;
@@ -266,6 +303,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "scroll";
   case SZ_A11Y_CHECKBOX:
     return "checkbox";
+  case SZ_A11Y_SLIDER:
+    return "slider";
   default:
     return "none";
   }
@@ -290,6 +329,11 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
       int on = v->sig_int && sz_signal_int_get(v->sig_int) != 0;
       snprintf(live, sizeof live, "%s=%d", v->a11y_label ? v->a11y_label : "",
                on ? 1 : 0);
+      label = live;
+    }
+    if (v->kind == SZ_VIEW_SLIDER) {
+      int64_t n = v->sig_int ? slider_clamp(sz_signal_int_get(v->sig_int)) : 0;
+      snprintf(live, sizeof live, "%lld", (long long)n);
       label = live;
     }
     n = snprintf(line, sizeof line, "%s:%s\n", a11y_role_name(v->a11y_role),
@@ -1059,6 +1103,14 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
       v->frame.w = max_w;
     break;
   }
+  case SZ_VIEW_SLIDER:
+    v->frame.w = max_w > 0 ? max_w : 120.f;
+    if (v->frame.w < 48.f)
+      v->frame.w = 48.f;
+    if (max_w > 0 && v->frame.w > max_w)
+      v->frame.w = max_w;
+    v->frame.h = theme->control_h;
+    break;
   case SZ_VIEW_TEXT_FIELD:
     v->frame.w = max_w > 0 ? max_w : 120.f;
     v->frame.h = theme->control_h;
@@ -1972,6 +2024,26 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
                  theme->foreground, theme->font_px);
     break;
   }
+  case SZ_VIEW_SLIDER: {
+    float track_h = 4.f;
+    float thumb = 12.f;
+    float n;
+    float tx;
+    float ty;
+    float tw;
+    if (v->frame.w < thumb)
+      thumb = v->frame.w;
+    n = (float)slider_clamp(v->sig_int ? sz_signal_int_get(v->sig_int) : 0);
+    tw = v->frame.w > thumb ? v->frame.w - thumb : 0.f;
+    tx = v->frame.x + (n / 100.f) * tw;
+    ty = v->frame.y + (v->frame.h - thumb) * 0.5f;
+    paint_rect(c, v->frame.x, v->frame.y + (v->frame.h - track_h) * 0.5f,
+               v->frame.w, track_h, theme->muted);
+    paint_rect(c, v->frame.x, v->frame.y + (v->frame.h - track_h) * 0.5f,
+               tx - v->frame.x + thumb * 0.5f, track_h, theme->primary);
+    paint_rect(c, tx, ty, thumb, thumb, theme->primary);
+    break;
+  }
   case SZ_VIEW_TEXT_FIELD: {
     const char *shown;
     resolve_text(v, buf, sizeof buf);
@@ -2254,6 +2326,8 @@ int sz_view_handle_tap(SzView *root, float x, float y) {
     sz_signal_int_set(hit->sig_int, n == 0 ? 1 : 0);
     return 1;
   }
+  if (hit->kind == SZ_VIEW_SLIDER)
+    return sz_view_slider_set_at(hit, x);
   if (hit->kind == SZ_VIEW_TEXT_FIELD) {
     clear_focus(root);
     hit->focused = 1;
