@@ -312,6 +312,14 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_scroll_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.sc\n";
+        let labels = labels_at(src, "View.sc");
+        assert!(labels.iter().any(|l| l == "View.scroll"), "{labels:?}");
+        assert!(labels.iter().any(|l| l == "View.scrollH"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_each_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.ea\n";
         let labels = labels_at(src, "View.ea");

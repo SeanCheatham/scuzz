@@ -13,6 +13,7 @@ text:page = 0
 button:Tasks
 text:Studio
 text:count = 0
+scroll:scrollh
 button:+1
 slider:40
 text:q or Esc quits
@@ -41,4 +42,5 @@ button:Clear
 0* item=""
 
 [scrolls]
-0 scroll
+0 scrollh
+1 scroll

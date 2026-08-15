@@ -2011,6 +2011,194 @@ static void test_wrap_in_column_grows_height(void) {
   sz_view_free(col);
 }
 
+static SzView *scroll_h_wide_row(SzView **row, SzView **left, SzView **right) {
+  *row = sz_view_row();
+  *left = sz_view_sized(80, 16, sz_view_text("L"));
+  *right = sz_view_sized(80, 16, sz_view_text("R"));
+  sz_view_add_child(*row, *left);
+  sz_view_add_child(*row, *right);
+  return sz_view_scroll_h(*row);
+}
+
+static void test_scroll_h_kind(void) {
+  SzView *scroll, *row, *left, *right, *vert;
+  SzString *dump;
+
+  scroll = scroll_h_wide_row(&row, &left, &right);
+  vert = sz_view_scroll(sz_view_text("v"));
+  (void)row;
+  (void)left;
+  (void)right;
+  assert(sz_view_kind(scroll) == SZ_VIEW_SCROLL);
+  assert(sz_view_scroll_is_h(scroll));
+  assert(!sz_view_scroll_is_h(vert));
+  dump = sz_view_a11y_dump(scroll);
+  assert(strstr(sz_string_cstr(dump), "scroll:scrollh") != NULL);
+  sz_string_free(dump);
+  sz_view_free(scroll);
+  sz_view_free(vert);
+}
+
+static void test_scroll_h_sizes_viewport(void) {
+  SzView *scroll, *left, *right, *row;
+  const SzTheme *theme = sz_theme_default();
+  SzRect sf, rf;
+
+  scroll = scroll_h_wide_row(&row, &left, &right);
+  (void)left;
+  (void)right;
+  sz_view_layout(scroll, 80.f, 200.f, theme);
+  sf = sz_view_frame(scroll);
+  rf = sz_view_frame(row);
+  assert(fabsf(sf.w - 80.f) < 0.5f);
+  assert(rf.w > sf.w + 0.5f);
+  assert(sf.h + 1.f < 200.f);
+  assert(fabsf(sf.h - (rf.h + theme->pad * 2.f)) < 0.5f);
+  sz_view_free(scroll);
+}
+
+static void test_scroll_h_unbounded_fits_child(void) {
+  SzView *scroll, *left, *right, *row;
+  const SzTheme *theme = sz_theme_default();
+  SzRect sf, rf;
+
+  scroll = scroll_h_wide_row(&row, &left, &right);
+  (void)left;
+  (void)right;
+  sz_view_layout(scroll, 0.f, 80.f, theme);
+  sf = sz_view_frame(scroll);
+  rf = sz_view_frame(row);
+  assert(fabsf(sf.w - (rf.w + theme->pad * 2.f)) < 0.5f);
+  sz_view_free(scroll);
+}
+
+static void test_scroll_h_scroll_by_pans_x(void) {
+  SzView *h, *v, *row, *left, *right;
+  const SzTheme *theme = sz_theme_default();
+
+  h = scroll_h_wide_row(&row, &left, &right);
+  v = sz_view_scroll(sz_view_text("v"));
+  (void)row;
+  (void)left;
+  (void)right;
+  sz_view_layout(h, 80.f, 80.f, theme);
+  sz_view_layout(v, 80.f, 80.f, theme);
+  assert(sz_view_scroll_x(h) == 0.f);
+  assert(sz_view_scroll_y(h) == 0.f);
+  sz_view_scroll_by(h, 40.f);
+  assert(sz_view_scroll_x(h) == 40.f);
+  assert(sz_view_scroll_y(h) == 0.f);
+  sz_view_scroll_by(h, -80.f);
+  assert(sz_view_scroll_x(h) == 0.f);
+  sz_view_scroll_by(v, 12.f);
+  assert(sz_view_scroll_y(v) == 12.f);
+  assert(sz_view_scroll_x(v) == 0.f);
+  sz_view_free(h);
+  sz_view_free(v);
+}
+
+static void test_scroll_h_hit_test(void) {
+  SzView *row, *left, *right, *scroll;
+  const SzTheme *theme = sz_theme_default();
+  SzRect sf, lf, rf;
+
+  row = sz_view_row();
+  left = sz_view_button("L", NULL, NULL);
+  right = sz_view_button("R", NULL, NULL);
+  sz_view_add_child(row, left);
+  sz_view_add_child(row, right);
+  scroll = sz_view_scroll_h(row);
+  /* Two 48px buttons + pads + gap exceed 60. Right starts past the viewport. */
+  sz_view_layout(scroll, 60.f, 80.f, theme);
+  sf = sz_view_frame(scroll);
+  lf = sz_view_frame(left);
+  rf = sz_view_frame(right);
+  assert(sz_view_hit_test(scroll, lf.x + 4.f, lf.y + 4.f) == left);
+  assert(rf.x >= sf.x + sf.w - 0.5f);
+  assert(sz_view_hit_test(scroll, rf.x + 4.f, rf.y + 4.f) == NULL);
+  sz_view_scroll_by(scroll, 50.f);
+  sz_view_layout(scroll, 60.f, 80.f, theme);
+  rf = sz_view_frame(right);
+  assert(sz_view_hit_test(scroll, rf.x + 4.f, rf.y + 4.f) == right);
+  sz_view_free(scroll);
+}
+
+static void test_scroll_h_pointer_drag(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *scroll, *row, *left, *right;
+  SzInputEvent ev;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+  float x0;
+
+  scroll = scroll_h_wide_row(&row, &left, &right);
+  (void)row;
+  (void)left;
+  (void)right;
+  root = sz_view_column();
+  sz_view_add_child(root, scroll);
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 80;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  sz_view_layout(root, 80.f, 80.f, theme);
+  f = sz_view_frame(scroll);
+  x0 = sz_view_scroll_x(scroll);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_POINTER;
+  ev.pointer_phase = SZ_POINTER_DOWN;
+  ev.x = f.x + 8.f;
+  ev.y = f.y + 8.f;
+  assert(sz_ui_inject_sync(session, &ev));
+  ev.pointer_phase = SZ_POINTER_MOVE;
+  ev.x = f.x + 8.f - 20.f; /* finger left → content left */
+  assert(sz_ui_inject_sync(session, &ev));
+  ev.pointer_phase = SZ_POINTER_UP;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_view_scroll_x(scroll) > x0);
+  assert(sz_view_scroll_y(scroll) == 0.f);
+  sz_ui_unmount(session);
+}
+
+static void test_scroll_h_inject_script(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *scroll, *row, *left, *right;
+  const char *path = "/tmp/scuzz_ui_inject_scroll_h.script";
+  float x0;
+
+  remove(path);
+  scroll = scroll_h_wide_row(&row, &left, &right);
+  (void)row;
+  (void)left;
+  (void)right;
+  root = sz_view_column();
+  sz_view_add_child(root, scroll);
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 80;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_inject(session, path));
+  assert(sz_ui_pump_sync(session));
+  x0 = sz_view_scroll_x(scroll);
+  write_stamp(path, "scroll 40\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_scroll_x(scroll) == x0 + 40.f);
+  assert(sz_view_scroll_y(scroll) == 0.f);
+  sz_ui_unmount(session);
+  remove(path);
+}
+
 static void test_sized_inside_column_keeps_box(void) {
   SzView *col, *box, *child;
   const SzTheme *theme = sz_theme_default();
@@ -5103,6 +5291,13 @@ int main(void) {
   test_wrap_gap_spaces_runs();
   test_wrap_show_when_skips();
   test_wrap_in_column_grows_height();
+  test_scroll_h_kind();
+  test_scroll_h_sizes_viewport();
+  test_scroll_h_unbounded_fits_child();
+  test_scroll_h_scroll_by_pans_x();
+  test_scroll_h_hit_test();
+  test_scroll_h_pointer_drag();
+  test_scroll_h_inject_script();
   test_sized_inside_column_keeps_box();
   test_padding_forwards_min_size();
   test_fraction_width_only_tightens_width();

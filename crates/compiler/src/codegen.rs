@@ -157,6 +157,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_each(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_each_map(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_scroll(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_scroll_h(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_expanded(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_stretch(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_center(ptr)").unwrap();
@@ -3363,6 +3364,15 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "View.scrollH" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_view_scroll_h(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "View.expanded" => {
             writeln!(
                 code,
@@ -4007,6 +4017,7 @@ law always: Bool = 1 == 1
                 "View.wrap(View.text(\"a\"), View.text(\"b\"))",
                 "sz_lang_view_wrap",
             ),
+            ("View.scrollH(View.text(\"x\"))", "sz_lang_view_scroll_h"),
             (
                 "View.maxSize(40, 30, View.text(\"x\"))",
                 "sz_lang_view_max_size",

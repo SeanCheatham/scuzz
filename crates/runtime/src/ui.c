@@ -1123,14 +1123,22 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
   case SZ_POINTER_MOVE:
     if (!session->pointer_down)
       return 0;
+    dx = event->x - session->pointer_x;
     dy = event->y - session->pointer_y;
     if (session->pointer_slider) {
       sz_view_slider_set_at(session->pointer_slider, event->x);
       session->dirty = 1;
-    } else if (session->pointer_scroll && (dy > 0.5f || dy < -0.5f)) {
-      /* Finger down → content follows (positive finger dy scrolls content up). */
-      sz_view_scroll_by(session->pointer_scroll, -dy);
-      session->dirty = 1;
+    } else if (session->pointer_scroll) {
+      /* Finger down → content follows (positive finger pans content up or left). */
+      if (sz_view_scroll_is_h(session->pointer_scroll)) {
+        if (dx > 0.5f || dx < -0.5f) {
+          sz_view_scroll_by(session->pointer_scroll, -dx);
+          session->dirty = 1;
+        }
+      } else if (dy > 0.5f || dy < -0.5f) {
+        sz_view_scroll_by(session->pointer_scroll, -dy);
+        session->dirty = 1;
+      }
     }
     session->pointer_x = event->x;
     session->pointer_y = event->y;

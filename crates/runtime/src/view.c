@@ -42,6 +42,8 @@ struct SzView {
   int img_h;
   char glyph;
   float scroll_y;
+  float scroll_x;
+  int scroll_h; /* 1 = pan x (View.scrollH); 0 = pan y */
   float pref_h; /* >0 overrides natural height when set */
   SzView *scroll_child; /* owned as sole child for SCROLL */
 
@@ -411,6 +413,16 @@ SzView *sz_view_scroll(SzView *child) {
   v->pref_h = 64.f;
   v->a11y_role = SZ_A11Y_SCROLL;
   v->a11y_label = sz_strdup("scroll");
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
+SzView *sz_view_scroll_h(SzView *child) {
+  SzView *v = view_new(SZ_VIEW_SCROLL);
+  v->scroll_h = 1;
+  v->a11y_role = SZ_A11Y_SCROLL;
+  v->a11y_label = sz_strdup("scrollh");
   if (child)
     sz_view_add_child(v, child);
   return v;
@@ -1649,26 +1661,46 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     break;
   }
   case SZ_VIEW_SCROLL: {
-    float inner_w = max_w - theme->pad * 2.f;
-    float vh;
-    if (v->pref_h > 0)
-      vh = v->pref_h;
-    else if (max_h > 0)
-      vh = max_h;
-    else if (min_h > 0)
-      vh = min_h;
-    else
-      vh = 0.f; /* Expanded flex slot may be empty; do not invent height */
-    if (max_h > 0 && vh > max_h)
-      vh = max_h;
-    v->frame.w = max_w;
-    v->frame.h = vh;
-    if (v->scroll_child) {
-      /* Height 0 = unbounded. A fake large max makes Expanded rows fill it. */
-      layout_constrained(v->scroll_child, x + theme->pad,
-                         y + theme->pad - v->scroll_y,
-                         box_loose(inner_w > 0 ? inner_w : max_w, 0.f),
-                         theme);
+    float pad = theme->pad;
+    if (v->scroll_h) {
+      float ch_h = 0.f;
+      float ch_w = 0.f;
+      if (v->scroll_child) {
+        /* Width 0 = unbounded. Height stays intrinsic unless the slot is tight. */
+        float child_max_h = 0.f;
+        if (min_h > 0.f && max_h > 0.f && min_h >= max_h - 0.5f &&
+            max_h > pad * 2.f)
+          child_max_h = max_h - pad * 2.f;
+        layout_constrained(v->scroll_child, x + pad - v->scroll_x, y + pad,
+                           box_loose(0.f, child_max_h), theme);
+        ch_w = v->scroll_child->frame.w;
+        ch_h = v->scroll_child->frame.h;
+      }
+      v->frame.w = max_w > 0.f ? max_w : ch_w + pad * 2.f;
+      v->frame.h = ch_h + pad * 2.f;
+      break;
+    }
+    {
+      float inner_w = max_w - pad * 2.f;
+      float vh;
+      if (v->pref_h > 0)
+        vh = v->pref_h;
+      else if (max_h > 0)
+        vh = max_h;
+      else if (min_h > 0)
+        vh = min_h;
+      else
+        vh = 0.f; /* Expanded flex slot may be empty; do not invent height */
+      if (max_h > 0 && vh > max_h)
+        vh = max_h;
+      v->frame.w = max_w;
+      v->frame.h = vh;
+      if (v->scroll_child) {
+        /* Height 0 = unbounded. A fake large max makes Expanded rows fill it. */
+        layout_constrained(v->scroll_child, x + pad, y + pad - v->scroll_y,
+                           box_loose(inner_w > 0 ? inner_w : max_w, 0.f),
+                           theme);
+      }
     }
     break;
   }
@@ -2220,18 +2252,34 @@ static void clear_focus(SzView *v) {
     clear_focus(v->children[i]);
 }
 
+float sz_view_scroll_x(const SzView *scroll) {
+  if (!scroll || scroll->kind != SZ_VIEW_SCROLL)
+    return 0.f;
+  return scroll->scroll_x;
+}
+
 float sz_view_scroll_y(const SzView *scroll) {
   if (!scroll || scroll->kind != SZ_VIEW_SCROLL)
     return 0.f;
   return scroll->scroll_y;
 }
 
-void sz_view_scroll_by(SzView *scroll, float dy) {
+int sz_view_scroll_is_h(const SzView *scroll) {
+  return scroll && scroll->kind == SZ_VIEW_SCROLL && scroll->scroll_h;
+}
+
+void sz_view_scroll_by(SzView *scroll, float d) {
   if (!scroll || scroll->kind != SZ_VIEW_SCROLL)
     return;
-  scroll->scroll_y += dy;
-  if (scroll->scroll_y < 0.f)
-    scroll->scroll_y = 0.f;
+  if (scroll->scroll_h) {
+    scroll->scroll_x += d;
+    if (scroll->scroll_x < 0.f)
+      scroll->scroll_x = 0.f;
+  } else {
+    scroll->scroll_y += d;
+    if (scroll->scroll_y < 0.f)
+      scroll->scroll_y = 0.f;
+  }
 }
 
 static SzView *scroll_at_node(SzView *v, float x, float y) {

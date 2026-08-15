@@ -2122,7 +2122,7 @@ fn infer_call(
             }
             Ok(Type::Opaque("View".into()))
         }
-        "View.scroll" => {
+        "View.scroll" | "View.scrollH" => {
             expect_arity(callee, &arg_tys, 1)?;
             Ok(Type::Opaque("View".into()))
         }
@@ -5162,6 +5162,7 @@ def note(n: Int where "x"): Unit = ()
         for call in [
             "View.column(View.stretch(View.text(\"x\")), View.button(\"Go\", _ => ()))",
             "View.wrap(View.text(\"a\"), View.text(\"b\"))",
+            "View.scrollH(View.text(\"x\"))",
             "View.maxSize(40, 30, View.text(\"x\"))",
             "View.clip(View.text(\"x\"))",
             "View.opacity(50, View.text(\"x\"))",

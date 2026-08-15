@@ -197,6 +197,8 @@ SzView *sz_view_each(SzSignalList *sig);
 /* Like `sz_view_each`, but `fn` builds each child from the item string. */
 SzView *sz_view_each_map(SzSignalList *sig, SzViewEachFn fn, void *env);
 SzView *sz_view_scroll(SzView *child);
+/* Like `sz_view_scroll`, but the pan axis is x (unbounded child width). */
+SzView *sz_view_scroll_h(SzView *child);
 /* Column leftover height or Row leftover width after non-Expanded siblings. */
 SzView *sz_view_expanded(SzView *child);
 /* Tight cross-axis in Column (width) or Row (height). Main axis stays intrinsic. */
@@ -267,8 +269,11 @@ SzView *sz_view_hit_test(SzView *root, float x, float y);
 int sz_view_handle_text_edit(SzView *root, const char *text, int backspace);
 
 /* Scroll offset + soft keyboard helpers. */
+float sz_view_scroll_x(const SzView *scroll);
 float sz_view_scroll_y(const SzView *scroll);
-void sz_view_scroll_by(SzView *scroll, float dy);
+/* Pan on the scroll axis (positive = content up or left). */
+void sz_view_scroll_by(SzView *scroll, float d);
+int sz_view_scroll_is_h(const SzView *scroll);
 SzView *sz_view_scroll_at(SzView *root, float x, float y);
 int sz_view_has_focused_text_field(SzView *root);
 /* Shown TextFields in a11y preorder (cap 64 for dump / inject). */
@@ -390,6 +395,7 @@ SzView *sz_lang_view_stack(void);
 SzView *sz_lang_view_each(SzSignalList *sig);
 SzView *sz_lang_view_each_map(SzSignalList *sig, SzViewEachFn fn, void *env);
 SzView *sz_lang_view_scroll(SzView *child);
+SzView *sz_lang_view_scroll_h(SzView *child);
 SzView *sz_lang_view_expanded(SzView *child);
 SzView *sz_lang_view_stretch(SzView *child);
 SzView *sz_lang_view_center(SzView *child);

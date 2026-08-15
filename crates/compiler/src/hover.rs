@@ -350,6 +350,8 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.checkbox(sig: Signal, label: String): View",
     ),
     ("View.slider", "View.slider(sig: Signal): View"),
+    ("View.scroll", "View.scroll(child: View): View"),
+    ("View.scrollH", "View.scrollH(child: View): View"),
     ("View.column", "View.column(...): View"),
     ("View.row", "View.row(...): View"),
     ("View.wrap", "View.wrap(...): View"),
@@ -489,6 +491,8 @@ mod tests {
         let calls = [
             ("View.stretch", "View.stretch(View.text(\"x\"))"),
             ("View.wrap", "View.wrap(View.text(\"a\"), View.text(\"b\"))"),
+            ("View.scroll", "View.scroll(View.text(\"x\"))"),
+            ("View.scrollH", "View.scrollH(View.text(\"x\"))"),
             ("View.maxSize", "View.maxSize(40, 30, View.text(\"x\"))"),
             ("View.clip", "View.clip(View.text(\"x\"))"),
             ("View.opacity", "View.opacity(50, View.text(\"x\"))"),

@@ -87,6 +87,7 @@ SzView *sz_lang_view_each_map(SzSignalList *sig, SzViewEachFn fn, void *env) {
 }
 
 SzView *sz_lang_view_scroll(SzView *child) { return sz_view_scroll(child); }
+SzView *sz_lang_view_scroll_h(SzView *child) { return sz_view_scroll_h(child); }
 SzView *sz_lang_view_expanded(SzView *child) { return sz_view_expanded(child); }
 SzView *sz_lang_view_stretch(SzView *child) { return sz_view_stretch(child); }
 SzView *sz_lang_view_center(SzView *child) { return sz_view_center(child); }
@@ -424,7 +425,7 @@ static void scripted_button_tap(SzUiSession *session, int prefer_upper) {
      type <s>   append <s> to the [fields] starred TextField; empty is a no-op; no field is a no-op
      type <n> <s>  append to dump-index n; `type 0` is still payload "0"
      pump <k>   pump k extra frames
-     scroll <dy> pan the first Scroll (positive = content up); no scroll is a no-op
+     scroll <dy> pan the first Scroll on its axis (positive = content up or left); no scroll is a no-op
      scroll <n> <dy>  pan dump-index n ([scrolls] scan order); `scroll 40` stays dy 40
      backspace <n> chop n bytes from the [fields] starred TextField (default 1); no field is a no-op
      backspace <n> <k>  chop k bytes from dump-index n
