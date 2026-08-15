@@ -269,6 +269,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_wrap_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.wr\n";
+        let labels = labels_at(src, "View.wr");
+        assert!(labels.iter().any(|l| l == "View.wrap"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_max_size_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.max\n";
         let labels = labels_at(src, "View.max");

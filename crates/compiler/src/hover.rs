@@ -351,6 +351,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ),
     ("View.column", "View.column(...): View"),
     ("View.row", "View.row(...): View"),
+    ("View.wrap", "View.wrap(...): View"),
     ("View.stack", "View.stack(...): View"),
     (
         "View.each",
@@ -486,6 +487,7 @@ mod tests {
     fn hovers_view_kit_sigs() {
         let calls = [
             ("View.stretch", "View.stretch(View.text(\"x\"))"),
+            ("View.wrap", "View.wrap(View.text(\"a\"), View.text(\"b\"))"),
             ("View.maxSize", "View.maxSize(40, 30, View.text(\"x\"))"),
             ("View.clip", "View.clip(View.text(\"x\"))"),
             ("View.opacity", "View.opacity(50, View.text(\"x\"))"),

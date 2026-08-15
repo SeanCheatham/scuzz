@@ -156,11 +156,12 @@ typedef enum SzViewKind {
   SZ_VIEW_EXCLUDE_SEMANTICS, /* skip a11y dump and field collect for subtree */
   SZ_VIEW_ELLIPSIS, /* cap extra lines; paint ... on the last visible line */
   SZ_VIEW_TEXT_COLOR, /* pass constraints; paint View.text with this ARGB */
-  SZ_VIEW_GAP, /* pass constraints; Column/Row/List child spacing in px */
+  SZ_VIEW_GAP, /* pass constraints; Column/Row/Wrap/List child spacing in px */
   SZ_VIEW_FONT_SIZE, /* pass constraints; View.text measure/paint size in px */
   SZ_VIEW_BORDER, /* pass constraints; paint n px stroke in color inside the frame */
   SZ_VIEW_RADIUS, /* pass constraints; clip paint to a rounded rect of n px */
-  SZ_VIEW_CHECKBOX /* Signal.int 0/1 box + label; tap flips */
+  SZ_VIEW_CHECKBOX, /* Signal.int 0/1 box + label; tap flips */
+  SZ_VIEW_WRAP      /* flow children into runs; wrap when remaining width is short */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -185,6 +186,7 @@ SzView *sz_view_checkbox(SzSignalInt *sig, const char *label);
 SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder);
 SzView *sz_view_column(void);
 SzView *sz_view_row(void);
+SzView *sz_view_wrap(void);
 SzView *sz_view_stack(void);
 SzView *sz_view_list(void);
 /* Reactive list: children rebuilt from Signal.list at layout (`- item` texts). */
@@ -225,7 +227,7 @@ SzView *sz_view_exclude_semantics(SzView *child);
 SzView *sz_view_ellipsis(SzView *child);
 /* Pass constraints through; size to child; paint `View.text` with `argb`. */
 SzView *sz_view_text_color(uint32_t argb, SzView *child);
-/* Pass constraints through; size to child; Column/Row/List spacing `n` px (`0` = none). */
+/* Pass constraints through; size to child; Column/Row/Wrap/List spacing `n` px (`0` = none). */
 SzView *sz_view_gap(int n, SzView *child);
 /* Pass constraints through; size to child; `View.text` measure/paint size `n` px (min 1). */
 SzView *sz_view_font_size(int n, SzView *child);
@@ -376,6 +378,7 @@ SzView *sz_lang_view_button(SzString *label, SzViewTapFn tap, void *env);
 SzView *sz_lang_view_checkbox(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_column(void);
 SzView *sz_lang_view_row(void);
+SzView *sz_lang_view_wrap(void);
 SzView *sz_lang_view_stack(void);
 SzView *sz_lang_view_each(SzSignalList *sig);
 SzView *sz_lang_view_each_map(SzSignalList *sig, SzViewEachFn fn, void *env);

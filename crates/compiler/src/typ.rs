@@ -2104,7 +2104,7 @@ fn infer_call(
             expect_ty(&arg_tys[3], &Type::Int)?;
             Ok(Type::Int)
         }
-        "View.column" | "View.row" | "View.stack" => {
+        "View.column" | "View.row" | "View.wrap" | "View.stack" => {
             // Nullary or children: `View.column(a, b, …)` adds each child.
             Ok(Type::Opaque("View".into()))
         }
@@ -5156,6 +5156,7 @@ def note(n: Int where "x"): Unit = ()
     fn typechecks_view_wrappers() {
         for call in [
             "View.column(View.stretch(View.text(\"x\")), View.button(\"Go\", _ => ()))",
+            "View.wrap(View.text(\"a\"), View.text(\"b\"))",
             "View.maxSize(40, 30, View.text(\"x\"))",
             "View.clip(View.text(\"x\"))",
             "View.opacity(50, View.text(\"x\"))",

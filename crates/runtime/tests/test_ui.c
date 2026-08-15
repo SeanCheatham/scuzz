@@ -1797,6 +1797,220 @@ static void test_row_non_flex_stays_intrinsic(void) {
   sz_view_free(row);
 }
 
+static SzView *wrap_two_sized(int w1, int h1, int w2, int h2) {
+  SzView *flow = sz_view_wrap();
+  sz_view_add_child(flow, sz_view_sized(w1, h1, sz_view_text("a")));
+  sz_view_add_child(flow, sz_view_sized(w2, h2, sz_view_text("b")));
+  return flow;
+}
+
+static void test_wrap_kind(void) {
+  SzView *flow = sz_view_wrap();
+  assert(sz_view_kind(flow) == SZ_VIEW_WRAP);
+  sz_view_free(flow);
+}
+
+static void test_wrap_one_run_when_wide(void) {
+  SzView *flow, *a, *b;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf, ff;
+
+  flow = sz_view_wrap();
+  a = sz_view_sized(20, 10, sz_view_text("a"));
+  b = sz_view_sized(20, 10, sz_view_text("b"));
+  sz_view_add_child(flow, a);
+  sz_view_add_child(flow, b);
+  sz_view_layout(flow, 200.f, 80.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  ff = sz_view_frame(flow);
+  assert(fabsf(bf.y - af.y) < 0.5f);
+  assert(fabsf(bf.x - (af.x + af.w) - theme->gap) < 0.5f);
+  assert(fabsf(ff.w - (theme->pad * 2.f + 20.f + theme->gap + 20.f)) < 0.5f);
+  assert(fabsf(ff.h - (theme->pad * 2.f + 10.f)) < 0.5f);
+  sz_view_free(flow);
+}
+
+static void test_wrap_sizes_to_runs_not_max(void) {
+  SzView *flow = wrap_two_sized(20, 10, 20, 10);
+  const SzTheme *theme = sz_theme_default();
+  SzRect ff;
+
+  sz_view_layout(flow, 200.f, 80.f, theme);
+  ff = sz_view_frame(flow);
+  assert(ff.w + 1.f < 200.f);
+  sz_view_free(flow);
+}
+
+static void test_wrap_second_run_when_narrow(void) {
+  SzView *flow, *a, *b;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf, ff;
+  float inner;
+
+  flow = sz_view_wrap();
+  a = sz_view_sized(40, 10, sz_view_text("a"));
+  b = sz_view_sized(40, 10, sz_view_text("b"));
+  sz_view_add_child(flow, a);
+  sz_view_add_child(flow, b);
+  /* pad 12*2 + 40 + gap 8 + 40 = 112. Cap below that so b wraps. */
+  sz_view_layout(flow, 100.f, 80.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  ff = sz_view_frame(flow);
+  inner = 100.f - theme->pad * 2.f;
+  assert(af.w <= inner + 0.5f);
+  assert(bf.y > af.y + af.h + 0.5f);
+  assert(fabsf(bf.x - af.x) < 0.5f);
+  assert(fabsf(bf.y - (af.y + af.h) - theme->gap) < 0.5f);
+  assert(fabsf(ff.w - (theme->pad * 2.f + 40.f)) < 0.5f);
+  assert(fabsf(ff.h - (theme->pad * 2.f + 10.f + theme->gap + 10.f)) < 0.5f);
+  sz_view_free(flow);
+}
+
+static void test_wrap_unbounded_stays_one_run(void) {
+  SzView *flow, *a, *b;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf;
+
+  flow = sz_view_wrap();
+  a = sz_view_sized(40, 10, sz_view_text("a"));
+  b = sz_view_sized(40, 10, sz_view_text("b"));
+  sz_view_add_child(flow, a);
+  sz_view_add_child(flow, b);
+  sz_view_layout(flow, 0.f, 80.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  assert(fabsf(bf.y - af.y) < 0.5f);
+  sz_view_free(flow);
+}
+
+static void test_wrap_empty_is_pad(void) {
+  SzView *flow = sz_view_wrap();
+  const SzTheme *theme = sz_theme_default();
+  SzRect ff;
+
+  sz_view_layout(flow, 200.f, 80.f, theme);
+  ff = sz_view_frame(flow);
+  assert(fabsf(ff.w - theme->pad * 2.f) < 0.5f);
+  assert(fabsf(ff.h - theme->pad * 2.f) < 0.5f);
+  sz_view_free(flow);
+}
+
+static void test_wrap_a11y_dumps_children(void) {
+  SzView *flow = sz_view_wrap();
+  SzString *dump;
+
+  sz_view_add_child(flow, sz_view_button("Home", NULL, NULL));
+  sz_view_add_child(flow, sz_view_button("Tasks", NULL, NULL));
+  dump = sz_view_a11y_dump(flow);
+  assert(strstr(sz_string_cstr(dump), "button:Home") != NULL);
+  assert(strstr(sz_string_cstr(dump), "button:Tasks") != NULL);
+  sz_string_free(dump);
+  sz_view_free(flow);
+}
+
+static void test_wrap_hit_test_second_run(void) {
+  SzView *flow, *a, *b, *hit;
+  const SzTheme *theme = sz_theme_default();
+  SzRect bf;
+
+  flow = sz_view_wrap();
+  a = sz_view_button("A", NULL, NULL);
+  b = sz_view_button("B", NULL, NULL);
+  sz_view_add_child(flow, a);
+  sz_view_add_child(flow, b);
+  sz_view_layout(flow, 90.f, 120.f, theme);
+  bf = sz_view_frame(b);
+  assert(bf.y > sz_view_frame(a).y + 0.5f);
+  hit = sz_view_hit_test(flow, bf.x + 2.f, bf.y + 2.f);
+  assert(hit == b);
+  sz_view_free(flow);
+}
+
+static void test_wrap_gap_zero_is_flush(void) {
+  SzView *flow, *a, *b, *g;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf;
+
+  flow = sz_view_wrap();
+  a = sz_view_sized(20, 10, sz_view_text("a"));
+  b = sz_view_sized(20, 10, sz_view_text("b"));
+  sz_view_add_child(flow, a);
+  sz_view_add_child(flow, b);
+  g = sz_view_gap(0, flow);
+  sz_view_layout(g, 200.f, 80.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  assert(fabsf(bf.x - (af.x + af.w)) < 0.5f);
+  sz_view_free(g);
+}
+
+static void test_wrap_gap_spaces_runs(void) {
+  SzView *flow, *a, *b, *g;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf;
+
+  flow = sz_view_wrap();
+  a = sz_view_sized(40, 10, sz_view_text("a"));
+  b = sz_view_sized(40, 10, sz_view_text("b"));
+  sz_view_add_child(flow, a);
+  sz_view_add_child(flow, b);
+  g = sz_view_gap(16, flow);
+  sz_view_layout(g, 100.f, 80.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  assert(bf.y > af.y + af.h + 0.5f);
+  assert(fabsf(bf.y - (af.y + af.h) - 16.f) < 0.5f);
+  sz_view_free(g);
+}
+
+static void test_wrap_show_when_skips(void) {
+  SzView *flow, *a, *mid, *b;
+  SzSignalInt *page;
+  const SzTheme *theme = sz_theme_default();
+  SzRect af, bf;
+
+  page = sz_signal_int(1);
+  flow = sz_view_wrap();
+  a = sz_view_sized(20, 10, sz_view_text("a"));
+  mid = sz_view_sized(40, 10, sz_view_text("mid"));
+  b = sz_view_sized(20, 10, sz_view_text("b"));
+  sz_view_add_child(flow, a);
+  sz_view_add_child(flow, sz_view_show_when(page, 0, mid));
+  sz_view_add_child(flow, b);
+  sz_view_layout(flow, 200.f, 80.f, theme);
+  af = sz_view_frame(a);
+  bf = sz_view_frame(b);
+  assert(fabsf(bf.y - af.y) < 0.5f);
+  assert(fabsf(bf.x - (af.x + af.w) - theme->gap) < 0.5f);
+  sz_view_free(flow);
+  sz_signal_int_free(page);
+}
+
+static void test_wrap_in_column_grows_height(void) {
+  SzView *col, *flow, *a, *b;
+  const SzTheme *theme = sz_theme_default();
+  SzRect cf, ff;
+  float one_run_h;
+
+  flow = sz_view_wrap();
+  a = sz_view_sized(40, 10, sz_view_text("a"));
+  b = sz_view_sized(40, 10, sz_view_text("b"));
+  sz_view_add_child(flow, a);
+  sz_view_add_child(flow, b);
+  col = sz_view_column();
+  sz_view_add_child(col, flow);
+  sz_view_layout(col, 200.f, 200.f, theme);
+  one_run_h = sz_view_frame(flow).h;
+  sz_view_layout(col, 100.f, 200.f, theme);
+  ff = sz_view_frame(flow);
+  cf = sz_view_frame(col);
+  assert(ff.h > one_run_h + 0.5f);
+  assert(cf.h > ff.h - 0.5f);
+  sz_view_free(col);
+}
+
 static void test_sized_inside_column_keeps_box(void) {
   SzView *col, *box, *child;
   const SzTheme *theme = sz_theme_default();
@@ -4620,6 +4834,18 @@ int main(void) {
   test_min_size_inside_expanded();
   test_column_non_flex_stays_intrinsic();
   test_row_non_flex_stays_intrinsic();
+  test_wrap_kind();
+  test_wrap_one_run_when_wide();
+  test_wrap_sizes_to_runs_not_max();
+  test_wrap_second_run_when_narrow();
+  test_wrap_unbounded_stays_one_run();
+  test_wrap_empty_is_pad();
+  test_wrap_a11y_dumps_children();
+  test_wrap_hit_test_second_run();
+  test_wrap_gap_zero_is_flush();
+  test_wrap_gap_spaces_runs();
+  test_wrap_show_when_skips();
+  test_wrap_in_column_grows_height();
   test_sized_inside_column_keeps_box();
   test_padding_forwards_min_size();
   test_fraction_width_only_tightens_width();

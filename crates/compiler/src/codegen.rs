@@ -151,6 +151,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare i64 @sz_color_rgba(i64, i64, i64, i64)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_column()").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_row()").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_wrap()").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_stack()").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_each(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_each_map(ptr, ptr, ptr)").unwrap();
@@ -3341,6 +3342,7 @@ fn emit_call(
         }
         "View.column" => emit_view_box("sz_lang_view_column", &mut code, &emitted_args, prefix),
         "View.row" => emit_view_box("sz_lang_view_row", &mut code, &emitted_args, prefix),
+        "View.wrap" => emit_view_box("sz_lang_view_wrap", &mut code, &emitted_args, prefix),
         "View.stack" => emit_view_box("sz_lang_view_stack", &mut code, &emitted_args, prefix),
         "View.scroll" => {
             writeln!(
@@ -3991,6 +3993,10 @@ law always: Bool = 1 == 1
     fn emit_view_wrappers() {
         let cases = [
             ("View.stretch(View.text(\"x\"))", "sz_lang_view_stretch"),
+            (
+                "View.wrap(View.text(\"a\"), View.text(\"b\"))",
+                "sz_lang_view_wrap",
+            ),
             (
                 "View.maxSize(40, 30, View.text(\"x\"))",
                 "sz_lang_view_max_size",
