@@ -102,7 +102,7 @@ enum Commands {
     },
     /// Search in-source laws under TestRuntime ([ui] events × schedules; IO-only schedules)
     #[command(
-        after_help = "Examples:\n  scuzz fuzz --iters 16\n  scuzz fuzz --iters 16 examples/concurrency\n  scuzz fuzz --exhaust --depth 1\n  scuzz fuzz --replay build/fuzz/repro.toml\n"
+        after_help = "Examples:\n  scuzz fuzz --iters 16\n  scuzz fuzz --iters 16 examples/io\n  scuzz fuzz --exhaust --depth 1\n  scuzz fuzz --replay build/fuzz/repro.toml\n"
     )]
     Fuzz {
         #[arg(default_value = ".")]

@@ -70,68 +70,60 @@ jobs:
           grep -q "Hello, Scuzz!" /tmp/hello.out
           grep -q "ready." /tmp/hello.out
 
-      - name: Concurrency + ADT + record/trait/generic + FS + impurity + incremental build
+      - name: Kernel + IO kits + incremental build
         run: |
-          cargo run -p scuzz -- run examples/concurrency | tee /tmp/concurrency.out
-          grep -q "ref-ok" /tmp/concurrency.out
-          grep -q "queue-ok" /tmp/concurrency.out
-          grep -q "deferred-ok" /tmp/concurrency.out
-          grep -q "fork-ok" /tmp/concurrency.out
-          grep -q "interrupted" /tmp/concurrency.out
-          grep -q "repeat-ok" /tmp/concurrency.out
-          grep -q "retry-ok" /tmp/concurrency.out
-          grep -q "forever-stopped" /tmp/concurrency.out
-          cargo run -p scuzz -- run examples/resource | tee /tmp/resource.out
-          grep -q "use:token" /tmp/resource.out
-          grep -q "release:token" /tmp/resource.out
-          grep -q "release:token2" /tmp/resource.out
-          grep -q "recovered" /tmp/resource.out
-          grep -q "timeout-fast" /tmp/resource.out
-          grep -q "got:ok" /tmp/resource.out
-          grep -q "timed-out" /tmp/resource.out
-          grep -q "release:to-tok" /tmp/resource.out
-          cargo run -p scuzz -- run examples/stream | tee /tmp/stream.out
-          grep -q "a!,b!,c" /tmp/stream.out
-          grep -q "drain:d" /tmp/stream.out
-          grep -q "filter:a,b" /tmp/stream.out
-          grep -q "map:a!,b!" /tmp/stream.out
-          grep -q "takeWhile:a,b" /tmp/stream.out
-          grep -q "dropWhile:a,b" /tmp/stream.out
-          grep -q "find:a" /tmp/stream.out
-          grep -q "exists:1" /tmp/stream.out
-          grep -q "miss:0" /tmp/stream.out
-          cargo run -p scuzz -- run examples/adt | tee /tmp/adt.out
-          grep -q "adt:red" /tmp/adt.out
-          cargo run -p scuzz -- run examples/record | tee /tmp/record.out
-          grep -q "record:8" /tmp/record.out
-          cargo run -p scuzz -- run examples/trait | tee /tmp/trait.out
-          grep -q "Point(3,5)" /tmp/trait.out
-          grep -q "get:3" /tmp/trait.out
-          grep -q "show:box" /tmp/trait.out
-          grep -q "show:some" /tmp/trait.out
-          grep -q "get:2" /tmp/trait.out
-          cargo run -p scuzz -- run examples/generic | tee /tmp/generic.out
-          grep -q "7ok" /tmp/generic.out
-          cargo run -p scuzz -- run examples/fs | tee /tmp/fs.out
-          grep -q "fs:fs-note" /tmp/fs.out
-          cargo run -p scuzz -- run examples/clock | tee /tmp/clock.out
-          grep -q "real:" /tmp/clock.out
-          grep -q "mono:" /tmp/clock.out
-          cargo run -p scuzz -- run examples/impurity | tee /tmp/impurity.out
-          grep -q "impurity-ok" /tmp/impurity.out
-          grep -q "fs:" /tmp/impurity.out
-          grep -q "net:" /tmp/impurity.out
-          cargo run -p scuzz -- test examples/server | tee /tmp/server.out
-          grep -q "served:/" /tmp/server.out
-          cargo run -p scuzz -- check examples/adt
+          cargo run -p scuzz -- run examples/kernel | tee /tmp/kernel.out
+          grep -q "adt:red" /tmp/kernel.out
+          grep -q "record:8" /tmp/kernel.out
+          grep -q "Point(3,5)" /tmp/kernel.out
+          grep -q "get:3" /tmp/kernel.out
+          grep -q "show:box" /tmp/kernel.out
+          grep -q "show:some" /tmp/kernel.out
+          grep -q "get:2" /tmp/kernel.out
+          grep -q "7ok" /tmp/kernel.out
+          cargo run -p scuzz -- run examples/io | tee /tmp/io.out
+          grep -q "ref-ok" /tmp/io.out
+          grep -q "queue-ok" /tmp/io.out
+          grep -q "deferred-ok" /tmp/io.out
+          grep -q "fork-ok" /tmp/io.out
+          grep -q "interrupted" /tmp/io.out
+          grep -q "repeat-ok" /tmp/io.out
+          grep -q "retry-ok" /tmp/io.out
+          grep -q "forever-stopped" /tmp/io.out
+          grep -q "use:token" /tmp/io.out
+          grep -q "release:token" /tmp/io.out
+          grep -q "release:token2" /tmp/io.out
+          grep -q "recovered" /tmp/io.out
+          grep -q "timeout-fast" /tmp/io.out
+          grep -q "got:ok" /tmp/io.out
+          grep -q "timed-out" /tmp/io.out
+          grep -q "release:to-tok" /tmp/io.out
+          grep -q "a!,b!,c" /tmp/io.out
+          grep -q "drain:d" /tmp/io.out
+          grep -q "filter:a,b" /tmp/io.out
+          grep -q "map:a!,b!" /tmp/io.out
+          grep -q "takeWhile:a,b" /tmp/io.out
+          grep -q "dropWhile:a,b" /tmp/io.out
+          grep -q "find:a" /tmp/io.out
+          grep -q "exists:1" /tmp/io.out
+          grep -q "miss:0" /tmp/io.out
+          grep -q "fs:fs-note" /tmp/io.out
+          grep -q "real:" /tmp/io.out
+          grep -q "mono:" /tmp/io.out
+          grep -q "impurity-ok" /tmp/io.out
+          grep -q "fs:" /tmp/io.out
+          grep -q "net:" /tmp/io.out
+          cargo run -p scuzz -- test examples/io | tee /tmp/io-test.out
+          grep -q "served:/" /tmp/io-test.out
+          cargo run -p scuzz -- check examples/kernel
           cargo run -p scuzz -- check --message-format=json examples/hello | tee /tmp/hello-check.json
           grep -q '^\[\]$' /tmp/hello-check.json
           cargo run -p scuzz -- lsp --help | tee /tmp/lsp-help.txt
           grep -q "scuzz check" /tmp/lsp-help.txt
           if cargo run -p scuzz -- check testdata/fmt/needs_format 2>/tmp/fmt-check.err; then echo "expected format error" && exit 1; fi
           grep -q "needs formatting" /tmp/fmt-check.err
-          cargo run -p scuzz -- build examples/adt
-          cargo run -p scuzz -- build examples/adt 2>&1 | tee /tmp/incr.out
+          cargo run -p scuzz -- build examples/kernel
+          cargo run -p scuzz -- build examples/kernel 2>&1 | tee /tmp/incr.out
           grep -q "up-to-date" /tmp/incr.out
           # Path-dep invalidation: a change in a dependency source must rebuild the root.
           cargo run -p scuzz -- build --full examples/counter
@@ -175,23 +167,17 @@ jobs:
 
       - name: Headless UI + golden PNGs
         run: |
-          cargo run -p scuzz -- run --headless examples/hello_ui
-          test -f examples/hello_ui/build/snapshot.png
-          cargo run -p scuzz -- test examples/hello_ui
           cargo run -p scuzz -- run --headless examples/counter
           test -f examples/counter/build/snapshot.png
           cargo run -p scuzz -- test examples/counter
-          cargo run -p scuzz -- run --headless examples/todo
-          test -f examples/todo/build/snapshot.png
-          cargo run -p scuzz -- test examples/todo
-          cargo run -p scuzz -- run --headless examples/nav
-          test -f examples/nav/build/snapshot.png
-          cargo run -p scuzz -- test examples/nav
+          cargo run -p scuzz -- run --headless examples/studio
+          test -f examples/studio/build/snapshot.png
+          cargo run -p scuzz -- test examples/studio
 
       - name: Deterministic fuzz (bounded) + repro replay
         run: |
           cargo run -p scuzz -- fuzz --iters 16 examples/counter
-          cargo run -p scuzz -- fuzz --iters 16 examples/todo
+          cargo run -p scuzz -- fuzz --iters 16 examples/studio
           cargo run -p scuzz -- fuzz --exhaust --depth 1 examples/counter
           rm -rf /tmp/scuzz-fuzzbug
           cargo run -p scuzz -- new --ui --path /tmp scuzz-fuzzbug
@@ -261,9 +247,9 @@ jobs:
           if ! cargo run -p scuzz -- fuzz --replay /tmp/scuzz-schedbug/build/fuzz/repro-fifo.toml /tmp/scuzz-schedbug; then
             echo "FIFO replay (no schedule_seed) should pass" && exit 1
           fi
-          cargo run -p scuzz -- fuzz --iters 4 examples/concurrency
+          cargo run -p scuzz -- fuzz --iters 4 examples/io
           cargo run -p scuzz -- mutate examples/hello
-          cargo run -p scuzz -- mutate examples/record --limit 2 --iters 0
+          cargo run -p scuzz -- mutate examples/kernel --limit 2 --iters 0
           cargo run -p scuzz -- mutate examples/counter --limit 1 --iters 0
 
       - name: v0 new --ui path
@@ -282,7 +268,7 @@ jobs:
           # SCUZZ_LIVE_FRAMES bounds stay-open Ui.run under Desktop (else hangs on xvfb).
           timeout 30s xvfb-run -a env SCUZZ_UI_RUNTIME=desktop SCUZZ_LIVE_FRAMES=2 \
             SCUZZ_UI_WIDTH=200 SCUZZ_UI_HEIGHT=100 \
-            ./examples/hello_ui/build/hello_ui 2>&1 | tee /tmp/win.out
+            ./examples/counter/build/counter 2>&1 | tee /tmp/win.out
           grep -q "desktop embedder" /tmp/win.out
           grep -q "X11 window" /tmp/win.out
 
@@ -356,7 +342,5 @@ jobs:
 
       - name: Golden PNG tests
         run: |
-          cargo run -p scuzz -- test examples/hello_ui
           cargo run -p scuzz -- test examples/counter
-          cargo run -p scuzz -- test examples/todo
-          cargo run -p scuzz -- test examples/nav
+          cargo run -p scuzz -- test examples/studio

@@ -1,0 +1,8 @@
+[package]
+name = "kernel"
+version = "0.1.0"
+description = "Language constructs: ADT, record, trait, generic, modules"
+
+[targets.native]
+kind = "executable"
+main = "Main"

@@ -1,8 +1,0 @@
-[package]
-name = "genum"
-version = "0.1.0"
-description = "generic enums/records smoke"
-
-[targets.native]
-kind = "executable"
-main = "Main"

@@ -1,0 +1,39 @@
+[signals]
+str[0] = ""
+list[1] = ["milk"]
+int[2] = 1
+int[3] = 0
+int[4] = 0
+str[5] = "count = 0"
+str[6] = "page = 1"
+
+[views]
+button:Home
+text:page = 1
+button:Tasks
+textfield:item
+button:Add
+button:Rename
+scroll:scroll
+list:list
+text:milk
+button:Done
+button:Del
+button:Save
+button:Clear
+
+[taps]
+0 Home
+1 Tasks
+2 Add
+3 Rename
+4 Done
+5 Del
+6 Save
+7 Clear
+
+[fields]
+0* item=""
+
+[scrolls]
+0 scroll

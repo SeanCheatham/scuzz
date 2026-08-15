@@ -1,8 +1,0 @@
-[package]
-name = "cli"
-version = "0.1.0"
-description = "IO CLI kit: Sys.args + Sys.readLine"
-
-[targets.native]
-kind = "executable"
-main = "Main"

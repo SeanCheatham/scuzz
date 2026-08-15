@@ -1,3 +1,0 @@
-def addItem(s: String): IO[Unit] =
-  IO.pure(noteAdd(s))
-

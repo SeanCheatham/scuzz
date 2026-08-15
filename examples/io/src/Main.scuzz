@@ -1,0 +1,27 @@
+def liveClock(): IO[Unit] =
+  Clock.realTime().flatMap(t =>
+    IO.println(s"real:$t").flatMap(_ =>
+      Clock.monotonic().flatMap(m => IO.println(s"mono:$m"))
+    )
+  )
+
+def liveFs(): IO[Unit] =
+  Fs.mkdirs("examples/io/build").flatMap(_ =>
+    Fs.write("examples/io/build/note.txt", "fs-note").flatMap(_ =>
+      Fs.read("examples/io/build/note.txt").flatMap(s => IO.println(s"fs:$s"))
+    )
+  )
+
+def maybeServe(): IO[Unit] =
+  Sys.getenv("SCUZZ_TESTRT").flatMap(t => if (Str.len(t) == 0) IO.println("serve:skip") else Server.run())
+
+@main def main: IO[Unit] =
+  for {
+    _ <- liveClock()
+    _ <- liveFs()
+    _ <- Concurrency.run()
+    _ <- Bracket.run()
+    _ <- Flow.run()
+    _ <- Impurity.runKit()
+    _ <- maybeServe()
+  } yield ()

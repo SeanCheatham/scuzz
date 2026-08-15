@@ -1,0 +1,139 @@
+enum Either[L, R]:
+  case Left(x: L)
+  case Right(y: R)
+
+record Point(x: Int where x >= 0, y: Int where y + 1 > y && y * 2 > y && y % 2 < 2 && y == y)
+
+trait Show:
+  def show(): String
+
+trait Get[T]:
+  def getOrElse(default: T): T
+
+impl Show for Point:
+  def show(): String =
+    Str.concat("Point(", Str.concat(Str.fromInt(self.x), Str.concat(",", Str.concat(Str.fromInt(self.y), ")"))))
+
+impl Get[Int] for Point:
+  def getOrElse(default: Int): Int =
+    self.x
+
+impl Show for Box:
+  def show(): String =
+    "box"
+
+impl Show for Opt:
+  def show(): String =
+    self match {
+      case Opt.Some(x) => "some"
+      case Opt.None => "none"
+    }
+
+impl Get[T] for Opt:
+  def getOrElse(default: T): T =
+    self match {
+      case Opt.Some(x) => x
+      case Opt.None => default
+    }
+
+import A.tag
+import A.Msg
+
+def id[T](x: T): T =
+  x
+
+def sum(p: Point): Int =
+  p.x + p.y
+
+def noneInt(): Opt[Int] =
+  Opt.None
+
+def wrap[T](x: T): Box[T] =
+  Box(x)
+
+def leftOr[L, R](e: Either[L, R], fallback: L): L =
+  e match {
+    case Either.Left(x) => x
+    case Either.Right(y) => fallback
+  }
+
+def describeEither(e: Either[Int, String]): String =
+  e match {
+    case Either.Left(n) => Str.fromInt(n)
+    case Either.Right(s) => s
+  }
+
+def flip(c: Color): Color =
+  c match {
+    case Color.Red => Color.Blue
+    case Color.Blue => Color.Red
+  }
+
+def describe(o: Opt[Int]): String =
+  o match {
+    case Opt.Some(n) => Str.concat("adt:describe:", Str.fromInt(n))
+    case Opt.None => "adt:describe:none"
+  }
+
+def greetFrom(m: Msg): String =
+  m match {
+    case Msg.Hi => "main-hi"
+    case Msg.Bye => "main-bye"
+  }
+
+record Box[T](x: T):
+  def get(): T =
+    self.x
+
+@main def main: IO[Unit] =
+  for {
+    c = Color.Red
+    o = Opt.Some(42)
+    p = Pair.Pair(7, "ok")
+    flipped = flip(c)
+    desc = describe(o)
+    xs = List.cons(Color.Blue, List.empty())
+    head = List.head(xs)
+    _ <- c match {
+  case Color.Red => IO.println("adt:red")
+  case Color.Blue => IO.println("adt:blue")
+}
+    _ <- o match {
+  case Opt.Some(n) => IO.println(Str.concat("adt:some:", Str.fromInt(n)))
+  case Opt.None => IO.println("adt:none")
+}
+    _ <- p match {
+  case Pair(x, y) => IO.println(Str.concat(Str.concat("adt:pair:", Str.fromInt(x)), Str.concat(":", y)))
+}
+    _ <- flipped match {
+  case Color.Red => IO.println("adt:flip:red")
+  case Color.Blue => IO.println("adt:flip:blue")
+}
+    _ <- IO.println(desc)
+    _ <- head match {
+  case Color.Red => IO.println("adt:list:red")
+  case Color.Blue => IO.println("adt:list:blue")
+}
+    packed = Pack.Of(List.cons("a", List.cons("b", List.empty())))
+    _ <- packed match {
+  case Pack.Of(ys) => IO.println(Str.concat("adt:box:", List.join(ys, ",")))
+  case Pack.Empty => IO.println("adt:box:empty")
+}
+    _ <- IO.println(Str.concat("record:", Str.fromInt(sum(Point(3, 5)))))
+    _ <- IO.println(Point(3, 5).show())
+    _ <- IO.println(Str.concat("get:", Str.fromInt(Point(3, 5).getOrElse(0))))
+    b = Box(4)
+    _ <- IO.println(Str.concat("show:", b.show()))
+    _ <- IO.println(Str.concat("show:", Opt.Some(1).show()))
+    _ <- IO.println(Str.concat("get:", Str.fromInt(Opt.Some(2).getOrElse(0))))
+    _ <- IO.println(Str.concat(Str.fromInt(id(7)), id("ok")))
+    _ <- IO.println(Str.concat("genum:some:", Str.fromInt(Opt.Some(3).getOrElse(0))))
+    _ <- IO.println(Str.concat("genum:none:", Str.fromInt(noneInt().getOrElse(9))))
+    wrapped = wrap(4)
+    _ <- IO.println(Str.concat("genum:box:", Str.fromInt(wrapped.get())))
+    _ <- IO.println(Str.concat("genum:either:", describeEither(Either.Right("ok"))))
+    _ <- IO.println(Str.concat("genum:multi:", Str.fromInt(leftOr(Either.Right("s"), 7))))
+    _ <- IO.println(Str.concat(tag(), B.tag()))
+    _ <- IO.println(greetFrom(Msg.Hi))
+    _ <- IO.println(B.greet())
+  } yield ()

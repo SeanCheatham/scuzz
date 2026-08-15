@@ -1,2 +1,0 @@
-@main def main: IO[Unit] =
-  Ui.run(_ => View.column(View.text("Live"), View.text("Press q or Esc to quit")))

@@ -1,0 +1,6 @@
+package demo.color
+
+enum Pack:
+  case Of(xs: List)
+  case Empty
+

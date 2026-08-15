@@ -1,8 +1,0 @@
-[package]
-name = "trait"
-version = "0.1.0"
-description = "thin trait/impl smoke"
-
-[targets.native]
-kind = "executable"
-main = "Main"

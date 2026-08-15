@@ -39,45 +39,40 @@ scuzz run --headless    # Desktop: scuzz run
 
 ## Example
 
-A file-backed todo list (`Fs`, `Signal.list`, `View`). Rows can mark done and delete. Full source: [`examples/todo`](examples/todo).
+A multi-page Headless app (`showWhen`, `Signal.list`, `Fs`, `View`). Home shows layout widgets. Tasks is a file-backed list. Full source: [`examples/studio`](examples/studio).
 
 ```scala
 @main def main: IO[Unit] =
-  for {
-    envPath <- Sys.getenv("SCUZZ_TODO_PATH")
-    path = if (Str.len(envPath) == 0) "/tmp/scuzz_todo.txt" else envPath
-    draft = Signal.str("")
-    items = Signal.list([])
-    text <- Fs.read(path).handleErrorWith(_ => IO.pure(""))
-    loaded = Str.lines(text)
-    _ = Signal.setList(items, if (List.isEmpty(loaded) == 1) ["milk"] else loaded)
-    _ <- Ui.run(_ => View.column(
-      View.text("Todo"),
-      View.row(
-        View.textField(draft, "item"),
-        View.button("Add", _ => for {
-          d = Signal.getStr(draft)
-        } yield if (Str.len(d) == 0) () else for {
-          xs = List.append(Signal.getList(items), d)
-          _ = Signal.setList(items, xs)
-        } yield Signal.setStr(draft, ""))
-      ),
-      View.expanded(View.scroll(View.each(items, s => View.row(
-        View.expanded(View.text(s)),
-        View.button("Del", _ => Signal.setList(items, List.filter(Signal.getList(items), x => x != s)))
-      )))),
-      View.button("Save", _ => for {
-        xs = Signal.getList(items)
-        body = if (List.isEmpty(xs) == 1) "" else Str.concat(List.join(xs, "\n"), "\n")
-        _ <- Fs.write(path, body)
-      } yield ()),
-      View.button("Clear", _ => Signal.setList(items, []))
-    ))
-  } yield ()
+  Sys.getenv("SCUZZ_TODO_PATH").flatMap(envPath =>
+    for {
+      path = if (Str.len(envPath) == 0) "/tmp/scuzz_studio.txt" else envPath
+      draft = Signal.str("")
+      items = Signal.list(["milk"])
+      page = Signal.int(0)
+      _ <- Ui.run(_ => View.column(
+        View.row(
+          View.button("Home", _ => Signal.set(page, 0)),
+          View.button("Tasks", _ => Signal.set(page, 1))
+        ),
+        View.showWhen(page, 0, View.text("Studio")),
+        View.row(
+          View.textField(draft, "item"),
+          View.button("Add", _ => for {
+            d = Str.trim(Signal.getStr(draft))
+          } yield if (Str.len(d) == 0) () else Signal.setList(items, List.append(Signal.getList(items), d)))
+        ),
+        View.expanded(View.scroll(View.each(items, s => View.row(
+          View.expanded(View.text(s)),
+          View.button("Del", _ => Signal.setList(items, List.filter(Signal.getList(items), x => x != s)))
+        )))),
+        View.button("Save", _ => Fs.write(path, Str.concat(List.join(Signal.getList(items), "\n"), "\n")))
+      ))
+    } yield ()
+  )
 ```
 
 ```bash
-scuzz run --headless examples/todo
+scuzz run --headless examples/studio
 ```
 
 ## License

@@ -49,7 +49,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 
 ## Success bars
 
-**v0** — Install CLI (`curl …/install.sh | sh`, or checkout `./scripts/install.sh`) → `scuzz new` (IO) or `scuzz new --ui` (Counter/Todo as `View` + builtin `IO`) → `scuzz test` and `scuzz run` (`--headless` for UI). Desktop when available. Language `Resource` / `Stream` / `Net.serve` ship (`examples/resource`, `examples/stream`, `examples/server`).
+**v0** — Install CLI (`curl …/install.sh | sh`, or checkout `./scripts/install.sh`) → `scuzz new` (IO) or `scuzz new --ui` (Counter as `View` + builtin `IO`) → `scuzz test` and `scuzz run` (`--headless` for UI). Desktop when available. Language `Resource` / `Stream` / `Net.serve` ship (`examples/io`).
 
 **v1** — Shipped `scuzz` is the Rust CLI (GitHub Releases; `package_release.sh` / `install.sh`). Kernel surface is proven by examples. `fuzz` / `mutate` live on that CLI.
 
@@ -104,7 +104,7 @@ Missing `[ui]` ⇒ Skia omitted from the link. `scuzz test` is TESTRT exit-0 smo
 
 ### Kernel dialect
 
-The language `scuzz` implements. Proof is examples that exercise each construct (`examples/hello`, `adt`, `record`, `trait`, `generic`, `genum`, `modules`, `counter`, …).
+The language `scuzz` implements. Proof is examples that exercise each construct (`examples/hello`, `kernel`, `io`, `counter`, `studio`).
 
 Locks (not an API catalog — see [`guide.md`](guide.md)):
 

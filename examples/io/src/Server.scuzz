@@ -1,0 +1,8 @@
+def handle(path: String): IO[String] =
+  for {
+    _ <- IO.println(s"served:$path")
+  } yield s"ok:$path"
+
+def run(): IO[Unit] =
+  Net.serve(8080, path => handle(path))
+

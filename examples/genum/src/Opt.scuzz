@@ -1,9 +1,0 @@
-enum Opt[T]:
-  case Some(x: T)
-  case None
-  def getOrElse(default: T): T =
-    self match {
-      case Opt.Some(x) => x
-      case Opt.None => default
-    }
-

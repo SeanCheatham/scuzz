@@ -1,0 +1,36 @@
+record Item(done: Int, label: String)
+
+trait Show:
+  def show(): String
+
+impl Show for Item:
+  def show(): String =
+    self.label
+
+private def doneMark(): String =
+  "#"
+
+def parseItem(s: String): Item =
+  if (Str.startsWith(s, doneMark()) == 1) Item(1, Str.slice(s, 1, Str.len(s))) else Item(0, s)
+
+def encodeItem(item: Item): String =
+  if (item.done == 1) Str.concat(doneMark(), item.label) else item.label
+
+def itemDone(s: String): Int =
+  parseItem(s).done
+
+def itemLabel(s: String): String =
+  parseItem(s).show()
+
+def flipDone(s: String): String =
+  encodeItem(Item(if (itemDone(s) == 1) 0 else 1, itemLabel(s)))
+
+def noteAdd(s: String): Unit =
+  Law.sometimes("droveAdd")
+
+def loadList(text: String): List =
+  if (List.isEmpty(Str.lines(text)) == 1) ["milk"] else Str.lines(text)
+
+def saveBody(xs: List): String =
+  if (List.isEmpty(xs) == 1) "" else Str.concat(List.join(xs, "\n"), "\n")
+

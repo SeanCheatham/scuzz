@@ -752,15 +752,15 @@ mod tests {
 
     #[test]
     fn examples_trait_generic_impl_sees_box() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/trait");
-        let resolved = resolve_project(&dir).expect("resolve trait example");
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/kernel");
+        let resolved = resolve_project(&dir).expect("resolve kernel example");
         let named: Vec<(String, String)> = resolved
             .sources
             .iter()
             .map(|s| (s.label.clone(), s.text.clone()))
             .collect();
         let labels: Vec<_> = named.iter().map(|(l, _)| l.as_str()).collect();
-        let p = crate::parser::parse_sources(&named).expect("parse trait example");
+        let p = crate::parser::parse_sources(&named).expect("parse kernel example");
         assert!(
             p.enums.iter().any(|e| e.name == "Box"),
             "Box missing; labels={labels:?} enums={:?}",
@@ -773,7 +773,7 @@ mod tests {
         crate::overlay::erase_laws(&mut p);
         crate::overlay::erase_requires(&mut p);
         let p = crate::typ::expand_impls(crate::lower::lower_program(p)).expect("expand");
-        crate::typ::typecheck(&p).expect("typecheck trait example");
+        crate::typ::typecheck(&p).expect("typecheck kernel example");
         let p = crate::typ::elaborate_generics(p).expect("elaborate");
         let p = crate::typ::resolve_field_access(p).expect("fields before mono");
         let p = crate::typ::monomorphize(p).expect("mono");

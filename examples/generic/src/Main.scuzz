@@ -1,5 +1,0 @@
-def id[T](x: T): T =
-  x
-
-@main def main: IO[Unit] =
-  IO.println(Str.concat(Str.fromInt(id(7)), id("ok")))

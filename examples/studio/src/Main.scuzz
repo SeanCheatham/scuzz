@@ -1,0 +1,56 @@
+law listLenNonNeg: Bool =
+  Law.signalListLen(1) >= 0
+
+law itemPastEndEmpty: Bool =
+  Str.len(Law.signalListAt(1, Law.signalListLen(1))) == 0
+
+law draftNonNeg: Bool =
+  Str.len(Law.signalStr(0)) >= 0
+
+law hasAdd: Bool =
+  Law.a11yHas("button:Add")
+
+law hasClear: Bool =
+  Law.a11yHas("button:Clear")
+
+law hasHome: Bool =
+  Law.a11yHas("button:Home")
+
+law hasTasks: Bool =
+  Law.a11yHas("button:Tasks")
+
+@main def main: IO[Unit] =
+  Sys.getenv("SCUZZ_TODO_PATH").flatMap(envPath =>
+    for {
+      path = if (Str.len(envPath) == 0) "/tmp/scuzz_studio.txt" else envPath
+      draft = Signal.str("")
+      items = Signal.list([])
+      page = Signal.int(0)
+      count = Signal.int(0)
+      compact = Signal.int(0)
+      countLabel = Signal.map(count, n => s"count = $n")
+      pageLabel = Signal.map(page, n => s"page = $n")
+      text <- Fs.read(path).handleErrorWith(_ =>
+  IO.pure("")
+)
+      loaded = Tasks.loadList(text)
+      _ = Signal.setList(items, loaded)
+      _ <- Ui.run(_ => View.column(View.row(View.button("Home", _ => Signal.set(page, 0)), View.bindText(pageLabel), View.button("Tasks", _ => Signal.set(page, 1))), View.showWhen(page, 0, View.padding(8, View.column(View.aspectRatio(6, 1, View.background(Color.rgb(61, 126, 166), View.center(View.icon(43, Theme.accent())))), View.fraction(50, 0, View.background(Color.rgb(230, 240, 248), View.padding(4, View.icon(43, Theme.accent())))), View.fontSize(18, View.textColor(Color.rgb(20, 40, 60), View.text("Studio"))), View.bindText(countLabel), View.row(View.button("+1", _ => Signal.set(count, Signal.get(count) + 1)), View.checkbox(compact, "compact"))))), View.row(View.textField(draft, "item"), View.button("Add", _ => for {
+  _ = Law.sometimes("tappedAdd")
+  d = Str.trim(Signal.getStr(draft))
+  n = Str.len(d)
+} yield if (n == 0) () else for {
+  xs = List.append(Signal.getList(items), d)
+  _ = Signal.setList(items, xs)
+} yield Signal.setStr(draft, "")), View.button("Rename", _ => for {
+  xs = Signal.getList(items)
+  ys = List.setAt(xs, 0, "oat milk")
+} yield Signal.setList(items, ys))), View.expanded(View.scroll(View.each(items, s => View.row(View.expanded(View.text(Tasks.itemLabel(s))), View.button(if (Tasks.itemDone(s) == 1) "Undo" else "Done", _ => for {
+  _ = Law.sometimes("tappedDone")
+} yield Signal.setList(items, List.map(Signal.getList(items), x => if (x == s) Tasks.flipDone(x) else x))), View.button("Del", _ => Signal.setList(items, List.filter(Signal.getList(items), x => x != s))))))), View.button("Save", _ => for {
+  xs = Signal.getList(items)
+  body = Tasks.saveBody(xs)
+  _ <- Fs.write(path, body)
+} yield ()), View.button("Clear", _ => Signal.setList(items, [])))).require(listLenNonNeg).require(itemPastEndEmpty).require(draftNonNeg).require(hasAdd).require(hasClear).require(hasHome).require(hasTasks).require(Signal.get(count) >= 0)
+    } yield ()
+  )

@@ -1,8 +1,0 @@
-[package]
-name = "server"
-version = "0.1.0"
-description = "Net.serve HTTP/1.0 GET (persistent listen)"
-
-[targets.native]
-kind = "executable"
-main = "Main"
