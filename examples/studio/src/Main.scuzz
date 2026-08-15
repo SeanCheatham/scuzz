@@ -25,6 +25,9 @@ law hasProgress: Bool =
 law hasSwitch: Bool =
   Law.a11yHas("switch:On")
 
+law hasChip: Bool =
+  Law.a11yHas("chip:Pin")
+
 @main def main: IO[Unit] =
   Sys.getenv("SCUZZ_TODO_PATH").flatMap(envPath =>
     for {
@@ -35,6 +38,7 @@ law hasSwitch: Bool =
       count = Signal.int(0)
       level = Signal.int(40)
       live = Signal.int(0)
+      pin = Signal.int(0)
       countLabel = Signal.map(count, n => s"count = $n")
       pageLabel = Signal.map(page, n => s"page = $n")
       text <- Fs.read(path).handleErrorWith(_ =>
@@ -49,7 +53,7 @@ law hasSwitch: Bool =
 } yield if (n == 0) () else for {
   xs = List.append(Signal.getList(items), d)
   _ = Signal.setList(items, xs)
-} yield Signal.setStr(draft, "")), View.switch(live, "On"), View.button("Rename", _ => for {
+} yield Signal.setStr(draft, "")), View.switch(live, "On"), View.chip(pin, "Pin"), View.button("Rename", _ => for {
   xs = Signal.getList(items)
   ys = List.setAt(xs, 0, "oat milk")
 } yield Signal.setList(items, ys))), View.expanded(View.scroll(View.each(items, s => View.row(View.expanded(View.text(Tasks.itemLabel(s))), View.button(if (Tasks.itemDone(s) == 1) "Undo" else "Done", _ => for {
@@ -58,6 +62,6 @@ law hasSwitch: Bool =
   xs = Signal.getList(items)
   body = Tasks.saveBody(xs)
   _ <- Fs.write(path, body)
-} yield ()), View.button("Clear", _ => Signal.setList(items, [])))).require(listLenNonNeg).require(itemPastEndEmpty).require(draftNonNeg).require(hasAdd).require(hasClear).require(hasHome).require(hasTasks).require(hasProgress).require(hasSwitch).require(Signal.get(count) >= 0)
+} yield ()), View.button("Clear", _ => Signal.setList(items, [])))).require(listLenNonNeg).require(itemPastEndEmpty).require(draftNonNeg).require(hasAdd).require(hasClear).require(hasHome).require(hasTasks).require(hasProgress).require(hasSwitch).require(hasChip).require(Signal.get(count) >= 0)
     } yield ()
   )

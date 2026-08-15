@@ -5,8 +5,9 @@ int[2] = 0
 int[3] = 0
 int[4] = 40
 int[5] = 0
-str[6] = "count = 0"
-str[7] = "page = 0"
+int[6] = 0
+str[7] = "count = 0"
+str[8] = "page = 0"
 
 [views]
 radio:Home=1
@@ -22,6 +23,7 @@ text:q or Esc quits
 textfield:item
 button:Add
 switch:On=0
+chip:Pin=0
 button:Rename
 scroll:scroll
 list:list
@@ -36,11 +38,12 @@ button:Clear
 1 Tasks 264,24 25x32
 2 +1 44,254 48x32
 3 slider 32,306 336x32
-4 Add 114,416 48x32
-5 On 170,416 37x32
-6 Rename 215,416 58x32
-7 Save 12,476 48x32
-8 Clear 12,516 48x32
+4 Add 96,416 48x32
+5 On 152,416 37x32
+6 Pin 197,416 32x32
+7 Rename 237,416 58x32
+8 Save 12,476 48x32
+9 Clear 12,516 48x32
 
 [fields]
 0* item=""

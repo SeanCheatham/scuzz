@@ -317,6 +317,14 @@ mod tests {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.ch\n";
         let labels = labels_at(src, "View.ch");
         assert!(labels.iter().any(|l| l == "View.checkbox"), "{labels:?}");
+        assert!(labels.iter().any(|l| l == "View.chip"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_view_chip_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.chi\n";
+        let labels = labels_at(src, "View.chi");
+        assert!(labels.iter().any(|l| l == "View.chip"), "{labels:?}");
     }
 
     #[test]
