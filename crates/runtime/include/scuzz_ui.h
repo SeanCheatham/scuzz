@@ -167,7 +167,8 @@ typedef enum SzViewKind {
   SZ_VIEW_RADIO,    /* Signal.int group; tap writes this value */
   SZ_VIEW_PROGRESS, /* Signal.int 0-100 bar; display only */
   SZ_VIEW_SWITCH,   /* Signal.int 0/1 track + label; tap flips */
-  SZ_VIEW_CHIP      /* Signal.int 0/1 labeled chip; tap flips */
+  SZ_VIEW_CHIP,     /* Signal.int 0/1 labeled chip; tap flips */
+  SZ_VIEW_LIST_TILE /* full-width title row; optional trailing child */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -199,6 +200,8 @@ SzView *sz_view_progress(SzSignalInt *sig);
 SzView *sz_view_switch(SzSignalInt *sig, const char *label);
 /* Tap flips `sig` between 0 and 1. `label` fills the chip. */
 SzView *sz_view_chip(SzSignalInt *sig, const char *label);
+/* Full-width title row. Optional `trailing` sits on the right. Not a tap target. */
+SzView *sz_view_list_tile(const char *title, SzView *trailing);
 SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder);
 SzView *sz_view_column(void);
 SzView *sz_view_row(void);
@@ -315,7 +318,8 @@ typedef enum SzA11yRole {
   SZ_A11Y_RADIO = 9,
   SZ_A11Y_PROGRESS = 10,
   SZ_A11Y_SWITCH = 11,
-  SZ_A11Y_CHIP = 12
+  SZ_A11Y_CHIP = 12,
+  SZ_A11Y_LIST_TILE = 13
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
@@ -411,6 +415,7 @@ SzView *sz_lang_view_slider(SzSignalInt *sig);
 SzView *sz_lang_view_progress(SzSignalInt *sig);
 SzView *sz_lang_view_switch(SzSignalInt *sig, SzString *label);
 SzView *sz_lang_view_chip(SzSignalInt *sig, SzString *label);
+SzView *sz_lang_view_list_tile(SzString *title, SzView *trailing);
 SzView *sz_lang_view_column(void);
 SzView *sz_lang_view_row(void);
 SzView *sz_lang_view_wrap(void);

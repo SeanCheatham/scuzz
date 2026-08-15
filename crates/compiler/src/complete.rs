@@ -328,6 +328,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_view_list_tile_after_dot() {
+        let src = "@main def main: IO[Unit] = Ui.run(_ => View.li\n";
+        let labels = labels_at(src, "View.li");
+        assert!(labels.iter().any(|l| l == "View.listTile"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_view_slider_after_dot() {
         let src = "@main def main: IO[Unit] = Ui.run(_ => View.sl\n";
         let labels = labels_at(src, "View.sl");

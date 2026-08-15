@@ -2114,6 +2114,19 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::Opaque("View".into()))
         }
+        "View.listTile" => {
+            if arg_tys.is_empty() || arg_tys.len() > 2 {
+                return Err(TypeError::Msg(format!(
+                    "View.listTile expects 1 or 2 args, got {}",
+                    arg_tys.len()
+                )));
+            }
+            expect_ty(&arg_tys[0], &Type::String)?;
+            if arg_tys.len() == 2 {
+                expect_ty(&arg_tys[1], &Type::Opaque("View".into()))?;
+            }
+            Ok(Type::Opaque("View".into()))
+        }
         "Theme.accent" | "Theme.primary" | "Theme.muted" | "Theme.foreground" => {
             expect_arity(callee, &arg_tys, 0)?;
             Ok(Type::Int)
@@ -5287,6 +5300,24 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.chip should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_list_tile() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.listTile("milk"))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.listTile should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_list_tile_trailing() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.listTile("milk", View.button("Del", _ => ())))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.listTile trailing should typecheck");
     }
 
     #[test]

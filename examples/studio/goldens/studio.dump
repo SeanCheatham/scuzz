@@ -27,7 +27,7 @@ chip:Pin=0
 button:Rename
 scroll:scroll
 list:list
-text:milk
+listtile:milk
 button:Done
 button:Del
 button:Save

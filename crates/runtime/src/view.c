@@ -118,7 +118,7 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_EXCLUDE_SEMANTICS || kind == SZ_VIEW_ELLIPSIS ||
          kind == SZ_VIEW_TEXT_COLOR || kind == SZ_VIEW_GAP ||
          kind == SZ_VIEW_FONT_SIZE || kind == SZ_VIEW_BORDER ||
-         kind == SZ_VIEW_RADIUS;
+         kind == SZ_VIEW_RADIUS || kind == SZ_VIEW_LIST_TILE;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -280,6 +280,16 @@ SzView *sz_view_chip(SzSignalInt *sig, const char *label) {
   return v;
 }
 
+SzView *sz_view_list_tile(const char *title, SzView *trailing) {
+  SzView *v = view_new(SZ_VIEW_LIST_TILE);
+  v->text = sz_strdup(title ? title : "");
+  v->a11y_role = SZ_A11Y_LIST_TILE;
+  v->a11y_label = sz_strdup(title ? title : "");
+  if (trailing)
+    sz_view_add_child(v, trailing);
+  return v;
+}
+
 static int64_t slider_clamp(int64_t n) {
   if (n < 0)
     return 0;
@@ -357,6 +367,8 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "switch";
   case SZ_A11Y_CHIP:
     return "chip";
+  case SZ_A11Y_LIST_TILE:
+    return "listtile";
   default:
     return "none";
   }
@@ -1206,6 +1218,31 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     if (max_w > 0 && v->frame.w > max_w)
       v->frame.w = max_w;
     break;
+  case SZ_VIEW_LIST_TILE: {
+    SzView *ch = v->child_count > 0 ? v->children[0] : NULL;
+    float pad = theme->pad;
+    float cw = 0.f;
+    float chh = 0.f;
+    float tx;
+    float ty;
+    v->frame.w = max_w > 0 ? max_w : 120.f;
+    v->frame.h = theme->control_h;
+    if (ch) {
+      layout_constrained(ch, x, y, box_loose(0.f, 0.f), theme);
+      cw = ch->frame.w;
+      chh = ch->frame.h;
+      if (cw > v->frame.w - pad * 2.f)
+        cw = v->frame.w - pad * 2.f;
+      if (cw < 0.f)
+        cw = 0.f;
+      if (chh > v->frame.h)
+        v->frame.h = chh;
+      tx = x + v->frame.w - pad - cw;
+      ty = y + (v->frame.h - chh) * 0.5f;
+      layout_constrained(ch, tx, ty, box_tight(cw, chh), theme);
+    }
+    break;
+  }
   case SZ_VIEW_SLIDER:
     v->frame.w = max_w > 0 ? max_w : 120.f;
     if (v->frame.w < 48.f)
@@ -2246,6 +2283,16 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     paint_string(c, buf, v->frame.x + theme->pad,
                  v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
                  on ? theme->on_primary : theme->foreground, theme->font_px);
+    break;
+  }
+  case SZ_VIEW_LIST_TILE: {
+    resolve_text(v, buf, sizeof buf);
+    paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
+    paint_string(c, buf, v->frame.x + theme->pad,
+                 v->frame.y + (v->frame.h + theme->font_px) * 0.5f,
+                 theme->foreground, theme->font_px);
+    for (i = 0; i < v->child_count; i++)
+      paint_node(v->children[i], c, theme);
     break;
   }
   case SZ_VIEW_RADIO: {

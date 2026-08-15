@@ -87,6 +87,10 @@ SzView *sz_lang_view_chip(SzSignalInt *sig, SzString *label) {
   return sz_view_chip(sig, label ? sz_string_cstr(label) : "");
 }
 
+SzView *sz_lang_view_list_tile(SzString *title, SzView *trailing) {
+  return sz_view_list_tile(title ? sz_string_cstr(title) : "", trailing);
+}
+
 SzView *sz_lang_view_column(void) { return sz_view_column(); }
 
 SzView *sz_lang_view_row(void) { return sz_view_row(); }

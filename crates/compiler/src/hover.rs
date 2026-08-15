@@ -360,6 +360,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.switch(sig: Signal, label: String): View",
     ),
     ("View.chip", "View.chip(sig: Signal, label: String): View"),
+    (
+        "View.listTile",
+        "View.listTile(title: String, trailing: View): View",
+    ),
     ("View.scroll", "View.scroll(child: View): View"),
     ("View.scrollH", "View.scrollH(child: View): View"),
     ("View.column", "View.column(...): View"),
@@ -617,6 +621,18 @@ mod tests {
         let h = hover_src(src, "chip");
         assert!(
             h.contains("View.chip(sig: Signal, label: String): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_view_list_tile() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.listTile("milk", View.button("Del", _ => ())))
+"#;
+        let h = hover_src(src, "listTile");
+        assert!(
+            h.contains("View.listTile(title: String, trailing: View): View"),
             "{h}"
         );
     }

@@ -148,6 +148,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_progress(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_switch(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_chip(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_list_tile(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_theme_accent()").unwrap();
     writeln!(out, "declare i64 @sz_theme_primary()").unwrap();
     writeln!(out, "declare i64 @sz_theme_muted()").unwrap();
@@ -3373,6 +3374,24 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "View.listTile" => {
+            if emitted_args.len() == 1 {
+                writeln!(
+                    code,
+                    "  %{prefix}_v = call ptr @sz_lang_view_list_tile(ptr {}, ptr null)",
+                    emitted_args[0].value
+                )
+                .unwrap();
+            } else {
+                writeln!(
+                    code,
+                    "  %{prefix}_v = call ptr @sz_lang_view_list_tile(ptr {}, ptr {})",
+                    emitted_args[0].value, emitted_args[1].value
+                )
+                .unwrap();
+            }
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "Theme.accent" => {
             writeln!(code, "  %{prefix}_v = call i64 @sz_theme_accent()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
@@ -4228,6 +4247,42 @@ law always: Bool = 1 == 1
         assert!(
             ir.contains("sz_lang_view_chip"),
             "expected sz_lang_view_chip in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_list_tile() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.listTile("milk"))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_list_tile"),
+            "expected sz_lang_view_list_tile in IR:\n{ir}"
+        );
+        assert!(
+            ir.contains("ptr null"),
+            "one-arg View.listTile must pass null trailing:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_list_tile_trailing() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.listTile("milk", View.button("Del", _ => ())))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_list_tile"),
+            "expected sz_lang_view_list_tile in IR:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_lang_view_button"),
+            "two-arg View.listTile should emit trailing:\n{ir}"
         );
     }
 
