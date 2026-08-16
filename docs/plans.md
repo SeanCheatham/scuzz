@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Last-use release for `List.map` / `List.filter` closure packs
+## Slice: Last-use release for `Stream.compileToList` streams
 
-`List.map` / `List.filter` pack a closure env list (`sz_list_cons` of fn + env). That pack stays allocated after the call.
+`List.filter` drops its input and closure pack. `Stream.compileToList` does not drop the stream.
 
-- Drop the owned closure pack after `sz_list_map` / `sz_list_filter`.
-- Proof: compiler IR for `List.len(List.filter([1], x => true))` shows `sz_release` of the closure list after `sz_list_filter`.
-- Out of scope: cycle collector, OS threads, device packaging.
+- Drop an owned stream after `sz_stream_compile_to_list`.
+- Proof: compiler IR for `Stream.compileToList(Stream.emits(["a"]))` shows `sz_release` of the stream after the call.
+- Out of scope: cycle collector, OS threads, device packaging, View / Stream lambda packs that the graph still holds.

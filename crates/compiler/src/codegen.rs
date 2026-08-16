@@ -2540,6 +2540,7 @@ fn emit_stream_pred(
     if as_io {
         io_emitted(code, format!("%{prefix}_v"), Kind::Int)
     } else if rt == "sz_list_filter" {
+        writeln!(code, "  call void @sz_release(ptr {})", lam.value).unwrap();
         if inner_owned && inner_kind == Kind::Ptr {
             writeln!(code, "  call void @sz_release(ptr {inner_value})").unwrap();
         }
@@ -2610,6 +2611,7 @@ fn emit_ptr_map(
     )
     .unwrap();
     if rt == "sz_list_map" {
+        writeln!(code, "  call void @sz_release(ptr {})", lam.value).unwrap();
         if inner_owned && inner_kind == Kind::Ptr {
             writeln!(code, "  call void @sz_release(ptr {inner_value})").unwrap();
         }
@@ -5300,6 +5302,53 @@ def id(m: Map[String, String]): Map[String, String] = m
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_list_filter"));
         assert!(ir.contains("sz_pred_"));
+    }
+
+    fn last_cl2_before(ir: &str, at: usize) -> &str {
+        let before = &ir[..at];
+        let idx = before
+            .rfind("_cl2 = call ptr @sz_list_cons")
+            .expect("expected closure pack cons");
+        let line_start = before[..idx].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        before[line_start..idx + 4].trim()
+    }
+
+    #[test]
+    fn emit_list_filter_releases_closure_pack() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.len(List.filter([1], x => true))))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let at = ir
+            .find("call ptr @sz_list_filter")
+            .expect("expected sz_list_filter");
+        let pack = last_cl2_before(&ir, at);
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {pack})")),
+            "expected last-use release of filter closure {pack}:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_map_releases_closure_pack() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.len(List.map([1], x => x))))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let at = ir
+            .find("call ptr @sz_list_map")
+            .expect("expected sz_list_map");
+        let pack = last_cl2_before(&ir, at);
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {pack})")),
+            "expected last-use release of map closure {pack}:\n{ir}"
+        );
     }
 
     #[test]
