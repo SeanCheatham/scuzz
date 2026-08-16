@@ -587,6 +587,101 @@ static char *g_stdout_buf = NULL;
 static size_t g_stdout_len = 0;
 static size_t g_stdout_cap = 0;
 
+#define ENV_CAP 32
+static char *g_env_keys[ENV_CAP];
+static char *g_env_vals[ENV_CAP];
+static int g_env_n;
+
+static void env_free_all(void) {
+  int i;
+  for (i = 0; i < g_env_n; i++) {
+    sz_free(g_env_keys[i]);
+    sz_free(g_env_vals[i]);
+    g_env_keys[i] = NULL;
+    g_env_vals[i] = NULL;
+  }
+  g_env_n = 0;
+}
+
+static char *env_dup(const char *s) {
+  size_t n;
+  char *d;
+  if (!s)
+    s = "";
+  n = strlen(s);
+  d = (char *)sz_alloc(n + 1);
+  memcpy(d, s, n + 1);
+  return d;
+}
+
+void sz_testrt_env_set(const char *key, const char *val) {
+  int i;
+  if (!key || !key[0])
+    return;
+  if (!val)
+    val = "";
+  for (i = 0; i < g_env_n; i++) {
+    if (strcmp(g_env_keys[i], key) == 0) {
+      sz_free(g_env_vals[i]);
+      g_env_vals[i] = env_dup(val);
+      return;
+    }
+  }
+  if (g_env_n >= ENV_CAP)
+    return;
+  g_env_keys[g_env_n] = env_dup(key);
+  g_env_vals[g_env_n] = env_dup(val);
+  g_env_n++;
+}
+
+const char *sz_testrt_env_get(const char *key) {
+  int i;
+  if (!key)
+    return NULL;
+  for (i = 0; i < g_env_n; i++) {
+    if (strcmp(g_env_keys[i], key) == 0)
+      return g_env_vals[i];
+  }
+  return NULL;
+}
+
+static void env_copy_host(const char *key) {
+  const char *v = getenv(key);
+  if (v && v[0])
+    sz_testrt_env_set(key, v);
+}
+
+/* SCUZZ_TESTRT_ENV is comma-separated KEY=val pairs. */
+static void env_parse_spec(const char *spec) {
+  const char *p;
+  if (!spec)
+    return;
+  p = spec;
+  while (*p) {
+    const char *comma = strchr(p, ',');
+    const char *eq;
+    size_t n = comma ? (size_t)(comma - p) : strlen(p);
+    char buf[256];
+    if (n >= sizeof buf)
+      n = sizeof buf - 1;
+    memcpy(buf, p, n);
+    buf[n] = '\0';
+    eq = strchr(buf, '=');
+    if (eq && eq != buf) {
+      char key[128];
+      size_t kn = (size_t)(eq - buf);
+      if (kn >= sizeof key)
+        kn = sizeof key - 1;
+      memcpy(key, buf, kn);
+      key[kn] = '\0';
+      sz_testrt_env_set(key, eq + 1);
+    }
+    if (!comma)
+      break;
+    p = comma + 1;
+  }
+}
+
 static void free_fake_argv(void) {
   int i;
   if (!g_fake_argv)
@@ -609,6 +704,7 @@ static void sz_testrt_sys_reset_live(void) {
   g_stdout_buf = NULL;
   g_stdout_len = 0;
   g_stdout_cap = 0;
+  env_free_all();
   g_sys_fake = 0;
 }
 
@@ -745,11 +841,19 @@ SzIo *sz_testrt_sys_read(int64_t n) {
 
 static void sz_testrt_sys_install(void) {
   const char *feed;
+  const char *spec;
   sz_testrt_sys_reset_live();
   g_sys_fake = 1;
   feed = getenv("SCUZZ_TESTRT_STDIN");
   if (feed && feed[0])
     sz_testrt_stdin_feed(feed);
+  /* App fixtures the CLI sets. Do not copy PATH/HOME/SCUZZ_TESTRT. */
+  env_copy_host("SCUZZ_TODO_PATH");
+  env_copy_host("SCUZZ_SERVE");
+  env_copy_host("SCUZZ_KIT");
+  spec = getenv("SCUZZ_TESTRT_ENV");
+  if (spec && spec[0])
+    env_parse_spec(spec);
 }
 
 int sz_testrt_sys_is_fake(void) { return g_sys_fake; }

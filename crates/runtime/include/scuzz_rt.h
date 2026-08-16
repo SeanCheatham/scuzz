@@ -459,6 +459,8 @@ void sz_testrt_stdout_reset(void);
 void sz_testrt_stdout_append(const char *line); /* appends line + '\n' */
 void sz_testrt_stdout_write(const char *bytes, size_t n); /* raw; no extra newline */
 const char *sz_testrt_stdout_cstr(void);
+void sz_testrt_env_set(const char *key, const char *val); /* sealed Sys.getenv map */
+const char *sz_testrt_env_get(const char *key); /* NULL if unset */
 
 /* Laws — residual checks armed only under SCUZZ_TESTRT=1 */
 void sz_law_stash_a11y(const char *dump);

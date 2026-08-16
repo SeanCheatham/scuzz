@@ -1537,6 +1537,19 @@ int main(void) {
       r = sz_io_unsafe_run(sz_io_println_cstr("cap"));
       assert(r.ok);
       assert(strstr(sz_testrt_stdout_cstr(), "cap\n") != NULL);
+
+      /* Sealed env: host PATH does not leak; overlay keys resolve. */
+      setenv("SCZ_LIVE_ENV_PROBE", "live", 1);
+      r = sz_io_unsafe_run(sz_sys_getenv(sz_string_from_cstr("SCZ_LIVE_ENV_PROBE")));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), "") == 0);
+      r = sz_io_unsafe_run(sz_sys_getenv(sz_string_from_cstr("PATH")));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), "") == 0);
+      sz_testrt_env_set("SCUZZ_KIT", "sealed");
+      r = sz_io_unsafe_run(sz_sys_getenv(sz_string_from_cstr("SCUZZ_KIT")));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), "sealed") == 0);
     }
 
     r = sz_io_unsafe_run(sz_impurity_run_kit());
@@ -1549,6 +1562,10 @@ int main(void) {
     assert(!sz_testrt_clock_is_fake());
     assert(!sz_testrt_fs_is_fake());
     assert(!sz_testrt_sys_is_fake());
+    r = sz_io_unsafe_run(sz_sys_getenv(sz_string_from_cstr("SCZ_LIVE_ENV_PROBE")));
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "live") == 0);
+    unsetenv("SCZ_LIVE_ENV_PROBE");
   }
 
   /* Cooperative fibers: race/both/Queue/Deferred + deterministic TestRuntime. */

@@ -13,7 +13,14 @@ def liveFs(): IO[Unit] =
   )
 
 def maybeServe(): IO[Unit] =
-  Sys.getenv("SCUZZ_TESTRT").flatMap(t => if (Str.len(t) == 0) IO.println("serve:skip") else Server.run())
+  Sys.getenv("SCUZZ_SERVE").flatMap(t => if (Str.len(t) == 0) IO.println("serve:skip") else Server.run())
+
+def envProbe(): IO[Unit] =
+  Sys.getenv("HOME").flatMap(h =>
+    IO.println(s"env:home:$h").flatMap(_ =>
+      Sys.getenv("SCUZZ_KIT").flatMap(k => IO.println(s"env:kit:$k"))
+    )
+  )
 
 @main def main: IO[Unit] =
   for {
@@ -23,5 +30,6 @@ def maybeServe(): IO[Unit] =
     _ <- Bracket.run()
     _ <- Flow.run()
     _ <- Impurity.runKit()
+    _ <- envProbe()
     _ <- maybeServe()
   } yield ()

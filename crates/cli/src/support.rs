@@ -53,7 +53,9 @@ pub fn run_testrt(
 ) -> Result<i32> {
     let mut cmd = Command::new(exe);
     cmd.env("SCUZZ_TESTRT", "1")
-        .env("SCUZZ_SOMETIMES_DUMP", reached);
+        .env("SCUZZ_SOMETIMES_DUMP", reached)
+        .env("SCUZZ_SERVE", "1")
+        .env("SCUZZ_KIT", "sealed");
     if let Some(ui) = ui {
         cmd.env("SCUZZ_UI_RUNTIME", "headless")
             .env("SCUZZ_UI_SCRIPT", ui.script)

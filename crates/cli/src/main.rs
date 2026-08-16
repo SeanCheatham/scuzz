@@ -710,6 +710,8 @@ fn apply_ui_env(
 fn run_io_smoke(exe: &Path) -> Result<()> {
     let status = Command::new(exe)
         .env("SCUZZ_TESTRT", "1")
+        .env("SCUZZ_SERVE", "1")
+        .env("SCUZZ_KIT", "sealed")
         .status()
         .with_context(|| format!("IO smoke {}", exe.display()))?;
     if !status.success() {

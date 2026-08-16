@@ -38,7 +38,7 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 - **Concurrency** — cooperative fibers only. Later: OS threads, supervision trees.
 - **Memory** — counter-shaped Headless pumps stay flat under alloc accounting. `Signal.list` and list/map/set nodes drop through RC. The compiler emits retain/release on string temps. IO graphs drop after `unsafe_run`. Values without a last-use stay allocated. No cycle collector. Panic may leak.
-- **Hermetic process and env kit** — TestRuntime fakes clock, random, FS, net, and console. `Sys.exec` and `Sys.spawn` fail under TestRuntime. `Sys.alive` / `Sys.kill` / `Sys.getenv` still touch the host. Revisit if fuzz needs fake processes or a sealed env map.
+- **Hermetic process and env kit** — TestRuntime fakes clock, random, FS, net, and console. `Sys.exec` and `Sys.spawn` fail under TestRuntime. `Sys.getenv` reads a sealed map (empty by default; CLI may inject `SCUZZ_KIT` / `SCUZZ_SERVE` / `SCUZZ_TODO_PATH`). `Sys.alive` / `Sys.kill` still touch the host.
 - **LSP / editor tooling** — `fmt`, `check --message-format=json`, `watch`, and `scuzz lsp` exist. LSP wraps `check` (didOpen/didChange overlay open buffers; didClose returns to disk). Positions are UTF-16. Hover, completion, and definition use that parse. Unknown methods return JSON-RPC `-32601`. JSON diagnostics stay the single schema. `check` reports more than one parse or type error per run.
 
 ### Dependency forms beyond `path`

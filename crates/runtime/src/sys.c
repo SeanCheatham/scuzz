@@ -525,7 +525,11 @@ SzIo *sz_sys_kill(int64_t pid) {
 static void *sys_getenv_result(void *env) {
   SzString *key = (SzString *)env;
   SysResult *r = (SysResult *)sz_alloc(sizeof(SysResult));
-  const char *v = getenv(sz_string_cstr(key));
+  const char *v;
+  if (sz_testrt_sys_is_fake())
+    v = sz_testrt_env_get(sz_string_cstr(key));
+  else
+    v = getenv(sz_string_cstr(key));
   r->is_err = 0;
   r->as.ok = sz_string_from_cstr(v ? v : "");
   return r;

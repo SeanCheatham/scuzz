@@ -35,7 +35,7 @@ scuzz test                   # compile + SCUZZ_TESTRT=1 exit-0 smoke
 scuzz run
 ```
 
-Console kit: `Sys.args(): IO[List[String]]`, `Sys.readLine(): IO[String]` (EOF → `""`; live parks on poll), `Sys.read(n): IO[String]` (n stdin bytes; fewer at EOF), `Sys.write(s): IO[Unit]` (stdout, no newline), `Sys.exec(cmd): IO[Int]` (exit code; live parks on poll; fails under TestRuntime), `Sys.spawn(cmd): IO[Int]` (pid; fails under TestRuntime), `Sys.alive(pid): IO[Int]`, `Sys.kill(pid): IO[Unit]` (SIGTERM), `IO.println`. Under `SCUZZ_TESTRT=1`, TestRuntime scripts stdin (`SCUZZ_TESTRT_STDIN` or `sz_testrt_stdin_feed`), optionally overrides argv, and captures println (still echoes to live stdout). Net uses stubs and injected serve paths (no live sockets). See `examples/io` and `examples/hello`.
+Console kit: `Sys.args(): IO[List[String]]`, `Sys.readLine(): IO[String]` (EOF → `""`; live parks on poll), `Sys.read(n): IO[String]` (n stdin bytes; fewer at EOF), `Sys.write(s): IO[Unit]` (stdout, no newline), `Sys.exec(cmd): IO[Int]` (exit code; live parks on poll; fails under TestRuntime), `Sys.spawn(cmd): IO[Int]` (pid; fails under TestRuntime), `Sys.alive(pid): IO[Int]`, `Sys.kill(pid): IO[Unit]` (SIGTERM), `IO.println`. Under `SCUZZ_TESTRT=1`, TestRuntime scripts stdin (`SCUZZ_TESTRT_STDIN` or `sz_testrt_stdin_feed`), optionally overrides argv, and captures println (still echoes to live stdout). `Sys.getenv` reads a sealed map (empty unless the CLI or `SCUZZ_TESTRT_ENV` injects keys). Net uses stubs and injected serve paths (no live sockets). See `examples/io` and `examples/hello`.
 
 ## Kernel language (what you write)
 

@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Mobile on one real device
+## Slice: Fake `Sys.alive` / `Sys.kill` under TestRuntime
 
-iOS simulator and Android emulator present, tap, and type. Hardware provisioning is still open.
+`Sys.exec` and `Sys.spawn` fail under TestRuntime. `Sys.getenv` is sealed. `Sys.alive` and `Sys.kill` still call the host.
 
-- Install one signed iOS device `.app` / `.ipa` or one Android APK on a physical phone and show one frame (or one tap).
-- Proof: `scuzz package` plus the platform toolchain runs `examples/counter` on that device, or fails with one install line when the device toolchain is missing.
-- Out of scope: Impeller, OS IME candidate windows, store signing.
+- Under `SCUZZ_TESTRT=1`, `Sys.alive` / `Sys.kill` use a fake process table (or fail like exec/spawn). Live code keeps `waitpid` / `kill`.
+- Proof: `examples/io` or `crates/runtime` tests do not touch host pids. A fake pid reports alive then dead after kill.
+- Out of scope: OS threads, Impeller, device packaging.
