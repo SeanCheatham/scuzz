@@ -18,7 +18,7 @@ scuzz run --headless         # writes build/snapshot.png
 scuzz fmt                    # rewrite src/ (check already verifies format)
 ```
 
-Default `[ui]` link uses the pinned Skia CPU prebuilt (`third_party/skia/PIN`). Checkout builds fetch it on first `ffi-skia` make. Opt out with `SCUZZ_SKIA=sk_sw`.
+Default `[ui]` link uses the pinned Skia CPU prebuilt (`third_party/skia/PIN`). Checkout builds fetch it on first `ffi-skia` make. Opt out with `SCUZZ_SKIA=sk_sw`. `SCUZZ_SKIA=gpu` presents through OpenGL. Missing OpenGL fails with one install line.
 
 From a prebuilt tarball (no checkout build): `RELEASE_TGZ=scuzz-<triple>.tar.gz ./scripts/install.sh`. Produce one with `./scripts/package_release.sh`. Publish GitHub Release assets with `git tag v0.1.0 && git push origin v0.1.0` (`linux-x86_64`, `darwin-arm64`). `install.sh --help` lists flags and the `curl | sh` invocation.
 

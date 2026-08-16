@@ -1,5 +1,6 @@
 #include "sk_capi.h"
 #include "png_enc.h"
+#include "sk_gpu.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -30,8 +31,10 @@ struct SkCanvas {
 struct SkSurface {
   int width;
   int height;
-  uint8_t *pixels; /* RGBA8888 */
-  SkCanvas canvas; /* borrowed through sk_surface_get_canvas */
+  int gpu;
+  uint8_t *pixels;  /* RGBA8888 CPU raster */
+  uint8_t *present; /* GPU readback when gpu != 0 */
+  SkCanvas canvas;  /* borrowed through sk_surface_get_canvas */
 };
 
 SkColor sk_color_rgba(uint8_t r, uint8_t g, uint8_t b, uint8_t a) {
@@ -71,10 +74,29 @@ SkSurface *sk_surface_make_raster_n32_premul(int width, int height) {
   return s;
 }
 
+SkSurface *sk_surface_make_gpu_n32_premul(int width, int height) {
+  SkSurface *s;
+  size_t n;
+  if (!sk_gpu_available())
+    return NULL;
+  s = sk_surface_make_raster_n32_premul(width, height);
+  if (!s)
+    return NULL;
+  n = (size_t)width * (size_t)height * 4;
+  s->present = (uint8_t *)calloc(n, 1);
+  if (!s->present) {
+    sk_surface_unref(s);
+    return NULL;
+  }
+  s->gpu = 1;
+  return s;
+}
+
 void sk_surface_unref(SkSurface *surface) {
   if (!surface)
     return;
   free(surface->pixels);
+  free(surface->present);
   free(surface);
 }
 
@@ -91,13 +113,21 @@ int sk_surface_height(const SkSurface *surface) {
 }
 
 const uint8_t *sk_surface_peek_pixels(const SkSurface *surface, size_t *out_size) {
+  size_t n;
   if (!surface) {
     if (out_size)
       *out_size = 0;
     return NULL;
   }
+  n = (size_t)surface->width * (size_t)surface->height * 4;
   if (out_size)
-    *out_size = (size_t)surface->width * (size_t)surface->height * 4;
+    *out_size = n;
+  if (surface->gpu) {
+    if (!sk_gpu_roundtrip(surface->pixels, surface->present, surface->width,
+                          surface->height))
+      return NULL;
+    return surface->present;
+  }
   return surface->pixels;
 }
 
@@ -397,9 +427,14 @@ float sk_paint_get_text_size(const SkPaint *paint) {
 int sk_encode_png(const SkSurface *surface, uint8_t **out_bytes, size_t *out_len) {
   uint8_t *mem;
   size_t len = 0;
+  size_t px_len = 0;
+  const uint8_t *px;
   if (!surface || !out_bytes || !out_len)
     return 0;
-  mem = sz_png_encode_rgba(surface->pixels, surface->width, surface->height,
+  px = sk_surface_peek_pixels(surface, &px_len);
+  if (!px)
+    return 0;
+  mem = sz_png_encode_rgba(px, surface->width, surface->height,
                            surface->width * 4, &len);
   if (!mem)
     return 0;

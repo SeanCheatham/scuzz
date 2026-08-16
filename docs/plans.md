@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: GPU presenter path
+## Slice: Android APK shell
 
-iOS simulator packaging, TextField input, and the Android NDK `.so` link are in. Only the CPU raster path exists (`sk_sw` or the pinned Skia CPU prebuilt).
+The NDK link emits `libscuzz.so`. There is no Activity that presents frames on an emulator or device.
 
-- Add one GPU presenter behind `sk_capi` that keeps the same `Ui` session and structural goldens.
-- Proof: `examples/counter` Headless structural dump matches the CPU path. Pixel goldens stay within the existing tolerance when `--pixels` is on.
-- Out of scope: Android APK/Activity, real devices, OS IME candidate windows.
+- Add a minimal Android Activity + SurfaceView that loads `libscuzz.so` and blits `sz_mobile_present` frames.
+- Proof: `scuzz package --target android examples/counter` plus the platform SDK installs and shows one frame on an emulator, or fails with one install line when `adb` / the SDK is missing.
+- Out of scope: real-device provisioning, Impeller, OS IME candidate windows.

@@ -235,6 +235,16 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
         let is_skia = std::fs::read_to_string(&backend)
             .map(|s| s.trim() == "skia")
             .unwrap_or(false);
+        let is_gpu = std::fs::read_to_string(&backend)
+            .map(|s| s.trim() == "gpu")
+            .unwrap_or(false);
+        if is_gpu {
+            if cfg!(target_os = "macos") {
+                link.arg("-framework").arg("OpenGL");
+            } else {
+                link.arg("-lEGL").arg("-lGLESv2");
+            }
+        }
         if is_skia {
             // Host zlib/bz2 for FreeType in the Skia fat archive.
             link.arg("-lz").arg("-lbz2");

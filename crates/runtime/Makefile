@@ -40,6 +40,8 @@ SKIA_LINK = $$([ -f $(FFI_SKIA)/build/sk_capi_backend ] && grep -qx skia $(FFI_S
 	if [ "$$(uname -s)" = Darwin ]; then \
 	  echo -lc++ -lm -lz -lbz2 -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon; \
 	else echo -lstdc++ -lm -lz -lbz2; fi)
+GPU_LINK = $$([ -f $(FFI_SKIA)/build/sk_capi_backend ] && grep -qx gpu $(FFI_SKIA)/build/sk_capi_backend && \
+	if [ "$$(uname -s)" = Darwin ]; then echo -framework OpenGL; else echo -lEGL -lGLESv2; fi)
 UNAME_S := $(shell uname -s)
 ifeq ($(UNAME_S),Darwin)
 HOST_LINK := -framework CoreFoundation
@@ -61,11 +63,11 @@ build/reload_b.$(RELOAD_EXT): tests/reload_b.c include/scuzz_ui.h | build
 
 build/test_io: tests/test_io.c build/libscuzz_rt.a | build ffi-skia
 	$(CC) $(CFLAGS) $(INCLUDES) tests/test_io.c -Lbuild -L$(FFI_SKIA)/build \
-		-lscuzz_rt -lsk_capi -lpthread $(HOST_LINK) $(SKIA_LINK) -o $@
+		-lscuzz_rt -lsk_capi -lpthread $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
 
 build/test_ui: tests/test_ui.c build/libscuzz_rt.a build/reload_a.$(RELOAD_EXT) build/reload_b.$(RELOAD_EXT) | build ffi-skia
 	$(CC) $(CFLAGS) $(INCLUDES) $(EXPORT_LINK) tests/test_ui.c -Lbuild -L$(FFI_SKIA)/build \
-		-lscuzz_rt -lsk_capi -lpthread $(HOST_LINK) $(SKIA_LINK) -o $@
+		-lscuzz_rt -lsk_capi -lpthread $(HOST_LINK) $(SKIA_LINK) $(GPU_LINK) -o $@
 
 test: build/test_io build/test_ui
 	./build/test_io

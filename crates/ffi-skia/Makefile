@@ -8,7 +8,7 @@ INCLUDES := -Iinclude -Isrc
 SRC := src/sk_sw.c src/png_enc.c
 OBJ := $(SRC:src/%.c=build/%.o)
 
-.PHONY: all clean test lib lib-skia lib-sk-sw ensure-prebuilt
+.PHONY: all clean test lib lib-skia lib-sk-sw lib-gpu ensure-prebuilt
 
 all: lib
 
@@ -16,9 +16,12 @@ build:
 	mkdir -p build
 
 # Default: pinned Skia prebuilt (fetch if needed). Opt out with SCUZZ_SKIA=sk_sw.
+# SCUZZ_SKIA=gpu: in-tree sk_sw paint + OpenGL present/readback.
 lib: ensure-prebuilt
 	@if [ "$${SCUZZ_SKIA:-}" = "sk_sw" ]; then \
 	  $(MAKE) lib-sk-sw; \
+	elif [ "$${SCUZZ_SKIA:-}" = "gpu" ]; then \
+	  $(MAKE) lib-gpu; \
 	elif [ -f "$(PREBUILT_LIB)" ]; then \
 	  $(MAKE) lib-skia; \
 	else \
@@ -27,24 +30,40 @@ lib: ensure-prebuilt
 	fi
 
 ensure-prebuilt:
-	@if [ "$${SCUZZ_SKIA:-}" = "sk_sw" ]; then \
-	  echo "ffi-skia: SCUZZ_SKIA=sk_sw — in-tree software backend"; \
+	@if [ "$${SCUZZ_SKIA:-}" = "sk_sw" ] || [ "$${SCUZZ_SKIA:-}" = "gpu" ]; then \
+	  echo "ffi-skia: SCUZZ_SKIA=$${SCUZZ_SKIA} — in-tree software paint"; \
 	else \
 	  "$(ROOT)/scripts/fetch_skia.sh"; \
 	fi
 
-build/%.o: src/%.c include/sk_capi.h src/png_enc.h | build
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+GPU_LIBS := -framework OpenGL
+else
+GPU_LIBS := -lEGL -lGLESv2
+endif
+
+build/%.o: src/%.c include/sk_capi.h src/png_enc.h src/sk_gpu.h | build
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
-lib-sk-sw: $(OBJ) | build
+build/sk_gpu.o: src/sk_gpu.c src/sk_gpu.h | build
+	$(CC) $(CFLAGS) -Wno-deprecated-declarations $(INCLUDES) -c $< -o $@
+
+lib-sk-sw: $(OBJ) build/sk_gpu_none.o | build
 	rm -f build/libsk_capi.a
-	ar rcs build/libsk_capi.a $(OBJ)
+	ar rcs build/libsk_capi.a $(OBJ) build/sk_gpu_none.o
 	echo sk_sw > build/sk_capi_backend
 
-lib-skia: | build
+lib-gpu: $(OBJ) build/sk_gpu.o | build
+	rm -f build/libsk_capi.a
+	ar rcs build/libsk_capi.a $(OBJ) build/sk_gpu.o
+	echo gpu > build/sk_capi_backend
+
+lib-skia: build/sk_gpu_skia_stub.o | build
 	@test -f "$(PREBUILT_LIB)"
 	rm -f build/*.a
 	cp -f "$(PREBUILT_LIB)" build/libsk_capi.a
+	ar rcs build/libsk_capi.a build/sk_gpu_skia_stub.o
 	echo skia > build/sk_capi_backend
 
 build/test_skia: tests/test_skia.c lib
@@ -55,16 +74,25 @@ build/test_skia: tests/test_skia.c lib
 	  else \
 	    extra="-lstdc++ -lm -lz -lbz2"; \
 	  fi; \
+	elif [ -f build/sk_capi_backend ] && grep -qx gpu build/sk_capi_backend; then \
+	  extra="$(GPU_LIBS)"; \
 	fi; \
 	$(CC) $(CFLAGS) $(INCLUDES) tests/test_skia.c -Lbuild -lsk_capi $$extra -lpthread -o $@
 
 # Canvas clip against in-tree sk_sw. The pinned Skia archive does not export save/clip.
-build/test_sk_clip: tests/test_sk_clip.c src/sk_sw.c src/png_enc.c include/sk_capi.h src/png_enc.h | build
-	$(CC) $(CFLAGS) $(INCLUDES) tests/test_sk_clip.c src/sk_sw.c src/png_enc.c -o $@
+build/test_sk_clip: tests/test_sk_clip.c src/sk_sw.c src/png_enc.c src/sk_gpu_none.c include/sk_capi.h src/png_enc.h | build
+	$(CC) $(CFLAGS) $(INCLUDES) tests/test_sk_clip.c src/sk_sw.c src/png_enc.c src/sk_gpu_none.c -o $@
+
+build/test_sk_gpu: tests/test_sk_gpu.c lib
+	$(CC) $(CFLAGS) $(INCLUDES) tests/test_sk_gpu.c -Lbuild -lsk_capi $(GPU_LIBS) -lpthread -o $@
 
 test: build/test_skia build/test_sk_clip
 	./build/test_skia
 	./build/test_sk_clip
+	@if [ "$${SCUZZ_SKIA:-}" = "gpu" ]; then \
+	  $(MAKE) build/test_sk_gpu; \
+	  ./build/test_sk_gpu; \
+	fi
 
 clean:
 	rm -rf build

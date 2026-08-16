@@ -50,7 +50,7 @@ jobs:
           sudo apt-get update
           # zlib/bz2: host libs for the Skia CPU prebuilt.
           sudo apt-get install -y clang make libx11-dev xvfb \
-            zlib1g-dev libbz2-dev
+            zlib1g-dev libbz2-dev libegl1-mesa-dev libgles2-mesa-dev
 
       - name: Install Rust (stable with rust-toolchain.toml)
         uses: dtolnay/rust-toolchain@stable
@@ -203,6 +203,12 @@ jobs:
           SCUZZ_SKIA=sk_sw make -C crates/ffi-skia clean lib CC=clang
           rm -rf examples/counter/build
           SCUZZ_SKIA=sk_sw cargo run -p scuzz -- test --pixels examples/counter
+          make -C crates/ffi-skia clean lib CC=clang
+
+      - name: GPU presenter (OpenGL readback)
+        run: |
+          SCUZZ_SKIA=gpu make -C crates/ffi-skia test CC=clang
+          SCUZZ_SKIA=gpu cargo run -p scuzz -- test examples/counter
           make -C crates/ffi-skia clean lib CC=clang
 
       - name: Deterministic fuzz (bounded) + repro replay

@@ -12,6 +12,27 @@
 #include <string.h>
 #include <dlfcn.h>
 
+static int want_gpu_presenter(void) {
+  const char *e = getenv("SCUZZ_SKIA");
+  return e && strcmp(e, "gpu") == 0;
+}
+
+static SkSurface *make_session_surface(int pw, int ph) {
+  SkSurface *s;
+  if (!want_gpu_presenter())
+    return sk_surface_make_raster_n32_premul(pw, ph);
+  s = sk_surface_make_gpu_n32_premul(pw, ph);
+  if (!s) {
+#if defined(__APPLE__)
+    fprintf(stderr, "missing OpenGL — install Xcode, then retry\n");
+#else
+    fprintf(stderr,
+            "missing OpenGL — install mesa (libegl1-mesa-dev libgles2-mesa-dev)\n");
+#endif
+  }
+  return s;
+}
+
 /* Weak stubs — strong defs from embedder-desktop override when linked. */
 __attribute__((weak)) int sz_embedder_available(void) { return 0; }
 __attribute__((weak)) double sz_embedder_display_scale(void) { return 1.0; }
@@ -164,7 +185,7 @@ SzUiSession *sz_ui_mount(const SzUiConfig *cfg, SzView *root) {
     pw = 1;
   if (ph < 1)
     ph = 1;
-  s->surface = sk_surface_make_raster_n32_premul(pw, ph);
+  s->surface = make_session_surface(pw, ph);
   if (!s->surface) {
     sz_free(s);
     return NULL;
@@ -996,7 +1017,7 @@ int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event) {
         pw = 1;
       if (ph < 1)
         ph = 1;
-      session->surface = sk_surface_make_raster_n32_premul(pw, ph);
+      session->surface = make_session_surface(pw, ph);
     }
     if (!session->surface)
       return 0;

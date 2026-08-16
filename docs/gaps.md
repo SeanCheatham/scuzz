@@ -19,11 +19,11 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ### 2. GPU presenters (Impeller / Skia GPU)
 
-**Status.** Unblocked on text/metrics. Only the CPU raster path exists (`sk_sw` or fetched Skia CPU prebuilt). Presenters must not change `Ui` session or logical goldens. That rule is asserted, not shown.
+**Status.** An OpenGL presenter is in (`SCUZZ_SKIA=gpu`): CPU `sk_sw` paint, GPU upload and readback behind `sk_capi`. Headless structural goldens match the CPU path. Impeller and Skia GPU raster stay deferred.
 
-**Unproven.** A GPU backend behind `sk_capi` keeps identical structural dumps and tolerance-bounded pixels.
+**Unproven.** A GPU rasterizer (Impeller or Skia GPU) behind `sk_capi` keeps identical structural dumps and tolerance-bounded pixels without a CPU paint pass.
 
-**Proof.** A second presenter renders the golden examples with unchanged structural goldens. Unused GPU stubs do not close the proof.
+**Proof.** `SCUZZ_SKIA=gpu` renders `examples/counter` with unchanged structural goldens. Pixel goldens match `sk_sw` when `--pixels` is on. Unused GPU stubs do not close the proof.
 
 ## Known gaps
 

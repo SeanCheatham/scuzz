@@ -79,7 +79,7 @@ libc `malloc`/`free` through `sz_alloc` / `sz_free`. No collector. Heap strings,
 
 ### Skia
 
-No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** is the pinned Skia CPU prebuilt (`third_party/skia/PIN` → `scripts/fetch_skia.sh`). App link uses host zlib/bz2, not brotli. In-tree `sk_sw` is the explicit opt-out (`SCUZZ_SKIA=sk_sw`). Impeller deferred (GPU presenters later; must not change `Ui` session or logical goldens). Callers depend only on `sk_capi.h`.
+No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** is the pinned Skia CPU prebuilt (`third_party/skia/PIN` → `scripts/fetch_skia.sh`). App link uses host zlib/bz2, not brotli. In-tree `sk_sw` is the explicit opt-out (`SCUZZ_SKIA=sk_sw`). `SCUZZ_SKIA=gpu` paints with `sk_sw` and presents through OpenGL (must not change `Ui` session or logical goldens). Impeller / Skia GPU raster stay deferred. Callers depend only on `sk_capi.h`.
 
 ### IO and impurity
 
@@ -213,7 +213,7 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: [`plans.md`](plans.md). Work order: core value types first — `Float`, reference counting, `Map` / `Set`, and IO last-use are in. `scuzz package --target ios` and `--target android` drive the platform shells. Open unknowns: Mobile on real devices (iOS simulator proven; Android NDK `.so` in), GPU presenters.
+Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: [`plans.md`](plans.md). Work order: core value types first — `Float`, reference counting, `Map` / `Set`, and IO last-use are in. `scuzz package --target ios` and `--target android` drive the platform shells. `SCUZZ_SKIA=gpu` presents through OpenGL. Open unknowns: Mobile on real devices (iOS simulator proven; Android NDK `.so` in). Impeller / Skia GPU raster stay deferred.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. `scuzz package --target ios` builds a signed simulator `.app` when Xcode is present. The iOS shell feeds typed text into TextField. `scuzz package --target android` links `libscuzz.so` when the NDK is present. Device builds stay open.
 
