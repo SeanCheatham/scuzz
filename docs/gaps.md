@@ -11,11 +11,11 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ### 1. Mobile on real devices
 
-**Status.** iOS simulator proven: `scuzz package --target ios` runs `crates/embedder-mobile/shells/ios/build_sim.sh`, which cross-compiles the LLVM app + C runtime + `sk_sw` for `arm64-apple-ios-simulator`, links the ObjC shell (`crates/embedder-mobile/shells/ios/main.m` + `ScuzzShell.m`), and signs a `.app`. `examples/counter` mounts `UiRuntime.Mobile` in a booted sim and presents live frames. The iOS shell feeds typed insert and backspace into `SZ_INPUT_TEXT_EDIT`. Android stays blocked on the NDK (`crates/embedder-mobile/shells/android/` is a manifest + JNI stub). Real devices stay open (provisioning, no simulator sandbox).
+**Status.** iOS simulator proven: `scuzz package --target ios` runs `crates/embedder-mobile/shells/ios/build_sim.sh` and signs a `.app`. `examples/counter` mounts `UiRuntime.Mobile` in a booted sim. The iOS shell feeds typed insert and backspace into `SZ_INPUT_TEXT_EDIT`. Android NDK link is in: `scuzz package --target android` emits `libscuzz.so` for `arm64-v8a` when the NDK is present, or fails with one install line when it is missing. Real devices stay open (provisioning, no APK/Activity install path yet).
 
-**Unproven.** Android cross-compile and JNI/ObjC embedding on hardware. Touch and soft-keyboard text input on hardware.
+**Unproven.** JNI/ObjC embedding on hardware. Touch and soft-keyboard text input on hardware. An Android APK that presents frames on an emulator or device.
 
-**Proof.** One example (counter) runs on one device or simulator with `scuzz package` plus the platform toolchain. `scuzz package --target ios` builds the sim `.app` when Xcode is present, or fails with one install line when it is missing. Sim TextField insert and backspace are in (`SZ_INPUT_TEXT_EDIT`). Android/device runs stay open.
+**Proof.** One example (counter) runs on one device or simulator with `scuzz package` plus the platform toolchain. iOS sim meets that bar. Android meets the NDK link bar. Device runs stay open.
 
 ### 2. GPU presenters (Impeller / Skia GPU)
 

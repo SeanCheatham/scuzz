@@ -13,13 +13,14 @@ present (`--whole-archive` so strong symbols override weak stubs in `libscuzz_rt
 
 ## Packaging shells
 
-`scuzz package --target android` copies the Android template. `scuzz package
---target ios` runs `shells/ios/build_sim.sh` and emits a signed simulator
-`.app`. Android still needs NDK wiring.
+`scuzz package --target android` runs `shells/android/build_ndk.sh` and emits
+`libscuzz.so` for `arm64-v8a`. Missing NDK fails with one install line.
+`scuzz package --target ios` runs `shells/ios/build_sim.sh` and emits a signed
+simulator `.app`.
 
 | Target | Path | Role |
 | --- | --- | --- |
-| Android | `shells/android/` | Manifest + JNI stub; wire NDK / activity for device |
+| Android | `shells/android/` | JNI + `android_shell.c` + `build_ndk.sh`; links `libscuzz.so` |
 | iOS | `shells/ios/` | ObjC shell (present / touch / keyboard) + `build_sim.sh`; builds a signed sim `.app` under Xcode |
 | host | (this lib) | CI smoke of the Mobile peer |
 

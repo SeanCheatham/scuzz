@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Android package CLI
+## Slice: GPU presenter path
 
-iOS simulator packaging and TextField input are in. `scuzz package --target android` still copies a manifest plus JNI stub. It does not cross-compile.
+iOS simulator packaging, TextField input, and the Android NDK `.so` link are in. Only the CPU raster path exists (`sk_sw` or the pinned Skia CPU prebuilt).
 
-- Make `scuzz package --target android` fail on the first missing NDK tool with one install line, or emit a linked Android package when the NDK is present.
-- Proof: `scuzz package --target android examples/counter` exits 0 with an NDK, or fails with one install line when the NDK is missing.
-- Out of scope: real devices, GPU presenters, OS IME candidate windows.
+- Add one GPU presenter behind `sk_capi` that keeps the same `Ui` session and structural goldens.
+- Proof: `examples/counter` Headless structural dump matches the CPU path. Pixel goldens stay within the existing tolerance when `--pixels` is on.
+- Out of scope: Android APK/Activity, real devices, OS IME candidate windows.

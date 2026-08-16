@@ -71,7 +71,7 @@ One CLI. One typer. One formatter. One linter. One testing strategy. No second a
 - **`scuzz.toml` is data** — package, path deps, `[ui]`. No plugin DSL. No `build.scuzz` hooks. Unknown keys rejected. Do not add `[plugins]`.
 - **Fingerprint** (incremental): miss → rebuild. The fingerprint includes compiler/runtime identity, native sources, target, clang version, Skia backend, and verify mode. No `scuzz clean` ritual.
 - **Missing tools:** fail on the first missing tool with one install line. No `flutter doctor` mega-checklist.
-- **`scuzz package`:** Android copies `crates/embedder-mobile/shells/android`. iOS runs `crates/embedder-mobile/shells/ios/build_sim.sh` and emits a signed simulator `.app`. Not a Gradle/CocoaPods API.
+- **`scuzz package`:** Android runs `crates/embedder-mobile/shells/android/build_ndk.sh` and emits `libscuzz.so` (needs the NDK). iOS runs `crates/embedder-mobile/shells/ios/build_sim.sh` and emits a signed simulator `.app`. Not a Gradle/CocoaPods API.
 
 ### GC (v0)
 
@@ -213,9 +213,9 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: [`plans.md`](plans.md). Work order: core value types first — `Float`, reference counting, `Map` / `Set`, and IO last-use are in. `scuzz package --target ios` drives the simulator shell. Sim TextField input is in. Android packaging stays open. Open unknowns: Mobile on Android + real devices (iOS simulator proven), GPU presenters.
+Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: [`plans.md`](plans.md). Work order: core value types first — `Float`, reference counting, `Map` / `Set`, and IO last-use are in. `scuzz package --target ios` and `--target android` drive the platform shells. Open unknowns: Mobile on real devices (iOS simulator proven; Android NDK `.so` in), GPU presenters.
 
-App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. `scuzz package --target ios` builds a signed simulator `.app` when Xcode is present. The iOS shell feeds typed text into TextField. Android and device builds stay open.
+App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. `scuzz package --target ios` builds a signed simulator `.app` when Xcode is present. The iOS shell feeds typed text into TextField. `scuzz package --target android` links `libscuzz.so` when the NDK is present. Device builds stay open.
 
 ## Risks
 

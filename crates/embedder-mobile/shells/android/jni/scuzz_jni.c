@@ -1,82 +1,35 @@
-/* Android JNI packaging shell.
- *
- * Maps MotionEvent / lifecycle / InputConnection onto SzInputEvent. Drives
- * the same UiSession protocol as Headless / Desktop / host mobile shell.
- *
- * This file is a compile-shaped stub. It includes the C ABI and shows the
- * mount → inject → pump → present loop. Fill real JNI glue when an NDK
- * toolchain is available.
- */
+/* Android JNI entry. JNI_OnLoad starts the renamed app main on a worker.
+ * The shell owns process setup; scuzz_app_main mounts UiRuntime.Mobile. */
 
-#include "scuzz_mobile.h"
-#include "scuzz_ui.h"
+#define _POSIX_C_SOURCE 200809L
 
-#include <stdint.h>
-#include <string.h>
+#include <jni.h>
+#include <pthread.h>
+#include <stdlib.h>
 
-typedef struct {
-  SzUiSession *session;
-  SzView *root;
-} ScuzzAndroidApp;
+extern int scuzz_app_main(int argc, char **argv);
+void scuzz_android_set_alive(int alive);
 
-static ScuzzAndroidApp g_app;
-
-int scuzz_android_mount(SzView *root, int width, int height) {
-  SzUiConfig cfg;
-  memset(&cfg, 0, sizeof(cfg));
-  cfg.kind = SZ_UI_RUNTIME_MOBILE;
-  cfg.width = width > 0 ? width : 360;
-  cfg.height = height > 0 ? height : 640;
-  cfg.scale = 1.0;
-  cfg.title = "Scuzz Lang";
-  g_app.root = root;
-  g_app.session = sz_ui_mount(&cfg, root);
-  if (!g_app.session)
-    return 0;
-  sz_ui_session_take_root(g_app.session);
-  return sz_ui_pump_sync(g_app.session);
+static void *scuzz_app_thread(void *unused) {
+  char *args[] = {(char *)"scuzz", NULL};
+  (void)unused;
+  setenv("SCUZZ_UI_RUNTIME", "mobile", 1);
+  scuzz_app_main(1, args);
+  return NULL;
 }
 
-int scuzz_android_touch(int phase, float x, float y) {
-  SzInputEvent ev;
-  if (!g_app.session)
-    return 0;
-  memset(&ev, 0, sizeof(ev));
-  ev.kind = SZ_INPUT_POINTER;
-  ev.pointer_phase = (SzPointerPhase)phase;
-  ev.x = x;
-  ev.y = y;
-  return sz_ui_inject_sync(g_app.session, &ev) && sz_ui_pump_sync(g_app.session);
+JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
+  pthread_t tid;
+  (void)vm;
+  (void)reserved;
+  scuzz_android_set_alive(1);
+  pthread_create(&tid, NULL, scuzz_app_thread, NULL);
+  pthread_detach(tid);
+  return JNI_VERSION_1_6;
 }
 
-int scuzz_android_lifecycle(int phase) {
-  SzInputEvent ev;
-  if (!g_app.session)
-    return 0;
-  memset(&ev, 0, sizeof(ev));
-  ev.kind = SZ_INPUT_LIFECYCLE;
-  ev.lifecycle = (SzLifecyclePhase)phase;
-  return sz_ui_inject_sync(g_app.session, &ev);
+JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *reserved) {
+  (void)vm;
+  (void)reserved;
+  scuzz_android_set_alive(0);
 }
-
-int scuzz_android_text(const char *text) {
-  SzInputEvent ev;
-  if (!g_app.session)
-    return 0;
-  memset(&ev, 0, sizeof(ev));
-  ev.kind = SZ_INPUT_TEXT;
-  ev.text = text;
-  return sz_ui_inject_sync(g_app.session, &ev) && sz_ui_pump_sync(g_app.session);
-}
-
-void scuzz_android_unmount(void) {
-  if (g_app.session) {
-    sz_ui_unmount(g_app.session);
-    g_app.session = NULL;
-    g_app.root = NULL;
-  }
-}
-
-/* Strong mobile present for on-device shells: pixels are handed to a Surface
- * View by the Java side after peeking through a host-provided callback. Until the
- * NDK link step, prefer the host shell simulator on Linux CI. */
