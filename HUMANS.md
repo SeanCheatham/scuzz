@@ -13,7 +13,7 @@ This file may be read by AI agents, but it must never be written, edited, or rem
 - Scuzz includes the compiler and tooling.
 - Scuzz is heavily-opinionated. One way to do things (when practical). One formatter. One linter. One testing strategy.
 - Scuzz is "batteries-included"; most use-cases should be supported out-of-the-box with the language and standard library, without a sprawl of ecosystem libraries.
-- Scuzz does not embrace classical unit testing or example-based testing. It prefers mutation, fuzzing, property-oriented, simulation, and determinism instead. These are all built into the language and tooling with first-class support.
+- Scuzz does not embrace classical unit testing or example-based testing. It prefers mutation, fuzzing, property-oriented, simulation, coverage, and determinism instead. These are all built into the language and tooling with first-class support.
   - Developers encode rules, laws, and expectations directly in the main codebase. Separate simulation drivers activate various behaviors, and all invariants of the codebase must be satisfied under fuzzing via these drivers.
   - The simulation mechanic should be hermetically sealed. Since all non-determinisms are captured through the effect system, any network effects beyond localhost should be rejected and error accordingly.
 - Scuzz leans on a strong compiler with rigid guardrails and constraints.
