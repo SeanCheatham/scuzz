@@ -4109,6 +4109,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.fab" => {
@@ -5715,6 +5716,23 @@ law always: Bool = 1 == 1
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of string {name} after View.button:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_icon_button_releases_label() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.iconButton("i", _ => ()))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_lang_view_icon_button(ptr ";
+        let at = ir.find(needle).expect("expected sz_lang_view_icon_button");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of string {name} after View.iconButton:\n{ir}"
         );
     }
 
