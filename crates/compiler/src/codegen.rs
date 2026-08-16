@@ -4045,6 +4045,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.bindText" => {
@@ -5680,6 +5681,23 @@ law always: Bool = 1 == 1
         assert!(ir.contains("sz_ui_run_rebuild"));
         assert!(ir.contains("sz_uibuild_"));
         assert!(ir.contains("sz_ui_reload_rebuild"));
+    }
+
+    #[test]
+    fn emit_view_text_releases_label() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.text("a"))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_lang_view_text(ptr ";
+        let at = ir.find(needle).expect("expected sz_lang_view_text");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of string {name} after View.text:\n{ir}"
+        );
     }
 
     #[test]
