@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Last-use release for let / `for` binders
+## Slice: Last-use release for bound ptrs through `if` / match
 
-The compiler releases owned string, List, Map / Set, and ADT temps after last use. Binders (`let` / `for`) drop the owned flag, so bound values stay allocated.
+Owned `let` / `for` binders drop after an `IO`, scalar, or fresh owned-ptr body. A bound ptr that aliases through `if` or match phi stays allocated.
 
-- Track owned on locals. Release the binder after last use in the body.
-- Proof: compiler IR or runtime alloc accounting shows a bound temp returns toward baseline.
+- Release a bound ptr after last use even when the body result is a phi of that ptr (retain the result, then drop the binder).
+- Proof: compiler IR shows `if (b) xs else ys` (or match) releases the unused arm's binder.
 - Out of scope: cycle collector, OS threads, device packaging.

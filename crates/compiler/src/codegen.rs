@@ -11,6 +11,23 @@ enum Kind {
     Io,
 }
 
+#[derive(Clone)]
+struct Local {
+    value: String,
+    kind: Kind,
+    owned: bool,
+}
+
+impl Local {
+    fn borrow(value: impl Into<String>, kind: Kind) -> Self {
+        Local {
+            value: value.into(),
+            kind,
+            owned: false,
+        }
+    }
+}
+
 /// Emit LLVM IR. Links against `libscuzz_rt`.
 pub fn emit_llvm(program: &Program) -> String {
     let mut strs: Vec<String> = Vec::new();
@@ -306,7 +323,7 @@ pub fn emit_llvm(program: &Program) -> String {
     }
 
     ctx.current_module = program.main.module.as_str();
-    let mut locals: HashMap<String, (String, Kind)> = HashMap::new();
+    let mut locals: HashMap<String, Local> = HashMap::new();
     let body_expr = emit_expr(&program.main.body, &mut ctx, &mut locals, "build");
     let reload_name = ctx.reload_fn.clone();
 
@@ -688,11 +705,11 @@ fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
     writeln!(out, ") {{").unwrap();
     writeln!(out, "entry:").unwrap();
 
-    let mut locals: HashMap<String, (String, Kind)> = HashMap::new();
+    let mut locals: HashMap<String, Local> = HashMap::new();
     for p in &def.params {
         locals.insert(
             p.name.clone(),
-            (format!("%{}", p.name), kind_of_type(&p.ty)),
+            Local::borrow(format!("%{}", p.name), kind_of_type(&p.ty)),
         );
     }
 
@@ -879,7 +896,7 @@ fn ensure_io(code: &mut String, kind: Kind, value: &str, tmp: &str) -> String {
 }
 
 /// Stable capture order for packing/unpacking flatMap/handleErrorWith env lists.
-fn capture_name_order(locals: &HashMap<String, (String, Kind)>) -> Vec<String> {
+fn capture_name_order(locals: &HashMap<String, Local>) -> Vec<String> {
     let mut names: Vec<String> = locals.keys().cloned().collect();
     names.sort();
     names
@@ -888,7 +905,7 @@ fn capture_name_order(locals: &HashMap<String, (String, Kind)>) -> Vec<String> {
 /// Pack enclosing locals into a `SzList` (head = first capture name). Ints are boxed.
 fn pack_env(
     code: &mut String,
-    locals: &HashMap<String, (String, Kind)>,
+    locals: &HashMap<String, Local>,
     names: &[String],
     prefix: &str,
 ) -> String {
@@ -898,11 +915,11 @@ fn pack_env(
     writeln!(code, "  %{prefix}_0 = call ptr @sz_list_nil()").unwrap();
     let mut cur = format!("%{prefix}_0");
     for (i, name) in names.iter().enumerate().rev() {
-        let (val, kind) = locals.get(name).expect("capture name");
-        let ptr = if *kind == Kind::Int || *kind == Kind::Float {
-            box_numeric(code, *kind, val, &format!("{prefix}_b{i}"))
+        let loc = locals.get(name).expect("capture name");
+        let ptr = if loc.kind == Kind::Int || loc.kind == Kind::Float {
+            box_numeric(code, loc.kind, &loc.value, &format!("{prefix}_b{i}"))
         } else {
-            val.clone()
+            loc.value.clone()
         };
         writeln!(
             code,
@@ -919,7 +936,7 @@ fn pack_env(
 fn emit_list_lit(
     elems: &[Expr],
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     let mut code = String::new();
@@ -953,8 +970,8 @@ fn emit_list_lit(
 /// Unpack `%env` list into `body_locals` (mirrors [`pack_env`] order).
 fn unpack_env_preamble(
     pre: &mut String,
-    body_locals: &mut HashMap<String, (String, Kind)>,
-    outer: &HashMap<String, (String, Kind)>,
+    body_locals: &mut HashMap<String, Local>,
+    outer: &HashMap<String, Local>,
     names: &[String],
     prefix: &str,
 ) {
@@ -963,16 +980,16 @@ fn unpack_env_preamble(
     }
     let mut cur = "%env".to_string();
     for (i, name) in names.iter().enumerate() {
-        let kind = outer.get(name).map(|(_, k)| *k).unwrap_or(Kind::Ptr);
+        let kind = outer.get(name).map(|l| l.kind).unwrap_or(Kind::Ptr);
         writeln!(pre, "  %{prefix}_h{i} = call ptr @sz_list_head(ptr {cur})").unwrap();
         writeln!(pre, "  %{prefix}_t{i} = call ptr @sz_list_tail(ptr {cur})").unwrap();
         match kind {
             Kind::Int | Kind::Float => {
                 let v = unbox_numeric(pre, kind, &format!("%{prefix}_h{i}"), name);
-                body_locals.insert(name.clone(), (v, kind));
+                body_locals.insert(name.clone(), Local::borrow(v, kind));
             }
             Kind::Ptr | Kind::Io => {
-                body_locals.insert(name.clone(), (format!("%{prefix}_h{i}"), kind));
+                body_locals.insert(name.clone(), Local::borrow(format!("%{prefix}_h{i}"), kind));
             }
         }
         cur = format!("%{prefix}_t{i}");
@@ -984,7 +1001,7 @@ fn emit_cstr_from_string(
     strs: &[String],
     expr: &Expr,
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> String {
     if let ExprKind::StrLit(s) = &expr.kind {
@@ -1013,7 +1030,7 @@ fn emit_sz_string(
     strs: &[String],
     expr: &Expr,
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> (String, bool) {
     if let ExprKind::StrLit(s) = &expr.kind {
@@ -1040,7 +1057,7 @@ fn emit_match(
     scrutinee: &Expr,
     arms: &[MatchArm],
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     let se = emit_expr(scrutinee, ctx, locals, &format!("{prefix}_sc"));
@@ -1148,7 +1165,7 @@ fn emit_pat(
     value: &str,
     kind: Kind,
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
     ok_label: &str,
     fail_label: &str,
@@ -1160,7 +1177,7 @@ fn emit_pat(
             writeln!(code, "  br label %{ok_label}").unwrap();
         }
         Pattern::Bind(name) => {
-            locals.insert(name.clone(), (value.to_string(), kind));
+            locals.insert(name.clone(), Local::borrow(value, kind));
             bound_names.push(name.clone());
             writeln!(code, "  br label %{ok_label}").unwrap();
         }
@@ -1288,7 +1305,7 @@ fn emit_payload_fields(
 fn emit_expr(
     expr: &Expr,
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     match &expr.kind {
@@ -1484,11 +1501,11 @@ fn emit_expr(
             owned_ptr(code, format!("%{prefix}_adt"))
         }
         ExprKind::Var(name) => {
-            let (val, kind) = locals
+            let loc = locals
                 .get(name)
                 .cloned()
-                .unwrap_or_else(|| ("null".into(), Kind::Ptr));
-            val_emitted(String::new(), val, kind)
+                .unwrap_or_else(|| Local::borrow("null", Kind::Ptr));
+            val_emitted(String::new(), loc.value, loc.kind)
         }
         ExprKind::Field { .. } => panic!("internal: unresolved field access in codegen"),
         ExprKind::MethodCall { .. } => panic!("internal: unresolved method call in codegen"),
@@ -1496,10 +1513,26 @@ fn emit_expr(
             // Nested vals must not reuse the same LLVM name prefix.
             let ve = emit_expr(value, ctx, locals, &format!("{prefix}_lv_{name}"));
             let mut code = ve.code;
-            locals.insert(name.clone(), (ve.value.clone(), ve.kind));
-            let be = emit_expr(body, ctx, locals, &format!("{prefix}_l_{name}"));
-            locals.remove(name);
+            locals.insert(
+                name.clone(),
+                Local {
+                    value: ve.value.clone(),
+                    kind: ve.kind,
+                    owned: ve.owned,
+                },
+            );
+            let mut be = emit_expr(body, ctx, locals, &format!("{prefix}_l_{name}"));
+            let bound = locals.remove(name);
             code.push_str(&be.code);
+            if let Some(bound) = bound {
+                if bound.owned && bound.kind == Kind::Ptr {
+                    if be.value == bound.value {
+                        be.owned = true;
+                    } else if be.kind != Kind::Ptr || be.owned {
+                        writeln!(code, "  call void @sz_release(ptr {})", bound.value).unwrap();
+                    }
+                }
+            }
             Emitted {
                 code,
                 value: be.value,
@@ -1579,7 +1612,7 @@ fn emit_expr(
             // Cont is a separate LLVM function. Capture enclosing locals with %env list.
             let capture_names = capture_name_order(locals);
             let mut pre = String::new();
-            let mut body_locals: HashMap<String, (String, Kind)> = HashMap::new();
+            let mut body_locals: HashMap<String, Local> = HashMap::new();
             unpack_env_preamble(
                 &mut pre,
                 &mut body_locals,
@@ -1591,9 +1624,9 @@ fn emit_expr(
             if let Some(p) = param {
                 if payload_kind == Kind::Int || payload_kind == Kind::Float {
                     let v = unbox_numeric(&mut pre, payload_kind, "%value", p);
-                    body_locals.insert(p.clone(), (v, payload_kind));
+                    body_locals.insert(p.clone(), Local::borrow(v, payload_kind));
                 } else {
-                    body_locals.insert(p.clone(), ("%value".into(), Kind::Ptr));
+                    body_locals.insert(p.clone(), Local::borrow("%value", Kind::Ptr));
                 }
             }
 
@@ -1648,7 +1681,7 @@ fn emit_expr(
             );
             if let Some(p) = param {
                 writeln!(pre, "  %{p}_msg = call ptr @sz_error_message(ptr %err)").unwrap();
-                body_locals.insert(p.clone(), (format!("%{p}_msg"), Kind::Ptr));
+                body_locals.insert(p.clone(), Local::borrow(format!("%{p}_msg"), Kind::Ptr));
             }
             let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("e{id}"));
             writeln!(
@@ -1769,7 +1802,7 @@ fn emit_expr(
 fn emit_interpolate(
     parts: &[crate::ast::InterpPart],
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     if parts.is_empty() {
@@ -1863,7 +1896,7 @@ fn emit_lambda(
     param: &Option<String>,
     body: &Expr,
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     let id = *ctx.cont_id;
@@ -1872,7 +1905,7 @@ fn emit_lambda(
 
     let capture_names = capture_name_order(locals);
     let mut pre = String::new();
-    let mut body_locals: HashMap<String, (String, Kind)> = HashMap::new();
+    let mut body_locals: HashMap<String, Local> = HashMap::new();
     unpack_env_preamble(
         &mut pre,
         &mut body_locals,
@@ -1881,7 +1914,7 @@ fn emit_lambda(
         &format!("t{id}"),
     );
     if let Some(p) = param {
-        body_locals.insert(p.clone(), ("%self".into(), Kind::Ptr));
+        body_locals.insert(p.clone(), Local::borrow("%self", Kind::Ptr));
     }
 
     let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("t{id}"));
@@ -1929,7 +1962,7 @@ fn emit_map_lambda(
     param: &Option<String>,
     body: &Expr,
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     let id = *ctx.cont_id;
@@ -1938,7 +1971,7 @@ fn emit_map_lambda(
 
     let capture_names = capture_name_order(locals);
     let mut pre = String::new();
-    let mut body_locals: HashMap<String, (String, Kind)> = HashMap::new();
+    let mut body_locals: HashMap<String, Local> = HashMap::new();
     unpack_env_preamble(
         &mut pre,
         &mut body_locals,
@@ -1948,7 +1981,7 @@ fn emit_map_lambda(
     );
     if let Some(p) = param {
         if p != "_" {
-            body_locals.insert(p.clone(), ("%n".into(), Kind::Int));
+            body_locals.insert(p.clone(), Local::borrow("%n", Kind::Int));
         }
     }
 
@@ -2007,7 +2040,7 @@ fn emit_each_lambda(
     param: &Option<String>,
     body: &Expr,
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     let id = *ctx.cont_id;
@@ -2016,7 +2049,7 @@ fn emit_each_lambda(
 
     let capture_names = capture_name_order(locals);
     let mut pre = String::new();
-    let mut body_locals: HashMap<String, (String, Kind)> = HashMap::new();
+    let mut body_locals: HashMap<String, Local> = HashMap::new();
     unpack_env_preamble(
         &mut pre,
         &mut body_locals,
@@ -2026,7 +2059,7 @@ fn emit_each_lambda(
     );
     if let Some(p) = param {
         if p != "_" {
-            body_locals.insert(p.clone(), ("%item".into(), Kind::Ptr));
+            body_locals.insert(p.clone(), Local::borrow("%item", Kind::Ptr));
         }
     }
 
@@ -2065,7 +2098,7 @@ fn emit_each_lambda(
 fn emit_view_each(
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     let src = emit_expr(&args[0], ctx, locals, &format!("{prefix}_src"));
@@ -2114,7 +2147,7 @@ fn emit_view_each(
 fn emit_signal_map(
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     assert!(args.len() == 2, "Signal.map expects 2 args");
@@ -2156,7 +2189,7 @@ fn emit_io_cont_lambda(
     param: &Option<String>,
     body: &Expr,
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     let id = *ctx.cont_id;
@@ -2165,7 +2198,7 @@ fn emit_io_cont_lambda(
 
     let capture_names = capture_name_order(locals);
     let mut pre = String::new();
-    let mut body_locals: HashMap<String, (String, Kind)> = HashMap::new();
+    let mut body_locals: HashMap<String, Local> = HashMap::new();
     unpack_env_preamble(
         &mut pre,
         &mut body_locals,
@@ -2175,7 +2208,7 @@ fn emit_io_cont_lambda(
     );
     if let Some(p) = param {
         if p != "_" {
-            body_locals.insert(p.clone(), ("%value".into(), Kind::Ptr));
+            body_locals.insert(p.clone(), Local::borrow("%value", Kind::Ptr));
         }
     }
 
@@ -2222,7 +2255,7 @@ fn emit_pred_lambda(
     param: &Option<String>,
     body: &Expr,
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     let id = *ctx.cont_id;
@@ -2231,7 +2264,7 @@ fn emit_pred_lambda(
 
     let capture_names = capture_name_order(locals);
     let mut pre = String::new();
-    let mut body_locals: HashMap<String, (String, Kind)> = HashMap::new();
+    let mut body_locals: HashMap<String, Local> = HashMap::new();
     unpack_env_preamble(
         &mut pre,
         &mut body_locals,
@@ -2241,7 +2274,7 @@ fn emit_pred_lambda(
     );
     if let Some(p) = param {
         if p != "_" {
-            body_locals.insert(p.clone(), ("%value".into(), Kind::Ptr));
+            body_locals.insert(p.clone(), Local::borrow("%value", Kind::Ptr));
         }
     }
 
@@ -2287,7 +2320,7 @@ fn emit_smap_lambda(
     param: &Option<String>,
     body: &Expr,
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
     box_int: bool,
 ) -> Emitted {
@@ -2297,7 +2330,7 @@ fn emit_smap_lambda(
 
     let capture_names = capture_name_order(locals);
     let mut pre = String::new();
-    let mut body_locals: HashMap<String, (String, Kind)> = HashMap::new();
+    let mut body_locals: HashMap<String, Local> = HashMap::new();
     unpack_env_preamble(
         &mut pre,
         &mut body_locals,
@@ -2307,7 +2340,7 @@ fn emit_smap_lambda(
     );
     if let Some(p) = param {
         if p != "_" {
-            body_locals.insert(p.clone(), ("%value".into(), Kind::Ptr));
+            body_locals.insert(p.clone(), Local::borrow("%value", Kind::Ptr));
         }
     }
 
@@ -2389,7 +2422,7 @@ fn emit_resource(
     callee: &str,
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     assert!(args.len() == 2, "{callee} expects 2 args");
@@ -2428,7 +2461,7 @@ fn emit_resource(
 fn emit_stream_evalmap(
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     assert!(args.len() == 2, "Stream.evalMap expects 2 args");
@@ -2454,7 +2487,7 @@ fn emit_stream_pred(
     rt: &str,
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
     as_io: bool,
 ) -> Emitted {
@@ -2490,7 +2523,7 @@ fn emit_stream_pred(
 fn emit_stream_filter(
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     emit_stream_pred(
@@ -2507,7 +2540,7 @@ fn emit_stream_filter(
 fn emit_stream_map(
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     emit_ptr_map(
@@ -2526,7 +2559,7 @@ fn emit_ptr_map(
     rt: &str,
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
     box_int: bool,
 ) -> Emitted {
@@ -2561,7 +2594,7 @@ fn emit_net_serve(
     rt: &str,
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     assert!(args.len() == 2, "{rt} expects 2 args");
@@ -2587,7 +2620,7 @@ fn emit_rebuild_lambda(
     param: &Option<String>,
     body: &Expr,
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     let id = *ctx.cont_id;
@@ -2596,7 +2629,7 @@ fn emit_rebuild_lambda(
 
     let capture_names = capture_name_order(locals);
     let mut pre = String::new();
-    let mut body_locals: HashMap<String, (String, Kind)> = HashMap::new();
+    let mut body_locals: HashMap<String, Local> = HashMap::new();
     unpack_env_preamble(
         &mut pre,
         &mut body_locals,
@@ -2606,7 +2639,7 @@ fn emit_rebuild_lambda(
     );
     if let Some(p) = param {
         if p != "_" {
-            body_locals.insert(p.clone(), ("%env".into(), Kind::Ptr));
+            body_locals.insert(p.clone(), Local::borrow("%env", Kind::Ptr));
         }
     }
 
@@ -2642,7 +2675,7 @@ fn emit_rebuild_lambda(
 fn emit_ui_run(
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     assert!(args.len() == 1, "Ui.run expects 1 arg");
@@ -2673,7 +2706,7 @@ fn emit_binary(
     left: &Expr,
     right: &Expr,
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     if matches!(op, BinOp::And | BinOp::Or) {
@@ -2825,7 +2858,7 @@ fn emit_short_circuit(
     left: &Expr,
     right: &Expr,
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     let id = *ctx.cont_id;
@@ -2916,7 +2949,7 @@ fn emit_call(
     callee: &str,
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, (String, Kind)>,
+    locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
     if callee == "Signal.map" {
@@ -4825,6 +4858,28 @@ def id(s: String): String = s
         assert!(
             ir[at..].contains("sz_release"),
             "expected last-use release of list temp:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_let_binder_release_after_len() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    xs = [1, 2]
+    n = List.len(xs)
+    _ <- IO.println(Str.fromInt(n))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call i64 @sz_list_len(ptr ";
+        let at = ir.find(needle).expect("expected sz_list_len");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected let-binder release of {name} after last use:\n{ir}"
         );
     }
 
