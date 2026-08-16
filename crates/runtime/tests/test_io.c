@@ -2407,8 +2407,10 @@ int main(void) {
     sz_list_free(ys);
     ys = sz_list_set_at(xs, 2, c);
     assert(ys == xs);
+    sz_release(ys);
     ys = sz_list_set_at(xs, -1, c);
     assert(ys == xs);
+    sz_release(ys);
     ys = sz_list_set_at(NULL, 0, c);
     assert(sz_list_is_empty(ys));
     sz_list_free(xs);

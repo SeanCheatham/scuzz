@@ -3343,7 +3343,13 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
+                writeln!(code, "  call void @sz_release(ptr {elem})").unwrap();
+            } else {
+                drop_owned_ptr(&mut code, &emitted_args[2]);
+            }
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "Map.empty" | "Set.empty" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_map_empty()").unwrap();
@@ -5282,6 +5288,24 @@ def id(m: Map[String, String]): Map[String, String] = m
         crate::typ::typecheck(&p).expect("typecheck");
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_list_set_at"));
+    }
+
+    #[test]
+    fn emit_list_temp_release_after_set_at() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join(List.setAt(["a", "b"], 0, "c"), ","))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_list_set_at(ptr ";
+        let at = ir.find(needle).expect("expected sz_list_set_at");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after setAt:\n{ir}"
+        );
     }
 
     #[test]
