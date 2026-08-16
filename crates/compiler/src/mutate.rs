@@ -391,16 +391,6 @@ fn mutate_prog_at(mut program: Program, target: i32, mode: MutateMode) -> (Progr
     (program, seen)
 }
 
-/// Count residual oracle mutation sites on a verify-prepared program.
-pub fn mutate_count(program: &Program) -> i32 {
-    mutate_count_mode(program, MutateMode::Oracles)
-}
-
-/// Apply oracle site `target` (0-based) on a verify-prepared program.
-pub fn mutate_apply(program: Program, target: i32) -> Program {
-    mutate_apply_mode(program, target, MutateMode::Oracles)
-}
-
 pub fn mutate_count_mode(program: &Program, mode: MutateMode) -> i32 {
     mutate_prog_at(program.clone(), -1, mode).1
 }
@@ -425,7 +415,7 @@ mod tests {
 "#,
         )
         .unwrap();
-        assert_eq!(mutate_count(&p), 0);
+        assert_eq!(mutate_count_mode(&p, MutateMode::Oracles), 0);
     }
 
     #[test]
@@ -440,7 +430,7 @@ record Point(x: Int where x >= 0, y: Int where y == y)
         )
         .unwrap();
         residualize_refinements(&mut p);
-        assert!(mutate_count(&p) > 0);
+        assert!(mutate_count_mode(&p, MutateMode::Oracles) > 0);
     }
 
     #[test]
@@ -452,9 +442,9 @@ record Point(x: Int where x >= 0, y: Int where y == y)
 "#,
         )
         .unwrap();
-        let n = mutate_count(&p);
+        let n = mutate_count_mode(&p, MutateMode::Oracles);
         assert!(n >= 1);
-        let m = mutate_apply(p, 0);
+        let m = mutate_apply_mode(p, 0, MutateMode::Oracles);
         let dumped = format!("{:?}", m.main.body.kind);
         assert!(
             dumped.contains("If") || dumped.contains("IntLit(0)"),

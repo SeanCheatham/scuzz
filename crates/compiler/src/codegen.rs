@@ -55,7 +55,6 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_io_fail_cstr(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_sleep_ms(i64)").unwrap();
     writeln!(out, "declare ptr @sz_io_handle_error_with(ptr, ptr, ptr)").unwrap();
-    writeln!(out, "declare ptr @sz_io_attempt(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_attempt_as_result(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_error_message(ptr)").unwrap();
     writeln!(out, "declare void @sz_panic(ptr)").unwrap();
@@ -4653,7 +4652,6 @@ law always: Bool = 1 == 1
         assert!(ir.contains("sz_ui_run_rebuild"));
         assert!(ir.contains("sz_uibuild_"));
         assert!(ir.contains("sz_ui_reload_rebuild"));
-        assert!(!ir.contains("call ptr @sz_ui_run_view"));
     }
 
     #[test]

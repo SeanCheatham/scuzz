@@ -48,8 +48,7 @@ jobs:
       - name: Install clang/make/X11/xvfb + Skia link deps
         run: |
           sudo apt-get update
-          # zlib/bz2: SDK/dev packages for the Skia CPU prebuilt. Brotli stays
-          # inside libsk_capi.a.
+          # zlib/bz2: host libs for the Skia CPU prebuilt.
           sudo apt-get install -y clang make libx11-dev xvfb \
             zlib1g-dev libbz2-dev
 

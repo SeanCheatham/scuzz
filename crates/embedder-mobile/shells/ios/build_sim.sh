@@ -34,7 +34,6 @@ APP="$OUT/$NAME.app"
 rm -rf "$OUT"
 mkdir -p "$OUT/obj"
 
-# App IR (host binary is a byproduct; the .ll is what this script consumes).
 SCUZZ="$ROOT/target/release/scuzz"
 if [ ! -x "$SCUZZ" ]; then
   SCUZZ="$ROOT/target/debug/scuzz"

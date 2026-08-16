@@ -43,13 +43,8 @@ lib-sk-sw: $(OBJ) | build
 
 lib-skia: | build
 	@test -f "$(PREBUILT_LIB)"
+	rm -f build/*.a
 	cp -f "$(PREBUILT_LIB)" build/libsk_capi.a
-	# Optional companion archives from the same prebuilt dir (not named libsk_capi.a).
-	@for f in "$(PREBUILT_DIR)"/*.a; do \
-	  [ -e "$$f" ] || continue; \
-	  b=$$(basename "$$f"); \
-	  if [ "$$b" != "libsk_capi.a" ]; then cp -f "$$f" "build/$$b"; fi; \
-	done
 	echo skia > build/sk_capi_backend
 
 build/test_skia: tests/test_skia.c lib

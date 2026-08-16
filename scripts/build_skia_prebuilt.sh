@@ -67,8 +67,7 @@ GN_ARGS=(
   'skia_use_system_harfbuzz=false'
   'skia_use_freetype=true'
   'skia_use_system_freetype2=false'
-  # CPU prebuilt ships DejaVu TTF. WOFF2 would pull host or Skia brotli into the
-  # app link. Keep it off so libsk_capi.a does not need -lbrotlidec.
+  # DejaVu TTF only. WOFF2 would need Brotli on the app link.
   'skia_use_freetype_woff2=false'
   'skia_enable_fontmgr_custom_embedded=true'
   'skia_enable_fontmgr_custom_empty=true'
@@ -110,9 +109,9 @@ cc -O2 -fPIC -c "${FONT_INC}" -o "${PKG}/obj/scuzz_embedded_font.o"
 
 echo "==> pack libsk_capi.a"
 cp -f "${SKIA}/out/Static/libskia.a" "${PKG}/libskia.a"
-# Companion static libs from the Skia build (plus brotli if a future GN flip
-# produces it — merge so the fat archive does not leak -lbrotlidec).
-for dep in freetype2 harfbuzz zlib png jpeg skcms brotli brotlidec brotlicommon; do
+# Merge Skia static libs into the fat archive. Include brotli names if present.
+SKIA_STATIC_LIBS=(freetype2 harfbuzz zlib png jpeg skcms brotli brotlidec brotlicommon)
+for dep in "${SKIA_STATIC_LIBS[@]}"; do
   if [[ -f "${SKIA}/out/Static/lib${dep}.a" ]]; then
     cp -f "${SKIA}/out/Static/lib${dep}.a" "${PKG}/lib${dep}.a"
   fi
@@ -124,7 +123,7 @@ SHIM_OBJS=(
   "${PKG}/obj/scuzz_embedded_font.o"
 )
 ARCHIVES=( "${PKG}/libskia.a" )
-for dep in freetype2 harfbuzz zlib png jpeg skcms brotli brotlidec brotlicommon; do
+for dep in "${SKIA_STATIC_LIBS[@]}"; do
   if [[ -f "${PKG}/lib${dep}.a" ]]; then
     ARCHIVES+=( "${PKG}/lib${dep}.a" )
   fi
@@ -160,15 +159,16 @@ else
   rm -rf "${COMBINED}"
 fi
 
-rm -f "${PKG}"/libskia.a "${PKG}"/libfreetype2.a "${PKG}"/libharfbuzz.a \
-  "${PKG}"/libzlib.a "${PKG}"/libpng.a "${PKG}"/libjpeg.a "${PKG}"/libskcms.a \
-  "${PKG}"/libbrotli.a "${PKG}"/libbrotlidec.a "${PKG}"/libbrotlicommon.a
+rm -f "${PKG}"/libskia.a
+for dep in "${SKIA_STATIC_LIBS[@]}"; do
+  rm -f "${PKG}/lib${dep}.a"
+done
 rm -rf "${PKG}/obj"
 
-# Fail closed: app link must not need host -lbrotlidec.
+# App link must not need host Brotli.
 if nm "${PKG}/libsk_capi.a" | grep -E ' U (_Brotli|Brotli)'; then
-  echo "build_skia_prebuilt: libsk_capi.a still has undefined Brotli symbols" >&2
-  echo "merge Skia or static libbrotlidec.a / libbrotlicommon.a into the fat archive" >&2
+  echo "build_skia_prebuilt: libsk_capi.a has undefined Brotli symbols" >&2
+  echo "merge static libbrotlidec.a / libbrotlicommon.a into the fat archive" >&2
   exit 1
 fi
 

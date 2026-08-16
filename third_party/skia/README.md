@@ -15,21 +15,18 @@ satisfied. Opt out with `SCUZZ_SKIA=sk_sw` for the in-tree software backend.
 
 `{triple}` is replaced with the host triple (for example `x86_64-unknown-linux-gnu`,
 `aarch64-apple-darwin`). Layout after fetch:
-`third_party/skia/prebuilt/<triple>/libsk_capi.a` (plus optional companion `.a`
-files). `crates/ffi-skia/Makefile` copies that archive into
+`third_party/skia/prebuilt/<triple>/libsk_capi.a`.
+`crates/ffi-skia/Makefile` copies that archive into
 `crates/ffi-skia/build/` (marker `build/sk_capi_backend` = `skia`).
 
 **Tarball contract:** a static library exporting every symbol in
 `crates/ffi-skia/include/sk_capi.h` (including measure / text-size APIs). Callers
-need no Skia headers — only `sk_capi.h`. Prefer a single fat
-`libsk_capi.a` (shim + Skia objects + embedded font). Companion archives in the
-same directory are also linked. Linking the Skia prebuilt needs
-`-lstdc++`/`-lc++` `-lm -lz -lbz2` (`scuzz` adds these when
-`build/sk_capi_backend` is `skia`). On Darwin also link CoreFoundation /
-CoreGraphics / CoreText / Foundation / Carbon. The fat archive does not
-need host brotli. `build_skia_prebuilt.sh` sets `skia_use_freetype_woff2=false`,
-merges any `libbrotli*.a` Skia produced, and fails if `libsk_capi.a` still has
-undefined Brotli symbols. On Linux install `zlib1g-dev libbz2-dev`.
+need no Skia headers — only `sk_capi.h`. One fat `libsk_capi.a` (shim + Skia
+objects + embedded font). Linking needs `-lstdc++`/`-lc++` `-lm -lz -lbz2`
+(`scuzz` adds these when `build/sk_capi_backend` is `skia`). On Darwin also link
+CoreFoundation / CoreGraphics / CoreText / Foundation / Carbon. The packer turns
+WOFF2 off and fails if the fat archive has undefined Brotli symbols. On Linux
+install `zlib1g-dev libbz2-dev`.
 
 **Pin / release:** `third_party/skia/PIN` records the as-needed `skia-cpu-vN`
 URL template (`url=…/skia-{triple}-cpu.tar.gz`). `scripts/package_release.sh`

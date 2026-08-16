@@ -231,17 +231,15 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
             link.arg("-lstdc++");
         }
         link.arg("-lm");
-        // Compression helpers used by FreeType inside real Skia prebuilts.
         let backend = ffi_skia_dir.join("build/sk_capi_backend");
         let is_skia = std::fs::read_to_string(&backend)
             .map(|s| s.trim() == "skia")
             .unwrap_or(false);
         if is_skia {
-            // zlib/bz2 stay on the link line (SDK or -dev packages). The fat
-            // archive does not need host brotli (WOFF2 off; packer fails if it leaks).
+            // Host zlib/bz2 for FreeType in the Skia fat archive.
             link.arg("-lz").arg("-lbz2");
             if cfg!(target_os = "macos") {
-                // Residual CoreText / Carbon symbols in the Darwin Skia fat archive.
+                // Darwin Skia archive needs these frameworks.
                 for fw in [
                     "CoreFoundation",
                     "CoreGraphics",
@@ -250,18 +248,6 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
                     "Carbon",
                 ] {
                     link.arg("-framework").arg(fw);
-                }
-            }
-        }
-
-        // Optional companion archives copied next to libsk_capi.a by ffi-skia Makefile.
-        if let Ok(entries) = std::fs::read_dir(ffi_skia_dir.join("build")) {
-            for ent in entries.flatten() {
-                let p = ent.path();
-                if p.extension().and_then(|e| e.to_str()) == Some("a")
-                    && p.file_name().and_then(|n| n.to_str()) != Some("libsk_capi.a")
-                {
-                    link.arg(p);
                 }
             }
         }

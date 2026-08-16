@@ -48,7 +48,7 @@ if [[ -f "${DEST}/${TRIPLE}/libsk_capi.a" && -z "${SCUZZ_SKIA_FORCE:-}" ]]; then
 fi
 
 mkdir -p "${DEST}/${TRIPLE}"
-# Clear previous contents so stale companion libs do not remain.
+# Clear the dest dir so a prior fetch cannot leave extra files.
 rm -rf "${DEST}/${TRIPLE:?}/"*
 tmpdir="$(mktemp -d)"
 trap 'rm -rf "$tmpdir"' EXIT

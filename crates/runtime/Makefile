@@ -34,9 +34,8 @@ lib: build/libscuzz_rt.a
 build/libscuzz_rt.a: $(OBJ)
 	ar rcs $@ $(OBJ)
 
-# Real Skia prebuilts need C++ + zlib/bz2 (+ Darwin text frameworks).
-# The fat archive does not need host brotli. CoreFoundation: macOS runtime
-# parks main in CFRunLoop for AppKit hops.
+# Skia CPU prebuilt: C++ + zlib/bz2 (+ Darwin text frameworks).
+# CoreFoundation: macOS runtime parks main in CFRunLoop for AppKit hops.
 SKIA_LINK = $$([ -f $(FFI_SKIA)/build/sk_capi_backend ] && grep -qx skia $(FFI_SKIA)/build/sk_capi_backend && \
 	if [ "$$(uname -s)" = Darwin ]; then \
 	  echo -lc++ -lm -lz -lbz2 -framework CoreFoundation -framework CoreGraphics -framework CoreText -framework Foundation -framework Carbon; \

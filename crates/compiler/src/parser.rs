@@ -2318,8 +2318,8 @@ enum Wrap:
 @main def main: IO[Unit] =
   for {
     count = Signal.int(0)
-    root = View.column()
-  } yield Ui.run(root)
+    label = Signal.map(count, n => "x")
+  } yield IO.println(label)
 "#;
         let p = parse(src).unwrap();
         match &p.main.body.kind {
@@ -2331,9 +2331,9 @@ enum Wrap:
                 ));
                 assert!(matches!(
                     &binders[1],
-                    ForBinder::Eq { name, .. } if name == "root"
+                    ForBinder::Eq { name, .. } if name == "label"
                 ));
-                assert!(matches!(&body.kind, ExprKind::Call { callee, .. } if callee == "Ui.run"));
+                assert!(matches!(&body.kind, ExprKind::IoPrintln(_)));
             }
             other => panic!("expected For, got {other:?}"),
         }

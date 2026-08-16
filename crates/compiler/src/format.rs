@@ -717,13 +717,13 @@ record Box[T](x: T):
         let src = r#"@main def main: IO[Unit] =
   for {
     count = Signal.int(0)
-    _ <- Ui.run(count)
+    _ <- Ui.run(_ => View.text("x"))
   } yield IO.pure(())
 "#;
         let out = format_source(src).unwrap();
         assert!(out.contains("for {"));
         assert!(out.contains("count = Signal.int(0)"));
-        assert!(out.contains("_ <- Ui.run(count)"));
+        assert!(out.contains("_ <- Ui.run(_ => View.text(\"x\"))"));
         assert!(out.contains("yield IO.pure(())"));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
