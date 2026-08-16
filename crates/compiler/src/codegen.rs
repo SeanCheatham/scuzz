@@ -1572,21 +1572,29 @@ fn emit_expr(
             )
             .unwrap();
 
-            writeln!(code, "{then_l}:").unwrap();
             let te = emit_expr(then_branch, ctx, locals, &format!("{prefix}_t{id}"));
+            let ee = emit_expr(else_branch, ctx, locals, &format!("{prefix}_e{id}"));
+            let kind = te.kind;
+            let mixed_ptr = kind == Kind::Ptr && te.owned != ee.owned;
+
+            writeln!(code, "{then_l}:").unwrap();
             code.push_str(&te.code);
+            if mixed_ptr && !te.owned {
+                writeln!(code, "  call void @sz_retain(ptr {})", te.value).unwrap();
+            }
             writeln!(code, "  br label %{then_join}").unwrap();
             writeln!(code, "{then_join}:").unwrap();
             writeln!(code, "  br label %{merge}").unwrap();
 
             writeln!(code, "{else_l}:").unwrap();
-            let ee = emit_expr(else_branch, ctx, locals, &format!("{prefix}_e{id}"));
             code.push_str(&ee.code);
+            if mixed_ptr && !ee.owned {
+                writeln!(code, "  call void @sz_retain(ptr {})", ee.value).unwrap();
+            }
             writeln!(code, "  br label %{else_join}").unwrap();
             writeln!(code, "{else_join}:").unwrap();
             writeln!(code, "  br label %{merge}").unwrap();
 
-            let kind = te.kind;
             let payload = te.payload;
             let ty = llvm_kind_ty(kind);
             writeln!(code, "{merge}:").unwrap();
@@ -1601,7 +1609,7 @@ fn emit_expr(
                 value: format!("%{prefix}_phi"),
                 kind,
                 payload,
-                owned: kind == Kind::Ptr && te.owned && ee.owned,
+                owned: kind == Kind::Ptr && (te.owned || ee.owned),
             }
         }
         ExprKind::Lambda { param, body } => emit_lambda(param, body, ctx, locals, prefix),
@@ -4945,6 +4953,49 @@ def id(s: String): String = s
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of if-arm list {name}:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_if_mixed_arm_retain_then_release() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.len(for {
+    xs = [1]
+  } yield if (false) xs else [2])))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let roots: Vec<&str> = ir
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                if line.contains("_cl") {
+                    return None;
+                }
+                let (name, rest) = line.split_once(" = call ptr @sz_list_cons(")?;
+                if rest.contains("@") {
+                    return None;
+                }
+                Some(name.trim())
+            })
+            .collect();
+        assert!(
+            roots.len() >= 2,
+            "expected xs and else-arm list roots:\n{ir}"
+        );
+        assert!(
+            ir.contains(&format!("call void @sz_retain(ptr {})", roots[0])),
+            "expected retain of borrowed xs {}:\n{ir}",
+            roots[0]
+        );
+        let needle = "call i64 @sz_list_len(ptr ";
+        let at = ir.find(needle).expect("expected sz_list_len");
+        let phi = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {phi})")),
+            "expected last-use release of mixed if-phi {phi}:\n{ir}"
         );
     }
 

@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Last-use release for mixed owned / borrowed `if` arms
+## Slice: Last-use release for mixed owned / borrowed match arms
 
-An `if` phi is owned only when both arms produce owned ptrs. `if (b) xs else [1]` stays allocated when the borrowed arm is taken.
+An `if` phi retains a borrowed arm when the other arm is owned. Match still marks the phi owned only when every arm produces an owned ptr. `xs match { case A => xs; case B => [1] }` stays allocated when the borrowed arm is taken.
 
-- Retain the borrowed arm at the join, then mark the phi owned so a later last-use drops it.
-- Proof: compiler IR for `List.len(for { xs = [1] } yield if (false) xs else [2])` shows `sz_retain` of `xs` and `sz_release` of the phi.
+- Retain each borrowed match arm at its join when any arm is owned, then mark the phi owned.
+- Proof: compiler IR for a match that yields a bound list or a fresh list shows `sz_retain` of the bound list and `sz_release` of the phi after `List.len`.
 - Out of scope: cycle collector, OS threads, device packaging.
