@@ -117,6 +117,7 @@ SzList *sz_list_map(SzList *xs, SzListMapFn fn, void *env) {
     sz_panic("sz_list_map(null fn)");
   if (!xs)
     return NULL;
+  /* Mapper returns +1. Cons retains. Drop the mapper ref. */
   h = fn(xs->head, env);
   n = sz_list_cons_take(h, sz_list_map(xs->tail, fn, env));
   sz_release(h);

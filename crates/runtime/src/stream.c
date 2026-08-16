@@ -348,8 +348,12 @@ static SzIo *after_sync_map(void *inner_acc, void *env) {
   SzList *acc = st->outer_acc;
   while (!sz_list_is_empty(xs)) {
     void *h = sz_list_head(xs);
+    void *mapped;
     xs = sz_list_tail(xs);
-    acc = sz_list_cons(st->f(h, st->fenv), acc);
+    /* Mapper returns +1. Cons retains. Drop the mapper ref. */
+    mapped = st->f(h, st->fenv);
+    acc = sz_list_cons(mapped, acc);
+    sz_release(mapped);
   }
   sz_free(st);
   return sz_io_pure(acc);

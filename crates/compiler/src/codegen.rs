@@ -2404,6 +2404,14 @@ fn emit_smap_lambda(
             body_emitted.kind == Kind::Ptr,
             "map mapper must be a pointer or numeric"
         );
+        if !body_emitted.owned {
+            writeln!(
+                ctx.conts,
+                "  call void @sz_retain(ptr {})",
+                body_emitted.value
+            )
+            .unwrap();
+        }
         writeln!(ctx.conts, "  ret ptr {}", body_emitted.value).unwrap();
     }
     writeln!(ctx.conts, "}}").unwrap();
@@ -5424,6 +5432,26 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {pack})")),
             "expected last-use release of map closure {pack}:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_map_retains_borrowed_element() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.len(List.map(["a"], x => x))))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let fn_at = ir
+            .find("define internal ptr @sz_smap_")
+            .expect("expected sz_smap_");
+        let fn_end = ir[fn_at..].find("\n}").expect("expected smap body end");
+        let body = &ir[fn_at..fn_at + fn_end];
+        assert!(
+            body.contains("call void @sz_retain(ptr %value)"),
+            "expected retain of borrowed map element:\n{body}"
         );
     }
 

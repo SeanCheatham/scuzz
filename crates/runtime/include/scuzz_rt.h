@@ -367,7 +367,8 @@ SzList *sz_list_append(SzList *xs, void *x);
 SzList *sz_list_set_at(SzList *xs, int64_t index, void *v);
 /* Keep heads for which `pred` is nonzero. New spine; cons retains heads. */
 SzList *sz_list_filter(SzList *xs, SzListPred pred, void *env);
-/* New spine. `fn` must not free `head`. Cons retains mapped heads. */
+/* New spine. `fn` returns an owned pointer. Retain `head` when `fn` yields it.
+ * Cons retains the mapped head. Map then drops the mapper ref. */
 SzList *sz_list_map(SzList *xs, SzListMapFn fn, void *env);
 /* Release the spine; heads drop through RC. */
 void sz_list_free(SzList *xs);

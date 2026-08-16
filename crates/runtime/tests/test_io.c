@@ -845,6 +845,7 @@ static void *map_bang(void *head, void *env) {
 
 static void *map_id(void *head, void *env) {
   (void)env;
+  sz_retain(head);
   return head;
 }
 
