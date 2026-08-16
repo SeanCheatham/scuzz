@@ -4320,6 +4320,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[2]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.listTile" => {
@@ -5894,6 +5895,34 @@ law always: Bool = 1 == 1
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of string {name} after View.inputChip:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_choice_chip_releases_label() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.choiceChip(n, 0, "a"))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_lang_view_choice_chip(ptr ";
+        let at = ir.find(needle).expect("expected sz_lang_view_choice_chip");
+        let rest = &ir[at + needle.len()..];
+        let args = rest.split(')').next().unwrap();
+        let name = args
+            .split(',')
+            .nth(2)
+            .unwrap()
+            .trim()
+            .trim_start_matches("ptr ")
+            .trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of string {name} after View.choiceChip:\n{ir}"
         );
     }
 
