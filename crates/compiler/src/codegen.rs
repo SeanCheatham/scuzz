@@ -3818,7 +3818,8 @@ fn emit_call(
                 &format!("{prefix}_eval"),
             );
             writeln!(code, "  %{prefix}_v = call ptr @sz_stream_eval(ptr {io})").unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            writeln!(code, "  call void @sz_release(ptr {io})").unwrap();
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "Stream.concat" => {
             writeln!(
@@ -5309,6 +5310,27 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of list {name} after Stream.emits:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_stream_eval_releases_io() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    xs <- Stream.compileToList(Stream.eval(IO.pure("a")))
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_stream_eval(ptr ";
+        let at = ir.find(needle).expect("expected sz_stream_eval");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of IO {name} after Stream.eval:\n{ir}"
         );
     }
 

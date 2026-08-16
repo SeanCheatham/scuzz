@@ -50,6 +50,7 @@ SzStream *sz_stream_emits(SzList *xs) {
 SzStream *sz_stream_eval(SzIo *io) {
   if (!io)
     sz_panic("sz_stream_eval(null)");
+  sz_retain(io);
   return st_new(SZ_ST_EVAL, io, sz_stream_nil(), NULL);
 }
 
