@@ -42,11 +42,46 @@ static int gpu_make_current(void) {
 #else
 
 #include <EGL/egl.h>
+#include <EGL/eglext.h>
 #include <GLES2/gl2.h>
+
+#ifndef EGL_PLATFORM_SURFACELESS_MESA
+#define EGL_PLATFORM_SURFACELESS_MESA 0x31DD
+#endif
+#ifndef PFNEGLGETPLATFORMDISPLAYEXTPROC
+typedef EGLDisplay (*PFNEGLGETPLATFORMDISPLAYEXTPROC)(EGLenum platform,
+                                                      void *native_display,
+                                                      const EGLint *attrib_list);
+#endif
 
 static EGLDisplay g_dpy = EGL_NO_DISPLAY;
 static EGLContext g_ctx = EGL_NO_CONTEXT;
 static EGLSurface g_surf = EGL_NO_SURFACE;
+
+/* Headless first: surfaceless does not need X11 or Wayland. Fall back to the
+ * default display when a window system is present. */
+static int gpu_init_display(void) {
+  PFNEGLGETPLATFORMDISPLAYEXTPROC get_plat;
+  EGLDisplay dpy = EGL_NO_DISPLAY;
+
+  get_plat = (PFNEGLGETPLATFORMDISPLAYEXTPROC)eglGetProcAddress(
+      "eglGetPlatformDisplayEXT");
+  if (get_plat) {
+    dpy = get_plat(EGL_PLATFORM_SURFACELESS_MESA, (void *)EGL_DEFAULT_DISPLAY,
+                   NULL);
+    if (dpy != EGL_NO_DISPLAY && eglInitialize(dpy, NULL, NULL)) {
+      g_dpy = dpy;
+      return 1;
+    }
+  }
+  dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
+  if (dpy == EGL_NO_DISPLAY)
+    return 0;
+  if (!eglInitialize(dpy, NULL, NULL))
+    return 0;
+  g_dpy = dpy;
+  return 1;
+}
 
 static int gpu_make_current(void) {
   EGLConfig cfg;
@@ -69,10 +104,7 @@ static int gpu_make_current(void) {
   if (g_ctx != EGL_NO_CONTEXT) {
     return eglMakeCurrent(g_dpy, g_surf, g_surf, g_ctx) == EGL_TRUE;
   }
-  g_dpy = eglGetDisplay(EGL_DEFAULT_DISPLAY);
-  if (g_dpy == EGL_NO_DISPLAY)
-    return 0;
-  if (!eglInitialize(g_dpy, NULL, NULL))
+  if (!gpu_init_display())
     return 0;
   if (!eglChooseConfig(g_dpy, cfg_attr, &cfg, 1, &n) || n < 1)
     return 0;

@@ -27,7 +27,8 @@ static SkSurface *make_session_surface(int pw, int ph) {
     fprintf(stderr, "missing OpenGL — install Xcode, then retry\n");
 #else
     fprintf(stderr,
-            "missing OpenGL — install mesa (libegl1-mesa-dev libgles2-mesa-dev)\n");
+            "missing OpenGL — install mesa (libegl1-mesa-dev libgles2-mesa-dev "
+            "libgl1-mesa-dri)\n");
 #endif
   }
   return s;
