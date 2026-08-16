@@ -357,7 +357,7 @@ struct Emitted {
     kind: Kind,
     /// When `kind == Io`, the kind of the successful payload (Int for Sys.exec).
     payload: Kind,
-    /// Compiler owns a +1 on this ptr (string / list / map temps). Release after last use.
+    /// Compiler owns a +1 on this ptr (string / list / map / ADT temps). Release after last use.
     owned: bool,
 }
 
@@ -464,8 +464,14 @@ fn kind_of_type(ty: &Type) -> Kind {
 }
 
 fn retain_borrowed_ret(ty: &Type) -> bool {
-    matches!(ty, Type::String | Type::List(_))
-        || matches!(ty, Type::App(n, _) if n == "Map" || n == "Set")
+    match ty {
+        Type::String | Type::List(_) | Type::Adt(_) => true,
+        Type::App(n, _) => !matches!(
+            n.as_str(),
+            "Fiber" | "Ref" | "Queue" | "Deferred" | "Resource" | "Stream"
+        ),
+        _ => false,
+    }
 }
 
 fn llvm_kind_ty(kind: Kind) -> &'static str {
@@ -1122,12 +1128,18 @@ fn emit_match(
         write!(code, " [ {val}, %{lab} ]").unwrap();
     }
     writeln!(code).unwrap();
+    if se.owned {
+        if result_kind == Kind::Ptr {
+            writeln!(code, "  call void @sz_retain(ptr %{prefix}_phi)").unwrap();
+        }
+        writeln!(code, "  call void @sz_release(ptr {})", se.value).unwrap();
+    }
     Emitted {
         code,
         value: format!("%{prefix}_phi"),
         kind: result_kind,
         payload: result_payload,
-        owned: false,
+        owned: se.owned && result_kind == Kind::Ptr,
     }
 }
 
@@ -1373,6 +1385,9 @@ fn emit_expr(
                 .copied()
                 .unwrap_or(0);
             let mut code = String::new();
+            let mut extra_box: Option<String> = None;
+            let mut extra_pack: Option<String> = None;
+            let mut extra_owned: Option<Emitted> = None;
             let payload_ptr = if args.is_empty() {
                 "null".to_string()
             } else {
@@ -1388,7 +1403,7 @@ fn emit_expr(
                         Some(Type::Int) | Some(Type::Bool) | Some(Type::Float) => {
                             let want = kind_of_type(field_tys.first().unwrap());
                             let v = if ae.kind == want {
-                                ae.value
+                                ae.value.clone()
                             } else if want == Kind::Float {
                                 writeln!(code, "  %{prefix}_ap0 = bitcast i64 0 to double")
                                     .unwrap();
@@ -1397,9 +1412,15 @@ fn emit_expr(
                                 writeln!(code, "  %{prefix}_ap0 = add i64 0, 0").unwrap();
                                 format!("%{prefix}_ap0")
                             };
-                            box_numeric(&mut code, want, &v, &format!("{prefix}_box"))
+                            let boxed = box_numeric(&mut code, want, &v, &format!("{prefix}_box"));
+                            extra_box = Some(boxed.clone());
+                            boxed
                         }
-                        _ => ae.value,
+                        _ => {
+                            let p = ae.value.clone();
+                            extra_owned = Some(ae);
+                            p
+                        }
                     }
                 } else {
                     // N>=2: pack field values into a List (Ints boxed).
@@ -1408,22 +1429,25 @@ fn emit_expr(
                     for (i, arg) in args.iter().enumerate().rev() {
                         let ae = emit_expr(arg, ctx, locals, &format!("{prefix}_ap{i}"));
                         code.push_str(&ae.code);
-                        let ptr = match field_tys.get(i) {
-                            Some(Type::Int) | Some(Type::Bool) | Some(Type::Float) => {
-                                let want = kind_of_type(field_tys.get(i).unwrap());
-                                let v = if ae.kind == want {
-                                    ae.value.clone()
-                                } else if want == Kind::Float {
-                                    writeln!(code, "  %{prefix}_ap{i}i = bitcast i64 0 to double")
-                                        .unwrap();
-                                    format!("%{prefix}_ap{i}i")
-                                } else {
-                                    writeln!(code, "  %{prefix}_ap{i}i = add i64 0, 0").unwrap();
-                                    format!("%{prefix}_ap{i}i")
-                                };
-                                box_numeric(&mut code, want, &v, &format!("{prefix}_bx{i}"))
-                            }
-                            _ => ae.value.clone(),
+                        let numeric = matches!(
+                            field_tys.get(i),
+                            Some(Type::Int) | Some(Type::Bool) | Some(Type::Float)
+                        );
+                        let ptr = if numeric {
+                            let want = kind_of_type(field_tys.get(i).unwrap());
+                            let v = if ae.kind == want {
+                                ae.value.clone()
+                            } else if want == Kind::Float {
+                                writeln!(code, "  %{prefix}_ap{i}i = bitcast i64 0 to double")
+                                    .unwrap();
+                                format!("%{prefix}_ap{i}i")
+                            } else {
+                                writeln!(code, "  %{prefix}_ap{i}i = add i64 0, 0").unwrap();
+                                format!("%{prefix}_ap{i}i")
+                            };
+                            box_numeric(&mut code, want, &v, &format!("{prefix}_bx{i}"))
+                        } else {
+                            ae.value.clone()
                         };
                         let next = format!("%{prefix}_pl{}", args.len() - i);
                         writeln!(
@@ -1432,8 +1456,14 @@ fn emit_expr(
                         )
                         .unwrap();
                         writeln!(code, "  call void @sz_release(ptr {cur})").unwrap();
+                        if numeric {
+                            writeln!(code, "  call void @sz_release(ptr {ptr})").unwrap();
+                        } else {
+                            drop_owned_ptr(&mut code, &ae);
+                        }
                         cur = next;
                     }
+                    extra_pack = Some(cur.clone());
                     cur
                 }
             };
@@ -1442,7 +1472,16 @@ fn emit_expr(
                 "  %{prefix}_adt = call ptr @sz_adt_new(i32 {tag}, ptr {payload_ptr})"
             )
             .unwrap();
-            val_emitted(code, format!("%{prefix}_adt"), Kind::Ptr)
+            if let Some(b) = extra_box {
+                writeln!(code, "  call void @sz_release(ptr {b})").unwrap();
+            }
+            if let Some(e) = extra_owned {
+                drop_owned_ptr(&mut code, &e);
+            }
+            if let Some(p) = extra_pack {
+                writeln!(code, "  call void @sz_release(ptr {p})").unwrap();
+            }
+            owned_ptr(code, format!("%{prefix}_adt"))
         }
         ExprKind::Var(name) => {
             let (val, kind) = locals
@@ -5861,6 +5900,46 @@ enum Color { case Red, case Blue }
         assert!(ir.contains("sz_adt_new"));
         assert!(ir.contains("sz_adt_tag"));
         assert!(ir.contains("icmp eq i32"));
+    }
+
+    #[test]
+    fn emit_adt_temp_release_after_match() {
+        let src = r#"
+enum Color { case Red, case Blue }
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Color.Red match {
+    case Color.Red => 1
+    case Color.Blue => 0
+  }))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = " = call ptr @sz_adt_new";
+        let at = ir.find(needle).expect("expected sz_adt_new");
+        let line_start = ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let name = ir[line_start..at].trim();
+        assert!(
+            ir.contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of ADT temp {name}:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_adt_retain_on_borrowed_return() {
+        let src = r#"
+enum Color { case Red, case Blue }
+def id(c: Color): Color = c
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(id(Color.Red) match {
+    case Color.Red => 1
+    case Color.Blue => 0
+  }))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_retain"));
     }
 
     #[test]

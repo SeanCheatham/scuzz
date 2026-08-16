@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Last-use release for ADT temps
+## Slice: Last-use release for let / `for` binders
 
-The compiler releases owned string, List, and Map / Set temps after last use. ADT construct temps without a last-use stay allocated.
+The compiler releases owned string, List, Map / Set, and ADT temps after last use. Binders (`let` / `for`) drop the owned flag, so bound values stay allocated.
 
-- Emit retain/release on owned ADT temps after last use (same shape as List).
-- Proof: compiler IR or runtime alloc accounting shows a dropped ADT temp returns toward baseline.
+- Track owned on locals. Release the binder after last use in the body.
+- Proof: compiler IR or runtime alloc accounting shows a bound temp returns toward baseline.
 - Out of scope: cycle collector, OS threads, device packaging.
