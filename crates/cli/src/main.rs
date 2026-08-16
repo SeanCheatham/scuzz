@@ -897,10 +897,12 @@ fn package_ios_sim(
     if !script.is_file() {
         bail!("missing iOS simulator script {}", script.display());
     }
+    let scuzz = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("scuzz"));
     let status = Command::new("bash")
         .arg(script)
         .arg(project_dir)
         .env("SCUZZ_BUNDLE_ID", bundle_id)
+        .env("SCUZZ", &scuzz)
         .status()
         .with_context(|| format!("running {}", script.display()))?;
     if !status.success() {

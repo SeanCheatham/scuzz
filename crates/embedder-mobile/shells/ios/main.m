@@ -44,6 +44,14 @@ static void *scuzz_app_thread(void *unused) {
   setenv("SCUZZ_UI_RUNTIME", "mobile", 1);
   setenv("SCUZZ_UI_WIDTH", width, 1);
   setenv("SCUZZ_UI_HEIGHT", height, 1);
+  {
+    NSArray *dirs = NSSearchPathForDirectoriesInDomains(NSDocumentDirectory,
+                                                        NSUserDomainMask, YES);
+    NSString *docs = dirs.firstObject;
+    NSString *dump =
+        [docs stringByAppendingPathComponent:@"scuzz_ios.debug.dump"];
+    setenv("SCUZZ_UI_DEBUG_DUMP", dump.fileSystemRepresentation, 0);
+  }
 
   scuzz_ios_set_alive(1);
   pthread_t tid;

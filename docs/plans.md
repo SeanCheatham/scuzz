@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: iOS sim TextField input
+## Slice: Android package CLI
 
-`scuzz package --target ios` builds a signed simulator `.app`. The iOS shell shows and hides the soft keyboard. It does not feed typed text into the session.
+iOS simulator packaging and TextField input are in. `scuzz package --target android` still copies a manifest plus JNI stub. It does not cross-compile.
 
-- Wire the hidden `UITextField` insert and backspace events to `sz_mobile_push_event` (`SZ_INPUT_TEXT_EDIT`) in `crates/embedder-mobile/shells/ios/ScuzzShell.m`.
-- Proof: a TextField in `examples/studio` (or `examples/counter`) accepts typed text in the iOS simulator.
-- Out of scope: Android NDK, device provisioning, OS IME candidate windows.
+- Make `scuzz package --target android` fail on the first missing NDK tool with one install line, or emit a linked Android package when the NDK is present.
+- Proof: `scuzz package --target android examples/counter` exits 0 with an NDK, or fails with one install line when the NDK is missing.
+- Out of scope: real devices, GPU presenters, OS IME candidate windows.

@@ -14,6 +14,8 @@
 #include "scuzz_mobile.h"
 
 #define EVENT_CAP 64
+#define TEXT_RING 64
+#define TEXT_LEN 64
 
 /* --- Event queue (main thread pushes, worker thread polls) --------------- */
 
@@ -22,6 +24,33 @@ static int g_q_head;
 static int g_q_tail;
 static os_unfair_lock g_q_lock = OS_UNFAIR_LOCK_INIT;
 static _Atomic int g_alive;
+static char g_text_bufs[TEXT_RING][TEXT_LEN];
+static int g_text_i;
+static int g_soft_keyboard;
+static UIView *g_hidden_input;
+
+static const char *stash_text(const char *s) {
+  size_t n;
+  char *dst;
+  if (!s)
+    s = "";
+  n = strlen(s);
+  if (n >= TEXT_LEN)
+    n = TEXT_LEN - 1;
+  dst = g_text_bufs[g_text_i];
+  g_text_i = (g_text_i + 1) % TEXT_RING;
+  memcpy(dst, s, n);
+  dst[n] = '\0';
+  return dst;
+}
+
+static void enqueue_text_edit(const char *text) {
+  SzInputEvent ev;
+  memset(&ev, 0, sizeof ev);
+  ev.kind = SZ_INPUT_TEXT_EDIT;
+  ev.text = stash_text(text ? text : "");
+  sz_mobile_push_event(&ev);
+}
 
 int sz_mobile_available(void) { return 1; }
 
@@ -155,17 +184,89 @@ int sz_mobile_poll_event(SzInputEvent *out) {
 
 @end
 
+/* Invisible first responder. Insert and backspace become TEXT_EDIT.
+ * Soft keyboard stays off until sz_mobile_set_keyboard(1). Hardware keys
+ * still reach the field so the simulator can type without a tap. */
+@interface ScuzzKeyboardField : UITextField <UITextFieldDelegate>
+@end
+
+@implementation ScuzzKeyboardField
+- (UIView *)inputView {
+  if (g_soft_keyboard)
+    return nil;
+  if (!g_hidden_input)
+    g_hidden_input = [[UIView alloc] initWithFrame:CGRectZero];
+  return g_hidden_input;
+}
+
+- (BOOL)textField:(UITextField *)textField
+    shouldChangeCharactersInRange:(NSRange)range
+                replacementString:(NSString *)string {
+  (void)textField;
+  if ([string length] == 0) {
+    NSUInteger n = range.length > 0 ? range.length : 1;
+    NSUInteger i;
+    for (i = 0; i < n; i++)
+      enqueue_text_edit("");
+  } else {
+    const char *utf8 = [string UTF8String];
+    enqueue_text_edit(utf8 ? utf8 : "");
+  }
+  return NO;
+}
+
+- (void)insertText:(NSString *)text {
+  const char *utf8 = [text UTF8String];
+  if (utf8 && utf8[0])
+    enqueue_text_edit(utf8);
+}
+
+- (void)deleteBackward {
+  enqueue_text_edit("");
+}
+@end
+
 /* --- Shell hooks --------------------------------------------------------- */
 
 static ScuzzView *g_view;
-static UITextField *g_keyboard_field;
+static ScuzzKeyboardField *g_keyboard_field;
 
 UIView *scuzz_ios_make_view(CGRect bounds) {
   g_view = [[ScuzzView alloc] initWithFrame:bounds];
-  /* Hidden field that summons the soft keyboard for TextField focus. */
-  g_keyboard_field = [[UITextField alloc] initWithFrame:CGRectZero];
-  g_keyboard_field.hidden = YES;
+  /* Alpha 0: a hidden view cannot become first responder. */
+  g_keyboard_field = [[ScuzzKeyboardField alloc]
+      initWithFrame:CGRectMake(0, 0, 1, 1)];
+  g_keyboard_field.alpha = 0;
+  g_keyboard_field.userInteractionEnabled = NO;
+  g_keyboard_field.autocorrectionType = UITextAutocorrectionTypeNo;
+  g_keyboard_field.autocapitalizationType = UITextAutocapitalizationTypeNone;
+  g_keyboard_field.spellCheckingType = UITextSpellCheckingTypeNo;
+  g_keyboard_field.delegate = g_keyboard_field;
+  g_keyboard_field.text = @"\u200b";
   [g_view addSubview:g_keyboard_field];
+  dispatch_async(dispatch_get_main_queue(), ^{
+    const char *typed;
+    [g_keyboard_field becomeFirstResponder];
+    typed = getenv("SCUZZ_IOS_TYPE");
+    if (!typed || !typed[0])
+      return;
+    /* Same UITextField delegate path as a keystroke. Delay until Ui.run
+     * has mounted and is polling. */
+    dispatch_after(
+        dispatch_time(DISPATCH_TIME_NOW, (int64_t)(800 * NSEC_PER_MSEC)),
+        dispatch_get_main_queue(), ^{
+          NSString *s = [NSString stringWithUTF8String:typed];
+          id<UITextFieldDelegate> del = g_keyboard_field.delegate;
+          NSRange insert = NSMakeRange(1, 0);
+          NSRange chop = NSMakeRange(0, 1);
+          (void)[del textField:g_keyboard_field
+              shouldChangeCharactersInRange:insert
+                          replacementString:s];
+          (void)[del textField:g_keyboard_field
+              shouldChangeCharactersInRange:chop
+                          replacementString:@""];
+        });
+  });
   return g_view;
 }
 
@@ -189,9 +290,9 @@ void sz_mobile_set_keyboard(int visible) {
   dispatch_async(dispatch_get_main_queue(), ^{
     if (!g_keyboard_field)
       return;
-    if (visible)
+    g_soft_keyboard = visible ? 1 : 0;
+    [g_keyboard_field reloadInputViews];
+    if (![g_keyboard_field isFirstResponder])
       [g_keyboard_field becomeFirstResponder];
-    else
-      [g_keyboard_field resignFirstResponder];
   });
 }

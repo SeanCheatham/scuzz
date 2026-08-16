@@ -34,13 +34,15 @@ APP="$OUT/$NAME.app"
 rm -rf "$OUT"
 mkdir -p "$OUT/obj"
 
-SCUZZ="$ROOT/target/release/scuzz"
-if [ ! -x "$SCUZZ" ]; then
-  SCUZZ="$ROOT/target/debug/scuzz"
-fi
-if [ ! -x "$SCUZZ" ]; then
-  cargo build --release -p scuzz
+if [ -z "${SCUZZ:-}" ] || [ ! -x "$SCUZZ" ]; then
   SCUZZ="$ROOT/target/release/scuzz"
+  if [ ! -x "$SCUZZ" ]; then
+    SCUZZ="$ROOT/target/debug/scuzz"
+  fi
+  if [ ! -x "$SCUZZ" ]; then
+    cargo build --release -p scuzz
+    SCUZZ="$ROOT/target/release/scuzz"
+  fi
 fi
 # App IR (host binary is a byproduct; the .ll is what this script consumes).
 # sk_sw avoids the macOS Skia CPU prebuilt on the iOS simulator link.

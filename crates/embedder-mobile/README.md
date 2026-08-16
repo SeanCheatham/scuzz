@@ -36,6 +36,7 @@ The shell owns `main` + `UIApplicationMain`. The app `main` is renamed to
 `UiRuntime.Mobile` through `SCUZZ_UI_RUNTIME=mobile` and pumps until
 `sz_mobile_alive` returns 0. Frames cross to the main queue as RGBA8888
 (`sz_mobile_present`). Touches enter the pump through the same event queue as
-the host shell. Soft keyboard: show/hide only (text events are future work).
+the host shell. Soft keyboard: show on TextField focus. Typed insert and
+backspace become `SZ_INPUT_TEXT_EDIT`.
 
 Same examples run unmodified through `SCUZZ_UI_RUNTIME=mobile`.

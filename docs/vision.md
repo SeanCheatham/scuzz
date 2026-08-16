@@ -213,9 +213,9 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: [`plans.md`](plans.md). Work order: core value types first — `Float`, reference counting, `Map` / `Set`, and IO last-use are in. `scuzz package --target ios` drives the simulator shell. Android packaging and sim TextField input stay open. Open unknowns: Mobile on Android + real devices (iOS simulator proven), GPU presenters.
+Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: [`plans.md`](plans.md). Work order: core value types first — `Float`, reference counting, `Map` / `Set`, and IO last-use are in. `scuzz package --target ios` drives the simulator shell. Sim TextField input is in. Android packaging stays open. Open unknowns: Mobile on Android + real devices (iOS simulator proven), GPU presenters.
 
-App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. `scuzz package --target ios examples/counter` builds a signed simulator `.app` when Xcode is present. Android and device builds stay open.
+App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. `scuzz package --target ios` builds a signed simulator `.app` when Xcode is present. The iOS shell feeds typed text into TextField. Android and device builds stay open.
 
 ## Risks
 
