@@ -75,7 +75,7 @@ One CLI. One typer. One formatter. One linter. One testing strategy. No second a
 
 ### GC (v0)
 
-libc `malloc`/`free` through `sz_alloc` / `sz_free`. No collector. Heap strings, list cells, ADTs, boxed i64, and map/set nodes are reference-counted (`sz_retain` / `sz_release`). The compiler emits release on owned string temps after concat, slice, trim, and `IO.println`, and retain when a function returns a borrowed `String`. List cells retain heads and shared tails. Map/Set trees share subtrees. Clear ownership still frees `Resource` / Views. IO graphs and values without a last-use still stay allocated. Panic may leak. Immutable data forms no cycles, so no cycle collector is needed. Long-lived IO churn waits on IO last-use.
+libc `malloc`/`free` through `sz_alloc` / `sz_free`. No collector. Heap strings, list cells, ADTs, boxed i64, map/set nodes, and IO nodes are reference-counted (`sz_retain` / `sz_release`). The compiler emits release on owned string temps after concat, slice, trim, and `IO.println`, and retain when a function returns a borrowed `String`. List cells retain heads and shared tails. Map/Set trees share subtrees. IO constructors take child IO nodes. `unsafe_run` drops the graph (and fiber structs) when it returns. Panic may leak. Clear ownership still frees `Resource` / Views. Values without a last-use stay allocated. Immutable data forms no cycles, so no cycle collector is needed.
 
 ### Skia
 
@@ -213,7 +213,7 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: [`plans.md`](plans.md). Work order: core value types first — `Float`, reference counting, and `Map` / `Set` are in. Mobile packaging (`scuzz package --target ios` CLI wiring, Android) comes after. Open unknowns: Mobile on Android + real devices (iOS simulator proven), GPU presenters.
+Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: [`plans.md`](plans.md). Work order: core value types first — `Float`, reference counting, `Map` / `Set`, and IO last-use are in. Mobile packaging (`scuzz package --target ios` CLI wiring, Android) comes after. Open unknowns: Mobile on Android + real devices (iOS simulator proven), GPU presenters.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. iOS simulator runs `examples/counter` through `crates/embedder-mobile/shells/ios/build_sim.sh`; Android and device builds stay open.
 

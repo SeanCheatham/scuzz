@@ -70,6 +70,12 @@ static SzIo *cont_println(void *value, void *env) {
   return sz_io_println_cstr("after-flatmap");
 }
 
+static SzIo *cont_pure_unit(void *value, void *env) {
+  (void)value;
+  (void)env;
+  return sz_io_pure(NULL);
+}
+
 static int lang_released = 0;
 static SzIo *lang_release(void *acquired, void *env) {
   (void)env;
@@ -2437,6 +2443,24 @@ int main(void) {
     sz_string_free(kb);
     sz_string_free(va);
     sz_string_free(vb);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
+  /* IO graph and fiber structs drop after unsafe_run. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzIoResult r;
+    sz_alloc_stats(&base_bytes, &base_count);
+    r = sz_io_unsafe_run(sz_io_flatmap(sz_io_pure(NULL), cont_pure_unit, NULL));
+    assert(r.ok);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+    r = sz_io_unsafe_run(sz_io_repeat_n(1, sz_io_pure(NULL)));
+    assert(r.ok);
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
