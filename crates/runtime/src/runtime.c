@@ -156,12 +156,14 @@ void sz_release(void *ptr) {
   case SZ_RC_LIST: {
     SzList *xs = (SzList *)ptr;
     for (;;) {
+      void *head = xs->head;
       SzList *tail = xs->tail;
       SzRcHdr *cell = sz_rc_hdr(xs);
       xs->head = NULL;
       xs->tail = NULL;
       cell->magic = 0;
       sz_free(cell);
+      sz_release(head);
       if (!sz_is_rc(tail))
         return;
       if (sz_rc_hdr(tail)->rc > 1) {
@@ -177,6 +179,23 @@ void sz_release(void *ptr) {
     a->payload = NULL;
     sz_free(h);
     sz_release(payload);
+    return;
+  }
+  case SZ_RC_MAP: {
+    SzMap *m = (SzMap *)ptr;
+    void *k = m->key;
+    void *v = m->val;
+    SzMap *l = m->left;
+    SzMap *r = m->right;
+    m->key = NULL;
+    m->val = NULL;
+    m->left = NULL;
+    m->right = NULL;
+    sz_free(h);
+    sz_release(k);
+    sz_release(v);
+    sz_release(l);
+    sz_release(r);
     return;
   }
   case SZ_RC_BOX:
@@ -334,10 +353,19 @@ SzList *sz_string_lines(const SzString *s) {
       i++;
     if (i < len && data[i] == '\n')
       i++;
-    if (end > start)
-      acc = sz_list_cons(sz_string_from_bytes(data + start, end - start), acc);
+    if (end > start) {
+      SzString *line = sz_string_from_bytes(data + start, end - start);
+      SzList *old = acc;
+      acc = sz_list_cons(line, old);
+      sz_release(line);
+      sz_release(old);
+    }
   }
-  return sz_list_reverse(acc);
+  {
+    SzList *rev = sz_list_reverse(acc);
+    sz_release(acc);
+    return rev;
+  }
 }
 
 void *sz_box_i64(int64_t n) {

@@ -14,13 +14,14 @@ void sz_panic(const char *msg) __attribute__((noreturn));
 void *sz_alloc(size_t size);
 void *sz_alloc_zero(size_t size);
 void sz_free(void *ptr);
-/* RC objects (strings, list cells, ADTs, boxed i64). List cells retain the
- * tail so shared spines stay. They do not own heads. Non-RC pointers no-op. */
+/* RC objects (strings, list cells, ADTs, boxed i64, map/set nodes). List
+ * cells retain heads and shared tails. Non-RC pointers no-op. */
 enum {
   SZ_RC_STRING = 1,
   SZ_RC_LIST = 2,
   SZ_RC_ADT = 3,
-  SZ_RC_BOX = 4
+  SZ_RC_BOX = 4,
+  SZ_RC_MAP = 5
 };
 void *sz_rc_alloc(size_t size, uint32_t kind);
 void sz_retain(void *ptr);
@@ -57,6 +58,7 @@ int64_t sz_string_starts_with(const SzString *s, const SzString *prefix);
 SzString *sz_string_trim(const SzString *s);
 
 typedef struct SzList SzList;
+typedef struct SzMap SzMap;
 /* Split on `\n` / `\r\n`; skip empty lines. */
 SzList *sz_string_lines(const SzString *s);
 
@@ -361,13 +363,26 @@ void *sz_list_at(const SzList *xs, size_t index);
 SzList *sz_list_reverse(SzList *xs);
 SzList *sz_list_append(SzList *xs, void *x);
 SzList *sz_list_set_at(SzList *xs, int64_t index, void *v);
-/* Keep heads for which `pred` is nonzero. New spine; does not own heads. */
+/* Keep heads for which `pred` is nonzero. New spine; cons retains heads. */
 SzList *sz_list_filter(SzList *xs, SzListPred pred, void *env);
-/* New spine. `fn` must not free `head`. Does not own heads. */
+/* New spine. `fn` must not free `head`. Cons retains mapped heads. */
 SzList *sz_list_map(SzList *xs, SzListMapFn fn, void *env);
-/* Free cons cells only; does not free heads. */
+/* Release the spine; heads drop through RC. */
 void sz_list_free(SzList *xs);
 SzString *sz_list_join(const SzList *xs, const char *sep);
+
+/* Persistent Map / Set (NULL = empty). key_kind 0 = boxed i64, 1 = String. */
+struct SzMap {
+  void *key;
+  void *val;
+  struct SzMap *left;
+  struct SzMap *right;
+  int32_t key_kind;
+};
+SzMap *sz_map_empty(void);
+SzMap *sz_map_set(SzMap *m, void *key, void *val, int32_t key_kind);
+void *sz_map_get_or(SzMap *m, void *key, void *dflt);
+int64_t sz_map_contains(SzMap *m, void *key);
 
 /* Blessed filesystem IO (live or TestRuntime mem FS; chosen when the IO runs) */
 SzIo *sz_fs_read(SzString *path);

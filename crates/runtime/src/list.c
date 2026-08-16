@@ -2,8 +2,8 @@
 
 #include <string.h>
 
-/* Linked list: NULL = Nil. Cons cells retain the tail (shared spines) and
- * do not own heads. sz_list_free is sz_release on the root cell. */
+/* Linked list: NULL = Nil. Cons cells retain head and tail. sz_list_free
+ * is sz_release on the root cell. */
 
 SzList *sz_list_nil(void) { return NULL; }
 
@@ -13,6 +13,7 @@ SzList *sz_list_cons(void *head, SzList *tail) {
   SzList *n = (SzList *)sz_rc_alloc(sizeof(SzList), SZ_RC_LIST);
   n->head = head;
   n->tail = tail;
+  sz_retain(head);
   sz_retain(tail);
   return n;
 }
@@ -65,8 +66,11 @@ SzList *sz_list_reverse(SzList *xs) {
 }
 
 SzList *sz_list_append(SzList *xs, void *x) {
-  if (!xs)
-    return sz_list_cons(x, NULL);
+  if (!xs) {
+    SzList *n = sz_list_cons(x, NULL);
+    sz_release(x);
+    return n;
+  }
   return sz_list_cons_take(xs->head, sz_list_append(xs->tail, x));
 }
 
@@ -101,11 +105,16 @@ SzList *sz_list_filter(SzList *xs, SzListPred pred, void *env) {
 }
 
 SzList *sz_list_map(SzList *xs, SzListMapFn fn, void *env) {
+  void *h;
+  SzList *n;
   if (!fn)
     sz_panic("sz_list_map(null fn)");
   if (!xs)
     return NULL;
-  return sz_list_cons_take(fn(xs->head, env), sz_list_map(xs->tail, fn, env));
+  h = fn(xs->head, env);
+  n = sz_list_cons_take(h, sz_list_map(xs->tail, fn, env));
+  sz_release(h);
+  return n;
 }
 
 void sz_list_free(SzList *xs) { sz_release(xs); }

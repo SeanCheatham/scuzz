@@ -11892,9 +11892,10 @@ static void test_signal_list_spine_collect(void) {
   int i;
 
   sz_alloc_stats(&origin_bytes, &origin_count);
-  first = sz_string_from_cstr("a");
-  xs = sz_list_cons(first, sz_list_nil());
-  items = sz_signal_list(xs);
+    first = sz_string_from_cstr("a");
+    xs = sz_list_cons(first, sz_list_nil());
+    sz_string_free(first);
+    items = sz_signal_list(xs);
   sz_alloc_stats(&base_bytes, &base_count);
   /* Append copies the spine; set frees the unshared previous spine. */
   for (i = 0; i < 30; i++) {

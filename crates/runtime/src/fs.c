@@ -164,11 +164,21 @@ static void *fs_list_result(void *env) {
   while ((ent = readdir(d)) != NULL) {
     if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
       continue;
-    acc = sz_list_cons(sz_string_from_cstr(ent->d_name), acc);
+    {
+      SzString *s = sz_string_from_cstr(ent->d_name);
+      SzList *old = acc;
+      acc = sz_list_cons(s, old);
+      sz_release(s);
+      sz_release(old);
+    }
   }
   closedir(d);
   r->is_err = 0;
-  r->as.ok = sz_list_reverse(acc);
+  {
+    SzList *rev = sz_list_reverse(acc);
+    sz_release(acc);
+    r->as.ok = rev;
+  }
   return r;
 }
 

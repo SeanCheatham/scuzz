@@ -31,7 +31,7 @@ pub fn hover_in_source(
     }
     if matches!(
         name.as_str(),
-        "Int" | "Float" | "String" | "Bool" | "Unit" | "List" | "IO"
+        "Int" | "Float" | "String" | "Bool" | "Unit" | "List" | "Map" | "Set" | "IO"
     ) {
         return Some(name);
     }
@@ -547,6 +547,16 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Str.concat", "Str.concat(a: String, b: String): String"),
     ("List.cons", "List.cons(x: T, xs: List[T]): List[T]"),
     ("List.append", "List.append(xs: List[T], x: T): List[T]"),
+    ("Map.empty", "Map.empty(): Map[K, V]"),
+    ("Map.set", "Map.set(m: Map[K, V], k: K, v: V): Map[K, V]"),
+    (
+        "Map.getOrElse",
+        "Map.getOrElse(m: Map[K, V], k: K, default: V): V",
+    ),
+    ("Map.contains", "Map.contains(m: Map[K, V], k: K): Bool"),
+    ("Set.empty", "Set.empty(): Set[T]"),
+    ("Set.add", "Set.add(s: Set[T], x: T): Set[T]"),
+    ("Set.contains", "Set.contains(s: Set[T], x: T): Bool"),
     ("Fs.read", "Fs.read(path: String): IO[String]"),
     ("Fs.write", "Fs.write(path: String, body: String): IO[Unit]"),
     ("Sys.args", "Sys.args(): IO[List]"),

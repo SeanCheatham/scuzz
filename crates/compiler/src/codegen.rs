@@ -85,6 +85,10 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_at(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_list_reverse(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_join(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_map_empty()").unwrap();
+    writeln!(out, "declare ptr @sz_map_set(ptr, ptr, ptr, i32)").unwrap();
+    writeln!(out, "declare ptr @sz_map_get_or(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_map_contains(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_append(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_set_at(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_filter(ptr, ptr, ptr)").unwrap();
@@ -909,6 +913,11 @@ fn emit_list_lit(
         )
         .unwrap();
         writeln!(code, "  call void @sz_release(ptr {cur})").unwrap();
+        if ee.kind == Kind::Int || ee.kind == Kind::Float {
+            writeln!(code, "  call void @sz_release(ptr {ptr})").unwrap();
+        } else {
+            drop_owned_ptr(&mut code, &ee);
+        }
         cur = next;
     }
     val_emitted(code, cur, Kind::Ptr)
@@ -3186,6 +3195,124 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "Map.empty" | "Set.empty" => {
+            writeln!(code, "  %{prefix}_v = call ptr @sz_map_empty()").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Map.set" | "Set.add" => {
+            let key_src = &emitted_args[1];
+            let key = if key_src.kind == Kind::Int || key_src.kind == Kind::Float {
+                box_numeric(
+                    &mut code,
+                    key_src.kind,
+                    &key_src.value,
+                    &format!("{prefix}_k"),
+                )
+            } else {
+                key_src.value.clone()
+            };
+            let (val, val_owned_box) = if callee == "Set.add" {
+                ("null".to_string(), false)
+            } else if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
+                (
+                    box_numeric(
+                        &mut code,
+                        emitted_args[2].kind,
+                        &emitted_args[2].value,
+                        &format!("{prefix}_v0"),
+                    ),
+                    true,
+                )
+            } else {
+                (emitted_args[2].value.clone(), false)
+            };
+            let kind = if key_src.kind == Kind::Int { 0 } else { 1 };
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_map_set(ptr {}, ptr {key}, ptr {val}, i32 {kind})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, key_src);
+            if callee == "Map.set" {
+                drop_owned_ptr(&mut code, &emitted_args[2]);
+            }
+            if key_src.kind == Kind::Int || key_src.kind == Kind::Float {
+                writeln!(code, "  call void @sz_release(ptr {key})").unwrap();
+            }
+            if val_owned_box {
+                writeln!(code, "  call void @sz_release(ptr {val})").unwrap();
+            }
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Map.getOrElse" => {
+            let key_src = &emitted_args[1];
+            let key = if key_src.kind == Kind::Int || key_src.kind == Kind::Float {
+                box_numeric(
+                    &mut code,
+                    key_src.kind,
+                    &key_src.value,
+                    &format!("{prefix}_k"),
+                )
+            } else {
+                key_src.value.clone()
+            };
+            let dflt = if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
+                box_numeric(
+                    &mut code,
+                    emitted_args[2].kind,
+                    &emitted_args[2].value,
+                    &format!("{prefix}_d"),
+                )
+            } else {
+                emitted_args[2].value.clone()
+            };
+            writeln!(
+                code,
+                "  %{prefix}_p = call ptr @sz_map_get_or(ptr {}, ptr {key}, ptr {dflt})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, key_src);
+            if key_src.kind == Kind::Int || key_src.kind == Kind::Float {
+                writeln!(code, "  call void @sz_release(ptr {key})").unwrap();
+            }
+            if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
+                let v = unbox_numeric(
+                    &mut code,
+                    emitted_args[2].kind,
+                    &format!("%{prefix}_p"),
+                    &format!("{prefix}_u"),
+                );
+                val_emitted(code, v, emitted_args[2].kind)
+            } else {
+                val_emitted(code, format!("%{prefix}_p"), Kind::Ptr)
+            }
+        }
+        "Map.contains" | "Set.contains" => {
+            let key_src = &emitted_args[1];
+            let key = if key_src.kind == Kind::Int || key_src.kind == Kind::Float {
+                box_numeric(
+                    &mut code,
+                    key_src.kind,
+                    &key_src.value,
+                    &format!("{prefix}_k"),
+                )
+            } else {
+                key_src.value.clone()
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_map_contains(ptr {}, ptr {key})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, key_src);
+            if key_src.kind == Kind::Int || key_src.kind == Kind::Float {
+                writeln!(code, "  call void @sz_release(ptr {key})").unwrap();
+            }
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
         "Fs.read" => {
             writeln!(
                 code,
@@ -4696,6 +4823,24 @@ def id(s: String): String = s
         crate::typ::typecheck(&p).expect("typecheck");
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_list_set_at"));
+    }
+
+    #[test]
+    fn emit_map_and_set_compile() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    m = Map.set(Map.empty(), "a", "1")
+    s = Set.add(Set.empty(), "x")
+    _ <- IO.println(Map.getOrElse(m, "a", "?"))
+    _ <- IO.println(if (Set.contains(s, "x")) "y" else "n")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_map_set"));
+        assert!(ir.contains("sz_map_get_or"));
+        assert!(ir.contains("sz_map_contains"));
     }
 
     #[test]

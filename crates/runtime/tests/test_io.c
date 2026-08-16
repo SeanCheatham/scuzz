@@ -2285,7 +2285,7 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
-  /* List spine free: cons cells go away; heads are not owned. */
+  /* List spine free: cons cells go away; heads stay with the caller. */
   {
     size_t base_bytes = 0, base_count = 0;
     size_t live_bytes = 0, live_count = 0;
@@ -2404,6 +2404,39 @@ int main(void) {
     sz_list_free(xs);
     sz_string_free(a);
     sz_string_free(b);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
+  /* Persistent map: shared subtrees; release returns to baseline. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *ka;
+    SzString *kb;
+    SzString *va;
+    SzString *vb;
+    SzMap *m0;
+    SzMap *m1;
+    SzMap *m2;
+    sz_alloc_stats(&base_bytes, &base_count);
+    ka = sz_string_from_cstr("a");
+    kb = sz_string_from_cstr("b");
+    va = sz_string_from_cstr("1");
+    vb = sz_string_from_cstr("2");
+    m0 = sz_map_empty();
+    m1 = sz_map_set(m0, ka, va, 1);
+    m2 = sz_map_set(m1, kb, vb, 1);
+    assert(sz_map_contains(m2, ka) == 1);
+    assert(sz_map_contains(m1, kb) == 0);
+    assert(strcmp(sz_string_cstr((SzString *)sz_map_get_or(m2, ka, NULL)), "1") == 0);
+    sz_release(m2);
+    sz_release(m1);
+    sz_string_free(ka);
+    sz_string_free(kb);
+    sz_string_free(va);
+    sz_string_free(vb);
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);

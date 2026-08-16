@@ -100,6 +100,10 @@ jobs:
           grep -q "to:2" /tmp/kernel.out
           grep -q "cmp:lt" /tmp/kernel.out
           grep -q "neg:-1.5" /tmp/kernel.out
+          grep -q "map:1" /tmp/kernel.out
+          grep -q "miss:no" /tmp/kernel.out
+          grep -q "has:y" /tmp/kernel.out
+          grep -q "set:y" /tmp/kernel.out
           cargo run -p scuzz -- run examples/io | tee /tmp/io.out
           grep -q "ref-ok" /tmp/io.out
           grep -q "queue-ok" /tmp/io.out

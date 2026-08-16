@@ -29,15 +29,15 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ### Core value types
 
-`Map` and `Set` are missing. Apps get `Int`, `Float`, `String`, `Bool`, `List[T]`, and enums. This limits the batteries-included thesis more than mobile packaging does.
+`Map` and `Set` are in (`examples/kernel`). Apps get `Int`, `Float`, `String`, `Bool`, `List[T]`, `Map[K, V]`, `Set[T]`, and enums.
 
 - **Float** — scalar through the lexer, typer, formatter, and codegen (LLVM `double`). Proof: `examples/kernel`.
-- **Map / Set** — persistent shared structures. List cells retain shared tails. They do not own heads yet. Map/Set wait on child ownership (see the Memory residual).
+- **Map / Set** — persistent trees. Keys are `Int` or `String`. List cells retain heads and tails. Proof: `examples/kernel`.
 
 ### Residuals
 
 - **Concurrency** — cooperative fibers only. Later: OS threads, supervision trees.
-- **Memory** — counter-shaped Headless pumps stay flat under alloc accounting. `Signal.list` releases list spines through RC. The compiler emits retain/release on string temps (concat, slice, trim, println, borrowed `String` return). List cells do not own heads. IO graphs and values without a last-use stay allocated. No cycle collector. `Map` / `Set` and long-lived IO churn wait on child ownership and IO last-use.
+- **Memory** — counter-shaped Headless pumps stay flat under alloc accounting. `Signal.list` and list/map/set nodes drop through RC. The compiler emits retain/release on string temps. IO graphs and values without a last-use stay allocated. No cycle collector. Long-lived IO churn waits on IO last-use.
 - **Hermetic process and env kit** — TestRuntime fakes clock, random, FS, net, and console. `Sys.exec` and `Sys.spawn` fail under TestRuntime. `Sys.alive` / `Sys.kill` / `Sys.getenv` still touch the host. Revisit if fuzz needs fake processes or a sealed env map.
 - **LSP / editor tooling** — `fmt`, `check --message-format=json`, `watch`, and `scuzz lsp` exist. LSP wraps `check` (didOpen/didChange overlay open buffers; didClose returns to disk). Positions are UTF-16. Hover, completion, and definition use that parse. Unknown methods return JSON-RPC `-32601`. JSON diagnostics stay the single schema. `check` reports more than one parse or type error per run.
 

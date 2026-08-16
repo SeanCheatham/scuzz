@@ -97,6 +97,16 @@ def scale(x: Float): Float =
 def trunc(x: Float): Int =
   Float.toInt(x)
 
+def mapSetProof(): IO[Unit] =
+  for {
+    mp = Map.set(Map.set(Map.empty(), "a", "1"), "b", "2")
+    st = Set.add(Set.add(Set.empty(), "x"), "y")
+    _ <- IO.println(s"map:${Map.getOrElse(mp, "a", "?")}")
+    _ <- IO.println(s"miss:${Map.getOrElse(mp, "z", "no")}")
+    _ <- IO.println(s"has:${if (Map.contains(mp, "b")) "y" else "n"}")
+    _ <- IO.println(s"set:${if (Set.contains(st, "x")) "y" else "n"}")
+  } yield ()
+
 record Box[T](x: T):
   def get(): T =
     self.x
@@ -157,4 +167,5 @@ record Box[T](x: T):
     _ <- IO.println(s"to:${trunc(2.9)}")
     _ <- IO.println(s"cmp:${if (1.5 < 2.0 && 2.0 > 1.0) "lt" else "ge"}")
     _ <- IO.println(s"neg:${0.0 - 1.5}")
+    _ <- mapSetProof()
   } yield ()

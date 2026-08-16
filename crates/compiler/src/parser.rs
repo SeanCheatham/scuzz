@@ -1733,6 +1733,8 @@ impl Parser {
                         | "Fiber"
                         | "Resource"
                         | "Stream"
+                        | "Map"
+                        | "Set"
                 ) =>
             {
                 self.bump();

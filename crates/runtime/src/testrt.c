@@ -281,12 +281,22 @@ static void *mem_list(void *env) {
     if (is_direct_child(path, n->path)) {
       const char *base = strrchr(n->path, '/');
       base = base ? base + 1 : n->path;
-      acc = sz_list_cons(sz_string_from_cstr(base), acc);
+      {
+        SzString *s = sz_string_from_cstr(base);
+        SzList *old = acc;
+        acc = sz_list_cons(s, old);
+        sz_release(s);
+        sz_release(old);
+      }
     }
   }
   sz_free(path);
   r->is_err = 0;
-  r->as.ok = sz_list_reverse(acc);
+  {
+    SzList *rev = sz_list_reverse(acc);
+    sz_release(acc);
+    r->as.ok = rev;
+  }
   return r;
 }
 
@@ -677,9 +687,13 @@ SzList *sz_testrt_sys_args_list(void) {
   SzList *acc = sz_list_nil();
   int i;
   /* Override stores user args only (no argv[0]). */
-  for (i = g_fake_argc - 1; i >= 0; i--)
-    acc = sz_list_cons(sz_string_from_cstr(g_fake_argv[i] ? g_fake_argv[i] : ""),
-                       acc);
+  for (i = g_fake_argc - 1; i >= 0; i--) {
+    SzString *s = sz_string_from_cstr(g_fake_argv[i] ? g_fake_argv[i] : "");
+    SzList *old = acc;
+    acc = sz_list_cons(s, old);
+    sz_release(s);
+    sz_release(old);
+  }
   return acc;
 }
 
@@ -960,7 +974,12 @@ void sz_driver_run_line(const char *spec) {
                               : 0);
       else
         head = sz_box_i64((int64_t)atoi(t));
-      args = sz_list_cons(head, args);
+      {
+        SzList *old = args;
+        args = sz_list_cons(head, old);
+        sz_release(head);
+        sz_release(old);
+      }
     }
     io = ((SzIo * (*)(SzList *)) d->fn)(args);
   }

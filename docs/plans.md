@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Map and Set
+## Slice: IO last-use
 
-Core value types come before mobile packaging (see [`gaps.md`](gaps.md)). `Float` is in. Reference counting covers string temps and shared list spines. `Map` / `Set` still wait on child ownership.
+Core value types are in (`Float`, `Map` / `Set`). Long-lived IO still holds graphs until process exit.
 
-- Add persistent `Map[K, V]` and `Set[T]` on shared trees. List cells must own heads (typed drop) so tree nodes can share children without a cycle collector.
-- Proof: `examples/kernel` constructs, looks up, and updates a map/set and still passes `scuzz check` and `scuzz test`.
-- Out of scope: IO last-use, OS threads, cycle collection.
+- Emit retain/release on IO handles so `flatMap` / `println` / `pure` graphs drop after `unsafe_run`. Panic may still leak.
+- Proof: `examples/kernel` and `examples/io` still pass `scuzz check` and `scuzz test`. Alloc accounting on a counter-shaped Headless pump stays flat.
+- Out of scope: OS threads, cycle collection.

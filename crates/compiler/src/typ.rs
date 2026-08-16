@@ -1946,6 +1946,48 @@ fn infer_call(
             };
             Ok(list_of(out))
         }
+        "Map.empty" => {
+            expect_arity(callee, &arg_tys, 0)?;
+            Ok(Type::App(
+                "Map".into(),
+                vec![Type::Opaque("Elem".into()), Type::Opaque("Elem".into())],
+            ))
+        }
+        "Map.set" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            let (k, v) = map_kv(&arg_tys[0])?;
+            let k = prefer_elem(&k, &arg_tys[1])?;
+            let v = prefer_elem(&v, &arg_tys[2])?;
+            Ok(Type::App("Map".into(), vec![k, v]))
+        }
+        "Map.getOrElse" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            let (k, v) = map_kv(&arg_tys[0])?;
+            prefer_elem(&k, &arg_tys[1])?;
+            prefer_elem(&v, &arg_tys[2])
+        }
+        "Map.contains" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let (k, _) = map_kv(&arg_tys[0])?;
+            prefer_elem(&k, &arg_tys[1])?;
+            Ok(Type::Bool)
+        }
+        "Set.empty" => {
+            expect_arity(callee, &arg_tys, 0)?;
+            Ok(Type::App("Set".into(), vec![Type::Opaque("Elem".into())]))
+        }
+        "Set.add" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let e = set_elem(&arg_tys[0])?;
+            let e = prefer_elem(&e, &arg_tys[1])?;
+            Ok(Type::App("Set".into(), vec![e]))
+        }
+        "Set.contains" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let e = set_elem(&arg_tys[0])?;
+            prefer_elem(&e, &arg_tys[1])?;
+            Ok(Type::Bool)
+        }
         "Fs.read" | "Fs.list" | "Fs.mkdirs" | "Fs.canonicalize" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
@@ -3089,7 +3131,7 @@ fn is_meta_opaque(t: &Type) -> bool {
 fn is_handle_ctor(name: &str) -> bool {
     matches!(
         name,
-        "Fiber" | "Ref" | "Queue" | "Deferred" | "Resource" | "Stream"
+        "Fiber" | "Ref" | "Queue" | "Deferred" | "Resource" | "Stream" | "Map" | "Set"
     )
 }
 
@@ -3126,6 +3168,26 @@ fn prefer_elem(a: &Type, b: &Type) -> Result<Type, TypeError> {
 
 fn list_of(t: Type) -> Type {
     Type::List(Box::new(t))
+}
+
+fn map_kv(t: &Type) -> Result<(Type, Type), TypeError> {
+    match t {
+        Type::App(n, args) if n == "Map" && args.len() == 2 => {
+            Ok((args[0].clone(), args[1].clone()))
+        }
+        other if is_meta_opaque(other) => {
+            Ok((Type::Opaque("Elem".into()), Type::Opaque("Elem".into())))
+        }
+        other => Err(TypeError::Msg(format!("expected Map[_, _], got {other:?}"))),
+    }
+}
+
+fn set_elem(t: &Type) -> Result<Type, TypeError> {
+    match t {
+        Type::App(n, args) if n == "Set" && args.len() == 1 => Ok(args[0].clone()),
+        other if is_meta_opaque(other) => Ok(Type::Opaque("Elem".into())),
+        other => Err(TypeError::Msg(format!("expected Set[_], got {other:?}"))),
+    }
 }
 
 fn unify_types(
@@ -5600,6 +5662,20 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.setAt should typecheck");
+    }
+
+    #[test]
+    fn typechecks_map_and_set() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    m = Map.set(Map.set(Map.empty(), "a", "1"), "b", "2")
+    s = Set.add(Set.empty(), "x")
+    _ <- IO.println(Map.getOrElse(m, "a", "?"))
+    _ <- IO.println(if (Map.contains(m, "b") && Set.contains(s, "x")) "y" else "n")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Map/Set should typecheck");
     }
 
     #[test]

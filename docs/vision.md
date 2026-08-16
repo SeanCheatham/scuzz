@@ -75,7 +75,7 @@ One CLI. One typer. One formatter. One linter. One testing strategy. No second a
 
 ### GC (v0)
 
-libc `malloc`/`free` through `sz_alloc` / `sz_free`. No collector. Heap strings, list cells, ADTs, and boxed i64 are reference-counted (`sz_retain` / `sz_release`). The compiler emits release on owned string temps after concat, slice, trim, and `IO.println`, and retain when a function returns a borrowed `String`. List cells retain shared tails. They do not own heads. Clear ownership still frees `Resource` / Views and list string heads on `Signal.list` free. IO graphs and values without a last-use still stay allocated. Panic may leak. Immutable data forms no cycles, so no cycle collector is needed. `Map` / `Set` need shared trees that own children and wait on that. Long-lived IO churn is the other trigger.
+libc `malloc`/`free` through `sz_alloc` / `sz_free`. No collector. Heap strings, list cells, ADTs, boxed i64, and map/set nodes are reference-counted (`sz_retain` / `sz_release`). The compiler emits release on owned string temps after concat, slice, trim, and `IO.println`, and retain when a function returns a borrowed `String`. List cells retain heads and shared tails. Map/Set trees share subtrees. Clear ownership still frees `Resource` / Views. IO graphs and values without a last-use still stay allocated. Panic may leak. Immutable data forms no cycles, so no cycle collector is needed. Long-lived IO churn waits on IO last-use.
 
 ### Skia
 
@@ -113,7 +113,7 @@ Locks (not an API catalog — see [`guide.md`](guide.md)):
 - Optional `package`; top-level `def` / `private def` / `import`; `@main def …: IO[Unit]`
 - Payload enums + `record` sugar (methods on generic records and enums) + thin traits/`impl` (static dispatch, including `trait Get[T]` / `impl Get[Int] for Point` / `impl Get[T] for Opt`) + monomorphized generics on defs/enums/records
 - File-stem modules; enums namespaced by stem; `import Module.name` for bare disambiguation
-- Types: `Unit`, `Int`, `Float`, `String`, `Bool`, `List[T]`, `IO[T]`, `A => B`, blessed handles (`Fiber[A]`, `Ref[A]`, `Queue[A]`, `Deferred[A]`, `Resource[A]`, `Stream[A]`), nominal enums. `true` / `false` are `Bool`. `Bool` is not `Int`. `attempt` is `IO[Result[A]]`. `handleErrorWith` binds a `String` error message.
+- Types: `Unit`, `Int`, `Float`, `String`, `Bool`, `List[T]`, `Map[K, V]`, `Set[T]`, `IO[T]`, `A => B`, blessed handles (`Fiber[A]`, `Ref[A]`, `Queue[A]`, `Deferred[A]`, `Resource[A]`, `Stream[A]`), nominal enums. `true` / `false` are `Bool`. `Bool` is not `Int`. `attempt` is `IO[Result[A]]`. `handleErrorWith` binds a `String` error message.
 - Blessed kits + `Signal` / `View` / `Ui` / `Law.*` / `.require` as documented in the guide. Kit lambdas bind the list element type (`List.filter` / `List.map`), `String` (`View.each` / `Stream.*` / `Resource` / `Net.serve`), or `Int` (`Signal.map`). The lambda body must return the kit result (`View`, `Bool`, `String`, `T` for `List.map`, or `IO`)
 - No macros, no implicits, no HKT beyond `IO`, no null
 
@@ -213,7 +213,7 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: [`plans.md`](plans.md). Work order: core value types first — `Float` is in. Compiler-emitted reference counting is in for string temps and list spines. Next is `Map` / `Set`. Mobile packaging (`scuzz package --target ios` CLI wiring, Android) comes after. Open unknowns: Mobile on Android + real devices (iOS simulator proven), GPU presenters.
+Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: [`plans.md`](plans.md). Work order: core value types first — `Float`, reference counting, and `Map` / `Set` are in. Mobile packaging (`scuzz package --target ios` CLI wiring, Android) comes after. Open unknowns: Mobile on Android + real devices (iOS simulator proven), GPU presenters.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. iOS simulator runs `examples/counter` through `crates/embedder-mobile/shells/ios/build_sim.sh`; Android and device builds stay open.
 

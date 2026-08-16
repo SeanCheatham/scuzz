@@ -29,8 +29,13 @@ static void *sys_args_thunk(void *env) {
   {
     SzList *acc = sz_list_nil();
     /* Skip argv[0] (program name); expose user args only. */
-    for (int i = g_argc - 1; i >= 1; i--)
-      acc = sz_list_cons(sz_string_from_cstr(g_argv[i] ? g_argv[i] : ""), acc);
+    for (int i = g_argc - 1; i >= 1; i--) {
+      SzString *s = sz_string_from_cstr(g_argv[i] ? g_argv[i] : "");
+      SzList *old = acc;
+      acc = sz_list_cons(s, old);
+      sz_release(s);
+      sz_release(old);
+    }
     return acc;
   }
 }
