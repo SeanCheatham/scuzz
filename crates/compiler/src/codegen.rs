@@ -1528,7 +1528,11 @@ fn emit_expr(
                 if bound.owned && bound.kind == Kind::Ptr {
                     if be.value == bound.value {
                         be.owned = true;
-                    } else if be.kind != Kind::Ptr || be.owned {
+                    } else {
+                        if be.kind == Kind::Ptr && !be.owned {
+                            writeln!(code, "  call void @sz_retain(ptr {})", be.value).unwrap();
+                            be.owned = true;
+                        }
                         writeln!(code, "  call void @sz_release(ptr {})", bound.value).unwrap();
                     }
                 }
@@ -4880,6 +4884,45 @@ def id(s: String): String = s
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected let-binder release of {name} after last use:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_let_binder_release_through_if_phi() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.len(for {
+    xs = [1]
+    ys = [2]
+  } yield if (true) xs else ys)))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let roots: Vec<&str> = ir
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                if line.contains("_cl") {
+                    return None;
+                }
+                let (name, rest) = line.split_once(" = call ptr @sz_list_cons(")?;
+                if rest.contains("@") {
+                    return None;
+                }
+                Some(name.trim())
+            })
+            .collect();
+        assert!(roots.len() >= 2, "expected two list-literal roots:\n{ir}");
+        for name in &roots {
+            assert!(
+                ir.contains(&format!("call void @sz_release(ptr {name})")),
+                "expected release of unused/last-use list {name}:\n{ir}"
+            );
+        }
+        assert!(
+            ir.contains("sz_retain"),
+            "expected retain of if-phi before dropping binders:\n{ir}"
         );
     }
 
