@@ -11644,6 +11644,7 @@ static void test_view_each(void) {
 
   xs = sz_list_cons(sz_string_from_cstr("eggs"), xs);
   sz_signal_list_set(items, xs);
+  sz_release(xs);
   sz_view_layout(list, 200.f, 120.f, theme);
   assert(strstr(sz_string_cstr(sz_view_a11y_dump(list)), "text:- eggs") != NULL);
   assert(strstr(sz_string_cstr(sz_view_a11y_dump(list)), "text:- milk") != NULL);
@@ -11678,6 +11679,7 @@ static void test_view_each_map_text(void) {
 
   xs = sz_list_cons(sz_string_from_cstr("eggs"), sz_list_nil());
   sz_signal_list_set(items, xs);
+  sz_release(xs);
   sz_view_layout(list, 200.f, 120.f, theme);
   dump = sz_string_cstr(sz_view_a11y_dump(list));
   assert(strstr(dump, "text:eggs") != NULL);
@@ -11902,6 +11904,7 @@ static void test_signal_list_spine_collect(void) {
   for (i = 0; i < 30; i++) {
     xs = sz_list_append(sz_signal_list_get(items), sz_string_from_cstr("x"));
     sz_signal_list_set(items, xs);
+    sz_release(xs);
   }
   sz_alloc_stats(&live_bytes, &live_count);
   /* Linear in current length, not quadratic leftover spines. */

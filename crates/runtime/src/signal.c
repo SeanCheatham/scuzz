@@ -264,6 +264,7 @@ void sz_signal_list_set(SzSignalList *s, SzList *v) {
   if (s->value == v)
     return;
   sz_release(s->value);
+  sz_retain(v);
   s->value = v;
 }
 

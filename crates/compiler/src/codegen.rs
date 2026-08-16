@@ -3946,6 +3946,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Law.signalInt" => {
@@ -6316,6 +6317,36 @@ law always: Bool = 1 == 1
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of list {name} after Signal.list:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_signal_set_list_releases_input() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    items = Signal.list([])
+    _ = Signal.setList(items, ["a"])
+    _ <- IO.println("ok")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_lang_signal_list_set(ptr ";
+        let at = ir.find(needle).expect("expected sz_lang_signal_list_set");
+        let rest = &ir[at + needle.len()..];
+        let args = rest.split(')').next().unwrap();
+        let name = args
+            .split(',')
+            .nth(1)
+            .unwrap()
+            .trim()
+            .trim_start_matches("ptr ")
+            .trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after Signal.setList:\n{ir}"
         );
     }
 
