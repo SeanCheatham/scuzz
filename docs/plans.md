@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Last-use release for `Signal.str` inputs
+## Slice: Last-use release for `Signal.setStr` inputs
 
-`Signal.setList` retains its list. `Signal.str` copies the bytes and still leaves the owned `String`.
+`Signal.str` copies bytes and drops the owned string. `Signal.setStr` still leaves the owned `String`.
 
-- Drop an owned string after `sz_lang_signal_str`.
-- Proof: compiler IR for `Signal.str("a")` shows `sz_release` of the string after the call.
+- Drop an owned string after `sz_lang_signal_str_set`.
+- Proof: compiler IR for `Signal.setStr(s, "a")` shows `sz_release` of the string after the call.
 - Out of scope: RC stream nodes, View lambda packs, OS threads.
