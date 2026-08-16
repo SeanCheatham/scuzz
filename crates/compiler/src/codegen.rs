@@ -1073,10 +1073,11 @@ fn emit_match(
     };
     writeln!(code, "  br label %{first}").unwrap();
 
-    let mut phi_parts: Vec<(String, String)> = Vec::new();
+    let mut arm_emits: Vec<(String, String, Emitted)> = Vec::new();
     let mut result_kind = Kind::Io;
     let mut result_payload = Kind::Ptr;
-    let mut arms_owned = !arms.is_empty();
+    let mut any_arm_owned = false;
+    let mut all_arms_owned = !arms.is_empty();
 
     for (i, arm) in arms.iter().enumerate() {
         let try_l = format!("{prefix}_try_{id}_{i}");
@@ -1101,23 +1102,20 @@ fn emit_match(
             &mut code,
             &mut bound_names,
         );
-        writeln!(code, "{ok_l}:").unwrap();
         let ae = emit_expr(&arm.body, ctx, locals, &format!("{prefix}_a{id}_{i}"));
         for b in &bound_names {
             locals.remove(b);
         }
-        code.push_str(&ae.code);
-        if phi_parts.is_empty() {
+        if arm_emits.is_empty() {
             result_kind = ae.kind;
             result_payload = ae.payload;
         }
-        if !ae.owned || ae.kind != Kind::Ptr {
-            arms_owned = false;
+        if ae.owned && ae.kind == Kind::Ptr {
+            any_arm_owned = true;
+        } else {
+            all_arms_owned = false;
         }
-        writeln!(code, "  br label %{join_l}").unwrap();
-        writeln!(code, "{join_l}:").unwrap();
-        writeln!(code, "  br label %{merge}").unwrap();
-        phi_parts.push((ae.value, join_l));
+        arm_emits.push((ok_l, join_l, ae));
     }
 
     writeln!(code, "{default_label}:").unwrap();
@@ -1137,6 +1135,21 @@ fn emit_match(
         }
     };
     writeln!(code, "  br label %{merge}").unwrap();
+
+    let mixed_ptr = result_kind == Kind::Ptr && any_arm_owned && !all_arms_owned;
+    let arms_provide = result_kind == Kind::Ptr && any_arm_owned;
+    let mut phi_parts: Vec<(String, String)> = Vec::new();
+    for (ok_l, join_l, ae) in &arm_emits {
+        writeln!(code, "{ok_l}:").unwrap();
+        code.push_str(&ae.code);
+        if mixed_ptr && !ae.owned {
+            writeln!(code, "  call void @sz_retain(ptr {})", ae.value).unwrap();
+        }
+        writeln!(code, "  br label %{join_l}").unwrap();
+        writeln!(code, "{join_l}:").unwrap();
+        writeln!(code, "  br label %{merge}").unwrap();
+        phi_parts.push((ae.value.clone(), join_l.clone()));
+    }
     phi_parts.push((dflt, default_label));
 
     let ty = llvm_kind_ty(result_kind);
@@ -1150,7 +1163,7 @@ fn emit_match(
     }
     writeln!(code).unwrap();
     if se.owned {
-        if result_kind == Kind::Ptr && !arms_owned {
+        if result_kind == Kind::Ptr && !arms_provide {
             writeln!(code, "  call void @sz_retain(ptr %{prefix}_phi)").unwrap();
         }
         writeln!(code, "  call void @sz_release(ptr {})", se.value).unwrap();
@@ -1160,7 +1173,7 @@ fn emit_match(
         value: format!("%{prefix}_phi"),
         kind: result_kind,
         payload: result_payload,
-        owned: result_kind == Kind::Ptr && (arms_owned || se.owned),
+        owned: result_kind == Kind::Ptr && (arms_provide || se.owned),
     }
 }
 
@@ -5018,6 +5031,53 @@ enum Color { case Red, case Blue }
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of match-arm list {name}:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_match_mixed_arm_retain_then_release() {
+        let src = r#"
+enum Color { case Red, case Blue }
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.len(for {
+    xs = [1]
+  } yield Color.Red match {
+    case Color.Red => xs
+    case Color.Blue => [2]
+  })))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let roots: Vec<&str> = ir
+            .lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                if line.contains("_cl") {
+                    return None;
+                }
+                let (name, rest) = line.split_once(" = call ptr @sz_list_cons(")?;
+                if rest.contains("@") {
+                    return None;
+                }
+                Some(name.trim())
+            })
+            .collect();
+        assert!(
+            roots.len() >= 2,
+            "expected xs and match-arm list roots:\n{ir}"
+        );
+        assert!(
+            ir.contains(&format!("call void @sz_retain(ptr {})", roots[0])),
+            "expected retain of borrowed xs {}:\n{ir}",
+            roots[0]
+        );
+        let needle = "call i64 @sz_list_len(ptr ";
+        let at = ir.find(needle).expect("expected sz_list_len");
+        let phi = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {phi})")),
+            "expected last-use release of mixed match-phi {phi}:\n{ir}"
         );
     }
 

@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Last-use release for mixed owned / borrowed match arms
+## Slice: Last-use release for `Map.getOrElse` maps
 
-An `if` phi retains a borrowed arm when the other arm is owned. Match still marks the phi owned only when every arm produces an owned ptr. `xs match { case A => xs; case B => [1] }` stays allocated when the borrowed arm is taken.
+`Map.contains` / `Map.set` drop an owned map. `Map.getOrElse` does not, because the result may alias a payload inside the map.
 
-- Retain each borrowed match arm at its join when any arm is owned, then mark the phi owned.
-- Proof: compiler IR for a match that yields a bound list or a fresh list shows `sz_retain` of the bound list and `sz_release` of the phi after `List.len`.
+- Retain the result, then drop the owned map (same last-use as `List.head`).
+- Proof: compiler IR for `Map.getOrElse(Map.set(Map.empty(), "a", "1"), "a", "?")` shows `sz_release` of the map after `sz_map_get_or`.
 - Out of scope: cycle collector, OS threads, device packaging.
