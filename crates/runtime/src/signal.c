@@ -252,6 +252,7 @@ SzSignalStr *sz_lang_signal_map(SzSignalInt *src, SzSignalMapIntFn fn, void *env
 
 SzSignalList *sz_signal_list(SzList *initial) {
   SzSignalList *s = (SzSignalList *)sz_alloc(sizeof(SzSignalList));
+  sz_retain(initial);
   s->value = initial;
   sig_register(SIG_LIST, s);
   return s;

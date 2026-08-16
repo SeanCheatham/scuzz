@@ -11896,6 +11896,7 @@ static void test_signal_list_spine_collect(void) {
     xs = sz_list_cons(first, sz_list_nil());
     sz_string_free(first);
     items = sz_signal_list(xs);
+    sz_release(xs);
   sz_alloc_stats(&base_bytes, &base_count);
   /* Append copies the spine; set frees the unshared previous spine. */
   for (i = 0; i < 30; i++) {
@@ -11917,6 +11918,7 @@ static void test_alloc_each_pump_flat(void) {
   SzSignalList *items;
   SzView *root;
   SzUiSession *session;
+  SzList *xs;
   size_t base_count = 0, base_bytes = 0;
   size_t live_count = 0, live_bytes = 0;
   size_t max_count = 0;
@@ -11928,8 +11930,9 @@ static void test_alloc_each_pump_flat(void) {
   cfg.height = 120;
   cfg.scale = 1.0;
 
-  items = sz_signal_list(
-      sz_list_cons(sz_string_from_cstr("milk"), sz_list_nil()));
+  xs = sz_list_cons(sz_string_from_cstr("milk"), sz_list_nil());
+  items = sz_signal_list(xs);
+  sz_release(xs);
   root = sz_view_column();
   sz_view_add_child(root, sz_view_each(items));
   session = sz_ui_mount(&cfg, root);
