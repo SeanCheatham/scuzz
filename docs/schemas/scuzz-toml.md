@@ -78,7 +78,8 @@ my-app/
     fingerprint             # incremental compile cache (gitignored through **/.scuzz/)
   build/package/            # emitted by `scuzz package`
     host/run.sh
-    android/lib/arm64-v8a/libscuzz.so  # NDK link (`scuzz package --target android`)
+    android/<name>.apk                 # debug APK (`scuzz package --target android`)
+    android/lib/arm64-v8a/libscuzz.so  # NDK link (same command)
     ios/<name>.app          # signed sim bundle (`scuzz package --target ios`)
 ```
 

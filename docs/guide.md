@@ -24,7 +24,7 @@ From a prebuilt tarball (no checkout build): `RELEASE_TGZ=scuzz-<triple>.tar.gz 
 
 `scuzz new --ui` scaffolds `scuzz.toml` with `[ui]`, a Counter-shaped `src/Main.scuzz`, and Headless-friendly defaults.
 
-`scuzz package --target host` writes a Mobile host shell under `build/package/host`. `scuzz package --target android` links `libscuzz.so` (needs the NDK). Missing NDK fails with one install line. `scuzz package --target ios` builds a signed iOS simulator `.app` (needs Xcode). Missing Xcode fails with one install line. The iOS shell sends typed text to TextField.
+`scuzz package --target host` writes a Mobile host shell under `build/package/host`. `scuzz package --target android` packs a debug APK (needs the NDK and the Android SDK). Missing NDK or SDK fails with one install line. `scuzz package --target ios` builds a signed iOS simulator `.app` (needs Xcode). Missing Xcode fails with one install line. The iOS shell sends typed text to TextField. The Android shell blits `sz_mobile_present` frames onto a SurfaceView.
 
 ## IO path
 

@@ -178,7 +178,7 @@ enum Commands {
     },
     /// Package a project for host, Android, or iOS
     #[command(
-        after_help = "Examples:\n  scuzz package --target host\n  scuzz package --target all examples/counter\n  scuzz package --target ios examples/counter\n  scuzz package --target android examples/counter\n\nios builds a signed simulator .app. It needs Xcode. android links libscuzz.so. It needs the NDK. Missing xcrun or NDK fails with one install line.\n"
+        after_help = "Examples:\n  scuzz package --target host\n  scuzz package --target all examples/counter\n  scuzz package --target ios examples/counter\n  scuzz package --target android examples/counter\n\nios builds a signed simulator .app. It needs Xcode. android packs a debug APK. It needs the NDK and the Android SDK. Missing xcrun, NDK, or SDK fails with one install line.\n"
     )]
     Package {
         #[arg(default_value = ".")]
@@ -888,6 +888,24 @@ fn require_ios_simulator_sdk() -> Result<()> {
 
 const ANDROID_NDK_INSTALL: &str =
     "missing Android NDK — install the NDK, then set ANDROID_NDK_HOME";
+const ANDROID_SDK_INSTALL: &str =
+    "missing Android SDK — install the Android SDK, then set ANDROID_HOME";
+
+fn android_sdk_roots() -> Vec<PathBuf> {
+    let mut roots: Vec<PathBuf> = Vec::new();
+    for key in ["ANDROID_HOME", "ANDROID_SDK_ROOT"] {
+        if let Ok(p) = std::env::var(key) {
+            if !p.is_empty() {
+                roots.push(PathBuf::from(p));
+            }
+        }
+    }
+    if let Ok(home) = std::env::var("HOME") {
+        roots.push(PathBuf::from(&home).join("Library/Android/sdk"));
+        roots.push(PathBuf::from(home).join("Android/Sdk"));
+    }
+    roots
+}
 
 fn ndk_clang(ndk: &Path) -> Option<PathBuf> {
     let prebuilt = ndk.join("toolchains/llvm/prebuilt");
@@ -911,20 +929,8 @@ fn find_android_ndk() -> Option<PathBuf> {
             return Some(pb);
         }
     }
-    let mut roots: Vec<PathBuf> = Vec::new();
-    for key in ["ANDROID_HOME", "ANDROID_SDK_ROOT"] {
-        if let Ok(p) = std::env::var(key) {
-            if !p.is_empty() {
-                roots.push(PathBuf::from(p));
-            }
-        }
-    }
-    if let Ok(home) = std::env::var("HOME") {
-        roots.push(PathBuf::from(&home).join("Library/Android/sdk"));
-        roots.push(PathBuf::from(home).join("Android/Sdk"));
-    }
     let mut found = Vec::new();
-    for root in roots {
+    for root in android_sdk_roots() {
         let ndk_root = root.join("ndk");
         let Ok(rd) = std::fs::read_dir(&ndk_root) else {
             continue;
@@ -940,8 +946,42 @@ fn find_android_ndk() -> Option<PathBuf> {
     found.pop()
 }
 
+fn sdk_has_packaging_tools(sdk: &Path) -> bool {
+    let platforms = sdk.join("platforms");
+    let tools = sdk.join("build-tools");
+    let Ok(plats) = std::fs::read_dir(&platforms) else {
+        return false;
+    };
+    let has_jar = plats
+        .flatten()
+        .any(|e| e.path().join("android.jar").is_file());
+    if !has_jar {
+        return false;
+    }
+    let Ok(bts) = std::fs::read_dir(&tools) else {
+        return false;
+    };
+    bts.flatten().any(|e| {
+        let p = e.path();
+        p.join("aapt2").is_file()
+            && p.join("d8").exists()
+            && p.join("apksigner").exists()
+            && p.join("zipalign").is_file()
+    })
+}
+
+fn find_android_sdk() -> Option<PathBuf> {
+    android_sdk_roots()
+        .into_iter()
+        .find(|root| sdk_has_packaging_tools(root))
+}
+
 fn require_android_ndk() -> Result<PathBuf> {
     find_android_ndk().ok_or_else(|| anyhow::anyhow!("{ANDROID_NDK_INSTALL}"))
+}
+
+fn require_android_sdk() -> Result<PathBuf> {
+    find_android_sdk().ok_or_else(|| anyhow::anyhow!("{ANDROID_SDK_INSTALL}"))
 }
 
 fn package_android_ndk(
@@ -952,19 +992,24 @@ fn package_android_ndk(
     mobile_dir: &Path,
 ) -> Result<()> {
     let ndk = require_android_ndk()?;
-    let script = mobile_dir.join("shells/android/build_ndk.sh");
-    if !script.is_file() {
-        bail!("missing Android NDK script {}", script.display());
+    let sdk = require_android_sdk()?;
+    let ndk_script = mobile_dir.join("shells/android/build_ndk.sh");
+    let apk_script = mobile_dir.join("shells/android/build_apk.sh");
+    if !ndk_script.is_file() {
+        bail!("missing Android NDK script {}", ndk_script.display());
+    }
+    if !apk_script.is_file() {
+        bail!("missing Android APK script {}", apk_script.display());
     }
     let scuzz = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("scuzz"));
     let status = Command::new("bash")
-        .arg(&script)
+        .arg(&ndk_script)
         .arg(project_dir)
         .env("SCUZZ_BUNDLE_ID", bundle_id)
         .env("SCUZZ", &scuzz)
         .env("ANDROID_NDK_HOME", &ndk)
         .status()
-        .with_context(|| format!("running {}", script.display()))?;
+        .with_context(|| format!("running {}", ndk_script.display()))?;
     if !status.success() {
         bail!("Android NDK package failed");
     }
@@ -972,12 +1017,29 @@ fn package_android_ndk(
     if !so.is_file() {
         bail!("Android NDK package did not emit {}", so.display());
     }
-    copy_dir(&mobile_dir.join("shells/android"), dest)?;
+    let status = Command::new("bash")
+        .arg(&apk_script)
+        .arg(project_dir)
+        .env("SCUZZ_BUNDLE_ID", bundle_id)
+        .env("ANDROID_HOME", &sdk)
+        .env("ANDROID_SDK_ROOT", &sdk)
+        .status()
+        .with_context(|| format!("running {}", apk_script.display()))?;
+    if !status.success() {
+        bail!("Android APK package failed");
+    }
+    let apk = project_dir
+        .join("build/android")
+        .join(format!("{name}.apk"));
+    if !apk.is_file() {
+        bail!("Android APK package did not emit {}", apk.display());
+    }
+    std::fs::copy(&apk, dest.join(format!("{name}.apk")))
+        .with_context(|| format!("copying {}", apk.display()))?;
     let lib_dir = dest.join("lib/arm64-v8a");
     std::fs::create_dir_all(&lib_dir)?;
     std::fs::copy(&so, lib_dir.join("libscuzz.so"))
         .with_context(|| format!("copying {}", so.display()))?;
-    patch_bundle_id(&dest.join("AndroidManifest.xml"), bundle_id)?;
     write_package_meta(dest, name, "android", bundle_id)?;
     Ok(())
 }
@@ -1054,6 +1116,7 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
     }
     if want_android {
         require_android_ndk()?;
+        require_android_sdk()?;
     }
 
     let compiled = if want_host {
@@ -1165,16 +1228,6 @@ runtime = "mobile"
 "#
         ),
     )?;
-    Ok(())
-}
-
-fn patch_bundle_id(manifest: &Path, bundle_id: &str) -> Result<()> {
-    if !manifest.is_file() {
-        return Ok(());
-    }
-    let text = std::fs::read_to_string(manifest)?;
-    let patched = text.replace("dev.scuzz.app", bundle_id);
-    std::fs::write(manifest, patched)?;
     Ok(())
 }
 

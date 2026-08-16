@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Android APK shell
+## Slice: Android emulator touch and TextField
 
-The NDK link emits `libscuzz.so`. There is no Activity that presents frames on an emulator or device.
+The Android APK blits `sz_mobile_present` frames. Touches and typed text do not reach the pump.
 
-- Add a minimal Android Activity + SurfaceView that loads `libscuzz.so` and blits `sz_mobile_present` frames.
-- Proof: `scuzz package --target android examples/counter` plus the platform SDK installs and shows one frame on an emulator, or fails with one install line when `adb` / the SDK is missing.
+- Forward SurfaceView taps into `sz_mobile_push_event`. Show a hidden `EditText` on TextField focus and map insert/backspace to `SZ_INPUT_TEXT_EDIT` (same contract as the iOS shell).
+- Proof: `examples/counter` or `examples/studio` on a booted emulator registers one tap or one typed edit, or fails with one install line when `adb` is missing.
 - Out of scope: real-device provisioning, Impeller, OS IME candidate windows.

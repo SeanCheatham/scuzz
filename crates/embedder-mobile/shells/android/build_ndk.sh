@@ -80,7 +80,8 @@ for src in "$ROOT"/crates/runtime/src/*.c; do
   "$CLANG" "${CFLAGS[@]}" -std=c11 "${INCLUDES[@]}" -c "$src" -o "$obj"
 done
 
-for src in "$ROOT"/crates/ffi-skia/src/sk_sw.c "$ROOT"/crates/ffi-skia/src/png_enc.c; do
+for src in "$ROOT"/crates/ffi-skia/src/sk_sw.c "$ROOT"/crates/ffi-skia/src/png_enc.c \
+           "$ROOT"/crates/ffi-skia/src/sk_gpu_none.c; do
   obj="$OUT/obj/sk_$(basename "${src%.c}").o"
   "$CLANG" "${CFLAGS[@]}" -std=c11 \
     -I"$ROOT"/crates/ffi-skia/include -I"$ROOT"/crates/ffi-skia/src -c "$src" -o "$obj"

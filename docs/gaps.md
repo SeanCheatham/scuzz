@@ -11,11 +11,11 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ### 1. Mobile on real devices
 
-**Status.** iOS simulator proven: `scuzz package --target ios` runs `crates/embedder-mobile/shells/ios/build_sim.sh` and signs a `.app`. `examples/counter` mounts `UiRuntime.Mobile` in a booted sim. The iOS shell feeds typed insert and backspace into `SZ_INPUT_TEXT_EDIT`. Android NDK link is in: `scuzz package --target android` emits `libscuzz.so` for `arm64-v8a` when the NDK is present, or fails with one install line when it is missing. Real devices stay open (provisioning, no APK/Activity install path yet).
+**Status.** iOS simulator proven: `scuzz package --target ios` runs `crates/embedder-mobile/shells/ios/build_sim.sh` and signs a `.app`. `examples/counter` mounts `UiRuntime.Mobile` in a booted sim. The iOS shell feeds typed insert and backspace into `SZ_INPUT_TEXT_EDIT`. Android emulator APK is in: `scuzz package --target android` packs a debug APK that loads `libscuzz.so` and blits `sz_mobile_present` onto a SurfaceView, or fails with one install line when the NDK or SDK is missing. Real devices stay open (provisioning).
 
-**Unproven.** JNI/ObjC embedding on hardware. Touch and soft-keyboard text input on hardware. An Android APK that presents frames on an emulator or device.
+**Unproven.** JNI/ObjC embedding on hardware. Touch and soft-keyboard text input on hardware. Android touch and TextField on the emulator.
 
-**Proof.** One example (counter) runs on one device or simulator with `scuzz package` plus the platform toolchain. iOS sim meets that bar. Android meets the NDK link bar. Device runs stay open.
+**Proof.** One example (counter) runs on one device or simulator with `scuzz package` plus the platform toolchain. iOS sim meets that bar. Android meets the emulator APK present bar. Device runs stay open.
 
 ### 2. GPU presenters (Impeller / Skia GPU)
 

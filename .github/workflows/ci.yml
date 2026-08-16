@@ -316,12 +316,13 @@ jobs:
           grep -q "scuzz mobile: present" /tmp/mobile.out
           cargo run -p scuzz -- package --target host examples/counter
           test -x examples/counter/build/package/host/run.sh
-          # Linux CI has no NDK. android must fail with one install line, or
-          # emit libscuzz.so when the NDK is present.
+          # Linux CI has no NDK/SDK. android must fail with one install line,
+          # or emit a debug APK when the NDK and SDK are present.
           if cargo run -p scuzz -- package --target android examples/counter > /tmp/android-pkg.out 2>&1; then
             test -f examples/counter/build/package/android/lib/arm64-v8a/libscuzz.so
+            test -f examples/counter/build/package/android/counter.apk
           else
-            grep -q "ANDROID_NDK_HOME" /tmp/android-pkg.out
+            grep -Eq "ANDROID_NDK_HOME|ANDROID_HOME" /tmp/android-pkg.out
           fi
           # Linux has no Xcode. ios must fail with one install line.
           if cargo run -p scuzz -- package --target ios examples/counter > /tmp/ios-pkg.out 2>&1; then
