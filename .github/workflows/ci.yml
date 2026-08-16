@@ -308,11 +308,17 @@ jobs:
             ./examples/counter/build/counter 2>&1 | tee /tmp/mobile.out
           grep -q "UiRuntime.Mobile" /tmp/mobile.out
           grep -q "scuzz mobile: present" /tmp/mobile.out
-          cargo run -p scuzz -- package --target all examples/counter
+          cargo run -p scuzz -- package --target host examples/counter
+          cargo run -p scuzz -- package --target android examples/counter
           test -x examples/counter/build/package/host/run.sh
           test -f examples/counter/build/package/android/jni/scuzz_jni.c
-          test -f examples/counter/build/package/ios/main.m
-          test -f examples/counter/build/package/ios/build_sim.sh
+          # Linux has no Xcode. ios must fail with one install line.
+          if cargo run -p scuzz -- package --target ios examples/counter > /tmp/ios-pkg.out 2>&1; then
+            echo "ios package succeeded without Xcode" >&2
+            cat /tmp/ios-pkg.out >&2
+            exit 1
+          fi
+          grep -q "xcode-select --install" /tmp/ios-pkg.out
           env SCUZZ_UI_WIDTH=200 SCUZZ_UI_HEIGHT=120 \
             ./examples/counter/build/package/host/run.sh 2>&1 | tee /tmp/pkg-host.out
           grep -q "scuzz mobile: present" /tmp/pkg-host.out

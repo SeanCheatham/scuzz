@@ -79,7 +79,7 @@ my-app/
   build/package/            # emitted by `scuzz package`
     host/run.sh
     android/
-    ios/
+    ios/<name>.app          # signed sim bundle (`scuzz package --target ios`)
 ```
 
 The compiler accepts `*.scuzz` under `src/` (recursive). Units in the same package are merged. Executables need exactly one `@main`. Stem-paired `*.scuzz_sim` / `*.scuzz_drivers` and in-source `law` decls load under `scuzz check` and verify/fuzz builds. See [vision.md](../vision.md#laws-simulation-mutation-and-verification). `scuzz fmt` and `scuzz check` format-verify only the selected project's `src/` (not dependency trees).

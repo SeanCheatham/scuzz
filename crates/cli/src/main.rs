@@ -176,9 +176,9 @@ enum Commands {
         #[arg(long)]
         ui: bool,
     },
-    /// Emit mobile packaging shells (android / ios / host)
+    /// Package a project for host, Android, or iOS
     #[command(
-        after_help = "Examples:\n  scuzz package --target host\n  scuzz package --target all examples/counter\n  scuzz package --target ios\n"
+        after_help = "Examples:\n  scuzz package --target host\n  scuzz package --target all examples/counter\n  scuzz package --target ios examples/counter\n\nios builds a signed simulator .app. It needs Xcode. Missing xcrun fails with one install line.\n"
     )]
     Package {
         #[arg(default_value = ".")]
@@ -867,6 +867,56 @@ fn build(
     compile_project(&support::compile_opts(path, out_dir, incremental, verify)?)
 }
 
+const IOS_XCODE_INSTALL: &str =
+    "missing Xcode — install Xcode from the App Store, then xcode-select --install";
+
+fn require_ios_simulator_sdk() -> Result<()> {
+    let output = Command::new("xcrun")
+        .args(["--sdk", "iphonesimulator", "--show-sdk-path"])
+        .output();
+    match output {
+        Ok(out) if out.status.success() => {
+            let path = String::from_utf8_lossy(&out.stdout);
+            if path.trim().is_empty() {
+                bail!("{IOS_XCODE_INSTALL}");
+            }
+            Ok(())
+        }
+        _ => bail!("{IOS_XCODE_INSTALL}"),
+    }
+}
+
+fn package_ios_sim(
+    project_dir: &Path,
+    dest: &Path,
+    name: &str,
+    bundle_id: &str,
+    script: &Path,
+) -> Result<()> {
+    require_ios_simulator_sdk()?;
+    if !script.is_file() {
+        bail!("missing iOS simulator script {}", script.display());
+    }
+    let status = Command::new("bash")
+        .arg(script)
+        .arg(project_dir)
+        .env("SCUZZ_BUNDLE_ID", bundle_id)
+        .status()
+        .with_context(|| format!("running {}", script.display()))?;
+    if !status.success() {
+        bail!("iOS simulator package failed");
+    }
+    let app = project_dir
+        .join("build/ios-sim")
+        .join(format!("{name}.app"));
+    if !app.is_dir() {
+        bail!("iOS simulator package did not emit {}", app.display());
+    }
+    copy_dir(&app, &dest.join(format!("{name}.app")))?;
+    write_package_meta(dest, name, "ios", bundle_id)?;
+    Ok(())
+}
+
 fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode> {
     let target_lc = target.to_ascii_lowercase();
     let targets: Vec<&str> = if target_lc == "all" {
@@ -878,6 +928,8 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
             "unknown package target '{target}' (host|android|ios|all). Example: scuzz package --target host"
         );
     };
+    let want_host = targets.contains(&"host");
+    let want_ios = targets.contains(&"ios");
     let project_dir = resolve_dir(path)?;
     let manifest = load_manifest(&project_dir.join("scuzz.toml"))
         .with_context(|| format!("reading {}/scuzz.toml", project_dir.display()))?;
@@ -898,19 +950,26 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
         bail!("missing embedder-mobile at {}", mobile_dir.display());
     }
 
-    let clang = std::env::var("SCUZZ_CLANG").unwrap_or_else(|_| "clang".into());
-    let status = Command::new("make")
-        .arg("-C")
-        .arg(&mobile_dir)
-        .arg("lib")
-        .env("CC", &clang)
-        .status()
-        .context("building embedder-mobile")?;
-    if !status.success() {
-        bail!("embedder-mobile build failed");
+    if want_ios {
+        require_ios_simulator_sdk()?;
     }
 
-    let compiled = build(path, &PathBuf::from("build"), true, false)?;
+    let compiled = if want_host {
+        let clang = std::env::var("SCUZZ_CLANG").unwrap_or_else(|_| "clang".into());
+        let status = Command::new("make")
+            .arg("-C")
+            .arg(&mobile_dir)
+            .arg("lib")
+            .env("CC", &clang)
+            .status()
+            .context("building embedder-mobile")?;
+        if !status.success() {
+            bail!("embedder-mobile build failed");
+        }
+        Some(build(path, &PathBuf::from("build"), true, false)?)
+    } else {
+        None
+    };
 
     let bundle_id = manifest
         .ui
@@ -927,12 +986,8 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
         std::fs::create_dir_all(&dest)?;
         match t {
             "host" => {
-                write_host_package(
-                    &dest,
-                    &compiled.executable,
-                    &manifest.package.name,
-                    bundle_id,
-                )?;
+                let exe = &compiled.as_ref().expect("host compile").executable;
+                write_host_package(&dest, exe, &manifest.package.name, bundle_id)?;
             }
             "android" => {
                 copy_dir(&mobile_dir.join("shells/android"), &dest)?;
@@ -940,9 +995,13 @@ fn package_project(path: &Path, target: &str, out_dir: &Path) -> Result<ExitCode
                 write_package_meta(&dest, &manifest.package.name, "android", bundle_id)?;
             }
             "ios" => {
-                copy_dir(&mobile_dir.join("shells/ios"), &dest)?;
-                patch_bundle_id(&dest.join("Info.plist"), bundle_id)?;
-                write_package_meta(&dest, &manifest.package.name, "ios", bundle_id)?;
+                package_ios_sim(
+                    &project_dir,
+                    &dest,
+                    &manifest.package.name,
+                    bundle_id,
+                    &mobile_dir.join("shells/ios/build_sim.sh"),
+                )?;
             }
             _ => unreachable!(),
         }
@@ -1015,13 +1074,13 @@ fn patch_bundle_id(manifest: &Path, bundle_id: &str) -> Result<()> {
 
 fn copy_dir(src: &Path, dst: &Path) -> Result<()> {
     if !src.is_dir() {
-        bail!("missing shell template {}", src.display());
+        bail!("missing directory {}", src.display());
     }
     std::fs::create_dir_all(dst)?;
     for entry in std::fs::read_dir(src)? {
         let entry = entry?;
         let name = entry.file_name();
-        // Skip caches / VCS junk (for example .gradle). Packaging stays template-only.
+        // Skip caches / VCS junk (for example .gradle).
         if name.to_string_lossy().starts_with('.') {
             continue;
         }

@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: iOS package CLI
+## Slice: iOS sim TextField input
 
-Core value types and IO last-use are in. `scuzz package --target ios` still copies templates. The CLI does not drive `build_sim.sh`.
+`scuzz package --target ios` builds a signed simulator `.app`. The iOS shell shows and hides the soft keyboard. It does not feed typed text into the session.
 
-- Make `scuzz package --target ios` run the iOS simulator shell (`crates/embedder-mobile/shells/ios/build_sim.sh`) for `examples/counter`.
-- Proof: `scuzz package --target ios examples/counter` exits 0 on a host that has the iOS simulator toolchain, or fails with one install line when the toolchain is missing.
-- Out of scope: Android NDK, device provisioning, sim TextField input.
+- Wire the hidden `UITextField` insert and backspace events to `sz_mobile_push_event` (`SZ_INPUT_TEXT_EDIT`) in `crates/embedder-mobile/shells/ios/ScuzzShell.m`.
+- Proof: a TextField in `examples/studio` (or `examples/counter`) accepts typed text in the iOS simulator.
+- Out of scope: Android NDK, device provisioning, OS IME candidate windows.

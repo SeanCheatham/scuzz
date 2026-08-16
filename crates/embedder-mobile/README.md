@@ -13,8 +13,9 @@ present (`--whole-archive` so strong symbols override weak stubs in `libscuzz_rt
 
 ## Packaging shells
 
-`scuzz package` copies **templates** from `shells/` (layout + JNI/ObjC
-hooks). The iOS shell builds for the simulator; Android still needs NDK wiring.
+`scuzz package --target android` copies the Android template. `scuzz package
+--target ios` runs `shells/ios/build_sim.sh` and emits a signed simulator
+`.app`. Android still needs NDK wiring.
 
 | Target | Path | Role |
 | --- | --- | --- |
@@ -25,7 +26,7 @@ hooks). The iOS shell builds for the simulator; Android still needs NDK wiring.
 iOS simulator proof (macOS arm64 + Xcode):
 
 ```bash
-crates/embedder-mobile/shells/ios/build_sim.sh examples/counter
+scuzz package --target ios examples/counter
 xcrun simctl install booted examples/counter/build/ios-sim/counter.app
 xcrun simctl launch booted dev.scuzz.app
 ```

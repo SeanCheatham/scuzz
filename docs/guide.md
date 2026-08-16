@@ -24,6 +24,8 @@ From a prebuilt tarball (no checkout build): `RELEASE_TGZ=scuzz-<triple>.tar.gz 
 
 `scuzz new --ui` scaffolds `scuzz.toml` with `[ui]`, a Counter-shaped `src/Main.scuzz`, and Headless-friendly defaults.
 
+`scuzz package --target host` writes a Mobile host shell under `build/package/host`. `scuzz package --target android` copies the Android template. `scuzz package --target ios` builds a signed iOS simulator `.app` (needs Xcode). Missing Xcode fails with one install line.
+
 ## IO path
 
 ```bash
