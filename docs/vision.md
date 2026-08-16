@@ -75,7 +75,7 @@ One CLI. One typer. One formatter. One linter. One testing strategy. No second a
 
 ### GC (v0)
 
-libc `malloc`/`free` through `sz_alloc` / `sz_free`. No moving collector yet. Clear ownership frees strings/IO/`Resource`/Views, unshared `Signal.list` cons spines, and list string heads on signal free. Panic may leak. Revisit when long-lived interactive graphs demand it.
+libc `malloc`/`free` through `sz_alloc` / `sz_free`. No collector. The compiler emits no frees. Clear ownership frees strings/IO/`Resource`/Views, unshared `Signal.list` cons spines, and list string heads on signal free. Values without a runtime owner stay allocated. Panic may leak. Direction: compiler-emitted reference counting. Immutable data forms no cycles, so no cycle collector is needed. `Map` / `Set` need shared structure and wait on it. Long-lived IO churn is the other trigger.
 
 ### Skia
 
@@ -213,7 +213,7 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: [`plans.md`](plans.md). Open unknowns: Mobile on Android + real devices (iOS simulator proven), GPU presenters.
+Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: [`plans.md`](plans.md). Work order: core value types first — `Float`, then reference counting, then `Map` / `Set`. Mobile packaging (`scuzz package --target ios` CLI wiring, Android) comes after. Open unknowns: Mobile on Android + real devices (iOS simulator proven), GPU presenters.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. iOS simulator runs `examples/counter` through `crates/embedder-mobile/shells/ios/build_sim.sh`; Android and device builds stay open.
 

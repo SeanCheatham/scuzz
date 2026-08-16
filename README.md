@@ -41,7 +41,7 @@ scuzz run --headless    # Desktop: scuzz run
 
 ## Example
 
-A multi-page Desktop app (`showWhen`, `Signal.list`, `Fs`, `View`). Home shows layout widgets. Tasks is a file-backed list. The window stays open. Press q or Esc to quit. Full source: [`examples/studio`](examples/studio).
+A multi-page Desktop app. Radios switch pages with `showWhen`. Tasks live in a `Signal.list` and persist through `Fs`. The window stays open. Press q or Esc to quit. The snippet condenses [`examples/studio`](examples/studio). The full example adds the widget catalog, laws, and drivers.
 
 ```scala
 @main def main: IO[Unit] =
@@ -49,13 +49,12 @@ A multi-page Desktop app (`showWhen`, `Signal.list`, `Fs`, `View`). Home shows l
     for {
       path = if (Str.len(envPath) == 0) "/tmp/scuzz_studio.txt" else envPath
       draft = Signal.str("")
-      items = Signal.list(["milk"])
+      items = Signal.list([])
       page = Signal.int(0)
+      text <- Fs.read(path).handleErrorWith(_ => IO.pure(""))
+      _ = Signal.setList(items, Tasks.loadList(text))
       _ <- Ui.run(_ => View.column(
-        View.row(
-          View.button("Home", _ => Signal.set(page, 0)),
-          View.button("Tasks", _ => Signal.set(page, 1))
-        ),
+        View.row(View.radio(page, 0, "Home"), View.radio(page, 1, "Tasks")),
         View.showWhen(page, 0, View.text("Studio")),
         View.row(
           View.textField(draft, "item"),
@@ -64,10 +63,10 @@ A multi-page Desktop app (`showWhen`, `Signal.list`, `Fs`, `View`). Home shows l
           } yield if (Str.len(d) == 0) () else Signal.setList(items, List.append(Signal.getList(items), d)))
         ),
         View.expanded(View.scroll(View.each(items, s => View.row(
-          View.expanded(View.text(s)),
+          View.expanded(View.text(Tasks.itemLabel(s))),
           View.button("Del", _ => Signal.setList(items, List.filter(Signal.getList(items), x => x != s)))
         )))),
-        View.button("Save", _ => Fs.write(path, Str.concat(List.join(Signal.getList(items), "\n"), "\n")))
+        View.button("Save", _ => Fs.write(path, Tasks.saveBody(Signal.getList(items))))
       ))
     } yield ()
   )

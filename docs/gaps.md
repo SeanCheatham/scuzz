@@ -27,10 +27,17 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ## Known gaps
 
+### Core value types
+
+`Float`, `Map`, and `Set` are missing. Apps get `Int`, `String`, `Bool`, `List[T]`, and enums only. This limits the batteries-included thesis more than mobile packaging does, so this work comes first (see [`plans.md`](plans.md)).
+
+- **Float** — a scalar through the lexer, typer, formatter, and codegen. No memory implications. Current slice.
+- **Map / Set** — persistent shared structures. Manual ownership does not extend to shared trees. They wait on reference counting (see the Memory residual).
+
 ### Residuals
 
 - **Concurrency** — cooperative fibers only. Later: OS threads, supervision trees.
-- **Memory** — counter-shaped Headless pumps stay flat under alloc accounting. `Signal.list` frees unshared cons spines. Later: a collector if list churn still needs it.
+- **Memory** — counter-shaped Headless pumps stay flat under alloc accounting. `Signal.list` frees unshared cons spines. The compiler emits no frees, so values without a runtime owner stay allocated. Direction: compiler-emitted reference counting. Immutable data forms no cycles, so no cycle collector is needed. `Map` / `Set` and long-lived IO churn wait on it.
 - **Hermetic process and env kit** — TestRuntime fakes clock, random, FS, net, and console. `Sys.exec` and `Sys.spawn` fail under TestRuntime. `Sys.alive` / `Sys.kill` / `Sys.getenv` still touch the host. Revisit if fuzz needs fake processes or a sealed env map.
 - **LSP / editor tooling** — `fmt`, `check --message-format=json`, `watch`, and `scuzz lsp` exist. LSP wraps `check` (didOpen/didChange overlay open buffers; didClose returns to disk). Positions are UTF-16. Hover, completion, and definition use that parse. Unknown methods return JSON-RPC `-32601`. JSON diagnostics stay the single schema. `check` reports more than one parse or type error per run.
 
