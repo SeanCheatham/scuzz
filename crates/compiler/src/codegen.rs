@@ -39,6 +39,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out).unwrap();
 
     writeln!(out, "declare ptr @sz_string_from_cstr(ptr)").unwrap();
+    writeln!(out, "declare void @sz_retain(ptr)").unwrap();
+    writeln!(out, "declare void @sz_release(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_cstr(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_concat(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_string_len(ptr)").unwrap();
@@ -351,6 +353,8 @@ struct Emitted {
     kind: Kind,
     /// When `kind == Io`, the kind of the successful payload (Int for Sys.exec).
     payload: Kind,
+    /// Compiler owns a +1 on this ptr (string temps). Release after a copy.
+    owned: bool,
 }
 
 fn io_emitted(code: String, value: String, payload: Kind) -> Emitted {
@@ -359,6 +363,7 @@ fn io_emitted(code: String, value: String, payload: Kind) -> Emitted {
         value,
         kind: Kind::Io,
         payload,
+        owned: false,
     }
 }
 
@@ -368,6 +373,29 @@ fn val_emitted(code: String, value: String, kind: Kind) -> Emitted {
         value,
         kind,
         payload: Kind::Ptr,
+        owned: false,
+    }
+}
+
+fn owned_ptr(code: String, value: String) -> Emitted {
+    Emitted {
+        code,
+        value,
+        kind: Kind::Ptr,
+        payload: Kind::Ptr,
+        owned: true,
+    }
+}
+
+fn drop_owned_ptr(code: &mut String, e: &Emitted) {
+    if e.owned && e.kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {})", e.value).unwrap();
+    }
+}
+
+fn drop_owned_ptrs(code: &mut String, args: &[Emitted]) {
+    for a in args {
+        drop_owned_ptr(code, a);
     }
 }
 
@@ -672,6 +700,9 @@ fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
             } else {
                 "null".into()
             };
+            if matches!(def.ret, Type::String) && !body.owned {
+                writeln!(out, "  call void @sz_retain(ptr {v})").unwrap();
+            }
             writeln!(out, "  ret ptr {v}").unwrap();
         }
     }
@@ -848,6 +879,7 @@ fn pack_env(
             i + 1
         )
         .unwrap();
+        writeln!(code, "  call void @sz_release(ptr {cur})").unwrap();
         cur = format!("%{prefix}_{}", i + 1);
     }
     cur
@@ -876,6 +908,7 @@ fn emit_list_lit(
             "  {next} = call ptr @sz_list_cons(ptr {ptr}, ptr {cur})"
         )
         .unwrap();
+        writeln!(code, "  call void @sz_release(ptr {cur})").unwrap();
         cur = next;
     }
     val_emitted(code, cur, Kind::Ptr)
@@ -946,7 +979,7 @@ fn emit_sz_string(
     ctx: &mut EmitCtx<'_>,
     locals: &mut HashMap<String, (String, Kind)>,
     prefix: &str,
-) -> String {
+) -> (String, bool) {
     if let ExprKind::StrLit(s) = &expr.kind {
         let idx = str_index(strs, s);
         let len = s.len() + 1;
@@ -960,11 +993,11 @@ fn emit_sz_string(
             "  %{prefix}_ss = call ptr @sz_string_from_cstr(ptr %{prefix}_gep)"
         )
         .unwrap();
-        return format!("%{prefix}_ss");
+        return (format!("%{prefix}_ss"), true);
     }
     let se = emit_expr(expr, ctx, locals, &format!("{prefix}_e"));
     code.push_str(&se.code);
-    se.value
+    (se.value, se.owned)
 }
 
 fn emit_match(
@@ -1064,6 +1097,7 @@ fn emit_match(
         value: format!("%{prefix}_phi"),
         kind: result_kind,
         payload: result_payload,
+        owned: false,
     }
 }
 
@@ -1240,7 +1274,7 @@ fn emit_expr(
                 "  %{prefix}_s = call ptr @sz_string_from_cstr(ptr %{prefix}_gep)"
             )
             .unwrap();
-            val_emitted(code, format!("%{prefix}_s"), Kind::Ptr)
+            owned_ptr(code, format!("%{prefix}_s"))
         }
         ExprKind::ListLit { elems } => emit_list_lit(elems, ctx, locals, prefix),
         ExprKind::Interpolate { parts } => emit_interpolate(parts, ctx, locals, prefix),
@@ -1272,8 +1306,11 @@ fn emit_expr(
         }
         ExprKind::IoPrintln(arg) => {
             let mut code = String::new();
-            let s = emit_sz_string(&mut code, ctx.strs, arg, ctx, locals, prefix);
+            let (s, owned) = emit_sz_string(&mut code, ctx.strs, arg, ctx, locals, prefix);
             writeln!(code, "  %{prefix}_io = call ptr @sz_io_println(ptr {s})").unwrap();
+            if owned {
+                writeln!(code, "  call void @sz_release(ptr {s})").unwrap();
+            }
             io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
         }
         ExprKind::IoPure(inner) => {
@@ -1364,6 +1401,7 @@ fn emit_expr(
                             "  {next} = call ptr @sz_list_cons(ptr {ptr}, ptr {cur})"
                         )
                         .unwrap();
+                        writeln!(code, "  call void @sz_release(ptr {cur})").unwrap();
                         cur = next;
                     }
                     cur
@@ -1398,6 +1436,7 @@ fn emit_expr(
                 value: be.value,
                 kind: be.kind,
                 payload: be.payload,
+                owned: be.owned,
             }
         }
         ExprKind::If {
@@ -1452,6 +1491,7 @@ fn emit_expr(
                 value: format!("%{prefix}_phi"),
                 kind,
                 payload,
+                owned: false,
             }
         }
         ExprKind::Lambda { param, body } => emit_lambda(param, body, ctx, locals, prefix),
@@ -1688,15 +1728,15 @@ fn emit_interpolate(
                 }
                 let mut code = ee.code;
                 let s = stringify_scalar(&mut code, ee.kind, &ee.value, &format!("{prefix}_s"));
-                return val_emitted(code, s, Kind::Ptr);
+                return owned_ptr(code, s);
             }
         }
     }
 
     let mut code = String::new();
-    let mut acc: Option<String> = None;
+    let mut acc: Option<(String, bool)> = None;
     for (i, part) in parts.iter().enumerate() {
-        let piece = match part {
+        let (piece, piece_owned) = match part {
             crate::ast::InterpPart::Lit(s) => {
                 let e = emit_expr(
                     &Expr::dummy(ExprKind::StrLit(s.clone())),
@@ -1705,31 +1745,44 @@ fn emit_interpolate(
                     &format!("{prefix}_l{i}"),
                 );
                 code.push_str(&e.code);
-                e.value
+                (e.value, e.owned)
             }
             crate::ast::InterpPart::Expr(e) => {
                 let ee = emit_expr(e, ctx, locals, &format!("{prefix}_e{i}"));
                 code.push_str(&ee.code);
                 if ee.kind == Kind::Ptr {
-                    ee.value
+                    (ee.value, ee.owned)
                 } else {
-                    stringify_scalar(&mut code, ee.kind, &ee.value, &format!("{prefix}_s{i}"))
+                    let s =
+                        stringify_scalar(&mut code, ee.kind, &ee.value, &format!("{prefix}_s{i}"));
+                    (s, true)
                 }
             }
         };
         acc = Some(match acc {
-            None => piece,
-            Some(prev) => {
+            None => (piece, piece_owned),
+            Some((prev, prev_owned)) => {
                 writeln!(
                     code,
                     "  %{prefix}_c{i} = call ptr @sz_string_concat(ptr {prev}, ptr {piece})"
                 )
                 .unwrap();
-                format!("%{prefix}_c{i}")
+                if prev_owned {
+                    writeln!(code, "  call void @sz_release(ptr {prev})").unwrap();
+                }
+                if piece_owned {
+                    writeln!(code, "  call void @sz_release(ptr {piece})").unwrap();
+                }
+                (format!("%{prefix}_c{i}"), true)
             }
         });
     }
-    val_emitted(code, acc.unwrap(), Kind::Ptr)
+    let (val, owned) = acc.unwrap();
+    if owned {
+        owned_ptr(code, val)
+    } else {
+        val_emitted(code, val, Kind::Ptr)
+    }
 }
 
 /// Emit a `_ => body` / `x => body` lambda literal as a closure value: a
@@ -1792,11 +1845,13 @@ fn emit_lambda(
         "  %{prefix}_cl1 = call ptr @sz_list_cons(ptr {env_ptr}, ptr %{prefix}_cl0)"
     )
     .unwrap();
+    writeln!(code, "  call void @sz_release(ptr %{prefix}_cl0)").unwrap();
     writeln!(
         code,
         "  %{prefix}_cl2 = call ptr @sz_list_cons(ptr @{fn_name}, ptr %{prefix}_cl1)"
     )
     .unwrap();
+    writeln!(code, "  call void @sz_release(ptr %{prefix}_cl1)").unwrap();
     val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
 }
 
@@ -1868,11 +1923,13 @@ fn emit_map_lambda(
         "  %{prefix}_cl1 = call ptr @sz_list_cons(ptr {env_ptr}, ptr %{prefix}_cl0)"
     )
     .unwrap();
+    writeln!(code, "  call void @sz_release(ptr %{prefix}_cl0)").unwrap();
     writeln!(
         code,
         "  %{prefix}_cl2 = call ptr @sz_list_cons(ptr @{fn_name}, ptr %{prefix}_cl1)"
     )
     .unwrap();
+    writeln!(code, "  call void @sz_release(ptr %{prefix}_cl1)").unwrap();
     val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
 }
 
@@ -1926,11 +1983,13 @@ fn emit_each_lambda(
         "  %{prefix}_cl1 = call ptr @sz_list_cons(ptr {env_ptr}, ptr %{prefix}_cl0)"
     )
     .unwrap();
+    writeln!(code, "  call void @sz_release(ptr %{prefix}_cl0)").unwrap();
     writeln!(
         code,
         "  %{prefix}_cl2 = call ptr @sz_list_cons(ptr @{fn_name}, ptr %{prefix}_cl1)"
     )
     .unwrap();
+    writeln!(code, "  call void @sz_release(ptr %{prefix}_cl1)").unwrap();
     val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
 }
 
@@ -2079,11 +2138,13 @@ fn emit_io_cont_lambda(
         "  %{prefix}_cl1 = call ptr @sz_list_cons(ptr {env_ptr}, ptr %{prefix}_cl0)"
     )
     .unwrap();
+    writeln!(code, "  call void @sz_release(ptr %{prefix}_cl0)").unwrap();
     writeln!(
         code,
         "  %{prefix}_cl2 = call ptr @sz_list_cons(ptr @{fn_name}, ptr %{prefix}_cl1)"
     )
     .unwrap();
+    writeln!(code, "  call void @sz_release(ptr %{prefix}_cl1)").unwrap();
     val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
 }
 
@@ -2141,11 +2202,13 @@ fn emit_pred_lambda(
         "  %{prefix}_cl1 = call ptr @sz_list_cons(ptr {env_ptr}, ptr %{prefix}_cl0)"
     )
     .unwrap();
+    writeln!(code, "  call void @sz_release(ptr %{prefix}_cl0)").unwrap();
     writeln!(
         code,
         "  %{prefix}_cl2 = call ptr @sz_list_cons(ptr @{fn_name}, ptr %{prefix}_cl1)"
     )
     .unwrap();
+    writeln!(code, "  call void @sz_release(ptr %{prefix}_cl1)").unwrap();
     val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
 }
 
@@ -2225,11 +2288,13 @@ fn emit_smap_lambda(
         "  %{prefix}_cl1 = call ptr @sz_list_cons(ptr {env_ptr}, ptr %{prefix}_cl0)"
     )
     .unwrap();
+    writeln!(code, "  call void @sz_release(ptr %{prefix}_cl0)").unwrap();
     writeln!(
         code,
         "  %{prefix}_cl2 = call ptr @sz_list_cons(ptr @{fn_name}, ptr %{prefix}_cl1)"
     )
     .unwrap();
+    writeln!(code, "  call void @sz_release(ptr %{prefix}_cl1)").unwrap();
     val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
 }
 
@@ -2479,11 +2544,13 @@ fn emit_rebuild_lambda(
         "  %{prefix}_cl1 = call ptr @sz_list_cons(ptr {env_ptr}, ptr %{prefix}_cl0)"
     )
     .unwrap();
+    writeln!(code, "  call void @sz_release(ptr %{prefix}_cl0)").unwrap();
     writeln!(
         code,
         "  %{prefix}_cl2 = call ptr @sz_list_cons(ptr @{fn_name}, ptr %{prefix}_cl1)"
     )
     .unwrap();
+    writeln!(code, "  call void @sz_release(ptr %{prefix}_cl1)").unwrap();
     val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
 }
 
@@ -2539,7 +2606,11 @@ fn emit_binary(
             le.value, re.value
         )
         .unwrap();
-        return val_emitted(code, format!("%{prefix}_add"), Kind::Ptr);
+        if le.owned {
+            writeln!(code, "  call void @sz_release(ptr {})", le.value).unwrap();
+        }
+        drop_owned_ptr(&mut code, &re);
+        return owned_ptr(code, format!("%{prefix}_add"));
     }
 
     if matches!(op, BinOp::Eq | BinOp::Ne) && le.kind == Kind::Ptr && re.kind == Kind::Ptr {
@@ -2550,6 +2621,10 @@ fn emit_binary(
         )
         .unwrap();
         writeln!(code, "  %{prefix}_eq = zext i32 %{prefix}_eqi to i64").unwrap();
+        if le.owned {
+            writeln!(code, "  call void @sz_release(ptr {})", le.value).unwrap();
+        }
+        drop_owned_ptr(&mut code, &re);
         if *op == BinOp::Eq {
             return val_emitted(code, format!("%{prefix}_eq"), Kind::Int);
         }
@@ -2861,7 +2936,8 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            drop_owned_ptrs(&mut code, &emitted_args);
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "Str.len" => {
             writeln!(
@@ -2870,6 +2946,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Str.slice" => {
@@ -2879,7 +2956,8 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
             )
             .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "Str.eq" => {
             writeln!(
@@ -2889,6 +2967,7 @@ fn emit_call(
             )
             .unwrap();
             writeln!(code, "  %{prefix}_v = zext i32 %{prefix}_eqi to i64").unwrap();
+            drop_owned_ptrs(&mut code, &emitted_args);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Str.charAt" => {
@@ -2898,6 +2977,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Str.fromInt" => {
@@ -2912,7 +2992,7 @@ fn emit_call(
                 "  %{prefix}_v = call ptr @sz_string_from_int(i64 {n})"
             )
             .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "Float.fromInt" => {
             let n = as_i64(
@@ -2941,6 +3021,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
+            drop_owned_ptrs(&mut code, &emitted_args);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Str.startsWith" => {
@@ -2950,6 +3031,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
+            drop_owned_ptrs(&mut code, &emitted_args);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Str.lines" => {
@@ -2959,6 +3041,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Str.trim" => {
@@ -2968,7 +3051,8 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "List.empty" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_list_nil()").unwrap();
@@ -3061,7 +3145,8 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "List.append" => {
             let elem = if emitted_args[1].kind == Kind::Int || emitted_args[1].kind == Kind::Float {
@@ -4484,6 +4569,19 @@ mod tests {
         assert!(ir.contains("define i32 @main(i32 %argc, ptr %argv)"));
         assert!(ir.contains("sz_io_println"));
         assert!(ir.contains("sz_runtime_main_args"));
+        assert!(ir.contains("sz_release"));
+    }
+
+    #[test]
+    fn emit_string_retain_on_borrowed_return() {
+        let src = r#"
+def id(s: String): String = s
+@main def main: IO[Unit] = IO.println(id("x"))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_retain"));
     }
 
     #[test]

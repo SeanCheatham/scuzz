@@ -14,6 +14,17 @@ void sz_panic(const char *msg) __attribute__((noreturn));
 void *sz_alloc(size_t size);
 void *sz_alloc_zero(size_t size);
 void sz_free(void *ptr);
+/* RC objects (strings, list cells, ADTs, boxed i64). List cells retain the
+ * tail so shared spines stay. They do not own heads. Non-RC pointers no-op. */
+enum {
+  SZ_RC_STRING = 1,
+  SZ_RC_LIST = 2,
+  SZ_RC_ADT = 3,
+  SZ_RC_BOX = 4
+};
+void *sz_rc_alloc(size_t size, uint32_t kind);
+void sz_retain(void *ptr);
+void sz_release(void *ptr);
 /* Live heap through sz_alloc/sz_free (user bytes; excludes size header). */
 void sz_alloc_stats(size_t *live_bytes, size_t *live_count);
 /* Reset peak / pump-sample counter; live stays accurate for outstanding allocs. */

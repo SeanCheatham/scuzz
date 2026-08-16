@@ -2,18 +2,26 @@
 
 #include <string.h>
 
-/* Linked list: NULL = Nil. Cons cells do not own heads. Signal.list frees
- * unshared spines on set/free. Shared tails (cons onto an existing list)
- * stay. No tracing collector. */
+/* Linked list: NULL = Nil. Cons cells retain the tail (shared spines) and
+ * do not own heads. sz_list_free is sz_release on the root cell. */
 
 SzList *sz_list_nil(void) { return NULL; }
 
 int sz_list_is_empty(const SzList *xs) { return xs == NULL; }
 
 SzList *sz_list_cons(void *head, SzList *tail) {
-  SzList *n = (SzList *)sz_alloc(sizeof(SzList));
+  SzList *n = (SzList *)sz_rc_alloc(sizeof(SzList), SZ_RC_LIST);
   n->head = head;
   n->tail = tail;
+  sz_retain(tail);
+  return n;
+}
+
+/* Cons, then drop the caller's unique ref to `tail`. Use when `tail` is a
+ * fresh spine the caller will not keep. Sharing a live tail uses cons only. */
+static SzList *sz_list_cons_take(void *head, SzList *tail) {
+  SzList *n = sz_list_cons(head, tail);
+  sz_release(tail);
   return n;
 }
 
@@ -52,20 +60,20 @@ void *sz_list_at(const SzList *xs, size_t index) {
 SzList *sz_list_reverse(SzList *xs) {
   SzList *acc = NULL;
   for (SzList *p = xs; p; p = p->tail)
-    acc = sz_list_cons(p->head, acc);
+    acc = sz_list_cons_take(p->head, acc);
   return acc;
 }
 
 SzList *sz_list_append(SzList *xs, void *x) {
   if (!xs)
     return sz_list_cons(x, NULL);
-  return sz_list_cons(xs->head, sz_list_append(xs->tail, x));
+  return sz_list_cons_take(xs->head, sz_list_append(xs->tail, x));
 }
 
 static SzList *sz_list_copy(SzList *xs) {
   if (!xs)
     return NULL;
-  return sz_list_cons(xs->head, sz_list_copy(xs->tail));
+  return sz_list_cons_take(xs->head, sz_list_copy(xs->tail));
 }
 
 /* Replace the head at `index`. Copy the spine so `xs` stays. Out of range
@@ -75,11 +83,11 @@ SzList *sz_list_set_at(SzList *xs, int64_t index, void *v) {
   if (!xs || index < 0)
     return xs;
   if (index == 0)
-    return sz_list_cons(v, sz_list_copy(xs->tail));
+    return sz_list_cons_take(v, sz_list_copy(xs->tail));
   rest = sz_list_set_at(xs->tail, index - 1, v);
   if (rest == xs->tail)
     return xs;
-  return sz_list_cons(xs->head, rest);
+  return sz_list_cons_take(xs->head, rest);
 }
 
 SzList *sz_list_filter(SzList *xs, SzListPred pred, void *env) {
@@ -88,7 +96,7 @@ SzList *sz_list_filter(SzList *xs, SzListPred pred, void *env) {
   if (!xs)
     return NULL;
   if (pred(xs->head, env))
-    return sz_list_cons(xs->head, sz_list_filter(xs->tail, pred, env));
+    return sz_list_cons_take(xs->head, sz_list_filter(xs->tail, pred, env));
   return sz_list_filter(xs->tail, pred, env);
 }
 
@@ -97,16 +105,10 @@ SzList *sz_list_map(SzList *xs, SzListMapFn fn, void *env) {
     sz_panic("sz_list_map(null fn)");
   if (!xs)
     return NULL;
-  return sz_list_cons(fn(xs->head, env), sz_list_map(xs->tail, fn, env));
+  return sz_list_cons_take(fn(xs->head, env), sz_list_map(xs->tail, fn, env));
 }
 
-void sz_list_free(SzList *xs) {
-  while (xs) {
-    SzList *n = xs->tail;
-    sz_free(xs);
-    xs = n;
-  }
-}
+void sz_list_free(SzList *xs) { sz_release(xs); }
 
 SzString *sz_list_join(const SzList *xs, const char *sep) {
   if (!sep)

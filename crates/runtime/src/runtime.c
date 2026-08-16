@@ -98,10 +98,99 @@ void sz_alloc_trace_on_pump(void) {
           g_trace_pumps, g_live_bytes, g_live_count, g_peak_bytes);
 }
 
+/* Header before RC user pointer: [SzRcHdr][user bytes...], itself in sz_alloc. */
+#define SZ_RC_MAGIC 0x535A5243u /* 'SZRC' */
+
+typedef struct SzRcHdr {
+  uint32_t magic;
+  uint32_t rc;
+  uint32_t kind;
+  uint32_t pad;
+} SzRcHdr;
+
+static SzRcHdr *sz_rc_hdr(const void *ptr) {
+  return ((SzRcHdr *)ptr) - 1;
+}
+
+static int sz_is_rc(const void *ptr) {
+  if (!ptr)
+    return 0;
+  return sz_rc_hdr(ptr)->magic == SZ_RC_MAGIC;
+}
+
+void *sz_rc_alloc(size_t size, uint32_t kind) {
+  SzRcHdr *h = (SzRcHdr *)sz_alloc(sizeof(SzRcHdr) + size);
+  h->magic = SZ_RC_MAGIC;
+  h->rc = 1;
+  h->kind = kind;
+  h->pad = 0;
+  return (void *)(h + 1);
+}
+
+void sz_retain(void *ptr) {
+  if (!sz_is_rc(ptr))
+    return;
+  sz_rc_hdr(ptr)->rc += 1;
+}
+
+void sz_release(void *ptr) {
+  SzRcHdr *h;
+  uint32_t kind;
+  if (!sz_is_rc(ptr))
+    return;
+  h = sz_rc_hdr(ptr);
+  if (h->rc > 1) {
+    h->rc -= 1;
+    return;
+  }
+  kind = h->kind;
+  h->magic = 0;
+  h->rc = 0;
+  switch (kind) {
+  case SZ_RC_STRING: {
+    SzString *s = (SzString *)ptr;
+    sz_free(s->data);
+    s->data = NULL;
+    break;
+  }
+  case SZ_RC_LIST: {
+    SzList *xs = (SzList *)ptr;
+    for (;;) {
+      SzList *tail = xs->tail;
+      SzRcHdr *cell = sz_rc_hdr(xs);
+      xs->head = NULL;
+      xs->tail = NULL;
+      cell->magic = 0;
+      sz_free(cell);
+      if (!sz_is_rc(tail))
+        return;
+      if (sz_rc_hdr(tail)->rc > 1) {
+        sz_release(tail);
+        return;
+      }
+      xs = tail;
+    }
+  }
+  case SZ_RC_ADT: {
+    SzAdt *a = (SzAdt *)ptr;
+    void *payload = a->payload;
+    a->payload = NULL;
+    sz_free(h);
+    sz_release(payload);
+    return;
+  }
+  case SZ_RC_BOX:
+    break;
+  default:
+    break;
+  }
+  sz_free(h);
+}
+
 /* --- strings ------------------------------------------------------------- */
 
 SzString *sz_string_from_bytes(const char *bytes, size_t len) {
-  SzString *s = (SzString *)sz_alloc(sizeof(SzString));
+  SzString *s = (SzString *)sz_rc_alloc(sizeof(SzString), SZ_RC_STRING);
   s->len = len;
   s->data = (char *)sz_alloc(len + 1);
   if (len)
@@ -120,12 +209,7 @@ const char *sz_string_cstr(const SzString *s) {
   return s && s->data ? s->data : "";
 }
 
-void sz_string_free(SzString *s) {
-  if (!s)
-    return;
-  sz_free(s->data);
-  sz_free(s);
-}
+void sz_string_free(SzString *s) { sz_release(s); }
 
 SzString *sz_string_concat(const SzString *a, const SzString *b) {
   size_t al = a && a->data ? a->len : 0;
@@ -257,7 +341,7 @@ SzList *sz_string_lines(const SzString *s) {
 }
 
 void *sz_box_i64(int64_t n) {
-  int64_t *p = (int64_t *)sz_alloc(sizeof(int64_t));
+  int64_t *p = (int64_t *)sz_rc_alloc(sizeof(int64_t), SZ_RC_BOX);
   *p = n;
   return p;
 }
@@ -339,9 +423,10 @@ SzIo *sz_io_attempt_as_result(SzIo *inner) {
 }
 
 SzAdt *sz_adt_new(int32_t tag, void *payload) {
-  SzAdt *a = (SzAdt *)sz_alloc(sizeof(SzAdt));
+  SzAdt *a = (SzAdt *)sz_rc_alloc(sizeof(SzAdt), SZ_RC_ADT);
   a->tag = tag;
   a->payload = payload;
+  sz_retain(payload);
   return a;
 }
 
@@ -406,6 +491,7 @@ SzIo *sz_io_println(SzString *msg) {
     sz_panic("sz_io_println(null)");
   SzIo *io = sz_io_new(SZ_IO_PRINTLN);
   io->as.println = msg;
+  sz_retain(msg);
   return io;
 }
 

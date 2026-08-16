@@ -32,12 +32,12 @@ When a gap closes or its assessment changes, update this file. If direction chan
 `Map` and `Set` are missing. Apps get `Int`, `Float`, `String`, `Bool`, `List[T]`, and enums. This limits the batteries-included thesis more than mobile packaging does.
 
 - **Float** — scalar through the lexer, typer, formatter, and codegen (LLVM `double`). Proof: `examples/kernel`.
-- **Map / Set** — persistent shared structures. Manual ownership does not extend to shared trees. They wait on reference counting (see the Memory residual).
+- **Map / Set** — persistent shared structures. List cells retain shared tails. They do not own heads yet. Map/Set wait on child ownership (see the Memory residual).
 
 ### Residuals
 
 - **Concurrency** — cooperative fibers only. Later: OS threads, supervision trees.
-- **Memory** — counter-shaped Headless pumps stay flat under alloc accounting. `Signal.list` frees unshared cons spines. The compiler emits no frees, so values without a runtime owner stay allocated. Direction: compiler-emitted reference counting. Immutable data forms no cycles, so no cycle collector is needed. `Map` / `Set` and long-lived IO churn wait on it.
+- **Memory** — counter-shaped Headless pumps stay flat under alloc accounting. `Signal.list` releases list spines through RC. The compiler emits retain/release on string temps (concat, slice, trim, println, borrowed `String` return). List cells do not own heads. IO graphs and values without a last-use stay allocated. No cycle collector. `Map` / `Set` and long-lived IO churn wait on child ownership and IO last-use.
 - **Hermetic process and env kit** — TestRuntime fakes clock, random, FS, net, and console. `Sys.exec` and `Sys.spawn` fail under TestRuntime. `Sys.alive` / `Sys.kill` / `Sys.getenv` still touch the host. Revisit if fuzz needs fake processes or a sealed env map.
 - **LSP / editor tooling** — `fmt`, `check --message-format=json`, `watch`, and `scuzz lsp` exist. LSP wraps `check` (didOpen/didChange overlay open buffers; didClose returns to disk). Positions are UTF-16. Hover, completion, and definition use that parse. Unknown methods return JSON-RPC `-32601`. JSON diagnostics stay the single schema. `check` reports more than one parse or type error per run.
 

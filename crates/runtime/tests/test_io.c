@@ -2378,6 +2378,37 @@ int main(void) {
     sz_string_free(c);
   }
 
+  /* RC: string retain/release returns to baseline. Shared list tails stay. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *s;
+    SzString *a;
+    SzString *b;
+    SzList *xs;
+    SzList *ys;
+    sz_alloc_stats(&base_bytes, &base_count);
+    s = sz_string_from_cstr("rc");
+    sz_retain(s);
+    sz_release(s);
+    sz_release(s);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+    a = sz_string_from_cstr("a");
+    b = sz_string_from_cstr("b");
+    xs = sz_list_cons(a, sz_list_nil());
+    ys = sz_list_cons(b, xs);
+    sz_list_free(ys);
+    assert(xs->head == a);
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   puts("runtime io tests ok");
   return 0;
 }

@@ -257,23 +257,12 @@ SzSignalList *sz_signal_list(SzList *initial) {
   return s;
 }
 
-static int list_shares(const SzList *a, const SzList *b) {
-  const SzList *p;
-  const SzList *q;
-  for (p = a; p; p = p->tail) {
-    for (q = b; q; q = q->tail) {
-      if (p == q)
-        return 1;
-    }
-  }
-  return 0;
-}
-
 void sz_signal_list_set(SzSignalList *s, SzList *v) {
   if (!s)
     return;
-  if (s->value && s->value != v && !list_shares(s->value, v))
-    sz_list_free(s->value);
+  if (s->value == v)
+    return;
+  sz_release(s->value);
   s->value = v;
 }
 

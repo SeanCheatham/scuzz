@@ -1,10 +1,9 @@
 # Short-term plan
 
-## Slice: compiler-emitted reference counting
+## Slice: Map and Set
 
-Core value types come before mobile packaging (see [`gaps.md`](gaps.md)). `Float` is in. `Map` / `Set` wait on shared structure, so the compiler must emit retains/releases next.
+Core value types come before mobile packaging (see [`gaps.md`](gaps.md)). `Float` is in. Reference counting covers string temps and shared list spines. `Map` / `Set` still wait on child ownership.
 
-- Emit retain/release on owned values (strings, lists, ADTs, IO handles) at copies and last use. Immutable data forms no cycles, so do not add a cycle collector.
-- Keep libc `malloc`/`free` through `sz_alloc` / `sz_free`. Panic may still leak.
-- Proof: `examples/kernel` and `examples/io` still pass `scuzz check` and `scuzz test`. Alloc accounting on a counter-shaped Headless pump stays flat across extra pumps.
-- Out of scope: `Map` / `Set`, cycle collection, OS threads.
+- Add persistent `Map[K, V]` and `Set[T]` on shared trees. List cells must own heads (typed drop) so tree nodes can share children without a cycle collector.
+- Proof: `examples/kernel` constructs, looks up, and updates a map/set and still passes `scuzz check` and `scuzz test`.
+- Out of scope: IO last-use, OS threads, cycle collection.
