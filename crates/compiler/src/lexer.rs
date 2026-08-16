@@ -53,6 +53,8 @@ pub enum Token {
     /// `s"..."` fragments: lit / `$ident` / `${...}` raw source for the parser.
     InterpString(Vec<InterpTok>),
     IntLit(i64),
+    /// IEEE-754 bits of a `Float` literal (`1.5`).
+    FloatLit(u64),
     Eof,
 }
 
@@ -207,17 +209,36 @@ pub fn lex(input: &str) -> Result<Vec<SpannedToken>, LexError> {
         }
         if c.is_ascii_digit() {
             let start = i;
-            let mut n = 0i64;
             while i < chars.len() && chars[i].is_ascii_digit() {
-                n = n
-                    .saturating_mul(10)
-                    .saturating_add((chars[i] as u8 - b'0') as i64);
                 i += 1;
             }
-            tokens.push(SpannedToken {
-                token: Token::IntLit(n),
-                span: Span::new(String::new(), byte_at(start), byte_at(i)),
-            });
+            let is_float = i < chars.len()
+                && chars[i] == '.'
+                && i + 1 < chars.len()
+                && chars[i + 1].is_ascii_digit();
+            if is_float {
+                i += 1;
+                while i < chars.len() && chars[i].is_ascii_digit() {
+                    i += 1;
+                }
+                let lexeme: String = chars[start..i].iter().collect();
+                let bits = lexeme.parse::<f64>().map(f64::to_bits).unwrap_or(0);
+                tokens.push(SpannedToken {
+                    token: Token::FloatLit(bits),
+                    span: Span::new(String::new(), byte_at(start), byte_at(i)),
+                });
+            } else {
+                let mut n = 0i64;
+                for &ch in &chars[start..i] {
+                    n = n
+                        .saturating_mul(10)
+                        .saturating_add((ch as u8 - b'0') as i64);
+                }
+                tokens.push(SpannedToken {
+                    token: Token::IntLit(n),
+                    span: Span::new(String::new(), byte_at(start), byte_at(i)),
+                });
+            }
             continue;
         }
         match c {
@@ -445,6 +466,14 @@ fn compact_interp_parts(parts: Vec<InterpTok>) -> Vec<InterpTok> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lexes_float_literal() {
+        let toks = lex("1.5 + 10").unwrap();
+        assert!(matches!(&toks[0].token, Token::FloatLit(b) if f64::from_bits(*b) == 1.5));
+        assert!(matches!(toks[1].token, Token::Plus));
+        assert!(matches!(toks[2].token, Token::IntLit(10)));
+    }
 
     #[test]
     fn lexes_hello() {

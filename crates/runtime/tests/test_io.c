@@ -1385,6 +1385,9 @@ int main(void) {
       assert(sz_string_len(tr) == 0);
     }
     assert(strcmp(sz_string_cstr(sz_string_from_int(42)), "42") == 0);
+    assert(strcmp(sz_string_cstr(sz_string_from_float(1.5)), "1.5") == 0);
+    assert(strcmp(sz_string_cstr(sz_string_from_float(2.0)), "2.0") == 0);
+    assert(strcmp(sz_string_cstr(sz_string_from_float(-1.5)), "-1.5") == 0);
   }
 
   /* list */

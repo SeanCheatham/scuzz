@@ -95,6 +95,11 @@ jobs:
           grep -q "show:some" /tmp/kernel.out
           grep -q "get:2" /tmp/kernel.out
           grep -q "7ok" /tmp/kernel.out
+          grep -q "float:3.0" /tmp/kernel.out
+          grep -q "from:3.0" /tmp/kernel.out
+          grep -q "to:2" /tmp/kernel.out
+          grep -q "cmp:lt" /tmp/kernel.out
+          grep -q "neg:-1.5" /tmp/kernel.out
           cargo run -p scuzz -- run examples/io | tee /tmp/io.out
           grep -q "ref-ok" /tmp/io.out
           grep -q "queue-ok" /tmp/io.out

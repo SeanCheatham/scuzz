@@ -1118,7 +1118,7 @@ fn kit_ret_label(ty: &Type) -> &'static str {
 fn kit_lambda_body_ok(got: &Type, want: &Type) -> bool {
     match want {
         Type::Opaque(n) if n == "View" => matches!(got, Type::Opaque(g) if g == "View"),
-        Type::String => matches!(got, Type::String | Type::Int),
+        Type::String => matches!(got, Type::String | Type::Int | Type::Float),
         Type::Bool => matches!(got, Type::Bool),
         Type::Io(_) => matches!(got, Type::Io(_)),
         _ => types_compat(got, want),
@@ -1389,6 +1389,7 @@ fn infer(
         let result = match &expr.kind {
             ExprKind::Unit => Ok(Type::Unit),
             ExprKind::IntLit(_) => Ok(Type::Int),
+            ExprKind::FloatLit(_) => Ok(Type::Float),
             ExprKind::BoolLit(_) => Ok(Type::Bool),
             ExprKind::StrLit(_) => Ok(Type::String),
             ExprKind::ListLit { elems } => {
@@ -1410,9 +1411,11 @@ fn infer(
                         crate::ast::InterpPart::Lit(_) => {}
                         crate::ast::InterpPart::Expr(e) => {
                             let t = infer(e, enums, funs, methods, current_module, env)?;
-                            if !matches!(t, Type::String | Type::Int) && !is_meta_opaque(&t) {
+                            if !matches!(t, Type::String | Type::Int | Type::Float)
+                                && !is_meta_opaque(&t)
+                            {
                                 return Err(TypeError::Msg(format!(
-                                    "interpolation hole must be String or Int, got {t:?}"
+                                    "interpolation hole must be String, Int, or Float, got {t:?}"
                                 )));
                             }
                         }
@@ -1558,7 +1561,12 @@ fn infer(
                         Ok(Type::String)
                     }
                     BinOp::Add | BinOp::Sub | BinOp::Mul | BinOp::Div | BinOp::Mod => {
-                        if matches!(lt, Type::Int) && matches!(rt, Type::Int) {
+                        if matches!(lt, Type::Float) && matches!(rt, Type::Float) {
+                            if matches!(op, BinOp::Mod) {
+                                return Err(TypeError::Msg("% needs Int".into()));
+                            }
+                            Ok(Type::Float)
+                        } else if matches!(lt, Type::Int) && matches!(rt, Type::Int) {
                             if matches!(op, BinOp::Div | BinOp::Mod)
                                 && matches!(right.kind, ExprKind::IntLit(0))
                             {
@@ -1567,7 +1575,7 @@ fn infer(
                             Ok(Type::Int)
                         } else {
                             Err(TypeError::Msg(format!(
-                                "arithmetic needs Int, got {lt:?} and {rt:?}"
+                                "arithmetic needs Int or Float, got {lt:?} and {rt:?}"
                             )))
                         }
                     }
@@ -1583,10 +1591,12 @@ fn infer(
                         }
                     }
                     BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
-                        if matches!(lt, Type::Int) && matches!(rt, Type::Int) {
+                        if matches!(lt, Type::Int) && matches!(rt, Type::Int)
+                            || matches!(lt, Type::Float) && matches!(rt, Type::Float)
+                        {
                             Ok(Type::Bool)
                         } else {
-                            Err(TypeError::Msg("ordered compare needs Int".into()))
+                            Err(TypeError::Msg("ordered compare needs Int or Float".into()))
                         }
                     }
                     BinOp::And | BinOp::Or => {
@@ -1850,6 +1860,16 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
             Ok(Type::String)
+        }
+        "Float.fromInt" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            Ok(Type::Float)
+        }
+        "Float.toInt" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Float)?;
+            Ok(Type::Int)
         }
         "Str.lines" => {
             expect_arity(callee, &arg_tys, 1)?;
@@ -2692,7 +2712,7 @@ fn check_payload_ty(
     fty: &Type,
 ) -> Result<(), TypeError> {
     match fty {
-        Type::Int | Type::String | Type::Bool | Type::Adt(_) => Ok(()),
+        Type::Int | Type::Float | Type::String | Type::Bool | Type::Adt(_) => Ok(()),
         Type::List(inner) => check_payload_ty(enum_name, en, case, fname, inner),
         Type::App(_, args) => {
             for a in args {
@@ -2711,7 +2731,7 @@ fn check_payload_ty(
             }
         }
         other => Err(TypeError::Msg(format!(
-            "{enum_name}.{} field {fname}: payload types are Int, String, Bool, List[T], an ADT, or the enum's type parameter(s), got {other:?}",
+            "{enum_name}.{} field {fname}: payload types are Int, Float, String, Bool, List[T], an ADT, or the enum's type parameter(s), got {other:?}",
             case.name
         ))),
     }
@@ -3038,6 +3058,7 @@ fn types_compat(a: &Type, b: &Type) -> bool {
     match (a, b) {
         (Type::Unit, Type::Unit) => true,
         (Type::Int, Type::Int) => true,
+        (Type::Float, Type::Float) => true,
         (Type::Bool, Type::Bool) => true,
         (Type::String, Type::String) => true,
         (Type::List(x), Type::List(y)) => types_compat(x, y),
@@ -3198,7 +3219,13 @@ fn unify_construct(
 
 fn mono_type_ok(t: &Type) -> bool {
     match t {
-        Type::Unit | Type::Int | Type::String | Type::Bool | Type::List(_) | Type::Adt(_) => true,
+        Type::Unit
+        | Type::Int
+        | Type::Float
+        | Type::String
+        | Type::Bool
+        | Type::List(_)
+        | Type::Adt(_) => true,
         Type::App(_, args) => args.iter().all(mono_type_ok),
         _ => false,
     }
@@ -3244,6 +3271,7 @@ fn type_mangle(t: &Type) -> String {
     match t {
         Type::Unit => "Unit".into(),
         Type::Int => "Int".into(),
+        Type::Float => "Float".into(),
         Type::String => "String".into(),
         Type::Bool => "Bool".into(),
         Type::List(inner) => format!("List_{}", type_mangle(inner)),
@@ -5581,6 +5609,33 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Str.startsWith should typecheck");
+    }
+
+    #[test]
+    fn typechecks_float_arith_and_convert() {
+        let src = r#"
+def scale(x: Float): Float = x * 2.0
+@main def main: IO[Unit] =
+  IO.println(s"${scale(1.5) + Float.fromInt(1)} ${Float.toInt(2.9)}")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Float arith should typecheck");
+    }
+
+    #[test]
+    fn rejects_float_mod() {
+        let src = r#"@main def main: IO[Unit] = IO.println(s"${1.5 % 2.0}")"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(err.contains("%"), "{err}");
+    }
+
+    #[test]
+    fn rejects_mixed_int_float_arith() {
+        let src = r#"@main def main: IO[Unit] = IO.println(s"${1 + 1.5}")"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(err.contains("Float") || err.contains("Int"), "{err}");
     }
 
     #[test]

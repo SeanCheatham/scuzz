@@ -181,6 +181,25 @@ SzString *sz_string_from_int(int64_t n) {
   return sz_string_from_cstr(buf);
 }
 
+SzString *sz_string_from_float(double x) {
+  char buf[64];
+  char *dot;
+  char *end;
+  if (x != x) {
+    return sz_string_from_cstr("NaN");
+  }
+  snprintf(buf, sizeof(buf), "%.6f", x);
+  dot = strchr(buf, '.');
+  if (dot) {
+    end = buf + strlen(buf);
+    while (end > dot + 2 && end[-1] == '0') {
+      end--;
+      *end = '\0';
+    }
+  }
+  return sz_string_from_cstr(buf);
+}
+
 int64_t sz_string_index_of(const SzString *s, const SzString *needle) {
   if (!s || !needle)
     return -1;

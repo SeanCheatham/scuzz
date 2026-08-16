@@ -1,11 +1,10 @@
 # Short-term plan
 
-## Slice: `Float` scalar type
+## Slice: compiler-emitted reference counting
 
-Core value types come before mobile packaging (see [`gaps.md`](gaps.md)). `Float` is first because it is the cheapest: a scalar through the compiler with no memory-management implications.
+Core value types come before mobile packaging (see [`gaps.md`](gaps.md)). `Float` is in. `Map` / `Set` wait on shared structure, so the compiler must emit retains/releases next.
 
-- Add `Float` to the kernel: literals (`1.5`), arithmetic (`+ - * /`), comparisons, and `s"$x"` interpolation with one stable decimal format.
-- Add `Float.fromInt(n): Float` and `Float.toInt(x): Int` (truncate).
-- `scuzz fmt` and `scuzz check` cover the new syntax. Codegen lowers to LLVM `double`.
-- Proof: `examples/kernel` exercises `Float`. `scuzz check` and `scuzz test` pass on `examples/`.
-- Out of scope: `Map` / `Set` (they wait on reference counting), `Float` law generators, mobile CLI wiring.
+- Emit retain/release on owned values (strings, lists, ADTs, IO handles) at copies and last use. Immutable data forms no cycles, so do not add a cycle collector.
+- Keep libc `malloc`/`free` through `sz_alloc` / `sz_free`. Panic may still leak.
+- Proof: `examples/kernel` and `examples/io` still pass `scuzz check` and `scuzz test`. Alloc accounting on a counter-shaped Headless pump stays flat across extra pumps.
+- Out of scope: `Map` / `Set`, cycle collection, OS threads.

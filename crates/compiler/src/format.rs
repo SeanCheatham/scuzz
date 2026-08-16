@@ -224,6 +224,7 @@ fn pretty_type(t: &Type) -> String {
     match t {
         Type::Unit => "Unit".into(),
         Type::Int => "Int".into(),
+        Type::Float => "Float".into(),
         Type::String => "String".into(),
         Type::Bool => "Bool".into(),
         Type::List(inner) => format!("List[{}]", pretty_type(inner)),
@@ -284,6 +285,7 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
     match &expr.kind {
         ExprKind::Unit => format!("{pad}()"),
         ExprKind::IntLit(n) => format!("{pad}{n}"),
+        ExprKind::FloatLit(bits) => format!("{pad}{}", crate::ast::format_float_bits(*bits)),
         ExprKind::BoolLit(true) => format!("{pad}true"),
         ExprKind::BoolLit(false) => format!("{pad}false"),
         ExprKind::StrLit(s) => format!("{pad}\"{}\"", escape(s)),
@@ -584,6 +586,20 @@ def tag(): String = helper()
         assert!(out.contains("private def helper(): String ="));
         assert!(out.contains("def tag(): String ="));
         assert!(!out.contains("private def tag"));
+    }
+
+    #[test]
+    fn formats_float_literal() {
+        let src = r#"
+def scale(x: Float): Float = x * 2.0
+@main def main: IO[Unit] = IO.println(s"${scale(1.5)}")
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("x: Float"));
+        assert!(out.contains("2.0"));
+        assert!(out.contains("1.5"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
     }
 
     #[test]

@@ -31,7 +31,7 @@ pub fn hover_in_source(
     }
     if matches!(
         name.as_str(),
-        "Int" | "String" | "Bool" | "Unit" | "List" | "IO"
+        "Int" | "Float" | "String" | "Bool" | "Unit" | "List" | "IO"
     ) {
         return Some(name);
     }
@@ -316,6 +316,8 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Fiber.join", "Fiber.join(f: Fiber[T]): IO[T]"),
     ("Fiber.interrupt", "Fiber.interrupt(f: Fiber[T]): IO[Unit]"),
     ("Str.fromInt", "Str.fromInt(n: Int): String"),
+    ("Float.fromInt", "Float.fromInt(n: Int): Float"),
+    ("Float.toInt", "Float.toInt(x: Float): Int"),
     (
         "Str.startsWith",
         "Str.startsWith(s: String, prefix: String): Bool",

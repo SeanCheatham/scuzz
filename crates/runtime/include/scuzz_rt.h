@@ -40,6 +40,7 @@ SzString *sz_string_slice(const SzString *s, int64_t start, int64_t end);
 int sz_string_eq(const SzString *a, const SzString *b);
 int64_t sz_string_char_at(const SzString *s, int64_t index); /* byte as i64; -1 OOB */
 SzString *sz_string_from_int(int64_t n);
+SzString *sz_string_from_float(double x);
 int64_t sz_string_index_of(const SzString *s, const SzString *needle);
 int64_t sz_string_starts_with(const SzString *s, const SzString *prefix);
 SzString *sz_string_trim(const SzString *s);

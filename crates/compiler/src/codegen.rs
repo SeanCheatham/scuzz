@@ -6,6 +6,7 @@ use std::fmt::Write as _;
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Kind {
     Int,
+    Float,
     Ptr,
     Io,
 }
@@ -45,6 +46,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare i32 @sz_string_eq(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_string_char_at(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_string_from_int(i64)").unwrap();
+    writeln!(out, "declare ptr @sz_string_from_float(double)").unwrap();
     writeln!(out, "declare i64 @sz_string_index_of(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_string_starts_with(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_trim(ptr)").unwrap();
@@ -399,6 +401,7 @@ fn build_enum_payloads(enums: &[EnumDef]) -> HashMap<(String, String), Vec<Type>
 fn llvm_type(ty: &Type) -> &'static str {
     match ty {
         Type::Int | Type::Bool => "i64",
+        Type::Float => "double",
         _ => "ptr",
     }
 }
@@ -406,8 +409,76 @@ fn llvm_type(ty: &Type) -> &'static str {
 fn kind_of_type(ty: &Type) -> Kind {
     match ty {
         Type::Int | Type::Bool => Kind::Int,
+        Type::Float => Kind::Float,
         Type::Io(_) => Kind::Io,
         _ => Kind::Ptr,
+    }
+}
+
+fn llvm_kind_ty(kind: Kind) -> &'static str {
+    match kind {
+        Kind::Int => "i64",
+        Kind::Float => "double",
+        Kind::Ptr | Kind::Io => "ptr",
+    }
+}
+
+fn llvm_double_const(bits: u64) -> String {
+    format!("0x{:016X}", bits)
+}
+
+fn box_numeric(code: &mut String, kind: Kind, value: &str, tmp: &str) -> String {
+    match kind {
+        Kind::Int => {
+            writeln!(code, "  %{tmp} = call ptr @sz_box_i64(i64 {value})").unwrap();
+            format!("%{tmp}")
+        }
+        Kind::Float => {
+            writeln!(code, "  %{tmp}_bits = bitcast double {value} to i64").unwrap();
+            writeln!(code, "  %{tmp} = call ptr @sz_box_i64(i64 %{tmp}_bits)").unwrap();
+            format!("%{tmp}")
+        }
+        Kind::Ptr | Kind::Io => value.to_string(),
+    }
+}
+
+fn unbox_numeric(code: &mut String, kind: Kind, ptr: &str, tmp: &str) -> String {
+    match kind {
+        Kind::Int => {
+            writeln!(code, "  %{tmp} = call i64 @sz_unbox_i64(ptr {ptr})").unwrap();
+            format!("%{tmp}")
+        }
+        Kind::Float => {
+            writeln!(code, "  %{tmp}_bits = call i64 @sz_unbox_i64(ptr {ptr})").unwrap();
+            writeln!(code, "  %{tmp} = bitcast i64 %{tmp}_bits to double").unwrap();
+            format!("%{tmp}")
+        }
+        Kind::Ptr | Kind::Io => ptr.to_string(),
+    }
+}
+
+fn as_f64(code: &mut String, kind: Kind, value: &str, tmp: &str) -> String {
+    if kind == Kind::Float {
+        return value.to_string();
+    }
+    unbox_numeric(code, Kind::Float, value, tmp)
+}
+
+fn stringify_scalar(code: &mut String, kind: Kind, value: &str, tmp: &str) -> String {
+    match kind {
+        Kind::Float => {
+            writeln!(
+                code,
+                "  %{tmp} = call ptr @sz_string_from_float(double {value})"
+            )
+            .unwrap();
+            format!("%{tmp}")
+        }
+        Kind::Int => {
+            writeln!(code, "  %{tmp} = call ptr @sz_string_from_int(i64 {value})").unwrap();
+            format!("%{tmp}")
+        }
+        Kind::Ptr | Kind::Io => value.to_string(),
     }
 }
 
@@ -497,7 +568,11 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
                 collect_strings(e, out);
             }
         }
-        ExprKind::Unit | ExprKind::Var(_) | ExprKind::IntLit(_) | ExprKind::BoolLit(_) => {}
+        ExprKind::Unit
+        | ExprKind::Var(_)
+        | ExprKind::IntLit(_)
+        | ExprKind::FloatLit(_)
+        | ExprKind::BoolLit(_) => {}
         ExprKind::Field { base, .. } => collect_strings(base, out),
         ExprKind::MethodCall { receiver, args, .. } => {
             collect_strings(receiver, out);
@@ -580,12 +655,20 @@ fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
             };
             writeln!(out, "  ret i64 {v}").unwrap();
         }
+        Kind::Float => {
+            let v = if body.kind == Kind::Float {
+                body.value
+            } else {
+                writeln!(out, "  %ret_fcoerce = bitcast i64 0 to double").unwrap();
+                "%ret_fcoerce".into()
+            };
+            writeln!(out, "  ret double {v}").unwrap();
+        }
         Kind::Ptr => {
             let v = if body.kind == Kind::Ptr || body.kind == Kind::Io {
                 body.value
-            } else if body.kind == Kind::Int {
-                writeln!(out, "  %ret_box = call ptr @sz_box_i64(i64 {})", body.value).unwrap();
-                "%ret_box".into()
+            } else if body.kind == Kind::Int || body.kind == Kind::Float {
+                box_numeric(out, body.kind, &body.value, "ret_box")
             } else {
                 "null".into()
             };
@@ -724,9 +807,8 @@ fn ensure_io(code: &mut String, kind: Kind, value: &str, tmp: &str) -> String {
     if kind == Kind::Io {
         return value.to_string();
     }
-    let ptr = if kind == Kind::Int {
-        writeln!(code, "  %{tmp}_box = call ptr @sz_box_i64(i64 {value})").unwrap();
-        format!("%{tmp}_box")
+    let ptr = if kind == Kind::Int || kind == Kind::Float {
+        box_numeric(code, kind, value, &format!("{tmp}_box"))
     } else {
         value.to_string()
     };
@@ -755,9 +837,8 @@ fn pack_env(
     let mut cur = format!("%{prefix}_0");
     for (i, name) in names.iter().enumerate().rev() {
         let (val, kind) = locals.get(name).expect("capture name");
-        let ptr = if *kind == Kind::Int {
-            writeln!(code, "  %{prefix}_b{i} = call ptr @sz_box_i64(i64 {val})").unwrap();
-            format!("%{prefix}_b{i}")
+        let ptr = if *kind == Kind::Int || *kind == Kind::Float {
+            box_numeric(code, *kind, val, &format!("{prefix}_b{i}"))
         } else {
             val.clone()
         };
@@ -784,14 +865,8 @@ fn emit_list_lit(
     for (i, elem) in elems.iter().enumerate().rev() {
         let ee = emit_expr(elem, ctx, locals, &format!("{prefix}_e{i}"));
         code.push_str(&ee.code);
-        let ptr = if ee.kind == Kind::Int {
-            writeln!(
-                code,
-                "  %{prefix}_b{i} = call ptr @sz_box_i64(i64 {})",
-                ee.value
-            )
-            .unwrap();
-            format!("%{prefix}_b{i}")
+        let ptr = if ee.kind == Kind::Int || ee.kind == Kind::Float {
+            box_numeric(&mut code, ee.kind, &ee.value, &format!("{prefix}_b{i}"))
         } else {
             ee.value.clone()
         };
@@ -823,13 +898,9 @@ fn unpack_env_preamble(
         writeln!(pre, "  %{prefix}_h{i} = call ptr @sz_list_head(ptr {cur})").unwrap();
         writeln!(pre, "  %{prefix}_t{i} = call ptr @sz_list_tail(ptr {cur})").unwrap();
         match kind {
-            Kind::Int => {
-                writeln!(
-                    pre,
-                    "  %{name} = call i64 @sz_unbox_i64(ptr %{prefix}_h{i})"
-                )
-                .unwrap();
-                body_locals.insert(name.clone(), (format!("%{name}"), Kind::Int));
+            Kind::Int | Kind::Float => {
+                let v = unbox_numeric(pre, kind, &format!("%{prefix}_h{i}"), name);
+                body_locals.insert(name.clone(), (v, kind));
             }
             Kind::Ptr | Kind::Io => {
                 body_locals.insert(name.clone(), (format!("%{prefix}_h{i}"), kind));
@@ -965,6 +1036,10 @@ fn emit_match(
             writeln!(code, "  %{prefix}_dflt = add i64 0, 0").unwrap();
             format!("%{prefix}_dflt")
         }
+        Kind::Float => {
+            writeln!(code, "  %{prefix}_dflt = bitcast i64 0 to double").unwrap();
+            format!("%{prefix}_dflt")
+        }
         Kind::Ptr => "null".into(),
         Kind::Io => {
             writeln!(code, "  %{prefix}_dflt = call ptr @sz_io_pure(ptr null)").unwrap();
@@ -974,10 +1049,7 @@ fn emit_match(
     writeln!(code, "  br label %{merge}").unwrap();
     phi_parts.push((dflt, default_label));
 
-    let ty = match result_kind {
-        Kind::Int => "i64",
-        Kind::Ptr | Kind::Io => "ptr",
-    };
+    let ty = llvm_kind_ty(result_kind);
     writeln!(code, "{merge}:").unwrap();
     write!(code, "  %{prefix}_phi = phi {ty}").unwrap();
     for (i, (val, lab)) in phi_parts.iter().enumerate() {
@@ -1101,13 +1173,14 @@ fn emit_payload_fields(
     let mut out = Vec::with_capacity(nbinds);
     if nbinds == 1 {
         match field_tys.first() {
-            Some(Type::Int) | Some(Type::Bool) => {
-                writeln!(
-                    code,
-                    "  %{prefix}_b0 = call i64 @sz_unbox_i64(ptr %{prefix}_pl)"
-                )
-                .unwrap();
-                out.push((format!("%{prefix}_b0"), Kind::Int));
+            Some(Type::Int) | Some(Type::Bool) | Some(Type::Float) => {
+                let k = if matches!(field_tys.first(), Some(Type::Float)) {
+                    Kind::Float
+                } else {
+                    Kind::Int
+                };
+                let v = unbox_numeric(code, k, &format!("%{prefix}_pl"), &format!("{prefix}_b0"));
+                out.push((v, k));
             }
             _ => out.push((format!("%{prefix}_pl"), Kind::Ptr)),
         }
@@ -1120,10 +1193,14 @@ fn emit_payload_fields(
             )
             .unwrap();
             match field_tys.get(fi) {
-                Some(Type::Int) | Some(Type::Bool) => {
-                    let bn = format!("{prefix}_b{fi}");
-                    writeln!(code, "  %{bn} = call i64 @sz_unbox_i64(ptr %{cell})").unwrap();
-                    out.push((format!("%{bn}"), Kind::Int));
+                Some(Type::Int) | Some(Type::Bool) | Some(Type::Float) => {
+                    let k = if matches!(field_tys.get(fi), Some(Type::Float)) {
+                        Kind::Float
+                    } else {
+                        Kind::Int
+                    };
+                    let v = unbox_numeric(code, k, &format!("%{cell}"), &format!("{prefix}_b{fi}"));
+                    out.push((v, k));
                 }
                 _ => out.push((format!("%{cell}"), Kind::Ptr)),
             }
@@ -1141,6 +1218,9 @@ fn emit_expr(
     match &expr.kind {
         ExprKind::Unit => val_emitted(String::new(), "null".into(), Kind::Ptr),
         ExprKind::IntLit(n) => val_emitted(String::new(), format!("{n}"), Kind::Int),
+        ExprKind::FloatLit(bits) => {
+            val_emitted(String::new(), llvm_double_const(*bits), Kind::Float)
+        }
         ExprKind::BoolLit(b) => val_emitted(
             String::new(),
             if *b { "1".into() } else { "0".into() },
@@ -1199,14 +1279,8 @@ fn emit_expr(
         ExprKind::IoPure(inner) => {
             let ie = emit_expr(inner, ctx, locals, &format!("{prefix}_p"));
             let mut code = ie.code;
-            let ptr = if ie.kind == Kind::Int {
-                writeln!(
-                    code,
-                    "  %{prefix}_box = call ptr @sz_box_i64(i64 {})",
-                    ie.value
-                )
-                .unwrap();
-                format!("%{prefix}_box")
+            let ptr = if ie.kind == Kind::Int || ie.kind == Kind::Float {
+                box_numeric(&mut code, ie.kind, &ie.value, &format!("{prefix}_box"))
             } else if ie.kind == Kind::Io {
                 ie.value
             } else {
@@ -1244,16 +1318,19 @@ fn emit_expr(
                     let ae = emit_expr(&args[0], ctx, locals, &format!("{prefix}_ap"));
                     code.push_str(&ae.code);
                     match field_tys.first() {
-                        Some(Type::Int) => {
-                            let v = if ae.kind == Kind::Int {
+                        Some(Type::Int) | Some(Type::Bool) | Some(Type::Float) => {
+                            let want = kind_of_type(field_tys.first().unwrap());
+                            let v = if ae.kind == want {
                                 ae.value
+                            } else if want == Kind::Float {
+                                writeln!(code, "  %{prefix}_ap0 = bitcast i64 0 to double")
+                                    .unwrap();
+                                format!("%{prefix}_ap0")
                             } else {
                                 writeln!(code, "  %{prefix}_ap0 = add i64 0, 0").unwrap();
                                 format!("%{prefix}_ap0")
                             };
-                            writeln!(code, "  %{prefix}_box = call ptr @sz_box_i64(i64 {v})")
-                                .unwrap();
-                            format!("%{prefix}_box")
+                            box_numeric(&mut code, want, &v, &format!("{prefix}_box"))
                         }
                         _ => ae.value,
                     }
@@ -1265,16 +1342,19 @@ fn emit_expr(
                         let ae = emit_expr(arg, ctx, locals, &format!("{prefix}_ap{i}"));
                         code.push_str(&ae.code);
                         let ptr = match field_tys.get(i) {
-                            Some(Type::Int) => {
-                                let v = if ae.kind == Kind::Int {
+                            Some(Type::Int) | Some(Type::Bool) | Some(Type::Float) => {
+                                let want = kind_of_type(field_tys.get(i).unwrap());
+                                let v = if ae.kind == want {
                                     ae.value.clone()
+                                } else if want == Kind::Float {
+                                    writeln!(code, "  %{prefix}_ap{i}i = bitcast i64 0 to double")
+                                        .unwrap();
+                                    format!("%{prefix}_ap{i}i")
                                 } else {
                                     writeln!(code, "  %{prefix}_ap{i}i = add i64 0, 0").unwrap();
                                     format!("%{prefix}_ap{i}i")
                                 };
-                                writeln!(code, "  %{prefix}_bx{i} = call ptr @sz_box_i64(i64 {v})")
-                                    .unwrap();
-                                format!("%{prefix}_bx{i}")
+                                box_numeric(&mut code, want, &v, &format!("{prefix}_bx{i}"))
                             }
                             _ => ae.value.clone(),
                         };
@@ -1359,10 +1439,7 @@ fn emit_expr(
 
             let kind = te.kind;
             let payload = te.payload;
-            let ty = match kind {
-                Kind::Int => "i64",
-                Kind::Ptr | Kind::Io => "ptr",
-            };
+            let ty = llvm_kind_ty(kind);
             writeln!(code, "{merge}:").unwrap();
             writeln!(
                 code,
@@ -1403,9 +1480,9 @@ fn emit_expr(
             );
 
             if let Some(p) = param {
-                if payload_kind == Kind::Int {
-                    writeln!(pre, "  %{p} = call i64 @sz_unbox_i64(ptr %value)").unwrap();
-                    body_locals.insert(p.clone(), (format!("%{p}"), Kind::Int));
+                if payload_kind == Kind::Int || payload_kind == Kind::Float {
+                    let v = unbox_numeric(&mut pre, payload_kind, "%value", p);
+                    body_locals.insert(p.clone(), (v, payload_kind));
                 } else {
                     body_locals.insert(p.clone(), ("%value".into(), Kind::Ptr));
                 }
@@ -1579,7 +1656,7 @@ fn emit_expr(
     }
 }
 
-/// Emit `s"..."` as left-fold `sz_string_concat`. Coerce Int holes with `sz_string_from_int`.
+/// Emit `s"..."` as left-fold `sz_string_concat`. Coerce Int / Float holes.
 fn emit_interpolate(
     parts: &[crate::ast::InterpPart],
     ctx: &mut EmitCtx<'_>,
@@ -1610,13 +1687,8 @@ fn emit_interpolate(
                     return ee;
                 }
                 let mut code = ee.code;
-                writeln!(
-                    code,
-                    "  %{prefix}_s = call ptr @sz_string_from_int(i64 {})",
-                    ee.value
-                )
-                .unwrap();
-                return val_emitted(code, format!("%{prefix}_s"), Kind::Ptr);
+                let s = stringify_scalar(&mut code, ee.kind, &ee.value, &format!("{prefix}_s"));
+                return val_emitted(code, s, Kind::Ptr);
             }
         }
     }
@@ -1641,13 +1713,7 @@ fn emit_interpolate(
                 if ee.kind == Kind::Ptr {
                     ee.value
                 } else {
-                    writeln!(
-                        code,
-                        "  %{prefix}_s{i} = call ptr @sz_string_from_int(i64 {})",
-                        ee.value
-                    )
-                    .unwrap();
-                    format!("%{prefix}_s{i}")
+                    stringify_scalar(&mut code, ee.kind, &ee.value, &format!("{prefix}_s{i}"))
                 }
             }
         };
@@ -1780,14 +1846,14 @@ fn emit_map_lambda(
         )
         .unwrap();
         writeln!(ctx.conts, "  ret ptr %m{id}_ok").unwrap();
-    } else if body_emitted.kind == Kind::Int {
-        writeln!(
+    } else if body_emitted.kind == Kind::Int || body_emitted.kind == Kind::Float {
+        let s = stringify_scalar(
             ctx.conts,
-            "  %m{id}_s = call ptr @sz_string_from_int(i64 {})",
-            body_emitted.value
-        )
-        .unwrap();
-        writeln!(ctx.conts, "  ret ptr %m{id}_s").unwrap();
+            body_emitted.kind,
+            &body_emitted.value,
+            &format!("m{id}_s"),
+        );
+        writeln!(ctx.conts, "  ret ptr {s}").unwrap();
     } else {
         writeln!(ctx.conts, "  ret ptr {}", body_emitted.value).unwrap();
     }
@@ -2123,28 +2189,28 @@ fn emit_smap_lambda(
     writeln!(ctx.conts, "entry:").unwrap();
     ctx.conts.push_str(&pre);
     ctx.conts.push_str(&body_emitted.code);
-    if body_emitted.kind == Kind::Int {
+    if body_emitted.kind == Kind::Int || body_emitted.kind == Kind::Float {
         if box_int {
-            writeln!(
+            let boxed = box_numeric(
                 ctx.conts,
-                "  %sm{id}_box = call ptr @sz_box_i64(i64 {})",
-                body_emitted.value
-            )
-            .unwrap();
-            writeln!(ctx.conts, "  ret ptr %sm{id}_box").unwrap();
+                body_emitted.kind,
+                &body_emitted.value,
+                &format!("sm{id}_box"),
+            );
+            writeln!(ctx.conts, "  ret ptr {boxed}").unwrap();
         } else {
-            writeln!(
+            let s = stringify_scalar(
                 ctx.conts,
-                "  %sm{id}_istr = call ptr @sz_string_from_int(i64 {})",
-                body_emitted.value
-            )
-            .unwrap();
-            writeln!(ctx.conts, "  ret ptr %sm{id}_istr").unwrap();
+                body_emitted.kind,
+                &body_emitted.value,
+                &format!("sm{id}_istr"),
+            );
+            writeln!(ctx.conts, "  ret ptr {s}").unwrap();
         }
     } else {
         assert!(
             body_emitted.kind == Kind::Ptr,
-            "map mapper must be a pointer or Int"
+            "map mapper must be a pointer or numeric"
         );
         writeln!(ctx.conts, "  ret ptr {}", body_emitted.value).unwrap();
     }
@@ -2492,6 +2558,48 @@ fn emit_binary(
         return val_emitted(code, format!("%{prefix}_nev"), Kind::Int);
     }
 
+    if le.kind == Kind::Float || re.kind == Kind::Float {
+        let lv = as_f64(&mut code, le.kind, &le.value, &format!("{prefix}_l0"));
+        let rv = as_f64(&mut code, re.kind, &re.value, &format!("{prefix}_r0"));
+        match op {
+            BinOp::Add => {
+                writeln!(code, "  %{prefix}_v = fadd double {lv}, {rv}").unwrap();
+                return val_emitted(code, format!("%{prefix}_v"), Kind::Float);
+            }
+            BinOp::Sub => {
+                writeln!(code, "  %{prefix}_v = fsub double {lv}, {rv}").unwrap();
+                return val_emitted(code, format!("%{prefix}_v"), Kind::Float);
+            }
+            BinOp::Mul => {
+                writeln!(code, "  %{prefix}_v = fmul double {lv}, {rv}").unwrap();
+                return val_emitted(code, format!("%{prefix}_v"), Kind::Float);
+            }
+            BinOp::Div => {
+                writeln!(code, "  %{prefix}_v = fdiv double {lv}, {rv}").unwrap();
+                return val_emitted(code, format!("%{prefix}_v"), Kind::Float);
+            }
+            BinOp::Mod => {
+                writeln!(code, "  %{prefix}_v = frem double {lv}, {rv}").unwrap();
+                return val_emitted(code, format!("%{prefix}_v"), Kind::Float);
+            }
+            BinOp::And | BinOp::Or => unreachable!("short-circuit ops emit separately"),
+            BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
+                let pred = match op {
+                    BinOp::Eq => "oeq",
+                    BinOp::Ne => "one",
+                    BinOp::Lt => "olt",
+                    BinOp::Le => "ole",
+                    BinOp::Gt => "ogt",
+                    BinOp::Ge => "oge",
+                    _ => unreachable!(),
+                };
+                writeln!(code, "  %{prefix}_cmp = fcmp {pred} double {lv}, {rv}").unwrap();
+                writeln!(code, "  %{prefix}_v = zext i1 %{prefix}_cmp to i64").unwrap();
+                return val_emitted(code, format!("%{prefix}_v"), Kind::Int);
+            }
+        }
+    }
+
     let lv = as_i64(&mut code, le.kind, &le.value, &format!("{prefix}_l0"));
     let rv = as_i64(&mut code, re.kind, &re.value, &format!("{prefix}_r0"));
 
@@ -2806,6 +2914,26 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "Float.fromInt" => {
+            let n = as_i64(
+                &mut code,
+                emitted_args[0].kind,
+                &emitted_args[0].value,
+                &format!("{prefix}_n"),
+            );
+            writeln!(code, "  %{prefix}_v = sitofp i64 {n} to double").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Float)
+        }
+        "Float.toInt" => {
+            let x = as_f64(
+                &mut code,
+                emitted_args[0].kind,
+                &emitted_args[0].value,
+                &format!("{prefix}_x"),
+            );
+            writeln!(code, "  %{prefix}_v = fptosi double {x} to i64").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
         "Str.indexOf" => {
             writeln!(
                 code,
@@ -2847,14 +2975,13 @@ fn emit_call(
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "List.cons" => {
-            let head = if emitted_args[0].kind == Kind::Int {
-                writeln!(
-                    code,
-                    "  %{prefix}_hd = call ptr @sz_box_i64(i64 {})",
-                    emitted_args[0].value
+            let head = if emitted_args[0].kind == Kind::Int || emitted_args[0].kind == Kind::Float {
+                box_numeric(
+                    &mut code,
+                    emitted_args[0].kind,
+                    &emitted_args[0].value,
+                    &format!("{prefix}_hd"),
                 )
-                .unwrap();
-                format!("%{prefix}_hd")
             } else {
                 emitted_args[0].value.clone()
             };
@@ -2937,14 +3064,13 @@ fn emit_call(
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "List.append" => {
-            let elem = if emitted_args[1].kind == Kind::Int {
-                writeln!(
-                    code,
-                    "  %{prefix}_el = call ptr @sz_box_i64(i64 {})",
-                    emitted_args[1].value
+            let elem = if emitted_args[1].kind == Kind::Int || emitted_args[1].kind == Kind::Float {
+                box_numeric(
+                    &mut code,
+                    emitted_args[1].kind,
+                    &emitted_args[1].value,
+                    &format!("{prefix}_el"),
                 )
-                .unwrap();
-                format!("%{prefix}_el")
             } else {
                 emitted_args[1].value.clone()
             };
@@ -2957,14 +3083,13 @@ fn emit_call(
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "List.setAt" => {
-            let elem = if emitted_args[2].kind == Kind::Int {
-                writeln!(
-                    code,
-                    "  %{prefix}_el = call ptr @sz_box_i64(i64 {})",
-                    emitted_args[2].value
+            let elem = if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
+                box_numeric(
+                    &mut code,
+                    emitted_args[2].kind,
+                    &emitted_args[2].value,
+                    &format!("{prefix}_el"),
                 )
-                .unwrap();
-                format!("%{prefix}_el")
             } else {
                 emitted_args[2].value.clone()
             };
@@ -4302,18 +4427,19 @@ fn emit_call(
                     let want = kind_of_type(&p.ty);
                     let (lval, lty) = match (want, a.kind) {
                         (Kind::Int, Kind::Int) => (a.value.clone(), "i64"),
+                        (Kind::Float, Kind::Float) => (a.value.clone(), "double"),
                         (Kind::Int, _) => {
                             let v = as_i64(&mut code, a.kind, &a.value, &format!("{prefix}_a{i}"));
                             (v, "i64")
                         }
-                        (_, Kind::Int) => {
-                            writeln!(
-                                code,
-                                "  %{prefix}_a{i} = call ptr @sz_box_i64(i64 {})",
-                                a.value
-                            )
-                            .unwrap();
-                            (format!("%{prefix}_a{i}"), "ptr")
+                        (Kind::Float, _) => {
+                            let v = as_f64(&mut code, a.kind, &a.value, &format!("{prefix}_a{i}"));
+                            (v, "double")
+                        }
+                        (_, Kind::Int) | (_, Kind::Float) => {
+                            let boxed =
+                                box_numeric(&mut code, a.kind, &a.value, &format!("{prefix}_a{i}"));
+                            (boxed, "ptr")
                         }
                         _ => (a.value.clone(), "ptr"),
                     };
@@ -4323,6 +4449,8 @@ fn emit_call(
                 for (i, a) in emitted_args.iter().enumerate() {
                     let (lval, lty) = if a.kind == Kind::Int {
                         (a.value.clone(), "i64")
+                    } else if a.kind == Kind::Float {
+                        (a.value.clone(), "double")
                     } else {
                         (a.value.clone(), "ptr")
                     };
@@ -4481,6 +4609,23 @@ mod tests {
         crate::typ::typecheck(&p).expect("typecheck");
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_string_starts_with"));
+    }
+
+    #[test]
+    fn emit_float_arith_and_convert() {
+        let src = r#"
+def scale(x: Float): Float = x * 2.0
+@main def main: IO[Unit] =
+  IO.println(s"${scale(1.5) + Float.fromInt(1)} ${Float.toInt(2.9)}")
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("fmul double"));
+        assert!(ir.contains("fadd double"));
+        assert!(ir.contains("sitofp i64"));
+        assert!(ir.contains("fptosi double"));
+        assert!(ir.contains("sz_string_from_float"));
     }
 
     #[test]

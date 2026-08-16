@@ -29,9 +29,9 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ### Core value types
 
-`Float`, `Map`, and `Set` are missing. Apps get `Int`, `String`, `Bool`, `List[T]`, and enums only. This limits the batteries-included thesis more than mobile packaging does, so this work comes first (see [`plans.md`](plans.md)).
+`Map` and `Set` are missing. Apps get `Int`, `Float`, `String`, `Bool`, `List[T]`, and enums. This limits the batteries-included thesis more than mobile packaging does.
 
-- **Float** — a scalar through the lexer, typer, formatter, and codegen. No memory implications. Current slice.
+- **Float** — scalar through the lexer, typer, formatter, and codegen (LLVM `double`). Proof: `examples/kernel`.
 - **Map / Set** — persistent shared structures. Manual ownership does not extend to shared trees. They wait on reference counting (see the Memory residual).
 
 ### Residuals

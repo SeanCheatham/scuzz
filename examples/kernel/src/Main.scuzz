@@ -91,6 +91,12 @@ def greetFrom(m: Msg): String =
     case Msg.Bye => "main-bye"
   }
 
+def scale(x: Float): Float =
+  x * 2.0
+
+def trunc(x: Float): Int =
+  Float.toInt(x)
+
 record Box[T](x: T):
   def get(): T =
     self.x
@@ -146,4 +152,9 @@ record Box[T](x: T):
     _ <- IO.println(Str.concat(tag(), B.tag()))
     _ <- IO.println(greetFrom(Msg.Hi))
     _ <- IO.println(B.greet())
+    _ <- IO.println(s"float:${scale(1.5)}")
+    _ <- IO.println(s"from:${Float.fromInt(3)}")
+    _ <- IO.println(s"to:${trunc(2.9)}")
+    _ <- IO.println(s"cmp:${if (1.5 < 2.0 && 2.0 > 1.0) "lt" else "ge"}")
+    _ <- IO.println(s"neg:${0.0 - 1.5}")
   } yield ()

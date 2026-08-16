@@ -310,6 +310,7 @@ impl Expr {
             leaf @ (ExprKind::Var(_)
             | ExprKind::Unit
             | ExprKind::IntLit(_)
+            | ExprKind::FloatLit(_)
             | ExprKind::BoolLit(_)
             | ExprKind::StrLit(_)) => leaf,
         };
@@ -400,6 +401,7 @@ impl Expr {
             ExprKind::Var(_)
             | ExprKind::Unit
             | ExprKind::IntLit(_)
+            | ExprKind::FloatLit(_)
             | ExprKind::BoolLit(_)
             | ExprKind::StrLit(_) => {}
         }
@@ -502,13 +504,15 @@ pub enum ExprKind {
     Unit,
     /// Integer literal
     IntLit(i64),
+    /// `Float` literal as IEEE-754 bits (`1.5`).
+    FloatLit(u64),
     /// `true` / `false`
     BoolLit(bool),
     /// String literal
     StrLit(String),
     /// List literal `[a, b, c]`
     ListLit { elems: Vec<Expr> },
-    /// `s"...$x..."` / `s"...${expr}..."` — typed concat (Int holes through `Str.fromInt`).
+    /// `s"...$x..."` / `s"...${expr}..."` — typed concat (Int / Float holes stringify).
     Interpolate { parts: Vec<InterpPart> },
     /// `if (cond) then else else_`
     If {
@@ -580,6 +584,7 @@ impl Pattern {
 pub enum Type {
     Unit,
     Int,
+    Float,
     String,
     Bool,
     /// Homogeneous cons list. Runtime is untyped pointers; the argument is a check-time element type.
@@ -602,6 +607,7 @@ impl std::fmt::Display for Type {
         match self {
             Type::Unit => write!(f, "Unit"),
             Type::Int => write!(f, "Int"),
+            Type::Float => write!(f, "Float"),
             Type::String => write!(f, "String"),
             Type::Bool => write!(f, "Bool"),
             Type::List(t) => write!(f, "List[{t}]"),
@@ -613,5 +619,19 @@ impl std::fmt::Display for Type {
                 write!(f, "{n}[{}]", inner.join(", "))
             }
         }
+    }
+}
+
+/// Source form for a `Float` literal. Always includes a decimal point.
+pub fn format_float_bits(bits: u64) -> String {
+    let x = f64::from_bits(bits);
+    if !x.is_finite() {
+        return format!("{x}");
+    }
+    let s = format!("{x}");
+    if s.contains('.') || s.contains('e') || s.contains('E') {
+        s
+    } else {
+        format!("{s}.0")
     }
 }

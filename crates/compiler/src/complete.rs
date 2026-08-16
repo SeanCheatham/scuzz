@@ -100,7 +100,7 @@ pub fn complete_in_source(
             });
         }
     }
-    for ty in ["Int", "String", "Bool", "Unit", "List", "IO"] {
+    for ty in ["Int", "Float", "String", "Bool", "Unit", "List", "IO"] {
         if ty.starts_with(&prefix) {
             push(Completion {
                 label: ty.to_string(),

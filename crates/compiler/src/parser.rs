@@ -990,13 +990,14 @@ impl Parser {
             return Ok(Type::Var(name));
         }
         match name.as_str() {
-            "Unit" | "Int" | "String" | "Bool" => {
+            "Unit" | "Int" | "Float" | "String" | "Bool" => {
                 if matches!(self.peek(), Token::LBracket) {
                     return Err(self.err(format!("{name} takes no type arguments")));
                 }
                 Ok(match name.as_str() {
                     "Unit" => Type::Unit,
                     "Int" => Type::Int,
+                    "Float" => Type::Float,
                     "String" => Type::String,
                     _ => Type::Bool,
                 })
@@ -1527,6 +1528,10 @@ impl Parser {
                 let end = self.bump().span;
                 Ok(self.mk(ExprKind::IntLit(n), start.cover(&end)))
             }
+            Token::FloatLit(bits) => {
+                let end = self.bump().span;
+                Ok(self.mk(ExprKind::FloatLit(bits), start.cover(&end)))
+            }
             Token::True => {
                 let end = self.bump().span;
                 Ok(self.mk(ExprKind::BoolLit(true), start.cover(&end)))
@@ -1546,16 +1551,17 @@ impl Parser {
             Token::Minus => {
                 self.bump();
                 let got = self.bump();
-                let n = match got.token {
-                    Token::IntLit(n) => n,
-                    other => {
-                        return Err(ParseError::At {
-                            msg: format!("expected int after `-`, got {other:?}"),
-                            span: got.span,
-                        })
+                match got.token {
+                    Token::IntLit(n) => Ok(self.mk(ExprKind::IntLit(-n), start.cover(&got.span))),
+                    Token::FloatLit(bits) => {
+                        let neg = (-f64::from_bits(bits)).to_bits();
+                        Ok(self.mk(ExprKind::FloatLit(neg), start.cover(&got.span)))
                     }
-                };
-                Ok(self.mk(ExprKind::IntLit(-n), start.cover(&got.span)))
+                    other => Err(ParseError::At {
+                        msg: format!("expected number after `-`, got {other:?}"),
+                        span: got.span,
+                    }),
+                }
             }
             Token::Underscore => {
                 self.bump();
@@ -1844,6 +1850,23 @@ mod tests {
         let p = parse(r#"@main def main: IO[Unit] = IO.println("Hello")"#).unwrap();
         assert_eq!(p.main.name, "main");
         assert!(matches!(p.main.body.kind, ExprKind::IoPrintln(_)));
+    }
+
+    #[test]
+    fn parse_float_literal_and_type() {
+        let src = r#"
+def scale(x: Float): Float = x * 2.0
+@main def main: IO[Unit] = IO.println(s"${scale(-1.5)}")
+"#;
+        let p = parse(src).unwrap();
+        assert!(matches!(p.defs[0].params[0].ty, Type::Float));
+        assert!(matches!(p.defs[0].ret, Type::Float));
+        match &p.defs[0].body.kind {
+            ExprKind::Binary { right, .. } => {
+                assert!(matches!(&right.kind, ExprKind::FloatLit(b) if f64::from_bits(*b) == 2.0));
+            }
+            other => panic!("expected binary, got {other:?}"),
+        }
     }
 
     #[test]
