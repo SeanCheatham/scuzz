@@ -3435,26 +3435,37 @@ fn emit_call(
                 writeln!(code, "  call void @sz_release(ptr {key})").unwrap();
             }
             take_owned_ptr(&mut code, &emitted_args[0], &format!("%{prefix}_p"));
+            let dflt_is_num =
+                emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float;
+            let dflt_owned = dflt_is_num || emitted_args[2].owned;
             if emitted_args[0].owned {
-                if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
+                if dflt_is_num {
+                    writeln!(code, "  call void @sz_release(ptr {dflt})").unwrap();
+                } else {
+                    drop_owned_ptr(&mut code, &emitted_args[2]);
+                }
+            } else if dflt_owned {
+                writeln!(code, "  call void @sz_retain(ptr %{prefix}_p)").unwrap();
+                if dflt_is_num {
                     writeln!(code, "  call void @sz_release(ptr {dflt})").unwrap();
                 } else {
                     drop_owned_ptr(&mut code, &emitted_args[2]);
                 }
             }
-            if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
+            let result_owned = emitted_args[0].owned || dflt_owned;
+            if dflt_is_num {
                 let v = unbox_numeric(
                     &mut code,
                     emitted_args[2].kind,
                     &format!("%{prefix}_p"),
                     &format!("{prefix}_u"),
                 );
-                if emitted_args[0].owned {
+                if result_owned {
                     writeln!(code, "  call void @sz_release(ptr %{prefix}_p)").unwrap();
                 }
                 val_emitted(code, v, emitted_args[2].kind)
             } else {
-                ptr_owned_if(code, format!("%{prefix}_p"), emitted_args[0].owned)
+                ptr_owned_if(code, format!("%{prefix}_p"), result_owned)
             }
         }
         "Map.contains" | "Set.contains" => {
@@ -5148,6 +5159,36 @@ def id(xs: List[Int]): List[Int] = xs
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {dflt})")),
             "expected last-use release of default {dflt} after getOrElse:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_map_get_or_else_drops_default_when_map_borrowed() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(for {
+    m = Map.set(Map.empty(), "a", "1")
+  } yield Map.getOrElse(m, "a", "?"))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_map_get_or(ptr ";
+        let at = ir.find(needle).expect("expected sz_map_get_or");
+        let rest = ir[at + needle.len()..].split(')').next().unwrap();
+        let dflt = rest
+            .split(',')
+            .nth(2)
+            .unwrap()
+            .trim()
+            .trim_start_matches("ptr ");
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {dflt})")),
+            "expected last-use release of borrowed-map default {dflt}:\n{ir}"
+        );
+        assert!(
+            ir[at..].contains("sz_retain"),
+            "expected retain of getOrElse result before dropping default:\n{ir}"
         );
     }
 

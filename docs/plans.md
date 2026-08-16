@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Last-use release for `Map.getOrElse` default when the map is borrowed
+## Slice: Last-use release for `List.map` / `List.filter` closure packs
 
-An owned map drops its default after retain. A borrowed map does not, so `Map.getOrElse(m, k, "?")` leaks `"?"` on a hit.
+`List.map` / `List.filter` pack a closure env list (`sz_list_cons` of fn + env). That pack stays allocated after the call.
 
-- When the map is not owned, retain the result and drop an owned default only if that is safe, or drop the default when it is unused.
-- Proof: compiler IR for `Map.getOrElse(id(Map.set(Map.empty(), "a", "1")), "a", "?")` shows `sz_release` of the default string.
+- Drop the owned closure pack after `sz_list_map` / `sz_list_filter`.
+- Proof: compiler IR for `List.len(List.filter([1], x => true))` shows `sz_release` of the closure list after `sz_list_filter`.
 - Out of scope: cycle collector, OS threads, device packaging.
