@@ -213,9 +213,9 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: [`plans.md`](plans.md). Work order: core value types first — `Float`, reference counting, `Map` / `Set`, and IO last-use are in. `scuzz package --target ios` and `--target android` drive the platform shells. `SCUZZ_SKIA=gpu` presents through OpenGL. Open unknowns: Mobile on real devices (iOS simulator proven; Android emulator APK in). Impeller / Skia GPU raster stay deferred.
+Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: [`plans.md`](plans.md). Work order: core value types first — `Float`, reference counting, `Map` / `Set`, and IO last-use are in. `scuzz package --target ios` and `--target android` drive the platform shells. `SCUZZ_SKIA=gpu` presents through OpenGL. Open unknowns: Mobile on real devices (iOS simulator and Android emulator proven). Impeller / Skia GPU raster stay deferred.
 
-App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. `scuzz package --target ios` builds a signed simulator `.app` when Xcode is present. The iOS shell feeds typed text into TextField. `scuzz package --target android` packs a debug APK when the NDK and SDK are present. The Android shell blits frames onto a SurfaceView. Device builds stay open.
+App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. `scuzz package --target ios` builds a signed simulator `.app` when Xcode is present. The iOS shell feeds typed text into TextField. `scuzz package --target android` packs a debug APK when the NDK and SDK are present. The Android shell blits frames onto a SurfaceView and feeds taps and typed text into the pump. Device builds stay open.
 
 ## Risks
 

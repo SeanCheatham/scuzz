@@ -1,37 +1,56 @@
 package dev.scuzz.app;
 
 import android.app.Activity;
+import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Rect;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.Editable;
+import android.text.TextWatcher;
 import android.util.Log;
+import android.view.MotionEvent;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
+import android.view.View;
+import android.view.inputmethod.InputMethodManager;
+import android.widget.EditText;
+import android.widget.FrameLayout;
 import java.io.File;
-import java.io.FileOutputStream;
 
-/** Loads libscuzz.so and blits the last sz_mobile_present frame. */
+/** Loads libscuzz.so, blits frames, and forwards tap / typed text. */
 public final class MainActivity extends Activity implements SurfaceHolder.Callback {
   static {
     System.loadLibrary("scuzz");
   }
 
+  private static final int POINTER_DOWN = 1;
+  private static final int POINTER_MOVE = 2;
+  private static final int POINTER_UP = 3;
+  private static final String ZWSP = "\u200b";
+
+  private SurfaceView surface;
   private SurfaceHolder holder;
+  private EditText hidden;
   private Bitmap bitmap;
   private int[] pixels;
   private int dumped;
+  private int keyboard;
+  private int watchLock;
   private final Handler tick = new Handler(Looper.getMainLooper());
   private final Runnable blit =
       new Runnable() {
         @Override
         public void run() {
           blitFrame();
+          syncKeyboard();
           tick.postDelayed(this, 16);
         }
       };
+
+  public native void nativeStart(String dumpPath);
 
   public native int nativeFrameWidth();
 
@@ -41,13 +60,51 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
 
   public native int nativeCopyFrame(int[] argb);
 
+  public native void nativePointer(float x, float y, int phase);
+
+  public native void nativeTextEdit(String text);
+
+  public native int nativeKeyboardVisible();
+
   @Override
   protected void onCreate(Bundle savedInstanceState) {
     super.onCreate(savedInstanceState);
-    SurfaceView surface = new SurfaceView(this);
+    FrameLayout root = new FrameLayout(this);
+    surface = new SurfaceView(this);
     holder = surface.getHolder();
     holder.addCallback(this);
-    setContentView(surface);
+    surface.setOnTouchListener(
+        new View.OnTouchListener() {
+          @Override
+          public boolean onTouch(View v, MotionEvent ev) {
+            return onSurfaceTouch(ev);
+          }
+        });
+    hidden = new EditText(this);
+    hidden.setBackground(null);
+    hidden.setAlpha(0f);
+    hidden.setText(ZWSP);
+    hidden.addTextChangedListener(
+        new TextWatcher() {
+          @Override
+          public void beforeTextChanged(CharSequence s, int st, int c, int a) {}
+
+          @Override
+          public void onTextChanged(CharSequence s, int st, int b, int c) {}
+
+          @Override
+          public void afterTextChanged(Editable s) {
+            onHiddenChanged(s);
+          }
+        });
+    root.addView(
+        surface, new FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+    root.addView(hidden, new FrameLayout.LayoutParams(1, 1));
+    setContentView(root);
+    File dump = new File(getFilesDir(), "scuzz_android.debug.dump");
+    nativeStart(dump.getAbsolutePath());
+    scheduleInject();
   }
 
   @Override
@@ -65,6 +122,123 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   public void surfaceDestroyed(SurfaceHolder h) {
     tick.removeCallbacks(blit);
     holder = null;
+  }
+
+  private boolean onSurfaceTouch(MotionEvent ev) {
+    int fw = nativeFrameWidth();
+    int fh = nativeFrameHeight();
+    int vw = surface.getWidth();
+    int vh = surface.getHeight();
+    int phase;
+    float x;
+    float y;
+    if (fw <= 0 || fh <= 0 || vw <= 0 || vh <= 0) {
+      return true;
+    }
+    x = ev.getX() * fw / vw;
+    y = ev.getY() * fh / vh;
+    switch (ev.getActionMasked()) {
+      case MotionEvent.ACTION_DOWN:
+        phase = POINTER_DOWN;
+        break;
+      case MotionEvent.ACTION_MOVE:
+        phase = POINTER_MOVE;
+        break;
+      case MotionEvent.ACTION_UP:
+      case MotionEvent.ACTION_CANCEL:
+        phase = POINTER_UP;
+        break;
+      default:
+        return true;
+    }
+    nativePointer(x, y, phase);
+    return true;
+  }
+
+  private void onHiddenChanged(Editable s) {
+    String t;
+    if (watchLock != 0) {
+      return;
+    }
+    t = s.toString();
+    if (t.equals(ZWSP)) {
+      return;
+    }
+    if (t.length() == 0) {
+      dispatchEdit("");
+    } else {
+      dispatchEdit(t.replace(ZWSP, ""));
+    }
+    watchLock = 1;
+    s.replace(0, s.length(), ZWSP);
+    watchLock = 0;
+  }
+
+  private void dispatchEdit(String text) {
+    nativeTextEdit(text == null ? "" : text);
+  }
+
+  private void scheduleInject() {
+    final String typed = extraOrEnv("SCUZZ_ANDROID_TYPE");
+    final String tap = extraOrEnv("SCUZZ_ANDROID_TAP");
+    tick.postDelayed(
+        new Runnable() {
+          @Override
+          public void run() {
+            if (typed != null && typed.length() > 0) {
+              dispatchEdit(typed);
+              dispatchEdit("");
+            }
+            if (tap != null && tap.length() > 0) {
+              injectTap(tap);
+            }
+          }
+        },
+        800);
+  }
+
+  private void injectTap(String spec) {
+    int comma = spec.indexOf(',');
+    float x;
+    float y;
+    if (comma <= 0) {
+      return;
+    }
+    try {
+      x = Float.parseFloat(spec.substring(0, comma));
+      y = Float.parseFloat(spec.substring(comma + 1));
+    } catch (NumberFormatException e) {
+      return;
+    }
+    nativePointer(x, y, POINTER_DOWN);
+    nativePointer(x, y, POINTER_UP);
+  }
+
+  private String extraOrEnv(String key) {
+    String v = getIntent().getStringExtra(key);
+    if (v != null && v.length() > 0) {
+      return v;
+    }
+    return System.getenv(key);
+  }
+
+  private void syncKeyboard() {
+    int want = nativeKeyboardVisible();
+    InputMethodManager imm;
+    if (want == keyboard) {
+      return;
+    }
+    keyboard = want;
+    imm = (InputMethodManager) getSystemService(Context.INPUT_METHOD_SERVICE);
+    if (imm == null) {
+      return;
+    }
+    if (want != 0) {
+      hidden.requestFocus();
+      imm.showSoftInput(hidden, 0);
+    } else {
+      imm.hideSoftInputFromWindow(hidden.getWindowToken(), 0);
+    }
   }
 
   private void blitFrame() {
@@ -106,21 +280,6 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     if (dumped == 0) {
       dumped = 1;
       Log.i("scuzz", "blit " + w + "x" + h + " frames=" + nativeFrameCount());
-      writeDump(w, h, nativeFrameCount());
-    }
-  }
-
-  private void writeDump(int w, int h, int frames) {
-    try {
-      File dir = getFilesDir();
-      dir.mkdirs();
-      File f = new File(dir, "scuzz_android.debug.dump");
-      FileOutputStream out = new FileOutputStream(f);
-      String line = "present " + w + "x" + h + " frames=" + frames + "\n";
-      out.write(line.getBytes("UTF-8"));
-      out.close();
-    } catch (Exception e) {
-      Log.e("scuzz", "dump failed", e);
     }
   }
 }

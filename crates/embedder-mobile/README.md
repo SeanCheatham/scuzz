@@ -28,10 +28,14 @@ simulator `.app`.
 Android emulator proof (SDK + NDK):
 
 ```bash
-scuzz package --target android examples/counter
-adb install -r examples/counter/build/android/counter.apk
-adb shell am start -n dev.scuzz.app/dev.scuzz.app.MainActivity
+scuzz package --target android examples/studio
+adb install -r examples/studio/build/android/studio.apk
+adb shell am start -n dev.scuzz.app/.MainActivity --es SCUZZ_ANDROID_TYPE hi
 ```
+
+`SCUZZ_ANDROID_TYPE` inserts then backspaces through the hidden `EditText`
+(`SZ_INPUT_TEXT_EDIT`). `SCUZZ_ANDROID_TAP=x,y` sends a pointer down/up in
+frame pixels. SurfaceView taps use the same queue.
 
 iOS simulator proof (macOS arm64 + Xcode):
 

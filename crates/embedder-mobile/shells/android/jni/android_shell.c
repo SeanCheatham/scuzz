@@ -1,6 +1,6 @@
 /* Android sz_mobile_* shell. Strong defs override the weak runtime stubs.
- * JNI_OnLoad in scuzz_jni.c starts scuzz_app_main on a worker. Present
- * keeps the last RGBA frame so MainActivity can blit it to a SurfaceView. */
+ * JNI_OnLoad in scuzz_jni.c loads the library. MainActivity calls
+ * nativeStart, then blits frames and pushes pointer / text events. */
 
 #include "scuzz_mobile.h"
 
@@ -10,6 +10,8 @@
 #include <string.h>
 
 #define EVENT_CAP 64
+#define TEXT_RING 64
+#define TEXT_LEN 64
 
 static SzInputEvent g_queue[EVENT_CAP];
 static int g_q_head;
@@ -20,8 +22,11 @@ static int g_alive;
 static int g_frames;
 static int g_w;
 static int g_h;
+static int g_keyboard;
 static uint8_t *g_rgba;
 static size_t g_rgba_cap;
+static char g_text_bufs[TEXT_RING][TEXT_LEN];
+static int g_text_i;
 
 int sz_mobile_available(void) { return 1; }
 
@@ -61,6 +66,48 @@ int sz_mobile_poll_event(SzInputEvent *out) {
   return 1;
 }
 
+static const char *stash_text(const char *s) {
+  size_t n;
+  char *dst;
+  if (!s)
+    s = "";
+  n = strlen(s);
+  if (n >= TEXT_LEN)
+    n = TEXT_LEN - 1;
+  dst = g_text_bufs[g_text_i];
+  g_text_i = (g_text_i + 1) % TEXT_RING;
+  memcpy(dst, s, n);
+  dst[n] = '\0';
+  return dst;
+}
+
+int scuzz_android_push_pointer(float x, float y, int phase) {
+  SzInputEvent ev;
+  if (phase != SZ_POINTER_DOWN && phase != SZ_POINTER_MOVE &&
+      phase != SZ_POINTER_UP)
+    return 0;
+  memset(&ev, 0, sizeof ev);
+  ev.kind = SZ_INPUT_POINTER;
+  ev.x = x;
+  ev.y = y;
+  ev.pointer_phase = (SzPointerPhase)phase;
+  __android_log_print(ANDROID_LOG_INFO, "scuzz",
+                      "scuzz android: pointer %.1f %.1f phase=%d", (double)x,
+                      (double)y, phase);
+  return sz_mobile_push_event(&ev);
+}
+
+int scuzz_android_push_text_edit(const char *text) {
+  SzInputEvent ev;
+  const char *stashed = stash_text(text ? text : "");
+  memset(&ev, 0, sizeof ev);
+  ev.kind = SZ_INPUT_TEXT_EDIT;
+  ev.text = stashed;
+  __android_log_print(ANDROID_LOG_INFO, "scuzz", "scuzz android: text_edit %s",
+                      stashed[0] ? stashed : "(backspace)");
+  return sz_mobile_push_event(&ev);
+}
+
 int sz_mobile_present(const char *title, int width, int height,
                       const uint8_t *rgba, size_t nbytes) {
   size_t need;
@@ -85,13 +132,16 @@ int sz_mobile_present(const char *title, int width, int height,
   g_h = height;
   g_frames++;
   pthread_mutex_unlock(&g_frame_lock);
-  __android_log_print(ANDROID_LOG_INFO, "scuzz",
-                      "scuzz android: present %dx%d frame=%d", width, height,
-                      g_frames);
+  if (g_frames <= 3 || (g_frames % 120) == 0)
+    __android_log_print(ANDROID_LOG_INFO, "scuzz",
+                        "scuzz android: present %dx%d frame=%d", width, height,
+                        g_frames);
   return 1;
 }
 
-void sz_mobile_set_keyboard(int visible) { (void)visible; }
+void sz_mobile_set_keyboard(int visible) { g_keyboard = visible ? 1 : 0; }
+
+int scuzz_android_keyboard_visible(void) { return g_keyboard; }
 
 int scuzz_android_frame_width(void) {
   int w;

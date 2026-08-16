@@ -1,6 +1,5 @@
-/* Android JNI entry. JNI_OnLoad starts the renamed app main on a worker.
- * The shell owns process setup; scuzz_app_main mounts UiRuntime.Mobile.
- * MainActivity copies the last present frame onto a SurfaceView. */
+/* Android JNI entry. nativeStart launches the renamed app main on a worker.
+ * MainActivity blits frames, forwards taps, and maps EditText to TEXT_EDIT. */
 
 #define _POSIX_C_SOURCE 200809L
 
@@ -8,6 +7,7 @@
 #include <pthread.h>
 #include <stdint.h>
 #include <stdlib.h>
+#include <string.h>
 
 extern int scuzz_app_main(int argc, char **argv);
 void scuzz_android_set_alive(int alive);
@@ -15,22 +15,22 @@ int scuzz_android_frame_width(void);
 int scuzz_android_frame_height(void);
 int scuzz_android_frame_count(void);
 int scuzz_android_copy_argb(int32_t *dst, int cap);
+int scuzz_android_push_pointer(float x, float y, int phase);
+int scuzz_android_push_text_edit(const char *text);
+int scuzz_android_keyboard_visible(void);
+
+static int g_started;
 
 static void *scuzz_app_thread(void *unused) {
   char *args[] = {(char *)"scuzz", NULL};
   (void)unused;
-  setenv("SCUZZ_UI_RUNTIME", "mobile", 1);
   scuzz_app_main(1, args);
   return NULL;
 }
 
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
-  pthread_t tid;
   (void)vm;
   (void)reserved;
-  scuzz_android_set_alive(1);
-  pthread_create(&tid, NULL, scuzz_app_thread, NULL);
-  pthread_detach(tid);
   return JNI_VERSION_1_6;
 }
 
@@ -38,6 +38,25 @@ JNIEXPORT void JNICALL JNI_OnUnload(JavaVM *vm, void *reserved) {
   (void)vm;
   (void)reserved;
   scuzz_android_set_alive(0);
+}
+
+JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativeStart(
+    JNIEnv *env, jobject thiz, jstring dump_path) {
+  const char *dump;
+  pthread_t tid;
+  (void)thiz;
+  if (g_started)
+    return;
+  g_started = 1;
+  setenv("SCUZZ_UI_RUNTIME", "mobile", 1);
+  dump = dump_path ? (*env)->GetStringUTFChars(env, dump_path, NULL) : NULL;
+  if (dump && dump[0])
+    setenv("SCUZZ_UI_DEBUG_DUMP", dump, 1);
+  if (dump_path && dump)
+    (*env)->ReleaseStringUTFChars(env, dump_path, dump);
+  scuzz_android_set_alive(1);
+  pthread_create(&tid, NULL, scuzz_app_thread, NULL);
+  pthread_detach(tid);
 }
 
 JNIEXPORT jint JNICALL Java_dev_scuzz_app_MainActivity_nativeFrameWidth(
@@ -76,4 +95,31 @@ JNIEXPORT jint JNICALL Java_dev_scuzz_app_MainActivity_nativeCopyFrame(
   frames = scuzz_android_copy_argb((int32_t *)dst, (int)cap);
   (*env)->ReleaseIntArrayElements(env, argb, dst, 0);
   return frames;
+}
+
+JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativePointer(
+    JNIEnv *env, jobject thiz, jfloat x, jfloat y, jint phase) {
+  (void)env;
+  (void)thiz;
+  (void)scuzz_android_push_pointer((float)x, (float)y, (int)phase);
+}
+
+JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativeTextEdit(
+    JNIEnv *env, jobject thiz, jstring text) {
+  const char *utf;
+  (void)thiz;
+  if (!text) {
+    (void)scuzz_android_push_text_edit("");
+    return;
+  }
+  utf = (*env)->GetStringUTFChars(env, text, NULL);
+  (void)scuzz_android_push_text_edit(utf ? utf : "");
+  (*env)->ReleaseStringUTFChars(env, text, utf);
+}
+
+JNIEXPORT jint JNICALL Java_dev_scuzz_app_MainActivity_nativeKeyboardVisible(
+    JNIEnv *env, jobject thiz) {
+  (void)env;
+  (void)thiz;
+  return scuzz_android_keyboard_visible();
 }
