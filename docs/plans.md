@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Last-use release for owned `if` / match arm temps
+## Slice: Last-use release for mixed owned / borrowed `if` arms
 
-`if` / match join through an unowned phi. An owned temp that is the arm result (`if (true) [1] else [2]`) stays allocated.
+An `if` phi is owned only when both arms produce owned ptrs. `if (b) xs else [1]` stays allocated when the borrowed arm is taken.
 
-- Mark the phi owned when both arms produce owned ptrs, so a later last-use (`List.len`) drops the taken arm.
-- Proof: compiler IR for `List.len(if (true) [1] else [2])` shows `sz_release` of the list.
-- Out of scope: mixed owned/borrowed arms, cycle collector, OS threads, device packaging.
+- Retain the borrowed arm at the join, then mark the phi owned so a later last-use drops it.
+- Proof: compiler IR for `List.len(for { xs = [1] } yield if (false) xs else [2])` shows `sz_retain` of `xs` and `sz_release` of the phi.
+- Out of scope: cycle collector, OS threads, device packaging.

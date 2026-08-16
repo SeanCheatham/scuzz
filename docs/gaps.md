@@ -37,7 +37,7 @@ When a gap closes or its assessment changes, update this file. If direction chan
 ### Residuals
 
 - **Concurrency** — cooperative fibers only. Later: OS threads, supervision trees.
-- **Memory** — counter-shaped Headless pumps stay flat under alloc accounting. `Signal.list` and list/map/set nodes drop through RC. The compiler emits retain/release on string, List, Map / Set, and ADT temps, and on owned `let` / `for` binders after an `IO` / scalar / owned-ptr / `if`-phi body. IO graphs drop after `unsafe_run`. Owned temps that live only in one `if` arm and join through an unowned phi stay allocated. No cycle collector. Panic may leak.
+- **Memory** — counter-shaped Headless pumps stay flat under alloc accounting. `Signal.list` and list/map/set nodes drop through RC. The compiler emits retain/release on string, List, Map / Set, and ADT temps, and on owned `let` / `for` binders after an `IO` / scalar / owned-ptr / `if`-phi body. An `if` / match phi is owned when every arm produces an owned ptr. IO graphs drop after `unsafe_run`. Mixed owned/borrowed `if` arms stay allocated when the borrowed arm is taken. No cycle collector. Panic may leak.
 - **LSP / editor tooling** — `fmt`, `check --message-format=json`, `watch`, and `scuzz lsp` exist. LSP wraps `check` (didOpen/didChange overlay open buffers; didClose returns to disk). Positions are UTF-16. Hover, completion, and definition use that parse. Unknown methods return JSON-RPC `-32601`. JSON diagnostics stay the single schema. `check` reports more than one parse or type error per run.
 
 ### Dependency forms beyond `path`

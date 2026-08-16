@@ -1076,6 +1076,7 @@ fn emit_match(
     let mut phi_parts: Vec<(String, String)> = Vec::new();
     let mut result_kind = Kind::Io;
     let mut result_payload = Kind::Ptr;
+    let mut arms_owned = !arms.is_empty();
 
     for (i, arm) in arms.iter().enumerate() {
         let try_l = format!("{prefix}_try_{id}_{i}");
@@ -1109,6 +1110,9 @@ fn emit_match(
         if phi_parts.is_empty() {
             result_kind = ae.kind;
             result_payload = ae.payload;
+        }
+        if !ae.owned || ae.kind != Kind::Ptr {
+            arms_owned = false;
         }
         writeln!(code, "  br label %{join_l}").unwrap();
         writeln!(code, "{join_l}:").unwrap();
@@ -1146,7 +1150,7 @@ fn emit_match(
     }
     writeln!(code).unwrap();
     if se.owned {
-        if result_kind == Kind::Ptr {
+        if result_kind == Kind::Ptr && !arms_owned {
             writeln!(code, "  call void @sz_retain(ptr %{prefix}_phi)").unwrap();
         }
         writeln!(code, "  call void @sz_release(ptr {})", se.value).unwrap();
@@ -1156,7 +1160,7 @@ fn emit_match(
         value: format!("%{prefix}_phi"),
         kind: result_kind,
         payload: result_payload,
-        owned: se.owned && result_kind == Kind::Ptr,
+        owned: result_kind == Kind::Ptr && (arms_owned || se.owned),
     }
 }
 
@@ -1597,7 +1601,7 @@ fn emit_expr(
                 value: format!("%{prefix}_phi"),
                 kind,
                 payload,
-                owned: false,
+                owned: kind == Kind::Ptr && te.owned && ee.owned,
             }
         }
         ExprKind::Lambda { param, body } => emit_lambda(param, body, ctx, locals, prefix),
@@ -4923,6 +4927,46 @@ def id(s: String): String = s
         assert!(
             ir.contains("sz_retain"),
             "expected retain of if-phi before dropping binders:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_if_arm_temp_release_after_len() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.len(if (true) [1] else [2])))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call i64 @sz_list_len(ptr ";
+        let at = ir.find(needle).expect("expected sz_list_len");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of if-arm list {name}:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_match_arm_temp_release_after_len() {
+        let src = r#"
+enum Color { case Red, case Blue }
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.len(Color.Red match {
+    case Color.Red => [1]
+    case Color.Blue => [2]
+  })))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call i64 @sz_list_len(ptr ";
+        let at = ir.find(needle).expect("expected sz_list_len");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of match-arm list {name}:\n{ir}"
         );
     }
 
