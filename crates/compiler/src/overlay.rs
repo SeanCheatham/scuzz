@@ -355,9 +355,7 @@ pub(crate) fn expr_has_law(e: &Expr) -> bool {
 pub fn driver_table_text(program: &Program) -> String {
     let mut out = String::new();
     for d in &program.defs {
-        if d.is_driver {
-            push_drive_spec(&mut out, d);
-        } else if d.is_law && !d.params.is_empty() {
+        if d.is_driver || (d.is_law && !d.params.is_empty()) {
             push_drive_spec(&mut out, d);
         }
     }

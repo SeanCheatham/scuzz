@@ -1394,8 +1394,6 @@ fn emit_expr(
             let mut code = ie.code;
             let ptr = if ie.kind == Kind::Int || ie.kind == Kind::Float {
                 box_numeric(&mut code, ie.kind, &ie.value, &format!("{prefix}_box"))
-            } else if ie.kind == Kind::Io {
-                ie.value
             } else {
                 ie.value
             };
