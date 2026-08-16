@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Last-use release for `Map.getOrElse` maps
+## Slice: Last-use release for `Map.getOrElse` default temps
 
-`Map.contains` / `Map.set` drop an owned map. `Map.getOrElse` does not, because the result may alias a payload inside the map.
+`Map.getOrElse` retains the result and drops an owned map. The default argument (`"?"`) stays allocated on a hit.
 
-- Retain the result, then drop the owned map (same last-use as `List.head`).
-- Proof: compiler IR for `Map.getOrElse(Map.set(Map.empty(), "a", "1"), "a", "?")` shows `sz_release` of the map after `sz_map_get_or`.
+- Drop an owned default after `sz_map_get_or` (the result was retained when it aliased the default).
+- Proof: compiler IR for `Map.getOrElse(Map.set(Map.empty(), "a", "1"), "a", "?")` shows `sz_release` of the default string.
 - Out of scope: cycle collector, OS threads, device packaging.

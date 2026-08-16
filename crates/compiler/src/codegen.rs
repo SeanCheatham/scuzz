@@ -3428,6 +3428,7 @@ fn emit_call(
             if key_src.kind == Kind::Int || key_src.kind == Kind::Float {
                 writeln!(code, "  call void @sz_release(ptr {key})").unwrap();
             }
+            take_owned_ptr(&mut code, &emitted_args[0], &format!("%{prefix}_p"));
             if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
                 let v = unbox_numeric(
                     &mut code,
@@ -3435,9 +3436,12 @@ fn emit_call(
                     &format!("%{prefix}_p"),
                     &format!("{prefix}_u"),
                 );
+                if emitted_args[0].owned {
+                    writeln!(code, "  call void @sz_release(ptr %{prefix}_p)").unwrap();
+                }
                 val_emitted(code, v, emitted_args[2].kind)
             } else {
-                val_emitted(code, format!("%{prefix}_p"), Kind::Ptr)
+                ptr_owned_if(code, format!("%{prefix}_p"), emitted_args[0].owned)
             }
         }
         "Map.contains" | "Set.contains" => {
@@ -5103,6 +5107,24 @@ def id(xs: List[Int]): List[Int] = xs
         crate::typ::typecheck(&p).expect("typecheck");
         let ir = emit_llvm(&p);
         assert_contains_releases_map_arg(&ir);
+    }
+
+    #[test]
+    fn emit_map_temp_release_after_get_or_else() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(Map.getOrElse(Map.set(Map.empty(), "a", "1"), "a", "?"))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_map_get_or(ptr ";
+        let at = ir.find(needle).expect("expected sz_map_get_or");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of map {name} after getOrElse:\n{ir}"
+        );
     }
 
     #[test]
