@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Last-use release for List temps
+## Slice: Last-use release for Map / Set temps
 
-The compiler releases owned string temps after concat, slice, trim, and `IO.println`. List cells retain heads and tails. List temps without a last-use stay allocated.
+The compiler releases owned string and List temps after last use. Map / Set trees share subtrees. Map / Set temps without a last-use stay allocated.
 
-- Emit retain/release on owned List temps after last use (same shape as strings).
-- Proof: compiler IR or runtime alloc accounting shows a dropped List temp returns toward baseline.
+- Emit retain/release on owned Map / Set temps after last use (same shape as List).
+- Proof: compiler IR or runtime alloc accounting shows a dropped Map / Set temp returns toward baseline.
 - Out of scope: cycle collector, OS threads, device packaging.
