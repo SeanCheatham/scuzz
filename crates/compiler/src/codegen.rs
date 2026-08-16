@@ -3797,7 +3797,8 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "Stream.emits" => {
             writeln!(
@@ -3806,7 +3807,8 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "Stream.eval" => {
             let io = ensure_io(
@@ -5287,6 +5289,45 @@ def id(m: Map[String, String]): Map[String, String] = m
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_stream_filter"));
         assert!(ir.contains("sz_pred_"));
+    }
+
+    #[test]
+    fn emit_stream_emits_releases_list() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    xs <- Stream.compileToList(Stream.emits(["a"]))
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_stream_emits(ptr ";
+        let at = ir.find(needle).expect("expected sz_stream_emits");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after Stream.emits:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_stream_emit_releases_value() {
+        let src = r#"
+@main def main: IO[Unit] =
+  Stream.drain(Stream.emit("a"))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_stream_emit(ptr ";
+        let at = ir.find(needle).expect("expected sz_stream_emit");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of value {name} after Stream.emit:\n{ir}"
+        );
     }
 
     #[test]

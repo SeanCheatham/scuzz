@@ -29,16 +29,21 @@ static SzStream *st_new(int tag, void *left, void *right, void *env) {
 SzStream *sz_stream_nil(void) { return st_new(SZ_ST_NIL, NULL, NULL, NULL); }
 
 SzStream *sz_stream_emit(void *value) {
+  sz_retain(value);
   return st_new(SZ_ST_CONS, value, sz_stream_nil(), NULL);
 }
 
 SzStream *sz_stream_emits(SzList *xs) {
   SzStream *s = sz_stream_nil();
   SzList *rev = sz_list_reverse(xs);
-  while (!sz_list_is_empty(rev)) {
-    s = st_new(SZ_ST_CONS, sz_list_head(rev), s, NULL);
-    rev = sz_list_tail(rev);
+  SzList *p = rev;
+  while (!sz_list_is_empty(p)) {
+    void *head = sz_list_head(p);
+    sz_retain(head);
+    s = st_new(SZ_ST_CONS, head, s, NULL);
+    p = sz_list_tail(p);
   }
+  sz_release(rev);
   return s;
 }
 
