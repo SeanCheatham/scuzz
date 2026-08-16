@@ -3429,6 +3429,13 @@ fn emit_call(
                 writeln!(code, "  call void @sz_release(ptr {key})").unwrap();
             }
             take_owned_ptr(&mut code, &emitted_args[0], &format!("%{prefix}_p"));
+            if emitted_args[0].owned {
+                if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
+                    writeln!(code, "  call void @sz_release(ptr {dflt})").unwrap();
+                } else {
+                    drop_owned_ptr(&mut code, &emitted_args[2]);
+                }
+            }
             if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
                 let v = unbox_numeric(
                     &mut code,
@@ -5124,6 +5131,17 @@ def id(xs: List[Int]): List[Int] = xs
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of map {name} after getOrElse:\n{ir}"
+        );
+        let rest = ir[at + needle.len()..].split(')').next().unwrap();
+        let dflt = rest
+            .split(',')
+            .nth(2)
+            .unwrap()
+            .trim()
+            .trim_start_matches("ptr ");
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {dflt})")),
+            "expected last-use release of default {dflt} after getOrElse:\n{ir}"
         );
     }
 
