@@ -357,7 +357,7 @@ struct Emitted {
     kind: Kind,
     /// When `kind == Io`, the kind of the successful payload (Int for Sys.exec).
     payload: Kind,
-    /// Compiler owns a +1 on this ptr (string / list temps). Release after last use.
+    /// Compiler owns a +1 on this ptr (string / list / map temps). Release after last use.
     owned: bool,
 }
 
@@ -461,6 +461,11 @@ fn kind_of_type(ty: &Type) -> Kind {
         Type::Io(_) => Kind::Io,
         _ => Kind::Ptr,
     }
+}
+
+fn retain_borrowed_ret(ty: &Type) -> bool {
+    matches!(ty, Type::String | Type::List(_))
+        || matches!(ty, Type::App(n, _) if n == "Map" || n == "Set")
 }
 
 fn llvm_kind_ty(kind: Kind) -> &'static str {
@@ -720,7 +725,7 @@ fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
             } else {
                 "null".into()
             };
-            if matches!(def.ret, Type::String | Type::List(_)) && !body.owned {
+            if retain_borrowed_ret(&def.ret) && !body.owned {
                 writeln!(out, "  call void @sz_retain(ptr {v})").unwrap();
             }
             writeln!(out, "  ret ptr {v}").unwrap();
@@ -3241,7 +3246,7 @@ fn emit_call(
         }
         "Map.empty" | "Set.empty" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_map_empty()").unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "Map.set" | "Set.add" => {
             let key_src = &emitted_args[1];
@@ -3277,6 +3282,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             drop_owned_ptr(&mut code, key_src);
             if callee == "Map.set" {
                 drop_owned_ptr(&mut code, &emitted_args[2]);
@@ -3287,7 +3293,7 @@ fn emit_call(
             if val_owned_box {
                 writeln!(code, "  call void @sz_release(ptr {val})").unwrap();
             }
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "Map.getOrElse" => {
             let key_src = &emitted_args[1];
@@ -3351,6 +3357,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             drop_owned_ptr(&mut code, key_src);
             if key_src.kind == Kind::Int || key_src.kind == Kind::Float {
                 writeln!(code, "  call void @sz_release(ptr {key})").unwrap();
@@ -4733,6 +4740,16 @@ mod tests {
     use super::*;
     use crate::parser::parse;
 
+    fn assert_contains_releases_map_arg(ir: &str) {
+        let needle = "call i64 @sz_map_contains(ptr ";
+        let at = ir.find(needle).expect("expected sz_map_contains");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of {name} after contains:\n{ir}"
+        );
+    }
+
     #[test]
     fn emit_contains_main_and_println() {
         let p = parse(r#"@main def main: IO[Unit] = IO.println("Hi")"#).unwrap();
@@ -4777,6 +4794,43 @@ def id(s: String): String = s
         let src = r#"
 def id(xs: List[Int]): List[Int] = xs
 @main def main: IO[Unit] = IO.println(Str.fromInt(List.len(id([1]))))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_retain"));
+    }
+
+    #[test]
+    fn emit_map_temp_release_after_contains() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(if (Map.contains(Map.set(Map.empty(), "a", "1"), "a")) "y" else "n")
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert_contains_releases_map_arg(&ir);
+    }
+
+    #[test]
+    fn emit_set_temp_release_after_contains() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(if (Set.contains(Set.add(Set.empty(), "x"), "x")) "y" else "n")
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert_contains_releases_map_arg(&ir);
+    }
+
+    #[test]
+    fn emit_map_retain_on_borrowed_return() {
+        let src = r#"
+def id(m: Map[String, String]): Map[String, String] = m
+@main def main: IO[Unit] =
+  IO.println(Map.getOrElse(id(Map.set(Map.empty(), "a", "1")), "a", "?"))
 "#;
         let p = crate::lower::lower_program(parse(src).unwrap());
         crate::typ::typecheck(&p).expect("typecheck");
