@@ -1550,6 +1550,22 @@ int main(void) {
       r = sz_io_unsafe_run(sz_sys_getenv(sz_string_from_cstr("SCUZZ_KIT")));
       assert(r.ok);
       assert(strcmp(sz_string_cstr((SzString *)r.value), "sealed") == 0);
+
+      /* Fake pid table: host pid is dead unless registered; kill never SIGTERM. */
+      r = sz_io_unsafe_run(sz_sys_alive((int64_t)getpid()));
+      assert(r.ok);
+      assert(sz_unbox_i64(r.value) == 0);
+      sz_testrt_proc_put(4242);
+      r = sz_io_unsafe_run(sz_sys_alive(4242));
+      assert(r.ok);
+      assert(sz_unbox_i64(r.value) == 1);
+      r = sz_io_unsafe_run(sz_sys_kill(4242));
+      assert(r.ok);
+      r = sz_io_unsafe_run(sz_sys_alive(4242));
+      assert(r.ok);
+      assert(sz_unbox_i64(r.value) == 0);
+      r = sz_io_unsafe_run(sz_sys_kill((int64_t)getpid()));
+      assert(r.ok);
     }
 
     r = sz_io_unsafe_run(sz_impurity_run_kit());

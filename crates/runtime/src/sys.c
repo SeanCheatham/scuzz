@@ -488,8 +488,12 @@ static void *sys_alive_result(void *env) {
   int status = 0;
   pid_t w;
   sz_free(env);
-  w = waitpid((pid_t)pid, &status, WNOHANG);
   r->is_err = 0;
+  if (sz_testrt_sys_is_fake()) {
+    r->as.ok = sz_box_i64(sz_testrt_proc_alive(pid));
+    return r;
+  }
+  w = waitpid((pid_t)pid, &status, WNOHANG);
   if (w == 0)
     r->as.ok = sz_box_i64(1);
   else
@@ -509,6 +513,10 @@ static void *sys_kill_result(void *env) {
   sz_free(env);
   r->is_err = 0;
   r->as.ok = NULL;
+  if (sz_testrt_sys_is_fake()) {
+    sz_testrt_proc_kill(pid);
+    return r;
+  }
   if (pid > 0 && kill((pid_t)pid, SIGTERM) != 0 && errno != ESRCH) {
     r->is_err = 1;
     r->as.err = sz_error_new(3, "Sys.kill: kill failed");

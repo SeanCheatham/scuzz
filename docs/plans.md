@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Fake `Sys.alive` / `Sys.kill` under TestRuntime
+## Slice: Last-use release for List temps
 
-`Sys.exec` and `Sys.spawn` fail under TestRuntime. `Sys.getenv` is sealed. `Sys.alive` and `Sys.kill` still call the host.
+The compiler releases owned string temps after concat, slice, trim, and `IO.println`. List cells retain heads and tails. List temps without a last-use stay allocated.
 
-- Under `SCUZZ_TESTRT=1`, `Sys.alive` / `Sys.kill` use a fake process table (or fail like exec/spawn). Live code keeps `waitpid` / `kill`.
-- Proof: `examples/io` or `crates/runtime` tests do not touch host pids. A fake pid reports alive then dead after kill.
-- Out of scope: OS threads, Impeller, device packaging.
+- Emit retain/release on owned List temps after last use (same shape as strings).
+- Proof: compiler IR or runtime alloc accounting shows a dropped List temp returns toward baseline.
+- Out of scope: cycle collector, OS threads, device packaging.

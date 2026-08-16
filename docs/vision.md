@@ -28,7 +28,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 | Renderer (v0) | Skia through thin C ABI; Impeller deferred |
 | Build tool | DIY Mill/Cargo-like: `scuzz` (not sbt/Maven) |
 | Effects | Language + runtime builtins |
-| Impurity | All nondeterminism / external I/O through blessed `IO`; no app-level `IO.delay` escape hatch. Simulation is hermetic (TestRuntime fakes; no live sockets; `Sys.exec` / `Sys.spawn` fail; `Sys.getenv` sealed) |
+| Impurity | All nondeterminism / external I/O through blessed `IO`; no app-level `IO.delay` escape hatch. Simulation is hermetic (TestRuntime fakes; no live sockets; `Sys.exec` / `Sys.spawn` fail; `Sys.getenv` sealed; `Sys.alive` / `Sys.kill` fake) |
 | Tests | One built-in strategy: **mutation + fuzz + laws (property) + sim + determinism** (TestRuntime). Oracles live **in source** (laws, inline checks, refinements). **Drivers** are oracle-free workloads the fuzzer composes. No classical unit-test culture. No external test frameworks |
 | Modules | `scuzz.toml` package = crate; `Foo.scuzz` = module (not JVM packages) |
 | Toolchain | Rust (`crates/cli`); one compiler |
@@ -83,7 +83,7 @@ No vendored Skia tree. Thin `sk_capi` (measure + draw). **Default UI backend** i
 
 ### IO and impurity
 
-One failure channel: `SzError` on `IO`. Blessed kits only. No app-level `IO.delay`. Cooperative single-threaded fibers (no OS threads for IO). `sleep` / empty `Queue.take` / incomplete `Deferred.get` / fd poll park. Cancel (race loser / `IO.timeout` / `Fiber.interrupt`) runs `IO.ensure` / `Resource` finalizers. `Fiber.fork` starts a supervised child (`join` parks; unjoined children cancel when the root completes). `IO.timeout(ms, inner)` is a blessed race of sleep-fail vs inner and keeps inner's `IO[T]`. `IO.forever(inner)` reruns until failure or cancel (`IO[Unit]`, never succeeds). `IO.repeatN(n, inner)` runs inner once plus `n` extra times (last success). `IO.retryN(n, inner)` retries on failure up to `n` extra times. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net/console. Simulation is hermetic: TestRuntime does not open live sockets; `Net.httpGet` uses stubs; `Net.serve` uses injected paths; a missing stub fails; `Sys.exec` and `Sys.spawn` fail; `Sys.getenv` reads a sealed map. Live `Net.serve` binds localhost (`127.0.0.1` and `::1`). Live `Net.httpGet` may leave the host. Surface catalogs: [`guide.md`](guide.md). Panics abort through `sz_panic`.
+One failure channel: `SzError` on `IO`. Blessed kits only. No app-level `IO.delay`. Cooperative single-threaded fibers (no OS threads for IO). `sleep` / empty `Queue.take` / incomplete `Deferred.get` / fd poll park. Cancel (race loser / `IO.timeout` / `Fiber.interrupt`) runs `IO.ensure` / `Resource` finalizers. `Fiber.fork` starts a supervised child (`join` parks; unjoined children cancel when the root completes). `IO.timeout(ms, inner)` is a blessed race of sleep-fail vs inner and keeps inner's `IO[T]`. `IO.forever(inner)` reruns until failure or cancel (`IO[Unit]`, never succeeds). `IO.repeatN(n, inner)` runs inner once plus `n` extra times (last success). `IO.retryN(n, inner)` retries on failure up to `n` extra times. TestRuntime (`SCUZZ_TESTRT=1`) fakes clock/random/FS/net/console. Simulation is hermetic: TestRuntime does not open live sockets; `Net.httpGet` uses stubs; `Net.serve` uses injected paths; a missing stub fails; `Sys.exec` and `Sys.spawn` fail; `Sys.getenv` reads a sealed map; `Sys.alive` / `Sys.kill` use a fake process table. Live `Net.serve` binds localhost (`127.0.0.1` and `::1`). Live `Net.httpGet` may leave the host. Surface catalogs: [`guide.md`](guide.md). Panics abort through `sz_panic`.
 
 ### `Ui` vs `View`
 
@@ -164,7 +164,7 @@ App correctness is **not** classical unit tests. Prefer **mutation, fuzzing, pro
 
 - **Oracles live in the live module.** Top-level `law` declarations (pure `Bool` predicates; nullary or generator-friendly `Int` / `String` / `Bool` params), explicit `.require(pred)` on values / `IO` (type-preserving; residual `Law.check` / sequenced `Law.assert` under verify), reachability `Law.sometimes(name)`, and `where` refinements on `def` params and `record` fields. All erase from live builds. Armed under TestRuntime / fuzz / mutation. Nullary laws apply at the call site through `.require`. Parameterized laws are instantiated by `scuzz fuzz`.
 - **Drivers (`*.scuzz_drivers`) do things.** Impure, parameterized, oracle-free steps. `scuzz fuzz` composes them (generated args, random order / interleaving) alongside the UI event alphabet. `check` rejects `Law.*` and `.require` in driver files. An assert inside a driver is a unit test in disguise.
-- **Simulation is hermetic.** Fuzz, mutation, and TestRuntime keep impurity inside fakes. No live sockets. `Net.httpGet` beyond the stub map fails. `Sys.exec` / `Sys.spawn` fail under TestRuntime so a child cannot open the network. `Sys.getenv` does not read the host map. Live `Net.httpGet` may leave the host.
+- **Simulation is hermetic.** Fuzz, mutation, and TestRuntime keep impurity inside fakes. No live sockets. `Net.httpGet` beyond the stub map fails. `Sys.exec` / `Sys.spawn` fail under TestRuntime so a child cannot open the network. `Sys.getenv` does not read the host map. `Sys.alive` / `Sys.kill` do not touch host pids. Live `Net.httpGet` may leave the host.
 - **`Law.sometimes` keeps composition honest.** Reachability accumulates across a fuzz *campaign*. Declared-but-never-reached states fail the campaign. Oracle-free drivers cannot pass vacuously. It is a coverage/fitness signal for corpus guidance, alongside Headless dump novelty. It is a path marker (`Unit`), not a value method.
 - **Mutation pressures the oracles.** Default `scuzz mutate` mutates live code and requires residual oracles to kill the mutant. `--oracles` mutates residual predicates. Surviving mutants mean weak, unreached, or missing laws/refinements.
 
@@ -213,7 +213,7 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: [`plans.md`](plans.md). Work order: core value types first — `Float`, reference counting, `Map` / `Set`, and IO last-use are in. `scuzz package --target ios` and `--target android` drive the platform shells. `SCUZZ_SKIA=gpu` presents through OpenGL. `Sys.getenv` is sealed under TestRuntime. Device packaging and Impeller / Skia GPU raster stay deferred.
+Unknowns and known gaps: [`gaps.md`](gaps.md). Next slices: [`plans.md`](plans.md). Work order: core value types first — `Float`, reference counting, `Map` / `Set`, and IO last-use are in. `scuzz package --target ios` and `--target android` drive the platform shells. `SCUZZ_SKIA=gpu` presents through OpenGL. `Sys.getenv` is sealed under TestRuntime. `Sys.alive` / `Sys.kill` use a fake process table. Device packaging and Impeller / Skia GPU raster stay deferred.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. `scuzz package --target ios` builds a signed simulator `.app` when Xcode is present. The iOS shell feeds typed text into TextField. `scuzz package --target android` packs a debug APK when the NDK and SDK are present. The Android shell blits frames onto a SurfaceView and feeds taps and typed text into the pump. Device builds stay open.
 
@@ -224,7 +224,7 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-on
 | Language + UI + tooling is huge | Small subset. Vertical slices. Counter before generality |
 | Dialect unexercised by apps | Kernel examples that stress each construct. `check` / `test` / `fuzz` on `examples/` |
 | Effects too weak or too heavy | Builtin IO. Pure `View`. `Ui` at session boundary |
-| Hidden nondeterminism | Closed impurity + hermetic TestRuntime + deterministic `*.scuzz_sim`. No live sockets under sim. `Sys.exec` / `Sys.spawn` fail under TestRuntime. `Sys.getenv` is sealed |
+| Hidden nondeterminism | Closed impurity + hermetic TestRuntime + deterministic `*.scuzz_sim`. No live sockets under sim. `Sys.exec` / `Sys.spawn` fail under TestRuntime. `Sys.getenv` is sealed. `Sys.alive` / `Sys.kill` use a fake process table |
 | Laws become brittle dump goldens | Laws talk to named module/signal surface. Strict sim/live pairing in `check`. Mutation kills weak oracles |
 | Sim becomes Mockito | Only top-level same-name overlays. No stubbing pure `View`/`Signal`. Kits stay TestRuntime |
 | Drivers become integration tests | `check` rejects `Law.*` in driver files. Correctness lives only in live-module oracles |

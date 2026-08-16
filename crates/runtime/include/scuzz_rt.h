@@ -461,6 +461,9 @@ void sz_testrt_stdout_write(const char *bytes, size_t n); /* raw; no extra newli
 const char *sz_testrt_stdout_cstr(void);
 void sz_testrt_env_set(const char *key, const char *val); /* sealed Sys.getenv map */
 const char *sz_testrt_env_get(const char *key); /* NULL if unset */
+void sz_testrt_proc_put(int64_t pid); /* fake Sys.alive table */
+int sz_testrt_proc_alive(int64_t pid); /* 1 if registered */
+void sz_testrt_proc_kill(int64_t pid); /* drop from table */
 
 /* Laws — residual checks armed only under SCUZZ_TESTRT=1 */
 void sz_law_stash_a11y(const char *dump);

@@ -592,6 +592,10 @@ static char *g_env_keys[ENV_CAP];
 static char *g_env_vals[ENV_CAP];
 static int g_env_n;
 
+#define PROC_CAP 32
+static int64_t g_proc[PROC_CAP];
+static int g_proc_n;
+
 static void env_free_all(void) {
   int i;
   for (i = 0; i < g_env_n; i++) {
@@ -643,6 +647,43 @@ const char *sz_testrt_env_get(const char *key) {
       return g_env_vals[i];
   }
   return NULL;
+}
+
+static void proc_clear(void) { g_proc_n = 0; }
+
+void sz_testrt_proc_put(int64_t pid) {
+  int i;
+  if (pid <= 0)
+    return;
+  for (i = 0; i < g_proc_n; i++) {
+    if (g_proc[i] == pid)
+      return;
+  }
+  if (g_proc_n >= PROC_CAP)
+    return;
+  g_proc[g_proc_n++] = pid;
+}
+
+int sz_testrt_proc_alive(int64_t pid) {
+  int i;
+  if (pid <= 0)
+    return 0;
+  for (i = 0; i < g_proc_n; i++) {
+    if (g_proc[i] == pid)
+      return 1;
+  }
+  return 0;
+}
+
+void sz_testrt_proc_kill(int64_t pid) {
+  int i;
+  for (i = 0; i < g_proc_n; i++) {
+    if (g_proc[i] == pid) {
+      g_proc[i] = g_proc[g_proc_n - 1];
+      g_proc_n--;
+      return;
+    }
+  }
 }
 
 static void env_copy_host(const char *key) {
@@ -705,6 +746,7 @@ static void sz_testrt_sys_reset_live(void) {
   g_stdout_len = 0;
   g_stdout_cap = 0;
   env_free_all();
+  proc_clear();
   g_sys_fake = 0;
 }
 
