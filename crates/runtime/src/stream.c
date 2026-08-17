@@ -55,6 +55,7 @@ SzStream *sz_stream_concat(SzStream *left, SzStream *right) {
 SzStream *sz_stream_evalmap(SzStream *inner, SzCont f, void *env) {
   if (!f)
     sz_panic("sz_stream_evalmap(null)");
+  sz_retain(env);
   return st_new(SZ_ST_EVALMAP, st_keep(inner), (void *)f, env);
 }
 

@@ -88,6 +88,10 @@ static SzIo *lang_use_ok(void *acquired, void *env) {
   (void)acquired;
   return sz_io_println_cstr("lang-resource-used");
 }
+static SzIo *lang_use_println_env(void *acquired, void *env) {
+  (void)acquired;
+  return sz_io_println((SzString *)sz_list_head((SzList *)env));
+}
 static SzIo *lang_use_fail(void *acquired, void *env) {
   (void)env;
   (void)acquired;
@@ -914,6 +918,41 @@ int main(void) {
   assert(lang_released == 1);
   sz_error_free(r.error);
   sz_lang_resource_free(lr);
+
+  /* Resource.use keeps a captured list env after the caller drops it. */
+  {
+    SzString *msg;
+    SzList *env;
+    SzIo *acq;
+    SzIo *use_io;
+    size_t base_count = 0, base_bytes = 0;
+    size_t live_count = 0, live_bytes = 0;
+
+    acq = sz_io_pure(sz_string_from_cstr("tok"));
+    sz_alloc_stats(&base_bytes, &base_count);
+    msg = sz_string_from_cstr("cap");
+    env = sz_list_cons(msg, sz_list_nil());
+    sz_release(msg);
+    lr = sz_lang_resource_make(acq, lang_release, env);
+    sz_release(env);
+    sz_lang_resource_free(lr);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    sz_release(acq);
+
+    lang_released = 0;
+    msg = sz_string_from_cstr("cap");
+    env = sz_list_cons(msg, sz_list_nil());
+    sz_release(msg);
+    lr = sz_lang_resource_make(sz_io_pure(sz_string_from_cstr("tok")),
+                               lang_release, NULL);
+    use_io = sz_lang_resource_use(lr, lang_use_println_env, env);
+    sz_release(env);
+    r = sz_io_unsafe_run(use_io);
+    assert(r.ok);
+    assert(lang_released == 1);
+    sz_lang_resource_free(lr);
+  }
 
   /* IO.ensure runs finalizer on success */
   ensured_flag = 0;

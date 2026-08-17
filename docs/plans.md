@@ -1,10 +1,10 @@
 # Short-term plan
 
-## Slice: Release Resource and Net.serve callback capture lists
+## Slice: Release Stream.filter / map / takeWhile capture lists
 
-Tap, `View.each`, `Signal.map`, and `Ui.run` rebuild env lists drop when the owner frees. `Resource.make` / `Resource.use` and `Net.serve` / `Net.serveOnce` unpack the callback pack and leave the capture env on the resource or server without retain or release.
+`Resource` and `Net.serve` callback envs drop when the owner frees. `Stream.filter` / `map` / `takeWhile` / `dropWhile` / `find` unpack the pack and leave the capture env on the stream without retain. Stream free already releases `env`.
 
-- Retain the callback env when the resource or server stores it.
-- Release that env when the resource or server frees.
-- Proof: `Resource.use` with a captured String still prints after the factory returns, and free returns live_count to baseline.
+- Retain the callback env in those combinators.
+- Drop the construction ref of the capture list after packing the lambda.
+- Proof: compiler IR for `Stream.drain(Stream.filter(Stream.emit("a"), x => tag))` with a captured `tag` shows `sz_release` of the capture list after the pack.
 - Out of scope: OS threads.

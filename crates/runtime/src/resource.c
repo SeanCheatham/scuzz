@@ -8,13 +8,19 @@ typedef struct LangResSt {
 } LangResSt;
 
 static SzIo *lang_fin_free_ok(void *ignored, void *env) {
+  LangResSt *st = (LangResSt *)env;
   (void)ignored;
-  sz_free(env);
+  sz_release(st->use_env);
+  st->use_env = NULL;
+  sz_free(st);
   return sz_io_pure(NULL);
 }
 
 static SzIo *lang_fin_free_err(SzError *err, void *env) {
-  sz_free(env);
+  LangResSt *st = (LangResSt *)env;
+  sz_release(st->use_env);
+  st->use_env = NULL;
+  sz_free(st);
   return sz_io_fail(err);
 }
 
@@ -35,6 +41,7 @@ SzLangResource *sz_lang_resource_make(SzIo *acquire, SzCont release,
   SzLangResource *r = (SzLangResource *)sz_alloc_zero(sizeof(SzLangResource));
   r->acquire = acquire;
   r->release = release;
+  sz_retain(release_env);
   r->release_env = release_env;
   return r;
 }
@@ -45,8 +52,15 @@ SzIo *sz_lang_resource_use(SzLangResource *res, SzCont use, void *use_env) {
   LangResSt *st = (LangResSt *)sz_alloc_zero(sizeof(LangResSt));
   st->res = res;
   st->use = use;
+  sz_retain(use_env);
   st->use_env = use_env;
   return sz_io_flatmap(res->acquire, lang_after_acquire, st);
 }
 
-void sz_lang_resource_free(SzLangResource *res) { sz_free(res); }
+void sz_lang_resource_free(SzLangResource *res) {
+  if (!res)
+    return;
+  sz_release(res->release_env);
+  res->release_env = NULL;
+  sz_free(res);
+}

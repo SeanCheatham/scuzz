@@ -2253,6 +2253,9 @@ fn emit_io_cont_lambda(
     )
     .unwrap();
     writeln!(code, "  call void @sz_release(ptr %{prefix}_cl1)").unwrap();
+    if env_ptr != "null" {
+        writeln!(code, "  call void @sz_release(ptr {env_ptr})").unwrap();
+    }
     owned_ptr(code, format!("%{prefix}_cl2"))
 }
 
@@ -6364,11 +6367,40 @@ law always: Bool = 1 == 1
   for {
     tag = "k"
     n = Signal.int(0)
-    s = Signal.map(n, x => tag)
+                s = Signal.map(n, x => tag)
     _ <- IO.println(Signal.getStr(s))
   } yield ()
 "#,
                 "Signal.map",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    tag = "k"
+    res = Resource.make(IO.pure("tok"), t => IO.println(tag))
+    _ <- Resource.use(res, t => IO.println(t))
+  } yield ()
+"#,
+                "Resource.make",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    tag = "k"
+    res = Resource.make(IO.pure("tok"), t => IO.println(t))
+    _ <- Resource.use(res, t => IO.println(tag))
+  } yield ()
+"#,
+                "Resource.use",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    tag = "k"
+    _ <- Net.serveOnce(8080, path => IO.pure(tag))
+  } yield ()
+"#,
+                "Net.serveOnce",
             ),
         ];
         for (src, label) in cases {

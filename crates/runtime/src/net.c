@@ -1093,6 +1093,8 @@ static void serve_free(ServeSt *st) {
   if (!st)
     return;
   serve_close_fds(st);
+  sz_release(st->henv);
+  st->henv = NULL;
   sz_free(st);
 }
 
@@ -1563,6 +1565,7 @@ static SzIo *net_serve_n(int64_t port, int64_t n, SzCont handler, void *env) {
   st->listen6_fd = -1;
   st->conn_fd = -1;
   st->handler = handler;
+  sz_retain(env);
   st->henv = env;
   return sz_io_handle_error_with(serve_round(st), serve_on_err, st);
 }
