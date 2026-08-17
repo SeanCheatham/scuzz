@@ -316,6 +316,10 @@ void sz_release(void *ptr) {
       sz_release(io->as.deferred_get);
       io->as.deferred_get = NULL;
       break;
+    case SZ_IO_PURE:
+      sz_release(io->as.pure_value);
+      io->as.pure_value = NULL;
+      break;
     default:
       break;
     }
@@ -1681,6 +1685,7 @@ static void fiber_resume_value(Sched *s, Fiber *f, void *value) {
         (stack->loop_kind == LOOP_REPEAT && stack->loop_left > 0)) {
       if (stack->loop_kind == LOOP_REPEAT)
         stack->loop_left--;
+      sz_release(value);
       if (f->cur != stack->loop_inner)
         sz_retain(stack->loop_inner);
       fiber_set_cur(f, stack->loop_inner);
@@ -1837,6 +1842,7 @@ static int step_fiber(Sched *s, Fiber *f) {
 
   switch (cur->tag) {
   case SZ_IO_PURE:
+    sz_retain(cur->as.pure_value);
     fiber_resume_value(s, f, cur->as.pure_value);
     return 0;
   case SZ_IO_DELAY: {

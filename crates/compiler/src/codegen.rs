@@ -1421,7 +1421,7 @@ fn emit_expr(
             } else {
                 ie.kind
             };
-            io_emitted(code, format!("%{prefix}_io"), payload)
+            io_emitted_payload(code, format!("%{prefix}_io"), payload, payload == Kind::Ptr)
         }
         ExprKind::AdtConstruct {
             enum_name,
@@ -5905,6 +5905,31 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of payload {name} after IO.pure:\n{ir}"
+        );
+        assert!(
+            ir.contains("call void @sz_release(ptr %value)"),
+            "expected last-use release of IO.pure binder %value:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_io_pure_for_binder_releases_value() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    s <- IO.pure("ok")
+    _ <- IO.println(s)
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("call ptr @sz_io_println(ptr %value)"),
+            "expected println of IO.pure binder:\n{ir}"
+        );
+        assert!(
+            ir.contains("call void @sz_release(ptr %value)"),
+            "expected last-use release of IO.pure binder %value:\n{ir}"
         );
     }
 

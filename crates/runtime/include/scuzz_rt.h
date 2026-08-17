@@ -209,6 +209,9 @@ struct SzIo {
   } as;
 };
 
+/* Callee retains the value. Caller drops after the call. Last sz_release of
+ * the IO node drops a leftover payload. Run retains so last-use of the result
+ * does not free the node slot. */
 SzIo *sz_io_pure(void *value);
 SzIo *sz_io_delay(SzThunk thunk, void *env);
 SzIo *sz_io_flatmap(SzIo *inner, SzCont cont, void *env);

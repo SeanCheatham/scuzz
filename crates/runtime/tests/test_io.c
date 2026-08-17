@@ -946,6 +946,32 @@ int main(void) {
   assert((intptr_t)r.value == 42);
   assert(delay_calls == 1);
 
+  /* Leftover IO.pure payloads drop on last-use / free. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *s;
+    SzIo *io;
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    r = sz_io_unsafe_run(pure_drop(sz_string_from_cstr("ok")));
+    assert(r.ok);
+    assert(r.value && strcmp(sz_string_cstr((SzString *)r.value), "ok") == 0);
+    sz_release(r.value);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    s = sz_string_from_cstr("drop");
+    io = sz_io_pure(s);
+    sz_release(s);
+    sz_release(io);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   /* println + flatMap */
   SzIo *prog =
       fm_drop(sz_io_println_cstr("hello"), cont_println, NULL);
@@ -1188,6 +1214,21 @@ int main(void) {
   assert(delay_calls == 0);
   assert(r.error && strstr(sz_string_cstr(r.error->message), "boom") != NULL);
   sz_error_free(r.error);
+
+  /* Repeat discards extra IO.pure retains; last value is the run result. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    r = sz_io_unsafe_run(repeat_n_drop(2, pure_drop(sz_string_from_cstr("rep"))));
+    assert(r.ok);
+    assert(r.value && strcmp(sz_string_cstr((SzString *)r.value), "rep") == 0);
+    sz_release(r.value);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
 
   /* IO.retryN: extra retries on failure; last success / last error. */
   retry_hits = 0;
