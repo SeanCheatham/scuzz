@@ -1,9 +1,10 @@
 # Short-term plan
 
-## Slice: Last-use release for `View.listTile` titles
+## Slice: Last-use release for View tap lambda packs
 
-`View.choiceChip` copies the label and drops the owned string. `View.listTile` still leaves the owned `String`.
+`View.button` unpacks `cons(fn, cons(env, nil))` and drops the owned label. The closure list stays allocated.
 
-- Drop an owned string after `sz_lang_view_list_tile`.
-- Proof: compiler IR for `Ui.run(_ => View.listTile("a"))` shows `sz_release` of the string after the call.
-- Out of scope: View lambda packs, RC stream nodes, OS threads.
+- Mark the tap lambda pack owned and drop it after unpack.
+- Proof: compiler IR for `Ui.run(_ => View.button("a", _ => ()))` shows `sz_release` of the closure list after the call.
+- Apply the same drop to `iconButton`, `fab`, `outlinedButton`, `textButton`, `actionChip`, and `inkWell`.
+- Out of scope: RC stream nodes, OS threads.

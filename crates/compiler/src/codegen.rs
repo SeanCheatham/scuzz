@@ -4238,6 +4238,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.radio" => {
@@ -4247,6 +4248,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[2]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.slider" => {
@@ -4283,6 +4285,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.switch" => {
@@ -4292,6 +4295,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.chip" => {
@@ -4350,6 +4354,7 @@ fn emit_call(
                 )
                 .unwrap();
             }
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.checkboxListTile" => {
@@ -4359,6 +4364,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.switchListTile" => {
@@ -4368,6 +4374,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.radioListTile" => {
@@ -4377,6 +4384,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[2]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.segmented" => {
@@ -4386,6 +4394,8 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            drop_owned_ptr(&mut code, &emitted_args[2]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.badge" => {
@@ -4413,6 +4423,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.placeholder" => {
@@ -4431,6 +4442,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.mergeSemantics" => {
@@ -4440,6 +4452,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.inkWell" => {
@@ -4466,6 +4479,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[2].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.visibility" => {
@@ -4514,6 +4528,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Theme.accent" => {
@@ -4799,6 +4814,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.icon" => {
@@ -4820,6 +4836,7 @@ fn emit_call(
                 emitted_args[3].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[3]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.showWhen" => {
@@ -6000,6 +6017,200 @@ law always: Bool = 1 == 1
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of string {name} after View.choiceChip:\n{ir}"
         );
+    }
+
+    #[test]
+    fn emit_view_string_copies_release_owned() {
+        let cases: &[(&str, &str, &[usize], &str)] = &[
+            (
+                r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.listTile("a"))
+"#,
+                "call ptr @sz_lang_view_list_tile(ptr ",
+                &[0],
+                "View.listTile",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.listTile("a", View.button("b", _ => ())))
+"#,
+                "call ptr @sz_lang_view_list_tile(ptr ",
+                &[0],
+                "View.listTile trailing",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.checkboxListTile(n, "a"))
+  } yield ()
+"#,
+                "call ptr @sz_lang_view_checkbox_list_tile(ptr ",
+                &[1],
+                "View.checkboxListTile",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.switchListTile(n, "a"))
+  } yield ()
+"#,
+                "call ptr @sz_lang_view_switch_list_tile(ptr ",
+                &[1],
+                "View.switchListTile",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.radioListTile(n, 1, "a"))
+  } yield ()
+"#,
+                "call ptr @sz_lang_view_radio_list_tile(ptr ",
+                &[2],
+                "View.radioListTile",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.checkbox(n, "a"))
+  } yield ()
+"#,
+                "call ptr @sz_lang_view_checkbox(ptr ",
+                &[1],
+                "View.checkbox",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.radio(n, 1, "a"))
+  } yield ()
+"#,
+                "call ptr @sz_lang_view_radio(ptr ",
+                &[2],
+                "View.radio",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.switch(n, "a"))
+  } yield ()
+"#,
+                "call ptr @sz_lang_view_switch(ptr ",
+                &[1],
+                "View.switch",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.avatar("a"))
+"#,
+                "call ptr @sz_lang_view_avatar(ptr ",
+                &[0],
+                "View.avatar",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.segmented(n, "a", "b"))
+  } yield ()
+"#,
+                "call ptr @sz_lang_view_segmented(ptr ",
+                &[1, 2],
+                "View.segmented",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.tooltip("a", View.avatar("b")))
+"#,
+                "call ptr @sz_lang_view_tooltip(ptr ",
+                &[0],
+                "View.tooltip",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.semantics("a", View.avatar("b")))
+"#,
+                "call ptr @sz_lang_view_semantics(ptr ",
+                &[0],
+                "View.semantics",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.mergeSemantics("a", View.avatar("b")))
+"#,
+                "call ptr @sz_lang_view_merge_semantics(ptr ",
+                &[0],
+                "View.mergeSemantics",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.inkWell("a", _ => (), View.avatar("b")))
+"#,
+                "call ptr @sz_lang_view_ink_well(ptr ",
+                &[0],
+                "View.inkWell",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.expansionTile(n, "a", View.text("b")))
+  } yield ()
+"#,
+                "call ptr @sz_lang_view_expansion_tile(ptr ",
+                &[1],
+                "View.expansionTile",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    s = Signal.str("x")
+    _ <- Ui.run(_ => View.textField(s, "a"))
+  } yield ()
+"#,
+                "call ptr @sz_lang_view_text_field(ptr ",
+                &[1],
+                "View.textField",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.image(24, 24, 1, "a"))
+"#,
+                "call ptr @sz_lang_view_image(",
+                &[3],
+                "View.image",
+            ),
+        ];
+        for (src, needle, idxs, label) in cases {
+            let p = crate::lower::lower_program(parse(src).unwrap());
+            crate::typ::typecheck(&p).unwrap_or_else(|e| panic!("typecheck {label}: {e}"));
+            let ir = emit_llvm(&p);
+            let at = ir
+                .find(needle)
+                .unwrap_or_else(|| panic!("expected {needle} in IR for {label}:\n{ir}"));
+            let rest = &ir[at + needle.len()..];
+            let args = rest.split(')').next().unwrap();
+            let parts: Vec<&str> = args.split(',').collect();
+            for &idx in *idxs {
+                let name = parts
+                    .get(idx)
+                    .unwrap_or_else(|| {
+                        panic!("missing arg {idx} after {needle} for {label}:\n{ir}")
+                    })
+                    .trim()
+                    .trim_start_matches("ptr ")
+                    .trim();
+                assert!(
+                    ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+                    "expected last-use release of string {name} after {label}:\n{ir}"
+                );
+            }
+        }
     }
 
     #[test]
