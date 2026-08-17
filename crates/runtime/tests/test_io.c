@@ -2334,25 +2334,55 @@ int main(void) {
     r = sz_io_unsafe_run(sz_sys_exec(sz_string_from_cstr("true")));
     assert(r.ok);
     assert(sz_unbox_i64(r.value) == 0);
+    sz_release(r.value);
     r = sz_io_unsafe_run(sz_sys_exec(sz_string_from_cstr("exit 7")));
     assert(r.ok);
     assert(sz_unbox_i64(r.value) == 7);
+    sz_release(r.value);
+  }
+
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzString *cmd = sz_string_from_cstr("true");
+      r = sz_io_unsafe_run(sz_sys_exec(cmd));
+      sz_release(cmd);
+      assert(r.ok);
+      sz_release(r.value);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
   }
 
   /* TestRuntime rejects Sys.exec / Sys.spawn so sim cannot fork a child. */
   {
     SzIoResult tr;
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
     sz_testrt_install();
-    tr = sz_io_unsafe_run(sz_sys_exec(sz_string_from_cstr("true")));
-    assert(!tr.ok);
-    assert(tr.error &&
-           strstr(sz_string_cstr(tr.error->message), "TestRuntime") != NULL);
-    sz_error_free(tr.error);
-    tr = sz_io_unsafe_run(sz_sys_spawn(sz_string_from_cstr("true")));
-    assert(!tr.ok);
-    assert(tr.error &&
-           strstr(sz_string_cstr(tr.error->message), "TestRuntime") != NULL);
-    sz_error_free(tr.error);
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzString *cmd = sz_string_from_cstr("true");
+      tr = sz_io_unsafe_run(sz_sys_exec(cmd));
+      sz_release(cmd);
+      assert(!tr.ok);
+      assert(tr.error &&
+             strstr(sz_string_cstr(tr.error->message), "TestRuntime") != NULL);
+      sz_error_free(tr.error);
+      cmd = sz_string_from_cstr("true");
+      tr = sz_io_unsafe_run(sz_sys_spawn(cmd));
+      sz_release(cmd);
+      assert(!tr.ok);
+      assert(tr.error &&
+             strstr(sz_string_cstr(tr.error->message), "TestRuntime") != NULL);
+      sz_error_free(tr.error);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
     sz_testrt_reset();
   }
 

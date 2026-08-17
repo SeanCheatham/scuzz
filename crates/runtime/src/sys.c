@@ -77,9 +77,18 @@ static SzIo *unwrap_sys(void *value, void *env) {
   SysResult *r = (SysResult *)value;
   if (!r)
     return sz_io_fail_cstr("Sys: null result");
-  if (r->is_err)
-    return fail_drop(r->as.err);
-  return pure_drop(r->as.ok);
+  if (r->is_err) {
+    SzError *err = r->as.err;
+    r->as.err = NULL;
+    sz_free(r);
+    return fail_drop(err);
+  }
+  {
+    void *ok = r->as.ok;
+    r->as.ok = NULL;
+    sz_free(r);
+    return pure_drop(ok);
+  }
 }
 
 static char *g_inbuf = NULL;
@@ -370,7 +379,6 @@ static void exec_free(ExecSt *st) {
     (void)waitpid(st->pid, &status, WNOHANG);
   sz_release(st->cmd);
   st->cmd = NULL;
-  sz_free(st);
 }
 
 static void *sys_exec_start(void *env) {
@@ -470,9 +478,10 @@ static SzIo *exec_keep_pair(void *value, void *env) {
 
 static SzIo *exec_after_kick(void *ignored, void *env) {
   SzPair *p = (SzPair *)env;
-  ExecSt *st = (ExecSt *)sz_alloc_zero(sizeof(ExecSt));
+  ExecSt *st = (ExecSt *)sz_rc_alloc(sizeof(ExecSt), SZ_RC_BOX);
   SzIo *io;
   (void)ignored;
+  memset(st, 0, sizeof(ExecSt));
   sz_retain(p->left);
   st->cmd = (SzString *)p->left;
   st->read_fd = -1;
@@ -480,6 +489,7 @@ static SzIo *exec_after_kick(void *ignored, void *env) {
   {
     SzIo *handled = sz_io_handle_error_with(io, exec_on_err, st);
     sz_release(io);
+    sz_release(st);
     return handled;
   }
 }
