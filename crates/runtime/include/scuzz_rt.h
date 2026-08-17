@@ -239,16 +239,7 @@ SzIo *sz_io_deferred_get(SzDeferred *d);
 SzIo *sz_io_poll_readable(int fd); /* IO[Unit]; park until fd is readable */
 SzIo *sz_io_poll_writable(int fd); /* IO[Unit]; park until fd is writable */
 
-/* Run to completion on the calling thread.
- * Concurrency is cooperative single-threaded fibers. sleep/Queue/Deferred/poll
- * park (Net, Sys.readLine, Sys.exec, httpGet DNS). race/both fork left-then-right onto a
- * ready queue. forever/repeatN/retryN rerun the same inner tree (yield each iteration).
- * Fiber.fork starts a supervised child. join parks. interrupt cancels.
- * Unjoined children cancel when the root fiber completes. Live / default: FIFO pick. When SCUZZ_SCHED_SEED is set (fuzz),
- * ready-fiber pick among n>1 is seed-driven (Lehmer/MINSTD). TestRuntime jumps
- * virtual time to the next wakeup when all fibers are blocked on timers. Live
- * idle wait uses poll (and interruptible nanosleep when only timers remain).
- * A cancelled sleeper or a ready listen socket cannot hold the run loop. */
+/* Run to completion on the calling thread. Cooperative single-threaded fibers. */
 typedef struct SzIoResult {
   int ok; /* 1 success, 0 error */
   void *value;

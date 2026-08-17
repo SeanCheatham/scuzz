@@ -1335,6 +1335,11 @@ static SzError *error_copy_or_interrupt(SzError *err) {
   return sz_error_new(err->code, sz_string_cstr(err->message));
 }
 
+static SzError *deferred_copy_error(SzDeferred *d) {
+  return d->error ? error_copy_or_interrupt(d->error)
+                  : sz_error_new(1, "deferred failed");
+}
+
 /* Unique parent: take the child. Shared parent (loop template): retain. */
 static SzIo *io_child(SzIo *parent, SzIo **slot) {
   SzIo *c = *slot;
@@ -1353,6 +1358,12 @@ static void fiber_set_cur(Fiber *f, SzIo *next) {
   f->cur = next;
   if (old != next)
     sz_release(old);
+}
+
+/* Retain so the run result does not alias a live slot. */
+static void fiber_set_pure_retained(Fiber *f, void *value) {
+  sz_retain(value);
+  fiber_set_cur(f, pure_drop(value));
 }
 
 static Fiber *fiber_new(SzIo *cur, Fiber *parent, JoinKind jk, int slot) {
@@ -1679,21 +1690,12 @@ void sz_fiber_wake_deferred(SzDeferred *d) {
     f->dwait = NULL;
     if (f->state == FIB_CANCELLED)
       continue;
-    if (!d->ok) {
-      SzError *err =
-          d->error
-              ? sz_error_new(d->error->code, sz_string_cstr(d->error->message))
-              : sz_error_new(1, "deferred failed");
-      f->state = FIB_READY;
-      f->stack = f->stack; /* keep handlers */
-      fiber_set_cur(f, fail_drop(err));
-      ready_enqueue(s, f);
-    } else {
-      f->state = FIB_READY;
-      sz_retain(d->value);
-      fiber_set_cur(f, pure_drop(d->value));
-      ready_enqueue(s, f);
-    }
+    f->state = FIB_READY;
+    if (!d->ok)
+      fiber_set_cur(f, fail_drop(deferred_copy_error(d)));
+    else
+      fiber_set_pure_retained(f, d->value);
+    ready_enqueue(s, f);
   }
 }
 
@@ -1960,15 +1962,10 @@ static int step_fiber(Sched *s, Fiber *f) {
     }
     if (d->completed) {
       if (!d->ok) {
-        SzError *err =
-            d->error
-                ? sz_error_new(d->error->code, sz_string_cstr(d->error->message))
-                : sz_error_new(1, "deferred failed");
-        fiber_fail(s, f, err);
+        fiber_fail(s, f, deferred_copy_error(d));
         return 0;
       }
-      sz_retain(d->value);
-      fiber_set_cur(f, pure_drop(d->value));
+      fiber_set_pure_retained(f, d->value);
       ready_enqueue(s, f);
       return 0;
     }

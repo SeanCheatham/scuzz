@@ -83,7 +83,6 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_io_flatmap(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_error_new(i32, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_fail(ptr)").unwrap();
-    writeln!(out, "declare ptr @sz_io_fail_cstr(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_sleep_ms(i64)").unwrap();
     writeln!(out, "declare ptr @sz_io_handle_error_with(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_attempt_as_result(ptr)").unwrap();
