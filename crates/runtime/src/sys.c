@@ -591,21 +591,28 @@ SzIo *sz_sys_kill(int64_t pid) {
 }
 
 static void *sys_getenv_result(void *env) {
-  SzString *key = (SzString *)env;
+  SzPair *p = (SzPair *)env;
+  SzString *key = p ? (SzString *)p->left : NULL;
   SysResult *r = (SysResult *)sz_alloc(sizeof(SysResult));
   const char *v;
   if (sz_testrt_sys_is_fake())
-    v = sz_testrt_env_get(sz_string_cstr(key));
+    v = sz_testrt_env_get(key ? sz_string_cstr(key) : "");
   else
-    v = getenv(sz_string_cstr(key));
+    v = getenv(key ? sz_string_cstr(key) : "");
   r->is_err = 0;
   r->as.ok = sz_string_from_cstr(v ? v : "");
-  sz_release(key);
+  sz_release(p);
   return r;
 }
 
 SzIo *sz_sys_getenv(SzString *key) {
+  SzPair *p;
   if (!key)
     sz_panic("sz_sys_getenv(null)");
-  return fm_drop(sz_io_delay(sys_getenv_result, key), unwrap_sys, NULL);
+  p = sz_pair_new(key, NULL);
+  {
+    SzIo *io = fm_drop(sz_io_delay(sys_getenv_result, p), unwrap_sys, NULL);
+    sz_release(p);
+    return io;
+  }
 }

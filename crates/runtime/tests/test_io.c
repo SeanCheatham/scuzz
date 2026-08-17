@@ -1676,6 +1676,17 @@ int main(void) {
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzString *key = sz_string_from_cstr("SCUZZ_LEFTOVER_GETENV");
+      SzIo *io = sz_sys_getenv(key);
+      sz_release(key);
+      sz_release(io);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
   }
 
   /* Stream — emit / eval / concat / evalMap / map / take / drop / filter / compileToList / drain */
@@ -2157,6 +2168,22 @@ int main(void) {
       r = sz_io_unsafe_run(sz_sys_getenv(sz_string_from_cstr("SCUZZ_KIT")));
       assert(r.ok);
       assert(strcmp(sz_string_cstr((SzString *)r.value), "sealed") == 0);
+      sz_release(r.value);
+
+      {
+        size_t base_bytes = 0, base_count = 0;
+        size_t live_bytes = 0, live_count = 0;
+        SzString *key;
+        sz_alloc_stats(&base_bytes, &base_count);
+        key = sz_string_from_cstr("SCUZZ_KIT");
+        r = sz_io_unsafe_run(sz_sys_getenv(key));
+        sz_release(key);
+        assert(r.ok);
+        sz_release(r.value);
+        sz_alloc_stats(&live_bytes, &live_count);
+        assert(live_count == base_count);
+        assert(live_bytes == base_bytes);
+      }
 
       /* Fake pid table: host pid is dead unless registered; kill never SIGTERM. */
       r = sz_io_unsafe_run(sz_sys_alive((int64_t)getpid()));
