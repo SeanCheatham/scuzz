@@ -235,7 +235,8 @@ SzIo *sz_io_repeat_n(int64_t n, SzIo *inner);
 SzIo *sz_io_retry_n(int64_t n, SzIo *inner);
 /* Fork inner onto the cooperative scheduler. Succeeds at once with a fiber handle. */
 SzIo *sz_fiber_fork(SzIo *inner);
-/* Park until the forked fiber succeeds (value) or fails / is interrupted. */
+/* Park until the forked fiber succeeds (value) or fails / is interrupted.
+ * Join retains the value so last-use does not free the fiber slot. */
 SzIo *sz_fiber_join(void *fiber);
 /* Cancel the fiber (ensure/Resource finalizers) and complete after it settles. */
 SzIo *sz_fiber_interrupt(void *fiber);

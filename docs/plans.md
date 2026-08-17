@@ -1,10 +1,10 @@
 # Short-term plan
 
-## Slice: Retain the Fiber.join result so join does not alias the fiber slot
+## Slice: Drop an owned IO.pure payload on last-use
 
-Queue / Ref / Deferred / Either / pair cells are RC and last-use drops them. `Fiber.join` still aliases `result_value`. `pure_drop` of that pointer does not give the joiner a distinct RC. Fiber free does not release the slot.
+Fiber.join retains a distinct result. The fiber slot keeps its own ref until free. `IO.pure` still aliases the payload: the IO node does not release it, and the compiler does not mark the payload owned.
 
-- Retain on complete so join and the fiber each hold a ref. Release `result_value` when the fiber frees.
-- Do not alias the slot after free. Join that needs a distinct RC retains first (same pattern as `Ref.get` / `Deferred.get`).
-- Proof: `test_io` fork/join then free returns alloc stats to baseline; compiler last-use drops an owned `Fiber.join` binder when it applies.
-- Out of scope: OS threads. Supervision trees.
+- Retain so last-use of an `IO.pure` binder can drop the payload without freeing a live IO slot, or transfer the retain to the run result and drop the node payload.
+- Do not alias the payload after the binder drops. Same pattern as `Ref.get` / `Fiber.join`.
+- Proof: `test_io` pure then last-use / free returns alloc stats to baseline; compiler last-use drops an owned `IO.pure` binder when it applies (`_ <- IO.pure("x")` / named bind).
+- Out of scope: OS threads. Panic leak.

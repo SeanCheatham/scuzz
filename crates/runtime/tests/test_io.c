@@ -1258,6 +1258,32 @@ int main(void) {
     assert((intptr_t)r.value == 42);
   }
 
+  /* Join retains a distinct RC. Fiber free drops the slot. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    r = sz_io_unsafe_run(fm_drop(
+        fork_drop(pure_drop(sz_string_from_cstr("join"))), fiber_join_cont,
+        NULL));
+    assert(r.ok);
+    assert(r.value && strcmp(sz_string_cstr((SzString *)r.value), "join") == 0);
+    sz_release(r.value);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    r = sz_io_unsafe_run(fm_drop(
+        fork_drop(pure_drop(sz_string_from_cstr("orphan"))), after_fork_ignore,
+        NULL));
+    assert(r.ok);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   /* Fiber.interrupt cancels a sleeper; join fails; Resource release runs. */
   {
     sz_testrt_install();

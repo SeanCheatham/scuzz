@@ -3869,7 +3869,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
-            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
         }
         "Fiber.interrupt" => {
             writeln!(
@@ -5422,6 +5422,32 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of inner {name} after Fiber.fork:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_fiber_join_releases_value() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    f <- Fiber.fork(IO.pure("ok"))
+    v <- Fiber.join(f)
+    _ <- IO.println(v)
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("call ptr @sz_fiber_join(ptr "),
+            "expected sz_fiber_join:\n{ir}"
+        );
+        assert!(
+            ir.contains("call ptr @sz_io_println(ptr %value)"),
+            "expected println of Fiber.join binder:\n{ir}"
+        );
+        assert!(
+            ir.contains("call void @sz_release(ptr %value)"),
+            "expected last-use release of Fiber.join binder %value:\n{ir}"
         );
     }
 
