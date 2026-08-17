@@ -99,6 +99,11 @@ static SzIo *retry_n_drop(int64_t n, SzIo *inner) {
   sz_release(inner);
   return io;
 }
+static SzIo *fork_drop(SzIo *inner) {
+  SzIo *io = sz_fiber_fork(inner);
+  sz_release(inner);
+  return io;
+}
 static SzIo *lang_use_ok(void *acquired, void *env) {
   (void)env;
   (void)acquired;
@@ -1109,7 +1114,7 @@ int main(void) {
     loop = sz_io_forever(body);
     sz_release(body);
     r = sz_io_unsafe_run(sz_io_flatmap(
-        sz_fiber_fork(loop), fiber_interrupt_then_join, NULL));
+        fork_drop(loop), fiber_interrupt_then_join, NULL));
     assert(r.ok);
     assert(lang_released == 1);
     sz_lang_resource_free(lr);
@@ -1120,7 +1125,7 @@ int main(void) {
   {
     SzIo *child = sz_io_pure((void *)(intptr_t)42);
     r = sz_io_unsafe_run(
-        sz_io_flatmap(sz_fiber_fork(child), fiber_join_cont, NULL));
+        sz_io_flatmap(fork_drop(child), fiber_join_cont, NULL));
     assert(r.ok);
     assert((intptr_t)r.value == 42);
   }
@@ -1131,7 +1136,7 @@ int main(void) {
     lang_released = 0;
     lr = lang_make_tok();
     r = sz_io_unsafe_run(sz_io_flatmap(
-        sz_fiber_fork(sz_lang_resource_use(lr, lang_use_sleep, NULL)),
+        fork_drop(sz_lang_resource_use(lr, lang_use_sleep, NULL)),
         fiber_interrupt_then_join, NULL));
     assert(r.ok);
     assert(lang_released == 1);
@@ -1144,8 +1149,7 @@ int main(void) {
     int64_t t0 = sz_clock_monotonic_ms_sync();
     int64_t t1;
     r = sz_io_unsafe_run(
-        sz_io_flatmap(sz_fiber_fork(sz_io_sleep_ms(300)), after_fork_ignore,
-                      NULL));
+        sz_io_flatmap(fork_drop(sz_io_sleep_ms(300)), after_fork_ignore, NULL));
     t1 = sz_clock_monotonic_ms_sync();
     assert(r.ok);
     assert(t1 - t0 < 80);

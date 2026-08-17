@@ -727,6 +727,7 @@ SzIo *sz_fiber_fork(SzIo *inner) {
   if (!inner)
     sz_panic("sz_fiber_fork(null)");
   SzIo *io = sz_io_new(SZ_IO_FORK);
+  sz_retain(inner);
   io->as.fork_inner = inner;
   return io;
 }
