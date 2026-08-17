@@ -984,6 +984,32 @@ int main(void) {
   assert(r.error && strstr(sz_string_cstr(r.error->message), "boom"));
   sz_error_free(r.error);
 
+  /* Leftover IO.fail errors drop on last-use / free. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzError *err;
+    SzIo *io;
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    r = sz_io_unsafe_run(fail_drop(sz_error_new(9, "boom")));
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "boom"));
+    sz_error_free(r.error);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    err = sz_error_new(1, "drop");
+    io = sz_io_fail(err);
+    sz_release(err);
+    sz_release(io);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   {
     SzError *err = sz_error_new(1, "boom");
     SzString *a = sz_error_message(err);
@@ -1258,6 +1284,20 @@ int main(void) {
   assert(r.ok);
   assert((intptr_t)r.value == 9);
   assert(retry_hits == 0);
+
+  /* Retry drops extra IO.fail retains; last error is the run result. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    r = sz_io_unsafe_run(retry_n_drop(2, sz_io_fail_cstr("boom")));
+    assert(!r.ok);
+    sz_error_free(r.error);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
 
   /* IO.forever: race loser when a sibling sleeper wins (TestRuntime). */
   {

@@ -320,6 +320,10 @@ void sz_release(void *ptr) {
       sz_release(io->as.pure_value);
       io->as.pure_value = NULL;
       break;
+    case SZ_IO_FAIL:
+      sz_error_free(io->as.fail);
+      io->as.fail = NULL;
+      break;
     default:
       break;
     }
@@ -1866,8 +1870,11 @@ static int step_fiber(Sched *s, Fiber *f) {
     park_sleep(s, f, cur->as.sleep_ms);
     return 0;
   case SZ_IO_FAIL: {
-    SzError *err =
-        cur->as.fail ? cur->as.fail : sz_error_new(3, "unknown failure");
+    SzError *err = cur->as.fail;
+    if (err)
+      sz_retain(err);
+    else
+      err = sz_error_new(3, "unknown failure");
     fiber_fail(s, f, err);
     return 0;
   }

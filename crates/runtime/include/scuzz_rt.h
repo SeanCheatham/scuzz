@@ -215,6 +215,9 @@ struct SzIo {
 SzIo *sz_io_pure(void *value);
 SzIo *sz_io_delay(SzThunk thunk, void *env);
 SzIo *sz_io_flatmap(SzIo *inner, SzCont cont, void *env);
+/* Callee retains the error. Caller drops after the call. Last sz_release of
+ * the IO node drops a leftover error. Run retains so fiber_fail does not
+ * free the node slot. */
 SzIo *sz_io_fail(SzError *err);
 SzIo *sz_io_fail_cstr(const char *msg);
 SzIo *sz_io_println(SzString *msg);

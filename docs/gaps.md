@@ -30,7 +30,7 @@ When a gap closes or its assessment changes, update this file. If direction chan
 ### Residuals
 
 - **Concurrency** — cooperative fibers only. Later: OS threads, supervision trees.
-- **Memory** — Headless pumps stay flat under alloc accounting. Last-use retain/release is locked in [`vision.md`](vision.md) GC. Values with no last-use stay allocated. Queue, Ref, Deferred, Either, pair, Fiber.join, and IO.pure results are RC; last-use drops the cell or the payload. The IO.fail error still aliases the IO slot. No cycle collector. Panic may leak.
+- **Memory** — Headless pumps stay flat under alloc accounting. Last-use retain/release is locked in [`vision.md`](vision.md) GC. Values with no last-use stay allocated. Queue, Ref, Deferred, Either, pair, Fiber.join, IO.pure, and IO.fail results are RC; last-use drops the cell, the payload, or the error. A delay env may leak if the delay node frees before the thunk runs. No cycle collector. Panic may leak.
 - **LSP / editor tooling** — `fmt`, `check --message-format=json`, `watch`, and `scuzz lsp` exist. LSP wraps `check` (didOpen/didChange overlay open buffers; didClose returns to disk). Positions are UTF-16. Hover, completion, and definition use that parse. Unknown methods return JSON-RPC `-32601`. JSON diagnostics stay the single schema. `check` reports more than one parse or type error per run.
 
 ### Dependency forms beyond `path`
