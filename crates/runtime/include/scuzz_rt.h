@@ -315,6 +315,7 @@ struct SzQueue {
 SzQueue *sz_queue_make(void);
 void sz_queue_free(SzQueue *q);
 SzIo *sz_queue_unbounded(void); /* IO[Queue] */
+/* Callee retains the value. Caller drops after the call. */
 SzIo *sz_queue_offer(SzQueue *q, void *value);
 SzIo *sz_queue_offer_cstr(SzQueue *q, const char *value);
 SzIo *sz_queue_take(SzQueue *q); /* IO[A]; parks when empty under the fiber scheduler */

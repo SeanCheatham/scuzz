@@ -52,12 +52,19 @@ SzIo *sz_queue_offer(SzQueue *q, void *value) {
     sz_panic("sz_queue_offer(null)");
   QOfferEnv *e = (QOfferEnv *)sz_alloc(sizeof(QOfferEnv));
   e->q = q;
+  sz_retain(value);
   e->value = value;
   return sz_io_delay(queue_offer_thunk, e);
 }
 
+static SzIo *queue_offer_drop(SzQueue *q, void *value) {
+  SzIo *io = sz_queue_offer(q, value);
+  sz_release(value);
+  return io;
+}
+
 SzIo *sz_queue_offer_cstr(SzQueue *q, const char *value) {
-  return sz_queue_offer(q, sz_string_from_cstr(value ? value : ""));
+  return queue_offer_drop(q, sz_string_from_cstr(value ? value : ""));
 }
 
 SzIo *sz_queue_take(SzQueue *q) {

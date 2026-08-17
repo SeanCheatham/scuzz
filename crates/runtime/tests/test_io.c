@@ -1278,6 +1278,16 @@ int main(void) {
     r = sz_io_unsafe_run(sz_queue_take(q));
     assert(r.ok);
     assert(strcmp(sz_string_cstr((SzString *)r.value), "x") == 0);
+
+    {
+      SzString *s = sz_string_from_cstr("y");
+      r = sz_io_unsafe_run(sz_queue_offer(q, s));
+      sz_release(s);
+      assert(r.ok);
+      r = sz_io_unsafe_run(sz_queue_take(q));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), "y") == 0);
+    }
     sz_queue_free(q);
   }
 
