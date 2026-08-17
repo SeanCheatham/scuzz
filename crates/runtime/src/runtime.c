@@ -689,6 +689,7 @@ SzIo *sz_io_timeout(int64_t ms, SzIo *inner) {
     sz_panic("sz_io_timeout(null)");
   SzIo *io = sz_io_new(SZ_IO_TIMEOUT);
   io->as.timeout.ms = ms < 0 ? 0 : ms;
+  sz_retain(inner);
   io->as.timeout.inner = inner;
   return io;
 }

@@ -104,6 +104,11 @@ static SzIo *fork_drop(SzIo *inner) {
   sz_release(inner);
   return io;
 }
+static SzIo *timeout_drop(int64_t ms, SzIo *inner) {
+  SzIo *io = sz_io_timeout(ms, inner);
+  sz_release(inner);
+  return io;
+}
 static SzIo *lang_use_ok(void *acquired, void *env) {
   (void)env;
   (void)acquired;
@@ -1006,7 +1011,7 @@ int main(void) {
   /* IO.timeout: inner wins and keeps its value. */
   {
     sz_testrt_install();
-    r = sz_io_unsafe_run(sz_io_timeout(50, sz_io_pure((void *)(intptr_t)7)));
+    r = sz_io_unsafe_run(timeout_drop(50, sz_io_pure((void *)(intptr_t)7)));
     assert(r.ok);
     assert((intptr_t)r.value == 7);
     sz_testrt_reset();
@@ -1015,7 +1020,7 @@ int main(void) {
   /* IO.timeout: inner failure is not rewritten as timeout. */
   {
     sz_testrt_install();
-    r = sz_io_unsafe_run(sz_io_timeout(50, sz_io_fail_cstr("boom")));
+    r = sz_io_unsafe_run(timeout_drop(50, sz_io_fail_cstr("boom")));
     assert(!r.ok);
     assert(r.error && strstr(sz_string_cstr(r.error->message), "boom") != NULL);
     sz_error_free(r.error);
@@ -1028,7 +1033,7 @@ int main(void) {
     lang_released = 0;
     lr = lang_make_tok();
     r = sz_io_unsafe_run(
-        sz_io_timeout(1, sz_lang_resource_use(lr, lang_use_sleep, NULL)));
+        timeout_drop(1, sz_lang_resource_use(lr, lang_use_sleep, NULL)));
     assert(!r.ok);
     assert(r.error && strstr(sz_string_cstr(r.error->message), "timeout") != NULL);
     assert(lang_released == 1);

@@ -1820,6 +1820,7 @@ fn emit_expr(
                 "  %{prefix}_timeout = call ptr @sz_io_timeout(i64 {ms_val}, ptr {iv})"
             )
             .unwrap();
+            writeln!(code, "  call void @sz_release(ptr {iv})").unwrap();
             io_emitted(code, format!("%{prefix}_timeout"), ie.payload)
         }
     }
@@ -5279,6 +5280,26 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of inner {name} after Fiber.fork:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_io_timeout_releases_inner() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    got <- IO.timeout(50, IO.pure("ok"))
+    _ <- IO.println(got)
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_io_timeout(i64 50, ptr ";
+        let at = ir.find(needle).expect("expected sz_io_timeout");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of inner {name} after IO.timeout:\n{ir}"
         );
     }
 

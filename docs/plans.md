@@ -1,10 +1,10 @@
 # Short-term plan
 
-## Slice: Drop owned inner IO after IO.timeout
+## Slice: Drop owned inner IO after IO.ensure
 
-`Fiber.fork` retains inner and drops the caller ref. `IO.timeout` stores inner without retain, so the inner graph can alias the timeout node.
+`IO.timeout` retains inner and drops the caller ref. `IO.ensure` stores inner and finalizer without retain, so those graphs can alias the ensure node.
 
-- Retain inner in `sz_io_timeout`.
-- Drop the caller ref after the call.
-- Proof: compiler IR for `IO.timeout(50, IO.pure("ok"))` shows `sz_release` of the inner after the call.
+- Retain inner and finalizer in `sz_io_ensure`.
+- Drop the caller refs after the call.
+- Proof: compiler IR for `IO.ensure(IO.pure("ok"), IO.println("fin"))` shows `sz_release` of inner and finalizer after the call.
 - Out of scope: OS threads.
