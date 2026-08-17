@@ -89,6 +89,11 @@ static SzLangResource *lang_make_tok(void) {
   sz_release(acq);
   return lr;
 }
+static SzIo *repeat_n_drop(int64_t n, SzIo *inner) {
+  SzIo *io = sz_io_repeat_n(n, inner);
+  sz_release(inner);
+  return io;
+}
 static SzIo *lang_use_ok(void *acquired, void *env) {
   (void)env;
   (void)acquired;
@@ -1024,23 +1029,23 @@ int main(void) {
 
   /* IO.repeatN: n extra runs after the first; last value wins. */
   delay_calls = 0;
-  r = sz_io_unsafe_run(sz_io_repeat_n(2, sz_io_delay(delay_inc, NULL)));
+  r = sz_io_unsafe_run(repeat_n_drop(2, sz_io_delay(delay_inc, NULL)));
   assert(r.ok);
   assert((intptr_t)r.value == 42);
   assert(delay_calls == 3);
 
   delay_calls = 0;
-  r = sz_io_unsafe_run(sz_io_repeat_n(0, sz_io_delay(delay_inc, NULL)));
+  r = sz_io_unsafe_run(repeat_n_drop(0, sz_io_delay(delay_inc, NULL)));
   assert(r.ok);
   assert(delay_calls == 1);
 
   delay_calls = 0;
-  r = sz_io_unsafe_run(sz_io_repeat_n(-3, sz_io_delay(delay_inc, NULL)));
+  r = sz_io_unsafe_run(repeat_n_drop(-3, sz_io_delay(delay_inc, NULL)));
   assert(r.ok);
   assert(delay_calls == 1);
 
   delay_calls = 0;
-  r = sz_io_unsafe_run(sz_io_repeat_n(5, sz_io_fail_cstr("boom")));
+  r = sz_io_unsafe_run(repeat_n_drop(5, sz_io_fail_cstr("boom")));
   assert(!r.ok);
   assert(delay_calls == 0);
   assert(r.error && strstr(sz_string_cstr(r.error->message), "boom") != NULL);
@@ -2565,7 +2570,7 @@ int main(void) {
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
-    r = sz_io_unsafe_run(sz_io_repeat_n(1, sz_io_pure(NULL)));
+    r = sz_io_unsafe_run(repeat_n_drop(1, sz_io_pure(NULL)));
     assert(r.ok);
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);

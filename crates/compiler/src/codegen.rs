@@ -3779,6 +3779,7 @@ fn emit_call(
                 "  %{prefix}_v = call ptr @sz_io_repeat_n(i64 {n}, ptr {iv})"
             )
             .unwrap();
+            writeln!(code, "  call void @sz_release(ptr {iv})").unwrap();
             io_emitted(code, format!("%{prefix}_v"), emitted_args[1].payload)
         }
         "IO.retryN" => {
@@ -5256,6 +5257,26 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of inner {name} after IO.forever:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_io_repeat_n_releases_inner() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n <- IO.repeatN(2, IO.pure("ok"))
+    _ <- IO.println(n)
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_io_repeat_n(i64 2, ptr ";
+        let at = ir.find(needle).expect("expected sz_io_repeat_n");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of inner {name} after IO.repeatN:\n{ir}"
         );
     }
 
