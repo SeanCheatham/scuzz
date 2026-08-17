@@ -200,7 +200,7 @@ void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
 
 /* --- SCUZZ_UI_SCRIPT playback (fuzz / replay) ---------------------------- */
 /* Line protocol, one event per line, delivered across pump boundaries:
-     tap <n>    tap the nth button, checkbox, radio, switch, chip, filter chip, choice chip, action chip, input chip, expansion, icon button, fab, outlined button, text button, checkbox list tile, switch list tile, radio list tile, ink well, or segmented (a11y preorder; [taps] in the dump); missing target is a no-op
+     tap <n>    activate the nth tap target in a11y preorder ([taps] in the dump); missing target is a no-op
      xy <x> <y> inject TAP at logical point; miss does not panic
      text <s>   replace the [fields] starred TextField with <s>; no field is a no-op
      text <n> <s>  replace dump-index n (a11y order); `text 0` is still payload "0"
@@ -217,41 +217,12 @@ void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
 static void script_tap(SzUiSession *session, int n) {
   SzView *buttons[64];
   int count = sz_ui_collect_buttons(session, buttons, 64);
-  SzInputEvent tap;
-  SzRect fr;
-  float x, y;
-  int w = sz_ui_session_width(session);
-  int h = sz_ui_session_height(session);
   if (n < 0 || n >= count) {
     fprintf(stderr, "scuzz: script tap %d skipped (%d buttons)\n", n, count);
     return;
   }
-  fr = sz_view_frame(buttons[n]);
-  x = fr.x + fr.w * 0.5f;
-  y = fr.y + fr.h * 0.5f;
-  /* Clamp into the session viewport so partially-offscreen controls still tap. */
-  if (x < 0.f)
-    x = 0.f;
-  if (y < 0.f)
-    y = 0.f;
-  if (w > 0 && x >= (float)w)
-    x = (float)w - 1.f;
-  if (h > 0 && y >= (float)h)
-    y = (float)h - 1.f;
-  if (x < fr.x)
-    x = fr.x + 1.f;
-  if (y < fr.y)
-    y = fr.y + 1.f;
-  if (x >= fr.x + fr.w)
-    x = fr.x + fr.w - 1.f;
-  if (y >= fr.y + fr.h)
-    y = fr.y + fr.h - 1.f;
-  memset(&tap, 0, sizeof(tap));
-  tap.kind = SZ_INPUT_TAP;
-  tap.x = x;
-  tap.y = y;
-  if (!sz_ui_inject_sync(session, &tap))
-    sz_panic("Ui.run: script tap inject failed");
+  if (!sz_ui_session_activate_view(session, buttons[n]))
+    sz_panic("Ui.run: script tap activate failed");
 }
 
 static void script_xy(SzUiSession *session, float x, float y) {

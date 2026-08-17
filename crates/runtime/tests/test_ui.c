@@ -4247,6 +4247,36 @@ static void test_tap_collect_tree_order(void) {
   sz_signal_int_free(b);
 }
 
+static void test_activate_offscreen_button(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *hits[8];
+  SzSignalInt *sig;
+  int n;
+
+  sig = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_button("Top", counter_tap, sig));
+  sz_view_add_child(root, sz_view_sized(40, 400, sz_view_text("pad")));
+  sz_view_add_child(root, sz_view_button("Low", counter_tap, sig));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  n = sz_view_collect_tap_targets(sz_ui_session_root(session), hits, 8);
+  assert(n == 2);
+  assert(strcmp(sz_view_a11y_label(hits[1]), "Low") == 0);
+  assert(sz_ui_session_activate_view(session, hits[1]));
+  assert(sz_signal_int_get(sig) == 1);
+  sz_ui_unmount(session);
+  sz_signal_int_free(sig);
+}
+
 static void test_checkbox_in_taps_dump(void) {
   SzUiConfig cfg;
   SzUiSession *session;
@@ -12470,6 +12500,7 @@ int main(void) {
   test_checkbox_hit_test();
   test_checkbox_paint_off_on();
   test_tap_collect_tree_order();
+  test_activate_offscreen_button();
   test_checkbox_in_taps_dump();
   test_switch_sizes();
   test_switch_a11y_off_on();

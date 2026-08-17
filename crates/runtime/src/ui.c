@@ -1061,6 +1061,24 @@ int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event) {
   }
 }
 
+int sz_ui_session_activate_view(SzUiSession *session, SzView *target) {
+  SzRect fr;
+  float x, y;
+  if (!session || !target || !session->root)
+    return 0;
+  sz_view_layout(session->root, (float)session->cfg.width,
+                 (float)session->cfg.height, session->theme);
+  fr = sz_view_frame(target);
+  x = fr.x + fr.w * 0.5f;
+  y = fr.y + fr.h * 0.5f;
+  if (!sz_view_activate(session->root, target, x, y))
+    return 0;
+  session_set_last_hit(session, x, y, target);
+  sync_keyboard(session);
+  session->dirty = 1;
+  return 1;
+}
+
 int sz_ui_snapshot_png_bytes(SzUiSession *session, uint8_t **out, size_t *out_len) {
   if (!session || !out || !out_len)
     return 0;

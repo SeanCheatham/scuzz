@@ -365,6 +365,11 @@ int sz_view_slider_set_at(SzView *view, float x);
 /* Layout + hit-test (also run inside pump / inject). */
 void sz_view_layout(SzView *root, float width, float height, const SzTheme *theme);
 SzView *sz_view_hit_test(SzView *root, float x, float y);
+int sz_view_handle_tap(SzView *root, float x, float y);
+/* Fire the tap handler on `target` (no hit-test). Slider / segmented use x. */
+int sz_view_activate(SzView *root, SzView *target, float x, float y);
+/* Layout + activate `target` and mark the session dirty (script `tap N`). */
+int sz_ui_session_activate_view(SzUiSession *session, SzView *target);
 /* Append to focused TextField, or chop one byte when backspace != 0. */
 int sz_view_handle_text_edit(SzView *root, const char *text, int backspace);
 

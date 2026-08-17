@@ -3573,13 +3573,10 @@ SzRect sz_view_caret_rect(SzView *root, const SzTheme *theme) {
   return z;
 }
 
-int sz_view_handle_tap(SzView *root, float x, float y) {
-  SzView *hit;
-  if (!root)
+int sz_view_activate(SzView *root, SzView *hit, float x, float y) {
+  if (!root || !hit)
     return 0;
-  hit = sz_view_hit_test(root, x, y);
-  if (!hit)
-    return 0;
+  (void)y;
   if ((hit->kind == SZ_VIEW_BUTTON || hit->kind == SZ_VIEW_ICON_BUTTON ||
        hit->kind == SZ_VIEW_FAB || hit->kind == SZ_VIEW_OUTLINED_BUTTON ||
        hit->kind == SZ_VIEW_TEXT_BUTTON || hit->kind == SZ_VIEW_ACTION_CHIP ||
@@ -3618,6 +3615,16 @@ int sz_view_handle_tap(SzView *root, float x, float y) {
     return 1;
   }
   return 0;
+}
+
+int sz_view_handle_tap(SzView *root, float x, float y) {
+  SzView *hit;
+  if (!root)
+    return 0;
+  hit = sz_view_hit_test(root, x, y);
+  if (!hit)
+    return 0;
+  return sz_view_activate(root, hit, x, y);
 }
 
 static int collect_text_fields_node(SzView *v, SzView **out, int cap, int n) {
