@@ -1266,6 +1266,27 @@ int main(void) {
     r = sz_io_unsafe_run(sz_deferred_get(def));
     assert(r.ok);
     assert(strcmp(sz_string_cstr((SzString *)r.value), "ok") == 0);
+
+    {
+      SzDeferred *d2 = sz_deferred_make();
+      SzString *s = sz_string_from_cstr("y");
+      r = sz_io_unsafe_run(sz_deferred_complete(d2, s));
+      sz_release(s);
+      assert(r.ok);
+      r = sz_io_unsafe_run(sz_deferred_get(d2));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), "y") == 0);
+      {
+        SzString *late = sz_string_from_cstr("z");
+        r = sz_io_unsafe_run(sz_deferred_complete(d2, late));
+        sz_release(late);
+        assert(r.ok);
+      }
+      r = sz_io_unsafe_run(sz_deferred_get(d2));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), "y") == 0);
+      sz_deferred_free(d2);
+    }
     sz_deferred_free(def);
   }
 

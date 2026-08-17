@@ -3792,6 +3792,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Deferred.get" => {
@@ -5592,6 +5593,30 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at + close..].contains(&format!("call void @sz_release(ptr {value})")),
             "expected last-use release of value {value} after Queue.offer:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_deferred_complete_releases_value() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    d <- Deferred.empty()
+    _ <- Deferred.complete(d, "a")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_deferred_complete(ptr ";
+        let at = ir.find(needle).expect("expected sz_deferred_complete");
+        let close = ir[at..]
+            .find(')')
+            .expect("expected sz_deferred_complete call close");
+        let value = ir[at..at + close].rsplit("ptr ").next().unwrap().trim();
+        assert_ne!(value, "null", "expected a value, not null:\n{ir}");
+        assert!(
+            ir[at + close..].contains(&format!("call void @sz_release(ptr {value})")),
+            "expected last-use release of value {value} after Deferred.complete:\n{ir}"
         );
     }
 

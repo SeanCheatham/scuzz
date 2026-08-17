@@ -31,7 +31,8 @@ static void *deferred_complete_thunk(void *env) {
     e->d->ok = 1;
     e->d->value = e->value;
     sz_fiber_wake_deferred(e->d);
-  }
+  } else
+    sz_release(e->value);
   sz_free(e);
   return NULL;
 }
@@ -41,12 +42,19 @@ SzIo *sz_deferred_complete(SzDeferred *d, void *value) {
     sz_panic("sz_deferred_complete(null)");
   DefCompleteEnv *e = (DefCompleteEnv *)sz_alloc(sizeof(DefCompleteEnv));
   e->d = d;
+  sz_retain(value);
   e->value = value;
   return sz_io_delay(deferred_complete_thunk, e);
 }
 
+static SzIo *deferred_complete_drop(SzDeferred *d, void *value) {
+  SzIo *io = sz_deferred_complete(d, value);
+  sz_release(value);
+  return io;
+}
+
 SzIo *sz_deferred_complete_cstr(SzDeferred *d, const char *value) {
-  return sz_deferred_complete(d, sz_string_from_cstr(value ? value : ""));
+  return deferred_complete_drop(d, sz_string_from_cstr(value ? value : ""));
 }
 
 SzIo *sz_deferred_get(SzDeferred *d) {
