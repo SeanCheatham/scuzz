@@ -848,17 +848,17 @@ static SzIo *recover_unit(SzError *err, void *env) {
 }
 
 static SzIo *after_ref_get(void *value, void *env) {
-  (void)env;
   SzString *s = (SzString *)value;
   assert(s && strcmp(sz_string_cstr(s), "b") == 0);
   sz_release(value);
+  sz_ref_free((SzRef *)env);
   return pure_drop(NULL);
 }
 
 static SzIo *after_ref_set(void *value, void *env) {
   (void)value;
   SzRef *r = (SzRef *)env;
-  return fm_drop(sz_ref_get(r), after_ref_get, NULL);
+  return fm_drop(sz_ref_get(r), after_ref_get, r);
 }
 
 static SzIo *after_ref(void *value, void *env) {
@@ -1262,6 +1262,7 @@ int main(void) {
     assert(strcmp(sz_string_cstr((SzString *)r.value), "b") == 0);
     sz_release(r.value);
     assert(strcmp(sz_string_cstr((SzString *)ref->value), "b") == 0);
+    sz_ref_free(ref);
   }
 
   /* Deferred */
@@ -1324,6 +1325,59 @@ int main(void) {
       sz_release(r.value);
     }
     sz_queue_free(q);
+  }
+
+  /* Leftover Queue / Ref / Deferred payloads drop on free. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzQueue *q;
+    SzRef *ref;
+    SzDeferred *def;
+    SzString *s;
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    q = sz_queue_make();
+    r = sz_io_unsafe_run(sz_queue_offer_cstr(q, "leftover"));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_queue_offer_cstr(q, "also"));
+    assert(r.ok);
+    assert(sz_queue_size(q) == 2);
+    sz_queue_free(q);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    s = sz_string_from_cstr("keep");
+    ref = sz_ref_make(s);
+    sz_release(s);
+    {
+      SzString *n = sz_string_from_cstr("next");
+      r = sz_io_unsafe_run(sz_ref_set(ref, n));
+      sz_release(n);
+      assert(r.ok);
+    }
+    sz_ref_free(ref);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    def = sz_deferred_make();
+    sz_deferred_free(def);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    def = sz_deferred_make();
+    r = sz_io_unsafe_run(sz_deferred_complete_cstr(def, "done"));
+    assert(r.ok);
+    sz_deferred_free(def);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
   }
 
   /* Stream — emit / eval / concat / evalMap / map / take / drop / filter / compileToList / drain */

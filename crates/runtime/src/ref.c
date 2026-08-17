@@ -7,6 +7,13 @@ SzRef *sz_ref_make(void *initial) {
   return r;
 }
 
+void sz_ref_free(SzRef *r) {
+  if (!r)
+    return;
+  sz_release(r->value);
+  sz_free(r);
+}
+
 static SzRef *ref_make_drop(void *initial) {
   SzRef *r = sz_ref_make(initial);
   sz_release(initial);

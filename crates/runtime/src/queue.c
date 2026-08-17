@@ -8,8 +8,11 @@ SzQueue *sz_queue_make(void) {
 }
 
 void sz_queue_free(SzQueue *q) {
+  size_t i;
   if (!q)
     return;
+  for (i = 0; i < q->len; i++)
+    sz_release(q->items[i]);
   sz_free(q->items);
   sz_free(q);
 }

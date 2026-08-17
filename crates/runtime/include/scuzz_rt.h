@@ -272,6 +272,8 @@ struct SzRef {
 
 /* Callee retains the initial value. Caller drops after the call. */
 SzRef *sz_ref_make(void *initial);
+/* Release the current value, then free the cell. */
+void sz_ref_free(SzRef *r);
 SzIo *sz_ref_of(void *initial);          /* IO[Ref] */
 SzIo *sz_ref_of_cstr(const char *initial);
 /* Get retains the current value. Caller drops the run result. */
@@ -290,6 +292,7 @@ struct SzDeferred {
 };
 
 SzDeferred *sz_deferred_make(void);
+/* Release a completed value (and a failed error), then free the cell. */
 void sz_deferred_free(SzDeferred *d);
 SzIo *sz_deferred_empty(void); /* IO[Deferred] */
 /* Callee retains the value. Caller drops after the call. */
@@ -307,6 +310,7 @@ struct SzQueue {
 };
 
 SzQueue *sz_queue_make(void);
+/* Release leftover items, then free the queue. */
 void sz_queue_free(SzQueue *q);
 SzIo *sz_queue_unbounded(void); /* IO[Queue] */
 /* Callee retains the value. Caller drops after the call. */

@@ -1,11 +1,10 @@
 # Short-term plan
 
-## Slice: Release leftover Queue, Ref, and Deferred payloads on free
+## Slice: Drop Queue, Ref, and Deferred cells after last use
 
-`Queue.take` now transfers the offer retain. Items that stay in the queue still leak when the queue frees. Ref and Deferred keep the same leftover-payload leak.
+`sz_queue_free` / `sz_ref_free` / `sz_deferred_free` now release leftover payloads. Compiled programs still leak the cells: `Queue.unbounded`, `Ref.of`, and `Deferred.empty` mark the handle borrowed, so last-use never frees it.
 
-- `sz_queue_free` releases remaining items. Do not retain again.
-- Add `sz_ref_free`. Release the current value, then free the cell.
-- `sz_deferred_free` already drops a failed error. Also release a completed value.
-- Proof: `test_io` offers without take, then frees; get after Ref/Deferred free is out of scope. Alloc accounting stays flat across offer-then-free.
-- Out of scope: OS threads. Making Queue RC. Releasing Either or pair fields (those still alias the run result).
+- Mark those IO payloads owned so a last-use drops the handle (`sz_queue_free` / `sz_ref_free` / `sz_deferred_free`).
+- Do not retain the handle again. The constructor result is the owned cell.
+- Proof: compiler IR releases the binder after last use; `test_io` already proves free drops leftover payloads.
+- Out of scope: OS threads. Making Queue RC. Releasing Either or pair fields.

@@ -7,7 +7,9 @@ SzDeferred *sz_deferred_make(void) {
 void sz_deferred_free(SzDeferred *d) {
   if (!d)
     return;
-  if (d->completed && !d->ok && d->error)
+  if (d->completed && d->ok)
+    sz_release(d->value);
+  else if (d->completed && !d->ok && d->error)
     sz_error_free(d->error);
   sz_free(d);
 }
