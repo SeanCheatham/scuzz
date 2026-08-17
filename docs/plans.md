@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Drop leftover Net.serve pack retains
+## Slice: Drop leftover Resource.use pack retains
 
-`Sys.exec` keeps the command in a pair until start. Unused exec drops leftover command retains. `Net.serve` still uses a malloc `ServeSt` pack that holds the handler env. Last-use `sz_free`s the pack and leaks that env.
+`Net.serve` keeps the handler env in a pair until start. Unused serve drops leftover env retains. `Resource.use` still holds the resource and use env in a pack. Last-use of an unused use IO frees the pack and leaks those retains.
 
-- Keep the handler env in a pair (same shape as `Net.httpGet`) so last-use of the unused serve IO drops leftover env retains. Steal on run so the live path can still own listen sockets.
-- Proof: `test_io` unused `sz_net_serve` / `sz_net_serve_once` then `sz_release` of the IO returns alloc stats to baseline.
+- Keep the use env in a pair (same shape as `Net.serve`) so last-use of the unused use IO drops leftover env retains. Steal on run so acquire still owns the resource.
+- Proof: `test_io` unused `sz_lang_resource_use` then `sz_release` of the IO returns alloc stats to baseline.
 - Out of scope: OS threads. Panic leak.

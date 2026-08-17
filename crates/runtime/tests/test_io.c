@@ -1646,6 +1646,19 @@ int main(void) {
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzString *henv = sz_string_from_cstr("henv");
+      SzIo *once = sz_net_serve_once(8080, serve_path_ok, henv);
+      SzIo *loop = sz_net_serve(8080, serve_path_ok, henv);
+      sz_release(henv);
+      sz_release(once);
+      sz_release(loop);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
   }
 
   /* Stream — emit / eval / concat / evalMap / map / take / drop / filter / compileToList / drain */

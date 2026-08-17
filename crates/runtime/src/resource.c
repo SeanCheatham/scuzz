@@ -35,7 +35,6 @@ static SzIo *lang_fin_free_ok(void *ignored, void *env) {
   st->use_env = NULL;
   sz_release(st->res);
   st->res = NULL;
-  sz_free(st);
   return pure_drop(NULL);
 }
 
@@ -45,7 +44,6 @@ static SzIo *lang_fin_free_err(SzError *err, void *env) {
   st->use_env = NULL;
   sz_release(st->res);
   st->res = NULL;
-  sz_free(st);
   return fail_drop(err);
 }
 
@@ -82,16 +80,24 @@ SzLangResource *sz_lang_resource_make(SzIo *acquire, SzCont release,
 }
 
 SzIo *sz_lang_resource_use(SzLangResource *res, SzCont use, void *use_env) {
+  LangResSt *st;
   if (!res || !use)
     sz_panic("sz_lang_resource_use(null)");
-  LangResSt *st = (LangResSt *)sz_alloc_zero(sizeof(LangResSt));
+  /* BOX last-release is sz_free. HANDLE last-use must not sz_release a
+   * leftover malloc pack (freed memory can look like RC). */
+  st = (LangResSt *)sz_rc_alloc(sizeof(LangResSt), SZ_RC_BOX);
+  memset(st, 0, sizeof(LangResSt));
   st->res = res;
   st->use = use;
   sz_retain(res);
   sz_retain(use_env);
   st->use_env = use_env;
   sz_retain(res->acquire);
-  return fm_drop(res->acquire, lang_after_acquire, st);
+  {
+    SzIo *io = fm_drop(res->acquire, lang_after_acquire, st);
+    sz_release(st);
+    return io;
+  }
 }
 
 void sz_lang_resource_free(SzLangResource *res) { sz_release(res); }
