@@ -39,6 +39,12 @@ static SzEither *either_left_drop(SzError *err) {
   return e;
 }
 
+static SzEither *either_right_drop(void *value) {
+  SzEither *e = sz_either_right(value);
+  sz_release(value);
+  return e;
+}
+
 static SzIo *attempt_drop(SzIo *inner) {
   SzIo *io = sz_io_attempt(inner);
   sz_release(inner);
@@ -544,6 +550,7 @@ int32_t sz_error_code(const SzError *err) { return err ? err->code : 0; }
 SzEither *sz_either_right(void *value) {
   SzEither *e = (SzEither *)sz_alloc_zero(sizeof(SzEither));
   e->is_right = 1;
+  sz_retain(value);
   e->as.right = value;
   return e;
 }
@@ -1018,7 +1025,7 @@ static void cont_free_all(ContFrame *stack) {
 /* Attempt success continuation: wrap value as Right. */
 static SzIo *attempt_ok(void *value, void *env) {
   (void)env;
-  return pure_drop(sz_either_right(value));
+  return pure_drop(either_right_drop(value));
 }
 
 static SzIo *attempt_err(SzError *err, void *env) {

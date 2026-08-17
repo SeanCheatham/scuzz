@@ -998,6 +998,15 @@ int main(void) {
     sz_either_free(e);
   }
 
+  {
+    SzString *s = sz_string_from_cstr("ok");
+    SzEither *e = sz_either_right(s);
+    sz_release(s);
+    assert(e && e->is_right);
+    assert(e->as.right && strcmp(sz_string_cstr((SzString *)e->as.right), "ok") == 0);
+    sz_either_free(e);
+  }
+
   /* Resource.make / use (IO acquire + IO release) */
   lang_released = 0;
   SzLangResource *lr = lang_make_tok();

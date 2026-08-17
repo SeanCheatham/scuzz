@@ -94,6 +94,7 @@ typedef struct SzEither {
   } as;
 } SzEither;
 
+/* Callee retains the value. Caller drops after the call. */
 SzEither *sz_either_right(void *value);
 /* Callee retains the error. Caller drops after the call. */
 SzEither *sz_either_left(SzError *err);
