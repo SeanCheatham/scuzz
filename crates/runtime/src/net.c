@@ -512,7 +512,6 @@ static void get_free(GetSt *st) {
   sz_free(st->acc);
   sz_release(st->url);
   st->url = NULL;
-  sz_free(st);
 }
 
 static void *get_start(void *env) {
@@ -1065,7 +1064,8 @@ static SzIo *get_after_dispatch(void *value, void *env) {
   SzIo *io;
   if ((intptr_t)value)
     return sz_testrt_net_http_get(url);
-  st = (GetSt *)sz_alloc_zero(sizeof(GetSt));
+  st = (GetSt *)sz_rc_alloc(sizeof(GetSt), SZ_RC_BOX);
+  memset(st, 0, sizeof(GetSt));
   sz_retain(url);
   st->url = url;
   st->fd = -1;
@@ -1074,7 +1074,11 @@ static SzIo *get_after_dispatch(void *value, void *env) {
   st->dns_fd = -1;
   io = fm_drop(sz_io_delay(get_start, st), get_after_start, st);
   io = fm_drop(io, get_after_connect, st);
-  return handle_drop(io, get_on_err, st);
+  {
+    SzIo *handled = handle_drop(io, get_on_err, st);
+    sz_release(st);
+    return handled;
+  }
 }
 
 SzIo *sz_net_http_get(SzString *url) {

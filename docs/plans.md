@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Keep Net.httpGet live pack RC
+## Slice: Drop leftover Sys.getenv unused key retains
 
-`Sys.exec` live pack is RC so HANDLE last-use drops the pack. `Net.httpGet` still mallocs `GetSt`. `get_free` frees it while HANDLE still holds the pointer. Freed memory can look like RC.
+`Net.httpGet` live pack is RC so HANDLE last-use drops the pack. `Sys.getenv` keeps the key as delay env. Unused getenv should drop leftover key retains. Prove it.
 
-- Keep `GetSt` RC (same shape as the live Sys.exec pack) so HANDLE last-use drops the pack. Do not `sz_free` in `get_free`.
-- Proof: `test_io` unused `sz_net_http_get` stays at baseline. A stub get under TestRuntime returns to alloc baseline after the result is dropped.
+- Keep the key as the delay env (already RC). Last-use of the unused getenv IO drops leftover key retains.
+- Proof: `test_io` unused `sz_sys_getenv` then `sz_release` of the IO returns alloc stats to baseline. A run under TestRuntime also returns to baseline after the result is dropped.
 - Out of scope: OS threads. Panic leak.

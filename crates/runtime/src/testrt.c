@@ -152,9 +152,18 @@ static SzIo *unwrap_box(void *value, void *env) {
   BoxResult *r = (BoxResult *)value;
   if (!r)
     return sz_io_fail_cstr("TestRuntime: null result");
-  if (r->is_err)
-    return fail_drop(r->as.err);
-  return pure_drop(r->as.ok);
+  if (r->is_err) {
+    SzError *err = r->as.err;
+    r->as.err = NULL;
+    sz_free(r);
+    return fail_drop(err);
+  }
+  {
+    void *ok = r->as.ok;
+    r->as.ok = NULL;
+    sz_free(r);
+    return pure_drop(ok);
+  }
 }
 
 static void *mem_read(void *env) {

@@ -2063,6 +2063,19 @@ int main(void) {
         sz_net_http_get(sz_string_from_cstr("http://example.test/ping")));
     assert(r.ok);
     assert(strcmp(sz_string_cstr((SzString *)r.value), "pong") == 0);
+    sz_release(r.value);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzString *url = sz_string_from_cstr("http://example.test/ping");
+      r = sz_io_unsafe_run(sz_net_http_get(url));
+      sz_release(url);
+      assert(r.ok);
+      sz_release(r.value);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
 
     sz_testrt_net_inject_request("/hello");
     r = sz_io_unsafe_run(sz_net_serve_once(8080, serve_path_ok, NULL));
