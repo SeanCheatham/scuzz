@@ -2388,6 +2388,31 @@ int main(void) {
     sz_string_free(b);
   }
 
+  /* List.append retains the element. The caller drops their ref. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *a;
+    SzString *b;
+    SzList *xs;
+    SzList *ys;
+    sz_alloc_stats(&base_bytes, &base_count);
+    a = sz_string_from_cstr("milk");
+    b = sz_string_from_cstr("f");
+    xs = sz_list_cons(a, sz_list_nil());
+    ys = sz_list_append(xs, b);
+    sz_release(xs);
+    assert(sz_list_len(ys) == 2);
+    assert(ys->head == a);
+    assert(ys->tail && ys->tail->head == b);
+    sz_list_free(ys);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   /* List.setAt: replace in bounds; past-end and negative keep the list. */
   {
     SzString *a = sz_string_from_cstr("a");

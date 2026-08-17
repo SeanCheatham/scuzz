@@ -363,6 +363,7 @@ SzList *sz_list_tail(const SzList *xs);
 size_t sz_list_len(const SzList *xs);
 void *sz_list_at(const SzList *xs, size_t index);
 SzList *sz_list_reverse(SzList *xs);
+/* Copy the spine and retain `x` (same as cons). Drop an owned `x` after. */
 SzList *sz_list_append(SzList *xs, void *x);
 SzList *sz_list_set_at(SzList *xs, int64_t index, void *v);
 /* Keep heads for which `pred` is nonzero. New spine; cons retains heads. */

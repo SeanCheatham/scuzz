@@ -72,5 +72,12 @@ pub fn run_testrt(
     let status = cmd
         .status()
         .with_context(|| format!("running {}", exe.display()))?;
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::ExitStatusExt;
+        if let Some(sig) = status.signal() {
+            eprintln!("scuzz: testrt killed by signal {sig}");
+        }
+    }
     Ok(status.code().unwrap_or(1))
 }

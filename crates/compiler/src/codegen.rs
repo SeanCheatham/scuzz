@@ -3332,6 +3332,11 @@ fn emit_call(
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
+            if emitted_args[1].kind == Kind::Int || emitted_args[1].kind == Kind::Float {
+                writeln!(code, "  call void @sz_release(ptr {elem})").unwrap();
+            } else {
+                drop_owned_ptr(&mut code, &emitted_args[1]);
+            }
             owned_ptr(code, format!("%{prefix}_v"))
         }
         "List.setAt" => {
@@ -5468,6 +5473,51 @@ def id(m: Map[String, String]): Map[String, String] = m
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_list_map"));
         assert!(ir.contains("sz_smap_"));
+    }
+
+    #[test]
+    fn emit_list_append_drops_owned_elem() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.append(["milk"], Str.trim(" f ")), ","))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let at = ir
+            .find("call ptr @sz_list_append")
+            .expect("expected sz_list_append");
+        assert!(
+            ir[at..].contains("sz_release"),
+            "expected last-use release after List.append:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_append_binder_release() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    d = Str.trim(" f ")
+    xs = List.append(["milk"], d)
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_list_append(ptr ";
+        let at = ir.find(needle).expect("expected sz_list_append");
+        let rest = ir[at + needle.len()..].split(')').next().unwrap();
+        let elem = rest
+            .split(',')
+            .nth(1)
+            .unwrap()
+            .trim()
+            .trim_start_matches("ptr ")
+            .trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {elem})")),
+            "expected binder release of append element {elem}:\n{ir}"
+        );
     }
 
     #[test]

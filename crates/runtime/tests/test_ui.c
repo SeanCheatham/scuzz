@@ -11941,6 +11941,7 @@ static void test_signal_list_spine_collect(void) {
   SzSignalList *items;
   SzList *xs;
   SzString *first;
+  SzString *x;
   size_t origin_count = 0, origin_bytes = 0;
   size_t base_count = 0, base_bytes = 0;
   size_t live_count = 0, live_bytes = 0;
@@ -11955,7 +11956,9 @@ static void test_signal_list_spine_collect(void) {
   sz_alloc_stats(&base_bytes, &base_count);
   /* Append copies the spine; set frees the unshared previous spine. */
   for (i = 0; i < 30; i++) {
-    xs = sz_list_append(sz_signal_list_get(items), sz_string_from_cstr("x"));
+    x = sz_string_from_cstr("x");
+    xs = sz_list_append(sz_signal_list_get(items), x);
+    sz_release(x);
     sz_signal_list_set(items, xs);
     sz_release(xs);
   }

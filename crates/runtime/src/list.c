@@ -65,12 +65,11 @@ SzList *sz_list_reverse(SzList *xs) {
   return acc;
 }
 
+/* Copy the spine and retain `x` (same as cons). The caller drops an owned
+ * `x` after the call. */
 SzList *sz_list_append(SzList *xs, void *x) {
-  if (!xs) {
-    SzList *n = sz_list_cons(x, NULL);
-    sz_release(x);
-    return n;
-  }
+  if (!xs)
+    return sz_list_cons(x, NULL);
   return sz_list_cons_take(xs->head, sz_list_append(xs->tail, x));
 }
 

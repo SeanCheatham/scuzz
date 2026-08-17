@@ -483,6 +483,15 @@ fn fuzz_fail(
         project_dir.display(),
         repro.display()
     );
+    {
+        let dump = std::fs::read_to_string(fuzz_dir.join("dump.txt")).unwrap_or_default();
+        if !dump.is_empty() {
+            println!("last dump:");
+            for line in dump.lines().take(80) {
+                println!("  {line}");
+            }
+        }
+    }
     let _ = write_fuzz_summary(
         fuzz_dir,
         project_dir,
