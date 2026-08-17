@@ -335,7 +335,13 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "entry:").unwrap();
     emit_driver_registers(&mut out, program, &strs);
     out.push_str(&body_expr.code);
-    let io_val = ensure_io(&mut out, body_expr.kind, &body_expr.value, "wrapped");
+    let io_val = ensure_io(
+        &mut out,
+        body_expr.kind,
+        &body_expr.value,
+        "wrapped",
+        body_expr.owned,
+    );
     writeln!(
         out,
         "  %rc = call i32 @sz_runtime_main_args(ptr {io_val}, i32 %argc, ptr %argv)"
@@ -719,7 +725,7 @@ fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
     let ret_kind = kind_of_type(&def.ret);
     match ret_kind {
         Kind::Io => {
-            let io = ensure_io(out, body.kind, &body.value, "ret_wrap");
+            let io = ensure_io(out, body.kind, &body.value, "ret_wrap", body.owned);
             writeln!(out, "  ret ptr {io}").unwrap();
         }
         Kind::Int => {
@@ -882,7 +888,7 @@ fn emit_law_drive_tramp(out: &mut String, d: &FunDef, strs: &[String], tramp: &s
     writeln!(out, "}}").unwrap();
 }
 
-fn ensure_io(code: &mut String, kind: Kind, value: &str, tmp: &str) -> String {
+fn ensure_io(code: &mut String, kind: Kind, value: &str, tmp: &str, owned: bool) -> String {
     if kind == Kind::Io {
         return value.to_string();
     }
@@ -892,6 +898,11 @@ fn ensure_io(code: &mut String, kind: Kind, value: &str, tmp: &str) -> String {
         value.to_string()
     };
     writeln!(code, "  %{tmp} = call ptr @sz_io_pure(ptr {ptr})").unwrap();
+    if kind == Kind::Int || kind == Kind::Float {
+        writeln!(code, "  call void @sz_release(ptr {ptr})").unwrap();
+    } else if owned && kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {value})").unwrap();
+    }
     format!("%{tmp}")
 }
 
@@ -1395,9 +1406,14 @@ fn emit_expr(
             let ptr = if ie.kind == Kind::Int || ie.kind == Kind::Float {
                 box_numeric(&mut code, ie.kind, &ie.value, &format!("{prefix}_box"))
             } else {
-                ie.value
+                ie.value.clone()
             };
             writeln!(code, "  %{prefix}_io = call ptr @sz_io_pure(ptr {ptr})").unwrap();
+            if ie.kind == Kind::Int || ie.kind == Kind::Float {
+                writeln!(code, "  call void @sz_release(ptr {ptr})").unwrap();
+            } else if ie.owned && ie.kind == Kind::Ptr {
+                writeln!(code, "  call void @sz_release(ptr {})", ie.value).unwrap();
+            }
             let payload = if ie.kind == Kind::Io {
                 ie.payload
             } else {
@@ -1672,6 +1688,7 @@ fn emit_expr(
                 body_emitted.kind,
                 &body_emitted.value,
                 &format!("c{id}_wrap"),
+                body_emitted.owned,
             );
             writeln!(ctx.conts, "  ret ptr {ret}").unwrap();
             writeln!(ctx.conts, "}}").unwrap();
@@ -1683,6 +1700,7 @@ fn emit_expr(
                 inner_emitted.kind,
                 &inner_emitted.value,
                 &format!("{prefix}_inio"),
+                inner_emitted.owned,
             );
             let env_ptr = pack_env(&mut code, locals, &capture_names, &format!("{prefix}_cap"));
             if env_ptr != "null" {
@@ -1729,6 +1747,7 @@ fn emit_expr(
                 body_emitted.kind,
                 &body_emitted.value,
                 &format!("e{id}_wrap"),
+                body_emitted.owned,
             );
             writeln!(ctx.conts, "  ret ptr {ret}").unwrap();
             writeln!(ctx.conts, "}}").unwrap();
@@ -1741,6 +1760,7 @@ fn emit_expr(
                 inner_emitted.kind,
                 &inner_emitted.value,
                 &format!("{prefix}_heio"),
+                inner_emitted.owned,
             );
             let env_ptr = pack_env(&mut code, locals, &capture_names, &format!("{prefix}_ecap"));
             if env_ptr != "null" {
@@ -1763,6 +1783,7 @@ fn emit_expr(
                 inner_emitted.kind,
                 &inner_emitted.value,
                 &format!("{prefix}_atio"),
+                inner_emitted.owned,
             );
             writeln!(
                 code,
@@ -1777,8 +1798,20 @@ fn emit_expr(
             let re = emit_expr(right, ctx, locals, &format!("{prefix}_rr"));
             let mut code = le.code;
             code.push_str(&re.code);
-            let lv = ensure_io(&mut code, le.kind, &le.value, &format!("{prefix}_rlio"));
-            let rv = ensure_io(&mut code, re.kind, &re.value, &format!("{prefix}_rrio"));
+            let lv = ensure_io(
+                &mut code,
+                le.kind,
+                &le.value,
+                &format!("{prefix}_rlio"),
+                le.owned,
+            );
+            let rv = ensure_io(
+                &mut code,
+                re.kind,
+                &re.value,
+                &format!("{prefix}_rrio"),
+                re.owned,
+            );
             writeln!(
                 code,
                 "  %{prefix}_race = call ptr @sz_io_race(ptr {lv}, ptr {rv})"
@@ -1793,8 +1826,20 @@ fn emit_expr(
             let re = emit_expr(right, ctx, locals, &format!("{prefix}_br"));
             let mut code = le.code;
             code.push_str(&re.code);
-            let lv = ensure_io(&mut code, le.kind, &le.value, &format!("{prefix}_blio"));
-            let rv = ensure_io(&mut code, re.kind, &re.value, &format!("{prefix}_brio"));
+            let lv = ensure_io(
+                &mut code,
+                le.kind,
+                &le.value,
+                &format!("{prefix}_blio"),
+                le.owned,
+            );
+            let rv = ensure_io(
+                &mut code,
+                re.kind,
+                &re.value,
+                &format!("{prefix}_brio"),
+                re.owned,
+            );
             writeln!(
                 code,
                 "  %{prefix}_both = call ptr @sz_io_both(ptr {lv}, ptr {rv})"
@@ -1809,8 +1854,20 @@ fn emit_expr(
             let fe = emit_expr(finalizer, ctx, locals, &format!("{prefix}_ef"));
             let mut code = ie.code;
             code.push_str(&fe.code);
-            let iv = ensure_io(&mut code, ie.kind, &ie.value, &format!("{prefix}_eiio"));
-            let fv = ensure_io(&mut code, fe.kind, &fe.value, &format!("{prefix}_efio"));
+            let iv = ensure_io(
+                &mut code,
+                ie.kind,
+                &ie.value,
+                &format!("{prefix}_eiio"),
+                ie.owned,
+            );
+            let fv = ensure_io(
+                &mut code,
+                fe.kind,
+                &fe.value,
+                &format!("{prefix}_efio"),
+                fe.owned,
+            );
             writeln!(
                 code,
                 "  %{prefix}_ensure = call ptr @sz_io_ensure(ptr {iv}, ptr {fv})"
@@ -1831,7 +1888,13 @@ fn emit_expr(
                 writeln!(code, "  %{prefix}_ms0 = add i64 0, 0").unwrap();
                 format!("%{prefix}_ms0")
             };
-            let iv = ensure_io(&mut code, ie.kind, &ie.value, &format!("{prefix}_tiio"));
+            let iv = ensure_io(
+                &mut code,
+                ie.kind,
+                &ie.value,
+                &format!("{prefix}_tiio"),
+                ie.owned,
+            );
             writeln!(
                 code,
                 "  %{prefix}_timeout = call ptr @sz_io_timeout(i64 {ms_val}, ptr {iv})"
@@ -2251,6 +2314,7 @@ fn emit_io_cont_lambda(
         body_emitted.kind,
         &body_emitted.value,
         &format!("r{id}_wrap"),
+        body_emitted.owned,
     );
     writeln!(ctx.conts, "  ret ptr {ret}").unwrap();
     writeln!(ctx.conts, "}}").unwrap();
@@ -2482,6 +2546,7 @@ fn emit_resource(
             first.kind,
             &first.value,
             &format!("{prefix}_acq"),
+            first.owned,
         );
         writeln!(
             code,
@@ -2490,9 +2555,6 @@ fn emit_resource(
         .unwrap();
         writeln!(code, "  call void @sz_release(ptr {acq})").unwrap();
         drop_owned_ptr(&mut code, &lam);
-        if first.kind != Kind::Io {
-            drop_owned_ptr(&mut code, &first);
-        }
         owned_ptr(code, format!("%{prefix}_v"))
     } else {
         writeln!(
@@ -3746,6 +3808,7 @@ fn emit_call(
                 emitted_args[0].kind,
                 &emitted_args[0].value,
                 &format!("{prefix}_fio"),
+                emitted_args[0].owned,
             );
             writeln!(code, "  %{prefix}_v = call ptr @sz_fiber_fork(ptr {iv})").unwrap();
             writeln!(code, "  call void @sz_release(ptr {iv})").unwrap();
@@ -3775,6 +3838,7 @@ fn emit_call(
                 emitted_args[0].kind,
                 &emitted_args[0].value,
                 &format!("{prefix}_fio"),
+                emitted_args[0].owned,
             );
             writeln!(code, "  %{prefix}_v = call ptr @sz_io_forever(ptr {iv})").unwrap();
             writeln!(code, "  call void @sz_release(ptr {iv})").unwrap();
@@ -3792,6 +3856,7 @@ fn emit_call(
                 emitted_args[1].kind,
                 &emitted_args[1].value,
                 &format!("{prefix}_rio"),
+                emitted_args[1].owned,
             );
             writeln!(
                 code,
@@ -3813,6 +3878,7 @@ fn emit_call(
                 emitted_args[1].kind,
                 &emitted_args[1].value,
                 &format!("{prefix}_tio"),
+                emitted_args[1].owned,
             );
             writeln!(
                 code,
@@ -3848,6 +3914,7 @@ fn emit_call(
                 emitted_args[0].kind,
                 &emitted_args[0].value,
                 &format!("{prefix}_eval"),
+                emitted_args[0].owned,
             );
             writeln!(code, "  %{prefix}_v = call ptr @sz_stream_eval(ptr {io})").unwrap();
             writeln!(code, "  call void @sz_release(ptr {io})").unwrap();
@@ -5491,6 +5558,24 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at + close..].contains(&format!("call void @sz_release(ptr {env})")),
             "expected last-use release of capture pack {env} after flatMap:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_io_pure_releases_payload() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.pure("ok").flatMap(_ => IO.println("ok"))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_io_pure(ptr ";
+        let at = ir.find(needle).expect("expected sz_io_pure");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert_ne!(name, "null", "expected a payload, not null:\n{ir}");
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of payload {name} after IO.pure:\n{ir}"
         );
     }
 

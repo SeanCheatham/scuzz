@@ -19,6 +19,13 @@ static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
   return io;
 }
 
+
+static SzIo *pure_drop(void *value) {
+  SzIo *io = sz_io_pure(value);
+  sz_release(value);
+  return io;
+}
+
 /* Blessed Net.httpGet — live HTTP/1.0 GET or TestRuntime stub map.
  * Live hostnames query A and AAAA together (park on poll). CNAME chains
  * re-query both (cap 5). When both addresses exist, start AAAA first and wait
@@ -44,7 +51,7 @@ static SzIo *unwrap_net(void *value, void *env) {
     return sz_io_fail_cstr("Net: null result");
   if (r->is_err)
     return sz_io_fail(r->as.err);
-  return sz_io_pure(r->as.ok);
+  return pure_drop(r->as.ok);
 }
 
 static int set_nonblock(int fd) {
@@ -965,7 +972,7 @@ static SzIo *get_poll_read(void *value, void *env) {
 
 static SzIo *get_finish(void *body, void *env) {
   get_free((GetSt *)env);
-  return sz_io_pure(body);
+  return pure_drop(body);
 }
 
 static SzIo *get_on_err(SzError *err, void *env) {
@@ -1525,12 +1532,12 @@ static SzIo *serve_after_write(void *value, void *env) {
     st->left--;
   if (st->left == 0) {
     serve_free(st);
-    return sz_io_pure(NULL);
+    return pure_drop(NULL);
   }
   if (st->left < 0 && sz_testrt_net_is_fake() &&
       sz_testrt_net_serve_pending() <= 0) {
     serve_free(st);
-    return sz_io_pure(NULL);
+    return pure_drop(NULL);
   }
   return serve_round(st);
 }
@@ -1561,7 +1568,7 @@ static SzIo *serve_round(ServeSt *st) {
   if (st->left < 0 && sz_testrt_net_is_fake() &&
       sz_testrt_net_serve_pending() <= 0) {
     serve_free(st);
-    return sz_io_pure(NULL);
+    return pure_drop(NULL);
   }
   prog = fm_drop(sz_io_delay(serve_ensure_listen, st), unwrap_net, NULL);
   prog = fm_drop(prog, serve_after_listen, st);

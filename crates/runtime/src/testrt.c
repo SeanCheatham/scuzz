@@ -12,6 +12,13 @@ static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
   return io;
 }
 
+
+static SzIo *pure_drop(void *value) {
+  SzIo *io = sz_io_pure(value);
+  sz_release(value);
+  return io;
+}
+
 void sz_testrt_clock_reset_live(void);
 void sz_testrt_random_reset_live(void);
 static void sz_testrt_fs_reset_live(void);
@@ -141,7 +148,7 @@ static SzIo *unwrap_box(void *value, void *env) {
     return sz_io_fail_cstr("TestRuntime: null result");
   if (r->is_err)
     return sz_io_fail(r->as.err);
-  return sz_io_pure(r->as.ok);
+  return pure_drop(r->as.ok);
 }
 
 static void *mem_read(void *env) {
@@ -952,9 +959,9 @@ SzIo *sz_law_assert(SzString *name, int64_t ok) {
   const char *tr = getenv("SCUZZ_TESTRT");
   char buf[256];
   if (!tr || tr[0] != '1')
-    return sz_io_pure(NULL);
+    return pure_drop(NULL);
   if (ok)
-    return sz_io_pure(NULL);
+    return pure_drop(NULL);
   snprintf(buf, sizeof buf, "law failed: %s", name ? sz_string_cstr(name) : "?");
   fprintf(stderr, "scuzz: %s\n", buf);
   return sz_io_fail_cstr(buf);

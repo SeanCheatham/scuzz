@@ -8,6 +8,13 @@ static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
   return io;
 }
 
+
+static SzIo *pure_drop(void *value) {
+  SzIo *io = sz_io_pure(value);
+  sz_release(value);
+  return io;
+}
+
 typedef struct LangResSt {
   SzLangResource *res;
   SzCont use;
@@ -23,7 +30,7 @@ static SzIo *lang_fin_free_ok(void *ignored, void *env) {
   sz_release(st->res);
   st->res = NULL;
   sz_free(st);
-  return sz_io_pure(NULL);
+  return pure_drop(NULL);
 }
 
 static SzIo *lang_fin_free_err(SzError *err, void *env) {

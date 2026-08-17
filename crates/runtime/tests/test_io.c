@@ -14,6 +14,8 @@
 #include <time.h>
 #include <unistd.h>
 
+static SzIo *pure_drop(void *value);
+
 static void sleep_us(long us) {
   struct timespec ts;
   if (us <= 0)
@@ -73,7 +75,7 @@ static SzIo *cont_println(void *value, void *env) {
 static SzIo *cont_pure_unit(void *value, void *env) {
   (void)value;
   (void)env;
-  return sz_io_pure(NULL);
+  return pure_drop(NULL);
 }
 
 static int lang_released = 0;
@@ -81,10 +83,10 @@ static SzIo *lang_release(void *acquired, void *env) {
   (void)env;
   assert(acquired);
   lang_released = 1;
-  return sz_io_pure(NULL);
+  return pure_drop(NULL);
 }
 static SzLangResource *lang_make_tok(void) {
-  SzIo *acq = sz_io_pure(sz_string_from_cstr("tok"));
+  SzIo *acq = pure_drop(sz_string_from_cstr("tok"));
   SzLangResource *lr = sz_lang_resource_make(acq, lang_release, NULL);
   sz_release(acq);
   return lr;
@@ -139,6 +141,13 @@ static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
   return io;
 }
 
+
+static SzIo *pure_drop(void *value) {
+  SzIo *io = sz_io_pure(value);
+  sz_release(value);
+  return io;
+}
+
 static SzIo *attempt_drop(SzIo *inner) {
   SzIo *io = sz_io_attempt(inner);
   sz_release(inner);
@@ -175,7 +184,7 @@ static SzIo *lang_use_sleep(void *acquired, void *env) {
 static SzIo *stream_bang(void *v, void *env) {
   (void)env;
   SzString *s = (SzString *)v;
-  return sz_io_pure(sz_string_concat(s, sz_string_from_cstr("!")));
+  return pure_drop(sz_string_concat(s, sz_string_from_cstr("!")));
 }
 
 static int64_t stream_nonempty(void *v, void *env) {
@@ -195,7 +204,7 @@ static int64_t stream_empty(void *v, void *env) {
 
 static SzIo *serve_path_ok(void *path, void *env) {
   (void)env;
-  return sz_io_pure(
+  return pure_drop(
       sz_string_concat(sz_string_from_cstr("ok:"), (SzString *)path));
 }
 
@@ -205,7 +214,7 @@ static SzIo *serve_fail_then_ok(void *path, void *env) {
   (void)env;
   if (g_serve_fail_n++ == 0)
     return sz_io_fail_cstr("handler boom");
-  return sz_io_pure(
+  return pure_drop(
       sz_string_concat(sz_string_from_cstr("ok:"), (SzString *)path));
 }
 
@@ -220,7 +229,7 @@ static SzIo *serve_big_ok(void *path, void *env) {
   {
     SzString *s = sz_string_from_bytes(blob, N);
     free(blob);
-    return sz_io_pure(s);
+    return pure_drop(s);
   }
 }
 
@@ -236,7 +245,7 @@ static SzIo *serve_padded_ok(void *path, void *env) {
   memcpy(blob, "ok:/x", 5);
   s = sz_string_from_bytes(blob, N);
   free(blob);
-  return sz_io_pure(s);
+  return pure_drop(s);
 }
 
 static void *live_get_client(void *arg) {
@@ -525,7 +534,7 @@ static SzIo *assert_peer_quiet(void *value, void *env) {
   (void)value;
   (void)env;
   assert(g_peer_flag == 0);
-  return sz_io_pure(NULL);
+  return pure_drop(NULL);
 }
 
 static void *pipe_late_write(void *arg) {
@@ -558,7 +567,7 @@ static SzIo *after_sleep_dns_http(void *value, void *env) {
 static SzIo *exec_then_flag(void *value, void *env) {
   (void)env;
   g_peer_flag = 1;
-  return sz_io_pure(value);
+  return pure_drop(value);
 }
 
 static void *dns_late_a(void *arg) {
@@ -829,14 +838,14 @@ static SzIo *recover_unit(SzError *err, void *env) {
   (void)env;
   assert(err && strstr(sz_string_cstr(err->message), "interrupted"));
   sz_error_free(err);
-  return sz_io_pure(NULL);
+  return pure_drop(NULL);
 }
 
 static SzIo *after_ref_get(void *value, void *env) {
   (void)env;
   SzString *s = (SzString *)value;
   assert(s && strcmp(sz_string_cstr(s), "b") == 0);
-  return sz_io_pure(NULL);
+  return pure_drop(NULL);
 }
 
 static SzIo *after_ref_set(void *value, void *env) {
@@ -859,7 +868,7 @@ static SzIo *fiber_join_cont(void *fiber, void *env) {
 static SzIo *after_fork_ignore(void *fiber, void *env) {
   (void)fiber;
   (void)env;
-  return sz_io_pure(NULL);
+  return pure_drop(NULL);
 }
 
 static SzIo *fiber_join_recover(void *ignored, void *fiber) {
@@ -883,7 +892,7 @@ static SzIo *retry_until_3(void *value, void *env) {
   (void)env;
   if ((intptr_t)value < 3)
     return sz_io_fail_cstr("not-yet");
-  return sz_io_pure(value);
+  return pure_drop(value);
 }
 
 static SzIo *always_fail_cont(void *value, void *env) {
@@ -916,7 +925,7 @@ static void *map_id(void *head, void *env) {
 
 static SzIo *after_sleep_tag(void *value, void *env) {
   (void)value;
-  return sz_io_pure(env);
+  return pure_drop(env);
 }
 
 int main(void) {
@@ -954,7 +963,7 @@ int main(void) {
     assert(e->as.left && strstr(sz_string_cstr(e->as.left->message), "nope"));
     sz_either_free(e);
   }
-  r = sz_io_unsafe_run(attempt_drop(sz_io_pure((void *)(intptr_t)3)));
+  r = sz_io_unsafe_run(attempt_drop(pure_drop((void *)(intptr_t)3)));
   assert(r.ok);
   {
     SzEither *e = (SzEither *)r.value;
@@ -987,7 +996,7 @@ int main(void) {
     size_t base_count = 0, base_bytes = 0;
     size_t live_count = 0, live_bytes = 0;
 
-    acq = sz_io_pure(sz_string_from_cstr("tok"));
+    acq = pure_drop(sz_string_from_cstr("tok"));
     sz_alloc_stats(&base_bytes, &base_count);
     msg = sz_string_from_cstr("cap");
     env = sz_list_cons(msg, sz_list_nil());
@@ -1015,7 +1024,7 @@ int main(void) {
   /* IO.ensure runs finalizer on success */
   ensured_flag = 0;
   r = sz_io_unsafe_run(
-      ensure_drop(sz_io_pure((void *)(intptr_t)1),
+      ensure_drop(pure_drop((void *)(intptr_t)1),
                   sz_io_delay(ensure_mark_thunk, NULL)));
   assert(r.ok);
   assert((intptr_t)r.value == 1);
@@ -1046,7 +1055,7 @@ int main(void) {
   /* IO.timeout: inner wins and keeps its value. */
   {
     sz_testrt_install();
-    r = sz_io_unsafe_run(timeout_drop(50, sz_io_pure((void *)(intptr_t)7)));
+    r = sz_io_unsafe_run(timeout_drop(50, pure_drop((void *)(intptr_t)7)));
     assert(r.ok);
     assert((intptr_t)r.value == 7);
     sz_testrt_reset();
@@ -1125,7 +1134,7 @@ int main(void) {
   sz_error_free(r.error);
 
   retry_hits = 0;
-  r = sz_io_unsafe_run(retry_n_drop(2, sz_io_pure((void *)(intptr_t)9)));
+  r = sz_io_unsafe_run(retry_n_drop(2, pure_drop((void *)(intptr_t)9)));
   assert(r.ok);
   assert((intptr_t)r.value == 9);
   assert(retry_hits == 0);
@@ -1163,7 +1172,7 @@ int main(void) {
 
   /* Fiber.fork/join: child value is the join result. */
   {
-    SzIo *child = sz_io_pure((void *)(intptr_t)42);
+    SzIo *child = pure_drop((void *)(intptr_t)42);
     r = sz_io_unsafe_run(
         fm_drop(fork_drop(child), fiber_join_cont, NULL));
     assert(r.ok);
@@ -1229,7 +1238,7 @@ int main(void) {
         sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
     SzStream *s = sz_stream_concat(
         sz_stream_evalmap(sz_stream_emits(xs), stream_bang, NULL),
-        sz_stream_eval(sz_io_pure(sz_string_from_cstr("c"))));
+        sz_stream_eval(pure_drop(sz_string_from_cstr("c"))));
     r = sz_io_unsafe_run(sz_stream_compile_to_list(s));
     assert(r.ok);
     SzString *joined = sz_list_join((SzList *)r.value, ",");
@@ -1441,7 +1450,7 @@ int main(void) {
 
   /* race prefers non-sleep winner */
   r = sz_io_unsafe_run(
-      race_drop(sz_io_sleep_ms(20), sz_io_pure((void *)(intptr_t)99)));
+      race_drop(sz_io_sleep_ms(20), pure_drop((void *)(intptr_t)99)));
   assert(r.ok);
   assert((intptr_t)r.value == 99);
 
@@ -1458,7 +1467,7 @@ int main(void) {
 
   /* both */
   r = sz_io_unsafe_run(
-      both_drop(sz_io_pure((void *)(intptr_t)1), sz_io_pure((void *)(intptr_t)2)));
+      both_drop(pure_drop((void *)(intptr_t)1), pure_drop((void *)(intptr_t)2)));
   assert(r.ok);
   {
     SzPair *p = (SzPair *)r.value;
@@ -2614,12 +2623,12 @@ int main(void) {
     size_t live_bytes = 0, live_count = 0;
     SzIoResult r;
     sz_alloc_stats(&base_bytes, &base_count);
-    r = sz_io_unsafe_run(fm_drop(sz_io_pure(NULL), cont_pure_unit, NULL));
+    r = sz_io_unsafe_run(fm_drop(pure_drop(NULL), cont_pure_unit, NULL));
     assert(r.ok);
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
-    r = sz_io_unsafe_run(repeat_n_drop(1, sz_io_pure(NULL)));
+    r = sz_io_unsafe_run(repeat_n_drop(1, pure_drop(NULL)));
     assert(r.ok);
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);

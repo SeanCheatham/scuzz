@@ -20,6 +20,13 @@ static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
   return io;
 }
 
+
+static SzIo *pure_drop(void *value) {
+  SzIo *io = sz_io_pure(value);
+  sz_release(value);
+  return io;
+}
+
 static SzIo *attempt_drop(SzIo *inner) {
   SzIo *io = sz_io_attempt(inner);
   sz_release(inner);
@@ -126,7 +133,9 @@ static SzRcHdr *sz_rc_hdr(const void *ptr) {
 }
 
 static int sz_is_rc(const void *ptr) {
-  if (!ptr)
+  uintptr_t p = (uintptr_t)ptr;
+  /* Small integers and other non-heap pointers are not RC. Do not load a header. */
+  if (p < 4096 || (p & 7) != 0)
     return 0;
   return sz_rc_hdr(ptr)->magic == SZ_RC_MAGIC;
 }
@@ -555,7 +564,7 @@ SzAdt *sz_either_to_result(SzEither *e) {
 
 static SzIo *attempt_as_result_cont(void *value, void *env) {
   (void)env;
-  return sz_io_pure(sz_either_to_result((SzEither *)value));
+  return pure_drop(sz_either_to_result((SzEither *)value));
 }
 
 SzIo *sz_io_attempt_as_result(SzIo *inner) {
@@ -596,6 +605,7 @@ static SzIo *sz_io_new(SzIoTag tag) {
 
 SzIo *sz_io_pure(void *value) {
   SzIo *io = sz_io_new(SZ_IO_PURE);
+  sz_retain(value);
   io->as.pure_value = value;
   return io;
 }
@@ -990,12 +1000,12 @@ static void cont_free_all(ContFrame *stack) {
 /* Attempt success continuation: wrap value as Right. */
 static SzIo *attempt_ok(void *value, void *env) {
   (void)env;
-  return sz_io_pure(sz_either_right(value));
+  return pure_drop(sz_either_right(value));
 }
 
 static SzIo *attempt_err(SzError *err, void *env) {
   (void)env;
-  return sz_io_pure(sz_either_left(err));
+  return pure_drop(sz_either_left(err));
 }
 
 typedef struct EnsureExit {
@@ -1010,7 +1020,7 @@ static SzIo *ensure_after_attempt_ok(void *either_val, void *env) {
   sz_free(e);
   if (ex && ex->is_right) {
     sz_either_free(ex);
-    return sz_io_pure(v);
+    return pure_drop(v);
   }
   {
     SzError *err =
@@ -1378,10 +1388,10 @@ static void fiber_wake_joiners(Sched *s, Fiber *target, int ok, void *val,
     w->fwait = NULL;
     if (w->state == FIB_FWAIT) {
       if (!want_join) {
-        fiber_set_cur(w, sz_io_pure(NULL));
+        fiber_set_cur(w, pure_drop(NULL));
         ready_enqueue(s, w);
       } else if (ok) {
-        fiber_set_cur(w, sz_io_pure(val));
+        fiber_set_cur(w, pure_drop(val));
         ready_enqueue(s, w);
       } else {
         fiber_fail(s, w, error_copy_or_interrupt(err));
@@ -1421,7 +1431,7 @@ static void join_child_done(Sched *s, Fiber *child, int ok, void *val,
       if (sib)
         fiber_cancel(s, sib);
       p->state = FIB_READY;
-      fiber_set_cur(p, sz_io_pure(val));
+      fiber_set_cur(p, pure_drop(val));
       p->join_kind = JOIN_NONE;
       ready_enqueue(s, p);
       return;
@@ -1448,7 +1458,7 @@ static void join_child_done(Sched *s, Fiber *child, int ok, void *val,
     if (slot == 1) {
       if (ok) {
         p->state = FIB_READY;
-        fiber_set_cur(p, sz_io_pure(val));
+        fiber_set_cur(p, pure_drop(val));
         ready_enqueue(s, p);
       } else {
         fiber_fail(s, p, err ? err : sz_error_new(1, "timeout inner failed"));
@@ -1475,7 +1485,7 @@ static void join_child_done(Sched *s, Fiber *child, int ok, void *val,
     if (p->children_settled >= 2) {
       p->join_kind = JOIN_NONE;
       p->state = FIB_READY;
-      fiber_set_cur(p, sz_io_pure(sz_pair_new(p->child_val[0], p->child_val[1])));
+      fiber_set_cur(p, pure_drop(sz_pair_new(p->child_val[0], p->child_val[1])));
       ready_enqueue(s, p);
     }
   }
@@ -1612,7 +1622,7 @@ int sz_fiber_wake_queue(SzQueue *q, void *value) {
   f->wait_next = NULL;
   f->qwait = NULL;
   f->state = FIB_READY;
-  fiber_set_cur(f, sz_io_pure(value));
+  fiber_set_cur(f, pure_drop(value));
   ready_enqueue(s, f);
   return 1;
 }
@@ -1640,7 +1650,7 @@ void sz_fiber_wake_deferred(SzDeferred *d) {
       ready_enqueue(s, f);
     } else {
       f->state = FIB_READY;
-      fiber_set_cur(f, sz_io_pure(d->value));
+      fiber_set_cur(f, pure_drop(d->value));
       ready_enqueue(s, f);
     }
   }
@@ -1672,7 +1682,7 @@ static int step_fiber(Sched *s, Fiber *f) {
     return 0;
   case SZ_IO_DELAY: {
     void *value = cur->as.delay.thunk(cur->as.delay.env);
-    fiber_set_cur(f, sz_io_pure(value));
+    fiber_set_cur(f, pure_drop(value));
     ready_enqueue(s, f);
     return 0;
   }
@@ -1683,7 +1693,7 @@ static int step_fiber(Sched *s, Fiber *f) {
     fputs(str, stdout);
     fputc('\n', stdout);
     fflush(stdout);
-    fiber_set_cur(f, sz_io_pure(NULL));
+    fiber_set_cur(f, pure_drop(NULL));
     ready_enqueue(s, f);
     return 0;
   }
@@ -1825,7 +1835,7 @@ static int step_fiber(Sched *s, Fiber *f) {
     child->forked = 1;
     forked_live_add(s, child);
     ready_enqueue(s, child);
-    fiber_set_cur(f, sz_io_pure((void *)child));
+    fiber_set_cur(f, pure_drop((void *)child));
     ready_enqueue(s, f);
     return 0;
   }
@@ -1837,7 +1847,7 @@ static int step_fiber(Sched *s, Fiber *f) {
     }
     if (target->state == FIB_DONE) {
       if (target->result_ok) {
-        fiber_set_cur(f, sz_io_pure(target->result_value));
+        fiber_set_cur(f, pure_drop(target->result_value));
         ready_enqueue(s, f);
       } else {
         fiber_fail(s, f, error_copy_or_interrupt(target->result_error));
@@ -1862,13 +1872,13 @@ static int step_fiber(Sched *s, Fiber *f) {
       return 0;
     }
     if (target->state == FIB_DONE || target->state == FIB_CANCELLED) {
-      fiber_set_cur(f, sz_io_pure(NULL));
+      fiber_set_cur(f, pure_drop(NULL));
       ready_enqueue(s, f);
       return 0;
     }
     fiber_cancel(s, target);
     if (target->state == FIB_DONE || target->state == FIB_CANCELLED) {
-      fiber_set_cur(f, sz_io_pure(NULL));
+      fiber_set_cur(f, pure_drop(NULL));
       ready_enqueue(s, f);
       return 0;
     }
@@ -1891,7 +1901,7 @@ static int step_fiber(Sched *s, Fiber *f) {
       for (i = 1; i < q->len; i++)
         q->items[i - 1] = q->items[i];
       q->len--;
-      fiber_set_cur(f, sz_io_pure(v));
+      fiber_set_cur(f, pure_drop(v));
       ready_enqueue(s, f);
       return 0;
     }
@@ -1916,7 +1926,7 @@ static int step_fiber(Sched *s, Fiber *f) {
         fiber_fail(s, f, err);
         return 0;
       }
-      fiber_set_cur(f, sz_io_pure(d->value));
+      fiber_set_cur(f, pure_drop(d->value));
       ready_enqueue(s, f);
       return 0;
     }
@@ -1942,7 +1952,7 @@ static int step_fiber(Sched *s, Fiber *f) {
       return 0;
     }
     if (n > 0) {
-      fiber_set_cur(f, sz_io_pure(NULL));
+      fiber_set_cur(f, pure_drop(NULL));
       ready_enqueue(s, f);
       return 0;
     }
@@ -1972,7 +1982,7 @@ static int wake_sleepers(Sched *s, int64_t now) {
       continue;
     }
     if (f->state == FIB_SLEEP && f->wake_at <= now) {
-      fiber_set_cur(f, sz_io_pure(NULL));
+      fiber_set_cur(f, pure_drop(NULL));
       ready_enqueue(s, f);
       woke = 1;
     } else if (f->state == FIB_SLEEP) {
@@ -2026,7 +2036,7 @@ static int wake_pollers(Sched *s, struct pollfd *pfds, Fiber **fibs, int n) {
     if (rev & POLLNVAL) {
       fiber_fail(s, f, sz_error_new(6, "poll failed"));
     } else {
-      fiber_set_cur(f, sz_io_pure(NULL));
+      fiber_set_cur(f, pure_drop(NULL));
       ready_enqueue(s, f);
     }
     woke = 1;

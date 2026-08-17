@@ -20,6 +20,13 @@ static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
   return io;
 }
 
+
+static SzIo *pure_drop(void *value) {
+  SzIo *io = sz_io_pure(value);
+  sz_release(value);
+  return io;
+}
+
 typedef struct {
   int is_err;
   union {
@@ -40,7 +47,7 @@ static SzIo *unwrap_fs(void *value, void *env) {
     return sz_io_fail_cstr("Fs: null result");
   if (r->is_err)
     return sz_io_fail(r->as.err);
-  return sz_io_pure(r->as.ok);
+  return pure_drop(r->as.ok);
 }
 
 static void *fs_read_result(void *env) {

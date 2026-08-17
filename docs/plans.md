@@ -1,10 +1,10 @@
 # Short-term plan
 
-## Slice: Retain payload in IO.pure
+## Slice: Retain error in IO.fail
 
-`handleErrorWith` capture packs retain then drop after the call. `IO.pure` still stores the payload without retain, so the value can alias the IO node.
+`IO.pure` retains the payload and drops an owned payload after the call. `IO.fail` still stores the error without retain, so the error can alias the fail node.
 
-- Retain payload in `sz_io_pure`.
+- Retain the error in `sz_io_fail`.
 - Drop the caller ref after the call.
-- Proof: compiler IR for `IO.pure("ok").flatMap(_ => IO.println("ok"))` shows `sz_release` of the payload after `sz_io_pure`.
-- Out of scope: OS threads. Releasing the payload when the IO node frees (the run result aliases it).
+- Proof: compiler IR for `IO.fail("boom").handleErrorWith(_ => IO.println("recovered"))` shows `sz_release` of the error after `sz_io_fail` / `sz_io_fail_cstr`.
+- Out of scope: OS threads. Releasing the error when the fail node frees (fiber_fail takes it).
