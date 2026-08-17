@@ -1272,6 +1272,8 @@ int main(void) {
     r = sz_io_unsafe_run(sz_deferred_get(def));
     assert(r.ok);
     assert(strcmp(sz_string_cstr((SzString *)r.value), "ok") == 0);
+    sz_release(r.value);
+    assert(strcmp(sz_string_cstr((SzString *)def->value), "ok") == 0);
 
     {
       SzDeferred *d2 = sz_deferred_make();
@@ -1282,6 +1284,8 @@ int main(void) {
       r = sz_io_unsafe_run(sz_deferred_get(d2));
       assert(r.ok);
       assert(strcmp(sz_string_cstr((SzString *)r.value), "y") == 0);
+      sz_release(r.value);
+      assert(strcmp(sz_string_cstr((SzString *)d2->value), "y") == 0);
       {
         SzString *late = sz_string_from_cstr("z");
         r = sz_io_unsafe_run(sz_deferred_complete(d2, late));
@@ -1291,6 +1295,8 @@ int main(void) {
       r = sz_io_unsafe_run(sz_deferred_get(d2));
       assert(r.ok);
       assert(strcmp(sz_string_cstr((SzString *)r.value), "y") == 0);
+      sz_release(r.value);
+      assert(strcmp(sz_string_cstr((SzString *)d2->value), "y") == 0);
       sz_deferred_free(d2);
     }
     sz_deferred_free(def);

@@ -304,6 +304,7 @@ SzIo *sz_deferred_empty(void); /* IO[Deferred] */
 /* Callee retains the value. Caller drops after the call. */
 SzIo *sz_deferred_complete(SzDeferred *d, void *value);
 SzIo *sz_deferred_complete_cstr(SzDeferred *d, const char *value);
+/* Get retains the completed value. Caller drops the run result. */
 SzIo *sz_deferred_get(SzDeferred *d); /* IO[A]; parks until complete under the fiber scheduler */
 
 /* Queue — unbounded FIFO of void*. */

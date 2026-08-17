@@ -3847,7 +3847,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
-            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
         }
         "Fiber.fork" => {
             let iv = ensure_io(
@@ -5694,6 +5694,29 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir.contains("call void @sz_release(ptr %value)"),
             "expected last-use release of Ref.get binder %value:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_deferred_get_releases_value() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    d <- Deferred.empty()
+    _ <- Deferred.complete(d, "a")
+    v <- Deferred.get(d)
+    _ <- IO.println(v)
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("call ptr @sz_io_println(ptr %value)"),
+            "expected println of Deferred.get binder:\n{ir}"
+        );
+        assert!(
+            ir.contains("call void @sz_release(ptr %value)"),
+            "expected last-use release of Deferred.get binder %value:\n{ir}"
         );
     }
 

@@ -1690,6 +1690,7 @@ void sz_fiber_wake_deferred(SzDeferred *d) {
       ready_enqueue(s, f);
     } else {
       f->state = FIB_READY;
+      sz_retain(d->value);
       fiber_set_cur(f, pure_drop(d->value));
       ready_enqueue(s, f);
     }
@@ -1966,6 +1967,7 @@ static int step_fiber(Sched *s, Fiber *f) {
         fiber_fail(s, f, err);
         return 0;
       }
+      sz_retain(d->value);
       fiber_set_cur(f, pure_drop(d->value));
       ready_enqueue(s, f);
       return 0;
