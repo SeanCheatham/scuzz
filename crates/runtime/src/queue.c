@@ -70,6 +70,7 @@ SzIo *sz_queue_offer_cstr(SzQueue *q, const char *value) {
 SzIo *sz_queue_take(SzQueue *q) {
   if (!q)
     sz_panic("sz_queue_take(null)");
+  /* Runtime transfers the offer retain. Compiler drops the owned take payload. */
   return sz_io_queue_take(q);
 }
 

@@ -312,6 +312,7 @@ SzIo *sz_queue_unbounded(void); /* IO[Queue] */
 /* Callee retains the value. Caller drops after the call. */
 SzIo *sz_queue_offer(SzQueue *q, void *value);
 SzIo *sz_queue_offer_cstr(SzQueue *q, const char *value);
+/* Take transfers the offer retain. Caller drops the run result. Do not retain again. */
 SzIo *sz_queue_take(SzQueue *q); /* IO[A]; parks when empty under the fiber scheduler */
 size_t sz_queue_size(const SzQueue *q);
 

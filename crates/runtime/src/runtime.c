@@ -1688,6 +1688,7 @@ int sz_fiber_wake_queue(SzQueue *q, void *value) {
   f->wait_next = NULL;
   f->qwait = NULL;
   f->state = FIB_READY;
+  /* Transfer the offer retain. Do not retain again. */
   fiber_set_cur(f, pure_drop(value));
   ready_enqueue(s, f);
   return 1;
@@ -1959,6 +1960,7 @@ static int step_fiber(Sched *s, Fiber *f) {
       for (i = 1; i < q->len; i++)
         q->items[i - 1] = q->items[i];
       q->len--;
+      /* Transfer the offer retain. Do not retain again. */
       fiber_set_cur(f, pure_drop(v));
       ready_enqueue(s, f);
       return 0;

@@ -3823,7 +3823,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
-            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
         }
         "Deferred.empty" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_deferred_empty()").unwrap();
@@ -5693,6 +5693,29 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir.contains("call void @sz_release(ptr %value)"),
             "expected last-use release of Ref.get binder %value:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_queue_take_releases_value() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    q <- Queue.unbounded()
+    _ <- Queue.offer(q, "a")
+    v <- Queue.take(q)
+    _ <- IO.println(v)
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("call ptr @sz_io_println(ptr %value)"),
+            "expected println of Queue.take binder:\n{ir}"
+        );
+        assert!(
+            ir.contains("call void @sz_release(ptr %value)"),
+            "expected last-use release of Queue.take binder %value:\n{ir}"
         );
     }
 

@@ -1,10 +1,11 @@
 # Short-term plan
 
-## Slice: Drop the `Queue.take` result as an owned transfer
+## Slice: Release leftover Queue, Ref, and Deferred payloads on free
 
-`sz_deferred_get` retains the completed value so the run result does not alias the Deferred slot. `Queue.take` already holds the offer retain after it removes the item. The compiler still treats the take binder as borrowed, so that ref leaks.
+`Queue.take` now transfers the offer retain. Items that stay in the queue still leak when the queue frees. Ref and Deferred keep the same leftover-payload leak.
 
-- Mark `Queue.take` payload owned so a last-use drops the transferred value.
-- Do not retain again in take. The offer retain is the take result.
-- Proof: `test_io` can drop the take result; compiler IR drops an owned `Queue.take` binder.
-- Out of scope: OS threads. Making Queue RC. Releasing remaining queued values when the queue frees.
+- `sz_queue_free` releases remaining items. Do not retain again.
+- Add `sz_ref_free`. Release the current value, then free the cell.
+- `sz_deferred_free` already drops a failed error. Also release a completed value.
+- Proof: `test_io` offers without take, then frees; get after Ref/Deferred free is out of scope. Alloc accounting stays flat across offer-then-free.
+- Out of scope: OS threads. Making Queue RC. Releasing Either or pair fields (those still alias the run result).
