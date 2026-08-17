@@ -11,6 +11,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -1698,6 +1699,17 @@ int main(void) {
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzString *cmd = sz_string_from_cstr("true");
+      SzIo *io = sz_sys_spawn(cmd);
+      sz_release(cmd);
+      sz_release(io);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
   }
 
   /* Stream — emit / eval / concat / evalMap / map / take / drop / filter / compileToList / drain */
@@ -2417,6 +2429,26 @@ int main(void) {
       sz_release(cmd);
       assert(r.ok);
       sz_release(r.value);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    int status = 0;
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzString *cmd = sz_string_from_cstr("true");
+      int64_t pid;
+      r = sz_io_unsafe_run(sz_sys_spawn(cmd));
+      sz_release(cmd);
+      assert(r.ok);
+      pid = sz_unbox_i64(r.value);
+      sz_release(r.value);
+      assert(waitpid((pid_t)pid, &status, 0) == (pid_t)pid);
     }
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
