@@ -265,11 +265,15 @@ void sz_release(void *ptr) {
     switch (io->tag) {
     case SZ_IO_FLATMAP:
       sz_release(io->as.flatmap.inner);
+      sz_release(io->as.flatmap.env);
       io->as.flatmap.inner = NULL;
+      io->as.flatmap.env = NULL;
       break;
     case SZ_IO_HANDLE_ERROR:
       sz_release(io->as.handle_error.inner);
+      sz_release(io->as.handle_error.env);
       io->as.handle_error.inner = NULL;
+      io->as.handle_error.env = NULL;
       break;
     case SZ_IO_ATTEMPT:
       sz_release(io->as.attempt_inner);
@@ -310,6 +314,14 @@ void sz_release(void *ptr) {
     case SZ_IO_FORK:
       sz_release(io->as.fork_inner);
       io->as.fork_inner = NULL;
+      break;
+    case SZ_IO_QUEUE_TAKE:
+      sz_release(io->as.queue_take);
+      io->as.queue_take = NULL;
+      break;
+    case SZ_IO_DEFERRED_GET:
+      sz_release(io->as.deferred_get);
+      io->as.deferred_get = NULL;
       break;
     default:
       break;
@@ -367,6 +379,39 @@ void sz_release(void *ptr) {
     e->message = NULL;
     sz_free(ptr);
     sz_release(msg);
+    return;
+  }
+  case SZ_RC_REF: {
+    SzRef *r = (SzRef *)ptr;
+    void *v = r->value;
+    r->value = NULL;
+    sz_free(ptr);
+    sz_release(v);
+    return;
+  }
+  case SZ_RC_QUEUE: {
+    SzQueue *q = (SzQueue *)ptr;
+    size_t i;
+    for (i = 0; i < q->len; i++)
+      sz_release(q->items[i]);
+    sz_free(q->items);
+    q->items = NULL;
+    q->len = 0;
+    break;
+  }
+  case SZ_RC_DEFERRED: {
+    SzDeferred *d = (SzDeferred *)ptr;
+    int ok = d->completed && d->ok;
+    int bad = d->completed && !d->ok;
+    void *v = d->value;
+    SzError *err = d->error;
+    d->value = NULL;
+    d->error = NULL;
+    sz_free(ptr);
+    if (ok)
+      sz_release(v);
+    else if (bad)
+      sz_error_free(err);
     return;
   }
   case SZ_RC_BOX:
@@ -674,6 +719,7 @@ SzIo *sz_io_flatmap(SzIo *inner, SzCont cont, void *env) {
   sz_retain(inner);
   io->as.flatmap.inner = inner;
   io->as.flatmap.cont = cont;
+  sz_retain(env);
   io->as.flatmap.env = env;
   return io;
 }
@@ -712,6 +758,7 @@ SzIo *sz_io_handle_error_with(SzIo *inner, SzErrorHandler handler, void *env) {
   sz_retain(inner);
   io->as.handle_error.inner = inner;
   io->as.handle_error.handler = handler;
+  sz_retain(env);
   io->as.handle_error.env = env;
   return io;
 }
@@ -831,12 +878,14 @@ SzIo *sz_fiber_interrupt(void *fiber) {
 
 SzIo *sz_io_queue_take(SzQueue *q) {
   SzIo *io = sz_io_new(SZ_IO_QUEUE_TAKE);
+  sz_retain(q);
   io->as.queue_take = q;
   return io;
 }
 
 SzIo *sz_io_deferred_get(SzDeferred *d) {
   SzIo *io = sz_io_new(SZ_IO_DEFERRED_GET);
+  sz_retain(d);
   io->as.deferred_get = d;
   return io;
 }
@@ -1037,6 +1086,8 @@ static ContFrame *cont_pop(ContFrame *stack) {
     sz_release(stack->loop_inner);
   if (stack->kind == CONT_ENSURE)
     sz_release(stack->finalizer);
+  if (stack->kind == CONT_FLATMAP || stack->kind == CONT_HANDLE)
+    sz_release(stack->env);
   sz_free(stack);
   return next;
 }
@@ -1368,6 +1419,18 @@ static SzIo *io_child(SzIo *parent, SzIo **slot) {
   return c;
 }
 
+static void *io_env_child(SzIo *parent, void **slot) {
+  void *e = *slot;
+  if (!e)
+    return NULL;
+  if (parent && sz_is_rc(parent) && sz_rc_hdr(parent)->rc > 1) {
+    sz_retain(e);
+    return e;
+  }
+  *slot = NULL;
+  return e;
+}
+
 static void fiber_set_cur(Fiber *f, SzIo *next) {
   SzIo *old = f->cur;
   f->cur = next;
@@ -1410,10 +1473,16 @@ static void fiber_cancel(Sched *s, Fiber *f) {
   ready_remove(s, f);
   if (f->state == FIB_SLEEP)
     sleeper_remove(s, f);
-  if (f->state == FIB_QWAIT && f->qwait)
+  if (f->state == FIB_QWAIT && f->qwait) {
     queue_waiter_remove(f->qwait, f);
-  if (f->state == FIB_DWAIT && f->dwait)
+    sz_release(f->qwait);
+    f->qwait = NULL;
+  }
+  if (f->state == FIB_DWAIT && f->dwait) {
     def_waiter_remove(f->dwait, f);
+    sz_release(f->dwait);
+    f->dwait = NULL;
+  }
   if (f->state == FIB_POLL)
     poller_remove(s, f);
   if (f->state == FIB_FWAIT && f->fwait)
@@ -1622,8 +1691,14 @@ static void fiber_resume_value(Sched *s, Fiber *f, void *value) {
   {
     SzCont cont = stack->cont;
     void *env = stack->env;
+    SzIo *next;
+    int env_rc = sz_is_rc(env);
+    stack->env = NULL;
     f->stack = cont_pop(stack);
-    fiber_set_cur(f, cont(value, env));
+    next = cont(value, env);
+    if (env_rc)
+      sz_release(env);
+    fiber_set_cur(f, next);
     if (!f->cur) {
       fiber_finish(s, f, 0, NULL,
                    sz_error_new(2, "flatMap continuation returned null"));
@@ -1639,8 +1714,14 @@ static void fiber_fail(Sched *s, Fiber *f, SzError *err) {
     if (stack->kind == CONT_HANDLE) {
       SzErrorHandler handler = stack->handler;
       void *env = stack->env;
+      SzIo *next;
+      int env_rc = sz_is_rc(env);
+      stack->env = NULL;
       f->stack = cont_pop(stack);
-      fiber_set_cur(f, handler(err, env));
+      next = handler(err, env);
+      if (env_rc)
+        sz_release(env);
+      fiber_set_cur(f, next);
       if (!f->cur) {
         fiber_finish(s, f, 0, NULL,
                      sz_error_new(2, "error handler returned null"));
@@ -1691,6 +1772,7 @@ int sz_fiber_wake_queue(SzQueue *q, void *value) {
   /* Transfer the offer retain. Do not retain again. */
   fiber_set_cur(f, pure_drop(value));
   ready_enqueue(s, f);
+  sz_release(q);
   return 1;
 }
 
@@ -1704,14 +1786,17 @@ void sz_fiber_wake_deferred(SzDeferred *d) {
     d->waiters = f->wait_next;
     f->wait_next = NULL;
     f->dwait = NULL;
-    if (f->state == FIB_CANCELLED)
+    if (f->state == FIB_CANCELLED) {
+      sz_release(d);
       continue;
+    }
     f->state = FIB_READY;
     if (!d->ok)
       fiber_set_cur(f, fail_drop(deferred_copy_error(d)));
     else
       fiber_set_pure_retained(f, d->value);
     ready_enqueue(s, f);
+    sz_release(d);
   }
 }
 
@@ -1768,7 +1853,8 @@ static int step_fiber(Sched *s, Fiber *f) {
   case SZ_IO_FLATMAP: {
     SzIo *inner = io_child(cur, &cur->as.flatmap.inner);
     f->stack =
-        cont_push_flatmap(f->stack, cur->as.flatmap.cont, cur->as.flatmap.env);
+        cont_push_flatmap(f->stack, cur->as.flatmap.cont,
+                          io_env_child(cur, &cur->as.flatmap.env));
     fiber_set_cur(f, inner);
     if (!f->cur) {
       fiber_finish(s, f, 0, NULL, sz_error_new(5, "flatMap inner is null"));
@@ -1780,7 +1866,7 @@ static int step_fiber(Sched *s, Fiber *f) {
   case SZ_IO_HANDLE_ERROR: {
     SzIo *inner = io_child(cur, &cur->as.handle_error.inner);
     f->stack = cont_push_handle(f->stack, cur->as.handle_error.handler,
-                                cur->as.handle_error.env);
+                                io_env_child(cur, &cur->as.handle_error.env));
     fiber_set_cur(f, inner);
     if (!f->cur) {
       fiber_finish(s, f, 0, NULL,
@@ -1950,6 +2036,7 @@ static int step_fiber(Sched *s, Fiber *f) {
   }
   case SZ_IO_QUEUE_TAKE: {
     SzQueue *q = cur->as.queue_take;
+    cur->as.queue_take = NULL;
     if (!q) {
       fiber_finish(s, f, 0, NULL, sz_error_new(1, "null queue"));
       return 0;
@@ -1962,6 +2049,7 @@ static int step_fiber(Sched *s, Fiber *f) {
       q->len--;
       /* Transfer the offer retain. Do not retain again. */
       fiber_set_cur(f, pure_drop(v));
+      sz_release(q);
       ready_enqueue(s, f);
       return 0;
     }
@@ -1973,6 +2061,7 @@ static int step_fiber(Sched *s, Fiber *f) {
   }
   case SZ_IO_DEFERRED_GET: {
     SzDeferred *d = cur->as.deferred_get;
+    cur->as.deferred_get = NULL;
     if (!d) {
       fiber_finish(s, f, 0, NULL, sz_error_new(1, "null deferred"));
       return 0;
@@ -1980,9 +2069,11 @@ static int step_fiber(Sched *s, Fiber *f) {
     if (d->completed) {
       if (!d->ok) {
         fiber_fail(s, f, deferred_copy_error(d));
+        sz_release(d);
         return 0;
       }
       fiber_set_pure_retained(f, d->value);
+      sz_release(d);
       ready_enqueue(s, f);
       return 0;
     }

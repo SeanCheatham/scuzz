@@ -3781,7 +3781,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
-            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
         }
         "Ref.get" => {
             writeln!(
@@ -3804,7 +3804,7 @@ fn emit_call(
         }
         "Queue.unbounded" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_queue_unbounded()").unwrap();
-            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
         }
         "Queue.offer" => {
             writeln!(
@@ -3827,7 +3827,7 @@ fn emit_call(
         }
         "Deferred.empty" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_deferred_empty()").unwrap();
-            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
         }
         "Deferred.complete" => {
             writeln!(
@@ -5693,6 +5693,69 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir.contains("call void @sz_release(ptr %value)"),
             "expected last-use release of Ref.get binder %value:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_ref_of_releases_handle() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    r <- Ref.of("a")
+    _ <- Ref.set(r, "b")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("call ptr @sz_ref_of(ptr "),
+            "expected sz_ref_of:\n{ir}"
+        );
+        assert!(
+            ir.contains("call void @sz_release(ptr %value)"),
+            "expected last-use release of Ref.of binder %value:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_queue_unbounded_releases_handle() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    q <- Queue.unbounded()
+    _ <- Queue.offer(q, "a")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("call ptr @sz_queue_unbounded()"),
+            "expected sz_queue_unbounded:\n{ir}"
+        );
+        assert!(
+            ir.contains("call void @sz_release(ptr %value)"),
+            "expected last-use release of Queue.unbounded binder %value:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_deferred_empty_releases_handle() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    d <- Deferred.empty()
+    _ <- Deferred.complete(d, "a")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("call ptr @sz_deferred_empty()"),
+            "expected sz_deferred_empty:\n{ir}"
+        );
+        assert!(
+            ir.contains("call void @sz_release(ptr %value)"),
+            "expected last-use release of Deferred.empty binder %value:\n{ir}"
         );
     }
 

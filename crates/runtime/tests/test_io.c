@@ -848,10 +848,10 @@ static SzIo *recover_unit(SzError *err, void *env) {
 }
 
 static SzIo *after_ref_get(void *value, void *env) {
+  (void)env;
   SzString *s = (SzString *)value;
   assert(s && strcmp(sz_string_cstr(s), "b") == 0);
   sz_release(value);
-  sz_ref_free((SzRef *)env);
   return pure_drop(NULL);
 }
 
@@ -864,7 +864,9 @@ static SzIo *after_ref_set(void *value, void *env) {
 static SzIo *after_ref(void *value, void *env) {
   (void)env;
   SzRef *r = (SzRef *)value;
-  return fm_drop(sz_ref_set_cstr(r, "b"), after_ref_set, r);
+  SzIo *io = fm_drop(sz_ref_set_cstr(r, "b"), after_ref_set, r);
+  sz_release(r);
+  return io;
 }
 
 static SzIo *fiber_join_cont(void *fiber, void *env) {

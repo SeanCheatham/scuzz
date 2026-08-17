@@ -1,10 +1,10 @@
 # Short-term plan
 
-## Slice: Drop Queue, Ref, and Deferred cells after last use
+## Slice: Release leftover Either and pair payloads on free
 
-`sz_queue_free` / `sz_ref_free` / `sz_deferred_free` now release leftover payloads. Compiled programs still leak the cells: `Queue.unbounded`, `Ref.of`, and `Deferred.empty` mark the handle borrowed, so last-use never frees it.
+Queue / Ref / Deferred cells are RC and last-use drops them. Either and pair still alias their fields: `sz_either_free` / `sz_pair_free` do not release payloads.
 
-- Mark those IO payloads owned so a last-use drops the handle (`sz_queue_free` / `sz_ref_free` / `sz_deferred_free`).
-- Do not retain the handle again. The constructor result is the owned cell.
-- Proof: compiler IR releases the binder after last use; `test_io` already proves free drops leftover payloads.
-- Out of scope: OS threads. Making Queue RC. Releasing Either or pair fields.
+- Make Either and pair RC, or release fields on free and keep the run result as the owner.
+- Do not alias fields after free. Getters that need a distinct RC retain first.
+- Proof: `test_io` both/attempt then free returns alloc stats to baseline; compiler last-use drops an owned `IO.both` / `attempt` binder when it applies.
+- Out of scope: OS threads. Fiber.join retain (join still aliases the fiber result).

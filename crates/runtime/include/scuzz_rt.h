@@ -15,7 +15,7 @@ void *sz_alloc(size_t size);
 void *sz_alloc_zero(size_t size);
 void sz_free(void *ptr);
 /* RC objects (strings, list cells, ADTs, boxed i64, map/set nodes, IO,
- * streams, resources, errors). List cells retain heads and shared tails. IO
+ * streams, resources, errors, Ref / Queue / Deferred). List cells retain heads and shared tails. IO
  * constructors take child IO nodes. Non-RC sz_alloc pointers no-op. */
 enum {
   SZ_RC_STRING = 1,
@@ -26,7 +26,10 @@ enum {
   SZ_RC_IO = 6,
   SZ_RC_STREAM = 7,
   SZ_RC_RESOURCE = 8,
-  SZ_RC_ERROR = 9
+  SZ_RC_ERROR = 9,
+  SZ_RC_REF = 10,
+  SZ_RC_QUEUE = 11,
+  SZ_RC_DEFERRED = 12
 };
 void *sz_rc_alloc(size_t size, uint32_t kind);
 void sz_retain(void *ptr);

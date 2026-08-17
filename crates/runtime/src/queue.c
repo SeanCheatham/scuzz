@@ -1,21 +1,15 @@
 #include "scuzz_rt.h"
 
 SzQueue *sz_queue_make(void) {
-  SzQueue *q = (SzQueue *)sz_alloc_zero(sizeof(SzQueue));
+  SzQueue *q = (SzQueue *)sz_rc_alloc(sizeof(SzQueue), SZ_RC_QUEUE);
   q->cap = 8;
+  q->len = 0;
+  q->waiters = NULL;
   q->items = (void **)sz_alloc(sizeof(void *) * q->cap);
   return q;
 }
 
-void sz_queue_free(SzQueue *q) {
-  size_t i;
-  if (!q)
-    return;
-  for (i = 0; i < q->len; i++)
-    sz_release(q->items[i]);
-  sz_free(q->items);
-  sz_free(q);
-}
+void sz_queue_free(SzQueue *q) { sz_release(q); }
 
 static void *queue_unbounded_thunk(void *env) {
   (void)env;
@@ -32,6 +26,7 @@ typedef struct QOfferEnv {
 static void *queue_offer_thunk(void *env) {
   QOfferEnv *e = (QOfferEnv *)env;
   if (sz_fiber_wake_queue(e->q, e->value)) {
+    sz_release(e->q);
     sz_free(e);
     return NULL;
   }
@@ -46,6 +41,7 @@ static void *queue_offer_thunk(void *env) {
     e->q->cap = ncap;
   }
   e->q->items[e->q->len++] = e->value;
+  sz_release(e->q);
   sz_free(e);
   return NULL;
 }
@@ -55,6 +51,7 @@ SzIo *sz_queue_offer(SzQueue *q, void *value) {
     sz_panic("sz_queue_offer(null)");
   QOfferEnv *e = (QOfferEnv *)sz_alloc(sizeof(QOfferEnv));
   e->q = q;
+  sz_retain(q);
   sz_retain(value);
   e->value = value;
   return sz_io_delay(queue_offer_thunk, e);

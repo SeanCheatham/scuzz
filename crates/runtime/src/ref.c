@@ -1,18 +1,13 @@
 #include "scuzz_rt.h"
 
 SzRef *sz_ref_make(void *initial) {
-  SzRef *r = (SzRef *)sz_alloc(sizeof(SzRef));
+  SzRef *r = (SzRef *)sz_rc_alloc(sizeof(SzRef), SZ_RC_REF);
   sz_retain(initial);
   r->value = initial;
   return r;
 }
 
-void sz_ref_free(SzRef *r) {
-  if (!r)
-    return;
-  sz_release(r->value);
-  sz_free(r);
-}
+void sz_ref_free(SzRef *r) { sz_release(r); }
 
 static SzRef *ref_make_drop(void *initial) {
   SzRef *r = sz_ref_make(initial);
@@ -33,13 +28,16 @@ SzIo *sz_ref_of_cstr(const char *initial) {
 
 static void *ref_get_thunk(void *env) {
   SzRef *r = (SzRef *)env;
-  sz_retain(r->value);
-  return r->value;
+  void *v = r->value;
+  sz_retain(v);
+  sz_release(r);
+  return v;
 }
 
 SzIo *sz_ref_get(SzRef *ref) {
   if (!ref)
     sz_panic("sz_ref_get(null)");
+  sz_retain(ref);
   return sz_io_delay(ref_get_thunk, ref);
 }
 
@@ -54,6 +52,7 @@ static void *ref_set_thunk(void *env) {
   e->ref->value = e->value;
   if (old != e->value)
     sz_release(old);
+  sz_release(e->ref);
   sz_free(e);
   return NULL;
 }
@@ -63,6 +62,7 @@ SzIo *sz_ref_set(SzRef *ref, void *value) {
     sz_panic("sz_ref_set(null)");
   RefSetEnv *e = (RefSetEnv *)sz_alloc(sizeof(RefSetEnv));
   e->ref = ref;
+  sz_retain(ref);
   sz_retain(value);
   e->value = value;
   return sz_io_delay(ref_set_thunk, e);
