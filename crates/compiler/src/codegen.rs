@@ -1690,6 +1690,7 @@ fn emit_expr(
                 "  %{prefix}_fm = call ptr @sz_io_flatmap(ptr {inner_io}, ptr @{cont_name}, ptr {env_ptr})"
             )
             .unwrap();
+            writeln!(code, "  call void @sz_release(ptr {inner_io})").unwrap();
             io_emitted(code, format!("%{prefix}_fm"), body_emitted.payload)
         }
         ExprKind::HandleErrorWith { inner, param, body } => {
@@ -5426,6 +5427,23 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of inner {name} after handleErrorWith:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_flatmap_releases_inner() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.pure("ok").flatMap(_ => IO.println("ok"))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_io_flatmap(ptr ";
+        let at = ir.find(needle).expect("expected sz_io_flatmap");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of inner {name} after flatMap:\n{ir}"
         );
     }
 

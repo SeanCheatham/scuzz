@@ -2,6 +2,12 @@
 
 #include <string.h>
 
+static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
+  SzIo *io = sz_io_flatmap(inner, cont, env);
+  sz_release(inner);
+  return io;
+}
+
 typedef struct LangResSt {
   SzLangResource *res;
   SzCont use;
@@ -35,7 +41,7 @@ static SzIo *lang_after_acquire(void *acquired, void *env) {
   st->acquired = acquired;
   SzIo *use_io = st->use(acquired, st->use_env);
   SzIo *rel = st->res->release(acquired, st->res->release_env);
-  SzIo *fin = sz_io_flatmap(rel, lang_fin_free_ok, st);
+  SzIo *fin = fm_drop(rel, lang_fin_free_ok, st);
   {
     SzIo *handled = sz_io_handle_error_with(fin, lang_fin_free_err, st);
     sz_release(fin);
@@ -72,7 +78,7 @@ SzIo *sz_lang_resource_use(SzLangResource *res, SzCont use, void *use_env) {
   sz_retain(use_env);
   st->use_env = use_env;
   sz_retain(res->acquire);
-  return sz_io_flatmap(res->acquire, lang_after_acquire, st);
+  return fm_drop(res->acquire, lang_after_acquire, st);
 }
 
 void sz_lang_resource_free(SzLangResource *res) { sz_release(res); }

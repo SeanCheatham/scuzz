@@ -14,6 +14,12 @@
 /* Process / args / console kit (Sys.args, IO.println, clang link).
  * TestRuntime rejects Sys.exec / Sys.spawn so sim cannot fork a child. */
 
+static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
+  SzIo *io = sz_io_flatmap(inner, cont, env);
+  sz_release(inner);
+  return io;
+}
+
 static char **g_argv = NULL;
 static int g_argc = 0;
 
@@ -168,13 +174,13 @@ static SzIo *sys_unwrap_line(void *value, void *env) {
 static SzIo *sys_after_poll(void *value, void *env) {
   (void)value;
   (void)env;
-  return sz_io_flatmap(sz_io_delay(sys_read_more, NULL), sys_unwrap_line, NULL);
+  return fm_drop(sz_io_delay(sys_read_more, NULL), sys_unwrap_line, NULL);
 }
 
 static SzIo *sys_poll_line(void *value, void *env) {
   (void)value;
   (void)env;
-  return sz_io_flatmap(sz_io_poll_readable(STDIN_FILENO), sys_after_poll, NULL);
+  return fm_drop(sz_io_poll_readable(STDIN_FILENO), sys_after_poll, NULL);
 }
 
 static SzIo *sys_after_try(void *value, void *env) {
@@ -191,11 +197,11 @@ static SzIo *sys_after_dispatch(void *value, void *env) {
   (void)env;
   if ((intptr_t)value)
     return sz_testrt_sys_read_line();
-  return sz_io_flatmap(sz_io_delay(sys_try_line, NULL), sys_after_try, NULL);
+  return fm_drop(sz_io_delay(sys_try_line, NULL), sys_after_try, NULL);
 }
 
 SzIo *sz_sys_read_line(void) {
-  return sz_io_flatmap(sz_io_delay(sys_read_dispatch, NULL), sys_after_dispatch,
+  return fm_drop(sz_io_delay(sys_read_dispatch, NULL), sys_after_dispatch,
                        NULL);
 }
 
@@ -267,12 +273,12 @@ static SzIo *sys_unwrap_n(void *value, void *env) {
 
 static SzIo *sys_after_poll_n(void *value, void *env) {
   (void)value;
-  return sz_io_flatmap(sz_io_delay(sys_read_more_n, env), sys_unwrap_n, env);
+  return fm_drop(sz_io_delay(sys_read_more_n, env), sys_unwrap_n, env);
 }
 
 static SzIo *sys_poll_n(void *value, void *env) {
   (void)value;
-  return sz_io_flatmap(sz_io_poll_readable(STDIN_FILENO), sys_after_poll_n, env);
+  return fm_drop(sz_io_poll_readable(STDIN_FILENO), sys_after_poll_n, env);
 }
 
 static SzIo *sys_after_try_n(void *value, void *env) {
@@ -297,13 +303,13 @@ static SzIo *sys_after_dispatch_n(void *value, void *env) {
     sz_free(env);
     return unwrap_sys(r, NULL);
   }
-  return sz_io_flatmap(sz_io_delay(sys_try_n, env), sys_after_try_n, env);
+  return fm_drop(sz_io_delay(sys_try_n, env), sys_after_try_n, env);
 }
 
 SzIo *sz_sys_read(int64_t n) {
   int64_t *p = (int64_t *)sz_alloc(sizeof(int64_t));
   *p = n < 0 ? 0 : n;
-  return sz_io_flatmap(sz_io_delay(sys_read_dispatch, NULL), sys_after_dispatch_n,
+  return fm_drop(sz_io_delay(sys_read_dispatch, NULL), sys_after_dispatch_n,
                        p);
 }
 
@@ -329,7 +335,7 @@ static void *sys_write_result(void *env) {
 SzIo *sz_sys_write(SzString *s) {
   if (!s)
     sz_panic("sz_sys_write(null)");
-  return sz_io_flatmap(sz_io_delay(sys_write_result, s), unwrap_sys, NULL);
+  return fm_drop(sz_io_delay(sys_write_result, s), unwrap_sys, NULL);
 }
 
 typedef struct ExecSt {
@@ -416,7 +422,7 @@ static void *sys_exec_reap(void *env) {
 
 static SzIo *exec_after_poll(void *value, void *env) {
   (void)value;
-  return sz_io_flatmap(sz_io_delay(sys_exec_reap, env), unwrap_sys, NULL);
+  return fm_drop(sz_io_delay(sys_exec_reap, env), unwrap_sys, NULL);
 }
 
 static SzIo *exec_finish(void *code, void *env) {
@@ -436,8 +442,8 @@ static SzIo *exec_after_start(void *value, void *env) {
   if (!r || r->is_err)
     return unwrap_sys(value, NULL);
   sz_free(r);
-  io = sz_io_flatmap(sz_io_poll_readable(st->read_fd), exec_after_poll, st);
-  return sz_io_flatmap(io, exec_finish, st);
+  io = fm_drop(sz_io_poll_readable(st->read_fd), exec_after_poll, st);
+  return fm_drop(io, exec_finish, st);
 }
 
 SzIo *sz_sys_exec(SzString *cmd) {
@@ -450,7 +456,7 @@ SzIo *sz_sys_exec(SzString *cmd) {
   st = (ExecSt *)sz_alloc_zero(sizeof(ExecSt));
   st->cmd = cmd;
   st->read_fd = -1;
-  io = sz_io_flatmap(sz_io_delay(sys_exec_start, st), exec_after_start, st);
+  io = fm_drop(sz_io_delay(sys_exec_start, st), exec_after_start, st);
   {
     SzIo *handled = sz_io_handle_error_with(io, exec_on_err, st);
     sz_release(io);
@@ -483,7 +489,7 @@ SzIo *sz_sys_spawn(SzString *cmd) {
     sz_panic("sz_sys_spawn(null)");
   if (sz_testrt_sys_is_fake())
     return sz_io_fail_cstr("Sys.spawn: rejected under TestRuntime");
-  return sz_io_flatmap(sz_io_delay(sys_spawn_result, cmd), unwrap_sys, NULL);
+  return fm_drop(sz_io_delay(sys_spawn_result, cmd), unwrap_sys, NULL);
 }
 
 static void *sys_alive_result(void *env) {
@@ -508,7 +514,7 @@ static void *sys_alive_result(void *env) {
 SzIo *sz_sys_alive(int64_t pid) {
   int64_t *p = (int64_t *)sz_alloc(sizeof(int64_t));
   *p = pid;
-  return sz_io_flatmap(sz_io_delay(sys_alive_result, p), unwrap_sys, NULL);
+  return fm_drop(sz_io_delay(sys_alive_result, p), unwrap_sys, NULL);
 }
 
 static void *sys_kill_result(void *env) {
@@ -531,7 +537,7 @@ static void *sys_kill_result(void *env) {
 SzIo *sz_sys_kill(int64_t pid) {
   int64_t *p = (int64_t *)sz_alloc(sizeof(int64_t));
   *p = pid;
-  return sz_io_flatmap(sz_io_delay(sys_kill_result, p), unwrap_sys, NULL);
+  return fm_drop(sz_io_delay(sys_kill_result, p), unwrap_sys, NULL);
 }
 
 static void *sys_getenv_result(void *env) {
@@ -550,5 +556,5 @@ static void *sys_getenv_result(void *env) {
 SzIo *sz_sys_getenv(SzString *key) {
   if (!key)
     sz_panic("sz_sys_getenv(null)");
-  return sz_io_flatmap(sz_io_delay(sys_getenv_result, key), unwrap_sys, NULL);
+  return fm_drop(sz_io_delay(sys_getenv_result, key), unwrap_sys, NULL);
 }

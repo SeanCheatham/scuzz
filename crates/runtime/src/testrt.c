@@ -6,6 +6,12 @@
 
 /* TestRuntime: install / reset fake interpreters. */
 
+static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
+  SzIo *io = sz_io_flatmap(inner, cont, env);
+  sz_release(inner);
+  return io;
+}
+
 void sz_testrt_clock_reset_live(void);
 void sz_testrt_random_reset_live(void);
 static void sz_testrt_fs_reset_live(void);
@@ -155,7 +161,7 @@ static void *mem_read(void *env) {
 }
 
 SzIo *sz_testrt_fs_read(SzString *path) {
-  return sz_io_flatmap(sz_io_delay(mem_read, path), unwrap_box, NULL);
+  return fm_drop(sz_io_delay(mem_read, path), unwrap_box, NULL);
 }
 
 typedef struct {
@@ -244,7 +250,7 @@ SzIo *sz_testrt_fs_write(SzString *path, SzString *contents) {
   WriteEnv *e = (WriteEnv *)sz_alloc(sizeof(WriteEnv));
   e->path = path;
   e->contents = contents;
-  return sz_io_flatmap(sz_io_delay(mem_write, e), unwrap_box, NULL);
+  return fm_drop(sz_io_delay(mem_write, e), unwrap_box, NULL);
 }
 
 static int is_direct_child(const char *dir, const char *child) {
@@ -301,7 +307,7 @@ static void *mem_list(void *env) {
 }
 
 SzIo *sz_testrt_fs_list(SzString *path) {
-  return sz_io_flatmap(sz_io_delay(mem_list, path), unwrap_box, NULL);
+  return fm_drop(sz_io_delay(mem_list, path), unwrap_box, NULL);
 }
 
 static void *mem_mkdirs(void *env) {
@@ -350,7 +356,7 @@ static void *mem_mkdirs(void *env) {
 }
 
 SzIo *sz_testrt_fs_mkdirs(SzString *path) {
-  return sz_io_flatmap(sz_io_delay(mem_mkdirs, path), unwrap_box, NULL);
+  return fm_drop(sz_io_delay(mem_mkdirs, path), unwrap_box, NULL);
 }
 
 static char *canon_path(const char *p) {
@@ -429,7 +435,7 @@ static void *mem_canonicalize(void *env) {
 }
 
 SzIo *sz_testrt_fs_canonicalize(SzString *path) {
-  return sz_io_flatmap(sz_io_delay(mem_canonicalize, path), unwrap_box, NULL);
+  return fm_drop(sz_io_delay(mem_canonicalize, path), unwrap_box, NULL);
 }
 
 /* --- stub network -------------------------------------------------------- */
@@ -554,7 +560,7 @@ static void *stub_http_get(void *env) {
 }
 
 SzIo *sz_testrt_net_http_get(SzString *url) {
-  return sz_io_flatmap(sz_io_delay(stub_http_get, url), unwrap_box, NULL);
+  return fm_drop(sz_io_delay(stub_http_get, url), unwrap_box, NULL);
 }
 
 const char *sz_testrt_net_last_serve_body(void) {

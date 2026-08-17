@@ -1,10 +1,10 @@
 # Short-term plan
 
-## Slice: Drop owned inner IO after flatMap
+## Slice: Drop owned inner IO after IO.attempt
 
-`handleErrorWith` retains inner and drops the caller ref. `flatMap` stores inner without retain, so the inner graph can alias the bind node.
+`flatMap` retains inner and drops the caller ref. `IO.attempt` stores inner without retain, so the inner graph can alias the attempt node.
 
-- Retain inner in `sz_io_flatmap`.
+- Retain inner in `sz_io_attempt`.
 - Drop the caller ref after the call.
-- Proof: compiler IR for `IO.pure("ok").flatMap(_ => IO.println("ok"))` shows `sz_release` of the inner after the call.
+- Proof: compiler IR for `IO.fail("boom").attempt` shows `sz_release` of the inner after the call.
 - Out of scope: OS threads.

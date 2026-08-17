@@ -13,6 +13,12 @@
 #include <sys/socket.h>
 #include <unistd.h>
 
+static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
+  SzIo *io = sz_io_flatmap(inner, cont, env);
+  sz_release(inner);
+  return io;
+}
+
 /* Blessed Net.httpGet — live HTTP/1.0 GET or TestRuntime stub map.
  * Live hostnames query A and AAAA together (park on poll). CNAME chains
  * re-query both (cap 5). When both addresses exist, start AAAA first and wait
@@ -898,7 +904,7 @@ static SzIo *get_unwrap_read(void *value, void *env) {
 static SzIo *get_after_write_poll(void *value, void *env) {
   GetSt *st = (GetSt *)env;
   (void)value;
-  return sz_io_flatmap(sz_io_delay(get_check_write, st), get_unwrap_write, st);
+  return fm_drop(sz_io_delay(get_check_write, st), get_unwrap_write, st);
 }
 
 static SzIo *race_drop(SzIo *left, SzIo *right) {
@@ -934,13 +940,13 @@ static SzIo *get_poll_write(void *value, void *env) {
       left = 1;
     ready = race_drop(ready, sz_io_sleep_ms(left));
   }
-  return sz_io_flatmap(ready, get_after_write_poll, st);
+  return fm_drop(ready, get_after_write_poll, st);
 }
 
 static SzIo *get_after_read_poll(void *value, void *env) {
   GetSt *st = (GetSt *)env;
   (void)value;
-  return sz_io_flatmap(sz_io_delay(get_read, st), get_unwrap_read, st);
+  return fm_drop(sz_io_delay(get_read, st), get_unwrap_read, st);
 }
 
 static SzIo *get_poll_read(void *value, void *env) {
@@ -954,7 +960,7 @@ static SzIo *get_poll_read(void *value, void *env) {
   if (left < 1)
     left = 1;
   ready = race_drop(sz_io_poll_readable(st->fd), sz_io_sleep_ms(left));
-  return sz_io_flatmap(ready, get_after_read_poll, st);
+  return fm_drop(ready, get_after_read_poll, st);
 }
 
 static SzIo *get_finish(void *body, void *env) {
@@ -982,7 +988,7 @@ static SzIo *get_unwrap_dns(void *value, void *env) {
 static SzIo *get_after_dns_poll(void *value, void *env) {
   GetSt *st = (GetSt *)env;
   (void)value;
-  return sz_io_flatmap(sz_io_delay(get_dns_recv, st), get_unwrap_dns, st);
+  return fm_drop(sz_io_delay(get_dns_recv, st), get_unwrap_dns, st);
 }
 
 static SzIo *get_poll_dns(void *value, void *env) {
@@ -994,13 +1000,13 @@ static SzIo *get_poll_dns(void *value, void *env) {
   if (left < 1)
     left = 1;
   ready = race_drop(sz_io_poll_readable(st->dns_fd), sz_io_sleep_ms(left));
-  return sz_io_flatmap(ready, get_after_dns_poll, st);
+  return fm_drop(ready, get_after_dns_poll, st);
 }
 
 static SzIo *get_after_resolved(void *value, void *env) {
   GetSt *st = (GetSt *)env;
   (void)value;
-  return sz_io_flatmap(sz_io_delay(get_tcp_connect, st), unwrap_net, NULL);
+  return fm_drop(sz_io_delay(get_tcp_connect, st), unwrap_net, NULL);
 }
 
 static SzIo *get_after_start(void *value, void *env) {
@@ -1010,7 +1016,7 @@ static SzIo *get_after_start(void *value, void *env) {
     return unwrap_net(value, NULL);
   sz_free(r);
   if (st->dns_fd >= 0)
-    return sz_io_flatmap(get_poll_dns(NULL, st), get_after_resolved, st);
+    return fm_drop(get_poll_dns(NULL, st), get_after_resolved, st);
   return get_after_resolved(NULL, st);
 }
 
@@ -1019,8 +1025,8 @@ static SzIo *get_after_connect(void *value, void *env) {
   SzIo *io;
   (void)value;
   io = get_poll_write(NULL, st);
-  io = sz_io_flatmap(io, get_poll_read, st);
-  return sz_io_flatmap(io, get_finish, st);
+  io = fm_drop(io, get_poll_read, st);
+  return fm_drop(io, get_finish, st);
 }
 
 static void *get_dispatch(void *env) {
@@ -1036,8 +1042,8 @@ static SzIo *get_after_dispatch(void *value, void *env) {
     get_free(st);
     return sz_testrt_net_http_get(url);
   }
-  io = sz_io_flatmap(sz_io_delay(get_start, st), get_after_start, st);
-  io = sz_io_flatmap(io, get_after_connect, st);
+  io = fm_drop(sz_io_delay(get_start, st), get_after_start, st);
+  io = fm_drop(io, get_after_connect, st);
   return handle_drop(io, get_on_err, st);
 }
 
@@ -1051,7 +1057,7 @@ SzIo *sz_net_http_get(SzString *url) {
   st->fd4 = -1;
   st->fd6 = -1;
   st->dns_fd = -1;
-  return sz_io_flatmap(sz_io_delay(get_dispatch, st), get_after_dispatch, st);
+  return fm_drop(sz_io_delay(get_dispatch, st), get_after_dispatch, st);
 }
 
 /* HTTP/1.0 GET server. Listen and connection fds are nonblocking. The fiber
@@ -1449,7 +1455,7 @@ static SzIo *serve_unwrap_write(void *value, void *env) {
 static SzIo *serve_after_accept_poll(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
   (void)value;
-  return sz_io_flatmap(sz_io_delay(serve_accept, st), serve_unwrap_accept, st);
+  return fm_drop(sz_io_delay(serve_accept, st), serve_unwrap_accept, st);
 }
 
 static SzIo *serve_poll_then_accept(void *value, void *env) {
@@ -1461,13 +1467,13 @@ static SzIo *serve_poll_then_accept(void *value, void *env) {
                        sz_io_poll_readable(st->listen6_fd));
   else
     ready = sz_io_poll_readable(st->listen_fd);
-  return sz_io_flatmap(ready, serve_after_accept_poll, st);
+  return fm_drop(ready, serve_after_accept_poll, st);
 }
 
 static SzIo *serve_after_conn_read_poll(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
   (void)value;
-  return sz_io_flatmap(sz_io_delay(serve_read_req, st), serve_unwrap_read, st);
+  return fm_drop(sz_io_delay(serve_read_req, st), serve_unwrap_read, st);
 }
 
 static SzIo *serve_poll_conn_read(void *value, void *env) {
@@ -1479,13 +1485,13 @@ static SzIo *serve_poll_conn_read(void *value, void *env) {
   if (left < 1)
     left = 1;
   ready = race_drop(sz_io_poll_readable(st->conn_fd), sz_io_sleep_ms(left));
-  return sz_io_flatmap(ready, serve_after_conn_read_poll, st);
+  return fm_drop(ready, serve_after_conn_read_poll, st);
 }
 
 static SzIo *serve_after_conn_write_poll(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
   (void)value;
-  return sz_io_flatmap(sz_io_delay(serve_write_close, st), serve_unwrap_write, st);
+  return fm_drop(sz_io_delay(serve_write_close, st), serve_unwrap_write, st);
 }
 
 static SzIo *serve_poll_conn_write(void *value, void *env) {
@@ -1499,7 +1505,7 @@ static SzIo *serve_poll_conn_write(void *value, void *env) {
   if (left < 1)
     left = 1;
   ready = race_drop(sz_io_poll_writable(st->conn_fd), sz_io_sleep_ms(left));
-  return sz_io_flatmap(ready, serve_after_conn_write_poll, st);
+  return fm_drop(ready, serve_after_conn_write_poll, st);
 }
 
 static SzIo *serve_after_listen(void *value, void *env) {
@@ -1507,9 +1513,9 @@ static SzIo *serve_after_listen(void *value, void *env) {
   SzIo *io;
   (void)value;
   if (sz_testrt_net_is_fake())
-    return sz_io_flatmap(sz_io_delay(serve_accept, st), unwrap_net, NULL);
+    return fm_drop(sz_io_delay(serve_accept, st), unwrap_net, NULL);
   io = serve_poll_then_accept(NULL, st);
-  return sz_io_flatmap(io, serve_poll_conn_read, st);
+  return fm_drop(io, serve_poll_conn_read, st);
 }
 
 static SzIo *serve_after_write(void *value, void *env) {
@@ -1534,7 +1540,7 @@ static SzIo *serve_after_body(void *body, void *env) {
   st->body = body;
   st->woff = 0;
   if (sz_testrt_net_is_fake())
-    return sz_io_flatmap(sz_io_delay(serve_write_close, st), unwrap_net, NULL);
+    return fm_drop(sz_io_delay(serve_write_close, st), unwrap_net, NULL);
   return serve_poll_conn_write(NULL, st);
 }
 
@@ -1545,8 +1551,8 @@ static SzIo *serve_on_handler_err(SzError *err, void *env) {
 static SzIo *serve_after_path(void *path, void *env) {
   ServeSt *st = (ServeSt *)env;
   SzIo *io = st->handler(path, st->henv);
-  io = sz_io_flatmap(io, serve_after_body, st);
-  io = sz_io_flatmap(io, serve_after_write, st);
+  io = fm_drop(io, serve_after_body, st);
+  io = fm_drop(io, serve_after_write, st);
   return handle_drop(io, serve_on_handler_err, st);
 }
 
@@ -1557,9 +1563,9 @@ static SzIo *serve_round(ServeSt *st) {
     serve_free(st);
     return sz_io_pure(NULL);
   }
-  prog = sz_io_flatmap(sz_io_delay(serve_ensure_listen, st), unwrap_net, NULL);
-  prog = sz_io_flatmap(prog, serve_after_listen, st);
-  return sz_io_flatmap(prog, serve_after_path, st);
+  prog = fm_drop(sz_io_delay(serve_ensure_listen, st), unwrap_net, NULL);
+  prog = fm_drop(prog, serve_after_listen, st);
+  return fm_drop(prog, serve_after_path, st);
 }
 
 static SzIo *serve_on_err(SzError *err, void *env) {

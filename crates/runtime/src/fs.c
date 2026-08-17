@@ -14,6 +14,12 @@
  * Fake vs live is chosen when the IO runs (after sz_testrt_install in
  * runtime_main), not when the graph is built. */
 
+static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
+  SzIo *io = sz_io_flatmap(inner, cont, env);
+  sz_release(inner);
+  return io;
+}
+
 typedef struct {
   int is_err;
   union {
@@ -87,13 +93,13 @@ static void *fs_dispatch(void *env) {
 static SzIo *fs_after_read(void *value, void *env) {
   if ((intptr_t)value)
     return sz_testrt_fs_read((SzString *)env);
-  return sz_io_flatmap(sz_io_delay(fs_read_result, env), unwrap_fs, NULL);
+  return fm_drop(sz_io_delay(fs_read_result, env), unwrap_fs, NULL);
 }
 
 SzIo *sz_fs_read(SzString *path) {
   if (!path)
     sz_panic("sz_fs_read(null)");
-  return sz_io_flatmap(sz_io_delay(fs_dispatch, NULL), fs_after_read, path);
+  return fm_drop(sz_io_delay(fs_dispatch, NULL), fs_after_read, path);
 }
 
 static void *fs_write_result(void *env) {
@@ -134,7 +140,7 @@ static SzIo *fs_after_write(void *value, void *env) {
     sz_free(e);
     return io;
   }
-  return sz_io_flatmap(sz_io_delay(fs_write_result, e), unwrap_fs, NULL);
+  return fm_drop(sz_io_delay(fs_write_result, e), unwrap_fs, NULL);
 }
 
 SzIo *sz_fs_write(SzString *path, SzString *contents) {
@@ -144,7 +150,7 @@ SzIo *sz_fs_write(SzString *path, SzString *contents) {
   e = (FsWriteEnv *)sz_alloc(sizeof(FsWriteEnv));
   e->path = path;
   e->contents = contents ? contents : sz_string_from_cstr("");
-  return sz_io_flatmap(sz_io_delay(fs_dispatch, NULL), fs_after_write, e);
+  return fm_drop(sz_io_delay(fs_dispatch, NULL), fs_after_write, e);
 }
 
 static void *fs_list_result(void *env) {
@@ -185,13 +191,13 @@ static void *fs_list_result(void *env) {
 static SzIo *fs_after_list(void *value, void *env) {
   if ((intptr_t)value)
     return sz_testrt_fs_list((SzString *)env);
-  return sz_io_flatmap(sz_io_delay(fs_list_result, env), unwrap_fs, NULL);
+  return fm_drop(sz_io_delay(fs_list_result, env), unwrap_fs, NULL);
 }
 
 SzIo *sz_fs_list(SzString *path) {
   if (!path)
     sz_panic("sz_fs_list(null)");
-  return sz_io_flatmap(sz_io_delay(fs_dispatch, NULL), fs_after_list, path);
+  return fm_drop(sz_io_delay(fs_dispatch, NULL), fs_after_list, path);
 }
 
 static void *fs_mkdirs_result(void *env) {
@@ -234,13 +240,13 @@ static void *fs_mkdirs_result(void *env) {
 static SzIo *fs_after_mkdirs(void *value, void *env) {
   if ((intptr_t)value)
     return sz_testrt_fs_mkdirs((SzString *)env);
-  return sz_io_flatmap(sz_io_delay(fs_mkdirs_result, env), unwrap_fs, NULL);
+  return fm_drop(sz_io_delay(fs_mkdirs_result, env), unwrap_fs, NULL);
 }
 
 SzIo *sz_fs_mkdirs(SzString *path) {
   if (!path)
     sz_panic("sz_fs_mkdirs(null)");
-  return sz_io_flatmap(sz_io_delay(fs_dispatch, NULL), fs_after_mkdirs, path);
+  return fm_drop(sz_io_delay(fs_dispatch, NULL), fs_after_mkdirs, path);
 }
 
 static void *fs_canonicalize_result(void *env) {
@@ -264,12 +270,12 @@ static void *fs_canonicalize_result(void *env) {
 static SzIo *fs_after_canonicalize(void *value, void *env) {
   if ((intptr_t)value)
     return sz_testrt_fs_canonicalize((SzString *)env);
-  return sz_io_flatmap(sz_io_delay(fs_canonicalize_result, env), unwrap_fs, NULL);
+  return fm_drop(sz_io_delay(fs_canonicalize_result, env), unwrap_fs, NULL);
 }
 
 SzIo *sz_fs_canonicalize(SzString *path) {
   if (!path)
     sz_panic("sz_fs_canonicalize(null)");
-  return sz_io_flatmap(sz_io_delay(fs_dispatch, NULL), fs_after_canonicalize,
+  return fm_drop(sz_io_delay(fs_dispatch, NULL), fs_after_canonicalize,
                        path);
 }

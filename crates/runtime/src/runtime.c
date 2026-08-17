@@ -14,6 +14,12 @@
 #include <CoreFoundation/CoreFoundation.h>
 #endif
 
+static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
+  SzIo *io = sz_io_flatmap(inner, cont, env);
+  sz_release(inner);
+  return io;
+}
+
 /* --- panic / alloc ------------------------------------------------------- */
 
 /* Header before user pointer: [size_t nbytes][user bytes...] */
@@ -549,7 +555,7 @@ static SzIo *attempt_as_result_cont(void *value, void *env) {
 SzIo *sz_io_attempt_as_result(SzIo *inner) {
   if (!inner)
     sz_panic("sz_io_attempt_as_result(null)");
-  return sz_io_flatmap(sz_io_attempt(inner), attempt_as_result_cont, NULL);
+  return fm_drop(sz_io_attempt(inner), attempt_as_result_cont, NULL);
 }
 
 SzAdt *sz_adt_new(int32_t tag, void *payload) {
@@ -601,6 +607,7 @@ SzIo *sz_io_flatmap(SzIo *inner, SzCont cont, void *env) {
   if (!inner || !cont)
     sz_panic("sz_io_flatmap(null)");
   SzIo *io = sz_io_new(SZ_IO_FLATMAP);
+  sz_retain(inner);
   io->as.flatmap.inner = inner;
   io->as.flatmap.cont = cont;
   io->as.flatmap.env = env;
@@ -1025,14 +1032,14 @@ static SzIo *ensure_run_fin_ok(SzIo *fin, void *value) {
   EnsureExit *e = (EnsureExit *)sz_alloc(sizeof(EnsureExit));
   e->value = value;
   e->err = NULL;
-  return sz_io_flatmap(sz_io_attempt(fin), ensure_after_attempt_ok, e);
+  return fm_drop(sz_io_attempt(fin), ensure_after_attempt_ok, e);
 }
 
 static SzIo *ensure_run_fin_err(SzIo *fin, SzError *err) {
   EnsureExit *e = (EnsureExit *)sz_alloc(sizeof(EnsureExit));
   e->value = NULL;
   e->err = err;
-  return sz_io_flatmap(sz_io_attempt(fin), ensure_after_attempt_err, e);
+  return fm_drop(sz_io_attempt(fin), ensure_after_attempt_err, e);
 }
 
 static SzIo *ignore_then_io(void *ignored, void *env) {
@@ -1053,7 +1060,7 @@ static SzIo *drain_ensure_finalizers(ContFrame *stack) {
       if (!acc)
         acc = fin;
       else
-        acc = sz_io_flatmap(acc, ignore_then_io, fin);
+        acc = fm_drop(acc, ignore_then_io, fin);
     } else if (c->kind == CONT_LOOP)
       sz_release(c->loop_inner);
     sz_free(c);
@@ -1709,7 +1716,7 @@ static int step_fiber(Sched *s, Fiber *f) {
   }
   case SZ_IO_ATTEMPT: {
     SzIo *inner = io_child(cur, &cur->as.attempt_inner);
-    SzIo *mapped = sz_io_flatmap(inner, attempt_ok, NULL);
+    SzIo *mapped = fm_drop(inner, attempt_ok, NULL);
     SzIo *handled = sz_io_handle_error_with(mapped, attempt_err, NULL);
     sz_release(mapped);
     fiber_set_cur(f, handled);
