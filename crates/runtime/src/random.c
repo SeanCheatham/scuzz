@@ -55,10 +55,15 @@ typedef struct {
 static void *random_next_thunk(void *env) {
   RandEnv *e = (RandEnv *)env;
   int64_t bound = e ? e->bound : 0;
+  int64_t n;
   if (bound <= 0)
-    return sz_box_i64(0);
-  uint64_t u = next_u64() >> 33;
-  return sz_box_i64((int64_t)(u % (uint64_t)bound));
+    n = 0;
+  else {
+    uint64_t u = next_u64() >> 33;
+    n = (int64_t)(u % (uint64_t)bound);
+  }
+  sz_free(e);
+  return sz_box_i64(n);
 }
 
 SzIo *sz_random_next_int(int64_t bound) {

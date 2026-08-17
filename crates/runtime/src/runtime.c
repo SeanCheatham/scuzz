@@ -173,6 +173,20 @@ static int sz_is_rc(const void *ptr) {
   return sz_rc_hdr(ptr)->magic == SZ_RC_MAGIC;
 }
 
+static int sz_is_alloc(const void *ptr) {
+  uintptr_t p = (uintptr_t)ptr;
+  if (p < 4096 || (p & 7) != 0)
+    return 0;
+  return sz_rc_hdr(ptr)->magic == SZ_ALLOC_MAGIC;
+}
+
+static void delay_env_drop(void *env) {
+  if (sz_is_rc(env))
+    sz_release(env);
+  else if (sz_is_alloc(env))
+    sz_free(env);
+}
+
 void *sz_rc_alloc(size_t size, uint32_t kind) {
   void *p = sz_alloc(size);
   SzRcHdr *h = sz_rc_hdr(p);
@@ -325,7 +339,7 @@ void sz_release(void *ptr) {
       io->as.fail = NULL;
       break;
     case SZ_IO_DELAY:
-      sz_release(io->as.delay.env);
+      delay_env_drop(io->as.delay.env);
       io->as.delay.env = NULL;
       break;
     default:

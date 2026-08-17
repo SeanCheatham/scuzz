@@ -47,31 +47,28 @@ SzIo *sz_ref_get(SzRef *ref) {
   }
 }
 
-typedef struct RefSetEnv {
-  SzRef *ref;
-  void *value;
-} RefSetEnv;
-
 static void *ref_set_thunk(void *env) {
-  RefSetEnv *e = (RefSetEnv *)env;
-  void *old = e->ref->value;
-  e->ref->value = e->value;
-  if (old != e->value)
+  SzPair *p = (SzPair *)env;
+  SzRef *ref = (SzRef *)p->left;
+  void *value = p->right;
+  void *old = ref->value;
+  ref->value = value;
+  p->right = NULL;
+  if (old != value)
     sz_release(old);
-  sz_release(e->ref);
-  sz_free(e);
+  sz_release(p);
   return NULL;
 }
 
 SzIo *sz_ref_set(SzRef *ref, void *value) {
   if (!ref)
     sz_panic("sz_ref_set(null)");
-  RefSetEnv *e = (RefSetEnv *)sz_alloc(sizeof(RefSetEnv));
-  e->ref = ref;
-  sz_retain(ref);
-  sz_retain(value);
-  e->value = value;
-  return sz_io_delay(ref_set_thunk, e);
+  {
+    SzPair *p = sz_pair_new(ref, value);
+    SzIo *io = sz_io_delay(ref_set_thunk, p);
+    sz_release(p);
+    return io;
+  }
 }
 
 static SzIo *ref_set_drop(SzRef *ref, void *value) {

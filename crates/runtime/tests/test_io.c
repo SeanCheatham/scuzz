@@ -1002,6 +1002,32 @@ int main(void) {
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzString *s0 = sz_string_from_cstr("a");
+      SzRef *ref = sz_ref_make(s0);
+      sz_release(s0);
+      s = sz_string_from_cstr("b");
+      io = sz_ref_set(ref, s);
+      sz_release(s);
+      sz_release(io);
+      sz_ref_free(ref);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      int64_t *p = (int64_t *)sz_alloc(sizeof(int64_t));
+      *p = 7;
+      io = sz_io_delay(delay_inc, p);
+      sz_release(io);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
   }
 
   /* println + flatMap */
