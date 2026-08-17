@@ -19,34 +19,33 @@ static void *deferred_empty_thunk(void *env) {
 
 SzIo *sz_deferred_empty(void) { return sz_io_delay(deferred_empty_thunk, NULL); }
 
-typedef struct DefCompleteEnv {
-  SzDeferred *d;
-  void *value;
-} DefCompleteEnv;
-
 static void *deferred_complete_thunk(void *env) {
-  DefCompleteEnv *e = (DefCompleteEnv *)env;
-  if (!e->d->completed) {
-    e->d->completed = 1;
-    e->d->ok = 1;
-    e->d->value = e->value;
-    sz_fiber_wake_deferred(e->d);
-  } else
-    sz_release(e->value);
-  sz_release(e->d);
-  sz_free(e);
+  SzPair *p = (SzPair *)env;
+  SzDeferred *d = (SzDeferred *)p->left;
+  void *value = p->right;
+  if (!d->completed) {
+    d->completed = 1;
+    d->ok = 1;
+    d->value = value;
+    p->right = NULL;
+    sz_fiber_wake_deferred(d);
+  } else {
+    sz_release(value);
+    p->right = NULL;
+  }
+  sz_release(p);
   return NULL;
 }
 
 SzIo *sz_deferred_complete(SzDeferred *d, void *value) {
   if (!d)
     sz_panic("sz_deferred_complete(null)");
-  DefCompleteEnv *e = (DefCompleteEnv *)sz_alloc(sizeof(DefCompleteEnv));
-  e->d = d;
-  sz_retain(d);
-  sz_retain(value);
-  e->value = value;
-  return sz_io_delay(deferred_complete_thunk, e);
+  {
+    SzPair *p = sz_pair_new(d, value);
+    SzIo *io = sz_io_delay(deferred_complete_thunk, p);
+    sz_release(p);
+    return io;
+  }
 }
 
 static SzIo *deferred_complete_drop(SzDeferred *d, void *value) {

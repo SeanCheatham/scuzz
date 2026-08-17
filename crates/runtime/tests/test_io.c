@@ -1556,6 +1556,19 @@ int main(void) {
     assert(live_bytes == base_bytes);
 
     sz_alloc_stats(&base_bytes, &base_count);
+    q = sz_queue_make();
+    s = sz_string_from_cstr("offer");
+    {
+      SzIo *io = sz_queue_offer(q, s);
+      sz_release(s);
+      sz_release(io);
+    }
+    sz_queue_free(q);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
     s = sz_string_from_cstr("keep");
     ref = sz_ref_make(s);
     sz_release(s);
@@ -1581,6 +1594,19 @@ int main(void) {
     def = sz_deferred_make();
     r = sz_io_unsafe_run(sz_deferred_complete_cstr(def, "done"));
     assert(r.ok);
+    sz_deferred_free(def);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    def = sz_deferred_make();
+    s = sz_string_from_cstr("unused");
+    {
+      SzIo *io = sz_deferred_complete(def, s);
+      sz_release(s);
+      sz_release(io);
+    }
     sz_deferred_free(def);
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);

@@ -18,43 +18,40 @@ static void *queue_unbounded_thunk(void *env) {
 
 SzIo *sz_queue_unbounded(void) { return sz_io_delay(queue_unbounded_thunk, NULL); }
 
-typedef struct QOfferEnv {
-  SzQueue *q;
-  void *value;
-} QOfferEnv;
-
 static void *queue_offer_thunk(void *env) {
-  QOfferEnv *e = (QOfferEnv *)env;
-  if (sz_fiber_wake_queue(e->q, e->value)) {
-    sz_release(e->q);
-    sz_free(e);
+  SzPair *p = (SzPair *)env;
+  SzQueue *q = (SzQueue *)p->left;
+  void *value = p->right;
+  if (sz_fiber_wake_queue(q, value)) {
+    p->right = NULL;
+    sz_release(p);
     return NULL;
   }
-  if (e->q->len == e->q->cap) {
-    size_t ncap = e->q->cap * 2;
+  if (q->len == q->cap) {
+    size_t ncap = q->cap * 2;
     void **nitems = (void **)sz_alloc(sizeof(void *) * ncap);
     size_t i;
-    for (i = 0; i < e->q->len; i++)
-      nitems[i] = e->q->items[i];
-    sz_free(e->q->items);
-    e->q->items = nitems;
-    e->q->cap = ncap;
+    for (i = 0; i < q->len; i++)
+      nitems[i] = q->items[i];
+    sz_free(q->items);
+    q->items = nitems;
+    q->cap = ncap;
   }
-  e->q->items[e->q->len++] = e->value;
-  sz_release(e->q);
-  sz_free(e);
+  q->items[q->len++] = value;
+  p->right = NULL;
+  sz_release(p);
   return NULL;
 }
 
 SzIo *sz_queue_offer(SzQueue *q, void *value) {
   if (!q)
     sz_panic("sz_queue_offer(null)");
-  QOfferEnv *e = (QOfferEnv *)sz_alloc(sizeof(QOfferEnv));
-  e->q = q;
-  sz_retain(q);
-  sz_retain(value);
-  e->value = value;
-  return sz_io_delay(queue_offer_thunk, e);
+  {
+    SzPair *p = sz_pair_new(q, value);
+    SzIo *io = sz_io_delay(queue_offer_thunk, p);
+    sz_release(p);
+    return io;
+  }
 }
 
 static SzIo *queue_offer_drop(SzQueue *q, void *value) {
