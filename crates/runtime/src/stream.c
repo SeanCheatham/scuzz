@@ -62,30 +62,35 @@ SzStream *sz_stream_evalmap(SzStream *inner, SzCont f, void *env) {
 SzStream *sz_stream_filter(SzStream *inner, SzStreamPred pred, void *env) {
   if (!pred)
     sz_panic("sz_stream_filter(null pred)");
+  sz_retain(env);
   return st_new(SZ_ST_FILTER, st_keep(inner), (void *)pred, env);
 }
 
 SzStream *sz_stream_map(SzStream *inner, SzStreamMapFn f, void *env) {
   if (!f)
     sz_panic("sz_stream_map(null fn)");
+  sz_retain(env);
   return st_new(SZ_ST_MAP, st_keep(inner), (void *)f, env);
 }
 
 SzStream *sz_stream_takewhile(SzStream *inner, SzStreamPred pred, void *env) {
   if (!pred)
     sz_panic("sz_stream_takewhile(null pred)");
+  sz_retain(env);
   return st_new(SZ_ST_TAKEWHILE, st_keep(inner), (void *)pred, env);
 }
 
 SzStream *sz_stream_dropwhile(SzStream *inner, SzStreamPred pred, void *env) {
   if (!pred)
     sz_panic("sz_stream_dropwhile(null pred)");
+  sz_retain(env);
   return st_new(SZ_ST_DROPWHILE, st_keep(inner), (void *)pred, env);
 }
 
 SzStream *sz_stream_find(SzStream *inner, SzStreamPred pred, void *env) {
   if (!pred)
     sz_panic("sz_stream_find(null pred)");
+  sz_retain(env);
   return st_new(SZ_ST_FIND, st_keep(inner), (void *)pred, env);
 }
 

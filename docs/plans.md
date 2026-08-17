@@ -1,10 +1,9 @@
 # Short-term plan
 
-## Slice: Release Stream.filter / map / takeWhile capture lists
+## Slice: Drop owned Resource after last use
 
-`Resource` and `Net.serve` callback envs drop when the owner frees. `Stream.filter` / `map` / `takeWhile` / `dropWhile` / `find` unpack the pack and leave the capture env on the stream without retain. Stream free already releases `env`.
+Callback capture lists drop when the View, session, stream, resource, or server frees. An owned `Resource` from `Resource.make` has no last-use release.
 
-- Retain the callback env in those combinators.
-- Drop the construction ref of the capture list after packing the lambda.
-- Proof: compiler IR for `Stream.drain(Stream.filter(Stream.emit("a"), x => tag))` with a captured `tag` shows `sz_release` of the capture list after the pack.
-- Out of scope: OS threads.
+- Drop an owned Resource after `Resource.use` when it is the last use.
+- Proof: compiler IR for `Resource.use(Resource.make(IO.pure("tok"), t => IO.println(t)), t => IO.println(t))` shows `sz_release` of the resource after the call.
+- Out of scope: OS threads. `sz_lang_resource_free` already releases the callback env.

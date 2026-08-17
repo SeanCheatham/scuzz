@@ -2320,6 +2320,9 @@ fn emit_pred_lambda(
     )
     .unwrap();
     writeln!(code, "  call void @sz_release(ptr %{prefix}_cl1)").unwrap();
+    if env_ptr != "null" {
+        writeln!(code, "  call void @sz_release(ptr {env_ptr})").unwrap();
+    }
     owned_ptr(code, format!("%{prefix}_cl2"))
 }
 
@@ -2414,6 +2417,9 @@ fn emit_smap_lambda(
     )
     .unwrap();
     writeln!(code, "  call void @sz_release(ptr %{prefix}_cl1)").unwrap();
+    if env_ptr != "null" {
+        writeln!(code, "  call void @sz_release(ptr {env_ptr})").unwrap();
+    }
     owned_ptr(code, format!("%{prefix}_cl2"))
 }
 
@@ -6397,10 +6403,19 @@ law always: Bool = 1 == 1
                 r#"@main def main: IO[Unit] =
   for {
     tag = "k"
-    _ <- Net.serveOnce(8080, path => IO.pure(tag))
+                _ <- Net.serveOnce(8080, path => IO.pure(tag))
   } yield ()
 "#,
                 "Net.serveOnce",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    tag = "k"
+    _ <- Stream.drain(Stream.filter(Stream.emit("a"), x => Str.len(tag) > 0))
+  } yield ()
+"#,
+                "Stream.filter",
             ),
         ];
         for (src, label) in cases {
