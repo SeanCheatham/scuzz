@@ -8,58 +8,16 @@
 
 int sz_ui_collect_buttons(SzUiSession *session, SzView **buttons, int cap) {
   SzView *r = sz_ui_session_root(session);
-  int n_buttons = 0;
-  int yi, xi;
-  int w = sz_ui_session_width(session);
-  int h = sz_ui_session_height(session);
-  if (!r)
+  if (!r || !buttons || cap <= 0)
     return 0;
-  for (yi = 0; yi < h; yi += 4) {
-    for (xi = 0; xi < w; xi += 4) {
-      SzView *hit = sz_view_hit_test(r, (float)xi, (float)yi);
-      int seen = 0;
-      int bi;
-      if (!hit || !sz_view_is_tap_target(hit))
-        continue;
-      for (bi = 0; bi < n_buttons; bi++) {
-        if (buttons[bi] == hit) {
-          seen = 1;
-          break;
-        }
-      }
-      if (!seen && n_buttons < cap)
-        buttons[n_buttons++] = hit;
-    }
-  }
-  return n_buttons;
+  return sz_view_collect_tap_targets(r, buttons, cap);
 }
 
 int sz_ui_collect_scrolls(SzUiSession *session, SzView **scrolls, int cap) {
   SzView *r = sz_ui_session_root(session);
-  int n = 0;
-  int yi, xi;
-  int w = sz_ui_session_width(session);
-  int h = sz_ui_session_height(session);
-  if (!r)
+  if (!r || !scrolls || cap <= 0)
     return 0;
-  for (yi = 0; yi < h; yi += 4) {
-    for (xi = 0; xi < w; xi += 4) {
-      SzView *hit = sz_view_scroll_at(r, (float)xi, (float)yi);
-      int seen = 0;
-      int si;
-      if (!hit)
-        continue;
-      for (si = 0; si < n; si++) {
-        if (scrolls[si] == hit) {
-          seen = 1;
-          break;
-        }
-      }
-      if (!seen && n < cap)
-        scrolls[n++] = hit;
-    }
-  }
-  return n;
+  return sz_view_collect_scrolls(r, scrolls, cap);
 }
 
 static void script_parse_scroll(const char *rest, int *index, float *dy) {
@@ -242,7 +200,7 @@ void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
 
 /* --- SCUZZ_UI_SCRIPT playback (fuzz / replay) ---------------------------- */
 /* Line protocol, one event per line, delivered across pump boundaries:
-     tap <n>    tap the nth button, checkbox, radio, switch, chip, filter chip, choice chip, action chip, input chip, expansion, icon button, fab, outlined button, text button, checkbox list tile, switch list tile, radio list tile, or segmented (scan order; [taps] in the dump); missing target is a no-op
+     tap <n>    tap the nth button, checkbox, radio, switch, chip, filter chip, choice chip, action chip, input chip, expansion, icon button, fab, outlined button, text button, checkbox list tile, switch list tile, radio list tile, ink well, or segmented (a11y preorder; [taps] in the dump); missing target is a no-op
      xy <x> <y> inject TAP at logical point; miss does not panic
      text <s>   replace the [fields] starred TextField with <s>; no field is a no-op
      text <n> <s>  replace dump-index n (a11y order); `text 0` is still payload "0"

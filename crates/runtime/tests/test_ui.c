@@ -4224,6 +4224,29 @@ static void test_checkbox_paint_off_on(void) {
   sz_signal_int_free(sig);
 }
 
+static void test_tap_collect_tree_order(void) {
+  SzView *root, *hits[8];
+  SzSignalInt *a, *b;
+  const SzTheme *theme = sz_theme_default();
+  int n;
+
+  a = sz_signal_int(0);
+  b = sz_signal_int(0);
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_button("A", NULL, NULL));
+  sz_view_add_child(root, sz_view_checkbox(a, "B"));
+  sz_view_add_child(root, sz_view_radio(b, 1, "C"));
+  sz_view_layout(root, 200.f, 200.f, theme);
+  n = sz_view_collect_tap_targets(root, hits, 8);
+  assert(n == 3);
+  assert(strcmp(sz_view_a11y_label(hits[0]), "A") == 0);
+  assert(strcmp(sz_view_a11y_label(hits[1]), "B") == 0);
+  assert(strcmp(sz_view_a11y_label(hits[2]), "C") == 0);
+  sz_view_free(root);
+  sz_signal_int_free(a);
+  sz_signal_int_free(b);
+}
+
 static void test_checkbox_in_taps_dump(void) {
   SzUiConfig cfg;
   SzUiSession *session;
@@ -8543,7 +8566,7 @@ static void test_ink_well_child_in_taps_dump(void) {
   taps = strstr(dump, "[taps]\n");
   assert(taps != NULL);
   assert(strstr(taps, "Go") != NULL);
-  assert(strstr(taps, "face") == NULL);
+  assert(strstr(taps, "face") != NULL);
   free(dump);
   sz_ui_unmount(session);
   sz_signal_int_free(sig);
@@ -12446,6 +12469,7 @@ int main(void) {
   test_checkbox_tap_toggles();
   test_checkbox_hit_test();
   test_checkbox_paint_off_on();
+  test_tap_collect_tree_order();
   test_checkbox_in_taps_dump();
   test_switch_sizes();
   test_switch_a11y_off_on();

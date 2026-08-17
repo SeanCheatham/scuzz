@@ -357,7 +357,7 @@ void sz_view_free(SzView *view);
 
 SzViewKind sz_view_kind(const SzView *view);
 SzRect sz_view_frame(const SzView *view);
-/* Button, checkbox, or slider: `tap N` / hit-test collect. */
+/* Button, checkbox, slider, and other `tap N` targets (a11y preorder collect). */
 int sz_view_is_tap_target(const SzView *view);
 /* Write slider `sig` from x (clamped 0–100). 1 if `view` is a slider. */
 int sz_view_slider_set_at(SzView *view, float x);
@@ -378,6 +378,10 @@ SzView *sz_view_scroll_at(SzView *root, float x, float y);
 int sz_view_has_focused_text_field(SzView *root);
 /* Shown TextFields in a11y preorder (cap 64 for dump / inject). */
 int sz_view_collect_text_fields(SzView *root, SzView **out, int cap);
+/* Shown tap targets in a11y preorder (cap 64 for dump / `tap N`). */
+int sz_view_collect_tap_targets(SzView *root, SzView **out, int cap);
+/* Shown Scroll views in a11y preorder (cap 64 for dump / `scroll N`). */
+int sz_view_collect_scrolls(SzView *root, SzView **out, int cap);
 /* Focused field, else the first collected field (`text`/`type`/`backspace`). */
 SzView *sz_view_text_field_target(SzView *root);
 /* Focus collected field `index`, or the starred target when index < 0. */

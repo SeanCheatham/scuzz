@@ -3644,6 +3644,52 @@ int sz_view_collect_text_fields(SzView *root, SzView **out, int cap) {
   return collect_text_fields_node(root, out, cap, 0);
 }
 
+static int collect_walk_hidden(const SzView *v) {
+  if (!v || !view_is_shown(v))
+    return 1;
+  if (v->kind == SZ_VIEW_EXCLUDE_SEMANTICS)
+    return 1;
+  if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
+    return 1;
+  if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
+    return 1;
+  return 0;
+}
+
+static int collect_tap_targets_node(SzView *v, SzView **out, int cap, int n) {
+  int i;
+  if (collect_walk_hidden(v) || n >= cap)
+    return n;
+  if (sz_view_is_tap_target(v))
+    out[n++] = v;
+  for (i = 0; i < v->child_count && n < cap; i++)
+    n = collect_tap_targets_node(v->children[i], out, cap, n);
+  return n;
+}
+
+int sz_view_collect_tap_targets(SzView *root, SzView **out, int cap) {
+  if (!root || !out || cap <= 0)
+    return 0;
+  return collect_tap_targets_node(root, out, cap, 0);
+}
+
+static int collect_scrolls_node(SzView *v, SzView **out, int cap, int n) {
+  int i;
+  if (collect_walk_hidden(v) || n >= cap)
+    return n;
+  if (v->kind == SZ_VIEW_SCROLL)
+    out[n++] = v;
+  for (i = 0; i < v->child_count && n < cap; i++)
+    n = collect_scrolls_node(v->children[i], out, cap, n);
+  return n;
+}
+
+int sz_view_collect_scrolls(SzView *root, SzView **out, int cap) {
+  if (!root || !out || cap <= 0)
+    return 0;
+  return collect_scrolls_node(root, out, cap, 0);
+}
+
 /* Focused TextField, else first shown field in a11y (preorder) order. */
 SzView *sz_view_text_field_target(SzView *root) {
   SzView *fields[64];

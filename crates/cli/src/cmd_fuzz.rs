@@ -472,6 +472,12 @@ fn fuzz_fail(
         shrunk.len(),
         events.len()
     );
+    if !shrunk.is_empty() {
+        println!("shrunk events:");
+        for ev in &shrunk {
+            println!("  {ev}");
+        }
+    }
     println!(
         "replay: scuzz fuzz {} --replay {}",
         project_dir.display(),

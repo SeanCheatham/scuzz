@@ -25,6 +25,7 @@ enum { SZ_ALLOC_TRACE_EVERY = 32 };
 
 void sz_panic(const char *msg) {
   fprintf(stderr, "scuzz panic: %s\n", msg ? msg : "(null)");
+  fflush(stderr);
   abort();
 }
 
