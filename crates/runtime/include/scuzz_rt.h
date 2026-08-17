@@ -16,7 +16,7 @@ void *sz_alloc_zero(size_t size);
 void sz_free(void *ptr);
 /* RC objects (strings, list cells, ADTs, boxed i64, map/set nodes, IO,
  * streams, resources, errors). List cells retain heads and shared tails. IO
- * constructors take child IO nodes. Non-RC pointers no-op. */
+ * constructors take child IO nodes. Non-RC sz_alloc pointers no-op. */
 enum {
   SZ_RC_STRING = 1,
   SZ_RC_LIST = 2,

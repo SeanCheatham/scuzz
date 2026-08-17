@@ -60,7 +60,23 @@ static SzIo *attempt_drop(SzIo *inner) {
 
 /* --- panic / alloc ------------------------------------------------------- */
 
-/* Header before user pointer: [size_t nbytes][user bytes...] */
+/* Header before every user pointer: [size_t nbytes][SzRcHdr][user].
+ * RC objects set SZ_RC_MAGIC. Other sz_alloc objects set SZ_ALLOC_MAGIC so
+ * sz_retain / sz_release can read the header without leaving the block. */
+#define SZ_ALLOC_MAGIC 0x535A414Cu /* 'SZAL' */
+#define SZ_RC_MAGIC 0x535A5243u    /* 'SZRC' */
+
+typedef struct SzRcHdr {
+  uint32_t magic;
+  uint32_t rc;
+  uint32_t kind;
+  uint32_t pad;
+} SzRcHdr;
+
+static SzRcHdr *sz_rc_hdr(const void *ptr) {
+  return ((SzRcHdr *)ptr) - 1;
+}
+
 static size_t g_live_bytes = 0;
 static size_t g_live_count = 0;
 static size_t g_peak_bytes = 0;
@@ -74,35 +90,48 @@ void sz_panic(const char *msg) {
 }
 
 void *sz_alloc(size_t size) {
-  size_t *raw = (size_t *)malloc(sizeof(size_t) + size);
+  size_t *raw =
+      (size_t *)malloc(sizeof(size_t) + sizeof(SzRcHdr) + size);
+  SzRcHdr *h;
   if (!raw)
     sz_panic("out of memory");
   *raw = size;
+  h = (SzRcHdr *)(raw + 1);
+  h->magic = SZ_ALLOC_MAGIC;
+  h->rc = 0;
+  h->kind = 0;
+  h->pad = 0;
   g_live_bytes += size;
   g_live_count += 1;
   if (g_live_bytes > g_peak_bytes)
     g_peak_bytes = g_live_bytes;
-  return (void *)(raw + 1);
+  return (void *)(h + 1);
 }
 
 void *sz_alloc_zero(size_t size) {
-  size_t *raw = (size_t *)calloc(1, sizeof(size_t) + size);
+  size_t *raw =
+      (size_t *)calloc(1, sizeof(size_t) + sizeof(SzRcHdr) + size);
+  SzRcHdr *h;
   if (!raw)
     sz_panic("out of memory");
   *raw = size;
+  h = (SzRcHdr *)(raw + 1);
+  h->magic = SZ_ALLOC_MAGIC;
   g_live_bytes += size;
   g_live_count += 1;
   if (g_live_bytes > g_peak_bytes)
     g_peak_bytes = g_live_bytes;
-  return (void *)(raw + 1);
+  return (void *)(h + 1);
 }
 
 void sz_free(void *ptr) {
+  SzRcHdr *h;
   size_t *raw;
   size_t n;
   if (!ptr)
     return;
-  raw = ((size_t *)ptr) - 1;
+  h = ((SzRcHdr *)ptr) - 1;
+  raw = ((size_t *)h) - 1;
   n = *raw;
   if (g_live_count > 0)
     g_live_count -= 1;
@@ -143,35 +172,21 @@ void sz_alloc_trace_on_pump(void) {
           g_trace_pumps, g_live_bytes, g_live_count, g_peak_bytes);
 }
 
-/* Header before RC user pointer: [SzRcHdr][user bytes...], itself in sz_alloc. */
-#define SZ_RC_MAGIC 0x535A5243u /* 'SZRC' */
-
-typedef struct SzRcHdr {
-  uint32_t magic;
-  uint32_t rc;
-  uint32_t kind;
-  uint32_t pad;
-} SzRcHdr;
-
-static SzRcHdr *sz_rc_hdr(const void *ptr) {
-  return ((SzRcHdr *)ptr) - 1;
-}
-
 static int sz_is_rc(const void *ptr) {
   uintptr_t p = (uintptr_t)ptr;
-  /* Small integers and other non-heap pointers are not RC. Do not load a header. */
+  /* Small integers are not RC. Do not load a header. */
   if (p < 4096 || (p & 7) != 0)
     return 0;
   return sz_rc_hdr(ptr)->magic == SZ_RC_MAGIC;
 }
 
 void *sz_rc_alloc(size_t size, uint32_t kind) {
-  SzRcHdr *h = (SzRcHdr *)sz_alloc(sizeof(SzRcHdr) + size);
+  void *p = sz_alloc(size);
+  SzRcHdr *h = sz_rc_hdr(p);
   h->magic = SZ_RC_MAGIC;
   h->rc = 1;
   h->kind = kind;
-  h->pad = 0;
-  return (void *)(h + 1);
+  return p;
 }
 
 void sz_retain(void *ptr) {
@@ -209,7 +224,7 @@ void sz_release(void *ptr) {
       xs->head = NULL;
       xs->tail = NULL;
       cell->magic = 0;
-      sz_free(cell);
+      sz_free(xs);
       sz_release(head);
       if (!sz_is_rc(tail))
         return;
@@ -224,7 +239,7 @@ void sz_release(void *ptr) {
     SzAdt *a = (SzAdt *)ptr;
     void *payload = a->payload;
     a->payload = NULL;
-    sz_free(h);
+    sz_free(ptr);
     sz_release(payload);
     return;
   }
@@ -238,7 +253,7 @@ void sz_release(void *ptr) {
     m->val = NULL;
     m->left = NULL;
     m->right = NULL;
-    sz_free(h);
+    sz_free(ptr);
     sz_release(k);
     sz_release(v);
     sz_release(l);
@@ -313,7 +328,7 @@ void sz_release(void *ptr) {
       st->right = NULL;
       st->env = NULL;
       cell->magic = 0;
-      sz_free(cell);
+      sz_free(st);
       if (tag == SZ_ST_CONS || tag == SZ_ST_EVAL) {
         sz_release(left);
         if (!sz_is_rc(right))
@@ -341,7 +356,7 @@ void sz_release(void *ptr) {
     SzIo *acq = r->acquire;
     r->release_env = NULL;
     r->acquire = NULL;
-    sz_free(h);
+    sz_free(ptr);
     sz_release(env);
     sz_release(acq);
     return;
@@ -350,7 +365,7 @@ void sz_release(void *ptr) {
     SzError *e = (SzError *)ptr;
     SzString *msg = e->message;
     e->message = NULL;
-    sz_free(h);
+    sz_free(ptr);
     sz_release(msg);
     return;
   }
@@ -359,7 +374,7 @@ void sz_release(void *ptr) {
   default:
     break;
   }
-  sz_free(h);
+  sz_free(ptr);
 }
 
 /* --- strings ------------------------------------------------------------- */

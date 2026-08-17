@@ -296,7 +296,7 @@ static SzView *watch_rebuild(void *env) {
 
 static void test_watch_rebuild_keeps_signals(void) {
   SzUiConfig cfg;
-  WatchRebuildEnv env;
+  WatchRebuildEnv *env;
   SzView *root;
   SzUiSession *session;
   SzInputEvent tap;
@@ -305,10 +305,11 @@ static void test_watch_rebuild_keeps_signals(void) {
   const char *stamp = "/tmp/scuzz_ui_reload.stamp";
 
   write_stamp(stamp, "n=");
-  env.count = sz_signal_int(0);
-  env.path = stamp;
-  env.btn = NULL;
-  root = watch_rebuild(&env);
+  env = (WatchRebuildEnv *)sz_alloc(sizeof(WatchRebuildEnv));
+  env->count = sz_signal_int(0);
+  env->path = stamp;
+  env->btn = NULL;
+  root = watch_rebuild(env);
 
   memset(&cfg, 0, sizeof(cfg));
   cfg.kind = SZ_UI_RUNTIME_HEADLESS;
@@ -318,7 +319,7 @@ static void test_watch_rebuild_keeps_signals(void) {
   session = sz_ui_mount(&cfg, root);
   assert(session);
   sz_ui_session_take_root(session);
-  sz_ui_session_set_rebuild(session, watch_rebuild, &env);
+  sz_ui_session_set_rebuild(session, watch_rebuild, env);
   assert(sz_ui_session_watch(session, stamp));
   assert(sz_ui_pump_sync(session));
   same = sz_ui_session_root(session);
@@ -327,16 +328,16 @@ static void test_watch_rebuild_keeps_signals(void) {
 
   memset(&tap, 0, sizeof(tap));
   tap.kind = SZ_INPUT_TAP;
-  tap.x = sz_view_frame(env.btn).x + 8.f;
-  tap.y = sz_view_frame(env.btn).y + 8.f;
+  tap.x = sz_view_frame(env->btn).x + 8.f;
+  tap.y = sz_view_frame(env->btn).y + 8.f;
   assert(sz_ui_inject_sync(session, &tap));
-  assert(sz_signal_int_get(env.count) == 1);
+  assert(sz_signal_int_get(env->count) == 1);
   dump1 = sz_signal_dump();
 
   write_stamp(stamp, "v=");
   assert(sz_ui_pump_sync(session));
   assert(sz_ui_session_root(session) != same);
-  assert(sz_signal_int_get(env.count) == 1);
+  assert(sz_signal_int_get(env->count) == 1);
   dump2 = sz_signal_dump();
   assert(strcmp(sz_string_cstr(dump1), sz_string_cstr(dump2)) == 0);
   a11y = sz_view_a11y_dump(sz_ui_session_root(session));
@@ -348,13 +349,14 @@ static void test_watch_rebuild_keeps_signals(void) {
   sz_view_layout(sz_ui_session_root(session), 200.f, 100.f, sz_theme_default());
   memset(&tap, 0, sizeof(tap));
   tap.kind = SZ_INPUT_TAP;
-  tap.x = sz_view_frame(env.btn).x + 8.f;
-  tap.y = sz_view_frame(env.btn).y + 8.f;
+  tap.x = sz_view_frame(env->btn).x + 8.f;
+  tap.y = sz_view_frame(env->btn).y + 8.f;
   assert(sz_ui_inject_sync(session, &tap));
-  assert(sz_signal_int_get(env.count) == 2);
+  assert(sz_signal_int_get(env->count) == 2);
 
   sz_ui_unmount(session);
-  sz_signal_int_free(env.count);
+  sz_signal_int_free(env->count);
+  sz_free(env);
   remove(stamp);
 }
 
@@ -397,7 +399,7 @@ static void *stamp_bump(void *arg) {
 }
 
 static void test_ui_run_rebuild_keepalive(void) {
-  KeepEnv env;
+  KeepEnv *env;
   pthread_t th;
   SzIoResult r;
   const char *stamp = "/tmp/scuzz_ui_keepalive.stamp";
@@ -406,22 +408,23 @@ static void test_ui_run_rebuild_keepalive(void) {
   char buf[2048];
   size_t n;
 
-  env.count = sz_signal_int(3);
-  env.calls = 0;
+  env = (KeepEnv *)sz_alloc(sizeof(KeepEnv));
+  env->count = sz_signal_int(3);
+  env->calls = 0;
   write_stamp(stamp, "0");
   remove(dump);
   setenv("SCUZZ_UI_RELOAD_STAMP", stamp, 1);
   setenv("SCUZZ_UI_DEBUG_DUMP", dump, 1);
   setenv("SCUZZ_LIVE_FRAMES", "8", 1);
   assert(pthread_create(&th, NULL, stamp_bump, (void *)stamp) == 0);
-  r = sz_io_unsafe_run(sz_ui_run_rebuild(keep_factory, &env));
+  r = sz_io_unsafe_run(sz_ui_run_rebuild(keep_factory, env));
   pthread_join(th, NULL);
   unsetenv("SCUZZ_UI_RELOAD_STAMP");
   unsetenv("SCUZZ_UI_DEBUG_DUMP");
   unsetenv("SCUZZ_LIVE_FRAMES");
   assert(r.ok);
-  assert(sz_signal_int_get(env.count) == 3);
-  assert(env.calls >= 2);
+  assert(sz_signal_int_get(env->count) == 3);
+  assert(env->calls >= 2);
   f = fopen(dump, "r");
   assert(f);
   n = fread(buf, 1, sizeof(buf) - 1, f);
@@ -432,7 +435,8 @@ static void test_ui_run_rebuild_keepalive(void) {
   assert(strstr(buf, "[taps]") != NULL);
   assert(strstr(buf, "[fields]") != NULL);
   assert(strstr(buf, "[scrolls]") != NULL);
-  sz_signal_int_free(env.count);
+  sz_signal_int_free(env->count);
+  sz_free(env);
   remove(stamp);
   remove(dump);
 }
