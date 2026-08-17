@@ -1,11 +1,10 @@
 # Short-term plan
 
-## Slice: Retain capture env in flatMap
+## Slice: Retain capture env in handleErrorWith
 
-`flatMap` retains inner and drops the caller IO ref. It still takes the capture list without retain, so the env can alias the bind node.
+The compiler retains a `flatMap` capture list and drops the pack after the call. `handleErrorWith` still takes the capture list without retain, so the env can alias the handler node.
 
-- Retain env in `sz_io_flatmap`.
+- Retain the capture pack before `sz_io_handle_error_with`.
 - Drop the owned pack after the call.
-- Release env when the flatMap node frees.
-- Proof: compiler IR for `IO.pure("ok").flatMap(_ => IO.println("ok"))` shows `sz_release` of the capture pack after the call.
-- Out of scope: `handleErrorWith` env. OS threads. `IO.pure` payloads.
+- Proof: compiler IR for `IO.fail("boom").handleErrorWith(_ => IO.println("recovered"))` shows `sz_release` of the capture pack after the call.
+- Out of scope: OS threads. `IO.pure` payloads. Runtime env retain (C kits pass non-list env).
