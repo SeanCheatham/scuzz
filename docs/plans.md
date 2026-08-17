@@ -1,10 +1,10 @@
 # Short-term plan
 
-## Slice: Drop owned inner IO after IO.ensure
+## Slice: Drop owned inner IO after IO.race
 
-`IO.timeout` retains inner and drops the caller ref. `IO.ensure` stores inner and finalizer without retain, so those graphs can alias the ensure node.
+`IO.ensure` retains inner and finalizer and drops the caller refs. `IO.race` stores left and right without retain, so those graphs can alias the race node.
 
-- Retain inner and finalizer in `sz_io_ensure`.
+- Retain left and right in `sz_io_race`.
 - Drop the caller refs after the call.
-- Proof: compiler IR for `IO.ensure(IO.pure("ok"), IO.println("fin"))` shows `sz_release` of inner and finalizer after the call.
+- Proof: compiler IR for `IO.race(IO.sleep(1), IO.pure("ok"))` shows `sz_release` of both arms after the call.
 - Out of scope: OS threads.

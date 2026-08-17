@@ -679,6 +679,8 @@ SzIo *sz_io_ensure(SzIo *inner, SzIo *finalizer) {
   if (!inner || !finalizer)
     sz_panic("sz_io_ensure(null)");
   SzIo *io = sz_io_new(SZ_IO_ENSURE);
+  sz_retain(inner);
+  sz_retain(finalizer);
   io->as.ensure.inner = inner;
   io->as.ensure.finalizer = finalizer;
   return io;

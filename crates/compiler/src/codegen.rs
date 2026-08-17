@@ -1801,6 +1801,8 @@ fn emit_expr(
                 "  %{prefix}_ensure = call ptr @sz_io_ensure(ptr {iv}, ptr {fv})"
             )
             .unwrap();
+            writeln!(code, "  call void @sz_release(ptr {iv})").unwrap();
+            writeln!(code, "  call void @sz_release(ptr {fv})").unwrap();
             io_emitted(code, format!("%{prefix}_ensure"), ie.payload)
         }
         ExprKind::IoTimeout { ms, inner } => {
@@ -5300,6 +5302,40 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of inner {name} after IO.timeout:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_io_ensure_releases_inner_and_finalizer() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.ensure(IO.pure("ok"), IO.println("fin"))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_io_ensure(ptr ";
+        let at = ir.find(needle).expect("expected sz_io_ensure");
+        let rest = &ir[at + needle.len()..];
+        let inner = rest.split(',').next().unwrap().trim();
+        let fin = rest
+            .split(',')
+            .nth(1)
+            .unwrap()
+            .trim()
+            .trim_start_matches("ptr ")
+            .split(')')
+            .next()
+            .unwrap()
+            .trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {inner})")),
+            "expected last-use release of inner {inner} after IO.ensure:\n{ir}"
+        );
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {fin})")),
+            "expected last-use release of finalizer {fin} after IO.ensure:\n{ir}"
         );
     }
 

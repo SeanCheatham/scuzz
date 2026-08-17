@@ -37,7 +37,10 @@ static SzIo *lang_after_acquire(void *acquired, void *env) {
   SzIo *rel = st->res->release(acquired, st->res->release_env);
   SzIo *fin = sz_io_flatmap(rel, lang_fin_free_ok, st);
   fin = sz_io_handle_error_with(fin, lang_fin_free_err, st);
-  return sz_io_ensure(use_io, fin);
+  SzIo *ens = sz_io_ensure(use_io, fin);
+  sz_release(use_io);
+  sz_release(fin);
+  return ens;
 }
 
 SzLangResource *sz_lang_resource_make(SzIo *acquire, SzCont release,

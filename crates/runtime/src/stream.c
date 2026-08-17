@@ -790,7 +790,13 @@ SzIo *sz_stream_compile_to_list(SzStream *s) {
   else
     sz_retain(s);
   body = sz_io_flatmap(compile_into(s, sz_list_nil(), -1), reverse_acc, NULL);
-  return sz_io_ensure(body, sz_io_delay(st_release_io, s));
+  {
+    SzIo *fin = sz_io_delay(st_release_io, s);
+    SzIo *ens = sz_io_ensure(body, fin);
+    sz_release(body);
+    sz_release(fin);
+    return ens;
+  }
 }
 
 static SzIo *drain_discard(void *list, void *env) {

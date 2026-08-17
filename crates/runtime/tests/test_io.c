@@ -109,6 +109,12 @@ static SzIo *timeout_drop(int64_t ms, SzIo *inner) {
   sz_release(inner);
   return io;
 }
+static SzIo *ensure_drop(SzIo *inner, SzIo *finalizer) {
+  SzIo *io = sz_io_ensure(inner, finalizer);
+  sz_release(inner);
+  sz_release(finalizer);
+  return io;
+}
 static SzIo *lang_use_ok(void *acquired, void *env) {
   (void)env;
   (void)acquired;
@@ -980,8 +986,8 @@ int main(void) {
   /* IO.ensure runs finalizer on success */
   ensured_flag = 0;
   r = sz_io_unsafe_run(
-      sz_io_ensure(sz_io_pure((void *)(intptr_t)1),
-                   sz_io_delay(ensure_mark_thunk, NULL)));
+      ensure_drop(sz_io_pure((void *)(intptr_t)1),
+                  sz_io_delay(ensure_mark_thunk, NULL)));
   assert(r.ok);
   assert((intptr_t)r.value == 1);
   assert(ensured_flag == 1);
@@ -989,7 +995,7 @@ int main(void) {
   /* IO.ensure runs finalizer on failure */
   ensured_flag = 0;
   r = sz_io_unsafe_run(
-      sz_io_ensure(sz_io_fail_cstr("boom"), sz_io_delay(ensure_mark_thunk, NULL)));
+      ensure_drop(sz_io_fail_cstr("boom"), sz_io_delay(ensure_mark_thunk, NULL)));
   assert(!r.ok);
   assert(ensured_flag == 1);
   sz_error_free(r.error);
