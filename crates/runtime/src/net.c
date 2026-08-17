@@ -501,6 +501,8 @@ static void get_free(GetSt *st) {
   }
   sz_free(st->req);
   sz_free(st->acc);
+  sz_release(st->url);
+  st->url = NULL;
   sz_free(st);
 }
 
@@ -1048,29 +1050,34 @@ static void *get_dispatch(void *env) {
 }
 
 static SzIo *get_after_dispatch(void *value, void *env) {
-  GetSt *st = (GetSt *)env;
+  SzPair *pack = (SzPair *)env;
+  SzString *url = (SzString *)pack->left;
+  GetSt *st;
   SzIo *io;
-  if ((intptr_t)value) {
-    SzString *url = st->url;
-    get_free(st);
+  if ((intptr_t)value)
     return sz_testrt_net_http_get(url);
-  }
+  st = (GetSt *)sz_alloc_zero(sizeof(GetSt));
+  sz_retain(url);
+  st->url = url;
+  st->fd = -1;
+  st->fd4 = -1;
+  st->fd6 = -1;
+  st->dns_fd = -1;
   io = fm_drop(sz_io_delay(get_start, st), get_after_start, st);
   io = fm_drop(io, get_after_connect, st);
   return handle_drop(io, get_on_err, st);
 }
 
 SzIo *sz_net_http_get(SzString *url) {
-  GetSt *st;
+  SzPair *pack;
   if (!url)
     sz_panic("sz_net_http_get(null)");
-  st = (GetSt *)sz_alloc_zero(sizeof(GetSt));
-  st->url = url;
-  st->fd = -1;
-  st->fd4 = -1;
-  st->fd6 = -1;
-  st->dns_fd = -1;
-  return fm_drop(sz_io_delay(get_dispatch, st), get_after_dispatch, st);
+  pack = sz_pair_new(url, NULL);
+  {
+    SzIo *io = fm_drop(sz_io_delay(get_dispatch, NULL), get_after_dispatch, pack);
+    sz_release(pack);
+    return io;
+  }
 }
 
 /* HTTP/1.0 GET server. Listen and connection fds are nonblocking. The fiber

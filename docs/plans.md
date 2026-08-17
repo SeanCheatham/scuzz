@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Drop leftover Net.httpGet pack retains
+## Slice: Drop leftover Sys.exec pack retains
 
-`Fs.write` keeps path and contents in a pair. Unused delay drops leftover retains. `Net.httpGet` still uses a malloc `GetSt` pack that holds the URL and later socket state. Last-use `sz_free`s the pack and leaks the URL.
+`Net.httpGet` keeps the URL in a pair until dispatch. Unused get drops leftover URL retains. `Sys.exec` still uses a malloc `ExecSt` pack that holds the command string. Last-use `sz_free`s the pack and leaks the command.
 
-- Keep the URL in a pair (or retain it on the pack) so last-use of the unused get IO drops leftover URL retains. Steal on run so the live path can still own sockets.
-- Proof: `test_io` unused `sz_net_http_get` then `sz_release` of the IO returns alloc stats to baseline.
-- Out of scope: OS threads. Panic leak. Exec malloc packs.
+- Keep the command in a pair (same shape as `Net.httpGet`) so last-use of the unused exec IO drops leftover command retains. Steal on run so the live path can still own the pipe and pid.
+- Proof: `test_io` unused `sz_sys_exec` then `sz_release` of the IO returns alloc stats to baseline.
+- Out of scope: OS threads. Panic leak.
