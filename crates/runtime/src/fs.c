@@ -41,11 +41,6 @@ typedef struct {
   } as;
 } FsResult;
 
-typedef struct {
-  SzString *path;
-  SzString *contents;
-} FsWriteEnv;
-
 static SzIo *unwrap_fs(void *value, void *env) {
   (void)env;
   FsResult *r = (FsResult *)value;
@@ -118,54 +113,56 @@ SzIo *sz_fs_read(SzString *path) {
 }
 
 static void *fs_write_result(void *env) {
-  FsWriteEnv *e = (FsWriteEnv *)env;
-  SzString *path = e->path;
-  SzString *contents = e->contents;
+  SzPair *pack = (SzPair *)env;
+  SzString *path = (SzString *)pack->left;
+  SzString *contents = (SzString *)pack->right;
   FsResult *r = (FsResult *)sz_alloc(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
-  FILE *f;
-  sz_free(e);
-  f = fopen(p, "wb");
+  FILE *f = fopen(p, "wb");
   if (!f) {
     char msg[512];
     snprintf(msg, sizeof(msg), "Fs.write: cannot open %s: %s", p, strerror(errno));
     r->is_err = 1;
     r->as.err = sz_error_new(2, msg);
-    return r;
+    goto done;
   }
-  SzString *c = contents;
-  if (c && c->len) {
-    if (fwrite(c->data, 1, c->len, f) != c->len) {
+  if (contents && contents->len) {
+    if (fwrite(contents->data, 1, contents->len, f) != contents->len) {
       fclose(f);
       r->is_err = 1;
       r->as.err = sz_error_new(2, "Fs.write: short write");
-      return r;
+      goto done;
     }
   }
   fclose(f);
   r->is_err = 0;
   r->as.ok = NULL;
+done:
+  sz_release(pack);
   return r;
 }
 
 static SzIo *fs_after_write(void *value, void *env) {
-  FsWriteEnv *e = (FsWriteEnv *)env;
-  if ((intptr_t)value) {
-    SzIo *io = sz_testrt_fs_write(e->path, e->contents);
-    sz_free(e);
-    return io;
-  }
-  return fm_drop(sz_io_delay(fs_write_result, e), unwrap_fs, NULL);
+  SzPair *pack = (SzPair *)env;
+  if ((intptr_t)value)
+    return sz_testrt_fs_write((SzString *)pack->left, (SzString *)pack->right);
+  return fm_drop(sz_io_delay(fs_write_result, pack), unwrap_fs, NULL);
 }
 
 SzIo *sz_fs_write(SzString *path, SzString *contents) {
-  FsWriteEnv *e;
+  SzString *body;
+  SzPair *pack;
   if (!path)
     sz_panic("sz_fs_write(null path)");
-  e = (FsWriteEnv *)sz_alloc(sizeof(FsWriteEnv));
-  e->path = path;
-  e->contents = contents ? contents : sz_string_from_cstr("");
-  return fm_drop(sz_io_delay(fs_dispatch, NULL), fs_after_write, e);
+  body = contents ? contents : sz_string_from_cstr("");
+  pack = sz_pair_new(path, body);
+  if (!contents)
+    sz_release(body);
+  {
+    SzIo *io = fm_drop(sz_io_delay(fs_dispatch, NULL), fs_after_write, pack);
+    sz_release(pack);
+    return io;
+  }
 }
 
 static void *fs_list_result(void *env) {

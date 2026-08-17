@@ -179,24 +179,21 @@ SzIo *sz_testrt_fs_read(SzString *path) {
   return fm_drop(sz_io_delay(mem_read, path), unwrap_box, NULL);
 }
 
-typedef struct {
-  SzString *path;
-  SzString *contents;
-} WriteEnv;
-
 static void *mem_write(void *env) {
-  WriteEnv *e = (WriteEnv *)env;
+  SzPair *pack = (SzPair *)env;
+  SzString *path_s = (SzString *)pack->left;
+  SzString *contents = (SzString *)pack->right;
   BoxResult *r = (BoxResult *)sz_alloc(sizeof(BoxResult));
-  char *path = norm_path(sz_string_cstr(e->path));
+  char *path = norm_path(sz_string_cstr(path_s));
   char parent[1024];
   MemNode *n;
-  SzString *c = e->contents ? e->contents : sz_string_from_cstr("");
+  SzString *c = contents ? contents : sz_string_from_cstr("");
 
   if (!parent_path(path, parent, sizeof parent)) {
     sz_free(path);
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.write: path too long (mem)");
-    return r;
+    goto done;
   }
   if (parent[0] != '\0' && !fs_find(parent)) {
     /* Create parent dirs (mkdir -p style for write). */
@@ -207,7 +204,7 @@ static void *mem_write(void *env) {
       sz_free(path);
       r->is_err = 1;
       r->as.err = sz_error_new(2, "Fs.write: parent too long (mem)");
-      return r;
+      goto done;
     }
     memcpy(tmp, parent, len + 1);
     for (i = 1; i < len; i++) {
@@ -217,7 +214,7 @@ static void *mem_write(void *env) {
           sz_free(path);
           r->is_err = 1;
           r->as.err = sz_error_new(2, "Fs.write: parent is file (mem)");
-          return r;
+          goto done;
         }
         tmp[i] = '/';
       }
@@ -226,7 +223,7 @@ static void *mem_write(void *env) {
       sz_free(path);
       r->is_err = 1;
       r->as.err = sz_error_new(2, "Fs.write: parent is file (mem)");
-      return r;
+      goto done;
     }
   }
 
@@ -235,7 +232,7 @@ static void *mem_write(void *env) {
     sz_free(path);
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.write: is a directory (mem)");
-    return r;
+    goto done;
   }
   if (!n) {
     n = (MemNode *)sz_alloc(sizeof(MemNode));
@@ -258,14 +255,18 @@ static void *mem_write(void *env) {
   n->data[c->len] = '\0';
   r->is_err = 0;
   r->as.ok = NULL;
+done:
+  if (!contents)
+    sz_release(c);
+  sz_release(pack);
   return r;
 }
 
 SzIo *sz_testrt_fs_write(SzString *path, SzString *contents) {
-  WriteEnv *e = (WriteEnv *)sz_alloc(sizeof(WriteEnv));
-  e->path = path;
-  e->contents = contents;
-  return fm_drop(sz_io_delay(mem_write, e), unwrap_box, NULL);
+  SzPair *pack = sz_pair_new(path, contents);
+  SzIo *io = fm_drop(sz_io_delay(mem_write, pack), unwrap_box, NULL);
+  sz_release(pack);
+  return io;
 }
 
 static int is_direct_child(const char *dir, const char *child) {

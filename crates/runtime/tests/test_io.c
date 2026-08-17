@@ -1611,6 +1611,19 @@ int main(void) {
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzString *path = sz_string_from_cstr("x.txt");
+      SzString *body = sz_string_from_cstr("hi");
+      SzIo *io = sz_fs_write(path, body);
+      sz_release(path);
+      sz_release(body);
+      sz_release(io);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
   }
 
   /* Stream — emit / eval / concat / evalMap / map / take / drop / filter / compileToList / drain */
