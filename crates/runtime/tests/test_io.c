@@ -1721,6 +1721,15 @@ int main(void) {
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzIo *io = sz_sys_read(3);
+      sz_release(io);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
   }
 
   /* Stream — emit / eval / concat / evalMap / map / take / drop / filter / compileToList / drain */
@@ -2182,6 +2191,19 @@ int main(void) {
       r = sz_io_unsafe_run(sz_sys_read(3));
       assert(r.ok);
       assert(strcmp(sz_string_cstr((SzString *)r.value), "def") == 0);
+
+      {
+        size_t base_bytes = 0, base_count = 0;
+        size_t live_bytes = 0, live_count = 0;
+        sz_testrt_stdin_feed("xy");
+        sz_alloc_stats(&base_bytes, &base_count);
+        r = sz_io_unsafe_run(sz_sys_read(2));
+        assert(r.ok);
+        sz_release(r.value);
+        sz_alloc_stats(&live_bytes, &live_count);
+        assert(live_count == base_count);
+        assert(live_bytes == base_bytes);
+      }
       r = sz_io_unsafe_run(sz_sys_write(sz_string_from_cstr("raw")));
       assert(r.ok);
       assert(strstr(sz_testrt_stdout_cstr(), "raw") != NULL);

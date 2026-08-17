@@ -239,7 +239,7 @@ static int inbuf_take_n(SysResult *r, size_t n) {
 }
 
 static void *sys_try_n(void *env) {
-  size_t n = (size_t) * (int64_t *)env;
+  size_t n = (size_t)sz_unbox_i64(env);
   SysResult *r = (SysResult *)sz_alloc_zero(sizeof(SysResult));
   if (inbuf_take_n(r, n))
     return r;
@@ -248,7 +248,7 @@ static void *sys_try_n(void *env) {
 }
 
 static void *sys_read_more_n(void *env) {
-  size_t want = (size_t) * (int64_t *)env;
+  size_t want = (size_t)sz_unbox_i64(env);
   SysResult *r = (SysResult *)sz_alloc_zero(sizeof(SysResult));
   char tmp[256];
   ssize_t n;
@@ -289,7 +289,6 @@ static SzIo *sys_unwrap_n(void *value, void *env) {
     sz_free(r);
     return sys_poll_n(NULL, env);
   }
-  sz_free(env);
   return unwrap_sys(value, NULL);
 }
 
@@ -309,30 +308,27 @@ static SzIo *sys_after_try_n(void *value, void *env) {
     sz_free(r);
     return sys_poll_n(NULL, env);
   }
-  sz_free(env);
   return unwrap_sys(value, NULL);
 }
 
 static SzIo *sys_after_dispatch_n(void *value, void *env) {
-  int64_t n = *(int64_t *)env;
-  if ((intptr_t)value) {
-    sz_free(env);
+  int64_t n = sz_unbox_i64(env);
+  if ((intptr_t)value)
     return sz_testrt_sys_read(n);
-  }
   if (n <= 0) {
     SysResult *r = (SysResult *)sz_alloc_zero(sizeof(SysResult));
     r->as.ok = sz_string_from_cstr("");
-    sz_free(env);
     return unwrap_sys(r, NULL);
   }
   return fm_drop(sz_io_delay(sys_try_n, env), sys_after_try_n, env);
 }
 
 SzIo *sz_sys_read(int64_t n) {
-  int64_t *p = (int64_t *)sz_alloc(sizeof(int64_t));
-  *p = n < 0 ? 0 : n;
-  return fm_drop(sz_io_delay(sys_read_dispatch, NULL), sys_after_dispatch_n,
-                       p);
+  void *nbox = sz_box_i64(n < 0 ? 0 : n);
+  SzIo *io = fm_drop(sz_io_delay(sys_read_dispatch, NULL), sys_after_dispatch_n,
+                     nbox);
+  sz_release(nbox);
+  return io;
 }
 
 static void *sys_write_result(void *env) {
