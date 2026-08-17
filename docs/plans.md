@@ -1,10 +1,10 @@
 # Short-term plan
 
-## Slice: Last-use release for View tap lambda packs
+## Slice: Last-use release for `View.each`, `Signal.map`, and `Ui.run` packs
 
-`View.button` unpacks `cons(fn, cons(env, nil))` and drops the owned label. The closure list stays allocated.
+Tap constructors drop the wrapper list after unpack. `View.each`, `Signal.map`, and `Ui.run` still leave `cons(fn, cons(env, nil))`.
 
-- Mark the tap lambda pack owned and drop it after unpack.
-- Proof: compiler IR for `Ui.run(_ => View.button("a", _ => ()))` shows `sz_release` of the closure list after the call.
-- Apply the same drop to `iconButton`, `fab`, `outlinedButton`, `textButton`, `actionChip`, and `inkWell`.
-- Out of scope: RC stream nodes, OS threads.
+- Mark those packs owned and drop them after unpack.
+- Proof: compiler IR for `Ui.run(_ => View.text("a"))` shows `sz_release` of the rebuild pack after `sz_ui_run_rebuild`.
+- Apply the same drop to `View.each` mappers and `Signal.map`.
+- Out of scope: RC stream nodes, OS threads, tap capture lists on `sz_view_free`.

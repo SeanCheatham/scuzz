@@ -1981,7 +1981,7 @@ fn emit_lambda(
     )
     .unwrap();
     writeln!(code, "  call void @sz_release(ptr %{prefix}_cl1)").unwrap();
-    val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
+    owned_ptr(code, format!("%{prefix}_cl2"))
 }
 
 /// `n => body` for `Signal.map`: `ptr (*)(i64, ptr)` returning a SzString.
@@ -4070,23 +4070,7 @@ fn emit_call(
         }
         "View.button" => {
             // args[1] is a closure value: cons(fn_ptr, cons(env_ptr, nil)).
-            writeln!(
-                code,
-                "  %{prefix}_fnp = call ptr @sz_list_head(ptr {})",
-                emitted_args[1].value
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_fnt = call ptr @sz_list_tail(ptr {})",
-                emitted_args[1].value
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_envp = call ptr @sz_list_head(ptr %{prefix}_fnt)"
-            )
-            .unwrap();
+            unpack_closure(&mut code, &emitted_args[1].value, prefix);
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @sz_lang_view_button(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
@@ -4094,26 +4078,11 @@ fn emit_call(
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.iconButton" => {
-            writeln!(
-                code,
-                "  %{prefix}_fnp = call ptr @sz_list_head(ptr {})",
-                emitted_args[1].value
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_fnt = call ptr @sz_list_tail(ptr {})",
-                emitted_args[1].value
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_envp = call ptr @sz_list_head(ptr %{prefix}_fnt)"
-            )
-            .unwrap();
+            unpack_closure(&mut code, &emitted_args[1].value, prefix);
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @sz_lang_view_icon_button(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
@@ -4121,26 +4090,11 @@ fn emit_call(
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.fab" => {
-            writeln!(
-                code,
-                "  %{prefix}_fnp = call ptr @sz_list_head(ptr {})",
-                emitted_args[1].value
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_fnt = call ptr @sz_list_tail(ptr {})",
-                emitted_args[1].value
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_envp = call ptr @sz_list_head(ptr %{prefix}_fnt)"
-            )
-            .unwrap();
+            unpack_closure(&mut code, &emitted_args[1].value, prefix);
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @sz_lang_view_fab(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
@@ -4148,26 +4102,11 @@ fn emit_call(
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.outlinedButton" => {
-            writeln!(
-                code,
-                "  %{prefix}_fnp = call ptr @sz_list_head(ptr {})",
-                emitted_args[1].value
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_fnt = call ptr @sz_list_tail(ptr {})",
-                emitted_args[1].value
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_envp = call ptr @sz_list_head(ptr %{prefix}_fnt)"
-            )
-            .unwrap();
+            unpack_closure(&mut code, &emitted_args[1].value, prefix);
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @sz_lang_view_outlined_button(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
@@ -4175,26 +4114,11 @@ fn emit_call(
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.textButton" => {
-            writeln!(
-                code,
-                "  %{prefix}_fnp = call ptr @sz_list_head(ptr {})",
-                emitted_args[1].value
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_fnt = call ptr @sz_list_tail(ptr {})",
-                emitted_args[1].value
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_envp = call ptr @sz_list_head(ptr %{prefix}_fnt)"
-            )
-            .unwrap();
+            unpack_closure(&mut code, &emitted_args[1].value, prefix);
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @sz_lang_view_text_button(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
@@ -4202,26 +4126,11 @@ fn emit_call(
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.actionChip" => {
-            writeln!(
-                code,
-                "  %{prefix}_fnp = call ptr @sz_list_head(ptr {})",
-                emitted_args[1].value
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_fnt = call ptr @sz_list_tail(ptr {})",
-                emitted_args[1].value
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_envp = call ptr @sz_list_head(ptr %{prefix}_fnt)"
-            )
-            .unwrap();
+            unpack_closure(&mut code, &emitted_args[1].value, prefix);
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @sz_lang_view_action_chip(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
@@ -4229,6 +4138,7 @@ fn emit_call(
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.checkbox" => {
@@ -4456,23 +4366,7 @@ fn emit_call(
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.inkWell" => {
-            writeln!(
-                code,
-                "  %{prefix}_fnp = call ptr @sz_list_head(ptr {})",
-                emitted_args[1].value
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_fnt = call ptr @sz_list_tail(ptr {})",
-                emitted_args[1].value
-            )
-            .unwrap();
-            writeln!(
-                code,
-                "  %{prefix}_envp = call ptr @sz_list_head(ptr %{prefix}_fnt)"
-            )
-            .unwrap();
+            unpack_closure(&mut code, &emitted_args[1].value, prefix);
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @sz_lang_view_ink_well(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp, ptr {})",
@@ -4480,6 +4374,7 @@ fn emit_call(
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.visibility" => {
@@ -6210,6 +6105,84 @@ law always: Bool = 1 == 1
                     "expected last-use release of string {name} after {label}:\n{ir}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn emit_view_tap_packs_release_owned() {
+        let cases: &[(&str, &str, &str)] = &[
+            (
+                r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.button("a", _ => ()))
+"#,
+                "call ptr @sz_lang_view_button(",
+                "View.button",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.iconButton("i", _ => ()))
+"#,
+                "call ptr @sz_lang_view_icon_button(",
+                "View.iconButton",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.fab("+", _ => ()))
+"#,
+                "call ptr @sz_lang_view_fab(",
+                "View.fab",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.outlinedButton("a", _ => ()))
+"#,
+                "call ptr @sz_lang_view_outlined_button(",
+                "View.outlinedButton",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.textButton("a", _ => ()))
+"#,
+                "call ptr @sz_lang_view_text_button(",
+                "View.textButton",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.actionChip("a", _ => ()))
+"#,
+                "call ptr @sz_lang_view_action_chip(",
+                "View.actionChip",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.inkWell("a", _ => (), View.avatar("b")))
+"#,
+                "call ptr @sz_lang_view_ink_well(",
+                "View.inkWell",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.button("a", _ => Signal.set(n, 1)))
+  } yield ()
+"#,
+                "call ptr @sz_lang_view_button(",
+                "View.button capture",
+            ),
+        ];
+        for (src, needle, label) in cases {
+            let p = crate::lower::lower_program(parse(src).unwrap());
+            crate::typ::typecheck(&p).unwrap_or_else(|e| panic!("typecheck {label}: {e}"));
+            let ir = emit_llvm(&p);
+            let at = ir
+                .find(needle)
+                .unwrap_or_else(|| panic!("expected {needle} in IR for {label}:\n{ir}"));
+            let pack = last_cl2_before(&ir, at);
+            assert!(
+                ir[at..].contains(&format!("call void @sz_release(ptr {pack})")),
+                "expected last-use release of tap pack {pack} after {label}:\n{ir}"
+            );
         }
     }
 
