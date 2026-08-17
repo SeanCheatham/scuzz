@@ -26,6 +26,7 @@ SzIo *sz_ref_of_cstr(const char *initial) {
 
 static void *ref_get_thunk(void *env) {
   SzRef *r = (SzRef *)env;
+  sz_retain(r->value);
   return r->value;
 }
 

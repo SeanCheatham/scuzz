@@ -851,6 +851,7 @@ static SzIo *after_ref_get(void *value, void *env) {
   (void)env;
   SzString *s = (SzString *)value;
   assert(s && strcmp(sz_string_cstr(s), "b") == 0);
+  sz_release(value);
   return pure_drop(NULL);
 }
 
@@ -1256,6 +1257,11 @@ int main(void) {
       assert(r.ok);
       assert(strcmp(sz_string_cstr((SzString *)ref->value), "b") == 0);
     }
+    r = sz_io_unsafe_run(sz_ref_get(ref));
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "b") == 0);
+    sz_release(r.value);
+    assert(strcmp(sz_string_cstr((SzString *)ref->value), "b") == 0);
   }
 
   /* Deferred */

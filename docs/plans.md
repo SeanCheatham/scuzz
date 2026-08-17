@@ -1,9 +1,10 @@
 # Short-term plan
 
-## Slice: Retain the current value in `sz_ref_get`
+## Slice: Retain the current value in `sz_deferred_get`
 
-`sz_deferred_complete` retains the value and drops the caller ref after the call. `sz_ref_get` still returns the live Ref slot, so a last-use drop of the run result would free the Ref's value.
+`sz_ref_get` retains the current value so the run result does not alias the Ref slot. `sz_deferred_get` still resumes with the live Deferred slot, so a last-use drop of the run result would free the completed value.
 
-- Retain the current value in the get thunk so the run result is a distinct ref.
-- Proof: `test_io` can drop the get result and still read the Ref; compiler last-use of an owned get binder still typechecks and runs.
-- Out of scope: OS threads. Making Ref RC. Releasing the current value when the Ref frees.
+- Retain the completed value when get resumes (parked waiters and the already-complete path).
+- Drop the get binder after the body when the payload is owned.
+- Proof: `test_io` can drop the get result and still read the Deferred; compiler IR drops an owned `Deferred.get` binder.
+- Out of scope: OS threads. Making Deferred RC. Releasing the completed value when the Deferred frees.

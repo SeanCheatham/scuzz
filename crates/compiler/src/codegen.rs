@@ -390,16 +390,23 @@ struct Emitted {
     kind: Kind,
     /// When `kind == Io`, the kind of the successful payload (Int for Sys.exec).
     payload: Kind,
+    /// When `kind == Io` and the payload is a ptr, the run result holds a distinct RC.
+    payload_owned: bool,
     /// Compiler owns a +1 on this ptr (string / list / map / ADT temps). Release after last use.
     owned: bool,
 }
 
 fn io_emitted(code: String, value: String, payload: Kind) -> Emitted {
+    io_emitted_payload(code, value, payload, false)
+}
+
+fn io_emitted_payload(code: String, value: String, payload: Kind, payload_owned: bool) -> Emitted {
     Emitted {
         code,
         value,
         kind: Kind::Io,
         payload,
+        payload_owned,
         owned: false,
     }
 }
@@ -410,6 +417,7 @@ fn val_emitted(code: String, value: String, kind: Kind) -> Emitted {
         value,
         kind,
         payload: Kind::Ptr,
+        payload_owned: false,
         owned: false,
     }
 }
@@ -420,6 +428,7 @@ fn owned_ptr(code: String, value: String) -> Emitted {
         value,
         kind: Kind::Ptr,
         payload: Kind::Ptr,
+        payload_owned: false,
         owned: true,
     }
 }
@@ -1068,6 +1077,7 @@ fn emit_match(
     let mut arm_emits: Vec<(String, String, Emitted)> = Vec::new();
     let mut result_kind = Kind::Io;
     let mut result_payload = Kind::Ptr;
+    let mut result_payload_owned = !arms.is_empty();
     let mut any_arm_owned = false;
     let mut all_arms_owned = !arms.is_empty();
 
@@ -1102,6 +1112,7 @@ fn emit_match(
             result_kind = ae.kind;
             result_payload = ae.payload;
         }
+        result_payload_owned = result_payload_owned && ae.payload_owned;
         if ae.owned && ae.kind == Kind::Ptr {
             any_arm_owned = true;
         } else {
@@ -1165,6 +1176,7 @@ fn emit_match(
         value: format!("%{prefix}_phi"),
         kind: result_kind,
         payload: result_payload,
+        payload_owned: result_kind == Kind::Io && result_payload_owned,
         owned: result_kind == Kind::Ptr && (arms_provide || se.owned),
     }
 }
@@ -1564,6 +1576,7 @@ fn emit_expr(
                 value: be.value,
                 kind: be.kind,
                 payload: be.payload,
+                payload_owned: be.payload_owned,
                 owned: be.owned,
             }
         }
@@ -1627,6 +1640,7 @@ fn emit_expr(
                 value: format!("%{prefix}_phi"),
                 kind,
                 payload,
+                payload_owned: te.payload_owned && ee.payload_owned,
                 owned: kind == Kind::Ptr && (te.owned || ee.owned),
             }
         }
@@ -1642,6 +1656,7 @@ fn emit_expr(
 
             let inner_emitted = emit_expr(inner, ctx, locals, &format!("{prefix}_in"));
             let payload_kind = inner_emitted.payload;
+            let payload_owned = inner_emitted.payload_owned;
 
             // Cont is a separate LLVM function. Capture enclosing locals with %env list.
             let capture_names = capture_name_order(locals);
@@ -1659,6 +1674,8 @@ fn emit_expr(
                 if payload_kind == Kind::Int || payload_kind == Kind::Float {
                     let v = unbox_numeric(&mut pre, payload_kind, "%value", p);
                     body_locals.insert(p.clone(), Local::borrow(v, payload_kind));
+                } else if payload_owned {
+                    body_locals.insert(p.clone(), Local::owned("%value", Kind::Ptr));
                 } else {
                     body_locals.insert(p.clone(), Local::borrow("%value", Kind::Ptr));
                 }
@@ -1681,6 +1698,14 @@ fn emit_expr(
                 &format!("c{id}_wrap"),
                 body_emitted.owned,
             );
+            if let Some(p) = param {
+                if let Some(bound) = body_locals.get(p) {
+                    if bound.owned && bound.kind == Kind::Ptr && ret != bound.value {
+                        writeln!(ctx.conts, "  call void @sz_release(ptr {})", bound.value)
+                            .unwrap();
+                    }
+                }
+            }
             writeln!(ctx.conts, "  ret ptr {ret}").unwrap();
             writeln!(ctx.conts, "}}").unwrap();
             writeln!(ctx.conts).unwrap();
@@ -1704,7 +1729,12 @@ fn emit_expr(
             .unwrap();
             writeln!(code, "  call void @sz_release(ptr {inner_io})").unwrap();
             writeln!(code, "  call void @sz_release(ptr {env_ptr})").unwrap();
-            io_emitted(code, format!("%{prefix}_fm"), body_emitted.payload)
+            io_emitted_payload(
+                code,
+                format!("%{prefix}_fm"),
+                body_emitted.payload,
+                body_emitted.payload_owned,
+            )
         }
         ExprKind::HandleErrorWith { inner, param, body } => {
             let id = *ctx.cont_id;
@@ -1772,7 +1802,12 @@ fn emit_expr(
             .unwrap();
             writeln!(code, "  call void @sz_release(ptr {inner_io})").unwrap();
             writeln!(code, "  call void @sz_release(ptr {env_ptr})").unwrap();
-            io_emitted(code, format!("%{prefix}_h"), body_emitted.payload)
+            io_emitted_payload(
+                code,
+                format!("%{prefix}_h"),
+                body_emitted.payload,
+                body_emitted.payload_owned,
+            )
         }
         ExprKind::Attempt { inner } => {
             let inner_emitted = emit_expr(inner, ctx, locals, &format!("{prefix}_at"));
@@ -1874,7 +1909,12 @@ fn emit_expr(
             .unwrap();
             writeln!(code, "  call void @sz_release(ptr {iv})").unwrap();
             writeln!(code, "  call void @sz_release(ptr {fv})").unwrap();
-            io_emitted(code, format!("%{prefix}_ensure"), ie.payload)
+            io_emitted_payload(
+                code,
+                format!("%{prefix}_ensure"),
+                ie.payload,
+                ie.payload_owned,
+            )
         }
         ExprKind::IoTimeout { ms, inner } => {
             let me = emit_expr(ms, ctx, locals, &format!("{prefix}_ms"));
@@ -1900,7 +1940,12 @@ fn emit_expr(
             )
             .unwrap();
             writeln!(code, "  call void @sz_release(ptr {iv})").unwrap();
-            io_emitted(code, format!("%{prefix}_timeout"), ie.payload)
+            io_emitted_payload(
+                code,
+                format!("%{prefix}_timeout"),
+                ie.payload,
+                ie.payload_owned,
+            )
         }
     }
 }
@@ -3746,7 +3791,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
-            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
         }
         "Ref.set" => {
             writeln!(
@@ -3866,7 +3911,12 @@ fn emit_call(
             )
             .unwrap();
             writeln!(code, "  call void @sz_release(ptr {iv})").unwrap();
-            io_emitted(code, format!("%{prefix}_v"), emitted_args[1].payload)
+            io_emitted_payload(
+                code,
+                format!("%{prefix}_v"),
+                emitted_args[1].payload,
+                emitted_args[1].payload_owned,
+            )
         }
         "IO.retryN" => {
             let n = if emitted_args[0].kind == Kind::Int {
@@ -3888,7 +3938,12 @@ fn emit_call(
             )
             .unwrap();
             writeln!(code, "  call void @sz_release(ptr {iv})").unwrap();
-            io_emitted(code, format!("%{prefix}_v"), emitted_args[1].payload)
+            io_emitted_payload(
+                code,
+                format!("%{prefix}_v"),
+                emitted_args[1].payload,
+                emitted_args[1].payload_owned,
+            )
         }
         "Stream.emit" => {
             writeln!(
@@ -5617,6 +5672,28 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at + close..].contains(&format!("call void @sz_release(ptr {value})")),
             "expected last-use release of value {value} after Deferred.complete:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_ref_get_releases_value() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    r <- Ref.of("a")
+    v <- Ref.get(r)
+    _ <- IO.println(v)
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("call ptr @sz_io_println(ptr %value)"),
+            "expected println of Ref.get binder:\n{ir}"
+        );
+        assert!(
+            ir.contains("call void @sz_release(ptr %value)"),
+            "expected last-use release of Ref.get binder %value:\n{ir}"
         );
     }
 
