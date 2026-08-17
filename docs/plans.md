@@ -1,10 +1,10 @@
 # Short-term plan
 
-## Slice: Drop owned inner IO after IO.race
+## Slice: Drop owned inner IO after IO.both
 
-`IO.ensure` retains inner and finalizer and drops the caller refs. `IO.race` stores left and right without retain, so those graphs can alias the race node.
+`IO.race` retains both arms and drops the caller refs. `IO.both` stores left and right without retain, so those graphs can alias the both node.
 
-- Retain left and right in `sz_io_race`.
+- Retain left and right in `sz_io_both`.
 - Drop the caller refs after the call.
-- Proof: compiler IR for `IO.race(IO.sleep(1), IO.pure("ok"))` shows `sz_release` of both arms after the call.
+- Proof: compiler IR for `IO.both(IO.pure("a"), IO.pure("b"))` shows `sz_release` of both arms after the call.
 - Out of scope: OS threads.

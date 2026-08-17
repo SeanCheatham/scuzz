@@ -1773,6 +1773,8 @@ fn emit_expr(
                 "  %{prefix}_race = call ptr @sz_io_race(ptr {lv}, ptr {rv})"
             )
             .unwrap();
+            writeln!(code, "  call void @sz_release(ptr {lv})").unwrap();
+            writeln!(code, "  call void @sz_release(ptr {rv})").unwrap();
             io_emitted(code, format!("%{prefix}_race"), Kind::Ptr)
         }
         ExprKind::IoBoth { left, right } => {
@@ -5336,6 +5338,40 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {fin})")),
             "expected last-use release of finalizer {fin} after IO.ensure:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_io_race_releases_arms() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.race(IO.sleep(1), IO.pure("ok"))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_io_race(ptr ";
+        let at = ir.find(needle).expect("expected sz_io_race");
+        let rest = &ir[at + needle.len()..];
+        let left = rest.split(',').next().unwrap().trim();
+        let right = rest
+            .split(',')
+            .nth(1)
+            .unwrap()
+            .trim()
+            .trim_start_matches("ptr ")
+            .split(')')
+            .next()
+            .unwrap()
+            .trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {left})")),
+            "expected last-use release of left {left} after IO.race:\n{ir}"
+        );
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {right})")),
+            "expected last-use release of right {right} after IO.race:\n{ir}"
         );
     }
 

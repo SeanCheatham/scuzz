@@ -901,6 +901,13 @@ static SzIo *get_after_write_poll(void *value, void *env) {
   return sz_io_flatmap(sz_io_delay(get_check_write, st), get_unwrap_write, st);
 }
 
+static SzIo *race_drop(SzIo *left, SzIo *right) {
+  SzIo *io = sz_io_race(left, right);
+  sz_release(left);
+  sz_release(right);
+  return io;
+}
+
 static SzIo *get_poll_write(void *value, void *env) {
   GetSt *st = (GetSt *)env;
   SzIo *ready;
@@ -908,9 +915,9 @@ static SzIo *get_poll_write(void *value, void *env) {
   if (st->fd >= 0)
     ready = sz_io_poll_writable(st->fd);
   else if (st->fd4 >= 0 && st->fd6 >= 0)
-    ready = sz_io_race(sz_io_poll_writable(st->fd4), sz_io_poll_writable(st->fd6));
+    ready = race_drop(sz_io_poll_writable(st->fd4), sz_io_poll_writable(st->fd6));
   else if (st->he_wait4 && st->fd6 >= 0)
-    ready = sz_io_race(sz_io_poll_writable(st->fd6), sz_io_sleep_ms(HE_A_DELAY_MS));
+    ready = race_drop(sz_io_poll_writable(st->fd6), sz_io_sleep_ms(HE_A_DELAY_MS));
   else if (st->fd6 >= 0)
     ready = sz_io_poll_writable(st->fd6);
   else
@@ -919,7 +926,7 @@ static SzIo *get_poll_write(void *value, void *env) {
     int64_t left = st->connect_deadline_ms - sz_clock_monotonic_ms_sync();
     if (left < 1)
       left = 1;
-    ready = sz_io_race(ready, sz_io_sleep_ms(left));
+    ready = race_drop(ready, sz_io_sleep_ms(left));
   }
   return sz_io_flatmap(ready, get_after_write_poll, st);
 }
@@ -940,7 +947,7 @@ static SzIo *get_poll_read(void *value, void *env) {
   left = st->read_deadline_ms - sz_clock_monotonic_ms_sync();
   if (left < 1)
     left = 1;
-  ready = sz_io_race(sz_io_poll_readable(st->fd), sz_io_sleep_ms(left));
+  ready = race_drop(sz_io_poll_readable(st->fd), sz_io_sleep_ms(left));
   return sz_io_flatmap(ready, get_after_read_poll, st);
 }
 
@@ -980,7 +987,7 @@ static SzIo *get_poll_dns(void *value, void *env) {
   left = st->dns_deadline_ms - sz_clock_monotonic_ms_sync();
   if (left < 1)
     left = 1;
-  ready = sz_io_race(sz_io_poll_readable(st->dns_fd), sz_io_sleep_ms(left));
+  ready = race_drop(sz_io_poll_readable(st->dns_fd), sz_io_sleep_ms(left));
   return sz_io_flatmap(ready, get_after_dns_poll, st);
 }
 
@@ -1444,7 +1451,7 @@ static SzIo *serve_poll_then_accept(void *value, void *env) {
   SzIo *ready;
   (void)value;
   if (st->listen6_fd >= 0)
-    ready = sz_io_race(sz_io_poll_readable(st->listen_fd),
+    ready = race_drop(sz_io_poll_readable(st->listen_fd),
                        sz_io_poll_readable(st->listen6_fd));
   else
     ready = sz_io_poll_readable(st->listen_fd);
@@ -1465,7 +1472,7 @@ static SzIo *serve_poll_conn_read(void *value, void *env) {
   left = st->req_deadline_ms - sz_clock_monotonic_ms_sync();
   if (left < 1)
     left = 1;
-  ready = sz_io_race(sz_io_poll_readable(st->conn_fd), sz_io_sleep_ms(left));
+  ready = race_drop(sz_io_poll_readable(st->conn_fd), sz_io_sleep_ms(left));
   return sz_io_flatmap(ready, serve_after_conn_read_poll, st);
 }
 
@@ -1485,7 +1492,7 @@ static SzIo *serve_poll_conn_write(void *value, void *env) {
   left = st->write_deadline_ms - sz_clock_monotonic_ms_sync();
   if (left < 1)
     left = 1;
-  ready = sz_io_race(sz_io_poll_writable(st->conn_fd), sz_io_sleep_ms(left));
+  ready = race_drop(sz_io_poll_writable(st->conn_fd), sz_io_sleep_ms(left));
   return sz_io_flatmap(ready, serve_after_conn_write_poll, st);
 }
 

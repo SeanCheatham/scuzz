@@ -115,6 +115,12 @@ static SzIo *ensure_drop(SzIo *inner, SzIo *finalizer) {
   sz_release(finalizer);
   return io;
 }
+static SzIo *race_drop(SzIo *left, SzIo *right) {
+  SzIo *io = sz_io_race(left, right);
+  sz_release(left);
+  sz_release(right);
+  return io;
+}
 static SzIo *lang_use_ok(void *acquired, void *env) {
   (void)env;
   (void)acquired;
@@ -1006,7 +1012,7 @@ int main(void) {
     lang_released = 0;
     lr = lang_make_tok();
     r = sz_io_unsafe_run(
-        sz_io_race(sz_lang_resource_use(lr, lang_use_sleep, NULL),
+        race_drop(sz_lang_resource_use(lr, lang_use_sleep, NULL),
                    sz_io_sleep_ms(1)));
     assert(r.ok);
     assert(lang_released == 1);
@@ -1109,7 +1115,7 @@ int main(void) {
     inner = sz_io_sleep_ms(1);
     loop = sz_io_forever(inner);
     sz_release(inner);
-    r = sz_io_unsafe_run(sz_io_race(loop, sz_io_sleep_ms(5)));
+    r = sz_io_unsafe_run(race_drop(loop, sz_io_sleep_ms(5)));
     assert(r.ok);
     sz_testrt_reset();
   }
@@ -1412,7 +1418,7 @@ int main(void) {
 
   /* race prefers non-sleep winner */
   r = sz_io_unsafe_run(
-      sz_io_race(sz_io_sleep_ms(20), sz_io_pure((void *)(intptr_t)99)));
+      race_drop(sz_io_sleep_ms(20), sz_io_pure((void *)(intptr_t)99)));
   assert(r.ok);
   assert((intptr_t)r.value == 99);
 
@@ -1421,7 +1427,7 @@ int main(void) {
     int64_t t0 = sz_clock_monotonic_ms_sync();
     int64_t t1;
     r = sz_io_unsafe_run(
-        sz_io_race(sz_io_sleep_ms(300), sz_io_sleep_ms(1)));
+        race_drop(sz_io_sleep_ms(300), sz_io_sleep_ms(1)));
     t1 = sz_clock_monotonic_ms_sync();
     assert(r.ok);
     assert(t1 - t0 < 80);
@@ -1667,7 +1673,7 @@ int main(void) {
 
     /* race(sleep(100), sleep(1)) wins the short sleep; clock jumps by 1. */
     t0 = sz_testrt_clock_now_ms();
-    r = sz_io_unsafe_run(sz_io_race(
+    r = sz_io_unsafe_run(race_drop(
         sz_io_flatmap(sz_io_sleep_ms(100), after_sleep_tag, (void *)(intptr_t)100),
         sz_io_flatmap(sz_io_sleep_ms(1), after_sleep_tag, (void *)(intptr_t)1)));
     assert(r.ok);
@@ -1679,7 +1685,7 @@ int main(void) {
     t0 = sz_testrt_clock_now_ms();
     sz_testrt_stdout_reset();
     r = sz_io_unsafe_run(
-        sz_io_race(sz_io_sleep_ms(50), sz_io_println_cstr("race-win")));
+        race_drop(sz_io_sleep_ms(50), sz_io_println_cstr("race-win")));
     assert(r.ok);
     assert(sz_testrt_clock_now_ms() == t0);
     assert(strstr(sz_testrt_stdout_cstr(), "race-win\n") != NULL);
@@ -1886,7 +1892,7 @@ int main(void) {
     void *ret = NULL;
     pthread_create(&th_idle, NULL, connect_hold, &port);
     pthread_create(&th_get, NULL, delayed_live_get, &port);
-    r = sz_io_unsafe_run(sz_io_race(sz_net_serve(port, serve_path_ok, NULL),
+    r = sz_io_unsafe_run(race_drop(sz_net_serve(port, serve_path_ok, NULL),
                                    sz_io_sleep_ms(2500)));
     pthread_join(th_idle, NULL);
     pthread_join(th_get, &ret);
@@ -1914,7 +1920,7 @@ int main(void) {
     void *ret = NULL;
     pthread_create(&th_bad, NULL, connect_close, &port);
     pthread_create(&th_get, NULL, soon_live_get, &port);
-    r = sz_io_unsafe_run(sz_io_race(sz_net_serve(port, serve_path_ok, NULL),
+    r = sz_io_unsafe_run(race_drop(sz_net_serve(port, serve_path_ok, NULL),
                                    sz_io_sleep_ms(400)));
     pthread_join(th_bad, NULL);
     pthread_join(th_get, &ret);
@@ -1960,7 +1966,7 @@ int main(void) {
     void *ret = NULL;
     pthread_create(&th_bad, NULL, get_then_rst, &port);
     pthread_create(&th_get, NULL, soon_live_get, &port);
-    r = sz_io_unsafe_run(sz_io_race(sz_net_serve(port, serve_padded_ok, NULL),
+    r = sz_io_unsafe_run(race_drop(sz_net_serve(port, serve_padded_ok, NULL),
                                    sz_io_sleep_ms(400)));
     pthread_join(th_bad, NULL);
     pthread_join(th_get, &ret);
@@ -1988,7 +1994,7 @@ int main(void) {
     void *ret = NULL;
     g_serve_fail_n = 0;
     pthread_create(&th, NULL, two_live_gets, &port);
-    r = sz_io_unsafe_run(sz_io_race(sz_net_serve(port, serve_fail_then_ok, NULL),
+    r = sz_io_unsafe_run(race_drop(sz_net_serve(port, serve_fail_then_ok, NULL),
                                    sz_io_sleep_ms(400)));
     pthread_join(th, &ret);
     assert(r.ok);

@@ -661,6 +661,8 @@ SzIo *sz_io_race(SzIo *left, SzIo *right) {
   if (!left || !right)
     sz_panic("sz_io_race(null)");
   SzIo *io = sz_io_new(SZ_IO_RACE);
+  sz_retain(left);
+  sz_retain(right);
   io->as.race.left = left;
   io->as.race.right = right;
   return io;
