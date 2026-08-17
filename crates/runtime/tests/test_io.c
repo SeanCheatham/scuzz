@@ -94,6 +94,11 @@ static SzIo *repeat_n_drop(int64_t n, SzIo *inner) {
   sz_release(inner);
   return io;
 }
+static SzIo *retry_n_drop(int64_t n, SzIo *inner) {
+  SzIo *io = sz_io_retry_n(n, inner);
+  sz_release(inner);
+  return io;
+}
 static SzIo *lang_use_ok(void *acquired, void *env) {
   (void)env;
   (void)acquired;
@@ -1053,14 +1058,14 @@ int main(void) {
 
   /* IO.retryN: extra retries on failure; last success / last error. */
   retry_hits = 0;
-  r = sz_io_unsafe_run(sz_io_retry_n(
+  r = sz_io_unsafe_run(retry_n_drop(
       5, sz_io_flatmap(sz_io_delay(retry_count, NULL), retry_until_3, NULL)));
   assert(r.ok);
   assert((intptr_t)r.value == 3);
   assert(retry_hits == 3);
 
   retry_hits = 0;
-  r = sz_io_unsafe_run(sz_io_retry_n(
+  r = sz_io_unsafe_run(retry_n_drop(
       1, sz_io_flatmap(sz_io_delay(retry_count, NULL), always_fail_cont, NULL)));
   assert(!r.ok);
   assert(retry_hits == 2);
@@ -1068,14 +1073,14 @@ int main(void) {
   sz_error_free(r.error);
 
   retry_hits = 0;
-  r = sz_io_unsafe_run(sz_io_retry_n(
+  r = sz_io_unsafe_run(retry_n_drop(
       0, sz_io_flatmap(sz_io_delay(retry_count, NULL), always_fail_cont, NULL)));
   assert(!r.ok);
   assert(retry_hits == 1);
   sz_error_free(r.error);
 
   retry_hits = 0;
-  r = sz_io_unsafe_run(sz_io_retry_n(2, sz_io_pure((void *)(intptr_t)9)));
+  r = sz_io_unsafe_run(retry_n_drop(2, sz_io_pure((void *)(intptr_t)9)));
   assert(r.ok);
   assert((intptr_t)r.value == 9);
   assert(retry_hits == 0);

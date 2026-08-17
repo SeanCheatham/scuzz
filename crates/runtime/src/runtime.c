@@ -717,6 +717,7 @@ SzIo *sz_io_retry_n(int64_t n, SzIo *inner) {
   if (!inner)
     sz_panic("sz_io_retry_n(null)");
   SzIo *io = sz_io_new(SZ_IO_RETRY_N);
+  sz_retain(inner);
   io->as.loop.inner = inner;
   io->as.loop.n = n < 0 ? 0 : n;
   return io;
