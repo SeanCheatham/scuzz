@@ -47,6 +47,7 @@ SzLangResource *sz_lang_resource_make(SzIo *acquire, SzCont release,
   SzLangResource *r = (SzLangResource *)sz_rc_alloc(sizeof(SzLangResource),
                                                    SZ_RC_RESOURCE);
   memset(r, 0, sizeof(SzLangResource));
+  sz_retain(acquire);
   r->acquire = acquire;
   r->release = release;
   sz_retain(release_env);
@@ -63,6 +64,7 @@ SzIo *sz_lang_resource_use(SzLangResource *res, SzCont use, void *use_env) {
   sz_retain(res);
   sz_retain(use_env);
   st->use_env = use_env;
+  sz_retain(res->acquire);
   return sz_io_flatmap(res->acquire, lang_after_acquire, st);
 }
 

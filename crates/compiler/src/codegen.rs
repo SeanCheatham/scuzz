@@ -2470,7 +2470,11 @@ fn emit_resource(
             "  %{prefix}_v = call ptr @sz_lang_resource_make(ptr {acq}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
         )
         .unwrap();
+        writeln!(code, "  call void @sz_release(ptr {acq})").unwrap();
         drop_owned_ptr(&mut code, &lam);
+        if first.kind != Kind::Io {
+            drop_owned_ptr(&mut code, &first);
+        }
         owned_ptr(code, format!("%{prefix}_v"))
     } else {
         writeln!(
@@ -5175,6 +5179,26 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(ir.contains("sz_lang_resource_make"));
         assert!(ir.contains("sz_lang_resource_use"));
         assert!(ir.contains("sz_rcont_"));
+    }
+
+    #[test]
+    fn emit_resource_make_releases_acquire() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    res = Resource.make(IO.pure("tok"), t => IO.println(t))
+    _ <- Resource.use(res, t => IO.println(t))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_lang_resource_make(ptr ";
+        let at = ir.find(needle).expect("expected sz_lang_resource_make");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of acquire {name} after Resource.make:\n{ir}"
+        );
     }
 
     #[test]

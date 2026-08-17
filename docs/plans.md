@@ -1,11 +1,10 @@
 # Short-term plan
 
-## Slice: Drop owned acquire IO after Resource.make
+## Slice: Drop owned inner IO after IO.forever
 
-`Resource.use` drops an owned resource after the call. `Resource.make` stores the acquire IO without retain, so the acquire graph can alias the use flatMap.
+`Resource.make` retains acquire and drops the caller ref. `IO.forever` stores inner without retain, so the inner graph can alias the loop node.
 
-- Retain the acquire IO in `Resource.make`.
-- Drop an owned acquire IO after the call.
-- Release acquire when the resource drops.
-- Proof: compiler IR for `Resource.make(IO.pure("tok"), t => IO.println(t))` shows `sz_release` of the acquire IO after the call.
-- Out of scope: OS threads.
+- Retain inner in `sz_io_forever`.
+- Drop the caller ref after the call.
+- Proof: compiler IR for `IO.forever(IO.sleep(1))` shows `sz_release` of the inner after the call.
+- Out of scope: `IO.repeatN` / `IO.retryN`. OS threads.

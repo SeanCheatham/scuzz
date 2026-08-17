@@ -83,6 +83,12 @@ static SzIo *lang_release(void *acquired, void *env) {
   lang_released = 1;
   return sz_io_pure(NULL);
 }
+static SzLangResource *lang_make_tok(void) {
+  SzIo *acq = sz_io_pure(sz_string_from_cstr("tok"));
+  SzLangResource *lr = sz_lang_resource_make(acq, lang_release, NULL);
+  sz_release(acq);
+  return lr;
+}
 static SzIo *lang_use_ok(void *acquired, void *env) {
   (void)env;
   (void)acquired;
@@ -903,16 +909,14 @@ int main(void) {
 
   /* Resource.make / use (IO acquire + IO release) */
   lang_released = 0;
-  SzLangResource *lr = sz_lang_resource_make(
-      sz_io_pure(sz_string_from_cstr("tok")), lang_release, NULL);
+  SzLangResource *lr = lang_make_tok();
   r = sz_io_unsafe_run(sz_lang_resource_use(lr, lang_use_ok, NULL));
   assert(r.ok);
   assert(lang_released == 1);
   sz_lang_resource_free(lr);
 
   lang_released = 0;
-  lr = sz_lang_resource_make(sz_io_pure(sz_string_from_cstr("tok")),
-                             lang_release, NULL);
+  lr = lang_make_tok();
   r = sz_io_unsafe_run(sz_lang_resource_use(lr, lang_use_fail, NULL));
   assert(!r.ok);
   assert(lang_released == 1);
@@ -944,8 +948,7 @@ int main(void) {
     msg = sz_string_from_cstr("cap");
     env = sz_list_cons(msg, sz_list_nil());
     sz_release(msg);
-    lr = sz_lang_resource_make(sz_io_pure(sz_string_from_cstr("tok")),
-                               lang_release, NULL);
+    lr = lang_make_tok();
     use_io = sz_lang_resource_use(lr, lang_use_println_env, env);
     sz_release(env);
     r = sz_io_unsafe_run(use_io);
@@ -975,8 +978,7 @@ int main(void) {
   {
     sz_testrt_install();
     lang_released = 0;
-    lr = sz_lang_resource_make(sz_io_pure(sz_string_from_cstr("tok")),
-                               lang_release, NULL);
+    lr = lang_make_tok();
     r = sz_io_unsafe_run(
         sz_io_race(sz_lang_resource_use(lr, lang_use_sleep, NULL),
                    sz_io_sleep_ms(1)));
@@ -1009,8 +1011,7 @@ int main(void) {
   {
     sz_testrt_install();
     lang_released = 0;
-    lr = sz_lang_resource_make(sz_io_pure(sz_string_from_cstr("tok")),
-                               lang_release, NULL);
+    lr = lang_make_tok();
     r = sz_io_unsafe_run(
         sz_io_timeout(1, sz_lang_resource_use(lr, lang_use_sleep, NULL)));
     assert(!r.ok);
@@ -1087,8 +1088,7 @@ int main(void) {
   {
     sz_testrt_install();
     lang_released = 0;
-    lr = sz_lang_resource_make(sz_io_pure(sz_string_from_cstr("tok")),
-                               lang_release, NULL);
+    lr = lang_make_tok();
     r = sz_io_unsafe_run(sz_io_flatmap(
         sz_fiber_fork(sz_io_forever(
             sz_lang_resource_use(lr, lang_use_sleep, NULL))),
@@ -1112,8 +1112,7 @@ int main(void) {
   {
     sz_testrt_install();
     lang_released = 0;
-    lr = sz_lang_resource_make(sz_io_pure(sz_string_from_cstr("tok")),
-                               lang_release, NULL);
+    lr = lang_make_tok();
     r = sz_io_unsafe_run(sz_io_flatmap(
         sz_fiber_fork(sz_lang_resource_use(lr, lang_use_sleep, NULL)),
         fiber_interrupt_then_join, NULL));
