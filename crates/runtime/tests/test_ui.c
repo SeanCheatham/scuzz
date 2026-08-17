@@ -12209,6 +12209,62 @@ static void test_alloc_counter_pump_flat(void) {
   sz_signal_int_free(count);
 }
 
+/* Headless button with a captured list env: tap still fires after the
+ * caller drops the list, and sz_view_free returns live_count to baseline. */
+static void list_env_tap(SzView *self, void *env) {
+  SzSignalInt *count = (SzSignalInt *)sz_list_head((SzList *)env);
+  (void)self;
+  sz_signal_int_set(count, sz_signal_int_get(count) + 1);
+}
+
+static void test_tap_env_retain_release(void) {
+  SzUiConfig cfg;
+  SzSignalInt *count;
+  SzList *env;
+  SzView *root, *btn;
+  SzUiSession *session;
+  SzInputEvent tap;
+  size_t base_count = 0, base_bytes = 0;
+  size_t live_count = 0, live_bytes = 0;
+
+  count = sz_signal_int(0);
+  sz_alloc_stats(&base_bytes, &base_count);
+  env = sz_list_cons(count, sz_list_nil());
+  btn = sz_view_button("+", list_env_tap, env);
+  sz_release(env);
+  sz_view_free(btn);
+  sz_alloc_stats(&live_bytes, &live_count);
+  assert(live_count == base_count);
+  sz_signal_int_free(count);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 100;
+  cfg.scale = 1.0;
+
+  count = sz_signal_int(0);
+  env = sz_list_cons(count, sz_list_nil());
+  root = sz_view_column();
+  btn = sz_view_button("+", list_env_tap, env);
+  sz_view_add_child(root, btn);
+  sz_release(env);
+
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  assert(sz_ui_pump_sync(session));
+  memset(&tap, 0, sizeof(tap));
+  tap.kind = SZ_INPUT_TAP;
+  tap.x = sz_view_frame(btn).x + 8.f;
+  tap.y = sz_view_frame(btn).y + 8.f;
+  assert(sz_ui_inject_sync(session, &tap));
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(count) == 1);
+  sz_ui_unmount(session);
+  sz_view_free(root);
+  sz_signal_int_free(count);
+}
+
 #ifdef __APPLE__
 #define RELOAD_A "build/reload_a.dylib"
 #define RELOAD_B "build/reload_b.dylib"
@@ -12869,6 +12925,7 @@ int main(void) {
   test_alloc_pump_flat();
   test_alloc_counter_pump_flat();
   test_alloc_each_pump_flat();
+  test_tap_env_retain_release();
   puts("runtime ui tests ok");
   return 0;
 }

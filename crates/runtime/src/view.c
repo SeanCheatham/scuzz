@@ -70,6 +70,12 @@ static SzView *view_new(SzViewKind kind) {
   return v;
 }
 
+static void view_set_tap(SzView *v, SzViewTapFn on_tap, void *env) {
+  v->on_tap = on_tap;
+  sz_retain(env);
+  v->tap_env = env;
+}
+
 static int view_is_shown(const SzView *v);
 static void resolve_text(const SzView *v, char *buf, size_t buflen);
 
@@ -235,8 +241,7 @@ SzView *sz_view_text_signal_str(SzSignalStr *sig) {
 SzView *sz_view_button(const char *label, SzViewTapFn on_tap, void *env) {
   SzView *v = view_new(SZ_VIEW_BUTTON);
   v->text = sz_strdup(label);
-  v->on_tap = on_tap;
-  v->tap_env = env;
+  view_set_tap(v, on_tap, env);
   v->interactive = 1;
   v->a11y_role = SZ_A11Y_BUTTON;
   v->a11y_label = sz_strdup(label);
@@ -246,8 +251,7 @@ SzView *sz_view_button(const char *label, SzViewTapFn on_tap, void *env) {
 SzView *sz_view_icon_button(const char *label, SzViewTapFn on_tap, void *env) {
   SzView *v = view_new(SZ_VIEW_ICON_BUTTON);
   v->text = sz_strdup(label ? label : "");
-  v->on_tap = on_tap;
-  v->tap_env = env;
+  view_set_tap(v, on_tap, env);
   v->interactive = 1;
   v->a11y_role = SZ_A11Y_ICON_BUTTON;
   v->a11y_label = sz_strdup(label ? label : "");
@@ -257,8 +261,7 @@ SzView *sz_view_icon_button(const char *label, SzViewTapFn on_tap, void *env) {
 SzView *sz_view_fab(const char *label, SzViewTapFn on_tap, void *env) {
   SzView *v = view_new(SZ_VIEW_FAB);
   v->text = sz_strdup(label ? label : "");
-  v->on_tap = on_tap;
-  v->tap_env = env;
+  view_set_tap(v, on_tap, env);
   v->interactive = 1;
   v->a11y_role = SZ_A11Y_FAB;
   v->a11y_label = sz_strdup(label ? label : "");
@@ -269,8 +272,7 @@ SzView *sz_view_outlined_button(const char *label, SzViewTapFn on_tap,
                                void *env) {
   SzView *v = view_new(SZ_VIEW_OUTLINED_BUTTON);
   v->text = sz_strdup(label ? label : "");
-  v->on_tap = on_tap;
-  v->tap_env = env;
+  view_set_tap(v, on_tap, env);
   v->interactive = 1;
   v->a11y_role = SZ_A11Y_OUTLINED;
   v->a11y_label = sz_strdup(label ? label : "");
@@ -280,8 +282,7 @@ SzView *sz_view_outlined_button(const char *label, SzViewTapFn on_tap,
 SzView *sz_view_text_button(const char *label, SzViewTapFn on_tap, void *env) {
   SzView *v = view_new(SZ_VIEW_TEXT_BUTTON);
   v->text = sz_strdup(label ? label : "");
-  v->on_tap = on_tap;
-  v->tap_env = env;
+  view_set_tap(v, on_tap, env);
   v->interactive = 1;
   v->a11y_role = SZ_A11Y_TEXT_BUTTON;
   v->a11y_label = sz_strdup(label ? label : "");
@@ -393,8 +394,7 @@ SzView *sz_view_choice_chip(SzSignalInt *sig, int64_t value, const char *label) 
 SzView *sz_view_action_chip(const char *label, SzViewTapFn on_tap, void *env) {
   SzView *v = view_new(SZ_VIEW_ACTION_CHIP);
   v->text = sz_strdup(label ? label : "");
-  v->on_tap = on_tap;
-  v->tap_env = env;
+  view_set_tap(v, on_tap, env);
   v->interactive = 1;
   v->a11y_role = SZ_A11Y_ACTION_CHIP;
   v->a11y_label = sz_strdup(label ? label : "");
@@ -526,8 +526,7 @@ SzView *sz_view_ink_well(const char *label, SzViewTapFn on_tap, void *env,
                          SzView *child) {
   SzView *v = view_new(SZ_VIEW_INK_WELL);
   v->text = sz_strdup(label ? label : "");
-  v->on_tap = on_tap;
-  v->tap_env = env;
+  view_set_tap(v, on_tap, env);
   v->interactive = 1;
   v->a11y_role = SZ_A11Y_INK_WELL;
   v->a11y_label = sz_strdup(label ? label : "");
@@ -1139,6 +1138,8 @@ void sz_view_free(SzView *view) {
   sz_free(view->placeholder);
   sz_free(view->a11y_label);
   /* Signals are owned by the demo/session, not the view. */
+  sz_release(view->tap_env);
+  view->tap_env = NULL;
   sz_free(view);
 }
 

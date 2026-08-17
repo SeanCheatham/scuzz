@@ -1981,6 +1981,9 @@ fn emit_lambda(
     )
     .unwrap();
     writeln!(code, "  call void @sz_release(ptr %{prefix}_cl1)").unwrap();
+    if env_ptr != "null" {
+        writeln!(code, "  call void @sz_release(ptr {env_ptr})").unwrap();
+    }
     owned_ptr(code, format!("%{prefix}_cl2"))
 }
 
@@ -6300,6 +6303,29 @@ law always: Bool = 1 == 1
                 "expected last-use release of tap pack {pack} after {label}:\n{ir}"
             );
         }
+    }
+
+    #[test]
+    fn emit_view_tap_capture_env_released_after_pack() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    _ <- Ui.run(_ => View.button("a", _ => Signal.set(n, 1)))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "_cap_1 = call ptr @sz_list_cons(";
+        let cap_at = ir.find(needle).expect("expected capture list cons");
+        let start = ir[..cap_at]
+            .rfind('%')
+            .expect("expected % before capture SSA");
+        let name = &ir[start..cap_at + "_cap_1".len()];
+        assert!(
+            ir[cap_at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected construction release of tap capture {name}:\n{ir}"
+        );
     }
 
     #[test]
