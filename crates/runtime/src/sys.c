@@ -451,7 +451,11 @@ SzIo *sz_sys_exec(SzString *cmd) {
   st->cmd = cmd;
   st->read_fd = -1;
   io = sz_io_flatmap(sz_io_delay(sys_exec_start, st), exec_after_start, st);
-  return sz_io_handle_error_with(io, exec_on_err, st);
+  {
+    SzIo *handled = sz_io_handle_error_with(io, exec_on_err, st);
+    sz_release(io);
+    return handled;
+  }
 }
 
 static void *sys_spawn_result(void *env) {

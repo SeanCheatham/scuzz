@@ -127,6 +127,11 @@ static SzIo *both_drop(SzIo *left, SzIo *right) {
   sz_release(right);
   return io;
 }
+static SzIo *handle_drop(SzIo *inner, SzErrorHandler handler, void *env) {
+  SzIo *io = sz_io_handle_error_with(inner, handler, env);
+  sz_release(inner);
+  return io;
+}
 static SzIo *lang_use_ok(void *acquired, void *env) {
   (void)env;
   (void)acquired;
@@ -847,7 +852,7 @@ static SzIo *after_fork_ignore(void *fiber, void *env) {
 
 static SzIo *fiber_join_recover(void *ignored, void *fiber) {
   (void)ignored;
-  return sz_io_handle_error_with(sz_fiber_join(fiber), recover_unit, NULL);
+  return handle_drop(sz_fiber_join(fiber), recover_unit, NULL);
 }
 
 static SzIo *fiber_interrupt_then_join(void *fiber, void *env) {
@@ -924,7 +929,7 @@ int main(void) {
   sz_error_free(r.error);
 
   /* handleErrorWith */
-  r = sz_io_unsafe_run(sz_io_handle_error_with(sz_io_fail_cstr("boom"),
+  r = sz_io_unsafe_run(handle_drop(sz_io_fail_cstr("boom"),
                                                recover_boom, NULL));
   assert(r.ok);
 

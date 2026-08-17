@@ -637,6 +637,7 @@ SzIo *sz_io_handle_error_with(SzIo *inner, SzErrorHandler handler, void *env) {
   if (!inner || !handler)
     sz_panic("sz_io_handle_error_with(null)");
   SzIo *io = sz_io_new(SZ_IO_HANDLE_ERROR);
+  sz_retain(inner);
   io->as.handle_error.inner = inner;
   io->as.handle_error.handler = handler;
   io->as.handle_error.env = env;
@@ -1709,7 +1710,9 @@ static int step_fiber(Sched *s, Fiber *f) {
   case SZ_IO_ATTEMPT: {
     SzIo *inner = io_child(cur, &cur->as.attempt_inner);
     SzIo *mapped = sz_io_flatmap(inner, attempt_ok, NULL);
-    fiber_set_cur(f, sz_io_handle_error_with(mapped, attempt_err, NULL));
+    SzIo *handled = sz_io_handle_error_with(mapped, attempt_err, NULL);
+    sz_release(mapped);
+    fiber_set_cur(f, handled);
     ready_enqueue(s, f);
     return 0;
   }

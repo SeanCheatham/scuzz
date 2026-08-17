@@ -908,6 +908,12 @@ static SzIo *race_drop(SzIo *left, SzIo *right) {
   return io;
 }
 
+static SzIo *handle_drop(SzIo *inner, SzErrorHandler handler, void *env) {
+  SzIo *io = sz_io_handle_error_with(inner, handler, env);
+  sz_release(inner);
+  return io;
+}
+
 static SzIo *get_poll_write(void *value, void *env) {
   GetSt *st = (GetSt *)env;
   SzIo *ready;
@@ -1032,7 +1038,7 @@ static SzIo *get_after_dispatch(void *value, void *env) {
   }
   io = sz_io_flatmap(sz_io_delay(get_start, st), get_after_start, st);
   io = sz_io_flatmap(io, get_after_connect, st);
-  return sz_io_handle_error_with(io, get_on_err, st);
+  return handle_drop(io, get_on_err, st);
 }
 
 SzIo *sz_net_http_get(SzString *url) {
@@ -1541,7 +1547,7 @@ static SzIo *serve_after_path(void *path, void *env) {
   SzIo *io = st->handler(path, st->henv);
   io = sz_io_flatmap(io, serve_after_body, st);
   io = sz_io_flatmap(io, serve_after_write, st);
-  return sz_io_handle_error_with(io, serve_on_handler_err, st);
+  return handle_drop(io, serve_on_handler_err, st);
 }
 
 static SzIo *serve_round(ServeSt *st) {
@@ -1574,7 +1580,7 @@ static SzIo *net_serve_n(int64_t port, int64_t n, SzCont handler, void *env) {
   st->handler = handler;
   sz_retain(env);
   st->henv = env;
-  return sz_io_handle_error_with(serve_round(st), serve_on_err, st);
+  return handle_drop(serve_round(st), serve_on_err, st);
 }
 
 SzIo *sz_net_serve(int64_t port, SzCont handler, void *env) {

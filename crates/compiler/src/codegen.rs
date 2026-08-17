@@ -1743,6 +1743,7 @@ fn emit_expr(
                 "  %{prefix}_h = call ptr @sz_io_handle_error_with(ptr {inner_io}, ptr @{cont_name}, ptr {env_ptr})"
             )
             .unwrap();
+            writeln!(code, "  call void @sz_release(ptr {inner_io})").unwrap();
             io_emitted(code, format!("%{prefix}_h"), body_emitted.payload)
         }
         ExprKind::Attempt { inner } => {
@@ -5408,6 +5409,23 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {right})")),
             "expected last-use release of right {right} after IO.both:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_handle_error_with_releases_inner() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.fail("boom").handleErrorWith(_ => IO.println("recovered"))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_io_handle_error_with(ptr ";
+        let at = ir.find(needle).expect("expected sz_io_handle_error_with");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of inner {name} after handleErrorWith:\n{ir}"
         );
     }
 
