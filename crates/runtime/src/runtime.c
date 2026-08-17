@@ -672,6 +672,8 @@ SzIo *sz_io_both(SzIo *left, SzIo *right) {
   if (!left || !right)
     sz_panic("sz_io_both(null)");
   SzIo *io = sz_io_new(SZ_IO_BOTH);
+  sz_retain(left);
+  sz_retain(right);
   io->as.both.left = left;
   io->as.both.right = right;
   return io;

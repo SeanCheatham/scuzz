@@ -121,6 +121,12 @@ static SzIo *race_drop(SzIo *left, SzIo *right) {
   sz_release(right);
   return io;
 }
+static SzIo *both_drop(SzIo *left, SzIo *right) {
+  SzIo *io = sz_io_both(left, right);
+  sz_release(left);
+  sz_release(right);
+  return io;
+}
 static SzIo *lang_use_ok(void *acquired, void *env) {
   (void)env;
   (void)acquired;
@@ -527,7 +533,7 @@ static SzIo *after_sleep_http(void *value, void *env) {
 
 static SzIo *after_sleep_dns_http(void *value, void *env) {
   (void)value;
-  return sz_io_both(
+  return both_drop(
       sz_net_http_get((SzString *)env),
       sz_io_flatmap(sz_io_println_cstr("peer"), assert_peer_quiet, NULL));
 }
@@ -1435,7 +1441,7 @@ int main(void) {
 
   /* both */
   r = sz_io_unsafe_run(
-      sz_io_both(sz_io_pure((void *)(intptr_t)1), sz_io_pure((void *)(intptr_t)2)));
+      both_drop(sz_io_pure((void *)(intptr_t)1), sz_io_pure((void *)(intptr_t)2)));
   assert(r.ok);
   {
     SzPair *p = (SzPair *)r.value;
@@ -1693,7 +1699,7 @@ int main(void) {
     /* both println order is stable across runs. */
     sz_testrt_stdout_reset();
     r = sz_io_unsafe_run(
-        sz_io_both(sz_io_println_cstr("a"), sz_io_println_cstr("b")));
+        both_drop(sz_io_println_cstr("a"), sz_io_println_cstr("b")));
     assert(r.ok);
     {
       char saved[64];
@@ -1702,7 +1708,7 @@ int main(void) {
       memcpy(saved, s, strlen(s) + 1);
       sz_testrt_stdout_reset();
       r = sz_io_unsafe_run(
-          sz_io_both(sz_io_println_cstr("a"), sz_io_println_cstr("b")));
+          both_drop(sz_io_println_cstr("a"), sz_io_println_cstr("b")));
       assert(r.ok);
       out2 = sz_testrt_stdout_cstr();
       assert(strcmp(saved, out2) == 0);
@@ -1713,7 +1719,7 @@ int main(void) {
     /* both(take, offer) parks take until offer wakes it. */
     q = sz_queue_make();
     r = sz_io_unsafe_run(
-        sz_io_both(sz_queue_take(q), sz_queue_offer_cstr(q, "parked")));
+        both_drop(sz_queue_take(q), sz_queue_offer_cstr(q, "parked")));
     assert(r.ok);
     {
       SzPair *p = (SzPair *)r.value;
@@ -1725,7 +1731,7 @@ int main(void) {
 
     /* both(get, complete) parks get until complete wakes it. */
     def = sz_deferred_make();
-    r = sz_io_unsafe_run(sz_io_both(sz_deferred_get(def),
+    r = sz_io_unsafe_run(both_drop(sz_deferred_get(def),
                                     sz_deferred_complete_cstr(def, "go")));
     assert(r.ok);
     {
@@ -1749,7 +1755,7 @@ int main(void) {
 
     sz_testrt_stdout_reset();
     r = sz_io_unsafe_run(
-        sz_io_both(sz_io_println_cstr("a"), sz_io_println_cstr("b")));
+        both_drop(sz_io_println_cstr("a"), sz_io_println_cstr("b")));
     assert(r.ok);
     s = sz_testrt_stdout_cstr();
     assert(strstr(s, "b\na\n") != NULL);
@@ -1758,14 +1764,14 @@ int main(void) {
 
     sz_testrt_stdout_reset();
     r = sz_io_unsafe_run(
-        sz_io_both(sz_io_println_cstr("a"), sz_io_println_cstr("b")));
+        both_drop(sz_io_println_cstr("a"), sz_io_println_cstr("b")));
     assert(r.ok);
     assert(strcmp(saved, sz_testrt_stdout_cstr()) == 0);
 
     unsetenv("SCUZZ_SCHED_SEED");
     sz_testrt_stdout_reset();
     r = sz_io_unsafe_run(
-        sz_io_both(sz_io_println_cstr("a"), sz_io_println_cstr("b")));
+        both_drop(sz_io_println_cstr("a"), sz_io_println_cstr("b")));
     assert(r.ok);
     assert(strstr(sz_testrt_stdout_cstr(), "a\nb\n") != NULL);
 
@@ -1843,7 +1849,7 @@ int main(void) {
   {
     SzPair *pair;
     g_peer_flag = 0;
-    r = sz_io_unsafe_run(sz_io_both(
+    r = sz_io_unsafe_run(both_drop(
         sz_io_flatmap(sz_sys_exec(sz_string_from_cstr("sleep 0.08")),
                       exec_then_flag, NULL),
         sz_io_flatmap(sz_io_println_cstr("peer"), assert_peer_quiet, NULL)));
@@ -2009,7 +2015,7 @@ int main(void) {
     assert(pipe(fds) == 0);
     g_peer_flag = 0;
     pthread_create(&th, NULL, pipe_late_write, &fds[1]);
-    r = sz_io_unsafe_run(sz_io_both(
+    r = sz_io_unsafe_run(both_drop(
         sz_io_poll_readable(fds[0]),
         sz_io_flatmap(sz_io_println_cstr("peer"), assert_peer_quiet, NULL)));
     pthread_join(th, NULL);
@@ -2026,7 +2032,7 @@ int main(void) {
     void *ret = NULL;
     g_peer_flag = 0;
     pthread_create(&th, NULL, live_get_client_late, &port);
-    r = sz_io_unsafe_run(sz_io_both(
+    r = sz_io_unsafe_run(both_drop(
         sz_net_serve_once(port, serve_path_ok, NULL),
         sz_io_flatmap(sz_io_println_cstr("peer"), assert_peer_quiet, NULL)));
     pthread_join(th, &ret);
@@ -2040,7 +2046,7 @@ int main(void) {
     char url[64];
     SzPair *pair;
     snprintf(url, sizeof url, "http://127.0.0.1:%d/x", port);
-    r = sz_io_unsafe_run(sz_io_both(
+    r = sz_io_unsafe_run(both_drop(
         sz_net_serve_once(port, serve_path_ok, NULL),
         sz_io_flatmap(sz_io_sleep_ms(30), after_sleep_http,
                       sz_string_from_cstr(url))));
@@ -2056,7 +2062,7 @@ int main(void) {
     char url[64];
     SzPair *pair;
     snprintf(url, sizeof url, "http://[::1]:%d/x", port);
-    r = sz_io_unsafe_run(sz_io_both(
+    r = sz_io_unsafe_run(both_drop(
         sz_net_serve_once(port, serve_path_ok, NULL),
         sz_io_flatmap(sz_io_sleep_ms(30), after_sleep_http,
                       sz_string_from_cstr(url))));
@@ -2272,7 +2278,7 @@ int main(void) {
     g_peer_flag = 0;
     pthread_create(&th, NULL, dns_late_a, &dns_fd);
     snprintf(url, sizeof url, "http://scuzz.test:%d/x", http_port);
-    r = sz_io_unsafe_run(sz_io_both(
+    r = sz_io_unsafe_run(both_drop(
         sz_net_serve_once(http_port, serve_path_ok, NULL),
         sz_io_flatmap(sz_io_sleep_ms(30), after_sleep_dns_http,
                       sz_string_from_cstr(url))));
@@ -2310,7 +2316,7 @@ int main(void) {
     g_peer_flag = 0;
     pthread_create(&th, NULL, dns_late_cname, &dns_fd);
     snprintf(url, sizeof url, "http://scuzz.test:%d/x", http_port);
-    r = sz_io_unsafe_run(sz_io_both(
+    r = sz_io_unsafe_run(both_drop(
         sz_net_serve_once(http_port, serve_path_ok, NULL),
         sz_io_flatmap(sz_io_sleep_ms(30), after_sleep_dns_http,
                       sz_string_from_cstr(url))));
@@ -2359,7 +2365,7 @@ int main(void) {
     wr = fds[1];
     g_peer_flag = 0;
     pthread_create(&th, NULL, stdin_late_write, &wr);
-    r = sz_io_unsafe_run(sz_io_both(
+    r = sz_io_unsafe_run(both_drop(
         sz_sys_read_line(),
         sz_io_flatmap(sz_io_println_cstr("peer"), assert_peer_quiet, NULL)));
     pthread_join(th, NULL);
