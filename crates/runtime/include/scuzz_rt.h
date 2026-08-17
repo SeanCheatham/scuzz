@@ -23,7 +23,8 @@ enum {
   SZ_RC_ADT = 3,
   SZ_RC_BOX = 4,
   SZ_RC_MAP = 5,
-  SZ_RC_IO = 6
+  SZ_RC_IO = 6,
+  SZ_RC_STREAM = 7
 };
 void *sz_rc_alloc(size_t size, uint32_t kind);
 void sz_retain(void *ptr);
@@ -313,8 +314,23 @@ SzIo *sz_queue_take(SzQueue *q); /* IO[A]; parks when empty under the fiber sche
 size_t sz_queue_size(const SzQueue *q);
 
 /* Stream — finite pull: emit / eval / concat / map / evalMap / filter / take / takeWhile / drop / dropWhile / find / exists. */
+enum {
+  SZ_ST_NIL = 0,
+  SZ_ST_CONS = 1,
+  SZ_ST_EVAL = 2,
+  SZ_ST_CONCAT = 3,
+  SZ_ST_EVALMAP = 4,
+  SZ_ST_TAKE = 5,
+  SZ_ST_DROP = 6,
+  SZ_ST_FILTER = 7,
+  SZ_ST_MAP = 8,
+  SZ_ST_TAKEWHILE = 9,
+  SZ_ST_DROPWHILE = 10,
+  SZ_ST_FIND = 11
+};
+
 struct SzStream {
-  int tag; /* 0 nil … 9 takeWhile, 10 dropWhile, 11 find */
+  int tag;
   void *left;
   void *right;
   void *env;

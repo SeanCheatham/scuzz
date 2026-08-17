@@ -2477,7 +2477,8 @@ fn emit_stream_evalmap(
         panic!("Stream.evalMap callback must be a lambda");
     };
     let lam = emit_io_cont_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
-    let mut code = inner.code;
+    let mut code = String::new();
+    code.push_str(&inner.code);
     code.push_str(&lam.code);
     unpack_closure(&mut code, &lam.value, prefix);
     writeln!(
@@ -2487,7 +2488,8 @@ fn emit_stream_evalmap(
     )
     .unwrap();
     drop_owned_ptr(&mut code, &lam);
-    val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+    drop_owned_ptr(&mut code, &inner);
+    owned_ptr(code, format!("%{prefix}_v"))
 }
 
 fn emit_stream_pred(
@@ -2517,15 +2519,13 @@ fn emit_stream_pred(
     )
     .unwrap();
     drop_owned_ptr(&mut code, &lam);
+    if inner_owned && inner_kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {inner_value})").unwrap();
+    }
     if as_io {
         io_emitted(code, format!("%{prefix}_v"), Kind::Int)
-    } else if rt == "sz_list_filter" {
-        if inner_owned && inner_kind == Kind::Ptr {
-            writeln!(code, "  call void @sz_release(ptr {inner_value})").unwrap();
-        }
-        owned_ptr(code, format!("%{prefix}_v"))
     } else {
-        val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        owned_ptr(code, format!("%{prefix}_v"))
     }
 }
 
@@ -2590,14 +2590,10 @@ fn emit_ptr_map(
     )
     .unwrap();
     drop_owned_ptr(&mut code, &lam);
-    if rt == "sz_list_map" {
-        if inner_owned && inner_kind == Kind::Ptr {
-            writeln!(code, "  call void @sz_release(ptr {inner_value})").unwrap();
-        }
-        owned_ptr(code, format!("%{prefix}_v"))
-    } else {
-        val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+    if inner_owned && inner_kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {inner_value})").unwrap();
     }
+    owned_ptr(code, format!("%{prefix}_v"))
 }
 
 fn emit_net_serve(
@@ -3815,7 +3811,9 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "Stream.take" => {
             writeln!(
@@ -3824,7 +3822,8 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "Stream.drop" => {
             writeln!(
@@ -3833,7 +3832,8 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "Stream.compileToList" => {
             writeln!(
@@ -3842,6 +3842,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Stream.drain" => {
@@ -3851,6 +3852,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Signal.int" => {
@@ -5263,6 +5265,23 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of value {name} after Stream.emit:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_stream_drain_releases_stream() {
+        let src = r#"@main def main: IO[Unit] =
+  Stream.drain(Stream.emit("a"))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_stream_drain(ptr ";
+        let at = ir.find(needle).expect("expected sz_stream_drain");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of stream {name} after Stream.drain:\n{ir}"
         );
     }
 

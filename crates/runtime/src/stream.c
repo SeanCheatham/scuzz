@@ -1,24 +1,18 @@
 #include "scuzz_rt.h"
 
 #include <stdint.h>
+#include <string.h>
 
-enum {
-  SZ_ST_NIL = 0,
-  SZ_ST_CONS = 1,
-  SZ_ST_EVAL = 2,
-  SZ_ST_CONCAT = 3,
-  SZ_ST_EVALMAP = 4,
-  SZ_ST_TAKE = 5,
-  SZ_ST_DROP = 6,
-  SZ_ST_FILTER = 7,
-  SZ_ST_MAP = 8,
-  SZ_ST_TAKEWHILE = 9,
-  SZ_ST_DROPWHILE = 10,
-  SZ_ST_FIND = 11
-};
+static SzStream *st_keep(SzStream *s) {
+  if (!s)
+    return sz_stream_nil();
+  sz_retain(s);
+  return s;
+}
 
 static SzStream *st_new(int tag, void *left, void *right, void *env) {
-  SzStream *s = (SzStream *)sz_alloc_zero(sizeof(SzStream));
+  SzStream *s = (SzStream *)sz_rc_alloc(sizeof(SzStream), SZ_RC_STREAM);
+  memset(s, 0, sizeof(SzStream));
   s->tag = tag;
   s->left = left;
   s->right = right;
@@ -55,73 +49,55 @@ SzStream *sz_stream_eval(SzIo *io) {
 }
 
 SzStream *sz_stream_concat(SzStream *left, SzStream *right) {
-  if (!left)
-    left = sz_stream_nil();
-  if (!right)
-    right = sz_stream_nil();
-  return st_new(SZ_ST_CONCAT, left, right, NULL);
+  return st_new(SZ_ST_CONCAT, st_keep(left), st_keep(right), NULL);
 }
 
 SzStream *sz_stream_evalmap(SzStream *inner, SzCont f, void *env) {
-  if (!inner || !f)
+  if (!f)
     sz_panic("sz_stream_evalmap(null)");
-  return st_new(SZ_ST_EVALMAP, inner, (void *)f, env);
+  return st_new(SZ_ST_EVALMAP, st_keep(inner), (void *)f, env);
 }
 
 SzStream *sz_stream_filter(SzStream *inner, SzStreamPred pred, void *env) {
-  if (!inner)
-    inner = sz_stream_nil();
   if (!pred)
     sz_panic("sz_stream_filter(null pred)");
-  return st_new(SZ_ST_FILTER, inner, (void *)pred, env);
+  return st_new(SZ_ST_FILTER, st_keep(inner), (void *)pred, env);
 }
 
 SzStream *sz_stream_map(SzStream *inner, SzStreamMapFn f, void *env) {
-  if (!inner)
-    inner = sz_stream_nil();
   if (!f)
     sz_panic("sz_stream_map(null fn)");
-  return st_new(SZ_ST_MAP, inner, (void *)f, env);
+  return st_new(SZ_ST_MAP, st_keep(inner), (void *)f, env);
 }
 
 SzStream *sz_stream_takewhile(SzStream *inner, SzStreamPred pred, void *env) {
-  if (!inner)
-    inner = sz_stream_nil();
   if (!pred)
     sz_panic("sz_stream_takewhile(null pred)");
-  return st_new(SZ_ST_TAKEWHILE, inner, (void *)pred, env);
+  return st_new(SZ_ST_TAKEWHILE, st_keep(inner), (void *)pred, env);
 }
 
 SzStream *sz_stream_dropwhile(SzStream *inner, SzStreamPred pred, void *env) {
-  if (!inner)
-    inner = sz_stream_nil();
   if (!pred)
     sz_panic("sz_stream_dropwhile(null pred)");
-  return st_new(SZ_ST_DROPWHILE, inner, (void *)pred, env);
+  return st_new(SZ_ST_DROPWHILE, st_keep(inner), (void *)pred, env);
 }
 
 SzStream *sz_stream_find(SzStream *inner, SzStreamPred pred, void *env) {
-  if (!inner)
-    inner = sz_stream_nil();
   if (!pred)
     sz_panic("sz_stream_find(null pred)");
-  return st_new(SZ_ST_FIND, inner, (void *)pred, env);
+  return st_new(SZ_ST_FIND, st_keep(inner), (void *)pred, env);
 }
 
 SzStream *sz_stream_take(SzStream *inner, int64_t n) {
-  if (!inner)
-    inner = sz_stream_nil();
   if (n <= 0)
     return sz_stream_nil();
-  return st_new(SZ_ST_TAKE, inner, NULL, (void *)(intptr_t)n);
+  return st_new(SZ_ST_TAKE, st_keep(inner), NULL, (void *)(intptr_t)n);
 }
 
 SzStream *sz_stream_drop(SzStream *inner, int64_t n) {
-  if (!inner)
-    inner = sz_stream_nil();
-  if (n <= 0)
-    return inner;
-  return st_new(SZ_ST_DROP, inner, NULL, (void *)(intptr_t)n);
+  if (n < 0)
+    n = 0;
+  return st_new(SZ_ST_DROP, st_keep(inner), NULL, (void *)(intptr_t)n);
 }
 
 typedef struct StEval {
@@ -796,8 +772,19 @@ static SzIo *reverse_acc(void *acc, void *env) {
   return sz_io_pure(sz_list_reverse((SzList *)acc));
 }
 
+static void *st_release_io(void *env) {
+  sz_release(env);
+  return NULL;
+}
+
 SzIo *sz_stream_compile_to_list(SzStream *s) {
-  return sz_io_flatmap(compile_into(s, sz_list_nil(), -1), reverse_acc, NULL);
+  SzIo *body;
+  if (!s)
+    s = sz_stream_nil();
+  else
+    sz_retain(s);
+  body = sz_io_flatmap(compile_into(s, sz_list_nil(), -1), reverse_acc, NULL);
+  return sz_io_ensure(body, sz_io_delay(st_release_io, s));
 }
 
 static SzIo *drain_discard(void *list, void *env) {
@@ -817,6 +804,8 @@ static SzIo *exists_from_list(void *list, void *env) {
 }
 
 SzIo *sz_stream_exists(SzStream *s, SzStreamPred pred, void *env) {
-  return sz_io_flatmap(sz_stream_compile_to_list(sz_stream_find(s, pred, env)),
-                       exists_from_list, NULL);
+  SzStream *found = sz_stream_find(s, pred, env);
+  SzIo *io = sz_stream_compile_to_list(found);
+  sz_release(found);
+  return sz_io_flatmap(io, exists_from_list, NULL);
 }

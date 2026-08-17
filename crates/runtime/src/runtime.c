@@ -255,6 +255,40 @@ void sz_release(void *ptr) {
     }
     break;
   }
+  case SZ_RC_STREAM: {
+    SzStream *st = (SzStream *)ptr;
+    for (;;) {
+      int tag = st->tag;
+      void *left = st->left;
+      void *right = st->right;
+      void *env = st->env;
+      SzRcHdr *cell = sz_rc_hdr(st);
+      st->left = NULL;
+      st->right = NULL;
+      st->env = NULL;
+      cell->magic = 0;
+      sz_free(cell);
+      if (tag == SZ_ST_CONS || tag == SZ_ST_EVAL) {
+        sz_release(left);
+        if (!sz_is_rc(right))
+          return;
+        if (sz_rc_hdr(right)->rc > 1) {
+          sz_release(right);
+          return;
+        }
+        st = (SzStream *)right;
+        continue;
+      }
+      sz_release(left);
+      if (tag == SZ_ST_CONCAT)
+        sz_release(right);
+      /* TAKE/DROP store a count in env. Filter and map nodes store a capture
+       * list. Function pointers in right are not RC. */
+      if (tag != SZ_ST_TAKE && tag != SZ_ST_DROP)
+        sz_release(env);
+      return;
+    }
+  }
   case SZ_RC_BOX:
     break;
   default:
