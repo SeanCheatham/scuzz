@@ -1687,6 +1687,17 @@ int main(void) {
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzIo *alive = sz_sys_alive(4242);
+      SzIo *killed = sz_sys_kill(4242);
+      sz_release(alive);
+      sz_release(killed);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
   }
 
   /* Stream — emit / eval / concat / evalMap / map / take / drop / filter / compileToList / drain */
@@ -2200,6 +2211,21 @@ int main(void) {
       assert(sz_unbox_i64(r.value) == 0);
       r = sz_io_unsafe_run(sz_sys_kill((int64_t)getpid()));
       assert(r.ok);
+
+      {
+        size_t base_bytes = 0, base_count = 0;
+        size_t live_bytes = 0, live_count = 0;
+        sz_alloc_stats(&base_bytes, &base_count);
+        sz_testrt_proc_put(7);
+        r = sz_io_unsafe_run(sz_sys_alive(7));
+        assert(r.ok);
+        sz_release(r.value);
+        r = sz_io_unsafe_run(sz_sys_kill(7));
+        assert(r.ok);
+        sz_alloc_stats(&live_bytes, &live_count);
+        assert(live_count == base_count);
+        assert(live_bytes == base_bytes);
+      }
     }
 
     r = sz_io_unsafe_run(sz_impurity_run_kit());
