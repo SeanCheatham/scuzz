@@ -1511,6 +1511,17 @@ int main(void) {
     sz_pair_free(p);
   }
 
+  {
+    SzString *a = sz_string_from_cstr("L");
+    SzString *b = sz_string_from_cstr("R");
+    SzPair *p = sz_pair_new(a, b);
+    sz_release(a);
+    sz_release(b);
+    assert(p && strcmp(sz_string_cstr((SzString *)p->left), "L") == 0);
+    assert(strcmp(sz_string_cstr((SzString *)p->right), "R") == 0);
+    sz_pair_free(p);
+  }
+
   /* string ops */
   {
     SzString *a = sz_string_from_cstr("foo");

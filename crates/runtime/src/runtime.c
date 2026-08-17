@@ -45,6 +45,13 @@ static SzEither *either_right_drop(void *value) {
   return e;
 }
 
+static SzPair *pair_drop(void *left, void *right) {
+  SzPair *p = sz_pair_new(left, right);
+  sz_release(left);
+  sz_release(right);
+  return p;
+}
+
 static SzIo *attempt_drop(SzIo *inner) {
   SzIo *io = sz_io_attempt(inner);
   sz_release(inner);
@@ -611,6 +618,8 @@ void *sz_adt_payload(const SzAdt *adt) { return adt ? adt->payload : NULL; }
 
 SzPair *sz_pair_new(void *left, void *right) {
   SzPair *p = (SzPair *)sz_alloc(sizeof(SzPair));
+  sz_retain(left);
+  sz_retain(right);
   p->left = left;
   p->right = right;
   return p;
@@ -1516,7 +1525,7 @@ static void join_child_done(Sched *s, Fiber *child, int ok, void *val,
     if (p->children_settled >= 2) {
       p->join_kind = JOIN_NONE;
       p->state = FIB_READY;
-      fiber_set_cur(p, pure_drop(sz_pair_new(p->child_val[0], p->child_val[1])));
+      fiber_set_cur(p, pure_drop(pair_drop(p->child_val[0], p->child_val[1])));
       ready_enqueue(s, p);
     }
   }

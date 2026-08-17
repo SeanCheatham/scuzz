@@ -364,6 +364,7 @@ typedef struct SzPair {
   void *right;
 } SzPair;
 
+/* Callee retains both sides. Caller drops after the call. */
 SzPair *sz_pair_new(void *left, void *right);
 void sz_pair_free(SzPair *p);
 
