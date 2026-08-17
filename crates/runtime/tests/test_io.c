@@ -1249,6 +1249,13 @@ int main(void) {
     SzRef *ref = sz_ref_make(s);
     sz_release(s);
     assert(ref && strcmp(sz_string_cstr((SzString *)ref->value), "a") == 0);
+    {
+      SzString *n = sz_string_from_cstr("b");
+      r = sz_io_unsafe_run(sz_ref_set(ref, n));
+      sz_release(n);
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)ref->value), "b") == 0);
+    }
   }
 
   /* Deferred */

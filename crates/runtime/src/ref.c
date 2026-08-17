@@ -42,7 +42,10 @@ typedef struct RefSetEnv {
 
 static void *ref_set_thunk(void *env) {
   RefSetEnv *e = (RefSetEnv *)env;
+  void *old = e->ref->value;
   e->ref->value = e->value;
+  if (old != e->value)
+    sz_release(old);
   sz_free(e);
   return NULL;
 }
@@ -52,10 +55,17 @@ SzIo *sz_ref_set(SzRef *ref, void *value) {
     sz_panic("sz_ref_set(null)");
   RefSetEnv *e = (RefSetEnv *)sz_alloc(sizeof(RefSetEnv));
   e->ref = ref;
+  sz_retain(value);
   e->value = value;
   return sz_io_delay(ref_set_thunk, e);
 }
 
+static SzIo *ref_set_drop(SzRef *ref, void *value) {
+  SzIo *io = sz_ref_set(ref, value);
+  sz_release(value);
+  return io;
+}
+
 SzIo *sz_ref_set_cstr(SzRef *ref, const char *value) {
-  return sz_ref_set(ref, sz_string_from_cstr(value ? value : ""));
+  return ref_set_drop(ref, sz_string_from_cstr(value ? value : ""));
 }

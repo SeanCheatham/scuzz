@@ -284,6 +284,7 @@ SzRef *sz_ref_make(void *initial);
 SzIo *sz_ref_of(void *initial);          /* IO[Ref] */
 SzIo *sz_ref_of_cstr(const char *initial);
 SzIo *sz_ref_get(SzRef *ref);            /* IO[A] */
+/* Callee retains the new value. Caller drops after the call. */
 SzIo *sz_ref_set(SzRef *ref, void *value); /* IO[Unit] */
 SzIo *sz_ref_set_cstr(SzRef *ref, const char *value);
 

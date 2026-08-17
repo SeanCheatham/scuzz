@@ -3755,6 +3755,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Queue.unbounded" => {
@@ -5544,6 +5545,28 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of error message {name} after handleErrorWith body:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_ref_set_releases_value() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    r <- Ref.of("a")
+    _ <- Ref.set(r, "b")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_ref_set(ptr ";
+        let at = ir.find(needle).expect("expected sz_ref_set");
+        let close = ir[at..].find(')').expect("expected sz_ref_set call close");
+        let value = ir[at..at + close].rsplit("ptr ").next().unwrap().trim();
+        assert_ne!(value, "null", "expected a value, not null:\n{ir}");
+        assert!(
+            ir[at + close..].contains(&format!("call void @sz_release(ptr {value})")),
+            "expected last-use release of value {value} after Ref.set:\n{ir}"
         );
     }
 

@@ -1,11 +1,10 @@
 # Short-term plan
 
-## Slice: Retain the new value in `sz_ref_set`
+## Slice: Retain the offer value in `sz_queue_offer`
 
-`sz_ref_make` retains the initial value and drops the caller ref after the call. `sz_ref_set` still stores the new value without retain, so an RC payload can alias the Ref. The old value is not released.
+`sz_ref_set` retains the new value and drops the caller ref after the call. `sz_queue_offer` still stores the value without retain, so an RC payload can alias the queue.
 
-- Retain the new value in `sz_ref_set`.
+- Retain the value in `sz_queue_offer`.
 - Drop the caller ref after the call.
-- Release the previous value when the set runs.
-- Proof: `test_io` Ref get/set still works; after set, a dropped caller string remains readable through `Ref.get`.
-- Out of scope: OS threads. Making Ref RC. Releasing the current value when the Ref frees.
+- Proof: `test_io` queue offer/take still works; C kits drop via `queue_offer_drop` or an equivalent after `sz_queue_offer`.
+- Out of scope: OS threads. Making Queue RC. Releasing queued values when the queue frees.
