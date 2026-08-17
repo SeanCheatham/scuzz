@@ -336,7 +336,8 @@ SzIo *sz_sys_read(int64_t n) {
 }
 
 static void *sys_write_result(void *env) {
-  SzString *s = (SzString *)env;
+  SzPair *pack = (SzPair *)env;
+  SzString *s = pack ? (SzString *)pack->left : NULL;
   SysResult *r = (SysResult *)sz_alloc(sizeof(SysResult));
   const char *p = s ? sz_string_cstr(s) : "";
   size_t n = s ? s->len : 0;
@@ -351,14 +352,20 @@ static void *sys_write_result(void *env) {
     r->is_err = 1;
     r->as.err = sz_error_new(3, "Sys.write: flush failed");
   }
-  sz_release(s);
+  sz_release(pack);
   return r;
 }
 
 SzIo *sz_sys_write(SzString *s) {
+  SzPair *pack;
   if (!s)
     sz_panic("sz_sys_write(null)");
-  return fm_drop(sz_io_delay(sys_write_result, s), unwrap_sys, NULL);
+  pack = sz_pair_new(s, NULL);
+  {
+    SzIo *io = fm_drop(sz_io_delay(sys_write_result, pack), unwrap_sys, NULL);
+    sz_release(pack);
+    return io;
+  }
 }
 
 typedef struct ExecSt {
