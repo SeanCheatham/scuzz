@@ -235,6 +235,8 @@ void sz_signal_str_free(SzSignalStr *s) {
     return;
   sig_unregister(s);
   sz_free(s->value);
+  sz_release(s->map_env);
+  s->map_env = NULL;
   sz_free(s);
 }
 
@@ -242,6 +244,7 @@ SzSignalStr *sz_lang_signal_map(SzSignalInt *src, SzSignalMapIntFn fn, void *env
   SzSignalStr *s = (SzSignalStr *)sz_alloc_zero(sizeof(SzSignalStr));
   s->map_src = src;
   s->map_fn = fn;
+  sz_retain(env);
   s->map_env = env;
   s->value = sz_strdup("");
   sig_register(SIG_STR, s);

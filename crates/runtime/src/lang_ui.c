@@ -442,6 +442,8 @@ static void *thunk_run_rebuild(void *env) {
   }
 
   sz_ui_unmount(session);
+  sz_release(e->env);
+  e->env = NULL;
   sz_free(e);
   return NULL;
 }
@@ -449,6 +451,7 @@ static void *thunk_run_rebuild(void *env) {
 SzIo *sz_ui_run_rebuild(SzUiRebuildFn fn, void *env) {
   RunRebuildEnv *e = (RunRebuildEnv *)sz_alloc(sizeof(RunRebuildEnv));
   e->rebuild = fn;
+  sz_retain(env);
   e->env = env;
   return sz_io_delay(thunk_run_rebuild, e);
 }

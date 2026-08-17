@@ -267,6 +267,8 @@ void sz_ui_session_set_rebuild(SzUiSession *session, SzUiRebuildFn fn,
   if (!session)
     return;
   session->rebuild = fn;
+  sz_release(session->rebuild_env);
+  sz_retain(env);
   session->rebuild_env = env;
 }
 
@@ -524,6 +526,8 @@ void sz_ui_unmount(SzUiSession *session) {
     sk_surface_unref(session->surface);
   if (session->owns_view)
     sz_view_free(session->root);
+  sz_release(session->rebuild_env);
+  session->rebuild_env = NULL;
   if (session->code_stale)
     dlclose(session->code_stale);
   if (session->code_handle)

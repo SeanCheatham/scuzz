@@ -12265,6 +12265,45 @@ static void test_tap_env_retain_release(void) {
   sz_signal_int_free(count);
 }
 
+static SzView *each_row_from_list_env(SzString *item, void *env) {
+  SzSignalInt *n = (SzSignalInt *)sz_list_head((SzList *)env);
+  char buf[64];
+  snprintf(buf, sizeof buf, "%s-%lld", item ? sz_string_cstr(item) : "",
+           (long long)sz_signal_int_get(n));
+  return sz_view_text(buf);
+}
+
+static void test_each_env_retain_release(void) {
+  SzSignalInt *n;
+  SzSignalList *items;
+  SzList *xs, *env;
+  SzView *list;
+  SzString *dump;
+  const SzTheme *theme = sz_theme_default();
+  size_t base_count = 0, base_bytes = 0;
+  size_t live_count = 0, live_bytes = 0;
+
+  n = sz_signal_int(7);
+  xs = sz_list_cons(sz_string_from_cstr("milk"), sz_list_nil());
+  items = sz_signal_list(xs);
+  sz_release(xs);
+  sz_alloc_stats(&base_bytes, &base_count);
+
+  env = sz_list_cons(n, sz_list_nil());
+  list = sz_view_each_map(items, each_row_from_list_env, env);
+  sz_release(env);
+  sz_view_layout(list, 200.f, 120.f, theme);
+  dump = sz_view_a11y_dump(list);
+  assert(strstr(sz_string_cstr(dump), "text:milk-7") != NULL);
+  sz_string_free(dump);
+  sz_view_free(list);
+
+  sz_alloc_stats(&live_bytes, &live_count);
+  assert(live_count == base_count);
+  sz_signal_list_free(items);
+  sz_signal_int_free(n);
+}
+
 #ifdef __APPLE__
 #define RELOAD_A "build/reload_a.dylib"
 #define RELOAD_B "build/reload_b.dylib"
@@ -12926,6 +12965,7 @@ int main(void) {
   test_alloc_counter_pump_flat();
   test_alloc_each_pump_flat();
   test_tap_env_retain_release();
+  test_each_env_retain_release();
   puts("runtime ui tests ok");
   return 0;
 }

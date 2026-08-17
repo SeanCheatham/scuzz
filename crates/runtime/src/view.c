@@ -835,6 +835,7 @@ SzView *sz_view_each(SzSignalList *sig) {
 SzView *sz_view_each_map(SzSignalList *sig, SzViewEachFn fn, void *env) {
   SzView *v = sz_view_each(sig);
   v->each_fn = fn;
+  sz_retain(env);
   v->each_env = env;
   return v;
 }
@@ -1140,6 +1141,8 @@ void sz_view_free(SzView *view) {
   /* Signals are owned by the demo/session, not the view. */
   sz_release(view->tap_env);
   view->tap_env = NULL;
+  sz_release(view->each_env);
+  view->each_env = NULL;
   sz_free(view);
 }
 
