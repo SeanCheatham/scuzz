@@ -148,6 +148,12 @@ static SzIo *pure_drop(void *value) {
   return io;
 }
 
+static SzIo *fail_drop(SzError *err) {
+  SzIo *io = sz_io_fail(err);
+  sz_release(err);
+  return io;
+}
+
 static SzIo *attempt_drop(SzIo *inner) {
   SzIo *io = sz_io_attempt(inner);
   sz_release(inner);
@@ -944,7 +950,7 @@ int main(void) {
   assert(r.ok);
 
   /* fail */
-  r = sz_io_unsafe_run(sz_io_fail(sz_error_new(9, "boom")));
+  r = sz_io_unsafe_run(fail_drop(sz_error_new(9, "boom")));
   assert(!r.ok);
   assert(r.error && strstr(sz_string_cstr(r.error->message), "boom"));
   sz_error_free(r.error);

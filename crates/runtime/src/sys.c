@@ -27,6 +27,12 @@ static SzIo *pure_drop(void *value) {
   return io;
 }
 
+static SzIo *fail_drop(SzError *err) {
+  SzIo *io = sz_io_fail(err);
+  sz_release(err);
+  return io;
+}
+
 static char **g_argv = NULL;
 static int g_argc = 0;
 
@@ -72,7 +78,7 @@ static SzIo *unwrap_sys(void *value, void *env) {
   if (!r)
     return sz_io_fail_cstr("Sys: null result");
   if (r->is_err)
-    return sz_io_fail(r->as.err);
+    return fail_drop(r->as.err);
   return pure_drop(r->as.ok);
 }
 
@@ -439,7 +445,7 @@ static SzIo *exec_finish(void *code, void *env) {
 
 static SzIo *exec_on_err(SzError *err, void *env) {
   exec_free((ExecSt *)env);
-  return sz_io_fail(err);
+  return fail_drop(err);
 }
 
 static SzIo *exec_after_start(void *value, void *env) {

@@ -26,6 +26,12 @@ static SzIo *pure_drop(void *value) {
   return io;
 }
 
+static SzIo *fail_drop(SzError *err) {
+  SzIo *io = sz_io_fail(err);
+  sz_release(err);
+  return io;
+}
+
 /* Blessed Net.httpGet — live HTTP/1.0 GET or TestRuntime stub map.
  * Live hostnames query A and AAAA together (park on poll). CNAME chains
  * re-query both (cap 5). When both addresses exist, start AAAA first and wait
@@ -50,7 +56,7 @@ static SzIo *unwrap_net(void *value, void *env) {
   if (!r)
     return sz_io_fail_cstr("Net: null result");
   if (r->is_err)
-    return sz_io_fail(r->as.err);
+    return fail_drop(r->as.err);
   return pure_drop(r->as.ok);
 }
 
@@ -977,7 +983,7 @@ static SzIo *get_finish(void *body, void *env) {
 
 static SzIo *get_on_err(SzError *err, void *env) {
   get_free((GetSt *)env);
-  return sz_io_fail(err);
+  return fail_drop(err);
 }
 
 static SzIo *get_poll_dns(void *value, void *env);
@@ -1424,7 +1430,7 @@ static SzIo *serve_unwrap_accept(void *value, void *env) {
 static SzIo *serve_drop_conn(ServeSt *st, SzError *err) {
   serve_close_conn(st);
   if (st->left == 1)
-    return sz_io_fail(err);
+    return fail_drop(err);
   sz_error_free(err);
   return serve_round(st);
 }
@@ -1577,7 +1583,7 @@ static SzIo *serve_round(ServeSt *st) {
 
 static SzIo *serve_on_err(SzError *err, void *env) {
   serve_free((ServeSt *)env);
-  return sz_io_fail(err);
+  return fail_drop(err);
 }
 
 static SzIo *net_serve_n(int64_t port, int64_t n, SzCont handler, void *env) {

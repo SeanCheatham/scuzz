@@ -27,6 +27,12 @@ static SzIo *pure_drop(void *value) {
   return io;
 }
 
+static SzIo *fail_drop(SzError *err) {
+  SzIo *io = sz_io_fail(err);
+  sz_release(err);
+  return io;
+}
+
 static SzIo *attempt_drop(SzIo *inner) {
   SzIo *io = sz_io_attempt(inner);
   sz_release(inner);
@@ -321,6 +327,14 @@ void sz_release(void *ptr) {
     sz_release(acq);
     return;
   }
+  case SZ_RC_ERROR: {
+    SzError *e = (SzError *)ptr;
+    SzString *msg = e->message;
+    e->message = NULL;
+    sz_free(h);
+    sz_release(msg);
+    return;
+  }
   case SZ_RC_BOX:
     break;
   default:
@@ -504,18 +518,13 @@ int64_t sz_unbox_i64(const void *p) {
 /* --- errors / Either / ADT / Pair ---------------------------------------- */
 
 SzError *sz_error_new(int32_t code, const char *msg) {
-  SzError *e = (SzError *)sz_alloc(sizeof(SzError));
+  SzError *e = (SzError *)sz_rc_alloc(sizeof(SzError), SZ_RC_ERROR);
   e->code = code;
   e->message = sz_string_from_cstr(msg ? msg : "error");
   return e;
 }
 
-void sz_error_free(SzError *err) {
-  if (!err)
-    return;
-  sz_string_free(err->message);
-  sz_free(err);
-}
+void sz_error_free(SzError *err) { sz_release(err); }
 
 SzString *sz_error_message(const SzError *err) {
   if (!err || !err->message)
@@ -632,12 +641,13 @@ SzIo *sz_io_flatmap(SzIo *inner, SzCont cont, void *env) {
 
 SzIo *sz_io_fail(SzError *err) {
   SzIo *io = sz_io_new(SZ_IO_FAIL);
+  sz_retain(err);
   io->as.fail = err;
   return io;
 }
 
 SzIo *sz_io_fail_cstr(const char *msg) {
-  return sz_io_fail(sz_error_new(1, msg ? msg : "fail"));
+  return fail_drop(sz_error_new(1, msg ? msg : "fail"));
 }
 
 SzIo *sz_io_println(SzString *msg) {
@@ -1023,13 +1033,16 @@ static SzIo *ensure_after_attempt_ok(void *either_val, void *env) {
     return pure_drop(v);
   }
   {
-    SzError *err =
-        ex && !ex->is_right && ex->as.left
-            ? ex->as.left
-            : sz_error_new(2, "ensure finalizer failed");
+    SzError *err;
+    if (ex && !ex->is_right && ex->as.left) {
+      err = ex->as.left;
+      ex->as.left = NULL;
+    } else {
+      err = sz_error_new(2, "ensure finalizer failed");
+    }
     if (ex)
       sz_either_free(ex);
-    return sz_io_fail(err);
+    return fail_drop(err);
   }
 }
 
@@ -1040,9 +1053,12 @@ static SzIo *ensure_after_attempt_err(void *either_val, void *env) {
   sz_free(e);
   if (ex && !ex->is_right && ex->as.left && ex->as.left != orig)
     sz_error_free(ex->as.left);
-  if (ex)
+  if (ex) {
+    if (!ex->is_right)
+      ex->as.left = NULL;
     sz_either_free(ex);
-  return sz_io_fail(orig);
+  }
+  return fail_drop(orig);
 }
 
 static SzIo *ensure_run_fin_ok(SzIo *fin, void *value) {
@@ -1646,7 +1662,7 @@ void sz_fiber_wake_deferred(SzDeferred *d) {
               : sz_error_new(1, "deferred failed");
       f->state = FIB_READY;
       f->stack = f->stack; /* keep handlers */
-      fiber_set_cur(f, sz_io_fail(err));
+      fiber_set_cur(f, fail_drop(err));
       ready_enqueue(s, f);
     } else {
       f->state = FIB_READY;

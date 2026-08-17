@@ -27,6 +27,12 @@ static SzIo *pure_drop(void *value) {
   return io;
 }
 
+static SzIo *fail_drop(SzError *err) {
+  SzIo *io = sz_io_fail(err);
+  sz_release(err);
+  return io;
+}
+
 typedef struct {
   int is_err;
   union {
@@ -46,7 +52,7 @@ static SzIo *unwrap_fs(void *value, void *env) {
   if (!r)
     return sz_io_fail_cstr("Fs: null result");
   if (r->is_err)
-    return sz_io_fail(r->as.err);
+    return fail_drop(r->as.err);
   return pure_drop(r->as.ok);
 }
 

@@ -73,6 +73,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_io_println(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_pure(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_flatmap(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_error_new(i32, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_fail(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_fail_cstr(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_sleep_ms(i64)").unwrap();
     writeln!(out, "declare ptr @sz_io_handle_error_with(ptr, ptr, ptr)").unwrap();
@@ -1007,35 +1009,6 @@ fn unpack_env_preamble(
     }
 }
 
-fn emit_cstr_from_string(
-    code: &mut String,
-    strs: &[String],
-    expr: &Expr,
-    ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, Local>,
-    prefix: &str,
-) -> String {
-    if let ExprKind::StrLit(s) = &expr.kind {
-        let idx = str_index(strs, s);
-        let len = s.len() + 1;
-        writeln!(
-            code,
-            "  %{prefix}_cstr = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
-        )
-        .unwrap();
-        return format!("%{prefix}_cstr");
-    }
-    let se = emit_expr(expr, ctx, locals, &format!("{prefix}_s"));
-    code.push_str(&se.code);
-    writeln!(
-        code,
-        "  %{prefix}_cstr = call ptr @sz_string_cstr(ptr {})",
-        se.value
-    )
-    .unwrap();
-    format!("%{prefix}_cstr")
-}
-
 fn emit_sz_string(
     code: &mut String,
     strs: &[String],
@@ -1383,12 +1356,22 @@ fn emit_expr(
         }
         ExprKind::IoFail(msg) => {
             let mut code = String::new();
-            let cstr = emit_cstr_from_string(&mut code, ctx.strs, msg, ctx, locals, prefix);
+            let (s, owned) = emit_sz_string(&mut code, ctx.strs, msg, ctx, locals, prefix);
+            writeln!(code, "  %{prefix}_cstr = call ptr @sz_string_cstr(ptr {s})").unwrap();
             writeln!(
                 code,
-                "  %{prefix}_io = call ptr @sz_io_fail_cstr(ptr {cstr})"
+                "  %{prefix}_err = call ptr @sz_error_new(i32 1, ptr %{prefix}_cstr)"
             )
             .unwrap();
+            writeln!(
+                code,
+                "  %{prefix}_io = call ptr @sz_io_fail(ptr %{prefix}_err)"
+            )
+            .unwrap();
+            writeln!(code, "  call void @sz_release(ptr %{prefix}_err)").unwrap();
+            if owned {
+                writeln!(code, "  call void @sz_release(ptr {s})").unwrap();
+            }
             io_emitted(code, format!("%{prefix}_io"), Kind::Ptr)
         }
         ExprKind::IoPrintln(arg) => {
@@ -5558,6 +5541,24 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at + close..].contains(&format!("call void @sz_release(ptr {env})")),
             "expected last-use release of capture pack {env} after flatMap:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_io_fail_releases_error() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.fail("boom").handleErrorWith(_ => IO.println("recovered"))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_io_fail(ptr ";
+        let at = ir.find(needle).expect("expected sz_io_fail");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert_ne!(name, "null", "expected an error, not null:\n{ir}");
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of error {name} after IO.fail:\n{ir}"
         );
     }
 

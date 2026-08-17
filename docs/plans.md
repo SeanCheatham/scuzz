@@ -1,10 +1,10 @@
 # Short-term plan
 
-## Slice: Retain error in IO.fail
+## Slice: Drop the handleErrorWith error message
 
-`IO.pure` retains the payload and drops an owned payload after the call. `IO.fail` still stores the error without retain, so the error can alias the fail node.
+`sz_error_message` returns a fresh string. The compiler stores that binder as borrowed, so the copy leaks after the handler runs.
 
-- Retain the error in `sz_io_fail`.
-- Drop the caller ref after the call.
-- Proof: compiler IR for `IO.fail("boom").handleErrorWith(_ => IO.println("recovered"))` shows `sz_release` of the error after `sz_io_fail` / `sz_io_fail_cstr`.
-- Out of scope: OS threads. Releasing the error when the fail node frees (fiber_fail takes it).
+- Mark the `handleErrorWith` error-message binder owned.
+- Drop it after the handler body.
+- Proof: compiler IR for `IO.fail("boom").handleErrorWith(e => IO.println(e))` shows `sz_release` of the message after last use.
+- Out of scope: OS threads. Releasing the `SzError` itself in the handler.

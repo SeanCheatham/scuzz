@@ -15,6 +15,12 @@ static SzIo *pure_drop(void *value) {
   return io;
 }
 
+static SzIo *fail_drop(SzError *err) {
+  SzIo *io = sz_io_fail(err);
+  sz_release(err);
+  return io;
+}
+
 typedef struct LangResSt {
   SzLangResource *res;
   SzCont use;
@@ -40,7 +46,7 @@ static SzIo *lang_fin_free_err(SzError *err, void *env) {
   sz_release(st->res);
   st->res = NULL;
   sz_free(st);
-  return sz_io_fail(err);
+  return fail_drop(err);
 }
 
 static SzIo *lang_after_acquire(void *acquired, void *env) {
