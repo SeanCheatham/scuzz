@@ -1010,6 +1010,46 @@ int main(void) {
     sz_either_free(e);
   }
 
+  /* Leftover Either payloads drop on free. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *s;
+    SzAdt *adt;
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    r = sz_io_unsafe_run(attempt_drop(pure_drop(sz_string_from_cstr("ok"))));
+    assert(r.ok);
+    sz_either_free((SzEither *)r.value);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    r = sz_io_unsafe_run(attempt_drop(sz_io_fail_cstr("nope")));
+    assert(r.ok);
+    sz_either_free((SzEither *)r.value);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    s = sz_string_from_cstr("ok");
+    {
+      SzIo *inner = pure_drop(s);
+      SzIo *att = sz_io_attempt_as_result(inner);
+      sz_release(inner);
+      r = sz_io_unsafe_run(att);
+    }
+    assert(r.ok);
+    adt = (SzAdt *)r.value;
+    assert(adt && sz_adt_tag(adt) == 1);
+    sz_release(adt);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   /* Resource.make / use (IO acquire + IO release) */
   lang_released = 0;
   SzLangResource *lr = lang_make_tok();
@@ -1635,6 +1675,21 @@ int main(void) {
     assert(p && strcmp(sz_string_cstr((SzString *)p->left), "L") == 0);
     assert(strcmp(sz_string_cstr((SzString *)p->right), "R") == 0);
     sz_pair_free(p);
+  }
+
+  /* Leftover pair payloads drop on free. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    r = sz_io_unsafe_run(both_drop(pure_drop(sz_string_from_cstr("L")),
+                                    pure_drop(sz_string_from_cstr("R"))));
+    assert(r.ok);
+    sz_pair_free((SzPair *)r.value);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
   }
 
   /* string ops */
@@ -2564,6 +2619,7 @@ int main(void) {
     pair = (SzPair *)r.value;
     assert(pair && pair->left);
     assert(strcmp(sz_string_cstr((SzString *)pair->left), "hello") == 0);
+    sz_pair_free(pair);
   }
 
   /* Alloc accounting: live_count returns to baseline after free. */

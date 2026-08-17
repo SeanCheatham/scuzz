@@ -414,6 +414,32 @@ void sz_release(void *ptr) {
       sz_error_free(err);
     return;
   }
+  case SZ_RC_EITHER: {
+    SzEither *e = (SzEither *)ptr;
+    if (e->is_right) {
+      void *v = e->as.right;
+      e->as.right = NULL;
+      sz_free(ptr);
+      sz_release(v);
+    } else {
+      SzError *err = e->as.left;
+      e->as.left = NULL;
+      sz_free(ptr);
+      sz_release(err);
+    }
+    return;
+  }
+  case SZ_RC_PAIR: {
+    SzPair *p = (SzPair *)ptr;
+    void *l = p->left;
+    void *r = p->right;
+    p->left = NULL;
+    p->right = NULL;
+    sz_free(ptr);
+    sz_release(l);
+    sz_release(r);
+    return;
+  }
   case SZ_RC_BOX:
     break;
   default:
@@ -615,7 +641,7 @@ SzString *sz_error_message(const SzError *err) {
 int32_t sz_error_code(const SzError *err) { return err ? err->code : 0; }
 
 SzEither *sz_either_right(void *value) {
-  SzEither *e = (SzEither *)sz_alloc_zero(sizeof(SzEither));
+  SzEither *e = (SzEither *)sz_rc_alloc(sizeof(SzEither), SZ_RC_EITHER);
   e->is_right = 1;
   sz_retain(value);
   e->as.right = value;
@@ -623,31 +649,30 @@ SzEither *sz_either_right(void *value) {
 }
 
 SzEither *sz_either_left(SzError *err) {
-  SzEither *e = (SzEither *)sz_alloc_zero(sizeof(SzEither));
+  SzEither *e = (SzEither *)sz_rc_alloc(sizeof(SzEither), SZ_RC_EITHER);
   e->is_right = 0;
   sz_retain(err);
   e->as.left = err;
   return e;
 }
 
-void sz_either_free(SzEither *e) {
-  if (!e)
-    return;
-  if (!e->is_right && e->as.left)
-    sz_error_free(e->as.left);
-  sz_free(e);
-}
+void sz_either_free(SzEither *e) { sz_release(e); }
 
 SzAdt *sz_either_to_result(SzEither *e) {
   SzAdt *adt;
   if (e && e->is_right) {
-    adt = sz_adt_new(1, e->as.right);
+    void *payload = e->as.right;
     e->as.right = NULL;
+    adt = sz_adt_new(1, payload);
+    sz_release(payload);
   } else {
     const char *msg = "error";
+    SzString *s;
     if (e && !e->is_right && e->as.left && e->as.left->message)
       msg = sz_string_cstr(e->as.left->message);
-    adt = sz_adt_new(0, sz_string_from_cstr(msg));
+    s = sz_string_from_cstr(msg);
+    adt = sz_adt_new(0, s);
+    sz_release(s);
   }
   sz_either_free(e);
   return adt;
@@ -677,7 +702,7 @@ int32_t sz_adt_tag(const SzAdt *adt) { return adt ? adt->tag : -1; }
 void *sz_adt_payload(const SzAdt *adt) { return adt ? adt->payload : NULL; }
 
 SzPair *sz_pair_new(void *left, void *right) {
-  SzPair *p = (SzPair *)sz_alloc(sizeof(SzPair));
+  SzPair *p = (SzPair *)sz_rc_alloc(sizeof(SzPair), SZ_RC_PAIR);
   sz_retain(left);
   sz_retain(right);
   p->left = left;
@@ -685,7 +710,7 @@ SzPair *sz_pair_new(void *left, void *right) {
   return p;
 }
 
-void sz_pair_free(SzPair *p) { sz_free(p); }
+void sz_pair_free(SzPair *p) { sz_release(p); }
 
 /* --- IO constructors ----------------------------------------------------- */
 

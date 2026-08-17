@@ -1704,6 +1704,8 @@ fn emit_expr(
                             .unwrap();
                     }
                 }
+            } else if payload_owned {
+                writeln!(ctx.conts, "  call void @sz_release(ptr %value)").unwrap();
             }
             writeln!(ctx.conts, "  ret ptr {ret}").unwrap();
             writeln!(ctx.conts, "}}").unwrap();
@@ -1824,7 +1826,7 @@ fn emit_expr(
             )
             .unwrap();
             writeln!(code, "  call void @sz_release(ptr {inner_io})").unwrap();
-            io_emitted(code, format!("%{prefix}_attempt"), Kind::Ptr)
+            io_emitted_payload(code, format!("%{prefix}_attempt"), Kind::Ptr, true)
         }
         ExprKind::IoRace { left, right } => {
             let le = emit_expr(left, ctx, locals, &format!("{prefix}_rl"));
@@ -1880,7 +1882,7 @@ fn emit_expr(
             .unwrap();
             writeln!(code, "  call void @sz_release(ptr {lv})").unwrap();
             writeln!(code, "  call void @sz_release(ptr {rv})").unwrap();
-            io_emitted(code, format!("%{prefix}_both"), Kind::Ptr)
+            io_emitted_payload(code, format!("%{prefix}_both"), Kind::Ptr, true)
         }
         ExprKind::IoEnsure { inner, finalizer } => {
             let ie = emit_expr(inner, ctx, locals, &format!("{prefix}_ei"));
@@ -5543,6 +5545,10 @@ def id(m: Map[String, String]): Map[String, String] = m
             ir[at..].contains(&format!("call void @sz_release(ptr {right})")),
             "expected last-use release of right {right} after IO.both:\n{ir}"
         );
+        assert!(
+            ir.contains("call void @sz_release(ptr %value)"),
+            "expected last-use release of IO.both pair binder %value:\n{ir}"
+        );
     }
 
     #[test]
@@ -5892,6 +5898,10 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of inner {name} after IO.attempt:\n{ir}"
+        );
+        assert!(
+            ir.contains("call void @sz_release(ptr %value)"),
+            "expected last-use release of attempt Result binder %value:\n{ir}"
         );
     }
 

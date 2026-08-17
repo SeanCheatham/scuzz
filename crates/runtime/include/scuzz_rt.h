@@ -15,7 +15,7 @@ void *sz_alloc(size_t size);
 void *sz_alloc_zero(size_t size);
 void sz_free(void *ptr);
 /* RC objects (strings, list cells, ADTs, boxed i64, map/set nodes, IO,
- * streams, resources, errors, Ref / Queue / Deferred). List cells retain heads and shared tails. IO
+ * streams, resources, errors, Ref / Queue / Deferred, Either, pair). List cells retain heads and shared tails. IO
  * constructors take child IO nodes. Non-RC sz_alloc pointers no-op. */
 enum {
   SZ_RC_STRING = 1,
@@ -29,7 +29,9 @@ enum {
   SZ_RC_ERROR = 9,
   SZ_RC_REF = 10,
   SZ_RC_QUEUE = 11,
-  SZ_RC_DEFERRED = 12
+  SZ_RC_DEFERRED = 12,
+  SZ_RC_EITHER = 13,
+  SZ_RC_PAIR = 14
 };
 void *sz_rc_alloc(size_t size, uint32_t kind);
 void sz_retain(void *ptr);
@@ -101,6 +103,7 @@ typedef struct SzEither {
 SzEither *sz_either_right(void *value);
 /* Callee retains the error. Caller drops after the call. */
 SzEither *sz_either_left(SzError *err);
+/* Last sz_release drops the Right value or the Left error, then frees the cell. */
 void sz_either_free(SzEither *e);
 
 /* --- ADT boxes (nullary / unary tagged values) --------------------------- */
@@ -371,6 +374,7 @@ typedef struct SzPair {
 
 /* Callee retains both sides. Caller drops after the call. */
 SzPair *sz_pair_new(void *left, void *right);
+/* Last sz_release drops both fields, then frees the cell. */
 void sz_pair_free(SzPair *p);
 
 /* Linked list (NULL = Nil) */

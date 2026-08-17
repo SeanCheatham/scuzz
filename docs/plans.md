@@ -1,10 +1,10 @@
 # Short-term plan
 
-## Slice: Release leftover Either and pair payloads on free
+## Slice: Retain the Fiber.join result so join does not alias the fiber slot
 
-Queue / Ref / Deferred cells are RC and last-use drops them. Either and pair still alias their fields: `sz_either_free` / `sz_pair_free` do not release payloads.
+Queue / Ref / Deferred / Either / pair cells are RC and last-use drops them. `Fiber.join` still aliases `result_value`. `pure_drop` of that pointer does not give the joiner a distinct RC. Fiber free does not release the slot.
 
-- Make Either and pair RC, or release fields on free and keep the run result as the owner.
-- Do not alias fields after free. Getters that need a distinct RC retain first.
-- Proof: `test_io` both/attempt then free returns alloc stats to baseline; compiler last-use drops an owned `IO.both` / `attempt` binder when it applies.
-- Out of scope: OS threads. Fiber.join retain (join still aliases the fiber result).
+- Retain on complete so join and the fiber each hold a ref. Release `result_value` when the fiber frees.
+- Do not alias the slot after free. Join that needs a distinct RC retains first (same pattern as `Ref.get` / `Deferred.get`).
+- Proof: `test_io` fork/join then free returns alloc stats to baseline; compiler last-use drops an owned `Fiber.join` binder when it applies.
+- Out of scope: OS threads. Supervision trees.
