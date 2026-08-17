@@ -2,14 +2,21 @@
 
 SzRef *sz_ref_make(void *initial) {
   SzRef *r = (SzRef *)sz_alloc(sizeof(SzRef));
+  sz_retain(initial);
   r->value = initial;
+  return r;
+}
+
+static SzRef *ref_make_drop(void *initial) {
+  SzRef *r = sz_ref_make(initial);
+  sz_release(initial);
   return r;
 }
 
 static void *ref_of_thunk(void *env) { return env; }
 
 SzIo *sz_ref_of(void *initial) {
-  SzRef *r = sz_ref_make(initial);
+  SzRef *r = ref_make_drop(initial);
   return sz_io_delay(ref_of_thunk, r);
 }
 

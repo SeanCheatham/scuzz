@@ -279,6 +279,7 @@ struct SzRef {
   void *value;
 };
 
+/* Callee retains the initial value. Caller drops after the call. */
 SzRef *sz_ref_make(void *initial);
 SzIo *sz_ref_of(void *initial);          /* IO[Ref] */
 SzIo *sz_ref_of_cstr(const char *initial);

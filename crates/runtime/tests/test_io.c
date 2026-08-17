@@ -1244,6 +1244,13 @@ int main(void) {
   r = sz_io_unsafe_run(fm_drop(sz_ref_of_cstr("a"), after_ref, NULL));
   assert(r.ok);
 
+  {
+    SzString *s = sz_string_from_cstr("a");
+    SzRef *ref = sz_ref_make(s);
+    sz_release(s);
+    assert(ref && strcmp(sz_string_cstr((SzString *)ref->value), "a") == 0);
+  }
+
   /* Deferred */
   {
     SzDeferred *def = sz_deferred_make();
