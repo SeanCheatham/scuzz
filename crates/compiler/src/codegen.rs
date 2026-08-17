@@ -2059,7 +2059,7 @@ fn emit_map_lambda(
     )
     .unwrap();
     writeln!(code, "  call void @sz_release(ptr %{prefix}_cl1)").unwrap();
-    val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
+    owned_ptr(code, format!("%{prefix}_cl2"))
 }
 
 /// `s => view` for `View.each`: `ptr (*)(ptr item, ptr env)` returning a SzView.
@@ -2119,7 +2119,7 @@ fn emit_each_lambda(
     )
     .unwrap();
     writeln!(code, "  call void @sz_release(ptr %{prefix}_cl1)").unwrap();
-    val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
+    owned_ptr(code, format!("%{prefix}_cl2"))
 }
 
 fn emit_view_each(
@@ -2145,29 +2145,14 @@ fn emit_view_each(
     let mapper = emit_each_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
     let mut code = src.code;
     code.push_str(&mapper.code);
-    writeln!(
-        code,
-        "  %{prefix}_fnp = call ptr @sz_list_head(ptr {})",
-        mapper.value
-    )
-    .unwrap();
-    writeln!(
-        code,
-        "  %{prefix}_fnt = call ptr @sz_list_tail(ptr {})",
-        mapper.value
-    )
-    .unwrap();
-    writeln!(
-        code,
-        "  %{prefix}_envp = call ptr @sz_list_head(ptr %{prefix}_fnt)"
-    )
-    .unwrap();
+    unpack_closure(&mut code, &mapper.value, prefix);
     writeln!(
         code,
         "  %{prefix}_v = call ptr @sz_lang_view_each_map(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
         src.value
     )
     .unwrap();
+    drop_owned_ptr(&mut code, &mapper);
     val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
 }
 
@@ -2185,29 +2170,14 @@ fn emit_signal_map(
     let mapper = emit_map_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
     let mut code = src.code;
     code.push_str(&mapper.code);
-    writeln!(
-        code,
-        "  %{prefix}_fnp = call ptr @sz_list_head(ptr {})",
-        mapper.value
-    )
-    .unwrap();
-    writeln!(
-        code,
-        "  %{prefix}_fnt = call ptr @sz_list_tail(ptr {})",
-        mapper.value
-    )
-    .unwrap();
-    writeln!(
-        code,
-        "  %{prefix}_envp = call ptr @sz_list_head(ptr %{prefix}_fnt)"
-    )
-    .unwrap();
+    unpack_closure(&mut code, &mapper.value, prefix);
     writeln!(
         code,
         "  %{prefix}_v = call ptr @sz_lang_signal_map(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
         src.value
     )
     .unwrap();
+    drop_owned_ptr(&mut code, &mapper);
     val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
 }
 
@@ -2706,7 +2676,7 @@ fn emit_rebuild_lambda(
     )
     .unwrap();
     writeln!(code, "  call void @sz_release(ptr %{prefix}_cl1)").unwrap();
-    val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
+    owned_ptr(code, format!("%{prefix}_cl2"))
 }
 
 fn emit_ui_run(
@@ -2720,13 +2690,15 @@ fn emit_ui_run(
         panic!("Ui.run expects _ => View");
     };
     let lam = emit_rebuild_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
-    let mut code = lam.code;
+    let mut code = String::new();
+    code.push_str(&lam.code);
     unpack_closure(&mut code, &lam.value, prefix);
     writeln!(
         code,
         "  %{prefix}_v = call ptr @sz_ui_run_rebuild(ptr %{prefix}_fnp, ptr %{prefix}_envp)"
     )
     .unwrap();
+    drop_owned_ptr(&mut code, &lam);
     io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
 }
 
@@ -5679,6 +5651,53 @@ law always: Bool = 1 == 1
         assert!(ir.contains("sz_ui_run_rebuild"));
         assert!(ir.contains("sz_uibuild_"));
         assert!(ir.contains("sz_ui_reload_rebuild"));
+    }
+
+    #[test]
+    fn emit_session_packs_release_owned() {
+        let cases: &[(&str, &str, &str)] = &[
+            (
+                r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.text("a"))
+"#,
+                "call ptr @sz_ui_run_rebuild(",
+                "Ui.run",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    items = Signal.list(["milk"])
+    _ <- Ui.run(_ => View.each(items, s => View.text(s)))
+  } yield ()
+"#,
+                "call ptr @sz_lang_view_each_map(",
+                "View.each",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(0)
+    s = Signal.map(n, x => "a")
+    _ <- IO.println(Signal.getStr(s))
+  } yield ()
+"#,
+                "call ptr @sz_lang_signal_map(",
+                "Signal.map",
+            ),
+        ];
+        for (src, needle, label) in cases {
+            let p = crate::lower::lower_program(parse(src).unwrap());
+            crate::typ::typecheck(&p).unwrap_or_else(|e| panic!("typecheck {label}: {e}"));
+            let ir = emit_llvm(&p);
+            let at = ir
+                .find(needle)
+                .unwrap_or_else(|| panic!("expected {needle} in IR for {label}:\n{ir}"));
+            let pack = last_cl2_before(&ir, at);
+            assert!(
+                ir[at..].contains(&format!("call void @sz_release(ptr {pack})")),
+                "expected last-use release of pack {pack} after {label}:\n{ir}"
+            );
+        }
     }
 
     #[test]

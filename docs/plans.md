@@ -1,10 +1,10 @@
 # Short-term plan
 
-## Slice: Last-use release for `View.each`, `Signal.map`, and `Ui.run` packs
+## Slice: Last-use release for Stream, Resource, and Net.serve packs
 
-Tap constructors drop the wrapper list after unpack. `View.each`, `Signal.map`, and `Ui.run` still leave `cons(fn, cons(env, nil))`.
+`View.each`, `Signal.map`, and `Ui.run` drop the wrapper list after unpack. `Stream.filter` / `Stream.map` / `Stream.evalMap`, `Resource.make` / `Resource.use`, and `Net.serve` still leave `cons(fn, cons(env, nil))`.
 
 - Mark those packs owned and drop them after unpack.
-- Proof: compiler IR for `Ui.run(_ => View.text("a"))` shows `sz_release` of the rebuild pack after `sz_ui_run_rebuild`.
-- Apply the same drop to `View.each` mappers and `Signal.map`.
-- Out of scope: RC stream nodes, OS threads, tap capture lists on `sz_view_free`.
+- Proof: compiler IR for `Stream.drain(Stream.filter(Stream.emit("a"), x => true))` shows `sz_release` of the filter pack after the call.
+- Apply the same drop to `Stream.map`, `Stream.evalMap`, `Resource.make`, `Resource.use`, and `Net.serve` / `Net.serveOnce`.
+- Out of scope: RC stream nodes, OS threads, capture lists on `sz_view_free`.
