@@ -95,6 +95,7 @@ typedef struct SzEither {
 } SzEither;
 
 SzEither *sz_either_right(void *value);
+/* Callee retains the error. Caller drops after the call. */
 SzEither *sz_either_left(SzError *err);
 void sz_either_free(SzEither *e);
 

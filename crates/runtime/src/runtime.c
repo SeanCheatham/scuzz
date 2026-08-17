@@ -33,6 +33,12 @@ static SzIo *fail_drop(SzError *err) {
   return io;
 }
 
+static SzEither *either_left_drop(SzError *err) {
+  SzEither *e = sz_either_left(err);
+  sz_release(err);
+  return e;
+}
+
 static SzIo *attempt_drop(SzIo *inner) {
   SzIo *io = sz_io_attempt(inner);
   sz_release(inner);
@@ -545,6 +551,7 @@ SzEither *sz_either_right(void *value) {
 SzEither *sz_either_left(SzError *err) {
   SzEither *e = (SzEither *)sz_alloc_zero(sizeof(SzEither));
   e->is_right = 0;
+  sz_retain(err);
   e->as.left = err;
   return e;
 }
@@ -1016,7 +1023,7 @@ static SzIo *attempt_ok(void *value, void *env) {
 
 static SzIo *attempt_err(SzError *err, void *env) {
   (void)env;
-  return pure_drop(sz_either_left(err));
+  return pure_drop(either_left_drop(err));
 }
 
 typedef struct EnsureExit {

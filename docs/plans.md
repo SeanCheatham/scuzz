@@ -1,10 +1,10 @@
 # Short-term plan
 
-## Slice: Retain the Left error in `sz_either_left`
+## Slice: Retain the Right value in `sz_either_right`
 
-`sz_error_message` shares the error's message. `sz_either_left` still stores the error without retain, so the error can alias the Either.
+`sz_either_left` retains the error and drops the caller ref after the call. `sz_either_right` still stores the value without retain, so an RC payload can alias the Either.
 
-- Retain the error in `sz_either_left`.
+- Retain the value in `sz_either_right`.
 - Drop the caller ref after the call.
-- Proof: `test_io` attempt of `IO.fail` still yields Left; C kits drop via `either_left_drop` or an equivalent after `sz_either_left`.
-- Out of scope: OS threads. Making Either itself RC.
+- Proof: `test_io` attempt of `IO.pure` still yields Right; C kits drop via `either_right_drop` or an equivalent after `sz_either_right`.
+- Out of scope: OS threads. Making Either itself RC. Releasing the Right value when Either frees (the result aliases it).

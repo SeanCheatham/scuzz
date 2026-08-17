@@ -980,6 +980,16 @@ int main(void) {
     assert(e->as.left && strstr(sz_string_cstr(e->as.left->message), "nope"));
     sz_either_free(e);
   }
+
+  {
+    SzError *err = sz_error_new(1, "nope");
+    SzEither *e = sz_either_left(err);
+    sz_release(err);
+    assert(e && !e->is_right);
+    assert(e->as.left && strstr(sz_string_cstr(e->as.left->message), "nope"));
+    sz_either_free(e);
+  }
+
   r = sz_io_unsafe_run(attempt_drop(pure_drop((void *)(intptr_t)3)));
   assert(r.ok);
   {
