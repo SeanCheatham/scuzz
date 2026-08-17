@@ -55,9 +55,18 @@ static SzIo *unwrap_net(void *value, void *env) {
   NetResult *r = (NetResult *)value;
   if (!r)
     return sz_io_fail_cstr("Net: null result");
-  if (r->is_err)
-    return fail_drop(r->as.err);
-  return pure_drop(r->as.ok);
+  if (r->is_err) {
+    SzError *err = r->as.err;
+    r->as.err = NULL;
+    sz_free(r);
+    return fail_drop(err);
+  }
+  {
+    void *ok = r->as.ok;
+    r->as.ok = NULL;
+    sz_free(r);
+    return pure_drop(ok);
+  }
 }
 
 static int set_nonblock(int fd) {
@@ -1132,9 +1141,10 @@ static void serve_free(ServeSt *st) {
   if (!st)
     return;
   serve_close_fds(st);
+  sz_release(st->body);
+  st->body = NULL;
   sz_release(st->henv);
   st->henv = NULL;
-  sz_free(st);
 }
 
 static int parse_get_path(const char *req, char *path, size_t path_sz) {
@@ -1571,6 +1581,7 @@ static SzIo *serve_on_handler_err(SzError *err, void *env) {
 static SzIo *serve_after_path(void *path, void *env) {
   ServeSt *st = (ServeSt *)env;
   SzIo *io = st->handler(path, st->henv);
+  sz_release(path);
   io = fm_drop(io, serve_after_body, st);
   io = fm_drop(io, serve_after_write, st);
   return handle_drop(io, serve_on_handler_err, st);
@@ -1604,7 +1615,8 @@ static void *serve_kick(void *env) { return env; }
 static SzIo *serve_after_kick(void *spec_v, void *env) {
   ServeSpec *spec = (ServeSpec *)spec_v;
   SzPair *pack = (SzPair *)env;
-  ServeSt *st = (ServeSt *)sz_alloc_zero(sizeof(ServeSt));
+  ServeSt *st = (ServeSt *)sz_rc_alloc(sizeof(ServeSt), SZ_RC_BOX);
+  memset(st, 0, sizeof(ServeSt));
   st->port = spec->port;
   st->left = spec->n > 0 ? spec->n : -1;
   st->listen_fd = -1;
@@ -1614,7 +1626,11 @@ static SzIo *serve_after_kick(void *spec_v, void *env) {
   sz_retain(pack->left);
   st->henv = pack->left;
   sz_free(spec);
-  return handle_drop(serve_round(st), serve_on_err, st);
+  {
+    SzIo *io = handle_drop(serve_round(st), serve_on_err, st);
+    sz_release(st);
+    return io;
+  }
 }
 
 static SzIo *net_serve_n(int64_t port, int64_t n, SzCont handler, void *env) {

@@ -209,9 +209,13 @@ static int64_t stream_empty(void *v, void *env) {
 }
 
 static SzIo *serve_path_ok(void *path, void *env) {
+  SzString *prefix;
+  SzString *out;
   (void)env;
-  return pure_drop(
-      sz_string_concat(sz_string_from_cstr("ok:"), (SzString *)path));
+  prefix = sz_string_from_cstr("ok:");
+  out = sz_string_concat(prefix, (SzString *)path);
+  sz_release(prefix);
+  return pure_drop(out);
 }
 
 static int g_serve_fail_n;
@@ -2030,6 +2034,8 @@ int main(void) {
   /* TestRuntime: fake clock sleep without wall wait */
   {
     int64_t t0, t1;
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
     sz_testrt_install();
     sz_testrt_net_stub("http://example.test/ping", "pong");
     t0 = sz_testrt_clock_now_ms();
@@ -2062,6 +2068,16 @@ int main(void) {
     r = sz_io_unsafe_run(sz_net_serve_once(8080, serve_path_ok, NULL));
     assert(r.ok);
     assert(strcmp(sz_testrt_net_last_serve_body(), "ok:/hello") == 0);
+
+    sz_testrt_net_set_last_serve_body(NULL);
+    sz_alloc_stats(&base_bytes, &base_count);
+    sz_testrt_net_inject_request("/hello");
+    r = sz_io_unsafe_run(sz_net_serve_once(8080, serve_path_ok, NULL));
+    assert(r.ok);
+    sz_testrt_net_set_last_serve_body(NULL);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
 
     sz_testrt_net_inject_request("/a");
     sz_testrt_net_queue_request("/b");
