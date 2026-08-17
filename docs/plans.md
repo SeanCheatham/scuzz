@@ -1,10 +1,9 @@
 # Short-term plan
 
-## Slice: Drop the handleErrorWith error message
+## Slice: Share the error message in `sz_error_message`
 
-`sz_error_message` returns a fresh string. The compiler stores that binder as borrowed, so the copy leaks after the handler runs.
+`handleErrorWith` drops the binder after the body. `sz_error_message` still copies bytes into a new string, so each recovery pays an extra alloc.
 
-- Mark the `handleErrorWith` error-message binder owned.
-- Drop it after the handler body.
-- Proof: compiler IR for `IO.fail("boom").handleErrorWith(e => IO.println(e))` shows `sz_release` of the message after last use.
-- Out of scope: OS threads. Releasing the `SzError` itself in the handler.
+- Retain `err->message` and return it. Keep a fresh string when `err` is null.
+- Proof: `IO.fail("boom").handleErrorWith(e => IO.println(e))` still typechecks and emits `sz_release` of the message; `test_io` handleErrorWith still recovers.
+- Out of scope: OS threads. Mutating error messages.

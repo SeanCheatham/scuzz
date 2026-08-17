@@ -26,6 +26,14 @@ impl Local {
             owned: false,
         }
     }
+
+    fn owned(value: impl Into<String>, kind: Kind) -> Self {
+        Local {
+            value: value.into(),
+            kind,
+            owned: true,
+        }
+    }
 }
 
 /// Emit LLVM IR. Links against `libscuzz_rt`.
@@ -1714,7 +1722,7 @@ fn emit_expr(
             );
             if let Some(p) = param {
                 writeln!(pre, "  %{p}_msg = call ptr @sz_error_message(ptr %err)").unwrap();
-                body_locals.insert(p.clone(), Local::borrow(format!("%{p}_msg"), Kind::Ptr));
+                body_locals.insert(p.clone(), Local::owned(format!("%{p}_msg"), Kind::Ptr));
             }
             let body_emitted = emit_expr(body, ctx, &mut body_locals, &format!("e{id}"));
             writeln!(
@@ -1732,6 +1740,14 @@ fn emit_expr(
                 &format!("e{id}_wrap"),
                 body_emitted.owned,
             );
+            if let Some(p) = param {
+                if let Some(bound) = body_locals.get(p) {
+                    if bound.owned && bound.kind == Kind::Ptr && ret != bound.value {
+                        writeln!(ctx.conts, "  call void @sz_release(ptr {})", bound.value)
+                            .unwrap();
+                    }
+                }
+            }
             writeln!(ctx.conts, "  ret ptr {ret}").unwrap();
             writeln!(ctx.conts, "}}").unwrap();
             writeln!(ctx.conts).unwrap();
@@ -5506,6 +5522,28 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at + close..].contains(&format!("call void @sz_release(ptr {env})")),
             "expected last-use release of capture pack {env} after handleErrorWith:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_handle_error_with_releases_error_message() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.fail("boom").handleErrorWith(e => IO.println(e))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = " = call ptr @sz_error_message(ptr ";
+        let at = ir.find(needle).expect("expected sz_error_message");
+        let line_start = ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let name = ir[line_start..at].trim();
+        assert!(
+            name.starts_with('%'),
+            "expected SSA name for error message, got {name:?}:\n{ir}"
+        );
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of error message {name} after handleErrorWith body:\n{ir}"
         );
     }
 
