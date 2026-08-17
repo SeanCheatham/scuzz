@@ -955,6 +955,17 @@ int main(void) {
   assert(r.error && strstr(sz_string_cstr(r.error->message), "boom"));
   sz_error_free(r.error);
 
+  {
+    SzError *err = sz_error_new(1, "boom");
+    SzString *a = sz_error_message(err);
+    SzString *b = sz_error_message(err);
+    assert(a == b);
+    assert(a && strstr(sz_string_cstr(a), "boom") != NULL);
+    sz_release(a);
+    sz_release(b);
+    sz_error_free(err);
+  }
+
   /* handleErrorWith */
   r = sz_io_unsafe_run(handle_drop(sz_io_fail_cstr("boom"),
                                                recover_boom, NULL));

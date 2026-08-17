@@ -1,9 +1,10 @@
 # Short-term plan
 
-## Slice: Share the error message in `sz_error_message`
+## Slice: Retain the Left error in `sz_either_left`
 
-`handleErrorWith` drops the binder after the body. `sz_error_message` still copies bytes into a new string, so each recovery pays an extra alloc.
+`sz_error_message` shares the error's message. `sz_either_left` still stores the error without retain, so the error can alias the Either.
 
-- Retain `err->message` and return it. Keep a fresh string when `err` is null.
-- Proof: `IO.fail("boom").handleErrorWith(e => IO.println(e))` still typechecks and emits `sz_release` of the message; `test_io` handleErrorWith still recovers.
-- Out of scope: OS threads. Mutating error messages.
+- Retain the error in `sz_either_left`.
+- Drop the caller ref after the call.
+- Proof: `test_io` attempt of `IO.fail` still yields Left; C kits drop via `either_left_drop` or an equivalent after `sz_either_left`.
+- Out of scope: OS threads. Making Either itself RC.

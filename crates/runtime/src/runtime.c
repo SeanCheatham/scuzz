@@ -529,7 +529,8 @@ void sz_error_free(SzError *err) { sz_release(err); }
 SzString *sz_error_message(const SzError *err) {
   if (!err || !err->message)
     return sz_string_from_cstr("error");
-  return sz_string_from_cstr(sz_string_cstr(err->message));
+  sz_retain(err->message);
+  return err->message;
 }
 
 int32_t sz_error_code(const SzError *err) { return err ? err->code : 0; }
