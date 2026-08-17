@@ -289,6 +289,15 @@ void sz_release(void *ptr) {
       return;
     }
   }
+  case SZ_RC_RESOURCE: {
+    SzLangResource *r = (SzLangResource *)ptr;
+    void *env = r->release_env;
+    r->release_env = NULL;
+    r->acquire = NULL;
+    sz_free(h);
+    sz_release(env);
+    return;
+  }
   case SZ_RC_BOX:
     break;
   default:

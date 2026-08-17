@@ -14,9 +14,9 @@ void sz_panic(const char *msg) __attribute__((noreturn));
 void *sz_alloc(size_t size);
 void *sz_alloc_zero(size_t size);
 void sz_free(void *ptr);
-/* RC objects (strings, list cells, ADTs, boxed i64, map/set nodes, IO).
- * List cells retain heads and shared tails. IO constructors take child
- * IO nodes. Non-RC pointers no-op. */
+/* RC objects (strings, list cells, ADTs, boxed i64, map/set nodes, IO,
+ * streams, resources). List cells retain heads and shared tails. IO
+ * constructors take child IO nodes. Non-RC pointers no-op. */
 enum {
   SZ_RC_STRING = 1,
   SZ_RC_LIST = 2,
@@ -24,7 +24,8 @@ enum {
   SZ_RC_BOX = 4,
   SZ_RC_MAP = 5,
   SZ_RC_IO = 6,
-  SZ_RC_STREAM = 7
+  SZ_RC_STREAM = 7,
+  SZ_RC_RESOURCE = 8
 };
 void *sz_rc_alloc(size_t size, uint32_t kind);
 void sz_retain(void *ptr);

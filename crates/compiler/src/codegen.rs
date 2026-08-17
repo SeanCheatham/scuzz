@@ -2454,7 +2454,8 @@ fn emit_resource(
         panic!("{callee} callback must be a lambda");
     };
     let lam = emit_io_cont_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
-    let mut code = first.code;
+    let mut code = String::new();
+    code.push_str(&first.code);
     code.push_str(&lam.code);
     unpack_closure(&mut code, &lam.value, prefix);
     if callee == "Resource.make" {
@@ -2470,7 +2471,7 @@ fn emit_resource(
         )
         .unwrap();
         drop_owned_ptr(&mut code, &lam);
-        val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        owned_ptr(code, format!("%{prefix}_v"))
     } else {
         writeln!(
             code,
@@ -2479,6 +2480,7 @@ fn emit_resource(
         )
         .unwrap();
         drop_owned_ptr(&mut code, &lam);
+        drop_owned_ptr(&mut code, &first);
         io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
     }
 }
@@ -5173,6 +5175,23 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(ir.contains("sz_lang_resource_make"));
         assert!(ir.contains("sz_lang_resource_use"));
         assert!(ir.contains("sz_rcont_"));
+    }
+
+    #[test]
+    fn emit_resource_use_releases_resource() {
+        let src = r#"@main def main: IO[Unit] =
+  Resource.use(Resource.make(IO.pure("tok"), t => IO.println(t)), t => IO.println(t))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_lang_resource_use(ptr ";
+        let at = ir.find(needle).expect("expected sz_lang_resource_use");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of resource {name} after Resource.use:\n{ir}"
+        );
     }
 
     #[test]
