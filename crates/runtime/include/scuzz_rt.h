@@ -213,6 +213,8 @@ struct SzIo {
  * the IO node drops a leftover payload. Run retains so last-use of the result
  * does not free the node slot. */
 SzIo *sz_io_pure(void *value);
+/* Callee retains a RC env. Caller drops after the call. Last sz_release of
+ * the delay node drops leftover env. Run steals env so the thunk owns it. */
 SzIo *sz_io_delay(SzThunk thunk, void *env);
 SzIo *sz_io_flatmap(SzIo *inner, SzCont cont, void *env);
 /* Callee retains the error. Caller drops after the call. Last sz_release of

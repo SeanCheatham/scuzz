@@ -1,10 +1,9 @@
 # Short-term plan
 
-## Slice: Release leftover delay env when the delay node frees
+## Slice: Release leftover non-RC delay env when the delay node frees
 
-IO.pure and IO.fail retain a distinct run result. The IO node drops leftover payload or error on free. `sz_io_delay` still stores `env` without retain/release. An unused delay (for example `Ref.of` before run) leaks a RC env.
+Delay retains a RC env. Run steals env. Last-use drops leftover RC env. A non-RC `sz_alloc` env (for example `Ref.set`) still leaks if the delay node frees before the thunk `sz_free`s it. `sz_release` is a no-op for that env. Do not `sz_free` a string literal or a small integer env.
 
-- `sz_retain` the env at `sz_io_delay` when it is RC. Last `sz_release` of the delay node drops leftover env.
-- Thunks that take the env must steal (null the slot) or hold a distinct RC. Do not `sz_release` a non-RC malloc env after the thunk `sz_free`s it.
-- Proof: `test_io` unused `sz_ref_of` / delay with a RC env then `sz_release` returns alloc stats to baseline.
-- Out of scope: OS threads. Panic leak. Non-RC malloc envs that the thunk never runs.
+- Free leftover env on delay destructor when it is a `sz_alloc` payload and not RC. Steal on run so the thunk can `sz_free` without a double free.
+- Proof: `test_io` unused `sz_ref_set` then `sz_release` of the IO returns alloc stats to baseline.
+- Out of scope: OS threads. Panic leak. String-literal delay env.

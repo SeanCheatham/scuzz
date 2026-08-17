@@ -808,6 +808,7 @@ SzIo *sz_stream_compile_to_list(SzStream *s) {
     SzIo *ens = sz_io_ensure(body, fin);
     sz_release(body);
     sz_release(fin);
+    sz_release(s);
     return ens;
   }
 }

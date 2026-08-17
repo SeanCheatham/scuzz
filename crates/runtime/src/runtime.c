@@ -324,6 +324,10 @@ void sz_release(void *ptr) {
       sz_error_free(io->as.fail);
       io->as.fail = NULL;
       break;
+    case SZ_IO_DELAY:
+      sz_release(io->as.delay.env);
+      io->as.delay.env = NULL;
+      break;
     default:
       break;
     }
@@ -734,6 +738,7 @@ SzIo *sz_io_delay(SzThunk thunk, void *env) {
     sz_panic("sz_io_delay(null thunk)");
   SzIo *io = sz_io_new(SZ_IO_DELAY);
   io->as.delay.thunk = thunk;
+  sz_retain(env);
   io->as.delay.env = env;
   return io;
 }
@@ -1851,6 +1856,9 @@ static int step_fiber(Sched *s, Fiber *f) {
     return 0;
   case SZ_IO_DELAY: {
     void *value = cur->as.delay.thunk(cur->as.delay.env);
+    /* Unique delay: steal env so destructor does not drop after the thunk. */
+    if (!(sz_is_rc(cur) && sz_rc_hdr(cur)->rc > 1))
+      cur->as.delay.env = NULL;
     fiber_set_cur(f, pure_drop(value));
     ready_enqueue(s, f);
     return 0;

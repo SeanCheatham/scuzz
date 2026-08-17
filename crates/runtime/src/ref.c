@@ -19,7 +19,9 @@ static void *ref_of_thunk(void *env) { return env; }
 
 SzIo *sz_ref_of(void *initial) {
   SzRef *r = ref_make_drop(initial);
-  return sz_io_delay(ref_of_thunk, r);
+  SzIo *io = sz_io_delay(ref_of_thunk, r);
+  sz_release(r);
+  return io;
 }
 
 SzIo *sz_ref_of_cstr(const char *initial) {
@@ -38,7 +40,11 @@ SzIo *sz_ref_get(SzRef *ref) {
   if (!ref)
     sz_panic("sz_ref_get(null)");
   sz_retain(ref);
-  return sz_io_delay(ref_get_thunk, ref);
+  {
+    SzIo *io = sz_io_delay(ref_get_thunk, ref);
+    sz_release(ref);
+    return io;
+  }
 }
 
 typedef struct RefSetEnv {

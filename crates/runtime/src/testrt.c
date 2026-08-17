@@ -166,10 +166,12 @@ static void *mem_read(void *env) {
   if (!n || n->is_dir) {
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.read: not found (mem)");
-    return r;
+    goto done;
   }
   r->is_err = 0;
   r->as.ok = sz_string_from_bytes(n->data ? n->data : "", n->len);
+done:
+  sz_release(path_s);
   return r;
 }
 
@@ -291,7 +293,7 @@ static void *mem_list(void *env) {
     sz_free(path);
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.list: not a directory (mem)");
-    return r;
+    goto done;
   }
   acc = sz_list_nil();
   for (n = g_fs; n; n = n->next) {
@@ -316,6 +318,8 @@ static void *mem_list(void *env) {
     sz_release(acc);
     r->as.ok = rev;
   }
+done:
+  sz_release(path_s);
   return r;
 }
 
@@ -335,13 +339,13 @@ static void *mem_mkdirs(void *env) {
     sz_free(path);
     r->is_err = 0;
     r->as.ok = NULL;
-    return r;
+    goto done;
   }
   if (len >= sizeof tmp) {
     sz_free(path);
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.mkdirs: path too long (mem)");
-    return r;
+    goto done;
   }
   memcpy(tmp, path, len + 1);
   for (i = 1; i < len; i++) {
@@ -351,7 +355,7 @@ static void *mem_mkdirs(void *env) {
         sz_free(path);
         r->is_err = 1;
         r->as.err = sz_error_new(2, "Fs.mkdirs: path component is file (mem)");
-        return r;
+        goto done;
       }
       tmp[i] = '/';
     }
@@ -360,11 +364,13 @@ static void *mem_mkdirs(void *env) {
     sz_free(path);
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.mkdirs: path is file (mem)");
-    return r;
+    goto done;
   }
   sz_free(path);
   r->is_err = 0;
   r->as.ok = NULL;
+done:
+  sz_release(path_s);
   return r;
 }
 
@@ -439,11 +445,13 @@ static void *mem_canonicalize(void *env) {
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.canonicalize: not found (mem)");
     sz_free(path);
-    return r;
+    goto done;
   }
   r->is_err = 0;
   r->as.ok = sz_string_from_cstr(path);
   sz_free(path);
+done:
+  sz_release(path_s);
   return r;
 }
 
@@ -564,11 +572,13 @@ static void *stub_http_get(void *env) {
     if (strcmp(s->url, url) == 0) {
       r->is_err = 0;
       r->as.ok = sz_string_from_cstr(s->body);
-      return r;
+      goto done;
     }
   }
   r->is_err = 1;
   r->as.err = sz_error_new(6, "Net.httpGet: no stub for URL");
+done:
+  sz_release(url_s);
   return r;
 }
 

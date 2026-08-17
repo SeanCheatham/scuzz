@@ -66,26 +66,26 @@ static void *fs_read_result(void *env) {
     snprintf(msg, sizeof(msg), "Fs.read: cannot open %s: %s", p, strerror(errno));
     r->is_err = 1;
     r->as.err = sz_error_new(2, msg);
-    return r;
+    goto done;
   }
   if (fseek(f, 0, SEEK_END) != 0) {
     fclose(f);
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.read: seek end failed");
-    return r;
+    goto done;
   }
   long sz = ftell(f);
   if (sz < 0) {
     fclose(f);
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.read: ftell failed");
-    return r;
+    goto done;
   }
   if (fseek(f, 0, SEEK_SET) != 0) {
     fclose(f);
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.read: seek set failed");
-    return r;
+    goto done;
   }
   char *buf = (char *)sz_alloc((size_t)sz + 1);
   size_t n = fread(buf, 1, (size_t)sz, f);
@@ -95,6 +95,8 @@ static void *fs_read_result(void *env) {
   sz_free(buf);
   r->is_err = 0;
   r->as.ok = s;
+done:
+  sz_release(path);
   return r;
 }
 
@@ -176,7 +178,7 @@ static void *fs_list_result(void *env) {
     snprintf(msg, sizeof(msg), "Fs.list: cannot open %s: %s", p, strerror(errno));
     r->is_err = 1;
     r->as.err = sz_error_new(2, msg);
-    return r;
+    goto done;
   }
   SzList *acc = sz_list_nil();
   struct dirent *ent;
@@ -198,6 +200,8 @@ static void *fs_list_result(void *env) {
     sz_release(acc);
     r->as.ok = rev;
   }
+done:
+  sz_release(path);
   return r;
 }
 
@@ -222,7 +226,7 @@ static void *fs_mkdirs_result(void *env) {
   if (len >= sizeof(tmp)) {
     r->is_err = 1;
     r->as.err = sz_error_new(2, "Fs.mkdirs: path too long");
-    return r;
+    goto done;
   }
   memcpy(tmp, p, len + 1);
   for (char *q = tmp + 1; *q; q++) {
@@ -233,7 +237,7 @@ static void *fs_mkdirs_result(void *env) {
         snprintf(msg, sizeof(msg), "Fs.mkdirs: %s: %s", tmp, strerror(errno));
         r->is_err = 1;
         r->as.err = sz_error_new(2, msg);
-        return r;
+        goto done;
       }
       *q = '/';
     }
@@ -243,10 +247,12 @@ static void *fs_mkdirs_result(void *env) {
     snprintf(msg, sizeof(msg), "Fs.mkdirs: %s: %s", tmp, strerror(errno));
     r->is_err = 1;
     r->as.err = sz_error_new(2, msg);
-    return r;
+    goto done;
   }
   r->is_err = 0;
   r->as.ok = NULL;
+done:
+  sz_release(path);
   return r;
 }
 
@@ -272,11 +278,13 @@ static void *fs_canonicalize_result(void *env) {
     snprintf(msg, sizeof(msg), "Fs.canonicalize: %s: %s", p, strerror(errno));
     r->is_err = 1;
     r->as.err = sz_error_new(2, msg);
-    return r;
+    goto done;
   }
   r->is_err = 0;
   r->as.ok = sz_string_from_cstr(resolved);
   free(resolved);
+done:
+  sz_release(path);
   return r;
 }
 

@@ -342,6 +342,7 @@ static void *sys_write_result(void *env) {
     r->is_err = 1;
     r->as.err = sz_error_new(3, "Sys.write: flush failed");
   }
+  sz_release(s);
   return r;
 }
 
@@ -486,6 +487,7 @@ static void *sys_spawn_result(void *env) {
   if (pid < 0) {
     r->is_err = 1;
     r->as.err = sz_error_new(3, "Sys.spawn: fork failed");
+    sz_release(cmd);
     return r;
   }
   if (pid == 0) {
@@ -494,6 +496,7 @@ static void *sys_spawn_result(void *env) {
   }
   r->is_err = 0;
   r->as.ok = sz_box_i64((int64_t)pid);
+  sz_release(cmd);
   return r;
 }
 
@@ -563,6 +566,7 @@ static void *sys_getenv_result(void *env) {
     v = getenv(sz_string_cstr(key));
   r->is_err = 0;
   r->as.ok = sz_string_from_cstr(v ? v : "");
+  sz_release(key);
   return r;
 }
 

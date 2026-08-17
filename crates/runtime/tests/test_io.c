@@ -972,6 +972,38 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
+  /* Leftover delay env drops on last-use / free. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzIo *io;
+    SzString *s;
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    io = sz_ref_of(sz_string_from_cstr("v"));
+    sz_release(io);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    s = sz_string_from_cstr("env");
+    io = sz_io_delay(delay_inc, s);
+    sz_release(s);
+    sz_release(io);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    r = sz_io_unsafe_run(sz_ref_of(sz_string_from_cstr("run")));
+    assert(r.ok);
+    sz_release(r.value);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   /* println + flatMap */
   SzIo *prog =
       fm_drop(sz_io_println_cstr("hello"), cont_println, NULL);
