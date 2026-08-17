@@ -2244,7 +2244,7 @@ fn emit_io_cont_lambda(
     )
     .unwrap();
     writeln!(code, "  call void @sz_release(ptr %{prefix}_cl1)").unwrap();
-    val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
+    owned_ptr(code, format!("%{prefix}_cl2"))
 }
 
 /// `t => Bool` predicate: `i64 (*)(ptr value, ptr env)`.
@@ -2308,7 +2308,7 @@ fn emit_pred_lambda(
     )
     .unwrap();
     writeln!(code, "  call void @sz_release(ptr %{prefix}_cl1)").unwrap();
-    val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
+    owned_ptr(code, format!("%{prefix}_cl2"))
 }
 
 /// `t => ptr` mapper: `ptr (*)(ptr value, ptr env)`.
@@ -2402,7 +2402,7 @@ fn emit_smap_lambda(
     )
     .unwrap();
     writeln!(code, "  call void @sz_release(ptr %{prefix}_cl1)").unwrap();
-    val_emitted(code, format!("%{prefix}_cl2"), Kind::Ptr)
+    owned_ptr(code, format!("%{prefix}_cl2"))
 }
 
 fn unpack_closure(code: &mut String, closure: &str, prefix: &str) {
@@ -2451,6 +2451,7 @@ fn emit_resource(
             "  %{prefix}_v = call ptr @sz_lang_resource_make(ptr {acq}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
         )
         .unwrap();
+        drop_owned_ptr(&mut code, &lam);
         val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
     } else {
         writeln!(
@@ -2459,6 +2460,7 @@ fn emit_resource(
             first.value
         )
         .unwrap();
+        drop_owned_ptr(&mut code, &lam);
         io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
     }
 }
@@ -2484,6 +2486,7 @@ fn emit_stream_evalmap(
         inner.value
     )
     .unwrap();
+    drop_owned_ptr(&mut code, &lam);
     val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
 }
 
@@ -2513,10 +2516,10 @@ fn emit_stream_pred(
         "  %{prefix}_v = call ptr @{rt}(ptr {inner_value}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
     )
     .unwrap();
+    drop_owned_ptr(&mut code, &lam);
     if as_io {
         io_emitted(code, format!("%{prefix}_v"), Kind::Int)
     } else if rt == "sz_list_filter" {
-        writeln!(code, "  call void @sz_release(ptr {})", lam.value).unwrap();
         if inner_owned && inner_kind == Kind::Ptr {
             writeln!(code, "  call void @sz_release(ptr {inner_value})").unwrap();
         }
@@ -2586,8 +2589,8 @@ fn emit_ptr_map(
         "  %{prefix}_v = call ptr @{rt}(ptr {inner_value}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
     )
     .unwrap();
+    drop_owned_ptr(&mut code, &lam);
     if rt == "sz_list_map" {
-        writeln!(code, "  call void @sz_release(ptr {})", lam.value).unwrap();
         if inner_owned && inner_kind == Kind::Ptr {
             writeln!(code, "  call void @sz_release(ptr {inner_value})").unwrap();
         }
@@ -2619,6 +2622,7 @@ fn emit_net_serve(
         port.value
     )
     .unwrap();
+    drop_owned_ptr(&mut code, &lam);
     io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
 }
 
@@ -5683,6 +5687,80 @@ law always: Bool = 1 == 1
 "#,
                 "call ptr @sz_lang_signal_map(",
                 "Signal.map",
+            ),
+        ];
+        for (src, needle, label) in cases {
+            let p = crate::lower::lower_program(parse(src).unwrap());
+            crate::typ::typecheck(&p).unwrap_or_else(|e| panic!("typecheck {label}: {e}"));
+            let ir = emit_llvm(&p);
+            let at = ir
+                .find(needle)
+                .unwrap_or_else(|| panic!("expected {needle} in IR for {label}:\n{ir}"));
+            let pack = last_cl2_before(&ir, at);
+            assert!(
+                ir[at..].contains(&format!("call void @sz_release(ptr {pack})")),
+                "expected last-use release of pack {pack} after {label}:\n{ir}"
+            );
+        }
+    }
+
+    #[test]
+    fn emit_kit_packs_release_owned() {
+        let cases: &[(&str, &str, &str)] = &[
+            (
+                r#"@main def main: IO[Unit] =
+  Stream.drain(Stream.filter(Stream.emit("a"), x => true))
+"#,
+                "call ptr @sz_stream_filter(",
+                "Stream.filter",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Stream.drain(Stream.map(Stream.emit("a"), x => x))
+"#,
+                "call ptr @sz_stream_map(",
+                "Stream.map",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Stream.drain(Stream.evalMap(Stream.emit("a"), x => IO.pure(x)))
+"#,
+                "call ptr @sz_stream_evalmap(",
+                "Stream.evalMap",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    res = Resource.make(IO.pure("tok"), t => IO.println(t))
+    _ <- Resource.use(res, t => IO.println(t))
+  } yield ()
+"#,
+                "call ptr @sz_lang_resource_make(",
+                "Resource.make",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    res = Resource.make(IO.pure("tok"), t => IO.println(t))
+    _ <- Resource.use(res, t => IO.println(t))
+  } yield ()
+"#,
+                "call ptr @sz_lang_resource_use(",
+                "Resource.use",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Net.serveOnce(8080, path => IO.pure(path))
+"#,
+                "call ptr @sz_net_serve_once(",
+                "Net.serveOnce",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Net.serve(8080, path => IO.pure(path))
+"#,
+                "call ptr @sz_net_serve(",
+                "Net.serve",
             ),
         ];
         for (src, needle, label) in cases {
