@@ -1659,6 +1659,19 @@ int main(void) {
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzLangResource *lr = lang_make_tok();
+      SzString *uen = sz_string_from_cstr("use-env");
+      SzIo *io = sz_lang_resource_use(lr, lang_use_ok, uen);
+      sz_release(uen);
+      sz_lang_resource_free(lr);
+      sz_release(io);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
   }
 
   /* Stream — emit / eval / concat / evalMap / map / take / drop / filter / compileToList / drain */

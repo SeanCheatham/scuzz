@@ -47,20 +47,33 @@ static SzIo *lang_fin_free_err(SzError *err, void *env) {
   return fail_drop(err);
 }
 
-static SzIo *lang_after_acquire(void *acquired, void *env) {
-  LangResSt *st = (LangResSt *)env;
+static SzIo *use_after_acquire(void *acquired, void *env) {
+  SzPair *pack = (SzPair *)env;
+  SzPair *inner = (SzPair *)pack->right;
+  LangResSt *st = (LangResSt *)sz_rc_alloc(sizeof(LangResSt), SZ_RC_BOX);
+  SzIo *use_io;
+  SzIo *rel;
+  SzIo *fin;
+  SzIo *ens;
+  memset(st, 0, sizeof(LangResSt));
+  sz_retain(pack->left);
+  st->res = (SzLangResource *)pack->left;
+  st->use = *(SzCont *)inner->right;
+  sz_retain(inner->left);
+  st->use_env = inner->left;
   st->acquired = acquired;
-  SzIo *use_io = st->use(acquired, st->use_env);
-  SzIo *rel = st->res->release(acquired, st->res->release_env);
-  SzIo *fin = fm_drop(rel, lang_fin_free_ok, st);
+  use_io = st->use(acquired, st->use_env);
+  rel = st->res->release(acquired, st->res->release_env);
+  fin = fm_drop(rel, lang_fin_free_ok, st);
   {
     SzIo *handled = sz_io_handle_error_with(fin, lang_fin_free_err, st);
     sz_release(fin);
     fin = handled;
   }
-  SzIo *ens = sz_io_ensure(use_io, fin);
+  ens = sz_io_ensure(use_io, fin);
   sz_release(use_io);
   sz_release(fin);
+  sz_release(st);
   return ens;
 }
 
@@ -80,22 +93,20 @@ SzLangResource *sz_lang_resource_make(SzIo *acquire, SzCont release,
 }
 
 SzIo *sz_lang_resource_use(SzLangResource *res, SzCont use, void *use_env) {
-  LangResSt *st;
+  SzCont *use_cell;
+  SzPair *inner;
+  SzPair *pack;
   if (!res || !use)
     sz_panic("sz_lang_resource_use(null)");
-  /* BOX last-release is sz_free. HANDLE last-use must not sz_release a
-   * leftover malloc pack (freed memory can look like RC). */
-  st = (LangResSt *)sz_rc_alloc(sizeof(LangResSt), SZ_RC_BOX);
-  memset(st, 0, sizeof(LangResSt));
-  st->res = res;
-  st->use = use;
-  sz_retain(res);
-  sz_retain(use_env);
-  st->use_env = use_env;
-  sz_retain(res->acquire);
+  use_cell = (SzCont *)sz_rc_alloc(sizeof(SzCont), SZ_RC_BOX);
+  *use_cell = use;
+  inner = sz_pair_new(use_env, use_cell);
+  sz_release(use_cell);
+  pack = sz_pair_new(res, inner);
+  sz_release(inner);
   {
-    SzIo *io = fm_drop(res->acquire, lang_after_acquire, st);
-    sz_release(st);
+    SzIo *io = fm_drop(res->acquire, use_after_acquire, pack);
+    sz_release(pack);
     return io;
   }
 }

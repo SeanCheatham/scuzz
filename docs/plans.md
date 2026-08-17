@@ -1,9 +1,9 @@
 # Short-term plan
 
-## Slice: Drop leftover Resource.use pack retains
+## Slice: Keep Net.serve live pack RC
 
-`Net.serve` keeps the handler env in a pair until start. Unused serve drops leftover env retains. `Resource.use` still holds the resource and use env in a pack. Last-use of an unused use IO frees the pack and leaks those retains.
+`Resource.use` keeps the resource and use env in a pair until start. Unused use drops leftover env retains. The live use pack is RC so HANDLE last-use drops the pack. `Net.serve` still mallocs `ServeSt`. `serve_free` frees it while HANDLE still holds the pointer. Freed memory can look like RC.
 
-- Keep the use env in a pair (same shape as `Net.serve`) so last-use of the unused use IO drops leftover env retains. Steal on run so acquire still owns the resource.
-- Proof: `test_io` unused `sz_lang_resource_use` then `sz_release` of the IO returns alloc stats to baseline.
+- Keep `ServeSt` RC (same shape as the live Resource.use pack) so HANDLE last-use drops the pack. Do not `sz_free` in `serve_free`.
+- Proof: `test_io` live `sz_net_serve_once` still returns to alloc baseline. Unused serve stays at baseline.
 - Out of scope: OS threads. Panic leak.
