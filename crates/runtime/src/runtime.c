@@ -697,6 +697,7 @@ SzIo *sz_io_forever(SzIo *inner) {
   if (!inner)
     sz_panic("sz_io_forever(null)");
   SzIo *io = sz_io_new(SZ_IO_FOREVER);
+  sz_retain(inner);
   io->as.loop.inner = inner;
   io->as.loop.n = 0;
   return io;

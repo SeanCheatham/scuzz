@@ -1077,22 +1077,29 @@ int main(void) {
 
   /* IO.forever: race loser when a sibling sleeper wins (TestRuntime). */
   {
+    SzIo *inner;
+    SzIo *loop;
     sz_testrt_install();
-    r = sz_io_unsafe_run(
-        sz_io_race(sz_io_forever(sz_io_sleep_ms(1)), sz_io_sleep_ms(5)));
+    inner = sz_io_sleep_ms(1);
+    loop = sz_io_forever(inner);
+    sz_release(inner);
+    r = sz_io_unsafe_run(sz_io_race(loop, sz_io_sleep_ms(5)));
     assert(r.ok);
     sz_testrt_reset();
   }
 
   /* IO.forever cancelled through Fiber.interrupt. Resource release still runs. */
   {
+    SzIo *body;
+    SzIo *loop;
     sz_testrt_install();
     lang_released = 0;
     lr = lang_make_tok();
+    body = sz_lang_resource_use(lr, lang_use_sleep, NULL);
+    loop = sz_io_forever(body);
+    sz_release(body);
     r = sz_io_unsafe_run(sz_io_flatmap(
-        sz_fiber_fork(sz_io_forever(
-            sz_lang_resource_use(lr, lang_use_sleep, NULL))),
-        fiber_interrupt_then_join, NULL));
+        sz_fiber_fork(loop), fiber_interrupt_then_join, NULL));
     assert(r.ok);
     assert(lang_released == 1);
     sz_lang_resource_free(lr);
