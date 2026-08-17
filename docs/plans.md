@@ -1,10 +1,11 @@
 # Short-term plan
 
-## Slice: Drop owned inner IO after IO.attempt
+## Slice: Retain capture env in flatMap
 
-`flatMap` retains inner and drops the caller ref. `IO.attempt` stores inner without retain, so the inner graph can alias the attempt node.
+`flatMap` retains inner and drops the caller IO ref. It still takes the capture list without retain, so the env can alias the bind node.
 
-- Retain inner in `sz_io_attempt`.
-- Drop the caller ref after the call.
-- Proof: compiler IR for `IO.fail("boom").attempt` shows `sz_release` of the inner after the call.
-- Out of scope: OS threads.
+- Retain env in `sz_io_flatmap`.
+- Drop the owned pack after the call.
+- Release env when the flatMap node frees.
+- Proof: compiler IR for `IO.pure("ok").flatMap(_ => IO.println("ok"))` shows `sz_release` of the capture pack after the call.
+- Out of scope: `handleErrorWith` env. OS threads. `IO.pure` payloads.

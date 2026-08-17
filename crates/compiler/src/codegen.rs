@@ -1761,6 +1761,7 @@ fn emit_expr(
                 "  %{prefix}_attempt = call ptr @sz_io_attempt_as_result(ptr {inner_io})"
             )
             .unwrap();
+            writeln!(code, "  call void @sz_release(ptr {inner_io})").unwrap();
             io_emitted(code, format!("%{prefix}_attempt"), Kind::Ptr)
         }
         ExprKind::IoRace { left, right } => {
@@ -5444,6 +5445,25 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of inner {name} after flatMap:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_io_attempt_releases_inner() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.fail("boom").attempt
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_io_attempt_as_result(ptr ";
+        let at = ir.find(needle).expect("expected sz_io_attempt_as_result");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of inner {name} after IO.attempt:\n{ir}"
         );
     }
 

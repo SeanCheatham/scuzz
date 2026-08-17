@@ -138,6 +138,12 @@ static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
   sz_release(inner);
   return io;
 }
+
+static SzIo *attempt_drop(SzIo *inner) {
+  SzIo *io = sz_io_attempt(inner);
+  sz_release(inner);
+  return io;
+}
 static SzIo *lang_use_ok(void *acquired, void *env) {
   (void)env;
   (void)acquired;
@@ -940,7 +946,7 @@ int main(void) {
   assert(r.ok);
 
   /* attempt */
-  r = sz_io_unsafe_run(sz_io_attempt(sz_io_fail_cstr("nope")));
+  r = sz_io_unsafe_run(attempt_drop(sz_io_fail_cstr("nope")));
   assert(r.ok);
   {
     SzEither *e = (SzEither *)r.value;
@@ -948,7 +954,7 @@ int main(void) {
     assert(e->as.left && strstr(sz_string_cstr(e->as.left->message), "nope"));
     sz_either_free(e);
   }
-  r = sz_io_unsafe_run(sz_io_attempt(sz_io_pure((void *)(intptr_t)3)));
+  r = sz_io_unsafe_run(attempt_drop(sz_io_pure((void *)(intptr_t)3)));
   assert(r.ok);
   {
     SzEither *e = (SzEither *)r.value;

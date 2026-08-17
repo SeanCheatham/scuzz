@@ -20,6 +20,12 @@ static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
   return io;
 }
 
+static SzIo *attempt_drop(SzIo *inner) {
+  SzIo *io = sz_io_attempt(inner);
+  sz_release(inner);
+  return io;
+}
+
 /* --- panic / alloc ------------------------------------------------------- */
 
 /* Header before user pointer: [size_t nbytes][user bytes...] */
@@ -655,6 +661,7 @@ SzIo *sz_io_attempt(SzIo *inner) {
   if (!inner)
     sz_panic("sz_io_attempt(null)");
   SzIo *io = sz_io_new(SZ_IO_ATTEMPT);
+  sz_retain(inner);
   io->as.attempt_inner = inner;
   return io;
 }
@@ -1032,14 +1039,14 @@ static SzIo *ensure_run_fin_ok(SzIo *fin, void *value) {
   EnsureExit *e = (EnsureExit *)sz_alloc(sizeof(EnsureExit));
   e->value = value;
   e->err = NULL;
-  return fm_drop(sz_io_attempt(fin), ensure_after_attempt_ok, e);
+  return fm_drop(attempt_drop(fin), ensure_after_attempt_ok, e);
 }
 
 static SzIo *ensure_run_fin_err(SzIo *fin, SzError *err) {
   EnsureExit *e = (EnsureExit *)sz_alloc(sizeof(EnsureExit));
   e->value = NULL;
   e->err = err;
-  return fm_drop(sz_io_attempt(fin), ensure_after_attempt_err, e);
+  return fm_drop(attempt_drop(fin), ensure_after_attempt_err, e);
 }
 
 static SzIo *ignore_then_io(void *ignored, void *env) {
