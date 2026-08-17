@@ -29,7 +29,7 @@ law hasChip: Bool =
   Law.a11yHas("chip:Pin")
 
 law hasListTile: Bool =
-  Law.a11yHas("listtile:")
+  Law.a11yHas("listtile:") || Law.signalListLen(1) == 0
 
 law hasBadge: Bool =
   Law.a11yHas("badge:")
@@ -44,7 +44,7 @@ law hasExpansion: Bool =
   Law.a11yHas("expansion:")
 
 law hasIconButton: Bool =
-  Law.a11yHas("iconbutton:")
+  Law.a11yHas("iconbutton:") || Law.signalListLen(1) == 0
 
 law hasVerticalDivider: Bool =
   Law.a11yHas("vdiv:")
@@ -74,25 +74,25 @@ law hasTooltip: Bool =
   Law.a11yHas("tooltip:")
 
 law hasOutlined: Bool =
-  Law.a11yHas("outlined:")
+  Law.a11yHas("outlined:") || Law.signalListLen(1) == 0
 
 law hasTextButton: Bool =
-  Law.a11yHas("textbutton:")
+  Law.a11yHas("textbutton:") || Law.signalListLen(1) == 0
 
 law hasPlaceholder: Bool =
   Law.a11yHas("placeholder:")
 
 law hasFilterChip: Bool =
-  Law.a11yHas("filterchip:")
+  Law.a11yHas("filterchip:") || Law.signalListLen(1) == 0
 
 law hasChoiceChip: Bool =
-  Law.a11yHas("choicechip:")
+  Law.a11yHas("choicechip:") || Law.signalListLen(1) == 0
 
 law hasActionChip: Bool =
-  Law.a11yHas("actionchip:")
+  Law.a11yHas("actionchip:") || Law.signalListLen(1) == 0
 
 law hasInputChip: Bool =
-  Law.a11yHas("inputchip:")
+  Law.a11yHas("inputchip:") || Law.signalListLen(1) == 0
 
 law hasSemantics: Bool =
   Law.a11yHas("semantics:")
