@@ -1,10 +1,10 @@
 # Short-term plan
 
-## Slice: Retain capture env in handleErrorWith
+## Slice: Retain payload in IO.pure
 
-The compiler retains a `flatMap` capture list and drops the pack after the call. `handleErrorWith` still takes the capture list without retain, so the env can alias the handler node.
+`handleErrorWith` capture packs retain then drop after the call. `IO.pure` still stores the payload without retain, so the value can alias the IO node.
 
-- Retain the capture pack before `sz_io_handle_error_with`.
-- Drop the owned pack after the call.
-- Proof: compiler IR for `IO.fail("boom").handleErrorWith(_ => IO.println("recovered"))` shows `sz_release` of the capture pack after the call.
-- Out of scope: OS threads. `IO.pure` payloads. Runtime env retain (C kits pass non-list env).
+- Retain payload in `sz_io_pure`.
+- Drop the caller ref after the call.
+- Proof: compiler IR for `IO.pure("ok").flatMap(_ => IO.println("ok"))` shows `sz_release` of the payload after `sz_io_pure`.
+- Out of scope: OS threads. Releasing the payload when the IO node frees (the run result aliases it).

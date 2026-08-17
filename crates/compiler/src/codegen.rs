@@ -1743,12 +1743,16 @@ fn emit_expr(
                 &format!("{prefix}_heio"),
             );
             let env_ptr = pack_env(&mut code, locals, &capture_names, &format!("{prefix}_ecap"));
+            if env_ptr != "null" {
+                writeln!(code, "  call void @sz_retain(ptr {env_ptr})").unwrap();
+            }
             writeln!(
                 code,
                 "  %{prefix}_h = call ptr @sz_io_handle_error_with(ptr {inner_io}, ptr @{cont_name}, ptr {env_ptr})"
             )
             .unwrap();
             writeln!(code, "  call void @sz_release(ptr {inner_io})").unwrap();
+            writeln!(code, "  call void @sz_release(ptr {env_ptr})").unwrap();
             io_emitted(code, format!("%{prefix}_h"), body_emitted.payload)
         }
         ExprKind::Attempt { inner } => {
@@ -5432,6 +5436,26 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of inner {name} after handleErrorWith:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_handle_error_with_releases_capture_pack() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.fail("boom").handleErrorWith(_ => IO.println("recovered"))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_io_handle_error_with(ptr ";
+        let at = ir.find(needle).expect("expected sz_io_handle_error_with");
+        let close = ir[at..]
+            .find(')')
+            .expect("expected handleErrorWith call close");
+        let env = ir[at..at + close].rsplit("ptr ").next().unwrap().trim();
+        assert!(
+            ir[at + close..].contains(&format!("call void @sz_release(ptr {env})")),
+            "expected last-use release of capture pack {env} after handleErrorWith:\n{ir}"
         );
     }
 
