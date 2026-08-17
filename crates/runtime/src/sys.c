@@ -368,6 +368,8 @@ static void exec_free(ExecSt *st) {
   }
   if (st->pid > 0)
     (void)waitpid(st->pid, &status, WNOHANG);
+  sz_release(st->cmd);
+  st->cmd = NULL;
   sz_free(st);
 }
 
@@ -460,21 +462,43 @@ static SzIo *exec_after_start(void *value, void *env) {
   return fm_drop(io, exec_finish, st);
 }
 
-SzIo *sz_sys_exec(SzString *cmd) {
-  ExecSt *st;
+static SzIo *exec_keep_pair(void *value, void *env) {
+  (void)value;
+  (void)env;
+  return pure_drop(NULL);
+}
+
+static SzIo *exec_after_kick(void *ignored, void *env) {
+  SzPair *p = (SzPair *)env;
+  ExecSt *st = (ExecSt *)sz_alloc_zero(sizeof(ExecSt));
   SzIo *io;
-  if (!cmd)
-    sz_panic("sz_sys_exec(null)");
-  if (sz_testrt_sys_is_fake())
-    return sz_io_fail_cstr("Sys.exec: rejected under TestRuntime");
-  st = (ExecSt *)sz_alloc_zero(sizeof(ExecSt));
-  st->cmd = cmd;
+  (void)ignored;
+  sz_retain(p->left);
+  st->cmd = (SzString *)p->left;
   st->read_fd = -1;
   io = fm_drop(sz_io_delay(sys_exec_start, st), exec_after_start, st);
   {
     SzIo *handled = sz_io_handle_error_with(io, exec_on_err, st);
     sz_release(io);
     return handled;
+  }
+}
+
+SzIo *sz_sys_exec(SzString *cmd) {
+  SzPair *p;
+  if (!cmd)
+    sz_panic("sz_sys_exec(null)");
+  p = sz_pair_new(cmd, NULL);
+  if (sz_testrt_sys_is_fake()) {
+    SzIo *io = fm_drop(sz_io_fail_cstr("Sys.exec: rejected under TestRuntime"),
+                       exec_keep_pair, p);
+    sz_release(p);
+    return io;
+  }
+  {
+    SzIo *io = fm_drop(sz_io_pure(NULL), exec_after_kick, p);
+    sz_release(p);
+    return io;
   }
 }
 
