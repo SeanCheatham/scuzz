@@ -138,6 +138,7 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"get:${List.getOrElse(xs, 1, "z")}")
     _ <- IO.println(s"miss:${List.getOrElse(xs, 9, "z")}")
     _ <- IO.println(s"fill:${List.join(List.fill(3, "a"), ",")}")
+    _ <- IO.println(s"rev:${List.join(List.reverse(xs), ",")}")
   } yield ()
 
 def strProof(): IO[Unit] =
@@ -157,6 +158,11 @@ def strProof(): IO[Unit] =
     _ <- IO.println(s"padL:${Str.padLeft("a", 3, "x")}")
     _ <- IO.println(s"padR:${Str.padRight("a", 3, "x")}")
     _ <- IO.println(s"blank:${if (Str.isBlank(" \t")) "y" else "n"}")
+    _ <- IO.println(s"lix:${Str.lastIndexOf("ababa", "ba")}")
+    _ <- IO.println(s"take:${Str.take("abc", 2)}")
+    _ <- IO.println(s"drop:${Str.drop("abc", 1)}")
+    _ <- IO.println(s"takeR:${Str.takeRight("abc", 2)}")
+    _ <- IO.println(s"dropR:${Str.dropRight("abc", 1)}")
   } yield ()
 
 record Box[T](x: T):

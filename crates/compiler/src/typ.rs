@@ -1834,7 +1834,7 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::String)
         }
-        "Str.len" | "Str.charAt" | "Str.indexOf" => {
+        "Str.len" | "Str.charAt" | "Str.indexOf" | "Str.lastIndexOf" => {
             if callee == "Str.len" {
                 expect_arity(callee, &arg_tys, 1)?;
                 expect_ty(&arg_tys[0], &Type::String)?;
@@ -1879,6 +1879,12 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::String)?;
             expect_ty(&arg_tys[1], &Type::Int)?;
             expect_ty(&arg_tys[2], &Type::Int)?;
+            Ok(Type::String)
+        }
+        "Str.take" | "Str.drop" | "Str.takeRight" | "Str.dropRight" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(Type::String)
         }
         "Str.fromInt" => {
@@ -5996,6 +6002,24 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Str.strip/pad/isBlank should typecheck");
+    }
+
+    #[test]
+    fn typechecks_str_last_index_take_drop_list_reverse() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(Str.fromInt(Str.lastIndexOf("ababa", "ba")))
+    _ <- IO.println(Str.take("abc", 2))
+    _ <- IO.println(Str.drop("abc", 1))
+    _ <- IO.println(Str.takeRight("abc", 2))
+    _ <- IO.println(Str.dropRight("abc", 1))
+    _ <- IO.println(List.join(List.reverse(["a", "b", "c"]), ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect(
+            "Str.lastIndexOf/take/drop/takeRight/dropRight and List.reverse should typecheck",
+        );
     }
 
     #[test]

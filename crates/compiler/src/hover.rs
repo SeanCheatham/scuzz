@@ -361,6 +361,14 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Str.padRight(s: String, n: Int, pad: String): String",
     ),
     ("Str.isBlank", "Str.isBlank(s: String): Bool"),
+    (
+        "Str.lastIndexOf",
+        "Str.lastIndexOf(s: String, needle: String): Int",
+    ),
+    ("Str.take", "Str.take(s: String, n: Int): String"),
+    ("Str.drop", "Str.drop(s: String, n: Int): String"),
+    ("Str.takeRight", "Str.takeRight(s: String, n: Int): String"),
+    ("Str.dropRight", "Str.dropRight(s: String, n: Int): String"),
     ("Signal.int", "Signal.int(n: Int): SignalInt"),
     ("Signal.get", "Signal.get(s: SignalInt): Int"),
     ("Signal.set", "Signal.set(s: SignalInt, n: Int): Unit"),
@@ -398,6 +406,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.getOrElse(xs: List[T], i: Int, default: T): T",
     ),
     ("List.fill", "List.fill(n: Int, x: T): List[T]"),
+    ("List.reverse", "List.reverse(xs: List[T]): List[T]"),
     (
         "List.concat",
         "List.concat(xs: List[T], ys: List[T]): List[T]",
@@ -1339,6 +1348,11 @@ mod tests {
 "#;
         let h = hover_src(src, "fill");
         assert!(h.contains("List.fill(n: Int, x: T): List[T]"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.reverse(["a", "b"]), ","))
+"#;
+        let h = hover_src(src, "reverse");
+        assert!(h.contains("List.reverse(xs: List[T]): List[T]"), "{h}");
     }
 
     #[test]
@@ -1494,6 +1508,40 @@ mod tests {
 "#;
         let h = hover_src(src, "isBlank");
         assert!(h.contains("Str.isBlank(s: String): Bool"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Str.lastIndexOf("ababa", "ba")))
+"#;
+        let h = hover_src(src, "lastIndexOf");
+        assert!(
+            h.contains("Str.lastIndexOf(s: String, needle: String): Int"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.take("abc", 2))
+"#;
+        let h = hover_src(src, "take");
+        assert!(h.contains("Str.take(s: String, n: Int): String"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.drop("abc", 1))
+"#;
+        let h = hover_src(src, "drop");
+        assert!(h.contains("Str.drop(s: String, n: Int): String"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.takeRight("abc", 2))
+"#;
+        let h = hover_src(src, "takeRight");
+        assert!(
+            h.contains("Str.takeRight(s: String, n: Int): String"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.dropRight("abc", 1))
+"#;
+        let h = hover_src(src, "dropRight");
+        assert!(
+            h.contains("Str.dropRight(s: String, n: Int): String"),
+            "{h}"
+        );
     }
 
     #[test]

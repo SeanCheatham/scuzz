@@ -606,6 +606,54 @@ int64_t sz_string_index_of(const SzString *s, const SzString *needle) {
   return -1;
 }
 
+int64_t sz_string_last_index_of(const SzString *s, const SzString *needle) {
+  size_t max;
+  if (!s || !needle)
+    return -1;
+  if (needle->len == 0)
+    return sz_string_len(s);
+  if (needle->len > s->len)
+    return -1;
+  max = s->len - needle->len;
+  for (size_t i = max + 1; i > 0; i--) {
+    size_t at = i - 1;
+    if (memcmp(s->data + at, needle->data, needle->len) == 0)
+      return (int64_t)at;
+  }
+  return -1;
+}
+
+SzString *sz_string_take(const SzString *s, int64_t n) {
+  if (n <= 0)
+    return sz_string_from_cstr("");
+  return sz_string_slice(s, 0, n);
+}
+
+SzString *sz_string_drop(const SzString *s, int64_t n) {
+  int64_t len = sz_string_len(s);
+  if (n <= 0)
+    return sz_string_slice(s, 0, len);
+  return sz_string_slice(s, n, len);
+}
+
+SzString *sz_string_take_right(const SzString *s, int64_t n) {
+  int64_t len = sz_string_len(s);
+  if (n <= 0)
+    return sz_string_from_cstr("");
+  if (n >= len)
+    return sz_string_slice(s, 0, len);
+  return sz_string_slice(s, len - n, len);
+}
+
+SzString *sz_string_drop_right(const SzString *s, int64_t n) {
+  int64_t len = sz_string_len(s);
+  if (n <= 0)
+    return sz_string_slice(s, 0, len);
+  if (n >= len)
+    return sz_string_from_cstr("");
+  return sz_string_slice(s, 0, len - n);
+}
+
 int64_t sz_string_starts_with(const SzString *s, const SzString *prefix) {
   return sz_string_index_of(s, prefix) == 0 ? 1 : 0;
 }

@@ -659,6 +659,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_list_reverse_after_dot() {
+        let src = "@main def main: IO[Unit] = List.rev\n";
+        let labels = labels_at(src, "List.rev");
+        assert!(labels.iter().any(|l| l == "List.reverse"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_list_exists_after_dot() {
         let src = "@main def main: IO[Unit] = List.ex\n";
         let labels = labels_at(src, "List.ex");
@@ -796,6 +803,41 @@ mod tests {
         let src = "@main def main: IO[Unit] = Str.isB\n";
         let labels = labels_at(src, "Str.isB");
         assert!(labels.iter().any(|l| l == "Str.isBlank"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_last_index_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.lastI\n";
+        let labels = labels_at(src, "Str.lastI");
+        assert!(labels.iter().any(|l| l == "Str.lastIndexOf"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_take_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.tak\n";
+        let labels = labels_at(src, "Str.tak");
+        assert!(labels.iter().any(|l| l == "Str.take"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_drop_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.dro\n";
+        let labels = labels_at(src, "Str.dro");
+        assert!(labels.iter().any(|l| l == "Str.drop"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_take_right_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.takeR\n";
+        let labels = labels_at(src, "Str.takeR");
+        assert!(labels.iter().any(|l| l == "Str.takeRight"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_drop_right_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.dropR\n";
+        let labels = labels_at(src, "Str.dropR");
+        assert!(labels.iter().any(|l| l == "Str.dropRight"), "{labels:?}");
     }
 
     #[test]

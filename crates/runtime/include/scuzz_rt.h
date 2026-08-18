@@ -64,6 +64,15 @@ int64_t sz_string_char_at(const SzString *s, int64_t index); /* byte as i64; -1 
 SzString *sz_string_from_int(int64_t n);
 SzString *sz_string_from_float(double x);
 int64_t sz_string_index_of(const SzString *s, const SzString *needle);
+int64_t sz_string_last_index_of(const SzString *s, const SzString *needle);
+/* First `n` bytes. `n` <= 0 is empty. */
+SzString *sz_string_take(const SzString *s, int64_t n);
+/* Skip `n` bytes. `n` <= 0 copies `s`. */
+SzString *sz_string_drop(const SzString *s, int64_t n);
+/* Last `n` bytes. `n` <= 0 is empty. */
+SzString *sz_string_take_right(const SzString *s, int64_t n);
+/* Drop last `n` bytes. `n` <= 0 copies `s`. */
+SzString *sz_string_drop_right(const SzString *s, int64_t n);
 int64_t sz_string_starts_with(const SzString *s, const SzString *prefix);
 int64_t sz_string_ends_with(const SzString *s, const SzString *suffix);
 int64_t sz_string_contains(const SzString *s, const SzString *needle);

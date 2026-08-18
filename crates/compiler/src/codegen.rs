@@ -75,6 +75,11 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_string_from_int(i64)").unwrap();
     writeln!(out, "declare ptr @sz_string_from_float(double)").unwrap();
     writeln!(out, "declare i64 @sz_string_index_of(ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_string_last_index_of(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_string_take(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_string_drop(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_string_take_right(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_string_drop_right(ptr, i64)").unwrap();
     writeln!(out, "declare i64 @sz_string_starts_with(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_string_contains(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_string_ends_with(ptr, ptr)").unwrap();
@@ -3407,6 +3412,56 @@ fn emit_call(
             .unwrap();
             drop_owned_ptrs(&mut code, &emitted_args);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Str.lastIndexOf" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_string_last_index_of(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptrs(&mut code, &emitted_args);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Str.take" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_string_take(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Str.drop" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_string_drop(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Str.takeRight" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_string_take_right(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Str.dropRight" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_string_drop_right(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "Str.startsWith" => {
             writeln!(
@@ -7263,6 +7318,43 @@ def scale(x: Float): Float = x * 2.0
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of string {name} after padLeft:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_str_last_index_take_drop_list_reverse() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(Str.fromInt(Str.lastIndexOf("ababa", "ba")))
+    _ <- IO.println(Str.take("abc", 2))
+    _ <- IO.println(Str.drop("abc", 1))
+    _ <- IO.println(Str.takeRight("abc", 2))
+    _ <- IO.println(Str.dropRight("abc", 1))
+    _ <- IO.println(List.join(List.reverse(["a", "b", "c"]), ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_string_last_index_of"));
+        assert!(ir.contains("sz_string_take"));
+        assert!(ir.contains("sz_string_drop"));
+        assert!(ir.contains("sz_string_take_right"));
+        assert!(ir.contains("sz_string_drop_right"));
+        assert!(ir.contains("sz_list_reverse"));
+        let needle = "call ptr @sz_string_take(ptr ";
+        let at = ir.find(needle).expect("take");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of string {name} after Str.take:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_reverse(ptr ";
+        let at = ir.find(needle).expect("reverse");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.reverse:\n{ir}"
         );
     }
 
