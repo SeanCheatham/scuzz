@@ -538,6 +538,85 @@ pub fn references_project(
         .collect())
 }
 
+pub enum RenameResult {
+    Unavailable,
+    BadName,
+    Edits(Vec<(PathBuf, u32, u32, u32, u32)>),
+}
+
+/// Ident range at a 0-based LSP position when rename is allowed.
+pub fn prepare_rename_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    line: u32,
+    character: u32,
+) -> Result<Option<(u32, u32, u32, u32, String)>> {
+    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(None);
+    };
+    let Some(program) = program else {
+        return Ok(None);
+    };
+    let named = named_sources(&resolved);
+    let offset = crate::span::utf16_pos_to_offset(&text, line, character);
+    let Some((start, end, name)) =
+        crate::rename::prepare_rename_in_sources(&program, &named, &label, &text, offset)
+    else {
+        return Ok(None);
+    };
+    let (sl, sc) = offset_to_utf16_pos(&text, start);
+    let (el, ec) = offset_to_utf16_pos(&text, end);
+    Ok(Some((sl, sc, el, ec, name)))
+}
+
+/// Rename edits at a 0-based LSP position. Same parse as [`check_project_with`].
+pub fn rename_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    line: u32,
+    character: u32,
+    new_name: &str,
+) -> Result<RenameResult> {
+    if !crate::rename::is_rename_ident(new_name) {
+        return Ok(RenameResult::BadName);
+    }
+    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(RenameResult::Unavailable);
+    };
+    let Some(program) = program else {
+        return Ok(RenameResult::Unavailable);
+    };
+    let named = named_sources(&resolved);
+    let offset = crate::span::utf16_pos_to_offset(&text, line, character);
+    let Some(edits) =
+        crate::rename::rename_in_sources(&program, &named, &label, &text, offset, new_name)
+    else {
+        return Ok(RenameResult::Unavailable);
+    };
+    Ok(RenameResult::Edits(
+        edits
+            .into_iter()
+            .map(|e| {
+                loc_to_lsp(
+                    &resolved,
+                    path,
+                    &named,
+                    crate::definition::DefLoc {
+                        file: e.file,
+                        start: e.start,
+                        end: e.end,
+                    },
+                    &text,
+                )
+            })
+            .collect(),
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

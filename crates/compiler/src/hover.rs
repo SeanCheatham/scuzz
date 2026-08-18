@@ -1309,7 +1309,7 @@ mod tests {
     #[test]
     fn hovers_str_to_int() {
         let src = r#"@main def main: IO[Unit] =
-  IO.println(s"${Str.toInt("7", 0)}")
+  IO.println(Str.fromInt(Str.toInt("7", 0)))
 "#;
         let h = hover_src(src, "toInt");
         assert!(h.contains("Str.toInt(s: String, default: Int): Int"), "{h}");

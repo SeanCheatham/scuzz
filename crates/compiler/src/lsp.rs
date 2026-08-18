@@ -1,10 +1,11 @@
 //! Small LSP wrapping `check_project`. Same diagnostics as `--message-format=json`.
 //! No second typer. Open buffers overlay disk text. Hover, completion, definition,
-//! document symbols, and references use that parse.
+//! document symbols, references, and rename use that parse.
 
 use crate::check::{
     canonicalize_source_path, check_project_with, complete_project, definition_project,
-    hover_project, json_str, references_project, symbols_project, Diagnostic,
+    hover_project, json_str, prepare_rename_project, references_project, rename_project,
+    symbols_project, Diagnostic, RenameResult,
 };
 use crate::overlay::collect_fmt_sources;
 use anyhow::Result;
@@ -33,7 +34,7 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             if let Some(p) = root_from_init(&body) {
                 root = p;
             }
-            let caps = r#"{"capabilities":{"textDocumentSync":{"openClose":true,"change":1},"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"definitionProvider":true,"documentSymbolProvider":true,"referencesProvider":true}}"#;
+            let caps = r#"{"capabilities":{"textDocumentSync":{"openClose":true,"change":1},"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"definitionProvider":true,"documentSymbolProvider":true,"referencesProvider":true,"renameProvider":{"prepareProvider":true}}}"#;
             write_result(&mut writer, id, caps)?;
         } else if method == "shutdown" {
             write_result(&mut writer, id, "null")?;
@@ -65,6 +66,14 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
         } else if method == "textDocument/references" {
             let result = references_result(&root, &open, &body);
             write_result(&mut writer, id, &result)?;
+        } else if method == "textDocument/prepareRename" {
+            let result = prepare_rename_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "textDocument/rename" {
+            match rename_result(&root, &open, &body) {
+                Ok(result) => write_result(&mut writer, id, &result)?,
+                Err(msg) => write_error(&mut writer, id, -32602, &msg)?,
+            }
         } else if method == "textDocument/didSave" {
             publish_check(&root, &open, &mut writer)?;
         } else if method == "initialized" || method.is_empty() {
@@ -309,6 +318,55 @@ fn references_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) 
         }
         _ => "[]".into(),
     }
+}
+
+fn prepare_rename_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    let Some(path) = doc_path_from_message(body) else {
+        return "null".into();
+    };
+    let line = json_i64_field(body, "line").unwrap_or(0).max(0) as u32;
+    let character = json_i64_field(body, "character").unwrap_or(0).max(0) as u32;
+    match prepare_rename_project(root, open, &path, line, character) {
+        Ok(Some((sl, sc, el, ec, name))) => format!(
+            r#"{{"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}},"placeholder":{}}}"#,
+            json_str(&name)
+        ),
+        _ => "null".into(),
+    }
+}
+
+fn rename_result(
+    root: &Path,
+    open: &BTreeMap<PathBuf, String>,
+    body: &str,
+) -> std::result::Result<String, String> {
+    let Some(path) = doc_path_from_message(body) else {
+        return Ok("null".into());
+    };
+    let line = json_i64_field(body, "line").unwrap_or(0).max(0) as u32;
+    let character = json_i64_field(body, "character").unwrap_or(0).max(0) as u32;
+    let new_name = json_string_field(body, "newName").unwrap_or_default();
+    match rename_project(root, open, &path, line, character, &new_name) {
+        Ok(RenameResult::BadName) => Err(format!("invalid rename: {new_name}")),
+        Ok(RenameResult::Unavailable) => Ok("null".into()),
+        Ok(RenameResult::Edits(edits)) => Ok(encode_workspace_edit(&edits, &new_name)),
+        Err(_) => Ok("null".into()),
+    }
+}
+
+fn encode_workspace_edit(edits: &[(PathBuf, u32, u32, u32, u32)], new_text: &str) -> String {
+    let mut by_uri: BTreeMap<String, Vec<String>> = BTreeMap::new();
+    for (dest, sl, sc, el, ec) in edits {
+        by_uri.entry(file_uri(dest)).or_default().push(format!(
+            r#"{{"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}},"newText":{}}}"#,
+            json_str(new_text)
+        ));
+    }
+    let parts: Vec<String> = by_uri
+        .into_iter()
+        .map(|(uri, items)| format!("{}:[{}]", json_str(&uri), items.join(",")))
+        .collect();
+    format!(r#"{{"changes":{{{}}}}}"#, parts.join(","))
 }
 
 fn src_files(root: &Path) -> Result<Vec<PathBuf>> {
@@ -805,6 +863,104 @@ mod tests {
         assert!(text.contains("\"id\":7"), "{text}");
         let hits = text.matches("\"line\":").count();
         assert!(hits >= 2, "expected decl and call ranges: {text}");
+    }
+
+    fn write_add_pkg(root: &Path) -> (String, String, String) {
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"lsp_rename\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src =
+            "def add(n: Int): Int = n\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(add(1)))\n";
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), &formatted).unwrap();
+        let root_uri = format!("file://{}", fs::canonicalize(root).unwrap().display());
+        let main = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let main_uri = format!("file://{}", main.display());
+        (formatted, root_uri, main_uri)
+    }
+
+    #[test]
+    fn lsp_rename_rewrites_add_to_sum() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let (formatted, root_uri, main_uri) = write_add_pkg(root);
+        let call = formatted.rfind("add").unwrap();
+        let (line, col) = crate::span::offset_to_utf16_pos(&formatted, call);
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let prepare = format!(
+            r#"{{"jsonrpc":"2.0","id":8,"method":"textDocument/prepareRename","params":{{"textDocument":{{"uri":{}}},"position":{{"line":{},"character":{}}}}}}}"#,
+            json_str(&main_uri),
+            line,
+            col
+        );
+        let rename = format!(
+            r#"{{"jsonrpc":"2.0","id":9,"method":"textDocument/rename","params":{{"textDocument":{{"uri":{}}},"position":{{"line":{},"character":{}}},"newName":"sum"}}}}"#,
+            json_str(&main_uri),
+            line,
+            col
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&prepare));
+        input.extend(frame(&rename));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("renameProvider"), "{text}");
+        assert!(text.contains("prepareProvider"), "{text}");
+        assert!(text.contains("\"id\":8"), "{text}");
+        assert!(text.contains("\"placeholder\":\"add\""), "{text}");
+        assert!(text.contains("\"id\":9"), "{text}");
+        assert!(text.contains("\"newText\":\"sum\""), "{text}");
+        let hits = text.matches("\"newText\":\"sum\"").count();
+        assert!(hits >= 2, "expected def and call edits: {text}");
+    }
+
+    #[test]
+    fn lsp_rename_rejects_keyword_and_skips_kit() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let (formatted, root_uri, main_uri) = write_add_pkg(root);
+        let call = formatted.rfind("add").unwrap();
+        let (line, col) = crate::span::offset_to_utf16_pos(&formatted, call);
+        let kit = formatted.find("println").unwrap();
+        let (kline, kcol) = crate::span::offset_to_utf16_pos(&formatted, kit);
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let bad = format!(
+            r#"{{"jsonrpc":"2.0","id":10,"method":"textDocument/rename","params":{{"textDocument":{{"uri":{}}},"position":{{"line":{},"character":{}}},"newName":"if"}}}}"#,
+            json_str(&main_uri),
+            line,
+            col
+        );
+        let kit_req = format!(
+            r#"{{"jsonrpc":"2.0","id":11,"method":"textDocument/rename","params":{{"textDocument":{{"uri":{}}},"position":{{"line":{},"character":{}}},"newName":"log"}}}}"#,
+            json_str(&main_uri),
+            kline,
+            kcol
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&bad));
+        input.extend(frame(&kit_req));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("\"id\":10"), "{text}");
+        assert!(text.contains("-32602"), "{text}");
+        assert!(text.contains("invalid rename: if"), "{text}");
+        assert!(text.contains("\"id\":11"), "{text}");
+        assert!(text.contains(r#""id":11,"result":null"#), "{text}");
     }
 
     #[test]

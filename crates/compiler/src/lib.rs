@@ -17,6 +17,7 @@ pub mod mutate;
 pub(crate) mod overlay;
 pub(crate) mod parser;
 pub(crate) mod references;
+pub(crate) mod rename;
 pub(crate) mod resolve;
 pub(crate) mod span;
 pub(crate) mod symbols;
