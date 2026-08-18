@@ -1614,13 +1614,14 @@ typedef struct ServeSpec {
   SzCont handler;
 } ServeSpec;
 
-static void *serve_kick(void *env) { return env; }
-
-static SzIo *serve_after_kick(void *spec_v, void *env) {
-  ServeSpec *spec = (ServeSpec *)spec_v;
+static SzIo *serve_after_kick(void *ignored, void *env) {
   SzPair *pack = (SzPair *)env;
+  ServeSpec *spec = pack ? (ServeSpec *)pack->right : NULL;
   ServeSt *st = (ServeSt *)sz_rc_alloc(sizeof(ServeSt), SZ_RC_BOX);
   memset(st, 0, sizeof(ServeSt));
+  (void)ignored;
+  if (!spec)
+    sz_panic("sz_net_serve(null spec)");
   st->port = spec->port;
   st->left = spec->n > 0 ? spec->n : -1;
   st->listen_fd = -1;
@@ -1629,7 +1630,6 @@ static SzIo *serve_after_kick(void *spec_v, void *env) {
   st->handler = spec->handler;
   sz_retain(pack->left);
   st->henv = pack->left;
-  sz_free(spec);
   {
     SzIo *io = handle_drop(serve_round(st), serve_on_err, st);
     sz_release(st);
@@ -1642,13 +1642,14 @@ static SzIo *net_serve_n(int64_t port, int64_t n, SzCont handler, void *env) {
   SzPair *pack;
   if (!handler)
     sz_panic("sz_net_serve(null handler)");
-  spec = (ServeSpec *)sz_alloc(sizeof(ServeSpec));
+  spec = (ServeSpec *)sz_rc_alloc(sizeof(ServeSpec), SZ_RC_BOX);
   spec->port = port;
   spec->n = n;
   spec->handler = handler;
-  pack = sz_pair_new(env, NULL);
+  pack = sz_pair_new(env, spec);
+  sz_release(spec);
   {
-    SzIo *io = fm_drop(sz_io_delay(serve_kick, spec), serve_after_kick, pack);
+    SzIo *io = fm_drop(sz_io_pure(NULL), serve_after_kick, pack);
     sz_release(pack);
     return io;
   }
