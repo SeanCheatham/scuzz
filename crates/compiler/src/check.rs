@@ -643,6 +643,38 @@ pub fn folding_ranges_project(
         .collect())
 }
 
+/// Selection ranges at 0-based LSP positions. Same parse as [`check_project_with`].
+pub fn selection_ranges_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    positions: &[(u32, u32)],
+) -> Result<Vec<Vec<(u32, u32, u32, u32)>>> {
+    let Some((_resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(program) = program else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    for (line, character) in positions {
+        let offset = crate::span::utf16_pos_to_offset(&text, *line, *character);
+        let ranges = crate::select::selection_ranges_in_source(&program, &label, &text, offset);
+        out.push(
+            ranges
+                .into_iter()
+                .map(|r| {
+                    let (sl, sc) = offset_to_utf16_pos(&text, r.start);
+                    let (el, ec) = offset_to_utf16_pos(&text, r.end);
+                    (sl, sc, el, ec)
+                })
+                .collect(),
+        );
+    }
+    Ok(out)
+}
+
 pub enum RenameResult {
     Unavailable,
     BadName,

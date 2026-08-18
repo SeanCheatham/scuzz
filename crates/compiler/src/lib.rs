@@ -21,6 +21,7 @@ pub(crate) mod parser;
 pub(crate) mod references;
 pub(crate) mod rename;
 pub(crate) mod resolve;
+pub(crate) mod select;
 pub(crate) mod signature;
 pub(crate) mod span;
 pub(crate) mod symbols;
