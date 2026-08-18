@@ -114,6 +114,9 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"drop:${List.join(List.drop(xs, 1), ",")}")
     _ <- IO.println(s"find:${List.join(List.find(xs, x => x == "b"), ",")}")
     _ <- IO.println(s"exists:${if (List.exists(xs, x => x == "c")) "y" else "n"}")
+    _ <- IO.println(s"takeWhile:${List.join(List.takeWhile(xs, x => x != "b"), ",")}")
+    _ <- IO.println(s"dropWhile:${List.join(List.dropWhile(xs, x => x != "b"), ",")}")
+    _ <- IO.println(s"forall:${if (List.forall(xs, x => x != "z")) "y" else "n"}")
   } yield ()
 
 record Box[T](x: T):

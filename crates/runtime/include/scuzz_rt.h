@@ -418,6 +418,12 @@ SzList *sz_list_drop(SzList *xs, int64_t n);
 SzList *sz_list_find(SzList *xs, SzListPred pred, void *env);
 /* 1 if any head matches `pred`, else 0. */
 int64_t sz_list_exists(SzList *xs, SzListPred pred, void *env);
+/* Keep a prefix while `pred` is nonzero. New spine. */
+SzList *sz_list_takewhile(SzList *xs, SzListPred pred, void *env);
+/* Skip a prefix while `pred` is nonzero, then retain the suffix. */
+SzList *sz_list_dropwhile(SzList *xs, SzListPred pred, void *env);
+/* 1 if every head matches `pred` (empty is 1), else 0. */
+int64_t sz_list_forall(SzList *xs, SzListPred pred, void *env);
 /* New spine. `fn` returns an owned pointer. Retain `head` when `fn` yields it.
  * Cons retains the mapped head. Map then drops the mapper ref. */
 SzList *sz_list_map(SzList *xs, SzListMapFn fn, void *env);

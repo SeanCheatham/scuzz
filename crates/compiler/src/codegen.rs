@@ -122,6 +122,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_drop(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_list_find(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_exists(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_takewhile(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_dropwhile(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_list_forall(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_map(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_write(ptr, ptr)").unwrap();
@@ -2645,16 +2648,18 @@ fn emit_stream_evalmap(
     owned_ptr(code, format!("%{prefix}_v"))
 }
 
-fn emit_list_exists(
+fn emit_list_pred_i64(
+    callee: &str,
+    rt: &str,
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
     locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
-    assert!(args.len() == 2, "List.exists expects 2 args");
+    assert!(args.len() == 2, "{callee} expects 2 args");
     let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
     let ExprKind::Lambda { param, body } = &args[1].kind else {
-        panic!("List.exists predicate must be a lambda");
+        panic!("{callee} predicate must be a lambda");
     };
     let lam = emit_pred_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
     let inner_owned = inner.owned;
@@ -2665,7 +2670,7 @@ fn emit_list_exists(
     unpack_closure(&mut code, &lam.value, prefix);
     writeln!(
         code,
-        "  %{prefix}_v = call i64 @sz_list_exists(ptr {inner_value}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
+        "  %{prefix}_v = call i64 @{rt}(ptr {inner_value}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
     )
     .unwrap();
     drop_owned_ptr(&mut code, &lam);
@@ -3176,7 +3181,32 @@ fn emit_call(
         );
     }
     if callee == "List.exists" {
-        return emit_list_exists(args, ctx, locals, prefix);
+        return emit_list_pred_i64("List.exists", "sz_list_exists", args, ctx, locals, prefix);
+    }
+    if callee == "List.takeWhile" {
+        return emit_stream_pred(
+            "List.takeWhile",
+            "sz_list_takewhile",
+            args,
+            ctx,
+            locals,
+            prefix,
+            false,
+        );
+    }
+    if callee == "List.dropWhile" {
+        return emit_stream_pred(
+            "List.dropWhile",
+            "sz_list_dropwhile",
+            args,
+            ctx,
+            locals,
+            prefix,
+            false,
+        );
+    }
+    if callee == "List.forall" {
+        return emit_list_pred_i64("List.forall", "sz_list_forall", args, ctx, locals, prefix);
     }
     if callee == "List.map" {
         return emit_ptr_map("List.map", "sz_list_map", args, ctx, locals, prefix, true);
@@ -6467,6 +6497,41 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[exists_at..].contains(&format!("call void @sz_release(ptr {exists_pack})")),
             "expected last-use release of exists closure {exists_pack}:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_take_while_drop_while_forall() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(List.takeWhile(["a", "b"], x => x != "b"), ","))
+    _ <- IO.println(List.join(List.dropWhile(["a", "b"], x => x != "b"), ","))
+    _ <- IO.println(if (List.forall(["a"], x => true)) "y" else "n")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_takewhile"));
+        assert!(ir.contains("sz_list_dropwhile"));
+        assert!(ir.contains("sz_list_forall"));
+        let tw_at = ir.find("call ptr @sz_list_takewhile").expect("takeWhile");
+        let tw_pack = last_cl2_before(&ir, tw_at);
+        assert!(
+            ir[tw_at..].contains(&format!("call void @sz_release(ptr {tw_pack})")),
+            "expected last-use release of takeWhile closure {tw_pack}:\n{ir}"
+        );
+        let dw_at = ir.find("call ptr @sz_list_dropwhile").expect("dropWhile");
+        let dw_pack = last_cl2_before(&ir, dw_at);
+        assert!(
+            ir[dw_at..].contains(&format!("call void @sz_release(ptr {dw_pack})")),
+            "expected last-use release of dropWhile closure {dw_pack}:\n{ir}"
+        );
+        let fa_at = ir.find("call i64 @sz_list_forall").expect("forall");
+        let fa_pack = last_cl2_before(&ir, fa_at);
+        assert!(
+            ir[fa_at..].contains(&format!("call void @sz_release(ptr {fa_pack})")),
+            "expected last-use release of forall closure {fa_pack}:\n{ir}"
         );
     }
 

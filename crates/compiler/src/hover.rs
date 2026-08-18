@@ -353,6 +353,18 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.exists",
         "List.exists(xs: List[T], pred: T => Bool): Bool",
     ),
+    (
+        "List.takeWhile",
+        "List.takeWhile(xs: List[T], pred: T => Bool): List[T]",
+    ),
+    (
+        "List.dropWhile",
+        "List.dropWhile(xs: List[T], pred: T => Bool): List[T]",
+    ),
+    (
+        "List.forall",
+        "List.forall(xs: List[T], pred: T => Bool): Bool",
+    ),
     ("View.text", "View.text(s: String): View"),
     ("View.bindText", "View.bindText(s: SignalStr): View"),
     (
@@ -1223,6 +1235,30 @@ mod tests {
         let h = hover_src(src, "exists");
         assert!(
             h.contains("List.exists(xs: List[T], pred: T => Bool): Bool"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_list_take_while() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.takeWhile(["a"], x => true), ","))
+"#;
+        let h = hover_src(src, "takeWhile");
+        assert!(
+            h.contains("List.takeWhile(xs: List[T], pred: T => Bool): List[T]"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_list_forall() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (List.forall(["a"], x => true)) "y" else "n")
+"#;
+        let h = hover_src(src, "forall");
+        assert!(
+            h.contains("List.forall(xs: List[T], pred: T => Bool): Bool"),
             "{h}"
         );
     }

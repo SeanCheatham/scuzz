@@ -3367,6 +3367,45 @@ int main(void) {
     sz_string_free(c);
   }
 
+  /* List.takeWhile / dropWhile / forall: prefix, suffix, all-match. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzString *c = sz_string_from_cstr("c");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_cons(c, sz_list_nil())));
+    SzList *ys;
+    ys = sz_list_takewhile(xs, keep_not_b, NULL);
+    assert(sz_list_len(ys) == 1);
+    assert(ys->head == a);
+    sz_list_free(ys);
+    ys = sz_list_takewhile(xs, keep_none, NULL);
+    assert(sz_list_is_empty(ys));
+    ys = sz_list_takewhile(NULL, keep_not_b, NULL);
+    assert(sz_list_is_empty(ys));
+    ys = sz_list_dropwhile(xs, keep_not_b, NULL);
+    assert(sz_list_len(ys) == 2);
+    assert(ys->head == b);
+    assert(ys->tail && ys->tail->head == c);
+    sz_list_free(ys);
+    ys = sz_list_dropwhile(xs, keep_none, NULL);
+    assert(ys == xs);
+    sz_release(ys);
+    ys = sz_list_dropwhile(NULL, keep_not_b, NULL);
+    assert(sz_list_is_empty(ys));
+    assert(sz_list_forall(xs, keep_not_b, NULL) == 0);
+    assert(sz_list_forall(xs, keep_none, NULL) == 0);
+    assert(sz_list_forall(NULL, keep_not_b, NULL) == 1);
+    {
+      SzList *as = sz_list_cons(a, NULL);
+      assert(sz_list_forall(as, keep_not_b, NULL) == 1);
+      sz_list_free(as);
+    }
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
+  }
+
   /* RC: string retain/release returns to baseline. Shared list tails stay. */
   {
     size_t base_bytes = 0, base_count = 0;

@@ -1060,9 +1060,11 @@ fn kit_lambda_param_ty_at(
         ("Ui.run", 0) => Some(Type::Opaque("Param".into())),
         ("Signal.map", 1) => Some(Type::Int),
         ("View.each", 1) if nargs == 2 => Some(Type::String),
-        ("List.filter" | "List.map" | "List.find" | "List.exists", 1) => {
-            prior.first().and_then(|t| list_elem(t).ok())
-        }
+        (
+            "List.filter" | "List.map" | "List.find" | "List.exists" | "List.takeWhile"
+            | "List.dropWhile" | "List.forall",
+            1,
+        ) => prior.first().and_then(|t| list_elem(t).ok()),
         (
             "Stream.filter" | "Stream.map" | "Stream.takeWhile" | "Stream.dropWhile"
             | "Stream.find" | "Stream.exists" | "Stream.evalMap" | "Resource.make" | "Resource.use"
@@ -1095,8 +1097,9 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
         ("View.each", 1) if nargs == 2 => Some(Type::Opaque("View".into())),
         ("Signal.map", 1) | ("Stream.map", 1) => Some(Type::String),
         (
-            "List.filter" | "List.find" | "List.exists" | "Stream.filter" | "Stream.takeWhile"
-            | "Stream.dropWhile" | "Stream.find" | "Stream.exists",
+            "List.filter" | "List.find" | "List.exists" | "List.takeWhile" | "List.dropWhile"
+            | "List.forall" | "Stream.filter" | "Stream.takeWhile" | "Stream.dropWhile"
+            | "Stream.find" | "Stream.exists",
             1,
         ) => Some(Type::Bool),
         (
@@ -1949,10 +1952,15 @@ fn infer_call(
             let elem = list_elem(&arg_tys[0])?;
             Ok(list_of(elem))
         }
-        "List.exists" => {
+        "List.exists" | "List.forall" => {
             expect_arity(callee, &arg_tys, 2)?;
             list_elem(&arg_tys[0])?;
             Ok(Type::Bool)
+        }
+        "List.takeWhile" | "List.dropWhile" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let elem = list_elem(&arg_tys[0])?;
+            Ok(list_of(elem))
         }
         "List.map" => {
             expect_arity(callee, &arg_tys, 2)?;
@@ -5699,6 +5707,41 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.take/drop/find/exists should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_take_while_drop_while_forall() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = ["a", "b", "c"]
+    tw = List.takeWhile(xs, x => x != "b")
+    dw = List.dropWhile(xs, x => x != "b")
+    all = List.forall(xs, x => x != "z")
+    _ <- IO.println(List.join(tw, ","))
+    _ <- IO.println(List.join(dw, ","))
+    _ <- IO.println(if (all) "y" else "n")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.takeWhile/dropWhile/forall should typecheck");
+    }
+
+    #[test]
+    fn rejects_list_take_while_non_bool() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = List.takeWhile(["a"], x => x)
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("List.takeWhile lambda must return Bool"),
+            "expected Bool body, got {}",
+            err.message()
+        );
     }
 
     #[test]

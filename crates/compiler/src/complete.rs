@@ -624,6 +624,20 @@ mod tests {
     }
 
     #[test]
+    fn completes_list_take_while_after_dot() {
+        let src = "@main def main: IO[Unit] = List.takeW\n";
+        let labels = labels_at(src, "List.takeW");
+        assert!(labels.iter().any(|l| l == "List.takeWhile"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_forall_after_dot() {
+        let src = "@main def main: IO[Unit] = List.fo\n";
+        let labels = labels_at(src, "List.fo");
+        assert!(labels.iter().any(|l| l == "List.forall"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_map_set_after_dot() {
         let src = "@main def main: IO[Unit] = Map.se\n";
         let labels = labels_at(src, "Map.se");

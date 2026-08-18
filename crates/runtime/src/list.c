@@ -150,6 +150,35 @@ int64_t sz_list_exists(SzList *xs, SzListPred pred, void *env) {
   return 0;
 }
 
+SzList *sz_list_takewhile(SzList *xs, SzListPred pred, void *env) {
+  if (!pred)
+    sz_panic("sz_list_takewhile(null pred)");
+  if (!xs || !pred(xs->head, env))
+    return NULL;
+  return sz_list_cons_take(xs->head, sz_list_takewhile(xs->tail, pred, env));
+}
+
+SzList *sz_list_dropwhile(SzList *xs, SzListPred pred, void *env) {
+  SzList *p;
+  if (!pred)
+    sz_panic("sz_list_dropwhile(null pred)");
+  for (p = xs; p && pred(p->head, env); p = p->tail)
+    ;
+  sz_retain(p);
+  return p;
+}
+
+int64_t sz_list_forall(SzList *xs, SzListPred pred, void *env) {
+  SzList *p;
+  if (!pred)
+    sz_panic("sz_list_forall(null pred)");
+  for (p = xs; p; p = p->tail) {
+    if (!pred(p->head, env))
+      return 0;
+  }
+  return 1;
+}
+
 SzList *sz_list_map(SzList *xs, SzListMapFn fn, void *env) {
   void *h;
   SzList *n;
