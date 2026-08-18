@@ -506,6 +506,59 @@ pub fn symbols_project(
     Ok(crate::symbols::symbols_in_source(&program, &label, &text))
 }
 
+/// Workspace outline. Same parse as [`check_project_with`].
+pub fn workspace_symbols_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    query: &str,
+) -> Result<Vec<(PathBuf, crate::symbols::WorkspaceSymbol, u32, u32, u32, u32)>> {
+    let mut resolved = crate::driver::resolve_project(project_dir)
+        .with_context(|| format!("resolving {}", project_dir.display()))?;
+    apply_unsaved(&mut resolved, unsaved, project_dir);
+    let named = named_sources(&resolved);
+    let Some(program) = parse_sources(&named)
+        .ok()
+        .and_then(|p| apply_overlays(p, &resolved.overlays).ok())
+    else {
+        return Ok(Vec::new());
+    };
+    let mut out = Vec::new();
+    for src in &resolved.sources {
+        if src.path.as_os_str().is_empty() {
+            continue;
+        }
+        let hits =
+            crate::symbols::workspace_symbols_in_source(&program, &src.label, &src.text, query);
+        for h in hits {
+            let (sl, sc) = offset_to_utf16_pos(&src.text, h.start);
+            let (el, ec) = offset_to_utf16_pos(&src.text, h.end);
+            out.push((src.path.clone(), h, sl, sc, el, ec));
+        }
+    }
+    Ok(out)
+}
+
+/// Signature help at a 0-based LSP position. Same parse as [`check_project_with`].
+pub fn signature_help_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    line: u32,
+    character: u32,
+) -> Result<Option<crate::signature::SigHelp>> {
+    let Some((_resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(None);
+    };
+    let Some(program) = program else {
+        return Ok(None);
+    };
+    let offset = crate::span::utf16_pos_to_offset(&text, line, character);
+    Ok(crate::signature::signature_help_in_source(
+        &program, &label, &text, offset,
+    ))
+}
+
 /// Find-references at a 0-based LSP position. Same parse as [`check_project_with`].
 pub fn references_project(
     project_dir: &Path,

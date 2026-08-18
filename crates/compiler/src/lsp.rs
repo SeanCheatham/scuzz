@@ -1,11 +1,11 @@
 //! Small LSP wrapping `check_project`. Same diagnostics as `--message-format=json`.
 //! No second typer. Open buffers overlay disk text. Hover, completion, definition,
-//! document symbols, references, and rename use that parse.
+//! document symbols, references, rename, workspace symbols, and signature help use that parse.
 
 use crate::check::{
     canonicalize_source_path, check_project_with, complete_project, definition_project,
     hover_project, json_str, prepare_rename_project, references_project, rename_project,
-    symbols_project, Diagnostic, RenameResult,
+    signature_help_project, symbols_project, workspace_symbols_project, Diagnostic, RenameResult,
 };
 use crate::overlay::collect_fmt_sources;
 use anyhow::Result;
@@ -34,7 +34,7 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             if let Some(p) = root_from_init(&body) {
                 root = p;
             }
-            let caps = r#"{"capabilities":{"textDocumentSync":{"openClose":true,"change":1},"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"definitionProvider":true,"documentSymbolProvider":true,"referencesProvider":true,"renameProvider":{"prepareProvider":true}}}"#;
+            let caps = r#"{"capabilities":{"textDocumentSync":{"openClose":true,"change":1},"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"definitionProvider":true,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{"triggerCharacters":["("]},"referencesProvider":true,"renameProvider":{"prepareProvider":true}}}"#;
             write_result(&mut writer, id, caps)?;
         } else if method == "shutdown" {
             write_result(&mut writer, id, "null")?;
@@ -62,6 +62,12 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/documentSymbol" {
             let result = document_symbol_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "workspace/symbol" {
+            let result = workspace_symbol_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "textDocument/signatureHelp" {
+            let result = signature_help_result(&root, &open, &body);
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/references" {
             let result = references_result(&root, &open, &body);
@@ -259,6 +265,72 @@ fn document_symbol_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &
             format!("[{}]", parts.join(","))
         }
         _ => "[]".into(),
+    }
+}
+
+fn workspace_symbol_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    let query = json_string_field(body, "query").unwrap_or_default();
+    match workspace_symbols_project(root, open, &query) {
+        Ok(syms) if !syms.is_empty() => {
+            let parts: Vec<String> = syms
+                .iter()
+                .map(|(path, s, sl, sc, el, ec)| {
+                    encode_workspace_symbol(&file_uri(path), s, *sl, *sc, *el, *ec)
+                })
+                .collect();
+            format!("[{}]", parts.join(","))
+        }
+        _ => "[]".into(),
+    }
+}
+
+fn encode_workspace_symbol(
+    uri: &str,
+    s: &crate::symbols::WorkspaceSymbol,
+    sl: u32,
+    sc: u32,
+    el: u32,
+    ec: u32,
+) -> String {
+    let loc = encode_location(uri, sl, sc, el, ec);
+    match &s.container {
+        Some(c) => format!(
+            r#"{{"name":{},"kind":{},"location":{},"containerName":{}}}"#,
+            json_str(&s.name),
+            s.kind,
+            loc,
+            json_str(c)
+        ),
+        None => format!(
+            r#"{{"name":{},"kind":{},"location":{}}}"#,
+            json_str(&s.name),
+            s.kind,
+            loc
+        ),
+    }
+}
+
+fn signature_help_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    let Some(path) = doc_path_from_message(body) else {
+        return "null".into();
+    };
+    let line = json_i64_field(body, "line").unwrap_or(0).max(0) as u32;
+    let character = json_i64_field(body, "character").unwrap_or(0).max(0) as u32;
+    match signature_help_project(root, open, &path, line, character) {
+        Ok(Some(h)) => {
+            let params: Vec<String> = h
+                .parameters
+                .iter()
+                .map(|p| format!(r#"{{"label":{}}}"#, json_str(p)))
+                .collect();
+            format!(
+                r#"{{"signatures":[{{"label":{},"parameters":[{}]}}],"activeSignature":0,"activeParameter":{}}}"#,
+                json_str(&h.label),
+                params.join(","),
+                h.active_parameter
+            )
+        }
+        _ => "null".into(),
     }
 }
 
@@ -961,6 +1033,76 @@ mod tests {
         assert!(text.contains("invalid rename: if"), "{text}");
         assert!(text.contains("\"id\":11"), "{text}");
         assert!(text.contains(r#""id":11,"result":null"#), "{text}");
+    }
+
+    #[test]
+    fn lsp_workspace_symbol_finds_add_and_helper() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let (_formatted, root_uri, _main_uri) = write_add_pkg(root);
+        let helper = crate::format::format_source("def helper(n: Int): Int = n\n").unwrap();
+        fs::write(root.join("src/Util.scuzz"), &helper).unwrap();
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let add_q =
+            r#"{"jsonrpc":"2.0","id":12,"method":"workspace/symbol","params":{"query":"add"}}"#;
+        let help_q =
+            r#"{"jsonrpc":"2.0","id":13,"method":"workspace/symbol","params":{"query":"HELP"}}"#;
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(add_q));
+        input.extend(frame(help_q));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("workspaceSymbolProvider"), "{text}");
+        assert!(text.contains("\"id\":12"), "{text}");
+        assert!(text.contains("\"name\":\"add\""), "{text}");
+        assert!(text.contains("\"id\":13"), "{text}");
+        assert!(text.contains("\"name\":\"helper\""), "{text}");
+    }
+
+    #[test]
+    fn lsp_signature_help_on_add_and_println() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let (formatted, root_uri, main_uri) = write_add_pkg(root);
+        let add_at = formatted.find("add(").unwrap() + 4;
+        let (line, col) = crate::span::offset_to_utf16_pos(&formatted, add_at);
+        let kit_at = formatted.find("println(").unwrap() + 8;
+        let (kline, kcol) = crate::span::offset_to_utf16_pos(&formatted, kit_at);
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let add_help = format!(
+            r#"{{"jsonrpc":"2.0","id":14,"method":"textDocument/signatureHelp","params":{{"textDocument":{{"uri":{}}},"position":{{"line":{},"character":{}}}}}}}"#,
+            json_str(&main_uri),
+            line,
+            col
+        );
+        let kit_help = format!(
+            r#"{{"jsonrpc":"2.0","id":15,"method":"textDocument/signatureHelp","params":{{"textDocument":{{"uri":{}}},"position":{{"line":{},"character":{}}}}}}}"#,
+            json_str(&main_uri),
+            kline,
+            kcol
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&add_help));
+        input.extend(frame(&kit_help));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("signatureHelpProvider"), "{text}");
+        assert!(text.contains("\"id\":14"), "{text}");
+        assert!(text.contains("def add(n: Int): Int"), "{text}");
+        assert!(text.contains("\"id\":15"), "{text}");
+        assert!(text.contains("IO.println(s: String): IO[Unit]"), "{text}");
     }
 
     #[test]

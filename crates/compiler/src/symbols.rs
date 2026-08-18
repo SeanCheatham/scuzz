@@ -74,6 +74,45 @@ pub fn symbols_in_source(program: &Program, current_file: &str, source: &str) ->
     out
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WorkspaceSymbol {
+    pub name: String,
+    pub kind: u8,
+    pub start: usize,
+    pub end: usize,
+    pub container: Option<String>,
+}
+
+/// Flattened outline entries whose names match `query` (empty query keeps all).
+pub fn workspace_symbols_in_source(
+    program: &Program,
+    current_file: &str,
+    source: &str,
+    query: &str,
+) -> Vec<WorkspaceSymbol> {
+    let docs = symbols_in_source(program, current_file, source);
+    let mut out = Vec::new();
+    flatten_workspace(&docs, None, &mut out);
+    if !query.is_empty() {
+        let q = query.to_ascii_lowercase();
+        out.retain(|s| s.name.to_ascii_lowercase().contains(&q));
+    }
+    out
+}
+
+fn flatten_workspace(syms: &[DocSymbol], container: Option<&str>, out: &mut Vec<WorkspaceSymbol>) {
+    for s in syms {
+        out.push(WorkspaceSymbol {
+            name: s.name.clone(),
+            kind: s.kind,
+            start: s.sel_start,
+            end: s.sel_end,
+            container: container.map(str::to_string),
+        });
+        flatten_workspace(&s.children, Some(&s.name), out);
+    }
+}
+
 fn leaf(name: &str, kind: u8, start: usize, end: usize) -> DocSymbol {
     sym(name, kind, start, end, start, end, vec![])
 }
@@ -189,5 +228,28 @@ def add(n: Int): Int = n
         assert_eq!(point.kind, KIND_STRUCT);
         let fields: Vec<_> = point.children.iter().map(|c| c.name.as_str()).collect();
         assert_eq!(fields, ["x", "y"]);
+    }
+
+    #[test]
+    fn workspace_query_filters_and_flattens_children() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+def add(n: Int): Int = n
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse_file(src, "Main.scuzz").unwrap();
+        let all = workspace_symbols_in_source(&p, "Main.scuzz", src, "");
+        let names: Vec<_> = all.iter().map(|s| s.name.as_str()).collect();
+        assert!(names.contains(&"add"), "{names:?}");
+        assert!(names.contains(&"Red"), "{names:?}");
+        let red = all.iter().find(|s| s.name == "Red").unwrap();
+        assert_eq!(red.container.as_deref(), Some("Color"));
+        let hits = workspace_symbols_in_source(&p, "Main.scuzz", src, "ADD");
+        assert_eq!(hits.len(), 1, "{hits:?}");
+        assert_eq!(hits[0].name, "add");
+        let none = workspace_symbols_in_source(&p, "Main.scuzz", src, "zzzz");
+        assert!(none.is_empty(), "{none:?}");
     }
 }
