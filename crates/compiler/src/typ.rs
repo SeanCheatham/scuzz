@@ -1061,8 +1061,8 @@ fn kit_lambda_param_ty_at(
         ("Signal.map", 1) => Some(Type::Int),
         ("View.each", 1) if nargs == 2 => Some(Type::String),
         (
-            "List.filter" | "List.filterNot" | "List.map" | "List.find" | "List.exists"
-            | "List.count" | "List.takeWhile" | "List.dropWhile" | "List.forall",
+            "List.filter" | "List.filterNot" | "List.map" | "List.flatMap" | "List.find"
+            | "List.exists" | "List.count" | "List.takeWhile" | "List.dropWhile" | "List.forall",
             1,
         ) => prior.first().and_then(|t| list_elem(t).ok()),
         (
@@ -1096,6 +1096,7 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
         ("Ui.run", 0) => Some(Type::Opaque("View".into())),
         ("View.each", 1) if nargs == 2 => Some(Type::Opaque("View".into())),
         ("Signal.map", 1) | ("Stream.map", 1) => Some(Type::String),
+        ("List.flatMap", 1) => Some(list_of(Type::Opaque("Elem".into()))),
         (
             "List.filter" | "List.filterNot" | "List.find" | "List.exists" | "List.count"
             | "List.takeWhile" | "List.dropWhile" | "List.forall" | "Stream.filter"
@@ -1113,6 +1114,7 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
 fn kit_ret_label(ty: &Type) -> &'static str {
     match ty {
         Type::Opaque(n) if n == "View" => "View",
+        Type::List(_) => "List[_]",
         Type::String => "String",
         Type::Bool => "Bool",
         Type::Io(_) => "IO[_]",
@@ -1123,6 +1125,7 @@ fn kit_ret_label(ty: &Type) -> &'static str {
 fn kit_lambda_body_ok(got: &Type, want: &Type) -> bool {
     match want {
         Type::Opaque(n) if n == "View" => matches!(got, Type::Opaque(g) if g == "View"),
+        Type::List(_) => matches!(got, Type::List(_)),
         Type::String => matches!(got, Type::String | Type::Int | Type::Float),
         Type::Bool => matches!(got, Type::Bool),
         Type::Io(_) => matches!(got, Type::Io(_)),
@@ -1960,7 +1963,7 @@ fn infer_call(
             let elem = prefer_elem(&arg_tys[0], &list_elem(&arg_tys[1])?)?;
             Ok(list_of(elem))
         }
-        "List.isEmpty" => {
+        "List.isEmpty" | "List.nonEmpty" => {
             expect_arity(callee, &arg_tys, 1)?;
             list_elem(&arg_tys[0])?;
             Ok(Type::Bool)
@@ -2069,6 +2072,22 @@ fn infer_call(
                 other => other.clone(),
             };
             Ok(list_of(out))
+        }
+        "List.flatMap" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            list_elem(&arg_tys[0])?;
+            let inner = match &arg_tys[1] {
+                Type::Fun(_, ret) => (**ret).clone(),
+                other => other.clone(),
+            };
+            let elem = list_elem(&inner)?;
+            Ok(list_of(elem))
+        }
+        "List.padTo" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            let elem = prefer_elem(&list_elem(&arg_tys[0])?, &arg_tys[2])?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(list_of(elem))
         }
         "Map.empty" => {
             expect_arity(callee, &arg_tys, 0)?;
@@ -5927,6 +5946,35 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.count/filterNot and Str.reverse should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_flat_map_pad_to_non_empty() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = ["a", "b"]
+    _ <- IO.println(List.join(List.flatMap(xs, x => [x, x]), ","))
+    _ <- IO.println(List.join(List.padTo(["a"], 3, "z"), ","))
+    _ <- IO.println(if (List.nonEmpty(xs)) "y" else "n")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.flatMap/padTo/nonEmpty should typecheck");
+    }
+
+    #[test]
+    fn rejects_list_flat_map_non_list() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.flatMap(["a"], x => x), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("List.flatMap lambda must return List[_]"),
+            "expected List body, got {}",
+            err.message()
+        );
     }
 
     #[test]

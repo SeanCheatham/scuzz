@@ -145,6 +145,9 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"head:${List.head(xs)}")
     _ <- IO.println(s"at:${List.at(xs, 1)}")
     _ <- IO.println(s"tail:${List.join(List.tail(xs), ",")}")
+    _ <- IO.println(s"fmap:${List.join(List.flatMap(["a", "b"], x => [x, x]), ",")}")
+    _ <- IO.println(s"padTo:${List.join(List.padTo(["a"], 3, "z"), ",")}")
+    _ <- IO.println(s"nempty:${if (List.nonEmpty(xs)) "y" else "n"}")
   } yield ()
 
 def strProof(): IO[Unit] =

@@ -482,6 +482,11 @@ SzList *sz_list_flatten(SzList *xss);
 /* New spine. `fn` returns an owned pointer. Retain `head` when `fn` yields it.
  * Cons retains the mapped head. Map then drops the mapper ref. */
 SzList *sz_list_map(SzList *xs, SzListMapFn fn, void *env);
+/* Mapper returns a list (+1). Concatenates in order. Empty stays empty. */
+SzList *sz_list_flat_map(SzList *xs, SzListMapFn fn, void *env);
+/* Pad with `x` until length `n`. n <= len leaves the list. n <= 0 leaves the list. */
+SzList *sz_list_pad_to(SzList *xs, int64_t n, void *x);
+int sz_list_non_empty(const SzList *xs);
 /* Release the spine; heads drop through RC. */
 void sz_list_free(SzList *xs);
 SzString *sz_list_join(const SzList *xs, const char *sep);

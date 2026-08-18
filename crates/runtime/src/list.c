@@ -297,6 +297,39 @@ SzList *sz_list_map(SzList *xs, SzListMapFn fn, void *env) {
   return n;
 }
 
+SzList *sz_list_flat_map(SzList *xs, SzListMapFn fn, void *env) {
+  SzList *chunk;
+  SzList *rest;
+  SzList *out;
+  if (!fn)
+    sz_panic("sz_list_flat_map(null fn)");
+  if (!xs)
+    return NULL;
+  /* Mapper returns +1 list. Concat retains. Drop the mapper list. */
+  chunk = (SzList *)fn(xs->head, env);
+  rest = sz_list_flat_map(xs->tail, fn, env);
+  out = sz_list_concat(chunk, rest);
+  sz_release(chunk);
+  sz_release(rest);
+  return out;
+}
+
+SzList *sz_list_pad_to(SzList *xs, int64_t n, void *x) {
+  size_t len = sz_list_len(xs);
+  SzList *suffix;
+  SzList *out;
+  if (n < 0)
+    n = 0;
+  if ((uint64_t)n <= (uint64_t)len)
+    return sz_list_drop(xs, 0);
+  suffix = sz_list_fill(n - (int64_t)len, x);
+  out = sz_list_concat(xs, suffix);
+  sz_release(suffix);
+  return out;
+}
+
+int sz_list_non_empty(const SzList *xs) { return xs != NULL; }
+
 void sz_list_free(SzList *xs) { sz_release(xs); }
 
 SzString *sz_list_join(const SzList *xs, const char *sep) {

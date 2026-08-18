@@ -389,6 +389,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Signal.list", "Signal.list(xs: List[T]): SignalList"),
     ("List.empty", "List.empty(): List[T]"),
     ("List.isEmpty", "List.isEmpty(xs: List[T]): Bool"),
+    ("List.nonEmpty", "List.nonEmpty(xs: List[T]): Bool"),
     ("List.head", "List.head(xs: List[T]): T"),
     ("List.tail", "List.tail(xs: List[T]): List[T]"),
     ("List.len", "List.len(xs: List[T]): Int"),
@@ -407,6 +408,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.filterNot(xs: List[T], pred: T => Bool): List[T]",
     ),
     ("List.map", "List.map(xs: List[T], f: T => U): List[U]"),
+    (
+        "List.flatMap",
+        "List.flatMap(xs: List[T], f: T => List[U]): List[U]",
+    ),
     (
         "List.setAt",
         "List.setAt(xs: List[T], i: Int, v: T): List[T]",
@@ -428,6 +433,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.getOrElse(xs: List[T], i: Int, default: T): T",
     ),
     ("List.fill", "List.fill(n: Int, x: T): List[T]"),
+    (
+        "List.padTo",
+        "List.padTo(xs: List[T], n: Int, x: T): List[T]",
+    ),
     ("List.reverse", "List.reverse(xs: List[T]): List[T]"),
     (
         "List.concat",
@@ -1321,6 +1330,18 @@ mod tests {
     }
 
     #[test]
+    fn hovers_list_flat_map() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.flatMap(["a"], x => [x, x]), ","))
+"#;
+        let h = hover_src(src, "flatMap");
+        assert!(
+            h.contains("List.flatMap(xs: List[T], f: T => List[U]): List[U]"),
+            "{h}"
+        );
+    }
+
+    #[test]
     fn hovers_list_set_at() {
         let src = r#"@main def main: IO[Unit] =
   IO.println(List.join(List.setAt(["a"], 0, "b"), ","))
@@ -1386,6 +1407,14 @@ mod tests {
 "#;
         let h = hover_src(src, "fill");
         assert!(h.contains("List.fill(n: Int, x: T): List[T]"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.padTo(["a"], 2, "z"), ","))
+"#;
+        let h = hover_src(src, "padTo");
+        assert!(
+            h.contains("List.padTo(xs: List[T], n: Int, x: T): List[T]"),
+            "{h}"
+        );
         let src = r#"@main def main: IO[Unit] =
   IO.println(List.join(List.reverse(["a", "b"]), ","))
 "#;
@@ -1637,6 +1666,11 @@ mod tests {
 "#;
         let h = hover_src(src, "empty");
         assert!(h.contains("List.empty(): List[T]"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (List.nonEmpty(["a"])) "y" else "n")
+"#;
+        let h = hover_src(src, "nonEmpty");
+        assert!(h.contains("List.nonEmpty(xs: List[T]): Bool"), "{h}");
         let src = r#"@main def main: IO[Unit] =
   IO.println(List.head(["a"]))
 "#;

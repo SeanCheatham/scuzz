@@ -124,6 +124,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_adt_payload(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_nil()").unwrap();
     writeln!(out, "declare i32 @sz_list_is_empty(ptr)").unwrap();
+    writeln!(out, "declare i32 @sz_list_non_empty(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_cons(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_head(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_tail(ptr)").unwrap();
@@ -160,6 +161,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_concat(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_flatten(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_map(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_flat_map(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_pad_to(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_write(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_list(ptr)").unwrap();
@@ -3260,6 +3263,17 @@ fn emit_call(
     if callee == "List.map" {
         return emit_ptr_map("List.map", "sz_list_map", args, ctx, locals, prefix, true);
     }
+    if callee == "List.flatMap" {
+        return emit_ptr_map(
+            "List.flatMap",
+            "sz_list_flat_map",
+            args,
+            ctx,
+            locals,
+            prefix,
+            true,
+        );
+    }
     if callee == "Resource.make" || callee == "Resource.use" {
         return emit_resource(callee, args, ctx, locals, prefix);
     }
@@ -3700,6 +3714,17 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
+        "List.nonEmpty" => {
+            writeln!(
+                code,
+                "  %{prefix}_i = call i32 @sz_list_non_empty(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            writeln!(code, "  %{prefix}_v = zext i32 %{prefix}_i to i64").unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
         "List.head" => {
             writeln!(
                 code,
@@ -3897,6 +3922,30 @@ fn emit_call(
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[1]);
             if emitted_args[1].kind == Kind::Int || emitted_args[1].kind == Kind::Float {
+                writeln!(code, "  call void @sz_release(ptr {elem})").unwrap();
+            }
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "List.padTo" => {
+            let elem = if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
+                box_numeric(
+                    &mut code,
+                    emitted_args[2].kind,
+                    &emitted_args[2].value,
+                    &format!("{prefix}_x"),
+                )
+            } else {
+                emitted_args[2].value.clone()
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_pad_to(ptr {}, i64 {}, ptr {elem})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[2]);
+            if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
                 writeln!(code, "  call void @sz_release(ptr {elem})").unwrap();
             }
             owned_ptr(code, format!("%{prefix}_v"))
@@ -7104,6 +7153,36 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of string {name} after Str.reverse:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_flat_map_pad_to_non_empty() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(List.flatMap(["a", "b"], x => [x, x]), ","))
+    _ <- IO.println(List.join(List.padTo(["a"], 3, "z"), ","))
+    _ <- IO.println(if (List.nonEmpty(["a"])) "y" else "n")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_flat_map"));
+        assert!(ir.contains("sz_list_pad_to"));
+        assert!(ir.contains("sz_list_non_empty"));
+        let fm_at = ir.find("call ptr @sz_list_flat_map").expect("flatMap");
+        let fm_pack = last_cl2_before(&ir, fm_at);
+        assert!(
+            ir[fm_at..].contains(&format!("call void @sz_release(ptr {fm_pack})")),
+            "expected last-use release of flatMap closure {fm_pack}:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_pad_to(ptr ";
+        let at = ir.find(needle).expect("padTo");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.padTo:\n{ir}"
         );
     }
 

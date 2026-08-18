@@ -937,6 +937,17 @@ static void *map_id(void *head, void *env) {
   return head;
 }
 
+static void *map_dup_list(void *head, void *env) {
+  (void)env;
+  return sz_list_cons(head, sz_list_cons(head, sz_list_nil()));
+}
+
+static void *map_empty_list(void *head, void *env) {
+  (void)head;
+  (void)env;
+  return sz_list_nil();
+}
+
 static SzIo *after_sleep_tag(void *value, void *env) {
   (void)value;
   return pure_drop(env);
@@ -3369,6 +3380,58 @@ int main(void) {
     sz_list_free(xs);
     sz_string_free(a);
     sz_string_free(b);
+  }
+
+  /* List.flatMap: mapper lists concatenate. Empty mapper cells drop. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_nil()));
+    SzList *ys;
+    ys = sz_list_flat_map(xs, map_dup_list, NULL);
+    assert(sz_list_len(ys) == 4);
+    assert(ys->head == a);
+    assert(ys->tail && ys->tail->head == a);
+    assert(ys->tail->tail && ys->tail->tail->head == b);
+    sz_list_free(ys);
+    ys = sz_list_flat_map(xs, map_empty_list, NULL);
+    assert(sz_list_is_empty(ys));
+    sz_list_free(ys);
+    ys = sz_list_flat_map(NULL, map_dup_list, NULL);
+    assert(sz_list_is_empty(ys));
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+  }
+
+  /* List.padTo: n <= len shares; n > len appends fill. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *z = sz_string_from_cstr("z");
+    SzList *xs = sz_list_cons(a, sz_list_nil());
+    SzList *ys;
+    ys = sz_list_pad_to(xs, 3, z);
+    assert(sz_list_len(ys) == 3);
+    assert(ys->head == a);
+    assert(ys->tail && ys->tail->head == z);
+    assert(ys->tail->tail && ys->tail->tail->head == z);
+    sz_list_free(ys);
+    ys = sz_list_pad_to(xs, 1, z);
+    assert(sz_list_len(ys) == 1);
+    assert(ys->head == a);
+    sz_list_free(ys);
+    ys = sz_list_pad_to(xs, 0, z);
+    assert(sz_list_len(ys) == 1);
+    sz_list_free(ys);
+    ys = sz_list_pad_to(NULL, 2, z);
+    assert(sz_list_len(ys) == 2);
+    assert(ys->head == z);
+    sz_list_free(ys);
+    assert(sz_list_non_empty(xs) == 1);
+    assert(sz_list_non_empty(NULL) == 0);
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(z);
   }
 
   /* List.append retains the element. The caller drops their ref. */

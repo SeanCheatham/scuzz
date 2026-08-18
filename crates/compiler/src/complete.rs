@@ -610,6 +610,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_list_flat_map_after_dot() {
+        let src = "@main def main: IO[Unit] = List.flatM\n";
+        let labels = labels_at(src, "List.flatM");
+        assert!(labels.iter().any(|l| l == "List.flatMap"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_list_set_at_after_dot() {
         let src = "@main def main: IO[Unit] = List.se\n";
         let labels = labels_at(src, "List.se");
@@ -663,6 +670,20 @@ mod tests {
         let src = "@main def main: IO[Unit] = List.fi\n";
         let labels = labels_at(src, "List.fi");
         assert!(labels.iter().any(|l| l == "List.fill"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_pad_to_after_dot() {
+        let src = "@main def main: IO[Unit] = List.padT\n";
+        let labels = labels_at(src, "List.padT");
+        assert!(labels.iter().any(|l| l == "List.padTo"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_non_empty_after_dot() {
+        let src = "@main def main: IO[Unit] = List.nonE\n";
+        let labels = labels_at(src, "List.nonE");
+        assert!(labels.iter().any(|l| l == "List.nonEmpty"), "{labels:?}");
     }
 
     #[test]
