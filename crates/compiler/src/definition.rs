@@ -173,7 +173,7 @@ pub(crate) enum DeclKind {
     Case,
 }
 
-fn loc_for_def(
+pub(crate) fn loc_for_def(
     sources: &[(String, String)],
     module: &str,
     kind: DeclKind,

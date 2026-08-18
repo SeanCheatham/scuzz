@@ -104,7 +104,7 @@ enum Commands {
     },
     /// Language server wrapping `scuzz check` JSON diagnostics (stdin/stdout LSP)
     #[command(
-        after_help = "Open buffers overlay disk text on didOpen / didChange / didClose. `workspace/didChangeWatchedFiles` republishes check diagnostics. Hover, completion, definition, document symbols, references, rename, workspace symbols, signature help, document highlights, folding ranges, format, selection ranges, inlay hints, semantic tokens (full and range), code actions, pull diagnostics, call hierarchy, type definition, implementation, code lenses, document links, and `workspace/executeCommand` (`scuzz.references`) use the same check parse. Quickfix actions attach the check diagnostic they fix.\n\nExamples:\n  scuzz lsp\n  scuzz lsp examples/hello\n"
+        after_help = "Open buffers overlay disk text on didOpen / didChange / didClose. `workspace/didChangeWatchedFiles` republishes check diagnostics. Hover, completion, definition, document symbols, references, rename, workspace symbols, signature help, document highlights, folding ranges, format, selection ranges, inlay hints, semantic tokens (full and range), code actions, pull diagnostics, call hierarchy, type definition, implementation, code lenses, document links, and `workspace/executeCommand` (`scuzz.references`) use the same check parse. Quickfix actions attach the check diagnostic they fix. `codeAction/resolve` fills the edit from action data. Diagnostics include related locations.\n\nExamples:\n  scuzz lsp\n  scuzz lsp examples/hello\n"
     )]
     Lsp {
         #[arg(default_value = ".")]

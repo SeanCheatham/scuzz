@@ -270,7 +270,7 @@ fn unknown_callee_actions(
     });
 }
 
-fn callee_candidates(program: &Program) -> Vec<String> {
+pub(crate) fn callee_candidates(program: &Program) -> Vec<String> {
     let mut out: Vec<String> = KIT_SIGS.iter().map(|(n, _)| (*n).to_string()).collect();
     for d in &program.defs {
         if d.is_private {
@@ -284,7 +284,7 @@ fn callee_candidates(program: &Program) -> Vec<String> {
     out
 }
 
-fn closest_callee(name: &str, cands: &[String]) -> Option<String> {
+pub(crate) fn closest_callee(name: &str, cands: &[String]) -> Option<String> {
     let method = name.rsplit('.').next().unwrap_or(name);
     let kit = name.split('.').next();
     let mut best: Option<(usize, String)> = None;

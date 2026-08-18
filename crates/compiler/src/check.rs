@@ -15,6 +15,34 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone)]
+pub struct RelatedLoc {
+    pub message: String,
+    pub file: Option<String>,
+    pub line: Option<u32>,
+    pub column: Option<u32>,
+    pub end_line: Option<u32>,
+    pub end_column: Option<u32>,
+}
+
+impl RelatedLoc {
+    fn to_json(&self) -> String {
+        let mut out = String::from("{");
+        out.push_str(&format!("\"message\":{}", json_str(&self.message)));
+        if let Some(f) = &self.file {
+            out.push_str(&format!(",\"file\":{}", json_str(f)));
+        }
+        if let Some(l) = self.line {
+            out.push_str(&format!(",\"line\":{l}"));
+        }
+        if let Some(c) = self.column {
+            out.push_str(&format!(",\"column\":{c}"));
+        }
+        out.push('}');
+        out
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct Diagnostic {
     pub severity: String,
     pub message: String,
@@ -23,6 +51,7 @@ pub struct Diagnostic {
     pub column: Option<u32>,
     pub end_line: Option<u32>,
     pub end_column: Option<u32>,
+    pub related: Vec<RelatedLoc>,
 }
 
 impl Diagnostic {
@@ -35,6 +64,7 @@ impl Diagnostic {
             column: None,
             end_line: None,
             end_column: None,
+            related: Vec::new(),
         }
     }
 
@@ -92,6 +122,10 @@ impl Diagnostic {
         }
         if let Some(c) = self.column {
             out.push_str(&format!(",\"column\":{c}"));
+        }
+        if !self.related.is_empty() {
+            let parts: Vec<String> = self.related.iter().map(|r| r.to_json()).collect();
+            out.push_str(&format!(",\"related\":[{}]", parts.join(",")));
         }
         out.push('}');
         out
@@ -163,6 +197,108 @@ fn diagnostic_from_type(e: TypeError, sources: &[(String, String)]) -> Diagnosti
         }
     }
     d
+}
+
+fn attach_related(d: &mut Diagnostic, program: &crate::ast::Program, sources: &[(String, String)]) {
+    let msg = d
+        .message
+        .strip_prefix("type error: ")
+        .unwrap_or(d.message.as_str());
+    if let Some(name) = msg.strip_prefix("unknown function ") {
+        let cands = crate::action::callee_candidates(program);
+        let Some(fix) = crate::action::closest_callee(name, &cands) else {
+            return;
+        };
+        let hint = format!("did you mean `{fix}`");
+        if let Some(rel) = related_from_name(program, sources, &fix, &hint) {
+            d.related.push(rel);
+        } else {
+            let rel = related_from_diag(d, &hint);
+            d.related.push(rel);
+        }
+        return;
+    }
+    let Some(rest) = msg.strip_prefix("non-exhaustive match: missing ") else {
+        return;
+    };
+    let first = rest.split(", ").next().unwrap_or("");
+    let enum_name = first.split('.').next().unwrap_or("");
+    if enum_name.is_empty() {
+        return;
+    }
+    let Some(en) = crate::hover::unique_enum(program, enum_name) else {
+        return;
+    };
+    let Some(loc) = crate::definition::loc_for_def(
+        sources,
+        en.module.as_str(),
+        crate::definition::DeclKind::Enum,
+        &en.name,
+    ) else {
+        return;
+    };
+    d.related
+        .push(related_from_def(sources, loc, format!("enum {}", en.name)));
+}
+
+fn related_from_name(
+    program: &crate::ast::Program,
+    sources: &[(String, String)],
+    name: &str,
+    message: &str,
+) -> Option<RelatedLoc> {
+    if let Some((module, bare)) = name.rsplit_once('.') {
+        if let Some(d) = crate::hover::def_named(program, module, bare) {
+            let loc = crate::definition::loc_for_def(
+                sources,
+                d.module.as_str(),
+                crate::definition::DeclKind::Def,
+                &d.name,
+            )?;
+            return Some(related_from_def(sources, loc, message.to_string()));
+        }
+    }
+    let d = crate::hover::unique_def(program, name)?;
+    let loc = crate::definition::loc_for_def(
+        sources,
+        d.module.as_str(),
+        crate::definition::DeclKind::Def,
+        &d.name,
+    )?;
+    Some(related_from_def(sources, loc, message.to_string()))
+}
+
+fn related_from_diag(d: &Diagnostic, message: &str) -> RelatedLoc {
+    RelatedLoc {
+        message: message.to_string(),
+        file: d.file.clone(),
+        line: d.line,
+        column: d.column,
+        end_line: d.end_line,
+        end_column: d.end_column,
+    }
+}
+
+fn related_from_def(
+    sources: &[(String, String)],
+    loc: crate::definition::DefLoc,
+    message: String,
+) -> RelatedLoc {
+    let text = sources
+        .iter()
+        .find(|(label, _)| label == &loc.file)
+        .map(|(_, t)| t.as_str())
+        .unwrap_or("");
+    let (line, column) = offset_to_utf16_pos(text, loc.start);
+    let (end_line, end_column) = offset_to_utf16_pos(text, loc.end);
+    RelatedLoc {
+        message,
+        file: Some(loc.file),
+        line: Some(line.saturating_add(1)),
+        column: Some(column.saturating_add(1)),
+        end_line: Some(end_line.saturating_add(1)),
+        end_column: Some(end_column.saturating_add(1)),
+    }
 }
 
 /// Canonical path, or parent canonical + file name when the file is not on disk yet.
@@ -368,7 +504,9 @@ pub fn check_project_with(
     let type_errs = typecheck_all(&program);
     let had_type_err = !type_errs.is_empty();
     for e in type_errs {
-        diags.push(diagnostic_from_type(e, &named));
+        let mut d = diagnostic_from_type(e, &named);
+        attach_related(&mut d, &program, &named);
+        diags.push(d);
     }
     if had_type_err {
         return Ok(diags);
@@ -1309,6 +1447,10 @@ version = "0.0.0"
         let json = format_diagnostics(&diags, true);
         assert!(json.contains("non-exhaustive"));
         assert!(json.contains("\"line\":"));
+        assert!(json.contains("\"related\""), "{json}");
+        assert!(json.contains("enum Color"), "{json}");
+        assert_eq!(diags[0].related.len(), 1, "{:?}", diags[0].related);
+        assert_eq!(diags[0].related[0].message, "enum Color");
     }
 
     fn write_ok_pkg(root: &Path) {
@@ -1575,6 +1717,15 @@ def b(): String = 1
             "{}",
             diags[0].message
         );
+        assert_eq!(diags[0].related.len(), 1, "{:?}", diags[0].related);
+        assert!(
+            diags[0].related[0].message.contains("`IO.println`"),
+            "{}",
+            diags[0].related[0].message
+        );
+        let json = format_diagnostics(&diags, true);
+        assert!(json.contains("\"related\""), "{json}");
+        assert!(json.contains("did you mean"), "{json}");
     }
 
     #[test]
