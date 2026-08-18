@@ -821,6 +821,10 @@ int64_t sz_string_is_empty(const SzString *s) {
   return (!s || !s->data || s->len == 0) ? 1 : 0;
 }
 
+int64_t sz_string_non_empty(const SzString *s) {
+  return sz_string_is_empty(s) ? 0 : 1;
+}
+
 static SzString *sz_string_ascii_case(const SzString *s, int to_upper) {
   size_t n = s && s->data ? s->len : 0;
   const char *src = s && s->data ? s->data : "";

@@ -116,6 +116,8 @@ def mapSetProof(): IO[Unit] =
     _ <- IO.println(s"sgone:${if (Set.contains(dropped, "x")) "y" else "n"}")
     _ <- IO.println(s"mempty:${if (Map.isEmpty(Map.empty())) "y" else "n"}")
     _ <- IO.println(s"sempty:${if (Set.isEmpty(Set.empty())) "y" else "n"}")
+    _ <- IO.println(s"mne:${if (Map.nonEmpty(mp)) "y" else "n"}")
+    _ <- IO.println(s"sne:${if (Set.nonEmpty(st)) "y" else "n"}")
   } yield ()
 
 def listProof(): IO[Unit] =
@@ -151,6 +153,8 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"range:${List.join(List.map(List.range(1, 4), n => Str.fromInt(n)), ",")}")
     _ <- IO.println(s"tab:${List.join(List.tabulate(3, i => Str.fromInt(i)), ",")}")
     _ <- IO.println(s"isp:${List.join(List.intersperse(xs, "|"), ",")}")
+    _ <- IO.println(s"grp:${List.join(List.map(List.grouped(xs, 2), g => List.join(g, ",")), "|")}")
+    _ <- IO.println(s"sld:${List.join(List.map(List.sliding(xs, 2), g => List.join(g, ",")), "|")}")
   } yield ()
 
 def strProof(): IO[Unit] =
@@ -162,6 +166,7 @@ def strProof(): IO[Unit] =
     _ <- IO.println(s"repl:${Str.replace("a-b", "-", ":")}")
     _ <- IO.println(s"split:${List.join(Str.split("a,b", ","), ":")}")
     _ <- IO.println(s"empty:${if (Str.isEmpty("")) "y" else "n"}")
+    _ <- IO.println(s"strne:${if (Str.nonEmpty("a")) "y" else "n"}")
     _ <- IO.println(s"lower:${Str.toLower("Ab")}")
     _ <- IO.println(s"upper:${Str.toUpper("Ab")}")
     _ <- IO.println(s"repeat:${Str.repeat("a", 3)}")

@@ -378,6 +378,37 @@ SzList *sz_list_intersperse(SzList *xs, void *x) {
   return sz_list_cons_take(xs->head, mid);
 }
 
+SzList *sz_list_grouped(SzList *xs, int64_t n) {
+  SzList *chunk;
+  SzList *rest;
+  SzList *more;
+  SzList *out;
+  if (!xs || n <= 0)
+    return NULL;
+  chunk = sz_list_take(xs, n);
+  rest = sz_list_drop(xs, n);
+  more = sz_list_grouped(rest, n);
+  sz_release(rest);
+  out = sz_list_cons_take(chunk, more);
+  sz_release(chunk);
+  return out;
+}
+
+SzList *sz_list_sliding(SzList *xs, int64_t n) {
+  SzList *window;
+  SzList *more;
+  SzList *out;
+  if (!xs || n <= 0)
+    return NULL;
+  if ((uint64_t)n > (uint64_t)sz_list_len(xs))
+    return NULL;
+  window = sz_list_take(xs, n);
+  more = sz_list_sliding(xs->tail, n);
+  out = sz_list_cons_take(window, more);
+  sz_release(window);
+  return out;
+}
+
 int sz_list_non_empty(const SzList *xs) { return xs != NULL; }
 
 void sz_list_free(SzList *xs) { sz_release(xs); }

@@ -708,6 +708,20 @@ mod tests {
     }
 
     #[test]
+    fn completes_list_grouped_after_dot() {
+        let src = "@main def main: IO[Unit] = List.gro\n";
+        let labels = labels_at(src, "List.gro");
+        assert!(labels.iter().any(|l| l == "List.grouped"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_sliding_after_dot() {
+        let src = "@main def main: IO[Unit] = List.sli\n";
+        let labels = labels_at(src, "List.sli");
+        assert!(labels.iter().any(|l| l == "List.sliding"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_list_reverse_after_dot() {
         let src = "@main def main: IO[Unit] = List.rev\n";
         let labels = labels_at(src, "List.rev");
@@ -845,6 +859,13 @@ mod tests {
         let src = "@main def main: IO[Unit] = Str.is\n";
         let labels = labels_at(src, "Str.is");
         assert!(labels.iter().any(|l| l == "Str.isEmpty"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_non_empty_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.nonE\n";
+        let labels = labels_at(src, "Str.nonE");
+        assert!(labels.iter().any(|l| l == "Str.nonEmpty"), "{labels:?}");
     }
 
     #[test]
@@ -995,10 +1016,24 @@ mod tests {
     }
 
     #[test]
+    fn completes_map_non_empty_after_dot() {
+        let src = "@main def main: IO[Unit] = Map.nonE\n";
+        let labels = labels_at(src, "Map.nonE");
+        assert!(labels.iter().any(|l| l == "Map.nonEmpty"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_set_is_empty_after_dot() {
         let src = "@main def main: IO[Unit] = Set.isE\n";
         let labels = labels_at(src, "Set.isE");
         assert!(labels.iter().any(|l| l == "Set.isEmpty"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_set_non_empty_after_dot() {
+        let src = "@main def main: IO[Unit] = Set.nonE\n";
+        let labels = labels_at(src, "Set.nonE");
+        assert!(labels.iter().any(|l| l == "Set.nonEmpty"), "{labels:?}");
     }
 
     #[test]

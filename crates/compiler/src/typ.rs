@@ -1921,7 +1921,7 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::String)
         }
-        "Str.isEmpty" => {
+        "Str.isEmpty" | "Str.nonEmpty" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::Bool)
@@ -2065,6 +2065,12 @@ fn infer_call(
             let elem = prefer_elem(&list_elem(&arg_tys[0])?, &arg_tys[1])?;
             Ok(list_of(elem))
         }
+        "List.grouped" | "List.sliding" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let elem = list_elem(&arg_tys[0])?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(list_of(list_of(elem)))
+        }
         "List.find" => {
             expect_arity(callee, &arg_tys, 2)?;
             let elem = list_elem(&arg_tys[0])?;
@@ -2158,7 +2164,7 @@ fn infer_call(
             map_kv(&arg_tys[0])?;
             Ok(Type::Int)
         }
-        "Map.isEmpty" => {
+        "Map.isEmpty" | "Map.nonEmpty" => {
             expect_arity(callee, &arg_tys, 1)?;
             map_kv(&arg_tys[0])?;
             Ok(Type::Bool)
@@ -2195,7 +2201,7 @@ fn infer_call(
             set_elem(&arg_tys[0])?;
             Ok(Type::Int)
         }
-        "Set.isEmpty" => {
+        "Set.isEmpty" | "Set.nonEmpty" => {
             expect_arity(callee, &arg_tys, 1)?;
             set_elem(&arg_tys[0])?;
             Ok(Type::Bool)
@@ -5924,6 +5930,8 @@ enum Color:
     _ <- IO.println(List.join(List.fill(3, "a"), ","))
     _ <- IO.println(if (Map.isEmpty(Map.empty())) "y" else "n")
     _ <- IO.println(if (Set.isEmpty(Set.empty())) "y" else "n")
+    _ <- IO.println(if (Map.nonEmpty(Map.set(Map.empty(), "a", "1"))) "y" else "n")
+    _ <- IO.println(if (Set.nonEmpty(Set.add(Set.empty(), "x"))) "y" else "n")
   } yield ()
 "#;
         let p = lower_program(parse(src).unwrap());
@@ -5995,6 +6003,22 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.range/tabulate/intersperse should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_grouped_sliding_non_empty() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = ["a", "b", "c"]
+    _ <- IO.println(List.join(List.map(List.grouped(xs, 2), g => List.join(g, ",")), "|"))
+    _ <- IO.println(List.join(List.map(List.sliding(xs, 2), g => List.join(g, ",")), "|"))
+    _ <- IO.println(if (Str.nonEmpty("a")) "y" else "n")
+    _ <- IO.println(if (Map.nonEmpty(Map.set(Map.empty(), "a", "1"))) "y" else "n")
+    _ <- IO.println(if (Set.nonEmpty(Set.add(Set.empty(), "x"))) "y" else "n")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.grouped/sliding and nonEmpty should typecheck");
     }
 
     #[test]

@@ -2134,6 +2134,9 @@ int main(void) {
       assert(sz_string_is_empty(sz_string_from_cstr("")) == 1);
       assert(sz_string_is_empty(sz_string_from_cstr("a")) == 0);
       assert(sz_string_is_empty(NULL) == 1);
+      assert(sz_string_non_empty(sz_string_from_cstr("")) == 0);
+      assert(sz_string_non_empty(sz_string_from_cstr("a")) == 1);
+      assert(sz_string_non_empty(NULL) == 0);
       {
         SzString *low = sz_string_to_lower(sz_string_from_cstr("AbC!"));
         SzString *up = sz_string_to_upper(sz_string_from_cstr("AbC!"));
@@ -3500,6 +3503,77 @@ int main(void) {
     sz_string_free(b);
     sz_string_free(c);
     sz_string_free(sep);
+  }
+
+  /* List.grouped: chunks of n. Last chunk may be short. n <= 0 is empty. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzString *c = sz_string_from_cstr("c");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_cons(c, sz_list_nil())));
+    SzList *gs;
+    SzList *g0;
+    SzList *g1;
+    gs = sz_list_grouped(xs, 2);
+    assert(sz_list_len(gs) == 2);
+    g0 = (SzList *)sz_list_head(gs);
+    assert(sz_list_len(g0) == 2);
+    assert(g0->head == a);
+    assert(g0->tail && g0->tail->head == b);
+    g1 = (SzList *)sz_list_at(gs, 1);
+    assert(sz_list_len(g1) == 1);
+    assert(g1->head == c);
+    sz_list_free(gs);
+    gs = sz_list_grouped(xs, 0);
+    assert(sz_list_is_empty(gs));
+    gs = sz_list_grouped(xs, -1);
+    assert(sz_list_is_empty(gs));
+    gs = sz_list_grouped(NULL, 2);
+    assert(sz_list_is_empty(gs));
+    gs = sz_list_grouped(xs, 5);
+    assert(sz_list_len(gs) == 1);
+    assert(sz_list_len((SzList *)sz_list_head(gs)) == 3);
+    sz_list_free(gs);
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
+  }
+
+  /* List.sliding: windows of n. n > len or n <= 0 is empty. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzString *c = sz_string_from_cstr("c");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_cons(c, sz_list_nil())));
+    SzList *ws;
+    SzList *w0;
+    SzList *w1;
+    ws = sz_list_sliding(xs, 2);
+    assert(sz_list_len(ws) == 2);
+    w0 = (SzList *)sz_list_head(ws);
+    assert(sz_list_len(w0) == 2);
+    assert(w0->head == a);
+    assert(w0->tail && w0->tail->head == b);
+    w1 = (SzList *)sz_list_at(ws, 1);
+    assert(sz_list_len(w1) == 2);
+    assert(w1->head == b);
+    assert(w1->tail && w1->tail->head == c);
+    sz_list_free(ws);
+    ws = sz_list_sliding(xs, 3);
+    assert(sz_list_len(ws) == 1);
+    assert(sz_list_len((SzList *)sz_list_head(ws)) == 3);
+    sz_list_free(ws);
+    ws = sz_list_sliding(xs, 4);
+    assert(sz_list_is_empty(ws));
+    ws = sz_list_sliding(xs, 0);
+    assert(sz_list_is_empty(ws));
+    ws = sz_list_sliding(NULL, 2);
+    assert(sz_list_is_empty(ws));
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
   }
 
   /* List.append retains the element. The caller drops their ref. */

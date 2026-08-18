@@ -88,6 +88,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_string_replace(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_trim(ptr)").unwrap();
     writeln!(out, "declare i64 @sz_string_is_empty(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_string_non_empty(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_to_lower(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_to_upper(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_repeat(ptr, i64)").unwrap();
@@ -166,6 +167,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_range(i64, i64)").unwrap();
     writeln!(out, "declare ptr @sz_list_tabulate(i64, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_intersperse(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_grouped(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_list_sliding(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_write(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_list(ptr)").unwrap();
@@ -3625,6 +3628,16 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
+        "Str.nonEmpty" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_string_non_empty(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
         "Str.toLower" => {
             writeln!(
                 code,
@@ -4014,6 +4027,21 @@ fn emit_call(
             }
             owned_ptr(code, format!("%{prefix}_v"))
         }
+        "List.grouped" | "List.sliding" => {
+            let rt = if callee == "List.grouped" {
+                "sz_list_grouped"
+            } else {
+                "sz_list_sliding"
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @{rt}(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
         "List.concat" => {
             writeln!(
                 code,
@@ -4290,6 +4318,18 @@ fn emit_call(
             )
             .unwrap();
             writeln!(code, "  %{prefix}_b = icmp eq i64 %{prefix}_n, 0").unwrap();
+            writeln!(code, "  %{prefix}_v = zext i1 %{prefix}_b to i64").unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Map.nonEmpty" | "Set.nonEmpty" => {
+            writeln!(
+                code,
+                "  %{prefix}_n = call i64 @sz_map_size(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            writeln!(code, "  %{prefix}_b = icmp ne i64 %{prefix}_n, 0").unwrap();
             writeln!(code, "  %{prefix}_v = zext i1 %{prefix}_b to i64").unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
@@ -7277,6 +7317,47 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of list {name} after List.intersperse:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_grouped_sliding_non_empty() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(List.map(List.grouped(["a", "b", "c"], 2), g => List.join(g, ",")), "|"))
+    _ <- IO.println(List.join(List.map(List.sliding(["a", "b", "c"], 2), g => List.join(g, ",")), "|"))
+    _ <- IO.println(if (Str.nonEmpty("a")) "y" else "n")
+    _ <- IO.println(if (Map.nonEmpty(Map.set(Map.empty(), "a", "1"))) "y" else "n")
+    _ <- IO.println(if (Set.nonEmpty(Set.add(Set.empty(), "x"))) "y" else "n")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_grouped"));
+        assert!(ir.contains("sz_list_sliding"));
+        assert!(ir.contains("sz_string_non_empty"));
+        assert!(ir.contains("icmp ne i64"));
+        let needle = "call ptr @sz_list_grouped(ptr ";
+        let at = ir.find(needle).expect("grouped");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.grouped:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_sliding(ptr ";
+        let at = ir.find(needle).expect("sliding");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.sliding:\n{ir}"
+        );
+        let needle = "call i64 @sz_string_non_empty(ptr ";
+        let at = ir.find(needle).expect("nonEmpty");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of string {name} after Str.nonEmpty:\n{ir}"
         );
     }
 

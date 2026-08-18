@@ -114,6 +114,8 @@ jobs:
           grep -q "sgone:n" /tmp/kernel.out
           grep -q "mempty:y" /tmp/kernel.out
           grep -q "sempty:y" /tmp/kernel.out
+          grep -q "mne:y" /tmp/kernel.out
+          grep -q "sne:y" /tmp/kernel.out
           grep -q "take:a,b" /tmp/kernel.out
           grep -q "drop:b,c" /tmp/kernel.out
           grep -q "find:b" /tmp/kernel.out
@@ -128,6 +130,7 @@ jobs:
           grep -q "repl:a:b" /tmp/kernel.out
           grep -q "split:a:b" /tmp/kernel.out
           grep -q "empty:y" /tmp/kernel.out
+          grep -q "strne:y" /tmp/kernel.out
           grep -q "lower:ab" /tmp/kernel.out
           grep -q "upper:AB" /tmp/kernel.out
           grep -q "repeat:aaa" /tmp/kernel.out
@@ -155,6 +158,8 @@ jobs:
           grep -q "range:1,2,3" /tmp/kernel.out
           grep -q "tab:0,1,2" /tmp/kernel.out
           grep -q "isp:a,|,b,|,c" /tmp/kernel.out
+          grep -q "grp:a,b|c" /tmp/kernel.out
+          grep -q "sld:a,b|b,c" /tmp/kernel.out
           grep -q "slen:3" /tmp/kernel.out
           grep -q "slice:bc" /tmp/kernel.out
           grep -q "ix:1" /tmp/kernel.out

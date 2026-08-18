@@ -341,6 +341,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ),
     ("Str.trim", "Str.trim(s: String): String"),
     ("Str.isEmpty", "Str.isEmpty(s: String): Bool"),
+    ("Str.nonEmpty", "Str.nonEmpty(s: String): Bool"),
     ("Str.toLower", "Str.toLower(s: String): String"),
     ("Str.toUpper", "Str.toUpper(s: String): String"),
     ("Str.repeat", "Str.repeat(s: String, n: Int): String"),
@@ -441,6 +442,14 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     (
         "List.intersperse",
         "List.intersperse(xs: List[T], x: T): List[T]",
+    ),
+    (
+        "List.grouped",
+        "List.grouped(xs: List[T], n: Int): List[List[T]]",
+    ),
+    (
+        "List.sliding",
+        "List.sliding(xs: List[T], n: Int): List[List[T]]",
     ),
     (
         "List.padTo",
@@ -692,6 +701,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Map.values", "Map.values(m: Map[K, V]): List[V]"),
     ("Map.size", "Map.size(m: Map[K, V]): Int"),
     ("Map.isEmpty", "Map.isEmpty(m: Map[K, V]): Bool"),
+    ("Map.nonEmpty", "Map.nonEmpty(m: Map[K, V]): Bool"),
     ("Set.empty", "Set.empty(): Set[T]"),
     ("Set.add", "Set.add(s: Set[T], x: T): Set[T]"),
     ("Set.contains", "Set.contains(s: Set[T], x: T): Bool"),
@@ -699,6 +709,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Set.toList", "Set.toList(s: Set[T]): List[T]"),
     ("Set.size", "Set.size(s: Set[T]): Int"),
     ("Set.isEmpty", "Set.isEmpty(s: Set[T]): Bool"),
+    ("Set.nonEmpty", "Set.nonEmpty(s: Set[T]): Bool"),
     ("Fs.read", "Fs.read(path: String): IO[String]"),
     ("Fs.write", "Fs.write(path: String, body: String): IO[Unit]"),
     ("Sys.args", "Sys.args(): IO[List]"),
@@ -1376,6 +1387,22 @@ mod tests {
             h.contains("List.intersperse(xs: List[T], x: T): List[T]"),
             "{h}"
         );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map(List.grouped(["a", "b"], 1), g => List.join(g, ",")), "|"))
+"#;
+        let h = hover_src(src, "grouped");
+        assert!(
+            h.contains("List.grouped(xs: List[T], n: Int): List[List[T]]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map(List.sliding(["a", "b"], 1), g => List.join(g, ",")), "|"))
+"#;
+        let h = hover_src(src, "sliding");
+        assert!(
+            h.contains("List.sliding(xs: List[T], n: Int): List[List[T]]"),
+            "{h}"
+        );
     }
 
     #[test]
@@ -1569,6 +1596,11 @@ mod tests {
         let h = hover_src(src, "isEmpty");
         assert!(h.contains("Str.isEmpty(s: String): Bool"), "{h}");
         let src = r#"@main def main: IO[Unit] =
+  IO.println(if (Str.nonEmpty("a")) "y" else "n")
+"#;
+        let h = hover_src(src, "nonEmpty");
+        assert!(h.contains("Str.nonEmpty(s: String): Bool"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
   IO.println(Str.toLower("Ab"))
 "#;
         let h = hover_src(src, "toLower");
@@ -1755,6 +1787,16 @@ mod tests {
 "#;
         let h = hover_src(src, "isEmpty");
         assert!(h.contains("Set.isEmpty(s: Set[T]): Bool"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (Map.nonEmpty(Map.set(Map.empty(), "a", "1"))) "y" else "n")
+"#;
+        let h = hover_src(src, "nonEmpty");
+        assert!(h.contains("Map.nonEmpty(m: Map[K, V]): Bool"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (Set.nonEmpty(Set.add(Set.empty(), "x"))) "y" else "n")
+"#;
+        let h = hover_src(src, "nonEmpty");
+        assert!(h.contains("Set.nonEmpty(s: Set[T]): Bool"), "{h}");
     }
 
     #[test]

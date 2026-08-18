@@ -84,6 +84,7 @@ int64_t sz_string_to_int(const SzString *s, int64_t dflt);
 SzString *sz_string_replace(const SzString *s, const SzString *oldv, const SzString *newv);
 SzString *sz_string_trim(const SzString *s);
 int64_t sz_string_is_empty(const SzString *s);
+int64_t sz_string_non_empty(const SzString *s);
 /* ASCII A-Z / a-z only. Other bytes stay. */
 SzString *sz_string_to_lower(const SzString *s);
 SzString *sz_string_to_upper(const SzString *s);
@@ -493,6 +494,10 @@ SzList *sz_list_range(int64_t from, int64_t until);
 SzList *sz_list_tabulate(int64_t n, SzListMapFn fn, void *env);
 /* Insert `x` between cells. Empty or one cell shares. Cons retains `x`. */
 SzList *sz_list_intersperse(SzList *xs, void *x);
+/* Chunks of length `n`. Last chunk may be short. n <= 0 is empty. */
+SzList *sz_list_grouped(SzList *xs, int64_t n);
+/* Overlapping windows of length `n`. n <= 0 or n > len is empty. */
+SzList *sz_list_sliding(SzList *xs, int64_t n);
 /* Release the spine; heads drop through RC. */
 void sz_list_free(SzList *xs);
 SzString *sz_list_join(const SzList *xs, const char *sep);
