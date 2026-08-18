@@ -2144,6 +2144,20 @@ int main(void) {
         SzString *none = sz_string_repeat(sz_string_from_cstr("ab"), 0);
         assert(strcmp(sz_string_cstr(low), "abc!") == 0);
         assert(strcmp(sz_string_cstr(up), "ABC!") == 0);
+        {
+          SzString *cap = sz_string_capitalize(sz_string_from_cstr("hello"));
+          SzString *keep = sz_string_capitalize(sz_string_from_cstr("Hello"));
+          SzString *empty = sz_string_capitalize(sz_string_from_cstr(""));
+          SzString *digit = sz_string_capitalize(sz_string_from_cstr("1ab"));
+          assert(strcmp(sz_string_cstr(cap), "Hello") == 0);
+          assert(strcmp(sz_string_cstr(keep), "Hello") == 0);
+          assert(sz_string_is_empty(empty) == 1);
+          assert(strcmp(sz_string_cstr(digit), "1ab") == 0);
+          sz_string_free(cap);
+          sz_string_free(keep);
+          sz_string_free(empty);
+          sz_string_free(digit);
+        }
         assert(strcmp(sz_string_cstr(rep), "ababab") == 0);
         assert(sz_string_is_empty(none) == 1);
         sz_string_free(low);
@@ -3608,6 +3622,24 @@ int main(void) {
     sz_string_free(c);
   }
 
+  /* List.indices: boxed 0 .. len-1. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_nil()));
+    SzList *ix = sz_list_indices(xs);
+    SzList *empty;
+    assert(sz_list_len(ix) == 2);
+    assert(sz_unbox_i64(ix->head) == 0);
+    assert(ix->tail && sz_unbox_i64(ix->tail->head) == 1);
+    sz_list_free(ix);
+    empty = sz_list_indices(NULL);
+    assert(sz_list_is_empty(empty));
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+  }
+
   /* List.indexWhere / lastIndexWhere: first/last match or -1. */
   {
     SzString *a = sz_string_from_cstr("a");
@@ -4005,6 +4037,18 @@ int main(void) {
     assert(sz_map_contains(m2, ka) == 1);
     assert(sz_map_contains(m1, kb) == 0);
     assert(strcmp(sz_string_cstr((SzString *)sz_map_get_or(m2, ka, NULL)), "1") == 0);
+    {
+      SzList *hit = sz_map_get(m2, ka);
+      SzList *miss = sz_map_get(m1, kb);
+      SzString *kz = sz_string_from_cstr("z");
+      SzList *absent = sz_map_get(m2, kz);
+      assert(sz_list_len(hit) == 1);
+      assert(strcmp(sz_string_cstr((SzString *)hit->head), "1") == 0);
+      assert(sz_list_is_empty(miss));
+      assert(sz_list_is_empty(absent));
+      sz_list_free(hit);
+      sz_string_free(kz);
+    }
     sz_release(m2);
     sz_release(m1);
     sz_string_free(ka);

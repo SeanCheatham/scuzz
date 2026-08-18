@@ -429,6 +429,10 @@ SzList *sz_list_slice(SzList *xs, int64_t from, int64_t until) {
   return out;
 }
 
+SzList *sz_list_indices(SzList *xs) {
+  return sz_list_range(0, (int64_t)sz_list_len(xs));
+}
+
 int64_t sz_list_index_where(SzList *xs, SzListPred pred, void *env) {
   SzList *p;
   int64_t i = 0;

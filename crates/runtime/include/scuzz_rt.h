@@ -88,6 +88,8 @@ int64_t sz_string_non_empty(const SzString *s);
 /* ASCII A-Z / a-z only. Other bytes stay. */
 SzString *sz_string_to_lower(const SzString *s);
 SzString *sz_string_to_upper(const SzString *s);
+/* First ASCII letter to upper. Other bytes stay. Empty stays empty. */
+SzString *sz_string_capitalize(const SzString *s);
 /* Repeat `s` `n` times. `n` <= 0 is empty. */
 SzString *sz_string_repeat(const SzString *s, int64_t n);
 /* Drop `prefix` when `s` starts with it. Else copy `s`. */
@@ -500,6 +502,8 @@ SzList *sz_list_grouped(SzList *xs, int64_t n);
 SzList *sz_list_sliding(SzList *xs, int64_t n);
 /* Cells `[from, until)`. Negative `from` / `until` is 0. Empty when until <= from. */
 SzList *sz_list_slice(SzList *xs, int64_t from, int64_t until);
+/* Boxed ints `[0, len)`. Empty when `xs` is empty. */
+SzList *sz_list_indices(SzList *xs);
 /* First index where `pred` is true, or -1. */
 int64_t sz_list_index_where(SzList *xs, SzListPred pred, void *env);
 /* Last index where `pred` is true, or -1. */
@@ -519,6 +523,8 @@ struct SzMap {
 SzMap *sz_map_empty(void);
 SzMap *sz_map_set(SzMap *m, void *key, void *val, int32_t key_kind);
 void *sz_map_get_or(SzMap *m, void *key, void *dflt);
+/* 0–1 list of the value. Miss is empty. Cons retains the value. */
+SzList *sz_map_get(SzMap *m, void *key);
 int64_t sz_map_contains(SzMap *m, void *key);
 /* Drop `key` if present. Missing key retains `m`. */
 SzMap *sz_map_remove(SzMap *m, void *key);

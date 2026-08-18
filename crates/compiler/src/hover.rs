@@ -344,6 +344,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Str.nonEmpty", "Str.nonEmpty(s: String): Bool"),
     ("Str.toLower", "Str.toLower(s: String): String"),
     ("Str.toUpper", "Str.toUpper(s: String): String"),
+    ("Str.capitalize", "Str.capitalize(s: String): String"),
     ("Str.repeat", "Str.repeat(s: String, n: Int): String"),
     (
         "Str.stripPrefix",
@@ -455,6 +456,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.slice",
         "List.slice(xs: List[T], from: Int, until: Int): List[T]",
     ),
+    ("List.indices", "List.indices(xs: List[T]): List[Int]"),
     (
         "List.padTo",
         "List.padTo(xs: List[T], n: Int, x: T): List[T]",
@@ -703,6 +705,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("List.append", "List.append(xs: List[T], x: T): List[T]"),
     ("Map.empty", "Map.empty(): Map[K, V]"),
     ("Map.set", "Map.set(m: Map[K, V], k: K, v: V): Map[K, V]"),
+    ("Map.get", "Map.get(m: Map[K, V], k: K): List[V]"),
     (
         "Map.getOrElse",
         "Map.getOrElse(m: Map[K, V], k: K, default: V): V",
@@ -1423,6 +1426,11 @@ mod tests {
             h.contains("List.slice(xs: List[T], from: Int, until: Int): List[T]"),
             "{h}"
         );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map(List.indices(["a", "b"]), n => Str.fromInt(n)), ","))
+"#;
+        let h = hover_src(src, "indices");
+        assert!(h.contains("List.indices(xs: List[T]): List[Int]"), "{h}");
     }
 
     #[test]
@@ -1732,6 +1740,11 @@ mod tests {
         let h = hover_src(src, "reverse");
         assert!(h.contains("Str.reverse(s: String): String"), "{h}");
         let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.capitalize("hello"))
+"#;
+        let h = hover_src(src, "capitalize");
+        assert!(h.contains("Str.capitalize(s: String): String"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
   IO.println(Str.fromInt(Str.len("abc")))
 "#;
         let h = hover_src(src, "len");
@@ -1813,6 +1826,11 @@ mod tests {
 "#;
         let h = hover_src(src, "values");
         assert!(h.contains("Map.values(m: Map[K, V]): List[V]"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(Map.get(Map.set(Map.empty(), "a", "1"), "a"), ","))
+"#;
+        let h = hover_src(src, "get");
+        assert!(h.contains("Map.get(m: Map[K, V], k: K): List[V]"), "{h}");
         let src = r#"@main def main: IO[Unit] =
   IO.println(if (Map.isEmpty(Map.empty())) "y" else "n")
 "#;

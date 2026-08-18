@@ -91,6 +91,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare i64 @sz_string_non_empty(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_to_lower(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_to_upper(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_string_capitalize(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_repeat(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_string_strip_prefix(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_strip_suffix(ptr, ptr)").unwrap();
@@ -136,6 +137,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_map_empty()").unwrap();
     writeln!(out, "declare ptr @sz_map_set(ptr, ptr, ptr, i32)").unwrap();
     writeln!(out, "declare ptr @sz_map_get_or(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_map_get(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_map_contains(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_map_remove(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_map_keys(ptr)").unwrap();
@@ -170,6 +172,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_grouped(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_list_sliding(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_list_slice(ptr, i64, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_list_indices(ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_index_where(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_last_index_where(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
@@ -3681,6 +3684,16 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
+        "Str.capitalize" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_string_capitalize(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
         "Str.repeat" => {
             writeln!(
                 code,
@@ -4075,6 +4088,16 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
+        "List.indices" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_indices(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
         "List.concat" => {
             writeln!(
                 code,
@@ -4194,6 +4217,31 @@ fn emit_call(
             }
             if val_owned_box {
                 writeln!(code, "  call void @sz_release(ptr {val})").unwrap();
+            }
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Map.get" => {
+            let key_src = &emitted_args[1];
+            let key = if key_src.kind == Kind::Int || key_src.kind == Kind::Float {
+                box_numeric(
+                    &mut code,
+                    key_src.kind,
+                    &key_src.value,
+                    &format!("{prefix}_k"),
+                )
+            } else {
+                key_src.value.clone()
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_map_get(ptr {}, ptr {key})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, key_src);
+            if key_src.kind == Kind::Int || key_src.kind == Kind::Float {
+                writeln!(code, "  call void @sz_release(ptr {key})").unwrap();
             }
             owned_ptr(code, format!("%{prefix}_v"))
         }
@@ -7431,6 +7479,44 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[lix_at..].contains(&format!("call void @sz_release(ptr {lix_pack})")),
             "expected last-use release of lastIndexWhere closure {lix_pack}:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_map_get_str_capitalize_list_indices() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(Map.get(Map.set(Map.empty(), "a", "1"), "a"), ","))
+    _ <- IO.println(Str.capitalize("hello"))
+    _ <- IO.println(List.join(List.map(List.indices(["a", "b"]), n => Str.fromInt(n)), ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_map_get"));
+        assert!(ir.contains("sz_string_capitalize"));
+        assert!(ir.contains("sz_list_indices"));
+        let needle = "call ptr @sz_map_get(ptr ";
+        let at = ir.find(needle).expect("map get");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of map {name} after Map.get:\n{ir}"
+        );
+        let needle = "call ptr @sz_string_capitalize(ptr ";
+        let at = ir.find(needle).expect("capitalize");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of string {name} after Str.capitalize:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_indices(ptr ";
+        let at = ir.find(needle).expect("indices");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.indices:\n{ir}"
         );
     }
 

@@ -851,6 +851,24 @@ SzString *sz_string_to_lower(const SzString *s) { return sz_string_ascii_case(s,
 
 SzString *sz_string_to_upper(const SzString *s) { return sz_string_ascii_case(s, 1); }
 
+SzString *sz_string_capitalize(const SzString *s) {
+  size_t n = s && s->data ? s->len : 0;
+  const char *src = s && s->data ? s->data : "";
+  char *buf = (char *)sz_alloc(n + 1);
+  size_t i;
+  SzString *out;
+  for (i = 0; i < n; i++) {
+    unsigned char c = (unsigned char)src[i];
+    if (i == 0 && c >= 'a' && c <= 'z')
+      c = (unsigned char)(c - 32);
+    buf[i] = (char)c;
+  }
+  buf[n] = '\0';
+  out = sz_string_from_bytes(buf, n);
+  sz_free(buf);
+  return out;
+}
+
 SzString *sz_string_repeat(const SzString *s, int64_t n) {
   size_t slen = s && s->data ? s->len : 0;
   const char *src = s && s->data ? s->data : "";

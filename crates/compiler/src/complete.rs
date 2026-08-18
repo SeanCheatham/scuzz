@@ -729,6 +729,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_list_indices_after_dot() {
+        let src = "@main def main: IO[Unit] = List.indi\n";
+        let labels = labels_at(src, "List.indi");
+        assert!(labels.iter().any(|l| l == "List.indices"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_list_reverse_after_dot() {
         let src = "@main def main: IO[Unit] = List.rev\n";
         let labels = labels_at(src, "List.rev");
@@ -907,6 +914,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_str_capitalize_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.cap\n";
+        let labels = labels_at(src, "Str.cap");
+        assert!(labels.iter().any(|l| l == "Str.capitalize"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_str_repeat_after_dot() {
         let src = "@main def main: IO[Unit] = Str.repe\n";
         let labels = labels_at(src, "Str.repe");
@@ -1030,6 +1044,14 @@ mod tests {
         let src = "@main def main: IO[Unit] = Map.va\n";
         let labels = labels_at(src, "Map.va");
         assert!(labels.iter().any(|l| l == "Map.values"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_map_get_after_dot() {
+        let src = "@main def main: IO[Unit] = Map.ge\n";
+        let labels = labels_at(src, "Map.ge");
+        assert!(labels.iter().any(|l| l == "Map.get"), "{labels:?}");
+        assert!(labels.iter().any(|l| l == "Map.getOrElse"), "{labels:?}");
     }
 
     #[test]

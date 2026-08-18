@@ -1948,7 +1948,7 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::Bool)
         }
-        "Str.toLower" | "Str.toUpper" => {
+        "Str.toLower" | "Str.toUpper" | "Str.capitalize" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::String)
@@ -2044,6 +2044,11 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::Int)?;
             expect_ty(&arg_tys[2], &Type::Int)?;
             Ok(arg_tys[0].clone())
+        }
+        "List.indices" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            list_elem(&arg_tys[0])?;
+            Ok(list_of(Type::Int))
         }
         "List.concat" => {
             expect_arity(callee, &arg_tys, 2)?;
@@ -2164,6 +2169,12 @@ fn infer_call(
             let k = prefer_elem(&k, &arg_tys[1])?;
             let v = prefer_elem(&v, &arg_tys[2])?;
             Ok(Type::App("Map".into(), vec![k, v]))
+        }
+        "Map.get" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let (k, v) = map_kv(&arg_tys[0])?;
+            prefer_elem(&k, &arg_tys[1])?;
+            Ok(list_of(v))
         }
         "Map.getOrElse" => {
             expect_arity(callee, &arg_tys, 3)?;
@@ -6067,6 +6078,22 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.slice/indexWhere/lastIndexWhere should typecheck");
+    }
+
+    #[test]
+    fn typechecks_map_get_str_capitalize_list_indices() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    m = Map.set(Map.empty(), "a", "1")
+    xs = ["a", "b", "c"]
+    _ <- IO.println(List.join(Map.get(m, "a"), ","))
+    _ <- IO.println(List.join(Map.get(m, "z"), ","))
+    _ <- IO.println(Str.capitalize("hello"))
+    _ <- IO.println(List.join(List.map(List.indices(xs), n => Str.fromInt(n)), ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Map.get/Str.capitalize/List.indices should typecheck");
     }
 
     #[test]
