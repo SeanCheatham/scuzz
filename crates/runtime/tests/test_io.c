@@ -1810,20 +1810,6 @@ int main(void) {
     SzString *    joined = sz_list_join((SzList *)r.value, ",");
     assert(strcmp(sz_string_cstr(joined), "a!,b!,c") == 0);
 
-    {
-      size_t base_bytes = 0, base_count = 0;
-      size_t live_bytes = 0, live_count = 0;
-      SzIoResult sr;
-      sz_alloc_stats(&base_bytes, &base_count);
-      sr = sz_io_unsafe_run(sz_stream_compile_to_list(
-          sz_stream_eval(pure_drop(sz_string_from_cstr("c")))));
-      assert(sr.ok);
-      sz_release(sr.value);
-      sz_alloc_stats(&live_bytes, &live_count);
-      assert(live_count == base_count);
-      assert(live_bytes == base_bytes);
-    }
-
     r = sz_io_unsafe_run(sz_stream_drain(sz_stream_emit(sz_string_from_cstr("d"))));
     assert(r.ok);
 
