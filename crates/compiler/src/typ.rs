@@ -2018,6 +2018,17 @@ fn infer_call(
             let elem = list_elem(&arg_tys[0])?;
             Ok(list_of(elem))
         }
+        "List.getOrElse" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            let elem = list_elem(&arg_tys[0])?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            prefer_elem(&elem, &arg_tys[2])
+        }
+        "List.fill" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            Ok(list_of(arg_tys[1].clone()))
+        }
         "List.find" => {
             expect_arity(callee, &arg_tys, 2)?;
             let elem = list_elem(&arg_tys[0])?;
@@ -2090,6 +2101,11 @@ fn infer_call(
             map_kv(&arg_tys[0])?;
             Ok(Type::Int)
         }
+        "Map.isEmpty" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            map_kv(&arg_tys[0])?;
+            Ok(Type::Bool)
+        }
         "Set.empty" => {
             expect_arity(callee, &arg_tys, 0)?;
             Ok(Type::App("Set".into(), vec![Type::Opaque("Elem".into())]))
@@ -2121,6 +2137,11 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 1)?;
             set_elem(&arg_tys[0])?;
             Ok(Type::Int)
+        }
+        "Set.isEmpty" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            set_elem(&arg_tys[0])?;
+            Ok(Type::Bool)
         }
         "Fs.read" | "Fs.list" | "Fs.mkdirs" | "Fs.canonicalize" => {
             expect_arity(callee, &arg_tys, 1)?;
@@ -5834,6 +5855,31 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.takeRight/dropRight/init/last should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_get_or_else_fill_map_is_empty() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = ["a", "b", "c"]
+    _ <- IO.println(List.getOrElse(xs, 1, "z"))
+    _ <- IO.println(List.getOrElse(xs, 9, "z"))
+    _ <- IO.println(List.join(List.fill(3, "a"), ","))
+    _ <- IO.println(if (Map.isEmpty(Map.empty())) "y" else "n")
+    _ <- IO.println(if (Set.isEmpty(Set.empty())) "y" else "n")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.getOrElse/fill and Map/Set.isEmpty should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_get_or_else_int() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.getOrElse([1, 2], 0, 9)))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.getOrElse Int list should typecheck");
     }
 
     #[test]

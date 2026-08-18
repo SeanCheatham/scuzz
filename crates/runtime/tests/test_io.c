@@ -3503,6 +3503,37 @@ int main(void) {
     sz_string_free(b);
     sz_string_free(c);
   }
+
+  /* List.getOrElse: index or default. List.fill: n copies. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzString *miss = sz_string_from_cstr("z");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_nil()));
+    SzList *ys;
+    assert(sz_list_get_or(xs, 0, miss) == a);
+    assert(sz_list_get_or(xs, 1, miss) == b);
+    assert(sz_list_get_or(xs, 2, miss) == miss);
+    assert(sz_list_get_or(xs, -1, miss) == miss);
+    assert(sz_list_get_or(NULL, 0, miss) == miss);
+    ys = sz_list_fill(3, a);
+    assert(sz_list_len(ys) == 3);
+    assert(ys->head == a);
+    assert(ys->tail && ys->tail->head == a);
+    sz_list_free(ys);
+    ys = sz_list_fill(0, a);
+    assert(sz_list_is_empty(ys));
+    ys = sz_list_fill(-1, a);
+    assert(sz_list_is_empty(ys));
+    ys = sz_list_fill(1, b);
+    assert(sz_list_len(ys) == 1);
+    assert(ys->head == b);
+    sz_list_free(ys);
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(miss);
+  }
   {
     SzString *a = sz_string_from_cstr("a");
     SzString *b = sz_string_from_cstr("b");

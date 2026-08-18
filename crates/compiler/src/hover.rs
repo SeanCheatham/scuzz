@@ -394,6 +394,11 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("List.init", "List.init(xs: List[T]): List[T]"),
     ("List.last", "List.last(xs: List[T]): List[T]"),
     (
+        "List.getOrElse",
+        "List.getOrElse(xs: List[T], i: Int, default: T): T",
+    ),
+    ("List.fill", "List.fill(n: Int, x: T): List[T]"),
+    (
         "List.concat",
         "List.concat(xs: List[T], ys: List[T]): List[T]",
     ),
@@ -633,12 +638,14 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Map.keys", "Map.keys(m: Map[K, V]): List[K]"),
     ("Map.values", "Map.values(m: Map[K, V]): List[V]"),
     ("Map.size", "Map.size(m: Map[K, V]): Int"),
+    ("Map.isEmpty", "Map.isEmpty(m: Map[K, V]): Bool"),
     ("Set.empty", "Set.empty(): Set[T]"),
     ("Set.add", "Set.add(s: Set[T], x: T): Set[T]"),
     ("Set.contains", "Set.contains(s: Set[T], x: T): Bool"),
     ("Set.remove", "Set.remove(s: Set[T], x: T): Set[T]"),
     ("Set.toList", "Set.toList(s: Set[T]): List[T]"),
     ("Set.size", "Set.size(s: Set[T]): Int"),
+    ("Set.isEmpty", "Set.isEmpty(s: Set[T]): Bool"),
     ("Fs.read", "Fs.read(path: String): IO[String]"),
     ("Fs.write", "Fs.write(path: String, body: String): IO[Unit]"),
     ("Sys.args", "Sys.args(): IO[List]"),
@@ -1318,6 +1325,23 @@ mod tests {
     }
 
     #[test]
+    fn hovers_list_get_or_else_fill() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.getOrElse(["a", "b"], 0, "z"))
+"#;
+        let h = hover_src(src, "getOrElse");
+        assert!(
+            h.contains("List.getOrElse(xs: List[T], i: Int, default: T): T"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.fill(2, "a"), ","))
+"#;
+        let h = hover_src(src, "fill");
+        assert!(h.contains("List.fill(n: Int, x: T): List[T]"), "{h}");
+    }
+
+    #[test]
     fn hovers_list_exists() {
         let src = r#"@main def main: IO[Unit] =
   IO.println(if (List.exists(["a"], x => true)) "y" else "n")
@@ -1479,6 +1503,16 @@ mod tests {
 "#;
         let h = hover_src(src, "values");
         assert!(h.contains("Map.values(m: Map[K, V]): List[V]"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (Map.isEmpty(Map.empty())) "y" else "n")
+"#;
+        let h = hover_src(src, "isEmpty");
+        assert!(h.contains("Map.isEmpty(m: Map[K, V]): Bool"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (Set.isEmpty(Set.empty())) "y" else "n")
+"#;
+        let h = hover_src(src, "isEmpty");
+        assert!(h.contains("Set.isEmpty(s: Set[T]): Bool"), "{h}");
     }
 
     #[test]

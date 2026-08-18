@@ -142,6 +142,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_drop_right(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_list_init(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_last(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_get_or(ptr, i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_fill(i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_find(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_exists(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_takewhile(ptr, ptr, ptr)").unwrap();
@@ -3743,6 +3745,80 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
+        "List.getOrElse" => {
+            let dflt = if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
+                box_numeric(
+                    &mut code,
+                    emitted_args[2].kind,
+                    &emitted_args[2].value,
+                    &format!("{prefix}_d"),
+                )
+            } else {
+                emitted_args[2].value.clone()
+            };
+            writeln!(
+                code,
+                "  %{prefix}_p = call ptr @sz_list_get_or(ptr {}, i64 {}, ptr {dflt})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            take_owned_ptr(&mut code, &emitted_args[0], &format!("%{prefix}_p"));
+            let dflt_is_num =
+                emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float;
+            let dflt_owned = dflt_is_num || emitted_args[2].owned;
+            if emitted_args[0].owned {
+                if dflt_is_num {
+                    writeln!(code, "  call void @sz_release(ptr {dflt})").unwrap();
+                } else {
+                    drop_owned_ptr(&mut code, &emitted_args[2]);
+                }
+            } else if dflt_owned {
+                writeln!(code, "  call void @sz_retain(ptr %{prefix}_p)").unwrap();
+                if dflt_is_num {
+                    writeln!(code, "  call void @sz_release(ptr {dflt})").unwrap();
+                } else {
+                    drop_owned_ptr(&mut code, &emitted_args[2]);
+                }
+            }
+            let result_owned = emitted_args[0].owned || dflt_owned;
+            if dflt_is_num {
+                let v = unbox_numeric(
+                    &mut code,
+                    emitted_args[2].kind,
+                    &format!("%{prefix}_p"),
+                    &format!("{prefix}_u"),
+                );
+                if result_owned {
+                    writeln!(code, "  call void @sz_release(ptr %{prefix}_p)").unwrap();
+                }
+                val_emitted(code, v, emitted_args[2].kind)
+            } else {
+                ptr_owned_if(code, format!("%{prefix}_p"), result_owned)
+            }
+        }
+        "List.fill" => {
+            let elem = if emitted_args[1].kind == Kind::Int || emitted_args[1].kind == Kind::Float {
+                box_numeric(
+                    &mut code,
+                    emitted_args[1].kind,
+                    &emitted_args[1].value,
+                    &format!("{prefix}_x"),
+                )
+            } else {
+                emitted_args[1].value.clone()
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_fill(i64 {}, ptr {elem})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            if emitted_args[1].kind == Kind::Int || emitted_args[1].kind == Kind::Float {
+                writeln!(code, "  call void @sz_release(ptr {elem})").unwrap();
+            }
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
         "List.concat" => {
             writeln!(
                 code,
@@ -4008,6 +4084,18 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Map.isEmpty" | "Set.isEmpty" => {
+            writeln!(
+                code,
+                "  %{prefix}_n = call i64 @sz_map_size(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            writeln!(code, "  %{prefix}_b = icmp eq i64 %{prefix}_n, 0").unwrap();
+            writeln!(code, "  %{prefix}_v = zext i1 %{prefix}_b to i64").unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
@@ -6827,6 +6915,42 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of list {name} after last:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_get_or_else_fill_map_is_empty() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.getOrElse(["a", "b"], 0, "z"))
+    _ <- IO.println(List.join(List.fill(2, "a"), ","))
+    _ <- IO.println(if (Map.isEmpty(Map.empty())) "y" else "n")
+    _ <- IO.println(if (Set.isEmpty(Set.empty())) "y" else "n")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_get_or"));
+        assert!(ir.contains("sz_list_fill"));
+        assert!(ir.contains("sz_map_size"));
+        let needle = "call ptr @sz_list_get_or(ptr ";
+        let at = ir.find(needle).expect("getOrElse");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after getOrElse:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_fill(i64 ";
+        let at = ir.find(needle).expect("fill");
+        assert!(
+            ir[at..].contains("call void @sz_release(ptr "),
+            "expected last-use release after List.fill:\n{ir}"
+        );
+        let empty_at = ir.find("icmp eq i64 ").expect("isEmpty");
+        assert!(
+            ir[empty_at.saturating_sub(120)..empty_at].contains("sz_map_size"),
+            "expected Map/Set.isEmpty via sz_map_size:\n{ir}"
         );
     }
 

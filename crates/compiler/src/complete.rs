@@ -645,6 +645,20 @@ mod tests {
     }
 
     #[test]
+    fn completes_list_get_or_else_after_dot() {
+        let src = "@main def main: IO[Unit] = List.getO\n";
+        let labels = labels_at(src, "List.getO");
+        assert!(labels.iter().any(|l| l == "List.getOrElse"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_fill_after_dot() {
+        let src = "@main def main: IO[Unit] = List.fi\n";
+        let labels = labels_at(src, "List.fi");
+        assert!(labels.iter().any(|l| l == "List.fill"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_list_exists_after_dot() {
         let src = "@main def main: IO[Unit] = List.ex\n";
         let labels = labels_at(src, "List.ex");
@@ -789,6 +803,20 @@ mod tests {
         let src = "@main def main: IO[Unit] = Map.va\n";
         let labels = labels_at(src, "Map.va");
         assert!(labels.iter().any(|l| l == "Map.values"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_map_is_empty_after_dot() {
+        let src = "@main def main: IO[Unit] = Map.isE\n";
+        let labels = labels_at(src, "Map.isE");
+        assert!(labels.iter().any(|l| l == "Map.isEmpty"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_set_is_empty_after_dot() {
+        let src = "@main def main: IO[Unit] = Set.isE\n";
+        let labels = labels_at(src, "Set.isE");
+        assert!(labels.iter().any(|l| l == "Set.isEmpty"), "{labels:?}");
     }
 
     #[test]

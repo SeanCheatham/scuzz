@@ -165,6 +165,32 @@ SzList *sz_list_last(SzList *xs) {
   return sz_list_cons(p->head, NULL);
 }
 
+/* Borrowed head at `index`, or `dflt`. Negative / OOB is `dflt`. */
+void *sz_list_get_or(SzList *xs, int64_t index, void *dflt) {
+  SzList *p = xs;
+  int64_t i = 0;
+  if (index < 0)
+    return dflt;
+  while (p) {
+    if (i == index)
+      return p->head;
+    p = p->tail;
+    i++;
+  }
+  return dflt;
+}
+
+/* `n` copies of `x`. n <= 0 is empty. Cons retains `x`. */
+SzList *sz_list_fill(int64_t n, void *x) {
+  SzList *acc = NULL;
+  int64_t i;
+  if (n <= 0)
+    return NULL;
+  for (i = 0; i < n; i++)
+    acc = sz_list_cons_take(x, acc);
+  return acc;
+}
+
 SzList *sz_list_find(SzList *xs, SzListPred pred, void *env) {
   SzList *p;
   if (!pred)

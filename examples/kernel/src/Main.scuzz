@@ -114,6 +114,8 @@ def mapSetProof(): IO[Unit] =
     _ <- IO.println(s"slist:${List.join(Set.toList(st), ",")}")
     _ <- IO.println(s"ssize:${Set.size(st)}")
     _ <- IO.println(s"sgone:${if (Set.contains(dropped, "x")) "y" else "n"}")
+    _ <- IO.println(s"mempty:${if (Map.isEmpty(Map.empty())) "y" else "n"}")
+    _ <- IO.println(s"sempty:${if (Set.isEmpty(Set.empty())) "y" else "n"}")
   } yield ()
 
 def listProof(): IO[Unit] =
@@ -133,6 +135,9 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"dropRight:${List.join(List.dropRight(xs, 1), ",")}")
     _ <- IO.println(s"init:${List.join(List.init(xs), ",")}")
     _ <- IO.println(s"last:${List.join(List.last(xs), ",")}")
+    _ <- IO.println(s"get:${List.getOrElse(xs, 1, "z")}")
+    _ <- IO.println(s"miss:${List.getOrElse(xs, 9, "z")}")
+    _ <- IO.println(s"fill:${List.join(List.fill(3, "a"), ",")}")
   } yield ()
 
 def strProof(): IO[Unit] =

@@ -446,6 +446,10 @@ SzList *sz_list_drop_right(SzList *xs, int64_t n);
 SzList *sz_list_init(SzList *xs);
 /* Last head as a one-cell list. Empty if none. */
 SzList *sz_list_last(SzList *xs);
+/* Borrowed head at `index`, or `dflt`. Negative / OOB is `dflt`. */
+void *sz_list_get_or(SzList *xs, int64_t index, void *dflt);
+/* `n` copies of `x`. n <= 0 is empty. Cons retains `x`. Drop owned `x` after. */
+SzList *sz_list_fill(int64_t n, void *x);
 /* First head for which `pred` is nonzero, as a one-cell list. Empty if none. */
 SzList *sz_list_find(SzList *xs, SzListPred pred, void *env);
 /* 1 if any head matches `pred`, else 0. */
