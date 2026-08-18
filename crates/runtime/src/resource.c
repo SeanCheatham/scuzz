@@ -31,6 +31,8 @@ typedef struct LangResSt {
 static SzIo *lang_fin_free_ok(void *ignored, void *env) {
   LangResSt *st = (LangResSt *)env;
   (void)ignored;
+  sz_release(st->acquired);
+  st->acquired = NULL;
   sz_release(st->use_env);
   st->use_env = NULL;
   sz_release(st->res);
@@ -40,6 +42,8 @@ static SzIo *lang_fin_free_ok(void *ignored, void *env) {
 
 static SzIo *lang_fin_free_err(SzError *err, void *env) {
   LangResSt *st = (LangResSt *)env;
+  sz_release(st->acquired);
+  st->acquired = NULL;
   sz_release(st->use_env);
   st->use_env = NULL;
   sz_release(st->res);
@@ -104,6 +108,7 @@ SzIo *sz_lang_resource_use(SzLangResource *res, SzCont use, void *use_env) {
   sz_release(use_cell);
   pack = sz_pair_new(res, inner);
   sz_release(inner);
+  sz_retain(res->acquire);
   {
     SzIo *io = fm_drop(res->acquire, use_after_acquire, pack);
     sz_release(pack);

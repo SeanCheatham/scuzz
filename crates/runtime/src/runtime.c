@@ -1870,14 +1870,16 @@ static int step_fiber(Sched *s, Fiber *f) {
     return 0;
   case SZ_IO_DELAY: {
     void *env = cur->as.delay.env;
-    void *value = cur->as.delay.thunk(env);
-    /* Unique delay: steal env so destructor does not drop after the thunk.
+    /* Unique delay: steal env before the thunk so the thunk can drop it.
      * BOX packs (Net.serve) are borrowed. Steal would leak the delay retain.
      * Leave BOX env so last-use of the delay node drops it. */
     if (!(sz_is_rc(cur) && sz_rc_hdr(cur)->rc > 1) &&
         !(sz_is_rc(env) && sz_rc_hdr(env)->kind == SZ_RC_BOX))
       cur->as.delay.env = NULL;
-    fiber_set_cur(f, pure_drop(value));
+    {
+      void *value = cur->as.delay.thunk(env);
+      fiber_set_cur(f, pure_drop(value));
+    }
     ready_enqueue(s, f);
     return 0;
   }

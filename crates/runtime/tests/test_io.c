@@ -1166,20 +1166,34 @@ int main(void) {
   }
 
   /* Resource.make / use (IO acquire + IO release) */
-  lang_released = 0;
-  SzLangResource *lr = lang_make_tok();
-  r = sz_io_unsafe_run(sz_lang_resource_use(lr, lang_use_ok, NULL));
-  assert(r.ok);
-  assert(lang_released == 1);
-  sz_lang_resource_free(lr);
+  SzLangResource *lr;
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
 
-  lang_released = 0;
-  lr = lang_make_tok();
-  r = sz_io_unsafe_run(sz_lang_resource_use(lr, lang_use_fail, NULL));
-  assert(!r.ok);
-  assert(lang_released == 1);
-  sz_error_free(r.error);
-  sz_lang_resource_free(lr);
+    lang_released = 0;
+    sz_alloc_stats(&base_bytes, &base_count);
+    lr = lang_make_tok();
+    r = sz_io_unsafe_run(sz_lang_resource_use(lr, lang_use_ok, NULL));
+    assert(r.ok);
+    assert(lang_released == 1);
+    sz_lang_resource_free(lr);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    lang_released = 0;
+    sz_alloc_stats(&base_bytes, &base_count);
+    lr = lang_make_tok();
+    r = sz_io_unsafe_run(sz_lang_resource_use(lr, lang_use_fail, NULL));
+    assert(!r.ok);
+    assert(lang_released == 1);
+    sz_error_free(r.error);
+    sz_lang_resource_free(lr);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
 
   /* Resource.use keeps a captured list env after the caller drops it. */
   {
