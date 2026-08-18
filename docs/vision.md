@@ -2,7 +2,7 @@
 
 Scuzz Lang is a Flutter-shaped product with a Scala-inspired language. It is not a Scala 3, Scala Native, or Maven citizen.
 
-One doc for product intent, design locks, language direction, and open work. Keep/cut tables: [`compatibility.md`](compatibility.md). Manifest schema: [`schemas/scuzz-toml.md`](schemas/scuzz-toml.md). App path and surface catalogs: [`guide.md`](guide.md). Future empirical pre-optimization: [`optimization.md`](optimization.md).
+One doc for product intent, design locks, language direction, and open work. Keep/cut tables: [`compatibility.md`](compatibility.md). Manifest schema: [`schemas/scuzz-toml.md`](schemas/scuzz-toml.md). App path and surface catalogs: [`guide.md`](guide.md). Checkout host setup: [`developer-environment.md`](developer-environment.md). Future empirical pre-optimization: [`optimization.md`](optimization.md).
 
 Edit this file when a decision or next-step order changes.
 
@@ -69,7 +69,7 @@ One CLI. One typer. One formatter. One linter. One testing strategy. No second a
 - **Verification** is built into `scuzz` and the language (laws, sim overlays, deterministic TestRuntime, fuzz search, mutation). Not optional crates or Maven/npm test plugins.
 - **JSON diagnostics** (`scuzz check --message-format=json`) are the editor protocol. `scuzz lsp` wraps that, overlays open buffers, and serves hover, completion, and definition from the same parse. Do not grow a second typer or schema.
 - **`scuzz.toml` is data** — package, path deps, `[ui]`. No plugin DSL. No `build.scuzz` hooks. Unknown keys rejected. Do not add `[plugins]`.
-- **Fingerprint** (incremental): miss → rebuild. The fingerprint includes compiler/runtime identity, native sources, target, clang version, Skia backend, and verify mode. No `scuzz clean` ritual.
+- **Fingerprint** (incremental): miss → rebuild. The fingerprint includes compiler/runtime identity, native sources, target, clang version, Skia backend, and verify mode. Live (`fingerprint`) and verify (`fingerprint.verify`) share `build/` artifacts. A compile writes its mode file and deletes the sibling so a later switch rebuilds. No `scuzz clean` ritual.
 - **Missing tools:** fail on the first missing tool with one install line. No `flutter doctor` mega-checklist.
 - **`scuzz package`:** Android runs `crates/embedder-mobile/shells/android/build_ndk.sh` and emits `libscuzz.so` (needs the NDK). iOS runs `crates/embedder-mobile/shells/ios/build_sim.sh` and emits a signed simulator `.app`. Not a Gradle/CocoaPods API.
 
