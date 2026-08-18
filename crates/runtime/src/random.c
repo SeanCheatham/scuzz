@@ -48,13 +48,8 @@ static uint64_t next_u64(void) {
   return g_state;
 }
 
-typedef struct {
-  int64_t bound;
-} RandEnv;
-
 static void *random_next_thunk(void *env) {
-  RandEnv *e = (RandEnv *)env;
-  int64_t bound = e ? e->bound : 0;
+  int64_t bound = sz_unbox_i64(env);
   int64_t n;
   if (bound <= 0)
     n = 0;
@@ -62,12 +57,12 @@ static void *random_next_thunk(void *env) {
     uint64_t u = next_u64() >> 33;
     n = (int64_t)(u % (uint64_t)bound);
   }
-  sz_free(e);
   return sz_box_i64(n);
 }
 
 SzIo *sz_random_next_int(int64_t bound) {
-  RandEnv *e = (RandEnv *)sz_alloc(sizeof(RandEnv));
-  e->bound = bound;
-  return sz_io_delay(random_next_thunk, e);
+  void *b = sz_box_i64(bound);
+  SzIo *io = sz_io_delay(random_next_thunk, b);
+  sz_release(b);
+  return io;
 }

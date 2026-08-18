@@ -1730,6 +1730,15 @@ int main(void) {
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzIo *io = sz_random_next_int(10);
+      sz_release(io);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
   }
 
   /* Stream — emit / eval / concat / evalMap / map / take / drop / filter / compileToList / drain */
@@ -2105,6 +2114,15 @@ int main(void) {
     r = sz_io_unsafe_run(sz_random_next_int(10));
     assert(r.ok);
     assert(sz_unbox_i64(r.value) >= 0 && sz_unbox_i64(r.value) < 10);
+    sz_release(r.value);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    r = sz_io_unsafe_run(sz_random_next_int(10));
+    assert(r.ok);
+    sz_release(r.value);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
 
     r = sz_io_unsafe_run(
         sz_fs_write(sz_string_from_cstr("a/b.txt"), sz_string_from_cstr("mem")));
