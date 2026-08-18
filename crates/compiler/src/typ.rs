@@ -1782,6 +1782,7 @@ fn infer_lambda_arg(
     }
 }
 
+#[inline(never)]
 fn infer_call(
     callee: &str,
     args: &[Expr],
@@ -1848,11 +1849,24 @@ fn infer_call(
             }
             Ok(Type::Int)
         }
-        "Str.startsWith" | "Str.eq" => {
+        "Str.startsWith" | "Str.eq" | "Str.contains" | "Str.endsWith" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::String)?;
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::Bool)
+        }
+        "Str.toInt" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(Type::Int)
+        }
+        "Str.replace" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            expect_ty(&arg_tys[2], &Type::String)?;
+            Ok(Type::String)
         }
         "Str.slice" => {
             expect_arity(callee, &arg_tys, 3)?;
@@ -5834,6 +5848,19 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Str.startsWith should typecheck");
+    }
+
+    #[test]
+    fn typechecks_str_contains_ends_toint_replace() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(if (Str.contains("ab", "b") && Str.endsWith("ab", "b")) "y" else "n")
+    _ <- IO.println(s"${Str.toInt("7", 0)}")
+    _ <- IO.println(Str.replace("a-b", "-", ":"))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Str.contains/endsWith/toInt/replace should typecheck");
     }
 
     #[test]

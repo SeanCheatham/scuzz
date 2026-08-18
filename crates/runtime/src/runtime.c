@@ -609,6 +609,90 @@ int64_t sz_string_starts_with(const SzString *s, const SzString *prefix) {
   return sz_string_index_of(s, prefix) == 0 ? 1 : 0;
 }
 
+int64_t sz_string_contains(const SzString *s, const SzString *needle) {
+  return sz_string_index_of(s, needle) >= 0 ? 1 : 0;
+}
+
+int64_t sz_string_ends_with(const SzString *s, const SzString *suffix) {
+  size_t slen;
+  size_t n;
+  if (!suffix)
+    return 0;
+  n = suffix->len;
+  if (n == 0)
+    return 1;
+  if (!s || n > s->len)
+    return 0;
+  slen = s->len;
+  return memcmp(s->data + slen - n, suffix->data, n) == 0 ? 1 : 0;
+}
+
+int64_t sz_string_to_int(const SzString *s, int64_t dflt) {
+  const char *p;
+  char *end;
+  long long v;
+  if (!s || !s->data || s->len == 0)
+    return dflt;
+  errno = 0;
+  p = s->data;
+  v = strtoll(p, &end, 10);
+  if (end == p || *end != '\0' || errno == ERANGE)
+    return dflt;
+  return (int64_t)v;
+}
+
+SzString *sz_string_replace(const SzString *s, const SzString *oldv, const SzString *newv) {
+  const char *src;
+  const char *oldp;
+  const char *newp;
+  size_t slen;
+  size_t nold;
+  size_t nnew;
+  size_t count;
+  size_t out_len;
+  size_t i;
+  size_t o;
+  char *buf;
+  SzString *out;
+  slen = s && s->data ? s->len : 0;
+  src = s && s->data ? s->data : "";
+  nold = oldv && oldv->data ? oldv->len : 0;
+  nnew = newv && newv->data ? newv->len : 0;
+  oldp = oldv && oldv->data ? oldv->data : "";
+  newp = newv && newv->data ? newv->data : "";
+  if (nold == 0)
+    return sz_string_from_bytes(src, slen);
+  count = 0;
+  i = 0;
+  while (i + nold <= slen) {
+    if (memcmp(src + i, oldp, nold) == 0) {
+      count++;
+      i += nold;
+    } else {
+      i++;
+    }
+  }
+  out_len = slen + count * nnew - count * nold;
+  buf = (char *)sz_alloc(out_len + 1);
+  i = 0;
+  o = 0;
+  while (i < slen) {
+    if (i + nold <= slen && memcmp(src + i, oldp, nold) == 0) {
+      if (nnew) {
+        memcpy(buf + o, newp, nnew);
+        o += nnew;
+      }
+      i += nold;
+    } else {
+      buf[o++] = src[i++];
+    }
+  }
+  buf[out_len] = '\0';
+  out = sz_string_from_bytes(buf, out_len);
+  sz_free(buf);
+  return out;
+}
+
 static int str_is_ws(unsigned char c) {
   return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }

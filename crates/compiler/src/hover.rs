@@ -322,6 +322,19 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Str.startsWith",
         "Str.startsWith(s: String, prefix: String): Bool",
     ),
+    (
+        "Str.contains",
+        "Str.contains(s: String, needle: String): Bool",
+    ),
+    (
+        "Str.endsWith",
+        "Str.endsWith(s: String, suffix: String): Bool",
+    ),
+    ("Str.toInt", "Str.toInt(s: String, default: Int): Int"),
+    (
+        "Str.replace",
+        "Str.replace(s: String, old: String, new: String): String",
+    ),
     ("Str.trim", "Str.trim(s: String): String"),
     ("Signal.int", "Signal.int(n: Int): SignalInt"),
     ("Signal.get", "Signal.get(s: SignalInt): Int"),
@@ -1279,6 +1292,27 @@ mod tests {
             h.contains("Str.startsWith(s: String, prefix: String): Bool"),
             "{h}"
         );
+    }
+
+    #[test]
+    fn hovers_str_contains() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (Str.contains("ab", "b")) "y" else "n")
+"#;
+        let h = hover_src(src, "contains");
+        assert!(
+            h.contains("Str.contains(s: String, needle: String): Bool"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_str_to_int() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(s"${Str.toInt("7", 0)}")
+"#;
+        let h = hover_src(src, "toInt");
+        assert!(h.contains("Str.toInt(s: String, default: Int): Int"), "{h}");
     }
 
     #[test]

@@ -118,6 +118,11 @@ jobs:
           grep -q "takeWhile:a" /tmp/kernel.out
           grep -q "dropWhile:b,c" /tmp/kernel.out
           grep -q "forall:y" /tmp/kernel.out
+          grep -q "contains:y" /tmp/kernel.out
+          grep -q "ends:y" /tmp/kernel.out
+          grep -q "toInt:7" /tmp/kernel.out
+          grep -q "miss:9" /tmp/kernel.out
+          grep -q "repl:a:b" /tmp/kernel.out
           cargo run -p scuzz -- run examples/io | tee /tmp/io.out
           grep -q "ref-ok" /tmp/io.out
           grep -q "queue-ok" /tmp/io.out

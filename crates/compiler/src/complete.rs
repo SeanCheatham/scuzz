@@ -666,6 +666,34 @@ mod tests {
     }
 
     #[test]
+    fn completes_str_contains_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.co\n";
+        let labels = labels_at(src, "Str.co");
+        assert!(labels.iter().any(|l| l == "Str.contains"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_ends_with_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.en\n";
+        let labels = labels_at(src, "Str.en");
+        assert!(labels.iter().any(|l| l == "Str.endsWith"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_replace_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.re\n";
+        let labels = labels_at(src, "Str.re");
+        assert!(labels.iter().any(|l| l == "Str.replace"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_to_int_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.to\n";
+        let labels = labels_at(src, "Str.to");
+        assert!(labels.iter().any(|l| l == "Str.toInt"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_str_trim_after_dot() {
         let src = "@main def main: IO[Unit] = Str.tr\n";
         let labels = labels_at(src, "Str.tr");

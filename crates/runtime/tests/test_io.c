@@ -2067,6 +2067,29 @@ int main(void) {
     assert(sz_string_starts_with(c, b) == 0);
     assert(sz_string_starts_with(c, sz_string_from_cstr("")) == 1);
     assert(sz_string_starts_with(c, sz_string_from_cstr("foobarbaz")) == 0);
+    assert(sz_string_contains(c, b) == 1);
+    assert(sz_string_contains(c, sz_string_from_cstr("zz")) == 0);
+    assert(sz_string_contains(c, sz_string_from_cstr("")) == 1);
+    assert(sz_string_ends_with(c, b) == 1);
+    assert(sz_string_ends_with(c, a) == 0);
+    assert(sz_string_ends_with(c, sz_string_from_cstr("")) == 1);
+    assert(sz_string_to_int(sz_string_from_cstr("42"), 0) == 42);
+    assert(sz_string_to_int(sz_string_from_cstr("-7"), 0) == -7);
+    assert(sz_string_to_int(sz_string_from_cstr("x"), 9) == 9);
+    assert(sz_string_to_int(sz_string_from_cstr("42x"), 9) == 9);
+    assert(sz_string_to_int(sz_string_from_cstr(""), 9) == 9);
+    {
+      SzString *rep = sz_string_replace(c, a, b);
+      assert(strcmp(sz_string_cstr(rep), "barbar") == 0);
+      sz_string_free(rep);
+      rep = sz_string_replace(sz_string_from_cstr("aaa"), sz_string_from_cstr("aa"),
+                              sz_string_from_cstr("b"));
+      assert(strcmp(sz_string_cstr(rep), "ba") == 0);
+      sz_string_free(rep);
+      rep = sz_string_replace(c, sz_string_from_cstr(""), b);
+      assert(strcmp(sz_string_cstr(rep), "foobar") == 0);
+      sz_string_free(rep);
+    }
     {
       SzString *tr = sz_string_trim(sz_string_from_cstr("  foo\t"));
       assert(strcmp(sz_string_cstr(tr), "foo") == 0);

@@ -65,6 +65,12 @@ SzString *sz_string_from_int(int64_t n);
 SzString *sz_string_from_float(double x);
 int64_t sz_string_index_of(const SzString *s, const SzString *needle);
 int64_t sz_string_starts_with(const SzString *s, const SzString *prefix);
+int64_t sz_string_ends_with(const SzString *s, const SzString *suffix);
+int64_t sz_string_contains(const SzString *s, const SzString *needle);
+/* Whole-string base-10 parse. Leading space is allowed. Junk or overflow uses `dflt`. */
+int64_t sz_string_to_int(const SzString *s, int64_t dflt);
+/* Replace every non-overlapping `oldv`. Empty `oldv` copies `s`. */
+SzString *sz_string_replace(const SzString *s, const SzString *oldv, const SzString *newv);
 SzString *sz_string_trim(const SzString *s);
 
 typedef struct SzList SzList;

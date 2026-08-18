@@ -76,6 +76,10 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_string_from_float(double)").unwrap();
     writeln!(out, "declare i64 @sz_string_index_of(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_string_starts_with(ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_string_contains(ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_string_ends_with(ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_string_to_int(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_string_replace(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_trim(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_lines(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_println(ptr)").unwrap();
@@ -3148,6 +3152,7 @@ fn emit_view_grid(code: &mut String, emitted_args: &[Emitted], prefix: &str) -> 
     val_emitted(std::mem::take(code), format!("%{prefix}_v"), Kind::Ptr)
 }
 
+#[inline(never)]
 fn emit_call(
     callee: &str,
     args: &[Expr],
@@ -3393,6 +3398,46 @@ fn emit_call(
             .unwrap();
             drop_owned_ptrs(&mut code, &emitted_args);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Str.contains" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_string_contains(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptrs(&mut code, &emitted_args);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Str.endsWith" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_string_ends_with(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptrs(&mut code, &emitted_args);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Str.toInt" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_string_to_int(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Str.replace" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_string_replace(ptr {}, ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            drop_owned_ptrs(&mut code, &emitted_args);
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "Str.lines" => {
             writeln!(
@@ -6691,6 +6736,32 @@ def id(m: Map[String, String]): Map[String, String] = m
         crate::typ::typecheck(&p).expect("typecheck");
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_string_starts_with"));
+    }
+
+    #[test]
+    fn emit_str_contains_ends_toint_replace() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(if (Str.contains("ab", "b")) "y" else "n")
+    _ <- IO.println(if (Str.endsWith("ab", "b")) "y" else "n")
+    _ <- IO.println(s"${Str.toInt("7", 0)}")
+    _ <- IO.println(Str.replace("a-b", "-", ":"))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_string_contains"));
+        assert!(ir.contains("sz_string_ends_with"));
+        assert!(ir.contains("sz_string_to_int"));
+        assert!(ir.contains("sz_string_replace"));
+        let needle = "call ptr @sz_string_replace(ptr ";
+        let at = ir.find(needle).expect("expected sz_string_replace");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of string {name} after replace:\n{ir}"
+        );
     }
 
     #[test]

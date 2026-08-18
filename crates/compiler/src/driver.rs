@@ -854,6 +854,15 @@ mod tests {
 
     #[test]
     fn examples_trait_generic_impl_sees_box() {
+        std::thread::Builder::new()
+            .stack_size(8 * 1024 * 1024)
+            .spawn(examples_trait_generic_impl_sees_box_inner)
+            .expect("spawn kernel typecheck")
+            .join()
+            .expect("kernel typecheck thread");
+    }
+
+    fn examples_trait_generic_impl_sees_box_inner() {
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples/kernel");
         let resolved = resolve_project(&dir).expect("resolve kernel example");
         let named: Vec<(String, String)> = resolved

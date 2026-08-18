@@ -127,6 +127,15 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"forall:${if (List.forall(xs, x => x != "z")) "y" else "n"}")
   } yield ()
 
+def strProof(): IO[Unit] =
+  for {
+    _ <- IO.println(s"contains:${if (Str.contains("ab", "b")) "y" else "n"}")
+    _ <- IO.println(s"ends:${if (Str.endsWith("ab", "b")) "y" else "n"}")
+    _ <- IO.println(s"toInt:${Str.toInt("7", 0)}")
+    _ <- IO.println(s"miss:${Str.toInt("x", 9)}")
+    _ <- IO.println(s"repl:${Str.replace("a-b", "-", ":")}")
+  } yield ()
+
 record Box[T](x: T):
   def get(): T =
     self.x
@@ -189,4 +198,5 @@ record Box[T](x: T):
     _ <- IO.println(s"neg:${0.0 - 1.5}")
     _ <- mapSetProof()
     _ <- listProof()
+    _ <- strProof()
   } yield ()
