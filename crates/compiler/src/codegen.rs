@@ -133,6 +133,10 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_filter(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_take(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_list_drop(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_list_take_right(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_list_drop_right(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_list_init(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_last(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_find(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_exists(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_takewhile(ptr, ptr, ptr)").unwrap();
@@ -3642,6 +3646,46 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
+        "List.takeRight" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_take_right(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "List.dropRight" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_drop_right(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "List.init" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_init(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "List.last" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_last(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
         "List.concat" => {
             writeln!(
                 code,
@@ -6679,6 +6723,53 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[exists_at..].contains(&format!("call void @sz_release(ptr {exists_pack})")),
             "expected last-use release of exists closure {exists_pack}:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_take_right_drop_right_init_last() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(List.takeRight(["a", "b", "c"], 2), ","))
+    _ <- IO.println(List.join(List.dropRight(["a", "b", "c"], 1), ","))
+    _ <- IO.println(List.join(List.init(["a", "b", "c"]), ","))
+    _ <- IO.println(List.join(List.last(["a", "b", "c"]), ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_take_right"));
+        assert!(ir.contains("sz_list_drop_right"));
+        assert!(ir.contains("sz_list_init"));
+        assert!(ir.contains("sz_list_last"));
+        let needle = "call ptr @sz_list_take_right(ptr ";
+        let at = ir.find(needle).expect("takeRight");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after takeRight:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_init(ptr ";
+        let at = ir.find(needle).expect("init");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after init:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_drop_right(ptr ";
+        let at = ir.find(needle).expect("dropRight");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after dropRight:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_last(ptr ";
+        let at = ir.find(needle).expect("last");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after last:\n{ir}"
         );
     }
 

@@ -1977,7 +1977,7 @@ fn infer_call(
             let elem = list_elem(&arg_tys[0])?;
             Ok(list_of(elem))
         }
-        "List.take" | "List.drop" => {
+        "List.take" | "List.drop" | "List.takeRight" | "List.dropRight" => {
             expect_arity(callee, &arg_tys, 2)?;
             list_elem(&arg_tys[0])?;
             expect_ty(&arg_tys[1], &Type::Int)?;
@@ -1993,6 +1993,11 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 1)?;
             let inner = list_elem(&arg_tys[0])?;
             let elem = list_elem(&inner)?;
+            Ok(list_of(elem))
+        }
+        "List.init" | "List.last" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            let elem = list_elem(&arg_tys[0])?;
             Ok(list_of(elem))
         }
         "List.find" => {
@@ -5792,6 +5797,25 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.take/drop/find/exists should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_take_right_drop_right_init_last() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = ["a", "b", "c"]
+    t = List.takeRight(xs, 2)
+    d = List.dropRight(xs, 1)
+    i = List.init(xs)
+    last = List.last(xs)
+    _ <- IO.println(List.join(t, ","))
+    _ <- IO.println(List.join(d, ","))
+    _ <- IO.println(List.join(i, ","))
+    _ <- IO.println(List.join(last, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.takeRight/dropRight/init/last should typecheck");
     }
 
     #[test]

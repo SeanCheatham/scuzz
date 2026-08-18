@@ -428,6 +428,14 @@ SzList *sz_list_filter(SzList *xs, SzListPred pred, void *env);
 SzList *sz_list_take(SzList *xs, int64_t n);
 /* Skip n heads and retain the suffix. n <= 0 retains xs. */
 SzList *sz_list_drop(SzList *xs, int64_t n);
+/* Last n heads as a shared suffix. n <= 0 is empty. */
+SzList *sz_list_take_right(SzList *xs, int64_t n);
+/* Drop last n heads as a new prefix spine. n <= 0 retains xs. */
+SzList *sz_list_drop_right(SzList *xs, int64_t n);
+/* All but the last cell as a new spine. Empty or one cell is empty. */
+SzList *sz_list_init(SzList *xs);
+/* Last head as a one-cell list. Empty if none. */
+SzList *sz_list_last(SzList *xs);
 /* First head for which `pred` is nonzero, as a one-cell list. Empty if none. */
 SzList *sz_list_find(SzList *xs, SzListPred pred, void *env);
 /* 1 if any head matches `pred`, else 0. */

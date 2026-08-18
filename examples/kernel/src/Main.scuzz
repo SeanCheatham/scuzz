@@ -129,6 +129,10 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"concat:${List.join(List.concat(["a"], ["b", "c"]), ",")}")
     xss = List.append(List.append(List.empty(), ["a"]), ["b", "c"])
     _ <- IO.println(s"flat:${List.join(List.flatten(xss), ",")}")
+    _ <- IO.println(s"takeRight:${List.join(List.takeRight(xs, 2), ",")}")
+    _ <- IO.println(s"dropRight:${List.join(List.dropRight(xs, 1), ",")}")
+    _ <- IO.println(s"init:${List.join(List.init(xs), ",")}")
+    _ <- IO.println(s"last:${List.join(List.last(xs), ",")}")
   } yield ()
 
 def strProof(): IO[Unit] =

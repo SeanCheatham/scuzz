@@ -617,6 +617,34 @@ mod tests {
     }
 
     #[test]
+    fn completes_list_take_right_after_dot() {
+        let src = "@main def main: IO[Unit] = List.takeR\n";
+        let labels = labels_at(src, "List.takeR");
+        assert!(labels.iter().any(|l| l == "List.takeRight"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_drop_right_after_dot() {
+        let src = "@main def main: IO[Unit] = List.dropR\n";
+        let labels = labels_at(src, "List.dropR");
+        assert!(labels.iter().any(|l| l == "List.dropRight"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_init_after_dot() {
+        let src = "@main def main: IO[Unit] = List.ini\n";
+        let labels = labels_at(src, "List.ini");
+        assert!(labels.iter().any(|l| l == "List.init"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_last_after_dot() {
+        let src = "@main def main: IO[Unit] = List.la\n";
+        let labels = labels_at(src, "List.la");
+        assert!(labels.iter().any(|l| l == "List.last"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_list_exists_after_dot() {
         let src = "@main def main: IO[Unit] = List.ex\n";
         let labels = labels_at(src, "List.ex");

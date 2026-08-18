@@ -3411,7 +3411,72 @@ int main(void) {
     sz_string_free(c);
   }
 
-  /* List.find / exists: first match or empty; Bool. */
+  /* List.takeRight / dropRight: suffix / prefix; n <= 0 matches take / drop. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzString *c = sz_string_from_cstr("c");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_cons(c, sz_list_nil())));
+    SzList *ys;
+    ys = sz_list_take_right(xs, 2);
+    assert(sz_list_len(ys) == 2);
+    assert(ys->head == b);
+    assert(ys->tail && ys->tail->head == c);
+    sz_list_free(ys);
+    ys = sz_list_take_right(xs, 0);
+    assert(sz_list_is_empty(ys));
+    ys = sz_list_take_right(NULL, 2);
+    assert(sz_list_is_empty(ys));
+    ys = sz_list_take_right(xs, 9);
+    assert(ys == xs);
+    sz_release(ys);
+    ys = sz_list_drop_right(xs, 1);
+    assert(sz_list_len(ys) == 2);
+    assert(ys->head == a);
+    assert(ys->tail && ys->tail->head == b);
+    sz_list_free(ys);
+    ys = sz_list_drop_right(xs, 0);
+    assert(ys == xs);
+    sz_release(ys);
+    ys = sz_list_drop_right(xs, 9);
+    assert(sz_list_is_empty(ys));
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
+  }
+
+  /* List.init / last: drop last; last as one cell. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzString *c = sz_string_from_cstr("c");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_cons(c, sz_list_nil())));
+    SzList *ys;
+    ys = sz_list_init(xs);
+    assert(sz_list_len(ys) == 2);
+    assert(ys->head == a);
+    assert(ys->tail && ys->tail->head == b);
+    sz_list_free(ys);
+    {
+      SzList *one = sz_list_cons(a, sz_list_nil());
+      ys = sz_list_init(one);
+      assert(sz_list_is_empty(ys));
+      sz_list_free(one);
+    }
+    ys = sz_list_init(NULL);
+    assert(sz_list_is_empty(ys));
+    ys = sz_list_last(xs);
+    assert(sz_list_len(ys) == 1);
+    assert(ys->head == c);
+    sz_list_free(ys);
+    ys = sz_list_last(NULL);
+    assert(sz_list_is_empty(ys));
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
+  }
   {
     SzString *a = sz_string_from_cstr("a");
     SzString *b = sz_string_from_cstr("b");

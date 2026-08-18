@@ -128,6 +128,43 @@ SzList *sz_list_drop(SzList *xs, int64_t n) {
   return p;
 }
 
+SzList *sz_list_take_right(SzList *xs, int64_t n) {
+  size_t len;
+  if (!xs || n <= 0)
+    return NULL;
+  len = sz_list_len(xs);
+  if ((uint64_t)n >= (uint64_t)len)
+    return sz_list_drop(xs, 0);
+  return sz_list_drop(xs, (int64_t)(len - (size_t)n));
+}
+
+SzList *sz_list_drop_right(SzList *xs, int64_t n) {
+  size_t len;
+  if (!xs)
+    return NULL;
+  if (n <= 0)
+    return sz_list_drop(xs, 0);
+  len = sz_list_len(xs);
+  if ((uint64_t)n >= (uint64_t)len)
+    return NULL;
+  return sz_list_take(xs, (int64_t)(len - (size_t)n));
+}
+
+SzList *sz_list_init(SzList *xs) {
+  if (!xs || !xs->tail)
+    return NULL;
+  return sz_list_cons_take(xs->head, sz_list_init(xs->tail));
+}
+
+SzList *sz_list_last(SzList *xs) {
+  SzList *p = xs;
+  if (!p)
+    return NULL;
+  while (p->tail)
+    p = p->tail;
+  return sz_list_cons(p->head, NULL);
+}
+
 SzList *sz_list_find(SzList *xs, SzListPred pred, void *env) {
   SzList *p;
   if (!pred)

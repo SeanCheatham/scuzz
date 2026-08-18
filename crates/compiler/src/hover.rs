@@ -367,6 +367,16 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("List.take", "List.take(xs: List[T], n: Int): List[T]"),
     ("List.drop", "List.drop(xs: List[T], n: Int): List[T]"),
     (
+        "List.takeRight",
+        "List.takeRight(xs: List[T], n: Int): List[T]",
+    ),
+    (
+        "List.dropRight",
+        "List.dropRight(xs: List[T], n: Int): List[T]",
+    ),
+    ("List.init", "List.init(xs: List[T]): List[T]"),
+    ("List.last", "List.last(xs: List[T]): List[T]"),
+    (
         "List.concat",
         "List.concat(xs: List[T], ys: List[T]): List[T]",
     ),
@@ -1258,6 +1268,36 @@ mod tests {
 "#;
         let h = hover_src(src, "take");
         assert!(h.contains("List.take(xs: List[T], n: Int): List[T]"), "{h}");
+    }
+
+    #[test]
+    fn hovers_list_take_right_init_last() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.takeRight(["a", "b"], 1), ","))
+"#;
+        let h = hover_src(src, "takeRight");
+        assert!(
+            h.contains("List.takeRight(xs: List[T], n: Int): List[T]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.dropRight(["a", "b"], 1), ","))
+"#;
+        let h = hover_src(src, "dropRight");
+        assert!(
+            h.contains("List.dropRight(xs: List[T], n: Int): List[T]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.init(["a", "b"]), ","))
+"#;
+        let h = hover_src(src, "init");
+        assert!(h.contains("List.init(xs: List[T]): List[T]"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.last(["a", "b"]), ","))
+"#;
+        let h = hover_src(src, "last");
+        assert!(h.contains("List.last(xs: List[T]): List[T]"), "{h}");
     }
 
     #[test]
