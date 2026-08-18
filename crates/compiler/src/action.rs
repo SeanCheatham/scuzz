@@ -18,6 +18,8 @@ pub struct CodeAction {
     pub end: usize,
     pub new_text: String,
     pub preferred: bool,
+    /// Check diagnostic this fix addresses (`None` for format).
+    pub diagnostic: Option<(String, usize, usize)>,
 }
 
 /// Edits for the LSP range in `current_file`. `range` is byte offsets; `None` is the whole file.
@@ -66,6 +68,7 @@ fn format_action(source: &str) -> Option<CodeAction> {
         end: source.len(),
         new_text: formatted,
         preferred: true,
+        diagnostic: None,
     })
 }
 
@@ -77,12 +80,12 @@ fn fill_match_actions(
     errs: &[TypeError],
     out: &mut Vec<CodeAction>,
 ) {
-    let missing_errs: Vec<(String, Option<&crate::span::Span>)> = errs
+    let missing_errs: Vec<(String, Option<&crate::span::Span>, String)> = errs
         .iter()
         .filter_map(|e| {
             let msg = type_err_msg(e);
             let rest = msg.strip_prefix("non-exhaustive match: missing ")?;
-            Some((rest.to_string(), e.span()))
+            Some((rest.to_string(), e.span(), e.to_string()))
         })
         .collect();
     if missing_errs.is_empty() {
@@ -96,9 +99,9 @@ fn fill_match_actions(
         if arms.is_empty() || !in_range(e.span.start, e.span.end, range) {
             return;
         }
-        let Some(rest) = missing_errs.iter().find_map(|(rest, span)| {
+        let Some((rest, span, msg)) = missing_errs.iter().find_map(|(rest, span, msg)| {
             if span_overlaps(span, e.span.start, e.span.end) {
-                Some(rest.as_str())
+                Some((rest.as_str(), span, msg.as_str()))
             } else {
                 None
             }
@@ -109,7 +112,12 @@ fn fill_match_actions(
         if missing.is_empty() {
             return;
         }
-        if let Some(a) = fill_match_edit(source, e.span.start, e.span.end, &arms[0], &missing) {
+        if let Some(mut a) = fill_match_edit(source, e.span.start, e.span.end, &arms[0], &missing) {
+            let (ds, de) = match span {
+                Some(s) => (s.start, s.end),
+                None => (e.span.start, e.span.end),
+            };
+            a.diagnostic = Some((msg.to_string(), ds, de));
             out.push(a);
         }
     });
@@ -152,6 +160,7 @@ fn fill_match_edit(
         end: brace + 1,
         new_text: text,
         preferred: true,
+        diagnostic: None,
     })
 }
 
@@ -213,12 +222,12 @@ fn unknown_callee_actions(
     errs: &[TypeError],
     out: &mut Vec<CodeAction>,
 ) {
-    let unknowns: Vec<(String, Option<&crate::span::Span>)> = errs
+    let unknowns: Vec<(String, Option<&crate::span::Span>, String)> = errs
         .iter()
         .filter_map(|e| {
             let msg = type_err_msg(e);
             let name = msg.strip_prefix("unknown function ")?;
-            Some((name.to_string(), e.span()))
+            Some((name.to_string(), e.span(), e.to_string()))
         })
         .collect();
     if unknowns.is_empty() {
@@ -233,17 +242,21 @@ fn unknown_callee_actions(
         if !in_range(e.span.start, e.span.end, range) {
             return;
         }
-        let hit = unknowns
-            .iter()
-            .any(|(name, span)| name == callee && span_overlaps(span, e.span.start, e.span.end));
-        if !hit {
+        let hit = unknowns.iter().find(|(name, span, _)| {
+            name == callee && span_overlaps(span, e.span.start, e.span.end)
+        });
+        let Some((_, span, msg)) = hit else {
             return;
-        }
+        };
         let Some(fix) = closest_callee(callee, &cands) else {
             return;
         };
         let Some((start, end)) = callee_span(source, e.span.start, e.span.end, callee) else {
             return;
+        };
+        let (ds, de) = match span {
+            Some(s) => (s.start, s.end),
+            None => (start, end),
         };
         out.push(CodeAction {
             title: format!("Change `{callee}` to `{fix}`"),
@@ -252,6 +265,7 @@ fn unknown_callee_actions(
             end,
             new_text: fix,
             preferred: true,
+            diagnostic: Some((msg.clone(), ds, de)),
         });
     });
 }
@@ -410,6 +424,7 @@ mod tests {
         assert_eq!(fmt.title, "Format document");
         assert!(fmt.new_text.contains("IO.println"), "{}", fmt.new_text);
         assert_ne!(fmt.new_text, src);
+        assert!(fmt.diagnostic.is_none());
     }
 
     #[test]
@@ -447,6 +462,8 @@ mod tests {
             .iter()
             .find(|a| a.title == "Fill missing match cases")
             .expect("fill");
+        let (msg, _, _) = fill.diagnostic.as_ref().expect("diagnostic");
+        assert!(msg.contains("non-exhaustive"), "{msg}");
         let mut edited = pretty.clone();
         edited.replace_range(fill.start..fill.end, &fill.new_text);
         assert!(
@@ -492,6 +509,8 @@ mod tests {
             .find(|a| a.new_text == "Str.contains")
             .expect("contains");
         assert!(fix.title.contains("Str.contain"), "{}", fix.title);
+        let (msg, _, _) = fix.diagnostic.as_ref().expect("diagnostic");
+        assert!(msg.contains("unknown function"), "{msg}");
         let mut edited = pretty.clone();
         edited.replace_range(fix.start..fix.end, &fix.new_text);
         assert!(edited.contains("Str.contains("), "{edited}");
@@ -509,6 +528,8 @@ mod tests {
             .find(|a| a.new_text == "IO.println")
             .expect("println");
         assert!(fix.title.contains("IO.printl"), "{}", fix.title);
+        let (msg, _, _) = fix.diagnostic.as_ref().expect("diagnostic");
+        assert!(msg.contains("unknown function IO.printl"), "{msg}");
         let mut edited = pretty.clone();
         edited.replace_range(fix.start..fix.end, &fix.new_text);
         assert!(edited.contains("IO.println("), "{edited}");

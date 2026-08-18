@@ -180,6 +180,33 @@ pub(crate) fn canonicalize_source_path(p: &Path) -> PathBuf {
     p.to_path_buf()
 }
 
+/// Resolve a diagnostic file label to a path under the project (overlay or disk).
+pub(crate) fn diagnostic_source_path(project_dir: &Path, file: &str) -> PathBuf {
+    let p = Path::new(file);
+    if p.is_absolute() {
+        return p.to_path_buf();
+    }
+    let joined = project_dir.join(file);
+    if joined.exists() {
+        return joined;
+    }
+    if let Some(idx) = file.find("/src/") {
+        return project_dir.join(&file[idx + 1..]);
+    }
+    if let Some(stripped) = file.strip_prefix("src/") {
+        return project_dir.join("src").join(stripped);
+    }
+    project_dir.join("src").join(file)
+}
+
+fn diagnostic_for_path(project_dir: &Path, d: &Diagnostic, path: &Path) -> bool {
+    let Some(file) = &d.file else {
+        return false;
+    };
+    canonicalize_source_path(&diagnostic_source_path(project_dir, file))
+        == canonicalize_source_path(path)
+}
+
 fn lookup_unsaved<'a>(path: &Path, unsaved: &'a BTreeMap<PathBuf, String>) -> Option<&'a String> {
     unsaved.get(path).or_else(|| {
         let key = canonicalize_source_path(path);
@@ -982,13 +1009,26 @@ pub fn semantic_tokens_range_project(
 }
 
 /// Code actions in a file. Same parse as [`check_project_with`].
+/// Optional last field is the check diagnostic this fix addresses.
 pub fn code_actions_project(
     project_dir: &Path,
     unsaved: &BTreeMap<PathBuf, String>,
     path: &Path,
     range: Option<((u32, u32), (u32, u32))>,
     only: &[String],
-) -> Result<Vec<(String, String, u32, u32, u32, u32, String, bool)>> {
+) -> Result<
+    Vec<(
+        String,
+        String,
+        u32,
+        u32,
+        u32,
+        u32,
+        String,
+        bool,
+        Option<(String, u32, u32, u32, u32)>,
+    )>,
+> {
     let Some((_resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
     else {
         return Ok(Vec::new());
@@ -1006,8 +1046,36 @@ pub fn code_actions_project(
         .map(|a| {
             let (sl, sc) = offset_to_utf16_pos(&text, a.start);
             let (el, ec) = offset_to_utf16_pos(&text, a.end);
-            (a.title, a.kind, sl, sc, el, ec, a.new_text, a.preferred)
+            let diagnostic = a.diagnostic.map(|(msg, ds, de)| {
+                let (dsl, dsc) = offset_to_utf16_pos(&text, ds);
+                let (del, dec) = offset_to_utf16_pos(&text, de);
+                (msg, dsl, dsc, del, dec)
+            });
+            (
+                a.title,
+                a.kind,
+                sl,
+                sc,
+                el,
+                ec,
+                a.new_text,
+                a.preferred,
+                diagnostic,
+            )
         })
+        .collect())
+}
+
+/// Diagnostics for one file. Same check as [`check_project_with`].
+pub fn document_diagnostics_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+) -> Result<Vec<Diagnostic>> {
+    let all = check_project_with(project_dir, unsaved)?;
+    Ok(all
+        .into_iter()
+        .filter(|d| diagnostic_for_path(project_dir, d, path))
         .collect())
 }
 
@@ -1447,6 +1515,39 @@ def b(): String = 1
             "{}",
             diags[0].message
         );
+    }
+
+    #[test]
+    fn document_diagnostics_project_filters_to_file() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"pull_diag\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = "@main def main: IO[Unit] =\n  IO.printl(\"ok\")\n";
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), formatted).unwrap();
+        let path = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let diags = document_diagnostics_project(root, &BTreeMap::new(), &path).unwrap();
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(
+            diags[0].message.contains("unknown function IO.printl"),
+            "{}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn document_diagnostics_project_empty_when_ok() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        let path = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let diags = document_diagnostics_project(root, &BTreeMap::new(), &path).unwrap();
+        assert!(diags.is_empty(), "{diags:?}");
     }
 
     #[test]
