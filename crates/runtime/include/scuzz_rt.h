@@ -73,6 +73,8 @@ SzString *sz_string_drop(const SzString *s, int64_t n);
 SzString *sz_string_take_right(const SzString *s, int64_t n);
 /* Drop last `n` bytes. `n` <= 0 copies `s`. */
 SzString *sz_string_drop_right(const SzString *s, int64_t n);
+/* Reverse bytes. */
+SzString *sz_string_reverse(const SzString *s);
 int64_t sz_string_starts_with(const SzString *s, const SzString *prefix);
 int64_t sz_string_ends_with(const SzString *s, const SzString *suffix);
 int64_t sz_string_contains(const SzString *s, const SzString *needle);
@@ -443,6 +445,10 @@ SzList *sz_list_append(SzList *xs, void *x);
 SzList *sz_list_set_at(SzList *xs, int64_t index, void *v);
 /* Keep heads for which `pred` is nonzero. New spine; cons retains heads. */
 SzList *sz_list_filter(SzList *xs, SzListPred pred, void *env);
+/* Keep heads for which `pred` is zero. */
+SzList *sz_list_filter_not(SzList *xs, SzListPred pred, void *env);
+/* Count heads for which `pred` is nonzero. */
+int64_t sz_list_count(SzList *xs, SzListPred pred, void *env);
 /* First n heads as a new spine. n <= 0 is empty. */
 SzList *sz_list_take(SzList *xs, int64_t n);
 /* Skip n heads and retain the suffix. n <= 0 retains xs. */

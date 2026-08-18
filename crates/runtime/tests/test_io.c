@@ -2173,6 +2173,14 @@ int main(void) {
         assert(strcmp(sz_string_cstr(gone), "") == 0);
         assert(strcmp(sz_string_cstr(tr), "ba") == 0);
         assert(strcmp(sz_string_cstr(dr), "abab") == 0);
+        {
+          SzString *rev = sz_string_reverse(sz_string_from_cstr("abc"));
+          SzString *empty = sz_string_reverse(sz_string_from_cstr(""));
+          assert(strcmp(sz_string_cstr(rev), "cba") == 0);
+          assert(strcmp(sz_string_cstr(empty), "") == 0);
+          sz_string_free(rev);
+          sz_string_free(empty);
+        }
         sz_string_free(t);
         sz_string_free(d);
         sz_string_free(t0);
@@ -3621,6 +3629,18 @@ int main(void) {
       assert(sz_list_forall(as, keep_not_b, NULL) == 1);
       sz_list_free(as);
     }
+    assert(sz_list_count(xs, keep_not_b, NULL) == 2);
+    assert(sz_list_count(xs, keep_none, NULL) == 0);
+    assert(sz_list_count(NULL, keep_not_b, NULL) == 0);
+    ys = sz_list_filter_not(xs, keep_not_b, NULL);
+    assert(sz_list_len(ys) == 1);
+    assert(ys->head == b);
+    sz_list_free(ys);
+    ys = sz_list_filter_not(xs, keep_none, NULL);
+    assert(sz_list_len(ys) == 3);
+    sz_list_free(ys);
+    ys = sz_list_filter_not(NULL, keep_not_b, NULL);
+    assert(sz_list_is_empty(ys));
     sz_list_free(xs);
     sz_string_free(a);
     sz_string_free(b);

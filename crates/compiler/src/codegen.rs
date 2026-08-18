@@ -80,6 +80,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_string_drop(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_string_take_right(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_string_drop_right(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_string_reverse(ptr)").unwrap();
     writeln!(out, "declare i64 @sz_string_starts_with(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_string_contains(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_string_ends_with(ptr, ptr)").unwrap();
@@ -141,6 +142,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_append(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_set_at(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_filter(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_filter_not(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_take(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_list_drop(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_list_take_right(ptr, i64)").unwrap();
@@ -151,6 +153,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_fill(i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_find(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_exists(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_list_count(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_takewhile(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_dropwhile(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_forall(ptr, ptr, ptr)").unwrap();
@@ -3201,6 +3204,17 @@ fn emit_call(
             false,
         );
     }
+    if callee == "List.filterNot" {
+        return emit_stream_pred(
+            "List.filterNot",
+            "sz_list_filter_not",
+            args,
+            ctx,
+            locals,
+            prefix,
+            false,
+        );
+    }
     if callee == "List.find" {
         return emit_stream_pred(
             "List.find",
@@ -3214,6 +3228,9 @@ fn emit_call(
     }
     if callee == "List.exists" {
         return emit_list_pred_i64("List.exists", "sz_list_exists", args, ctx, locals, prefix);
+    }
+    if callee == "List.count" {
+        return emit_list_pred_i64("List.count", "sz_list_count", args, ctx, locals, prefix);
     }
     if callee == "List.takeWhile" {
         return emit_stream_pred(
@@ -3458,6 +3475,16 @@ fn emit_call(
                 code,
                 "  %{prefix}_v = call ptr @sz_string_drop_right(ptr {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Str.reverse" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_string_reverse(ptr {})",
+                emitted_args[0].value
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
@@ -7041,6 +7068,42 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[fa_at..].contains(&format!("call void @sz_release(ptr {fa_pack})")),
             "expected last-use release of forall closure {fa_pack}:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_count_filter_not_str_reverse() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(Str.fromInt(List.count(["a", "b", "c"], x => x != "b")))
+    _ <- IO.println(List.join(List.filterNot(["a", "b", "c"], x => x == "b"), ","))
+    _ <- IO.println(Str.reverse("abc"))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_count"));
+        assert!(ir.contains("sz_list_filter_not"));
+        assert!(ir.contains("sz_string_reverse"));
+        let count_at = ir.find("call i64 @sz_list_count").expect("count");
+        let count_pack = last_cl2_before(&ir, count_at);
+        assert!(
+            ir[count_at..].contains(&format!("call void @sz_release(ptr {count_pack})")),
+            "expected last-use release of count closure {count_pack}:\n{ir}"
+        );
+        let fn_at = ir.find("call ptr @sz_list_filter_not").expect("filterNot");
+        let fn_pack = last_cl2_before(&ir, fn_at);
+        assert!(
+            ir[fn_at..].contains(&format!("call void @sz_release(ptr {fn_pack})")),
+            "expected last-use release of filterNot closure {fn_pack}:\n{ir}"
+        );
+        let needle = "call ptr @sz_string_reverse(ptr ";
+        let at = ir.find(needle).expect("reverse");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of string {name} after Str.reverse:\n{ir}"
         );
     }
 

@@ -139,6 +139,12 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"miss:${List.getOrElse(xs, 9, "z")}")
     _ <- IO.println(s"fill:${List.join(List.fill(3, "a"), ",")}")
     _ <- IO.println(s"rev:${List.join(List.reverse(xs), ",")}")
+    _ <- IO.println(s"count:${Str.fromInt(List.count(xs, x => x != "b"))}")
+    _ <- IO.println(s"fnot:${List.join(List.filterNot(xs, x => x == "b"), ",")}")
+    _ <- IO.println(s"llen:${Str.fromInt(List.len(xs))}")
+    _ <- IO.println(s"head:${List.head(xs)}")
+    _ <- IO.println(s"at:${List.at(xs, 1)}")
+    _ <- IO.println(s"tail:${List.join(List.tail(xs), ",")}")
   } yield ()
 
 def strProof(): IO[Unit] =
@@ -163,6 +169,12 @@ def strProof(): IO[Unit] =
     _ <- IO.println(s"drop:${Str.drop("abc", 1)}")
     _ <- IO.println(s"takeR:${Str.takeRight("abc", 2)}")
     _ <- IO.println(s"dropR:${Str.dropRight("abc", 1)}")
+    _ <- IO.println(s"srev:${Str.reverse("abc")}")
+    _ <- IO.println(s"slen:${Str.fromInt(Str.len("abc"))}")
+    _ <- IO.println(s"slice:${Str.slice("abc", 1, 3)}")
+    _ <- IO.println(s"ix:${Str.fromInt(Str.indexOf("ababa", "ba"))}")
+    _ <- IO.println(s"ch:${Str.fromInt(Str.charAt("abc", 1))}")
+    _ <- IO.println(s"lines:${List.join(Str.lines("a\nb"), ",")}")
   } yield ()
 
 record Box[T](x: T):

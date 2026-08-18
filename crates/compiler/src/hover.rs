@@ -369,6 +369,15 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Str.drop", "Str.drop(s: String, n: Int): String"),
     ("Str.takeRight", "Str.takeRight(s: String, n: Int): String"),
     ("Str.dropRight", "Str.dropRight(s: String, n: Int): String"),
+    ("Str.reverse", "Str.reverse(s: String): String"),
+    ("Str.len", "Str.len(s: String): Int"),
+    ("Str.charAt", "Str.charAt(s: String, i: Int): Int"),
+    ("Str.indexOf", "Str.indexOf(s: String, needle: String): Int"),
+    (
+        "Str.slice",
+        "Str.slice(s: String, start: Int, end: Int): String",
+    ),
+    ("Str.lines", "Str.lines(s: String): List[String]"),
     ("Signal.int", "Signal.int(n: Int): SignalInt"),
     ("Signal.get", "Signal.get(s: SignalInt): Int"),
     ("Signal.set", "Signal.set(s: SignalInt, n: Int): Unit"),
@@ -378,11 +387,24 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Signal.map(s: SignalInt, f: Int => String): SignalStr",
     ),
     ("Signal.list", "Signal.list(xs: List[T]): SignalList"),
+    ("List.empty", "List.empty(): List[T]"),
     ("List.isEmpty", "List.isEmpty(xs: List[T]): Bool"),
+    ("List.head", "List.head(xs: List[T]): T"),
+    ("List.tail", "List.tail(xs: List[T]): List[T]"),
+    ("List.len", "List.len(xs: List[T]): Int"),
+    ("List.at", "List.at(xs: List[T], i: Int): T"),
+    (
+        "List.join",
+        "List.join(xs: List[String], sep: String): String",
+    ),
     ("Str.eq", "Str.eq(a: String, b: String): Bool"),
     (
         "List.filter",
         "List.filter(xs: List[T], pred: T => Bool): List[T]",
+    ),
+    (
+        "List.filterNot",
+        "List.filterNot(xs: List[T], pred: T => Bool): List[T]",
     ),
     ("List.map", "List.map(xs: List[T], f: T => U): List[U]"),
     (
@@ -419,6 +441,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     (
         "List.exists",
         "List.exists(xs: List[T], pred: T => Bool): Bool",
+    ),
+    (
+        "List.count",
+        "List.count(xs: List[T], pred: T => Bool): Int",
     ),
     (
         "List.takeWhile",
@@ -1271,6 +1297,18 @@ mod tests {
     }
 
     #[test]
+    fn hovers_list_filter_not() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.filterNot(["a", "b"], x => x == "b"), ","))
+"#;
+        let h = hover_src(src, "filterNot");
+        assert!(
+            h.contains("List.filterNot(xs: List[T], pred: T => Bool): List[T]"),
+            "{h}"
+        );
+    }
+
+    #[test]
     fn hovers_list_map() {
         let src = r#"@main def main: IO[Unit] =
   IO.println(List.join(List.map(["a"], x => Str.concat(x, "!")), ","))
@@ -1363,6 +1401,18 @@ mod tests {
         let h = hover_src(src, "exists");
         assert!(
             h.contains("List.exists(xs: List[T], pred: T => Bool): Bool"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_list_count() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.count(["a", "b"], x => x != "b")))
+"#;
+        let h = hover_src(src, "count");
+        assert!(
+            h.contains("List.count(xs: List[T], pred: T => Bool): Int"),
             "{h}"
         );
     }
@@ -1540,6 +1590,79 @@ mod tests {
         let h = hover_src(src, "dropRight");
         assert!(
             h.contains("Str.dropRight(s: String, n: Int): String"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.reverse("abc"))
+"#;
+        let h = hover_src(src, "reverse");
+        assert!(h.contains("Str.reverse(s: String): String"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Str.len("abc")))
+"#;
+        let h = hover_src(src, "len");
+        assert!(h.contains("Str.len(s: String): Int"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Str.charAt("abc", 1)))
+"#;
+        let h = hover_src(src, "charAt");
+        assert!(h.contains("Str.charAt(s: String, i: Int): Int"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Str.indexOf("ababa", "ba")))
+"#;
+        let h = hover_src(src, "indexOf");
+        assert!(
+            h.contains("Str.indexOf(s: String, needle: String): Int"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.slice("abc", 1, 3))
+"#;
+        let h = hover_src(src, "slice");
+        assert!(
+            h.contains("Str.slice(s: String, start: Int, end: Int): String"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(Str.lines("a\nb"), ","))
+"#;
+        let h = hover_src(src, "lines");
+        assert!(h.contains("Str.lines(s: String): List[String]"), "{h}");
+    }
+
+    #[test]
+    fn hovers_list_empty_head_tail_len_at_join() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.len(List.empty())))
+"#;
+        let h = hover_src(src, "empty");
+        assert!(h.contains("List.empty(): List[T]"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.head(["a"]))
+"#;
+        let h = hover_src(src, "head");
+        assert!(h.contains("List.head(xs: List[T]): T"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.tail(["a", "b"]), ","))
+"#;
+        let h = hover_src(src, "tail");
+        assert!(h.contains("List.tail(xs: List[T]): List[T]"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.len(["a"])))
+"#;
+        let h = hover_src(src, "len");
+        assert!(h.contains("List.len(xs: List[T]): Int"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.at(["a", "b"], 1))
+"#;
+        let h = hover_src(src, "at");
+        assert!(h.contains("List.at(xs: List[T], i: Int): T"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(["a", "b"], ","))
+"#;
+        let h = hover_src(src, "join");
+        assert!(
+            h.contains("List.join(xs: List[String], sep: String): String"),
             "{h}"
         );
     }

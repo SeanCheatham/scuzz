@@ -596,6 +596,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_list_filter_not_after_dot() {
+        let src = "@main def main: IO[Unit] = List.filterN\n";
+        let labels = labels_at(src, "List.filterN");
+        assert!(labels.iter().any(|l| l == "List.filterNot"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_list_map_after_dot() {
         let src = "@main def main: IO[Unit] = List.ma\n";
         let labels = labels_at(src, "List.ma");
@@ -670,6 +677,55 @@ mod tests {
         let src = "@main def main: IO[Unit] = List.ex\n";
         let labels = labels_at(src, "List.ex");
         assert!(labels.iter().any(|l| l == "List.exists"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_count_after_dot() {
+        let src = "@main def main: IO[Unit] = List.cou\n";
+        let labels = labels_at(src, "List.cou");
+        assert!(labels.iter().any(|l| l == "List.count"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_empty_after_dot() {
+        let src = "@main def main: IO[Unit] = List.em\n";
+        let labels = labels_at(src, "List.em");
+        assert!(labels.iter().any(|l| l == "List.empty"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_head_after_dot() {
+        let src = "@main def main: IO[Unit] = List.he\n";
+        let labels = labels_at(src, "List.he");
+        assert!(labels.iter().any(|l| l == "List.head"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_tail_after_dot() {
+        let src = "@main def main: IO[Unit] = List.tai\n";
+        let labels = labels_at(src, "List.tai");
+        assert!(labels.iter().any(|l| l == "List.tail"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_len_after_dot() {
+        let src = "@main def main: IO[Unit] = List.len\n";
+        let labels = labels_at(src, "List.len");
+        assert!(labels.iter().any(|l| l == "List.len"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_at_after_dot() {
+        let src = "@main def main: IO[Unit] = List.at\n";
+        let labels = labels_at(src, "List.at");
+        assert!(labels.iter().any(|l| l == "List.at"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_join_after_dot() {
+        let src = "@main def main: IO[Unit] = List.jo\n";
+        let labels = labels_at(src, "List.jo");
+        assert!(labels.iter().any(|l| l == "List.join"), "{labels:?}");
     }
 
     #[test]
@@ -838,6 +894,48 @@ mod tests {
         let src = "@main def main: IO[Unit] = Str.dropR\n";
         let labels = labels_at(src, "Str.dropR");
         assert!(labels.iter().any(|l| l == "Str.dropRight"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_len_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.len\n";
+        let labels = labels_at(src, "Str.len");
+        assert!(labels.iter().any(|l| l == "Str.len"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_char_at_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.ch\n";
+        let labels = labels_at(src, "Str.ch");
+        assert!(labels.iter().any(|l| l == "Str.charAt"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_index_of_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.ind\n";
+        let labels = labels_at(src, "Str.ind");
+        assert!(labels.iter().any(|l| l == "Str.indexOf"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_slice_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.sl\n";
+        let labels = labels_at(src, "Str.sl");
+        assert!(labels.iter().any(|l| l == "Str.slice"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_lines_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.lin\n";
+        let labels = labels_at(src, "Str.lin");
+        assert!(labels.iter().any(|l| l == "Str.lines"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_reverse_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.rev\n";
+        let labels = labels_at(src, "Str.rev");
+        assert!(labels.iter().any(|l| l == "Str.reverse"), "{labels:?}");
     }
 
     #[test]

@@ -654,6 +654,21 @@ SzString *sz_string_drop_right(const SzString *s, int64_t n) {
   return sz_string_slice(s, 0, len - n);
 }
 
+SzString *sz_string_reverse(const SzString *s) {
+  size_t n = s && s->data ? s->len : 0;
+  const char *src = s && s->data ? s->data : "";
+  char *buf;
+  size_t i;
+  SzString *out;
+  buf = (char *)sz_alloc(n + 1);
+  for (i = 0; i < n; i++)
+    buf[i] = src[n - 1 - i];
+  buf[n] = '\0';
+  out = sz_string_from_bytes(buf, n);
+  sz_free(buf);
+  return out;
+}
+
 int64_t sz_string_starts_with(const SzString *s, const SzString *prefix) {
   return sz_string_index_of(s, prefix) == 0 ? 1 : 0;
 }

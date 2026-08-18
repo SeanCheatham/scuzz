@@ -109,6 +109,28 @@ SzList *sz_list_filter(SzList *xs, SzListPred pred, void *env) {
   return sz_list_filter(xs->tail, pred, env);
 }
 
+SzList *sz_list_filter_not(SzList *xs, SzListPred pred, void *env) {
+  if (!pred)
+    sz_panic("sz_list_filter_not(null pred)");
+  if (!xs)
+    return NULL;
+  if (!pred(xs->head, env))
+    return sz_list_cons_take(xs->head, sz_list_filter_not(xs->tail, pred, env));
+  return sz_list_filter_not(xs->tail, pred, env);
+}
+
+int64_t sz_list_count(SzList *xs, SzListPred pred, void *env) {
+  SzList *p;
+  int64_t n = 0;
+  if (!pred)
+    sz_panic("sz_list_count(null pred)");
+  for (p = xs; p; p = p->tail) {
+    if (pred(p->head, env))
+      n++;
+  }
+  return n;
+}
+
 SzList *sz_list_take(SzList *xs, int64_t n) {
   if (!xs || n <= 0)
     return NULL;

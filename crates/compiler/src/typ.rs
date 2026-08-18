@@ -1061,8 +1061,8 @@ fn kit_lambda_param_ty_at(
         ("Signal.map", 1) => Some(Type::Int),
         ("View.each", 1) if nargs == 2 => Some(Type::String),
         (
-            "List.filter" | "List.map" | "List.find" | "List.exists" | "List.takeWhile"
-            | "List.dropWhile" | "List.forall",
+            "List.filter" | "List.filterNot" | "List.map" | "List.find" | "List.exists"
+            | "List.count" | "List.takeWhile" | "List.dropWhile" | "List.forall",
             1,
         ) => prior.first().and_then(|t| list_elem(t).ok()),
         (
@@ -1097,9 +1097,9 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
         ("View.each", 1) if nargs == 2 => Some(Type::Opaque("View".into())),
         ("Signal.map", 1) | ("Stream.map", 1) => Some(Type::String),
         (
-            "List.filter" | "List.find" | "List.exists" | "List.takeWhile" | "List.dropWhile"
-            | "List.forall" | "Stream.filter" | "Stream.takeWhile" | "Stream.dropWhile"
-            | "Stream.find" | "Stream.exists",
+            "List.filter" | "List.filterNot" | "List.find" | "List.exists" | "List.count"
+            | "List.takeWhile" | "List.dropWhile" | "List.forall" | "Stream.filter"
+            | "Stream.takeWhile" | "Stream.dropWhile" | "Stream.find" | "Stream.exists",
             1,
         ) => Some(Type::Bool),
         (
@@ -1887,6 +1887,11 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(Type::String)
         }
+        "Str.reverse" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::String)
+        }
         "Str.fromInt" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
@@ -1996,7 +2001,7 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(list_of(elem))
         }
-        "List.filter" => {
+        "List.filter" | "List.filterNot" => {
             expect_arity(callee, &arg_tys, 2)?;
             let elem = list_elem(&arg_tys[0])?;
             Ok(list_of(elem))
@@ -2044,6 +2049,11 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 2)?;
             list_elem(&arg_tys[0])?;
             Ok(Type::Bool)
+        }
+        "List.count" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            list_elem(&arg_tys[0])?;
+            Ok(Type::Int)
         }
         "List.takeWhile" | "List.dropWhile" => {
             expect_arity(callee, &arg_tys, 2)?;
@@ -5903,6 +5913,20 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.takeWhile/dropWhile/forall should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_count_filter_not_str_reverse() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = ["a", "b", "c"]
+    _ <- IO.println(Str.fromInt(List.count(xs, x => x != "b")))
+    _ <- IO.println(List.join(List.filterNot(xs, x => x == "b"), ","))
+    _ <- IO.println(Str.reverse("abc"))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.count/filterNot and Str.reverse should typecheck");
     }
 
     #[test]
