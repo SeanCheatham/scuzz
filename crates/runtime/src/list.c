@@ -99,24 +99,23 @@ SzList *sz_list_set_at(SzList *xs, int64_t index, void *v) {
   return sz_list_cons_take(xs->head, rest);
 }
 
-SzList *sz_list_filter(SzList *xs, SzListPred pred, void *env) {
+static SzList *list_filter(SzList *xs, SzListPred pred, void *env, int keep,
+                           const char *panic) {
   if (!pred)
-    sz_panic("sz_list_filter(null pred)");
+    sz_panic(panic);
   if (!xs)
     return NULL;
-  if (pred(xs->head, env))
-    return sz_list_cons_take(xs->head, sz_list_filter(xs->tail, pred, env));
-  return sz_list_filter(xs->tail, pred, env);
+  if ((pred(xs->head, env) != 0) == keep)
+    return sz_list_cons_take(xs->head, list_filter(xs->tail, pred, env, keep, panic));
+  return list_filter(xs->tail, pred, env, keep, panic);
+}
+
+SzList *sz_list_filter(SzList *xs, SzListPred pred, void *env) {
+  return list_filter(xs, pred, env, 1, "sz_list_filter(null pred)");
 }
 
 SzList *sz_list_filter_not(SzList *xs, SzListPred pred, void *env) {
-  if (!pred)
-    sz_panic("sz_list_filter_not(null pred)");
-  if (!xs)
-    return NULL;
-  if (!pred(xs->head, env))
-    return sz_list_cons_take(xs->head, sz_list_filter_not(xs->tail, pred, env));
-  return sz_list_filter_not(xs->tail, pred, env);
+  return list_filter(xs, pred, env, 0, "sz_list_filter_not(null pred)");
 }
 
 int64_t sz_list_count(SzList *xs, SzListPred pred, void *env) {

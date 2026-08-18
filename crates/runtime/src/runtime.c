@@ -1028,8 +1028,6 @@ SzString *sz_error_message(const SzError *err) {
   return err->message;
 }
 
-int32_t sz_error_code(const SzError *err) { return err ? err->code : 0; }
-
 SzEither *sz_either_right(void *value) {
   SzEither *e = (SzEither *)sz_rc_alloc(sizeof(SzEither), SZ_RC_EITHER);
   e->is_right = 1;

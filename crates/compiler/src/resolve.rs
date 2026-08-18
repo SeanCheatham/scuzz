@@ -7,7 +7,6 @@
 //! (qualified or bare). Enums have no privacy yet.
 
 use crate::ast::{EnumDef, FunDef, Import};
-use crate::span::Span;
 use std::collections::HashMap;
 
 /// LLVM symbol for a user def: `@sz_user_{Module}_{name}` (or `@sz_user_{name}` when module is empty).
@@ -276,6 +275,7 @@ impl<'a> EnumIndex<'a> {
 mod tests {
     use super::*;
     use crate::ast::{EnumCase, EnumDef, Expr, ExprKind, FunDef, Type};
+    use crate::span::Span;
 
     fn def(module: &str, name: &str) -> FunDef {
         FunDef {

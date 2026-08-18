@@ -125,7 +125,6 @@ SzError *sz_error_new(int32_t code, const char *msg);
 void sz_error_free(SzError *err);
 /* Caller owns a ref. A non-null error shares its message. */
 SzString *sz_error_message(const SzError *err);
-int32_t sz_error_code(const SzError *err);
 
 /* --- Either (attempt results) -------------------------------------------- */
 

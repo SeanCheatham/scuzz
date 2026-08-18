@@ -135,29 +135,19 @@ SzMap *sz_map_remove(SzMap *m, void *k) {
                         sz_map_remove(m->right, min->key), m->key_kind);
 }
 
-static SzList *map_keys_acc(SzMap *m, SzList *acc) {
+static SzList *map_field_acc(SzMap *m, SzList *acc, int keys) {
   SzList *next;
   if (!m)
     return acc;
-  acc = map_keys_acc(m->right, acc);
-  next = sz_list_cons(m->key, acc);
+  acc = map_field_acc(m->right, acc, keys);
+  next = sz_list_cons(keys ? m->key : m->val, acc);
   sz_release(acc);
-  return map_keys_acc(m->left, next);
+  return map_field_acc(m->left, next, keys);
 }
 
-SzList *sz_map_keys(SzMap *m) { return map_keys_acc(m, NULL); }
+SzList *sz_map_keys(SzMap *m) { return map_field_acc(m, NULL, 1); }
 
-static SzList *map_values_acc(SzMap *m, SzList *acc) {
-  SzList *next;
-  if (!m)
-    return acc;
-  acc = map_values_acc(m->right, acc);
-  next = sz_list_cons(m->val, acc);
-  sz_release(acc);
-  return map_values_acc(m->left, next);
-}
-
-SzList *sz_map_values(SzMap *m) { return map_values_acc(m, NULL); }
+SzList *sz_map_values(SzMap *m) { return map_field_acc(m, NULL, 0); }
 
 int64_t sz_map_size(SzMap *m) {
   if (!m)
@@ -165,12 +155,14 @@ int64_t sz_map_size(SzMap *m) {
   return 1 + sz_map_size(m->left) + sz_map_size(m->right);
 }
 
-SzMap *sz_set_union(SzMap *a, SzMap *b) {
+/* Overlay `b`'s keys onto `a`. `take_b_val` copies values from `b`; else NULL. */
+static SzMap *map_overlay(SzMap *a, SzMap *b, int take_b_val) {
   SzList *keys;
   SzList *p;
   SzMap *cur;
   SzMap *next;
   int32_t kind;
+  void *v;
   if (!b) {
     sz_retain(a);
     return a;
@@ -184,7 +176,8 @@ SzMap *sz_set_union(SzMap *a, SzMap *b) {
   sz_retain(cur);
   keys = sz_map_keys(b);
   for (p = keys; p; p = p->tail) {
-    next = sz_map_set(cur, p->head, NULL, kind);
+    v = take_b_val ? sz_map_get_or(b, p->head, NULL) : NULL;
+    next = sz_map_set(cur, p->head, v, kind);
     sz_release(cur);
     cur = next;
   }
@@ -192,44 +185,28 @@ SzMap *sz_set_union(SzMap *a, SzMap *b) {
   return cur;
 }
 
-SzMap *sz_set_intersect(SzMap *a, SzMap *b) {
+/* Keep keys of `a` that are (or are not) in `b`. `take_a_val` copies values. */
+static SzMap *map_keep(SzMap *a, SzMap *b, int want_in_b, int take_a_val) {
   SzList *keys;
   SzList *p;
   SzMap *out = NULL;
   SzMap *next;
   int32_t kind;
-  if (!a || !b)
-    return NULL;
-  kind = a->key_kind;
-  keys = sz_map_keys(a);
-  for (p = keys; p; p = p->tail) {
-    if (sz_map_contains(b, p->head)) {
-      next = sz_map_set(out, p->head, NULL, kind);
-      sz_release(out);
-      out = next;
-    }
-  }
-  sz_list_free(keys);
-  return out;
-}
-
-SzMap *sz_set_diff(SzMap *a, SzMap *b) {
-  SzList *keys;
-  SzList *p;
-  SzMap *out = NULL;
-  SzMap *next;
-  int32_t kind;
+  void *v;
   if (!a)
     return NULL;
   if (!b) {
+    if (want_in_b)
+      return NULL;
     sz_retain(a);
     return a;
   }
   kind = a->key_kind;
   keys = sz_map_keys(a);
   for (p = keys; p; p = p->tail) {
-    if (!sz_map_contains(b, p->head)) {
-      next = sz_map_set(out, p->head, NULL, kind);
+    if ((sz_map_contains(b, p->head) != 0) == want_in_b) {
+      v = take_a_val ? sz_map_get_or(a, p->head, NULL) : NULL;
+      next = sz_map_set(out, p->head, v, kind);
       sz_release(out);
       out = next;
     }
@@ -238,107 +215,39 @@ SzMap *sz_set_diff(SzMap *a, SzMap *b) {
   return out;
 }
 
-SzMap *sz_map_union(SzMap *a, SzMap *b) {
-  SzList *keys;
-  SzList *p;
-  SzMap *cur;
-  SzMap *next;
-  int32_t kind;
-  if (!b) {
-    sz_retain(a);
-    return a;
-  }
-  if (!a) {
-    sz_retain(b);
-    return b;
-  }
-  kind = a->key_kind;
-  cur = a;
-  sz_retain(cur);
-  keys = sz_map_keys(b);
-  for (p = keys; p; p = p->tail) {
-    next = sz_map_set(cur, p->head, sz_map_get_or(b, p->head, NULL), kind);
-    sz_release(cur);
-    cur = next;
-  }
-  sz_list_free(keys);
-  return cur;
-}
+SzMap *sz_set_union(SzMap *a, SzMap *b) { return map_overlay(a, b, 0); }
 
-SzMap *sz_map_intersect(SzMap *a, SzMap *b) {
-  SzList *keys;
-  SzList *p;
-  SzMap *out = NULL;
-  SzMap *next;
-  int32_t kind;
-  if (!a || !b)
-    return NULL;
-  kind = a->key_kind;
-  keys = sz_map_keys(a);
-  for (p = keys; p; p = p->tail) {
-    if (sz_map_contains(b, p->head)) {
-      next = sz_map_set(out, p->head, sz_map_get_or(a, p->head, NULL), kind);
-      sz_release(out);
-      out = next;
-    }
-  }
-  sz_list_free(keys);
-  return out;
-}
+SzMap *sz_set_intersect(SzMap *a, SzMap *b) { return map_keep(a, b, 1, 0); }
 
-SzMap *sz_map_diff(SzMap *a, SzMap *b) {
-  SzList *keys;
-  SzList *p;
-  SzMap *out = NULL;
-  SzMap *next;
-  int32_t kind;
-  if (!a)
-    return NULL;
-  if (!b) {
-    sz_retain(a);
-    return a;
-  }
-  kind = a->key_kind;
-  keys = sz_map_keys(a);
-  for (p = keys; p; p = p->tail) {
-    if (!sz_map_contains(b, p->head)) {
-      next = sz_map_set(out, p->head, sz_map_get_or(a, p->head, NULL), kind);
-      sz_release(out);
-      out = next;
-    }
-  }
-  sz_list_free(keys);
-  return out;
-}
+SzMap *sz_set_diff(SzMap *a, SzMap *b) { return map_keep(a, b, 0, 0); }
 
-int64_t sz_set_is_subset(SzMap *a, SzMap *b) {
+SzMap *sz_map_union(SzMap *a, SzMap *b) { return map_overlay(a, b, 1); }
+
+SzMap *sz_map_intersect(SzMap *a, SzMap *b) { return map_keep(a, b, 1, 1); }
+
+SzMap *sz_map_diff(SzMap *a, SzMap *b) { return map_keep(a, b, 0, 1); }
+
+static int64_t set_keys_match(SzMap *a, SzMap *b, int want_in_b) {
   SzList *keys;
   SzList *p;
+  int64_t ok = 1;
   if (!a)
     return 1;
   keys = sz_map_keys(a);
   for (p = keys; p; p = p->tail) {
-    if (!sz_map_contains(b, p->head)) {
-      sz_list_free(keys);
-      return 0;
+    if ((sz_map_contains(b, p->head) != 0) != want_in_b) {
+      ok = 0;
+      break;
     }
   }
   sz_list_free(keys);
-  return 1;
+  return ok;
 }
+
+int64_t sz_set_is_subset(SzMap *a, SzMap *b) { return set_keys_match(a, b, 1); }
 
 int64_t sz_set_is_disjoint(SzMap *a, SzMap *b) {
-  SzList *keys;
-  SzList *p;
   if (!a || !b)
     return 1;
-  keys = sz_map_keys(a);
-  for (p = keys; p; p = p->tail) {
-    if (sz_map_contains(b, p->head)) {
-      sz_list_free(keys);
-      return 0;
-    }
-  }
-  sz_list_free(keys);
-  return 1;
+  return set_keys_match(a, b, 0);
 }

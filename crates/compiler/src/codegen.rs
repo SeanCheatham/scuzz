@@ -3232,6 +3232,11 @@ fn emit_view_grid(code: &mut String, emitted_args: &[Emitted], prefix: &str) -> 
     val_emitted(std::mem::take(code), format!("%{prefix}_v"), Kind::Ptr)
 }
 
+fn emit_view_wrap(llvm: &str, args: String, mut code: String, prefix: &str) -> Emitted {
+    writeln!(code, "  %{prefix}_v = call ptr @{llvm}({args})").unwrap();
+    val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+}
+
 #[inline(never)]
 fn emit_call(
     callee: &str,
@@ -3240,117 +3245,41 @@ fn emit_call(
     locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
+    const PRED_PTR: &[(&str, &str, bool)] = &[
+        ("List.filter", "sz_list_filter", false),
+        ("List.filterNot", "sz_list_filter_not", false),
+        ("List.find", "sz_list_find", false),
+        ("List.takeWhile", "sz_list_takewhile", false),
+        ("List.span", "sz_list_span", false),
+        ("List.partition", "sz_list_partition", false),
+        ("List.dropWhile", "sz_list_dropwhile", false),
+        ("Stream.takeWhile", "sz_stream_takewhile", false),
+        ("Stream.dropWhile", "sz_stream_dropwhile", false),
+        ("Stream.find", "sz_stream_find", false),
+        ("Stream.exists", "sz_stream_exists", true),
+    ];
+    const PRED_I64: &[(&str, &str)] = &[
+        ("List.exists", "sz_list_exists"),
+        ("List.indexWhere", "sz_list_index_where"),
+        ("List.lastIndexWhere", "sz_list_last_index_where"),
+        ("List.count", "sz_list_count"),
+        ("List.forall", "sz_list_forall"),
+    ];
     if callee == "Signal.map" {
         return emit_signal_map(args, ctx, locals, prefix);
     }
     if callee == "View.each" {
         return emit_view_each(args, ctx, locals, prefix);
     }
-    if callee == "List.filter" {
-        return emit_stream_pred(
-            "List.filter",
-            "sz_list_filter",
-            args,
-            ctx,
-            locals,
-            prefix,
-            false,
-        );
+    for &(name, llvm, io_bool) in PRED_PTR {
+        if callee == name {
+            return emit_stream_pred(name, llvm, args, ctx, locals, prefix, io_bool);
+        }
     }
-    if callee == "List.filterNot" {
-        return emit_stream_pred(
-            "List.filterNot",
-            "sz_list_filter_not",
-            args,
-            ctx,
-            locals,
-            prefix,
-            false,
-        );
-    }
-    if callee == "List.find" {
-        return emit_stream_pred(
-            "List.find",
-            "sz_list_find",
-            args,
-            ctx,
-            locals,
-            prefix,
-            false,
-        );
-    }
-    if callee == "List.exists" {
-        return emit_list_pred_i64("List.exists", "sz_list_exists", args, ctx, locals, prefix);
-    }
-    if callee == "List.indexWhere" {
-        return emit_list_pred_i64(
-            "List.indexWhere",
-            "sz_list_index_where",
-            args,
-            ctx,
-            locals,
-            prefix,
-        );
-    }
-    if callee == "List.lastIndexWhere" {
-        return emit_list_pred_i64(
-            "List.lastIndexWhere",
-            "sz_list_last_index_where",
-            args,
-            ctx,
-            locals,
-            prefix,
-        );
-    }
-    if callee == "List.count" {
-        return emit_list_pred_i64("List.count", "sz_list_count", args, ctx, locals, prefix);
-    }
-    if callee == "List.takeWhile" {
-        return emit_stream_pred(
-            "List.takeWhile",
-            "sz_list_takewhile",
-            args,
-            ctx,
-            locals,
-            prefix,
-            false,
-        );
-    }
-    if callee == "List.span" {
-        return emit_stream_pred(
-            "List.span",
-            "sz_list_span",
-            args,
-            ctx,
-            locals,
-            prefix,
-            false,
-        );
-    }
-    if callee == "List.partition" {
-        return emit_stream_pred(
-            "List.partition",
-            "sz_list_partition",
-            args,
-            ctx,
-            locals,
-            prefix,
-            false,
-        );
-    }
-    if callee == "List.dropWhile" {
-        return emit_stream_pred(
-            "List.dropWhile",
-            "sz_list_dropwhile",
-            args,
-            ctx,
-            locals,
-            prefix,
-            false,
-        );
-    }
-    if callee == "List.forall" {
-        return emit_list_pred_i64("List.forall", "sz_list_forall", args, ctx, locals, prefix);
+    for &(name, llvm) in PRED_I64 {
+        if callee == name {
+            return emit_list_pred_i64(name, llvm, args, ctx, locals, prefix);
+        }
     }
     if callee == "List.map" {
         return emit_ptr_map("List.map", "sz_list_map", args, ctx, locals, prefix, true);
@@ -3377,50 +3306,6 @@ fn emit_call(
     }
     if callee == "Stream.filter" {
         return emit_stream_filter(args, ctx, locals, prefix);
-    }
-    if callee == "Stream.takeWhile" {
-        return emit_stream_pred(
-            "Stream.takeWhile",
-            "sz_stream_takewhile",
-            args,
-            ctx,
-            locals,
-            prefix,
-            false,
-        );
-    }
-    if callee == "Stream.dropWhile" {
-        return emit_stream_pred(
-            "Stream.dropWhile",
-            "sz_stream_dropwhile",
-            args,
-            ctx,
-            locals,
-            prefix,
-            false,
-        );
-    }
-    if callee == "Stream.find" {
-        return emit_stream_pred(
-            "Stream.find",
-            "sz_stream_find",
-            args,
-            ctx,
-            locals,
-            prefix,
-            false,
-        );
-    }
-    if callee == "Stream.exists" {
-        return emit_stream_pred(
-            "Stream.exists",
-            "sz_stream_exists",
-            args,
-            ctx,
-            locals,
-            prefix,
-            true,
-        );
     }
     if callee == "Stream.map" {
         return emit_stream_map(args, ctx, locals, prefix);
@@ -3529,105 +3414,39 @@ fn emit_call(
             writeln!(code, "  %{prefix}_v = fptosi double {x} to i64").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        "Str.indexOf" => {
+        "Str.indexOf" | "Str.lastIndexOf" | "Str.startsWith" | "Str.contains" | "Str.endsWith" => {
+            let rt = match callee {
+                "Str.indexOf" => "sz_string_index_of",
+                "Str.lastIndexOf" => "sz_string_last_index_of",
+                "Str.startsWith" => "sz_string_starts_with",
+                "Str.contains" => "sz_string_contains",
+                _ => "sz_string_ends_with",
+            };
             writeln!(
                 code,
-                "  %{prefix}_v = call i64 @sz_string_index_of(ptr {}, ptr {})",
+                "  %{prefix}_v = call i64 @{rt}(ptr {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
             drop_owned_ptrs(&mut code, &emitted_args);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        "Str.lastIndexOf" => {
+        "Str.take" | "Str.drop" | "Str.takeRight" | "Str.dropRight" | "Str.repeat" => {
+            let rt = match callee {
+                "Str.take" => "sz_string_take",
+                "Str.drop" => "sz_string_drop",
+                "Str.takeRight" => "sz_string_take_right",
+                "Str.dropRight" => "sz_string_drop_right",
+                _ => "sz_string_repeat",
+            };
             writeln!(
                 code,
-                "  %{prefix}_v = call i64 @sz_string_last_index_of(ptr {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            drop_owned_ptrs(&mut code, &emitted_args);
-            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
-        }
-        "Str.take" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_string_take(ptr {}, i64 {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "Str.drop" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_string_drop(ptr {}, i64 {})",
+                "  %{prefix}_v = call ptr @{rt}(ptr {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "Str.takeRight" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_string_take_right(ptr {}, i64 {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "Str.dropRight" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_string_drop_right(ptr {}, i64 {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "Str.reverse" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_string_reverse(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "Str.startsWith" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call i64 @sz_string_starts_with(ptr {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            drop_owned_ptrs(&mut code, &emitted_args);
-            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
-        }
-        "Str.contains" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call i64 @sz_string_contains(ptr {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            drop_owned_ptrs(&mut code, &emitted_args);
-            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
-        }
-        "Str.endsWith" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call i64 @sz_string_ends_with(ptr {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            drop_owned_ptrs(&mut code, &emitted_args);
-            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Str.toInt" => {
             writeln!(
@@ -3659,137 +3478,70 @@ fn emit_call(
             drop_owned_ptrs(&mut code, &emitted_args);
             owned_ptr(code, format!("%{prefix}_v"))
         }
-        "Str.lines" => {
+        "Str.lines" | "Str.trim" | "Str.toLower" | "Str.toUpper" | "Str.capitalize"
+        | "Str.reverse" => {
+            let rt = match callee {
+                "Str.lines" => "sz_string_lines",
+                "Str.trim" => "sz_string_trim",
+                "Str.toLower" => "sz_string_to_lower",
+                "Str.toUpper" => "sz_string_to_upper",
+                "Str.capitalize" => "sz_string_capitalize",
+                _ => "sz_string_reverse",
+            };
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @sz_string_lines(ptr {})",
+                "  %{prefix}_v = call ptr @{rt}(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
-        "Str.trim" => {
+        "Str.isEmpty" | "Str.nonEmpty" | "Str.isBlank" => {
+            let rt = match callee {
+                "Str.isEmpty" => "sz_string_is_empty",
+                "Str.nonEmpty" => "sz_string_non_empty",
+                _ => "sz_string_is_blank",
+            };
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @sz_string_trim(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "Str.isEmpty" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call i64 @sz_string_is_empty(ptr {})",
+                "  %{prefix}_v = call i64 @{rt}(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        "Str.nonEmpty" => {
+        "Str.stripPrefix" | "Str.stripSuffix" => {
+            let rt = if callee == "Str.stripPrefix" {
+                "sz_string_strip_prefix"
+            } else {
+                "sz_string_strip_suffix"
+            };
             writeln!(
                 code,
-                "  %{prefix}_v = call i64 @sz_string_non_empty(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
-        }
-        "Str.toLower" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_string_to_lower(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "Str.toUpper" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_string_to_upper(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "Str.capitalize" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_string_capitalize(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "Str.repeat" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_string_repeat(ptr {}, i64 {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "Str.stripPrefix" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_string_strip_prefix(ptr {}, ptr {})",
+                "  %{prefix}_v = call ptr @{rt}(ptr {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
             drop_owned_ptrs(&mut code, &emitted_args);
             owned_ptr(code, format!("%{prefix}_v"))
         }
-        "Str.stripSuffix" => {
+        "Str.padLeft" | "Str.padRight" => {
+            let rt = if callee == "Str.padLeft" {
+                "sz_string_pad_left"
+            } else {
+                "sz_string_pad_right"
+            };
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @sz_string_strip_suffix(ptr {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            drop_owned_ptrs(&mut code, &emitted_args);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "Str.padLeft" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_string_pad_left(ptr {}, i64 {}, ptr {})",
+                "  %{prefix}_v = call ptr @{rt}(ptr {}, i64 {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             drop_owned_ptr(&mut code, &emitted_args[2]);
             owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "Str.padRight" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_string_pad_right(ptr {}, i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            drop_owned_ptr(&mut code, &emitted_args[2]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "Str.isBlank" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call i64 @sz_string_is_blank(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "List.empty" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_list_nil()").unwrap();
@@ -3818,10 +3570,15 @@ fn emit_call(
             drop_owned_ptrs(&mut code, &emitted_args);
             owned_ptr(code, format!("%{prefix}_v"))
         }
-        "List.isEmpty" => {
+        "List.isEmpty" | "List.nonEmpty" => {
+            let rt = if callee == "List.isEmpty" {
+                "sz_list_is_empty"
+            } else {
+                "sz_list_non_empty"
+            };
             writeln!(
                 code,
-                "  %{prefix}_i = call i32 @sz_list_is_empty(ptr {})",
+                "  %{prefix}_i = call i32 @{rt}(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -3829,31 +3586,15 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        "List.nonEmpty" => {
+        "List.head" | "List.tail" => {
+            let rt = if callee == "List.head" {
+                "sz_list_head"
+            } else {
+                "sz_list_tail"
+            };
             writeln!(
                 code,
-                "  %{prefix}_i = call i32 @sz_list_non_empty(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            writeln!(code, "  %{prefix}_v = zext i32 %{prefix}_i to i64").unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
-        }
-        "List.head" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_list_head(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            take_owned_ptr(&mut code, &emitted_args[0], &format!("%{prefix}_v"));
-            ptr_owned_if(code, format!("%{prefix}_v"), emitted_args[0].owned)
-        }
-        "List.tail" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_list_tail(ptr {})",
+                "  %{prefix}_v = call ptr @{rt}(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -3880,10 +3621,20 @@ fn emit_call(
             take_owned_ptr(&mut code, &emitted_args[0], &format!("%{prefix}_v"));
             ptr_owned_if(code, format!("%{prefix}_v"), emitted_args[0].owned)
         }
-        "List.reverse" => {
+        "List.reverse" | "List.init" | "List.inits" | "List.tails" | "List.last"
+        | "List.flatten" | "List.indices" => {
+            let rt = match callee {
+                "List.reverse" => "sz_list_reverse",
+                "List.init" => "sz_list_init",
+                "List.inits" => "sz_list_inits",
+                "List.tails" => "sz_list_tails",
+                "List.last" => "sz_list_last",
+                "List.flatten" => "sz_list_flatten",
+                _ => "sz_list_indices",
+            };
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @sz_list_reverse(ptr {})",
+                "  %{prefix}_v = call ptr @{rt}(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -3907,91 +3658,21 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[1]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
-        "List.take" => {
+        "List.take" | "List.drop" | "List.takeRight" | "List.dropRight" | "List.splitAt"
+        | "List.grouped" | "List.sliding" => {
+            let rt = match callee {
+                "List.take" => "sz_list_take",
+                "List.drop" => "sz_list_drop",
+                "List.takeRight" => "sz_list_take_right",
+                "List.dropRight" => "sz_list_drop_right",
+                "List.splitAt" => "sz_list_split_at",
+                "List.grouped" => "sz_list_grouped",
+                _ => "sz_list_sliding",
+            };
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @sz_list_take(ptr {}, i64 {})",
+                "  %{prefix}_v = call ptr @{rt}(ptr {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "List.splitAt" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_list_split_at(ptr {}, i64 {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "List.drop" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_list_drop(ptr {}, i64 {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "List.takeRight" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_list_take_right(ptr {}, i64 {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "List.dropRight" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_list_drop_right(ptr {}, i64 {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "List.init" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_list_init(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "List.inits" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_list_inits(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "List.tails" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_list_tails(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "List.last" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_list_last(ptr {})",
-                emitted_args[0].value
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
@@ -4128,36 +3809,11 @@ fn emit_call(
             }
             owned_ptr(code, format!("%{prefix}_v"))
         }
-        "List.grouped" | "List.sliding" => {
-            let rt = if callee == "List.grouped" {
-                "sz_list_grouped"
-            } else {
-                "sz_list_sliding"
-            };
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @{rt}(ptr {}, i64 {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
         "List.slice" => {
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @sz_list_slice(ptr {}, i64 {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "List.indices" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_list_indices(ptr {})",
-                emitted_args[0].value
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
@@ -4172,16 +3828,6 @@ fn emit_call(
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             drop_owned_ptr(&mut code, &emitted_args[1]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "List.flatten" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_list_flatten(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
         "List.append" => {
@@ -4491,34 +4137,33 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        "Map.isEmpty" | "Set.isEmpty" => {
+        "Map.isEmpty" | "Set.isEmpty" | "Map.nonEmpty" | "Set.nonEmpty" => {
+            let pred = if callee.ends_with("isEmpty") {
+                "eq"
+            } else {
+                "ne"
+            };
             writeln!(
                 code,
                 "  %{prefix}_n = call i64 @sz_map_size(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
-            writeln!(code, "  %{prefix}_b = icmp eq i64 %{prefix}_n, 0").unwrap();
+            writeln!(code, "  %{prefix}_b = icmp {pred} i64 %{prefix}_n, 0").unwrap();
             writeln!(code, "  %{prefix}_v = zext i1 %{prefix}_b to i64").unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        "Map.nonEmpty" | "Set.nonEmpty" => {
+        "Fs.read" | "Fs.list" | "Fs.mkdirs" | "Fs.canonicalize" => {
+            let rt = match callee {
+                "Fs.read" => "sz_fs_read",
+                "Fs.list" => "sz_fs_list",
+                "Fs.mkdirs" => "sz_fs_mkdirs",
+                _ => "sz_fs_canonicalize",
+            };
             writeln!(
                 code,
-                "  %{prefix}_n = call i64 @sz_map_size(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            writeln!(code, "  %{prefix}_b = icmp ne i64 %{prefix}_n, 0").unwrap();
-            writeln!(code, "  %{prefix}_v = zext i1 %{prefix}_b to i64").unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
-        }
-        "Fs.read" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_fs_read(ptr {})",
+                "  %{prefix}_v = call ptr @{rt}(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -4534,36 +4179,6 @@ fn emit_call(
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             drop_owned_ptr(&mut code, &emitted_args[1]);
-            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "Fs.list" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_fs_list(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "Fs.mkdirs" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_fs_mkdirs(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "Fs.canonicalize" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_fs_canonicalize(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Sys.args" => {
@@ -4788,7 +4403,7 @@ fn emit_call(
             writeln!(code, "  call void @sz_release(ptr {iv})").unwrap();
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
-        "IO.repeatN" => {
+        "IO.repeatN" | "IO.retryN" => {
             let n = if emitted_args[0].kind == Kind::Int {
                 emitted_args[0].value.clone()
             } else {
@@ -4799,41 +4414,15 @@ fn emit_call(
                 &mut code,
                 emitted_args[1].kind,
                 &emitted_args[1].value,
-                &format!("{prefix}_rio"),
+                &format!("{prefix}_nio"),
                 emitted_args[1].owned,
             );
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_io_repeat_n(i64 {n}, ptr {iv})"
-            )
-            .unwrap();
-            writeln!(code, "  call void @sz_release(ptr {iv})").unwrap();
-            io_emitted_payload(
-                code,
-                format!("%{prefix}_v"),
-                emitted_args[1].payload,
-                emitted_args[1].payload_owned,
-            )
-        }
-        "IO.retryN" => {
-            let n = if emitted_args[0].kind == Kind::Int {
-                emitted_args[0].value.clone()
+            let rt = if callee == "IO.repeatN" {
+                "sz_io_repeat_n"
             } else {
-                writeln!(code, "  %{prefix}_n0 = add i64 0, 0").unwrap();
-                format!("%{prefix}_n0")
+                "sz_io_retry_n"
             };
-            let iv = ensure_io(
-                &mut code,
-                emitted_args[1].kind,
-                &emitted_args[1].value,
-                &format!("{prefix}_tio"),
-                emitted_args[1].owned,
-            );
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_io_retry_n(i64 {n}, ptr {iv})"
-            )
-            .unwrap();
+            writeln!(code, "  %{prefix}_v = call ptr @{rt}(i64 {n}, ptr {iv})").unwrap();
             writeln!(code, "  call void @sz_release(ptr {iv})").unwrap();
             io_emitted_payload(
                 code,
@@ -4842,20 +4431,15 @@ fn emit_call(
                 emitted_args[1].payload_owned,
             )
         }
-        "Stream.emit" => {
+        "Stream.emit" | "Stream.emits" => {
+            let rt = if callee == "Stream.emit" {
+                "sz_stream_emit"
+            } else {
+                "sz_stream_emits"
+            };
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @sz_stream_emit(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "Stream.emits" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_stream_emits(ptr {})",
+                "  %{prefix}_v = call ptr @{rt}(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -4885,40 +4469,30 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[1]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
-        "Stream.take" => {
+        "Stream.take" | "Stream.drop" => {
+            let rt = if callee == "Stream.take" {
+                "sz_stream_take"
+            } else {
+                "sz_stream_drop"
+            };
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @sz_stream_take(ptr {}, i64 {})",
+                "  %{prefix}_v = call ptr @{rt}(ptr {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
-        "Stream.drop" => {
+        "Stream.compileToList" | "Stream.drain" => {
+            let rt = if callee == "Stream.compileToList" {
+                "sz_stream_compile_to_list"
+            } else {
+                "sz_stream_drain"
+            };
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @sz_stream_drop(ptr {}, i64 {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
-        }
-        "Stream.compileToList" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_stream_compile_to_list(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[0]);
-            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "Stream.drain" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_stream_drain(ptr {})",
+                "  %{prefix}_v = call ptr @{rt}(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -5474,20 +5048,14 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
-        "Theme.accent" => {
-            writeln!(code, "  %{prefix}_v = call i64 @sz_theme_accent()").unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
-        }
-        "Theme.primary" => {
-            writeln!(code, "  %{prefix}_v = call i64 @sz_theme_primary()").unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
-        }
-        "Theme.muted" => {
-            writeln!(code, "  %{prefix}_v = call i64 @sz_theme_muted()").unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
-        }
-        "Theme.foreground" => {
-            writeln!(code, "  %{prefix}_v = call i64 @sz_theme_foreground()").unwrap();
+        "Theme.accent" | "Theme.primary" | "Theme.muted" | "Theme.foreground" => {
+            let rt = match callee {
+                "Theme.accent" => "sz_theme_accent",
+                "Theme.primary" => "sz_theme_primary",
+                "Theme.muted" => "sz_theme_muted",
+                _ => "sz_theme_foreground",
+            };
+            writeln!(code, "  %{prefix}_v = call i64 @{rt}()").unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Color.rgb" => {
@@ -5516,239 +5084,73 @@ fn emit_call(
         "View.wrap" => emit_view_box("sz_lang_view_wrap", &mut code, &emitted_args, prefix),
         "View.grid" => emit_view_grid(&mut code, &emitted_args, prefix),
         "View.stack" => emit_view_box("sz_lang_view_stack", &mut code, &emitted_args, prefix),
-        "View.scroll" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_scroll(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        "View.scroll"
+        | "View.scrollH"
+        | "View.expanded"
+        | "View.stretch"
+        | "View.center"
+        | "View.clip"
+        | "View.ellipsis"
+        | "View.ignorePointer"
+        | "View.absorbPointer"
+        | "View.excludeSemantics" => {
+            let rt = match callee {
+                "View.scroll" => "sz_lang_view_scroll",
+                "View.scrollH" => "sz_lang_view_scroll_h",
+                "View.expanded" => "sz_lang_view_expanded",
+                "View.stretch" => "sz_lang_view_stretch",
+                "View.center" => "sz_lang_view_center",
+                "View.clip" => "sz_lang_view_clip",
+                "View.ellipsis" => "sz_lang_view_ellipsis",
+                "View.ignorePointer" => "sz_lang_view_ignore_pointer",
+                "View.absorbPointer" => "sz_lang_view_absorb_pointer",
+                _ => "sz_lang_view_exclude_semantics",
+            };
+            emit_view_wrap(rt, format!("ptr {}", emitted_args[0].value), code, prefix)
         }
-        "View.scrollH" => {
-            writeln!(
+        "View.padding" | "View.opacity" | "View.maxLines" | "View.textColor" | "View.gap"
+        | "View.fontSize" | "View.radius" | "View.background" => {
+            let rt = match callee {
+                "View.padding" => "sz_lang_view_padding",
+                "View.opacity" => "sz_lang_view_opacity",
+                "View.maxLines" => "sz_lang_view_max_lines",
+                "View.textColor" => "sz_lang_view_text_color",
+                "View.gap" => "sz_lang_view_gap",
+                "View.fontSize" => "sz_lang_view_font_size",
+                "View.radius" => "sz_lang_view_radius",
+                _ => "sz_lang_view_background",
+            };
+            emit_view_wrap(
+                rt,
+                format!(
+                    "i64 {}, ptr {}",
+                    emitted_args[0].value, emitted_args[1].value
+                ),
                 code,
-                "  %{prefix}_v = call ptr @sz_lang_view_scroll_h(ptr {})",
-                emitted_args[0].value
+                prefix,
             )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
-        "View.expanded" => {
-            writeln!(
+        "View.align" | "View.positioned" | "View.sized" | "View.minSize" | "View.maxSize"
+        | "View.border" | "View.aspectRatio" | "View.fraction" => {
+            let rt = match callee {
+                "View.align" => "sz_lang_view_align",
+                "View.positioned" => "sz_lang_view_positioned",
+                "View.sized" => "sz_lang_view_sized",
+                "View.minSize" => "sz_lang_view_min_size",
+                "View.maxSize" => "sz_lang_view_max_size",
+                "View.border" => "sz_lang_view_border",
+                "View.aspectRatio" => "sz_lang_view_aspect_ratio",
+                _ => "sz_lang_view_fraction",
+            };
+            emit_view_wrap(
+                rt,
+                format!(
+                    "i64 {}, i64 {}, ptr {}",
+                    emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+                ),
                 code,
-                "  %{prefix}_v = call ptr @sz_lang_view_expanded(ptr {})",
-                emitted_args[0].value
+                prefix,
             )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.stretch" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_stretch(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.center" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_center(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.align" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_align(i64 {}, i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.positioned" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_positioned(i64 {}, i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.padding" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_padding(i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.sized" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_sized(i64 {}, i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.minSize" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_min_size(i64 {}, i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.maxSize" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_max_size(i64 {}, i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.clip" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_clip(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.opacity" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_opacity(i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.maxLines" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_max_lines(i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.ellipsis" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_ellipsis(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.textColor" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_text_color(i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.gap" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_gap(i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.fontSize" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_font_size(i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.border" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_border(i64 {}, i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.radius" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_radius(i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.ignorePointer" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_ignore_pointer(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.absorbPointer" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_absorb_pointer(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.excludeSemantics" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_exclude_semantics(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.background" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_background(i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.aspectRatio" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_aspect_ratio(i64 {}, i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
-        }
-        "View.fraction" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_lang_view_fraction(i64 {}, i64 {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
-            )
-            .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.textField" => {
             writeln!(

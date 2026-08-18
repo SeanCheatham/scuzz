@@ -1158,7 +1158,7 @@ pub fn inlay_hints_project(
             crate::span::utf16_pos_to_offset(&text, el, ec),
         )
     });
-    let hints = crate::inlay::inlay_hints_in_source(&program, &label, &text, byte_range);
+    let hints = crate::inlay::inlay_hints_in_source(&program, &label, byte_range);
     Ok(hints
         .into_iter()
         .map(|h| {

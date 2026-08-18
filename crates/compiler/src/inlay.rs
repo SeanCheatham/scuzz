@@ -19,7 +19,6 @@ pub struct InlayHint {
 pub fn inlay_hints_in_source(
     program: &Program,
     current_file: &str,
-    _source: &str,
     range: Option<(usize, usize)>,
 ) -> Vec<InlayHint> {
     let mut out = Vec::new();
@@ -234,7 +233,7 @@ mod tests {
 @main def main: IO[Unit] = IO.println(Str.fromInt(add(1, 2)))
 "#;
         let p = parse_file(src, "Main.scuzz").unwrap();
-        let hints = inlay_hints_in_source(&p, "Main.scuzz", src, None);
+        let hints = inlay_hints_in_source(&p, "Main.scuzz", None);
         let labels: Vec<_> = hints.iter().map(|h| h.label.as_str()).collect();
         assert!(labels.contains(&"n:"), "{hints:?}");
         assert!(labels.contains(&"m:"), "{hints:?}");
@@ -258,7 +257,7 @@ mod tests {
   if (true) IO.println(Str.fromInt(add(n))) else IO.println("y")
 "#;
         let p = parse_file(src, "Main.scuzz").unwrap();
-        let hints = inlay_hints_in_source(&p, "Main.scuzz", src, None);
+        let hints = inlay_hints_in_source(&p, "Main.scuzz", None);
         let add_call = src.find("add(n)").unwrap() + 4;
         assert!(
             !hints.iter().any(|h| h.offset == add_call),
@@ -277,7 +276,7 @@ mod tests {
 @main def main: IO[Unit] = IO.println(Str.fromInt(Point(1, 2).x))
 "#;
         let p = parse_file(src, "Main.scuzz").unwrap();
-        let hints = inlay_hints_in_source(&p, "Main.scuzz", src, None);
+        let hints = inlay_hints_in_source(&p, "Main.scuzz", None);
         assert!(hints.iter().any(|h| h.label == "x:"), "{hints:?}");
         assert!(hints.iter().any(|h| h.label == "y:"), "{hints:?}");
     }
