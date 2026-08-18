@@ -14,6 +14,18 @@
 #include <CoreFoundation/CoreFoundation.h>
 #endif
 
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define SZ_ASAN 1
+#endif
+#endif
+#ifdef __SANITIZE_ADDRESS__
+#define SZ_ASAN 1
+#endif
+#ifdef SZ_ASAN
+void *__asan_region_is_poisoned(void *beg, size_t size);
+#endif
+
 static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
   SzIo *io = sz_io_flatmap(inner, cont, env);
   sz_release(inner);
@@ -68,6 +80,36 @@ typedef struct SzRcHdr {
 
 static SzRcHdr *sz_rc_hdr(const void *ptr) {
   return ((SzRcHdr *)ptr) - 1;
+}
+
+static int sz_hdr_readable(const void *ptr) {
+#ifdef SZ_ASAN
+  SzRcHdr *h = sz_rc_hdr(ptr);
+  if (__asan_region_is_poisoned((void *)h, sizeof(*h)))
+    return 0;
+#else
+  (void)ptr;
+#endif
+  return 1;
+}
+
+static int sz_is_rc(const void *ptr) {
+  uintptr_t p = (uintptr_t)ptr;
+  /* Small integers are not RC. Do not load a header. */
+  if (p < 4096 || (p & 7) != 0)
+    return 0;
+  if (!sz_hdr_readable(ptr))
+    return 0;
+  return sz_rc_hdr(ptr)->magic == SZ_RC_MAGIC;
+}
+
+static int sz_is_alloc(const void *ptr) {
+  uintptr_t p = (uintptr_t)ptr;
+  if (p < 4096 || (p & 7) != 0)
+    return 0;
+  if (!sz_hdr_readable(ptr))
+    return 0;
+  return sz_rc_hdr(ptr)->magic == SZ_ALLOC_MAGIC;
 }
 
 static size_t g_live_bytes = 0;
@@ -163,21 +205,6 @@ void sz_alloc_trace_on_pump(void) {
     return;
   fprintf(stderr, "scuzz alloc: pump=%u live_bytes=%zu live_count=%zu peak_bytes=%zu\n",
           g_trace_pumps, g_live_bytes, g_live_count, g_peak_bytes);
-}
-
-static int sz_is_rc(const void *ptr) {
-  uintptr_t p = (uintptr_t)ptr;
-  /* Small integers are not RC. Do not load a header. */
-  if (p < 4096 || (p & 7) != 0)
-    return 0;
-  return sz_rc_hdr(ptr)->magic == SZ_RC_MAGIC;
-}
-
-static int sz_is_alloc(const void *ptr) {
-  uintptr_t p = (uintptr_t)ptr;
-  if (p < 4096 || (p & 7) != 0)
-    return 0;
-  return sz_rc_hdr(ptr)->magic == SZ_ALLOC_MAGIC;
 }
 
 static void delay_env_drop(void *env) {

@@ -215,8 +215,8 @@ struct SzIo {
 SzIo *sz_io_pure(void *value);
 /* Callee retains a RC env. Caller drops after the call. Last sz_release of
  * the delay node drops leftover RC env or a leftover sz_alloc env. It does
- * not free a string literal or a small integer. Run steals env so the thunk
- * owns it. */
+ * not load an RC header from a string literal or a small integer. Run steals
+ * env so the thunk owns it. */
 SzIo *sz_io_delay(SzThunk thunk, void *env);
 SzIo *sz_io_flatmap(SzIo *inner, SzCont cont, void *env);
 /* Callee retains the error. Caller drops after the call. Last sz_release of
