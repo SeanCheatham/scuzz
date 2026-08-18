@@ -2,14 +2,15 @@
 //! No second typer. Open buffers overlay disk text. Hover, completion, definition,
 //! document symbols, references, rename, workspace symbols, signature help,
 //! document highlights, folding ranges, format, selection ranges, inlay hints,
-//! semantic tokens, and code actions use that parse.
+//! semantic tokens, code actions, and call hierarchy use that parse.
 
 use crate::check::{
     canonicalize_source_path, check_project_with, code_actions_project, complete_project,
     definition_project, folding_ranges_project, highlights_project, hover_project,
-    inlay_hints_project, json_str, prepare_rename_project, references_project, rename_project,
+    incoming_calls_project, inlay_hints_project, json_str, outgoing_calls_project,
+    prepare_call_hierarchy_project, prepare_rename_project, references_project, rename_project,
     selection_ranges_project, semantic_tokens_project, signature_help_project, symbols_project,
-    workspace_symbols_project, Diagnostic, RenameResult,
+    workspace_symbols_project, CallItemLsp, Diagnostic, RenameResult,
 };
 use crate::fold::FOLD_REGION;
 use crate::overlay::collect_fmt_sources;
@@ -43,7 +44,7 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             let type_list: Vec<String> = TOKEN_TYPES.iter().map(|t| json_str(t)).collect();
             let mod_list: Vec<String> = TOKEN_MODIFIERS.iter().map(|t| json_str(t)).collect();
             let caps = format!(
-                r#"{{"capabilities":{{"textDocumentSync":{{"openClose":true,"change":1}},"hoverProvider":true,"completionProvider":{{"triggerCharacters":["."]}},"definitionProvider":true,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{{"triggerCharacters":["("]}},"referencesProvider":true,"renameProvider":{{"prepareProvider":true}},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true,"semanticTokensProvider":{{"legend":{{"tokenTypes":[{}],"tokenModifiers":[{}]}},"full":true}},"codeActionProvider":{{"codeActionKinds":["quickfix","source.formatDocument"]}}}}}}"#,
+                r#"{{"capabilities":{{"textDocumentSync":{{"openClose":true,"change":1}},"hoverProvider":true,"completionProvider":{{"triggerCharacters":["."]}},"definitionProvider":true,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{{"triggerCharacters":["("]}},"referencesProvider":true,"renameProvider":{{"prepareProvider":true}},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true,"semanticTokensProvider":{{"legend":{{"tokenTypes":[{}],"tokenModifiers":[{}]}},"full":true}},"codeActionProvider":{{"codeActionKinds":["quickfix","source.formatDocument"]}},"callHierarchyProvider":true}}}}"#,
                 type_list.join(","),
                 mod_list.join(",")
             );
@@ -112,6 +113,15 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/codeAction" {
             let result = code_action_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "textDocument/prepareCallHierarchy" {
+            let result = prepare_call_hierarchy_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "callHierarchy/incomingCalls" {
+            let result = incoming_calls_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "callHierarchy/outgoingCalls" {
+            let result = outgoing_calls_result(&root, &open, &body);
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/didSave" {
             publish_check(&root, &open, &mut writer)?;
@@ -632,6 +642,109 @@ fn encode_code_action(
     )
 }
 
+fn encode_call_item(item: &CallItemLsp) -> String {
+    format!(
+        r#"{{"name":{},"kind":{},"uri":{},"range":{{"start":{{"line":{},"character":{}}},"end":{{"line":{},"character":{}}}}},"selectionRange":{{"start":{{"line":{},"character":{}}},"end":{{"line":{},"character":{}}}}}}}"#,
+        json_str(&item.name),
+        crate::hierarchy::KIND_FN,
+        json_str(&file_uri(&item.path)),
+        item.sl,
+        item.sc,
+        item.el,
+        item.ec,
+        item.ssl,
+        item.ssc,
+        item.sel,
+        item.sec
+    )
+}
+
+fn encode_from_ranges(ranges: &[(u32, u32, u32, u32)]) -> String {
+    let parts: Vec<String> = ranges
+        .iter()
+        .map(|(sl, sc, el, ec)| {
+            format!(
+                r#"{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}}"#
+            )
+        })
+        .collect();
+    parts.join(",")
+}
+
+fn prepare_call_hierarchy_result(
+    root: &Path,
+    open: &BTreeMap<PathBuf, String>,
+    body: &str,
+) -> String {
+    let Some(path) = doc_path_from_message(body) else {
+        return "null".into();
+    };
+    let line = json_i64_field(body, "line").unwrap_or(0).max(0) as u32;
+    let character = json_i64_field(body, "character").unwrap_or(0).max(0) as u32;
+    match prepare_call_hierarchy_project(root, open, &path, line, character) {
+        Ok(Some(item)) => format!("[{}]", encode_call_item(&item)),
+        _ => "null".into(),
+    }
+}
+
+fn item_position(body: &str) -> Option<(PathBuf, u32, u32)> {
+    let item = json_object_field(body, "item")?;
+    let uri = json_string_field(item, "uri")?;
+    let sel = json_object_field(item, "selectionRange")?;
+    let start = json_object_field(sel, "start")?;
+    let line = json_i64_field(start, "line")?.max(0) as u32;
+    let character = json_i64_field(start, "character")?.max(0) as u32;
+    Some((
+        canonicalize_source_path(&uri_to_path(&uri)),
+        line,
+        character,
+    ))
+}
+
+fn incoming_calls_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    let Some((path, line, character)) = item_position(body) else {
+        return "[]".into();
+    };
+    match incoming_calls_project(root, open, &path, line, character) {
+        Ok(calls) => {
+            let parts: Vec<String> = calls
+                .iter()
+                .map(|(from, ranges)| {
+                    format!(
+                        r#"{{"from":{},"fromRanges":[{}]}}"#,
+                        encode_call_item(from),
+                        encode_from_ranges(ranges)
+                    )
+                })
+                .collect();
+            format!("[{}]", parts.join(","))
+        }
+        _ => "[]".into(),
+    }
+}
+
+fn outgoing_calls_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    let Some((path, line, character)) = item_position(body) else {
+        return "[]".into();
+    };
+    match outgoing_calls_project(root, open, &path, line, character) {
+        Ok(calls) => {
+            let parts: Vec<String> = calls
+                .iter()
+                .map(|(to, ranges)| {
+                    format!(
+                        r#"{{"to":{},"fromRanges":[{}]}}"#,
+                        encode_call_item(to),
+                        encode_from_ranges(ranges)
+                    )
+                })
+                .collect();
+            format!("[{}]", parts.join(","))
+        }
+        _ => "[]".into(),
+    }
+}
+
 fn encode_selection_chain(ranges: &[(u32, u32, u32, u32)]) -> Option<String> {
     if ranges.is_empty() {
         return None;
@@ -903,6 +1016,52 @@ fn json_string_field(body: &str, key: &str) -> Option<String> {
         }
     }
     Some(out)
+}
+
+fn json_object_field<'a>(body: &'a str, key: &str) -> Option<&'a str> {
+    let pat = format!("\"{key}\"");
+    let i = body.find(&pat)?;
+    let rest = body[i + pat.len()..].trim_start().strip_prefix(':')?;
+    let rest = rest.trim_start();
+    if !rest.starts_with('{') {
+        return None;
+    }
+    let end = match_json_object(rest)?;
+    Some(&rest[..=end])
+}
+
+fn match_json_object(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut depth = 0i32;
+    let mut in_str = false;
+    let mut i = 0;
+    while i < bytes.len() {
+        let c = bytes[i];
+        if in_str {
+            if c == b'\\' && i + 1 < bytes.len() {
+                i += 2;
+                continue;
+            }
+            if c == b'"' {
+                in_str = false;
+            }
+            i += 1;
+            continue;
+        }
+        match c {
+            b'"' => in_str = true,
+            b'{' => depth += 1,
+            b'}' => {
+                depth -= 1;
+                if depth == 0 {
+                    return Some(i);
+                }
+            }
+            _ => {}
+        }
+        i += 1;
+    }
+    None
 }
 
 fn json_id(body: &str) -> Option<String> {
@@ -1707,6 +1866,77 @@ mod tests {
         assert!(text.contains("Fill missing match cases"), "{text}");
         assert!(text.contains("Color.Blue"), "{text}");
         assert!(text.contains("quickfix"), "{text}");
+    }
+
+    #[test]
+    fn lsp_call_hierarchy_prepare_incoming_outgoing() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"lsp_hier\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = r#"def add(n: Int): Int =
+  n
+
+def twice(n: Int): Int =
+  add(n)
+
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(twice(1)))
+"#;
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), &formatted).unwrap();
+        let root_uri = format!("file://{}", fs::canonicalize(root).unwrap().display());
+        let main = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let main_uri = format!("file://{}", main.display());
+        let twice_call = formatted.rfind("twice").unwrap();
+        let (tline, tcol) = crate::span::offset_to_utf16_pos(&formatted, twice_call);
+        let add_def = formatted.find("add").unwrap();
+        let (aline, acol) = crate::span::offset_to_utf16_pos(&formatted, add_def);
+        let twice_def = formatted.find("twice").unwrap();
+        let (dline, dcol) = crate::span::offset_to_utf16_pos(&formatted, twice_def);
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let prep = format!(
+            r#"{{"jsonrpc":"2.0","id":27,"method":"textDocument/prepareCallHierarchy","params":{{"textDocument":{{"uri":{}}},"position":{{"line":{tline},"character":{tcol}}}}}}}"#,
+            json_str(&main_uri)
+        );
+        let add_item = format!(
+            r#"{{"name":"add","kind":12,"uri":{uri},"range":{{"start":{{"line":{aline},"character":{acol}}},"end":{{"line":{aline},"character":{acol}}}}},"selectionRange":{{"start":{{"line":{aline},"character":{acol}}},"end":{{"line":{aline},"character":{acol}}}}}}}"#,
+            uri = json_str(&main_uri)
+        );
+        let twice_item = format!(
+            r#"{{"name":"twice","kind":12,"uri":{uri},"range":{{"start":{{"line":{dline},"character":{dcol}}},"end":{{"line":{dline},"character":{dcol}}}}},"selectionRange":{{"start":{{"line":{dline},"character":{dcol}}},"end":{{"line":{dline},"character":{dcol}}}}}}}"#,
+            uri = json_str(&main_uri)
+        );
+        let incoming = format!(
+            r#"{{"jsonrpc":"2.0","id":28,"method":"callHierarchy/incomingCalls","params":{{"item":{add_item}}}}}"#
+        );
+        let outgoing = format!(
+            r#"{{"jsonrpc":"2.0","id":29,"method":"callHierarchy/outgoingCalls","params":{{"item":{twice_item}}}}}"#
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&prep));
+        input.extend(frame(&incoming));
+        input.extend(frame(&outgoing));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("callHierarchyProvider"), "{text}");
+        assert!(text.contains("\"id\":27"), "{text}");
+        assert!(text.contains("\"name\":\"twice\""), "{text}");
+        assert!(text.contains("\"id\":28"), "{text}");
+        assert!(text.contains("\"from\""), "{text}");
+        assert!(text.contains("\"id\":29"), "{text}");
+        assert!(text.contains("\"to\""), "{text}");
+        assert!(text.contains("\"name\":\"add\""), "{text}");
     }
 
     #[test]

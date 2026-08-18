@@ -591,6 +591,166 @@ pub fn references_project(
         .collect())
 }
 
+#[derive(Debug, Clone)]
+pub struct CallItemLsp {
+    pub path: PathBuf,
+    pub name: String,
+    pub sl: u32,
+    pub sc: u32,
+    pub el: u32,
+    pub ec: u32,
+    pub ssl: u32,
+    pub ssc: u32,
+    pub sel: u32,
+    pub sec: u32,
+}
+
+fn hierarchy_item_to_lsp(
+    resolved: &crate::driver::ResolvedProject,
+    path: &Path,
+    named: &[(String, String)],
+    item: crate::hierarchy::HierarchyItem,
+    fallback_text: &str,
+) -> CallItemLsp {
+    let loc = crate::definition::DefLoc {
+        file: item.file.clone(),
+        start: item.sel_start,
+        end: item.sel_end,
+    };
+    let (dest, _, _, _, _) = loc_to_lsp(resolved, path, named, loc, fallback_text);
+    let src = named
+        .iter()
+        .find(|(l, _)| *l == item.file)
+        .map(|(_, t)| t.as_str())
+        .unwrap_or(fallback_text);
+    let (sl, sc) = offset_to_utf16_pos(src, item.range_start);
+    let (el, ec) = offset_to_utf16_pos(src, item.range_end);
+    let (ssl, ssc) = offset_to_utf16_pos(src, item.sel_start);
+    let (sel, sec) = offset_to_utf16_pos(src, item.sel_end);
+    CallItemLsp {
+        path: dest,
+        name: item.name,
+        sl,
+        sc,
+        el,
+        ec,
+        ssl,
+        ssc,
+        sel,
+        sec,
+    }
+}
+
+/// Prepare call hierarchy at a 0-based LSP position. Same parse as [`check_project_with`].
+pub fn prepare_call_hierarchy_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    line: u32,
+    character: u32,
+) -> Result<Option<CallItemLsp>> {
+    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(None);
+    };
+    let Some(program) = program else {
+        return Ok(None);
+    };
+    let named = named_sources(&resolved);
+    let offset = crate::span::utf16_pos_to_offset(&text, line, character);
+    let Some(item) =
+        crate::hierarchy::prepare_call_hierarchy(&program, &named, &label, &text, offset)
+    else {
+        return Ok(None);
+    };
+    Ok(Some(hierarchy_item_to_lsp(
+        &resolved, path, &named, item, &text,
+    )))
+}
+
+/// Incoming calls at a 0-based LSP position. Same parse as [`check_project_with`].
+pub fn incoming_calls_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    line: u32,
+    character: u32,
+) -> Result<Vec<(CallItemLsp, Vec<(u32, u32, u32, u32)>)>> {
+    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(program) = program else {
+        return Ok(Vec::new());
+    };
+    let named = named_sources(&resolved);
+    let offset = crate::span::utf16_pos_to_offset(&text, line, character);
+    let calls = crate::hierarchy::incoming_calls(&program, &named, &label, &text, offset);
+    Ok(calls
+        .into_iter()
+        .map(|c| {
+            let from_file = c.from.file.clone();
+            let from_text = named
+                .iter()
+                .find(|(l, _)| *l == from_file)
+                .map(|(_, t)| t.as_str())
+                .unwrap_or(&text);
+            let item = hierarchy_item_to_lsp(&resolved, path, &named, c.from, &text);
+            let ranges = c
+                .from_ranges
+                .into_iter()
+                .map(|(a, b)| {
+                    let (sl, sc) = offset_to_utf16_pos(from_text, a);
+                    let (el, ec) = offset_to_utf16_pos(from_text, b);
+                    (sl, sc, el, ec)
+                })
+                .collect();
+            (item, ranges)
+        })
+        .collect())
+}
+
+/// Outgoing calls at a 0-based LSP position. Same parse as [`check_project_with`].
+pub fn outgoing_calls_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    line: u32,
+    character: u32,
+) -> Result<Vec<(CallItemLsp, Vec<(u32, u32, u32, u32)>)>> {
+    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(program) = program else {
+        return Ok(Vec::new());
+    };
+    let named = named_sources(&resolved);
+    let offset = crate::span::utf16_pos_to_offset(&text, line, character);
+    let calls = crate::hierarchy::outgoing_calls(&program, &named, &label, &text, offset);
+    Ok(calls
+        .into_iter()
+        .map(|c| {
+            let from_text = named
+                .iter()
+                .find(|(l, _)| *l == label)
+                .map(|(_, t)| t.as_str())
+                .unwrap_or(&text);
+            let item = hierarchy_item_to_lsp(&resolved, path, &named, c.to, &text);
+            let ranges = c
+                .from_ranges
+                .into_iter()
+                .map(|(a, b)| {
+                    let (sl, sc) = offset_to_utf16_pos(from_text, a);
+                    let (el, ec) = offset_to_utf16_pos(from_text, b);
+                    (sl, sc, el, ec)
+                })
+                .collect();
+            (item, ranges)
+        })
+        .collect())
+}
+
 /// Document highlights at a 0-based LSP position. Same parse as [`check_project_with`].
 pub fn highlights_project(
     project_dir: &Path,

@@ -10,6 +10,7 @@ pub mod driver;
 pub(crate) mod fold;
 pub mod format;
 pub mod fuzz;
+pub(crate) mod hierarchy;
 pub(crate) mod highlight;
 pub(crate) mod hover;
 pub(crate) mod inlay;
