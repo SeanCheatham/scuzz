@@ -11,6 +11,7 @@ pub mod format;
 pub mod fuzz;
 pub(crate) mod highlight;
 pub(crate) mod hover;
+pub(crate) mod inlay;
 pub(crate) mod lexer;
 pub(crate) mod lower;
 pub(crate) mod lsp;

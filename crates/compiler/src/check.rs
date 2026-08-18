@@ -675,6 +675,36 @@ pub fn selection_ranges_project(
     Ok(out)
 }
 
+/// Parameter inlay hints in a file. Same parse as [`check_project_with`].
+pub fn inlay_hints_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    range: Option<((u32, u32), (u32, u32))>,
+) -> Result<Vec<(u32, u32, String, u8)>> {
+    let Some((_resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(program) = program else {
+        return Ok(Vec::new());
+    };
+    let byte_range = range.map(|((sl, sc), (el, ec))| {
+        (
+            crate::span::utf16_pos_to_offset(&text, sl, sc),
+            crate::span::utf16_pos_to_offset(&text, el, ec),
+        )
+    });
+    let hints = crate::inlay::inlay_hints_in_source(&program, &label, &text, byte_range);
+    Ok(hints
+        .into_iter()
+        .map(|h| {
+            let (line, character) = offset_to_utf16_pos(&text, h.offset);
+            (line, character, h.label, h.kind)
+        })
+        .collect())
+}
+
 pub enum RenameResult {
     Unavailable,
     BadName,

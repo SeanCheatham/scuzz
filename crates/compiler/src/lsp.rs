@@ -1,13 +1,14 @@
 //! Small LSP wrapping `check_project`. Same diagnostics as `--message-format=json`.
 //! No second typer. Open buffers overlay disk text. Hover, completion, definition,
 //! document symbols, references, rename, workspace symbols, signature help,
-//! document highlights, folding ranges, format, and selection ranges use that parse.
+//! document highlights, folding ranges, format, selection ranges, and inlay hints
+//! use that parse.
 
 use crate::check::{
     canonicalize_source_path, check_project_with, complete_project, definition_project,
-    folding_ranges_project, highlights_project, hover_project, json_str, prepare_rename_project,
-    references_project, rename_project, selection_ranges_project, signature_help_project,
-    symbols_project, workspace_symbols_project, Diagnostic, RenameResult,
+    folding_ranges_project, highlights_project, hover_project, inlay_hints_project, json_str,
+    prepare_rename_project, references_project, rename_project, selection_ranges_project,
+    signature_help_project, symbols_project, workspace_symbols_project, Diagnostic, RenameResult,
 };
 use crate::fold::FOLD_REGION;
 use crate::overlay::collect_fmt_sources;
@@ -37,7 +38,7 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             if let Some(p) = root_from_init(&body) {
                 root = p;
             }
-            let caps = r#"{"capabilities":{"textDocumentSync":{"openClose":true,"change":1},"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"definitionProvider":true,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{"triggerCharacters":["("]},"referencesProvider":true,"renameProvider":{"prepareProvider":true},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true}}}"#;
+            let caps = r#"{"capabilities":{"textDocumentSync":{"openClose":true,"change":1},"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"definitionProvider":true,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{"triggerCharacters":["("]},"referencesProvider":true,"renameProvider":{"prepareProvider":true},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true}}}"#;
             write_result(&mut writer, id, caps)?;
         } else if method == "shutdown" {
             write_result(&mut writer, id, "null")?;
@@ -94,6 +95,9 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/selectionRange" {
             let result = selection_range_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "textDocument/inlayHint" {
+            let result = inlay_hint_result(&root, &open, &body);
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/didSave" {
             publish_check(&root, &open, &mut writer)?;
@@ -534,6 +538,28 @@ fn selection_range_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &
     }
 }
 
+fn inlay_hint_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    let Some(path) = doc_path_from_message(body) else {
+        return "[]".into();
+    };
+    let range = json_optional_range(body);
+    match inlay_hints_project(root, open, &path, range) {
+        Ok(hints) => {
+            let parts: Vec<String> = hints
+                .iter()
+                .map(|(line, character, label, kind)| {
+                    format!(
+                        r#"{{"position":{{"line":{line},"character":{character}}},"label":{},"kind":{kind},"paddingRight":true}}"#,
+                        json_str(label)
+                    )
+                })
+                .collect();
+            format!("[{}]", parts.join(","))
+        }
+        _ => "[]".into(),
+    }
+}
+
 fn encode_selection_chain(ranges: &[(u32, u32, u32, u32)]) -> Option<String> {
     if ranges.is_empty() {
         return None;
@@ -589,6 +615,44 @@ fn json_positions(body: &str) -> Vec<(u32, u32)> {
         vec![(line, character)]
     } else {
         out
+    }
+}
+
+fn json_optional_range(body: &str) -> Option<((u32, u32), (u32, u32))> {
+    let i = body.find("\"range\"")?;
+    let mut rest = &body[i..];
+    let mut pairs = Vec::new();
+    while pairs.len() < 2 {
+        let Some(li) = rest.find("\"line\"") else {
+            break;
+        };
+        rest = &rest[li + 6..];
+        let Some(colon) = rest.find(':') else {
+            break;
+        };
+        rest = rest[colon + 1..].trim_start();
+        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let Ok(line) = digits.parse::<u32>() else {
+            break;
+        };
+        let Some(ci) = rest.find("\"character\"") else {
+            break;
+        };
+        rest = &rest[ci + 11..];
+        let Some(colon) = rest.find(':') else {
+            break;
+        };
+        rest = rest[colon + 1..].trim_start();
+        let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
+        let Ok(character) = digits.parse::<u32>() else {
+            break;
+        };
+        pairs.push((line, character));
+    }
+    if pairs.len() == 2 {
+        Some((pairs[0], pairs[1]))
+    } else {
+        None
     }
 }
 
@@ -1429,6 +1493,33 @@ mod tests {
         assert!(text.contains("selectionRangeProvider"), "{text}");
         assert!(text.contains("\"id\":21"), "{text}");
         assert!(text.contains("\"parent\""), "{text}");
+    }
+
+    #[test]
+    fn lsp_inlay_hint_names_add_and_println_args() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let (_formatted, root_uri, main_uri) = write_add_pkg(root);
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let req = format!(
+            r#"{{"jsonrpc":"2.0","id":22,"method":"textDocument/inlayHint","params":{{"textDocument":{{"uri":{}}}}}}}"#,
+            json_str(&main_uri)
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&req));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("inlayHintProvider"), "{text}");
+        assert!(text.contains("\"id\":22"), "{text}");
+        assert!(text.contains("\"n:\""), "{text}");
+        assert!(text.contains("\"s:\""), "{text}");
+        assert!(text.contains("\"kind\":2"), "{text}");
     }
 
     #[test]

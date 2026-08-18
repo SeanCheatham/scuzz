@@ -88,7 +88,12 @@ fn callee_before_paren(toks: &[SpannedToken], paren: usize) -> Option<(Option<St
     Some((None, name.clone()))
 }
 
-fn sig_label(program: &Program, module: &str, qual: Option<&str>, name: &str) -> Option<String> {
+pub(crate) fn sig_label(
+    program: &Program,
+    module: &str,
+    qual: Option<&str>,
+    name: &str,
+) -> Option<String> {
     if let Some(q) = qual {
         let callee = format!("{q}.{name}");
         if let Some(s) = kit_sig(&callee) {
@@ -118,7 +123,15 @@ fn unique_kit_suffix(name: &str) -> Option<&'static str> {
     }
 }
 
-fn params_from_label(label: &str) -> Vec<String> {
+pub(crate) fn param_names_from_label(label: &str) -> Vec<String> {
+    params_from_label(label)
+        .into_iter()
+        .map(|p| p.split(':').next().unwrap_or("").trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
+}
+
+pub(crate) fn params_from_label(label: &str) -> Vec<String> {
     let Some(start) = label.find('(') else {
         return Vec::new();
     };
