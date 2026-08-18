@@ -1,12 +1,15 @@
 //! Small LSP wrapping `check_project`. Same diagnostics as `--message-format=json`.
 //! No second typer. Open buffers overlay disk text. Hover, completion, definition,
-//! document symbols, references, rename, workspace symbols, and signature help use that parse.
+//! document symbols, references, rename, workspace symbols, signature help,
+//! document highlights, and folding ranges use that parse.
 
 use crate::check::{
     canonicalize_source_path, check_project_with, complete_project, definition_project,
-    hover_project, json_str, prepare_rename_project, references_project, rename_project,
-    signature_help_project, symbols_project, workspace_symbols_project, Diagnostic, RenameResult,
+    folding_ranges_project, highlights_project, hover_project, json_str, prepare_rename_project,
+    references_project, rename_project, signature_help_project, symbols_project,
+    workspace_symbols_project, Diagnostic, RenameResult,
 };
+use crate::fold::FOLD_REGION;
 use crate::overlay::collect_fmt_sources;
 use anyhow::Result;
 use std::collections::BTreeMap;
@@ -34,7 +37,7 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             if let Some(p) = root_from_init(&body) {
                 root = p;
             }
-            let caps = r#"{"capabilities":{"textDocumentSync":{"openClose":true,"change":1},"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"definitionProvider":true,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{"triggerCharacters":["("]},"referencesProvider":true,"renameProvider":{"prepareProvider":true}}}"#;
+            let caps = r#"{"capabilities":{"textDocumentSync":{"openClose":true,"change":1},"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"definitionProvider":true,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{"triggerCharacters":["("]},"referencesProvider":true,"renameProvider":{"prepareProvider":true},"documentHighlightProvider":true,"foldingRangeProvider":true}}}"#;
             write_result(&mut writer, id, caps)?;
         } else if method == "shutdown" {
             write_result(&mut writer, id, "null")?;
@@ -80,6 +83,12 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
                 Ok(result) => write_result(&mut writer, id, &result)?,
                 Err(msg) => write_error(&mut writer, id, -32602, &msg)?,
             }
+        } else if method == "textDocument/documentHighlight" {
+            let result = document_highlight_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "textDocument/foldingRange" {
+            let result = folding_range_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/didSave" {
             publish_check(&root, &open, &mut writer)?;
         } else if method == "initialized" || method.is_empty() {
@@ -439,6 +448,49 @@ fn encode_workspace_edit(edits: &[(PathBuf, u32, u32, u32, u32)], new_text: &str
         .map(|(uri, items)| format!("{}:[{}]", json_str(&uri), items.join(",")))
         .collect();
     format!(r#"{{"changes":{{{}}}}}"#, parts.join(","))
+}
+
+fn document_highlight_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    let Some(path) = doc_path_from_message(body) else {
+        return "[]".into();
+    };
+    let line = json_i64_field(body, "line").unwrap_or(0).max(0) as u32;
+    let character = json_i64_field(body, "character").unwrap_or(0).max(0) as u32;
+    match highlights_project(root, open, &path, line, character) {
+        Ok(hits) => {
+            let parts: Vec<String> = hits
+                .iter()
+                .map(|(sl, sc, el, ec, kind)| {
+                    format!(
+                        r#"{{"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}},"kind":{kind}}}"#
+                    )
+                })
+                .collect();
+            format!("[{}]", parts.join(","))
+        }
+        _ => "[]".into(),
+    }
+}
+
+fn folding_range_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    let Some(path) = doc_path_from_message(body) else {
+        return "[]".into();
+    };
+    match folding_ranges_project(root, open, &path) {
+        Ok(folds) => {
+            let parts: Vec<String> = folds
+                .iter()
+                .map(|(sl, sc, el, ec)| {
+                    format!(
+                        r#"{{"startLine":{sl},"startCharacter":{sc},"endLine":{el},"endCharacter":{ec},"kind":{}}}"#,
+                        json_str(FOLD_REGION)
+                    )
+                })
+                .collect();
+            format!("[{}]", parts.join(","))
+        }
+        _ => "[]".into(),
+    }
 }
 
 fn src_files(root: &Path) -> Result<Vec<PathBuf>> {
@@ -1103,6 +1155,77 @@ mod tests {
         assert!(text.contains("def add(n: Int): Int"), "{text}");
         assert!(text.contains("\"id\":15"), "{text}");
         assert!(text.contains("IO.println(s: String): IO[Unit]"), "{text}");
+    }
+
+    #[test]
+    fn lsp_document_highlight_marks_add_write_and_read() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let (formatted, root_uri, main_uri) = write_add_pkg(root);
+        let call = formatted.rfind("add").unwrap();
+        let (line, col) = crate::span::offset_to_utf16_pos(&formatted, call);
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let req = format!(
+            r#"{{"jsonrpc":"2.0","id":16,"method":"textDocument/documentHighlight","params":{{"textDocument":{{"uri":{}}},"position":{{"line":{},"character":{}}}}}}}"#,
+            json_str(&main_uri),
+            line,
+            col
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&req));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("documentHighlightProvider"), "{text}");
+        assert!(text.contains("\"id\":16"), "{text}");
+        assert!(text.contains("\"kind\":3"), "{text}");
+        assert!(text.contains("\"kind\":2"), "{text}");
+    }
+
+    #[test]
+    fn lsp_folding_range_covers_for_block() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"lsp_fold\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println("x")
+  } yield ()
+"#;
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), &formatted).unwrap();
+        let root_uri = format!("file://{}", fs::canonicalize(root).unwrap().display());
+        let main = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let main_uri = format!("file://{}", main.display());
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let req = format!(
+            r#"{{"jsonrpc":"2.0","id":17,"method":"textDocument/foldingRange","params":{{"textDocument":{{"uri":{}}}}}}}"#,
+            json_str(&main_uri)
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&req));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("foldingRangeProvider"), "{text}");
+        assert!(text.contains("\"id\":17"), "{text}");
+        assert!(text.contains("\"kind\":\"region\""), "{text}");
+        assert!(text.contains("\"startLine\":"), "{text}");
     }
 
     #[test]

@@ -591,6 +591,58 @@ pub fn references_project(
         .collect())
 }
 
+/// Document highlights at a 0-based LSP position. Same parse as [`check_project_with`].
+pub fn highlights_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    line: u32,
+    character: u32,
+) -> Result<Vec<(u32, u32, u32, u32, u8)>> {
+    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(program) = program else {
+        return Ok(Vec::new());
+    };
+    let named = named_sources(&resolved);
+    let offset = crate::span::utf16_pos_to_offset(&text, line, character);
+    let hits = crate::highlight::highlights_in_source(&program, &named, &label, &text, offset);
+    Ok(hits
+        .into_iter()
+        .map(|h| {
+            let (sl, sc) = offset_to_utf16_pos(&text, h.start);
+            let (el, ec) = offset_to_utf16_pos(&text, h.end);
+            (sl, sc, el, ec, h.kind)
+        })
+        .collect())
+}
+
+/// Folding ranges for a file. Same parse as [`check_project_with`].
+pub fn folding_ranges_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+) -> Result<Vec<(u32, u32, u32, u32)>> {
+    let Some((_resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(program) = program else {
+        return Ok(Vec::new());
+    };
+    let folds = crate::fold::folds_in_source(&program, &label, &text);
+    Ok(folds
+        .into_iter()
+        .map(|f| {
+            let (sl, sc) = offset_to_utf16_pos(&text, f.start);
+            let (el, ec) = offset_to_utf16_pos(&text, f.end);
+            (sl, sc, el, ec)
+        })
+        .collect())
+}
+
 pub enum RenameResult {
     Unavailable,
     BadName,
