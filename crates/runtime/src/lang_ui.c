@@ -309,12 +309,13 @@ SzView *sz_lang_view_bind_text(SzSignalStr *sig) { return sz_view_text_signal_st
 
 typedef struct {
   SzUiRebuildFn rebuild;
-  void *env;
-} RunRebuildEnv;
-
+} RebuildFnCell;
 
 static void *thunk_run_rebuild(void *env) {
-  RunRebuildEnv *e = (RunRebuildEnv *)env;
+  SzPair *pack = (SzPair *)env;
+  RebuildFnCell *cell = pack ? (RebuildFnCell *)pack->right : NULL;
+  void *capture = pack ? pack->left : NULL;
+  SzUiRebuildFn rebuild = cell ? cell->rebuild : NULL;
   SzUiConfig cfg;
   SzUiSession *session;
   SzView *root;
@@ -324,9 +325,9 @@ static void *thunk_run_rebuild(void *env) {
 
   fill_cfg(&cfg, 0, 0);
 
-  if (!e->rebuild)
+  if (!rebuild)
     sz_panic("Ui.run rebuild missing");
-  root = e->rebuild(e->env);
+  root = rebuild(capture);
   if (!root)
     sz_panic("Ui.run rebuild returned null");
 
@@ -334,7 +335,7 @@ static void *thunk_run_rebuild(void *env) {
   if (!session)
     sz_panic("Ui.run mount failed");
   sz_ui_session_take_root(session);
-  sz_ui_session_set_rebuild(session, e->rebuild, e->env);
+  sz_ui_session_set_rebuild(session, rebuild, capture);
   stamp = getenv("SCUZZ_UI_RELOAD_STAMP");
   if (stamp && stamp[0])
     sz_ui_session_watch(session, stamp);
@@ -442,16 +443,19 @@ static void *thunk_run_rebuild(void *env) {
   }
 
   sz_ui_unmount(session);
-  sz_release(e->env);
-  e->env = NULL;
-  sz_free(e);
+  sz_release(pack);
   return NULL;
 }
 
 SzIo *sz_ui_run_rebuild(SzUiRebuildFn fn, void *env) {
-  RunRebuildEnv *e = (RunRebuildEnv *)sz_alloc(sizeof(RunRebuildEnv));
-  e->rebuild = fn;
-  sz_retain(env);
-  e->env = env;
-  return sz_io_delay(thunk_run_rebuild, e);
+  RebuildFnCell *cell = (RebuildFnCell *)sz_rc_alloc(sizeof(RebuildFnCell), SZ_RC_BOX);
+  SzPair *pack;
+  cell->rebuild = fn;
+  pack = sz_pair_new(env, cell);
+  sz_release(cell);
+  {
+    SzIo *io = sz_io_delay(thunk_run_rebuild, pack);
+    sz_release(pack);
+    return io;
+  }
 }

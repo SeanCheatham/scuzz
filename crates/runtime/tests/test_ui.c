@@ -373,6 +373,20 @@ static void test_ui_run_rebuild(void) {
   assert(r.ok);
   assert(sz_signal_int_get(count) == 7);
   sz_signal_int_free(count);
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    sz_alloc_stats(&base_bytes, &base_count);
+    count = sz_signal_int(1);
+    {
+      SzIo *io = sz_ui_run_rebuild(run_rebuild_factory, count);
+      sz_release(io);
+    }
+    sz_signal_int_free(count);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
 }
 
 typedef struct {

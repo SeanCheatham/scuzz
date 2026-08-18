@@ -557,11 +557,10 @@ SzIo *sz_sys_spawn(SzString *cmd) {
 }
 
 static void *sys_alive_result(void *env) {
-  int64_t pid = *(int64_t *)env;
+  int64_t pid = sz_unbox_i64(env);
   SysResult *r = (SysResult *)sz_alloc(sizeof(SysResult));
   int status = 0;
   pid_t w;
-  sz_free(env);
   r->is_err = 0;
   if (sz_testrt_sys_is_fake()) {
     r->as.ok = sz_box_i64(sz_testrt_proc_alive(pid));
@@ -576,15 +575,15 @@ static void *sys_alive_result(void *env) {
 }
 
 SzIo *sz_sys_alive(int64_t pid) {
-  int64_t *p = (int64_t *)sz_alloc(sizeof(int64_t));
-  *p = pid;
-  return fm_drop(sz_io_delay(sys_alive_result, p), unwrap_sys, NULL);
+  void *p = sz_box_i64(pid);
+  SzIo *io = fm_drop(sz_io_delay(sys_alive_result, p), unwrap_sys, NULL);
+  sz_release(p);
+  return io;
 }
 
 static void *sys_kill_result(void *env) {
-  int64_t pid = *(int64_t *)env;
+  int64_t pid = sz_unbox_i64(env);
   SysResult *r = (SysResult *)sz_alloc(sizeof(SysResult));
-  sz_free(env);
   r->is_err = 0;
   r->as.ok = NULL;
   if (sz_testrt_sys_is_fake()) {
@@ -599,9 +598,10 @@ static void *sys_kill_result(void *env) {
 }
 
 SzIo *sz_sys_kill(int64_t pid) {
-  int64_t *p = (int64_t *)sz_alloc(sizeof(int64_t));
-  *p = pid;
-  return fm_drop(sz_io_delay(sys_kill_result, p), unwrap_sys, NULL);
+  void *p = sz_box_i64(pid);
+  SzIo *io = fm_drop(sz_io_delay(sys_kill_result, p), unwrap_sys, NULL);
+  sz_release(p);
+  return io;
 }
 
 static void *sys_getenv_result(void *env) {

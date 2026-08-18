@@ -51,8 +51,28 @@ static SzIo *unwrap_fs(void *value, void *env) {
   return pure_drop(r->as.ok);
 }
 
+static void *fs_dispatch(void *env);
+
+static SzString *pack_path(void *env) {
+  SzPair *pack = (SzPair *)env;
+  return pack ? (SzString *)pack->left : NULL;
+}
+
+static SzIo *fs_bind(SzString *path, SzCont after) {
+  SzPair *pack;
+  if (!path)
+    sz_panic("Fs: null path");
+  pack = sz_pair_new(path, NULL);
+  {
+    SzIo *io = fm_drop(sz_io_delay(fs_dispatch, NULL), after, pack);
+    sz_release(pack);
+    return io;
+  }
+}
+
 static void *fs_read_result(void *env) {
-  SzString *path = (SzString *)env;
+  SzPair *pack = (SzPair *)env;
+  SzString *path = pack_path(pack);
   FsResult *r = (FsResult *)sz_alloc(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
   FILE *f = fopen(p, "rb");
@@ -91,7 +111,7 @@ static void *fs_read_result(void *env) {
   r->is_err = 0;
   r->as.ok = s;
 done:
-  sz_release(path);
+  sz_release(pack);
   return r;
 }
 
@@ -101,16 +121,13 @@ static void *fs_dispatch(void *env) {
 }
 
 static SzIo *fs_after_read(void *value, void *env) {
+  SzPair *pack = (SzPair *)env;
   if ((intptr_t)value)
-    return sz_testrt_fs_read((SzString *)env);
-  return fm_drop(sz_io_delay(fs_read_result, env), unwrap_fs, NULL);
+    return sz_testrt_fs_read(pack_path(pack));
+  return fm_drop(sz_io_delay(fs_read_result, pack), unwrap_fs, NULL);
 }
 
-SzIo *sz_fs_read(SzString *path) {
-  if (!path)
-    sz_panic("sz_fs_read(null)");
-  return fm_drop(sz_io_delay(fs_dispatch, NULL), fs_after_read, path);
-}
+SzIo *sz_fs_read(SzString *path) { return fs_bind(path, fs_after_read); }
 
 static void *fs_write_result(void *env) {
   SzPair *pack = (SzPair *)env;
@@ -166,7 +183,8 @@ SzIo *sz_fs_write(SzString *path, SzString *contents) {
 }
 
 static void *fs_list_result(void *env) {
-  SzString *path = (SzString *)env;
+  SzPair *pack = (SzPair *)env;
+  SzString *path = pack_path(pack);
   FsResult *r = (FsResult *)sz_alloc(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
   DIR *d = opendir(p);
@@ -198,24 +216,22 @@ static void *fs_list_result(void *env) {
     r->as.ok = rev;
   }
 done:
-  sz_release(path);
+  sz_release(pack);
   return r;
 }
 
 static SzIo *fs_after_list(void *value, void *env) {
+  SzPair *pack = (SzPair *)env;
   if ((intptr_t)value)
-    return sz_testrt_fs_list((SzString *)env);
-  return fm_drop(sz_io_delay(fs_list_result, env), unwrap_fs, NULL);
+    return sz_testrt_fs_list(pack_path(pack));
+  return fm_drop(sz_io_delay(fs_list_result, pack), unwrap_fs, NULL);
 }
 
-SzIo *sz_fs_list(SzString *path) {
-  if (!path)
-    sz_panic("sz_fs_list(null)");
-  return fm_drop(sz_io_delay(fs_dispatch, NULL), fs_after_list, path);
-}
+SzIo *sz_fs_list(SzString *path) { return fs_bind(path, fs_after_list); }
 
 static void *fs_mkdirs_result(void *env) {
-  SzString *path = (SzString *)env;
+  SzPair *pack = (SzPair *)env;
+  SzString *path = pack_path(pack);
   FsResult *r = (FsResult *)sz_alloc(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
   char tmp[1024];
@@ -249,24 +265,22 @@ static void *fs_mkdirs_result(void *env) {
   r->is_err = 0;
   r->as.ok = NULL;
 done:
-  sz_release(path);
+  sz_release(pack);
   return r;
 }
 
 static SzIo *fs_after_mkdirs(void *value, void *env) {
+  SzPair *pack = (SzPair *)env;
   if ((intptr_t)value)
-    return sz_testrt_fs_mkdirs((SzString *)env);
-  return fm_drop(sz_io_delay(fs_mkdirs_result, env), unwrap_fs, NULL);
+    return sz_testrt_fs_mkdirs(pack_path(pack));
+  return fm_drop(sz_io_delay(fs_mkdirs_result, pack), unwrap_fs, NULL);
 }
 
-SzIo *sz_fs_mkdirs(SzString *path) {
-  if (!path)
-    sz_panic("sz_fs_mkdirs(null)");
-  return fm_drop(sz_io_delay(fs_dispatch, NULL), fs_after_mkdirs, path);
-}
+SzIo *sz_fs_mkdirs(SzString *path) { return fs_bind(path, fs_after_mkdirs); }
 
 static void *fs_canonicalize_result(void *env) {
-  SzString *path = (SzString *)env;
+  SzPair *pack = (SzPair *)env;
+  SzString *path = pack_path(pack);
   FsResult *r = (FsResult *)sz_alloc(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
   char *resolved = realpath(p, NULL);
@@ -281,19 +295,17 @@ static void *fs_canonicalize_result(void *env) {
   r->as.ok = sz_string_from_cstr(resolved);
   free(resolved);
 done:
-  sz_release(path);
+  sz_release(pack);
   return r;
 }
 
 static SzIo *fs_after_canonicalize(void *value, void *env) {
+  SzPair *pack = (SzPair *)env;
   if ((intptr_t)value)
-    return sz_testrt_fs_canonicalize((SzString *)env);
-  return fm_drop(sz_io_delay(fs_canonicalize_result, env), unwrap_fs, NULL);
+    return sz_testrt_fs_canonicalize(pack_path(pack));
+  return fm_drop(sz_io_delay(fs_canonicalize_result, pack), unwrap_fs, NULL);
 }
 
 SzIo *sz_fs_canonicalize(SzString *path) {
-  if (!path)
-    sz_panic("sz_fs_canonicalize(null)");
-  return fm_drop(sz_io_delay(fs_dispatch, NULL), fs_after_canonicalize,
-                       path);
+  return fs_bind(path, fs_after_canonicalize);
 }

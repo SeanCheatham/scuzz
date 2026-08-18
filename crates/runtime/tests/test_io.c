@@ -1733,8 +1733,34 @@ int main(void) {
 
     sz_alloc_stats(&base_bytes, &base_count);
     {
+      SzIo *io = sz_testrt_sys_read(3);
+      sz_release(io);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
       SzIo *io = sz_random_next_int(10);
       sz_release(io);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzString *path = sz_string_from_cstr("leftover-fs.txt");
+      SzIo *rd = sz_fs_read(path);
+      SzIo *ls = sz_fs_list(path);
+      SzIo *mk = sz_fs_mkdirs(path);
+      SzIo *cn = sz_fs_canonicalize(path);
+      sz_release(path);
+      sz_release(rd);
+      sz_release(ls);
+      sz_release(mk);
+      sz_release(cn);
     }
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
@@ -2130,6 +2156,29 @@ int main(void) {
     r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("a/b.txt")));
     assert(r.ok);
     assert(strcmp(sz_string_cstr((SzString *)r.value), "mem") == 0);
+    sz_release(r.value);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzString *file = sz_string_from_cstr("a/b.txt");
+      SzString *dir = sz_string_from_cstr("a");
+      r = sz_io_unsafe_run(sz_fs_read(file));
+      assert(r.ok);
+      sz_release(r.value);
+      r = sz_io_unsafe_run(sz_fs_list(dir));
+      assert(r.ok);
+      sz_release(r.value);
+      r = sz_io_unsafe_run(sz_fs_mkdirs(dir));
+      assert(r.ok);
+      r = sz_io_unsafe_run(sz_fs_canonicalize(dir));
+      assert(r.ok);
+      sz_release(r.value);
+      sz_release(file);
+      sz_release(dir);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
 
     r = sz_io_unsafe_run(
         sz_net_http_get(sz_string_from_cstr("http://example.test/ping")));

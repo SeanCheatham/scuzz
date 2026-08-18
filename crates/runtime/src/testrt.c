@@ -166,8 +166,21 @@ static SzIo *unwrap_box(void *value, void *env) {
   }
 }
 
+static SzString *pack_path(void *env) {
+  SzPair *pack = (SzPair *)env;
+  return pack ? (SzString *)pack->left : NULL;
+}
+
+static SzIo *testrt_fs_bind(SzString *path, SzThunk thunk) {
+  SzPair *pack = sz_pair_new(path, NULL);
+  SzIo *io = fm_drop(sz_io_delay(thunk, pack), unwrap_box, NULL);
+  sz_release(pack);
+  return io;
+}
+
 static void *mem_read(void *env) {
-  SzString *path_s = (SzString *)env;
+  SzPair *pack = (SzPair *)env;
+  SzString *path_s = pack_path(pack);
   BoxResult *r = (BoxResult *)sz_alloc(sizeof(BoxResult));
   char *path = norm_path(sz_string_cstr(path_s));
   MemNode *n = fs_find(path);
@@ -180,12 +193,12 @@ static void *mem_read(void *env) {
   r->is_err = 0;
   r->as.ok = sz_string_from_bytes(n->data ? n->data : "", n->len);
 done:
-  sz_release(path_s);
+  sz_release(pack);
   return r;
 }
 
 SzIo *sz_testrt_fs_read(SzString *path) {
-  return fm_drop(sz_io_delay(mem_read, path), unwrap_box, NULL);
+  return testrt_fs_bind(path, mem_read);
 }
 
 static void *mem_write(void *env) {
@@ -292,7 +305,8 @@ static int is_direct_child(const char *dir, const char *child) {
 }
 
 static void *mem_list(void *env) {
-  SzString *path_s = (SzString *)env;
+  SzPair *pack = (SzPair *)env;
+  SzString *path_s = pack_path(pack);
   BoxResult *r = (BoxResult *)sz_alloc(sizeof(BoxResult));
   char *path = norm_path(sz_string_cstr(path_s));
   MemNode *dir = fs_find(path);
@@ -329,16 +343,17 @@ static void *mem_list(void *env) {
     r->as.ok = rev;
   }
 done:
-  sz_release(path_s);
+  sz_release(pack);
   return r;
 }
 
 SzIo *sz_testrt_fs_list(SzString *path) {
-  return fm_drop(sz_io_delay(mem_list, path), unwrap_box, NULL);
+  return testrt_fs_bind(path, mem_list);
 }
 
 static void *mem_mkdirs(void *env) {
-  SzString *path_s = (SzString *)env;
+  SzPair *pack = (SzPair *)env;
+  SzString *path_s = pack_path(pack);
   BoxResult *r = (BoxResult *)sz_alloc(sizeof(BoxResult));
   char *path = norm_path(sz_string_cstr(path_s));
   char tmp[1024];
@@ -380,12 +395,12 @@ static void *mem_mkdirs(void *env) {
   r->is_err = 0;
   r->as.ok = NULL;
 done:
-  sz_release(path_s);
+  sz_release(pack);
   return r;
 }
 
 SzIo *sz_testrt_fs_mkdirs(SzString *path) {
-  return fm_drop(sz_io_delay(mem_mkdirs, path), unwrap_box, NULL);
+  return testrt_fs_bind(path, mem_mkdirs);
 }
 
 static char *canon_path(const char *p) {
@@ -445,7 +460,8 @@ static char *canon_path(const char *p) {
 }
 
 static void *mem_canonicalize(void *env) {
-  SzString *path_s = (SzString *)env;
+  SzPair *pack = (SzPair *)env;
+  SzString *path_s = pack_path(pack);
   BoxResult *r = (BoxResult *)sz_alloc(sizeof(BoxResult));
   char *path = canon_path(sz_string_cstr(path_s));
   MemNode *n = fs_find(path);
@@ -461,12 +477,12 @@ static void *mem_canonicalize(void *env) {
   r->as.ok = sz_string_from_cstr(path);
   sz_free(path);
 done:
-  sz_release(path_s);
+  sz_release(pack);
   return r;
 }
 
 SzIo *sz_testrt_fs_canonicalize(SzString *path) {
-  return fm_drop(sz_io_delay(mem_canonicalize, path), unwrap_box, NULL);
+  return testrt_fs_bind(path, mem_canonicalize);
 }
 
 /* --- stub network -------------------------------------------------------- */
@@ -896,12 +912,11 @@ SzIo *sz_testrt_sys_read_line(void) {
 }
 
 static void *testrt_read_n_thunk(void *env) {
-  int64_t n = *(int64_t *)env;
+  int64_t n = sz_unbox_i64(env);
   size_t want;
   size_t avail;
   size_t take;
   void *s;
-  sz_free(env);
   if (n <= 0)
     return sz_string_from_cstr("");
   if (!g_stdin_buf || g_stdin_off >= g_stdin_len)
@@ -915,9 +930,10 @@ static void *testrt_read_n_thunk(void *env) {
 }
 
 SzIo *sz_testrt_sys_read(int64_t n) {
-  int64_t *p = (int64_t *)sz_alloc(sizeof(int64_t));
-  *p = n;
-  return sz_io_delay(testrt_read_n_thunk, p);
+  void *b = sz_box_i64(n);
+  SzIo *io = sz_io_delay(testrt_read_n_thunk, b);
+  sz_release(b);
+  return io;
 }
 
 static void sz_testrt_sys_install(void) {

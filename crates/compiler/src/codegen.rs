@@ -3637,6 +3637,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Fs.write" => {
@@ -3646,6 +3647,8 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Fs.list" => {
@@ -3655,6 +3658,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Fs.mkdirs" => {
@@ -3664,6 +3668,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Fs.canonicalize" => {
@@ -3673,6 +3678,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Sys.args" => {
@@ -3699,6 +3705,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Sys.exec" => {
@@ -3708,6 +3715,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Sys.spawn" => {
@@ -3717,6 +3725,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Sys.alive" => {
@@ -3744,6 +3753,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Clock.realTime" => {
@@ -3770,6 +3780,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Impurity.runKit" => {
@@ -5703,6 +5714,80 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at + close..].contains(&format!("call void @sz_release(ptr {value})")),
             "expected last-use release of value {value} after Deferred.complete:\n{ir}"
+        );
+    }
+
+    fn assert_owned_ptr_args_released(src: &str, decl: &str) {
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = format!("call ptr @{decl}(");
+        let at = ir
+            .find(&needle)
+            .unwrap_or_else(|| panic!("expected {decl}:\n{ir}"));
+        let close = ir[at..]
+            .find(')')
+            .unwrap_or_else(|| panic!("expected {decl} call close:\n{ir}"));
+        let args = &ir[at + needle.len()..at + close];
+        let after = &ir[at + close..];
+        let mut saw_ptr = false;
+        for part in args.split(", ") {
+            let part = part.trim();
+            if let Some(v) = part.strip_prefix("ptr ") {
+                if v == "null" {
+                    continue;
+                }
+                saw_ptr = true;
+                assert!(
+                    after.contains(&format!("call void @sz_release(ptr {v})")),
+                    "expected last-use release of {v} after {decl}:\n{ir}"
+                );
+            }
+        }
+        assert!(saw_ptr, "expected a ptr arg for {decl}:\n{ir}");
+    }
+
+    #[test]
+    fn emit_kit_string_args_release_after_call() {
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] = Fs.read("x").flatMap(_ => IO.pure(()))"#,
+            "sz_fs_read",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] = Fs.write("x", "y")"#,
+            "sz_fs_write",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] = Fs.list("x").flatMap(_ => IO.pure(()))"#,
+            "sz_fs_list",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] = Fs.mkdirs("x")"#,
+            "sz_fs_mkdirs",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] = Fs.canonicalize("x").flatMap(_ => IO.pure(()))"#,
+            "sz_fs_canonicalize",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] = Sys.write("x")"#,
+            "sz_sys_write",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] = Sys.exec("true").flatMap(_ => IO.pure(()))"#,
+            "sz_sys_exec",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] = Sys.spawn("true").flatMap(_ => IO.pure(()))"#,
+            "sz_sys_spawn",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] = Sys.getenv("PATH").flatMap(_ => IO.pure(()))"#,
+            "sz_sys_getenv",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] = Net.httpGet("http://example.test/").flatMap(_ => IO.pure(()))"#,
+            "sz_net_http_get",
         );
     }
 
