@@ -2,14 +2,14 @@
 //! No second typer. Open buffers overlay disk text. Hover, completion, definition,
 //! document symbols, references, rename, workspace symbols, signature help,
 //! document highlights, folding ranges, format, selection ranges, inlay hints,
-//! and semantic tokens use that parse.
+//! semantic tokens, and code actions use that parse.
 
 use crate::check::{
-    canonicalize_source_path, check_project_with, complete_project, definition_project,
-    folding_ranges_project, highlights_project, hover_project, inlay_hints_project, json_str,
-    prepare_rename_project, references_project, rename_project, selection_ranges_project,
-    semantic_tokens_project, signature_help_project, symbols_project, workspace_symbols_project,
-    Diagnostic, RenameResult,
+    canonicalize_source_path, check_project_with, code_actions_project, complete_project,
+    definition_project, folding_ranges_project, highlights_project, hover_project,
+    inlay_hints_project, json_str, prepare_rename_project, references_project, rename_project,
+    selection_ranges_project, semantic_tokens_project, signature_help_project, symbols_project,
+    workspace_symbols_project, Diagnostic, RenameResult,
 };
 use crate::fold::FOLD_REGION;
 use crate::overlay::collect_fmt_sources;
@@ -43,7 +43,7 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             let type_list: Vec<String> = TOKEN_TYPES.iter().map(|t| json_str(t)).collect();
             let mod_list: Vec<String> = TOKEN_MODIFIERS.iter().map(|t| json_str(t)).collect();
             let caps = format!(
-                r#"{{"capabilities":{{"textDocumentSync":{{"openClose":true,"change":1}},"hoverProvider":true,"completionProvider":{{"triggerCharacters":["."]}},"definitionProvider":true,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{{"triggerCharacters":["("]}},"referencesProvider":true,"renameProvider":{{"prepareProvider":true}},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true,"semanticTokensProvider":{{"legend":{{"tokenTypes":[{}],"tokenModifiers":[{}]}},"full":true}}}}}}"#,
+                r#"{{"capabilities":{{"textDocumentSync":{{"openClose":true,"change":1}},"hoverProvider":true,"completionProvider":{{"triggerCharacters":["."]}},"definitionProvider":true,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{{"triggerCharacters":["("]}},"referencesProvider":true,"renameProvider":{{"prepareProvider":true}},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true,"semanticTokensProvider":{{"legend":{{"tokenTypes":[{}],"tokenModifiers":[{}]}},"full":true}},"codeActionProvider":{{"codeActionKinds":["quickfix","source.formatDocument"]}}}}}}"#,
                 type_list.join(","),
                 mod_list.join(",")
             );
@@ -109,6 +109,9 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/semanticTokens/full" {
             let result = semantic_tokens_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "textDocument/codeAction" {
+            let result = code_action_result(&root, &open, &body);
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/didSave" {
             publish_check(&root, &open, &mut writer)?;
@@ -584,6 +587,51 @@ fn semantic_tokens_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &
     }
 }
 
+fn code_action_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    let Some(path) = doc_path_from_message(body) else {
+        return "[]".into();
+    };
+    let range = json_optional_range(body);
+    let only = json_only(body);
+    match code_actions_project(root, open, &path, range, &only) {
+        Ok(acts) => {
+            let uri = file_uri(&path);
+            let parts: Vec<String> = acts
+                .iter()
+                .map(|(title, kind, sl, sc, el, ec, new_text, preferred)| {
+                    encode_code_action(&uri, title, kind, *sl, *sc, *el, *ec, new_text, *preferred)
+                })
+                .collect();
+            format!("[{}]", parts.join(","))
+        }
+        _ => "[]".into(),
+    }
+}
+
+fn encode_code_action(
+    uri: &str,
+    title: &str,
+    kind: &str,
+    sl: u32,
+    sc: u32,
+    el: u32,
+    ec: u32,
+    new_text: &str,
+    preferred: bool,
+) -> String {
+    let pref = if preferred { "true" } else { "false" };
+    let text_edit = format!(
+        r#"{{"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}},"newText":{}}}"#,
+        json_str(new_text)
+    );
+    let changes = format!("{}:[{}]", json_str(uri), text_edit);
+    format!(
+        r#"{{"title":{},"kind":{},"isPreferred":{pref},"edit":{{"changes":{{{changes}}}}}}}"#,
+        json_str(title),
+        json_str(kind)
+    )
+}
+
 fn encode_selection_chain(ranges: &[(u32, u32, u32, u32)]) -> Option<String> {
     if ranges.is_empty() {
         return None;
@@ -678,6 +726,46 @@ fn json_optional_range(body: &str) -> Option<((u32, u32), (u32, u32))> {
     } else {
         None
     }
+}
+
+fn json_only(body: &str) -> Vec<String> {
+    let Some(i) = body.find("\"only\"") else {
+        return Vec::new();
+    };
+    let rest = &body[i + 6..];
+    let Some(lb) = rest.find('[') else {
+        return Vec::new();
+    };
+    let after = &rest[lb + 1..];
+    let Some(rb) = after.find(']') else {
+        return Vec::new();
+    };
+    let mut inner = &after[..rb];
+    let mut out = Vec::new();
+    while let Some(q) = inner.find('"') {
+        inner = &inner[q + 1..];
+        let mut s = String::new();
+        let mut chars = inner.chars();
+        let mut closed = false;
+        while let Some(c) = chars.next() {
+            if c == '"' {
+                closed = true;
+                break;
+            }
+            if c == '\\' {
+                if let Some(n) = chars.next() {
+                    s.push(n);
+                }
+            } else {
+                s.push(c);
+            }
+        }
+        if closed {
+            out.push(s);
+        }
+        inner = chars.as_str();
+    }
+    out
 }
 
 fn src_files(root: &Path) -> Result<Vec<PathBuf>> {
@@ -1571,6 +1659,127 @@ mod tests {
         assert!(text.contains("\"data\":["), "{text}");
         assert!(text.contains("tokenTypes"), "{text}");
         assert!(text.contains("\"keyword\""), "{text}");
+    }
+
+    #[test]
+    fn lsp_code_action_fills_missing_match() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"lsp_action\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = r#"enum Color:
+  case Red
+  case Blue
+
+@main def main: IO[Unit] =
+  Color.Red match {
+    case Color.Red => IO.println("r")
+  }
+"#;
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), &formatted).unwrap();
+        let root_uri = format!("file://{}", fs::canonicalize(root).unwrap().display());
+        let main = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let main_uri = format!("file://{}", main.display());
+        let match_at = formatted.find("match").unwrap();
+        let (line, col) = crate::span::offset_to_utf16_pos(&formatted, match_at);
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let req = format!(
+            r#"{{"jsonrpc":"2.0","id":24,"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":{}}},"range":{{"start":{{"line":{line},"character":{col}}},"end":{{"line":{line},"character":{col}}}}},"context":{{"diagnostics":[],"only":["quickfix"]}}}}}}"#,
+            json_str(&main_uri)
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&req));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("codeActionProvider"), "{text}");
+        assert!(text.contains("\"id\":24"), "{text}");
+        assert!(text.contains("Fill missing match cases"), "{text}");
+        assert!(text.contains("Color.Blue"), "{text}");
+        assert!(text.contains("quickfix"), "{text}");
+    }
+
+    #[test]
+    fn lsp_code_action_formats_document() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"lsp_fmt\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = "@main def main: IO[Unit] = IO.println(\"ok\")\n";
+        fs::write(root.join("src/Main.scuzz"), src).unwrap();
+        let root_uri = format!("file://{}", fs::canonicalize(root).unwrap().display());
+        let main = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let main_uri = format!("file://{}", main.display());
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let req = format!(
+            r#"{{"jsonrpc":"2.0","id":25,"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":{}}},"range":{{"start":{{"line":0,"character":0}},"end":{{"line":0,"character":8}}}},"context":{{"diagnostics":[],"only":["source"]}}}}}}"#,
+            json_str(&main_uri)
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&req));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("\"id\":25"), "{text}");
+        assert!(text.contains("Format document"), "{text}");
+        assert!(text.contains("source.formatDocument"), "{text}");
+    }
+
+    #[test]
+    fn lsp_code_action_fixes_unknown_callee() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"lsp_fix\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (Str.contain("ab", "b")) "y" else "n")
+"#;
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), &formatted).unwrap();
+        let root_uri = format!("file://{}", fs::canonicalize(root).unwrap().display());
+        let main = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let main_uri = format!("file://{}", main.display());
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let req = format!(
+            r#"{{"jsonrpc":"2.0","id":26,"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":{}}},"range":{{"start":{{"line":0,"character":0}},"end":{{"line":10,"character":0}}}},"context":{{"diagnostics":[],"only":["quickfix"]}}}}}}"#,
+            json_str(&main_uri)
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&req));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("\"id\":26"), "{text}");
+        assert!(text.contains("Str.contains"), "{text}");
+        assert!(text.contains("Str.contain"), "{text}");
     }
 
     #[test]

@@ -1,5 +1,6 @@
 //! Scuzz Lang compiler: parse kernel dialect → LLVM IR → native link.
 
+pub(crate) mod action;
 pub(crate) mod ast;
 pub(crate) mod check;
 pub(crate) mod codegen;

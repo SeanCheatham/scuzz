@@ -722,6 +722,36 @@ pub fn semantic_tokens_project(
     Ok(crate::tokens::encode_semantic_tokens(&text, &toks))
 }
 
+/// Code actions in a file. Same parse as [`check_project_with`].
+pub fn code_actions_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    range: Option<((u32, u32), (u32, u32))>,
+    only: &[String],
+) -> Result<Vec<(String, String, u32, u32, u32, u32, String, bool)>> {
+    let Some((_resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(Vec::new());
+    };
+    let byte_range = range.map(|((sl, sc), (el, ec))| {
+        (
+            crate::span::utf16_pos_to_offset(&text, sl, sc),
+            crate::span::utf16_pos_to_offset(&text, el, ec),
+        )
+    });
+    let acts =
+        crate::action::code_actions_in_source(program.as_ref(), &label, &text, byte_range, only);
+    Ok(acts
+        .into_iter()
+        .map(|a| {
+            let (sl, sc) = offset_to_utf16_pos(&text, a.start);
+            let (el, ec) = offset_to_utf16_pos(&text, a.end);
+            (a.title, a.kind, sl, sc, el, ec, a.new_text, a.preferred)
+        })
+        .collect())
+}
+
 pub enum RenameResult {
     Unavailable,
     BadName,
