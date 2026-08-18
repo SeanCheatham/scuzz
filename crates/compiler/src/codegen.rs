@@ -143,6 +143,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_map_keys(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_map_values(ptr)").unwrap();
     writeln!(out, "declare i64 @sz_map_size(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_set_union(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_set_intersect(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_set_diff(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_append(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_set_at(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_filter(ptr, ptr, ptr)").unwrap();
@@ -4361,6 +4364,22 @@ fn emit_call(
             }
             owned_ptr(code, format!("%{prefix}_v"))
         }
+        "Set.union" | "Set.intersect" | "Set.diff" => {
+            let rt = match callee {
+                "Set.union" => "sz_set_union",
+                "Set.intersect" => "sz_set_intersect",
+                _ => "sz_set_diff",
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @{rt}(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
         "Map.keys" | "Set.toList" => {
             writeln!(
                 code,
@@ -7517,6 +7536,30 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of list {name} after List.indices:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_set_union_intersect_diff() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(Set.toList(Set.union(Set.add(Set.empty(), "x"), Set.add(Set.empty(), "y"))), ","))
+    _ <- IO.println(List.join(Set.toList(Set.intersect(Set.add(Set.empty(), "x"), Set.add(Set.empty(), "x"))), ","))
+    _ <- IO.println(List.join(Set.toList(Set.diff(Set.add(Set.empty(), "x"), Set.empty())), ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_set_union"));
+        assert!(ir.contains("sz_set_intersect"));
+        assert!(ir.contains("sz_set_diff"));
+        let needle = "call ptr @sz_set_union(ptr ";
+        let at = ir.find(needle).expect("union");
+        let left = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {left})")),
+            "expected last-use release of set {left} after Set.union:\n{ir}"
         );
     }
 

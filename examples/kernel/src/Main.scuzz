@@ -120,6 +120,9 @@ def mapSetProof(): IO[Unit] =
     _ <- IO.println(s"sne:${if (Set.nonEmpty(st)) "y" else "n"}")
     _ <- IO.println(s"mget:${List.join(Map.get(mp, "a"), ",")}")
     _ <- IO.println(s"mmiss:${List.join(Map.get(mp, "z"), ",")}")
+    _ <- IO.println(s"union:${List.join(Set.toList(Set.union(st, Set.add(Set.empty(), "z"))), ",")}")
+    _ <- IO.println(s"isect:${List.join(Set.toList(Set.intersect(st, Set.add(Set.add(Set.empty(), "y"), "z"))), ",")}")
+    _ <- IO.println(s"sdiff:${List.join(Set.toList(Set.diff(st, Set.add(Set.add(Set.empty(), "y"), "z"))), ",")}")
   } yield ()
 
 def listProof(): IO[Unit] =

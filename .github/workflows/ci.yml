@@ -118,6 +118,9 @@ jobs:
           grep -q "sne:y" /tmp/kernel.out
           grep -q "mget:1" /tmp/kernel.out
           grep -q "mmiss:" /tmp/kernel.out
+          grep -q "union:x,y,z" /tmp/kernel.out
+          grep -q "isect:y" /tmp/kernel.out
+          grep -q "sdiff:x" /tmp/kernel.out
           grep -q "take:a,b" /tmp/kernel.out
           grep -q "drop:b,c" /tmp/kernel.out
           grep -q "find:b" /tmp/kernel.out

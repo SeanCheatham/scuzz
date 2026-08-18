@@ -164,3 +164,76 @@ int64_t sz_map_size(SzMap *m) {
     return 0;
   return 1 + sz_map_size(m->left) + sz_map_size(m->right);
 }
+
+SzMap *sz_set_union(SzMap *a, SzMap *b) {
+  SzList *keys;
+  SzList *p;
+  SzMap *cur;
+  SzMap *next;
+  int32_t kind;
+  if (!b) {
+    sz_retain(a);
+    return a;
+  }
+  if (!a) {
+    sz_retain(b);
+    return b;
+  }
+  kind = a->key_kind;
+  cur = a;
+  sz_retain(cur);
+  keys = sz_map_keys(b);
+  for (p = keys; p; p = p->tail) {
+    next = sz_map_set(cur, p->head, NULL, kind);
+    sz_release(cur);
+    cur = next;
+  }
+  sz_list_free(keys);
+  return cur;
+}
+
+SzMap *sz_set_intersect(SzMap *a, SzMap *b) {
+  SzList *keys;
+  SzList *p;
+  SzMap *out = NULL;
+  SzMap *next;
+  int32_t kind;
+  if (!a || !b)
+    return NULL;
+  kind = a->key_kind;
+  keys = sz_map_keys(a);
+  for (p = keys; p; p = p->tail) {
+    if (sz_map_contains(b, p->head)) {
+      next = sz_map_set(out, p->head, NULL, kind);
+      sz_release(out);
+      out = next;
+    }
+  }
+  sz_list_free(keys);
+  return out;
+}
+
+SzMap *sz_set_diff(SzMap *a, SzMap *b) {
+  SzList *keys;
+  SzList *p;
+  SzMap *out = NULL;
+  SzMap *next;
+  int32_t kind;
+  if (!a)
+    return NULL;
+  if (!b) {
+    sz_retain(a);
+    return a;
+  }
+  kind = a->key_kind;
+  keys = sz_map_keys(a);
+  for (p = keys; p; p = p->tail) {
+    if (!sz_map_contains(b, p->head)) {
+      next = sz_map_set(out, p->head, NULL, kind);
+      sz_release(out);
+      out = next;
+    }
+  }
+  sz_list_free(keys);
+  return out;
+}

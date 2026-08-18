@@ -725,6 +725,12 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Set.size", "Set.size(s: Set[T]): Int"),
     ("Set.isEmpty", "Set.isEmpty(s: Set[T]): Bool"),
     ("Set.nonEmpty", "Set.nonEmpty(s: Set[T]): Bool"),
+    ("Set.union", "Set.union(a: Set[T], b: Set[T]): Set[T]"),
+    (
+        "Set.intersect",
+        "Set.intersect(a: Set[T], b: Set[T]): Set[T]",
+    ),
+    ("Set.diff", "Set.diff(a: Set[T], b: Set[T]): Set[T]"),
     ("Fs.read", "Fs.read(path: String): IO[String]"),
     ("Fs.write", "Fs.write(path: String, body: String): IO[Unit]"),
     ("Sys.args", "Sys.args(): IO[List]"),
@@ -1851,6 +1857,24 @@ mod tests {
 "#;
         let h = hover_src(src, "nonEmpty");
         assert!(h.contains("Set.nonEmpty(s: Set[T]): Bool"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(Set.toList(Set.union(Set.add(Set.empty(), "x"), Set.add(Set.empty(), "y"))), ","))
+"#;
+        let h = hover_src(src, "union");
+        assert!(h.contains("Set.union(a: Set[T], b: Set[T]): Set[T]"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(Set.toList(Set.intersect(Set.add(Set.empty(), "x"), Set.add(Set.empty(), "x"))), ","))
+"#;
+        let h = hover_src(src, "intersect");
+        assert!(
+            h.contains("Set.intersect(a: Set[T], b: Set[T]): Set[T]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(Set.toList(Set.diff(Set.add(Set.empty(), "x"), Set.empty())), ","))
+"#;
+        let h = hover_src(src, "diff");
+        assert!(h.contains("Set.diff(a: Set[T], b: Set[T]): Set[T]"), "{h}");
     }
 
     #[test]

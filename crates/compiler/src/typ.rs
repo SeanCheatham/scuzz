@@ -2251,6 +2251,12 @@ fn infer_call(
             set_elem(&arg_tys[0])?;
             Ok(Type::Bool)
         }
+        "Set.union" | "Set.intersect" | "Set.diff" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let a = set_elem(&arg_tys[0])?;
+            let b = set_elem(&arg_tys[1])?;
+            Ok(Type::App("Set".into(), vec![prefer_elem(&a, &b)?]))
+        }
         "Fs.read" | "Fs.list" | "Fs.mkdirs" | "Fs.canonicalize" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
@@ -6179,6 +6185,21 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Map.remove/keys/size should typecheck");
+    }
+
+    #[test]
+    fn typechecks_set_union_intersect_diff() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    a = Set.add(Set.add(Set.empty(), "x"), "y")
+    b = Set.add(Set.add(Set.empty(), "y"), "z")
+    _ <- IO.println(List.join(Set.toList(Set.union(a, b)), ","))
+    _ <- IO.println(List.join(Set.toList(Set.intersect(a, b)), ","))
+    _ <- IO.println(List.join(Set.toList(Set.diff(a, b)), ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Set.union/intersect/diff should typecheck");
     }
 
     #[test]

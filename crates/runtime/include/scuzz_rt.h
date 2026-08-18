@@ -533,6 +533,10 @@ SzList *sz_map_keys(SzMap *m);
 /* Inorder values as a new list. Cons retains values. */
 SzList *sz_map_values(SzMap *m);
 int64_t sz_map_size(SzMap *m);
+/* Set algebra. Values stay null. Empty `b` retains `a` for union/diff. */
+SzMap *sz_set_union(SzMap *a, SzMap *b);
+SzMap *sz_set_intersect(SzMap *a, SzMap *b);
+SzMap *sz_set_diff(SzMap *a, SzMap *b);
 
 /* Blessed filesystem IO (live or TestRuntime mem FS; chosen when the IO runs) */
 SzIo *sz_fs_read(SzString *path);

@@ -4166,6 +4166,80 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
+  /* Persistent set union / intersect / diff. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *kx;
+    SzString *ky;
+    SzString *kz;
+    SzMap *a0;
+    SzMap *a;
+    SzMap *b0;
+    SzMap *b;
+    SzMap *u;
+    SzMap *isect;
+    SzMap *d;
+    SzMap *tmp;
+    SzList *ks;
+    sz_alloc_stats(&base_bytes, &base_count);
+    kx = sz_string_from_cstr("x");
+    ky = sz_string_from_cstr("y");
+    kz = sz_string_from_cstr("z");
+    a0 = sz_map_set(NULL, kx, NULL, 1);
+    a = sz_map_set(a0, ky, NULL, 1);
+    b0 = sz_map_set(NULL, ky, NULL, 1);
+    b = sz_map_set(b0, kz, NULL, 1);
+    u = sz_set_union(a, b);
+    assert(sz_map_size(u) == 3);
+    assert(sz_map_contains(u, kx) == 1);
+    assert(sz_map_contains(u, ky) == 1);
+    assert(sz_map_contains(u, kz) == 1);
+    ks = sz_map_keys(u);
+    assert(sz_list_len(ks) == 3);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_head(ks)), "x") == 0);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_head(sz_list_tail(ks))), "y") ==
+           0);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_head(
+                      sz_list_tail(sz_list_tail(ks)))),
+                  "z") == 0);
+    sz_list_free(ks);
+    isect = sz_set_intersect(a, b);
+    assert(sz_map_size(isect) == 1);
+    assert(sz_map_contains(isect, ky) == 1);
+    d = sz_set_diff(a, b);
+    assert(sz_map_size(d) == 1);
+    assert(sz_map_contains(d, kx) == 1);
+    tmp = sz_set_union(a, NULL);
+    assert(tmp == a);
+    sz_release(tmp);
+    tmp = sz_set_union(NULL, b);
+    assert(tmp == b);
+    sz_release(tmp);
+    assert(sz_set_intersect(NULL, b) == NULL);
+    assert(sz_set_intersect(a, NULL) == NULL);
+    assert(sz_set_diff(NULL, b) == NULL);
+    tmp = sz_set_diff(a, NULL);
+    assert(tmp == a);
+    sz_release(tmp);
+    tmp = sz_set_union(a, a);
+    assert(sz_map_size(tmp) == 2);
+    sz_release(tmp);
+    sz_release(d);
+    sz_release(isect);
+    sz_release(u);
+    sz_release(b);
+    sz_release(b0);
+    sz_release(a);
+    sz_release(a0);
+    sz_string_free(kx);
+    sz_string_free(ky);
+    sz_string_free(kz);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   /* IO graph and fiber structs drop after unsafe_run. */
   {
     size_t base_bytes = 0, base_count = 0;

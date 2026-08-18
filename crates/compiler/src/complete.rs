@@ -1083,6 +1083,27 @@ mod tests {
     }
 
     #[test]
+    fn completes_set_union_after_dot() {
+        let src = "@main def main: IO[Unit] = Set.un\n";
+        let labels = labels_at(src, "Set.un");
+        assert!(labels.iter().any(|l| l == "Set.union"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_set_intersect_after_dot() {
+        let src = "@main def main: IO[Unit] = Set.int\n";
+        let labels = labels_at(src, "Set.int");
+        assert!(labels.iter().any(|l| l == "Set.intersect"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_set_diff_after_dot() {
+        let src = "@main def main: IO[Unit] = Set.di\n";
+        let labels = labels_at(src, "Set.di");
+        assert!(labels.iter().any(|l| l == "Set.diff"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_list_concat_after_dot() {
         let src = "@main def main: IO[Unit] = List.conc\n";
         let labels = labels_at(src, "List.conc");
