@@ -62,11 +62,30 @@ pub fn semantic_tokens_in_source(source: &str) -> Vec<SemToken> {
     out
 }
 
+/// Tokens whose start sits in `[start, end)`.
+pub fn semantic_tokens_in_range(source: &str, start: usize, end: usize) -> Vec<SemToken> {
+    semantic_tokens_in_source(source)
+        .into_iter()
+        .filter(|t| t.start >= start && t.start < end)
+        .collect()
+}
+
 /// LSP packed deltas: deltaLine, deltaStart, length, tokenType, tokenModifiers.
+/// The first token is relative to `(0, 0)`.
 pub fn encode_semantic_tokens(source: &str, toks: &[SemToken]) -> Vec<u32> {
+    encode_semantic_tokens_from(source, toks, 0, 0)
+}
+
+/// Packed deltas. The first token is relative to `(origin_line, origin_col)`.
+pub fn encode_semantic_tokens_from(
+    source: &str,
+    toks: &[SemToken],
+    origin_line: u32,
+    origin_col: u32,
+) -> Vec<u32> {
     let mut data = Vec::with_capacity(toks.len() * 5);
-    let mut prev_line = 0u32;
-    let mut prev_start = 0u32;
+    let mut prev_line = origin_line;
+    let mut prev_start = origin_col;
     for t in toks {
         let (line, start) = offset_to_utf16_pos(source, t.start);
         let (_, end_col) = offset_to_utf16_pos(source, t.end);
@@ -279,5 +298,27 @@ mod tests {
     fn skips_unlexable_source() {
         let toks = semantic_tokens_in_source("@@@");
         assert!(toks.is_empty(), "{toks:?}");
+    }
+
+    #[test]
+    fn encodes_range_relative_to_origin() {
+        let src = "def add(n: Int): Int = n\n@main def main: IO[Unit] = IO.println(\"x\")\n";
+        let line1 = src.find("@main").unwrap();
+        let toks = semantic_tokens_in_range(src, line1, src.len());
+        assert!(
+            toks.iter()
+                .any(|t| src[t.start..t.end] == *"main" && t.ty == TY_FUNCTION),
+            "{toks:?}"
+        );
+        assert!(
+            !toks.iter().any(|t| src[t.start..t.end] == *"add"),
+            "{toks:?}"
+        );
+        let (ol, oc) = offset_to_utf16_pos(src, line1);
+        let data = encode_semantic_tokens_from(src, &toks, ol, oc);
+        assert!(data.len() % 5 == 0 && !data.is_empty(), "{data:?}");
+        assert_eq!(data[0], 0);
+        let full = encode_semantic_tokens(src, &semantic_tokens_in_source(src));
+        assert!(data.len() < full.len(), "{} vs {}", data.len(), full.len());
     }
 }

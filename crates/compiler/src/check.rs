@@ -882,6 +882,31 @@ pub fn semantic_tokens_project(
     Ok(crate::tokens::encode_semantic_tokens(&text, &toks))
 }
 
+/// Semantic tokens whose start sits in `range`. Deltas are relative to the range start.
+pub fn semantic_tokens_range_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    range: Option<((u32, u32), (u32, u32))>,
+) -> Result<Vec<u32>> {
+    let Some((_resolved, _label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(Vec::new());
+    };
+    if program.is_none() {
+        return Ok(Vec::new());
+    }
+    let Some(((sl, sc), (el, ec))) = range else {
+        return Ok(Vec::new());
+    };
+    let start = crate::span::utf16_pos_to_offset(&text, sl, sc);
+    let end = crate::span::utf16_pos_to_offset(&text, el, ec);
+    let toks = crate::tokens::semantic_tokens_in_range(&text, start, end);
+    Ok(crate::tokens::encode_semantic_tokens_from(
+        &text, &toks, sl, sc,
+    ))
+}
+
 /// Code actions in a file. Same parse as [`check_project_with`].
 pub fn code_actions_project(
     project_dir: &Path,
@@ -1241,5 +1266,56 @@ def b(): String = 1
             diags.len(),
             diags
         );
+    }
+
+    #[test]
+    fn check_project_reports_unknown_io_method() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"io_typo\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = "@main def main: IO[Unit] =\n  IO.printl(\"ok\")\n";
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), formatted).unwrap();
+        let diags = check_project(root).unwrap();
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(
+            diags[0].message.contains("unknown function IO.printl"),
+            "{}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn semantic_tokens_range_is_shorter_than_full() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        let path = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let text = fs::read_to_string(&path).unwrap();
+        let full = semantic_tokens_project(root, &BTreeMap::new(), &path).unwrap();
+        let line1 = text.find('\n').map(|i| i + 1).unwrap_or(0);
+        let (sl, sc) = offset_to_utf16_pos(&text, line1);
+        let (el, ec) = offset_to_utf16_pos(&text, text.len());
+        let ranged = semantic_tokens_range_project(
+            root,
+            &BTreeMap::new(),
+            &path,
+            Some(((sl, sc), (el, ec))),
+        )
+        .unwrap();
+        assert!(!full.is_empty(), "{full:?}");
+        assert!(!ranged.is_empty(), "{ranged:?}");
+        assert!(
+            ranged.len() < full.len(),
+            "{} vs {}",
+            ranged.len(),
+            full.len()
+        );
+        assert_eq!(ranged[0], 0);
     }
 }

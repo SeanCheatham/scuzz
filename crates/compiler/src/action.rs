@@ -498,6 +498,23 @@ mod tests {
     }
 
     #[test]
+    fn replaces_unknown_io_printl_typo() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.printl("ok")
+"#;
+        let pretty = format_source(src).unwrap();
+        let acts = actions(&pretty, None, &["quickfix"]);
+        let fix = acts
+            .iter()
+            .find(|a| a.new_text == "IO.println")
+            .expect("println");
+        assert!(fix.title.contains("IO.printl"), "{}", fix.title);
+        let mut edited = pretty.clone();
+        edited.replace_range(fix.start..fix.end, &fix.new_text);
+        assert!(edited.contains("IO.println("), "{edited}");
+    }
+
+    #[test]
     fn skips_distant_unknown_name() {
         let src = r#"@main def main: IO[Unit] =
   zzzyyy("ok")

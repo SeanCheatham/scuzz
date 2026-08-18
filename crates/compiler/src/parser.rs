@@ -1697,7 +1697,16 @@ impl Parser {
                             ))
                         }
                     }
-                    other => Err(self.err(format!("unknown IO.{other}"))),
+                    other => {
+                        let callee = format!("IO.{other}");
+                        let args = if matches!(self.peek(), Token::LParen) {
+                            self.parse_args()?
+                        } else {
+                            Vec::new()
+                        };
+                        let end = args.last().map(|a| a.span.clone()).unwrap_or(start.clone());
+                        Ok(self.mk(ExprKind::Call { callee, args }, start.cover(&end)))
+                    }
                 }
             }
             Token::Ident(name) if name == "Ui" => {
@@ -1900,6 +1909,19 @@ def scale(x: Float): Float = x * 2.0
                 ));
             }
             other => panic!("expected for, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_unknown_io_method_as_call() {
+        let src = "@main def main: IO[Unit] = IO.printl(\"x\")\n";
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::Call { callee, args } => {
+                assert_eq!(callee, "IO.printl");
+                assert_eq!(args.len(), 1);
+            }
+            other => panic!("expected call, got {other:?}"),
         }
     }
 

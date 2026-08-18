@@ -2,15 +2,16 @@
 //! No second typer. Open buffers overlay disk text. Hover, completion, definition,
 //! document symbols, references, rename, workspace symbols, signature help,
 //! document highlights, folding ranges, format, selection ranges, inlay hints,
-//! semantic tokens, code actions, and call hierarchy use that parse.
+//! semantic tokens (full and range), code actions, and call hierarchy use that parse.
 
 use crate::check::{
     canonicalize_source_path, check_project_with, code_actions_project, complete_project,
     definition_project, folding_ranges_project, highlights_project, hover_project,
     incoming_calls_project, inlay_hints_project, json_str, outgoing_calls_project,
     prepare_call_hierarchy_project, prepare_rename_project, references_project, rename_project,
-    selection_ranges_project, semantic_tokens_project, signature_help_project, symbols_project,
-    workspace_symbols_project, CallItemLsp, Diagnostic, RenameResult,
+    selection_ranges_project, semantic_tokens_project, semantic_tokens_range_project,
+    signature_help_project, symbols_project, workspace_symbols_project, CallItemLsp, Diagnostic,
+    RenameResult,
 };
 use crate::fold::FOLD_REGION;
 use crate::overlay::collect_fmt_sources;
@@ -44,7 +45,7 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             let type_list: Vec<String> = TOKEN_TYPES.iter().map(|t| json_str(t)).collect();
             let mod_list: Vec<String> = TOKEN_MODIFIERS.iter().map(|t| json_str(t)).collect();
             let caps = format!(
-                r#"{{"capabilities":{{"textDocumentSync":{{"openClose":true,"change":1}},"hoverProvider":true,"completionProvider":{{"triggerCharacters":["."]}},"definitionProvider":true,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{{"triggerCharacters":["("]}},"referencesProvider":true,"renameProvider":{{"prepareProvider":true}},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true,"semanticTokensProvider":{{"legend":{{"tokenTypes":[{}],"tokenModifiers":[{}]}},"full":true}},"codeActionProvider":{{"codeActionKinds":["quickfix","source.formatDocument"]}},"callHierarchyProvider":true}}}}"#,
+                r#"{{"capabilities":{{"textDocumentSync":{{"openClose":true,"change":1}},"hoverProvider":true,"completionProvider":{{"triggerCharacters":["."]}},"definitionProvider":true,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{{"triggerCharacters":["("]}},"referencesProvider":true,"renameProvider":{{"prepareProvider":true}},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true,"semanticTokensProvider":{{"legend":{{"tokenTypes":[{}],"tokenModifiers":[{}]}},"full":true,"range":true}},"codeActionProvider":{{"codeActionKinds":["quickfix","source.formatDocument"]}},"callHierarchyProvider":true}}}}"#,
                 type_list.join(","),
                 mod_list.join(",")
             );
@@ -110,6 +111,9 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/semanticTokens/full" {
             let result = semantic_tokens_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "textDocument/semanticTokens/range" {
+            let result = semantic_tokens_range_result(&root, &open, &body);
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/codeAction" {
             let result = code_action_result(&root, &open, &body);
@@ -589,12 +593,29 @@ fn semantic_tokens_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &
         return r#"{"data":[]}"#.into();
     };
     match semantic_tokens_project(root, open, &path) {
-        Ok(data) => {
-            let nums: Vec<String> = data.iter().map(|n| n.to_string()).collect();
-            format!(r#"{{"data":[{}]}}"#, nums.join(","))
-        }
+        Ok(data) => encode_semantic_token_data(&data),
         _ => r#"{"data":[]}"#.into(),
     }
+}
+
+fn semantic_tokens_range_result(
+    root: &Path,
+    open: &BTreeMap<PathBuf, String>,
+    body: &str,
+) -> String {
+    let Some(path) = doc_path_from_message(body) else {
+        return r#"{"data":[]}"#.into();
+    };
+    let range = json_optional_range(body);
+    match semantic_tokens_range_project(root, open, &path, range) {
+        Ok(data) => encode_semantic_token_data(&data),
+        _ => r#"{"data":[]}"#.into(),
+    }
+}
+
+fn encode_semantic_token_data(data: &[u32]) -> String {
+    let nums: Vec<String> = data.iter().map(|n| n.to_string()).collect();
+    format!(r#"{{"data":[{}]}}"#, nums.join(","))
 }
 
 fn code_action_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
@@ -1818,6 +1839,67 @@ mod tests {
         assert!(text.contains("\"data\":["), "{text}");
         assert!(text.contains("tokenTypes"), "{text}");
         assert!(text.contains("\"keyword\""), "{text}");
+        assert!(text.contains("\"range\":true"), "{text}");
+    }
+
+    #[test]
+    fn lsp_semantic_tokens_range_is_shorter_than_full() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let (formatted, root_uri, main_uri) = write_add_pkg(root);
+        let line1 = formatted.find('\n').map(|i| i + 1).unwrap_or(0);
+        let (sl, sc) = crate::span::offset_to_utf16_pos(&formatted, line1);
+        let (el, ec) = crate::span::offset_to_utf16_pos(&formatted, formatted.len());
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let full = format!(
+            r#"{{"jsonrpc":"2.0","id":30,"method":"textDocument/semanticTokens/full","params":{{"textDocument":{{"uri":{}}}}}}}"#,
+            json_str(&main_uri)
+        );
+        let range = format!(
+            r#"{{"jsonrpc":"2.0","id":31,"method":"textDocument/semanticTokens/range","params":{{"textDocument":{{"uri":{}}},"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}}}}}}"#,
+            json_str(&main_uri)
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&full));
+        input.extend(frame(&range));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("\"id\":30"), "{text}");
+        assert!(text.contains("\"id\":31"), "{text}");
+        let full_data = extract_semantic_data(&text, "\"id\":30");
+        let range_data = extract_semantic_data(&text, "\"id\":31");
+        assert!(!full_data.is_empty(), "{text}");
+        assert!(!range_data.is_empty(), "{text}");
+        assert!(
+            range_data.len() < full_data.len(),
+            "{} vs {} in {text}",
+            range_data.len(),
+            full_data.len()
+        );
+    }
+
+    fn extract_semantic_data(text: &str, id: &str) -> Vec<u32> {
+        let Some(at) = text.find(id) else {
+            return Vec::new();
+        };
+        let rest = &text[at..];
+        let Some(data_at) = rest.find("\"data\":[") else {
+            return Vec::new();
+        };
+        let rest = &rest[data_at + 8..];
+        let Some(end) = rest.find(']') else {
+            return Vec::new();
+        };
+        rest[..end]
+            .split(',')
+            .filter_map(|s| s.trim().parse().ok())
+            .collect()
     }
 
     #[test]
@@ -2010,6 +2092,44 @@ def twice(n: Int): Int =
         assert!(text.contains("\"id\":26"), "{text}");
         assert!(text.contains("Str.contains"), "{text}");
         assert!(text.contains("Str.contain"), "{text}");
+    }
+
+    #[test]
+    fn lsp_code_action_fixes_unknown_io_printl() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"lsp_io_typo\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = r#"@main def main: IO[Unit] =
+  IO.printl("ok")
+"#;
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), &formatted).unwrap();
+        let root_uri = format!("file://{}", fs::canonicalize(root).unwrap().display());
+        let main = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let main_uri = format!("file://{}", main.display());
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let req = format!(
+            r#"{{"jsonrpc":"2.0","id":32,"method":"textDocument/codeAction","params":{{"textDocument":{{"uri":{}}},"range":{{"start":{{"line":0,"character":0}},"end":{{"line":10,"character":0}}}},"context":{{"diagnostics":[],"only":["quickfix"]}}}}}}"#,
+            json_str(&main_uri)
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&req));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("\"id\":32"), "{text}");
+        assert!(text.contains("IO.println"), "{text}");
+        assert!(text.contains("IO.printl"), "{text}");
     }
 
     #[test]
