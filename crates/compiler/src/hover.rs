@@ -729,6 +729,18 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Map.size", "Map.size(m: Map[K, V]): Int"),
     ("Map.isEmpty", "Map.isEmpty(m: Map[K, V]): Bool"),
     ("Map.nonEmpty", "Map.nonEmpty(m: Map[K, V]): Bool"),
+    (
+        "Map.union",
+        "Map.union(a: Map[K, V], b: Map[K, V]): Map[K, V]",
+    ),
+    (
+        "Map.intersect",
+        "Map.intersect(a: Map[K, V], b: Map[K, V]): Map[K, V]",
+    ),
+    (
+        "Map.diff",
+        "Map.diff(a: Map[K, V], b: Map[K, V]): Map[K, V]",
+    ),
     ("Set.empty", "Set.empty(): Set[T]"),
     ("Set.add", "Set.add(s: Set[T], x: T): Set[T]"),
     ("Set.contains", "Set.contains(s: Set[T], x: T): Bool"),
@@ -1911,6 +1923,30 @@ mod tests {
 "#;
         let h = hover_src(src, "diff");
         assert!(h.contains("Set.diff(a: Set[T], b: Set[T]): Set[T]"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(Map.values(Map.union(Map.set(Map.empty(), "a", "1"), Map.set(Map.empty(), "b", "2"))), ","))
+"#;
+        let h = hover_src(src, "union");
+        assert!(
+            h.contains("Map.union(a: Map[K, V], b: Map[K, V]): Map[K, V]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(Map.values(Map.intersect(Map.set(Map.empty(), "a", "1"), Map.set(Map.empty(), "a", "9"))), ","))
+"#;
+        let h = hover_src(src, "intersect");
+        assert!(
+            h.contains("Map.intersect(a: Map[K, V], b: Map[K, V]): Map[K, V]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(Map.values(Map.diff(Map.set(Map.empty(), "a", "1"), Map.empty())), ","))
+"#;
+        let h = hover_src(src, "diff");
+        assert!(
+            h.contains("Map.diff(a: Map[K, V], b: Map[K, V]): Map[K, V]"),
+            "{h}"
+        );
     }
 
     #[test]

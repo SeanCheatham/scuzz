@@ -4293,6 +4293,99 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
+  /* Persistent map union / intersect / diff keep values. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *ka;
+    SzString *kb;
+    SzString *kc;
+    SzString *v1;
+    SzString *v2;
+    SzString *v9;
+    SzString *v3;
+    SzMap *a0;
+    SzMap *a;
+    SzMap *b0;
+    SzMap *b;
+    SzMap *u;
+    SzMap *isect;
+    SzMap *d;
+    SzMap *tmp;
+    SzList *vs;
+    sz_alloc_stats(&base_bytes, &base_count);
+    ka = sz_string_from_cstr("a");
+    kb = sz_string_from_cstr("b");
+    kc = sz_string_from_cstr("c");
+    v1 = sz_string_from_cstr("1");
+    v2 = sz_string_from_cstr("2");
+    v9 = sz_string_from_cstr("9");
+    v3 = sz_string_from_cstr("3");
+    a0 = sz_map_set(NULL, ka, v1, 1);
+    a = sz_map_set(a0, kb, v2, 1);
+    b0 = sz_map_set(NULL, kb, v9, 1);
+    b = sz_map_set(b0, kc, v3, 1);
+    u = sz_map_union(a, b);
+    assert(sz_map_size(u) == 3);
+    assert(strcmp(sz_string_cstr((SzString *)sz_map_get_or(u, ka, NULL)), "1") ==
+           0);
+    assert(strcmp(sz_string_cstr((SzString *)sz_map_get_or(u, kb, NULL)), "9") ==
+           0);
+    assert(strcmp(sz_string_cstr((SzString *)sz_map_get_or(u, kc, NULL)), "3") ==
+           0);
+    vs = sz_map_values(u);
+    assert(sz_list_len(vs) == 3);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_head(vs)), "1") == 0);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_head(sz_list_tail(vs))),
+                  "9") == 0);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_head(
+                      sz_list_tail(sz_list_tail(vs)))),
+                  "3") == 0);
+    sz_list_free(vs);
+    isect = sz_map_intersect(a, b);
+    assert(sz_map_size(isect) == 1);
+    assert(strcmp(sz_string_cstr((SzString *)sz_map_get_or(isect, kb, NULL)),
+                  "2") == 0);
+    d = sz_map_diff(a, b);
+    assert(sz_map_size(d) == 1);
+    assert(strcmp(sz_string_cstr((SzString *)sz_map_get_or(d, ka, NULL)), "1") ==
+           0);
+    tmp = sz_map_union(a, NULL);
+    assert(tmp == a);
+    sz_release(tmp);
+    tmp = sz_map_union(NULL, b);
+    assert(tmp == b);
+    sz_release(tmp);
+    assert(sz_map_intersect(NULL, b) == NULL);
+    assert(sz_map_intersect(a, NULL) == NULL);
+    assert(sz_map_diff(NULL, b) == NULL);
+    tmp = sz_map_diff(a, NULL);
+    assert(tmp == a);
+    sz_release(tmp);
+    tmp = sz_map_union(a, a);
+    assert(sz_map_size(tmp) == 2);
+    assert(strcmp(sz_string_cstr((SzString *)sz_map_get_or(tmp, kb, NULL)),
+                  "2") == 0);
+    sz_release(tmp);
+    sz_release(d);
+    sz_release(isect);
+    sz_release(u);
+    sz_release(b);
+    sz_release(b0);
+    sz_release(a);
+    sz_release(a0);
+    sz_string_free(ka);
+    sz_string_free(kb);
+    sz_string_free(kc);
+    sz_string_free(v1);
+    sz_string_free(v2);
+    sz_string_free(v9);
+    sz_string_free(v3);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   /* IO graph and fiber structs drop after unsafe_run. */
   {
     size_t base_bytes = 0, base_count = 0;

@@ -121,6 +121,9 @@ jobs:
           grep -q "union:x,y,z" /tmp/kernel.out
           grep -q "isect:y" /tmp/kernel.out
           grep -q "sdiff:x" /tmp/kernel.out
+          grep -q "munion:1,9,3" /tmp/kernel.out
+          grep -q "misect:2" /tmp/kernel.out
+          grep -q "mdiff:1" /tmp/kernel.out
           grep -q "take:a,b" /tmp/kernel.out
           grep -q "drop:b,c" /tmp/kernel.out
           grep -q "find:b" /tmp/kernel.out

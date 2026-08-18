@@ -2229,6 +2229,14 @@ fn infer_call(
             map_kv(&arg_tys[0])?;
             Ok(Type::Bool)
         }
+        "Map.union" | "Map.intersect" | "Map.diff" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let (k1, v1) = map_kv(&arg_tys[0])?;
+            let (k2, v2) = map_kv(&arg_tys[1])?;
+            let k = prefer_elem(&k1, &k2)?;
+            let v = prefer_elem(&v1, &v2)?;
+            Ok(Type::App("Map".into(), vec![k, v]))
+        }
         "Set.empty" => {
             expect_arity(callee, &arg_tys, 0)?;
             Ok(Type::App("Set".into(), vec![Type::Opaque("Elem".into())]))
@@ -6229,6 +6237,21 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Set.union/intersect/diff should typecheck");
+    }
+
+    #[test]
+    fn typechecks_map_union_intersect_diff() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    a = Map.set(Map.set(Map.empty(), "a", "1"), "b", "2")
+    b = Map.set(Map.set(Map.empty(), "b", "9"), "c", "3")
+    _ <- IO.println(List.join(Map.values(Map.union(a, b)), ","))
+    _ <- IO.println(List.join(Map.values(Map.intersect(a, b)), ","))
+    _ <- IO.println(List.join(Map.values(Map.diff(a, b)), ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Map.union/intersect/diff should typecheck");
     }
 
     #[test]

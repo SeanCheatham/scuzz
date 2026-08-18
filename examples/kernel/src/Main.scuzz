@@ -123,6 +123,10 @@ def mapSetProof(): IO[Unit] =
     _ <- IO.println(s"union:${List.join(Set.toList(Set.union(st, Set.add(Set.empty(), "z"))), ",")}")
     _ <- IO.println(s"isect:${List.join(Set.toList(Set.intersect(st, Set.add(Set.add(Set.empty(), "y"), "z"))), ",")}")
     _ <- IO.println(s"sdiff:${List.join(Set.toList(Set.diff(st, Set.add(Set.add(Set.empty(), "y"), "z"))), ",")}")
+    other = Map.set(Map.set(Map.empty(), "b", "9"), "c", "3")
+    _ <- IO.println(s"munion:${List.join(Map.values(Map.union(mp, other)), ",")}")
+    _ <- IO.println(s"misect:${List.join(Map.values(Map.intersect(mp, other)), ",")}")
+    _ <- IO.println(s"mdiff:${List.join(Map.values(Map.diff(mp, other)), ",")}")
   } yield ()
 
 def listProof(): IO[Unit] =

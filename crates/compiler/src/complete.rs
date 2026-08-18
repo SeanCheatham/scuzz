@@ -1125,6 +1125,27 @@ mod tests {
     }
 
     #[test]
+    fn completes_map_union_after_dot() {
+        let src = "@main def main: IO[Unit] = Map.un\n";
+        let labels = labels_at(src, "Map.un");
+        assert!(labels.iter().any(|l| l == "Map.union"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_map_intersect_after_dot() {
+        let src = "@main def main: IO[Unit] = Map.int\n";
+        let labels = labels_at(src, "Map.int");
+        assert!(labels.iter().any(|l| l == "Map.intersect"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_map_diff_after_dot() {
+        let src = "@main def main: IO[Unit] = Map.di\n";
+        let labels = labels_at(src, "Map.di");
+        assert!(labels.iter().any(|l| l == "Map.diff"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_list_concat_after_dot() {
         let src = "@main def main: IO[Unit] = List.conc\n";
         let labels = labels_at(src, "List.conc");

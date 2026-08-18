@@ -146,6 +146,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_set_union(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_set_intersect(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_set_diff(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_map_union(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_map_intersect(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_map_diff(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_append(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_set_at(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_filter(ptr, ptr, ptr)").unwrap();
@@ -4399,11 +4402,14 @@ fn emit_call(
             }
             owned_ptr(code, format!("%{prefix}_v"))
         }
-        "Set.union" | "Set.intersect" | "Set.diff" => {
+        "Set.union" | "Set.intersect" | "Set.diff" | "Map.union" | "Map.intersect" | "Map.diff" => {
             let rt = match callee {
                 "Set.union" => "sz_set_union",
                 "Set.intersect" => "sz_set_intersect",
-                _ => "sz_set_diff",
+                "Set.diff" => "sz_set_diff",
+                "Map.union" => "sz_map_union",
+                "Map.intersect" => "sz_map_intersect",
+                _ => "sz_map_diff",
             };
             writeln!(
                 code,
@@ -7625,6 +7631,30 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {left})")),
             "expected last-use release of set {left} after Set.union:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_map_union_intersect_diff() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(Map.values(Map.union(Map.set(Map.empty(), "a", "1"), Map.set(Map.empty(), "b", "2"))), ","))
+    _ <- IO.println(List.join(Map.values(Map.intersect(Map.set(Map.empty(), "a", "1"), Map.set(Map.empty(), "a", "9"))), ","))
+    _ <- IO.println(List.join(Map.values(Map.diff(Map.set(Map.empty(), "a", "1"), Map.empty())), ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_map_union"));
+        assert!(ir.contains("sz_map_intersect"));
+        assert!(ir.contains("sz_map_diff"));
+        let needle = "call ptr @sz_map_union(ptr ";
+        let at = ir.find(needle).expect("union");
+        let left = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {left})")),
+            "expected last-use release of map {left} after Map.union:\n{ir}"
         );
     }
 
