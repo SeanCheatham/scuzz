@@ -1,17 +1,19 @@
 //! Small LSP wrapping `check_project`. Same diagnostics as `--message-format=json`.
 //! No second typer. Open buffers overlay disk text. Hover, completion, definition,
 //! document symbols, references, rename, workspace symbols, signature help,
-//! document highlights, folding ranges, format, selection ranges, and inlay hints
-//! use that parse.
+//! document highlights, folding ranges, format, selection ranges, inlay hints,
+//! and semantic tokens use that parse.
 
 use crate::check::{
     canonicalize_source_path, check_project_with, complete_project, definition_project,
     folding_ranges_project, highlights_project, hover_project, inlay_hints_project, json_str,
     prepare_rename_project, references_project, rename_project, selection_ranges_project,
-    signature_help_project, symbols_project, workspace_symbols_project, Diagnostic, RenameResult,
+    semantic_tokens_project, signature_help_project, symbols_project, workspace_symbols_project,
+    Diagnostic, RenameResult,
 };
 use crate::fold::FOLD_REGION;
 use crate::overlay::collect_fmt_sources;
+use crate::tokens::{TOKEN_MODIFIERS, TOKEN_TYPES};
 use anyhow::Result;
 use std::collections::BTreeMap;
 use std::fs;
@@ -38,8 +40,14 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             if let Some(p) = root_from_init(&body) {
                 root = p;
             }
-            let caps = r#"{"capabilities":{"textDocumentSync":{"openClose":true,"change":1},"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"definitionProvider":true,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{"triggerCharacters":["("]},"referencesProvider":true,"renameProvider":{"prepareProvider":true},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true}}}"#;
-            write_result(&mut writer, id, caps)?;
+            let type_list: Vec<String> = TOKEN_TYPES.iter().map(|t| json_str(t)).collect();
+            let mod_list: Vec<String> = TOKEN_MODIFIERS.iter().map(|t| json_str(t)).collect();
+            let caps = format!(
+                r#"{{"capabilities":{{"textDocumentSync":{{"openClose":true,"change":1}},"hoverProvider":true,"completionProvider":{{"triggerCharacters":["."]}},"definitionProvider":true,"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{{"triggerCharacters":["("]}},"referencesProvider":true,"renameProvider":{{"prepareProvider":true}},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true,"semanticTokensProvider":{{"legend":{{"tokenTypes":[{}],"tokenModifiers":[{}]}},"full":true}}}}}}"#,
+                type_list.join(","),
+                mod_list.join(",")
+            );
+            write_result(&mut writer, id, &caps)?;
         } else if method == "shutdown" {
             write_result(&mut writer, id, "null")?;
         } else if method == "exit" {
@@ -98,6 +106,9 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/inlayHint" {
             let result = inlay_hint_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "textDocument/semanticTokens/full" {
+            let result = semantic_tokens_result(&root, &open, &body);
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/didSave" {
             publish_check(&root, &open, &mut writer)?;
@@ -557,6 +568,19 @@ fn inlay_hint_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) 
             format!("[{}]", parts.join(","))
         }
         _ => "[]".into(),
+    }
+}
+
+fn semantic_tokens_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    let Some(path) = doc_path_from_message(body) else {
+        return r#"{"data":[]}"#.into();
+    };
+    match semantic_tokens_project(root, open, &path) {
+        Ok(data) => {
+            let nums: Vec<String> = data.iter().map(|n| n.to_string()).collect();
+            format!(r#"{{"data":[{}]}}"#, nums.join(","))
+        }
+        _ => r#"{"data":[]}"#.into(),
     }
 }
 
@@ -1520,6 +1544,33 @@ mod tests {
         assert!(text.contains("\"n:\""), "{text}");
         assert!(text.contains("\"s:\""), "{text}");
         assert!(text.contains("\"kind\":2"), "{text}");
+    }
+
+    #[test]
+    fn lsp_semantic_tokens_full_marks_def() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let (_formatted, root_uri, main_uri) = write_add_pkg(root);
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let req = format!(
+            r#"{{"jsonrpc":"2.0","id":23,"method":"textDocument/semanticTokens/full","params":{{"textDocument":{{"uri":{}}}}}}}"#,
+            json_str(&main_uri)
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&req));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("semanticTokensProvider"), "{text}");
+        assert!(text.contains("\"id\":23"), "{text}");
+        assert!(text.contains("\"data\":["), "{text}");
+        assert!(text.contains("tokenTypes"), "{text}");
+        assert!(text.contains("\"keyword\""), "{text}");
     }
 
     #[test]

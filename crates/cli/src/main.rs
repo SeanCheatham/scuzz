@@ -104,7 +104,7 @@ enum Commands {
     },
     /// Language server wrapping `scuzz check` JSON diagnostics (stdin/stdout LSP)
     #[command(
-        after_help = "Open buffers overlay disk text on didOpen / didChange / didClose. Hover, completion, definition, document symbols, references, rename, workspace symbols, signature help, document highlights, folding ranges, format, selection ranges, and inlay hints use the same check parse.\n\nExamples:\n  scuzz lsp\n  scuzz lsp examples/hello\n"
+        after_help = "Open buffers overlay disk text on didOpen / didChange / didClose. Hover, completion, definition, document symbols, references, rename, workspace symbols, signature help, document highlights, folding ranges, format, selection ranges, inlay hints, and semantic tokens use the same check parse.\n\nExamples:\n  scuzz lsp\n  scuzz lsp examples/hello\n"
     )]
     Lsp {
         #[arg(default_value = ".")]

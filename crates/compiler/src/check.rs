@@ -705,6 +705,23 @@ pub fn inlay_hints_project(
         .collect())
 }
 
+/// Semantic tokens for a file. Same parse as [`check_project_with`].
+pub fn semantic_tokens_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+) -> Result<Vec<u32>> {
+    let Some((_resolved, _label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(Vec::new());
+    };
+    if program.is_none() {
+        return Ok(Vec::new());
+    }
+    let toks = crate::tokens::semantic_tokens_in_source(&text);
+    Ok(crate::tokens::encode_semantic_tokens(&text, &toks))
+}
+
 pub enum RenameResult {
     Unavailable,
     BadName,

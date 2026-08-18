@@ -26,6 +26,7 @@ pub(crate) mod select;
 pub(crate) mod signature;
 pub(crate) mod span;
 pub(crate) mod symbols;
+pub(crate) mod tokens;
 pub(crate) mod typ;
 
 pub use check::{check_project, format_diagnostics};
