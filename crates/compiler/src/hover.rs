@@ -433,6 +433,15 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.getOrElse(xs: List[T], i: Int, default: T): T",
     ),
     ("List.fill", "List.fill(n: Int, x: T): List[T]"),
+    ("List.range", "List.range(from: Int, until: Int): List[Int]"),
+    (
+        "List.tabulate",
+        "List.tabulate(n: Int, f: Int => T): List[T]",
+    ),
+    (
+        "List.intersperse",
+        "List.intersperse(xs: List[T], x: T): List[T]",
+    ),
     (
         "List.padTo",
         "List.padTo(xs: List[T], n: Int, x: T): List[T]",
@@ -1337,6 +1346,34 @@ mod tests {
         let h = hover_src(src, "flatMap");
         assert!(
             h.contains("List.flatMap(xs: List[T], f: T => List[U]): List[U]"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_list_range_tabulate_intersperse() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.len(List.range(1, 4))))
+"#;
+        let h = hover_src(src, "range");
+        assert!(
+            h.contains("List.range(from: Int, until: Int): List[Int]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.tabulate(2, i => Str.fromInt(i)), ","))
+"#;
+        let h = hover_src(src, "tabulate");
+        assert!(
+            h.contains("List.tabulate(n: Int, f: Int => T): List[T]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.intersperse(["a", "b"], "|"), ","))
+"#;
+        let h = hover_src(src, "intersperse");
+        assert!(
+            h.contains("List.intersperse(xs: List[T], x: T): List[T]"),
             "{h}"
         );
     }

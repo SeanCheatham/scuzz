@@ -328,6 +328,56 @@ SzList *sz_list_pad_to(SzList *xs, int64_t n, void *x) {
   return out;
 }
 
+SzList *sz_list_range(int64_t from, int64_t until) {
+  SzList *acc = NULL;
+  int64_t i;
+  void *b;
+  if (until <= from)
+    return NULL;
+  i = until;
+  while (i > from) {
+    i--;
+    b = sz_box_i64(i);
+    acc = sz_list_cons_take(b, acc);
+    sz_release(b);
+  }
+  return acc;
+}
+
+SzList *sz_list_tabulate(int64_t n, SzListMapFn fn, void *env) {
+  SzList *acc;
+  int64_t i;
+  void *idx;
+  void *h;
+  if (!fn)
+    sz_panic("sz_list_tabulate(null fn)");
+  if (n <= 0)
+    return NULL;
+  acc = NULL;
+  for (i = n - 1; i >= 0; i--) {
+    idx = sz_box_i64(i);
+    h = fn(idx, env);
+    sz_release(idx);
+    acc = sz_list_cons_take(h, acc);
+    sz_release(h);
+  }
+  return acc;
+}
+
+SzList *sz_list_intersperse(SzList *xs, void *x) {
+  SzList *rest;
+  SzList *mid;
+  if (!xs)
+    return NULL;
+  if (!xs->tail) {
+    sz_retain(xs);
+    return xs;
+  }
+  rest = sz_list_intersperse(xs->tail, x);
+  mid = sz_list_cons_take(x, rest);
+  return sz_list_cons_take(xs->head, mid);
+}
+
 int sz_list_non_empty(const SzList *xs) { return xs != NULL; }
 
 void sz_list_free(SzList *xs) { sz_release(xs); }

@@ -687,6 +687,27 @@ mod tests {
     }
 
     #[test]
+    fn completes_list_range_after_dot() {
+        let src = "@main def main: IO[Unit] = List.ran\n";
+        let labels = labels_at(src, "List.ran");
+        assert!(labels.iter().any(|l| l == "List.range"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_tabulate_after_dot() {
+        let src = "@main def main: IO[Unit] = List.tab\n";
+        let labels = labels_at(src, "List.tab");
+        assert!(labels.iter().any(|l| l == "List.tabulate"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_intersperse_after_dot() {
+        let src = "@main def main: IO[Unit] = List.inters\n";
+        let labels = labels_at(src, "List.inters");
+        assert!(labels.iter().any(|l| l == "List.intersperse"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_list_reverse_after_dot() {
         let src = "@main def main: IO[Unit] = List.rev\n";
         let labels = labels_at(src, "List.rev");

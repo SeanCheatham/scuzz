@@ -163,6 +163,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_map(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_flat_map(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_pad_to(ptr, i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_range(i64, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_list_tabulate(i64, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_intersperse(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_write(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_list(ptr)").unwrap();
@@ -2821,6 +2824,31 @@ fn emit_ptr_map(
     owned_ptr(code, format!("%{prefix}_v"))
 }
 
+fn emit_list_tabulate(
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 2, "List.tabulate expects 2 args");
+    let n = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let ExprKind::Lambda { param, body } = &args[1].kind else {
+        panic!("List.tabulate mapper must be a lambda");
+    };
+    let lam = emit_smap_lambda(param, body, ctx, locals, &format!("{prefix}_fn"), true);
+    let mut code = n.code;
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    let n_i = as_i64(&mut code, n.kind, &n.value, &format!("{prefix}_n"));
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @sz_list_tabulate(i64 {n_i}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
+    )
+    .unwrap();
+    drop_owned_ptr(&mut code, &lam);
+    owned_ptr(code, format!("%{prefix}_v"))
+}
+
 fn emit_net_serve(
     rt: &str,
     args: &[Expr],
@@ -3273,6 +3301,9 @@ fn emit_call(
             prefix,
             true,
         );
+    }
+    if callee == "List.tabulate" {
+        return emit_list_tabulate(args, ctx, locals, prefix);
     }
     if callee == "Resource.make" || callee == "Resource.use" {
         return emit_resource(callee, args, ctx, locals, prefix);
@@ -3946,6 +3977,39 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             drop_owned_ptr(&mut code, &emitted_args[2]);
             if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
+                writeln!(code, "  call void @sz_release(ptr {elem})").unwrap();
+            }
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "List.range" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_range(i64 {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "List.intersperse" => {
+            let elem = if emitted_args[1].kind == Kind::Int || emitted_args[1].kind == Kind::Float {
+                box_numeric(
+                    &mut code,
+                    emitted_args[1].kind,
+                    &emitted_args[1].value,
+                    &format!("{prefix}_x"),
+                )
+            } else {
+                emitted_args[1].value.clone()
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_intersperse(ptr {}, ptr {elem})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            if emitted_args[1].kind == Kind::Int || emitted_args[1].kind == Kind::Float {
                 writeln!(code, "  call void @sz_release(ptr {elem})").unwrap();
             }
             owned_ptr(code, format!("%{prefix}_v"))
@@ -7183,6 +7247,36 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of list {name} after List.padTo:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_range_tabulate_intersperse() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(List.map(List.range(1, 4), n => Str.fromInt(n)), ","))
+    _ <- IO.println(List.join(List.tabulate(3, i => Str.fromInt(i)), ","))
+    _ <- IO.println(List.join(List.intersperse(["a", "b"], "|"), ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_range"));
+        assert!(ir.contains("sz_list_tabulate"));
+        assert!(ir.contains("sz_list_intersperse"));
+        let tab_at = ir.find("call ptr @sz_list_tabulate").expect("tabulate");
+        let tab_pack = last_cl2_before(&ir, tab_at);
+        assert!(
+            ir[tab_at..].contains(&format!("call void @sz_release(ptr {tab_pack})")),
+            "expected last-use release of tabulate closure {tab_pack}:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_intersperse(ptr ";
+        let at = ir.find(needle).expect("intersperse");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.intersperse:\n{ir}"
         );
     }
 

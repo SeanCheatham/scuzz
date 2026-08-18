@@ -937,6 +937,11 @@ static void *map_id(void *head, void *env) {
   return head;
 }
 
+static void *map_int_to_str(void *head, void *env) {
+  (void)env;
+  return sz_string_from_int(sz_unbox_i64(head));
+}
+
 static void *map_dup_list(void *head, void *env) {
   (void)env;
   return sz_list_cons(head, sz_list_cons(head, sz_list_nil()));
@@ -3432,6 +3437,69 @@ int main(void) {
     sz_list_free(xs);
     sz_string_free(a);
     sz_string_free(z);
+  }
+
+  /* List.range: [from, until). Empty when until <= from. */
+  {
+    SzList *xs;
+    xs = sz_list_range(1, 4);
+    assert(sz_list_len(xs) == 3);
+    assert(sz_unbox_i64(sz_list_head(xs)) == 1);
+    assert(sz_unbox_i64(sz_list_at(xs, 2)) == 3);
+    sz_list_free(xs);
+    xs = sz_list_range(5, 5);
+    assert(sz_list_is_empty(xs));
+    xs = sz_list_range(3, 1);
+    assert(sz_list_is_empty(xs));
+    xs = sz_list_range(-1, 2);
+    assert(sz_list_len(xs) == 3);
+    assert(sz_unbox_i64(sz_list_head(xs)) == -1);
+    sz_list_free(xs);
+  }
+
+  /* List.tabulate: f(0)..f(n-1). n <= 0 is empty. */
+  {
+    SzList *ys;
+    ys = sz_list_tabulate(3, map_int_to_str, NULL);
+    assert(sz_list_len(ys) == 3);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_head(ys)), "0") == 0);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_at(ys, 2)), "2") == 0);
+    sz_list_free(ys);
+    ys = sz_list_tabulate(0, map_int_to_str, NULL);
+    assert(sz_list_is_empty(ys));
+    ys = sz_list_tabulate(-2, map_int_to_str, NULL);
+    assert(sz_list_is_empty(ys));
+  }
+
+  /* List.intersperse: insert x between cells. Empty/one share. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzString *c = sz_string_from_cstr("c");
+    SzString *sep = sz_string_from_cstr("|");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_cons(c, sz_list_nil())));
+    SzList *ys;
+    ys = sz_list_intersperse(xs, sep);
+    assert(sz_list_len(ys) == 5);
+    assert(ys->head == a);
+    assert(ys->tail && ys->tail->head == sep);
+    assert(ys->tail->tail && ys->tail->tail->head == b);
+    sz_list_free(ys);
+    {
+      SzList *one = sz_list_cons(a, sz_list_nil());
+      ys = sz_list_intersperse(one, sep);
+      assert(sz_list_len(ys) == 1);
+      assert(ys->head == a);
+      sz_list_free(ys);
+      sz_list_free(one);
+    }
+    ys = sz_list_intersperse(NULL, sep);
+    assert(sz_list_is_empty(ys));
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
+    sz_string_free(sep);
   }
 
   /* List.append retains the element. The caller drops their ref. */

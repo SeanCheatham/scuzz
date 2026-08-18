@@ -487,6 +487,12 @@ SzList *sz_list_flat_map(SzList *xs, SzListMapFn fn, void *env);
 /* Pad with `x` until length `n`. n <= len leaves the list. n <= 0 leaves the list. */
 SzList *sz_list_pad_to(SzList *xs, int64_t n, void *x);
 int sz_list_non_empty(const SzList *xs);
+/* Boxed ints `[from, until)`. Empty when `until` <= `from`. Cons retains each box. */
+SzList *sz_list_range(int64_t from, int64_t until);
+/* `f(0)` … `f(n-1)`. n <= 0 is empty. `fn` sees a boxed index and returns +1. */
+SzList *sz_list_tabulate(int64_t n, SzListMapFn fn, void *env);
+/* Insert `x` between cells. Empty or one cell shares. Cons retains `x`. */
+SzList *sz_list_intersperse(SzList *xs, void *x);
 /* Release the spine; heads drop through RC. */
 void sz_list_free(SzList *xs);
 SzString *sz_list_join(const SzList *xs, const char *sep);

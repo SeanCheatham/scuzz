@@ -1065,6 +1065,7 @@ fn kit_lambda_param_ty_at(
             | "List.exists" | "List.count" | "List.takeWhile" | "List.dropWhile" | "List.forall",
             1,
         ) => prior.first().and_then(|t| list_elem(t).ok()),
+        ("List.tabulate", 1) => Some(Type::Int),
         (
             "Stream.filter" | "Stream.map" | "Stream.takeWhile" | "Stream.dropWhile"
             | "Stream.find" | "Stream.exists" | "Stream.evalMap" | "Resource.make" | "Resource.use"
@@ -2042,6 +2043,27 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
             Ok(list_of(arg_tys[1].clone()))
+        }
+        "List.range" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(list_of(Type::Int))
+        }
+        "List.tabulate" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            let out = match &arg_tys[1] {
+                Type::Fun(_, ret) => (**ret).clone(),
+                Type::Opaque(_) => Type::Opaque("Elem".into()),
+                other => other.clone(),
+            };
+            Ok(list_of(out))
+        }
+        "List.intersperse" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let elem = prefer_elem(&list_elem(&arg_tys[0])?, &arg_tys[1])?;
+            Ok(list_of(elem))
         }
         "List.find" => {
             expect_arity(callee, &arg_tys, 2)?;
@@ -5960,6 +5982,19 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.flatMap/padTo/nonEmpty should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_range_tabulate_intersperse() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(List.map(List.range(1, 4), n => Str.fromInt(n)), ","))
+    _ <- IO.println(List.join(List.tabulate(3, i => Str.fromInt(i)), ","))
+    _ <- IO.println(List.join(List.intersperse(["a", "b", "c"], "|"), ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.range/tabulate/intersperse should typecheck");
     }
 
     #[test]
