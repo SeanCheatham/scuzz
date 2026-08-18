@@ -1922,6 +1922,24 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(Type::String)
         }
+        "Str.stripPrefix" | "Str.stripSuffix" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            Ok(Type::String)
+        }
+        "Str.padLeft" | "Str.padRight" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            expect_ty(&arg_tys[2], &Type::String)?;
+            Ok(Type::String)
+        }
+        "Str.isBlank" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::Bool)
+        }
         "List.empty" => {
             expect_arity(callee, &arg_tys, 0)?;
             Ok(list_of(Type::Opaque("Elem".into())))
@@ -5917,6 +5935,21 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Str.isEmpty/toLower/toUpper/repeat should typecheck");
+    }
+
+    #[test]
+    fn typechecks_str_strip_pad_blank() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(Str.stripPrefix("abc", "a"))
+    _ <- IO.println(Str.stripSuffix("abc", "c"))
+    _ <- IO.println(Str.padLeft("a", 3, "x"))
+    _ <- IO.println(Str.padRight("a", 3, "x"))
+    _ <- IO.println(if (Str.isBlank(" \t")) "y" else "n")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Str.strip/pad/isBlank should typecheck");
     }
 
     #[test]

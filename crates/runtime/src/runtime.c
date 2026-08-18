@@ -811,6 +811,81 @@ SzString *sz_string_repeat(const SzString *s, int64_t n) {
   return out;
 }
 
+static SzString *sz_string_copy(const SzString *s) {
+  size_t n = s && s->data ? s->len : 0;
+  const char *src = s && s->data ? s->data : "";
+  return sz_string_from_bytes(src, n);
+}
+
+SzString *sz_string_strip_prefix(const SzString *s, const SzString *prefix) {
+  size_t slen = s && s->data ? s->len : 0;
+  size_t plen = prefix && prefix->data ? prefix->len : 0;
+  if (!sz_string_starts_with(s, prefix))
+    return sz_string_copy(s);
+  return sz_string_from_bytes((s && s->data) ? s->data + plen : "", slen - plen);
+}
+
+SzString *sz_string_strip_suffix(const SzString *s, const SzString *suffix) {
+  size_t slen = s && s->data ? s->len : 0;
+  size_t n = suffix && suffix->data ? suffix->len : 0;
+  if (!sz_string_ends_with(s, suffix))
+    return sz_string_copy(s);
+  return sz_string_from_bytes((s && s->data) ? s->data : "", slen - n);
+}
+
+static SzString *sz_string_pad(const SzString *s, int64_t n, const SzString *pad, int left) {
+  size_t slen = s && s->data ? s->len : 0;
+  size_t plen = pad && pad->data ? pad->len : 0;
+  const char *src = s && s->data ? s->data : "";
+  const char *psrc = pad && pad->data ? pad->data : "";
+  size_t want;
+  size_t need;
+  char *buf;
+  SzString *out;
+  size_t i;
+  if (n <= 0 || (uint64_t)n <= (uint64_t)slen)
+    return sz_string_copy(s);
+  if (plen == 0)
+    return sz_string_copy(s);
+  if ((uint64_t)n > (uint64_t)SIZE_MAX)
+    sz_panic("Str.pad too large");
+  want = (size_t)n;
+  need = want - slen;
+  buf = (char *)sz_alloc(want + 1);
+  if (left) {
+    for (i = 0; i < need; i++)
+      buf[i] = psrc[i % plen];
+    memcpy(buf + need, src, slen);
+  } else {
+    memcpy(buf, src, slen);
+    for (i = 0; i < need; i++)
+      buf[slen + i] = psrc[i % plen];
+  }
+  buf[want] = '\0';
+  out = sz_string_from_bytes(buf, want);
+  sz_free(buf);
+  return out;
+}
+
+SzString *sz_string_pad_left(const SzString *s, int64_t n, const SzString *pad) {
+  return sz_string_pad(s, n, pad, 1);
+}
+
+SzString *sz_string_pad_right(const SzString *s, int64_t n, const SzString *pad) {
+  return sz_string_pad(s, n, pad, 0);
+}
+
+int64_t sz_string_is_blank(const SzString *s) {
+  size_t i;
+  if (!s || !s->data || s->len == 0)
+    return 1;
+  for (i = 0; i < s->len; i++) {
+    if (!str_is_ws((unsigned char)s->data[i]))
+      return 0;
+  }
+  return 1;
+}
+
 SzList *sz_string_lines(const SzString *s) {
   SzList *acc = NULL;
   size_t i = 0;

@@ -78,6 +78,16 @@ SzString *sz_string_to_lower(const SzString *s);
 SzString *sz_string_to_upper(const SzString *s);
 /* Repeat `s` `n` times. `n` <= 0 is empty. */
 SzString *sz_string_repeat(const SzString *s, int64_t n);
+/* Drop `prefix` when `s` starts with it. Else copy `s`. */
+SzString *sz_string_strip_prefix(const SzString *s, const SzString *prefix);
+/* Drop `suffix` when `s` ends with it. Else copy `s`. */
+SzString *sz_string_strip_suffix(const SzString *s, const SzString *suffix);
+/* Pad on the left to width `n`. `n` <= len, or empty pad, copies `s`. */
+SzString *sz_string_pad_left(const SzString *s, int64_t n, const SzString *pad);
+/* Pad on the right to width `n`. `n` <= len, or empty pad, copies `s`. */
+SzString *sz_string_pad_right(const SzString *s, int64_t n, const SzString *pad);
+/* 1 when `s` is empty or only ASCII space, tab, CR, LF. */
+int64_t sz_string_is_blank(const SzString *s);
 
 typedef struct SzList SzList;
 typedef struct SzMap SzMap;

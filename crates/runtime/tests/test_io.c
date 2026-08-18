@@ -2134,6 +2134,32 @@ int main(void) {
       }
     }
     {
+      SzString *pre = sz_string_strip_prefix(sz_string_from_cstr("abc"), sz_string_from_cstr("a"));
+      SzString *keep = sz_string_strip_prefix(sz_string_from_cstr("abc"), sz_string_from_cstr("z"));
+      SzString *suf = sz_string_strip_suffix(sz_string_from_cstr("abc"), sz_string_from_cstr("c"));
+      SzString *left = sz_string_pad_left(sz_string_from_cstr("a"), 3, sz_string_from_cstr("x"));
+      SzString *right = sz_string_pad_right(sz_string_from_cstr("a"), 3, sz_string_from_cstr("x"));
+      SzString *shortp = sz_string_pad_left(sz_string_from_cstr("abcd"), 2, sz_string_from_cstr("x"));
+      SzString *nopad = sz_string_pad_left(sz_string_from_cstr("a"), 3, sz_string_from_cstr(""));
+      assert(strcmp(sz_string_cstr(pre), "bc") == 0);
+      assert(strcmp(sz_string_cstr(keep), "abc") == 0);
+      assert(strcmp(sz_string_cstr(suf), "ab") == 0);
+      assert(strcmp(sz_string_cstr(left), "xxa") == 0);
+      assert(strcmp(sz_string_cstr(right), "axx") == 0);
+      assert(strcmp(sz_string_cstr(shortp), "abcd") == 0);
+      assert(strcmp(sz_string_cstr(nopad), "a") == 0);
+      assert(sz_string_is_blank(sz_string_from_cstr(" \t\n")) == 1);
+      assert(sz_string_is_blank(sz_string_from_cstr(" a")) == 0);
+      assert(sz_string_is_blank(NULL) == 1);
+      sz_string_free(pre);
+      sz_string_free(keep);
+      sz_string_free(suf);
+      sz_string_free(left);
+      sz_string_free(right);
+      sz_string_free(shortp);
+      sz_string_free(nopad);
+    }
+    {
       SzString *tr = sz_string_trim(sz_string_from_cstr("  foo\t"));
       assert(strcmp(sz_string_cstr(tr), "foo") == 0);
       tr = sz_string_trim(sz_string_from_cstr("bar"));

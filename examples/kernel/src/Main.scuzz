@@ -147,6 +147,11 @@ def strProof(): IO[Unit] =
     _ <- IO.println(s"lower:${Str.toLower("Ab")}")
     _ <- IO.println(s"upper:${Str.toUpper("Ab")}")
     _ <- IO.println(s"repeat:${Str.repeat("a", 3)}")
+    _ <- IO.println(s"strip:${Str.stripPrefix("abc", "a")}")
+    _ <- IO.println(s"suffix:${Str.stripSuffix("abc", "c")}")
+    _ <- IO.println(s"padL:${Str.padLeft("a", 3, "x")}")
+    _ <- IO.println(s"padR:${Str.padRight("a", 3, "x")}")
+    _ <- IO.println(s"blank:${if (Str.isBlank(" \t")) "y" else "n"}")
   } yield ()
 
 record Box[T](x: T):

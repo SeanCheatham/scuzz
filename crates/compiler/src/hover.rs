@@ -344,6 +344,23 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Str.toLower", "Str.toLower(s: String): String"),
     ("Str.toUpper", "Str.toUpper(s: String): String"),
     ("Str.repeat", "Str.repeat(s: String, n: Int): String"),
+    (
+        "Str.stripPrefix",
+        "Str.stripPrefix(s: String, prefix: String): String",
+    ),
+    (
+        "Str.stripSuffix",
+        "Str.stripSuffix(s: String, suffix: String): String",
+    ),
+    (
+        "Str.padLeft",
+        "Str.padLeft(s: String, n: Int, pad: String): String",
+    ),
+    (
+        "Str.padRight",
+        "Str.padRight(s: String, n: Int, pad: String): String",
+    ),
+    ("Str.isBlank", "Str.isBlank(s: String): Bool"),
     ("Signal.int", "Signal.int(n: Int): SignalInt"),
     ("Signal.get", "Signal.get(s: SignalInt): Int"),
     ("Signal.set", "Signal.set(s: SignalInt, n: Int): Unit"),
@@ -1412,6 +1429,47 @@ mod tests {
 "#;
         let h = hover_src(src, "repeat");
         assert!(h.contains("Str.repeat(s: String, n: Int): String"), "{h}");
+    }
+
+    #[test]
+    fn hovers_str_strip_pad_blank() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.stripPrefix("abc", "a"))
+"#;
+        let h = hover_src(src, "stripPrefix");
+        assert!(
+            h.contains("Str.stripPrefix(s: String, prefix: String): String"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.stripSuffix("abc", "c"))
+"#;
+        let h = hover_src(src, "stripSuffix");
+        assert!(
+            h.contains("Str.stripSuffix(s: String, suffix: String): String"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.padLeft("a", 3, "x"))
+"#;
+        let h = hover_src(src, "padLeft");
+        assert!(
+            h.contains("Str.padLeft(s: String, n: Int, pad: String): String"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.padRight("a", 3, "x"))
+"#;
+        let h = hover_src(src, "padRight");
+        assert!(
+            h.contains("Str.padRight(s: String, n: Int, pad: String): String"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (Str.isBlank(" ")) "y" else "n")
+"#;
+        let h = hover_src(src, "isBlank");
+        assert!(h.contains("Str.isBlank(s: String): Bool"), "{h}");
     }
 
     #[test]

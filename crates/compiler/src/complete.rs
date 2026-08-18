@@ -750,6 +750,41 @@ mod tests {
     }
 
     #[test]
+    fn completes_str_strip_prefix_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.stripP\n";
+        let labels = labels_at(src, "Str.stripP");
+        assert!(labels.iter().any(|l| l == "Str.stripPrefix"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_strip_suffix_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.stripS\n";
+        let labels = labels_at(src, "Str.stripS");
+        assert!(labels.iter().any(|l| l == "Str.stripSuffix"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_pad_left_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.padL\n";
+        let labels = labels_at(src, "Str.padL");
+        assert!(labels.iter().any(|l| l == "Str.padLeft"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_pad_right_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.padR\n";
+        let labels = labels_at(src, "Str.padR");
+        assert!(labels.iter().any(|l| l == "Str.padRight"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_is_blank_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.isB\n";
+        let labels = labels_at(src, "Str.isB");
+        assert!(labels.iter().any(|l| l == "Str.isBlank"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_map_values_after_dot() {
         let src = "@main def main: IO[Unit] = Map.va\n";
         let labels = labels_at(src, "Map.va");

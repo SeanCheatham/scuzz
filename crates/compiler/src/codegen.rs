@@ -85,6 +85,11 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_string_to_lower(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_to_upper(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_repeat(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_string_strip_prefix(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_string_strip_suffix(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_string_pad_left(ptr, i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_string_pad_right(ptr, i64, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_string_is_blank(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_lines(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_split(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_println(ptr)").unwrap();
@@ -3520,6 +3525,58 @@ fn emit_call(
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Str.stripPrefix" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_string_strip_prefix(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptrs(&mut code, &emitted_args);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Str.stripSuffix" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_string_strip_suffix(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptrs(&mut code, &emitted_args);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Str.padLeft" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_string_pad_left(ptr {}, i64 {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[2]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Str.padRight" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_string_pad_right(ptr {}, i64 {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[2]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Str.isBlank" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_string_is_blank(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "List.empty" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_list_nil()").unwrap();
@@ -7047,6 +7104,41 @@ def scale(x: Float): Float = x * 2.0
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of string {name} after repeat:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_str_strip_pad_blank() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(Str.stripPrefix("abc", "a"))
+    _ <- IO.println(Str.stripSuffix("abc", "c"))
+    _ <- IO.println(Str.padLeft("a", 3, "x"))
+    _ <- IO.println(Str.padRight("a", 3, "x"))
+    _ <- IO.println(if (Str.isBlank(" ")) "y" else "n")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_string_strip_prefix"));
+        assert!(ir.contains("sz_string_strip_suffix"));
+        assert!(ir.contains("sz_string_pad_left"));
+        assert!(ir.contains("sz_string_pad_right"));
+        assert!(ir.contains("sz_string_is_blank"));
+        let needle = "call ptr @sz_string_strip_prefix(ptr ";
+        let at = ir.find(needle).expect("stripPrefix");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of string {name} after stripPrefix:\n{ir}"
+        );
+        let needle = "call ptr @sz_string_pad_left(ptr ";
+        let at = ir.find(needle).expect("padLeft");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of string {name} after padLeft:\n{ir}"
         );
     }
 

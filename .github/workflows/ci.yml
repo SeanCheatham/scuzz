@@ -129,6 +129,11 @@ jobs:
           grep -q "lower:ab" /tmp/kernel.out
           grep -q "upper:AB" /tmp/kernel.out
           grep -q "repeat:aaa" /tmp/kernel.out
+          grep -q "strip:bc" /tmp/kernel.out
+          grep -q "suffix:ab" /tmp/kernel.out
+          grep -q "padL:xxa" /tmp/kernel.out
+          grep -q "padR:axx" /tmp/kernel.out
+          grep -q "blank:y" /tmp/kernel.out
           grep -q "concat:a,b,c" /tmp/kernel.out
           grep -q "flat:a,b,c" /tmp/kernel.out
           grep -q "takeRight:b,c" /tmp/kernel.out
