@@ -61,6 +61,45 @@ pub fn definition_in_sources(
     None
 }
 
+/// Import that bound the ident, or the same location as [`definition_in_sources`].
+pub fn declaration_in_sources(
+    program: &Program,
+    sources: &[(String, String)],
+    current_file: &str,
+    current_source: &str,
+    offset: usize,
+) -> Option<DefLoc> {
+    let (qual, name) = ident_at_opts(current_source, offset, false)?;
+    let module = module_id_from_label(current_file);
+    let import_hit = program.imports.iter().find(|im| {
+        im.in_module == module
+            && im.span.end > im.span.start
+            && match &qual {
+                Some(q) => im.from_module == *q && im.name == name,
+                None => im.name == name,
+            }
+    });
+    if let Some(im) = import_hit {
+        let on_import = offset >= im.span.start && offset < im.span.end;
+        let local = qual.is_none()
+            && (def_named(program, &module, &name).is_some()
+                || enum_named(program, &module, &name).is_some());
+        if on_import || !local {
+            let file = if !im.span.file.is_empty() {
+                im.span.file.clone()
+            } else {
+                current_file.to_string()
+            };
+            return Some(DefLoc {
+                file,
+                start: im.span.start,
+                end: im.span.end,
+            });
+        }
+    }
+    definition_in_sources(program, sources, current_file, current_source, offset)
+}
+
 /// Named enum/record for the ident at `offset` (param/def return type, or the ident itself).
 pub fn type_definition_in_sources(
     program: &Program,

@@ -3,20 +3,23 @@
 //! document symbols, references, rename, workspace symbols, signature help,
 //! document highlights, folding ranges, format, selection ranges, inlay hints,
 //! semantic tokens (full and range), code actions, pull diagnostics, call hierarchy,
-//! type definition, implementation, code lenses, document links, and
-//! `workspace/executeCommand` (`scuzz.references`) use that parse. Quickfix actions
+//! type definition, implementation, code lenses, document links,
+//! `workspace/executeCommand` (`scuzz.references`), workspace pull diagnostics,
+//! and declaration use that parse. Quickfix actions
 //! attach the check diagnostic they fix. Diagnostics carry related locations.
-//! `codeAction/resolve` fills the edit from action data.
+//! `codeAction/resolve` fills the edit from action data. Declaration of an imported
+//! name is the import. Definition is the def.
 
 use crate::check::{
     canonicalize_source_path, check_project_with, code_actions_project, code_lenses_project,
-    complete_project, definition_project, diagnostic_source_path, document_diagnostics_project,
-    document_links_project, folding_ranges_project, highlights_project, hover_project,
-    implementation_project, incoming_calls_project, inlay_hints_project, json_str,
-    outgoing_calls_project, prepare_call_hierarchy_project, prepare_rename_project,
-    references_project, rename_project, selection_ranges_project, semantic_tokens_project,
-    semantic_tokens_range_project, signature_help_project, symbols_project,
-    type_definition_project, workspace_symbols_project, CallItemLsp, Diagnostic, RenameResult,
+    complete_project, declaration_project, definition_project, diagnostic_source_path,
+    document_diagnostics_project, document_links_project, folding_ranges_project,
+    highlights_project, hover_project, implementation_project, incoming_calls_project,
+    inlay_hints_project, json_str, outgoing_calls_project, prepare_call_hierarchy_project,
+    prepare_rename_project, references_project, rename_project, selection_ranges_project,
+    semantic_tokens_project, semantic_tokens_range_project, signature_help_project,
+    symbols_project, type_definition_project, workspace_diagnostics_project,
+    workspace_symbols_project, CallItemLsp, Diagnostic, RenameResult,
 };
 use crate::fold::FOLD_REGION;
 use crate::overlay::collect_fmt_sources;
@@ -50,7 +53,7 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             let type_list: Vec<String> = TOKEN_TYPES.iter().map(|t| json_str(t)).collect();
             let mod_list: Vec<String> = TOKEN_MODIFIERS.iter().map(|t| json_str(t)).collect();
             let caps = format!(
-                r#"{{"capabilities":{{"textDocumentSync":{{"openClose":true,"change":1}},"hoverProvider":true,"completionProvider":{{"triggerCharacters":["."]}},"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":true,"codeLensProvider":{{"resolveProvider":false}},"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{{"triggerCharacters":["("]}},"referencesProvider":true,"renameProvider":{{"prepareProvider":true}},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true,"semanticTokensProvider":{{"legend":{{"tokenTypes":[{}],"tokenModifiers":[{}]}},"full":true,"range":true}},"codeActionProvider":{{"codeActionKinds":["quickfix","source.formatDocument"],"resolveProvider":true}},"callHierarchyProvider":true,"diagnosticProvider":{{"interFileDependencies":true,"workspaceDiagnostics":false}},"documentLinkProvider":{{"resolveProvider":false}},"executeCommandProvider":{{"commands":["scuzz.references"]}}}}}}"#,
+                r#"{{"capabilities":{{"textDocumentSync":{{"openClose":true,"change":1}},"hoverProvider":true,"completionProvider":{{"triggerCharacters":["."]}},"definitionProvider":true,"declarationProvider":true,"typeDefinitionProvider":true,"implementationProvider":true,"codeLensProvider":{{"resolveProvider":false}},"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{{"triggerCharacters":["("]}},"referencesProvider":true,"renameProvider":{{"prepareProvider":true}},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true,"semanticTokensProvider":{{"legend":{{"tokenTypes":[{}],"tokenModifiers":[{}]}},"full":true,"range":true}},"codeActionProvider":{{"codeActionKinds":["quickfix","source.formatDocument"],"resolveProvider":true}},"callHierarchyProvider":true,"diagnosticProvider":{{"interFileDependencies":true,"workspaceDiagnostics":true}},"documentLinkProvider":{{"resolveProvider":false}},"executeCommandProvider":{{"commands":["scuzz.references"]}}}}}}"#,
                 type_list.join(","),
                 mod_list.join(",")
             );
@@ -78,6 +81,9 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/definition" {
             let result = definition_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "textDocument/declaration" {
+            let result = declaration_result(&root, &open, &body);
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/typeDefinition" {
             let result = type_definition_result(&root, &open, &body);
@@ -147,6 +153,9 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             }
         } else if method == "textDocument/diagnostic" {
             let result = document_diagnostic_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "workspace/diagnostic" {
+            let result = workspace_diagnostic_result(&root, &open);
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/prepareCallHierarchy" {
             let result = prepare_call_hierarchy_result(&root, &open, &body);
@@ -326,6 +335,21 @@ fn definition_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) 
     let line = json_i64_field(body, "line").unwrap_or(0).max(0) as u32;
     let character = json_i64_field(body, "character").unwrap_or(0).max(0) as u32;
     match definition_project(root, open, &path, line, character) {
+        Ok(Some((dest, sl, sc, el, ec))) => format!(
+            r#"{{"uri":{},"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}}}}"#,
+            json_str(&file_uri(&dest))
+        ),
+        _ => "null".into(),
+    }
+}
+
+fn declaration_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    let Some(path) = doc_path_from_message(body) else {
+        return "null".into();
+    };
+    let line = json_i64_field(body, "line").unwrap_or(0).max(0) as u32;
+    let character = json_i64_field(body, "character").unwrap_or(0).max(0) as u32;
+    match declaration_project(root, open, &path, line, character) {
         Ok(Some((dest, sl, sc, el, ec))) => format!(
             r#"{{"uri":{},"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}}}}"#,
             json_str(&file_uri(&dest))
@@ -907,6 +931,35 @@ fn document_diagnostic_result(root: &Path, open: &BTreeMap<PathBuf, String>, bod
             let d = Diagnostic::error(e.to_string());
             format!(
                 r#"{{"kind":"full","items":[{}]}}"#,
+                lsp_diagnostic_json(root, &d)
+            )
+        }
+    }
+}
+
+fn workspace_diagnostic_result(root: &Path, open: &BTreeMap<PathBuf, String>) -> String {
+    match workspace_diagnostics_project(root, open) {
+        Ok(files) => {
+            let items: Vec<String> = files
+                .iter()
+                .map(|(path, diags)| {
+                    let uri = file_uri(path);
+                    let inner: Vec<String> =
+                        diags.iter().map(|d| lsp_diagnostic_json(root, d)).collect();
+                    format!(
+                        r#"{{"kind":"full","uri":{},"items":[{}]}}"#,
+                        json_str(&uri),
+                        inner.join(",")
+                    )
+                })
+                .collect();
+            format!(r#"{{"items":[{}]}}"#, items.join(","))
+        }
+        Err(e) => {
+            let d = Diagnostic::error(e.to_string());
+            format!(
+                r#"{{"items":[{{"kind":"full","uri":{},"items":[{}]}}]}}"#,
+                json_str(&file_uri(root)),
                 lsp_diagnostic_json(root, &d)
             )
         }
@@ -2731,6 +2784,87 @@ def twice(n: Int): Int =
         assert!(text.contains("\"id\":40"), "{text}");
         assert!(text.contains("-32602"), "{text}");
         assert!(text.contains("unknown code action"), "{text}");
+    }
+
+    #[test]
+    fn lsp_workspace_diagnostics_lists_files() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"lsp_wsdiag\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let a = crate::format::format_source("def tag(): String =\n  \"a\"\n").unwrap();
+        let main =
+            crate::format::format_source("@main def main: IO[Unit] =\n  IO.printl(\"ok\")\n")
+                .unwrap();
+        fs::write(root.join("src/A.scuzz"), a).unwrap();
+        fs::write(root.join("src/Main.scuzz"), main).unwrap();
+        let root_uri = format!("file://{}", fs::canonicalize(root).unwrap().display());
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let req =
+            r#"{"jsonrpc":"2.0","id":41,"method":"workspace/diagnostic","params":{}}"#.to_string();
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&req));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("workspaceDiagnostics"), "{text}");
+        assert!(text.contains("\"id\":41"), "{text}");
+        assert!(text.contains("\"kind\":\"full\""), "{text}");
+        assert!(text.contains("unknown function IO.printl"), "{text}");
+        assert!(text.contains("A.scuzz"), "{text}");
+    }
+
+    #[test]
+    fn lsp_declaration_jumps_to_import() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"lsp_decl\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let a = crate::format::format_source("def tag(): String =\n  \"a\"\n").unwrap();
+        let main = crate::format::format_source(
+            "import A.tag\n@main def main: IO[Unit] =\n  IO.println(tag())\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/A.scuzz"), a).unwrap();
+        fs::write(root.join("src/Main.scuzz"), &main).unwrap();
+        let root_uri = format!("file://{}", fs::canonicalize(root).unwrap().display());
+        let main_path = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let main_uri = format!("file://{}", main_path.display());
+        let call = main.rfind("tag").unwrap();
+        let (line, col) = crate::span::offset_to_utf16_pos(&main, call);
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let req = format!(
+            r#"{{"jsonrpc":"2.0","id":42,"method":"textDocument/declaration","params":{{"textDocument":{{"uri":{}}},"position":{{"line":{line},"character":{col}}}}}}}"#,
+            json_str(&main_uri)
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&req));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("declarationProvider"), "{text}");
+        assert!(text.contains("\"id\":42"), "{text}");
+        assert!(text.contains(&main_uri), "{text}");
+        assert!(text.contains("\"line\":0"), "{text}");
+        assert!(!text.contains("A.scuzz"), "{text}");
     }
 
     #[test]

@@ -624,6 +624,32 @@ pub fn definition_project(
     Ok(Some(loc_to_lsp(&resolved, path, &named, loc, &text)))
 }
 
+/// Go-to-declaration at a 0-based LSP position. Same parse as [`check_project_with`].
+/// An imported name jumps to the import. Other names jump to the def.
+pub fn declaration_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    line: u32,
+    character: u32,
+) -> Result<Option<(PathBuf, u32, u32, u32, u32)>> {
+    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(None);
+    };
+    let Some(program) = program else {
+        return Ok(None);
+    };
+    let named = named_sources(&resolved);
+    let offset = crate::span::utf16_pos_to_offset(&text, line, character);
+    let Some(loc) =
+        crate::definition::declaration_in_sources(&program, &named, &label, &text, offset)
+    else {
+        return Ok(None);
+    };
+    Ok(Some(loc_to_lsp(&resolved, path, &named, loc, &text)))
+}
+
 /// Go-to-type-definition at a 0-based LSP position. Same parse as [`check_project_with`].
 pub fn type_definition_project(
     project_dir: &Path,
@@ -1255,6 +1281,31 @@ pub fn document_diagnostics_project(
         .collect())
 }
 
+/// Diagnostics for every `src/` file. Same check as [`check_project_with`].
+pub fn workspace_diagnostics_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+) -> Result<Vec<(PathBuf, Vec<Diagnostic>)>> {
+    let all = check_project_with(project_dir, unsaved)?;
+    let mut by_path: BTreeMap<PathBuf, Vec<Diagnostic>> = BTreeMap::new();
+    if let Ok(files) = collect_fmt_sources(&project_dir.join("src")) {
+        for p in files {
+            by_path.entry(canonicalize_source_path(&p)).or_default();
+        }
+    }
+    for p in unsaved.keys() {
+        by_path.entry(canonicalize_source_path(p)).or_default();
+    }
+    for d in all {
+        let Some(file) = &d.file else {
+            continue;
+        };
+        let path = canonicalize_source_path(&diagnostic_source_path(project_dir, file));
+        by_path.entry(path).or_default().push(d);
+    }
+    Ok(by_path.into_iter().collect())
+}
+
 pub enum RenameResult {
     Unavailable,
     BadName,
@@ -1564,6 +1615,41 @@ version = "0.0.0"
     }
 
     #[test]
+    fn declaration_project_jumps_to_import() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        fs::write(
+            root.join("src/A.scuzz"),
+            crate::format::format_source("def tag(): String =\n  \"a\"\n").unwrap(),
+        )
+        .unwrap();
+        let main = crate::format::format_source(
+            "import A.tag\n@main def main: IO[Unit] =\n  IO.println(tag())\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/Main.scuzz"), &main).unwrap();
+        let path = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let call = main.rfind("tag").unwrap();
+        let (line, col) = offset_to_utf16_pos(&main, call);
+        let (dest, sl, sc, el, ec) = declaration_project(root, &BTreeMap::new(), &path, line, col)
+            .unwrap()
+            .expect("declaration");
+        assert_eq!(canonicalize_source_path(&dest), path);
+        let import_at = main.find("A.tag").unwrap();
+        let (il, ic) = offset_to_utf16_pos(&main, import_at);
+        let (iel, iec) = offset_to_utf16_pos(&main, import_at + "A.tag".len());
+        assert_eq!((sl, sc, el, ec), (il, ic, iel, iec));
+        let (def_dest, _, _, _, _) = definition_project(root, &BTreeMap::new(), &path, line, col)
+            .unwrap()
+            .expect("definition");
+        assert!(
+            canonicalize_source_path(&def_dest).ends_with("A.scuzz"),
+            "{def_dest:?}"
+        );
+    }
+
+    #[test]
     fn type_definition_project_jumps_to_enum() {
         let dir = tempdir().unwrap();
         let root = dir.path();
@@ -1759,6 +1845,43 @@ def b(): String = 1
         let path = canonicalize_source_path(&root.join("src/Main.scuzz"));
         let diags = document_diagnostics_project(root, &BTreeMap::new(), &path).unwrap();
         assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn workspace_diagnostics_project_lists_every_src_file() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        fs::write(
+            root.join("src/A.scuzz"),
+            crate::format::format_source("def tag(): String =\n  \"a\"\n").unwrap(),
+        )
+        .unwrap();
+        let main =
+            crate::format::format_source("@main def main: IO[Unit] =\n  IO.printl(\"ok\")\n")
+                .unwrap();
+        fs::write(root.join("src/Main.scuzz"), main).unwrap();
+        let items = workspace_diagnostics_project(root, &BTreeMap::new()).unwrap();
+        assert!(items.len() >= 2, "{items:?}");
+        let main_path = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let a_path = canonicalize_source_path(&root.join("src/A.scuzz"));
+        let main_diags = items
+            .iter()
+            .find(|(p, _)| canonicalize_source_path(p) == main_path)
+            .map(|(_, d)| d.as_slice())
+            .unwrap_or(&[]);
+        let a_diags = items
+            .iter()
+            .find(|(p, _)| canonicalize_source_path(p) == a_path)
+            .map(|(_, d)| d.as_slice())
+            .unwrap_or(&[]);
+        assert_eq!(main_diags.len(), 1, "{main_diags:?}");
+        assert!(
+            main_diags[0].message.contains("unknown function IO.printl"),
+            "{}",
+            main_diags[0].message
+        );
+        assert!(a_diags.is_empty(), "{a_diags:?}");
     }
 
     #[test]
