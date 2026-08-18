@@ -62,7 +62,7 @@ pub fn definition_in_sources(
 }
 
 #[derive(Clone, Copy)]
-enum DeclKind {
+pub(crate) enum DeclKind {
     Def,
     Enum,
     Case,
@@ -83,7 +83,7 @@ fn loc_for_def(
     })
 }
 
-fn source_for_module<'a>(
+pub(crate) fn source_for_module<'a>(
     sources: &'a [(String, String)],
     module: &str,
 ) -> Option<(&'a str, &'a str)> {
@@ -93,7 +93,16 @@ fn source_for_module<'a>(
         .map(|(l, t)| (l.as_str(), t.as_str()))
 }
 
-fn decl_span(source: &str, kind: DeclKind, name: &str) -> Option<(usize, usize)> {
+pub(crate) fn decl_span(source: &str, kind: DeclKind, name: &str) -> Option<(usize, usize)> {
+    decl_kw_name(source, kind, name).map(|(_, s, e)| (s, e))
+}
+
+/// Keyword start plus name span for a declaration.
+pub(crate) fn decl_kw_name(
+    source: &str,
+    kind: DeclKind,
+    name: &str,
+) -> Option<(usize, usize, usize)> {
     let toks = lex(source).ok()?;
     for i in 0..toks.len() {
         let ok = match kind {
@@ -107,7 +116,7 @@ fn decl_span(source: &str, kind: DeclKind, name: &str) -> Option<(usize, usize)>
         if let Some(t) = toks.get(i + 1) {
             if let Token::Ident(n) = &t.token {
                 if n == name {
-                    return Some((t.span.start, t.span.end));
+                    return Some((toks[i].span.start, t.span.start, t.span.end));
                 }
             }
         }
@@ -127,8 +136,7 @@ fn param_decl_span(
         d.module == module
             && d.params.iter().any(|p| p.name == name)
             && d.body.span.file == current_file
-            && d.body.span.start <= offset
-            && offset <= d.body.span.end
+            && def_covers_offset(sources, d, offset)
     })?;
     let (file, text) = source_for_module(sources, &d.module)?;
     let toks = lex(text).ok()?;
@@ -138,7 +146,7 @@ fn param_decl_span(
             after_def = false;
         }
         if let Token::Ident(n) = &t.token {
-            if !after_def && n == &d.name {
+            if !after_def && n == &d.name && t.span.start < d.body.span.start {
                 after_def = true;
                 continue;
             }
@@ -150,15 +158,45 @@ fn param_decl_span(
                 });
             }
         }
-        if after_def
-            && matches!(t.token, Token::Eq | Token::Colon)
-            && t.span.end < d.body.span.start
-        { /* keep scanning params until body */ }
         if after_def && t.span.start >= d.body.span.start {
             break;
         }
     }
     None
+}
+
+fn def_covers_offset(sources: &[(String, String)], d: &crate::ast::FunDef, offset: usize) -> bool {
+    if d.body.span.start <= offset && offset <= d.body.span.end {
+        return true;
+    }
+    if offset > d.body.span.end {
+        return false;
+    }
+    let Some((_, text)) = source_for_module(sources, &d.module) else {
+        return false;
+    };
+    let Ok(toks) = lex(text) else {
+        return false;
+    };
+    let mut name_start = None;
+    for i in 0..toks.len() {
+        if !matches!(toks[i].token, Token::Def | Token::Law) {
+            continue;
+        }
+        let Some(t) = toks.get(i + 1) else {
+            continue;
+        };
+        let Token::Ident(n) = &t.token else {
+            continue;
+        };
+        if n == &d.name && t.span.start < d.body.span.start {
+            name_start = Some(t.span.start);
+        }
+    }
+    match name_start {
+        Some(s) => offset >= s && offset < d.body.span.start,
+        None => false,
+    }
 }
 
 #[cfg(test)]
@@ -209,5 +247,18 @@ mod tests {
         let red_use = src.find("Red").unwrap();
         let d = definition_in_sources(&program, &sources, "Main.scuzz", src, red_use).unwrap();
         assert_eq!(d.start, red_use);
+    }
+
+    #[test]
+    fn defines_param_from_signature() {
+        let src = "def add(n: Int): Int = n\n@main def main: IO[Unit] = IO.println(\"x\")\n";
+        let program = parse_file(src, "Main.scuzz").unwrap();
+        let sources = [("Main.scuzz".into(), src.to_string())];
+        let param = src.find("n:").unwrap();
+        let d = definition_in_sources(&program, &sources, "Main.scuzz", src, param).unwrap();
+        assert_eq!(d.start, param);
+        let body = src.rfind("= n").unwrap() + 2;
+        let d = definition_in_sources(&program, &sources, "Main.scuzz", src, body).unwrap();
+        assert_eq!(d.start, param);
     }
 }

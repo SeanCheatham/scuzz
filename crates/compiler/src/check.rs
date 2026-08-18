@@ -456,6 +456,16 @@ pub fn definition_project(
     else {
         return Ok(None);
     };
+    Ok(Some(loc_to_lsp(&resolved, path, &named, loc, &text)))
+}
+
+fn loc_to_lsp(
+    resolved: &crate::driver::ResolvedProject,
+    path: &Path,
+    named: &[(String, String)],
+    loc: crate::definition::DefLoc,
+    fallback_text: &str,
+) -> (PathBuf, u32, u32, u32, u32) {
     let dest = resolved
         .sources
         .iter()
@@ -474,10 +484,58 @@ pub fn definition_project(
         .iter()
         .find(|(l, _)| *l == loc.file)
         .map(|(_, t)| t.as_str())
-        .unwrap_or(text.as_str());
+        .unwrap_or(fallback_text);
     let (sl, sc) = offset_to_utf16_pos(src, loc.start);
     let (el, ec) = offset_to_utf16_pos(src, loc.end);
-    Ok(Some((dest, sl, sc, el, ec)))
+    (dest, sl, sc, el, ec)
+}
+
+/// Document outline at a file. Same parse as [`check_project_with`].
+pub fn symbols_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+) -> Result<Vec<crate::symbols::DocSymbol>> {
+    let Some((_resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(program) = program else {
+        return Ok(Vec::new());
+    };
+    Ok(crate::symbols::symbols_in_source(&program, &label, &text))
+}
+
+/// Find-references at a 0-based LSP position. Same parse as [`check_project_with`].
+pub fn references_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    line: u32,
+    character: u32,
+    include_declaration: bool,
+) -> Result<Vec<(PathBuf, u32, u32, u32, u32)>> {
+    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(program) = program else {
+        return Ok(Vec::new());
+    };
+    let named = named_sources(&resolved);
+    let offset = crate::span::utf16_pos_to_offset(&text, line, character);
+    let refs = crate::references::references_in_sources(
+        &program,
+        &named,
+        &label,
+        &text,
+        offset,
+        include_declaration,
+    );
+    Ok(refs
+        .into_iter()
+        .map(|loc| loc_to_lsp(&resolved, path, &named, loc, &text))
+        .collect())
 }
 
 #[cfg(test)]

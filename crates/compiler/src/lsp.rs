@@ -1,9 +1,10 @@
 //! Small LSP wrapping `check_project`. Same diagnostics as `--message-format=json`.
-//! No second typer. Open buffers overlay disk text. Hover, completion, and definition use that parse.
+//! No second typer. Open buffers overlay disk text. Hover, completion, definition,
+//! document symbols, and references use that parse.
 
 use crate::check::{
     canonicalize_source_path, check_project_with, complete_project, definition_project,
-    hover_project, json_str, Diagnostic,
+    hover_project, json_str, references_project, symbols_project, Diagnostic,
 };
 use crate::overlay::collect_fmt_sources;
 use anyhow::Result;
@@ -32,7 +33,7 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             if let Some(p) = root_from_init(&body) {
                 root = p;
             }
-            let caps = r#"{"capabilities":{"textDocumentSync":{"openClose":true,"change":1},"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"definitionProvider":true}}"#;
+            let caps = r#"{"capabilities":{"textDocumentSync":{"openClose":true,"change":1},"hoverProvider":true,"completionProvider":{"triggerCharacters":["."]},"definitionProvider":true,"documentSymbolProvider":true,"referencesProvider":true}}"#;
             write_result(&mut writer, id, caps)?;
         } else if method == "shutdown" {
             write_result(&mut writer, id, "null")?;
@@ -57,6 +58,12 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/definition" {
             let result = definition_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "textDocument/documentSymbol" {
+            let result = document_symbol_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "textDocument/references" {
+            let result = references_result(&root, &open, &body);
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/didSave" {
             publish_check(&root, &open, &mut writer)?;
@@ -229,6 +236,78 @@ fn definition_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) 
             json_str(&file_uri(&dest))
         ),
         _ => "null".into(),
+    }
+}
+
+fn document_symbol_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    let Some(path) = doc_path_from_message(body) else {
+        return "[]".into();
+    };
+    match symbols_project(root, open, &path) {
+        Ok(syms) if !syms.is_empty() => {
+            let src = overlay_text(open, &path);
+            let parts: Vec<String> = syms.iter().map(|s| encode_symbol(s, &src)).collect();
+            format!("[{}]", parts.join(","))
+        }
+        _ => "[]".into(),
+    }
+}
+
+fn overlay_text(open: &BTreeMap<PathBuf, String>, path: &Path) -> String {
+    let key = canonicalize_source_path(path);
+    if let Some(t) = open.get(path).or_else(|| {
+        open.iter()
+            .find(|(p, _)| canonicalize_source_path(p) == key)
+            .map(|(_, t)| t)
+    }) {
+        return t.clone();
+    }
+    fs::read_to_string(path).unwrap_or_default()
+}
+
+fn encode_symbol(s: &crate::symbols::DocSymbol, src: &str) -> String {
+    let children: Vec<String> = s.children.iter().map(|c| encode_symbol(c, src)).collect();
+    format!(
+        r#"{{"name":{},"kind":{},"range":{},"selectionRange":{},"children":[{}]}}"#,
+        json_str(&s.name),
+        s.kind,
+        encode_range(src, s.range_start, s.range_end),
+        encode_range(src, s.sel_start, s.sel_end),
+        children.join(",")
+    )
+}
+
+fn encode_range(src: &str, start: usize, end: usize) -> String {
+    let (sl, sc) = crate::span::offset_to_utf16_pos(src, start);
+    let (el, ec) = crate::span::offset_to_utf16_pos(src, end);
+    format!(
+        r#"{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}}"#
+    )
+}
+
+fn encode_location(uri: &str, sl: u32, sc: u32, el: u32, ec: u32) -> String {
+    format!(
+        r#"{{"uri":{},"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}}}}"#,
+        json_str(uri)
+    )
+}
+
+fn references_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    let Some(path) = doc_path_from_message(body) else {
+        return "[]".into();
+    };
+    let line = json_i64_field(body, "line").unwrap_or(0).max(0) as u32;
+    let character = json_i64_field(body, "character").unwrap_or(0).max(0) as u32;
+    let include_declaration = json_bool_field(body, "includeDeclaration").unwrap_or(true);
+    match references_project(root, open, &path, line, character, include_declaration) {
+        Ok(locs) => {
+            let parts: Vec<String> = locs
+                .iter()
+                .map(|(dest, sl, sc, el, ec)| encode_location(&file_uri(dest), *sl, *sc, *el, *ec))
+                .collect();
+            format!("[{}]", parts.join(","))
+        }
+        _ => "[]".into(),
     }
 }
 
@@ -408,6 +487,20 @@ fn json_i64_field(body: &str, key: &str) -> Option<i64> {
     let rest = rest.trim_start();
     let digits: String = rest.chars().take_while(|c| c.is_ascii_digit()).collect();
     digits.parse().ok()
+}
+
+fn json_bool_field(body: &str, key: &str) -> Option<bool> {
+    let pat = format!("\"{key}\"");
+    let i = body.find(&pat)?;
+    let rest = body[i + pat.len()..].trim_start().strip_prefix(':')?;
+    let rest = rest.trim_start();
+    if rest.starts_with("true") {
+        Some(true)
+    } else if rest.starts_with("false") {
+        Some(false)
+    } else {
+        None
+    }
 }
 
 #[cfg(test)]
@@ -632,6 +725,86 @@ mod tests {
         assert!(text.contains("definitionProvider"), "{text}");
         assert!(text.contains("\"id\":5"), "{text}");
         assert!(text.contains("\"line\":0"), "{text}");
+    }
+
+    #[test]
+    fn lsp_document_symbol_lists_add_and_main() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"lsp_sym\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src =
+            "def add(n: Int): Int = n\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(add(1)))\n";
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), &formatted).unwrap();
+        let root_uri = format!("file://{}", fs::canonicalize(root).unwrap().display());
+        let main = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let main_uri = format!("file://{}", main.display());
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let req = format!(
+            r#"{{"jsonrpc":"2.0","id":6,"method":"textDocument/documentSymbol","params":{{"textDocument":{{"uri":{}}}}}}}"#,
+            json_str(&main_uri)
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&req));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("documentSymbolProvider"), "{text}");
+        assert!(text.contains("\"id\":6"), "{text}");
+        assert!(text.contains("\"name\":\"add\""), "{text}");
+        assert!(text.contains("\"name\":\"main\""), "{text}");
+    }
+
+    #[test]
+    fn lsp_references_finds_add_decl_and_call() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"lsp_refs\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src =
+            "def add(n: Int): Int = n\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(add(1)))\n";
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), &formatted).unwrap();
+        let root_uri = format!("file://{}", fs::canonicalize(root).unwrap().display());
+        let main = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let main_uri = format!("file://{}", main.display());
+        let call = formatted.rfind("add").unwrap();
+        let (line, col) = crate::span::offset_to_utf16_pos(&formatted, call);
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let req = format!(
+            r#"{{"jsonrpc":"2.0","id":7,"method":"textDocument/references","params":{{"textDocument":{{"uri":{}}},"position":{{"line":{},"character":{}}},"context":{{"includeDeclaration":true}}}}}}"#,
+            json_str(&main_uri),
+            line,
+            col
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&req));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("referencesProvider"), "{text}");
+        assert!(text.contains("\"id\":7"), "{text}");
+        let hits = text.matches("\"line\":").count();
+        assert!(hits >= 2, "expected decl and call ranges: {text}");
     }
 
     #[test]

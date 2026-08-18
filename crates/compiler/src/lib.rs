@@ -16,8 +16,10 @@ pub mod manifest;
 pub mod mutate;
 pub(crate) mod overlay;
 pub(crate) mod parser;
+pub(crate) mod references;
 pub(crate) mod resolve;
 pub(crate) mod span;
+pub(crate) mod symbols;
 pub(crate) mod typ;
 
 pub use check::{check_project, format_diagnostics};
