@@ -46,3 +46,21 @@ Write all docs, README files, and comments in ASD-STE100 Simplified Technical En
 2. Read `docs/vision.md` for locks and current direction.
 3. Add the smallest slice that proves the behavior (a test or `examples/` when it applies).
 4. Update `vision.md`. If `compatibility.md` or `guide.md` owns the topic, update that file instead.
+
+## Cursor Cloud specific instructions
+
+Host setup and prove-host commands: [`docs/developer-environment.md`](docs/developer-environment.md). CI mirror: `.github/workflows/ci.yml` (`linux-headless`).
+
+No long-running app daemons. Develop with `cargo` + `make` + `clang`. Default UI path is headless (`scuzz run --headless`); it does not need `DISPLAY` or X11.
+
+**Install script** stays `cargo fetch` only. Required host packages (`clang`, `make`, `zlib1g-dev`, `libbz2-dev`) and optional CI slices (ASan `libclang-rt-18-dev`, Desktop `libx11-dev` + `xvfb`, GPU `libegl1-mesa-dev` `libgles2-mesa-dev` `libgl1-mesa-dri`) live in the cloud VM snapshot, not in the install script. Optional slice commands: `make -C crates/runtime test-asan CC=clang`; `xvfb-run -a env LIBGL_ALWAYS_SOFTWARE=1 SCUZZ_SKIA=gpu …`; `xvfb-run -a env SCUZZ_UI_RUNTIME=desktop SCUZZ_LIVE_FRAMES=2 cargo run -p scuzz -- run …`.
+
+**Skia link gotcha:** on this Ubuntu image, clang fails with `cannot find -lstdc++` unless gcc's lib dir is on `LIBRARY_PATH`. Export before any link that pulls Skia (runtime tests, `cargo test -p scuzz-compiler`, `cargo run -p scuzz -- …`):
+
+```bash
+export LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13${LIBRARY_PATH:+:$LIBRARY_PATH}
+```
+
+The cloud VM `~/.bashrc` already sets this. New shells pick it up; non-login one-shot commands may need the export.
+
+Skia CPU prebuilt downloads on first `make -C crates/ffi-skia lib` / runtime test into `third_party/skia/prebuilt/` (gitignored).
