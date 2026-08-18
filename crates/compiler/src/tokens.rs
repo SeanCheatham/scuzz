@@ -266,7 +266,7 @@ mod tests {
         let src = "def add(n: Int): Int = n\n";
         let toks = semantic_tokens_in_source(src);
         let data = encode_semantic_tokens(src, &toks);
-        assert!(data.len() % 5 == 0 && !data.is_empty(), "{data:?}");
+        assert!(data.len().is_multiple_of(5) && !data.is_empty(), "{data:?}");
         assert_eq!(data[0], 0);
         assert_eq!(data.len(), toks.len() * 5);
         assert!(toks.iter().any(|t| t.ty == TY_KEYWORD));
@@ -316,7 +316,7 @@ mod tests {
         );
         let (ol, oc) = offset_to_utf16_pos(src, line1);
         let data = encode_semantic_tokens_from(src, &toks, ol, oc);
-        assert!(data.len() % 5 == 0 && !data.is_empty(), "{data:?}");
+        assert!(data.len().is_multiple_of(5) && !data.is_empty(), "{data:?}");
         assert_eq!(data[0], 0);
         let full = encode_semantic_tokens(src, &semantic_tokens_in_source(src));
         assert!(data.len() < full.len(), "{} vs {}", data.len(), full.len());
