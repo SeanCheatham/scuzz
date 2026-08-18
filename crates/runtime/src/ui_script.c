@@ -218,7 +218,7 @@ static void script_tap(SzUiSession *session, int n) {
   SzView *buttons[64];
   int count = sz_ui_collect_buttons(session, buttons, 64);
   if (n < 0 || n >= count) {
-    fprintf(stderr, "scuzz: script tap %d skipped (%d buttons)\n", n, count);
+    fprintf(stderr, "scuzz: script tap %d skipped (%d tap targets)\n", n, count);
     return;
   }
   if (!sz_ui_session_activate_view(session, buttons[n]))

@@ -97,7 +97,7 @@ pub struct UiConfig {
     pub headless_size: Vec<i32>,
     #[serde(default = "default_scale")]
     pub headless_scale: f64,
-    /// 0-based DFS button index for `_after_tap` goldens (`SCUZZ_UI_TAP_N`)
+    /// 0-based `[taps]` index for `_after_tap` goldens (`SCUZZ_UI_TAP_N`)
     #[serde(default)]
     pub tap_button: Option<i32>,
     /// Text injected before the scripted tap (`SCUZZ_UI_TEXT`)

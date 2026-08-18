@@ -325,7 +325,7 @@ fn check_driver_def(live: &Program, d: &FunDef, label: &str) -> Result<(), Overl
     }
     if expr_has_law(&d.body) {
         return Err(OverlayError::Msg(format!(
-            "{label}: driver `{}` must not call Law.*",
+            "{label}: driver `{}` must not call Law.* or `.require`",
             d.name
         )));
     }

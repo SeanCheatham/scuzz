@@ -348,7 +348,7 @@ static void *sys_write_result(void *env) {
   r->as.ok = NULL;
   if (sz_testrt_sys_is_fake())
     sz_testrt_stdout_write(p, n);
-  if (n > 0 && fwrite(p, 1, n, stdout) != n) {
+  else if (n > 0 && fwrite(p, 1, n, stdout) != n) {
     r->is_err = 1;
     r->as.err = sz_error_new(3, "Sys.write: write failed");
   } else if (fflush(stdout) != 0) {
@@ -504,19 +504,27 @@ static SzIo *exec_after_kick(void *ignored, void *env) {
   }
 }
 
+static void *sys_proc_dispatch(void *env) {
+  (void)env;
+  return (void *)(intptr_t)(sz_testrt_sys_is_fake() ? 1 : 0);
+}
+
+static SzIo *sys_after_exec_dispatch(void *value, void *env) {
+  SzPair *p = (SzPair *)env;
+  if ((intptr_t)value)
+    return fm_drop(sz_io_fail_cstr("Sys.exec: rejected under TestRuntime"),
+                   exec_keep_pair, p);
+  return fm_drop(sz_io_pure(NULL), exec_after_kick, p);
+}
+
 SzIo *sz_sys_exec(SzString *cmd) {
   SzPair *p;
   if (!cmd)
     sz_panic("sz_sys_exec(null)");
   p = sz_pair_new(cmd, NULL);
-  if (sz_testrt_sys_is_fake()) {
-    SzIo *io = fm_drop(sz_io_fail_cstr("Sys.exec: rejected under TestRuntime"),
-                       exec_keep_pair, p);
-    sz_release(p);
-    return io;
-  }
   {
-    SzIo *io = fm_drop(sz_io_pure(NULL), exec_after_kick, p);
+    SzIo *io = fm_drop(sz_io_delay(sys_proc_dispatch, NULL), sys_after_exec_dispatch,
+                       p);
     sz_release(p);
     return io;
   }
@@ -545,19 +553,22 @@ static void *sys_spawn_result(void *env) {
   return r;
 }
 
+static SzIo *sys_after_spawn_dispatch(void *value, void *env) {
+  SzPair *p = (SzPair *)env;
+  if ((intptr_t)value)
+    return fm_drop(sz_io_fail_cstr("Sys.spawn: rejected under TestRuntime"),
+                   exec_keep_pair, p);
+  return fm_drop(sz_io_delay(sys_spawn_result, p), unwrap_sys, NULL);
+}
+
 SzIo *sz_sys_spawn(SzString *cmd) {
   SzPair *p;
   if (!cmd)
     sz_panic("sz_sys_spawn(null)");
   p = sz_pair_new(cmd, NULL);
-  if (sz_testrt_sys_is_fake()) {
-    SzIo *io = fm_drop(sz_io_fail_cstr("Sys.spawn: rejected under TestRuntime"),
-                       exec_keep_pair, p);
-    sz_release(p);
-    return io;
-  }
   {
-    SzIo *io = fm_drop(sz_io_delay(sys_spawn_result, p), unwrap_sys, NULL);
+    SzIo *io = fm_drop(sz_io_delay(sys_proc_dispatch, NULL), sys_after_spawn_dispatch,
+                       p);
     sz_release(p);
     return io;
   }

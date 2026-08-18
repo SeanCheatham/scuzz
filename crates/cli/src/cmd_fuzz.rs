@@ -2,7 +2,7 @@ use crate::support::{compile_opts, resolve_dir, run_testrt, TestrtUi};
 use anyhow::{bail, Context, Result};
 use scuzz_compiler::compile_project;
 use scuzz_compiler::fuzz::{
-    corpus_keep, corpus_push, count_prefix_lines, drive_script_lines, dump_push, exhaust_alphabet,
+    corpus_keep, corpus_push, count_dump_section, drive_script_lines, dump_push, exhaust_alphabet,
     fuzz_pick_sched, fuzz_pick_script, lines_nonempty, missing_from, parse_repro, repro_text,
     sched_push, script_text,
 };
@@ -19,6 +19,9 @@ pub fn cmd_fuzz(
     depth: Option<i64>,
 ) -> Result<ExitCode> {
     if let Some(replay) = replay {
+        if exhaust || depth.is_some() {
+            bail!("fuzz --replay cannot combine with --exhaust or --depth");
+        }
         return fuzz_replay(path, replay);
     }
     if iters < 0 {
@@ -124,13 +127,13 @@ fn fuzz_probe(
         bail!("fuzz probe failed: app fails under TestRuntime before any event");
     }
     let dump = std::fs::read_to_string(fuzz_dir.join("dump.txt")).unwrap_or_default();
-    let n_buttons = count_prefix_lines(&dump, "button:");
-    let n_fields = count_prefix_lines(&dump, "textfield:");
-    let n_scrolls = count_prefix_lines(&dump, "scroll:");
+    let n_taps = count_dump_section(&dump, "[taps]");
+    let n_fields = count_dump_section(&dump, "[fields]");
+    let n_scrolls = count_dump_section(&dump, "[scrolls]");
     let drivers = read_drivers(project_dir);
-    if n_buttons + n_fields + n_scrolls == 0 && drivers.is_empty() {
+    if n_taps + n_fields + n_scrolls == 0 && drivers.is_empty() {
         check_sometimes_campaign(project_dir, fuzz_dir)?;
-        println!("scuzz fuzz ok (no buttons, text fields, scrolls, or drivers; probe only)");
+        println!("scuzz fuzz ok (no tap targets, text fields, scrolls, or drivers; probe only)");
         return Ok(ExitCode::SUCCESS);
     }
     if exhaust {
@@ -140,7 +143,7 @@ fn fuzz_probe(
             project_dir,
             w,
             h,
-            n_buttons,
+            n_taps,
             n_fields > 0,
             n_scrolls > 0,
             &drivers,
@@ -153,7 +156,7 @@ fn fuzz_probe(
             project_dir,
             w,
             h,
-            n_buttons,
+            n_taps,
             n_fields > 0,
             n_scrolls > 0,
             &drivers,
