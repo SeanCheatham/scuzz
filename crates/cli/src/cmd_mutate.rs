@@ -3,7 +3,7 @@ use anyhow::{bail, Result};
 use scuzz_compiler::compile_prepared_program;
 use scuzz_compiler::driver::load_verify_program;
 use scuzz_compiler::fuzz::{
-    count_prefix_lines, drive_script_lines, fuzz_script, lines_nonempty, script_text,
+    count_dump_section, drive_script_lines, fuzz_script, lines_nonempty, script_text,
 };
 use scuzz_compiler::mutate::{mutate_apply_mode, mutate_count_mode, MutateMode};
 use std::path::Path;
@@ -131,17 +131,17 @@ fn mutate_exec_ui(
         return Ok(0);
     }
     let dump = std::fs::read_to_string(out_dir.join("dump.txt")).unwrap_or_default();
-    let n_buttons = count_prefix_lines(&dump, "button:");
-    let n_fields = count_prefix_lines(&dump, "textfield:");
-    let n_scrolls = count_prefix_lines(&dump, "scroll:");
+    let n_taps = count_dump_section(&dump, "[taps]");
+    let n_fields = count_dump_section(&dump, "[fields]");
+    let n_scrolls = count_dump_section(&dump, "[scrolls]");
     let drivers =
         lines_nonempty(&std::fs::read_to_string(out_dir.join("drivers.txt")).unwrap_or_default());
-    if n_buttons + n_fields + n_scrolls == 0 && drivers.is_empty() {
+    if n_taps + n_fields + n_scrolls == 0 && drivers.is_empty() {
         return Ok(0);
     }
     for iter in 0..iters {
         let s = mutate_iter_seed(seed, mutant_index, iter);
-        let events = fuzz_script(s, n_buttons, n_fields > 0, n_scrolls > 0, &drivers);
+        let events = fuzz_script(s, n_taps, n_fields > 0, n_scrolls > 0, &drivers);
         let code = mutate_exec_ui_events(exe, out_dir, w, h, &events, &s.to_string())?;
         if code != 0 {
             return Ok(code);

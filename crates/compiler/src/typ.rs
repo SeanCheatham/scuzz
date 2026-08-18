@@ -3115,8 +3115,8 @@ fn bind_pattern(
             match scrut {
                 Type::Adt(n) if n == &id && en.type_params.is_empty() => {}
                 Type::App(n, _) if n == &id => {}
-                Type::Opaque(_) if en.type_params.is_empty() => {}
-                Type::Opaque(_) => {
+                Type::Opaque(_) if is_meta_opaque(scrut) && en.type_params.is_empty() => {}
+                Type::Opaque(_) if is_meta_opaque(scrut) => {
                     return Err(TypeError::Msg(format!(
                         "cannot match an untyped value against generic enum {enum_name}"
                     )))
@@ -3279,8 +3279,22 @@ fn uncovered_product(
     let tail = &tys[1..];
     match head {
         Type::Adt(n) | Type::App(n, _) => {
-            let Ok((en, _)) = lookup_enum(enums, n, current_module) else {
-                return Ok(Vec::new());
+            let (en, _) = match lookup_enum(enums, n, current_module) {
+                Ok(pair) => pair,
+                Err(_) => {
+                    if rows
+                        .iter()
+                        .any(|r| r.first().is_some_and(|p| p.is_irrefutable()))
+                    {
+                        let rest: Vec<Vec<crate::ast::Pattern>> = rows
+                            .iter()
+                            .filter(|r| r.first().is_some_and(|p| p.is_irrefutable()))
+                            .map(|r| r.iter().skip(1).cloned().collect())
+                            .collect();
+                        return uncovered_product(tail, &rest, enums, current_module);
+                    }
+                    return Ok(vec![head.to_string()]);
+                }
             };
             let mut missing = Vec::new();
             for case in &en.cases {
@@ -7268,6 +7282,27 @@ enum Wrap:
         assert!(
             err.message()
                 .contains("non-exhaustive match: missing Wrap.Box(Color.Blue)"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_opaque_kit_match_against_enum() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  View.text("x") match {
+    case Color.Red => IO.println("r")
+    case Color.Blue => IO.println("b")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("does not match scrutinee"),
             "{}",
             err.message()
         );

@@ -58,7 +58,7 @@ Optional. Used by `scuzz run` / `test` / `package`.
 | `default_runtime` | `"headless"` \| `"desktop"` \| `"mobile"` | `scuzz run` default; `--headless` forces Headless |
 | `headless_size` | `[w, h]` | Logical pixels for Headless / goldens / Mobile host |
 | `headless_scale` | float | Headless session scale (default 1). Desktop uses OS backing scale when higher. |
-| `tap_button` | int (optional) | 0-based button index for `_after_tap` goldens (`SCUZZ_UI_TAP_N`) |
+| `tap_button` | int (optional) | 0-based `[taps]` index for `_after_tap` goldens (`SCUZZ_UI_TAP_N`) |
 | `tap_text` | string (optional) | Text injected before the scripted tap (`SCUZZ_UI_TEXT`) |
 | `bundle_id` | string | Android package / iOS `CFBundleIdentifier` for `scuzz package` |
 

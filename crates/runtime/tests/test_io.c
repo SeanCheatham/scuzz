@@ -1807,8 +1807,22 @@ int main(void) {
         sz_stream_eval(pure_drop(sz_string_from_cstr("c"))));
     r = sz_io_unsafe_run(sz_stream_compile_to_list(s));
     assert(r.ok);
-    SzString *joined = sz_list_join((SzList *)r.value, ",");
+    SzString *    joined = sz_list_join((SzList *)r.value, ",");
     assert(strcmp(sz_string_cstr(joined), "a!,b!,c") == 0);
+
+    {
+      size_t base_bytes = 0, base_count = 0;
+      size_t live_bytes = 0, live_count = 0;
+      SzIoResult sr;
+      sz_alloc_stats(&base_bytes, &base_count);
+      sr = sz_io_unsafe_run(sz_stream_compile_to_list(
+          sz_stream_eval(pure_drop(sz_string_from_cstr("c")))));
+      assert(sr.ok);
+      sz_release(sr.value);
+      sz_alloc_stats(&live_bytes, &live_count);
+      assert(live_count == base_count);
+      assert(live_bytes == base_bytes);
+    }
 
     r = sz_io_unsafe_run(sz_stream_drain(sz_stream_emit(sz_string_from_cstr("d"))));
     assert(r.ok);
@@ -2775,6 +2789,27 @@ int main(void) {
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
+    sz_testrt_reset();
+  }
+
+  /* Sys.exec / Sys.spawn built before TestRuntime still reject at run. */
+  {
+    SzIoResult tr;
+    SzString *cmd = sz_string_from_cstr("true");
+    SzIo *exec_io = sz_sys_exec(cmd);
+    SzIo *spawn_io = sz_sys_spawn(cmd);
+    sz_release(cmd);
+    sz_testrt_install();
+    tr = sz_io_unsafe_run(exec_io);
+    assert(!tr.ok);
+    assert(tr.error &&
+           strstr(sz_string_cstr(tr.error->message), "TestRuntime") != NULL);
+    sz_error_free(tr.error);
+    tr = sz_io_unsafe_run(spawn_io);
+    assert(!tr.ok);
+    assert(tr.error &&
+           strstr(sz_string_cstr(tr.error->message), "TestRuntime") != NULL);
+    sz_error_free(tr.error);
     sz_testrt_reset();
   }
 

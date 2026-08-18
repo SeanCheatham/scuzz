@@ -736,7 +736,16 @@ SzString *sz_string_replace(const SzString *s, const SzString *oldv, const SzStr
       i++;
     }
   }
-  out_len = slen + count * nnew - count * nold;
+  if (nnew > nold) {
+    size_t grow = nnew - nold;
+    if (count != 0 && grow > ((size_t)-1) / count)
+      sz_panic("sz_string_replace: result too large");
+    if (count * grow > ((size_t)-1) - slen)
+      sz_panic("sz_string_replace: result too large");
+    out_len = slen + count * grow;
+  } else {
+    out_len = slen - count * (nold - nnew);
+  }
   buf = (char *)sz_alloc(out_len + 1);
   i = 0;
   o = 0;

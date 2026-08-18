@@ -211,6 +211,7 @@ static SzIo *after_eval(void *value, void *env) {
   SzList *acc = sz_list_cons(value, st->acc);
   SzStream *tail = st->tail;
   int64_t remain = st->remain;
+  sz_release(value);
   sz_free(st);
   return compile_into(tail, acc, remain);
 }
@@ -316,6 +317,7 @@ static SzIo *fold_evalmap(SzList *xs, StMap *st);
 static SzIo *after_map_one(void *value, void *env) {
   StMap *st = (StMap *)env;
   st->outer_acc = sz_list_cons(value, st->outer_acc);
+  sz_release(value);
   return fold_evalmap(st->xs, st);
 }
 

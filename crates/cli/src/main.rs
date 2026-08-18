@@ -21,7 +21,7 @@ use support::resolve_dir;
     after_help = "Examples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz check --message-format=json\n  scuzz lsp\n  scuzz test\n  scuzz run --headless\n  scuzz run examples/studio\n  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio\n  scuzz watch\n  scuzz run --watch --headless\n  scuzz fuzz --iters 16\n  scuzz mutate --limit 16 --iters 4\n\nJSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check` (open buffers overlay disk; not a second typer).\n`scuzz check` is the linter. `watch` rebuilds. `[ui] run --watch` is hot reload: it keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (Signals stay). IO-only `run --watch` kills and reruns on source change. Live dump: build/debug.dump. Live inject: build/inject.script (tap/xy/text/type/pump/scroll/backspace). Desktop/Mobile record: build/record.script."
 )]
 struct Cli {
-    /// Diagnostic format: human (default) or json (`check` protocol; LSP wraps check)
+    /// Diagnostic format: human (default) or json (`scuzz check` only)
     #[arg(long, global = true, default_value = "human", value_parser = ["human", "json"])]
     message_format: String,
     #[command(subcommand)]
@@ -82,7 +82,7 @@ enum Commands {
     },
     /// Run tests: Headless structural goldens for [ui] packages; IO smoke (TESTRT exit 0) otherwise
     #[command(
-        after_help = "Examples:\n  scuzz test\n  scuzz test --update\n  scuzz test --pixels examples/counter\n  scuzz test examples/io\n\n[ui] packages need goldens/. Seed with --update, then compare without it. Missing scuzz.toml fails."
+        after_help = "Examples:\n  scuzz test\n  scuzz test --update\n  scuzz test --pixels examples/counter\n  scuzz test examples/io\n\n[ui] packages need goldens/. `scuzz test --update` creates goldens/ when it is missing, then seeds dumps. Missing scuzz.toml fails."
     )]
     Test {
         #[arg(default_value = ".")]
@@ -104,7 +104,7 @@ enum Commands {
     },
     /// Language server wrapping `scuzz check` JSON diagnostics (stdin/stdout LSP)
     #[command(
-        after_help = "Open buffers overlay disk text on didOpen / didChange / didClose. `workspace/didChangeWatchedFiles` republishes check diagnostics. Hover, completion, definition, document symbols, references, rename, workspace symbols, signature help, document highlights, folding ranges, format, selection ranges, inlay hints, semantic tokens (full and range), code actions, pull diagnostics, call hierarchy, type definition, implementation, code lenses, document links, and `workspace/executeCommand` (`scuzz.references`) use the same check parse. Quickfix actions attach the check diagnostic they fix. `codeAction/resolve` fills the edit from action data. Diagnostics include related locations. `workspace/diagnostic` lists every src file. `textDocument/declaration` jumps to the import that bound a name.\n\nExamples:\n  scuzz lsp\n  scuzz lsp examples/hello\n"
+        after_help = "Open buffers overlay disk text on didOpen / didChange / didClose. `workspace/didChangeWatchedFiles` republishes check diagnostics. Hover, completion, definition, document symbols, references, rename, workspace symbols, signature help, document highlights, folding ranges, format, selection ranges, inlay hints, semantic tokens (full and range), code actions, pull diagnostics, call hierarchy, type definition, implementation, code lenses, document links, `workspace/willRenameFiles`, and `workspace/executeCommand` (`scuzz.references`) use the same check parse. Quickfix actions attach the check diagnostic they fix. `codeAction/resolve` fills the edit from action data. Diagnostics include related locations. `workspace/diagnostic` lists every src file. `textDocument/declaration` jumps to the import that bound a name.\n\nExamples:\n  scuzz lsp\n  scuzz lsp examples/hello\n"
     )]
     Lsp {
         #[arg(default_value = ".")]
@@ -121,7 +121,7 @@ enum Commands {
         #[arg(long)]
         check: bool,
     },
-    /// Search in-source laws under TestRuntime ([ui] events × schedules; IO-only schedules)
+    /// Search in-source laws, drivers, and [taps] events under TestRuntime
     #[command(
         after_help = "Examples:\n  scuzz fuzz --iters 16\n  scuzz fuzz --iters 16 examples/io\n  scuzz fuzz --exhaust --depth 1\n  scuzz fuzz --replay build/fuzz/repro.toml\n"
     )]
@@ -178,13 +178,13 @@ enum Commands {
     },
     /// Package a project for host, Android, or iOS
     #[command(
-        after_help = "Examples:\n  scuzz package --target host\n  scuzz package --target all examples/counter\n  scuzz package --target ios examples/counter\n  scuzz package --target android examples/counter\n\nios builds a signed simulator .app. It needs Xcode. android packs a debug APK. It needs the NDK and the Android SDK. Missing xcrun, NDK, or SDK fails with one install line.\n"
+        after_help = "Examples:\n  scuzz package --target host\n  scuzz package --target all examples/counter\n  scuzz package --target ios examples/counter\n  scuzz package --target android examples/counter\n\nDefault target is host. ios builds a signed simulator .app. It needs Xcode. android packs a debug APK. It needs the NDK and the Android SDK. Missing xcrun, NDK, or SDK fails with one install line.\n"
     )]
     Package {
         #[arg(default_value = ".")]
         path: PathBuf,
         /// Packaging target: host, android, ios, or all
-        #[arg(long, default_value = "all")]
+        #[arg(long, default_value = "host")]
         target: String,
         #[arg(long, default_value = "build")]
         out_dir: PathBuf,
@@ -204,6 +204,9 @@ fn main() -> ExitCode {
 fn real_main() -> Result<ExitCode> {
     let cli = Cli::parse();
     let json = cli.message_format == "json";
+    if json && !matches!(cli.command, Commands::Check { .. }) {
+        bail!("--message-format=json applies to `scuzz check` only");
+    }
     match cli.command {
         Commands::Build {
             path,
@@ -432,7 +435,11 @@ fn run_once(
             .unwrap_or(Path::new("."))
             .join("snapshot.png");
         apply_ui_env(&mut cmd, &manifest, &snap, /*tap*/ false);
-        eprintln!("scuzz run --headless → snapshot {}", snap.display());
+        if headless {
+            eprintln!("scuzz run --headless → snapshot {}", snap.display());
+        } else {
+            eprintln!("scuzz run → Headless snapshot {}", snap.display());
+        }
     } else if use_mobile {
         apply_peer_env(&mut cmd, &manifest, &project_dir, true);
         cmd.env(
@@ -724,10 +731,13 @@ fn run_io_smoke(exe: &Path) -> Result<()> {
 fn run_goldens(project_dir: &Path, exe: &Path, update: bool, pixels: bool) -> Result<()> {
     let goldens = project_dir.join("goldens");
     if !goldens.is_dir() {
-        bail!(
-            "missing goldens/ for [ui] package {}. Seed with `scuzz test --update`.",
-            project_dir.display()
-        );
+        if !update {
+            bail!(
+                "missing goldens/ for [ui] package {}. Seed with `scuzz test --update`.",
+                project_dir.display()
+            );
+        }
+        std::fs::create_dir_all(&goldens)?;
     }
     let manifest = load_manifest(&project_dir.join("scuzz.toml"))?;
     let name = manifest.package.name.as_str();

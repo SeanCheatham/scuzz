@@ -343,6 +343,22 @@ pub fn count_prefix_lines(s: &str, prefix: &str) -> i64 {
     s.lines().filter(|l| l.starts_with(prefix)).count() as i64
 }
 
+/// Count nonempty lines under a dump section header (`[taps]`, `[fields]`, `[scrolls]`).
+pub fn count_dump_section(s: &str, header: &str) -> i64 {
+    let mut in_section = false;
+    let mut n = 0i64;
+    for line in s.lines() {
+        if line.starts_with('[') && line.ends_with(']') {
+            in_section = line == header;
+            continue;
+        }
+        if in_section && !line.is_empty() {
+            n += 1;
+        }
+    }
+    n
+}
+
 pub fn script_text(events: &[String]) -> String {
     if events.is_empty() {
         String::new()
@@ -438,6 +454,33 @@ mod tests {
             a,
             vec!["tap 0".to_string(), "tap 1".into(), "pump 1".into()]
         );
+    }
+
+    #[test]
+    fn dump_section_counts_taps_not_view_buttons() {
+        let dump = "\
+[views]
+radio:Home=1
+button:+1
+button:Add
+textfield:item
+scroll:scroll
+
+[taps]
+0 Home 24,24 25x32
+1 +1 44,254 48x32
+2 Add 75,416 43x32
+
+[fields]
+0* item=\"\"
+
+[scrolls]
+0 scroll
+";
+        assert_eq!(count_prefix_lines(dump, "button:"), 2);
+        assert_eq!(count_dump_section(dump, "[taps]"), 3);
+        assert_eq!(count_dump_section(dump, "[fields]"), 1);
+        assert_eq!(count_dump_section(dump, "[scrolls]"), 1);
     }
 
     #[test]

@@ -37,6 +37,12 @@ impl RelatedLoc {
         if let Some(c) = self.column {
             out.push_str(&format!(",\"column\":{c}"));
         }
+        if let Some(l) = self.end_line {
+            out.push_str(&format!(",\"end_line\":{l}"));
+        }
+        if let Some(c) = self.end_column {
+            out.push_str(&format!(",\"end_column\":{c}"));
+        }
         out.push('}');
         out
     }
@@ -122,6 +128,12 @@ impl Diagnostic {
         }
         if let Some(c) = self.column {
             out.push_str(&format!(",\"column\":{c}"));
+        }
+        if let Some(l) = self.end_line {
+            out.push_str(&format!(",\"end_line\":{l}"));
+        }
+        if let Some(c) = self.end_column {
+            out.push_str(&format!(",\"end_column\":{c}"));
         }
         if !self.related.is_empty() {
             let parts: Vec<String> = self.related.iter().map(|r| r.to_json()).collect();
@@ -476,31 +488,38 @@ pub fn check_project_with(
     let Some(program) = maybe_program else {
         return Ok(diags);
     };
-    let program = match apply_overlays(program, &resolved.overlays) {
-        Ok(p) => p,
-        Err(e) => {
-            diags.push(Diagnostic::error(e.to_string()));
-            return Ok(diags);
+    let program = {
+        let live = program;
+        match apply_overlays(live.clone(), &resolved.overlays) {
+            Ok(p) => p,
+            Err(e) => {
+                diags.push(Diagnostic::error(e.to_string()));
+                live
+            }
         }
     };
     let law_names = match collect_law_names(&program) {
         Ok(n) => n,
         Err(e) => {
             diags.push(Diagnostic::error(e.to_string()));
-            return Ok(diags);
+            Vec::new()
         }
     };
     if let Err(e) = check_laws_applied(&program, &law_names) {
         diags.push(Diagnostic::error(e.to_string()));
-        return Ok(diags);
     }
     let mut program = program;
     // Residualize refinements so Law.check typechecks like verify builds.
     residualize_refinements(&mut program);
     program.law_names = law_names;
-    let program = lower_program(program);
-    let mut program = program;
-    crate::typ::inject_builtin_enums(&mut program.enums);
+    let lowered = lower_program(program);
+    let program = match crate::typ::expand_impls(lowered.clone()) {
+        Ok(p) => p,
+        Err(e) => {
+            diags.push(diagnostic_from_type(e, &named));
+            lowered
+        }
+    };
     let type_errs = typecheck_all(&program);
     let had_type_err = !type_errs.is_empty();
     for e in type_errs {
@@ -1513,6 +1532,8 @@ mod tests {
         let json = format_diagnostics(&diags, true);
         assert!(json.contains("\"line\":"));
         assert!(json.contains("\"column\":"));
+        assert!(json.contains("\"end_line\":"), "{json}");
+        assert!(json.contains("\"end_column\":"), "{json}");
     }
 
     #[test]
@@ -2011,5 +2032,69 @@ def b(): String = 1
             full.len()
         );
         assert_eq!(ranged[0], 0);
+    }
+
+    #[test]
+    fn check_project_typechecks_impl_method_bodies() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"impl_body\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = "\
+record Point(x: Int):
+  def label(): String =
+    self.x
+@main def main: IO[Unit] =
+  IO.println(\"ok\")
+";
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), formatted).unwrap();
+        let diags = check_project(root).unwrap();
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(
+            diags[0].message.contains("String") || diags[0].message.contains("Int"),
+            "{}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn check_project_reports_unused_law_and_type_error() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"law_and_ty\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = "\
+law always: Bool = 1 == 1
+def a(): Int = \"x\"
+@main def main: IO[Unit] =
+  IO.println(\"ok\")
+";
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), formatted).unwrap();
+        let diags = check_project(root).unwrap();
+        assert!(
+            diags.len() >= 2,
+            "expected law and type diagnostics, got {}: {diags:?}",
+            diags.len()
+        );
+        assert!(
+            diags.iter().any(|d| d.message.contains("never applied")),
+            "{diags:?}"
+        );
+        assert!(
+            diags
+                .iter()
+                .any(|d| d.message.contains("Int") || d.message.contains("String")),
+            "{diags:?}"
+        );
     }
 }
