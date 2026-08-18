@@ -13,7 +13,7 @@ Scuzz is not Scala 3. It is not the JVM. It is not a cats-effect port. Scala Nat
 - **Testing:** mutation, fuzz, laws, simulation, and determinism are built in. Oracles live in source. Drivers are oracle-free. Simulation is hermetic. Do not add a third-party harness.
 - **Batteries:** the language and standard kits cover common cases. No ecosystem library sprawl.
 
-Product intent: [docs/vision.md](docs/vision.md). App path: [docs/guide.md](docs/guide.md).
+Product intent: [docs/vision.md](docs/vision.md). App path: [docs/guide.md](docs/guide.md). Checkout setup: [docs/developer-environment.md](docs/developer-environment.md).
 
 ## Install
 

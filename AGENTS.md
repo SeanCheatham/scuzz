@@ -11,6 +11,7 @@
 | [`docs/optimization.md`](docs/optimization.md) | Later empirical pre-optimization (`*.scuzz_tune`). Not current work. |
 | [`docs/compatibility.md`](docs/compatibility.md) | Keep or cut vs Scala and effect libraries. Platforms. Toolchain. |
 | [`docs/guide.md`](docs/guide.md) | App author path from install to run |
+| [`docs/developer-environment.md`](docs/developer-environment.md) | Checkout host setup |
 | [`docs/schemas/scuzz-toml.md`](docs/schemas/scuzz-toml.md) | Package manifest schema |
 | [`README.md`](README.md) | Pitch, install, one example |
 
