@@ -13,6 +13,7 @@ pub mod fuzz;
 pub(crate) mod hierarchy;
 pub(crate) mod highlight;
 pub(crate) mod hover;
+pub(crate) mod implement;
 pub(crate) mod inlay;
 pub(crate) mod lens;
 pub(crate) mod lexer;

@@ -3,16 +3,16 @@
 //! document symbols, references, rename, workspace symbols, signature help,
 //! document highlights, folding ranges, format, selection ranges, inlay hints,
 //! semantic tokens (full and range), code actions, call hierarchy, type definition,
-//! and code lenses use that parse.
+//! implementation, and code lenses use that parse.
 
 use crate::check::{
     canonicalize_source_path, check_project_with, code_actions_project, code_lenses_project,
     complete_project, definition_project, folding_ranges_project, highlights_project,
-    hover_project, incoming_calls_project, inlay_hints_project, json_str, outgoing_calls_project,
-    prepare_call_hierarchy_project, prepare_rename_project, references_project, rename_project,
-    selection_ranges_project, semantic_tokens_project, semantic_tokens_range_project,
-    signature_help_project, symbols_project, type_definition_project, workspace_symbols_project,
-    CallItemLsp, Diagnostic, RenameResult,
+    hover_project, implementation_project, incoming_calls_project, inlay_hints_project, json_str,
+    outgoing_calls_project, prepare_call_hierarchy_project, prepare_rename_project,
+    references_project, rename_project, selection_ranges_project, semantic_tokens_project,
+    semantic_tokens_range_project, signature_help_project, symbols_project,
+    type_definition_project, workspace_symbols_project, CallItemLsp, Diagnostic, RenameResult,
 };
 use crate::fold::FOLD_REGION;
 use crate::overlay::collect_fmt_sources;
@@ -46,7 +46,7 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             let type_list: Vec<String> = TOKEN_TYPES.iter().map(|t| json_str(t)).collect();
             let mod_list: Vec<String> = TOKEN_MODIFIERS.iter().map(|t| json_str(t)).collect();
             let caps = format!(
-                r#"{{"capabilities":{{"textDocumentSync":{{"openClose":true,"change":1}},"hoverProvider":true,"completionProvider":{{"triggerCharacters":["."]}},"definitionProvider":true,"typeDefinitionProvider":true,"codeLensProvider":{{"resolveProvider":false}},"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{{"triggerCharacters":["("]}},"referencesProvider":true,"renameProvider":{{"prepareProvider":true}},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true,"semanticTokensProvider":{{"legend":{{"tokenTypes":[{}],"tokenModifiers":[{}]}},"full":true,"range":true}},"codeActionProvider":{{"codeActionKinds":["quickfix","source.formatDocument"]}},"callHierarchyProvider":true}}}}"#,
+                r#"{{"capabilities":{{"textDocumentSync":{{"openClose":true,"change":1}},"hoverProvider":true,"completionProvider":{{"triggerCharacters":["."]}},"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":true,"codeLensProvider":{{"resolveProvider":false}},"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{{"triggerCharacters":["("]}},"referencesProvider":true,"renameProvider":{{"prepareProvider":true}},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true,"semanticTokensProvider":{{"legend":{{"tokenTypes":[{}],"tokenModifiers":[{}]}},"full":true,"range":true}},"codeActionProvider":{{"codeActionKinds":["quickfix","source.formatDocument"]}},"callHierarchyProvider":true}}}}"#,
                 type_list.join(","),
                 mod_list.join(",")
             );
@@ -77,6 +77,9 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/typeDefinition" {
             let result = type_definition_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "textDocument/implementation" {
+            let result = implementation_result(&root, &open, &body);
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/codeLens" {
             let result = code_lens_result(&root, &open, &body);
@@ -134,7 +137,7 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
         } else if method == "callHierarchy/outgoingCalls" {
             let result = outgoing_calls_result(&root, &open, &body);
             write_result(&mut writer, id, &result)?;
-        } else if method == "textDocument/didSave" {
+        } else if method == "textDocument/didSave" || method == "workspace/didChangeWatchedFiles" {
             publish_check(&root, &open, &mut writer)?;
         } else if method == "initialized" || method.is_empty() {
             continue;
@@ -320,6 +323,24 @@ fn type_definition_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &
             json_str(&file_uri(&dest))
         ),
         _ => "null".into(),
+    }
+}
+
+fn implementation_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    let Some(path) = doc_path_from_message(body) else {
+        return "[]".into();
+    };
+    let line = json_i64_field(body, "line").unwrap_or(0).max(0) as u32;
+    let character = json_i64_field(body, "character").unwrap_or(0).max(0) as u32;
+    match implementation_project(root, open, &path, line, character) {
+        Ok(locs) => {
+            let parts: Vec<String> = locs
+                .iter()
+                .map(|(dest, sl, sc, el, ec)| encode_location(&file_uri(dest), *sl, *sc, *el, *ec))
+                .collect();
+            format!("[{}]", parts.join(","))
+        }
+        _ => "[]".into(),
     }
 }
 
@@ -1475,6 +1496,79 @@ def paint(c: Color): Color =
         assert!(text.contains("\"id\":34"), "{text}");
         assert!(text.contains("1 ref"), "{text}");
         assert!(text.contains("scuzz.references"), "{text}");
+    }
+
+    fn write_show_pkg(root: &Path) -> (String, String, String) {
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"lsp_impl\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = r#"record Point(x: Int, y: Int)
+trait Show:
+  def show(): String
+impl Show for Point:
+  def show(): String =
+    "p"
+@main def main: IO[Unit] =
+  IO.println("x")
+"#;
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), &formatted).unwrap();
+        let root_uri = format!("file://{}", fs::canonicalize(root).unwrap().display());
+        let main = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let main_uri = format!("file://{}", main.display());
+        (formatted, root_uri, main_uri)
+    }
+
+    #[test]
+    fn lsp_implementation_jumps_to_point() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let (formatted, root_uri, main_uri) = write_show_pkg(root);
+        let show = formatted.find("Show:").unwrap();
+        let (line, col) = crate::span::offset_to_utf16_pos(&formatted, show);
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let req = format!(
+            r#"{{"jsonrpc":"2.0","id":35,"method":"textDocument/implementation","params":{{"textDocument":{{"uri":{}}},"position":{{"line":{line},"character":{col}}}}}}}"#,
+            json_str(&main_uri)
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&req));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("implementationProvider"), "{text}");
+        assert!(text.contains("\"id\":35"), "{text}");
+        let point = formatted.find("for Point").unwrap() + 4;
+        let (pl, _pc) = crate::span::offset_to_utf16_pos(&formatted, point);
+        assert!(text.contains(&format!("\"line\":{pl}")), "{text}");
+    }
+
+    #[test]
+    fn lsp_watched_files_republish_diagnostics() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let (_formatted, root_uri, _main_uri) = write_show_pkg(root);
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let watch = r#"{"jsonrpc":"2.0","method":"workspace/didChangeWatchedFiles","params":{"changes":[{"uri":"file:///unused","type":2}]}}"#;
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(watch));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("textDocument/publishDiagnostics"), "{text}");
     }
 
     #[test]

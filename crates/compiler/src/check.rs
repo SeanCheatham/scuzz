@@ -484,6 +484,30 @@ pub fn type_definition_project(
     Ok(Some(loc_to_lsp(&resolved, path, &named, loc, &text)))
 }
 
+/// Go-to-implementation at a 0-based LSP position. Same parse as [`check_project_with`].
+pub fn implementation_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    line: u32,
+    character: u32,
+) -> Result<Vec<(PathBuf, u32, u32, u32, u32)>> {
+    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(program) = program else {
+        return Ok(Vec::new());
+    };
+    let named = named_sources(&resolved);
+    let offset = crate::span::utf16_pos_to_offset(&text, line, character);
+    let locs = crate::implement::implementation_in_sources(&program, &named, &label, &text, offset);
+    Ok(locs
+        .into_iter()
+        .map(|loc| loc_to_lsp(&resolved, path, &named, loc, &text))
+        .collect())
+}
+
 /// Code lenses in a file. Same parse as [`check_project_with`].
 pub fn code_lenses_project(
     project_dir: &Path,
@@ -1322,6 +1346,40 @@ def paint(c: Color): Color =
         let color = formatted.find("Color").unwrap();
         let (dl, dc) = offset_to_utf16_pos(&formatted, color);
         assert_eq!((sl, sc), (dl, dc));
+    }
+
+    #[test]
+    fn implementation_project_jumps_to_for_type() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"impl_ok\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = "\
+record Point(x: Int, y: Int)
+trait Show:
+  def show(): String
+impl Show for Point:
+  def show(): String =
+    \"p\"
+@main def main: IO[Unit] =
+  IO.println(\"x\")
+";
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), &formatted).unwrap();
+        let path = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let show = formatted.find("Show:").unwrap();
+        let (line, col) = offset_to_utf16_pos(&formatted, show);
+        let locs = implementation_project(root, &BTreeMap::new(), &path, line, col).unwrap();
+        assert_eq!(locs.len(), 1, "{locs:?}");
+        let (dest, sl, sc, _el, _ec) = &locs[0];
+        assert_eq!(canonicalize_source_path(dest), path);
+        let point = formatted.find("for Point").unwrap() + 4;
+        let (dl, dc) = offset_to_utf16_pos(&formatted, point);
+        assert_eq!((*sl, *sc), (dl, dc));
     }
 
     #[test]
