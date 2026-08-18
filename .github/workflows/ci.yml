@@ -123,6 +123,9 @@ jobs:
           grep -q "toInt:7" /tmp/kernel.out
           grep -q "miss:9" /tmp/kernel.out
           grep -q "repl:a:b" /tmp/kernel.out
+          grep -q "split:a:b" /tmp/kernel.out
+          grep -q "concat:a,b,c" /tmp/kernel.out
+          grep -q "flat:a,b,c" /tmp/kernel.out
           cargo run -p scuzz -- run examples/io | tee /tmp/io.out
           grep -q "ref-ok" /tmp/io.out
           grep -q "queue-ok" /tmp/io.out

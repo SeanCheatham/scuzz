@@ -82,6 +82,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_string_replace(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_trim(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_lines(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_string_split(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_println(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_pure(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_flatmap(ptr, ptr, ptr)").unwrap();
@@ -132,6 +133,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_takewhile(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_dropwhile(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_forall(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_concat(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_flatten(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_map(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_write(ptr, ptr)").unwrap();
@@ -3439,6 +3442,16 @@ fn emit_call(
             drop_owned_ptrs(&mut code, &emitted_args);
             owned_ptr(code, format!("%{prefix}_v"))
         }
+        "Str.split" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_string_split(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptrs(&mut code, &emitted_args);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
         "Str.lines" => {
             writeln!(
                 code,
@@ -3579,6 +3592,27 @@ fn emit_call(
                 code,
                 "  %{prefix}_v = call ptr @sz_list_drop(ptr {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "List.concat" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_concat(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "List.flatten" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_flatten(ptr {})",
+                emitted_args[0].value
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
@@ -6761,6 +6795,31 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of string {name} after replace:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_str_split_list_concat_flatten() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(Str.split("a,b", ","), ":"))
+    _ <- IO.println(List.join(List.concat(["a"], ["b", "c"]), ","))
+    xss = List.append(List.append(List.empty(), ["a"]), ["b", "c"])
+    _ <- IO.println(List.join(List.flatten(xss), ","))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_string_split"));
+        assert!(ir.contains("sz_list_concat"));
+        assert!(ir.contains("sz_list_flatten"));
+        let needle = "call ptr @sz_string_split(ptr ";
+        let at = ir.find(needle).expect("expected sz_string_split");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of string {name} after split:\n{ir}"
         );
     }
 

@@ -2091,6 +2091,30 @@ int main(void) {
       sz_string_free(rep);
     }
     {
+      SzString *s = sz_string_from_cstr("a,,b");
+      SzString *sep = sz_string_from_cstr(",");
+      SzString *empty = sz_string_from_cstr("");
+      SzList *xs = sz_string_split(s, sep);
+      SzList *one;
+      SzList *blank;
+      assert(sz_list_len(xs) == 3);
+      assert(strcmp(sz_string_cstr(xs->head), "a") == 0);
+      assert(strcmp(sz_string_cstr(xs->tail->head), "") == 0);
+      assert(strcmp(sz_string_cstr(xs->tail->tail->head), "b") == 0);
+      sz_list_free(xs);
+      one = sz_string_split(s, empty);
+      assert(sz_list_len(one) == 1);
+      assert(strcmp(sz_string_cstr(one->head), "a,,b") == 0);
+      sz_list_free(one);
+      blank = sz_string_split(empty, sep);
+      assert(sz_list_len(blank) == 1);
+      assert(strcmp(sz_string_cstr(blank->head), "") == 0);
+      sz_list_free(blank);
+      sz_string_free(s);
+      sz_string_free(sep);
+      sz_string_free(empty);
+    }
+    {
       SzString *tr = sz_string_trim(sz_string_from_cstr("  foo\t"));
       assert(strcmp(sz_string_cstr(tr), "foo") == 0);
       tr = sz_string_trim(sz_string_from_cstr("bar"));
@@ -3429,7 +3453,59 @@ int main(void) {
     sz_string_free(c);
   }
 
-  /* RC: string retain/release returns to baseline. Shared list tails stay. */
+  /* List.concat: left spine copy; empty left retains right. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzString *c = sz_string_from_cstr("c");
+    SzList *xs = sz_list_cons(a, sz_list_nil());
+    SzList *ys = sz_list_cons(b, sz_list_cons(c, sz_list_nil()));
+    SzList *zs = sz_list_concat(xs, ys);
+    SzList *empty;
+    assert(sz_list_len(zs) == 3);
+    assert(zs->head == a);
+    assert(zs->tail && zs->tail->head == b);
+    assert(zs->tail->tail && zs->tail->tail->head == c);
+    assert(sz_list_len(xs) == 1);
+    sz_list_free(zs);
+    empty = sz_list_concat(NULL, ys);
+    assert(empty == ys);
+    sz_release(empty);
+    empty = sz_list_concat(xs, NULL);
+    assert(sz_list_len(empty) == 1);
+    assert(empty->head == a);
+    sz_list_free(empty);
+    sz_list_free(xs);
+    sz_list_free(ys);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
+  }
+
+  /* List.flatten: concatenate inner lists. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzString *c = sz_string_from_cstr("c");
+    SzList *inner1 = sz_list_cons(a, sz_list_nil());
+    SzList *inner2 = sz_list_cons(b, sz_list_cons(c, sz_list_nil()));
+    SzList *xss = sz_list_cons(inner1, sz_list_cons(inner2, sz_list_nil()));
+    SzList *flat = sz_list_flatten(xss);
+    SzList *empty;
+    assert(sz_list_len(flat) == 3);
+    assert(flat->head == a);
+    assert(flat->tail && flat->tail->head == b);
+    assert(flat->tail->tail && flat->tail->tail->head == c);
+    sz_list_free(flat);
+    empty = sz_list_flatten(NULL);
+    assert(sz_list_is_empty(empty));
+    sz_list_free(xss);
+    sz_list_free(inner1);
+    sz_list_free(inner2);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
+  }
   {
     size_t base_bytes = 0, base_count = 0;
     size_t live_bytes = 0, live_count = 0;

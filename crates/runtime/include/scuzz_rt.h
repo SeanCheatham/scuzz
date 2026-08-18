@@ -77,6 +77,8 @@ typedef struct SzList SzList;
 typedef struct SzMap SzMap;
 /* Split on `\n` / `\r\n`; skip empty lines. */
 SzList *sz_string_lines(const SzString *s);
+/* Split on non-overlapping `sep`. Empty `sep` copies `s` as one cell. */
+SzList *sz_string_split(const SzString *s, const SzString *sep);
 
 /* Boxed i64 for IO[Int] */
 void *sz_box_i64(int64_t n);
@@ -430,6 +432,10 @@ SzList *sz_list_takewhile(SzList *xs, SzListPred pred, void *env);
 SzList *sz_list_dropwhile(SzList *xs, SzListPred pred, void *env);
 /* 1 if every head matches `pred` (empty is 1), else 0. */
 int64_t sz_list_forall(SzList *xs, SzListPred pred, void *env);
+/* Copy the left spine and share `ys`. Empty `xs` retains `ys`. */
+SzList *sz_list_concat(SzList *xs, SzList *ys);
+/* Concatenate inner lists. Empty `xss` is empty. */
+SzList *sz_list_flatten(SzList *xss);
 /* New spine. `fn` returns an owned pointer. Retain `head` when `fn` yields it.
  * Cons retains the mapped head. Map then drops the mapper ref. */
 SzList *sz_list_map(SzList *xs, SzListMapFn fn, void *env);

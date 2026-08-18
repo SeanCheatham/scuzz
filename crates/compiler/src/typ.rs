@@ -1868,6 +1868,12 @@ fn infer_call(
             expect_ty(&arg_tys[2], &Type::String)?;
             Ok(Type::String)
         }
+        "Str.split" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            Ok(list_of(Type::String))
+        }
         "Str.slice" => {
             expect_arity(callee, &arg_tys, 3)?;
             expect_ty(&arg_tys[0], &Type::String)?;
@@ -1960,6 +1966,18 @@ fn infer_call(
             list_elem(&arg_tys[0])?;
             expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(arg_tys[0].clone())
+        }
+        "List.concat" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let a = list_elem(&arg_tys[0])?;
+            let b = list_elem(&arg_tys[1])?;
+            Ok(list_of(prefer_elem(&a, &b)?))
+        }
+        "List.flatten" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            let inner = list_elem(&arg_tys[0])?;
+            let elem = list_elem(&inner)?;
+            Ok(list_of(elem))
         }
         "List.find" => {
             expect_arity(callee, &arg_tys, 2)?;
@@ -5861,6 +5879,23 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Str.contains/endsWith/toInt/replace should typecheck");
+    }
+
+    #[test]
+    fn typechecks_str_split_list_concat_flatten() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    parts = Str.split("a,b", ",")
+    ys = List.concat(["a"], ["b", "c"])
+    xss = List.append(List.append(List.empty(), ["a"]), ["b", "c"])
+    flat = List.flatten(xss)
+    _ <- IO.println(List.join(parts, ":"))
+    _ <- IO.println(List.join(ys, ","))
+    _ <- IO.println(List.join(flat, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Str.split/List.concat/flatten should typecheck");
     }
 
     #[test]

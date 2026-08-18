@@ -335,6 +335,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Str.replace",
         "Str.replace(s: String, old: String, new: String): String",
     ),
+    (
+        "Str.split",
+        "Str.split(s: String, sep: String): List[String]",
+    ),
     ("Str.trim", "Str.trim(s: String): String"),
     ("Signal.int", "Signal.int(n: Int): SignalInt"),
     ("Signal.get", "Signal.get(s: SignalInt): Int"),
@@ -358,6 +362,11 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ),
     ("List.take", "List.take(xs: List[T], n: Int): List[T]"),
     ("List.drop", "List.drop(xs: List[T], n: Int): List[T]"),
+    (
+        "List.concat",
+        "List.concat(xs: List[T], ys: List[T]): List[T]",
+    ),
+    ("List.flatten", "List.flatten(xss: List[List[T]]): List[T]"),
     (
         "List.find",
         "List.find(xs: List[T], pred: T => Bool): List[T]",
@@ -1322,6 +1331,38 @@ mod tests {
 "#;
         let h = hover_src(src, "trim");
         assert!(h.contains("Str.trim(s: String): String"), "{h}");
+    }
+
+    #[test]
+    fn hovers_str_split() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(Str.split("a,b", ","), ":"))
+"#;
+        let h = hover_src(src, "split");
+        assert!(
+            h.contains("Str.split(s: String, sep: String): List[String]"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_list_concat_and_flatten() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.concat(["a"], ["b"]), ","))
+"#;
+        let h = hover_src(src, "concat");
+        assert!(
+            h.contains("List.concat(xs: List[T], ys: List[T]): List[T]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.flatten(List.append(List.empty(), ["a"])), ","))
+"#;
+        let h = hover_src(src, "flatten");
+        assert!(
+            h.contains("List.flatten(xss: List[List[T]]): List[T]"),
+            "{h}"
+        );
     }
 
     #[test]

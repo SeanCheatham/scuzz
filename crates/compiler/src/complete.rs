@@ -687,6 +687,27 @@ mod tests {
     }
 
     #[test]
+    fn completes_str_split_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.sp\n";
+        let labels = labels_at(src, "Str.sp");
+        assert!(labels.iter().any(|l| l == "Str.split"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_concat_after_dot() {
+        let src = "@main def main: IO[Unit] = List.conc\n";
+        let labels = labels_at(src, "List.conc");
+        assert!(labels.iter().any(|l| l == "List.concat"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_flatten_after_dot() {
+        let src = "@main def main: IO[Unit] = List.fl\n";
+        let labels = labels_at(src, "List.fl");
+        assert!(labels.iter().any(|l| l == "List.flatten"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_str_to_int_after_dot() {
         let src = "@main def main: IO[Unit] = Str.to\n";
         let labels = labels_at(src, "Str.to");

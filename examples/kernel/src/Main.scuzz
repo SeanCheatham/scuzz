@@ -125,6 +125,9 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"takeWhile:${List.join(List.takeWhile(xs, x => x != "b"), ",")}")
     _ <- IO.println(s"dropWhile:${List.join(List.dropWhile(xs, x => x != "b"), ",")}")
     _ <- IO.println(s"forall:${if (List.forall(xs, x => x != "z")) "y" else "n"}")
+    _ <- IO.println(s"concat:${List.join(List.concat(["a"], ["b", "c"]), ",")}")
+    xss = List.append(List.append(List.empty(), ["a"]), ["b", "c"])
+    _ <- IO.println(s"flat:${List.join(List.flatten(xss), ",")}")
   } yield ()
 
 def strProof(): IO[Unit] =
@@ -134,6 +137,7 @@ def strProof(): IO[Unit] =
     _ <- IO.println(s"toInt:${Str.toInt("7", 0)}")
     _ <- IO.println(s"miss:${Str.toInt("x", 9)}")
     _ <- IO.println(s"repl:${Str.replace("a-b", "-", ":")}")
+    _ <- IO.println(s"split:${List.join(Str.split("a,b", ","), ":")}")
   } yield ()
 
 record Box[T](x: T):

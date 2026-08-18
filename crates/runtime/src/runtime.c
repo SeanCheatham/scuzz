@@ -693,6 +693,48 @@ SzString *sz_string_replace(const SzString *s, const SzString *oldv, const SzStr
   return out;
 }
 
+SzList *sz_string_split(const SzString *s, const SzString *sep) {
+  size_t slen = s && s->data ? s->len : 0;
+  const char *src = s && s->data ? s->data : "";
+  size_t nsep = sep && sep->data ? sep->len : 0;
+  const char *sepp = sep && sep->data ? sep->data : "";
+  SzList *acc = NULL;
+  size_t i;
+  size_t start;
+  SzString *part;
+  SzList *old;
+  SzList *rev;
+  if (nsep == 0) {
+    SzString *one = sz_string_from_bytes(src, slen);
+    acc = sz_list_cons(one, NULL);
+    sz_release(one);
+    return acc;
+  }
+  i = 0;
+  start = 0;
+  while (i + nsep <= slen) {
+    if (memcmp(src + i, sepp, nsep) == 0) {
+      part = sz_string_from_bytes(src + start, i - start);
+      old = acc;
+      acc = sz_list_cons(part, old);
+      sz_release(part);
+      sz_release(old);
+      i += nsep;
+      start = i;
+    } else {
+      i++;
+    }
+  }
+  part = sz_string_from_bytes(src + start, slen - start);
+  old = acc;
+  acc = sz_list_cons(part, old);
+  sz_release(part);
+  sz_release(old);
+  rev = sz_list_reverse(acc);
+  sz_release(acc);
+  return rev;
+}
+
 static int str_is_ws(unsigned char c) {
   return c == ' ' || c == '\t' || c == '\n' || c == '\r';
 }

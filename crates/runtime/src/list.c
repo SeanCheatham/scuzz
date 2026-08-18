@@ -179,6 +179,25 @@ int64_t sz_list_forall(SzList *xs, SzListPred pred, void *env) {
   return 1;
 }
 
+SzList *sz_list_concat(SzList *xs, SzList *ys) {
+  if (!xs) {
+    sz_retain(ys);
+    return ys;
+  }
+  return sz_list_cons_take(xs->head, sz_list_concat(xs->tail, ys));
+}
+
+SzList *sz_list_flatten(SzList *xss) {
+  SzList *rest;
+  SzList *out;
+  if (!xss)
+    return NULL;
+  rest = sz_list_flatten(xss->tail);
+  out = sz_list_concat((SzList *)xss->head, rest);
+  sz_release(rest);
+  return out;
+}
+
 SzList *sz_list_map(SzList *xs, SzListMapFn fn, void *env) {
   void *h;
   SzList *n;
