@@ -85,6 +85,101 @@ pub fn rename_in_sources(
     )
 }
 
+/// True when `name` is a blessed kit namespace. File rename must not rewrite those.
+pub fn is_kit_module(name: &str) -> bool {
+    matches!(
+        name,
+        "IO" | "Str"
+            | "List"
+            | "Fs"
+            | "Sys"
+            | "Clock"
+            | "Random"
+            | "Net"
+            | "Impurity"
+            | "Signal"
+            | "View"
+            | "Theme"
+            | "Ref"
+            | "Queue"
+            | "Deferred"
+            | "Fiber"
+            | "Resource"
+            | "Stream"
+            | "Map"
+            | "Set"
+            | "Ui"
+            | "Law"
+            | "Float"
+    )
+}
+
+fn module_has_def(program: &Program, module: &str, name: &str) -> bool {
+    program
+        .defs
+        .iter()
+        .any(|d| d.module == module && d.name == name)
+        || (program.main.module == module && program.main.name == name)
+}
+
+fn is_enum_ctor(program: &Program, enum_name: &str, case: &str) -> bool {
+    program
+        .enums
+        .iter()
+        .any(|e| e.name == enum_name && e.cases.iter().any(|c| c.name == case))
+}
+
+/// Byte ranges of `old_mod` used as a module name: `import Module.name` and
+/// qualified `Module.def` calls. Does not rewrite enum cases (`Color.Red`).
+pub fn module_ident_spans(
+    source: &str,
+    old_mod: &str,
+    program: Option<&Program>,
+) -> Vec<(usize, usize)> {
+    if old_mod.is_empty() || is_kit_module(old_mod) {
+        return Vec::new();
+    }
+    let Ok(toks) = lex(source) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for i in 0..toks.len() {
+        let Token::Ident(name) = &toks[i].token else {
+            continue;
+        };
+        if name != old_mod {
+            continue;
+        }
+        let next_dot = toks
+            .get(i + 1)
+            .is_some_and(|t| matches!(t.token, Token::Dot));
+        if !next_dot {
+            continue;
+        }
+        let prev_import = i
+            .checked_sub(1)
+            .and_then(|j| toks.get(j))
+            .is_some_and(|t| matches!(t.token, Token::Import));
+        if prev_import {
+            out.push((toks[i].span.start, toks[i].span.end));
+            continue;
+        }
+        let Some(program) = program else {
+            continue;
+        };
+        let Some(Token::Ident(next_name)) = toks.get(i + 2).map(|t| &t.token) else {
+            continue;
+        };
+        if is_enum_ctor(program, old_mod, next_name) {
+            continue;
+        }
+        if module_has_def(program, old_mod, next_name) {
+            out.push((toks[i].span.start, toks[i].span.end));
+        }
+    }
+    out
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -150,5 +245,45 @@ mod tests {
         for e in &edits {
             assert_eq!(&src[e.start..e.end], "n");
         }
+    }
+
+    #[test]
+    fn module_spans_cover_import_and_qualified_def() {
+        let a = "def tag(): String =\n  \"a\"\n";
+        let main = "import A.tag\n@main def main: IO[Unit] =\n  IO.println(A.tag())\n";
+        let sources = vec![
+            ("A.scuzz".into(), a.to_string()),
+            ("Main.scuzz".into(), main.to_string()),
+        ];
+        let p = crate::parser::parse_sources(&sources).unwrap();
+        let spans = module_ident_spans(main, "A", Some(&p));
+        assert_eq!(spans.len(), 2, "{spans:?}");
+        assert_eq!(&main[spans[0].0..spans[0].1], "A");
+        assert_eq!(&main[spans[1].0..spans[1].1], "A");
+        assert!(module_ident_spans(main, "IO", Some(&p)).is_empty());
+        assert!(module_ident_spans(a, "A", Some(&p)).is_empty());
+    }
+
+    #[test]
+    fn module_spans_skip_enum_cases() {
+        let src = "\
+enum Color:
+  case Red
+def paint(): Color =
+  Color.Red
+@main def main: IO[Unit] =
+  IO.println(\"x\")
+";
+        let p = parse_file(src, "Color.scuzz").unwrap();
+        let spans = module_ident_spans(src, "Color", Some(&p));
+        assert!(spans.is_empty(), "{spans:?}");
+    }
+
+    #[test]
+    fn module_spans_import_without_program() {
+        let src = "import A.tag\n@main def main: IO[Unit] =\n  IO.println(tag())\n";
+        let spans = module_ident_spans(src, "A", None);
+        assert_eq!(spans.len(), 1, "{spans:?}");
+        assert_eq!(&src[spans[0].0..spans[0].1], "A");
     }
 }

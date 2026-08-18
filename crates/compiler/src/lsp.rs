@@ -5,10 +5,11 @@
 //! semantic tokens (full and range), code actions, pull diagnostics, call hierarchy,
 //! type definition, implementation, code lenses, document links,
 //! `workspace/executeCommand` (`scuzz.references`), workspace pull diagnostics,
-//! and declaration use that parse. Quickfix actions
+//! declaration, and `workspace/willRenameFiles` use that parse. Quickfix actions
 //! attach the check diagnostic they fix. Diagnostics carry related locations.
 //! `codeAction/resolve` fills the edit from action data. Declaration of an imported
-//! name is the import. Definition is the def.
+//! name is the import. Definition is the def. File rename rewrites `import Module`
+//! and qualified `Module.name` calls.
 
 use crate::check::{
     canonicalize_source_path, check_project_with, code_actions_project, code_lenses_project,
@@ -18,8 +19,9 @@ use crate::check::{
     inlay_hints_project, json_str, outgoing_calls_project, prepare_call_hierarchy_project,
     prepare_rename_project, references_project, rename_project, selection_ranges_project,
     semantic_tokens_project, semantic_tokens_range_project, signature_help_project,
-    symbols_project, type_definition_project, workspace_diagnostics_project,
-    workspace_symbols_project, CallItemLsp, Diagnostic, RenameResult,
+    symbols_project, type_definition_project, will_rename_files_project,
+    workspace_diagnostics_project, workspace_symbols_project, CallItemLsp, Diagnostic,
+    RenameResult,
 };
 use crate::fold::FOLD_REGION;
 use crate::overlay::collect_fmt_sources;
@@ -53,7 +55,7 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             let type_list: Vec<String> = TOKEN_TYPES.iter().map(|t| json_str(t)).collect();
             let mod_list: Vec<String> = TOKEN_MODIFIERS.iter().map(|t| json_str(t)).collect();
             let caps = format!(
-                r#"{{"capabilities":{{"textDocumentSync":{{"openClose":true,"change":1}},"hoverProvider":true,"completionProvider":{{"triggerCharacters":["."]}},"definitionProvider":true,"declarationProvider":true,"typeDefinitionProvider":true,"implementationProvider":true,"codeLensProvider":{{"resolveProvider":false}},"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{{"triggerCharacters":["("]}},"referencesProvider":true,"renameProvider":{{"prepareProvider":true}},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true,"semanticTokensProvider":{{"legend":{{"tokenTypes":[{}],"tokenModifiers":[{}]}},"full":true,"range":true}},"codeActionProvider":{{"codeActionKinds":["quickfix","source.formatDocument"],"resolveProvider":true}},"callHierarchyProvider":true,"diagnosticProvider":{{"interFileDependencies":true,"workspaceDiagnostics":true}},"documentLinkProvider":{{"resolveProvider":false}},"executeCommandProvider":{{"commands":["scuzz.references"]}}}}}}"#,
+                r#"{{"capabilities":{{"textDocumentSync":{{"openClose":true,"change":1}},"hoverProvider":true,"completionProvider":{{"triggerCharacters":["."]}},"definitionProvider":true,"declarationProvider":true,"typeDefinitionProvider":true,"implementationProvider":true,"codeLensProvider":{{"resolveProvider":false}},"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{{"triggerCharacters":["("]}},"referencesProvider":true,"renameProvider":{{"prepareProvider":true}},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true,"semanticTokensProvider":{{"legend":{{"tokenTypes":[{}],"tokenModifiers":[{}]}},"full":true,"range":true}},"codeActionProvider":{{"codeActionKinds":["quickfix","source.formatDocument"],"resolveProvider":true}},"callHierarchyProvider":true,"diagnosticProvider":{{"interFileDependencies":true,"workspaceDiagnostics":true}},"documentLinkProvider":{{"resolveProvider":false}},"executeCommandProvider":{{"commands":["scuzz.references"]}},"workspace":{{"fileOperations":{{"willRename":{{"filters":[{{"scheme":"file","pattern":{{"glob":"**/*.scuzz"}}}}]}}}}}}}}}}"#,
                 type_list.join(","),
                 mod_list.join(",")
             );
@@ -156,6 +158,9 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             write_result(&mut writer, id, &result)?;
         } else if method == "workspace/diagnostic" {
             let result = workspace_diagnostic_result(&root, &open);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "workspace/willRenameFiles" {
+            let result = will_rename_files_result(&root, &open, &body);
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/prepareCallHierarchy" {
             let result = prepare_call_hierarchy_result(&root, &open, &body);
@@ -658,14 +663,27 @@ fn rename_result(
     match rename_project(root, open, &path, line, character, &new_name) {
         Ok(RenameResult::BadName) => Err(format!("invalid rename: {new_name}")),
         Ok(RenameResult::Unavailable) => Ok("null".into()),
-        Ok(RenameResult::Edits(edits)) => Ok(encode_workspace_edit(&edits, &new_name)),
+        Ok(RenameResult::Edits(edits)) => Ok(encode_workspace_edit(
+            &edits
+                .into_iter()
+                .map(|(p, sl, sc, el, ec)| (p, sl, sc, el, ec, new_name.clone()))
+                .collect::<Vec<_>>(),
+        )),
         Err(_) => Ok("null".into()),
     }
 }
 
-fn encode_workspace_edit(edits: &[(PathBuf, u32, u32, u32, u32)], new_text: &str) -> String {
+fn will_rename_files_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    let files = json_rename_file_pairs(body);
+    match will_rename_files_project(root, open, &files) {
+        Ok(edits) => encode_workspace_edit(&edits),
+        Err(_) => r#"{"changes":{}}"#.into(),
+    }
+}
+
+fn encode_workspace_edit(edits: &[(PathBuf, u32, u32, u32, u32, String)]) -> String {
     let mut by_uri: BTreeMap<String, Vec<String>> = BTreeMap::new();
-    for (dest, sl, sc, el, ec) in edits {
+    for (dest, sl, sc, el, ec, new_text) in edits {
         by_uri.entry(file_uri(dest)).or_default().push(format!(
             r#"{{"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}},"newText":{}}}"#,
             json_str(new_text)
@@ -1331,6 +1349,69 @@ fn doc_text_from_message(body: &str) -> Option<(PathBuf, String)> {
     let path = doc_path_from_message(body)?;
     let text = json_string_field(body, "text")?;
     Some((path, text))
+}
+
+fn json_string_fields(body: &str, key: &str) -> Vec<String> {
+    let pat = format!("\"{key}\"");
+    let mut out = Vec::new();
+    let mut rest = body;
+    while let Some(i) = rest.find(&pat) {
+        let after = rest[i + pat.len()..].trim_start();
+        let Some(after) = after.strip_prefix(':') else {
+            rest = &rest[i + pat.len()..];
+            continue;
+        };
+        let after = after.trim_start();
+        let Some(after) = after.strip_prefix('"') else {
+            rest = &rest[i + pat.len()..];
+            continue;
+        };
+        let mut s = String::new();
+        let mut chars = after.chars();
+        let mut closed = false;
+        while let Some(c) = chars.next() {
+            if c == '"' {
+                closed = true;
+                break;
+            }
+            if c == '\\' {
+                match chars.next() {
+                    Some('"') => s.push('"'),
+                    Some('\\') => s.push('\\'),
+                    Some('n') => s.push('\n'),
+                    Some('r') => s.push('\r'),
+                    Some('t') => s.push('\t'),
+                    Some(o) => s.push(o),
+                    None => break,
+                }
+            } else {
+                s.push(c);
+            }
+        }
+        if closed {
+            out.push(s);
+        }
+        rest = chars.as_str();
+    }
+    out
+}
+
+fn json_rename_file_pairs(body: &str) -> Vec<(PathBuf, PathBuf)> {
+    let Some(i) = body.find("\"files\"") else {
+        return Vec::new();
+    };
+    let rest = &body[i..];
+    let olds = json_string_fields(rest, "oldUri");
+    let news = json_string_fields(rest, "newUri");
+    olds.into_iter()
+        .zip(news)
+        .map(|(old_uri, new_uri)| {
+            (
+                canonicalize_source_path(&uri_to_path(&old_uri)),
+                canonicalize_source_path(&uri_to_path(&new_uri)),
+            )
+        })
+        .collect()
 }
 
 fn json_string_field(body: &str, key: &str) -> Option<String> {
@@ -2865,6 +2946,60 @@ def twice(n: Int): Int =
         assert!(text.contains(&main_uri), "{text}");
         assert!(text.contains("\"line\":0"), "{text}");
         assert!(!text.contains("A.scuzz"), "{text}");
+    }
+
+    #[test]
+    fn lsp_will_rename_files_rewrites_import_module() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"lsp_will_rename\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let a = crate::format::format_source("def tag(): String =\n  \"a\"\n").unwrap();
+        let main = crate::format::format_source(
+            "import A.tag\n@main def main: IO[Unit] =\n  IO.println(A.tag())\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/A.scuzz"), a).unwrap();
+        fs::write(root.join("src/Main.scuzz"), &main).unwrap();
+        let root_uri = format!("file://{}", fs::canonicalize(root).unwrap().display());
+        let old_uri = format!(
+            "file://{}",
+            canonicalize_source_path(&root.join("src/A.scuzz")).display()
+        );
+        let new_uri = format!(
+            "file://{}",
+            canonicalize_source_path(&root.join("src/B.scuzz")).display()
+        );
+        let main_uri = format!(
+            "file://{}",
+            canonicalize_source_path(&root.join("src/Main.scuzz")).display()
+        );
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let req = format!(
+            r#"{{"jsonrpc":"2.0","id":43,"method":"workspace/willRenameFiles","params":{{"files":[{{"oldUri":{},"newUri":{}}}]}}}}"#,
+            json_str(&old_uri),
+            json_str(&new_uri)
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&req));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("willRename"), "{text}");
+        assert!(text.contains("**/*.scuzz"), "{text}");
+        assert!(text.contains("\"id\":43"), "{text}");
+        assert!(text.contains(&main_uri), "{text}");
+        assert!(text.contains("\"newText\":\"B\""), "{text}");
+        assert!(!text.contains("\"newText\":\"A\""), "{text}");
     }
 
     #[test]

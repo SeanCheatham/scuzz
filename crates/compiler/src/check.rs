@@ -1385,6 +1385,67 @@ pub fn rename_project(
     ))
 }
 
+/// Text edits for `workspace/willRenameFiles`. Same parse as [`check_project_with`].
+pub fn will_rename_files_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    files: &[(PathBuf, PathBuf)],
+) -> Result<Vec<(PathBuf, u32, u32, u32, u32, String)>> {
+    let mut resolved = crate::driver::resolve_project(project_dir)
+        .with_context(|| format!("resolving {}", project_dir.display()))?;
+    apply_unsaved(&mut resolved, unsaved, project_dir);
+    let named = named_sources(&resolved);
+    let program = crate::parser::parse_sources(&named).ok();
+    let mut out = Vec::new();
+    for (old_path, new_path) in files {
+        let old_path = canonicalize_source_path(old_path);
+        let new_path = canonicalize_source_path(new_path);
+        if old_path.extension().and_then(|e| e.to_str()) != Some("scuzz")
+            || new_path.extension().and_then(|e| e.to_str()) != Some("scuzz")
+        {
+            continue;
+        }
+        let old_mod = crate::resolve::module_id_from_label(&old_path.to_string_lossy());
+        let new_mod = crate::resolve::module_id_from_label(&new_path.to_string_lossy());
+        if old_mod.is_empty()
+            || old_mod == new_mod
+            || crate::rename::is_kit_module(&old_mod)
+            || !crate::rename::is_rename_ident(&new_mod)
+        {
+            continue;
+        }
+        let is_src = resolved
+            .sources
+            .iter()
+            .any(|s| canonicalize_source_path(&s.path) == old_path)
+            || unsaved
+                .keys()
+                .any(|p| canonicalize_source_path(p) == old_path);
+        if !is_src {
+            continue;
+        }
+        for src in &resolved.sources {
+            for (start, end) in
+                crate::rename::module_ident_spans(&src.text, &old_mod, program.as_ref())
+            {
+                let (sl, sc) = offset_to_utf16_pos(&src.text, start);
+                let (el, ec) = offset_to_utf16_pos(&src.text, end);
+                out.push((
+                    canonicalize_source_path(&src.path),
+                    sl,
+                    sc,
+                    el,
+                    ec,
+                    new_mod.clone(),
+                ));
+            }
+        }
+    }
+    out.sort_by(|a, b| a.0.cmp(&b.0).then(a.1.cmp(&b.1)).then(a.2.cmp(&b.2)));
+    out.dedup();
+    Ok(out)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1647,6 +1708,45 @@ version = "0.0.0"
             canonicalize_source_path(&def_dest).ends_with("A.scuzz"),
             "{def_dest:?}"
         );
+    }
+
+    #[test]
+    fn will_rename_files_rewrites_import_module() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        fs::write(
+            root.join("src/A.scuzz"),
+            crate::format::format_source("def tag(): String =\n  \"a\"\n").unwrap(),
+        )
+        .unwrap();
+        let main = crate::format::format_source(
+            "import A.tag\n@main def main: IO[Unit] =\n  IO.println(A.tag())\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/Main.scuzz"), &main).unwrap();
+        let old = canonicalize_source_path(&root.join("src/A.scuzz"));
+        let new = canonicalize_source_path(&root.join("src/B.scuzz"));
+        let edits = will_rename_files_project(root, &BTreeMap::new(), &[(old, new)]).unwrap();
+        assert_eq!(edits.len(), 2, "{edits:?}");
+        let main_path = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        for (path, sl, sc, el, ec, text) in &edits {
+            assert_eq!(canonicalize_source_path(path), main_path);
+            assert_eq!(text, "B");
+            let start = crate::span::utf16_pos_to_offset(&main, *sl, *sc);
+            let end = crate::span::utf16_pos_to_offset(&main, *el, *ec);
+            assert_eq!(&main[start..end], "A");
+        }
+        let same_stem = will_rename_files_project(
+            root,
+            &BTreeMap::new(),
+            &[(
+                canonicalize_source_path(&root.join("src/A.scuzz")),
+                canonicalize_source_path(&root.join("lib/A.scuzz")),
+            )],
+        )
+        .unwrap();
+        assert!(same_stem.is_empty(), "{same_stem:?}");
     }
 
     #[test]
