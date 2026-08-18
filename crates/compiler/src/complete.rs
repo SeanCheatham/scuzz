@@ -823,6 +823,27 @@ mod tests {
     }
 
     #[test]
+    fn completes_list_span_after_dot() {
+        let src = "@main def main: IO[Unit] = List.spa\n";
+        let labels = labels_at(src, "List.spa");
+        assert!(labels.iter().any(|l| l == "List.span"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_partition_after_dot() {
+        let src = "@main def main: IO[Unit] = List.par\n";
+        let labels = labels_at(src, "List.par");
+        assert!(labels.iter().any(|l| l == "List.partition"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_split_at_after_dot() {
+        let src = "@main def main: IO[Unit] = List.spl\n";
+        let labels = labels_at(src, "List.spl");
+        assert!(labels.iter().any(|l| l == "List.splitAt"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_list_forall_after_dot() {
         let src = "@main def main: IO[Unit] = List.fo\n";
         let labels = labels_at(src, "List.fo");

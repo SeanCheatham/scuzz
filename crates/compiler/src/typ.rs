@@ -1070,6 +1070,8 @@ fn kit_lambda_param_ty_at(
             | "List.count"
             | "List.takeWhile"
             | "List.dropWhile"
+            | "List.span"
+            | "List.partition"
             | "List.forall"
             | "List.indexWhere"
             | "List.lastIndexWhere",
@@ -1116,6 +1118,8 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
             | "List.count"
             | "List.takeWhile"
             | "List.dropWhile"
+            | "List.span"
+            | "List.partition"
             | "List.forall"
             | "List.indexWhere"
             | "List.lastIndexWhere"
@@ -2038,6 +2042,12 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(arg_tys[0].clone())
         }
+        "List.splitAt" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let elem = list_elem(&arg_tys[0])?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(list_of(list_of(elem)))
+        }
         "List.slice" => {
             expect_arity(callee, &arg_tys, 3)?;
             list_elem(&arg_tys[0])?;
@@ -2129,6 +2139,11 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 2)?;
             let elem = list_elem(&arg_tys[0])?;
             Ok(list_of(elem))
+        }
+        "List.span" | "List.partition" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let elem = list_elem(&arg_tys[0])?;
+            Ok(list_of(list_of(elem)))
         }
         "List.map" => {
             expect_arity(callee, &arg_tys, 2)?;
@@ -6013,6 +6028,20 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.takeWhile/dropWhile/forall should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_split_at_span_partition() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = ["a", "b", "c"]
+    _ <- IO.println(List.join(List.map(List.splitAt(xs, 1), g => List.join(g, ",")), "|"))
+    _ <- IO.println(List.join(List.map(List.span(xs, x => x != "c"), g => List.join(g, ",")), "|"))
+    _ <- IO.println(List.join(List.map(List.partition(xs, x => x == "b"), g => List.join(g, ",")), "|"))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.splitAt/span/partition should typecheck");
     }
 
     #[test]

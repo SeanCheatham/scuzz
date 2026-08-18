@@ -3932,6 +3932,59 @@ int main(void) {
     sz_string_free(c);
   }
 
+  /* List.splitAt / span / partition: two lists packed as List[List]. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzString *c = sz_string_from_cstr("c");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_cons(c, sz_list_nil())));
+    SzList *pair;
+    SzList *left;
+    SzList *right;
+    pair = sz_list_split_at(xs, 1);
+    assert(sz_list_len(pair) == 2);
+    left = (SzList *)sz_list_head(pair);
+    right = (SzList *)sz_list_head(sz_list_tail(pair));
+    assert(sz_list_len(left) == 1);
+    assert(left->head == a);
+    assert(sz_list_len(right) == 2);
+    assert(right->head == b);
+    assert(right->tail && right->tail->head == c);
+    sz_list_free(pair);
+    pair = sz_list_split_at(xs, 0);
+    left = (SzList *)sz_list_head(pair);
+    right = (SzList *)sz_list_head(sz_list_tail(pair));
+    assert(sz_list_is_empty(left));
+    assert(right == xs);
+    sz_list_free(pair);
+    pair = sz_list_span(xs, keep_not_b, NULL);
+    left = (SzList *)sz_list_head(pair);
+    right = (SzList *)sz_list_head(sz_list_tail(pair));
+    assert(sz_list_len(left) == 1);
+    assert(left->head == a);
+    assert(sz_list_len(right) == 2);
+    assert(right->head == b);
+    sz_list_free(pair);
+    pair = sz_list_partition(xs, keep_not_b, NULL);
+    left = (SzList *)sz_list_head(pair);
+    right = (SzList *)sz_list_head(sz_list_tail(pair));
+    assert(sz_list_len(left) == 2);
+    assert(left->head == a);
+    assert(left->tail && left->tail->head == c);
+    assert(sz_list_len(right) == 1);
+    assert(right->head == b);
+    sz_list_free(pair);
+    pair = sz_list_split_at(NULL, 1);
+    assert(sz_list_len(pair) == 2);
+    assert(sz_list_is_empty((SzList *)sz_list_head(pair)));
+    assert(sz_list_is_empty((SzList *)sz_list_head(sz_list_tail(pair))));
+    sz_list_free(pair);
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
+  }
+
   /* List.concat: left spine copy; empty left retains right. */
   {
     SzString *a = sz_string_from_cstr("a");

@@ -164,6 +164,9 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"ixw:${Str.fromInt(List.indexWhere(xs, x => x == "b"))}")
     _ <- IO.println(s"lixw:${Str.fromInt(List.lastIndexWhere(xs, x => x != "z"))}")
     _ <- IO.println(s"ixs:${List.join(List.map(List.indices(xs), n => Str.fromInt(n)), ",")}")
+    _ <- IO.println(s"sat:${List.join(List.map(List.splitAt(xs, 1), g => List.join(g, ",")), "|")}")
+    _ <- IO.println(s"span:${List.join(List.map(List.span(xs, x => x != "c"), g => List.join(g, ",")), "|")}")
+    _ <- IO.println(s"part:${List.join(List.map(List.partition(xs, x => x == "b"), g => List.join(g, ",")), "|")}")
   } yield ()
 
 def strProof(): IO[Unit] =

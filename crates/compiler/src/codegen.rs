@@ -176,6 +176,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_sliding(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_list_slice(ptr, i64, i64)").unwrap();
     writeln!(out, "declare ptr @sz_list_indices(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_split_at(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_list_span(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_partition(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_index_where(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_last_index_where(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
@@ -3306,6 +3309,28 @@ fn emit_call(
             false,
         );
     }
+    if callee == "List.span" {
+        return emit_stream_pred(
+            "List.span",
+            "sz_list_span",
+            args,
+            ctx,
+            locals,
+            prefix,
+            false,
+        );
+    }
+    if callee == "List.partition" {
+        return emit_stream_pred(
+            "List.partition",
+            "sz_list_partition",
+            args,
+            ctx,
+            locals,
+            prefix,
+            false,
+        );
+    }
     if callee == "List.dropWhile" {
         return emit_stream_pred(
             "List.dropWhile",
@@ -3879,6 +3904,16 @@ fn emit_call(
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @sz_list_take(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "List.splitAt" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_split_at(ptr {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
@@ -7321,6 +7356,36 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[fa_at..].contains(&format!("call void @sz_release(ptr {fa_pack})")),
             "expected last-use release of forall closure {fa_pack}:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_split_at_span_partition() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(List.map(List.splitAt(["a", "b"], 1), g => List.join(g, ",")), "|"))
+    _ <- IO.println(List.join(List.map(List.span(["a", "b"], x => x != "b"), g => List.join(g, ",")), "|"))
+    _ <- IO.println(List.join(List.map(List.partition(["a", "b"], x => x == "a"), g => List.join(g, ",")), "|"))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_split_at"));
+        assert!(ir.contains("sz_list_span"));
+        assert!(ir.contains("sz_list_partition"));
+        let needle = "call ptr @sz_list_split_at(ptr ";
+        let at = ir.find(needle).expect("splitAt");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.splitAt:\n{ir}"
+        );
+        let sp_at = ir.find("call ptr @sz_list_span").expect("span");
+        let sp_pack = last_cl2_before(&ir, sp_at);
+        assert!(
+            ir[sp_at..].contains(&format!("call void @sz_release(ptr {sp_pack})")),
+            "expected last-use release of span closure {sp_pack}:\n{ir}"
         );
     }
 

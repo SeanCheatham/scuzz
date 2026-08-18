@@ -504,6 +504,12 @@ SzList *sz_list_sliding(SzList *xs, int64_t n);
 SzList *sz_list_slice(SzList *xs, int64_t from, int64_t until);
 /* Boxed ints `[0, len)`. Empty when `xs` is empty. */
 SzList *sz_list_indices(SzList *xs);
+/* Two lists packed as List[List]: take then drop. */
+SzList *sz_list_split_at(SzList *xs, int64_t n);
+/* Two lists packed as List[List]: takeWhile then dropWhile. */
+SzList *sz_list_span(SzList *xs, SzListPred pred, void *env);
+/* Two lists packed as List[List]: filter then filterNot. */
+SzList *sz_list_partition(SzList *xs, SzListPred pred, void *env);
 /* First index where `pred` is true, or -1. */
 int64_t sz_list_index_where(SzList *xs, SzListPred pred, void *env);
 /* Last index where `pred` is true, or -1. */

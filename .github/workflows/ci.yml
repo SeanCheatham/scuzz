@@ -170,6 +170,9 @@ jobs:
           grep -q "ixw:1" /tmp/kernel.out
           grep -q "lixw:2" /tmp/kernel.out
           grep -q "ixs:0,1,2" /tmp/kernel.out
+          grep -Fq "sat:a|b,c" /tmp/kernel.out
+          grep -Fq "span:a,b|c" /tmp/kernel.out
+          grep -Fq "part:b|a,c" /tmp/kernel.out
           grep -q "slen:3" /tmp/kernel.out
           grep -q "slice:bc" /tmp/kernel.out
           grep -q "ix:1" /tmp/kernel.out

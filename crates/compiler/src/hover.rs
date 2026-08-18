@@ -496,6 +496,18 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.dropWhile(xs: List[T], pred: T => Bool): List[T]",
     ),
     (
+        "List.span",
+        "List.span(xs: List[T], pred: T => Bool): List[List[T]]",
+    ),
+    (
+        "List.partition",
+        "List.partition(xs: List[T], pred: T => Bool): List[List[T]]",
+    ),
+    (
+        "List.splitAt",
+        "List.splitAt(xs: List[T], n: Int): List[List[T]]",
+    ),
+    (
         "List.forall",
         "List.forall(xs: List[T], pred: T => Bool): Bool",
     ),
@@ -1568,6 +1580,30 @@ mod tests {
         let h = hover_src(src, "takeWhile");
         assert!(
             h.contains("List.takeWhile(xs: List[T], pred: T => Bool): List[T]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map(List.span(["a", "b"], x => x != "b"), g => List.join(g, ",")), "|"))
+"#;
+        let h = hover_src(src, "span");
+        assert!(
+            h.contains("List.span(xs: List[T], pred: T => Bool): List[List[T]]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map(List.partition(["a", "b"], x => x == "a"), g => List.join(g, ",")), "|"))
+"#;
+        let h = hover_src(src, "partition");
+        assert!(
+            h.contains("List.partition(xs: List[T], pred: T => Bool): List[List[T]]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map(List.splitAt(["a", "b"], 1), g => List.join(g, ",")), "|"))
+"#;
+        let h = hover_src(src, "splitAt");
+        assert!(
+            h.contains("List.splitAt(xs: List[T], n: Int): List[List[T]]"),
             "{h}"
         );
     }
