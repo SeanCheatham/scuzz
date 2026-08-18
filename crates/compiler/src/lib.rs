@@ -14,6 +14,7 @@ pub(crate) mod hierarchy;
 pub(crate) mod highlight;
 pub(crate) mod hover;
 pub(crate) mod inlay;
+pub(crate) mod lens;
 pub(crate) mod lexer;
 pub(crate) mod lower;
 pub(crate) mod lsp;

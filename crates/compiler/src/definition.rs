@@ -1,6 +1,6 @@
 //! Go-to-definition from the same parse as `check`. No second typer.
 
-use crate::ast::Program;
+use crate::ast::{Program, Type};
 use crate::hover::{def_named, enum_named, ident_at_opts, unique_def, unique_enum};
 use crate::lexer::{lex, Token};
 use crate::resolve::module_id_from_label;
@@ -59,6 +59,111 @@ pub fn definition_in_sources(
         return Some(span);
     }
     None
+}
+
+/// Named enum/record for the ident at `offset` (param/def return type, or the ident itself).
+pub fn type_definition_in_sources(
+    program: &Program,
+    sources: &[(String, String)],
+    current_file: &str,
+    current_source: &str,
+    offset: usize,
+) -> Option<DefLoc> {
+    let (qual, name) = ident_at_opts(current_source, offset, false)?;
+    let module = module_id_from_label(current_file);
+    if is_builtin_type(&name) && qual.is_none() {
+        return None;
+    }
+    if let Some(q) = &qual {
+        if let Some(en) =
+            enum_named(program, q, &name).or_else(|| unique_enum(program, name.as_str()))
+        {
+            if en.name == *name {
+                return loc_for_def(sources, en.module.as_str(), DeclKind::Enum, &en.name);
+            }
+        }
+        if let Some(en) = enum_named(program, q, q)
+            .or_else(|| enum_named(program, &module, q))
+            .or_else(|| unique_enum(program, q))
+        {
+            if en.cases.iter().any(|c| c.name == name) {
+                return loc_for_def(sources, en.module.as_str(), DeclKind::Enum, &en.name);
+            }
+        }
+    }
+    if let Some(en) = enum_named(program, &module, &name).or_else(|| unique_enum(program, &name)) {
+        return loc_for_def(sources, en.module.as_str(), DeclKind::Enum, &en.name);
+    }
+    let case_hits: Vec<_> = program
+        .enums
+        .iter()
+        .filter(|e| e.cases.iter().any(|c| c.name == name))
+        .collect();
+    if case_hits.len() == 1 {
+        return loc_for_def(
+            sources,
+            case_hits[0].module.as_str(),
+            DeclKind::Enum,
+            &case_hits[0].name,
+        );
+    }
+    if let Some(d) = def_named(program, &module, &name).or_else(|| unique_def(program, &name)) {
+        return loc_from_type(program, sources, &d.module, &d.ret);
+    }
+    if let Some(ty) = param_ty_in_module(program, sources, &module, &name, offset, current_file) {
+        return loc_from_type(program, sources, &module, ty);
+    }
+    None
+}
+
+fn is_builtin_type(name: &str) -> bool {
+    matches!(
+        name,
+        "Int" | "Float" | "String" | "Bool" | "Unit" | "List" | "Map" | "Set" | "IO"
+    )
+}
+
+fn peel_type(ty: &Type) -> &Type {
+    match ty {
+        Type::List(t) | Type::Io(t) => peel_type(t),
+        Type::Fun(_, r) => peel_type(r),
+        other => other,
+    }
+}
+
+fn loc_from_type(
+    program: &Program,
+    sources: &[(String, String)],
+    module: &str,
+    ty: &Type,
+) -> Option<DefLoc> {
+    let t = peel_type(ty);
+    let n = match t {
+        Type::Adt(n) | Type::App(n, _) => n.as_str(),
+        _ => return None,
+    };
+    if is_builtin_type(n) {
+        return None;
+    }
+    let en = enum_named(program, module, n).or_else(|| unique_enum(program, n))?;
+    loc_for_def(sources, en.module.as_str(), DeclKind::Enum, &en.name)
+}
+
+fn param_ty_in_module<'a>(
+    program: &'a Program,
+    sources: &[(String, String)],
+    module: &str,
+    name: &str,
+    offset: usize,
+    current_file: &str,
+) -> Option<&'a Type> {
+    let d = program.defs.iter().find(|d| {
+        d.module == module
+            && d.params.iter().any(|p| p.name == name)
+            && d.body.span.file == current_file
+            && def_covers_offset(sources, d, offset)
+    })?;
+    d.params.iter().find(|p| p.name == name).map(|p| &p.ty)
 }
 
 #[derive(Clone, Copy)]
@@ -260,5 +365,70 @@ mod tests {
         let body = src.rfind("= n").unwrap() + 2;
         let d = definition_in_sources(&program, &sources, "Main.scuzz", src, body).unwrap();
         assert_eq!(d.start, param);
+    }
+
+    fn ty_loc(src: &str, needle: &str) -> Option<DefLoc> {
+        let program = parse_file(src, "Main.scuzz").unwrap();
+        let offset = src.find(needle).expect(needle);
+        type_definition_in_sources(
+            &program,
+            &[("Main.scuzz".into(), src.into())],
+            "Main.scuzz",
+            src,
+            offset,
+        )
+    }
+
+    #[test]
+    fn type_def_param_and_return_go_to_enum() {
+        let src = "\
+enum Color:
+  case Red
+  case Blue
+def paint(c: Color): Color =
+  c
+def wrap(xs: List[Color]): List[Color] =
+  xs
+@main def main: IO[Unit] =
+  IO.println(\"x\")
+";
+        let color = src.find("Color").unwrap();
+        let param = src.find("c:").unwrap();
+        assert_eq!(ty_loc(src, "c:").unwrap().start, color);
+        let body_c = src.rfind("\n  c\n").unwrap() + 3;
+        let program = parse_file(src, "Main.scuzz").unwrap();
+        let d = type_definition_in_sources(
+            &program,
+            &[("Main.scuzz".into(), src.into())],
+            "Main.scuzz",
+            src,
+            body_c,
+        )
+        .expect("body c");
+        assert_eq!(d.start, color);
+        assert_eq!(ty_loc(src, "paint").unwrap().start, color);
+        assert_eq!(ty_loc(src, "wrap").unwrap().start, color);
+        let red = src.find("Red").unwrap();
+        assert_eq!(
+            type_definition_in_sources(
+                &program,
+                &[("Main.scuzz".into(), src.into())],
+                "Main.scuzz",
+                src,
+                red,
+            )
+            .unwrap()
+            .start,
+            color
+        );
+        let _ = param;
+    }
+
+    #[test]
+    fn type_def_skips_builtin_int() {
+        let src = "def add(n: Int): Int = n\n@main def main: IO[Unit] = IO.println(\"x\")\n";
+        assert!(ty_loc(src, "add").is_none());
+        assert!(ty_loc(src, "n:").is_none());
+        assert!(ty_loc(src, "Int").is_none());
     }
 }

@@ -459,6 +459,56 @@ pub fn definition_project(
     Ok(Some(loc_to_lsp(&resolved, path, &named, loc, &text)))
 }
 
+/// Go-to-type-definition at a 0-based LSP position. Same parse as [`check_project_with`].
+pub fn type_definition_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    line: u32,
+    character: u32,
+) -> Result<Option<(PathBuf, u32, u32, u32, u32)>> {
+    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(None);
+    };
+    let Some(program) = program else {
+        return Ok(None);
+    };
+    let named = named_sources(&resolved);
+    let offset = crate::span::utf16_pos_to_offset(&text, line, character);
+    let Some(loc) =
+        crate::definition::type_definition_in_sources(&program, &named, &label, &text, offset)
+    else {
+        return Ok(None);
+    };
+    Ok(Some(loc_to_lsp(&resolved, path, &named, loc, &text)))
+}
+
+/// Code lenses in a file. Same parse as [`check_project_with`].
+pub fn code_lenses_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+) -> Result<Vec<(u32, u32, u32, u32, String)>> {
+    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(program) = program else {
+        return Ok(Vec::new());
+    };
+    let named = named_sources(&resolved);
+    let lenses = crate::lens::code_lenses_in_source(&program, &named, &label, &text);
+    Ok(lenses
+        .into_iter()
+        .map(|l| {
+            let (sl, sc) = offset_to_utf16_pos(&text, l.start);
+            let (el, ec) = offset_to_utf16_pos(&text, l.end);
+            (sl, sc, el, ec, l.title)
+        })
+        .collect())
+}
+
 fn loc_to_lsp(
     resolved: &crate::driver::ResolvedProject,
     path: &Path,
@@ -1239,6 +1289,57 @@ version = "0.0.0"
         let decl = formatted.find("add").unwrap();
         let (dl, dc) = offset_to_utf16_pos(&formatted, decl);
         assert_eq!((sl, sc), (dl, dc));
+    }
+
+    #[test]
+    fn type_definition_project_jumps_to_enum() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"tydef_ok\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let src = "\
+enum Color:
+  case Red
+def paint(c: Color): Color =
+  c
+@main def main: IO[Unit] =
+  IO.println(\"x\")
+";
+        let formatted = crate::format::format_source(src).unwrap();
+        fs::write(root.join("src/Main.scuzz"), &formatted).unwrap();
+        let path = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let paint = formatted.find("paint").unwrap();
+        let (line, col) = offset_to_utf16_pos(&formatted, paint);
+        let (dest, sl, sc, _el, _ec) =
+            type_definition_project(root, &BTreeMap::new(), &path, line, col)
+                .unwrap()
+                .expect("type definition");
+        assert_eq!(canonicalize_source_path(&dest), path);
+        let color = formatted.find("Color").unwrap();
+        let (dl, dc) = offset_to_utf16_pos(&formatted, color);
+        assert_eq!((sl, sc), (dl, dc));
+    }
+
+    #[test]
+    fn code_lenses_project_counts_add_refs() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        fs::write(
+            root.join("src/Main.scuzz"),
+            crate::format::format_source(
+                "def add(n: Int): Int = n\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(add(1)))\n",
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        let path = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let lenses = code_lenses_project(root, &BTreeMap::new(), &path).unwrap();
+        assert!(lenses.iter().any(|l| l.4 == "1 ref"), "{lenses:?}");
     }
 
     #[test]
