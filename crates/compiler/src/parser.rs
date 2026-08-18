@@ -568,13 +568,14 @@ impl Parser {
 
     fn parse_import(&mut self) -> Result<Import, ParseError> {
         self.expect(&Token::Import)?;
-        let (from_module, _) = self.expect_ident()?;
+        let (from_module, mod_span) = self.expect_ident()?;
         self.expect(&Token::Dot)?;
-        let (name, _) = self.expect_ident()?;
+        let (name, name_span) = self.expect_ident()?;
         Ok(Import {
             in_module: self.module.clone(),
             from_module,
             name,
+            span: mod_span.cover(&name_span),
         })
     }
 

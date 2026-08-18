@@ -5,6 +5,8 @@ use crate::definition::definition_in_sources;
 use crate::references::references_in_sources;
 use crate::symbols::{symbols_in_source, KIND_FN};
 
+pub const COMMAND_REFERENCES: &str = "scuzz.references";
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CodeLens {
     pub start: usize,

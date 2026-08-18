@@ -560,6 +560,44 @@ pub fn code_lenses_project(
         .collect())
 }
 
+/// Document links for `import Module.name` in a file. Same parse as [`check_project_with`].
+pub fn document_links_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+) -> Result<Vec<(u32, u32, u32, u32, PathBuf, u32, u32, u32, u32, String)>> {
+    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(program) = program else {
+        return Ok(Vec::new());
+    };
+    let named = named_sources(&resolved);
+    let links = crate::links::document_links_in_source(&program, &named, &label);
+    Ok(links
+        .into_iter()
+        .map(|l| {
+            let (sl, sc) = offset_to_utf16_pos(&text, l.start);
+            let (el, ec) = offset_to_utf16_pos(&text, l.end);
+            let dest = loc_to_lsp(
+                &resolved,
+                path,
+                &named,
+                crate::definition::DefLoc {
+                    file: l.dest_file,
+                    start: l.dest_start,
+                    end: l.dest_end,
+                },
+                &text,
+            );
+            (
+                sl, sc, el, ec, dest.0, dest.1, dest.2, dest.3, dest.4, l.tooltip,
+            )
+        })
+        .collect())
+}
+
 fn loc_to_lsp(
     resolved: &crate::driver::ResolvedProject,
     path: &Path,
@@ -1466,6 +1504,28 @@ impl Show for Point:
         let path = canonicalize_source_path(&root.join("src/Main.scuzz"));
         let lenses = code_lenses_project(root, &BTreeMap::new(), &path).unwrap();
         assert!(lenses.iter().any(|l| l.4 == "1 ref"), "{lenses:?}");
+    }
+
+    #[test]
+    fn document_links_project_resolves_import() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        fs::write(
+            root.join("src/A.scuzz"),
+            crate::format::format_source("def tag(): String =\n  \"a\"\n").unwrap(),
+        )
+        .unwrap();
+        let main = crate::format::format_source(
+            "import A.tag\n@main def main: IO[Unit] =\n  IO.println(tag())\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/Main.scuzz"), &main).unwrap();
+        let path = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let links = document_links_project(root, &BTreeMap::new(), &path).unwrap();
+        assert_eq!(links.len(), 1, "{links:?}");
+        assert_eq!(links[0].9, "A.tag");
+        assert!(links[0].4.ends_with("A.scuzz"), "{:?}", links[0].4);
     }
 
     #[test]

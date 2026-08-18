@@ -7,6 +7,7 @@
 //! (qualified or bare). Enums have no privacy yet.
 
 use crate::ast::{EnumDef, FunDef, Import};
+use crate::span::Span;
 use std::collections::HashMap;
 
 /// LLVM symbol for a user def: `@sz_user_{Module}_{name}` (or `@sz_user_{name}` when module is empty).
@@ -316,6 +317,7 @@ mod tests {
             in_module: in_module.into(),
             from_module: from_module.into(),
             name: name.into(),
+            span: Span::dummy(),
         }
     }
 

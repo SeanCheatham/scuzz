@@ -61,6 +61,8 @@ pub struct Import {
     pub in_module: String,
     pub from_module: String,
     pub name: String,
+    /// Span of `Module.name` in the import line.
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

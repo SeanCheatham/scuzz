@@ -17,6 +17,7 @@ pub(crate) mod implement;
 pub(crate) mod inlay;
 pub(crate) mod lens;
 pub(crate) mod lexer;
+pub(crate) mod links;
 pub(crate) mod lower;
 pub(crate) mod lsp;
 pub mod manifest;

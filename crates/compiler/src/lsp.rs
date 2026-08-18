@@ -3,18 +3,19 @@
 //! document symbols, references, rename, workspace symbols, signature help,
 //! document highlights, folding ranges, format, selection ranges, inlay hints,
 //! semantic tokens (full and range), code actions, pull diagnostics, call hierarchy,
-//! type definition, implementation, and code lenses use that parse. Quickfix actions
+//! type definition, implementation, code lenses, document links, and
+//! `workspace/executeCommand` (`scuzz.references`) use that parse. Quickfix actions
 //! attach the check diagnostic they fix.
 
 use crate::check::{
     canonicalize_source_path, check_project_with, code_actions_project, code_lenses_project,
     complete_project, definition_project, diagnostic_source_path, document_diagnostics_project,
-    folding_ranges_project, highlights_project, hover_project, implementation_project,
-    incoming_calls_project, inlay_hints_project, json_str, outgoing_calls_project,
-    prepare_call_hierarchy_project, prepare_rename_project, references_project, rename_project,
-    selection_ranges_project, semantic_tokens_project, semantic_tokens_range_project,
-    signature_help_project, symbols_project, type_definition_project, workspace_symbols_project,
-    CallItemLsp, Diagnostic, RenameResult,
+    document_links_project, folding_ranges_project, highlights_project, hover_project,
+    implementation_project, incoming_calls_project, inlay_hints_project, json_str,
+    outgoing_calls_project, prepare_call_hierarchy_project, prepare_rename_project,
+    references_project, rename_project, selection_ranges_project, semantic_tokens_project,
+    semantic_tokens_range_project, signature_help_project, symbols_project,
+    type_definition_project, workspace_symbols_project, CallItemLsp, Diagnostic, RenameResult,
 };
 use crate::fold::FOLD_REGION;
 use crate::overlay::collect_fmt_sources;
@@ -48,7 +49,7 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             let type_list: Vec<String> = TOKEN_TYPES.iter().map(|t| json_str(t)).collect();
             let mod_list: Vec<String> = TOKEN_MODIFIERS.iter().map(|t| json_str(t)).collect();
             let caps = format!(
-                r#"{{"capabilities":{{"textDocumentSync":{{"openClose":true,"change":1}},"hoverProvider":true,"completionProvider":{{"triggerCharacters":["."]}},"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":true,"codeLensProvider":{{"resolveProvider":false}},"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{{"triggerCharacters":["("]}},"referencesProvider":true,"renameProvider":{{"prepareProvider":true}},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true,"semanticTokensProvider":{{"legend":{{"tokenTypes":[{}],"tokenModifiers":[{}]}},"full":true,"range":true}},"codeActionProvider":{{"codeActionKinds":["quickfix","source.formatDocument"]}},"callHierarchyProvider":true,"diagnosticProvider":{{"interFileDependencies":true,"workspaceDiagnostics":false}}}}}}"#,
+                r#"{{"capabilities":{{"textDocumentSync":{{"openClose":true,"change":1}},"hoverProvider":true,"completionProvider":{{"triggerCharacters":["."]}},"definitionProvider":true,"typeDefinitionProvider":true,"implementationProvider":true,"codeLensProvider":{{"resolveProvider":false}},"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{{"triggerCharacters":["("]}},"referencesProvider":true,"renameProvider":{{"prepareProvider":true}},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true,"semanticTokensProvider":{{"legend":{{"tokenTypes":[{}],"tokenModifiers":[{}]}},"full":true,"range":true}},"codeActionProvider":{{"codeActionKinds":["quickfix","source.formatDocument"]}},"callHierarchyProvider":true,"diagnosticProvider":{{"interFileDependencies":true,"workspaceDiagnostics":false}},"documentLinkProvider":{{"resolveProvider":false}},"executeCommandProvider":{{"commands":["scuzz.references"]}}}}}}"#,
                 type_list.join(","),
                 mod_list.join(",")
             );
@@ -86,6 +87,14 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
         } else if method == "textDocument/codeLens" {
             let result = code_lens_result(&root, &open, &body);
             write_result(&mut writer, id, &result)?;
+        } else if method == "textDocument/documentLink" {
+            let result = document_link_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "workspace/executeCommand" {
+            match execute_command_result(&root, &open, &body) {
+                Ok(result) => write_result(&mut writer, id, &result)?,
+                Err(msg) => write_error(&mut writer, id, -32602, &msg)?,
+            }
         } else if method == "textDocument/documentSymbol" {
             let result = document_symbol_result(&root, &open, &body);
             write_result(&mut writer, id, &result)?;
@@ -355,18 +364,97 @@ fn code_lens_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -
     };
     match code_lenses_project(root, open, &path) {
         Ok(lenses) if !lenses.is_empty() => {
+            let uri = file_uri(&path);
             let parts: Vec<String> = lenses
                 .iter()
-                .map(|(sl, sc, el, ec, title)| {
-                    format!(
-                        r#"{{"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}},"command":{{"title":{},"command":"scuzz.references"}}}}"#,
-                        json_str(title)
+                .map(|(sl, sc, el, ec, title)| encode_code_lens(&uri, *sl, *sc, *el, *ec, title))
+                .collect();
+            format!("[{}]", parts.join(","))
+        }
+        _ => "[]".into(),
+    }
+}
+
+fn encode_code_lens(uri: &str, sl: u32, sc: u32, el: u32, ec: u32, title: &str) -> String {
+    format!(
+        r#"{{"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}},"command":{{"title":{},"command":{},"arguments":[{{"uri":{},"line":{sl},"character":{sc}}}]}}}}"#,
+        json_str(title),
+        json_str(crate::lens::COMMAND_REFERENCES),
+        json_str(uri)
+    )
+}
+
+fn document_link_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    let Some(path) = doc_path_from_message(body) else {
+        return "[]".into();
+    };
+    match document_links_project(root, open, &path) {
+        Ok(links) if !links.is_empty() => {
+            let parts: Vec<String> = links
+                .iter()
+                .map(|(sl, sc, el, ec, dest, dsl, dsc, del, dec, tooltip)| {
+                    encode_document_link(
+                        *sl,
+                        *sc,
+                        *el,
+                        *ec,
+                        &file_uri(dest),
+                        *dsl,
+                        *dsc,
+                        *del,
+                        *dec,
+                        tooltip,
                     )
                 })
                 .collect();
             format!("[{}]", parts.join(","))
         }
         _ => "[]".into(),
+    }
+}
+
+fn encode_document_link(
+    sl: u32,
+    sc: u32,
+    el: u32,
+    ec: u32,
+    target: &str,
+    dsl: u32,
+    dsc: u32,
+    del: u32,
+    dec: u32,
+    tooltip: &str,
+) -> String {
+    format!(
+        r#"{{"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}},"target":{},"tooltip":{},"targetRange":{{"start":{{"line":{dsl},"character":{dsc}}},"end":{{"line":{del},"character":{dec}}}}}}}"#,
+        json_str(target),
+        json_str(tooltip)
+    )
+}
+
+fn execute_command_result(
+    root: &Path,
+    open: &BTreeMap<PathBuf, String>,
+    body: &str,
+) -> std::result::Result<String, String> {
+    let cmd = json_string_field(body, "command").unwrap_or_default();
+    if cmd != crate::lens::COMMAND_REFERENCES {
+        return Err(format!("unknown command: {cmd}"));
+    }
+    let Some(path) = doc_path_from_message(body) else {
+        return Ok("[]".into());
+    };
+    let line = json_i64_field(body, "line").unwrap_or(0).max(0) as u32;
+    let character = json_i64_field(body, "character").unwrap_or(0).max(0) as u32;
+    match references_project(root, open, &path, line, character, true) {
+        Ok(locs) => {
+            let parts: Vec<String> = locs
+                .iter()
+                .map(|(dest, sl, sc, el, ec)| encode_location(&file_uri(dest), *sl, *sc, *el, *ec))
+                .collect();
+            Ok(format!("[{}]", parts.join(",")))
+        }
+        _ => Ok("[]".into()),
     }
 }
 
@@ -1523,6 +1611,80 @@ def paint(c: Color): Color =
         assert!(text.contains("\"id\":34"), "{text}");
         assert!(text.contains("1 ref"), "{text}");
         assert!(text.contains("scuzz.references"), "{text}");
+        assert!(text.contains("executeCommandProvider"), "{text}");
+        assert!(text.contains("\"arguments\""), "{text}");
+    }
+
+    #[test]
+    fn lsp_execute_command_lists_add_refs() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        let (formatted, root_uri, main_uri) = write_add_pkg(root);
+        let add_at = formatted.find("add").unwrap();
+        let (line, col) = crate::span::offset_to_utf16_pos(&formatted, add_at);
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let req = format!(
+            r#"{{"jsonrpc":"2.0","id":37,"method":"workspace/executeCommand","params":{{"command":"scuzz.references","arguments":[{{"uri":{},"line":{line},"character":{col}}}]}}}}"#,
+            json_str(&main_uri)
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&req));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("\"id\":37"), "{text}");
+        assert!(text.contains(&main_uri), "{text}");
+        assert!(text.contains("\"uri\""), "{text}");
+        assert!(text.matches("\"line\"").count() >= 2, "{text}");
+    }
+
+    #[test]
+    fn lsp_document_link_jumps_to_imported_def() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"lsp_link\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let a = crate::format::format_source("def tag(): String =\n  \"a\"\n").unwrap();
+        let main = crate::format::format_source(
+            "import A.tag\n@main def main: IO[Unit] =\n  IO.println(tag())\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/A.scuzz"), a).unwrap();
+        fs::write(root.join("src/Main.scuzz"), main).unwrap();
+        let root_uri = format!("file://{}", fs::canonicalize(root).unwrap().display());
+        let main_path = canonicalize_source_path(&root.join("src/Main.scuzz"));
+        let main_uri = format!("file://{}", main_path.display());
+        let a_path = canonicalize_source_path(&root.join("src/A.scuzz"));
+        let a_uri = format!("file://{}", a_path.display());
+        let init = format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        );
+        let req = format!(
+            r#"{{"jsonrpc":"2.0","id":38,"method":"textDocument/documentLink","params":{{"textDocument":{{"uri":{}}}}}}}"#,
+            json_str(&main_uri)
+        );
+        let mut input = Vec::new();
+        input.extend(frame(&init));
+        input.extend(frame(&req));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("documentLinkProvider"), "{text}");
+        assert!(text.contains("\"id\":38"), "{text}");
+        assert!(text.contains(&a_uri), "{text}");
+        assert!(text.contains("A.tag"), "{text}");
+        assert!(text.contains("targetRange"), "{text}");
     }
 
     fn write_show_pkg(root: &Path) -> (String, String, String) {
