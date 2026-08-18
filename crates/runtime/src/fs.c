@@ -33,6 +33,12 @@ static SzIo *fail_drop(SzError *err) {
   return io;
 }
 
+static void *rc_box_zero(size_t n) {
+  void *p = sz_rc_alloc(n, SZ_RC_BOX);
+  memset(p, 0, n);
+  return p;
+}
+
 typedef struct {
   int is_err;
   union {
@@ -46,9 +52,18 @@ static SzIo *unwrap_fs(void *value, void *env) {
   FsResult *r = (FsResult *)value;
   if (!r)
     return sz_io_fail_cstr("Fs: null result");
-  if (r->is_err)
-    return fail_drop(r->as.err);
-  return pure_drop(r->as.ok);
+  if (r->is_err) {
+    SzError *err = r->as.err;
+    r->as.err = NULL;
+    sz_release(r);
+    return fail_drop(err);
+  }
+  {
+    void *ok = r->as.ok;
+    r->as.ok = NULL;
+    sz_release(r);
+    return pure_drop(ok);
+  }
 }
 
 static void *fs_dispatch(void *env);
@@ -73,7 +88,7 @@ static SzIo *fs_bind(SzString *path, SzCont after) {
 static void *fs_read_result(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path = pack_path(pack);
-  FsResult *r = (FsResult *)sz_alloc(sizeof(FsResult));
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
   FILE *f = fopen(p, "rb");
   if (!f) {
@@ -133,7 +148,7 @@ static void *fs_write_result(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path = (SzString *)pack->left;
   SzString *contents = (SzString *)pack->right;
-  FsResult *r = (FsResult *)sz_alloc(sizeof(FsResult));
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
   FILE *f = fopen(p, "wb");
   if (!f) {
@@ -185,7 +200,7 @@ SzIo *sz_fs_write(SzString *path, SzString *contents) {
 static void *fs_list_result(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path = pack_path(pack);
-  FsResult *r = (FsResult *)sz_alloc(sizeof(FsResult));
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
   DIR *d = opendir(p);
   if (!d) {
@@ -232,7 +247,7 @@ SzIo *sz_fs_list(SzString *path) { return fs_bind(path, fs_after_list); }
 static void *fs_mkdirs_result(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path = pack_path(pack);
-  FsResult *r = (FsResult *)sz_alloc(sizeof(FsResult));
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
   char tmp[1024];
   size_t len = strlen(p);
@@ -281,7 +296,7 @@ SzIo *sz_fs_mkdirs(SzString *path) { return fs_bind(path, fs_after_mkdirs); }
 static void *fs_canonicalize_result(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path = pack_path(pack);
-  FsResult *r = (FsResult *)sz_alloc(sizeof(FsResult));
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
   char *resolved = realpath(p, NULL);
   if (!resolved) {

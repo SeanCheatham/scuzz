@@ -33,6 +33,12 @@ static SzIo *fail_drop(SzError *err) {
   return io;
 }
 
+static void *rc_box_zero(size_t n) {
+  void *p = sz_rc_alloc(n, SZ_RC_BOX);
+  memset(p, 0, n);
+  return p;
+}
+
 static char **g_argv = NULL;
 static int g_argc = 0;
 
@@ -72,6 +78,7 @@ typedef struct {
   } as;
 } SysResult;
 
+/* DELAY wraps `r` in PURE (extra retain at run). Drop that retain here. */
 static SzIo *unwrap_sys(void *value, void *env) {
   (void)env;
   SysResult *r = (SysResult *)value;
@@ -80,13 +87,13 @@ static SzIo *unwrap_sys(void *value, void *env) {
   if (r->is_err) {
     SzError *err = r->as.err;
     r->as.err = NULL;
-    sz_free(r);
+    sz_release(r);
     return fail_drop(err);
   }
   {
     void *ok = r->as.ok;
     r->as.ok = NULL;
-    sz_free(r);
+    sz_release(r);
     return pure_drop(ok);
   }
 }
@@ -144,7 +151,7 @@ static void *sys_read_dispatch(void *env) {
 }
 
 static void *sys_try_line(void *env) {
-  SysResult *r = (SysResult *)sz_alloc_zero(sizeof(SysResult));
+  SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
   (void)env;
   if (inbuf_take_line(r))
     return r;
@@ -153,7 +160,7 @@ static void *sys_try_line(void *env) {
 }
 
 static void *sys_read_more(void *env) {
-  SysResult *r = (SysResult *)sz_alloc_zero(sizeof(SysResult));
+  SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
   char tmp[256];
   ssize_t n;
   (void)env;
@@ -187,7 +194,7 @@ static SzIo *sys_unwrap_line(void *value, void *env) {
   SysResult *r = (SysResult *)value;
   (void)env;
   if (r && r->retry) {
-    sz_free(r);
+    sz_release(r);
     return sys_poll_line(NULL, NULL);
   }
   return unwrap_sys(value, NULL);
@@ -209,7 +216,7 @@ static SzIo *sys_after_try(void *value, void *env) {
   SysResult *r = (SysResult *)value;
   (void)env;
   if (r && r->retry) {
-    sz_free(r);
+    sz_release(r);
     return sys_poll_line(NULL, NULL);
   }
   return unwrap_sys(value, NULL);
@@ -240,7 +247,7 @@ static int inbuf_take_n(SysResult *r, size_t n) {
 
 static void *sys_try_n(void *env) {
   size_t n = (size_t)sz_unbox_i64(env);
-  SysResult *r = (SysResult *)sz_alloc_zero(sizeof(SysResult));
+  SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
   if (inbuf_take_n(r, n))
     return r;
   r->retry = 1;
@@ -249,7 +256,7 @@ static void *sys_try_n(void *env) {
 
 static void *sys_read_more_n(void *env) {
   size_t want = (size_t)sz_unbox_i64(env);
-  SysResult *r = (SysResult *)sz_alloc_zero(sizeof(SysResult));
+  SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
   char tmp[256];
   ssize_t n;
   n = read(STDIN_FILENO, tmp, sizeof tmp);
@@ -286,7 +293,7 @@ static SzIo *sys_poll_n(void *value, void *env);
 static SzIo *sys_unwrap_n(void *value, void *env) {
   SysResult *r = (SysResult *)value;
   if (r && r->retry) {
-    sz_free(r);
+    sz_release(r);
     return sys_poll_n(NULL, env);
   }
   return unwrap_sys(value, NULL);
@@ -305,7 +312,7 @@ static SzIo *sys_poll_n(void *value, void *env) {
 static SzIo *sys_after_try_n(void *value, void *env) {
   SysResult *r = (SysResult *)value;
   if (r && r->retry) {
-    sz_free(r);
+    sz_release(r);
     return sys_poll_n(NULL, env);
   }
   return unwrap_sys(value, NULL);
@@ -316,7 +323,7 @@ static SzIo *sys_after_dispatch_n(void *value, void *env) {
   if ((intptr_t)value)
     return sz_testrt_sys_read(n);
   if (n <= 0) {
-    SysResult *r = (SysResult *)sz_alloc_zero(sizeof(SysResult));
+    SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
     r->as.ok = sz_string_from_cstr("");
     return unwrap_sys(r, NULL);
   }
@@ -334,7 +341,7 @@ SzIo *sz_sys_read(int64_t n) {
 static void *sys_write_result(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *s = pack ? (SzString *)pack->left : NULL;
-  SysResult *r = (SysResult *)sz_alloc(sizeof(SysResult));
+  SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
   const char *p = s ? sz_string_cstr(s) : "";
   size_t n = s ? s->len : 0;
   r->is_err = 0;
@@ -386,7 +393,7 @@ static void exec_free(ExecSt *st) {
 
 static void *sys_exec_start(void *env) {
   ExecSt *st = (ExecSt *)env;
-  SysResult *r = (SysResult *)sz_alloc_zero(sizeof(SysResult));
+  SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
   int fds[2];
   pid_t pid;
   const char *c = sz_string_cstr(st->cmd);
@@ -419,7 +426,7 @@ static void *sys_exec_start(void *env) {
 
 static void *sys_exec_reap(void *env) {
   ExecSt *st = (ExecSt *)env;
-  SysResult *r = (SysResult *)sz_alloc_zero(sizeof(SysResult));
+  SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
   int status = 0;
   int code;
   pid_t w;
@@ -468,7 +475,7 @@ static SzIo *exec_after_start(void *value, void *env) {
   SzIo *io;
   if (!r || r->is_err)
     return unwrap_sys(value, NULL);
-  sz_free(r);
+  sz_release(r);
   io = fm_drop(sz_io_poll_readable(st->read_fd), exec_after_poll, st);
   return fm_drop(io, exec_finish, st);
 }
@@ -518,7 +525,7 @@ SzIo *sz_sys_exec(SzString *cmd) {
 static void *sys_spawn_result(void *env) {
   SzPair *p = (SzPair *)env;
   SzString *cmd = p ? (SzString *)p->left : NULL;
-  SysResult *r = (SysResult *)sz_alloc(sizeof(SysResult));
+  SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
   pid_t pid;
   const char *c = cmd ? sz_string_cstr(cmd) : "";
   pid = fork();
@@ -558,7 +565,7 @@ SzIo *sz_sys_spawn(SzString *cmd) {
 
 static void *sys_alive_result(void *env) {
   int64_t pid = sz_unbox_i64(env);
-  SysResult *r = (SysResult *)sz_alloc(sizeof(SysResult));
+  SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
   int status = 0;
   pid_t w;
   r->is_err = 0;
@@ -583,7 +590,7 @@ SzIo *sz_sys_alive(int64_t pid) {
 
 static void *sys_kill_result(void *env) {
   int64_t pid = sz_unbox_i64(env);
-  SysResult *r = (SysResult *)sz_alloc(sizeof(SysResult));
+  SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
   r->is_err = 0;
   r->as.ok = NULL;
   if (sz_testrt_sys_is_fake()) {
@@ -607,7 +614,7 @@ SzIo *sz_sys_kill(int64_t pid) {
 static void *sys_getenv_result(void *env) {
   SzPair *p = (SzPair *)env;
   SzString *key = p ? (SzString *)p->left : NULL;
-  SysResult *r = (SysResult *)sz_alloc(sizeof(SysResult));
+  SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
   const char *v;
   if (sz_testrt_sys_is_fake())
     v = sz_testrt_env_get(key ? sz_string_cstr(key) : "");
