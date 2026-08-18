@@ -3295,6 +3295,78 @@ int main(void) {
     sz_string_free(c);
   }
 
+  /* List.take: prefix spine; n <= 0 is empty. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzString *c = sz_string_from_cstr("c");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_cons(c, sz_list_nil())));
+    SzList *ys;
+    ys = sz_list_take(xs, 2);
+    assert(sz_list_len(ys) == 2);
+    assert(ys->head == a);
+    assert(ys->tail && ys->tail->head == b);
+    assert(sz_list_len(xs) == 3);
+    sz_list_free(ys);
+    ys = sz_list_take(xs, 0);
+    assert(sz_list_is_empty(ys));
+    ys = sz_list_take(NULL, 2);
+    assert(sz_list_is_empty(ys));
+    ys = sz_list_take(xs, 9);
+    assert(sz_list_len(ys) == 3);
+    assert(ys->head == a);
+    sz_list_free(ys);
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
+  }
+
+  /* List.drop: shared suffix; n <= 0 retains xs. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzString *c = sz_string_from_cstr("c");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_cons(c, sz_list_nil())));
+    SzList *ys;
+    ys = sz_list_drop(xs, 1);
+    assert(sz_list_len(ys) == 2);
+    assert(ys->head == b);
+    assert(ys->tail && ys->tail->head == c);
+    sz_list_free(ys);
+    ys = sz_list_drop(xs, 0);
+    assert(ys == xs);
+    sz_release(ys);
+    ys = sz_list_drop(xs, 9);
+    assert(sz_list_is_empty(ys));
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
+  }
+
+  /* List.find / exists: first match or empty; Bool. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzString *c = sz_string_from_cstr("c");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_cons(c, sz_list_nil())));
+    SzList *ys;
+    ys = sz_list_find(xs, keep_not_b, NULL);
+    assert(sz_list_len(ys) == 1);
+    assert(ys->head == a);
+    sz_list_free(ys);
+    ys = sz_list_find(xs, keep_none, NULL);
+    assert(sz_list_is_empty(ys));
+    assert(sz_list_exists(xs, keep_not_b, NULL) == 1);
+    assert(sz_list_exists(xs, keep_none, NULL) == 0);
+    assert(sz_list_exists(NULL, keep_not_b, NULL) == 0);
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
+  }
+
   /* RC: string retain/release returns to baseline. Shared list tails stay. */
   {
     size_t base_bytes = 0, base_count = 0;

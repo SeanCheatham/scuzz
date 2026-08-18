@@ -610,6 +610,20 @@ mod tests {
     }
 
     #[test]
+    fn completes_list_take_after_dot() {
+        let src = "@main def main: IO[Unit] = List.tak\n";
+        let labels = labels_at(src, "List.tak");
+        assert!(labels.iter().any(|l| l == "List.take"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_exists_after_dot() {
+        let src = "@main def main: IO[Unit] = List.ex\n";
+        let labels = labels_at(src, "List.ex");
+        assert!(labels.iter().any(|l| l == "List.exists"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_map_set_after_dot() {
         let src = "@main def main: IO[Unit] = Map.se\n";
         let labels = labels_at(src, "Map.se");

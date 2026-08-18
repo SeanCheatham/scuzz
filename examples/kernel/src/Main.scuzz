@@ -107,6 +107,15 @@ def mapSetProof(): IO[Unit] =
     _ <- IO.println(s"set:${if (Set.contains(st, "x")) "y" else "n"}")
   } yield ()
 
+def listProof(): IO[Unit] =
+  for {
+    xs = ["a", "b", "c"]
+    _ <- IO.println(s"take:${List.join(List.take(xs, 2), ",")}")
+    _ <- IO.println(s"drop:${List.join(List.drop(xs, 1), ",")}")
+    _ <- IO.println(s"find:${List.join(List.find(xs, x => x == "b"), ",")}")
+    _ <- IO.println(s"exists:${if (List.exists(xs, x => x == "c")) "y" else "n"}")
+  } yield ()
+
 record Box[T](x: T):
   def get(): T =
     self.x
@@ -168,4 +177,5 @@ record Box[T](x: T):
     _ <- IO.println(s"cmp:${if (1.5 < 2.0 && 2.0 > 1.0) "lt" else "ge"}")
     _ <- IO.println(s"neg:${0.0 - 1.5}")
     _ <- mapSetProof()
+    _ <- listProof()
   } yield ()

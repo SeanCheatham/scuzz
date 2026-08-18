@@ -1060,7 +1060,9 @@ fn kit_lambda_param_ty_at(
         ("Ui.run", 0) => Some(Type::Opaque("Param".into())),
         ("Signal.map", 1) => Some(Type::Int),
         ("View.each", 1) if nargs == 2 => Some(Type::String),
-        ("List.filter" | "List.map", 1) => prior.first().and_then(|t| list_elem(t).ok()),
+        ("List.filter" | "List.map" | "List.find" | "List.exists", 1) => {
+            prior.first().and_then(|t| list_elem(t).ok())
+        }
         (
             "Stream.filter" | "Stream.map" | "Stream.takeWhile" | "Stream.dropWhile"
             | "Stream.find" | "Stream.exists" | "Stream.evalMap" | "Resource.make" | "Resource.use"
@@ -1093,8 +1095,8 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
         ("View.each", 1) if nargs == 2 => Some(Type::Opaque("View".into())),
         ("Signal.map", 1) | ("Stream.map", 1) => Some(Type::String),
         (
-            "List.filter" | "Stream.filter" | "Stream.takeWhile" | "Stream.dropWhile"
-            | "Stream.find" | "Stream.exists",
+            "List.filter" | "List.find" | "List.exists" | "Stream.filter" | "Stream.takeWhile"
+            | "Stream.dropWhile" | "Stream.find" | "Stream.exists",
             1,
         ) => Some(Type::Bool),
         (
@@ -1935,6 +1937,22 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 2)?;
             let elem = list_elem(&arg_tys[0])?;
             Ok(list_of(elem))
+        }
+        "List.take" | "List.drop" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            list_elem(&arg_tys[0])?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(arg_tys[0].clone())
+        }
+        "List.find" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let elem = list_elem(&arg_tys[0])?;
+            Ok(list_of(elem))
+        }
+        "List.exists" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            list_elem(&arg_tys[0])?;
+            Ok(Type::Bool)
         }
         "List.map" => {
             expect_arity(callee, &arg_tys, 2)?;
@@ -5662,6 +5680,42 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.setAt should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_take_drop_find_exists() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = ["a", "b", "c"]
+    t = List.take(xs, 2)
+    d = List.drop(xs, 1)
+    f = List.find(xs, x => x == "b")
+    hit = List.exists(xs, x => x == "c")
+    _ <- IO.println(List.join(t, ","))
+    _ <- IO.println(List.join(d, ","))
+    _ <- IO.println(List.join(f, ","))
+    _ <- IO.println(if (hit) "y" else "n")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.take/drop/find/exists should typecheck");
+    }
+
+    #[test]
+    fn rejects_list_find_non_bool() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = List.find(["a"], x => x)
+    _ <- IO.println(List.join(xs, ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("List.find lambda must return Bool"),
+            "expected Bool body, got {}",
+            err.message()
+        );
     }
 
     #[test]

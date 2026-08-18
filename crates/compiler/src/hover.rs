@@ -343,6 +343,16 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.setAt",
         "List.setAt(xs: List[T], i: Int, v: T): List[T]",
     ),
+    ("List.take", "List.take(xs: List[T], n: Int): List[T]"),
+    ("List.drop", "List.drop(xs: List[T], n: Int): List[T]"),
+    (
+        "List.find",
+        "List.find(xs: List[T], pred: T => Bool): List[T]",
+    ),
+    (
+        "List.exists",
+        "List.exists(xs: List[T], pred: T => Bool): Bool",
+    ),
     ("View.text", "View.text(s: String): View"),
     ("View.bindText", "View.bindText(s: SignalStr): View"),
     (
@@ -1192,6 +1202,27 @@ mod tests {
         let h = hover_src(src, "setAt");
         assert!(
             h.contains("List.setAt(xs: List[T], i: Int, v: T): List[T]"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_list_take() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.take(["a", "b"], 1), ","))
+"#;
+        let h = hover_src(src, "take");
+        assert!(h.contains("List.take(xs: List[T], n: Int): List[T]"), "{h}");
+    }
+
+    #[test]
+    fn hovers_list_exists() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (List.exists(["a"], x => true)) "y" else "n")
+"#;
+        let h = hover_src(src, "exists");
+        assert!(
+            h.contains("List.exists(xs: List[T], pred: T => Bool): Bool"),
             "{h}"
         );
     }

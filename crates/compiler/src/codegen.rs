@@ -118,6 +118,10 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_append(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_set_at(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_filter(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_take(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_list_drop(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_list_find(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_list_exists(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_map(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_write(ptr, ptr)").unwrap();
@@ -2641,6 +2645,36 @@ fn emit_stream_evalmap(
     owned_ptr(code, format!("%{prefix}_v"))
 }
 
+fn emit_list_exists(
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 2, "List.exists expects 2 args");
+    let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let ExprKind::Lambda { param, body } = &args[1].kind else {
+        panic!("List.exists predicate must be a lambda");
+    };
+    let lam = emit_pred_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
+    let inner_owned = inner.owned;
+    let inner_kind = inner.kind;
+    let inner_value = inner.value.clone();
+    let mut code = inner.code;
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    writeln!(
+        code,
+        "  %{prefix}_v = call i64 @sz_list_exists(ptr {inner_value}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
+    )
+    .unwrap();
+    drop_owned_ptr(&mut code, &lam);
+    if inner_owned && inner_kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {inner_value})").unwrap();
+    }
+    val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+}
+
 fn emit_stream_pred(
     callee: &str,
     rt: &str,
@@ -3130,6 +3164,20 @@ fn emit_call(
             false,
         );
     }
+    if callee == "List.find" {
+        return emit_stream_pred(
+            "List.find",
+            "sz_list_find",
+            args,
+            ctx,
+            locals,
+            prefix,
+            false,
+        );
+    }
+    if callee == "List.exists" {
+        return emit_list_exists(args, ctx, locals, prefix);
+    }
     if callee == "List.map" {
         return emit_ptr_map("List.map", "sz_list_map", args, ctx, locals, prefix, true);
     }
@@ -3436,6 +3484,26 @@ fn emit_call(
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             drop_owned_ptr(&mut code, &emitted_args[1]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "List.take" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_take(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "List.drop" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_drop(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
         "List.append" => {
@@ -6346,6 +6414,60 @@ def id(m: Map[String, String]): Map[String, String] = m
         crate::typ::typecheck(&p).expect("typecheck");
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_list_set_at"));
+    }
+
+    #[test]
+    fn emit_list_take_drop_find_exists() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(List.take(["a", "b", "c"], 2), ","))
+    _ <- IO.println(List.join(List.drop(["a", "b", "c"], 1), ","))
+    _ <- IO.println(List.join(List.find(["a", "b"], x => x == "b"), ","))
+    _ <- IO.println(if (List.exists(["a", "c"], x => x == "c")) "y" else "n")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_take"));
+        assert!(ir.contains("sz_list_drop"));
+        assert!(ir.contains("sz_list_find"));
+        assert!(ir.contains("sz_list_exists"));
+        assert!(ir.contains("sz_pred_"));
+        let take_needle = "call ptr @sz_list_take(ptr ";
+        let take_at = ir.find(take_needle).expect("take");
+        let take_list = ir[take_at + take_needle.len()..]
+            .split(',')
+            .next()
+            .unwrap()
+            .trim();
+        assert!(
+            ir[take_at..].contains(&format!("call void @sz_release(ptr {take_list})")),
+            "expected last-use release of list {take_list} after List.take:\n{ir}"
+        );
+        let drop_needle = "call ptr @sz_list_drop(ptr ";
+        let drop_at = ir.find(drop_needle).expect("drop");
+        let drop_list = ir[drop_at + drop_needle.len()..]
+            .split(',')
+            .next()
+            .unwrap()
+            .trim();
+        assert!(
+            ir[drop_at..].contains(&format!("call void @sz_release(ptr {drop_list})")),
+            "expected last-use release of list {drop_list} after List.drop:\n{ir}"
+        );
+        let find_at = ir.find("call ptr @sz_list_find").expect("find");
+        let pack = last_cl2_before(&ir, find_at);
+        assert!(
+            ir[find_at..].contains(&format!("call void @sz_release(ptr {pack})")),
+            "expected last-use release of find closure {pack}:\n{ir}"
+        );
+        let exists_at = ir.find("call i64 @sz_list_exists").expect("exists");
+        let exists_pack = last_cl2_before(&ir, exists_at);
+        assert!(
+            ir[exists_at..].contains(&format!("call void @sz_release(ptr {exists_pack})")),
+            "expected last-use release of exists closure {exists_pack}:\n{ir}"
+        );
     }
 
     #[test]

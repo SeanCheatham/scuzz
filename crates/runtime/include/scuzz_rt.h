@@ -410,6 +410,14 @@ SzList *sz_list_append(SzList *xs, void *x);
 SzList *sz_list_set_at(SzList *xs, int64_t index, void *v);
 /* Keep heads for which `pred` is nonzero. New spine; cons retains heads. */
 SzList *sz_list_filter(SzList *xs, SzListPred pred, void *env);
+/* First n heads as a new spine. n <= 0 is empty. */
+SzList *sz_list_take(SzList *xs, int64_t n);
+/* Skip n heads and retain the suffix. n <= 0 retains xs. */
+SzList *sz_list_drop(SzList *xs, int64_t n);
+/* First head for which `pred` is nonzero, as a one-cell list. Empty if none. */
+SzList *sz_list_find(SzList *xs, SzListPred pred, void *env);
+/* 1 if any head matches `pred`, else 0. */
+int64_t sz_list_exists(SzList *xs, SzListPred pred, void *env);
 /* New spine. `fn` returns an owned pointer. Retain `head` when `fn` yields it.
  * Cons retains the mapped head. Map then drops the mapper ref. */
 SzList *sz_list_map(SzList *xs, SzListMapFn fn, void *env);
