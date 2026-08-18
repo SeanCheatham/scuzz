@@ -507,6 +507,8 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.splitAt",
         "List.splitAt(xs: List[T], n: Int): List[List[T]]",
     ),
+    ("List.inits", "List.inits(xs: List[T]): List[List[T]]"),
+    ("List.tails", "List.tails(xs: List[T]): List[List[T]]"),
     (
         "List.forall",
         "List.forall(xs: List[T], pred: T => Bool): Bool",
@@ -755,6 +757,11 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Set.intersect(a: Set[T], b: Set[T]): Set[T]",
     ),
     ("Set.diff", "Set.diff(a: Set[T], b: Set[T]): Set[T]"),
+    ("Set.isSubset", "Set.isSubset(a: Set[T], b: Set[T]): Bool"),
+    (
+        "Set.isDisjoint",
+        "Set.isDisjoint(a: Set[T], b: Set[T]): Bool",
+    ),
     ("Fs.read", "Fs.read(path: String): IO[String]"),
     ("Fs.write", "Fs.write(path: String, body: String): IO[Unit]"),
     ("Sys.args", "Sys.args(): IO[List]"),
@@ -1618,6 +1625,16 @@ mod tests {
             h.contains("List.splitAt(xs: List[T], n: Int): List[List[T]]"),
             "{h}"
         );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map(List.inits(["a", "b"]), g => List.join(g, ",")), "|"))
+"#;
+        let h = hover_src(src, "inits");
+        assert!(h.contains("List.inits(xs: List[T]): List[List[T]]"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map(List.tails(["a", "b"]), g => List.join(g, ",")), "|"))
+"#;
+        let h = hover_src(src, "tails");
+        assert!(h.contains("List.tails(xs: List[T]): List[List[T]]"), "{h}");
     }
 
     #[test]
@@ -1945,6 +1962,22 @@ mod tests {
         let h = hover_src(src, "diff");
         assert!(
             h.contains("Map.diff(a: Map[K, V], b: Map[K, V]): Map[K, V]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (Set.isSubset(Set.add(Set.empty(), "x"), Set.add(Set.empty(), "x"))) "y" else "n")
+"#;
+        let h = hover_src(src, "isSubset");
+        assert!(
+            h.contains("Set.isSubset(a: Set[T], b: Set[T]): Bool"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (Set.isDisjoint(Set.add(Set.empty(), "x"), Set.add(Set.empty(), "y"))) "y" else "n")
+"#;
+        let h = hover_src(src, "isDisjoint");
+        assert!(
+            h.contains("Set.isDisjoint(a: Set[T], b: Set[T]): Bool"),
             "{h}"
         );
     }

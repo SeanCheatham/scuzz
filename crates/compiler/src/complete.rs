@@ -844,6 +844,20 @@ mod tests {
     }
 
     #[test]
+    fn completes_list_inits_after_dot() {
+        let src = "@main def main: IO[Unit] = List.ini\n";
+        let labels = labels_at(src, "List.ini");
+        assert!(labels.iter().any(|l| l == "List.inits"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_tails_after_dot() {
+        let src = "@main def main: IO[Unit] = List.tai\n";
+        let labels = labels_at(src, "List.tai");
+        assert!(labels.iter().any(|l| l == "List.tails"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_list_forall_after_dot() {
         let src = "@main def main: IO[Unit] = List.fo\n";
         let labels = labels_at(src, "List.fo");
@@ -1122,6 +1136,20 @@ mod tests {
         let src = "@main def main: IO[Unit] = Set.di\n";
         let labels = labels_at(src, "Set.di");
         assert!(labels.iter().any(|l| l == "Set.diff"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_set_is_subset_after_dot() {
+        let src = "@main def main: IO[Unit] = Set.isS\n";
+        let labels = labels_at(src, "Set.isS");
+        assert!(labels.iter().any(|l| l == "Set.isSubset"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_set_is_disjoint_after_dot() {
+        let src = "@main def main: IO[Unit] = Set.isD\n";
+        let labels = labels_at(src, "Set.isD");
+        assert!(labels.iter().any(|l| l == "Set.isDisjoint"), "{labels:?}");
     }
 
     #[test]

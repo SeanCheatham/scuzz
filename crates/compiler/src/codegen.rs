@@ -149,6 +149,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_map_union(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_map_intersect(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_map_diff(ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_set_is_subset(ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_set_is_disjoint(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_append(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_set_at(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_filter(ptr, ptr, ptr)").unwrap();
@@ -182,6 +184,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_split_at(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_list_span(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_partition(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_inits(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_tails(ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_index_where(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_last_index_where(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
@@ -3963,6 +3967,26 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
+        "List.inits" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_inits(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "List.tails" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_tails(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
         "List.last" => {
             writeln!(
                 code,
@@ -4420,6 +4444,22 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             drop_owned_ptr(&mut code, &emitted_args[1]);
             owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Set.isSubset" | "Set.isDisjoint" => {
+            let rt = if callee == "Set.isSubset" {
+                "sz_set_is_subset"
+            } else {
+                "sz_set_is_disjoint"
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @{rt}(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Map.keys" | "Set.toList" => {
             writeln!(
@@ -7392,6 +7432,39 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[sp_at..].contains(&format!("call void @sz_release(ptr {sp_pack})")),
             "expected last-use release of span closure {sp_pack}:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_inits_tails_set_subset() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(List.map(List.inits(["a", "b"]), g => List.join(g, ",")), "|"))
+    _ <- IO.println(List.join(List.map(List.tails(["a", "b"]), g => List.join(g, ",")), "|"))
+    _ <- IO.println(if (Set.isSubset(Set.add(Set.empty(), "x"), Set.add(Set.empty(), "x"))) "y" else "n")
+    _ <- IO.println(if (Set.isDisjoint(Set.add(Set.empty(), "x"), Set.add(Set.empty(), "y"))) "y" else "n")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_inits"));
+        assert!(ir.contains("sz_list_tails"));
+        assert!(ir.contains("sz_set_is_subset"));
+        assert!(ir.contains("sz_set_is_disjoint"));
+        let needle = "call ptr @sz_list_inits(ptr ";
+        let at = ir.find(needle).expect("inits");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.inits:\n{ir}"
+        );
+        let needle = "call i64 @sz_set_is_subset(ptr ";
+        let at = ir.find(needle).expect("subset");
+        let left = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {left})")),
+            "expected last-use release of set {left} after Set.isSubset:\n{ir}"
         );
     }
 

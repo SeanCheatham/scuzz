@@ -2115,6 +2115,11 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(list_of(list_of(elem)))
         }
+        "List.inits" | "List.tails" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            let elem = list_elem(&arg_tys[0])?;
+            Ok(list_of(list_of(elem)))
+        }
         "List.find" => {
             expect_arity(callee, &arg_tys, 2)?;
             let elem = list_elem(&arg_tys[0])?;
@@ -2279,6 +2284,13 @@ fn infer_call(
             let a = set_elem(&arg_tys[0])?;
             let b = set_elem(&arg_tys[1])?;
             Ok(Type::App("Set".into(), vec![prefer_elem(&a, &b)?]))
+        }
+        "Set.isSubset" | "Set.isDisjoint" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let a = set_elem(&arg_tys[0])?;
+            let b = set_elem(&arg_tys[1])?;
+            prefer_elem(&a, &b)?;
+            Ok(Type::Bool)
         }
         "Fs.read" | "Fs.list" | "Fs.mkdirs" | "Fs.canonicalize" => {
             expect_arity(callee, &arg_tys, 1)?;
@@ -6237,6 +6249,23 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Set.union/intersect/diff should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_inits_tails_set_subset() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = ["a", "b"]
+    a = Set.add(Set.empty(), "x")
+    b = Set.add(Set.add(Set.empty(), "x"), "y")
+    _ <- IO.println(List.join(List.map(List.inits(xs), g => List.join(g, ",")), "|"))
+    _ <- IO.println(List.join(List.map(List.tails(xs), g => List.join(g, ",")), "|"))
+    _ <- IO.println(if (Set.isSubset(a, b)) "y" else "n")
+    _ <- IO.println(if (Set.isDisjoint(a, Set.add(Set.empty(), "z"))) "y" else "n")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.inits/tails and Set.isSubset/isDisjoint should typecheck");
     }
 
     #[test]

@@ -124,6 +124,8 @@ jobs:
           grep -q "munion:1,9,3" /tmp/kernel.out
           grep -q "misect:2" /tmp/kernel.out
           grep -q "mdiff:1" /tmp/kernel.out
+          grep -q "sub:y" /tmp/kernel.out
+          grep -q "disj:y" /tmp/kernel.out
           grep -q "take:a,b" /tmp/kernel.out
           grep -q "drop:b,c" /tmp/kernel.out
           grep -q "find:b" /tmp/kernel.out
@@ -176,6 +178,8 @@ jobs:
           grep -Fq "sat:a|b,c" /tmp/kernel.out
           grep -Fq "span:a,b|c" /tmp/kernel.out
           grep -Fq "part:b|a,c" /tmp/kernel.out
+          grep -Fq "inits:|a|a,b|a,b,c" /tmp/kernel.out
+          grep -Fq "tails:a,b,c|b,c|c|" /tmp/kernel.out
           grep -q "slen:3" /tmp/kernel.out
           grep -q "slice:bc" /tmp/kernel.out
           grep -q "ix:1" /tmp/kernel.out

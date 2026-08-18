@@ -3985,6 +3985,67 @@ int main(void) {
     sz_string_free(c);
   }
 
+  /* List.inits / tails: prefixes and suffixes including empty. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *a;
+    SzString *b;
+    SzString *c;
+    SzList *xs;
+    SzList *tmp;
+    SzList *gs;
+    SzList *g0;
+    SzList *g1;
+    SzList *glast;
+    sz_alloc_stats(&base_bytes, &base_count);
+    a = sz_string_from_cstr("a");
+    b = sz_string_from_cstr("b");
+    c = sz_string_from_cstr("c");
+    xs = sz_list_cons(a, NULL);
+    tmp = sz_list_append(xs, b);
+    sz_release(xs);
+    xs = sz_list_append(tmp, c);
+    sz_release(tmp);
+    gs = sz_list_inits(xs);
+    assert(sz_list_len(gs) == 4);
+    g0 = (SzList *)sz_list_head(gs);
+    assert(sz_list_is_empty(g0));
+    g1 = (SzList *)sz_list_at(gs, 1);
+    assert(sz_list_len(g1) == 1);
+    assert(g1->head == a);
+    glast = (SzList *)sz_list_at(gs, 3);
+    assert(sz_list_len(glast) == 3);
+    assert(glast->head == a);
+    sz_list_free(gs);
+    gs = sz_list_tails(xs);
+    assert(sz_list_len(gs) == 4);
+    g0 = (SzList *)sz_list_head(gs);
+    assert(sz_list_len(g0) == 3);
+    assert(g0->head == a);
+    glast = (SzList *)sz_list_at(gs, 3);
+    assert(sz_list_is_empty(glast));
+    g1 = (SzList *)sz_list_at(gs, 1);
+    assert(sz_list_len(g1) == 2);
+    assert(g1->head == b);
+    sz_list_free(gs);
+    gs = sz_list_inits(NULL);
+    assert(sz_list_len(gs) == 1);
+    assert(sz_list_is_empty((SzList *)sz_list_head(gs)));
+    sz_list_free(gs);
+    gs = sz_list_tails(NULL);
+    assert(sz_list_len(gs) == 1);
+    assert(sz_list_is_empty((SzList *)sz_list_head(gs)));
+    sz_list_free(gs);
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   /* List.concat: left spine copy; empty left retains right. */
   {
     SzString *a = sz_string_from_cstr("a");
@@ -4381,6 +4442,49 @@ int main(void) {
     sz_string_free(v2);
     sz_string_free(v9);
     sz_string_free(v3);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
+  /* Persistent set subset / disjoint. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *kx;
+    SzString *ky;
+    SzString *kz;
+    SzMap *a0;
+    SzMap *a;
+    SzMap *b0;
+    SzMap *b;
+    SzMap *z;
+    sz_alloc_stats(&base_bytes, &base_count);
+    kx = sz_string_from_cstr("x");
+    ky = sz_string_from_cstr("y");
+    kz = sz_string_from_cstr("z");
+    a0 = sz_map_set(NULL, kx, NULL, 1);
+    a = sz_map_set(a0, ky, NULL, 1);
+    b0 = sz_map_set(NULL, ky, NULL, 1);
+    b = sz_map_set(b0, kz, NULL, 1);
+    z = sz_map_set(NULL, kz, NULL, 1);
+    assert(sz_set_is_subset(a0, a) == 1);
+    assert(sz_set_is_subset(a, a) == 1);
+    assert(sz_set_is_subset(a, b) == 0);
+    assert(sz_set_is_subset(NULL, a) == 1);
+    assert(sz_set_is_subset(a, NULL) == 0);
+    assert(sz_set_is_disjoint(a, z) == 1);
+    assert(sz_set_is_disjoint(a, b) == 0);
+    assert(sz_set_is_disjoint(NULL, a) == 1);
+    assert(sz_set_is_disjoint(a, NULL) == 1);
+    sz_release(z);
+    sz_release(b);
+    sz_release(b0);
+    sz_release(a);
+    sz_release(a0);
+    sz_string_free(kx);
+    sz_string_free(ky);
+    sz_string_free(kz);
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);

@@ -468,6 +468,27 @@ SzList *sz_list_partition(SzList *xs, SzListPred pred, void *env) {
   return list_two(a, b);
 }
 
+SzList *sz_list_inits(SzList *xs) {
+  size_t n = sz_list_len(xs);
+  size_t i;
+  SzList *out = NULL;
+  SzList *prefix;
+  for (i = n + 1; i > 0; i--) {
+    prefix = sz_list_take(xs, (int64_t)(i - 1));
+    out = sz_list_cons_take(prefix, out);
+    sz_release(prefix);
+  }
+  return out;
+}
+
+SzList *sz_list_tails(SzList *xs) {
+  SzList *rest;
+  if (!xs)
+    return sz_list_cons(NULL, NULL);
+  rest = sz_list_tails(xs->tail);
+  return sz_list_cons_take(xs, rest);
+}
+
 int64_t sz_list_index_where(SzList *xs, SzListPred pred, void *env) {
   SzList *p;
   int64_t i = 0;

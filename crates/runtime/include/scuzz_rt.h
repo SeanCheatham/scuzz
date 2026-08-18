@@ -510,6 +510,10 @@ SzList *sz_list_split_at(SzList *xs, int64_t n);
 SzList *sz_list_span(SzList *xs, SzListPred pred, void *env);
 /* Two lists packed as List[List]: filter then filterNot. */
 SzList *sz_list_partition(SzList *xs, SzListPred pred, void *env);
+/* Prefixes including empty and the full list. */
+SzList *sz_list_inits(SzList *xs);
+/* Suffixes including the full list and empty. */
+SzList *sz_list_tails(SzList *xs);
 /* First index where `pred` is true, or -1. */
 int64_t sz_list_index_where(SzList *xs, SzListPred pred, void *env);
 /* Last index where `pred` is true, or -1. */
@@ -548,6 +552,10 @@ SzMap *sz_set_diff(SzMap *a, SzMap *b);
 SzMap *sz_map_union(SzMap *a, SzMap *b);
 SzMap *sz_map_intersect(SzMap *a, SzMap *b);
 SzMap *sz_map_diff(SzMap *a, SzMap *b);
+/* 1 when every key of `a` is in `b`. Empty `a` is a subset. */
+int64_t sz_set_is_subset(SzMap *a, SzMap *b);
+/* 1 when `a` and `b` share no key. Empty is disjoint. */
+int64_t sz_set_is_disjoint(SzMap *a, SzMap *b);
 
 /* Blessed filesystem IO (live or TestRuntime mem FS; chosen when the IO runs) */
 SzIo *sz_fs_read(SzString *path);

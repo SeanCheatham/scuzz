@@ -310,3 +310,35 @@ SzMap *sz_map_diff(SzMap *a, SzMap *b) {
   sz_list_free(keys);
   return out;
 }
+
+int64_t sz_set_is_subset(SzMap *a, SzMap *b) {
+  SzList *keys;
+  SzList *p;
+  if (!a)
+    return 1;
+  keys = sz_map_keys(a);
+  for (p = keys; p; p = p->tail) {
+    if (!sz_map_contains(b, p->head)) {
+      sz_list_free(keys);
+      return 0;
+    }
+  }
+  sz_list_free(keys);
+  return 1;
+}
+
+int64_t sz_set_is_disjoint(SzMap *a, SzMap *b) {
+  SzList *keys;
+  SzList *p;
+  if (!a || !b)
+    return 1;
+  keys = sz_map_keys(a);
+  for (p = keys; p; p = p->tail) {
+    if (sz_map_contains(b, p->head)) {
+      sz_list_free(keys);
+      return 0;
+    }
+  }
+  sz_list_free(keys);
+  return 1;
+}

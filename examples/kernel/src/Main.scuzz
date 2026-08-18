@@ -127,6 +127,8 @@ def mapSetProof(): IO[Unit] =
     _ <- IO.println(s"munion:${List.join(Map.values(Map.union(mp, other)), ",")}")
     _ <- IO.println(s"misect:${List.join(Map.values(Map.intersect(mp, other)), ",")}")
     _ <- IO.println(s"mdiff:${List.join(Map.values(Map.diff(mp, other)), ",")}")
+    _ <- IO.println(s"sub:${if (Set.isSubset(st, Set.union(st, Set.add(Set.empty(), "z")))) "y" else "n"}")
+    _ <- IO.println(s"disj:${if (Set.isDisjoint(st, Set.add(Set.empty(), "z"))) "y" else "n"}")
   } yield ()
 
 def listProof(): IO[Unit] =
@@ -171,6 +173,8 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"sat:${List.join(List.map(List.splitAt(xs, 1), g => List.join(g, ",")), "|")}")
     _ <- IO.println(s"span:${List.join(List.map(List.span(xs, x => x != "c"), g => List.join(g, ",")), "|")}")
     _ <- IO.println(s"part:${List.join(List.map(List.partition(xs, x => x == "b"), g => List.join(g, ",")), "|")}")
+    _ <- IO.println(s"inits:${List.join(List.map(List.inits(xs), g => List.join(g, ",")), "|")}")
+    _ <- IO.println(s"tails:${List.join(List.map(List.tails(xs), g => List.join(g, ",")), "|")}")
   } yield ()
 
 def strProof(): IO[Unit] =
