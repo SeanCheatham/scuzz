@@ -115,6 +115,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_map_set(ptr, ptr, ptr, i32)").unwrap();
     writeln!(out, "declare ptr @sz_map_get_or(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_map_contains(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_map_remove(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_map_keys(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_map_size(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_append(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_set_at(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_filter(ptr, ptr, ptr)").unwrap();
@@ -3728,6 +3731,51 @@ fn emit_call(
             }
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
+        "Map.remove" | "Set.remove" => {
+            let key_src = &emitted_args[1];
+            let key = if key_src.kind == Kind::Int || key_src.kind == Kind::Float {
+                box_numeric(
+                    &mut code,
+                    key_src.kind,
+                    &key_src.value,
+                    &format!("{prefix}_k"),
+                )
+            } else {
+                key_src.value.clone()
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_map_remove(ptr {}, ptr {key})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, key_src);
+            if key_src.kind == Kind::Int || key_src.kind == Kind::Float {
+                writeln!(code, "  call void @sz_release(ptr {key})").unwrap();
+            }
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Map.keys" | "Set.toList" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_map_keys(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Map.size" | "Set.size" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_map_size(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
         "Fs.read" => {
             writeln!(
                 code,
@@ -6559,8 +6607,14 @@ def id(m: Map[String, String]): Map[String, String] = m
   for {
     m = Map.set(Map.empty(), "a", "1")
     s = Set.add(Set.empty(), "x")
+    gone = Map.remove(m, "a")
+    dropped = Set.remove(s, "x")
     _ <- IO.println(Map.getOrElse(m, "a", "?"))
     _ <- IO.println(if (Set.contains(s, "x")) "y" else "n")
+    _ <- IO.println(List.join(Map.keys(gone), ","))
+    _ <- IO.println(s"${Map.size(gone)}")
+    _ <- IO.println(List.join(Set.toList(dropped), ","))
+    _ <- IO.println(s"${Set.size(dropped)}")
   } yield ()
 "#;
         let p = crate::lower::lower_program(parse(src).unwrap());
@@ -6569,6 +6623,63 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(ir.contains("sz_map_set"));
         assert!(ir.contains("sz_map_get_or"));
         assert!(ir.contains("sz_map_contains"));
+        assert!(ir.contains("sz_map_remove"));
+        assert!(ir.contains("sz_map_keys"));
+        assert!(ir.contains("sz_map_size"));
+    }
+
+    #[test]
+    fn emit_map_temp_release_after_remove() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(if (Map.contains(Map.remove(Map.set(Map.empty(), "a", "1"), "a"), "a")) "y" else "n")
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_map_remove(ptr ";
+        let at = ir.find(needle).expect("expected sz_map_remove");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of map {name} after remove:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_map_temp_release_after_keys() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join(Map.keys(Map.set(Map.empty(), "a", "1")), ","))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_map_keys(ptr ";
+        let at = ir.find(needle).expect("expected sz_map_keys");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of map {name} after keys:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_map_temp_release_after_size() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(s"${Map.size(Map.set(Map.empty(), "a", "1"))}")
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call i64 @sz_map_size(ptr ";
+        let at = ir.find(needle).expect("expected sz_map_size");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of map {name} after size:\n{ir}"
+        );
     }
 
     #[test]

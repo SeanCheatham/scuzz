@@ -3470,6 +3470,104 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
+  /* Persistent map remove / keys / size. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *ka;
+    SzString *kb;
+    SzString *kc;
+    SzString *kz;
+    SzString *va;
+    SzString *vb;
+    SzString *vc;
+    SzMap *m1;
+    SzMap *m2;
+    SzMap *m3;
+    SzMap *gone;
+    SzMap *miss;
+    SzMap *two;
+    SzList *ks;
+    SzList *ks2;
+    void *k1;
+    void *k2;
+    void *k3;
+    SzMap *i1;
+    SzMap *i2;
+    SzMap *i3;
+    SzMap *i4;
+    sz_alloc_stats(&base_bytes, &base_count);
+    ka = sz_string_from_cstr("a");
+    kb = sz_string_from_cstr("b");
+    kc = sz_string_from_cstr("c");
+    kz = sz_string_from_cstr("z");
+    va = sz_string_from_cstr("1");
+    vb = sz_string_from_cstr("2");
+    vc = sz_string_from_cstr("3");
+    m1 = sz_map_set(NULL, ka, va, 1);
+    m2 = sz_map_set(m1, kb, vb, 1);
+    assert(sz_map_size(m2) == 2);
+    ks = sz_map_keys(m2);
+    assert(sz_list_len(ks) == 2);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_head(ks)), "a") == 0);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_head(sz_list_tail(ks))), "b") ==
+           0);
+    sz_list_free(ks);
+    gone = sz_map_remove(m2, kb);
+    assert(sz_map_contains(gone, kb) == 0);
+    assert(sz_map_contains(m2, kb) == 1);
+    assert(sz_map_size(gone) == 1);
+    miss = sz_map_remove(m2, kz);
+    assert(miss == m2);
+    assert(sz_map_size(miss) == 2);
+    sz_release(miss);
+    m3 = sz_map_set(m2, kc, vc, 1);
+    two = sz_map_remove(m3, kb);
+    assert(sz_map_size(two) == 2);
+    assert(sz_map_contains(two, ka) == 1);
+    assert(sz_map_contains(two, kc) == 1);
+    assert(sz_map_contains(two, kb) == 0);
+    ks2 = sz_map_keys(two);
+    assert(sz_list_len(ks2) == 2);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_head(ks2)), "a") == 0);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_head(sz_list_tail(ks2))), "c") ==
+           0);
+    sz_list_free(ks2);
+    k1 = sz_box_i64(1);
+    k2 = sz_box_i64(2);
+    k3 = sz_box_i64(3);
+    i1 = sz_map_set(NULL, k2, va, 0);
+    i2 = sz_map_set(i1, k1, va, 0);
+    i3 = sz_map_set(i2, k3, va, 0);
+    i4 = sz_map_remove(i3, k2);
+    assert(sz_map_size(i4) == 2);
+    assert(sz_map_contains(i4, k1) == 1);
+    assert(sz_map_contains(i4, k3) == 1);
+    assert(sz_map_contains(i4, k2) == 0);
+    sz_release(i4);
+    sz_release(i3);
+    sz_release(i2);
+    sz_release(i1);
+    sz_release(k1);
+    sz_release(k2);
+    sz_release(k3);
+    sz_release(two);
+    sz_release(m3);
+    sz_release(gone);
+    sz_release(m2);
+    sz_release(m1);
+    sz_string_free(ka);
+    sz_string_free(kb);
+    sz_string_free(kc);
+    sz_string_free(kz);
+    sz_string_free(va);
+    sz_string_free(vb);
+    sz_string_free(vc);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   /* IO graph and fiber structs drop after unsafe_run. */
   {
     size_t base_bytes = 0, base_count = 0;

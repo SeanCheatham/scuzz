@@ -443,6 +443,11 @@ SzMap *sz_map_empty(void);
 SzMap *sz_map_set(SzMap *m, void *key, void *val, int32_t key_kind);
 void *sz_map_get_or(SzMap *m, void *key, void *dflt);
 int64_t sz_map_contains(SzMap *m, void *key);
+/* Drop `key` if present. Missing key retains `m`. */
+SzMap *sz_map_remove(SzMap *m, void *key);
+/* Inorder keys as a new list. Cons retains keys. */
+SzList *sz_map_keys(SzMap *m);
+int64_t sz_map_size(SzMap *m);
 
 /* Blessed filesystem IO (live or TestRuntime mem FS; chosen when the IO runs) */
 SzIo *sz_fs_read(SzString *path);

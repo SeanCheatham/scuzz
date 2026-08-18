@@ -83,3 +83,65 @@ int64_t sz_map_contains(SzMap *m, void *k) {
     return sz_map_contains(m->left, k);
   return sz_map_contains(m->right, k);
 }
+
+static SzMap *map_min(SzMap *m) {
+  while (m && m->left)
+    m = m->left;
+  return m;
+}
+
+SzMap *sz_map_remove(SzMap *m, void *k) {
+  int c;
+  SzMap *child;
+  SzMap *min;
+  if (!m)
+    return NULL;
+  c = map_cmp(m, k);
+  if (c > 0) {
+    child = sz_map_remove(m->left, k);
+    if (child == m->left) {
+      sz_release(child);
+      sz_retain(m);
+      return m;
+    }
+    return map_take_left(m->key, m->val, child, m->right, m->key_kind);
+  }
+  if (c < 0) {
+    child = sz_map_remove(m->right, k);
+    if (child == m->right) {
+      sz_release(child);
+      sz_retain(m);
+      return m;
+    }
+    return map_take_right(m->key, m->val, m->left, child, m->key_kind);
+  }
+  if (!m->left) {
+    sz_retain(m->right);
+    return m->right;
+  }
+  if (!m->right) {
+    sz_retain(m->left);
+    return m->left;
+  }
+  min = map_min(m->right);
+  return map_take_right(min->key, min->val, m->left,
+                        sz_map_remove(m->right, min->key), m->key_kind);
+}
+
+static SzList *map_keys_acc(SzMap *m, SzList *acc) {
+  SzList *next;
+  if (!m)
+    return acc;
+  acc = map_keys_acc(m->right, acc);
+  next = sz_list_cons(m->key, acc);
+  sz_release(acc);
+  return map_keys_acc(m->left, next);
+}
+
+SzList *sz_map_keys(SzMap *m) { return map_keys_acc(m, NULL); }
+
+int64_t sz_map_size(SzMap *m) {
+  if (!m)
+    return 0;
+  return 1 + sz_map_size(m->left) + sz_map_size(m->right);
+}

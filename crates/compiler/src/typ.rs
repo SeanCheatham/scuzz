@@ -1998,6 +1998,22 @@ fn infer_call(
             prefer_elem(&k, &arg_tys[1])?;
             Ok(Type::Bool)
         }
+        "Map.remove" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let (k, v) = map_kv(&arg_tys[0])?;
+            let k = prefer_elem(&k, &arg_tys[1])?;
+            Ok(Type::App("Map".into(), vec![k, v]))
+        }
+        "Map.keys" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            let (k, _) = map_kv(&arg_tys[0])?;
+            Ok(list_of(k))
+        }
+        "Map.size" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            map_kv(&arg_tys[0])?;
+            Ok(Type::Int)
+        }
         "Set.empty" => {
             expect_arity(callee, &arg_tys, 0)?;
             Ok(Type::App("Set".into(), vec![Type::Opaque("Elem".into())]))
@@ -2013,6 +2029,22 @@ fn infer_call(
             let e = set_elem(&arg_tys[0])?;
             prefer_elem(&e, &arg_tys[1])?;
             Ok(Type::Bool)
+        }
+        "Set.remove" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let e = set_elem(&arg_tys[0])?;
+            let e = prefer_elem(&e, &arg_tys[1])?;
+            Ok(Type::App("Set".into(), vec![e]))
+        }
+        "Set.toList" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            let e = set_elem(&arg_tys[0])?;
+            Ok(list_of(e))
+        }
+        "Set.size" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            set_elem(&arg_tys[0])?;
+            Ok(Type::Int)
         }
         "Fs.read" | "Fs.list" | "Fs.mkdirs" | "Fs.canonicalize" => {
             expect_arity(callee, &arg_tys, 1)?;
@@ -5773,6 +5805,26 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Map/Set should typecheck");
+    }
+
+    #[test]
+    fn typechecks_map_remove_keys_size() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    m = Map.set(Map.set(Map.empty(), "a", "1"), "b", "2")
+    s = Set.add(Set.add(Set.empty(), "x"), "y")
+    gone = Map.remove(m, "b")
+    dropped = Set.remove(s, "x")
+    _ <- IO.println(List.join(Map.keys(m), ","))
+    _ <- IO.println(s"${Map.size(m)}")
+    _ <- IO.println(if (Map.contains(gone, "b")) "y" else "n")
+    _ <- IO.println(List.join(Set.toList(s), ","))
+    _ <- IO.println(s"${Set.size(s)}")
+    _ <- IO.println(if (Set.contains(dropped, "x")) "y" else "n")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Map.remove/keys/size should typecheck");
     }
 
     #[test]

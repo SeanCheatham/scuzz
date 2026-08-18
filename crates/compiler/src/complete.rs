@@ -645,6 +645,20 @@ mod tests {
     }
 
     #[test]
+    fn completes_map_remove_after_dot() {
+        let src = "@main def main: IO[Unit] = Map.re\n";
+        let labels = labels_at(src, "Map.re");
+        assert!(labels.iter().any(|l| l == "Map.remove"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_set_to_list_after_dot() {
+        let src = "@main def main: IO[Unit] = Set.to\n";
+        let labels = labels_at(src, "Set.to");
+        assert!(labels.iter().any(|l| l == "Set.toList"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_str_starts_with_after_dot() {
         let src = "@main def main: IO[Unit] = Str.st\n";
         let labels = labels_at(src, "Str.st");

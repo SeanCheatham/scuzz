@@ -101,10 +101,18 @@ def mapSetProof(): IO[Unit] =
   for {
     mp = Map.set(Map.set(Map.empty(), "a", "1"), "b", "2")
     st = Set.add(Set.add(Set.empty(), "x"), "y")
+    gone = Map.remove(mp, "b")
+    dropped = Set.remove(st, "x")
     _ <- IO.println(s"map:${Map.getOrElse(mp, "a", "?")}")
     _ <- IO.println(s"miss:${Map.getOrElse(mp, "z", "no")}")
     _ <- IO.println(s"has:${if (Map.contains(mp, "b")) "y" else "n"}")
     _ <- IO.println(s"set:${if (Set.contains(st, "x")) "y" else "n"}")
+    _ <- IO.println(s"keys:${List.join(Map.keys(mp), ",")}")
+    _ <- IO.println(s"msize:${Map.size(mp)}")
+    _ <- IO.println(s"gone:${if (Map.contains(gone, "b")) "y" else "n"}")
+    _ <- IO.println(s"slist:${List.join(Set.toList(st), ",")}")
+    _ <- IO.println(s"ssize:${Set.size(st)}")
+    _ <- IO.println(s"sgone:${if (Set.contains(dropped, "x")) "y" else "n"}")
   } yield ()
 
 def listProof(): IO[Unit] =
