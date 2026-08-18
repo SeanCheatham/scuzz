@@ -452,6 +452,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.sliding(xs: List[T], n: Int): List[List[T]]",
     ),
     (
+        "List.slice",
+        "List.slice(xs: List[T], from: Int, until: Int): List[T]",
+    ),
+    (
         "List.padTo",
         "List.padTo(xs: List[T], n: Int, x: T): List[T]",
     ),
@@ -468,6 +472,14 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     (
         "List.exists",
         "List.exists(xs: List[T], pred: T => Bool): Bool",
+    ),
+    (
+        "List.indexWhere",
+        "List.indexWhere(xs: List[T], pred: T => Bool): Int",
+    ),
+    (
+        "List.lastIndexWhere",
+        "List.lastIndexWhere(xs: List[T], pred: T => Bool): Int",
     ),
     (
         "List.count",
@@ -1403,6 +1415,14 @@ mod tests {
             h.contains("List.sliding(xs: List[T], n: Int): List[List[T]]"),
             "{h}"
         );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.slice(["a", "b", "c"], 1, 3), ","))
+"#;
+        let h = hover_src(src, "slice");
+        assert!(
+            h.contains("List.slice(xs: List[T], from: Int, until: Int): List[T]"),
+            "{h}"
+        );
     }
 
     #[test]
@@ -1494,6 +1514,22 @@ mod tests {
         let h = hover_src(src, "exists");
         assert!(
             h.contains("List.exists(xs: List[T], pred: T => Bool): Bool"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.indexWhere(["a", "b"], x => x == "b")))
+"#;
+        let h = hover_src(src, "indexWhere");
+        assert!(
+            h.contains("List.indexWhere(xs: List[T], pred: T => Bool): Int"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.lastIndexWhere(["a", "b"], x => x == "b")))
+"#;
+        let h = hover_src(src, "lastIndexWhere");
+        assert!(
+            h.contains("List.lastIndexWhere(xs: List[T], pred: T => Bool): Int"),
             "{h}"
         );
     }

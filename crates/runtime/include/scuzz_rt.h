@@ -498,6 +498,12 @@ SzList *sz_list_intersperse(SzList *xs, void *x);
 SzList *sz_list_grouped(SzList *xs, int64_t n);
 /* Overlapping windows of length `n`. n <= 0 or n > len is empty. */
 SzList *sz_list_sliding(SzList *xs, int64_t n);
+/* Cells `[from, until)`. Negative `from` / `until` is 0. Empty when until <= from. */
+SzList *sz_list_slice(SzList *xs, int64_t from, int64_t until);
+/* First index where `pred` is true, or -1. */
+int64_t sz_list_index_where(SzList *xs, SzListPred pred, void *env);
+/* Last index where `pred` is true, or -1. */
+int64_t sz_list_last_index_where(SzList *xs, SzListPred pred, void *env);
 /* Release the spine; heads drop through RC. */
 void sz_list_free(SzList *xs);
 SzString *sz_list_join(const SzList *xs, const char *sep);

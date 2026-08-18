@@ -3576,6 +3576,54 @@ int main(void) {
     sz_string_free(c);
   }
 
+  /* List.slice: [from, until). Negative is 0. until <= from is empty. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzString *c = sz_string_from_cstr("c");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_cons(c, sz_list_nil())));
+    SzList *ys;
+    ys = sz_list_slice(xs, 1, 3);
+    assert(sz_list_len(ys) == 2);
+    assert(ys->head == b);
+    assert(ys->tail && ys->tail->head == c);
+    sz_list_free(ys);
+    ys = sz_list_slice(xs, 0, 3);
+    assert(sz_list_len(ys) == 3);
+    sz_list_free(ys);
+    ys = sz_list_slice(xs, 2, 2);
+    assert(sz_list_is_empty(ys));
+    ys = sz_list_slice(xs, -1, 1);
+    assert(sz_list_len(ys) == 1);
+    assert(ys->head == a);
+    sz_list_free(ys);
+    ys = sz_list_slice(xs, 1, 9);
+    assert(sz_list_len(ys) == 2);
+    sz_list_free(ys);
+    ys = sz_list_slice(NULL, 0, 2);
+    assert(sz_list_is_empty(ys));
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
+  }
+
+  /* List.indexWhere / lastIndexWhere: first/last match or -1. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzString *c = sz_string_from_cstr("c");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_cons(c, sz_list_nil())));
+    assert(sz_list_index_where(xs, keep_not_b, NULL) == 0);
+    assert(sz_list_last_index_where(xs, keep_not_b, NULL) == 2);
+    assert(sz_list_index_where(NULL, keep_not_b, NULL) == -1);
+    assert(sz_list_last_index_where(NULL, keep_not_b, NULL) == -1);
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
+  }
+
   /* List.append retains the element. The caller drops their ref. */
   {
     size_t base_bytes = 0, base_count = 0;

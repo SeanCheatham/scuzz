@@ -160,6 +160,9 @@ jobs:
           grep -q "isp:a,|,b,|,c" /tmp/kernel.out
           grep -q "grp:a,b|c" /tmp/kernel.out
           grep -q "sld:a,b|b,c" /tmp/kernel.out
+          grep -q "lslice:b,c" /tmp/kernel.out
+          grep -q "ixw:1" /tmp/kernel.out
+          grep -q "lixw:2" /tmp/kernel.out
           grep -q "slen:3" /tmp/kernel.out
           grep -q "slice:bc" /tmp/kernel.out
           grep -q "ix:1" /tmp/kernel.out

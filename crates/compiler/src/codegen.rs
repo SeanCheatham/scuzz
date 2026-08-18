@@ -169,6 +169,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_intersperse(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_grouped(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_list_sliding(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_list_slice(ptr, i64, i64)").unwrap();
+    writeln!(out, "declare i64 @sz_list_index_where(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_list_last_index_where(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_write(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_list(ptr)").unwrap();
@@ -3263,6 +3266,26 @@ fn emit_call(
     if callee == "List.exists" {
         return emit_list_pred_i64("List.exists", "sz_list_exists", args, ctx, locals, prefix);
     }
+    if callee == "List.indexWhere" {
+        return emit_list_pred_i64(
+            "List.indexWhere",
+            "sz_list_index_where",
+            args,
+            ctx,
+            locals,
+            prefix,
+        );
+    }
+    if callee == "List.lastIndexWhere" {
+        return emit_list_pred_i64(
+            "List.lastIndexWhere",
+            "sz_list_last_index_where",
+            args,
+            ctx,
+            locals,
+            prefix,
+        );
+    }
     if callee == "List.count" {
         return emit_list_pred_i64("List.count", "sz_list_count", args, ctx, locals, prefix);
     }
@@ -4037,6 +4060,16 @@ fn emit_call(
                 code,
                 "  %{prefix}_v = call ptr @{rt}(ptr {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "List.slice" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_slice(ptr {}, i64 {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
@@ -7358,6 +7391,46 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of string {name} after Str.nonEmpty:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_slice_index_where() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(List.slice(["a", "b", "c"], 1, 3), ","))
+    _ <- IO.println(Str.fromInt(List.indexWhere(["a", "b", "c"], x => x == "b")))
+    _ <- IO.println(Str.fromInt(List.lastIndexWhere(["a", "b", "c"], x => x != "z")))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_slice"));
+        assert!(ir.contains("sz_list_index_where"));
+        assert!(ir.contains("sz_list_last_index_where"));
+        let needle = "call ptr @sz_list_slice(ptr ";
+        let at = ir.find(needle).expect("slice");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.slice:\n{ir}"
+        );
+        let ix_at = ir
+            .find("call i64 @sz_list_index_where")
+            .expect("indexWhere");
+        let ix_pack = last_cl2_before(&ir, ix_at);
+        assert!(
+            ir[ix_at..].contains(&format!("call void @sz_release(ptr {ix_pack})")),
+            "expected last-use release of indexWhere closure {ix_pack}:\n{ir}"
+        );
+        let lix_at = ir
+            .find("call i64 @sz_list_last_index_where")
+            .expect("lastIndexWhere");
+        let lix_pack = last_cl2_before(&ir, lix_at);
+        assert!(
+            ir[lix_at..].contains(&format!("call void @sz_release(ptr {lix_pack})")),
+            "expected last-use release of lastIndexWhere closure {lix_pack}:\n{ir}"
         );
     }
 

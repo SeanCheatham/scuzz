@@ -722,6 +722,13 @@ mod tests {
     }
 
     #[test]
+    fn completes_list_slice_after_dot() {
+        let src = "@main def main: IO[Unit] = List.slic\n";
+        let labels = labels_at(src, "List.slic");
+        assert!(labels.iter().any(|l| l == "List.slice"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_list_reverse_after_dot() {
         let src = "@main def main: IO[Unit] = List.rev\n";
         let labels = labels_at(src, "List.rev");
@@ -733,6 +740,23 @@ mod tests {
         let src = "@main def main: IO[Unit] = List.ex\n";
         let labels = labels_at(src, "List.ex");
         assert!(labels.iter().any(|l| l == "List.exists"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_index_where_after_dot() {
+        let src = "@main def main: IO[Unit] = List.indexW\n";
+        let labels = labels_at(src, "List.indexW");
+        assert!(labels.iter().any(|l| l == "List.indexWhere"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_list_last_index_where_after_dot() {
+        let src = "@main def main: IO[Unit] = List.lastIndexW\n";
+        let labels = labels_at(src, "List.lastIndexW");
+        assert!(
+            labels.iter().any(|l| l == "List.lastIndexWhere"),
+            "{labels:?}"
+        );
     }
 
     #[test]

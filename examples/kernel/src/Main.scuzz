@@ -155,6 +155,9 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"isp:${List.join(List.intersperse(xs, "|"), ",")}")
     _ <- IO.println(s"grp:${List.join(List.map(List.grouped(xs, 2), g => List.join(g, ",")), "|")}")
     _ <- IO.println(s"sld:${List.join(List.map(List.sliding(xs, 2), g => List.join(g, ",")), "|")}")
+    _ <- IO.println(s"lslice:${List.join(List.slice(xs, 1, 3), ",")}")
+    _ <- IO.println(s"ixw:${Str.fromInt(List.indexWhere(xs, x => x == "b"))}")
+    _ <- IO.println(s"lixw:${Str.fromInt(List.lastIndexWhere(xs, x => x != "z"))}")
   } yield ()
 
 def strProof(): IO[Unit] =

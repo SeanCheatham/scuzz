@@ -409,6 +409,53 @@ SzList *sz_list_sliding(SzList *xs, int64_t n) {
   return out;
 }
 
+SzList *sz_list_slice(SzList *xs, int64_t from, int64_t until) {
+  size_t len = sz_list_len(xs);
+  SzList *dropped;
+  SzList *out;
+  int64_t n;
+  if (from < 0)
+    from = 0;
+  if (until < 0)
+    until = 0;
+  if ((uint64_t)from >= (uint64_t)len || until <= from)
+    return NULL;
+  if ((uint64_t)until > (uint64_t)len)
+    until = (int64_t)len;
+  n = until - from;
+  dropped = sz_list_drop(xs, from);
+  out = sz_list_take(dropped, n);
+  sz_release(dropped);
+  return out;
+}
+
+int64_t sz_list_index_where(SzList *xs, SzListPred pred, void *env) {
+  SzList *p;
+  int64_t i = 0;
+  if (!pred)
+    sz_panic("sz_list_index_where(null pred)");
+  for (p = xs; p; p = p->tail) {
+    if (pred(p->head, env))
+      return i;
+    i++;
+  }
+  return -1;
+}
+
+int64_t sz_list_last_index_where(SzList *xs, SzListPred pred, void *env) {
+  SzList *p;
+  int64_t i = 0;
+  int64_t hit = -1;
+  if (!pred)
+    sz_panic("sz_list_last_index_where(null pred)");
+  for (p = xs; p; p = p->tail) {
+    if (pred(p->head, env))
+      hit = i;
+    i++;
+  }
+  return hit;
+}
+
 int sz_list_non_empty(const SzList *xs) { return xs != NULL; }
 
 void sz_list_free(SzList *xs) { sz_release(xs); }

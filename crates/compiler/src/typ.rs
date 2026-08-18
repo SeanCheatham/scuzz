@@ -1061,8 +1061,18 @@ fn kit_lambda_param_ty_at(
         ("Signal.map", 1) => Some(Type::Int),
         ("View.each", 1) if nargs == 2 => Some(Type::String),
         (
-            "List.filter" | "List.filterNot" | "List.map" | "List.flatMap" | "List.find"
-            | "List.exists" | "List.count" | "List.takeWhile" | "List.dropWhile" | "List.forall",
+            "List.filter"
+            | "List.filterNot"
+            | "List.map"
+            | "List.flatMap"
+            | "List.find"
+            | "List.exists"
+            | "List.count"
+            | "List.takeWhile"
+            | "List.dropWhile"
+            | "List.forall"
+            | "List.indexWhere"
+            | "List.lastIndexWhere",
             1,
         ) => prior.first().and_then(|t| list_elem(t).ok()),
         ("List.tabulate", 1) => Some(Type::Int),
@@ -1099,9 +1109,21 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
         ("Signal.map", 1) | ("Stream.map", 1) => Some(Type::String),
         ("List.flatMap", 1) => Some(list_of(Type::Opaque("Elem".into()))),
         (
-            "List.filter" | "List.filterNot" | "List.find" | "List.exists" | "List.count"
-            | "List.takeWhile" | "List.dropWhile" | "List.forall" | "Stream.filter"
-            | "Stream.takeWhile" | "Stream.dropWhile" | "Stream.find" | "Stream.exists",
+            "List.filter"
+            | "List.filterNot"
+            | "List.find"
+            | "List.exists"
+            | "List.count"
+            | "List.takeWhile"
+            | "List.dropWhile"
+            | "List.forall"
+            | "List.indexWhere"
+            | "List.lastIndexWhere"
+            | "Stream.filter"
+            | "Stream.takeWhile"
+            | "Stream.dropWhile"
+            | "Stream.find"
+            | "Stream.exists",
             1,
         ) => Some(Type::Bool),
         (
@@ -2016,6 +2038,13 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(arg_tys[0].clone())
         }
+        "List.slice" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            list_elem(&arg_tys[0])?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            expect_ty(&arg_tys[2], &Type::Int)?;
+            Ok(arg_tys[0].clone())
+        }
         "List.concat" => {
             expect_arity(callee, &arg_tys, 2)?;
             let a = list_elem(&arg_tys[0])?;
@@ -2080,6 +2109,11 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 2)?;
             list_elem(&arg_tys[0])?;
             Ok(Type::Bool)
+        }
+        "List.indexWhere" | "List.lastIndexWhere" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            list_elem(&arg_tys[0])?;
+            Ok(Type::Int)
         }
         "List.count" => {
             expect_arity(callee, &arg_tys, 2)?;
@@ -6019,6 +6053,20 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.grouped/sliding and nonEmpty should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_slice_index_where() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = ["a", "b", "c"]
+    _ <- IO.println(List.join(List.slice(xs, 1, 3), ","))
+    _ <- IO.println(Str.fromInt(List.indexWhere(xs, x => x == "b")))
+    _ <- IO.println(Str.fromInt(List.lastIndexWhere(xs, x => x != "z")))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.slice/indexWhere/lastIndexWhere should typecheck");
     }
 
     #[test]
