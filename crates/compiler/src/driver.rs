@@ -121,11 +121,7 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
     std::fs::create_dir_all(&opts.out_dir)?;
     let cache_dir = opts.project_dir.join(".scuzz");
     std::fs::create_dir_all(&cache_dir)?;
-    let fp_path = cache_dir.join(if opts.verify {
-        "fingerprint.verify"
-    } else {
-        "fingerprint"
-    });
+    let fp_path = cache_dir.join(fingerprint_cache_name(opts.verify));
     let exe = opts.out_dir.join(&exe_name);
     let ll_path = opts.out_dir.join(format!("{exe_name}.ll"));
 
@@ -144,7 +140,7 @@ pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
 
     let program = prepare_program(&resolved, opts.verify)?;
     let out = compile_prepared_program(opts, program)?;
-    std::fs::write(&fp_path, &fingerprint)?;
+    store_compile_fingerprint(&cache_dir, opts.verify, &fingerprint)?;
     Ok(out)
 }
 
@@ -176,6 +172,8 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
             driver_table_text(&program),
         )?;
         std::fs::write(opts.out_dir.join("sometimes.declared"), declared)?;
+    } else {
+        let _ = std::fs::remove_file(opts.out_dir.join("drivers.txt"));
     }
 
     let _native = NATIVE_LINK_LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -443,6 +441,25 @@ fn fingerprint_resolved_into(resolved: &ResolvedProject, verify: bool, h: &mut D
             ov.text.hash(h);
         }
     }
+}
+
+fn fingerprint_cache_name(verify: bool) -> &'static str {
+    if verify {
+        "fingerprint.verify"
+    } else {
+        "fingerprint"
+    }
+}
+
+/// Write this mode's fingerprint. Drop the sibling so live and verify
+/// compiles cannot share one `build/` binary.
+fn store_compile_fingerprint(cache_dir: &Path, verify: bool, fingerprint: &str) -> Result<()> {
+    std::fs::write(cache_dir.join(fingerprint_cache_name(verify)), fingerprint)?;
+    let sibling = cache_dir.join(fingerprint_cache_name(!verify));
+    if sibling.is_file() {
+        std::fs::remove_file(&sibling)?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1104,6 +1121,26 @@ mod tests {
             .collect();
         let err = parse_sources(&named).unwrap_err().to_string();
         assert!(err.contains("multiple @main"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn store_compile_fingerprint_drops_sibling_mode() {
+        let tmp = tempdir().unwrap();
+        let cache = tmp.path();
+        fs::write(cache.join("fingerprint.verify"), "old-verify").unwrap();
+        store_compile_fingerprint(cache, false, "live-fp").unwrap();
+        assert_eq!(
+            fs::read_to_string(cache.join("fingerprint")).unwrap(),
+            "live-fp"
+        );
+        assert!(!cache.join("fingerprint.verify").is_file());
+        fs::write(cache.join("fingerprint"), "stale-live").unwrap();
+        store_compile_fingerprint(cache, true, "verify-fp").unwrap();
+        assert_eq!(
+            fs::read_to_string(cache.join("fingerprint.verify")).unwrap(),
+            "verify-fp"
+        );
+        assert!(!cache.join("fingerprint").is_file());
     }
 
     #[test]

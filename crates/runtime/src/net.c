@@ -32,6 +32,12 @@ static SzIo *fail_drop(SzError *err) {
   return io;
 }
 
+static void *rc_box_zero(size_t n) {
+  void *p = sz_rc_alloc(n, SZ_RC_BOX);
+  memset(p, 0, n);
+  return p;
+}
+
 /* Blessed Net.httpGet — live HTTP/1.0 GET or TestRuntime stub map.
  * Live hostnames query A and AAAA together (park on poll). CNAME chains
  * re-query both (cap 5). When both addresses exist, start AAAA first and wait
@@ -50,6 +56,7 @@ typedef struct {
   } as;
 } NetResult;
 
+/* DELAY wraps `r` in PURE (extra retain at run). Drop that retain here. */
 static SzIo *unwrap_net(void *value, void *env) {
   (void)env;
   NetResult *r = (NetResult *)value;
@@ -58,13 +65,13 @@ static SzIo *unwrap_net(void *value, void *env) {
   if (r->is_err) {
     SzError *err = r->as.err;
     r->as.err = NULL;
-    sz_free(r);
+    sz_release(r);
     return fail_drop(err);
   }
   {
     void *ok = r->as.ok;
     r->as.ok = NULL;
-    sz_free(r);
+    sz_release(r);
     return pure_drop(ok);
   }
 }
@@ -516,7 +523,7 @@ static void get_free(GetSt *st) {
 
 static void *get_start(void *env) {
   GetSt *st = (GetSt *)env;
-  NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
+  NetResult *r = (NetResult *)rc_box_zero(sizeof(NetResult));
   const char *url = sz_string_cstr(st->url);
   int port = 80;
   int is_v6 = 0;
@@ -600,7 +607,7 @@ static void *dns_wait_more(GetSt *st, NetResult *r) {
 
 static void *get_dns_recv(void *env) {
   GetSt *st = (GetSt *)env;
-  NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
+  NetResult *r = (NetResult *)rc_box_zero(sizeof(NetResult));
   uint8_t buf[512];
   ssize_t n;
 
@@ -701,7 +708,7 @@ static void get_build_req(GetSt *st) {
 
 static void *get_tcp_connect(void *env) {
   GetSt *st = (GetSt *)env;
-  NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
+  NetResult *r = (NetResult *)rc_box_zero(sizeof(NetResult));
   int fd;
 
   if (st->got_aaaa)
@@ -776,19 +783,19 @@ static int he_start_v4(GetSt *st) {
 }
 
 static void *get_he_pick(GetSt *st) {
-  NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
+  NetResult *r = (NetResult *)rc_box_zero(sizeof(NetResult));
   int w6 = fd_pollout(st->fd6);
   int w4 = fd_pollout(st->fd4);
   int e6 = fd_soerr(st->fd6);
   int e4 = fd_soerr(st->fd4);
   if (w6 && e6 == 0) {
     he_take(st, st->fd6, st->fd4);
-    sz_free(r);
+    sz_release(r);
     return get_check_write(st);
   }
   if (w4 && e4 == 0) {
     he_take(st, st->fd4, st->fd6);
-    sz_free(r);
+    sz_release(r);
     return get_check_write(st);
   }
   if (w6 && e6 != 0) {
@@ -824,7 +831,7 @@ static void *get_check_write(void *env) {
 
   if (st->fd < 0)
     return get_he_pick(st);
-  r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
+  r = (NetResult *)rc_box_zero(sizeof(NetResult));
   if (!fd_pollout(st->fd)) {
     if (sz_clock_monotonic_ms_sync() >= st->connect_deadline_ms) {
       r->is_err = 1;
@@ -858,7 +865,7 @@ static void *get_check_write(void *env) {
 
 static void *get_read(void *env) {
   GetSt *st = (GetSt *)env;
-  NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
+  NetResult *r = (NetResult *)rc_box_zero(sizeof(NetResult));
   char buf[4096];
   ssize_t n;
   char *body;
@@ -908,7 +915,7 @@ static SzIo *get_unwrap_write(void *value, void *env) {
   GetSt *st = (GetSt *)env;
   NetResult *r = (NetResult *)value;
   if (r && r->retry) {
-    sz_free(r);
+    sz_release(r);
     return get_poll_write(NULL, st);
   }
   return unwrap_net(value, NULL);
@@ -918,7 +925,7 @@ static SzIo *get_unwrap_read(void *value, void *env) {
   GetSt *st = (GetSt *)env;
   NetResult *r = (NetResult *)value;
   if (r && r->retry) {
-    sz_free(r);
+    sz_release(r);
     return get_poll_read(NULL, st);
   }
   return unwrap_net(value, NULL);
@@ -1002,7 +1009,7 @@ static SzIo *get_unwrap_dns(void *value, void *env) {
   GetSt *st = (GetSt *)env;
   NetResult *r = (NetResult *)value;
   if (r && r->retry) {
-    sz_free(r);
+    sz_release(r);
     return get_poll_dns(NULL, st);
   }
   return unwrap_net(value, NULL);
@@ -1037,7 +1044,7 @@ static SzIo *get_after_start(void *value, void *env) {
   NetResult *r = (NetResult *)value;
   if (!r || r->is_err)
     return unwrap_net(value, NULL);
-  sz_free(r);
+  sz_release(r);
   if (st->dns_fd >= 0)
     return fm_drop(get_poll_dns(NULL, st), get_after_resolved, st);
   return get_after_resolved(NULL, st);
@@ -1219,7 +1226,7 @@ static int serve_bind_v6(int port) {
 
 static void *serve_ensure_listen(void *env) {
   ServeSt *st = (ServeSt *)env;
-  NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
+  NetResult *r = (NetResult *)rc_box_zero(sizeof(NetResult));
   int port;
 
   if (sz_testrt_net_is_fake()) {
@@ -1250,7 +1257,7 @@ static void *serve_ensure_listen(void *env) {
 
 static void *serve_accept(void *env) {
   ServeSt *st = (ServeSt *)env;
-  NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
+  NetResult *r = (NetResult *)rc_box_zero(sizeof(NetResult));
   int fd;
   int conn = -1;
 
@@ -1310,7 +1317,7 @@ static void *serve_accept(void *env) {
 
 static void *serve_read_req(void *env) {
   ServeSt *st = (ServeSt *)env;
-  NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
+  NetResult *r = (NetResult *)rc_box_zero(sizeof(NetResult));
   ssize_t n;
   char path[1024];
 
@@ -1362,7 +1369,7 @@ static void *serve_read_req(void *env) {
 
 static void *serve_write_close(void *env) {
   ServeSt *st = (ServeSt *)env;
-  NetResult *r = (NetResult *)sz_alloc_zero(sizeof(NetResult));
+  NetResult *r = (NetResult *)rc_box_zero(sizeof(NetResult));
   SzString *body = (SzString *)st->body;
   const char *data = body ? sz_string_cstr(body) : "";
   size_t len = body ? (size_t)sz_string_len(body) : 0;
@@ -1442,7 +1449,7 @@ static SzIo *serve_unwrap_accept(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
   NetResult *r = (NetResult *)value;
   if (r && r->retry) {
-    sz_free(r);
+    sz_release(r);
     return serve_poll_then_accept(NULL, st);
   }
   return unwrap_net(value, NULL);
@@ -1460,12 +1467,13 @@ static SzIo *serve_unwrap_read(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
   NetResult *r = (NetResult *)value;
   if (r && r->retry) {
-    sz_free(r);
+    sz_release(r);
     return serve_poll_conn_read(NULL, st);
   }
   if (r && r->drop) {
     SzError *err = r->as.err;
-    sz_free(r);
+    r->as.err = NULL;
+    sz_release(r);
     return serve_drop_conn(st, err);
   }
   return unwrap_net(value, NULL);
@@ -1475,12 +1483,13 @@ static SzIo *serve_unwrap_write(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
   NetResult *r = (NetResult *)value;
   if (r && r->retry) {
-    sz_free(r);
+    sz_release(r);
     return serve_poll_conn_write(NULL, st);
   }
   if (r && r->drop) {
     SzError *err = r->as.err;
-    sz_free(r);
+    r->as.err = NULL;
+    sz_release(r);
     return serve_drop_conn(st, err);
   }
   return unwrap_net(value, NULL);

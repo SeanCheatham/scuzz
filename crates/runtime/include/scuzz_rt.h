@@ -247,8 +247,9 @@ struct SzIo {
 };
 
 /* Callee retains the value. Caller drops after the call. Last sz_release of
- * the IO node drops a leftover payload. Run retains so last-use of the result
- * does not free the node slot. */
+ * the IO node drops a leftover RC payload. Delay result boxes are RC; unwrap
+ * takes ok/err and drops the box. Run retains so last-use of the result does
+ * not free the node slot. */
 SzIo *sz_io_pure(void *value);
 /* Callee retains a RC env. Caller drops after the call. Last sz_release of
  * the delay node drops leftover RC env or a leftover sz_alloc env. It does

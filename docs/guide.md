@@ -1,6 +1,6 @@
 # Scuzz Lang app guide
 
-Short path from install to a Headless UI or IO app. For product thesis, design locks, and direction see [vision.md](vision.md).
+Short path from install to a Headless UI or IO app. For product thesis, design locks, and direction see [vision.md](vision.md). For checkout host setup see [developer-environment.md](developer-environment.md).
 
 ## UI path
 

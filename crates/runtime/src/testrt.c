@@ -25,6 +25,12 @@ static SzIo *fail_drop(SzError *err) {
   return io;
 }
 
+static void *rc_box_zero(size_t n) {
+  void *p = sz_rc_alloc(n, SZ_RC_BOX);
+  memset(p, 0, n);
+  return p;
+}
+
 void sz_testrt_clock_reset_live(void);
 void sz_testrt_random_reset_live(void);
 static void sz_testrt_fs_reset_live(void);
@@ -147,6 +153,7 @@ typedef struct {
   } as;
 } BoxResult;
 
+/* DELAY wraps `r` in PURE (extra retain at run). Drop that retain here. */
 static SzIo *unwrap_box(void *value, void *env) {
   (void)env;
   BoxResult *r = (BoxResult *)value;
@@ -155,13 +162,13 @@ static SzIo *unwrap_box(void *value, void *env) {
   if (r->is_err) {
     SzError *err = r->as.err;
     r->as.err = NULL;
-    sz_free(r);
+    sz_release(r);
     return fail_drop(err);
   }
   {
     void *ok = r->as.ok;
     r->as.ok = NULL;
-    sz_free(r);
+    sz_release(r);
     return pure_drop(ok);
   }
 }
@@ -181,7 +188,7 @@ static SzIo *testrt_fs_bind(SzString *path, SzThunk thunk) {
 static void *mem_read(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path_s = pack_path(pack);
-  BoxResult *r = (BoxResult *)sz_alloc(sizeof(BoxResult));
+  BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
   char *path = norm_path(sz_string_cstr(path_s));
   MemNode *n = fs_find(path);
   sz_free(path);
@@ -205,7 +212,7 @@ static void *mem_write(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path_s = (SzString *)pack->left;
   SzString *contents = (SzString *)pack->right;
-  BoxResult *r = (BoxResult *)sz_alloc(sizeof(BoxResult));
+  BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
   char *path = norm_path(sz_string_cstr(path_s));
   char parent[1024];
   MemNode *n;
@@ -307,7 +314,7 @@ static int is_direct_child(const char *dir, const char *child) {
 static void *mem_list(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path_s = pack_path(pack);
-  BoxResult *r = (BoxResult *)sz_alloc(sizeof(BoxResult));
+  BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
   char *path = norm_path(sz_string_cstr(path_s));
   MemNode *dir = fs_find(path);
   MemNode *n;
@@ -354,7 +361,7 @@ SzIo *sz_testrt_fs_list(SzString *path) {
 static void *mem_mkdirs(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path_s = pack_path(pack);
-  BoxResult *r = (BoxResult *)sz_alloc(sizeof(BoxResult));
+  BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
   char *path = norm_path(sz_string_cstr(path_s));
   char tmp[1024];
   size_t len = strlen(path);
@@ -462,7 +469,7 @@ static char *canon_path(const char *p) {
 static void *mem_canonicalize(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path_s = pack_path(pack);
-  BoxResult *r = (BoxResult *)sz_alloc(sizeof(BoxResult));
+  BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
   char *path = canon_path(sz_string_cstr(path_s));
   MemNode *n = fs_find(path);
   if (!n) {
@@ -591,7 +598,7 @@ void sz_testrt_net_stub(const char *url, const char *body) {
 
 static void *stub_http_get(void *env) {
   SzString *url_s = (SzString *)env;
-  BoxResult *r = (BoxResult *)sz_alloc(sizeof(BoxResult));
+  BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
   const char *url = sz_string_cstr(url_s);
   NetStub *s;
   for (s = g_stubs; s; s = s->next) {
