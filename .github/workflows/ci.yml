@@ -106,6 +106,7 @@ jobs:
           grep -q "has:y" /tmp/kernel.out
           grep -q "set:y" /tmp/kernel.out
           grep -q "keys:a,b" /tmp/kernel.out
+          grep -q "vals:1,2" /tmp/kernel.out
           grep -q "msize:2" /tmp/kernel.out
           grep -q "gone:n" /tmp/kernel.out
           grep -q "slist:x,y" /tmp/kernel.out
@@ -124,6 +125,10 @@ jobs:
           grep -q "miss:9" /tmp/kernel.out
           grep -q "repl:a:b" /tmp/kernel.out
           grep -q "split:a:b" /tmp/kernel.out
+          grep -q "empty:y" /tmp/kernel.out
+          grep -q "lower:ab" /tmp/kernel.out
+          grep -q "upper:AB" /tmp/kernel.out
+          grep -q "repeat:aaa" /tmp/kernel.out
           grep -q "concat:a,b,c" /tmp/kernel.out
           grep -q "flat:a,b,c" /tmp/kernel.out
           cargo run -p scuzz -- run examples/io | tee /tmp/io.out

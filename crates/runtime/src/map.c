@@ -140,6 +140,18 @@ static SzList *map_keys_acc(SzMap *m, SzList *acc) {
 
 SzList *sz_map_keys(SzMap *m) { return map_keys_acc(m, NULL); }
 
+static SzList *map_values_acc(SzMap *m, SzList *acc) {
+  SzList *next;
+  if (!m)
+    return acc;
+  acc = map_values_acc(m->right, acc);
+  next = sz_list_cons(m->val, acc);
+  sz_release(acc);
+  return map_values_acc(m->left, next);
+}
+
+SzList *sz_map_values(SzMap *m) { return map_values_acc(m, NULL); }
+
 int64_t sz_map_size(SzMap *m) {
   if (!m)
     return 0;

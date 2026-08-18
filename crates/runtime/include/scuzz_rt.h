@@ -72,6 +72,12 @@ int64_t sz_string_to_int(const SzString *s, int64_t dflt);
 /* Replace every non-overlapping `oldv`. Empty `oldv` copies `s`. */
 SzString *sz_string_replace(const SzString *s, const SzString *oldv, const SzString *newv);
 SzString *sz_string_trim(const SzString *s);
+int64_t sz_string_is_empty(const SzString *s);
+/* ASCII A-Z / a-z only. Other bytes stay. */
+SzString *sz_string_to_lower(const SzString *s);
+SzString *sz_string_to_upper(const SzString *s);
+/* Repeat `s` `n` times. `n` <= 0 is empty. */
+SzString *sz_string_repeat(const SzString *s, int64_t n);
 
 typedef struct SzList SzList;
 typedef struct SzMap SzMap;
@@ -459,6 +465,8 @@ int64_t sz_map_contains(SzMap *m, void *key);
 SzMap *sz_map_remove(SzMap *m, void *key);
 /* Inorder keys as a new list. Cons retains keys. */
 SzList *sz_map_keys(SzMap *m);
+/* Inorder values as a new list. Cons retains values. */
+SzList *sz_map_values(SzMap *m);
 int64_t sz_map_size(SzMap *m);
 
 /* Blessed filesystem IO (live or TestRuntime mem FS; chosen when the IO runs) */

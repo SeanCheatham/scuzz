@@ -1906,6 +1906,22 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::String)
         }
+        "Str.isEmpty" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::Bool)
+        }
+        "Str.toLower" | "Str.toUpper" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::String)
+        }
+        "Str.repeat" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(Type::String)
+        }
         "List.empty" => {
             expect_arity(callee, &arg_tys, 0)?;
             Ok(list_of(Type::Opaque("Elem".into())))
@@ -2040,6 +2056,11 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 1)?;
             let (k, _) = map_kv(&arg_tys[0])?;
             Ok(list_of(k))
+        }
+        "Map.values" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            let (_, v) = map_kv(&arg_tys[0])?;
+            Ok(list_of(v))
         }
         "Map.size" => {
             expect_arity(callee, &arg_tys, 1)?;
@@ -5848,6 +5869,7 @@ enum Color:
     gone = Map.remove(m, "b")
     dropped = Set.remove(s, "x")
     _ <- IO.println(List.join(Map.keys(m), ","))
+    _ <- IO.println(List.join(Map.values(m), ","))
     _ <- IO.println(s"${Map.size(m)}")
     _ <- IO.println(if (Map.contains(gone, "b")) "y" else "n")
     _ <- IO.println(List.join(Set.toList(s), ","))
@@ -5857,6 +5879,20 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Map.remove/keys/size should typecheck");
+    }
+
+    #[test]
+    fn typechecks_str_is_empty_case_repeat() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(if (Str.isEmpty("")) "y" else "n")
+    _ <- IO.println(Str.toLower("Ab"))
+    _ <- IO.println(Str.toUpper("Ab"))
+    _ <- IO.println(Str.repeat("a", 3))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Str.isEmpty/toLower/toUpper/repeat should typecheck");
     }
 
     #[test]

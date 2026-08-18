@@ -2115,6 +2115,25 @@ int main(void) {
       sz_string_free(empty);
     }
     {
+      assert(sz_string_is_empty(sz_string_from_cstr("")) == 1);
+      assert(sz_string_is_empty(sz_string_from_cstr("a")) == 0);
+      assert(sz_string_is_empty(NULL) == 1);
+      {
+        SzString *low = sz_string_to_lower(sz_string_from_cstr("AbC!"));
+        SzString *up = sz_string_to_upper(sz_string_from_cstr("AbC!"));
+        SzString *rep = sz_string_repeat(sz_string_from_cstr("ab"), 3);
+        SzString *none = sz_string_repeat(sz_string_from_cstr("ab"), 0);
+        assert(strcmp(sz_string_cstr(low), "abc!") == 0);
+        assert(strcmp(sz_string_cstr(up), "ABC!") == 0);
+        assert(strcmp(sz_string_cstr(rep), "ababab") == 0);
+        assert(sz_string_is_empty(none) == 1);
+        sz_string_free(low);
+        sz_string_free(up);
+        sz_string_free(rep);
+        sz_string_free(none);
+      }
+    }
+    {
       SzString *tr = sz_string_trim(sz_string_from_cstr("  foo\t"));
       assert(strcmp(sz_string_cstr(tr), "foo") == 0);
       tr = sz_string_trim(sz_string_from_cstr("bar"));
@@ -3612,6 +3631,14 @@ int main(void) {
     assert(strcmp(sz_string_cstr((SzString *)sz_list_head(sz_list_tail(ks))), "b") ==
            0);
     sz_list_free(ks);
+    {
+      SzList *vs = sz_map_values(m2);
+      assert(sz_list_len(vs) == 2);
+      assert(strcmp(sz_string_cstr((SzString *)sz_list_head(vs)), "1") == 0);
+      assert(strcmp(sz_string_cstr((SzString *)sz_list_head(sz_list_tail(vs))), "2") ==
+             0);
+      sz_list_free(vs);
+    }
     gone = sz_map_remove(m2, kb);
     assert(sz_map_contains(gone, kb) == 0);
     assert(sz_map_contains(m2, kb) == 1);

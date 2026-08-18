@@ -81,6 +81,10 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare i64 @sz_string_to_int(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_string_replace(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_trim(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_string_is_empty(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_string_to_lower(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_string_to_upper(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_string_repeat(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_string_lines(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_split(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_println(ptr)").unwrap();
@@ -122,6 +126,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare i64 @sz_map_contains(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_map_remove(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_map_keys(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_map_values(ptr)").unwrap();
     writeln!(out, "declare i64 @sz_map_size(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_append(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_set_at(ptr, i64, ptr)").unwrap();
@@ -3472,6 +3477,46 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
+        "Str.isEmpty" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @sz_string_is_empty(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "Str.toLower" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_string_to_lower(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Str.toUpper" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_string_to_upper(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Str.repeat" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_string_repeat(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
         "List.empty" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_list_nil()").unwrap();
             owned_ptr(code, format!("%{prefix}_v"))
@@ -3839,6 +3884,16 @@ fn emit_call(
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @sz_map_keys(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Map.values" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_map_values(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -6691,6 +6746,7 @@ def id(m: Map[String, String]): Map[String, String] = m
     _ <- IO.println(Map.getOrElse(m, "a", "?"))
     _ <- IO.println(if (Set.contains(s, "x")) "y" else "n")
     _ <- IO.println(List.join(Map.keys(gone), ","))
+    _ <- IO.println(List.join(Map.values(gone), ","))
     _ <- IO.println(s"${Map.size(gone)}")
     _ <- IO.println(List.join(Set.toList(dropped), ","))
     _ <- IO.println(s"${Set.size(dropped)}")
@@ -6704,6 +6760,7 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(ir.contains("sz_map_contains"));
         assert!(ir.contains("sz_map_remove"));
         assert!(ir.contains("sz_map_keys"));
+        assert!(ir.contains("sz_map_values"));
         assert!(ir.contains("sz_map_size"));
     }
 
@@ -6740,6 +6797,24 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of map {name} after keys:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_map_temp_release_after_values() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join(Map.values(Map.set(Map.empty(), "a", "1")), ","))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_map_values(ptr ";
+        let at = ir.find(needle).expect("expected sz_map_values");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of map {name} after values:\n{ir}"
         );
     }
 
@@ -6849,6 +6924,39 @@ def scale(x: Float): Float = x * 2.0
         crate::typ::typecheck(&p).expect("typecheck");
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_string_trim"));
+    }
+
+    #[test]
+    fn emit_str_is_empty_case_repeat() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(if (Str.isEmpty("")) "y" else "n")
+    _ <- IO.println(Str.toLower("Ab"))
+    _ <- IO.println(Str.toUpper("Ab"))
+    _ <- IO.println(Str.repeat("a", 3))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_string_is_empty"));
+        assert!(ir.contains("sz_string_to_lower"));
+        assert!(ir.contains("sz_string_to_upper"));
+        assert!(ir.contains("sz_string_repeat"));
+        let needle = "call ptr @sz_string_to_lower(ptr ";
+        let at = ir.find(needle).expect("expected sz_string_to_lower");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of string {name} after toLower:\n{ir}"
+        );
+        let needle = "call ptr @sz_string_repeat(ptr ";
+        let at = ir.find(needle).expect("expected sz_string_repeat");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of string {name} after repeat:\n{ir}"
+        );
     }
 
     #[test]

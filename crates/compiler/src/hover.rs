@@ -340,6 +340,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Str.split(s: String, sep: String): List[String]",
     ),
     ("Str.trim", "Str.trim(s: String): String"),
+    ("Str.isEmpty", "Str.isEmpty(s: String): Bool"),
+    ("Str.toLower", "Str.toLower(s: String): String"),
+    ("Str.toUpper", "Str.toUpper(s: String): String"),
+    ("Str.repeat", "Str.repeat(s: String, n: Int): String"),
     ("Signal.int", "Signal.int(n: Int): SignalInt"),
     ("Signal.get", "Signal.get(s: SignalInt): Int"),
     ("Signal.set", "Signal.set(s: SignalInt, n: Int): Unit"),
@@ -600,6 +604,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Map.contains", "Map.contains(m: Map[K, V], k: K): Bool"),
     ("Map.remove", "Map.remove(m: Map[K, V], k: K): Map[K, V]"),
     ("Map.keys", "Map.keys(m: Map[K, V]): List[K]"),
+    ("Map.values", "Map.values(m: Map[K, V]): List[V]"),
     ("Map.size", "Map.size(m: Map[K, V]): Int"),
     ("Set.empty", "Set.empty(): Set[T]"),
     ("Set.add", "Set.add(s: Set[T], x: T): Set[T]"),
@@ -1343,6 +1348,39 @@ mod tests {
             h.contains("Str.split(s: String, sep: String): List[String]"),
             "{h}"
         );
+    }
+
+    #[test]
+    fn hovers_str_is_empty_case_repeat() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (Str.isEmpty("")) "y" else "n")
+"#;
+        let h = hover_src(src, "isEmpty");
+        assert!(h.contains("Str.isEmpty(s: String): Bool"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.toLower("Ab"))
+"#;
+        let h = hover_src(src, "toLower");
+        assert!(h.contains("Str.toLower(s: String): String"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.toUpper("Ab"))
+"#;
+        let h = hover_src(src, "toUpper");
+        assert!(h.contains("Str.toUpper(s: String): String"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.repeat("a", 3))
+"#;
+        let h = hover_src(src, "repeat");
+        assert!(h.contains("Str.repeat(s: String, n: Int): String"), "{h}");
+    }
+
+    #[test]
+    fn hovers_map_values() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(Map.values(Map.set(Map.empty(), "a", "1")), ","))
+"#;
+        let h = hover_src(src, "values");
+        assert!(h.contains("Map.values(m: Map[K, V]): List[V]"), "{h}");
     }
 
     #[test]

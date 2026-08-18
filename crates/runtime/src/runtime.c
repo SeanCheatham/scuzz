@@ -2,6 +2,7 @@
 #include "scuzz_rt.h"
 
 #include <errno.h>
+#include <stdint.h>
 #include <poll.h>
 #include <pthread.h>
 #include <stdio.h>
@@ -751,6 +752,63 @@ SzString *sz_string_trim(const SzString *s) {
   while (j > i && str_is_ws((unsigned char)s->data[j - 1]))
     j--;
   return sz_string_from_bytes(s->data + i, j - i);
+}
+
+int64_t sz_string_is_empty(const SzString *s) {
+  return (!s || !s->data || s->len == 0) ? 1 : 0;
+}
+
+static SzString *sz_string_ascii_case(const SzString *s, int to_upper) {
+  size_t n = s && s->data ? s->len : 0;
+  const char *src = s && s->data ? s->data : "";
+  char *buf = (char *)sz_alloc(n + 1);
+  size_t i;
+  SzString *out;
+  for (i = 0; i < n; i++) {
+    unsigned char c = (unsigned char)src[i];
+    if (to_upper) {
+      if (c >= 'a' && c <= 'z')
+        c = (unsigned char)(c - 32);
+    } else if (c >= 'A' && c <= 'Z') {
+      c = (unsigned char)(c + 32);
+    }
+    buf[i] = (char)c;
+  }
+  buf[n] = '\0';
+  out = sz_string_from_bytes(buf, n);
+  sz_free(buf);
+  return out;
+}
+
+SzString *sz_string_to_lower(const SzString *s) { return sz_string_ascii_case(s, 0); }
+
+SzString *sz_string_to_upper(const SzString *s) { return sz_string_ascii_case(s, 1); }
+
+SzString *sz_string_repeat(const SzString *s, int64_t n) {
+  size_t slen = s && s->data ? s->len : 0;
+  const char *src = s && s->data ? s->data : "";
+  size_t times;
+  size_t out_len;
+  char *buf;
+  SzString *out;
+  size_t i;
+  if (n <= 0)
+    return sz_string_from_cstr("");
+  if (slen == 0)
+    return sz_string_from_cstr("");
+  if ((uint64_t)n > (uint64_t)SIZE_MAX)
+    sz_panic("Str.repeat too large");
+  times = (size_t)n;
+  if (slen > SIZE_MAX / times)
+    sz_panic("Str.repeat too large");
+  out_len = slen * times;
+  buf = (char *)sz_alloc(out_len + 1);
+  for (i = 0; i < times; i++)
+    memcpy(buf + i * slen, src, slen);
+  buf[out_len] = '\0';
+  out = sz_string_from_bytes(buf, out_len);
+  sz_free(buf);
+  return out;
 }
 
 SzList *sz_string_lines(const SzString *s) {

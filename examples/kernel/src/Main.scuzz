@@ -108,6 +108,7 @@ def mapSetProof(): IO[Unit] =
     _ <- IO.println(s"has:${if (Map.contains(mp, "b")) "y" else "n"}")
     _ <- IO.println(s"set:${if (Set.contains(st, "x")) "y" else "n"}")
     _ <- IO.println(s"keys:${List.join(Map.keys(mp), ",")}")
+    _ <- IO.println(s"vals:${List.join(Map.values(mp), ",")}")
     _ <- IO.println(s"msize:${Map.size(mp)}")
     _ <- IO.println(s"gone:${if (Map.contains(gone, "b")) "y" else "n"}")
     _ <- IO.println(s"slist:${List.join(Set.toList(st), ",")}")
@@ -138,6 +139,10 @@ def strProof(): IO[Unit] =
     _ <- IO.println(s"miss:${Str.toInt("x", 9)}")
     _ <- IO.println(s"repl:${Str.replace("a-b", "-", ":")}")
     _ <- IO.println(s"split:${List.join(Str.split("a,b", ","), ":")}")
+    _ <- IO.println(s"empty:${if (Str.isEmpty("")) "y" else "n"}")
+    _ <- IO.println(s"lower:${Str.toLower("Ab")}")
+    _ <- IO.println(s"upper:${Str.toUpper("Ab")}")
+    _ <- IO.println(s"repeat:${Str.repeat("a", 3)}")
   } yield ()
 
 record Box[T](x: T):

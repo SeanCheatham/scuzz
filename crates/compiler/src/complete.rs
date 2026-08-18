@@ -694,6 +694,41 @@ mod tests {
     }
 
     #[test]
+    fn completes_str_is_empty_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.is\n";
+        let labels = labels_at(src, "Str.is");
+        assert!(labels.iter().any(|l| l == "Str.isEmpty"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_to_lower_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.toL\n";
+        let labels = labels_at(src, "Str.toL");
+        assert!(labels.iter().any(|l| l == "Str.toLower"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_to_upper_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.toU\n";
+        let labels = labels_at(src, "Str.toU");
+        assert!(labels.iter().any(|l| l == "Str.toUpper"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_str_repeat_after_dot() {
+        let src = "@main def main: IO[Unit] = Str.repe\n";
+        let labels = labels_at(src, "Str.repe");
+        assert!(labels.iter().any(|l| l == "Str.repeat"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_map_values_after_dot() {
+        let src = "@main def main: IO[Unit] = Map.va\n";
+        let labels = labels_at(src, "Map.va");
+        assert!(labels.iter().any(|l| l == "Map.values"), "{labels:?}");
+    }
+
+    #[test]
     fn completes_list_concat_after_dot() {
         let src = "@main def main: IO[Unit] = List.conc\n";
         let labels = labels_at(src, "List.conc");
