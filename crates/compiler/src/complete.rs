@@ -467,4 +467,22 @@ mod tests {
         assert!(labels2.iter().any(|l| l == "m ="), "{labels2:?}");
         assert!(!labels2.iter().any(|l| l == "n ="), "{labels2:?}");
     }
+
+    #[test]
+    fn completes_record_copy_fields() {
+        let src = r#"
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] = IO.println(Str.fromInt(Point(3, 5).copy()))
+"#;
+        let labels = labels_at(src, ".copy(");
+        assert!(labels.iter().any(|l| l == "x ="), "{labels:?}");
+        assert!(labels.iter().any(|l| l == "y ="), "{labels:?}");
+        let src2 = r#"
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] = IO.println(Str.fromInt(Point(3, 5).copy(x = 1, )))
+"#;
+        let labels2 = labels_at(src2, "x = 1, ");
+        assert!(labels2.iter().any(|l| l == "y ="), "{labels2:?}");
+        assert!(!labels2.iter().any(|l| l == "x ="), "{labels2:?}");
+    }
 }

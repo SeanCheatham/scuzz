@@ -715,6 +715,182 @@ fn bind_named_args(
     Ok(out)
 }
 
+/// Place `.copy` args onto record fields. Missing fields stay `None`.
+fn bind_copy_slots(
+    callee: &str,
+    fields: &[String],
+    args: Vec<Expr>,
+) -> Result<Vec<Option<Expr>>, TypeError> {
+    if fields.is_empty() {
+        if args.is_empty() {
+            return Ok(Vec::new());
+        }
+        return Err(TypeError::Msg(format!(
+            "{callee} expects 0 field updates, got {}",
+            args.len()
+        )));
+    }
+    let mut seen_named = false;
+    let mut slots: Vec<Option<Expr>> = fields.iter().map(|_| None).collect();
+    let mut used: HashSet<String> = HashSet::new();
+    let mut pos = 0usize;
+    for a in args {
+        match a.kind {
+            ExprKind::NamedArg { name, value } => {
+                seen_named = true;
+                if !used.insert(name.clone()) {
+                    return Err(TypeError::Msg(format!(
+                        "{callee} field `{name}` is given more than once"
+                    )));
+                }
+                let Some(idx) = fields.iter().position(|f| f == &name) else {
+                    return Err(TypeError::Msg(format!("{callee} has no field `{name}`")));
+                };
+                if slots[idx].is_some() {
+                    return Err(TypeError::Msg(format!(
+                        "{callee} field `{name}` is already given"
+                    )));
+                }
+                slots[idx] = Some(*value);
+            }
+            _ => {
+                if seen_named {
+                    return Err(TypeError::Msg(format!(
+                        "{callee}: positional argument follows named argument"
+                    )));
+                }
+                if pos >= fields.len() {
+                    return Err(TypeError::Msg(format!(
+                        "{callee} expects {} field update(s), got more",
+                        fields.len()
+                    )));
+                }
+                slots[pos] = Some(a);
+                pos += 1;
+            }
+        }
+    }
+    Ok(slots)
+}
+
+fn record_from_type<'a>(
+    ty: &Type,
+    enums: &'a EnumIndex<'a>,
+    current_module: &str,
+    span: &crate::span::Span,
+) -> Result<(&'a crate::ast::EnumDef, String), TypeError> {
+    let id = match ty {
+        Type::Adt(id) | Type::App(id, _) => id.as_str(),
+        other => {
+            return Err(
+                TypeError::Msg(format!(".copy needs a record type, got {other:?}"))
+                    .with_span_if_bare(span),
+            );
+        }
+    };
+    let (en, eid) = lookup_enum(enums, id, current_module)?;
+    if !is_record_like(en) {
+        return Err(TypeError::Msg(format!(
+            ".copy requires a record type, got enum {}",
+            en.name
+        ))
+        .with_span_if_bare(span));
+    }
+    Ok((en, eid))
+}
+
+fn infer_copy(
+    receiver_ty: &Type,
+    args: &[Expr],
+    enums: &EnumIndex<'_>,
+    funs: &FunIndex<'_>,
+    methods: &MethodIndex,
+    current_module: &str,
+    env: &mut HashMap<String, Type>,
+    span: &crate::span::Span,
+) -> Result<Type, TypeError> {
+    let (en, _) = record_from_type(receiver_ty, enums, current_module, span)?;
+    let case = en.cases.first().ok_or_else(|| {
+        TypeError::Msg("internal: record has no case".into()).with_span_if_bare(span)
+    })?;
+    let names: Vec<String> = case.fields.iter().map(|(n, _)| n.clone()).collect();
+    let slots =
+        bind_copy_slots(".copy", &names, args.to_vec()).map_err(|e| e.with_span_if_bare(span))?;
+    for (i, slot) in slots.iter().enumerate() {
+        let Some(arg) = slot else {
+            continue;
+        };
+        let at = infer(arg, enums, funs, methods, current_module, env)?;
+        let want = field_type(receiver_ty, &names[i], enums, current_module)?;
+        expect_ty(&at, &want)?;
+    }
+    Ok(receiver_ty.clone())
+}
+
+fn rewrite_copy(
+    receiver: Expr,
+    args: Vec<Expr>,
+    span: crate::span::Span,
+    enums: &EnumIndex<'_>,
+    funs: &FunIndex<'_>,
+    methods: &MethodIndex,
+    current_module: &str,
+    env: &mut HashMap<String, Type>,
+) -> Result<Expr, TypeError> {
+    let rt = infer(&receiver, enums, funs, methods, current_module, env)?;
+    if matches!(&rt, Type::App(_, _)) {
+        return Ok(Expr::new(
+            ExprKind::MethodCall {
+                receiver: Box::new(receiver),
+                method: "copy".into(),
+                args,
+            },
+            span,
+        ));
+    }
+    let (en, eid) = record_from_type(&rt, enums, current_module, &span)?;
+    let case = en.cases.first().ok_or_else(|| {
+        TypeError::Msg("internal: record has no case".into()).with_span_if_bare(&span)
+    })?;
+    let names: Vec<String> = case.fields.iter().map(|(n, _)| n.clone()).collect();
+    let slots = bind_copy_slots(".copy", &names, args).map_err(|e| e.with_span_if_bare(&span))?;
+    let bind_names: Vec<String> = (0..names.len()).map(|i| format!("__c{i}")).collect();
+    let ctor_args: Vec<Expr> = slots
+        .into_iter()
+        .enumerate()
+        .map(|(i, slot)| {
+            slot.unwrap_or_else(|| Expr::new(ExprKind::Var(bind_names[i].clone()), span.clone()))
+        })
+        .collect();
+    let body = Expr::new(
+        ExprKind::AdtConstruct {
+            enum_name: eid.clone(),
+            case_name: case.name.clone(),
+            args: ctor_args,
+            type_args: Vec::new(),
+        },
+        span.clone(),
+    );
+    Ok(Expr::new(
+        ExprKind::Match {
+            scrutinee: Box::new(receiver),
+            arms: vec![crate::ast::MatchArm::new(
+                crate::ast::Pattern::Adt {
+                    enum_name: eid,
+                    case_name: case.name.clone(),
+                    binds: bind_names
+                        .into_iter()
+                        .map(crate::ast::Pattern::Bind)
+                        .collect(),
+                    type_args: Vec::new(),
+                },
+                body,
+            )],
+        },
+        span,
+    ))
+}
+
 fn bind_one_named(callee: &str, param: &str, expr: Expr) -> Result<Expr, TypeError> {
     match expr.kind {
         ExprKind::NamedArg { name, value } => {
@@ -892,6 +1068,16 @@ fn resolve_named_expr(expr: Expr, cx: &NamedCx, module: &str) -> Result<Expr, Ty
                             .with_span_if_bare(&span),
                     );
                 }
+                return Ok(Expr::new(
+                    ExprKind::MethodCall {
+                        receiver: Box::new(receiver),
+                        method,
+                        args,
+                    },
+                    span,
+                ));
+            }
+            if method == "copy" {
                 return Ok(Expr::new(
                     ExprKind::MethodCall {
                         receiver: Box::new(receiver),
@@ -1756,6 +1942,18 @@ fn rewrite_fields(
                     env,
                 );
             }
+            if method == "copy" {
+                return rewrite_copy(
+                    receiver,
+                    args,
+                    span,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                );
+            }
             let rt = infer(&receiver, enums, funs, methods, current_module, env)?;
             let (id, targs) =
                 method_receiver_parts(&rt, &method).map_err(|e| e.with_span_if_bare(&span))?;
@@ -2018,6 +2216,18 @@ fn infer(
                 if method == "require" {
                     infer_require_args(args, &rt, enums, funs, methods, current_module, env)?;
                     return Ok(rt);
+                }
+                if method == "copy" {
+                    return infer_copy(
+                        &rt,
+                        args,
+                        enums,
+                        funs,
+                        methods,
+                        current_module,
+                        env,
+                        &expr.span,
+                    );
                 }
                 let (id, targs) = method_receiver_parts(&rt, method)?;
                 let entry = methods.lookup(id, method)?;
@@ -6950,6 +7160,160 @@ enum Opt[T]:
         let err = typecheck(&p).unwrap_err();
         assert!(
             err.message().contains("unknown enum Nope"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn typechecks_record_copy_named_and_positional() {
+        let src = r#"
+record Point(x: Int, y: Int)
+def sum(p: Point): Int = p.x + p.y
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(sum(Point(3, 5).copy(y = 9))))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("record copy named typecheck");
+        let p = resolve_field_access(p).expect("copy lower");
+        match &p.main.body.kind {
+            ExprKind::IoPrintln(inner) => match &inner.kind {
+                ExprKind::Call { args, .. } => match &args[0].kind {
+                    ExprKind::Call { args, .. } => {
+                        assert!(
+                            matches!(&args[0].kind, ExprKind::Match { .. }),
+                            "copy lowers to match, got {:?}",
+                            args[0].kind
+                        );
+                    }
+                    other => panic!("expected sum call arg, got {other:?}"),
+                },
+                other => panic!("expected Str.fromInt, got {other:?}"),
+            },
+            other => panic!("expected println, got {other:?}"),
+        }
+        let src = r#"
+record Point(x: Int, y: Int)
+def sum(p: Point): Int = p.x + p.y
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(sum(Point(3, 5).copy(1))))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("record copy positional typecheck");
+    }
+
+    #[test]
+    fn typechecks_generic_record_copy() {
+        let src = r#"
+record Box[T](x: T):
+  def get(): T =
+    self.x
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Box(4).copy(x = 5).get()))
+"#;
+        let p = expand_impls(lower_program(parse(src).unwrap())).expect("expand");
+        typecheck(&p).expect("generic record copy typecheck");
+        let p = elaborate_generics(p).expect("elaborate");
+        let p = resolve_field_access(p).expect("fields before mono");
+        let p = monomorphize(p).expect("mono");
+        resolve_field_access(p).expect("copy after mono");
+    }
+
+    #[test]
+    fn typechecks_record_copy_in_interp_with_where() {
+        let src = r#"
+record Point(x: Int where x >= 0, y: Int where y == y)
+def sum(p: Point): Int = p.x + p.y
+@main def main: IO[Unit] =
+  IO.println(s"copy:${sum(Point(3, 5).copy(y = 9))}")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("copy in interpolation typecheck");
+        let mut p = parse(src).unwrap();
+        crate::overlay::residualize_refinements(&mut p);
+        let p = lower_program(p);
+        match typecheck(&p) {
+            Ok(()) => {}
+            Err(e) => panic!("copy after residualize typecheck: {}", e.message()),
+        }
+    }
+
+    #[test]
+    fn typechecks_record_copy_identity() {
+        let src = r#"
+record Point(x: Int, y: Int)
+def sum(p: Point): Int = p.x + p.y
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(sum(Point(3, 5).copy())))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("empty copy typecheck");
+    }
+
+    #[test]
+    fn rejects_copy_unknown_field() {
+        let src = r#"
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Point(3, 5).copy(z = 1).x))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("has no field `z`"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_copy_on_enum() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  Color.Red.copy() match {
+    case Color.Red => IO.println("r")
+    case Color.Blue => IO.println("b")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("record type") || err.message().contains(".copy"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_copy_field_type_mismatch() {
+        let src = r#"
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Point(3, 5).copy(y = "no").x))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("expected") || err.message().contains("String"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_copy_duplicate_field() {
+        let src = r#"
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Point(3, 5).copy(x = 1, x = 2).x))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("more than once") || err.message().contains("already given"),
             "{}",
             err.message()
         );

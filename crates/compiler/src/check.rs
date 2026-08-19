@@ -554,8 +554,6 @@ pub fn check_project_with(
         diags.push(Diagnostic::error(e.to_string()));
     }
     let mut program = program;
-    // Residualize refinements so Law.check typechecks like verify builds.
-    residualize_refinements(&mut program);
     program.law_names = law_names;
     let lowered = lower_program(program);
     let program = match crate::typ::expand_impls(lowered.clone()) {
@@ -565,13 +563,15 @@ pub fn check_project_with(
             lowered
         }
     };
-    let program = match crate::typ::resolve_named_args(program) {
+    let mut program = match crate::typ::resolve_named_args(program) {
         Ok(p) => p,
         Err(e) => {
             diags.push(diagnostic_from_type(e, &named));
             return Ok(diags);
         }
     };
+    // Bind named args before residualize so `where` wraps positional fields.
+    residualize_refinements(&mut program);
     let type_errs = typecheck_all(&program);
     let had_type_err = !type_errs.is_empty();
     for e in type_errs {

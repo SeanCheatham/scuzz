@@ -95,6 +95,7 @@ fn prepare_program(resolved: &ResolvedProject, verify: bool) -> Result<Program> 
     if verify {
         let law_names = collect_law_names(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
         check_laws_applied(&program, &law_names).map_err(|e| anyhow::anyhow!("{e}"))?;
+        program = crate::typ::resolve_named_args(program).map_err(|e| anyhow::anyhow!("{e}"))?;
         residualize_refinements(&mut program);
         program.law_names = law_names;
     } else {
