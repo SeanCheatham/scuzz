@@ -9,7 +9,7 @@ Scuzz is not Scala 3. It is not the JVM. It is not a cats-effect port. Scala Nat
 - **Language:** Scala-inspired subset for CLI, server, desktop, and mobile. `for` is the binder (`=` pure, `<-` effect). I/O goes through `IO`. Dense source aims for Scala-like token efficiency.
 - **Runtime:** native LLVM. No VM, no Java, no classpath.
 - **UI:** `View` is pure. State lives in `Signal`. `Ui.run` is the session. Canvas is Skia-shaped. Headless is a peer runtime.
-- **Tooling:** one CLI (`scuzz`) for build, run, format, check, fuzz, mutate, and package. One formatter. One linter (`scuzz check`). `[ui] run --watch` is hot reload.
+- **Tooling:** one CLI (`scuzz`) for build, run, format, check, fuzz, and package. One formatter. One linter (`scuzz check`). `[ui] run --watch` is hot reload.
 - **Testing:** mutation, fuzz, laws, simulation, and determinism are built in. Oracles live in source. Drivers are oracle-free. Simulation is hermetic. Do not add a third-party harness.
 - **Batteries:** the language and standard kits cover common cases. No ecosystem library sprawl.
 
