@@ -2,12 +2,13 @@
 //!
 //! Module id is the source file stem (`Foo.scuzz` → `Foo`). Defs and enums are
 //! namespaced. Bare names resolve locally first, then through `import Module.name`
-//! in the current module, then to a unique cross-module **public** def/enum
-//! when unambiguous. `private def` is only visible within its module
-//! (qualified or bare). Enums have no privacy yet.
+//! / `import Module.name as alias` / `import Module.*` in the current module, then
+//! to a unique cross-module **public** def/enum when unambiguous. `private def`
+//! is only visible within its module (qualified or bare). Enums have no privacy yet.
+//! `import Module.*` binds every public def and enum. It does not bind private defs.
 
-use crate::ast::{EnumDef, FunDef, Import};
-use std::collections::HashMap;
+use crate::ast::{EnumDef, Expr, ExprKind, FunDef, Import, Pattern, Program, Type};
+use std::collections::{HashMap, HashSet};
 
 /// LLVM symbol for a user def: `@sz_user_{Module}_{name}` (or `@sz_user_{name}` when module is empty).
 pub fn user_symbol(module: &str, name: &str) -> String {
@@ -64,8 +65,8 @@ fn visible_from(d: &FunDef, current_module: &str) -> bool {
 pub struct FunIndex<'a> {
     by_qual: HashMap<String, &'a FunDef>,
     by_name: HashMap<String, Vec<&'a FunDef>>,
-    /// `(in_module, bare_name)` → import.
-    imports: HashMap<(String, String), &'a Import>,
+    /// `(in_module, bare_name)` → `(from_module, source_name)`.
+    imports: HashMap<(String, String), (String, String)>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -127,28 +128,34 @@ impl<'a> FunIndex<'a> {
             .iter()
             .map(|e| (qual_key(&e.module, &e.name), e))
             .collect();
-        let mut import_map: HashMap<(String, String), &'a Import> = HashMap::new();
+        let mut import_map: HashMap<(String, String), (String, String)> = HashMap::new();
         for im in imports {
-            let key = (im.in_module.clone(), im.name.clone());
-            if import_map.insert(key, im).is_some() {
-                return Err(ResolveError::DuplicateImport {
-                    module: im.in_module.clone(),
-                    name: im.name.clone(),
-                });
-            }
-            let q = qual_key(&im.from_module, &im.name);
-            if let Some(d) = by_qual.get(&q).copied() {
-                if d.is_private {
-                    return Err(ResolveError::ImportPrivate {
+            let binds = import_bindings(im, defs, enums)?;
+            for (local, source) in binds {
+                let q = qual_key(&im.from_module, &source);
+                if let Some(d) = by_qual.get(&q).copied() {
+                    if d.is_private {
+                        return Err(ResolveError::ImportPrivate {
+                            module: im.from_module.clone(),
+                            name: source,
+                        });
+                    }
+                } else if !enum_by_qual.contains_key(&q) {
+                    return Err(ResolveError::ImportUnknown {
                         module: im.from_module.clone(),
-                        name: im.name.clone(),
+                        name: source,
                     });
                 }
-            } else if !enum_by_qual.contains_key(&q) {
-                return Err(ResolveError::ImportUnknown {
-                    module: im.from_module.clone(),
-                    name: im.name.clone(),
-                });
+                let key = (im.in_module.clone(), local.clone());
+                if import_map
+                    .insert(key, (im.from_module.clone(), source.clone()))
+                    .is_some()
+                {
+                    return Err(ResolveError::DuplicateImport {
+                        module: im.in_module.clone(),
+                        name: local,
+                    });
+                }
             }
         }
         Ok(Self {
@@ -177,13 +184,13 @@ impl<'a> FunIndex<'a> {
         if let Some(d) = self.by_qual.get(&local) {
             return Ok(*d);
         }
-        if let Some(im) = self
+        if let Some((from, name)) = self
             .imports
             .get(&(current_module.to_string(), callee.to_string()))
         {
             return self
                 .by_qual
-                .get(&qual_key(&im.from_module, &im.name))
+                .get(&qual_key(from, name))
                 .copied()
                 .ok_or_else(|| ResolveError::Unknown(callee.to_string()));
         }
@@ -208,7 +215,7 @@ impl<'a> FunIndex<'a> {
 pub struct EnumIndex<'a> {
     by_qual: HashMap<String, &'a EnumDef>,
     by_name: HashMap<String, Vec<&'a EnumDef>>,
-    imports: HashMap<(String, String), &'a Import>,
+    imports: HashMap<(String, String), (String, String)>,
 }
 
 impl<'a> EnumIndex<'a> {
@@ -225,9 +232,23 @@ impl<'a> EnumIndex<'a> {
             }
             by_name.entry(e.name.clone()).or_default().push(e);
         }
-        let mut import_map: HashMap<(String, String), &'a Import> = HashMap::new();
+        let mut import_map: HashMap<(String, String), (String, String)> = HashMap::new();
         for im in imports {
-            import_map.insert((im.in_module.clone(), im.name.clone()), im);
+            if im.is_wildcard() {
+                for e in enums {
+                    if e.module == im.from_module {
+                        import_map.insert(
+                            (im.in_module.clone(), e.name.clone()),
+                            (im.from_module.clone(), e.name.clone()),
+                        );
+                    }
+                }
+            } else {
+                import_map.insert(
+                    (im.in_module.clone(), im.local_name().to_string()),
+                    (im.from_module.clone(), im.name.clone()),
+                );
+            }
         }
         Ok(Self {
             by_qual,
@@ -248,11 +269,11 @@ impl<'a> EnumIndex<'a> {
         if let Some(e) = self.by_qual.get(&local) {
             return Ok(*e);
         }
-        if let Some(im) = self
+        if let Some((from, src)) = self
             .imports
             .get(&(current_module.to_string(), name.to_string()))
         {
-            if let Some(e) = self.by_qual.get(&qual_key(&im.from_module, &im.name)) {
+            if let Some(e) = self.by_qual.get(&qual_key(from, src)) {
                 return Ok(*e);
             }
             // Import may target a def, not an enum.
@@ -269,6 +290,202 @@ impl<'a> EnumIndex<'a> {
         let e = self.resolve(name, current_module)?;
         Ok(enum_id(&e.module, &e.name))
     }
+}
+
+fn module_exists(defs: &[FunDef], enums: &[EnumDef], module: &str) -> bool {
+    defs.iter().any(|d| d.module == module) || enums.iter().any(|e| e.module == module)
+}
+
+/// Public def or enum `name` in `module`.
+pub fn public_in(defs: &[FunDef], enums: &[EnumDef], module: &str, name: &str) -> bool {
+    defs.iter()
+        .any(|d| d.module == module && d.name == name && !d.is_private)
+        || enums.iter().any(|e| e.module == module && e.name == name)
+}
+
+/// `(local_name, source_name)` pairs this import binds.
+pub fn import_bindings(
+    im: &Import,
+    defs: &[FunDef],
+    enums: &[EnumDef],
+) -> Result<Vec<(String, String)>, ResolveError> {
+    if im.is_wildcard() {
+        if !module_exists(defs, enums, &im.from_module) {
+            return Err(ResolveError::ImportUnknown {
+                module: im.from_module.clone(),
+                name: "*".into(),
+            });
+        }
+        let mut out = Vec::new();
+        for d in defs {
+            if d.module == im.from_module && !d.is_private {
+                out.push((d.name.clone(), d.name.clone()));
+            }
+        }
+        for e in enums {
+            if e.module == im.from_module {
+                out.push((e.name.clone(), e.name.clone()));
+            }
+        }
+        return Ok(out);
+    }
+    Ok(vec![(im.local_name().to_string(), im.name.clone())])
+}
+
+/// Resolve a bare imported name to `(from_module, source_name)`.
+pub fn bind_import<'a>(
+    imports: &'a [Import],
+    defs: &'a [FunDef],
+    enums: &'a [EnumDef],
+    in_module: &str,
+    local: &str,
+) -> Option<(&'a str, String)> {
+    for im in imports {
+        if im.in_module != in_module {
+            continue;
+        }
+        if im.is_wildcard() {
+            if public_in(defs, enums, &im.from_module, local) {
+                return Some((im.from_module.as_str(), local.to_string()));
+            }
+        } else if im.local_name() == local {
+            return Some((im.from_module.as_str(), im.name.clone()));
+        }
+    }
+    None
+}
+
+/// Imports in `program` whose bound bare names never appear in that module.
+pub fn unused_imports(program: &Program) -> Vec<&Import> {
+    let mut used: HashMap<String, HashSet<String>> = HashMap::new();
+    for d in &program.defs {
+        let set = used.entry(d.module.clone()).or_default();
+        collect_type_names(&d.ret, set);
+        for p in &d.params {
+            collect_type_names(&p.ty, set);
+            if let Some(r) = &p.rfn {
+                collect_expr_names(r, set);
+            }
+        }
+        collect_expr_names(&d.body, set);
+    }
+    if !program.main.name.is_empty() {
+        collect_expr_names(
+            &program.main.body,
+            used.entry(program.main.module.clone()).or_default(),
+        );
+    }
+    for im in &program.impls {
+        let set = used.entry(im.module.clone()).or_default();
+        for m in &im.methods {
+            collect_type_names(&m.ret, set);
+            for p in &m.params {
+                collect_type_names(&p.ty, set);
+                if let Some(r) = &p.rfn {
+                    collect_expr_names(r, set);
+                }
+            }
+            collect_expr_names(&m.body, set);
+        }
+    }
+    for en in &program.enums {
+        let set = used.entry(en.module.clone()).or_default();
+        for c in &en.cases {
+            for (_, ty) in &c.fields {
+                collect_type_names(ty, set);
+            }
+            for r in &c.field_rfns {
+                if let Some(e) = r {
+                    collect_expr_names(e, set);
+                }
+            }
+        }
+        for m in &en.methods {
+            collect_type_names(&m.ret, set);
+            for p in &m.params {
+                collect_type_names(&p.ty, set);
+                if let Some(r) = &p.rfn {
+                    collect_expr_names(r, set);
+                }
+            }
+            collect_expr_names(&m.body, set);
+        }
+    }
+    program
+        .imports
+        .iter()
+        .filter(|im| {
+            let empty = HashSet::new();
+            let names = used.get(&im.in_module).unwrap_or(&empty);
+            if im.is_wildcard() {
+                match import_bindings(im, &program.defs, &program.enums) {
+                    Ok(binds) => binds.iter().all(|(local, _)| !names.contains(local)),
+                    Err(_) => true,
+                }
+            } else {
+                !names.contains(im.local_name())
+            }
+        })
+        .collect()
+}
+
+fn mark_name(name: &str, out: &mut HashSet<String>) {
+    if let Some((m, _)) = split_dotted(name) {
+        out.insert(m.to_string());
+    } else {
+        out.insert(name.to_string());
+    }
+}
+
+fn collect_type_names(ty: &Type, out: &mut HashSet<String>) {
+    match ty {
+        Type::Adt(n) | Type::App(n, _) | Type::Var(n) | Type::Opaque(n) => mark_name(n, out),
+        Type::List(t) | Type::Io(t) => collect_type_names(t, out),
+        Type::Fun(a, b) => {
+            collect_type_names(a, out);
+            collect_type_names(b, out);
+        }
+        _ => {}
+    }
+    if let Type::App(_, args) = ty {
+        for a in args {
+            collect_type_names(a, out);
+        }
+    }
+}
+
+fn collect_pat_names(p: &Pattern, out: &mut HashSet<String>) {
+    match p {
+        Pattern::Adt {
+            enum_name, binds, ..
+        } => {
+            mark_name(enum_name, out);
+            for b in binds {
+                collect_pat_names(b, out);
+            }
+        }
+        Pattern::Or(ps) => {
+            for p in ps {
+                collect_pat_names(p, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn collect_expr_names(e: &Expr, out: &mut HashSet<String>) {
+    match &e.kind {
+        ExprKind::Call { callee, .. } => mark_name(callee, out),
+        ExprKind::AdtConstruct { enum_name, .. } => mark_name(enum_name, out),
+        ExprKind::Match { arms, .. } => {
+            for a in arms {
+                collect_pat_names(&a.pattern, out);
+            }
+        }
+        ExprKind::Ascribe { ty, .. } => collect_type_names(ty, out),
+        _ => {}
+    }
+    e.for_each_child(|c| collect_expr_names(c, out));
 }
 
 #[cfg(test)]
@@ -317,8 +534,19 @@ mod tests {
             in_module: in_module.into(),
             from_module: from_module.into(),
             name: name.into(),
+            alias: None,
             span: Span::dummy(),
         }
+    }
+
+    fn imp_as(in_module: &str, from_module: &str, name: &str, alias: &str) -> Import {
+        let mut im = imp(in_module, from_module, name);
+        im.alias = Some(alias.into());
+        im
+    }
+
+    fn imp_star(in_module: &str, from_module: &str) -> Import {
+        imp(in_module, from_module, "*")
     }
 
     #[test]
@@ -424,5 +652,52 @@ mod tests {
     fn mangle_includes_module() {
         assert_eq!(user_symbol("A", "tag"), "sz_user_A_tag");
         assert_eq!(user_symbol("", "add1"), "sz_user_add1");
+    }
+
+    #[test]
+    fn import_alias_resolves_bare() {
+        let defs = vec![def("A", "tag"), def("B", "tag")];
+        let imports = vec![imp_as("Main", "A", "tag", "fromA")];
+        let idx = FunIndex::build(&defs, &imports, &[]).unwrap();
+        assert_eq!(idx.resolve("fromA", "Main").unwrap().module, "A");
+        assert!(matches!(
+            idx.resolve("tag", "Main"),
+            Err(ResolveError::Ambiguous(_))
+        ));
+    }
+
+    #[test]
+    fn import_wildcard_binds_public_only() {
+        let defs = vec![def("A", "tag"), private_def("A", "hidden"), def("A", "one")];
+        let enums = vec![en("A", "Msg")];
+        let imports = vec![imp_star("Main", "A")];
+        let idx = FunIndex::build(&defs, &imports, &enums).unwrap();
+        assert_eq!(idx.resolve("tag", "Main").unwrap().module, "A");
+        assert_eq!(idx.resolve("one", "Main").unwrap().module, "A");
+        assert!(matches!(
+            idx.resolve("hidden", "Main"),
+            Err(ResolveError::Unknown(_))
+        ));
+        let eidx = EnumIndex::build(&enums, &imports).unwrap();
+        assert_eq!(eidx.resolve("Msg", "Main").unwrap().module, "A");
+    }
+
+    #[test]
+    fn import_wildcard_unknown_module() {
+        let imports = vec![imp_star("Main", "Missing")];
+        assert!(matches!(
+            FunIndex::build(&[], &imports, &[]),
+            Err(ResolveError::ImportUnknown { .. })
+        ));
+    }
+
+    #[test]
+    fn import_wildcard_duplicate_with_specific() {
+        let defs = vec![def("A", "tag")];
+        let imports = vec![imp("Main", "A", "tag"), imp_star("Main", "A")];
+        assert!(matches!(
+            FunIndex::build(&defs, &imports, &[]),
+            Err(ResolveError::DuplicateImport { .. })
+        ));
     }
 }

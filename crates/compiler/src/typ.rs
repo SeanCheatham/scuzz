@@ -931,16 +931,8 @@ fn call_param_names(callee: &str, current_module: &str, cx: &NamedCx) -> Option<
     {
         return Some(p.clone());
     }
-    if let Some(im) = cx
-        .imports
-        .iter()
-        .find(|im| im.in_module == current_module && im.name == callee)
-    {
-        return cx
-            .def_params
-            .iter()
-            .find(|(m, n, _, _)| m == &im.from_module && n == callee)
-            .map(|(_, _, p, _)| p.clone());
+    if let Some((_, _, p, _)) = imported_def_params(callee, current_module, cx) {
+        return Some(p.clone());
     }
     let hits: Vec<&Vec<String>> = cx
         .def_params
@@ -953,6 +945,33 @@ fn call_param_names(callee: &str, current_module: &str, cx: &NamedCx) -> Option<
     } else {
         None
     }
+}
+
+fn imported_def_params<'a>(
+    callee: &str,
+    current_module: &str,
+    cx: &'a NamedCx,
+) -> Option<&'a (String, String, Vec<String>, bool)> {
+    for im in &cx.imports {
+        if im.in_module != current_module {
+            continue;
+        }
+        if im.is_wildcard() {
+            if let Some(hit) = cx
+                .def_params
+                .iter()
+                .find(|(m, n, _, is_priv)| m == &im.from_module && n == callee && !*is_priv)
+            {
+                return Some(hit);
+            }
+        } else if im.local_name() == callee {
+            return cx
+                .def_params
+                .iter()
+                .find(|(m, n, _, _)| m == &im.from_module && n == &im.name);
+        }
+    }
+    None
 }
 
 fn adt_ctor_names(enums: &[crate::ast::EnumDef], enum_name: &str, case_name: &str) -> Vec<String> {
@@ -9353,6 +9372,54 @@ enum Pair:
         .unwrap();
         let p = lower_program(p);
         typecheck(&p).expect("import should disambiguate bare tag");
+    }
+
+    #[test]
+    fn import_alias_and_wildcard_typecheck() {
+        let p = crate::parser::parse_sources(&[
+            (
+                "A.scuzz".into(),
+                "def tag(): String = \"a\"\ndef one(): Int = 1\n".into(),
+            ),
+            (
+                "Main.scuzz".into(),
+                "import A.tag\nimport A.*\n@main def main: IO[Unit] = IO.println(tag())\n".into(),
+            ),
+        ])
+        .unwrap();
+        let p = lower_program(p);
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("duplicate import"),
+            "unexpected: {}",
+            err.message()
+        );
+
+        let p = crate::parser::parse_sources(&[
+            (
+                "A.scuzz".into(),
+                "def tag(): String = \"a\"\ndef one(): Int = 1\n".into(),
+            ),
+            ("B.scuzz".into(), "def tag(): String = \"b\"\n".into()),
+            (
+                "Main.scuzz".into(),
+                "import A.tag as fromA\n@main def main: IO[Unit] = IO.println(Str.concat(fromA(), B.tag()))\n".into(),
+            ),
+        ])
+        .unwrap();
+        let p = lower_program(p);
+        typecheck(&p).expect("alias should typecheck");
+
+        let p = crate::parser::parse_sources(&[
+            ("A.scuzz".into(), "def greet(): String = \"a\"\n".into()),
+            (
+                "Main.scuzz".into(),
+                "import A.*\n@main def main: IO[Unit] = IO.println(greet())\n".into(),
+            ),
+        ])
+        .unwrap();
+        let p = lower_program(p);
+        typecheck(&p).expect("wildcard should typecheck");
     }
 
     #[test]

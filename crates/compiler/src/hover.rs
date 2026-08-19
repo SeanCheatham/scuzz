@@ -40,10 +40,16 @@ pub fn hover_in_source(
     ) {
         return Some(name);
     }
-    if let Some(d) = def_named(program, &module, &name).or_else(|| unique_def(program, &name)) {
+    if let Some(d) = def_named(program, &module, &name)
+        .or_else(|| imported_def(program, &module, &name))
+        .or_else(|| unique_def(program, &name))
+    {
         return Some(show_def(d));
     }
-    if let Some(en) = enum_named(program, &module, &name).or_else(|| unique_enum(program, &name)) {
+    if let Some(en) = enum_named(program, &module, &name)
+        .or_else(|| imported_enum(program, &module, &name))
+        .or_else(|| unique_enum(program, &name))
+    {
         return Some(show_enum(en));
     }
     if let Some(p) = param_in_module(program, &module, &name, offset) {
@@ -98,6 +104,36 @@ pub(crate) fn def_named<'a>(program: &'a Program, module: &str, name: &str) -> O
         .defs
         .iter()
         .find(|d| d.module == module && d.name == name)
+}
+
+pub(crate) fn imported_def<'a>(
+    program: &'a Program,
+    module: &str,
+    name: &str,
+) -> Option<&'a FunDef> {
+    let (from, src) = crate::resolve::bind_import(
+        &program.imports,
+        &program.defs,
+        &program.enums,
+        module,
+        name,
+    )?;
+    def_named(program, from, &src)
+}
+
+pub(crate) fn imported_enum<'a>(
+    program: &'a Program,
+    module: &str,
+    name: &str,
+) -> Option<&'a EnumDef> {
+    let (from, src) = crate::resolve::bind_import(
+        &program.imports,
+        &program.defs,
+        &program.enums,
+        module,
+        name,
+    )?;
+    enum_named(program, from, &src)
 }
 
 pub(crate) fn unique_def<'a>(program: &'a Program, name: &str) -> Option<&'a FunDef> {
@@ -1085,6 +1121,23 @@ mod tests {
         let src = "def add(n: Int): Int = n\n@main def main: IO[Unit] = IO.println(\"x\")\n";
         let h = hover_src(src, "add");
         assert!(h.contains("def add(n: Int): Int"), "{h}");
+    }
+
+    #[test]
+    fn hovers_imported_alias() {
+        let sources = vec![
+            ("A.scuzz".into(), "def tag(): String = \"a\"\n".to_string()),
+            (
+                "Main.scuzz".into(),
+                "import A.tag as fromA\n@main def main: IO[Unit] =\n  IO.println(fromA())\n"
+                    .to_string(),
+            ),
+        ];
+        let program = crate::parser::parse_sources(&sources).unwrap();
+        let main = &sources[1].1;
+        let offset = main.rfind("fromA").unwrap();
+        let h = hover_in_source(&program, "Main.scuzz", main, offset).expect("hover alias");
+        assert!(h.contains("def tag(): String"), "{h}");
     }
 
     #[test]

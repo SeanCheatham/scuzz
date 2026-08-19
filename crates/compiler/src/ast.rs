@@ -11,7 +11,8 @@ pub struct Program {
     pub impls: Vec<ImplDef>,
     pub defs: Vec<FunDef>,
     pub main: MainDef,
-    /// `import Module.name` — bare `name` in `in_module` resolves to `from_module.name`.
+    /// `import Module.name` / `import Module.name as alias` / `import Module.*`.
+    /// Bare `alias` (or `name`) in `in_module` resolves to `from_module.name`.
     pub imports: Vec<Import>,
     /// Law def names residualized under TestRuntime (empty for live builds).
     pub law_names: Vec<String>,
@@ -56,13 +57,26 @@ pub struct ImplMethod {
 }
 
 /// Top-level `import FromModule.name` in file-stem module `in_module`.
+/// `name` is `"*"` for `import Module.*`. `alias` is `Some` for `as alias`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Import {
     pub in_module: String,
     pub from_module: String,
     pub name: String,
-    /// Span of `Module.name` in the import line.
+    pub alias: Option<String>,
+    /// Span of `Module.name`, `Module.name as alias`, or `Module.*`.
     pub span: Span,
+}
+
+impl Import {
+    /// Bare name this import binds in `in_module`. Wildcard has no single local name.
+    pub fn local_name(&self) -> &str {
+        self.alias.as_deref().unwrap_or(&self.name)
+    }
+
+    pub fn is_wildcard(&self) -> bool {
+        self.name == "*"
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

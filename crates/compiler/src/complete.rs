@@ -47,6 +47,14 @@ pub fn complete_in_source(
         }
     }
     if let Some(q) = &qual {
+        if import_selector_dot(source, offset) && "*".starts_with(&prefix) {
+            push(Completion {
+                label: "*".into(),
+                kind: KIND_MODULE,
+                detail: "import every public name".into(),
+                insert_text: "*".into(),
+            });
+        }
         for (callee, sig) in KIT_SIGS {
             if let Some(method) = callee.strip_prefix(&format!("{q}.")) {
                 if method.starts_with(&prefix) {
@@ -291,6 +299,44 @@ fn named_args_used(
     used
 }
 
+fn import_selector_dot(source: &str, offset: usize) -> bool {
+    let Ok(toks) = lex(source) else {
+        return false;
+    };
+    for (i, t) in toks.iter().enumerate() {
+        if t.span.end > offset {
+            break;
+        }
+        if !matches!(t.token, Token::Import) {
+            continue;
+        }
+        let Some(id) = toks.get(i + 1) else {
+            continue;
+        };
+        let Some(dot) = toks.get(i + 2) else {
+            continue;
+        };
+        if !matches!(id.token, Token::Ident(_)) || !matches!(dot.token, Token::Dot) {
+            continue;
+        }
+        if offset < dot.span.end {
+            continue;
+        }
+        match toks.get(i + 3) {
+            None => return true,
+            Some(next) if next.span.start >= offset => return true,
+            Some(next)
+                if matches!(next.token, Token::Ident(_) | Token::Star)
+                    && offset <= next.span.end =>
+            {
+                return true;
+            }
+            _ => {}
+        }
+    }
+    false
+}
+
 fn prefix_at(source: &str, offset: usize) -> (Option<String>, String) {
     let Ok(toks) = lex(source) else {
         return (None, String::new());
@@ -450,6 +496,13 @@ mod tests {
                 .any(|c| c.label == "row" && c.detail.contains("row: String")),
             "{hits:?}"
         );
+    }
+
+    #[test]
+    fn completes_import_star() {
+        let src = "import A.\n@main def main: IO[Unit] = IO.println(\"x\")\n";
+        let labels = labels_at(src, "import A.");
+        assert!(labels.iter().any(|l| l == "*"), "{labels:?}");
     }
 
     #[test]

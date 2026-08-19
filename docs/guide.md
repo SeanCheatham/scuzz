@@ -88,7 +88,7 @@ Reusable local packages are ordinary projects without `@main`. Depend on them fr
 shared = { path = "../shared" }
 ```
 
-Dependency sources are merged into one program with the root (and any transitive path deps). See `examples/shared` + `examples/counter`, and [scuzz-toml.md](schemas/scuzz-toml.md). Same-package files are modules by stem (`Foo.scuzz` → `Foo`). `private def` stays in-module (default public). `import Module.name` brings a public def or enum into bare scope. Enums are namespaced like defs (same bare name in two modules is allowed). See `examples/kernel` and [vision.md](vision.md#modules-and-source-shape).
+Dependency sources are merged into one program with the root (and any transitive path deps). See `examples/shared` + `examples/counter`, and [scuzz-toml.md](schemas/scuzz-toml.md). Same-package files are modules by stem (`Foo.scuzz` → `Foo`). `private def` stays in-module (default public). `import Module.name` brings a public def or enum into bare scope. `import Module.name as alias` binds `alias`. `import Module.*` binds every public def and enum. `check` reports an unused import. Enums are namespaced like defs (same bare name in two modules is allowed). See `examples/kernel` and [vision.md](vision.md#modules-and-source-shape).
 
 ## Laws, sim, and impurity
 
@@ -128,7 +128,7 @@ src/
 | `examples/counter` | Small UI: `Signal.map` + `View.bindText` + layout widgets + button lambda + `Ui.run(_ => view)` factory + path dep on `shared` + `.require` / sim + `Law.sometimes` |
 | `examples/shared` | Library package (`{ path = "..." }`) with helpers + optional `*.scuzz_sim` + `.require` |
 | `examples/studio` | Desktop stay-open app: `showWhen` pages, `Signal.list` + `View.each`, Done/Add/Del/Rename, `View.radio` / `View.slider` / `View.progress` / `View.switch` / `View.chip` / `View.filterChip` / `View.choiceChip` / `View.actionChip` / `View.inputChip` / `View.listTile` / `View.badge` / `View.card` / `View.divider` / `View.expansionTile` / `View.iconButton` / `View.verticalDivider` / `View.circularProgress` / `View.avatar` / `View.checkboxListTile` / `View.switchListTile` / `View.radioListTile` / `View.segmented` / `View.fab` / `View.outlinedButton` / `View.textButton` / `View.tooltip` / `View.placeholder` / `View.semantics` / `View.mergeSemantics` / `View.inkWell` / `View.visibility` / `View.offstage` / `View.unconstrainedBox` / `View.scrollH` / `View.grid`, Fs load/save, `record` / `trait` / stem modules, laws + drivers / `Law.sometimes`. `scuzz run` opens a window (q or Esc quits). `--headless` snapshots. |
-| `examples/kernel` | Language constructs: enums, `record` + `where` + `.copy`, `trait` / `impl`, generics, generic enum/record, stem modules, `private def`, `import`, `Float`, match guards, literal match, or-patterns, named call arguments, type ascription |
+| `examples/kernel` | Language constructs: enums, `record` + `where` + `.copy`, `trait` / `impl`, generics, generic enum/record, stem modules, `private def`, `import` / `as` / `*`, `Float`, match guards, literal match, or-patterns, named call arguments, type ascription |
 | `examples/io` | Blessed kits: Clock / Fs / `Impurity.runKit` / `Ref` / `Queue` / `Deferred` / `Fiber` / `Resource` / `Stream` / `Net.serve` (serve under `scuzz test`) |
 
 Edit [vision.md](vision.md) when changing GC, Skia, effects, UI boundaries, or language direction.

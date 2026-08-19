@@ -38,7 +38,7 @@ impl Get[T] for Opt:
 
 import A.tag
 import A.Msg
-import A.one
+import A.one as fromA
 
 def id[T](x: T): T =
   x
@@ -50,7 +50,7 @@ law sumPositive: Bool =
   sum(Point(3, 5)) > 0
 
 law onePositive: Bool =
-  one() > 0
+  fromA() > 0
 
 law addComm(a: Int, b: Int): Bool =
   a + b == b + a

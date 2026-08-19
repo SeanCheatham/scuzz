@@ -582,6 +582,16 @@ pub fn check_project_with(
     if had_type_err {
         return Ok(diags);
     }
+    for im in crate::resolve::unused_imports(&program) {
+        let msg = if im.is_wildcard() {
+            format!("unused import {}.{}", im.from_module, im.name)
+        } else if let Some(alias) = &im.alias {
+            format!("unused import {}.{} as {alias}", im.from_module, im.name)
+        } else {
+            format!("unused import {}.{}", im.from_module, im.name)
+        };
+        diags.push(Diagnostic::error(msg).with_span(&im.span, &named));
+    }
     match crate::typ::elaborate_generics(program) {
         Ok(_) => Ok(diags),
         Err(e) => {
@@ -2129,5 +2139,48 @@ def a(): Int = \"x\"
                 .any(|d| d.message.contains("Int") || d.message.contains("String")),
             "{diags:?}"
         );
+    }
+
+    #[test]
+    fn check_project_reports_unused_import() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        fs::write(
+            root.join("src/A.scuzz"),
+            crate::format::format_source("def tag(): String =\n  \"a\"\n").unwrap(),
+        )
+        .unwrap();
+        let main = crate::format::format_source(
+            "import A.tag\n@main def main: IO[Unit] =\n  IO.println(\"x\")\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/Main.scuzz"), &main).unwrap();
+        let diags = check_project(root).unwrap();
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(
+            diags[0].message.contains("unused import A.tag"),
+            "{:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn check_project_keeps_used_import() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        fs::write(
+            root.join("src/A.scuzz"),
+            crate::format::format_source("def tag(): String =\n  \"a\"\n").unwrap(),
+        )
+        .unwrap();
+        let main = crate::format::format_source(
+            "import A.tag\n@main def main: IO[Unit] =\n  IO.println(tag())\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/Main.scuzz"), &main).unwrap();
+        let diags = check_project(root).unwrap();
+        assert!(diags.is_empty(), "{diags:?}");
     }
 }

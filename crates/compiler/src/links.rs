@@ -29,8 +29,27 @@ pub fn document_links_in_source(
         if im.span.end <= im.span.start {
             continue;
         }
+        let target_name = if im.is_wildcard() {
+            program
+                .defs
+                .iter()
+                .find(|d| d.module == im.from_module && !d.is_private)
+                .map(|d| d.name.as_str())
+                .or_else(|| {
+                    program
+                        .enums
+                        .iter()
+                        .find(|e| e.module == im.from_module)
+                        .map(|e| e.name.as_str())
+                })
+        } else {
+            Some(im.name.as_str())
+        };
+        let Some(target_name) = target_name else {
+            continue;
+        };
         let Some((dest_file, dest_start, dest_end)) =
-            import_target(program, sources, &im.from_module, &im.name)
+            import_target(program, sources, &im.from_module, target_name)
         else {
             continue;
         };
@@ -93,6 +112,21 @@ mod tests {
         assert_eq!(l.dest_file, "A.scuzz");
         assert_eq!(&a[l.dest_start..l.dest_end], "tag");
         assert_eq!(l.tooltip, "A.tag");
+    }
+
+    #[test]
+    fn links_wildcard_to_first_public_def() {
+        let main = "import A.*\n@main def main: IO[Unit] =\n  IO.println(tag())\n";
+        let a = "def tag(): String =\n  \"a\"\n";
+        let sources = vec![
+            ("Main.scuzz".into(), main.to_string()),
+            ("A.scuzz".into(), a.to_string()),
+        ];
+        let program = parse_sources(&sources).unwrap();
+        let links = document_links_in_source(&program, &sources, "Main.scuzz");
+        assert_eq!(links.len(), 1, "{links:?}");
+        assert_eq!(&main[links[0].start..links[0].end], "A.*");
+        assert_eq!(&a[links[0].dest_start..links[0].dest_end], "tag");
     }
 
     #[test]

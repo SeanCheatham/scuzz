@@ -44,7 +44,15 @@ fn pretty_program(p: &Program) -> String {
         out.push_str("import ");
         out.push_str(&im.from_module);
         out.push('.');
-        out.push_str(&im.name);
+        if im.is_wildcard() {
+            out.push('*');
+        } else {
+            out.push_str(&im.name);
+            if let Some(alias) = &im.alias {
+                out.push_str(" as ");
+                out.push_str(alias);
+            }
+        }
         out.push('\n');
     }
     if !p.imports.is_empty() && (!p.defs.is_empty() || !p.main.name.is_empty()) {
@@ -1009,6 +1017,16 @@ enum Wrap:
         let src = "import A.tag\n@main def main: IO[Unit] =\n  IO.println(tag())\n";
         let out = format_source(src).unwrap();
         assert!(out.contains("import A.tag"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_import_alias_and_wildcard() {
+        let src = "import A.tag as fromA\nimport B.*\n@main def main: IO[Unit] =\n  IO.println(fromA())\n";
+        let out = format_source(src).unwrap();
+        assert!(out.contains("import A.tag as fromA"), "{out}");
+        assert!(out.contains("import B.*"), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

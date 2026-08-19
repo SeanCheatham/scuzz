@@ -575,13 +575,45 @@ impl Parser {
         self.expect(&Token::Import)?;
         let (from_module, mod_span) = self.expect_ident()?;
         self.expect(&Token::Dot)?;
+        if matches!(self.peek(), Token::Star) {
+            let star = self.bump();
+            if self.peek_as() {
+                return Err(self.err("`import Module.*` does not take `as`"));
+            }
+            return Ok(Import {
+                in_module: self.module.clone(),
+                from_module,
+                name: "*".into(),
+                alias: None,
+                span: mod_span.cover(&star.span),
+            });
+        }
         let (name, name_span) = self.expect_ident()?;
+        let mut end = name_span.clone();
+        let alias = if self.peek_as() {
+            self.bump();
+            let (alias, alias_span) = self.expect_ident()?;
+            if alias == name {
+                return Err(self.err(format!(
+                    "import alias `{alias}` is the same as `{from_module}.{name}`"
+                )));
+            }
+            end = alias_span;
+            Some(alias)
+        } else {
+            None
+        };
         Ok(Import {
             in_module: self.module.clone(),
             from_module,
             name,
-            span: mod_span.cover(&name_span),
+            alias,
+            span: mod_span.cover(&end),
         })
+    }
+
+    fn peek_as(&self) -> bool {
+        matches!(self.peek(), Token::Ident(s) if s == "as")
     }
 
     fn parse_main(&mut self) -> Result<MainDef, ParseError> {
@@ -3303,5 +3335,43 @@ enum Opt[T]:
             }
             other => panic!("expected for, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_import_alias_and_wildcard() {
+        let src = r#"
+import A.tag as fromA
+import A.*
+@main def main: IO[Unit] = IO.println(fromA())
+"#;
+        let p = parse(src).unwrap();
+        assert_eq!(p.imports.len(), 2);
+        assert_eq!(p.imports[0].from_module, "A");
+        assert_eq!(p.imports[0].name, "tag");
+        assert_eq!(p.imports[0].alias.as_deref(), Some("fromA"));
+        assert!(p.imports[1].is_wildcard());
+        assert_eq!(
+            &src[p.imports[0].span.start..p.imports[0].span.end],
+            "A.tag as fromA"
+        );
+        assert_eq!(&src[p.imports[1].span.start..p.imports[1].span.end], "A.*");
+    }
+
+    #[test]
+    fn parse_import_star_rejects_as() {
+        let src = "import A.* as x\n@main def main: IO[Unit] = IO.println(\"x\")\n";
+        let err = parse(src).unwrap_err();
+        assert!(
+            err.message().contains("does not take `as`"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn parse_import_rejects_same_alias() {
+        let src = "import A.tag as tag\n@main def main: IO[Unit] = IO.println(\"x\")\n";
+        let err = parse(src).unwrap_err();
+        assert!(err.message().contains("same as"), "{}", err.message());
     }
 }
