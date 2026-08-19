@@ -955,7 +955,7 @@ fn encode_call_item(item: &CallItemLsp) -> String {
     format!(
         r#"{{"name":{},"kind":{},"uri":{},"range":{{"start":{{"line":{},"character":{}}},"end":{{"line":{},"character":{}}}}},"selectionRange":{{"start":{{"line":{},"character":{}}},"end":{{"line":{},"character":{}}}}}}}"#,
         json_str(&item.name),
-        crate::hierarchy::KIND_FN,
+        crate::symbols::KIND_FN,
         json_str(&file_uri(&item.path)),
         item.sl,
         item.sc,
@@ -1107,13 +1107,7 @@ fn type_related_result(
     root: &Path,
     open: &BTreeMap<PathBuf, String>,
     body: &str,
-    f: fn(
-        &crate::ast::Program,
-        &[(String, String)],
-        &str,
-        &str,
-        usize,
-    ) -> Vec<crate::typehier::TypeItem>,
+    f: crate::typehier::TypeQuery,
 ) -> String {
     let Some((path, line, character)) = item_position(body) else {
         return "[]".into();

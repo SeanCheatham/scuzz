@@ -4,8 +4,6 @@ use crate::ast::{Expr, ExprKind, Program};
 use crate::definition::{decl_kw_name, definition_in_sources, source_for_module, DeclKind};
 use std::collections::BTreeMap;
 
-pub const KIND_FN: u8 = 12;
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HierarchyItem {
     pub file: String,
@@ -69,7 +67,7 @@ pub fn incoming_calls(
             let Some((rs, re)) = callee_ident_span(text, start, end, callee) else {
                 return;
             };
-            let Some(hit) = resolve_fn(program, sources, &from.file, text, rs) else {
+            let Some(hit) = prepare_call_hierarchy(program, sources, &from.file, text, rs) else {
                 return;
             };
             if hit.file != target.file || hit.sel_start != target.sel_start {
@@ -112,7 +110,7 @@ pub fn outgoing_calls(
         let Some((rs, re)) = callee_ident_span(text, start, end, callee) else {
             return;
         };
-        let Some(to) = resolve_fn(program, sources, &from.file, text, rs) else {
+        let Some(to) = prepare_call_hierarchy(program, sources, &from.file, text, rs) else {
             return;
         };
         let key = (to.file.clone(), to.sel_start);
@@ -126,16 +124,6 @@ pub fn outgoing_calls(
             .push((rs, re));
     });
     finish_outgoing(by_to)
-}
-
-fn resolve_fn(
-    program: &Program,
-    sources: &[(String, String)],
-    file: &str,
-    text: &str,
-    offset: usize,
-) -> Option<HierarchyItem> {
-    prepare_call_hierarchy(program, sources, file, text, offset)
 }
 
 fn fns(program: &Program, sources: &[(String, String)]) -> Vec<HierarchyItem> {

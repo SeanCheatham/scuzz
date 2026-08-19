@@ -59,6 +59,13 @@ type OverlayFile = (
     Option<crate::ast::Program>,
 );
 
+type ParsedFile = (
+    crate::driver::ResolvedProject,
+    String,
+    String,
+    crate::ast::Program,
+);
+
 #[derive(Debug, Clone)]
 pub struct RelatedLoc {
     pub message: String,
@@ -341,13 +348,8 @@ fn related_from_def(
     loc: crate::definition::DefLoc,
     message: String,
 ) -> RelatedLoc {
-    let text = sources
-        .iter()
-        .find(|(label, _)| label == &loc.file)
-        .map(|(_, t)| t.as_str())
-        .unwrap_or("");
-    let (line, column) = offset_to_utf16_pos(text, loc.start);
-    let (end_line, end_column) = offset_to_utf16_pos(text, loc.end);
+    let text = named_text(sources, &loc.file, "");
+    let (line, column, end_line, end_column) = utf16_range(text, loc.start, loc.end);
     RelatedLoc {
         message,
         file: Some(loc.file),
@@ -635,6 +637,29 @@ fn load_overlay_file(
     Ok(Some((resolved, label, text, program)))
 }
 
+fn load_parsed(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+) -> Result<Option<ParsedFile>> {
+    Ok(load_overlay_file(project_dir, unsaved, path)?
+        .and_then(|(resolved, label, text, program)| program.map(|p| (resolved, label, text, p))))
+}
+
+fn named_text<'a>(named: &'a [(String, String)], file: &str, fallback: &'a str) -> &'a str {
+    named
+        .iter()
+        .find(|(l, _)| *l == file)
+        .map(|(_, t)| t.as_str())
+        .unwrap_or(fallback)
+}
+
+fn utf16_range(text: &str, start: usize, end: usize) -> LspRange {
+    let (sl, sc) = offset_to_utf16_pos(text, start);
+    let (el, ec) = offset_to_utf16_pos(text, end);
+    (sl, sc, el, ec)
+}
+
 /// Signature hover at a 0-based LSP position. Same parse as [`check_project_with`].
 pub fn hover_project(
     project_dir: &Path,
@@ -643,11 +668,7 @@ pub fn hover_project(
     line: u32,
     character: u32,
 ) -> Result<Option<String>> {
-    let Some((_resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(None);
-    };
-    let Some(program) = program else {
+    let Some((_resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(None);
     };
     let offset = crate::span::utf16_pos_to_offset(&text, line, character);
@@ -685,11 +706,7 @@ pub fn definition_project(
     line: u32,
     character: u32,
 ) -> Result<Option<FileRange>> {
-    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(None);
-    };
-    let Some(program) = program else {
+    let Some((resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(None);
     };
     let named = named_sources(&resolved);
@@ -711,11 +728,7 @@ pub fn declaration_project(
     line: u32,
     character: u32,
 ) -> Result<Option<FileRange>> {
-    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(None);
-    };
-    let Some(program) = program else {
+    let Some((resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(None);
     };
     let named = named_sources(&resolved);
@@ -736,11 +749,7 @@ pub fn type_definition_project(
     line: u32,
     character: u32,
 ) -> Result<Option<FileRange>> {
-    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(None);
-    };
-    let Some(program) = program else {
+    let Some((resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(None);
     };
     let named = named_sources(&resolved);
@@ -761,11 +770,7 @@ pub fn implementation_project(
     line: u32,
     character: u32,
 ) -> Result<Vec<FileRange>> {
-    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(Vec::new());
-    };
-    let Some(program) = program else {
+    let Some((resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(Vec::new());
     };
     let named = named_sources(&resolved);
@@ -783,11 +788,7 @@ pub fn code_lenses_project(
     unsaved: &BTreeMap<PathBuf, String>,
     path: &Path,
 ) -> Result<Vec<RangeText>> {
-    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(Vec::new());
-    };
-    let Some(program) = program else {
+    let Some((resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(Vec::new());
     };
     let named = named_sources(&resolved);
@@ -808,11 +809,7 @@ pub fn document_links_project(
     unsaved: &BTreeMap<PathBuf, String>,
     path: &Path,
 ) -> Result<Vec<DocumentLinkLsp>> {
-    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(Vec::new());
-    };
-    let Some(program) = program else {
+    let Some((resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(Vec::new());
     };
     let named = named_sources(&resolved);
@@ -861,13 +858,8 @@ fn loc_to_lsp(
         })
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| path.to_path_buf());
-    let src = named
-        .iter()
-        .find(|(l, _)| *l == loc.file)
-        .map(|(_, t)| t.as_str())
-        .unwrap_or(fallback_text);
-    let (sl, sc) = offset_to_utf16_pos(src, loc.start);
-    let (el, ec) = offset_to_utf16_pos(src, loc.end);
+    let src = named_text(named, &loc.file, fallback_text);
+    let (sl, sc, el, ec) = utf16_range(src, loc.start, loc.end);
     (dest, sl, sc, el, ec)
 }
 
@@ -877,11 +869,7 @@ pub fn symbols_project(
     unsaved: &BTreeMap<PathBuf, String>,
     path: &Path,
 ) -> Result<Vec<crate::symbols::DocSymbol>> {
-    let Some((_resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(Vec::new());
-    };
-    let Some(program) = program else {
+    let Some((_resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(Vec::new());
     };
     Ok(crate::symbols::symbols_in_source(&program, &label, &text))
@@ -927,11 +915,7 @@ pub fn signature_help_project(
     line: u32,
     character: u32,
 ) -> Result<Option<crate::signature::SigHelp>> {
-    let Some((_resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(None);
-    };
-    let Some(program) = program else {
+    let Some((_resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(None);
     };
     let offset = crate::span::utf16_pos_to_offset(&text, line, character);
@@ -949,11 +933,7 @@ pub fn references_project(
     character: u32,
     include_declaration: bool,
 ) -> Result<Vec<FileRange>> {
-    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(Vec::new());
-    };
-    let Some(program) = program else {
+    let Some((resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(Vec::new());
     };
     let named = named_sources(&resolved);
@@ -999,15 +979,9 @@ fn hierarchy_item_to_lsp(
         end: item.sel_end,
     };
     let (dest, _, _, _, _) = loc_to_lsp(resolved, path, named, loc, fallback_text);
-    let src = named
-        .iter()
-        .find(|(l, _)| *l == item.file)
-        .map(|(_, t)| t.as_str())
-        .unwrap_or(fallback_text);
-    let (sl, sc) = offset_to_utf16_pos(src, item.range_start);
-    let (el, ec) = offset_to_utf16_pos(src, item.range_end);
-    let (ssl, ssc) = offset_to_utf16_pos(src, item.sel_start);
-    let (sel, sec) = offset_to_utf16_pos(src, item.sel_end);
+    let src = named_text(named, &item.file, fallback_text);
+    let (sl, sc, el, ec) = utf16_range(src, item.range_start, item.range_end);
+    let (ssl, ssc, sel, sec) = utf16_range(src, item.sel_start, item.sel_end);
     CallItemLsp {
         path: dest,
         name: item.name,
@@ -1030,11 +1004,7 @@ pub fn prepare_call_hierarchy_project(
     line: u32,
     character: u32,
 ) -> Result<Option<CallItemLsp>> {
-    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(None);
-    };
-    let Some(program) = program else {
+    let Some((resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(None);
     };
     let named = named_sources(&resolved);
@@ -1057,11 +1027,7 @@ pub fn incoming_calls_project(
     line: u32,
     character: u32,
 ) -> Result<Vec<CallWithRanges>> {
-    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(Vec::new());
-    };
-    let Some(program) = program else {
+    let Some((resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(Vec::new());
     };
     let named = named_sources(&resolved);
@@ -1070,22 +1036,13 @@ pub fn incoming_calls_project(
     Ok(calls
         .into_iter()
         .map(|c| {
-            let from_file = c.from.file.clone();
-            let from_text = named
-                .iter()
-                .find(|(l, _)| *l == from_file)
-                .map(|(_, t)| t.as_str())
-                .unwrap_or(&text);
-            let item = hierarchy_item_to_lsp(&resolved, path, &named, c.from, &text);
+            let from_text = named_text(&named, &c.from.file, &text);
             let ranges = c
                 .from_ranges
                 .into_iter()
-                .map(|(a, b)| {
-                    let (sl, sc) = offset_to_utf16_pos(from_text, a);
-                    let (el, ec) = offset_to_utf16_pos(from_text, b);
-                    (sl, sc, el, ec)
-                })
+                .map(|(a, b)| utf16_range(from_text, a, b))
                 .collect();
+            let item = hierarchy_item_to_lsp(&resolved, path, &named, c.from, &text);
             (item, ranges)
         })
         .collect())
@@ -1099,11 +1056,7 @@ pub fn outgoing_calls_project(
     line: u32,
     character: u32,
 ) -> Result<Vec<CallWithRanges>> {
-    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(Vec::new());
-    };
-    let Some(program) = program else {
+    let Some((resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(Vec::new());
     };
     let named = named_sources(&resolved);
@@ -1112,21 +1065,12 @@ pub fn outgoing_calls_project(
     Ok(calls
         .into_iter()
         .map(|c| {
-            let from_text = named
-                .iter()
-                .find(|(l, _)| *l == label)
-                .map(|(_, t)| t.as_str())
-                .unwrap_or(&text);
-            let item = hierarchy_item_to_lsp(&resolved, path, &named, c.to, &text);
             let ranges = c
                 .from_ranges
                 .into_iter()
-                .map(|(a, b)| {
-                    let (sl, sc) = offset_to_utf16_pos(from_text, a);
-                    let (el, ec) = offset_to_utf16_pos(from_text, b);
-                    (sl, sc, el, ec)
-                })
+                .map(|(a, b)| utf16_range(&text, a, b))
                 .collect();
+            let item = hierarchy_item_to_lsp(&resolved, path, &named, c.to, &text);
             (item, ranges)
         })
         .collect())
@@ -1176,19 +1120,9 @@ pub fn type_items_project(
     path: &Path,
     line: u32,
     character: u32,
-    f: fn(
-        &crate::ast::Program,
-        &[(String, String)],
-        &str,
-        &str,
-        usize,
-    ) -> Vec<crate::typehier::TypeItem>,
+    f: crate::typehier::TypeQuery,
 ) -> Result<Vec<TypeItemLsp>> {
-    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(Vec::new());
-    };
-    let Some(program) = program else {
+    let Some((resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(Vec::new());
     };
     let named = named_sources(&resolved);
@@ -1207,11 +1141,7 @@ pub fn highlights_project(
     line: u32,
     character: u32,
 ) -> Result<Vec<HighlightLsp>> {
-    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(Vec::new());
-    };
-    let Some(program) = program else {
+    let Some((resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(Vec::new());
     };
     let named = named_sources(&resolved);
@@ -1233,11 +1163,7 @@ pub fn folding_ranges_project(
     unsaved: &BTreeMap<PathBuf, String>,
     path: &Path,
 ) -> Result<Vec<(u32, u32, u32, u32)>> {
-    let Some((_resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(Vec::new());
-    };
-    let Some(program) = program else {
+    let Some((_resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(Vec::new());
     };
     let folds = crate::fold::folds_in_source(&program, &label, &text);
@@ -1258,11 +1184,7 @@ pub fn selection_ranges_project(
     path: &Path,
     positions: &[(u32, u32)],
 ) -> Result<Vec<Vec<LspRange>>> {
-    let Some((_resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(Vec::new());
-    };
-    let Some(program) = program else {
+    let Some((_resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(Vec::new());
     };
     let mut out = Vec::new();
@@ -1290,11 +1212,7 @@ pub fn inlay_hints_project(
     path: &Path,
     range: Option<((u32, u32), (u32, u32))>,
 ) -> Result<Vec<(u32, u32, String, u8)>> {
-    let Some((_resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(Vec::new());
-    };
-    let Some(program) = program else {
+    let Some((_resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(Vec::new());
     };
     let byte_range = range.map(|((sl, sc), (el, ec))| {
@@ -1319,13 +1237,9 @@ pub fn semantic_tokens_project(
     unsaved: &BTreeMap<PathBuf, String>,
     path: &Path,
 ) -> Result<Vec<u32>> {
-    let Some((_resolved, _label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
+    let Some((_resolved, _label, text, _)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(Vec::new());
     };
-    if program.is_none() {
-        return Ok(Vec::new());
-    }
     let toks = crate::tokens::semantic_tokens_in_source(&text);
     Ok(crate::tokens::encode_semantic_tokens(&text, &toks))
 }
@@ -1337,13 +1251,9 @@ pub fn semantic_tokens_range_project(
     path: &Path,
     range: Option<((u32, u32), (u32, u32))>,
 ) -> Result<Vec<u32>> {
-    let Some((_resolved, _label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
+    let Some((_resolved, _label, text, _)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(Vec::new());
     };
-    if program.is_none() {
-        return Ok(Vec::new());
-    }
     let Some(((sl, sc), (el, ec))) = range else {
         return Ok(Vec::new());
     };
@@ -1453,11 +1363,7 @@ pub fn prepare_rename_project(
     line: u32,
     character: u32,
 ) -> Result<Option<RangeText>> {
-    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(None);
-    };
-    let Some(program) = program else {
+    let Some((resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(None);
     };
     let named = named_sources(&resolved);
@@ -1484,11 +1390,7 @@ pub fn rename_project(
     if !crate::rename::is_rename_ident(new_name) {
         return Ok(RenameResult::BadName);
     }
-    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
-    else {
-        return Ok(RenameResult::Unavailable);
-    };
-    let Some(program) = program else {
+    let Some((resolved, label, text, program)) = load_parsed(project_dir, unsaved, path)? else {
         return Ok(RenameResult::Unavailable);
     };
     let named = named_sources(&resolved);

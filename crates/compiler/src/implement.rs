@@ -1,9 +1,9 @@
 //! Go-to-implementation from the same parse as `check`. No second typer.
 
 use crate::ast::{Program, TraitDef};
-use crate::definition::DefLoc;
+use crate::definition::{source_for_module, DefLoc};
 use crate::hover::ident_at_opts;
-use crate::lexer::{lex, Token};
+use crate::lexer::{lex, SpannedToken, Token};
 use crate::resolve::module_id_from_label;
 
 /// Impl locations for the ident at `offset` in `current_file`.
@@ -63,7 +63,7 @@ fn impl_for_type_locs(
         if im.trait_name != trait_name {
             continue;
         }
-        let Some((file, text)) = source_for(sources, &im.module) else {
+        let Some((file, text)) = source_for_module(sources, &im.module) else {
             continue;
         };
         if let Some((start, end)) = impl_for_type_span(text, trait_name, &im.for_type) {
@@ -100,7 +100,7 @@ fn impl_method_locs(
                 .iter()
                 .any(|t| t.name == im.trait_name && t.methods.iter().any(|m| m.name == method))
         {
-            let Some((file, text)) = source_for(sources, &im.module) else {
+            let Some((file, text)) = source_for_module(sources, &im.module) else {
                 continue;
             };
             if let Some((start, end)) = impl_method_span(text, &im.trait_name, &im.for_type, method)
@@ -114,13 +114,6 @@ fn impl_method_locs(
         }
     }
     out
-}
-
-fn source_for<'a>(sources: &'a [(String, String)], module: &str) -> Option<(&'a str, &'a str)> {
-    sources
-        .iter()
-        .find(|(label, _)| module_id_from_label(label) == module)
-        .map(|(l, t)| (l.as_str(), t.as_str()))
 }
 
 pub(crate) fn impl_for_type_span(
@@ -157,6 +150,45 @@ pub(crate) fn impl_method_span(
         i += 1;
     }
     None
+}
+
+pub(crate) fn trait_method_span(
+    source: &str,
+    trait_name: &str,
+    method: &str,
+) -> Option<(usize, usize)> {
+    let toks = lex(source).ok()?;
+    let mut i = 0;
+    while i < toks.len() {
+        if matches!(toks[i].token, Token::Trait) {
+            if let Some(Token::Ident(n)) = toks.get(i + 1).map(|t| &t.token) {
+                if n == trait_name {
+                    let mut j = skip_brackets(&toks, i + 2);
+                    while j < toks.len() && !impl_block_end(source, &toks[j]) {
+                        if matches!(toks[j].token, Token::Def) {
+                            if let Some(Token::Ident(mn)) = toks.get(j + 1).map(|t| &t.token) {
+                                if mn == method {
+                                    let m = &toks[j + 1];
+                                    return Some((m.span.start, m.span.end));
+                                }
+                            }
+                        }
+                        j += 1;
+                    }
+                }
+            }
+        }
+        i += 1;
+    }
+    None
+}
+
+pub(crate) fn decl_block_end(source: &str, toks: &[SpannedToken], start: usize) -> usize {
+    toks[start..]
+        .iter()
+        .find(|t| impl_block_end(source, t))
+        .map(|t| t.span.start)
+        .unwrap_or(source.len())
 }
 
 /// Index of the `for Type` ident in `toks`.

@@ -8,14 +8,13 @@ use crate::ast::Program;
 use crate::definition::{decl_kw_name, source_for_module, DeclKind};
 use crate::hover::{enum_named, ident_at_opts, unique_enum};
 use crate::implement::{
-    impl_block_end, impl_method_span, skip_brackets, trait_named, unique_trait,
+    decl_block_end, impl_method_span, skip_brackets, trait_method_span, trait_named, unique_trait,
 };
 use crate::lexer::{lex, Token};
 use crate::resolve::module_id_from_label;
-use crate::symbols::{KIND_ENUM, KIND_STRUCT};
+use crate::symbols::{KIND_ENUM, KIND_INTERFACE, KIND_METHOD, KIND_STRUCT};
 
-pub const KIND_METHOD: u8 = 6;
-pub const KIND_INTERFACE: u8 = 11;
+pub type TypeQuery = fn(&Program, &[(String, String)], &str, &str, usize) -> Vec<TypeItem>;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TypeItem {
@@ -25,6 +24,14 @@ pub struct TypeItem {
     pub detail: String,
     pub sel_start: usize,
     pub sel_end: usize,
+}
+
+enum Owner {
+    Trait(String),
+    Impl {
+        trait_name: String,
+        for_type: String,
+    },
 }
 
 enum Hit {
@@ -118,7 +125,7 @@ fn hit_at(program: &Program, current_file: &str, source: &str, offset: usize) ->
     let (_, name) = ident_at_opts(source, offset, false)?;
     let module = module_id_from_label(current_file);
     match owner_at(source, offset) {
-        Some(Hit::Trait(tr)) => {
+        Some(Owner::Trait(tr)) => {
             if name == tr {
                 return Some(Hit::Trait(name));
             }
@@ -133,10 +140,9 @@ fn hit_at(program: &Program, current_file: &str, source: &str, offset: usize) ->
                 });
             }
         }
-        Some(Hit::ImplMethod {
+        Some(Owner::Impl {
             trait_name: tn,
             for_type: ft,
-            ..
         }) => {
             if name == tn {
                 return Some(Hit::Trait(tn));
@@ -156,7 +162,7 @@ fn hit_at(program: &Program, current_file: &str, source: &str, offset: usize) ->
                 });
             }
         }
-        _ => {}
+        None => {}
     }
     if unique_trait(program, &name).is_some() || trait_named(program, &module, &name).is_some() {
         return Some(Hit::Trait(name));
@@ -186,8 +192,7 @@ fn named_item(
 }
 
 fn trait_item(program: &Program, sources: &[(String, String)], name: &str) -> Option<TypeItem> {
-    let tr =
-        unique_trait(program, name).or_else(|| program.traits.iter().find(|t| t.name == name))?;
+    let tr = program.traits.iter().find(|t| t.name == name)?;
     let (file, text) = source_for_module(sources, &tr.module)?;
     let (_, ns, ne) = decl_kw_name(text, DeclKind::Trait, name)?;
     Some(named_item(
@@ -201,8 +206,7 @@ fn trait_item(program: &Program, sources: &[(String, String)], name: &str) -> Op
 }
 
 fn type_item(program: &Program, sources: &[(String, String)], name: &str) -> Option<TypeItem> {
-    let en =
-        unique_enum(program, name).or_else(|| program.enums.iter().find(|e| e.name == name))?;
+    let en = program.enums.iter().find(|e| e.name == name)?;
     let (file, text) = source_for_module(sources, &en.module)?;
     let (_, ns, ne) = decl_kw_name(text, DeclKind::Enum, name)?;
     let (kind, detail) = if en.is_record {
@@ -237,8 +241,7 @@ fn method_item(
             e,
         ));
     }
-    let tr = unique_trait(program, trait_name)
-        .or_else(|| program.traits.iter().find(|t| t.name == trait_name))?;
+    let tr = program.traits.iter().find(|t| t.name == trait_name)?;
     if !tr.methods.iter().any(|m| m.name == method) {
         return None;
     }
@@ -268,50 +271,15 @@ fn method_items(
         .collect()
 }
 
-fn trait_method_span(source: &str, trait_name: &str, method: &str) -> Option<(usize, usize)> {
+fn owner_at(source: &str, offset: usize) -> Option<Owner> {
     let toks = lex(source).ok()?;
     let mut i = 0;
     while i < toks.len() {
         if matches!(toks[i].token, Token::Trait) {
             if let Some(Token::Ident(n)) = toks.get(i + 1).map(|t| &t.token) {
-                if n == trait_name {
-                    let mut j = skip_brackets(&toks, i + 2);
-                    while j < toks.len() && !impl_block_end(source, &toks[j]) {
-                        if matches!(toks[j].token, Token::Def) {
-                            if let Some(Token::Ident(mn)) = toks.get(j + 1).map(|t| &t.token) {
-                                if mn == method {
-                                    let m = &toks[j + 1];
-                                    return Some((m.span.start, m.span.end));
-                                }
-                            }
-                        }
-                        j += 1;
-                    }
-                }
-            }
-        }
-        i += 1;
-    }
-    None
-}
-
-fn block_end(source: &str, toks: &[crate::lexer::SpannedToken], start: usize) -> usize {
-    toks[start..]
-        .iter()
-        .find(|t| impl_block_end(source, t))
-        .map(|t| t.span.start)
-        .unwrap_or(source.len())
-}
-
-fn owner_at(source: &str, offset: usize) -> Option<Hit> {
-    let toks = lex(source).ok()?;
-    let mut i = 0;
-    while i < toks.len() {
-        if matches!(toks[i].token, Token::Trait) {
-            if let Some(Token::Ident(n)) = toks.get(i + 1).map(|t| &t.token) {
-                let end = block_end(source, &toks, skip_brackets(&toks, i + 2));
+                let end = decl_block_end(source, &toks, skip_brackets(&toks, i + 2));
                 if toks[i].span.start <= offset && offset < end {
-                    return Some(Hit::Trait(n.clone()));
+                    return Some(Owner::Trait(n.clone()));
                 }
             }
         }
@@ -320,12 +288,11 @@ fn owner_at(source: &str, offset: usize) -> Option<Hit> {
                 let j = skip_brackets(&toks, i + 2);
                 if matches!(toks.get(j).map(|t| &t.token), Some(Token::For)) {
                     if let Some(Token::Ident(n)) = toks.get(j + 1).map(|t| &t.token) {
-                        let end = block_end(source, &toks, j + 2);
+                        let end = decl_block_end(source, &toks, j + 2);
                         if toks[i].span.start <= offset && offset < end {
-                            return Some(Hit::ImplMethod {
+                            return Some(Owner::Impl {
                                 trait_name: tn.clone(),
                                 for_type: n.clone(),
-                                method: String::new(),
                             });
                         }
                     }
@@ -363,11 +330,7 @@ impl Show for Box:
         items.iter().map(|i| i.name.as_str()).collect()
     }
 
-    fn at(
-        src: &str,
-        offset: usize,
-        f: fn(&Program, &[(String, String)], &str, &str, usize) -> Vec<TypeItem>,
-    ) -> Vec<TypeItem> {
+    fn at(src: &str, offset: usize, f: TypeQuery) -> Vec<TypeItem> {
         let program = parse_file(src, "Main.scuzz").unwrap();
         f(
             &program,

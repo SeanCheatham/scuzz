@@ -5,11 +5,13 @@ use crate::definition::{decl_kw_name, DeclKind};
 use crate::lexer::{lex, Token};
 use crate::resolve::module_id_from_label;
 
+pub const KIND_METHOD: u8 = 6;
+pub const KIND_FIELD: u8 = 8;
 pub const KIND_ENUM: u8 = 10;
+pub const KIND_INTERFACE: u8 = 11;
 pub const KIND_FN: u8 = 12;
 pub const KIND_ENUM_MEMBER: u8 = 22;
 pub const KIND_STRUCT: u8 = 23;
-pub const KIND_FIELD: u8 = 8;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DocSymbol {
