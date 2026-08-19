@@ -610,6 +610,14 @@ fn retain_borrowed_ret(ty: &Type) -> bool {
     }
 }
 
+/// `IO[T]` payload is a distinct RC when `T` is a last-use pointer type.
+fn io_payload_owned(ty: &Type) -> bool {
+    match ty {
+        Type::Io(inner) => retain_borrowed_ret(inner),
+        _ => false,
+    }
+}
+
 fn llvm_kind_ty(kind: Kind) -> &'static str {
     match kind {
         Kind::Int => "i64",
@@ -5608,6 +5616,7 @@ fn emit_call(
                 ("ptr", Kind::Ptr, Kind::Ptr, format!("sz_user_{other}"))
             };
             let mut arg_parts = Vec::new();
+            let mut extra_boxes: Vec<String> = Vec::new();
             if let Some(f) = f {
                 for (i, p) in f.params.iter().enumerate() {
                     let a = &emitted_args[i];
@@ -5626,6 +5635,7 @@ fn emit_call(
                         (_, Kind::Int) | (_, Kind::Float) => {
                             let boxed =
                                 box_numeric(&mut code, a.kind, &a.value, &format!("{prefix}_a{i}"));
+                            extra_boxes.push(boxed.clone());
                             (boxed, "ptr")
                         }
                         _ => (a.value.clone(), "ptr"),
@@ -5651,8 +5661,17 @@ fn emit_call(
                 arg_parts.join(", ")
             )
             .unwrap();
+            drop_owned_ptrs(&mut code, &emitted_args);
+            for b in &extra_boxes {
+                writeln!(code, "  call void @sz_release(ptr {b})").unwrap();
+            }
+            let ret_owned = f.map(|fun| retain_borrowed_ret(&fun.ret)).unwrap_or(false);
+            let payload_owned = f.map(|fun| io_payload_owned(&fun.ret)).unwrap_or(false);
             match ret_kind {
-                Kind::Io => io_emitted(code, format!("%{prefix}_v"), payload),
+                Kind::Io => {
+                    io_emitted_payload(code, format!("%{prefix}_v"), payload, payload_owned)
+                }
+                Kind::Ptr if ret_owned => owned_ptr(code, format!("%{prefix}_v")),
                 other_k => val_emitted(code, format!("%{prefix}_v"), other_k),
             }
         }
@@ -5671,6 +5690,58 @@ mod tests {
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of {name} after contains:\n{ir}"
+        );
+    }
+
+    fn emit_full(src: &str) -> String {
+        let mut p = parse(src).unwrap();
+        crate::typ::inject_builtin_enums(&mut p.enums);
+        let p = crate::lower::lower_program(p);
+        let p = crate::typ::expand_impls(p).expect("impls");
+        let p = crate::typ::resolve_named_args(p).expect("named");
+        crate::typ::typecheck(&p).expect("typecheck");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate");
+        let p = crate::typ::resolve_field_access(p).expect("fields");
+        let p = crate::typ::monomorphize(p).expect("mono");
+        let p = crate::typ::resolve_field_access(p).expect("fields after mono");
+        emit_llvm(&p)
+    }
+
+    fn is_llvm_call_site(ir: &str, at: usize) -> bool {
+        let line_start = ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let before_sym = &ir[line_start..at];
+        before_sym.contains("call ") && !before_sym.contains("define ")
+    }
+
+    fn find_user_call(ir: &str, sym: &str) -> usize {
+        let needle = format!("@{sym}(");
+        let mut search = 0usize;
+        while let Some(rel) = ir[search..].find(&needle) {
+            let at = search + rel;
+            if is_llvm_call_site(ir, at) {
+                return at;
+            }
+            search = at + needle.len();
+        }
+        panic!("missing call to {sym}:\n{ir}");
+    }
+
+    fn user_call_ptr_args<'a>(ir: &'a str, sym: &str) -> (usize, Vec<&'a str>) {
+        let at = find_user_call(ir, sym);
+        let rest = &ir[at..];
+        let open = rest.find('(').unwrap();
+        let close = rest.find(')').unwrap();
+        let ptrs: Vec<&str> = rest[open + 1..close]
+            .split(',')
+            .filter_map(|a| a.trim().strip_prefix("ptr "))
+            .collect();
+        (at, ptrs)
+    }
+
+    fn assert_release_after(ir: &str, at: usize, name: &str, what: &str) {
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of {what} {name}:\n{ir}"
         );
     }
 
@@ -6026,6 +6097,325 @@ def id(xs: List[Int]): List[Int] = xs
         crate::typ::typecheck(&p).expect("typecheck");
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_retain"));
+    }
+
+    #[test]
+    fn emit_user_call_drops_owned_string_arg() {
+        let src = r#"
+def slen(s: String): Int = Str.len(s)
+@main def main: IO[Unit] = IO.println(Str.fromInt(slen("xy")))
+"#;
+        let ir = emit_full(src);
+        let (at, args) = user_call_ptr_args(&ir, "sz_user_slen");
+        assert_eq!(args.len(), 1, "expected one string arg:\n{ir}");
+        assert_release_after(&ir, at, args[0], "owned string arg");
+    }
+
+    #[test]
+    fn emit_user_call_drops_owned_list_arg() {
+        let src = r#"
+def llen(xs: List[Int]): Int = List.len(xs)
+@main def main: IO[Unit] = IO.println(Str.fromInt(llen([1, 2])))
+"#;
+        let ir = emit_full(src);
+        let (at, args) = user_call_ptr_args(&ir, "sz_user_llen");
+        assert_eq!(args.len(), 1, "expected one list arg:\n{ir}");
+        assert_release_after(&ir, at, args[0], "owned list arg");
+    }
+
+    #[test]
+    fn emit_user_id_drops_owned_arg_and_return() {
+        let src = r#"
+def id(s: String): String = s
+@main def main: IO[Unit] = IO.println(id("x"))
+"#;
+        let ir = emit_full(src);
+        let (at, args) = user_call_ptr_args(&ir, "sz_user_id");
+        assert_eq!(args.len(), 1, "expected one string arg:\n{ir}");
+        assert_release_after(&ir, at, args[0], "owned id arg");
+        let line_start = ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0);
+        let ret = ir[line_start..].split('=').next().unwrap().trim();
+        assert_release_after(&ir, at, ret, "owned id return");
+        assert!(
+            ir.contains("sz_retain"),
+            "id retains a borrowed param:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_user_call_keeps_borrowed_local_until_later_use() {
+        let src = r#"
+def slen(s: String): Int = Str.len(s)
+@main def main: IO[Unit] =
+  for {
+    s = "xy"
+    n = slen(s)
+    _ <- IO.println(Str.fromInt(n))
+    _ <- IO.println(s)
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let (at, args) = user_call_ptr_args(&ir, "sz_user_slen");
+        assert_eq!(args.len(), 1, "expected borrowed local arg:\n{ir}");
+        let s = args[0];
+        let after = &ir[at..];
+        let cons_at = after
+            .find(&format!("sz_list_cons(ptr {s},"))
+            .unwrap_or_else(|| panic!("expected capture of local {s} after slen:\n{ir}"));
+        let rel_at = after
+            .find(&format!("call void @sz_release(ptr {s})"))
+            .unwrap_or_else(|| panic!("expected binder release of {s}:\n{ir}"));
+        assert!(
+            cons_at < rel_at,
+            "borrowed local {s} must stay until after capture:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_nested_user_id_drops_each_owned_temp() {
+        let src = r#"
+def id(s: String): String = s
+@main def main: IO[Unit] = IO.println(id(id("x")))
+"#;
+        let ir = emit_full(src);
+        let mut search = 0usize;
+        let mut calls = 0usize;
+        let needle = "@sz_user_id(";
+        while let Some(rel) = ir[search..].find(needle) {
+            let at = search + rel;
+            if is_llvm_call_site(&ir, at) {
+                let rest = &ir[at..];
+                let open = rest.find('(').unwrap();
+                let close = rest.find(')').unwrap();
+                let arg = rest[open + 1..close]
+                    .trim()
+                    .strip_prefix("ptr ")
+                    .expect("ptr arg");
+                assert_release_after(&ir, at, arg, "nested id arg");
+                calls += 1;
+            }
+            search = at + needle.len();
+        }
+        assert_eq!(calls, 2, "expected two id calls:\n{ir}");
+    }
+
+    #[test]
+    fn emit_user_string_return_owned_for_let() {
+        let src = r#"
+def hello(): String = "hi"
+@main def main: IO[Unit] =
+  for {
+    s = hello()
+    _ <- IO.println(s)
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let at = find_user_call(&ir, "sz_user_hello");
+        let ret = ir[ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0)..]
+            .split('=')
+            .next()
+            .unwrap()
+            .trim();
+        assert_release_after(&ir, at, ret, "owned hello return");
+    }
+
+    #[test]
+    fn emit_user_call_drops_default_string_arg() {
+        let src = r#"
+def greet(name: String, punct: String = "!"): String = Str.concat(name, punct)
+@main def main: IO[Unit] = IO.println(greet("x"))
+"#;
+        let ir = emit_full(src);
+        let (at, args) = user_call_ptr_args(&ir, "sz_user_greet");
+        assert_eq!(args.len(), 2, "expected name and default punct:\n{ir}");
+        assert_release_after(&ir, at, args[0], "owned greet name");
+        assert_release_after(&ir, at, args[1], "owned greet default");
+    }
+
+    #[test]
+    fn emit_user_call_drops_two_owned_string_args() {
+        let src = r#"
+def join(a: String, b: String): String = Str.concat(a, b)
+@main def main: IO[Unit] = IO.println(join("a", "b"))
+"#;
+        let ir = emit_full(src);
+        let (at, args) = user_call_ptr_args(&ir, "sz_user_join");
+        assert_eq!(args.len(), 2, "expected two string args:\n{ir}");
+        assert_release_after(&ir, at, args[0], "owned join left");
+        assert_release_after(&ir, at, args[1], "owned join right");
+    }
+
+    #[test]
+    fn emit_user_io_string_payload_owned() {
+        let src = r#"
+def hello(): IO[String] = IO.pure("hi")
+@main def main: IO[Unit] =
+  for {
+    s <- hello()
+    _ <- IO.println(s)
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        assert!(
+            ir.contains("call void @sz_release(ptr %value)"),
+            "expected owned IO[String] payload last-use:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_user_call_drops_owned_map_arg() {
+        let src = r#"
+def hasA(m: Map[String, String]): Bool = Map.contains(m, "a")
+@main def main: IO[Unit] =
+  IO.println(if (hasA(Map.set(Map.empty(), "a", "1"))) "y" else "n")
+"#;
+        let ir = emit_full(src);
+        let (at, args) = user_call_ptr_args(&ir, "sz_user_hasA");
+        assert_eq!(args.len(), 1, "expected one map arg:\n{ir}");
+        assert_release_after(&ir, at, args[0], "owned map arg");
+    }
+
+    #[test]
+    fn emit_user_call_drops_owned_set_arg() {
+        let src = r#"
+def hasX(s: Set[String]): Bool = Set.contains(s, "x")
+@main def main: IO[Unit] =
+  IO.println(if (hasX(Set.add(Set.empty(), "x"))) "y" else "n")
+"#;
+        let ir = emit_full(src);
+        let (at, args) = user_call_ptr_args(&ir, "sz_user_hasX");
+        assert_eq!(args.len(), 1, "expected one set arg:\n{ir}");
+        assert_release_after(&ir, at, args[0], "owned set arg");
+    }
+
+    #[test]
+    fn emit_user_adt_id_drops_owned_arg() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+def id(c: Color): Color = c
+@main def main: IO[Unit] =
+  id(Color.Red) match {
+    case Color.Red => IO.println("r")
+    case Color.Blue => IO.println("b")
+  }
+"#;
+        let ir = emit_full(src);
+        let (at, args) = user_call_ptr_args(&ir, "sz_user_id");
+        assert_eq!(args.len(), 1, "expected one ADT arg:\n{ir}");
+        assert_release_after(&ir, at, args[0], "owned ADT arg");
+        assert!(
+            ir.contains("sz_retain"),
+            "id retains a borrowed Color:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_method_call_drops_owned_receiver() {
+        let src = r#"
+record Point(x: Int, y: Int)
+trait Show:
+  def show(): String
+impl Show for Point:
+  def show(): String = "p"
+@main def main: IO[Unit] = IO.println(Point(1, 2).show())
+"#;
+        let ir = emit_full(src);
+        let needle = "show(";
+        let mut search = 0usize;
+        let mut found = false;
+        while let Some(rel) = ir[search..].find(needle) {
+            let at = search + rel;
+            let line_start = ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            if is_llvm_call_site(&ir, at) && ir[line_start..].contains("@sz_user_") {
+                let rest = &ir[at..];
+                let open = rest.find('(').unwrap();
+                let close = rest.find(')').unwrap();
+                if let Some(arg) = rest[open + 1..close].trim().strip_prefix("ptr ") {
+                    assert_release_after(&ir, at, arg, "owned method receiver");
+                    found = true;
+                    break;
+                }
+            }
+            search = at + needle.len();
+        }
+        assert!(found, "expected Point.show call:\n{ir}");
+    }
+
+    #[test]
+    fn emit_generic_id_drops_owned_string() {
+        let src = r#"
+def id[T](x: T): T = x
+@main def main: IO[Unit] = IO.println(id("x"))
+"#;
+        let ir = emit_full(src);
+        let mut found = false;
+        for (i, line) in ir.lines().enumerate() {
+            let line = line.trim_start();
+            if line.contains(" = call ptr @sz_user_") && line.contains("(") {
+                if let Some(args) = line.split_once('(').map(|(_, r)| r) {
+                    if let Some(arg) = args.trim().strip_prefix("ptr ") {
+                        let arg = arg.trim_end_matches(')').trim();
+                        if arg.starts_with('%') {
+                            let rest = ir.lines().skip(i).collect::<Vec<_>>().join("\n");
+                            assert!(
+                                rest.contains(&format!("call void @sz_release(ptr {arg})")),
+                                "expected last-use release of generic id arg {arg}:\n{ir}"
+                            );
+                            found = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+        assert!(found, "expected generic id call:\n{ir}");
+    }
+
+    #[test]
+    fn emit_user_list_return_dropped_after_len() {
+        let src = r#"
+def wrap(xs: List[Int]): List[Int] = xs
+@main def main: IO[Unit] = IO.println(Str.fromInt(List.len(wrap([1]))))
+"#;
+        let ir = emit_full(src);
+        let (at, args) = user_call_ptr_args(&ir, "sz_user_wrap");
+        assert_eq!(args.len(), 1, "expected one list arg:\n{ir}");
+        assert_release_after(&ir, at, args[0], "owned wrap arg");
+        let needle = "call i64 @sz_list_len(ptr ";
+        let len_at = ir.find(needle).expect("expected sz_list_len");
+        let phi = ir[len_at + needle.len()..]
+            .split(')')
+            .next()
+            .unwrap()
+            .trim();
+        assert_release_after(&ir, len_at, phi, "owned wrap return");
+    }
+
+    #[test]
+    fn emit_user_io_unit_drops_owned_string_arg() {
+        let src = r#"
+def shout(s: String): IO[Unit] = IO.println(s)
+@main def main: IO[Unit] = shout("hi")
+"#;
+        let ir = emit_full(src);
+        let (at, args) = user_call_ptr_args(&ir, "sz_user_shout");
+        assert_eq!(args.len(), 1, "expected one string arg:\n{ir}");
+        assert_release_after(&ir, at, args[0], "owned shout arg");
+    }
+
+    #[test]
+    fn emit_user_call_drops_owned_record() {
+        let src = r#"
+record Point(x: Int, y: Int)
+def sum(p: Point): Int = p.x + p.y
+@main def main: IO[Unit] = IO.println(Str.fromInt(sum(Point(3, 5))))
+"#;
+        let ir = emit_full(src);
+        let (at, args) = user_call_ptr_args(&ir, "sz_user_sum");
+        assert_eq!(args.len(), 1, "expected one record arg:\n{ir}");
+        assert_release_after(&ir, at, args[0], "owned record arg");
     }
 
     #[test]
