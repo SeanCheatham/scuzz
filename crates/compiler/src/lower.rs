@@ -40,6 +40,10 @@ fn lower_pattern(pat: Pattern, enums: &EnumIndex<'_>, current_module: &str) -> P
     match pat {
         Pattern::Wildcard => Pattern::Wildcard,
         Pattern::Bind(name) => Pattern::Bind(name),
+        Pattern::Int(n) => Pattern::Int(n),
+        Pattern::Float(bits) => Pattern::Float(bits),
+        Pattern::Bool(b) => Pattern::Bool(b),
+        Pattern::Str(s) => Pattern::Str(s),
         Pattern::Adt {
             enum_name,
             case_name,

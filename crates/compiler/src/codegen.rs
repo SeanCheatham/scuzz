@@ -749,6 +749,7 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         ExprKind::Match { scrutinee, arms } => {
             collect_strings(scrutinee, out);
             for a in arms {
+                collect_pat_strings(&a.pattern, out);
                 if let Some(g) = &a.guard {
                     collect_strings(g, out);
                 }
@@ -791,6 +792,26 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
             }
             collect_strings(body, out);
         }
+    }
+}
+
+fn collect_pat_strings(pat: &Pattern, out: &mut Vec<String>) {
+    match pat {
+        Pattern::Str(s) => {
+            if !out.contains(s) {
+                out.push(s.clone());
+            }
+        }
+        Pattern::Adt { binds, .. } => {
+            for b in binds {
+                collect_pat_strings(b, out);
+            }
+        }
+        Pattern::Wildcard
+        | Pattern::Bind(_)
+        | Pattern::Int(_)
+        | Pattern::Float(_)
+        | Pattern::Bool(_) => {}
     }
 }
 
@@ -1191,7 +1212,7 @@ fn emit_match(
         emit_pat(
             &arm.pattern,
             &se.value,
-            Kind::Ptr,
+            se.kind,
             &format!("{prefix}_p{id}_{i}"),
             &ok_l,
             &next_l,
@@ -1320,6 +1341,89 @@ fn emit_pat(
             pe.locals.insert(name.clone(), Local::borrow(value, kind));
             pe.bound_names.push(name.clone());
             writeln!(pe.code, "  br label %{ok_label}").unwrap();
+        }
+        Pattern::Int(n) => {
+            if kind != Kind::Int {
+                writeln!(pe.code, "  br label %{fail_label}").unwrap();
+                return;
+            }
+            let sid = *pe.ctx.cont_id;
+            *pe.ctx.cont_id += 1;
+            let cmp = format!("{prefix}_ieq{sid}");
+            writeln!(pe.code, "  %{cmp} = icmp eq i64 {value}, {n}").unwrap();
+            writeln!(
+                pe.code,
+                "  br i1 %{cmp}, label %{ok_label}, label %{fail_label}"
+            )
+            .unwrap();
+        }
+        Pattern::Bool(b) => {
+            if kind != Kind::Int {
+                writeln!(pe.code, "  br label %{fail_label}").unwrap();
+                return;
+            }
+            let sid = *pe.ctx.cont_id;
+            *pe.ctx.cont_id += 1;
+            let want = if *b { 1 } else { 0 };
+            let cmp = format!("{prefix}_beq{sid}");
+            writeln!(pe.code, "  %{cmp} = icmp eq i64 {value}, {want}").unwrap();
+            writeln!(
+                pe.code,
+                "  br i1 %{cmp}, label %{ok_label}, label %{fail_label}"
+            )
+            .unwrap();
+        }
+        Pattern::Float(bits) => {
+            if kind != Kind::Float {
+                writeln!(pe.code, "  br label %{fail_label}").unwrap();
+                return;
+            }
+            let sid = *pe.ctx.cont_id;
+            *pe.ctx.cont_id += 1;
+            let lit = llvm_double_const(*bits);
+            let cmp = format!("{prefix}_feq{sid}");
+            writeln!(pe.code, "  %{cmp} = fcmp oeq double {value}, {lit}").unwrap();
+            writeln!(
+                pe.code,
+                "  br i1 %{cmp}, label %{ok_label}, label %{fail_label}"
+            )
+            .unwrap();
+        }
+        Pattern::Str(s) => {
+            if kind != Kind::Ptr {
+                writeln!(pe.code, "  br label %{fail_label}").unwrap();
+                return;
+            }
+            let sid = *pe.ctx.cont_id;
+            *pe.ctx.cont_id += 1;
+            let idx = str_index(pe.ctx.strs, s);
+            let len = s.len() + 1;
+            let gep = format!("{prefix}_sgep{sid}");
+            let lit = format!("{prefix}_slit{sid}");
+            let eqi = format!("{prefix}_seqi{sid}");
+            let cmp = format!("{prefix}_seq{sid}");
+            writeln!(
+                pe.code,
+                "  %{gep} = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
+            )
+            .unwrap();
+            writeln!(
+                pe.code,
+                "  %{lit} = call ptr @sz_string_from_cstr(ptr %{gep})"
+            )
+            .unwrap();
+            writeln!(
+                pe.code,
+                "  %{eqi} = call i32 @sz_string_eq(ptr {value}, ptr %{lit})"
+            )
+            .unwrap();
+            writeln!(pe.code, "  call void @sz_release(ptr %{lit})").unwrap();
+            writeln!(pe.code, "  %{cmp} = icmp ne i32 %{eqi}, 0").unwrap();
+            writeln!(
+                pe.code,
+                "  br i1 %{cmp}, label %{ok_label}, label %{fail_label}"
+            )
+            .unwrap();
         }
         Pattern::Adt {
             enum_name,
@@ -9688,6 +9792,65 @@ enum Wrap:
         assert!(
             tag_calls >= 2,
             "expected nested tag tests, got {tag_calls}:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_int_literal_pattern() {
+        let src = r#"
+@main def main: IO[Unit] =
+  0 match {
+    case 0 => IO.println("z")
+    case _ => IO.println("o")
+  }
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("icmp eq i64") && ir.contains(", 0"),
+            "expected int literal icmp:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_string_literal_pattern() {
+        let src = r#"
+@main def main: IO[Unit] =
+  "ok" match {
+    case "ok" => IO.println("hit")
+    case _ => IO.println("miss")
+  }
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_string_eq"),
+            "expected string literal eq:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_nested_int_literal_pattern() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  Opt.Some(0) match {
+    case Opt.Some(0) => IO.println("z")
+    case Opt.Some(_) => IO.println("o")
+    case Opt.None => IO.println("n")
+  }
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_adt_tag"), "expected adt tag:\n{ir}");
+        assert!(
+            ir.contains("icmp eq i64") && ir.contains(", 0"),
+            "expected nested int icmp:\n{ir}"
         );
     }
 
