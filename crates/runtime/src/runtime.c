@@ -1019,6 +1019,24 @@ int64_t sz_unbox_i64(const void *p) {
   return p ? *(const int64_t *)p : 0;
 }
 
+int sz_ptr_eq(const void *a, const void *b) {
+  uint32_t ka;
+  if (a == b)
+    return 1;
+  if (!a || !b)
+    return 0;
+  if (!sz_is_rc(a) || !sz_is_rc(b))
+    return 0;
+  ka = sz_rc_hdr(a)->kind;
+  if (ka != sz_rc_hdr(b)->kind)
+    return 0;
+  if (ka == SZ_RC_STRING)
+    return sz_string_eq((const SzString *)a, (const SzString *)b);
+  if (ka == SZ_RC_BOX)
+    return sz_unbox_i64(a) == sz_unbox_i64(b);
+  return 0;
+}
+
 /* --- errors / Either / ADT / Pair ---------------------------------------- */
 
 SzError *sz_error_new(int32_t code, const char *msg) {

@@ -190,6 +190,12 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_zip_all(ptr, ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_unzip(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_transpose(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_list_contains(ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_list_index_of(ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_list_last_index_of(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_distinct(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_diff(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_intersect(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_index_where(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_last_index_where(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
@@ -3634,7 +3640,7 @@ fn emit_call(
             ptr_owned_if(code, format!("%{prefix}_v"), emitted_args[0].owned)
         }
         "List.reverse" | "List.init" | "List.inits" | "List.tails" | "List.last"
-        | "List.flatten" | "List.indices" | "List.unzip" | "List.transpose" => {
+        | "List.flatten" | "List.indices" | "List.unzip" | "List.transpose" | "List.distinct" => {
             let rt = match callee {
                 "List.reverse" => "sz_list_reverse",
                 "List.init" => "sz_list_init",
@@ -3644,6 +3650,7 @@ fn emit_call(
                 "List.flatten" => "sz_list_flatten",
                 "List.unzip" => "sz_list_unzip",
                 "List.transpose" => "sz_list_transpose",
+                "List.distinct" => "sz_list_distinct",
                 _ => "sz_list_indices",
             };
             writeln!(
@@ -3833,11 +3840,12 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
-        "List.concat" | "List.zip" => {
-            let rt = if callee == "List.zip" {
-                "sz_list_zip"
-            } else {
-                "sz_list_concat"
+        "List.concat" | "List.zip" | "List.diff" | "List.intersect" => {
+            let rt = match callee {
+                "List.zip" => "sz_list_zip",
+                "List.diff" => "sz_list_diff",
+                "List.intersect" => "sz_list_intersect",
+                _ => "sz_list_concat",
             };
             writeln!(
                 code,
@@ -3887,6 +3895,36 @@ fn emit_call(
                 writeln!(code, "  call void @sz_release(ptr {y})").unwrap();
             }
             owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "List.contains" | "List.indexOf" | "List.lastIndexOf" => {
+            let rt = match callee {
+                "List.contains" => "sz_list_contains",
+                "List.indexOf" => "sz_list_index_of",
+                _ => "sz_list_last_index_of",
+            };
+            let elem = if emitted_args[1].kind == Kind::Int || emitted_args[1].kind == Kind::Float {
+                box_numeric(
+                    &mut code,
+                    emitted_args[1].kind,
+                    &emitted_args[1].value,
+                    &format!("{prefix}_el"),
+                )
+            } else {
+                emitted_args[1].value.clone()
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @{rt}(ptr {}, ptr {elem})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            if emitted_args[1].kind == Kind::Int || emitted_args[1].kind == Kind::Float {
+                writeln!(code, "  call void @sz_release(ptr {elem})").unwrap();
+            } else {
+                drop_owned_ptr(&mut code, &emitted_args[1]);
+            }
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "List.append" => {
             let elem = if emitted_args[1].kind == Kind::Int || emitted_args[1].kind == Kind::Float {
@@ -6972,6 +7010,52 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of list {name} after List.transpose:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_contains_distinct_diff() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(if (List.contains(["a", "b"], "b")) "y" else "n")
+    _ <- IO.println(Str.fromInt(List.indexOf(["a", "b", "a"], "a")))
+    _ <- IO.println(Str.fromInt(List.lastIndexOf(["a", "b", "a"], "a")))
+    _ <- IO.println(List.join(List.distinct(["a", "b", "a"]), ","))
+    _ <- IO.println(List.join(List.diff(["a", "b"], ["a"]), ","))
+    _ <- IO.println(List.join(List.intersect(["a", "b"], ["a"]), ","))
+    _ <- IO.println(if (List.contains([1, 2], 2)) "y" else "n")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_contains"));
+        assert!(ir.contains("sz_list_index_of"));
+        assert!(ir.contains("sz_list_last_index_of"));
+        assert!(ir.contains("sz_list_distinct"));
+        assert!(ir.contains("sz_list_diff"));
+        assert!(ir.contains("sz_list_intersect"));
+        assert!(ir.contains("sz_box_i64"));
+        let needle = "call i64 @sz_list_contains(ptr ";
+        let at = ir.find(needle).expect("contains");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.contains:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_distinct(ptr ";
+        let at = ir.find(needle).expect("distinct");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.distinct:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_diff(ptr ";
+        let at = ir.find(needle).expect("diff");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.diff:\n{ir}"
         );
     }
 

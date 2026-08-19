@@ -113,6 +113,8 @@ SzList *sz_string_split(const SzString *s, const SzString *sep);
 /* Boxed i64 for IO[Int] */
 void *sz_box_i64(int64_t n);
 int64_t sz_unbox_i64(const void *p);
+/* 1 when pointers match, or both strings / boxed i64 match by value. */
+int sz_ptr_eq(const void *a, const void *b);
 
 /* --- errors -------------------------------------------------------------- */
 
@@ -523,6 +525,18 @@ SzList *sz_list_zip_all(SzList *xs, SzList *ys, void *x, void *y);
 SzList *sz_list_unzip(SzList *pairs);
 /* Rows to columns. Stops at the shortest row. Empty is empty. */
 SzList *sz_list_transpose(SzList *xss);
+/* 1 when any cell equals `x` (string / boxed i64 by value). */
+int64_t sz_list_contains(SzList *xs, void *x);
+/* First index of `x`, or -1. */
+int64_t sz_list_index_of(SzList *xs, void *x);
+/* Last index of `x`, or -1. */
+int64_t sz_list_last_index_of(SzList *xs, void *x);
+/* First cell of each equal value. Empty stays empty. */
+SzList *sz_list_distinct(SzList *xs);
+/* Cells of `xs` that are missing from `ys`. Empty `xs` is empty. */
+SzList *sz_list_diff(SzList *xs, SzList *ys);
+/* Cells of `xs` that occur in `ys`. Empty `xs` or `ys` is empty. */
+SzList *sz_list_intersect(SzList *xs, SzList *ys);
 /* First index where `pred` is true, or -1. */
 int64_t sz_list_index_where(SzList *xs, SzListPred pred, void *env);
 /* Last index where `pred` is true, or -1. */

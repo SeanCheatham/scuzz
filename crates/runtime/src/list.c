@@ -539,6 +539,79 @@ SzList *sz_list_unzip(SzList *pairs) {
   return list_two(arev, brev);
 }
 
+int64_t sz_list_contains(SzList *xs, void *x) {
+  SzList *p;
+  for (p = xs; p; p = p->tail) {
+    if (sz_ptr_eq(p->head, x))
+      return 1;
+  }
+  return 0;
+}
+
+int64_t sz_list_index_of(SzList *xs, void *x) {
+  SzList *p;
+  int64_t i = 0;
+  for (p = xs; p; p = p->tail) {
+    if (sz_ptr_eq(p->head, x))
+      return i;
+    i++;
+  }
+  return -1;
+}
+
+int64_t sz_list_last_index_of(SzList *xs, void *x) {
+  SzList *p;
+  int64_t i = 0;
+  int64_t hit = -1;
+  for (p = xs; p; p = p->tail) {
+    if (sz_ptr_eq(p->head, x))
+      hit = i;
+    i++;
+  }
+  return hit;
+}
+
+SzList *sz_list_distinct(SzList *xs) {
+  SzList *acc = NULL;
+  SzList *p;
+  SzList *rev;
+  for (p = xs; p; p = p->tail) {
+    if (!sz_list_contains(acc, p->head))
+      acc = sz_list_cons_take(p->head, acc);
+  }
+  rev = sz_list_reverse(acc);
+  sz_release(acc);
+  return rev;
+}
+
+SzList *sz_list_diff(SzList *xs, SzList *ys) {
+  SzList *acc = NULL;
+  SzList *p;
+  SzList *rev;
+  for (p = xs; p; p = p->tail) {
+    if (!sz_list_contains(ys, p->head))
+      acc = sz_list_cons_take(p->head, acc);
+  }
+  rev = sz_list_reverse(acc);
+  sz_release(acc);
+  return rev;
+}
+
+SzList *sz_list_intersect(SzList *xs, SzList *ys) {
+  SzList *acc = NULL;
+  SzList *p;
+  SzList *rev;
+  if (!ys)
+    return NULL;
+  for (p = xs; p; p = p->tail) {
+    if (sz_list_contains(ys, p->head))
+      acc = sz_list_cons_take(p->head, acc);
+  }
+  rev = sz_list_reverse(acc);
+  sz_release(acc);
+  return rev;
+}
+
 SzList *sz_list_transpose(SzList *xss) {
   SzList *p;
   SzList *heads = NULL;
