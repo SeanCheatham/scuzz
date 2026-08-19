@@ -637,7 +637,7 @@ impl Parser {
 
     fn parse_def(&mut self, is_private: bool) -> Result<FunDef, ParseError> {
         self.expect(&Token::Def)?;
-        let (name, _) = self.expect_ident()?;
+        let (name, name_span) = self.expect_ident()?;
         let type_params = if matches!(self.peek(), Token::LBracket) {
             self.parse_type_params()?
         } else {
@@ -653,6 +653,7 @@ impl Parser {
         Ok(FunDef {
             module: self.module.clone(),
             name,
+            name_span,
             is_private,
             is_law: false,
             is_driver: false,
@@ -665,7 +666,7 @@ impl Parser {
 
     fn parse_law(&mut self) -> Result<FunDef, ParseError> {
         self.expect(&Token::Law)?;
-        let (name, _) = self.expect_ident()?;
+        let (name, name_span) = self.expect_ident()?;
         let params = if matches!(self.peek(), Token::LParen) {
             self.bump();
             let params = self.parse_param_list_with_tparams(&[])?;
@@ -684,6 +685,7 @@ impl Parser {
         Ok(FunDef {
             module: self.module.clone(),
             name,
+            name_span,
             is_private: false,
             is_law: true,
             is_driver: false,
@@ -725,11 +727,12 @@ impl Parser {
             return Ok(params);
         }
         loop {
-            let (pname, pty, rfn) = self.parse_name_ty_rfn(type_params)?;
+            let (pname, pname_span, pty, rfn) = self.parse_name_ty_rfn(type_params)?;
             params.push(Param {
                 name: pname.clone(),
                 ty: pty,
                 rfn,
+                span: pname_span,
             });
             if params.iter().filter(|p| p.name == pname).count() > 1 {
                 return Err(self.err(format!("duplicate parameter {pname}")));
@@ -746,8 +749,8 @@ impl Parser {
     fn parse_name_ty_rfn(
         &mut self,
         type_params: &[String],
-    ) -> Result<(String, Type, Option<Expr>), ParseError> {
-        let (name, _) = self.expect_ident()?;
+    ) -> Result<(String, Span, Type, Option<Expr>), ParseError> {
+        let (name, span) = self.expect_ident()?;
         self.expect(&Token::Colon)?;
         let ty = self.parse_type_with_tparams(type_params)?;
         let rfn = if matches!(self.peek(), Token::Where) {
@@ -756,7 +759,7 @@ impl Parser {
         } else {
             None
         };
-        Ok((name, ty, rfn))
+        Ok((name, span, ty, rfn))
     }
 
     fn parse_enum(&mut self) -> Result<EnumDef, ParseError> {
@@ -831,7 +834,7 @@ impl Parser {
         let mut fields: Vec<(String, Type)> = Vec::new();
         let mut field_rfns = Vec::new();
         loop {
-            let (fname, fty, rfn) = self.parse_name_ty_rfn(&type_params)?;
+            let (fname, _, fty, rfn) = self.parse_name_ty_rfn(&type_params)?;
             if fields.iter().any(|(n, _)| n == &fname) {
                 return Err(self.err(format!("duplicate field {fname}")));
             }
@@ -1080,7 +1083,7 @@ impl Parser {
         if matches!(self.peek(), Token::LParen) {
             self.bump();
             loop {
-                let (fname, fty, rfn) = self.parse_name_ty_rfn(type_params)?;
+                let (fname, _, fty, rfn) = self.parse_name_ty_rfn(type_params)?;
                 if fields.iter().any(|(n, _)| n == &fname) {
                     return Err(self.err(format!("duplicate field {fname}")));
                 }
@@ -1112,11 +1115,11 @@ impl Parser {
     }
 
     /// Binder name: ident or `_`.
-    fn parse_binder_name(&mut self) -> Result<String, ParseError> {
+    fn parse_binder_name(&mut self) -> Result<(String, Span), ParseError> {
         let got = self.bump();
         match got.token {
-            Token::Ident(s) => Ok(s),
-            Token::Underscore => Ok("_".into()),
+            Token::Ident(s) => Ok((s, got.span)),
+            Token::Underscore => Ok(("_".into(), got.span)),
             other => Err(ParseError::At {
                 msg: format!("expected binder name, got {other:?}"),
                 span: got.span,
@@ -1136,17 +1139,17 @@ impl Parser {
                     return Err(self.err("`yield` belongs after `}`: `for { … } yield e`"))
                 }
                 _ => {
-                    let name = self.parse_binder_name()?;
+                    let (name, span) = self.parse_binder_name()?;
                     match self.peek() {
                         Token::Eq => {
                             self.bump();
                             let value = self.parse_expr()?;
-                            binders.push(ForBinder::Eq { name, value });
+                            binders.push(ForBinder::Eq { name, span, value });
                         }
                         Token::LeftArrow => {
                             self.bump();
                             let value = self.parse_expr()?;
-                            binders.push(ForBinder::Draw { name, value });
+                            binders.push(ForBinder::Draw { name, span, value });
                         }
                         other => {
                             return Err(

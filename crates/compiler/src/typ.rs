@@ -356,11 +356,13 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
                 name: "self".into(),
                 ty: self_ty.clone(),
                 rfn: None,
+                span: Span::dummy(),
             }];
             params.extend(method.params.clone());
             program.defs.push(FunDef {
                 module: im.module.clone(),
                 name: mangled,
+                name_span: Span::dummy(),
                 is_private: false,
                 is_law: false,
                 is_driver: false,
@@ -389,11 +391,13 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
                     name: "self".into(),
                     ty: self_ty.clone(),
                     rfn: None,
+                    span: Span::dummy(),
                 }];
                 params.extend(method.params.clone());
                 extra.push(FunDef {
                     module: en.module.clone(),
                     name: mangled,
+                    name_span: Span::dummy(),
                     is_private: false,
                     is_law: false,
                     is_driver: false,
@@ -4839,6 +4843,7 @@ fn mono_expr(
                                     name: p.name.clone(),
                                     ty: apply_subst(&ty, &subst),
                                     rfn: p.rfn.clone(),
+                                    span: p.span.clone(),
                                 })
                             })
                             .collect();
@@ -4851,6 +4856,7 @@ fn mono_expr(
                             FunDef {
                                 module: f.module.clone(),
                                 name: mangled.clone(),
+                                name_span: f.name_span.clone(),
                                 is_private: f.is_private,
                                 is_law: f.is_law,
                                 is_driver: f.is_driver,

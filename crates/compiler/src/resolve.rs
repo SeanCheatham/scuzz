@@ -8,6 +8,7 @@
 //! `import Module.*` binds every public def and enum. It does not bind private defs.
 
 use crate::ast::{EnumDef, Expr, ExprKind, FunDef, Import, Pattern, Program, Type};
+use crate::span::Span;
 use std::collections::{HashMap, HashSet};
 
 /// LLVM symbol for a user def: `@sz_user_{Module}_{name}` (or `@sz_user_{name}` when module is empty).
@@ -394,10 +395,8 @@ pub fn unused_imports(program: &Program) -> Vec<&Import> {
             for (_, ty) in &c.fields {
                 collect_type_names(ty, set);
             }
-            for r in &c.field_rfns {
-                if let Some(e) = r {
-                    collect_expr_names(e, set);
-                }
+            for e in c.field_rfns.iter().flatten() {
+                collect_expr_names(e, set);
             }
         }
         for m in &en.methods {
@@ -427,6 +426,334 @@ pub fn unused_imports(program: &Program) -> Vec<&Import> {
             }
         })
         .collect()
+}
+
+/// Kind of unused name `check` reports.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnusedKind {
+    Local,
+    Param,
+    PrivateDef,
+}
+
+/// Unused local, parameter, or private def with a source span.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct UnusedName {
+    pub kind: UnusedKind,
+    pub name: String,
+    pub span: Span,
+    /// End of the def body. Used to remove an unused private def.
+    pub body_end: usize,
+}
+
+impl UnusedName {
+    pub fn message(&self) -> String {
+        match self.kind {
+            UnusedKind::Local => format!("unused local {}", self.name),
+            UnusedKind::Param => format!("unused parameter {}", self.name),
+            UnusedKind::PrivateDef => format!("unused private def {}", self.name),
+        }
+    }
+}
+
+/// A name that starts with `_` is kept on purpose. Lone `_` discards.
+pub fn discarded_name(name: &str) -> bool {
+    name == "_" || name.starts_with('_')
+}
+
+/// Locals, parameters, and private defs that never appear as uses.
+pub fn unused_names(program: &Program) -> Vec<UnusedName> {
+    let mut out = Vec::new();
+    for d in &program.defs {
+        unused_in_def(d, &mut out);
+    }
+    if !program.main.name.is_empty() {
+        unused_in_expr(&program.main.body, &mut out);
+    }
+    for im in &program.impls {
+        for m in &im.methods {
+            unused_in_params(&m.params, &m.body, false, &mut out);
+            unused_in_expr(&m.body, &mut out);
+        }
+    }
+    for en in &program.enums {
+        for m in &en.methods {
+            unused_in_params(&m.params, &m.body, false, &mut out);
+            unused_in_expr(&m.body, &mut out);
+        }
+    }
+    for d in &program.defs {
+        if d.is_private && !private_def_used(program, d) {
+            out.push(UnusedName {
+                kind: UnusedKind::PrivateDef,
+                name: d.name.clone(),
+                span: d.name_span.clone(),
+                body_end: d.body.span.end,
+            });
+        }
+    }
+    out
+}
+
+fn unused_in_def(d: &FunDef, out: &mut Vec<UnusedName>) {
+    unused_in_params(&d.params, &d.body, d.is_driver, out);
+    for p in &d.params {
+        if let Some(r) = &p.rfn {
+            unused_in_expr(r, out);
+        }
+    }
+    unused_in_expr(&d.body, out);
+}
+
+fn unused_in_params(
+    params: &[crate::ast::Param],
+    body: &Expr,
+    skip: bool,
+    out: &mut Vec<UnusedName>,
+) {
+    if skip {
+        return;
+    }
+    for p in params {
+        if discarded_name(&p.name) || p.name == "self" {
+            continue;
+        }
+        let used_rfn = p.rfn.as_ref().is_some_and(|e| uses_name(e, &p.name));
+        if !used_rfn && !uses_name(body, &p.name) {
+            out.push(UnusedName {
+                kind: UnusedKind::Param,
+                name: p.name.clone(),
+                span: p.span.clone(),
+                body_end: 0,
+            });
+        }
+    }
+}
+
+fn unused_in_expr(e: &Expr, out: &mut Vec<UnusedName>) {
+    match &e.kind {
+        ExprKind::For { binders, body } => {
+            for (i, b) in binders.iter().enumerate() {
+                unused_in_expr(b.value(), out);
+                let name = b.name();
+                if discarded_name(name) {
+                    continue;
+                }
+                if !used_after_for_binder(name, &binders[i + 1..], body) {
+                    out.push(UnusedName {
+                        kind: UnusedKind::Local,
+                        name: name.to_string(),
+                        span: b.name_span().clone(),
+                        body_end: 0,
+                    });
+                }
+            }
+            unused_in_expr(body, out);
+        }
+        ExprKind::Let { name, value, body } => {
+            unused_in_expr(value, out);
+            if !discarded_name(name) && !uses_name(body, name) {
+                out.push(UnusedName {
+                    kind: UnusedKind::Local,
+                    name: name.clone(),
+                    span: e.span.clone(),
+                    body_end: 0,
+                });
+            }
+            unused_in_expr(body, out);
+        }
+        ExprKind::Lambda { param, body } => {
+            if let Some(name) = param {
+                if !discarded_name(name) && !uses_name(body, name) {
+                    let end = (e.span.start + name.len()).min(e.span.end);
+                    out.push(UnusedName {
+                        kind: UnusedKind::Param,
+                        name: name.clone(),
+                        span: Span::new(e.span.file.clone(), e.span.start, end),
+                        body_end: 0,
+                    });
+                }
+            }
+            unused_in_expr(body, out);
+        }
+        ExprKind::FlatMap { inner, param, body }
+        | ExprKind::HandleErrorWith { inner, param, body } => {
+            unused_in_expr(inner, out);
+            if let Some(name) = param {
+                if !discarded_name(name) && !uses_name(body, name) {
+                    out.push(UnusedName {
+                        kind: UnusedKind::Param,
+                        name: name.clone(),
+                        span: e.span.clone(),
+                        body_end: 0,
+                    });
+                }
+            }
+            unused_in_expr(body, out);
+        }
+        _ => e.for_each_child(|c| unused_in_expr(c, out)),
+    }
+}
+
+fn used_after_for_binder(name: &str, rest: &[crate::ast::ForBinder], body: &Expr) -> bool {
+    for b in rest {
+        if uses_name(b.value(), name) {
+            return true;
+        }
+        if b.name() == name {
+            return false;
+        }
+    }
+    uses_name(body, name)
+}
+
+fn uses_name(e: &Expr, name: &str) -> bool {
+    match &e.kind {
+        ExprKind::Var(n) => n == name,
+        ExprKind::Lambda { param, body } => param.as_deref() != Some(name) && uses_name(body, name),
+        ExprKind::Let {
+            name: n,
+            value,
+            body,
+        } => uses_name(value, name) || (n != name && uses_name(body, name)),
+        ExprKind::FlatMap { inner, param, body }
+        | ExprKind::HandleErrorWith { inner, param, body } => {
+            uses_name(inner, name) || (param.as_deref() != Some(name) && uses_name(body, name))
+        }
+        ExprKind::For { binders, body } => {
+            for b in binders {
+                if uses_name(b.value(), name) {
+                    return true;
+                }
+                if b.name() == name {
+                    return false;
+                }
+            }
+            uses_name(body, name)
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            if uses_name(scrutinee, name) {
+                return true;
+            }
+            for a in arms {
+                if pattern_bind_names(&a.pattern).contains(name) {
+                    continue;
+                }
+                if a.guard.as_ref().is_some_and(|g| uses_name(g, name)) {
+                    return true;
+                }
+                if uses_name(&a.body, name) {
+                    return true;
+                }
+            }
+            false
+        }
+        _ => {
+            let mut hit = false;
+            e.for_each_child(|c| {
+                if uses_name(c, name) {
+                    hit = true;
+                }
+            });
+            hit
+        }
+    }
+}
+
+fn pattern_bind_names(p: &Pattern) -> HashSet<String> {
+    let mut out = HashSet::new();
+    collect_pattern_binds(p, &mut out);
+    out
+}
+
+fn collect_pattern_binds(p: &Pattern, out: &mut HashSet<String>) {
+    match p {
+        Pattern::Bind(n) => {
+            out.insert(n.clone());
+        }
+        Pattern::As { name, inner } => {
+            out.insert(name.clone());
+            collect_pattern_binds(inner, out);
+        }
+        Pattern::Adt { binds, .. } => {
+            for b in binds {
+                collect_pattern_binds(b, out);
+            }
+        }
+        Pattern::Or(ps) => {
+            for p in ps {
+                collect_pattern_binds(p, out);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn private_def_used(program: &Program, d: &FunDef) -> bool {
+    for other in &program.defs {
+        if other.module == d.module && other.name == d.name {
+            continue;
+        }
+        if expr_calls(&other.body, &d.module, &d.name) {
+            return true;
+        }
+        for p in &other.params {
+            if p.rfn
+                .as_ref()
+                .is_some_and(|e| expr_calls(e, &d.module, &d.name))
+            {
+                return true;
+            }
+        }
+    }
+    if program.main.module == d.module && expr_calls(&program.main.body, &d.module, &d.name) {
+        return true;
+    }
+    for im in &program.impls {
+        for m in &im.methods {
+            if expr_calls(&m.body, &d.module, &d.name) {
+                return true;
+            }
+        }
+    }
+    for en in &program.enums {
+        for m in &en.methods {
+            if expr_calls(&m.body, &d.module, &d.name) {
+                return true;
+            }
+        }
+        for c in &en.cases {
+            for r in &c.field_rfns {
+                if r.as_ref()
+                    .is_some_and(|e| expr_calls(e, &d.module, &d.name))
+                {
+                    return true;
+                }
+            }
+        }
+    }
+    false
+}
+
+fn expr_calls(e: &Expr, module: &str, name: &str) -> bool {
+    match &e.kind {
+        ExprKind::Call { callee, .. } => {
+            callee == name
+                || *callee == format!("{module}.{name}")
+                || children_call(e, module, name)
+        }
+        _ => children_call(e, module, name),
+    }
+}
+
+fn children_call(e: &Expr, module: &str, name: &str) -> bool {
+    let mut hit = false;
+    e.for_each_child(|c| {
+        if expr_calls(c, module, name) {
+            hit = true;
+        }
+    });
+    hit
 }
 
 fn mark_name(name: &str, out: &mut HashSet<String>) {
@@ -499,6 +826,7 @@ mod tests {
         FunDef {
             module: module.into(),
             name: name.into(),
+            name_span: Span::dummy(),
             is_private: false,
             is_law: false,
             is_driver: false,
@@ -700,5 +1028,76 @@ mod tests {
             FunIndex::build(&defs, &imports, &[]),
             Err(ResolveError::DuplicateImport { .. })
         ));
+    }
+
+    fn names(src: &str) -> Vec<String> {
+        let p = crate::parser::parse_file(src, "Main.scuzz").unwrap();
+        unused_names(&p).into_iter().map(|u| u.message()).collect()
+    }
+
+    #[test]
+    fn unused_local_in_for() {
+        let msgs =
+            names("@main def main: IO[Unit] =\n  for {\n    x = 1\n  } yield IO.println(\"ok\")\n");
+        assert!(msgs.iter().any(|m| m == "unused local x"), "{msgs:?}");
+    }
+
+    #[test]
+    fn used_local_in_for() {
+        let msgs = names(
+            "@main def main: IO[Unit] =\n  for {\n    x = 1\n  } yield IO.println(Str.fromInt(x))\n",
+        );
+        assert!(msgs.is_empty(), "{msgs:?}");
+    }
+
+    #[test]
+    fn discarded_local_is_kept() {
+        let msgs = names(
+            "@main def main: IO[Unit] =\n  for {\n    _x = 1\n  } yield IO.println(\"ok\")\n",
+        );
+        assert!(msgs.is_empty(), "{msgs:?}");
+    }
+
+    #[test]
+    fn unused_parameter() {
+        let msgs = names(
+            "def add(n: Int): Int =\n  1\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(add(1)))\n",
+        );
+        assert!(msgs.iter().any(|m| m == "unused parameter n"), "{msgs:?}");
+    }
+
+    #[test]
+    fn where_counts_as_use() {
+        let msgs = names(
+            "def note(n: Int where n >= 0): Int =\n  1\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(note(1)))\n",
+        );
+        assert!(msgs.is_empty(), "{msgs:?}");
+    }
+
+    #[test]
+    fn unused_lambda_parameter() {
+        let msgs = names(
+            "@main def main: IO[Unit] =\n  IO.println(Str.fromInt(List.len(List.filter([1], x => true))))\n",
+        );
+        assert!(msgs.iter().any(|m| m == "unused parameter x"), "{msgs:?}");
+    }
+
+    #[test]
+    fn unused_private_def() {
+        let msgs = names(
+            "private def hidden(): String =\n  \"a\"\n@main def main: IO[Unit] =\n  IO.println(\"ok\")\n",
+        );
+        assert!(
+            msgs.iter().any(|m| m == "unused private def hidden"),
+            "{msgs:?}"
+        );
+    }
+
+    #[test]
+    fn used_private_def() {
+        let msgs = names(
+            "private def hidden(): String =\n  \"a\"\ndef tag(): String =\n  hidden()\n@main def main: IO[Unit] =\n  IO.println(tag())\n",
+        );
+        assert!(!msgs.iter().any(|m| m.contains("hidden")), "{msgs:?}");
     }
 }

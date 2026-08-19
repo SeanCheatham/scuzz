@@ -357,6 +357,20 @@ pub fn lex(input: &str) -> Result<Vec<SpannedToken>, LexError> {
             continue;
         }
         match c {
+            '_' if i + 1 < chars.len()
+                && (chars[i + 1].is_ascii_alphanumeric() || chars[i + 1] == '_') =>
+            {
+                let start = i;
+                let mut ident = String::new();
+                while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
+                    ident.push(chars[i]);
+                    i += 1;
+                }
+                tokens.push(SpannedToken {
+                    token: Token::Ident(ident),
+                    span: Span::new(String::new(), byte_at(start), byte_at(i)),
+                });
+            }
             ':' | '=' | '.' | ',' | '(' | ')' | '{' | '}' | '[' | ']' | '+' | '-' | '*' | '/'
             | '%' | '<' | '>' | '_' => {
                 let start = i;
@@ -608,6 +622,16 @@ mod tests {
         let toks = lex("law always: Bool = 1 == 1").unwrap();
         assert!(matches!(toks[0].token, Token::Law));
         assert!(matches!(&toks[1].token, Token::Ident(s) if s == "always"));
+    }
+
+    #[test]
+    fn lexes_underscore_ident() {
+        let toks = lex("_n = 1").unwrap();
+        assert!(matches!(&toks[0].token, Token::Ident(s) if s == "_n"));
+        assert!(matches!(toks[1].token, Token::Eq));
+        let toks = lex("_ => 1").unwrap();
+        assert!(matches!(toks[0].token, Token::Underscore));
+        assert!(matches!(toks[1].token, Token::Arrow));
     }
 
     #[test]

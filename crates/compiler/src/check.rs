@@ -555,6 +555,7 @@ pub fn check_project_with(
     }
     let mut program = program;
     program.law_names = law_names;
+    let unused = crate::resolve::unused_names(&program);
     let lowered = lower_program(program);
     let program = match crate::typ::expand_impls(lowered.clone()) {
         Ok(p) => p,
@@ -591,6 +592,9 @@ pub fn check_project_with(
             format!("unused import {}.{}", im.from_module, im.name)
         };
         diags.push(Diagnostic::error(msg).with_span(&im.span, &named));
+    }
+    for u in unused {
+        diags.push(Diagnostic::error(u.message()).with_span(&u.span, &named));
     }
     match crate::typ::elaborate_generics(program) {
         Ok(_) => Ok(diags),
@@ -2182,5 +2186,76 @@ def a(): Int = \"x\"
         fs::write(root.join("src/Main.scuzz"), &main).unwrap();
         let diags = check_project(root).unwrap();
         assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn check_project_reports_unused_local() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        let main = crate::format::format_source(
+            "@main def main: IO[Unit] =\n  for {\n    x = 1\n  } yield IO.println(\"ok\")\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/Main.scuzz"), &main).unwrap();
+        let diags = check_project(root).unwrap();
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(
+            diags[0].message.contains("unused local x"),
+            "{:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn check_project_keeps_underscore_local() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        let main = crate::format::format_source(
+            "@main def main: IO[Unit] =\n  for {\n    _x = 1\n  } yield IO.println(\"ok\")\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/Main.scuzz"), &main).unwrap();
+        let diags = check_project(root).unwrap();
+        assert!(diags.is_empty(), "{diags:?}");
+    }
+
+    #[test]
+    fn check_project_reports_unused_parameter() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        let main = crate::format::format_source(
+            "def add(n: Int): Int =\n  1\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(add(1)))\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/Main.scuzz"), &main).unwrap();
+        let diags = check_project(root).unwrap();
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(
+            diags[0].message.contains("unused parameter n"),
+            "{:?}",
+            diags[0].message
+        );
+    }
+
+    #[test]
+    fn check_project_reports_unused_private_def() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        let main = crate::format::format_source(
+            "private def hidden(): String =\n  \"a\"\n@main def main: IO[Unit] =\n  IO.println(\"ok\")\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/Main.scuzz"), &main).unwrap();
+        let diags = check_project(root).unwrap();
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        assert!(
+            diags[0].message.contains("unused private def hidden"),
+            "{:?}",
+            diags[0].message
+        );
     }
 }

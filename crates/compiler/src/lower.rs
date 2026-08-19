@@ -231,7 +231,7 @@ fn desugar_for(
         .into_iter()
         .rev()
         .fold(body, |body, binder| match binder {
-            ForBinder::Eq { name, value } => {
+            ForBinder::Eq { name, value, .. } => {
                 let sp = value.span.clone().cover(&body.span);
                 Expr::new(
                     ExprKind::Let {
@@ -242,7 +242,7 @@ fn desugar_for(
                     sp,
                 )
             }
-            ForBinder::Draw { name, value } => {
+            ForBinder::Draw { name, value, .. } => {
                 let param = if name == "_" { None } else { Some(name) };
                 let sp = value.span.clone().cover(&body.span);
                 Expr::new(
