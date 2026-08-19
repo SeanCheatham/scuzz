@@ -651,6 +651,8 @@ pub enum Pattern {
     /// `Color.Red | Color.Blue` / nested `Opt.Some(0 | 1)`.
     /// Lower expands this into separate arms.
     Or(Vec<Pattern>),
+    /// `n @ Pat` — bind `n` to the value at this position, then match `Pat`.
+    As { name: String, inner: Box<Pattern> },
 }
 
 impl Pattern {
@@ -659,8 +661,29 @@ impl Pattern {
     pub fn is_irrefutable(&self) -> bool {
         match self {
             Pattern::Wildcard | Pattern::Bind(_) => true,
+            Pattern::As { inner, .. } => inner.is_irrefutable(),
             Pattern::Or(alts) => alts.iter().any(|a| a.is_irrefutable()),
             _ => false,
+        }
+    }
+
+    /// Drop `n @` wrappers. Exhaustiveness uses the inner pattern.
+    pub fn strip_as(&self) -> Pattern {
+        match self {
+            Pattern::As { inner, .. } => inner.strip_as(),
+            Pattern::Adt {
+                enum_name,
+                case_name,
+                binds,
+                type_args,
+            } => Pattern::Adt {
+                enum_name: enum_name.clone(),
+                case_name: case_name.clone(),
+                binds: binds.iter().map(|b| b.strip_as()).collect(),
+                type_args: type_args.clone(),
+            },
+            Pattern::Or(alts) => Pattern::Or(alts.iter().map(|a| a.strip_as()).collect()),
+            other => other.clone(),
         }
     }
 
@@ -669,6 +692,14 @@ impl Pattern {
     pub fn flatten_or(&self) -> Vec<Pattern> {
         match self {
             Pattern::Or(alts) => alts.iter().flat_map(|a| a.flatten_or()).collect(),
+            Pattern::As { name, inner } => inner
+                .flatten_or()
+                .into_iter()
+                .map(|p| Pattern::As {
+                    name: name.clone(),
+                    inner: Box::new(p),
+                })
+                .collect(),
             Pattern::Adt {
                 enum_name,
                 case_name,

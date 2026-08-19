@@ -1543,16 +1543,29 @@ impl Parser {
     }
 
     fn parse_or_pattern(&mut self) -> Result<Pattern, ParseError> {
-        let first = self.parse_pattern_atom()?;
+        let first = self.parse_as_pattern()?;
         if !matches!(self.peek(), Token::Pipe) {
             return Ok(first);
         }
         let mut alts = vec![first];
         while matches!(self.peek(), Token::Pipe) {
             self.bump();
-            alts.push(self.parse_pattern_atom()?);
+            alts.push(self.parse_as_pattern()?);
         }
         Ok(Pattern::Or(alts))
+    }
+
+    fn parse_as_pattern(&mut self) -> Result<Pattern, ParseError> {
+        if matches!(self.peek(), Token::Ident(_)) && matches!(self.peek_nth(1), Token::At) {
+            let (name, _) = self.expect_ident()?;
+            self.bump();
+            let inner = self.parse_or_pattern()?;
+            return Ok(Pattern::As {
+                name,
+                inner: Box::new(inner),
+            });
+        }
+        self.parse_pattern_atom()
     }
 
     fn parse_pattern_atom(&mut self) -> Result<Pattern, ParseError> {
@@ -2750,6 +2763,92 @@ enum Color:
                 assert!(arms[1].guard.is_none());
                 assert!(matches!(&arms[1].pattern, Pattern::Or(_)));
             }
+            other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_as_pattern() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  o match {
+    case s @ Opt.Some(n) => IO.println("s")
+    case Opt.None => IO.println("n")
+  }
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => match &arms[0].pattern {
+                Pattern::As { name, inner } => {
+                    assert_eq!(name, "s");
+                    assert!(
+                        matches!(
+                            inner.as_ref(),
+                            Pattern::Adt { case_name, binds, .. }
+                                if case_name == "Some"
+                                    && matches!(&binds[..], [Pattern::Bind(n)] if n == "n")
+                        ),
+                        "{inner:?}"
+                    );
+                }
+                other => panic!("expected as-pattern, got {other:?}"),
+            },
+            other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_as_pattern_wraps_or() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  c match {
+    case p @ Color.Red | Color.Blue => IO.println("p")
+  }
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => match &arms[0].pattern {
+                Pattern::As { name, inner } => {
+                    assert_eq!(name, "p");
+                    assert!(matches!(inner.as_ref(), Pattern::Or(alts) if alts.len() == 2));
+                }
+                other => panic!("expected as wrapping or, got {other:?}"),
+            },
+            other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_nested_as_pattern() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  Opt.Some(0) match {
+    case Opt.Some(n @ 0) => IO.println("z")
+    case Opt.Some(_) => IO.println("o")
+    case Opt.None => IO.println("n")
+  }
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => match &arms[0].pattern {
+                Pattern::Adt { binds, .. } => match &binds[..] {
+                    [Pattern::As { name, inner }] => {
+                        assert_eq!(name, "n");
+                        assert!(matches!(inner.as_ref(), Pattern::Int(0)));
+                    }
+                    other => panic!("expected nested as, got {other:?}"),
+                },
+                other => panic!("expected Opt.Some(n @ 0), got {other:?}"),
+            },
             other => panic!("expected match, got {other:?}"),
         }
     }

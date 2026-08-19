@@ -49,6 +49,10 @@ fn lower_pattern(pat: Pattern, enums: &EnumIndex<'_>, current_module: &str) -> P
                 .map(|a| lower_pattern(a, enums, current_module))
                 .collect(),
         ),
+        Pattern::As { name, inner } => Pattern::As {
+            name,
+            inner: Box::new(lower_pattern(*inner, enums, current_module)),
+        },
         Pattern::Adt {
             enum_name,
             case_name,
@@ -464,6 +468,41 @@ enum Opt:
                         assert!(matches!(&binds[..], [Pattern::Int(1)]), "{binds:?}");
                     }
                     other => panic!("expected Some(1), got {other:?}"),
+                }
+            }
+            other => panic!("expected Match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn expands_as_or_pattern_keeping_the_bind() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  Color.Red match {
+    case p @ Color.Red | Color.Blue => IO.println("p")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => {
+                assert_eq!(arms.len(), 2, "{arms:?}");
+                for (arm, want) in arms.iter().zip(["Red", "Blue"]) {
+                    match &arm.pattern {
+                        Pattern::As { name, inner } => {
+                            assert_eq!(name, "p");
+                            assert!(
+                                matches!(
+                                    inner.as_ref(),
+                                    Pattern::Adt { case_name, .. } if case_name == want
+                                ),
+                                "{inner:?}"
+                            );
+                        }
+                        other => panic!("expected as-pattern, got {other:?}"),
+                    }
                 }
             }
             other => panic!("expected Match, got {other:?}"),

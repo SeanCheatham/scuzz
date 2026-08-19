@@ -815,6 +815,7 @@ fn collect_pat_strings(pat: &Pattern, out: &mut Vec<String>) {
                 collect_pat_strings(a, out);
             }
         }
+        Pattern::As { inner, .. } => collect_pat_strings(inner, out),
         Pattern::Wildcard
         | Pattern::Bind(_)
         | Pattern::Int(_)
@@ -1349,6 +1350,11 @@ fn emit_pat(
             pe.locals.insert(name.clone(), Local::borrow(value, kind));
             pe.bound_names.push(name.clone());
             writeln!(pe.code, "  br label %{ok_label}").unwrap();
+        }
+        Pattern::As { name, inner } => {
+            pe.locals.insert(name.clone(), Local::borrow(value, kind));
+            pe.bound_names.push(name.clone());
+            emit_pat(inner, value, kind, prefix, ok_label, fail_label, pe);
         }
         Pattern::Int(n) => {
             if kind != Kind::Int {
@@ -5924,6 +5930,25 @@ enum Color { case Red, case Blue }
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of guard list {name}:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_match_as_pattern_binds_scrutinee() {
+        let src = r#"
+enum Color { case Red, case Blue }
+@main def main: IO[Unit] =
+  Color.Red match {
+    case p @ Color.Red => IO.println("r")
+    case Color.Blue => IO.println("b")
+  }
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_adt_tag") && ir.contains("_ok_"),
+            "expected as-pattern to match the inner ADT:\n{ir}"
         );
     }
 
