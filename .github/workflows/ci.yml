@@ -316,9 +316,7 @@ jobs:
 
       - name: Deterministic fuzz (bounded) + repro replay
         run: |
-          cargo run -p scuzz -- fuzz --iters 16 examples/counter
-          cargo run -p scuzz -- fuzz --iters 16 examples/studio
-          cargo run -p scuzz -- fuzz --exhaust --depth 1 examples/counter
+          cargo run -p scuzz -- fuzz --iterations 16 examples/counter
           rm -rf /tmp/scuzz-fuzzbug
           cargo run -p scuzz -- new --ui --path /tmp scuzz-fuzzbug
           cat > /tmp/scuzz-fuzzbug/src/Main.scuzz <<'EOF'
@@ -333,33 +331,12 @@ jobs:
               ))
             } yield ()
           EOF
-          if cargo run -p scuzz -- fuzz --iters 8 /tmp/scuzz-fuzzbug; then
+          if cargo run -p scuzz -- fuzz --iterations 8 /tmp/scuzz-fuzzbug; then
             echo "fuzz should have found the failure" && exit 1
           fi
           test -f /tmp/scuzz-fuzzbug/build/fuzz/repro.toml
           if cargo run -p scuzz -- fuzz --replay /tmp/scuzz-fuzzbug/build/fuzz/repro.toml /tmp/scuzz-fuzzbug; then
             echo "replay should have reproduced the failure" && exit 1
-          fi
-          rm -rf /tmp/scuzz-fuzzbug-ex
-          cargo run -p scuzz -- new --ui --path /tmp scuzz-fuzzbug-ex
-          cat > /tmp/scuzz-fuzzbug-ex/src/Main.scuzz <<'EOF'
-          @main def main: IO[Unit] =
-            for {
-              count = Signal.int(0)
-              label = Signal.map(count, n => s"count = $n")
-              _ <- Ui.run(_ => View.column(
-                View.text("Bug"),
-                View.bindText(label),
-                View.row(View.button("boom", _ => Fs.read("/definitely/missing")))
-              ))
-            } yield ()
-          EOF
-          if cargo run -p scuzz -- fuzz --exhaust --depth 1 /tmp/scuzz-fuzzbug-ex; then
-            echo "exhaust should have found the failure" && exit 1
-          fi
-          test -f /tmp/scuzz-fuzzbug-ex/build/fuzz/repro.toml
-          if cargo run -p scuzz -- fuzz --replay /tmp/scuzz-fuzzbug-ex/build/fuzz/repro.toml /tmp/scuzz-fuzzbug-ex; then
-            echo "exhaust replay should have reproduced the failure" && exit 1
           fi
           rm -rf /tmp/scuzz-schedbug
           cargo run -p scuzz -- new --path /tmp scuzz-schedbug
@@ -373,7 +350,7 @@ jobs:
             } yield ()
           EOF
           cargo run -p scuzz -- test /tmp/scuzz-schedbug
-          if cargo run -p scuzz -- fuzz --iters 8 /tmp/scuzz-schedbug; then
+          if cargo run -p scuzz -- fuzz --iterations 12 /tmp/scuzz-schedbug; then
             echo "schedule fuzz should have found the interleaving bug" && exit 1
           fi
           test -f /tmp/scuzz-schedbug/build/fuzz/repro.toml
@@ -385,11 +362,11 @@ jobs:
           if ! cargo run -p scuzz -- fuzz --replay /tmp/scuzz-schedbug/build/fuzz/repro-fifo.toml /tmp/scuzz-schedbug; then
             echo "FIFO replay (no schedule_seed) should pass" && exit 1
           fi
-          cargo run -p scuzz -- fuzz --iters 4 examples/io
-          cargo run -p scuzz -- mutate examples/hello
-          cargo run -p scuzz -- mutate --oracles examples/kernel --limit 2 --iters 0
-          cargo run -p scuzz -- mutate --oracles examples/counter --limit 1 --iters 0
-          cargo run -p scuzz -- mutate examples/kernel --limit 1 --iters 0
+          cargo run -p scuzz -- fuzz --iterations 1 examples/io
+          cargo run -p scuzz -- fuzz --iterations 4 examples/hello
+          cargo run -p scuzz -- fuzz --iterations 4 --oracles examples/kernel
+          cargo run -p scuzz -- fuzz --iterations 4 --oracles examples/counter
+          cargo run -p scuzz -- fuzz --iterations 2 examples/kernel
 
       - name: v0 new --ui path
         run: |

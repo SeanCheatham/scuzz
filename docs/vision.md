@@ -22,7 +22,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 
 | Topic | Choice |
 | --- | --- |
-| UI testing / CI | In-source laws + composed drivers through `scuzz fuzz` (primary); mutation as law-strength gate; structural goldens as regression face; PNG optional through `--pixels` |
+| UI testing / CI | In-source laws + composed drivers through `scuzz fuzz --iterations` (primary; mutation is a phase); structural goldens as regression face; PNG optional through `--pixels` |
 | Static hygiene | One linter: `scuzz check` (format-verify + typecheck; lints on this command; no `lint` subcommand). One formatter: `scuzz fmt` rewrites |
 | Codegen | LLVM IR |
 | Renderer (v0) | Skia through thin C ABI; Impeller deferred |
@@ -52,7 +52,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 
 **v0** — Install CLI (`curl …/install.sh | sh`, or checkout `./scripts/install.sh`) → `scuzz new` (IO) or `scuzz new --ui` (Counter as `View` + builtin `IO`) → `scuzz test --update` then `scuzz test`, and `scuzz run` (`--headless` for UI). Desktop when available. Language `Resource` / `Stream` / `Net.serve` ship (`examples/io`).
 
-**v1** — Shipped `scuzz` is the Rust CLI (GitHub Releases; `package_release.sh` / `install.sh`). Kernel surface is proven by examples. `fuzz` / `mutate` live on that CLI.
+**v1** — Shipped `scuzz` is the Rust CLI (GitHub Releases; `package_release.sh` / `install.sh`). Kernel surface is proven by examples. `fuzz` lives on that CLI.
 
 ## Decisions
 
@@ -176,14 +176,13 @@ App correctness is **not** classical unit tests. Prefer **mutation, fuzzing, pro
 - **Drivers (`*.scuzz_drivers`) do things.** Impure, parameterized, oracle-free steps. `scuzz fuzz` composes them (generated args, random order / interleaving) alongside the UI event alphabet. `check` rejects `Law.*` and `.require` in driver files. An assert inside a driver is a unit test in disguise.
 - **Simulation is hermetic.** Fuzz, mutation, and TestRuntime keep impurity inside fakes. No live sockets. `Net.httpGet` beyond the stub map fails. `Sys.exec` / `Sys.spawn` fail under TestRuntime so a child cannot open the network. `Sys.getenv` does not read the host map. `Sys.alive` / `Sys.kill` do not touch host pids. Live `Net.httpGet` may leave the host.
 - **`Law.sometimes` keeps composition honest.** Reachability accumulates across a fuzz *campaign*. Declared-but-never-reached states fail the campaign. Oracle-free drivers cannot pass vacuously. It is a coverage/fitness signal for corpus guidance, alongside Headless dump novelty. It is a path marker (`Unit`), not a value method.
-- **Mutation pressures the oracles.** Default `scuzz mutate` mutates live code and requires residual oracles to kill the mutant. `--oracles` mutates residual predicates. Surviving mutants mean weak, unreached, or missing laws/refinements.
+- **Mutation pressures the oracles.** `scuzz fuzz` mutates live `def` bodies after search. Residual oracles must kill each mutant. `--oracles` mutates residual predicates. Surviving mutants mean weak, unreached, or missing laws/refinements.
 
 | Phase | Role |
 | --- | --- |
 | `scuzz check` | Format-verify `src/`; typecheck live + laws/refinements + sim + drivers; laws pure, drivers `IO`, no oracles in drivers; every nullary `law` must appear in a `.require`; parameterized laws stay generator-friendly; sim bindings match live types/purity. Reports every parse and type diagnostic in the run |
 | `scuzz build` (verify graph) | Layer `*.scuzz_sim` over live defs; compile drivers; residualize `.require` / `where` checks (armed under TestRuntime / fuzz / mutation only); publish parameterized laws as drive targets |
-| `scuzz fuzz` | Compose drivers + parameterized laws + event scripts / IO schedules. Shrink a failing prefix before `repro.toml`. `[ui]` kept prefixes run twice; dump mismatch fails. Per-run oracles: `.require` residuals, refinements, panic/`SzError`. Per-campaign oracle: `Law.sometimes` reachability → `repro.toml` |
-| `scuzz mutate` | Mutate live `def` bodies (flip ops, swap `if` arms, `0`↔`1`, sibling constructors); keep residual oracles armed. `--oracles` mutates residual `Law.check` / `Law.assert` / `.require` predicates. Idle probe plus `--iters` fuzz; surviving mutants mean weak or unreached oracles |
+| `scuzz fuzz` | `--iterations N` campaign. Search: probe, then exhaustive `[ui]` deepening while the next full depth fits, then coverage-guided random. Kept prefixes / schedule seeds form the corpus. Shrink a failing prefix before `repro.toml`. `[ui]` kept prefixes run twice; dump mismatch fails. Then mutation: idle probe plus corpus replay. `--oracles` mutates residual `Law.check` / `Law.assert` / `.require` predicates. Per-run oracles: `.require` residuals, refinements, panic/`SzError`. Per-campaign: `Law.sometimes` reachability. Survivors fail. Writes `build/fuzz/summary.toml` |
 | Later (optional) | Discharge trivial law/refinement fragments statically; leave the rest as search |
 
 Direction beyond this (not current work): fuzz-verified `*.scuzz_tune` — [`optimization.md`](optimization.md). Pivot slices and status: [`gaps.md`](gaps.md).
@@ -199,7 +198,7 @@ src/
 
 - Live/`scuzz run` loads `*.scuzz` only. Laws, `.require`, inline checks, and refinements erase.
 - No separate laws file. Oracles belong next to the code they constrain, in `*.scuzz`.
-- Fuzz / mutation / test layers sim, then arms oracles. Rename drift fails `check`.
+- Fuzz / test layers sim, then arms oracles. Mutation is a fuzz phase. Rename drift fails `check`.
 - No free-floating `tests/` package roots. No third-party test or mutation frameworks.
 - Prefer swapping values you own through `*.scuzz_sim`. Blessed kits stay one implementation + TestRuntime fakes. Do not stub pure helpers, `View` builders, or `Signal` cells. TestRuntime does not open live sockets.
 - Driver params stay generator-friendly (`Int` / `String` / `Bool`). Drivers may call live defs but never assert correctness.
@@ -211,7 +210,7 @@ Keep purity checkable (pure `A` vs `IO` vs session). Total expr core. Signals as
 
 ### `scuzz fuzz`
 
-Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overlays when present). The fuzz alphabet is `[taps]` targets, text fields, and scrolls **plus declared drivers** (`drive <name> [args]` extends the script line protocol; the verify build publishes the driver table alongside the a11y dump) **plus parameterized laws** (same `drive` verb). Oracles: in-source **laws/refinements** first. Panic/`SzError` still fails. `Law.sometimes` reachability judges the campaign. Structural dumps aid diagnosis (PNG last). `repro.toml` records a **shrunk** event list + driver invocations, so replay is generator-independent. `[ui]` kept prefixes run twice; a dump mismatch fails the campaign. `tap N` / `scroll N` follow a11y preorder (`[taps]` / `[scrolls]`), not a pixel scan. `tap N` activates that target directly so a control below the viewport still fires. Headless fuzz stays stable across fonts. `pump` is time. No hidden nondeterminism. Determinism makes any failing prefix replayable. Seeded `--iters` keeps `[ui]` prefixes that hit new `Law.sometimes` names or a new Headless `dump.txt`, and IO-only schedule seeds that hit new sometimes names, then extends/perturbs them (CLI-only; no runtime machinery). Flags, script verbs, and schedule seeds: [`guide.md`](guide.md).
+Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overlays when present). The fuzz alphabet is `[taps]` targets, text fields, and scrolls **plus declared drivers** (`drive <name> [args]` extends the script line protocol; the verify build publishes the driver table alongside the a11y dump) **plus parameterized laws** (same `drive` verb). Oracles: in-source **laws/refinements** first. Panic/`SzError` still fails. `Law.sometimes` reachability judges the campaign. Structural dumps aid diagnosis (PNG last). `repro.toml` records a **shrunk** event list + driver invocations, so replay is generator-independent. `[ui]` kept prefixes run twice; a dump mismatch fails the campaign. `tap N` / `scroll N` follow a11y preorder (`[taps]` / `[scrolls]`), not a pixel scan. `tap N` activates that target directly so a control below the viewport still fires. Headless fuzz stays stable across fonts. `pump` is time. No hidden nondeterminism. Determinism makes any failing prefix replayable. Seeded `--iterations N` splits the budget: about two thirds search, the rest mutation slots. Search tries exhaustive `[ui]` event scripts depth by depth while a full depth fits, then keeps `[ui]` prefixes that hit new `Law.sometimes` names or a new Headless `dump.txt`, and IO-only schedule seeds that hit new sometimes names, then extends/perturbs them (CLI-only; no runtime machinery). An empty alphabet moves leftover search budget to mutation. Mutation compiles one mutant per slot, idle-probes, then replays the corpus. `--replay` restores a shrunk event list. `--oracles` mutates residual predicates. The command writes `build/fuzz/summary.toml` (coverage and mutation). Flags, script verbs, and schedule seeds: [`guide.md`](guide.md).
 
 ### Layout model
 
@@ -219,7 +218,7 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 ### UI testing
 
-**In-source laws + composed drivers through `scuzz fuzz` + built-in mutation** are primary for `[ui]` apps. **Structural goldens** (Headless signal + a11y dumps) are a regression face — few, live graph, not a substitute for laws. PNG optional (`scuzz test --pixels`). IO packages: laws + drivers + sim under TestRuntime when present. Otherwise compile + TESTRT exit-0 smoke.
+**In-source laws + composed drivers through `scuzz fuzz`** are primary for `[ui]` apps. Mutation is a phase of that command. **Structural goldens** (Headless signal + a11y dumps) are a regression face — few, live graph, not a substitute for laws. PNG optional (`scuzz test --pixels`). IO packages: laws + drivers + sim under TestRuntime when present. Otherwise compile + TESTRT exit-0 smoke.
 
 ## Open work
 

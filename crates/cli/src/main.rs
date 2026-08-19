@@ -1,5 +1,4 @@
 mod cmd_fuzz;
-mod cmd_mutate;
 mod support;
 
 use anyhow::{bail, Context, Result};
@@ -18,7 +17,7 @@ use support::resolve_dir;
     name = "scuzz",
     version,
     about = "Scuzz Lang CLI",
-    after_help = "Examples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz check --message-format=json\n  scuzz lsp\n  scuzz test\n  scuzz run --headless\n  scuzz run examples/studio\n  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio\n  scuzz watch\n  scuzz run --watch --headless\n  scuzz fuzz --iters 16\n  scuzz mutate --limit 16 --iters 4\n\nJSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check` (open buffers overlay disk; not a second typer).\n`scuzz check` is the linter. `watch` rebuilds. `[ui] run --watch` is hot reload: it keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (Signals stay). IO-only `run --watch` kills and reruns on source change. Live dump: build/debug.dump. Live inject: build/inject.script (tap/xy/text/type/pump/scroll/backspace). Desktop/Mobile record: build/record.script."
+    after_help = "Examples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz check --message-format=json\n  scuzz lsp\n  scuzz test\n  scuzz run --headless\n  scuzz run examples/studio\n  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio\n  scuzz watch\n  scuzz run --watch --headless\n  scuzz fuzz --iterations 16\n\nJSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check` (open buffers overlay disk; not a second typer).\n`scuzz check` is the linter. `watch` rebuilds. `[ui] run --watch` is hot reload: it keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (Signals stay). IO-only `run --watch` kills and reruns on source change. Live dump: build/debug.dump. Live inject: build/inject.script (tap/xy/text/type/pump/scroll/backspace). Desktop/Mobile record: build/record.script."
 )]
 struct Cli {
     /// Diagnostic format: human (default) or json (`scuzz check` only)
@@ -121,45 +120,22 @@ enum Commands {
         #[arg(long)]
         check: bool,
     },
-    /// Search in-source laws, drivers, and [taps] events under TestRuntime
+    /// Search in-source laws, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation
     #[command(
-        after_help = "Examples:\n  scuzz fuzz --iters 16\n  scuzz fuzz --iters 16 examples/io\n  scuzz fuzz --exhaust --depth 1\n  scuzz fuzz --replay build/fuzz/repro.toml\n"
+        after_help = "Examples:\n  scuzz fuzz --iterations 16\n  scuzz fuzz --iterations 16 examples/counter\n  scuzz fuzz --oracles examples/counter\n  scuzz fuzz --replay build/fuzz/repro.toml\n"
     )]
     Fuzz {
         #[arg(default_value = ".")]
         path: PathBuf,
-        /// Seeded search iterations (scripts or schedule seeds)
+        /// Iteration budget (search + mutation slots)
         #[arg(long, default_value_t = 32)]
-        iters: i64,
+        iterations: i64,
         /// Deterministic LCG seed
         #[arg(long, default_value_t = 42)]
         seed: i64,
-        /// Exhaustive [ui] event alphabet (needs --depth)
-        #[arg(long)]
-        exhaust: bool,
-        /// Exhaustion depth (with --exhaust)
-        #[arg(long)]
-        depth: Option<i64>,
         /// Replay a repro.toml (events + optional schedule_seed)
         #[arg(long)]
         replay: Option<PathBuf>,
-    },
-    /// Mutate live def bodies (or residual oracles with --oracles) and probe
-    #[command(
-        after_help = "Examples:\n  scuzz mutate\n  scuzz mutate --limit 16 --iters 4\n  scuzz mutate --oracles examples/counter --limit 4 --iters 8\n  scuzz mutate examples/hello\n"
-    )]
-    Mutate {
-        #[arg(default_value = ".")]
-        path: PathBuf,
-        /// Max mutation sites to probe
-        #[arg(long, default_value_t = 16)]
-        limit: i64,
-        /// Fuzz iters per mutant after the idle probe (`0` is idle only)
-        #[arg(long, default_value_t = 4)]
-        iters: i64,
-        /// Deterministic LCG seed
-        #[arg(long, default_value_t = 42)]
-        seed: i64,
         /// Mutate residual Law.check / Law.assert / .require predicates
         #[arg(long)]
         oracles: bool,
@@ -365,19 +341,11 @@ version = "0.1.0"
         }
         Commands::Fuzz {
             path,
-            iters,
+            iterations,
             seed,
-            exhaust,
-            depth,
             replay,
-        } => cmd_fuzz::cmd_fuzz(&path, replay.as_deref(), iters, seed, exhaust, depth),
-        Commands::Mutate {
-            path,
-            limit,
-            iters,
-            seed,
             oracles,
-        } => cmd_mutate::cmd_mutate(&path, limit, iters, seed, oracles),
+        } => cmd_fuzz::cmd_fuzz(&path, replay.as_deref(), iterations, seed, oracles),
         Commands::Package {
             path,
             target,
