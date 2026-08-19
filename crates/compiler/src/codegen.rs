@@ -1092,7 +1092,7 @@ fn ensure_io(code: &mut String, kind: Kind, value: &str, tmp: &str, owned: bool)
 
 /// Stable capture order for packing/unpacking flatMap/handleErrorWith env lists.
 fn capture_name_order(locals: &HashMap<String, Local>) -> Vec<String> {
-    let mut names: Vec<String> = locals.keys().cloned().filter(|n| n != "_").collect();
+    let mut names: Vec<String> = locals.keys().filter(|&n| n != "_").cloned().collect();
     names.sort();
     names
 }
