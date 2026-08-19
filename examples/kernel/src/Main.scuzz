@@ -242,6 +242,7 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"padTo:${List.join(List.padTo(["a"], 3, "z"), ",")}")
     _ <- IO.println(s"nempty:${if (List.nonEmpty(xs)) "y" else "n"}")
     _ <- IO.println(s"range:${List.join(List.map(List.range(1, 4), n => Str.fromInt(n)), ",")}")
+    _ <- IO.println(s"typedlam:${List.join(List.map(List.range(1, 4), (n: Int) => Str.fromInt(n)), ",")}")
     _ <- IO.println(s"tab:${List.join(List.tabulate(3, i => Str.fromInt(i)), ",")}")
     _ <- IO.println(s"isp:${List.join(List.intersperse(xs, "|"), ",")}")
     _ <- IO.println(s"grp:${List.join(List.map(List.grouped(xs, 2), g => List.join(g, ",")), "|")}")

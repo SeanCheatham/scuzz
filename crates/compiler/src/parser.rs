@@ -1691,18 +1691,76 @@ impl Parser {
                 Ok((None, self.parse_block()?))
             }
             Token::LParen => {
+                let start = self.current_span();
                 self.bump();
-                self.expect(&Token::RParen)?;
-                self.expect(&Token::Arrow)?;
-                Ok((None, self.parse_block()?))
+                if matches!(self.peek(), Token::RParen) {
+                    self.bump();
+                    self.expect(&Token::Arrow)?;
+                    return Ok((None, self.parse_block()?));
+                }
+                let lam = self.parse_paren_lambda_after_lparen(start)?;
+                match lam.kind {
+                    ExprKind::Lambda { param, body, .. } => Ok((param, *body)),
+                    _ => Err(self.err(
+                        "expected `_ => expr`, `() => expr`, `(x: T) => expr`, or `name => expr`",
+                    )),
+                }
             }
             Token::Ident(name) => {
                 self.bump();
                 self.expect(&Token::Arrow)?;
                 Ok((Some(name), self.parse_block()?))
             }
-            _ => Err(self.err("expected `_ => expr`, `() => expr`, or `name => expr`")),
+            _ => {
+                Err(self
+                    .err("expected `_ => expr`, `() => expr`, `(x: T) => expr`, or `name => expr`"))
+            }
         }
+    }
+
+    /// `LParen` is already consumed. Parse `(x) => body` or `(x: T) => body`.
+    fn parse_paren_lambda_after_lparen(&mut self, start: Span) -> Result<Expr, ParseError> {
+        let (name, _) = self.parse_binder_name()?;
+        let param_ty = if matches!(self.peek(), Token::Colon) {
+            self.bump();
+            Some(self.parse_type()?)
+        } else {
+            None
+        };
+        self.expect(&Token::RParen)?;
+        self.expect(&Token::Arrow)?;
+        let body = self.parse_block()?;
+        let param = if name == "_" { None } else { Some(name) };
+        let span = start.cover(&body.span);
+        Ok(self.mk_lambda(param, param_ty, body, span))
+    }
+
+    fn try_paren_lambda(&mut self, start: Span) -> Option<Expr> {
+        let saved = self.i;
+        match self.parse_paren_lambda_after_lparen(start) {
+            Ok(e) => Some(e),
+            Err(_) => {
+                self.i = saved;
+                None
+            }
+        }
+    }
+
+    fn mk_lambda(
+        &self,
+        param: Option<String>,
+        param_ty: Option<Type>,
+        body: Expr,
+        span: Span,
+    ) -> Expr {
+        self.mk(
+            ExprKind::Lambda {
+                param,
+                param_ty,
+                body: Box::new(body),
+            },
+            span,
+        )
     }
 
     fn parse_args(&mut self) -> Result<Vec<Expr>, ParseError> {
@@ -1771,7 +1829,16 @@ impl Parser {
                 self.bump();
                 if matches!(self.peek(), Token::RParen) {
                     let end = self.bump().span;
+                    if matches!(self.peek(), Token::Arrow) {
+                        self.bump();
+                        let body = self.parse_block()?;
+                        let span = start.cover(&body.span);
+                        return Ok(self.mk_lambda(None, None, body, span));
+                    }
                     return Ok(self.mk(ExprKind::Unit, start.cover(&end)));
+                }
+                if let Some(lam) = self.try_paren_lambda(start.clone()) {
+                    return Ok(lam);
                 }
                 let inner = self.parse_expr()?;
                 self.expect(&Token::RParen)?;
@@ -1822,13 +1889,7 @@ impl Parser {
                 self.expect(&Token::Arrow)?;
                 let body = self.parse_block()?;
                 let span = start.cover(&body.span);
-                Ok(self.mk(
-                    ExprKind::Lambda {
-                        param: None,
-                        body: Box::new(body),
-                    },
-                    span,
-                ))
+                Ok(self.mk_lambda(None, None, body, span))
             }
             Token::Ident(name) if name == "IO" => {
                 self.bump();
@@ -2018,13 +2079,7 @@ impl Parser {
                     self.bump();
                     let body = self.parse_block()?;
                     let span = start.cover(&body.span);
-                    return Ok(self.mk(
-                        ExprKind::Lambda {
-                            param: Some(name),
-                            body: Box::new(body),
-                        },
-                        span,
-                    ));
+                    return Ok(self.mk_lambda(Some(name), None, body, span));
                 }
                 if matches!(self.peek(), Token::LParen) {
                     let args = self.parse_args()?;
@@ -2338,6 +2393,55 @@ def x(): Float = 1.5e1 + 1e-3
                 ExprKind::Lambda { param: Some(n), .. } if n == "self"
             )),
             other => panic!("expected call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_typed_lambda_param() {
+        let src = r#"@main def main: IO[Unit] = IO.println(List.join(List.map([1], (n: Int) => Str.fromInt(n)), ","))"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::IoPrintln(arg) => match &arg.kind {
+                ExprKind::Call { callee, args } if callee == "List.join" => match &args[0].kind {
+                    ExprKind::Call { callee, args } if callee == "List.map" => {
+                        match &args[1].kind {
+                            ExprKind::Lambda {
+                                param: Some(n),
+                                param_ty: Some(Type::Int),
+                                ..
+                            } if n == "n" => {}
+                            other => panic!("expected typed lambda, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected List.map, got {other:?}"),
+                },
+                other => panic!("expected List.join, got {other:?}"),
+            },
+            other => panic!("expected println, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_paren_untyped_lambda() {
+        let src =
+            r#"@main def main: IO[Unit] = IO.println(List.join(List.map(["a"], (x) => x), ","))"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::IoPrintln(arg) => match &arg.kind {
+                ExprKind::Call { args, .. } => match &args[0].kind {
+                    ExprKind::Call { args, .. } => match &args[1].kind {
+                        ExprKind::Lambda {
+                            param: Some(n),
+                            param_ty: None,
+                            ..
+                        } if n == "x" => {}
+                        other => panic!("expected untyped paren lambda, got {other:?}"),
+                    },
+                    other => panic!("expected List.map, got {other:?}"),
+                },
+                other => panic!("expected List.join, got {other:?}"),
+            },
+            other => panic!("expected println, got {other:?}"),
         }
     }
 

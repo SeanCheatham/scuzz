@@ -1615,7 +1615,7 @@ fn infer_require_pred(
 ) -> Result<Type, TypeError> {
     match &pred.kind {
         ExprKind::Var(name) if is_nullary_bool_law(name, funs, current_module)? => Ok(Type::Bool),
-        ExprKind::Lambda { param, body } => {
+        ExprKind::Lambda { param, body, .. } => {
             let inner = match receiver_ty {
                 Type::Io(t) => t.as_ref(),
                 other => other,
@@ -1702,7 +1702,7 @@ fn normalize_require_pred(
                 span,
             )
         }
-        ExprKind::Lambda { param, body } => {
+        ExprKind::Lambda { param, body, .. } => {
             if let Some(p) = param {
                 if p == "_" {
                     *body
@@ -1993,7 +1993,12 @@ fn rewrite_lambda_arg(
     current_module: &str,
     env: &mut HashMap<String, Type>,
 ) -> Result<Expr, TypeError> {
-    if let ExprKind::Lambda { param, body } = expr.kind {
+    if let ExprKind::Lambda {
+        param,
+        param_ty: ann,
+        body,
+    } = expr.kind
+    {
         let span = expr.span;
         let old = bind_opt(param.as_ref(), param_ty, env);
         let body = rewrite_fields(*body, enums, funs, methods, current_module, env)?;
@@ -2001,6 +2006,7 @@ fn rewrite_lambda_arg(
         Ok(Expr::new(
             ExprKind::Lambda {
                 param,
+                param_ty: ann,
                 body: Box::new(body),
             },
             span,
@@ -2616,10 +2622,20 @@ fn infer(
                     vec![*inner_ty],
                 ))))
             }
-            ExprKind::Lambda { param, body } => {
+            ExprKind::Lambda {
+                param,
+                param_ty,
+                body,
+            } => {
                 // Bare lambdas (View.button tap). Kit Call args bind String/Int
                 // and check the body type in infer_call via infer_lambda_arg.
-                let old = bind_opt(param.as_ref(), Type::Opaque("Param".into()), env);
+                // `(x: T) =>` binds `T` so the body typechecks against that param.
+                let bind_ty = if let Some(ann) = param_ty {
+                    resolve_ascribe_type(ann, enums, current_module)?
+                } else {
+                    Type::Opaque("Param".into())
+                };
+                let old = bind_opt(param.as_ref(), bind_ty, env);
                 let _ = infer(body, enums, funs, methods, current_module, env)?;
                 restore_opt(old, env);
                 Ok(Type::Opaque("TapFn".into()))
@@ -2676,7 +2692,20 @@ fn infer_lambda_arg(
     current_module: &str,
     env: &mut HashMap<String, Type>,
 ) -> Result<Type, TypeError> {
-    if let ExprKind::Lambda { param, body } = &expr.kind {
+    if let ExprKind::Lambda {
+        param,
+        param_ty: ann,
+        body,
+    } = &expr.kind
+    {
+        if let Some(ann) = ann {
+            let got = resolve_ascribe_type(ann, enums, current_module)?;
+            if !types_compat(&got, &param_ty) {
+                return Err(TypeError::Msg(format!(
+                    "lambda param type mismatch: expected {param_ty}, got {got}"
+                )));
+            }
+        }
         let old = bind_opt(param.as_ref(), param_ty.clone(), env);
         let result = infer(body, enums, funs, methods, current_module, env);
         restore_opt(old, env);
@@ -5436,9 +5465,14 @@ fn mono_expr(
             },
             span,
         )),
-        ExprKind::Lambda { param, body } => Ok(Expr::new(
+        ExprKind::Lambda {
+            param,
+            param_ty,
+            body,
+        } => Ok(Expr::new(
             ExprKind::Lambda {
                 param,
+                param_ty,
                 body: Box::new(mono_expr(
                     *body,
                     enums,
@@ -6246,9 +6280,14 @@ fn elaborate_expr(
             },
             span,
         )),
-        ExprKind::Lambda { param, body } => Ok(Expr::new(
+        ExprKind::Lambda {
+            param,
+            param_ty,
+            body,
+        } => Ok(Expr::new(
             ExprKind::Lambda {
                 param,
+                param_ty,
                 body: Box::new(elaborate_expr(
                     *body,
                     enums,
@@ -6397,8 +6436,13 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
             name,
             value: Box::new(subst_node_targs(*value, subst)),
         },
-        ExprKind::Lambda { param, body } => ExprKind::Lambda {
+        ExprKind::Lambda {
             param,
+            param_ty,
+            body,
+        } => ExprKind::Lambda {
+            param,
+            param_ty: param_ty.map(|t| apply_subst(&t, subst)),
             body: Box::new(subst_node_targs(*body, subst)),
         },
         other => other,
@@ -6557,7 +6601,12 @@ fn collect_node_targs(expr: &Expr, out: &mut Vec<(String, Vec<Type>)>) {
         ExprKind::Unary { expr, .. }
         | ExprKind::NamedArg { value: expr, .. }
         | ExprKind::Ascribe { expr, .. } => collect_node_targs(expr, out),
-        ExprKind::Lambda { body, .. } => collect_node_targs(body, out),
+        ExprKind::Lambda { param_ty, body, .. } => {
+            if let Some(t) = param_ty {
+                collect_apps_in_type(t, out);
+            }
+            collect_node_targs(body, out);
+        }
         _ => {}
     }
 }
@@ -6747,8 +6796,16 @@ fn rewrite_enum_refs(
             name,
             value: Box::new(rewrite_enum_refs(*value, clones)?),
         },
-        ExprKind::Lambda { param, body } => ExprKind::Lambda {
+        ExprKind::Lambda {
             param,
+            param_ty,
+            body,
+        } => ExprKind::Lambda {
+            param,
+            param_ty: match param_ty {
+                Some(t) => Some(concretize_type(&t, clones)?),
+                None => None,
+            },
             body: Box::new(rewrite_enum_refs(*body, clones)?),
         },
         other => other,
@@ -7055,6 +7112,55 @@ def apply(f: Int => String, n: Int): String = f(n)
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Int => String param");
+    }
+
+    #[test]
+    fn typechecks_typed_lambda_on_list_map() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map([1, 2], (n: Int) => Str.fromInt(n)), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("typed Int lambda on List.map");
+    }
+
+    #[test]
+    fn typechecks_typed_lambda_on_user_fun() {
+        let src = r#"
+def apply(f: Int => String, n: Int): String = f(n)
+@main def main: IO[Unit] =
+  IO.println(apply((x: Int) => Str.fromInt(x), 1))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("typed Int lambda on Fun param");
+    }
+
+    #[test]
+    fn rejects_typed_lambda_param_mismatch() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map([1, 2], (n: String) => n), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(
+            err.contains("lambda param type mismatch")
+                && err.contains("Int")
+                && err.contains("String"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn rejects_typed_lambda_on_user_fun_mismatch() {
+        let src = r#"
+def apply(f: Int => String, n: Int): String = f(n)
+@main def main: IO[Unit] =
+  IO.println(apply((x: String) => x, 1))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(err.contains("lambda param type mismatch"), "{err}");
     }
 
     #[test]
