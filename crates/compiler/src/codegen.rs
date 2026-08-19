@@ -533,6 +533,16 @@ fn drop_owned_ptr(code: &mut String, e: &Emitted) {
     }
 }
 
+/// Drop a discarded owned ptr, or any IO node that never runs.
+fn drop_discarded(code: &mut String, kind: Kind, value: &str, owned: bool) {
+    if owned && kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {value})").unwrap();
+    }
+    if kind == Kind::Io {
+        writeln!(code, "  call void @sz_release(ptr {value})").unwrap();
+    }
+}
+
 fn drop_owned_ptrs(code: &mut String, args: &[Emitted]) {
     for a in args {
         drop_owned_ptr(code, a);
@@ -867,6 +877,9 @@ fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
 
     let mut locals: HashMap<String, Local> = HashMap::new();
     for p in &def.params {
+        if p.name == "_" {
+            continue;
+        }
         locals.insert(
             p.name.clone(),
             Local::borrow(format!("%{}", p.name), kind_of_type(&p.ty)),
@@ -1062,7 +1075,7 @@ fn ensure_io(code: &mut String, kind: Kind, value: &str, tmp: &str, owned: bool)
 
 /// Stable capture order for packing/unpacking flatMap/handleErrorWith env lists.
 fn capture_name_order(locals: &HashMap<String, Local>) -> Vec<String> {
-    let mut names: Vec<String> = locals.keys().cloned().collect();
+    let mut names: Vec<String> = locals.keys().cloned().filter(|n| n != "_").collect();
     names.sort();
     names
 }
@@ -1081,7 +1094,8 @@ fn pack_env(
     let mut cur = format!("%{prefix}_0");
     for (i, name) in names.iter().enumerate().rev() {
         let loc = locals.get(name).expect("capture name");
-        let ptr = if loc.kind == Kind::Int || loc.kind == Kind::Float {
+        let boxed = loc.kind == Kind::Int || loc.kind == Kind::Float;
+        let ptr = if boxed {
             box_numeric(code, loc.kind, &loc.value, &format!("{prefix}_b{i}"))
         } else {
             loc.value.clone()
@@ -1093,6 +1107,9 @@ fn pack_env(
         )
         .unwrap();
         writeln!(code, "  call void @sz_release(ptr {cur})").unwrap();
+        if boxed {
+            writeln!(code, "  call void @sz_release(ptr {ptr})").unwrap();
+        }
         cur = format!("%{prefix}_{}", i + 1);
     }
     cur
@@ -1356,8 +1373,10 @@ fn emit_pat(
             writeln!(pe.code, "  br label %{ok_label}").unwrap();
         }
         Pattern::Bind(name) => {
-            pe.locals.insert(name.clone(), Local::borrow(value, kind));
-            pe.bound_names.push(name.clone());
+            if name != "_" {
+                pe.locals.insert(name.clone(), Local::borrow(value, kind));
+                pe.bound_names.push(name.clone());
+            }
             writeln!(pe.code, "  br label %{ok_label}").unwrap();
         }
         Pattern::As { name, inner } => {
@@ -1797,6 +1816,20 @@ fn emit_expr(
         ExprKind::Let { name, value, body } => {
             // Nested vals must not reuse the same LLVM name prefix.
             let ve = emit_expr(value, ctx, locals, &format!("{prefix}_lv_{name}"));
+            if name == "_" {
+                let mut code = ve.code;
+                drop_discarded(&mut code, ve.kind, &ve.value, ve.owned);
+                let be = emit_expr(body, ctx, locals, &format!("{prefix}_l_disc"));
+                code.push_str(&be.code);
+                return Emitted {
+                    code,
+                    value: be.value,
+                    kind: be.kind,
+                    payload: be.payload,
+                    payload_owned: be.payload_owned,
+                    owned: be.owned,
+                };
+            }
             let mut code = ve.code;
             locals.insert(
                 name.clone(),
@@ -1820,6 +1853,8 @@ fn emit_expr(
                         }
                         writeln!(code, "  call void @sz_release(ptr {})", bound.value).unwrap();
                     }
+                } else if bound.kind == Kind::Io && !crate::resolve::uses_name(body, name) {
+                    writeln!(code, "  call void @sz_release(ptr {})", bound.value).unwrap();
                 }
             }
             Emitted {
@@ -5745,6 +5780,85 @@ mod tests {
         );
     }
 
+    fn assert_released(ir: &str, name: &str, what: &str) {
+        assert!(
+            ir.contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of {what} {name}:\n{ir}"
+        );
+    }
+
+    fn cstr_string_temps(ir: &str) -> Vec<&str> {
+        ir.lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                let (name, _) = line.split_once(" = call ptr @sz_string_from_cstr(")?;
+                Some(name.trim())
+            })
+            .collect()
+    }
+
+    fn list_cons_roots(ir: &str) -> Vec<&str> {
+        ir.lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                if line.contains("_cl") {
+                    return None;
+                }
+                let (name, rest) = line.split_once(" = call ptr @sz_list_cons(")?;
+                if rest.contains("@") {
+                    return None;
+                }
+                Some(name.trim())
+            })
+            .collect()
+    }
+
+    fn adt_temps(ir: &str) -> Vec<&str> {
+        ir.lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                let (name, _) = line.split_once(" = call ptr @sz_adt_new(")?;
+                Some(name.trim())
+            })
+            .collect()
+    }
+
+    fn io_println_temps(ir: &str) -> Vec<&str> {
+        ir.lines()
+            .filter_map(|line| {
+                let line = line.trim();
+                let (name, _) = line.split_once(" = call ptr @sz_io_println(")?;
+                Some(name.trim())
+            })
+            .collect()
+    }
+
+    fn assert_capture_box_released(ir: &str) {
+        let needle = " = call ptr @sz_box_i64(";
+        let mut found = false;
+        let mut search = 0usize;
+        while let Some(rel) = ir[search..].find(needle) {
+            let at = search + rel;
+            let line_start = ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0);
+            let name = ir[line_start..at].trim();
+            search = at + needle.len();
+            if !name.starts_with('%') {
+                continue;
+            }
+            let rest = &ir[at..];
+            if !rest.contains(&format!("sz_list_cons(ptr {name},")) {
+                continue;
+            }
+            assert!(
+                rest.contains(&format!("call void @sz_release(ptr {name})")),
+                "expected last-use release of capture box {name}:\n{ir}"
+            );
+            found = true;
+            break;
+        }
+        assert!(found, "expected boxed Int/Float capture in pack_env:\n{ir}");
+    }
+
     #[test]
     fn emit_contains_main_and_println() {
         let p = parse(r#"@main def main: IO[Unit] = IO.println("Hi")"#).unwrap();
@@ -6416,6 +6530,415 @@ def sum(p: Point): Int = p.x + p.y
         let (at, args) = user_call_ptr_args(&ir, "sz_user_sum");
         assert_eq!(args.len(), 1, "expected one record arg:\n{ir}");
         assert_release_after(&ir, at, args[0], "owned record arg");
+    }
+
+    #[test]
+    fn emit_nested_discard_lets_drop_each_string() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    _ = "a"
+    _ = "b"
+    _ <- IO.println("ok")
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let temps = cstr_string_temps(&ir);
+        assert!(
+            temps.len() >= 3,
+            "expected discarded a/b plus println ok:\n{ir}"
+        );
+        for name in &temps {
+            assert_released(&ir, name, "discarded or last-use string");
+        }
+    }
+
+    #[test]
+    fn emit_nested_discard_lets_drop_each_list() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    _ = [1]
+    _ = [2]
+    _ <- IO.println("ok")
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let roots = list_cons_roots(&ir);
+        assert!(roots.len() >= 2, "expected two discarded list roots:\n{ir}");
+        for name in &roots {
+            assert_released(&ir, name, "discarded list");
+        }
+    }
+
+    #[test]
+    fn emit_three_nested_discards_drop_each_string() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    _ = "a"
+    _ = "b"
+    _ = "c"
+    _ <- IO.println("ok")
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let temps = cstr_string_temps(&ir);
+        assert!(temps.len() >= 4, "expected a/b/c plus println ok:\n{ir}");
+        for name in &temps {
+            assert_released(&ir, name, "nested discarded string");
+        }
+    }
+
+    #[test]
+    fn emit_discard_then_named_binder_keeps_named() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    _ = "skip"
+    s = "keep"
+    _ <- IO.println(s)
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let temps = cstr_string_temps(&ir);
+        assert!(
+            temps.len() >= 2,
+            "expected skip and keep string temps:\n{ir}"
+        );
+        for name in &temps {
+            assert_released(&ir, name, "discard or named last-use string");
+        }
+        assert!(
+            ir.contains("sz_io_println"),
+            "named binder must still reach println:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_named_then_discard_does_not_clobber() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    s = "keep"
+    _ = "skip"
+    _ <- IO.println(s)
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let temps = cstr_string_temps(&ir);
+        assert!(temps.len() >= 2, "expected keep and skip temps:\n{ir}");
+        for name in &temps {
+            assert_released(&ir, name, "named or discarded string");
+        }
+        let keep = temps[0];
+        assert!(
+            ir.contains(&format!("sz_io_println(ptr {keep})")),
+            "println must use the named string, not the discard:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_discard_user_string_return() {
+        let src = r#"
+def hello(): String = "hi"
+@main def main: IO[Unit] =
+  for {
+    _ = hello()
+    _ <- IO.println("ok")
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let at = find_user_call(&ir, "sz_user_hello");
+        let ret = ir[ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0)..]
+            .split('=')
+            .next()
+            .unwrap()
+            .trim();
+        assert_release_after(&ir, at, ret, "discarded hello return");
+    }
+
+    #[test]
+    fn emit_discard_user_list_return() {
+        let src = r#"
+def wrap(): List[Int] = [1]
+@main def main: IO[Unit] =
+  for {
+    _ = wrap()
+    _ <- IO.println("ok")
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let at = find_user_call(&ir, "sz_user_wrap");
+        let ret = ir[ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0)..]
+            .split('=')
+            .next()
+            .unwrap()
+            .trim();
+        assert_release_after(&ir, at, ret, "discarded wrap return");
+    }
+
+    #[test]
+    fn emit_discard_map_and_set() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    _ = Map.set(Map.empty(), "a", "1")
+    _ = Set.add(Set.empty(), "x")
+    _ <- IO.println("ok")
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let mut sets = Vec::new();
+        let mut search = 0usize;
+        let needle = " = call ptr @sz_map_set(";
+        while let Some(rel) = ir[search..].find(needle) {
+            let at = search + rel;
+            let name = ir[ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0)..at].trim();
+            sets.push(name);
+            search = at + needle.len();
+        }
+        assert!(
+            sets.len() >= 2,
+            "expected discarded map and set (sz_map_set):\n{ir}"
+        );
+        assert_released(&ir, sets[0], "discarded map");
+        assert_released(&ir, sets[1], "discarded set");
+    }
+
+    #[test]
+    fn emit_discard_adt() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  for {
+    _ = Color.Red
+    _ = Color.Blue
+    _ <- IO.println("ok")
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let temps = adt_temps(&ir);
+        assert!(temps.len() >= 2, "expected two discarded ADTs:\n{ir}");
+        for name in &temps {
+            assert_released(&ir, name, "discarded ADT");
+        }
+    }
+
+    #[test]
+    fn emit_discard_record() {
+        let src = r#"
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] =
+  for {
+    _ = Point(1, 2)
+    _ <- IO.println("ok")
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let temps = adt_temps(&ir);
+        assert!(!temps.is_empty(), "expected discarded Point:\n{ir}");
+        for name in &temps {
+            assert_released(&ir, name, "discarded record");
+        }
+    }
+
+    #[test]
+    fn emit_discard_io_never_runs() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    _ = IO.println("skip")
+    _ <- IO.println("ok")
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let temps = io_println_temps(&ir);
+        assert!(
+            temps.len() >= 2,
+            "expected discarded skip IO and run ok IO:\n{ir}"
+        );
+        assert_released(&ir, temps[0], "discarded IO");
+    }
+
+    #[test]
+    fn emit_nested_discard_io_drops_each() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    _ = IO.println("a")
+    _ = IO.println("b")
+    _ <- IO.println("ok")
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let temps = io_println_temps(&ir);
+        assert!(temps.len() >= 3, "expected a/b plus run ok:\n{ir}");
+        assert_released(&ir, temps[0], "first discarded IO");
+        assert_released(&ir, temps[1], "second discarded IO");
+    }
+
+    #[test]
+    fn emit_unused_named_io_let_drops() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    skip = IO.println("skip")
+    _ <- IO.println("ok")
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let temps = io_println_temps(&ir);
+        assert!(!temps.is_empty(), "expected unused named IO println:\n{ir}");
+        assert_released(&ir, temps[0], "unused named IO let");
+    }
+
+    #[test]
+    fn emit_used_named_io_let_still_sequences() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    step = IO.println("go")
+    _ <- step
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        assert!(
+            ir.contains("sz_io_flatmap") || ir.contains("sz_runtime_main_args"),
+            "used IO let must still sequence:\n{ir}"
+        );
+        let temps = io_println_temps(&ir);
+        assert_eq!(temps.len(), 1, "expected one println IO:\n{ir}");
+        let needle = "call ptr @sz_io_flatmap(ptr ";
+        let at = ir.find(needle).expect("expected sz_io_flatmap");
+        let inner = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert_eq!(inner, temps[0], "flatMap must take the named IO:\n{ir}");
+    }
+
+    #[test]
+    fn emit_discard_user_io_return() {
+        let src = r#"
+def shout(): IO[Unit] = IO.println("hi")
+@main def main: IO[Unit] =
+  for {
+    _ = shout()
+    _ <- IO.println("ok")
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let at = find_user_call(&ir, "sz_user_shout");
+        let ret = ir[ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0)..]
+            .split('=')
+            .next()
+            .unwrap()
+            .trim();
+        assert_release_after(&ir, at, ret, "discarded shout IO");
+    }
+
+    #[test]
+    fn emit_underscore_prefix_binder_is_not_discard_slot() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    _s = "keep"
+    _ <- IO.println(_s)
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let temps = cstr_string_temps(&ir);
+        assert!(!temps.is_empty(), "expected _s string:\n{ir}");
+        let s = temps[0];
+        assert!(
+            ir.contains(&format!("sz_io_println(ptr {s})")),
+            "_s must bind and reach println:\n{ir}"
+        );
+        assert_released(&ir, s, "_s last-use");
+    }
+
+    #[test]
+    fn emit_discard_param_does_not_clobber_let() {
+        let src = r#"
+def ignore(_s: String): Int = 1
+@main def main: IO[Unit] =
+  for {
+    _ = "x"
+    n = ignore("y")
+    _ <- IO.println(Str.fromInt(n))
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let temps = cstr_string_temps(&ir);
+        assert!(temps.len() >= 2, "expected discarded x and ignore y:\n{ir}");
+        for name in &temps {
+            assert_released(&ir, name, "discard or call-arg string");
+        }
+    }
+
+    #[test]
+    fn emit_flatmap_capture_box_last_use() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    n = 3
+    s <- IO.pure("x")
+    _ <- IO.println(Str.fromInt(n))
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        assert_capture_box_released(&ir);
+    }
+
+    #[test]
+    fn emit_handle_error_capture_box_last_use() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    n = 4
+    _ <- IO.fail("boom").handleErrorWith(_ => IO.println(Str.fromInt(n)))
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        assert_capture_box_released(&ir);
+    }
+
+    #[test]
+    fn emit_flatmap_capture_float_box_last_use() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    x = 1.5
+    s <- IO.pure("x")
+    _ <- IO.println(Str.fromInt(Float.toInt(x)))
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        assert_capture_box_released(&ir);
+    }
+
+    #[test]
+    fn emit_discard_between_two_named_binders() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    a = "left"
+    _ = "mid"
+    b = "right"
+    _ <- IO.println(a)
+    _ <- IO.println(b)
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        let temps = cstr_string_temps(&ir);
+        assert!(temps.len() >= 3, "expected left/mid/right strings:\n{ir}");
+        for name in &temps {
+            assert_released(&ir, name, "named or discarded string");
+        }
+        assert!(
+            ir.contains(&format!("sz_io_println(ptr {})", temps[0])),
+            "first named binder must reach println:\n{ir}"
+        );
     }
 
     #[test]
