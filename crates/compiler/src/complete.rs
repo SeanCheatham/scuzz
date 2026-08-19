@@ -297,6 +297,12 @@ mod tests {
             ("List.di", "List.distinct"),
             ("List.di", "List.diff"),
             ("List.int", "List.intersect"),
+            ("List.st", "List.startsWith"),
+            ("List.en", "List.endsWith"),
+            ("List.sa", "List.sameElements"),
+            ("List.pa", "List.patch"),
+            ("List.findL", "List.findLast"),
+            ("List.pr", "List.prefixLength"),
             ("Color.rgb", "Color.rgb"),
             ("Color.rgb", "Color.rgba"),
         ] {

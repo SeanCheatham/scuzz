@@ -541,6 +541,19 @@ SzList *sz_list_intersect(SzList *xs, SzList *ys);
 int64_t sz_list_index_where(SzList *xs, SzListPred pred, void *env);
 /* Last index where `pred` is true, or -1. */
 int64_t sz_list_last_index_where(SzList *xs, SzListPred pred, void *env);
+/* 1 when `xs` begins with `prefix`. Empty prefix is 1. */
+int64_t sz_list_starts_with(SzList *xs, SzList *prefix);
+/* 1 when `xs` ends with `suffix`. Empty suffix is 1. */
+int64_t sz_list_ends_with(SzList *xs, SzList *suffix);
+/* 1 when `xs` and `ys` have the same cells in order. */
+int64_t sz_list_same_elements(SzList *xs, SzList *ys);
+/* Replace `replaced` cells from `from` with `other`. Negative is 0.
+ * `from` past the end appends `other`. */
+SzList *sz_list_patch(SzList *xs, int64_t from, SzList *other, int64_t replaced);
+/* Last head for which `pred` is nonzero, as a one-cell list. Empty if none. */
+SzList *sz_list_find_last(SzList *xs, SzListPred pred, void *env);
+/* Length of the leading prefix where `pred` is nonzero. */
+int64_t sz_list_prefix_length(SzList *xs, SzListPred pred, void *env);
 /* Release the spine; heads drop through RC. */
 void sz_list_free(SzList *xs);
 SzString *sz_list_join(const SzList *xs, const char *sep);

@@ -670,6 +670,102 @@ int64_t sz_list_last_index_where(SzList *xs, SzListPred pred, void *env) {
   return hit;
 }
 
+int64_t sz_list_starts_with(SzList *xs, SzList *prefix) {
+  SzList *a = xs;
+  SzList *b = prefix;
+  while (b) {
+    if (!a || !sz_ptr_eq(a->head, b->head))
+      return 0;
+    a = a->tail;
+    b = b->tail;
+  }
+  return 1;
+}
+
+int64_t sz_list_ends_with(SzList *xs, SzList *suffix) {
+  size_t n = sz_list_len(xs);
+  size_t m = sz_list_len(suffix);
+  SzList *p;
+  size_t i;
+  if (m > n)
+    return 0;
+  p = xs;
+  for (i = 0; i < n - m; i++)
+    p = p->tail;
+  return sz_list_starts_with(p, suffix);
+}
+
+int64_t sz_list_same_elements(SzList *xs, SzList *ys) {
+  SzList *a = xs;
+  SzList *b = ys;
+  while (a && b) {
+    if (!sz_ptr_eq(a->head, b->head))
+      return 0;
+    a = a->tail;
+    b = b->tail;
+  }
+  return a == NULL && b == NULL ? 1 : 0;
+}
+
+SzList *sz_list_patch(SzList *xs, int64_t from, SzList *other, int64_t replaced) {
+  size_t len = sz_list_len(xs);
+  size_t f;
+  size_t r;
+  size_t skip;
+  SzList *left;
+  SzList *right;
+  SzList *mid;
+  SzList *out;
+  if (from < 0)
+    f = 0;
+  else if ((uint64_t)from > (uint64_t)len)
+    f = len;
+  else
+    f = (size_t)from;
+  if (replaced < 0)
+    r = 0;
+  else if ((uint64_t)replaced > (uint64_t)(len - f))
+    r = len - f;
+  else
+    r = (size_t)replaced;
+  skip = f + r;
+  left = sz_list_take(xs, (int64_t)f);
+  right = sz_list_drop(xs, (int64_t)skip);
+  mid = sz_list_concat(left, other);
+  sz_release(left);
+  out = sz_list_concat(mid, right);
+  sz_release(mid);
+  sz_release(right);
+  return out;
+}
+
+SzList *sz_list_find_last(SzList *xs, SzListPred pred, void *env) {
+  SzList *p;
+  void *hit = NULL;
+  int found = 0;
+  if (!pred)
+    sz_panic("sz_list_find_last(null pred)");
+  for (p = xs; p; p = p->tail) {
+    if (pred(p->head, env)) {
+      hit = p->head;
+      found = 1;
+    }
+  }
+  if (!found)
+    return NULL;
+  return sz_list_cons(hit, NULL);
+}
+
+int64_t sz_list_prefix_length(SzList *xs, SzListPred pred, void *env) {
+  SzList *p;
+  int64_t n = 0;
+  if (!pred)
+    sz_panic("sz_list_prefix_length(null pred)");
+  for (p = xs; p && pred(p->head, env); p = p->tail)
+    n++;
+  return n;
+}
+
 int sz_list_non_empty(const SzList *xs) { return xs != NULL; }
 
 void sz_list_free(SzList *xs) { sz_release(xs); }

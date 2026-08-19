@@ -198,6 +198,12 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_intersect(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_index_where(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_last_index_where(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_list_starts_with(ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_list_ends_with(ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_list_same_elements(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_patch(ptr, i64, ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_list_find_last(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_list_prefix_length(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_write(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_list(ptr)").unwrap();
@@ -3267,6 +3273,7 @@ fn emit_call(
         ("List.filter", "sz_list_filter", false),
         ("List.filterNot", "sz_list_filter_not", false),
         ("List.find", "sz_list_find", false),
+        ("List.findLast", "sz_list_find_last", false),
         ("List.takeWhile", "sz_list_takewhile", false),
         ("List.span", "sz_list_span", false),
         ("List.partition", "sz_list_partition", false),
@@ -3282,6 +3289,7 @@ fn emit_call(
         ("List.lastIndexWhere", "sz_list_last_index_where"),
         ("List.count", "sz_list_count"),
         ("List.forall", "sz_list_forall"),
+        ("List.prefixLength", "sz_list_prefix_length"),
     ];
     if callee == "Signal.map" {
         return emit_signal_map(args, ctx, locals, prefix);
@@ -3925,6 +3933,36 @@ fn emit_call(
                 drop_owned_ptr(&mut code, &emitted_args[1]);
             }
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "List.startsWith" | "List.endsWith" | "List.sameElements" => {
+            let rt = match callee {
+                "List.startsWith" => "sz_list_starts_with",
+                "List.endsWith" => "sz_list_ends_with",
+                _ => "sz_list_same_elements",
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @{rt}(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "List.patch" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_patch(ptr {}, i64 {}, ptr {}, i64 {})",
+                emitted_args[0].value,
+                emitted_args[1].value,
+                emitted_args[2].value,
+                emitted_args[3].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[2]);
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "List.append" => {
             let elem = if emitted_args[1].kind == Kind::Int || emitted_args[1].kind == Kind::Float {
@@ -7056,6 +7094,50 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of list {name} after List.diff:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_starts_with_patch_find_last() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(if (List.startsWith(["a", "b"], ["a"])) "y" else "n")
+    _ <- IO.println(if (List.endsWith(["a", "b"], ["b"])) "y" else "n")
+    _ <- IO.println(if (List.sameElements(["a"], ["a"])) "y" else "n")
+    _ <- IO.println(List.join(List.patch(["a", "b", "c"], 1, ["x"], 1), ","))
+    _ <- IO.println(List.join(List.findLast(["a", "b", "a"], x => x == "a"), ","))
+    _ <- IO.println(Str.fromInt(List.prefixLength(["a", "a", "b"], x => x == "a")))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_starts_with"));
+        assert!(ir.contains("sz_list_ends_with"));
+        assert!(ir.contains("sz_list_same_elements"));
+        assert!(ir.contains("sz_list_patch"));
+        assert!(ir.contains("sz_list_find_last"));
+        assert!(ir.contains("sz_list_prefix_length"));
+        let needle = "call i64 @sz_list_starts_with(ptr ";
+        let at = ir.find(needle).expect("startsWith");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.startsWith:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_patch(ptr ";
+        let at = ir.find(needle).expect("patch");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.patch:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_find_last(ptr ";
+        let at = ir.find(needle).expect("findLast");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.findLast:\n{ir}"
         );
     }
 
