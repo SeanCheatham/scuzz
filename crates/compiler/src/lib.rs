@@ -33,6 +33,7 @@ pub(crate) mod span;
 pub(crate) mod symbols;
 pub(crate) mod tokens;
 pub(crate) mod typ;
+pub(crate) mod typehier;
 
 pub use check::{check_project, format_diagnostics};
 pub use driver::{compile_prepared_program, compile_project, CompileOutput};

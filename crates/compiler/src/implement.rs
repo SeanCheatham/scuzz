@@ -33,14 +33,18 @@ pub fn implementation_in_sources(
     impl_method_locs(program, sources, "", Some(&name))
 }
 
-fn trait_named<'a>(program: &'a Program, module: &str, name: &str) -> Option<&'a TraitDef> {
+pub(crate) fn trait_named<'a>(
+    program: &'a Program,
+    module: &str,
+    name: &str,
+) -> Option<&'a TraitDef> {
     program
         .traits
         .iter()
         .find(|t| t.module == module && t.name == name)
 }
 
-fn unique_trait<'a>(program: &'a Program, name: &str) -> Option<&'a TraitDef> {
+pub(crate) fn unique_trait<'a>(program: &'a Program, name: &str) -> Option<&'a TraitDef> {
     let hits: Vec<_> = program.traits.iter().filter(|t| t.name == name).collect();
     if hits.len() == 1 {
         Some(hits[0])
@@ -119,13 +123,17 @@ fn source_for<'a>(sources: &'a [(String, String)], module: &str) -> Option<(&'a 
         .map(|(l, t)| (l.as_str(), t.as_str()))
 }
 
-fn impl_for_type_span(source: &str, trait_name: &str, for_type: &str) -> Option<(usize, usize)> {
+pub(crate) fn impl_for_type_span(
+    source: &str,
+    trait_name: &str,
+    for_type: &str,
+) -> Option<(usize, usize)> {
     let (toks, i) = find_impl_header(source, trait_name, for_type)?;
     let t = toks.get(i)?;
     Some((t.span.start, t.span.end))
 }
 
-fn impl_method_span(
+pub(crate) fn impl_method_span(
     source: &str,
     trait_name: &str,
     for_type: &str,
@@ -195,7 +203,7 @@ fn find_impl_header(
     None
 }
 
-fn skip_brackets(toks: &[crate::lexer::SpannedToken], mut i: usize) -> usize {
+pub(crate) fn skip_brackets(toks: &[crate::lexer::SpannedToken], mut i: usize) -> usize {
     if !matches!(toks.get(i).map(|t| &t.token), Some(Token::LBracket)) {
         return i;
     }
@@ -218,7 +226,7 @@ fn skip_brackets(toks: &[crate::lexer::SpannedToken], mut i: usize) -> usize {
     i
 }
 
-fn impl_block_end(source: &str, tok: &crate::lexer::SpannedToken) -> bool {
+pub(crate) fn impl_block_end(source: &str, tok: &crate::lexer::SpannedToken) -> bool {
     match tok.token {
         Token::Impl
         | Token::Trait

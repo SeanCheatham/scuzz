@@ -227,6 +227,7 @@ pub(crate) enum DeclKind {
     Def,
     Enum,
     Case,
+    Trait,
 }
 
 pub(crate) fn loc_for_def(
@@ -270,6 +271,7 @@ pub(crate) fn decl_kw_name(
             DeclKind::Def => matches!(toks[i].token, Token::Def | Token::Law),
             DeclKind::Enum => matches!(toks[i].token, Token::Enum | Token::Record),
             DeclKind::Case => matches!(toks[i].token, Token::Case),
+            DeclKind::Trait => matches!(toks[i].token, Token::Trait),
         };
         if !ok {
             continue;
