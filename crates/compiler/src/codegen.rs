@@ -204,6 +204,15 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_patch(ptr, i64, ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_list_find_last(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_prefix_length(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_list_index_of_slice(ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_list_last_index_of_slice(ptr, ptr)").unwrap();
+    writeln!(
+        out,
+        "declare i64 @sz_list_segment_length(ptr, ptr, ptr, i64)"
+    )
+    .unwrap();
+    writeln!(out, "declare i64 @sz_list_is_defined_at(ptr, i64)").unwrap();
+    writeln!(out, "declare i64 @sz_list_length_compare(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_write(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_list(ptr)").unwrap();
@@ -2766,6 +2775,39 @@ fn emit_list_pred_i64(
     val_emitted(code, format!("%{prefix}_v"), Kind::Int)
 }
 
+fn emit_list_segment_length(
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 3, "List.segmentLength expects 3 args");
+    let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let ExprKind::Lambda { param, body } = &args[1].kind else {
+        panic!("List.segmentLength predicate must be a lambda");
+    };
+    let lam = emit_pred_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
+    let from = emit_expr(&args[2], ctx, locals, &format!("{prefix}_a2"));
+    let inner_owned = inner.owned;
+    let inner_kind = inner.kind;
+    let inner_value = inner.value.clone();
+    let mut code = inner.code;
+    code.push_str(&lam.code);
+    code.push_str(&from.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    writeln!(
+        code,
+        "  %{prefix}_v = call i64 @sz_list_segment_length(ptr {inner_value}, ptr %{prefix}_fnp, ptr %{prefix}_envp, i64 {})",
+        from.value
+    )
+    .unwrap();
+    drop_owned_ptr(&mut code, &lam);
+    if inner_owned && inner_kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {inner_value})").unwrap();
+    }
+    val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+}
+
 fn emit_stream_pred(
     callee: &str,
     rt: &str,
@@ -3296,6 +3338,9 @@ fn emit_call(
     }
     if callee == "View.each" {
         return emit_view_each(args, ctx, locals, prefix);
+    }
+    if callee == "List.segmentLength" {
+        return emit_list_segment_length(args, ctx, locals, prefix);
     }
     for &(name, llvm, io_bool) in PRED_PTR {
         if callee == name {
@@ -3934,10 +3979,16 @@ fn emit_call(
             }
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        "List.startsWith" | "List.endsWith" | "List.sameElements" => {
+        "List.startsWith"
+        | "List.endsWith"
+        | "List.sameElements"
+        | "List.indexOfSlice"
+        | "List.lastIndexOfSlice" => {
             let rt = match callee {
                 "List.startsWith" => "sz_list_starts_with",
                 "List.endsWith" => "sz_list_ends_with",
+                "List.indexOfSlice" => "sz_list_index_of_slice",
+                "List.lastIndexOfSlice" => "sz_list_last_index_of_slice",
                 _ => "sz_list_same_elements",
             };
             writeln!(
@@ -3948,6 +3999,21 @@ fn emit_call(
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             drop_owned_ptr(&mut code, &emitted_args[1]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "List.isDefinedAt" | "List.lengthCompare" => {
+            let rt = if callee == "List.isDefinedAt" {
+                "sz_list_is_defined_at"
+            } else {
+                "sz_list_length_compare"
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @{rt}(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "List.patch" => {
@@ -7138,6 +7204,62 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of list {name} after List.findLast:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_index_of_slice_segment_length() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(Str.fromInt(List.indexOfSlice(["a", "b", "a", "b"], ["a", "b"])))
+    _ <- IO.println(Str.fromInt(List.lastIndexOfSlice(["a", "b", "a", "b"], ["a", "b"])))
+    _ <- IO.println(Str.fromInt(List.segmentLength(["a", "a", "b"], x => x == "a", 0)))
+    _ <- IO.println(if (List.isDefinedAt(["a", "b"], 1)) "y" else "n")
+    _ <- IO.println(Str.fromInt(List.lengthCompare(["a", "b"], 2)))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_index_of_slice"));
+        assert!(ir.contains("sz_list_last_index_of_slice"));
+        assert!(ir.contains("sz_list_segment_length"));
+        assert!(ir.contains("sz_list_is_defined_at"));
+        assert!(ir.contains("sz_list_length_compare"));
+        let needle = "call i64 @sz_list_index_of_slice(ptr ";
+        let at = ir.find(needle).expect("indexOfSlice");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.indexOfSlice:\n{ir}"
+        );
+        let needle = "call i64 @sz_list_last_index_of_slice(ptr ";
+        let at = ir.find(needle).expect("lastIndexOfSlice");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.lastIndexOfSlice:\n{ir}"
+        );
+        let needle = "call i64 @sz_list_is_defined_at(ptr ";
+        let at = ir.find(needle).expect("isDefinedAt");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.isDefinedAt:\n{ir}"
+        );
+        let needle = "call i64 @sz_list_length_compare(ptr ";
+        let at = ir.find(needle).expect("lengthCompare");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.lengthCompare:\n{ir}"
+        );
+        let needle = "call i64 @sz_list_segment_length(ptr ";
+        let at = ir.find(needle).expect("segmentLength");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.segmentLength:\n{ir}"
         );
     }
 

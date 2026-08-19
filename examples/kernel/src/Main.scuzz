@@ -186,6 +186,11 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"ldiff:${List.join(List.diff(xs, ["a", "z"]), ",")}")
     _ <- IO.println(s"lisect:${List.join(List.intersect(xs, ["a", "z"]), ",")}")
     _ <- IO.println(s"nhas:${if (List.contains(List.range(1, 4), 2)) "y" else "n"}")
+    _ <- IO.println(s"ixslice:${Str.fromInt(List.indexOfSlice(["a", "b", "a", "b"], ["a", "b"]))}")
+    _ <- IO.println(s"lixslice:${Str.fromInt(List.lastIndexOfSlice(["a", "b", "a", "b"], ["a", "b"]))}")
+    _ <- IO.println(s"seglen:${Str.fromInt(List.segmentLength(["a", "a", "b"], x => x == "a", 0))}")
+    _ <- IO.println(s"defat:${if (List.isDefinedAt(xs, 1)) "y" else "n"}")
+    _ <- IO.println(s"lcmp:${Str.fromInt(List.lengthCompare(xs, 3))}")
   } yield ()
 
 def strProof(): IO[Unit] =

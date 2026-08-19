@@ -303,6 +303,11 @@ mod tests {
             ("List.pa", "List.patch"),
             ("List.findL", "List.findLast"),
             ("List.pr", "List.prefixLength"),
+            ("List.indexOfS", "List.indexOfSlice"),
+            ("List.lastIndexOfS", "List.lastIndexOfSlice"),
+            ("List.seg", "List.segmentLength"),
+            ("List.isD", "List.isDefinedAt"),
+            ("List.lengthC", "List.lengthCompare"),
             ("Color.rgb", "Color.rgb"),
             ("Color.rgb", "Color.rgba"),
         ] {

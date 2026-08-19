@@ -766,6 +766,74 @@ int64_t sz_list_prefix_length(SzList *xs, SzListPred pred, void *env) {
   return n;
 }
 
+int64_t sz_list_index_of_slice(SzList *xs, SzList *slice) {
+  SzList *p;
+  int64_t i = 0;
+  if (!slice)
+    return 0;
+  for (p = xs; p; p = p->tail) {
+    if (sz_list_starts_with(p, slice))
+      return i;
+    i++;
+  }
+  return -1;
+}
+
+int64_t sz_list_last_index_of_slice(SzList *xs, SzList *slice) {
+  SzList *p;
+  int64_t i = 0;
+  int64_t hit = -1;
+  if (!slice)
+    return (int64_t)sz_list_len(xs);
+  for (p = xs; p; p = p->tail) {
+    if (sz_list_starts_with(p, slice))
+      hit = i;
+    i++;
+  }
+  return hit;
+}
+
+int64_t sz_list_segment_length(SzList *xs, SzListPred pred, void *env, int64_t from) {
+  SzList *p;
+  int64_t i = 0;
+  if (!pred)
+    sz_panic("sz_list_segment_length(null pred)");
+  if (from < 0)
+    from = 0;
+  for (p = xs; p && i < from; p = p->tail)
+    i++;
+  return sz_list_prefix_length(p, pred, env);
+}
+
+int64_t sz_list_is_defined_at(SzList *xs, int64_t index) {
+  SzList *p;
+  int64_t i = 0;
+  if (index < 0)
+    return 0;
+  for (p = xs; p; p = p->tail) {
+    if (i == index)
+      return 1;
+    i++;
+  }
+  return 0;
+}
+
+int64_t sz_list_length_compare(SzList *xs, int64_t n) {
+  SzList *p = xs;
+  int64_t i = 0;
+  if (n < 0)
+    return 1;
+  while (p && i < n) {
+    p = p->tail;
+    i++;
+  }
+  if (i < n)
+    return -1;
+  if (p)
+    return 1;
+  return 0;
+}
+
 int sz_list_non_empty(const SzList *xs) { return xs != NULL; }
 
 void sz_list_free(SzList *xs) { sz_release(xs); }

@@ -554,6 +554,16 @@ SzList *sz_list_patch(SzList *xs, int64_t from, SzList *other, int64_t replaced)
 SzList *sz_list_find_last(SzList *xs, SzListPred pred, void *env);
 /* Length of the leading prefix where `pred` is nonzero. */
 int64_t sz_list_prefix_length(SzList *xs, SzListPred pred, void *env);
+/* First index of `slice`, or -1. Empty slice is 0. */
+int64_t sz_list_index_of_slice(SzList *xs, SzList *slice);
+/* Last index of `slice`, or -1. Empty slice is len. */
+int64_t sz_list_last_index_of_slice(SzList *xs, SzList *slice);
+/* prefixLength of the suffix that starts at `from`. Negative `from` is 0. */
+int64_t sz_list_segment_length(SzList *xs, SzListPred pred, void *env, int64_t from);
+/* 1 when `index` is a valid cell index. */
+int64_t sz_list_is_defined_at(SzList *xs, int64_t index);
+/* Negative when len < n, 0 when equal, positive when len > n. */
+int64_t sz_list_length_compare(SzList *xs, int64_t n);
 /* Release the spine; heads drop through RC. */
 void sz_list_free(SzList *xs);
 SzString *sz_list_join(const SzList *xs, const char *sep);
