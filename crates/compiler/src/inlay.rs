@@ -139,6 +139,7 @@ fn hint_args(
 
 fn skip_arg(name: &str, arg: &Expr) -> bool {
     matches!(&arg.kind, ExprKind::Var(v) if v == name)
+        || matches!(&arg.kind, ExprKind::NamedArg { name: n, .. } if n == name)
 }
 
 fn split_callee(callee: &str) -> (Option<&str>, &str) {
@@ -279,5 +280,20 @@ mod tests {
         let hints = inlay_hints_in_source(&p, "Main.scuzz", None);
         assert!(hints.iter().any(|h| h.label == "x:"), "{hints:?}");
         assert!(hints.iter().any(|h| h.label == "y:"), "{hints:?}");
+    }
+
+    #[test]
+    fn skips_named_arg() {
+        let src = r#"def add(n: Int, m: Int): Int = n
+@main def main: IO[Unit] = IO.println(Str.fromInt(add(n = 1, m = 2)))
+"#;
+        let p = parse_file(src, "Main.scuzz").unwrap();
+        let hints = inlay_hints_in_source(&p, "Main.scuzz", None);
+        let add_n = src.find("n = 1").unwrap();
+        let add_m = src.find("m = 2").unwrap();
+        assert!(
+            !hints.iter().any(|h| h.offset == add_n || h.offset == add_m),
+            "named args still hinted: {hints:?}"
+        );
     }
 }

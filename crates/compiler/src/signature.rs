@@ -38,7 +38,7 @@ pub fn signature_help_in_source(
     })
 }
 
-fn innermost_call_paren(toks: &[SpannedToken], offset: usize) -> Option<usize> {
+pub(crate) fn innermost_call_paren(toks: &[SpannedToken], offset: usize) -> Option<usize> {
     let mut best = None;
     for (i, t) in toks.iter().enumerate() {
         if !matches!(t.token, Token::LParen) || t.span.start > offset {
@@ -70,7 +70,10 @@ fn innermost_call_paren(toks: &[SpannedToken], offset: usize) -> Option<usize> {
     best
 }
 
-fn callee_before_paren(toks: &[SpannedToken], paren: usize) -> Option<(Option<String>, String)> {
+pub(crate) fn callee_before_paren(
+    toks: &[SpannedToken],
+    paren: usize,
+) -> Option<(Option<String>, String)> {
     if paren == 0 {
         return None;
     }

@@ -707,7 +707,9 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         | ExprKind::IoFail(e)
         | ExprKind::IoPure(e)
         | ExprKind::Attempt { inner: e } => collect_strings(e, out),
-        ExprKind::Unary { expr: e, .. } => collect_strings(e, out),
+        ExprKind::Unary { expr: e, .. } | ExprKind::NamedArg { value: e, .. } => {
+            collect_strings(e, out)
+        }
         ExprKind::Lambda { body, .. } => collect_strings(body, out),
         ExprKind::FlatMap { inner, body, .. }
         | ExprKind::HandleErrorWith { inner, body, .. }
@@ -1881,6 +1883,7 @@ fn emit_expr(
         ExprKind::Unary { op, expr } => emit_unary(*op, expr, ctx, locals, prefix),
         ExprKind::Binary { op, left, right } => emit_binary(op, left, right, ctx, locals, prefix),
         ExprKind::Call { callee, args } => emit_call(callee, args, ctx, locals, prefix),
+        ExprKind::NamedArg { .. } => panic!("internal: unlowered named argument"),
         ExprKind::For { .. } => panic!("internal: unlowered `for` in codegen"),
         ExprKind::Match { scrutinee, arms } => emit_match(scrutinee, arms, ctx, locals, prefix),
         ExprKind::FlatMap { inner, param, body } => {
@@ -5683,6 +5686,22 @@ def id(s: String): String = s
         crate::typ::typecheck(&p).expect("typecheck");
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_retain"));
+    }
+
+    #[test]
+    fn emit_named_args_reordered() {
+        let src = r#"
+def pair(a: Int, b: Int): Int = a * 10 + b
+@main def main: IO[Unit] = IO.println(Str.fromInt(pair(b = 2, a = 1)))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        let p = crate::typ::resolve_named_args(p).expect("named args");
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_user_pair") || ir.contains("sz_user_Main_pair"),
+            "{ir}"
+        );
     }
 
     #[test]

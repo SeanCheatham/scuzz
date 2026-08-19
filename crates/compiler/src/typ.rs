@@ -1,9 +1,11 @@
 use crate::ast::{
     BinOp, EnumDef, Expr, ExprKind, FunDef, ImplDef, Param, Program, TraitDef, Type, UnOp,
 };
+use crate::hover::kit_sig;
 use crate::resolve::{enum_bare_name, enum_id, EnumIndex, FunIndex, ResolveError};
+use crate::signature::param_names_from_label;
 use crate::span::Span;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -446,6 +448,10 @@ fn builtin_result_enum() -> EnumDef {
 
 /// Same checks as [`typecheck`]. Continues past def-level failures.
 pub fn typecheck_all(program: &Program) -> Vec<TypeError> {
+    let program = match resolve_named_args(program.clone()) {
+        Ok(p) => p,
+        Err(e) => return vec![e],
+    };
     let mut errs = Vec::new();
     let mut enums_storage = program.enums.clone();
     inject_builtin_enums(&mut enums_storage);
@@ -543,6 +549,469 @@ pub fn typecheck_all(program: &Program) -> Vec<TypeError> {
         Err(e) => errs.push(e),
     }
     errs
+}
+
+/// Rewrite `name = expr` call arguments into positional order.
+pub fn resolve_named_args(mut program: Program) -> Result<Program, TypeError> {
+    let def_params: Vec<(String, String, Vec<String>, bool)> = program
+        .defs
+        .iter()
+        .map(|d| {
+            (
+                d.module.clone(),
+                d.name.clone(),
+                d.params.iter().map(|p| p.name.clone()).collect(),
+                d.is_private,
+            )
+        })
+        .collect();
+    let enums = program.enums.clone();
+    let traits = program.traits.clone();
+    let impls = program.impls.clone();
+    let imports = program.imports.clone();
+    let cx = NamedCx {
+        def_params,
+        enums,
+        traits,
+        impls,
+        imports,
+    };
+    for d in &mut program.defs {
+        let module = d.module.clone();
+        for p in &mut d.params {
+            if let Some(rfn) = p.rfn.take() {
+                p.rfn = Some(resolve_named_expr(rfn, &cx, &module)?);
+            }
+        }
+        d.body = resolve_named_expr(
+            std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)),
+            &cx,
+            &module,
+        )?;
+    }
+    let main_mod = program.main.module.clone();
+    program.main.body = resolve_named_expr(
+        std::mem::replace(&mut program.main.body, Expr::dummy(ExprKind::Unit)),
+        &cx,
+        &main_mod,
+    )?;
+    for im in &mut program.impls {
+        let module = im.module.clone();
+        for m in &mut im.methods {
+            m.body = resolve_named_expr(
+                std::mem::replace(&mut m.body, Expr::dummy(ExprKind::Unit)),
+                &cx,
+                &module,
+            )?;
+        }
+    }
+    for en in &mut program.enums {
+        let module = en.module.clone();
+        for case in &mut en.cases {
+            for slot in &mut case.field_rfns {
+                if let Some(rfn) = slot.take() {
+                    *slot = Some(resolve_named_expr(rfn, &cx, &module)?);
+                }
+            }
+        }
+        for m in &mut en.methods {
+            m.body = resolve_named_expr(
+                std::mem::replace(&mut m.body, Expr::dummy(ExprKind::Unit)),
+                &cx,
+                &module,
+            )?;
+        }
+    }
+    Ok(program)
+}
+
+struct NamedCx {
+    def_params: Vec<(String, String, Vec<String>, bool)>,
+    enums: Vec<crate::ast::EnumDef>,
+    traits: Vec<crate::ast::TraitDef>,
+    impls: Vec<crate::ast::ImplDef>,
+    imports: Vec<crate::ast::Import>,
+}
+
+fn is_param_ident(name: &str) -> bool {
+    let mut chars = name.chars();
+    let Some(first) = chars.next() else {
+        return false;
+    };
+    (first.is_ascii_alphabetic() || first == '_')
+        && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+}
+
+fn has_named_arg(args: &[Expr]) -> bool {
+    args.iter()
+        .any(|a| matches!(a.kind, ExprKind::NamedArg { .. }))
+}
+
+fn bind_named_args(
+    callee: &str,
+    params: &[String],
+    args: Vec<Expr>,
+) -> Result<Vec<Expr>, TypeError> {
+    if !has_named_arg(&args) {
+        return Ok(args);
+    }
+    if params.is_empty() || params.iter().any(|p| !is_param_ident(p)) {
+        return Err(TypeError::Msg(format!(
+            "{callee} does not take named arguments"
+        )));
+    }
+    let mut seen_named = false;
+    let mut slots: Vec<Option<Expr>> = params.iter().map(|_| None).collect();
+    let mut used: HashSet<String> = HashSet::new();
+    let mut pos = 0usize;
+    for a in args {
+        match a.kind {
+            ExprKind::NamedArg { name, value } => {
+                seen_named = true;
+                if !used.insert(name.clone()) {
+                    return Err(TypeError::Msg(format!(
+                        "{callee} argument `{name}` is given more than once"
+                    )));
+                }
+                let Some(idx) = params.iter().position(|p| p == &name) else {
+                    return Err(TypeError::Msg(format!("{callee} has no argument `{name}`")));
+                };
+                if slots[idx].is_some() {
+                    return Err(TypeError::Msg(format!(
+                        "{callee} argument `{name}` is already given"
+                    )));
+                }
+                slots[idx] = Some(*value);
+            }
+            _ => {
+                if seen_named {
+                    return Err(TypeError::Msg(format!(
+                        "{callee}: positional argument follows named argument"
+                    )));
+                }
+                if pos >= params.len() {
+                    return Err(TypeError::Msg(format!(
+                        "{callee} expects {} args, got more",
+                        params.len()
+                    )));
+                }
+                slots[pos] = Some(a);
+                pos += 1;
+            }
+        }
+    }
+    let mut out = Vec::with_capacity(params.len());
+    for (i, slot) in slots.into_iter().enumerate() {
+        match slot {
+            Some(e) => out.push(e),
+            None => {
+                return Err(TypeError::Msg(format!(
+                    "{callee} missing argument `{}`",
+                    params[i]
+                )));
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn bind_one_named(callee: &str, param: &str, expr: Expr) -> Result<Expr, TypeError> {
+    match expr.kind {
+        ExprKind::NamedArg { name, value } => {
+            if name == param {
+                Ok(*value)
+            } else {
+                Err(TypeError::Msg(format!("{callee} has no argument `{name}`")))
+            }
+        }
+        kind => Ok(Expr {
+            kind,
+            span: expr.span,
+        }),
+    }
+}
+
+fn call_param_names(callee: &str, current_module: &str, cx: &NamedCx) -> Option<Vec<String>> {
+    if let Some(sig) = kit_sig(callee) {
+        let names = param_names_from_label(sig);
+        if names.iter().all(|n| is_param_ident(n)) {
+            return Some(names);
+        }
+        return Some(Vec::new());
+    }
+    if let Some((m, name)) = crate::resolve::split_dotted(callee) {
+        return cx
+            .def_params
+            .iter()
+            .find(|(mod_name, n, _, is_priv)| {
+                mod_name == m && n == name && (!*is_priv || mod_name == current_module)
+            })
+            .map(|(_, _, p, _)| p.clone());
+    }
+    if let Some((_, _, p, _)) = cx
+        .def_params
+        .iter()
+        .find(|(m, n, _, _)| m == current_module && n == callee)
+    {
+        return Some(p.clone());
+    }
+    if let Some(im) = cx
+        .imports
+        .iter()
+        .find(|im| im.in_module == current_module && im.name == callee)
+    {
+        return cx
+            .def_params
+            .iter()
+            .find(|(m, n, _, _)| m == &im.from_module && n == callee)
+            .map(|(_, _, p, _)| p.clone());
+    }
+    let hits: Vec<&Vec<String>> = cx
+        .def_params
+        .iter()
+        .filter(|(m, n, _, is_priv)| n == callee && (!*is_priv || m == current_module))
+        .map(|(_, _, p, _)| p)
+        .collect();
+    if hits.len() == 1 {
+        Some(hits[0].clone())
+    } else {
+        None
+    }
+}
+
+fn adt_ctor_names(enums: &[crate::ast::EnumDef], enum_name: &str, case_name: &str) -> Vec<String> {
+    let en = enums.iter().find(|e| {
+        e.name == enum_name
+            || (!e.module.is_empty() && format!("{}.{}", e.module, e.name) == enum_name)
+            || enum_name.ends_with(&format!(".{}", e.name))
+    });
+    let Some(en) = en else {
+        return Vec::new();
+    };
+    let Some(case) = en.cases.iter().find(|c| c.name == case_name) else {
+        return Vec::new();
+    };
+    case.fields.iter().map(|(n, _)| n.clone()).collect()
+}
+
+fn trait_method_names(
+    traits: &[crate::ast::TraitDef],
+    impls: &[crate::ast::ImplDef],
+    enums: &[crate::ast::EnumDef],
+    method: &str,
+) -> Vec<String> {
+    let mut hits: Vec<Vec<String>> = Vec::new();
+    for t in traits {
+        for m in &t.methods {
+            if m.name == method {
+                hits.push(m.params.iter().map(|p| p.name.clone()).collect());
+            }
+        }
+    }
+    for im in impls {
+        for m in &im.methods {
+            if m.name == method {
+                hits.push(m.params.iter().map(|p| p.name.clone()).collect());
+            }
+        }
+    }
+    for en in enums {
+        for m in &en.methods {
+            if m.name == method {
+                hits.push(m.params.iter().map(|p| p.name.clone()).collect());
+            }
+        }
+    }
+    hits.sort();
+    hits.dedup();
+    if hits.len() == 1 {
+        hits.remove(0)
+    } else {
+        Vec::new()
+    }
+}
+
+fn resolve_named_expr(expr: Expr, cx: &NamedCx, module: &str) -> Result<Expr, TypeError> {
+    let span = expr.span.clone();
+    match expr.kind {
+        ExprKind::Call { callee, args } => {
+            let args = args
+                .into_iter()
+                .map(|a| resolve_named_expr(a, cx, module))
+                .collect::<Result<Vec<_>, _>>()?;
+            let names = call_param_names(&callee, module, cx);
+            let args = match names {
+                Some(n) => bind_named_args(&callee, &n, args)?,
+                None if has_named_arg(&args) => {
+                    return Err(
+                        TypeError::Msg(format!("{callee} does not take named arguments"))
+                            .with_span_if_bare(&span),
+                    );
+                }
+                None => args,
+            };
+            Ok(Expr::new(ExprKind::Call { callee, args }, span))
+        }
+        ExprKind::AdtConstruct {
+            enum_name,
+            case_name,
+            args,
+            type_args,
+        } => {
+            let args = args
+                .into_iter()
+                .map(|a| resolve_named_expr(a, cx, module))
+                .collect::<Result<Vec<_>, _>>()?;
+            let names = adt_ctor_names(&cx.enums, &enum_name, &case_name);
+            let label = format!("{enum_name}.{case_name}");
+            let args = bind_named_args(&label, &names, args)?;
+            Ok(Expr::new(
+                ExprKind::AdtConstruct {
+                    enum_name,
+                    case_name,
+                    args,
+                    type_args,
+                },
+                span,
+            ))
+        }
+        ExprKind::MethodCall {
+            receiver,
+            method,
+            args,
+        } => {
+            let receiver = resolve_named_expr(*receiver, cx, module)?;
+            let args = args
+                .into_iter()
+                .map(|a| resolve_named_expr(a, cx, module))
+                .collect::<Result<Vec<_>, _>>()?;
+            if method == "require" {
+                if has_named_arg(&args) {
+                    return Err(
+                        TypeError::Msg(".require does not take named arguments".into())
+                            .with_span_if_bare(&span),
+                    );
+                }
+                return Ok(Expr::new(
+                    ExprKind::MethodCall {
+                        receiver: Box::new(receiver),
+                        method,
+                        args,
+                    },
+                    span,
+                ));
+            }
+            let names = trait_method_names(&cx.traits, &cx.impls, &cx.enums, &method);
+            let args = bind_named_args(&format!(".{method}"), &names, args)?;
+            Ok(Expr::new(
+                ExprKind::MethodCall {
+                    receiver: Box::new(receiver),
+                    method,
+                    args,
+                },
+                span,
+            ))
+        }
+        ExprKind::IoPrintln(e) => {
+            let e = bind_one_named("IO.println", "s", resolve_named_expr(*e, cx, module)?)?;
+            Ok(Expr::new(ExprKind::IoPrintln(Box::new(e)), span))
+        }
+        ExprKind::IoSleep(e) => {
+            let e = bind_one_named("IO.sleep", "ms", resolve_named_expr(*e, cx, module)?)?;
+            Ok(Expr::new(ExprKind::IoSleep(Box::new(e)), span))
+        }
+        ExprKind::IoFail(e) => {
+            let e = bind_one_named("IO.fail", "s", resolve_named_expr(*e, cx, module)?)?;
+            Ok(Expr::new(ExprKind::IoFail(Box::new(e)), span))
+        }
+        ExprKind::IoPure(e) => {
+            let e = bind_one_named("IO.pure", "x", resolve_named_expr(*e, cx, module)?)?;
+            Ok(Expr::new(ExprKind::IoPure(Box::new(e)), span))
+        }
+        ExprKind::IoRace { left, right } => {
+            let args = bind_named_args(
+                "IO.race",
+                &["a".into(), "b".into()],
+                vec![
+                    resolve_named_expr(*left, cx, module)?,
+                    resolve_named_expr(*right, cx, module)?,
+                ],
+            )?;
+            let mut it = args.into_iter();
+            Ok(Expr::new(
+                ExprKind::IoRace {
+                    left: Box::new(it.next().unwrap()),
+                    right: Box::new(it.next().unwrap()),
+                },
+                span,
+            ))
+        }
+        ExprKind::IoBoth { left, right } => {
+            let args = bind_named_args(
+                "IO.both",
+                &["a".into(), "b".into()],
+                vec![
+                    resolve_named_expr(*left, cx, module)?,
+                    resolve_named_expr(*right, cx, module)?,
+                ],
+            )?;
+            let mut it = args.into_iter();
+            Ok(Expr::new(
+                ExprKind::IoBoth {
+                    left: Box::new(it.next().unwrap()),
+                    right: Box::new(it.next().unwrap()),
+                },
+                span,
+            ))
+        }
+        ExprKind::IoEnsure { inner, finalizer } => {
+            let args = bind_named_args(
+                "IO.ensure",
+                &["inner".into(), "finalizer".into()],
+                vec![
+                    resolve_named_expr(*inner, cx, module)?,
+                    resolve_named_expr(*finalizer, cx, module)?,
+                ],
+            )?;
+            let mut it = args.into_iter();
+            Ok(Expr::new(
+                ExprKind::IoEnsure {
+                    inner: Box::new(it.next().unwrap()),
+                    finalizer: Box::new(it.next().unwrap()),
+                },
+                span,
+            ))
+        }
+        ExprKind::IoTimeout { ms, inner } => {
+            let args = bind_named_args(
+                "IO.timeout",
+                &["ms".into(), "inner".into()],
+                vec![
+                    resolve_named_expr(*ms, cx, module)?,
+                    resolve_named_expr(*inner, cx, module)?,
+                ],
+            )?;
+            let mut it = args.into_iter();
+            Ok(Expr::new(
+                ExprKind::IoTimeout {
+                    ms: Box::new(it.next().unwrap()),
+                    inner: Box::new(it.next().unwrap()),
+                },
+                span,
+            ))
+        }
+        ExprKind::NamedArg { name, value } => {
+            let value = resolve_named_expr(*value, cx, module)?;
+            Ok(Expr::new(
+                ExprKind::NamedArg {
+                    name,
+                    value: Box::new(value),
+                },
+                span,
+            ))
+        }
+        kind => Expr { kind, span }.try_map_children(|c| resolve_named_expr(c, cx, module)),
+    }
 }
 
 fn typecheck_def(
@@ -1687,6 +2156,9 @@ fn infer(
                     UnOp::BitNot => Err(TypeError::Msg(format!("unary `~` needs Int, got {t:?}"))),
                 }
             }
+            ExprKind::NamedArg { name, .. } => Err(TypeError::Msg(format!(
+                "named argument `{name}` is only allowed in a call"
+            ))),
             ExprKind::Call { callee, args } => {
                 if let Some(Type::Fun(param_ty, ret_ty)) = env.get(callee).cloned() {
                     if args.len() != 1 {
@@ -4509,6 +4981,21 @@ fn mono_expr(
             },
             span,
         )),
+        ExprKind::NamedArg { name, value } => Ok(Expr::new(
+            ExprKind::NamedArg {
+                name,
+                value: Box::new(mono_expr(
+                    *value,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+            },
+            span,
+        )),
         ExprKind::AdtConstruct {
             enum_name,
             case_name,
@@ -5342,6 +5829,22 @@ fn elaborate_expr(
             },
             span,
         )),
+        ExprKind::NamedArg { name, value } => Ok(Expr::new(
+            ExprKind::NamedArg {
+                name,
+                value: Box::new(elaborate_expr(
+                    *value,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    None,
+                    tparams,
+                )?),
+            },
+            span,
+        )),
         ExprKind::Lambda { param, body } => Ok(Expr::new(
             ExprKind::Lambda {
                 param,
@@ -5488,6 +5991,10 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
         ExprKind::Unary { op, expr } => ExprKind::Unary {
             op,
             expr: Box::new(subst_node_targs(*expr, subst)),
+        },
+        ExprKind::NamedArg { name, value } => ExprKind::NamedArg {
+            name,
+            value: Box::new(subst_node_targs(*value, subst)),
         },
         ExprKind::Lambda { param, body } => ExprKind::Lambda {
             param,
@@ -5642,7 +6149,9 @@ fn collect_node_targs(expr: &Expr, out: &mut Vec<(String, Vec<Type>)>) {
             collect_node_targs(left, out);
             collect_node_targs(right, out);
         }
-        ExprKind::Unary { expr, .. } => collect_node_targs(expr, out),
+        ExprKind::Unary { expr, .. } | ExprKind::NamedArg { value: expr, .. } => {
+            collect_node_targs(expr, out)
+        }
         ExprKind::Lambda { body, .. } => collect_node_targs(body, out),
         _ => {}
     }
@@ -5826,6 +6335,10 @@ fn rewrite_enum_refs(
         ExprKind::Unary { op, expr } => ExprKind::Unary {
             op,
             expr: Box::new(rewrite_enum_refs(*expr, clones)?),
+        },
+        ExprKind::NamedArg { name, value } => ExprKind::NamedArg {
+            name,
+            value: Box::new(rewrite_enum_refs(*value, clones)?),
         },
         ExprKind::Lambda { param, body } => ExprKind::Lambda {
             param,
@@ -6295,6 +6808,63 @@ def bits(n: Int, b: Bool): Int =
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("unary and bitwise typecheck");
+    }
+
+    #[test]
+    fn typechecks_named_args_reorder() {
+        let src = r#"
+def add(n: Int, m: Int): Int = n + m
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(add(m = 2, n = 1) + Point(y = 4, x = 3).x))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("named args typecheck");
+    }
+
+    #[test]
+    fn rejects_unknown_named_arg() {
+        let src = r#"
+def add(n: Int, m: Int): Int = n + m
+@main def main: IO[Unit] = IO.println(Str.fromInt(add(n = 1, z = 2)))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("has no argument `z`"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_positional_after_named() {
+        let src = r#"
+def add(n: Int, m: Int): Int = n + m
+@main def main: IO[Unit] = IO.println(Str.fromInt(add(n = 1, 2)))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("positional argument follows named"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_missing_named_arg() {
+        let src = r#"
+def add(n: Int, m: Int): Int = n + m
+@main def main: IO[Unit] = IO.println(Str.fromInt(add(n = 1)))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("missing argument `m`"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]

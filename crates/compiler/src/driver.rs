@@ -158,6 +158,7 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
     crate::typ::inject_builtin_enums(&mut program.enums);
     let program = lower_program(program);
     let program = crate::typ::expand_impls(program).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let program = crate::typ::resolve_named_args(program).map_err(|e| anyhow::anyhow!("{e}"))?;
     typecheck(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
     let program = crate::typ::elaborate_generics(program).map_err(|e| anyhow::anyhow!("{e}"))?;
     let program = crate::typ::resolve_field_access(program).map_err(|e| anyhow::anyhow!("{e}"))?;
@@ -887,6 +888,7 @@ mod tests {
         crate::overlay::erase_laws(&mut p);
         crate::overlay::erase_requires(&mut p);
         let p = crate::typ::expand_impls(crate::lower::lower_program(p)).expect("expand");
+        let p = crate::typ::resolve_named_args(p).expect("named args");
         crate::typ::typecheck(&p).expect("typecheck kernel example");
         let p = crate::typ::elaborate_generics(p).expect("elaborate");
         let p = crate::typ::resolve_field_access(p).expect("fields before mono");

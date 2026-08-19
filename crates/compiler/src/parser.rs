@@ -337,8 +337,13 @@ impl Parser {
     }
 
     fn peek(&self) -> &Token {
-        if self.i < self.tokens.len() {
-            &self.tokens[self.i].token
+        self.peek_nth(0)
+    }
+
+    fn peek_nth(&self, n: usize) -> &Token {
+        let i = self.i.saturating_add(n);
+        if i < self.tokens.len() {
+            &self.tokens[i].token
         } else {
             &self.tokens[self.tokens.len() - 1].token
         }
@@ -1608,9 +1613,12 @@ impl Parser {
         let mut args = Vec::new();
         if !matches!(self.peek(), Token::RParen) {
             loop {
-                args.push(self.parse_expr()?);
+                args.push(self.parse_arg()?);
                 if matches!(self.peek(), Token::Comma) {
                     self.bump();
+                    if matches!(self.peek(), Token::RParen) {
+                        break;
+                    }
                     continue;
                 }
                 break;
@@ -1618,6 +1626,26 @@ impl Parser {
         }
         self.expect(&Token::RParen)?;
         Ok(args)
+    }
+
+    fn parse_arg(&mut self) -> Result<Expr, ParseError> {
+        if let Token::Ident(name) = self.peek().clone() {
+            if matches!(self.peek_nth(1), Token::Eq) {
+                let start = self.current_span();
+                self.bump();
+                self.bump();
+                let value = self.parse_expr()?;
+                let span = start.cover(&value.span);
+                return Ok(self.mk(
+                    ExprKind::NamedArg {
+                        name,
+                        value: Box::new(value),
+                    },
+                    span,
+                ));
+            }
+        }
+        self.parse_expr()
     }
 
     fn parse_primary(&mut self) -> Result<Expr, ParseError> {
@@ -3122,6 +3150,58 @@ def mask(): Int = (0xFF & 0b1111) | 1 << 2 ^ 3
                 op: BinOp::BitOr, ..
             } => {}
             other => panic!("expected | at top, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_named_args() {
+        let src = r#"
+def add(n: Int, m: Int): Int = n + m
+@main def main: IO[Unit] = IO.println(Str.fromInt(add(m = 2, n = 1)))
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::IoPrintln(inner) => match &inner.kind {
+                ExprKind::Call { callee, args } if callee == "Str.fromInt" => match &args[0].kind {
+                    ExprKind::Call { callee, args } if callee == "add" => {
+                        assert_eq!(args.len(), 2);
+                        assert!(
+                            matches!(&args[0].kind, ExprKind::NamedArg { name, .. } if name == "m"),
+                            "{:?}",
+                            args[0]
+                        );
+                        assert!(
+                            matches!(&args[1].kind, ExprKind::NamedArg { name, .. } if name == "n"),
+                            "{:?}",
+                            args[1]
+                        );
+                    }
+                    other => panic!("expected add call, got {other:?}"),
+                },
+                other => panic!("expected Str.fromInt, got {other:?}"),
+            },
+            other => panic!("expected println, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_named_args_trailing_comma() {
+        let src = r#"
+def add(n: Int, m: Int): Int = n + m
+@main def main: IO[Unit] = IO.println(Str.fromInt(add(m = 2, n = 1,)))
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::IoPrintln(inner) => match &inner.kind {
+                ExprKind::Call { callee, args } if callee == "Str.fromInt" => match &args[0].kind {
+                    ExprKind::Call { callee, args } if callee == "add" => {
+                        assert_eq!(args.len(), 2);
+                    }
+                    other => panic!("expected add call, got {other:?}"),
+                },
+                other => panic!("expected Str.fromInt, got {other:?}"),
+            },
+            other => panic!("expected println, got {other:?}"),
         }
     }
 }
