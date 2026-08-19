@@ -591,6 +591,7 @@ fn pretty_pattern(pat: &Pattern) -> String {
             .map(pretty_pattern)
             .collect::<Vec<_>>()
             .join(" | "),
+        Pattern::As { name, inner } => format!("{name} @ {}", pretty_pattern(inner)),
         Pattern::Adt {
             enum_name,
             case_name,
@@ -820,6 +821,29 @@ enum Opt:
 "#;
         let out = format_source(src).unwrap();
         assert!(out.contains("case Opt.Some(0 | 1) =>"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_as_pattern() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  o match {
+    case s @ Opt.Some(n @ 0) => IO.println("z")
+    case p @ Color.Red | Color.Blue => IO.println("p")
+    case Opt.None => IO.println("n")
+  }
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("case s @ Opt.Some(n @ 0) =>"));
+        assert!(out.contains("case p @ Color.Red | Color.Blue =>"));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

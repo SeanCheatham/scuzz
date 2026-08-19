@@ -469,6 +469,7 @@ fn collect_pat_names(p: &Pattern, out: &mut HashSet<String>) {
                 collect_pat_names(p, out);
             }
         }
+        Pattern::As { inner, .. } => collect_pat_names(inner, out),
         _ => {}
     }
 }

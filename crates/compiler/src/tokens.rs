@@ -145,6 +145,7 @@ fn classify(
 ) -> Option<(u32, u32)> {
     match tok {
         Token::Private => Some((TY_MODIFIER, 0)),
+        Token::At => Some((TY_OPERATOR, 0)),
         Token::AtMain
         | Token::Package
         | Token::Enum
@@ -303,8 +304,19 @@ mod tests {
 
     #[test]
     fn skips_unlexable_source() {
-        let toks = semantic_tokens_in_source("@@@");
+        let toks = semantic_tokens_in_source("???");
         assert!(toks.is_empty(), "{toks:?}");
+    }
+
+    #[test]
+    fn classifies_at_as_operator() {
+        let src = "n @ x";
+        let toks = semantic_tokens_in_source(src);
+        assert!(
+            toks.iter()
+                .any(|t| src[t.start..t.end] == *"@" && t.ty == TY_OPERATOR),
+            "{toks:?}"
+        );
     }
 
     #[test]

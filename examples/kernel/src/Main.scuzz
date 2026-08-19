@@ -136,6 +136,24 @@ def describeOptSmall(o: Opt[Int]): String =
     case Opt.None => "optNone"
   }
 
+def keepSome(o: Opt[Int]): String =
+  o match {
+    case s @ Opt.Some(_) => describe(s)
+    case Opt.None => "none"
+  }
+
+def describeAsZero(o: Opt[Int]): String =
+  o match {
+    case Opt.Some(n @ 0) => Str.concat("z:", Str.fromInt(n))
+    case Opt.Some(_) => "n"
+    case Opt.None => "none"
+  }
+
+def describeAsHue(c: Color): String =
+  c match {
+    case p @ Color.Red | Color.Blue => describeHue(p)
+  }
+
 def eitherNum(e: Either[Int, Int]): Int =
   e match {
     case Either.Left(n) | Either.Right(n) => n
@@ -334,6 +352,13 @@ record Box[T](x: T):
     _ <- Color.Red match {
   case Color.Red | Color.Blue if false => IO.println("or:skip")
   case Color.Red | Color.Blue => IO.println("or:hit")
+}
+    _ <- IO.println(Str.concat("as:", keepSome(Opt.Some(42))))
+    _ <- IO.println(Str.concat("as:", describeAsZero(Opt.Some(0))))
+    _ <- IO.println(Str.concat("as:", describeAsHue(Color.Red)))
+    _ <- Opt.Some(1) match {
+  case s @ Opt.Some(n) => IO.println(Str.concat("as:both:", Str.fromInt(n)))
+  case Opt.None => IO.println("as:none")
 }
     _ <- 0 match {
   case 0 => IO.println("lit:hit0")

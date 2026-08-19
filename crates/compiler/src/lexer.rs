@@ -4,6 +4,7 @@ use thiserror::Error;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     AtMain, // @main
+    At,     // `@` in `n @ Pat`
     Package,
     Enum,
     Record,
@@ -124,19 +125,27 @@ pub fn lex(input: &str) -> Result<Vec<SpannedToken>, LexError> {
         }
         if c == '@' {
             let start = i;
-            i += 1;
-            let mut ident = String::new();
-            while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
-                ident.push(chars[i]);
-                i += 1;
-            }
-            if ident == "main" {
+            let main = i + 5 <= chars.len()
+                && chars[i + 1] == 'm'
+                && chars[i + 2] == 'a'
+                && chars[i + 3] == 'i'
+                && chars[i + 4] == 'n'
+                && chars
+                    .get(i + 5)
+                    .map(|ch| !(ch.is_ascii_alphanumeric() || *ch == '_'))
+                    .unwrap_or(true);
+            if main {
+                i += 5;
                 tokens.push(SpannedToken {
                     token: Token::AtMain,
                     span: Span::new(String::new(), byte_at(start), byte_at(i)),
                 });
             } else {
-                return Err(LexError::UnexpectedChar('@', byte_at(start)));
+                i += 1;
+                tokens.push(SpannedToken {
+                    token: Token::At,
+                    span: Span::new(String::new(), byte_at(start), byte_at(i)),
+                });
             }
             continue;
         }
@@ -671,5 +680,29 @@ mod tests {
         assert!(toks.iter().any(|t| matches!(t.token, Token::Caret)));
         assert!(toks.iter().any(|t| matches!(t.token, Token::Shl)));
         assert!(toks.iter().any(|t| matches!(t.token, Token::Shr)));
+    }
+
+    #[test]
+    fn lexes_at_as_pattern_and_keeps_at_main() {
+        let toks = lex("n @ Opt.Some(x) @main").unwrap();
+        assert!(toks.iter().any(|t| matches!(t.token, Token::At)));
+        assert!(toks.iter().any(|t| matches!(t.token, Token::AtMain)));
+        let glued = lex("n@x").unwrap();
+        assert!(
+            matches!(
+                &glued[..3],
+                [SpannedToken {
+                    token: Token::Ident(a),
+                    ..
+                }, SpannedToken {
+                    token: Token::At,
+                    ..
+                }, SpannedToken {
+                    token: Token::Ident(b),
+                    ..
+                }] if a == "n" && b == "x"
+            ),
+            "{glued:?}"
+        );
     }
 }

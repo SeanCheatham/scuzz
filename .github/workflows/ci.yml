@@ -104,6 +104,10 @@ jobs:
           grep -q "or:opt01" /tmp/kernel.out
           grep -q "or:either:4" /tmp/kernel.out
           grep -q "or:hit" /tmp/kernel.out
+          grep -q "as:adt:describe:42" /tmp/kernel.out
+          grep -q "as:z:0" /tmp/kernel.out
+          grep -q "as:primary" /tmp/kernel.out
+          grep -q "as:both:1" /tmp/kernel.out
           grep -q "record:8" /tmp/kernel.out
           grep -q "Point(3,5)" /tmp/kernel.out
           grep -q "get:3" /tmp/kernel.out
