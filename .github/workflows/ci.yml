@@ -129,6 +129,10 @@ jobs:
           grep -q "named:8" /tmp/kernel.out
           grep -q "namedkit:2" /tmp/kernel.out
           grep -q "namedfn:7" /tmp/kernel.out
+          grep -q "copy:12" /tmp/kernel.out
+          grep -q "copyPos:6" /tmp/kernel.out
+          grep -q "copyBox:5" /tmp/kernel.out
+          grep -q "copyId:8" /tmp/kernel.out
           grep -q "ascribe:9" /tmp/kernel.out
           grep -q "ascribeList:0" /tmp/kernel.out
           grep -q "ascribeInt:1" /tmp/kernel.out

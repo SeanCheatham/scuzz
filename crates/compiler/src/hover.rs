@@ -5,6 +5,8 @@ use crate::lexer::{lex, Token};
 use crate::resolve::module_id_from_label;
 use crate::typ::kit_lambda_param_ty;
 
+const COPY_HOVER: &str = "record.copy(field = value, …): T";
+
 /// Hover text at a byte offset in `source` (`file` is the parse label).
 pub fn hover_in_source(
     program: &Program,
@@ -27,6 +29,9 @@ pub fn hover_in_source(
         {
             return Some(show_enum(en));
         }
+        if name == "copy" {
+            return Some(COPY_HOVER.into());
+        }
         return None;
     }
     if matches!(
@@ -43,6 +48,9 @@ pub fn hover_in_source(
     }
     if let Some(p) = param_in_module(program, &module, &name, offset) {
         return Some(show_param(p));
+    }
+    if name == "copy" {
+        return Some(COPY_HOVER.into());
     }
     binder_in_program(program, file, &name, offset)
 }
@@ -1077,6 +1085,16 @@ mod tests {
         let src = "def add(n: Int): Int = n\n@main def main: IO[Unit] = IO.println(\"x\")\n";
         let h = hover_src(src, "add");
         assert!(h.contains("def add(n: Int): Int"), "{h}");
+    }
+
+    #[test]
+    fn hovers_record_copy() {
+        let src = r#"
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] = IO.println(Str.fromInt(Point(3, 5).copy(y = 9).x))
+"#;
+        let h = hover_src(src, "copy");
+        assert!(h.contains("record.copy"), "{h}");
     }
 
     #[test]

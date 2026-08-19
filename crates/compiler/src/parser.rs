@@ -3227,6 +3227,42 @@ def add(n: Int, m: Int): Int = n + m
     }
 
     #[test]
+    fn parse_record_copy() {
+        let src = r#"
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] = IO.println(Str.fromInt(Point(3, 5).copy(y = 9).x))
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::IoPrintln(inner) => match &inner.kind {
+                ExprKind::Call { args, .. } => match &args[0].kind {
+                    ExprKind::Field { base, field } if field == "x" => match &base.kind {
+                        ExprKind::MethodCall {
+                            method,
+                            args: cargs,
+                            ..
+                        } if method == "copy" => {
+                            assert_eq!(cargs.len(), 1);
+                            assert!(
+                                matches!(
+                                    &cargs[0].kind,
+                                    ExprKind::NamedArg { name, .. } if name == "y"
+                                ),
+                                "{:?}",
+                                cargs[0]
+                            );
+                        }
+                        other => panic!("expected copy, got {other:?}"),
+                    },
+                    other => panic!("expected field, got {other:?}"),
+                },
+                other => panic!("expected Str.fromInt, got {other:?}"),
+            },
+            other => panic!("expected println, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_type_ascription() {
         let src = r#"
 enum Opt[T]:

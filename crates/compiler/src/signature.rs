@@ -109,7 +109,35 @@ pub(crate) fn sig_label(
     if let Some(d) = def_named(program, module, name).or_else(|| unique_def(program, name)) {
         return Some(show_def(d));
     }
+    if name == "copy" {
+        return copy_sig_label(program);
+    }
     unique_kit_suffix(name).map(str::to_string)
+}
+
+fn record_like(en: &crate::ast::EnumDef) -> bool {
+    en.is_record || (en.cases.len() == 1 && en.cases[0].name == en.name)
+}
+
+fn copy_sig_label(program: &Program) -> Option<String> {
+    let mut names: Vec<String> = Vec::new();
+    for en in &program.enums {
+        if !record_like(en) {
+            continue;
+        }
+        let Some(case) = en.cases.first() else {
+            continue;
+        };
+        for (n, _) in &case.fields {
+            if !names.iter().any(|k| k == n) {
+                names.push(n.clone());
+            }
+        }
+    }
+    if names.is_empty() {
+        return Some("copy(field = value, …): T".into());
+    }
+    Some(format!("copy({}): T", names.join(", ")))
 }
 
 fn unique_kit_suffix(name: &str) -> Option<&'static str> {
@@ -231,6 +259,20 @@ mod tests {
         let h = signature_help_in_source(&p, "Main.scuzz", src, kit).unwrap();
         assert!(h.label.contains("IO.println"), "{h:?}");
         assert_eq!(h.parameters.len(), 1, "{h:?}");
+    }
+
+    #[test]
+    fn helps_record_copy() {
+        let src = r#"
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] = IO.println(Str.fromInt(Point(3, 5).copy(y = 9).x))
+"#;
+        let p = parse_file(src, "Main.scuzz").unwrap();
+        let at = src.find("copy(").unwrap() + 5;
+        let h = signature_help_in_source(&p, "Main.scuzz", src, at).unwrap();
+        assert!(h.label.contains("copy("), "{h:?}");
+        assert!(h.parameters.iter().any(|p| p.contains("x")), "{h:?}");
+        assert!(h.parameters.iter().any(|p| p.contains("y")), "{h:?}");
     }
 
     #[test]

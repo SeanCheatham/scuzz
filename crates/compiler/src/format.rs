@@ -1143,6 +1143,18 @@ def add(n: Int, m: Int): Int = n + m
     }
 
     #[test]
+    fn formats_record_copy() {
+        let src = r#"
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] = IO.println(Str.fromInt(Point(3, 5).copy(y = 9).x))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("Point(3, 5).copy(y = 9)"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
     fn formats_type_ascription() {
         let src = r#"
 enum Opt[T]:

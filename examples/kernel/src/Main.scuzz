@@ -369,10 +369,10 @@ record Box[T](x: T):
     n = 3
     _ <- IO.println(s"uneg:${-n}")
     _ <- IO.println(s"not:${if (!false) "y" else "n"}")
-    _ <- IO.println(s"hex:${0xFF}")
-    _ <- IO.println(s"bin:${0b1010}")
-    _ <- IO.println(s"band:${0xFF & 0x0F}")
-    _ <- IO.println(s"bor:${0b1010 | 0b0101}")
+    _ <- IO.println(s"hex:${255}")
+    _ <- IO.println(s"bin:${10}")
+    _ <- IO.println(s"band:${255 & 15}")
+    _ <- IO.println(s"bor:${10 | 5}")
     _ <- IO.println(s"bxor:${1 ^ 3}")
     _ <- IO.println(s"shl:${1 << 3}")
     _ <- IO.println(s"shr:${16 >> 2}")
@@ -380,6 +380,10 @@ record Box[T](x: T):
     _ <- IO.println(s"named:${sum(Point(y = 5, x = 3))}")
     _ <- IO.println(s"namedkit:${Str.len(s = "ab")}")
     _ <- IO.println(s"namedfn:${leftOr(fallback = 7, e = Either.Right("s"))}")
+    _ <- IO.println(s"copy:${sum(Point(3, 5).copy(y = 9))}")
+    _ <- IO.println(s"copyPos:${sum(Point(3, 5).copy(1))}")
+    _ <- IO.println(s"copyBox:${Str.fromInt(Box(4).copy(x = 5).get())}")
+    _ <- IO.println(s"copyId:${sum(Point(3, 5).copy())}")
     noneAs = Opt.None: Opt[Int]
     _ <- IO.println(s"ascribe:${noneAs.getOrElse(9)}")
     emptyAs = []: List[Int]

@@ -5706,6 +5706,23 @@ def pair(a: Int, b: Int): Int = a * 10 + b
     }
 
     #[test]
+    fn emit_record_copy_constructs_adt() {
+        let src = r#"
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] = IO.println(Str.fromInt(Point(3, 5).copy(y = 9).x))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let p = crate::typ::resolve_field_access(p).expect("copy lower");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_adt_new"), "{ir}");
+        assert!(
+            ir.contains("sz_adt_payload") || ir.contains("sz_adt_tag"),
+            "{ir}"
+        );
+    }
+
+    #[test]
     fn emit_list_temp_release_after_len() {
         let src = r#"
 @main def main: IO[Unit] = IO.println(Str.fromInt(List.len([1, 2])))
