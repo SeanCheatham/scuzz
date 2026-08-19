@@ -129,6 +129,9 @@ jobs:
           grep -q "named:8" /tmp/kernel.out
           grep -q "namedkit:2" /tmp/kernel.out
           grep -q "namedfn:7" /tmp/kernel.out
+          grep -q "ascribe:9" /tmp/kernel.out
+          grep -q "ascribeList:0" /tmp/kernel.out
+          grep -q "ascribeInt:1" /tmp/kernel.out
           grep -q "map:1" /tmp/kernel.out
           grep -q "miss:no" /tmp/kernel.out
           grep -q "has:y" /tmp/kernel.out

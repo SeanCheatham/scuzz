@@ -248,6 +248,10 @@ impl Expr {
                 op,
                 expr: Box::new(f(*expr)?),
             },
+            ExprKind::Ascribe { expr, ty } => ExprKind::Ascribe {
+                expr: Box::new(f(*expr)?),
+                ty,
+            },
             ExprKind::NamedArg { name, value } => ExprKind::NamedArg {
                 name,
                 value: Box::new(f(*value)?),
@@ -382,7 +386,9 @@ impl Expr {
                 f(inner);
                 f(body);
             }
-            ExprKind::Unary { expr, .. } | ExprKind::NamedArg { value: expr, .. } => f(expr),
+            ExprKind::Unary { expr, .. }
+            | ExprKind::NamedArg { value: expr, .. }
+            | ExprKind::Ascribe { expr, .. } => f(expr),
             ExprKind::If {
                 cond,
                 then_branch,
@@ -559,6 +565,8 @@ pub enum ExprKind {
     },
     /// Prefix `-e` / `!e` / `~e`
     Unary { op: UnOp, expr: Box<Expr> },
+    /// `e: T` — pin the type of `e`. Elaboration strips this after it fills expected types.
+    Ascribe { expr: Box<Expr>, ty: Type },
     /// Builtin or user call: `Str.concat(a,b)`, `foo(x)`, `Fs.read(p)`
     Call { callee: String, args: Vec<Expr> },
     /// `name = expr` in a call argument list. Rewritten to positional before typecheck.

@@ -1062,6 +1062,44 @@ fn resolve_type(ty: &Type, enums: &EnumIndex<'_>, module: &str) -> Result<Type, 
     resolve_type_in(ty, enums, module, &[])
 }
 
+/// Resolve `e: T`. A single-letter unknown name is a type parameter (`T` in `Opt[T]`).
+fn resolve_ascribe_type(ty: &Type, enums: &EnumIndex<'_>, module: &str) -> Result<Type, TypeError> {
+    let mut tparams = Vec::new();
+    collect_ascribe_tparams(ty, enums, module, &mut tparams);
+    resolve_type_in(ty, enums, module, &tparams)
+}
+
+fn collect_ascribe_tparams(ty: &Type, enums: &EnumIndex<'_>, module: &str, out: &mut Vec<String>) {
+    match ty {
+        Type::Adt(n) | Type::Var(n) => {
+            if is_ascribe_tparam(n)
+                && !out.iter().any(|p| p == n)
+                && enums.resolve(n, module).is_err()
+            {
+                out.push(n.clone());
+            }
+        }
+        Type::App(_, args) => {
+            for a in args {
+                collect_ascribe_tparams(a, enums, module, out);
+            }
+        }
+        Type::List(inner) | Type::Io(inner) => {
+            collect_ascribe_tparams(inner, enums, module, out);
+        }
+        Type::Fun(a, b) => {
+            collect_ascribe_tparams(a, enums, module, out);
+            collect_ascribe_tparams(b, enums, module, out);
+        }
+        _ => {}
+    }
+}
+
+fn is_ascribe_tparam(n: &str) -> bool {
+    let mut chars = n.chars();
+    matches!(chars.next(), Some(c) if c.is_ascii_uppercase()) && chars.next().is_none()
+}
+
 fn resolve_type_in(
     ty: &Type,
     enums: &EnumIndex<'_>,
@@ -2001,7 +2039,7 @@ fn infer(
                 enum_name,
                 case_name,
                 args,
-                ..
+                type_args,
             } => {
                 let (en, id) = lookup_enum(enums, enum_name, current_module)?;
                 let case = en
@@ -2026,6 +2064,10 @@ fn infer(
                         expect_ty(&at, &want)?;
                     }
                     Ok(Type::Adt(id))
+                } else if type_args.len() == en.type_params.len()
+                    && type_args.iter().all(|t| !contains_unbound(t))
+                {
+                    Ok(Type::App(id, type_args.clone()))
                 } else {
                     let mut subst: HashMap<String, Type> = HashMap::new();
                     for (arg, (_fname, fty)) in args.iter().zip(case.fields.iter()) {
@@ -2155,6 +2197,12 @@ fn infer(
                     UnOp::Not => Err(TypeError::Msg(format!("unary `!` needs Bool, got {t:?}"))),
                     UnOp::BitNot => Err(TypeError::Msg(format!("unary `~` needs Int, got {t:?}"))),
                 }
+            }
+            ExprKind::Ascribe { expr, ty } => {
+                let want = resolve_ascribe_type(ty, enums, current_module)?;
+                let got = infer(expr, enums, funs, methods, current_module, env)?;
+                expect_ty(&got, &want)?;
+                Ok(want)
             }
             ExprKind::NamedArg { name, .. } => Err(TypeError::Msg(format!(
                 "named argument `{name}` is only allowed in a call"
@@ -5829,6 +5877,22 @@ fn elaborate_expr(
             },
             span,
         )),
+        ExprKind::Ascribe { expr, ty } => {
+            let want = resolve_ascribe_type(&ty, enums, current_module)?;
+            let inner = elaborate_expr(
+                *expr,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                Some(&want),
+                tparams,
+            )?;
+            let got = infer(&inner, enums, funs, methods, current_module, env)?;
+            expect_ty(&got, &want).map_err(|e| e.with_span_if_bare(&span))?;
+            Ok(inner)
+        }
         ExprKind::NamedArg { name, value } => Ok(Expr::new(
             ExprKind::NamedArg {
                 name,
@@ -6149,9 +6213,9 @@ fn collect_node_targs(expr: &Expr, out: &mut Vec<(String, Vec<Type>)>) {
             collect_node_targs(left, out);
             collect_node_targs(right, out);
         }
-        ExprKind::Unary { expr, .. } | ExprKind::NamedArg { value: expr, .. } => {
-            collect_node_targs(expr, out)
-        }
+        ExprKind::Unary { expr, .. }
+        | ExprKind::NamedArg { value: expr, .. }
+        | ExprKind::Ascribe { expr, .. } => collect_node_targs(expr, out),
         ExprKind::Lambda { body, .. } => collect_node_targs(body, out),
         _ => {}
     }
@@ -6820,6 +6884,75 @@ record Point(x: Int, y: Int)
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("named args typecheck");
+    }
+
+    #[test]
+    fn typechecks_ascription_on_nullary_generic() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  for {
+    x = Opt.None: Opt[Int]
+  } yield x match {
+    case Opt.Some(n) => IO.println(Str.fromInt(n))
+    case Opt.None => IO.println("none")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("ascribe Opt.None typecheck");
+        let p = elaborate_generics(p).expect("ascribe Opt.None elaborate");
+        monomorphize(p).expect("ascribe Opt.None mono");
+    }
+
+    #[test]
+    fn typechecks_ascription_empty_list() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    xs = []: List[Int]
+  } yield IO.println(Str.fromInt(List.len(xs)))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("ascribe empty list typecheck");
+    }
+
+    #[test]
+    fn typechecks_ascription_infix() {
+        let src = r#"
+@main def main: IO[Unit] = IO.println(Str.fromInt(1 + 2: Int))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("ascribe infix typecheck");
+    }
+
+    #[test]
+    fn rejects_ascription_mismatch() {
+        let src = r#"
+@main def main: IO[Unit] = IO.println(1: String)
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("expected") && err.message().contains("String"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_ascribe_type() {
+        let src = r#"
+@main def main: IO[Unit] = IO.println(1: Nope)
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("unknown enum Nope"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]
