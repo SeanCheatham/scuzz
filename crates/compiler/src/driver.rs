@@ -1305,6 +1305,8 @@ mod tests {
         assert!(first.contains("kind=headless"), "{first}");
         assert!(first.contains("[heap]"), "{first}");
         assert!(first.contains("live_bytes="), "{first}");
+        assert!(first.contains("delta_bytes="), "{first}");
+        assert!(first.contains("string="), "{first}");
         assert!(!first.contains("text:Beta"), "{first}");
 
         write_reload_ui(&app, "Beta");

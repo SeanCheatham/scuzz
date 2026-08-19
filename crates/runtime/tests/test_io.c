@@ -991,6 +991,201 @@ int main(void) {
     assert(sz_alloc_peak_bytes() == live_bytes);
   }
 
+  /* Heap census tracks RC kinds and dump delta. */
+  {
+    size_t kb0 = 0, kc0 = 0, kb1 = 0, kc1 = 0;
+    size_t live_bytes = 0, live_count = 0;
+    int64_t db = 0, dc = 0;
+    char heap[1536];
+    void *raw;
+    SzString *s;
+    SzList *xs;
+    void *box;
+    SzMap *m;
+    SzIo *io;
+    SzStream *st;
+    SzError *err;
+    SzRef *ref;
+    SzQueue *q;
+    SzDeferred *d;
+    SzEither *ei;
+    SzPair *pair;
+    SzAdt *adt;
+    SzLangResource *lr;
+    int i;
+
+    assert(strcmp(sz_alloc_kind_name(SZ_RC_RAW), "raw") == 0);
+    assert(strcmp(sz_alloc_kind_name(SZ_RC_STRING), "string") == 0);
+    assert(strcmp(sz_alloc_kind_name(SZ_RC_PAIR), "pair") == 0);
+    assert(strcmp(sz_alloc_kind_name(99), "raw") == 0);
+
+    sz_alloc_kind_stats(SZ_RC_RAW, &kb0, &kc0);
+    sz_alloc_mark();
+    raw = sz_alloc(64);
+    sz_alloc_kind_stats(SZ_RC_RAW, &kb1, &kc1);
+    assert(kc1 == kc0 + 1);
+    assert(kb1 >= kb0 + 64);
+    sz_alloc_delta(&db, &dc);
+    assert(dc == 1);
+    assert(db >= 64);
+    sz_alloc_format_heap(heap, sizeof heap, 0);
+    assert(strstr(heap, "live_bytes=") != NULL);
+    assert(strstr(heap, "delta_count=1") != NULL);
+    assert(strstr(heap, "delta_bytes=") != NULL);
+    for (i = 0; i < SZ_RC_KIND_COUNT; i++) {
+      char line[64];
+      snprintf(line, sizeof line, "%s=", sz_alloc_kind_name((uint32_t)i));
+      assert(strstr(heap, line) != NULL);
+    }
+    sz_alloc_format_heap(heap, sizeof heap, 1);
+    sz_free(raw);
+    sz_alloc_delta(&db, &dc);
+    assert(dc == -1);
+    sz_alloc_format_heap(heap, sizeof heap, 0);
+    assert(strstr(heap, "delta_count=-1") != NULL);
+
+    sz_alloc_kind_stats(SZ_RC_STRING, &kb0, &kc0);
+    sz_alloc_stats(&live_bytes, &live_count);
+    s = sz_string_from_cstr("census");
+    sz_alloc_kind_stats(SZ_RC_STRING, &kb1, &kc1);
+    assert(kc1 == kc0 + 1);
+    sz_release(s);
+    sz_alloc_kind_stats(SZ_RC_STRING, &kb1, &kc1);
+    assert(kc1 == kc0);
+    sz_alloc_stats(&kb1, &kc1);
+    assert(kc1 == live_count);
+    assert(kb1 == live_bytes);
+
+    sz_alloc_kind_stats(SZ_RC_LIST, &kb0, &kc0);
+    sz_alloc_kind_stats(SZ_RC_STRING, &kb1, &kc1);
+    s = sz_string_from_cstr("h");
+    xs = sz_list_cons(s, NULL);
+    sz_release(s);
+    sz_alloc_kind_stats(SZ_RC_LIST, &live_bytes, &live_count);
+    assert(live_count == kc0 + 1);
+    sz_alloc_kind_stats(SZ_RC_STRING, &live_bytes, &live_count);
+    assert(live_count == kc1 + 1);
+    sz_release(xs);
+    sz_alloc_kind_stats(SZ_RC_LIST, &live_bytes, &live_count);
+    assert(live_count == kc0);
+    sz_alloc_kind_stats(SZ_RC_STRING, &live_bytes, &live_count);
+    assert(live_count == kc1);
+
+    sz_alloc_kind_stats(SZ_RC_BOX, &kb0, &kc0);
+    box = sz_box_i64(7);
+    sz_alloc_kind_stats(SZ_RC_BOX, &kb1, &kc1);
+    assert(kc1 == kc0 + 1);
+    sz_release(box);
+    sz_alloc_kind_stats(SZ_RC_BOX, &kb1, &kc1);
+    assert(kc1 == kc0);
+
+    sz_alloc_kind_stats(SZ_RC_MAP, &kb0, &kc0);
+    s = sz_string_from_cstr("k");
+    box = sz_box_i64(1);
+    m = sz_map_set(NULL, s, box, 1);
+    sz_release(s);
+    sz_release(box);
+    sz_alloc_kind_stats(SZ_RC_MAP, &kb1, &kc1);
+    assert(kc1 == kc0 + 1);
+    sz_release(m);
+    sz_alloc_kind_stats(SZ_RC_MAP, &kb1, &kc1);
+    assert(kc1 == kc0);
+
+    sz_alloc_kind_stats(SZ_RC_IO, &kb0, &kc0);
+    io = sz_io_pure(NULL);
+    sz_alloc_kind_stats(SZ_RC_IO, &kb1, &kc1);
+    assert(kc1 == kc0 + 1);
+    sz_release(io);
+    sz_alloc_kind_stats(SZ_RC_IO, &kb1, &kc1);
+    assert(kc1 == kc0);
+
+    sz_alloc_kind_stats(SZ_RC_STREAM, &kb0, &kc0);
+    s = sz_string_from_cstr("e");
+    st = sz_stream_emit(s);
+    sz_release(s);
+    sz_alloc_kind_stats(SZ_RC_STREAM, &kb1, &kc1);
+    assert(kc1 == kc0 + 2);
+    sz_release(st);
+    sz_alloc_kind_stats(SZ_RC_STREAM, &kb1, &kc1);
+    assert(kc1 == kc0);
+
+    sz_alloc_kind_stats(SZ_RC_ERROR, &kb0, &kc0);
+    err = sz_error_new(1, "boom");
+    sz_alloc_kind_stats(SZ_RC_ERROR, &kb1, &kc1);
+    assert(kc1 == kc0 + 1);
+    sz_release(err);
+    sz_alloc_kind_stats(SZ_RC_ERROR, &kb1, &kc1);
+    assert(kc1 == kc0);
+
+    sz_alloc_kind_stats(SZ_RC_REF, &kb0, &kc0);
+    s = sz_string_from_cstr("r");
+    ref = sz_ref_make(s);
+    sz_release(s);
+    sz_alloc_kind_stats(SZ_RC_REF, &kb1, &kc1);
+    assert(kc1 == kc0 + 1);
+    sz_release(ref);
+    sz_alloc_kind_stats(SZ_RC_REF, &kb1, &kc1);
+    assert(kc1 == kc0);
+
+    sz_alloc_kind_stats(SZ_RC_QUEUE, &kb0, &kc0);
+    q = sz_queue_make();
+    sz_alloc_kind_stats(SZ_RC_QUEUE, &kb1, &kc1);
+    assert(kc1 == kc0 + 1);
+    sz_release(q);
+    sz_alloc_kind_stats(SZ_RC_QUEUE, &kb1, &kc1);
+    assert(kc1 == kc0);
+
+    sz_alloc_kind_stats(SZ_RC_DEFERRED, &kb0, &kc0);
+    d = sz_deferred_make();
+    sz_alloc_kind_stats(SZ_RC_DEFERRED, &kb1, &kc1);
+    assert(kc1 == kc0 + 1);
+    sz_release(d);
+    sz_alloc_kind_stats(SZ_RC_DEFERRED, &kb1, &kc1);
+    assert(kc1 == kc0);
+
+    sz_alloc_kind_stats(SZ_RC_EITHER, &kb0, &kc0);
+    s = sz_string_from_cstr("ok");
+    ei = sz_either_right(s);
+    sz_release(s);
+    sz_alloc_kind_stats(SZ_RC_EITHER, &kb1, &kc1);
+    assert(kc1 == kc0 + 1);
+    sz_release(ei);
+    sz_alloc_kind_stats(SZ_RC_EITHER, &kb1, &kc1);
+    assert(kc1 == kc0);
+
+    sz_alloc_kind_stats(SZ_RC_PAIR, &kb0, &kc0);
+    s = sz_string_from_cstr("l");
+    box = sz_box_i64(2);
+    pair = sz_pair_new(s, box);
+    sz_release(s);
+    sz_release(box);
+    sz_alloc_kind_stats(SZ_RC_PAIR, &kb1, &kc1);
+    assert(kc1 == kc0 + 1);
+    sz_release(pair);
+    sz_alloc_kind_stats(SZ_RC_PAIR, &kb1, &kc1);
+    assert(kc1 == kc0);
+
+    sz_alloc_kind_stats(SZ_RC_ADT, &kb0, &kc0);
+    s = sz_string_from_cstr("p");
+    adt = sz_adt_new(1, s);
+    sz_release(s);
+    sz_alloc_kind_stats(SZ_RC_ADT, &kb1, &kc1);
+    assert(kc1 == kc0 + 1);
+    sz_release(adt);
+    sz_alloc_kind_stats(SZ_RC_ADT, &kb1, &kc1);
+    assert(kc1 == kc0);
+
+    sz_alloc_kind_stats(SZ_RC_RESOURCE, &kb0, &kc0);
+    io = pure_drop(sz_string_from_cstr("a"));
+    lr = sz_lang_resource_make(io, lang_release, NULL);
+    sz_release(io);
+    sz_alloc_kind_stats(SZ_RC_RESOURCE, &kb1, &kc1);
+    assert(kc1 == kc0 + 1);
+    sz_release(lr);
+    sz_alloc_kind_stats(SZ_RC_RESOURCE, &kb1, &kc1);
+    assert(kc1 == kc0);
+  }
+
   /* Leftover IO.pure payloads drop on last-use / free. */
   {
     size_t base_bytes = 0, base_count = 0;

@@ -288,6 +288,7 @@ int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path) {
     return 0;
   sz_free(session->debug_dump_path);
   session->debug_dump_path = sz_strdup(path);
+  sz_alloc_mark();
   return 1;
 }
 
@@ -413,15 +414,16 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
   }
   if (session && session->debug_dump_path && path &&
       strcmp(path, session->debug_dump_path) == 0) {
-    size_t live_bytes = 0, live_count = 0;
-    sz_alloc_stats(&live_bytes, &live_count);
     fprintf(f, "\n[session]\nkind=%s\nwidth=%d\nheight=%d\nlifecycle=%s\n"
                "keyboard=%d\npumps=%u\n",
             runtime_kind_name(session->cfg.kind), session->cfg.width,
             session->cfg.height, lifecycle_name(session->lifecycle),
             session->keyboard_visible, session->pumps);
-    fprintf(f, "\n[heap]\nlive_bytes=%zu\nlive_count=%zu\npeak_bytes=%zu\n",
-            live_bytes, live_count, sz_alloc_peak_bytes());
+    {
+      char heap[1536];
+      sz_alloc_format_heap(heap, sizeof heap, 1);
+      fprintf(f, "\n[heap]\n%s", heap);
+    }
   }
   fclose(f);
   sz_string_free(signals);

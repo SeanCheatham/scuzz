@@ -474,6 +474,12 @@ static char *slurp_cstr(const char *path) {
   return buf;
 }
 
+static int64_t dump_i64(const char *s, const char *key) {
+  const char *p = strstr(s, key);
+  assert(p);
+  return (int64_t)atoll(p + strlen(key));
+}
+
 static void test_session_debug_dump(void) {
   SzUiConfig cfg;
   SzUiSession *session;
@@ -535,6 +541,22 @@ static void test_session_debug_dump(void) {
   assert(strstr(a, "live_bytes=") != NULL);
   assert(strstr(a, "live_count=") != NULL);
   assert(strstr(a, "peak_bytes=") != NULL);
+  assert(strstr(a, "delta_bytes=") != NULL);
+  assert(strstr(a, "delta_count=") != NULL);
+  assert(strstr(a, "raw=") != NULL);
+  assert(strstr(a, "string=") != NULL);
+  assert(strstr(a, "list=") != NULL);
+  assert(strstr(a, "pair=") != NULL);
+  {
+    char *second;
+    int64_t dc;
+    assert(sz_ui_session_dump_now(session));
+    second = slurp_cstr(path);
+    assert(strstr(second, "string=") != NULL);
+    dc = dump_i64(second, "delta_count=");
+    assert(dc > -20 && dc < 20);
+    free(second);
+  }
 
   {
     SzInputEvent text;
@@ -901,6 +923,8 @@ static void test_session_inject_control(void) {
   assert(strstr(body, "[session]") != NULL);
   assert(strstr(body, "[heap]") != NULL);
   assert(strstr(body, "peak_bytes=") != NULL);
+  assert(strstr(body, "delta_bytes=") != NULL);
+  assert(strstr(body, "string=") != NULL);
   free(body);
 
   {
@@ -913,6 +937,27 @@ static void test_session_inject_control(void) {
     assert(strstr(body, "pumps=") != NULL);
     free(body);
     assert(sz_ui_session_pumps(session) > pumps0);
+  }
+
+  {
+    void *hold;
+    int64_t peak_hi, peak_lo;
+    hold = sz_alloc(65536);
+    assert(sz_ui_session_dump_now(session));
+    body = slurp_cstr(dump);
+    assert(strstr(body, "raw=") != NULL);
+    peak_hi = dump_i64(body, "peak_bytes=");
+    free(body);
+    sz_free(hold);
+    write_stamp(inject, "resetpeak\n");
+    assert(sz_ui_pump_sync(session));
+    assert(sz_ui_session_dump_now(session));
+    body = slurp_cstr(dump);
+    peak_lo = dump_i64(body, "peak_bytes=");
+    assert(strstr(body, "delta_count=") != NULL);
+    free(body);
+    assert(peak_hi >= 65536);
+    assert(peak_lo < peak_hi);
   }
 
   first = sz_ui_session_root(session);

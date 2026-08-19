@@ -474,14 +474,16 @@ int sz_ui_session_watch(SzUiSession *session, const char *path);
  * (`scroll 40` stays the first).
  * [last_hit] appears after a TAP in this session: `xy x y -> role:label` or
  * `-> NULL`.
- * [heap] is live alloc stats (`live_bytes` / `live_count` / `peak_bytes`).
+ * [heap] is live alloc stats (`live_bytes` / `live_count` / `peak_bytes`),
+ * `delta_bytes` / `delta_count` since the last live dump or `resetpeak`,
+ * and per-kind `name=count:bytes` (`raw`, `string`, `list`, …).
  * [session] is kind, size, lifecycle, keyboard, and pump count.
  * Only the live debug dump includes them. Fuzz / golden dumps omit them. */
 int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
 int sz_ui_session_write_dump(SzUiSession *session, const char *path);
 /* Rewrite the live debug dump now, including [session] and [heap]. No path is a no-op. */
 int sz_ui_session_dump_now(SzUiSession *session);
-/* Watch an inject script (tap/xy/text/type/pump/scroll/backspace/dump/reload/quit).
+/* Watch an inject script (tap/xy/text/type/pump/scroll/backspace/dump/reload/quit/resetpeak).
  * Next pump that sees new contents plays the suffix (append) or the whole file
  * (rewrite). Missing = empty. */
 int sz_ui_session_set_inject(SzUiSession *session, const char *path);
@@ -625,8 +627,9 @@ SzView *sz_lang_view_bind_text(SzSignalStr *sig);
  * SCUZZ_UI_RELOAD_CODE (dylib exporting sz_ui_reload_rebuild) if that
  * file exists, then rebuilds. Writes SCUZZ_UI_DEBUG_DUMP on dirty pumps
  * when set (includes [heap]). Plays SCUZZ_UI_INJECT
- * (tap/xy/text/type/pump/scroll/backspace/dump/reload/quit) when that file
- * changes. `quit` stops the live pump loop. */
+ * (tap/xy/text/type/pump/scroll/backspace/dump/reload/quit/resetpeak) when
+ * that file changes. `quit` stops the live pump loop. `resetpeak` resets
+ * peak bytes and the heap delta mark. */
 SzIo *sz_ui_run_rebuild(SzUiRebuildFn fn, void *env);
 
 #ifdef __cplusplus
