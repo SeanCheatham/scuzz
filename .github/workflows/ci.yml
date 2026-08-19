@@ -180,6 +180,10 @@ jobs:
           grep -Fq "part:b|a,c" /tmp/kernel.out
           grep -Fq "inits:|a|a,b|a,b,c" /tmp/kernel.out
           grep -Fq "tails:a,b,c|b,c|c|" /tmp/kernel.out
+          grep -Fq "zip:a,1|b,2" /tmp/kernel.out
+          grep -Fq "zipAll:a,1|b,9|c,9" /tmp/kernel.out
+          grep -Fq "unzip:a,b|1,2" /tmp/kernel.out
+          grep -Fq "tr:a,c|b,d" /tmp/kernel.out
           grep -q "slen:3" /tmp/kernel.out
           grep -q "slice:bc" /tmp/kernel.out
           grep -q "ix:1" /tmp/kernel.out

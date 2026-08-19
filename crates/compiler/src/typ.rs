@@ -2124,6 +2124,26 @@ fn infer_call(
             let elem = list_elem(&arg_tys[0])?;
             Ok(list_of(list_of(elem)))
         }
+        "List.zip" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let a = list_elem(&arg_tys[0])?;
+            let b = list_elem(&arg_tys[1])?;
+            Ok(list_of(list_of(prefer_elem(&a, &b)?)))
+        }
+        "List.zipAll" => {
+            expect_arity(callee, &arg_tys, 4)?;
+            let a = list_elem(&arg_tys[0])?;
+            let b = list_elem(&arg_tys[1])?;
+            let ab = prefer_elem(&a, &b)?;
+            let xy = prefer_elem(&arg_tys[2], &arg_tys[3])?;
+            Ok(list_of(list_of(prefer_elem(&ab, &xy)?)))
+        }
+        "List.unzip" | "List.transpose" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            let inner = list_elem(&arg_tys[0])?;
+            let elem = list_elem(&inner)?;
+            Ok(list_of(list_of(elem)))
+        }
         "List.find" => {
             expect_arity(callee, &arg_tys, 2)?;
             let elem = list_elem(&arg_tys[0])?;
@@ -6286,6 +6306,21 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.inits/tails and Set.isSubset/isDisjoint should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_zip_unzip_transpose() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = ["a", "b", "c"]
+    _ <- IO.println(List.join(List.map(List.zip(xs, ["1", "2"]), g => List.join(g, ",")), "|"))
+    _ <- IO.println(List.join(List.map(List.zipAll(xs, ["1"], "z", "9"), g => List.join(g, ",")), "|"))
+    _ <- IO.println(List.join(List.map(List.unzip(List.zip(xs, ["1", "2"])), g => List.join(g, ",")), "|"))
+    _ <- IO.println(List.join(List.map(List.transpose([["a", "b"], ["c", "d"]]), g => List.join(g, ",")), "|"))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.zip/zipAll/unzip/transpose should typecheck");
     }
 
     #[test]

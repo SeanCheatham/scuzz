@@ -523,6 +523,22 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("List.inits", "List.inits(xs: List[T]): List[List[T]]"),
     ("List.tails", "List.tails(xs: List[T]): List[List[T]]"),
     (
+        "List.zip",
+        "List.zip(xs: List[T], ys: List[T]): List[List[T]]",
+    ),
+    (
+        "List.zipAll",
+        "List.zipAll(xs: List[T], ys: List[T], x: T, y: T): List[List[T]]",
+    ),
+    (
+        "List.unzip",
+        "List.unzip(pairs: List[List[T]]): List[List[T]]",
+    ),
+    (
+        "List.transpose",
+        "List.transpose(xss: List[List[T]]): List[List[T]]",
+    ),
+    (
         "List.forall",
         "List.forall(xs: List[T], pred: T => Bool): Bool",
     ),
@@ -1916,6 +1932,38 @@ mod tests {
 "#;
         let h = hover_src(src, "tails");
         assert!(h.contains("List.tails(xs: List[T]): List[List[T]]"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map(List.zip(["a"], ["1"]), g => List.join(g, ",")), "|"))
+"#;
+        let h = hover_src(src, "zip");
+        assert!(
+            h.contains("List.zip(xs: List[T], ys: List[T]): List[List[T]]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map(List.zipAll(["a"], ["1"], "z", "9"), g => List.join(g, ",")), "|"))
+"#;
+        let h = hover_src(src, "zipAll");
+        assert!(
+            h.contains("List.zipAll(xs: List[T], ys: List[T], x: T, y: T): List[List[T]]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map(List.unzip(List.zip(["a"], ["1"])), g => List.join(g, ",")), "|"))
+"#;
+        let h = hover_src(src, "unzip");
+        assert!(
+            h.contains("List.unzip(pairs: List[List[T]]): List[List[T]]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map(List.transpose([["a", "b"], ["c", "d"]]), g => List.join(g, ",")), "|"))
+"#;
+        let h = hover_src(src, "transpose");
+        assert!(
+            h.contains("List.transpose(xss: List[List[T]]): List[List[T]]"),
+            "{h}"
+        );
     }
 
     #[test]
