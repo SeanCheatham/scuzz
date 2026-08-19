@@ -692,6 +692,7 @@ fn collect_pattern_binds(p: &Pattern, out: &mut HashSet<String>) {
             collect_pattern_binds(head, out);
             collect_pattern_binds(tail, out);
         }
+        Pattern::Named { inner, .. } => collect_pattern_binds(inner, out),
         Pattern::Or(ps) => {
             for p in ps {
                 collect_pattern_binds(p, out);
@@ -819,6 +820,7 @@ fn collect_pat_names(p: &Pattern, out: &mut HashSet<String>) {
             }
         }
         Pattern::As { inner, .. } => collect_pat_names(inner, out),
+        Pattern::Named { inner, .. } => collect_pat_names(inner, out),
         _ => {}
     }
 }

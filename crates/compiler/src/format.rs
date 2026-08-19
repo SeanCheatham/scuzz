@@ -374,6 +374,13 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             }
         }
         ExprKind::Call { callee, args } => {
+            if callee == "List.cons" && args.len() == 2 {
+                return format!(
+                    "{pad}{} :: {}",
+                    pretty_cons_operand(&args[0], true),
+                    pretty_cons_operand(&args[1], false)
+                );
+            }
             let a: Vec<_> = args
                 .iter()
                 .map(|e| pretty_expr(e, 0).trim().to_string())
@@ -535,6 +542,24 @@ fn pretty_operand(e: &Expr) -> String {
     }
 }
 
+fn pretty_cons_operand(e: &Expr, left: bool) -> String {
+    let s = pretty_expr(e, 0).trim().to_string();
+    let wrap = matches!(
+        e.kind,
+        ExprKind::If { .. }
+            | ExprKind::Match { .. }
+            | ExprKind::For { .. }
+            | ExprKind::Lambda { .. }
+            | ExprKind::Ascribe { .. }
+    ) || (left
+        && matches!(&e.kind, ExprKind::Call { callee, args } if callee == "List.cons" && args.len() == 2));
+    if wrap {
+        format!("({s})")
+    } else {
+        s
+    }
+}
+
 fn binop_str(op: BinOp) -> &'static str {
     match op {
         BinOp::Add => "+",
@@ -588,6 +613,7 @@ fn pretty_pattern(pat: &Pattern) -> String {
         Pattern::As { name, inner } => format!("{name} @ {}", pretty_pattern(inner)),
         Pattern::Nil => "[]".into(),
         Pattern::Cons { head, tail, .. } => pretty_cons_pattern(head, tail),
+        Pattern::Named { name, inner } => format!("{name} = {}", pretty_pattern(inner)),
         Pattern::Adt {
             enum_name,
             case_name,
@@ -1351,6 +1377,34 @@ enum Opt[T]:
         let out = format_source(src).unwrap();
         assert!(out.contains("Opt.None: Opt[Int]"), "{out}");
         assert!(out.contains("(1: Int)"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_named_field_pattern() {
+        let src = r#"
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] =
+  Point(3, 5) match {
+    case Point(x = n) => IO.println(Str.fromInt(n))
+  }
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("case Point(x = n)"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_cons_expr() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join("a" :: "b" :: List.empty(), ","))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("\"a\" :: \"b\" :: List.empty()"), "{out}");
+        assert!(!out.contains("List.cons"), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

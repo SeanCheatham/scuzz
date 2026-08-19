@@ -67,6 +67,10 @@ fn lower_pattern(pat: Pattern, enums: &EnumIndex<'_>, current_module: &str) -> P
             tail: Box::new(lower_pattern(*tail, enums, current_module)),
             elem,
         },
+        Pattern::Named { name, inner } => Pattern::Named {
+            name,
+            inner: Box::new(lower_pattern(*inner, enums, current_module)),
+        },
         Pattern::Adt {
             enum_name,
             case_name,
@@ -75,13 +79,35 @@ fn lower_pattern(pat: Pattern, enums: &EnumIndex<'_>, current_module: &str) -> P
         } => {
             let id =
                 resolve_ctor(enums, &enum_name, &case_name, current_module).unwrap_or(enum_name);
+            let binds: Vec<Pattern> = binds
+                .into_iter()
+                .map(|b| lower_pattern(b, enums, current_module))
+                .collect();
+            let binds = match enums
+                .resolve(&id, current_module)
+                .or_else(|_| enums.resolve(crate::resolve::enum_bare_name(&id), current_module))
+            {
+                Ok(e) => {
+                    if let Some(case) = e.cases.iter().find(|c| c.name == case_name) {
+                        let names: Vec<String> =
+                            case.fields.iter().map(|(n, _)| n.clone()).collect();
+                        let ctor = if e.name == case_name {
+                            e.name.clone()
+                        } else {
+                            format!("{}.{}", e.name, case_name)
+                        };
+                        crate::ast::rewrite_named_payload(&ctor, binds.clone(), &names)
+                            .unwrap_or(binds)
+                    } else {
+                        binds
+                    }
+                }
+                Err(_) => binds,
+            };
             Pattern::Adt {
                 enum_name: id,
                 case_name,
-                binds: binds
-                    .into_iter()
-                    .map(|b| lower_pattern(b, enums, current_module))
-                    .collect(),
+                binds,
                 type_args,
             }
         }
@@ -519,6 +545,29 @@ enum Color:
                     }
                 }
             }
+            other => panic!("expected Match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rewrites_named_field_pattern_to_positional() {
+        let src = r#"
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] =
+  Point(3, 5) match {
+    case Point(x = n) => IO.println(Str.fromInt(n))
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => match &arms[0].pattern {
+                Pattern::Adt { binds, .. } => {
+                    assert_eq!(binds.len(), 2, "{binds:?}");
+                    assert!(matches!(&binds[0], Pattern::Bind(n) if n == "n"));
+                    assert!(matches!(&binds[1], Pattern::Wildcard));
+                }
+                other => panic!("expected Point Adt, got {other:?}"),
+            },
             other => panic!("expected Match, got {other:?}"),
         }
     }

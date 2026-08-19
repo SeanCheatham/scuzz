@@ -4133,6 +4133,9 @@ fn bind_pattern(
     env: &mut HashMap<String, Type>,
 ) -> Result<Vec<(String, Option<Type>)>, TypeError> {
     match pat {
+        crate::ast::Pattern::Named { .. } => Err(TypeError::Msg(
+            "named field pattern is only allowed in a constructor payload".into(),
+        )),
         crate::ast::Pattern::Wildcard => Ok(Vec::new()),
         crate::ast::Pattern::Int(_) => {
             if !matches!(scrut, Type::Int) {
@@ -4206,6 +4209,14 @@ fn bind_pattern(
                     )))
                 }
             }
+            let field_names: Vec<String> = case.fields.iter().map(|(n, _)| n.clone()).collect();
+            let ctor = if en.name == case_name.as_str() {
+                en.name.clone()
+            } else {
+                format!("{}.{}", en.name, case_name)
+            };
+            let binds = crate::ast::rewrite_named_payload(&ctor, binds.clone(), &field_names)
+                .map_err(TypeError::Msg)?;
             if binds.len() != case.fields.len() {
                 if case.fields.is_empty() {
                     return Err(TypeError::Msg(format!(
@@ -4309,13 +4320,18 @@ fn check_match_exhaustive(
     enums: &EnumIndex<'_>,
     current_module: &str,
 ) -> Result<(), TypeError> {
-    for arm in arms {
-        check_unique_binds(&arm.pattern)?;
+    let rewritten: Vec<crate::ast::Pattern> = arms
+        .iter()
+        .map(|a| rewrite_named_in_pattern(&a.pattern, enums, current_module))
+        .collect::<Result<Vec<_>, _>>()?;
+    for pat in &rewritten {
+        check_unique_binds(pat)?;
     }
     let covering: Vec<&crate::ast::Pattern> = arms
         .iter()
-        .filter(|a| a.guard.is_none())
-        .map(|a| &a.pattern)
+        .zip(rewritten.iter())
+        .filter(|(a, _)| a.guard.is_none())
+        .map(|(_, p)| p)
         .collect();
     let missing = uncovered_pats(scrut, &covering, enums, current_module)?;
     if !missing.is_empty() {
@@ -4327,14 +4343,76 @@ fn check_match_exhaustive(
     for i in 1..arms.len() {
         let prev: Vec<&crate::ast::Pattern> = arms[..i]
             .iter()
-            .filter(|a| a.guard.is_none())
-            .map(|a| &a.pattern)
+            .zip(rewritten[..i].iter())
+            .filter(|(a, _)| a.guard.is_none())
+            .map(|(_, p)| p)
             .collect();
         if uncovered_pats(scrut, &prev, enums, current_module)?.is_empty() {
             return Err(TypeError::Msg(format!("unreachable match arm {}", i + 1)));
         }
     }
     Ok(())
+}
+
+fn rewrite_named_in_pattern(
+    pat: &crate::ast::Pattern,
+    enums: &EnumIndex<'_>,
+    current_module: &str,
+) -> Result<crate::ast::Pattern, TypeError> {
+    match pat {
+        crate::ast::Pattern::Adt {
+            enum_name,
+            case_name,
+            binds,
+            type_args,
+        } => {
+            let binds = binds
+                .iter()
+                .map(|b| rewrite_named_in_pattern(b, enums, current_module))
+                .collect::<Result<Vec<_>, _>>()?;
+            let (en, _) = lookup_enum(enums, enum_name, current_module)?;
+            let case = en
+                .cases
+                .iter()
+                .find(|c| c.name == *case_name)
+                .ok_or_else(|| {
+                    TypeError::Msg(format!("unknown case {enum_name}.{case_name} in pattern"))
+                })?;
+            let names: Vec<String> = case.fields.iter().map(|(n, _)| n.clone()).collect();
+            let ctor = if en.name == case_name.as_str() {
+                en.name.clone()
+            } else {
+                format!("{}.{}", en.name, case_name)
+            };
+            let binds =
+                crate::ast::rewrite_named_payload(&ctor, binds, &names).map_err(TypeError::Msg)?;
+            Ok(crate::ast::Pattern::Adt {
+                enum_name: enum_name.clone(),
+                case_name: case_name.clone(),
+                binds,
+                type_args: type_args.clone(),
+            })
+        }
+        crate::ast::Pattern::Or(alts) => Ok(crate::ast::Pattern::Or(
+            alts.iter()
+                .map(|a| rewrite_named_in_pattern(a, enums, current_module))
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        crate::ast::Pattern::As { name, inner } => Ok(crate::ast::Pattern::As {
+            name: name.clone(),
+            inner: Box::new(rewrite_named_in_pattern(inner, enums, current_module)?),
+        }),
+        crate::ast::Pattern::Cons { head, tail, elem } => Ok(crate::ast::Pattern::Cons {
+            head: Box::new(rewrite_named_in_pattern(head, enums, current_module)?),
+            tail: Box::new(rewrite_named_in_pattern(tail, enums, current_module)?),
+            elem: elem.clone(),
+        }),
+        crate::ast::Pattern::Named { name, inner } => Ok(crate::ast::Pattern::Named {
+            name: name.clone(),
+            inner: Box::new(rewrite_named_in_pattern(inner, enums, current_module)?),
+        }),
+        other => Ok(other.clone()),
+    }
 }
 
 fn check_unique_binds(pat: &crate::ast::Pattern) -> Result<(), TypeError> {
@@ -4374,6 +4452,7 @@ fn collect_bind_names(pat: &crate::ast::Pattern, out: &mut Vec<String>) {
             collect_bind_names(head, out);
             collect_bind_names(tail, out);
         }
+        crate::ast::Pattern::Named { inner, .. } => collect_bind_names(inner, out),
         crate::ast::Pattern::Or(alts) => {
             if let Some(first) = alts.first() {
                 collect_bind_names(first, out);
@@ -4669,6 +4748,14 @@ fn elaborate_pattern(
                 .ok_or_else(|| {
                     TypeError::Msg(format!("unknown case {enum_name}.{case_name} in pattern"))
                 })?;
+            let field_names: Vec<String> = case.fields.iter().map(|(n, _)| n.clone()).collect();
+            let ctor = if en.name == case_name.as_str() {
+                en.name.clone()
+            } else {
+                format!("{}.{}", en.name, case_name)
+            };
+            let binds = crate::ast::rewrite_named_payload(&ctor, binds.clone(), &field_names)
+                .map_err(TypeError::Msg)?;
             let field_tys = payload_field_types(en, case, scrut, enums)?;
             let mut out_binds = Vec::with_capacity(binds.len());
             for (nested, fty) in binds.iter().zip(field_tys.iter()) {
@@ -4714,6 +4801,10 @@ fn elaborate_pattern(
                 elem,
             })
         }
+        crate::ast::Pattern::Named { name, inner: _ } => Err(TypeError::Msg(format!(
+            "named field pattern `{name}` is only allowed in a constructor payload"
+        ))
+        .with_span_if_bare(span)),
     }
 }
 
@@ -6609,6 +6700,10 @@ fn subst_pattern(pat: crate::ast::Pattern, subst: &HashMap<String, Type>) -> cra
             tail: Box::new(subst_pattern(*tail, subst)),
             elem: apply_subst(&elem, subst),
         },
+        crate::ast::Pattern::Named { name, inner } => crate::ast::Pattern::Named {
+            name,
+            inner: Box::new(subst_pattern(*inner, subst)),
+        },
         p => p,
     }
 }
@@ -6777,6 +6872,8 @@ fn collect_pattern_targs(pat: &crate::ast::Pattern, out: &mut Vec<(String, Vec<T
         collect_apps_in_type(elem, out);
         collect_pattern_targs(head, out);
         collect_pattern_targs(tail, out);
+    } else if let crate::ast::Pattern::Named { inner, .. } = pat {
+        collect_pattern_targs(inner, out);
     }
 }
 
@@ -7008,6 +7105,10 @@ fn rewrite_pattern(
             head: Box::new(rewrite_pattern(*head, clones)?),
             tail: Box::new(rewrite_pattern(*tail, clones)?),
             elem: concretize_type(&elem, clones)?,
+        }),
+        crate::ast::Pattern::Named { name, inner } => Ok(crate::ast::Pattern::Named {
+            name,
+            inner: Box::new(rewrite_pattern(*inner, clones)?),
         }),
         p => Ok(p),
     }
@@ -7947,6 +8048,105 @@ def isPair(xs: List[String]): String =
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("list lit plus wildcard covers List");
+    }
+
+    #[test]
+    fn typechecks_named_field_pattern_omitted_is_wildcard() {
+        let src = r#"
+record Point(x: Int, y: Int)
+def originX(p: Point): Int =
+  p match {
+    case Point(x = n) => n
+  }
+@main def main: IO[Unit] = IO.println(Str.fromInt(originX(Point(3, 5))))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("named field plus omitted y covers Point");
+    }
+
+    #[test]
+    fn typechecks_named_enum_payload() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+def get(o: Opt): Int =
+  o match {
+    case Opt.Some(x = n) => n
+    case Opt.None => 0
+  }
+@main def main: IO[Unit] = IO.println(Str.fromInt(get(Opt.Some(1))))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("named Some payload plus None covers Opt");
+    }
+
+    #[test]
+    fn typechecks_cons_expr() {
+        let src = r#"
+def nest(): List[String] =
+  "a" :: "b" :: List.empty()
+@main def main: IO[Unit] = IO.println(List.join(nest(), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect(":: cons expression typechecks");
+    }
+
+    #[test]
+    fn rejects_unknown_named_field() {
+        let src = r#"
+record Point(x: Int, y: Int)
+def bad(p: Point): Int =
+  p match {
+    case Point(z = n) => n
+  }
+@main def main: IO[Unit] = IO.println(Str.fromInt(bad(Point(1, 2))))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("has no field `z`"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_positional_after_named_field() {
+        let src = r#"
+record Point(x: Int, y: Int)
+def bad(p: Point): Int =
+  p match {
+    case Point(x = n, m) => n
+  }
+@main def main: IO[Unit] = IO.println(Str.fromInt(bad(Point(1, 2))))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("positional pattern follows named"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_duplicate_named_field() {
+        let src = r#"
+record Point(x: Int, y: Int)
+def bad(p: Point): Int =
+  p match {
+    case Point(x = a, x = b) => a
+  }
+@main def main: IO[Unit] = IO.println(Str.fromInt(bad(Point(1, 2))))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("duplicate field `x`"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]

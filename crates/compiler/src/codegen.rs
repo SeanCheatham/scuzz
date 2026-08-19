@@ -856,6 +856,7 @@ fn collect_pat_strings(pat: &Pattern, out: &mut Vec<String>) {
             collect_pat_strings(head, out);
             collect_pat_strings(tail, out);
         }
+        Pattern::Named { inner, .. } => collect_pat_strings(inner, out),
         Pattern::Wildcard
         | Pattern::Bind(_)
         | Pattern::Int(_)
@@ -1552,6 +1553,9 @@ fn emit_pat(
         }
         Pattern::Or(_) => {
             panic!("or-pattern must be flattened in lower before codegen")
+        }
+        Pattern::Named { .. } => {
+            panic!("named field pattern must be rewritten before codegen")
         }
         Pattern::Nil => {
             if kind != Kind::Ptr {
@@ -6320,6 +6324,36 @@ def describe(xs: List[Int]): String =
         assert!(
             ir.contains("sz_list_head") && ir.contains("call i64 @sz_unbox_i64"),
             "Int head must unbox:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_named_field_pattern() {
+        let src = r#"
+record Point(x: Int, y: Int)
+def originX(p: Point): Int =
+  p match {
+    case Point(x = n) => n
+  }
+@main def main: IO[Unit] = IO.println(Str.fromInt(originX(Point(3, 5))))
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_adt_payload") && ir.contains("sz_unbox_i64"),
+            "named field match should load payload:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_cons_expr() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join("a" :: List.empty(), ","))
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_list_cons"),
+            "expected :: to emit sz_list_cons:\n{ir}"
         );
     }
 

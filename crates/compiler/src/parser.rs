@@ -1324,7 +1324,7 @@ impl Parser {
     }
 
     fn parse_cmp(&mut self) -> Result<Expr, ParseError> {
-        let mut left = self.parse_shift()?;
+        let mut left = self.parse_cons()?;
         loop {
             let op = match self.peek() {
                 Token::EqEq => BinOp::Eq,
@@ -1336,7 +1336,7 @@ impl Parser {
                 _ => break,
             };
             self.bump();
-            let right = self.parse_shift()?;
+            let right = self.parse_cons()?;
             let span = left.span.clone().cover(&right.span);
             left = self.mk(
                 ExprKind::Binary {
@@ -1371,6 +1371,24 @@ impl Parser {
             );
         }
         Ok(left)
+    }
+
+    /// Right-associative `h :: t` → `List.cons(h, t)`.
+    fn parse_cons(&mut self) -> Result<Expr, ParseError> {
+        let left = self.parse_shift()?;
+        if !matches!(self.peek(), Token::ColonColon) {
+            return Ok(left);
+        }
+        self.bump();
+        let right = self.parse_cons()?;
+        let span = left.span.clone().cover(&right.span);
+        Ok(self.mk(
+            ExprKind::Call {
+                callee: "List.cons".into(),
+                args: vec![left, right],
+            },
+            span,
+        ))
     }
 
     fn parse_add(&mut self) -> Result<Expr, ParseError> {
@@ -1715,16 +1733,37 @@ impl Parser {
         }
         self.bump();
         let mut binds = Vec::new();
+        if matches!(self.peek(), Token::RParen) {
+            self.bump();
+            return Ok(binds);
+        }
         loop {
-            binds.push(self.parse_or_pattern()?);
+            binds.push(self.parse_named_or_pattern()?);
             if matches!(self.peek(), Token::Comma) {
                 self.bump();
+                if matches!(self.peek(), Token::RParen) {
+                    break;
+                }
                 continue;
             }
             break;
         }
         self.expect(&Token::RParen)?;
         Ok(binds)
+    }
+
+    /// `name = pat` or a nested pattern.
+    fn parse_named_or_pattern(&mut self) -> Result<Pattern, ParseError> {
+        if matches!(self.peek(), Token::Ident(_)) && matches!(self.peek_nth(1), Token::Eq) {
+            let (name, _) = self.expect_ident()?;
+            self.bump();
+            let inner = self.parse_or_pattern()?;
+            return Ok(Pattern::Named {
+                name,
+                inner: Box::new(inner),
+            });
+        }
+        self.parse_or_pattern()
     }
 
     fn parse_lambda(&mut self) -> Result<(Option<String>, Expr), ParseError> {
@@ -3214,6 +3253,81 @@ enum Opt:
                 other => panic!("expected list lit pat, got {other:?}"),
             },
             other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_named_field_pattern() {
+        let src = r#"
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] =
+  Point(3, 5) match {
+    case Point(x = n) => IO.println(Str.fromInt(n))
+  }
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => match &arms[0].pattern {
+                Pattern::Adt { binds, .. } => match &binds[..] {
+                    [Pattern::Named { name, inner }] => {
+                        assert_eq!(name, "x");
+                        assert!(matches!(inner.as_ref(), Pattern::Bind(n) if n == "n"));
+                    }
+                    other => panic!("expected named field, got {other:?}"),
+                },
+                other => panic!("expected Point named, got {other:?}"),
+            },
+            other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_named_field_mixed_positional() {
+        let src = r#"
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] =
+  Point(3, 5) match {
+    case Point(n, y = 0) => IO.println(Str.fromInt(n))
+    case Point(_, _) => IO.println("o")
+  }
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => match &arms[0].pattern {
+                Pattern::Adt { binds, .. } => {
+                    assert!(matches!(&binds[0], Pattern::Bind(n) if n == "n"));
+                    assert!(
+                        matches!(&binds[1], Pattern::Named { name, inner } if name == "y" && matches!(inner.as_ref(), Pattern::Int(0)))
+                    );
+                }
+                other => panic!("expected mixed named, got {other:?}"),
+            },
+            other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_cons_expr() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join("a" :: "b" :: List.empty(), ","))
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::IoPrintln(inner) => match &inner.kind {
+                ExprKind::Call { callee, args } if callee == "List.join" => match &args[0].kind {
+                    ExprKind::Call { callee, args } if callee == "List.cons" => {
+                        assert!(matches!(&args[0].kind, ExprKind::StrLit(s) if s == "a"));
+                        match &args[1].kind {
+                            ExprKind::Call { callee, .. } if callee == "List.cons" => {}
+                            other => panic!("expected nested cons, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected List.cons, got {other:?}"),
+                },
+                other => panic!("expected List.join, got {other:?}"),
+            },
+            other => panic!("expected println, got {other:?}"),
         }
     }
 
