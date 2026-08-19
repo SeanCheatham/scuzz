@@ -229,6 +229,15 @@ fn pretty_binding(name: &str, ty: &Type, rfn: Option<&Expr>) -> String {
     }
 }
 
+fn pretty_param(p: &crate::ast::Param) -> String {
+    let mut s = pretty_binding(&p.name, &p.ty, p.rfn.as_ref());
+    if let Some(d) = &p.default {
+        s.push_str(" = ");
+        s.push_str(pretty_expr(d, 0).trim());
+    }
+    s
+}
+
 fn pretty_type(t: &Type) -> String {
     match t {
         Type::Unit => "Unit".into(),
@@ -250,11 +259,7 @@ fn pretty_type(t: &Type) -> String {
 
 fn pretty_def(d: &FunDef) -> String {
     if d.is_law {
-        let params: Vec<String> = d
-            .params
-            .iter()
-            .map(|p| pretty_binding(&p.name, &p.ty, p.rfn.as_ref()))
-            .collect();
+        let params: Vec<String> = d.params.iter().map(pretty_param).collect();
         let sig = if params.is_empty() {
             d.name.clone()
         } else {
@@ -267,11 +272,7 @@ fn pretty_def(d: &FunDef) -> String {
             pretty_expr(&d.body, 1)
         );
     }
-    let params: Vec<String> = d
-        .params
-        .iter()
-        .map(|p| pretty_binding(&p.name, &p.ty, p.rfn.as_ref()))
-        .collect();
+    let params: Vec<String> = d.params.iter().map(pretty_param).collect();
     let vis = if d.is_private { "private " } else { "" };
     let tparams = if d.type_params.is_empty() {
         String::new()
@@ -1182,6 +1183,18 @@ def add(n: Int, m: Int): Int = n + m
 "#;
         let out = format_source(src).unwrap();
         assert!(out.contains("add(m = 2, n = 1)"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_param_default() {
+        let src = r#"
+def add(n: Int, m: Int = 1): Int = n + m
+@main def main: IO[Unit] = IO.println(Str.fromInt(add(3)))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("m: Int = 1"), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

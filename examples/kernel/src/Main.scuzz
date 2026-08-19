@@ -46,6 +46,12 @@ def id[T](x: T): T =
 def sum(p: Point): Int =
   p.x + p.y
 
+def addDefault(n: Int, m: Int = 1): Int =
+  n + m
+
+def greet(name: String, punct: String = "!"): String =
+  Str.concat(name, punct)
+
 law sumPositive: Bool =
   sum(Point(3, 5)) > 0
 
@@ -431,6 +437,11 @@ record Box[T](x: T):
     _ <- IO.println(s"named:${sum(Point(y = 5, x = 3))}")
     _ <- IO.println(s"namedkit:${Str.len(s = "ab")}")
     _ <- IO.println(s"namedfn:${leftOr(fallback = 7, e = Either.Right("s"))}")
+    _ <- IO.println(s"defarg:${addDefault(3)}")
+    _ <- IO.println(s"defargN:${addDefault(n = 3)}")
+    _ <- IO.println(s"defarg2:${addDefault(3, 4)}")
+    _ <- IO.println(s"greet:${greet("hi")}")
+    _ <- IO.println(s"greetQ:${greet("hi", "?")}")
     _ <- IO.println(s"copy:${sum(Point(3, 5).copy(y = 9))}")
     _ <- IO.println(s"copyPos:${sum(Point(3, 5).copy(1))}")
     _ <- IO.println(s"copyBox:${Str.fromInt(Box(4).copy(x = 5).get())}")

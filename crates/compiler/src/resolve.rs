@@ -367,6 +367,9 @@ pub fn unused_imports(program: &Program) -> Vec<&Import> {
             if let Some(r) = &p.rfn {
                 collect_expr_names(r, set);
             }
+            if let Some(dflt) = &p.default {
+                collect_expr_names(dflt, set);
+            }
         }
         collect_expr_names(&d.body, set);
     }
@@ -501,6 +504,9 @@ fn unused_in_def(d: &FunDef, out: &mut Vec<UnusedName>) {
         if let Some(r) = &p.rfn {
             unused_in_expr(r, out);
         }
+        if let Some(dflt) = &p.default {
+            unused_in_expr(dflt, out);
+        }
     }
     unused_in_expr(&d.body, out);
 }
@@ -607,7 +613,7 @@ fn used_after_for_binder(name: &str, rest: &[crate::ast::ForBinder], body: &Expr
     uses_name(body, name)
 }
 
-fn uses_name(e: &Expr, name: &str) -> bool {
+pub(crate) fn uses_name(e: &Expr, name: &str) -> bool {
     match &e.kind {
         ExprKind::Var(n) => n == name,
         ExprKind::Lambda { param, body } => param.as_deref() != Some(name) && uses_name(body, name),
@@ -699,6 +705,12 @@ fn private_def_used(program: &Program, d: &FunDef) -> bool {
         }
         for p in &other.params {
             if p.rfn
+                .as_ref()
+                .is_some_and(|e| expr_calls(e, &d.module, &d.name))
+            {
+                return true;
+            }
+            if p.default
                 .as_ref()
                 .is_some_and(|e| expr_calls(e, &d.module, &d.name))
             {
