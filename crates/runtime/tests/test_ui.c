@@ -419,7 +419,7 @@ static void test_ui_run_rebuild_keepalive(void) {
   const char *stamp = "/tmp/scuzz_ui_keepalive.stamp";
   const char *dump = "/tmp/scuzz_ui_keepalive.dump";
   FILE *f;
-  char buf[2048];
+  char buf[8192];
   size_t n;
 
   env = (KeepEnv *)sz_alloc(sizeof(KeepEnv));
@@ -452,6 +452,7 @@ static void test_ui_run_rebuild_keepalive(void) {
   assert(strstr(buf, "[session]") != NULL);
   assert(strstr(buf, "[heap]") != NULL);
   assert(strstr(buf, "live_bytes=") != NULL);
+  assert(strstr(buf, "[live]") != NULL);
   sz_signal_int_free(env->count);
   sz_free(env);
   remove(stamp);
@@ -511,6 +512,8 @@ static void test_session_debug_dump(void) {
   assert(session);
   sz_ui_session_take_root(session);
   assert(sz_ui_session_set_debug_dump(session, path));
+  assert(sz_alloc_panic_dump_path());
+  assert(strstr(sz_alloc_panic_dump_path(), ".panic") != NULL);
   assert(sz_ui_pump_sync(session));
   a = slurp_cstr(path);
   assert(strstr(a, "[signals]") != NULL);
@@ -539,6 +542,8 @@ static void test_session_debug_dump(void) {
   assert(strstr(a, "pumps=1") != NULL);
   assert(strstr(a, "[heap]") != NULL);
   assert(strstr(a, "live_bytes=") != NULL);
+  assert(strstr(a, "[live]") != NULL);
+  assert(strstr(a, "string rc=") != NULL);
   assert(strstr(a, "live_count=") != NULL);
   assert(strstr(a, "peak_bytes=") != NULL);
   assert(strstr(a, "delta_bytes=") != NULL);
@@ -597,6 +602,7 @@ static void test_session_debug_dump(void) {
   free(c);
 
   sz_ui_unmount(session);
+  assert(sz_alloc_panic_dump_path() == NULL);
   sz_signal_int_free(count);
   sz_signal_str_free(draft);
   sz_signal_str_free(query);
@@ -908,6 +914,7 @@ static void test_session_inject_control(void) {
   assert(strstr(body, "pumps=1") != NULL);
   assert(strstr(body, "[heap]") != NULL);
   assert(strstr(body, "live_bytes=") != NULL);
+  assert(strstr(body, "[live]") != NULL);
   free(body);
 
   assert(sz_ui_session_write_dump(session, fuzz));
@@ -915,6 +922,7 @@ static void test_session_inject_control(void) {
   assert(strstr(body, "[signals]") != NULL);
   assert(strstr(body, "[session]") == NULL);
   assert(strstr(body, "[heap]") == NULL);
+  assert(strstr(body, "[live]") == NULL);
   free(body);
 
   remove(dump);
@@ -925,6 +933,7 @@ static void test_session_inject_control(void) {
   assert(strstr(body, "peak_bytes=") != NULL);
   assert(strstr(body, "delta_bytes=") != NULL);
   assert(strstr(body, "string=") != NULL);
+  assert(strstr(body, "[live]") != NULL);
   free(body);
 
   {

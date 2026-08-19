@@ -78,7 +78,35 @@ typedef struct SzRcHdr {
   uint32_t rc;
   uint32_t kind;
   uint32_t pad;
+  struct SzRcHdr *prev;
+  struct SzRcHdr *next;
 } SzRcHdr;
+
+static SzRcHdr *g_live = NULL;
+static int g_in_panic = 0;
+static char g_panic_dump[1024];
+enum { SZ_LIVE_DUMP_ROWS = 32, SZ_LIVE_PANIC_ROWS = 64 };
+
+static size_t hdr_bytes(const SzRcHdr *h) { return *(((size_t *)h) - 1); }
+
+static void live_link(SzRcHdr *h) {
+  h->prev = NULL;
+  h->next = g_live;
+  if (g_live)
+    g_live->prev = h;
+  g_live = h;
+}
+
+static void live_unlink(SzRcHdr *h) {
+  if (h->prev)
+    h->prev->next = h->next;
+  else if (g_live == h)
+    g_live = h->next;
+  if (h->next)
+    h->next->prev = h->prev;
+  h->prev = NULL;
+  h->next = NULL;
+}
 
 static SzRcHdr *sz_rc_hdr(const void *ptr) {
   return ((SzRcHdr *)ptr) - 1;
@@ -180,6 +208,9 @@ static void *alloc_block(size_t size, int zero, uint32_t magic, uint32_t kind) {
   h->rc = (magic == SZ_RC_MAGIC) ? 1 : 0;
   h->kind = kind;
   h->pad = 0;
+  h->prev = NULL;
+  h->next = NULL;
+  live_link(h);
   g_live_bytes += size;
   g_live_count += 1;
   kind_add(kind, size);
@@ -188,9 +219,97 @@ static void *alloc_block(size_t size, int zero, uint32_t magic, uint32_t kind) {
   return (void *)(h + 1);
 }
 
+static const char *panic_dump_path(void) {
+  const char *e;
+  if (g_panic_dump[0])
+    return g_panic_dump;
+  e = getenv("SCUZZ_PANIC_DUMP");
+  if (e && e[0])
+    return e;
+  return NULL;
+}
+
+void sz_alloc_set_panic_dump(const char *path) {
+  if (!path || !path[0]) {
+    g_panic_dump[0] = '\0';
+    return;
+  }
+  snprintf(g_panic_dump, sizeof g_panic_dump, "%s", path);
+}
+
+const char *sz_alloc_panic_dump_path(void) { return panic_dump_path(); }
+
+void sz_alloc_walk(void (*fn)(void *ptr, uint32_t kind, size_t bytes, uint32_t rc,
+                              void *ctx),
+                   void *ctx) {
+  SzRcHdr *h;
+  if (!fn)
+    return;
+  for (h = g_live; h; h = h->next)
+    fn((void *)(h + 1), h->kind, hdr_bytes(h), h->rc, ctx);
+}
+
+int sz_alloc_format_live(char *buf, size_t cap, int max_rows) {
+  SzRcHdr *h;
+  size_t n = 0;
+  int shown = 0;
+  int extra = 0;
+  if (!buf || cap == 0)
+    return 0;
+  buf[0] = '\0';
+  for (h = g_live; h; h = h->next) {
+    if (max_rows >= 0 && shown >= max_rows) {
+      extra += 1;
+      continue;
+    }
+    heap_append(buf, cap, &n, "%s rc=%u bytes=%zu\n",
+                sz_alloc_kind_name(h->kind), h->rc, hdr_bytes(h));
+    shown += 1;
+  }
+  if (extra > 0)
+    heap_append(buf, cap, &n, "truncated=%d\n", extra);
+  return (int)n;
+}
+
+int sz_alloc_format_panic(char *buf, size_t cap, const char *msg) {
+  size_t n = 0;
+  char heap[1536];
+  char live[4096];
+  if (!buf || cap == 0)
+    return 0;
+  buf[0] = '\0';
+  heap_append(buf, cap, &n, "scuzz panic: %s\n", msg ? msg : "(null)");
+  sz_alloc_format_heap(heap, sizeof heap, 0);
+  heap_append(buf, cap, &n, "[heap]\n%s", heap);
+  sz_alloc_format_live(live, sizeof live, SZ_LIVE_PANIC_ROWS);
+  heap_append(buf, cap, &n, "[live]\n%s", live);
+  return (int)n;
+}
+
+void sz_alloc_sweep(void) {
+  while (g_live)
+    sz_free((void *)(g_live + 1));
+}
+
 void sz_panic(const char *msg) {
-  fprintf(stderr, "scuzz panic: %s\n", msg ? msg : "(null)");
+  char report[8192];
+  const char *path;
+  FILE *f;
+  if (g_in_panic)
+    abort();
+  g_in_panic = 1;
+  sz_alloc_format_panic(report, sizeof report, msg);
+  fputs(report, stderr);
   fflush(stderr);
+  path = panic_dump_path();
+  if (path) {
+    f = fopen(path, "w");
+    if (f) {
+      fputs(report, f);
+      fclose(f);
+    }
+  }
+  sz_alloc_sweep();
   abort();
 }
 
@@ -211,6 +330,7 @@ void sz_free(void *ptr) {
   h = ((SzRcHdr *)ptr) - 1;
   raw = ((size_t *)h) - 1;
   n = *raw;
+  live_unlink(h);
   kind_sub(h->kind, n);
   if (g_live_count > 0)
     g_live_count -= 1;

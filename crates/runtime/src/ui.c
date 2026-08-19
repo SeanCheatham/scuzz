@@ -284,10 +284,13 @@ int sz_ui_session_watch(SzUiSession *session, const char *path) {
 }
 
 int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path) {
+  char panic_path[1024];
   if (!session || !path || !path[0])
     return 0;
   sz_free(session->debug_dump_path);
   session->debug_dump_path = sz_strdup(path);
+  snprintf(panic_path, sizeof panic_path, "%s.panic", path);
+  sz_alloc_set_panic_dump(panic_path);
   sz_alloc_mark();
   return 1;
 }
@@ -421,8 +424,11 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
             session->keyboard_visible, session->pumps);
     {
       char heap[1536];
+      char live[2048];
       sz_alloc_format_heap(heap, sizeof heap, 1);
       fprintf(f, "\n[heap]\n%s", heap);
+      sz_alloc_format_live(live, sizeof live, 32);
+      fprintf(f, "\n[live]\n%s", live);
     }
   }
   fclose(f);
@@ -582,6 +588,8 @@ void sz_ui_unmount(SzUiSession *session) {
   sz_free(session->watch_path);
   sz_free(session->watch_fp);
   sz_free(session->debug_dump_path);
+  session->debug_dump_path = NULL;
+  sz_alloc_set_panic_dump(NULL);
   sz_free(session->inject_path);
   sz_free(session->inject_fp);
   sz_free(session->record_path);
