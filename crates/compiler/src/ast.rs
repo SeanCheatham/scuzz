@@ -600,13 +600,61 @@ pub enum Pattern {
     Bool(bool),
     /// `case "ok"`
     Str(String),
+    /// `Color.Red | Color.Blue` / nested `Opt.Some(0 | 1)`.
+    /// Lower expands this into separate arms.
+    Or(Vec<Pattern>),
 }
 
 impl Pattern {
     /// `_` or a name bind — matches any value at this position.
+    /// An or-pattern is irrefutable when any alternative is.
     pub fn is_irrefutable(&self) -> bool {
-        matches!(self, Pattern::Wildcard | Pattern::Bind(_))
+        match self {
+            Pattern::Wildcard | Pattern::Bind(_) => true,
+            Pattern::Or(alts) => alts.iter().any(|a| a.is_irrefutable()),
+            _ => false,
+        }
     }
+
+    /// Expand `A | B` and nested or in payloads into or-free patterns.
+    /// Nested payload or uses a cartesian product (`Some(0 | 1)` → `Some(0)`, `Some(1)`).
+    pub fn flatten_or(&self) -> Vec<Pattern> {
+        match self {
+            Pattern::Or(alts) => alts.iter().flat_map(|a| a.flatten_or()).collect(),
+            Pattern::Adt {
+                enum_name,
+                case_name,
+                binds,
+                type_args,
+            } => {
+                let parts: Vec<Vec<Pattern>> = binds.iter().map(|b| b.flatten_or()).collect();
+                cartesian_patterns(&parts)
+                    .into_iter()
+                    .map(|binds| Pattern::Adt {
+                        enum_name: enum_name.clone(),
+                        case_name: case_name.clone(),
+                        binds,
+                        type_args: type_args.clone(),
+                    })
+                    .collect()
+            }
+            other => vec![other.clone()],
+        }
+    }
+}
+
+fn cartesian_patterns(parts: &[Vec<Pattern>]) -> Vec<Vec<Pattern>> {
+    parts.iter().fold(vec![vec![]], |acc, part| {
+        let mut next = Vec::with_capacity(acc.len().saturating_mul(part.len().max(1)));
+        for prefix in &acc {
+            for p in part {
+                let mut row = prefix.clone();
+                row.push(p.clone());
+                next.push(row);
+            }
+        }
+        next
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]

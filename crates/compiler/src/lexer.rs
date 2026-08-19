@@ -47,6 +47,7 @@ pub enum Token {
     Gt,
     GtEq,
     AmpAmp,
+    Pipe, // `|` in `case A | B`
     PipePipe,
     Ident(String),
     StringLit(String),
@@ -199,12 +200,20 @@ pub fn lex(input: &str) -> Result<Vec<SpannedToken>, LexError> {
             i += 2;
             continue;
         }
-        if c == '|' && i + 1 < chars.len() && chars[i + 1] == '|' {
-            tokens.push(SpannedToken {
-                token: Token::PipePipe,
-                span: Span::new(String::new(), byte_at(i), byte_at(i + 2)),
-            });
-            i += 2;
+        if c == '|' {
+            if i + 1 < chars.len() && chars[i + 1] == '|' {
+                tokens.push(SpannedToken {
+                    token: Token::PipePipe,
+                    span: Span::new(String::new(), byte_at(i), byte_at(i + 2)),
+                });
+                i += 2;
+            } else {
+                tokens.push(SpannedToken {
+                    token: Token::Pipe,
+                    span: Span::new(String::new(), byte_at(i), byte_at(i + 1)),
+                });
+                i += 1;
+            }
             continue;
         }
         if c.is_ascii_digit() {
@@ -509,6 +518,13 @@ mod tests {
         assert!(toks.iter().any(|t| matches!(t.token, Token::EqEq)));
         assert!(toks.iter().any(|t| matches!(t.token, Token::Plus)));
         assert!(toks.iter().any(|t| matches!(t.token, Token::Else)));
+    }
+
+    #[test]
+    fn lexes_or_pattern_pipe() {
+        let toks = lex(r#"case Color.Red | Color.Blue => x || y"#).unwrap();
+        assert!(toks.iter().any(|t| matches!(t.token, Token::Pipe)));
+        assert!(toks.iter().any(|t| matches!(t.token, Token::PipePipe)));
     }
 
     #[test]

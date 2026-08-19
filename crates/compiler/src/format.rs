@@ -532,6 +532,11 @@ fn pretty_pattern(pat: &Pattern) -> String {
         Pattern::Bool(true) => "true".into(),
         Pattern::Bool(false) => "false".into(),
         Pattern::Str(s) => format!("\"{}\"", escape(s)),
+        Pattern::Or(alts) => alts
+            .iter()
+            .map(pretty_pattern)
+            .collect::<Vec<_>>()
+            .join(" | "),
         Pattern::Adt {
             enum_name,
             case_name,
@@ -722,6 +727,45 @@ enum Opt:
         assert!(out.contains("case true =>"));
         assert!(out.contains("case \"ok\" =>"));
         assert!(out.contains("case x =>"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_or_patterns() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  c match {
+    case Color.Red | Color.Blue => IO.println("p")
+  }
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("case Color.Red | Color.Blue =>"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_nested_or_pattern() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  Opt.Some(0) match {
+    case Opt.Some(0 | 1) => IO.println("s")
+    case Opt.Some(_) => IO.println("o")
+    case Opt.None => IO.println("n")
+  }
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("case Opt.Some(0 | 1) =>"));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }
