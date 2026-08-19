@@ -208,11 +208,9 @@ fn prefix_at(source: &str, offset: usize) -> (Option<String>, String) {
         let prefix = source.get(t.span.start..offset).unwrap_or("").to_string();
         return (qual_before_ident(i), prefix);
     }
-    if matches!(t.token, Token::Dot) && t.span.end <= offset {
-        if i >= 1 {
-            if let Token::Ident(q) = &toks[i - 1].token {
-                return (Some(q.clone()), String::new());
-            }
+    if matches!(t.token, Token::Dot) && t.span.end <= offset && i >= 1 {
+        if let Token::Ident(q) = &toks[i - 1].token {
+            return (Some(q.clone()), String::new());
         }
     }
     (None, String::new())

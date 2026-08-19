@@ -435,7 +435,7 @@ mod tests {
     #[test]
     fn lcg_is_deterministic() {
         assert_eq!(lcg_seed(42), 43);
-        assert_eq!(lcg_next(43), 43 * 48_271 % 2_147_483_647);
+        assert_eq!(lcg_next(43), 43 * 48_271);
         assert_eq!(lcg_below(10, 3), 1);
     }
 

@@ -14,6 +14,51 @@ use std::collections::BTreeMap;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+/// UTF-16 range: start line, start character, end line, end character.
+pub type LspRange = (u32, u32, u32, u32);
+
+/// File path plus a UTF-16 range.
+pub type FileRange = (PathBuf, u32, u32, u32, u32);
+
+/// UTF-16 range plus text. Used for code lens titles and rename placeholders.
+pub type RangeText = (u32, u32, u32, u32, String);
+
+/// Document link: source UTF-16 range, target file, target UTF-16 range, label.
+pub type DocumentLinkLsp = (u32, u32, u32, u32, PathBuf, u32, u32, u32, u32, String);
+
+/// Workspace symbol hit: file, symbol, UTF-16 range.
+pub type WorkspaceSymbolHit = (PathBuf, crate::symbols::WorkspaceSymbol, u32, u32, u32, u32);
+
+/// Call hierarchy result: item plus the UTF-16 ranges of its call sites.
+pub type CallWithRanges = (CallItemLsp, Vec<LspRange>);
+
+/// Document highlight: UTF-16 range plus kind byte.
+pub type HighlightLsp = (u32, u32, u32, u32, u8);
+
+/// Code action: title, kind, UTF-16 range, new text, is-preferred, source diagnostic.
+pub type CodeActionLsp = (
+    String,
+    String,
+    u32,
+    u32,
+    u32,
+    u32,
+    String,
+    bool,
+    Option<(String, u32, u32, u32, u32)>,
+);
+
+/// Text edit: file, UTF-16 range, new text.
+pub type TextEditLsp = (PathBuf, u32, u32, u32, u32, String);
+
+/// Loaded source file: resolved project, label, text, parsed program.
+type OverlayFile = (
+    crate::driver::ResolvedProject,
+    String,
+    String,
+    Option<crate::ast::Program>,
+);
+
 #[derive(Debug, Clone)]
 pub struct RelatedLoc {
     pub message: String,
@@ -543,14 +588,7 @@ fn load_overlay_file(
     project_dir: &Path,
     unsaved: &BTreeMap<PathBuf, String>,
     path: &Path,
-) -> Result<
-    Option<(
-        crate::driver::ResolvedProject,
-        String,
-        String,
-        Option<crate::ast::Program>,
-    )>,
-> {
+) -> Result<Option<OverlayFile>> {
     let mut resolved = crate::driver::resolve_project(project_dir)
         .with_context(|| format!("resolving {}", project_dir.display()))?;
     apply_unsaved(&mut resolved, unsaved, project_dir);
@@ -625,7 +663,7 @@ pub fn definition_project(
     path: &Path,
     line: u32,
     character: u32,
-) -> Result<Option<(PathBuf, u32, u32, u32, u32)>> {
+) -> Result<Option<FileRange>> {
     let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
     else {
         return Ok(None);
@@ -651,7 +689,7 @@ pub fn declaration_project(
     path: &Path,
     line: u32,
     character: u32,
-) -> Result<Option<(PathBuf, u32, u32, u32, u32)>> {
+) -> Result<Option<FileRange>> {
     let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
     else {
         return Ok(None);
@@ -676,7 +714,7 @@ pub fn type_definition_project(
     path: &Path,
     line: u32,
     character: u32,
-) -> Result<Option<(PathBuf, u32, u32, u32, u32)>> {
+) -> Result<Option<FileRange>> {
     let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
     else {
         return Ok(None);
@@ -701,7 +739,7 @@ pub fn implementation_project(
     path: &Path,
     line: u32,
     character: u32,
-) -> Result<Vec<(PathBuf, u32, u32, u32, u32)>> {
+) -> Result<Vec<FileRange>> {
     let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
     else {
         return Ok(Vec::new());
@@ -723,7 +761,7 @@ pub fn code_lenses_project(
     project_dir: &Path,
     unsaved: &BTreeMap<PathBuf, String>,
     path: &Path,
-) -> Result<Vec<(u32, u32, u32, u32, String)>> {
+) -> Result<Vec<RangeText>> {
     let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
     else {
         return Ok(Vec::new());
@@ -748,7 +786,7 @@ pub fn document_links_project(
     project_dir: &Path,
     unsaved: &BTreeMap<PathBuf, String>,
     path: &Path,
-) -> Result<Vec<(u32, u32, u32, u32, PathBuf, u32, u32, u32, u32, String)>> {
+) -> Result<Vec<DocumentLinkLsp>> {
     let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
     else {
         return Ok(Vec::new());
@@ -787,7 +825,7 @@ fn loc_to_lsp(
     named: &[(String, String)],
     loc: crate::definition::DefLoc,
     fallback_text: &str,
-) -> (PathBuf, u32, u32, u32, u32) {
+) -> FileRange {
     let dest = resolved
         .sources
         .iter()
@@ -833,7 +871,7 @@ pub fn workspace_symbols_project(
     project_dir: &Path,
     unsaved: &BTreeMap<PathBuf, String>,
     query: &str,
-) -> Result<Vec<(PathBuf, crate::symbols::WorkspaceSymbol, u32, u32, u32, u32)>> {
+) -> Result<Vec<WorkspaceSymbolHit>> {
     let mut resolved = crate::driver::resolve_project(project_dir)
         .with_context(|| format!("resolving {}", project_dir.display()))?;
     apply_unsaved(&mut resolved, unsaved, project_dir);
@@ -889,7 +927,7 @@ pub fn references_project(
     line: u32,
     character: u32,
     include_declaration: bool,
-) -> Result<Vec<(PathBuf, u32, u32, u32, u32)>> {
+) -> Result<Vec<FileRange>> {
     let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
     else {
         return Ok(Vec::new());
@@ -997,7 +1035,7 @@ pub fn incoming_calls_project(
     path: &Path,
     line: u32,
     character: u32,
-) -> Result<Vec<(CallItemLsp, Vec<(u32, u32, u32, u32)>)>> {
+) -> Result<Vec<CallWithRanges>> {
     let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
     else {
         return Ok(Vec::new());
@@ -1039,7 +1077,7 @@ pub fn outgoing_calls_project(
     path: &Path,
     line: u32,
     character: u32,
-) -> Result<Vec<(CallItemLsp, Vec<(u32, u32, u32, u32)>)>> {
+) -> Result<Vec<CallWithRanges>> {
     let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
     else {
         return Ok(Vec::new());
@@ -1080,7 +1118,7 @@ pub fn highlights_project(
     path: &Path,
     line: u32,
     character: u32,
-) -> Result<Vec<(u32, u32, u32, u32, u8)>> {
+) -> Result<Vec<HighlightLsp>> {
     let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
     else {
         return Ok(Vec::new());
@@ -1131,7 +1169,7 @@ pub fn selection_ranges_project(
     unsaved: &BTreeMap<PathBuf, String>,
     path: &Path,
     positions: &[(u32, u32)],
-) -> Result<Vec<Vec<(u32, u32, u32, u32)>>> {
+) -> Result<Vec<Vec<LspRange>>> {
     let Some((_resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
     else {
         return Ok(Vec::new());
@@ -1237,19 +1275,7 @@ pub fn code_actions_project(
     path: &Path,
     range: Option<((u32, u32), (u32, u32))>,
     only: &[String],
-) -> Result<
-    Vec<(
-        String,
-        String,
-        u32,
-        u32,
-        u32,
-        u32,
-        String,
-        bool,
-        Option<(String, u32, u32, u32, u32)>,
-    )>,
-> {
+) -> Result<Vec<CodeActionLsp>> {
     let Some((_resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
     else {
         return Ok(Vec::new());
@@ -1328,7 +1354,7 @@ pub fn workspace_diagnostics_project(
 pub enum RenameResult {
     Unavailable,
     BadName,
-    Edits(Vec<(PathBuf, u32, u32, u32, u32)>),
+    Edits(Vec<FileRange>),
 }
 
 /// Ident range at a 0-based LSP position when rename is allowed.
@@ -1338,7 +1364,7 @@ pub fn prepare_rename_project(
     path: &Path,
     line: u32,
     character: u32,
-) -> Result<Option<(u32, u32, u32, u32, String)>> {
+) -> Result<Option<RangeText>> {
     let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
     else {
         return Ok(None);
@@ -1409,7 +1435,7 @@ pub fn will_rename_files_project(
     project_dir: &Path,
     unsaved: &BTreeMap<PathBuf, String>,
     files: &[(PathBuf, PathBuf)],
-) -> Result<Vec<(PathBuf, u32, u32, u32, u32, String)>> {
+) -> Result<Vec<TextEditLsp>> {
     let mut resolved = crate::driver::resolve_project(project_dir)
         .with_context(|| format!("resolving {}", project_dir.display()))?;
     apply_unsaved(&mut resolved, unsaved, project_dir);

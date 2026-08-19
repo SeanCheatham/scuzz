@@ -52,19 +52,8 @@ pub fn cmd_mutate(
         let mutant = mutate_apply_mode(prog.clone(), i as i32, mode);
         let opts = compile_opts(&project_dir, &out_dir, false, true)?;
         let compiled = compile_prepared_program(&opts, mutant)?;
-        let w = manifest.ui.as_ref().map(|u| u.width()).unwrap_or(200);
-        let h = manifest.ui.as_ref().map(|u| u.height()).unwrap_or(120);
-        let with_ui = manifest.ui.is_some();
-        let code = mutate_exec(
-            &compiled.executable,
-            &out_dir,
-            with_ui,
-            w,
-            h,
-            i,
-            iters,
-            seed,
-        )?;
+        let ui = manifest.ui.as_ref().map(|u| (u.width(), u.height()));
+        let code = mutate_exec(&compiled.executable, &out_dir, ui, i, iters, seed)?;
         if code == 0 {
             println!("  mutant {i}: survived");
             survived += 1;
@@ -100,17 +89,14 @@ fn mutate_iter_seed(seed: i64, mutant_index: i64, iter: i64) -> i64 {
 fn mutate_exec(
     exe: &Path,
     out_dir: &Path,
-    with_ui: bool,
-    w: i32,
-    h: i32,
+    ui: Option<(i32, i32)>,
     mutant_index: i64,
     iters: i64,
     seed: i64,
 ) -> Result<i32> {
-    if with_ui {
-        mutate_exec_ui(exe, out_dir, w, h, mutant_index, iters, seed)
-    } else {
-        mutate_exec_io(exe, out_dir, mutant_index, iters, seed)
+    match ui {
+        Some((w, h)) => mutate_exec_ui(exe, out_dir, w, h, mutant_index, iters, seed),
+        None => mutate_exec_io(exe, out_dir, mutant_index, iters, seed),
     }
 }
 

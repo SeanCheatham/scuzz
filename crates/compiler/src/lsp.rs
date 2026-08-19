@@ -20,8 +20,8 @@ use crate::check::{
     prepare_rename_project, references_project, rename_project, selection_ranges_project,
     semantic_tokens_project, semantic_tokens_range_project, signature_help_project,
     symbols_project, type_definition_project, will_rename_files_project,
-    workspace_diagnostics_project, workspace_symbols_project, CallItemLsp, Diagnostic,
-    RenameResult,
+    workspace_diagnostics_project, workspace_symbols_project, CallItemLsp, CodeActionLsp,
+    Diagnostic, LspRange, RenameResult, TextEditLsp,
 };
 use crate::fold::FOLD_REGION;
 use crate::overlay::collect_fmt_sources;
@@ -432,15 +432,9 @@ fn document_link_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &st
                 .iter()
                 .map(|(sl, sc, el, ec, dest, dsl, dsc, del, dec, tooltip)| {
                     encode_document_link(
-                        *sl,
-                        *sc,
-                        *el,
-                        *ec,
+                        &(*sl, *sc, *el, *ec),
                         &file_uri(dest),
-                        *dsl,
-                        *dsc,
-                        *del,
-                        *dec,
+                        &(*dsl, *dsc, *del, *dec),
                         tooltip,
                     )
                 })
@@ -452,17 +446,13 @@ fn document_link_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &st
 }
 
 fn encode_document_link(
-    sl: u32,
-    sc: u32,
-    el: u32,
-    ec: u32,
+    range: &LspRange,
     target: &str,
-    dsl: u32,
-    dsc: u32,
-    del: u32,
-    dec: u32,
+    target_range: &LspRange,
     tooltip: &str,
 ) -> String {
+    let (sl, sc, el, ec) = range;
+    let (dsl, dsc, del, dec) = target_range;
     format!(
         r#"{{"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}},"target":{},"tooltip":{},"targetRange":{{"start":{{"line":{dsl},"character":{dsc}}},"end":{{"line":{del},"character":{dec}}}}}}}"#,
         json_str(target),
@@ -681,7 +671,7 @@ fn will_rename_files_result(root: &Path, open: &BTreeMap<PathBuf, String>, body:
     }
 }
 
-fn encode_workspace_edit(edits: &[(PathBuf, u32, u32, u32, u32, String)]) -> String {
+fn encode_workspace_edit(edits: &[TextEditLsp]) -> String {
     let mut by_uri: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for (dest, sl, sc, el, ec, new_text) in edits {
         by_uri.entry(file_uri(dest)).or_default().push(format!(
@@ -835,35 +825,16 @@ fn code_action_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str)
     match code_actions_project(root, open, &path, range, &only) {
         Ok(acts) => {
             let uri = file_uri(&path);
-            let parts: Vec<String> = acts
-                .iter()
-                .map(
-                    |(title, kind, sl, sc, el, ec, new_text, preferred, diagnostic)| {
-                        encode_code_action(
-                            &uri, title, kind, *sl, *sc, *el, *ec, new_text, *preferred, diagnostic,
-                        )
-                    },
-                )
-                .collect();
+            let parts: Vec<String> = acts.iter().map(|a| encode_code_action(&uri, a)).collect();
             format!("[{}]", parts.join(","))
         }
         _ => "[]".into(),
     }
 }
 
-fn encode_code_action(
-    uri: &str,
-    title: &str,
-    kind: &str,
-    sl: u32,
-    sc: u32,
-    el: u32,
-    ec: u32,
-    new_text: &str,
-    preferred: bool,
-    diagnostic: &Option<(String, u32, u32, u32, u32)>,
-) -> String {
-    let pref = if preferred { "true" } else { "false" };
+fn encode_code_action(uri: &str, action: &CodeActionLsp) -> String {
+    let (title, kind, sl, sc, el, ec, new_text, preferred, diagnostic) = action;
+    let pref = if *preferred { "true" } else { "false" };
     let text_edit = format!(
         r#"{{"range":{{"start":{{"line":{sl},"character":{sc}}},"end":{{"line":{el},"character":{ec}}}}},"newText":{}}}"#,
         json_str(new_text)
@@ -914,23 +885,10 @@ fn code_action_resolve_result(
     };
     match code_actions_project(root, open, &path, None, &only) {
         Ok(acts) => {
-            let Some((title, kind, sl, sc, el, ec, new_text, preferred, diagnostic)) =
-                acts.iter().find(|(t, _, _, _, _, _, _, _, _)| t == &title)
-            else {
+            let Some(action) = acts.iter().find(|(t, ..)| t == &title) else {
                 return Err(format!("unknown code action: {title}"));
             };
-            Ok(encode_code_action(
-                &file_uri(&path),
-                title,
-                kind,
-                *sl,
-                *sc,
-                *el,
-                *ec,
-                new_text,
-                *preferred,
-                diagnostic,
-            ))
+            Ok(encode_code_action(&file_uri(&path), action))
         }
         _ => Err("unknown code action".into()),
     }

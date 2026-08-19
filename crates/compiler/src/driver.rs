@@ -473,44 +473,35 @@ fn fingerprint_resolved(resolved: &ResolvedProject, verify: bool) -> String {
 pub fn resolve_project(project_dir: &Path) -> Result<ResolvedProject> {
     let root = canonicalize_dir(project_dir)
         .with_context(|| format!("resolving project {}", project_dir.display()))?;
-    let mut sources = Vec::new();
-    let mut overlays = Vec::new();
-    let mut package_dirs = Vec::new();
-    let mut manifest_paths = Vec::new();
-    let mut visiting: Vec<(String, PathBuf)> = Vec::new();
-    let mut done: HashSet<PathBuf> = HashSet::new();
+    let mut state = VisitState::default();
 
-    let root_manifest = visit_package(
-        &root,
-        None,
-        &mut visiting,
-        &mut done,
-        &mut sources,
-        &mut overlays,
-        &mut package_dirs,
-        &mut manifest_paths,
-    )?;
+    let root_manifest = visit_package(&root, None, &mut state)?;
 
-    validate_overlay_stems(&sources, &overlays)?;
+    validate_overlay_stems(&state.sources, &state.overlays)?;
 
     Ok(ResolvedProject {
         root_manifest,
-        sources,
-        overlays,
-        package_dirs,
-        manifest_paths,
+        sources: state.sources,
+        overlays: state.overlays,
+        package_dirs: state.package_dirs,
+        manifest_paths: state.manifest_paths,
     })
+}
+
+#[derive(Default)]
+struct VisitState {
+    visiting: Vec<(String, PathBuf)>,
+    done: HashSet<PathBuf>,
+    sources: Vec<ResolvedSource>,
+    overlays: Vec<OverlaySource>,
+    package_dirs: Vec<PathBuf>,
+    manifest_paths: Vec<PathBuf>,
 }
 
 fn visit_package(
     pkg_dir: &Path,
     via_dep: Option<&str>,
-    visiting: &mut Vec<(String, PathBuf)>,
-    done: &mut HashSet<PathBuf>,
-    sources: &mut Vec<ResolvedSource>,
-    overlays: &mut Vec<OverlaySource>,
-    package_dirs: &mut Vec<PathBuf>,
-    manifest_paths: &mut Vec<PathBuf>,
+    state: &mut VisitState,
 ) -> Result<Manifest> {
     let canon = canonicalize_dir(pkg_dir).with_context(|| {
         if let Some(name) = via_dep {
@@ -520,10 +511,14 @@ fn visit_package(
         }
     })?;
 
-    if let Some(pos) = visiting.iter().position(|(_, p)| p == &canon) {
-        let mut chain: Vec<String> = visiting[pos..].iter().map(|(n, _)| n.clone()).collect();
+    if let Some(pos) = state.visiting.iter().position(|(_, p)| p == &canon) {
+        let mut chain: Vec<String> = state.visiting[pos..]
+            .iter()
+            .map(|(n, _)| n.clone())
+            .collect();
         let self_name = via_dep.map(|s| s.to_string()).unwrap_or_else(|| {
-            visiting
+            state
+                .visiting
                 .last()
                 .map(|(n, _)| n.clone())
                 .unwrap_or_else(|| "?".into())
@@ -550,12 +545,12 @@ fn visit_package(
         }
     })?;
 
-    if done.contains(&canon) {
+    if state.done.contains(&canon) {
         return Ok(manifest);
     }
 
     let pkg_name = manifest.package.name.clone();
-    visiting.push((pkg_name.clone(), canon.clone()));
+    state.visiting.push((pkg_name.clone(), canon.clone()));
 
     // Deterministic order regardless of TOML/map iteration (already BTreeMap).
     let deps: Vec<(String, String)> = manifest
@@ -575,23 +570,14 @@ fn visit_package(
                 child.display()
             );
         }
-        visit_package(
-            &child,
-            Some(dep_name),
-            visiting,
-            done,
-            sources,
-            overlays,
-            package_dirs,
-            manifest_paths,
-        )?;
+        visit_package(&child, Some(dep_name), state)?;
     }
 
     let pkg_sources = find_sources(&canon).with_context(|| {
         if let Some(name) = via_dep {
-            format!("dependency `{name}`: sources in {}", canon.display())
+            format!("dependency `{name}`: state.sources in {}", canon.display())
         } else {
-            format!("sources in {}", canon.display())
+            format!("state.sources in {}", canon.display())
         }
     })?;
     for path in pkg_sources {
@@ -603,7 +589,7 @@ fn visit_package(
             .to_string_lossy()
             .replace('\\', "/");
         let label = format!("{pkg_name}/{rel}");
-        sources.push(ResolvedSource { label, path, text });
+        state.sources.push(ResolvedSource { label, path, text });
     }
 
     let pkg_overlays = find_overlays(&canon)?;
@@ -616,7 +602,7 @@ fn visit_package(
             .to_string_lossy()
             .replace('\\', "/");
         let label = format!("{pkg_name}/{rel}");
-        overlays.push(OverlaySource {
+        state.overlays.push(OverlaySource {
             stem,
             kind,
             label,
@@ -625,10 +611,10 @@ fn visit_package(
         });
     }
 
-    package_dirs.push(canon.clone());
-    manifest_paths.push(manifest_path);
-    done.insert(canon);
-    visiting.pop();
+    state.package_dirs.push(canon.clone());
+    state.manifest_paths.push(manifest_path);
+    state.done.insert(canon);
+    state.visiting.pop();
     Ok(manifest)
 }
 

@@ -505,7 +505,7 @@ pub fn typecheck_all(program: &Program) -> Vec<TypeError> {
                         }
                     }
                     match infer(rfn, &enums, &funs, &methods, &en.module, &mut env) {
-                        Ok(rty) if matches!(rty, Type::Bool) => {}
+                        Ok(Type::Bool) => {}
                         Ok(rty) => errs.push(TypeError::Msg(format!(
                             "where on `{}.{}` must be Bool, got {rty:?}",
                             en.name, fname
@@ -947,6 +947,8 @@ fn force_pred_if_io(pred: Expr, pred_ty: &Type) -> Expr {
     }
 }
 
+// Arity comes from the shared typecheck context (enums, funs, methods, module, env).
+#[allow(clippy::too_many_arguments)]
 fn rewrite_require(
     receiver: Expr,
     args: Vec<Expr>,
@@ -1780,6 +1782,8 @@ fn infer(
     .map_err(|e| e.with_span_if_bare(&expr.span))
 }
 
+// Arity comes from the shared typecheck context (enums, funs, methods, module, env).
+#[allow(clippy::too_many_arguments)]
 fn infer_lambda_arg(
     callee: &str,
     expr: &Expr,
@@ -4376,6 +4380,8 @@ fn check_targ(
     }
 }
 
+// Arity comes from the shared typecheck context (enums, funs, methods, module, env).
+#[allow(clippy::too_many_arguments)]
 fn elaborate_expr(
     expr: Expr,
     enums: &EnumIndex<'_>,
