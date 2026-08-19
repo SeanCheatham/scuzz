@@ -1391,11 +1391,42 @@ impl Parser {
         self.parse_pattern_at(false)
     }
 
-    fn parse_pattern_at(&mut self, nested: bool) -> Result<Pattern, ParseError> {
-        match self.peek() {
+    fn parse_pattern_at(&mut self, _nested: bool) -> Result<Pattern, ParseError> {
+        match self.peek().clone() {
             Token::Underscore => {
                 self.bump();
                 Ok(Pattern::Wildcard)
+            }
+            Token::IntLit(n) => {
+                self.bump();
+                Ok(Pattern::Int(n))
+            }
+            Token::FloatLit(bits) => {
+                self.bump();
+                Ok(Pattern::Float(bits))
+            }
+            Token::True => {
+                self.bump();
+                Ok(Pattern::Bool(true))
+            }
+            Token::False => {
+                self.bump();
+                Ok(Pattern::Bool(false))
+            }
+            Token::StringLit(s) => {
+                self.bump();
+                Ok(Pattern::Str(s))
+            }
+            Token::Minus => {
+                self.bump();
+                let got = self.bump();
+                match got.token {
+                    Token::IntLit(n) => Ok(Pattern::Int(-n)),
+                    Token::FloatLit(bits) => Ok(Pattern::Float((-f64::from_bits(bits)).to_bits())),
+                    other => Err(self.err(format!(
+                        "expected number after `-` in pattern, got {other:?}"
+                    ))),
+                }
             }
             Token::Ident(_) => {
                 let (name, _) = self.expect_ident()?;
@@ -1418,12 +1449,8 @@ impl Parser {
                         binds,
                         type_args: Vec::new(),
                     })
-                } else if nested {
-                    Ok(Pattern::Bind(name))
                 } else {
-                    Err(self.err(format!(
-                        "expected `.Case` or `(binds)` after pattern {name}"
-                    )))
+                    Ok(Pattern::Bind(name))
                 }
             }
             other => Err(self.err(format!("expected pattern, got {other:?}"))),
@@ -2374,6 +2401,85 @@ enum Wrap:
                     assert!(matches!(&binds[..], [Pattern::Wildcard]), "{binds:?}");
                 }
                 other => panic!("expected wildcard payload, got {other:?}"),
+            },
+            other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_literal_patterns() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  n match {
+    case 0 => IO.println("z")
+    case -1 => IO.println("n")
+    case true => IO.println("t")
+    case "ok" => IO.println("s")
+    case 1.5 => IO.println("f")
+    case x => IO.println("b")
+  }
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => {
+                assert!(
+                    matches!(&arms[0].pattern, Pattern::Int(0)),
+                    "{:?}",
+                    arms[0].pattern
+                );
+                assert!(
+                    matches!(&arms[1].pattern, Pattern::Int(-1)),
+                    "{:?}",
+                    arms[1].pattern
+                );
+                assert!(
+                    matches!(&arms[2].pattern, Pattern::Bool(true)),
+                    "{:?}",
+                    arms[2].pattern
+                );
+                assert!(
+                    matches!(&arms[3].pattern, Pattern::Str(s) if s == "ok"),
+                    "{:?}",
+                    arms[3].pattern
+                );
+                assert!(
+                    matches!(&arms[4].pattern, Pattern::Float(_)),
+                    "{:?}",
+                    arms[4].pattern
+                );
+                assert!(
+                    matches!(&arms[5].pattern, Pattern::Bind(n) if n == "x"),
+                    "{:?}",
+                    arms[5].pattern
+                );
+            }
+            other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_nested_int_literal_pattern() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  Opt.Some(0) match {
+    case Opt.Some(0) => IO.println("z")
+    case Opt.Some(_) => IO.println("o")
+    case Opt.None => IO.println("n")
+  }
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => match &arms[0].pattern {
+                Pattern::Adt { binds, .. } => {
+                    assert!(matches!(&binds[..], [Pattern::Int(0)]), "{binds:?}");
+                }
+                other => panic!("expected Opt.Some(0), got {other:?}"),
             },
             other => panic!("expected match, got {other:?}"),
         }

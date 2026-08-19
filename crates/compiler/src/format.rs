@@ -527,6 +527,11 @@ fn pretty_pattern(pat: &Pattern) -> String {
     match pat {
         Pattern::Wildcard => "_".into(),
         Pattern::Bind(name) => name.clone(),
+        Pattern::Int(n) => format!("{n}"),
+        Pattern::Float(bits) => crate::ast::format_float_bits(*bits),
+        Pattern::Bool(true) => "true".into(),
+        Pattern::Bool(false) => "false".into(),
+        Pattern::Str(s) => format!("\"{}\"", escape(s)),
         Pattern::Adt {
             enum_name,
             case_name,
@@ -695,6 +700,28 @@ enum Opt:
 "#;
         let out = format_source(src).unwrap();
         assert!(out.contains("case Opt.Some(n) if n > 0 =>"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_literal_patterns() {
+        let src = r#"
+@main def main: IO[Unit] =
+  n match {
+    case 0 => IO.println("z")
+    case -1 => IO.println("n")
+    case true => IO.println("t")
+    case "ok" => IO.println("s")
+    case x => IO.println("b")
+  }
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("case 0 =>"));
+        assert!(out.contains("case -1 =>"));
+        assert!(out.contains("case true =>"));
+        assert!(out.contains("case \"ok\" =>"));
+        assert!(out.contains("case x =>"));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

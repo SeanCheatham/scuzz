@@ -93,6 +93,12 @@ jobs:
           grep -q "guard:pos:3" /tmp/kernel.out
           grep -q "guard:nonpos:0" /tmp/kernel.out
           grep -q "guard:none" /tmp/kernel.out
+          grep -q "lit:zero" /tmp/kernel.out
+          grep -q "lit:other" /tmp/kernel.out
+          grep -q "lit:yes" /tmp/kernel.out
+          grep -q "lit:good" /tmp/kernel.out
+          grep -q "lit:some0" /tmp/kernel.out
+          grep -q "lit:hit0" /tmp/kernel.out
           grep -q "record:8" /tmp/kernel.out
           grep -q "Point(3,5)" /tmp/kernel.out
           grep -q "get:3" /tmp/kernel.out

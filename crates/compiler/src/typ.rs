@@ -3210,6 +3210,38 @@ fn bind_pattern(
 ) -> Result<Vec<(String, Option<Type>)>, TypeError> {
     match pat {
         crate::ast::Pattern::Wildcard => Ok(Vec::new()),
+        crate::ast::Pattern::Int(_) => {
+            if !matches!(scrut, Type::Int) {
+                return Err(TypeError::Msg(format!(
+                    "int literal pattern does not match scrutinee {scrut:?}"
+                )));
+            }
+            Ok(Vec::new())
+        }
+        crate::ast::Pattern::Float(_) => {
+            if !matches!(scrut, Type::Float) {
+                return Err(TypeError::Msg(format!(
+                    "float literal pattern does not match scrutinee {scrut:?}"
+                )));
+            }
+            Ok(Vec::new())
+        }
+        crate::ast::Pattern::Bool(_) => {
+            if !matches!(scrut, Type::Bool) {
+                return Err(TypeError::Msg(format!(
+                    "bool literal pattern does not match scrutinee {scrut:?}"
+                )));
+            }
+            Ok(Vec::new())
+        }
+        crate::ast::Pattern::Str(_) => {
+            if !matches!(scrut, Type::String) {
+                return Err(TypeError::Msg(format!(
+                    "string literal pattern does not match scrutinee {scrut:?}"
+                )));
+            }
+            Ok(Vec::new())
+        }
         crate::ast::Pattern::Bind(name) => {
             let old = env.insert(name.clone(), scrut.clone());
             Ok(vec![(name.clone(), old)])
@@ -3370,7 +3402,11 @@ fn collect_bind_names(pat: &crate::ast::Pattern, out: &mut Vec<String>) {
                 collect_bind_names(b, out);
             }
         }
-        crate::ast::Pattern::Wildcard => {}
+        crate::ast::Pattern::Wildcard
+        | crate::ast::Pattern::Int(_)
+        | crate::ast::Pattern::Float(_)
+        | crate::ast::Pattern::Bool(_)
+        | crate::ast::Pattern::Str(_) => {}
     }
 }
 
@@ -3460,6 +3496,65 @@ fn uncovered_product(
             }
             Ok(missing)
         }
+        Type::Bool => {
+            let mut missing = Vec::new();
+            for (lit, name) in [(true, "true"), (false, "false")] {
+                let mut spec: Vec<Vec<crate::ast::Pattern>> = Vec::new();
+                for r in rows {
+                    match r.first() {
+                        Some(p) if p.is_irrefutable() => {
+                            spec.push(r.iter().skip(1).cloned().collect());
+                        }
+                        Some(crate::ast::Pattern::Bool(b)) if *b == lit => {
+                            spec.push(r.iter().skip(1).cloned().collect());
+                        }
+                        _ => {}
+                    }
+                }
+                if spec.is_empty() {
+                    missing.push(name.into());
+                    continue;
+                }
+                for m in uncovered_product(tail, &spec, enums, current_module)? {
+                    if tail.is_empty() {
+                        missing.push(name.into());
+                    } else {
+                        missing.push(format!("{name}, {m}"));
+                    }
+                }
+            }
+            Ok(missing)
+        }
+        Type::Int | Type::Float | Type::String => {
+            if rows
+                .iter()
+                .any(|r| r.first().is_some_and(|p| p.is_irrefutable()))
+            {
+                let rest: Vec<Vec<crate::ast::Pattern>> = rows
+                    .iter()
+                    .filter(|r| r.first().is_some_and(|p| p.is_irrefutable()))
+                    .map(|r| r.iter().skip(1).cloned().collect())
+                    .collect();
+                uncovered_product(tail, &rest, enums, current_module)
+            } else if rows.is_empty() {
+                Ok(vec![head.to_string()])
+            } else {
+                let rest_missing = if tail.is_empty() {
+                    Vec::new()
+                } else {
+                    let rest: Vec<Vec<crate::ast::Pattern>> = rows
+                        .iter()
+                        .map(|r| r.iter().skip(1).cloned().collect())
+                        .collect();
+                    uncovered_product(tail, &rest, enums, current_module)?
+                };
+                if rest_missing.is_empty() {
+                    Ok(vec!["_".into()])
+                } else {
+                    Ok(rest_missing)
+                }
+            }
+        }
         _ => {
             if rows
                 .iter()
@@ -3489,7 +3584,12 @@ fn elaborate_pattern(
     span: &Span,
 ) -> Result<crate::ast::Pattern, TypeError> {
     match pat {
-        crate::ast::Pattern::Wildcard | crate::ast::Pattern::Bind(_) => Ok(pat.clone()),
+        crate::ast::Pattern::Wildcard
+        | crate::ast::Pattern::Bind(_)
+        | crate::ast::Pattern::Int(_)
+        | crate::ast::Pattern::Float(_)
+        | crate::ast::Pattern::Bool(_)
+        | crate::ast::Pattern::Str(_) => Ok(pat.clone()),
         crate::ast::Pattern::Adt {
             enum_name,
             case_name,
@@ -6045,6 +6145,139 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("kit Bool guard typechecks");
+    }
+
+    #[test]
+    fn typechecks_int_literal_match() {
+        let src = r#"
+@main def main: IO[Unit] =
+  0 match {
+    case 0 => IO.println("z")
+    case _ => IO.println("o")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("int literal plus wildcard is exhaustive");
+    }
+
+    #[test]
+    fn typechecks_bool_literal_match() {
+        let src = r#"
+@main def main: IO[Unit] =
+  true match {
+    case true => IO.println("t")
+    case false => IO.println("f")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("true and false cover Bool");
+    }
+
+    #[test]
+    fn typechecks_name_bind_covers_int() {
+        let src = r#"
+@main def main: IO[Unit] =
+  1 match {
+    case 0 => IO.println("z")
+    case n => IO.println(Str.fromInt(n))
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("name bind covers remaining Int");
+    }
+
+    #[test]
+    fn typechecks_nested_int_literal_match() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  Opt.Some(0) match {
+    case Opt.Some(0) => IO.println("z")
+    case Opt.Some(_) => IO.println("o")
+    case Opt.None => IO.println("n")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("nested int literal plus wildcard payload is exhaustive");
+    }
+
+    #[test]
+    fn rejects_int_literal_match_without_wildcard() {
+        let src = r#"
+@main def main: IO[Unit] =
+  0 match {
+    case 0 => IO.println("z")
+    case 1 => IO.println("o")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("non-exhaustive match: missing _"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_bool_literal_match_missing_false() {
+        let src = r#"
+@main def main: IO[Unit] =
+  true match {
+    case true => IO.println("t")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("non-exhaustive match: missing false"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_string_literal_on_int() {
+        let src = r#"
+@main def main: IO[Unit] =
+  0 match {
+    case "x" => IO.println("s")
+    case _ => IO.println("o")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("string literal pattern does not match scrutinee"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_nested_int_literal_without_payload_wildcard() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  Opt.Some(0) match {
+    case Opt.Some(0) => IO.println("z")
+    case Opt.None => IO.println("n")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("non-exhaustive match: missing")
+                && err.message().contains("Opt.Some"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]

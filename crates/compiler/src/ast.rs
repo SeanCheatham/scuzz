@@ -590,8 +590,16 @@ pub enum Pattern {
     },
     /// `_`
     Wildcard,
-    /// Payload name bind (`n` in `case Opt.Some(n)`).
+    /// Payload name bind (`n` in `case Opt.Some(n)`), or a top-level catch-all bind.
     Bind(String),
+    /// `case 0` / `case -1`
+    Int(i64),
+    /// `case 1.5`
+    Float(u64),
+    /// `case true` / `case false`
+    Bool(bool),
+    /// `case "ok"`
+    Str(String),
 }
 
 impl Pattern {
