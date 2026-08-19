@@ -264,6 +264,7 @@ pub(crate) fn impl_block_end(source: &str, tok: &crate::lexer::SpannedToken) -> 
         | Token::Trait
         | Token::Enum
         | Token::Record
+        | Token::Type
         | Token::Import
         | Token::Law
         | Token::AtMain => true,

@@ -1,6 +1,7 @@
 use crate::ast::{
     BinOp, EnumCase, EnumDef, Expr, ExprKind, ForBinder, FunDef, ImplDef, ImplMethod, Import,
-    InterpPart, MainDef, MatchArm, Param, Pattern, Program, TraitDef, TraitMethod, Type, UnOp,
+    InterpPart, MainDef, MatchArm, Param, Pattern, Program, TraitDef, TraitMethod, Type, TypeAlias,
+    UnOp,
 };
 use crate::lexer::{lex, InterpTok, LexError, SpannedToken, Token};
 use crate::resolve::module_id_from_label;
@@ -69,6 +70,7 @@ fn empty_program(file: &str) -> Program {
     Program {
         package: Vec::new(),
         enums: Vec::new(),
+        aliases: Vec::new(),
         traits: Vec::new(),
         impls: Vec::new(),
         defs: Vec::new(),
@@ -119,6 +121,7 @@ pub fn parse_file_recovering(source: &str, file: &str) -> (Program, Vec<ParseErr
 pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError> {
     let mut package: Option<Vec<String>> = None;
     let mut enums: Vec<EnumDef> = Vec::new();
+    let mut aliases: Vec<crate::ast::TypeAlias> = Vec::new();
     let mut traits: Vec<TraitDef> = Vec::new();
     let mut impls: Vec<ImplDef> = Vec::new();
     let mut defs: Vec<FunDef> = Vec::new();
@@ -150,6 +153,18 @@ pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError
                 )));
             }
             enums.push(e);
+        }
+        for a in prog.aliases {
+            if aliases
+                .iter()
+                .any(|x| x.module == a.module && x.name == a.name)
+            {
+                return Err(ParseError::Msg(format!(
+                    "{name}: duplicate type {}.{}",
+                    a.module, a.name
+                )));
+            }
+            aliases.push(a);
         }
         for t in prog.traits {
             if traits
@@ -201,6 +216,7 @@ pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError
     Ok(Program {
         package: package.unwrap_or_default(),
         enums,
+        aliases,
         traits,
         impls,
         defs,
@@ -218,6 +234,7 @@ pub fn parse_sources_recovering(
     let mut errors = Vec::new();
     let mut package: Option<Vec<String>> = None;
     let mut enums: Vec<EnumDef> = Vec::new();
+    let mut aliases: Vec<crate::ast::TypeAlias> = Vec::new();
     let mut traits: Vec<TraitDef> = Vec::new();
     let mut impls: Vec<ImplDef> = Vec::new();
     let mut defs: Vec<FunDef> = Vec::new();
@@ -249,6 +266,19 @@ pub fn parse_sources_recovering(
                 continue;
             }
             enums.push(e);
+        }
+        for a in prog.aliases {
+            if aliases
+                .iter()
+                .any(|x| x.module == a.module && x.name == a.name)
+            {
+                errors.push(ParseError::Msg(format!(
+                    "{name}: duplicate type {}.{}",
+                    a.module, a.name
+                )));
+                continue;
+            }
+            aliases.push(a);
         }
         for t in prog.traits {
             if traits
@@ -308,6 +338,7 @@ pub fn parse_sources_recovering(
         Some(Program {
             package: package.unwrap_or_default(),
             enums,
+            aliases,
             traits,
             impls,
             defs,
@@ -403,6 +434,7 @@ impl Parser {
             self.peek(),
             Token::Enum
                 | Token::Record
+                | Token::Type
                 | Token::Trait
                 | Token::Impl
                 | Token::Import
@@ -459,6 +491,7 @@ impl Parser {
         }
 
         let mut enums = Vec::new();
+        let mut aliases: Vec<TypeAlias> = Vec::new();
         let mut traits = Vec::new();
         let mut impls = Vec::new();
         let mut defs = Vec::new();
@@ -480,6 +513,19 @@ impl Parser {
                 },
                 Token::Record => match self.parse_record() {
                     Ok(e) => enums.push(e),
+                    Err(e) => {
+                        errors.push(e);
+                        self.skip_to_item();
+                    }
+                },
+                Token::Type => match self.parse_type_alias() {
+                    Ok(a) => {
+                        if aliases.iter().any(|x| x.name == a.name) {
+                            errors.push(self.err(format!("duplicate type {}", a.name)));
+                        } else {
+                            aliases.push(a);
+                        }
+                    }
                     Err(e) => {
                         errors.push(e);
                         self.skip_to_item();
@@ -547,7 +593,7 @@ impl Parser {
                 Token::Eof => break,
                 other => {
                     let msg = format!(
-                    "expected enum/record/trait/impl/import/def/private def/law/@main, got {other:?}"
+                    "expected enum/record/type/trait/impl/import/def/private def/law/@main, got {other:?}"
                 );
                     errors.push(self.err(msg));
                     self.skip_to_item();
@@ -559,6 +605,7 @@ impl Parser {
             Program {
                 package,
                 enums,
+                aliases,
                 traits,
                 impls,
                 defs,
@@ -661,6 +708,26 @@ impl Parser {
             params,
             ret,
             body,
+        })
+    }
+
+    /// `type Name = T` / `type Name[T] = List[T]`.
+    fn parse_type_alias(&mut self) -> Result<TypeAlias, ParseError> {
+        self.expect(&Token::Type)?;
+        let (name, name_span) = self.expect_ident()?;
+        let type_params = if matches!(self.peek(), Token::LBracket) {
+            self.parse_type_params()?
+        } else {
+            Vec::new()
+        };
+        self.expect(&Token::Eq)?;
+        let target = self.parse_type_with_tparams(&type_params)?;
+        Ok(TypeAlias {
+            module: self.module.clone(),
+            name,
+            name_span,
+            type_params,
+            target,
         })
     }
 
@@ -3972,5 +4039,43 @@ import A.*
         let src = "import A.tag as tag\n@main def main: IO[Unit] = IO.println(\"x\")\n";
         let err = parse(src).unwrap_err();
         assert!(err.message().contains("same as"), "{}", err.message());
+    }
+
+    #[test]
+    fn parse_type_alias() {
+        let src = r#"
+type UserId = Int
+type Labels = List[String]
+type BoxList[T] = List[T]
+def idOf(n: UserId): UserId = n
+@main def main: IO[Unit] = IO.println(Str.fromInt(idOf(1)))
+"#;
+        let p = parse(src).unwrap();
+        assert_eq!(p.aliases.len(), 3);
+        assert_eq!(p.aliases[0].name, "UserId");
+        assert!(p.aliases[0].type_params.is_empty());
+        assert!(matches!(p.aliases[0].target, Type::Int));
+        assert_eq!(p.aliases[1].name, "Labels");
+        assert!(matches!(p.aliases[1].target, Type::List(ref t) if matches!(**t, Type::String)));
+        assert_eq!(p.aliases[2].name, "BoxList");
+        assert_eq!(p.aliases[2].type_params, vec!["T".to_string()]);
+        assert!(
+            matches!(p.aliases[2].target, Type::List(ref t) if matches!(**t, Type::Var(ref n) if n == "T"))
+        );
+    }
+
+    #[test]
+    fn parse_rejects_duplicate_type_alias() {
+        let src = r#"
+type UserId = Int
+type UserId = String
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(
+            err.message().contains("duplicate type UserId"),
+            "{}",
+            err.message()
+        );
     }
 }

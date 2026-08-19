@@ -1,5 +1,6 @@
 use crate::ast::{
-    BinOp, EnumDef, Expr, ExprKind, FunDef, ImplDef, Param, Program, TraitDef, Type, UnOp,
+    BinOp, EnumDef, Expr, ExprKind, FunDef, ImplDef, Param, Program, TraitDef, Type, TypeAlias,
+    UnOp,
 };
 use crate::hover::kit_sig;
 use crate::resolve::{enum_bare_name, enum_id, EnumIndex, FunIndex, ResolveError};
@@ -271,7 +272,8 @@ fn with_pass_indexes<R>(
     let enums = EnumIndex::build(&enums_owned, &imports_owned)
         .map_err(|e| TypeError::Msg(e.to_string()))?;
     let methods = MethodIndex::build(&impls_owned, &traits_owned, &enums, &enums_owned)?;
-    let funs = FunIndex::build(&defs_owned, &imports_owned, &enums_owned)
+    let aliases_owned = program.aliases.clone();
+    let funs = FunIndex::build(&defs_owned, &imports_owned, &enums_owned, &aliases_owned)
         .map_err(|e| TypeError::Msg(e.to_string()))?;
     f(program, &enums, &methods, &funs)
 }
@@ -325,8 +327,260 @@ fn enum_self_ty(en: &EnumDef) -> Type {
     }
 }
 
+/// Expand `type Name = T` in signatures and ascriptions. Idempotent.
+pub fn expand_type_aliases(mut program: Program) -> Result<Program, TypeError> {
+    for a in &program.aliases {
+        if program
+            .enums
+            .iter()
+            .any(|e| e.module == a.module && e.name == a.name)
+        {
+            return Err(TypeError::Msg(format!(
+                "type {} conflicts with enum {}",
+                a.name, a.name
+            )));
+        }
+    }
+    let aliases = program.aliases.clone();
+    let imports = program.imports.clone();
+    for a in &mut program.aliases {
+        let mut stack = vec![crate::resolve::enum_id(&a.module, &a.name)];
+        a.target = expand_alias_ty(&a.target, &aliases, &imports, &a.module, &mut stack)?;
+    }
+    let aliases = program.aliases.clone();
+    for d in &mut program.defs {
+        expand_types_in_def(d, &aliases, &imports)?;
+    }
+    {
+        let module = program.main.module.clone();
+        program.main.body =
+            expand_types_in_expr(program.main.body.clone(), &aliases, &imports, &module)?;
+    }
+    for en in &mut program.enums {
+        let module = en.module.clone();
+        let tparams = en.type_params.clone();
+        for c in &mut en.cases {
+            for (_, ty) in &mut c.fields {
+                *ty = expand_alias_ty_tparams(ty, &aliases, &imports, &module, &tparams)?;
+            }
+        }
+        for m in &mut en.methods {
+            expand_types_in_method(m, &aliases, &imports, &module, &tparams)?;
+        }
+    }
+    for t in &mut program.traits {
+        let module = t.module.clone();
+        let tparams = t.type_params.clone();
+        for m in &mut t.methods {
+            m.ret = expand_alias_ty_tparams(&m.ret, &aliases, &imports, &module, &tparams)?;
+            for p in &mut m.params {
+                p.ty = expand_alias_ty_tparams(&p.ty, &aliases, &imports, &module, &tparams)?;
+            }
+        }
+    }
+    for im in &mut program.impls {
+        let module = im.module.clone();
+        for m in &mut im.methods {
+            expand_types_in_method(m, &aliases, &imports, &module, &[])?;
+        }
+    }
+    Ok(program)
+}
+
+fn expand_types_in_def(
+    d: &mut FunDef,
+    aliases: &[TypeAlias],
+    imports: &[crate::ast::Import],
+) -> Result<(), TypeError> {
+    let module = d.module.clone();
+    let tparams = d.type_params.clone();
+    d.ret = expand_alias_ty_tparams(&d.ret, aliases, imports, &module, &tparams)?;
+    for p in &mut d.params {
+        p.ty = expand_alias_ty_tparams(&p.ty, aliases, imports, &module, &tparams)?;
+    }
+    d.body = expand_types_in_expr(d.body.clone(), aliases, imports, &module)?;
+    Ok(())
+}
+
+fn expand_types_in_method(
+    m: &mut crate::ast::ImplMethod,
+    aliases: &[TypeAlias],
+    imports: &[crate::ast::Import],
+    module: &str,
+    tparams: &[String],
+) -> Result<(), TypeError> {
+    m.ret = expand_alias_ty_tparams(&m.ret, aliases, imports, module, tparams)?;
+    for p in &mut m.params {
+        p.ty = expand_alias_ty_tparams(&p.ty, aliases, imports, module, tparams)?;
+    }
+    m.body = expand_types_in_expr(m.body.clone(), aliases, imports, module)?;
+    Ok(())
+}
+
+fn expand_types_in_expr(
+    expr: Expr,
+    aliases: &[TypeAlias],
+    imports: &[crate::ast::Import],
+    module: &str,
+) -> Result<Expr, TypeError> {
+    let span = expr.span.clone();
+    match expr.kind {
+        ExprKind::Ascribe { expr, ty } => {
+            let ty = expand_alias_ty(&ty, aliases, imports, module, &mut Vec::new())?;
+            let expr = expand_types_in_expr(*expr, aliases, imports, module)?;
+            Ok(Expr::new(
+                ExprKind::Ascribe {
+                    expr: Box::new(expr),
+                    ty,
+                },
+                span,
+            ))
+        }
+        ExprKind::Lambda {
+            param,
+            param_ty,
+            body,
+        } => {
+            let param_ty = match param_ty {
+                Some(ty) => Some(expand_alias_ty(
+                    &ty,
+                    aliases,
+                    imports,
+                    module,
+                    &mut Vec::new(),
+                )?),
+                None => None,
+            };
+            let body = expand_types_in_expr(*body, aliases, imports, module)?;
+            Ok(Expr::new(
+                ExprKind::Lambda {
+                    param,
+                    param_ty,
+                    body: Box::new(body),
+                },
+                span,
+            ))
+        }
+        kind => Expr { kind, span }
+            .try_map_children(|c| expand_types_in_expr(c, aliases, imports, module)),
+    }
+}
+
+fn expand_alias_ty_tparams(
+    ty: &Type,
+    aliases: &[TypeAlias],
+    imports: &[crate::ast::Import],
+    module: &str,
+    tparams: &[String],
+) -> Result<Type, TypeError> {
+    match ty {
+        Type::Var(n) if tparams.iter().any(|p| p == n) => Ok(ty.clone()),
+        Type::Adt(n) if tparams.iter().any(|p| p == n) => Ok(Type::Var(n.clone())),
+        _ => expand_alias_ty(ty, aliases, imports, module, &mut Vec::new()),
+    }
+}
+
+fn expand_alias_ty(
+    ty: &Type,
+    aliases: &[TypeAlias],
+    imports: &[crate::ast::Import],
+    module: &str,
+    stack: &mut Vec<String>,
+) -> Result<Type, TypeError> {
+    match ty {
+        Type::List(inner) => Ok(Type::List(Box::new(expand_alias_ty(
+            inner, aliases, imports, module, stack,
+        )?))),
+        Type::Io(inner) => Ok(Type::Io(Box::new(expand_alias_ty(
+            inner, aliases, imports, module, stack,
+        )?))),
+        Type::Fun(a, b) => Ok(Type::Fun(
+            Box::new(expand_alias_ty(a, aliases, imports, module, stack)?),
+            Box::new(expand_alias_ty(b, aliases, imports, module, stack)?),
+        )),
+        Type::Adt(n) => expand_alias_name(n, &[], aliases, imports, module, stack),
+        Type::App(n, args) => {
+            let args = args
+                .iter()
+                .map(|a| expand_alias_ty(a, aliases, imports, module, stack))
+                .collect::<Result<Vec<_>, _>>()?;
+            expand_alias_name(n, &args, aliases, imports, module, stack)
+        }
+        other => Ok(other.clone()),
+    }
+}
+
+fn expand_alias_name(
+    name: &str,
+    args: &[Type],
+    aliases: &[TypeAlias],
+    imports: &[crate::ast::Import],
+    module: &str,
+    stack: &mut Vec<String>,
+) -> Result<Type, TypeError> {
+    let Some(alias) = lookup_alias(aliases, imports, name, module)? else {
+        return Ok(if args.is_empty() {
+            Type::Adt(name.to_string())
+        } else {
+            Type::App(name.to_string(), args.to_vec())
+        });
+    };
+    let key = crate::resolve::enum_id(&alias.module, &alias.name);
+    if stack.iter().any(|s| s == &key) {
+        return Err(TypeError::Msg(format!("cyclic type {name}")));
+    }
+    if alias.type_params.len() != args.len() {
+        if alias.type_params.is_empty() {
+            return Err(TypeError::Msg(format!(
+                "type {name} takes no type arguments"
+            )));
+        }
+        return Err(TypeError::Msg(format!(
+            "type {name} expects {} type argument(s)",
+            alias.type_params.len()
+        )));
+    }
+    let mut subst = HashMap::new();
+    for (p, t) in alias.type_params.iter().zip(args.iter()) {
+        subst.insert(p.clone(), t.clone());
+    }
+    let inst = apply_subst(&alias.target, &subst);
+    stack.push(key);
+    let out = expand_alias_ty(&inst, aliases, imports, module, stack)?;
+    stack.pop();
+    Ok(out)
+}
+
+fn lookup_alias<'a>(
+    aliases: &'a [TypeAlias],
+    imports: &[crate::ast::Import],
+    name: &str,
+    module: &str,
+) -> Result<Option<&'a TypeAlias>, TypeError> {
+    if let Some((m, n)) = crate::resolve::split_dotted(name) {
+        return Ok(aliases.iter().find(|a| a.module == m && a.name == n));
+    }
+    if let Some(a) = aliases
+        .iter()
+        .find(|a| a.module == module && a.name == name)
+    {
+        return Ok(Some(a));
+    }
+    if let Some((from, src)) = crate::resolve::bind_import(imports, &[], &[], aliases, module, name)
+    {
+        return Ok(aliases.iter().find(|a| a.module == from && a.name == src));
+    }
+    let hits: Vec<_> = aliases.iter().filter(|a| a.name == name).collect();
+    match hits.as_slice() {
+        [] => Ok(None),
+        [a] => Ok(Some(*a)),
+        _ => Err(TypeError::Msg(format!("ambiguous type {name}"))),
+    }
+}
+
 /// Turn `impl` methods into ordinary defs (`self` first) for FunIndex / codegen.
 pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
+    program = expand_type_aliases(program)?;
     inject_builtin_enums(&mut program.enums);
     let enums = EnumIndex::build(&program.enums, &program.imports)
         .map_err(|e| TypeError::Msg(e.to_string()))?;
@@ -458,6 +712,10 @@ pub fn typecheck_all(program: &Program) -> Vec<TypeError> {
         Ok(p) => p,
         Err(e) => return vec![e],
     };
+    let program = match expand_type_aliases(program) {
+        Ok(p) => p,
+        Err(e) => return vec![e],
+    };
     let mut errs = Vec::new();
     let mut enums_storage = program.enums.clone();
     inject_builtin_enums(&mut enums_storage);
@@ -477,7 +735,12 @@ pub fn typecheck_all(program: &Program) -> Vec<TypeError> {
         Ok(m) => m,
         Err(e) => return vec![e],
     };
-    let funs = match FunIndex::build(&program.defs, &program.imports, &program.enums) {
+    let funs = match FunIndex::build(
+        &program.defs,
+        &program.imports,
+        &program.enums,
+        &program.aliases,
+    ) {
         Ok(f) => f,
         Err(e) => {
             return vec![match e {
@@ -10950,6 +11213,117 @@ law always: Bool = 1 == 1
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List[Int] map/filter");
+    }
+
+    #[test]
+    fn typechecks_type_alias() {
+        let src = r#"
+type UserId = Int
+type Labels = List[String]
+type BoxList[T] = List[T]
+def idOf(n: UserId): UserId =
+  n
+def joinLabels(xs: Labels): String =
+  List.join(xs, ",")
+def lenBoxes(xs: BoxList[Int]): Int =
+  List.len(xs)
+@main def main: IO[Unit] =
+  for {
+    n = idOf(3)
+    s = joinLabels(["a", "b"])
+    k = lenBoxes([1, 2])
+    ascribe = 1: UserId
+    _ <- IO.println(Str.fromInt(n + k))
+    _ <- IO.println(s)
+    _ <- IO.println(Str.fromInt(ascribe))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("type aliases should typecheck");
+    }
+
+    #[test]
+    fn rejects_cyclic_type_alias() {
+        let src = r#"
+type A = B
+type B = A
+def f(x: A): A = x
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("cyclic type"),
+            "got {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_type_alias_arity() {
+        let src = r#"
+type UserId = Int
+def f(x: UserId[Int]): Int = x
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("takes no type arguments"),
+            "got {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_generic_type_alias_without_args() {
+        let src = r#"
+type BoxList[T] = List[T]
+def f(xs: BoxList): Int = List.len(xs)
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("expects 1 type argument"),
+            "got {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_type_alias_enum_clash() {
+        let src = r#"
+record Point(x: Int, y: Int)
+type Point = Int
+def f(n: Point): Point = n
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("conflicts with enum"),
+            "got {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn typechecks_imported_type_alias() {
+        let sources = vec![
+            (
+                "A.scuzz".to_string(),
+                "type Tag = String\ndef one(): Int = 1\n".to_string(),
+            ),
+            (
+                "Main.scuzz".to_string(),
+                "import A.Tag\ndef show(t: Tag): String = t\n@main def main: IO[Unit] = IO.println(show(\"ok\"))\n"
+                    .to_string(),
+            ),
+        ];
+        let p = crate::parser::parse_sources(&sources).unwrap();
+        let p = lower_program(p);
+        typecheck(&p).expect("imported type alias");
     }
 
     #[test]

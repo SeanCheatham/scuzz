@@ -54,6 +54,35 @@ pub fn definition_in_sources(
     {
         return loc_for_def(sources, en.module.as_str(), DeclKind::Enum, &en.name);
     }
+    if let Some(a) = program
+        .aliases
+        .iter()
+        .find(|a| a.module == module && a.name == name)
+        .or_else(|| {
+            let (from, src) = crate::resolve::bind_import(
+                &program.imports,
+                &program.defs,
+                &program.enums,
+                &program.aliases,
+                &module,
+                &name,
+            )?;
+            program
+                .aliases
+                .iter()
+                .find(|a| a.module == from && a.name == src)
+        })
+        .or_else(|| {
+            let hits: Vec<_> = program.aliases.iter().filter(|a| a.name == name).collect();
+            if hits.len() == 1 {
+                Some(hits[0])
+            } else {
+                None
+            }
+        })
+    {
+        return loc_for_def(sources, a.module.as_str(), DeclKind::TypeAlias, &a.name);
+    }
     let case_hits: Vec<_> = program
         .enums
         .iter()
@@ -89,6 +118,7 @@ pub fn declaration_in_sources(
                             && crate::resolve::public_in(
                                 &program.defs,
                                 &program.enums,
+                                &program.aliases,
                                 &im.from_module,
                                 &name,
                             ))
@@ -227,6 +257,7 @@ pub(crate) enum DeclKind {
     Enum,
     Case,
     Trait,
+    TypeAlias,
 }
 
 pub(crate) fn loc_for_def(
@@ -271,6 +302,7 @@ pub(crate) fn decl_kw_name(
             DeclKind::Enum => matches!(toks[i].token, Token::Enum | Token::Record),
             DeclKind::Case => matches!(toks[i].token, Token::Case),
             DeclKind::Trait => matches!(toks[i].token, Token::Trait),
+            DeclKind::TypeAlias => matches!(toks[i].token, Token::Type),
         };
         if !ok {
             continue;
@@ -487,5 +519,20 @@ def wrap(xs: List[Color]): List[Color] =
         assert!(ty_loc(src, "add").is_none());
         assert!(ty_loc(src, "n:").is_none());
         assert!(ty_loc(src, "Int").is_none());
+    }
+
+    #[test]
+    fn defines_type_alias_from_use() {
+        let src = r#"
+type UserId = Int
+def idOf(n: UserId): UserId = n
+@main def main: IO[Unit] = IO.println(Str.fromInt(idOf(1)))
+"#;
+        let program = parse_file(src, "Main.scuzz").unwrap();
+        let sources = [("Main.scuzz".into(), src.to_string())];
+        let use_at = src.rfind("UserId").unwrap();
+        let d = definition_in_sources(&program, &sources, "Main.scuzz", src, use_at).unwrap();
+        let decl = src.find("UserId").unwrap();
+        assert_eq!(d.start, decl);
     }
 }

@@ -2,6 +2,7 @@ enum Msg:
   case Hi
   case Bye
 
+type Tag = String
 def one(): Int =
   1
 
@@ -9,7 +10,10 @@ private def hidden(): String =
   "a"
 
 def tag(): String =
-  hidden()
+  labeled(hidden())
+
+def labeled(t: Tag): Tag =
+  t
 
 def greet(): String =
   Msg.Hi match {
