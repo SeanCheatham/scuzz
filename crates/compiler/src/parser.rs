@@ -2135,6 +2135,69 @@ def scale(x: Float): Float = x * 2.0
     }
 
     #[test]
+    fn parse_separated_and_scientific_literals() {
+        let src = r#"
+def n(): Int = 1_000 + 0xFF_00 + 0b1010_0001
+def x(): Float = 1.5e1 + 1e-3
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        match &p.defs[0].body.kind {
+            ExprKind::Binary { left, .. } => match &left.kind {
+                ExprKind::Binary { left, .. } => {
+                    assert!(matches!(&left.kind, ExprKind::IntLit(1000)));
+                }
+                other => panic!("expected 1_000, got {other:?}"),
+            },
+            other => panic!("expected +, got {other:?}"),
+        }
+        match &p.defs[1].body.kind {
+            ExprKind::Binary { left, right, .. } => {
+                assert!(matches!(&left.kind, ExprKind::FloatLit(b) if f64::from_bits(*b) == 15.0));
+                assert!(matches!(
+                    &right.kind,
+                    ExprKind::FloatLit(b) if (f64::from_bits(*b) - 0.001).abs() < 1e-12
+                ));
+            }
+            other => panic!("expected float +, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_triple_quoted_string() {
+        let src = "@main def main: IO[Unit] = IO.println(\"\"\"a\nb\"\"\")\n";
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::IoPrintln(inner) => match &inner.kind {
+                ExprKind::StrLit(s) => assert_eq!(s, "a\nb"),
+                other => panic!("expected StrLit, got {other:?}"),
+            },
+            other => panic!("expected println, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_triple_interpolated_string() {
+        let src = "@main def main: IO[Unit] =\n  for {\n    n = 3\n  } yield IO.println(s\"\"\"n=$n\"\"\")\n";
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::For { body, .. } => match &body.kind {
+                ExprKind::IoPrintln(inner) => match &inner.kind {
+                    ExprKind::Interpolate { parts } => {
+                        assert!(
+                            parts.iter().any(|p| matches!(p, InterpPart::Expr(_))),
+                            "{parts:?}"
+                        );
+                    }
+                    other => panic!("expected interpolate, got {other:?}"),
+                },
+                other => panic!("expected println, got {other:?}"),
+            },
+            other => panic!("expected for, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn parse_io_forever_repeat_retry_as_calls() {
         let src = r#"@main def main: IO[Unit] =
   for {

@@ -563,7 +563,7 @@ pub enum ExprKind {
     Unit,
     /// Integer literal
     IntLit(i64),
-    /// `Float` literal as IEEE-754 bits (`1.5`).
+    /// `Float` literal as IEEE-754 bits (`1.5`, `1.5e-3`).
     FloatLit(u64),
     /// `true` / `false`
     BoolLit(bool),
