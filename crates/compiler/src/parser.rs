@@ -1,6 +1,6 @@
 use crate::ast::{
     BinOp, EnumCase, EnumDef, Expr, ExprKind, ForBinder, FunDef, ImplDef, ImplMethod, Import,
-    InterpPart, MainDef, MatchArm, Param, Pattern, Program, TraitDef, TraitMethod, Type,
+    InterpPart, MainDef, MatchArm, Param, Pattern, Program, TraitDef, TraitMethod, Type, UnOp,
 };
 use crate::lexer::{lex, InterpTok, LexError, SpannedToken, Token};
 use crate::resolve::module_id_from_label;
@@ -1163,10 +1163,10 @@ impl Parser {
     }
 
     fn parse_and(&mut self) -> Result<Expr, ParseError> {
-        let mut left = self.parse_cmp()?;
+        let mut left = self.parse_bitor()?;
         while matches!(self.peek(), Token::AmpAmp) {
             self.bump();
-            let right = self.parse_cmp()?;
+            let right = self.parse_bitor()?;
             let span = left.span.clone().cover(&right.span);
             left = self.mk(
                 ExprKind::Binary {
@@ -1180,8 +1180,62 @@ impl Parser {
         Ok(left)
     }
 
+    fn parse_bitor(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_bitxor()?;
+        while matches!(self.peek(), Token::Pipe) {
+            self.bump();
+            let right = self.parse_bitxor()?;
+            let span = left.span.clone().cover(&right.span);
+            left = self.mk(
+                ExprKind::Binary {
+                    op: BinOp::BitOr,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span,
+            );
+        }
+        Ok(left)
+    }
+
+    fn parse_bitxor(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_bitand()?;
+        while matches!(self.peek(), Token::Caret) {
+            self.bump();
+            let right = self.parse_bitand()?;
+            let span = left.span.clone().cover(&right.span);
+            left = self.mk(
+                ExprKind::Binary {
+                    op: BinOp::BitXor,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span,
+            );
+        }
+        Ok(left)
+    }
+
+    fn parse_bitand(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_cmp()?;
+        while matches!(self.peek(), Token::Amp) {
+            self.bump();
+            let right = self.parse_cmp()?;
+            let span = left.span.clone().cover(&right.span);
+            left = self.mk(
+                ExprKind::Binary {
+                    op: BinOp::BitAnd,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span,
+            );
+        }
+        Ok(left)
+    }
+
     fn parse_cmp(&mut self) -> Result<Expr, ParseError> {
-        let mut left = self.parse_add()?;
+        let mut left = self.parse_shift()?;
         loop {
             let op = match self.peek() {
                 Token::EqEq => BinOp::Eq,
@@ -1190,6 +1244,29 @@ impl Parser {
                 Token::LtEq => BinOp::Le,
                 Token::Gt => BinOp::Gt,
                 Token::GtEq => BinOp::Ge,
+                _ => break,
+            };
+            self.bump();
+            let right = self.parse_shift()?;
+            let span = left.span.clone().cover(&right.span);
+            left = self.mk(
+                ExprKind::Binary {
+                    op,
+                    left: Box::new(left),
+                    right: Box::new(right),
+                },
+                span,
+            );
+        }
+        Ok(left)
+    }
+
+    fn parse_shift(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_add()?;
+        loop {
+            let op = match self.peek() {
+                Token::Shl => BinOp::Shl,
+                Token::Shr => BinOp::Shr,
                 _ => break,
             };
             self.bump();
@@ -1231,7 +1308,7 @@ impl Parser {
     }
 
     fn parse_mul(&mut self) -> Result<Expr, ParseError> {
-        let mut left = self.parse_postfix()?;
+        let mut left = self.parse_unary()?;
         loop {
             let op = match self.peek() {
                 Token::Star => BinOp::Mul,
@@ -1240,7 +1317,7 @@ impl Parser {
                 _ => break,
             };
             self.bump();
-            let right = self.parse_postfix()?;
+            let right = self.parse_unary()?;
             let span = left.span.clone().cover(&right.span);
             left = self.mk(
                 ExprKind::Binary {
@@ -1252,6 +1329,26 @@ impl Parser {
             );
         }
         Ok(left)
+    }
+
+    fn parse_unary(&mut self) -> Result<Expr, ParseError> {
+        let start = self.current_span();
+        let op = match self.peek() {
+            Token::Minus => UnOp::Neg,
+            Token::Bang => UnOp::Not,
+            Token::Tilde => UnOp::BitNot,
+            _ => return self.parse_postfix(),
+        };
+        self.bump();
+        let expr = self.parse_unary()?;
+        let span = start.cover(&expr.span);
+        Ok(self.mk(
+            ExprKind::Unary {
+                op,
+                expr: Box::new(expr),
+            },
+            span,
+        ))
     }
 
     fn parse_postfix(&mut self) -> Result<Expr, ParseError> {
@@ -1594,21 +1691,6 @@ impl Parser {
             Token::InterpString(parts) => {
                 self.bump();
                 self.parse_interpolate(parts, start)
-            }
-            Token::Minus => {
-                self.bump();
-                let got = self.bump();
-                match got.token {
-                    Token::IntLit(n) => Ok(self.mk(ExprKind::IntLit(-n), start.cover(&got.span))),
-                    Token::FloatLit(bits) => {
-                        let neg = (-f64::from_bits(bits)).to_bits();
-                        Ok(self.mk(ExprKind::FloatLit(neg), start.cover(&got.span)))
-                    }
-                    other => Err(ParseError::At {
-                        msg: format!("expected number after `-`, got {other:?}"),
-                        span: got.span,
-                    }),
-                }
             }
             Token::Underscore => {
                 self.bump();
@@ -2990,5 +3072,56 @@ def b(): Int = 2
             p.defs.iter().map(|d| &d.name).collect::<Vec<_>>()
         );
         assert_eq!(p.main.name, "main");
+    }
+
+    #[test]
+    fn parse_unary_not_neg_bitnot() {
+        let src = r#"
+def f(n: Int, b: Bool): Int = if (!b) -n else ~n
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        match &p.defs[0].body.kind {
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+            } => {
+                assert!(
+                    matches!(&cond.kind, ExprKind::Unary { op: UnOp::Not, .. }),
+                    "{cond:?}"
+                );
+                assert!(
+                    matches!(&then_branch.kind, ExprKind::Unary { op: UnOp::Neg, .. }),
+                    "{then_branch:?}"
+                );
+                assert!(
+                    matches!(
+                        &else_branch.kind,
+                        ExprKind::Unary {
+                            op: UnOp::BitNot,
+                            ..
+                        }
+                    ),
+                    "{else_branch:?}"
+                );
+            }
+            other => panic!("expected if, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_bitwise_hex_bin() {
+        let src = r#"
+def mask(): Int = (0xFF & 0b1111) | 1 << 2 ^ 3
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        match &p.defs[0].body.kind {
+            ExprKind::Binary {
+                op: BinOp::BitOr, ..
+            } => {}
+            other => panic!("expected | at top, got {other:?}"),
+        }
     }
 }

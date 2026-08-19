@@ -51,6 +51,11 @@ fn flip_arith(op: BinOp) -> Option<BinOp> {
         BinOp::Mul => BinOp::Div,
         BinOp::Div => BinOp::Mul,
         BinOp::Mod => BinOp::Mul,
+        BinOp::BitAnd => BinOp::BitOr,
+        BinOp::BitOr => BinOp::BitAnd,
+        BinOp::BitXor => BinOp::BitAnd,
+        BinOp::Shl => BinOp::Shr,
+        BinOp::Shr => BinOp::Shl,
         _ => return None,
     })
 }

@@ -177,8 +177,14 @@ fn classify(
         | Token::Gt
         | Token::GtEq
         | Token::AmpAmp
+        | Token::Amp
         | Token::Pipe
         | Token::PipePipe
+        | Token::Caret
+        | Token::Tilde
+        | Token::Shl
+        | Token::Shr
+        | Token::Bang
         | Token::Arrow
         | Token::LeftArrow
         | Token::Dot

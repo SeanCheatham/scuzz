@@ -42,13 +42,19 @@ pub enum Token {
     Percent,
     EqEq,
     BangEq,
+    Bang,
     Lt,
     LtEq,
     Gt,
     GtEq,
     AmpAmp,
-    Pipe, // `|` in `case A | B`
+    Amp,
+    Pipe, // `|` in `case A | B` and bitwise or
     PipePipe,
+    Caret,
+    Tilde,
+    Shl,
+    Shr,
     Ident(String),
     StringLit(String),
     /// `s"..."` fragments: lit / `$ident` / `${...}` raw source for the parser.
@@ -168,6 +174,14 @@ pub fn lex(input: &str) -> Result<Vec<SpannedToken>, LexError> {
             i += 2;
             continue;
         }
+        if c == '!' {
+            tokens.push(SpannedToken {
+                token: Token::Bang,
+                span: Span::new(String::new(), byte_at(i), byte_at(i + 1)),
+            });
+            i += 1;
+            continue;
+        }
         if c == '<' && i + 1 < chars.len() && chars[i + 1] == '-' {
             tokens.push(SpannedToken {
                 token: Token::LeftArrow,
@@ -184,9 +198,25 @@ pub fn lex(input: &str) -> Result<Vec<SpannedToken>, LexError> {
             i += 2;
             continue;
         }
+        if c == '<' && i + 1 < chars.len() && chars[i + 1] == '<' {
+            tokens.push(SpannedToken {
+                token: Token::Shl,
+                span: Span::new(String::new(), byte_at(i), byte_at(i + 2)),
+            });
+            i += 2;
+            continue;
+        }
         if c == '>' && i + 1 < chars.len() && chars[i + 1] == '=' {
             tokens.push(SpannedToken {
                 token: Token::GtEq,
+                span: Span::new(String::new(), byte_at(i), byte_at(i + 2)),
+            });
+            i += 2;
+            continue;
+        }
+        if c == '>' && i + 1 < chars.len() && chars[i + 1] == '>' {
+            tokens.push(SpannedToken {
+                token: Token::Shr,
                 span: Span::new(String::new(), byte_at(i), byte_at(i + 2)),
             });
             i += 2;
@@ -198,6 +228,30 @@ pub fn lex(input: &str) -> Result<Vec<SpannedToken>, LexError> {
                 span: Span::new(String::new(), byte_at(i), byte_at(i + 2)),
             });
             i += 2;
+            continue;
+        }
+        if c == '&' {
+            tokens.push(SpannedToken {
+                token: Token::Amp,
+                span: Span::new(String::new(), byte_at(i), byte_at(i + 1)),
+            });
+            i += 1;
+            continue;
+        }
+        if c == '^' {
+            tokens.push(SpannedToken {
+                token: Token::Caret,
+                span: Span::new(String::new(), byte_at(i), byte_at(i + 1)),
+            });
+            i += 1;
+            continue;
+        }
+        if c == '~' {
+            tokens.push(SpannedToken {
+                token: Token::Tilde,
+                span: Span::new(String::new(), byte_at(i), byte_at(i + 1)),
+            });
+            i += 1;
             continue;
         }
         if c == '|' {
@@ -218,6 +272,49 @@ pub fn lex(input: &str) -> Result<Vec<SpannedToken>, LexError> {
         }
         if c.is_ascii_digit() {
             let start = i;
+            if c == '0' && i + 1 < chars.len() {
+                let next = chars[i + 1];
+                if (next == 'x' || next == 'X')
+                    && i + 2 < chars.len()
+                    && chars[i + 2].is_ascii_hexdigit()
+                {
+                    i += 2;
+                    let mut n = 0i64;
+                    while i < chars.len() && chars[i].is_ascii_hexdigit() {
+                        let d = chars[i];
+                        let v = if d.is_ascii_digit() {
+                            (d as u8 - b'0') as i64
+                        } else {
+                            (d.to_ascii_lowercase() as u8 - b'a' + 10) as i64
+                        };
+                        n = n.saturating_mul(16).saturating_add(v);
+                        i += 1;
+                    }
+                    tokens.push(SpannedToken {
+                        token: Token::IntLit(n),
+                        span: Span::new(String::new(), byte_at(start), byte_at(i)),
+                    });
+                    continue;
+                }
+                if (next == 'b' || next == 'B')
+                    && i + 2 < chars.len()
+                    && (chars[i + 2] == '0' || chars[i + 2] == '1')
+                {
+                    i += 2;
+                    let mut n = 0i64;
+                    while i < chars.len() && (chars[i] == '0' || chars[i] == '1') {
+                        n = n
+                            .saturating_mul(2)
+                            .saturating_add((chars[i] as u8 - b'0') as i64);
+                        i += 1;
+                    }
+                    tokens.push(SpannedToken {
+                        token: Token::IntLit(n),
+                        span: Span::new(String::new(), byte_at(start), byte_at(i)),
+                    });
+                    continue;
+                }
+            }
             while i < chars.len() && chars[i].is_ascii_digit() {
                 i += 1;
             }
@@ -560,5 +657,19 @@ mod tests {
             .unwrap();
         let (line, _) = crate::span::offset_to_line_col(src, at_main.span.start);
         assert_eq!(line, 2);
+    }
+
+    #[test]
+    fn lexes_unary_bitwise_and_base_lits() {
+        let toks = lex("!x ~1 0xFF 0b1010 a & b | c ^ d << 2 >> 1").unwrap();
+        assert!(toks.iter().any(|t| matches!(t.token, Token::Bang)));
+        assert!(toks.iter().any(|t| matches!(t.token, Token::Tilde)));
+        assert!(toks.iter().any(|t| matches!(t.token, Token::IntLit(255))));
+        assert!(toks.iter().any(|t| matches!(t.token, Token::IntLit(10))));
+        assert!(toks.iter().any(|t| matches!(t.token, Token::Amp)));
+        assert!(toks.iter().any(|t| matches!(t.token, Token::Pipe)));
+        assert!(toks.iter().any(|t| matches!(t.token, Token::Caret)));
+        assert!(toks.iter().any(|t| matches!(t.token, Token::Shl)));
+        assert!(toks.iter().any(|t| matches!(t.token, Token::Shr)));
     }
 }

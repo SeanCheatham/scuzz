@@ -1,4 +1,6 @@
-use crate::ast::{BinOp, EnumDef, Expr, ExprKind, FunDef, ImplDef, Param, Program, TraitDef, Type};
+use crate::ast::{
+    BinOp, EnumDef, Expr, ExprKind, FunDef, ImplDef, Param, Program, TraitDef, Type, UnOp,
+};
 use crate::resolve::{enum_bare_name, enum_id, EnumIndex, FunIndex, ResolveError};
 use crate::span::Span;
 use std::collections::HashMap;
@@ -1661,6 +1663,28 @@ fn infer(
                             Err(TypeError::Msg("&&/|| need Bool".into()))
                         }
                     }
+                    BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
+                        if matches!(lt, Type::Int) && matches!(rt, Type::Int) {
+                            Ok(Type::Int)
+                        } else {
+                            Err(TypeError::Msg(format!(
+                                "bitwise ops need Int, got {lt:?} and {rt:?}"
+                            )))
+                        }
+                    }
+                }
+            }
+            ExprKind::Unary { op, expr } => {
+                let t = infer(expr, enums, funs, methods, current_module, env)?;
+                match op {
+                    UnOp::Neg if matches!(t, Type::Int | Type::Float) => Ok(t),
+                    UnOp::Not if matches!(t, Type::Bool) => Ok(Type::Bool),
+                    UnOp::BitNot if matches!(t, Type::Int) => Ok(Type::Int),
+                    UnOp::Neg => Err(TypeError::Msg(format!(
+                        "unary `-` needs Int or Float, got {t:?}"
+                    ))),
+                    UnOp::Not => Err(TypeError::Msg(format!("unary `!` needs Bool, got {t:?}"))),
+                    UnOp::BitNot => Err(TypeError::Msg(format!("unary `~` needs Int, got {t:?}"))),
                 }
             }
             ExprKind::Call { callee, args } => {
@@ -4470,6 +4494,21 @@ fn mono_expr(
             },
             span,
         )),
+        ExprKind::Unary { op, expr } => Ok(Expr::new(
+            ExprKind::Unary {
+                op,
+                expr: Box::new(mono_expr(
+                    *expr,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+            },
+            span,
+        )),
         ExprKind::AdtConstruct {
             enum_name,
             case_name,
@@ -5287,6 +5326,22 @@ fn elaborate_expr(
             },
             span,
         )),
+        ExprKind::Unary { op, expr } => Ok(Expr::new(
+            ExprKind::Unary {
+                op,
+                expr: Box::new(elaborate_expr(
+                    *expr,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    None,
+                    tparams,
+                )?),
+            },
+            span,
+        )),
         ExprKind::Lambda { param, body } => Ok(Expr::new(
             ExprKind::Lambda {
                 param,
@@ -5429,6 +5484,10 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
             op,
             left: Box::new(subst_node_targs(*left, subst)),
             right: Box::new(subst_node_targs(*right, subst)),
+        },
+        ExprKind::Unary { op, expr } => ExprKind::Unary {
+            op,
+            expr: Box::new(subst_node_targs(*expr, subst)),
         },
         ExprKind::Lambda { param, body } => ExprKind::Lambda {
             param,
@@ -5583,6 +5642,7 @@ fn collect_node_targs(expr: &Expr, out: &mut Vec<(String, Vec<Type>)>) {
             collect_node_targs(left, out);
             collect_node_targs(right, out);
         }
+        ExprKind::Unary { expr, .. } => collect_node_targs(expr, out),
         ExprKind::Lambda { body, .. } => collect_node_targs(body, out),
         _ => {}
     }
@@ -5762,6 +5822,10 @@ fn rewrite_enum_refs(
             op,
             left: Box::new(rewrite_enum_refs(*left, clones)?),
             right: Box::new(rewrite_enum_refs(*right, clones)?),
+        },
+        ExprKind::Unary { op, expr } => ExprKind::Unary {
+            op,
+            expr: Box::new(rewrite_enum_refs(*expr, clones)?),
         },
         ExprKind::Lambda { param, body } => ExprKind::Lambda {
             param,
@@ -6220,6 +6284,47 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("true and false cover Bool");
+    }
+
+    #[test]
+    fn typechecks_unary_and_bitwise() {
+        let src = r#"
+def bits(n: Int, b: Bool): Int =
+  if (!b) -n else (0xFF & n) | 1 << 2 ^ ~0b1
+@main def main: IO[Unit] = IO.println(Str.fromInt(bits(3, false)))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("unary and bitwise typecheck");
+    }
+
+    #[test]
+    fn rejects_not_on_int() {
+        let src = r#"
+def bad(n: Int): Bool = !n
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("unary `!` needs Bool"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_bitwise_on_float() {
+        let src = r#"
+def bad(x: Float): Float = x & 1.0
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("bitwise ops need Int"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]
