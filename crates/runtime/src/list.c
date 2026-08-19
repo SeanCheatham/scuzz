@@ -488,6 +488,88 @@ SzList *sz_list_tails(SzList *xs) {
   return sz_list_cons_take(xs, rest);
 }
 
+static SzList *elem_pair(void *a, void *b) {
+  return sz_list_cons_take(a, sz_list_cons(b, NULL));
+}
+
+SzList *sz_list_zip(SzList *xs, SzList *ys) {
+  SzList *pair;
+  SzList *rest;
+  SzList *out;
+  if (!xs || !ys)
+    return NULL;
+  pair = elem_pair(xs->head, ys->head);
+  rest = sz_list_zip(xs->tail, ys->tail);
+  out = sz_list_cons_take(pair, rest);
+  sz_release(pair);
+  return out;
+}
+
+SzList *sz_list_zip_all(SzList *xs, SzList *ys, void *x, void *y) {
+  SzList *pair;
+  SzList *rest;
+  SzList *out;
+  if (!xs && !ys)
+    return NULL;
+  pair = elem_pair(xs ? xs->head : x, ys ? ys->head : y);
+  rest = sz_list_zip_all(xs ? xs->tail : NULL, ys ? ys->tail : NULL, x, y);
+  out = sz_list_cons_take(pair, rest);
+  sz_release(pair);
+  return out;
+}
+
+SzList *sz_list_unzip(SzList *pairs) {
+  SzList *as = NULL;
+  SzList *bs = NULL;
+  SzList *p;
+  SzList *inner;
+  SzList *arev;
+  SzList *brev;
+  for (p = pairs; p; p = p->tail) {
+    inner = (SzList *)p->head;
+    if (!inner || !inner->tail)
+      continue;
+    as = sz_list_cons_take(inner->head, as);
+    bs = sz_list_cons_take(inner->tail->head, bs);
+  }
+  arev = sz_list_reverse(as);
+  sz_release(as);
+  brev = sz_list_reverse(bs);
+  sz_release(bs);
+  return list_two(arev, brev);
+}
+
+SzList *sz_list_transpose(SzList *xss) {
+  SzList *p;
+  SzList *heads = NULL;
+  SzList *tails = NULL;
+  SzList *hrev;
+  SzList *trev;
+  SzList *rest;
+  SzList *out;
+  SzList *row;
+  if (!xss)
+    return NULL;
+  for (p = xss; p; p = p->tail) {
+    if (!p->head)
+      return NULL;
+  }
+  for (p = xss; p; p = p->tail) {
+    row = (SzList *)p->head;
+    heads = sz_list_cons_take(row->head, heads);
+    tails = sz_list_cons_take(row->tail, tails);
+  }
+  hrev = sz_list_reverse(heads);
+  sz_release(heads);
+  trev = sz_list_reverse(tails);
+  sz_release(tails);
+  rest = sz_list_transpose(trev);
+  sz_release(trev);
+  out = sz_list_cons_take(hrev, rest);
+  sz_release(hrev);
+  return out;
+}
+
 int64_t sz_list_index_where(SzList *xs, SzListPred pred, void *env) {
   SzList *p;
   int64_t i = 0;

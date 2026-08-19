@@ -175,6 +175,10 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"part:${List.join(List.map(List.partition(xs, x => x == "b"), g => List.join(g, ",")), "|")}")
     _ <- IO.println(s"inits:${List.join(List.map(List.inits(xs), g => List.join(g, ",")), "|")}")
     _ <- IO.println(s"tails:${List.join(List.map(List.tails(xs), g => List.join(g, ",")), "|")}")
+    _ <- IO.println(s"zip:${List.join(List.map(List.zip(xs, ["1", "2"]), g => List.join(g, ",")), "|")}")
+    _ <- IO.println(s"zipAll:${List.join(List.map(List.zipAll(xs, ["1"], "z", "9"), g => List.join(g, ",")), "|")}")
+    _ <- IO.println(s"unzip:${List.join(List.map(List.unzip(List.zip(xs, ["1", "2"])), g => List.join(g, ",")), "|")}")
+    _ <- IO.println(s"tr:${List.join(List.map(List.transpose([["a", "b"], ["c", "d"]]), g => List.join(g, ",")), "|")}")
   } yield ()
 
 def strProof(): IO[Unit] =

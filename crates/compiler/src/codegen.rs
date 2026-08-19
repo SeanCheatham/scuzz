@@ -186,6 +186,10 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_partition(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_inits(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_tails(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_zip(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_zip_all(ptr, ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_unzip(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_transpose(ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_index_where(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_last_index_where(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
@@ -3630,7 +3634,7 @@ fn emit_call(
             ptr_owned_if(code, format!("%{prefix}_v"), emitted_args[0].owned)
         }
         "List.reverse" | "List.init" | "List.inits" | "List.tails" | "List.last"
-        | "List.flatten" | "List.indices" => {
+        | "List.flatten" | "List.indices" | "List.unzip" | "List.transpose" => {
             let rt = match callee {
                 "List.reverse" => "sz_list_reverse",
                 "List.init" => "sz_list_init",
@@ -3638,6 +3642,8 @@ fn emit_call(
                 "List.tails" => "sz_list_tails",
                 "List.last" => "sz_list_last",
                 "List.flatten" => "sz_list_flatten",
+                "List.unzip" => "sz_list_unzip",
+                "List.transpose" => "sz_list_transpose",
                 _ => "sz_list_indices",
             };
             writeln!(
@@ -3827,15 +3833,59 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
-        "List.concat" => {
+        "List.concat" | "List.zip" => {
+            let rt = if callee == "List.zip" {
+                "sz_list_zip"
+            } else {
+                "sz_list_concat"
+            };
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @sz_list_concat(ptr {}, ptr {})",
+                "  %{prefix}_v = call ptr @{rt}(ptr {}, ptr {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             drop_owned_ptr(&mut code, &emitted_args[1]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "List.zipAll" => {
+            let x = if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
+                box_numeric(
+                    &mut code,
+                    emitted_args[2].kind,
+                    &emitted_args[2].value,
+                    &format!("{prefix}_x"),
+                )
+            } else {
+                emitted_args[2].value.clone()
+            };
+            let y = if emitted_args[3].kind == Kind::Int || emitted_args[3].kind == Kind::Float {
+                box_numeric(
+                    &mut code,
+                    emitted_args[3].kind,
+                    &emitted_args[3].value,
+                    &format!("{prefix}_y"),
+                )
+            } else {
+                emitted_args[3].value.clone()
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_zip_all(ptr {}, ptr {}, ptr {x}, ptr {y})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            drop_owned_ptr(&mut code, &emitted_args[2]);
+            drop_owned_ptr(&mut code, &emitted_args[3]);
+            if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
+                writeln!(code, "  call void @sz_release(ptr {x})").unwrap();
+            }
+            if emitted_args[3].kind == Kind::Int || emitted_args[3].kind == Kind::Float {
+                writeln!(code, "  call void @sz_release(ptr {y})").unwrap();
+            }
             owned_ptr(code, format!("%{prefix}_v"))
         }
         "List.append" => {
@@ -6875,6 +6925,53 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {left})")),
             "expected last-use release of set {left} after Set.isSubset:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_zip_unzip_transpose() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(List.map(List.zip(["a", "b"], ["1"]), g => List.join(g, ",")), "|"))
+    _ <- IO.println(List.join(List.map(List.zipAll(["a", "b"], ["1"], "z", "9"), g => List.join(g, ",")), "|"))
+    _ <- IO.println(List.join(List.map(List.unzip(List.zip(["a"], ["1"])), g => List.join(g, ",")), "|"))
+    _ <- IO.println(List.join(List.map(List.transpose([["a", "b"], ["c", "d"]]), g => List.join(g, ",")), "|"))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_zip"));
+        assert!(ir.contains("sz_list_zip_all"));
+        assert!(ir.contains("sz_list_unzip"));
+        assert!(ir.contains("sz_list_transpose"));
+        let needle = "call ptr @sz_list_zip(ptr ";
+        let at = ir.find(needle).expect("zip");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.zip:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_zip_all(ptr ";
+        let at = ir.find(needle).expect("zipAll");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.zipAll:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_unzip(ptr ";
+        let at = ir.find(needle).expect("unzip");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.unzip:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_transpose(ptr ";
+        let at = ir.find(needle).expect("transpose");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.transpose:\n{ir}"
         );
     }
 

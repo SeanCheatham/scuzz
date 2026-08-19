@@ -287,6 +287,10 @@ mod tests {
             ("List.takeW", "List.takeWhile"),
             ("List.ini", "List.init"),
             ("List.ini", "List.inits"),
+            ("List.zi", "List.zip"),
+            ("List.zi", "List.zipAll"),
+            ("List.un", "List.unzip"),
+            ("List.tr", "List.transpose"),
             ("Color.rgb", "Color.rgb"),
             ("Color.rgb", "Color.rgba"),
         ] {

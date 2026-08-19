@@ -514,6 +514,15 @@ SzList *sz_list_partition(SzList *xs, SzListPred pred, void *env);
 SzList *sz_list_inits(SzList *xs);
 /* Suffixes including the full list and empty. */
 SzList *sz_list_tails(SzList *xs);
+/* Matching cells as 2-element lists. Stops at the shorter list. */
+SzList *sz_list_zip(SzList *xs, SzList *ys);
+/* Zip and pad the shorter list with `x` or `y`. */
+SzList *sz_list_zip_all(SzList *xs, SzList *ys, void *x, void *y);
+/* Two lists packed as List[List]: first cells, then second cells.
+ * An inner list shorter than 2 is skipped. Empty is two empty lists. */
+SzList *sz_list_unzip(SzList *pairs);
+/* Rows to columns. Stops at the shortest row. Empty is empty. */
+SzList *sz_list_transpose(SzList *xss);
 /* First index where `pred` is true, or -1. */
 int64_t sz_list_index_where(SzList *xs, SzListPred pred, void *env);
 /* Last index where `pred` is true, or -1. */
