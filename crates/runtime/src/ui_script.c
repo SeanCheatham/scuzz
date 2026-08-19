@@ -211,7 +211,7 @@ void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
      scroll <n> <dy>  pan dump-index n ([scrolls] scan order); `scroll 40` stays dy 40
      backspace <n> chop n bytes from the [fields] starred TextField (default 1); no field is a no-op
      backspace <n> <k>  chop k bytes from dump-index n
-     dump       rewrite the live debug dump now (includes [heap] kinds and delta); no dump path is a no-op
+     dump       rewrite the live debug dump now (includes [heap] kinds, delta, and [live] rows); no dump path is a no-op
      reload     rebuild the View factory now; missing factory is a no-op
      quit       stop the live session; remaining script lines do not run
      resetpeak  set peak_bytes to live and mark delta; next dump reports growth from here

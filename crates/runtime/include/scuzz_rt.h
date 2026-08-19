@@ -14,6 +14,23 @@ void sz_panic(const char *msg) __attribute__((noreturn));
 void *sz_alloc(size_t size);
 void *sz_alloc_zero(size_t size);
 void sz_free(void *ptr);
+/* Free every remaining live block. Panic uses this before abort. */
+void sz_alloc_sweep(void);
+/* Visit each live block. The callback must not alloc or free. */
+void sz_alloc_walk(void (*fn)(void *ptr, uint32_t kind, size_t bytes,
+                              uint32_t rc, void *ctx),
+                   void *ctx);
+/* Write live rows (`kind rc=N bytes=M`). `max_rows` < 0 means no cap.
+ * Extra rows become `truncated=N`. Truncates to `cap`. Returns bytes
+ * written, not counting the NUL. */
+int sz_alloc_format_live(char *buf, size_t cap, int max_rows);
+/* Write panic text plus `[heap]` and `[live]`. Truncates to `cap`. */
+int sz_alloc_format_panic(char *buf, size_t cap, const char *msg);
+/* Register a panic dump path. NULL or empty clears it. `SCUZZ_PANIC_DUMP`
+ * is used when no path is registered. */
+void sz_alloc_set_panic_dump(const char *path);
+/* Registered path, or `SCUZZ_PANIC_DUMP`, or NULL. */
+const char *sz_alloc_panic_dump_path(void);
 /* RC objects (strings, list cells, ADTs, boxed i64, map/set nodes, IO,
  * streams, resources, errors, Ref / Queue / Deferred, Either, pair). List cells retain heads and shared tails. IO
  * constructors take child IO nodes. Non-RC sz_alloc pointers no-op. */
@@ -54,7 +71,8 @@ void sz_alloc_mark(void);
 void sz_alloc_delta(int64_t *bytes, int64_t *count);
 /* Write census lines (`live_bytes=…` through kind `name=count:bytes`).
  * `mark` 1 snapshots live after the write. Truncates to `cap`. Returns
- * bytes written, not counting the NUL. */
+ * bytes written, not counting the NUL. Live debug dumps also write
+ * `[live]` through `sz_alloc_format_live`. */
 int sz_alloc_format_heap(char *buf, size_t cap, int mark);
 /* Optional SCUZZ_ALLOC_TRACE=1 sample from sz_ui_pump_sync (every N pumps). */
 void sz_alloc_trace_on_pump(void);

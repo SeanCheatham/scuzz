@@ -963,6 +963,78 @@ static SzIo *after_sleep_tag(void *value, void *env) {
   return pure_drop(env);
 }
 
+typedef struct {
+  int n;
+  int strings;
+  int lists;
+  int raw;
+  int maps;
+  int boxes;
+  size_t bytes;
+} LiveVisit;
+
+static void live_visit_acc(void *ptr, uint32_t kind, size_t bytes, uint32_t rc,
+                           void *ctx) {
+  LiveVisit *v = (LiveVisit *)ctx;
+  (void)ptr;
+  (void)rc;
+  v->n += 1;
+  v->bytes += bytes;
+  if (kind == SZ_RC_STRING)
+    v->strings += 1;
+  else if (kind == SZ_RC_LIST)
+    v->lists += 1;
+  else if (kind == SZ_RC_RAW)
+    v->raw += 1;
+  else if (kind == SZ_RC_MAP)
+    v->maps += 1;
+  else if (kind == SZ_RC_BOX)
+    v->boxes += 1;
+}
+
+static size_t read_fd_all(int fd, char *buf, size_t cap) {
+  size_t n = 0;
+  if (!buf || cap == 0)
+    return 0;
+  while (n + 1 < cap) {
+    ssize_t r = read(fd, buf + n, cap - 1 - n);
+    if (r <= 0)
+      break;
+    n += (size_t)r;
+  }
+  buf[n] = '\0';
+  return n;
+}
+
+static int wait_aborted(pid_t pid) {
+  int st = 0;
+  if (waitpid(pid, &st, 0) != pid)
+    return 0;
+  return WIFSIGNALED(st) && WTERMSIG(st) == SIGABRT;
+}
+
+static char *slurp_path(const char *path) {
+  FILE *f = fopen(path, "r");
+  char *buf;
+  long n;
+  if (!f)
+    return NULL;
+  fseek(f, 0, SEEK_END);
+  n = ftell(f);
+  fseek(f, 0, SEEK_SET);
+  if (n < 0)
+    n = 0;
+  buf = (char *)malloc((size_t)n + 1);
+  if (!buf) {
+    fclose(f);
+    return NULL;
+  }
+  n = (long)fread(buf, 1, (size_t)n, f);
+  fclose(f);
+  buf[n] = '\0';
+  return buf;
+}
+
 int main(void) {
   /* delay */
   delay_calls = 0;
@@ -1184,6 +1256,253 @@ int main(void) {
     sz_release(lr);
     sz_alloc_kind_stats(SZ_RC_RESOURCE, &kb1, &kc1);
     assert(kc1 == kc0);
+  }
+
+  /* Live list walks remaining blocks; panic dumps them and sweeps. */
+  {
+    size_t live_bytes = 0, live_count = 0;
+    size_t kb0 = 0, kc0 = 0, kb1 = 0, kc1 = 0;
+    LiveVisit before, after;
+    char live[2048];
+    char panic[4096];
+    void *raw;
+    SzString *s;
+    SzList *xs;
+    void *box;
+    SzMap *m;
+    SzError *err;
+    SzAdt *adt;
+    int i;
+    pid_t pid;
+    int fds[2];
+    char child_err[8192];
+    const char *panic_path = "/tmp/scuzz_panic.dump";
+    char *dumped;
+
+    assert(sz_alloc_format_live(NULL, 16, 4) == 0);
+    assert(sz_alloc_format_live(live, 0, 4) == 0);
+    assert(sz_alloc_format_panic(NULL, 16, "x") == 0);
+    assert(sz_alloc_format_panic(live, 0, "x") == 0);
+    sz_alloc_walk(NULL, NULL);
+    sz_alloc_set_panic_dump(NULL);
+    sz_alloc_set_panic_dump("");
+    assert(sz_alloc_panic_dump_path() == NULL);
+    sz_alloc_set_panic_dump("/tmp/scuzz_panic_path.dump");
+    assert(strcmp(sz_alloc_panic_dump_path(), "/tmp/scuzz_panic_path.dump") == 0);
+    sz_alloc_set_panic_dump(NULL);
+    assert(sz_alloc_panic_dump_path() == NULL);
+
+    memset(&before, 0, sizeof before);
+    sz_alloc_walk(live_visit_acc, &before);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(before.n == (int)live_count);
+    assert(before.bytes == live_bytes);
+
+    sz_alloc_kind_stats(SZ_RC_STRING, &kb0, &kc0);
+    s = sz_string_from_cstr("live-row");
+    xs = sz_list_cons(s, NULL);
+    sz_release(s);
+    raw = sz_alloc(48);
+    box = sz_box_i64(9);
+    {
+      SzString *key = sz_string_from_cstr("k");
+      SzString *payload = sz_string_from_cstr("p");
+      m = sz_map_set(NULL, key, box, 1);
+      sz_release(key);
+      adt = sz_adt_new(3, payload);
+      sz_release(payload);
+    }
+    sz_release(box);
+    err = sz_error_new(2, "e");
+
+    memset(&after, 0, sizeof after);
+    sz_alloc_walk(live_visit_acc, &after);
+    assert(after.n > before.n);
+    assert(after.strings > before.strings);
+    assert(after.lists == before.lists + 1);
+    assert(after.raw >= before.raw + 1);
+    assert(after.boxes >= before.boxes + 1);
+    assert(after.maps == before.maps + 1);
+
+    sz_alloc_format_live(live, sizeof live, -1);
+    assert(strstr(live, "string rc=") != NULL);
+    assert(strstr(live, "list rc=") != NULL);
+    assert(strstr(live, "raw rc=0 bytes=") != NULL);
+    assert(strstr(live, "box rc=") != NULL);
+    assert(strstr(live, "map rc=") != NULL);
+    assert(strstr(live, "error rc=") != NULL);
+    assert(strstr(live, "adt rc=") != NULL);
+    assert(strstr(live, "truncated=") == NULL);
+
+    sz_alloc_format_live(live, sizeof live, 1);
+    assert(strstr(live, "truncated=") != NULL);
+
+    sz_alloc_format_live(live, sizeof live, 0);
+    assert(strstr(live, "truncated=") != NULL);
+    assert(strstr(live, "string rc=") == NULL);
+
+    sz_alloc_format_panic(panic, sizeof panic, "probe");
+    assert(strstr(panic, "scuzz panic: probe") != NULL);
+    assert(strstr(panic, "[heap]") != NULL);
+    assert(strstr(panic, "live_bytes=") != NULL);
+    assert(strstr(panic, "[live]") != NULL);
+    assert(strstr(panic, "string rc=") != NULL);
+    sz_alloc_format_panic(panic, sizeof panic, NULL);
+    assert(strstr(panic, "scuzz panic: (null)") != NULL);
+
+    sz_free(raw);
+    sz_release(xs);
+    sz_release(m);
+    sz_release(err);
+    sz_release(adt);
+    sz_alloc_kind_stats(SZ_RC_STRING, &kb1, &kc1);
+    assert(kc1 == kc0);
+
+    fflush(NULL);
+    pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      s = sz_string_from_cstr("sweep-child");
+      xs = sz_list_cons(s, NULL);
+      sz_release(s);
+      raw = sz_alloc(32);
+      (void)raw;
+      (void)xs;
+      sz_alloc_sweep();
+      sz_alloc_stats(&live_bytes, &live_count);
+      _exit(live_count == 0 && live_bytes == 0 ? 0 : 1);
+    }
+    {
+      int st = 0;
+      assert(waitpid(pid, &st, 0) == pid);
+      assert(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
+
+    fflush(NULL);
+    pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      sz_alloc_sweep();
+      sz_alloc_sweep();
+      sz_alloc_stats(&live_bytes, &live_count);
+      _exit(live_count == 0 ? 0 : 1);
+    }
+    {
+      int st = 0;
+      assert(waitpid(pid, &st, 0) == pid);
+      assert(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
+
+    assert(pipe(fds) == 0);
+    fflush(NULL);
+    pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      dup2(fds[1], STDERR_FILENO);
+      close(fds[0]);
+      close(fds[1]);
+      s = sz_string_from_cstr("panic-live");
+      (void)s;
+      sz_panic("boom");
+    }
+    close(fds[1]);
+    read_fd_all(fds[0], child_err, sizeof child_err);
+    close(fds[0]);
+    assert(wait_aborted(pid));
+    assert(strstr(child_err, "scuzz panic: boom") != NULL);
+    assert(strstr(child_err, "[heap]") != NULL);
+    assert(strstr(child_err, "[live]") != NULL);
+    assert(strstr(child_err, "string rc=") != NULL);
+
+    remove(panic_path);
+    fflush(NULL);
+    pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      freopen("/dev/null", "w", stderr);
+      sz_alloc_set_panic_dump(panic_path);
+      s = sz_string_from_cstr("file-live");
+      xs = sz_list_cons(s, NULL);
+      sz_release(s);
+      (void)xs;
+      sz_panic("file boom");
+    }
+    assert(wait_aborted(pid));
+    dumped = slurp_path(panic_path);
+    assert(dumped);
+    assert(strstr(dumped, "scuzz panic: file boom") != NULL);
+    assert(strstr(dumped, "[heap]") != NULL);
+    assert(strstr(dumped, "[live]") != NULL);
+    assert(strstr(dumped, "list rc=") != NULL);
+    free(dumped);
+    remove(panic_path);
+
+    fflush(NULL);
+    pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      freopen("/dev/null", "w", stderr);
+      setenv("SCUZZ_PANIC_DUMP", panic_path, 1);
+      sz_alloc_set_panic_dump(NULL);
+      sz_panic("env boom");
+    }
+    assert(wait_aborted(pid));
+    dumped = slurp_path(panic_path);
+    assert(dumped);
+    assert(strstr(dumped, "scuzz panic: env boom") != NULL);
+    assert(strstr(dumped, "[live]") != NULL);
+    free(dumped);
+    remove(panic_path);
+
+    /* Nested RC graph still sweeps to zero. */
+    fflush(NULL);
+    pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      SzString *a = sz_string_from_cstr("a");
+      SzString *b = sz_string_from_cstr("b");
+      SzList *tail = sz_list_cons(b, NULL);
+      SzList *head = sz_list_cons(a, tail);
+      SzMap *mm;
+      SzEither *ei;
+      SzPair *pair;
+      SzRef *ref;
+      SzQueue *q;
+      SzDeferred *d;
+      SzIo *io;
+      sz_release(a);
+      sz_release(b);
+      sz_release(tail);
+      mm = sz_map_set(NULL, sz_string_from_cstr("mk"), sz_box_i64(1), 1);
+      ei = sz_either_right(sz_string_from_cstr("ok"));
+      pair = sz_pair_new(sz_string_from_cstr("l"), sz_box_i64(2));
+      ref = sz_ref_make(sz_string_from_cstr("r"));
+      q = sz_queue_make();
+      d = sz_deferred_make();
+      io = sz_io_pure(sz_string_from_cstr("io"));
+      (void)head;
+      (void)mm;
+      (void)ei;
+      (void)pair;
+      (void)ref;
+      (void)q;
+      (void)d;
+      (void)io;
+      sz_alloc_sweep();
+      sz_alloc_stats(&live_bytes, &live_count);
+      for (i = 0; i < SZ_RC_KIND_COUNT; i++) {
+        size_t kb = 0, kc = 0;
+        sz_alloc_kind_stats((uint32_t)i, &kb, &kc);
+        if (kc != 0 || kb != 0)
+          _exit(2);
+      }
+      _exit(live_count == 0 && live_bytes == 0 ? 0 : 1);
+    }
+    {
+      int st = 0;
+      assert(waitpid(pid, &st, 0) == pid);
+      assert(WIFEXITED(st) && WEXITSTATUS(st) == 0);
+    }
   }
 
   /* Leftover IO.pure payloads drop on last-use / free. */
