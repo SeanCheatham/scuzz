@@ -395,6 +395,22 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             binop_str(*op),
             pretty_expr(right, 0).trim()
         ),
+        ExprKind::Unary { op, expr } => {
+            let inner = pretty_expr(expr, 0).trim().to_string();
+            let wrapped = match &expr.kind {
+                ExprKind::Binary { .. }
+                | ExprKind::If { .. }
+                | ExprKind::Match { .. }
+                | ExprKind::For { .. } => format!("({inner})"),
+                _ => inner,
+            };
+            let pfx = match op {
+                crate::ast::UnOp::Neg => "-",
+                crate::ast::UnOp::Not => "!",
+                crate::ast::UnOp::BitNot => "~",
+            };
+            format!("{pad}{pfx}{wrapped}")
+        }
         ExprKind::FlatMap { inner, param, body } => {
             let left = pretty_expr(inner, 0).trim().to_string();
             let right = pretty_expr(body, indent + 1);
@@ -507,6 +523,11 @@ fn binop_str(op: BinOp) -> &'static str {
         BinOp::Ge => ">=",
         BinOp::And => "&&",
         BinOp::Or => "||",
+        BinOp::BitAnd => "&",
+        BinOp::BitOr => "|",
+        BinOp::BitXor => "^",
+        BinOp::Shl => "<<",
+        BinOp::Shr => ">>",
     }
 }
 
@@ -1065,6 +1086,21 @@ impl Get[T] for Opt:
 "#;
         let out = format_source(src).unwrap();
         assert!(out.contains("impl Get[T] for Opt:"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_unary_and_bitwise() {
+        let src = r#"
+def bits(n: Int, b: Bool): Int = if (!b) -n else n & 0xF | 1 << 2
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("!b"), "{out}");
+        assert!(out.contains("-n"), "{out}");
+        assert!(out.contains("n & 15") || out.contains("n & 0xF"), "{out}");
+        assert!(out.contains("<<"), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

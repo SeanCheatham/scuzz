@@ -148,6 +148,19 @@ pub enum BinOp {
     Ge,
     And,
     Or,
+    BitAnd,
+    BitOr,
+    BitXor,
+    Shl,
+    Shr,
+}
+
+/// Prefix operator: `-e`, `!e`, `~e`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UnOp {
+    Neg,
+    Not,
+    BitNot,
 }
 
 /// Expression with source span.
@@ -230,6 +243,10 @@ impl Expr {
                 op,
                 left: Box::new(f(*left)?),
                 right: Box::new(f(*right)?),
+            },
+            ExprKind::Unary { op, expr } => ExprKind::Unary {
+                op,
+                expr: Box::new(f(*expr)?),
             },
             ExprKind::If {
                 cond,
@@ -361,6 +378,7 @@ impl Expr {
                 f(inner);
                 f(body);
             }
+            ExprKind::Unary { expr, .. } => f(expr),
             ExprKind::If {
                 cond,
                 then_branch,
@@ -535,6 +553,8 @@ pub enum ExprKind {
         left: Box<Expr>,
         right: Box<Expr>,
     },
+    /// Prefix `-e` / `!e` / `~e`
+    Unary { op: UnOp, expr: Box<Expr> },
     /// Builtin or user call: `Str.concat(a,b)`, `foo(x)`, `Fs.read(p)`
     Call { callee: String, args: Vec<Expr> },
     /// `_ => expr` or `x => expr` — single-param lambda literal (tap callbacks).

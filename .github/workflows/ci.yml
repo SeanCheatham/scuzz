@@ -116,6 +116,16 @@ jobs:
           grep -q "to:2" /tmp/kernel.out
           grep -q "cmp:lt" /tmp/kernel.out
           grep -q "neg:-1.5" /tmp/kernel.out
+          grep -q "uneg:-3" /tmp/kernel.out
+          grep -q "not:y" /tmp/kernel.out
+          grep -q "hex:255" /tmp/kernel.out
+          grep -q "bin:10" /tmp/kernel.out
+          grep -q "band:15" /tmp/kernel.out
+          grep -q "bor:15" /tmp/kernel.out
+          grep -q "bxor:2" /tmp/kernel.out
+          grep -q "shl:8" /tmp/kernel.out
+          grep -q "shr:4" /tmp/kernel.out
+          grep -q "bnot:-1" /tmp/kernel.out
           grep -q "map:1" /tmp/kernel.out
           grep -q "miss:no" /tmp/kernel.out
           grep -q "has:y" /tmp/kernel.out

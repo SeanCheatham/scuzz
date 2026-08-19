@@ -1,4 +1,4 @@
-use crate::ast::{BinOp, EnumDef, Expr, ExprKind, FunDef, MatchArm, Pattern, Program, Type};
+use crate::ast::{BinOp, EnumDef, Expr, ExprKind, FunDef, MatchArm, Pattern, Program, Type, UnOp};
 use crate::resolve::{user_symbol, FunIndex};
 use std::collections::HashMap;
 use std::fmt::Write as _;
@@ -707,6 +707,7 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         | ExprKind::IoFail(e)
         | ExprKind::IoPure(e)
         | ExprKind::Attempt { inner: e } => collect_strings(e, out),
+        ExprKind::Unary { expr: e, .. } => collect_strings(e, out),
         ExprKind::Lambda { body, .. } => collect_strings(body, out),
         ExprKind::FlatMap { inner, body, .. }
         | ExprKind::HandleErrorWith { inner, body, .. }
@@ -1877,6 +1878,7 @@ fn emit_expr(
             }
         }
         ExprKind::Lambda { param, body } => emit_lambda(param, body, ctx, locals, prefix),
+        ExprKind::Unary { op, expr } => emit_unary(*op, expr, ctx, locals, prefix),
         ExprKind::Binary { op, left, right } => emit_binary(op, left, right, ctx, locals, prefix),
         ExprKind::Call { callee, args } => emit_call(callee, args, ctx, locals, prefix),
         ExprKind::For { .. } => panic!("internal: unlowered `for` in codegen"),
@@ -3185,6 +3187,39 @@ fn as_i64(code: &mut String, kind: Kind, value: &str, tmp: &str) -> String {
     format!("%{tmp}")
 }
 
+fn emit_unary(
+    op: UnOp,
+    expr: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    let inner = emit_expr(expr, ctx, locals, &format!("{prefix}_u"));
+    let mut code = inner.code;
+    match op {
+        UnOp::Neg if inner.kind == Kind::Float => {
+            writeln!(code, "  %{prefix}_v = fneg double {}", inner.value).unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Float)
+        }
+        UnOp::Neg => {
+            let v = as_i64(&mut code, inner.kind, &inner.value, &format!("{prefix}_u0"));
+            writeln!(code, "  %{prefix}_v = sub i64 0, {v}").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        UnOp::Not => {
+            let v = as_i64(&mut code, inner.kind, &inner.value, &format!("{prefix}_u0"));
+            writeln!(code, "  %{prefix}_z = icmp eq i64 {v}, 0").unwrap();
+            writeln!(code, "  %{prefix}_v = zext i1 %{prefix}_z to i64").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        UnOp::BitNot => {
+            let v = as_i64(&mut code, inner.kind, &inner.value, &format!("{prefix}_u0"));
+            writeln!(code, "  %{prefix}_v = xor i64 {v}, -1").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+    }
+}
+
 fn emit_binary(
     op: &BinOp,
     left: &Expr,
@@ -3260,6 +3295,9 @@ fn emit_binary(
                 return val_emitted(code, format!("%{prefix}_v"), Kind::Float);
             }
             BinOp::And | BinOp::Or => unreachable!("short-circuit ops emit separately"),
+            BinOp::BitAnd | BinOp::BitOr | BinOp::BitXor | BinOp::Shl | BinOp::Shr => {
+                unreachable!("bitwise ops are Int")
+            }
             BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
                 let pred = match op {
                     BinOp::Eq => "oeq",
@@ -3320,6 +3358,28 @@ fn emit_binary(
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         BinOp::And | BinOp::Or => unreachable!("short-circuit ops emit separately"),
+        BinOp::BitAnd => {
+            writeln!(code, "  %{prefix}_v = and i64 {lv}, {rv}").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        BinOp::BitOr => {
+            writeln!(code, "  %{prefix}_v = or i64 {lv}, {rv}").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        BinOp::BitXor => {
+            writeln!(code, "  %{prefix}_v = xor i64 {lv}, {rv}").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        BinOp::Shl => {
+            writeln!(code, "  %{prefix}_sh = and i64 {rv}, 63").unwrap();
+            writeln!(code, "  %{prefix}_v = shl i64 {lv}, %{prefix}_sh").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        BinOp::Shr => {
+            writeln!(code, "  %{prefix}_sh = and i64 {rv}, 63").unwrap();
+            writeln!(code, "  %{prefix}_v = ashr i64 {lv}, %{prefix}_sh").unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
         BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => {
             let pred = match op {
                 BinOp::Eq => "eq",
@@ -10069,5 +10129,21 @@ record Pair[A, B](a: A, b: B)
             ir.contains("call i64 @sz_unbox_i64"),
             "Int field bind must be unboxed"
         );
+    }
+
+    #[test]
+    fn emit_unary_and_bitwise() {
+        let src = r#"
+def bits(n: Int, b: Bool): Int =
+  if (!b) -n else (0xF & n) | 1 << 3 ^ ~1
+@main def main: IO[Unit] = IO.println(Str.fromInt(bits(2, true)))
+"#;
+        let ir = gen_ir(src);
+        assert!(ir.contains("icmp eq i64"), "expected boolean not: {ir}");
+        assert!(ir.contains("sub i64 0,"), "expected unary minus: {ir}");
+        assert!(ir.contains("and i64"), "expected &: {ir}");
+        assert!(ir.contains("or i64"), "expected |: {ir}");
+        assert!(ir.contains("xor i64"), "expected ^ / ~: {ir}");
+        assert!(ir.contains("shl i64"), "expected <<: {ir}");
     }
 }
