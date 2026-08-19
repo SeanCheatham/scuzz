@@ -380,6 +380,11 @@ record Box[T](x: T):
     _ <- IO.println(s"named:${sum(Point(y = 5, x = 3))}")
     _ <- IO.println(s"namedkit:${Str.len(s = "ab")}")
     _ <- IO.println(s"namedfn:${leftOr(fallback = 7, e = Either.Right("s"))}")
+    noneAs = Opt.None: Opt[Int]
+    _ <- IO.println(s"ascribe:${noneAs.getOrElse(9)}")
+    emptyAs = []: List[Int]
+    _ <- IO.println(s"ascribeList:${Str.fromInt(List.len(emptyAs))}")
+    _ <- IO.println(s"ascribeInt:${1: Int}")
     _ <- mapSetProof()
     _ <- listProof()
     _ <- strProof()

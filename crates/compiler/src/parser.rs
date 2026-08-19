@@ -1146,7 +1146,28 @@ impl Parser {
     }
 
     fn parse_expr(&mut self) -> Result<Expr, ParseError> {
-        self.parse_or()
+        let expr = self.parse_or()?;
+        if !matches!(self.peek(), Token::Colon) {
+            return Ok(expr);
+        }
+        self.bump();
+        let ty = self.parse_type()?;
+        let end = self.prev_span();
+        let span = expr.span.clone().cover(&end);
+        Ok(self.mk(
+            ExprKind::Ascribe {
+                expr: Box::new(expr),
+                ty,
+            },
+            span,
+        ))
+    }
+
+    fn prev_span(&self) -> Span {
+        if self.i == 0 {
+            return self.current_span();
+        }
+        self.tokens[self.i - 1].span.clone()
     }
 
     fn parse_or(&mut self) -> Result<Expr, ParseError> {
@@ -3202,6 +3223,49 @@ def add(n: Int, m: Int): Int = n + m
                 other => panic!("expected Str.fromInt, got {other:?}"),
             },
             other => panic!("expected println, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_type_ascription() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  for {
+    x = Opt.None: Opt[Int]
+    n = 1 + 2: Int
+  } yield IO.println(Str.fromInt(n))
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::For { binders, .. } => {
+                match &binders[0] {
+                    ForBinder::Eq { value, .. } => match &value.kind {
+                        ExprKind::Ascribe { ty, expr } => {
+                            assert!(
+                                matches!(ty, Type::App(n, args) if n == "Opt" && matches!(&args[0], Type::Int)),
+                                "{ty:?}"
+                            );
+                            assert!(matches!(expr.kind, ExprKind::AdtConstruct { .. }));
+                        }
+                        other => panic!("expected ascribe, got {other:?}"),
+                    },
+                    other => panic!("expected eq binder, got {other:?}"),
+                }
+                match &binders[1] {
+                    ForBinder::Eq { value, .. } => match &value.kind {
+                        ExprKind::Ascribe { ty, expr } => {
+                            assert!(matches!(ty, Type::Int), "{ty:?}");
+                            assert!(matches!(expr.kind, ExprKind::Binary { .. }));
+                        }
+                        other => panic!("expected ascribe sum, got {other:?}"),
+                    },
+                    other => panic!("expected eq binder, got {other:?}"),
+                }
+            }
+            other => panic!("expected for, got {other:?}"),
         }
     }
 }

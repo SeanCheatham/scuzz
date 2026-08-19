@@ -707,9 +707,9 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         | ExprKind::IoFail(e)
         | ExprKind::IoPure(e)
         | ExprKind::Attempt { inner: e } => collect_strings(e, out),
-        ExprKind::Unary { expr: e, .. } | ExprKind::NamedArg { value: e, .. } => {
-            collect_strings(e, out)
-        }
+        ExprKind::Unary { expr: e, .. }
+        | ExprKind::NamedArg { value: e, .. }
+        | ExprKind::Ascribe { expr: e, .. } => collect_strings(e, out),
         ExprKind::Lambda { body, .. } => collect_strings(body, out),
         ExprKind::FlatMap { inner, body, .. }
         | ExprKind::HandleErrorWith { inner, body, .. }
@@ -1778,6 +1778,7 @@ fn emit_expr(
         }
         ExprKind::Field { .. } => panic!("internal: unresolved field access in codegen"),
         ExprKind::MethodCall { .. } => panic!("internal: unresolved method call in codegen"),
+        ExprKind::Ascribe { expr, .. } => emit_expr(expr, ctx, locals, prefix),
         ExprKind::Let { name, value, body } => {
             // Nested vals must not reuse the same LLVM name prefix.
             let ve = emit_expr(value, ctx, locals, &format!("{prefix}_lv_{name}"));
@@ -10084,6 +10085,27 @@ def noneInt(): Opt[Int] = Opt.None
             "Int bind must be unboxed"
         );
         assert!(ir.contains("call ptr @sz_adt_new(i32 1, ptr null)"));
+    }
+
+    #[test]
+    fn emit_ascribe_nullary_generic() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  for {
+    x = Opt.None: Opt[Int]
+  } yield x match {
+    case Opt.Some(n) => IO.println(Str.fromInt(n))
+    case Opt.None => IO.println("none")
+  }
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("call ptr @sz_adt_new(i32 1, ptr null)"),
+            "ascribed None must construct:\n{ir}"
+        );
     }
 
     #[test]

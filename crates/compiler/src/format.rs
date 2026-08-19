@@ -394,9 +394,9 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
         ),
         ExprKind::Binary { op, left, right } => format!(
             "{pad}{} {} {}",
-            pretty_expr(left, 0).trim(),
+            pretty_operand(left),
             binop_str(*op),
-            pretty_expr(right, 0).trim()
+            pretty_operand(right)
         ),
         ExprKind::Unary { op, expr } => {
             let inner = pretty_expr(expr, 0).trim().to_string();
@@ -404,7 +404,8 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
                 ExprKind::Binary { .. }
                 | ExprKind::If { .. }
                 | ExprKind::Match { .. }
-                | ExprKind::For { .. } => format!("({inner})"),
+                | ExprKind::For { .. }
+                | ExprKind::Ascribe { .. } => format!("({inner})"),
                 _ => inner,
             };
             let pfx = match op {
@@ -413,6 +414,18 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
                 crate::ast::UnOp::BitNot => "~",
             };
             format!("{pad}{pfx}{wrapped}")
+        }
+        ExprKind::Ascribe { expr, ty } => {
+            let inner = pretty_expr(expr, 0).trim().to_string();
+            let wrapped = match &expr.kind {
+                ExprKind::Binary { .. }
+                | ExprKind::If { .. }
+                | ExprKind::Match { .. }
+                | ExprKind::For { .. }
+                | ExprKind::Lambda { .. } => format!("({inner})"),
+                _ => inner,
+            };
+            format!("{pad}{wrapped}: {}", pretty_type(ty))
         }
         ExprKind::FlatMap { inner, param, body } => {
             let left = pretty_expr(inner, 0).trim().to_string();
@@ -508,6 +521,15 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             out.push('}');
             out
         }
+    }
+}
+
+fn pretty_operand(e: &Expr) -> String {
+    let s = pretty_expr(e, 0).trim().to_string();
+    if matches!(e.kind, ExprKind::Ascribe { .. }) {
+        format!("({s})")
+    } else {
+        s
     }
 }
 
@@ -1116,6 +1138,25 @@ def add(n: Int, m: Int): Int = n + m
 "#;
         let out = format_source(src).unwrap();
         assert!(out.contains("add(m = 2, n = 1)"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_type_ascription() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  for {
+    x = Opt.None: Opt[Int]
+    n = (1: Int) + 2
+  } yield IO.println(Str.fromInt(n))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("Opt.None: Opt[Int]"), "{out}");
+        assert!(out.contains("(1: Int)"), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }
