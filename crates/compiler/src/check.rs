@@ -565,6 +565,13 @@ pub fn check_project_with(
             lowered
         }
     };
+    let program = match crate::typ::resolve_named_args(program) {
+        Ok(p) => p,
+        Err(e) => {
+            diags.push(diagnostic_from_type(e, &named));
+            return Ok(diags);
+        }
+    };
     let type_errs = typecheck_all(&program);
     let had_type_err = !type_errs.is_empty();
     for e in type_errs {

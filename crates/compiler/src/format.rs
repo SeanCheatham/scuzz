@@ -379,6 +379,9 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
                 .collect();
             format!("{pad}{callee}({})", a.join(", "))
         }
+        ExprKind::NamedArg { name, value } => {
+            format!("{pad}{name} = {}", pretty_expr(value, 0).trim())
+        }
         ExprKind::If {
             cond,
             then_branch,
@@ -1101,6 +1104,18 @@ def bits(n: Int, b: Bool): Int = if (!b) -n else n & 0xF | 1 << 2
         assert!(out.contains("-n"), "{out}");
         assert!(out.contains("n & 15") || out.contains("n & 0xF"), "{out}");
         assert!(out.contains("<<"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_named_args() {
+        let src = r#"
+def add(n: Int, m: Int): Int = n + m
+@main def main: IO[Unit] = IO.println(Str.fromInt(add(m = 2, n = 1)))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("add(m = 2, n = 1)"), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

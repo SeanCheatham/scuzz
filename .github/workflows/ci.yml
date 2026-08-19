@@ -126,6 +126,9 @@ jobs:
           grep -q "shl:8" /tmp/kernel.out
           grep -q "shr:4" /tmp/kernel.out
           grep -q "bnot:-1" /tmp/kernel.out
+          grep -q "named:8" /tmp/kernel.out
+          grep -q "namedkit:2" /tmp/kernel.out
+          grep -q "namedfn:7" /tmp/kernel.out
           grep -q "map:1" /tmp/kernel.out
           grep -q "miss:no" /tmp/kernel.out
           grep -q "has:y" /tmp/kernel.out

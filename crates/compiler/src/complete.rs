@@ -4,6 +4,9 @@ use crate::ast::Program;
 use crate::hover::{kit_lambda_locals, show_def, show_enum, show_param, KIT_SIGS};
 use crate::lexer::{lex, Token};
 use crate::resolve::module_id_from_label;
+use crate::signature::{
+    callee_before_paren, innermost_call_paren, param_names_from_label, sig_label,
+};
 use std::collections::BTreeSet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +41,11 @@ pub fn complete_in_source(
             out.push(c);
         }
     };
+    if let Some(p) = program {
+        for c in named_arg_completions(p, &module, source, offset, &prefix) {
+            push(c);
+        }
+    }
     if let Some(q) = &qual {
         for (callee, sig) in KIT_SIGS {
             if let Some(method) = callee.strip_prefix(&format!("{q}.")) {
@@ -180,6 +188,107 @@ pub fn complete_in_source(
     }
     out.sort_by(|a, b| a.label.cmp(&b.label));
     out
+}
+
+fn named_arg_completions(
+    program: &Program,
+    module: &str,
+    source: &str,
+    offset: usize,
+    prefix: &str,
+) -> Vec<Completion> {
+    let Ok(toks) = lex(source) else {
+        return Vec::new();
+    };
+    let Some(paren) = innermost_call_paren(&toks, offset) else {
+        return Vec::new();
+    };
+    let prev = toks.iter().rev().find(|t| t.span.end <= offset);
+    if prev.is_some_and(|t| matches!(t.token, Token::Eq)) {
+        return Vec::new();
+    }
+    let Some((qual, name)) = callee_before_paren(&toks, paren) else {
+        return Vec::new();
+    };
+    let mut names = if let Some(label) = sig_label(program, module, qual.as_deref(), &name) {
+        param_names_from_label(&label)
+    } else {
+        construct_fields(program, &name)
+    };
+    names.retain(|n| {
+        let mut chars = n.chars();
+        let Some(first) = chars.next() else {
+            return false;
+        };
+        (first.is_ascii_alphabetic() || first == '_')
+            && chars.all(|c| c.is_ascii_alphanumeric() || c == '_')
+    });
+    if names.is_empty() {
+        return Vec::new();
+    }
+    let used = named_args_used(&toks, paren, offset);
+    let mut out = Vec::new();
+    for n in names {
+        if used.contains(&n) {
+            continue;
+        }
+        if !n.starts_with(prefix) {
+            continue;
+        }
+        out.push(Completion {
+            label: format!("{n} ="),
+            kind: KIND_VAR,
+            detail: format!("named argument `{n}`"),
+            insert_text: format!("{n} = "),
+        });
+    }
+    out
+}
+
+fn construct_fields(program: &Program, name: &str) -> Vec<String> {
+    let mut hits: Vec<Vec<String>> = Vec::new();
+    for en in &program.enums {
+        for c in &en.cases {
+            if c.name == name && !c.fields.is_empty() {
+                hits.push(c.fields.iter().map(|(n, _)| n.clone()).collect());
+            }
+        }
+    }
+    hits.sort();
+    hits.dedup();
+    if hits.len() == 1 {
+        hits.remove(0)
+    } else {
+        Vec::new()
+    }
+}
+
+fn named_args_used(
+    toks: &[crate::lexer::SpannedToken],
+    paren: usize,
+    offset: usize,
+) -> BTreeSet<String> {
+    let mut used = BTreeSet::new();
+    let mut depth = 1i32;
+    for w in toks[paren + 1..].windows(2) {
+        if w[0].span.start >= offset {
+            break;
+        }
+        match w[0].token {
+            Token::LParen | Token::LBracket | Token::LBrace => depth += 1,
+            Token::RParen | Token::RBracket | Token::RBrace => {
+                depth -= 1;
+                if depth <= 0 {
+                    break;
+                }
+            }
+            Token::Ident(ref n) if depth == 1 && matches!(w[1].token, Token::Eq) => {
+                used.insert(n.clone());
+            }
+            _ => {}
+        }
+    }
+    used
 }
 
 fn prefix_at(source: &str, offset: usize) -> (Option<String>, String) {
@@ -341,5 +450,21 @@ mod tests {
                 .any(|c| c.label == "row" && c.detail.contains("row: String")),
             "{hits:?}"
         );
+    }
+
+    #[test]
+    fn completes_named_args() {
+        let src = r#"def add(n: Int, m: Int): Int = n
+@main def main: IO[Unit] = IO.println(Str.fromInt(add()))
+"#;
+        let labels = labels_at(src, "fromInt(add(");
+        assert!(labels.iter().any(|l| l == "n ="), "{labels:?}");
+        assert!(labels.iter().any(|l| l == "m ="), "{labels:?}");
+        let src2 = r#"def add(n: Int, m: Int): Int = n
+@main def main: IO[Unit] = IO.println(Str.fromInt(add(n = 1, )))
+"#;
+        let labels2 = labels_at(src2, "n = 1, ");
+        assert!(labels2.iter().any(|l| l == "m ="), "{labels2:?}");
+        assert!(!labels2.iter().any(|l| l == "n ="), "{labels2:?}");
     }
 }

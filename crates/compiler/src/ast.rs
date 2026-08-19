@@ -248,6 +248,10 @@ impl Expr {
                 op,
                 expr: Box::new(f(*expr)?),
             },
+            ExprKind::NamedArg { name, value } => ExprKind::NamedArg {
+                name,
+                value: Box::new(f(*value)?),
+            },
             ExprKind::If {
                 cond,
                 then_branch,
@@ -378,7 +382,7 @@ impl Expr {
                 f(inner);
                 f(body);
             }
-            ExprKind::Unary { expr, .. } => f(expr),
+            ExprKind::Unary { expr, .. } | ExprKind::NamedArg { value: expr, .. } => f(expr),
             ExprKind::If {
                 cond,
                 then_branch,
@@ -557,6 +561,8 @@ pub enum ExprKind {
     Unary { op: UnOp, expr: Box<Expr> },
     /// Builtin or user call: `Str.concat(a,b)`, `foo(x)`, `Fs.read(p)`
     Call { callee: String, args: Vec<Expr> },
+    /// `name = expr` in a call argument list. Rewritten to positional before typecheck.
+    NamedArg { name: String, value: Box<Expr> },
     /// `_ => expr` or `x => expr` — single-param lambda literal (tap callbacks).
     Lambda {
         param: Option<String>,
