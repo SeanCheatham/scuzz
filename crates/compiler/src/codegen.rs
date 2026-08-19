@@ -60,7 +60,7 @@ pub fn emit_llvm(program: &Program) -> String {
 
     let mut out = String::new();
     writeln!(out, "; Scuzz Lang generated LLVM IR").unwrap();
-    // Omit target triple / datalayout: clang uses the host defaults (macOS arm64, Linux x86_64, …).
+    // No target triple / datalayout. Clang fills the host. Link uses -Wno-override-module.
     writeln!(out).unwrap();
 
     writeln!(out, "declare ptr @sz_string_from_cstr(ptr)").unwrap();

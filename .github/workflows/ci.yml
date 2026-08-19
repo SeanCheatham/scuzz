@@ -300,6 +300,8 @@ jobs:
           cargo run -p scuzz -- test examples/io | tee /tmp/io-test.out
           grep -q "served:/" /tmp/io-test.out
           cargo run -p scuzz -- check examples/kernel
+          cargo run -p scuzz -- check examples/bad-example
+          cargo run -p scuzz -- test examples/bad-example
           cargo run -p scuzz -- check --message-format=json examples/hello | tee /tmp/hello-check.json
           grep -q '^\[\]$' /tmp/hello-check.json
           cargo run -p scuzz -- lsp --help | tee /tmp/lsp-help.txt
@@ -377,6 +379,16 @@ jobs:
       - name: Deterministic fuzz (bounded) + repro replay
         run: |
           cargo run -p scuzz -- fuzz --iterations 16 examples/counter
+          if cargo run -p scuzz -- fuzz --no-fail-fast --iterations 8 examples/bad-example; then
+            echo "fuzz should have found the law failure" && exit 1
+          fi
+          test -f examples/bad-example/build/fuzz/repro.toml
+          grep -E '^search_failures = [1-9]' examples/bad-example/build/fuzz/summary.toml
+          grep -E '^survived = [1-9]' examples/bad-example/build/fuzz/summary.toml
+          grep -E '^ran = [1-9]' examples/bad-example/build/fuzz/summary.toml
+          if cargo run -p scuzz -- fuzz --replay examples/bad-example/build/fuzz/repro.toml examples/bad-example; then
+            echo "replay should have reproduced the law failure" && exit 1
+          fi
           rm -rf /tmp/scuzz-fuzzbug
           cargo run -p scuzz -- new --ui --path /tmp scuzz-fuzzbug
           cat > /tmp/scuzz-fuzzbug/src/Main.scuzz <<'EOF'

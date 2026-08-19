@@ -21,12 +21,13 @@ build:
 
 FFI_SKIA_CFLAGS := -std=c11 -Wall -Wextra -Werror -O2
 
+# Keep ffi-skia on its own CFLAGS so optional ASan runs do not leave
+# instrumented objects for later non-ASan `make -C ffi-skia test`.
+# `lib` does not need the Skia archive (headers live in ffi-skia/include).
 ffi-skia:
-	# Keep ffi-skia on its own CFLAGS so optional ASan runs do not leave
-	# instrumented objects for later non-ASan `make -C ffi-skia test`.
-	$(MAKE) -C $(FFI_SKIA) lib CC=$(CC) CFLAGS='$(FFI_SKIA_CFLAGS)'
+	@$(MAKE) --no-print-directory -C $(FFI_SKIA) lib CC=$(CC) CFLAGS='$(FFI_SKIA_CFLAGS)'
 
-build/%.o: src/%.c include/scuzz_rt.h include/scuzz_ui.h src/rt_util.h src/ui_script.h | build ffi-skia
+build/%.o: src/%.c include/scuzz_rt.h include/scuzz_ui.h src/rt_util.h src/ui_script.h | build
 	$(CC) $(CFLAGS) $(INCLUDES) -c $< -o $@
 
 lib: build/libscuzz_rt.a

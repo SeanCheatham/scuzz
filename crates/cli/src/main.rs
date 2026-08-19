@@ -122,7 +122,7 @@ enum Commands {
     },
     /// Search in-source laws, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation
     #[command(
-        after_help = "Examples:\n  scuzz fuzz --iterations 16\n  scuzz fuzz --iterations 16 examples/counter\n  scuzz fuzz --oracles examples/counter\n  scuzz fuzz --replay build/fuzz/repro.toml\n"
+        after_help = "Examples:\n  scuzz fuzz --iterations 16\n  scuzz fuzz --iterations 16 examples/counter\n  scuzz fuzz --oracles examples/counter\n  scuzz fuzz --replay build/fuzz/repro.toml\n  scuzz fuzz --no-fail-fast --iterations 8 examples/bad-example\n\n`examples/bad-example` is an expected fuzz failure (known-wrong `bump`). Default stops at the first search failure. `--no-fail-fast` finishes search and still mutates. `scuzz check` and `scuzz test` still pass.\n"
     )]
     Fuzz {
         #[arg(default_value = ".")]
@@ -139,6 +139,9 @@ enum Commands {
         /// Mutate residual Law.check / Law.assert / .require predicates
         #[arg(long)]
         oracles: bool,
+        /// Finish search and still mutate after the first search failure
+        #[arg(long)]
+        no_fail_fast: bool,
     },
     /// Create a new Scuzz Lang project
     #[command(
@@ -345,7 +348,15 @@ version = "0.1.0"
             seed,
             replay,
             oracles,
-        } => cmd_fuzz::cmd_fuzz(&path, replay.as_deref(), iterations, seed, oracles),
+            no_fail_fast,
+        } => cmd_fuzz::cmd_fuzz(
+            &path,
+            replay.as_deref(),
+            iterations,
+            seed,
+            oracles,
+            no_fail_fast,
+        ),
         Commands::Package {
             path,
             target,

@@ -182,13 +182,11 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
     build_runtime(&opts.runtime_dir, &opts.clang)?;
 
     let lib = opts.runtime_dir.join("build/libscuzz_rt.a");
-    let include = opts.runtime_dir.join("include");
     let with_ui = manifest.ui.is_some();
 
     let mut link = Command::new(&opts.clang);
-    link.arg(&ll_path)
-        .arg(&lib)
-        .arg(format!("-I{}", include.display()));
+    // .ll has no triple; do not pass C -I (unused on IR).
+    link.arg("-Wno-override-module").arg(&ll_path).arg(&lib);
 
     // macOS: runtime parks main in CFRunLoop so AppKit can hop from the worker.
     if cfg!(target_os = "macos") {
@@ -202,28 +200,20 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
             .map(|p| p.join("ffi-skia"))
             .unwrap_or_else(|| PathBuf::from("crates/ffi-skia"));
         // Build libsk_capi.a if missing (pinned Skia by default; SCUZZ_SKIA=sk_sw opts out).
-        let skia_status = Command::new("make")
-            .arg("-C")
-            .arg(&ffi_skia_dir)
-            .arg("lib")
-            .env("CC", &opts.clang)
-            .status()
-            .with_context(|| {
-                format!(
-                    "missing make while building Skia C API in {} — install clang and make",
-                    ffi_skia_dir.display()
-                )
-            })?;
-        if !skia_status.success() {
-            bail!(
+        run_make_lib(
+            &ffi_skia_dir,
+            &opts.clang,
+            format!(
+                "missing make while building Skia C API in {} — install clang and make",
+                ffi_skia_dir.display()
+            ),
+            format!(
                 "Skia C API build failed in {} — install clang and make, then retry",
                 ffi_skia_dir.display()
-            );
-        }
+            ),
+        )?;
         let skia_lib = ffi_skia_dir.join("build/libsk_capi.a");
-        let skia_include = ffi_skia_dir.join("include");
-        link.arg(&skia_lib)
-            .arg(format!("-I{}", skia_include.display()));
+        link.arg(&skia_lib);
         // Real Skia backends are C++; sk_sw ignores these.
         if cfg!(target_os = "macos") {
             link.arg("-lc++");
@@ -324,7 +314,7 @@ fn push_force_load(link: &mut Command, archive: &Path) {
 
 fn link_reload_dylib(clang: &str, ll: &Path, out: &Path) -> Result<()> {
     let mut cmd = Command::new(clang);
-    cmd.arg(ll);
+    cmd.arg("-Wno-override-module").arg(ll);
     if cfg!(target_os = "macos") {
         cmd.arg("-dynamiclib")
             .arg("-undefined")
@@ -736,38 +726,48 @@ fn validate_overlay_stems(sources: &[ResolvedSource], overlays: &[OverlaySource]
     Ok(())
 }
 
-fn build_runtime(runtime_dir: &Path, clang: &str) -> Result<()> {
-    let status = Command::new("make")
+fn run_make_lib(dir: &Path, clang: &str, spawn_err: String, fail_err: String) -> Result<()> {
+    let output = Command::new("make")
+        .arg("--no-print-directory")
         .arg("-C")
-        .arg(runtime_dir)
+        .arg(dir)
         .arg("lib")
         .env("CC", clang)
-        .status()
-        .with_context(|| "building runtime (make)")?;
-    if !status.success() {
-        bail!("runtime build failed in {}", runtime_dir.display());
+        .output()
+        .with_context(|| spawn_err)?;
+    if output.status.success() {
+        return Ok(());
     }
+    eprint!(
+        "{}{}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    bail!("{fail_err}")
+}
+
+fn build_runtime(runtime_dir: &Path, clang: &str) -> Result<()> {
+    run_make_lib(
+        runtime_dir,
+        clang,
+        "building runtime (make)".into(),
+        format!("runtime build failed in {}", runtime_dir.display()),
+    )?;
 
     // Optional embedder builds. Skip if make fails.
     if let Some(parent) = runtime_dir.parent() {
         for name in ["embedder-desktop", "embedder-mobile"] {
             let embedder = parent.join(name);
             if embedder.join("Makefile").is_file() {
-                let status = Command::new("make")
-                    .arg("-C")
-                    .arg(&embedder)
-                    .arg("lib")
-                    .env("CC", clang)
-                    .status()
-                    .with_context(|| {
-                        format!("missing make while building {}", embedder.display())
-                    })?;
-                if !status.success() {
-                    bail!(
+                run_make_lib(
+                    &embedder,
+                    clang,
+                    format!("missing make while building {}", embedder.display()),
+                    format!(
                         "embedder build failed in {} — install clang and make, then retry",
                         embedder.display()
-                    );
-                }
+                    ),
+                )?;
             }
         }
     }

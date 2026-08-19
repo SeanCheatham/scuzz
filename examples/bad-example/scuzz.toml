@@ -1,0 +1,4 @@
+[package]
+name = "bad-example"
+version = "0.1.0"
+description = "Known-wrong bump. scuzz fuzz must fail."

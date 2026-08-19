@@ -1,0 +1,11 @@
+def bump(n: Int): Int =
+  n - 1
+
+def scale(n: Int): Int =
+  n * 2
+
+law bumpIncreases(n: Int): Bool =
+  bump(n) == n + 1
+
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(bump(0) + scale(1)))

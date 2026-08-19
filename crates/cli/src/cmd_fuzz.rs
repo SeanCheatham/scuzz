@@ -10,7 +10,7 @@ use scuzz_compiler::fuzz::{
 };
 use scuzz_compiler::manifest::load_manifest;
 use scuzz_compiler::mutate::{mutate_apply_mode, mutate_count_mode, MutateMode};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 /// Shared fuzz target: executable, output directory, project directory, UI size.
@@ -62,6 +62,7 @@ struct FuzzSummary<'a> {
     seed: i64,
     iterations: i64,
     search: i64,
+    search_failures: i64,
     corpus: i64,
     ok: bool,
     drivers: &'a [String],
@@ -72,12 +73,20 @@ struct FuzzSummary<'a> {
     mutate: &'a MutateStats,
 }
 
+struct SearchRepro {
+    path: PathBuf,
+    events: Vec<String>,
+}
+
 struct Campaign {
     seed: i64,
     iterations: i64,
     oracles: bool,
     search_used: i64,
     mutate_slots: i64,
+    fail_fast: bool,
+    search_failures: i64,
+    repro: Option<SearchRepro>,
 }
 
 struct UiSearch {
@@ -91,6 +100,7 @@ pub fn cmd_fuzz(
     iterations: i64,
     seed: i64,
     oracles: bool,
+    no_fail_fast: bool,
 ) -> Result<ExitCode> {
     if let Some(replay) = replay {
         return fuzz_replay(path, replay);
@@ -98,7 +108,7 @@ pub fn cmd_fuzz(
     if iterations < 0 {
         bail!("fuzz --iterations N requires N >= 0");
     }
-    fuzz_run(path, iterations, seed, oracles)
+    fuzz_run(path, iterations, seed, oracles, !no_fail_fast)
 }
 
 fn budget_split(n: i64) -> (i64, i64) {
@@ -110,7 +120,13 @@ fn budget_split(n: i64) -> (i64, i64) {
     }
 }
 
-fn fuzz_run(path: &Path, iterations: i64, seed: i64, oracles: bool) -> Result<ExitCode> {
+fn fuzz_run(
+    path: &Path,
+    iterations: i64,
+    seed: i64,
+    oracles: bool,
+    fail_fast: bool,
+) -> Result<ExitCode> {
     let project_dir = resolve_dir(path)?;
     let manifest = load_manifest(&project_dir.join("scuzz.toml"))
         .with_context(|| format!("reading {}/scuzz.toml", project_dir.display()))?;
@@ -135,6 +151,9 @@ fn fuzz_run(path: &Path, iterations: i64, seed: i64, oracles: bool) -> Result<Ex
         oracles,
         search_used: 0,
         mutate_slots,
+        fail_fast,
+        search_failures: 0,
+        repro: None,
     };
     if is_ui {
         fuzz_ui_campaign(&ctx, &mut camp, search_budget)
@@ -199,8 +218,7 @@ fn fuzz_ui_campaign(
     let drivers = read_drivers(ctx.project_dir);
     if n_taps + n_fields + n_scrolls == 0 && drivers.is_empty() {
         camp.mutate_slots += search_budget;
-        sometimes_or_fail(ctx, camp, 0, &[], None)?;
-        return mutate_then_finish(ctx, camp, 0, &[], &[]);
+        return finish_campaign(ctx, camp, 0, &[], &[]);
     }
     let targets = FuzzTargets {
         n_buttons: n_taps,
@@ -236,8 +254,7 @@ fn fuzz_ui_campaign(
     }
     camp.mutate_slots += remaining;
     let corpus_len = search.prefixes.len() as i64;
-    sometimes_or_fail(ctx, camp, corpus_len, &[], None)?;
-    mutate_then_finish(ctx, camp, corpus_len, &search.prefixes, &[])
+    finish_campaign(ctx, camp, corpus_len, &search.prefixes, &[])
 }
 
 fn fuzz_io_campaign(
@@ -258,7 +275,8 @@ fn fuzz_io_campaign(
         if code != 0 {
             camp.search_used = iter + 1;
             let sched_n: i64 = sched.parse().unwrap_or(0);
-            return fuzz_fail(ctx, camp, camp.seed + iter, sched_n, iter, &drives);
+            note_search_fail(ctx, camp, camp.seed + iter, sched_n, iter, &drives)?;
+            continue;
         }
         let reached = lines_nonempty(
             &std::fs::read_to_string(ctx.fuzz_dir.join("sometimes.reached")).unwrap_or_default(),
@@ -277,8 +295,7 @@ fn fuzz_io_campaign(
     }
     camp.search_used = search_budget;
     let corpus_len = corpus.len() as i64;
-    sometimes_or_fail(ctx, camp, corpus_len, &[], None)?;
-    mutate_then_finish(ctx, camp, corpus_len, &[], &corpus)
+    finish_campaign(ctx, camp, corpus_len, &[], &corpus)
 }
 
 fn fuzz_loop(
@@ -355,7 +372,8 @@ fn consider_ui_script(
     )?;
     camp.search_used += 1;
     if code != 0 {
-        return fuzz_fail(ctx, camp, camp.seed + iter, sched, iter, events);
+        note_search_fail(ctx, camp, camp.seed + iter, sched, iter, events)?;
+        return Ok(());
     }
     let reached = lines_nonempty(
         &std::fs::read_to_string(ctx.fuzz_dir.join("sometimes.reached")).unwrap_or_default(),
@@ -371,7 +389,8 @@ fn consider_ui_script(
             &sched.to_string(),
         )?;
         if dump2_code != 0 {
-            return fuzz_fail(ctx, camp, camp.seed + iter, sched, iter, events);
+            note_search_fail(ctx, camp, camp.seed + iter, sched, iter, events)?;
+            return Ok(());
         }
         let dump2 = std::fs::read_to_string(ctx.fuzz_dir.join("dump.txt")).unwrap_or_default();
         if dump2 != dump {
@@ -383,38 +402,59 @@ fn consider_ui_script(
     Ok(())
 }
 
-fn sometimes_or_fail(
+fn finish_campaign(
     ctx: &FuzzCtx<'_>,
     camp: &Campaign,
     corpus: i64,
-    events: &[String],
-    repro: Option<&Path>,
-) -> Result<()> {
-    match check_sometimes_campaign(ctx.project_dir, ctx.fuzz_dir) {
-        Ok(()) => Ok(()),
-        Err(e) => {
-            let mutate = mutate_stats_skip(ctx.project_dir, camp.oracles);
-            let declared = declared_names(ctx.project_dir);
-            let reached = reached_names(ctx.fuzz_dir);
-            write_and_print(
-                ctx,
-                &FuzzSummary {
-                    seed: camp.seed,
-                    iterations: camp.iterations,
-                    search: camp.search_used,
-                    corpus,
-                    ok: false,
-                    drivers: &read_drivers(ctx.project_dir),
-                    events,
-                    declared: &declared,
-                    reached: &reached,
-                    repro,
-                    mutate: &mutate,
-                },
-            )?;
-            Err(e)
-        }
+    corpus_ui: &[Vec<String>],
+    corpus_io: &[IoKeep],
+) -> Result<ExitCode> {
+    let missing = sometimes_missing(ctx.project_dir, ctx.fuzz_dir);
+    if camp.fail_fast && !missing.is_empty() {
+        return report_sometimes_fail(ctx, camp, corpus, &missing);
     }
+    mutate_then_finish(ctx, camp, corpus, corpus_ui, corpus_io, &missing)
+}
+
+fn sometimes_missing(project_dir: &Path, fuzz_dir: &Path) -> Vec<String> {
+    let decl = declared_names(project_dir);
+    let camp = reached_names(fuzz_dir);
+    missing_from(&decl, &camp).into_iter().cloned().collect()
+}
+
+fn report_sometimes_fail(
+    ctx: &FuzzCtx<'_>,
+    camp: &Campaign,
+    corpus: i64,
+    missing: &[String],
+) -> Result<ExitCode> {
+    let mutate = mutate_stats_skip(ctx.project_dir, camp.oracles);
+    let declared = declared_names(ctx.project_dir);
+    let reached = reached_names(ctx.fuzz_dir);
+    let repro = camp.repro.as_ref().map(|r| r.path.as_path());
+    let events: &[String] = camp
+        .repro
+        .as_ref()
+        .map(|r| r.events.as_slice())
+        .unwrap_or(&[]);
+    write_and_print(
+        ctx,
+        &FuzzSummary {
+            seed: camp.seed,
+            iterations: camp.iterations,
+            search: camp.search_used,
+            search_failures: camp.search_failures,
+            corpus,
+            ok: false,
+            drivers: &read_drivers(ctx.project_dir),
+            events,
+            declared: &declared,
+            reached: &reached,
+            repro,
+            mutate: &mutate,
+        },
+    )?;
+    bail!("Law.sometimes never reached: {}", missing.join(", "))
 }
 
 fn mutate_then_finish(
@@ -423,37 +463,70 @@ fn mutate_then_finish(
     corpus: i64,
     corpus_ui: &[Vec<String>],
     corpus_io: &[IoKeep],
+    sometimes_missing: &[String],
 ) -> Result<ExitCode> {
     let mutate = mutate_phase(ctx, camp.mutate_slots, camp.oracles, corpus_ui, corpus_io)?;
     let declared = declared_names(ctx.project_dir);
     let reached = reached_names(ctx.fuzz_dir);
-    let ok = mutate.survived == 0;
+    let repro = camp.repro.as_ref().map(|r| r.path.as_path());
+    let events: &[String] = camp
+        .repro
+        .as_ref()
+        .map(|r| r.events.as_slice())
+        .unwrap_or(&[]);
+    let ok = camp.search_failures == 0 && sometimes_missing.is_empty() && mutate.survived == 0;
     write_and_print(
         ctx,
         &FuzzSummary {
             seed: camp.seed,
             iterations: camp.iterations,
             search: camp.search_used,
+            search_failures: camp.search_failures,
             corpus,
             ok,
             drivers: &read_drivers(ctx.project_dir),
-            events: &[],
+            events,
             declared: &declared,
             reached: &reached,
-            repro: None,
+            repro,
             mutate: &mutate,
         },
     )?;
     if ok {
-        Ok(ExitCode::SUCCESS)
-    } else {
+        return Ok(ExitCode::SUCCESS);
+    }
+    if !sometimes_missing.is_empty() {
+        println!(
+            "Law.sometimes never reached: {}",
+            sometimes_missing.join(", ")
+        );
+    }
+    if camp.search_failures > 0 {
+        if let Some(repro) = &camp.repro {
+            println!(
+                "replay: scuzz fuzz {} --replay {}",
+                ctx.project_dir.display(),
+                repro.path.display()
+            );
+        }
+    }
+    if mutate.survived > 0 {
         let flag = if camp.oracles { " --oracles" } else { "" };
         println!(
             "surviving mutants mean weak or unreachable residual oracles; rerun: scuzz fuzz{flag} --iterations {}",
             camp.iterations
         );
-        bail!("mutate survivors");
     }
+    if camp.search_failures > 0 {
+        bail!("fuzz failure");
+    }
+    if !sometimes_missing.is_empty() {
+        bail!(
+            "Law.sometimes never reached: {}",
+            sometimes_missing.join(", ")
+        );
+    }
+    bail!("mutate survivors");
 }
 
 fn mutate_stats_skip(project_dir: &Path, oracles: bool) -> MutateStats {
@@ -653,14 +726,14 @@ fn shrink_events(
     Ok(cur)
 }
 
-fn fuzz_fail<T>(
+fn note_search_fail(
     ctx: &FuzzCtx<'_>,
-    camp: &Campaign,
+    camp: &mut Campaign,
     script_seed: i64,
     schedule_seed: i64,
     iter: i64,
     events: &[String],
-) -> Result<T> {
+) -> Result<()> {
     let shrunk = shrink_events(
         ctx.exe,
         ctx.fuzz_dir,
@@ -669,29 +742,31 @@ fn fuzz_fail<T>(
         &schedule_seed.to_string(),
         events,
     )?;
-    let repro = ctx.fuzz_dir.join("repro.toml");
-    std::fs::write(
-        &repro,
-        repro_text(script_seed, &schedule_seed.to_string(), &shrunk),
-    )?;
-    println!(
-        "fuzz failure at script {iter} (seed {script_seed}); wrote {} ({} events, shrunk from {})",
-        repro.display(),
-        shrunk.len(),
-        events.len()
-    );
-    if !shrunk.is_empty() {
-        println!("shrunk events:");
-        for ev in &shrunk {
-            println!("  {ev}");
+    camp.search_failures += 1;
+    let first = camp.repro.is_none();
+    if first {
+        let path = ctx.fuzz_dir.join("repro.toml");
+        std::fs::write(
+            &path,
+            repro_text(script_seed, &schedule_seed.to_string(), &shrunk),
+        )?;
+        println!(
+            "fuzz failure at script {iter} (seed {script_seed}); wrote {} ({} events, shrunk from {})",
+            path.display(),
+            shrunk.len(),
+            events.len()
+        );
+        if !shrunk.is_empty() {
+            println!("shrunk events:");
+            for ev in &shrunk {
+                println!("  {ev}");
+            }
         }
-    }
-    println!(
-        "replay: scuzz fuzz {} --replay {}",
-        ctx.project_dir.display(),
-        repro.display()
-    );
-    {
+        println!(
+            "replay: scuzz fuzz {} --replay {}",
+            ctx.project_dir.display(),
+            path.display()
+        );
         let dump = std::fs::read_to_string(ctx.fuzz_dir.join("dump.txt")).unwrap_or_default();
         if !dump.is_empty() {
             println!("last dump:");
@@ -699,39 +774,41 @@ fn fuzz_fail<T>(
                 println!("  {line}");
             }
         }
-    }
-    let mutate = mutate_stats_skip(ctx.project_dir, camp.oracles);
-    let declared = declared_names(ctx.project_dir);
-    let reached = reached_names(ctx.fuzz_dir);
-    let _ = write_and_print(
-        ctx,
-        &FuzzSummary {
-            seed: script_seed,
-            iterations: camp.iterations,
-            search: camp.search_used,
-            corpus: 0,
-            ok: false,
-            drivers: &read_drivers(ctx.project_dir),
-            events: &shrunk,
-            declared: &declared,
-            reached: &reached,
-            repro: Some(&repro),
-            mutate: &mutate,
-        },
-    );
-    bail!("fuzz failure");
-}
-
-fn check_sometimes_campaign(project_dir: &Path, fuzz_dir: &Path) -> Result<()> {
-    let decl = declared_names(project_dir);
-    let camp = reached_names(fuzz_dir);
-    let missing: Vec<&String> = missing_from(&decl, &camp);
-    if missing.is_empty() {
-        Ok(())
+        camp.repro = Some(SearchRepro {
+            path,
+            events: shrunk,
+        });
     } else {
-        let names: Vec<&str> = missing.iter().map(|s| s.as_str()).collect();
-        bail!("Law.sometimes never reached: {}", names.join(", "))
+        println!("fuzz failure at script {iter} (seed {script_seed}); counted (repro kept)");
     }
+    if camp.fail_fast {
+        let mutate = mutate_stats_skip(ctx.project_dir, camp.oracles);
+        let declared = declared_names(ctx.project_dir);
+        let reached = reached_names(ctx.fuzz_dir);
+        let repro = camp.repro.as_ref().unwrap();
+        write_and_print(
+            ctx,
+            &FuzzSummary {
+                seed: camp.seed,
+                iterations: camp.iterations,
+                search: camp.search_used,
+                search_failures: camp.search_failures,
+                corpus: 0,
+                ok: false,
+                drivers: &read_drivers(ctx.project_dir),
+                events: &repro.events,
+                declared: &declared,
+                reached: &reached,
+                repro: Some(&repro.path),
+                mutate: &mutate,
+            },
+        )?;
+        bail!("fuzz failure");
+    }
+    if first {
+        println!("scuzz fuzz: --no-fail-fast; continue search then mutation");
+    }
+    Ok(())
 }
 
 fn declared_names(project_dir: &Path) -> Vec<String> {
@@ -783,8 +860,8 @@ fn write_and_print(ctx: &FuzzCtx<'_>, s: &FuzzSummary<'_>) -> Result<()> {
 fn print_report(s: &FuzzSummary<'_>) {
     let status = if s.ok { "ok" } else { "fail" };
     println!(
-        "scuzz fuzz {status} ({} search, seed {}, {} corpus)",
-        s.search, s.seed, s.corpus
+        "scuzz fuzz {status} ({} search, {} search failures, seed {}, {} corpus)",
+        s.search, s.search_failures, s.seed, s.corpus
     );
     println!(
         "coverage: {}",
@@ -819,11 +896,12 @@ fn write_fuzz_summary(ctx: &FuzzCtx<'_>, s: &FuzzSummary<'_>) -> Result<()> {
         None => String::new(),
     };
     let text = format!(
-        "[fuzz]\nok = {ok}\nseed = {seed}\niterations = {iterations}\nsearch = {search}\ncorpus = {corpus}\ndrivers = [{drivers}]\nevents = [{events}]\ndeclared = [{declared}]\nreachability = [{reached}]\nrepro = \"{repro}\"\nreplay = \"{replay}\"\n\n[mutate]\nkilled = {killed}\nsurvived = {survived}\nran = {ran}\nsites = {sites}\noracles = {oracles}\n",
+        "[fuzz]\nok = {ok}\nseed = {seed}\niterations = {iterations}\nsearch = {search}\nsearch_failures = {search_failures}\ncorpus = {corpus}\ndrivers = [{drivers}]\nevents = [{events}]\ndeclared = [{declared}]\nreachability = [{reached}]\nrepro = \"{repro}\"\nreplay = \"{replay}\"\n\n[mutate]\nkilled = {killed}\nsurvived = {survived}\nran = {ran}\nsites = {sites}\noracles = {oracles}\n",
         ok = if s.ok { "true" } else { "false" },
         seed = s.seed,
         iterations = s.iterations,
         search = s.search,
+        search_failures = s.search_failures,
         corpus = s.corpus,
         drivers = toml_str_array(s.drivers),
         events = toml_str_array(s.events),

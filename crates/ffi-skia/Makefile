@@ -19,11 +19,11 @@ build:
 # SCUZZ_SKIA=gpu: in-tree sk_sw paint + OpenGL present/readback.
 lib: ensure-prebuilt
 	@if [ "$${SCUZZ_SKIA:-}" = "sk_sw" ]; then \
-	  $(MAKE) lib-sk-sw; \
+	  $(MAKE) --no-print-directory lib-sk-sw; \
 	elif [ "$${SCUZZ_SKIA:-}" = "gpu" ]; then \
-	  $(MAKE) lib-gpu; \
+	  $(MAKE) --no-print-directory lib-gpu; \
 	elif [ -f "$(PREBUILT_LIB)" ]; then \
-	  $(MAKE) lib-skia; \
+	  $(MAKE) --no-print-directory lib-skia; \
 	else \
 	  echo "ffi-skia: missing $(PREBUILT_LIB) (set SCUZZ_SKIA=sk_sw to use in-tree sk_sw)" >&2; \
 	  exit 1; \
@@ -31,8 +31,8 @@ lib: ensure-prebuilt
 
 ensure-prebuilt:
 	@if [ "$${SCUZZ_SKIA:-}" = "sk_sw" ] || [ "$${SCUZZ_SKIA:-}" = "gpu" ]; then \
-	  echo "ffi-skia: SCUZZ_SKIA=$${SCUZZ_SKIA} — in-tree software paint"; \
-	else \
+	  :; \
+	elif [ ! -f "$(PREBUILT_LIB)" ]; then \
 	  "$(ROOT)/scripts/fetch_skia.sh"; \
 	fi
 
@@ -50,20 +50,39 @@ build/sk_gpu.o: src/sk_gpu.c src/sk_gpu.h | build
 	$(CC) $(CFLAGS) -Wno-deprecated-declarations $(INCLUDES) -c $< -o $@
 
 lib-sk-sw: $(OBJ) build/sk_gpu_none.o | build
-	rm -f build/libsk_capi.a
-	ar rcs build/libsk_capi.a $(OBJ) build/sk_gpu_none.o
+	@if [ -f build/libsk_capi.a ] && [ -f build/sk_capi_backend ] && grep -qx sk_sw build/sk_capi_backend; then \
+	  fresh=1; \
+	  for o in $(OBJ) build/sk_gpu_none.o; do \
+	    if [ $$o -nt build/libsk_capi.a ]; then fresh=0; fi; \
+	  done; \
+	  if [ $$fresh -eq 1 ]; then exit 0; fi; \
+	fi; \
+	rm -f build/libsk_capi.a; \
+	ar rcs build/libsk_capi.a $(OBJ) build/sk_gpu_none.o; \
 	echo sk_sw > build/sk_capi_backend
 
 lib-gpu: $(OBJ) build/sk_gpu.o | build
-	rm -f build/libsk_capi.a
-	ar rcs build/libsk_capi.a $(OBJ) build/sk_gpu.o
+	@if [ -f build/libsk_capi.a ] && [ -f build/sk_capi_backend ] && grep -qx gpu build/sk_capi_backend; then \
+	  fresh=1; \
+	  for o in $(OBJ) build/sk_gpu.o; do \
+	    if [ $$o -nt build/libsk_capi.a ]; then fresh=0; fi; \
+	  done; \
+	  if [ $$fresh -eq 1 ]; then exit 0; fi; \
+	fi; \
+	rm -f build/libsk_capi.a; \
+	ar rcs build/libsk_capi.a $(OBJ) build/sk_gpu.o; \
 	echo gpu > build/sk_capi_backend
 
 lib-skia: build/sk_gpu_skia_stub.o | build
 	@test -f "$(PREBUILT_LIB)"
-	rm -f build/*.a
-	cp -f "$(PREBUILT_LIB)" build/libsk_capi.a
-	ar rcs build/libsk_capi.a build/sk_gpu_skia_stub.o
+	@if [ -f build/libsk_capi.a ] && [ -f build/sk_capi_backend ] && grep -qx skia build/sk_capi_backend \
+	    && [ ! "$(PREBUILT_LIB)" -nt build/libsk_capi.a ] \
+	    && [ ! build/sk_gpu_skia_stub.o -nt build/libsk_capi.a ]; then \
+	  exit 0; \
+	fi; \
+	rm -f build/*.a; \
+	cp -f "$(PREBUILT_LIB)" build/libsk_capi.a; \
+	ar rcs build/libsk_capi.a build/sk_gpu_skia_stub.o; \
 	echo skia > build/sk_capi_backend
 
 build/test_skia: tests/test_skia.c lib
