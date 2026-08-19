@@ -551,6 +551,30 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.intersect(xs: List[T], ys: List[T]): List[T]",
     ),
     (
+        "List.startsWith",
+        "List.startsWith(xs: List[T], prefix: List[T]): Bool",
+    ),
+    (
+        "List.endsWith",
+        "List.endsWith(xs: List[T], suffix: List[T]): Bool",
+    ),
+    (
+        "List.sameElements",
+        "List.sameElements(xs: List[T], ys: List[T]): Bool",
+    ),
+    (
+        "List.patch",
+        "List.patch(xs: List[T], from: Int, other: List[T], replaced: Int): List[T]",
+    ),
+    (
+        "List.findLast",
+        "List.findLast(xs: List[T], pred: T => Bool): List[T]",
+    ),
+    (
+        "List.prefixLength",
+        "List.prefixLength(xs: List[T], pred: T => Bool): Int",
+    ),
+    (
         "List.forall",
         "List.forall(xs: List[T], pred: T => Bool): Bool",
     ),
@@ -2013,6 +2037,56 @@ mod tests {
         let h = hover_src(src, "intersect");
         assert!(
             h.contains("List.intersect(xs: List[T], ys: List[T]): List[T]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (List.startsWith(["a", "b"], ["a"])) "y" else "n")
+"#;
+        let h = hover_src(src, "startsWith");
+        assert!(
+            h.contains("List.startsWith(xs: List[T], prefix: List[T]): Bool"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (List.endsWith(["a", "b"], ["b"])) "y" else "n")
+"#;
+        let h = hover_src(src, "endsWith");
+        assert!(
+            h.contains("List.endsWith(xs: List[T], suffix: List[T]): Bool"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (List.sameElements(["a"], ["a"])) "y" else "n")
+"#;
+        let h = hover_src(src, "sameElements");
+        assert!(
+            h.contains("List.sameElements(xs: List[T], ys: List[T]): Bool"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.patch(["a", "b", "c"], 1, ["x"], 1), ","))
+"#;
+        let h = hover_src(src, "patch");
+        assert!(
+            h.contains(
+                "List.patch(xs: List[T], from: Int, other: List[T], replaced: Int): List[T]"
+            ),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.findLast(["a", "b", "a"], x => x == "a"), ","))
+"#;
+        let h = hover_src(src, "findLast");
+        assert!(
+            h.contains("List.findLast(xs: List[T], pred: T => Bool): List[T]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.prefixLength(["a", "a", "b"], x => x == "a")))
+"#;
+        let h = hover_src(src, "prefixLength");
+        assert!(
+            h.contains("List.prefixLength(xs: List[T], pred: T => Bool): Int"),
             "{h}"
         );
     }

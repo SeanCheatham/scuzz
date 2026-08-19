@@ -1068,6 +1068,7 @@ fn kit_lambda_param_ty_at(
             | "List.map"
             | "List.flatMap"
             | "List.find"
+            | "List.findLast"
             | "List.exists"
             | "List.count"
             | "List.takeWhile"
@@ -1076,7 +1077,8 @@ fn kit_lambda_param_ty_at(
             | "List.partition"
             | "List.forall"
             | "List.indexWhere"
-            | "List.lastIndexWhere",
+            | "List.lastIndexWhere"
+            | "List.prefixLength",
             1,
         ) => prior.first().and_then(|t| list_elem(t).ok()),
         ("List.tabulate", 1) => Some(Type::Int),
@@ -1116,6 +1118,7 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
             "List.filter"
             | "List.filterNot"
             | "List.find"
+            | "List.findLast"
             | "List.exists"
             | "List.count"
             | "List.takeWhile"
@@ -1125,6 +1128,7 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
             | "List.forall"
             | "List.indexWhere"
             | "List.lastIndexWhere"
+            | "List.prefixLength"
             | "Stream.filter"
             | "Stream.takeWhile"
             | "Stream.dropWhile"
@@ -2165,10 +2169,30 @@ fn infer_call(
             let b = list_elem(&arg_tys[1])?;
             Ok(list_of(prefer_elem(&a, &b)?))
         }
-        "List.find" => {
+        "List.startsWith" | "List.endsWith" | "List.sameElements" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let a = list_elem(&arg_tys[0])?;
+            let b = list_elem(&arg_tys[1])?;
+            prefer_elem(&a, &b)?;
+            Ok(Type::Bool)
+        }
+        "List.patch" => {
+            expect_arity(callee, &arg_tys, 4)?;
+            let a = list_elem(&arg_tys[0])?;
+            let b = list_elem(&arg_tys[2])?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            expect_ty(&arg_tys[3], &Type::Int)?;
+            Ok(list_of(prefer_elem(&a, &b)?))
+        }
+        "List.find" | "List.findLast" => {
             expect_arity(callee, &arg_tys, 2)?;
             let elem = list_elem(&arg_tys[0])?;
             Ok(list_of(elem))
+        }
+        "List.prefixLength" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            list_elem(&arg_tys[0])?;
+            Ok(Type::Int)
         }
         "List.exists" | "List.forall" => {
             expect_arity(callee, &arg_tys, 2)?;
@@ -6359,6 +6383,24 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.contains/indexOf/distinct/diff/intersect should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_starts_with_patch_find_last() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = ["a", "b", "a", "c"]
+    _ <- IO.println(if (List.startsWith(xs, ["a", "b"])) "y" else "n")
+    _ <- IO.println(if (List.endsWith(xs, ["a", "c"])) "y" else "n")
+    _ <- IO.println(if (List.sameElements(xs, ["a", "b", "a", "c"])) "y" else "n")
+    _ <- IO.println(List.join(List.patch(xs, 1, ["x", "y"], 2), ","))
+    _ <- IO.println(List.join(List.findLast(xs, x => x == "a"), ","))
+    _ <- IO.println(Str.fromInt(List.prefixLength(xs, x => x == "a")))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p)
+            .expect("List.startsWith/endsWith/patch/findLast/prefixLength should typecheck");
     }
 
     #[test]
