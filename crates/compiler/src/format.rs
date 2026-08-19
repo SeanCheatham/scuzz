@@ -360,9 +360,18 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
                 format!("{pad}{bare}.{case_name}({})", a.join(", "))
             }
         }
-        ExprKind::Lambda { param, body } => {
-            let p = param.as_deref().unwrap_or("_");
-            format!("{pad}{p} => {}", pretty_expr(body, 0).trim())
+        ExprKind::Lambda {
+            param,
+            param_ty,
+            body,
+        } => {
+            let body = pretty_expr(body, 0).trim().to_string();
+            match (param.as_deref(), param_ty) {
+                (None, None) => format!("{pad}_ => {body}"),
+                (None, Some(ty)) => format!("{pad}(_: {}) => {body}", pretty_type(ty)),
+                (Some(p), None) => format!("{pad}{p} => {body}"),
+                (Some(p), Some(ty)) => format!("{pad}({p}: {}) => {body}", pretty_type(ty)),
+            }
         }
         ExprKind::Call { callee, args } => {
             let a: Vec<_> = args
@@ -1281,6 +1290,17 @@ enum Opt[T]:
         let out = format_source(src).unwrap();
         assert!(out.contains("Opt.None: Opt[Int]"), "{out}");
         assert!(out.contains("(1: Int)"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_typed_lambda_param() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map([1], (n: Int) => Str.fromInt(n)), ","))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("(n: Int) =>"), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

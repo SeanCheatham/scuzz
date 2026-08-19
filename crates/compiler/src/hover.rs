@@ -229,6 +229,7 @@ fn collect_kit_locals(expr: &Expr, offset: usize, out: &mut Vec<(String, Type)>)
                     if let ExprKind::Lambda {
                         param: Some(p),
                         body,
+                        ..
                     } = &a.kind
                     {
                         if a.span.start <= offset && offset <= a.span.end && p != "_" {
@@ -264,6 +265,7 @@ fn walk_binders(expr: &Expr, name: &str, offset: usize, best: &mut Option<(usize
         ExprKind::Lambda {
             param: Some(n),
             body,
+            ..
         } if n == name && covers => {
             consider(best, span_len, n);
             walk_binders(body, name, offset, best);

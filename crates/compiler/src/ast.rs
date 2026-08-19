@@ -224,8 +224,13 @@ impl Expr {
                 base: Box::new(f(*base)?),
                 field,
             },
-            ExprKind::Lambda { param, body } => ExprKind::Lambda {
+            ExprKind::Lambda {
                 param,
+                param_ty,
+                body,
+            } => ExprKind::Lambda {
+                param,
+                param_ty,
                 body: Box::new(f(*body)?),
             },
             ExprKind::FlatMap { inner, param, body } => ExprKind::FlatMap {
@@ -596,6 +601,8 @@ pub enum ExprKind {
     /// `_ => expr` or `x => expr` — single-param lambda literal (tap callbacks).
     Lambda {
         param: Option<String>,
+        /// `Some` for `(x: T) =>`. Kit args still bind from the callee.
+        param_ty: Option<Type>,
         body: Box<Expr>,
     },
 }

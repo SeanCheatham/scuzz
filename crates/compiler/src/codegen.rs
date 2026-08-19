@@ -1887,7 +1887,7 @@ fn emit_expr(
                 owned: kind == Kind::Ptr && (te.owned || ee.owned),
             }
         }
-        ExprKind::Lambda { param, body } => emit_lambda(param, body, ctx, locals, prefix),
+        ExprKind::Lambda { param, body, .. } => emit_lambda(param, body, ctx, locals, prefix),
         ExprKind::Unary { op, expr } => emit_unary(*op, expr, ctx, locals, prefix),
         ExprKind::Binary { op, left, right } => emit_binary(op, left, right, ctx, locals, prefix),
         ExprKind::Call { callee, args } => emit_call(callee, args, ctx, locals, prefix),
@@ -2520,7 +2520,7 @@ fn emit_view_each(
         .unwrap();
         return val_emitted(code, format!("%{prefix}_v"), Kind::Ptr);
     }
-    let ExprKind::Lambda { param, body } = &args[1].kind else {
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("View.each mapper must be a lambda");
     };
     let mapper = emit_each_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
@@ -2545,7 +2545,7 @@ fn emit_signal_map(
 ) -> Emitted {
     assert!(args.len() == 2, "Signal.map expects 2 args");
     let src = emit_expr(&args[0], ctx, locals, &format!("{prefix}_src"));
-    let ExprKind::Lambda { param, body } = &args[1].kind else {
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("Signal.map mapper must be a lambda");
     };
     let mapper = emit_map_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
@@ -2823,7 +2823,7 @@ fn emit_resource(
 ) -> Emitted {
     assert!(args.len() == 2, "{callee} expects 2 args");
     let first = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
-    let ExprKind::Lambda { param, body } = &args[1].kind else {
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("{callee} callback must be a lambda");
     };
     let lam = emit_io_cont_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
@@ -2868,7 +2868,7 @@ fn emit_stream_evalmap(
 ) -> Emitted {
     assert!(args.len() == 2, "Stream.evalMap expects 2 args");
     let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
-    let ExprKind::Lambda { param, body } = &args[1].kind else {
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("Stream.evalMap callback must be a lambda");
     };
     let lam = emit_io_cont_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
@@ -2897,7 +2897,7 @@ fn emit_list_pred_i64(
 ) -> Emitted {
     assert!(args.len() == 2, "{callee} expects 2 args");
     let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
-    let ExprKind::Lambda { param, body } = &args[1].kind else {
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("{callee} predicate must be a lambda");
     };
     let lam = emit_pred_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
@@ -2927,7 +2927,7 @@ fn emit_list_segment_length(
 ) -> Emitted {
     assert!(args.len() == 3, "List.segmentLength expects 3 args");
     let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
-    let ExprKind::Lambda { param, body } = &args[1].kind else {
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("List.segmentLength predicate must be a lambda");
     };
     let lam = emit_pred_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
@@ -2963,7 +2963,7 @@ fn emit_stream_pred(
 ) -> Emitted {
     assert!(args.len() == 2, "{callee} expects 2 args");
     let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
-    let ExprKind::Lambda { param, body } = &args[1].kind else {
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("{callee} predicate must be a lambda");
     };
     let lam = emit_pred_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
@@ -3034,7 +3034,7 @@ fn emit_ptr_map(
 ) -> Emitted {
     assert!(args.len() == 2, "{callee} expects 2 args");
     let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
-    let ExprKind::Lambda { param, body } = &args[1].kind else {
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("{callee} mapper must be a lambda");
     };
     let lam = emit_smap_lambda(param, body, ctx, locals, &format!("{prefix}_fn"), box_int);
@@ -3064,7 +3064,7 @@ fn emit_list_tabulate(
 ) -> Emitted {
     assert!(args.len() == 2, "List.tabulate expects 2 args");
     let n = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
-    let ExprKind::Lambda { param, body } = &args[1].kind else {
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("List.tabulate mapper must be a lambda");
     };
     let lam = emit_smap_lambda(param, body, ctx, locals, &format!("{prefix}_fn"), true);
@@ -3090,7 +3090,7 @@ fn emit_net_serve(
 ) -> Emitted {
     assert!(args.len() == 2, "{rt} expects 2 args");
     let port = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
-    let ExprKind::Lambda { param, body } = &args[1].kind else {
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("{rt} callback must be a lambda");
     };
     let lam = emit_io_cont_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
@@ -3174,7 +3174,7 @@ fn emit_ui_run(
     prefix: &str,
 ) -> Emitted {
     assert!(args.len() == 1, "Ui.run expects 1 arg");
-    let ExprKind::Lambda { param, body } = &args[0].kind else {
+    let ExprKind::Lambda { param, body, .. } = &args[0].kind else {
         panic!("Ui.run expects _ => View");
     };
     let lam = emit_rebuild_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
@@ -7088,6 +7088,18 @@ def id(m: Map[String, String]): Map[String, String] = m
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_list_map"));
         assert!(ir.contains("sz_smap_"));
+    }
+
+    #[test]
+    fn emit_list_map_typed_lambda() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map([1, 2], (n: Int) => Str.fromInt(n)), ","))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typed lambda List.map");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_map"), "{ir}");
+        assert!(ir.contains("sz_smap_"), "{ir}");
     }
 
     #[test]

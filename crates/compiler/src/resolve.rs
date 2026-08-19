@@ -568,7 +568,7 @@ fn unused_in_expr(e: &Expr, out: &mut Vec<UnusedName>) {
             }
             unused_in_expr(body, out);
         }
-        ExprKind::Lambda { param, body } => {
+        ExprKind::Lambda { param, body, .. } => {
             if let Some(name) = param {
                 if !discarded_name(name) && !uses_name(body, name) {
                     let end = (e.span.start + name.len()).min(e.span.end);
@@ -616,7 +616,9 @@ fn used_after_for_binder(name: &str, rest: &[crate::ast::ForBinder], body: &Expr
 pub(crate) fn uses_name(e: &Expr, name: &str) -> bool {
     match &e.kind {
         ExprKind::Var(n) => n == name,
-        ExprKind::Lambda { param, body } => param.as_deref() != Some(name) && uses_name(body, name),
+        ExprKind::Lambda { param, body, .. } => {
+            param.as_deref() != Some(name) && uses_name(body, name)
+        }
         ExprKind::Let {
             name: n,
             value,

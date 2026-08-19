@@ -221,6 +221,7 @@ jobs:
           grep -q "padTo:a,z,z" /tmp/kernel.out
           grep -q "nempty:y" /tmp/kernel.out
           grep -q "range:1,2,3" /tmp/kernel.out
+          grep -q "typedlam:1,2,3" /tmp/kernel.out
           grep -q "tab:0,1,2" /tmp/kernel.out
           grep -q "isp:a,|,b,|,c" /tmp/kernel.out
           grep -q "grp:a,b|c" /tmp/kernel.out
