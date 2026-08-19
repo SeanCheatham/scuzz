@@ -191,6 +191,11 @@ jobs:
           grep -q "ldiff:b,c" /tmp/kernel.out
           grep -q "lisect:a" /tmp/kernel.out
           grep -q "nhas:y" /tmp/kernel.out
+          grep -q "ixslice:0" /tmp/kernel.out
+          grep -q "lixslice:2" /tmp/kernel.out
+          grep -q "seglen:2" /tmp/kernel.out
+          grep -q "defat:y" /tmp/kernel.out
+          grep -q "lcmp:0" /tmp/kernel.out
           grep -q "slen:3" /tmp/kernel.out
           grep -q "slice:bc" /tmp/kernel.out
           grep -q "ix:1" /tmp/kernel.out

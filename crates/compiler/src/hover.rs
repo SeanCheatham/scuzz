@@ -575,6 +575,26 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.prefixLength(xs: List[T], pred: T => Bool): Int",
     ),
     (
+        "List.indexOfSlice",
+        "List.indexOfSlice(xs: List[T], slice: List[T]): Int",
+    ),
+    (
+        "List.lastIndexOfSlice",
+        "List.lastIndexOfSlice(xs: List[T], slice: List[T]): Int",
+    ),
+    (
+        "List.segmentLength",
+        "List.segmentLength(xs: List[T], pred: T => Bool, from: Int): Int",
+    ),
+    (
+        "List.isDefinedAt",
+        "List.isDefinedAt(xs: List[T], i: Int): Bool",
+    ),
+    (
+        "List.lengthCompare",
+        "List.lengthCompare(xs: List[T], n: Int): Int",
+    ),
+    (
         "List.forall",
         "List.forall(xs: List[T], pred: T => Bool): Bool",
     ),
@@ -2087,6 +2107,46 @@ mod tests {
         let h = hover_src(src, "prefixLength");
         assert!(
             h.contains("List.prefixLength(xs: List[T], pred: T => Bool): Int"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.indexOfSlice(["a", "b"], ["b"])))
+"#;
+        let h = hover_src(src, "indexOfSlice");
+        assert!(
+            h.contains("List.indexOfSlice(xs: List[T], slice: List[T]): Int"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.lastIndexOfSlice(["a", "b", "a", "b"], ["a", "b"])))
+"#;
+        let h = hover_src(src, "lastIndexOfSlice");
+        assert!(
+            h.contains("List.lastIndexOfSlice(xs: List[T], slice: List[T]): Int"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.segmentLength(["a", "a", "b"], x => x == "a", 0)))
+"#;
+        let h = hover_src(src, "segmentLength");
+        assert!(
+            h.contains("List.segmentLength(xs: List[T], pred: T => Bool, from: Int): Int"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (List.isDefinedAt(["a"], 0)) "y" else "n")
+"#;
+        let h = hover_src(src, "isDefinedAt");
+        assert!(
+            h.contains("List.isDefinedAt(xs: List[T], i: Int): Bool"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.lengthCompare(["a", "b"], 2)))
+"#;
+        let h = hover_src(src, "lengthCompare");
+        assert!(
+            h.contains("List.lengthCompare(xs: List[T], n: Int): Int"),
             "{h}"
         );
     }

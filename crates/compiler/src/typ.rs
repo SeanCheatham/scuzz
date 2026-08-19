@@ -1078,7 +1078,8 @@ fn kit_lambda_param_ty_at(
             | "List.forall"
             | "List.indexWhere"
             | "List.lastIndexWhere"
-            | "List.prefixLength",
+            | "List.prefixLength"
+            | "List.segmentLength",
             1,
         ) => prior.first().and_then(|t| list_elem(t).ok()),
         ("List.tabulate", 1) => Some(Type::Int),
@@ -1129,6 +1130,7 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
             | "List.indexWhere"
             | "List.lastIndexWhere"
             | "List.prefixLength"
+            | "List.segmentLength"
             | "Stream.filter"
             | "Stream.takeWhile"
             | "Stream.dropWhile"
@@ -2192,6 +2194,31 @@ fn infer_call(
         "List.prefixLength" => {
             expect_arity(callee, &arg_tys, 2)?;
             list_elem(&arg_tys[0])?;
+            Ok(Type::Int)
+        }
+        "List.segmentLength" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            list_elem(&arg_tys[0])?;
+            expect_ty(&arg_tys[2], &Type::Int)?;
+            Ok(Type::Int)
+        }
+        "List.indexOfSlice" | "List.lastIndexOfSlice" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let a = list_elem(&arg_tys[0])?;
+            let b = list_elem(&arg_tys[1])?;
+            prefer_elem(&a, &b)?;
+            Ok(Type::Int)
+        }
+        "List.isDefinedAt" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            list_elem(&arg_tys[0])?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(Type::Bool)
+        }
+        "List.lengthCompare" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            list_elem(&arg_tys[0])?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(Type::Int)
         }
         "List.exists" | "List.forall" => {
@@ -6401,6 +6428,23 @@ enum Color:
         let p = lower_program(parse(src).unwrap());
         typecheck(&p)
             .expect("List.startsWith/endsWith/patch/findLast/prefixLength should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_index_of_slice_segment_length() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = ["a", "b", "a", "b"]
+    _ <- IO.println(Str.fromInt(List.indexOfSlice(xs, ["a", "b"])))
+    _ <- IO.println(Str.fromInt(List.lastIndexOfSlice(xs, ["a", "b"])))
+    _ <- IO.println(Str.fromInt(List.segmentLength(xs, x => x == "a", 0)))
+    _ <- IO.println(if (List.isDefinedAt(xs, 3)) "y" else "n")
+    _ <- IO.println(Str.fromInt(List.lengthCompare(xs, 4)))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p)
+            .expect("List.indexOfSlice/lastIndexOfSlice/segmentLength/isDefinedAt/lengthCompare should typecheck");
     }
 
     #[test]

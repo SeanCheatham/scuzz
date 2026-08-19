@@ -4453,6 +4453,122 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
+  /* List.indexOfSlice / lastIndexOfSlice / segmentLength / isDefinedAt /
+   * lengthCompare. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *a;
+    SzString *a2;
+    SzString *b;
+    SzString *c;
+    SzList *xs;
+    SzList *tmp;
+    SzList *ab;
+    SzList *ba;
+    SzList *aa;
+    void *n1;
+    void *n2;
+    void *n9;
+    SzList *ns;
+    SzList *nslice;
+    sz_alloc_stats(&base_bytes, &base_count);
+    a = sz_string_from_cstr("a");
+    a2 = sz_string_from_cstr("a");
+    b = sz_string_from_cstr("b");
+    c = sz_string_from_cstr("c");
+    xs = sz_list_cons(a, NULL);
+    tmp = sz_list_append(xs, b);
+    sz_release(xs);
+    xs = sz_list_append(tmp, a);
+    sz_release(tmp);
+    tmp = sz_list_append(xs, b);
+    sz_release(xs);
+    xs = tmp;
+    ab = sz_list_cons(a2, NULL);
+    tmp = sz_list_append(ab, b);
+    sz_release(ab);
+    ab = tmp;
+    ba = sz_list_cons(b, NULL);
+    tmp = sz_list_append(ba, a2);
+    sz_release(ba);
+    ba = tmp;
+    aa = sz_list_cons(a2, NULL);
+    tmp = sz_list_append(aa, a2);
+    sz_release(aa);
+    aa = tmp;
+    assert(sz_list_index_of_slice(xs, ab) == 0);
+    assert(sz_list_last_index_of_slice(xs, ab) == 2);
+    assert(sz_list_index_of_slice(xs, ba) == 1);
+    assert(sz_list_last_index_of_slice(xs, ba) == 1);
+    assert(sz_list_index_of_slice(xs, aa) == -1);
+    assert(sz_list_last_index_of_slice(xs, aa) == -1);
+    assert(sz_list_index_of_slice(xs, NULL) == 0);
+    assert(sz_list_last_index_of_slice(xs, NULL) == 4);
+    assert(sz_list_index_of_slice(NULL, NULL) == 0);
+    assert(sz_list_last_index_of_slice(NULL, NULL) == 0);
+    assert(sz_list_index_of_slice(NULL, ab) == -1);
+    assert(sz_list_last_index_of_slice(NULL, ab) == -1);
+    tmp = sz_list_cons(a, NULL);
+    {
+      SzList *mid = sz_list_append(tmp, b);
+      sz_release(tmp);
+      tmp = sz_list_append(mid, c);
+      sz_release(mid);
+    }
+    assert(sz_list_index_of_slice(xs, tmp) == -1);
+    sz_list_free(tmp);
+    assert(sz_list_segment_length(xs, keep_a, NULL, 0) == 1);
+    assert(sz_list_segment_length(xs, keep_a, NULL, 2) == 1);
+    assert(sz_list_segment_length(xs, keep_a, NULL, 1) == 0);
+    assert(sz_list_segment_length(xs, keep_a, NULL, -3) == 1);
+    assert(sz_list_segment_length(xs, keep_a, NULL, 9) == 0);
+    assert(sz_list_segment_length(NULL, keep_a, NULL, 0) == 0);
+    assert(sz_list_is_defined_at(xs, 0) == 1);
+    assert(sz_list_is_defined_at(xs, 3) == 1);
+    assert(sz_list_is_defined_at(xs, 4) == 0);
+    assert(sz_list_is_defined_at(xs, -1) == 0);
+    assert(sz_list_is_defined_at(NULL, 0) == 0);
+    assert(sz_list_length_compare(xs, 4) == 0);
+    assert(sz_list_length_compare(xs, 3) > 0);
+    assert(sz_list_length_compare(xs, 5) < 0);
+    assert(sz_list_length_compare(NULL, 0) == 0);
+    assert(sz_list_length_compare(NULL, 1) < 0);
+    assert(sz_list_length_compare(xs, -1) > 0);
+    n1 = sz_box_i64(1);
+    n2 = sz_box_i64(2);
+    n9 = sz_box_i64(1);
+    ns = sz_list_cons(n1, NULL);
+    tmp = sz_list_append(ns, n2);
+    sz_release(ns);
+    ns = sz_list_append(tmp, n1);
+    sz_release(tmp);
+    nslice = sz_list_cons(n9, NULL);
+    tmp = sz_list_append(nslice, n2);
+    sz_release(nslice);
+    nslice = tmp;
+    assert(sz_list_index_of_slice(ns, nslice) == 0);
+    assert(sz_list_last_index_of_slice(ns, nslice) == 0);
+    assert(sz_list_is_defined_at(ns, 2) == 1);
+    assert(sz_list_length_compare(ns, 3) == 0);
+    sz_list_free(nslice);
+    sz_list_free(ns);
+    sz_release(n1);
+    sz_release(n2);
+    sz_release(n9);
+    sz_list_free(xs);
+    sz_list_free(ab);
+    sz_list_free(ba);
+    sz_list_free(aa);
+    sz_string_free(a);
+    sz_string_free(a2);
+    sz_string_free(b);
+    sz_string_free(c);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   /* List.concat: left spine copy; empty left retains right. */
   {
     SzString *a = sz_string_from_cstr("a");
