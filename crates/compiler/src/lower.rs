@@ -180,6 +180,7 @@ fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Expr {
                     .into_iter()
                     .map(|a| MatchArm {
                         pattern: lower_pattern(a.pattern, enums, current_module),
+                        guard: a.guard.map(|g| lower_expr(g, enums, current_module)),
                         body: lower_expr(a.body, enums, current_module),
                     })
                     .collect(),

@@ -749,6 +749,9 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         ExprKind::Match { scrutinee, arms } => {
             collect_strings(scrutinee, out);
             for a in arms {
+                if let Some(g) = &a.guard {
+                    collect_strings(g, out);
+                }
                 collect_strings(&a.body, out);
             }
         }
@@ -1167,7 +1170,7 @@ fn emit_match(
     };
     writeln!(code, "  br label %{first}").unwrap();
 
-    let mut arm_emits: Vec<(String, String, Emitted)> = Vec::new();
+    let mut arm_emits: Vec<(String, String, String, Option<Emitted>, Emitted)> = Vec::new();
     let mut result_kind = Kind::Io;
     let mut result_payload = Kind::Ptr;
     let mut result_payload_owned = !arms.is_empty();
@@ -1199,6 +1202,10 @@ fn emit_match(
                 bound_names: &mut bound_names,
             },
         );
+        let ge = arm
+            .guard
+            .as_ref()
+            .map(|g| emit_expr(g, ctx, locals, &format!("{prefix}_g{id}_{i}")));
         let ae = emit_expr(&arm.body, ctx, locals, &format!("{prefix}_a{id}_{i}"));
         for b in &bound_names {
             locals.remove(b);
@@ -1213,7 +1220,7 @@ fn emit_match(
         } else {
             all_arms_owned = false;
         }
-        arm_emits.push((ok_l, join_l, ae));
+        arm_emits.push((ok_l, join_l, next_l, ge, ae));
     }
 
     writeln!(code, "{default_label}:").unwrap();
@@ -1237,8 +1244,20 @@ fn emit_match(
     let mixed_ptr = result_kind == Kind::Ptr && any_arm_owned && !all_arms_owned;
     let arms_provide = result_kind == Kind::Ptr && any_arm_owned;
     let mut phi_parts: Vec<(String, String)> = Vec::new();
-    for (ok_l, join_l, ae) in &arm_emits {
+    for (ok_l, join_l, next_l, ge, ae) in &arm_emits {
         writeln!(code, "{ok_l}:").unwrap();
+        if let Some(ge) = ge {
+            code.push_str(&ge.code);
+            let cond_i64 = as_i64(&mut code, ge.kind, &ge.value, &format!("{ok_l}_gc"));
+            let body_l = format!("{ok_l}_body");
+            writeln!(code, "  %{ok_l}_cmp = icmp ne i64 {cond_i64}, 0").unwrap();
+            writeln!(
+                code,
+                "  br i1 %{ok_l}_cmp, label %{body_l}, label %{next_l}"
+            )
+            .unwrap();
+            writeln!(code, "{body_l}:").unwrap();
+        }
         code.push_str(&ae.code);
         if mixed_ptr && !ae.owned {
             writeln!(code, "  call void @sz_retain(ptr {})", ae.value).unwrap();
@@ -5652,6 +5671,50 @@ enum Color { case Red, case Blue }
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of match-arm list {name}:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_match_guard_branches_on_pred() {
+        let src = r#"
+enum Color { case Red, case Blue }
+@main def main: IO[Unit] =
+  Color.Red match {
+    case Color.Red if false => IO.println("skip")
+    case Color.Red => IO.println("hit")
+    case Color.Blue => IO.println("blue")
+  }
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("icmp ne i64 0, 0") || ir.contains("icmp ne i64"),
+            "expected guard icmp:\n{ir}"
+        );
+        assert!(ir.contains("_body:"), "expected guard body label:\n{ir}");
+    }
+
+    #[test]
+    fn emit_match_guard_releases_list_temp() {
+        let src = r#"
+enum Color { case Red, case Blue }
+@main def main: IO[Unit] =
+  Color.Red match {
+    case Color.Red if List.nonEmpty([1]) => IO.println("hit")
+    case Color.Red => IO.println("miss")
+    case Color.Blue => IO.println("blue")
+  }
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call i32 @sz_list_non_empty(ptr ";
+        let at = ir.find(needle).expect("expected sz_list_nonempty");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of guard list {name}:\n{ir}"
         );
     }
 
