@@ -305,6 +305,37 @@ SzView *sz_lang_view_show_when(SzSignalInt *sig, int64_t value, SzView *child) {
 
 SzView *sz_lang_view_bind_text(SzSignalStr *sig) { return sz_view_text_signal_str(sig); }
 
+static int live_still_desktop(void) { return sz_embedder_alive(); }
+
+static int live_still_mobile(void) { return sz_mobile_alive(); }
+
+static int live_still_watch(void) { return 1; }
+
+static void live_pump_loop(SzUiSession *session, int (*still)(void)) {
+  const char *max_frames_env = getenv("SCUZZ_LIVE_FRAMES");
+  int64_t max_frames =
+      (max_frames_env && atoi(max_frames_env) > 0) ? atoi(max_frames_env) : 0;
+  int64_t frame = 0;
+  while (sz_ui_session_alive(session) && still()) {
+    if (!sz_ui_pump_sync(session)) {
+      if (!sz_ui_session_alive(session))
+        break;
+      sz_panic("Ui.run live pump failed");
+    }
+    if (!sz_ui_session_alive(session))
+      break;
+    frame++;
+    if (max_frames > 0 && frame >= max_frames)
+      break;
+    {
+      struct timespec ts;
+      ts.tv_sec = 0;
+      ts.tv_nsec = 16000000L; /* ~60fps cap */
+      nanosleep(&ts, NULL);
+    }
+  }
+}
+
 /* --- Ui.run -------------------------------------------------------------- */
 
 typedef struct {
@@ -380,63 +411,15 @@ static void *thunk_run_rebuild(void *env) {
 
   interactive = cfg.kind == SZ_UI_RUNTIME_DESKTOP && sz_embedder_available();
   if (interactive) {
-    const char *max_frames_env = getenv("SCUZZ_LIVE_FRAMES");
-    int64_t max_frames =
-        (max_frames_env && atoi(max_frames_env) > 0) ? atoi(max_frames_env) : 0;
-    int64_t frame = 0;
-    do {
-      if (!sz_ui_pump_sync(session))
-        sz_panic("Ui.run live pump failed");
-      frame++;
-      if (max_frames > 0 && frame >= max_frames)
-        break;
-      {
-        struct timespec ts;
-        ts.tv_sec = 0;
-        ts.tv_nsec = 16000000L; /* ~60fps cap */
-        nanosleep(&ts, NULL);
-      }
-    } while (sz_embedder_alive());
+    live_pump_loop(session, live_still_desktop);
     sz_ui_session_finish(session);
   } else if (stamp && stamp[0]) {
-    const char *max_frames_env = getenv("SCUZZ_LIVE_FRAMES");
-    int64_t max_frames =
-        (max_frames_env && atoi(max_frames_env) > 0) ? atoi(max_frames_env) : 0;
-    int64_t frame = 0;
-    do {
-      if (!sz_ui_pump_sync(session))
-        sz_panic("Ui.run live pump failed");
-      frame++;
-      if (max_frames > 0 && frame >= max_frames)
-        break;
-      {
-        struct timespec ts;
-        ts.tv_sec = 0;
-        ts.tv_nsec = 16000000L;
-        nanosleep(&ts, NULL);
-      }
-    } while (1);
+    live_pump_loop(session, live_still_watch);
     sz_ui_session_finish(session);
   } else if (cfg.kind == SZ_UI_RUNTIME_MOBILE && sz_mobile_available()) {
     /* Live Mobile shell (iOS sim/device): pump until the shell goes away.
      * Host shell reports alive=0, so the CI smoke stays a single frame. */
-    const char *max_frames_env = getenv("SCUZZ_LIVE_FRAMES");
-    int64_t max_frames =
-        (max_frames_env && atoi(max_frames_env) > 0) ? atoi(max_frames_env) : 0;
-    int64_t frame = 0;
-    while (sz_mobile_alive()) {
-      if (!sz_ui_pump_sync(session))
-        sz_panic("Ui.run live pump failed");
-      frame++;
-      if (max_frames > 0 && frame >= max_frames)
-        break;
-      {
-        struct timespec ts;
-        ts.tv_sec = 0;
-        ts.tv_nsec = 16000000L; /* ~60fps cap */
-        nanosleep(&ts, NULL);
-      }
-    }
+    live_pump_loop(session, live_still_mobile);
     sz_ui_session_finish(session);
   } else {
     sz_ui_session_finish(session);

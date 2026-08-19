@@ -135,6 +135,7 @@ struct SzUiSession {
   void *code_handle;
   void *code_stale;
   int code_gen;
+  unsigned pumps;
 };
 
 static int runtime_kind_ok(SzUiRuntimeKind kind) {
@@ -332,6 +333,32 @@ static void fputs_dump_quoted(FILE *f, const char *s) {
   fputc('"', f);
 }
 
+static const char *runtime_kind_name(SzUiRuntimeKind kind) {
+  switch (kind) {
+  case SZ_UI_RUNTIME_HEADLESS:
+    return "headless";
+  case SZ_UI_RUNTIME_DESKTOP:
+    return "desktop";
+  case SZ_UI_RUNTIME_MOBILE:
+    return "mobile";
+  default:
+    return "unknown";
+  }
+}
+
+static const char *lifecycle_name(SzLifecyclePhase phase) {
+  switch (phase) {
+  case SZ_LIFECYCLE_RESUME:
+    return "resume";
+  case SZ_LIFECYCLE_PAUSE:
+    return "pause";
+  case SZ_LIFECYCLE_STOP:
+    return "stop";
+  default:
+    return "unknown";
+  }
+}
+
 int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
   FILE *f;
   SzString *signals;
@@ -384,10 +411,28 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
             session->last_hit_y,
             session->last_hit_desc ? session->last_hit_desc : "NULL");
   }
+  if (session && session->debug_dump_path && path &&
+      strcmp(path, session->debug_dump_path) == 0) {
+    size_t live_bytes = 0, live_count = 0;
+    sz_alloc_stats(&live_bytes, &live_count);
+    fprintf(f, "\n[session]\nkind=%s\nwidth=%d\nheight=%d\nlifecycle=%s\n"
+               "keyboard=%d\npumps=%u\n",
+            runtime_kind_name(session->cfg.kind), session->cfg.width,
+            session->cfg.height, lifecycle_name(session->lifecycle),
+            session->keyboard_visible, session->pumps);
+    fprintf(f, "\n[heap]\nlive_bytes=%zu\nlive_count=%zu\npeak_bytes=%zu\n",
+            live_bytes, live_count, sz_alloc_peak_bytes());
+  }
   fclose(f);
   sz_string_free(signals);
   sz_string_free(views);
   return 1;
+}
+
+int sz_ui_session_dump_now(SzUiSession *session) {
+  if (!session || !session->debug_dump_path)
+    return 0;
+  return sz_ui_session_write_dump(session, session->debug_dump_path);
 }
 
 int sz_ui_session_reload(SzUiSession *session) {
@@ -884,6 +929,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
     }
   }
   sz_alloc_trace_on_pump();
+  session->pumps += 1;
   if (need_dump && session->debug_dump_path)
     sz_ui_session_write_dump(session, session->debug_dump_path);
   return 1;
@@ -1119,8 +1165,23 @@ SzLifecyclePhase sz_ui_session_lifecycle(const SzUiSession *session) {
   return session ? session->lifecycle : SZ_LIFECYCLE_STOP;
 }
 
+int sz_ui_session_alive(const SzUiSession *session) {
+  return session && session->lifecycle != SZ_LIFECYCLE_STOP;
+}
+
+void sz_ui_session_request_stop(SzUiSession *session) {
+  if (!session)
+    return;
+  session->lifecycle = SZ_LIFECYCLE_STOP;
+  session->keyboard_visible = 0;
+}
+
 int sz_ui_session_keyboard_visible(const SzUiSession *session) {
   return session ? session->keyboard_visible : 0;
+}
+
+unsigned sz_ui_session_pumps(const SzUiSession *session) {
+  return session ? session->pumps : 0;
 }
 
 /* Shared resolution of headless size from args / env. */

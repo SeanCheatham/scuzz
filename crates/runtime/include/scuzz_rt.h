@@ -38,6 +38,8 @@ void sz_retain(void *ptr);
 void sz_release(void *ptr);
 /* Live heap through sz_alloc/sz_free (user bytes; excludes size header). */
 void sz_alloc_stats(size_t *live_bytes, size_t *live_count);
+/* High-water live_bytes since process start or the last reset. */
+size_t sz_alloc_peak_bytes(void);
 /* Reset peak / pump-sample counter; live stays accurate for outstanding allocs. */
 void sz_alloc_reset_stats(void);
 /* Optional SCUZZ_ALLOC_TRACE=1 sample from sz_ui_pump_sync (every N pumps). */

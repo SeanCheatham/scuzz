@@ -211,8 +211,11 @@ void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
      scroll <n> <dy>  pan dump-index n ([scrolls] scan order); `scroll 40` stays dy 40
      backspace <n> chop n bytes from the [fields] starred TextField (default 1); no field is a no-op
      backspace <n> <k>  chop k bytes from dump-index n
+     dump       rewrite the live debug dump now (includes [heap]); no dump path is a no-op
+     reload     rebuild the View factory now; missing factory is a no-op
+     quit       stop the live session; remaining script lines do not run
      drive <name> [args]  run a verify-graph driver (Int/String/Bool args)
-   Blank lines and #-comments are skipped. Pump runs after every event. */
+   Blank lines and #-comments are skipped. Pump runs after every event except quit. */
 
 static void script_tap(SzUiSession *session, int n) {
   SzView *buttons[64];
@@ -278,10 +281,20 @@ static void play_script_line(SzUiSession *session, char *line) {
     int idx;
     const char *payload = script_field_payload(len > 4 ? line + 5 : "", &idx);
     script_type(session, idx, payload);
+  } else if (strcmp(line, "dump") == 0) {
+    sz_ui_session_dump_now(session);
+  } else if (strcmp(line, "reload") == 0) {
+    if (!sz_ui_session_reload(session))
+      fprintf(stderr, "scuzz: script reload skipped (no factory)\n");
+  } else if (strcmp(line, "quit") == 0) {
+    sz_ui_session_request_stop(session);
+    return;
   } else if (strncmp(line, "drive ", 6) == 0)
     sz_driver_run_line(line + 6);
   else
     sz_panic("Ui.run: unknown SCUZZ_UI_SCRIPT directive");
+  if (!sz_ui_session_alive(session))
+    return;
   if (!sz_ui_pump_sync(session))
     sz_panic("Ui.run: script pump failed");
 }
@@ -292,6 +305,8 @@ void sz_ui_script_play_text(SzUiSession *session, char *text) {
     char *nl = strchr(p, '\n');
     char *line = p;
     size_t len;
+    if (!sz_ui_session_alive(session))
+      return;
     if (nl) {
       *nl = '\0';
       p = nl + 1;
@@ -311,6 +326,8 @@ void sz_ui_script_run_file(SzUiSession *session, const char *path) {
     sz_panic("Ui.run: SCUZZ_UI_SCRIPT open failed");
   while (fgets(line, sizeof line, f)) {
     size_t len = strlen(line);
+    if (!sz_ui_session_alive(session))
+      break;
     while (len > 0 && (line[len - 1] == '\n' || line[len - 1] == '\r'))
       line[--len] = '\0';
     play_script_line(session, line);

@@ -1260,6 +1260,22 @@ mod tests {
         }
     }
 
+    fn wait_child_exit(child: &mut std::process::Child, ms: u64) {
+        let start = std::time::Instant::now();
+        loop {
+            if let Ok(Some(status)) = child.try_wait() {
+                assert!(status.success(), "ui process exit {status}");
+                return;
+            }
+            if start.elapsed().as_millis() as u64 >= ms {
+                let _ = child.kill();
+                let _ = child.wait();
+                panic!("timed out waiting for ui process to quit");
+            }
+            std::thread::sleep(std::time::Duration::from_millis(50));
+        }
+    }
+
     #[test]
     fn live_reload_dylib_swaps_view_label() {
         let tmp = tempdir().unwrap();
@@ -1271,6 +1287,7 @@ mod tests {
 
         let stamp = app.join("build").join("reload.stamp");
         let dump = app.join("build").join("debug.dump");
+        let inject = app.join("build").join("inject.script");
         fs::write(&stamp, "0\n").unwrap();
         let mut child = std::process::Command::new(&out.executable)
             .env("SCUZZ_UI_RUNTIME", "headless")
@@ -1279,10 +1296,15 @@ mod tests {
             .env("SCUZZ_UI_RELOAD_STAMP", &stamp)
             .env("SCUZZ_UI_RELOAD_CODE", &dylib)
             .env("SCUZZ_UI_DEBUG_DUMP", &dump)
+            .env("SCUZZ_UI_INJECT", &inject)
             .spawn()
             .expect("spawn reload_label");
         let first = wait_dump_contains(&dump, "text:Alpha", &mut child, 8_000);
         assert!(first.contains("int[0] = 7"), "{first}");
+        assert!(first.contains("[session]"), "{first}");
+        assert!(first.contains("kind=headless"), "{first}");
+        assert!(first.contains("[heap]"), "{first}");
+        assert!(first.contains("live_bytes="), "{first}");
         assert!(!first.contains("text:Beta"), "{first}");
 
         write_reload_ui(&app, "Beta");
@@ -1290,10 +1312,12 @@ mod tests {
         fs::write(&stamp, "1\n").unwrap();
         let second = wait_dump_contains(&dump, "text:Beta", &mut child, 8_000);
         assert!(second.contains("int[0] = 7"), "{second}");
+        assert!(second.contains("[heap]"), "{second}");
+        assert!(second.contains("[session]"), "{second}");
         assert!(!second.contains("text:Alpha"), "{second}");
 
-        let _ = child.kill();
-        let _ = child.wait();
+        fs::write(&inject, "quit\n").unwrap();
+        wait_child_exit(&mut child, 8_000);
     }
 
     fn write_io_watch(dir: &Path, marker: &Path, msg: &str) {

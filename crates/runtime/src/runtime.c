@@ -185,6 +185,8 @@ void sz_alloc_stats(size_t *live_bytes, size_t *live_count) {
     *live_count = g_live_count;
 }
 
+size_t sz_alloc_peak_bytes(void) { return g_peak_bytes; }
+
 void sz_alloc_reset_stats(void) {
   g_peak_bytes = g_live_bytes;
   g_trace_pumps = 0;

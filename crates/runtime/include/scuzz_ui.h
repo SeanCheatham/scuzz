@@ -473,12 +473,17 @@ int sz_ui_session_watch(SzUiSession *session, const char *path);
  * [scrolls] lists hittable Scrolls in scan order; `scroll N dy` pans index N
  * (`scroll 40` stays the first).
  * [last_hit] appears after a TAP in this session: `xy x y -> role:label` or
- * `-> NULL`. */
+ * `-> NULL`.
+ * [heap] is live alloc stats (`live_bytes` / `live_count` / `peak_bytes`).
+ * [session] is kind, size, lifecycle, keyboard, and pump count.
+ * Only the live debug dump includes them. Fuzz / golden dumps omit them. */
 int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
 int sz_ui_session_write_dump(SzUiSession *session, const char *path);
-/* Watch an inject script (tap/text/type/pump/scroll/backspace/xy). Next pump that
- * sees new contents plays the suffix (append) or the whole file (rewrite).
- * Missing = empty. */
+/* Rewrite the live debug dump now, including [session] and [heap]. No path is a no-op. */
+int sz_ui_session_dump_now(SzUiSession *session);
+/* Watch an inject script (tap/xy/text/type/pump/scroll/backspace/dump/reload/quit).
+ * Next pump that sees new contents plays the suffix (append) or the whole file
+ * (rewrite). Missing = empty. */
 int sz_ui_session_set_inject(SzUiSession *session, const char *path);
 /* Live record path (Desktop / Mobile drain). Truncates on set. Appends only from
  * OS drain, never from script / inject playback. */
@@ -505,7 +510,13 @@ int sz_ui_session_width(const SzUiSession *session);
 int sz_ui_session_height(const SzUiSession *session);
 SzView *sz_ui_session_root(SzUiSession *session);
 SzLifecyclePhase sz_ui_session_lifecycle(const SzUiSession *session);
+/* 1 while the session is not STOP. `quit` / request_stop clear this. */
+int sz_ui_session_alive(const SzUiSession *session);
+/* Mark STOP so live pump loops exit. The current pump still finishes. */
+void sz_ui_session_request_stop(SzUiSession *session);
 int sz_ui_session_keyboard_visible(const SzUiSession *session);
+/* Completed pump count. STOP returns 0 without incrementing. */
+unsigned sz_ui_session_pumps(const SzUiSession *session);
 
 /* IO → UI bridge: post signal writes from completed IO; flushed at pump. */
 void sz_ui_bridge_post_int(SzUiSession *session, SzSignalInt *sig, int64_t value);
@@ -613,8 +624,9 @@ SzView *sz_lang_view_bind_text(SzSignalStr *sig);
  * SCUZZ_UI_RELOAD_STAMP when set. On stamp change, loads
  * SCUZZ_UI_RELOAD_CODE (dylib exporting sz_ui_reload_rebuild) if that
  * file exists, then rebuilds. Writes SCUZZ_UI_DEBUG_DUMP on dirty pumps
- * when set. Plays SCUZZ_UI_INJECT (tap/text/type/pump/scroll/backspace)
- * when that file changes. */
+ * when set (includes [heap]). Plays SCUZZ_UI_INJECT
+ * (tap/xy/text/type/pump/scroll/backspace/dump/reload/quit) when that file
+ * changes. `quit` stops the live pump loop. */
 SzIo *sz_ui_run_rebuild(SzUiRebuildFn fn, void *env);
 
 #ifdef __cplusplus
