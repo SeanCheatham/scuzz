@@ -972,6 +972,25 @@ int main(void) {
   assert((intptr_t)r.value == 42);
   assert(delay_calls == 1);
 
+  /* Peak tracks high-water live bytes; reset keeps live and lowers peak. */
+  {
+    size_t live_bytes = 0, live_count = 0;
+    size_t peak0, peak1;
+    void *p;
+    sz_alloc_stats(&live_bytes, &live_count);
+    sz_alloc_reset_stats();
+    peak0 = sz_alloc_peak_bytes();
+    assert(peak0 == live_bytes);
+    p = sz_alloc(4096);
+    peak1 = sz_alloc_peak_bytes();
+    assert(peak1 >= peak0 + 4096);
+    sz_free(p);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(sz_alloc_peak_bytes() == peak1);
+    sz_alloc_reset_stats();
+    assert(sz_alloc_peak_bytes() == live_bytes);
+  }
+
   /* Leftover IO.pure payloads drop on last-use / free. */
   {
     size_t base_bytes = 0, base_count = 0;
@@ -987,6 +1006,7 @@ int main(void) {
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
+    assert(sz_alloc_peak_bytes() >= live_bytes);
 
     sz_alloc_stats(&base_bytes, &base_count);
     s = sz_string_from_cstr("drop");

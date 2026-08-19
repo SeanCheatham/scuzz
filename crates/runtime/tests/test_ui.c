@@ -449,6 +449,9 @@ static void test_ui_run_rebuild_keepalive(void) {
   assert(strstr(buf, "[taps]") != NULL);
   assert(strstr(buf, "[fields]") != NULL);
   assert(strstr(buf, "[scrolls]") != NULL);
+  assert(strstr(buf, "[session]") != NULL);
+  assert(strstr(buf, "[heap]") != NULL);
+  assert(strstr(buf, "live_bytes=") != NULL);
   sz_signal_int_free(env->count);
   sz_free(env);
   remove(stamp);
@@ -522,6 +525,16 @@ static void test_session_debug_dump(void) {
   assert(strstr(a, "1 search=\"\"") != NULL);
   assert(strstr(a, "1* search") == NULL);
   assert(strstr(a, "[scrolls]") != NULL);
+  assert(strstr(a, "[session]") != NULL);
+  assert(strstr(a, "kind=headless") != NULL);
+  assert(strstr(a, "width=200") != NULL);
+  assert(strstr(a, "height=200") != NULL);
+  assert(strstr(a, "lifecycle=resume") != NULL);
+  assert(strstr(a, "pumps=1") != NULL);
+  assert(strstr(a, "[heap]") != NULL);
+  assert(strstr(a, "live_bytes=") != NULL);
+  assert(strstr(a, "live_count=") != NULL);
+  assert(strstr(a, "peak_bytes=") != NULL);
 
   {
     SzInputEvent text;
@@ -823,6 +836,133 @@ static void test_session_inject_script(void) {
   sz_ui_unmount(session);
   sz_signal_int_free(count);
   remove(path);
+}
+
+static void test_session_inject_control(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  WatchRebuildEnv *env;
+  SzView *root, *first;
+  SzString *a11y;
+  const char *stamp = "/tmp/scuzz_ui_inject_control.stamp";
+  const char *dump = "/tmp/scuzz_ui_inject_control.dump";
+  const char *inject = "/tmp/scuzz_ui_inject_control.script";
+  const char *fuzz = "/tmp/scuzz_ui_inject_control.fuzz.dump";
+  char *body;
+
+  write_stamp(stamp, "n=");
+  remove(dump);
+  remove(inject);
+  remove(fuzz);
+  env = (WatchRebuildEnv *)sz_alloc(sizeof(WatchRebuildEnv));
+  env->count = sz_signal_int(0);
+  env->path = stamp;
+  env->btn = NULL;
+  root = watch_rebuild(env);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 100;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  sz_ui_session_set_rebuild(session, watch_rebuild, env);
+  assert(sz_ui_session_set_debug_dump(session, dump));
+  assert(sz_ui_session_set_inject(session, inject));
+  assert(sz_ui_session_alive(session));
+  assert(sz_ui_session_pumps(session) == 0);
+  assert(!sz_ui_session_dump_now(NULL));
+  assert(!sz_ui_session_alive(NULL));
+  assert(sz_ui_session_pumps(NULL) == 0);
+  sz_ui_session_request_stop(NULL);
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_pumps(session) == 1);
+  body = slurp_cstr(dump);
+  assert(strstr(body, "[session]") != NULL);
+  assert(strstr(body, "kind=headless") != NULL);
+  assert(strstr(body, "lifecycle=resume") != NULL);
+  assert(strstr(body, "pumps=1") != NULL);
+  assert(strstr(body, "[heap]") != NULL);
+  assert(strstr(body, "live_bytes=") != NULL);
+  free(body);
+
+  assert(sz_ui_session_write_dump(session, fuzz));
+  body = slurp_cstr(fuzz);
+  assert(strstr(body, "[signals]") != NULL);
+  assert(strstr(body, "[session]") == NULL);
+  assert(strstr(body, "[heap]") == NULL);
+  free(body);
+
+  remove(dump);
+  assert(sz_ui_session_dump_now(session));
+  body = slurp_cstr(dump);
+  assert(strstr(body, "[session]") != NULL);
+  assert(strstr(body, "[heap]") != NULL);
+  assert(strstr(body, "peak_bytes=") != NULL);
+  free(body);
+
+  {
+    unsigned pumps0 = sz_ui_session_pumps(session);
+    remove(dump);
+    write_stamp(inject, "dump\n");
+    assert(sz_ui_pump_sync(session));
+    body = slurp_cstr(dump);
+    assert(strstr(body, "[heap]") != NULL);
+    assert(strstr(body, "pumps=") != NULL);
+    free(body);
+    assert(sz_ui_session_pumps(session) > pumps0);
+  }
+
+  first = sz_ui_session_root(session);
+  write_stamp(stamp, "v=");
+  write_stamp(inject, "reload\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_root(session) != first);
+  a11y = sz_view_a11y_dump(sz_ui_session_root(session));
+  assert(strstr(sz_string_cstr(a11y), "text:v=") != NULL);
+  sz_string_free(a11y);
+
+  write_stamp(inject, "quit\ntap 0\n");
+  assert(sz_ui_pump_sync(session));
+  assert(!sz_ui_session_alive(session));
+  assert(sz_signal_int_get(env->count) == 0);
+  assert(!sz_ui_pump_sync(session));
+
+  sz_ui_unmount(session);
+  sz_signal_int_free(env->count);
+  sz_free(env);
+  remove(stamp);
+  remove(dump);
+  remove(inject);
+  remove(fuzz);
+}
+
+static void test_session_dump_now_needs_path(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root;
+
+  root = sz_view_column();
+  sz_view_add_child(root, sz_view_text("x"));
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 80;
+  cfg.height = 40;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(!sz_ui_session_dump_now(session));
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_pumps(session) == 1);
+  sz_ui_session_request_stop(session);
+  assert(!sz_ui_session_alive(session));
+  assert(sz_ui_session_lifecycle(session) == SZ_LIFECYCLE_STOP);
+  assert(!sz_ui_pump_sync(session));
+  assert(sz_ui_session_pumps(session) == 1);
+  sz_ui_unmount(session);
 }
 
 static void test_session_inject_scroll(void) {
@@ -12463,6 +12603,8 @@ int main(void) {
   test_record_live_not_script();
   test_studio_shaped_xy();
   test_session_inject_script();
+  test_session_inject_control();
+  test_session_dump_now_needs_path();
   test_session_inject_scroll();
   test_session_inject_backspace();
   test_session_inject_type();
