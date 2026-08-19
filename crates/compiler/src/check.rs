@@ -1132,6 +1132,73 @@ pub fn outgoing_calls_project(
         .collect())
 }
 
+#[derive(Debug, Clone)]
+pub struct TypeItemLsp {
+    pub path: PathBuf,
+    pub name: String,
+    pub kind: u8,
+    pub detail: String,
+    pub sl: u32,
+    pub sc: u32,
+    pub el: u32,
+    pub ec: u32,
+}
+
+fn type_item_to_lsp(
+    resolved: &crate::driver::ResolvedProject,
+    path: &Path,
+    named: &[(String, String)],
+    item: crate::typehier::TypeItem,
+    fallback_text: &str,
+) -> TypeItemLsp {
+    let loc = crate::definition::DefLoc {
+        file: item.file.clone(),
+        start: item.sel_start,
+        end: item.sel_end,
+    };
+    let (dest, sl, sc, el, ec) = loc_to_lsp(resolved, path, named, loc, fallback_text);
+    TypeItemLsp {
+        path: dest,
+        name: item.name,
+        kind: item.kind,
+        detail: item.detail,
+        sl,
+        sc,
+        el,
+        ec,
+    }
+}
+
+/// Type hierarchy items at a 0-based LSP position. Same parse as [`check_project_with`].
+pub fn type_items_project(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+    path: &Path,
+    line: u32,
+    character: u32,
+    f: fn(
+        &crate::ast::Program,
+        &[(String, String)],
+        &str,
+        &str,
+        usize,
+    ) -> Vec<crate::typehier::TypeItem>,
+) -> Result<Vec<TypeItemLsp>> {
+    let Some((resolved, label, text, program)) = load_overlay_file(project_dir, unsaved, path)?
+    else {
+        return Ok(Vec::new());
+    };
+    let Some(program) = program else {
+        return Ok(Vec::new());
+    };
+    let named = named_sources(&resolved);
+    let offset = crate::span::utf16_pos_to_offset(&text, line, character);
+    Ok(f(&program, &named, &label, &text, offset)
+        .into_iter()
+        .map(|item| type_item_to_lsp(&resolved, path, &named, item, &text))
+        .collect())
+}
+
 /// Document highlights at a 0-based LSP position. Same parse as [`check_project_with`].
 pub fn highlights_project(
     project_dir: &Path,

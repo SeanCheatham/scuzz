@@ -3,7 +3,7 @@
 //! document symbols, references, rename, workspace symbols, signature help,
 //! document highlights, folding ranges, format, selection ranges, inlay hints,
 //! semantic tokens (full and range), code actions, pull diagnostics, call hierarchy,
-//! type definition, implementation, code lenses, document links,
+//! type hierarchy, type definition, implementation, code lenses, document links,
 //! `workspace/executeCommand` (`scuzz.references`), workspace pull diagnostics,
 //! declaration, and `workspace/willRenameFiles` use that parse. Quickfix actions
 //! attach the check diagnostic they fix. Diagnostics carry related locations.
@@ -19,9 +19,9 @@ use crate::check::{
     inlay_hints_project, json_str, outgoing_calls_project, prepare_call_hierarchy_project,
     prepare_rename_project, references_project, rename_project, selection_ranges_project,
     semantic_tokens_project, semantic_tokens_range_project, signature_help_project,
-    symbols_project, type_definition_project, will_rename_files_project,
+    symbols_project, type_definition_project, type_items_project, will_rename_files_project,
     workspace_diagnostics_project, workspace_symbols_project, CallItemLsp, CodeActionLsp,
-    Diagnostic, LspRange, RenameResult, TextEditLsp,
+    Diagnostic, LspRange, RenameResult, TextEditLsp, TypeItemLsp,
 };
 use crate::fold::FOLD_REGION;
 use crate::overlay::collect_fmt_sources;
@@ -55,7 +55,7 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             let type_list: Vec<String> = TOKEN_TYPES.iter().map(|t| json_str(t)).collect();
             let mod_list: Vec<String> = TOKEN_MODIFIERS.iter().map(|t| json_str(t)).collect();
             let caps = format!(
-                r#"{{"capabilities":{{"textDocumentSync":{{"openClose":true,"change":1}},"hoverProvider":true,"completionProvider":{{"triggerCharacters":["."]}},"definitionProvider":true,"declarationProvider":true,"typeDefinitionProvider":true,"implementationProvider":true,"codeLensProvider":{{"resolveProvider":false}},"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{{"triggerCharacters":["("]}},"referencesProvider":true,"renameProvider":{{"prepareProvider":true}},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true,"semanticTokensProvider":{{"legend":{{"tokenTypes":[{}],"tokenModifiers":[{}]}},"full":true,"range":true}},"codeActionProvider":{{"codeActionKinds":["quickfix","source.formatDocument"],"resolveProvider":true}},"callHierarchyProvider":true,"diagnosticProvider":{{"interFileDependencies":true,"workspaceDiagnostics":true}},"documentLinkProvider":{{"resolveProvider":false}},"executeCommandProvider":{{"commands":["scuzz.references"]}},"workspace":{{"fileOperations":{{"willRename":{{"filters":[{{"scheme":"file","pattern":{{"glob":"**/*.scuzz"}}}}]}}}}}}}}}}"#,
+                r#"{{"capabilities":{{"textDocumentSync":{{"openClose":true,"change":1}},"hoverProvider":true,"completionProvider":{{"triggerCharacters":["."]}},"definitionProvider":true,"declarationProvider":true,"typeDefinitionProvider":true,"implementationProvider":true,"codeLensProvider":{{"resolveProvider":false}},"documentSymbolProvider":true,"workspaceSymbolProvider":true,"signatureHelpProvider":{{"triggerCharacters":["("]}},"referencesProvider":true,"renameProvider":{{"prepareProvider":true}},"documentHighlightProvider":true,"foldingRangeProvider":true,"documentFormattingProvider":true,"documentRangeFormattingProvider":true,"selectionRangeProvider":true,"inlayHintProvider":true,"semanticTokensProvider":{{"legend":{{"tokenTypes":[{}],"tokenModifiers":[{}]}},"full":true,"range":true}},"codeActionProvider":{{"codeActionKinds":["quickfix","source.formatDocument"],"resolveProvider":true}},"callHierarchyProvider":true,"typeHierarchyProvider":true,"diagnosticProvider":{{"interFileDependencies":true,"workspaceDiagnostics":true}},"documentLinkProvider":{{"resolveProvider":false}},"executeCommandProvider":{{"commands":["scuzz.references"]}},"workspace":{{"fileOperations":{{"willRename":{{"filters":[{{"scheme":"file","pattern":{{"glob":"**/*.scuzz"}}}}]}}}}}}}}}}"#,
                 type_list.join(","),
                 mod_list.join(",")
             );
@@ -170,6 +170,15 @@ fn run_lsp_io<R: Read, W: Write>(root: &Path, reader: R, mut writer: W) -> Resul
             write_result(&mut writer, id, &result)?;
         } else if method == "callHierarchy/outgoingCalls" {
             let result = outgoing_calls_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "textDocument/prepareTypeHierarchy" {
+            let result = prepare_type_hierarchy_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "typeHierarchy/supertypes" {
+            let result = type_supertypes_result(&root, &open, &body);
+            write_result(&mut writer, id, &result)?;
+        } else if method == "typeHierarchy/subtypes" {
+            let result = type_subtypes_result(&root, &open, &body);
             write_result(&mut writer, id, &result)?;
         } else if method == "textDocument/didSave" || method == "workspace/didChangeWatchedFiles" {
             publish_check(&root, &open, &mut writer)?;
@@ -1043,6 +1052,87 @@ fn outgoing_calls_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &s
         }
         _ => "[]".into(),
     }
+}
+
+fn encode_type_item(item: &TypeItemLsp) -> String {
+    format!(
+        r#"{{"name":{},"kind":{},"detail":{},"uri":{},"range":{{"start":{{"line":{},"character":{}}},"end":{{"line":{},"character":{}}}}},"selectionRange":{{"start":{{"line":{},"character":{}}},"end":{{"line":{},"character":{}}}}}}}"#,
+        json_str(&item.name),
+        item.kind,
+        json_str(&item.detail),
+        json_str(&file_uri(&item.path)),
+        item.sl,
+        item.sc,
+        item.el,
+        item.ec,
+        item.sl,
+        item.sc,
+        item.el,
+        item.ec
+    )
+}
+
+fn encode_type_items(items: &[TypeItemLsp]) -> String {
+    if items.is_empty() {
+        return "null".into();
+    }
+    let parts: Vec<String> = items.iter().map(encode_type_item).collect();
+    format!("[{}]", parts.join(","))
+}
+
+fn prepare_type_hierarchy_result(
+    root: &Path,
+    open: &BTreeMap<PathBuf, String>,
+    body: &str,
+) -> String {
+    let Some(path) = doc_path_from_message(body) else {
+        return "null".into();
+    };
+    let line = json_i64_field(body, "line").unwrap_or(0).max(0) as u32;
+    let character = json_i64_field(body, "character").unwrap_or(0).max(0) as u32;
+    match type_items_project(
+        root,
+        open,
+        &path,
+        line,
+        character,
+        crate::typehier::prepare_type_hierarchy,
+    ) {
+        Ok(items) => encode_type_items(&items),
+        _ => "null".into(),
+    }
+}
+
+fn type_related_result(
+    root: &Path,
+    open: &BTreeMap<PathBuf, String>,
+    body: &str,
+    f: fn(
+        &crate::ast::Program,
+        &[(String, String)],
+        &str,
+        &str,
+        usize,
+    ) -> Vec<crate::typehier::TypeItem>,
+) -> String {
+    let Some((path, line, character)) = item_position(body) else {
+        return "[]".into();
+    };
+    match type_items_project(root, open, &path, line, character, f) {
+        Ok(items) => {
+            let parts: Vec<String> = items.iter().map(encode_type_item).collect();
+            format!("[{}]", parts.join(","))
+        }
+        _ => "[]".into(),
+    }
+}
+
+fn type_supertypes_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    type_related_result(root, open, body, crate::typehier::type_supertypes)
+}
+
+fn type_subtypes_result(root: &Path, open: &BTreeMap<PathBuf, String>, body: &str) -> String {
+    type_related_result(root, open, body, crate::typehier::type_subtypes)
 }
 
 fn encode_selection_chain(ranges: &[(u32, u32, u32, u32)]) -> Option<String> {
@@ -2599,6 +2689,59 @@ def twice(n: Int): Int =
         assert!(text.contains("\"id\":29"), "{text}");
         assert!(text.contains("\"to\""), "{text}");
         assert!(text.contains("\"name\":\"add\""), "{text}");
+    }
+
+    #[test]
+    fn lsp_type_hierarchy_prepare_super_sub() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_ok_pkg(root);
+        let formatted = crate::format::format_source(
+            "record Point(x: Int, y: Int)\ntrait Show:\n  def show(): String\nimpl Show for Point:\n  def show(): String =\n    \"p\"\n@main def main: IO[Unit] =\n  IO.println(\"x\")\n",
+        )
+        .unwrap();
+        fs::write(root.join("src/Main.scuzz"), &formatted).unwrap();
+        let root_uri = format!("file://{}", fs::canonicalize(root).unwrap().display());
+        let main_uri = format!(
+            "file://{}",
+            canonicalize_source_path(&root.join("src/Main.scuzz")).display()
+        );
+        let (sline, scol) =
+            crate::span::offset_to_utf16_pos(&formatted, formatted.find("Show:").unwrap());
+        let (pline, pcol) =
+            crate::span::offset_to_utf16_pos(&formatted, formatted.find("Point(").unwrap());
+        let item = |name: &str, line: u32, col: u32| {
+            format!(
+                r#"{{"name":"{name}","uri":{uri},"selectionRange":{{"start":{{"line":{line},"character":{col}}}}}}}"#,
+                uri = json_str(&main_uri)
+            )
+        };
+        let mut input = Vec::new();
+        input.extend(frame(&format!(
+            r#"{{"jsonrpc":"2.0","id":1,"method":"initialize","params":{{"rootUri":"{root_uri}","capabilities":{{}}}}}}"#
+        )));
+        input.extend(frame(&format!(
+            r#"{{"jsonrpc":"2.0","id":44,"method":"textDocument/prepareTypeHierarchy","params":{{"textDocument":{{"uri":{}}},"position":{{"line":{sline},"character":{scol}}}}}}}"#,
+            json_str(&main_uri)
+        )));
+        input.extend(frame(&format!(
+            r#"{{"jsonrpc":"2.0","id":45,"method":"typeHierarchy/subtypes","params":{{"item":{}}}}}"#,
+            item("Show", sline, scol)
+        )));
+        input.extend(frame(&format!(
+            r#"{{"jsonrpc":"2.0","id":46,"method":"typeHierarchy/supertypes","params":{{"item":{}}}}}"#,
+            item("Point", pline, pcol)
+        )));
+        input.extend(frame(r#"{"jsonrpc":"2.0","id":2,"method":"shutdown"}"#));
+        input.extend(frame(r#"{"jsonrpc":"2.0","method":"exit"}"#));
+        let mut out = Vec::new();
+        run_lsp_io(root, Cursor::new(input), &mut out).unwrap();
+        let text = String::from_utf8(out).unwrap();
+        assert!(text.contains("typeHierarchyProvider"), "{text}");
+        assert!(text.contains("\"name\":\"Show\""), "{text}");
+        assert!(text.contains("\"kind\":11"), "{text}");
+        assert!(text.contains("\"name\":\"Point\""), "{text}");
+        assert!(text.contains("\"kind\":23"), "{text}");
     }
 
     #[test]
