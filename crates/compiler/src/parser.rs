@@ -2730,7 +2730,7 @@ def b(): Int = 2
 @main def main: IO[Unit] = IO.println("ok")
 "#;
         let (p, errs) = parse_file_recovering(src, "rec.scuzz");
-        assert!(errs.len() >= 1, "{errs:?}");
+        assert!(!errs.is_empty(), "{errs:?}");
         assert!(
             p.defs.iter().any(|d| d.name == "b"),
             "expected recovered def b: {:?}",

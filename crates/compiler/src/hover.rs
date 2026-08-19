@@ -229,7 +229,7 @@ fn walk_binders(expr: &Expr, name: &str, offset: usize, best: &mut Option<(usize
 }
 
 fn consider(best: &mut Option<(usize, String)>, span_len: usize, name: &str) {
-    let text = format!("{name}");
+    let text = name.to_string();
     match best {
         None => *best = Some((span_len, text)),
         Some((len, _)) if span_len < *len => *best = Some((span_len, text)),

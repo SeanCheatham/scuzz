@@ -1164,13 +1164,15 @@ fn emit_match(
             &arm.pattern,
             &se.value,
             Kind::Ptr,
-            ctx,
-            locals,
             &format!("{prefix}_p{id}_{i}"),
             &ok_l,
             &next_l,
-            &mut code,
-            &mut bound_names,
+            &mut PatEmit {
+                ctx,
+                locals,
+                code: &mut code,
+                bound_names: &mut bound_names,
+            },
         );
         let ae = emit_expr(&arm.body, ctx, locals, &format!("{prefix}_a{id}_{i}"));
         for b in &bound_names {
@@ -1249,26 +1251,31 @@ fn emit_match(
     }
 }
 
+/// Mutable emission state threaded through pattern matching.
+struct PatEmit<'a, 'b> {
+    ctx: &'a mut EmitCtx<'b>,
+    locals: &'a mut HashMap<String, Local>,
+    code: &'a mut String,
+    bound_names: &'a mut Vec<String>,
+}
+
 fn emit_pat(
     pat: &Pattern,
     value: &str,
     kind: Kind,
-    ctx: &mut EmitCtx<'_>,
-    locals: &mut HashMap<String, Local>,
     prefix: &str,
     ok_label: &str,
     fail_label: &str,
-    code: &mut String,
-    bound_names: &mut Vec<String>,
+    pe: &mut PatEmit<'_, '_>,
 ) {
     match pat {
         Pattern::Wildcard => {
-            writeln!(code, "  br label %{ok_label}").unwrap();
+            writeln!(pe.code, "  br label %{ok_label}").unwrap();
         }
         Pattern::Bind(name) => {
-            locals.insert(name.clone(), Local::borrow(value, kind));
-            bound_names.push(name.clone());
-            writeln!(code, "  br label %{ok_label}").unwrap();
+            pe.locals.insert(name.clone(), Local::borrow(value, kind));
+            pe.bound_names.push(name.clone());
+            writeln!(pe.code, "  br label %{ok_label}").unwrap();
         }
         Pattern::Adt {
             enum_name,
@@ -1276,25 +1283,29 @@ fn emit_pat(
             binds,
             ..
         } => {
-            let sid = *ctx.cont_id;
-            *ctx.cont_id += 1;
-            let Some(&expected) = ctx.enum_tags.get(&(enum_name.clone(), case_name.clone())) else {
-                writeln!(code, "  br label %{fail_label}").unwrap();
+            let sid = *pe.ctx.cont_id;
+            *pe.ctx.cont_id += 1;
+            let Some(&expected) = pe
+                .ctx
+                .enum_tags
+                .get(&(enum_name.clone(), case_name.clone()))
+            else {
+                writeln!(pe.code, "  br label %{fail_label}").unwrap();
                 return;
             };
             let tag = format!("{prefix}_tg{sid}");
             let cmp = format!("{prefix}_eq{sid}");
             let matched = format!("{prefix}_m{sid}");
-            writeln!(code, "  %{tag} = call i32 @sz_adt_tag(ptr {value})").unwrap();
-            writeln!(code, "  %{cmp} = icmp eq i32 %{tag}, {expected}").unwrap();
+            writeln!(pe.code, "  %{tag} = call i32 @sz_adt_tag(ptr {value})").unwrap();
+            writeln!(pe.code, "  %{cmp} = icmp eq i32 %{tag}, {expected}").unwrap();
             writeln!(
-                code,
+                pe.code,
                 "  br i1 %{cmp}, label %{matched}, label %{fail_label}"
             )
             .unwrap();
-            writeln!(code, "{matched}:").unwrap();
+            writeln!(pe.code, "{matched}:").unwrap();
             if binds.is_empty() {
-                writeln!(code, "  br label %{ok_label}").unwrap();
+                writeln!(pe.code, "  br label %{ok_label}").unwrap();
                 return;
             }
             let fields = emit_payload_fields(
@@ -1302,9 +1313,9 @@ fn emit_pat(
                 case_name,
                 binds.len(),
                 value,
-                ctx,
+                pe.ctx,
                 &format!("{prefix}_f{sid}"),
-                code,
+                pe.code,
             );
             for (fi, nested) in binds.iter().enumerate() {
                 let (fval, fkind) = fields.get(fi).cloned().unwrap_or((value.to_string(), kind));
@@ -1317,16 +1328,13 @@ fn emit_pat(
                     nested,
                     &fval,
                     fkind,
-                    ctx,
-                    locals,
                     &format!("{prefix}_n{sid}_{fi}"),
                     &next_ok,
                     fail_label,
-                    code,
-                    bound_names,
+                    pe,
                 );
                 if fi + 1 != binds.len() {
-                    writeln!(code, "{next_ok}:").unwrap();
+                    writeln!(pe.code, "{next_ok}:").unwrap();
                 }
             }
         }

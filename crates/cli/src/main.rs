@@ -426,7 +426,7 @@ fn run_once(
     let use_desktop = effective.eq_ignore_ascii_case("desktop")
         || (!use_headless && !use_mobile && manifest.ui.is_some());
 
-    let out = build(path, &out_dir.to_path_buf(), true, false)?;
+    let out = build(path, out_dir, true, false)?;
     let mut cmd = Command::new(&out.executable);
     if use_headless && (headless || manifest.ui.is_some()) {
         let snap = out
@@ -479,7 +479,7 @@ fn watch_build(path: &Path, out_dir: &Path) -> Result<ExitCode> {
         project_dir.display()
     );
     loop {
-        match build(path, &out_dir.to_path_buf(), true, false) {
+        match build(path, out_dir, true, false) {
             Ok(out) if out.cache_hit => eprintln!("up-to-date {}", out.executable.display()),
             Ok(out) => eprintln!("rebuilt {}", out.executable.display()),
             Err(e) => eprintln!("scuzz watch build error: {e:#}"),
@@ -511,7 +511,7 @@ fn watch_run(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
 
 fn watch_run_io(project_dir: &Path, path: &Path, out_dir: &Path) -> Result<ExitCode> {
     loop {
-        let mut child = match build(path, &out_dir.to_path_buf(), true, false) {
+        let mut child = match build(path, out_dir, true, false) {
             Ok(out) => match Command::new(&out.executable).spawn() {
                 Ok(c) => {
                     eprintln!("scuzz run --watch: running (pid {})", c.id());
@@ -574,7 +574,7 @@ fn watch_run_ui(
             }
         }
         if wait_for_source_change(project_dir, 400)? {
-            match build(path, &out_dir.to_path_buf(), true, false) {
+            match build(path, out_dir, true, false) {
                 Ok(_) => {
                     gen += 1;
                     std::fs::write(&stamp, format!("{gen}\n"))?;
@@ -599,7 +599,7 @@ fn spawn_ui_keep(
     let use_mobile = effective.eq_ignore_ascii_case("mobile");
     let use_desktop = effective.eq_ignore_ascii_case("desktop")
         || (!use_headless && !use_mobile && manifest.ui.is_some());
-    let out = build(path, &out_dir.to_path_buf(), true, false)?;
+    let out = build(path, out_dir, true, false)?;
     let mut cmd = Command::new(&out.executable);
     cmd.env("SCUZZ_UI_RELOAD_STAMP", stamp);
     cmd.env(
