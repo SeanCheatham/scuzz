@@ -25,7 +25,7 @@ def itemLabel(s: String): String =
 def flipDone(s: String): String =
   encodeItem(Item(if (itemDone(s) == 1) 0 else 1, itemLabel(s)))
 
-def noteAdd(s: String): Unit =
+def noteAdd(_s: String): Unit =
   Law.sometimes("droveAdd")
 
 def loadList(text: String): List[String] =

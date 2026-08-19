@@ -15,7 +15,7 @@ impl Show for Point:
     Str.concat("Point(", Str.concat(Str.fromInt(self.x), Str.concat(",", Str.concat(Str.fromInt(self.y), ")"))))
 
 impl Get[Int] for Point:
-  def getOrElse(default: Int): Int =
+  def getOrElse(_default: Int): Int =
     self.x
 
 impl Show for Box:

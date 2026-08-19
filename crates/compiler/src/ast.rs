@@ -118,6 +118,8 @@ pub struct FunDef {
     /// File-stem module id (`Foo.scuzz` → `Foo`). Empty when parsed without a path.
     pub module: String,
     pub name: String,
+    /// Span of the def name.
+    pub name_span: Span,
     /// `private def` — visible only within `module`. Default public.
     pub is_private: bool,
     /// Top-level `law name: Bool = …` — erased from live builds; residualized under verify.
@@ -137,6 +139,8 @@ pub struct Param {
     pub ty: Type,
     /// `n: Int where n >= 0` — residualized at calls under the verify graph.
     pub rfn: Option<Expr>,
+    /// Span of the parameter name.
+    pub span: Span,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -310,12 +314,14 @@ impl Expr {
                 let mut out = Vec::with_capacity(binders.len());
                 for b in binders {
                     out.push(match b {
-                        ForBinder::Eq { name, value } => ForBinder::Eq {
+                        ForBinder::Eq { name, span, value } => ForBinder::Eq {
                             name,
+                            span,
                             value: f(value)?,
                         },
-                        ForBinder::Draw { name, value } => ForBinder::Draw {
+                        ForBinder::Draw { name, span, value } => ForBinder::Draw {
                             name,
+                            span,
                             value: f(value)?,
                         },
                     });
@@ -602,9 +608,37 @@ pub enum InterpPart {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ForBinder {
     /// `name = value`
-    Eq { name: String, value: Expr },
+    Eq {
+        name: String,
+        span: Span,
+        value: Expr,
+    },
     /// `name <- value` (`name` may be `"_"`)
-    Draw { name: String, value: Expr },
+    Draw {
+        name: String,
+        span: Span,
+        value: Expr,
+    },
+}
+
+impl ForBinder {
+    pub fn name(&self) -> &str {
+        match self {
+            ForBinder::Eq { name, .. } | ForBinder::Draw { name, .. } => name,
+        }
+    }
+
+    pub fn name_span(&self) -> &Span {
+        match self {
+            ForBinder::Eq { span, .. } | ForBinder::Draw { span, .. } => span,
+        }
+    }
+
+    pub fn value(&self) -> &Expr {
+        match self {
+            ForBinder::Eq { value, .. } | ForBinder::Draw { value, .. } => value,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

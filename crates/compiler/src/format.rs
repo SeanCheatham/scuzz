@@ -5,6 +5,7 @@ use crate::ast::{
     TraitDef, Type,
 };
 use crate::parser::{parse, ParseError};
+use crate::span::Span;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -485,6 +486,7 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
                 &Expr::dummy(ExprKind::For {
                     binders: vec![ForBinder::Eq {
                         name: name.clone(),
+                        span: Span::dummy(),
                         value: *value.clone(),
                     }],
                     body: body.clone(),
@@ -497,14 +499,14 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             let inner = "  ".repeat(indent + 1);
             for b in binders {
                 match b {
-                    ForBinder::Eq { name, value } => {
+                    ForBinder::Eq { name, value, .. } => {
                         out.push_str(&inner);
                         out.push_str(name);
                         out.push_str(" = ");
                         out.push_str(pretty_expr(value, 0).trim());
                         out.push('\n');
                     }
-                    ForBinder::Draw { name, value } => {
+                    ForBinder::Draw { name, value, .. } => {
                         out.push_str(&inner);
                         out.push_str(name);
                         out.push_str(" <- ");

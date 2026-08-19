@@ -4,7 +4,7 @@ use crate::ast::{Expr, ExprKind, MatchArm, Program};
 use crate::format::format_source;
 use crate::hover::KIT_SIGS;
 use crate::lower::lower_program;
-use crate::resolve::module_id_from_label;
+use crate::resolve::{module_id_from_label, UnusedKind, UnusedName};
 use crate::typ::{typecheck_all, TypeError};
 
 pub const KIND_QUICKFIX: &str = "quickfix";
@@ -38,12 +38,14 @@ pub fn code_actions_in_source(
         }
     }
     if let Some(program) = program {
+        let unused = crate::resolve::unused_names(program);
         let program = lower_program(program.clone());
         let errs = typecheck_all(&program);
         if kind_wanted(only, KIND_QUICKFIX) {
             fill_match_actions(&program, current_file, source, range, &errs, &mut out);
             unknown_callee_actions(&program, current_file, source, range, &errs, &mut out);
             unused_import_actions(&program, current_file, source, range, &mut out);
+            unused_name_actions(&unused, current_file, source, range, &mut out);
         }
     }
     out
@@ -373,6 +375,66 @@ fn line_indent(source: &str, offset: usize) -> String {
         .collect()
 }
 
+fn unused_name_actions(
+    unused: &[UnusedName],
+    current_file: &str,
+    source: &str,
+    range: Option<(usize, usize)>,
+    out: &mut Vec<CodeAction>,
+) {
+    let module = module_id_from_label(current_file);
+    for u in unused {
+        if u.span.file != current_file && !u.span.file.is_empty() {
+            let from_module = module_id_from_label(&u.span.file);
+            if from_module != module {
+                continue;
+            }
+        }
+        if u.span.end <= u.span.start || !in_range(u.span.start, u.span.end, range) {
+            continue;
+        }
+        match u.kind {
+            UnusedKind::PrivateDef => {
+                let (start, end) = def_range(source, u.span.start, u.body_end);
+                out.push(CodeAction {
+                    title: format!("Remove {}", u.message()),
+                    kind: KIND_QUICKFIX.into(),
+                    start,
+                    end,
+                    new_text: String::new(),
+                    preferred: true,
+                    diagnostic: Some((u.message(), u.span.start, u.span.end)),
+                });
+            }
+            UnusedKind::Local | UnusedKind::Param => {
+                out.push(CodeAction {
+                    title: format!("Prefix {} with `_`", u.name),
+                    kind: KIND_QUICKFIX.into(),
+                    start: u.span.start,
+                    end: u.span.end,
+                    new_text: format!("_{}", u.name),
+                    preferred: true,
+                    diagnostic: Some((u.message(), u.span.start, u.span.end)),
+                });
+            }
+        }
+    }
+}
+
+fn def_range(source: &str, name_start: usize, body_end: usize) -> (usize, usize) {
+    let line_start = source[..name_start.min(source.len())]
+        .rfind('\n')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let end = body_end.max(name_start);
+    let line_end = source
+        .get(end..)
+        .and_then(|rest| rest.find('\n'))
+        .map(|i| end + i + 1)
+        .unwrap_or(source.len());
+    (line_start, line_end)
+}
+
 fn unused_import_actions(
     program: &Program,
     current_file: &str,
@@ -638,6 +700,33 @@ mod tests {
         let mut edited = main.to_string();
         edited.replace_range(fix.start..fix.end, &fix.new_text);
         assert!(!edited.contains("import A.tag"), "{edited}");
+        assert!(edited.contains("IO.println"), "{edited}");
+    }
+
+    #[test]
+    fn prefixes_unused_parameter() {
+        let src = "def add(n: Int): Int =\n  1\n@main def main: IO[Unit] =\n  IO.println(Str.fromInt(add(1)))\n";
+        let acts = actions(src, None, &["quickfix"]);
+        let fix = acts
+            .iter()
+            .find(|a| a.title.contains("Prefix n"))
+            .expect("prefix unused");
+        let mut edited = src.to_string();
+        edited.replace_range(fix.start..fix.end, &fix.new_text);
+        assert!(edited.contains("def add(_n: Int)"), "{edited}");
+    }
+
+    #[test]
+    fn removes_unused_private_def() {
+        let src = "private def hidden(): String =\n  \"a\"\n@main def main: IO[Unit] =\n  IO.println(\"ok\")\n";
+        let acts = actions(src, None, &["quickfix"]);
+        let fix = acts
+            .iter()
+            .find(|a| a.title.contains("unused private def"))
+            .expect("remove unused private");
+        let mut edited = src.to_string();
+        edited.replace_range(fix.start..fix.end, &fix.new_text);
+        assert!(!edited.contains("hidden"), "{edited}");
         assert!(edited.contains("IO.println"), "{edited}");
     }
 }
