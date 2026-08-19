@@ -57,7 +57,6 @@ pub fn definition_in_sources(
     let case_hits: Vec<_> = program
         .enums
         .iter()
-        .filter(|e| e.module == module || e.cases.iter().any(|c| c.name == name))
         .filter(|e| e.cases.iter().any(|c| c.name == name))
         .collect();
     if case_hits.len() == 1 {
