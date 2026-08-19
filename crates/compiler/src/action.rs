@@ -43,6 +43,7 @@ pub fn code_actions_in_source(
         if kind_wanted(only, KIND_QUICKFIX) {
             fill_match_actions(&program, current_file, source, range, &errs, &mut out);
             unknown_callee_actions(&program, current_file, source, range, &errs, &mut out);
+            unused_import_actions(&program, current_file, source, range, &mut out);
         }
     }
     out
@@ -372,6 +373,54 @@ fn line_indent(source: &str, offset: usize) -> String {
         .collect()
 }
 
+fn unused_import_actions(
+    program: &Program,
+    current_file: &str,
+    source: &str,
+    range: Option<(usize, usize)>,
+    out: &mut Vec<CodeAction>,
+) {
+    let module = module_id_from_label(current_file);
+    for im in crate::resolve::unused_imports(program) {
+        if im.in_module != module {
+            continue;
+        }
+        if im.span.end <= im.span.start || !in_range(im.span.start, im.span.end, range) {
+            continue;
+        }
+        let (start, end) = import_line_range(source, im.span.start, im.span.end);
+        let msg = if im.is_wildcard() {
+            format!("unused import {}.{}", im.from_module, im.name)
+        } else if let Some(alias) = &im.alias {
+            format!("unused import {}.{} as {alias}", im.from_module, im.name)
+        } else {
+            format!("unused import {}.{}", im.from_module, im.name)
+        };
+        out.push(CodeAction {
+            title: format!("Remove {msg}"),
+            kind: KIND_QUICKFIX.into(),
+            start,
+            end,
+            new_text: String::new(),
+            preferred: true,
+            diagnostic: Some((msg, im.span.start, im.span.end)),
+        });
+    }
+}
+
+fn import_line_range(source: &str, start: usize, end: usize) -> (usize, usize) {
+    let line_start = source[..start.min(source.len())]
+        .rfind('\n')
+        .map(|i| i + 1)
+        .unwrap_or(0);
+    let line_end = source
+        .get(end..)
+        .and_then(|rest| rest.find('\n'))
+        .map(|i| end + i + 1)
+        .unwrap_or(source.len());
+    (line_start, line_end)
+}
+
 fn walk_program(program: &Program, module: &str, f: &mut impl FnMut(&Expr)) {
     for d in &program.defs {
         if d.module == *module {
@@ -564,5 +613,31 @@ mod tests {
         assert_eq!(levenshtein("println", "println"), 0);
         assert_eq!(levenshtein("printl", "println"), 1);
         assert_eq!(levenshtein("", "ab"), 2);
+    }
+
+    #[test]
+    fn removes_unused_import() {
+        let a = "def tag(): String = \"a\"\n";
+        let main = "import A.tag\n@main def main: IO[Unit] =\n  IO.println(\"x\")\n";
+        let sources = vec![
+            ("A.scuzz".into(), a.to_string()),
+            ("Main.scuzz".into(), main.to_string()),
+        ];
+        let program = crate::parser::parse_sources(&sources).unwrap();
+        let acts = crate::action::code_actions_in_source(
+            Some(&program),
+            "Main.scuzz",
+            main,
+            None,
+            &["quickfix".into()],
+        );
+        let fix = acts
+            .iter()
+            .find(|a| a.title.contains("unused import"))
+            .expect("remove unused");
+        let mut edited = main.to_string();
+        edited.replace_range(fix.start..fix.end, &fix.new_text);
+        assert!(!edited.contains("import A.tag"), "{edited}");
+        assert!(edited.contains("IO.println"), "{edited}");
     }
 }

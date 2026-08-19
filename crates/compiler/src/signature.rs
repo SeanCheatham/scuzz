@@ -1,7 +1,7 @@
 //! Signature help from the same parse as `check`. No second typer.
 
 use crate::ast::Program;
-use crate::hover::{def_named, kit_sig, show_def, unique_def, KIT_SIGS};
+use crate::hover::{def_named, imported_def, kit_sig, show_def, unique_def, KIT_SIGS};
 use crate::lexer::{lex, SpannedToken, Token};
 use crate::resolve::module_id_from_label;
 
@@ -106,7 +106,10 @@ pub(crate) fn sig_label(
             return Some(show_def(d));
         }
     }
-    if let Some(d) = def_named(program, module, name).or_else(|| unique_def(program, name)) {
+    if let Some(d) = def_named(program, module, name)
+        .or_else(|| imported_def(program, module, name))
+        .or_else(|| unique_def(program, name))
+    {
         return Some(show_def(d));
     }
     if name == "copy" {

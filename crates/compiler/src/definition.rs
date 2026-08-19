@@ -1,7 +1,9 @@
 //! Go-to-definition from the same parse as `check`. No second typer.
 
 use crate::ast::{Program, Type};
-use crate::hover::{def_named, enum_named, ident_at_opts, unique_def, unique_enum};
+use crate::hover::{
+    def_named, enum_named, ident_at_opts, imported_def, imported_enum, unique_def, unique_enum,
+};
 use crate::lexer::{lex, Token};
 use crate::resolve::module_id_from_label;
 
@@ -40,10 +42,16 @@ pub fn definition_in_sources(
         }
         return None;
     }
-    if let Some(d) = def_named(program, &module, &name).or_else(|| unique_def(program, &name)) {
+    if let Some(d) = def_named(program, &module, &name)
+        .or_else(|| imported_def(program, &module, &name))
+        .or_else(|| unique_def(program, &name))
+    {
         return loc_for_def(sources, d.module.as_str(), DeclKind::Def, &d.name);
     }
-    if let Some(en) = enum_named(program, &module, &name).or_else(|| unique_enum(program, &name)) {
+    if let Some(en) = enum_named(program, &module, &name)
+        .or_else(|| imported_enum(program, &module, &name))
+        .or_else(|| unique_enum(program, &name))
+    {
         return loc_for_def(sources, en.module.as_str(), DeclKind::Enum, &en.name);
     }
     let case_hits: Vec<_> = program
@@ -75,8 +83,17 @@ pub fn declaration_in_sources(
         im.in_module == module
             && im.span.end > im.span.start
             && match &qual {
-                Some(q) => im.from_module == *q && im.name == name,
-                None => im.name == name,
+                Some(q) => im.from_module == *q && (im.name == name || im.is_wildcard()),
+                None => {
+                    im.local_name() == name
+                        || (im.is_wildcard()
+                            && crate::resolve::public_in(
+                                &program.defs,
+                                &program.enums,
+                                &im.from_module,
+                                &name,
+                            ))
+                }
             }
     });
     if let Some(im) = import_hit {
