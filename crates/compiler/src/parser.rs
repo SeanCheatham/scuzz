@@ -680,6 +680,7 @@ impl Parser {
         if !matches!(ret, Type::Bool) {
             return Err(self.err(format!("law `{name}` must return Bool, got {ret:?}")));
         }
+        self.reject_param_defaults(&params, "law parameters")?;
         self.expect(&Token::Eq)?;
         let body = self.parse_expr()?;
         Ok(FunDef {
@@ -728,10 +729,17 @@ impl Parser {
         }
         loop {
             let (pname, pname_span, pty, rfn) = self.parse_name_ty_rfn(type_params)?;
+            let default = if matches!(self.peek(), Token::Eq) {
+                self.bump();
+                Some(self.parse_expr()?)
+            } else {
+                None
+            };
             params.push(Param {
                 name: pname.clone(),
                 ty: pty,
                 rfn,
+                default,
                 span: pname_span,
             });
             if params.iter().filter(|p| p.name == pname).count() > 1 {
@@ -742,6 +750,17 @@ impl Parser {
                 continue;
             }
             break;
+        }
+        let mut seen_default = false;
+        for p in &params {
+            if p.default.is_some() {
+                seen_default = true;
+            } else if seen_default {
+                return Err(self.err(format!(
+                    "parameter `{}` needs a default (it follows a parameter with a default)",
+                    p.name
+                )));
+            }
         }
         Ok(params)
     }
@@ -760,6 +779,13 @@ impl Parser {
             None
         };
         Ok((name, span, ty, rfn))
+    }
+
+    fn reject_param_defaults(&self, params: &[Param], ctx: &str) -> Result<(), ParseError> {
+        if params.iter().any(|p| p.default.is_some()) {
+            return Err(self.err(format!("{ctx} cannot have a default")));
+        }
+        Ok(())
     }
 
     fn parse_enum(&mut self) -> Result<EnumDef, ParseError> {
@@ -911,6 +937,7 @@ impl Parser {
         self.expect(&Token::RParen)?;
         self.expect(&Token::Colon)?;
         let ret = self.parse_type_with_tparams(type_params)?;
+        self.reject_param_defaults(&params, "trait method parameters")?;
         Ok(TraitMethod { name, params, ret })
     }
 
@@ -992,6 +1019,7 @@ impl Parser {
         self.expect(&Token::RParen)?;
         self.expect(&Token::Colon)?;
         let ret = self.parse_type_with_tparams(type_params)?;
+        self.reject_param_defaults(&params, "method parameters")?;
         self.expect(&Token::Eq)?;
         let body = self.parse_expr()?;
         Ok(ImplMethod {
@@ -2323,6 +2351,71 @@ def note(n: Int where n >= 0): Unit = ()
 "#;
         let p = parse(src).unwrap();
         assert!(p.defs[0].params[0].rfn.is_some());
+    }
+
+    #[test]
+    fn parse_param_default() {
+        let src = r#"
+def add(n: Int, m: Int = 1): Int = n + m
+@main def main: IO[Unit] = IO.println("ok")
+"#;
+        let p = parse(src).unwrap();
+        assert!(p.defs[0].params[0].default.is_none());
+        match &p.defs[0].params[1].default {
+            Some(e) => assert!(matches!(e.kind, ExprKind::IntLit(1))),
+            None => panic!("expected default on m"),
+        }
+    }
+
+    #[test]
+    fn parse_param_where_then_default() {
+        let src = r#"
+def note(n: Int where n >= 0 = 0): Int = n
+@main def main: IO[Unit] = IO.println("ok")
+"#;
+        let p = parse(src).unwrap();
+        assert!(p.defs[0].params[0].rfn.is_some());
+        match &p.defs[0].params[0].default {
+            Some(e) => assert!(matches!(e.kind, ExprKind::IntLit(0))),
+            None => panic!("expected default on n"),
+        }
+    }
+
+    #[test]
+    fn parse_rejects_non_trailing_default() {
+        let src = r#"
+def add(n: Int = 1, m: Int): Int = n + m
+@main def main: IO[Unit] = IO.println("ok")
+"#;
+        let err = parse(src).unwrap_err().to_string();
+        assert!(err.contains("needs a default"), "unexpected: {err}");
+    }
+
+    #[test]
+    fn parse_rejects_law_param_default() {
+        let src = r#"
+law addComm(a: Int = 0, b: Int = 0): Bool = a + b == b + a
+@main def main: IO[Unit] = IO.println("ok")
+"#;
+        let err = parse(src).unwrap_err().to_string();
+        assert!(
+            err.contains("law parameters cannot have a default"),
+            "unexpected: {err}"
+        );
+    }
+
+    #[test]
+    fn parse_rejects_method_param_default() {
+        let src = r#"
+record Point(x: Int, y: Int):
+  def bump(n: Int = 1): Int = self.x + n
+@main def main: IO[Unit] = IO.println("ok")
+"#;
+        let err = parse(src).unwrap_err().to_string();
+        assert!(
+            err.contains("method parameters cannot have a default"),
+            "unexpected: {err}"
+        );
     }
 
     #[test]

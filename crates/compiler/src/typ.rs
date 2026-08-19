@@ -356,6 +356,7 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
                 name: "self".into(),
                 ty: self_ty.clone(),
                 rfn: None,
+                default: None,
                 span: Span::dummy(),
             }];
             params.extend(method.params.clone());
@@ -391,6 +392,7 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
                     name: "self".into(),
                     ty: self_ty.clone(),
                     rfn: None,
+                    default: None,
                     span: Span::dummy(),
                 }];
                 params.extend(method.params.clone());
@@ -557,36 +559,21 @@ pub fn typecheck_all(program: &Program) -> Vec<TypeError> {
 
 /// Rewrite `name = expr` call arguments into positional order.
 pub fn resolve_named_args(mut program: Program) -> Result<Program, TypeError> {
-    let def_params: Vec<(String, String, Vec<String>, bool)> = program
-        .defs
-        .iter()
-        .map(|d| {
-            (
-                d.module.clone(),
-                d.name.clone(),
-                d.params.iter().map(|p| p.name.clone()).collect(),
-                d.is_private,
-            )
-        })
-        .collect();
-    let enums = program.enums.clone();
-    let traits = program.traits.clone();
-    let impls = program.impls.clone();
-    let imports = program.imports.clone();
-    let cx = NamedCx {
-        def_params,
-        enums,
-        traits,
-        impls,
-        imports,
-    };
+    let cx = named_cx(&program);
     for d in &mut program.defs {
         let module = d.module.clone();
         for p in &mut d.params {
             if let Some(rfn) = p.rfn.take() {
                 p.rfn = Some(resolve_named_expr(rfn, &cx, &module)?);
             }
+            if let Some(dflt) = p.default.take() {
+                p.default = Some(resolve_named_expr(dflt, &cx, &module)?);
+            }
         }
+    }
+    let cx = named_cx(&program);
+    for d in &mut program.defs {
+        let module = d.module.clone();
         d.body = resolve_named_expr(
             std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)),
             &cx,
@@ -629,8 +616,30 @@ pub fn resolve_named_args(mut program: Program) -> Result<Program, TypeError> {
     Ok(program)
 }
 
+fn named_cx(program: &Program) -> NamedCx {
+    NamedCx {
+        def_params: program
+            .defs
+            .iter()
+            .map(|d| {
+                (
+                    d.module.clone(),
+                    d.name.clone(),
+                    d.params.iter().map(|p| p.name.clone()).collect(),
+                    d.params.iter().map(|p| p.default.clone()).collect(),
+                    d.is_private,
+                )
+            })
+            .collect(),
+        enums: program.enums.clone(),
+        traits: program.traits.clone(),
+        impls: program.impls.clone(),
+        imports: program.imports.clone(),
+    }
+}
+
 struct NamedCx {
-    def_params: Vec<(String, String, Vec<String>, bool)>,
+    def_params: Vec<(String, String, Vec<String>, Vec<Option<Expr>>, bool)>,
     enums: Vec<crate::ast::EnumDef>,
     traits: Vec<crate::ast::TraitDef>,
     impls: Vec<crate::ast::ImplDef>,
@@ -656,8 +665,18 @@ fn bind_named_args(
     params: &[String],
     args: Vec<Expr>,
 ) -> Result<Vec<Expr>, TypeError> {
+    let none = vec![None; params.len()];
+    bind_named_args_with_defaults(callee, params, &none, args)
+}
+
+fn bind_named_args_with_defaults(
+    callee: &str,
+    params: &[String],
+    defaults: &[Option<Expr>],
+    args: Vec<Expr>,
+) -> Result<Vec<Expr>, TypeError> {
     if !has_named_arg(&args) {
-        return Ok(args);
+        return pad_defaults(callee, params, defaults, args);
     }
     if params.is_empty() || params.iter().any(|p| !is_param_ident(p)) {
         return Err(TypeError::Msg(format!(
@@ -708,14 +727,39 @@ fn bind_named_args(
     for (i, slot) in slots.into_iter().enumerate() {
         match slot {
             Some(e) => out.push(e),
-            None => {
-                return Err(TypeError::Msg(format!(
-                    "{callee} missing argument `{}`",
-                    params[i]
-                )));
-            }
+            None => match defaults.get(i).and_then(|d| d.clone()) {
+                Some(d) => out.push(d),
+                None => {
+                    return Err(TypeError::Msg(format!(
+                        "{callee} missing argument `{}`",
+                        params[i]
+                    )));
+                }
+            },
         }
     }
+    Ok(out)
+}
+
+/// Fill omitted trailing args from defaults. Leave short required calls for arity check.
+fn pad_defaults(
+    _callee: &str,
+    params: &[String],
+    defaults: &[Option<Expr>],
+    args: Vec<Expr>,
+) -> Result<Vec<Expr>, TypeError> {
+    if args.len() >= params.len() || params.is_empty() {
+        return Ok(args);
+    }
+    let mut extra = Vec::new();
+    for i in args.len()..params.len() {
+        match defaults.get(i).and_then(|d| d.as_ref()) {
+            Some(d) => extra.push(d.clone()),
+            None => return Ok(args),
+        }
+    }
+    let mut out = args;
+    out.extend(extra);
     Ok(out)
 }
 
@@ -911,41 +955,46 @@ fn bind_one_named(callee: &str, param: &str, expr: Expr) -> Result<Expr, TypeErr
     }
 }
 
-fn call_param_names(callee: &str, current_module: &str, cx: &NamedCx) -> Option<Vec<String>> {
+fn call_param_names(
+    callee: &str,
+    current_module: &str,
+    cx: &NamedCx,
+) -> Option<(Vec<String>, Vec<Option<Expr>>)> {
     if let Some(sig) = kit_sig(callee) {
         let names = param_names_from_label(sig);
         if names.iter().all(|n| is_param_ident(n)) {
-            return Some(names);
+            let n = names.len();
+            return Some((names, vec![None; n]));
         }
-        return Some(Vec::new());
+        return Some((Vec::new(), Vec::new()));
     }
     if let Some((m, name)) = crate::resolve::split_dotted(callee) {
         return cx
             .def_params
             .iter()
-            .find(|(mod_name, n, _, is_priv)| {
+            .find(|(mod_name, n, _, _, is_priv)| {
                 mod_name == m && n == name && (!*is_priv || mod_name == current_module)
             })
-            .map(|(_, _, p, _)| p.clone());
+            .map(|(_, _, p, d, _)| (p.clone(), d.clone()));
     }
-    if let Some((_, _, p, _)) = cx
+    if let Some((_, _, p, d, _)) = cx
         .def_params
         .iter()
-        .find(|(m, n, _, _)| m == current_module && n == callee)
+        .find(|(m, n, _, _, _)| m == current_module && n == callee)
     {
-        return Some(p.clone());
+        return Some((p.clone(), d.clone()));
     }
-    if let Some((_, _, p, _)) = imported_def_params(callee, current_module, cx) {
-        return Some(p.clone());
+    if let Some((_, _, p, d, _)) = imported_def_params(callee, current_module, cx) {
+        return Some((p.clone(), d.clone()));
     }
-    let hits: Vec<&Vec<String>> = cx
+    let hits: Vec<_> = cx
         .def_params
         .iter()
-        .filter(|(m, n, _, is_priv)| n == callee && (!*is_priv || m == current_module))
-        .map(|(_, _, p, _)| p)
+        .filter(|(m, n, _, _, is_priv)| n == callee && (!*is_priv || m == current_module))
+        .map(|(_, _, p, d, _)| (p, d))
         .collect();
     if hits.len() == 1 {
-        Some(hits[0].clone())
+        Some((hits[0].0.clone(), hits[0].1.clone()))
     } else {
         None
     }
@@ -955,7 +1004,7 @@ fn imported_def_params<'a>(
     callee: &str,
     current_module: &str,
     cx: &'a NamedCx,
-) -> Option<&'a (String, String, Vec<String>, bool)> {
+) -> Option<&'a (String, String, Vec<String>, Vec<Option<Expr>>, bool)> {
     for im in &cx.imports {
         if im.in_module != current_module {
             continue;
@@ -964,7 +1013,7 @@ fn imported_def_params<'a>(
             if let Some(hit) = cx
                 .def_params
                 .iter()
-                .find(|(m, n, _, is_priv)| m == &im.from_module && n == callee && !*is_priv)
+                .find(|(m, n, _, _, is_priv)| m == &im.from_module && n == callee && !*is_priv)
             {
                 return Some(hit);
             }
@@ -972,7 +1021,7 @@ fn imported_def_params<'a>(
             return cx
                 .def_params
                 .iter()
-                .find(|(m, n, _, _)| m == &im.from_module && n == &im.name);
+                .find(|(m, n, _, _, _)| m == &im.from_module && n == &im.name);
         }
     }
     None
@@ -1040,7 +1089,7 @@ fn resolve_named_expr(expr: Expr, cx: &NamedCx, module: &str) -> Result<Expr, Ty
                 .collect::<Result<Vec<_>, _>>()?;
             let names = call_param_names(&callee, module, cx);
             let args = match names {
-                Some(n) => bind_named_args(&callee, &n, args)?,
+                Some((n, d)) => bind_named_args_with_defaults(&callee, &n, &d, args)?,
                 None if has_named_arg(&args) => {
                     return Err(
                         TypeError::Msg(format!("{callee} does not take named arguments"))
@@ -1237,6 +1286,34 @@ fn typecheck_def(
         );
     }
     for p in &d.params {
+        if let Some(dflt) = &p.default {
+            for other in &d.params {
+                if crate::resolve::uses_name(dflt, &other.name) {
+                    return Err(TypeError::At {
+                        msg: format!(
+                            "default for `{}` must not use parameter `{}`",
+                            p.name, other.name
+                        ),
+                        span: dflt.span.clone(),
+                    });
+                }
+            }
+            if crate::overlay::expr_has_law(dflt) {
+                return Err(TypeError::At {
+                    msg: format!("default for `{}` must not call Law.*", p.name),
+                    span: dflt.span.clone(),
+                });
+            }
+            let mut denv: HashMap<String, Type> = HashMap::new();
+            let dty = infer(dflt, enums, funs, methods, &d.module, &mut denv)?;
+            let want = resolve_type_in(&p.ty, enums, &d.module, &d.type_params)?;
+            if !types_compat(&dty, &want) {
+                return Err(TypeError::At {
+                    msg: format!("default for `{}` expected {:?}, got {dty:?}", p.name, want),
+                    span: dflt.span.clone(),
+                });
+            }
+        }
         if let Some(rfn) = &p.rfn {
             if crate::overlay::expr_has_law(rfn) {
                 return Err(TypeError::At {
@@ -4843,6 +4920,10 @@ fn mono_expr(
                                     name: p.name.clone(),
                                     ty: apply_subst(&ty, &subst),
                                     rfn: p.rfn.clone(),
+                                    default: p
+                                        .default
+                                        .as_ref()
+                                        .map(|e| subst_node_targs(e.clone(), &subst)),
                                     span: p.span.clone(),
                                 })
                             })
@@ -7150,6 +7231,79 @@ record Point(x: Int, y: Int)
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("named args typecheck");
+    }
+
+    #[test]
+    fn typechecks_default_args() {
+        let src = r#"
+def add(n: Int, m: Int = 1): Int = n + m
+def greet(name: String, punct: String = "!"): String = Str.concat(name, punct)
+@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(Str.fromInt(add(3)))
+    _ <- IO.println(Str.fromInt(add(n = 3)))
+    _ <- IO.println(Str.fromInt(add(3, 4)))
+    _ <- IO.println(greet("hi"))
+    _ <- IO.println(greet("hi", "?"))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("default args typecheck");
+    }
+
+    #[test]
+    fn typechecks_default_with_where() {
+        let src = r#"
+def note(n: Int where n >= 0 = 0): Int = n
+@main def main: IO[Unit] = IO.println(Str.fromInt(note()))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("where + default typecheck");
+    }
+
+    #[test]
+    fn rejects_default_type_mismatch() {
+        let src = r#"
+def add(n: Int, m: Int = "x"): Int = n + m
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("default for `m`"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_default_that_uses_param() {
+        let src = r#"
+def add(n: Int, m: Int = n): Int = n + m
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("must not use parameter"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_omitted_required_before_default() {
+        let src = r#"
+def add(n: Int, m: Int = 1): Int = n + m
+@main def main: IO[Unit] = IO.println(Str.fromInt(add()))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("expects 2 args") || err.message().contains("missing argument"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]

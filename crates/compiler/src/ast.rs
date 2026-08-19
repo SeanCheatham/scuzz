@@ -139,6 +139,8 @@ pub struct Param {
     pub ty: Type,
     /// `n: Int where n >= 0` — residualized at calls under the verify graph.
     pub rfn: Option<Expr>,
+    /// `m: Int = 1` — filled at the call when the argument is omitted.
+    pub default: Option<Expr>,
     /// Span of the parameter name.
     pub span: Span,
 }

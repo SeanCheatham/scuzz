@@ -5713,6 +5713,22 @@ def pair(a: Int, b: Int): Int = a * 10 + b
     }
 
     #[test]
+    fn emit_default_args_filled() {
+        let src = r#"
+def add(n: Int, m: Int = 1): Int = n + m
+@main def main: IO[Unit] = IO.println(Str.fromInt(add(3)))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        let p = crate::typ::resolve_named_args(p).expect("defaults");
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("i64 3") && ir.contains("i64 1"),
+            "expected filled default 1 at the call:\n{ir}"
+        );
+    }
+
+    #[test]
     fn emit_record_copy_constructs_adt() {
         let src = r#"
 record Point(x: Int, y: Int)

@@ -11,6 +11,14 @@ pub fn lower_program(mut program: Program) -> Program {
         .expect("duplicate enums should be rejected at parse");
     for d in &mut program.defs {
         let module = d.module.clone();
+        for p in &mut d.params {
+            if let Some(rfn) = p.rfn.take() {
+                p.rfn = Some(lower_expr(rfn, &enums, &module));
+            }
+            if let Some(dflt) = p.default.take() {
+                p.default = Some(lower_expr(dflt, &enums, &module));
+            }
+        }
         d.body = lower_expr(
             std::mem::replace(&mut d.body, Expr::dummy(ExprKind::Unit)),
             &enums,

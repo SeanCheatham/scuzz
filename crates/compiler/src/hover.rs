@@ -297,10 +297,27 @@ pub(crate) fn show_def(d: &FunDef) -> String {
 }
 
 pub(crate) fn show_param(p: &Param) -> String {
-    if p.rfn.is_some() {
+    let mut s = if p.rfn.is_some() {
         format!("{}: {} where ...", p.name, p.ty)
     } else {
         format!("{}: {}", p.name, p.ty)
+    };
+    if let Some(d) = &p.default {
+        s.push_str(" = ");
+        s.push_str(&show_default(d));
+    }
+    s
+}
+
+fn show_default(e: &Expr) -> String {
+    match &e.kind {
+        ExprKind::IntLit(n) => n.to_string(),
+        ExprKind::BoolLit(true) => "true".into(),
+        ExprKind::BoolLit(false) => "false".into(),
+        ExprKind::StrLit(s) => format!("\"{s}\""),
+        ExprKind::FloatLit(bits) => crate::ast::format_float_bits(*bits),
+        ExprKind::Unit => "()".into(),
+        _ => "…".into(),
     }
 }
 
@@ -1121,6 +1138,14 @@ mod tests {
         let src = "def add(n: Int): Int = n\n@main def main: IO[Unit] = IO.println(\"x\")\n";
         let h = hover_src(src, "add");
         assert!(h.contains("def add(n: Int): Int"), "{h}");
+    }
+
+    #[test]
+    fn hovers_def_default_arg() {
+        let src =
+            "def add(n: Int, m: Int = 1): Int = n + m\n@main def main: IO[Unit] = IO.println(\"x\")\n";
+        let h = hover_src(src, "add");
+        assert!(h.contains("m: Int = 1"), "{h}");
     }
 
     #[test]
