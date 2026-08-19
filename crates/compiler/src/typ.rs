@@ -969,13 +969,15 @@ fn call_param_names(
         return Some((Vec::new(), Vec::new()));
     }
     if let Some((m, name)) = crate::resolve::split_dotted(callee) {
-        return cx
-            .def_params
-            .iter()
-            .find(|(mod_name, n, _, _, is_priv)| {
-                mod_name == m && n == name && (!*is_priv || mod_name == current_module)
-            })
-            .map(|(_, _, p, d, _)| (p.clone(), d.clone()));
+        if let Some((_, _, p, d, _)) = cx.def_params.iter().find(|(mod_name, n, _, _, is_priv)| {
+            mod_name == m && n == name && (!*is_priv || mod_name == current_module)
+        }) {
+            return Some((p.clone(), d.clone()));
+        }
+        return record_ctor_param_names(callee, current_module, &cx.enums).map(|names| {
+            let n = names.len();
+            (names, vec![None; n])
+        });
     }
     if let Some((_, _, p, d, _)) = cx
         .def_params
@@ -994,10 +996,49 @@ fn call_param_names(
         .map(|(_, _, p, d, _)| (p, d))
         .collect();
     if hits.len() == 1 {
-        Some((hits[0].0.clone(), hits[0].1.clone()))
-    } else {
-        None
+        return Some((hits[0].0.clone(), hits[0].1.clone()));
     }
+    record_ctor_param_names(callee, current_module, &cx.enums).map(|names| {
+        let n = names.len();
+        (names, vec![None; n])
+    })
+}
+
+/// Field names for an unlowered `Point(y = 1, x = 0)` call. Residualize still sees `Call`.
+fn record_ctor_param_names(
+    callee: &str,
+    current_module: &str,
+    enums: &[crate::ast::EnumDef],
+) -> Option<Vec<String>> {
+    let exact: Vec<_> = enums
+        .iter()
+        .filter(|e| {
+            is_record_like(e)
+                && (e.name == callee
+                    || (!e.module.is_empty() && format!("{}.{}", e.module, e.name) == callee))
+        })
+        .collect();
+    let hits = if exact.len() == 1 {
+        exact
+    } else {
+        let local: Vec<_> = enums
+            .iter()
+            .filter(|e| is_record_like(e) && e.module == current_module && e.name == callee)
+            .collect();
+        if local.len() == 1 {
+            local
+        } else {
+            enums
+                .iter()
+                .filter(|e| is_record_like(e) && e.name == callee)
+                .collect()
+        }
+    };
+    if hits.len() != 1 {
+        return None;
+    }
+    let case = hits[0].cases.first()?;
+    Some(case.fields.iter().map(|(n, _)| n.clone()).collect())
 }
 
 fn imported_def_params<'a>(
@@ -7355,6 +7396,21 @@ record Point(x: Int, y: Int)
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("named args typecheck");
+    }
+
+    #[test]
+    fn resolves_named_record_ctor_before_lower() {
+        let src = r#"
+record Point(x: Int where x >= 0, y: Int where y == y)
+def sum(p: Point): Int = p.x + p.y
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(sum(Point(y = 5, x = 3))))
+"#;
+        let p = resolve_named_args(parse(src).unwrap()).expect("named record ctor before lower");
+        let mut p = p;
+        crate::overlay::residualize_refinements(&mut p);
+        let p = lower_program(p);
+        typecheck(&p).expect("verify graph named record ctor");
     }
 
     #[test]
