@@ -688,6 +688,10 @@ fn collect_pattern_binds(p: &Pattern, out: &mut HashSet<String>) {
                 collect_pattern_binds(b, out);
             }
         }
+        Pattern::Cons { head, tail, .. } => {
+            collect_pattern_binds(head, out);
+            collect_pattern_binds(tail, out);
+        }
         Pattern::Or(ps) => {
             for p in ps {
                 collect_pattern_binds(p, out);
@@ -804,6 +808,10 @@ fn collect_pat_names(p: &Pattern, out: &mut HashSet<String>) {
             for b in binds {
                 collect_pat_names(b, out);
             }
+        }
+        Pattern::Cons { head, tail, .. } => {
+            collect_pat_names(head, out);
+            collect_pat_names(tail, out);
         }
         Pattern::Or(ps) => {
             for p in ps {
