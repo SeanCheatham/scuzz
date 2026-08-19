@@ -150,6 +150,7 @@ fn classify(
         | Token::Package
         | Token::Enum
         | Token::Record
+        | Token::Type
         | Token::Trait
         | Token::Impl
         | Token::Case
@@ -206,7 +207,7 @@ fn classify_ident(
     match prev_tok {
         Some(Token::Def) | Some(Token::Law) => return (TY_FUNCTION, MOD_DECLARATION),
         Some(Token::Enum) | Some(Token::Record) => return (TY_ENUM, MOD_DECLARATION),
-        Some(Token::Trait) => return (TY_TYPE, MOD_DECLARATION),
+        Some(Token::Type) | Some(Token::Trait) => return (TY_TYPE, MOD_DECLARATION),
         Some(Token::Case) => return (TY_ENUM_MEMBER, MOD_DECLARATION),
         Some(Token::Package) | Some(Token::Import) => return (TY_NAMESPACE, 0),
         Some(Token::Colon) => return (TY_TYPE, 0),

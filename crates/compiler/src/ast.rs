@@ -7,6 +7,8 @@ pub struct Program {
     /// Dotted package path, for example `["scuzz", "compiler"]`.
     pub package: Vec<String>,
     pub enums: Vec<EnumDef>,
+    /// `type Name = T` / `type Name[T] = List[T]`. Expanded before typecheck.
+    pub aliases: Vec<TypeAlias>,
     pub traits: Vec<TraitDef>,
     pub impls: Vec<ImplDef>,
     pub defs: Vec<FunDef>,
@@ -54,6 +56,18 @@ pub struct ImplMethod {
     pub params: Vec<Param>,
     pub ret: Type,
     pub body: Expr,
+}
+
+/// `type Name = T` / `type Name[T] = List[T]` in file-stem module `module`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TypeAlias {
+    pub module: String,
+    pub name: String,
+    /// Span of the alias name.
+    pub name_span: Span,
+    /// `type BoxList[T] = List[T]` — empty when the alias is not generic.
+    pub type_params: Vec<String>,
+    pub target: Type,
 }
 
 /// Top-level `import FromModule.name` in file-stem module `in_module`.

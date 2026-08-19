@@ -558,6 +558,10 @@ pub fn check_project_with(
     let mut program = program;
     program.law_names = law_names;
     let unused = crate::resolve::unused_names(&program);
+    let unused_imports: Vec<crate::ast::Import> = crate::resolve::unused_imports(&program)
+        .into_iter()
+        .cloned()
+        .collect();
     let lowered = lower_program(program);
     let program = match crate::typ::expand_impls(lowered.clone()) {
         Ok(p) => p,
@@ -585,7 +589,7 @@ pub fn check_project_with(
     if had_type_err {
         return Ok(diags);
     }
-    for im in crate::resolve::unused_imports(&program) {
+    for im in &unused_imports {
         let msg = if im.is_wildcard() {
             format!("unused import {}.{}", im.from_module, im.name)
         } else if let Some(alias) = &im.alias {

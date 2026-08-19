@@ -1,6 +1,6 @@
 //! Signature hover from the same parse as `check`. No second typer.
 
-use crate::ast::{EnumDef, Expr, ExprKind, FunDef, Param, Program, Type};
+use crate::ast::{EnumDef, Expr, ExprKind, FunDef, Param, Program, Type, TypeAlias};
 use crate::lexer::{lex, Token};
 use crate::resolve::module_id_from_label;
 use crate::typ::kit_lambda_param_ty;
@@ -32,6 +32,9 @@ pub fn hover_in_source(
         if name == "copy" {
             return Some(COPY_HOVER.into());
         }
+        if let Some(a) = alias_named(program, &q, &name) {
+            return Some(show_alias(a));
+        }
         return None;
     }
     if matches!(
@@ -39,6 +42,12 @@ pub fn hover_in_source(
         "Int" | "Float" | "String" | "Bool" | "Unit" | "List" | "Map" | "Set" | "IO"
     ) {
         return Some(name);
+    }
+    if let Some(a) = alias_named(program, &module, &name)
+        .or_else(|| imported_alias(program, &module, &name))
+        .or_else(|| unique_alias(program, &name))
+    {
+        return Some(show_alias(a));
     }
     if let Some(d) = def_named(program, &module, &name)
         .or_else(|| imported_def(program, &module, &name))
@@ -115,6 +124,7 @@ pub(crate) fn imported_def<'a>(
         &program.imports,
         &program.defs,
         &program.enums,
+        &program.aliases,
         module,
         name,
     )?;
@@ -130,6 +140,7 @@ pub(crate) fn imported_enum<'a>(
         &program.imports,
         &program.defs,
         &program.enums,
+        &program.aliases,
         module,
         name,
     )?;
@@ -158,6 +169,34 @@ pub(crate) fn enum_named<'a>(
 
 pub(crate) fn unique_enum<'a>(program: &'a Program, name: &str) -> Option<&'a EnumDef> {
     let hits: Vec<_> = program.enums.iter().filter(|e| e.name == name).collect();
+    if hits.len() == 1 {
+        Some(hits[0])
+    } else {
+        None
+    }
+}
+
+fn alias_named<'a>(program: &'a Program, module: &str, name: &str) -> Option<&'a TypeAlias> {
+    program
+        .aliases
+        .iter()
+        .find(|a| a.module == module && a.name == name)
+}
+
+fn imported_alias<'a>(program: &'a Program, module: &str, name: &str) -> Option<&'a TypeAlias> {
+    let (from, src) = crate::resolve::bind_import(
+        &program.imports,
+        &program.defs,
+        &program.enums,
+        &program.aliases,
+        module,
+        name,
+    )?;
+    alias_named(program, from, &src)
+}
+
+fn unique_alias<'a>(program: &'a Program, name: &str) -> Option<&'a TypeAlias> {
+    let hits: Vec<_> = program.aliases.iter().filter(|a| a.name == name).collect();
     if hits.len() == 1 {
         Some(hits[0])
     } else {
@@ -321,6 +360,15 @@ fn show_default(e: &Expr) -> String {
         ExprKind::Unit => "()".into(),
         _ => "…".into(),
     }
+}
+
+pub(crate) fn show_alias(a: &TypeAlias) -> String {
+    let tps = if a.type_params.is_empty() {
+        String::new()
+    } else {
+        format!("[{}]", a.type_params.join(", "))
+    };
+    format!("type {}{tps} = {}", a.name, a.target)
 }
 
 pub(crate) fn show_enum(en: &EnumDef) -> String {
@@ -1143,6 +1191,17 @@ mod tests {
         let src = "def add(n: Int): Int = n\n@main def main: IO[Unit] = IO.println(\"x\")\n";
         let h = hover_src(src, "add");
         assert!(h.contains("def add(n: Int): Int"), "{h}");
+    }
+
+    #[test]
+    fn hovers_type_alias() {
+        let src = r#"
+type UserId = Int
+def idOf(n: UserId): UserId = n
+@main def main: IO[Unit] = IO.println(Str.fromInt(idOf(1)))
+"#;
+        let h = hover_src(src, "UserId");
+        assert!(h.contains("type UserId = Int"), "{h}");
     }
 
     #[test]

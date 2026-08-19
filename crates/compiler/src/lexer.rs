@@ -8,6 +8,7 @@ pub enum Token {
     Package,
     Enum,
     Record,
+    Type,
     Trait,
     Impl,
     Case,
@@ -364,6 +365,7 @@ pub fn lex(input: &str) -> Result<Vec<SpannedToken>, LexError> {
                         "package" => Token::Package,
                         "enum" => Token::Enum,
                         "record" => Token::Record,
+                        "type" => Token::Type,
                         "trait" => Token::Trait,
                         "impl" => Token::Impl,
                         "case" => Token::Case,
@@ -702,6 +704,12 @@ mod tests {
     fn lexes_where() {
         let toks = lex("def f(n: Int where n >= 0): Int = n").unwrap();
         assert!(toks.iter().any(|t| matches!(t.token, Token::Where)));
+    }
+
+    #[test]
+    fn lexes_type_alias() {
+        let toks = lex("type UserId = Int").unwrap();
+        assert!(toks.iter().any(|t| matches!(t.token, Token::Type)));
     }
 
     #[test]

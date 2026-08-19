@@ -4,6 +4,9 @@ enum Either[L, R]:
 
 record Point(x: Int where x >= 0, y: Int where y + 1 > y && y * 2 > y && y % 2 < 2 && y == y)
 
+type UserId = Int
+type Labels = List[String]
+type BoxList[T] = List[T]
 trait Show:
   def show(): String
 
@@ -39,6 +42,7 @@ impl Get[T] for Opt:
 import A.tag
 import A.Msg
 import A.one as fromA
+import A.Tag
 
 def id[T](x: T): T =
   x
@@ -51,6 +55,18 @@ def addDefault(n: Int, m: Int = 1): Int =
 
 def greet(name: String, punct: String = "!"): String =
   Str.concat(name, punct)
+
+def idOf(n: UserId): UserId =
+  n
+
+def joinLabels(xs: Labels): String =
+  List.join(xs, ",")
+
+def lenBoxes(xs: BoxList[Int]): Int =
+  List.len(xs)
+
+def showTag(t: Tag): String =
+  t
 
 law sumPositive: Bool =
   sum(Point(3, 5)) > 0
@@ -502,6 +518,13 @@ b"""
     emptyAs = []: List[Int]
     _ <- IO.println(s"ascribeList:${Str.fromInt(List.len(emptyAs))}")
     _ <- IO.println(s"ascribeInt:${1: Int}")
+    uid = idOf(8)
+    _ <- IO.println(s"aliasId:$uid")
+    _ <- IO.println(s"aliasJoin:${joinLabels(["a", "b"])}")
+    _ <- IO.println(s"aliasLen:${lenBoxes([1, 2, 3])}")
+    ascribeId = 4: UserId
+    _ <- IO.println(s"aliasAscribe:$ascribeId")
+    _ <- IO.println(s"aliasTag:${showTag("ok")}")
     _ <- mapSetProof()
     _ <- listProof()
     _ <- strProof()

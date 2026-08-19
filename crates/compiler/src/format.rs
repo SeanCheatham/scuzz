@@ -2,7 +2,7 @@
 
 use crate::ast::{
     BinOp, EnumDef, Expr, ExprKind, ForBinder, FunDef, ImplDef, MatchArm, Pattern, Program,
-    TraitDef, Type,
+    TraitDef, Type, TypeAlias,
 };
 use crate::parser::{parse, ParseError};
 use crate::span::Span;
@@ -32,6 +32,10 @@ fn pretty_program(p: &Program) -> String {
             out.push_str(&pretty_enum(e));
             out.push('\n');
         }
+    }
+    for a in &p.aliases {
+        out.push_str(&pretty_alias(a));
+        out.push('\n');
     }
     for t in &p.traits {
         out.push_str(&pretty_trait(t));
@@ -77,6 +81,15 @@ fn pretty_program(p: &Program) -> String {
         out.push('\n');
     }
     out
+}
+
+fn pretty_alias(a: &TypeAlias) -> String {
+    let tparams = if a.type_params.is_empty() {
+        String::new()
+    } else {
+        format!("[{}]", a.type_params.join(", "))
+    };
+    format!("type {}{tparams} = {}", a.name, pretty_type(&a.target))
 }
 
 fn pretty_enum(e: &EnumDef) -> String {
@@ -1439,6 +1452,21 @@ record Point(x: Int, y: Int)
             out.contains("15.0") || out.contains("1.5e1") || out.contains("15"),
             "{out}"
         );
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_type_alias() {
+        let src = r#"
+type UserId = Int
+type BoxList[T] = List[T]
+def idOf(n: UserId): UserId = n
+@main def main: IO[Unit] = IO.println(Str.fromInt(idOf(1)))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("type UserId = Int"), "{out}");
+        assert!(out.contains("type BoxList[T] = List[T]"), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }
