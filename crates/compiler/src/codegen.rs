@@ -71,6 +71,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare i64 @sz_string_len(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_string_slice(ptr, i64, i64)").unwrap();
     writeln!(out, "declare i32 @sz_string_eq(ptr, ptr)").unwrap();
+    writeln!(out, "declare i32 @sz_ptr_eq(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_string_char_at(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_string_from_int(i64)").unwrap();
     writeln!(out, "declare ptr @sz_string_from_float(double)").unwrap();
@@ -3263,7 +3264,7 @@ fn emit_binary(
     if matches!(op, BinOp::Eq | BinOp::Ne) && le.kind == Kind::Ptr && re.kind == Kind::Ptr {
         writeln!(
             code,
-            "  %{prefix}_eqi = call i32 @sz_string_eq(ptr {}, ptr {})",
+            "  %{prefix}_eqi = call i32 @sz_ptr_eq(ptr {}, ptr {})",
             le.value, re.value
         )
         .unwrap();
@@ -9977,6 +9978,65 @@ enum Wrap:
         assert!(
             ir.contains("sz_string_eq"),
             "expected string literal eq:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_ptr_eq_for_list_and_adt() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(if (["a"] == ["a"] && ["a"] != ["b"]) "y" else "n")
+    _ <- IO.println(if (Color.Red == Color.Red && Color.Red != Color.Blue) "y" else "n")
+    _ <- IO.println(if ("ab" == "ab") "y" else "n")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_ptr_eq"),
+            "expected pointer == to call sz_ptr_eq:\n{ir}"
+        );
+        let ptr_eqs = ir.matches("call i32 @sz_ptr_eq").count();
+        assert!(
+            ptr_eqs >= 5,
+            "expected list/adt/string == to use sz_ptr_eq, got {ptr_eqs}:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_ptr_eq_releases_owned_list_temps() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(if (["a"] == ["b"]) "y" else "n")
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call i32 @sz_ptr_eq(ptr ";
+        let at = ir.find(needle).expect("expected sz_ptr_eq");
+        let line = ir[at..].lines().next().unwrap();
+        let insides = line
+            .split_once('(')
+            .expect("sz_ptr_eq call")
+            .1
+            .trim_end_matches(')');
+        let mut args = insides
+            .split(',')
+            .map(|s| s.trim().trim_start_matches("ptr ").trim());
+        let left = args.next().expect("left");
+        let right = args.next().expect("right");
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {left})")),
+            "expected last-use release of left list {left}:\n{ir}"
+        );
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {right})")),
+            "expected last-use release of right list {right}:\n{ir}"
         );
     }
 

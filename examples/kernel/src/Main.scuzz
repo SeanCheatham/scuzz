@@ -299,6 +299,32 @@ def strProof(): IO[Unit] =
     _ <- IO.println(s"lines:${List.join(Str.lines("a\nb"), ",")}")
   } yield ()
 
+def eqProof(): IO[Unit] =
+  for {
+    xs = ["a", "b"]
+    ys = ["a", "b"]
+    zs = ["a", "c"]
+    mp = Map.set(Map.set(Map.empty(), "a", "1"), "b", "2")
+    mp2 = Map.set(Map.set(Map.empty(), "b", "2"), "a", "1")
+    other = Map.set(Map.empty(), "z", "9")
+    st = Set.add(Set.add(Set.empty(), "x"), "y")
+    st2 = Set.add(Set.add(Set.empty(), "y"), "x")
+    stz = Set.add(Set.empty(), "z")
+    o1 = Opt.Some(1)
+    o2 = Opt.Some(1)
+    none = Opt.None: Opt[Int]
+    p1 = Point(3, 5)
+    p2 = Point(3, 5)
+    _ <- IO.println(s"eqStr:${if ("ab" == "ab" && "ab" != "c") "y" else "n"}")
+    _ <- IO.println(s"eqList:${if (xs == ys && xs != zs) "y" else "n"}")
+    _ <- IO.println(s"eqAdt:${if (Color.Red == Color.Red && Color.Red != Color.Blue) "y" else "n"}")
+    _ <- IO.println(s"eqOpt:${if (o1 == o2 && o1 != none) "y" else "n"}")
+    _ <- IO.println(s"eqRec:${if (p1 == p2 && p1 != Point(3, 6)) "y" else "n"}")
+    _ <- IO.println(s"eqMap:${if (mp == mp2 && mp != other) "y" else "n"}")
+    _ <- IO.println(s"eqSet:${if (st == st2 && st != stz) "y" else "n"}")
+    _ <- IO.println(s"eqNest:${if (Opt.Some(o1) == Opt.Some(o2)) "y" else "n"}")
+  } yield ()
+
 record Box[T](x: T):
   def get(): T =
     self.x
@@ -417,4 +443,5 @@ record Box[T](x: T):
     _ <- mapSetProof()
     _ <- listProof()
     _ <- strProof()
+    _ <- eqProof()
   } yield ()

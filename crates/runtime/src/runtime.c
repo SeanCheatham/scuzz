@@ -1019,6 +1019,62 @@ int64_t sz_unbox_i64(const void *p) {
   return p ? *(const int64_t *)p : 0;
 }
 
+static int list_eq(const SzList *a, const SzList *b) {
+  while (a && b) {
+    if (!sz_ptr_eq(a->head, b->head))
+      return 0;
+    a = a->tail;
+    b = b->tail;
+  }
+  return a == NULL && b == NULL;
+}
+
+static int map_subset_eq(const SzMap *a, SzMap *b) {
+  if (!a)
+    return 1;
+  if (sz_map_contains(b, a->key) == 0)
+    return 0;
+  if (!sz_ptr_eq(a->val, sz_map_get_or(b, a->key, NULL)))
+    return 0;
+  return map_subset_eq(a->left, b) && map_subset_eq(a->right, b);
+}
+
+static int map_eq(const SzMap *a, const SzMap *b) {
+  if (a == b)
+    return 1;
+  if (!a || !b)
+    return 0;
+  if (a->key_kind != b->key_kind)
+    return 0;
+  if (sz_map_size((SzMap *)a) != sz_map_size((SzMap *)b))
+    return 0;
+  return map_subset_eq(a, (SzMap *)b);
+}
+
+static int adt_eq(const SzAdt *a, const SzAdt *b) {
+  if (a->tag != b->tag)
+    return 0;
+  return sz_ptr_eq(a->payload, b->payload);
+}
+
+static int pair_eq(const SzPair *a, const SzPair *b) {
+  return sz_ptr_eq(a->left, b->left) && sz_ptr_eq(a->right, b->right);
+}
+
+static int either_eq(const SzEither *a, const SzEither *b) {
+  if (a->is_right != b->is_right)
+    return 0;
+  if (a->is_right)
+    return sz_ptr_eq(a->as.right, b->as.right);
+  return sz_ptr_eq(a->as.left, b->as.left);
+}
+
+static int error_eq(const SzError *a, const SzError *b) {
+  if (a->code != b->code)
+    return 0;
+  return sz_ptr_eq(a->message, b->message);
+}
+
 int sz_ptr_eq(const void *a, const void *b) {
   uint32_t ka;
   if (a == b)
@@ -1030,11 +1086,26 @@ int sz_ptr_eq(const void *a, const void *b) {
   ka = sz_rc_hdr(a)->kind;
   if (ka != sz_rc_hdr(b)->kind)
     return 0;
-  if (ka == SZ_RC_STRING)
+  switch (ka) {
+  case SZ_RC_STRING:
     return sz_string_eq((const SzString *)a, (const SzString *)b);
-  if (ka == SZ_RC_BOX)
+  case SZ_RC_BOX:
     return sz_unbox_i64(a) == sz_unbox_i64(b);
-  return 0;
+  case SZ_RC_LIST:
+    return list_eq((const SzList *)a, (const SzList *)b);
+  case SZ_RC_MAP:
+    return map_eq((const SzMap *)a, (const SzMap *)b);
+  case SZ_RC_ADT:
+    return adt_eq((const SzAdt *)a, (const SzAdt *)b);
+  case SZ_RC_PAIR:
+    return pair_eq((const SzPair *)a, (const SzPair *)b);
+  case SZ_RC_EITHER:
+    return either_eq((const SzEither *)a, (const SzEither *)b);
+  case SZ_RC_ERROR:
+    return error_eq((const SzError *)a, (const SzError *)b);
+  default:
+    return 0;
+  }
 }
 
 /* --- errors / Either / ADT / Pair ---------------------------------------- */

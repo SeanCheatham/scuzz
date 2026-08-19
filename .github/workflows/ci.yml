@@ -140,6 +140,14 @@ jobs:
           grep -q "ascribe:9" /tmp/kernel.out
           grep -q "ascribeList:0" /tmp/kernel.out
           grep -q "ascribeInt:1" /tmp/kernel.out
+          grep -q "eqStr:y" /tmp/kernel.out
+          grep -q "eqList:y" /tmp/kernel.out
+          grep -q "eqAdt:y" /tmp/kernel.out
+          grep -q "eqOpt:y" /tmp/kernel.out
+          grep -q "eqRec:y" /tmp/kernel.out
+          grep -q "eqMap:y" /tmp/kernel.out
+          grep -q "eqSet:y" /tmp/kernel.out
+          grep -q "eqNest:y" /tmp/kernel.out
           grep -q "map:1" /tmp/kernel.out
           grep -q "miss:no" /tmp/kernel.out
           grep -q "has:y" /tmp/kernel.out

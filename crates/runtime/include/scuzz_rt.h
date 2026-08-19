@@ -113,7 +113,8 @@ SzList *sz_string_split(const SzString *s, const SzString *sep);
 /* Boxed i64 for IO[Int] */
 void *sz_box_i64(int64_t n);
 int64_t sz_unbox_i64(const void *p);
-/* 1 when pointers match, or both strings / boxed i64 match by value. */
+/* 1 when pointers match, or both strings, boxed i64, lists, maps, ADTs,
+ * pairs, Either, or errors match by value. Other RC kinds stay identity. */
 int sz_ptr_eq(const void *a, const void *b);
 
 /* --- errors -------------------------------------------------------------- */
