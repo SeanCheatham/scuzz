@@ -302,7 +302,8 @@ def strProof(): IO[Unit] =
     _ <- IO.println(s"slice:${Str.slice("abc", 1, 3)}")
     _ <- IO.println(s"ix:${Str.fromInt(Str.indexOf("ababa", "ba"))}")
     _ <- IO.println(s"ch:${Str.fromInt(Str.charAt("abc", 1))}")
-    _ <- IO.println(s"lines:${List.join(Str.lines("a\nb"), ",")}")
+    _ <- IO.println(s"lines:${List.join(Str.lines("""a
+b"""), ",")}")
   } yield ()
 
 def eqProof(): IO[Unit] =
@@ -428,6 +429,15 @@ record Box[T](x: T):
     _ <- IO.println(s"not:${if (!false) "y" else "n"}")
     _ <- IO.println(s"hex:${255}")
     _ <- IO.println(s"bin:${10}")
+    _ <- IO.println(s"sep:${1000}")
+    _ <- IO.println(s"hexsep:${65280}")
+    _ <- IO.println(s"binsep:${161}")
+    _ <- IO.println(s"sci:${15.0}")
+    _ <- IO.println(s"scisep:${1.0}")
+    note = """a
+b"""
+    _ <- IO.println(s"tri:${Str.len(note)}")
+    _ <- IO.println(s"hole:$n")
     _ <- IO.println(s"band:${255 & 15}")
     _ <- IO.println(s"bor:${10 | 5}")
     _ <- IO.println(s"bxor:${1 ^ 3}")

@@ -151,7 +151,8 @@ pub fn lex(input: &str) -> Result<Vec<SpannedToken>, LexError> {
         }
         if c == '"' {
             let start = i;
-            let (s, next) = read_string_lit(&chars, i, &char_byte)?;
+            let triple = is_triple_quote(&chars, i);
+            let (s, next) = read_string_lit(&chars, i, &char_byte, triple)?;
             i = next;
             tokens.push(SpannedToken {
                 token: Token::StringLit(s),
@@ -281,79 +282,12 @@ pub fn lex(input: &str) -> Result<Vec<SpannedToken>, LexError> {
         }
         if c.is_ascii_digit() {
             let start = i;
-            if c == '0' && i + 1 < chars.len() {
-                let next = chars[i + 1];
-                if (next == 'x' || next == 'X')
-                    && i + 2 < chars.len()
-                    && chars[i + 2].is_ascii_hexdigit()
-                {
-                    i += 2;
-                    let mut n = 0i64;
-                    while i < chars.len() && chars[i].is_ascii_hexdigit() {
-                        let d = chars[i];
-                        let v = if d.is_ascii_digit() {
-                            (d as u8 - b'0') as i64
-                        } else {
-                            (d.to_ascii_lowercase() as u8 - b'a' + 10) as i64
-                        };
-                        n = n.saturating_mul(16).saturating_add(v);
-                        i += 1;
-                    }
-                    tokens.push(SpannedToken {
-                        token: Token::IntLit(n),
-                        span: Span::new(String::new(), byte_at(start), byte_at(i)),
-                    });
-                    continue;
-                }
-                if (next == 'b' || next == 'B')
-                    && i + 2 < chars.len()
-                    && (chars[i + 2] == '0' || chars[i + 2] == '1')
-                {
-                    i += 2;
-                    let mut n = 0i64;
-                    while i < chars.len() && (chars[i] == '0' || chars[i] == '1') {
-                        n = n
-                            .saturating_mul(2)
-                            .saturating_add((chars[i] as u8 - b'0') as i64);
-                        i += 1;
-                    }
-                    tokens.push(SpannedToken {
-                        token: Token::IntLit(n),
-                        span: Span::new(String::new(), byte_at(start), byte_at(i)),
-                    });
-                    continue;
-                }
-            }
-            while i < chars.len() && chars[i].is_ascii_digit() {
-                i += 1;
-            }
-            let is_float = i < chars.len()
-                && chars[i] == '.'
-                && i + 1 < chars.len()
-                && chars[i + 1].is_ascii_digit();
-            if is_float {
-                i += 1;
-                while i < chars.len() && chars[i].is_ascii_digit() {
-                    i += 1;
-                }
-                let lexeme: String = chars[start..i].iter().collect();
-                let bits = lexeme.parse::<f64>().map(f64::to_bits).unwrap_or(0);
-                tokens.push(SpannedToken {
-                    token: Token::FloatLit(bits),
-                    span: Span::new(String::new(), byte_at(start), byte_at(i)),
-                });
-            } else {
-                let mut n = 0i64;
-                for &ch in &chars[start..i] {
-                    n = n
-                        .saturating_mul(10)
-                        .saturating_add((ch as u8 - b'0') as i64);
-                }
-                tokens.push(SpannedToken {
-                    token: Token::IntLit(n),
-                    span: Span::new(String::new(), byte_at(start), byte_at(i)),
-                });
-            }
+            let (token, next) = lex_number(&chars, i)?;
+            i = next;
+            tokens.push(SpannedToken {
+                token,
+                span: Span::new(String::new(), byte_at(start), byte_at(i)),
+            });
             continue;
         }
         match c {
@@ -409,7 +343,8 @@ pub fn lex(input: &str) -> Result<Vec<SpannedToken>, LexError> {
                     i += 1;
                 }
                 if ident == "s" && i < chars.len() && chars[i] == '"' {
-                    let (parts, next) = read_interp_string(&chars, i, &char_byte)?;
+                    let triple = is_triple_quote(&chars, i);
+                    let (parts, next) = read_interp_string(&chars, i, &char_byte, triple)?;
                     i = next;
                     tokens.push(SpannedToken {
                         token: Token::InterpString(parts),
@@ -457,20 +392,134 @@ fn byte_at_chars(char_byte: &[usize], ci: usize) -> usize {
     char_byte[ci.min(char_byte.len() - 1)]
 }
 
+fn is_triple_quote(chars: &[char], i: usize) -> bool {
+    i + 2 < chars.len() && chars[i] == '"' && chars[i + 1] == '"' && chars[i + 2] == '"'
+}
+
+/// Skip `_` that sits between digits of class `is_digit`.
+fn take_separated_digits<F>(chars: &[char], mut i: usize, is_digit: F) -> (String, usize)
+where
+    F: Fn(char) -> bool,
+{
+    let mut digits = String::new();
+    while i < chars.len() {
+        if is_digit(chars[i]) {
+            digits.push(chars[i]);
+            i += 1;
+        } else if chars[i] == '_'
+            && i + 1 < chars.len()
+            && (is_digit(chars[i + 1]) || chars[i + 1] == '_')
+        {
+            i += 1;
+        } else {
+            break;
+        }
+    }
+    (digits, i)
+}
+
+fn parse_dec_i64(digits: &str) -> i64 {
+    let mut n = 0i64;
+    for d in digits.chars() {
+        n = n.saturating_mul(10).saturating_add((d as u8 - b'0') as i64);
+    }
+    n
+}
+
+fn lex_number(chars: &[char], start: usize) -> Result<(Token, usize), LexError> {
+    let mut i = start;
+    if chars[i] == '0' && i + 1 < chars.len() {
+        let next = chars[i + 1];
+        if (next == 'x' || next == 'X') && i + 2 < chars.len() && chars[i + 2].is_ascii_hexdigit() {
+            i += 2;
+            let (digits, next_i) = take_separated_digits(chars, i, |c| c.is_ascii_hexdigit());
+            i = next_i;
+            let mut n = 0i64;
+            for d in digits.chars() {
+                let v = if d.is_ascii_digit() {
+                    (d as u8 - b'0') as i64
+                } else {
+                    (d.to_ascii_lowercase() as u8 - b'a' + 10) as i64
+                };
+                n = n.saturating_mul(16).saturating_add(v);
+            }
+            return Ok((Token::IntLit(n), i));
+        }
+        if (next == 'b' || next == 'B')
+            && i + 2 < chars.len()
+            && (chars[i + 2] == '0' || chars[i + 2] == '1')
+        {
+            i += 2;
+            let (digits, next_i) = take_separated_digits(chars, i, |c| c == '0' || c == '1');
+            i = next_i;
+            let mut n = 0i64;
+            for d in digits.chars() {
+                n = n.saturating_mul(2).saturating_add((d as u8 - b'0') as i64);
+            }
+            return Ok((Token::IntLit(n), i));
+        }
+    }
+
+    let (int_digits, next_i) = take_separated_digits(chars, i, |c| c.is_ascii_digit());
+    i = next_i;
+    let mut is_float = false;
+    let mut lexeme = int_digits;
+
+    if i < chars.len() && chars[i] == '.' && i + 1 < chars.len() && chars[i + 1].is_ascii_digit() {
+        is_float = true;
+        lexeme.push('.');
+        i += 1;
+        let (frac, next_i) = take_separated_digits(chars, i, |c| c.is_ascii_digit());
+        lexeme.push_str(&frac);
+        i = next_i;
+    }
+
+    if i < chars.len() && (chars[i] == 'e' || chars[i] == 'E') {
+        let mut j = i + 1;
+        if j < chars.len() && (chars[j] == '+' || chars[j] == '-') {
+            j += 1;
+        }
+        if j < chars.len() && chars[j].is_ascii_digit() {
+            is_float = true;
+            lexeme.push(chars[i]);
+            if chars[i + 1] == '+' || chars[i + 1] == '-' {
+                lexeme.push(chars[i + 1]);
+                i += 2;
+            } else {
+                i += 1;
+            }
+            let (exp, next_i) = take_separated_digits(chars, i, |c| c.is_ascii_digit());
+            lexeme.push_str(&exp);
+            i = next_i;
+        }
+    }
+
+    if is_float {
+        let bits = lexeme.parse::<f64>().map(f64::to_bits).unwrap_or(0);
+        Ok((Token::FloatLit(bits), i))
+    } else {
+        Ok((Token::IntLit(parse_dec_i64(&lexeme)), i))
+    }
+}
+
 fn read_string_lit(
     chars: &[char],
     start_quote: usize,
     char_byte: &[usize],
+    triple: bool,
 ) -> Result<(String, usize), LexError> {
     let start = start_quote;
-    let mut i = start_quote + 1;
+    let mut i = start_quote + if triple { 3 } else { 1 };
     let mut s = String::new();
     while i < chars.len() {
+        if triple && is_triple_quote(chars, i) {
+            return Ok((s, i + 3));
+        }
         let ch = chars[i];
-        if ch == '"' {
+        if !triple && ch == '"' {
             return Ok((s, i + 1));
         }
-        if ch == '\\' {
+        if !triple && ch == '\\' {
             i += 1;
             if i >= chars.len() {
                 return Err(LexError::UnterminatedString(byte_at_chars(
@@ -501,14 +550,20 @@ fn read_interp_string(
     chars: &[char],
     start_quote: usize,
     char_byte: &[usize],
+    triple: bool,
 ) -> Result<(Vec<InterpTok>, usize), LexError> {
     let start = start_quote;
-    let mut i = start_quote + 1;
+    let mut i = start_quote + if triple { 3 } else { 1 };
     let mut parts = Vec::new();
     let mut lit = String::new();
     while i < chars.len() {
+        if triple && is_triple_quote(chars, i) {
+            parts.push(InterpTok::Lit(std::mem::take(&mut lit)));
+            let parts = compact_interp_parts(parts);
+            return Ok((parts, i + 3));
+        }
         let ch = chars[i];
-        if ch == '"' {
+        if !triple && ch == '"' {
             parts.push(InterpTok::Lit(std::mem::take(&mut lit)));
             let parts = compact_interp_parts(parts);
             return Ok((parts, i + 1));
@@ -704,6 +759,94 @@ mod tests {
         assert!(toks.iter().any(|t| matches!(t.token, Token::Caret)));
         assert!(toks.iter().any(|t| matches!(t.token, Token::Shl)));
         assert!(toks.iter().any(|t| matches!(t.token, Token::Shr)));
+    }
+
+    #[test]
+    fn lexes_numeric_separators() {
+        let toks = lex("1_000 0xFF_00 0b1010_0001 1_000.5_5").unwrap();
+        assert!(matches!(toks[0].token, Token::IntLit(1000)));
+        assert!(matches!(toks[1].token, Token::IntLit(0xFF00)));
+        assert!(matches!(toks[2].token, Token::IntLit(0b1010_0001)));
+        assert!(matches!(
+            &toks[3].token,
+            Token::FloatLit(b) if f64::from_bits(*b) == 1000.55
+        ));
+        let glued = lex("1__000").unwrap();
+        assert!(matches!(glued[0].token, Token::IntLit(1000)));
+        let trail = lex("1_ + 2").unwrap();
+        assert!(matches!(trail[0].token, Token::IntLit(1)));
+        assert!(matches!(trail[1].token, Token::Underscore));
+    }
+
+    #[test]
+    fn lexes_scientific_floats() {
+        let toks = lex("1.5e1 1e10 1.5e-3 2E+2").unwrap();
+        assert!(matches!(
+            &toks[0].token,
+            Token::FloatLit(b) if f64::from_bits(*b) == 15.0
+        ));
+        assert!(matches!(
+            &toks[1].token,
+            Token::FloatLit(b) if f64::from_bits(*b) == 1e10
+        ));
+        assert!(matches!(
+            &toks[2].token,
+            Token::FloatLit(b) if (f64::from_bits(*b) - 0.0015).abs() < 1e-12
+        ));
+        assert!(matches!(
+            &toks[3].token,
+            Token::FloatLit(b) if f64::from_bits(*b) == 200.0
+        ));
+        let sep = lex("1_000e-3").unwrap();
+        assert!(matches!(
+            &sep[0].token,
+            Token::FloatLit(b) if (f64::from_bits(*b) - 1.0).abs() < 1e-12
+        ));
+        let not_exp = lex("1eq").unwrap();
+        assert!(matches!(not_exp[0].token, Token::IntLit(1)));
+        assert!(matches!(&not_exp[1].token, Token::Ident(s) if s == "eq"));
+    }
+
+    #[test]
+    fn lexes_triple_quoted_string() {
+        let toks = lex("\"\"\"a\nb\"\"\"").unwrap();
+        match &toks[0].token {
+            Token::StringLit(s) => assert_eq!(s, "a\nb"),
+            other => panic!("expected StringLit, got {other:?}"),
+        }
+        let inner = lex("\"\"\"a\"b\"\"\"").unwrap();
+        match &inner[0].token {
+            Token::StringLit(s) => assert_eq!(s, "a\"b"),
+            other => panic!("expected StringLit, got {other:?}"),
+        }
+        let empty = lex("\"\"\"\"\"\"").unwrap();
+        match &empty[0].token {
+            Token::StringLit(s) => assert_eq!(s, ""),
+            other => panic!("expected empty StringLit, got {other:?}"),
+        }
+        let raw = lex("\"\"\"a\\nb\"\"\"").unwrap();
+        match &raw[0].token {
+            Token::StringLit(s) => assert_eq!(s, "a\\nb"),
+            other => panic!("expected raw backslash, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lexes_triple_interpolated_string() {
+        let toks = lex("s\"\"\"n=$n\nok\"\"\"").unwrap();
+        match &toks[0].token {
+            Token::InterpString(parts) => {
+                assert_eq!(
+                    parts,
+                    &vec![
+                        InterpTok::Lit("n=".into()),
+                        InterpTok::Ident("n".into()),
+                        InterpTok::Lit("\nok".into()),
+                    ]
+                );
+            }
+            other => panic!("expected InterpString, got {other:?}"),
+        }
     }
 
     #[test]

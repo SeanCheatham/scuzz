@@ -298,7 +298,7 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
         ExprKind::FloatLit(bits) => format!("{pad}{}", crate::ast::format_float_bits(*bits)),
         ExprKind::BoolLit(true) => format!("{pad}true"),
         ExprKind::BoolLit(false) => format!("{pad}false"),
-        ExprKind::StrLit(s) => format!("{pad}\"{}\"", escape(s)),
+        ExprKind::StrLit(s) => format!("{pad}{}", quote_string(s)),
         ExprKind::ListLit { elems } => {
             let a: Vec<_> = elems
                 .iter()
@@ -307,25 +307,7 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             format!("{pad}[{}]", a.join(", "))
         }
         ExprKind::Interpolate { parts } => {
-            let mut body = String::from("s\"");
-            for part in parts {
-                match part {
-                    crate::ast::InterpPart::Lit(s) => body.push_str(&escape_interp_lit(s)),
-                    crate::ast::InterpPart::Expr(e) => match &e.kind {
-                        ExprKind::Var(n) => {
-                            body.push('$');
-                            body.push_str(n);
-                        }
-                        _ => {
-                            body.push_str("${");
-                            body.push_str(pretty_expr(e, 0).trim());
-                            body.push('}');
-                        }
-                    },
-                }
-            }
-            body.push('"');
-            format!("{pad}{body}")
+            format!("{pad}{}", quote_interpolate(parts))
         }
         ExprKind::IoPrintln(e) => format!("{pad}IO.println({})", pretty_expr(e, 0).trim()),
         ExprKind::IoSleep(e) => format!("{pad}IO.sleep({})", pretty_expr(e, 0).trim()),
@@ -588,7 +570,7 @@ fn pretty_pattern(pat: &Pattern) -> String {
         Pattern::Float(bits) => crate::ast::format_float_bits(*bits),
         Pattern::Bool(true) => "true".into(),
         Pattern::Bool(false) => "false".into(),
-        Pattern::Str(s) => format!("\"{}\"", escape(s)),
+        Pattern::Str(s) => quote_string(s),
         Pattern::Or(alts) => alts
             .iter()
             .map(pretty_pattern)
@@ -635,6 +617,79 @@ fn escape(s: &str) -> String {
 
 fn escape_interp_lit(s: &str) -> String {
     escape(s).replace('$', "\\$")
+}
+
+fn use_triple_quotes(s: &str) -> bool {
+    s.contains('\n') && !s.contains("\"\"\"")
+}
+
+fn quote_string(s: &str) -> String {
+    if use_triple_quotes(s) {
+        format!("\"\"\"{s}\"\"\"")
+    } else {
+        format!("\"{}\"", escape(s))
+    }
+}
+
+fn interp_has_newline(parts: &[crate::ast::InterpPart]) -> bool {
+    parts.iter().any(|p| match p {
+        crate::ast::InterpPart::Lit(s) => s.contains('\n'),
+        crate::ast::InterpPart::Expr(_) => false,
+    })
+}
+
+fn interp_has_triple(parts: &[crate::ast::InterpPart]) -> bool {
+    parts.iter().any(|p| match p {
+        crate::ast::InterpPart::Lit(s) => s.contains("\"\"\""),
+        crate::ast::InterpPart::Expr(_) => false,
+    })
+}
+
+fn escape_triple_interp_lit(s: &str) -> String {
+    let mut out = String::new();
+    for ch in s.chars() {
+        match ch {
+            '\\' => out.push_str("\\\\"),
+            '$' => out.push_str("\\$"),
+            other => out.push(other),
+        }
+    }
+    out
+}
+
+fn write_interp_body(parts: &[crate::ast::InterpPart], triple: bool) -> String {
+    let mut body = String::new();
+    for part in parts {
+        match part {
+            crate::ast::InterpPart::Lit(s) => {
+                if triple {
+                    body.push_str(&escape_triple_interp_lit(s));
+                } else {
+                    body.push_str(&escape_interp_lit(s));
+                }
+            }
+            crate::ast::InterpPart::Expr(e) => match &e.kind {
+                ExprKind::Var(n) => {
+                    body.push('$');
+                    body.push_str(n);
+                }
+                _ => {
+                    body.push_str("${");
+                    body.push_str(pretty_expr(e, 0).trim());
+                    body.push('}');
+                }
+            },
+        }
+    }
+    body
+}
+
+fn quote_interpolate(parts: &[crate::ast::InterpPart]) -> String {
+    if interp_has_newline(parts) && !interp_has_triple(parts) {
+        format!("s\"\"\"{}\"\"\"", write_interp_body(parts, true))
+    } else {
+        format!("s\"{}\"", write_interp_body(parts, false))
+    }
 }
 
 #[cfg(test)]
@@ -1226,6 +1281,29 @@ enum Opt[T]:
         let out = format_source(src).unwrap();
         assert!(out.contains("Opt.None: Opt[Int]"), "{out}");
         assert!(out.contains("(1: Int)"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_triple_quoted_multiline() {
+        let src = "@main def main: IO[Unit] =\n  IO.println(\"\"\"a\nb\"\"\")\n";
+        let out = format_source(src).unwrap();
+        assert!(out.contains("\"\"\"a\nb\"\"\""), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_scientific_and_separated_numbers() {
+        let src =
+            r#"@main def main: IO[Unit] = IO.println(Str.fromInt(1_000 + Float.toInt(1.5e1)))"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("1000"), "{out}");
+        assert!(
+            out.contains("15.0") || out.contains("1.5e1") || out.contains("15"),
+            "{out}"
+        );
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

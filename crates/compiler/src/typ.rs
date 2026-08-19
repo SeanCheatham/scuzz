@@ -7222,6 +7222,24 @@ def bits(n: Int, b: Bool): Int =
     }
 
     #[test]
+    fn typechecks_separated_scientific_and_triple_string() {
+        let src = r#"
+def n(): Int = 1_000 + 0xFF_00
+def x(): Float = 1.5e1
+@main def main: IO[Unit] =
+  for {
+    note = """a
+b"""
+    _ <- IO.println(Str.fromInt(n() + Float.toInt(x())))
+    _ <- IO.println(note)
+    _ <- IO.println(s"""k:${n()}""")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("separated, scientific, and triple strings typecheck");
+    }
+
+    #[test]
     fn typechecks_named_args_reorder() {
         let src = r#"
 def add(n: Int, m: Int): Int = n + m

@@ -8039,6 +8039,30 @@ def scale(x: Float): Float = x * 2.0
     }
 
     #[test]
+    fn emit_separated_scientific_and_triple_string() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(Str.fromInt(1_000))
+    _ <- IO.println(s"${1.5e1}")
+    _ <- IO.println("""ok""")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("i64 1000") || ir.contains("1000"),
+            "expected 1000 in IR:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_string_from_float") || ir.contains("double"),
+            "expected float emit:\n{ir}"
+        );
+        assert!(ir.contains("sz_string_from_cstr"), "expected string:\n{ir}");
+    }
+
+    #[test]
     fn emit_str_trim_compile() {
         let src = r#"@main def main: IO[Unit] =
   IO.println(Str.trim("  x  "))

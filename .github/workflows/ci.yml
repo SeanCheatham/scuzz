@@ -124,6 +124,13 @@ jobs:
           grep -q "not:y" /tmp/kernel.out
           grep -q "hex:255" /tmp/kernel.out
           grep -q "bin:10" /tmp/kernel.out
+          grep -q "sep:1000" /tmp/kernel.out
+          grep -q "hexsep:65280" /tmp/kernel.out
+          grep -q "binsep:161" /tmp/kernel.out
+          grep -q "sci:15.0" /tmp/kernel.out
+          grep -q "scisep:1.0" /tmp/kernel.out
+          grep -q "tri:3" /tmp/kernel.out
+          grep -q "hole:3" /tmp/kernel.out
           grep -q "band:15" /tmp/kernel.out
           grep -q "bor:15" /tmp/kernel.out
           grep -q "bxor:2" /tmp/kernel.out
