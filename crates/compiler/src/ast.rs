@@ -696,6 +696,15 @@ pub enum Pattern {
     Or(Vec<Pattern>),
     /// `n @ Pat` — bind `n` to the value at this position, then match `Pat`.
     As { name: String, inner: Box<Pattern> },
+    /// `[]`
+    Nil,
+    /// `h :: t`. `[a, b]` sugar folds to Cons ending in Nil.
+    Cons {
+        head: Box<Pattern>,
+        tail: Box<Pattern>,
+        /// Element type. Parser leaves `Opaque("Elem")`. Elaborate fills it.
+        elem: Type,
+    },
 }
 
 impl Pattern {
@@ -726,6 +735,11 @@ impl Pattern {
                 type_args: type_args.clone(),
             },
             Pattern::Or(alts) => Pattern::Or(alts.iter().map(|a| a.strip_as()).collect()),
+            Pattern::Cons { head, tail, elem } => Pattern::Cons {
+                head: Box::new(head.strip_as()),
+                tail: Box::new(tail.strip_as()),
+                elem: elem.clone(),
+            },
             other => other.clone(),
         }
     }
@@ -757,6 +771,21 @@ impl Pattern {
                         case_name: case_name.clone(),
                         binds,
                         type_args: type_args.clone(),
+                    })
+                    .collect()
+            }
+            Pattern::Cons { head, tail, elem } => {
+                let parts = [head.flatten_or(), tail.flatten_or()];
+                cartesian_patterns(&parts)
+                    .into_iter()
+                    .map(|mut row| {
+                        let t = row.pop().unwrap();
+                        let h = row.pop().unwrap();
+                        Pattern::Cons {
+                            head: Box::new(h),
+                            tail: Box::new(t),
+                            elem: elem.clone(),
+                        }
                     })
                     .collect()
             }

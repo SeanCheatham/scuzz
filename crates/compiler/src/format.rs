@@ -586,6 +586,8 @@ fn pretty_pattern(pat: &Pattern) -> String {
             .collect::<Vec<_>>()
             .join(" | "),
         Pattern::As { name, inner } => format!("{name} @ {}", pretty_pattern(inner)),
+        Pattern::Nil => "[]".into(),
+        Pattern::Cons { head, tail, .. } => pretty_cons_pattern(head, tail),
         Pattern::Adt {
             enum_name,
             case_name,
@@ -605,6 +607,32 @@ fn pretty_pattern(pat: &Pattern) -> String {
             } else {
                 format!("{bare}.{case_name}({})", inner.join(", "))
             }
+        }
+    }
+}
+
+fn pretty_cons_pattern(head: &Pattern, tail: &Pattern) -> String {
+    if let Some(elems) = collect_nil_chain(head, tail) {
+        return format!("[{}]", elems.join(", "));
+    }
+    let h = match head {
+        Pattern::Or(_) | Pattern::Cons { .. } => format!("({})", pretty_pattern(head)),
+        _ => pretty_pattern(head),
+    };
+    format!("{h} :: {}", pretty_pattern(tail))
+}
+
+fn collect_nil_chain(head: &Pattern, tail: &Pattern) -> Option<Vec<String>> {
+    let mut elems = vec![pretty_pattern(head)];
+    let mut cur = tail;
+    loop {
+        match cur {
+            Pattern::Nil => return Some(elems),
+            Pattern::Cons { head, tail, .. } => {
+                elems.push(pretty_pattern(head));
+                cur = tail;
+            }
+            _ => return None,
         }
     }
 }
@@ -1169,6 +1197,39 @@ enum Opt[T]:
 "#;
         let out = format_source(src).unwrap();
         assert!(out.contains("  def getOrElse(default: T): T ="));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_list_patterns() {
+        let src = r#"
+def describe(xs: List[String]): String =
+  xs match {
+    case [] => "empty"
+    case x :: xs => x
+  }
+@main def main: IO[Unit] = IO.println(describe(["a"]))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("case [] =>"), "{out}");
+        assert!(out.contains("case x :: xs =>"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_list_literal_pattern() {
+        let src = r#"
+def isPair(xs: List[String]): String =
+  xs match {
+    case ["a", "b"] => "ab"
+    case _ => "no"
+  }
+@main def main: IO[Unit] = IO.println(isPair(["a"]))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("case [\"a\", \"b\"] =>"), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

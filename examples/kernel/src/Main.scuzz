@@ -272,7 +272,24 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"seglen:${Str.fromInt(List.segmentLength(["a", "a", "b"], x => x == "a", 0))}")
     _ <- IO.println(s"defat:${if (List.isDefinedAt(xs, 1)) "y" else "n"}")
     _ <- IO.println(s"lcmp:${Str.fromInt(List.lengthCompare(xs, 3))}")
+    _ <- IO.println(s"lpat:${describeList(["a", "b"])}")
+    _ <- IO.println(s"lpat0:${describeList([])}")
+    _ <- IO.println(s"lpat1:${describeList(["z"])}")
+    _ <- IO.println(s"lpati:${describeInts([1, 2])}")
   } yield ()
+
+def describeList(xs: List[String]): String =
+  xs match {
+    case [] => "empty"
+    case [x] => Str.concat("one:", x)
+    case x :: y :: _ => Str.concat("more:", Str.concat(x, y))
+  }
+
+def describeInts(xs: List[Int]): String =
+  xs match {
+    case [] => "none"
+    case n :: _ => Str.fromInt(n)
+  }
 
 def strProof(): IO[Unit] =
   for {

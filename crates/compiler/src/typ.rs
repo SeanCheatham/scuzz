@@ -4249,6 +4249,22 @@ fn bind_pattern(
             }
             Ok(bound)
         }
+        crate::ast::Pattern::Nil => {
+            list_elem(scrut)?;
+            Ok(Vec::new())
+        }
+        crate::ast::Pattern::Cons { head, tail, .. } => {
+            let elem = list_elem(scrut)?;
+            let mut restored = bind_pattern(head, &elem, enums, current_module, env)?;
+            restored.extend(bind_pattern(
+                tail,
+                &list_of(elem),
+                enums,
+                current_module,
+                env,
+            )?);
+            Ok(restored)
+        }
     }
 }
 
@@ -4354,12 +4370,17 @@ fn collect_bind_names(pat: &crate::ast::Pattern, out: &mut Vec<String>) {
                 collect_bind_names(b, out);
             }
         }
+        crate::ast::Pattern::Cons { head, tail, .. } => {
+            collect_bind_names(head, out);
+            collect_bind_names(tail, out);
+        }
         crate::ast::Pattern::Or(alts) => {
             if let Some(first) = alts.first() {
                 collect_bind_names(first, out);
             }
         }
         crate::ast::Pattern::Wildcard
+        | crate::ast::Pattern::Nil
         | crate::ast::Pattern::Int(_)
         | crate::ast::Pattern::Float(_)
         | crate::ast::Pattern::Bool(_)
@@ -4481,6 +4502,52 @@ fn uncovered_product(
                     } else {
                         missing.push(format!("{name}, {m}"));
                     }
+                }
+            }
+            Ok(missing)
+        }
+        Type::List(elem) => {
+            let mut missing = Vec::new();
+            let mut nil_spec: Vec<Vec<crate::ast::Pattern>> = Vec::new();
+            let mut cons_spec: Vec<Vec<crate::ast::Pattern>> = Vec::new();
+            for r in rows {
+                match r.first() {
+                    Some(p) if p.is_irrefutable() => {
+                        nil_spec.push(r.iter().skip(1).cloned().collect());
+                        let mut rest =
+                            vec![crate::ast::Pattern::Wildcard, crate::ast::Pattern::Wildcard];
+                        rest.extend(r.iter().skip(1).cloned());
+                        cons_spec.push(rest);
+                    }
+                    Some(crate::ast::Pattern::Nil) => {
+                        nil_spec.push(r.iter().skip(1).cloned().collect());
+                    }
+                    Some(crate::ast::Pattern::Cons { head, tail: tp, .. }) => {
+                        let mut rest = vec![(**head).clone(), (**tp).clone()];
+                        rest.extend(r.iter().skip(1).cloned());
+                        cons_spec.push(rest);
+                    }
+                    _ => {}
+                }
+            }
+            if nil_spec.is_empty() {
+                missing.push("[]".into());
+            } else {
+                for m in uncovered_product(tail, &nil_spec, enums, current_module)? {
+                    if tail.is_empty() {
+                        missing.push("[]".into());
+                    } else {
+                        missing.push(format!("[], {m}"));
+                    }
+                }
+            }
+            if cons_spec.is_empty() {
+                missing.push("_ :: _".into());
+            } else {
+                let mut nested = vec![(**elem).clone(), Type::List(elem.clone())];
+                nested.extend(tail.iter().cloned());
+                if !uncovered_product(&nested, &cons_spec, enums, current_module)?.is_empty() {
+                    missing.push("_ :: _".into());
                 }
             }
             Ok(missing)
@@ -4619,6 +4686,32 @@ fn elaborate_pattern(
                 case_name: case_name.clone(),
                 binds: out_binds,
                 type_args: targs,
+            })
+        }
+        crate::ast::Pattern::Nil => {
+            list_elem(scrut)?;
+            Ok(crate::ast::Pattern::Nil)
+        }
+        crate::ast::Pattern::Cons { head, tail, .. } => {
+            let elem = list_elem(scrut)?;
+            Ok(crate::ast::Pattern::Cons {
+                head: Box::new(elaborate_pattern(
+                    head,
+                    &elem,
+                    enums,
+                    current_module,
+                    tparams,
+                    span,
+                )?),
+                tail: Box::new(elaborate_pattern(
+                    tail,
+                    &list_of(elem.clone()),
+                    enums,
+                    current_module,
+                    tparams,
+                    span,
+                )?),
+                elem,
             })
         }
     }
@@ -6511,6 +6604,11 @@ fn subst_pattern(pat: crate::ast::Pattern, subst: &HashMap<String, Type>) -> cra
             name,
             inner: Box::new(subst_pattern(*inner, subst)),
         },
+        crate::ast::Pattern::Cons { head, tail, elem } => crate::ast::Pattern::Cons {
+            head: Box::new(subst_pattern(*head, subst)),
+            tail: Box::new(subst_pattern(*tail, subst)),
+            elem: apply_subst(&elem, subst),
+        },
         p => p,
     }
 }
@@ -6675,6 +6773,10 @@ fn collect_pattern_targs(pat: &crate::ast::Pattern, out: &mut Vec<(String, Vec<T
         }
     } else if let crate::ast::Pattern::As { inner, .. } = pat {
         collect_pattern_targs(inner, out);
+    } else if let crate::ast::Pattern::Cons { head, tail, elem } = pat {
+        collect_apps_in_type(elem, out);
+        collect_pattern_targs(head, out);
+        collect_pattern_targs(tail, out);
     }
 }
 
@@ -6901,6 +7003,11 @@ fn rewrite_pattern(
         crate::ast::Pattern::As { name, inner } => Ok(crate::ast::Pattern::As {
             name,
             inner: Box::new(rewrite_pattern(*inner, clones)?),
+        }),
+        crate::ast::Pattern::Cons { head, tail, elem } => Ok(crate::ast::Pattern::Cons {
+            head: Box::new(rewrite_pattern(*head, clones)?),
+            tail: Box::new(rewrite_pattern(*tail, clones)?),
+            elem: concretize_type(&elem, clones)?,
         }),
         p => Ok(p),
     }
@@ -7812,6 +7919,88 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("nested int literal plus wildcard payload is exhaustive");
+    }
+
+    #[test]
+    fn typechecks_list_nil_and_cons() {
+        let src = r#"
+def describe(xs: List[String]): String =
+  xs match {
+    case [] => "empty"
+    case x :: xs => x
+  }
+@main def main: IO[Unit] = IO.println(describe(["a"]))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("[] and cons cover List");
+    }
+
+    #[test]
+    fn typechecks_list_literal_pattern() {
+        let src = r#"
+def isPair(xs: List[String]): String =
+  xs match {
+    case ["a", "b"] => "ab"
+    case _ => "no"
+  }
+@main def main: IO[Unit] = IO.println(isPair(["a", "b"]))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("list lit plus wildcard covers List");
+    }
+
+    #[test]
+    fn rejects_list_match_missing_cons() {
+        let src = r#"
+def describe(xs: List[String]): String =
+  xs match {
+    case [] => "empty"
+  }
+@main def main: IO[Unit] = IO.println(describe([]))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("non-exhaustive match: missing _ :: _"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_list_match_missing_nil() {
+        let src = r#"
+def describe(xs: List[String]): String =
+  xs match {
+    case _ :: _ => "n"
+  }
+@main def main: IO[Unit] = IO.println(describe([]))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("non-exhaustive match: missing []"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_list_pattern_on_int() {
+        let src = r#"
+@main def main: IO[Unit] =
+  0 match {
+    case [] => IO.println("e")
+    case _ => IO.println("o")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(
+            err.contains("List") || err.contains("expected List"),
+            "{err}"
+        );
     }
 
     #[test]

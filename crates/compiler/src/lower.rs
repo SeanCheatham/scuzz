@@ -61,6 +61,12 @@ fn lower_pattern(pat: Pattern, enums: &EnumIndex<'_>, current_module: &str) -> P
             name,
             inner: Box::new(lower_pattern(*inner, enums, current_module)),
         },
+        Pattern::Nil => Pattern::Nil,
+        Pattern::Cons { head, tail, elem } => Pattern::Cons {
+            head: Box::new(lower_pattern(*head, enums, current_module)),
+            tail: Box::new(lower_pattern(*tail, enums, current_module)),
+            elem,
+        },
         Pattern::Adt {
             enum_name,
             case_name,

@@ -24,6 +24,7 @@ pub enum Token {
     True,
     False,
     Colon,
+    ColonColon, // `::` in `x :: xs`
     Eq,
     Dot,
     Comma,
@@ -158,6 +159,14 @@ pub fn lex(input: &str) -> Result<Vec<SpannedToken>, LexError> {
                 token: Token::StringLit(s),
                 span: Span::new(String::new(), byte_at(start), byte_at(i)),
             });
+            continue;
+        }
+        if c == ':' && i + 1 < chars.len() && chars[i + 1] == ':' {
+            tokens.push(SpannedToken {
+                token: Token::ColonColon,
+                span: Span::new(String::new(), byte_at(i), byte_at(i + 2)),
+            });
+            i += 2;
             continue;
         }
         if c == '=' && i + 1 < chars.len() && chars[i + 1] == '>' {

@@ -188,6 +188,7 @@ fn classify(
         | Token::Bang
         | Token::Arrow
         | Token::LeftArrow
+        | Token::ColonColon
         | Token::Dot
         | Token::Eq => Some((TY_OPERATOR, 0)),
         Token::Ident(name) => Some(classify_ident(name, prev, next)),

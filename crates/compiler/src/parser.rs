@@ -1574,16 +1574,30 @@ impl Parser {
     }
 
     fn parse_or_pattern(&mut self) -> Result<Pattern, ParseError> {
-        let first = self.parse_as_pattern()?;
+        let first = self.parse_cons_pattern()?;
         if !matches!(self.peek(), Token::Pipe) {
             return Ok(first);
         }
         let mut alts = vec![first];
         while matches!(self.peek(), Token::Pipe) {
             self.bump();
-            alts.push(self.parse_as_pattern()?);
+            alts.push(self.parse_cons_pattern()?);
         }
         Ok(Pattern::Or(alts))
+    }
+
+    fn parse_cons_pattern(&mut self) -> Result<Pattern, ParseError> {
+        let head = self.parse_as_pattern()?;
+        if !matches!(self.peek(), Token::ColonColon) {
+            return Ok(head);
+        }
+        self.bump();
+        let tail = self.parse_cons_pattern()?;
+        Ok(Pattern::Cons {
+            head: Box::new(head),
+            tail: Box::new(tail),
+            elem: Type::Opaque("Elem".into()),
+        })
     }
 
     fn parse_as_pattern(&mut self) -> Result<Pattern, ParseError> {
@@ -1599,8 +1613,38 @@ impl Parser {
         self.parse_pattern_atom()
     }
 
+    fn parse_list_pattern(&mut self) -> Result<Pattern, ParseError> {
+        self.bump();
+        if matches!(self.peek(), Token::RBracket) {
+            self.bump();
+            return Ok(Pattern::Nil);
+        }
+        let mut elems = Vec::new();
+        loop {
+            elems.push(self.parse_or_pattern()?);
+            if matches!(self.peek(), Token::Comma) {
+                self.bump();
+                if matches!(self.peek(), Token::RBracket) {
+                    break;
+                }
+                continue;
+            }
+            break;
+        }
+        self.expect(&Token::RBracket)?;
+        Ok(elems
+            .into_iter()
+            .rev()
+            .fold(Pattern::Nil, |tail, head| Pattern::Cons {
+                head: Box::new(head),
+                tail: Box::new(tail),
+                elem: Type::Opaque("Elem".into()),
+            }))
+    }
+
     fn parse_pattern_atom(&mut self) -> Result<Pattern, ParseError> {
         match self.peek().clone() {
+            Token::LBracket => self.parse_list_pattern(),
             Token::Underscore => {
                 self.bump();
                 Ok(Pattern::Wildcard)
@@ -3111,6 +3155,85 @@ enum Opt:
                     other => panic!("expected nested as, got {other:?}"),
                 },
                 other => panic!("expected Opt.Some(n @ 0), got {other:?}"),
+            },
+            other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_nil_and_cons_patterns() {
+        let src = r#"
+@main def main: IO[Unit] =
+  xs match {
+    case [] => IO.println("e")
+    case x :: xs => IO.println(x)
+  }
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => {
+                assert!(
+                    matches!(&arms[0].pattern, Pattern::Nil),
+                    "{:?}",
+                    arms[0].pattern
+                );
+                match &arms[1].pattern {
+                    Pattern::Cons { head, tail, .. } => {
+                        assert!(matches!(head.as_ref(), Pattern::Bind(n) if n == "x"));
+                        assert!(matches!(tail.as_ref(), Pattern::Bind(n) if n == "xs"));
+                    }
+                    other => panic!("expected cons, got {other:?}"),
+                }
+            }
+            other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_list_literal_pattern() {
+        let src = r#"
+@main def main: IO[Unit] =
+  xs match {
+    case ["a", "b"] => IO.println("ab")
+    case _ => IO.println("no")
+  }
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => match &arms[0].pattern {
+                Pattern::Cons { head, tail, .. } => {
+                    assert!(matches!(head.as_ref(), Pattern::Str(s) if s == "a"));
+                    match tail.as_ref() {
+                        Pattern::Cons { head, tail, .. } => {
+                            assert!(matches!(head.as_ref(), Pattern::Str(s) if s == "b"));
+                            assert!(matches!(tail.as_ref(), Pattern::Nil));
+                        }
+                        other => panic!("expected inner cons, got {other:?}"),
+                    }
+                }
+                other => panic!("expected list lit pat, got {other:?}"),
+            },
+            other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_as_wrapping_cons() {
+        let src = r#"
+@main def main: IO[Unit] =
+  xs match {
+    case ys @ _ :: _ => IO.println("n")
+    case [] => IO.println("e")
+  }
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => match &arms[0].pattern {
+                Pattern::As { name, inner } => {
+                    assert_eq!(name, "ys");
+                    assert!(matches!(inner.as_ref(), Pattern::Cons { .. }));
+                }
+                other => panic!("expected as-cons, got {other:?}"),
             },
             other => panic!("expected match, got {other:?}"),
         }

@@ -852,11 +852,16 @@ fn collect_pat_strings(pat: &Pattern, out: &mut Vec<String>) {
             }
         }
         Pattern::As { inner, .. } => collect_pat_strings(inner, out),
+        Pattern::Cons { head, tail, .. } => {
+            collect_pat_strings(head, out);
+            collect_pat_strings(tail, out);
+        }
         Pattern::Wildcard
         | Pattern::Bind(_)
         | Pattern::Int(_)
         | Pattern::Float(_)
-        | Pattern::Bool(_) => {}
+        | Pattern::Bool(_)
+        | Pattern::Nil => {}
     }
 }
 
@@ -1547,6 +1552,95 @@ fn emit_pat(
         }
         Pattern::Or(_) => {
             panic!("or-pattern must be flattened in lower before codegen")
+        }
+        Pattern::Nil => {
+            if kind != Kind::Ptr {
+                writeln!(pe.code, "  br label %{fail_label}").unwrap();
+                return;
+            }
+            let sid = *pe.ctx.cont_id;
+            *pe.ctx.cont_id += 1;
+            let empty = format!("{prefix}_ne{sid}");
+            let cmp = format!("{prefix}_nc{sid}");
+            writeln!(
+                pe.code,
+                "  %{empty} = call i32 @sz_list_is_empty(ptr {value})"
+            )
+            .unwrap();
+            writeln!(pe.code, "  %{cmp} = icmp ne i32 %{empty}, 0").unwrap();
+            writeln!(
+                pe.code,
+                "  br i1 %{cmp}, label %{ok_label}, label %{fail_label}"
+            )
+            .unwrap();
+        }
+        Pattern::Cons { head, tail, elem } => {
+            if kind != Kind::Ptr {
+                writeln!(pe.code, "  br label %{fail_label}").unwrap();
+                return;
+            }
+            let sid = *pe.ctx.cont_id;
+            *pe.ctx.cont_id += 1;
+            let empty = format!("{prefix}_ce{sid}");
+            let cmp = format!("{prefix}_cc{sid}");
+            let matched = format!("{prefix}_cm{sid}");
+            let next_ok = format!("{prefix}_cn{sid}");
+            writeln!(
+                pe.code,
+                "  %{empty} = call i32 @sz_list_is_empty(ptr {value})"
+            )
+            .unwrap();
+            writeln!(pe.code, "  %{cmp} = icmp eq i32 %{empty}, 0").unwrap();
+            writeln!(
+                pe.code,
+                "  br i1 %{cmp}, label %{matched}, label %{fail_label}"
+            )
+            .unwrap();
+            writeln!(pe.code, "{matched}:").unwrap();
+            let hptr = format!("{prefix}_ch{sid}");
+            let tptr = format!("{prefix}_ct{sid}");
+            writeln!(pe.code, "  %{hptr} = call ptr @sz_list_head(ptr {value})").unwrap();
+            writeln!(pe.code, "  %{tptr} = call ptr @sz_list_tail(ptr {value})").unwrap();
+            let (hval, hkind) = match elem {
+                Type::Int | Type::Bool => {
+                    let v = unbox_numeric(
+                        pe.code,
+                        Kind::Int,
+                        &format!("%{hptr}"),
+                        &format!("{prefix}_cu{sid}"),
+                    );
+                    (v, Kind::Int)
+                }
+                Type::Float => {
+                    let v = unbox_numeric(
+                        pe.code,
+                        Kind::Float,
+                        &format!("%{hptr}"),
+                        &format!("{prefix}_cu{sid}"),
+                    );
+                    (v, Kind::Float)
+                }
+                _ => (format!("%{hptr}"), Kind::Ptr),
+            };
+            emit_pat(
+                head,
+                &hval,
+                hkind,
+                &format!("{prefix}_chp{sid}"),
+                &next_ok,
+                fail_label,
+                pe,
+            );
+            writeln!(pe.code, "{next_ok}:").unwrap();
+            emit_pat(
+                tail,
+                &format!("%{tptr}"),
+                Kind::Ptr,
+                &format!("{prefix}_ctp{sid}"),
+                ok_label,
+                fail_label,
+                pe,
+            );
         }
     }
 }
@@ -6188,6 +6282,44 @@ enum Color { case Red, case Blue }
         assert!(
             ir.contains("sz_adt_tag") && ir.contains("_ok_"),
             "expected as-pattern to match the inner ADT:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_nil_cons_match() {
+        let src = r#"
+def describe(xs: List[String]): String =
+  xs match {
+    case [] => "empty"
+    case x :: _ => x
+  }
+@main def main: IO[Unit] = IO.println(describe(["a"]))
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_list_is_empty") && ir.contains("sz_list_head"),
+            "expected list match:\n{ir}"
+        );
+        assert!(
+            !ir.contains("call i64 @sz_unbox_i64"),
+            "String head must pass through:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_cons_unboxes_int_head() {
+        let src = r#"
+def describe(xs: List[Int]): String =
+  xs match {
+    case [] => "none"
+    case n :: _ => Str.fromInt(n)
+  }
+@main def main: IO[Unit] = IO.println(describe([1, 2]))
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_list_head") && ir.contains("call i64 @sz_unbox_i64"),
+            "Int head must unbox:\n{ir}"
         );
     }
 
