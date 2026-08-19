@@ -538,6 +538,18 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.transpose",
         "List.transpose(xss: List[List[T]]): List[List[T]]",
     ),
+    ("List.contains", "List.contains(xs: List[T], x: T): Bool"),
+    ("List.indexOf", "List.indexOf(xs: List[T], x: T): Int"),
+    (
+        "List.lastIndexOf",
+        "List.lastIndexOf(xs: List[T], x: T): Int",
+    ),
+    ("List.distinct", "List.distinct(xs: List[T]): List[T]"),
+    ("List.diff", "List.diff(xs: List[T], ys: List[T]): List[T]"),
+    (
+        "List.intersect",
+        "List.intersect(xs: List[T], ys: List[T]): List[T]",
+    ),
     (
         "List.forall",
         "List.forall(xs: List[T], pred: T => Bool): Bool",
@@ -1962,6 +1974,45 @@ mod tests {
         let h = hover_src(src, "transpose");
         assert!(
             h.contains("List.transpose(xss: List[List[T]]): List[List[T]]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (List.contains(["a", "b"], "b")) "y" else "n")
+"#;
+        let h = hover_src(src, "contains");
+        assert!(h.contains("List.contains(xs: List[T], x: T): Bool"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.indexOf(["a", "b"], "b")))
+"#;
+        let h = hover_src(src, "indexOf");
+        assert!(h.contains("List.indexOf(xs: List[T], x: T): Int"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.lastIndexOf(["a", "a"], "a")))
+"#;
+        let h = hover_src(src, "lastIndexOf");
+        assert!(
+            h.contains("List.lastIndexOf(xs: List[T], x: T): Int"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.distinct(["a", "a"]), ","))
+"#;
+        let h = hover_src(src, "distinct");
+        assert!(h.contains("List.distinct(xs: List[T]): List[T]"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.diff(["a", "b"], ["b"]), ","))
+"#;
+        let h = hover_src(src, "diff");
+        assert!(
+            h.contains("List.diff(xs: List[T], ys: List[T]): List[T]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.intersect(["a", "b"], ["b"]), ","))
+"#;
+        let h = hover_src(src, "intersect");
+        assert!(
+            h.contains("List.intersect(xs: List[T], ys: List[T]): List[T]"),
             "{h}"
         );
     }

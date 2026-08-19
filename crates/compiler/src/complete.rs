@@ -291,6 +291,12 @@ mod tests {
             ("List.zi", "List.zipAll"),
             ("List.un", "List.unzip"),
             ("List.tr", "List.transpose"),
+            ("List.con", "List.contains"),
+            ("List.ind", "List.indexOf"),
+            ("List.lastI", "List.lastIndexOf"),
+            ("List.di", "List.distinct"),
+            ("List.di", "List.diff"),
+            ("List.int", "List.intersect"),
             ("Color.rgb", "Color.rgb"),
             ("Color.rgb", "Color.rgba"),
         ] {

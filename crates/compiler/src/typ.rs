@@ -2144,6 +2144,27 @@ fn infer_call(
             let elem = list_elem(&inner)?;
             Ok(list_of(list_of(elem)))
         }
+        "List.contains" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            prefer_elem(&list_elem(&arg_tys[0])?, &arg_tys[1])?;
+            Ok(Type::Bool)
+        }
+        "List.indexOf" | "List.lastIndexOf" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            prefer_elem(&list_elem(&arg_tys[0])?, &arg_tys[1])?;
+            Ok(Type::Int)
+        }
+        "List.distinct" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            list_elem(&arg_tys[0])?;
+            Ok(arg_tys[0].clone())
+        }
+        "List.diff" | "List.intersect" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let a = list_elem(&arg_tys[0])?;
+            let b = list_elem(&arg_tys[1])?;
+            Ok(list_of(prefer_elem(&a, &b)?))
+        }
         "List.find" => {
             expect_arity(callee, &arg_tys, 2)?;
             let elem = list_elem(&arg_tys[0])?;
@@ -6321,6 +6342,23 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.zip/zipAll/unzip/transpose should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_contains_distinct_diff() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = ["a", "b", "a", "c"]
+    _ <- IO.println(if (List.contains(xs, "b")) "y" else "n")
+    _ <- IO.println(Str.fromInt(List.indexOf(xs, "a")))
+    _ <- IO.println(Str.fromInt(List.lastIndexOf(xs, "a")))
+    _ <- IO.println(List.join(List.distinct(xs), ","))
+    _ <- IO.println(List.join(List.diff(xs, ["a", "z"]), ","))
+    _ <- IO.println(List.join(List.intersect(xs, ["a", "z"]), ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.contains/indexOf/distinct/diff/intersect should typecheck");
     }
 
     #[test]

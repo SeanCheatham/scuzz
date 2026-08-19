@@ -184,6 +184,13 @@ jobs:
           grep -Fq "zipAll:a,1|b,9|c,9" /tmp/kernel.out
           grep -Fq "unzip:a,b|1,2" /tmp/kernel.out
           grep -Fq "tr:a,c|b,d" /tmp/kernel.out
+          grep -q "lhas:y" /tmp/kernel.out
+          grep -q "lix:1" /tmp/kernel.out
+          grep -q "llix:2" /tmp/kernel.out
+          grep -q "uniq:a,b,c" /tmp/kernel.out
+          grep -q "ldiff:b,c" /tmp/kernel.out
+          grep -q "lisect:a" /tmp/kernel.out
+          grep -q "nhas:y" /tmp/kernel.out
           grep -q "slen:3" /tmp/kernel.out
           grep -q "slice:bc" /tmp/kernel.out
           grep -q "ix:1" /tmp/kernel.out
