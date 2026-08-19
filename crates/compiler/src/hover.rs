@@ -913,7 +913,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Deferred.get(d: Deferred[String]): IO[String]",
     ),
     ("Str.concat", "Str.concat(a: String, b: String): String"),
-    ("List.cons", "List.cons(x: T, xs: List[T]): List[T]"),
+    (
+        "List.cons",
+        "List.cons(x: T, xs: List[T]): List[T]  (`x :: xs`)",
+    ),
     ("List.append", "List.append(xs: List[T], x: T): List[T]"),
     ("Map.empty", "Map.empty(): Map[K, V]"),
     ("Map.set", "Map.set(m: Map[K, V], k: K, v: V): Map[K, V]"),

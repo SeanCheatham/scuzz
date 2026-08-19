@@ -276,6 +276,10 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"lpat0:${describeList([])}")
     _ <- IO.println(s"lpat1:${describeList(["z"])}")
     _ <- IO.println(s"lpati:${describeInts([1, 2])}")
+    _ <- IO.println(s"cons:${List.join(consPair("a", "b"), ",")}")
+    _ <- IO.println(s"npat:${originX(Point(3, 5))}")
+    _ <- IO.println(s"npaty:${namedY(Point(3, 5))}")
+    _ <- IO.println(s"npatopt:${namedSome(Opt.Some(8))}")
   } yield ()
 
 def describeList(xs: List[String]): String =
@@ -290,6 +294,25 @@ def describeInts(xs: List[Int]): String =
     case [] => "none"
     case n :: _ => Str.fromInt(n)
   }
+
+def originX(p: Point): Int =
+  p match {
+    case Point(x = n) => n
+  }
+
+def namedY(p: Point): Int =
+  p match {
+    case Point(y = n) => n
+  }
+
+def namedSome(o: Opt[Int]): Int =
+  o match {
+    case Opt.Some(x = n) => n
+    case Opt.None => 0
+  }
+
+def consPair(a: String, b: String): List[String] =
+  a :: b :: List.empty()
 
 def strProof(): IO[Unit] =
   for {
@@ -361,7 +384,7 @@ record Box[T](x: T):
     p = Pair.Pair(7, "ok")
     flipped = flip(c)
     desc = describe(o)
-    xs = List.cons(Color.Blue, List.empty())
+    xs = Color.Blue :: List.empty()
     head = List.head(xs)
     _ <- c match {
   case Color.Red => IO.println("adt:red")
@@ -415,7 +438,7 @@ record Box[T](x: T):
   case 0 => IO.println("lit:hit0")
   case _ => IO.println("lit:miss0")
 }
-    packed = Pack.Of(List.cons("a", List.cons("b", List.empty())))
+    packed = Pack.Of("a" :: "b" :: List.empty())
     _ <- packed match {
   case Pack.Of(ys) => IO.println(Str.concat("adt:box:", List.join(ys, ",")))
   case Pack.Empty => IO.println("adt:box:empty")

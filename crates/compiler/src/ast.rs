@@ -705,6 +705,72 @@ pub enum Pattern {
         /// Element type. Parser leaves `Opaque("Elem")`. Elaborate fills it.
         elem: Type,
     },
+    /// `x = pat` in an ADT payload. Typecheck rewrites to positional.
+    Named { name: String, inner: Box<Pattern> },
+}
+
+/// Rewrite named ADT payload binds to positional field order.
+/// Omitted fields become `_`. When no bind is named, return `binds` unchanged.
+pub fn rewrite_named_payload(
+    ctor: &str,
+    binds: Vec<Pattern>,
+    field_names: &[String],
+) -> Result<Vec<Pattern>, String> {
+    let mut positional = Vec::new();
+    let mut named: Vec<(String, Pattern)> = Vec::new();
+    let mut seen_named = false;
+    for b in binds {
+        match b {
+            Pattern::Named { name, inner } => {
+                seen_named = true;
+                named.push((name, *inner));
+            }
+            _ if seen_named => {
+                return Err(format!(
+                    "{ctor}: positional pattern follows named field pattern"
+                ));
+            }
+            other => positional.push(other),
+        }
+    }
+    if named.is_empty() {
+        return Ok(positional);
+    }
+    if field_names.is_empty() {
+        return Err(format!("{ctor} is nullary; remove named field pattern"));
+    }
+    if positional.len() + named.len() > field_names.len() {
+        return Err(format!(
+            "{ctor} expects {} binder(s), got {}",
+            field_names.len(),
+            positional.len() + named.len()
+        ));
+    }
+    let mut used = std::collections::HashSet::new();
+    for name in field_names.iter().take(positional.len()) {
+        used.insert(name.clone());
+    }
+    let mut by_name = std::collections::HashMap::new();
+    for (name, pat) in named {
+        if !field_names.iter().any(|f| f == &name) {
+            return Err(format!("{ctor} has no field `{name}`"));
+        }
+        if !used.insert(name.clone()) {
+            return Err(format!("{ctor}: duplicate field `{name}`"));
+        }
+        by_name.insert(name, pat);
+    }
+    let mut out = Vec::with_capacity(field_names.len());
+    for (i, fname) in field_names.iter().enumerate() {
+        if i < positional.len() {
+            out.push(positional[i].clone());
+        } else if let Some(p) = by_name.remove(fname) {
+            out.push(p);
+        } else {
+            out.push(Pattern::Wildcard);
+        }
+    }
+    Ok(out)
 }
 
 impl Pattern {
@@ -713,7 +779,7 @@ impl Pattern {
     pub fn is_irrefutable(&self) -> bool {
         match self {
             Pattern::Wildcard | Pattern::Bind(_) => true,
-            Pattern::As { inner, .. } => inner.is_irrefutable(),
+            Pattern::As { inner, .. } | Pattern::Named { inner, .. } => inner.is_irrefutable(),
             Pattern::Or(alts) => alts.iter().any(|a| a.is_irrefutable()),
             _ => false,
         }
@@ -739,6 +805,10 @@ impl Pattern {
                 head: Box::new(head.strip_as()),
                 tail: Box::new(tail.strip_as()),
                 elem: elem.clone(),
+            },
+            Pattern::Named { name, inner } => Pattern::Named {
+                name: name.clone(),
+                inner: Box::new(inner.strip_as()),
             },
             other => other.clone(),
         }
@@ -789,6 +859,14 @@ impl Pattern {
                     })
                     .collect()
             }
+            Pattern::Named { name, inner } => inner
+                .flatten_or()
+                .into_iter()
+                .map(|p| Pattern::Named {
+                    name: name.clone(),
+                    inner: Box::new(p),
+                })
+                .collect(),
             other => vec![other.clone()],
         }
     }
