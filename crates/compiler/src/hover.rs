@@ -389,6 +389,19 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Signal.map(s: SignalInt, f: Int => String): SignalStr",
     ),
     ("Signal.list", "Signal.list(xs: List[T]): SignalList"),
+    ("Signal.getStr", "Signal.getStr(s: SignalStr): String"),
+    (
+        "Signal.setStr",
+        "Signal.setStr(s: SignalStr, v: String): Unit",
+    ),
+    (
+        "Signal.getList",
+        "Signal.getList(s: SignalList): List[String]",
+    ),
+    (
+        "Signal.setList",
+        "Signal.setList(s: SignalList, xs: List[String]): Unit",
+    ),
     ("List.empty", "List.empty(): List[T]"),
     ("List.isEmpty", "List.isEmpty(xs: List[T]): Bool"),
     ("List.nonEmpty", "List.nonEmpty(xs: List[T]): Bool"),
@@ -646,6 +659,44 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.each(items: SignalList, row: String => View): View",
     ),
     ("View.expanded", "View.expanded(child: View): View"),
+    (
+        "View.sized",
+        "View.sized(w: Int, h: Int, child: View): View",
+    ),
+    (
+        "View.align",
+        "View.align(ax: Int, ay: Int, child: View): View",
+    ),
+    (
+        "View.positioned",
+        "View.positioned(x: Int, y: Int, child: View): View",
+    ),
+    (
+        "View.aspectRatio",
+        "View.aspectRatio(rw: Int, rh: Int, child: View): View",
+    ),
+    (
+        "View.fraction",
+        "View.fraction(wpct: Int, hpct: Int, child: View): View",
+    ),
+    ("View.padding", "View.padding(n: Int, child: View): View"),
+    (
+        "View.background",
+        "View.background(color: Int, child: View): View",
+    ),
+    ("View.icon", "View.icon(code: Int, color: Int): View"),
+    (
+        "View.image",
+        "View.image(w: Int, h: Int, color: Int, caption: String): View",
+    ),
+    (
+        "View.showWhen",
+        "View.showWhen(sig: SignalInt, value: Int, child: View): View",
+    ),
+    (
+        "View.textField",
+        "View.textField(sig: SignalStr, hint: String): View",
+    ),
     ("View.stretch", "View.stretch(child: View): View"),
     ("View.clip", "View.clip(child: View): View"),
     ("View.opacity", "View.opacity(pct: Int, child: View): View"),
@@ -676,6 +727,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Color.rgba",
         "Color.rgba(r: Int, g: Int, b: Int, a: Int): Int",
     ),
+    ("Theme.accent", "Theme.accent(): Int"),
+    ("Theme.primary", "Theme.primary(): Int"),
+    ("Theme.muted", "Theme.muted(): Int"),
+    ("Theme.foreground", "Theme.foreground(): Int"),
     (
         "View.ignorePointer",
         "View.ignorePointer(child: View): View",
@@ -696,6 +751,14 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Law.sometimes", "Law.sometimes(name: String): Unit"),
     ("Law.force", "Law.force(inner: IO[Bool]): Bool"),
     ("Law.assert", "Law.assert(name: String, ok: Bool): IO[Unit]"),
+    ("Law.signalInt", "Law.signalInt(id: Int): Int"),
+    ("Law.signalStr", "Law.signalStr(id: Int): String"),
+    ("Law.signalListLen", "Law.signalListLen(id: Int): Int"),
+    (
+        "Law.signalListAt",
+        "Law.signalListAt(id: Int, i: Int): String",
+    ),
+    ("Law.a11yHas", "Law.a11yHas(needle: String): Bool"),
     ("Ref.of", "Ref.of(s: String): IO[Ref[String]]"),
     ("Ref.get", "Ref.get(r: Ref[String]): IO[String]"),
     ("Ref.set", "Ref.set(r: Ref[String], s: String): IO[Unit]"),
@@ -764,15 +827,34 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ),
     ("Fs.read", "Fs.read(path: String): IO[String]"),
     ("Fs.write", "Fs.write(path: String, body: String): IO[Unit]"),
-    ("Sys.args", "Sys.args(): IO[List]"),
+    ("Fs.list", "Fs.list(path: String): IO[List[String]]"),
+    ("Fs.mkdirs", "Fs.mkdirs(path: String): IO[Unit]"),
+    (
+        "Fs.canonicalize",
+        "Fs.canonicalize(path: String): IO[String]",
+    ),
+    ("Sys.args", "Sys.args(): IO[List[String]]"),
     ("Sys.readLine", "Sys.readLine(): IO[String]"),
+    ("Sys.read", "Sys.read(n: Int): IO[String]"),
+    ("Sys.write", "Sys.write(s: String): IO[Unit]"),
+    ("Sys.exec", "Sys.exec(cmd: String): IO[Int]"),
+    ("Sys.spawn", "Sys.spawn(cmd: String): IO[Int]"),
+    ("Sys.alive", "Sys.alive(pid: Int): IO[Int]"),
+    ("Sys.kill", "Sys.kill(pid: Int): IO[Unit]"),
+    ("Sys.getenv", "Sys.getenv(name: String): IO[String]"),
     ("Clock.realTime", "Clock.realTime(): IO[Int]"),
     ("Clock.monotonic", "Clock.monotonic(): IO[Int]"),
+    ("Random.nextInt", "Random.nextInt(bound: Int): IO[Int]"),
     ("Net.httpGet", "Net.httpGet(url: String): IO[String]"),
+    (
+        "Net.serveOnce",
+        "Net.serveOnce(port: Int, handle: String => IO[Unit]): IO[Unit]",
+    ),
     (
         "Net.serve",
         "Net.serve(port: Int, handle: String => IO[Unit]): IO[Unit]",
     ),
+    ("Impurity.runKit", "Impurity.runKit(): IO[Unit]"),
     (
         "Resource.make",
         "Resource.make(acquire: IO[String], release: String => IO[Unit]): Resource[String]",
@@ -782,6 +864,52 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Resource.use(r: Resource[String], f: String => IO[T]): IO[T]",
     ),
     ("Stream.emit", "Stream.emit(s: String): Stream[String]"),
+    (
+        "Stream.emits",
+        "Stream.emits(xs: List[String]): Stream[String]",
+    ),
+    ("Stream.eval", "Stream.eval(io: IO[String]): Stream[String]"),
+    (
+        "Stream.concat",
+        "Stream.concat(a: Stream[String], b: Stream[String]): Stream[String]",
+    ),
+    (
+        "Stream.map",
+        "Stream.map(s: Stream[String], f: String => String): Stream[String]",
+    ),
+    (
+        "Stream.evalMap",
+        "Stream.evalMap(s: Stream[String], f: String => IO[String]): Stream[String]",
+    ),
+    (
+        "Stream.filter",
+        "Stream.filter(s: Stream[String], pred: String => Bool): Stream[String]",
+    ),
+    (
+        "Stream.take",
+        "Stream.take(s: Stream[String], n: Int): Stream[String]",
+    ),
+    (
+        "Stream.takeWhile",
+        "Stream.takeWhile(s: Stream[String], pred: String => Bool): Stream[String]",
+    ),
+    (
+        "Stream.drop",
+        "Stream.drop(s: Stream[String], n: Int): Stream[String]",
+    ),
+    (
+        "Stream.dropWhile",
+        "Stream.dropWhile(s: Stream[String], pred: String => Bool): Stream[String]",
+    ),
+    (
+        "Stream.find",
+        "Stream.find(s: Stream[String], pred: String => Bool): Stream[String]",
+    ),
+    (
+        "Stream.exists",
+        "Stream.exists(s: Stream[String], pred: String => Bool): IO[Bool]",
+    ),
+    ("Stream.drain", "Stream.drain(s: Stream[String]): IO[Unit]"),
     (
         "Stream.compileToList",
         "Stream.compileToList(s: Stream[String]): IO[List[String]]",
@@ -798,6 +926,11 @@ const TYPED_KIT_CALLEES: &[&str] = &[
     "Str.eq",
     "List.isEmpty",
     "Law.force",
+    "Law.signalInt",
+    "Law.signalStr",
+    "Law.signalListLen",
+    "Law.signalListAt",
+    "Law.a11yHas",
     "Fiber.fork",
     "Fiber.join",
     "Ref.of",
@@ -805,9 +938,54 @@ const TYPED_KIT_CALLEES: &[&str] = &[
     "Deferred.empty",
     "Resource.make",
     "Stream.emit",
+    "Stream.emits",
+    "Stream.eval",
+    "Stream.concat",
+    "Stream.map",
+    "Stream.evalMap",
+    "Stream.filter",
+    "Stream.take",
+    "Stream.takeWhile",
+    "Stream.drop",
+    "Stream.dropWhile",
+    "Stream.find",
+    "Stream.exists",
+    "Stream.drain",
     "View.bindText",
+    "View.sized",
+    "View.align",
+    "View.positioned",
+    "View.aspectRatio",
+    "View.fraction",
+    "View.padding",
+    "View.background",
+    "View.icon",
+    "View.image",
+    "View.showWhen",
+    "View.textField",
     "Signal.get",
     "Signal.str",
+    "Signal.getStr",
+    "Signal.setStr",
+    "Signal.getList",
+    "Signal.setList",
+    "Theme.accent",
+    "Theme.primary",
+    "Theme.muted",
+    "Theme.foreground",
+    "Fs.list",
+    "Fs.mkdirs",
+    "Fs.canonicalize",
+    "Sys.read",
+    "Sys.write",
+    "Sys.exec",
+    "Sys.spawn",
+    "Sys.alive",
+    "Sys.kill",
+    "Sys.getenv",
+    "Random.nextInt",
+    "Net.serveOnce",
+    "Impurity.runKit",
 ];
 
 #[cfg(test)]
@@ -903,6 +1081,109 @@ mod tests {
         for (callee, call) in calls {
             let needle = callee.rsplit('.').next().unwrap();
             let src = format!("@main def main: IO[Unit] =\n  Ui.run(_ => {call})\n");
+            let h = hover_src(&src, needle);
+            let sig = kit_sig(callee).expect(callee);
+            assert!(h.contains(sig), "{callee}: {h}");
+        }
+    }
+
+    #[test]
+    fn hovers_added_kit_sigs() {
+        let view_calls = [
+            ("View.sized", "View.sized(40, 30, View.text(\"x\"))"),
+            ("View.align", "View.align(0, 1, View.text(\"x\"))"),
+            ("View.positioned", "View.positioned(4, 8, View.text(\"x\"))"),
+            (
+                "View.aspectRatio",
+                "View.aspectRatio(16, 9, View.text(\"x\"))",
+            ),
+            ("View.fraction", "View.fraction(50, 0, View.text(\"x\"))"),
+            ("View.padding", "View.padding(8, View.text(\"x\"))"),
+            (
+                "View.background",
+                "View.background(Color.rgb(1, 2, 3), View.text(\"x\"))",
+            ),
+            ("View.icon", "View.icon(43, Theme.accent())"),
+            (
+                "View.image",
+                "View.image(24, 24, Color.rgb(1, 2, 3), \"a\")",
+            ),
+            (
+                "View.textField",
+                "View.textField(Signal.str(\"\"), \"hint\")",
+            ),
+        ];
+        for (callee, call) in view_calls {
+            let needle = callee.rsplit('.').next().unwrap();
+            let src = format!("@main def main: IO[Unit] =\n  Ui.run(_ => {call})\n");
+            let h = hover_src(&src, needle);
+            let sig = kit_sig(callee).expect(callee);
+            assert!(h.contains(sig), "{callee}: {h}");
+        }
+        let plain_calls = [
+            ("Theme.primary", "Theme.primary()"),
+            ("Theme.muted", "Theme.muted()"),
+            ("Theme.foreground", "Theme.foreground()"),
+            ("Fs.list", "Fs.list(\".\")"),
+            ("Fs.mkdirs", "Fs.mkdirs(\"a\")"),
+            ("Fs.canonicalize", "Fs.canonicalize(\".\")"),
+            ("Sys.read", "Sys.read(4)"),
+            ("Sys.write", "Sys.write(\"x\")"),
+            ("Sys.exec", "Sys.exec(\"ls\")"),
+            ("Sys.spawn", "Sys.spawn(\"ls\")"),
+            ("Sys.alive", "Sys.alive(1)"),
+            ("Sys.kill", "Sys.kill(1)"),
+            ("Sys.getenv", "Sys.getenv(\"HOME\")"),
+            ("Random.nextInt", "Random.nextInt(10)"),
+            ("Net.serveOnce", "Net.serveOnce(8080, s => IO.println(s))"),
+            ("Impurity.runKit", "Impurity.runKit()"),
+            ("Signal.getStr", "Signal.getStr(Signal.str(\"x\"))"),
+            ("Signal.setStr", "Signal.setStr(Signal.str(\"x\"), \"y\")"),
+            ("Signal.getList", "Signal.getList(Signal.list([\"a\"]))"),
+            (
+                "Signal.setList",
+                "Signal.setList(Signal.list([\"a\"]), [\"b\"])",
+            ),
+            ("Law.signalInt", "Law.signalInt(0)"),
+            ("Law.signalStr", "Law.signalStr(0)"),
+            ("Law.signalListLen", "Law.signalListLen(0)"),
+            ("Law.signalListAt", "Law.signalListAt(0, 0)"),
+            ("Law.a11yHas", "Law.a11yHas(\"x\")"),
+            ("Stream.emits", "Stream.emits([\"a\"])"),
+            ("Stream.eval", "Stream.eval(IO.pure(\"a\"))"),
+            (
+                "Stream.concat",
+                "Stream.concat(Stream.emit(\"a\"), Stream.emit(\"b\"))",
+            ),
+            ("Stream.map", "Stream.map(Stream.emit(\"a\"), s => s)"),
+            (
+                "Stream.evalMap",
+                "Stream.evalMap(Stream.emit(\"a\"), s => IO.pure(s))",
+            ),
+            (
+                "Stream.filter",
+                "Stream.filter(Stream.emit(\"a\"), s => true)",
+            ),
+            ("Stream.take", "Stream.take(Stream.emit(\"a\"), 1)"),
+            (
+                "Stream.takeWhile",
+                "Stream.takeWhile(Stream.emit(\"a\"), s => true)",
+            ),
+            ("Stream.drop", "Stream.drop(Stream.emit(\"a\"), 1)"),
+            (
+                "Stream.dropWhile",
+                "Stream.dropWhile(Stream.emit(\"a\"), s => true)",
+            ),
+            ("Stream.find", "Stream.find(Stream.emit(\"a\"), s => true)"),
+            (
+                "Stream.exists",
+                "Stream.exists(Stream.emit(\"a\"), s => true)",
+            ),
+            ("Stream.drain", "Stream.drain(Stream.emit(\"a\"))"),
+        ];
+        for (callee, call) in plain_calls {
+            let needle = callee.rsplit('.').next().unwrap();
+            let src = format!("@main def main: IO[Unit] = {call}\n");
             let h = hover_src(&src, needle);
             let sig = kit_sig(callee).expect(callee);
             assert!(h.contains(sig), "{callee}: {h}");
