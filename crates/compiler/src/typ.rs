@@ -8367,6 +8367,41 @@ enum Opt:
     }
 
     #[test]
+    fn typechecks_structural_eq_on_list_adt_map() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  for {
+    xs = ["a", "b"]
+    mp = Map.set(Map.set(Map.empty(), "a", "1"), "b", "2")
+    mp2 = Map.set(Map.set(Map.empty(), "b", "2"), "a", "1")
+    _ <- IO.println(if (xs == ["a", "b"] && xs != ["a"]) "y" else "n")
+    _ <- IO.println(if (Color.Red == Color.Red && Color.Red != Color.Blue) "y" else "n")
+    _ <- IO.println(if (mp == mp2) "y" else "n")
+    _ <- IO.println(if ("ab" == "ab") "y" else "n")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("structural == on list/adt/map should typecheck");
+    }
+
+    #[test]
+    fn rejects_list_eq_int() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (["a"] == 1) "y" else "n")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("comparison type mismatch"),
+            "expected mismatch, got {}",
+            err.message()
+        );
+    }
+
+    #[test]
     fn typechecks_str_contains_ends_toint_replace() {
         let src = r#"@main def main: IO[Unit] =
   for {
