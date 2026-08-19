@@ -18,6 +18,7 @@ void sz_free(void *ptr);
  * streams, resources, errors, Ref / Queue / Deferred, Either, pair). List cells retain heads and shared tails. IO
  * constructors take child IO nodes. Non-RC sz_alloc pointers no-op. */
 enum {
+  SZ_RC_RAW = 0,
   SZ_RC_STRING = 1,
   SZ_RC_LIST = 2,
   SZ_RC_ADT = 3,
@@ -31,17 +32,30 @@ enum {
   SZ_RC_QUEUE = 11,
   SZ_RC_DEFERRED = 12,
   SZ_RC_EITHER = 13,
-  SZ_RC_PAIR = 14
+  SZ_RC_PAIR = 14,
+  SZ_RC_KIND_COUNT = 15
 };
 void *sz_rc_alloc(size_t size, uint32_t kind);
 void sz_retain(void *ptr);
 void sz_release(void *ptr);
 /* Live heap through sz_alloc/sz_free (user bytes; excludes size header). */
 void sz_alloc_stats(size_t *live_bytes, size_t *live_count);
+/* Live bytes and count for one kind (`SZ_RC_RAW` … `SZ_RC_PAIR`). */
+void sz_alloc_kind_stats(uint32_t kind, size_t *bytes, size_t *count);
+/* Dump key for `kind` (`raw`, `string`, …). Unknown kinds use `raw`. */
+const char *sz_alloc_kind_name(uint32_t kind);
 /* High-water live_bytes since process start or the last reset. */
 size_t sz_alloc_peak_bytes(void);
 /* Reset peak / pump-sample counter; live stays accurate for outstanding allocs. */
 void sz_alloc_reset_stats(void);
+/* Snapshot live totals so the next census reports delta from this point. */
+void sz_alloc_mark(void);
+/* live minus the last mark (may be negative). */
+void sz_alloc_delta(int64_t *bytes, int64_t *count);
+/* Write census lines (`live_bytes=…` through kind `name=count:bytes`).
+ * `mark` 1 snapshots live after the write. Truncates to `cap`. Returns
+ * bytes written, not counting the NUL. */
+int sz_alloc_format_heap(char *buf, size_t cap, int mark);
 /* Optional SCUZZ_ALLOC_TRACE=1 sample from sz_ui_pump_sync (every N pumps). */
 void sz_alloc_trace_on_pump(void);
 

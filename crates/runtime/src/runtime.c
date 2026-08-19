@@ -5,6 +5,7 @@
 #include <stdint.h>
 #include <poll.h>
 #include <pthread.h>
+#include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -116,8 +117,76 @@ static int sz_is_alloc(const void *ptr) {
 static size_t g_live_bytes = 0;
 static size_t g_live_count = 0;
 static size_t g_peak_bytes = 0;
+static size_t g_mark_bytes = 0;
+static size_t g_mark_count = 0;
+static size_t g_kind_bytes[SZ_RC_KIND_COUNT];
+static size_t g_kind_count[SZ_RC_KIND_COUNT];
 static unsigned g_trace_pumps = 0;
 enum { SZ_ALLOC_TRACE_EVERY = 32 };
+
+static const char *k_kind_names[SZ_RC_KIND_COUNT] = {
+    "raw",      "string", "list",     "adt",      "box",  "map",
+    "io",       "stream", "resource", "error",    "ref",  "queue",
+    "deferred", "either", "pair"};
+
+static uint32_t kind_idx(uint32_t kind) {
+  return kind < SZ_RC_KIND_COUNT ? kind : (uint32_t)SZ_RC_RAW;
+}
+
+static void kind_add(uint32_t kind, size_t n) {
+  uint32_t i = kind_idx(kind);
+  g_kind_bytes[i] += n;
+  g_kind_count[i] += 1;
+}
+
+static void kind_sub(uint32_t kind, size_t n) {
+  uint32_t i = kind_idx(kind);
+  if (g_kind_count[i] > 0)
+    g_kind_count[i] -= 1;
+  if (g_kind_bytes[i] >= n)
+    g_kind_bytes[i] -= n;
+  else
+    g_kind_bytes[i] = 0;
+}
+
+static void heap_append(char *buf, size_t cap, size_t *n, const char *fmt, ...) {
+  va_list ap;
+  int w;
+  if (!buf || cap == 0 || *n >= cap)
+    return;
+  va_start(ap, fmt);
+  w = vsnprintf(buf + *n, cap - *n, fmt, ap);
+  va_end(ap);
+  if (w < 0)
+    return;
+  if ((size_t)w >= cap - *n)
+    *n = cap - 1;
+  else
+    *n += (size_t)w;
+}
+
+static void *alloc_block(size_t size, int zero, uint32_t magic, uint32_t kind) {
+  size_t *raw;
+  SzRcHdr *h;
+  if (zero)
+    raw = (size_t *)calloc(1, sizeof(size_t) + sizeof(SzRcHdr) + size);
+  else
+    raw = (size_t *)malloc(sizeof(size_t) + sizeof(SzRcHdr) + size);
+  if (!raw)
+    sz_panic("out of memory");
+  *raw = size;
+  h = (SzRcHdr *)(raw + 1);
+  h->magic = magic;
+  h->rc = (magic == SZ_RC_MAGIC) ? 1 : 0;
+  h->kind = kind;
+  h->pad = 0;
+  g_live_bytes += size;
+  g_live_count += 1;
+  kind_add(kind, size);
+  if (g_live_bytes > g_peak_bytes)
+    g_peak_bytes = g_live_bytes;
+  return (void *)(h + 1);
+}
 
 void sz_panic(const char *msg) {
   fprintf(stderr, "scuzz panic: %s\n", msg ? msg : "(null)");
@@ -126,38 +195,11 @@ void sz_panic(const char *msg) {
 }
 
 void *sz_alloc(size_t size) {
-  size_t *raw =
-      (size_t *)malloc(sizeof(size_t) + sizeof(SzRcHdr) + size);
-  SzRcHdr *h;
-  if (!raw)
-    sz_panic("out of memory");
-  *raw = size;
-  h = (SzRcHdr *)(raw + 1);
-  h->magic = SZ_ALLOC_MAGIC;
-  h->rc = 0;
-  h->kind = 0;
-  h->pad = 0;
-  g_live_bytes += size;
-  g_live_count += 1;
-  if (g_live_bytes > g_peak_bytes)
-    g_peak_bytes = g_live_bytes;
-  return (void *)(h + 1);
+  return alloc_block(size, 0, SZ_ALLOC_MAGIC, SZ_RC_RAW);
 }
 
 void *sz_alloc_zero(size_t size) {
-  size_t *raw =
-      (size_t *)calloc(1, sizeof(size_t) + sizeof(SzRcHdr) + size);
-  SzRcHdr *h;
-  if (!raw)
-    sz_panic("out of memory");
-  *raw = size;
-  h = (SzRcHdr *)(raw + 1);
-  h->magic = SZ_ALLOC_MAGIC;
-  g_live_bytes += size;
-  g_live_count += 1;
-  if (g_live_bytes > g_peak_bytes)
-    g_peak_bytes = g_live_bytes;
-  return (void *)(h + 1);
+  return alloc_block(size, 1, SZ_ALLOC_MAGIC, SZ_RC_RAW);
 }
 
 void sz_free(void *ptr) {
@@ -169,6 +211,7 @@ void sz_free(void *ptr) {
   h = ((SzRcHdr *)ptr) - 1;
   raw = ((size_t *)h) - 1;
   n = *raw;
+  kind_sub(h->kind, n);
   if (g_live_count > 0)
     g_live_count -= 1;
   if (g_live_bytes >= n)
@@ -185,11 +228,56 @@ void sz_alloc_stats(size_t *live_bytes, size_t *live_count) {
     *live_count = g_live_count;
 }
 
+void sz_alloc_kind_stats(uint32_t kind, size_t *bytes, size_t *count) {
+  uint32_t i = kind_idx(kind);
+  if (bytes)
+    *bytes = g_kind_bytes[i];
+  if (count)
+    *count = g_kind_count[i];
+}
+
+const char *sz_alloc_kind_name(uint32_t kind) {
+  return k_kind_names[kind_idx(kind)];
+}
+
 size_t sz_alloc_peak_bytes(void) { return g_peak_bytes; }
 
 void sz_alloc_reset_stats(void) {
   g_peak_bytes = g_live_bytes;
   g_trace_pumps = 0;
+}
+
+void sz_alloc_mark(void) {
+  g_mark_bytes = g_live_bytes;
+  g_mark_count = g_live_count;
+}
+
+void sz_alloc_delta(int64_t *bytes, int64_t *count) {
+  if (bytes)
+    *bytes = (int64_t)g_live_bytes - (int64_t)g_mark_bytes;
+  if (count)
+    *count = (int64_t)g_live_count - (int64_t)g_mark_count;
+}
+
+int sz_alloc_format_heap(char *buf, size_t cap, int mark) {
+  int64_t db = 0, dc = 0;
+  size_t n = 0;
+  int i;
+  if (!buf || cap == 0)
+    return 0;
+  buf[0] = '\0';
+  sz_alloc_delta(&db, &dc);
+  heap_append(buf, cap, &n,
+              "live_bytes=%zu\nlive_count=%zu\npeak_bytes=%zu\n"
+              "delta_bytes=%lld\ndelta_count=%lld\n",
+              g_live_bytes, g_live_count, g_peak_bytes, (long long)db,
+              (long long)dc);
+  for (i = 0; i < SZ_RC_KIND_COUNT; i++)
+    heap_append(buf, cap, &n, "%s=%zu:%zu\n", k_kind_names[i],
+                g_kind_count[i], g_kind_bytes[i]);
+  if (mark)
+    sz_alloc_mark();
+  return (int)n;
 }
 
 void sz_alloc_trace_on_pump(void) {
@@ -218,12 +306,7 @@ static void delay_env_drop(void *env) {
 }
 
 void *sz_rc_alloc(size_t size, uint32_t kind) {
-  void *p = sz_alloc(size);
-  SzRcHdr *h = sz_rc_hdr(p);
-  h->magic = SZ_RC_MAGIC;
-  h->rc = 1;
-  h->kind = kind;
-  return p;
+  return alloc_block(size, 0, SZ_RC_MAGIC, kind);
 }
 
 void sz_retain(void *ptr) {
