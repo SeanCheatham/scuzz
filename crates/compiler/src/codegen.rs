@@ -533,6 +533,23 @@ fn drop_owned_ptr(code: &mut String, e: &Emitted) {
     }
 }
 
+/// Drop a leftover after a consume that does not keep the pointer.
+fn drop_run_result(code: &mut String, value: &str) {
+    writeln!(code, "  call void @sz_release(ptr {value})").unwrap();
+}
+
+/// Keep `src`'s value and last-use flag, with new IR prefix `code`.
+fn keep_emitted(code: String, src: &Emitted) -> Emitted {
+    Emitted {
+        code,
+        value: src.value.clone(),
+        kind: src.kind,
+        payload: src.payload,
+        payload_owned: src.payload_owned,
+        owned: src.owned,
+    }
+}
+
 /// Drop a discarded owned ptr, or any IO node that never runs.
 fn drop_discarded(code: &mut String, kind: Kind, value: &str, owned: bool) {
     if owned && kind == Kind::Ptr {
@@ -2376,6 +2393,9 @@ fn emit_lambda(
             body_emitted.value
         )
         .unwrap();
+        drop_run_result(ctx.conts, &format!("%t{id}_ur"));
+    } else {
+        drop_owned_ptr(ctx.conts, &body_emitted);
     }
     writeln!(ctx.conts, "  ret void").unwrap();
     writeln!(ctx.conts, "}}").unwrap();
@@ -5045,7 +5065,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "Law.signalListLen" => {
             writeln!(
@@ -5063,7 +5083,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
-            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "Law.a11yHas" => {
             writeln!(
@@ -5072,6 +5092,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Law.assert" => {
@@ -5081,6 +5102,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Law.check" => {
@@ -5090,10 +5112,11 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
-            val_emitted(code, emitted_args[2].value.clone(), emitted_args[2].kind)
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            keep_emitted(code, &emitted_args[2])
         }
         "Law.force" => {
-            // IO[Bool/Int] → Int with unsafe_run + unbox (verify residual only).
+            // IO[Bool] → Int with unsafe_run + unbox (verify residual only).
             writeln!(
                 code,
                 "  %{prefix}_fr = call ptr @sz_io_unsafe_run_or_die(ptr {})",
@@ -5105,6 +5128,7 @@ fn emit_call(
                 "  %{prefix}_v = call i64 @sz_unbox_i64(ptr %{prefix}_fr)"
             )
             .unwrap();
+            drop_run_result(&mut code, &format!("%{prefix}_fr"));
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "Law.sometimes" => {
@@ -5114,6 +5138,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, "null".into(), Kind::Ptr)
         }
         "View.text" => {
@@ -5785,6 +5810,18 @@ mod tests {
             ir.contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of {what} {name}:\n{ir}"
         );
+    }
+
+    fn first_ptr_arg<'a>(ir: &'a str, needle: &str) -> (usize, &'a str) {
+        let at = ir
+            .find(needle)
+            .unwrap_or_else(|| panic!("missing {needle}:\n{ir}"));
+        let name = ir[at + needle.len()..]
+            .split([',', ')'])
+            .next()
+            .unwrap()
+            .trim();
+        (at, name)
     }
 
     fn cstr_string_temps(ir: &str) -> Vec<&str> {
@@ -9251,6 +9288,173 @@ law always: Bool = 1 == 1
     }
 
     #[test]
+    fn emit_law_check_drops_name_keeps_value() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] = IO.println(Law.check("n", true, "x"))
+"#,
+        );
+        let (at, name) = first_ptr_arg(&ir, "call void @sz_law_check(ptr ");
+        assert_release_after(&ir, at, name, "Law.check name");
+        let (print_at, value) = first_ptr_arg(&ir, "call ptr @sz_io_println(ptr ");
+        assert_ne!(
+            value, name,
+            "println must use the check value, not the name:\n{ir}"
+        );
+        assert_release_after(&ir, print_at, value, "Law.check value");
+    }
+
+    #[test]
+    fn emit_law_check_int_value_still_drops_name() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] = IO.println(Str.fromInt(Law.check("n", true, 3)))
+"#,
+        );
+        let (at, name) = first_ptr_arg(&ir, "call void @sz_law_check(ptr ");
+        assert_release_after(&ir, at, name, "Law.check name");
+    }
+
+    #[test]
+    fn emit_law_check_list_value_dropped_after_len() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.len(Law.check("n", true, [1, 2]))))
+"#,
+        );
+        let (at, name) = first_ptr_arg(&ir, "call void @sz_law_check(ptr ");
+        assert_release_after(&ir, at, name, "Law.check name");
+        let needle = "call i64 @sz_list_len(ptr ";
+        let len_at = ir.find(needle).expect("expected sz_list_len");
+        let list = ir[len_at + needle.len()..]
+            .split(')')
+            .next()
+            .unwrap()
+            .trim();
+        assert_release_after(&ir, len_at, list, "Law.check list value");
+    }
+
+    #[test]
+    fn emit_law_check_record_value_dropped_after_field() {
+        let ir = emit_full(
+            r#"
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Law.check("n", true, Point(1, 2)).x))
+"#,
+        );
+        let (at, name) = first_ptr_arg(&ir, "call void @sz_law_check(ptr ");
+        assert_release_after(&ir, at, name, "Law.check name");
+        let temps = adt_temps(&ir);
+        assert!(!temps.is_empty(), "expected Point temp:\n{ir}");
+        for t in &temps {
+            assert_released(&ir, t, "Law.check record value");
+        }
+    }
+
+    #[test]
+    fn emit_require_drops_law_name_string() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] =
+  IO.println("x".require("nonEmpty", s => Str.len(s) > 0))
+"#,
+        );
+        let (at, name) = first_ptr_arg(&ir, "call void @sz_law_check(ptr ");
+        assert_release_after(&ir, at, name, ".require name");
+        let temps = cstr_string_temps(&ir);
+        assert!(temps.len() >= 2, "expected name and value strings:\n{ir}");
+        for t in &temps {
+            assert_released(&ir, t, ".require string");
+        }
+    }
+
+    #[test]
+    fn emit_law_assert_drops_name() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] = Law.assert("ok", true)
+"#,
+        );
+        let (at, name) = first_ptr_arg(&ir, "call ptr @sz_law_assert(ptr ");
+        assert_release_after(&ir, at, name, "Law.assert name");
+    }
+
+    #[test]
+    fn emit_law_sometimes_drops_name() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] =
+  for {
+    _ = Law.sometimes("hit")
+    _ <- IO.println("ok")
+  } yield ()
+"#,
+        );
+        let (at, name) = first_ptr_arg(&ir, "call void @sz_law_sometimes(ptr ");
+        assert_release_after(&ir, at, name, "Law.sometimes name");
+    }
+
+    #[test]
+    fn emit_law_a11y_has_drops_needle() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(if (Law.a11yHas("btn")) 1 else 0))
+"#,
+        );
+        let (at, name) = first_ptr_arg(&ir, "call i64 @sz_law_a11y_has(ptr ");
+        assert_release_after(&ir, at, name, "Law.a11yHas needle");
+    }
+
+    #[test]
+    fn emit_law_force_drops_unbox_box() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(if (Law.force(IO.pure(true))) 1 else 0))
+"#,
+        );
+        let needle = " = call ptr @sz_io_unsafe_run_or_die(ptr ";
+        let at = ir.find(needle).expect("expected unsafe_run in Law.force");
+        let box_name = ir[ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0)..at].trim();
+        assert!(
+            ir[at..].contains(&format!("call i64 @sz_unbox_i64(ptr {box_name})")),
+            "expected unbox of {box_name}:\n{ir}"
+        );
+        assert_release_after(&ir, at, box_name, "Law.force box");
+    }
+
+    #[test]
+    fn emit_law_signal_str_owned_and_dropped() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] = IO.println(Law.signalStr(0))
+"#,
+        );
+        let needle = " = call ptr @sz_law_signal_str(i64 ";
+        let at = ir.find(needle).expect("expected sz_law_signal_str");
+        let name = ir[ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0)..at].trim();
+        let print_at = ir.find("call ptr @sz_io_println(ptr ").expect("println");
+        assert_release_after(&ir, print_at, name, "Law.signalStr");
+    }
+
+    #[test]
+    fn emit_law_signal_list_at_owned_and_dropped() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] = IO.println(Law.signalListAt(0, 0))
+"#,
+        );
+        let needle = " = call ptr @sz_law_signal_list_at(i64 ";
+        let at = ir.find(needle).expect("expected sz_law_signal_list_at");
+        let name = ir[ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0)..at].trim();
+        let print_at = ir.find("call ptr @sz_io_println(ptr ").expect("println");
+        assert_release_after(&ir, print_at, name, "Law.signalListAt");
+    }
+
+    #[test]
     fn emit_ui_run_rebuild_lambda() {
         let src = r#"@main def main: IO[Unit] =
   Ui.run(_ => View.text("x"))
@@ -9416,6 +9620,196 @@ law always: Bool = 1 == 1
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of string {name} after View.button:\n{ir}"
         );
+    }
+
+    #[test]
+    fn emit_tap_leftover_string_drops() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] =
+  Ui.run(_ => View.button("a", _ => "leftover"))
+"#,
+        );
+        let temps = cstr_string_temps(&ir);
+        assert!(
+            temps.len() >= 2,
+            "expected button label and leftover:\n{ir}"
+        );
+        for name in &temps {
+            assert_released(&ir, name, "tap leftover or button label");
+        }
+    }
+
+    #[test]
+    fn emit_tap_leftover_list_drops() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] =
+  Ui.run(_ => View.button("a", _ => [1]))
+"#,
+        );
+        let roots = list_cons_roots(&ir);
+        assert!(!roots.is_empty(), "expected leftover list in tap:\n{ir}");
+        for name in &roots {
+            assert_released(&ir, name, "tap leftover list");
+        }
+    }
+
+    #[test]
+    fn emit_tap_leftover_adt_drops() {
+        let ir = emit_full(
+            r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  Ui.run(_ => View.button("a", _ => Color.Red))
+"#,
+        );
+        let temps = adt_temps(&ir);
+        assert!(!temps.is_empty(), "expected leftover ADT in tap:\n{ir}");
+        for name in &temps {
+            assert_released(&ir, name, "tap leftover ADT");
+        }
+    }
+
+    #[test]
+    fn emit_tap_io_drops_run_result() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] =
+  Ui.run(_ => View.button("a", _ => IO.println("hi")))
+"#,
+        );
+        let needle = " = call ptr @sz_io_unsafe_run_or_die(ptr ";
+        let at = ir.find(needle).expect("expected tap unsafe_run");
+        let result = ir[ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0)..at].trim();
+        assert_release_after(&ir, at, result, "tap IO run result");
+    }
+
+    #[test]
+    fn emit_icon_button_tap_leftover_string_drops() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] =
+  Ui.run(_ => View.iconButton("i", _ => "leftover"))
+"#,
+        );
+        let temps = cstr_string_temps(&ir);
+        assert!(temps.len() >= 2, "expected icon label and leftover:\n{ir}");
+        for name in &temps {
+            assert_released(&ir, name, "iconButton tap leftover");
+        }
+    }
+
+    #[test]
+    fn emit_fab_tap_leftover_string_drops() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] =
+  Ui.run(_ => View.fab("f", _ => "leftover"))
+"#,
+        );
+        let temps = cstr_string_temps(&ir);
+        assert!(temps.len() >= 2, "expected fab label and leftover:\n{ir}");
+        for name in &temps {
+            assert_released(&ir, name, "fab tap leftover");
+        }
+    }
+
+    #[test]
+    fn emit_outlined_button_tap_leftover_string_drops() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] =
+  Ui.run(_ => View.outlinedButton("a", _ => "leftover"))
+"#,
+        );
+        let temps = cstr_string_temps(&ir);
+        assert!(
+            temps.len() >= 2,
+            "expected outlined label and leftover:\n{ir}"
+        );
+        for name in &temps {
+            assert_released(&ir, name, "outlinedButton tap leftover");
+        }
+    }
+
+    #[test]
+    fn emit_text_button_tap_leftover_string_drops() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] =
+  Ui.run(_ => View.textButton("a", _ => "leftover"))
+"#,
+        );
+        let temps = cstr_string_temps(&ir);
+        assert!(
+            temps.len() >= 2,
+            "expected text button label and leftover:\n{ir}"
+        );
+        for name in &temps {
+            assert_released(&ir, name, "textButton tap leftover");
+        }
+    }
+
+    #[test]
+    fn emit_action_chip_tap_leftover_string_drops() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] =
+  Ui.run(_ => View.actionChip("a", _ => "leftover"))
+"#,
+        );
+        let temps = cstr_string_temps(&ir);
+        assert!(
+            temps.len() >= 2,
+            "expected action chip label and leftover:\n{ir}"
+        );
+        for name in &temps {
+            assert_released(&ir, name, "actionChip tap leftover");
+        }
+    }
+
+    #[test]
+    fn emit_ink_well_tap_leftover_string_drops() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] =
+  Ui.run(_ => View.inkWell("a", _ => "leftover", View.text("x")))
+"#,
+        );
+        let temps = cstr_string_temps(&ir);
+        assert!(
+            temps.len() >= 3,
+            "expected inkWell label, leftover, and child:\n{ir}"
+        );
+        for name in &temps {
+            assert_released(&ir, name, "inkWell tap leftover");
+        }
+    }
+
+    #[test]
+    fn emit_tap_leftover_map_drops() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] =
+  Ui.run(_ => View.button("a", _ => Map.set(Map.empty(), "k", "v")))
+"#,
+        );
+        let mut sets = Vec::new();
+        let mut search = 0usize;
+        let needle = " = call ptr @sz_map_set(";
+        while let Some(rel) = ir[search..].find(needle) {
+            let at = search + rel;
+            let name = ir[ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0)..at].trim();
+            sets.push(name);
+            search = at + needle.len();
+        }
+        assert!(!sets.is_empty(), "expected leftover map in tap:\n{ir}");
+        for name in &sets {
+            assert_released(&ir, name, "tap leftover map");
+        }
     }
 
     #[test]
