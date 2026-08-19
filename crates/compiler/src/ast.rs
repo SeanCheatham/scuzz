@@ -291,6 +291,10 @@ impl Expr {
                 for a in arms {
                     out.push(MatchArm {
                         pattern: a.pattern,
+                        guard: match a.guard {
+                            Some(g) => Some(f(g)?),
+                            None => None,
+                        },
                         body: f(a.body)?,
                     });
                 }
@@ -390,6 +394,9 @@ impl Expr {
             ExprKind::Match { scrutinee, arms } => {
                 f(scrutinee);
                 for a in arms {
+                    if let Some(g) = &a.guard {
+                        f(g);
+                    }
                     f(&a.body);
                 }
             }
@@ -555,7 +562,19 @@ pub enum ForBinder {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MatchArm {
     pub pattern: Pattern,
+    /// `case Pat if pred =>` — `pred` is Bool. `None` when there is no guard.
+    pub guard: Option<Expr>,
     pub body: Expr,
+}
+
+impl MatchArm {
+    pub fn new(pattern: Pattern, body: Expr) -> Self {
+        Self {
+            pattern,
+            guard: None,
+            body,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

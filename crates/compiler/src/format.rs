@@ -513,7 +513,14 @@ fn binop_str(op: BinOp) -> &'static str {
 fn pretty_arm(arm: &MatchArm, indent: usize) -> String {
     let pad = "  ".repeat(indent);
     let body = pretty_expr(&arm.body, 0).trim().to_string();
-    format!("{pad}case {} => {body}", pretty_pattern(&arm.pattern))
+    let pat = pretty_pattern(&arm.pattern);
+    match &arm.guard {
+        Some(g) => {
+            let pred = pretty_expr(g, 0).trim().to_string();
+            format!("{pad}case {pat} if {pred} => {body}")
+        }
+        None => format!("{pad}case {pat} => {body}"),
+    }
 }
 
 fn pretty_pattern(pat: &Pattern) -> String {
@@ -669,6 +676,25 @@ enum Opt:
         assert!(out.contains("case None"));
         assert!(out.contains("Opt.Some(1)"));
         assert!(out.contains("case Opt.Some(n) =>"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_match_guard() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  Opt.Some(1) match {
+    case Opt.Some(n) if n > 0 => IO.println("pos")
+    case Opt.Some(n) => IO.println("nonpos")
+    case Opt.None => IO.println("none")
+  }
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("case Opt.Some(n) if n > 0 =>"));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

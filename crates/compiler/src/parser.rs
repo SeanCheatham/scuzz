@@ -1364,9 +1364,19 @@ impl Parser {
         while matches!(self.peek(), Token::Case) {
             self.bump();
             let pattern = self.parse_pattern()?;
+            let guard = if matches!(self.peek(), Token::If) {
+                self.bump();
+                Some(self.parse_expr()?)
+            } else {
+                None
+            };
             self.expect(&Token::Arrow)?;
             let body = self.parse_expr()?;
-            arms.push(MatchArm { pattern, body });
+            arms.push(MatchArm {
+                pattern,
+                guard,
+                body,
+            });
         }
         if braced {
             self.expect(&Token::RBrace)?;
@@ -2241,6 +2251,37 @@ enum Opt:
                         binds, case_name, ..
                     } if case_name == "None" && binds.is_empty() => {}
                     other => panic!("expected nullary None, got {other:?}"),
+                }
+            }
+            other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_match_guard() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  Opt.Some(1) match {
+    case Opt.Some(n) if n > 0 => IO.println("pos")
+    case Opt.Some(n) => IO.println("nonpos")
+    case Opt.None => IO.println("none")
+  }
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => {
+                assert!(arms[0].guard.is_some(), "first arm needs a guard");
+                assert!(arms[1].guard.is_none(), "second arm is unguarded");
+                match &arms[0].guard {
+                    Some(g) => assert!(
+                        matches!(g.kind, ExprKind::Binary { op: BinOp::Gt, .. }),
+                        "{:?}",
+                        g.kind
+                    ),
+                    None => panic!("missing guard"),
                 }
             }
             other => panic!("expected match, got {other:?}"),

@@ -1302,15 +1302,15 @@ fn rewrite_fields(
             Ok(Expr::new(
                 ExprKind::Match {
                     scrutinee: Box::new(base),
-                    arms: vec![crate::ast::MatchArm {
-                        pattern: crate::ast::Pattern::Adt {
+                    arms: vec![crate::ast::MatchArm::new(
+                        crate::ast::Pattern::Adt {
                             enum_name: eid,
                             case_name: case.name.clone(),
                             binds: names.into_iter().map(crate::ast::Pattern::Bind).collect(),
                             type_args: Vec::new(),
                         },
                         body,
-                    }],
+                    )],
                 },
                 span,
             ))
@@ -1382,10 +1382,22 @@ fn rewrite_fields(
             let mut out_arms = Vec::new();
             for arm in arms {
                 let bound = bind_pattern(&arm.pattern, &st, enums, current_module, env)?;
+                let guard = match arm.guard {
+                    Some(g) => Some(rewrite_fields(
+                        g,
+                        enums,
+                        funs,
+                        methods,
+                        current_module,
+                        env,
+                    )?),
+                    None => None,
+                };
                 let body = rewrite_fields(arm.body, enums, funs, methods, current_module, env)?;
                 unbind_pattern(bound, env);
                 out_arms.push(crate::ast::MatchArm {
                     pattern: arm.pattern,
+                    guard,
                     body,
                 });
             }
@@ -1675,6 +1687,15 @@ fn infer(
                 let mut result: Option<Type> = None;
                 for arm in arms {
                     let bound = bind_pattern(&arm.pattern, &st, enums, current_module, env)?;
+                    if let Some(g) = &arm.guard {
+                        let gt = infer(g, enums, funs, methods, current_module, env)?;
+                        if !matches!(gt, Type::Bool) {
+                            unbind_pattern(bound, env);
+                            return Err(TypeError::Msg(format!(
+                                "match guard must be Bool, got {gt:?}"
+                            )));
+                        }
+                    }
                     let bt = infer(&arm.body, enums, funs, methods, current_module, env)?;
                     unbind_pattern(bound, env);
                     match &result {
@@ -3301,17 +3322,25 @@ fn check_match_exhaustive(
     for arm in arms {
         check_unique_binds(&arm.pattern)?;
     }
-    let pats: Vec<&crate::ast::Pattern> = arms.iter().map(|a| &a.pattern).collect();
-    let missing = uncovered_pats(scrut, &pats, enums, current_module)?;
+    let covering: Vec<&crate::ast::Pattern> = arms
+        .iter()
+        .filter(|a| a.guard.is_none())
+        .map(|a| &a.pattern)
+        .collect();
+    let missing = uncovered_pats(scrut, &covering, enums, current_module)?;
     if !missing.is_empty() {
         return Err(TypeError::Msg(format!(
             "non-exhaustive match: missing {}",
             missing.join(", ")
         )));
     }
-    for i in 1..pats.len() {
-        let prev = &pats[..i];
-        if uncovered_pats(scrut, prev, enums, current_module)?.is_empty() {
+    for i in 1..arms.len() {
+        let prev: Vec<&crate::ast::Pattern> = arms[..i]
+            .iter()
+            .filter(|a| a.guard.is_none())
+            .map(|a| &a.pattern)
+            .collect();
+        if uncovered_pats(scrut, &prev, enums, current_module)?.is_empty() {
             return Err(TypeError::Msg(format!("unreachable match arm {}", i + 1)));
         }
     }
@@ -4205,6 +4234,18 @@ fn mono_expr(
             let mut out_arms = Vec::new();
             for arm in arms {
                 let bound = bind_pattern(&arm.pattern, &st, enums, current_module, env)?;
+                let guard = match arm.guard {
+                    Some(g) => Some(mono_expr(
+                        g,
+                        enums,
+                        funs,
+                        methods,
+                        current_module,
+                        env,
+                        specialized,
+                    )?),
+                    None => None,
+                };
                 let body = mono_expr(
                     arm.body,
                     enums,
@@ -4217,6 +4258,7 @@ fn mono_expr(
                 unbind_pattern(bound, env);
                 out_arms.push(crate::ast::MatchArm {
                     pattern: arm.pattern,
+                    guard,
                     body,
                 });
             }
@@ -4595,6 +4637,19 @@ fn elaborate_expr(
                 let bound = bind_pattern(&arm.pattern, &st, enums, current_module, env)?;
                 let pattern =
                     elaborate_pattern(&arm.pattern, &st, enums, current_module, tparams, &span)?;
+                let guard = match arm.guard {
+                    Some(g) => Some(elaborate_expr(
+                        g,
+                        enums,
+                        funs,
+                        methods,
+                        current_module,
+                        env,
+                        None,
+                        tparams,
+                    )?),
+                    None => None,
+                };
                 let body = elaborate_expr(
                     arm.body,
                     enums,
@@ -4606,7 +4661,11 @@ fn elaborate_expr(
                     tparams,
                 )?;
                 unbind_pattern(bound, env);
-                out_arms.push(crate::ast::MatchArm { pattern, body });
+                out_arms.push(crate::ast::MatchArm {
+                    pattern,
+                    guard,
+                    body,
+                });
             }
             Ok(Expr::new(
                 ExprKind::Match {
@@ -5137,6 +5196,7 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
                         crate::ast::Pattern::Adt { .. } => subst_pattern(a.pattern, subst),
                         p => p,
                     },
+                    guard: a.guard.map(|g| subst_node_targs(g, subst)),
                     body: subst_node_targs(a.body, subst),
                 })
                 .collect(),
@@ -5310,6 +5370,9 @@ fn collect_node_targs(expr: &Expr, out: &mut Vec<(String, Vec<Type>)>) {
             collect_node_targs(scrutinee, out);
             for a in arms {
                 collect_pattern_targs(&a.pattern, out);
+                if let Some(g) = &a.guard {
+                    collect_node_targs(g, out);
+                }
                 collect_node_targs(&a.body, out);
             }
         }
@@ -5455,6 +5518,10 @@ fn rewrite_enum_refs(
                 .map(|a| {
                     Ok(crate::ast::MatchArm {
                         pattern: rewrite_pattern(a.pattern, clones)?,
+                        guard: match a.guard {
+                            Some(g) => Some(rewrite_enum_refs(g, clones)?),
+                            None => None,
+                        },
                         body: rewrite_enum_refs(a.body, clones)?,
                     })
                 })
@@ -5888,6 +5955,96 @@ enum Color:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("wildcard should make match exhaustive");
+    }
+
+    #[test]
+    fn typechecks_match_guard() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  Opt.Some(1) match {
+    case Opt.Some(n) if n > 0 => IO.println("pos")
+    case Opt.Some(n) => IO.println("nonpos")
+    case Opt.None => IO.println("none")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("unguarded cases still cover Some and None");
+    }
+
+    #[test]
+    fn rejects_non_bool_match_guard() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  Color.Red match {
+    case Color.Red if 1 => IO.println("r")
+    case Color.Blue => IO.println("b")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(err.contains("match guard must be Bool"), "{err}");
+    }
+
+    #[test]
+    fn rejects_guarded_only_match_as_nonexhaustive() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  Color.Red match {
+    case Color.Red if true => IO.println("r")
+    case Color.Blue => IO.println("b")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("non-exhaustive match: missing Color.Red"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_unreachable_arm_after_unguarded_wildcard() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  Color.Red match {
+    case _ => IO.println("all")
+    case Color.Red if true => IO.println("r")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(err.contains("unreachable match arm"), "{err}");
+    }
+
+    #[test]
+    fn typechecks_match_guard_kit_bool() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  Color.Red match {
+    case Color.Red if List.nonEmpty([1]) => IO.println("hit")
+    case Color.Red => IO.println("miss")
+    case Color.Blue => IO.println("blue")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("kit Bool guard typechecks");
     }
 
     #[test]
