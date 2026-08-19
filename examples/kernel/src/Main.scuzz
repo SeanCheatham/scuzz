@@ -118,6 +118,29 @@ def describeOptZero(o: Opt[Int]): String =
     case Opt.None => "none"
   }
 
+def describeHue(c: Color): String =
+  c match {
+    case Color.Red | Color.Blue => "primary"
+  }
+
+def describeSmall(n: Int): String =
+  n match {
+    case 0 | 1 => "tiny"
+    case _ => "big"
+  }
+
+def describeOptSmall(o: Opt[Int]): String =
+  o match {
+    case Opt.Some(0 | 1) => "opt01"
+    case Opt.Some(_) => "optN"
+    case Opt.None => "optNone"
+  }
+
+def eitherNum(e: Either[Int, Int]): Int =
+  e match {
+    case Either.Left(n) | Either.Right(n) => n
+  }
+
 def greetFrom(m: Msg): String =
   m match {
     case Msg.Hi => "main-hi"
@@ -304,6 +327,14 @@ record Box[T](x: T):
     _ <- IO.println(Str.concat("lit:", describeFlag(true)))
     _ <- IO.println(Str.concat("lit:", describeWord("ok")))
     _ <- IO.println(Str.concat("lit:", describeOptZero(Opt.Some(0))))
+    _ <- IO.println(Str.concat("or:", describeHue(Color.Red)))
+    _ <- IO.println(Str.concat("or:", describeSmall(1)))
+    _ <- IO.println(Str.concat("or:", describeOptSmall(Opt.Some(0))))
+    _ <- IO.println(Str.concat("or:either:", Str.fromInt(eitherNum(Either.Left(4)))))
+    _ <- Color.Red match {
+  case Color.Red | Color.Blue if false => IO.println("or:skip")
+  case Color.Red | Color.Blue => IO.println("or:hit")
+}
     _ <- 0 match {
   case 0 => IO.println("lit:hit0")
   case _ => IO.println("lit:miss0")

@@ -99,6 +99,11 @@ jobs:
           grep -q "lit:good" /tmp/kernel.out
           grep -q "lit:some0" /tmp/kernel.out
           grep -q "lit:hit0" /tmp/kernel.out
+          grep -q "or:primary" /tmp/kernel.out
+          grep -q "or:tiny" /tmp/kernel.out
+          grep -q "or:opt01" /tmp/kernel.out
+          grep -q "or:either:4" /tmp/kernel.out
+          grep -q "or:hit" /tmp/kernel.out
           grep -q "record:8" /tmp/kernel.out
           grep -q "Point(3,5)" /tmp/kernel.out
           grep -q "get:3" /tmp/kernel.out

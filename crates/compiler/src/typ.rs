@@ -3307,6 +3307,18 @@ fn bind_pattern(
             }
             Ok(restored)
         }
+        crate::ast::Pattern::Or(alts) => {
+            let mut it = alts.iter();
+            let first = it
+                .next()
+                .ok_or_else(|| TypeError::Msg("empty or-pattern".into()))?;
+            let bound = bind_pattern(first, scrut, enums, current_module, env)?;
+            for alt in it {
+                let extra = bind_pattern(alt, scrut, enums, current_module, env)?;
+                unbind_pattern(extra, env);
+            }
+            Ok(bound)
+        }
     }
 }
 
@@ -3380,6 +3392,12 @@ fn check_match_exhaustive(
 }
 
 fn check_unique_binds(pat: &crate::ast::Pattern) -> Result<(), TypeError> {
+    if let crate::ast::Pattern::Or(alts) = pat {
+        for a in alts {
+            check_unique_binds(a)?;
+        }
+        return Ok(());
+    }
     let mut names = Vec::new();
     collect_bind_names(pat, &mut names);
     let mut seen = HashMap::new();
@@ -3402,6 +3420,11 @@ fn collect_bind_names(pat: &crate::ast::Pattern, out: &mut Vec<String>) {
                 collect_bind_names(b, out);
             }
         }
+        crate::ast::Pattern::Or(alts) => {
+            for a in alts {
+                collect_bind_names(a, out);
+            }
+        }
         crate::ast::Pattern::Wildcard
         | crate::ast::Pattern::Int(_)
         | crate::ast::Pattern::Float(_)
@@ -3416,7 +3439,10 @@ fn uncovered_pats(
     enums: &EnumIndex<'_>,
     current_module: &str,
 ) -> Result<Vec<String>, TypeError> {
-    let rows: Vec<Vec<crate::ast::Pattern>> = pats.iter().map(|p| vec![(*p).clone()]).collect();
+    let rows: Vec<Vec<crate::ast::Pattern>> = pats
+        .iter()
+        .flat_map(|p| p.flatten_or().into_iter().map(|q| vec![q]))
+        .collect();
     uncovered_product(std::slice::from_ref(scrut), &rows, enums, current_module)
 }
 
@@ -3590,6 +3616,20 @@ fn elaborate_pattern(
         | crate::ast::Pattern::Float(_)
         | crate::ast::Pattern::Bool(_)
         | crate::ast::Pattern::Str(_) => Ok(pat.clone()),
+        crate::ast::Pattern::Or(alts) => {
+            let mut out = Vec::with_capacity(alts.len());
+            for a in alts {
+                out.push(elaborate_pattern(
+                    a,
+                    scrut,
+                    enums,
+                    current_module,
+                    tparams,
+                    span,
+                )?);
+            }
+            Ok(crate::ast::Pattern::Or(out))
+        }
         crate::ast::Pattern::Adt {
             enum_name,
             case_name,
@@ -5292,10 +5332,7 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
             arms: arms
                 .into_iter()
                 .map(|a| crate::ast::MatchArm {
-                    pattern: match a.pattern {
-                        crate::ast::Pattern::Adt { .. } => subst_pattern(a.pattern, subst),
-                        p => p,
-                    },
+                    pattern: subst_pattern(a.pattern, subst),
                     guard: a.guard.map(|g| subst_node_targs(g, subst)),
                     body: subst_node_targs(a.body, subst),
                 })
@@ -5415,6 +5452,9 @@ fn subst_pattern(pat: crate::ast::Pattern, subst: &HashMap<String, Type>) -> cra
             binds: binds.into_iter().map(|b| subst_pattern(b, subst)).collect(),
             type_args: type_args.iter().map(|t| apply_subst(t, subst)).collect(),
         },
+        crate::ast::Pattern::Or(alts) => {
+            crate::ast::Pattern::Or(alts.into_iter().map(|a| subst_pattern(a, subst)).collect())
+        }
         p => p,
     }
 }
@@ -5564,6 +5604,10 @@ fn collect_pattern_targs(pat: &crate::ast::Pattern, out: &mut Vec<(String, Vec<T
         }
         for b in binds {
             collect_pattern_targs(b, out);
+        }
+    } else if let crate::ast::Pattern::Or(alts) = pat {
+        for a in alts {
+            collect_pattern_targs(a, out);
         }
     }
 }
@@ -5767,6 +5811,11 @@ fn rewrite_pattern(
                 })
             }
         }
+        crate::ast::Pattern::Or(alts) => Ok(crate::ast::Pattern::Or(
+            alts.into_iter()
+                .map(|a| rewrite_pattern(a, clones))
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
         p => Ok(p),
     }
 }
@@ -6201,6 +6250,114 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("nested int literal plus wildcard payload is exhaustive");
+    }
+
+    #[test]
+    fn typechecks_or_pattern_covers_enum() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  Color.Red match {
+    case Color.Red | Color.Blue => IO.println("p")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("or-pattern should cover both cases");
+    }
+
+    #[test]
+    fn typechecks_or_pattern_covers_bool() {
+        let src = r#"
+@main def main: IO[Unit] =
+  true match {
+    case true | false => IO.println("b")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("true | false covers Bool");
+    }
+
+    #[test]
+    fn typechecks_nested_or_pattern() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  Opt.Some(0) match {
+    case Opt.Some(0 | 1) => IO.println("s")
+    case Opt.Some(_) => IO.println("o")
+    case Opt.None => IO.println("n")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("nested or plus wildcard payload is exhaustive");
+    }
+
+    #[test]
+    fn typechecks_or_pattern_shared_bind() {
+        let src = r#"
+enum Either:
+  case Left(x: Int)
+  case Right(y: Int)
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Either.Left(1) match {
+    case Either.Left(n) | Either.Right(n) => n
+  }))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("shared bind across or-alternatives");
+    }
+
+    #[test]
+    fn typechecks_or_pattern_with_guard() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  Color.Red match {
+    case Color.Red | Color.Blue if false => IO.println("skip")
+    case Color.Red | Color.Blue => IO.println("hit")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("unguarded or-pattern still covers");
+    }
+
+    #[test]
+    fn rejects_or_pattern_int_without_wildcard() {
+        let src = r#"
+@main def main: IO[Unit] =
+  0 match {
+    case 0 | 1 => IO.println("s")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("non-exhaustive match: missing _"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_or_pattern_bind_missing_on_one_alt() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Opt.Some(1) match {
+    case Opt.Some(n) | Opt.None => n
+  }))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(err.contains("unknown") || err.contains("n"), "{err}");
     }
 
     #[test]

@@ -1363,7 +1363,7 @@ impl Parser {
         let mut arms = Vec::new();
         while matches!(self.peek(), Token::Case) {
             self.bump();
-            let pattern = self.parse_pattern()?;
+            let pattern = self.parse_or_pattern()?;
             let guard = if matches!(self.peek(), Token::If) {
                 self.bump();
                 Some(self.parse_expr()?)
@@ -1387,11 +1387,20 @@ impl Parser {
         Ok(arms)
     }
 
-    fn parse_pattern(&mut self) -> Result<Pattern, ParseError> {
-        self.parse_pattern_at(false)
+    fn parse_or_pattern(&mut self) -> Result<Pattern, ParseError> {
+        let first = self.parse_pattern_atom()?;
+        if !matches!(self.peek(), Token::Pipe) {
+            return Ok(first);
+        }
+        let mut alts = vec![first];
+        while matches!(self.peek(), Token::Pipe) {
+            self.bump();
+            alts.push(self.parse_pattern_atom()?);
+        }
+        Ok(Pattern::Or(alts))
     }
 
-    fn parse_pattern_at(&mut self, _nested: bool) -> Result<Pattern, ParseError> {
+    fn parse_pattern_atom(&mut self) -> Result<Pattern, ParseError> {
         match self.peek().clone() {
             Token::Underscore => {
                 self.bump();
@@ -1464,7 +1473,7 @@ impl Parser {
         self.bump();
         let mut binds = Vec::new();
         loop {
-            binds.push(self.parse_pattern_at(true)?);
+            binds.push(self.parse_or_pattern()?);
             if matches!(self.peek(), Token::Comma) {
                 self.bump();
                 continue;
@@ -2481,6 +2490,103 @@ enum Opt:
                 }
                 other => panic!("expected Opt.Some(0), got {other:?}"),
             },
+            other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_or_pattern() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  c match {
+    case Color.Red | Color.Blue => IO.println("p")
+  }
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => match &arms[0].pattern {
+                Pattern::Or(alts) => {
+                    assert_eq!(alts.len(), 2, "{alts:?}");
+                    assert!(
+                        matches!(
+                            &alts[0],
+                            Pattern::Adt {
+                                case_name,
+                                ..
+                            } if case_name == "Red"
+                        ),
+                        "{:?}",
+                        alts[0]
+                    );
+                    assert!(
+                        matches!(
+                            &alts[1],
+                            Pattern::Adt {
+                                case_name,
+                                ..
+                            } if case_name == "Blue"
+                        ),
+                        "{:?}",
+                        alts[1]
+                    );
+                }
+                other => panic!("expected or-pattern, got {other:?}"),
+            },
+            other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_nested_or_pattern() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  Opt.Some(0) match {
+    case Opt.Some(0 | 1) => IO.println("s")
+    case Opt.Some(_) => IO.println("o")
+    case Opt.None => IO.println("n")
+  }
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => match &arms[0].pattern {
+                Pattern::Adt { binds, .. } => match &binds[..] {
+                    [Pattern::Or(alts)] => {
+                        assert!(matches!(&alts[..], [Pattern::Int(0), Pattern::Int(1)]));
+                    }
+                    other => panic!("expected nested or, got {other:?}"),
+                },
+                other => panic!("expected Opt.Some(0 | 1), got {other:?}"),
+            },
+            other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_or_pattern_with_guard() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  c match {
+    case Color.Red | Color.Blue if false => IO.println("skip")
+    case Color.Red | Color.Blue => IO.println("hit")
+  }
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => {
+                assert!(arms[0].guard.is_some(), "first arm needs a guard");
+                assert!(matches!(&arms[0].pattern, Pattern::Or(_)));
+                assert!(arms[1].guard.is_none());
+                assert!(matches!(&arms[1].pattern, Pattern::Or(_)));
+            }
             other => panic!("expected match, got {other:?}"),
         }
     }

@@ -807,6 +807,11 @@ fn collect_pat_strings(pat: &Pattern, out: &mut Vec<String>) {
                 collect_pat_strings(b, out);
             }
         }
+        Pattern::Or(alts) => {
+            for a in alts {
+                collect_pat_strings(a, out);
+            }
+        }
         Pattern::Wildcard
         | Pattern::Bind(_)
         | Pattern::Int(_)
@@ -1485,6 +1490,9 @@ fn emit_pat(
                     writeln!(pe.code, "{next_ok}:").unwrap();
                 }
             }
+        }
+        Pattern::Or(_) => {
+            panic!("or-pattern must be flattened in lower before codegen")
         }
     }
 }
@@ -9701,6 +9709,25 @@ enum Color { case Red, case Blue }
         assert!(ir.contains("sz_adt_new"));
         assert!(ir.contains("sz_adt_tag"));
         assert!(ir.contains("icmp eq i32"));
+    }
+
+    #[test]
+    fn emit_or_pattern_expands_to_two_tag_checks() {
+        let src = r#"
+enum Color { case Red, case Blue }
+@main def main: IO[Unit] =
+  Color.Red match {
+    case Color.Red | Color.Blue => IO.println("p")
+  }
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let tags = ir.matches("sz_adt_tag").count();
+        assert!(
+            tags >= 2,
+            "expected two tag checks for expanded or-pattern, got {tags}:\n{ir}"
+        );
     }
 
     #[test]

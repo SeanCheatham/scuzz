@@ -44,6 +44,11 @@ fn lower_pattern(pat: Pattern, enums: &EnumIndex<'_>, current_module: &str) -> P
         Pattern::Float(bits) => Pattern::Float(bits),
         Pattern::Bool(b) => Pattern::Bool(b),
         Pattern::Str(s) => Pattern::Str(s),
+        Pattern::Or(alts) => Pattern::Or(
+            alts.into_iter()
+                .map(|a| lower_pattern(a, enums, current_module))
+                .collect(),
+        ),
         Pattern::Adt {
             enum_name,
             case_name,
@@ -177,20 +182,28 @@ fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Expr {
                 span,
             )
         }
-        ExprKind::Match { scrutinee, arms } => Expr::new(
-            ExprKind::Match {
-                scrutinee: Box::new(lower_expr(*scrutinee, enums, current_module)),
-                arms: arms
-                    .into_iter()
-                    .map(|a| MatchArm {
-                        pattern: lower_pattern(a.pattern, enums, current_module),
-                        guard: a.guard.map(|g| lower_expr(g, enums, current_module)),
-                        body: lower_expr(a.body, enums, current_module),
-                    })
-                    .collect(),
-            },
-            span,
-        ),
+        ExprKind::Match { scrutinee, arms } => {
+            let mut out = Vec::new();
+            for a in arms {
+                let pattern = lower_pattern(a.pattern, enums, current_module);
+                let guard = a.guard.map(|g| lower_expr(g, enums, current_module));
+                let body = lower_expr(a.body, enums, current_module);
+                for pat in pattern.flatten_or() {
+                    out.push(MatchArm {
+                        pattern: pat,
+                        guard: guard.clone(),
+                        body: body.clone(),
+                    });
+                }
+            }
+            Expr::new(
+                ExprKind::Match {
+                    scrutinee: Box::new(lower_expr(*scrutinee, enums, current_module)),
+                    arms: out,
+                },
+                span,
+            )
+        }
         kind => Expr { kind, span }.map_children(|c| lower_expr(c, enums, current_module)),
     }
 }
@@ -383,6 +396,76 @@ enum Color:
                 }
                 other => panic!("expected AdtConstruct, got {other:?}"),
             },
+            other => panic!("expected Match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn expands_or_pattern_into_separate_arms() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  Color.Red match {
+    case Color.Red | Color.Blue => IO.println("p")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => {
+                assert_eq!(arms.len(), 2, "{arms:?}");
+                assert!(
+                    matches!(
+                        &arms[0].pattern,
+                        Pattern::Adt { case_name, .. } if case_name == "Red"
+                    ),
+                    "{:?}",
+                    arms[0].pattern
+                );
+                assert!(
+                    matches!(
+                        &arms[1].pattern,
+                        Pattern::Adt { case_name, .. } if case_name == "Blue"
+                    ),
+                    "{:?}",
+                    arms[1].pattern
+                );
+            }
+            other => panic!("expected Match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn expands_nested_or_payload_into_separate_arms() {
+        let src = r#"
+enum Opt:
+  case Some(x: Int)
+  case None
+@main def main: IO[Unit] =
+  Opt.Some(0) match {
+    case Opt.Some(0 | 1) => IO.println("s")
+    case Opt.Some(_) => IO.println("o")
+    case Opt.None => IO.println("n")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        match &p.main.body.kind {
+            ExprKind::Match { arms, .. } => {
+                assert_eq!(arms.len(), 4, "{arms:?}");
+                match &arms[0].pattern {
+                    Pattern::Adt { binds, .. } => {
+                        assert!(matches!(&binds[..], [Pattern::Int(0)]), "{binds:?}");
+                    }
+                    other => panic!("expected Some(0), got {other:?}"),
+                }
+                match &arms[1].pattern {
+                    Pattern::Adt { binds, .. } => {
+                        assert!(matches!(&binds[..], [Pattern::Int(1)]), "{binds:?}");
+                    }
+                    other => panic!("expected Some(1), got {other:?}"),
+                }
+            }
             other => panic!("expected Match, got {other:?}"),
         }
     }
