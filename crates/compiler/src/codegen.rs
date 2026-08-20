@@ -4725,16 +4725,25 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        "Fs.read" | "Fs.list" | "Fs.mkdirs" | "Fs.canonicalize" => {
+        "Fs.read" | "Fs.list" | "Fs.canonicalize" => {
             let rt = match callee {
                 "Fs.read" => "sz_fs_read",
                 "Fs.list" => "sz_fs_list",
-                "Fs.mkdirs" => "sz_fs_mkdirs",
                 _ => "sz_fs_canonicalize",
             };
             writeln!(
                 code,
                 "  %{prefix}_v = call ptr @{rt}(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
+        }
+        "Fs.mkdirs" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_fs_mkdirs(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -4754,11 +4763,11 @@ fn emit_call(
         }
         "Sys.args" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_sys_args()").unwrap();
-            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
         }
         "Sys.readLine" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_sys_read_line()").unwrap();
-            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
         }
         "Sys.read" => {
             writeln!(
@@ -4767,7 +4776,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
-            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
         }
         "Sys.write" => {
             writeln!(
@@ -4825,7 +4834,7 @@ fn emit_call(
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
-            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
         }
         "Clock.realTime" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_clock_real_time()").unwrap();
@@ -4852,7 +4861,7 @@ fn emit_call(
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
-            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
         }
         "Impurity.runKit" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_impurity_run_kit()").unwrap();
@@ -6584,6 +6593,38 @@ def hello(): IO[String] = IO.pure("hi")
         assert!(
             ir.contains("call void @sz_release(ptr %value)"),
             "expected owned IO[String] payload last-use:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_fs_read_payload_owned() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    s <- Fs.read("x")
+    _ <- IO.println(s)
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        assert!(
+            ir.contains("call void @sz_release(ptr %value)"),
+            "expected owned Fs.read payload last-use:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_fs_list_payload_owned() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    names <- Fs.list("x")
+    _ <- IO.println(Str.fromInt(List.len(names)))
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        assert!(
+            ir.contains("call void @sz_release(ptr %value)"),
+            "expected owned Fs.list payload last-use:\n{ir}"
         );
     }
 

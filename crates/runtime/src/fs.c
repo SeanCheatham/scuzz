@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <unistd.h>
 
 /* Blessed filesystem IO — live interpreter or TestRuntime mem FS.
  * Fake vs live is chosen when the IO runs (after sz_testrt_install in
@@ -91,11 +92,18 @@ static void *fs_read_result(void *env) {
   FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
   const char *p = sz_string_cstr(path);
   FILE *f = fopen(p, "rb");
+  struct stat st;
   if (!f) {
     char msg[512];
     snprintf(msg, sizeof(msg), "Fs.read: cannot open %s: %s", p, strerror(errno));
     r->is_err = 1;
     r->as.err = sz_error_new(2, msg);
+    goto done;
+  }
+  if (fstat(fileno(f), &st) != 0 || !S_ISREG(st.st_mode)) {
+    fclose(f);
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.read: not a regular file");
     goto done;
   }
   if (fseek(f, 0, SEEK_END) != 0) {
@@ -119,6 +127,13 @@ static void *fs_read_result(void *env) {
   }
   char *buf = (char *)sz_alloc((size_t)sz + 1);
   size_t n = fread(buf, 1, (size_t)sz, f);
+  if (ferror(f)) {
+    fclose(f);
+    sz_free(buf);
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.read: read failed");
+    goto done;
+  }
   fclose(f);
   buf[n] = '\0';
   SzString *s = sz_string_from_bytes(buf, n);
@@ -241,6 +256,26 @@ static SzIo *fs_after_list(void *value, void *env) {
 
 SzIo *sz_fs_list(SzString *path) { return fs_bind(path, fs_after_list); }
 
+/* Make `path` a directory. An existing directory is ok. A file is an error. */
+static int fs_mkdir_one(const char *path, FsResult *r) {
+  struct stat st;
+  if (mkdir(path, 0755) == 0)
+    return 1;
+  if (errno != EEXIST) {
+    char msg[512];
+    snprintf(msg, sizeof(msg), "Fs.mkdirs: %s: %s", path, strerror(errno));
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, msg);
+    return 0;
+  }
+  if (stat(path, &st) != 0 || !S_ISDIR(st.st_mode)) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.mkdirs: exists and is not a directory");
+    return 0;
+  }
+  return 1;
+}
+
 static void *fs_mkdirs_result(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path = pack_path(pack);
@@ -257,23 +292,13 @@ static void *fs_mkdirs_result(void *env) {
   for (char *q = tmp + 1; *q; q++) {
     if (*q == '/') {
       *q = '\0';
-      if (mkdir(tmp, 0755) != 0 && errno != EEXIST) {
-        char msg[512];
-        snprintf(msg, sizeof(msg), "Fs.mkdirs: %s: %s", tmp, strerror(errno));
-        r->is_err = 1;
-        r->as.err = sz_error_new(2, msg);
+      if (!fs_mkdir_one(tmp, r))
         goto done;
-      }
       *q = '/';
     }
   }
-  if (mkdir(tmp, 0755) != 0 && errno != EEXIST) {
-    char msg[512];
-    snprintf(msg, sizeof(msg), "Fs.mkdirs: %s: %s", tmp, strerror(errno));
-    r->is_err = 1;
-    r->as.err = sz_error_new(2, msg);
+  if (!fs_mkdir_one(tmp, r))
     goto done;
-  }
   r->is_err = 0;
   r->as.ok = NULL;
 done:
