@@ -259,7 +259,14 @@ fn pretty_type(t: &Type) -> String {
         Type::String => "String".into(),
         Type::Bool => "Bool".into(),
         Type::List(inner) => format!("List[{}]", pretty_type(inner)),
-        Type::Fun(a, b) => format!("{} => {}", pretty_type(a), pretty_type(b)),
+        Type::Fun(a, b) => {
+            let left = pretty_type(a);
+            if matches!(a.as_ref(), Type::Fun(_, _)) {
+                format!("({left}) => {}", pretty_type(b))
+            } else {
+                format!("{left} => {}", pretty_type(b))
+            }
+        }
         Type::Io(inner) => format!("IO[{}]", pretty_type(inner)),
         Type::App(n, args) => format!(
             "{}[{}]",
@@ -303,6 +310,129 @@ fn pretty_def(d: &FunDef) -> String {
     )
 }
 
+/// `==` and looser. A `::` operand at this prec or below needs parens.
+const PREC_CMP: i8 = 6;
+/// Right-associative `::` (`List.cons`).
+const PREC_CONS: i8 = 7;
+
+/// Precedence of a binary operator. A larger value binds more tightly.
+/// The order matches the parser: mul, add, shift, cons, cmp, `&`, `^`, `|`, `&&`, `||`.
+fn bin_prec(op: BinOp) -> i8 {
+    match op {
+        BinOp::Mul | BinOp::Div | BinOp::Mod => 10,
+        BinOp::Add | BinOp::Sub => 9,
+        BinOp::Shl | BinOp::Shr => 8,
+        BinOp::Eq | BinOp::Ne | BinOp::Lt | BinOp::Le | BinOp::Gt | BinOp::Ge => PREC_CMP,
+        BinOp::BitAnd => 5,
+        BinOp::BitXor => 4,
+        BinOp::BitOr => 3,
+        BinOp::And => 2,
+        BinOp::Or => 1,
+    }
+}
+
+fn is_cons_call(e: &Expr) -> bool {
+    matches!(
+        &e.kind,
+        ExprKind::Call { callee, args } if callee == "List.cons" && args.len() == 2
+    )
+}
+
+fn infix_prec(e: &Expr) -> Option<i8> {
+    match &e.kind {
+        ExprKind::Binary { op, .. } => Some(bin_prec(*op)),
+        ExprKind::Call { callee, args } if callee == "List.cons" && args.len() == 2 => {
+            Some(PREC_CONS)
+        }
+        _ => None,
+    }
+}
+
+/// Print context that decides when a child needs parens.
+#[derive(Clone, Copy)]
+enum WrapCtx {
+    /// Left or right operand of a binary operator.
+    Infix { parent: i8, right: bool },
+    /// Head or tail of `::`.
+    Cons { right: bool },
+    /// Operand of prefix `-`, `!`, or `~`.
+    Unary,
+    /// Receiver of `.field`, `.method`, `match`, `.attempt`, `.flatMap`, or `.handleErrorWith`.
+    Postfix,
+}
+
+/// Return true when this child needs parens in `ctx`.
+fn needs_paren_in(e: &Expr, ctx: WrapCtx) -> bool {
+    let loose_form = matches!(
+        e.kind,
+        ExprKind::If { .. }
+            | ExprKind::For { .. }
+            | ExprKind::Lambda { .. }
+            | ExprKind::Ascribe { .. }
+    );
+    match ctx {
+        WrapCtx::Infix { parent, right } => {
+            if loose_form {
+                return true;
+            }
+            match infix_prec(e) {
+                Some(child) => child < parent || (right && child == parent),
+                None => false,
+            }
+        }
+        WrapCtx::Cons { right } => {
+            if matches!(
+                e.kind,
+                ExprKind::If { .. }
+                    | ExprKind::Match { .. }
+                    | ExprKind::For { .. }
+                    | ExprKind::Lambda { .. }
+                    | ExprKind::Ascribe { .. }
+            ) {
+                return true;
+            }
+            if is_cons_call(e) {
+                return !right;
+            }
+            if let ExprKind::Binary { op, .. } = &e.kind {
+                return bin_prec(*op) <= PREC_CMP;
+            }
+            false
+        }
+        WrapCtx::Unary => {
+            matches!(
+                e.kind,
+                ExprKind::Binary { .. }
+                    | ExprKind::If { .. }
+                    | ExprKind::Match { .. }
+                    | ExprKind::For { .. }
+                    | ExprKind::Ascribe { .. }
+            ) || is_cons_call(e)
+        }
+        WrapCtx::Postfix => {
+            matches!(
+                e.kind,
+                ExprKind::Binary { .. }
+                    | ExprKind::Unary { .. }
+                    | ExprKind::Ascribe { .. }
+                    | ExprKind::If { .. }
+                    | ExprKind::For { .. }
+                    | ExprKind::Lambda { .. }
+            ) || is_cons_call(e)
+        }
+    }
+}
+
+/// Print `e` and add parens when `needs_paren_in` is true.
+fn pretty_in(e: &Expr, ctx: WrapCtx) -> String {
+    let s = pretty_expr(e, 0).trim().to_string();
+    if needs_paren_in(e, ctx) {
+        format!("({s})")
+    } else {
+        s
+    }
+}
+
 fn pretty_expr(expr: &Expr, indent: usize) -> String {
     let pad = "  ".repeat(indent);
     match &expr.kind {
@@ -328,7 +458,7 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
         ExprKind::IoPure(e) => format!("{pad}IO.pure({})", pretty_expr(e, 0).trim()),
         ExprKind::Var(n) => format!("{pad}{n}"),
         ExprKind::Field { base, field } => {
-            format!("{pad}{}.{}", pretty_expr(base, 0).trim(), field)
+            format!("{pad}{}.{}", pretty_in(base, WrapCtx::Postfix), field)
         }
         ExprKind::MethodCall {
             receiver,
@@ -341,7 +471,7 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
                 .collect();
             format!(
                 "{pad}{}.{}({})",
-                pretty_expr(receiver, 0).trim(),
+                pretty_in(receiver, WrapCtx::Postfix),
                 method,
                 a.join(", ")
             )
@@ -390,8 +520,8 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             if callee == "List.cons" && args.len() == 2 {
                 return format!(
                     "{pad}{} :: {}",
-                    pretty_cons_operand(&args[0], true),
-                    pretty_cons_operand(&args[1], false)
+                    pretty_in(&args[0], WrapCtx::Cons { right: false }),
+                    pretty_in(&args[1], WrapCtx::Cons { right: true })
                 );
             }
             let a: Vec<_> = args
@@ -415,26 +545,30 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
         ),
         ExprKind::Binary { op, left, right } => format!(
             "{pad}{} {} {}",
-            pretty_operand(left),
+            pretty_in(
+                left,
+                WrapCtx::Infix {
+                    parent: bin_prec(*op),
+                    right: false
+                }
+            ),
             binop_str(*op),
-            pretty_operand(right)
+            pretty_in(
+                right,
+                WrapCtx::Infix {
+                    parent: bin_prec(*op),
+                    right: true
+                }
+            )
         ),
         ExprKind::Unary { op, expr } => {
-            let inner = pretty_expr(expr, 0).trim().to_string();
-            let wrapped = match &expr.kind {
-                ExprKind::Binary { .. }
-                | ExprKind::If { .. }
-                | ExprKind::Match { .. }
-                | ExprKind::For { .. }
-                | ExprKind::Ascribe { .. } => format!("({inner})"),
-                _ => inner,
-            };
+            let inner = pretty_in(expr, WrapCtx::Unary);
             let pfx = match op {
                 crate::ast::UnOp::Neg => "-",
                 crate::ast::UnOp::Not => "!",
                 crate::ast::UnOp::BitNot => "~",
             };
-            format!("{pad}{pfx}{wrapped}")
+            format!("{pad}{pfx}{inner}")
         }
         ExprKind::Ascribe { expr, ty } => {
             let inner = pretty_expr(expr, 0).trim().to_string();
@@ -449,7 +583,7 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             format!("{pad}{wrapped}: {}", pretty_type(ty))
         }
         ExprKind::FlatMap { inner, param, body } => {
-            let left = pretty_expr(inner, 0).trim().to_string();
+            let left = pretty_in(inner, WrapCtx::Postfix);
             let right = pretty_expr(body, indent + 1);
             let p = param.as_deref().unwrap_or("_");
             if !matches!(
@@ -463,13 +597,13 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             }
         }
         ExprKind::HandleErrorWith { inner, param, body } => {
-            let left = pretty_expr(inner, 0).trim().to_string();
+            let left = pretty_in(inner, WrapCtx::Postfix);
             let right = pretty_expr(body, indent + 1);
             let p = param.as_deref().unwrap_or("_");
             format!("{pad}{left}.handleErrorWith({p} =>\n{right}\n{pad})")
         }
         ExprKind::Attempt { inner } => {
-            let left = pretty_expr(inner, 0).trim().to_string();
+            let left = pretty_in(inner, WrapCtx::Postfix);
             format!("{pad}{left}.attempt")
         }
         ExprKind::IoRace { left, right } => format!(
@@ -533,7 +667,7 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             out
         }
         ExprKind::Match { scrutinee, arms } => {
-            let s = pretty_expr(scrutinee, 0).trim().to_string();
+            let s = pretty_in(scrutinee, WrapCtx::Postfix);
             let mut out = format!("{pad}{s} match {{\n");
             for arm in arms {
                 out.push_str(&pretty_arm(arm, indent + 1));
@@ -543,33 +677,6 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             out.push('}');
             out
         }
-    }
-}
-
-fn pretty_operand(e: &Expr) -> String {
-    let s = pretty_expr(e, 0).trim().to_string();
-    if matches!(e.kind, ExprKind::Ascribe { .. }) {
-        format!("({s})")
-    } else {
-        s
-    }
-}
-
-fn pretty_cons_operand(e: &Expr, left: bool) -> String {
-    let s = pretty_expr(e, 0).trim().to_string();
-    let wrap = matches!(
-        e.kind,
-        ExprKind::If { .. }
-            | ExprKind::Match { .. }
-            | ExprKind::For { .. }
-            | ExprKind::Lambda { .. }
-            | ExprKind::Ascribe { .. }
-    ) || (left
-        && matches!(&e.kind, ExprKind::Call { callee, args } if callee == "List.cons" && args.len() == 2));
-    if wrap {
-        format!("({s})")
-    } else {
-        s
     }
 }
 
@@ -696,7 +803,7 @@ fn escape_interp_lit(s: &str) -> String {
 }
 
 fn use_triple_quotes(s: &str) -> bool {
-    s.contains('\n') && !s.contains("\"\"\"")
+    s.contains('\n') && !s.contains('"')
 }
 
 fn quote_string(s: &str) -> String {
@@ -714,9 +821,9 @@ fn interp_has_newline(parts: &[crate::ast::InterpPart]) -> bool {
     })
 }
 
-fn interp_has_triple(parts: &[crate::ast::InterpPart]) -> bool {
+fn interp_has_quote(parts: &[crate::ast::InterpPart]) -> bool {
     parts.iter().any(|p| match p {
-        crate::ast::InterpPart::Lit(s) => s.contains("\"\"\""),
+        crate::ast::InterpPart::Lit(s) => s.contains('"'),
         crate::ast::InterpPart::Expr(_) => false,
     })
 }
@@ -735,7 +842,7 @@ fn escape_triple_interp_lit(s: &str) -> String {
 
 fn write_interp_body(parts: &[crate::ast::InterpPart], triple: bool) -> String {
     let mut body = String::new();
-    for part in parts {
+    for (i, part) in parts.iter().enumerate() {
         match part {
             crate::ast::InterpPart::Lit(s) => {
                 if triple {
@@ -746,8 +853,21 @@ fn write_interp_body(parts: &[crate::ast::InterpPart], triple: bool) -> String {
             }
             crate::ast::InterpPart::Expr(e) => match &e.kind {
                 ExprKind::Var(n) => {
-                    body.push('$');
-                    body.push_str(n);
+                    let glue = match parts.get(i + 1) {
+                        Some(crate::ast::InterpPart::Lit(s)) => s
+                            .chars()
+                            .next()
+                            .is_some_and(|c| c.is_ascii_alphanumeric() || c == '_'),
+                        _ => false,
+                    };
+                    if glue {
+                        body.push_str("${");
+                        body.push_str(n);
+                        body.push('}');
+                    } else {
+                        body.push('$');
+                        body.push_str(n);
+                    }
                 }
                 _ => {
                     body.push_str("${");
@@ -761,7 +881,7 @@ fn write_interp_body(parts: &[crate::ast::InterpPart], triple: bool) -> String {
 }
 
 fn quote_interpolate(parts: &[crate::ast::InterpPart]) -> String {
-    if interp_has_newline(parts) && !interp_has_triple(parts) {
+    if interp_has_newline(parts) && !interp_has_quote(parts) {
         format!("s\"\"\"{}\"\"\"", write_interp_body(parts, true))
     } else {
         format!("s\"{}\"", write_interp_body(parts, false))
@@ -1467,6 +1587,102 @@ def idOf(n: UserId): UserId = n
         let out = format_source(src).unwrap();
         assert!(out.contains("type UserId = Int"), "{out}");
         assert!(out.contains("type BoxList[T] = List[T]"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_keeps_infix_grouping() {
+        let src = r#"
+def mul(): Int = (1 + 2) * 3
+def sub(a: Int, b: Int, c: Int): Int = a - (b - c)
+def and(a: Bool, b: Bool, c: Bool): Bool = (a || b) && c
+def cons(a: Int, b: Int, xs: List[Int]): List[Int] = (a == b) :: xs
+@main def main: IO[Unit] = IO.println("ok")
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("(1 + 2) * 3"), "{out}");
+        assert!(out.contains("a - (b - c)"), "{out}");
+        assert!(out.contains("(a || b) && c"), "{out}");
+        assert!(out.contains("(a == b) ::"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_keeps_cons_and_unary_grouping() {
+        let src = r#"
+def add(a: Int, b: List[Int], c: Int): Int = (a :: b) + c
+def neg(a: Int, b: List[Int]): Int = -(a :: b)
+@main def main: IO[Unit] = IO.println("ok")
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("(a :: b) + c"), "{out}");
+        assert!(!out.contains("a :: b +"), "{out}");
+        assert!(
+            out.contains("-(a :: b)") || out.contains("-((a :: b))"),
+            "{out}"
+        );
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_keeps_postfix_and_if_grouping() {
+        let src = r#"
+record Point(x: Int, y: Int)
+def copy(a: Point, b: Point): Point = (a + b).copy(x = 1)
+def addIf(c: Bool, a: Int, b: Int): Int = (if (c) a else b) + 1
+def matchAdd(a: Int, b: Int): Int = (a + b) match {
+  case x => x
+}
+def addLam(): Int = (x => x) + 1
+def field(n: Int): Int = (-n).x
+@main def main: IO[Unit] = IO.println("ok")
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("(a + b).copy"), "{out}");
+        assert!(out.contains("(if"), "{out}");
+        assert!(out.contains("(a + b) match"), "{out}");
+        assert!(out.contains("(x => x) + 1"), "{out}");
+        assert!(out.contains("(-n).x"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_keeps_interp_ident_glue() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    n = 1
+  } yield IO.println(s"${n}foo")
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("${n}foo"), "{out}");
+        assert!(!out.contains("$nfoo"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_keeps_fun_type_parens() {
+        let src = r#"
+def apply(f: (Int => String) => Bool, g: Int => String): Bool = f(g)
+@main def main: IO[Unit] = IO.println("ok")
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("(Int => String) => Bool"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_multiline_string_with_quote() {
+        let src = "@main def main: IO[Unit] =\n  IO.println(\"hello\\nworld\\\"\")\n";
+        let out = format_source(src).unwrap();
+        assert!(out.contains("\"hello\\nworld\\\"\""), "{out}");
+        assert!(!out.contains("\"\"\""), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }
