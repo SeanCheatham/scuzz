@@ -55,6 +55,10 @@ compile_c() {
       includes=(-Icrates/ffi-skia/include)
       ;;
     crates/embedder-desktop/*)
+      # X11 presenter is Linux-only (Makefile). Skip the compile check without X11.
+      if [[ "$src" == *x11_present.c && "$(uname -s)" != Linux ]]; then
+        return 0
+      fi
       includes=(-Icrates/embedder-desktop/include -Icrates/ffi-skia/include
         -Icrates/runtime/include)
       ;;

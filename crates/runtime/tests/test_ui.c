@@ -744,6 +744,63 @@ static void test_record_live_not_script(void) {
   remove(inject);
 }
 
+static void test_record_live_scroll(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *list, *scroll;
+  SzInputEvent ev;
+  const char *record = "/tmp/scuzz_ui_record_scroll.script";
+  char *body;
+  SzRect fr;
+  size_t n0;
+
+  remove(record);
+  root = sz_view_column();
+  list = sz_view_list();
+  sz_view_add_child(list, sz_view_text("one"));
+  sz_view_add_child(list, sz_view_text("two"));
+  sz_view_add_child(list, sz_view_text("three"));
+  sz_view_add_child(list, sz_view_text("four"));
+  scroll = sz_view_scroll(list);
+  sz_view_add_child(root, scroll);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_record(session, record));
+  assert(sz_ui_pump_sync(session));
+  fr = sz_view_frame(scroll);
+
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_SCROLL;
+  ev.x = fr.x + fr.w * 0.5f;
+  ev.y = fr.y + fr.h * 0.5f;
+  ev.dy = 40.f;
+  assert(sz_ui_session_live_inject(session, &ev));
+  body = slurp_cstr(record);
+  assert(strstr(body, "scroll 0 40") != NULL);
+  n0 = strlen(body);
+  free(body);
+
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_SCROLL;
+  ev.x = 1000.f;
+  ev.y = 1000.f;
+  ev.dy = 40.f;
+  assert(!sz_ui_session_live_inject(session, &ev));
+  body = slurp_cstr(record);
+  assert(strlen(body) == n0);
+  free(body);
+
+  sz_ui_unmount(session);
+  remove(record);
+}
+
 static void test_studio_shaped_xy(void) {
   SzUiConfig cfg;
   SzUiSession *session;
@@ -12655,6 +12712,7 @@ int main(void) {
   test_session_debug_dump();
   test_xy_hit_and_miss();
   test_record_live_not_script();
+  test_record_live_scroll();
   test_studio_shaped_xy();
   test_session_inject_script();
   test_session_inject_control();
