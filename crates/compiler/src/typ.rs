@@ -2185,6 +2185,12 @@ fn kit_lambda_param_ty_at(
             | "List.groupBy",
             1,
         ) => prior.first().and_then(|t| list_elem(t).ok()),
+        ("Map.filter" | "Map.exists" | "Map.forall" | "Map.mapValues", 1) => {
+            prior.first().and_then(|t| map_kv(t).ok().map(|(_, v)| v))
+        }
+        ("Set.filter" | "Set.exists" | "Set.forall" | "Set.map", 1) => {
+            prior.first().and_then(|t| set_elem(t).ok())
+        }
         ("List.tabulate", 1) => Some(Type::Int),
         (
             "Stream.filter" | "Stream.map" | "Stream.takeWhile" | "Stream.dropWhile"
@@ -2238,7 +2244,13 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
             | "Stream.takeWhile"
             | "Stream.dropWhile"
             | "Stream.find"
-            | "Stream.exists",
+            | "Stream.exists"
+            | "Map.filter"
+            | "Map.exists"
+            | "Map.forall"
+            | "Set.filter"
+            | "Set.exists"
+            | "Set.forall",
             1,
         ) => Some(Type::Bool),
         ("List.sortBy" | "List.maxBy" | "List.minBy", 1) => Some(Type::Int),
@@ -3592,6 +3604,26 @@ fn infer_call(
             let v = prefer_elem(&v1, &v2)?;
             Ok(Type::App("Map".into(), vec![k, v]))
         }
+        "Map.filter" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let (k, v) = map_kv(&arg_tys[0])?;
+            Ok(Type::App("Map".into(), vec![k, v]))
+        }
+        "Map.mapValues" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let (k, _) = map_kv(&arg_tys[0])?;
+            let out = match &arg_tys[1] {
+                Type::Fun(_, ret) => (**ret).clone(),
+                Type::Opaque(_) => Type::Opaque("Elem".into()),
+                other => other.clone(),
+            };
+            Ok(Type::App("Map".into(), vec![k, out]))
+        }
+        "Map.exists" | "Map.forall" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            map_kv(&arg_tys[0])?;
+            Ok(Type::Bool)
+        }
         "Set.empty" => {
             expect_arity(callee, &arg_tys, 0)?;
             Ok(Type::App("Set".into(), vec![Type::Opaque("Elem".into())]))
@@ -3640,6 +3672,26 @@ fn infer_call(
             let a = set_elem(&arg_tys[0])?;
             let b = set_elem(&arg_tys[1])?;
             prefer_elem(&a, &b)?;
+            Ok(Type::Bool)
+        }
+        "Set.filter" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let e = set_elem(&arg_tys[0])?;
+            Ok(Type::App("Set".into(), vec![e]))
+        }
+        "Set.map" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            set_elem(&arg_tys[0])?;
+            let key = match &arg_tys[1] {
+                Type::Fun(_, ret) => (**ret).clone(),
+                other => other.clone(),
+            };
+            expect_map_key(callee, &key)?;
+            Ok(Type::App("Set".into(), vec![key]))
+        }
+        "Set.exists" | "Set.forall" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            set_elem(&arg_tys[0])?;
             Ok(Type::Bool)
         }
         "Fs.read" | "Fs.list" | "Fs.mkdirs" | "Fs.canonicalize" => {
@@ -9581,6 +9633,55 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Map.union/intersect/diff should typecheck");
+    }
+
+    #[test]
+    fn typechecks_map_set_combinators() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    a = Map.set(Map.set(Map.empty(), "a", "1"), "b", "2")
+    s = Set.add(Set.add(Set.empty(), "x"), "y")
+    _ <- IO.println(List.join(Map.values(Map.filter(a, v => v != "2")), ","))
+    _ <- IO.println(List.join(Map.values(Map.mapValues(a, v => Str.concat(v, "!"))), ","))
+    _ <- IO.println(if (Map.exists(a, v => v == "2")) "y" else "n")
+    _ <- IO.println(if (Map.forall(a, v => v != "z")) "y" else "n")
+    _ <- IO.println(List.join(Set.toList(Set.filter(s, x => x != "y")), ","))
+    _ <- IO.println(List.join(Set.toList(Set.map(s, x => Str.concat(x, "!"))), ","))
+    _ <- IO.println(if (Set.exists(s, x => x == "x")) "y" else "n")
+    _ <- IO.println(if (Set.forall(s, x => x != "z")) "y" else "n")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Map/Set combinators should typecheck");
+    }
+
+    #[test]
+    fn typechecks_map_filter_lambda_must_be_bool() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(Map.values(Map.filter(Map.set(Map.empty(), "a", "1"), v => v)), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("Map.filter lambda must return Bool"),
+            "expected Bool lambda error, got {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn typechecks_set_map_lambda_must_be_key() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(Set.toList(Set.map(Set.add(Set.empty(), "x"), x => true)), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("Set.map lambda must return Int or String"),
+            "expected key lambda error, got {}",
+            err.message()
+        );
     }
 
     #[test]

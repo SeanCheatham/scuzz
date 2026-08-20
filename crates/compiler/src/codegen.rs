@@ -164,6 +164,14 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_map_union(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_map_intersect(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_map_diff(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_map_filter(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_map_map_values(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_map_exists(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_map_forall(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_set_filter(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_set_map(ptr, ptr, ptr, i32)").unwrap();
+    writeln!(out, "declare i64 @sz_set_exists(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_set_forall(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_set_is_subset(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_set_is_disjoint(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_append(ptr, ptr)").unwrap();
@@ -3412,6 +3420,45 @@ fn emit_list_group_by(
     owned_ptr(code, format!("%{prefix}_v"))
 }
 
+fn emit_set_map(
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 2, "Set.map expects 2 args");
+    let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
+        panic!("Set.map mapper must be a lambda");
+    };
+    let lam = emit_smap_lambda(
+        param,
+        body,
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        true,
+        inner.elem,
+    );
+    let inner_owned = inner.owned;
+    let inner_kind = inner.kind;
+    let inner_value = inner.value.clone();
+    let key_kind = i32::from(lam.elem != Kind::Int);
+    let mut code = inner.code;
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @sz_set_map(ptr {inner_value}, ptr %{prefix}_fnp, ptr %{prefix}_envp, i32 {key_kind})"
+    )
+    .unwrap();
+    drop_owned_ptr(&mut code, &lam);
+    if inner_owned && inner_kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {inner_value})").unwrap();
+    }
+    owned_ptr(code, format!("%{prefix}_v")).with_elem(lam.elem)
+}
+
 fn emit_list_extremum_by(
     callee: &str,
     want_max: i64,
@@ -3945,6 +3992,8 @@ fn emit_call(
         ("Stream.dropWhile", "sz_stream_dropwhile", false),
         ("Stream.find", "sz_stream_find", false),
         ("Stream.exists", "sz_stream_exists", true),
+        ("Map.filter", "sz_map_filter", false),
+        ("Set.filter", "sz_set_filter", false),
     ];
     const PRED_I64: &[(&str, &str)] = &[
         ("List.exists", "sz_list_exists"),
@@ -3953,6 +4002,10 @@ fn emit_call(
         ("List.count", "sz_list_count"),
         ("List.forall", "sz_list_forall"),
         ("List.prefixLength", "sz_list_prefix_length"),
+        ("Map.exists", "sz_map_exists"),
+        ("Map.forall", "sz_map_forall"),
+        ("Set.exists", "sz_set_exists"),
+        ("Set.forall", "sz_set_forall"),
     ];
     if callee == "Signal.map" {
         return emit_signal_map(args, ctx, locals, prefix);
@@ -3981,6 +4034,20 @@ fn emit_call(
     }
     if callee == "List.groupBy" {
         return emit_list_group_by(args, ctx, locals, prefix);
+    }
+    if callee == "Map.mapValues" {
+        return emit_ptr_map(
+            "Map.mapValues",
+            "sz_map_map_values",
+            args,
+            ctx,
+            locals,
+            prefix,
+            true,
+        );
+    }
+    if callee == "Set.map" {
+        return emit_set_map(args, ctx, locals, prefix);
     }
     if callee == "List.maxBy" {
         return emit_list_extremum_by("List.maxBy", 1, args, ctx, locals, prefix);
@@ -4881,7 +4948,14 @@ fn emit_call(
             if val_owned_box {
                 writeln!(code, "  call void @sz_release(ptr {val})").unwrap();
             }
-            owned_ptr(code, format!("%{prefix}_v"))
+            let elem = if callee == "Set.add" {
+                key_src.kind
+            } else if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
+                emitted_args[2].kind
+            } else {
+                Kind::Ptr
+            };
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(elem)
         }
         "Map.get" => {
             let key_src = &emitted_args[1];
@@ -5022,7 +5096,7 @@ fn emit_call(
             if key_src.kind == Kind::Int || key_src.kind == Kind::Float {
                 writeln!(code, "  call void @sz_release(ptr {key})").unwrap();
             }
-            owned_ptr(code, format!("%{prefix}_v"))
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
         }
         "Set.union" | "Set.intersect" | "Set.diff" | "Map.union" | "Map.intersect" | "Map.diff" => {
             let rt = match callee {
@@ -5041,7 +5115,7 @@ fn emit_call(
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             drop_owned_ptr(&mut code, &emitted_args[1]);
-            owned_ptr(code, format!("%{prefix}_v"))
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
         }
         "Set.isSubset" | "Set.isDisjoint" => {
             let rt = if callee == "Set.isSubset" {
@@ -9359,6 +9433,60 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of list {name} after List.sum:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_map_set_combinators() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(Map.values(Map.filter(Map.set(Map.empty(), "a", "1"), v => v != "z")), ","))
+    _ <- IO.println(List.join(Map.values(Map.mapValues(Map.set(Map.empty(), "a", "1"), v => Str.concat(v, "!"))), ","))
+    _ <- IO.println(if (Map.exists(Map.set(Map.empty(), "a", "1"), v => v == "1")) "y" else "n")
+    _ <- IO.println(if (Map.forall(Map.set(Map.empty(), "a", "1"), v => v != "z")) "y" else "n")
+    _ <- IO.println(List.join(Set.toList(Set.filter(Set.add(Set.empty(), "x"), x => x != "z")), ","))
+    _ <- IO.println(List.join(Set.toList(Set.map(Set.add(Set.empty(), "x"), x => Str.concat(x, "!"))), ","))
+    _ <- IO.println(if (Set.exists(Set.add(Set.empty(), "x"), x => x == "x")) "y" else "n")
+    _ <- IO.println(if (Set.forall(Set.add(Set.empty(), "x"), x => x != "z")) "y" else "n")
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_map_filter"));
+        assert!(ir.contains("sz_map_map_values"));
+        assert!(ir.contains("sz_map_exists"));
+        assert!(ir.contains("sz_map_forall"));
+        assert!(ir.contains("sz_set_filter"));
+        assert!(ir.contains("sz_set_map"));
+        assert!(ir.contains("sz_set_exists"));
+        assert!(ir.contains("sz_set_forall"));
+        let needle = "call ptr @sz_map_filter(ptr ";
+        let at = ir.find(needle).expect("filter");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of map {name} after Map.filter:\n{ir}"
+        );
+        let fn_at = ir.find("call ptr @sz_map_filter").expect("filter call");
+        let fn_pack = last_cl2_before(&ir, fn_at);
+        assert!(
+            ir[fn_at..].contains(&format!("call void @sz_release(ptr {fn_pack})")),
+            "expected last-use release of filter closure {fn_pack}:\n{ir}"
+        );
+        let needle = "call ptr @sz_map_map_values(ptr ";
+        let at = ir.find(needle).expect("mapValues");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of map {name} after Map.mapValues:\n{ir}"
+        );
+        let needle = "call ptr @sz_set_filter(ptr ";
+        let at = ir.find(needle).expect("set filter");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of set {name} after Set.filter:\n{ir}"
         );
     }
 
