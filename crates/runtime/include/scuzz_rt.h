@@ -601,6 +601,12 @@ int64_t sz_list_segment_length(SzList *xs, SzListPred pred, void *env, int64_t f
 int64_t sz_list_is_defined_at(SzList *xs, int64_t index);
 /* Negative when len < n, 0 when equal, positive when len > n. */
 int64_t sz_list_length_compare(SzList *xs, int64_t n);
+/* `as_int` 1 orders boxed Int, else String. `want_max` 1 is max. Empty max panics. */
+SzList *sz_list_sort(SzList *xs, int64_t as_int);
+SzList *sz_list_sort_by(SzList *xs, SzListMapFn fn, void *env);
+void *sz_list_max(SzList *xs, int64_t as_int);
+void *sz_list_min(SzList *xs, int64_t as_int);
+void *sz_list_max_by(SzList *xs, SzListMapFn fn, void *env, int64_t want_max);
 /* Release the spine; heads drop through RC. */
 void sz_list_free(SzList *xs);
 SzString *sz_list_join(const SzList *xs, const char *sep);

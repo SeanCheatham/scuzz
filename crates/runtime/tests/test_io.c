@@ -1283,6 +1283,11 @@ static int64_t keep_a(void *head, void *env) {
   return strcmp(sz_string_cstr((SzString *)head), "a") == 0;
 }
 
+static void *str_len_key(void *head, void *env) {
+  (void)env;
+  return sz_box_i64(sz_string_len((SzString *)head));
+}
+
 static int64_t keep_none(void *head, void *env) {
   (void)head;
   (void)env;
@@ -6381,6 +6386,89 @@ int main(void) {
     sz_string_free(a2);
     sz_string_free(b);
     sz_string_free(c);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
+  /* List.sort / sortBy / max / min / maxBy / minBy. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *a;
+    SzString *b;
+    SzString *c;
+    SzString *aa;
+    SzList *xs;
+    SzList *out;
+    SzList *ns;
+    void *n1;
+    void *n2;
+    void *n3;
+    sz_alloc_stats(&base_bytes, &base_count);
+    a = sz_string_from_cstr("c");
+    b = sz_string_from_cstr("a");
+    c = sz_string_from_cstr("b");
+    aa = sz_string_from_cstr("aa");
+    xs = sz_list_cons(a, NULL);
+    {
+      SzList *tmp = sz_list_append(xs, b);
+      sz_release(xs);
+      xs = sz_list_append(tmp, c);
+      sz_release(tmp);
+    }
+    out = sz_list_sort(xs, 0);
+    assert(sz_list_len(out) == 3);
+    assert(out->head == b);
+    assert(sz_list_at(out, 1) == c);
+    assert(sz_list_at(out, 2) == a);
+    sz_list_free(out);
+    out = sz_list_sort(NULL, 0);
+    assert(sz_list_is_empty(out));
+    assert(sz_list_max(xs, 0) == a);
+    assert(sz_list_min(xs, 0) == b);
+    sz_list_free(xs);
+    xs = sz_list_cons(aa, NULL);
+    {
+      SzList *tmp = sz_list_append(xs, b);
+      sz_release(xs);
+      xs = sz_list_append(tmp, a);
+      sz_release(tmp);
+    }
+    out = sz_list_sort_by(xs, str_len_key, NULL);
+    assert(sz_list_len(out) == 3);
+    assert(out->head == b);
+    assert(sz_list_at(out, 1) == a);
+    assert(sz_list_at(out, 2) == aa);
+    sz_list_free(out);
+    assert(sz_list_max_by(xs, str_len_key, NULL, 1) == aa);
+    assert(sz_list_max_by(xs, str_len_key, NULL, 0) == b);
+    sz_list_free(xs);
+    n1 = sz_box_i64(3);
+    n2 = sz_box_i64(1);
+    n3 = sz_box_i64(2);
+    ns = sz_list_cons(n1, NULL);
+    {
+      SzList *tmp = sz_list_append(ns, n2);
+      sz_release(ns);
+      ns = sz_list_append(tmp, n3);
+      sz_release(tmp);
+    }
+    out = sz_list_sort(ns, 1);
+    assert(sz_unbox_i64(sz_list_head(out)) == 1);
+    assert(sz_unbox_i64(sz_list_at(out, 1)) == 2);
+    assert(sz_unbox_i64(sz_list_at(out, 2)) == 3);
+    sz_list_free(out);
+    assert(sz_unbox_i64(sz_list_max(ns, 1)) == 3);
+    assert(sz_unbox_i64(sz_list_min(ns, 1)) == 1);
+    sz_list_free(ns);
+    sz_release(n1);
+    sz_release(n2);
+    sz_release(n3);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(c);
+    sz_string_free(aa);
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);

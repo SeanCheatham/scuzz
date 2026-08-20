@@ -464,6 +464,10 @@ mod tests {
             ("List.seg", "List.segmentLength"),
             ("List.isD", "List.isDefinedAt"),
             ("List.lengthC", "List.lengthCompare"),
+            ("List.so", "List.sort"),
+            ("List.sortB", "List.sortBy"),
+            ("List.maxB", "List.maxBy"),
+            ("List.minB", "List.minBy"),
             ("Color.rgb", "Color.rgb"),
             ("Color.rgb", "Color.rgba"),
         ] {

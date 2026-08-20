@@ -705,6 +705,15 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.lengthCompare",
         "List.lengthCompare(xs: List[T], n: Int): Int",
     ),
+    ("List.sort", "List.sort(xs: List[T]): List[T]"),
+    (
+        "List.sortBy",
+        "List.sortBy(xs: List[T], f: T => Int): List[T]",
+    ),
+    ("List.max", "List.max(xs: List[T]): T"),
+    ("List.min", "List.min(xs: List[T]): T"),
+    ("List.maxBy", "List.maxBy(xs: List[T], f: T => Int): T"),
+    ("List.minBy", "List.minBy(xs: List[T], f: T => Int): T"),
     (
         "List.forall",
         "List.forall(xs: List[T], pred: T => Bool): Bool",
@@ -2309,6 +2318,29 @@ record Point(x: Int, y: Int)
             h.contains("List.lengthCompare(xs: List[T], n: Int): Int"),
             "{h}"
         );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.sort(["b", "a"]), ","))
+"#;
+        let h = hover_src(src, "sort");
+        assert!(h.contains("List.sort(xs: List[T]): List[T]"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.sortBy(["bb", "a"], x => Str.len(x)), ","))
+"#;
+        let h = hover_src(src, "sortBy");
+        assert!(
+            h.contains("List.sortBy(xs: List[T], f: T => Int): List[T]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.max(["a", "c"]))
+"#;
+        let h = hover_src(src, "max");
+        assert!(h.contains("List.max(xs: List[T]): T"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.maxBy(["bb", "a"], x => Str.len(x)))
+"#;
+        let h = hover_src(src, "maxBy");
+        assert!(h.contains("List.maxBy(xs: List[T], f: T => Int): T"), "{h}");
     }
 
     #[test]
