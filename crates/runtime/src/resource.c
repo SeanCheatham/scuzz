@@ -30,7 +30,7 @@ typedef struct LangResSt {
 
 static SzIo *lang_fin_free_ok(void *ignored, void *env) {
   LangResSt *st = (LangResSt *)env;
-  (void)ignored;
+  sz_release(ignored);
   sz_release(st->acquired);
   st->acquired = NULL;
   sz_release(st->use_env);

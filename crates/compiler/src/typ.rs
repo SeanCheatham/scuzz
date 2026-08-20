@@ -2960,8 +2960,10 @@ fn infer(
                 let Type::Io(inner_ty) = it else {
                     return Err(TypeError::Msg("IO.ensure inner must be IO[_]".into()));
                 };
-                if !matches!(ft, Type::Io(_)) {
-                    return Err(TypeError::Msg("IO.ensure finalizer must be IO[_]".into()));
+                if !types_compat(&ft, &Type::Io(Box::new(Type::Unit))) {
+                    return Err(TypeError::Msg(
+                        "IO.ensure finalizer must be IO[Unit]".into(),
+                    ));
                 }
                 Ok(Type::Io(inner_ty))
             }
@@ -3763,12 +3765,38 @@ fn infer_call(
         "Resource.make" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::Io(Box::new(Type::String)))?;
+            if !matches!(&args[1].kind, ExprKind::Lambda { .. }) {
+                return Err(TypeError::Msg(
+                    "Resource.make callback must be a lambda".into(),
+                ));
+            }
+            let Type::Fun(_, bt) = &arg_tys[1] else {
+                return Err(TypeError::Msg(
+                    "Resource.make callback must be a lambda".into(),
+                ));
+            };
+            expect_ty(bt, &Type::Io(Box::new(Type::Unit)))?;
             Ok(handle_ty("Resource", Type::String))
         }
         "Resource.use" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_handle(&arg_tys[0], "Resource")?;
-            Ok(Type::Io(Box::new(Type::Unit)))
+            if !matches!(&args[1].kind, ExprKind::Lambda { .. }) {
+                return Err(TypeError::Msg(
+                    "Resource.use callback must be a lambda".into(),
+                ));
+            }
+            let Type::Fun(_, ret) = &arg_tys[1] else {
+                return Err(TypeError::Msg(
+                    "Resource.use callback must be a lambda".into(),
+                ));
+            };
+            let Type::Io(inner) = ret.as_ref() else {
+                return Err(TypeError::Msg(
+                    "Resource.use lambda must return IO[_]".into(),
+                ));
+            };
+            Ok(Type::Io(inner.clone()))
         }
         "Stream.emit" => {
             expect_arity(callee, &arg_tys, 1)?;
@@ -8736,6 +8764,64 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Resource.make/use should typecheck");
+    }
+
+    #[test]
+    fn typechecks_resource_use_payload() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    res = Resource.make(IO.pure("tok"), t => IO.println(t))
+    got <- Resource.use(res, t => IO.pure(t))
+    _ <- IO.println(got)
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Resource.use should yield IO[T]");
+    }
+
+    #[test]
+    fn rejects_resource_use_non_lambda() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    res = Resource.make(IO.pure("tok"), t => IO.println(t))
+    _ <- Resource.use(res, "nope")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("Resource.use callback must be a lambda"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_resource_make_non_unit_release() {
+        let src = r#"@main def main: IO[Unit] =
+  Resource.make(IO.pure("tok"), t => IO.pure("x"))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        assert!(
+            typecheck(&p).is_err(),
+            "Resource.make release must be IO[Unit]"
+        );
+    }
+
+    #[test]
+    fn rejects_resource_make_non_lambda() {
+        let src = r#"@main def main: IO[Unit] =
+  Resource.make(IO.pure("tok"), "nope")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("Resource.make callback must be a lambda"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]
