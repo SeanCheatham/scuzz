@@ -77,9 +77,18 @@ pub struct SpannedToken {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum InterpTok {
     Lit(String),
-    Ident(String),
-    /// Raw `${...}` body source (re-lexed by the parser).
-    Brace(String),
+    Ident {
+        name: String,
+        start: usize,
+        end: usize,
+    },
+    /// Raw `${...}` body source (re-lexed by the parser). `start`/`end` are
+    /// byte offsets of that body in the outer file.
+    Brace {
+        body: String,
+        start: usize,
+        end: usize,
+    },
 }
 
 #[derive(Debug, Error)]
@@ -90,6 +99,8 @@ pub enum LexError {
     UnterminatedString(usize),
     #[error("bad string interpolation at byte offset {0}")]
     BadInterpolation(usize),
+    #[error("integer overflow at byte offset {0}")]
+    IntegerOverflow(usize),
 }
 
 impl LexError {
@@ -97,7 +108,8 @@ impl LexError {
         match self {
             LexError::UnexpectedChar(_, o)
             | LexError::UnterminatedString(o)
-            | LexError::BadInterpolation(o) => *o,
+            | LexError::BadInterpolation(o)
+            | LexError::IntegerOverflow(o) => *o,
         }
     }
 }
@@ -292,7 +304,7 @@ pub fn lex(input: &str) -> Result<Vec<SpannedToken>, LexError> {
         }
         if c.is_ascii_digit() {
             let start = i;
-            let (token, next) = lex_number(&chars, i)?;
+            let (token, next) = lex_number(&chars, i, &char_byte)?;
             i = next;
             tokens.push(SpannedToken {
                 token,
@@ -429,15 +441,25 @@ where
     (digits, i)
 }
 
-fn parse_dec_i64(digits: &str) -> i64 {
-    let mut n = 0i64;
+fn parse_int_digits(digits: &str, radix: u32, start: usize) -> Result<i64, LexError> {
+    let mut n: i128 = 0;
+    let r = radix as i128;
     for d in digits.chars() {
-        n = n.saturating_mul(10).saturating_add((d as u8 - b'0') as i64);
+        let v = d.to_digit(radix).expect("digit already filtered") as i128;
+        n = n
+            .checked_mul(r)
+            .and_then(|n| n.checked_add(v))
+            .ok_or(LexError::IntegerOverflow(start))?;
     }
-    n
+    i64::try_from(n).map_err(|_| LexError::IntegerOverflow(start))
 }
 
-fn lex_number(chars: &[char], start: usize) -> Result<(Token, usize), LexError> {
+fn lex_number(
+    chars: &[char],
+    start: usize,
+    char_byte: &[usize],
+) -> Result<(Token, usize), LexError> {
+    let off = byte_at_chars(char_byte, start);
     let mut i = start;
     if chars[i] == '0' && i + 1 < chars.len() {
         let next = chars[i + 1];
@@ -445,15 +467,7 @@ fn lex_number(chars: &[char], start: usize) -> Result<(Token, usize), LexError> 
             i += 2;
             let (digits, next_i) = take_separated_digits(chars, i, |c| c.is_ascii_hexdigit());
             i = next_i;
-            let mut n = 0i64;
-            for d in digits.chars() {
-                let v = if d.is_ascii_digit() {
-                    (d as u8 - b'0') as i64
-                } else {
-                    (d.to_ascii_lowercase() as u8 - b'a' + 10) as i64
-                };
-                n = n.saturating_mul(16).saturating_add(v);
-            }
+            let n = parse_int_digits(&digits, 16, off)?;
             return Ok((Token::IntLit(n), i));
         }
         if (next == 'b' || next == 'B')
@@ -463,10 +477,7 @@ fn lex_number(chars: &[char], start: usize) -> Result<(Token, usize), LexError> 
             i += 2;
             let (digits, next_i) = take_separated_digits(chars, i, |c| c == '0' || c == '1');
             i = next_i;
-            let mut n = 0i64;
-            for d in digits.chars() {
-                n = n.saturating_mul(2).saturating_add((d as u8 - b'0') as i64);
-            }
+            let n = parse_int_digits(&digits, 2, off)?;
             return Ok((Token::IntLit(n), i));
         }
     }
@@ -509,7 +520,7 @@ fn lex_number(chars: &[char], start: usize) -> Result<(Token, usize), LexError> 
         let bits = lexeme.parse::<f64>().map(f64::to_bits).unwrap_or(0);
         Ok((Token::FloatLit(bits), i))
     } else {
-        Ok((Token::IntLit(parse_dec_i64(&lexeme)), i))
+        Ok((Token::IntLit(parse_int_digits(&lexeme, 10, off)?), i))
     }
 }
 
@@ -579,7 +590,7 @@ fn read_interp_string(
             let parts = compact_interp_parts(parts);
             return Ok((parts, i + 1));
         }
-        if ch == '\\' {
+        if !triple && ch == '\\' {
             i += 1;
             if i >= chars.len() {
                 return Err(LexError::UnterminatedString(byte_at_chars(
@@ -609,33 +620,30 @@ fn read_interp_string(
             if chars[i] == '{' {
                 i += 1;
                 let body_start = i;
-                let mut depth = 1usize;
-                while i < chars.len() {
-                    if chars[i] == '{' {
-                        depth += 1;
-                    } else if chars[i] == '}' {
-                        depth -= 1;
-                        if depth == 0 {
-                            break;
-                        }
-                    }
-                    i += 1;
-                }
-                if i >= chars.len() || chars[i] != '}' {
-                    return Err(LexError::BadInterpolation(byte_at_chars(char_byte, start)));
-                }
+                i = scan_interp_hole(chars, i, char_byte, start)?;
                 let body: String = chars[body_start..i].iter().collect();
-                parts.push(InterpTok::Brace(body));
+                let start_off = byte_at_chars(char_byte, body_start);
+                let end_off = byte_at_chars(char_byte, i);
+                parts.push(InterpTok::Brace {
+                    body,
+                    start: start_off,
+                    end: end_off,
+                });
                 i += 1;
                 continue;
             }
             if chars[i].is_ascii_alphabetic() || chars[i] == '_' {
+                let name_start = i;
                 let mut name = String::new();
                 while i < chars.len() && (chars[i].is_ascii_alphanumeric() || chars[i] == '_') {
                     name.push(chars[i]);
                     i += 1;
                 }
-                parts.push(InterpTok::Ident(name));
+                parts.push(InterpTok::Ident {
+                    name,
+                    start: byte_at_chars(char_byte, name_start),
+                    end: byte_at_chars(char_byte, i),
+                });
                 continue;
             }
             return Err(LexError::BadInterpolation(byte_at_chars(char_byte, start)));
@@ -646,6 +654,75 @@ fn read_interp_string(
     Err(LexError::UnterminatedString(byte_at_chars(
         char_byte, start,
     )))
+}
+
+/// Scan a `${...}` hole. Skip strings and `//` comments so a `}` in quotes or
+/// a comment does not close the hole. Stop on the matching `}`. Return the
+/// index of that `}`.
+fn scan_interp_hole(
+    chars: &[char],
+    mut i: usize,
+    char_byte: &[usize],
+    start: usize,
+) -> Result<usize, LexError> {
+    let mut depth = 1usize;
+    while i < chars.len() {
+        if is_triple_quote(chars, i) {
+            i = skip_triple_string(chars, i)
+                .ok_or(LexError::BadInterpolation(byte_at_chars(char_byte, start)))?;
+            continue;
+        }
+        if chars[i] == '"' {
+            i = skip_quoted_string(chars, i)
+                .ok_or(LexError::BadInterpolation(byte_at_chars(char_byte, start)))?;
+            continue;
+        }
+        if chars[i] == '/' && i + 1 < chars.len() && chars[i + 1] == '/' {
+            i += 2;
+            while i < chars.len() && chars[i] != '\n' {
+                i += 1;
+            }
+            continue;
+        }
+        if chars[i] == '{' {
+            depth += 1;
+        } else if chars[i] == '}' {
+            depth -= 1;
+            if depth == 0 {
+                return Ok(i);
+            }
+        }
+        i += 1;
+    }
+    Err(LexError::BadInterpolation(byte_at_chars(char_byte, start)))
+}
+
+fn skip_triple_string(chars: &[char], i: usize) -> Option<usize> {
+    let mut j = i + 3;
+    while j < chars.len() {
+        if is_triple_quote(chars, j) {
+            return Some(j + 3);
+        }
+        j += 1;
+    }
+    None
+}
+
+fn skip_quoted_string(chars: &[char], i: usize) -> Option<usize> {
+    let mut j = i + 1;
+    while j < chars.len() {
+        if chars[j] == '"' {
+            return Some(j + 1);
+        }
+        if chars[j] == '\\' {
+            j += 1;
+            if j >= chars.len() {
+                return None;
+            }
+        }
+        j += 1;
+    }
+    None
 }
 
 fn compact_interp_parts(parts: Vec<InterpTok>) -> Vec<InterpTok> {
@@ -734,9 +811,13 @@ mod tests {
         let toks = lex(r#"s"real:$t""#).unwrap();
         match &toks[0].token {
             Token::InterpString(parts) => {
-                assert_eq!(
-                    parts,
-                    &vec![InterpTok::Lit("real:".into()), InterpTok::Ident("t".into())]
+                assert!(
+                    matches!(
+                        parts.as_slice(),
+                        [InterpTok::Lit(a), InterpTok::Ident { name, .. }]
+                            if a == "real:" && name == "t"
+                    ),
+                    "{parts:?}"
                 );
             }
             other => panic!("expected InterpString, got {other:?}"),
@@ -853,13 +934,16 @@ mod tests {
         let toks = lex("s\"\"\"n=$n\nok\"\"\"").unwrap();
         match &toks[0].token {
             Token::InterpString(parts) => {
-                assert_eq!(
-                    parts,
-                    &vec![
-                        InterpTok::Lit("n=".into()),
-                        InterpTok::Ident("n".into()),
-                        InterpTok::Lit("\nok".into()),
-                    ]
+                assert!(
+                    matches!(
+                        parts.as_slice(),
+                        [
+                            InterpTok::Lit(a),
+                            InterpTok::Ident { name, .. },
+                            InterpTok::Lit(b)
+                        ] if a == "n=" && name == "n" && b == "\nok"
+                    ),
+                    "{parts:?}"
                 );
             }
             other => panic!("expected InterpString, got {other:?}"),
@@ -888,5 +972,73 @@ mod tests {
             ),
             "{glued:?}"
         );
+    }
+
+    #[test]
+    fn rejects_integer_overflow() {
+        let max = lex("9223372036854775807").unwrap();
+        assert!(matches!(max[0].token, Token::IntLit(n) if n == i64::MAX));
+        assert!(matches!(
+            lex("9223372036854775808"),
+            Err(LexError::IntegerOverflow(_))
+        ));
+        assert!(matches!(
+            lex("0x8000000000000000"),
+            Err(LexError::IntegerOverflow(_))
+        ));
+        assert!(matches!(
+            lex("0xFFFFFFFFFFFFFFFF"),
+            Err(LexError::IntegerOverflow(_))
+        ));
+        let bin = format!("0b1{}", "0".repeat(64));
+        assert!(matches!(lex(&bin), Err(LexError::IntegerOverflow(_))));
+    }
+
+    #[test]
+    fn triple_interp_keeps_backslash() {
+        let toks = lex("s\"\"\"a\\nb$n\"\"\"").unwrap();
+        match &toks[0].token {
+            Token::InterpString(parts) => {
+                assert!(
+                    matches!(
+                        parts.as_slice(),
+                        [InterpTok::Lit(a), InterpTok::Ident { name, .. }]
+                            if a == "a\\nb" && name == "n"
+                    ),
+                    "{parts:?}"
+                );
+            }
+            other => panic!("expected InterpString, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn interp_hole_skips_string_and_comment_braces() {
+        let toks = lex(r#"s"${Str.concat("}", "x")}""#).unwrap();
+        match &toks[0].token {
+            Token::InterpString(parts) => {
+                assert!(
+                    matches!(
+                        parts.as_slice(),
+                        [InterpTok::Brace { body, .. }] if body == r#"Str.concat("}", "x")"#
+                    ),
+                    "{parts:?}"
+                );
+            }
+            other => panic!("expected InterpString, got {other:?}"),
+        }
+        let toks = lex("s\"${1 // }\n}\"").unwrap();
+        match &toks[0].token {
+            Token::InterpString(parts) => {
+                assert!(
+                    matches!(
+                        parts.as_slice(),
+                        [InterpTok::Brace { body, .. }] if body == "1 // }\n"
+                    ),
+                    "{parts:?}"
+                );
+            }
+            other => panic!("expected InterpString, got {other:?}"),
+        }
     }
 }
