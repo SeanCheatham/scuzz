@@ -285,6 +285,10 @@ jobs:
           grep -q "each:k" /tmp/io.out
           grep -q "when:y" /tmp/io.out
           grep -q "unless:y" /tmp/io.out
+          grep -q "refN:2" /tmp/io.out
+          grep -q "queueN:7" /tmp/io.out
+          grep -q "defN:8" /tmp/io.out
+          grep -q "forkN:9" /tmp/io.out
           grep -q "fs:fs-note" /tmp/io.out
           grep -q "use:token" /tmp/io.out
           grep -q "release:token" /tmp/io.out

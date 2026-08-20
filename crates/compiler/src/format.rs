@@ -1273,6 +1273,23 @@ record Box[T](x: T):
     }
 
     #[test]
+    fn formats_ref_update_roundtrip() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    r <- Ref.of(1)
+    _ <- Ref.update(r, n => n + 1)
+    n <- Ref.updateAndGet(r, n => n + 1)
+    _ <- IO.println(Str.fromInt(n))
+  } yield ()
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("Ref.update("));
+        assert!(out.contains("Ref.updateAndGet("));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
     fn formats_resource_roundtrip() {
         let src = r#"@main def main: IO[Unit] =
   for {
