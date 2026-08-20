@@ -345,7 +345,7 @@ fn binder_binds(b: &ForBinder, name: &str) -> bool {
 fn pat_binds(p: &Pattern, name: &str) -> bool {
     match p {
         Pattern::Bind(n) => n == name,
-        Pattern::Tuple { left, right, .. } => pat_binds(left, name) || pat_binds(right, name),
+        Pattern::Tuple { elems, .. } => elems.iter().any(|e| pat_binds(e, name)),
         Pattern::Adt { binds, .. } => binds.iter().any(|b| pat_binds(b, name)),
         Pattern::Cons { head, tail, .. } => pat_binds(head, name) || pat_binds(tail, name),
         Pattern::As { name: n, inner } => n == name || pat_binds(inner, name),

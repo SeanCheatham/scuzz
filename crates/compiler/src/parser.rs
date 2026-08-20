@@ -1,7 +1,8 @@
 use crate::ast::{
-    is_for_binder_pat, is_tuple_binder_pat, simple_binder_name, BinOp, EnumCase, EnumDef, Expr,
-    ExprKind, ForBinder, FunDef, ImplDef, ImplMethod, Import, InterpPart, MainDef, MatchArm, Param,
-    Pattern, Program, TraitDef, TraitMethod, Type, TypeAlias, UnOp, TUP_UNPACK,
+    is_for_binder_pat, is_tuple_binder_pat, opaque_tuple_pat, simple_binder_name, BinOp, EnumCase,
+    EnumDef, Expr, ExprKind, ForBinder, FunDef, ImplDef, ImplMethod, Import, InterpPart, MainDef,
+    MatchArm, Param, Pattern, Program, TraitDef, TraitMethod, Type, TypeAlias, UnOp,
+    MAX_TUPLE_ARITY, TUP_UNPACK,
 };
 use crate::lexer::{lex, InterpTok, LexError, SpannedToken, Token};
 use crate::resolve::module_id_from_label;
@@ -431,6 +432,16 @@ impl Parser {
             msg: msg.into(),
             span: self.current_span(),
         }
+    }
+
+    fn check_tuple_arity(&self, n: usize) -> Result<(), ParseError> {
+        if n < 2 {
+            return Err(self.err("tuple needs two or more slots"));
+        }
+        if n > MAX_TUPLE_ARITY {
+            return Err(self.err(format!("tuple has at most {MAX_TUPLE_ARITY} slots")));
+        }
+        Ok(())
     }
 
     fn at_item_start(&self) -> bool {
@@ -1107,12 +1118,21 @@ impl Parser {
             let inner = self.parse_type_with_tparams(type_params)?;
             if matches!(self.peek(), Token::Comma) {
                 self.bump();
-                let right = self.parse_type_with_tparams(type_params)?;
-                if matches!(self.peek(), Token::Comma) {
-                    return Err(self.err("tuple has two slots"));
+                let mut elems = vec![inner];
+                loop {
+                    if matches!(self.peek(), Token::RParen) {
+                        break;
+                    }
+                    elems.push(self.parse_type_with_tparams(type_params)?);
+                    if matches!(self.peek(), Token::Comma) {
+                        self.bump();
+                    } else {
+                        break;
+                    }
                 }
+                self.check_tuple_arity(elems.len())?;
                 self.expect(&Token::RParen)?;
-                return Ok(Type::Tuple(Box::new(inner), Box::new(right)));
+                return Ok(Type::Tuple(elems));
             }
             self.expect(&Token::RParen)?;
             return Ok(inner);
@@ -1755,19 +1775,27 @@ impl Parser {
         match self.peek().clone() {
             Token::LParen => {
                 self.bump();
-                let left = self.parse_or_pattern()?;
-                self.expect(&Token::Comma)?;
-                let right = self.parse_or_pattern()?;
-                if matches!(self.peek(), Token::Comma) {
-                    return Err(self.err("tuple has two slots"));
+                let first = self.parse_or_pattern()?;
+                if !matches!(self.peek(), Token::Comma) {
+                    self.expect(&Token::RParen)?;
+                    return Ok(first);
                 }
+                self.bump();
+                let mut elems = vec![first];
+                loop {
+                    if matches!(self.peek(), Token::RParen) {
+                        break;
+                    }
+                    elems.push(self.parse_or_pattern()?);
+                    if matches!(self.peek(), Token::Comma) {
+                        self.bump();
+                    } else {
+                        break;
+                    }
+                }
+                self.check_tuple_arity(elems.len())?;
                 self.expect(&Token::RParen)?;
-                Ok(Pattern::Tuple {
-                    left: Box::new(left),
-                    right: Box::new(right),
-                    left_ty: Type::Opaque("Elem".into()),
-                    right_ty: Type::Opaque("Elem".into()),
-                })
+                Ok(opaque_tuple_pat(elems))
             }
             Token::LBracket => self.parse_list_pattern(),
             Token::Underscore => {
@@ -1953,19 +1981,23 @@ impl Parser {
         }
         if matches!(self.peek(), Token::Comma) {
             self.bump();
-            let right = self.parse_or_pattern()?;
-            if matches!(self.peek(), Token::Comma) {
-                return Err(self.err("tuple has two slots"));
+            let mut elems = vec![left];
+            loop {
+                if matches!(self.peek(), Token::RParen) {
+                    break;
+                }
+                elems.push(self.parse_or_pattern()?);
+                if matches!(self.peek(), Token::Comma) {
+                    self.bump();
+                } else {
+                    break;
+                }
             }
+            self.check_tuple_arity(elems.len())?;
             self.expect(&Token::RParen)?;
             self.expect(&Token::Arrow)?;
             let body = self.parse_block()?;
-            let pat = Pattern::Tuple {
-                left: Box::new(left),
-                right: Box::new(right),
-                left_ty: Type::Opaque("Elem".into()),
-                right_ty: Type::Opaque("Elem".into()),
-            };
+            let pat = opaque_tuple_pat(elems);
             if !is_tuple_binder_pat(&pat) {
                 return Err(self.err(
                     "tuple lambda must bind names, `_`, nested `(a, b)`, or a constructor pattern",
@@ -2124,18 +2156,21 @@ impl Parser {
                 let inner = inner?;
                 if matches!(self.peek(), Token::Comma) {
                     self.bump();
-                    let right = self.parse_expr()?;
-                    if matches!(self.peek(), Token::Comma) {
-                        return Err(self.err("tuple has two slots"));
+                    let mut elems = vec![inner];
+                    loop {
+                        if matches!(self.peek(), Token::RParen) {
+                            break;
+                        }
+                        elems.push(self.parse_expr()?);
+                        if matches!(self.peek(), Token::Comma) {
+                            self.bump();
+                        } else {
+                            break;
+                        }
                     }
+                    self.check_tuple_arity(elems.len())?;
                     let end = self.expect(&Token::RParen)?;
-                    return Ok(self.mk(
-                        ExprKind::Tuple {
-                            left: Box::new(inner),
-                            right: Box::new(right),
-                        },
-                        start.cover(&end),
-                    ));
+                    return Ok(self.mk(ExprKind::Tuple { elems }, start.cover(&end)));
                 }
                 self.expect(&Token::RParen)?;
                 Ok(inner)
@@ -2488,16 +2523,17 @@ def swap(p: (Int, String)): (String, Int) =
         let p = parse(src).unwrap();
         assert!(matches!(
             &p.defs[0].params[0].ty,
-            Type::Tuple(a, b) if matches!(**a, Type::Int) && matches!(**b, Type::String)
+            Type::Tuple(xs) if matches!(xs.as_slice(), [Type::Int, Type::String])
         ));
         assert!(matches!(
             &p.defs[0].ret,
-            Type::Tuple(a, b) if matches!(**a, Type::String) && matches!(**b, Type::Int)
+            Type::Tuple(xs) if matches!(xs.as_slice(), [Type::String, Type::Int])
         ));
         match &p.defs[0].body.kind {
-            ExprKind::Tuple { left, right } => {
-                assert!(matches!(&left.kind, ExprKind::Field { field, .. } if field == "_2"));
-                assert!(matches!(&right.kind, ExprKind::Field { field, .. } if field == "_1"));
+            ExprKind::Tuple { elems } => {
+                assert_eq!(elems.len(), 2);
+                assert!(matches!(&elems[0].kind, ExprKind::Field { field, .. } if field == "_2"));
+                assert!(matches!(&elems[1].kind, ExprKind::Field { field, .. } if field == "_1"));
             }
             other => panic!("expected tuple, got {other:?}"),
         }
@@ -2558,8 +2594,9 @@ def swap(p: (Int, String)): (String, Int) =
                 ForBinder::Eq { name, pat, .. } => {
                     assert_eq!(name, crate::ast::TUP_UNPACK);
                     match pat {
-                        Some(Pattern::Tuple { right, .. }) => {
-                            assert!(matches!(**right, Pattern::Tuple { .. }));
+                        Some(Pattern::Tuple { elems, .. }) => {
+                            assert_eq!(elems.len(), 2);
+                            assert!(matches!(elems[1], Pattern::Tuple { .. }));
                         }
                         other => panic!("expected nested tuple, got {other:?}"),
                     }
@@ -2652,10 +2689,38 @@ record Point(x: Int, y: Int)
     }
 
     #[test]
-    fn parse_rejects_three_slot_tuple() {
-        let src = r#"@main def main: IO[Unit] = IO.println((1, 2, 3))"#;
+    fn parse_three_slot_tuple() {
+        let src = r#"
+def f(p: (Int, String, Bool)): Int = p._1
+@main def main: IO[Unit] =
+  for {
+    (a, b, c) = (1, "x", true)
+  } yield IO.println(Str.fromInt(f((a, b, c))))
+"#;
+        let p = parse(src).unwrap();
+        assert!(matches!(
+            &p.defs[0].params[0].ty,
+            Type::Tuple(xs) if xs.len() == 3
+        ));
+        match &p.main.body.kind {
+            ExprKind::For { binders, .. } => match &binders[0] {
+                ForBinder::Eq {
+                    pat: Some(Pattern::Tuple { elems, .. }),
+                    ..
+                } => {
+                    assert_eq!(elems.len(), 3);
+                }
+                other => panic!("expected 3-slot binder, got {other:?}"),
+            },
+            other => panic!("expected for, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_rejects_nine_slot_tuple() {
+        let src = r#"@main def main: IO[Unit] = IO.println((1, 2, 3, 4, 5, 6, 7, 8, 9))"#;
         let err = parse(src).unwrap_err();
-        assert!(err.to_string().contains("tuple has two slots"), "{err}");
+        assert!(err.to_string().contains("at most 8 slots"), "{err}");
     }
 
     #[test]

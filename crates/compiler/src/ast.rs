@@ -276,9 +276,8 @@ impl Expr {
                 left: Box::new(f(*left)?),
                 right: Box::new(f(*right)?),
             },
-            ExprKind::Tuple { left, right } => ExprKind::Tuple {
-                left: Box::new(f(*left)?),
-                right: Box::new(f(*right)?),
+            ExprKind::Tuple { elems } => ExprKind::Tuple {
+                elems: elems.into_iter().map(f).collect::<Result<Vec<_>, _>>()?,
             },
             ExprKind::IoTimeout { ms, inner } => ExprKind::IoTimeout {
                 ms: Box::new(f(*ms)?),
@@ -434,10 +433,6 @@ impl Expr {
                 left: inner,
                 right: body,
             }
-            | ExprKind::Tuple {
-                left: inner,
-                right: body,
-            }
             | ExprKind::Binary {
                 left: inner,
                 right: body,
@@ -449,6 +444,11 @@ impl Expr {
             } => {
                 f(inner);
                 f(body);
+            }
+            ExprKind::Tuple { elems } => {
+                for e in elems {
+                    f(e);
+                }
             }
             ExprKind::Unary { expr, .. }
             | ExprKind::NamedArg { value: expr, .. }
@@ -613,8 +613,8 @@ pub enum ExprKind {
     StrLit(String),
     /// List literal `[a, b, c]`
     ListLit { elems: Vec<Expr> },
-    /// `(a, b)` — two-slot tuple. Runtime is `SzPair`.
-    Tuple { left: Box<Expr>, right: Box<Expr> },
+    /// `(a, b)` / `(a, b, c)` — two or more slots. Runtime is right-nested `SzPair`.
+    Tuple { elems: Vec<Expr> },
     /// `s"...$x..."` / `s"...${expr}..."` — typed concat (Int / Float holes stringify).
     Interpolate { parts: Vec<InterpPart> },
     /// `if (cond) then else else_`
@@ -657,6 +657,23 @@ pub enum InterpPart {
 
 /// Synthetic binder for `(a, b) = e` / `Opt.Some(n) =>` until lower unpacks the pattern.
 pub const TUP_UNPACK: &str = "__tup";
+
+/// Max tuple slots. Nest tuples for a larger product.
+pub const MAX_TUPLE_ARITY: usize = 8;
+
+/// Parse `_1` … `_8` as a 0-based slot index.
+pub fn tuple_slot(field: &str) -> Option<usize> {
+    let n = field.strip_prefix('_')?;
+    if n.is_empty() || !n.bytes().all(|b| b.is_ascii_digit()) || n.starts_with('0') {
+        return None;
+    }
+    let i: usize = n.parse().ok()?;
+    if (1..=MAX_TUPLE_ARITY).contains(&i) {
+        Some(i - 1)
+    } else {
+        None
+    }
+}
 
 /// Binder inside `for { … }`: `x = e` (pure) or `x <- e` (effect).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -717,9 +734,7 @@ pub fn is_unpack_binder_pat(p: &Pattern) -> bool {
         Pattern::Int(_) | Pattern::Float(_) | Pattern::Bool(_) | Pattern::Str(_) | Pattern::Nil => {
             true
         }
-        Pattern::Tuple { left, right, .. } => {
-            is_unpack_binder_pat(left) && is_unpack_binder_pat(right)
-        }
+        Pattern::Tuple { elems, .. } => elems.iter().all(is_unpack_binder_pat),
         Pattern::Adt { binds, .. } => binds.iter().all(is_unpack_binder_pat),
         Pattern::Cons { head, tail, .. } => {
             is_unpack_binder_pat(head) && is_unpack_binder_pat(tail)
@@ -735,6 +750,15 @@ pub fn is_for_binder_pat(p: &Pattern) -> bool {
         p,
         Pattern::Int(_) | Pattern::Float(_) | Pattern::Bool(_) | Pattern::Str(_)
     ) && is_unpack_binder_pat(p)
+}
+
+/// Tuple pattern with Opaque slot types (parser / lambda unpack).
+pub fn opaque_tuple_pat(elems: Vec<Pattern>) -> Pattern {
+    let n = elems.len();
+    Pattern::Tuple {
+        elems,
+        tys: vec![Type::Opaque("Elem".into()); n],
+    }
 }
 
 /// Simple `x` / `_` binder. `None` for a tuple unpack.
@@ -813,13 +837,8 @@ pub enum Pattern {
         /// Element type. Parser leaves `Opaque("Elem")`. Elaborate fills it.
         elem: Type,
     },
-    /// `(a, b)`. Parser leaves types Opaque. Elaborate fills them from the scrutinee.
-    Tuple {
-        left: Box<Pattern>,
-        right: Box<Pattern>,
-        left_ty: Type,
-        right_ty: Type,
-    },
+    /// `(a, b)` / `(a, b, c)`. Parser leaves types Opaque. Elaborate fills them from the scrutinee.
+    Tuple { elems: Vec<Pattern>, tys: Vec<Type> },
     /// `x = pat` in an ADT payload. Typecheck rewrites to positional.
     Named { name: String, inner: Box<Pattern> },
 }
@@ -895,7 +914,7 @@ impl Pattern {
         match self {
             Pattern::Wildcard | Pattern::Bind(_) => true,
             Pattern::As { inner, .. } | Pattern::Named { inner, .. } => inner.is_irrefutable(),
-            Pattern::Tuple { left, right, .. } => left.is_irrefutable() && right.is_irrefutable(),
+            Pattern::Tuple { elems, .. } => elems.iter().all(|e| e.is_irrefutable()),
             Pattern::Or(alts) => alts.iter().any(|a| a.is_irrefutable()),
             _ => false,
         }
@@ -922,16 +941,9 @@ impl Pattern {
                 tail: Box::new(tail.strip_as()),
                 elem: elem.clone(),
             },
-            Pattern::Tuple {
-                left,
-                right,
-                left_ty,
-                right_ty,
-            } => Pattern::Tuple {
-                left: Box::new(left.strip_as()),
-                right: Box::new(right.strip_as()),
-                left_ty: left_ty.clone(),
-                right_ty: right_ty.clone(),
+            Pattern::Tuple { elems, tys } => Pattern::Tuple {
+                elems: elems.iter().map(|e| e.strip_as()).collect(),
+                tys: tys.clone(),
             },
             Pattern::Named { name, inner } => Pattern::Named {
                 name: name.clone(),
@@ -986,24 +998,13 @@ impl Pattern {
                     })
                     .collect()
             }
-            Pattern::Tuple {
-                left,
-                right,
-                left_ty,
-                right_ty,
-            } => {
-                let parts = [left.flatten_or(), right.flatten_or()];
+            Pattern::Tuple { elems, tys } => {
+                let parts: Vec<Vec<Pattern>> = elems.iter().map(|e| e.flatten_or()).collect();
                 cartesian_patterns(&parts)
                     .into_iter()
-                    .map(|mut row| {
-                        let r = row.pop().unwrap();
-                        let l = row.pop().unwrap();
-                        Pattern::Tuple {
-                            left: Box::new(l),
-                            right: Box::new(r),
-                            left_ty: left_ty.clone(),
-                            right_ty: right_ty.clone(),
-                        }
+                    .map(|elems| Pattern::Tuple {
+                        elems,
+                        tys: tys.clone(),
                     })
                     .collect()
             }
@@ -1043,8 +1044,8 @@ pub enum Type {
     Bool,
     /// Homogeneous cons list. Runtime is untyped pointers; the argument is a check-time element type.
     List(Box<Type>),
-    /// Two-slot tuple `(A, B)`. Runtime is `SzPair`.
-    Tuple(Box<Type>, Box<Type>),
+    /// Tuple `(A, B)` / `(A, B, C)`. Runtime is right-nested `SzPair`.
+    Tuple(Vec<Type>),
     /// Single-parameter function type (`T => U`) for kit lambdas.
     Fun(Box<Type>, Box<Type>),
     Io(Box<Type>),
@@ -1067,7 +1068,10 @@ impl std::fmt::Display for Type {
             Type::String => write!(f, "String"),
             Type::Bool => write!(f, "Bool"),
             Type::List(t) => write!(f, "List[{t}]"),
-            Type::Tuple(a, b) => write!(f, "({a}, {b})"),
+            Type::Tuple(xs) => {
+                let inner: Vec<String> = xs.iter().map(|t| t.to_string()).collect();
+                write!(f, "({})", inner.join(", "))
+            }
             Type::Fun(a, b) => write!(f, "{a} => {b}"),
             Type::Io(t) => write!(f, "IO[{t}]"),
             Type::Adt(n) | Type::Var(n) | Type::Opaque(n) => write!(f, "{n}"),

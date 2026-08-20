@@ -67,16 +67,12 @@ fn lower_pattern(pat: Pattern, enums: &EnumIndex<'_>, current_module: &str) -> P
             tail: Box::new(lower_pattern(*tail, enums, current_module)),
             elem,
         },
-        Pattern::Tuple {
-            left,
-            right,
-            left_ty,
-            right_ty,
-        } => Pattern::Tuple {
-            left: Box::new(lower_pattern(*left, enums, current_module)),
-            right: Box::new(lower_pattern(*right, enums, current_module)),
-            left_ty,
-            right_ty,
+        Pattern::Tuple { elems, tys } => Pattern::Tuple {
+            elems: elems
+                .into_iter()
+                .map(|e| lower_pattern(e, enums, current_module))
+                .collect(),
+            tys,
         },
         Pattern::Named { name, inner } => Pattern::Named {
             name,
