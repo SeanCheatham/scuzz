@@ -3572,16 +3572,32 @@ int main(void) {
     r = sz_io_unsafe_run(sz_fs_canonicalize(sz_string_from_cstr("build")));
     assert(r.ok);
     assert(sz_string_len((SzString *)r.value) > 0);
+
+    r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("build")));
+    assert(!r.ok);
+    sz_error_free(r.error);
+
+    r = sz_io_unsafe_run(sz_fs_write(
+        sz_string_from_cstr("build/test_fs_mkdirs_file"), sz_string_from_cstr("x")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(
+        sz_fs_mkdirs(sz_string_from_cstr("build/test_fs_mkdirs_file")));
+    assert(!r.ok);
+    sz_error_free(r.error);
+    remove("build/test_fs_mkdirs_file");
     remove(path);
   }
 
   /* TestRuntime: Fs graph built before install still uses mem-FS. */
   {
+    SzIo *mk = sz_fs_mkdirs(sz_string_from_cstr("step"));
     SzIo *w = sz_fs_write(sz_string_from_cstr("step/x.txt"),
                           sz_string_from_cstr("step-mem"));
     SzIo *rd = sz_fs_read(sz_string_from_cstr("step/x.txt"));
     SzIo *ls = sz_fs_list(sz_string_from_cstr("step"));
     sz_testrt_install();
+    r = sz_io_unsafe_run(mk);
+    assert(r.ok);
     r = sz_io_unsafe_run(w);
     assert(r.ok);
     r = sz_io_unsafe_run(rd);
@@ -3624,6 +3640,8 @@ int main(void) {
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
 
+    r = sz_io_unsafe_run(sz_fs_mkdirs(sz_string_from_cstr("a")));
+    assert(r.ok);
     r = sz_io_unsafe_run(
         sz_fs_write(sz_string_from_cstr("a/b.txt"), sz_string_from_cstr("mem")));
     assert(r.ok);
@@ -3653,6 +3671,42 @@ int main(void) {
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
+
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("missing/x.txt"), sz_string_from_cstr("z")));
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "no parent") != NULL);
+    sz_error_free(r.error);
+    assert(access("missing/x.txt", F_OK) != 0);
+    assert(access("missing", F_OK) != 0);
+
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("not-a-dir"), sz_string_from_cstr("x")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_fs_mkdirs(sz_string_from_cstr("not-a-dir")));
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "path is file (mem)") !=
+               NULL);
+    sz_error_free(r.error);
+
+    {
+      char deep[1024];
+      size_t n = 0;
+      int i;
+      for (i = 0; i < 260; i++) {
+        if (i)
+          deep[n++] = '/';
+        deep[n++] = 'a';
+      }
+      deep[n] = '\0';
+      r = sz_io_unsafe_run(sz_fs_canonicalize(sz_string_from_cstr(deep)));
+      assert(!r.ok);
+      assert(r.error &&
+             strstr(sz_string_cstr(r.error->message), "path too deep") != NULL);
+      sz_error_free(r.error);
+    }
 
     r = sz_io_unsafe_run(
         sz_net_http_get(sz_string_from_cstr("http://example.test/ping")));
