@@ -566,17 +566,18 @@ fn unused_in_expr(e: &Expr, out: &mut Vec<UnusedName>) {
         ExprKind::For { binders, body } => {
             for (i, b) in binders.iter().enumerate() {
                 unused_in_expr(b.value(), out);
-                let name = b.name();
-                if discarded_name(name) {
-                    continue;
-                }
-                if !used_after_for_binder(name, &binders[i + 1..], body) {
-                    out.push(UnusedName {
-                        kind: UnusedKind::Local,
-                        name: name.to_string(),
-                        span: b.name_span().clone(),
-                        body_end: 0,
-                    });
+                for name in binder_local_names(b) {
+                    if discarded_name(&name) {
+                        continue;
+                    }
+                    if !used_after_for_binder(&name, &binders[i + 1..], body) {
+                        out.push(UnusedName {
+                            kind: UnusedKind::Local,
+                            name,
+                            span: b.name_span().clone(),
+                            body_end: 0,
+                        });
+                    }
                 }
             }
             unused_in_expr(body, out);
@@ -593,8 +594,25 @@ fn unused_in_expr(e: &Expr, out: &mut Vec<UnusedName>) {
             }
             unused_in_expr(body, out);
         }
-        ExprKind::Lambda { param, body, .. } => {
-            if let Some(name) = param {
+        ExprKind::Lambda {
+            param, pat, body, ..
+        } => {
+            if let Some(p) = pat {
+                for name in pattern_bind_names(p) {
+                    if discarded_name(&name) {
+                        continue;
+                    }
+                    if !uses_name(body, &name) {
+                        let end = (e.span.start + name.len()).min(e.span.end);
+                        out.push(UnusedName {
+                            kind: UnusedKind::Param,
+                            name,
+                            span: Span::new(e.span.file.clone(), e.span.start, end),
+                            body_end: 0,
+                        });
+                    }
+                }
+            } else if let Some(name) = param {
                 if !discarded_name(name) && !uses_name(body, name) {
                     let end = (e.span.start + name.len()).min(e.span.end);
                     out.push(UnusedName {
@@ -631,17 +649,32 @@ fn used_after_for_binder(name: &str, rest: &[crate::ast::ForBinder], body: &Expr
         if uses_name(b.value(), name) {
             return true;
         }
-        if b.name() == name {
+        if binder_local_names(b).iter().any(|n| n == name) {
             return false;
         }
     }
     uses_name(body, name)
 }
 
+fn binder_local_names(b: &crate::ast::ForBinder) -> Vec<String> {
+    if let Some(p) = b.unpack_pat() {
+        pattern_bind_names(p).into_iter().collect()
+    } else {
+        vec![b.name().to_string()]
+    }
+}
+
 pub(crate) fn uses_name(e: &Expr, name: &str) -> bool {
     match &e.kind {
         ExprKind::Var(n) => n == name,
-        ExprKind::Lambda { param, body, .. } => {
+        ExprKind::Lambda {
+            param, pat, body, ..
+        } => {
+            if let Some(p) = pat {
+                if pattern_bind_names(p).contains(name) {
+                    return false;
+                }
+            }
             param.as_deref() != Some(name) && uses_name(body, name)
         }
         ExprKind::Let {
@@ -658,7 +691,7 @@ pub(crate) fn uses_name(e: &Expr, name: &str) -> bool {
                 if uses_name(b.value(), name) {
                     return true;
                 }
-                if b.name() == name {
+                if binder_local_names(b).iter().any(|n| n == name) {
                     return false;
                 }
             }
@@ -716,6 +749,10 @@ fn collect_pattern_binds(p: &Pattern, out: &mut HashSet<String>) {
         Pattern::Cons { head, tail, .. } => {
             collect_pattern_binds(head, out);
             collect_pattern_binds(tail, out);
+        }
+        Pattern::Tuple { left, right, .. } => {
+            collect_pattern_binds(left, out);
+            collect_pattern_binds(right, out);
         }
         Pattern::Named { inner, .. } => collect_pattern_binds(inner, out),
         Pattern::Or(ps) => {
@@ -838,6 +875,10 @@ fn collect_pat_names(p: &Pattern, out: &mut HashSet<String>) {
         Pattern::Cons { head, tail, .. } => {
             collect_pat_names(head, out);
             collect_pat_names(tail, out);
+        }
+        Pattern::Tuple { left, right, .. } => {
+            collect_pat_names(left, out);
+            collect_pat_names(right, out);
         }
         Pattern::Or(ps) => {
             for p in ps {
@@ -1100,6 +1141,23 @@ mod tests {
             "@main def main: IO[Unit] =\n  for {\n    x = 1\n  } yield IO.println(Str.fromInt(x))\n",
         );
         assert!(msgs.is_empty(), "{msgs:?}");
+    }
+
+    #[test]
+    fn unused_tuple_for_binder_slot() {
+        let msgs = names(
+            "@main def main: IO[Unit] =\n  for {\n    (a, b) = (1, \"x\")\n  } yield IO.println(Str.fromInt(a))\n",
+        );
+        assert!(msgs.iter().any(|m| m == "unused local b"), "{msgs:?}");
+        assert!(!msgs.iter().any(|m| m == "unused local a"), "{msgs:?}");
+    }
+
+    #[test]
+    fn unused_tuple_lambda_slot() {
+        let msgs = names(
+            "@main def main: IO[Unit] =\n  IO.println(Str.fromInt(List.head(List.map([(1, \"x\")], (n, s) => n))))\n",
+        );
+        assert!(msgs.iter().any(|m| m == "unused parameter s"), "{msgs:?}");
     }
 
     #[test]

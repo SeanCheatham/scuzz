@@ -390,20 +390,22 @@ def swap[A, B](p: (A, B)): (B, A) =
     case (a, b) => (b, a)
   }
 
+def firsts(xs: List[(Int, String)]): List[Int] =
+  List.map(xs, (n, _) => n)
+
 def tupleProof(): IO[Unit] =
   for {
-    p = (42, "ok")
-    n = p._1
-    s = p._2
-    q = swap(p)
-    both <- IO.both(IO.pure(1), IO.pure("x"))
+    (n, s) = (42, "ok")
+    q = swap((n, s))
+    (_, bothS) <- IO.both(IO.pure(1), IO.pure("x"))
     _ <- IO.println(s"tup:$n")
     _ <- IO.println(s"tup:$s")
     _ <- q match {
   case (a, m) => IO.println(s"swap:$a:$m")
 }
-    _ <- IO.println(s"eqTup:${if (p == (42, "ok") && (1, "x") != (2, "x")) "y" else "n"}")
-    _ <- IO.println(s"both:${both._2}")
+    _ <- IO.println(s"eqTup:${if ((n, s) == (42, "ok") && (1, "x") != (2, "x")) "y" else "n"}")
+    _ <- IO.println(s"both:$bothS")
+    _ <- IO.println(s"first:${Str.fromInt(List.head(firsts([(9, "z")])))}")
   } yield ()
 
 def eqProof(): IO[Unit] =

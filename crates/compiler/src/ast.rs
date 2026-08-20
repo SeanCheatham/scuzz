@@ -241,10 +241,12 @@ impl Expr {
             ExprKind::Lambda {
                 param,
                 param_ty,
+                pat,
                 body,
             } => ExprKind::Lambda {
                 param,
                 param_ty,
+                pat,
                 body: Box::new(f(*body)?),
             },
             ExprKind::FlatMap { inner, param, body } => ExprKind::FlatMap {
@@ -339,15 +341,27 @@ impl Expr {
                 let mut out = Vec::with_capacity(binders.len());
                 for b in binders {
                     out.push(match b {
-                        ForBinder::Eq { name, span, value } => ForBinder::Eq {
+                        ForBinder::Eq {
+                            name,
+                            span,
+                            value,
+                            pat,
+                        } => ForBinder::Eq {
                             name,
                             span,
                             value: f(value)?,
+                            pat,
                         },
-                        ForBinder::Draw { name, span, value } => ForBinder::Draw {
+                        ForBinder::Draw {
+                            name,
+                            span,
+                            value,
+                            pat,
+                        } => ForBinder::Draw {
                             name,
                             span,
                             value: f(value)?,
+                            pat,
                         },
                     });
                 }
@@ -623,10 +637,13 @@ pub enum ExprKind {
     /// `name = expr` in a call argument list. Rewritten to positional before typecheck.
     NamedArg { name: String, value: Box<Expr> },
     /// `_ => expr` or `x => expr` — single-param lambda literal (tap callbacks).
+    /// `(a, b) =>` sets `pat` and binds `param` to `"__tup"` until lower unpacks.
     Lambda {
         param: Option<String>,
         /// `Some` for `(x: T) =>`. Kit args still bind from the callee.
         param_ty: Option<Type>,
+        /// `Some` for `(a, b) =>`. Lower rewrites the body to a match.
+        pat: Option<Box<Pattern>>,
         body: Box<Expr>,
     },
 }
@@ -637,20 +654,25 @@ pub enum InterpPart {
     Expr(Expr),
 }
 
+/// Synthetic binder for `(a, b) = e` / `(a, b) =>` until lower unpacks the tuple.
+pub const TUP_UNPACK: &str = "__tup";
+
 /// Binder inside `for { … }`: `x = e` (pure) or `x <- e` (effect).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ForBinder {
-    /// `name = value`
+    /// `name = value` — `pat` unpacks `(a, b) = value`.
     Eq {
         name: String,
         span: Span,
         value: Expr,
+        pat: Option<Pattern>,
     },
-    /// `name <- value` (`name` may be `"_"`)
+    /// `name <- value` (`name` may be `"_"`) — `pat` unpacks `(a, b) <- value`.
     Draw {
         name: String,
         span: Span,
         value: Expr,
+        pat: Option<Pattern>,
     },
 }
 
@@ -671,6 +693,33 @@ impl ForBinder {
         match self {
             ForBinder::Eq { value, .. } | ForBinder::Draw { value, .. } => value,
         }
+    }
+
+    /// Tuple unpack pattern for `(a, b) = e` / `(a, b) <- e`.
+    pub fn unpack_pat(&self) -> Option<&Pattern> {
+        match self {
+            ForBinder::Eq { pat, .. } | ForBinder::Draw { pat, .. } => pat.as_ref(),
+        }
+    }
+}
+
+/// Name, `_`, or a two-slot tuple of those. Nested tuples are allowed.
+pub fn is_tuple_binder_pat(p: &Pattern) -> bool {
+    match p {
+        Pattern::Wildcard | Pattern::Bind(_) => true,
+        Pattern::Tuple { left, right, .. } => {
+            is_tuple_binder_pat(left) && is_tuple_binder_pat(right)
+        }
+        _ => false,
+    }
+}
+
+/// Simple `x` / `_` binder. `None` for a tuple unpack.
+pub fn simple_binder_name(p: &Pattern) -> Option<&str> {
+    match p {
+        Pattern::Wildcard => Some("_"),
+        Pattern::Bind(n) => Some(n.as_str()),
+        _ => None,
     }
 }
 

@@ -1,6 +1,9 @@
 //! Signature hover from the same parse as `check`. No second typer.
 
-use crate::ast::{EnumDef, Expr, ExprKind, FunDef, Param, Program, Type, TypeAlias};
+use crate::ast::{
+    EnumDef, Expr, ExprKind, ForBinder, FunDef, Param, Pattern, Program, Type, TypeAlias,
+    TUP_UNPACK,
+};
 use crate::lexer::{lex, Token};
 use crate::resolve::module_id_from_label;
 use crate::typ::kit_lambda_param_ty;
@@ -271,7 +274,11 @@ fn collect_kit_locals(expr: &Expr, offset: usize, out: &mut Vec<(String, Type)>)
                         ..
                     } = &a.kind
                     {
-                        if a.span.start <= offset && offset <= a.span.end && p != "_" {
+                        if a.span.start <= offset
+                            && offset <= a.span.end
+                            && p != "_"
+                            && p != TUP_UNPACK
+                        {
                             out.push((p.clone(), pty));
                         }
                         collect_kit_locals(body, offset, out);
@@ -302,14 +309,44 @@ fn walk_binders(expr: &Expr, name: &str, offset: usize, best: &mut Option<(usize
             walk_binders(body, name, offset, best);
         }
         ExprKind::Lambda {
-            param: Some(n),
-            body,
-            ..
-        } if n == name && covers => {
-            consider(best, span_len, n);
+            param, pat, body, ..
+        } => {
+            let hit = if let Some(p) = pat {
+                pat_binds(p, name)
+            } else {
+                param.as_deref() == Some(name)
+            };
+            if hit && covers {
+                consider(best, span_len, name);
+            }
+            walk_binders(body, name, offset, best);
+        }
+        ExprKind::For { binders, body } => {
+            for b in binders {
+                if covers && binder_binds(b, name) {
+                    consider(best, span_len, name);
+                }
+                walk_binders(b.value(), name, offset, best);
+            }
             walk_binders(body, name, offset, best);
         }
         _ => expr.for_each_child(|c| walk_binders(c, name, offset, best)),
+    }
+}
+
+fn binder_binds(b: &ForBinder, name: &str) -> bool {
+    if let Some(p) = b.unpack_pat() {
+        pat_binds(p, name)
+    } else {
+        b.name() == name
+    }
+}
+
+fn pat_binds(p: &Pattern, name: &str) -> bool {
+    match p {
+        Pattern::Bind(n) => n == name,
+        Pattern::Tuple { left, right, .. } => pat_binds(left, name) || pat_binds(right, name),
+        _ => false,
     }
 }
 
@@ -1284,6 +1321,30 @@ record Point(x: Int, y: Int)
         let program = parse_file(src, "Main.scuzz").unwrap();
         let h = hover_in_source(&program, "Main.scuzz", src, offset).unwrap();
         assert!(h.contains("n: Int"), "{h}");
+    }
+
+    #[test]
+    fn hovers_tuple_unpack_slot() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    (n, s) = (1, "x")
+  } yield IO.println(s)
+"#;
+        let program = parse_file(src, "Main.scuzz").unwrap();
+        let offset = src.find("println(s)").unwrap() + 8;
+        let h = hover_in_source(&program, "Main.scuzz", src, offset).unwrap();
+        assert_eq!(h, "s", "{h}");
+        assert!(!h.contains(TUP_UNPACK), "{h}");
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map([(1, "x")], (n, t) => t), ","))
+"#;
+        let program = parse_file(src, "Main.scuzz").unwrap();
+        let offset = src.find("=> t").unwrap() + 3;
+        let h = hover_in_source(&program, "Main.scuzz", src, offset).unwrap();
+        assert_eq!(h, "t", "{h}");
+        assert!(!h.contains(TUP_UNPACK), "{h}");
     }
 
     #[test]
