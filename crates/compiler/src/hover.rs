@@ -346,6 +346,11 @@ fn pat_binds(p: &Pattern, name: &str) -> bool {
     match p {
         Pattern::Bind(n) => n == name,
         Pattern::Tuple { left, right, .. } => pat_binds(left, name) || pat_binds(right, name),
+        Pattern::Adt { binds, .. } => binds.iter().any(|b| pat_binds(b, name)),
+        Pattern::Cons { head, tail, .. } => pat_binds(head, name) || pat_binds(tail, name),
+        Pattern::As { name: n, inner } => n == name || pat_binds(inner, name),
+        Pattern::Named { inner, .. } => pat_binds(inner, name),
+        Pattern::Or(alts) => alts.iter().any(|a| pat_binds(a, name)),
         _ => false,
     }
 }
@@ -1355,6 +1360,24 @@ record Point(x: Int, y: Int)
         let offset = src.find("=> t").unwrap() + 3;
         let h = hover_in_source(&program, "Main.scuzz", src, offset).unwrap();
         assert_eq!(h, "t", "{h}");
+        assert!(!h.contains(TUP_UNPACK), "{h}");
+    }
+
+    #[test]
+    fn hovers_ctor_unpack_slot() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  for {
+    Opt.Some(n) = Opt.Some(1)
+  } yield IO.println(Str.fromInt(n))
+"#;
+        let program = parse_file(src, "Main.scuzz").unwrap();
+        let offset = src.find("fromInt(n)").unwrap() + 8;
+        let h = hover_in_source(&program, "Main.scuzz", src, offset).unwrap();
+        assert_eq!(h, "n", "{h}");
         assert!(!h.contains(TUP_UNPACK), "{h}");
     }
 

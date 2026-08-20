@@ -519,7 +519,12 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
         } => {
             let body = pretty_expr(body, 0).trim().to_string();
             if let Some(p) = pat {
-                return format!("{pad}{} => {body}", pretty_pattern(p.as_ref()));
+                let binder = pretty_pattern(p.as_ref());
+                let binder = match p.as_ref() {
+                    Pattern::Tuple { .. } => binder,
+                    _ => format!("({binder})"),
+                };
+                return format!("{pad}{binder} => {body}");
             }
             match (param.as_deref(), param_ty) {
                 (None, None) => format!("{pad}_ => {body}"),
@@ -1177,6 +1182,24 @@ record Point(x: Int, y: Int)
         assert!(out.contains("(n, s) = (1, \"x\")"), "{out}");
         assert!(out.contains("(a, b) <- IO.both"), "{out}");
         assert!(out.contains("(i, t) => t"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_ctor_for_binder_and_lambda() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    Point(x, y) = Point(1, 2)
+    Opt.Some(n) = Opt.Some(3)
+    h :: _t = [4]
+  } yield IO.println(Str.fromInt(List.head(List.map([Opt.Some(5)], (Opt.Some(k)) => k))))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("Point(x, y) = Point(1, 2)"), "{out}");
+        assert!(out.contains("Opt.Some(n) = Opt.Some(3)"), "{out}");
+        assert!(out.contains("h :: _t = [4]"), "{out}");
+        assert!(out.contains("(Opt.Some(k)) => k"), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

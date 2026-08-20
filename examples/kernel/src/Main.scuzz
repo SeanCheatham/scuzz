@@ -393,6 +393,21 @@ def swap[A, B](p: (A, B)): (B, A) =
 def firsts(xs: List[(Int, String)]): List[Int] =
   List.map(xs, (n, _) => n)
 
+def unpackProof(): IO[Unit] =
+  for {
+    Point(x, y) = Point(3, 5)
+    Opt.Some(n) = Opt.Some(7)
+    h :: _t = [8, 9]
+    got <- IO.pure(Opt.Some(4))
+    Opt.Some(m) = got
+    xs = List.map([Opt.Some(1), Opt.Some(2)], (Opt.Some(k)) => k)
+    _ <- IO.println(s"unpack:${Str.fromInt(x + y)}")
+    _ <- IO.println(s"unpackSome:${Str.fromInt(n)}")
+    _ <- IO.println(s"unpackCons:${Str.fromInt(h)}")
+    _ <- IO.println(s"unpackDraw:${Str.fromInt(m)}")
+    _ <- IO.println(s"unpackLam:${Str.fromInt(List.head(xs))}")
+  } yield ()
+
 def tupleProof(): IO[Unit] =
   for {
     (n, s) = (42, "ok")
@@ -575,4 +590,5 @@ b"""
     _ <- strProof()
     _ <- eqProof()
     _ <- tupleProof()
+    _ <- unpackProof()
   } yield ()

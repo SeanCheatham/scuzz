@@ -380,6 +380,7 @@ impl Expr {
                             None => None,
                         },
                         body: f(a.body)?,
+                        unpack: a.unpack,
                     });
                 }
                 ExprKind::Match {
@@ -654,20 +655,20 @@ pub enum InterpPart {
     Expr(Expr),
 }
 
-/// Synthetic binder for `(a, b) = e` / `(a, b) =>` until lower unpacks the tuple.
+/// Synthetic binder for `(a, b) = e` / `Opt.Some(n) =>` until lower unpacks the pattern.
 pub const TUP_UNPACK: &str = "__tup";
 
 /// Binder inside `for { … }`: `x = e` (pure) or `x <- e` (effect).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ForBinder {
-    /// `name = value` — `pat` unpacks `(a, b) = value`.
+    /// `name = value` — `pat` unpacks `(a, b) = value` / `Opt.Some(n) = value`.
     Eq {
         name: String,
         span: Span,
         value: Expr,
         pat: Option<Pattern>,
     },
-    /// `name <- value` (`name` may be `"_"`) — `pat` unpacks `(a, b) <- value`.
+    /// `name <- value` (`name` may be `"_"`) — `pat` unpacks `(a, b) <- value` / `Opt.Some(n) <- value`.
     Draw {
         name: String,
         span: Span,
@@ -695,7 +696,7 @@ impl ForBinder {
         }
     }
 
-    /// Tuple unpack pattern for `(a, b) = e` / `(a, b) <- e`.
+    /// Unpack pattern for `(a, b) = e` / `Opt.Some(n) <- e`.
     pub fn unpack_pat(&self) -> Option<&Pattern> {
         match self {
             ForBinder::Eq { pat, .. } | ForBinder::Draw { pat, .. } => pat.as_ref(),
@@ -703,15 +704,37 @@ impl ForBinder {
     }
 }
 
-/// Name, `_`, or a two-slot tuple of those. Nested tuples are allowed.
+/// Name, `_`, tuple, constructor, list, as, or named-field pattern for a binder / lambda.
+/// Nested patterns are allowed. Nested literals are allowed (`Opt.Some(0)`).
 pub fn is_tuple_binder_pat(p: &Pattern) -> bool {
+    is_unpack_binder_pat(p)
+}
+
+/// Same as [`is_tuple_binder_pat`]. Nested literals are allowed.
+pub fn is_unpack_binder_pat(p: &Pattern) -> bool {
     match p {
         Pattern::Wildcard | Pattern::Bind(_) => true,
-        Pattern::Tuple { left, right, .. } => {
-            is_tuple_binder_pat(left) && is_tuple_binder_pat(right)
+        Pattern::Int(_) | Pattern::Float(_) | Pattern::Bool(_) | Pattern::Str(_) | Pattern::Nil => {
+            true
         }
-        _ => false,
+        Pattern::Tuple { left, right, .. } => {
+            is_unpack_binder_pat(left) && is_unpack_binder_pat(right)
+        }
+        Pattern::Adt { binds, .. } => binds.iter().all(is_unpack_binder_pat),
+        Pattern::Cons { head, tail, .. } => {
+            is_unpack_binder_pat(head) && is_unpack_binder_pat(tail)
+        }
+        Pattern::As { inner, .. } | Pattern::Named { inner, .. } => is_unpack_binder_pat(inner),
+        Pattern::Or(alts) => !alts.is_empty() && alts.iter().all(is_unpack_binder_pat),
     }
+}
+
+/// Top-level `for` binder. A lone literal is not a binder (`0 = 1`).
+pub fn is_for_binder_pat(p: &Pattern) -> bool {
+    !matches!(
+        p,
+        Pattern::Int(_) | Pattern::Float(_) | Pattern::Bool(_) | Pattern::Str(_)
+    ) && is_unpack_binder_pat(p)
 }
 
 /// Simple `x` / `_` binder. `None` for a tuple unpack.
@@ -729,6 +752,8 @@ pub struct MatchArm {
     /// `case Pat if pred =>` — `pred` is Bool. `None` when there is no guard.
     pub guard: Option<Expr>,
     pub body: Expr,
+    /// Binder / lambda unpack. Skip exhaustiveness. A miss panics.
+    pub unpack: bool,
 }
 
 impl MatchArm {
@@ -737,6 +762,16 @@ impl MatchArm {
             pattern,
             guard: None,
             body,
+            unpack: false,
+        }
+    }
+
+    pub fn unpack(pattern: Pattern, body: Expr) -> Self {
+        Self {
+            pattern,
+            guard: None,
+            body,
+            unpack: true,
         }
     }
 }
