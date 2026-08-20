@@ -2,6 +2,8 @@
 
 #include "scuzz_mobile.h"
 
+#include <limits.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -24,6 +26,21 @@ static int shell_enabled(void) {
 }
 
 int sz_mobile_available(void) { return shell_enabled(); }
+
+static int frame_bytes(int width, int height, size_t *out) {
+  size_t w;
+  size_t h;
+  if (width <= 0 || height <= 0 || !out)
+    return 0;
+  w = (size_t)width;
+  h = (size_t)height;
+  if (w > SIZE_MAX / 4)
+    return 0;
+  if (h > SIZE_MAX / (w * 4))
+    return 0;
+  *out = w * h * 4;
+  return 1;
+}
 
 static int q_push(const SzInputEvent *ev) {
   int next;
@@ -59,19 +76,20 @@ void sz_mobile_set_keyboard(int visible) {
   }
 }
 
-int sz_mobile_present(const char *title, int width, int height,
-                      const uint8_t *rgba, size_t nbytes) {
+int sz_mobile_present(const char *title, int point_w, int point_h, int pixel_w,
+                      int pixel_h, const uint8_t *rgba, size_t nbytes) {
   size_t need;
   if (!shell_enabled())
     return 0;
-  if (!rgba || width <= 0 || height <= 0)
+  if (!rgba || point_w <= 0 || point_h <= 0)
     return 0;
-  need = (size_t)width * (size_t)height * 4;
+  if (!frame_bytes(pixel_w, pixel_h, &need))
+    return 0;
   if (nbytes < need)
     return 0;
   g_ready = 1;
-  g_w = width;
-  g_h = height;
+  g_w = pixel_w;
+  g_h = pixel_h;
   g_frames++;
   if (title) {
     size_t n = strlen(title);
@@ -80,8 +98,9 @@ int sz_mobile_present(const char *title, int width, int height,
     if (g_last_title)
       memcpy(g_last_title, title, n + 1);
   }
-  fprintf(stderr, "scuzz mobile: present %dx%d frame=%d keyboard=%d title=%s\n",
-          width, height, g_frames, g_keyboard,
+  fprintf(stderr,
+          "scuzz mobile: present %dx%d px=%dx%d frame=%d keyboard=%d title=%s\n",
+          point_w, point_h, pixel_w, pixel_h, g_frames, g_keyboard,
           g_last_title ? g_last_title : "Scuzz Lang");
   (void)g_ready;
   (void)g_w;

@@ -20,9 +20,11 @@ extern "C" {
 /* Nonzero if a mobile shell can present (host: SCUZZ_MOBILE_SHELL=1). */
 int sz_mobile_available(void);
 
-/* Present an RGBA8888 frame. Returns 1 on success, 0 if unavailable / failed. */
-int sz_mobile_present(const char *title, int width, int height,
-                      const uint8_t *rgba, size_t nbytes);
+/* Present an RGBA8888 frame. Returns 1 on success, 0 if unavailable / failed.
+ * point_w/point_h are the window size in points. pixel_w/pixel_h are the
+ * rgba dimensions (point * backing scale). */
+int sz_mobile_present(const char *title, int point_w, int point_h, int pixel_w,
+                      int pixel_h, const uint8_t *rgba, size_t nbytes);
 
 /* Destroy shell resources. */
 void sz_mobile_shutdown(void);

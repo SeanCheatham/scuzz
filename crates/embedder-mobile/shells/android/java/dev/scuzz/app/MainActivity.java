@@ -10,6 +10,7 @@ import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
 import android.text.TextWatcher;
+import android.util.DisplayMetrics;
 import android.util.Log;
 import android.view.MotionEvent;
 import android.view.SurfaceHolder;
@@ -29,6 +30,9 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   private static final int POINTER_DOWN = 1;
   private static final int POINTER_MOVE = 2;
   private static final int POINTER_UP = 3;
+  private static final int LIFECYCLE_RESUME = 1;
+  private static final int LIFECYCLE_PAUSE = 2;
+  private static final int LIFECYCLE_STOP = 3;
   private static final String ZWSP = "\u200b";
 
   private SurfaceView surface;
@@ -39,6 +43,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   private int dumped;
   private int keyboard;
   private int watchLock;
+  private float density = 1f;
   private final Handler tick = new Handler(Looper.getMainLooper());
   private final Runnable blit =
       new Runnable() {
@@ -50,11 +55,15 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
         }
       };
 
-  public native void nativeStart(String dumpPath);
+  public native void nativeStart(String dumpPath, int width, int height, float scale);
 
   public native int nativeFrameWidth();
 
   public native int nativeFrameHeight();
+
+  public native int nativePointWidth();
+
+  public native int nativePointHeight();
 
   public native int nativeFrameCount();
 
@@ -63,6 +72,12 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   public native void nativePointer(float x, float y, int phase);
 
   public native void nativeTextEdit(String text);
+
+  public native void nativeResize(int width, int height);
+
+  public native void nativeLifecycle(int phase);
+
+  public native void nativeSetAlive(int alive);
 
   public native int nativeKeyboardVisible();
 
@@ -102,9 +117,32 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
             FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
     root.addView(hidden, new FrameLayout.LayoutParams(1, 1));
     setContentView(root);
+    DisplayMetrics dm = getResources().getDisplayMetrics();
+    density = dm.density > 0f ? dm.density : 1f;
+    int logicalW = Math.max(1, (int) (dm.widthPixels / density));
+    int logicalH = Math.max(1, (int) (dm.heightPixels / density));
     File dump = new File(getFilesDir(), "scuzz_android.debug.dump");
-    nativeStart(dump.getAbsolutePath());
+    nativeStart(dump.getAbsolutePath(), logicalW, logicalH, density);
     scheduleInject();
+  }
+
+  @Override
+  protected void onPause() {
+    nativeLifecycle(LIFECYCLE_PAUSE);
+    super.onPause();
+  }
+
+  @Override
+  protected void onResume() {
+    super.onResume();
+    nativeLifecycle(LIFECYCLE_RESUME);
+  }
+
+  @Override
+  protected void onDestroy() {
+    nativeLifecycle(LIFECYCLE_STOP);
+    nativeSetAlive(0);
+    super.onDestroy();
   }
 
   @Override
@@ -116,6 +154,9 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   @Override
   public void surfaceChanged(SurfaceHolder h, int format, int w, int ht) {
     holder = h;
+    if (density > 0f && w > 0 && ht > 0) {
+      nativeResize(Math.max(1, (int) (w / density)), Math.max(1, (int) (ht / density)));
+    }
   }
 
   @Override
@@ -125,18 +166,18 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   }
 
   private boolean onSurfaceTouch(MotionEvent ev) {
-    int fw = nativeFrameWidth();
-    int fh = nativeFrameHeight();
+    int pw = nativePointWidth();
+    int ph = nativePointHeight();
     int vw = surface.getWidth();
     int vh = surface.getHeight();
     int phase;
     float x;
     float y;
-    if (fw <= 0 || fh <= 0 || vw <= 0 || vh <= 0) {
+    if (pw <= 0 || ph <= 0 || vw <= 0 || vh <= 0) {
       return true;
     }
-    x = ev.getX() * fw / vw;
-    y = ev.getY() * fh / vh;
+    x = ev.getX() * pw / vw;
+    y = ev.getY() * ph / vh;
     switch (ev.getActionMasked()) {
       case MotionEvent.ACTION_DOWN:
         phase = POINTER_DOWN;

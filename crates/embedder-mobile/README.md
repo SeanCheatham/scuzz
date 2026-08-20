@@ -35,7 +35,7 @@ adb shell am start -n dev.scuzz.app/.MainActivity --es SCUZZ_ANDROID_TYPE hi
 
 `SCUZZ_ANDROID_TYPE` inserts then backspaces through the hidden `EditText`
 (`SZ_INPUT_TEXT_EDIT`). `SCUZZ_ANDROID_TAP=x,y` sends a pointer down/up in
-frame pixels. SurfaceView taps use the same queue.
+logical points. SurfaceView taps map to the same session space.
 
 iOS simulator proof (macOS arm64 + Xcode):
 
