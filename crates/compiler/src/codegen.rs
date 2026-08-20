@@ -275,6 +275,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_ref_of(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_ref_get(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_ref_set(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_ref_update(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_ref_update_and_get(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_queue_unbounded()").unwrap();
     writeln!(out, "declare ptr @sz_queue_offer(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_queue_take(ptr)").unwrap();
@@ -683,6 +685,17 @@ fn list_elem_of_type(ty: &Type) -> Kind {
     }
 }
 
+fn cell_elem_of_type(ty: &Type) -> Kind {
+    match ty {
+        Type::List(inner) => kind_of_type(inner),
+        Type::Io(inner) => cell_elem_of_type(inner),
+        Type::App(n, args) if matches!(n.as_str(), "Ref" | "Queue" | "Deferred" | "Fiber") => {
+            args.first().map(kind_of_type).unwrap_or(Kind::Ptr)
+        }
+        _ => Kind::Ptr,
+    }
+}
+
 fn retain_borrowed_ret(ty: &Type) -> bool {
     match ty {
         Type::String | Type::List(_) | Type::Adt(_) | Type::Tuple(_, _) => true,
@@ -742,6 +755,19 @@ fn unbox_numeric(code: &mut String, kind: Kind, ptr: &str, tmp: &str) -> String 
         }
         Kind::Ptr | Kind::Io => ptr.to_string(),
     }
+}
+
+/// Box Int/Float for a cell slot. The bool is true when the caller must drop the box after a retain.
+fn as_cell_ptr(code: &mut String, e: &Emitted, tmp: &str) -> (String, bool) {
+    if e.kind == Kind::Int || e.kind == Kind::Float {
+        (box_numeric(code, e.kind, &e.value, tmp), true)
+    } else {
+        (e.value.clone(), false)
+    }
+}
+
+fn io_cell_get(code: String, value: String, payload: Kind) -> Emitted {
+    io_emitted_payload(code, value, payload, payload == Kind::Ptr)
 }
 
 fn as_f64(code: &mut String, kind: Kind, value: &str, tmp: &str) -> String {
@@ -971,7 +997,7 @@ fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
         locals.insert(
             p.name.clone(),
             Local::borrow(format!("%{}", p.name), kind_of_type(&p.ty))
-                .with_elem(list_elem_of_type(&p.ty)),
+                .with_elem(cell_elem_of_type(&p.ty)),
         );
     }
 
@@ -2122,7 +2148,11 @@ fn emit_expr(
         }
         ExprKind::Field { .. } => panic!("internal: unresolved field access in codegen"),
         ExprKind::MethodCall { .. } => panic!("internal: unresolved method call in codegen"),
-        ExprKind::Ascribe { expr, .. } => emit_expr(expr, ctx, locals, prefix),
+        ExprKind::Ascribe { expr, ty } => {
+            let mut e = emit_expr(expr, ctx, locals, prefix);
+            e.elem = cell_elem_of_type(ty);
+            e
+        }
         ExprKind::Let { name, value, body } => {
             // Nested vals must not reuse the same LLVM name prefix.
             let ve = emit_expr(value, ctx, locals, &format!("{prefix}_lv_{name}"));
@@ -3325,6 +3355,49 @@ fn emit_io_foreach(
     }
 }
 
+fn emit_ref_update(
+    callee: &str,
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 2, "{callee} expects 2 args");
+    let r = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
+        panic!("{callee} callback must be a lambda");
+    };
+    let lam = emit_smap_lambda(
+        param,
+        body,
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        true,
+        r.elem,
+    );
+    let mut code = r.code;
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    let rt = if callee == "Ref.updateAndGet" {
+        "sz_ref_update_and_get"
+    } else {
+        "sz_ref_update"
+    };
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @{rt}(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
+        r.value
+    )
+    .unwrap();
+    drop_owned_ptr(&mut code, &lam);
+    if callee == "Ref.updateAndGet" {
+        io_cell_get(code, format!("%{prefix}_v"), r.elem)
+    } else {
+        io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+    }
+}
+
 fn emit_list_pred_i64(
     callee: &str,
     rt: &str,
@@ -4261,6 +4334,9 @@ fn emit_call(
     }
     if callee == "IO.foreach" || callee == "IO.foreachDiscard" {
         return emit_io_foreach(callee, args, ctx, locals, prefix);
+    }
+    if callee == "Ref.update" || callee == "Ref.updateAndGet" {
+        return emit_ref_update(callee, args, ctx, locals, prefix);
     }
     if callee == "Stream.filter" {
         return emit_stream_filter(args, ctx, locals, prefix);
@@ -5510,13 +5586,10 @@ fn emit_call(
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Ref.of" => {
-            writeln!(
-                code,
-                "  %{prefix}_v = call ptr @sz_ref_of(ptr {})",
-                emitted_args[0].value
-            )
-            .unwrap();
+            let (ptr, _) = as_cell_ptr(&mut code, &emitted_args[0], &format!("{prefix}_box"));
+            writeln!(code, "  %{prefix}_v = call ptr @sz_ref_of(ptr {ptr})").unwrap();
             io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
+                .with_elem(emitted_args[0].kind)
         }
         "Ref.get" => {
             writeln!(
@@ -5525,16 +5598,21 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
-            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
+            io_cell_get(code, format!("%{prefix}_v"), emitted_args[0].elem)
         }
         "Ref.set" => {
+            let (ptr, boxed) = as_cell_ptr(&mut code, &emitted_args[1], &format!("{prefix}_box"));
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @sz_ref_set(ptr {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
+                "  %{prefix}_v = call ptr @sz_ref_set(ptr {}, ptr {ptr})",
+                emitted_args[0].value
             )
             .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[1]);
+            if boxed {
+                writeln!(code, "  call void @sz_release(ptr {ptr})").unwrap();
+            } else {
+                drop_owned_ptr(&mut code, &emitted_args[1]);
+            }
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Queue.unbounded" => {
@@ -5542,13 +5620,18 @@ fn emit_call(
             io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
         }
         "Queue.offer" => {
+            let (ptr, boxed) = as_cell_ptr(&mut code, &emitted_args[1], &format!("{prefix}_box"));
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @sz_queue_offer(ptr {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
+                "  %{prefix}_v = call ptr @sz_queue_offer(ptr {}, ptr {ptr})",
+                emitted_args[0].value
             )
             .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[1]);
+            if boxed {
+                writeln!(code, "  call void @sz_release(ptr {ptr})").unwrap();
+            } else {
+                drop_owned_ptr(&mut code, &emitted_args[1]);
+            }
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Queue.take" => {
@@ -5558,20 +5641,25 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
-            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
+            io_cell_get(code, format!("%{prefix}_v"), emitted_args[0].elem)
         }
         "Deferred.empty" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_deferred_empty()").unwrap();
             io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
         }
         "Deferred.complete" => {
+            let (ptr, boxed) = as_cell_ptr(&mut code, &emitted_args[1], &format!("{prefix}_box"));
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @sz_deferred_complete(ptr {}, ptr {})",
-                emitted_args[0].value, emitted_args[1].value
+                "  %{prefix}_v = call ptr @sz_deferred_complete(ptr {}, ptr {ptr})",
+                emitted_args[0].value
             )
             .unwrap();
-            drop_owned_ptr(&mut code, &emitted_args[1]);
+            if boxed {
+                writeln!(code, "  call void @sz_release(ptr {ptr})").unwrap();
+            } else {
+                drop_owned_ptr(&mut code, &emitted_args[1]);
+            }
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Deferred.get" => {
@@ -5581,7 +5669,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
-            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
+            io_cell_get(code, format!("%{prefix}_v"), emitted_args[0].elem)
         }
         "Fiber.fork" => {
             let iv = ensure_io(
@@ -5593,7 +5681,9 @@ fn emit_call(
             );
             writeln!(code, "  %{prefix}_v = call ptr @sz_fiber_fork(ptr {iv})").unwrap();
             writeln!(code, "  call void @sz_release(ptr {iv})").unwrap();
-            io_emitted(code, format!("%{prefix}_v"), emitted_args[0].payload)
+            let mut out = io_emitted(code, format!("%{prefix}_v"), Kind::Ptr);
+            out.elem = emitted_args[0].payload;
+            out
         }
         "Fiber.join" => {
             writeln!(
@@ -5602,7 +5692,7 @@ fn emit_call(
                 emitted_args[0].value
             )
             .unwrap();
-            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
+            io_cell_get(code, format!("%{prefix}_v"), emitted_args[0].elem)
         }
         "Fiber.interrupt" => {
             writeln!(
@@ -8113,6 +8203,42 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(ir.contains("sz_io_when"));
         assert!(ir.contains("sz_io_unless"));
         assert!(ir.contains("sz_unbox_i64"));
+    }
+
+    #[test]
+    fn emit_generic_ref_queue_fiber() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    r <- Ref.of(1)
+    _ <- Ref.set(r, 2)
+    n <- Ref.get(r)
+    _ <- Ref.update(r, x => x + 1)
+    m <- Ref.updateAndGet(r, x => x + 1)
+    _ <- IO.println(Str.fromInt(n + m))
+    q <- Queue.unbounded(): IO[Queue[Int]]
+    _ <- Queue.offer(q, 3)
+    k <- Queue.take(q)
+    _ <- IO.println(Str.fromInt(k))
+    f <- Fiber.fork(IO.pure(4))
+    j <- Fiber.join(f)
+    _ <- IO.println(Str.fromInt(j))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_box_i64"),
+            "expected boxed Int payload:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_unbox_i64"),
+            "expected unbox of Int payload:\n{ir}"
+        );
+        assert!(ir.contains("sz_ref_update"));
+        assert!(ir.contains("sz_ref_update_and_get"));
+        assert!(ir.contains("sz_queue_offer"));
+        assert!(ir.contains("sz_fiber_join"));
     }
 
     #[test]
@@ -10812,6 +10938,16 @@ record Point(x: Int, y: Int)
 "#,
                 "call ptr @sz_net_serve(",
                 "Net.serve",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  for {
+    r <- Ref.of(1)
+    _ <- Ref.update(r, x => x + 1)
+  } yield ()
+"#,
+                "call ptr @sz_ref_update(ptr ",
+                "Ref.update",
             ),
         ];
         for (src, needle, label) in cases {

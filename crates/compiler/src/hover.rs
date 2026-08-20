@@ -1007,24 +1007,23 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Law.signalListAt(id: Int, i: Int): String",
     ),
     ("Law.a11yHas", "Law.a11yHas(needle: String): Bool"),
-    ("Ref.of", "Ref.of(s: String): IO[Ref[String]]"),
-    ("Ref.get", "Ref.get(r: Ref[String]): IO[String]"),
-    ("Ref.set", "Ref.set(r: Ref[String], s: String): IO[Unit]"),
-    ("Queue.unbounded", "Queue.unbounded(): IO[Queue[String]]"),
+    ("Ref.of", "Ref.of(x: A): IO[Ref[A]]"),
+    ("Ref.get", "Ref.get(r: Ref[A]): IO[A]"),
+    ("Ref.set", "Ref.set(r: Ref[A], x: A): IO[Unit]"),
+    ("Ref.update", "Ref.update(r: Ref[A], f: A => A): IO[Unit]"),
     (
-        "Queue.offer",
-        "Queue.offer(q: Queue[String], s: String): IO[Unit]",
+        "Ref.updateAndGet",
+        "Ref.updateAndGet(r: Ref[A], f: A => A): IO[A]",
     ),
-    ("Queue.take", "Queue.take(q: Queue[String]): IO[String]"),
-    ("Deferred.empty", "Deferred.empty(): IO[Deferred[String]]"),
+    ("Queue.unbounded", "Queue.unbounded(): IO[Queue[A]]"),
+    ("Queue.offer", "Queue.offer(q: Queue[A], x: A): IO[Unit]"),
+    ("Queue.take", "Queue.take(q: Queue[A]): IO[A]"),
+    ("Deferred.empty", "Deferred.empty(): IO[Deferred[A]]"),
     (
         "Deferred.complete",
-        "Deferred.complete(d: Deferred[String], s: String): IO[Unit]",
+        "Deferred.complete(d: Deferred[A], x: A): IO[Unit]",
     ),
-    (
-        "Deferred.get",
-        "Deferred.get(d: Deferred[String]): IO[String]",
-    ),
+    ("Deferred.get", "Deferred.get(d: Deferred[A]): IO[A]"),
     ("Str.concat", "Str.concat(a: String, b: String): String"),
     (
         "List.cons",
@@ -1208,6 +1207,8 @@ const TYPED_KIT_CALLEES: &[&str] = &[
     "Fiber.fork",
     "Fiber.join",
     "Ref.of",
+    "Ref.update",
+    "Ref.updateAndGet",
     "Queue.unbounded",
     "Deferred.empty",
     "Resource.make",
@@ -2920,5 +2921,29 @@ record Point(x: Int, y: Int)
             kit_sig("View.bindText"),
             Some("View.bindText(s: SignalStr): View")
         );
+    }
+
+    #[test]
+    fn hovers_ref_update() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    r <- Ref.of(1)
+    _ <- Ref.update(r, n => n + 1)
+    m <- Ref.updateAndGet(r, n => n + 1)
+    _ <- IO.println(Str.fromInt(m))
+  } yield ()
+"#;
+        let h = hover_src(src, "update");
+        assert!(
+            h.contains("Ref.update(r: Ref[A], f: A => A): IO[Unit]"),
+            "{h}"
+        );
+        let h = hover_src(src, "updateAndGet");
+        assert!(
+            h.contains("Ref.updateAndGet(r: Ref[A], f: A => A): IO[A]"),
+            "{h}"
+        );
+        let h = hover_src(src, "of");
+        assert!(h.contains("Ref.of(x: A): IO[Ref[A]]"), "{h}");
     }
 }

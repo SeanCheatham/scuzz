@@ -1242,6 +1242,11 @@ static SzIo *after_ref_set(void *value, void *env) {
   return fm_drop(sz_ref_get(r), after_ref_get, r);
 }
 
+static void *inc_i64(void *head, void *env) {
+  (void)env;
+  return sz_box_i64(sz_unbox_i64(head) + 1);
+}
+
 static SzIo *after_ref(void *value, void *env) {
   (void)env;
   SzRef *r = (SzRef *)value;
@@ -2680,6 +2685,32 @@ int main(void) {
     sz_ref_free(ref);
   }
 
+  /* Ref[Int] + update */
+  {
+    void *b0 = sz_box_i64(1);
+    SzRef *ref = sz_ref_make(b0);
+    sz_release(b0);
+    {
+      void *b2 = sz_box_i64(2);
+      r = sz_io_unsafe_run(sz_ref_set(ref, b2));
+      sz_release(b2);
+      assert(r.ok);
+    }
+    r = sz_io_unsafe_run(sz_ref_get(ref));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 2);
+    sz_release(r.value);
+    r = sz_io_unsafe_run(sz_ref_update(ref, inc_i64, NULL));
+    assert(r.ok);
+    assert(sz_unbox_i64(ref->value) == 3);
+    r = sz_io_unsafe_run(sz_ref_update_and_get(ref, inc_i64, NULL));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 4);
+    sz_release(r.value);
+    assert(sz_unbox_i64(ref->value) == 4);
+    sz_ref_free(ref);
+  }
+
   /* Deferred */
   {
     SzDeferred *def = sz_deferred_make();
@@ -2740,6 +2771,32 @@ int main(void) {
       sz_release(r.value);
     }
     sz_queue_free(q);
+  }
+
+  /* Queue[Int] / Deferred[Int] */
+  {
+    SzQueue *q = sz_queue_make();
+    void *n = sz_box_i64(7);
+    r = sz_io_unsafe_run(sz_queue_offer(q, n));
+    sz_release(n);
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_queue_take(q));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 7);
+    sz_release(r.value);
+    sz_queue_free(q);
+  }
+  {
+    SzDeferred *d = sz_deferred_make();
+    void *n = sz_box_i64(8);
+    r = sz_io_unsafe_run(sz_deferred_complete(d, n));
+    sz_release(n);
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_deferred_get(d));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 8);
+    sz_release(r.value);
+    sz_deferred_free(d);
   }
 
   /* Queue ring: take from the front, then offer until the ring wraps and grows. */

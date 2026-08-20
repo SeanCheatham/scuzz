@@ -37,6 +37,21 @@ def run(): IO[Unit] =
     _ <- IO.when(true, IO.println("when:y"))
     _ <- IO.unless(true, IO.fail("unless-skip"))
     _ <- IO.unless(false, IO.println("unless:y"))
+    c <- Ref.of(0)
+    _ <- Ref.update(c, n => n + 1)
+    n <- Ref.updateAndGet(c, n => n + 1)
+    _ <- IO.println(s"refN:${Str.fromInt(n)}")
+    iq <- Queue.unbounded(): IO[Queue[Int]]
+    _ <- Queue.offer(iq, 7)
+    k <- Queue.take(iq)
+    _ <- IO.println(s"queueN:${Str.fromInt(k)}")
+    id <- Deferred.empty(): IO[Deferred[Int]]
+    _ <- Deferred.complete(id, 8)
+    g <- Deferred.get(id)
+    _ <- IO.println(s"defN:${Str.fromInt(g)}")
+    nf <- Fiber.fork(IO.pure(9))
+    nj <- Fiber.join(nf)
+    _ <- IO.println(s"forkN:${Str.fromInt(nj)}")
     _ <- IO.println("done")
   } yield ()
 

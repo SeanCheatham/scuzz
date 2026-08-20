@@ -204,6 +204,7 @@ typedef void *(*SzThunk)(void *env);
 typedef SzIo *(*SzCont)(void *value, void *env);
 typedef int64_t (*SzStreamPred)(void *value, void *env);
 typedef void *(*SzStreamMapFn)(void *value, void *env);
+typedef void *(*SzListMapFn)(void *head, void *env);
 typedef SzIo *(*SzErrorHandler)(SzError *err, void *env);
 
 typedef enum SzIoTag {
@@ -382,6 +383,9 @@ SzIo *sz_ref_get(SzRef *ref);            /* IO[A] */
 /* Callee retains the new value. Caller drops after the call. */
 SzIo *sz_ref_set(SzRef *ref, void *value); /* IO[Unit] */
 SzIo *sz_ref_set_cstr(SzRef *ref, const char *value);
+/* Mapper returns an owned pointer. The slot takes that ref. */
+SzIo *sz_ref_update(SzRef *ref, SzListMapFn fn, void *env); /* IO[Unit] */
+SzIo *sz_ref_update_and_get(SzRef *ref, SzListMapFn fn, void *env); /* IO[A] */
 
 /* Deferred — one-shot promise. */
 struct SzDeferred {
@@ -484,7 +488,6 @@ struct SzList {
 };
 
 typedef int64_t (*SzListPred)(void *head, void *env);
-typedef void *(*SzListMapFn)(void *head, void *env);
 
 SzList *sz_list_nil(void);
 int sz_list_is_empty(const SzList *xs);

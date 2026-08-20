@@ -2209,6 +2209,9 @@ fn kit_lambda_param_ty_at(
             1,
         ) => prior.first().and_then(|t| list_elem(t).ok()),
         ("IO.foreach" | "IO.foreachDiscard", 1) => prior.first().and_then(|t| list_elem(t).ok()),
+        ("Ref.update" | "Ref.updateAndGet", 1) => prior
+            .first()
+            .and_then(|t| handle_payload_ty(t, "Ref").ok().map(default_cell_payload)),
         ("Map.filter" | "Map.exists" | "Map.forall" | "Map.mapValues", 1) => {
             prior.first().and_then(|t| map_kv(t).ok().map(|(_, v)| v))
         }
@@ -3864,49 +3867,75 @@ fn infer_call(
         }
         "Ref.of" => {
             expect_arity(callee, &arg_tys, 1)?;
-            expect_ty(&arg_tys[0], &Type::String)?;
-            Ok(Type::Io(Box::new(handle_ty("Ref", Type::String))))
+            Ok(Type::Io(Box::new(handle_ty("Ref", arg_tys[0].clone()))))
         }
         "Ref.get" => {
             expect_arity(callee, &arg_tys, 1)?;
-            expect_handle(&arg_tys[0], "Ref")?;
-            Ok(Type::Io(Box::new(Type::String)))
+            let payload = default_cell_payload(handle_payload_ty(&arg_tys[0], "Ref")?);
+            Ok(Type::Io(Box::new(payload)))
         }
         "Ref.set" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_handle(&arg_tys[0], "Ref")?;
-            expect_ty(&arg_tys[1], &Type::String)?;
+            let payload = default_cell_payload(handle_payload_ty(&arg_tys[0], "Ref")?);
+            expect_ty(&arg_tys[1], &payload)?;
             Ok(Type::Io(Box::new(Type::Unit)))
+        }
+        "Ref.update" | "Ref.updateAndGet" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let payload = default_cell_payload(handle_payload_ty(&arg_tys[0], "Ref")?);
+            if !matches!(&args[1].kind, ExprKind::Lambda { .. }) {
+                return Err(TypeError::Msg(format!(
+                    "{callee} callback must be a lambda"
+                )));
+            }
+            let Type::Fun(a, b) = &arg_tys[1] else {
+                return Err(TypeError::Msg(format!(
+                    "{callee} callback must be a lambda"
+                )));
+            };
+            expect_ty(a, &payload)?;
+            expect_ty(b, &payload)?;
+            if callee == "Ref.update" {
+                Ok(Type::Io(Box::new(Type::Unit)))
+            } else {
+                Ok(Type::Io(Box::new(payload)))
+            }
         }
         "Queue.unbounded" => {
             expect_arity(callee, &arg_tys, 0)?;
-            Ok(Type::Io(Box::new(handle_ty("Queue", Type::String))))
+            Ok(Type::Io(Box::new(handle_ty(
+                "Queue",
+                Type::Opaque("Elem".into()),
+            ))))
         }
         "Queue.offer" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_handle(&arg_tys[0], "Queue")?;
-            expect_ty(&arg_tys[1], &Type::String)?;
+            let payload = default_cell_payload(handle_payload_ty(&arg_tys[0], "Queue")?);
+            expect_ty(&arg_tys[1], &payload)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         "Queue.take" => {
             expect_arity(callee, &arg_tys, 1)?;
-            expect_handle(&arg_tys[0], "Queue")?;
-            Ok(Type::Io(Box::new(Type::String)))
+            let payload = default_cell_payload(handle_payload_ty(&arg_tys[0], "Queue")?);
+            Ok(Type::Io(Box::new(payload)))
         }
         "Deferred.empty" => {
             expect_arity(callee, &arg_tys, 0)?;
-            Ok(Type::Io(Box::new(handle_ty("Deferred", Type::String))))
+            Ok(Type::Io(Box::new(handle_ty(
+                "Deferred",
+                Type::Opaque("Elem".into()),
+            ))))
         }
         "Deferred.complete" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_handle(&arg_tys[0], "Deferred")?;
-            expect_ty(&arg_tys[1], &Type::String)?;
+            let payload = default_cell_payload(handle_payload_ty(&arg_tys[0], "Deferred")?);
+            expect_ty(&arg_tys[1], &payload)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         "Deferred.get" => {
             expect_arity(callee, &arg_tys, 1)?;
-            expect_handle(&arg_tys[0], "Deferred")?;
-            Ok(Type::Io(Box::new(Type::String)))
+            let payload = default_cell_payload(handle_payload_ty(&arg_tys[0], "Deferred")?);
+            Ok(Type::Io(Box::new(payload)))
         }
         "Fiber.fork" => {
             expect_arity(callee, &arg_tys, 1)?;
@@ -5452,6 +5481,22 @@ fn expect_handle<'a>(got: &'a Type, name: &str) -> Result<&'a [Type], TypeError>
     match got {
         Type::App(n, args) if n == name => Ok(args),
         other => Err(TypeError::Msg(format!("expected {name}[_], got {other:?}"))),
+    }
+}
+
+fn handle_payload_ty(got: &Type, name: &str) -> Result<Type, TypeError> {
+    Ok(expect_handle(got, name)?
+        .first()
+        .cloned()
+        .unwrap_or_else(|| Type::Opaque("Elem".into())))
+}
+
+/// `Queue.unbounded` / `Deferred.empty` have no witness. A missing pin is String.
+fn default_cell_payload(payload: Type) -> Type {
+    if is_meta_opaque(&payload) {
+        Type::String
+    } else {
+        payload
     }
 }
 
@@ -7211,7 +7256,14 @@ fn elaborate_expr(
             )?;
             let got = infer(&inner, enums, funs, methods, current_module, env)?;
             expect_ty(&got, &want).map_err(|e| e.with_span_if_bare(&span))?;
-            Ok(inner)
+            // Keep the pin. `Queue.unbounded` / `Deferred.empty` have no witness.
+            Ok(Expr::new(
+                ExprKind::Ascribe {
+                    expr: Box::new(inner),
+                    ty,
+                },
+                span,
+            ))
         }
         ExprKind::NamedArg { name, value } => Ok(Expr::new(
             ExprKind::NamedArg {
@@ -7411,6 +7463,10 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
             param_ty: param_ty.map(|t| apply_subst(&t, subst)),
             pat,
             body: Box::new(subst_node_targs(*body, subst)),
+        },
+        ExprKind::Ascribe { expr, ty } => ExprKind::Ascribe {
+            expr: Box::new(subst_node_targs(*expr, subst)),
+            ty: apply_subst(&ty, subst),
         },
         other => other,
     };
@@ -7807,6 +7863,10 @@ fn rewrite_enum_refs(
             },
             pat,
             body: Box::new(rewrite_enum_refs(*body, clones)?),
+        },
+        ExprKind::Ascribe { expr, ty } => ExprKind::Ascribe {
+            expr: Box::new(rewrite_enum_refs(*expr, clones)?),
+            ty: concretize_type(&ty, clones)?,
         },
         other => other,
     };
@@ -9497,6 +9557,71 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("IO.foreach/when should typecheck");
+    }
+
+    #[test]
+    fn typechecks_generic_ref_queue_deferred() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    r <- Ref.of(1)
+    _ <- Ref.set(r, 2)
+    n <- Ref.get(r)
+    _ <- Ref.update(r, x => x + 1)
+    m <- Ref.updateAndGet(r, x => x + 1)
+    _ <- IO.println(Str.fromInt(n + m))
+    s <- Ref.of("a")
+    _ <- Ref.update(s, t => Str.concat(t, "!"))
+    q <- Queue.unbounded(): IO[Queue[Int]]
+    _ <- Queue.offer(q, 3)
+    k <- Queue.take(q)
+    _ <- IO.println(Str.fromInt(k))
+    d <- Deferred.empty(): IO[Deferred[Int]]
+    _ <- Deferred.complete(d, 4)
+    g <- Deferred.get(d)
+    f <- Fiber.fork(IO.pure(5))
+    j <- Fiber.join(f)
+    _ <- IO.println(Str.fromInt(g + j))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("generic Ref/Queue/Deferred/Fiber should typecheck");
+        let p = elaborate_generics(p).expect("generic cells keep ascribe pin");
+        monomorphize(p).expect("generic cells monomorphize");
+    }
+
+    #[test]
+    fn typechecks_queue_int_needs_pin() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    q <- Queue.unbounded()
+    _ <- Queue.offer(q, 1)
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("expected") || err.message().contains("String"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn typechecks_ref_update_rejects_non_lambda() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    r <- Ref.of(1)
+    _ <- Ref.update(r, 1)
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("Ref.update callback must be a lambda"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]
