@@ -46,17 +46,13 @@ static void *queue_offer_thunk(void *env) {
   SzPair *p = (SzPair *)env;
   SzQueue *q = (SzQueue *)p->left;
   void *value = p->right;
-  if (sz_fiber_wake_queue(q, value)) {
-    p->right = NULL;
-    sz_release(p);
+  sz_retain(value);
+  if (sz_fiber_wake_queue(q, value))
     return NULL;
-  }
   if (q->len == q->cap)
     queue_grow(q);
   q->items[queue_slot(q, q->len)] = value;
   q->len++;
-  p->right = NULL;
-  sz_release(p);
   return NULL;
 }
 

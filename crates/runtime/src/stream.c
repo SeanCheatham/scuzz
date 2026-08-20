@@ -794,7 +794,7 @@ static SzIo *reverse_acc(void *acc, void *env) {
 }
 
 static void *st_release_io(void *env) {
-  sz_release(env);
+  (void)env;
   return NULL;
 }
 

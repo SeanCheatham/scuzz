@@ -1894,7 +1894,8 @@ static SzIo *ignore_then_io(void *ignored, void *env) {
 }
 
 /* Sequence finalizers LIFO (top of stack first). Takes ownership of ENSURE
- * frames' finalizer pointers. Frees the whole cont stack. */
+ * frames' finalizer pointers. Releases flatMap/handle env like cont_pop.
+ * Frees the whole cont stack. */
 static SzIo *drain_ensure_finalizers(ContFrame *stack) {
   SzIo *acc = NULL;
   ContFrame *c = stack;
@@ -1909,10 +1910,36 @@ static SzIo *drain_ensure_finalizers(ContFrame *stack) {
         acc = fm_drop(acc, ignore_then_io, fin);
     } else if (c->kind == CONT_LOOP)
       sz_release(c->loop_inner);
+    else if (c->kind == CONT_FLATMAP || c->kind == CONT_HANDLE)
+      sz_release(c->env);
     sz_free(c);
     c = next;
   }
   return acc;
+}
+
+/* Steal unstepped ENSURE finalizers from cur (inner-most first). Nested
+ * ENSURE nodes fold the same way. */
+static SzIo *take_unstepped_ensure(SzIo *cur) {
+  SzIo *inner;
+  SzIo *fin;
+  SzIo *acc;
+  if (!cur || cur->tag != SZ_IO_ENSURE)
+    return NULL;
+  inner = cur->as.ensure.inner;
+  fin = cur->as.ensure.finalizer;
+  if (sz_is_rc(cur) && sz_rc_hdr(cur)->rc > 1) {
+    if (fin)
+      sz_retain(fin);
+  } else {
+    cur->as.ensure.finalizer = NULL;
+  }
+  acc = take_unstepped_ensure(inner);
+  if (!acc)
+    return fin;
+  if (!fin)
+    return acc;
+  return fm_drop(acc, ignore_then_io, fin);
 }
 
 static void ready_enqueue(Sched *s, Fiber *f) {
@@ -2224,8 +2251,15 @@ static void fiber_cancel(Sched *s, Fiber *f) {
       fiber_cancel(s, nested);
     nested = next;
   }
-  cleanup = drain_ensure_finalizers(f->stack);
-  f->stack = NULL;
+  {
+    SzIo *from_cur = take_unstepped_ensure(f->cur);
+    SzIo *from_stack = drain_ensure_finalizers(f->stack);
+    f->stack = NULL;
+    if (from_cur && from_stack)
+      cleanup = fm_drop(from_cur, ignore_then_io, from_stack);
+    else
+      cleanup = from_cur ? from_cur : from_stack;
+  }
   fiber_set_cur(f, cleanup);
   if (cleanup) {
     f->state = FIB_FINALIZING;
@@ -2551,14 +2585,19 @@ static int step_fiber(Sched *s, Fiber *f) {
     return 0;
   case SZ_IO_DELAY: {
     void *env = cur->as.delay.env;
-    /* Unique delay: steal env before the thunk so the thunk can drop it.
-     * BOX packs (Net.serve) are borrowed. Steal would leak the delay retain.
-     * Leave BOX env so last-use of the delay node drops it. */
+    int steal = 0;
+    /* Thunks borrow env. Unique delay (not BOX) steals so the runner drops
+     * env after the thunk. Shared delay leaves env so a loop can rerun.
+     * BOX packs stay on the node so last-use drops them. */
     if (!(sz_is_rc(cur) && sz_rc_hdr(cur)->rc > 1) &&
-        !(sz_is_rc(env) && sz_rc_hdr(env)->kind == SZ_RC_BOX))
+        !(sz_is_rc(env) && sz_rc_hdr(env)->kind == SZ_RC_BOX)) {
       cur->as.delay.env = NULL;
+      steal = 1;
+    }
     {
       void *value = cur->as.delay.thunk(env);
+      if (steal)
+        delay_env_drop(env);
       fiber_set_cur(f, pure_drop(value));
     }
     ready_enqueue(s, f);

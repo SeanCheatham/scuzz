@@ -200,7 +200,6 @@ static void *mem_read(void *env) {
   r->is_err = 0;
   r->as.ok = sz_string_from_bytes(n->data ? n->data : "", n->len);
 done:
-  sz_release(pack);
   return r;
 }
 
@@ -287,7 +286,6 @@ static void *mem_write(void *env) {
 done:
   if (!contents)
     sz_release(c);
-  sz_release(pack);
   return r;
 }
 
@@ -350,7 +348,6 @@ static void *mem_list(void *env) {
     r->as.ok = rev;
   }
 done:
-  sz_release(pack);
   return r;
 }
 
@@ -402,7 +399,6 @@ static void *mem_mkdirs(void *env) {
   r->is_err = 0;
   r->as.ok = NULL;
 done:
-  sz_release(pack);
   return r;
 }
 
@@ -484,7 +480,6 @@ static void *mem_canonicalize(void *env) {
   r->as.ok = sz_string_from_cstr(path);
   sz_free(path);
 done:
-  sz_release(pack);
   return r;
 }
 
@@ -611,7 +606,6 @@ static void *stub_http_get(void *env) {
   r->is_err = 1;
   r->as.err = sz_error_new(6, "Net.httpGet: no stub for URL");
 done:
-  sz_release(url_s);
   return r;
 }
 

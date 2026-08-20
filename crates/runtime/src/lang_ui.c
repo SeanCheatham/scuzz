@@ -426,7 +426,6 @@ static void *thunk_run_rebuild(void *env) {
   }
 
   sz_ui_unmount(session);
-  sz_release(pack);
   return NULL;
 }
 
