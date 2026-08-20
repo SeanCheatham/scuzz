@@ -1,12 +1,8 @@
-/* Mobile embedder for iOS. Strong sz_mobile_* defs override the weak
- * runtime stubs (crates/runtime/src/ui.c). Present copies the RGBA8888
- * frame to the view on the main queue. Touch and keyboard arrive on the
- * main thread and are polled once per pump on the worker thread. */
+/* iOS sz_mobile_* shell. Strong defs override the weak runtime stubs. */
 
 #import <CoreGraphics/CoreGraphics.h>
 #import <UIKit/UIKit.h>
 
-#include <limits.h>
 #include <os/lock.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -43,18 +39,21 @@ static int text_slot_queued(const char *slot) {
   return 0;
 }
 
-static const char *stash_text(const char *s) {
+static void copy_text(char *dst, const char *s) {
   size_t n;
-  char *dst;
   if (!s)
     s = "";
   n = strlen(s);
   if (n >= TEXT_LEN)
     n = TEXT_LEN - 1;
-  dst = g_text_bufs[g_text_i];
-  g_text_i = (g_text_i + 1) % TEXT_RING;
   memcpy(dst, s, n);
   dst[n] = '\0';
+}
+
+static const char *stash_text(const char *s) {
+  char *dst = g_text_bufs[g_text_i];
+  g_text_i = (g_text_i + 1) % TEXT_RING;
+  copy_text(dst, s);
   return dst;
 }
 
@@ -75,7 +74,6 @@ static int frame_bytes(int width, int height, size_t *out) {
 
 static void enqueue_text_edit(const char *text) {
   SzInputEvent ev;
-  /* Drop if the queue is full, or if the next text slot is still queued. */
   os_unfair_lock_lock(&g_q_lock);
   if (q_full() || text_slot_queued(g_text_bufs[g_text_i])) {
     os_unfair_lock_unlock(&g_q_lock);
@@ -83,7 +81,7 @@ static void enqueue_text_edit(const char *text) {
   }
   memset(&ev, 0, sizeof ev);
   ev.kind = SZ_INPUT_TEXT_EDIT;
-  ev.text = stash_text(text ? text : "");
+  ev.text = stash_text(text);
   g_queue[g_q_tail] = ev;
   g_q_tail = (g_q_tail + 1) % EVENT_CAP;
   os_unfair_lock_unlock(&g_q_lock);
@@ -93,7 +91,7 @@ int sz_mobile_available(void) { return 1; }
 
 int sz_mobile_alive(void) { return atomic_load(&g_alive); }
 
-void scuzz_ios_set_alive(int alive) { atomic_store(&g_alive, alive); }
+void scuzz_ios_set_alive(int alive) { atomic_store(&g_alive, alive ? 1 : 0); }
 
 void scuzz_ios_push_lifecycle(int phase) {
   SzInputEvent ev;
@@ -135,12 +133,7 @@ int sz_mobile_poll_event(SzInputEvent *out) {
   *out = g_queue[g_q_head];
   g_q_head = (g_q_head + 1) % EVENT_CAP;
   if (out->kind == SZ_INPUT_TEXT_EDIT) {
-    const char *src = out->text ? out->text : "";
-    size_t n = strlen(src);
-    if (n >= TEXT_LEN)
-      n = TEXT_LEN - 1;
-    memcpy(g_poll_text, src, n);
-    g_poll_text[n] = '\0';
+    copy_text(g_poll_text, out->text);
     out->text = g_poll_text;
   }
   os_unfair_lock_unlock(&g_q_lock);
@@ -154,7 +147,6 @@ int sz_mobile_poll_event(SzInputEvent *out) {
   size_t _nbytes;
   int _pw;
   int _ph;
-  os_unfair_lock _lock;
 }
 - (void)setFramePixels:(NSData *)data width:(int)w height:(int)h;
 @end
@@ -163,10 +155,8 @@ int sz_mobile_poll_event(SzInputEvent *out) {
 
 - (instancetype)initWithFrame:(CGRect)frame {
   self = [super initWithFrame:frame];
-  if (self) {
-    _lock = OS_UNFAIR_LOCK_INIT;
+  if (self)
     self.backgroundColor = [UIColor whiteColor];
-  }
   return self;
 }
 
@@ -178,39 +168,28 @@ int sz_mobile_poll_event(SzInputEvent *out) {
   size_t n = data ? [data length] : 0;
   uint8_t *next = NULL;
   if (n > 0) {
-    next = (uint8_t *)malloc(n);
+    next = (uint8_t *)realloc(_pixels, n);
     if (!next)
-      return; /* keep the old buffer */
+      return;
     memcpy(next, [data bytes], n);
+  } else {
+    free(_pixels);
   }
-  os_unfair_lock_lock(&_lock);
-  free(_pixels);
   _pixels = next;
   _nbytes = n;
   _pw = w;
   _ph = h;
-  os_unfair_lock_unlock(&_lock);
   [self setNeedsDisplay];
 }
 
 - (void)drawRect:(CGRect)rect {
-  uint8_t *pixels;
-  size_t nbytes;
-  int pw;
-  int ph;
   (void)rect;
-  os_unfair_lock_lock(&_lock);
-  pixels = _pixels;
-  nbytes = _nbytes;
-  pw = _pw;
-  ph = _ph;
-  os_unfair_lock_unlock(&_lock);
-  if (pixels && pw > 0 && ph > 0) {
+  if (_pixels && _pw > 0 && _ph > 0) {
     CGColorSpaceRef cs = CGColorSpaceCreateDeviceRGB();
     CGDataProviderRef provider =
-        CGDataProviderCreateWithData(NULL, pixels, nbytes, NULL);
+        CGDataProviderCreateWithData(NULL, _pixels, _nbytes, NULL);
     CGImageRef image = CGImageCreate(
-        (size_t)pw, (size_t)ph, 8, 32, (size_t)pw * 4, cs,
+        (size_t)_pw, (size_t)_ph, 8, 32, (size_t)_pw * 4, cs,
         kCGBitmapByteOrderDefault | kCGImageAlphaPremultipliedLast, provider,
         NULL, false, kCGRenderingIntentDefault);
     CGContextRef ctx = UIGraphicsGetCurrentContext();

@@ -2,7 +2,6 @@
 
 #include "scuzz_mobile.h"
 
-#include <limits.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -10,15 +9,11 @@
 
 #define EVENT_CAP 64
 
-static int g_ready;
 static int g_keyboard;
 static int g_frames;
-static int g_w;
-static int g_h;
 static SzInputEvent g_queue[EVENT_CAP];
 static int g_q_head;
 static int g_q_tail;
-static char *g_last_title;
 
 static int shell_enabled(void) {
   const char *e = getenv("SCUZZ_MOBILE_SHELL");
@@ -87,34 +82,17 @@ int sz_mobile_present(const char *title, int point_w, int point_h, int pixel_w,
     return 0;
   if (nbytes < need)
     return 0;
-  g_ready = 1;
-  g_w = pixel_w;
-  g_h = pixel_h;
   g_frames++;
-  if (title) {
-    size_t n = strlen(title);
-    free(g_last_title);
-    g_last_title = (char *)malloc(n + 1);
-    if (g_last_title)
-      memcpy(g_last_title, title, n + 1);
-  }
   fprintf(stderr,
           "scuzz mobile: present %dx%d px=%dx%d frame=%d keyboard=%d title=%s\n",
           point_w, point_h, pixel_w, pixel_h, g_frames, g_keyboard,
-          g_last_title ? g_last_title : "Scuzz Lang");
-  (void)g_ready;
-  (void)g_w;
-  (void)g_h;
+          title && title[0] ? title : "Scuzz Lang");
   return 1;
 }
 
 void sz_mobile_shutdown(void) {
-  free(g_last_title);
-  g_last_title = NULL;
-  g_ready = 0;
   g_keyboard = 0;
   g_frames = 0;
-  g_w = g_h = 0;
   g_q_head = g_q_tail = 0;
   if (shell_enabled())
     fprintf(stderr, "scuzz mobile: shutdown\n");

@@ -1,7 +1,5 @@
-/* iOS shell entry. UIApplicationMain owns the main thread. The Scuzz app
- * main (renamed to scuzz_app_main at link time) runs on a worker thread and
- * mounts UiRuntime.Mobile. Frames and input cross through the sz_mobile_*
- * hooks in ScuzzShell.m. */
+/* iOS shell entry. UIApplicationMain owns the main thread. The app main
+ * (renamed scuzz_app_main) runs on a worker and mounts UiRuntime.Mobile. */
 
 #import <UIKit/UIKit.h>
 
