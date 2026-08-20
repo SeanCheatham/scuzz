@@ -829,6 +829,212 @@ static void *dns_he_v4_loopback(void *arg) {
   return NULL;
 }
 
+static void dns_set_ar(uint8_t *buf, uint16_t arcount) {
+  buf[10] = (uint8_t)(arcount >> 8);
+  buf[11] = (uint8_t)arcount;
+}
+
+static void *dns_glue_only(void *arg) {
+  int fd = *(int *)arg;
+  uint8_t buf[512];
+  uint8_t a[16];
+  uint8_t aaaa[28];
+  struct sockaddr_in from;
+  socklen_t flen;
+  ssize_t n;
+  int i;
+  memset(a, 0, sizeof a);
+  a[0] = 0xC0;
+  a[1] = 0x0C;
+  a[3] = 1;
+  a[5] = 1;
+  a[9] = 60;
+  a[11] = 4;
+  a[12] = 127;
+  a[15] = 1;
+  memset(aaaa, 0, sizeof aaaa);
+  aaaa[0] = 0xC0;
+  aaaa[1] = 0x0C;
+  aaaa[3] = 28;
+  aaaa[5] = 1;
+  aaaa[9] = 60;
+  aaaa[11] = 16;
+  aaaa[27] = 1;
+  for (i = 0; i < 2; i++) {
+    flen = sizeof from;
+    n = recvfrom(fd, buf, sizeof buf, 0, (struct sockaddr *)&from, &flen);
+    if (n < 12)
+      return NULL;
+    dns_set_qr(buf, 0);
+    if (dns_qtype_of(buf, n) == 1) {
+      if ((size_t)n + 16 > sizeof buf)
+        return NULL;
+      dns_set_ar(buf, 1);
+      memcpy(buf + n, a, 16);
+      if (sendto(fd, buf, (size_t)n + 16, 0, (struct sockaddr *)&from, flen) < 0)
+        return NULL;
+    } else {
+      if ((size_t)n + 28 > sizeof buf)
+        return NULL;
+      dns_set_ar(buf, 1);
+      memcpy(buf + n, aaaa, 28);
+      if (sendto(fd, buf, (size_t)n + 28, 0, (struct sockaddr *)&from, flen) < 0)
+        return NULL;
+    }
+  }
+  return NULL;
+}
+
+static void *dns_wrong_src(void *arg) {
+  int fd = *(int *)arg;
+  int spoof;
+  uint8_t buf[512];
+  uint8_t ans[16];
+  struct sockaddr_in from;
+  socklen_t flen;
+  ssize_t n;
+  int i;
+  spoof = socket(AF_INET, SOCK_DGRAM, 0);
+  if (spoof < 0)
+    return NULL;
+  memset(ans, 0, sizeof ans);
+  ans[0] = 0xC0;
+  ans[1] = 0x0C;
+  ans[3] = 1;
+  ans[5] = 1;
+  ans[9] = 60;
+  ans[11] = 4;
+  ans[12] = 127;
+  ans[15] = 1;
+  for (i = 0; i < 2; i++) {
+    flen = sizeof from;
+    n = recvfrom(fd, buf, sizeof buf, 0, (struct sockaddr *)&from, &flen);
+    if (n < 12) {
+      close(spoof);
+      return NULL;
+    }
+    if (dns_qtype_of(buf, n) == 1) {
+      if ((size_t)n + 16 > sizeof buf) {
+        close(spoof);
+        return NULL;
+      }
+      dns_set_qr(buf, 1);
+      memcpy(buf + n, ans, 16);
+      if (sendto(spoof, buf, (size_t)n + 16, 0, (struct sockaddr *)&from, flen) <
+          0) {
+        close(spoof);
+        return NULL;
+      }
+    } else {
+      dns_set_qr(buf, 0);
+      if (sendto(spoof, buf, (size_t)n, 0, (struct sockaddr *)&from, flen) < 0) {
+        close(spoof);
+        return NULL;
+      }
+    }
+  }
+  close(spoof);
+  return NULL;
+}
+
+static void *ipv4_http_hold_complete(void *arg) {
+  int port = *(int *)arg;
+  int fd, cfd;
+  int one = 1;
+  struct sockaddr_in addr;
+  char buf[512];
+  const char *resp = "HTTP/1.0 200 OK\r\nContent-Length: 5\r\n\r\nok:/x";
+  ssize_t n;
+  fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0)
+    return NULL;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+  memset(&addr, 0, sizeof addr);
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)port);
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  if (bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0 || listen(fd, 1) != 0) {
+    close(fd);
+    return NULL;
+  }
+  cfd = accept(fd, NULL, NULL);
+  close(fd);
+  if (cfd < 0)
+    return NULL;
+  n = read(cfd, buf, sizeof buf);
+  (void)n;
+  if (write(cfd, resp, strlen(resp)) < 0) {
+    close(cfd);
+    return NULL;
+  }
+  sleep_us(1500000);
+  close(cfd);
+  return (void *)1;
+}
+
+static void *ipv4_http_404(void *arg) {
+  int port = *(int *)arg;
+  int fd, cfd;
+  int one = 1;
+  struct sockaddr_in addr;
+  char buf[512];
+  const char *resp = "HTTP/1.0 404 Not Found\r\nContent-Length: 3\r\n\r\nerr";
+  ssize_t n;
+  fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0)
+    return NULL;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+  memset(&addr, 0, sizeof addr);
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)port);
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  if (bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0 || listen(fd, 1) != 0) {
+    close(fd);
+    return NULL;
+  }
+  cfd = accept(fd, NULL, NULL);
+  close(fd);
+  if (cfd < 0)
+    return NULL;
+  n = read(cfd, buf, sizeof buf);
+  (void)n;
+  if (write(cfd, resp, strlen(resp)) < 0) {
+    close(cfd);
+    return NULL;
+  }
+  close(cfd);
+  return (void *)1;
+}
+
+static void *ipv4_http_rst(void *arg) {
+  int port = *(int *)arg;
+  int fd, cfd;
+  int one = 1;
+  struct linger lin;
+  struct sockaddr_in addr;
+  fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0)
+    return NULL;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+  memset(&addr, 0, sizeof addr);
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)port);
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  if (bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0 || listen(fd, 1) != 0) {
+    close(fd);
+    return NULL;
+  }
+  cfd = accept(fd, NULL, NULL);
+  close(fd);
+  if (cfd < 0)
+    return NULL;
+  lin.l_onoff = 1;
+  lin.l_linger = 0;
+  setsockopt(cfd, SOL_SOCKET, SO_LINGER, &lin, sizeof lin);
+  close(cfd);
+  return (void *)1;
+}
+
 static void *stdin_late_write(void *arg) {
   int fd = *(int *)arg;
   sleep_us(40000);
@@ -3962,6 +4168,138 @@ int main(void) {
     inner = (SzPair *)outer->right;
     assert(inner && inner->left);
     assert(strcmp(sz_string_cstr((SzString *)inner->left), "ok:/x") == 0);
+  }
+
+  /* Glue A/AAAA in ADDITIONAL is not an answer. */
+  {
+    pthread_t th;
+    int dns_fd;
+    struct sockaddr_in addr;
+    socklen_t alen = sizeof addr;
+    dns_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    assert(dns_fd >= 0);
+    memset(&addr, 0, sizeof addr);
+    addr.sin_family = AF_INET;
+    addr.sin_port = 0;
+    assert(inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) == 1);
+    assert(bind(dns_fd, (struct sockaddr *)&addr, sizeof addr) == 0);
+    alen = sizeof addr;
+    assert(getsockname(dns_fd, (struct sockaddr *)&addr, &alen) == 0);
+    sz_net_test_set_nameserver("127.0.0.1", (int)ntohs(addr.sin_port));
+    pthread_create(&th, NULL, dns_glue_only, &dns_fd);
+    r = sz_io_unsafe_run(
+        sz_net_http_get(sz_string_from_cstr("http://scuzz.test/x")));
+    pthread_join(th, NULL);
+    close(dns_fd);
+    sz_net_test_set_nameserver(NULL, 0);
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "DNS failed"));
+    sz_error_free(r.error);
+  }
+
+  /* Answer from a different UDP source port is ignored. */
+  {
+    pthread_t th;
+    int dns_fd;
+    struct sockaddr_in addr;
+    socklen_t alen = sizeof addr;
+    int64_t t0;
+    int64_t t1;
+    dns_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    assert(dns_fd >= 0);
+    memset(&addr, 0, sizeof addr);
+    addr.sin_family = AF_INET;
+    addr.sin_port = 0;
+    assert(inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) == 1);
+    assert(bind(dns_fd, (struct sockaddr *)&addr, sizeof addr) == 0);
+    alen = sizeof addr;
+    assert(getsockname(dns_fd, (struct sockaddr *)&addr, &alen) == 0);
+    sz_net_test_set_nameserver("127.0.0.1", (int)ntohs(addr.sin_port));
+    pthread_create(&th, NULL, dns_wrong_src, &dns_fd);
+    t0 = sz_clock_monotonic_ms_sync();
+    r = sz_io_unsafe_run(
+        sz_net_http_get(sz_string_from_cstr("http://silent.test/x")));
+    t1 = sz_clock_monotonic_ms_sync();
+    pthread_join(th, NULL);
+    close(dns_fd);
+    sz_net_test_set_nameserver(NULL, 0);
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "DNS timed out"));
+    sz_error_free(r.error);
+    assert(t1 - t0 >= 900);
+    assert(t1 - t0 < 2500);
+  }
+
+  /* URL: CR/LF, userinfo, and port out of range fail in get_start. */
+  {
+    r = sz_io_unsafe_run(
+        sz_net_http_get(sz_string_from_cstr("http://127.0.0.1/\r\nHost: x")));
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "invalid URL"));
+    sz_error_free(r.error);
+    r = sz_io_unsafe_run(
+        sz_net_http_get(sz_string_from_cstr("http://user@host/")));
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "invalid URL"));
+    sz_error_free(r.error);
+    r = sz_io_unsafe_run(
+        sz_net_http_get(sz_string_from_cstr("http://127.0.0.1:99999/")));
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "invalid port"));
+    sz_error_free(r.error);
+  }
+
+  /* Content-Length complete without close: httpGet succeeds before EOF. */
+  {
+    pthread_t th;
+    int port = 18594;
+    char url[64];
+    int64_t t0;
+    int64_t t1;
+    pthread_create(&th, NULL, ipv4_http_hold_complete, &port);
+    snprintf(url, sizeof url, "http://127.0.0.1:%d/x", port);
+    t0 = sz_clock_monotonic_ms_sync();
+    r = sz_io_unsafe_run(fm_drop(sz_io_sleep_ms(30), after_sleep_http,
+                                      sz_string_from_cstr(url)));
+    t1 = sz_clock_monotonic_ms_sync();
+    pthread_join(th, NULL);
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "ok:/x") == 0);
+    sz_release(r.value);
+    assert(t1 - t0 < 900);
+  }
+
+  /* Non-2xx fails. */
+  {
+    pthread_t th;
+    int port = 18595;
+    char url[64];
+    pthread_create(&th, NULL, ipv4_http_404, &port);
+    snprintf(url, sizeof url, "http://127.0.0.1:%d/x", port);
+    r = sz_io_unsafe_run(fm_drop(sz_io_sleep_ms(30), after_sleep_http,
+                                      sz_string_from_cstr(url)));
+    pthread_join(th, NULL);
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "HTTP error"));
+    sz_error_free(r.error);
+  }
+
+  /* Peer RST after accept: IO fails; process stays alive (no SIGPIPE). */
+  {
+    pthread_t th;
+    int port = 18596;
+    char url[64];
+    pthread_create(&th, NULL, ipv4_http_rst, &port);
+    snprintf(url, sizeof url, "http://127.0.0.1:%d/x", port);
+    r = sz_io_unsafe_run(fm_drop(sz_io_sleep_ms(30), after_sleep_http,
+                                      sz_string_from_cstr(url)));
+    pthread_join(th, NULL);
+    assert(!r.ok);
+    assert(r.error &&
+           (strstr(sz_string_cstr(r.error->message), "write failed") ||
+            strstr(sz_string_cstr(r.error->message), "connect failed") ||
+            strstr(sz_string_cstr(r.error->message), "read failed")));
+    sz_error_free(r.error);
   }
 
   /* Live Sys.readLine leftover: one write, two lines. */

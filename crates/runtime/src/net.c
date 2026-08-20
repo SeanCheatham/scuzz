@@ -11,6 +11,7 @@
 #include <string.h>
 #include <poll.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
 
 static SzIo *fm_drop(SzIo *inner, SzCont cont, void *env) {
@@ -39,12 +40,15 @@ static void *rc_box_zero(size_t n) {
 }
 
 /* Blessed Net.httpGet — live HTTP/1.0 GET or TestRuntime stub map.
- * Live hostnames query A and AAAA together (park on poll). CNAME chains
- * re-query both (cap 5). When both addresses exist, start AAAA first and wait
- * 250ms (RFC 8305) before the A connect so working IPv6 wins. DNS, connect,
- * and the response read each wait at most 1000ms. A partial DNS answer
- * proceeds. IPv4 literals and `http://[::1]/` skip DNS. Failures use SzError
- * code 6. */
+ * Live hostnames query A and AAAA together (park on poll). DNS takes answer
+ * RRs whose owner matches the query name (ASCII case-insensitive). CNAME
+ * chains re-query both (cap 5). UDP replies must match the nameserver
+ * address. Query IDs are not sequential. When both addresses exist, start
+ * AAAA first and wait 250ms from connect start before the A connect so
+ * working IPv6 wins (one A and one AAAA). DNS, connect, write, and the
+ * response read each wait at most 1000ms. A 2xx response finishes on
+ * Content-Length or EOF. Bodies cap at 1 MiB. Chunked encoding fails.
+ * IPv4 literals and `http://[::1]/` skip DNS. Failures use SzError code 6. */
 
 typedef struct {
   int is_err;
@@ -83,13 +87,53 @@ static int set_nonblock(int fd) {
   return fcntl(fd, F_SETFL, fl | O_NONBLOCK);
 }
 
+/* 1 = ok, 0 = invalid URL, -1 = invalid port. */
+static int url_has_bad_bytes(const char *s, size_t n) {
+  size_t i;
+  if (!s)
+    return 1;
+  for (i = 0; i < n; i++) {
+    unsigned char c = (unsigned char)s[i];
+    if (c == 0 || c == '\r' || c == '\n')
+      return 1;
+  }
+  return 0;
+}
+
+static int parse_port_digits(const char *s, const char **end, int *port) {
+  unsigned long v = 0;
+  int digits = 0;
+  if (!s || s[0] < '0' || s[0] > '9')
+    return 0;
+  while (s[0] >= '0' && s[0] <= '9') {
+    v = v * 10UL + (unsigned long)(s[0] - '0');
+    s++;
+    digits++;
+    if (digits > 5 || v > 65535UL)
+      return 0;
+  }
+  if (v < 1UL)
+    return 0;
+  *port = (int)v;
+  if (end)
+    *end = s;
+  return 1;
+}
+
 static int parse_http_url(const char *url, char *host, size_t host_sz, char *path,
                           size_t path_sz, int *port, int *is_v6) {
   const char *p;
   const char *slash;
   const char *rb;
+  const char *rest;
   size_t hlen;
-  if (!url || !is_v6 || strncmp(url, "http://", 7) != 0)
+  size_t ulen;
+  if (!url || !host || !path || !port || !is_v6)
+    return 0;
+  ulen = strlen(url);
+  if (url_has_bad_bytes(url, ulen))
+    return 0;
+  if (strncmp(url, "http://", 7) != 0)
     return 0;
   *is_v6 = 0;
   *port = 80;
@@ -103,15 +147,17 @@ static int parse_http_url(const char *url, char *host, size_t host_sz, char *pat
       return 0;
     memcpy(host, p + 1, hlen);
     host[hlen] = '\0';
+    if (strchr(host, '@') || url_has_bad_bytes(host, hlen))
+      return 0;
     *is_v6 = 1;
     p = rb + 1;
     if (p[0] == ':') {
       p++;
-      *port = atoi(p);
-      if (*port <= 0)
-        *port = 80;
-      while (*p && *p != '/')
-        p++;
+      if (!parse_port_digits(p, &rest, port))
+        return -1;
+      if (*rest && *rest != '/')
+        return -1;
+      p = rest;
     }
     if (p[0] == '\0') {
       memcpy(path, "/", 2);
@@ -119,30 +165,40 @@ static int parse_http_url(const char *url, char *host, size_t host_sz, char *pat
     }
     if (p[0] != '/' || strlen(p) + 1 > path_sz)
       return 0;
+    if (url_has_bad_bytes(p, strlen(p)))
+      return 0;
     memcpy(path, p, strlen(p) + 1);
     return 1;
   }
   slash = strchr(p, '/');
   if (slash) {
     hlen = (size_t)(slash - p);
-    if (hlen + 1 > host_sz || (size_t)strlen(slash) + 1 > path_sz)
+    if (hlen == 0 || hlen + 1 > host_sz || (size_t)strlen(slash) + 1 > path_sz)
       return 0;
     memcpy(host, p, hlen);
     host[hlen] = '\0';
+    if (url_has_bad_bytes(slash, strlen(slash)))
+      return 0;
     memcpy(path, slash, strlen(slash) + 1);
   } else {
-    if (strlen(p) + 1 > host_sz)
+    hlen = strlen(p);
+    if (hlen == 0 || hlen + 1 > host_sz)
       return 0;
-    memcpy(host, p, strlen(p) + 1);
+    memcpy(host, p, hlen + 1);
     memcpy(path, "/", 2);
   }
+  if (strchr(host, '@') || url_has_bad_bytes(host, strlen(host)))
+    return 0;
   {
     char *colon = strchr(host, ':');
     if (colon) {
       *colon = '\0';
-      *port = atoi(colon + 1);
-      if (*port <= 0)
-        *port = 80;
+      if (host[0] == '\0')
+        return 0;
+      if (!parse_port_digits(colon + 1, &rest, port))
+        return -1;
+      if (*rest)
+        return -1;
     }
   }
   return 1;
@@ -162,10 +218,15 @@ typedef struct GetSt {
   int a_done;
   int aaaa_done;
   int he_wait4;
+  int tcp_up;
+  int dns_ns_ok;
   int64_t dns_deadline_ms;
   int64_t connect_deadline_ms;
+  int64_t write_deadline_ms;
   int64_t read_deadline_ms;
+  int64_t he_v4_at_ms;
   int http_port;
+  struct sockaddr_in dns_ns;
   struct sockaddr_storage peer;
   struct sockaddr_storage peer4;
   struct sockaddr_storage peer6;
@@ -182,9 +243,40 @@ typedef struct GetSt {
   size_t total;
 } GetSt;
 
-static uint16_t g_dns_qid;
+static uint64_t g_dns_rng;
+static int g_dns_rng_on;
 static int g_test_ns_on;
 static struct sockaddr_in g_test_ns;
+
+static void dns_rng_seed(void) {
+  FILE *f;
+  uint64_t s = 0;
+  if (g_dns_rng_on)
+    return;
+  f = fopen("/dev/urandom", "rb");
+  if (f) {
+    if (fread(&s, sizeof s, 1, f) != 1)
+      s = 0;
+    fclose(f);
+  }
+  if (s == 0) {
+    struct timespec ts;
+    if (clock_gettime(CLOCK_REALTIME, &ts) == 0)
+      s = ((uint64_t)ts.tv_sec << 32) ^ (uint64_t)ts.tv_nsec ^ 0x9e3779b97f4a7c15ULL;
+  }
+  g_dns_rng = s ? s : 1;
+  g_dns_rng_on = 1;
+}
+
+static uint16_t dns_fresh_id(void) {
+  uint16_t id;
+  dns_rng_seed();
+  do {
+    g_dns_rng = g_dns_rng * 6364136223846793005ULL + 1;
+    id = (uint16_t)(g_dns_rng >> 48);
+  } while (id == 0);
+  return id;
+}
 
 void sz_net_test_set_nameserver(const char *ipv4, int port) {
   memset(&g_test_ns, 0, sizeof g_test_ns);
@@ -360,11 +452,29 @@ static int dns_read_name(const uint8_t *buf, size_t n, size_t *off, char *out,
   return 0;
 }
 
-/* 1 = address (A and/or AAAA), 2 = CNAME only, 4 = NODATA, 0 = fail. */
+static int dns_name_eq(const char *a, const char *b) {
+  size_t i;
+  if (!a || !b)
+    return 0;
+  for (i = 0; a[i] || b[i]; i++) {
+    unsigned char ca = (unsigned char)a[i];
+    unsigned char cb = (unsigned char)b[i];
+    if (ca >= 'A' && ca <= 'Z')
+      ca = (unsigned char)(ca - 'A' + 'a');
+    if (cb >= 'A' && cb <= 'Z')
+      cb = (unsigned char)(cb - 'A' + 'a');
+    if (ca != cb)
+      return 0;
+  }
+  return 1;
+}
+
+/* 1 = address, 2 = CNAME only, 3 = ignore packet, 4 = this type done, 0 = fail. */
 static int dns_parse_answer(const uint8_t *buf, size_t n, uint16_t id,
-                            struct in_addr *a_out, uint8_t *aaaa, int *has_a,
-                            int *has_aaaa, char *cname, size_t cname_cap) {
-  uint16_t flags, qd, rr, i;
+                            const char *qname, struct in_addr *a_out,
+                            uint8_t *aaaa, int *has_a, int *has_aaaa,
+                            char *cname, size_t cname_cap) {
+  uint16_t flags, qd, an, i, rcode;
   size_t o = 12;
   int got_a = 0;
   int got_aaaa = 0;
@@ -372,42 +482,52 @@ static int dns_parse_answer(const uint8_t *buf, size_t n, uint16_t id,
     *has_a = 0;
   if (has_aaaa)
     *has_aaaa = 0;
-  if (n < 12 || rd16(buf) != id)
-    return 0;
-  flags = rd16(buf + 2);
-  if ((flags & 0x8000) == 0 || (flags & 0x000F) != 0)
-    return 0;
-  qd = rd16(buf + 4);
-  rr = (uint16_t)(rd16(buf + 6) + rd16(buf + 8) + rd16(buf + 10));
   if (cname && cname_cap)
     cname[0] = '\0';
+  if (n < 12 || rd16(buf) != id)
+    return 3;
+  flags = rd16(buf + 2);
+  if ((flags & 0x8000) == 0)
+    return 3;
+  if (flags & 0x0200)
+    return 3; /* TC */
+  rcode = (uint16_t)(flags & 0x000F);
+  if (rcode == 3)
+    return 0; /* NXDOMAIN */
+  if (rcode != 0)
+    return 4; /* SERVFAIL / FORMERR / REFUSED: this type done */
+  qd = rd16(buf + 4);
+  an = rd16(buf + 6);
   for (i = 0; i < qd; i++) {
     if (!dns_skip_name(buf, n, &o) || o + 4 > n)
-      return 0;
+      return 3;
     o += 4;
   }
-  for (i = 0; i < rr; i++) {
+  for (i = 0; i < an; i++) {
     uint16_t typ, cls, rdlen;
-    if (!dns_skip_name(buf, n, &o) || o + 10 > n)
-      return 0;
+    char owner[256];
+    if (!dns_read_name(buf, n, &o, owner, sizeof owner) || o + 10 > n)
+      return 3;
     typ = rd16(buf + o);
     cls = rd16(buf + o + 2);
     rdlen = rd16(buf + o + 8);
     o += 10;
     if (o + rdlen > n)
-      return 0;
-    if (typ == 1 && cls == 1 && rdlen == 4 && !got_a && a_out) {
-      memcpy(&a_out->s_addr, buf + o, 4);
-      got_a = 1;
-    } else if (typ == 28 && cls == 1 && rdlen == 16 && !got_aaaa && aaaa) {
-      memcpy(aaaa, buf + o, 16);
-      got_aaaa = 1;
-    } else if (typ == 5 && cls == 1 && cname && cname_cap && cname[0] == '\0') {
-      size_t name_off = o;
-      char tmp[256];
-      if (dns_read_name(buf, n, &name_off, tmp, sizeof tmp) == 1 && tmp[0] &&
-          strlen(tmp) < cname_cap)
-        memcpy(cname, tmp, strlen(tmp) + 1);
+      return 3;
+    if (dns_name_eq(owner, qname) && cls == 1) {
+      if (typ == 1 && rdlen == 4 && !got_a && a_out) {
+        memcpy(&a_out->s_addr, buf + o, 4);
+        got_a = 1;
+      } else if (typ == 28 && rdlen == 16 && !got_aaaa && aaaa) {
+        memcpy(aaaa, buf + o, 16);
+        got_aaaa = 1;
+      } else if (typ == 5 && cname && cname_cap && cname[0] == '\0') {
+        char tmp[256];
+          size_t c_off = o;
+          if (dns_read_name(buf, n, &c_off, tmp, sizeof tmp) == 1 && tmp[0] &&
+              strlen(tmp) < cname_cap)
+            memcpy(cname, tmp, strlen(tmp) + 1);
+      }
     }
     o += rdlen;
   }
@@ -429,10 +549,9 @@ static int dns_send_one(GetSt *st, uint16_t qtype, uint16_t *id_out) {
   ssize_t nsent;
   if (!st || !id_out || !nameserver_addr(&ns))
     return 0;
-  g_dns_qid++;
-  if (g_dns_qid == 0)
-    g_dns_qid = 1;
-  *id_out = g_dns_qid;
+  st->dns_ns = ns;
+  st->dns_ns_ok = 1;
+  *id_out = dns_fresh_id();
   qn = dns_build_query(q, sizeof q, *id_out, st->dns_name, qtype);
   if (qn == 0)
     return 0;
@@ -497,6 +616,7 @@ static void addr_set_v6(struct sockaddr_storage *ss, socklen_t *len,
 #define HE_READ_MS 1000
 #define HE_REQ_MS 1000
 #define HE_WRITE_MS 1000
+#define HE_BODY_MAX (1024u * 1024u)
 
 static void get_free(GetSt *st) {
   if (!st)
@@ -530,10 +650,23 @@ static void *get_start(void *env) {
   struct sockaddr_in *a4;
   struct sockaddr_in6 *a6;
 
-  if (!parse_http_url(url, st->host, sizeof st->host, st->path, sizeof st->path,
-                      &port, &is_v6)) {
+  int url_ok;
+
+  if (strncmp(url ? url : "", "http://", 7) != 0) {
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.httpGet: only http:// URLs supported");
+    return r;
+  }
+  url_ok = parse_http_url(url, st->host, sizeof st->host, st->path, sizeof st->path,
+                          &port, &is_v6);
+  if (url_ok < 0) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(6, "Net.httpGet: invalid port");
+    return r;
+  }
+  if (url_ok != 1) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(6, "Net.httpGet: invalid URL");
     return r;
   }
   st->http_port = port;
@@ -610,9 +743,21 @@ static void *get_dns_recv(void *env) {
   NetResult *r = (NetResult *)rc_box_zero(sizeof(NetResult));
   uint8_t buf[512];
   ssize_t n;
+  struct sockaddr_in from;
+  socklen_t flen = sizeof from;
 
-  n = recvfrom(st->dns_fd, buf, sizeof buf, 0, NULL, NULL);
+  memset(&from, 0, sizeof from);
+  n = recvfrom(st->dns_fd, buf, sizeof buf, 0, (struct sockaddr *)&from, &flen);
   if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK))
+    return dns_wait_more(st, r);
+  if (n < 0) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(6, "Net.httpGet: DNS failed");
+    return r;
+  }
+  if (st->dns_ns_ok &&
+      (from.sin_family != AF_INET || from.sin_port != st->dns_ns.sin_port ||
+       from.sin_addr.s_addr != st->dns_ns.sin_addr.s_addr))
     return dns_wait_more(st, r);
   if (n < 12) {
     r->is_err = 1;
@@ -629,8 +774,10 @@ static void *get_dns_recv(void *env) {
     int kind;
     if (id != st->dns_id_a && id != st->dns_id_aaaa)
       return dns_wait_more(st, r);
-    kind = dns_parse_answer(buf, (size_t)n, id, &a4, aaaa, &has_a, &has_aaaa,
-                            cname, sizeof cname);
+    kind = dns_parse_answer(buf, (size_t)n, id, st->dns_name, &a4, aaaa, &has_a,
+                            &has_aaaa, cname, sizeof cname);
+    if (kind == 3)
+      return dns_wait_more(st, r);
     if (kind == 1) {
       if (has_a) {
         addr_set_v4(&st->peer4, &st->peer4_len, a4, st->http_port);
@@ -656,7 +803,7 @@ static void *get_dns_recv(void *env) {
         st->a_done = 1;
       if (id == st->dns_id_aaaa)
         st->aaaa_done = 1;
-    } else if (kind != 1) {
+    } else {
       r->is_err = 1;
       r->as.err = sz_error_new(6, "Net.httpGet: DNS failed");
       return r;
@@ -677,6 +824,12 @@ static int tcp_begin(const struct sockaddr *sa, socklen_t len) {
       close(fd);
     return -1;
   }
+#ifdef SO_NOSIGPIPE
+  {
+    int nosig = 1;
+    setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &nosig, sizeof nosig);
+  }
+#endif
   if (connect(fd, sa, len) != 0 && errno != EINPROGRESS && errno != EAGAIN) {
     close(fd);
     return -1;
@@ -731,6 +884,8 @@ static void *get_tcp_connect(void *env) {
     }
     get_build_req(st);
     st->connect_deadline_ms = sz_clock_monotonic_ms_sync() + HE_CONNECT_MS;
+    if (st->he_wait4)
+      st->he_v4_at_ms = sz_clock_monotonic_ms_sync() + HE_A_DELAY_MS;
     r->is_err = 0;
     return r;
   }
@@ -833,22 +988,38 @@ static void *get_check_write(void *env) {
     return get_he_pick(st);
   r = (NetResult *)rc_box_zero(sizeof(NetResult));
   if (!fd_pollout(st->fd)) {
-    if (sz_clock_monotonic_ms_sync() >= st->connect_deadline_ms) {
+    int64_t dl = st->tcp_up ? st->write_deadline_ms : st->connect_deadline_ms;
+    const char *msg = st->tcp_up ? "Net.httpGet: write timed out"
+                                 : "Net.httpGet: connect timed out";
+    if (sz_clock_monotonic_ms_sync() >= dl) {
       r->is_err = 1;
-      r->as.err = sz_error_new(6, "Net.httpGet: connect timed out");
+      r->as.err = sz_error_new(6, msg);
       return r;
     }
     r->retry = 1;
     return r;
   }
 
-  if (getsockopt(st->fd, SOL_SOCKET, SO_ERROR, &so, &sl) != 0 || so != 0) {
-    r->is_err = 1;
-    r->as.err = sz_error_new(6, "Net.httpGet: connect failed");
-    return r;
+  if (!st->tcp_up) {
+    if (getsockopt(st->fd, SOL_SOCKET, SO_ERROR, &so, &sl) != 0 || so != 0) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.httpGet: connect failed");
+      return r;
+    }
+    st->tcp_up = 1;
+    st->write_deadline_ms = sz_clock_monotonic_ms_sync() + HE_WRITE_MS;
   }
+#ifdef MSG_NOSIGNAL
+  n = send(st->fd, st->req + st->req_off, st->req_len - st->req_off, MSG_NOSIGNAL);
+#else
   n = write(st->fd, st->req + st->req_off, st->req_len - st->req_off);
+#endif
   if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+    if (sz_clock_monotonic_ms_sync() >= st->write_deadline_ms) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.httpGet: write timed out");
+      return r;
+    }
     r->retry = 1;
     return r;
   }
@@ -858,9 +1029,206 @@ static void *get_check_write(void *env) {
     return r;
   }
   st->req_off += (size_t)n;
-  if (st->req_off < st->req_len)
+  if (st->req_off < st->req_len) {
+    if (sz_clock_monotonic_ms_sync() >= st->write_deadline_ms) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.httpGet: write timed out");
+      return r;
+    }
     r->retry = 1;
+  }
   return r;
+}
+
+static int ascii_ieq(const char *a, const char *b, size_t n) {
+  size_t i;
+  for (i = 0; i < n; i++) {
+    unsigned char ca = (unsigned char)a[i];
+    unsigned char cb = (unsigned char)b[i];
+    if (ca >= 'A' && ca <= 'Z')
+      ca = (unsigned char)(ca - 'A' + 'a');
+    if (cb >= 'A' && cb <= 'Z')
+      cb = (unsigned char)(cb - 'A' + 'a');
+    if (ca != cb)
+      return 0;
+  }
+  return 1;
+}
+
+static size_t http_hdr_len(const char *acc, size_t total) {
+  size_t i;
+  if (!acc || total < 4)
+    return 0;
+  for (i = 0; i + 3 < total; i++) {
+    if (acc[i] == '\r' && acc[i + 1] == '\n' && acc[i + 2] == '\r' &&
+        acc[i + 3] == '\n')
+      return i + 4;
+  }
+  return 0;
+}
+
+static int http_status_code(const char *acc, size_t hdr_len) {
+  size_t line = 0;
+  size_t i;
+  if (!acc || hdr_len < 12)
+    return -1;
+  while (line + 1 < hdr_len && !(acc[line] == '\r' && acc[line + 1] == '\n'))
+    line++;
+  if (memcmp(acc, "HTTP/1.", 7) != 0)
+    return -1;
+  i = 8;
+  while (i < line && acc[i] != ' ')
+    i++;
+  while (i < line && acc[i] == ' ')
+    i++;
+  if (i + 3 > line)
+    return -1;
+  if (acc[i] < '0' || acc[i] > '9' || acc[i + 1] < '0' || acc[i + 1] > '9' ||
+      acc[i + 2] < '0' || acc[i + 2] > '9')
+    return -1;
+  return (acc[i] - '0') * 100 + (acc[i + 1] - '0') * 10 + (acc[i + 2] - '0');
+}
+
+static int http_header_present(const char *acc, size_t hdr_len, const char *name) {
+  size_t nlen = strlen(name);
+  size_t i = 0;
+  while (i + 1 < hdr_len && !(acc[i] == '\r' && acc[i + 1] == '\n'))
+    i++;
+  i += 2;
+  while (i < hdr_len) {
+    size_t start = i;
+    size_t colon;
+    if (acc[i] == '\r')
+      break;
+    while (i + 1 < hdr_len && !(acc[i] == '\r' && acc[i + 1] == '\n'))
+      i++;
+    colon = start;
+    while (colon < i && acc[colon] != ':')
+      colon++;
+    if (colon < i && (size_t)(colon - start) == nlen &&
+        ascii_ieq(acc + start, name, nlen))
+      return 1;
+    i += 2;
+  }
+  return 0;
+}
+
+static int http_content_length(const char *acc, size_t hdr_len, size_t *out) {
+  size_t i = 0;
+  const char *name = "Content-Length";
+  size_t nlen = 14;
+  while (i + 1 < hdr_len && !(acc[i] == '\r' && acc[i + 1] == '\n'))
+    i++;
+  i += 2;
+  while (i < hdr_len) {
+    size_t start = i;
+    size_t colon;
+    if (acc[i] == '\r')
+      break;
+    while (i + 1 < hdr_len && !(acc[i] == '\r' && acc[i + 1] == '\n'))
+      i++;
+    colon = start;
+    while (colon < i && acc[colon] != ':')
+      colon++;
+    if (colon < i && (size_t)(colon - start) == nlen &&
+        ascii_ieq(acc + start, name, nlen)) {
+      unsigned long v = 0;
+      size_t p = colon + 1;
+      int digits = 0;
+      while (p < i && (acc[p] == ' ' || acc[p] == '\t'))
+        p++;
+      if (p >= i || acc[p] < '0' || acc[p] > '9')
+        return 0;
+      while (p < i && acc[p] >= '0' && acc[p] <= '9') {
+        v = v * 10UL + (unsigned long)(acc[p] - '0');
+        p++;
+        digits++;
+        if (digits > 10 || v > (unsigned long)HE_BODY_MAX)
+          return 0;
+      }
+      while (p < i && (acc[p] == ' ' || acc[p] == '\t'))
+        p++;
+      if (p != i)
+        return 0;
+      *out = (size_t)v;
+      return 1;
+    }
+    i += 2;
+  }
+  return 0;
+}
+
+/* 1 = r is final (ok or err). 0 = retry. eof = connection closed. */
+static int get_try_complete(GetSt *st, NetResult *r, int eof) {
+  size_t hdr;
+  int status;
+  size_t clen = 0;
+  int has_cl;
+  size_t body_off;
+  size_t body_got;
+  if (!st->acc || st->total == 0) {
+    if (eof) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.httpGet: malformed response");
+      return 1;
+    }
+    return 0;
+  }
+  hdr = http_hdr_len(st->acc, st->total);
+  if (hdr == 0) {
+    if (eof) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.httpGet: malformed response");
+      return 1;
+    }
+    return 0;
+  }
+  status = http_status_code(st->acc, hdr);
+  if (status < 0) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(6, "Net.httpGet: malformed response");
+    return 1;
+  }
+  if (status < 200 || status > 299) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(6, "Net.httpGet: HTTP error");
+    return 1;
+  }
+  if (http_header_present(st->acc, hdr, "Transfer-Encoding")) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(6, "Net.httpGet: chunked encoding unsupported");
+    return 1;
+  }
+  has_cl = 0;
+  if (http_header_present(st->acc, hdr, "Content-Length")) {
+    if (!http_content_length(st->acc, hdr, &clen)) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.httpGet: malformed response");
+      return 1;
+    }
+    has_cl = 1;
+  }
+  body_off = hdr;
+  body_got = st->total > body_off ? st->total - body_off : 0;
+  if (has_cl) {
+    if (body_got >= clen) {
+      r->is_err = 0;
+      r->as.ok = sz_string_from_bytes(st->acc + body_off, clen);
+      return 1;
+    }
+    if (eof) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.httpGet: malformed response");
+      return 1;
+    }
+    return 0;
+  }
+  if (eof) {
+    r->is_err = 0;
+    r->as.ok = sz_string_from_bytes(st->acc + body_off, body_got);
+    return 1;
+  }
+  return 0;
 }
 
 static void *get_read(void *env) {
@@ -868,7 +1236,6 @@ static void *get_read(void *env) {
   NetResult *r = (NetResult *)rc_box_zero(sizeof(NetResult));
   char buf[4096];
   ssize_t n;
-  char *body;
 
   n = read(st->fd, buf, sizeof buf);
   if (n < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
@@ -886,25 +1253,30 @@ static void *get_read(void *env) {
     return r;
   }
   if (n > 0) {
-    char *nacc = (char *)sz_alloc(st->total + (size_t)n + 1);
+    size_t add = (size_t)n;
+    char *nacc;
+    if (st->total >= HE_BODY_MAX || add > HE_BODY_MAX - st->total) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(6, "Net.httpGet: response too large");
+      return r;
+    }
+    nacc = (char *)sz_alloc(st->total + add + 1);
     if (st->total)
       memcpy(nacc, st->acc, st->total);
-    memcpy(nacc + st->total, buf, (size_t)n);
-    st->total += (size_t)n;
+    memcpy(nacc + st->total, buf, add);
+    st->total += add;
     nacc[st->total] = '\0';
     sz_free(st->acc);
     st->acc = nacc;
+    if (get_try_complete(st, r, 0))
+      return r;
     r->retry = 1;
     return r;
   }
-  body = strstr(st->acc ? st->acc : "", "\r\n\r\n");
-  if (!body) {
-    r->is_err = 1;
-    r->as.err = sz_error_new(6, "Net.httpGet: malformed response");
+  if (get_try_complete(st, r, 1))
     return r;
-  }
-  r->is_err = 0;
-  r->as.ok = sz_string_from_cstr(body + 4);
+  r->is_err = 1;
+  r->as.err = sz_error_new(6, "Net.httpGet: malformed response");
   return r;
 }
 
@@ -956,16 +1328,27 @@ static SzIo *get_poll_write(void *value, void *env) {
   (void)value;
   if (st->fd >= 0)
     ready = sz_io_poll_writable(st->fd);
-  else if (st->fd4 >= 0 && st->fd6 >= 0)
+  else if (st->he_wait4 && st->fd6 >= 0 && st->fd4 < 0) {
+    int64_t delay = st->he_v4_at_ms - sz_clock_monotonic_ms_sync();
+    if (delay < 1) {
+      he_start_v4(st);
+      if (st->fd4 >= 0 && st->fd6 >= 0)
+        ready = race_drop(sz_io_poll_writable(st->fd4), sz_io_poll_writable(st->fd6));
+      else if (st->fd6 >= 0)
+        ready = sz_io_poll_writable(st->fd6);
+      else
+        ready = sz_io_poll_writable(st->fd4);
+    } else
+      ready = race_drop(sz_io_poll_writable(st->fd6), sz_io_sleep_ms(delay));
+  } else if (st->fd4 >= 0 && st->fd6 >= 0)
     ready = race_drop(sz_io_poll_writable(st->fd4), sz_io_poll_writable(st->fd6));
-  else if (st->he_wait4 && st->fd6 >= 0)
-    ready = race_drop(sz_io_poll_writable(st->fd6), sz_io_sleep_ms(HE_A_DELAY_MS));
   else if (st->fd6 >= 0)
     ready = sz_io_poll_writable(st->fd6);
   else
     ready = sz_io_poll_writable(st->fd4);
   {
-    int64_t left = st->connect_deadline_ms - sz_clock_monotonic_ms_sync();
+    int64_t dl = st->tcp_up ? st->write_deadline_ms : st->connect_deadline_ms;
+    int64_t left = dl - sz_clock_monotonic_ms_sync();
     if (left < 1)
       left = 1;
     ready = race_drop(ready, sz_io_sleep_ms(left));
@@ -1101,8 +1484,9 @@ SzIo *sz_net_http_get(SzString *url) {
 }
 
 /* HTTP/1.0 GET server. Listen and connection fds are nonblocking. The fiber
- * parks on poll so other IO can run. Live listen is 127.0.0.1 and ::1 (V6ONLY)
- * so httpGet literals on either loopback match. TestRuntime injects paths and
+ * parks on poll so other IO can run. Live listen is 127.0.0.1 and/or ::1
+ * (V6ONLY). Bind succeeds when at least one family works so httpGet literals
+ * on the bound loopback match. TestRuntime injects paths and
  * skips sockets. Request read and response write each wait at most 1000ms.
  * A timed-out, malformed, reset, or handler-failed client is dropped.
  * Persistent serve accepts the next. Error code 6. serveOnce is one request.
@@ -1245,7 +1629,7 @@ static void *serve_ensure_listen(void *env) {
   }
   st->listen_fd = serve_bind_v4(port);
   st->listen6_fd = serve_bind_v6(port);
-  if (st->listen_fd < 0 || st->listen6_fd < 0) {
+  if (st->listen_fd < 0 && st->listen6_fd < 0) {
     serve_close_fds(st);
     r->is_err = 1;
     r->as.err = sz_error_new(6, "Net.serve: bind/listen failed");
@@ -1505,9 +1889,11 @@ static SzIo *serve_poll_then_accept(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
   SzIo *ready;
   (void)value;
-  if (st->listen6_fd >= 0)
+  if (st->listen_fd >= 0 && st->listen6_fd >= 0)
     ready = race_drop(sz_io_poll_readable(st->listen_fd),
                        sz_io_poll_readable(st->listen6_fd));
+  else if (st->listen6_fd >= 0)
+    ready = sz_io_poll_readable(st->listen6_fd);
   else
     ready = sz_io_poll_readable(st->listen_fd);
   return fm_drop(ready, serve_after_accept_poll, st);
