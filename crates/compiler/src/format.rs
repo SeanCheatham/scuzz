@@ -259,6 +259,7 @@ fn pretty_type(t: &Type) -> String {
         Type::String => "String".into(),
         Type::Bool => "Bool".into(),
         Type::List(inner) => format!("List[{}]", pretty_type(inner)),
+        Type::Tuple(a, b) => format!("({}, {})", pretty_type(a), pretty_type(b)),
         Type::Fun(a, b) => {
             let left = pretty_type(a);
             if matches!(a.as_ref(), Type::Fun(_, _)) {
@@ -448,6 +449,13 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
                 .map(|e| pretty_expr(e, 0).trim().to_string())
                 .collect();
             format!("{pad}[{}]", a.join(", "))
+        }
+        ExprKind::Tuple { left, right } => {
+            format!(
+                "{pad}({}, {})",
+                pretty_expr(left, 0).trim(),
+                pretty_expr(right, 0).trim()
+            )
         }
         ExprKind::Interpolate { parts } => {
             format!("{pad}{}", quote_interpolate(parts))
@@ -733,6 +741,9 @@ fn pretty_pattern(pat: &Pattern) -> String {
         Pattern::As { name, inner } => format!("{name} @ {}", pretty_pattern(inner)),
         Pattern::Nil => "[]".into(),
         Pattern::Cons { head, tail, .. } => pretty_cons_pattern(head, tail),
+        Pattern::Tuple { left, right, .. } => {
+            format!("({}, {})", pretty_pattern(left), pretty_pattern(right))
+        }
         Pattern::Named { name, inner } => format!("{name} = {}", pretty_pattern(inner)),
         Pattern::Adt {
             enum_name,
@@ -1286,6 +1297,25 @@ enum Wrap:
         let out = format_source(src).unwrap();
         assert!(out.contains("case Wrap.Box(Color.Red) =>"));
         assert!(out.contains("case Wrap.Box(_) =>"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_tuple_roundtrip() {
+        let src = r#"
+def swap(p: (Int, String)): (String, Int) =
+  p match {
+    case (n, s) => (s, n)
+  }
+@main def main: IO[Unit] =
+  IO.println(swap((1, "x"))._1)
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("def swap(p: (Int, String)): (String, Int) ="));
+        assert!(out.contains("case (n, s) =>"));
+        assert!(out.contains("(s, n)"));
+        assert!(out.contains("swap((1, \"x\"))._1"));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

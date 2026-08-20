@@ -498,6 +498,10 @@ fn expand_alias_ty(
             Box::new(expand_alias_ty(a, aliases, imports, module, stack)?),
             Box::new(expand_alias_ty(b, aliases, imports, module, stack)?),
         )),
+        Type::Tuple(a, b) => Ok(Type::Tuple(
+            Box::new(expand_alias_ty(a, aliases, imports, module, stack)?),
+            Box::new(expand_alias_ty(b, aliases, imports, module, stack)?),
+        )),
         Type::Adt(n) => expand_alias_name(n, &[], aliases, imports, module, stack),
         Type::App(n, args) => {
             let args = args
@@ -1681,6 +1685,10 @@ fn collect_ascribe_tparams(ty: &Type, enums: &EnumIndex<'_>, module: &str, out: 
             collect_ascribe_tparams(a, enums, module, out);
             collect_ascribe_tparams(b, enums, module, out);
         }
+        Type::Tuple(a, b) => {
+            collect_ascribe_tparams(a, enums, module, out);
+            collect_ascribe_tparams(b, enums, module, out);
+        }
         _ => {}
     }
 }
@@ -1762,6 +1770,10 @@ fn resolve_type_in(
             Box::new(resolve_type_in(a, enums, module, type_params)?),
             Box::new(resolve_type_in(b, enums, module, type_params)?),
         )),
+        Type::Tuple(a, b) => Ok(Type::Tuple(
+            Box::new(resolve_type_in(a, enums, module, type_params)?),
+            Box::new(resolve_type_in(b, enums, module, type_params)?),
+        )),
         other => Ok(other.clone()),
     }
 }
@@ -1787,6 +1799,15 @@ fn field_type(
     enums: &EnumIndex<'_>,
     current_module: &str,
 ) -> Result<Type, TypeError> {
+    if let Type::Tuple(a, b) = base_ty {
+        return match field {
+            "_1" => Ok((**a).clone()),
+            "_2" => Ok((**b).clone()),
+            _ => Err(TypeError::Msg(format!(
+                "tuple has fields _1 and _2, not {field}"
+            ))),
+        };
+    }
     let (id, targs): (&str, &[Type]) = match base_ty {
         Type::Adt(id) => (id, &[]),
         Type::App(id, args) => (id, args),
@@ -2402,6 +2423,31 @@ fn rewrite_fields(
         ExprKind::Field { base, field } => {
             let base = rewrite_fields(*base, enums, funs, methods, current_module, env)?;
             let bt = infer(&base, enums, funs, methods, current_module, env)?;
+            if let Type::Tuple(a, b) = &bt {
+                if field != "_1" && field != "_2" {
+                    return Err(
+                        TypeError::Msg(format!("tuple has fields _1 and _2, not {field}"))
+                            .with_span_if_bare(&span),
+                    );
+                }
+                let body_name = if field == "_1" { "__f0" } else { "__f1" };
+                let body = Expr::new(ExprKind::Var(body_name.to_string()), span.clone());
+                return Ok(Expr::new(
+                    ExprKind::Match {
+                        scrutinee: Box::new(base),
+                        arms: vec![crate::ast::MatchArm::new(
+                            crate::ast::Pattern::Tuple {
+                                left: Box::new(crate::ast::Pattern::Bind("__f0".into())),
+                                right: Box::new(crate::ast::Pattern::Bind("__f1".into())),
+                                left_ty: (**a).clone(),
+                                right_ty: (**b).clone(),
+                            },
+                            body,
+                        )],
+                    },
+                    span,
+                ));
+            }
             if matches!(&bt, Type::App(_, _)) {
                 return Ok(Expr::new(
                     ExprKind::Field {
@@ -2596,6 +2642,11 @@ fn infer(
                 Ok(Type::List(Box::new(
                     elem.unwrap_or_else(|| Type::Opaque("Elem".into())),
                 )))
+            }
+            ExprKind::Tuple { left, right } => {
+                let lt = infer(left, enums, funs, methods, current_module, env)?;
+                let rt = infer(right, enums, funs, methods, current_module, env)?;
+                Ok(Type::Tuple(Box::new(lt), Box::new(rt)))
             }
             ExprKind::Interpolate { parts } => {
                 for part in parts {
@@ -2964,15 +3015,32 @@ fn infer(
                 restore_opt(old, env);
                 Ok(Type::Opaque("TapFn".into()))
             }
-            ExprKind::IoRace { left, right } | ExprKind::IoBoth { left, right } => {
+            ExprKind::IoRace { left, right } => {
                 let lt = infer(left, enums, funs, methods, current_module, env)?;
                 let rt = infer(right, enums, funs, methods, current_module, env)?;
-                if !matches!(lt, Type::Io(_)) || !matches!(rt, Type::Io(_)) {
-                    return Err(TypeError::Msg(
-                        "IO.race/both arguments must be IO[_]".into(),
-                    ));
+                let Type::Io(a) = lt else {
+                    return Err(TypeError::Msg("IO.race arguments must be IO[_]".into()));
+                };
+                let Type::Io(b) = rt else {
+                    return Err(TypeError::Msg("IO.race arguments must be IO[_]".into()));
+                };
+                if !types_compat(&a, &b) {
+                    return Err(TypeError::Msg(format!(
+                        "IO.race arms disagree: {a:?} vs {b:?}"
+                    )));
                 }
-                Ok(Type::Io(Box::new(Type::Unit)))
+                Ok(Type::Io(a))
+            }
+            ExprKind::IoBoth { left, right } => {
+                let lt = infer(left, enums, funs, methods, current_module, env)?;
+                let rt = infer(right, enums, funs, methods, current_module, env)?;
+                let Type::Io(a) = lt else {
+                    return Err(TypeError::Msg("IO.both arguments must be IO[_]".into()));
+                };
+                let Type::Io(b) = rt else {
+                    return Err(TypeError::Msg("IO.both arguments must be IO[_]".into()));
+                };
+                Ok(Type::Io(Box::new(Type::Tuple(a, b))))
             }
             ExprKind::IoEnsure { inner, finalizer } => {
                 let it = infer(inner, enums, funs, methods, current_module, env)?;
@@ -4497,6 +4565,10 @@ fn check_payload_ty(
     match fty {
         Type::Int | Type::Float | Type::String | Type::Bool | Type::Adt(_) => Ok(()),
         Type::List(inner) => check_payload_ty(enum_name, en, case, fname, inner),
+        Type::Tuple(a, b) => {
+            check_payload_ty(enum_name, en, case, fname, a)?;
+            check_payload_ty(enum_name, en, case, fname, b)
+        }
         Type::App(_, args) => {
             for a in args {
                 check_payload_ty(enum_name, en, case, fname, a)?;
@@ -4672,6 +4744,19 @@ fn bind_pattern(
             )?);
             Ok(restored)
         }
+        crate::ast::Pattern::Tuple { left, right, .. } => {
+            let (a, b) = match scrut {
+                Type::Tuple(a, b) => ((**a).clone(), (**b).clone()),
+                other => {
+                    return Err(TypeError::Msg(format!(
+                        "tuple pattern does not match scrutinee {other:?}"
+                    )))
+                }
+            };
+            let mut restored = bind_pattern(left, &a, enums, current_module, env)?;
+            restored.extend(bind_pattern(right, &b, enums, current_module, env)?);
+            Ok(restored)
+        }
     }
 }
 
@@ -4803,6 +4888,17 @@ fn rewrite_named_in_pattern(
             tail: Box::new(rewrite_named_in_pattern(tail, enums, current_module)?),
             elem: elem.clone(),
         }),
+        crate::ast::Pattern::Tuple {
+            left,
+            right,
+            left_ty,
+            right_ty,
+        } => Ok(crate::ast::Pattern::Tuple {
+            left: Box::new(rewrite_named_in_pattern(left, enums, current_module)?),
+            right: Box::new(rewrite_named_in_pattern(right, enums, current_module)?),
+            left_ty: left_ty.clone(),
+            right_ty: right_ty.clone(),
+        }),
         crate::ast::Pattern::Named { name, inner } => Ok(crate::ast::Pattern::Named {
             name: name.clone(),
             inner: Box::new(rewrite_named_in_pattern(inner, enums, current_module)?),
@@ -4847,6 +4943,10 @@ fn collect_bind_names(pat: &crate::ast::Pattern, out: &mut Vec<String>) {
         crate::ast::Pattern::Cons { head, tail, .. } => {
             collect_bind_names(head, out);
             collect_bind_names(tail, out);
+        }
+        crate::ast::Pattern::Tuple { left, right, .. } => {
+            collect_bind_names(left, out);
+            collect_bind_names(right, out);
         }
         crate::ast::Pattern::Named { inner, .. } => collect_bind_names(inner, out),
         crate::ast::Pattern::Or(alts) => {
@@ -5027,6 +5127,36 @@ fn uncovered_product(
             }
             Ok(missing)
         }
+        Type::Tuple(a, b) => {
+            let mut spec: Vec<Vec<crate::ast::Pattern>> = Vec::new();
+            for r in rows {
+                match r.first() {
+                    Some(p) if p.is_irrefutable() => {
+                        let mut rest =
+                            vec![crate::ast::Pattern::Wildcard, crate::ast::Pattern::Wildcard];
+                        rest.extend(r.iter().skip(1).cloned());
+                        spec.push(rest);
+                    }
+                    Some(crate::ast::Pattern::Tuple { left, right, .. }) => {
+                        let mut rest = vec![(**left).clone(), (**right).clone()];
+                        rest.extend(r.iter().skip(1).cloned());
+                        spec.push(rest);
+                    }
+                    _ => {}
+                }
+            }
+            if spec.is_empty() {
+                return Ok(vec![head.to_string()]);
+            }
+            let mut nested = vec![(**a).clone(), (**b).clone()];
+            nested.extend(tail.iter().cloned());
+            let missing = uncovered_product(&nested, &spec, enums, current_module)?;
+            if missing.is_empty() {
+                Ok(Vec::new())
+            } else {
+                Ok(missing.into_iter().map(|m| format!("({m})")).collect())
+            }
+        }
         Type::Int | Type::Float | Type::String => {
             if rows
                 .iter()
@@ -5197,6 +5327,34 @@ fn elaborate_pattern(
                 elem,
             })
         }
+        crate::ast::Pattern::Tuple { left, right, .. } => {
+            let Type::Tuple(a, b) = scrut else {
+                return Err(TypeError::Msg(format!(
+                    "tuple pattern does not match scrutinee {scrut:?}"
+                ))
+                .with_span_if_bare(span));
+            };
+            Ok(crate::ast::Pattern::Tuple {
+                left: Box::new(elaborate_pattern(
+                    left,
+                    a,
+                    enums,
+                    current_module,
+                    tparams,
+                    span,
+                )?),
+                right: Box::new(elaborate_pattern(
+                    right,
+                    b,
+                    enums,
+                    current_module,
+                    tparams,
+                    span,
+                )?),
+                left_ty: (**a).clone(),
+                right_ty: (**b).clone(),
+            })
+        }
         crate::ast::Pattern::Named { name, inner: _ } => Err(TypeError::Msg(format!(
             "named field pattern `{name}` is only allowed in a constructor payload"
         ))
@@ -5212,6 +5370,7 @@ fn types_compat(a: &Type, b: &Type) -> bool {
         (Type::Bool, Type::Bool) => true,
         (Type::String, Type::String) => true,
         (Type::List(x), Type::List(y)) => types_compat(x, y),
+        (Type::Tuple(a0, a1), Type::Tuple(b0, b1)) => types_compat(a0, b0) && types_compat(a1, b1),
         (Type::Fun(a0, a1), Type::Fun(b0, b1)) => types_compat(a0, b0) && types_compat(a1, b1),
         (Type::Io(x), Type::Io(y)) => types_compat(x, y),
         (Type::Adt(x), Type::Adt(y)) => x == y,
@@ -5356,6 +5515,10 @@ fn unify_types(
         }
         (Type::Io(a), Type::Io(b)) => unify_types(a, b, subst),
         (Type::List(a), Type::List(b)) => unify_types(a, b, subst),
+        (Type::Tuple(a0, a1), Type::Tuple(b0, b1)) => {
+            unify_types(a0, b0, subst)?;
+            unify_types(a1, b1, subst)
+        }
         (Type::Fun(a0, a1), Type::Fun(b0, b1)) => {
             unify_types(a0, b0, subst)?;
             unify_types(a1, b1, subst)
@@ -5400,6 +5563,10 @@ fn unify_construct(
         }
         (Type::Io(a), Type::Io(b)) => unify_construct(a, b, subst),
         (Type::List(a), Type::List(b)) => unify_construct(a, b, subst),
+        (Type::Tuple(a0, a1), Type::Tuple(b0, b1)) => {
+            unify_construct(a0, b0, subst)?;
+            unify_construct(a1, b1, subst)
+        }
         (Type::Fun(a0, a1), Type::Fun(b0, b1)) => {
             unify_construct(a0, b0, subst)?;
             unify_construct(a1, b1, subst)
@@ -5426,7 +5593,9 @@ fn mono_type_ok(t: &Type) -> bool {
         | Type::Bool
         | Type::List(_)
         | Type::Adt(_) => true,
+        Type::Tuple(a, b) => mono_type_ok(a) && mono_type_ok(b),
         Type::App(_, args) => args.iter().all(mono_type_ok),
+        Type::Io(inner) => mono_type_ok(inner),
         _ => false,
     }
 }
@@ -5436,6 +5605,10 @@ fn apply_subst(ty: &Type, subst: &HashMap<String, Type>) -> Type {
         Type::Var(n) => subst.get(n).cloned().unwrap_or_else(|| ty.clone()),
         Type::Io(inner) => Type::Io(Box::new(apply_subst(inner, subst))),
         Type::List(inner) => Type::List(Box::new(apply_subst(inner, subst))),
+        Type::Tuple(a, b) => Type::Tuple(
+            Box::new(apply_subst(a, subst)),
+            Box::new(apply_subst(b, subst)),
+        ),
         Type::Fun(a, b) => Type::Fun(
             Box::new(apply_subst(a, subst)),
             Box::new(apply_subst(b, subst)),
@@ -5455,6 +5628,10 @@ fn erase_vars(ty: &Type, names: &[String]) -> Type {
         Type::Var(n) if names.iter().any(|p| p == n) => Type::Opaque(n.clone()),
         Type::Io(inner) => Type::Io(Box::new(erase_vars(inner, names))),
         Type::List(inner) => Type::List(Box::new(erase_vars(inner, names))),
+        Type::Tuple(a, b) => Type::Tuple(
+            Box::new(erase_vars(a, names)),
+            Box::new(erase_vars(b, names)),
+        ),
         Type::Fun(a, b) => Type::Fun(
             Box::new(erase_vars(a, names)),
             Box::new(erase_vars(b, names)),
@@ -5475,6 +5652,7 @@ fn type_mangle(t: &Type) -> String {
         Type::String => "String".into(),
         Type::Bool => "Bool".into(),
         Type::List(inner) => format!("List_{}", type_mangle(inner)),
+        Type::Tuple(a, b) => format!("Tup_{}_{}", type_mangle(a), type_mangle(b)),
         Type::Fun(a, b) => format!("Fun_{}_{}", type_mangle(a), type_mangle(b)),
         Type::Adt(id) => id.replace('.', "_"),
         Type::App(id, args) => format!(
@@ -5796,6 +5974,29 @@ fn mono_expr(
         )),
         ExprKind::IoBoth { left, right } => Ok(Expr::new(
             ExprKind::IoBoth {
+                left: Box::new(mono_expr(
+                    *left,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+                right: Box::new(mono_expr(
+                    *right,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+            },
+            span,
+        )),
+        ExprKind::Tuple { left, right } => Ok(Expr::new(
+            ExprKind::Tuple {
                 left: Box::new(mono_expr(
                     *left,
                     enums,
@@ -6191,6 +6392,10 @@ fn usable_expected(ty: &Type, tparams: &[String]) -> bool {
         Type::Opaque(_) => false,
         Type::Var(n) => tparams.iter().any(|p| p == n),
         Type::Io(inner) => usable_expected(inner, tparams),
+        Type::List(inner) => usable_expected(inner, tparams),
+        Type::Fun(a, b) | Type::Tuple(a, b) => {
+            usable_expected(a, tparams) && usable_expected(b, tparams)
+        }
         Type::App(_, args) => args.iter().all(|a| usable_expected(a, tparams)),
         _ => true,
     }
@@ -6200,7 +6405,8 @@ fn usable_expected(ty: &Type, tparams: &[String]) -> bool {
 fn contains_unbound(t: &Type) -> bool {
     match t {
         Type::Opaque(n) => n.starts_with("__unbound_"),
-        Type::Io(inner) => contains_unbound(inner),
+        Type::Io(inner) | Type::List(inner) => contains_unbound(inner),
+        Type::Fun(a, b) | Type::Tuple(a, b) => contains_unbound(a) || contains_unbound(b),
         Type::App(_, args) => args.iter().any(contains_unbound),
         _ => false,
     }
@@ -6245,6 +6451,13 @@ fn check_targ(
                 check_targ(enum_name, case_name, a, tparams, span)?;
             }
             Ok(())
+        }
+        Type::List(inner) | Type::Io(inner) => {
+            check_targ(enum_name, case_name, inner, tparams, span)
+        }
+        Type::Fun(a, b) | Type::Tuple(a, b) => {
+            check_targ(enum_name, case_name, a, tparams, span)?;
+            check_targ(enum_name, case_name, b, tparams, span)
         }
         _ => Ok(()),
     }
@@ -6731,6 +6944,37 @@ fn elaborate_expr(
             },
             span,
         )),
+        ExprKind::Tuple { left, right } => {
+            let (lexp, rexp) = match expected {
+                Some(Type::Tuple(a, b)) => (Some(a.as_ref()), Some(b.as_ref())),
+                _ => (None, None),
+            };
+            Ok(Expr::new(
+                ExprKind::Tuple {
+                    left: Box::new(elaborate_expr(
+                        *left,
+                        enums,
+                        funs,
+                        methods,
+                        current_module,
+                        env,
+                        lexp,
+                        tparams,
+                    )?),
+                    right: Box::new(elaborate_expr(
+                        *right,
+                        enums,
+                        funs,
+                        methods,
+                        current_module,
+                        env,
+                        rexp,
+                        tparams,
+                    )?),
+                },
+                span,
+            ))
+        }
         ExprKind::IoEnsure { inner, finalizer } => Ok(Expr::new(
             ExprKind::IoEnsure {
                 inner: Box::new(elaborate_expr(
@@ -7033,6 +7277,10 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
             left: Box::new(subst_node_targs(*left, subst)),
             right: Box::new(subst_node_targs(*right, subst)),
         },
+        ExprKind::Tuple { left, right } => ExprKind::Tuple {
+            left: Box::new(subst_node_targs(*left, subst)),
+            right: Box::new(subst_node_targs(*right, subst)),
+        },
         ExprKind::IoEnsure { inner, finalizer } => ExprKind::IoEnsure {
             inner: Box::new(subst_node_targs(*inner, subst)),
             finalizer: Box::new(subst_node_targs(*finalizer, subst)),
@@ -7126,6 +7374,17 @@ fn subst_pattern(pat: crate::ast::Pattern, subst: &HashMap<String, Type>) -> cra
             tail: Box::new(subst_pattern(*tail, subst)),
             elem: apply_subst(&elem, subst),
         },
+        crate::ast::Pattern::Tuple {
+            left,
+            right,
+            left_ty,
+            right_ty,
+        } => crate::ast::Pattern::Tuple {
+            left: Box::new(subst_pattern(*left, subst)),
+            right: Box::new(subst_pattern(*right, subst)),
+            left_ty: apply_subst(&left_ty, subst),
+            right_ty: apply_subst(&right_ty, subst),
+        },
         crate::ast::Pattern::Named { name, inner } => crate::ast::Pattern::Named {
             name,
             inner: Box::new(subst_pattern(*inner, subst)),
@@ -7154,7 +7413,7 @@ fn collect_apps_in_type(ty: &Type, out: &mut Vec<(String, Vec<Type>)>) {
             }
         }
         Type::Io(inner) | Type::List(inner) => collect_apps_in_type(inner, out),
-        Type::Fun(a, b) => {
+        Type::Fun(a, b) | Type::Tuple(a, b) => {
             collect_apps_in_type(a, out);
             collect_apps_in_type(b, out);
         }
@@ -7224,6 +7483,7 @@ fn collect_node_targs(expr: &Expr, out: &mut Vec<(String, Vec<Type>)>) {
         }
         ExprKind::IoRace { left, right }
         | ExprKind::IoBoth { left, right }
+        | ExprKind::Tuple { left, right }
         | ExprKind::IoEnsure {
             inner: left,
             finalizer: right,
@@ -7408,6 +7668,10 @@ fn rewrite_enum_refs(
             left: Box::new(rewrite_enum_refs(*left, clones)?),
             right: Box::new(rewrite_enum_refs(*right, clones)?),
         },
+        ExprKind::Tuple { left, right } => ExprKind::Tuple {
+            left: Box::new(rewrite_enum_refs(*left, clones)?),
+            right: Box::new(rewrite_enum_refs(*right, clones)?),
+        },
         ExprKind::IoEnsure { inner, finalizer } => ExprKind::IoEnsure {
             inner: Box::new(rewrite_enum_refs(*inner, clones)?),
             finalizer: Box::new(rewrite_enum_refs(*finalizer, clones)?),
@@ -7532,6 +7796,17 @@ fn rewrite_pattern(
             tail: Box::new(rewrite_pattern(*tail, clones)?),
             elem: concretize_type(&elem, clones)?,
         }),
+        crate::ast::Pattern::Tuple {
+            left,
+            right,
+            left_ty,
+            right_ty,
+        } => Ok(crate::ast::Pattern::Tuple {
+            left: Box::new(rewrite_pattern(*left, clones)?),
+            right: Box::new(rewrite_pattern(*right, clones)?),
+            left_ty: concretize_type(&left_ty, clones)?,
+            right_ty: concretize_type(&right_ty, clones)?,
+        }),
         crate::ast::Pattern::Named { name, inner } => Ok(crate::ast::Pattern::Named {
             name,
             inner: Box::new(rewrite_pattern(*inner, clones)?),
@@ -7561,6 +7836,10 @@ fn concretize_type(
         }
         Type::Io(inner) => Ok(Type::Io(Box::new(concretize_type(inner, clones)?))),
         Type::List(inner) => Ok(Type::List(Box::new(concretize_type(inner, clones)?))),
+        Type::Tuple(a, b) => Ok(Type::Tuple(
+            Box::new(concretize_type(a, clones)?),
+            Box::new(concretize_type(b, clones)?),
+        )),
         Type::Fun(a, b) => Ok(Type::Fun(
             Box::new(concretize_type(a, clones)?),
             Box::new(concretize_type(b, clones)?),
@@ -8494,6 +8773,73 @@ def isPair(xs: List[String]): String =
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("list lit plus wildcard covers List");
+    }
+
+    #[test]
+    fn typechecks_tuple_construct_project_match_and_both() {
+        let src = r#"
+def swap[A, B](p: (A, B)): (B, A) =
+  p match {
+    case (a, b) => (b, a)
+  }
+def take(p: (Int, String)): String = p._2
+@main def main: IO[Unit] =
+  for {
+    p = (42, "ok")
+    n = p._1
+    s = p._2
+    q = swap(p)
+    both <- IO.both(IO.pure(1), IO.pure("x"))
+    _ <- IO.println(Str.fromInt(n))
+    _ <- IO.println(s)
+    _ <- IO.println(q._1)
+    _ <- IO.println(take(both))
+    _ <- IO.println(if (p == (42, "ok") && (1, "x") != (2, "x")) "y" else "n")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("tuple surface");
+        let p = resolve_field_access(p).expect("tuple fields");
+        assert!(
+            matches!(&p.defs[0].body.kind, ExprKind::Match { .. }),
+            "swap matches a tuple"
+        );
+    }
+
+    #[test]
+    fn rejects_unknown_tuple_field() {
+        let src = r#"
+@main def main: IO[Unit] = IO.println((1, "x")._3)
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(err.contains("tuple has fields _1 and _2"), "{err}");
+    }
+
+    #[test]
+    fn rejects_tuple_pattern_on_int() {
+        let src = r#"
+@main def main: IO[Unit] =
+  1 match {
+    case (a, b) => IO.println("no")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(err.contains("tuple pattern does not match"), "{err}");
+    }
+
+    #[test]
+    fn rejects_io_race_payload_mismatch() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    _ <- IO.race(IO.pure(1), IO.pure("x"))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(err.contains("IO.race arms disagree"), "{err}");
     }
 
     #[test]

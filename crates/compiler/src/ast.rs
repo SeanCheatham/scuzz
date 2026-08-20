@@ -274,6 +274,10 @@ impl Expr {
                 left: Box::new(f(*left)?),
                 right: Box::new(f(*right)?),
             },
+            ExprKind::Tuple { left, right } => ExprKind::Tuple {
+                left: Box::new(f(*left)?),
+                right: Box::new(f(*right)?),
+            },
             ExprKind::IoTimeout { ms, inner } => ExprKind::IoTimeout {
                 ms: Box::new(f(*ms)?),
                 inner: Box::new(f(*inner)?),
@@ -412,6 +416,10 @@ impl Expr {
                 right: body,
             }
             | ExprKind::IoBoth {
+                left: inner,
+                right: body,
+            }
+            | ExprKind::Tuple {
                 left: inner,
                 right: body,
             }
@@ -590,6 +598,8 @@ pub enum ExprKind {
     StrLit(String),
     /// List literal `[a, b, c]`
     ListLit { elems: Vec<Expr> },
+    /// `(a, b)` — two-slot tuple. Runtime is `SzPair`.
+    Tuple { left: Box<Expr>, right: Box<Expr> },
     /// `s"...$x..."` / `s"...${expr}..."` — typed concat (Int / Float holes stringify).
     Interpolate { parts: Vec<InterpPart> },
     /// `if (cond) then else else_`
@@ -719,6 +729,13 @@ pub enum Pattern {
         /// Element type. Parser leaves `Opaque("Elem")`. Elaborate fills it.
         elem: Type,
     },
+    /// `(a, b)`. Parser leaves types Opaque. Elaborate fills them from the scrutinee.
+    Tuple {
+        left: Box<Pattern>,
+        right: Box<Pattern>,
+        left_ty: Type,
+        right_ty: Type,
+    },
     /// `x = pat` in an ADT payload. Typecheck rewrites to positional.
     Named { name: String, inner: Box<Pattern> },
 }
@@ -794,6 +811,7 @@ impl Pattern {
         match self {
             Pattern::Wildcard | Pattern::Bind(_) => true,
             Pattern::As { inner, .. } | Pattern::Named { inner, .. } => inner.is_irrefutable(),
+            Pattern::Tuple { left, right, .. } => left.is_irrefutable() && right.is_irrefutable(),
             Pattern::Or(alts) => alts.iter().any(|a| a.is_irrefutable()),
             _ => false,
         }
@@ -819,6 +837,17 @@ impl Pattern {
                 head: Box::new(head.strip_as()),
                 tail: Box::new(tail.strip_as()),
                 elem: elem.clone(),
+            },
+            Pattern::Tuple {
+                left,
+                right,
+                left_ty,
+                right_ty,
+            } => Pattern::Tuple {
+                left: Box::new(left.strip_as()),
+                right: Box::new(right.strip_as()),
+                left_ty: left_ty.clone(),
+                right_ty: right_ty.clone(),
             },
             Pattern::Named { name, inner } => Pattern::Named {
                 name: name.clone(),
@@ -873,6 +902,27 @@ impl Pattern {
                     })
                     .collect()
             }
+            Pattern::Tuple {
+                left,
+                right,
+                left_ty,
+                right_ty,
+            } => {
+                let parts = [left.flatten_or(), right.flatten_or()];
+                cartesian_patterns(&parts)
+                    .into_iter()
+                    .map(|mut row| {
+                        let r = row.pop().unwrap();
+                        let l = row.pop().unwrap();
+                        Pattern::Tuple {
+                            left: Box::new(l),
+                            right: Box::new(r),
+                            left_ty: left_ty.clone(),
+                            right_ty: right_ty.clone(),
+                        }
+                    })
+                    .collect()
+            }
             Pattern::Named { name, inner } => inner
                 .flatten_or()
                 .into_iter()
@@ -909,6 +959,8 @@ pub enum Type {
     Bool,
     /// Homogeneous cons list. Runtime is untyped pointers; the argument is a check-time element type.
     List(Box<Type>),
+    /// Two-slot tuple `(A, B)`. Runtime is `SzPair`.
+    Tuple(Box<Type>, Box<Type>),
     /// Single-parameter function type (`T => U`) for kit lambdas.
     Fun(Box<Type>, Box<Type>),
     Io(Box<Type>),
@@ -931,6 +983,7 @@ impl std::fmt::Display for Type {
             Type::String => write!(f, "String"),
             Type::Bool => write!(f, "Bool"),
             Type::List(t) => write!(f, "List[{t}]"),
+            Type::Tuple(a, b) => write!(f, "({a}, {b})"),
             Type::Fun(a, b) => write!(f, "{a} => {b}"),
             Type::Io(t) => write!(f, "IO[{t}]"),
             Type::Adt(n) | Type::Var(n) | Type::Opaque(n) => write!(f, "{n}"),

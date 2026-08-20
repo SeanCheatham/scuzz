@@ -418,7 +418,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("IO.repeatN", "IO.repeatN(n: Int, inner: IO[T]): IO[T]"),
     ("IO.retryN", "IO.retryN(n: Int, inner: IO[T]): IO[T]"),
     ("IO.race", "IO.race(a: IO[T], b: IO[T]): IO[T]"),
-    ("IO.both", "IO.both(a: IO[T], b: IO[T]): IO[(T, T)]"),
+    ("IO.both", "IO.both(a: IO[A], b: IO[B]): IO[(A, B)]"),
     (
         "IO.ensure",
         "IO.ensure(inner: IO[T], finalizer: IO[Unit]): IO[T]",

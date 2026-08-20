@@ -3351,6 +3351,8 @@ int main(void) {
     sz_release(b);
     assert(p && strcmp(sz_string_cstr((SzString *)p->left), "L") == 0);
     assert(strcmp(sz_string_cstr((SzString *)p->right), "R") == 0);
+    assert(sz_pair_left(p) == p->left);
+    assert(sz_pair_right(p) == p->right);
     sz_pair_free(p);
   }
 

@@ -812,7 +812,7 @@ fn collect_type_names(ty: &Type, out: &mut HashSet<String>) {
     match ty {
         Type::Adt(n) | Type::App(n, _) | Type::Var(n) | Type::Opaque(n) => mark_name(n, out),
         Type::List(t) | Type::Io(t) => collect_type_names(t, out),
-        Type::Fun(a, b) => {
+        Type::Fun(a, b) | Type::Tuple(a, b) => {
             collect_type_names(a, out);
             collect_type_names(b, out);
         }

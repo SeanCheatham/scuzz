@@ -462,6 +462,9 @@ typedef struct SzPair {
 
 /* Callee retains both sides. Caller drops after the call. */
 SzPair *sz_pair_new(void *left, void *right);
+/* Borrow a slot. The pair keeps the retain. */
+void *sz_pair_left(const SzPair *p);
+void *sz_pair_right(const SzPair *p);
 /* Last sz_release drops both fields, then frees the cell. */
 void sz_pair_free(SzPair *p);
 
