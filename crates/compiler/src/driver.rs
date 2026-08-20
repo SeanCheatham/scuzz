@@ -880,7 +880,7 @@ mod tests {
     #[test]
     fn examples_trait_generic_impl_sees_box() {
         std::thread::Builder::new()
-            .stack_size(8 * 1024 * 1024)
+            .stack_size(16 * 1024 * 1024)
             .spawn(examples_trait_generic_impl_sees_box_inner)
             .expect("spawn kernel typecheck")
             .join()

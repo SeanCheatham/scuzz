@@ -2583,7 +2583,8 @@ fn rewrite_fields(
             let st = infer(&scrutinee, enums, funs, methods, current_module, env)?;
             let mut out_arms = Vec::new();
             for arm in arms {
-                let bound = bind_pattern(&arm.pattern, &st, enums, current_module, env)?;
+                let bound =
+                    bind_pattern(&arm.pattern, &st, enums, current_module, env, arm.unpack)?;
                 let guard = match arm.guard {
                     Some(g) => Some(rewrite_fields(
                         g,
@@ -2601,6 +2602,7 @@ fn rewrite_fields(
                     pattern: arm.pattern,
                     guard,
                     body,
+                    unpack: arm.unpack,
                 });
             }
             Ok(Expr::new(
@@ -2940,7 +2942,8 @@ fn infer(
                 let st = infer(scrutinee, enums, funs, methods, current_module, env)?;
                 let mut result: Option<Type> = None;
                 for arm in arms {
-                    let bound = bind_pattern(&arm.pattern, &st, enums, current_module, env)?;
+                    let bound =
+                        bind_pattern(&arm.pattern, &st, enums, current_module, env, arm.unpack)?;
                     if let Some(g) = &arm.guard {
                         let gt = infer(g, enums, funs, methods, current_module, env)?;
                         if !matches!(gt, Type::Bool) {
@@ -4702,6 +4705,7 @@ fn bind_pattern(
     enums: &EnumIndex<'_>,
     current_module: &str,
     env: &mut HashMap<String, Type>,
+    loose: bool,
 ) -> Result<Vec<(String, Option<Type>)>, TypeError> {
     match pat {
         crate::ast::Pattern::Named { .. } => Err(TypeError::Msg(
@@ -4747,7 +4751,14 @@ fn bind_pattern(
         crate::ast::Pattern::As { name, inner } => {
             let old = env.insert(name.clone(), scrut.clone());
             let mut restored = vec![(name.clone(), old)];
-            restored.extend(bind_pattern(inner, scrut, enums, current_module, env)?);
+            restored.extend(bind_pattern(
+                inner,
+                scrut,
+                enums,
+                current_module,
+                env,
+                loose,
+            )?);
             Ok(restored)
         }
         crate::ast::Pattern::Adt {
@@ -4769,6 +4780,7 @@ fn bind_pattern(
                 Type::Adt(n) if n == &id && en.type_params.is_empty() => {}
                 Type::App(n, _) if n == &id => {}
                 Type::Opaque(_) if is_meta_opaque(scrut) && en.type_params.is_empty() => {}
+                Type::Opaque(_) if loose => {}
                 Type::Opaque(_) if is_meta_opaque(scrut) => {
                     return Err(TypeError::Msg(format!(
                         "cannot match an untyped value against generic enum {enum_name}"
@@ -4815,7 +4827,14 @@ fn bind_pattern(
             let field_tys = payload_field_types(en, case, scrut, enums)?;
             let mut restored = Vec::new();
             for (nested, fty) in binds.iter().zip(field_tys.iter()) {
-                restored.extend(bind_pattern(nested, fty, enums, current_module, env)?);
+                restored.extend(bind_pattern(
+                    nested,
+                    fty,
+                    enums,
+                    current_module,
+                    env,
+                    loose,
+                )?);
             }
             Ok(restored)
         }
@@ -4824,9 +4843,9 @@ fn bind_pattern(
             let first = it
                 .next()
                 .ok_or_else(|| TypeError::Msg("empty or-pattern".into()))?;
-            let bound = bind_pattern(first, scrut, enums, current_module, env)?;
+            let bound = bind_pattern(first, scrut, enums, current_module, env, loose)?;
             for alt in it {
-                let extra = bind_pattern(alt, scrut, enums, current_module, env)?;
+                let extra = bind_pattern(alt, scrut, enums, current_module, env, loose)?;
                 unbind_pattern(extra, env);
             }
             Ok(bound)
@@ -4836,14 +4855,19 @@ fn bind_pattern(
             Ok(Vec::new())
         }
         crate::ast::Pattern::Cons { head, tail, .. } => {
-            let elem = list_elem(scrut)?;
-            let mut restored = bind_pattern(head, &elem, enums, current_module, env)?;
+            let elem = if loose && matches!(scrut, Type::Opaque(_)) {
+                Type::Opaque("Elem".into())
+            } else {
+                list_elem(scrut)?
+            };
+            let mut restored = bind_pattern(head, &elem, enums, current_module, env, loose)?;
             restored.extend(bind_pattern(
                 tail,
                 &list_of(elem),
                 enums,
                 current_module,
                 env,
+                loose,
             )?);
             Ok(restored)
         }
@@ -4857,8 +4881,8 @@ fn bind_pattern(
                     )))
                 }
             };
-            let mut restored = bind_pattern(left, &a, enums, current_module, env)?;
-            restored.extend(bind_pattern(right, &b, enums, current_module, env)?);
+            let mut restored = bind_pattern(left, &a, enums, current_module, env, loose)?;
+            restored.extend(bind_pattern(right, &b, enums, current_module, env, loose)?);
             Ok(restored)
         }
     }
@@ -4880,6 +4904,8 @@ fn payload_field_types(
                 subst.insert(p.clone(), t.clone());
             }
         }
+    } else if matches!(scrut, Type::Opaque(_)) {
+        skipped.extend(en.type_params.iter().cloned());
     }
     let mut out = Vec::with_capacity(case.fields.len());
     for (_, fty) in &case.fields {
@@ -4911,6 +4937,9 @@ fn check_match_exhaustive(
         .collect::<Result<Vec<_>, _>>()?;
     for pat in &rewritten {
         check_unique_binds(pat)?;
+    }
+    if arms.iter().any(|a| a.unpack) {
+        return Ok(());
     }
     let covering: Vec<&crate::ast::Pattern> = arms
         .iter()
@@ -5318,6 +5347,7 @@ fn elaborate_pattern(
     current_module: &str,
     tparams: &[String],
     span: &Span,
+    loose: bool,
 ) -> Result<crate::ast::Pattern, TypeError> {
     match pat {
         crate::ast::Pattern::Wildcard
@@ -5335,6 +5365,7 @@ fn elaborate_pattern(
                 current_module,
                 tparams,
                 span,
+                loose,
             )?),
         }),
         crate::ast::Pattern::Or(alts) => {
@@ -5347,6 +5378,7 @@ fn elaborate_pattern(
                     current_module,
                     tparams,
                     span,
+                    loose,
                 )?);
             }
             Ok(crate::ast::Pattern::Or(out))
@@ -5363,6 +5395,7 @@ fn elaborate_pattern(
             } else {
                 match scrut {
                     Type::App(eid, eargs) if eid == &id => eargs.clone(),
+                    Type::Opaque(_) if loose => Vec::new(),
                     other => {
                         return Err(TypeError::Msg(format!(
                             "pattern {enum_name}.{case_name} does not match scrutinee {other:?}"
@@ -5396,6 +5429,7 @@ fn elaborate_pattern(
                     current_module,
                     tparams,
                     span,
+                    loose,
                 )?);
             }
             Ok(crate::ast::Pattern::Adt {
@@ -5410,7 +5444,11 @@ fn elaborate_pattern(
             Ok(crate::ast::Pattern::Nil)
         }
         crate::ast::Pattern::Cons { head, tail, .. } => {
-            let elem = list_elem(scrut)?;
+            let elem = if loose && matches!(scrut, Type::Opaque(_)) {
+                Type::Opaque("Elem".into())
+            } else {
+                list_elem(scrut)?
+            };
             Ok(crate::ast::Pattern::Cons {
                 head: Box::new(elaborate_pattern(
                     head,
@@ -5419,6 +5457,7 @@ fn elaborate_pattern(
                     current_module,
                     tparams,
                     span,
+                    loose,
                 )?),
                 tail: Box::new(elaborate_pattern(
                     tail,
@@ -5427,6 +5466,7 @@ fn elaborate_pattern(
                     current_module,
                     tparams,
                     span,
+                    loose,
                 )?),
                 elem,
             })
@@ -5450,6 +5490,7 @@ fn elaborate_pattern(
                     current_module,
                     tparams,
                     span,
+                    loose,
                 )?),
                 right: Box::new(elaborate_pattern(
                     right,
@@ -5458,6 +5499,7 @@ fn elaborate_pattern(
                     current_module,
                     tparams,
                     span,
+                    loose,
                 )?),
                 left_ty: a,
                 right_ty: b,
@@ -6263,7 +6305,8 @@ fn mono_expr(
             )?;
             let mut out_arms = Vec::new();
             for arm in arms {
-                let bound = bind_pattern(&arm.pattern, &st, enums, current_module, env)?;
+                let bound =
+                    bind_pattern(&arm.pattern, &st, enums, current_module, env, arm.unpack)?;
                 let guard = match arm.guard {
                     Some(g) => Some(mono_expr(
                         g,
@@ -6290,6 +6333,7 @@ fn mono_expr(
                     pattern: arm.pattern,
                     guard,
                     body,
+                    unpack: arm.unpack,
                 });
             }
             Ok(Expr::new(
@@ -6603,6 +6647,64 @@ fn check_targ(
     }
 }
 
+fn elaborate_lambda_arg(
+    expr: Expr,
+    param_ty: Type,
+    enums: &EnumIndex<'_>,
+    funs: &FunIndex<'_>,
+    methods: &MethodIndex,
+    current_module: &str,
+    env: &mut HashMap<String, Type>,
+    tparams: &[String],
+) -> Result<Expr, TypeError> {
+    if let ExprKind::Lambda {
+        param,
+        param_ty: ann,
+        pat,
+        body,
+    } = expr.kind
+    {
+        let span = expr.span;
+        let bind_ty = if let Some(ref a) = ann {
+            resolve_ascribe_type(a, enums, current_module)?
+        } else {
+            param_ty
+        };
+        let old = bind_opt(param.as_ref(), bind_ty, env);
+        let body = elaborate_expr(
+            *body,
+            enums,
+            funs,
+            methods,
+            current_module,
+            env,
+            None,
+            tparams,
+        )?;
+        restore_opt(old, env);
+        Ok(Expr::new(
+            ExprKind::Lambda {
+                param,
+                param_ty: ann,
+                pat,
+                body: Box::new(body),
+            },
+            span,
+        ))
+    } else {
+        elaborate_expr(
+            expr,
+            enums,
+            funs,
+            methods,
+            current_module,
+            env,
+            None,
+            tparams,
+        )
+    }
+}
+
 // Arity comes from the shared typecheck context (enums, funs, methods, module, env).
 #[allow(clippy::too_many_arguments)]
 fn elaborate_expr(
@@ -6723,9 +6825,17 @@ fn elaborate_expr(
             let st = infer(&scrutinee, enums, funs, methods, current_module, env)?;
             let mut out_arms = Vec::new();
             for arm in arms {
-                let bound = bind_pattern(&arm.pattern, &st, enums, current_module, env)?;
-                let pattern =
-                    elaborate_pattern(&arm.pattern, &st, enums, current_module, tparams, &span)?;
+                let bound =
+                    bind_pattern(&arm.pattern, &st, enums, current_module, env, arm.unpack)?;
+                let pattern = elaborate_pattern(
+                    &arm.pattern,
+                    &st,
+                    enums,
+                    current_module,
+                    tparams,
+                    &span,
+                    arm.unpack,
+                )?;
                 let guard = match arm.guard {
                     Some(g) => Some(elaborate_expr(
                         g,
@@ -6754,6 +6864,7 @@ fn elaborate_expr(
                     pattern,
                     guard,
                     body,
+                    unpack: arm.unpack,
                 });
             }
             Ok(Expr::new(
@@ -6847,13 +6958,32 @@ fn elaborate_expr(
                     span,
                 ))
             } else {
-                let args = args
-                    .into_iter()
-                    .map(|a| {
-                        elaborate_expr(a, enums, funs, methods, current_module, env, None, tparams)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?;
-                Ok(Expr::new(ExprKind::Call { callee, args }, span))
+                let nargs = args.len();
+                let mut out = Vec::with_capacity(nargs);
+                let mut prior: Vec<Type> = Vec::new();
+                for (i, a) in args.into_iter().enumerate() {
+                    let elaborated = if let Some(pty) =
+                        kit_lambda_param_ty_at(&callee, i, nargs, &prior)
+                    {
+                        elaborate_lambda_arg(
+                            a,
+                            pty,
+                            enums,
+                            funs,
+                            methods,
+                            current_module,
+                            env,
+                            tparams,
+                        )?
+                    } else {
+                        elaborate_expr(a, enums, funs, methods, current_module, env, None, tparams)?
+                    };
+                    let ty = infer(&elaborated, enums, funs, methods, current_module, env)
+                        .unwrap_or_else(|_| Type::Opaque("Rewrite".into()));
+                    prior.push(ty);
+                    out.push(elaborated);
+                }
+                Ok(Expr::new(ExprKind::Call { callee, args: out }, span))
             }
         }
         ExprKind::Let { name, value, body } => {
@@ -7387,6 +7517,7 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
                     pattern: subst_pattern(a.pattern, subst),
                     guard: a.guard.map(|g| subst_node_targs(g, subst)),
                     body: subst_node_targs(a.body, subst),
+                    unpack: a.unpack,
                 })
                 .collect(),
         },
@@ -7783,6 +7914,7 @@ fn rewrite_enum_refs(
                             None => None,
                         },
                         body: rewrite_enum_refs(a.body, clones)?,
+                        unpack: a.unpack,
                     })
                 })
                 .collect::<Result<Vec<_>, TypeError>>()?,
@@ -9001,6 +9133,53 @@ def firsts(xs: List[(Int, String)]): List[Int] =
         let p = crate::typ::elaborate_generics(p).expect("elaborate tuple unpack");
         let p = crate::typ::resolve_field_access(p).expect("fields");
         crate::typ::monomorphize(p).expect("mono tuple unpack");
+    }
+
+    #[test]
+    fn typechecks_ctor_for_binder_and_lambda() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+record Point(x: Int, y: Int)
+def xs(): List[Opt[Int]] = [Opt.Some(1), Opt.Some(2)]
+def heads(ys: List[Opt[Int]]): List[Int] =
+  List.map(ys, (Opt.Some(n)) => n)
+@main def main: IO[Unit] =
+  for {
+    Point(x, y) = Point(3, 5)
+    Opt.Some(n) = Opt.Some(7)
+    h :: _t = [8, 9]
+    got <- IO.pure(Opt.Some(4))
+    Opt.Some(m) = got
+    _ <- IO.println(Str.fromInt(x + y + n + h + m))
+    _ <- IO.println(Str.fromInt(List.head(heads(xs()))))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("ctor unpack in for and lambda");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate ctor unpack");
+        let p = crate::typ::resolve_field_access(p).expect("fields");
+        crate::typ::monomorphize(p).expect("mono ctor unpack");
+    }
+
+    #[test]
+    fn rejects_ctor_for_binder_on_int() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  for {
+    Opt.Some(n) = 1
+  } yield IO.println(Str.fromInt(n))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(
+            err.contains("Opt") || err.contains("mismatch") || err.contains("Int"),
+            "{err}"
+        );
     }
 
     #[test]

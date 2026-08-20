@@ -171,7 +171,14 @@ fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Expr {
             body,
         } => {
             let body = lower_expr(*body, enums, current_module);
-            let body = unpack_pat(pat.map(|p| *p), param.as_deref(), body, span.clone());
+            let body = unpack_pat(
+                pat.map(|p| *p),
+                param.as_deref(),
+                body,
+                span.clone(),
+                enums,
+                current_module,
+            );
             Expr::new(
                 ExprKind::Lambda {
                     param,
@@ -266,6 +273,7 @@ fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Expr {
                         pattern: pat,
                         guard: guard.clone(),
                         body: body.clone(),
+                        unpack: a.unpack,
                     });
                 }
             }
@@ -281,15 +289,28 @@ fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Expr {
     }
 }
 
-fn unpack_pat(pat: Option<Pattern>, name: Option<&str>, body: Expr, span: Span) -> Expr {
+fn unpack_pat(
+    pat: Option<Pattern>,
+    name: Option<&str>,
+    body: Expr,
+    span: Span,
+    enums: &EnumIndex<'_>,
+    current_module: &str,
+) -> Expr {
     let Some(pat) = pat else {
         return body;
     };
+    let pat = lower_pattern(pat, enums, current_module);
     let scrut = name.unwrap_or(TUP_UNPACK);
+    let arms = pat
+        .flatten_or()
+        .into_iter()
+        .map(|p| MatchArm::unpack(p, body.clone()))
+        .collect();
     Expr::new(
         ExprKind::Match {
             scrutinee: Box::new(Expr::new(ExprKind::Var(scrut.into()), span.clone())),
-            arms: vec![MatchArm::new(pat, body)],
+            arms,
         },
         span,
     )
@@ -318,7 +339,7 @@ fn desugar_for(
                 name, value, pat, ..
             } => {
                 let sp = value.span.clone().cover(&body.span);
-                let body = unpack_pat(pat, Some(&name), body, sp.clone());
+                let body = unpack_pat(pat, Some(&name), body, sp.clone(), enums, current_module);
                 Expr::new(
                     ExprKind::Let {
                         name,
@@ -337,7 +358,14 @@ fn desugar_for(
                     Some(name.clone())
                 };
                 let sp = value.span.clone().cover(&body.span);
-                let body = unpack_pat(pat, param.as_deref(), body, sp.clone());
+                let body = unpack_pat(
+                    pat,
+                    param.as_deref(),
+                    body,
+                    sp.clone(),
+                    enums,
+                    current_module,
+                );
                 Expr::new(
                     ExprKind::FlatMap {
                         inner: Box::new(lower_expr(value, enums, current_module)),
@@ -409,6 +437,32 @@ mod tests {
             dumped.contains("__tup") || dumped.contains("Match"),
             "{dumped}"
         );
+    }
+
+    #[test]
+    fn lowers_ctor_for_binder_to_match() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  for {
+    Opt.Some(n) = Opt.Some(1)
+  } yield IO.println(Str.fromInt(n))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        match &p.main.body.kind {
+            ExprKind::Let { name, body, .. } => {
+                assert_eq!(name, crate::ast::TUP_UNPACK);
+                match &body.kind {
+                    ExprKind::Match { arms, .. } => {
+                        assert!(arms[0].unpack, "ctor unpack arm must be marked unpack");
+                    }
+                    other => panic!("ctor binder unpacks with match, got {other:?}"),
+                }
+            }
+            other => panic!("expected Let, got {other:?}"),
+        }
     }
 
     #[test]

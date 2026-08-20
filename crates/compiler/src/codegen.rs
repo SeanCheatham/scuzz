@@ -440,6 +440,11 @@ pub fn emit_llvm(program: &Program) -> String {
         "@.div0 = private unnamed_addr constant [17 x i8] c\"division by zero\\00\", align 1"
     )
     .unwrap();
+    writeln!(
+        out,
+        "@.unpack = private unnamed_addr constant [14 x i8] c\"unpack failed\\00\", align 1"
+    )
+    .unwrap();
     writeln!(out).unwrap();
 
     // User defs are emitted below. LLVM allows call sites before the defining
@@ -1448,22 +1453,34 @@ fn emit_match(
     }
 
     writeln!(code, "{default_label}:").unwrap();
-    let dflt = match result_kind {
-        Kind::Int => {
-            writeln!(code, "  %{prefix}_dflt = add i64 0, 0").unwrap();
-            format!("%{prefix}_dflt")
-        }
-        Kind::Float => {
-            writeln!(code, "  %{prefix}_dflt = bitcast i64 0 to double").unwrap();
-            format!("%{prefix}_dflt")
-        }
-        Kind::Ptr => "null".into(),
-        Kind::Io => {
-            writeln!(code, "  %{prefix}_dflt = call ptr @sz_io_pure(ptr null)").unwrap();
-            format!("%{prefix}_dflt")
-        }
+    let unpack_miss = arms.iter().any(|a| a.unpack);
+    let dflt = if unpack_miss {
+        writeln!(
+            code,
+            "  call void @sz_panic(ptr getelementptr inbounds ([14 x i8], ptr @.unpack, i64 0, i64 0))"
+        )
+        .unwrap();
+        writeln!(code, "  unreachable").unwrap();
+        None
+    } else {
+        let dflt = match result_kind {
+            Kind::Int => {
+                writeln!(code, "  %{prefix}_dflt = add i64 0, 0").unwrap();
+                format!("%{prefix}_dflt")
+            }
+            Kind::Float => {
+                writeln!(code, "  %{prefix}_dflt = bitcast i64 0 to double").unwrap();
+                format!("%{prefix}_dflt")
+            }
+            Kind::Ptr => "null".into(),
+            Kind::Io => {
+                writeln!(code, "  %{prefix}_dflt = call ptr @sz_io_pure(ptr null)").unwrap();
+                format!("%{prefix}_dflt")
+            }
+        };
+        writeln!(code, "  br label %{merge}").unwrap();
+        Some(dflt)
     };
-    writeln!(code, "  br label %{merge}").unwrap();
 
     let mixed_ptr = result_kind == Kind::Ptr && any_arm_owned && !all_arms_owned;
     let arms_provide = result_kind == Kind::Ptr && any_arm_owned;
@@ -1491,7 +1508,9 @@ fn emit_match(
         writeln!(code, "  br label %{merge}").unwrap();
         phi_parts.push((ae.value.clone(), join_l.clone()));
     }
-    phi_parts.push((dflt, default_label));
+    if let Some(dflt) = dflt {
+        phi_parts.push((dflt, default_label));
+    }
 
     let ty = llvm_kind_ty(result_kind);
     writeln!(code, "{merge}:").unwrap();
@@ -12981,6 +13000,26 @@ def swap[A, B](p: (A, B)): (B, A) =
         assert!(ir.contains("call ptr @sz_pair_left"), "tuple._1:\n{ir}");
         assert!(ir.contains("call ptr @sz_pair_right"), "tuple._2:\n{ir}");
         assert!(ir.contains("call ptr @sz_io_both"), "IO.both:\n{ir}");
+    }
+
+    #[test]
+    fn emit_ctor_unpack_panics_on_miss() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  for {
+    Opt.Some(n) = Opt.Some(1)
+    _ <- IO.println(Str.fromInt(n))
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        assert!(ir.contains("@.unpack"), "unpack miss string:\n{ir}");
+        assert!(
+            ir.contains("call void @sz_panic"),
+            "unpack miss panics:\n{ir}"
+        );
     }
 
     fn gen_ir(src: &str) -> String {

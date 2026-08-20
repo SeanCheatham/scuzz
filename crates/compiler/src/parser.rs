@@ -1,7 +1,7 @@
 use crate::ast::{
-    is_tuple_binder_pat, simple_binder_name, BinOp, EnumCase, EnumDef, Expr, ExprKind, ForBinder,
-    FunDef, ImplDef, ImplMethod, Import, InterpPart, MainDef, MatchArm, Param, Pattern, Program,
-    TraitDef, TraitMethod, Type, TypeAlias, UnOp, TUP_UNPACK,
+    is_for_binder_pat, is_tuple_binder_pat, simple_binder_name, BinOp, EnumCase, EnumDef, Expr,
+    ExprKind, ForBinder, FunDef, ImplDef, ImplMethod, Import, InterpPart, MainDef, MatchArm, Param,
+    Pattern, Program, TraitDef, TraitMethod, Type, TypeAlias, UnOp, TUP_UNPACK,
 };
 use crate::lexer::{lex, InterpTok, LexError, SpannedToken, Token};
 use crate::resolve::module_id_from_label;
@@ -1208,36 +1208,16 @@ impl Parser {
         self.parse_expr()
     }
 
-    /// Binder name: ident or `_`.
-    fn parse_binder_name(&mut self) -> Result<(String, Span), ParseError> {
-        let got = self.bump();
-        match got.token {
-            Token::Ident(s) => Ok((s, got.span)),
-            Token::Underscore => Ok(("_".into(), got.span)),
-            other => Err(ParseError::At {
-                msg: format!("expected binder name, got {other:?}"),
-                span: got.span,
-            }),
-        }
-    }
-
-    /// Name, `_`, or `(a, b)` for a `for` binder.
+    /// Name, `_`, `(a, b)`, or a constructor / list / as-pattern for a `for` binder.
     fn parse_for_binder_pat(&mut self) -> Result<(Pattern, Span), ParseError> {
         let start = self.current_span();
-        if matches!(self.peek(), Token::LParen) {
-            let pat = self.parse_or_pattern()?;
-            if !is_tuple_binder_pat(&pat) {
-                return Err(self.err("for binder must be a name, `_`, or `(a, b)`"));
-            }
-            let span = start.cover(&self.prev_span());
-            return Ok((pat, span));
+        let pat = self.parse_or_pattern()?;
+        if !is_for_binder_pat(&pat) {
+            return Err(
+                self.err("for binder must be a name, `_`, `(a, b)`, or a constructor pattern")
+            );
         }
-        let (name, span) = self.parse_binder_name()?;
-        let pat = if name == "_" {
-            Pattern::Wildcard
-        } else {
-            Pattern::Bind(name)
-        };
+        let span = start.cover(&self.prev_span());
         Ok((pat, span))
     }
 
@@ -1690,6 +1670,7 @@ impl Parser {
                 pattern,
                 guard,
                 body,
+                unpack: false,
             });
         }
         if braced {
@@ -1918,7 +1899,7 @@ impl Parser {
                             self.mk(
                                 ExprKind::Match {
                                     scrutinee: Box::new(self.mk(ExprKind::Var(name), sp.clone())),
-                                    arms: vec![MatchArm::new(*pat, *body)],
+                                    arms: vec![MatchArm::unpack(*pat, *body)],
                                 },
                                 sp,
                             )
@@ -1986,7 +1967,9 @@ impl Parser {
                 right_ty: Type::Opaque("Elem".into()),
             };
             if !is_tuple_binder_pat(&pat) {
-                return Err(self.err("tuple lambda must bind names, `_`, or nested `(a, b)`"));
+                return Err(self.err(
+                    "tuple lambda must bind names, `_`, nested `(a, b)`, or a constructor pattern",
+                ));
             }
             let span = start.cover(&body.span);
             return Ok(self.mk_lambda(Some(TUP_UNPACK.into()), None, Some(pat), body, span));
@@ -2003,10 +1986,10 @@ impl Parser {
             };
             return Ok(self.mk_lambda(param, None, None, body, span));
         }
-        if matches!(left, Pattern::Tuple { .. }) && is_tuple_binder_pat(&left) {
+        if is_tuple_binder_pat(&left) {
             return Ok(self.mk_lambda(Some(TUP_UNPACK.into()), None, Some(left), body, span));
         }
-        Err(self.err("lambda binder must be a name, `_`, or `(a, b)`"))
+        Err(self.err("lambda binder must be a name, `_`, `(a, b)`, or a constructor pattern"))
     }
 
     fn try_paren_lambda(&mut self, start: Span) -> Result<Option<Expr>, ParseError> {
@@ -2020,7 +2003,10 @@ impl Parser {
                 // `expect` consumes the unexpected token. `(x => x)` hits Arrow
                 // while looking for `)`. Keep that as a grouped lambda.
                 let msg = e.message();
-                if msg.contains("tuple lambda") || msg.contains("lambda binder") {
+                if msg.contains("tuple lambda")
+                    || msg.contains("lambda binder")
+                    || msg.contains("constructor pattern")
+                {
                     return Err(e);
                 }
                 self.i = saved;
@@ -2585,16 +2571,69 @@ def swap(p: (Int, String)): (String, Int) =
     }
 
     #[test]
-    fn rejects_literal_tuple_lambda() {
+    fn parse_literal_tuple_lambda() {
         let src = r#"
 @main def main: IO[Unit] =
-  IO.println(List.join(List.map([(1, "x")], (n, 0) => "z"), ","))
+  IO.println(List.join(List.map([(1, 0)], (n, 0) => "z"), ","))
 "#;
-        let err = parse(src).unwrap_err().to_string();
+        let p = parse(src).unwrap();
+        let dumped = format!("{:?}", p.main.body.kind);
         assert!(
-            err.contains("tuple lambda") || err.contains("lambda binder"),
-            "{err}"
+            dumped.contains("pat: Some") || dumped.contains("Int(0)"),
+            "{dumped}"
         );
+    }
+
+    #[test]
+    fn parse_ctor_for_binder_and_lambda() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+record Point(x: Int, y: Int)
+@main def main: IO[Unit] =
+  for {
+    Point(x, y) = Point(1, 2)
+    Opt.Some(n) <- IO.pure(Opt.Some(3))
+    h :: t = [4, 5]
+  } yield IO.println(List.join(List.map([Opt.Some(6)], (Opt.Some(k)) => Str.fromInt(k)), ","))
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::For { binders, body } => {
+                assert_eq!(binders.len(), 3);
+                match &binders[0] {
+                    ForBinder::Eq { name, pat, .. } => {
+                        assert_eq!(name, crate::ast::TUP_UNPACK);
+                        assert!(
+                            matches!(pat, Some(Pattern::Adt { case_name, .. }) if case_name == "Point"),
+                            "{pat:?}"
+                        );
+                    }
+                    other => panic!("expected eq ctor binder, got {other:?}"),
+                }
+                match &binders[1] {
+                    ForBinder::Draw { name, pat, .. } => {
+                        assert_eq!(name, crate::ast::TUP_UNPACK);
+                        assert!(
+                            matches!(pat, Some(Pattern::Adt { case_name, .. }) if case_name == "Some"),
+                            "{pat:?}"
+                        );
+                    }
+                    other => panic!("expected draw ctor binder, got {other:?}"),
+                }
+                match &binders[2] {
+                    ForBinder::Eq { name, pat, .. } => {
+                        assert_eq!(name, crate::ast::TUP_UNPACK);
+                        assert!(matches!(pat, Some(Pattern::Cons { .. })), "{pat:?}");
+                    }
+                    other => panic!("expected eq cons binder, got {other:?}"),
+                }
+                let dumped = format!("{body:?}");
+                assert!(dumped.contains("pat: Some"), "{dumped}");
+            }
+            other => panic!("expected for, got {other:?}"),
+        }
     }
 
     #[test]
