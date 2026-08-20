@@ -66,11 +66,20 @@ SzList *sz_list_reverse(SzList *xs) {
 }
 
 /* Copy the spine and retain `x` (same as cons). The caller drops an owned
- * `x` after the call. */
+ * `x` after the call. Walk `xs` into a reverse acc, then fold onto cons(x). */
 SzList *sz_list_append(SzList *xs, void *x) {
+  SzList *acc = NULL;
+  SzList *p;
+  SzList *out;
   if (!xs)
     return sz_list_cons(x, NULL);
-  return sz_list_cons_take(xs->head, sz_list_append(xs->tail, x));
+  for (p = xs; p; p = p->tail)
+    acc = sz_list_cons_take(p->head, acc);
+  out = sz_list_cons(x, NULL);
+  for (p = acc; p; p = p->tail)
+    out = sz_list_cons_take(p->head, out);
+  sz_release(acc);
+  return out;
 }
 
 static SzList *sz_list_copy(SzList *xs) {
@@ -101,13 +110,18 @@ SzList *sz_list_set_at(SzList *xs, int64_t index, void *v) {
 
 static SzList *list_filter(SzList *xs, SzListPred pred, void *env, int keep,
                            const char *panic) {
+  SzList *acc = NULL;
+  SzList *p;
+  SzList *out;
   if (!pred)
     sz_panic(panic);
-  if (!xs)
-    return NULL;
-  if ((pred(xs->head, env) != 0) == keep)
-    return sz_list_cons_take(xs->head, list_filter(xs->tail, pred, env, keep, panic));
-  return list_filter(xs->tail, pred, env, keep, panic);
+  for (p = xs; p; p = p->tail) {
+    if ((pred(p->head, env) != 0) == keep)
+      acc = sz_list_cons_take(p->head, acc);
+  }
+  out = sz_list_reverse(acc);
+  sz_release(acc);
+  return out;
 }
 
 SzList *sz_list_filter(SzList *xs, SzListPred pred, void *env) {
@@ -131,9 +145,18 @@ int64_t sz_list_count(SzList *xs, SzListPred pred, void *env) {
 }
 
 SzList *sz_list_take(SzList *xs, int64_t n) {
+  SzList *acc = NULL;
+  SzList *p;
+  SzList *out;
+  int64_t i;
   if (!xs || n <= 0)
     return NULL;
-  return sz_list_cons_take(xs->head, sz_list_take(xs->tail, n - 1));
+  p = xs;
+  for (i = 0; p && i < n; i++, p = p->tail)
+    acc = sz_list_cons_take(p->head, acc);
+  out = sz_list_reverse(acc);
+  sz_release(acc);
+  return out;
 }
 
 SzList *sz_list_drop(SzList *xs, int64_t n) {
@@ -263,12 +286,24 @@ int64_t sz_list_forall(SzList *xs, SzListPred pred, void *env) {
   return 1;
 }
 
+/* Walk `xs` into a reverse acc, then fold onto a retained `ys`. Empty `xs`
+ * retains `ys`. */
 SzList *sz_list_concat(SzList *xs, SzList *ys) {
+  SzList *acc = NULL;
+  SzList *p;
+  SzList *out;
   if (!xs) {
     sz_retain(ys);
     return ys;
   }
-  return sz_list_cons_take(xs->head, sz_list_concat(xs->tail, ys));
+  for (p = xs; p; p = p->tail)
+    acc = sz_list_cons_take(p->head, acc);
+  sz_retain(ys);
+  out = ys;
+  for (p = acc; p; p = p->tail)
+    out = sz_list_cons_take(p->head, out);
+  sz_release(acc);
+  return out;
 }
 
 SzList *sz_list_flatten(SzList *xss) {
@@ -283,17 +318,21 @@ SzList *sz_list_flatten(SzList *xss) {
 }
 
 SzList *sz_list_map(SzList *xs, SzListMapFn fn, void *env) {
+  SzList *acc = NULL;
+  SzList *p;
+  SzList *out;
   void *h;
-  SzList *n;
   if (!fn)
     sz_panic("sz_list_map(null fn)");
-  if (!xs)
-    return NULL;
   /* Mapper returns +1. Cons retains. Drop the mapper ref. */
-  h = fn(xs->head, env);
-  n = sz_list_cons_take(h, sz_list_map(xs->tail, fn, env));
-  sz_release(h);
-  return n;
+  for (p = xs; p; p = p->tail) {
+    h = fn(p->head, env);
+    acc = sz_list_cons_take(h, acc);
+    sz_release(h);
+  }
+  out = sz_list_reverse(acc);
+  sz_release(acc);
+  return out;
 }
 
 SzList *sz_list_flat_map(SzList *xs, SzListMapFn fn, void *env) {
@@ -846,12 +885,20 @@ SzString *sz_list_join(const SzList *xs, const char *sep) {
   size_t count = 0;
   for (const SzList *p = xs; p; p = p->tail) {
     SzString *s = (SzString *)p->head;
-    if (s)
+    if (s) {
+      if (s->len > SIZE_MAX - total)
+        sz_panic("List.join too large");
       total += s->len;
-    if (count > 0)
+    }
+    if (count > 0) {
+      if (sep_len > SIZE_MAX - total)
+        sz_panic("List.join too large");
       total += sep_len;
+    }
     count++;
   }
+  if (total == SIZE_MAX)
+    sz_panic("List.join too large");
   char *buf = (char *)sz_alloc(total + 1);
   size_t off = 0;
   size_t i = 0;

@@ -16,6 +16,8 @@ struct Local {
     value: String,
     kind: Kind,
     owned: bool,
+    /// Element kind when this local is a `List`.
+    elem: Kind,
 }
 
 impl Local {
@@ -24,6 +26,7 @@ impl Local {
             value: value.into(),
             kind,
             owned: false,
+            elem: Kind::Ptr,
         }
     }
 
@@ -32,7 +35,13 @@ impl Local {
             value: value.into(),
             kind,
             owned: true,
+            elem: Kind::Ptr,
         }
+    }
+
+    fn with_elem(mut self, elem: Kind) -> Self {
+        self.elem = elem;
+        self
     }
 }
 
@@ -493,6 +502,15 @@ struct Emitted {
     payload_owned: bool,
     /// Compiler owns a +1 on this ptr (string / list / map / ADT temps). Release after last use.
     owned: bool,
+    /// Element kind when this value is a `List`.
+    elem: Kind,
+}
+
+impl Emitted {
+    fn with_elem(mut self, elem: Kind) -> Self {
+        self.elem = elem;
+        self
+    }
 }
 
 fn io_emitted(code: String, value: String, payload: Kind) -> Emitted {
@@ -507,6 +525,7 @@ fn io_emitted_payload(code: String, value: String, payload: Kind, payload_owned:
         payload,
         payload_owned,
         owned: false,
+        elem: Kind::Ptr,
     }
 }
 
@@ -518,6 +537,7 @@ fn val_emitted(code: String, value: String, kind: Kind) -> Emitted {
         payload: Kind::Ptr,
         payload_owned: false,
         owned: false,
+        elem: Kind::Ptr,
     }
 }
 
@@ -529,6 +549,7 @@ fn owned_ptr(code: String, value: String) -> Emitted {
         payload: Kind::Ptr,
         payload_owned: false,
         owned: true,
+        elem: Kind::Ptr,
     }
 }
 
@@ -552,6 +573,7 @@ fn keep_emitted(code: String, src: &Emitted) -> Emitted {
         payload: src.payload,
         payload_owned: src.payload_owned,
         owned: src.owned,
+        elem: src.elem,
     }
 }
 
@@ -627,6 +649,13 @@ fn kind_of_type(ty: &Type) -> Kind {
         Type::Int | Type::Bool => Kind::Int,
         Type::Float => Kind::Float,
         Type::Io(_) => Kind::Io,
+        _ => Kind::Ptr,
+    }
+}
+
+fn list_elem_of_type(ty: &Type) -> Kind {
+    match ty {
+        Type::List(inner) => kind_of_type(inner),
         _ => Kind::Ptr,
     }
 }
@@ -910,7 +939,8 @@ fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
         }
         locals.insert(
             p.name.clone(),
-            Local::borrow(format!("%{}", p.name), kind_of_type(&p.ty)),
+            Local::borrow(format!("%{}", p.name), kind_of_type(&p.ty))
+                .with_elem(list_elem_of_type(&p.ty)),
         );
     }
 
@@ -924,21 +954,17 @@ fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
             writeln!(out, "  ret ptr {io}").unwrap();
         }
         Kind::Int => {
-            let v = if body.kind == Kind::Int {
-                body.value
-            } else {
-                writeln!(out, "  %ret_coerce = add i64 0, 0").unwrap();
-                "%ret_coerce".into()
-            };
+            let v = as_i64(out, body.kind, &body.value, "ret_i");
+            if body.owned && body.kind == Kind::Ptr {
+                writeln!(out, "  call void @sz_release(ptr {})", body.value).unwrap();
+            }
             writeln!(out, "  ret i64 {v}").unwrap();
         }
         Kind::Float => {
-            let v = if body.kind == Kind::Float {
-                body.value
-            } else {
-                writeln!(out, "  %ret_fcoerce = bitcast i64 0 to double").unwrap();
-                "%ret_fcoerce".into()
-            };
+            let v = as_f64(out, body.kind, &body.value, "ret_f");
+            if body.owned && body.kind == Kind::Ptr {
+                writeln!(out, "  call void @sz_release(ptr {})", body.value).unwrap();
+            }
             writeln!(out, "  ret double {v}").unwrap();
         }
         Kind::Ptr => {
@@ -1152,9 +1178,13 @@ fn emit_list_lit(
     let mut code = String::new();
     writeln!(code, "  %{prefix}_0 = call ptr @sz_list_nil()").unwrap();
     let mut cur = format!("%{prefix}_0");
+    let mut elem_kind = Kind::Ptr;
     for (i, elem) in elems.iter().enumerate().rev() {
         let ee = emit_expr(elem, ctx, locals, &format!("{prefix}_e{i}"));
         code.push_str(&ee.code);
+        if i == 0 {
+            elem_kind = ee.kind;
+        }
         let ptr = if ee.kind == Kind::Int || ee.kind == Kind::Float {
             box_numeric(&mut code, ee.kind, &ee.value, &format!("{prefix}_b{i}"))
         } else {
@@ -1174,7 +1204,7 @@ fn emit_list_lit(
         }
         cur = next;
     }
-    owned_ptr(code, cur)
+    owned_ptr(code, cur).with_elem(elem_kind)
 }
 
 /// Unpack `%env` list into `body_locals` (mirrors [`pack_env`] order).
@@ -1190,7 +1220,9 @@ fn unpack_env_preamble(
     }
     let mut cur = "%env".to_string();
     for (i, name) in names.iter().enumerate() {
-        let kind = outer.get(name).map(|l| l.kind).unwrap_or(Kind::Ptr);
+        let loc = outer.get(name);
+        let kind = loc.map(|l| l.kind).unwrap_or(Kind::Ptr);
+        let elem = loc.map(|l| l.elem).unwrap_or(Kind::Ptr);
         writeln!(pre, "  %{prefix}_h{i} = call ptr @sz_list_head(ptr {cur})").unwrap();
         writeln!(pre, "  %{prefix}_t{i} = call ptr @sz_list_tail(ptr {cur})").unwrap();
         match kind {
@@ -1199,7 +1231,10 @@ fn unpack_env_preamble(
                 body_locals.insert(name.clone(), Local::borrow(v, kind));
             }
             Kind::Ptr | Kind::Io => {
-                body_locals.insert(name.clone(), Local::borrow(format!("%{prefix}_h{i}"), kind));
+                body_locals.insert(
+                    name.clone(),
+                    Local::borrow(format!("%{prefix}_h{i}"), kind).with_elem(elem),
+                );
             }
         }
         cur = format!("%{prefix}_t{i}");
@@ -1257,6 +1292,7 @@ fn emit_match(
     let mut arm_emits: Vec<(String, String, String, Option<Emitted>, Emitted)> = Vec::new();
     let mut result_kind = Kind::Io;
     let mut result_payload = Kind::Ptr;
+    let mut result_elem = Kind::Ptr;
     let mut result_payload_owned = !arms.is_empty();
     let mut any_arm_owned = false;
     let mut all_arms_owned = !arms.is_empty();
@@ -1284,6 +1320,7 @@ fn emit_match(
                 locals,
                 code: &mut code,
                 bound_names: &mut bound_names,
+                list_elem: se.elem,
             },
         );
         let ge = arm
@@ -1297,6 +1334,7 @@ fn emit_match(
         if arm_emits.is_empty() {
             result_kind = ae.kind;
             result_payload = ae.payload;
+            result_elem = ae.elem;
         }
         result_payload_owned = result_payload_owned && ae.payload_owned;
         if ae.owned && ae.kind == Kind::Ptr {
@@ -1376,6 +1414,7 @@ fn emit_match(
         payload: result_payload,
         payload_owned: result_kind == Kind::Io && result_payload_owned,
         owned: result_kind == Kind::Ptr && (arms_provide || se.owned),
+        elem: result_elem,
     }
 }
 
@@ -1385,6 +1424,8 @@ struct PatEmit<'a, 'b> {
     locals: &'a mut HashMap<String, Local>,
     code: &'a mut String,
     bound_names: &'a mut Vec<String>,
+    /// Element kind of a List scrutinee. Ptr binds copy this.
+    list_elem: Kind,
 }
 
 fn emit_pat(
@@ -1402,13 +1443,23 @@ fn emit_pat(
         }
         Pattern::Bind(name) => {
             if name != "_" {
-                pe.locals.insert(name.clone(), Local::borrow(value, kind));
+                let loc = if kind == Kind::Ptr {
+                    Local::borrow(value, kind).with_elem(pe.list_elem)
+                } else {
+                    Local::borrow(value, kind)
+                };
+                pe.locals.insert(name.clone(), loc);
                 pe.bound_names.push(name.clone());
             }
             writeln!(pe.code, "  br label %{ok_label}").unwrap();
         }
         Pattern::As { name, inner } => {
-            pe.locals.insert(name.clone(), Local::borrow(value, kind));
+            let loc = if kind == Kind::Ptr {
+                Local::borrow(value, kind).with_elem(pe.list_elem)
+            } else {
+                Local::borrow(value, kind)
+            };
+            pe.locals.insert(name.clone(), loc);
             pe.bound_names.push(name.clone());
             emit_pat(inner, value, kind, prefix, ok_label, fail_label, pe);
         }
@@ -1928,7 +1979,7 @@ fn emit_expr(
                 .get(name)
                 .cloned()
                 .unwrap_or_else(|| Local::borrow("null", Kind::Ptr));
-            val_emitted(String::new(), loc.value, loc.kind)
+            val_emitted(String::new(), loc.value, loc.kind).with_elem(loc.elem)
         }
         ExprKind::Field { .. } => panic!("internal: unresolved field access in codegen"),
         ExprKind::MethodCall { .. } => panic!("internal: unresolved method call in codegen"),
@@ -1948,6 +1999,7 @@ fn emit_expr(
                     payload: be.payload,
                     payload_owned: be.payload_owned,
                     owned: be.owned,
+                    elem: be.elem,
                 };
             }
             let mut code = ve.code;
@@ -1957,6 +2009,7 @@ fn emit_expr(
                     value: ve.value.clone(),
                     kind: ve.kind,
                     owned: ve.owned,
+                    elem: ve.elem,
                 },
             );
             let mut be = emit_expr(body, ctx, locals, &format!("{prefix}_l_{name}"));
@@ -1984,6 +2037,7 @@ fn emit_expr(
                 payload: be.payload,
                 payload_owned: be.payload_owned,
                 owned: be.owned,
+                elem: be.elem,
             }
         }
         ExprKind::If {
@@ -2048,6 +2102,7 @@ fn emit_expr(
                 payload,
                 payload_owned: te.payload_owned && ee.payload_owned,
                 owned: kind == Kind::Ptr && (te.owned || ee.owned),
+                elem: te.elem,
             }
         }
         ExprKind::Lambda { param, body, .. } => emit_lambda(param, body, ctx, locals, prefix),
@@ -2808,6 +2863,7 @@ fn emit_pred_lambda(
     ctx: &mut EmitCtx<'_>,
     locals: &mut HashMap<String, Local>,
     prefix: &str,
+    elem: Kind,
 ) -> Emitted {
     let id = *ctx.cont_id;
     *ctx.cont_id += 1;
@@ -2825,7 +2881,12 @@ fn emit_pred_lambda(
     );
     if let Some(p) = param {
         if p != "_" {
-            body_locals.insert(p.clone(), Local::borrow("%value", Kind::Ptr));
+            if elem == Kind::Int || elem == Kind::Float {
+                let v = unbox_numeric(&mut pre, elem, "%value", p);
+                body_locals.insert(p.clone(), Local::borrow(v, elem));
+            } else {
+                body_locals.insert(p.clone(), Local::borrow("%value", Kind::Ptr));
+            }
         }
     }
 
@@ -2877,6 +2938,7 @@ fn emit_smap_lambda(
     locals: &mut HashMap<String, Local>,
     prefix: &str,
     box_int: bool,
+    elem: Kind,
 ) -> Emitted {
     let id = *ctx.cont_id;
     *ctx.cont_id += 1;
@@ -2894,7 +2956,12 @@ fn emit_smap_lambda(
     );
     if let Some(p) = param {
         if p != "_" {
-            body_locals.insert(p.clone(), Local::borrow("%value", Kind::Ptr));
+            if elem == Kind::Int || elem == Kind::Float {
+                let v = unbox_numeric(&mut pre, elem, "%value", p);
+                body_locals.insert(p.clone(), Local::borrow(v, elem));
+            } else {
+                body_locals.insert(p.clone(), Local::borrow("%value", Kind::Ptr));
+            }
         }
     }
 
@@ -2962,7 +3029,7 @@ fn emit_smap_lambda(
     if env_ptr != "null" {
         writeln!(code, "  call void @sz_release(ptr {env_ptr})").unwrap();
     }
-    owned_ptr(code, format!("%{prefix}_cl2"))
+    owned_ptr(code, format!("%{prefix}_cl2")).with_elem(body_emitted.kind)
 }
 
 fn unpack_closure(code: &mut String, closure: &str, prefix: &str) {
@@ -3069,7 +3136,14 @@ fn emit_list_pred_i64(
     let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("{callee} predicate must be a lambda");
     };
-    let lam = emit_pred_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
+    let lam = emit_pred_lambda(
+        param,
+        body,
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        inner.elem,
+    );
     let inner_owned = inner.owned;
     let inner_kind = inner.kind;
     let inner_value = inner.value.clone();
@@ -3099,7 +3173,14 @@ fn emit_list_segment_length(
     let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("List.segmentLength predicate must be a lambda");
     };
-    let lam = emit_pred_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
+    let lam = emit_pred_lambda(
+        param,
+        body,
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        inner.elem,
+    );
     let from = emit_expr(&args[2], ctx, locals, &format!("{prefix}_a2"));
     let inner_owned = inner.owned;
     let inner_kind = inner.kind;
@@ -3135,9 +3216,17 @@ fn emit_stream_pred(
     let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("{callee} predicate must be a lambda");
     };
-    let lam = emit_pred_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
+    let lam = emit_pred_lambda(
+        param,
+        body,
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        inner.elem,
+    );
     let inner_owned = inner.owned;
     let inner_kind = inner.kind;
+    let inner_elem = inner.elem;
     let inner_value = inner.value.clone();
     let mut code = inner.code;
     code.push_str(&lam.code);
@@ -3153,8 +3242,10 @@ fn emit_stream_pred(
     }
     if as_io {
         io_emitted(code, format!("%{prefix}_v"), Kind::Int)
-    } else {
+    } else if callee == "List.span" || callee == "List.partition" {
         owned_ptr(code, format!("%{prefix}_v"))
+    } else {
+        owned_ptr(code, format!("%{prefix}_v")).with_elem(inner_elem)
     }
 }
 
@@ -3206,7 +3297,15 @@ fn emit_ptr_map(
     let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("{callee} mapper must be a lambda");
     };
-    let lam = emit_smap_lambda(param, body, ctx, locals, &format!("{prefix}_fn"), box_int);
+    let lam = emit_smap_lambda(
+        param,
+        body,
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        box_int,
+        inner.elem,
+    );
     let inner_owned = inner.owned;
     let inner_kind = inner.kind;
     let inner_value = inner.value.clone();
@@ -3222,7 +3321,7 @@ fn emit_ptr_map(
     if inner_owned && inner_kind == Kind::Ptr {
         writeln!(code, "  call void @sz_release(ptr {inner_value})").unwrap();
     }
-    owned_ptr(code, format!("%{prefix}_v"))
+    owned_ptr(code, format!("%{prefix}_v")).with_elem(lam.elem)
 }
 
 fn emit_list_tabulate(
@@ -3236,7 +3335,15 @@ fn emit_list_tabulate(
     let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("List.tabulate mapper must be a lambda");
     };
-    let lam = emit_smap_lambda(param, body, ctx, locals, &format!("{prefix}_fn"), true);
+    let lam = emit_smap_lambda(
+        param,
+        body,
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        true,
+        Kind::Int,
+    );
     let mut code = n.code;
     code.push_str(&lam.code);
     unpack_closure(&mut code, &lam.value, prefix);
@@ -3247,7 +3354,7 @@ fn emit_list_tabulate(
     )
     .unwrap();
     drop_owned_ptr(&mut code, &lam);
-    owned_ptr(code, format!("%{prefix}_v"))
+    owned_ptr(code, format!("%{prefix}_v")).with_elem(lam.elem)
 }
 
 fn emit_net_serve(
@@ -4010,7 +4117,12 @@ fn emit_call(
                 writeln!(code, "  call void @sz_release(ptr {head})").unwrap();
             }
             drop_owned_ptrs(&mut code, &emitted_args);
-            owned_ptr(code, format!("%{prefix}_v"))
+            let elem = if emitted_args[0].kind == Kind::Int || emitted_args[0].kind == Kind::Float {
+                emitted_args[0].kind
+            } else {
+                emitted_args[1].elem
+            };
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(elem)
         }
         "List.isEmpty" | "List.nonEmpty" => {
             let rt = if callee == "List.isEmpty" {
@@ -4028,20 +4140,41 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        "List.head" | "List.tail" => {
-            let rt = if callee == "List.head" {
-                "sz_list_head"
-            } else {
-                "sz_list_tail"
-            };
+        "List.head" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @{rt}(ptr {})",
+                "  %{prefix}_v = call ptr @sz_list_head(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            take_owned_ptr(&mut code, &emitted_args[0], &format!("%{prefix}_v"));
+            let elem = emitted_args[0].elem;
+            let result_owned = emitted_args[0].owned;
+            if elem == Kind::Int || elem == Kind::Float {
+                let v = unbox_numeric(
+                    &mut code,
+                    elem,
+                    &format!("%{prefix}_v"),
+                    &format!("{prefix}_u"),
+                );
+                if result_owned {
+                    writeln!(code, "  call void @sz_release(ptr %{prefix}_v)").unwrap();
+                }
+                val_emitted(code, v, elem)
+            } else {
+                ptr_owned_if(code, format!("%{prefix}_v"), result_owned)
+            }
+        }
+        "List.tail" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_tail(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
             take_owned_ptr(&mut code, &emitted_args[0], &format!("%{prefix}_v"));
             ptr_owned_if(code, format!("%{prefix}_v"), emitted_args[0].owned)
+                .with_elem(emitted_args[0].elem)
         }
         "List.len" => {
             writeln!(
@@ -4061,7 +4194,22 @@ fn emit_call(
             )
             .unwrap();
             take_owned_ptr(&mut code, &emitted_args[0], &format!("%{prefix}_v"));
-            ptr_owned_if(code, format!("%{prefix}_v"), emitted_args[0].owned)
+            let elem = emitted_args[0].elem;
+            let result_owned = emitted_args[0].owned;
+            if elem == Kind::Int || elem == Kind::Float {
+                let v = unbox_numeric(
+                    &mut code,
+                    elem,
+                    &format!("%{prefix}_v"),
+                    &format!("{prefix}_u"),
+                );
+                if result_owned {
+                    writeln!(code, "  call void @sz_release(ptr %{prefix}_v)").unwrap();
+                }
+                val_emitted(code, v, elem)
+            } else {
+                ptr_owned_if(code, format!("%{prefix}_v"), result_owned)
+            }
         }
         "List.reverse" | "List.init" | "List.inits" | "List.tails" | "List.last"
         | "List.flatten" | "List.indices" | "List.unzip" | "List.transpose" | "List.distinct" => {
@@ -4084,7 +4232,14 @@ fn emit_call(
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
+            let elem = match callee {
+                "List.indices" => Kind::Int,
+                "List.reverse" | "List.init" | "List.last" | "List.distinct" => {
+                    emitted_args[0].elem
+                }
+                _ => Kind::Ptr,
+            };
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(elem)
         }
         "List.join" => {
             writeln!(
@@ -4121,7 +4276,11 @@ fn emit_call(
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
+            let elem = match callee {
+                "List.grouped" | "List.sliding" | "List.splitAt" => Kind::Ptr,
+                _ => emitted_args[0].elem,
+            };
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(elem)
         }
         "List.getOrElse" => {
             let dflt = if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
@@ -4195,7 +4354,7 @@ fn emit_call(
             if emitted_args[1].kind == Kind::Int || emitted_args[1].kind == Kind::Float {
                 writeln!(code, "  call void @sz_release(ptr {elem})").unwrap();
             }
-            owned_ptr(code, format!("%{prefix}_v"))
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[1].kind)
         }
         "List.padTo" => {
             let elem = if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
@@ -4219,7 +4378,7 @@ fn emit_call(
             if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
                 writeln!(code, "  call void @sz_release(ptr {elem})").unwrap();
             }
-            owned_ptr(code, format!("%{prefix}_v"))
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
         }
         "List.range" => {
             writeln!(
@@ -4228,7 +4387,7 @@ fn emit_call(
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
-            owned_ptr(code, format!("%{prefix}_v"))
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(Kind::Int)
         }
         "List.intersperse" => {
             let elem = if emitted_args[1].kind == Kind::Int || emitted_args[1].kind == Kind::Float {
@@ -4252,7 +4411,7 @@ fn emit_call(
             if emitted_args[1].kind == Kind::Int || emitted_args[1].kind == Kind::Float {
                 writeln!(code, "  call void @sz_release(ptr {elem})").unwrap();
             }
-            owned_ptr(code, format!("%{prefix}_v"))
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
         }
         "List.slice" => {
             writeln!(
@@ -4262,7 +4421,7 @@ fn emit_call(
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
         }
         "List.concat" | "List.zip" | "List.diff" | "List.intersect" => {
             let rt = match callee {
@@ -4279,7 +4438,12 @@ fn emit_call(
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             drop_owned_ptr(&mut code, &emitted_args[1]);
-            owned_ptr(code, format!("%{prefix}_v"))
+            let elem = if callee == "List.zip" {
+                Kind::Ptr
+            } else {
+                emitted_args[0].elem
+            };
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(elem)
         }
         "List.zipAll" => {
             let x = if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
@@ -4399,7 +4563,7 @@ fn emit_call(
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             drop_owned_ptr(&mut code, &emitted_args[2]);
-            owned_ptr(code, format!("%{prefix}_v"))
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
         }
         "List.append" => {
             let elem = if emitted_args[1].kind == Kind::Int || emitted_args[1].kind == Kind::Float {
@@ -4424,7 +4588,12 @@ fn emit_call(
             } else {
                 drop_owned_ptr(&mut code, &emitted_args[1]);
             }
-            owned_ptr(code, format!("%{prefix}_v"))
+            let list_elem = if emitted_args[0].elem != Kind::Ptr {
+                emitted_args[0].elem
+            } else {
+                emitted_args[1].kind
+            };
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(list_elem)
         }
         "List.setAt" => {
             let elem = if emitted_args[2].kind == Kind::Int || emitted_args[2].kind == Kind::Float {
@@ -4449,7 +4618,7 @@ fn emit_call(
             } else {
                 drop_owned_ptr(&mut code, &emitted_args[2]);
             }
-            owned_ptr(code, format!("%{prefix}_v"))
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
         }
         "Map.empty" | "Set.empty" => {
             writeln!(code, "  %{prefix}_v = call ptr @sz_map_empty()").unwrap();
@@ -5842,12 +6011,17 @@ fn emit_call(
             }
             let ret_owned = f.map(|fun| retain_borrowed_ret(&fun.ret)).unwrap_or(false);
             let payload_owned = f.map(|fun| io_payload_owned(&fun.ret)).unwrap_or(false);
+            let ret_elem = f
+                .map(|fun| list_elem_of_type(&fun.ret))
+                .unwrap_or(Kind::Ptr);
             match ret_kind {
                 Kind::Io => {
                     io_emitted_payload(code, format!("%{prefix}_v"), payload, payload_owned)
                 }
-                Kind::Ptr if ret_owned => owned_ptr(code, format!("%{prefix}_v")),
-                other_k => val_emitted(code, format!("%{prefix}_v"), other_k),
+                Kind::Ptr if ret_owned => {
+                    owned_ptr(code, format!("%{prefix}_v")).with_elem(ret_elem)
+                }
+                other_k => val_emitted(code, format!("%{prefix}_v"), other_k).with_elem(ret_elem),
             }
         }
     }
@@ -6341,6 +6515,48 @@ def describe(xs: List[Int]): String =
         assert!(
             ir.contains("sz_list_head") && ir.contains("call i64 @sz_unbox_i64"),
             "Int head must unbox:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_head_unboxes_int_in_def() {
+        let src = r#"
+def h(xs: List[Int]): Int = List.head(xs)
+@main def main: IO[Unit] = IO.println(Str.fromInt(h([7])))
+"#;
+        let ir = gen_ir(src);
+        let head_at = ir
+            .find("call ptr @sz_list_head")
+            .expect("expected sz_list_head");
+        assert!(
+            ir[head_at..].contains("call i64 @sz_unbox_i64"),
+            "List.head of List[Int] must unbox after sz_list_head:\n{ir}"
+        );
+        assert!(
+            !ir.contains("%ret_coerce"),
+            "Int mismatch must not coerce to 0:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_map_interpolates_int_elem() {
+        let src = r#"
+@main def main: IO[Unit] = IO.println(List.join(List.map([1, 2], n => s"$n"), ","))
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_string_from_int"),
+            "map of List[Int] into interpolate must stringify via sz_string_from_int:\n{ir}"
+        );
+        let smap_at = ir
+            .find("define internal ptr @sz_smap_")
+            .expect("expected smap");
+        let smap = &ir[smap_at..];
+        let smap_end = smap.find("\n}").unwrap_or(smap.len());
+        let smap_fn = &smap[..smap_end];
+        assert!(
+            smap_fn.contains("sz_unbox_i64") && smap_fn.contains("sz_string_from_int"),
+            "smap must unbox n then stringify:\n{smap_fn}"
         );
     }
 
