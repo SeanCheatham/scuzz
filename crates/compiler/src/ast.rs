@@ -402,7 +402,8 @@ impl Expr {
             | ExprKind::IntLit(_)
             | ExprKind::FloatLit(_)
             | ExprKind::BoolLit(_)
-            | ExprKind::StrLit(_)) => leaf,
+            | ExprKind::StrLit(_)
+            | ExprKind::Placeholder) => leaf,
         };
         Ok(Expr { kind, span })
     }
@@ -504,8 +505,34 @@ impl Expr {
             | ExprKind::IntLit(_)
             | ExprKind::FloatLit(_)
             | ExprKind::BoolLit(_)
-            | ExprKind::StrLit(_) => {}
+            | ExprKind::StrLit(_)
+            | ExprKind::Placeholder => {}
         }
+    }
+}
+
+/// Binder name for a wrapped `_` hole. Starts with `_` so unused stays quiet.
+pub const PLACEHOLDER_PARAM: &str = "__ph";
+
+/// Count `_` holes. Nested lambdas keep their own holes.
+pub fn count_placeholders(e: &Expr) -> usize {
+    match &e.kind {
+        ExprKind::Placeholder => 1,
+        ExprKind::Lambda { .. } => 0,
+        _ => {
+            let mut n = 0;
+            e.for_each_child(|c| n += count_placeholders(c));
+            n
+        }
+    }
+}
+
+/// Replace each `_` hole with `name`. Nested lambdas stay unchanged.
+pub fn replace_placeholder(e: Expr, name: &str) -> Expr {
+    match e.kind {
+        ExprKind::Placeholder => Expr::new(ExprKind::Var(name.into()), e.span),
+        ExprKind::Lambda { .. } => e,
+        kind => Expr { kind, span: e.span }.map_children(|c| replace_placeholder(c, name)),
     }
 }
 
@@ -647,6 +674,8 @@ pub enum ExprKind {
         pat: Option<Box<Pattern>>,
         body: Box<Expr>,
     },
+    /// `_` in an expression. A kit or `A => B` argument wraps one hole as a lambda.
+    Placeholder,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

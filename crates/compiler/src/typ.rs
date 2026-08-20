@@ -1641,8 +1641,14 @@ fn typecheck_def(
             }
         }
     }
-    let body_ty = infer(&d.body, enums, funs, methods, &d.module, &mut env)?;
     let ret = resolve_type_in(&d.ret, enums, &d.module, &d.type_params)?;
+    let body_ty = if matches!(&ret, Type::Fun(_, _)) && crate::ast::count_placeholders(&d.body) > 0
+    {
+        let wrapped = wrap_placeholder(d.body.clone())?;
+        infer(&wrapped, enums, funs, methods, &d.module, &mut env)?
+    } else {
+        infer(&d.body, enums, funs, methods, &d.module, &mut env)?
+    };
     if !types_compat(&body_ty, &ret) {
         return Err(TypeError::At {
             msg: format!(
@@ -2363,6 +2369,7 @@ fn rewrite_lambda_arg(
     current_module: &str,
     env: &mut HashMap<String, Type>,
 ) -> Result<Expr, TypeError> {
+    let expr = as_lambda_arg(expr)?;
     if let ExprKind::Lambda {
         param,
         param_ty: ann,
@@ -2726,6 +2733,10 @@ fn infer(
                 .get(name)
                 .cloned()
                 .ok_or_else(|| TypeError::Msg(format!("unbound variable {name}"))),
+            ExprKind::Placeholder => Err(TypeError::At {
+                msg: "placeholder `_` needs a function argument (`List.map(xs, _ + 1)`)".into(),
+                span: expr.span.clone(),
+            }),
             ExprKind::Field { base, field } => {
                 let bt = infer(base, enums, funs, methods, current_module, env)?;
                 field_type(&bt, field, enums, current_module)
@@ -2933,7 +2944,17 @@ fn infer(
             }
             ExprKind::Ascribe { expr, ty } => {
                 let want = resolve_ascribe_type(ty, enums, current_module)?;
-                let got = infer(expr, enums, funs, methods, current_module, env)?;
+                let wrapped;
+                let inner = if matches!(want, Type::Fun(_, _))
+                    && crate::ast::count_placeholders(expr) > 0
+                    && !matches!(expr.kind, ExprKind::Lambda { .. })
+                {
+                    wrapped = wrap_placeholder(expr.as_ref().clone())?;
+                    &wrapped
+                } else {
+                    expr
+                };
+                let got = infer(inner, enums, funs, methods, current_module, env)?;
                 expect_ty(&got, &want)?;
                 Ok(want)
             }
@@ -3117,6 +3138,45 @@ fn infer(
     .map_err(|e| e.with_span_if_bare(&expr.span))
 }
 
+/// Wrap one `_` hole as `__ph => …`. Nested lambdas keep their own holes.
+fn wrap_placeholder(expr: Expr) -> Result<Expr, TypeError> {
+    let n = crate::ast::count_placeholders(&expr);
+    if n == 0 {
+        return Ok(expr);
+    }
+    if n > 1 {
+        return Err(TypeError::At {
+            msg: "placeholder `_` allows one hole per lambda".into(),
+            span: expr.span.clone(),
+        });
+    }
+    let span = expr.span.clone();
+    let body = crate::ast::replace_placeholder(expr, crate::ast::PLACEHOLDER_PARAM);
+    Ok(Expr::new(
+        ExprKind::Lambda {
+            param: Some(crate::ast::PLACEHOLDER_PARAM.into()),
+            param_ty: None,
+            pat: None,
+            body: Box::new(body),
+        },
+        span,
+    ))
+}
+
+fn as_lambda_arg(expr: Expr) -> Result<Expr, TypeError> {
+    if matches!(expr.kind, ExprKind::Lambda { .. }) {
+        Ok(expr)
+    } else if crate::ast::count_placeholders(&expr) > 0 {
+        wrap_placeholder(expr)
+    } else {
+        Ok(expr)
+    }
+}
+
+fn is_callback_shape(e: &Expr) -> bool {
+    matches!(e.kind, ExprKind::Lambda { .. }) || crate::ast::count_placeholders(e) > 0
+}
+
 // Arity comes from the shared typecheck context (enums, funs, methods, module, env).
 #[allow(clippy::too_many_arguments)]
 fn infer_lambda_arg(
@@ -3130,6 +3190,15 @@ fn infer_lambda_arg(
     current_module: &str,
     env: &mut HashMap<String, Type>,
 ) -> Result<Type, TypeError> {
+    let wrapped;
+    let expr = if !matches!(expr.kind, ExprKind::Lambda { .. })
+        && crate::ast::count_placeholders(expr) > 0
+    {
+        wrapped = wrap_placeholder(expr.clone())?;
+        &wrapped
+    } else {
+        expr
+    };
     if let ExprKind::Lambda {
         param,
         param_ty: ann,
@@ -3916,7 +3985,7 @@ fn infer_call(
         "Ref.update" | "Ref.updateAndGet" => {
             expect_arity(callee, &arg_tys, 2)?;
             let payload = default_cell_payload(handle_payload_ty(&arg_tys[0], "Ref")?);
-            if !matches!(&args[1].kind, ExprKind::Lambda { .. }) {
+            if !is_callback_shape(&args[1]) {
                 return Err(TypeError::Msg(format!(
                     "{callee} callback must be a lambda"
                 )));
@@ -4009,7 +4078,7 @@ fn infer_call(
         "IO.foreach" | "IO.foreachDiscard" => {
             expect_arity(callee, &arg_tys, 2)?;
             list_elem(&arg_tys[0])?;
-            if !matches!(&args[1].kind, ExprKind::Lambda { .. }) {
+            if !is_callback_shape(&args[1]) {
                 return Err(TypeError::Msg(format!(
                     "{callee} callback must be a lambda"
                 )));
@@ -4040,7 +4109,7 @@ fn infer_call(
                 return Err(TypeError::Msg("Resource.make acquire must be IO[_]".into()));
             };
             let payload = (**inner).clone();
-            if !matches!(&args[1].kind, ExprKind::Lambda { .. }) {
+            if !is_callback_shape(&args[1]) {
                 return Err(TypeError::Msg(
                     "Resource.make callback must be a lambda".into(),
                 ));
@@ -4057,7 +4126,7 @@ fn infer_call(
         "Resource.use" => {
             expect_arity(callee, &arg_tys, 2)?;
             let payload = handle_payload_ty(&arg_tys[0], "Resource")?;
-            if !matches!(&args[1].kind, ExprKind::Lambda { .. }) {
+            if !is_callback_shape(&args[1]) {
                 return Err(TypeError::Msg(
                     "Resource.use callback must be a lambda".into(),
                 ));
@@ -6684,6 +6753,7 @@ fn elaborate_lambda_arg(
     env: &mut HashMap<String, Type>,
     tparams: &[String],
 ) -> Result<Expr, TypeError> {
+    let expr = as_lambda_arg(expr)?;
     if let ExprKind::Lambda {
         param,
         param_ty: ann,
@@ -6744,6 +6814,11 @@ fn elaborate_expr(
     expected: Option<&Type>,
     tparams: &[String],
 ) -> Result<Expr, TypeError> {
+    let expr = if matches!(expected, Some(Type::Fun(_, _))) {
+        as_lambda_arg(expr)?
+    } else {
+        expr
+    };
     let span = expr.span.clone();
     match expr.kind {
         ExprKind::AdtConstruct {
@@ -8398,6 +8473,69 @@ def apply(f: Int => String, n: Int): String = f(n)
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Int => String param");
+    }
+
+    #[test]
+    fn typechecks_placeholder_add_on_list_map() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map(List.map([1, 2], _ + 1), Str.fromInt(_)), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("placeholder `_ + 1` and `Str.fromInt(_)` on List.map");
+    }
+
+    #[test]
+    fn typechecks_placeholder_filter() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join(List.filter(["a", "b", "c"], _ != "b"), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("placeholder `_ != \"b\"` on List.filter");
+    }
+
+    #[test]
+    fn typechecks_placeholder_on_user_fun() {
+        let src = r#"
+def apply(f: Int => String, n: Int): String = f(n)
+@main def main: IO[Unit] =
+  IO.println(apply(Str.fromInt(_), 1))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("placeholder on A => B param");
+    }
+
+    #[test]
+    fn typechecks_placeholder_identity() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map(["a", "b"], _), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("placeholder `_` identity on List.map");
+    }
+
+    #[test]
+    fn rejects_two_placeholder_holes() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map([1, 2], _ + _), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(err.message().contains("one hole"), "{}", err.message());
+    }
+
+    #[test]
+    fn rejects_placeholder_without_function_expected() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(_ + 1)
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(err.message().contains("placeholder"), "{}", err.message());
     }
 
     #[test]

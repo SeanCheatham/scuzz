@@ -902,7 +902,8 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         | ExprKind::Var(_)
         | ExprKind::IntLit(_)
         | ExprKind::FloatLit(_)
-        | ExprKind::BoolLit(_) => {}
+        | ExprKind::BoolLit(_)
+        | ExprKind::Placeholder => {}
         ExprKind::Field { base, .. } => collect_strings(base, out),
         ExprKind::MethodCall { receiver, args, .. } => {
             collect_strings(receiver, out);
@@ -2238,6 +2239,7 @@ fn emit_expr(
                 .unwrap_or_else(|| Local::borrow("null", Kind::Ptr));
             val_emitted(String::new(), loc.value, loc.kind).with_elem(loc.elem)
         }
+        ExprKind::Placeholder => panic!("internal: unresolved placeholder `_` in codegen"),
         ExprKind::Field { .. } => panic!("internal: unresolved field access in codegen"),
         ExprKind::MethodCall { .. } => panic!("internal: unresolved method call in codegen"),
         ExprKind::Ascribe { expr, ty } => {
@@ -13110,6 +13112,19 @@ enum Opt[T]:
         assert!(
             ir.contains("call void @sz_panic"),
             "unpack miss panics:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_placeholder_list_map() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map(List.map([1, 2], _ + 1), Str.fromInt(_)), ","))
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_list_map"),
+            "placeholder List.map must emit sz_list_map:\n{ir}"
         );
     }
 

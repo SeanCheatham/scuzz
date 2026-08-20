@@ -192,6 +192,7 @@ fn classify(
         | Token::ColonColon
         | Token::Dot
         | Token::Eq => Some((TY_OPERATOR, 0)),
+        Token::Underscore => Some((TY_PARAMETER, 0)),
         Token::Ident(name) => Some(classify_ident(name, prev, next)),
         _ => None,
     }

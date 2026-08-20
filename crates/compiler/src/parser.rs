@@ -2215,12 +2215,20 @@ impl Parser {
                 self.bump();
                 self.parse_interpolate(parts, start)
             }
-            Token::Underscore if self.bare_arrow_is_lambda => {
-                self.bump();
-                self.expect(&Token::Arrow)?;
-                let body = self.parse_block()?;
-                let span = start.cover(&body.span);
-                Ok(self.mk_lambda(None, None, None, body, span))
+            Token::Underscore => {
+                let end = self.bump().span;
+                if matches!(self.peek(), Token::Arrow) {
+                    if !self.bare_arrow_is_lambda {
+                        return Err(
+                            self.err("`_ =>` is a lambda; use `_` as a hole in a kit argument")
+                        );
+                    }
+                    self.bump();
+                    let body = self.parse_block()?;
+                    let span = start.cover(&body.span);
+                    return Ok(self.mk_lambda(None, None, None, body, span));
+                }
+                Ok(self.mk(ExprKind::Placeholder, start.cover(&end)))
             }
             Token::Ident(name) if name == "IO" => {
                 self.bump();
@@ -2988,6 +2996,64 @@ def x(): Float = 1.5e1 + 1e-3
                 ExprKind::Lambda { param: Some(n), .. } if n == "self"
             )),
             other => panic!("expected call, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_placeholder_hole() {
+        let src = r#"@main def main: IO[Unit] = IO.println(List.join(List.map([1], _ + 1), ","))"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::IoPrintln(arg) => match &arg.kind {
+                ExprKind::Call { callee, args } if callee == "List.join" => match &args[0].kind {
+                    ExprKind::Call { callee, args } if callee == "List.map" => {
+                        match &args[1].kind {
+                            ExprKind::Binary { op, left, right } => {
+                                assert!(matches!(op, crate::ast::BinOp::Add), "expected `_ + 1`");
+                                assert!(
+                                    matches!(left.kind, ExprKind::Placeholder),
+                                    "left hole: {:?}",
+                                    left.kind
+                                );
+                                assert!(
+                                    matches!(right.kind, ExprKind::IntLit(1)),
+                                    "right 1: {:?}",
+                                    right.kind
+                                );
+                            }
+                            other => panic!("expected `_ + 1`, got {other:?}"),
+                        }
+                    }
+                    other => panic!("expected List.map, got {other:?}"),
+                },
+                other => panic!("expected List.join, got {other:?}"),
+            },
+            other => panic!("expected println, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_placeholder_call_arg() {
+        let src = r#"@main def main: IO[Unit] = IO.println(List.join(List.map([1], Str.fromInt(_)), ","))"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::IoPrintln(arg) => match &arg.kind {
+                ExprKind::Call { args, .. } => match &args[0].kind {
+                    ExprKind::Call { args, .. } => match &args[1].kind {
+                        ExprKind::Call { callee, args } if callee == "Str.fromInt" => {
+                            assert!(
+                                matches!(args[0].kind, ExprKind::Placeholder),
+                                "expected Str.fromInt(_), got {:?}",
+                                args[0].kind
+                            );
+                        }
+                        other => panic!("expected Str.fromInt(_), got {other:?}"),
+                    },
+                    other => panic!("expected List.map, got {other:?}"),
+                },
+                other => panic!("expected List.join, got {other:?}"),
+            },
+            other => panic!("expected println, got {other:?}"),
         }
     }
 

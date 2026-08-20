@@ -284,6 +284,12 @@ fn collect_kit_locals(expr: &Expr, offset: usize, out: &mut Vec<(String, Type)>)
                         collect_kit_locals(body, offset, out);
                         continue;
                     }
+                    if crate::ast::count_placeholders(a) > 0
+                        && a.span.start <= offset
+                        && offset <= a.span.end
+                    {
+                        out.push(("_".into(), pty));
+                    }
                 }
                 collect_kit_locals(a, offset, out);
             }
@@ -2490,6 +2496,18 @@ enum Opt[T]:
 "#;
         let h = hover_src(src, "product");
         assert!(h.contains("List.product(xs: List[Int]): Int"), "{h}");
+    }
+
+    #[test]
+    fn hovers_placeholder_list_map() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map([1], _ + 1), ","))
+"#;
+        let h = hover_src(src, "map");
+        assert!(
+            h.contains("List.map(xs: List[T], f: T => U): List[U]"),
+            "{h}"
+        );
     }
 
     #[test]

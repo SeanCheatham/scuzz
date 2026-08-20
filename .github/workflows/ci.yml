@@ -89,6 +89,10 @@ jobs:
         run: |
           cargo run -p scuzz -- run examples/kernel | tee /tmp/kernel.out
           grep -q "adt:red" /tmp/kernel.out
+          grep -q "phmap:1,2,3" /tmp/kernel.out
+          grep -q "phadd:2,3,4" /tmp/kernel.out
+          grep -q "phfilt:a,c" /tmp/kernel.out
+          grep -q "phid:a,b" /tmp/kernel.out
           grep -q "guard:hit" /tmp/kernel.out
           grep -q "guard:pos:3" /tmp/kernel.out
           grep -q "guard:nonpos:0" /tmp/kernel.out
