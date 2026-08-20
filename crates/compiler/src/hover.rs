@@ -1034,11 +1034,11 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Net.httpGet", "Net.httpGet(url: String): IO[String]"),
     (
         "Net.serveOnce",
-        "Net.serveOnce(port: Int, handle: String => IO[Unit]): IO[Unit]",
+        "Net.serveOnce(port: Int, handle: String => IO[String]): IO[Unit]",
     ),
     (
         "Net.serve",
-        "Net.serve(port: Int, handle: String => IO[Unit]): IO[Unit]",
+        "Net.serve(port: Int, handle: String => IO[String]): IO[Unit]",
     ),
     ("Impurity.runKit", "Impurity.runKit(): IO[Unit]"),
     (
@@ -1367,7 +1367,7 @@ record Point(x: Int, y: Int)
             ("Sys.kill", "Sys.kill(1)"),
             ("Sys.getenv", "Sys.getenv(\"HOME\")"),
             ("Random.nextInt", "Random.nextInt(10)"),
-            ("Net.serveOnce", "Net.serveOnce(8080, s => IO.println(s))"),
+            ("Net.serveOnce", "Net.serveOnce(8080, s => IO.pure(s))"),
             ("Impurity.runKit", "Impurity.runKit()"),
             ("Signal.getStr", "Signal.getStr(Signal.str(\"x\"))"),
             ("Signal.setStr", "Signal.setStr(Signal.str(\"x\"), \"y\")"),

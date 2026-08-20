@@ -493,7 +493,7 @@ static int dns_parse_answer(const uint8_t *buf, size_t n, uint16_t id,
     return 3; /* TC */
   rcode = (uint16_t)(flags & 0x000F);
   if (rcode == 3)
-    return 0; /* NXDOMAIN */
+    return 4; /* NXDOMAIN: this type done; wait for the twin query */
   if (rcode != 0)
     return 4; /* SERVFAIL / FORMERR / REFUSED: this type done */
   qd = rd16(buf + 4);
@@ -618,6 +618,8 @@ static void addr_set_v6(struct sockaddr_storage *ss, socklen_t *len,
 #define HE_WRITE_MS 1000
 #define HE_BODY_MAX (1024u * 1024u)
 
+/* Close sockets and drop URL/buffers. A second call is a no-op. Cancel and
+ * success both run this through IO.ensure. */
 static void get_free(GetSt *st) {
   if (!st)
     return;
@@ -636,9 +638,16 @@ static void get_free(GetSt *st) {
     st->dns_fd = -1;
   }
   sz_free(st->req);
+  st->req = NULL;
   sz_free(st->acc);
+  st->acc = NULL;
   sz_release(st->url);
   st->url = NULL;
+}
+
+static void *get_cleanup(void *env) {
+  get_free((GetSt *)env);
+  return NULL;
 }
 
 static void *get_start(void *env) {
@@ -1381,11 +1390,6 @@ static SzIo *get_finish(void *body, void *env) {
   return pure_drop(body);
 }
 
-static SzIo *get_on_err(SzError *err, void *env) {
-  get_free((GetSt *)env);
-  return fail_drop(err);
-}
-
 static SzIo *get_poll_dns(void *value, void *env);
 
 static SzIo *get_unwrap_dns(void *value, void *env) {
@@ -1465,9 +1469,12 @@ static SzIo *get_after_dispatch(void *value, void *env) {
   io = fm_drop(sz_io_delay(get_start, st), get_after_start, st);
   io = fm_drop(io, get_after_connect, st);
   {
-    SzIo *handled = handle_drop(io, get_on_err, st);
+    SzIo *fin = sz_io_delay(get_cleanup, st);
+    SzIo *ens = sz_io_ensure(io, fin);
+    sz_release(io);
+    sz_release(fin);
     sz_release(st);
-    return handled;
+    return ens;
   }
 }
 
@@ -1532,6 +1539,8 @@ static void serve_close_fds(ServeSt *st) {
   }
 }
 
+/* Close listen/conn fds and drop body/handler env. A second call is a no-op.
+ * Cancel and success both run this through IO.ensure. */
 static void serve_free(ServeSt *st) {
   if (!st)
     return;
@@ -1540,6 +1549,11 @@ static void serve_free(ServeSt *st) {
   st->body = NULL;
   sz_release(st->henv);
   st->henv = NULL;
+}
+
+static void *serve_cleanup(void *env) {
+  serve_free((ServeSt *)env);
+  return NULL;
 }
 
 static int parse_get_path(const char *req, char *path, size_t path_sz) {
@@ -1623,12 +1637,20 @@ static void *serve_ensure_listen(void *env) {
     r->as.err = sz_error_new(6, "Net.serve: port must be 1..65535");
     return r;
   }
-  if (st->listen_fd >= 0) {
+  if (st->listen_fd >= 0 || st->listen6_fd >= 0) {
     r->is_err = 0;
     return r;
   }
-  st->listen_fd = serve_bind_v4(port);
-  st->listen6_fd = serve_bind_v6(port);
+  {
+    int fd4 = serve_bind_v4(port);
+    int fd6 = serve_bind_v6(port);
+    if (st->listen_fd >= 0)
+      close(st->listen_fd);
+    st->listen_fd = fd4;
+    if (st->listen6_fd >= 0)
+      close(st->listen6_fd);
+    st->listen6_fd = fd6;
+  }
   if (st->listen_fd < 0 && st->listen6_fd < 0) {
     serve_close_fds(st);
     r->is_err = 1;
@@ -1966,6 +1988,7 @@ static SzIo *serve_after_write(void *value, void *env) {
 
 static SzIo *serve_after_body(void *body, void *env) {
   ServeSt *st = (ServeSt *)env;
+  sz_release(st->body);
   st->body = body;
   st->woff = 0;
   if (sz_testrt_net_is_fake())
@@ -1998,11 +2021,6 @@ static SzIo *serve_round(ServeSt *st) {
   return fm_drop(prog, serve_after_path, st);
 }
 
-static SzIo *serve_on_err(SzError *err, void *env) {
-  serve_free((ServeSt *)env);
-  return fail_drop(err);
-}
-
 typedef struct ServeSpec {
   int64_t port;
   int64_t n;
@@ -2026,9 +2044,13 @@ static SzIo *serve_after_kick(void *ignored, void *env) {
   sz_retain(pack->left);
   st->henv = pack->left;
   {
-    SzIo *io = handle_drop(serve_round(st), serve_on_err, st);
+    SzIo *io = serve_round(st);
+    SzIo *fin = sz_io_delay(serve_cleanup, st);
+    SzIo *ens = sz_io_ensure(io, fin);
+    sz_release(io);
+    sz_release(fin);
     sz_release(st);
-    return io;
+    return ens;
   }
 }
 

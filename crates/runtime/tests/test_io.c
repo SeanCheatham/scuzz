@@ -342,6 +342,51 @@ static void *two_live_gets(void *arg) {
   return live_get_client(arg);
 }
 
+static void *live_get_client_v6(void *arg) {
+  int port = *(int *)arg;
+  int fd = -1;
+  int i;
+  struct sockaddr_in6 addr;
+  char req[128];
+  static char buf[1024];
+  ssize_t n;
+  size_t total = 0;
+  memset(buf, 0, sizeof buf);
+  memset(&addr, 0, sizeof addr);
+  addr.sin6_family = AF_INET6;
+  addr.sin6_port = htons((uint16_t)port);
+  if (inet_pton(AF_INET6, "::1", &addr.sin6_addr) != 1)
+    return NULL;
+  snprintf(req, sizeof req,
+           "GET /x HTTP/1.0\r\nHost: [::1]\r\nConnection: close\r\n\r\n");
+  for (i = 0; i < 50; i++) {
+    sleep_us(10000);
+    fd = socket(AF_INET6, SOCK_STREAM, 0);
+    if (fd < 0)
+      continue;
+    if (connect(fd, (struct sockaddr *)&addr, sizeof addr) == 0)
+      break;
+    close(fd);
+    fd = -1;
+  }
+  if (fd < 0)
+    return NULL;
+  if (write(fd, req, strlen(req)) < 0) {
+    close(fd);
+    return NULL;
+  }
+  while (total + 1 < sizeof buf &&
+         (n = read(fd, buf + total, sizeof buf - 1 - total)) > 0)
+    total += (size_t)n;
+  close(fd);
+  return buf;
+}
+
+static void *two_live_gets_v6(void *arg) {
+  live_get_client_v6(arg);
+  return live_get_client_v6(arg);
+}
+
 static void *delayed_live_get(void *arg) {
   sleep_us(1200000);
   return live_get_client(arg);
@@ -812,6 +857,74 @@ static void *dns_he_dead_a(void *arg) {
       memcpy(buf + n, aaaa, 28);
       if (sendto(fd, buf, (size_t)n + 28, 0, (struct sockaddr *)&from, flen) < 0)
         return NULL;
+    }
+  }
+  return NULL;
+}
+
+/* AAAA NXDOMAIN first, then A 127.0.0.1. */
+static void *dns_aaaa_nxdomain_then_a(void *arg) {
+  int fd = *(int *)arg;
+  uint8_t buf[512];
+  uint8_t held[512];
+  uint8_t ans[16];
+  struct sockaddr_in from;
+  struct sockaddr_in held_from;
+  socklen_t flen;
+  socklen_t held_flen = 0;
+  ssize_t n;
+  ssize_t held_n = 0;
+  int got_aaaa = 0;
+  int got_a = 0;
+  memset(ans, 0, sizeof ans);
+  ans[0] = 0xC0;
+  ans[1] = 0x0C;
+  ans[3] = 1;
+  ans[5] = 1;
+  ans[9] = 60;
+  ans[11] = 4;
+  ans[12] = 127;
+  ans[15] = 1;
+  while (!got_aaaa || !got_a) {
+    flen = sizeof from;
+    n = recvfrom(fd, buf, sizeof buf, 0, (struct sockaddr *)&from, &flen);
+    if (n < 12)
+      return NULL;
+    if (dns_qtype_of(buf, n) == 28) {
+      dns_set_qr(buf, 0);
+      buf[3] = (uint8_t)((buf[3] & 0xF0) | 3);
+      if (sendto(fd, buf, (size_t)n, 0, (struct sockaddr *)&from, flen) < 0)
+        return NULL;
+      got_aaaa = 1;
+      if (held_n >= 12) {
+        if ((size_t)held_n + 16 > sizeof held)
+          return NULL;
+        dns_set_qr(held, 1);
+        memcpy(held + held_n, ans, 16);
+        if (sendto(fd, held, (size_t)held_n + 16, 0,
+                   (struct sockaddr *)&held_from, held_flen) < 0)
+          return NULL;
+        got_a = 1;
+        held_n = 0;
+      }
+    } else if (dns_qtype_of(buf, n) == 1) {
+      if (!got_aaaa) {
+        if ((size_t)n > sizeof held)
+          return NULL;
+        memcpy(held, buf, (size_t)n);
+        held_n = n;
+        held_from = from;
+        held_flen = flen;
+      } else {
+        if ((size_t)n + 16 > sizeof buf)
+          return NULL;
+        dns_set_qr(buf, 1);
+        memcpy(buf + n, ans, 16);
+        if (sendto(fd, buf, (size_t)n + 16, 0, (struct sockaddr *)&from, flen) <
+            0)
+          return NULL;
+        got_a = 1;
+      }
     }
   }
   return NULL;
@@ -2658,6 +2771,31 @@ int main(void) {
 
     sz_alloc_stats(&base_bytes, &base_count);
     {
+      SzString *url = sz_string_from_cstr("http://192.0.2.1:9/x");
+      r = sz_io_unsafe_run(
+          race_drop(sz_net_http_get(url), sz_io_sleep_ms(20)));
+      sz_release(url);
+      assert(r.ok);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzString *henv = sz_string_from_cstr("henv");
+      r = sz_io_unsafe_run(
+          race_drop(sz_net_serve(18601, serve_path_ok, henv),
+                    sz_io_sleep_ms(20)));
+      sz_release(henv);
+      assert(r.ok);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
       SzString *cmd = sz_string_from_cstr("true");
       SzIo *io = sz_sys_exec(cmd);
       sz_release(cmd);
@@ -3748,6 +3886,17 @@ int main(void) {
     assert(strcmp(sz_testrt_net_last_serve_body(), "ok:/b") == 0);
     assert(sz_testrt_net_serve_pending() == 0);
 
+    sz_testrt_net_set_last_serve_body(NULL);
+    sz_alloc_stats(&base_bytes, &base_count);
+    sz_testrt_net_inject_request("/a");
+    sz_testrt_net_queue_request("/b");
+    r = sz_io_unsafe_run(sz_net_serve(8080, serve_path_ok, NULL));
+    assert(r.ok);
+    sz_testrt_net_set_last_serve_body(NULL);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
     g_serve_fail_n = 0;
     sz_testrt_net_inject_request("/a");
     sz_testrt_net_queue_request("/b");
@@ -4392,6 +4541,60 @@ int main(void) {
     assert(strcmp(sz_string_cstr((SzString *)pair->right), "ok:/x") == 0);
   }
 
+  /* v4 listen occupied: persistent serve stays on ::1 for two GETs. */
+  {
+    int port = 18603;
+    int v4hold = -1;
+    int v6probe = -1;
+    int one = 1;
+    struct sockaddr_in a4;
+    struct sockaddr_in6 a6;
+    pthread_t th;
+    void *ret = NULL;
+    v6probe = socket(AF_INET6, SOCK_STREAM, 0);
+    if (v6probe >= 0) {
+      setsockopt(v6probe, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+#ifdef IPV6_V6ONLY
+      setsockopt(v6probe, IPPROTO_IPV6, IPV6_V6ONLY, &one, sizeof one);
+#endif
+      memset(&a6, 0, sizeof a6);
+      a6.sin6_family = AF_INET6;
+      a6.sin6_port = htons((uint16_t)port);
+      if (inet_pton(AF_INET6, "::1", &a6.sin6_addr) == 1 &&
+          bind(v6probe, (struct sockaddr *)&a6, sizeof a6) == 0)
+        listen(v6probe, 1);
+      else {
+        close(v6probe);
+        v6probe = -1;
+      }
+    }
+    if (v6probe >= 0) {
+      close(v6probe);
+      v4hold = socket(AF_INET, SOCK_STREAM, 0);
+      if (v4hold >= 0) {
+        setsockopt(v4hold, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+        memset(&a4, 0, sizeof a4);
+        a4.sin_family = AF_INET;
+        a4.sin_port = htons((uint16_t)port);
+        a4.sin_addr.s_addr = inet_addr("127.0.0.1");
+        if (bind(v4hold, (struct sockaddr *)&a4, sizeof a4) != 0 ||
+            listen(v4hold, 1) != 0) {
+          close(v4hold);
+          v4hold = -1;
+        }
+      }
+    }
+    if (v4hold >= 0) {
+      pthread_create(&th, NULL, two_live_gets_v6, &port);
+      r = sz_io_unsafe_run(race_drop(sz_net_serve(port, serve_path_ok, NULL),
+                                     sz_io_sleep_ms(400)));
+      pthread_join(th, &ret);
+      close(v4hold);
+      assert(r.ok);
+      assert(ret && strstr((char *)ret, "ok:/x") != NULL);
+    }
+  }
+
   /* IPv6 literals skip DNS: http://[::1]:port/x */
   {
     pthread_t th;
@@ -4510,6 +4713,40 @@ int main(void) {
     assert(strcmp(sz_string_cstr((SzString *)r.value), "ok:/x") == 0);
   }
 
+  /* AAAA NXDOMAIN first, then A 127.0.0.1; GET uses the A record. */
+  {
+    pthread_t th_dns;
+    pthread_t th_http;
+    int dns_fd;
+    int http_port = 18604;
+    struct sockaddr_in addr;
+    socklen_t alen = sizeof addr;
+    char url[80];
+    void *http_ret = NULL;
+    dns_fd = socket(AF_INET, SOCK_DGRAM, 0);
+    assert(dns_fd >= 0);
+    memset(&addr, 0, sizeof addr);
+    addr.sin_family = AF_INET;
+    addr.sin_port = 0;
+    assert(inet_pton(AF_INET, "127.0.0.1", &addr.sin_addr) == 1);
+    assert(bind(dns_fd, (struct sockaddr *)&addr, sizeof addr) == 0);
+    alen = sizeof addr;
+    assert(getsockname(dns_fd, (struct sockaddr *)&addr, &alen) == 0);
+    sz_net_test_set_nameserver("127.0.0.1", (int)ntohs(addr.sin_port));
+    pthread_create(&th_http, NULL, ipv4_http_once, &http_port);
+    pthread_create(&th_dns, NULL, dns_aaaa_nxdomain_then_a, &dns_fd);
+    snprintf(url, sizeof url, "http://scuzz.test:%d/x", http_port);
+    r = sz_io_unsafe_run(fm_drop(sz_io_sleep_ms(30), after_sleep_http,
+                                      sz_string_from_cstr(url)));
+    pthread_join(th_dns, NULL);
+    pthread_join(th_http, &http_ret);
+    close(dns_fd);
+    sz_net_test_set_nameserver(NULL, 0);
+    assert(r.ok);
+    assert(http_ret != NULL);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "ok:/x") == 0);
+  }
+
   /* TEST-NET-1 blackhole: connect fails in ~1s instead of hanging on the OS. */
   {
     int64_t t0 = sz_clock_monotonic_ms_sync();
@@ -4522,6 +4759,47 @@ int main(void) {
     sz_error_free(r.error);
     assert(t1 - t0 >= 900);
     assert(t1 - t0 < 2500);
+  }
+
+  /* Cancelled GET drops the URL and sockets. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzString *url = sz_string_from_cstr("http://192.0.2.1:9/x");
+      r = sz_io_unsafe_run(
+          race_drop(sz_net_http_get(url), sz_io_sleep_ms(20)));
+      sz_release(url);
+      assert(r.ok);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
+  /* Cancelled serve drops handler env; the port can accept again. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    int port = 18602;
+    pthread_t th;
+    void *ret = NULL;
+    SzString *henv;
+    sz_alloc_stats(&base_bytes, &base_count);
+    henv = sz_string_from_cstr("henv");
+    r = sz_io_unsafe_run(
+        race_drop(sz_net_serve(port, serve_path_ok, henv), sz_io_sleep_ms(20)));
+    sz_release(henv);
+    assert(r.ok);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+    pthread_create(&th, NULL, live_get_client, &port);
+    r = sz_io_unsafe_run(sz_net_serve_once(port, serve_path_ok, NULL));
+    pthread_join(th, &ret);
+    assert(r.ok);
+    assert(ret && strstr((char *)ret, "ok:/x") != NULL);
   }
 
   /* Silent nameserver: DNS fails in ~1s instead of parking on UDP recv. */
