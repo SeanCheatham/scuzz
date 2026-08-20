@@ -62,6 +62,7 @@ pub fn parse_file(source: &str, file: &str) -> Result<Program, ParseError> {
         file: file.to_string(),
         module,
         source: source.to_string(),
+        bare_arrow_is_lambda: true,
     };
     p.parse_program()
 }
@@ -112,6 +113,7 @@ pub fn parse_file_recovering(source: &str, file: &str) -> (Program, Vec<ParseErr
         file: file.to_string(),
         module,
         source: source.to_string(),
+        bare_arrow_is_lambda: true,
     };
     p.parse_program_recovering()
 }
@@ -357,6 +359,8 @@ struct Parser {
     file: String,
     module: String,
     source: String,
+    /// When false, a bare ident or `_` before `=>` is not a lambda.
+    bare_arrow_is_lambda: bool,
 }
 
 impl Parser {
@@ -945,7 +949,7 @@ impl Parser {
         }
         let methods = if matches!(self.peek(), Token::Colon) {
             self.bump();
-            let methods = self.parse_trailing_methods(&type_params)?;
+            let methods = self.parse_indented_methods(&type_params)?;
             if methods.is_empty() {
                 return Err(self.err(format!("record {name} has no methods")));
             }
@@ -978,7 +982,7 @@ impl Parser {
         };
         self.expect(&Token::Colon)?;
         let mut methods: Vec<crate::ast::TraitMethod> = Vec::new();
-        while matches!(self.peek(), Token::Def) {
+        while matches!(self.peek(), Token::Def) && self.peek_column() > 1 {
             let method = self.parse_trait_method(&type_params)?;
             if methods.iter().any(|m| m.name == method.name) {
                 return Err(self.err(format!("duplicate method {} in trait {name}", method.name)));
@@ -1020,10 +1024,7 @@ impl Parser {
         self.expect(&Token::For)?;
         let (for_type, _) = self.expect_ident()?;
         self.expect(&Token::Colon)?;
-        let mut methods = Vec::new();
-        while matches!(self.peek(), Token::Def) {
-            methods.push(self.parse_impl_method(&[])?);
-        }
+        let methods = self.parse_indented_methods(&[])?;
         if methods.is_empty() {
             return Err(self.err(format!("impl {trait_name} for {for_type} has no methods")));
         }
@@ -1051,18 +1052,7 @@ impl Parser {
         Ok(args)
     }
 
-    fn parse_trailing_methods(
-        &mut self,
-        type_params: &[String],
-    ) -> Result<Vec<ImplMethod>, ParseError> {
-        let mut methods = Vec::new();
-        while matches!(self.peek(), Token::Def) {
-            methods.push(self.parse_impl_method(type_params)?);
-        }
-        Ok(methods)
-    }
-
-    /// Enum methods sit in the colon body (`  def …`). A column-0 `def` is the next free def.
+    /// Methods sit in the colon body (`  def …`). A column-0 `def` is the next free def.
     fn parse_indented_methods(
         &mut self,
         type_params: &[String],
@@ -1531,7 +1521,7 @@ impl Parser {
             match self.peek() {
                 Token::Dot => {
                     self.bump();
-                    let (method, _) = self.expect_ident()?;
+                    let (method, method_span) = self.expect_ident()?;
                     match method.as_str() {
                         "flatMap" => {
                             self.expect(&Token::LParen)?;
@@ -1562,11 +1552,12 @@ impl Parser {
                             );
                         }
                         "attempt" => {
+                            let mut span = expr.span.clone().cover(&method_span);
                             if matches!(self.peek(), Token::LParen) {
                                 self.bump();
-                                self.expect(&Token::RParen)?;
+                                let end = self.expect(&Token::RParen)?;
+                                span = span.cover(&end);
                             }
-                            let span = expr.span.clone();
                             expr = self.mk(
                                 ExprKind::Attempt {
                                     inner: Box::new(expr),
@@ -1592,7 +1583,7 @@ impl Parser {
                                     span,
                                 );
                             } else {
-                                let span = expr.span.clone();
+                                let span = expr.span.clone().cover(&method_span);
                                 expr = self.mk(
                                     ExprKind::Field {
                                         base: Box::new(expr),
@@ -1637,7 +1628,11 @@ impl Parser {
             let pattern = self.parse_or_pattern()?;
             let guard = if matches!(self.peek(), Token::If) {
                 self.bump();
-                Some(self.parse_expr()?)
+                let saved = self.bare_arrow_is_lambda;
+                self.bare_arrow_is_lambda = false;
+                let g = self.parse_expr();
+                self.bare_arrow_is_lambda = saved;
+                Some(g?)
             } else {
                 None
             };
@@ -1886,6 +1881,9 @@ impl Parser {
     }
 
     fn try_paren_lambda(&mut self, start: Span) -> Option<Expr> {
+        if !self.bare_arrow_is_lambda {
+            return None;
+        }
         let saved = self.i;
         match self.parse_paren_lambda_after_lparen(start) {
             Ok(e) => Some(e),
@@ -1915,22 +1913,28 @@ impl Parser {
 
     fn parse_args(&mut self) -> Result<Vec<Expr>, ParseError> {
         self.expect(&Token::LParen)?;
-        let mut args = Vec::new();
-        if !matches!(self.peek(), Token::RParen) {
-            loop {
-                args.push(self.parse_arg()?);
-                if matches!(self.peek(), Token::Comma) {
-                    self.bump();
-                    if matches!(self.peek(), Token::RParen) {
-                        break;
+        let saved = self.bare_arrow_is_lambda;
+        self.bare_arrow_is_lambda = true;
+        let result = (|| {
+            let mut args = Vec::new();
+            if !matches!(self.peek(), Token::RParen) {
+                loop {
+                    args.push(self.parse_arg()?);
+                    if matches!(self.peek(), Token::Comma) {
+                        self.bump();
+                        if matches!(self.peek(), Token::RParen) {
+                            break;
+                        }
+                        continue;
                     }
-                    continue;
+                    break;
                 }
-                break;
             }
-        }
-        self.expect(&Token::RParen)?;
-        Ok(args)
+            self.expect(&Token::RParen)?;
+            Ok(args)
+        })();
+        self.bare_arrow_is_lambda = saved;
+        result
     }
 
     fn parse_arg(&mut self) -> Result<Expr, ParseError> {
@@ -1979,7 +1983,7 @@ impl Parser {
                 self.bump();
                 if matches!(self.peek(), Token::RParen) {
                     let end = self.bump().span;
-                    if matches!(self.peek(), Token::Arrow) {
+                    if self.bare_arrow_is_lambda && matches!(self.peek(), Token::Arrow) {
                         self.bump();
                         let body = self.parse_block()?;
                         let span = start.cover(&body.span);
@@ -1990,7 +1994,11 @@ impl Parser {
                 if let Some(lam) = self.try_paren_lambda(start.clone()) {
                     return Ok(lam);
                 }
-                let inner = self.parse_expr()?;
+                let saved = self.bare_arrow_is_lambda;
+                self.bare_arrow_is_lambda = true;
+                let inner = self.parse_expr();
+                self.bare_arrow_is_lambda = saved;
+                let inner = inner?;
                 self.expect(&Token::RParen)?;
                 Ok(inner)
             }
@@ -2034,7 +2042,7 @@ impl Parser {
                 self.bump();
                 self.parse_interpolate(parts, start)
             }
-            Token::Underscore => {
+            Token::Underscore if self.bare_arrow_is_lambda => {
                 self.bump();
                 self.expect(&Token::Arrow)?;
                 let body = self.parse_block()?;
@@ -2225,7 +2233,7 @@ impl Parser {
             }
             Token::Ident(name) => {
                 self.bump();
-                if matches!(self.peek(), Token::Arrow) {
+                if self.bare_arrow_is_lambda && matches!(self.peek(), Token::Arrow) {
                     self.bump();
                     let body = self.parse_block()?;
                     let span = start.cover(&body.span);
@@ -2281,20 +2289,27 @@ impl Parser {
         for part in parts {
             match part {
                 InterpTok::Lit(s) => out.push(InterpPart::Lit(s)),
-                InterpTok::Ident(name) => out.push(InterpPart::Expr(
-                    self.mk(ExprKind::Var(name), start.clone()),
-                )),
-                InterpTok::Brace(body) => {
-                    let tokens = lex(&body).map_err(|e| ParseError::At {
+                InterpTok::Ident { name, start, end } => out.push(InterpPart::Expr(self.mk(
+                    ExprKind::Var(name),
+                    Span::new(self.file.clone(), start, end),
+                ))),
+                InterpTok::Brace { body, start, end } => {
+                    let mut tokens = lex(&body).map_err(|e| ParseError::At {
                         msg: e.to_string(),
-                        span: start.clone(),
+                        span: Span::new(self.file.clone(), start, end),
                     })?;
+                    for t in &mut tokens {
+                        t.span.start += start;
+                        t.span.end += start;
+                        t.span.file = self.file.clone();
+                    }
                     let mut nested = Parser {
                         tokens,
                         i: 0,
                         file: self.file.clone(),
                         module: self.module.clone(),
-                        source: body.clone(),
+                        source: self.source.clone(),
+                        bare_arrow_is_lambda: true,
                     };
                     let e = nested.parse_expr()?;
                     if !matches!(nested.peek(), Token::Eof) {
@@ -2400,6 +2415,38 @@ def x(): Float = 1.5e1 + 1e-3
             },
             other => panic!("expected for, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_interp_hole_var_span_is_the_name() {
+        let src = r#"@main def main: IO[Unit] = IO.println(s"${n}")"#;
+        let p = parse(src).unwrap();
+        let n_start = src.find("${n}").unwrap() + 2;
+        let n_end = n_start + 1;
+        match &p.main.body.kind {
+            ExprKind::IoPrintln(inner) => match &inner.kind {
+                ExprKind::Interpolate { parts } => match parts.as_slice() {
+                    [InterpPart::Expr(e)] => {
+                        assert!(
+                            matches!(&e.kind, ExprKind::Var(name) if name == "n"),
+                            "{:?}",
+                            e.kind
+                        );
+                        assert_eq!(e.span.start, n_start, "start {:?}", e.span);
+                        assert_eq!(e.span.end, n_end, "end {:?}", e.span);
+                    }
+                    other => panic!("expected one hole, got {other:?}"),
+                },
+                other => panic!("expected interpolate, got {other:?}"),
+            },
+            other => panic!("expected println, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_interp_hole_with_string_brace() {
+        let src = r#"@main def main: IO[Unit] = IO.println(s"${Str.concat("}", "x")}")"#;
+        parse(src).unwrap();
     }
 
     #[test]
@@ -2910,6 +2957,44 @@ enum Opt:
                 }
             }
             other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    fn parse_guard_program(guard: &str) -> Program {
+        let src = format!(
+            r#"
+@main def main: IO[Unit] =
+  v match {{
+    case v if {guard} => IO.println("ok")
+    case _ => IO.println("no")
+  }}
+"#
+        );
+        parse(&src).unwrap_or_else(|e| panic!("guard `{guard}` failed: {e}"))
+    }
+
+    #[test]
+    fn parse_match_guard_does_not_steal_case_arrow() {
+        for guard in [
+            "flag",
+            "n > m",
+            "a && b",
+            "!flag",
+            "(flag)",
+            "pred(n => n > 0)",
+            "(flag: Bool)",
+        ] {
+            let p = parse_guard_program(guard);
+            match &p.main.body.kind {
+                ExprKind::Match { arms, .. } => {
+                    assert!(
+                        arms[0].guard.is_some(),
+                        "guard `{guard}` needs a guard expr"
+                    );
+                    assert!(arms[1].guard.is_none());
+                }
+                other => panic!("guard `{guard}`: expected match, got {other:?}"),
+            }
         }
     }
 
@@ -3650,6 +3735,51 @@ def getOrElse[T](o: Opt[T], default: T): T =
     }
 
     #[test]
+    fn parse_record_does_not_swallow_following_def() {
+        let src = r#"
+record Box[T](x: T):
+  def get(): T = self.x
+def extra(): Int = 1
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        assert_eq!(p.enums[0].methods.len(), 1);
+        assert_eq!(p.enums[0].methods[0].name, "get");
+        assert_eq!(p.defs[0].name, "extra");
+    }
+
+    #[test]
+    fn parse_impl_does_not_swallow_following_def() {
+        let src = r#"
+record Point(x: Int)
+trait Show:
+  def show(): String
+impl Show for Point:
+  def show(): String = "p"
+def extra(): Int = 1
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        assert_eq!(p.impls[0].methods.len(), 1);
+        assert_eq!(p.impls[0].methods[0].name, "show");
+        assert_eq!(p.defs[0].name, "extra");
+    }
+
+    #[test]
+    fn parse_trait_does_not_swallow_following_def() {
+        let src = r#"
+trait Show:
+  def show(): String
+def extra(): Int = 1
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        assert_eq!(p.traits[0].methods.len(), 1);
+        assert_eq!(p.traits[0].methods[0].name, "show");
+        assert_eq!(p.defs[0].name, "extra");
+    }
+
+    #[test]
     fn parse_multi_param_enum_decl() {
         let src = r#"
 enum Either[L, R]:
@@ -3957,6 +4087,30 @@ record Point(x: Int, y: Int)
                 other => panic!("expected Str.fromInt, got {other:?}"),
             },
             other => panic!("expected println, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_field_access_span_covers_name() {
+        let src = r#"
+record Point(x: Int)
+def f(p: Point): Int = p.x
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = parse(src).unwrap();
+        let needle = "p.x";
+        let start = src.find(needle).unwrap();
+        let end = start + needle.len();
+        match &p.defs[0].body.kind {
+            ExprKind::Field { field, .. } if field == "x" => {
+                assert_eq!(
+                    p.defs[0].body.span.start, start,
+                    "{:?}",
+                    p.defs[0].body.span
+                );
+                assert_eq!(p.defs[0].body.span.end, end, "{:?}", p.defs[0].body.span);
+            }
+            other => panic!("expected field, got {other:?}"),
         }
     }
 
