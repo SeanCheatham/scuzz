@@ -294,11 +294,12 @@ jobs:
           grep -q "fs:fs-note" /tmp/io.out
           grep -q "real:" /tmp/io.out
           grep -q "mono:" /tmp/io.out
-          grep -q "impurity-ok" /tmp/io.out
+          grep -q "kit:skip" /tmp/io.out
           grep -q "fs:" /tmp/io.out
-          grep -q "net:" /tmp/io.out
           cargo run -p scuzz -- test examples/io | tee /tmp/io-test.out
           grep -q "served:/" /tmp/io-test.out
+          grep -q "impurity-ok" /tmp/io-test.out
+          grep -q "net:" /tmp/io-test.out
           cargo run -p scuzz -- check examples/kernel
           cargo run -p scuzz -- check examples/bad-example
           cargo run -p scuzz -- test examples/bad-example
