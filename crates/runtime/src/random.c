@@ -34,7 +34,7 @@ static uint64_t live_seed(void) {
 
 static uint64_t next_u64(void) {
   if (!g_fake) {
-    /* Per-call mix from urandom when live; keep a process LCG warm-start. */
+    /* Seed once from /dev/urandom (realtime mix fallback). Then Knuth LCG. */
     static int inited = 0;
     static uint64_t live = 1;
     if (!inited) {
@@ -54,8 +54,13 @@ static void *random_next_thunk(void *env) {
   if (bound <= 0)
     n = 0;
   else {
-    uint64_t u = next_u64() >> 33;
-    n = (int64_t)(u % (uint64_t)bound);
+    uint64_t lim = (uint64_t)bound;
+    uint64_t zone = UINT64_MAX - (UINT64_MAX % lim);
+    uint64_t u;
+    do {
+      u = next_u64();
+    } while (u >= zone);
+    n = (int64_t)(u % lim);
   }
   return sz_box_i64(n);
 }

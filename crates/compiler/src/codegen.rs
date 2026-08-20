@@ -2136,6 +2136,8 @@ fn emit_expr(
             if let Some(p) = param {
                 if payload_kind == Kind::Int || payload_kind == Kind::Float {
                     let v = unbox_numeric(&mut pre, payload_kind, "%value", p);
+                    // IO[Int]/IO[Float] payload is a boxed i64. Drop the box after unbox.
+                    writeln!(pre, "  call void @sz_release(ptr %value)").unwrap();
                     body_locals.insert(p.clone(), Local::borrow(v, payload_kind));
                 } else if payload_owned {
                     body_locals.insert(p.clone(), Local::owned("%value", Kind::Ptr));
@@ -2168,7 +2170,7 @@ fn emit_expr(
                             .unwrap();
                     }
                 }
-            } else if payload_owned {
+            } else if payload_owned || payload_kind == Kind::Int || payload_kind == Kind::Float {
                 writeln!(ctx.conts, "  call void @sz_release(ptr %value)").unwrap();
             }
             writeln!(ctx.conts, "  ret ptr {ret}").unwrap();
@@ -8119,6 +8121,98 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir.contains("call void @sz_release(ptr %value)"),
             "expected last-use release of Deferred.get binder %value:\n{ir}"
+        );
+    }
+
+    fn flatmap_cont_for_call<'a>(ir: &'a str, callee: &str) -> &'a str {
+        let needle = format!("call ptr @{callee}");
+        let at = ir
+            .find(&needle)
+            .unwrap_or_else(|| panic!("missing {needle}:\n{ir}"));
+        let fm = ir[at..]
+            .find("call ptr @sz_io_flatmap")
+            .unwrap_or_else(|| panic!("missing flatMap after {callee}:\n{ir}"));
+        let call = &ir[at + fm..];
+        let name_at = call
+            .find("@sz_cont_")
+            .unwrap_or_else(|| panic!("missing continuation after {callee}:\n{ir}"));
+        let name_end = call[name_at..]
+            .find([',', ')'])
+            .unwrap_or_else(|| panic!("truncated continuation name after {callee}:\n{ir}"));
+        let cont_name = call[name_at + 1..name_at + name_end].trim();
+        let def = format!("define internal ptr @{cont_name}(");
+        let start = ir
+            .find(&def)
+            .unwrap_or_else(|| panic!("missing {def}:\n{ir}"));
+        let body = &ir[start..];
+        let end = body
+            .find("\n}\n")
+            .unwrap_or_else(|| panic!("missing continuation close for {cont_name}:\n{ir}"));
+        &ir[start..start + end + 2]
+    }
+
+    #[test]
+    fn emit_clock_realtime_releases_int_box() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    t <- Clock.realTime()
+    _ <- IO.println(Str.fromInt(t))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_clock_real_time"),
+            "expected Clock.realTime call:\n{ir}"
+        );
+        let cont = flatmap_cont_for_call(&ir, "sz_clock_real_time");
+        assert!(
+            cont.contains("call void @sz_release(ptr %value)"),
+            "expected boxed Int drop in Clock.realTime continuation:\n{cont}"
+        );
+    }
+
+    #[test]
+    fn emit_random_next_int_releases_int_box() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n <- Random.nextInt(10)
+    _ <- IO.println(Str.fromInt(n))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("call ptr @sz_random_next_int"),
+            "expected Random.nextInt call:\n{ir}"
+        );
+        let cont = flatmap_cont_for_call(&ir, "sz_random_next_int");
+        assert!(
+            cont.contains("call void @sz_release(ptr %value)"),
+            "expected boxed Int drop in Random.nextInt continuation:\n{cont}"
+        );
+    }
+
+    #[test]
+    fn emit_discarded_clock_realtime_releases_int_box() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- Clock.realTime()
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_clock_real_time"),
+            "expected Clock.realTime call:\n{ir}"
+        );
+        let cont = flatmap_cont_for_call(&ir, "sz_clock_real_time");
+        assert!(
+            cont.contains("call void @sz_release(ptr %value)"),
+            "expected boxed Int drop for discarded Clock.realTime:\n{cont}"
         );
     }
 

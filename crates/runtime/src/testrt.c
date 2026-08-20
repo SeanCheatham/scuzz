@@ -579,13 +579,23 @@ int sz_testrt_net_is_fake(void) { return g_net_fake; }
 
 void sz_testrt_net_stub(const char *url, const char *body) {
   NetStub *s;
+  const char *u = url ? url : "";
+  const char *b = body ? body : "";
   if (!g_net_fake)
     sz_testrt_net_install();
+  for (s = g_stubs; s; s = s->next) {
+    if (strcmp(s->url, u) == 0) {
+      sz_free(s->body);
+      s->body = (char *)sz_alloc(strlen(b) + 1);
+      memcpy(s->body, b, strlen(b) + 1);
+      return;
+    }
+  }
   s = (NetStub *)sz_alloc(sizeof(NetStub));
-  s->url = (char *)sz_alloc(strlen(url ? url : "") + 1);
-  memcpy(s->url, url ? url : "", strlen(url ? url : "") + 1);
-  s->body = (char *)sz_alloc(strlen(body ? body : "") + 1);
-  memcpy(s->body, body ? body : "", strlen(body ? body : "") + 1);
+  s->url = (char *)sz_alloc(strlen(u) + 1);
+  memcpy(s->url, u, strlen(u) + 1);
+  s->body = (char *)sz_alloc(strlen(b) + 1);
+  memcpy(s->body, b, strlen(b) + 1);
   s->next = g_stubs;
   g_stubs = s;
 }

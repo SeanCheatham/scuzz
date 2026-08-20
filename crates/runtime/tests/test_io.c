@@ -3761,6 +3761,14 @@ int main(void) {
     t1 = sz_testrt_clock_now_ms();
     assert(t1 == t0 + 1000);
 
+    {
+      int64_t saved = sz_testrt_clock_now_ms();
+      r = sz_io_unsafe_run(sz_io_sleep_ms(INT64_MAX));
+      assert(r.ok);
+      assert(sz_testrt_clock_now_ms() == INT64_MAX);
+      sz_testrt_clock_install(saved);
+    }
+
     r = sz_io_unsafe_run(sz_clock_real_time());
     assert(r.ok);
     assert(sz_unbox_i64(r.value) == t1);
@@ -3769,6 +3777,21 @@ int main(void) {
     assert(r.ok);
     assert(sz_unbox_i64(r.value) >= 0 && sz_unbox_i64(r.value) < 10);
     sz_release(r.value);
+
+    {
+      int i;
+      int saw_hi = 0;
+      int64_t bound = (int64_t)1 << 40;
+      for (i = 0; i < 64; i++) {
+        r = sz_io_unsafe_run(sz_random_next_int(bound));
+        assert(r.ok);
+        assert(sz_unbox_i64(r.value) >= 0 && sz_unbox_i64(r.value) < bound);
+        if (sz_unbox_i64(r.value) >= ((int64_t)1 << 31))
+          saw_hi = 1;
+        sz_release(r.value);
+      }
+      assert(saw_hi);
+    }
 
     sz_alloc_stats(&base_bytes, &base_count);
     r = sz_io_unsafe_run(sz_random_next_int(10));
@@ -4031,16 +4054,39 @@ int main(void) {
       }
     }
 
-    r = sz_io_unsafe_run(sz_impurity_run_kit());
-    assert(r.ok);
-    assert(strstr(sz_testrt_stdout_cstr(), "args:") != NULL);
-    assert(strstr(sz_testrt_stdout_cstr(), "line:") != NULL);
-    assert(strstr(sz_testrt_stdout_cstr(), "impurity-ok\n") != NULL);
+    {
+      size_t base_bytes = 0, base_count = 0;
+      size_t live_bytes = 0, live_count = 0;
+      char *argv[] = {"alpha", "beta"};
+      int i;
+      sz_testrt_net_stub("http://example.test/v1", "stub-body");
+      sz_testrt_sys_set_args(2, argv);
+      sz_testrt_stdin_feed("hello-line\n");
+      r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("note.txt"),
+                                      sz_string_from_cstr("kit-note")));
+      assert(r.ok);
+      for (i = 0; i < 64; i++)
+        sz_testrt_stdout_append("warm-line-for-cap");
+      sz_testrt_stdout_reset();
+      sz_alloc_stats(&base_bytes, &base_count);
+      r = sz_io_unsafe_run(sz_impurity_run_kit());
+      assert(r.ok);
+      assert(strstr(sz_testrt_stdout_cstr(), "args:") != NULL);
+      assert(strstr(sz_testrt_stdout_cstr(), "line:") != NULL);
+      assert(strstr(sz_testrt_stdout_cstr(), "impurity-ok\n") != NULL);
+      sz_alloc_stats(&live_bytes, &live_count);
+      assert(live_count == base_count);
+      assert(live_bytes == base_bytes);
+    }
 
     sz_testrt_reset();
     assert(!sz_testrt_clock_is_fake());
     assert(!sz_testrt_fs_is_fake());
     assert(!sz_testrt_sys_is_fake());
+    r = sz_io_unsafe_run(sz_impurity_run_kit());
+    assert(!r.ok);
+    assert(r.error && strstr(sz_string_cstr(r.error->message), "TestRuntime") != NULL);
+    sz_error_free(r.error);
     r = sz_io_unsafe_run(sz_sys_getenv(sz_string_from_cstr("SCZ_LIVE_ENV_PROBE")));
     assert(r.ok);
     assert(strcmp(sz_string_cstr((SzString *)r.value), "live") == 0);
