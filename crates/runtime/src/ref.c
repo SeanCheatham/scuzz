@@ -15,7 +15,10 @@ static SzRef *ref_make_drop(void *initial) {
   return r;
 }
 
-static void *ref_of_thunk(void *env) { return env; }
+static void *ref_of_thunk(void *env) {
+  sz_retain(env);
+  return env;
+}
 
 SzIo *sz_ref_of(void *initial) {
   SzRef *r = ref_make_drop(initial);
@@ -32,7 +35,6 @@ static void *ref_get_thunk(void *env) {
   SzRef *r = (SzRef *)env;
   void *v = r->value;
   sz_retain(v);
-  sz_release(r);
   return v;
 }
 
@@ -52,11 +54,9 @@ static void *ref_set_thunk(void *env) {
   SzRef *ref = (SzRef *)p->left;
   void *value = p->right;
   void *old = ref->value;
+  sz_retain(value);
   ref->value = value;
-  p->right = NULL;
-  if (old != value)
-    sz_release(old);
-  sz_release(p);
+  sz_release(old);
   return NULL;
 }
 

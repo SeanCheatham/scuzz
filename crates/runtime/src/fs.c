@@ -126,7 +126,6 @@ static void *fs_read_result(void *env) {
   r->is_err = 0;
   r->as.ok = s;
 done:
-  sz_release(pack);
   return r;
 }
 
@@ -170,7 +169,6 @@ static void *fs_write_result(void *env) {
   r->is_err = 0;
   r->as.ok = NULL;
 done:
-  sz_release(pack);
   return r;
 }
 
@@ -231,7 +229,6 @@ static void *fs_list_result(void *env) {
     r->as.ok = rev;
   }
 done:
-  sz_release(pack);
   return r;
 }
 
@@ -280,7 +277,6 @@ static void *fs_mkdirs_result(void *env) {
   r->is_err = 0;
   r->as.ok = NULL;
 done:
-  sz_release(pack);
   return r;
 }
 
@@ -310,7 +306,6 @@ static void *fs_canonicalize_result(void *env) {
   r->as.ok = sz_string_from_cstr(resolved);
   free(resolved);
 done:
-  sz_release(pack);
   return r;
 }
 

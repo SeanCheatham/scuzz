@@ -188,6 +188,31 @@ static SzIo *lang_use_sleep(void *acquired, void *env) {
   return sz_io_sleep_ms(100);
 }
 
+static int lang_used = 0;
+static SzIo *lang_use_mark(void *acquired, void *env) {
+  (void)acquired;
+  (void)env;
+  lang_used = 1;
+  return pure_drop(NULL);
+}
+
+static int lang_use_stepped = 0;
+static void *use_step_thunk(void *env) {
+  (void)env;
+  lang_use_stepped = 1;
+  return NULL;
+}
+static SzIo *lang_use_step(void *acquired, void *env) {
+  (void)acquired;
+  (void)env;
+  return sz_io_delay(use_step_thunk, NULL);
+}
+
+static SzIo *fiber_interrupt_direct(void *fiber, void *env) {
+  (void)env;
+  return sz_fiber_interrupt(fiber);
+}
+
 static SzIo *stream_bang(void *v, void *env) {
   (void)env;
   SzString *s = (SzString *)v;
@@ -2094,6 +2119,74 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
+  /* Shared kit delay (repeatN/retryN) borrows env. Loops must not free it. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *s;
+    SzRef *ref;
+    SzQueue *q;
+    SzDeferred *def;
+    int i;
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    s = sz_string_from_cstr("v");
+    ref = sz_ref_make(s);
+    sz_release(s);
+    r = sz_io_unsafe_run(repeat_n_drop(0, sz_ref_get(ref)));
+    assert(r.ok);
+    assert(r.value && strcmp(sz_string_cstr((SzString *)r.value), "v") == 0);
+    sz_release(r.value);
+    r = sz_io_unsafe_run(repeat_n_drop(2, sz_ref_get(ref)));
+    assert(r.ok);
+    sz_release(r.value);
+    r = sz_io_unsafe_run(retry_n_drop(2, sz_ref_get(ref)));
+    assert(r.ok);
+    sz_release(r.value);
+    r = sz_io_unsafe_run(repeat_n_drop(2, sz_ref_set(ref, ref->value)));
+    assert(r.ok);
+    assert(ref->value && strcmp(sz_string_cstr((SzString *)ref->value), "v") == 0);
+    r = sz_io_unsafe_run(repeat_n_drop(0, sz_ref_of_cstr("of")));
+    assert(r.ok);
+    sz_release(r.value);
+    sz_ref_free(ref);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    q = sz_queue_make();
+    s = sz_string_from_cstr("x");
+    r = sz_io_unsafe_run(repeat_n_drop(2, sz_queue_offer(q, s)));
+    sz_release(s);
+    assert(r.ok);
+    assert(sz_queue_size(q) == 3);
+    for (i = 0; i < 3; i++) {
+      r = sz_io_unsafe_run(sz_queue_take(q));
+      assert(r.ok);
+      sz_release(r.value);
+    }
+    sz_queue_free(q);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    def = sz_deferred_make();
+    s = sz_string_from_cstr("y");
+    r = sz_io_unsafe_run(repeat_n_drop(2, sz_deferred_complete(def, s)));
+    sz_release(s);
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_deferred_get(def));
+    assert(r.ok);
+    assert(r.value && strcmp(sz_string_cstr((SzString *)r.value), "y") == 0);
+    sz_release(r.value);
+    sz_deferred_free(def);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   /* IO.retryN: extra retries on failure; last success / last error. */
   retry_hits = 0;
   r = sz_io_unsafe_run(retry_n_drop(
@@ -2214,6 +2307,53 @@ int main(void) {
     assert(r.ok);
     assert(lang_released == 1);
     sz_lang_resource_free(lr);
+    sz_testrt_reset();
+  }
+
+  /* Cancel Resource.use after acquire, before the ensure step. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+
+    lang_released = 0;
+    lang_use_stepped = 0;
+    sz_alloc_stats(&base_bytes, &base_count);
+    lr = lang_make_tok();
+    r = sz_io_unsafe_run(fm_drop(
+        fork_drop(sz_lang_resource_use(lr, lang_use_step, NULL)),
+        fiber_interrupt_direct, NULL));
+    assert(r.ok);
+    assert(lang_use_stepped == 0);
+    assert(lang_released == 1);
+    sz_lang_resource_free(lr);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
+  /* Cancel Resource.use during a parking acquire. Release must not run. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzIo *acq;
+
+    sz_testrt_install();
+    lang_released = 0;
+    lang_used = 0;
+    sz_alloc_stats(&base_bytes, &base_count);
+    acq = sz_io_sleep_ms(100);
+    lr = sz_lang_resource_make(acq, lang_release, NULL);
+    sz_release(acq);
+    r = sz_io_unsafe_run(fm_drop(
+        fork_drop(sz_lang_resource_use(lr, lang_use_mark, NULL)),
+        fiber_interrupt_direct, NULL));
+    assert(r.ok);
+    assert(lang_used == 0);
+    assert(lang_released == 0);
+    sz_lang_resource_free(lr);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
     sz_testrt_reset();
   }
 
@@ -2390,6 +2530,26 @@ int main(void) {
       r = sz_io_unsafe_run(sz_ref_set(ref, n));
       sz_release(n);
       assert(r.ok);
+    }
+    sz_ref_free(ref);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    /* Ref.set of the same pointer must not leak. */
+    sz_alloc_stats(&base_bytes, &base_count);
+    s = sz_string_from_cstr("same");
+    ref = sz_ref_make(s);
+    sz_release(s);
+    r = sz_io_unsafe_run(sz_ref_set(ref, ref->value));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_ref_get(ref));
+    assert(r.ok);
+    {
+      void *v = r.value;
+      r = sz_io_unsafe_run(sz_ref_set(ref, v));
+      assert(r.ok);
+      sz_release(v);
     }
     sz_ref_free(ref);
     sz_alloc_stats(&live_bytes, &live_count);

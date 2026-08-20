@@ -26,14 +26,10 @@ static void *deferred_complete_thunk(void *env) {
   if (!d->completed) {
     d->completed = 1;
     d->ok = 1;
+    sz_retain(value);
     d->value = value;
-    p->right = NULL;
     sz_fiber_wake_deferred(d);
-  } else {
-    sz_release(value);
-    p->right = NULL;
   }
-  sz_release(p);
   return NULL;
 }
 
