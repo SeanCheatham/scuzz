@@ -1407,6 +1407,18 @@ SzPair *sz_pair_new(void *left, void *right) {
   return p;
 }
 
+void *sz_pair_left(const SzPair *p) {
+  if (!p)
+    sz_panic("tuple._1 on null");
+  return p->left;
+}
+
+void *sz_pair_right(const SzPair *p) {
+  if (!p)
+    sz_panic("tuple._2 on null");
+  return p->right;
+}
+
 void sz_pair_free(SzPair *p) { sz_release(p); }
 
 /* --- IO constructors ----------------------------------------------------- */

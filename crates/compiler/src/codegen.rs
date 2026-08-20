@@ -137,6 +137,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_fiber_interrupt(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_unsafe_run_or_die(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_adt_new(i32, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_pair_new(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_pair_left(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_pair_right(ptr)").unwrap();
     writeln!(out, "declare i32 @sz_adt_tag(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_adt_payload(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_nil()").unwrap();
@@ -678,7 +681,7 @@ fn list_elem_of_type(ty: &Type) -> Kind {
 
 fn retain_borrowed_ret(ty: &Type) -> bool {
     match ty {
-        Type::String | Type::List(_) | Type::Adt(_) => true,
+        Type::String | Type::List(_) | Type::Adt(_) | Type::Tuple(_, _) => true,
         Type::App(n, _) => !matches!(
             n.as_str(),
             "Fiber" | "Ref" | "Queue" | "Deferred" | "Resource" | "Stream"
@@ -810,6 +813,10 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
             left: inner,
             right: body,
         }
+        | ExprKind::Tuple {
+            left: inner,
+            right: body,
+        }
         | ExprKind::IoEnsure {
             inner,
             finalizer: body,
@@ -905,6 +912,10 @@ fn collect_pat_strings(pat: &Pattern, out: &mut Vec<String>) {
         Pattern::Cons { head, tail, .. } => {
             collect_pat_strings(head, out);
             collect_pat_strings(tail, out);
+        }
+        Pattern::Tuple { left, right, .. } => {
+            collect_pat_strings(left, out);
+            collect_pat_strings(right, out);
         }
         Pattern::Named { inner, .. } => collect_pat_strings(inner, out),
         Pattern::Wildcard
@@ -1221,6 +1232,46 @@ fn emit_list_lit(
         cur = next;
     }
     owned_ptr(code, cur).with_elem(elem_kind)
+}
+
+fn emit_tuple(
+    left: &Expr,
+    right: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    let le = emit_expr(left, ctx, locals, &format!("{prefix}_l"));
+    let re = emit_expr(right, ctx, locals, &format!("{prefix}_r"));
+    let mut code = String::new();
+    code.push_str(&le.code);
+    code.push_str(&re.code);
+    let lp = if le.kind == Kind::Int || le.kind == Kind::Float {
+        box_numeric(&mut code, le.kind, &le.value, &format!("{prefix}_lb"))
+    } else {
+        le.value.clone()
+    };
+    let rp = if re.kind == Kind::Int || re.kind == Kind::Float {
+        box_numeric(&mut code, re.kind, &re.value, &format!("{prefix}_rb"))
+    } else {
+        re.value.clone()
+    };
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @sz_pair_new(ptr {lp}, ptr {rp})"
+    )
+    .unwrap();
+    if le.kind == Kind::Int || le.kind == Kind::Float {
+        writeln!(code, "  call void @sz_release(ptr {lp})").unwrap();
+    } else {
+        drop_owned_ptr(&mut code, &le);
+    }
+    if re.kind == Kind::Int || re.kind == Kind::Float {
+        writeln!(code, "  call void @sz_release(ptr {rp})").unwrap();
+    } else {
+        drop_owned_ptr(&mut code, &re);
+    }
+    owned_ptr(code, format!("%{prefix}_v"))
 }
 
 /// Unpack `%env` list into `body_locals` (mirrors [`pack_env`] order).
@@ -1718,6 +1769,73 @@ fn emit_pat(
                 pe,
             );
         }
+        Pattern::Tuple {
+            left,
+            right,
+            left_ty,
+            right_ty,
+        } => {
+            if kind != Kind::Ptr {
+                writeln!(pe.code, "  br label %{fail_label}").unwrap();
+                return;
+            }
+            let sid = *pe.ctx.cont_id;
+            *pe.ctx.cont_id += 1;
+            let lptr = format!("{prefix}_tl{sid}");
+            let rptr = format!("{prefix}_tr{sid}");
+            let next_ok = format!("{prefix}_tn{sid}");
+            writeln!(pe.code, "  %{lptr} = call ptr @sz_pair_left(ptr {value})").unwrap();
+            writeln!(pe.code, "  %{rptr} = call ptr @sz_pair_right(ptr {value})").unwrap();
+            let (lval, lkind) = tuple_slot_value(
+                pe.code,
+                left_ty,
+                &format!("%{lptr}"),
+                &format!("{prefix}_tu{sid}"),
+            );
+            let saved = pe.list_elem;
+            pe.list_elem = list_elem_of_type(left_ty);
+            emit_pat(
+                left,
+                &lval,
+                lkind,
+                &format!("{prefix}_tlp{sid}"),
+                &next_ok,
+                fail_label,
+                pe,
+            );
+            writeln!(pe.code, "{next_ok}:").unwrap();
+            let (rval, rkind) = tuple_slot_value(
+                pe.code,
+                right_ty,
+                &format!("%{rptr}"),
+                &format!("{prefix}_tv{sid}"),
+            );
+            pe.list_elem = list_elem_of_type(right_ty);
+            emit_pat(
+                right,
+                &rval,
+                rkind,
+                &format!("{prefix}_trp{sid}"),
+                ok_label,
+                fail_label,
+                pe,
+            );
+            pe.list_elem = saved;
+        }
+    }
+}
+
+fn tuple_slot_value(code: &mut String, ty: &Type, ptr: &str, tmp: &str) -> (String, Kind) {
+    match ty {
+        Type::Int | Type::Bool => {
+            let v = unbox_numeric(code, Kind::Int, ptr, tmp);
+            (v, Kind::Int)
+        }
+        Type::Float => {
+            let v = unbox_numeric(code, Kind::Float, ptr, tmp);
+            (v, Kind::Float)
+        }
+        _ => (ptr.to_string(), Kind::Ptr),
     }
 }
 
@@ -1813,6 +1931,7 @@ fn emit_expr(
             owned_ptr(code, format!("%{prefix}_s"))
         }
         ExprKind::ListLit { elems } => emit_list_lit(elems, ctx, locals, prefix),
+        ExprKind::Tuple { left, right } => emit_tuple(left, right, ctx, locals, prefix),
         ExprKind::Interpolate { parts } => emit_interpolate(parts, ctx, locals, prefix),
         ExprKind::IoSleep(ms) => {
             let me = emit_expr(ms, ctx, locals, &format!("{prefix}_ms"));
@@ -8006,7 +8125,7 @@ def id(m: Map[String, String]): Map[String, String] = m
     fn emit_io_race_releases_arms() {
         let src = r#"@main def main: IO[Unit] =
   for {
-    _ <- IO.race(IO.sleep(1), IO.pure("ok"))
+    _ <- IO.race(IO.sleep(1), IO.println("ok"))
   } yield ()
 "#;
         let p = crate::lower::lower_program(parse(src).unwrap());
@@ -12463,6 +12582,38 @@ def add1(n: Int): Int = n + 1
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_list_nil"));
         assert!(ir.contains("sz_list_cons"));
+    }
+
+    #[test]
+    fn emit_tuple_constructs_projects_and_matches() {
+        let src = r#"
+def swap[A, B](p: (A, B)): (B, A) =
+  p match {
+    case (a, b) => (b, a)
+  }
+@main def main: IO[Unit] =
+  for {
+    p = (42, "ok")
+    n = p._1
+    s = p._2
+    q = swap(p)
+    both <- IO.both(IO.pure(1), IO.pure("x"))
+    _ <- IO.println(Str.fromInt(n))
+    _ <- IO.println(s)
+    _ <- q match {
+      case (a, _) => IO.println(a)
+    }
+    _ <- IO.println(both._2)
+  } yield ()
+"#;
+        let ir = emit_full(src);
+        assert!(
+            ir.contains("call ptr @sz_pair_new"),
+            "tuple construct:\n{ir}"
+        );
+        assert!(ir.contains("call ptr @sz_pair_left"), "tuple._1:\n{ir}");
+        assert!(ir.contains("call ptr @sz_pair_right"), "tuple._2:\n{ir}");
+        assert!(ir.contains("call ptr @sz_io_both"), "IO.both:\n{ir}");
     }
 
     fn gen_ir(src: &str) -> String {

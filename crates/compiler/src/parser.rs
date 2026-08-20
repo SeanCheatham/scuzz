@@ -1105,6 +1105,15 @@ impl Parser {
         if matches!(self.peek(), Token::LParen) {
             self.bump();
             let inner = self.parse_type_with_tparams(type_params)?;
+            if matches!(self.peek(), Token::Comma) {
+                self.bump();
+                let right = self.parse_type_with_tparams(type_params)?;
+                if matches!(self.peek(), Token::Comma) {
+                    return Err(self.err("tuple has two slots"));
+                }
+                self.expect(&Token::RParen)?;
+                return Ok(Type::Tuple(Box::new(inner), Box::new(right)));
+            }
             self.expect(&Token::RParen)?;
             return Ok(inner);
         }
@@ -1724,6 +1733,22 @@ impl Parser {
 
     fn parse_pattern_atom(&mut self) -> Result<Pattern, ParseError> {
         match self.peek().clone() {
+            Token::LParen => {
+                self.bump();
+                let left = self.parse_or_pattern()?;
+                self.expect(&Token::Comma)?;
+                let right = self.parse_or_pattern()?;
+                if matches!(self.peek(), Token::Comma) {
+                    return Err(self.err("tuple has two slots"));
+                }
+                self.expect(&Token::RParen)?;
+                Ok(Pattern::Tuple {
+                    left: Box::new(left),
+                    right: Box::new(right),
+                    left_ty: Type::Opaque("Elem".into()),
+                    right_ty: Type::Opaque("Elem".into()),
+                })
+            }
             Token::LBracket => self.parse_list_pattern(),
             Token::Underscore => {
                 self.bump();
@@ -1999,6 +2024,21 @@ impl Parser {
                 let inner = self.parse_expr();
                 self.bare_arrow_is_lambda = saved;
                 let inner = inner?;
+                if matches!(self.peek(), Token::Comma) {
+                    self.bump();
+                    let right = self.parse_expr()?;
+                    if matches!(self.peek(), Token::Comma) {
+                        return Err(self.err("tuple has two slots"));
+                    }
+                    let end = self.expect(&Token::RParen)?;
+                    return Ok(self.mk(
+                        ExprKind::Tuple {
+                            left: Box::new(inner),
+                            right: Box::new(right),
+                        },
+                        start.cover(&end),
+                    ));
+                }
                 self.expect(&Token::RParen)?;
                 Ok(inner)
             }
@@ -2335,6 +2375,48 @@ mod tests {
         let p = parse(r#"@main def main: IO[Unit] = IO.println("Hello")"#).unwrap();
         assert_eq!(p.main.name, "main");
         assert!(matches!(p.main.body.kind, ExprKind::IoPrintln(_)));
+    }
+
+    #[test]
+    fn parse_tuple_expr_type_and_pattern() {
+        let src = r#"
+def swap(p: (Int, String)): (String, Int) =
+  (p._2, p._1)
+@main def main: IO[Unit] =
+  (1, "x") match {
+    case (n, s) => IO.println(s)
+  }
+"#;
+        let p = parse(src).unwrap();
+        assert!(matches!(
+            &p.defs[0].params[0].ty,
+            Type::Tuple(a, b) if matches!(**a, Type::Int) && matches!(**b, Type::String)
+        ));
+        assert!(matches!(
+            &p.defs[0].ret,
+            Type::Tuple(a, b) if matches!(**a, Type::String) && matches!(**b, Type::Int)
+        ));
+        match &p.defs[0].body.kind {
+            ExprKind::Tuple { left, right } => {
+                assert!(matches!(&left.kind, ExprKind::Field { field, .. } if field == "_2"));
+                assert!(matches!(&right.kind, ExprKind::Field { field, .. } if field == "_1"));
+            }
+            other => panic!("expected tuple, got {other:?}"),
+        }
+        match &p.main.body.kind {
+            ExprKind::Match { scrutinee, arms } => {
+                assert!(matches!(scrutinee.kind, ExprKind::Tuple { .. }));
+                assert!(matches!(arms[0].pattern, Pattern::Tuple { .. }));
+            }
+            other => panic!("expected match, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_rejects_three_slot_tuple() {
+        let src = r#"@main def main: IO[Unit] = IO.println((1, 2, 3))"#;
+        let err = parse(src).unwrap_err();
+        assert!(err.to_string().contains("tuple has two slots"), "{err}");
     }
 
     #[test]
