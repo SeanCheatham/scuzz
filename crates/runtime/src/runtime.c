@@ -1855,6 +1855,7 @@ static SzIo *ensure_after_attempt_ok(void *either_val, void *env) {
     }
     if (ex)
       sz_either_free(ex);
+    sz_release(v);
     return fail_drop(err);
   }
 }

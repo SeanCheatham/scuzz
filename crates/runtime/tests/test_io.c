@@ -80,11 +80,20 @@ static SzIo *cont_pure_unit(void *value, void *env) {
 }
 
 static int lang_released = 0;
+static void *lang_release_thunk(void *env) {
+  (void)env;
+  lang_released = 1;
+  return NULL;
+}
 static SzIo *lang_release(void *acquired, void *env) {
   (void)env;
   assert(acquired);
-  lang_released = 1;
-  return pure_drop(NULL);
+  return sz_io_delay(lang_release_thunk, NULL);
+}
+static SzIo *lang_release_pure_str(void *acquired, void *env) {
+  (void)acquired;
+  (void)env;
+  return pure_drop(sz_string_from_cstr("x"));
 }
 static SzLangResource *lang_make_tok(void) {
   SzIo *acq = pure_drop(sz_string_from_cstr("tok"));
@@ -1981,6 +1990,24 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
+  /* Release IO success payload drops in lang_fin_free_ok. */
+  {
+    SzIo *acq;
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    acq = pure_drop(sz_string_from_cstr("tok"));
+    lr = sz_lang_resource_make(acq, lang_release_pure_str, NULL);
+    sz_release(acq);
+    r = sz_io_unsafe_run(sz_lang_resource_use(lr, lang_use_ok, NULL));
+    assert(r.ok);
+    sz_lang_resource_free(lr);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   /* Resource.use keeps a captured list env after the caller drops it. */
   {
     SzString *msg;
@@ -2031,6 +2058,21 @@ int main(void) {
   assert(!r.ok);
   assert(ensured_flag == 1);
   sz_error_free(r.error);
+
+  /* Inner success payload drops when the finalizer fails. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    r = sz_io_unsafe_run(
+        ensure_drop(pure_drop(sz_string_from_cstr("x")), sz_io_fail_cstr("boom")));
+    assert(!r.ok);
+    sz_error_free(r.error);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
 
   /* Resource releases when cancelled as race loser (TestRuntime: both park, then short wins). */
   {

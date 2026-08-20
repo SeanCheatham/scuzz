@@ -2795,7 +2795,10 @@ fn emit_io_cont_lambda(
     if env_ptr != "null" {
         writeln!(code, "  call void @sz_release(ptr {env_ptr})").unwrap();
     }
-    owned_ptr(code, format!("%{prefix}_cl2"))
+    let mut out = owned_ptr(code, format!("%{prefix}_cl2"));
+    out.payload = body_emitted.payload;
+    out.payload_owned = body_emitted.payload_owned;
+    out
 }
 
 /// `t => Bool` predicate: `i64 (*)(ptr value, ptr env)`.
@@ -3022,7 +3025,7 @@ fn emit_resource(
         .unwrap();
         drop_owned_ptr(&mut code, &lam);
         drop_owned_ptr(&mut code, &first);
-        io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        io_emitted_payload(code, format!("%{prefix}_v"), lam.payload, lam.payload_owned)
     }
 }
 
@@ -7295,6 +7298,24 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of resource {name} after Resource.use:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_resource_use_payload_owned() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    res = Resource.make(IO.pure("tok"), t => IO.println(t))
+    got <- Resource.use(res, t => IO.pure(t))
+    _ <- IO.println(got)
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("call void @sz_release(ptr %value)"),
+            "expected last-use release of Resource.use String payload:\n{ir}"
         );
     }
 
