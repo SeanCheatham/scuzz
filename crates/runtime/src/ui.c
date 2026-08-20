@@ -59,12 +59,15 @@ __attribute__((weak)) int sz_embedder_poll_event(SzInputEvent *out) {
 
 /* Weak stubs — strong defs from embedder-mobile override when linked. */
 __attribute__((weak)) int sz_mobile_available(void) { return 0; }
-__attribute__((weak)) int sz_mobile_present(const char *title, int width,
-                                            int height, const uint8_t *rgba,
+__attribute__((weak)) int sz_mobile_present(const char *title, int point_w,
+                                            int point_h, int pixel_w,
+                                            int pixel_h, const uint8_t *rgba,
                                             size_t nbytes) {
   (void)title;
-  (void)width;
-  (void)height;
+  (void)point_w;
+  (void)point_h;
+  (void)pixel_w;
+  (void)pixel_h;
   (void)rgba;
   (void)nbytes;
   return 0;
@@ -954,7 +957,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
     rgba = sk_surface_peek_pixels(session->surface, &nbytes);
     if (rgba) {
       sz_mobile_present(session->cfg.title, session->cfg.width,
-                        session->cfg.height, rgba, nbytes);
+                        session->cfg.height, pw, ph, rgba, nbytes);
     }
   }
   sz_alloc_trace_on_pump();

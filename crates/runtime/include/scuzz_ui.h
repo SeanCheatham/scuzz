@@ -20,7 +20,7 @@ typedef struct SzUiConfig {
   SzUiRuntimeKind kind;
   int width;
   int height;
-  double scale; /* Desktop: display backing scale; Headless: from SCUZZ_UI_SCALE */
+  double scale; /* Desktop/Mobile backing scale; Headless: SCUZZ_UI_SCALE */
   const char *title; /* Desktop / Mobile; may be NULL */
 } SzUiConfig;
 
