@@ -1173,14 +1173,14 @@ fn rewrite_copy(
             slot.unwrap_or_else(|| Expr::new(ExprKind::Var(bind_names[i].clone()), span.clone()))
         })
         .collect();
-    let body = Expr::new(
-        ExprKind::AdtConstruct {
-            enum_name: eid.clone(),
-            case_name: case.name.clone(),
-            args: ctor_args,
-            type_args: Vec::new(),
-        },
+    let body = crate::overlay::residualize_adt(
+        eid.clone(),
+        case.name.clone(),
+        ctor_args,
+        Vec::new(),
         span.clone(),
+        std::slice::from_ref(en),
+        current_module,
     );
     Ok(Expr::new(
         ExprKind::Match {
@@ -8135,6 +8135,26 @@ def sum(p: Point): Int = p.x + p.y
             Ok(()) => {}
             Err(e) => panic!("copy after residualize typecheck: {}", e.message()),
         }
+    }
+
+    #[test]
+    fn copy_lower_residualizes_where() {
+        let src = r#"
+record Point(x: Int where x >= 0, y: Int)
+def origin(): Point = Point(3, 5)
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(origin().copy(x = -1).x))
+"#;
+        let mut p = parse(src).unwrap();
+        crate::overlay::residualize_refinements(&mut p);
+        let p = lower_program(p);
+        let p = resolve_named_args(p).expect("named args");
+        let p = resolve_field_access(p).expect("copy lower");
+        let dumped = format!("{:?}", p.main.body.kind);
+        assert!(
+            dumped.contains("Law.check"),
+            "copy-lower should wrap where: {dumped}"
+        );
     }
 
     #[test]

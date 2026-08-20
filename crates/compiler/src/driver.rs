@@ -87,21 +87,22 @@ fn prepare_program(resolved: &ResolvedProject, verify: bool) -> Result<Program> 
         .map(|s| (s.label.clone(), s.text.clone()))
         .collect();
     let program = parse_sources(&named).map_err(|e| anyhow::anyhow!("parse error: {e}"))?;
-    let mut program = if verify {
-        apply_overlays(program, &resolved.overlays).map_err(|e| anyhow::anyhow!("{e}"))?
-    } else {
-        program
-    };
-    if verify {
+    let program = if verify {
         let law_names = collect_law_names(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
+        check_laws_applied(&program, &law_names).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let mut program =
+            apply_overlays(program, &resolved.overlays).map_err(|e| anyhow::anyhow!("{e}"))?;
         check_laws_applied(&program, &law_names).map_err(|e| anyhow::anyhow!("{e}"))?;
         program = crate::typ::resolve_named_args(program).map_err(|e| anyhow::anyhow!("{e}"))?;
         residualize_refinements(&mut program);
         program.law_names = law_names;
+        program
     } else {
+        let mut program = program;
         erase_laws(&mut program);
         erase_requires(&mut program);
-    }
+        program
+    };
     Ok(program)
 }
 
@@ -701,20 +702,23 @@ fn collect_overlays(
     Ok(())
 }
 
-fn validate_overlay_stems(sources: &[ResolvedSource], overlays: &[OverlaySource]) -> Result<()> {
-    let mut live_stems: HashSet<String> = HashSet::new();
-    for s in sources {
-        if let Some(stem) = s
-            .path
-            .file_stem()
-            .and_then(|x| x.to_str())
-            .map(|s| s.to_string())
-        {
-            live_stems.insert(stem);
-        }
+fn paths_eq(a: &Path, b: &Path) -> bool {
+    if a == b {
+        return true;
     }
+    match (std::fs::canonicalize(a), std::fs::canonicalize(b)) {
+        (Ok(ca), Ok(cb)) => ca == cb,
+        _ => false,
+    }
+}
+
+fn validate_overlay_stems(sources: &[ResolvedSource], overlays: &[OverlaySource]) -> Result<()> {
     for ov in overlays {
-        if !live_stems.contains(&ov.stem) {
+        if ov.path.as_os_str().is_empty() {
+            continue;
+        }
+        let twin = ov.path.with_file_name(format!("{}.scuzz", ov.stem));
+        if !sources.iter().any(|s| paths_eq(&s.path, &twin)) {
             bail!(
                 "{}: overlay stem `{}` has no live `{}.scuzz` twin",
                 ov.label,
@@ -916,6 +920,45 @@ mod tests {
         };
         let file = if main { "Main.scuzz" } else { "Lib.scuzz" };
         fs::write(dir.join("src").join(file), &src).unwrap();
+    }
+
+    #[test]
+    fn rejects_app_overlay_without_local_twin_even_if_dep_has_stem() {
+        let tmp = tempdir().unwrap();
+        let shared = tmp.path().join("shared");
+        let app = tmp.path().join("app");
+        fs::create_dir_all(shared.join("src")).unwrap();
+        fs::write(
+            shared.join("scuzz.toml"),
+            "[package]\nname = \"shared\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        fs::write(
+            shared.join("src/Shared.scuzz"),
+            "def greet(): String = \"hi\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(app.join("src")).unwrap();
+        fs::write(
+            app.join("scuzz.toml"),
+            "[package]\nname = \"app\"\nversion = \"0.1.0\"\n\n[dependencies]\nshared = { path = \"../shared\" }\n",
+        )
+        .unwrap();
+        fs::write(
+            app.join("src/Main.scuzz"),
+            "@main def main: IO[Unit] =\n  IO.println(greet())\n",
+        )
+        .unwrap();
+        fs::write(
+            app.join("src/Shared.scuzz_sim"),
+            "def greet(): String = \"sim\"\n",
+        )
+        .unwrap();
+        let err = resolve_project(&app).unwrap_err().to_string();
+        assert!(
+            err.contains("no live") && err.contains("Shared.scuzz"),
+            "unexpected: {err}"
+        );
     }
 
     #[test]

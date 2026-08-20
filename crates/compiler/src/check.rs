@@ -4,7 +4,7 @@ use crate::format::format_source;
 use crate::lower::lower_program;
 use crate::overlay::{
     apply_overlays, check_laws_applied, collect_fmt_sources, collect_law_names, is_fmt_source,
-    overlay_kind_from_path, residualize_refinements, OverlaySource,
+    overlay_kind_from_path, residualize_refinements, OverlayError, OverlaySource,
 };
 use crate::parser::{parse_sources, parse_sources_recovering, ParseError};
 use crate::span::{offset_to_utf16_pos, Span};
@@ -226,12 +226,20 @@ pub fn format_diagnostics(diags: &[Diagnostic], json: bool) -> String {
     }
 }
 
-fn named_sources(resolved: &crate::driver::ResolvedProject) -> Vec<(String, String)> {
+fn live_named_sources(resolved: &crate::driver::ResolvedProject) -> Vec<(String, String)> {
     resolved
         .sources
         .iter()
         .map(|s| (s.label.clone(), s.text.clone()))
         .collect()
+}
+
+fn named_sources(resolved: &crate::driver::ResolvedProject) -> Vec<(String, String)> {
+    let mut out = live_named_sources(resolved);
+    for ov in &resolved.overlays {
+        out.push((ov.label.clone(), ov.text.clone()));
+    }
+    out
 }
 
 fn diagnostic_from_parse(e: ParseError, sources: &[(String, String)]) -> Diagnostic {
@@ -253,8 +261,8 @@ fn diagnostic_from_type(e: TypeError, sources: &[(String, String)]) -> Diagnosti
     } else {
         let file = sources
             .iter()
-            .find(|(l, _)| l.contains("/src/Main.scuzz") || l.ends_with("Main.scuzz"))
-            .or_else(|| sources.last())
+            .find(|(l, _)| Path::new(l).file_name().and_then(|n| n.to_str()) == Some("Main.scuzz"))
+            .or_else(|| sources.first())
             .map(|(l, _)| l.clone());
         if let Some(f) = file {
             d = d.with_file(f);
@@ -516,6 +524,86 @@ pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
     check_project_with(project_dir, &BTreeMap::new())
 }
 
+fn diagnostic_from_overlay(e: OverlayError, sources: &[(String, String)]) -> Diagnostic {
+    match e {
+        OverlayError::Parse(p) => diagnostic_from_parse(p, sources),
+        OverlayError::Msg(m) => Diagnostic::error(m),
+    }
+}
+
+fn diag_dup(a: &Diagnostic, b: &Diagnostic) -> bool {
+    a.file == b.file && a.line == b.line && a.column == b.column && a.message == b.message
+}
+
+fn merge_diags(into: &mut Vec<Diagnostic>, extra: Vec<Diagnostic>) {
+    for d in extra {
+        if !into.iter().any(|x| diag_dup(x, &d)) {
+            into.push(d);
+        }
+    }
+}
+
+fn check_typed_graph(
+    program: crate::ast::Program,
+    named: &[(String, String)],
+    residualize: bool,
+) -> Vec<Diagnostic> {
+    let mut diags = Vec::new();
+    let unused = crate::resolve::unused_names(&program);
+    let unused_imports: Vec<crate::ast::Import> = crate::resolve::unused_imports(&program)
+        .into_iter()
+        .cloned()
+        .collect();
+    let lowered = lower_program(program);
+    let program = match crate::typ::expand_impls(lowered.clone()) {
+        Ok(p) => p,
+        Err(e) => {
+            diags.push(diagnostic_from_type(e, named));
+            lowered
+        }
+    };
+    let mut program = match crate::typ::resolve_named_args(program) {
+        Ok(p) => p,
+        Err(e) => {
+            diags.push(diagnostic_from_type(e, named));
+            return diags;
+        }
+    };
+    if residualize {
+        residualize_refinements(&mut program);
+    }
+    let type_errs = typecheck_all(&program);
+    let had_type_err = !type_errs.is_empty();
+    for e in type_errs {
+        let mut d = diagnostic_from_type(e, named);
+        attach_related(&mut d, &program, named);
+        diags.push(d);
+    }
+    if had_type_err {
+        return diags;
+    }
+    for im in &unused_imports {
+        let msg = if im.is_wildcard() {
+            format!("unused import {}.{}", im.from_module, im.name)
+        } else if let Some(alias) = &im.alias {
+            format!("unused import {}.{} as {alias}", im.from_module, im.name)
+        } else {
+            format!("unused import {}.{}", im.from_module, im.name)
+        };
+        diags.push(Diagnostic::error(msg).with_span(&im.span, named));
+    }
+    for u in unused {
+        diags.push(Diagnostic::error(u.message()).with_span(&u.span, named));
+    }
+    match crate::typ::elaborate_generics(program) {
+        Ok(_) => diags,
+        Err(e) => {
+            diags.push(diagnostic_from_type(e, named));
+            diags
+        }
+    }
+}
+
 /// Same typer as [`check_project`]. Replace disk text for matching paths (LSP buffers).
 pub fn check_project_with(
     project_dir: &Path,
@@ -527,88 +615,43 @@ pub fn check_project_with(
     apply_unsaved(&mut resolved, unsaved, project_dir);
 
     let named = named_sources(&resolved);
+    let live_named = live_named_sources(&resolved);
 
-    let (maybe_program, parse_errs) = parse_sources_recovering(&named);
+    let (maybe_program, parse_errs) = parse_sources_recovering(&live_named);
     for e in parse_errs {
         diags.push(diagnostic_from_parse(e, &named));
     }
     let Some(program) = maybe_program else {
         return Ok(diags);
     };
-    let program = {
-        let live = program;
-        match apply_overlays(live.clone(), &resolved.overlays) {
-            Ok(p) => p,
-            Err(e) => {
-                diags.push(Diagnostic::error(e.to_string()));
-                live
-            }
-        }
-    };
-    let law_names = match collect_law_names(&program) {
+    let live = program;
+    let law_names = match collect_law_names(&live) {
         Ok(n) => n,
         Err(e) => {
-            diags.push(Diagnostic::error(e.to_string()));
+            diags.push(diagnostic_from_overlay(e, &named));
             Vec::new()
         }
     };
-    if let Err(e) = check_laws_applied(&program, &law_names) {
-        diags.push(Diagnostic::error(e.to_string()));
+    if let Err(e) = check_laws_applied(&live, &law_names) {
+        diags.push(diagnostic_from_overlay(e, &named));
     }
-    let mut program = program;
-    program.law_names = law_names;
-    let unused = crate::resolve::unused_names(&program);
-    let unused_imports: Vec<crate::ast::Import> = crate::resolve::unused_imports(&program)
-        .into_iter()
-        .cloned()
-        .collect();
-    let lowered = lower_program(program);
-    let program = match crate::typ::expand_impls(lowered.clone()) {
-        Ok(p) => p,
-        Err(e) => {
-            diags.push(diagnostic_from_type(e, &named));
-            lowered
+    let mut live_prog = live.clone();
+    live_prog.law_names = law_names.clone();
+    merge_diags(&mut diags, check_typed_graph(live_prog, &named, false));
+
+    match apply_overlays(live, &resolved.overlays) {
+        Ok(mut program) => {
+            if let Err(e) = check_laws_applied(&program, &law_names) {
+                diags.push(diagnostic_from_overlay(e, &named));
+            }
+            program.law_names = law_names;
+            merge_diags(&mut diags, check_typed_graph(program, &named, true));
         }
-    };
-    let mut program = match crate::typ::resolve_named_args(program) {
-        Ok(p) => p,
         Err(e) => {
-            diags.push(diagnostic_from_type(e, &named));
-            return Ok(diags);
-        }
-    };
-    // Bind named args before residualize so `where` wraps positional fields.
-    residualize_refinements(&mut program);
-    let type_errs = typecheck_all(&program);
-    let had_type_err = !type_errs.is_empty();
-    for e in type_errs {
-        let mut d = diagnostic_from_type(e, &named);
-        attach_related(&mut d, &program, &named);
-        diags.push(d);
-    }
-    if had_type_err {
-        return Ok(diags);
-    }
-    for im in &unused_imports {
-        let msg = if im.is_wildcard() {
-            format!("unused import {}.{}", im.from_module, im.name)
-        } else if let Some(alias) = &im.alias {
-            format!("unused import {}.{} as {alias}", im.from_module, im.name)
-        } else {
-            format!("unused import {}.{}", im.from_module, im.name)
-        };
-        diags.push(Diagnostic::error(msg).with_span(&im.span, &named));
-    }
-    for u in unused {
-        diags.push(Diagnostic::error(u.message()).with_span(&u.span, &named));
-    }
-    match crate::typ::elaborate_generics(program) {
-        Ok(_) => Ok(diags),
-        Err(e) => {
-            diags.push(diagnostic_from_type(e, &named));
-            Ok(diags)
+            diags.push(diagnostic_from_overlay(e, &named));
         }
     }
+    Ok(diags)
 }
 
 fn load_overlay_file(
@@ -634,8 +677,8 @@ fn load_overlay_file(
                 None => return Ok(None),
             },
         };
-    let named = named_sources(&resolved);
-    let program = parse_sources(&named)
+    let live_named = live_named_sources(&resolved);
+    let program = parse_sources(&live_named)
         .ok()
         .and_then(|p| apply_overlays(p, &resolved.overlays).ok());
     Ok(Some((resolved, label, text, program)))
@@ -1653,6 +1696,107 @@ version = "0.0.0"
             diags[0].message.contains("String") || diags[0].message.contains("Int"),
             "{}",
             diags[0].message
+        );
+    }
+
+    fn write_sim_pkg(root: &Path, live: &str, sim: &str) {
+        fs::write(
+            root.join("scuzz.toml"),
+            "[package]\nname = \"sim_check\"\nversion = \"0.0.0\"\n",
+        )
+        .unwrap();
+        fs::create_dir_all(root.join("src")).unwrap();
+        let live = crate::format::format_source(live).unwrap();
+        let sim = crate::format::format_source(sim).unwrap();
+        fs::write(root.join("src/Main.scuzz"), live).unwrap();
+        fs::write(root.join("src/Main.scuzz_sim"), sim).unwrap();
+    }
+
+    #[test]
+    fn check_project_sim_type_error_points_at_sim_file() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_sim_pkg(
+            root,
+            "def title(): String = \"Live\"\n@main def main: IO[Unit] =\n  IO.println(title())\n",
+            "def title(): String = 1\n",
+        );
+        let diags = check_project(root).unwrap();
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        let file = diags[0].file.as_deref().unwrap_or("");
+        assert!(
+            file.contains(".scuzz_sim"),
+            "expected sim file, got {file} diags={diags:?}"
+        );
+        assert!(!file.ends_with("Main.scuzz"), "{file}");
+        assert!(
+            diags[0].line.is_some() && diags[0].line != Some(0),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn check_project_with_unsaved_sim_type_error_points_at_sim_file() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_sim_pkg(
+            root,
+            "def title(): String = \"Live\"\n@main def main: IO[Unit] =\n  IO.println(title())\n",
+            "def title(): String = \"Sim\"\n",
+        );
+        assert!(check_project(root).unwrap().is_empty());
+        let mut unsaved = BTreeMap::new();
+        unsaved.insert(
+            canonicalize_source_path(&root.join("src/Main.scuzz_sim")),
+            crate::format::format_source("def title(): String = 1\n").unwrap(),
+        );
+        let diags = check_project_with(root, &unsaved).unwrap();
+        assert_eq!(diags.len(), 1, "{diags:?}");
+        let file = diags[0].file.as_deref().unwrap_or("");
+        assert!(
+            file.contains(".scuzz_sim"),
+            "expected sim file, got {file} diags={diags:?}"
+        );
+        assert!(
+            diags[0].line.is_some() && diags[0].line != Some(0),
+            "{diags:?}"
+        );
+    }
+
+    #[test]
+    fn check_project_typechecks_live_body_replaced_by_sim() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_sim_pkg(
+            root,
+            "def title(): String = 1\n@main def main: IO[Unit] =\n  IO.println(title())\n",
+            "def title(): String = \"Sim\"\n",
+        );
+        let diags = check_project(root).unwrap();
+        assert!(
+            diags.iter().any(|d| {
+                (d.message.contains("String") || d.message.contains("Int"))
+                    && d.file
+                        .as_deref()
+                        .is_some_and(|f| f.ends_with("Main.scuzz") && !f.contains(".scuzz_sim"))
+            }),
+            "expected live type error, got {diags:?}"
+        );
+    }
+
+    #[test]
+    fn check_project_sim_require_does_not_apply_live_law() {
+        let dir = tempdir().unwrap();
+        let root = dir.path();
+        write_sim_pkg(
+            root,
+            "law always: Bool = 1 == 1\ndef title(): String = \"Live\"\n@main def main: IO[Unit] =\n  IO.println(title())\n",
+            "def title(): String = \"Sim\".require(always)\n",
+        );
+        let diags = check_project(root).unwrap();
+        assert!(
+            diags.iter().any(|d| d.message.contains("never applied")),
+            "{diags:?}"
         );
     }
 
