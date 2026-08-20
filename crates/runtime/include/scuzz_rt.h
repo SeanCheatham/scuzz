@@ -355,7 +355,7 @@ void *sz_io_unsafe_run_or_die(SzIo *io);
 int sz_fiber_wake_queue(SzQueue *q, void *value);
 void sz_fiber_wake_deferred(SzDeferred *d);
 
-/* Language Resource.make / use: IO acquire + SzCont release/use (String payload). */
+/* Language Resource.make / use: IO acquire + SzCont release/use. */
 struct SzLangResource {
   SzIo *acquire;
   SzCont release;

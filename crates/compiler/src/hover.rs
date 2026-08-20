@@ -1130,62 +1130,59 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Impurity.runKit", "Impurity.runKit(): IO[Unit]"),
     (
         "Resource.make",
-        "Resource.make(acquire: IO[String], release: String => IO[Unit]): Resource[String]",
+        "Resource.make(acquire: IO[A], release: A => IO[Unit]): Resource[A]",
     ),
     (
         "Resource.use",
-        "Resource.use(r: Resource[String], f: String => IO[T]): IO[T]",
+        "Resource.use(r: Resource[A], f: A => IO[T]): IO[T]",
     ),
-    ("Stream.emit", "Stream.emit(s: String): Stream[String]"),
-    (
-        "Stream.emits",
-        "Stream.emits(xs: List[String]): Stream[String]",
-    ),
-    ("Stream.eval", "Stream.eval(io: IO[String]): Stream[String]"),
+    ("Stream.emit", "Stream.emit(x: A): Stream[A]"),
+    ("Stream.emits", "Stream.emits(xs: List[A]): Stream[A]"),
+    ("Stream.eval", "Stream.eval(io: IO[A]): Stream[A]"),
     (
         "Stream.concat",
-        "Stream.concat(a: Stream[String], b: Stream[String]): Stream[String]",
+        "Stream.concat(a: Stream[A], b: Stream[A]): Stream[A]",
     ),
     (
         "Stream.map",
-        "Stream.map(s: Stream[String], f: String => String): Stream[String]",
+        "Stream.map(s: Stream[A], f: A => B): Stream[B]",
     ),
     (
         "Stream.evalMap",
-        "Stream.evalMap(s: Stream[String], f: String => IO[String]): Stream[String]",
+        "Stream.evalMap(s: Stream[A], f: A => IO[B]): Stream[B]",
     ),
     (
         "Stream.filter",
-        "Stream.filter(s: Stream[String], pred: String => Bool): Stream[String]",
+        "Stream.filter(s: Stream[A], pred: A => Bool): Stream[A]",
     ),
     (
         "Stream.take",
-        "Stream.take(s: Stream[String], n: Int): Stream[String]",
+        "Stream.take(s: Stream[A], n: Int): Stream[A]",
     ),
     (
         "Stream.takeWhile",
-        "Stream.takeWhile(s: Stream[String], pred: String => Bool): Stream[String]",
+        "Stream.takeWhile(s: Stream[A], pred: A => Bool): Stream[A]",
     ),
     (
         "Stream.drop",
-        "Stream.drop(s: Stream[String], n: Int): Stream[String]",
+        "Stream.drop(s: Stream[A], n: Int): Stream[A]",
     ),
     (
         "Stream.dropWhile",
-        "Stream.dropWhile(s: Stream[String], pred: String => Bool): Stream[String]",
+        "Stream.dropWhile(s: Stream[A], pred: A => Bool): Stream[A]",
     ),
     (
         "Stream.find",
-        "Stream.find(s: Stream[String], pred: String => Bool): Stream[String]",
+        "Stream.find(s: Stream[A], pred: A => Bool): Stream[A]",
     ),
     (
         "Stream.exists",
-        "Stream.exists(s: Stream[String], pred: String => Bool): IO[Bool]",
+        "Stream.exists(s: Stream[A], pred: A => Bool): IO[Bool]",
     ),
-    ("Stream.drain", "Stream.drain(s: Stream[String]): IO[Unit]"),
+    ("Stream.drain", "Stream.drain(s: Stream[A]): IO[Unit]"),
     (
         "Stream.compileToList",
-        "Stream.compileToList(s: Stream[String]): IO[List[String]]",
+        "Stream.compileToList(s: Stream[A]): IO[List[A]]",
     ),
 ];
 
@@ -2945,5 +2942,34 @@ record Point(x: Int, y: Int)
         );
         let h = hover_src(src, "of");
         assert!(h.contains("Ref.of(x: A): IO[Ref[A]]"), "{h}");
+    }
+
+    #[test]
+    fn hovers_generic_stream_resource() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    res = Resource.make(IO.pure(1), n => IO.println(Str.fromInt(n)))
+    _ <- Resource.use(res, n => IO.pure(n))
+    xs <- Stream.compileToList(Stream.map(Stream.emit(2), n => n + 1))
+    _ <- IO.println(Str.fromInt(List.head(xs)))
+  } yield ()
+"#;
+        let h = hover_src(src, "make");
+        assert!(
+            h.contains("Resource.make(acquire: IO[A], release: A => IO[Unit]): Resource[A]"),
+            "{h}"
+        );
+        let h = hover_src(src, "emit");
+        assert!(h.contains("Stream.emit(x: A): Stream[A]"), "{h}");
+        let h = hover_src(src, "map");
+        assert!(
+            h.contains("Stream.map(s: Stream[A], f: A => B): Stream[B]"),
+            "{h}"
+        );
+        let h = hover_src(src, "compileToList");
+        assert!(
+            h.contains("Stream.compileToList(s: Stream[A]): IO[List[A]]"),
+            "{h}"
+        );
     }
 }
