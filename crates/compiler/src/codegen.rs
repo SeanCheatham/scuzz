@@ -233,6 +233,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_max(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_list_min(ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_list_max_by(ptr, ptr, ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_list_group_by(ptr, ptr, ptr, i32)").unwrap();
+    writeln!(out, "declare i64 @sz_list_sum(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_list_product(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_write(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_list(ptr)").unwrap();
@@ -3370,6 +3373,45 @@ fn emit_list_sort_by(
     owned_ptr(code, format!("%{prefix}_v")).with_elem(inner_elem)
 }
 
+fn emit_list_group_by(
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 2, "List.groupBy expects 2 args");
+    let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
+        panic!("List.groupBy mapper must be a lambda");
+    };
+    let lam = emit_smap_lambda(
+        param,
+        body,
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        true,
+        inner.elem,
+    );
+    let inner_owned = inner.owned;
+    let inner_kind = inner.kind;
+    let inner_value = inner.value.clone();
+    let key_kind = i32::from(lam.elem != Kind::Int);
+    let mut code = inner.code;
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @sz_list_group_by(ptr {inner_value}, ptr %{prefix}_fnp, ptr %{prefix}_envp, i32 {key_kind})"
+    )
+    .unwrap();
+    drop_owned_ptr(&mut code, &lam);
+    if inner_owned && inner_kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {inner_value})").unwrap();
+    }
+    owned_ptr(code, format!("%{prefix}_v"))
+}
+
 fn emit_list_extremum_by(
     callee: &str,
     want_max: i64,
@@ -3936,6 +3978,9 @@ fn emit_call(
     }
     if callee == "List.sortBy" {
         return emit_list_sort_by(args, ctx, locals, prefix);
+    }
+    if callee == "List.groupBy" {
+        return emit_list_group_by(args, ctx, locals, prefix);
     }
     if callee == "List.maxBy" {
         return emit_list_extremum_by("List.maxBy", 1, args, ctx, locals, prefix);
@@ -4671,6 +4716,21 @@ fn emit_call(
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
+        }
+        "List.sum" | "List.product" => {
+            let rt = if callee == "List.sum" {
+                "sz_list_sum"
+            } else {
+                "sz_list_product"
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call i64 @{rt}(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
         "List.max" | "List.min" => {
             let rt = if callee == "List.max" {
@@ -9267,6 +9327,38 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of list {name} after List.sortBy:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_group_by_sum_product() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(List.map(Map.keys(List.groupBy(["aa", "b", "cc"], x => Str.len(x))), n => Str.fromInt(n)), ","))
+    _ <- IO.println(List.join(Map.keys(List.groupBy(["ab", "ac"], x => Str.take(x, 1))), ","))
+    _ <- IO.println(Str.fromInt(List.sum([1, 2, 3])))
+    _ <- IO.println(Str.fromInt(List.product([2, 3, 4])))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_group_by"));
+        assert!(ir.contains("sz_list_sum"));
+        assert!(ir.contains("sz_list_product"));
+        let needle = "call ptr @sz_list_group_by(ptr ";
+        let at = ir.find(needle).expect("groupBy");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.groupBy:\n{ir}"
+        );
+        let needle = "call i64 @sz_list_sum(ptr ";
+        let at = ir.find(needle).expect("sum");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.sum:\n{ir}"
         );
     }
 

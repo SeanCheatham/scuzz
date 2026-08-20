@@ -468,6 +468,9 @@ mod tests {
             ("List.sortB", "List.sortBy"),
             ("List.maxB", "List.maxBy"),
             ("List.minB", "List.minBy"),
+            ("List.groupB", "List.groupBy"),
+            ("List.sum", "List.sum"),
+            ("List.prod", "List.product"),
             ("Color.rgb", "Color.rgb"),
             ("Color.rgb", "Color.rgba"),
         ] {

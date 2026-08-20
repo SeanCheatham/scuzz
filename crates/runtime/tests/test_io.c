@@ -1288,6 +1288,11 @@ static void *str_len_key(void *head, void *env) {
   return sz_box_i64(sz_string_len((SzString *)head));
 }
 
+static void *str_take1(void *head, void *env) {
+  (void)env;
+  return sz_string_take((SzString *)head, 1);
+}
+
 static int64_t keep_none(void *head, void *env) {
   (void)head;
   (void)env;
@@ -6469,6 +6474,120 @@ int main(void) {
     sz_string_free(b);
     sz_string_free(c);
     sz_string_free(aa);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
+  /* List.groupBy / sum / product. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *aa;
+    SzString *b;
+    SzString *cc;
+    SzString *ab;
+    SzString *ac;
+    SzList *xs;
+    SzList *ns;
+    SzMap *g;
+    SzList *keys;
+    SzList *vals;
+    SzList *row;
+    void *n1;
+    void *n2;
+    void *n3;
+    sz_alloc_stats(&base_bytes, &base_count);
+    aa = sz_string_from_cstr("aa");
+    b = sz_string_from_cstr("b");
+    cc = sz_string_from_cstr("cc");
+    xs = sz_list_cons(aa, NULL);
+    {
+      SzList *tmp = sz_list_append(xs, b);
+      sz_release(xs);
+      xs = sz_list_append(tmp, cc);
+      sz_release(tmp);
+    }
+    g = sz_list_group_by(xs, str_len_key, NULL, 0);
+    assert(sz_map_size(g) == 2);
+    keys = sz_map_keys(g);
+    assert(sz_list_len(keys) == 2);
+    assert(sz_unbox_i64(sz_list_head(keys)) == 1);
+    assert(sz_unbox_i64(sz_list_at(keys, 1)) == 2);
+    vals = sz_map_values(g);
+    row = (SzList *)sz_list_head(vals);
+    assert(sz_list_len(row) == 1);
+    assert(row->head == b);
+    row = (SzList *)sz_list_at(vals, 1);
+    assert(sz_list_len(row) == 2);
+    assert(row->head == aa);
+    assert(sz_list_at(row, 1) == cc);
+    sz_list_free(keys);
+    sz_list_free(vals);
+    sz_release(g);
+    g = sz_list_group_by(NULL, str_len_key, NULL, 0);
+    assert(g == NULL);
+    sz_list_free(xs);
+    ab = sz_string_from_cstr("ab");
+    ac = sz_string_from_cstr("ac");
+    xs = sz_list_cons(ab, NULL);
+    {
+      SzList *tmp = sz_list_append(xs, ac);
+      sz_release(xs);
+      xs = sz_list_append(tmp, b);
+      sz_release(tmp);
+    }
+    g = sz_list_group_by(xs, str_take1, NULL, 1);
+    assert(sz_map_size(g) == 2);
+    keys = sz_map_keys(g);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_head(keys)), "a") == 0);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_at(keys, 1)), "b") == 0);
+    vals = sz_map_values(g);
+    row = (SzList *)sz_list_head(vals);
+    assert(sz_list_len(row) == 2);
+    assert(row->head == ab);
+    assert(sz_list_at(row, 1) == ac);
+    row = (SzList *)sz_list_at(vals, 1);
+    assert(sz_list_len(row) == 1);
+    assert(row->head == b);
+    sz_list_free(keys);
+    sz_list_free(vals);
+    sz_release(g);
+    sz_list_free(xs);
+    n1 = sz_box_i64(3);
+    n2 = sz_box_i64(1);
+    n3 = sz_box_i64(3);
+    ns = sz_list_cons(n1, NULL);
+    {
+      SzList *tmp = sz_list_append(ns, n2);
+      sz_release(ns);
+      ns = sz_list_append(tmp, n3);
+      sz_release(tmp);
+    }
+    g = sz_list_group_by(ns, map_id, NULL, 0);
+    assert(sz_map_size(g) == 2);
+    keys = sz_map_keys(g);
+    assert(sz_unbox_i64(sz_list_head(keys)) == 1);
+    assert(sz_unbox_i64(sz_list_at(keys, 1)) == 3);
+    vals = sz_map_values(g);
+    row = (SzList *)sz_list_at(vals, 1);
+    assert(sz_list_len(row) == 2);
+    sz_list_free(keys);
+    sz_list_free(vals);
+    sz_release(g);
+    assert(sz_list_sum(ns) == 7);
+    assert(sz_list_product(ns) == 9);
+    assert(sz_list_sum(NULL) == 0);
+    assert(sz_list_product(NULL) == 1);
+    sz_list_free(ns);
+    sz_release(n1);
+    sz_release(n2);
+    sz_release(n3);
+    sz_string_free(aa);
+    sz_string_free(b);
+    sz_string_free(cc);
+    sz_string_free(ab);
+    sz_string_free(ac);
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);
