@@ -750,9 +750,10 @@ fn collect_pattern_binds(p: &Pattern, out: &mut HashSet<String>) {
             collect_pattern_binds(head, out);
             collect_pattern_binds(tail, out);
         }
-        Pattern::Tuple { left, right, .. } => {
-            collect_pattern_binds(left, out);
-            collect_pattern_binds(right, out);
+        Pattern::Tuple { elems, .. } => {
+            for e in elems {
+                collect_pattern_binds(e, out);
+            }
         }
         Pattern::Named { inner, .. } => collect_pattern_binds(inner, out),
         Pattern::Or(ps) => {
@@ -849,9 +850,14 @@ fn collect_type_names(ty: &Type, out: &mut HashSet<String>) {
     match ty {
         Type::Adt(n) | Type::App(n, _) | Type::Var(n) | Type::Opaque(n) => mark_name(n, out),
         Type::List(t) | Type::Io(t) => collect_type_names(t, out),
-        Type::Fun(a, b) | Type::Tuple(a, b) => {
+        Type::Fun(a, b) => {
             collect_type_names(a, out);
             collect_type_names(b, out);
+        }
+        Type::Tuple(xs) => {
+            for t in xs {
+                collect_type_names(t, out);
+            }
         }
         _ => {}
     }
@@ -876,9 +882,10 @@ fn collect_pat_names(p: &Pattern, out: &mut HashSet<String>) {
             collect_pat_names(head, out);
             collect_pat_names(tail, out);
         }
-        Pattern::Tuple { left, right, .. } => {
-            collect_pat_names(left, out);
-            collect_pat_names(right, out);
+        Pattern::Tuple { elems, .. } => {
+            for e in elems {
+                collect_pat_names(e, out);
+            }
         }
         Pattern::Or(ps) => {
             for p in ps {

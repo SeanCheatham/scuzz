@@ -500,9 +500,10 @@ fn expand_alias_ty(
             Box::new(expand_alias_ty(a, aliases, imports, module, stack)?),
             Box::new(expand_alias_ty(b, aliases, imports, module, stack)?),
         )),
-        Type::Tuple(a, b) => Ok(Type::Tuple(
-            Box::new(expand_alias_ty(a, aliases, imports, module, stack)?),
-            Box::new(expand_alias_ty(b, aliases, imports, module, stack)?),
+        Type::Tuple(xs) => Ok(Type::Tuple(
+            xs.iter()
+                .map(|t| expand_alias_ty(t, aliases, imports, module, stack))
+                .collect::<Result<Vec<_>, _>>()?,
         )),
         Type::Adt(n) => expand_alias_name(n, &[], aliases, imports, module, stack),
         Type::App(n, args) => {
@@ -1687,9 +1688,10 @@ fn collect_ascribe_tparams(ty: &Type, enums: &EnumIndex<'_>, module: &str, out: 
             collect_ascribe_tparams(a, enums, module, out);
             collect_ascribe_tparams(b, enums, module, out);
         }
-        Type::Tuple(a, b) => {
-            collect_ascribe_tparams(a, enums, module, out);
-            collect_ascribe_tparams(b, enums, module, out);
+        Type::Tuple(xs) => {
+            for t in xs {
+                collect_ascribe_tparams(t, enums, module, out);
+            }
         }
         _ => {}
     }
@@ -1772,9 +1774,10 @@ fn resolve_type_in(
             Box::new(resolve_type_in(a, enums, module, type_params)?),
             Box::new(resolve_type_in(b, enums, module, type_params)?),
         )),
-        Type::Tuple(a, b) => Ok(Type::Tuple(
-            Box::new(resolve_type_in(a, enums, module, type_params)?),
-            Box::new(resolve_type_in(b, enums, module, type_params)?),
+        Type::Tuple(xs) => Ok(Type::Tuple(
+            xs.iter()
+                .map(|t| resolve_type_in(t, enums, module, type_params))
+                .collect::<Result<Vec<_>, _>>()?,
         )),
         other => Ok(other.clone()),
     }
@@ -1801,14 +1804,19 @@ fn field_type(
     enums: &EnumIndex<'_>,
     current_module: &str,
 ) -> Result<Type, TypeError> {
-    if let Type::Tuple(a, b) = base_ty {
-        return match field {
-            "_1" => Ok((**a).clone()),
-            "_2" => Ok((**b).clone()),
-            _ => Err(TypeError::Msg(format!(
-                "tuple has fields _1 and _2, not {field}"
-            ))),
+    if let Type::Tuple(slots) = base_ty {
+        let Some(idx) = crate::ast::tuple_slot(field) else {
+            return Err(TypeError::Msg(format!(
+                "tuple has fields _1 through _{}, not {field}",
+                slots.len()
+            )));
         };
+        return slots.get(idx).cloned().ok_or_else(|| {
+            TypeError::Msg(format!(
+                "tuple has fields _1 through _{}, not {field}",
+                slots.len()
+            ))
+        });
     }
     let (id, targs): (&str, &[Type]) = match base_ty {
         Type::Adt(id) => (id, &[]),
@@ -2442,24 +2450,32 @@ fn rewrite_fields(
         ExprKind::Field { base, field } => {
             let base = rewrite_fields(*base, enums, funs, methods, current_module, env)?;
             let bt = infer(&base, enums, funs, methods, current_module, env)?;
-            if let Type::Tuple(a, b) = &bt {
-                if field != "_1" && field != "_2" {
-                    return Err(
-                        TypeError::Msg(format!("tuple has fields _1 and _2, not {field}"))
-                            .with_span_if_bare(&span),
-                    );
+            if let Type::Tuple(slots) = &bt {
+                let Some(idx) = crate::ast::tuple_slot(&field) else {
+                    return Err(TypeError::Msg(format!(
+                        "tuple has fields _1 through _{}, not {field}",
+                        slots.len()
+                    ))
+                    .with_span_if_bare(&span));
+                };
+                if idx >= slots.len() {
+                    return Err(TypeError::Msg(format!(
+                        "tuple has fields _1 through _{}, not {field}",
+                        slots.len()
+                    ))
+                    .with_span_if_bare(&span));
                 }
-                let body_name = if field == "_1" { "__f0" } else { "__f1" };
-                let body = Expr::new(ExprKind::Var(body_name.to_string()), span.clone());
+                let binds: Vec<crate::ast::Pattern> = (0..slots.len())
+                    .map(|i| crate::ast::Pattern::Bind(format!("__f{i}")))
+                    .collect();
+                let body = Expr::new(ExprKind::Var(format!("__f{idx}")), span.clone());
                 return Ok(Expr::new(
                     ExprKind::Match {
                         scrutinee: Box::new(base),
                         arms: vec![crate::ast::MatchArm::new(
                             crate::ast::Pattern::Tuple {
-                                left: Box::new(crate::ast::Pattern::Bind("__f0".into())),
-                                right: Box::new(crate::ast::Pattern::Bind("__f1".into())),
-                                left_ty: (**a).clone(),
-                                right_ty: (**b).clone(),
+                                elems: binds,
+                                tys: slots.clone(),
                             },
                             body,
                         )],
@@ -2664,10 +2680,15 @@ fn infer(
                     elem.unwrap_or_else(|| Type::Opaque("Elem".into())),
                 )))
             }
-            ExprKind::Tuple { left, right } => {
-                let lt = infer(left, enums, funs, methods, current_module, env)?;
-                let rt = infer(right, enums, funs, methods, current_module, env)?;
-                Ok(Type::Tuple(Box::new(lt), Box::new(rt)))
+            ExprKind::Tuple { elems } => {
+                let mut tys = Vec::new();
+                for e in elems {
+                    tys.push(infer(e, enums, funs, methods, current_module, env)?);
+                }
+                if tys.len() < 2 {
+                    return Err(TypeError::Msg("tuple needs two or more slots".into()));
+                }
+                Ok(Type::Tuple(tys))
             }
             ExprKind::Interpolate { parts } => {
                 for part in parts {
@@ -3063,7 +3084,7 @@ fn infer(
                 let Type::Io(b) = rt else {
                     return Err(TypeError::Msg("IO.both arguments must be IO[_]".into()));
                 };
-                Ok(Type::Io(Box::new(Type::Tuple(a, b))))
+                Ok(Type::Io(Box::new(Type::Tuple(vec![*a, *b]))))
             }
             ExprKind::IoEnsure { inner, finalizer } => {
                 let it = infer(inner, enums, funs, methods, current_module, env)?;
@@ -4671,9 +4692,11 @@ fn check_payload_ty(
     match fty {
         Type::Int | Type::Float | Type::String | Type::Bool | Type::Adt(_) => Ok(()),
         Type::List(inner) => check_payload_ty(enum_name, en, case, fname, inner),
-        Type::Tuple(a, b) => {
-            check_payload_ty(enum_name, en, case, fname, a)?;
-            check_payload_ty(enum_name, en, case, fname, b)
+        Type::Tuple(xs) => {
+            for t in xs {
+                check_payload_ty(enum_name, en, case, fname, t)?;
+            }
+            Ok(())
         }
         Type::App(_, args) => {
             for a in args {
@@ -4871,18 +4894,27 @@ fn bind_pattern(
             )?);
             Ok(restored)
         }
-        crate::ast::Pattern::Tuple { left, right, .. } => {
-            let (a, b) = match scrut {
-                Type::Tuple(a, b) => ((**a).clone(), (**b).clone()),
-                Type::Opaque(_) => (scrut.clone(), scrut.clone()),
+        crate::ast::Pattern::Tuple { elems, .. } => {
+            let slots = match scrut {
+                Type::Tuple(xs) => xs.clone(),
+                Type::Opaque(_) => vec![scrut.clone(); elems.len()],
                 other => {
                     return Err(TypeError::Msg(format!(
                         "tuple pattern does not match scrutinee {other:?}"
                     )))
                 }
             };
-            let mut restored = bind_pattern(left, &a, enums, current_module, env, loose)?;
-            restored.extend(bind_pattern(right, &b, enums, current_module, env, loose)?);
+            if slots.len() != elems.len() {
+                return Err(TypeError::Msg(format!(
+                    "tuple pattern has {} slots, scrutinee has {}",
+                    elems.len(),
+                    slots.len()
+                )));
+            }
+            let mut restored = Vec::new();
+            for (p, t) in elems.iter().zip(slots.iter()) {
+                restored.extend(bind_pattern(p, t, enums, current_module, env, loose)?);
+            }
             Ok(restored)
         }
     }
@@ -5021,16 +5053,12 @@ fn rewrite_named_in_pattern(
             tail: Box::new(rewrite_named_in_pattern(tail, enums, current_module)?),
             elem: elem.clone(),
         }),
-        crate::ast::Pattern::Tuple {
-            left,
-            right,
-            left_ty,
-            right_ty,
-        } => Ok(crate::ast::Pattern::Tuple {
-            left: Box::new(rewrite_named_in_pattern(left, enums, current_module)?),
-            right: Box::new(rewrite_named_in_pattern(right, enums, current_module)?),
-            left_ty: left_ty.clone(),
-            right_ty: right_ty.clone(),
+        crate::ast::Pattern::Tuple { elems, tys } => Ok(crate::ast::Pattern::Tuple {
+            elems: elems
+                .iter()
+                .map(|e| rewrite_named_in_pattern(e, enums, current_module))
+                .collect::<Result<Vec<_>, _>>()?,
+            tys: tys.clone(),
         }),
         crate::ast::Pattern::Named { name, inner } => Ok(crate::ast::Pattern::Named {
             name: name.clone(),
@@ -5077,9 +5105,10 @@ fn collect_bind_names(pat: &crate::ast::Pattern, out: &mut Vec<String>) {
             collect_bind_names(head, out);
             collect_bind_names(tail, out);
         }
-        crate::ast::Pattern::Tuple { left, right, .. } => {
-            collect_bind_names(left, out);
-            collect_bind_names(right, out);
+        crate::ast::Pattern::Tuple { elems, .. } => {
+            for e in elems {
+                collect_bind_names(e, out);
+            }
         }
         crate::ast::Pattern::Named { inner, .. } => collect_bind_names(inner, out),
         crate::ast::Pattern::Or(alts) => {
@@ -5260,18 +5289,19 @@ fn uncovered_product(
             }
             Ok(missing)
         }
-        Type::Tuple(a, b) => {
+        Type::Tuple(slots) => {
             let mut spec: Vec<Vec<crate::ast::Pattern>> = Vec::new();
             for r in rows {
                 match r.first() {
                     Some(p) if p.is_irrefutable() => {
-                        let mut rest =
-                            vec![crate::ast::Pattern::Wildcard, crate::ast::Pattern::Wildcard];
+                        let mut rest = vec![crate::ast::Pattern::Wildcard; slots.len()];
                         rest.extend(r.iter().skip(1).cloned());
                         spec.push(rest);
                     }
-                    Some(crate::ast::Pattern::Tuple { left, right, .. }) => {
-                        let mut rest = vec![(**left).clone(), (**right).clone()];
+                    Some(crate::ast::Pattern::Tuple { elems, .. })
+                        if elems.len() == slots.len() =>
+                    {
+                        let mut rest = elems.clone();
                         rest.extend(r.iter().skip(1).cloned());
                         spec.push(rest);
                     }
@@ -5281,7 +5311,7 @@ fn uncovered_product(
             if spec.is_empty() {
                 return Ok(vec![head.to_string()]);
             }
-            let mut nested = vec![(**a).clone(), (**b).clone()];
+            let mut nested = slots.clone();
             nested.extend(tail.iter().cloned());
             let missing = uncovered_product(&nested, &spec, enums, current_module)?;
             if missing.is_empty() {
@@ -5471,10 +5501,10 @@ fn elaborate_pattern(
                 elem,
             })
         }
-        crate::ast::Pattern::Tuple { left, right, .. } => {
-            let (a, b) = match scrut {
-                Type::Tuple(a, b) => ((**a).clone(), (**b).clone()),
-                Type::Opaque(_) => (scrut.clone(), scrut.clone()),
+        crate::ast::Pattern::Tuple { elems, .. } => {
+            let slots = match scrut {
+                Type::Tuple(xs) => xs.clone(),
+                Type::Opaque(_) => vec![scrut.clone(); elems.len()],
                 _ => {
                     return Err(TypeError::Msg(format!(
                         "tuple pattern does not match scrutinee {scrut:?}"
@@ -5482,27 +5512,29 @@ fn elaborate_pattern(
                     .with_span_if_bare(span));
                 }
             };
+            if slots.len() != elems.len() {
+                return Err(TypeError::Msg(format!(
+                    "tuple pattern has {} slots, scrutinee has {}",
+                    elems.len(),
+                    slots.len()
+                ))
+                .with_span_if_bare(span));
+            }
+            let mut out_elems = Vec::new();
+            for (p, t) in elems.iter().zip(slots.iter()) {
+                out_elems.push(elaborate_pattern(
+                    p,
+                    t,
+                    enums,
+                    current_module,
+                    tparams,
+                    span,
+                    loose,
+                )?);
+            }
             Ok(crate::ast::Pattern::Tuple {
-                left: Box::new(elaborate_pattern(
-                    left,
-                    &a,
-                    enums,
-                    current_module,
-                    tparams,
-                    span,
-                    loose,
-                )?),
-                right: Box::new(elaborate_pattern(
-                    right,
-                    &b,
-                    enums,
-                    current_module,
-                    tparams,
-                    span,
-                    loose,
-                )?),
-                left_ty: a,
-                right_ty: b,
+                elems: out_elems,
+                tys: slots,
             })
         }
         crate::ast::Pattern::Named { name, inner: _ } => Err(TypeError::Msg(format!(
@@ -5520,7 +5552,9 @@ fn types_compat(a: &Type, b: &Type) -> bool {
         (Type::Bool, Type::Bool) => true,
         (Type::String, Type::String) => true,
         (Type::List(x), Type::List(y)) => types_compat(x, y),
-        (Type::Tuple(a0, a1), Type::Tuple(b0, b1)) => types_compat(a0, b0) && types_compat(a1, b1),
+        (Type::Tuple(a), Type::Tuple(b)) => {
+            a.len() == b.len() && a.iter().zip(b.iter()).all(|(u, v)| types_compat(u, v))
+        }
         (Type::Fun(a0, a1), Type::Fun(b0, b1)) => types_compat(a0, b0) && types_compat(a1, b1),
         (Type::Io(x), Type::Io(y)) => types_compat(x, y),
         (Type::Adt(x), Type::Adt(y)) => x == y,
@@ -5685,9 +5719,11 @@ fn unify_types(
         }
         (Type::Io(a), Type::Io(b)) => unify_types(a, b, subst),
         (Type::List(a), Type::List(b)) => unify_types(a, b, subst),
-        (Type::Tuple(a0, a1), Type::Tuple(b0, b1)) => {
-            unify_types(a0, b0, subst)?;
-            unify_types(a1, b1, subst)
+        (Type::Tuple(a), Type::Tuple(b)) if a.len() == b.len() => {
+            for (u, v) in a.iter().zip(b.iter()) {
+                unify_types(u, v, subst)?;
+            }
+            Ok(())
         }
         (Type::Fun(a0, a1), Type::Fun(b0, b1)) => {
             unify_types(a0, b0, subst)?;
@@ -5733,9 +5769,11 @@ fn unify_construct(
         }
         (Type::Io(a), Type::Io(b)) => unify_construct(a, b, subst),
         (Type::List(a), Type::List(b)) => unify_construct(a, b, subst),
-        (Type::Tuple(a0, a1), Type::Tuple(b0, b1)) => {
-            unify_construct(a0, b0, subst)?;
-            unify_construct(a1, b1, subst)
+        (Type::Tuple(a), Type::Tuple(b)) if a.len() == b.len() => {
+            for (u, v) in a.iter().zip(b.iter()) {
+                unify_construct(u, v, subst)?;
+            }
+            Ok(())
         }
         (Type::Fun(a0, a1), Type::Fun(b0, b1)) => {
             unify_construct(a0, b0, subst)?;
@@ -5763,7 +5801,7 @@ fn mono_type_ok(t: &Type) -> bool {
         | Type::Bool
         | Type::List(_)
         | Type::Adt(_) => true,
-        Type::Tuple(a, b) => mono_type_ok(a) && mono_type_ok(b),
+        Type::Tuple(xs) => xs.iter().all(mono_type_ok),
         Type::App(_, args) => args.iter().all(mono_type_ok),
         Type::Io(inner) => mono_type_ok(inner),
         _ => false,
@@ -5775,10 +5813,7 @@ fn apply_subst(ty: &Type, subst: &HashMap<String, Type>) -> Type {
         Type::Var(n) => subst.get(n).cloned().unwrap_or_else(|| ty.clone()),
         Type::Io(inner) => Type::Io(Box::new(apply_subst(inner, subst))),
         Type::List(inner) => Type::List(Box::new(apply_subst(inner, subst))),
-        Type::Tuple(a, b) => Type::Tuple(
-            Box::new(apply_subst(a, subst)),
-            Box::new(apply_subst(b, subst)),
-        ),
+        Type::Tuple(xs) => Type::Tuple(xs.iter().map(|t| apply_subst(t, subst)).collect()),
         Type::Fun(a, b) => Type::Fun(
             Box::new(apply_subst(a, subst)),
             Box::new(apply_subst(b, subst)),
@@ -5798,10 +5833,7 @@ fn erase_vars(ty: &Type, names: &[String]) -> Type {
         Type::Var(n) if names.iter().any(|p| p == n) => Type::Opaque(n.clone()),
         Type::Io(inner) => Type::Io(Box::new(erase_vars(inner, names))),
         Type::List(inner) => Type::List(Box::new(erase_vars(inner, names))),
-        Type::Tuple(a, b) => Type::Tuple(
-            Box::new(erase_vars(a, names)),
-            Box::new(erase_vars(b, names)),
-        ),
+        Type::Tuple(xs) => Type::Tuple(xs.iter().map(|t| erase_vars(t, names)).collect()),
         Type::Fun(a, b) => Type::Fun(
             Box::new(erase_vars(a, names)),
             Box::new(erase_vars(b, names)),
@@ -5822,7 +5854,10 @@ fn type_mangle(t: &Type) -> String {
         Type::String => "String".into(),
         Type::Bool => "Bool".into(),
         Type::List(inner) => format!("List_{}", type_mangle(inner)),
-        Type::Tuple(a, b) => format!("Tup_{}_{}", type_mangle(a), type_mangle(b)),
+        Type::Tuple(xs) => format!(
+            "Tup_{}",
+            xs.iter().map(type_mangle).collect::<Vec<_>>().join("_")
+        ),
         Type::Fun(a, b) => format!("Fun_{}_{}", type_mangle(a), type_mangle(b)),
         Type::Adt(id) => id.replace('.', "_"),
         Type::App(id, args) => format!(
@@ -6165,26 +6200,12 @@ fn mono_expr(
             },
             span,
         )),
-        ExprKind::Tuple { left, right } => Ok(Expr::new(
+        ExprKind::Tuple { elems } => Ok(Expr::new(
             ExprKind::Tuple {
-                left: Box::new(mono_expr(
-                    *left,
-                    enums,
-                    funs,
-                    methods,
-                    current_module,
-                    env,
-                    specialized,
-                )?),
-                right: Box::new(mono_expr(
-                    *right,
-                    enums,
-                    funs,
-                    methods,
-                    current_module,
-                    env,
-                    specialized,
-                )?),
+                elems: elems
+                    .into_iter()
+                    .map(|e| mono_expr(e, enums, funs, methods, current_module, env, specialized))
+                    .collect::<Result<Vec<_>, _>>()?,
             },
             span,
         )),
@@ -6577,9 +6598,8 @@ fn usable_expected(ty: &Type, tparams: &[String]) -> bool {
         Type::Var(n) => tparams.iter().any(|p| p == n),
         Type::Io(inner) => usable_expected(inner, tparams),
         Type::List(inner) => usable_expected(inner, tparams),
-        Type::Fun(a, b) | Type::Tuple(a, b) => {
-            usable_expected(a, tparams) && usable_expected(b, tparams)
-        }
+        Type::Fun(a, b) => usable_expected(a, tparams) && usable_expected(b, tparams),
+        Type::Tuple(xs) => xs.iter().all(|t| usable_expected(t, tparams)),
         Type::App(_, args) => args.iter().all(|a| usable_expected(a, tparams)),
         _ => true,
     }
@@ -6590,7 +6610,8 @@ fn contains_unbound(t: &Type) -> bool {
     match t {
         Type::Opaque(n) => n.starts_with("__unbound_"),
         Type::Io(inner) | Type::List(inner) => contains_unbound(inner),
-        Type::Fun(a, b) | Type::Tuple(a, b) => contains_unbound(a) || contains_unbound(b),
+        Type::Fun(a, b) => contains_unbound(a) || contains_unbound(b),
+        Type::Tuple(xs) => xs.iter().any(contains_unbound),
         Type::App(_, args) => args.iter().any(contains_unbound),
         _ => false,
     }
@@ -6639,9 +6660,15 @@ fn check_targ(
         Type::List(inner) | Type::Io(inner) => {
             check_targ(enum_name, case_name, inner, tparams, span)
         }
-        Type::Fun(a, b) | Type::Tuple(a, b) => {
+        Type::Fun(a, b) => {
             check_targ(enum_name, case_name, a, tparams, span)?;
             check_targ(enum_name, case_name, b, tparams, span)
+        }
+        Type::Tuple(xs) => {
+            for t in xs {
+                check_targ(enum_name, case_name, t, tparams, span)?;
+            }
+            Ok(())
         }
         _ => Ok(()),
     }
@@ -7214,33 +7241,29 @@ fn elaborate_expr(
             },
             span,
         )),
-        ExprKind::Tuple { left, right } => {
-            let (lexp, rexp) = match expected {
-                Some(Type::Tuple(a, b)) => (Some(a.as_ref()), Some(b.as_ref())),
-                _ => (None, None),
+        ExprKind::Tuple { elems } => {
+            let slot_exp: Vec<Option<&Type>> = match expected {
+                Some(Type::Tuple(xs)) if xs.len() == elems.len() => xs.iter().map(Some).collect(),
+                _ => vec![None; elems.len()],
             };
             Ok(Expr::new(
                 ExprKind::Tuple {
-                    left: Box::new(elaborate_expr(
-                        *left,
-                        enums,
-                        funs,
-                        methods,
-                        current_module,
-                        env,
-                        lexp,
-                        tparams,
-                    )?),
-                    right: Box::new(elaborate_expr(
-                        *right,
-                        enums,
-                        funs,
-                        methods,
-                        current_module,
-                        env,
-                        rexp,
-                        tparams,
-                    )?),
+                    elems: elems
+                        .into_iter()
+                        .zip(slot_exp)
+                        .map(|(e, exp)| {
+                            elaborate_expr(
+                                e,
+                                enums,
+                                funs,
+                                methods,
+                                current_module,
+                                env,
+                                exp,
+                                tparams,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
                 },
                 span,
             ))
@@ -7567,9 +7590,11 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
             left: Box::new(subst_node_targs(*left, subst)),
             right: Box::new(subst_node_targs(*right, subst)),
         },
-        ExprKind::Tuple { left, right } => ExprKind::Tuple {
-            left: Box::new(subst_node_targs(*left, subst)),
-            right: Box::new(subst_node_targs(*right, subst)),
+        ExprKind::Tuple { elems } => ExprKind::Tuple {
+            elems: elems
+                .into_iter()
+                .map(|e| subst_node_targs(e, subst))
+                .collect(),
         },
         ExprKind::IoEnsure { inner, finalizer } => ExprKind::IoEnsure {
             inner: Box::new(subst_node_targs(*inner, subst)),
@@ -7670,16 +7695,9 @@ fn subst_pattern(pat: crate::ast::Pattern, subst: &HashMap<String, Type>) -> cra
             tail: Box::new(subst_pattern(*tail, subst)),
             elem: apply_subst(&elem, subst),
         },
-        crate::ast::Pattern::Tuple {
-            left,
-            right,
-            left_ty,
-            right_ty,
-        } => crate::ast::Pattern::Tuple {
-            left: Box::new(subst_pattern(*left, subst)),
-            right: Box::new(subst_pattern(*right, subst)),
-            left_ty: apply_subst(&left_ty, subst),
-            right_ty: apply_subst(&right_ty, subst),
+        crate::ast::Pattern::Tuple { elems, tys } => crate::ast::Pattern::Tuple {
+            elems: elems.into_iter().map(|e| subst_pattern(e, subst)).collect(),
+            tys: tys.iter().map(|t| apply_subst(t, subst)).collect(),
         },
         crate::ast::Pattern::Named { name, inner } => crate::ast::Pattern::Named {
             name,
@@ -7709,9 +7727,14 @@ fn collect_apps_in_type(ty: &Type, out: &mut Vec<(String, Vec<Type>)>) {
             }
         }
         Type::Io(inner) | Type::List(inner) => collect_apps_in_type(inner, out),
-        Type::Fun(a, b) | Type::Tuple(a, b) => {
+        Type::Fun(a, b) => {
             collect_apps_in_type(a, out);
             collect_apps_in_type(b, out);
+        }
+        Type::Tuple(xs) => {
+            for t in xs {
+                collect_apps_in_type(t, out);
+            }
         }
         _ => {}
     }
@@ -7779,7 +7802,6 @@ fn collect_node_targs(expr: &Expr, out: &mut Vec<(String, Vec<Type>)>) {
         }
         ExprKind::IoRace { left, right }
         | ExprKind::IoBoth { left, right }
-        | ExprKind::Tuple { left, right }
         | ExprKind::IoEnsure {
             inner: left,
             finalizer: right,
@@ -7790,6 +7812,11 @@ fn collect_node_targs(expr: &Expr, out: &mut Vec<(String, Vec<Type>)>) {
         } => {
             collect_node_targs(left, out);
             collect_node_targs(right, out);
+        }
+        ExprKind::Tuple { elems } => {
+            for e in elems {
+                collect_node_targs(e, out);
+            }
         }
         ExprKind::Field { base, .. } => collect_node_targs(base, out),
         ExprKind::MethodCall { receiver, args, .. } => {
@@ -7965,9 +7992,11 @@ fn rewrite_enum_refs(
             left: Box::new(rewrite_enum_refs(*left, clones)?),
             right: Box::new(rewrite_enum_refs(*right, clones)?),
         },
-        ExprKind::Tuple { left, right } => ExprKind::Tuple {
-            left: Box::new(rewrite_enum_refs(*left, clones)?),
-            right: Box::new(rewrite_enum_refs(*right, clones)?),
+        ExprKind::Tuple { elems } => ExprKind::Tuple {
+            elems: elems
+                .into_iter()
+                .map(|e| rewrite_enum_refs(e, clones))
+                .collect::<Result<Vec<_>, _>>()?,
         },
         ExprKind::IoEnsure { inner, finalizer } => ExprKind::IoEnsure {
             inner: Box::new(rewrite_enum_refs(*inner, clones)?),
@@ -8099,16 +8128,15 @@ fn rewrite_pattern(
             tail: Box::new(rewrite_pattern(*tail, clones)?),
             elem: concretize_type(&elem, clones)?,
         }),
-        crate::ast::Pattern::Tuple {
-            left,
-            right,
-            left_ty,
-            right_ty,
-        } => Ok(crate::ast::Pattern::Tuple {
-            left: Box::new(rewrite_pattern(*left, clones)?),
-            right: Box::new(rewrite_pattern(*right, clones)?),
-            left_ty: concretize_type(&left_ty, clones)?,
-            right_ty: concretize_type(&right_ty, clones)?,
+        crate::ast::Pattern::Tuple { elems, tys } => Ok(crate::ast::Pattern::Tuple {
+            elems: elems
+                .into_iter()
+                .map(|e| rewrite_pattern(e, clones))
+                .collect::<Result<Vec<_>, _>>()?,
+            tys: tys
+                .iter()
+                .map(|t| concretize_type(t, clones))
+                .collect::<Result<Vec<_>, _>>()?,
         }),
         crate::ast::Pattern::Named { name, inner } => Ok(crate::ast::Pattern::Named {
             name,
@@ -8139,9 +8167,10 @@ fn concretize_type(
         }
         Type::Io(inner) => Ok(Type::Io(Box::new(concretize_type(inner, clones)?))),
         Type::List(inner) => Ok(Type::List(Box::new(concretize_type(inner, clones)?))),
-        Type::Tuple(a, b) => Ok(Type::Tuple(
-            Box::new(concretize_type(a, clones)?),
-            Box::new(concretize_type(b, clones)?),
+        Type::Tuple(xs) => Ok(Type::Tuple(
+            xs.iter()
+                .map(|t| concretize_type(t, clones))
+                .collect::<Result<Vec<_>, _>>()?,
         )),
         Type::Fun(a, b) => Ok(Type::Fun(
             Box::new(concretize_type(a, clones)?),
@@ -9136,6 +9165,48 @@ def firsts(xs: List[(Int, String)]): List[Int] =
     }
 
     #[test]
+    fn typechecks_three_slot_tuple() {
+        let src = r#"
+def rot(t: (Int, String, Bool)): (String, Bool, Int) =
+  t match {
+    case (a, b, c) => (b, c, a)
+  }
+def mid(t: (Int, String, Bool)): String = t._2
+@main def main: IO[Unit] =
+  for {
+    (n, s, ok) = (1, "x", true)
+    r = rot((n, s, ok))
+    _ <- IO.println(Str.fromInt(n))
+    _ <- IO.println(s)
+    _ <- IO.println(if (ok) "y" else "n")
+    _ <- IO.println(mid((n, s, ok)))
+    _ <- IO.println(Str.fromInt(r._3))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("3-slot tuple");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate 3-slot");
+        let p = crate::typ::resolve_field_access(p).expect("fields");
+        crate::typ::monomorphize(p).expect("mono 3-slot");
+    }
+
+    #[test]
+    fn rejects_arity_mismatch_tuple_pattern() {
+        let src = r#"
+@main def main: IO[Unit] =
+  (1, "x") match {
+    case (a, b, c) => IO.println(a)
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(
+            err.contains("tuple pattern has 3 slots") || err.contains("scrutinee has 2"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn typechecks_ctor_for_binder_and_lambda() {
         let src = r#"
 enum Opt[T]:
@@ -9205,7 +9276,7 @@ enum Opt[T]:
 "#;
         let p = lower_program(parse(src).unwrap());
         let err = typecheck(&p).unwrap_err().to_string();
-        assert!(err.contains("tuple has fields _1 and _2"), "{err}");
+        assert!(err.contains("tuple has fields _1 through _2"), "{err}");
     }
 
     #[test]

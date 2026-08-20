@@ -390,6 +390,11 @@ def swap[A, B](p: (A, B)): (B, A) =
     case (a, b) => (b, a)
   }
 
+def rot3(t: (Int, String, Bool)): (String, Bool, Int) =
+  t match {
+    case (a, b, c) => (b, c, a)
+  }
+
 def firsts(xs: List[(Int, String)]): List[Int] =
   List.map(xs, (n, _) => n)
 
@@ -421,6 +426,13 @@ def tupleProof(): IO[Unit] =
     _ <- IO.println(s"eqTup:${if ((n, s) == (42, "ok") && (1, "x") != (2, "x")) "y" else "n"}")
     _ <- IO.println(s"both:$bothS")
     _ <- IO.println(s"first:${Str.fromInt(List.head(firsts([(9, "z")])))}")
+    (tn, ts, tok) = (1, "x", true)
+    r3 = rot3((tn, ts, tok))
+    _ <- IO.println(s"tri:${Str.fromInt(tn)}")
+    _ <- IO.println(s"tri:$ts")
+    _ <- IO.println(s"tri:${if (tok) "y" else "n"}")
+    _ <- IO.println(s"rot:${r3._1}")
+    _ <- IO.println(s"rot:${Str.fromInt(r3._3)}")
   } yield ()
 
 def eqProof(): IO[Unit] =

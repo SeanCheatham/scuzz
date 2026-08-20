@@ -259,7 +259,10 @@ fn pretty_type(t: &Type) -> String {
         Type::String => "String".into(),
         Type::Bool => "Bool".into(),
         Type::List(inner) => format!("List[{}]", pretty_type(inner)),
-        Type::Tuple(a, b) => format!("({}, {})", pretty_type(a), pretty_type(b)),
+        Type::Tuple(xs) => format!(
+            "({})",
+            xs.iter().map(pretty_type).collect::<Vec<_>>().join(", ")
+        ),
         Type::Fun(a, b) => {
             let left = pretty_type(a);
             if matches!(a.as_ref(), Type::Fun(_, _)) {
@@ -450,12 +453,12 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
                 .collect();
             format!("{pad}[{}]", a.join(", "))
         }
-        ExprKind::Tuple { left, right } => {
-            format!(
-                "{pad}({}, {})",
-                pretty_expr(left, 0).trim(),
-                pretty_expr(right, 0).trim()
-            )
+        ExprKind::Tuple { elems } => {
+            let inner: Vec<String> = elems
+                .iter()
+                .map(|e| pretty_expr(e, 0).trim().to_string())
+                .collect();
+            format!("{pad}({})", inner.join(", "))
         }
         ExprKind::Interpolate { parts } => {
             format!("{pad}{}", quote_interpolate(parts))
@@ -763,8 +766,9 @@ fn pretty_pattern(pat: &Pattern) -> String {
         Pattern::As { name, inner } => format!("{name} @ {}", pretty_pattern(inner)),
         Pattern::Nil => "[]".into(),
         Pattern::Cons { head, tail, .. } => pretty_cons_pattern(head, tail),
-        Pattern::Tuple { left, right, .. } => {
-            format!("({}, {})", pretty_pattern(left), pretty_pattern(right))
+        Pattern::Tuple { elems, .. } => {
+            let inner: Vec<String> = elems.iter().map(pretty_pattern).collect();
+            format!("({})", inner.join(", "))
         }
         Pattern::Named { name, inner } => format!("{name} = {}", pretty_pattern(inner)),
         Pattern::Adt {

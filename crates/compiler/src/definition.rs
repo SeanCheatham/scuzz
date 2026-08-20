@@ -211,7 +211,8 @@ fn is_builtin_type(name: &str) -> bool {
 fn peel_type(ty: &Type) -> &Type {
     match ty {
         Type::List(t) | Type::Io(t) => peel_type(t),
-        Type::Fun(_, r) | Type::Tuple(_, r) => peel_type(r),
+        Type::Fun(_, r) => peel_type(r),
+        Type::Tuple(xs) => xs.last().map(peel_type).unwrap_or(ty),
         other => other,
     }
 }
