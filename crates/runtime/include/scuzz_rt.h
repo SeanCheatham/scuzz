@@ -393,12 +393,14 @@ SzIo *sz_deferred_complete_cstr(SzDeferred *d, const char *value);
 /* Get retains the completed value. Caller drops the run result. */
 SzIo *sz_deferred_get(SzDeferred *d); /* IO[A]; parks until complete under the fiber scheduler */
 
-/* Queue — unbounded FIFO of void*. */
+/* Queue — unbounded FIFO of void*. Items sit in a ring. Waiters are FIFO
+ * (oldest parked take gets the next offer). */
 struct SzQueue {
   void **items;
+  size_t head; /* index of the oldest item; unused when len is 0 */
   size_t len;
   size_t cap;
-  void *waiters; /* runtime Fiber* list while take is parked */
+  void *waiters; /* runtime Fiber* FIFO while take is parked */
 };
 
 SzQueue *sz_queue_make(void);

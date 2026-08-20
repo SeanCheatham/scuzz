@@ -2314,6 +2314,39 @@ int main(void) {
     sz_queue_free(q);
   }
 
+  /* Queue ring: take from the front, then offer until the ring wraps and grows. */
+  {
+    static const char *items[] = {"0", "1", "2", "3", "4", "5", "6", "7",
+                                  "8", "9", "10", "11"};
+    SzQueue *q = sz_queue_make();
+    size_t i;
+    for (i = 0; i < 8; i++) {
+      r = sz_io_unsafe_run(sz_queue_offer_cstr(q, items[i]));
+      assert(r.ok);
+    }
+    assert(sz_queue_size(q) == 8);
+    for (i = 0; i < 3; i++) {
+      r = sz_io_unsafe_run(sz_queue_take(q));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), items[i]) == 0);
+      sz_release(r.value);
+    }
+    assert(sz_queue_size(q) == 5);
+    for (i = 8; i < 12; i++) {
+      r = sz_io_unsafe_run(sz_queue_offer_cstr(q, items[i]));
+      assert(r.ok);
+    }
+    assert(sz_queue_size(q) == 9);
+    for (i = 3; i < 12; i++) {
+      r = sz_io_unsafe_run(sz_queue_take(q));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), items[i]) == 0);
+      sz_release(r.value);
+    }
+    assert(sz_queue_size(q) == 0);
+    sz_queue_free(q);
+  }
+
   /* Leftover Queue / Ref / Deferred payloads drop on free. */
   {
     size_t base_bytes = 0, base_count = 0;
@@ -3494,6 +3527,24 @@ int main(void) {
       assert(p);
       assert(strcmp(sz_string_cstr((SzString *)p->left), "parked") == 0);
       sz_pair_free(p);
+    }
+    sz_queue_free(q);
+
+    /* Two parked takes get offers in waiter order (oldest take first). */
+    q = sz_queue_make();
+    r = sz_io_unsafe_run(both_drop(
+        both_drop(sz_queue_take(q), sz_queue_take(q)),
+        both_drop(sz_queue_offer_cstr(q, "a"), sz_queue_offer_cstr(q, "b"))));
+    assert(r.ok);
+    {
+      SzPair *outer = (SzPair *)r.value;
+      SzPair *takes;
+      assert(outer);
+      takes = (SzPair *)outer->left;
+      assert(takes);
+      assert(strcmp(sz_string_cstr((SzString *)takes->left), "a") == 0);
+      assert(strcmp(sz_string_cstr((SzString *)takes->right), "b") == 0);
+      sz_pair_free(outer);
     }
     sz_queue_free(q);
 
