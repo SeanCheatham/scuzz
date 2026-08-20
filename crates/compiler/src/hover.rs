@@ -454,6 +454,19 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("IO.forever", "IO.forever(inner: IO[T]): IO[Unit]"),
     ("IO.repeatN", "IO.repeatN(n: Int, inner: IO[T]): IO[T]"),
     ("IO.retryN", "IO.retryN(n: Int, inner: IO[T]): IO[T]"),
+    (
+        "IO.foreach",
+        "IO.foreach(xs: List[T], f: T => IO[U]): IO[List[U]]",
+    ),
+    (
+        "IO.foreachDiscard",
+        "IO.foreachDiscard(xs: List[T], f: T => IO[U]): IO[Unit]",
+    ),
+    ("IO.when", "IO.when(cond: Bool, inner: IO[Unit]): IO[Unit]"),
+    (
+        "IO.unless",
+        "IO.unless(cond: Bool, inner: IO[Unit]): IO[Unit]",
+    ),
     ("IO.race", "IO.race(a: IO[T], b: IO[T]): IO[T]"),
     ("IO.both", "IO.both(a: IO[A], b: IO[B]): IO[(A, B)]"),
     (
@@ -1491,6 +1504,13 @@ record Point(x: Int, y: Int)
                 "Stream.evalMap",
                 "Stream.evalMap(Stream.emit(\"a\"), s => IO.pure(s))",
             ),
+            ("IO.foreach", "IO.foreach([\"a\"], s => IO.println(s))"),
+            (
+                "IO.foreachDiscard",
+                "IO.foreachDiscard([\"a\"], s => IO.println(s))",
+            ),
+            ("IO.when", "IO.when(true, IO.println(\"y\"))"),
+            ("IO.unless", "IO.unless(false, IO.println(\"n\"))"),
             (
                 "Stream.filter",
                 "Stream.filter(Stream.emit(\"a\"), s => true)",

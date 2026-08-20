@@ -1256,6 +1256,8 @@ record Box[T](x: T):
     t <- IO.retryN(1, IO.pure("ok"))
     h <- Fiber.fork(IO.forever(IO.sleep(1)))
     _ <- Fiber.interrupt(h)
+    _ <- IO.foreach(["a"], x => IO.println(x))
+    _ <- IO.when(true, IO.println("y"))
     _ <- IO.println(n)
     _ <- IO.println(t)
   } yield ()
@@ -1264,6 +1266,8 @@ record Box[T](x: T):
         assert!(out.contains("IO.repeatN("));
         assert!(out.contains("IO.retryN("));
         assert!(out.contains("IO.forever("));
+        assert!(out.contains("IO.foreach("));
+        assert!(out.contains("IO.when("));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

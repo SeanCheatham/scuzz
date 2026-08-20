@@ -29,6 +29,14 @@ def run(): IO[Unit] =
     _ <- Fiber.join(h).handleErrorWith(_ =>
   IO.println("forever-stopped")
 )
+    xs <- IO.foreach(["a", "b"], x => IO.pure(Str.concat(x, "!")))
+    _ <- IO.println(s"foreach:${List.join(xs, ",")}")
+    ns <- IO.foreach([1, 2], n => IO.pure(n + 1))
+    _ <- IO.println(s"foreachN:${Str.fromInt(List.head(ns))}")
+    _ <- IO.foreachDiscard(["k"], x => IO.println(s"each:$x"))
+    _ <- IO.when(true, IO.println("when:y"))
+    _ <- IO.unless(true, IO.fail("unless-skip"))
+    _ <- IO.unless(false, IO.println("unless:y"))
     _ <- IO.println("done")
   } yield ()
 

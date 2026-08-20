@@ -2208,6 +2208,7 @@ fn kit_lambda_param_ty_at(
             | "List.groupBy",
             1,
         ) => prior.first().and_then(|t| list_elem(t).ok()),
+        ("IO.foreach" | "IO.foreachDiscard", 1) => prior.first().and_then(|t| list_elem(t).ok()),
         ("Map.filter" | "Map.exists" | "Map.forall" | "Map.mapValues", 1) => {
             prior.first().and_then(|t| map_kv(t).ok().map(|(_, v)| v))
         }
@@ -2277,9 +2278,11 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
             1,
         ) => Some(Type::Bool),
         ("List.sortBy" | "List.maxBy" | "List.minBy", 1) => Some(Type::Int),
-        ("Stream.evalMap" | "Resource.make" | "Resource.use", 1) => {
-            Some(Type::Io(Box::new(Type::Unit)))
-        }
+        (
+            "Stream.evalMap" | "Resource.make" | "Resource.use" | "IO.foreach"
+            | "IO.foreachDiscard",
+            1,
+        ) => Some(Type::Io(Box::new(Type::Opaque("Elem".into())))),
         ("Net.serve" | "Net.serveOnce", 1) => Some(Type::Io(Box::new(Type::String))),
         _ => None,
     }
@@ -3940,6 +3943,34 @@ fn infer_call(
                 return Err(TypeError::Msg(format!("{callee} inner must be IO[_]")));
             };
             Ok(Type::Io(inner_ty))
+        }
+        "IO.foreach" | "IO.foreachDiscard" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            list_elem(&arg_tys[0])?;
+            if !matches!(&args[1].kind, ExprKind::Lambda { .. }) {
+                return Err(TypeError::Msg(format!(
+                    "{callee} callback must be a lambda"
+                )));
+            }
+            let Type::Fun(_, ret) = &arg_tys[1] else {
+                return Err(TypeError::Msg(format!(
+                    "{callee} callback must be a lambda"
+                )));
+            };
+            let Type::Io(inner) = ret.as_ref() else {
+                return Err(TypeError::Msg(format!("{callee} lambda must return IO[_]")));
+            };
+            if callee == "IO.foreachDiscard" {
+                Ok(Type::Io(Box::new(Type::Unit)))
+            } else {
+                Ok(Type::Io(Box::new(list_of((**inner).clone()))))
+            }
+        }
+        "IO.when" | "IO.unless" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Bool)?;
+            expect_ty(&arg_tys[1], &Type::Io(Box::new(Type::Unit)))?;
+            Ok(Type::Io(Box::new(Type::Unit)))
         }
         "Resource.make" => {
             expect_arity(callee, &arg_tys, 2)?;
@@ -9449,6 +9480,52 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("IO.forever/repeatN/retryN should typecheck");
+    }
+
+    #[test]
+    fn typechecks_io_foreach_when() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs <- IO.foreach(["a", "b"], x => IO.pure(Str.concat(x, "!")))
+    _ <- IO.println(List.join(xs, ","))
+    ns <- IO.foreach([1, 2], n => IO.pure(n + 1))
+    _ <- IO.println(Str.fromInt(List.head(ns)))
+    _ <- IO.foreachDiscard(["a"], x => IO.println(x))
+    _ <- IO.when(true, IO.println("y"))
+    _ <- IO.unless(false, IO.println("n"))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("IO.foreach/when should typecheck");
+    }
+
+    #[test]
+    fn typechecks_io_foreach_rejects_non_lambda() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.foreach(["a"], "nope")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("IO.foreach callback must be a lambda"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn typechecks_io_when_needs_io_unit() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.when(true, IO.pure("x"))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("Io(Unit)") || err.message().contains("Io(String)"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]

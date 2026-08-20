@@ -132,6 +132,10 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_io_forever(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_repeat_n(i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_io_retry_n(i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_foreach(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_foreach_discard(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_when(i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_io_unless(i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fiber_fork(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fiber_join(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fiber_interrupt(ptr)").unwrap();
@@ -2275,9 +2279,15 @@ fn emit_expr(
                     writeln!(pre, "  call void @sz_release(ptr %value)").unwrap();
                     body_locals.insert(p.clone(), Local::borrow(v, payload_kind));
                 } else if payload_owned {
-                    body_locals.insert(p.clone(), Local::owned("%value", Kind::Ptr));
+                    body_locals.insert(
+                        p.clone(),
+                        Local::owned("%value", Kind::Ptr).with_elem(inner_emitted.elem),
+                    );
                 } else {
-                    body_locals.insert(p.clone(), Local::borrow("%value", Kind::Ptr));
+                    body_locals.insert(
+                        p.clone(),
+                        Local::borrow("%value", Kind::Ptr).with_elem(inner_emitted.elem),
+                    );
                 }
             }
 
@@ -2927,6 +2937,7 @@ fn emit_io_cont_lambda(
     ctx: &mut EmitCtx<'_>,
     locals: &mut HashMap<String, Local>,
     prefix: &str,
+    elem: Kind,
 ) -> Emitted {
     let id = *ctx.cont_id;
     *ctx.cont_id += 1;
@@ -2944,7 +2955,12 @@ fn emit_io_cont_lambda(
     );
     if let Some(p) = param {
         if p != "_" {
-            body_locals.insert(p.clone(), Local::borrow("%value", Kind::Ptr));
+            if elem == Kind::Int || elem == Kind::Float {
+                let v = unbox_numeric(&mut pre, elem, "%value", p);
+                body_locals.insert(p.clone(), Local::borrow(v, elem));
+            } else {
+                body_locals.insert(p.clone(), Local::borrow("%value", Kind::Ptr));
+            }
         }
     }
 
@@ -3199,7 +3215,7 @@ fn emit_resource(
     let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("{callee} callback must be a lambda");
     };
-    let lam = emit_io_cont_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
+    let lam = emit_io_cont_lambda(param, body, ctx, locals, &format!("{prefix}_fn"), Kind::Ptr);
     let mut code = String::new();
     code.push_str(&first.code);
     code.push_str(&lam.code);
@@ -3244,7 +3260,7 @@ fn emit_stream_evalmap(
     let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("Stream.evalMap callback must be a lambda");
     };
-    let lam = emit_io_cont_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
+    let lam = emit_io_cont_lambda(param, body, ctx, locals, &format!("{prefix}_fn"), Kind::Ptr);
     let mut code = String::new();
     code.push_str(&inner.code);
     code.push_str(&lam.code);
@@ -3258,6 +3274,55 @@ fn emit_stream_evalmap(
     drop_owned_ptr(&mut code, &lam);
     drop_owned_ptr(&mut code, &inner);
     owned_ptr(code, format!("%{prefix}_v"))
+}
+
+fn emit_io_foreach(
+    callee: &str,
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 2, "{callee} expects 2 args");
+    let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
+        panic!("{callee} callback must be a lambda");
+    };
+    let lam = emit_io_cont_lambda(
+        param,
+        body,
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        inner.elem,
+    );
+    let inner_owned = inner.owned;
+    let inner_kind = inner.kind;
+    let inner_value = inner.value.clone();
+    let mut code = inner.code;
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    let rt = if callee == "IO.foreachDiscard" {
+        "sz_io_foreach_discard"
+    } else {
+        "sz_io_foreach"
+    };
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @{rt}(ptr {inner_value}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
+    )
+    .unwrap();
+    drop_owned_ptr(&mut code, &lam);
+    if inner_owned && inner_kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {inner_value})").unwrap();
+    }
+    if callee == "IO.foreachDiscard" {
+        io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+    } else {
+        let mut out = io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true);
+        out.elem = lam.payload;
+        out
+    }
 }
 
 fn emit_list_pred_i64(
@@ -3678,7 +3743,7 @@ fn emit_net_serve(
     let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("{rt} callback must be a lambda");
     };
-    let lam = emit_io_cont_lambda(param, body, ctx, locals, &format!("{prefix}_fn"));
+    let lam = emit_io_cont_lambda(param, body, ctx, locals, &format!("{prefix}_fn"), Kind::Ptr);
     let mut code = port.code;
     code.push_str(&lam.code);
     unpack_closure(&mut code, &lam.value, prefix);
@@ -4193,6 +4258,9 @@ fn emit_call(
     }
     if callee == "Stream.evalMap" {
         return emit_stream_evalmap(args, ctx, locals, prefix);
+    }
+    if callee == "IO.foreach" || callee == "IO.foreachDiscard" {
+        return emit_io_foreach(callee, args, ctx, locals, prefix);
     }
     if callee == "Stream.filter" {
         return emit_stream_filter(args, ctx, locals, prefix);
@@ -5584,6 +5652,29 @@ fn emit_call(
                 emitted_args[1].payload,
                 emitted_args[1].payload_owned,
             )
+        }
+        "IO.when" | "IO.unless" => {
+            let cond = if emitted_args[0].kind == Kind::Int {
+                emitted_args[0].value.clone()
+            } else {
+                writeln!(code, "  %{prefix}_c0 = add i64 0, 0").unwrap();
+                format!("%{prefix}_c0")
+            };
+            let iv = ensure_io(
+                &mut code,
+                emitted_args[1].kind,
+                &emitted_args[1].value,
+                &format!("{prefix}_wio"),
+                emitted_args[1].owned,
+            );
+            let rt = if callee == "IO.when" {
+                "sz_io_when"
+            } else {
+                "sz_io_unless"
+            };
+            writeln!(code, "  %{prefix}_v = call ptr @{rt}(i64 {cond}, ptr {iv})").unwrap();
+            writeln!(code, "  call void @sz_release(ptr {iv})").unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Stream.emit" | "Stream.emits" => {
             let rt = if callee == "Stream.emit" {
@@ -7999,6 +8090,79 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(ir.contains("sz_io_forever"));
         assert!(ir.contains("sz_io_repeat_n"));
         assert!(ir.contains("sz_io_retry_n"));
+    }
+
+    #[test]
+    fn emit_io_foreach_when() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs <- IO.foreach(["a", "b"], x => IO.pure(Str.concat(x, "!")))
+    _ <- IO.println(List.join(xs, ","))
+    ns <- IO.foreach([1, 2], n => IO.pure(n + 1))
+    _ <- IO.println(Str.fromInt(List.head(ns)))
+    _ <- IO.foreachDiscard(["a"], x => IO.println(x))
+    _ <- IO.when(true, IO.println("y"))
+    _ <- IO.unless(false, IO.println("n"))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_io_foreach"));
+        assert!(ir.contains("sz_io_foreach_discard"));
+        assert!(ir.contains("sz_io_when"));
+        assert!(ir.contains("sz_io_unless"));
+        assert!(ir.contains("sz_unbox_i64"));
+    }
+
+    #[test]
+    fn emit_io_foreach_releases_list_and_pack() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.foreach(["a"], x => IO.println(x)).flatMap(_ => IO.pure(()))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_io_foreach(ptr ";
+        let at = ir.find(needle).expect("expected sz_io_foreach");
+        let list = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {list})")),
+            "expected last-use release of list {list} after IO.foreach:\n{ir}"
+        );
+        let pack_at = ir[..at]
+            .rfind(" = call ptr @sz_list_cons(ptr @sz_rcont_")
+            .expect("pack");
+        let pack = ir[ir[..pack_at].rfind('\n').map(|i| i + 1).unwrap_or(0)..pack_at].trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {pack})")),
+            "expected last-use release of foreach closure {pack}:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_io_when_releases_inner() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.when(true, IO.println("y"))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        let needle = "call ptr @sz_io_when(i64 ";
+        let at = ir.find(needle).expect("expected sz_io_when");
+        let rest = &ir[at + needle.len()..];
+        let inner = rest
+            .split("ptr ")
+            .nth(1)
+            .unwrap()
+            .split(')')
+            .next()
+            .unwrap()
+            .trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {inner})")),
+            "expected last-use release of inner {inner} after IO.when:\n{ir}"
+        );
     }
 
     #[test]
@@ -10607,6 +10771,13 @@ record Point(x: Int, y: Int)
 "#,
                 "call ptr @sz_stream_evalmap(",
                 "Stream.evalMap",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  IO.foreach(["a"], x => IO.println(x)).flatMap(_ => IO.pure(()))
+"#,
+                "call ptr @sz_io_foreach(",
+                "IO.foreach",
             ),
             (
                 r#"@main def main: IO[Unit] =
