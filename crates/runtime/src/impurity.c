@@ -22,8 +22,13 @@ static SzIo *labeled(const char *label, SzString *value) {
 
 static SzIo *label_i64(const char *label, int64_t n) {
   char buf[64];
+  SzString *s;
+  SzIo *io;
   snprintf(buf, sizeof buf, "%lld", (long long)n);
-  return labeled(label, sz_string_from_cstr(buf));
+  s = sz_string_from_cstr(buf);
+  io = labeled(label, s);
+  sz_release(s);
+  return io;
 }
 
 static SzIo *kit_done(void *value, void *env) {
@@ -33,8 +38,11 @@ static SzIo *kit_done(void *value, void *env) {
 }
 
 static SzIo *after_line(void *value, void *env) {
+  SzIo *io;
   (void)env;
-  return fm_drop(labeled("line:", (SzString *)value), kit_done, NULL);
+  io = labeled("line:", (SzString *)value);
+  sz_release(value);
+  return fm_drop(io, kit_done, NULL);
 }
 
 static SzIo *do_read_line(void *value, void *env) {
@@ -44,10 +52,15 @@ static SzIo *do_read_line(void *value, void *env) {
 }
 
 static SzIo *after_args(void *value, void *env) {
-  (void)env;
   SzList *xs = (SzList *)value;
-  SzString *joined = sz_list_join(xs, ",");
-  return fm_drop(labeled("args:", joined), do_read_line, NULL);
+  SzString *joined;
+  SzIo *io;
+  (void)env;
+  joined = sz_list_join(xs, ",");
+  sz_release(xs);
+  io = labeled("args:", joined);
+  sz_release(joined);
+  return fm_drop(io, do_read_line, NULL);
 }
 
 static SzIo *do_args(void *value, void *env) {
@@ -57,43 +70,55 @@ static SzIo *do_args(void *value, void *env) {
 }
 
 static SzIo *after_net(void *value, void *env) {
+  SzIo *io;
   (void)env;
-  return fm_drop(labeled("net:", (SzString *)value), do_args, NULL);
+  io = labeled("net:", (SzString *)value);
+  sz_release(value);
+  return fm_drop(io, do_args, NULL);
 }
 
 static SzIo *do_net(void *value, void *env) {
+  SzString *url = sz_string_from_cstr("http://example.test/v1");
+  SzIo *io = sz_net_http_get(url);
   (void)value;
   (void)env;
-  return fm_drop(
-      sz_net_http_get(sz_string_from_cstr("http://example.test/v1")), after_net,
-      NULL);
+  sz_release(url);
+  return fm_drop(io, after_net, NULL);
 }
 
 static SzIo *after_fs(void *value, void *env) {
+  SzIo *io;
   (void)env;
-  return fm_drop(labeled("fs:", (SzString *)value), do_net, NULL);
+  io = labeled("fs:", (SzString *)value);
+  sz_release(value);
+  return fm_drop(io, do_net, NULL);
 }
 
 static SzIo *do_fs_read(void *value, void *env) {
+  SzString *path = sz_string_from_cstr("note.txt");
+  SzIo *io = sz_fs_read(path);
   (void)value;
   (void)env;
-  return fm_drop(sz_fs_read(sz_string_from_cstr("note.txt")), after_fs,
-                       NULL);
+  sz_release(path);
+  return fm_drop(io, after_fs, NULL);
 }
 
 static SzIo *do_fs_write(void *value, void *env) {
+  SzString *path = sz_string_from_cstr("note.txt");
+  SzString *body = sz_string_from_cstr("kit-note");
+  SzIo *io = sz_fs_write(path, body);
   (void)value;
   (void)env;
-  return fm_drop(
-      sz_fs_write(sz_string_from_cstr("note.txt"),
-                  sz_string_from_cstr("kit-note")),
-      do_fs_read, NULL);
+  sz_release(path);
+  sz_release(body);
+  return fm_drop(io, do_fs_read, NULL);
 }
 
 static SzIo *after_rand(void *value, void *env) {
+  int64_t n = sz_unbox_i64(value);
   (void)env;
-  return fm_drop(label_i64("rand:", sz_unbox_i64(value)), do_fs_write,
-                       NULL);
+  sz_release(value);
+  return fm_drop(label_i64("rand:", n), do_fs_write, NULL);
 }
 
 static SzIo *do_rand(void *value, void *env) {
@@ -115,8 +140,10 @@ static SzIo *do_sleep(void *value, void *env) {
 }
 
 static SzIo *after_mono(void *value, void *env) {
+  int64_t n = sz_unbox_i64(value);
   (void)env;
-  return fm_drop(label_i64("mono:", sz_unbox_i64(value)), do_sleep, NULL);
+  sz_release(value);
+  return fm_drop(label_i64("mono:", n), do_sleep, NULL);
 }
 
 static SzIo *do_mono(void *value, void *env) {
@@ -126,8 +153,10 @@ static SzIo *do_mono(void *value, void *env) {
 }
 
 static SzIo *after_real(void *value, void *env) {
+  int64_t n = sz_unbox_i64(value);
   (void)env;
-  return fm_drop(label_i64("real:", sz_unbox_i64(value)), do_mono, NULL);
+  sz_release(value);
+  return fm_drop(label_i64("real:", n), do_mono, NULL);
 }
 
 static void *impurity_unit_thunk(void *env) {
@@ -135,12 +164,13 @@ static void *impurity_unit_thunk(void *env) {
   return NULL;
 }
 
-/* Install/stub when the returned IO runs (after @main TESTRT install). */
+/* Overlay stubs when TestRuntime is already active. Do not install it. */
 static SzIo *impurity_boot(void *value, void *env) {
   char *argv[] = {"alpha", "beta"};
   (void)value;
   (void)env;
-  sz_testrt_install();
+  if (!sz_testrt_clock_is_fake())
+    return sz_io_fail_cstr("Impurity.runKit requires TestRuntime");
   sz_testrt_net_stub("http://example.test/v1", "stub-body");
   sz_testrt_sys_set_args(2, argv);
   sz_testrt_stdin_feed("hello-line\n");

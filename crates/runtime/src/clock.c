@@ -16,7 +16,12 @@ void sz_testrt_clock_install(int64_t start_ms) {
 void sz_testrt_clock_advance(int64_t ms) {
   if (!g_fake)
     return;
-  if (ms > 0)
+  if (ms <= 0)
+    return;
+  /* Saturate. Signed add of a large sleep is undefined. */
+  if (g_now_ms > INT64_MAX - ms)
+    g_now_ms = INT64_MAX;
+  else
     g_now_ms += ms;
 }
 

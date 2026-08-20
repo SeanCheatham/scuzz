@@ -2561,7 +2561,12 @@ void sz_fiber_wake_deferred(SzDeferred *d) {
 
 static void park_sleep(Sched *s, Fiber *f, int64_t ms) {
   int64_t now = sz_clock_monotonic_ms_sync();
-  f->wake_at = now + (ms < 0 ? 0 : ms);
+  int64_t add = ms < 0 ? 0 : ms;
+  /* Saturate. Signed add of a large sleep is undefined. */
+  if (add > 0 && now > INT64_MAX - add)
+    f->wake_at = INT64_MAX;
+  else
+    f->wake_at = now + add;
   f->state = FIB_SLEEP;
   fiber_set_cur(f, NULL);
   sleeper_add(s, f);

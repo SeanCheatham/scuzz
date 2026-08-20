@@ -29,7 +29,6 @@ def envProbe(): IO[Unit] =
     _ <- Concurrency.run()
     _ <- Bracket.run()
     _ <- Flow.run()
-    _ <- Impurity.runKit()
     _ <- envProbe()
     _ <- maybeServe()
   } yield ()
