@@ -230,6 +230,24 @@ static SzIo *stream_bang(void *v, void *env) {
   return pure_drop(out);
 }
 
+static int foreach_hits = 0;
+
+static SzIo *foreach_fail_second(void *v, void *env) {
+  (void)env;
+  foreach_hits++;
+  if (foreach_hits >= 2)
+    return sz_io_fail_cstr("foreach-boom");
+  sz_retain(v);
+  return pure_drop(v);
+}
+
+static SzIo *foreach_unit(void *v, void *env) {
+  (void)v;
+  (void)env;
+  foreach_hits++;
+  return pure_drop(NULL);
+}
+
 static int64_t stream_nonempty(void *v, void *env) {
   (void)env;
   return sz_string_len((SzString *)v) > 0;
@@ -2429,6 +2447,106 @@ int main(void) {
     assert(lang_released == 1);
     sz_lang_resource_free(lr);
     sz_testrt_reset();
+  }
+
+  /* IO.foreach collects mapper results. Empty is nil. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_nil()));
+    SzList *out;
+    SzIo *io = sz_io_foreach(xs, stream_bang, NULL);
+    r = sz_io_unsafe_run(io);
+    assert(r.ok);
+    out = (SzList *)r.value;
+    assert(sz_list_len(out) == 2);
+    assert(strcmp(sz_string_cstr((SzString *)out->head), "a!") == 0);
+    assert(out->tail &&
+           strcmp(sz_string_cstr((SzString *)out->tail->head), "b!") == 0);
+    sz_list_free(out);
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+  }
+
+  {
+    SzIo *io = sz_io_foreach(NULL, stream_bang, NULL);
+    r = sz_io_unsafe_run(io);
+    assert(r.ok);
+    assert(r.value == NULL);
+  }
+
+  /* IO.foreachDiscard walks every cell and yields Unit. */
+  {
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_nil()));
+    foreach_hits = 0;
+    r = sz_io_unsafe_run(sz_io_foreach_discard(xs, foreach_unit, NULL));
+    assert(r.ok);
+    assert(r.value == NULL);
+    assert(foreach_hits == 2);
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+  }
+
+  /* Failure stops later cells and frees the pack. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *a = sz_string_from_cstr("a");
+    SzString *b = sz_string_from_cstr("b");
+    SzList *xs = sz_list_cons(a, sz_list_cons(b, sz_list_nil()));
+    foreach_hits = 0;
+    sz_alloc_stats(&base_bytes, &base_count);
+    r = sz_io_unsafe_run(sz_io_foreach(xs, foreach_fail_second, NULL));
+    assert(!r.ok);
+    sz_error_free(r.error);
+    assert(foreach_hits == 2);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+    sz_list_free(xs);
+    sz_string_free(a);
+    sz_string_free(b);
+  }
+
+  /* IO.when / unless pick inner or Unit. Unused inner drops. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *s = sz_string_from_cstr("when-ok");
+    SzIo *inner = sz_io_println(s);
+    SzIo *io;
+    sz_release(s);
+    io = sz_io_when(1, inner);
+    sz_release(inner);
+    r = sz_io_unsafe_run(io);
+    assert(r.ok);
+
+    sz_alloc_stats(&base_bytes, &base_count);
+    inner = sz_io_fail_cstr("when-skip");
+    io = sz_io_when(0, inner);
+    sz_release(inner);
+    r = sz_io_unsafe_run(io);
+    assert(r.ok);
+    assert(r.value == NULL);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+
+    inner = sz_io_println_cstr("unless-ok");
+    io = sz_io_unless(0, inner);
+    sz_release(inner);
+    r = sz_io_unsafe_run(io);
+    assert(r.ok);
+
+    inner = sz_io_fail_cstr("unless-skip");
+    io = sz_io_unless(1, inner);
+    sz_release(inner);
+    r = sz_io_unsafe_run(io);
+    assert(r.ok);
   }
 
   /* Fiber.fork/join: child value is the join result. */

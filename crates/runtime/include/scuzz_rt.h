@@ -318,6 +318,15 @@ SzIo *sz_io_forever(SzIo *inner);
 SzIo *sz_io_repeat_n(int64_t n, SzIo *inner);
 /* On failure, retry n extra times (n<0 → 0 extra). Last error if all fail. */
 SzIo *sz_io_retry_n(int64_t n, SzIo *inner);
+/* Run f on each list cell in order. Collects results. Empty is IO.pure(nil).
+ * Failure or cancel stops later cells. Callee retains xs and env. */
+SzIo *sz_io_foreach(SzList *xs, SzCont f, void *env);
+/* Same walk. Discards each success value. Result is IO[Unit]. */
+SzIo *sz_io_foreach_discard(SzList *xs, SzCont f, void *env);
+/* If cond is non-zero, return inner. Else IO.pure(Unit). Caller drops inner. */
+SzIo *sz_io_when(int64_t cond, SzIo *inner);
+/* If cond is zero, return inner. Else IO.pure(Unit). Caller drops inner. */
+SzIo *sz_io_unless(int64_t cond, SzIo *inner);
 /* Fork inner onto the cooperative scheduler. Succeeds at once with a fiber handle. */
 SzIo *sz_fiber_fork(SzIo *inner);
 /* Park until the forked fiber succeeds (value) or fails / is interrupted.

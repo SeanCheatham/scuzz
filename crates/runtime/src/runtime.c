@@ -1586,6 +1586,120 @@ SzIo *sz_io_retry_n(int64_t n, SzIo *inner) {
   return io;
 }
 
+/* pack = pair(rest, pair(acc, pair(fn_env, fn))). fn is not RC. */
+static SzIo *foreach_go(SzPair *pack, int discard);
+
+static SzIo *foreach_continue(void *value, void *env, int discard) {
+  SzPair *pack = (SzPair *)env;
+  SzPair *mid = (SzPair *)pack->right;
+  SzPair *fnpack = (SzPair *)mid->right;
+  SzList *rest = sz_list_tail(pack->left);
+  SzList *acc;
+  SzPair *new_mid;
+  SzPair *next;
+  SzIo *io;
+  if (discard) {
+    sz_release(value);
+    acc = (SzList *)mid->left;
+    sz_retain(acc);
+  } else {
+    acc = sz_list_cons(value, (SzList *)mid->left);
+    sz_release(value);
+  }
+  sz_retain(rest);
+  sz_retain(fnpack);
+  new_mid = sz_pair_new(acc, fnpack);
+  next = sz_pair_new(rest, new_mid);
+  sz_release(acc);
+  sz_release(fnpack);
+  sz_release(new_mid);
+  sz_release(rest);
+  io = foreach_go(next, discard);
+  sz_release(next);
+  return io;
+}
+
+static SzIo *foreach_after(void *value, void *env) {
+  return foreach_continue(value, env, 0);
+}
+
+static SzIo *foreach_discard_after(void *value, void *env) {
+  return foreach_continue(value, env, 1);
+}
+
+static SzIo *foreach_go(SzPair *pack, int discard) {
+  SzPair *mid;
+  SzPair *fnpack;
+  SzCont fn;
+  void *head;
+  SzIo *item;
+  SzIo *io;
+  if (!pack)
+    return sz_io_fail_cstr("IO.foreach: null pack");
+  if (sz_list_is_empty((SzList *)pack->left)) {
+    if (discard)
+      return sz_io_pure(NULL);
+    {
+      SzList *out = sz_list_reverse((SzList *)((SzPair *)pack->right)->left);
+      io = sz_io_pure(out);
+      sz_release(out);
+      return io;
+    }
+  }
+  mid = (SzPair *)pack->right;
+  fnpack = (SzPair *)mid->right;
+  fn = (SzCont)fnpack->right;
+  if (!fn)
+    return sz_io_fail_cstr("IO.foreach: null callback");
+  head = sz_list_head((SzList *)pack->left);
+  item = fn(head, fnpack->left);
+  if (!item)
+    return sz_io_fail_cstr("IO.foreach: callback returned null");
+  io = sz_io_flatmap(item, discard ? foreach_discard_after : foreach_after,
+                     pack);
+  sz_release(item);
+  return io;
+}
+
+static SzIo *foreach_start(SzList *xs, SzCont f, void *env, int discard) {
+  SzPair *fnpack;
+  SzPair *mid;
+  SzPair *pack;
+  SzIo *io;
+  if (!f)
+    sz_panic("sz_io_foreach(null fn)");
+  fnpack = sz_pair_new(env, (void *)f);
+  mid = sz_pair_new(NULL, fnpack);
+  pack = sz_pair_new(xs, mid);
+  sz_release(fnpack);
+  sz_release(mid);
+  io = foreach_go(pack, discard);
+  sz_release(pack);
+  return io;
+}
+
+SzIo *sz_io_foreach(SzList *xs, SzCont f, void *env) {
+  return foreach_start(xs, f, env, 0);
+}
+
+SzIo *sz_io_foreach_discard(SzList *xs, SzCont f, void *env) {
+  return foreach_start(xs, f, env, 1);
+}
+
+SzIo *sz_io_when(int64_t cond, SzIo *inner) {
+  if (!inner)
+    sz_panic("sz_io_when(null)");
+  if (cond) {
+    sz_retain(inner);
+    return inner;
+  }
+  return sz_io_pure(NULL);
+}
+
+SzIo *sz_io_unless(int64_t cond, SzIo *inner) {
+  return sz_io_when(cond ? 0 : 1, inner);
+}
+
 SzIo *sz_fiber_fork(SzIo *inner) {
   if (!inner)
     sz_panic("sz_fiber_fork(null)");

@@ -2273,7 +2273,7 @@ impl Parser {
                             start.cover(&end),
                         ))
                     }
-                    "repeatN" | "retryN" => {
+                    "repeatN" | "retryN" | "foreach" | "foreachDiscard" | "when" | "unless" => {
                         let args = self.parse_args()?;
                         if args.len() != 2 {
                             return Err(self.err(format!("IO.{method} expects 2 args")));
@@ -2738,6 +2738,8 @@ def x(): Float = 1.5e1 + 1e-3
     _ <- IO.forever(IO.sleep(1))
     _ <- IO.repeatN(2, IO.pure("x"))
     _ <- IO.retryN(1, IO.pure("y"))
+    _ <- IO.foreach(["a"], x => IO.println(x))
+    _ <- IO.when(true, IO.println("y"))
   } yield ()
 "#;
         let p = parse(src).unwrap();
@@ -2757,6 +2759,16 @@ def x(): Float = 1.5e1 + 1e-3
                     &binders[2],
                     ForBinder::Draw { value, .. }
                         if matches!(&value.kind, ExprKind::Call { callee, .. } if callee == "IO.retryN")
+                ));
+                assert!(matches!(
+                    &binders[3],
+                    ForBinder::Draw { value, .. }
+                        if matches!(&value.kind, ExprKind::Call { callee, .. } if callee == "IO.foreach")
+                ));
+                assert!(matches!(
+                    &binders[4],
+                    ForBinder::Draw { value, .. }
+                        if matches!(&value.kind, ExprKind::Call { callee, .. } if callee == "IO.when")
                 ));
             }
             other => panic!("expected for, got {other:?}"),
