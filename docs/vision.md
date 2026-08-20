@@ -103,7 +103,7 @@ One failure channel: `SzError` on `IO`. Blessed kits only. No app-level `IO.dela
 | **`View`** | Widget tree | Sync/pure `build` |
 | **`Ui` / `UiSession`** | `mount` / `pump` / `inject` / `snapshot` | Effectful (`UiRuntime`) |
 
-Headless is a **peer** of Desktop/Mobile — product runtime for agents and CI. Frame boundary is `pump`. World effects stay blessed `IO`. Bridge into signals through `sz_ui_bridge_post_*`. No UI feature without a Headless path. Prefer `Signal.list` + `View.each`. Derived display through `Signal.map` + `View.bindText`. Nested declarative construction only. `Ui.run(_ => view)` is the session. The factory re-runs on stamp-watch. Create Signals outside the factory so they stay. Live Desktop/Mobile drain appends to `build/record.script` (`tap N` / `xy x y` / `type` / `backspace`). Headless replays that file through `SCUZZ_UI_SCRIPT` (`--script`). Dump `[taps]` includes frames; `[last_hit]` shows the last TAP target or `NULL`.
+Headless is a **peer** of Desktop/Mobile — product runtime for agents and CI. Frame boundary is `pump`. World effects stay blessed `IO`. Bridge into signals through `sz_ui_bridge_post_*`. No UI feature without a Headless path. Prefer `Signal.list` + `View.each`. Derived display through `Signal.map` + `View.bindText`. Nested declarative construction only. `Ui.run(_ => view)` is the session. The factory re-runs on stamp-watch. Create Signals outside the factory so they stay. Live Desktop/Mobile drain appends to `build/record.script` (`tap N` / `xy x y` / `type` / `backspace` / `scroll N dy`). Headless replays that file through `SCUZZ_UI_SCRIPT` (`--script`). Dump `[taps]` includes frames; `[last_hit]` shows the last TAP target or `NULL`.
 
 ### IO apps vs Headless
 

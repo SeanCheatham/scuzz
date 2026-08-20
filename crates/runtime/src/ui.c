@@ -796,6 +796,25 @@ static void record_live_event(SzUiSession *session, const SzInputEvent *ev) {
       fprintf(f, "xy %.1f %.1f\n", ev->x, ev->y);
     else if (dx * dx + dy * dy <= 64.f)
       record_tap_or_xy(session, f, ev->x, ev->y);
+  } else if (ev->kind == SZ_INPUT_SCROLL && session->root) {
+    SzView *scrolls[64];
+    SzView *hit;
+    int n, i, idx;
+    sz_view_layout(session->root, (float)session->cfg.width,
+                   (float)session->cfg.height, session->theme);
+    hit = sz_view_scroll_at(session->root, ev->x, ev->y);
+    if (hit) {
+      n = sz_ui_collect_scrolls(session, scrolls, 64);
+      idx = -1;
+      for (i = 0; i < n; i++) {
+        if (scrolls[i] == hit) {
+          idx = i;
+          break;
+        }
+      }
+      if (idx >= 0)
+        fprintf(f, "scroll %d %.0f\n", idx, ev->dy);
+    }
   }
   fclose(f);
 }

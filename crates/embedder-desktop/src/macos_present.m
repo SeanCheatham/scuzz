@@ -8,8 +8,8 @@
 #include <string.h>
 
 #define EVENT_CAP 64
-#define TEXT_RING 32
-#define TEXT_LEN 8
+#define TEXT_RING 64
+#define TEXT_LEN 64
 
 static NSWindow *g_win;
 static NSImageView *g_view;
@@ -59,6 +59,19 @@ double sz_embedder_display_scale(void) {
   return scale;
 }
 
+static int q_full(void) {
+  return ((g_q_tail + 1) % EVENT_CAP) == g_q_head;
+}
+
+static int text_slot_queued(const char *slot) {
+  int i;
+  for (i = g_q_head; i != g_q_tail; i = (i + 1) % EVENT_CAP) {
+    if (g_queue[i].kind == SZ_INPUT_TEXT_EDIT && g_queue[i].text == slot)
+      return 1;
+  }
+  return 0;
+}
+
 static const char *stash_text(const char *s) {
   size_t n;
   char *dst;
@@ -94,21 +107,54 @@ int sz_embedder_poll_event(SzInputEvent *out) {
   return 1;
 }
 
-static void enqueue_tap(float x, float y) {
+static void enqueue_pointer(SzPointerPhase phase, float x, float y) {
   SzInputEvent ev;
   memset(&ev, 0, sizeof(ev));
-  ev.kind = SZ_INPUT_TAP;
+  ev.kind = SZ_INPUT_POINTER;
+  ev.pointer_phase = phase;
   ev.x = x;
   ev.y = y;
   q_push(&ev);
 }
 
+static void enqueue_scroll(float x, float y, float dy) {
+  SzInputEvent ev;
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_SCROLL;
+  ev.x = x;
+  ev.y = y;
+  ev.dy = dy;
+  q_push(&ev);
+}
+
 static void enqueue_text_edit(const char *text) {
   SzInputEvent ev;
+  /* Drop if the queue is full, or if the next text slot is still queued. */
+  if (q_full() || text_slot_queued(g_text_bufs[g_text_i]))
+    return;
   memset(&ev, 0, sizeof(ev));
   ev.kind = SZ_INPUT_TEXT_EDIT;
   ev.text = stash_text(text ? text : "");
   q_push(&ev);
+}
+
+/* Convert a window event to Scuzz layout coords. 0 if outside the content view. */
+static int event_content_xy(NSEvent *ev, float *x, float *y) {
+  NSView *content;
+  NSPoint loc;
+  NSPoint inView;
+  if (!ev || !g_win || !x || !y)
+    return 0;
+  content = [g_win contentView];
+  if (!content)
+    return 0;
+  loc = [ev locationInWindow];
+  inView = [content convertPoint:loc fromView:nil];
+  if (!NSPointInRect(inView, [content bounds]))
+    return 0;
+  *x = (float)inView.x;
+  *y = (float)(content.bounds.size.height - inView.y);
+  return 1;
 }
 
 static void ensure_app(void) {
@@ -233,15 +279,26 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
         if (!ev)
           break;
 
-        if ([ev type] == NSEventTypeLeftMouseDown && g_win) {
-          NSView *content = [g_win contentView];
-          NSPoint loc = [ev locationInWindow];
-          NSPoint inView = [content convertPoint:loc fromView:nil];
-          float x = (float)inView.x;
-          /* Cocoa y is bottom-up; Scuzz layout is top-down. */
-          float y = (float)(content.bounds.size.height - inView.y);
-          enqueue_tap(x, y);
-          continue;
+        {
+          NSEventType t = [ev type];
+          float x, y;
+          if (t == NSEventTypeLeftMouseDown && event_content_xy(ev, &x, &y)) {
+            enqueue_pointer(SZ_POINTER_DOWN, x, y);
+            continue;
+          }
+          if (t == NSEventTypeLeftMouseDragged && event_content_xy(ev, &x, &y)) {
+            enqueue_pointer(SZ_POINTER_MOVE, x, y);
+            continue;
+          }
+          if (t == NSEventTypeLeftMouseUp && event_content_xy(ev, &x, &y)) {
+            enqueue_pointer(SZ_POINTER_UP, x, y);
+            continue;
+          }
+          /* scrollingDeltaY: positive = content up (matches SZ_INPUT_SCROLL). */
+          if (t == NSEventTypeScrollWheel && event_content_xy(ev, &x, &y)) {
+            enqueue_scroll(x, y, (float)[ev scrollingDeltaY]);
+            continue;
+          }
         }
 
         if ([ev type] == NSEventTypeKeyDown) {
