@@ -2237,10 +2237,10 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
             | "Stream.exists",
             1,
         ) => Some(Type::Bool),
-        (
-            "Stream.evalMap" | "Resource.make" | "Resource.use" | "Net.serve" | "Net.serveOnce",
-            1,
-        ) => Some(Type::Io(Box::new(Type::Unit))),
+        ("Stream.evalMap" | "Resource.make" | "Resource.use", 1) => {
+            Some(Type::Io(Box::new(Type::Unit)))
+        }
+        ("Net.serve" | "Net.serveOnce", 1) => Some(Type::Io(Box::new(Type::String))),
         _ => None,
     }
 }
@@ -2251,6 +2251,7 @@ fn kit_ret_label(ty: &Type) -> &'static str {
         Type::List(_) => "List[_]",
         Type::String => "String",
         Type::Bool => "Bool",
+        Type::Io(inner) if matches!(inner.as_ref(), Type::String) => "IO[String]",
         Type::Io(_) => "IO[_]",
         _ => "the expected type",
     }
@@ -3674,6 +3675,15 @@ fn infer_call(
         "Net.serveOnce" | "Net.serve" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
+            match &arg_tys[1] {
+                Type::Fun(_, ret) if matches!(ret.as_ref(), Type::Io(p) if matches!(p.as_ref(), Type::String)) =>
+                    {}
+                _ => {
+                    return Err(TypeError::Msg(format!(
+                        "{callee} lambda must return IO[String]"
+                    )));
+                }
+            }
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         "Impurity.runKit" => {
@@ -9692,7 +9702,7 @@ def note(n: Int where "x"): Unit = ()
     #[test]
     fn typechecks_net_serve_once() {
         let src = r#"@main def main: IO[Unit] =
-  Net.serveOnce(8080, path => IO.println(s"served:$path"))
+  Net.serveOnce(8080, path => IO.pure(path))
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Net.serveOnce should typecheck");
@@ -9701,7 +9711,7 @@ def note(n: Int where "x"): Unit = ()
     #[test]
     fn typechecks_net_serve() {
         let src = r#"@main def main: IO[Unit] =
-  Net.serve(8080, path => IO.println(s"served:$path"))
+  Net.serve(8080, path => IO.pure(path))
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Net.serve should typecheck");
@@ -9715,8 +9725,24 @@ def note(n: Int where "x"): Unit = ()
         let p = lower_program(parse(src).unwrap());
         let err = typecheck(&p).unwrap_err();
         assert!(
-            err.message().contains("Net.serve lambda must return IO[_]"),
-            "expected IO handler, got {}",
+            err.message()
+                .contains("Net.serve lambda must return IO[String]"),
+            "expected IO[String] handler, got {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_net_serve_io_int() {
+        let src = r#"@main def main: IO[Unit] =
+  Net.serve(8080, path => IO.pure(1))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("Net.serve lambda must return IO[String]"),
+            "expected IO[String] handler, got {}",
             err.message()
         );
     }
