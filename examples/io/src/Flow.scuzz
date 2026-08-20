@@ -22,5 +22,13 @@ def run(): IO[Unit] =
     _ <- IO.println(Str.concat("exists:", if (hit) "1" else "0"))
     miss <- Stream.exists(Stream.emits(["", ""]), x => Str.len(x) > 0)
     _ <- IO.println(Str.concat("miss:", if (miss) "1" else "0"))
+    ns <- Stream.compileToList(Stream.map(Stream.emits([1, 2]), n => n + 1))
+    _ <- IO.println(s"mapN:${Str.fromInt(List.head(ns))}")
+    fs <- Stream.compileToList(Stream.filter(Stream.emit(4), n => n > 0))
+    _ <- IO.println(s"filterN:${Str.fromInt(List.head(fs))}")
+    es <- Stream.compileToList(Stream.evalMap(Stream.eval(IO.pure(5)), n => IO.pure(n + 1)))
+    _ <- IO.println(s"evalN:${Str.fromInt(List.head(es))}")
+    cs <- Stream.compileToList(Stream.concat(Stream.take(Stream.emit(6), 1), Stream.drop(Stream.emit(7), 0)))
+    _ <- IO.println(s"concatN:${Str.fromInt(List.head(cs))}")
   } yield ()
 

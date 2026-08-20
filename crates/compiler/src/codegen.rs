@@ -689,7 +689,12 @@ fn cell_elem_of_type(ty: &Type) -> Kind {
     match ty {
         Type::List(inner) => kind_of_type(inner),
         Type::Io(inner) => cell_elem_of_type(inner),
-        Type::App(n, args) if matches!(n.as_str(), "Ref" | "Queue" | "Deferred" | "Fiber") => {
+        Type::App(n, args)
+            if matches!(
+                n.as_str(),
+                "Ref" | "Queue" | "Deferred" | "Fiber" | "Resource" | "Stream"
+            ) =>
+        {
             args.first().map(kind_of_type).unwrap_or(Kind::Ptr)
         }
         _ => Kind::Ptr,
@@ -3113,7 +3118,7 @@ fn emit_pred_lambda(
 }
 
 /// `t => ptr` mapper: `ptr (*)(ptr value, ptr env)`.
-/// Stream.map stringifies Int bodies. List.map boxes Int bodies.
+/// List.map / Stream.map box Int bodies. Signal.map stringifies.
 fn emit_smap_lambda(
     param: &Option<String>,
     body: &Expr,
@@ -3245,7 +3250,12 @@ fn emit_resource(
     let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("{callee} callback must be a lambda");
     };
-    let lam = emit_io_cont_lambda(param, body, ctx, locals, &format!("{prefix}_fn"), Kind::Ptr);
+    let payload = if callee == "Resource.make" {
+        first.payload
+    } else {
+        first.elem
+    };
+    let lam = emit_io_cont_lambda(param, body, ctx, locals, &format!("{prefix}_fn"), payload);
     let mut code = String::new();
     code.push_str(&first.code);
     code.push_str(&lam.code);
@@ -3265,7 +3275,7 @@ fn emit_resource(
         .unwrap();
         writeln!(code, "  call void @sz_release(ptr {acq})").unwrap();
         drop_owned_ptr(&mut code, &lam);
-        owned_ptr(code, format!("%{prefix}_v"))
+        owned_ptr(code, format!("%{prefix}_v")).with_elem(payload)
     } else {
         writeln!(
             code,
@@ -3276,6 +3286,7 @@ fn emit_resource(
         drop_owned_ptr(&mut code, &lam);
         drop_owned_ptr(&mut code, &first);
         io_emitted_payload(code, format!("%{prefix}_v"), lam.payload, lam.payload_owned)
+            .with_elem(lam.elem)
     }
 }
 
@@ -3290,7 +3301,14 @@ fn emit_stream_evalmap(
     let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
         panic!("Stream.evalMap callback must be a lambda");
     };
-    let lam = emit_io_cont_lambda(param, body, ctx, locals, &format!("{prefix}_fn"), Kind::Ptr);
+    let lam = emit_io_cont_lambda(
+        param,
+        body,
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        inner.elem,
+    );
     let mut code = String::new();
     code.push_str(&inner.code);
     code.push_str(&lam.code);
@@ -3303,7 +3321,7 @@ fn emit_stream_evalmap(
     .unwrap();
     drop_owned_ptr(&mut code, &lam);
     drop_owned_ptr(&mut code, &inner);
-    owned_ptr(code, format!("%{prefix}_v"))
+    owned_ptr(code, format!("%{prefix}_v")).with_elem(lam.payload)
 }
 
 fn emit_io_foreach(
@@ -3554,7 +3572,7 @@ fn emit_stream_map(
         ctx,
         locals,
         prefix,
-        false,
+        true,
     )
 }
 
@@ -5766,20 +5784,25 @@ fn emit_call(
             writeln!(code, "  call void @sz_release(ptr {iv})").unwrap();
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
-        "Stream.emit" | "Stream.emits" => {
-            let rt = if callee == "Stream.emit" {
-                "sz_stream_emit"
+        "Stream.emit" => {
+            let (ptr, boxed) = as_cell_ptr(&mut code, &emitted_args[0], &format!("{prefix}_box"));
+            writeln!(code, "  %{prefix}_v = call ptr @sz_stream_emit(ptr {ptr})").unwrap();
+            if boxed {
+                writeln!(code, "  call void @sz_release(ptr {ptr})").unwrap();
             } else {
-                "sz_stream_emits"
-            };
+                drop_owned_ptr(&mut code, &emitted_args[0]);
+            }
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].kind)
+        }
+        "Stream.emits" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @{rt}(ptr {})",
+                "  %{prefix}_v = call ptr @sz_stream_emits(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
         }
         "Stream.eval" => {
             let io = ensure_io(
@@ -5791,7 +5814,7 @@ fn emit_call(
             );
             writeln!(code, "  %{prefix}_v = call ptr @sz_stream_eval(ptr {io})").unwrap();
             writeln!(code, "  call void @sz_release(ptr {io})").unwrap();
-            owned_ptr(code, format!("%{prefix}_v"))
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].payload)
         }
         "Stream.concat" => {
             writeln!(
@@ -5802,7 +5825,7 @@ fn emit_call(
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             drop_owned_ptr(&mut code, &emitted_args[1]);
-            owned_ptr(code, format!("%{prefix}_v"))
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
         }
         "Stream.take" | "Stream.drop" => {
             let rt = if callee == "Stream.take" {
@@ -5817,7 +5840,7 @@ fn emit_call(
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
-            owned_ptr(code, format!("%{prefix}_v"))
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
         }
         "Stream.compileToList" | "Stream.drain" => {
             let rt = if callee == "Stream.compileToList" {
@@ -5832,7 +5855,12 @@ fn emit_call(
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
-            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            if callee == "Stream.compileToList" {
+                io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
+                    .with_elem(emitted_args[0].elem)
+            } else {
+                io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+            }
         }
         "Signal.int" => {
             writeln!(
@@ -8239,6 +8267,38 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(ir.contains("sz_ref_update_and_get"));
         assert!(ir.contains("sz_queue_offer"));
         assert!(ir.contains("sz_fiber_join"));
+    }
+
+    #[test]
+    fn emit_generic_stream_resource() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    res = Resource.make(IO.pure(3), n => IO.println(Str.fromInt(n)))
+    got <- Resource.use(res, n => IO.pure(n + 1))
+    _ <- IO.println(Str.fromInt(got))
+    ns <- Stream.compileToList(Stream.map(Stream.emits([1, 2]), n => n + 1))
+    _ <- IO.println(Str.fromInt(List.head(ns)))
+    fs <- Stream.compileToList(Stream.filter(Stream.emit(4), n => n > 0))
+    _ <- IO.println(Str.fromInt(List.head(fs)))
+    es <- Stream.compileToList(Stream.evalMap(Stream.eval(IO.pure(5)), n => IO.pure(n + 1)))
+    _ <- IO.println(Str.fromInt(List.head(es)))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_box_i64"),
+            "expected boxed Int stream/resource payload:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_unbox_i64"),
+            "expected unbox of Int stream/resource payload:\n{ir}"
+        );
+        assert!(ir.contains("sz_lang_resource_make"));
+        assert!(ir.contains("sz_stream_map"));
+        assert!(ir.contains("sz_stream_filter"));
+        assert!(ir.contains("sz_stream_evalmap"));
     }
 
     #[test]

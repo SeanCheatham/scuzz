@@ -2221,10 +2221,19 @@ fn kit_lambda_param_ty_at(
         ("List.tabulate", 1) => Some(Type::Int),
         (
             "Stream.filter" | "Stream.map" | "Stream.takeWhile" | "Stream.dropWhile"
-            | "Stream.find" | "Stream.exists" | "Stream.evalMap" | "Resource.make" | "Resource.use"
-            | "Net.serve" | "Net.serveOnce",
+            | "Stream.find" | "Stream.exists" | "Stream.evalMap",
             1,
-        ) => Some(Type::String),
+        ) => prior
+            .first()
+            .and_then(|t| handle_payload_ty(t, "Stream").ok()),
+        ("Resource.make", 1) => prior.first().and_then(|t| match t {
+            Type::Io(inner) => Some((**inner).clone()),
+            _ => None,
+        }),
+        ("Resource.use", 1) => prior
+            .first()
+            .and_then(|t| handle_payload_ty(t, "Resource").ok()),
+        ("Net.serve" | "Net.serveOnce", 1) => Some(Type::String),
         _ => None,
     }
 }
@@ -2249,7 +2258,7 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
     match (callee, arg_i) {
         ("Ui.run", 0) => Some(Type::Opaque("View".into())),
         ("View.each", 1) if nargs == 2 => Some(Type::Opaque("View".into())),
-        ("Signal.map", 1) | ("Stream.map", 1) => Some(Type::String),
+        ("Signal.map", 1) => Some(Type::String),
         ("List.flatMap", 1) => Some(list_of(Type::Opaque("Elem".into()))),
         (
             "List.filter"
@@ -4003,33 +4012,38 @@ fn infer_call(
         }
         "Resource.make" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_ty(&arg_tys[0], &Type::Io(Box::new(Type::String)))?;
+            let Type::Io(inner) = &arg_tys[0] else {
+                return Err(TypeError::Msg("Resource.make acquire must be IO[_]".into()));
+            };
+            let payload = (**inner).clone();
             if !matches!(&args[1].kind, ExprKind::Lambda { .. }) {
                 return Err(TypeError::Msg(
                     "Resource.make callback must be a lambda".into(),
                 ));
             }
-            let Type::Fun(_, bt) = &arg_tys[1] else {
+            let Type::Fun(a, bt) = &arg_tys[1] else {
                 return Err(TypeError::Msg(
                     "Resource.make callback must be a lambda".into(),
                 ));
             };
+            expect_ty(a, &payload)?;
             expect_ty(bt, &Type::Io(Box::new(Type::Unit)))?;
-            Ok(handle_ty("Resource", Type::String))
+            Ok(handle_ty("Resource", payload))
         }
         "Resource.use" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_handle(&arg_tys[0], "Resource")?;
+            let payload = handle_payload_ty(&arg_tys[0], "Resource")?;
             if !matches!(&args[1].kind, ExprKind::Lambda { .. }) {
                 return Err(TypeError::Msg(
                     "Resource.use callback must be a lambda".into(),
                 ));
             }
-            let Type::Fun(_, ret) = &arg_tys[1] else {
+            let Type::Fun(a, ret) = &arg_tys[1] else {
                 return Err(TypeError::Msg(
                     "Resource.use callback must be a lambda".into(),
                 ));
             };
+            expect_ty(a, &payload)?;
             let Type::Io(inner) = ret.as_ref() else {
                 return Err(TypeError::Msg(
                     "Resource.use lambda must return IO[_]".into(),
@@ -4039,76 +4053,99 @@ fn infer_call(
         }
         "Stream.emit" => {
             expect_arity(callee, &arg_tys, 1)?;
-            expect_ty(&arg_tys[0], &Type::String)?;
-            Ok(handle_ty("Stream", Type::String))
+            Ok(handle_ty("Stream", arg_tys[0].clone()))
         }
         "Stream.emits" => {
             expect_arity(callee, &arg_tys, 1)?;
-            expect_ty(&arg_tys[0], &list_of(Type::String))?;
-            Ok(handle_ty("Stream", Type::String))
+            let elem = list_elem(&arg_tys[0])?;
+            Ok(handle_ty("Stream", elem))
         }
         "Stream.eval" => {
             expect_arity(callee, &arg_tys, 1)?;
-            expect_ty(&arg_tys[0], &Type::Io(Box::new(Type::String)))?;
-            Ok(handle_ty("Stream", Type::String))
+            let Type::Io(inner) = &arg_tys[0] else {
+                return Err(TypeError::Msg("Stream.eval argument must be IO[_]".into()));
+            };
+            Ok(handle_ty("Stream", (**inner).clone()))
         }
         "Stream.concat" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_handle(&arg_tys[0], "Stream")?;
-            expect_handle(&arg_tys[1], "Stream")?;
-            Ok(handle_ty("Stream", Type::String))
+            let a = handle_payload_ty(&arg_tys[0], "Stream")?;
+            let b = handle_payload_ty(&arg_tys[1], "Stream")?;
+            let elem = prefer_named(&a, &b, "Stream")?;
+            Ok(handle_ty("Stream", elem))
         }
         "Stream.take" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_handle(&arg_tys[0], "Stream")?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
             expect_ty(&arg_tys[1], &Type::Int)?;
-            Ok(handle_ty("Stream", Type::String))
+            Ok(handle_ty("Stream", elem))
         }
         "Stream.drop" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_handle(&arg_tys[0], "Stream")?;
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
             expect_ty(&arg_tys[1], &Type::Int)?;
-            Ok(handle_ty("Stream", Type::String))
+            Ok(handle_ty("Stream", elem))
         }
         "Stream.evalMap" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_handle(&arg_tys[0], "Stream")?;
-            Ok(handle_ty("Stream", Type::String))
+            handle_payload_ty(&arg_tys[0], "Stream")?;
+            let out = match &arg_tys[1] {
+                Type::Fun(_, ret) => match ret.as_ref() {
+                    Type::Io(inner) => (**inner).clone(),
+                    other => {
+                        return Err(TypeError::Msg(format!(
+                            "Stream.evalMap lambda must return IO[_], got {other:?}"
+                        )));
+                    }
+                },
+                Type::Opaque(_) => Type::Opaque("Elem".into()),
+                other => {
+                    return Err(TypeError::Msg(format!(
+                        "Stream.evalMap callback must be a lambda, got {other:?}"
+                    )));
+                }
+            };
+            Ok(handle_ty("Stream", out))
         }
         "Stream.filter" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_handle(&arg_tys[0], "Stream")?;
-            Ok(handle_ty("Stream", Type::String))
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", elem))
         }
         "Stream.map" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_handle(&arg_tys[0], "Stream")?;
-            Ok(handle_ty("Stream", Type::String))
+            handle_payload_ty(&arg_tys[0], "Stream")?;
+            let out = match &arg_tys[1] {
+                Type::Fun(_, ret) => (**ret).clone(),
+                Type::Opaque(_) => Type::Opaque("Elem".into()),
+                other => other.clone(),
+            };
+            Ok(handle_ty("Stream", out))
         }
         "Stream.takeWhile" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_handle(&arg_tys[0], "Stream")?;
-            Ok(handle_ty("Stream", Type::String))
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", elem))
         }
         "Stream.dropWhile" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_handle(&arg_tys[0], "Stream")?;
-            Ok(handle_ty("Stream", Type::String))
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", elem))
         }
         "Stream.find" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_handle(&arg_tys[0], "Stream")?;
-            Ok(handle_ty("Stream", Type::String))
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(handle_ty("Stream", elem))
         }
         "Stream.exists" => {
             expect_arity(callee, &arg_tys, 2)?;
-            expect_handle(&arg_tys[0], "Stream")?;
+            handle_payload_ty(&arg_tys[0], "Stream")?;
             Ok(Type::Io(Box::new(Type::Bool)))
         }
         "Stream.compileToList" => {
             expect_arity(callee, &arg_tys, 1)?;
-            expect_handle(&arg_tys[0], "Stream")?;
-            Ok(Type::Io(Box::new(list_of(Type::String))))
+            let elem = handle_payload_ty(&arg_tys[0], "Stream")?;
+            Ok(Type::Io(Box::new(list_of(elem))))
         }
         "Stream.drain" => {
             expect_arity(callee, &arg_tys, 1)?;
@@ -5539,6 +5576,10 @@ fn expect_map_key(callee: &str, key: &Type) -> Result<(), TypeError> {
 }
 
 fn prefer_elem(a: &Type, b: &Type) -> Result<Type, TypeError> {
+    prefer_named(a, b, "list element")
+}
+
+fn prefer_named(a: &Type, b: &Type, what: &str) -> Result<Type, TypeError> {
     if types_compat(a, b) {
         if is_meta_opaque(a) {
             return Ok(b.clone());
@@ -5546,7 +5587,7 @@ fn prefer_elem(a: &Type, b: &Type) -> Result<Type, TypeError> {
         return Ok(a.clone());
     }
     Err(TypeError::Msg(format!(
-        "list element type mismatch: {a:?} vs {b:?}"
+        "{what} type mismatch: {a:?} vs {b:?}"
     )))
 }
 
@@ -9590,6 +9631,41 @@ enum Opt:
     }
 
     #[test]
+    fn typechecks_generic_stream_resource() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    res = Resource.make(IO.pure(3), n => IO.println(Str.fromInt(n)))
+    got <- Resource.use(res, n => IO.pure(n + 1))
+    _ <- IO.println(Str.fromInt(got))
+    ns <- Stream.compileToList(Stream.map(Stream.emits([1, 2]), n => n + 1))
+    _ <- IO.println(Str.fromInt(List.head(ns)))
+    fs <- Stream.compileToList(Stream.filter(Stream.emit(4), n => n > 0))
+    _ <- IO.println(Str.fromInt(List.head(fs)))
+    es <- Stream.compileToList(Stream.evalMap(Stream.eval(IO.pure(5)), n => IO.pure(n + 1)))
+    _ <- IO.println(Str.fromInt(List.head(es)))
+    cs <- Stream.compileToList(Stream.concat(Stream.take(Stream.emit(6), 1), Stream.drop(Stream.emit(7), 0)))
+    _ <- IO.println(Str.fromInt(List.head(cs)))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("generic Stream/Resource should typecheck");
+    }
+
+    #[test]
+    fn rejects_stream_concat_payload_mismatch() {
+        let src = r#"@main def main: IO[Unit] =
+  Stream.drain(Stream.concat(Stream.emit(1), Stream.emit("a")))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("Stream type mismatch"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
     fn typechecks_queue_int_needs_pin() {
         let src = r#"@main def main: IO[Unit] =
   for {
@@ -10576,6 +10652,18 @@ def scale(x: Float): Float = x * 2.0
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Stream.exists should typecheck");
+    }
+
+    #[test]
+    fn typechecks_stream_map_int() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs <- Stream.compileToList(Stream.map(Stream.emits([1, 2]), n => n + 1))
+    _ <- IO.println(Str.fromInt(List.head(xs)))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Stream.map Int should typecheck");
     }
 
     #[test]

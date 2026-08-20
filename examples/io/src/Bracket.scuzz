@@ -14,6 +14,9 @@ def run(): IO[Unit] =
     _ <- IO.timeout(1, Resource.use(Resource.make(IO.pure("to-tok"), t => IO.println(s"release:$t")), _t => IO.sleep(100))).handleErrorWith(_ =>
   IO.println("timed-out")
 )
+    resN = Resource.make(IO.pure(3), n => IO.println(s"releaseN:${Str.fromInt(n)}"))
+    gotN <- Resource.use(resN, n => IO.pure(n + 1))
+    _ <- IO.println(s"useN:${Str.fromInt(gotN)}")
     _ <- IO.println("done")
   } yield ()
 
