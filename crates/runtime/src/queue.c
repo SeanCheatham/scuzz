@@ -3,6 +3,7 @@
 SzQueue *sz_queue_make(void) {
   SzQueue *q = (SzQueue *)sz_rc_alloc(sizeof(SzQueue), SZ_RC_QUEUE);
   q->cap = 8;
+  q->head = 0;
   q->len = 0;
   q->waiters = NULL;
   q->items = (void **)sz_alloc(sizeof(void *) * q->cap);
@@ -18,6 +19,29 @@ static void *queue_unbounded_thunk(void *env) {
 
 SzIo *sz_queue_unbounded(void) { return sz_io_delay(queue_unbounded_thunk, NULL); }
 
+static size_t queue_slot(const SzQueue *q, size_t i) {
+  size_t idx = q->head + i;
+  if (idx >= q->cap)
+    idx -= q->cap;
+  return idx;
+}
+
+static void queue_grow(SzQueue *q) {
+  size_t ncap;
+  void **nitems;
+  size_t i;
+  if (q->cap > (SIZE_MAX / 2) / sizeof(void *))
+    sz_panic("sz_queue_offer: cap overflow");
+  ncap = q->cap * 2;
+  nitems = (void **)sz_alloc(sizeof(void *) * ncap);
+  for (i = 0; i < q->len; i++)
+    nitems[i] = q->items[queue_slot(q, i)];
+  sz_free(q->items);
+  q->items = nitems;
+  q->cap = ncap;
+  q->head = 0;
+}
+
 static void *queue_offer_thunk(void *env) {
   SzPair *p = (SzPair *)env;
   SzQueue *q = (SzQueue *)p->left;
@@ -27,17 +51,10 @@ static void *queue_offer_thunk(void *env) {
     sz_release(p);
     return NULL;
   }
-  if (q->len == q->cap) {
-    size_t ncap = q->cap * 2;
-    void **nitems = (void **)sz_alloc(sizeof(void *) * ncap);
-    size_t i;
-    for (i = 0; i < q->len; i++)
-      nitems[i] = q->items[i];
-    sz_free(q->items);
-    q->items = nitems;
-    q->cap = ncap;
-  }
-  q->items[q->len++] = value;
+  if (q->len == q->cap)
+    queue_grow(q);
+  q->items[queue_slot(q, q->len)] = value;
+  q->len++;
   p->right = NULL;
   sz_release(p);
   return NULL;

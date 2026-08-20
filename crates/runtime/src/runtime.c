@@ -644,11 +644,17 @@ void sz_release(void *ptr) {
   case SZ_RC_QUEUE: {
     SzQueue *q = (SzQueue *)ptr;
     size_t i;
-    for (i = 0; i < q->len; i++)
-      sz_release(q->items[i]);
+    for (i = 0; i < q->len; i++) {
+      size_t idx = q->head + i;
+      if (q->cap && idx >= q->cap)
+        idx -= q->cap;
+      sz_release(q->items[idx]);
+    }
     sz_free(q->items);
     q->items = NULL;
+    q->head = 0;
     q->len = 0;
+    q->cap = 0;
     break;
   }
   case SZ_RC_DEFERRED: {
@@ -2021,8 +2027,11 @@ static void sleeper_remove(Sched *s, Fiber *f) {
 }
 
 static void queue_waiter_add(SzQueue *q, Fiber *f) {
-  f->wait_next = (Fiber *)q->waiters;
-  q->waiters = f;
+  Fiber **pp = (Fiber **)&q->waiters;
+  f->wait_next = NULL;
+  while (*pp)
+    pp = &(*pp)->wait_next;
+  *pp = f;
 }
 
 static void queue_waiter_remove(SzQueue *q, Fiber *f) {
@@ -2770,10 +2779,11 @@ static int step_fiber(Sched *s, Fiber *f) {
       return 0;
     }
     if (q->len > 0) {
-      void *v = q->items[0];
-      size_t i;
-      for (i = 1; i < q->len; i++)
-        q->items[i - 1] = q->items[i];
+      void *v = q->items[q->head];
+      q->items[q->head] = NULL;
+      q->head++;
+      if (q->head == q->cap)
+        q->head = 0;
       q->len--;
       /* Transfer the offer retain. Do not retain again. */
       fiber_set_cur(f, pure_drop(v));
