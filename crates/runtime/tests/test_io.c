@@ -7070,6 +7070,131 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
+  /* Map.filter / mapValues / exists / forall. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *ka;
+    SzString *kb;
+    SzString *kc;
+    SzString *va;
+    SzString *vb;
+    SzString *vc;
+    SzMap *m0;
+    SzMap *m1;
+    SzMap *m2;
+    SzMap *kept;
+    SzMap *mapped;
+    SzList *vals;
+    sz_alloc_stats(&base_bytes, &base_count);
+    ka = sz_string_from_cstr("a");
+    kb = sz_string_from_cstr("b");
+    kc = sz_string_from_cstr("c");
+    va = sz_string_from_cstr("1");
+    vb = sz_string_from_cstr("b");
+    vc = sz_string_from_cstr("3");
+    m0 = sz_map_set(NULL, ka, va, 1);
+    m1 = sz_map_set(m0, kb, vb, 1);
+    m2 = sz_map_set(m1, kc, vc, 1);
+    kept = sz_map_filter(m2, keep_not_b, NULL);
+    assert(sz_map_size(kept) == 2);
+    assert(sz_map_contains(kept, ka) == 1);
+    assert(sz_map_contains(kept, kb) == 0);
+    assert(sz_map_contains(kept, kc) == 1);
+    assert(sz_map_exists(m2, keep_a, NULL) == 0);
+    assert(sz_map_exists(m2, keep_not_b, NULL) == 1);
+    assert(sz_map_forall(m2, keep_not_b, NULL) == 0);
+    assert(sz_map_forall(kept, keep_not_b, NULL) == 1);
+    assert(sz_map_filter(NULL, keep_not_b, NULL) == NULL);
+    assert(sz_map_exists(NULL, keep_a, NULL) == 0);
+    assert(sz_map_forall(NULL, keep_a, NULL) == 1);
+    mapped = sz_map_map_values(kept, map_id, NULL);
+    assert(sz_map_size(mapped) == 2);
+    vals = sz_map_values(mapped);
+    assert(sz_list_len(vals) == 2);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_head(vals)), "1") == 0);
+    assert(sz_map_map_values(NULL, map_id, NULL) == NULL);
+    sz_list_free(vals);
+    sz_release(mapped);
+    sz_release(kept);
+    sz_release(m2);
+    sz_release(m1);
+    sz_release(m0);
+    sz_string_free(ka);
+    sz_string_free(kb);
+    sz_string_free(kc);
+    sz_string_free(va);
+    sz_string_free(vb);
+    sz_string_free(vc);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
+  /* Set.filter / map / exists / forall. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *kx;
+    SzString *ky;
+    SzString *kz;
+    SzMap *s0;
+    SzMap *s1;
+    SzMap *s2;
+    SzMap *kept;
+    SzMap *mapped;
+    SzList *keys;
+    sz_alloc_stats(&base_bytes, &base_count);
+    kx = sz_string_from_cstr("a");
+    ky = sz_string_from_cstr("b");
+    kz = sz_string_from_cstr("c");
+    s0 = sz_map_set(NULL, kx, NULL, 1);
+    s1 = sz_map_set(s0, ky, NULL, 1);
+    s2 = sz_map_set(s1, kz, NULL, 1);
+    kept = sz_set_filter(s2, keep_not_b, NULL);
+    assert(sz_map_size(kept) == 2);
+    assert(sz_map_contains(kept, kx) == 1);
+    assert(sz_map_contains(kept, ky) == 0);
+    assert(sz_set_exists(s2, keep_a, NULL) == 1);
+    assert(sz_set_exists(s2, keep_none, NULL) == 0);
+    assert(sz_set_forall(s2, keep_not_b, NULL) == 0);
+    assert(sz_set_forall(kept, keep_not_b, NULL) == 1);
+    assert(sz_set_filter(NULL, keep_not_b, NULL) == NULL);
+    assert(sz_set_exists(NULL, keep_a, NULL) == 0);
+    assert(sz_set_forall(NULL, keep_a, NULL) == 1);
+    mapped = sz_set_map(kept, str_take1, NULL, 1);
+    assert(sz_map_size(mapped) == 2);
+    keys = sz_map_keys(mapped);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_head(keys)), "a") == 0);
+    assert(strcmp(sz_string_cstr((SzString *)sz_list_at(keys, 1)), "c") == 0);
+    {
+      SzString *aa = sz_string_from_cstr("aa");
+      SzString *ab = sz_string_from_cstr("ab");
+      SzMap *one = sz_map_set(NULL, aa, NULL, 1);
+      SzMap *two = sz_map_set(one, ab, NULL, 1);
+      SzMap *collapsed = sz_set_map(two, str_take1, NULL, 1);
+      assert(sz_map_size(collapsed) == 1);
+      sz_release(collapsed);
+      sz_release(two);
+      sz_release(one);
+      sz_string_free(aa);
+      sz_string_free(ab);
+    }
+    assert(sz_set_map(NULL, str_take1, NULL, 1) == NULL);
+    sz_list_free(keys);
+    sz_release(mapped);
+    sz_release(kept);
+    sz_release(s2);
+    sz_release(s1);
+    sz_release(s0);
+    sz_string_free(kx);
+    sz_string_free(ky);
+    sz_string_free(kz);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   /* IO graph and fiber structs drop after unsafe_run. */
   {
     size_t base_bytes = 0, base_count = 0;

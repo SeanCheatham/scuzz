@@ -1007,6 +1007,22 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Map.diff",
         "Map.diff(a: Map[K, V], b: Map[K, V]): Map[K, V]",
     ),
+    (
+        "Map.filter",
+        "Map.filter(m: Map[K, V], pred: V => Bool): Map[K, V]",
+    ),
+    (
+        "Map.mapValues",
+        "Map.mapValues(m: Map[K, V], f: V => W): Map[K, W]",
+    ),
+    (
+        "Map.exists",
+        "Map.exists(m: Map[K, V], pred: V => Bool): Bool",
+    ),
+    (
+        "Map.forall",
+        "Map.forall(m: Map[K, V], pred: V => Bool): Bool",
+    ),
     ("Set.empty", "Set.empty(): Set[T]"),
     ("Set.add", "Set.add(s: Set[T], x: T): Set[T]"),
     ("Set.contains", "Set.contains(s: Set[T], x: T): Bool"),
@@ -1026,6 +1042,13 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Set.isDisjoint",
         "Set.isDisjoint(a: Set[T], b: Set[T]): Bool",
     ),
+    (
+        "Set.filter",
+        "Set.filter(s: Set[T], pred: T => Bool): Set[T]",
+    ),
+    ("Set.map", "Set.map(s: Set[T], f: T => K): Set[K]"),
+    ("Set.exists", "Set.exists(s: Set[T], pred: T => Bool): Bool"),
+    ("Set.forall", "Set.forall(s: Set[T], pred: T => Bool): Bool"),
     ("Fs.read", "Fs.read(path: String): IO[String]"),
     ("Fs.write", "Fs.write(path: String, body: String): IO[Unit]"),
     ("Fs.list", "Fs.list(path: String): IO[List[String]]"),
@@ -2692,6 +2715,38 @@ record Point(x: Int, y: Int)
         let h = hover_src(src, "diff");
         assert!(
             h.contains("Map.diff(a: Map[K, V], b: Map[K, V]): Map[K, V]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(Map.values(Map.filter(Map.set(Map.empty(), "a", "1"), v => v != "z")), ","))
+"#;
+        let h = hover_src(src, "filter");
+        assert!(
+            h.contains("Map.filter(m: Map[K, V], pred: V => Bool): Map[K, V]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(Map.values(Map.mapValues(Map.set(Map.empty(), "a", "1"), v => v)), ","))
+"#;
+        let h = hover_src(src, "mapValues");
+        assert!(
+            h.contains("Map.mapValues(m: Map[K, V], f: V => W): Map[K, W]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (Map.exists(Map.set(Map.empty(), "a", "1"), v => v == "1")) "y" else "n")
+"#;
+        let h = hover_src(src, "exists");
+        assert!(
+            h.contains("Map.exists(m: Map[K, V], pred: V => Bool): Bool"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (Map.forall(Map.set(Map.empty(), "a", "1"), v => v != "z")) "y" else "n")
+"#;
+        let h = hover_src(src, "forall");
+        assert!(
+            h.contains("Map.forall(m: Map[K, V], pred: V => Bool): Bool"),
             "{h}"
         );
         let src = r#"@main def main: IO[Unit] =

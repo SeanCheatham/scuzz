@@ -225,6 +225,14 @@ def mapSetProof(): IO[Unit] =
     _ <- IO.println(s"mdiff:${List.join(Map.values(Map.diff(mp, other)), ",")}")
     _ <- IO.println(s"sub:${if (Set.isSubset(st, Set.union(st, Set.add(Set.empty(), "z")))) "y" else "n"}")
     _ <- IO.println(s"disj:${if (Set.isDisjoint(st, Set.add(Set.empty(), "z"))) "y" else "n"}")
+    _ <- IO.println(s"mfil:${List.join(Map.values(Map.filter(mp, v => v != "2")), ",")}")
+    _ <- IO.println(s"mmap:${List.join(Map.values(Map.mapValues(mp, v => Str.concat(v, "!"))), ",")}")
+    _ <- IO.println(s"mex:${if (Map.exists(mp, v => v == "2")) "y" else "n"}")
+    _ <- IO.println(s"mfa:${if (Map.forall(mp, v => v != "z")) "y" else "n"}")
+    _ <- IO.println(s"sfil:${List.join(Set.toList(Set.filter(st, x => x != "y")), ",")}")
+    _ <- IO.println(s"smap:${List.join(Set.toList(Set.map(st, x => Str.concat(x, "!"))), ",")}")
+    _ <- IO.println(s"sex:${if (Set.exists(st, x => x == "x")) "y" else "n"}")
+    _ <- IO.println(s"sfa:${if (Set.forall(st, x => x != "z")) "y" else "n"}")
   } yield ()
 
 def listProof(): IO[Unit] =

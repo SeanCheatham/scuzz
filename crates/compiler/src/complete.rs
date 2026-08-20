@@ -471,6 +471,10 @@ mod tests {
             ("List.groupB", "List.groupBy"),
             ("List.sum", "List.sum"),
             ("List.prod", "List.product"),
+            ("Map.fil", "Map.filter"),
+            ("Map.mapV", "Map.mapValues"),
+            ("Set.fil", "Set.filter"),
+            ("Set.map", "Set.map"),
             ("Color.rgb", "Color.rgb"),
             ("Color.rgb", "Color.rgba"),
         ] {

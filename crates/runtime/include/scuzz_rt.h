@@ -649,6 +649,23 @@ SzMap *sz_set_diff(SzMap *a, SzMap *b);
 SzMap *sz_map_union(SzMap *a, SzMap *b);
 SzMap *sz_map_intersect(SzMap *a, SzMap *b);
 SzMap *sz_map_diff(SzMap *a, SzMap *b);
+/* Keep entries whose value matches `pred`. Empty stays empty. */
+SzMap *sz_map_filter(SzMap *m, SzListPred pred, void *env);
+/* Map each value. Mapper returns +1. Empty stays empty. */
+SzMap *sz_map_map_values(SzMap *m, SzListMapFn fn, void *env);
+/* 1 when any value matches `pred`. Empty is 0. */
+int64_t sz_map_exists(SzMap *m, SzListPred pred, void *env);
+/* 1 when every value matches `pred`. Empty is 1. */
+int64_t sz_map_forall(SzMap *m, SzListPred pred, void *env);
+/* Keep keys that match `pred`. Empty stays empty. */
+SzMap *sz_set_filter(SzMap *s, SzListPred pred, void *env);
+/* Map each key. Mapper returns +1. `key_kind` is 0 for boxed Int, 1 for
+ * String. Duplicate keys collapse. Empty stays empty. */
+SzMap *sz_set_map(SzMap *s, SzListMapFn fn, void *env, int32_t key_kind);
+/* 1 when any key matches `pred`. Empty is 0. */
+int64_t sz_set_exists(SzMap *s, SzListPred pred, void *env);
+/* 1 when every key matches `pred`. Empty is 1. */
+int64_t sz_set_forall(SzMap *s, SzListPred pred, void *env);
 /* 1 when every key of `a` is in `b`. Empty `a` is a subset. */
 int64_t sz_set_is_subset(SzMap *a, SzMap *b);
 /* 1 when `a` and `b` share no key. Empty is disjoint. */

@@ -227,6 +227,137 @@ SzMap *sz_map_intersect(SzMap *a, SzMap *b) { return map_keep(a, b, 1, 1); }
 
 SzMap *sz_map_diff(SzMap *a, SzMap *b) { return map_keep(a, b, 0, 1); }
 
+/* Rebuild from keys. `on_key` 1 tests the key; else the value. */
+static SzMap *map_filter_on(SzMap *m, SzListPred pred, void *env, int on_key,
+                            const char *panic) {
+  SzList *keys;
+  SzList *p;
+  SzMap *out = NULL;
+  SzMap *next;
+  void *v;
+  void *arg;
+  int32_t kind;
+  if (!pred)
+    sz_panic(panic);
+  if (!m)
+    return NULL;
+  kind = m->key_kind;
+  keys = sz_map_keys(m);
+  for (p = keys; p; p = p->tail) {
+    v = sz_map_get_or(m, p->head, NULL);
+    arg = on_key ? p->head : v;
+    if (pred(arg, env) != 0) {
+      next = sz_map_set(out, p->head, v, kind);
+      sz_release(out);
+      out = next;
+    }
+  }
+  sz_list_free(keys);
+  return out;
+}
+
+static int64_t map_pred_on(SzMap *m, SzListPred pred, void *env, int on_key,
+                           int want_all, const char *panic) {
+  SzList *keys;
+  SzList *p;
+  void *v;
+  void *arg;
+  int64_t ok;
+  if (!pred)
+    sz_panic(panic);
+  if (!m)
+    return want_all ? 1 : 0;
+  keys = sz_map_keys(m);
+  ok = want_all ? 1 : 0;
+  for (p = keys; p; p = p->tail) {
+    v = sz_map_get_or(m, p->head, NULL);
+    arg = on_key ? p->head : v;
+    if (want_all) {
+      if (pred(arg, env) == 0) {
+        ok = 0;
+        break;
+      }
+    } else if (pred(arg, env) != 0) {
+      ok = 1;
+      break;
+    }
+  }
+  sz_list_free(keys);
+  return ok;
+}
+
+SzMap *sz_map_filter(SzMap *m, SzListPred pred, void *env) {
+  return map_filter_on(m, pred, env, 0, "sz_map_filter(null pred)");
+}
+
+SzMap *sz_map_map_values(SzMap *m, SzListMapFn fn, void *env) {
+  SzList *keys;
+  SzList *p;
+  SzMap *out = NULL;
+  SzMap *next;
+  void *nv;
+  int32_t kind;
+  if (!fn)
+    sz_panic("sz_map_map_values(null fn)");
+  if (!m)
+    return NULL;
+  kind = m->key_kind;
+  keys = sz_map_keys(m);
+  for (p = keys; p; p = p->tail) {
+    /* Mapper returns +1. Set retains. Drop the mapper ref. */
+    nv = fn(sz_map_get_or(m, p->head, NULL), env);
+    next = sz_map_set(out, p->head, nv, kind);
+    sz_release(nv);
+    sz_release(out);
+    out = next;
+  }
+  sz_list_free(keys);
+  return out;
+}
+
+int64_t sz_map_exists(SzMap *m, SzListPred pred, void *env) {
+  return map_pred_on(m, pred, env, 0, 0, "sz_map_exists(null pred)");
+}
+
+int64_t sz_map_forall(SzMap *m, SzListPred pred, void *env) {
+  return map_pred_on(m, pred, env, 0, 1, "sz_map_forall(null pred)");
+}
+
+SzMap *sz_set_filter(SzMap *s, SzListPred pred, void *env) {
+  return map_filter_on(s, pred, env, 1, "sz_set_filter(null pred)");
+}
+
+SzMap *sz_set_map(SzMap *s, SzListMapFn fn, void *env, int32_t key_kind) {
+  SzList *keys;
+  SzList *p;
+  SzMap *out = NULL;
+  SzMap *next;
+  void *nk;
+  if (!fn)
+    sz_panic("sz_set_map(null fn)");
+  if (!s)
+    return NULL;
+  keys = sz_map_keys(s);
+  for (p = keys; p; p = p->tail) {
+    /* Mapper returns +1. Set retains. Drop the mapper ref. */
+    nk = fn(p->head, env);
+    next = sz_map_set(out, nk, NULL, key_kind);
+    sz_release(nk);
+    sz_release(out);
+    out = next;
+  }
+  sz_list_free(keys);
+  return out;
+}
+
+int64_t sz_set_exists(SzMap *s, SzListPred pred, void *env) {
+  return map_pred_on(s, pred, env, 1, 0, "sz_set_exists(null pred)");
+}
+
+int64_t sz_set_forall(SzMap *s, SzListPred pred, void *env) {
+  return map_pred_on(s, pred, env, 1, 1, "sz_set_forall(null pred)");
+}
+
 static int64_t set_keys_match(SzMap *a, SzMap *b, int want_in_b) {
   SzList *keys;
   SzList *p;
