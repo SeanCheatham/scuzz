@@ -439,6 +439,7 @@ fn expand_types_in_expr(
         ExprKind::Lambda {
             param,
             param_ty,
+            pat,
             body,
         } => {
             let param_ty = match param_ty {
@@ -456,6 +457,7 @@ fn expand_types_in_expr(
                 ExprKind::Lambda {
                     param,
                     param_ty,
+                    pat,
                     body: Box::new(body),
                 },
                 span,
@@ -2341,6 +2343,7 @@ fn rewrite_lambda_arg(
     if let ExprKind::Lambda {
         param,
         param_ty: ann,
+        pat,
         body,
     } = expr.kind
     {
@@ -2352,6 +2355,7 @@ fn rewrite_lambda_arg(
             ExprKind::Lambda {
                 param,
                 param_ty: ann,
+                pat,
                 body: Box::new(body),
             },
             span,
@@ -3001,6 +3005,7 @@ fn infer(
                 param,
                 param_ty,
                 body,
+                ..
             } => {
                 // Bare lambdas (View.button tap). Kit Call args bind String/Int
                 // and check the body type in infer_call via infer_lambda_arg.
@@ -3090,6 +3095,7 @@ fn infer_lambda_arg(
         param,
         param_ty: ann,
         body,
+        ..
     } = &expr.kind
     {
         if let Some(ann) = ann {
@@ -4747,6 +4753,7 @@ fn bind_pattern(
         crate::ast::Pattern::Tuple { left, right, .. } => {
             let (a, b) = match scrut {
                 Type::Tuple(a, b) => ((**a).clone(), (**b).clone()),
+                Type::Opaque(_) => (scrut.clone(), scrut.clone()),
                 other => {
                     return Err(TypeError::Msg(format!(
                         "tuple pattern does not match scrutinee {other:?}"
@@ -5328,16 +5335,20 @@ fn elaborate_pattern(
             })
         }
         crate::ast::Pattern::Tuple { left, right, .. } => {
-            let Type::Tuple(a, b) = scrut else {
-                return Err(TypeError::Msg(format!(
-                    "tuple pattern does not match scrutinee {scrut:?}"
-                ))
-                .with_span_if_bare(span));
+            let (a, b) = match scrut {
+                Type::Tuple(a, b) => ((**a).clone(), (**b).clone()),
+                Type::Opaque(_) => (scrut.clone(), scrut.clone()),
+                _ => {
+                    return Err(TypeError::Msg(format!(
+                        "tuple pattern does not match scrutinee {scrut:?}"
+                    ))
+                    .with_span_if_bare(span));
+                }
             };
             Ok(crate::ast::Pattern::Tuple {
                 left: Box::new(elaborate_pattern(
                     left,
-                    a,
+                    &a,
                     enums,
                     current_module,
                     tparams,
@@ -5345,14 +5356,14 @@ fn elaborate_pattern(
                 )?),
                 right: Box::new(elaborate_pattern(
                     right,
-                    b,
+                    &b,
                     enums,
                     current_module,
                     tparams,
                     span,
                 )?),
-                left_ty: (**a).clone(),
-                right_ty: (**b).clone(),
+                left_ty: a,
+                right_ty: b,
             })
         }
         crate::ast::Pattern::Named { name, inner: _ } => Err(TypeError::Msg(format!(
@@ -6320,23 +6331,35 @@ fn mono_expr(
         ExprKind::Lambda {
             param,
             param_ty,
+            pat,
             body,
-        } => Ok(Expr::new(
-            ExprKind::Lambda {
-                param,
-                param_ty,
-                body: Box::new(mono_expr(
-                    *body,
-                    enums,
-                    funs,
-                    methods,
-                    current_module,
-                    env,
-                    specialized,
-                )?),
-            },
-            span,
-        )),
+        } => {
+            let bind_ty = if let Some(ann) = &param_ty {
+                resolve_ascribe_type(ann, enums, current_module)?
+            } else {
+                Type::Opaque("Param".into())
+            };
+            let old = bind_opt(param.as_ref(), bind_ty, env);
+            let body = mono_expr(
+                *body,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                specialized,
+            )?;
+            restore_opt(old, env);
+            Ok(Expr::new(
+                ExprKind::Lambda {
+                    param,
+                    param_ty,
+                    pat,
+                    body: Box::new(body),
+                },
+                span,
+            ))
+        }
         other => Ok(Expr::new(other, span)),
     }
 }
@@ -7178,24 +7201,36 @@ fn elaborate_expr(
         ExprKind::Lambda {
             param,
             param_ty,
+            pat,
             body,
-        } => Ok(Expr::new(
-            ExprKind::Lambda {
-                param,
-                param_ty,
-                body: Box::new(elaborate_expr(
-                    *body,
-                    enums,
-                    funs,
-                    methods,
-                    current_module,
-                    env,
-                    None,
-                    tparams,
-                )?),
-            },
-            span,
-        )),
+        } => {
+            let bind_ty = if let Some(ann) = &param_ty {
+                resolve_ascribe_type(ann, enums, current_module)?
+            } else {
+                Type::Opaque("Param".into())
+            };
+            let old = bind_opt(param.as_ref(), bind_ty, env);
+            let body = elaborate_expr(
+                *body,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                None,
+                tparams,
+            )?;
+            restore_opt(old, env);
+            Ok(Expr::new(
+                ExprKind::Lambda {
+                    param,
+                    param_ty,
+                    pat,
+                    body: Box::new(body),
+                },
+                span,
+            ))
+        }
         ExprKind::For { .. } => panic!("internal: unlowered `for` in elaboration"),
         other => Ok(Expr::new(other, span)),
     }
@@ -7338,10 +7373,12 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
         ExprKind::Lambda {
             param,
             param_ty,
+            pat,
             body,
         } => ExprKind::Lambda {
             param,
             param_ty: param_ty.map(|t| apply_subst(&t, subst)),
+            pat,
             body: Box::new(subst_node_targs(*body, subst)),
         },
         other => other,
@@ -7729,6 +7766,7 @@ fn rewrite_enum_refs(
         ExprKind::Lambda {
             param,
             param_ty,
+            pat,
             body,
         } => ExprKind::Lambda {
             param,
@@ -7736,6 +7774,7 @@ fn rewrite_enum_refs(
                 Some(t) => Some(concretize_type(&t, clones)?),
                 None => None,
             },
+            pat,
             body: Box::new(rewrite_enum_refs(*body, clones)?),
         },
         other => other,
@@ -8803,6 +8842,48 @@ def take(p: (Int, String)): String = p._2
         assert!(
             matches!(&p.defs[0].body.kind, ExprKind::Match { .. }),
             "swap matches a tuple"
+        );
+    }
+
+    #[test]
+    fn typechecks_tuple_for_binder_and_lambda() {
+        let src = r#"
+def firsts(xs: List[(Int, String)]): List[Int] =
+  List.map(xs, (n, _) => n)
+@main def main: IO[Unit] =
+  for {
+    (n, s) = (42, "ok")
+    (a, (b, c)) = (1, (2, "x"))
+    (d, e) <- IO.both(IO.pure(1), IO.pure("x"))
+    _ <- IO.println(Str.fromInt(n))
+    _ <- IO.println(s)
+    _ <- IO.println(Str.fromInt(a + b))
+    _ <- IO.println(c)
+    _ <- IO.println(Str.fromInt(d))
+    _ <- IO.println(e)
+    _ <- IO.println(Str.fromInt(List.head(firsts([(2, "z")]))))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("tuple unpack in for and lambda");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate tuple unpack");
+        let p = crate::typ::resolve_field_access(p).expect("fields");
+        crate::typ::monomorphize(p).expect("mono tuple unpack");
+    }
+
+    #[test]
+    fn rejects_tuple_for_binder_on_int() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    (a, b) = 1
+  } yield IO.println("no")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(
+            err.contains("tuple") || err.contains("mismatch") || err.contains("Int"),
+            "{err}"
         );
     }
 

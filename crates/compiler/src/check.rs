@@ -609,6 +609,15 @@ pub fn check_project_with(
     project_dir: &Path,
     unsaved: &BTreeMap<PathBuf, String>,
 ) -> Result<Vec<Diagnostic>> {
+    let dir = project_dir.to_path_buf();
+    let unsaved = unsaved.clone();
+    crate::driver::on_compiler_stack(move || check_project_with_inner(&dir, &unsaved))
+}
+
+fn check_project_with_inner(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+) -> Result<Vec<Diagnostic>> {
     let mut diags = format_check_src(project_dir, unsaved)?;
     let mut resolved = crate::driver::resolve_project(project_dir)
         .with_context(|| format!("resolving {}", project_dir.display()))?;

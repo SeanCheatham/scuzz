@@ -514,9 +514,13 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
         ExprKind::Lambda {
             param,
             param_ty,
+            pat,
             body,
         } => {
             let body = pretty_expr(body, 0).trim().to_string();
+            if let Some(p) = pat {
+                return format!("{pad}{} => {body}", pretty_pattern(p.as_ref()));
+            }
             match (param.as_deref(), param_ty) {
                 (None, None) => format!("{pad}_ => {body}"),
                 (None, Some(ty)) => format!("{pad}(_: {}) => {body}", pretty_type(ty)),
@@ -642,6 +646,7 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
                         name: name.clone(),
                         span: Span::dummy(),
                         value: *value.clone(),
+                        pat: None,
                     }],
                     body: body.clone(),
                 }),
@@ -653,16 +658,28 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             let inner = "  ".repeat(indent + 1);
             for b in binders {
                 match b {
-                    ForBinder::Eq { name, value, .. } => {
+                    ForBinder::Eq {
+                        name, value, pat, ..
+                    } => {
                         out.push_str(&inner);
-                        out.push_str(name);
+                        if let Some(p) = pat {
+                            out.push_str(&pretty_pattern(p));
+                        } else {
+                            out.push_str(name);
+                        }
                         out.push_str(" = ");
                         out.push_str(pretty_expr(value, 0).trim());
                         out.push('\n');
                     }
-                    ForBinder::Draw { name, value, .. } => {
+                    ForBinder::Draw {
+                        name, value, pat, ..
+                    } => {
                         out.push_str(&inner);
-                        out.push_str(name);
+                        if let Some(p) = pat {
+                            out.push_str(&pretty_pattern(p));
+                        } else {
+                            out.push_str(name);
+                        }
                         out.push_str(" <- ");
                         out.push_str(pretty_expr(value, 0).trim());
                         out.push('\n');
@@ -1144,6 +1161,22 @@ record Point(x: Int, y: Int)
         assert!(out.contains("record Point(x: Int, y: Int)"));
         assert!(out.contains("Point(1, 2)"));
         assert!(out.contains("case Point(a, b) =>"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_tuple_for_binder_and_lambda() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    (n, s) = (1, "x")
+    (a, b) <- IO.both(IO.pure(2), IO.pure("y"))
+  } yield IO.println(List.join(List.map([(3, "z")], (i, t) => t), ","))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("(n, s) = (1, \"x\")"), "{out}");
+        assert!(out.contains("(a, b) <- IO.both"), "{out}");
+        assert!(out.contains("(i, t) => t"), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

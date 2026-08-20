@@ -1,6 +1,6 @@
 //! Desugar `for` to `Let` / `FlatMap`. Resolve `Enum.Case` to `AdtConstruct`.
 
-use crate::ast::{Expr, ExprKind, ForBinder, MatchArm, Pattern, Program};
+use crate::ast::{Expr, ExprKind, ForBinder, MatchArm, Pattern, Program, TUP_UNPACK};
 use crate::resolve::{enum_id, split_dotted, EnumIndex};
 use crate::span::Span;
 
@@ -164,6 +164,24 @@ fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Expr {
             let body = lower_expr(*body, enums, current_module);
             desugar_for(binders, body, span, enums, current_module)
         }
+        ExprKind::Lambda {
+            param,
+            param_ty,
+            pat,
+            body,
+        } => {
+            let body = lower_expr(*body, enums, current_module);
+            let body = unpack_pat(pat.map(|p| *p), param.as_deref(), body, span.clone());
+            Expr::new(
+                ExprKind::Lambda {
+                    param,
+                    param_ty,
+                    pat: None,
+                    body: Box::new(body),
+                },
+                span,
+            )
+        }
         ExprKind::Call { callee, args } => {
             let args: Vec<Expr> = args
                 .into_iter()
@@ -263,6 +281,20 @@ fn lower_expr(expr: Expr, enums: &EnumIndex<'_>, current_module: &str) -> Expr {
     }
 }
 
+fn unpack_pat(pat: Option<Pattern>, name: Option<&str>, body: Expr, span: Span) -> Expr {
+    let Some(pat) = pat else {
+        return body;
+    };
+    let scrut = name.unwrap_or(TUP_UNPACK);
+    Expr::new(
+        ExprKind::Match {
+            scrutinee: Box::new(Expr::new(ExprKind::Var(scrut.into()), span.clone())),
+            arms: vec![MatchArm::new(pat, body)],
+        },
+        span,
+    )
+}
+
 fn desugar_for(
     binders: Vec<ForBinder>,
     body: Expr,
@@ -282,8 +314,11 @@ fn desugar_for(
         .into_iter()
         .rev()
         .fold(body, |body, binder| match binder {
-            ForBinder::Eq { name, value, .. } => {
+            ForBinder::Eq {
+                name, value, pat, ..
+            } => {
                 let sp = value.span.clone().cover(&body.span);
+                let body = unpack_pat(pat, Some(&name), body, sp.clone());
                 Expr::new(
                     ExprKind::Let {
                         name,
@@ -293,9 +328,16 @@ fn desugar_for(
                     sp,
                 )
             }
-            ForBinder::Draw { name, value, .. } => {
-                let param = if name == "_" { None } else { Some(name) };
+            ForBinder::Draw {
+                name, value, pat, ..
+            } => {
+                let param = if name == "_" {
+                    None
+                } else {
+                    Some(name.clone())
+                };
                 let sp = value.span.clone().cover(&body.span);
+                let body = unpack_pat(pat, param.as_deref(), body, sp.clone());
                 Expr::new(
                     ExprKind::FlatMap {
                         inner: Box::new(lower_expr(value, enums, current_module)),
@@ -331,6 +373,42 @@ mod tests {
             }
             other => panic!("expected nested Let, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn lowers_tuple_for_binder_to_match() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    (n, s) = (1, "x")
+  } yield IO.println(s)
+"#;
+        let p = lower_program(parse(src).unwrap());
+        match &p.main.body.kind {
+            ExprKind::Let { name, body, .. } => {
+                assert_eq!(name, crate::ast::TUP_UNPACK);
+                assert!(
+                    matches!(&body.kind, ExprKind::Match { .. }),
+                    "tuple binder unpacks with match, got {body:?}"
+                );
+            }
+            other => panic!("expected Let, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lowers_tuple_lambda_to_match() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map([(1, "x")], (n, s) => s), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let dumped = format!("{:?}", p.main.body.kind);
+        assert!(dumped.contains("Match"), "{dumped}");
+        assert!(
+            dumped.contains("__tup") || dumped.contains("Match"),
+            "{dumped}"
+        );
     }
 
     #[test]

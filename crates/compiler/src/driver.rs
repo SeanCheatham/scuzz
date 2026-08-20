@@ -22,6 +22,17 @@ use std::time::SystemTime;
 /// (cargo test threads) must not `make`/`ar`/`ld` them at once. The linker can SIGSEGV.
 static NATIVE_LINK_LOCK: Mutex<()> = Mutex::new(());
 
+/// Debug typecheck of the kernel example overflows the default thread stack.
+pub(crate) fn on_compiler_stack<T: Send + 'static>(f: impl FnOnce() -> T + Send + 'static) -> T {
+    std::thread::Builder::new()
+        .name("scuzz-compiler".into())
+        .stack_size(16 * 1024 * 1024)
+        .spawn(f)
+        .expect("spawn compiler stack")
+        .join()
+        .unwrap_or_else(|e| std::panic::resume_unwind(e))
+}
+
 #[derive(Debug, Clone)]
 pub struct CompileOptions {
     pub project_dir: PathBuf,
@@ -115,6 +126,11 @@ pub fn load_verify_program(project_dir: &Path) -> Result<(Program, Manifest)> {
 }
 
 pub fn compile_project(opts: &CompileOptions) -> Result<CompileOutput> {
+    let opts = opts.clone();
+    on_compiler_stack(move || compile_project_inner(&opts))
+}
+
+fn compile_project_inner(opts: &CompileOptions) -> Result<CompileOutput> {
     let resolved = resolve_project(&opts.project_dir)?;
     let manifest = resolved.root_manifest.clone();
     let fingerprint = fingerprint_compile(opts, &resolved);
