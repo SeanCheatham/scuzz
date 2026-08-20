@@ -1,5 +1,6 @@
 #include "scuzz_rt.h"
 
+#include <stdlib.h>
 #include <string.h>
 
 /* Linked list: NULL = Nil. Cons cells retain head and tail. sz_list_free
@@ -855,6 +856,188 @@ int64_t sz_list_is_defined_at(SzList *xs, int64_t index) {
     i++;
   }
   return 0;
+}
+
+typedef struct {
+  void *value;
+  int64_t key;
+  size_t idx;
+} SzSortSlot;
+
+static int str_ord(const SzString *a, const SzString *b) {
+  size_t n;
+  int c;
+  if (a == b)
+    return 0;
+  if (!a)
+    return -1;
+  if (!b)
+    return 1;
+  n = a->len < b->len ? a->len : b->len;
+  c = n ? memcmp(a->data, b->data, n) : 0;
+  if (c)
+    return c;
+  if (a->len < b->len)
+    return -1;
+  if (a->len > b->len)
+    return 1;
+  return 0;
+}
+
+static int cmp_int_slots(const void *a, const void *b) {
+  const SzSortSlot *x = (const SzSortSlot *)a;
+  const SzSortSlot *y = (const SzSortSlot *)b;
+  int64_t kx = sz_unbox_i64(x->value);
+  int64_t ky = sz_unbox_i64(y->value);
+  if (kx < ky)
+    return -1;
+  if (kx > ky)
+    return 1;
+  if (x->idx < y->idx)
+    return -1;
+  if (x->idx > y->idx)
+    return 1;
+  return 0;
+}
+
+static int cmp_str_slots(const void *a, const void *b) {
+  const SzSortSlot *x = (const SzSortSlot *)a;
+  const SzSortSlot *y = (const SzSortSlot *)b;
+  int c = str_ord((const SzString *)x->value, (const SzString *)y->value);
+  if (c)
+    return c;
+  if (x->idx < y->idx)
+    return -1;
+  if (x->idx > y->idx)
+    return 1;
+  return 0;
+}
+
+static int cmp_key_slots(const void *a, const void *b) {
+  const SzSortSlot *x = (const SzSortSlot *)a;
+  const SzSortSlot *y = (const SzSortSlot *)b;
+  if (x->key < y->key)
+    return -1;
+  if (x->key > y->key)
+    return 1;
+  if (x->idx < y->idx)
+    return -1;
+  if (x->idx > y->idx)
+    return 1;
+  return 0;
+}
+
+static SzList *sort_slots(SzSortSlot *slots, size_t n,
+                          int (*cmp)(const void *, const void *)) {
+  SzList *acc = NULL;
+  size_t i;
+  qsort(slots, n, sizeof(SzSortSlot), cmp);
+  for (i = n; i > 0; i--)
+    acc = sz_list_cons_take(slots[i - 1].value, acc);
+  sz_free(slots);
+  return acc;
+}
+
+SzList *sz_list_sort(SzList *xs, int64_t as_int) {
+  size_t n = sz_list_len(xs);
+  SzSortSlot *slots;
+  SzList *p;
+  size_t i;
+  if (!xs)
+    return NULL;
+  slots = (SzSortSlot *)sz_alloc(n * sizeof(SzSortSlot));
+  i = 0;
+  for (p = xs; p; p = p->tail) {
+    slots[i].value = p->head;
+    slots[i].key = 0;
+    slots[i].idx = i;
+    i++;
+  }
+  return sort_slots(slots, n, as_int ? cmp_int_slots : cmp_str_slots);
+}
+
+SzList *sz_list_sort_by(SzList *xs, SzListMapFn fn, void *env) {
+  size_t n = sz_list_len(xs);
+  SzSortSlot *slots;
+  SzList *p;
+  size_t i;
+  if (!fn)
+    sz_panic("sz_list_sort_by(null fn)");
+  if (!xs)
+    return NULL;
+  slots = (SzSortSlot *)sz_alloc(n * sizeof(SzSortSlot));
+  i = 0;
+  for (p = xs; p; p = p->tail) {
+    void *box = fn(p->head, env);
+    slots[i].value = p->head;
+    slots[i].key = sz_unbox_i64(box);
+    slots[i].idx = i;
+    sz_release(box);
+    i++;
+  }
+  return sort_slots(slots, n, cmp_key_slots);
+}
+
+static int cell_ord(void *a, void *b, int64_t as_int) {
+  if (as_int) {
+    int64_t ka = sz_unbox_i64(a);
+    int64_t kb = sz_unbox_i64(b);
+    if (ka < kb)
+      return -1;
+    if (ka > kb)
+      return 1;
+    return 0;
+  }
+  return str_ord((const SzString *)a, (const SzString *)b);
+}
+
+static void *list_extreme(SzList *xs, int64_t as_int, int want_max,
+                          const char *empty_msg) {
+  SzList *p;
+  void *best;
+  if (!xs)
+    sz_panic(empty_msg);
+  best = xs->head;
+  for (p = xs->tail; p; p = p->tail) {
+    int c = cell_ord(p->head, best, as_int);
+    if (want_max ? c > 0 : c < 0)
+      best = p->head;
+  }
+  return best;
+}
+
+void *sz_list_max(SzList *xs, int64_t as_int) {
+  return list_extreme(xs, as_int, 1, "List.max on empty");
+}
+
+void *sz_list_min(SzList *xs, int64_t as_int) {
+  return list_extreme(xs, as_int, 0, "List.min on empty");
+}
+
+void *sz_list_max_by(SzList *xs, SzListMapFn fn, void *env, int64_t want_max) {
+  SzList *p;
+  void *best;
+  int64_t best_k;
+  void *box;
+  if (!fn)
+    sz_panic("sz_list_max_by(null fn)");
+  if (!xs)
+    sz_panic(want_max ? "List.maxBy on empty" : "List.minBy on empty");
+  box = fn(xs->head, env);
+  best_k = sz_unbox_i64(box);
+  sz_release(box);
+  best = xs->head;
+  for (p = xs->tail; p; p = p->tail) {
+    int64_t k;
+    box = fn(p->head, env);
+    k = sz_unbox_i64(box);
+    sz_release(box);
+    if (want_max ? k > best_k : k < best_k) {
+      best_k = k;
+      best = p->head;
+    }
+  }
+  return best;
 }
 
 int64_t sz_list_length_compare(SzList *xs, int64_t n) {

@@ -228,6 +228,11 @@ pub fn emit_llvm(program: &Program) -> String {
     .unwrap();
     writeln!(out, "declare i64 @sz_list_is_defined_at(ptr, i64)").unwrap();
     writeln!(out, "declare i64 @sz_list_length_compare(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_list_sort(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_list_sort_by(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_max(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_list_min(ptr, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_list_max_by(ptr, ptr, ptr, i64)").unwrap();
     writeln!(out, "declare ptr @sz_fs_read(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_write(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_list(ptr)").unwrap();
@@ -3326,6 +3331,100 @@ fn emit_ptr_map(
     owned_ptr(code, format!("%{prefix}_v")).with_elem(lam.elem)
 }
 
+fn emit_list_sort_by(
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 2, "List.sortBy expects 2 args");
+    let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
+        panic!("List.sortBy mapper must be a lambda");
+    };
+    let lam = emit_smap_lambda(
+        param,
+        body,
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        true,
+        inner.elem,
+    );
+    let inner_owned = inner.owned;
+    let inner_kind = inner.kind;
+    let inner_elem = inner.elem;
+    let inner_value = inner.value.clone();
+    let mut code = inner.code;
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @sz_list_sort_by(ptr {inner_value}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
+    )
+    .unwrap();
+    drop_owned_ptr(&mut code, &lam);
+    if inner_owned && inner_kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {inner_value})").unwrap();
+    }
+    owned_ptr(code, format!("%{prefix}_v")).with_elem(inner_elem)
+}
+
+fn emit_list_extremum_by(
+    callee: &str,
+    want_max: i64,
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 2, "{callee} expects 2 args");
+    let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
+        panic!("{callee} mapper must be a lambda");
+    };
+    let lam = emit_smap_lambda(
+        param,
+        body,
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        true,
+        inner.elem,
+    );
+    let inner_owned = inner.owned;
+    let inner_kind = inner.kind;
+    let inner_elem = inner.elem;
+    let inner_value = inner.value.clone();
+    let mut code = inner.code;
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @sz_list_max_by(ptr {inner_value}, ptr %{prefix}_fnp, ptr %{prefix}_envp, i64 {want_max})"
+    )
+    .unwrap();
+    drop_owned_ptr(&mut code, &lam);
+    if inner_owned && inner_kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_retain(ptr %{prefix}_v)").unwrap();
+        writeln!(code, "  call void @sz_release(ptr {inner_value})").unwrap();
+    }
+    if inner_elem == Kind::Int || inner_elem == Kind::Float {
+        let v = unbox_numeric(
+            &mut code,
+            inner_elem,
+            &format!("%{prefix}_v"),
+            &format!("{prefix}_u"),
+        );
+        if inner_owned {
+            writeln!(code, "  call void @sz_release(ptr %{prefix}_v)").unwrap();
+        }
+        val_emitted(code, v, inner_elem)
+    } else {
+        ptr_owned_if(code, format!("%{prefix}_v"), inner_owned)
+    }
+}
+
 fn emit_list_tabulate(
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
@@ -3834,6 +3933,15 @@ fn emit_call(
     }
     if callee == "List.map" {
         return emit_ptr_map("List.map", "sz_list_map", args, ctx, locals, prefix, true);
+    }
+    if callee == "List.sortBy" {
+        return emit_list_sort_by(args, ctx, locals, prefix);
+    }
+    if callee == "List.maxBy" {
+        return emit_list_extremum_by("List.maxBy", 1, args, ctx, locals, prefix);
+    }
+    if callee == "List.minBy" {
+        return emit_list_extremum_by("List.minBy", 0, args, ctx, locals, prefix);
     }
     if callee == "List.flatMap" {
         return emit_ptr_map(
@@ -4552,6 +4660,48 @@ fn emit_call(
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
+        }
+        "List.sort" => {
+            let as_int = i64::from(emitted_args[0].elem == Kind::Int);
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_sort(ptr {}, i64 {as_int})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
+        }
+        "List.max" | "List.min" => {
+            let rt = if callee == "List.max" {
+                "sz_list_max"
+            } else {
+                "sz_list_min"
+            };
+            let as_int = i64::from(emitted_args[0].elem == Kind::Int);
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @{rt}(ptr {}, i64 {as_int})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            take_owned_ptr(&mut code, &emitted_args[0], &format!("%{prefix}_v"));
+            let elem = emitted_args[0].elem;
+            let result_owned = emitted_args[0].owned;
+            if elem == Kind::Int || elem == Kind::Float {
+                let v = unbox_numeric(
+                    &mut code,
+                    elem,
+                    &format!("%{prefix}_v"),
+                    &format!("{prefix}_u"),
+                );
+                if result_owned {
+                    writeln!(code, "  call void @sz_release(ptr %{prefix}_v)").unwrap();
+                }
+                val_emitted(code, v, elem)
+            } else {
+                ptr_owned_if(code, format!("%{prefix}_v"), result_owned)
+            }
         }
         "List.patch" => {
             writeln!(
@@ -9079,6 +9229,44 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of list {name} after List.segmentLength:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_sort_max_min() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(List.sort(["c", "a", "b"]), ","))
+    _ <- IO.println(List.join(List.map(List.sort([3, 1, 2]), n => Str.fromInt(n)), ","))
+    _ <- IO.println(List.join(List.sortBy(["bb", "a", "ccc"], x => Str.len(x)), ","))
+    _ <- IO.println(List.max(["a", "c"]))
+    _ <- IO.println(List.min(["a", "c"]))
+    _ <- IO.println(Str.fromInt(List.max([1, 3])))
+    _ <- IO.println(List.maxBy(["bb", "a"], x => Str.len(x)))
+    _ <- IO.println(List.minBy(["bb", "a"], x => Str.len(x)))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_sort"));
+        assert!(ir.contains("sz_list_sort_by"));
+        assert!(ir.contains("sz_list_max"));
+        assert!(ir.contains("sz_list_min"));
+        assert!(ir.contains("sz_list_max_by"));
+        let needle = "call ptr @sz_list_sort(ptr ";
+        let at = ir.find(needle).expect("sort");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.sort:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_sort_by(ptr ";
+        let at = ir.find(needle).expect("sortBy");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.sortBy:\n{ir}"
         );
     }
 

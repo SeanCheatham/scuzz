@@ -2178,7 +2178,10 @@ fn kit_lambda_param_ty_at(
             | "List.indexWhere"
             | "List.lastIndexWhere"
             | "List.prefixLength"
-            | "List.segmentLength",
+            | "List.segmentLength"
+            | "List.sortBy"
+            | "List.maxBy"
+            | "List.minBy",
             1,
         ) => prior.first().and_then(|t| list_elem(t).ok()),
         ("List.tabulate", 1) => Some(Type::Int),
@@ -2237,6 +2240,7 @@ fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
             | "Stream.exists",
             1,
         ) => Some(Type::Bool),
+        ("List.sortBy" | "List.maxBy" | "List.minBy", 1) => Some(Type::Int),
         ("Stream.evalMap" | "Resource.make" | "Resource.use", 1) => {
             Some(Type::Io(Box::new(Type::Unit)))
         }
@@ -2251,6 +2255,7 @@ fn kit_ret_label(ty: &Type) -> &'static str {
         Type::List(_) => "List[_]",
         Type::String => "String",
         Type::Bool => "Bool",
+        Type::Int => "Int",
         Type::Io(inner) if matches!(inner.as_ref(), Type::String) => "IO[String]",
         Type::Io(_) => "IO[_]",
         _ => "the expected type",
@@ -2263,6 +2268,7 @@ fn kit_lambda_body_ok(got: &Type, want: &Type) -> bool {
         Type::List(_) => matches!(got, Type::List(_)),
         Type::String => matches!(got, Type::String | Type::Int | Type::Float),
         Type::Bool => matches!(got, Type::Bool),
+        Type::Int => matches!(got, Type::Int),
         Type::Io(_) => matches!(got, Type::Io(_)),
         _ => types_compat(got, want),
     }
@@ -3431,6 +3437,27 @@ fn infer_call(
             list_elem(&arg_tys[0])?;
             expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(Type::Int)
+        }
+        "List.sort" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            let elem = list_elem(&arg_tys[0])?;
+            expect_ordered_elem(callee, &elem)?;
+            Ok(arg_tys[0].clone())
+        }
+        "List.max" | "List.min" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            let elem = list_elem(&arg_tys[0])?;
+            expect_ordered_elem(callee, &elem)?;
+            Ok(elem)
+        }
+        "List.sortBy" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            list_elem(&arg_tys[0])?;
+            Ok(arg_tys[0].clone())
+        }
+        "List.maxBy" | "List.minBy" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            list_elem(&arg_tys[0])
         }
         "List.exists" | "List.forall" => {
             expect_arity(callee, &arg_tys, 2)?;
@@ -5164,6 +5191,16 @@ fn list_elem(t: &Type) -> Result<Type, TypeError> {
         Type::List(e) => Ok((**e).clone()),
         Type::Opaque(_) if is_meta_opaque(t) => Ok(Type::Opaque("Elem".into())),
         other => Err(TypeError::Msg(format!("expected List[_], got {other:?}"))),
+    }
+}
+
+fn expect_ordered_elem(callee: &str, elem: &Type) -> Result<(), TypeError> {
+    if matches!(elem, Type::Int | Type::String) || is_meta_opaque(elem) {
+        Ok(())
+    } else {
+        Err(TypeError::Msg(format!(
+            "{callee} needs List[Int] or List[String], got List[{elem}]"
+        )))
     }
 }
 
@@ -9395,6 +9432,56 @@ enum Opt:
         let p = lower_program(parse(src).unwrap());
         typecheck(&p)
             .expect("List.indexOfSlice/lastIndexOfSlice/segmentLength/isDefinedAt/lengthCompare should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_sort_max_min() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = ["c", "a", "b"]
+    ns = [3, 1, 2]
+    _ <- IO.println(List.join(List.sort(xs), ","))
+    _ <- IO.println(List.join(List.map(List.sort(ns), n => Str.fromInt(n)), ","))
+    _ <- IO.println(List.join(List.sortBy(["bb", "a", "ccc"], x => Str.len(x)), ","))
+    _ <- IO.println(List.max(xs))
+    _ <- IO.println(List.min(xs))
+    _ <- IO.println(Str.fromInt(List.max(ns)))
+    _ <- IO.println(Str.fromInt(List.min(ns)))
+    _ <- IO.println(List.maxBy(["bb", "a", "ccc"], x => Str.len(x)))
+    _ <- IO.println(List.minBy(["bb", "a", "ccc"], x => Str.len(x)))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.sort/max/min/sortBy/maxBy/minBy should typecheck");
+    }
+
+    #[test]
+    fn rejects_list_sort_bool() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(if (List.max([true, false])) "y" else "n")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("List.max needs List[Int] or List[String]"),
+            "expected ordered-elem error, got {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_list_sort_by_non_int() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.sortBy(["a"], x => x), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("List.sortBy lambda must return Int"),
+            "expected Int key, got {}",
+            err.message()
+        );
     }
 
     #[test]
