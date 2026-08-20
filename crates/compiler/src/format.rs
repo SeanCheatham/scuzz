@@ -468,6 +468,7 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
         ExprKind::IoFail(e) => format!("{pad}IO.fail({})", pretty_expr(e, 0).trim()),
         ExprKind::IoPure(e) => format!("{pad}IO.pure({})", pretty_expr(e, 0).trim()),
         ExprKind::Var(n) => format!("{pad}{n}"),
+        ExprKind::Placeholder => format!("{pad}_"),
         ExprKind::Field { base, field } => {
             format!("{pad}{}.{}", pretty_in(base, WrapCtx::Postfix), field)
         }
@@ -1649,6 +1650,17 @@ record Point(x: Int, y: Int)
         let out = format_source(src).unwrap();
         assert!(out.contains("\"a\" :: \"b\" :: List.empty()"), "{out}");
         assert!(!out.contains("List.cons"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_placeholder_lambda() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map([1], _ + 1), ","))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("_ + 1"), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }
