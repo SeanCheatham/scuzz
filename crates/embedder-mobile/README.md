@@ -4,7 +4,7 @@ OS presentation and input for `UiRuntime.Mobile`. Headless remains the CI peer f
 
 ## Host shell (Linux CI)
 
-`libscuzz_mobile.a` (`src/host_shell.c`) logs present/pump diagnostics to stderr when
+`libscuzz_mobile.a` (`src/host_shell.c`) logs present and keyboard lines to stderr when
 `SCUZZ_MOBILE_SHELL=1` (pixels stay offscreen on the host). Linked when
 present (`--whole-archive` so strong symbols override weak stubs in `libscuzz_rt.a`).
 

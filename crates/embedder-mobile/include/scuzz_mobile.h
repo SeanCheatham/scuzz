@@ -10,12 +10,7 @@
 extern "C" {
 #endif
 
-/* Mobile embedder ABI. Weak stubs live in runtime when unlinked.
- *
- * Host shell (Linux CI): present + scripted event queue when SCUZZ_MOBILE_SHELL=1.
- * Android / iOS packaging shells map OS touch / lifecycle / IME onto SzInputEvent
- * and call the same present / keyboard hooks.
- */
+/* Mobile embedder ABI. Weak stubs live in runtime when unlinked. */
 
 /* Nonzero if a mobile shell can present (host: SCUZZ_MOBILE_SHELL=1). */
 int sz_mobile_available(void);
@@ -39,7 +34,7 @@ int sz_mobile_poll_event(SzInputEvent *out);
  * Host shell returns 0 so the CI smoke stays a single frame. */
 int sz_mobile_alive(void);
 
-/* Host / test helper: push an event into the shell queue. */
+/* Enqueue an OS event. Returns 1 if stored. */
 int sz_mobile_push_event(const SzInputEvent *event);
 
 #ifdef __cplusplus

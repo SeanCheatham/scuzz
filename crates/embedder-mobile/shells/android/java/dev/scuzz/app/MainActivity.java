@@ -44,6 +44,8 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   private int keyboard;
   private int watchLock;
   private float density = 1f;
+  private int pointW;
+  private int pointH;
   private final Handler tick = new Handler(Looper.getMainLooper());
   private final Runnable blit =
       new Runnable() {
@@ -60,12 +62,6 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   public native int nativeFrameWidth();
 
   public native int nativeFrameHeight();
-
-  public native int nativePointWidth();
-
-  public native int nativePointHeight();
-
-  public native int nativeFrameCount();
 
   public native int nativeCopyFrame(int[] argb);
 
@@ -119,10 +115,10 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     setContentView(root);
     DisplayMetrics dm = getResources().getDisplayMetrics();
     density = dm.density > 0f ? dm.density : 1f;
-    int logicalW = Math.max(1, (int) (dm.widthPixels / density));
-    int logicalH = Math.max(1, (int) (dm.heightPixels / density));
+    pointW = Math.max(1, (int) (dm.widthPixels / density));
+    pointH = Math.max(1, (int) (dm.heightPixels / density));
     File dump = new File(getFilesDir(), "scuzz_android.debug.dump");
-    nativeStart(dump.getAbsolutePath(), logicalW, logicalH, density);
+    nativeStart(dump.getAbsolutePath(), pointW, pointH, density);
     scheduleInject();
   }
 
@@ -154,8 +150,10 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   @Override
   public void surfaceChanged(SurfaceHolder h, int format, int w, int ht) {
     holder = h;
-    if (density > 0f && w > 0 && ht > 0) {
-      nativeResize(Math.max(1, (int) (w / density)), Math.max(1, (int) (ht / density)));
+    if (w > 0 && ht > 0) {
+      pointW = Math.max(1, (int) (w / density));
+      pointH = Math.max(1, (int) (ht / density));
+      nativeResize(pointW, pointH);
     }
   }
 
@@ -166,18 +164,16 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
   }
 
   private boolean onSurfaceTouch(MotionEvent ev) {
-    int pw = nativePointWidth();
-    int ph = nativePointHeight();
     int vw = surface.getWidth();
     int vh = surface.getHeight();
     int phase;
     float x;
     float y;
-    if (pw <= 0 || ph <= 0 || vw <= 0 || vh <= 0) {
+    if (pointW <= 0 || pointH <= 0 || vw <= 0 || vh <= 0) {
       return true;
     }
-    x = ev.getX() * pw / vw;
-    y = ev.getY() * ph / vh;
+    x = ev.getX() * pointW / vw;
+    y = ev.getY() * pointH / vh;
     switch (ev.getActionMasked()) {
       case MotionEvent.ACTION_DOWN:
         phase = POINTER_DOWN;
@@ -320,7 +316,7 @@ public final class MainActivity extends Activity implements SurfaceHolder.Callba
     }
     if (dumped == 0) {
       dumped = 1;
-      Log.i("scuzz", "blit " + w + "x" + h + " frames=" + nativeFrameCount());
+      Log.i("scuzz", "blit " + w + "x" + h + " frames=" + copied);
     }
   }
 }

@@ -1,11 +1,8 @@
-/* Android sz_mobile_* shell. Strong defs override the weak runtime stubs.
- * JNI_OnLoad in scuzz_jni.c loads the library. MainActivity calls
- * nativeStart, then blits frames and pushes pointer / text events. */
+/* Android sz_mobile_* shell. Strong defs override the weak runtime stubs. */
 
 #include "scuzz_mobile.h"
 
 #include <android/log.h>
-#include <limits.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -25,8 +22,6 @@ static _Atomic int g_alive;
 static int g_frames;
 static int g_w;
 static int g_h;
-static int g_point_w;
-static int g_point_h;
 static _Atomic int g_keyboard;
 static uint8_t *g_rgba;
 static size_t g_rgba_cap;
@@ -46,7 +41,6 @@ void sz_mobile_shutdown(void) {
   g_rgba = NULL;
   g_rgba_cap = 0;
   g_w = g_h = 0;
-  g_point_w = g_point_h = 0;
   pthread_mutex_unlock(&g_frame_lock);
   scuzz_android_set_alive(0);
 }
@@ -62,18 +56,21 @@ static int text_slot_queued(const char *slot) {
   return 0;
 }
 
-static const char *stash_text(const char *s) {
+static void copy_text(char *dst, const char *s) {
   size_t n;
-  char *dst;
   if (!s)
     s = "";
   n = strlen(s);
   if (n >= TEXT_LEN)
     n = TEXT_LEN - 1;
-  dst = g_text_bufs[g_text_i];
-  g_text_i = (g_text_i + 1) % TEXT_RING;
   memcpy(dst, s, n);
   dst[n] = '\0';
+}
+
+static const char *stash_text(const char *s) {
+  char *dst = g_text_bufs[g_text_i];
+  g_text_i = (g_text_i + 1) % TEXT_RING;
+  copy_text(dst, s);
   return dst;
 }
 
@@ -119,12 +116,7 @@ int sz_mobile_poll_event(SzInputEvent *out) {
   *out = g_queue[g_q_head];
   g_q_head = (g_q_head + 1) % EVENT_CAP;
   if (out->kind == SZ_INPUT_TEXT_EDIT) {
-    const char *src = out->text ? out->text : "";
-    size_t n = strlen(src);
-    if (n >= TEXT_LEN)
-      n = TEXT_LEN - 1;
-    memcpy(g_poll_text, src, n);
-    g_poll_text[n] = '\0';
+    copy_text(g_poll_text, out->text);
     out->text = g_poll_text;
   }
   pthread_mutex_unlock(&g_q_lock);
@@ -141,15 +133,11 @@ int scuzz_android_push_pointer(float x, float y, int phase) {
   ev.x = x;
   ev.y = y;
   ev.pointer_phase = (SzPointerPhase)phase;
-  __android_log_print(ANDROID_LOG_INFO, "scuzz",
-                      "scuzz android: pointer %.1f %.1f phase=%d", (double)x,
-                      (double)y, phase);
   return sz_mobile_push_event(&ev);
 }
 
 int scuzz_android_push_text_edit(const char *text) {
   SzInputEvent ev;
-  /* Drop if the queue is full, or if the next text slot is still queued. */
   pthread_mutex_lock(&g_q_lock);
   if (q_full() || text_slot_queued(g_text_bufs[g_text_i])) {
     pthread_mutex_unlock(&g_q_lock);
@@ -157,12 +145,10 @@ int scuzz_android_push_text_edit(const char *text) {
   }
   memset(&ev, 0, sizeof ev);
   ev.kind = SZ_INPUT_TEXT_EDIT;
-  ev.text = stash_text(text ? text : "");
+  ev.text = stash_text(text);
   g_queue[g_q_tail] = ev;
   g_q_tail = (g_q_tail + 1) % EVENT_CAP;
   pthread_mutex_unlock(&g_q_lock);
-  __android_log_print(ANDROID_LOG_INFO, "scuzz", "scuzz android: text_edit %s",
-                      text && text[0] ? text : "(backspace)");
   return 1;
 }
 
@@ -174,8 +160,6 @@ int scuzz_android_push_resize(int w, int h) {
   ev.kind = SZ_INPUT_RESIZE;
   ev.width = w;
   ev.height = h;
-  __android_log_print(ANDROID_LOG_INFO, "scuzz", "scuzz android: resize %dx%d",
-                      w, h);
   return sz_mobile_push_event(&ev);
 }
 
@@ -213,8 +197,6 @@ int sz_mobile_present(const char *title, int point_w, int point_h, int pixel_w,
   memcpy(g_rgba, rgba, need);
   g_w = pixel_w;
   g_h = pixel_h;
-  g_point_w = point_w;
-  g_point_h = point_h;
   g_frames++;
   pthread_mutex_unlock(&g_frame_lock);
   if (g_frames <= 3 || (g_frames % 120) == 0)
@@ -230,58 +212,34 @@ void sz_mobile_set_keyboard(int visible) {
 
 int scuzz_android_keyboard_visible(void) { return atomic_load(&g_keyboard); }
 
-int scuzz_android_frame_width(void) {
-  int w;
+static int frame_int(const int *p) {
+  int v;
   pthread_mutex_lock(&g_frame_lock);
-  w = g_w;
+  v = *p;
   pthread_mutex_unlock(&g_frame_lock);
-  return w;
+  return v;
 }
 
-int scuzz_android_frame_height(void) {
-  int h;
-  pthread_mutex_lock(&g_frame_lock);
-  h = g_h;
-  pthread_mutex_unlock(&g_frame_lock);
-  return h;
-}
+int scuzz_android_frame_width(void) { return frame_int(&g_w); }
 
-int scuzz_android_point_width(void) {
-  int w;
-  pthread_mutex_lock(&g_frame_lock);
-  w = g_point_w;
-  pthread_mutex_unlock(&g_frame_lock);
-  return w;
-}
-
-int scuzz_android_point_height(void) {
-  int h;
-  pthread_mutex_lock(&g_frame_lock);
-  h = g_point_h;
-  pthread_mutex_unlock(&g_frame_lock);
-  return h;
-}
-
-int scuzz_android_frame_count(void) {
-  int n;
-  pthread_mutex_lock(&g_frame_lock);
-  n = g_frames;
-  pthread_mutex_unlock(&g_frame_lock);
-  return n;
-}
+int scuzz_android_frame_height(void) { return frame_int(&g_h); }
 
 int scuzz_android_copy_argb(int32_t *dst, int cap) {
-  int n;
-  int i;
+  size_t n;
+  size_t i;
   int frames;
   const uint8_t *src;
   if (!dst || cap <= 0)
     return 0;
   pthread_mutex_lock(&g_frame_lock);
-  n = g_w * g_h;
-  frames = g_frames;
   src = g_rgba;
-  if (!src || n <= 0 || cap < n) {
+  if (!src || g_w <= 0 || g_h <= 0) {
+    pthread_mutex_unlock(&g_frame_lock);
+    return 0;
+  }
+  n = (size_t)g_w * (size_t)g_h;
+  frames = g_frames;
+  if ((size_t)cap < n) {
     pthread_mutex_unlock(&g_frame_lock);
     return 0;
   }

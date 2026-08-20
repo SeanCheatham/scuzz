@@ -417,8 +417,7 @@ static void *thunk_run_rebuild(void *env) {
     live_pump_loop(session, live_still_watch);
     sz_ui_session_finish(session);
   } else if (cfg.kind == SZ_UI_RUNTIME_MOBILE && sz_mobile_available()) {
-    /* Live Mobile shell (iOS sim/device): pump until the shell goes away.
-     * Host shell reports alive=0, so the CI smoke stays a single frame. */
+    /* Host shell reports alive=0, so CI stays one frame. */
     live_pump_loop(session, live_still_mobile);
     sz_ui_session_finish(session);
   } else {

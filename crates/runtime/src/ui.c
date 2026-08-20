@@ -1216,7 +1216,7 @@ unsigned sz_ui_session_pumps(const SzUiSession *session) {
   return session ? session->pumps : 0;
 }
 
-/* Shared resolution of headless size from args / env. */
+/* Resolve width, height, and scale from args or env. */
 void sz_ui_resolve_headless_size(int *width, int *height, double *scale) {
   if (*width <= 0) {
     const char *w = getenv("SCUZZ_UI_WIDTH");

@@ -1,5 +1,4 @@
-/* Android JNI entry. nativeStart launches the renamed app main on a worker.
- * MainActivity blits frames, forwards taps, and maps EditText to TEXT_EDIT. */
+/* JNI entry. nativeStart launches the renamed app main on a worker. */
 
 #define _POSIX_C_SOURCE 200809L
 
@@ -15,9 +14,6 @@ void scuzz_android_set_alive(int alive);
 void sz_mobile_shutdown(void);
 int scuzz_android_frame_width(void);
 int scuzz_android_frame_height(void);
-int scuzz_android_point_width(void);
-int scuzz_android_point_height(void);
-int scuzz_android_frame_count(void);
 int scuzz_android_copy_argb(int32_t *dst, int cap);
 int scuzz_android_push_pointer(float x, float y, int phase);
 int scuzz_android_push_text_edit(const char *text);
@@ -99,27 +95,6 @@ JNIEXPORT jint JNICALL Java_dev_scuzz_app_MainActivity_nativeFrameHeight(
   return scuzz_android_frame_height();
 }
 
-JNIEXPORT jint JNICALL Java_dev_scuzz_app_MainActivity_nativePointWidth(
-    JNIEnv *env, jobject thiz) {
-  (void)env;
-  (void)thiz;
-  return scuzz_android_point_width();
-}
-
-JNIEXPORT jint JNICALL Java_dev_scuzz_app_MainActivity_nativePointHeight(
-    JNIEnv *env, jobject thiz) {
-  (void)env;
-  (void)thiz;
-  return scuzz_android_point_height();
-}
-
-JNIEXPORT jint JNICALL Java_dev_scuzz_app_MainActivity_nativeFrameCount(
-    JNIEnv *env, jobject thiz) {
-  (void)env;
-  (void)thiz;
-  return scuzz_android_frame_count();
-}
-
 JNIEXPORT jint JNICALL Java_dev_scuzz_app_MainActivity_nativeCopyFrame(
     JNIEnv *env, jobject thiz, jintArray argb) {
   jint *dst;
@@ -153,7 +128,11 @@ JNIEXPORT void JNICALL Java_dev_scuzz_app_MainActivity_nativeTextEdit(
     return;
   }
   utf = (*env)->GetStringUTFChars(env, text, NULL);
-  (void)scuzz_android_push_text_edit(utf ? utf : "");
+  if (!utf) {
+    (void)scuzz_android_push_text_edit("");
+    return;
+  }
+  (void)scuzz_android_push_text_edit(utf);
   (*env)->ReleaseStringUTFChars(env, text, utf);
 }
 

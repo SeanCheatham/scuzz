@@ -500,6 +500,7 @@ int sz_ui_session_load_code(SzUiSession *session, const char *path);
 void sz_ui_unmount(SzUiSession *session);
 /* Snapshot PNG / structural dump from SCUZZ_SNAPSHOT_PATH / SCUZZ_FUZZ_DUMP. */
 void sz_ui_session_finish(SzUiSession *session);
+/* Width/height/scale from args, else SCUZZ_UI_WIDTH / HEIGHT / SCALE. */
 void sz_ui_resolve_headless_size(int *width, int *height, double *scale);
 
 int sz_ui_pump_sync(SzUiSession *session);
