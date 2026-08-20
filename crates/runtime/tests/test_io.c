@@ -224,8 +224,10 @@ static SzIo *fiber_interrupt_direct(void *fiber, void *env) {
 
 static SzIo *stream_bang(void *v, void *env) {
   (void)env;
-  SzString *s = (SzString *)v;
-  return pure_drop(sz_string_concat(s, sz_string_from_cstr("!")));
+  SzString *bang = sz_string_from_cstr("!");
+  SzString *out = sz_string_concat((SzString *)v, bang);
+  sz_release(bang);
+  return pure_drop(out);
 }
 
 static int64_t stream_nonempty(void *v, void *env) {
@@ -235,7 +237,10 @@ static int64_t stream_nonempty(void *v, void *env) {
 
 static void *stream_bang_sync(void *v, void *env) {
   (void)env;
-  return sz_string_concat((SzString *)v, sz_string_from_cstr("!"));
+  SzString *bang = sz_string_from_cstr("!");
+  SzString *out = sz_string_concat((SzString *)v, bang);
+  sz_release(bang);
+  return out;
 }
 
 static int64_t stream_empty(void *v, void *env) {
@@ -2858,6 +2863,22 @@ int main(void) {
     assert(strcmp(sz_string_cstr(joined), "a,b") == 0);
     assert(delay_calls == 3);
 
+    delay_calls = 0;
+    s = sz_stream_take(
+        sz_stream_filter(
+            sz_stream_concat(
+                sz_stream_concat(
+                    sz_stream_eval(sz_io_delay(take_hit, (void *)"a")),
+                    sz_stream_eval(sz_io_delay(take_hit, (void *)""))),
+                sz_stream_eval(sz_io_delay(take_hit, (void *)"b"))),
+            stream_nonempty, NULL),
+        1);
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(s));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a") == 0);
+    assert(delay_calls == 1);
+
     xs = sz_list_cons(
         sz_string_from_cstr("a"),
         sz_list_cons(sz_string_from_cstr("b"), sz_list_nil()));
@@ -2930,6 +2951,22 @@ int main(void) {
     assert(strcmp(sz_string_cstr(joined), "a") == 0);
     assert(delay_calls == 3);
 
+    delay_calls = 0;
+    s = sz_stream_take(
+        sz_stream_dropwhile(
+            sz_stream_concat(
+                sz_stream_concat(
+                    sz_stream_eval(sz_io_delay(take_hit, (void *)"")),
+                    sz_stream_eval(sz_io_delay(take_hit, (void *)"a"))),
+                sz_stream_eval(sz_io_delay(take_hit, (void *)"b"))),
+            stream_empty, NULL),
+        1);
+    r = sz_io_unsafe_run(sz_stream_compile_to_list(s));
+    assert(r.ok);
+    joined = sz_list_join((SzList *)r.value, ",");
+    assert(strcmp(sz_string_cstr(joined), "a") == 0);
+    assert(delay_calls == 2);
+
     xs = sz_list_cons(
         sz_string_from_cstr(""),
         sz_list_cons(sz_string_from_cstr("a"),
@@ -2988,6 +3025,143 @@ int main(void) {
     assert(r.ok);
     assert(sz_unbox_i64(r.value) == 0);
     assert(delay_calls == 2);
+
+    {
+      size_t base_bytes = 0, base_count = 0;
+      size_t live_bytes = 0, live_count = 0;
+      SzString *a;
+      SzString *b;
+      SzString *empty;
+      SzList *ys;
+      SzList *tail;
+      SzList *mid;
+      SzStream *st;
+      SzIo *fail;
+
+      sz_alloc_stats(&base_bytes, &base_count);
+      a = sz_string_from_cstr("a");
+      st = sz_stream_emit(a);
+      sz_release(a);
+      r = sz_io_unsafe_run(sz_stream_compile_to_list(st));
+      assert(r.ok);
+      sz_release(r.value);
+      sz_release(st);
+      sz_alloc_stats(&live_bytes, &live_count);
+      assert(live_count == base_count);
+      assert(live_bytes == base_bytes);
+
+      sz_alloc_stats(&base_bytes, &base_count);
+      a = sz_string_from_cstr("a");
+      b = sz_string_from_cstr("b");
+      tail = sz_list_cons(b, NULL);
+      sz_release(b);
+      ys = sz_list_cons(a, tail);
+      sz_release(a);
+      sz_release(tail);
+      {
+        SzStream *inner = sz_stream_emits(ys);
+        st = sz_stream_map(inner, stream_bang_sync, NULL);
+        sz_release(inner);
+      }
+      sz_release(ys);
+      r = sz_io_unsafe_run(sz_stream_compile_to_list(st));
+      assert(r.ok);
+      sz_release(r.value);
+      sz_release(st);
+      sz_alloc_stats(&live_bytes, &live_count);
+      assert(live_count == base_count);
+      assert(live_bytes == base_bytes);
+
+      sz_alloc_stats(&base_bytes, &base_count);
+      a = sz_string_from_cstr("a");
+      empty = sz_string_from_cstr("");
+      b = sz_string_from_cstr("b");
+      tail = sz_list_cons(b, NULL);
+      sz_release(b);
+      mid = sz_list_cons(empty, tail);
+      sz_release(empty);
+      sz_release(tail);
+      ys = sz_list_cons(a, mid);
+      sz_release(a);
+      sz_release(mid);
+      {
+        SzStream *inner = sz_stream_emits(ys);
+        st = sz_stream_filter(inner, stream_nonempty, NULL);
+        sz_release(inner);
+      }
+      sz_release(ys);
+      r = sz_io_unsafe_run(sz_stream_compile_to_list(st));
+      assert(r.ok);
+      sz_release(r.value);
+      sz_release(st);
+      sz_alloc_stats(&live_bytes, &live_count);
+      assert(live_count == base_count);
+      assert(live_bytes == base_bytes);
+
+      sz_alloc_stats(&base_bytes, &base_count);
+      a = sz_string_from_cstr("a");
+      b = sz_string_from_cstr("b");
+      tail = sz_list_cons(b, NULL);
+      sz_release(b);
+      ys = sz_list_cons(a, tail);
+      sz_release(a);
+      sz_release(tail);
+      {
+        SzStream *inner = sz_stream_emits(ys);
+        st = sz_stream_drop(inner, 1);
+        sz_release(inner);
+      }
+      sz_release(ys);
+      r = sz_io_unsafe_run(sz_stream_compile_to_list(st));
+      assert(r.ok);
+      sz_release(r.value);
+      sz_release(st);
+      sz_alloc_stats(&live_bytes, &live_count);
+      assert(live_count == base_count);
+      assert(live_bytes == base_bytes);
+
+      sz_alloc_stats(&base_bytes, &base_count);
+      a = sz_string_from_cstr("d");
+      st = sz_stream_emit(a);
+      sz_release(a);
+      r = sz_io_unsafe_run(sz_stream_drain(st));
+      assert(r.ok);
+      sz_release(r.value);
+      sz_release(st);
+      sz_alloc_stats(&live_bytes, &live_count);
+      assert(live_count == base_count);
+      assert(live_bytes == base_bytes);
+
+      sz_alloc_stats(&base_bytes, &base_count);
+      a = sz_string_from_cstr("");
+      b = sz_string_from_cstr("a");
+      tail = sz_list_cons(b, NULL);
+      sz_release(b);
+      ys = sz_list_cons(a, tail);
+      sz_release(a);
+      sz_release(tail);
+      st = sz_stream_emits(ys);
+      sz_release(ys);
+      r = sz_io_unsafe_run(sz_stream_exists(st, stream_nonempty, NULL));
+      assert(r.ok);
+      sz_release(r.value);
+      sz_release(st);
+      sz_alloc_stats(&live_bytes, &live_count);
+      assert(live_count == base_count);
+      assert(live_bytes == base_bytes);
+
+      sz_alloc_stats(&base_bytes, &base_count);
+      fail = sz_io_fail_cstr("boom");
+      st = sz_stream_eval(fail);
+      sz_release(fail);
+      r = sz_io_unsafe_run(sz_stream_compile_to_list(st));
+      assert(!r.ok);
+      sz_error_free(r.error);
+      sz_release(st);
+      sz_alloc_stats(&live_bytes, &live_count);
+      assert(live_count == base_count);
+      assert(live_bytes == base_bytes);
+    }
   }
 
   /* sleep */

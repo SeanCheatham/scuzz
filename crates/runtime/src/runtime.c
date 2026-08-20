@@ -1810,7 +1810,7 @@ static ContFrame *cont_pop(ContFrame *stack) {
   if (stack->kind == CONT_ENSURE)
     sz_release(stack->finalizer);
   if (stack->kind == CONT_FLATMAP || stack->kind == CONT_HANDLE)
-    sz_release(stack->env);
+    delay_env_drop(stack->env);
   sz_free(stack);
   return next;
 }
@@ -1912,7 +1912,7 @@ static SzIo *drain_ensure_finalizers(ContFrame *stack) {
     } else if (c->kind == CONT_LOOP)
       sz_release(c->loop_inner);
     else if (c->kind == CONT_FLATMAP || c->kind == CONT_HANDLE)
-      sz_release(c->env);
+      delay_env_drop(c->env);
     sz_free(c);
     c = next;
   }
