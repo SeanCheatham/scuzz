@@ -6369,6 +6369,39 @@ int main(void) {
     sz_string_free(c);
   }
 
+  /* Spine combinators loop: 10k cells finish and do not leak. One shared
+   * string is the head of every cons. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *s;
+    SzList *xs = NULL;
+    SzList *tmp;
+    SzList *ys;
+    int i;
+    sz_alloc_stats(&base_bytes, &base_count);
+    s = sz_string_from_cstr("x");
+    for (i = 0; i < 10000; i++) {
+      tmp = sz_list_cons(s, xs);
+      sz_release(xs);
+      xs = tmp;
+    }
+    ys = sz_list_map(xs, map_id, NULL);
+    assert(sz_list_len(ys) == 10000);
+    sz_list_free(ys);
+    ys = sz_list_filter(xs, keep_not_b, NULL);
+    assert(sz_list_len(ys) == 10000);
+    sz_list_free(ys);
+    ys = sz_list_concat(xs, NULL);
+    assert(sz_list_len(ys) == 10000);
+    sz_list_free(ys);
+    sz_list_free(xs);
+    sz_string_free(s);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   /* List.flatten: concatenate inner lists. */
   {
     SzString *a = sz_string_from_cstr("a");
