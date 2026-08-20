@@ -24,17 +24,27 @@ fn lcg_below(s: i64, n: i64) -> i64 {
     }
 }
 
+const INTERESTING_INTS: [i64; 8] = [0, 1, -1, 2, 3, 8, 255, -100];
+
+fn drive_int(s: i64) -> i64 {
+    if lcg_below(s, 2) == 0 {
+        INTERESTING_INTS[lcg_below(lcg_next(s), INTERESTING_INTS.len() as i64) as usize]
+    } else {
+        lcg_below(lcg_next(s), 1000) - 100
+    }
+}
+
 fn letter_at(i: i64) -> String {
     let idx = i.rem_euclid(26) as usize;
     (LETTERS[idx] as char).to_string()
 }
 
-fn fuzz_kind_count(has_text: bool, has_scroll: bool, has_drive: bool) -> i64 {
+fn fuzz_kind_count(n_fields: i64, n_scrolls: i64, has_drive: bool) -> i64 {
     3 + i64::from(has_drive)
-        + i64::from(has_text)
-        + i64::from(has_text)
-        + i64::from(has_text)
-        + i64::from(has_scroll)
+        + i64::from(n_fields > 0)
+        + i64::from(n_fields > 0)
+        + i64::from(n_fields > 0)
+        + i64::from(n_scrolls > 0)
 }
 
 fn fuzz_word(prefix: &str, mut s: i64, n: i64) -> (String, i64) {
@@ -80,7 +90,7 @@ fn drive_line(spec: &str, mut s: i64) -> String {
                 s = lcg_next(s);
             }
             _ => {
-                args.push((1 + lcg_below(s, 3)).to_string());
+                args.push(drive_int(s).to_string());
                 s = lcg_next(s);
             }
         }
@@ -89,6 +99,7 @@ fn drive_line(spec: &str, mut s: i64) -> String {
 }
 
 /// One `drive` line per driver table spec, with generated args.
+/// Shuffle the lines. Drop a suffix so some iters run a subset. Keep-all is one draw.
 pub fn drive_script_lines(seed: i64, drivers: &[String]) -> Vec<String> {
     let mut s = lcg_next(lcg_seed(seed));
     let mut out = Vec::new();
@@ -96,39 +107,46 @@ pub fn drive_script_lines(seed: i64, drivers: &[String]) -> Vec<String> {
         out.push(drive_line(spec, s));
         s = lcg_next(s);
     }
+    if out.len() <= 1 {
+        return out;
+    }
+    for i in (1..out.len()).rev() {
+        let j = lcg_below(s, (i + 1) as i64) as usize;
+        s = lcg_next(s);
+        out.swap(i, j);
+    }
+    let keep = 1 + lcg_below(s, out.len() as i64);
+    out.truncate(keep as usize);
     out
 }
 
 fn fuzz_event(
     s: i64,
     n_buttons: i64,
-    has_text: bool,
-    has_scroll: bool,
+    n_fields: i64,
+    n_scrolls: i64,
     drivers: &[String],
 ) -> (String, i64) {
-    fuzz_event_at(lcg_next(s), n_buttons, has_text, has_scroll, drivers)
+    fuzz_event_at(lcg_next(s), n_buttons, n_fields, n_scrolls, drivers)
 }
 
 fn fuzz_event_at(
     s: i64,
     n_buttons: i64,
-    has_text: bool,
-    has_scroll: bool,
+    n_fields: i64,
+    n_scrolls: i64,
     drivers: &[String],
 ) -> (String, i64) {
-    let k = lcg_below(
-        s,
-        fuzz_kind_count(has_text, has_scroll, !drivers.is_empty()),
-    );
-    fuzz_event_kind(s, k, n_buttons, has_scroll, has_text, drivers)
+    let k = lcg_below(s, fuzz_kind_count(n_fields, n_scrolls, !drivers.is_empty()));
+    fuzz_event_kind(s, k, n_buttons, n_scrolls, n_fields, drivers)
 }
 
 fn fuzz_event_kind(
     s: i64,
     k: i64,
     n_buttons: i64,
-    has_scroll: bool,
-    has_text: bool,
+    n_scrolls: i64,
+    n_fields: i64,
     drivers: &[String],
 ) -> (String, i64) {
     if k <= 1 {
@@ -155,32 +173,44 @@ fn fuzz_event_kind(
             let s = lcg_next(s);
             (drive_line(spec, s), s)
         } else {
-            fuzz_event_extra(lcg_next(s), k - 4, has_scroll, has_text)
+            fuzz_event_extra(lcg_next(s), k - 4, n_scrolls, n_fields)
         }
     } else {
-        fuzz_event_extra(lcg_next(s), k - 3, has_scroll, has_text)
+        fuzz_event_extra(lcg_next(s), k - 3, n_scrolls, n_fields)
     }
 }
 
-fn fuzz_event_extra(s: i64, k: i64, has_scroll: bool, has_text: bool) -> (String, i64) {
+fn fuzz_field_word(verb: &str, s: i64, n_fields: i64) -> (String, i64) {
+    let idx = lcg_below(s, n_fields.max(1));
+    let s = lcg_next(s);
+    fuzz_word(&format!("{verb} {idx} "), lcg_next(s), 1 + lcg_below(s, 7))
+}
+
+fn fuzz_event_extra(s: i64, k: i64, n_scrolls: i64, n_fields: i64) -> (String, i64) {
     if k == 0 {
-        if has_scroll {
-            ("scroll 40".into(), s)
+        if n_scrolls > 0 {
+            let s = lcg_next(s);
+            (format!("scroll {} 40", lcg_below(s, n_scrolls.max(1))), s)
+        } else if n_fields > 0 {
+            fuzz_field_word("text", s, n_fields)
         } else {
             fuzz_word("text ", lcg_next(s), 1 + lcg_below(s, 7))
         }
     } else if k == 1 {
-        if has_text {
-            ("backspace".into(), s)
+        if n_fields > 0 {
+            let s = lcg_next(s);
+            (format!("backspace {} 1", lcg_below(s, n_fields.max(1))), s)
         } else {
             fuzz_word("text ", lcg_next(s), 1 + lcg_below(s, 7))
         }
     } else if k == 2 {
-        if has_text {
-            fuzz_word("type ", lcg_next(s), 1 + lcg_below(s, 7))
+        if n_fields > 0 {
+            fuzz_field_word("type", s, n_fields)
         } else {
             fuzz_word("text ", lcg_next(s), 1 + lcg_below(s, 7))
         }
+    } else if n_fields > 0 {
+        fuzz_field_word("text", s, n_fields)
     } else {
         fuzz_word("text ", lcg_next(s), 1 + lcg_below(s, 7))
     }
@@ -190,14 +220,14 @@ fn fuzz_script_acc(
     mut s: i64,
     remaining: i64,
     n_buttons: i64,
-    has_text: bool,
-    has_scroll: bool,
+    n_fields: i64,
+    n_scrolls: i64,
     drivers: &[String],
     mut acc: Vec<String>,
 ) -> Vec<String> {
     let mut left = remaining;
     while left > 0 {
-        let (ev, next) = fuzz_event(s, n_buttons, has_text, has_scroll, drivers);
+        let (ev, next) = fuzz_event(s, n_buttons, n_fields, n_scrolls, drivers);
         acc.push(ev);
         s = next;
         left -= 1;
@@ -208,21 +238,21 @@ fn fuzz_script_acc(
 pub fn fuzz_script(
     seed: i64,
     n_buttons: i64,
-    has_text: bool,
-    has_scroll: bool,
+    n_fields: i64,
+    n_scrolls: i64,
     drivers: &[String],
 ) -> Vec<String> {
     let s = lcg_next(lcg_seed(seed));
     let len = 1 + lcg_below(s, 12);
-    fuzz_script_acc(s, len, n_buttons, has_text, has_scroll, drivers, Vec::new())
+    fuzz_script_acc(s, len, n_buttons, n_fields, n_scrolls, drivers, Vec::new())
 }
 
 fn fuzz_extend_prefix(
     prefix: &[String],
     s: i64,
     n_buttons: i64,
-    has_text: bool,
-    has_scroll: bool,
+    n_fields: i64,
+    n_scrolls: i64,
     drivers: &[String],
 ) -> Vec<String> {
     let extra = 1 + lcg_below(s, 4);
@@ -230,8 +260,8 @@ fn fuzz_extend_prefix(
         s,
         extra,
         n_buttons,
-        has_text,
-        has_scroll,
+        n_fields,
+        n_scrolls,
         drivers,
         prefix.to_vec(),
     )
@@ -240,21 +270,21 @@ fn fuzz_extend_prefix(
 pub fn fuzz_pick_script(
     seed: i64,
     n_buttons: i64,
-    has_text: bool,
-    has_scroll: bool,
+    n_fields: i64,
+    n_scrolls: i64,
     drivers: &[String],
     corpus: &[Vec<String>],
 ) -> Vec<String> {
     if corpus.is_empty() {
-        return fuzz_script(seed, n_buttons, has_text, has_scroll, drivers);
+        return fuzz_script(seed, n_buttons, n_fields, n_scrolls, drivers);
     }
     let s = lcg_next(lcg_seed(seed));
     if lcg_below(s, 2) == 0 {
-        fuzz_script(seed, n_buttons, has_text, has_scroll, drivers)
+        fuzz_script(seed, n_buttons, n_fields, n_scrolls, drivers)
     } else {
         let s = lcg_next(s);
         let base = &corpus[lcg_below(s, corpus.len() as i64) as usize];
-        fuzz_extend_prefix(base, lcg_next(s), n_buttons, has_text, has_scroll, drivers)
+        fuzz_extend_prefix(base, lcg_next(s), n_buttons, n_fields, n_scrolls, drivers)
     }
 }
 
@@ -279,22 +309,22 @@ pub fn fuzz_pick_sched(seed: i64, iter: i64, corpus: &[String]) -> String {
 
 pub fn exhaust_alphabet(
     n_buttons: i64,
-    has_text: bool,
-    has_scroll: bool,
+    n_fields: i64,
+    n_scrolls: i64,
     drivers: &[String],
 ) -> Vec<String> {
     let mut out = Vec::new();
     for i in 0..n_buttons {
         out.push(format!("tap {i}"));
     }
-    if has_text {
-        out.push("text".into());
-        out.push("text a".into());
-        out.push("backspace".into());
-        out.push("type a".into());
+    for i in 0..n_fields {
+        out.push(format!("text {i} a"));
+        out.push(format!("type {i} a"));
+        // Two numbers: field index then chop count. `backspace N` is count on the starred field.
+        out.push(format!("backspace {i} 1"));
     }
-    if has_scroll {
-        out.push("scroll 40".into());
+    for i in 0..n_scrolls {
+        out.push(format!("scroll {i} 40"));
     }
     for spec in drivers {
         out.push(drive_line(spec, 0));
@@ -303,16 +333,41 @@ pub fn exhaust_alphabet(
     out
 }
 
-pub fn corpus_push(corpus: &mut Vec<Vec<String>>, events: Vec<String>) {
-    corpus.insert(0, events);
+pub fn corpus_push<T>(corpus: &mut Vec<T>, item: T) {
+    corpus.insert(0, item);
     corpus.truncate(32);
 }
 
 pub fn dump_push(seen: &mut Vec<String>, dump: String) {
     if !seen.iter().any(|d| d == &dump) {
         seen.insert(0, dump);
-        seen.truncate(64);
     }
+}
+
+/// Distinct live-code site indices for `take` mutation slots.
+pub fn fuzz_mutate_sites(seed: i64, take: i64, sites: i64) -> Vec<i64> {
+    if sites <= 0 || take <= 0 {
+        return Vec::new();
+    }
+    let take = take.min(sites);
+    let mut out = Vec::new();
+    for i in 0..take {
+        let mut s = lcg_seed(seed + i);
+        let mut site = s.rem_euclid(sites);
+        let mut tries = 0i64;
+        while out.contains(&site) && tries < 8 {
+            s = lcg_next(s);
+            site = s.rem_euclid(sites);
+            tries += 1;
+        }
+        if out.contains(&site) {
+            if let Some(free) = (0..sites).find(|c| !out.contains(c)) {
+                site = free;
+            }
+        }
+        out.push(site);
+    }
+    out
 }
 
 pub fn sched_push(corpus: &mut Vec<String>, sched: String) {
@@ -441,18 +496,42 @@ mod tests {
 
     #[test]
     fn script_same_seed_same_events() {
-        let a = fuzz_script(42, 2, true, false, &[]);
-        let b = fuzz_script(42, 2, true, false, &[]);
+        let a = fuzz_script(42, 2, 1, 0, &[]);
+        let b = fuzz_script(42, 2, 1, 0, &[]);
         assert_eq!(a, b);
         assert!(!a.is_empty());
     }
 
     #[test]
     fn exhaust_alphabet_includes_taps_and_pump() {
-        let a = exhaust_alphabet(2, false, false, &[]);
+        let a = exhaust_alphabet(2, 0, 0, &[]);
         assert_eq!(
             a,
             vec!["tap 0".to_string(), "tap 1".into(), "pump 1".into()]
+        );
+    }
+
+    #[test]
+    fn exhaust_alphabet_pump_only() {
+        assert_eq!(exhaust_alphabet(0, 0, 0, &[]), vec!["pump 1".to_string()]);
+    }
+
+    #[test]
+    fn exhaust_alphabet_indexes_fields_and_scrolls() {
+        let a = exhaust_alphabet(0, 2, 2, &[]);
+        assert_eq!(
+            a,
+            vec![
+                "text 0 a".to_string(),
+                "type 0 a".into(),
+                "backspace 0 1".into(),
+                "text 1 a".into(),
+                "type 1 a".into(),
+                "backspace 1 1".into(),
+                "scroll 0 40".into(),
+                "scroll 1 40".into(),
+                "pump 1".into(),
+            ]
         );
     }
 
@@ -505,6 +584,74 @@ scroll:scroll
         assert_eq!(a, b);
         assert!(a.starts_with("drive addComm "), "{a}");
         assert_eq!(a.split_whitespace().count(), 4);
+    }
+
+    #[test]
+    fn drive_line_int_not_only_one_two_three() {
+        let small: std::collections::HashSet<i64> = [1, 2, 3].into_iter().collect();
+        let mut got = std::collections::HashSet::new();
+        for seed in 0..32 {
+            let line = drive_line("f i", seed);
+            let n: i64 = line
+                .split_whitespace()
+                .nth(2)
+                .expect("int arg")
+                .parse()
+                .expect("int");
+            got.insert(n);
+        }
+        assert!(
+            !got.is_subset(&small),
+            "Int draws stayed in {{1,2,3}}: {got:?}"
+        );
+    }
+
+    #[test]
+    fn drive_script_lines_shuffles_or_subsets() {
+        let drivers = vec!["a".into(), "b".into(), "c".into()];
+        let mut saw_all = false;
+        let mut saw_subset = false;
+        let mut saw_shuffle = false;
+        for seed in 0..48 {
+            let lines = drive_script_lines(seed, &drivers);
+            let names: Vec<&str> = lines
+                .iter()
+                .map(|l| l.split_whitespace().nth(1).unwrap_or(""))
+                .collect();
+            if names.len() == 3 {
+                saw_all = true;
+                if names != ["a", "b", "c"] {
+                    saw_shuffle = true;
+                }
+            } else if !names.is_empty() {
+                saw_subset = true;
+            }
+        }
+        assert!(saw_all, "keep-all must stay one of the draws");
+        assert!(saw_subset, "some iters must drop a suffix");
+        assert!(saw_shuffle, "some full draws must shuffle order");
+    }
+
+    #[test]
+    fn dump_push_never_forgets() {
+        let mut seen = Vec::new();
+        for i in 0..70 {
+            dump_push(&mut seen, format!("dump-{i}"));
+        }
+        assert_eq!(seen.len(), 70);
+        assert!(seen.iter().any(|d| d == "dump-0"));
+        assert!(seen.iter().any(|d| d == "dump-69"));
+    }
+
+    #[test]
+    fn fuzz_mutate_sites_are_distinct() {
+        let sites = fuzz_mutate_sites(7, 5, 20);
+        assert_eq!(sites.len(), 5);
+        let mut uniq = sites.clone();
+        uniq.sort();
+        uniq.dedup();
+        assert_eq!(uniq.len(), 5);
+        assert!(sites.iter().all(|s| *s >= 0 && *s < 20));
     }
 
     #[test]
