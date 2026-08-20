@@ -715,6 +715,12 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("List.maxBy", "List.maxBy(xs: List[T], f: T => Int): T"),
     ("List.minBy", "List.minBy(xs: List[T], f: T => Int): T"),
     (
+        "List.groupBy",
+        "List.groupBy(xs: List[T], f: T => K): Map[K, List[T]]",
+    ),
+    ("List.sum", "List.sum(xs: List[Int]): Int"),
+    ("List.product", "List.product(xs: List[Int]): Int"),
+    (
         "List.forall",
         "List.forall(xs: List[T], pred: T => Bool): Bool",
     ),
@@ -2341,6 +2347,24 @@ record Point(x: Int, y: Int)
 "#;
         let h = hover_src(src, "maxBy");
         assert!(h.contains("List.maxBy(xs: List[T], f: T => Int): T"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map(Map.keys(List.groupBy(["aa", "b"], x => Str.len(x))), n => Str.fromInt(n)), ","))
+"#;
+        let h = hover_src(src, "groupBy");
+        assert!(
+            h.contains("List.groupBy(xs: List[T], f: T => K): Map[K, List[T]]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.sum([1, 2])))
+"#;
+        let h = hover_src(src, "sum");
+        assert!(h.contains("List.sum(xs: List[Int]): Int"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.product([2, 3])))
+"#;
+        let h = hover_src(src, "product");
+        assert!(h.contains("List.product(xs: List[Int]): Int"), "{h}");
     }
 
     #[test]

@@ -607,6 +607,14 @@ SzList *sz_list_sort_by(SzList *xs, SzListMapFn fn, void *env);
 void *sz_list_max(SzList *xs, int64_t as_int);
 void *sz_list_min(SzList *xs, int64_t as_int);
 void *sz_list_max_by(SzList *xs, SzListMapFn fn, void *env, int64_t want_max);
+/* Group cells by the `Int` or `String` key that `fn` returns. `key_kind`
+ * is 0 for boxed Int, 1 for String. Empty is empty. Cells in a group
+ * keep their order. */
+SzMap *sz_list_group_by(SzList *xs, SzListMapFn fn, void *env, int32_t key_kind);
+/* Sum boxed Int cells. Empty is 0. */
+int64_t sz_list_sum(SzList *xs);
+/* Product of boxed Int cells. Empty is 1. */
+int64_t sz_list_product(SzList *xs);
 /* Release the spine; heads drop through RC. */
 void sz_list_free(SzList *xs);
 SzString *sz_list_join(const SzList *xs, const char *sep);

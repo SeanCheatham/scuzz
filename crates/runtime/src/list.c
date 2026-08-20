@@ -1014,6 +1014,45 @@ void *sz_list_min(SzList *xs, int64_t as_int) {
   return list_extreme(xs, as_int, 0, "List.min on empty");
 }
 
+SzMap *sz_list_group_by(SzList *xs, SzListMapFn fn, void *env, int32_t key_kind) {
+  SzMap *acc = NULL;
+  SzList *p;
+  if (!fn)
+    sz_panic("sz_list_group_by(null fn)");
+  for (p = xs; p; p = p->tail) {
+    void *key = fn(p->head, env);
+    void *cur = sz_map_get_or(acc, key, NULL);
+    SzList *grown;
+    SzMap *next;
+    if (cur)
+      grown = sz_list_append((SzList *)cur, p->head);
+    else
+      grown = sz_list_cons(p->head, NULL);
+    next = sz_map_set(acc, key, grown, key_kind);
+    sz_release(grown);
+    sz_release(acc);
+    sz_release(key);
+    acc = next;
+  }
+  return acc;
+}
+
+int64_t sz_list_sum(SzList *xs) {
+  int64_t acc = 0;
+  SzList *p;
+  for (p = xs; p; p = p->tail)
+    acc += sz_unbox_i64(p->head);
+  return acc;
+}
+
+int64_t sz_list_product(SzList *xs) {
+  int64_t acc = 1;
+  SzList *p;
+  for (p = xs; p; p = p->tail)
+    acc *= sz_unbox_i64(p->head);
+  return acc;
+}
+
 void *sz_list_max_by(SzList *xs, SzListMapFn fn, void *env, int64_t want_max) {
   SzList *p;
   void *best;

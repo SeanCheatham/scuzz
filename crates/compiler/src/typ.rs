@@ -2181,7 +2181,8 @@ fn kit_lambda_param_ty_at(
             | "List.segmentLength"
             | "List.sortBy"
             | "List.maxBy"
-            | "List.minBy",
+            | "List.minBy"
+            | "List.groupBy",
             1,
         ) => prior.first().and_then(|t| list_elem(t).ok()),
         ("List.tabulate", 1) => Some(Type::Int),
@@ -3458,6 +3459,21 @@ fn infer_call(
         "List.maxBy" | "List.minBy" => {
             expect_arity(callee, &arg_tys, 2)?;
             list_elem(&arg_tys[0])
+        }
+        "List.groupBy" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let elem = list_elem(&arg_tys[0])?;
+            let key = match &arg_tys[1] {
+                Type::Fun(_, ret) => (**ret).clone(),
+                other => other.clone(),
+            };
+            expect_map_key(callee, &key)?;
+            Ok(Type::App("Map".into(), vec![key, list_of(elem)]))
+        }
+        "List.sum" | "List.product" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_int_elem(callee, &list_elem(&arg_tys[0])?)?;
+            Ok(Type::Int)
         }
         "List.exists" | "List.forall" => {
             expect_arity(callee, &arg_tys, 2)?;
@@ -5200,6 +5216,26 @@ fn expect_ordered_elem(callee: &str, elem: &Type) -> Result<(), TypeError> {
     } else {
         Err(TypeError::Msg(format!(
             "{callee} needs List[Int] or List[String], got List[{elem}]"
+        )))
+    }
+}
+
+fn expect_int_elem(callee: &str, elem: &Type) -> Result<(), TypeError> {
+    if matches!(elem, Type::Int) || is_meta_opaque(elem) {
+        Ok(())
+    } else {
+        Err(TypeError::Msg(format!(
+            "{callee} needs List[Int], got List[{elem}]"
+        )))
+    }
+}
+
+fn expect_map_key(callee: &str, key: &Type) -> Result<(), TypeError> {
+    if matches!(key, Type::Int | Type::String) || is_meta_opaque(key) {
+        Ok(())
+    } else {
+        Err(TypeError::Msg(format!(
+            "{callee} lambda must return Int or String, got {key}"
         )))
     }
 }
@@ -9480,6 +9516,54 @@ enum Opt:
         assert!(
             err.message().contains("List.sortBy lambda must return Int"),
             "expected Int key, got {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn typechecks_list_group_by_sum_product() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    g = List.groupBy(["aa", "b", "cc"], x => Str.len(x))
+    gs = List.groupBy(["ab", "ac", "b"], x => Str.take(x, 1))
+    _ <- IO.println(List.join(List.map(Map.keys(g), n => Str.fromInt(n)), ","))
+    _ <- IO.println(List.join(List.map(Map.values(g), row => List.join(row, ":")), "|"))
+    _ <- IO.println(List.join(Map.keys(gs), ","))
+    _ <- IO.println(Str.fromInt(List.sum([1, 2, 3])))
+    _ <- IO.println(Str.fromInt(List.product([2, 3, 4])))
+    _ <- IO.println(Str.fromInt(List.sum([]: List[Int])))
+    _ <- IO.println(Str.fromInt(List.product([]: List[Int])))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.groupBy/sum/product should typecheck");
+    }
+
+    #[test]
+    fn rejects_list_group_by_bool_key() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(Map.keys(List.groupBy(["a"], x => true)), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("List.groupBy lambda must return Int or String"),
+            "expected map-key error, got {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_list_sum_string() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.sum(["a"])))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("List.sum needs List[Int]"),
+            "expected Int list error, got {}",
             err.message()
         );
     }
