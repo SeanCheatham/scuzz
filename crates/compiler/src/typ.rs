@@ -2730,10 +2730,15 @@ fn infer(
                 }
                 Ok(Type::String)
             }
-            ExprKind::IoPrintln(e) | ExprKind::IoFail(e) => {
+            ExprKind::IoPrintln(e) => {
                 let t = infer(e, enums, funs, methods, current_module, env)?;
                 expect_ty(&t, &Type::String)?;
                 Ok(Type::Io(Box::new(Type::Unit)))
+            }
+            ExprKind::IoFail(e) => {
+                let t = infer(e, enums, funs, methods, current_module, env)?;
+                expect_ty(&t, &Type::String)?;
+                Ok(fail_ty())
             }
             ExprKind::IoSleep(e) => {
                 let t = infer(e, enums, funs, methods, current_module, env)?;
@@ -2873,12 +2878,8 @@ fn infer(
                 }
                 let tt = infer(then_branch, enums, funs, methods, current_module, env)?;
                 let et = infer(else_branch, enums, funs, methods, current_module, env)?;
-                if !types_compat(&tt, &et) {
-                    return Err(TypeError::Msg(format!(
-                        "if branches disagree: {tt:?} vs {et:?}"
-                    )));
-                }
-                Ok(tt)
+                prefer_join(&tt, &et)
+                    .map_err(|_| TypeError::Msg(format!("if branches disagree: {tt:?} vs {et:?}")))
             }
             ExprKind::Binary { op, left, right } => {
                 let lt = infer(left, enums, funs, methods, current_module, env)?;
@@ -3014,12 +3015,14 @@ fn infer(
                     unbind_pattern(bound, env);
                     match &result {
                         None => result = Some(bt),
-                        Some(prev) if types_compat(prev, &bt) => {}
-                        Some(prev) => {
-                            return Err(TypeError::Msg(format!(
-                                "match arms disagree: {prev:?} vs {bt:?}"
-                            )))
-                        }
+                        Some(prev) => match prefer_join(prev, &bt) {
+                            Ok(joined) => result = Some(joined),
+                            Err(_) => {
+                                return Err(TypeError::Msg(format!(
+                                    "match arms disagree: {prev:?} vs {bt:?}"
+                                )))
+                            }
+                        },
                     }
                 }
                 let ty = result.ok_or_else(|| TypeError::Msg("empty match".into()))?;
@@ -3064,7 +3067,11 @@ fn infer(
                         "handleErrorWith body must return IO[_]".into(),
                     ));
                 }
-                Ok(bt)
+                if types_compat(&it, &bt) {
+                    Ok(prefer_concrete(&it, &bt))
+                } else {
+                    Ok(bt)
+                }
             }
             ExprKind::Attempt { inner } => {
                 let it = infer(inner, enums, funs, methods, current_module, env)?;
@@ -3109,7 +3116,7 @@ fn infer(
                         "IO.race arms disagree: {a:?} vs {b:?}"
                     )));
                 }
-                Ok(Type::Io(a))
+                Ok(Type::Io(Box::new(prefer_concrete(&*a, &*b))))
             }
             ExprKind::IoBoth { left, right } => {
                 let lt = infer(left, enums, funs, methods, current_module, env)?;
@@ -5755,10 +5762,50 @@ fn types_compat(a: &Type, b: &Type) -> bool {
 fn is_meta_opaque(t: &Type) -> bool {
     match t {
         Type::Opaque(n) => {
-            matches!(n.as_str(), "Elem" | "Param" | "Any" | "Rewrite" | "TapFn")
-                || n.starts_with("__unbound_")
+            matches!(
+                n.as_str(),
+                "Elem" | "Param" | "Any" | "Rewrite" | "TapFn" | "Fail"
+            ) || n.starts_with("__unbound_")
         }
         _ => false,
+    }
+}
+
+fn fail_ty() -> Type {
+    Type::Io(Box::new(Type::Opaque("Fail".into())))
+}
+
+fn prefer_join(a: &Type, b: &Type) -> Result<Type, TypeError> {
+    if types_compat(a, b) {
+        Ok(prefer_concrete(a, b))
+    } else {
+        Err(TypeError::Msg(format!("type mismatch: {a:?} vs {b:?}")))
+    }
+}
+
+fn prefer_concrete(a: &Type, b: &Type) -> Type {
+    match (a, b) {
+        (Type::Io(x), Type::Io(y)) => Type::Io(Box::new(prefer_concrete(x, y))),
+        (Type::List(x), Type::List(y)) => Type::List(Box::new(prefer_concrete(x, y))),
+        (Type::Tuple(xs), Type::Tuple(ys)) if xs.len() == ys.len() => Type::Tuple(
+            xs.iter()
+                .zip(ys.iter())
+                .map(|(u, v)| prefer_concrete(u, v))
+                .collect(),
+        ),
+        (Type::Fun(a0, a1), Type::Fun(b0, b1)) => Type::Fun(
+            Box::new(prefer_concrete(a0, b0)),
+            Box::new(prefer_concrete(a1, b1)),
+        ),
+        (Type::App(n, xs), Type::App(m, ys)) if n == m && xs.len() == ys.len() => Type::App(
+            n.clone(),
+            xs.iter()
+                .zip(ys.iter())
+                .map(|(u, v)| prefer_concrete(u, v))
+                .collect(),
+        ),
+        (x, y) if is_meta_opaque(x) => y.clone(),
+        (x, _) => x.clone(),
     }
 }
 
@@ -8515,6 +8562,60 @@ def asString(): IO[String] = IO.pure("x")
         let p = lower_program(parse(src).unwrap());
         let err = typecheck(&p).unwrap_err().to_string();
         assert!(err.contains("IO") || err.contains("String"), "{err}");
+    }
+
+    #[test]
+    fn typechecks_io_fail_as_io_int() {
+        let src = r#"
+def boom(): IO[Int] = IO.fail("x")
+def choose(ok: Bool): IO[Int] =
+  if (ok) IO.pure(1) else IO.fail("nope")
+def recover(): IO[Int] =
+  IO.fail("x").handleErrorWith(_ => IO.pure(2))
+def raceFail(): IO[Int] =
+  IO.race(IO.fail("x"), IO.pure(3))
+@main def main: IO[Unit] =
+  for {
+    a <- boom()
+    b <- choose(true)
+    c <- recover()
+    d <- raceFail()
+    _ <- IO.println(Str.fromInt(a + b + c + d))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("IO.fail joins IO[Int]");
+    }
+
+    #[test]
+    fn typechecks_for_if_guard() {
+        let src = r#"
+def positive(n: Int): IO[Int] =
+  for {
+    x <- IO.pure(n)
+    if x > 0
+  } yield x
+@main def main: IO[Unit] =
+  for {
+    n <- positive(3)
+    _ <- IO.println(Str.fromInt(n))
+    _ <- positive(0).handleErrorWith(_ => IO.println("miss"))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("for if guard typecheck");
+    }
+
+    #[test]
+    fn rejects_if_fail_vs_string_io() {
+        let src = r#"
+def bad(ok: Bool): IO[Int] =
+  if (ok) IO.pure(1) else IO.pure("x")
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(err.contains("if branches disagree"), "{err}");
     }
 
     #[test]

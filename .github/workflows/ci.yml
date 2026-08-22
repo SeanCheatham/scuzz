@@ -296,6 +296,10 @@ jobs:
           grep -q "get:b" /tmp/kernel.out
           grep -q "miss:z" /tmp/kernel.out
           grep -q "fill:a,a,a" /tmp/kernel.out
+          grep -q "failif:7" /tmp/kernel.out
+          grep -q "failif:miss" /tmp/kernel.out
+          grep -q "forif:3" /tmp/kernel.out
+          grep -q "forif:miss" /tmp/kernel.out
           cargo run -p scuzz -- run examples/io | tee /tmp/io.out
           grep -q "ref-ok" /tmp/io.out
           grep -q "queue-ok" /tmp/io.out

@@ -657,6 +657,9 @@ fn used_after_for_binder(name: &str, rest: &[crate::ast::ForBinder], body: &Expr
 }
 
 fn binder_local_names(b: &crate::ast::ForBinder) -> Vec<String> {
+    if matches!(b, crate::ast::ForBinder::Guard { .. }) {
+        return Vec::new();
+    }
     if let Some(p) = b.unpack_pat() {
         pattern_bind_names(p).into_iter().collect()
     } else {

@@ -459,7 +459,7 @@ pub(crate) fn show_enum(en: &EnumDef) -> String {
 pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("IO.println", "IO.println(s: String): IO[Unit]"),
     ("IO.sleep", "IO.sleep(ms: Int): IO[Unit]"),
-    ("IO.fail", "IO.fail(s: String): IO[Unit]"),
+    ("IO.fail", "IO.fail(s: String): IO[A]"),
     ("IO.pure", "IO.pure(x: T): IO[T]"),
     ("IO.timeout", "IO.timeout(ms: Int, inner: IO[T]): IO[T]"),
     ("IO.forever", "IO.forever(inner: IO[T]): IO[Unit]"),
@@ -1431,6 +1431,13 @@ enum Opt[T]:
         let program = parse_file(src, "Main.scuzz").unwrap();
         let h = hover_in_source(&program, "Main.scuzz", src, offset).unwrap();
         assert!(h.contains("IO.println"), "{h}");
+    }
+
+    #[test]
+    fn hovers_io_fail() {
+        let src = "@main def main: IO[Unit] = IO.fail(\"x\")\n";
+        let h = hover_src(src, "fail");
+        assert!(h.contains("IO.fail(s: String): IO[A]"), "{h}");
     }
 
     #[test]
