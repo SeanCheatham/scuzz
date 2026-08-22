@@ -64,6 +64,8 @@ struct SzView {
   int64_t radio_value;
   /* TextField caret: byte offset into the live string (UTF-8 snapped). */
   int caret;
+  /* View.tooltip: 1 when the pointer hovers this node. */
+  int hover;
 };
 
 static SzView *view_new(SzViewKind kind) {
@@ -2506,6 +2508,48 @@ SzView *sz_view_hit_test(SzView *root, float x, float y) {
   return hit_node(root, x, y);
 }
 
+static SzView *tooltip_at_node(SzView *v, float x, float y) {
+  int i;
+  SzView *found;
+  if (!v || !view_is_shown(v) || !point_in(&v->frame, x, y))
+    return NULL;
+  if (v->kind == SZ_VIEW_IGNORE_POINTER)
+    return NULL;
+  if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
+    return NULL;
+  if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
+    return NULL;
+  for (i = v->child_count - 1; i >= 0; i--) {
+    found = tooltip_at_node(v->children[i], x, y);
+    if (found)
+      return found;
+  }
+  return v->kind == SZ_VIEW_TOOLTIP ? v : NULL;
+}
+
+SzView *sz_view_tooltip_at(SzView *root, float x, float y) {
+  return tooltip_at_node(root, x, y);
+}
+
+void sz_view_clear_hover(SzView *root) {
+  int i;
+  if (!root)
+    return;
+  root->hover = 0;
+  for (i = 0; i < root->child_count; i++)
+    sz_view_clear_hover(root->children[i]);
+}
+
+int sz_view_set_hover_at(SzView *root, float x, float y) {
+  SzView *tip;
+  sz_view_clear_hover(root);
+  tip = tooltip_at_node(root, x, y);
+  if (!tip)
+    return 0;
+  tip->hover = 1;
+  return 1;
+}
+
 static const float k_text_field_inset = 6.f;
 
 static int g_clip_on;
@@ -3499,6 +3543,49 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   }
 }
 
+static void paint_hover_bubble(SzView *v, SkCanvas *c, const SzTheme *theme,
+                               float canvas_w, float canvas_h) {
+  const char *msg;
+  float pad, gap, tw, th, x, y;
+  int prev_clip;
+  if (!v || v->kind != SZ_VIEW_TOOLTIP || !v->hover || !c || !theme)
+    return;
+  msg = v->text ? v->text : "";
+  if (!msg[0])
+    return;
+  pad = scale_px(theme, 4.f);
+  gap = scale_px(theme, 4.f);
+  tw = text_width(msg, theme->font_px) + pad * 2.f;
+  th = theme->font_px + pad * 2.f;
+  x = v->frame.x;
+  y = v->frame.y + v->frame.h + gap;
+  if (y + th > canvas_h && v->frame.y - gap - th >= 0.f)
+    y = v->frame.y - gap - th;
+  if (x + tw > canvas_w)
+    x = canvas_w - tw;
+  if (x < 0.f)
+    x = 0.f;
+  if (y < 0.f)
+    y = 0.f;
+  prev_clip = g_clip_on;
+  g_clip_on = 0;
+  paint_rect(c, x, y, tw, th, theme->surface);
+  paint_string(c, msg, x + pad, y + pad + theme->font_px, theme->foreground,
+               theme->font_px);
+  g_clip_on = prev_clip;
+}
+
+static void paint_hover_tooltips(SzView *v, SkCanvas *c, const SzTheme *theme,
+                                 float canvas_w, float canvas_h) {
+  int i;
+  if (!v)
+    return;
+  if (v->kind == SZ_VIEW_TOOLTIP && v->hover)
+    paint_hover_bubble(v, c, theme, canvas_w, canvas_h);
+  for (i = 0; i < v->child_count; i++)
+    paint_hover_tooltips(v->children[i], c, theme, canvas_w, canvas_h);
+}
+
 /* Internal: used by ui.c */
 int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
                   const SzTheme *theme) {
@@ -3511,6 +3598,7 @@ int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
   sk_canvas_clear(canvas, sk_color_argb(theme->background));
   sz_view_layout(root, (float)width, (float)height, theme);
   paint_node(root, canvas, theme);
+  paint_hover_tooltips(root, canvas, theme, (float)width, (float)height);
   return 1;
 }
 

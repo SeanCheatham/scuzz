@@ -1364,6 +1364,71 @@ static void test_record_live_key(void) {
   remove(record);
 }
 
+static void test_record_live_hover_secondary(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *btn, *tip;
+  SzSignalInt *count;
+  SzInputEvent ev;
+  const char *record = "/tmp/scuzz_ui_record_hover.script";
+  char *body;
+  SzRect fr;
+
+  remove(record);
+  count = sz_signal_int(0);
+  btn = sz_view_button("Go", counter_tap, count);
+  tip = sz_view_tooltip("Sean", btn);
+  root = sz_view_column();
+  sz_view_add_child(root, tip);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_record(session, record));
+  assert(sz_ui_pump_sync(session));
+  fr = sz_view_frame(btn);
+
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_POINTER;
+  ev.pointer_phase = SZ_POINTER_MOVE;
+  ev.pointer_button = 0;
+  ev.x = fr.x + fr.w * 0.5f;
+  ev.y = fr.y + fr.h * 0.5f;
+  assert(sz_ui_session_live_inject(session, &ev));
+  assert(sz_ui_session_live_inject(session, &ev));
+  body = slurp_cstr(record);
+  {
+    char *first = strstr(body, "hover ");
+    assert(first != NULL);
+    assert(strstr(first + 6, "hover ") == NULL);
+  }
+  free(body);
+
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_POINTER;
+  ev.pointer_phase = SZ_POINTER_DOWN;
+  ev.pointer_button = 3;
+  ev.x = fr.x + fr.w * 0.5f;
+  ev.y = fr.y + fr.h * 0.5f;
+  assert(sz_ui_session_live_inject(session, &ev));
+  ev.pointer_phase = SZ_POINTER_UP;
+  assert(sz_ui_session_live_inject(session, &ev));
+  assert(sz_signal_int_get(count) == 0);
+  body = slurp_cstr(record);
+  assert(strstr(body, "secondary 0") != NULL);
+  assert(strstr(body, "tap ") == NULL);
+  free(body);
+
+  sz_ui_unmount(session);
+  sz_signal_int_free(count);
+  remove(record);
+}
+
 static void test_session_inject_caret(void) {
   SzUiConfig cfg;
   SzUiSession *session;
@@ -1452,6 +1517,97 @@ static void test_session_inject_caret(void) {
 
   sz_ui_unmount(session);
   sz_signal_str_free(draft);
+  remove(path);
+  remove(dump);
+}
+
+static void test_session_inject_hover_secondary(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *btn, *tip;
+  SzSignalInt *count;
+  SzInputEvent ev;
+  const char *path = "/tmp/scuzz_ui_inject_hover.script";
+  const char *dump = "/tmp/scuzz_ui_inject_hover.dump";
+  char *body;
+  SzRect fr;
+
+  remove(path);
+  remove(dump);
+  count = sz_signal_int(0);
+  btn = sz_view_button("Go", counter_tap, count);
+  tip = sz_view_tooltip("Sean", btn);
+  root = sz_view_column();
+  sz_view_add_child(root, tip);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_inject(session, path));
+  assert(sz_ui_session_set_debug_dump(session, dump));
+  assert(sz_ui_pump_sync(session));
+  fr = sz_view_frame(btn);
+
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_POINTER;
+  ev.pointer_phase = SZ_POINTER_MOVE;
+  ev.pointer_button = 0;
+  ev.x = fr.x + 4.f;
+  ev.y = fr.y + fr.h * 0.5f;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_ui_pump_sync(session));
+  body = slurp_cstr(dump);
+  assert(strstr(body, "[hover]") != NULL);
+  assert(strstr(body, "tooltip:Sean") != NULL);
+  free(body);
+
+  {
+    char line[128];
+    snprintf(line, sizeof line, "hover %.1f %.1f\n", fr.x + fr.w * 0.5f,
+             fr.y + fr.h * 0.5f);
+    write_stamp(path, line);
+  }
+  assert(sz_ui_pump_sync(session));
+  body = slurp_cstr(dump);
+  assert(strstr(body, "[hover]") != NULL);
+  assert(strstr(body, "tooltip:Sean") != NULL);
+  free(body);
+
+  write_stamp(path, "hover 190.0 70.0\n");
+  assert(sz_ui_pump_sync(session));
+  body = slurp_cstr(dump);
+  assert(strstr(body, "[hover]") != NULL);
+  assert(strstr(body, "-> NULL") != NULL);
+  free(body);
+
+  write_stamp(path, "secondary 0\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(count) == 0);
+  body = slurp_cstr(dump);
+  assert(strstr(body, "[last_secondary]") != NULL);
+  assert(strstr(body, "button:Go") != NULL);
+  free(body);
+
+  {
+    char line[128];
+    snprintf(line, sizeof line, "secondary %.1f %.1f\n", fr.x + fr.w * 0.5f,
+             fr.y + fr.h * 0.5f);
+    write_stamp(path, line);
+  }
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(count) == 0);
+
+  write_stamp(path, "tap 0\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(count) == 1);
+
+  sz_ui_unmount(session);
+  sz_signal_int_free(count);
   remove(path);
   remove(dump);
 }
@@ -7225,6 +7381,39 @@ static void test_tooltip_paint_child(void) {
   sz_view_free(root);
 }
 
+static void test_tooltip_paint_hover(void) {
+  SzView *root, *av;
+  SkSurface *surf;
+  SkCanvas *canvas;
+  const uint8_t *px;
+  size_t n = 0;
+  const SzTheme *theme = sz_theme_default();
+  SzRect f;
+  int mx, my;
+
+  av = sz_view_avatar("S");
+  root = sz_view_tooltip("Sean", av);
+  sz_view_layout(root, 80.f, 80.f, theme);
+  f = sz_view_frame(root);
+  assert(sz_view_set_hover_at(root, f.x + 4.f, f.y + f.h * 0.5f));
+  assert(sz_view_tooltip_at(root, f.x + 4.f, f.y + f.h * 0.5f) == root);
+  surf = sk_surface_make_raster_n32_premul(80, 80);
+  assert(surf);
+  canvas = sk_surface_get_canvas(surf);
+  assert(canvas);
+  assert(sz_view_paint(root, canvas, 80, 80, theme));
+  px = sk_surface_peek_pixels(surf, &n);
+  assert(px && n == 80 * 80 * 4);
+  mx = (int)(f.x + 4.f);
+  my = (int)(f.y + f.h + 6.f);
+  if (my >= 80)
+    my = 79;
+  /* Hover bubble is surface white, not the page background. */
+  assert(px_rgb(px, 80, mx, my, 0xFF, 0xFF, 0xFF));
+  sk_surface_unref(surf);
+  sz_view_free(root);
+}
+
 static void test_tooltip_not_in_taps_dump(void) {
   SzUiConfig cfg;
   SzUiSession *session;
@@ -12960,7 +13149,9 @@ int main(void) {
   test_session_inject_key();
   test_session_inject_key_utf8_backspace();
   test_record_live_key();
+  test_record_live_hover_secondary();
   test_session_inject_caret();
+  test_session_inject_hover_secondary();
   test_session_inject_field_index();
   test_button_set_and_show_when();
   test_widgets();
@@ -13226,6 +13417,7 @@ int main(void) {
   test_tooltip_not_tap_target();
   test_tooltip_child_tap();
   test_tooltip_paint_child();
+  test_tooltip_paint_hover();
   test_tooltip_not_in_taps_dump();
   test_tooltip_child_in_taps_dump();
   test_tooltip_same_origin();

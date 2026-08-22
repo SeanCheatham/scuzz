@@ -133,11 +133,12 @@ int sz_embedder_poll_event(SzInputEvent *out) {
   return 1;
 }
 
-static void enqueue_pointer(SzPointerPhase phase, float x, float y) {
+static void enqueue_pointer(SzPointerPhase phase, float x, float y, int button) {
   SzInputEvent ev;
   memset(&ev, 0, sizeof(ev));
   ev.kind = SZ_INPUT_POINTER;
   ev.pointer_phase = phase;
+  ev.pointer_button = button;
   ev.x = x;
   ev.y = y;
   q_push(&ev);
@@ -384,7 +385,8 @@ static int ensure_window(const char *title, int width, int height) {
   }
   XSelectInput(g_dpy, g_win,
                ExposureMask | StructureNotifyMask | KeyPressMask |
-                   ButtonPressMask | ButtonReleaseMask | Button1MotionMask);
+                   ButtonPressMask | ButtonReleaseMask | PointerMotionMask |
+                   Button1MotionMask);
   XMapWindow(g_dpy, g_win);
   g_gc = DefaultGC(g_dpy, screen);
 
@@ -483,11 +485,26 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
       return 1;
     }
     if (ev.type == ButtonPress && ev.xbutton.button == 1)
-      enqueue_pointer(SZ_POINTER_DOWN, (float)ev.xbutton.x, (float)ev.xbutton.y);
-    if (ev.type == MotionNotify && (ev.xmotion.state & Button1Mask))
-      enqueue_pointer(SZ_POINTER_MOVE, (float)ev.xmotion.x, (float)ev.xmotion.y);
+      enqueue_pointer(SZ_POINTER_DOWN, (float)ev.xbutton.x, (float)ev.xbutton.y,
+                      1);
+    if (ev.type == ButtonPress && ev.xbutton.button == 3)
+      enqueue_pointer(SZ_POINTER_DOWN, (float)ev.xbutton.x, (float)ev.xbutton.y,
+                      3);
+    if (ev.type == MotionNotify) {
+      int button = 0;
+      if (ev.xmotion.state & Button1Mask)
+        button = 1;
+      else if (ev.xmotion.state & Button3Mask)
+        button = 3;
+      enqueue_pointer(SZ_POINTER_MOVE, (float)ev.xmotion.x, (float)ev.xmotion.y,
+                      button);
+    }
     if (ev.type == ButtonRelease && ev.xbutton.button == 1)
-      enqueue_pointer(SZ_POINTER_UP, (float)ev.xbutton.x, (float)ev.xbutton.y);
+      enqueue_pointer(SZ_POINTER_UP, (float)ev.xbutton.x, (float)ev.xbutton.y,
+                      1);
+    if (ev.type == ButtonRelease && ev.xbutton.button == 3)
+      enqueue_pointer(SZ_POINTER_UP, (float)ev.xbutton.x, (float)ev.xbutton.y,
+                      3);
     /* Wheel: 4 = up, 5 = down. Positive dy = content up (matches SZ_INPUT_SCROLL). */
     if (ev.type == ButtonPress && ev.xbutton.button == 4)
       enqueue_scroll((float)ev.xbutton.x, (float)ev.xbutton.y, 40.f);

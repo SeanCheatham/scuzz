@@ -118,6 +118,7 @@ struct SzUiSession {
   SzLifecyclePhase lifecycle;
   int keyboard_visible;
   int pointer_down;
+  int pointer_button;
   float pointer_x;
   float pointer_y;
   float pointer_down_x;
@@ -137,6 +138,15 @@ struct SzUiSession {
   float last_hit_x;
   float last_hit_y;
   char *last_hit_desc;
+  int hover_seen;
+  float hover_x;
+  float hover_y;
+  char *hover_desc;
+  char *record_hover_desc;
+  int last_secondary_seen;
+  float last_secondary_x;
+  float last_secondary_y;
+  char *last_secondary_desc;
   void *code_handle;
   void *code_stale;
   int code_gen;
@@ -420,6 +430,17 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
             session->last_hit_y,
             session->last_hit_desc ? session->last_hit_desc : "NULL");
   }
+  if (session && session->hover_seen) {
+    fprintf(f, "\n[hover]\nxy %.1f %.1f -> %s\n", session->hover_x,
+            session->hover_y,
+            session->hover_desc ? session->hover_desc : "NULL");
+  }
+  if (session && session->last_secondary_seen) {
+    fprintf(f, "\n[last_secondary]\nxy %.1f %.1f -> %s\n",
+            session->last_secondary_x, session->last_secondary_y,
+            session->last_secondary_desc ? session->last_secondary_desc
+                                         : "NULL");
+  }
   if (session && session->debug_dump_path && path &&
       strcmp(path, session->debug_dump_path) == 0) {
     fprintf(f, "\n[session]\nkind=%s\nwidth=%d\nheight=%d\nlifecycle=%s\n"
@@ -599,6 +620,9 @@ void sz_ui_unmount(SzUiSession *session) {
   sz_free(session->inject_fp);
   sz_free(session->record_path);
   sz_free(session->last_hit_desc);
+  sz_free(session->hover_desc);
+  sz_free(session->record_hover_desc);
+  sz_free(session->last_secondary_desc);
   sz_free(session);
 }
 
@@ -748,6 +772,42 @@ static void session_set_last_hit(SzUiSession *session, float x, float y,
   session->last_hit_desc = sz_strdup(desc);
 }
 
+static void session_set_hover(SzUiSession *session, float x, float y,
+                              SzView *tip) {
+  char desc[256];
+  if (!session)
+    return;
+  format_last_hit_desc(tip, desc, sizeof desc);
+  session->hover_seen = 1;
+  session->hover_x = x;
+  session->hover_y = y;
+  sz_free(session->hover_desc);
+  session->hover_desc = sz_strdup(desc);
+}
+
+static void session_clear_hover(SzUiSession *session) {
+  if (!session)
+    return;
+  session->hover_seen = 0;
+  sz_free(session->hover_desc);
+  session->hover_desc = NULL;
+  if (session->root)
+    sz_view_clear_hover(session->root);
+}
+
+static void session_set_last_secondary(SzUiSession *session, float x, float y,
+                                       SzView *hit_if_fired) {
+  char desc[256];
+  if (!session)
+    return;
+  format_last_hit_desc(hit_if_fired, desc, sizeof desc);
+  session->last_secondary_seen = 1;
+  session->last_secondary_x = x;
+  session->last_secondary_y = y;
+  sz_free(session->last_secondary_desc);
+  session->last_secondary_desc = sz_strdup(desc);
+}
+
 static int find_tap_index_at(SzUiSession *session, float x, float y) {
   SzView *buttons[64];
   SzView *hit;
@@ -777,6 +837,21 @@ static void record_tap_or_xy(SzUiSession *session, FILE *f, float x, float y) {
     fprintf(f, "xy %.1f %.1f\n", x, y);
 }
 
+static int event_pointer_button(const SzInputEvent *ev) {
+  if (ev && ev->pointer_button == 3)
+    return 3;
+  return 1;
+}
+
+static void record_secondary_or_xy(SzUiSession *session, FILE *f, float x,
+                                   float y) {
+  int idx = find_tap_index_at(session, x, y);
+  if (idx >= 0)
+    fprintf(f, "secondary %d\n", idx);
+  else
+    fprintf(f, "secondary %.1f %.1f\n", x, y);
+}
+
 /* Append one OS event to the record file. Script / inject playback must not
  * call this. */
 static void record_live_event(SzUiSession *session, const SzInputEvent *ev) {
@@ -799,10 +874,30 @@ static void record_live_event(SzUiSession *session, const SzInputEvent *ev) {
     else
       fprintf(f, "type %s\n", ev->text);
   } else if (ev->kind == SZ_INPUT_POINTER &&
+             ev->pointer_phase == SZ_POINTER_MOVE && !session->pointer_down) {
+    SzView *tip;
+    char desc[256];
+    if (session->root) {
+      sz_view_layout(session->root, (float)session->cfg.width,
+                     (float)session->cfg.height, session->theme);
+      tip = sz_view_tooltip_at(session->root, ev->x, ev->y);
+    } else
+      tip = NULL;
+    format_last_hit_desc(tip, desc, sizeof desc);
+    if (!session->record_hover_desc ||
+        strcmp(session->record_hover_desc, desc) != 0) {
+      fprintf(f, "hover %.1f %.1f\n", ev->x, ev->y);
+      sz_free(session->record_hover_desc);
+      session->record_hover_desc = sz_strdup(desc);
+    }
+  } else if (ev->kind == SZ_INPUT_POINTER &&
              ev->pointer_phase == SZ_POINTER_UP && session->pointer_down) {
     float dx = ev->x - session->pointer_down_x;
     float dy = ev->y - session->pointer_down_y;
-    if (session->pointer_slider)
+    if (session->pointer_button == 3 || ev->pointer_button == 3) {
+      if (dx * dx + dy * dy <= 64.f)
+        record_secondary_or_xy(session, f, ev->x, ev->y);
+    } else if (session->pointer_slider)
       fprintf(f, "xy %.1f %.1f\n", ev->x, ev->y);
     else if (dx * dx + dy * dy <= 64.f)
       record_tap_or_xy(session, f, ev->x, ev->y);
@@ -944,6 +1039,10 @@ int sz_ui_pump_sync(SzUiSession *session) {
   }
   /* Paint in device pixels. Layout is restored to logical points afterward
    * so hit-testing / inject stay in the same space as embedder events. */
+  if (session->hover_seen)
+    sz_view_set_hover_at(session->root, session->hover_x, session->hover_y);
+  else
+    sz_view_clear_hover(session->root);
   if (!sz_view_paint(session->root, session->canvas, pw, ph, theme))
     return 0;
   if (scale != 1.f)
@@ -977,6 +1076,7 @@ int sz_ui_pump_sync(SzUiSession *session) {
 static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
   float dx, dy;
   const float tap_slop2 = 64.f; /* 8px squared */
+  int button = event_pointer_button(event);
 
   if (!session->root)
     return 0;
@@ -989,11 +1089,16 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
   case SZ_POINTER_DOWN: {
     SzView *hit = sz_view_hit_test(session->root, event->x, event->y);
     session->pointer_down = 1;
+    session->pointer_button = button;
     session->pointer_x = event->x;
     session->pointer_y = event->y;
     session->pointer_down_x = event->x;
     session->pointer_down_y = event->y;
-    if (hit && sz_view_kind(hit) == SZ_VIEW_SLIDER) {
+    session_clear_hover(session);
+    if (button == 3) {
+      session->pointer_slider = NULL;
+      session->pointer_scroll = NULL;
+    } else if (hit && sz_view_kind(hit) == SZ_VIEW_SLIDER) {
       session->pointer_slider = hit;
       session->pointer_scroll = NULL;
       sz_view_slider_set_at(hit, event->x);
@@ -1006,10 +1111,22 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
     return 1;
   }
   case SZ_POINTER_MOVE:
-    if (!session->pointer_down)
-      return 0;
+    if (!session->pointer_down) {
+      SzView *tip = sz_view_tooltip_at(session->root, event->x, event->y);
+      (void)sz_view_set_hover_at(session->root, event->x, event->y);
+      session_set_hover(session, event->x, event->y, tip);
+      session->pointer_x = event->x;
+      session->pointer_y = event->y;
+      session->dirty = 1;
+      return 1;
+    }
     dx = event->x - session->pointer_x;
     dy = event->y - session->pointer_y;
+    if (session->pointer_button == 3) {
+      session->pointer_x = event->x;
+      session->pointer_y = event->y;
+      return 1;
+    }
     if (session->pointer_slider) {
       sz_view_slider_set_at(session->pointer_slider, event->x);
       session->dirty = 1;
@@ -1031,10 +1148,23 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
   case SZ_POINTER_UP:
     if (!session->pointer_down)
       return 0;
+    if (button != session->pointer_button)
+      return 1;
     dx = event->x - session->pointer_down_x;
     dy = event->y - session->pointer_down_y;
     session->pointer_down = 0;
     session->pointer_scroll = NULL;
+    if (session->pointer_button == 3) {
+      SzView *hit = NULL;
+      if (dx * dx + dy * dy <= tap_slop2) {
+        hit = sz_view_hit_test(session->root, event->x, event->y);
+        session_set_last_secondary(session, event->x, event->y, hit);
+        session->dirty = 1;
+      }
+      session->pointer_slider = NULL;
+      session->pointer_button = 0;
+      return 1;
+    }
     if (session->pointer_slider) {
       SzView *sl = session->pointer_slider;
       sz_view_slider_set_at(sl, event->x);

@@ -1,8 +1,8 @@
 # Next slice
 
-A3 — Hover and secondary click.
+A4 — Selection and clipboard.
 
-Today MOVE inject fails unless a button is down. There is no mouse button on `SzInputEvent`. Add a button field. Accept MOVE without a button. Show `View.tooltip` on hover. Headless inject drives hover and secondary click.
+Shift+arrows and pointer drag. Replace/delete selection. Session-owned clipboard buffer plus script `copy` / `cut` / `paste`; Desktop/Mobile sync the OS pasteboard in the embedder. Do not start OS-only. Repeat/IME compose if A1 left gaps.
 
 Each slice lands Headless inject + dump + a runtime test. Desktop and Headless share verbs.
 
