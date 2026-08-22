@@ -149,6 +149,21 @@ SzList *sz_map_keys(SzMap *m) { return map_field_acc(m, NULL, 1); }
 
 SzList *sz_map_values(SzMap *m) { return map_field_acc(m, NULL, 0); }
 
+static SzList *map_pairs_acc(SzMap *m, SzList *acc) {
+  SzList *next;
+  SzPair *pair;
+  if (!m)
+    return acc;
+  acc = map_pairs_acc(m->right, acc);
+  pair = sz_pair_new(m->key, m->val);
+  next = sz_list_cons(pair, acc);
+  sz_release(pair);
+  sz_release(acc);
+  return map_pairs_acc(m->left, next);
+}
+
+SzList *sz_map_to_list(SzMap *m) { return map_pairs_acc(m, NULL); }
+
 int64_t sz_map_size(SzMap *m) {
   if (!m)
     return 0;

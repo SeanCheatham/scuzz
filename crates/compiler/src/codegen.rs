@@ -164,6 +164,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_map_remove(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_map_keys(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_map_values(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_map_to_list(ptr)").unwrap();
     writeln!(out, "declare i64 @sz_map_size(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_set_union(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_set_intersect(ptr, ptr)").unwrap();
@@ -231,6 +232,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare i64 @sz_list_index_of(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_last_index_of(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_distinct(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_distinct_by(ptr, ptr, ptr, i32)").unwrap();
+    writeln!(out, "declare ptr @sz_list_to_map(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_to_set(ptr, i32)").unwrap();
     writeln!(out, "declare ptr @sz_list_diff(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_intersect(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_index_where(ptr, ptr, ptr)").unwrap();
@@ -3875,16 +3879,19 @@ fn emit_list_sort_by(
     owned_ptr(code, format!("%{prefix}_v")).with_elem(inner_elem)
 }
 
-fn emit_list_group_by(
+fn emit_list_keyed(
+    callee: &str,
+    rt: &str,
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
     locals: &mut HashMap<String, Local>,
     prefix: &str,
+    returns_list: bool,
 ) -> Emitted {
-    assert!(args.len() == 2, "List.groupBy expects 2 args");
+    assert!(args.len() == 2, "{callee} expects 2 args");
     let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
     let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
-        panic!("List.groupBy mapper must be a lambda");
+        panic!("{callee} mapper must be a lambda");
     };
     let lam = emit_smap_lambda(
         param,
@@ -3897,6 +3904,7 @@ fn emit_list_group_by(
     );
     let inner_owned = inner.owned;
     let inner_kind = inner.kind;
+    let inner_elem = inner.elem;
     let inner_value = inner.value.clone();
     let key_kind = i32::from(lam.elem != Kind::Int);
     let mut code = inner.code;
@@ -3904,14 +3912,18 @@ fn emit_list_group_by(
     unpack_closure(&mut code, &lam.value, prefix);
     writeln!(
         code,
-        "  %{prefix}_v = call ptr @sz_list_group_by(ptr {inner_value}, ptr %{prefix}_fnp, ptr %{prefix}_envp, i32 {key_kind})"
+        "  %{prefix}_v = call ptr @{rt}(ptr {inner_value}, ptr %{prefix}_fnp, ptr %{prefix}_envp, i32 {key_kind})"
     )
     .unwrap();
     drop_owned_ptr(&mut code, &lam);
     if inner_owned && inner_kind == Kind::Ptr {
         writeln!(code, "  call void @sz_release(ptr {inner_value})").unwrap();
     }
-    owned_ptr(code, format!("%{prefix}_v"))
+    if returns_list {
+        owned_ptr(code, format!("%{prefix}_v")).with_elem(inner_elem)
+    } else {
+        owned_ptr(code, format!("%{prefix}_v"))
+    }
 }
 
 fn emit_set_map(
@@ -4591,7 +4603,26 @@ fn emit_call(
         return emit_list_sort_by(args, ctx, locals, prefix);
     }
     if callee == "List.groupBy" {
-        return emit_list_group_by(args, ctx, locals, prefix);
+        return emit_list_keyed(
+            "List.groupBy",
+            "sz_list_group_by",
+            args,
+            ctx,
+            locals,
+            prefix,
+            false,
+        );
+    }
+    if callee == "List.distinctBy" {
+        return emit_list_keyed(
+            "List.distinctBy",
+            "sz_list_distinct_by",
+            args,
+            ctx,
+            locals,
+            prefix,
+            true,
+        );
     }
     if callee == "Map.mapValues" {
         return emit_ptr_map(
@@ -4999,7 +5030,7 @@ fn emit_call(
         }
         "List.reverse" | "List.init" | "List.inits" | "List.tails" | "List.last"
         | "List.flatten" | "List.indices" | "List.transpose" | "List.distinct"
-        | "List.zipWithIndex" => {
+        | "List.zipWithIndex" | "List.toMap" => {
             let rt = match callee {
                 "List.reverse" => "sz_list_reverse",
                 "List.init" => "sz_list_init",
@@ -5010,6 +5041,7 @@ fn emit_call(
                 "List.transpose" => "sz_list_transpose",
                 "List.distinct" => "sz_list_distinct",
                 "List.zipWithIndex" => "sz_list_zip_with_index",
+                "List.toMap" => "sz_list_to_map",
                 _ => "sz_list_indices",
             };
             writeln!(
@@ -5709,6 +5741,17 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
+        "List.toSet" => {
+            let key_kind = i32::from(emitted_args[0].elem != Kind::Int);
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_to_set(ptr {}, i32 {key_kind})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(emitted_args[0].elem)
+        }
         "Map.keys" | "Set.toList" => {
             writeln!(
                 code,
@@ -5728,6 +5771,16 @@ fn emit_call(
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
+        }
+        "Map.toList" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_map_to_list(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(Kind::Ptr)
         }
         "Map.size" | "Set.size" => {
             writeln!(
@@ -10262,6 +10315,46 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of list {name} after List.sum:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_distinct_by_to_map_to_set() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(List.distinctBy(["aa", "b", "cc"], x => Str.len(x)), ","))
+    _ <- IO.println(Map.getOrElse(List.toMap([("a", "1")]), "a", "?"))
+    _ <- IO.println(List.join(Set.toList(List.toSet(["b", "a"])), ","))
+    _ <- IO.println(List.join(List.map(Map.toList(Map.set(Map.empty(), "a", "1")), (k, v) => s"$k:$v"), "|"))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_distinct_by"));
+        assert!(ir.contains("sz_list_to_map"));
+        assert!(ir.contains("sz_list_to_set"));
+        assert!(ir.contains("sz_map_to_list"));
+        let needle = "call ptr @sz_list_distinct_by(ptr ";
+        let at = ir.find(needle).expect("distinctBy");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.distinctBy:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_to_map(ptr ";
+        let at = ir.find(needle).expect("toMap");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.toMap:\n{ir}"
+        );
+        let needle = "call ptr @sz_map_to_list(ptr ";
+        let at = ir.find(needle).expect("toList");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of map {name} after Map.toList:\n{ir}"
         );
     }
 

@@ -2219,7 +2219,8 @@ fn kit_lambda_param_ty_at(
             | "List.sortBy"
             | "List.maxBy"
             | "List.minBy"
-            | "List.groupBy",
+            | "List.groupBy"
+            | "List.distinctBy",
             1,
         ) => prior.first().and_then(|t| list_elem(t).ok()),
         ("IO.foreach" | "IO.foreachDiscard", 1) => prior.first().and_then(|t| list_elem(t).ok()),
@@ -3605,6 +3606,50 @@ fn infer_call(
             list_elem(&arg_tys[0])?;
             Ok(arg_tys[0].clone())
         }
+        "List.distinctBy" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            list_elem(&arg_tys[0])?;
+            let key = match &arg_tys[1] {
+                Type::Fun(_, ret) => (**ret).clone(),
+                other => other.clone(),
+            };
+            expect_map_key(callee, &key)?;
+            Ok(arg_tys[0].clone())
+        }
+        "List.toMap" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            let inner = list_elem(&arg_tys[0])?;
+            if is_meta_opaque(&inner) {
+                return Ok(Type::App(
+                    "Map".into(),
+                    vec![Type::Opaque("Elem".into()), Type::Opaque("Elem".into())],
+                ));
+            }
+            match inner {
+                Type::Tuple(xs) if xs.len() == 2 => {
+                    if !matches!(xs[0], Type::Int | Type::String) && !is_meta_opaque(&xs[0]) {
+                        return Err(TypeError::Msg(format!(
+                            "List.toMap key must be Int or String, got {}",
+                            xs[0]
+                        )));
+                    }
+                    Ok(Type::App("Map".into(), vec![xs[0].clone(), xs[1].clone()]))
+                }
+                other => Err(TypeError::Msg(format!(
+                    "List.toMap needs List[(K, V)], got List[{other:?}]"
+                ))),
+            }
+        }
+        "List.toSet" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            let elem = list_elem(&arg_tys[0])?;
+            if !matches!(elem, Type::Int | Type::String) && !is_meta_opaque(&elem) {
+                return Err(TypeError::Msg(format!(
+                    "List.toSet needs List[Int] or List[String], got List[{elem}]"
+                )));
+            }
+            Ok(Type::App("Set".into(), vec![elem]))
+        }
         "List.diff" | "List.intersect" => {
             expect_arity(callee, &arg_tys, 2)?;
             let a = list_elem(&arg_tys[0])?;
@@ -3831,6 +3876,11 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 1)?;
             let (_, v) = map_kv(&arg_tys[0])?;
             Ok(list_of(v))
+        }
+        "Map.toList" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            let (k, v) = map_kv(&arg_tys[0])?;
+            Ok(list_of(Type::Tuple(vec![k, v])))
         }
         "Map.size" => {
             expect_arity(callee, &arg_tys, 1)?;
@@ -10785,6 +10835,73 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.groupBy/sum/product should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_distinct_by_to_map_to_set() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = []: List[String]
+    pairs = []: List[(String, Int)]
+    emptyM = Map.empty(): Map[String, Int]
+    _ <- IO.println(List.join(List.distinctBy(["aa", "b", "cc"], x => Str.len(x)), ","))
+    _ <- IO.println(List.join(List.distinctBy(xs, x => x), ","))
+    _ <- IO.println(List.join(List.distinctBy([]: List[String], x => x), ","))
+    _ <- IO.println(Map.getOrElse(List.toMap([("a", "1"), ("b", "2")]), "a", "?"))
+    _ <- IO.println(Str.fromInt(Map.size(List.toMap(pairs))))
+    _ <- IO.println(Str.fromInt(Map.size(List.toMap([]: List[(String, Int)]))))
+    _ <- IO.println(List.join(Set.toList(List.toSet(["b", "a", "b"])), ","))
+    _ <- IO.println(List.join(List.map(Set.toList(List.toSet([1, 2, 1])), Str.fromInt(_)), ","))
+    _ <- IO.println(List.join(List.map(Map.toList(Map.set(Map.empty(), "a", "1")), (k, v) => s"$k:$v"), "|"))
+    _ <- IO.println(Str.fromInt(List.len(Map.toList(emptyM))))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.distinctBy/toMap/toSet and Map.toList should typecheck");
+    }
+
+    #[test]
+    fn rejects_list_distinct_by_bool_key() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.distinctBy(["a"], x => true), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("List.distinctBy lambda must return Int or String"),
+            "expected map-key error, got {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_list_to_map_non_pair() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(Map.size(List.toMap(["a"]))))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("List.toMap needs List[(K, V)]"),
+            "expected pair-list error, got {}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_list_to_set_bool() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(Set.toList(List.toSet([true])), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("List.toSet needs List[Int] or List[String]"),
+            "expected Int/String list error, got {}",
+            err.message()
+        );
     }
 
     #[test]

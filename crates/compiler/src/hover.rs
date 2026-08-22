@@ -745,6 +745,12 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.lastIndexOf(xs: List[T], x: T): Int",
     ),
     ("List.distinct", "List.distinct(xs: List[T]): List[T]"),
+    (
+        "List.distinctBy",
+        "List.distinctBy(xs: List[T], f: T => K): List[T]",
+    ),
+    ("List.toMap", "List.toMap(pairs: List[(K, V)]): Map[K, V]"),
+    ("List.toSet", "List.toSet(xs: List[T]): Set[T]"),
     ("List.diff", "List.diff(xs: List[T], ys: List[T]): List[T]"),
     (
         "List.intersect",
@@ -1080,6 +1086,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Map.remove", "Map.remove(m: Map[K, V], k: K): Map[K, V]"),
     ("Map.keys", "Map.keys(m: Map[K, V]): List[K]"),
     ("Map.values", "Map.values(m: Map[K, V]): List[V]"),
+    ("Map.toList", "Map.toList(m: Map[K, V]): List[(K, V)]"),
     ("Map.size", "Map.size(m: Map[K, V]): Int"),
     ("Map.isEmpty", "Map.isEmpty(m: Map[K, V]): Bool"),
     ("Map.nonEmpty", "Map.nonEmpty(m: Map[K, V]): Bool"),
@@ -2437,6 +2444,27 @@ enum Opt[T]:
         let h = hover_src(src, "distinct");
         assert!(h.contains("List.distinct(xs: List[T]): List[T]"), "{h}");
         let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.distinctBy(["aa", "b"], x => Str.len(x)), ","))
+"#;
+        let h = hover_src(src, "distinctBy");
+        assert!(
+            h.contains("List.distinctBy(xs: List[T], f: T => K): List[T]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Map.getOrElse(List.toMap([("a", "1")]), "a", "?"))
+"#;
+        let h = hover_src(src, "toMap");
+        assert!(
+            h.contains("List.toMap(pairs: List[(K, V)]): Map[K, V]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(Set.toList(List.toSet(["a"])), ","))
+"#;
+        let h = hover_src(src, "toSet");
+        assert!(h.contains("List.toSet(xs: List[T]): Set[T]"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
   IO.println(List.join(List.diff(["a", "b"], ["b"]), ","))
 "#;
         let h = hover_src(src, "diff");
@@ -2857,6 +2885,11 @@ enum Opt[T]:
 "#;
         let h = hover_src(src, "values");
         assert!(h.contains("Map.values(m: Map[K, V]): List[V]"), "{h}");
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map(Map.toList(Map.set(Map.empty(), "a", "1")), (k, v) => s"$k:$v"), "|"))
+"#;
+        let h = hover_src(src, "toList");
+        assert!(h.contains("Map.toList(m: Map[K, V]): List[(K, V)]"), "{h}");
         let src = r#"@main def main: IO[Unit] =
   IO.println(List.join(Map.get(Map.set(Map.empty(), "a", "1"), "a"), ","))
 "#;
