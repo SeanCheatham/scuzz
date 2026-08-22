@@ -67,6 +67,7 @@ typedef struct SzInputEvent {
   int keyboard_visible;         /* SZ_INPUT_KEYBOARD: 1=show, 0=hide */
   const char *key;              /* SZ_INPUT_KEY name: Enter, Backspace, ArrowLeft, a */
   int key_mods;                 /* SZ_INPUT_KEY: SZ_KEY_SHIFT / CTRL / CMD / ALT */
+  int pointer_button;           /* SZ_INPUT_POINTER: 0 hover, 1 primary, 3 secondary */
 } SzInputEvent;
 
 /* --- theme tokens -------------------------------------------------------- */
@@ -193,7 +194,7 @@ typedef enum SzViewKind {
   SZ_VIEW_FAB,                /* circular primary tap; same closure as button */
   SZ_VIEW_OUTLINED_BUTTON,    /* surface + border tap; same closure as button */
   SZ_VIEW_TEXT_BUTTON,        /* foreground label tap; same closure as button */
-  SZ_VIEW_TOOLTIP,            /* message + child; sizes to the child; not a tap */
+  SZ_VIEW_TOOLTIP,            /* message + child; sizes to the child; shows message on hover; not a tap */
   SZ_VIEW_PLACEHOLDER,        /* sizes to the child; muted box mark; not a tap */
   SZ_VIEW_FILTER_CHIP,        /* Signal.int 0/1 chip with a leading check; tap flips */
   SZ_VIEW_CHOICE_CHIP,        /* Signal.int group; chip tap writes this value */
@@ -274,7 +275,7 @@ SzView *sz_view_fab(const char *label, SzViewTapFn on_tap, void *env);
 SzView *sz_view_outlined_button(const char *label, SzViewTapFn on_tap, void *env);
 /* Label tap with no fill. Same closure as button. */
 SzView *sz_view_text_button(const char *label, SzViewTapFn on_tap, void *env);
-/* Sizes to `child`. `message` is a11y. Not a tap target. */
+/* Sizes to `child`. `message` is a11y. Shows `message` on hover. Not a tap. */
 SzView *sz_view_tooltip(const char *message, SzView *child);
 /* Sizes to `child`. Paints a muted box mark. Not a tap target. */
 SzView *sz_view_placeholder(SzView *child);
@@ -374,6 +375,11 @@ int sz_view_slider_set_at(SzView *view, float x);
 /* Layout + hit-test (also run inside pump / inject). */
 void sz_view_layout(SzView *root, float width, float height, const SzTheme *theme);
 SzView *sz_view_hit_test(SzView *root, float x, float y);
+/* Innermost View.tooltip whose frame contains (x, y), or NULL. */
+SzView *sz_view_tooltip_at(SzView *root, float x, float y);
+/* Clear hover marks. Mark the tooltip at (x, y). 1 if a tooltip is hovered. */
+int sz_view_set_hover_at(SzView *root, float x, float y);
+void sz_view_clear_hover(SzView *root);
 int sz_view_handle_tap(SzView *root, float x, float y);
 /* Fire the tap handler on `target` (no hit-test). Slider / segmented use x. */
 int sz_view_activate(SzView *root, SzView *target, float x, float y);
@@ -494,10 +500,17 @@ int sz_ui_session_watch(SzUiSession *session, const char *path);
  * One-token forms still use the starred field. `key <name> [text]` uses the
  * starred field. Live OS keys record as `key`, not `type`. `caret <n>` sets the
  * starred-field caret. Click-to-caret uses TAP / `xy` on the field.
+ * `hover x y` is pointer MOVE with no button. `secondary N` / `secondary x y`
+ * is button 3. Live OS hover and right-click record those verbs.
  * [scrolls] lists hittable Scrolls in scan order; `scroll N dy` pans index N
  * (`scroll 40` stays the first).
  * [last_hit] appears after a TAP in this session: `xy x y -> role:label` or
  * `-> NULL`.
+ * [hover] appears after a pointer MOVE with no button: `xy x y -> tooltip:msg`
+ * or `-> NULL`.
+ * [last_secondary] appears after a button-3 click: `xy x y -> role:label` or
+ * `-> NULL`. `hover x y` and `secondary N` / `secondary x y` are inject verbs.
+ * Live Desktop hover and right-click record those verbs.
  * [heap] is live alloc stats (`live_bytes` / `live_count` / `peak_bytes`),
  * `delta_bytes` / `delta_count` since the last live dump or `resetpeak`,
  * and per-kind `name=count:bytes` (`raw`, `string`, `list`, …).
@@ -507,7 +520,7 @@ int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
 int sz_ui_session_write_dump(SzUiSession *session, const char *path);
 /* Rewrite the live debug dump now, including [session] and [heap]. No path is a no-op. */
 int sz_ui_session_dump_now(SzUiSession *session);
-/* Watch an inject script (tap/xy/text/type/key/caret/pump/scroll/backspace/dump/reload/quit/resetpeak).
+/* Watch an inject script (tap/xy/text/type/key/caret/hover/secondary/pump/scroll/backspace/dump/reload/quit/resetpeak).
  * Next pump that sees new contents plays the suffix (append) or the whole file
  * (rewrite). Missing = empty. */
 int sz_ui_session_set_inject(SzUiSession *session, const char *path);
@@ -652,7 +665,7 @@ SzView *sz_lang_view_bind_text(SzSignalStr *sig);
  * SCUZZ_UI_RELOAD_CODE (dylib exporting sz_ui_reload_rebuild) if that
  * file exists, then rebuilds. Writes SCUZZ_UI_DEBUG_DUMP on dirty pumps
  * when set (includes [heap]). Plays SCUZZ_UI_INJECT
- * (tap/xy/text/type/key/caret/pump/scroll/backspace/dump/reload/quit/resetpeak) when
+ * (tap/xy/text/type/key/caret/hover/secondary/pump/scroll/backspace/dump/reload/quit/resetpeak) when
  * that file changes. `quit` stops the live pump loop. Desktop quit is window
  * close. `resetpeak` resets
  * peak bytes and the heap delta mark. */

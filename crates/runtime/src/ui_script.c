@@ -247,6 +247,9 @@ void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
                         live OS keys record this verb
      caret <n>  set the starred TextField caret to byte offset n
      caret <i> <n>  set dump-index i caret to byte offset n
+     hover <x> <y>  pointer MOVE with no button (hover); shows View.tooltip; live OS hover records this verb
+     secondary <n>  button-3 click on tap-dump index n; does not fire the primary tap
+     secondary <x> <y>  button-3 click at a logical point; live OS right-click records this verb
      pump <k>   pump k extra frames
      scroll <dy> pan the first Scroll on its axis (positive = content up or left); no scroll is a no-op
      scroll <n> <dy>  pan dump-index n ([scrolls] scan order); `scroll 40` stays dy 40
@@ -278,6 +281,46 @@ static void script_xy(SzUiSession *session, float x, float y) {
   tap.y = y;
   if (!sz_ui_inject_sync(session, &tap))
     sz_panic("Ui.run: script xy inject failed");
+}
+
+static void script_hover(SzUiSession *session, float x, float y) {
+  SzInputEvent ev;
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_POINTER;
+  ev.pointer_phase = SZ_POINTER_MOVE;
+  ev.pointer_button = 0;
+  ev.x = x;
+  ev.y = y;
+  if (!sz_ui_inject_sync(session, &ev))
+    sz_panic("Ui.run: script hover inject failed");
+}
+
+static void script_secondary_xy(SzUiSession *session, float x, float y) {
+  SzInputEvent ev;
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_POINTER;
+  ev.pointer_phase = SZ_POINTER_DOWN;
+  ev.pointer_button = 3;
+  ev.x = x;
+  ev.y = y;
+  if (!sz_ui_inject_sync(session, &ev))
+    sz_panic("Ui.run: script secondary inject failed");
+  ev.pointer_phase = SZ_POINTER_UP;
+  if (!sz_ui_inject_sync(session, &ev))
+    sz_panic("Ui.run: script secondary inject failed");
+}
+
+static void script_secondary_n(SzUiSession *session, int n) {
+  SzView *buttons[64];
+  SzRect fr;
+  int count = sz_ui_collect_buttons(session, buttons, 64);
+  if (n < 0 || n >= count) {
+    fprintf(stderr, "scuzz: script secondary %d skipped (%d tap targets)\n", n,
+            count);
+    return;
+  }
+  fr = sz_view_frame(buttons[n]);
+  script_secondary_xy(session, fr.x + fr.w * 0.5f, fr.y + fr.h * 0.5f);
 }
 
 static void play_script_line(SzUiSession *session, char *line) {
@@ -347,6 +390,20 @@ static void play_script_line(SzUiSession *session, char *line) {
       else
         fprintf(stderr, "scuzz: script caret %d skipped\n", idx);
     }
+  } else if (strncmp(line, "hover ", 6) == 0) {
+    float x = 0.f, y = 0.f;
+    if (sscanf(line + 6, "%f %f", &x, &y) == 2)
+      script_hover(session, x, y);
+    else
+      sz_panic("Ui.run: hover needs x y");
+  } else if (strncmp(line, "secondary ", 10) == 0 ||
+             strcmp(line, "secondary") == 0) {
+    float x = 0.f, y = 0.f;
+    const char *rest = len > 9 ? line + 10 : "";
+    if (sscanf(rest, "%f %f", &x, &y) == 2)
+      script_secondary_xy(session, x, y);
+    else
+      script_secondary_n(session, rest[0] ? atoi(rest) : 0);
   } else if (strcmp(line, "dump") == 0) {
     sz_ui_session_dump_now(session);
   } else if (strcmp(line, "reload") == 0) {

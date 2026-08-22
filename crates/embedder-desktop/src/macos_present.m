@@ -125,11 +125,12 @@ int sz_embedder_poll_event(SzInputEvent *out) {
   return 1;
 }
 
-static void enqueue_pointer(SzPointerPhase phase, float x, float y) {
+static void enqueue_pointer(SzPointerPhase phase, float x, float y, int button) {
   SzInputEvent ev;
   memset(&ev, 0, sizeof(ev));
   ev.kind = SZ_INPUT_POINTER;
   ev.pointer_phase = phase;
+  ev.pointer_button = button;
   ev.x = x;
   ev.y = y;
   q_push(&ev);
@@ -322,6 +323,7 @@ static int ensure_window_on_main(const char *title, int width, int height) {
   [g_view setImageScaling:NSImageScaleAxesIndependently];
   [g_view setAnimates:NO];
   [g_win setContentView:g_view];
+  [g_win setAcceptsMouseMovedEvents:YES];
   [g_win makeKeyAndOrderFront:nil];
   [NSApp activateIgnoringOtherApps:YES];
 
@@ -394,15 +396,31 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
           NSEventType t = [ev type];
           float x, y;
           if (t == NSEventTypeLeftMouseDown && event_content_xy(ev, &x, &y)) {
-            enqueue_pointer(SZ_POINTER_DOWN, x, y);
+            enqueue_pointer(SZ_POINTER_DOWN, x, y, 1);
             continue;
           }
           if (t == NSEventTypeLeftMouseDragged && event_content_xy(ev, &x, &y)) {
-            enqueue_pointer(SZ_POINTER_MOVE, x, y);
+            enqueue_pointer(SZ_POINTER_MOVE, x, y, 1);
             continue;
           }
           if (t == NSEventTypeLeftMouseUp && event_content_xy(ev, &x, &y)) {
-            enqueue_pointer(SZ_POINTER_UP, x, y);
+            enqueue_pointer(SZ_POINTER_UP, x, y, 1);
+            continue;
+          }
+          if (t == NSEventTypeRightMouseDown && event_content_xy(ev, &x, &y)) {
+            enqueue_pointer(SZ_POINTER_DOWN, x, y, 3);
+            continue;
+          }
+          if (t == NSEventTypeRightMouseDragged && event_content_xy(ev, &x, &y)) {
+            enqueue_pointer(SZ_POINTER_MOVE, x, y, 3);
+            continue;
+          }
+          if (t == NSEventTypeRightMouseUp && event_content_xy(ev, &x, &y)) {
+            enqueue_pointer(SZ_POINTER_UP, x, y, 3);
+            continue;
+          }
+          if (t == NSEventTypeMouseMoved && event_content_xy(ev, &x, &y)) {
+            enqueue_pointer(SZ_POINTER_MOVE, x, y, 0);
             continue;
           }
           /* scrollingDeltaY: positive = content up (matches SZ_INPUT_SCROLL). */
