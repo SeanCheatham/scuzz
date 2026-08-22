@@ -30,9 +30,11 @@ static void queue_grow(SzQueue *q) {
   size_t ncap;
   void **nitems;
   size_t i;
-  if (q->cap > (SIZE_MAX / 2) / sizeof(void *))
+  if (q->cap >= (SIZE_MAX / 2) / sizeof(void *))
     sz_panic("sz_queue_offer: cap overflow");
   ncap = q->cap * 2;
+  if (ncap > SIZE_MAX / sizeof(void *))
+    sz_panic("sz_queue_offer: cap overflow");
   nitems = (void **)sz_alloc(sizeof(void *) * ncap);
   for (i = 0; i < q->len; i++)
     nitems[i] = q->items[queue_slot(q, i)];
@@ -42,6 +44,15 @@ static void queue_grow(SzQueue *q) {
   q->head = 0;
 }
 
+void sz_queue_enqueue(SzQueue *q, void *value) {
+  if (!q)
+    sz_panic("sz_queue_enqueue(null)");
+  if (q->len == q->cap)
+    queue_grow(q);
+  q->items[queue_slot(q, q->len)] = value;
+  q->len++;
+}
+
 static void *queue_offer_thunk(void *env) {
   SzPair *p = (SzPair *)env;
   SzQueue *q = (SzQueue *)p->left;
@@ -49,10 +60,7 @@ static void *queue_offer_thunk(void *env) {
   sz_retain(value);
   if (sz_fiber_wake_queue(q, value))
     return NULL;
-  if (q->len == q->cap)
-    queue_grow(q);
-  q->items[queue_slot(q, q->len)] = value;
-  q->len++;
+  sz_queue_enqueue(q, value);
   return NULL;
 }
 
