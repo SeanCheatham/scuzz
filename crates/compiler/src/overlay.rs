@@ -1,4 +1,4 @@
-//! Stem-paired `*.scuzz_sim` / `*.scuzz_drivers` overlays and in-source `law` residualization.
+//! Stem-paired `*.scuzz_sim` / `*.scuzz_drivers` overlays and in-source `property` residualization.
 
 use crate::ast::{EnumDef, Expr, ExprKind, FunDef, Import, Program, Type};
 use crate::parser::{parse_file, ParseError};
@@ -33,8 +33,8 @@ pub struct OverlaySource {
 }
 
 /// Apply same-name sim replacements, then merge `*.scuzz_drivers`. In-source
-/// `law` defs stay on the program. Call [`collect_law_names`] then
-/// [`check_laws_applied`] under verify / check. `.require` is rewritten
+/// `property` defs stay on the program. Call [`collect_property_names`] then
+/// [`check_properties_applied`] under verify / check. `.require` is rewritten
 /// by type in field resolution (verify) or erased live.
 pub fn apply_overlays(
     mut live: Program,
@@ -75,30 +75,30 @@ pub fn apply_overlays(
     Ok(live)
 }
 
-/// Names of in-source `law` declarations, in source order. Reject a law that
-/// collides with a non-law def (already a parse duplicate). Check the return type.
-pub fn collect_law_names(program: &Program) -> Result<Vec<String>, OverlayError> {
+/// Names of in-source `property` declarations, in source order. Reject a property that
+/// collides with a non-property def (already a parse duplicate). Check the return type.
+pub fn collect_property_names(program: &Program) -> Result<Vec<String>, OverlayError> {
     let mut names = Vec::new();
     for d in &program.defs {
-        if !d.is_law {
+        if !d.is_property {
             continue;
         }
         if !matches!(d.ret, Type::Bool) {
             return Err(OverlayError::Msg(format!(
-                "law `{}` must return Bool, got {:?}",
+                "property `{}` must return Bool, got {:?}",
                 d.name, d.ret
             )));
         }
         if d.params.len() > 3 {
             return Err(OverlayError::Msg(format!(
-                "law `{}` takes at most three Int, String, or Bool params",
+                "property `{}` takes at most three Int, String, or Bool params",
                 d.name
             )));
         }
         for p in &d.params {
             if !matches!(p.ty, Type::Int | Type::String | Type::Bool) {
                 return Err(OverlayError::Msg(format!(
-                    "law `{}` param `{}` must be Int, String, or Bool",
+                    "property `{}` param `{}` must be Int, String, or Bool",
                     d.name, p.name
                 )));
             }
@@ -108,10 +108,10 @@ pub fn collect_law_names(program: &Program) -> Result<Vec<String>, OverlayError>
     Ok(names)
 }
 
-/// Drop `law` defs. Live `build` / `run` must not emit them.
-pub fn erase_laws(program: &mut Program) {
-    program.defs.retain(|d| !d.is_law);
-    program.law_names.clear();
+/// Drop `property` defs. Live `build` / `run` must not emit them.
+pub fn erase_properties(program: &mut Program) {
+    program.defs.retain(|d| !d.is_property);
+    program.property_names.clear();
 }
 
 /// Drop `.require` to the receiver. Live `build` / `run` must not evaluate the predicate.
@@ -134,26 +134,29 @@ fn erase_require_expr(expr: Expr) -> Expr {
     }
 }
 
-/// Every `law` must appear in a `.require` predicate in live (non-law) code.
-pub fn check_laws_applied(program: &Program, law_names: &[String]) -> Result<(), OverlayError> {
-    if law_names.is_empty() {
+/// Every `property` must appear in a `.require` predicate in live (non-property) code.
+pub fn check_properties_applied(
+    program: &Program,
+    property_names: &[String],
+) -> Result<(), OverlayError> {
+    if property_names.is_empty() {
         return Ok(());
     }
     let mut used = std::collections::HashSet::new();
     for d in &program.defs {
-        if d.is_law {
+        if d.is_property {
             continue;
         }
-        collect_required_laws(&d.body, law_names, &mut used);
+        collect_required_properties(&d.body, property_names, &mut used);
     }
-    collect_required_laws(&program.main.body, law_names, &mut used);
+    collect_required_properties(&program.main.body, property_names, &mut used);
     for d in &program.defs {
-        if !d.is_law || !d.params.is_empty() {
+        if !d.is_property || !d.params.is_empty() {
             continue;
         }
         if !used.contains(&d.name) {
             return Err(OverlayError::Msg(format!(
-                "law `{}` is never applied; use `.require({})` on the value it constrains",
+                "property `{}` is never applied; use `.require({})` on the value it constrains",
                 d.name, d.name
             )));
         }
@@ -165,9 +168,9 @@ fn callee_base(callee: &str) -> &str {
     callee.rsplit('.').next().unwrap_or(callee)
 }
 
-fn collect_required_laws(
+fn collect_required_properties(
     e: &Expr,
-    law_names: &[String],
+    property_names: &[String],
     used: &mut std::collections::HashSet<String>,
 ) {
     if let ExprKind::MethodCall {
@@ -177,35 +180,42 @@ fn collect_required_laws(
     } = &e.kind
     {
         if method == "require" {
-            collect_required_laws(receiver, law_names, used);
+            collect_required_properties(receiver, property_names, used);
             for a in args {
-                mark_law_refs(a, law_names, used);
-                collect_required_laws(a, law_names, used);
+                mark_property_refs(a, property_names, used);
+                collect_required_properties(a, property_names, used);
             }
             return;
         }
     }
-    e.for_each_child(|c| collect_required_laws(c, law_names, used));
+    e.for_each_child(|c| collect_required_properties(c, property_names, used));
 }
 
-fn mark_law_refs(e: &Expr, law_names: &[String], used: &mut std::collections::HashSet<String>) {
+fn mark_property_refs(
+    e: &Expr,
+    property_names: &[String],
+    used: &mut std::collections::HashSet<String>,
+) {
     match &e.kind {
         ExprKind::Var(name) => {
             let base = callee_base(name);
-            if law_names.iter().any(|n| n == base || n == name) {
+            if property_names.iter().any(|n| n == base || n == name) {
                 used.insert(base.to_string());
             }
         }
         ExprKind::Call { callee, args } => {
             let base = callee_base(callee);
-            if law_names.iter().any(|n| n == base || n == callee.as_str()) {
+            if property_names
+                .iter()
+                .any(|n| n == base || n == callee.as_str())
+            {
                 used.insert(base.to_string());
             }
             for a in args {
-                mark_law_refs(a, law_names, used);
+                mark_property_refs(a, property_names, used);
             }
         }
-        _ => e.for_each_child(|c| mark_law_refs(c, law_names, used)),
+        _ => e.for_each_child(|c| mark_property_refs(c, property_names, used)),
     }
 }
 
@@ -258,15 +268,15 @@ fn replace_sim_def(live: &mut Program, sim: &FunDef, label: &str) -> Result<(), 
         )));
     };
     let live_def = &live.defs[idx];
-    if live_def.is_law {
+    if live_def.is_property {
         return Err(OverlayError::Msg(format!(
-            "{label}: sim def `{}` cannot replace a law",
+            "{label}: sim def `{}` cannot replace a property",
             sim.name
         )));
     }
-    if sim.is_law {
+    if sim.is_property {
         return Err(OverlayError::Msg(format!(
-            "{label}: sim def cannot be a law"
+            "{label}: sim def cannot be a property"
         )));
     }
     if live_def.type_params != sim.type_params {
@@ -338,15 +348,15 @@ fn apply_driver_overlay(
             ov.label
         )));
     }
-    let law_names: Vec<String> = live
+    let property_names: Vec<String> = live
         .defs
         .iter()
-        .filter(|d| d.is_law)
+        .filter(|d| d.is_property)
         .map(|d| d.name.clone())
         .collect();
     for mut d in prog.defs {
         d.module = ov.stem.clone();
-        check_driver_def(live, &d, &ov.label, &law_names)?;
+        check_driver_def(live, &d, &ov.label, &property_names)?;
         d.is_driver = true;
         names.push(d.name.clone());
         live.defs.push(d);
@@ -358,11 +368,11 @@ fn check_driver_def(
     live: &Program,
     d: &FunDef,
     label: &str,
-    law_names: &[String],
+    property_names: &[String],
 ) -> Result<(), OverlayError> {
-    if d.is_law {
+    if d.is_property {
         return Err(OverlayError::Msg(format!(
-            "{label}: *.scuzz_drivers must not declare a law"
+            "{label}: *.scuzz_drivers must not declare a property"
         )));
     }
     if live
@@ -395,18 +405,18 @@ fn check_driver_def(
             )));
         }
     }
-    if expr_has_law(&d.body) || expr_mentions_law_name(&d.body, law_names) {
+    if expr_has_property(&d.body) || expr_mentions_property_name(&d.body, property_names) {
         return Err(OverlayError::Msg(format!(
-            "{label}: driver `{}` must not call Law.* or `.require`",
+            "{label}: driver `{}` must not call Property.* or `.require`",
             d.name
         )));
     }
     Ok(())
 }
 
-pub(crate) fn expr_has_law(e: &Expr) -> bool {
+pub(crate) fn expr_has_property(e: &Expr) -> bool {
     let here = match &e.kind {
-        ExprKind::Call { callee, .. } => callee.starts_with("Law."),
+        ExprKind::Call { callee, .. } => callee.starts_with("Property."),
         ExprKind::MethodCall { method, .. } => method == "require",
         _ => false,
     };
@@ -416,24 +426,24 @@ pub(crate) fn expr_has_law(e: &Expr) -> bool {
     let mut found = false;
     e.for_each_child(|c| {
         if !found {
-            found = expr_has_law(c);
+            found = expr_has_property(c);
         }
     });
     found
 }
 
-fn law_name_hit(name: &str, law_names: &[String]) -> bool {
+fn property_name_hit(name: &str, property_names: &[String]) -> bool {
     let base = callee_base(name);
-    law_names.iter().any(|n| n == base || n == name)
+    property_names.iter().any(|n| n == base || n == name)
 }
 
-fn expr_mentions_law_name(e: &Expr, law_names: &[String]) -> bool {
-    if law_names.is_empty() {
+fn expr_mentions_property_name(e: &Expr, property_names: &[String]) -> bool {
+    if property_names.is_empty() {
         return false;
     }
     let here = match &e.kind {
-        ExprKind::Var(name) => law_name_hit(name, law_names),
-        ExprKind::Call { callee, .. } => law_name_hit(callee, law_names),
+        ExprKind::Var(name) => property_name_hit(name, property_names),
+        ExprKind::Call { callee, .. } => property_name_hit(callee, property_names),
         _ => false,
     };
     if here {
@@ -442,18 +452,18 @@ fn expr_mentions_law_name(e: &Expr, law_names: &[String]) -> bool {
     let mut found = false;
     e.for_each_child(|c| {
         if !found {
-            found = expr_mentions_law_name(c, law_names);
+            found = expr_mentions_property_name(c, property_names);
         }
     });
     found
 }
 
 /// Table lines for `build/drivers.txt`: `name`, `name i`, `name s`, `name b`,
-/// or several kind tokens (`name i i`). Includes parameterized laws.
+/// or several kind tokens (`name i i`). Includes parameterized properties.
 pub fn driver_table_text(program: &Program) -> String {
     let mut out = String::new();
     for d in &program.defs {
-        if d.is_driver || (d.is_law && !d.params.is_empty()) {
+        if d.is_driver || (d.is_property && !d.params.is_empty()) {
             push_drive_spec(&mut out, d);
         }
     }
@@ -472,7 +482,7 @@ fn push_drive_spec(out: &mut String, d: &FunDef) {
     out.push('\n');
 }
 
-/// Rewrite calls and record construction so `where` predicates become `Law.check`
+/// Rewrite calls and record construction so `where` predicates become `Property.check`
 /// at the use site. Live builds skip this step.
 pub fn residualize_refinements(program: &mut Program) {
     let defs = program.defs.clone();
@@ -644,10 +654,10 @@ fn find_record<'a>(
     find_enum(enums, imports, callee, current_module).filter(|e| e.is_record)
 }
 
-fn law_check(name: String, pred: Expr, value: Expr, span: Span) -> Expr {
+fn property_check(name: String, pred: Expr, value: Expr, span: Span) -> Expr {
     Expr::new(
         ExprKind::Call {
-            callee: "Law.check".into(),
+            callee: "Property.check".into(),
             args: vec![Expr::new(ExprKind::StrLit(name), span.clone()), pred, value],
         },
         span,
@@ -669,7 +679,9 @@ fn wrap_refined(
         .map(|(n, rfn)| {
             let var = Expr::new(ExprKind::Var(n.clone()), span.clone());
             match rfn {
-                Some(pred) => law_check(format!("{label}.{n}"), pred.clone(), var, span.clone()),
+                Some(pred) => {
+                    property_check(format!("{label}.{n}"), pred.clone(), var, span.clone())
+                }
                 None => var,
             }
         })
@@ -866,10 +878,10 @@ mod tests {
     use crate::parser::parse_sources;
 
     #[test]
-    fn sim_replaces_live_def_and_keeps_laws() {
+    fn sim_replaces_live_def_and_keeps_properties() {
         let live = parse_sources(&[(
             "Main.scuzz".into(),
-            "def title(): String = \"Live\"\nlaw always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(title())\n"
+            "def title(): String = \"Live\"\nproperty always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(title())\n"
                 .into(),
         )])
         .unwrap();
@@ -881,34 +893,34 @@ mod tests {
             text: "def title(): String = \"Sim\"\n".into(),
         }];
         let prog = apply_overlays(live, &overlays).unwrap();
-        let laws = collect_law_names(&prog).unwrap();
-        assert_eq!(laws, vec!["always".to_string()]);
+        let properties = collect_property_names(&prog).unwrap();
+        assert_eq!(properties, vec!["always".to_string()]);
         let title = prog.defs.iter().find(|d| d.name == "title").unwrap();
         match &title.body.kind {
             crate::ast::ExprKind::StrLit(s) => assert_eq!(s, "Sim"),
             other => panic!("expected sim body, got {other:?}"),
         }
-        let law = prog.defs.iter().find(|d| d.name == "always").unwrap();
-        assert!(law.is_law);
+        let property = prog.defs.iter().find(|d| d.name == "always").unwrap();
+        assert!(property.is_property);
     }
 
     #[test]
-    fn erase_drops_laws_from_live() {
+    fn erase_drops_properties_from_live() {
         let mut live = parse_sources(&[(
             "Main.scuzz".into(),
-            "law always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
+            "property always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
         )])
         .unwrap();
         assert_eq!(live.defs.len(), 1);
-        erase_laws(&mut live);
+        erase_properties(&mut live);
         assert!(live.defs.is_empty());
     }
 
     #[test]
-    fn sim_cannot_replace_a_law() {
+    fn sim_cannot_replace_a_property() {
         let live = parse_sources(&[(
             "Main.scuzz".into(),
-            "law title: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
+            "property title: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
         )])
         .unwrap();
         let overlays = vec![OverlaySource {
@@ -939,7 +951,7 @@ mod tests {
     }
 
     #[test]
-    fn drivers_merge_and_reject_law_calls() {
+    fn drivers_merge_and_reject_property_calls() {
         let live = parse_sources(&[(
             "Main.scuzz".into(),
             "def note(n: Int): Unit = ()\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
@@ -982,10 +994,10 @@ mod tests {
             kind: OverlayKind::Drivers,
             path: PathBuf::new(),
             label: "Main.scuzz_drivers".into(),
-            text: "def bad(): IO[Unit] =\n  Law.assert(\"x\", 1)\n".into(),
+            text: "def bad(): IO[Unit] =\n  Property.assert(\"x\", 1)\n".into(),
         }];
         let err = apply_overlays(live, &overlays).unwrap_err();
-        assert!(err.to_string().contains("must not call Law"));
+        assert!(err.to_string().contains("must not call Property"));
     }
 
     #[test]
@@ -998,7 +1010,9 @@ mod tests {
         .unwrap();
         residualize_refinements(&mut prog);
         let src = format!("{:?}", prog.main.body.kind);
-        assert!(src.contains("Law.check") || matches!(prog.main.body.kind, ExprKind::Let { .. }));
+        assert!(
+            src.contains("Property.check") || matches!(prog.main.body.kind, ExprKind::Let { .. })
+        );
         match &prog.main.body.kind {
             ExprKind::IoPure(inner) => match &inner.kind {
                 ExprKind::Let { name, body, .. } => {
@@ -1007,8 +1021,10 @@ mod tests {
                         ExprKind::Call { callee, args } => {
                             assert_eq!(callee, "note");
                             match &args[0].kind {
-                                ExprKind::Call { callee, .. } => assert_eq!(callee, "Law.check"),
-                                other => panic!("expected Law.check arg, got {other:?}"),
+                                ExprKind::Call { callee, .. } => {
+                                    assert_eq!(callee, "Property.check")
+                                }
+                                other => panic!("expected Property.check arg, got {other:?}"),
                             }
                         }
                         other => panic!("expected call, got {other:?}"),
@@ -1021,39 +1037,39 @@ mod tests {
     }
 
     #[test]
-    fn unused_law_errors() {
+    fn unused_property_errors() {
         let prog = parse_sources(&[(
             "Main.scuzz".into(),
-            "law always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
+            "property always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
         )])
         .unwrap();
-        let laws = collect_law_names(&prog).unwrap();
-        let err = check_laws_applied(&prog, &laws).unwrap_err();
+        let properties = collect_property_names(&prog).unwrap();
+        let err = check_properties_applied(&prog, &properties).unwrap_err();
         assert!(err.to_string().contains("never applied"));
     }
 
     #[test]
-    fn parameterized_law_need_not_require() {
+    fn parameterized_property_need_not_require() {
         let prog = parse_sources(&[(
             "Main.scuzz".into(),
-            "law addComm(a: Int, b: Int): Bool = a + b == b + a\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
+            "property addComm(a: Int, b: Int): Bool = a + b == b + a\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
         )])
         .unwrap();
-        let laws = collect_law_names(&prog).unwrap();
-        check_laws_applied(&prog, &laws).unwrap();
+        let properties = collect_property_names(&prog).unwrap();
+        check_properties_applied(&prog, &properties).unwrap();
         assert_eq!(driver_table_text(&prog).trim(), "addComm i i");
     }
 
     #[test]
-    fn applied_law_ok() {
+    fn applied_property_ok() {
         let prog = parse_sources(&[(
             "Main.scuzz".into(),
-            "law always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\").require(always)\n"
+            "property always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\").require(always)\n"
                 .into(),
         )])
         .unwrap();
-        let laws = collect_law_names(&prog).unwrap();
-        check_laws_applied(&prog, &laws).unwrap();
+        let properties = collect_property_names(&prog).unwrap();
+        check_properties_applied(&prog, &properties).unwrap();
     }
 
     #[test]
@@ -1121,11 +1137,14 @@ mod tests {
     }
 
     #[test]
-    fn sim_rejects_law_def() {
+    fn sim_rejects_property_def() {
         let live =
             live_with("def title(): Bool = true\n@main def main: IO[Unit] = IO.println(\"x\")\n");
-        let err = apply_overlays(live, &sim_ov("law title: Bool = true\n")).unwrap_err();
-        assert!(err.to_string().contains("sim def cannot be a law"), "{err}");
+        let err = apply_overlays(live, &sim_ov("property title: Bool = true\n")).unwrap_err();
+        assert!(
+            err.to_string().contains("sim def cannot be a property"),
+            "{err}"
+        );
     }
 
     #[test]
@@ -1164,9 +1183,9 @@ mod tests {
     }
 
     #[test]
-    fn drivers_reject_law_name_call() {
+    fn drivers_reject_property_name_call() {
         let live = live_with(
-            "law always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\").require(always)\n",
+            "property always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\").require(always)\n",
         );
         let overlays = vec![OverlaySource {
             stem: "Main".into(),
@@ -1176,7 +1195,7 @@ mod tests {
             text: "def plusN(): IO[Unit] =\n  IO.pure(always)\n".into(),
         }];
         let err = apply_overlays(live, &overlays).unwrap_err();
-        assert!(err.to_string().contains("must not call Law"), "{err}");
+        assert!(err.to_string().contains("must not call Property"), "{err}");
     }
 
     #[test]
@@ -1196,7 +1215,7 @@ mod tests {
         residualize_refinements(&mut prog);
         let dumped = format!("{:?}", prog.main.body.kind);
         assert!(
-            !dumped.contains("Law.check"),
+            !dumped.contains("Property.check"),
             "B.note has no where; got {dumped}"
         );
     }
@@ -1213,7 +1232,7 @@ mod tests {
         let en = prog.enums.iter().find(|e| e.name == "Box").unwrap();
         let dumped = format!("{:?}", en.methods[0].body.kind);
         assert!(
-            dumped.contains("Law.check"),
+            dumped.contains("Property.check"),
             "record method should wrap note: {dumped}"
         );
     }

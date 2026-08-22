@@ -423,8 +423,8 @@ pub(crate) fn show_def(d: &FunDef) -> String {
         format!("[{}]", d.type_params.join(", "))
     };
     let params: Vec<String> = d.params.iter().map(show_param).collect();
-    if d.is_law {
-        format!("law {}: {}", d.name, d.ret)
+    if d.is_property {
+        format!("property {}: {}", d.name, d.ret)
     } else {
         format!("{vis}def {}{tps}({}): {}", d.name, params.join(", "), d.ret)
     }
@@ -1083,20 +1083,29 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ),
     ("Ui.run", "Ui.run(_ => View): IO[Unit]"),
     (
-        "Law.check",
-        "Law.check(name: String, ok: Bool, value: T): T",
+        "Property.check",
+        "Property.check(name: String, ok: Bool, value: T): T",
     ),
-    ("Law.sometimes", "Law.sometimes(name: String): Unit"),
-    ("Law.force", "Law.force(inner: IO[Bool]): Bool"),
-    ("Law.assert", "Law.assert(name: String, ok: Bool): IO[Unit]"),
-    ("Law.signalInt", "Law.signalInt(id: Int): Int"),
-    ("Law.signalStr", "Law.signalStr(id: Int): String"),
-    ("Law.signalListLen", "Law.signalListLen(id: Int): Int"),
     (
-        "Law.signalListAt",
-        "Law.signalListAt(id: Int, i: Int): String",
+        "Property.sometimes",
+        "Property.sometimes(name: String): Unit",
     ),
-    ("Law.a11yHas", "Law.a11yHas(needle: String): Bool"),
+    ("Property.force", "Property.force(inner: IO[Bool]): Bool"),
+    (
+        "Property.assert",
+        "Property.assert(name: String, ok: Bool): IO[Unit]",
+    ),
+    ("Property.signalInt", "Property.signalInt(id: Int): Int"),
+    ("Property.signalStr", "Property.signalStr(id: Int): String"),
+    (
+        "Property.signalListLen",
+        "Property.signalListLen(id: Int): Int",
+    ),
+    (
+        "Property.signalListAt",
+        "Property.signalListAt(id: Int, i: Int): String",
+    ),
+    ("Property.a11yHas", "Property.a11yHas(needle: String): Bool"),
     ("Ref.of", "Ref.of(x: A): IO[Ref[A]]"),
     ("Ref.get", "Ref.get(r: Ref[A]): IO[A]"),
     ("Ref.set", "Ref.set(r: Ref[A], x: A): IO[Unit]"),
@@ -1286,12 +1295,12 @@ const TYPED_KIT_CALLEES: &[&str] = &[
     "Str.startsWith",
     "Str.eq",
     "List.isEmpty",
-    "Law.force",
-    "Law.signalInt",
-    "Law.signalStr",
-    "Law.signalListLen",
-    "Law.signalListAt",
-    "Law.a11yHas",
+    "Property.force",
+    "Property.signalInt",
+    "Property.signalStr",
+    "Property.signalListLen",
+    "Property.signalListAt",
+    "Property.a11yHas",
     "Fiber.fork",
     "Fiber.join",
     "Ref.of",
@@ -1670,11 +1679,11 @@ def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
                 "Signal.setList",
                 "Signal.setList(Signal.list([\"a\"]), [\"b\"])",
             ),
-            ("Law.signalInt", "Law.signalInt(0)"),
-            ("Law.signalStr", "Law.signalStr(0)"),
-            ("Law.signalListLen", "Law.signalListLen(0)"),
-            ("Law.signalListAt", "Law.signalListAt(0, 0)"),
-            ("Law.a11yHas", "Law.a11yHas(\"x\")"),
+            ("Property.signalInt", "Property.signalInt(0)"),
+            ("Property.signalStr", "Property.signalStr(0)"),
+            ("Property.signalListLen", "Property.signalListLen(0)"),
+            ("Property.signalListAt", "Property.signalListAt(0, 0)"),
+            ("Property.a11yHas", "Property.a11yHas(\"x\")"),
             ("Stream.emits", "Stream.emits([\"a\"])"),
             ("Stream.eval", "Stream.eval(IO.pure(\"a\"))"),
             (

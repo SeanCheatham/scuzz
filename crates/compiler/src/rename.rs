@@ -109,7 +109,7 @@ pub fn is_kit_module(name: &str) -> bool {
             | "Map"
             | "Set"
             | "Ui"
-            | "Law"
+            | "Property"
             | "Float"
     )
 }

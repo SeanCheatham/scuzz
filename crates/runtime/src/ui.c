@@ -1247,13 +1247,13 @@ void sz_ui_session_finish(SzUiSession *session) {
       sz_panic("fuzz dump open failed");
     views = session && session->root ? sz_view_a11y_dump(session->root)
                                      : sz_string_from_cstr("");
-    sz_law_stash_a11y(sz_string_cstr(views));
+    sz_property_stash_a11y(sz_string_cstr(views));
     sz_string_free(views);
     fprintf(stderr, "scuzz: wrote fuzz dump %s\n", dump);
   } else if (session && session->root) {
-    /* Still stash a11y for residual laws under TESTRT without a dump path. */
+    /* Still stash a11y for residual properties under TESTRT without a dump path. */
     SzString *views = sz_view_a11y_dump(session->root);
-    sz_law_stash_a11y(sz_string_cstr(views));
+    sz_property_stash_a11y(sz_string_cstr(views));
     sz_string_free(views);
   }
 }

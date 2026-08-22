@@ -6,7 +6,7 @@ def run(): IO[Unit] =
     _ <- IO.println(s"ref:$v")
     q <- Queue.unbounded()
     _ <- IO.both(Queue.take(q), Queue.offer(q, "parked"))
-    _ = Law.sometimes("queueParked")
+    _ = Property.sometimes("queueParked")
     _ <- IO.println("queue-ok")
     d <- Deferred.empty()
     _ <- IO.both(Deferred.get(d), Deferred.complete(d, "go"))

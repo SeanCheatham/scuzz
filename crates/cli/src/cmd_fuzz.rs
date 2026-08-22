@@ -498,7 +498,7 @@ fn report_sometimes_fail(
             mutate: &mutate,
         },
     )?;
-    bail!("Law.sometimes never reached: {}", missing.join(", "))
+    bail!("Property.sometimes never reached: {}", missing.join(", "))
 }
 
 fn mutate_then_finish(
@@ -548,7 +548,7 @@ fn mutate_then_finish(
     }
     if !sometimes_missing.is_empty() {
         println!(
-            "Law.sometimes never reached: {}",
+            "Property.sometimes never reached: {}",
             sometimes_missing.join(", ")
         );
     }
@@ -573,7 +573,7 @@ fn mutate_then_finish(
     }
     if !sometimes_missing.is_empty() {
         bail!(
-            "Law.sometimes never reached: {}",
+            "Property.sometimes never reached: {}",
             sometimes_missing.join(", ")
         );
     }
@@ -612,7 +612,7 @@ fn mutate_phase(
     let sites = mutate_count_mode(&prog, mode) as i64;
     if sites == 0 {
         if oracles {
-            println!("scuzz fuzz: no residual Law.check / Law.assert / .require sites");
+            println!("scuzz fuzz: no residual Property.check / Property.assert / .require sites");
         } else {
             println!("scuzz fuzz: no live-code mutation sites");
         }

@@ -1,116 +1,116 @@
-law listLenNonNeg: Bool =
-  Law.signalListLen(1) >= 0
+property listLenNonNeg: Bool =
+  Property.signalListLen(1) >= 0
 
-law itemPastEndEmpty: Bool =
-  Str.len(Law.signalListAt(1, Law.signalListLen(1))) == 0
+property itemPastEndEmpty: Bool =
+  Str.len(Property.signalListAt(1, Property.signalListLen(1))) == 0
 
-law draftNonNeg: Bool =
-  Str.len(Law.signalStr(0)) >= 0
+property draftNonNeg: Bool =
+  Str.len(Property.signalStr(0)) >= 0
 
-law hasAdd: Bool =
-  Law.a11yHas("button:Add")
+property hasAdd: Bool =
+  Property.a11yHas("button:Add")
 
-law hasClear: Bool =
-  Law.a11yHas("button:Clear")
+property hasClear: Bool =
+  Property.a11yHas("button:Clear")
 
-law hasHome: Bool =
-  Law.a11yHas("radio:Home")
+property hasHome: Bool =
+  Property.a11yHas("radio:Home")
 
-law hasTasks: Bool =
-  Law.a11yHas("radio:Tasks")
+property hasTasks: Bool =
+  Property.a11yHas("radio:Tasks")
 
-law hasProgress: Bool =
-  Law.a11yHas("progress:") || Law.a11yHas("radio:Home=1") == false
+property hasProgress: Bool =
+  Property.a11yHas("progress:") || Property.a11yHas("radio:Home=1") == false
 
-law hasSwitch: Bool =
-  Law.a11yHas("switch:On")
+property hasSwitch: Bool =
+  Property.a11yHas("switch:On")
 
-law hasChip: Bool =
-  Law.a11yHas("chip:Pin")
+property hasChip: Bool =
+  Property.a11yHas("chip:Pin")
 
-law hasListTile: Bool =
-  Law.a11yHas("listtile:") || Law.signalListLen(1) == 0
+property hasListTile: Bool =
+  Property.a11yHas("listtile:") || Property.signalListLen(1) == 0
 
-law hasBadge: Bool =
-  Law.a11yHas("badge:")
+property hasBadge: Bool =
+  Property.a11yHas("badge:")
 
-law hasCard: Bool =
-  Law.a11yHas("card:")
+property hasCard: Bool =
+  Property.a11yHas("card:")
 
-law hasDivider: Bool =
-  Law.a11yHas("divider:")
+property hasDivider: Bool =
+  Property.a11yHas("divider:")
 
-law hasExpansion: Bool =
-  Law.a11yHas("expansion:")
+property hasExpansion: Bool =
+  Property.a11yHas("expansion:")
 
-law hasIconButton: Bool =
-  Law.a11yHas("iconbutton:") || Law.signalListLen(1) == 0
+property hasIconButton: Bool =
+  Property.a11yHas("iconbutton:") || Property.signalListLen(1) == 0
 
-law hasVerticalDivider: Bool =
-  Law.a11yHas("vdiv:")
+property hasVerticalDivider: Bool =
+  Property.a11yHas("vdiv:")
 
-law hasCircularProgress: Bool =
-  Law.a11yHas("circular:")
+property hasCircularProgress: Bool =
+  Property.a11yHas("circular:")
 
-law hasAvatar: Bool =
-  Law.a11yHas("avatar:")
+property hasAvatar: Bool =
+  Property.a11yHas("avatar:")
 
-law hasCheckTile: Bool =
-  Law.a11yHas("checktile:")
+property hasCheckTile: Bool =
+  Property.a11yHas("checktile:")
 
-law hasSwitchTile: Bool =
-  Law.a11yHas("switchtile:")
+property hasSwitchTile: Bool =
+  Property.a11yHas("switchtile:")
 
-law hasRadioTile: Bool =
-  Law.a11yHas("radiotile:")
+property hasRadioTile: Bool =
+  Property.a11yHas("radiotile:")
 
-law hasSegmented: Bool =
-  Law.a11yHas("segmented:")
+property hasSegmented: Bool =
+  Property.a11yHas("segmented:")
 
-law hasFab: Bool =
-  Law.a11yHas("fab:")
+property hasFab: Bool =
+  Property.a11yHas("fab:")
 
-law hasTooltip: Bool =
-  Law.a11yHas("tooltip:")
+property hasTooltip: Bool =
+  Property.a11yHas("tooltip:")
 
-law hasOutlined: Bool =
-  Law.a11yHas("outlined:") || Law.signalListLen(1) == 0
+property hasOutlined: Bool =
+  Property.a11yHas("outlined:") || Property.signalListLen(1) == 0
 
-law hasTextButton: Bool =
-  Law.a11yHas("textbutton:") || Law.signalListLen(1) == 0
+property hasTextButton: Bool =
+  Property.a11yHas("textbutton:") || Property.signalListLen(1) == 0
 
-law hasPlaceholder: Bool =
-  Law.a11yHas("placeholder:")
+property hasPlaceholder: Bool =
+  Property.a11yHas("placeholder:")
 
-law hasFilterChip: Bool =
-  Law.a11yHas("filterchip:") || Law.signalListLen(1) == 0
+property hasFilterChip: Bool =
+  Property.a11yHas("filterchip:") || Property.signalListLen(1) == 0
 
-law hasChoiceChip: Bool =
-  Law.a11yHas("choicechip:") || Law.signalListLen(1) == 0
+property hasChoiceChip: Bool =
+  Property.a11yHas("choicechip:") || Property.signalListLen(1) == 0
 
-law hasActionChip: Bool =
-  Law.a11yHas("actionchip:") || Law.signalListLen(1) == 0
+property hasActionChip: Bool =
+  Property.a11yHas("actionchip:") || Property.signalListLen(1) == 0
 
-law hasInputChip: Bool =
-  Law.a11yHas("inputchip:") || Law.signalListLen(1) == 0
+property hasInputChip: Bool =
+  Property.a11yHas("inputchip:") || Property.signalListLen(1) == 0
 
-law hasSemantics: Bool =
-  Law.a11yHas("semantics:")
+property hasSemantics: Bool =
+  Property.a11yHas("semantics:")
 
-law hasMerge: Bool =
-  Law.a11yHas("merge:") || Law.a11yHas("radio:Home=1") == false
+property hasMerge: Bool =
+  Property.a11yHas("merge:") || Property.a11yHas("radio:Home=1") == false
 
-law hasInkWell: Bool =
-  Law.a11yHas("inkwell:")
+property hasInkWell: Bool =
+  Property.a11yHas("inkwell:")
 
-law hasVisibility: Bool =
-  Law.a11yHas("visibility:")
+property hasVisibility: Bool =
+  Property.a11yHas("visibility:")
 
-law hasOffstage: Bool =
-  Law.a11yHas("offstage:")
+property hasOffstage: Bool =
+  Property.a11yHas("offstage:")
 
-law hasUnconstrained: Bool =
-  Law.a11yHas("unconstrained:")
+property hasUnconstrained: Bool =
+  Property.a11yHas("unconstrained:")
 
 @main def main: IO[Unit] =
   Sys.getenv("SCUZZ_TODO_PATH").flatMap(envPath =>
@@ -136,7 +136,7 @@ law hasUnconstrained: Bool =
       loaded = Tasks.loadList(text)
       _ = Signal.setList(items, loaded)
       _ <- Ui.run(_ => View.column(View.grid(3, View.radio(page, 0, "Home"), View.bindText(pageLabel), View.radio(page, 1, "Tasks")), View.showWhen(page, 0, View.padding(8, View.column(View.aspectRatio(6, 1, View.background(Color.rgb(61, 126, 166), View.center(View.mergeSemantics("logo", View.icon(43, Theme.accent()))))), View.fraction(50, 0, View.background(Color.rgb(230, 240, 248), View.padding(4, View.icon(43, Theme.accent())))), View.fontSize(18, View.textColor(Color.rgb(20, 40, 60), View.text("Studio"))), View.bindText(countLabel), View.scrollH(View.button("+1", _ => Signal.set(count, Signal.get(count) + 1))), View.slider(level), View.progress(level), View.text("q or Esc quits")))), View.row(View.textField(draft, "item"), View.button("Add", _ => for {
-  _ = Law.sometimes("tappedAdd")
+  _ = Property.sometimes("tappedAdd")
   d = Str.trim(Signal.getStr(draft))
   n = Str.len(d)
 } yield if (n == 0) () else for {

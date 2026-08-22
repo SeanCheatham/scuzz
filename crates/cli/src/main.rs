@@ -43,7 +43,7 @@ enum Commands {
         /// Force a full rebuild (ignore incremental fingerprint)
         #[arg(long)]
         full: bool,
-        /// Apply `*.scuzz_sim` + residual in-source `law` decls (TestRuntime / fuzz graph)
+        /// Apply `*.scuzz_sim` + residual in-source `property` decls (TestRuntime / fuzz graph)
         #[arg(long)]
         verify: bool,
     },
@@ -120,7 +120,7 @@ enum Commands {
         #[arg(long)]
         check: bool,
     },
-    /// Search in-source laws, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation
+    /// Search in-source properties, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation
     #[command(
         after_help = "Examples:\n  scuzz fuzz --iterations 16\n  scuzz fuzz --iterations 16 examples/counter\n  scuzz fuzz --oracles examples/counter\n  scuzz fuzz --replay build/fuzz/repro.toml\n  scuzz fuzz --no-fail-fast --iterations 8 examples/bad-example\n\n`examples/bad-example` is an expected fuzz failure (known-wrong `bump`). Default stops at the first search failure. `--no-fail-fast` finishes search and still mutates. `scuzz check` and `scuzz test` still pass.\n"
     )]
@@ -136,7 +136,7 @@ enum Commands {
         /// Replay a repro.toml (events + optional schedule_seed)
         #[arg(long)]
         replay: Option<PathBuf>,
-        /// Mutate residual Law.check / Law.assert / .require predicates
+        /// Mutate residual Property.check / Property.assert / .require predicates
         #[arg(long)]
         oracles: bool,
         /// Finish search and still mutate after the first search failure

@@ -12124,7 +12124,7 @@ static void test_each_expanded_row_in_scroll(void) {
   remove(path);
 }
 
-static void test_law_signal_list_len(void) {
+static void test_property_signal_list_len(void) {
   SzSignalList *items;
   SzList *xs;
   SzString *dump;
@@ -12138,15 +12138,15 @@ static void test_law_signal_list_len(void) {
   s = strstr(sz_string_cstr(dump), "list[");
   assert(s);
   id = atoi(s + 5);
-  assert(sz_law_signal_list_len(id) == 2);
+  assert(sz_property_signal_list_len(id) == 2);
   sz_signal_list_set(items, sz_list_nil());
-  assert(sz_law_signal_list_len(id) == 0);
-  assert(sz_law_signal_list_len(99999) == 0);
+  assert(sz_property_signal_list_len(id) == 0);
+  assert(sz_property_signal_list_len(99999) == 0);
   sz_string_free(dump);
   sz_signal_list_free(items);
 }
 
-static void test_law_signal_list_at(void) {
+static void test_property_signal_list_at(void) {
   SzSignalList *items;
   SzList *xs;
   SzString *got;
@@ -12161,26 +12161,26 @@ static void test_law_signal_list_at(void) {
   s = strstr(sz_string_cstr(dump), "list[");
   assert(s);
   id = atoi(s + 5);
-  got = sz_law_signal_list_at(id, 0);
+  got = sz_property_signal_list_at(id, 0);
   assert(strcmp(sz_string_cstr(got), "a") == 0);
   sz_string_free(got);
-  got = sz_law_signal_list_at(id, 1);
+  got = sz_property_signal_list_at(id, 1);
   assert(strcmp(sz_string_cstr(got), "b") == 0);
   sz_string_free(got);
-  got = sz_law_signal_list_at(id, 2);
+  got = sz_property_signal_list_at(id, 2);
   assert(strcmp(sz_string_cstr(got), "") == 0);
   sz_string_free(got);
-  got = sz_law_signal_list_at(id, -1);
+  got = sz_property_signal_list_at(id, -1);
   assert(strcmp(sz_string_cstr(got), "") == 0);
   sz_string_free(got);
-  got = sz_law_signal_list_at(99999, 0);
+  got = sz_property_signal_list_at(99999, 0);
   assert(strcmp(sz_string_cstr(got), "") == 0);
   sz_string_free(got);
   sz_string_free(dump);
   sz_signal_list_free(items);
 }
 
-static void test_law_signal_str(void) {
+static void test_property_signal_str(void) {
   SzSignalStr *draft;
   SzString *got;
   SzString *dump;
@@ -12192,14 +12192,14 @@ static void test_law_signal_str(void) {
   s = strstr(sz_string_cstr(dump), "str[");
   assert(s);
   id = atoi(s + 4);
-  got = sz_law_signal_str(id);
+  got = sz_property_signal_str(id);
   assert(strcmp(sz_string_cstr(got), "milk") == 0);
   sz_string_free(got);
   sz_signal_str_set(draft, "oat");
-  got = sz_law_signal_str(id);
+  got = sz_property_signal_str(id);
   assert(strcmp(sz_string_cstr(got), "oat") == 0);
   sz_string_free(got);
-  got = sz_law_signal_str(99999);
+  got = sz_property_signal_str(99999);
   assert(strcmp(sz_string_cstr(got), "") == 0);
   sz_string_free(got);
   sz_string_free(dump);
@@ -13228,9 +13228,9 @@ int main(void) {
   test_view_each_map_button();
   test_each_expanded_row_in_scroll();
   test_signal_list_spine_collect();
-  test_law_signal_list_len();
-  test_law_signal_list_at();
-  test_law_signal_str();
+  test_property_signal_list_len();
+  test_property_signal_list_at();
+  test_property_signal_str();
   test_text_field_edit();
   test_caret_metrics();
   test_alloc_pump_flat();

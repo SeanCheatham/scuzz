@@ -299,7 +299,7 @@ pub(crate) fn decl_kw_name(
     let toks = lex(source).ok()?;
     for i in 0..toks.len() {
         let ok = match kind {
-            DeclKind::Def => matches!(toks[i].token, Token::Def | Token::Law),
+            DeclKind::Def => matches!(toks[i].token, Token::Def | Token::Property),
             DeclKind::Enum => matches!(toks[i].token, Token::Enum | Token::Record),
             DeclKind::Case => matches!(toks[i].token, Token::Case),
             DeclKind::Trait => matches!(toks[i].token, Token::Trait),
@@ -337,7 +337,7 @@ fn param_decl_span(
     let toks = lex(text).ok()?;
     let mut after_def = false;
     for t in &toks {
-        if matches!(t.token, Token::Def | Token::Law) {
+        if matches!(t.token, Token::Def | Token::Property) {
             after_def = false;
         }
         if let Token::Ident(n) = &t.token {
@@ -375,7 +375,7 @@ fn def_covers_offset(sources: &[(String, String)], d: &crate::ast::FunDef, offse
     };
     let mut name_start = None;
     for i in 0..toks.len() {
-        if !matches!(toks[i].token, Token::Def | Token::Law) {
+        if !matches!(toks[i].token, Token::Def | Token::Property) {
             continue;
         }
         let Some(t) = toks.get(i + 1) else {
