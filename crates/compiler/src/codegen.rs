@@ -219,6 +219,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_zip(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_zip_all(ptr, ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_unzip(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_zip_with_index(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_fold_left(ptr, ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_fold_right(ptr, ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_transpose(ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_contains(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_index_of(ptr, ptr)").unwrap();
@@ -3706,6 +3709,72 @@ fn emit_ptr_map(
     owned_ptr(code, format!("%{prefix}_v")).with_elem(lam.elem)
 }
 
+fn emit_list_fold(
+    callee: &str,
+    rt: &str,
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 3, "{callee} expects 3 args");
+    let xs = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let z = emit_expr(&args[1], ctx, locals, &format!("{prefix}_z"));
+    let ExprKind::Lambda { param, body, .. } = &args[2].kind else {
+        panic!("{callee} folder must be a lambda");
+    };
+    let lam = emit_smap_lambda(
+        param,
+        body,
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        true,
+        Kind::Ptr,
+    );
+    let xs_owned = xs.owned;
+    let xs_kind = xs.kind;
+    let xs_value = xs.value.clone();
+    let z_owned = z.owned;
+    let z_kind = z.kind;
+    let z_elem = z.elem;
+    let z_value = z.value.clone();
+    let mut code = xs.code;
+    code.push_str(&z.code);
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    let zptr = if z_kind == Kind::Int || z_kind == Kind::Float {
+        box_numeric(&mut code, z_kind, &z_value, &format!("{prefix}_zb"))
+    } else {
+        z_value.clone()
+    };
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @{rt}(ptr {xs_value}, ptr {zptr}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
+    )
+    .unwrap();
+    drop_owned_ptr(&mut code, &lam);
+    if xs_owned && xs_kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {xs_value})").unwrap();
+    }
+    if z_kind == Kind::Int || z_kind == Kind::Float {
+        writeln!(code, "  call void @sz_release(ptr {zptr})").unwrap();
+        let v = unbox_numeric(
+            &mut code,
+            z_kind,
+            &format!("%{prefix}_v"),
+            &format!("{prefix}_u"),
+        );
+        writeln!(code, "  call void @sz_release(ptr %{prefix}_v)").unwrap();
+        val_emitted(code, v, z_kind)
+    } else {
+        if z_owned && z_kind == Kind::Ptr {
+            writeln!(code, "  call void @sz_release(ptr {z_value})").unwrap();
+        }
+        owned_ptr(code, format!("%{prefix}_v")).with_elem(z_elem)
+    }
+}
+
 fn emit_list_sort_by(
     args: &[Expr],
     ctx: &mut EmitCtx<'_>,
@@ -4393,6 +4462,26 @@ fn emit_call(
     if callee == "List.map" {
         return emit_ptr_map("List.map", "sz_list_map", args, ctx, locals, prefix, true);
     }
+    if callee == "List.foldLeft" {
+        return emit_list_fold(
+            "List.foldLeft",
+            "sz_list_fold_left",
+            args,
+            ctx,
+            locals,
+            prefix,
+        );
+    }
+    if callee == "List.foldRight" {
+        return emit_list_fold(
+            "List.foldRight",
+            "sz_list_fold_right",
+            args,
+            ctx,
+            locals,
+            prefix,
+        );
+    }
     if callee == "List.sortBy" {
         return emit_list_sort_by(args, ctx, locals, prefix);
     }
@@ -4804,7 +4893,8 @@ fn emit_call(
             }
         }
         "List.reverse" | "List.init" | "List.inits" | "List.tails" | "List.last"
-        | "List.flatten" | "List.indices" | "List.transpose" | "List.distinct" => {
+        | "List.flatten" | "List.indices" | "List.transpose" | "List.distinct"
+        | "List.zipWithIndex" => {
             let rt = match callee {
                 "List.reverse" => "sz_list_reverse",
                 "List.init" => "sz_list_init",
@@ -4814,6 +4904,7 @@ fn emit_call(
                 "List.flatten" => "sz_list_flatten",
                 "List.transpose" => "sz_list_transpose",
                 "List.distinct" => "sz_list_distinct",
+                "List.zipWithIndex" => "sz_list_zip_with_index",
                 _ => "sz_list_indices",
             };
             writeln!(
@@ -4825,6 +4916,7 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             let elem = match callee {
                 "List.indices" => Kind::Int,
+                "List.zipWithIndex" => Kind::Ptr,
                 "List.reverse" | "List.init" | "List.last" | "List.distinct" => {
                     emitted_args[0].elem
                 }
@@ -9785,6 +9877,37 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of list {name} after List.transpose:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_zip_with_index_and_fold() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(List.map(List.zipWithIndex(["a", "b"]), (i, s) => s"${Str.fromInt(i)},$s"), "|"))
+    _ <- IO.println(Str.fromInt(List.foldLeft([1, 2], 0, (acc, n) => acc + n)))
+    _ <- IO.println(List.foldRight(["a"], "!", (x, acc) => Str.concat(x, acc)))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_zip_with_index"));
+        assert!(ir.contains("sz_list_fold_left"));
+        assert!(ir.contains("sz_list_fold_right"));
+        let needle = "call ptr @sz_list_zip_with_index(ptr ";
+        let at = ir.find(needle).expect("zipWithIndex");
+        let name = ir[at + needle.len()..].split(')').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.zipWithIndex:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_fold_left(ptr ";
+        let at = ir.find(needle).expect("foldLeft");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.foldLeft:\n{ir}"
         );
     }
 
