@@ -477,6 +477,24 @@ enum Opt[T]:
     }
 
     #[test]
+    fn completes_case_keyword_on_fun_param() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
+@main def main: IO[Unit] =
+  IO.println(apply({ case Opt.Some(n) => Str.fromInt(n) case Opt.None => "?" }, Opt.Some(3)))
+"#;
+        let labels = labels_at(src, "{ ");
+        assert!(labels.iter().any(|l| l == "case"), "{labels:?}");
+        assert!(
+            labels.iter().all(|l| l != "__case"),
+            "synthetic binder leaked: {labels:?}"
+        );
+    }
+
+    #[test]
     fn completes_def_by_prefix() {
         let src = "def add(n: Int): Int = n\n@main def main: IO[Unit] = ad\n";
         let labels = labels_at(src, " ad");

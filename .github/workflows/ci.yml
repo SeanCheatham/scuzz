@@ -235,6 +235,12 @@ jobs:
           grep -q "caselam:1,n" /tmp/kernel.out
           grep -q "caselam0:" /tmp/kernel.out
           grep -q "caselit:z,n" /tmp/kernel.out
+          grep -q "funapply:3" /tmp/kernel.out
+          grep -q "funapplyN:?" /tmp/kernel.out
+          grep -q "funph:1" /tmp/kernel.out
+          grep -q "funtl:2" /tmp/kernel.out
+          grep -q "funadd:4" /tmp/kernel.out
+          grep -q "funtwice:11" /tmp/kernel.out
           grep -q "tab:0,1,2" /tmp/kernel.out
           grep -q "isp:a,|,b,|,c" /tmp/kernel.out
           grep -q "grp:a,b|c" /tmp/kernel.out

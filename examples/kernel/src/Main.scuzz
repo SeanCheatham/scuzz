@@ -80,6 +80,18 @@ law addComm(a: Int, b: Int): Bool =
 def noneInt(): Opt[Int] =
   Opt.None
 
+def applyOptStr(f: Opt[Int] => String, o: Opt[Int]): String =
+  f(o)
+
+def applyIntStr(f: Int => String, n: Int): String =
+  f(n)
+
+def applyInt(f: Int => Int, n: Int): Int =
+  f(n)
+
+def applyTwice(f: Int => String, n: Int): String =
+  Str.concat(f(n), f(n))
+
 def wrap[T](x: T): Box[T] =
   Box(x)
 
@@ -284,6 +296,18 @@ def listProof(): IO[Unit] =
   case 0 => "z"
   case _ => "n"
 }), ",")}")
+    _ <- IO.println(s"funapply:${applyOptStr({
+  case Opt.Some(n) => Str.fromInt(n)
+  case Opt.None => "?"
+}, Opt.Some(3))}")
+    _ <- IO.println(s"funapplyN:${applyOptStr({
+  case Opt.Some(n) => Str.fromInt(n)
+  case Opt.None => "?"
+}, noneInt())}")
+    _ <- IO.println(s"funph:${applyIntStr(Str.fromInt(_), 1)}")
+    _ <- IO.println(s"funtl:${applyIntStr((x: Int) => Str.fromInt(x), 2)}")
+    _ <- IO.println(s"funadd:${Str.fromInt(applyInt(_ + 1, 3))}")
+    _ <- IO.println(s"funtwice:${applyTwice(Str.fromInt(_), 1)}")
     _ <- IO.println(s"tab:${List.join(List.tabulate(3, i => Str.fromInt(i)), ",")}")
     _ <- IO.println(s"isp:${List.join(List.intersperse(xs, "|"), ",")}")
     _ <- IO.println(s"grp:${List.join(List.map(List.grouped(xs, 2), g => List.join(g, ",")), "|")}")
