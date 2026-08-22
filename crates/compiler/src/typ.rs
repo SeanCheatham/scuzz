@@ -2597,6 +2597,48 @@ fn rewrite_fields(
                 span,
             ))
         }
+        ExprKind::IoMap { inner, param, body } => {
+            let inner = rewrite_fields(*inner, enums, funs, methods, current_module, env)?;
+            let it = infer(&inner, enums, funs, methods, current_module, env)?;
+            let Type::Io(inner_t) = it else {
+                return Ok(Expr::new(
+                    ExprKind::IoMap {
+                        inner: Box::new(inner),
+                        param,
+                        body: Box::new(rewrite_fields(
+                            *body,
+                            enums,
+                            funs,
+                            methods,
+                            current_module,
+                            env,
+                        )?),
+                    },
+                    span,
+                ));
+            };
+            let old = if let Some(ref p) = param {
+                env.insert(p.clone(), (*inner_t).clone())
+            } else {
+                None
+            };
+            let body = rewrite_fields(*body, enums, funs, methods, current_module, env)?;
+            if let Some(p) = &param {
+                if let Some(v) = old {
+                    env.insert(p.clone(), v);
+                } else {
+                    env.remove(p);
+                }
+            }
+            Ok(Expr::new(
+                ExprKind::IoMap {
+                    inner: Box::new(inner),
+                    param,
+                    body: Box::new(body),
+                },
+                span,
+            ))
+        }
         ExprKind::Let { name, value, body } => {
             let value = rewrite_fields(*value, enums, funs, methods, current_module, env)?;
             let vt = infer(&value, enums, funs, methods, current_module, env)?;
@@ -3051,6 +3093,26 @@ fn infer(
                     return Err(TypeError::Msg("flatMap body must return IO[_]".into()));
                 }
                 Ok(bt)
+            }
+            ExprKind::IoMap { inner, param, body } => {
+                let it = infer(inner, enums, funs, methods, current_module, env)?;
+                let Type::Io(inner_t) = it else {
+                    return Err(TypeError::Msg("map receiver must be IO[_]".into()));
+                };
+                let old = if let Some(p) = param {
+                    env.insert(p.clone(), (*inner_t).clone())
+                } else {
+                    None
+                };
+                let bt = infer(body, enums, funs, methods, current_module, env)?;
+                if let Some(p) = param {
+                    if let Some(v) = old {
+                        env.insert(p.clone(), v);
+                    } else {
+                        env.remove(p);
+                    }
+                }
+                Ok(Type::Io(Box::new(bt)))
             }
             ExprKind::HandleErrorWith { inner, param, body } => {
                 let it = infer(inner, enums, funs, methods, current_module, env)?;
@@ -6341,6 +6403,47 @@ fn mono_expr(
                 span,
             ))
         }
+        ExprKind::IoMap { inner, param, body } => {
+            let it = infer(&inner, enums, funs, methods, current_module, env)?;
+            let inner = mono_expr(
+                *inner,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                specialized,
+            )?;
+            let old = if let (Type::Io(inner_t), Some(ref p)) = (&it, &param) {
+                env.insert(p.clone(), (**inner_t).clone())
+            } else {
+                None
+            };
+            let body = mono_expr(
+                *body,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                specialized,
+            )?;
+            if let Some(p) = &param {
+                if let Some(v) = old {
+                    env.insert(p.clone(), v);
+                } else {
+                    env.remove(p);
+                }
+            }
+            Ok(Expr::new(
+                ExprKind::IoMap {
+                    inner: Box::new(inner),
+                    param,
+                    body: Box::new(body),
+                },
+                span,
+            ))
+        }
         ExprKind::HandleErrorWith { inner, param, body } => Ok(Expr::new(
             ExprKind::HandleErrorWith {
                 inner: Box::new(mono_expr(
@@ -7328,6 +7431,52 @@ fn elaborate_expr(
                 span,
             ))
         }
+        ExprKind::IoMap { inner, param, body } => {
+            let inner = elaborate_expr(
+                *inner,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                None,
+                tparams,
+            )?;
+            let it = infer(&inner, enums, funs, methods, current_module, env)?;
+            let mut old = None;
+            if let (Type::Io(inner_t), Some(p)) = (&it, &param) {
+                old = env.insert(p.clone(), (**inner_t).clone());
+            }
+            let body_expected = match expected {
+                Some(Type::Io(t)) => Some(&**t),
+                _ => None,
+            };
+            let body = elaborate_expr(
+                *body,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                body_expected,
+                tparams,
+            )?;
+            if let Some(p) = &param {
+                if let Some(v) = old {
+                    env.insert(p.clone(), v);
+                } else {
+                    env.remove(p);
+                }
+            }
+            Ok(Expr::new(
+                ExprKind::IoMap {
+                    inner: Box::new(inner),
+                    param,
+                    body: Box::new(body),
+                },
+                span,
+            ))
+        }
         ExprKind::IoPure(inner) => {
             let inner_expected = match expected {
                 Some(Type::Io(t)) => Some(&**t),
@@ -7806,6 +7955,11 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
             param,
             body: Box::new(subst_node_targs(*body, subst)),
         },
+        ExprKind::IoMap { inner, param, body } => ExprKind::IoMap {
+            inner: Box::new(subst_node_targs(*inner, subst)),
+            param,
+            body: Box::new(subst_node_targs(*body, subst)),
+        },
         ExprKind::IoPrintln(e) => ExprKind::IoPrintln(Box::new(subst_node_targs(*e, subst))),
         ExprKind::IoSleep(e) => ExprKind::IoSleep(Box::new(subst_node_targs(*e, subst))),
         ExprKind::IoFail(e) => ExprKind::IoFail(Box::new(subst_node_targs(*e, subst))),
@@ -8023,7 +8177,7 @@ fn collect_node_targs(expr: &Expr, out: &mut Vec<(String, Vec<Type>)>) {
             collect_node_targs(value, out);
             collect_node_targs(body, out);
         }
-        ExprKind::FlatMap { inner, body, .. } => {
+        ExprKind::FlatMap { inner, body, .. } | ExprKind::IoMap { inner, body, .. } => {
             collect_node_targs(inner, out);
             collect_node_targs(body, out);
         }
@@ -8204,6 +8358,11 @@ fn rewrite_enum_refs(
             body: Box::new(rewrite_enum_refs(*body, clones)?),
         },
         ExprKind::FlatMap { inner, param, body } => ExprKind::FlatMap {
+            inner: Box::new(rewrite_enum_refs(*inner, clones)?),
+            param,
+            body: Box::new(rewrite_enum_refs(*body, clones)?),
+        },
+        ExprKind::IoMap { inner, param, body } => ExprKind::IoMap {
             inner: Box::new(rewrite_enum_refs(*inner, clones)?),
             param,
             body: Box::new(rewrite_enum_refs(*body, clones)?),
@@ -8604,6 +8763,38 @@ def positive(n: Int): IO[Int] =
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("for if guard typecheck");
+    }
+
+    #[test]
+    fn typechecks_io_map() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    n <- IO.pure(3).map(x => x + 1)
+    s <- IO.pure("a").map(x => Str.concat(x, "!"))
+    z <- IO.pure(1).map(_ => 7)
+    _ <- IO.println(Str.fromInt(n))
+    _ <- IO.println(s)
+    _ <- IO.println(Str.fromInt(z))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("IO.map typecheck");
+    }
+
+    #[test]
+    fn rejects_io_map_on_int() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(1.map(n => n + 1)))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("map receiver must be IO[_]"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]

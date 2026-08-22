@@ -300,6 +300,9 @@ jobs:
           grep -q "failif:miss" /tmp/kernel.out
           grep -q "forif:3" /tmp/kernel.out
           grep -q "forif:miss" /tmp/kernel.out
+          grep -q "iomap:4" /tmp/kernel.out
+          grep -q "iomapS:a!" /tmp/kernel.out
+          grep -q "iomapU:7" /tmp/kernel.out
           cargo run -p scuzz -- run examples/io | tee /tmp/io.out
           grep -q "ref-ok" /tmp/io.out
           grep -q "queue-ok" /tmp/io.out

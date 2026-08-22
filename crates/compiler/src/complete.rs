@@ -41,6 +41,26 @@ pub fn complete_in_source(
             out.push(c);
         }
     };
+    if after_receiver_dot(source, offset) {
+        for (label, detail) in [
+            ("map", "IO[A].map(f: A => B): IO[B]"),
+            ("flatMap", "IO[A].flatMap(f: A => IO[B]): IO[B]"),
+            (
+                "handleErrorWith",
+                "IO[A].handleErrorWith(f: String => IO[A]): IO[A]",
+            ),
+            ("attempt", "IO[A].attempt: IO[Result[A]]"),
+        ] {
+            if label.starts_with(&prefix) {
+                push(Completion {
+                    label: (*label).to_string(),
+                    kind: KIND_MEMBER,
+                    detail: (*detail).to_string(),
+                    insert_text: (*label).to_string(),
+                });
+            }
+        }
+    }
     if let Some(p) = program {
         for c in named_arg_completions(p, &module, source, offset, &prefix) {
             push(c);
@@ -372,6 +392,40 @@ fn prefix_at(source: &str, offset: usize) -> (Option<String>, String) {
     (None, String::new())
 }
 
+/// True when the cursor is after `).` or `ident.` on a value, not `Kit.` / `Type.`.
+fn after_receiver_dot(source: &str, offset: usize) -> bool {
+    let Ok(toks) = lex(source) else {
+        return false;
+    };
+    let mut last = None;
+    for (i, t) in toks.iter().enumerate() {
+        if t.span.start < offset {
+            last = Some(i);
+        }
+    }
+    let Some(i) = last else {
+        return false;
+    };
+    let dot_i = if matches!(toks[i].token, Token::Dot) && toks[i].span.end <= offset {
+        i
+    } else if matches!(toks[i].token, Token::Ident(_))
+        && i >= 1
+        && matches!(toks[i - 1].token, Token::Dot)
+    {
+        i - 1
+    } else {
+        return false;
+    };
+    if dot_i == 0 {
+        return false;
+    }
+    match &toks[dot_i - 1].token {
+        Token::RParen => true,
+        Token::Ident(name) => !name.chars().next().is_some_and(|c| c.is_ascii_uppercase()),
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,6 +446,17 @@ mod tests {
         let labels = labels_at(src, "IO.");
         assert!(labels.iter().any(|l| l == "IO.println"), "{labels:?}");
         assert!(labels.iter().any(|l| l == "IO.sleep"), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_io_map_after_value_dot() {
+        let src = "@main def main: IO[Unit] = IO.pure(1).\n";
+        let labels = labels_at(src, ").");
+        assert!(labels.iter().any(|l| l == "map"), "{labels:?}");
+        assert!(labels.iter().any(|l| l == "flatMap"), "{labels:?}");
+        let src = "@main def main: IO[Unit] = IO.pure(1).ma\n";
+        let labels = labels_at(src, ".ma");
+        assert!(labels.iter().any(|l| l == "map"), "{labels:?}");
     }
 
     #[test]

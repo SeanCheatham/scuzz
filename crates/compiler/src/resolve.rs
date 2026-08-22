@@ -626,6 +626,7 @@ fn unused_in_expr(e: &Expr, out: &mut Vec<UnusedName>) {
             unused_in_expr(body, out);
         }
         ExprKind::FlatMap { inner, param, body }
+        | ExprKind::IoMap { inner, param, body }
         | ExprKind::HandleErrorWith { inner, param, body } => {
             unused_in_expr(inner, out);
             if let Some(name) = param {
@@ -686,6 +687,7 @@ pub(crate) fn uses_name(e: &Expr, name: &str) -> bool {
             body,
         } => uses_name(value, name) || (n != name && uses_name(body, name)),
         ExprKind::FlatMap { inner, param, body }
+        | ExprKind::IoMap { inner, param, body }
         | ExprKind::HandleErrorWith { inner, param, body } => {
             uses_name(inner, name) || (param.as_deref() != Some(name) && uses_name(body, name))
         }

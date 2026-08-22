@@ -852,6 +852,7 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
         | ExprKind::Ascribe { expr: e, .. } => collect_strings(e, out),
         ExprKind::Lambda { body, .. } => collect_strings(body, out),
         ExprKind::FlatMap { inner, body, .. }
+        | ExprKind::IoMap { inner, body, .. }
         | ExprKind::HandleErrorWith { inner, body, .. }
         | ExprKind::Let {
             value: inner, body, ..
@@ -2387,6 +2388,22 @@ fn emit_expr(
         ExprKind::NamedArg { .. } => panic!("internal: unlowered named argument"),
         ExprKind::For { .. } => panic!("internal: unlowered `for` in codegen"),
         ExprKind::Match { scrutinee, arms } => emit_match(scrutinee, arms, ctx, locals, prefix),
+        ExprKind::IoMap { inner, param, body } => {
+            let wrapped = Expr::new(ExprKind::IoPure(body.clone()), body.span.clone());
+            emit_expr(
+                &Expr::new(
+                    ExprKind::FlatMap {
+                        inner: inner.clone(),
+                        param: param.clone(),
+                        body: Box::new(wrapped),
+                    },
+                    inner.span.clone().cover(&body.span),
+                ),
+                ctx,
+                locals,
+                prefix,
+            )
+        }
         ExprKind::FlatMap { inner, param, body } => {
             let id = *ctx.cont_id;
             *ctx.cont_id += 1;
@@ -9350,6 +9367,27 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at + close..].contains(&format!("call void @sz_release(ptr {env})")),
             "expected last-use release of capture pack {env} after flatMap:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_io_map_releases_inner_and_pack() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.pure(1).map(n => n + 1).flatMap(n => IO.println(Str.fromInt(n)))
+"#;
+        let ir = emit_full(src);
+        let needle = "call ptr @sz_io_flatmap(ptr ";
+        let at = ir.find(needle).expect("expected sz_io_flatmap from IO.map");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of inner {name} after IO.map:\n{ir}"
+        );
+        let close = ir[at..].find(')').expect("expected map flatMap call close");
+        let env = ir[at..at + close].rsplit("ptr ").next().unwrap().trim();
+        assert!(
+            ir[at + close..].contains(&format!("call void @sz_release(ptr {env})")),
+            "expected last-use release of capture pack {env} after IO.map:\n{ir}"
         );
     }
 
