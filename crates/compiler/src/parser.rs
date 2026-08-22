@@ -2232,9 +2232,9 @@ impl Parser {
                 if matches!(self.peek_nth(1), Token::Case) {
                     return self.parse_case_lambda(start);
                 }
-                return Err(self.err(
+                Err(self.err(
                     "statement blocks are not allowed; write `{ case … }` or use `for` to bind names",
-                ));
+                ))
             }
             Token::LParen => {
                 self.bump();
