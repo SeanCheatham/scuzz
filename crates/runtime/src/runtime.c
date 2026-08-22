@@ -644,6 +644,8 @@ void sz_release(void *ptr) {
   case SZ_RC_QUEUE: {
     SzQueue *q = (SzQueue *)ptr;
     size_t i;
+    if (q->waiters)
+      sz_panic("sz_queue_free: waiters remain");
     for (i = 0; i < q->len; i++) {
       size_t idx = q->head + i;
       if (q->cap && idx >= q->cap)
@@ -2350,6 +2352,33 @@ static void fiber_wake_joiners(Sched *s, Fiber *target, int ok, void *val,
                                SzError *err);
 static void fiber_settle_cancelled(Sched *s, Fiber *f);
 
+static void fiber_clear_qwait(Fiber *f) {
+  if (!f->qwait)
+    return;
+  sz_release(f->qwait);
+  f->qwait = NULL;
+}
+
+static void fiber_restore_queue_item(Fiber *f) {
+  SzQueue *q = f->qwait;
+  void *value;
+  if (!q)
+    return;
+  if (f->state == FIB_QWAIT)
+    queue_waiter_remove(q, f);
+  else if (f->cur && f->cur->tag == SZ_IO_PURE) {
+    value = f->cur->as.pure_value;
+    f->cur->as.pure_value = NULL;
+    if (value) {
+      if (q->waiters)
+        sz_fiber_wake_queue(q, value);
+      else
+        sz_queue_enqueue(q, value);
+    }
+  }
+  fiber_clear_qwait(f);
+}
+
 static void fiber_cancel(Sched *s, Fiber *f) {
   SzIo *cleanup;
   Fiber *nested;
@@ -2359,11 +2388,8 @@ static void fiber_cancel(Sched *s, Fiber *f) {
   ready_remove(s, f);
   if (f->state == FIB_SLEEP)
     sleeper_remove(s, f);
-  if (f->state == FIB_QWAIT && f->qwait) {
-    queue_waiter_remove(f->qwait, f);
-    sz_release(f->qwait);
-    f->qwait = NULL;
-  }
+  if (f->qwait)
+    fiber_restore_queue_item(f);
   if (f->state == FIB_DWAIT && f->dwait) {
     def_waiter_remove(f->dwait, f);
     sz_release(f->dwait);
@@ -2519,6 +2545,7 @@ static void join_child_done(Sched *s, Fiber *child, int ok, void *val,
 static void fiber_finish(Sched *s, Fiber *f, int ok, void *val, SzError *err) {
   if (f->state == FIB_CANCELLED)
     return;
+  fiber_clear_qwait(f);
   if (f->state == FIB_FINALIZING) {
     cont_free_all(f->stack);
     f->stack = NULL;
@@ -2653,17 +2680,42 @@ static void fiber_fail(Sched *s, Fiber *f, SzError *err) {
 int sz_fiber_wake_queue(SzQueue *q, void *value) {
   Fiber *f;
   Sched *s = g_sched;
-  if (!q || !s || !q->waiters)
+  if (!q || !s)
     return 0;
-  f = (Fiber *)q->waiters;
-  q->waiters = f->wait_next;
-  f->wait_next = NULL;
-  f->qwait = NULL;
-  f->state = FIB_READY;
-  /* Transfer the offer retain. Do not retain again. */
-  fiber_set_cur(f, pure_drop(value));
-  ready_enqueue(s, f);
-  sz_release(q);
+  while (q->waiters) {
+    f = (Fiber *)q->waiters;
+    q->waiters = f->wait_next;
+    f->wait_next = NULL;
+    if (f->state == FIB_CANCELLED) {
+      sz_release(q);
+      continue;
+    }
+    f->state = FIB_READY;
+    /* Keep qwait until take completes. Cancel can restore the item. */
+    fiber_set_cur(f, pure_drop(value));
+    ready_enqueue(s, f);
+    return 1;
+  }
+  return 0;
+}
+
+int sz_queue_cancel_ready_handoff(SzQueue *q, void *value) {
+  Fiber *f;
+  Sched *s = g_sched;
+  if (!q || !s || !value || !q->waiters)
+    return 0;
+  sz_retain(value);
+  if (!sz_fiber_wake_queue(q, value)) {
+    sz_release(value);
+    return 0;
+  }
+  for (f = s->all_fibers; f; f = f->all_next) {
+    if (f->qwait == q && f->state == FIB_READY)
+      break;
+  }
+  if (!f)
+    return 0;
+  fiber_cancel(s, f);
   return 1;
 }
 
@@ -2718,6 +2770,7 @@ static int step_fiber(Sched *s, Fiber *f) {
 
   switch (cur->tag) {
   case SZ_IO_PURE:
+    fiber_clear_qwait(f);
     sz_retain(cur->as.pure_value);
     fiber_resume_value(s, f, cur->as.pure_value);
     return 0;
@@ -2962,9 +3015,9 @@ static int step_fiber(Sched *s, Fiber *f) {
       if (q->head == q->cap)
         q->head = 0;
       q->len--;
-      /* Transfer the offer retain. Do not retain again. */
+      /* Transfer the offer retain. Keep qwait until take completes. */
+      f->qwait = q;
       fiber_set_cur(f, pure_drop(v));
-      sz_release(q);
       ready_enqueue(s, f);
       return 0;
     }
@@ -3191,6 +3244,10 @@ static void sched_free_fibers(Sched *s) {
     Fiber *n = f->all_next;
     sz_release(f->cur);
     f->cur = NULL;
+    if (f->qwait) {
+      sz_release(f->qwait);
+      f->qwait = NULL;
+    }
     cont_free_all(f->stack);
     f->stack = NULL;
     fiber_release_result(f);

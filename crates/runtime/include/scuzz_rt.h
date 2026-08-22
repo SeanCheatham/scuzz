@@ -428,6 +428,11 @@ SzIo *sz_queue_offer_cstr(SzQueue *q, const char *value);
 /* Take transfers the offer retain. Caller drops the run result. Do not retain again. */
 SzIo *sz_queue_take(SzQueue *q); /* IO[A]; parks when empty under the fiber scheduler */
 size_t sz_queue_size(const SzQueue *q);
+/* Transfer an owned retain into the ring. Does not wake waiters. */
+void sz_queue_enqueue(SzQueue *q, void *value);
+/* Test hook: wake one parked take, then cancel that fiber before it steps.
+ * Returns 1 if a waiter was cancelled. The value retain transfers like offer. */
+int sz_queue_cancel_ready_handoff(SzQueue *q, void *value);
 
 /* Stream — finite pull: emit / eval / concat / map / evalMap / filter / take / takeWhile / drop / dropWhile / find / exists. */
 enum {

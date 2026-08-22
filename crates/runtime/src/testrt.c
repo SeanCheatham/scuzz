@@ -1073,6 +1073,7 @@ void sz_property_sometimes_flush(void) {
   fclose(f);
 }
 
+/* Matches DRIVE_NAMES_MAX in crates/compiler/src/overlay.rs. Overlay rejects a larger table. */
 #define SZ_DRIVERS_MAX 32
 typedef struct {
   char *name;
@@ -1088,8 +1089,10 @@ void sz_driver_register(SzString *name, int64_t nargs, int64_t kind, void *fn) {
   const char *s = name ? sz_string_cstr(name) : "";
   size_t n;
   char *copy;
-  if (!fn || !s[0] || g_drivers_n >= SZ_DRIVERS_MAX)
+  if (!fn || !s[0])
     return;
+  if (g_drivers_n >= SZ_DRIVERS_MAX)
+    sz_panic("sz_driver_register: too many drivers");
   n = strlen(s);
   copy = (char *)sz_alloc(n + 1);
   memcpy(copy, s, n + 1);

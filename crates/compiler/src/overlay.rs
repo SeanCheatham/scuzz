@@ -1,6 +1,6 @@
 //! Stem-paired `*.scuzz_sim` / `*.scuzz_drivers` overlays and in-source `property` residualization.
 
-use crate::ast::{EnumDef, Expr, ExprKind, FunDef, Import, Program, Type};
+use crate::ast::{EnumDef, Expr, ExprKind, ForBinder, FunDef, Import, Pattern, Program, Type};
 use crate::parser::{parse_file, ParseError};
 use crate::resolve::split_dotted;
 use crate::span::Span;
@@ -71,6 +71,7 @@ pub fn apply_overlays(
         }
         apply_driver_overlay(&mut live, ov, &mut driver_names)?;
     }
+    check_drive_table(&live)?;
     live.driver_names = driver_names;
     Ok(live)
 }
@@ -105,6 +106,7 @@ pub fn collect_property_names(program: &Program) -> Result<Vec<String>, OverlayE
         }
         names.push(d.name.clone());
     }
+    check_drive_table(program)?;
     Ok(names)
 }
 
@@ -348,15 +350,9 @@ fn apply_driver_overlay(
             ov.label
         )));
     }
-    let property_names: Vec<String> = live
-        .defs
-        .iter()
-        .filter(|d| d.is_property)
-        .map(|d| d.name.clone())
-        .collect();
     for mut d in prog.defs {
         d.module = ov.stem.clone();
-        check_driver_def(live, &d, &ov.label, &property_names)?;
+        check_driver_def(live, &d, &ov.label)?;
         d.is_driver = true;
         names.push(d.name.clone());
         live.defs.push(d);
@@ -364,15 +360,20 @@ fn apply_driver_overlay(
     Ok(())
 }
 
-fn check_driver_def(
-    live: &Program,
-    d: &FunDef,
-    label: &str,
-    property_names: &[String],
-) -> Result<(), OverlayError> {
+fn check_driver_def(live: &Program, d: &FunDef, label: &str) -> Result<(), OverlayError> {
     if d.is_property {
         return Err(OverlayError::Msg(format!(
             "{label}: *.scuzz_drivers must not declare a property"
+        )));
+    }
+    if let Some(prev) = live
+        .defs
+        .iter()
+        .find(|l| l.name == d.name && is_drive_spec(l))
+    {
+        return Err(OverlayError::Msg(format!(
+            "{label}: driver `{}` collides with {}.{}",
+            d.name, prev.module, prev.name
         )));
     }
     if live
@@ -405,11 +406,17 @@ fn check_driver_def(
             )));
         }
     }
-    if expr_has_property(&d.body) || expr_mentions_property_name(&d.body, property_names) {
-        return Err(OverlayError::Msg(format!(
-            "{label}: driver `{}` must not call Property.* or `.require`",
-            d.name
-        )));
+    {
+        let properties: Vec<&FunDef> = live.defs.iter().filter(|p| p.is_property).collect();
+        let mut binders: Vec<String> = d.params.iter().map(|p| p.name.clone()).collect();
+        if expr_has_property(&d.body)
+            || expr_mentions_property_name(&d.body, &properties, &mut binders)
+        {
+            return Err(OverlayError::Msg(format!(
+                "{label}: driver `{}` must not call Property.* or `.require`",
+                d.name
+            )));
+        }
     }
     Ok(())
 }
@@ -432,30 +439,196 @@ pub(crate) fn expr_has_property(e: &Expr) -> bool {
     found
 }
 
-fn property_name_hit(name: &str, property_names: &[String]) -> bool {
-    let base = callee_base(name);
-    property_names.iter().any(|n| n == base || n == name)
+fn property_ref_hit(name: &str, properties: &[&FunDef], binders: &[String]) -> bool {
+    if let Some((module, base)) = split_dotted(name) {
+        return properties
+            .iter()
+            .any(|p| p.module == module && p.name == base);
+    }
+    !binders.iter().any(|b| b == name) && properties.iter().any(|p| p.name == name)
 }
 
-fn expr_mentions_property_name(e: &Expr, property_names: &[String]) -> bool {
-    if property_names.is_empty() {
+fn collect_pat_binds(p: &Pattern, binders: &mut Vec<String>) {
+    match p {
+        Pattern::Bind(n) if n != "_" => binders.push(n.clone()),
+        Pattern::Tuple { elems, .. } => {
+            for e in elems {
+                collect_pat_binds(e, binders);
+            }
+        }
+        Pattern::Adt { binds, .. } => {
+            for b in binds {
+                collect_pat_binds(b, binders);
+            }
+        }
+        Pattern::Cons { head, tail, .. } => {
+            collect_pat_binds(head, binders);
+            collect_pat_binds(tail, binders);
+        }
+        Pattern::As { name, inner } => {
+            if name != "_" {
+                binders.push(name.clone());
+            }
+            collect_pat_binds(inner, binders);
+        }
+        Pattern::Named { inner, .. } => collect_pat_binds(inner, binders),
+        Pattern::Or(alts) => {
+            for a in alts {
+                collect_pat_binds(a, binders);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn push_for_binder(b: &ForBinder, binders: &mut Vec<String>) {
+    if let Some(p) = b.unpack_pat() {
+        collect_pat_binds(p, binders);
+    } else {
+        let n = b.name();
+        if !n.is_empty() && n != "_" {
+            binders.push(n.to_string());
+        }
+    }
+}
+
+fn push_opt_binder(name: Option<&str>, binders: &mut Vec<String>) {
+    if let Some(n) = name {
+        if n != "_" {
+            binders.push(n.to_string());
+        }
+    }
+}
+
+fn expr_mentions_property_name(
+    e: &Expr,
+    properties: &[&FunDef],
+    binders: &mut Vec<String>,
+) -> bool {
+    if properties.is_empty() {
         return false;
     }
-    let here = match &e.kind {
-        ExprKind::Var(name) => property_name_hit(name, property_names),
-        ExprKind::Call { callee, .. } => property_name_hit(callee, property_names),
-        _ => false,
-    };
-    if here {
-        return true;
-    }
-    let mut found = false;
-    e.for_each_child(|c| {
-        if !found {
-            found = expr_mentions_property_name(c, property_names);
+    match &e.kind {
+        ExprKind::Var(name) => property_ref_hit(name, properties, binders),
+        ExprKind::Call { callee, args } => {
+            if property_ref_hit(callee, properties, binders) {
+                return true;
+            }
+            args.iter()
+                .any(|a| expr_mentions_property_name(a, properties, binders))
         }
-    });
-    found
+        ExprKind::Let { name, value, body } => {
+            if expr_mentions_property_name(value, properties, binders) {
+                return true;
+            }
+            let n = binders.len();
+            push_opt_binder(Some(name.as_str()), binders);
+            let hit = expr_mentions_property_name(body, properties, binders);
+            binders.truncate(n);
+            hit
+        }
+        ExprKind::Lambda {
+            param, pat, body, ..
+        } => {
+            let n = binders.len();
+            if let Some(p) = pat {
+                collect_pat_binds(p, binders);
+            } else {
+                push_opt_binder(param.as_deref(), binders);
+            }
+            let hit = expr_mentions_property_name(body, properties, binders);
+            binders.truncate(n);
+            hit
+        }
+        ExprKind::FlatMap { inner, param, body }
+        | ExprKind::IoMap { inner, param, body }
+        | ExprKind::HandleErrorWith { inner, param, body } => {
+            if expr_mentions_property_name(inner, properties, binders) {
+                return true;
+            }
+            let n = binders.len();
+            push_opt_binder(param.as_deref(), binders);
+            let hit = expr_mentions_property_name(body, properties, binders);
+            binders.truncate(n);
+            hit
+        }
+        ExprKind::For {
+            binders: fb, body, ..
+        } => {
+            let n = binders.len();
+            for b in fb {
+                if expr_mentions_property_name(b.value(), properties, binders) {
+                    binders.truncate(n);
+                    return true;
+                }
+                push_for_binder(b, binders);
+            }
+            let hit = expr_mentions_property_name(body, properties, binders);
+            binders.truncate(n);
+            hit
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            if expr_mentions_property_name(scrutinee, properties, binders) {
+                return true;
+            }
+            for arm in arms {
+                let n = binders.len();
+                collect_pat_binds(&arm.pattern, binders);
+                if let Some(g) = &arm.guard {
+                    if expr_mentions_property_name(g, properties, binders) {
+                        binders.truncate(n);
+                        return true;
+                    }
+                }
+                let hit = expr_mentions_property_name(&arm.body, properties, binders);
+                binders.truncate(n);
+                if hit {
+                    return true;
+                }
+            }
+            false
+        }
+        _ => {
+            let mut found = false;
+            e.for_each_child(|c| {
+                if !found {
+                    found = expr_mentions_property_name(c, properties, binders);
+                }
+            });
+            found
+        }
+    }
+}
+
+/// Matches `SZ_DRIVERS_MAX` in `crates/runtime/src/testrt.c`.
+const DRIVE_NAMES_MAX: usize = 32;
+
+fn is_drive_spec(d: &FunDef) -> bool {
+    d.is_driver || (d.is_property && !d.params.is_empty())
+}
+
+fn check_drive_table(program: &Program) -> Result<(), OverlayError> {
+    let mut seen: std::collections::HashMap<String, &FunDef> = std::collections::HashMap::new();
+    let mut n = 0usize;
+    for d in &program.defs {
+        if !is_drive_spec(d) {
+            continue;
+        }
+        n += 1;
+        if let Some(prev) = seen.get(&d.name) {
+            return Err(OverlayError::Msg(format!(
+                "driver `{}` collides with {}.{}",
+                d.name, prev.module, prev.name
+            )));
+        }
+        seen.insert(d.name.clone(), d);
+    }
+    if n > DRIVE_NAMES_MAX {
+        return Err(OverlayError::Msg(format!(
+            "too many drive names (max {DRIVE_NAMES_MAX})"
+        )));
+    }
+    Ok(())
 }
 
 /// Table lines for `build/drivers.txt`: `name`, `name i`, `name s`, `name b`,
@@ -1196,6 +1369,87 @@ mod tests {
         }];
         let err = apply_overlays(live, &overlays).unwrap_err();
         assert!(err.to_string().contains("must not call Property"), "{err}");
+    }
+
+    fn driver_ov(stem: &str, text: &str) -> OverlaySource {
+        OverlaySource {
+            stem: stem.into(),
+            kind: OverlayKind::Drivers,
+            path: PathBuf::new(),
+            label: format!("{stem}.scuzz_drivers"),
+            text: text.into(),
+        }
+    }
+
+    #[test]
+    fn drivers_allow_property_name_as_binder() {
+        let live = live_with(
+            "property always: Bool = true\n@main def main: IO[Unit] = IO.println(\"x\").require(always)\n",
+        );
+        let overlays = vec![driver_ov(
+            "Main",
+            "def plusN(always: Bool): IO[Unit] =\n  IO.when(always, IO.println(\"x\"))\n",
+        )];
+        let prog = apply_overlays(live, &overlays).unwrap();
+        assert!(prog.defs.iter().any(|d| d.is_driver && d.name == "plusN"));
+
+        let live = live_with(
+            "property always: Bool = true\n@main def main: IO[Unit] = IO.println(\"x\").require(always)\n",
+        );
+        let overlays = vec![driver_ov(
+            "Main",
+            "def plusN(): IO[Unit] =\n  for {\n    always = true\n    _ <- IO.when(always, IO.println(\"x\"))\n  } yield ()\n",
+        )];
+        apply_overlays(live, &overlays).unwrap();
+    }
+
+    #[test]
+    fn drivers_reject_cross_module_drive_name() {
+        let live = live_with("@main def main: IO[Unit] = IO.println(\"x\")\n");
+        let overlays = vec![
+            driver_ov("A", "def bump(n: Int): IO[Unit] = IO.pure(())\n"),
+            driver_ov("B", "def bump(n: Int): IO[Unit] = IO.pure(())\n"),
+        ];
+        let err = apply_overlays(live, &overlays).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("driver `bump` collides with A.bump"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn drivers_reject_parameterized_property_name() {
+        let live = live_with(
+            "property p(a: Int): Bool = a == a\n@main def main: IO[Unit] = IO.println(\"x\")\n",
+        );
+        let overlays = vec![driver_ov("Main", "def p(n: Int): IO[Unit] = IO.pure(())\n")];
+        let err = apply_overlays(live, &overlays).unwrap_err();
+        assert!(
+            err.to_string().contains("driver `p` collides with"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn parameterized_properties_reject_duplicate_drive_name() {
+        let prog = parse_sources(&[
+            (
+                "A.scuzz".into(),
+                "property p(a: Int): Bool = a == a\n".into(),
+            ),
+            (
+                "B.scuzz".into(),
+                "property p(a: Int): Bool = a == a\n@main def main: IO[Unit] = IO.println(\"x\")\n"
+                    .into(),
+            ),
+        ])
+        .unwrap();
+        let err = collect_property_names(&prog).unwrap_err();
+        assert!(
+            err.to_string().contains("driver `p` collides with"),
+            "{err}"
+        );
     }
 
     #[test]

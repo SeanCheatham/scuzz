@@ -1288,6 +1288,47 @@ static SzIo *fiber_interrupt_then_join(void *fiber, void *env) {
   return fm_drop(sz_fiber_interrupt(fiber), fiber_join_recover, fiber);
 }
 
+static SzIo *recover_any_unit(SzError *err, void *env) {
+  (void)env;
+  sz_error_free(err);
+  return pure_drop(NULL);
+}
+
+static SzIo *cancel_handoff_then_join(void *fiber, void *q) {
+  SzString *x = sz_string_from_cstr("x");
+  int hit = sz_queue_cancel_ready_handoff((SzQueue *)q, x);
+  sz_release(x);
+  assert(hit == 1);
+  return handle_drop(sz_fiber_join(fiber), recover_unit, NULL);
+}
+
+static SzIo *after_offer_interrupt_join(void *ignored, void *fiber) {
+  (void)ignored;
+  return fiber_interrupt_then_join(fiber, NULL);
+}
+
+static SzIo *fork_take_offer_interrupt(void *fiber, void *q) {
+  return fm_drop(sz_queue_offer_cstr((SzQueue *)q, "x"),
+                 after_offer_interrupt_join, fiber);
+}
+
+static int value_is_cstr(void *v, const char *want) {
+  return v && want && strcmp(sz_string_cstr((SzString *)v), want) == 0;
+}
+
+static void assert_queue_holds_x_if_take_lost(SzQueue *q, int take_won) {
+  SzIoResult t;
+  if (take_won) {
+    assert(sz_queue_size(q) == 0);
+    return;
+  }
+  assert(sz_queue_size(q) == 1);
+  t = sz_io_unsafe_run(sz_queue_take(q));
+  assert(t.ok);
+  assert(value_is_cstr(t.value, "x"));
+  sz_release(t.value);
+}
+
 static int retry_hits = 0;
 static void *retry_count(void *env) {
   (void)env;
@@ -4418,6 +4459,83 @@ int main(void) {
     assert(r.ok);
     assert(strstr(sz_testrt_stdout_cstr(), "a\nb\n") != NULL);
 
+    sz_testrt_reset();
+  }
+
+  /* Queue.take handoff must survive race / timeout / interrupt cancel. */
+  {
+    SzQueue *q;
+    int seed;
+    int race_loser = 0;
+    char seedbuf[16];
+    char old_seed_buf[32];
+    int had_seed = 0;
+    const char *old_seed = getenv("SCUZZ_SCHED_SEED");
+    if (old_seed) {
+      had_seed = 1;
+      snprintf(old_seed_buf, sizeof old_seed_buf, "%s", old_seed);
+    }
+
+    sz_testrt_install();
+
+    /* Deterministic: cancel the READY take after wake, before it steps. */
+    q = sz_queue_make();
+    r = sz_io_unsafe_run(fm_drop(fork_drop(sz_queue_take(q)),
+                                 cancel_handoff_then_join, q));
+    assert(r.ok);
+    assert_queue_holds_x_if_take_lost(q, 0);
+    sz_queue_free(q);
+
+    for (seed = 0; seed <= 64; seed++) {
+      SzPair *p;
+      int take_won;
+      snprintf(seedbuf, sizeof seedbuf, "%d", seed);
+      setenv("SCUZZ_SCHED_SEED", seedbuf, 1);
+
+      /* race winner may be take or println; item must not vanish */
+      q = sz_queue_make();
+      r = sz_io_unsafe_run(both_drop(
+          race_drop(sz_queue_take(q), sz_io_println_cstr("win")),
+          sz_queue_offer_cstr(q, "x")));
+      assert(r.ok);
+      p = (SzPair *)r.value;
+      assert(p);
+      take_won = value_is_cstr(p->left, "x");
+      if (!take_won)
+        race_loser = 1;
+      sz_pair_free(p);
+      assert_queue_holds_x_if_take_lost(q, take_won);
+      sz_queue_free(q);
+
+      q = sz_queue_make();
+      r = sz_io_unsafe_run(both_drop(
+          handle_drop(timeout_drop(seed & 1, sz_queue_take(q)), recover_any_unit,
+                      NULL),
+          sz_queue_offer_cstr(q, "x")));
+      assert(r.ok);
+      p = (SzPair *)r.value;
+      assert(p);
+      take_won = value_is_cstr(p->left, "x");
+      sz_pair_free(p);
+      assert_queue_holds_x_if_take_lost(q, take_won);
+      sz_queue_free(q);
+
+      q = sz_queue_make();
+      r = sz_io_unsafe_run(fm_drop(fork_drop(sz_queue_take(q)),
+                                   fork_take_offer_interrupt, q));
+      assert(r.ok);
+      take_won = value_is_cstr(r.value, "x");
+      if (r.value)
+        sz_release(r.value);
+      assert_queue_holds_x_if_take_lost(q, take_won);
+      sz_queue_free(q);
+    }
+
+    assert(race_loser);
+    if (had_seed)
+      setenv("SCUZZ_SCHED_SEED", old_seed_buf, 1);
+    else
+      unsetenv("SCUZZ_SCHED_SEED");
     sz_testrt_reset();
   }
 
