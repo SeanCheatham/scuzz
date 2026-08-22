@@ -1469,6 +1469,23 @@ enum Opt[T]:
     }
 
     #[test]
+    fn hovers_case_lambda_on_fun_param() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
+@main def main: IO[Unit] =
+  IO.println(apply({ case Opt.Some(n) => Str.fromInt(n) case Opt.None => "?" }, Opt.Some(3)))
+"#;
+        let program = parse_file(src, "Main.scuzz").unwrap();
+        let offset = src.find("fromInt(n)").unwrap() + 8;
+        let h = hover_in_source(&program, "Main.scuzz", src, offset).unwrap();
+        assert_eq!(h, "n", "{h}");
+        assert!(!h.contains("__case"), "{h}");
+    }
+
+    #[test]
     fn hovers_io_println() {
         let src = "@main def main: IO[Unit] = IO.println(\"x\")\n";
         let h = hover_src(src, "println");

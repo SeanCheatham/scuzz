@@ -18,6 +18,8 @@ struct Local {
     owned: bool,
     /// Element kind when this local is a `List`.
     elem: Kind,
+    /// `(A, B)` kinds when this local is `A => B`.
+    fun: Option<(Kind, Kind)>,
 }
 
 impl Local {
@@ -27,6 +29,7 @@ impl Local {
             kind,
             owned: false,
             elem: Kind::Ptr,
+            fun: None,
         }
     }
 
@@ -36,11 +39,17 @@ impl Local {
             kind,
             owned: true,
             elem: Kind::Ptr,
+            fun: None,
         }
     }
 
     fn with_elem(mut self, elem: Kind) -> Self {
         self.elem = elem;
+        self
+    }
+
+    fn with_fun(mut self, fun: Option<(Kind, Kind)>) -> Self {
+        self.fun = fun;
         self
     }
 }
@@ -694,6 +703,13 @@ fn kind_of_type(ty: &Type) -> Kind {
     }
 }
 
+fn fun_kinds(ty: &Type) -> Option<(Kind, Kind)> {
+    match ty {
+        Type::Fun(a, b) => Some((kind_of_type(a), kind_of_type(b))),
+        _ => None,
+    }
+}
+
 fn list_elem_of_type(ty: &Type) -> Kind {
     match ty {
         Type::List(inner) => kind_of_type(inner),
@@ -719,7 +735,7 @@ fn cell_elem_of_type(ty: &Type) -> Kind {
 
 fn retain_borrowed_ret(ty: &Type) -> bool {
     match ty {
-        Type::String | Type::List(_) | Type::Adt(_) | Type::Tuple(_) => true,
+        Type::String | Type::List(_) | Type::Adt(_) | Type::Tuple(_) | Type::Fun(_, _) => true,
         Type::App(n, _) => !matches!(
             n.as_str(),
             "Fiber" | "Ref" | "Queue" | "Deferred" | "Resource" | "Stream"
@@ -1018,7 +1034,8 @@ fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
         locals.insert(
             p.name.clone(),
             Local::borrow(format!("%{}", p.name), kind_of_type(&p.ty))
-                .with_elem(cell_elem_of_type(&p.ty)),
+                .with_elem(cell_elem_of_type(&p.ty))
+                .with_fun(fun_kinds(&p.ty)),
         );
     }
 
@@ -1380,7 +1397,9 @@ fn unpack_env_preamble(
             Kind::Ptr | Kind::Io => {
                 body_locals.insert(
                     name.clone(),
-                    Local::borrow(format!("%{prefix}_h{i}"), kind).with_elem(elem),
+                    Local::borrow(format!("%{prefix}_h{i}"), kind)
+                        .with_elem(elem)
+                        .with_fun(loc.and_then(|l| l.fun)),
                 );
             }
         }
@@ -2286,6 +2305,7 @@ fn emit_expr(
                     kind: ve.kind,
                     owned: ve.owned,
                     elem: ve.elem,
+                    fun: None,
                 },
             );
             let mut be = emit_expr(body, ctx, locals, &format!("{prefix}_l_{name}"));
@@ -3354,6 +3374,76 @@ fn unpack_closure(code: &mut String, closure: &str, prefix: &str) {
         "  %{prefix}_envp = call ptr @sz_list_head(ptr %{prefix}_fnt)"
     )
     .unwrap();
+}
+
+/// Pack a kit-style `ptr (*)(ptr, ptr)` closure for an `A => B` argument.
+fn emit_fun_arg(
+    ty: &Type,
+    expr: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    let Type::Fun(a, _) = ty else {
+        return emit_expr(expr, ctx, locals, prefix);
+    };
+    if let ExprKind::Lambda { param, body, .. } = &expr.kind {
+        emit_smap_lambda(param, body, ctx, locals, prefix, true, kind_of_type(a))
+    } else {
+        emit_expr(expr, ctx, locals, prefix)
+    }
+}
+
+/// `f(x)` when `f` is an `A => B` local. Same pack as `List.map`.
+fn emit_fun_apply(
+    callee: &str,
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 1, "{callee} expects 1 arg");
+    let loc = locals.get(callee).cloned().expect("fun apply local");
+    let arg = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let ret_k = loc.fun.map(|(_, b)| b).unwrap_or(Kind::Ptr);
+    let arg_owned = arg.owned;
+    let arg_kind = arg.kind;
+    let arg_value = arg.value.clone();
+    let mut code = arg.code;
+    unpack_closure(&mut code, &loc.value, prefix);
+    let (arg_ptr, drop_box) = if arg_kind == Kind::Int || arg_kind == Kind::Float {
+        (
+            box_numeric(&mut code, arg_kind, &arg_value, &format!("{prefix}_ab")),
+            true,
+        )
+    } else {
+        (arg_value.clone(), false)
+    };
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr %{prefix}_fnp(ptr {arg_ptr}, ptr %{prefix}_envp)"
+    )
+    .unwrap();
+    if arg_owned && arg_kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {arg_value})").unwrap();
+    }
+    if drop_box {
+        writeln!(code, "  call void @sz_release(ptr {arg_ptr})").unwrap();
+    }
+    match ret_k {
+        Kind::Int | Kind::Float => {
+            let v = unbox_numeric(
+                &mut code,
+                ret_k,
+                &format!("%{prefix}_v"),
+                &format!("{prefix}_u"),
+            );
+            writeln!(code, "  call void @sz_release(ptr %{prefix}_v)").unwrap();
+            val_emitted(code, v, ret_k)
+        }
+        Kind::Io => io_emitted(code, format!("%{prefix}_v"), Kind::Ptr),
+        Kind::Ptr => owned_ptr(code, format!("%{prefix}_v")),
+    }
 }
 
 fn emit_resource(
@@ -4503,6 +4593,9 @@ fn emit_call(
     locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
+    if locals.contains_key(callee) {
+        return emit_fun_apply(callee, args, ctx, locals, prefix);
+    }
     const PRED_PTR: &[(&str, &str, bool)] = &[
         ("List.filter", "sz_list_filter", false),
         ("List.filterNot", "sz_list_filter_not", false),
@@ -4703,8 +4796,23 @@ fn emit_call(
     if callee == "Ui.run" {
         return emit_ui_run(args, ctx, locals, prefix);
     }
+    let user_fun = ctx.funs.resolve(callee, ctx.current_module).ok();
     let mut emitted_args = Vec::new();
     for (i, a) in args.iter().enumerate() {
+        if let Some(f) = user_fun {
+            if let Some(p) = f.params.get(i) {
+                if matches!(&p.ty, Type::Fun(_, _)) {
+                    emitted_args.push(emit_fun_arg(
+                        &p.ty,
+                        a,
+                        ctx,
+                        locals,
+                        &format!("{prefix}_arg{i}"),
+                    ));
+                    continue;
+                }
+            }
+        }
         emitted_args.push(emit_expr(a, ctx, locals, &format!("{prefix}_arg{i}")));
     }
     let mut code = String::new();
@@ -13592,6 +13700,100 @@ enum Opt[T]:
         assert!(
             ir.contains("sz_adt_tag"),
             "case lambda must match the success:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_fun_apply_case_lambda() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
+@main def main: IO[Unit] =
+  IO.println(apply({ case Opt.Some(n) => Str.fromInt(n) case Opt.None => "?" }, Opt.Some(3)))
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_smap_"),
+            "A => B case lambda must emit a value closure:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_adt_tag"),
+            "fun apply must match the argument:\n{ir}"
+        );
+        assert!(
+            ir.contains("_fnp(ptr "),
+            "fun apply must call the unpacked fn:\n{ir}"
+        );
+        let (at, args) = user_call_ptr_args(&ir, "sz_user_apply");
+        assert!(args.len() >= 1, "expected Fun pack arg to apply:\n{ir}");
+        assert_release_after(&ir, at, args[0], "owned Fun pack");
+    }
+
+    #[test]
+    fn emit_fun_apply_placeholder() {
+        let src = r#"
+def apply(f: Int => String, n: Int): String = f(n)
+@main def main: IO[Unit] =
+  IO.println(apply(Str.fromInt(_), 1))
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_smap_"),
+            "placeholder A => B must emit a value closure:\n{ir}"
+        );
+        assert!(
+            ir.contains("_fnp(ptr "),
+            "fun apply must call the unpacked fn:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_fun_apply_typed_lambda() {
+        let src = r#"
+def apply(f: Int => String, n: Int): String = f(n)
+@main def main: IO[Unit] =
+  IO.println(apply((x: Int) => Str.fromInt(x), 2))
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_smap_"),
+            "typed A => B lambda must emit a value closure:\n{ir}"
+        );
+        assert!(
+            ir.contains("_fnp(ptr "),
+            "fun apply must call the unpacked fn:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_fun_apply_int_result() {
+        let src = r#"
+def apply(f: Int => Int, n: Int): Int = f(n) + 1
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(apply(_ + 1, 3)))
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_unbox_i64"),
+            "Int => Int apply must unbox:\n{ir}"
+        );
+        assert!(ir.contains("add i64"), "unboxed Int result must add:\n{ir}");
+    }
+
+    #[test]
+    fn emit_fun_id_retains_borrowed() {
+        let src = r#"
+def id(f: Int => String): Int => String = f
+def apply(g: Int => String, n: Int): String = g(n)
+@main def main: IO[Unit] =
+  IO.println(apply(id((x: Int) => Str.fromInt(x)), 1))
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_retain"),
+            "returning a borrowed Fun retains the pack:\n{ir}"
         );
     }
 
