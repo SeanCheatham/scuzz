@@ -719,6 +719,22 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.foldRight(xs: List[T], z: U, f: (T, U) => U): U",
     ),
     (
+        "List.scanLeft",
+        "List.scanLeft(xs: List[T], z: U, f: (U, T) => U): List[U]",
+    ),
+    (
+        "List.scanRight",
+        "List.scanRight(xs: List[T], z: U, f: (T, U) => U): List[U]",
+    ),
+    (
+        "List.reduceLeft",
+        "List.reduceLeft(xs: List[T], f: (T, T) => T): T",
+    ),
+    (
+        "List.reduceRight",
+        "List.reduceRight(xs: List[T], f: (T, T) => T): T",
+    ),
+    (
         "List.transpose",
         "List.transpose(xss: List[List[T]]): List[List[T]]",
     ),
@@ -2355,6 +2371,38 @@ enum Opt[T]:
         let h = hover_src(src, "foldRight");
         assert!(
             h.contains("List.foldRight(xs: List[T], z: U, f: (T, U) => U): U"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map(List.scanLeft([1], 0, (acc, n) => acc + n), Str.fromInt(_)), ","))
+"#;
+        let h = hover_src(src, "scanLeft");
+        assert!(
+            h.contains("List.scanLeft(xs: List[T], z: U, f: (U, T) => U): List[U]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.scanRight(["a"], "!", (x, acc) => Str.concat(x, acc)), "|"))
+"#;
+        let h = hover_src(src, "scanRight");
+        assert!(
+            h.contains("List.scanRight(xs: List[T], z: U, f: (T, U) => U): List[U]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.reduceLeft([1, 2], (acc, n) => acc + n)))
+"#;
+        let h = hover_src(src, "reduceLeft");
+        assert!(
+            h.contains("List.reduceLeft(xs: List[T], f: (T, T) => T): T"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.reduceRight(["a", "b"], (x, acc) => Str.concat(x, acc)))
+"#;
+        let h = hover_src(src, "reduceRight");
+        assert!(
+            h.contains("List.reduceRight(xs: List[T], f: (T, T) => T): T"),
             "{h}"
         );
         let src = r#"@main def main: IO[Unit] =

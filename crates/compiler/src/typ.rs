@@ -2233,15 +2233,19 @@ fn kit_lambda_param_ty_at(
             prior.first().and_then(|t| set_elem(t).ok())
         }
         ("List.tabulate", 1) => Some(Type::Int),
-        ("List.foldLeft", 2) => {
+        ("List.foldLeft" | "List.scanLeft", 2) => {
             let elem = prior.first().and_then(|t| list_elem(t).ok())?;
             let z = prior.get(1)?.clone();
             Some(Type::Tuple(vec![z, elem]))
         }
-        ("List.foldRight", 2) => {
+        ("List.foldRight" | "List.scanRight", 2) => {
             let elem = prior.first().and_then(|t| list_elem(t).ok())?;
             let z = prior.get(1)?.clone();
             Some(Type::Tuple(vec![elem, z]))
+        }
+        ("List.reduceLeft" | "List.reduceRight", 1) => {
+            let elem = prior.first().and_then(|t| list_elem(t).ok())?;
+            Some(Type::Tuple(vec![elem.clone(), elem]))
         }
         (
             "Stream.filter" | "Stream.map" | "Stream.takeWhile" | "Stream.dropWhile"
@@ -3706,6 +3710,28 @@ fn infer_call(
                 other => other.clone(),
             };
             prefer_named(&arg_tys[1], &ret, "fold accumulator")
+        }
+        "List.scanLeft" | "List.scanRight" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            list_elem(&arg_tys[0])?;
+            let ret = match &arg_tys[2] {
+                Type::Fun(_, r) => (**r).clone(),
+                other => other.clone(),
+            };
+            Ok(list_of(prefer_named(
+                &arg_tys[1],
+                &ret,
+                "scan accumulator",
+            )?))
+        }
+        "List.reduceLeft" | "List.reduceRight" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            let elem = list_elem(&arg_tys[0])?;
+            let ret = match &arg_tys[1] {
+                Type::Fun(_, r) => (**r).clone(),
+                other => other.clone(),
+            };
+            prefer_named(&elem, &ret, "reduce element")
         }
         "List.exists" | "List.forall" => {
             expect_arity(callee, &arg_tys, 2)?;
@@ -10618,6 +10644,26 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.zipWithIndex/foldLeft/foldRight should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_scan_and_reduce() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = []: List[Int]
+    _ <- IO.println(List.join(List.map(List.scanLeft([1, 2, 3], 0, (acc, n) => acc + n), Str.fromInt(_)), ","))
+    _ <- IO.println(List.join(List.map(List.scanRight([1, 2, 3], 0, (n, acc) => n + acc), Str.fromInt(_)), ","))
+    _ <- IO.println(List.join(List.scanLeft(["a", "b"], "!", (acc, x) => Str.concat(acc, x)), "|"))
+    _ <- IO.println(List.join(List.scanRight(["a", "b"], "!", (x, acc) => Str.concat(x, acc)), "|"))
+    _ <- IO.println(List.join(List.map(List.scanLeft([]: List[Int], 7, (acc, n) => acc + n), Str.fromInt(_)), ","))
+    _ <- IO.println(List.join(List.map(List.scanLeft(xs, 7, (acc, n) => acc + n), Str.fromInt(_)), ","))
+    _ <- IO.println(Str.fromInt(List.reduceLeft([1, 2, 3], (acc, n) => acc + n)))
+    _ <- IO.println(List.reduceLeft(["a", "b"], (acc, x) => Str.concat(acc, x)))
+    _ <- IO.println(List.reduceRight(["a", "b"], (x, acc) => Str.concat(x, acc)))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.scanLeft/scanRight/reduceLeft/reduceRight should typecheck");
     }
 
     #[test]

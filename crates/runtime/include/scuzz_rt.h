@@ -583,6 +583,18 @@ void *sz_list_fold_left(SzList *xs, void *z, SzListMapFn fn, void *env);
 /* Fold with `fn((head, acc), env)` from the right. Empty returns a retain of `z`.
  * `fn` returns an owned acc. */
 void *sz_list_fold_right(SzList *xs, void *z, SzListMapFn fn, void *env);
+/* Accumulators including `z`. `fn((acc, head), env)` like foldLeft.
+ * Empty is a one-cell list of `z`. */
+SzList *sz_list_scan_left(SzList *xs, void *z, SzListMapFn fn, void *env);
+/* Accumulators including `z` from the right. `fn((head, acc), env)`.
+ * Empty is a one-cell list of `z`. */
+SzList *sz_list_scan_right(SzList *xs, void *z, SzListMapFn fn, void *env);
+/* Fold from the first cell. Empty panics. `fn((acc, head), env)`.
+ * `fn` returns an owned acc. */
+void *sz_list_reduce_left(SzList *xs, SzListMapFn fn, void *env);
+/* Fold from the last cell. Empty panics. `fn((head, acc), env)`.
+ * `fn` returns an owned acc. */
+void *sz_list_reduce_right(SzList *xs, SzListMapFn fn, void *env);
 /* Rows to columns. Stops at the shortest row. Empty is empty. */
 SzList *sz_list_transpose(SzList *xss);
 /* 1 when any cell equals `x` (string / boxed i64 by value). */

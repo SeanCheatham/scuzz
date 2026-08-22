@@ -222,6 +222,10 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_list_zip_with_index(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_fold_left(ptr, ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_fold_right(ptr, ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_scan_left(ptr, ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_scan_right(ptr, ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_reduce_left(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_list_reduce_right(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_list_transpose(ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_contains(ptr, ptr)").unwrap();
     writeln!(out, "declare i64 @sz_list_index_of(ptr, ptr)").unwrap();
@@ -3716,6 +3720,7 @@ fn emit_list_fold(
     ctx: &mut EmitCtx<'_>,
     locals: &mut HashMap<String, Local>,
     prefix: &str,
+    scan: bool,
 ) -> Emitted {
     assert!(args.len() == 3, "{callee} expects 3 args");
     let xs = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
@@ -3759,19 +3764,75 @@ fn emit_list_fold(
     }
     if z_kind == Kind::Int || z_kind == Kind::Float {
         writeln!(code, "  call void @sz_release(ptr {zptr})").unwrap();
-        let v = unbox_numeric(
-            &mut code,
-            z_kind,
-            &format!("%{prefix}_v"),
-            &format!("{prefix}_u"),
-        );
-        writeln!(code, "  call void @sz_release(ptr %{prefix}_v)").unwrap();
-        val_emitted(code, v, z_kind)
+        if scan {
+            owned_ptr(code, format!("%{prefix}_v")).with_elem(z_kind)
+        } else {
+            let v = unbox_numeric(
+                &mut code,
+                z_kind,
+                &format!("%{prefix}_v"),
+                &format!("{prefix}_u"),
+            );
+            writeln!(code, "  call void @sz_release(ptr %{prefix}_v)").unwrap();
+            val_emitted(code, v, z_kind)
+        }
     } else {
         if z_owned && z_kind == Kind::Ptr {
             writeln!(code, "  call void @sz_release(ptr {z_value})").unwrap();
         }
         owned_ptr(code, format!("%{prefix}_v")).with_elem(z_elem)
+    }
+}
+
+fn emit_list_reduce(
+    callee: &str,
+    rt: &str,
+    args: &[Expr],
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    assert!(args.len() == 2, "{callee} expects 2 args");
+    let xs = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
+        panic!("{callee} folder must be a lambda");
+    };
+    let lam = emit_smap_lambda(
+        param,
+        body,
+        ctx,
+        locals,
+        &format!("{prefix}_fn"),
+        true,
+        Kind::Ptr,
+    );
+    let xs_owned = xs.owned;
+    let xs_kind = xs.kind;
+    let xs_elem = xs.elem;
+    let xs_value = xs.value.clone();
+    let mut code = xs.code;
+    code.push_str(&lam.code);
+    unpack_closure(&mut code, &lam.value, prefix);
+    writeln!(
+        code,
+        "  %{prefix}_v = call ptr @{rt}(ptr {xs_value}, ptr %{prefix}_fnp, ptr %{prefix}_envp)"
+    )
+    .unwrap();
+    drop_owned_ptr(&mut code, &lam);
+    if xs_owned && xs_kind == Kind::Ptr {
+        writeln!(code, "  call void @sz_release(ptr {xs_value})").unwrap();
+    }
+    if xs_elem == Kind::Int || xs_elem == Kind::Float {
+        let v = unbox_numeric(
+            &mut code,
+            xs_elem,
+            &format!("%{prefix}_v"),
+            &format!("{prefix}_u"),
+        );
+        writeln!(code, "  call void @sz_release(ptr %{prefix}_v)").unwrap();
+        val_emitted(code, v, xs_elem)
+    } else {
+        owned_ptr(code, format!("%{prefix}_v")).with_elem(xs_elem)
     }
 }
 
@@ -4470,12 +4531,56 @@ fn emit_call(
             ctx,
             locals,
             prefix,
+            false,
         );
     }
     if callee == "List.foldRight" {
         return emit_list_fold(
             "List.foldRight",
             "sz_list_fold_right",
+            args,
+            ctx,
+            locals,
+            prefix,
+            false,
+        );
+    }
+    if callee == "List.scanLeft" {
+        return emit_list_fold(
+            "List.scanLeft",
+            "sz_list_scan_left",
+            args,
+            ctx,
+            locals,
+            prefix,
+            true,
+        );
+    }
+    if callee == "List.scanRight" {
+        return emit_list_fold(
+            "List.scanRight",
+            "sz_list_scan_right",
+            args,
+            ctx,
+            locals,
+            prefix,
+            true,
+        );
+    }
+    if callee == "List.reduceLeft" {
+        return emit_list_reduce(
+            "List.reduceLeft",
+            "sz_list_reduce_left",
+            args,
+            ctx,
+            locals,
+            prefix,
+        );
+    }
+    if callee == "List.reduceRight" {
+        return emit_list_reduce(
+            "List.reduceRight",
+            "sz_list_reduce_right",
             args,
             ctx,
             locals,
@@ -9908,6 +10013,39 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert!(
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of list {name} after List.foldLeft:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_scan_and_reduce() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(List.join(List.map(List.scanLeft([1, 2], 0, (acc, n) => acc + n), n => Str.fromInt(n)), ","))
+    _ <- IO.println(List.join(List.scanRight(["a"], "!", (x, acc) => Str.concat(x, acc)), "|"))
+    _ <- IO.println(Str.fromInt(List.reduceLeft([1, 2], (acc, n) => acc + n)))
+    _ <- IO.println(List.reduceRight(["a", "b"], (x, acc) => Str.concat(x, acc)))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_list_scan_left"));
+        assert!(ir.contains("sz_list_scan_right"));
+        assert!(ir.contains("sz_list_reduce_left"));
+        assert!(ir.contains("sz_list_reduce_right"));
+        let needle = "call ptr @sz_list_scan_left(ptr ";
+        let at = ir.find(needle).expect("scanLeft");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.scanLeft:\n{ir}"
+        );
+        let needle = "call ptr @sz_list_reduce_left(ptr ";
+        let at = ir.find(needle).expect("reduceLeft");
+        let name = ir[at + needle.len()..].split(',').next().unwrap().trim();
+        assert!(
+            ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
+            "expected last-use release of list {name} after List.reduceLeft:\n{ir}"
         );
     }
 
