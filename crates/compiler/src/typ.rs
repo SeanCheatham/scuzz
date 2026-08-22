@@ -3546,17 +3546,31 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 2)?;
             let a = list_elem(&arg_tys[0])?;
             let b = list_elem(&arg_tys[1])?;
-            Ok(list_of(list_of(prefer_elem(&a, &b)?)))
+            Ok(list_of(Type::Tuple(vec![a, b])))
         }
         "List.zipAll" => {
             expect_arity(callee, &arg_tys, 4)?;
-            let a = list_elem(&arg_tys[0])?;
-            let b = list_elem(&arg_tys[1])?;
-            let ab = prefer_elem(&a, &b)?;
-            let xy = prefer_elem(&arg_tys[2], &arg_tys[3])?;
-            Ok(list_of(list_of(prefer_elem(&ab, &xy)?)))
+            let a = prefer_elem(&list_elem(&arg_tys[0])?, &arg_tys[2])?;
+            let b = prefer_elem(&list_elem(&arg_tys[1])?, &arg_tys[3])?;
+            Ok(list_of(Type::Tuple(vec![a, b])))
         }
-        "List.unzip" | "List.transpose" => {
+        "List.unzip" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            let inner = list_elem(&arg_tys[0])?;
+            if is_meta_opaque(&inner) {
+                return Ok(Type::Tuple(vec![list_of(inner.clone()), list_of(inner)]));
+            }
+            match inner {
+                Type::Tuple(xs) if xs.len() == 2 => Ok(Type::Tuple(vec![
+                    list_of(xs[0].clone()),
+                    list_of(xs[1].clone()),
+                ])),
+                other => Err(TypeError::Msg(format!(
+                    "List.unzip needs List[(A, B)], got List[{other:?}]"
+                ))),
+            }
+        }
+        "List.transpose" => {
             expect_arity(callee, &arg_tys, 1)?;
             let inner = list_elem(&arg_tys[0])?;
             let elem = list_elem(&inner)?;
@@ -10553,9 +10567,11 @@ enum Opt:
         let src = r#"@main def main: IO[Unit] =
   for {
     xs = ["a", "b", "c"]
-    _ <- IO.println(List.join(List.map(List.zip(xs, ["1", "2"]), g => List.join(g, ",")), "|"))
-    _ <- IO.println(List.join(List.map(List.zipAll(xs, ["1"], "z", "9"), g => List.join(g, ",")), "|"))
-    _ <- IO.println(List.join(List.map(List.unzip(List.zip(xs, ["1", "2"])), g => List.join(g, ",")), "|"))
+    (as, bs) = List.unzip(List.zip(xs, ["1", "2"]))
+    _ <- IO.println(List.join(List.map(List.zip(xs, ["1", "2"]), (a, b) => s"$a,$b"), "|"))
+    _ <- IO.println(List.join(List.map(List.zipAll(xs, ["1"], "z", "9"), (a, b) => s"$a,$b"), "|"))
+    _ <- IO.println(List.join([List.join(as, ","), List.join(bs, ",")], "|"))
+    _ <- IO.println(List.join(List.map(List.zip([1, 2], ["a", "b"]), (n, s) => s"${Str.fromInt(n)},$s"), "|"))
     _ <- IO.println(List.join(List.map(List.transpose([["a", "b"], ["c", "d"]]), g => List.join(g, ",")), "|"))
   } yield ()
 "#;
