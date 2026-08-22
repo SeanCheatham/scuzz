@@ -41,6 +41,31 @@ pub fn complete_in_source(
             out.push(c);
         }
     };
+    if after_case_keyword(source, offset) {
+        if let Some(p) = program {
+            for en in &p.enums {
+                if en.module != module && !en.module.is_empty() {
+                    continue;
+                }
+                for c in &en.cases {
+                    if !c.name.starts_with(&prefix) {
+                        continue;
+                    }
+                    let insert = if c.fields.is_empty() {
+                        c.name.clone()
+                    } else {
+                        format!("{}(", c.name)
+                    };
+                    push(Completion {
+                        label: c.name.clone(),
+                        kind: KIND_ENUM,
+                        detail: format!("{}.{}", en.name, c.name),
+                        insert_text: insert,
+                    });
+                }
+            }
+        }
+    }
     if after_receiver_dot(source, offset) {
         for (label, detail) in [
             ("map", "IO[A].map(f: A => B): IO[B]"),
@@ -426,6 +451,26 @@ fn after_receiver_dot(source: &str, offset: usize) -> bool {
     }
 }
 
+fn after_case_keyword(source: &str, offset: usize) -> bool {
+    let Ok(toks) = lex(source) else {
+        return false;
+    };
+    let mut last = None;
+    for (i, t) in toks.iter().enumerate() {
+        if t.span.start < offset {
+            last = Some(i);
+        }
+    }
+    let Some(i) = last else {
+        return false;
+    };
+    match &toks[i].token {
+        Token::Case if toks[i].span.end <= offset => true,
+        Token::Ident(_) if i >= 1 && matches!(toks[i - 1].token, Token::Case) => true,
+        _ => false,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -530,6 +575,20 @@ def apply(f: Int => Int, n: Int): Int = f(n)
             .collect();
         assert!(labels.iter().any(|l| l.contains("Red")), "{labels:?}");
         assert!(labels.iter().any(|l| l.contains("Blue")), "{labels:?}");
+    }
+
+    #[test]
+    fn completes_bare_case_names_after_case() {
+        let live = "enum Opt[T]:\n  case Some(x: T)\n  case None\n@main def main: IO[Unit] = IO.println(\"x\")\n";
+        let program = parse_file(live, "Main.scuzz").unwrap();
+        let src = "enum Opt[T]:\n  case Some(x: T)\n  case None\n@main def main: IO[Unit] =\n  Opt.Some(1) match {\n    case \n";
+        let offset = src.rfind("case ").unwrap() + 5;
+        let labels: Vec<String> = complete_in_source(Some(&program), "Main.scuzz", src, offset)
+            .into_iter()
+            .map(|c| c.label)
+            .collect();
+        assert!(labels.iter().any(|l| l == "None"), "{labels:?}");
+        assert!(labels.iter().any(|l| l == "Some"), "{labels:?}");
     }
 
     #[test]
