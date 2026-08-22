@@ -1642,9 +1642,8 @@ fn typecheck_def(
         }
     }
     let ret = resolve_type_in(&d.ret, enums, &d.module, &d.type_params)?;
-    let body_ty = if matches!(&ret, Type::Fun(_, _)) && crate::ast::count_placeholders(&d.body) > 0
-    {
-        let wrapped = wrap_placeholder(d.body.clone())?;
+    let body_ty = if matches!(&ret, Type::Fun(_, _)) {
+        let wrapped = as_lambda_arg(d.body.clone(), &env)?;
         infer(&wrapped, enums, funs, methods, &d.module, &mut env)?
     } else {
         infer(&d.body, enums, funs, methods, &d.module, &mut env)?
@@ -2384,7 +2383,7 @@ fn rewrite_lambda_arg(
     current_module: &str,
     env: &mut HashMap<String, Type>,
 ) -> Result<Expr, TypeError> {
-    let expr = as_lambda_arg(expr)?;
+    let expr = as_lambda_arg(expr, env)?;
     if let ExprKind::Lambda {
         param,
         param_ty: ann,
@@ -3008,10 +3007,9 @@ fn infer(
                 let want = resolve_ascribe_type(ty, enums, current_module)?;
                 let wrapped;
                 let inner = if matches!(want, Type::Fun(_, _))
-                    && crate::ast::count_placeholders(expr) > 0
                     && !matches!(expr.kind, ExprKind::Lambda { .. })
                 {
-                    wrapped = wrap_placeholder(expr.as_ref().clone())?;
+                    wrapped = as_lambda_arg(expr.as_ref().clone(), env)?;
                     &wrapped
                 } else {
                     expr
@@ -3251,18 +3249,59 @@ fn wrap_placeholder(expr: Expr) -> Result<Expr, TypeError> {
     ))
 }
 
-fn as_lambda_arg(expr: Expr) -> Result<Expr, TypeError> {
+/// Wrap a unary def as `x => callee(x)` when a kit or `A => B` argument expects a function.
+fn wrap_eta_arg(expr: Expr, env: &HashMap<String, Type>) -> Expr {
+    if matches!(expr.kind, ExprKind::Lambda { .. }) {
+        return expr;
+    }
+    let span = expr.span.clone();
+    let callee = match &expr.kind {
+        ExprKind::Call { callee, args } if args.is_empty() => callee.clone(),
+        ExprKind::Var(name) if !env.contains_key(name) => name.clone(),
+        _ => return expr,
+    };
+    let param = crate::ast::ETA_PARAM.to_string();
+    let arg = Expr::new(ExprKind::Var(param.clone()), span.clone());
+    let body = Expr::new(
+        ExprKind::Call {
+            callee,
+            args: vec![arg],
+        },
+        span.clone(),
+    );
+    Expr::new(
+        ExprKind::Lambda {
+            param: Some(param),
+            param_ty: None,
+            pat: None,
+            body: Box::new(body),
+        },
+        span,
+    )
+}
+
+fn as_lambda_arg(expr: Expr, env: &HashMap<String, Type>) -> Result<Expr, TypeError> {
     if matches!(expr.kind, ExprKind::Lambda { .. }) {
         Ok(expr)
     } else if crate::ast::count_placeholders(&expr) > 0 {
         wrap_placeholder(expr)
     } else {
-        Ok(expr)
+        Ok(wrap_eta_arg(expr, env))
     }
 }
 
-fn is_callback_shape(e: &Expr) -> bool {
-    matches!(e.kind, ExprKind::Lambda { .. }) || crate::ast::count_placeholders(e) > 0
+fn is_eta_candidate(e: &Expr, env: &HashMap<String, Type>) -> bool {
+    match &e.kind {
+        ExprKind::Call { args, .. } if args.is_empty() => true,
+        ExprKind::Var(name) if !env.contains_key(name) => true,
+        _ => false,
+    }
+}
+
+fn is_callback_shape(e: &Expr, env: &HashMap<String, Type>) -> bool {
+    matches!(e.kind, ExprKind::Lambda { .. })
+        || crate::ast::count_placeholders(e) > 0
+        || is_eta_candidate(e, env)
 }
 
 // Arity comes from the shared typecheck context (enums, funs, methods, module, env).
@@ -3283,6 +3322,9 @@ fn infer_lambda_arg(
         && crate::ast::count_placeholders(expr) > 0
     {
         wrapped = wrap_placeholder(expr.clone())?;
+        &wrapped
+    } else if !matches!(expr.kind, ExprKind::Lambda { .. }) && is_eta_candidate(expr, env) {
+        wrapped = wrap_eta_arg(expr.clone(), env);
         &wrapped
     } else {
         expr
@@ -4172,7 +4214,7 @@ fn infer_call(
         "Ref.update" | "Ref.updateAndGet" => {
             expect_arity(callee, &arg_tys, 2)?;
             let payload = default_cell_payload(handle_payload_ty(&arg_tys[0], "Ref")?);
-            if !is_callback_shape(&args[1]) {
+            if !is_callback_shape(&args[1], env) {
                 return Err(TypeError::Msg(format!(
                     "{callee} callback must be a lambda"
                 )));
@@ -4265,7 +4307,7 @@ fn infer_call(
         "IO.foreach" | "IO.foreachDiscard" => {
             expect_arity(callee, &arg_tys, 2)?;
             list_elem(&arg_tys[0])?;
-            if !is_callback_shape(&args[1]) {
+            if !is_callback_shape(&args[1], env) {
                 return Err(TypeError::Msg(format!(
                     "{callee} callback must be a lambda"
                 )));
@@ -4296,7 +4338,7 @@ fn infer_call(
                 return Err(TypeError::Msg("Resource.make acquire must be IO[_]".into()));
             };
             let payload = (**inner).clone();
-            if !is_callback_shape(&args[1]) {
+            if !is_callback_shape(&args[1], env) {
                 return Err(TypeError::Msg(
                     "Resource.make callback must be a lambda".into(),
                 ));
@@ -4313,7 +4355,7 @@ fn infer_call(
         "Resource.use" => {
             expect_arity(callee, &arg_tys, 2)?;
             let payload = handle_payload_ty(&arg_tys[0], "Resource")?;
-            if !is_callback_shape(&args[1]) {
+            if !is_callback_shape(&args[1], env) {
                 return Err(TypeError::Msg(
                     "Resource.use callback must be a lambda".into(),
                 ));
@@ -6240,6 +6282,7 @@ fn mono_lambda_arg(
     env: &mut HashMap<String, Type>,
     specialized: &mut HashMap<String, FunDef>,
 ) -> Result<Expr, TypeError> {
+    let expr = as_lambda_arg(expr, env)?;
     if let ExprKind::Lambda {
         param,
         param_ty: ann,
@@ -7105,7 +7148,7 @@ fn elaborate_lambda_arg(
     env: &mut HashMap<String, Type>,
     tparams: &[String],
 ) -> Result<Expr, TypeError> {
-    let expr = as_lambda_arg(expr)?;
+    let expr = as_lambda_arg(expr, env)?;
     if let ExprKind::Lambda {
         param,
         param_ty: ann,
@@ -7167,7 +7210,7 @@ fn elaborate_expr(
     tparams: &[String],
 ) -> Result<Expr, TypeError> {
     let expr = if matches!(expected, Some(Type::Fun(_, _))) {
-        as_lambda_arg(expr)?
+        as_lambda_arg(expr, env)?
     } else {
         expr
     };
@@ -9004,6 +9047,84 @@ def apply(f: Int => String, n: Int): String = f(n)
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("placeholder on A => B param");
+    }
+
+    #[test]
+    fn typechecks_eta_kit_on_list_map() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map([1, 2], Str.fromInt()), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("eta Str.fromInt on List.map");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate eta map");
+        crate::typ::monomorphize(p).expect("mono eta map");
+    }
+
+    #[test]
+    fn typechecks_eta_kit_on_user_fun() {
+        let src = r#"
+def apply(f: Int => String, n: Int): String = f(n)
+@main def main: IO[Unit] =
+  IO.println(apply(Str.fromInt(), 1))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("eta Str.fromInt on A => B param");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate eta fun");
+        crate::typ::monomorphize(p).expect("mono eta fun");
+    }
+
+    #[test]
+    fn typechecks_eta_user_def_on_fun_param() {
+        let src = r#"
+def bump(n: Int): Int = n + 1
+def apply(f: Int => Int, n: Int): Int = f(n)
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(apply(bump, 3)))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("eta unary def on A => B param");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate eta def");
+        crate::typ::monomorphize(p).expect("mono eta def");
+    }
+
+    #[test]
+    fn typechecks_eta_generic_id() {
+        let src = r#"
+def id[T](x: T): T = x
+def apply(f: Int => Int, n: Int): Int = f(n)
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(apply(id, 3)))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("eta generic id on Int => Int");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate eta id");
+        crate::typ::monomorphize(p).expect("mono eta id");
+    }
+
+    #[test]
+    fn typechecks_eta_empty_list_pin() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map([]: List[Int], Str.fromInt()), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("eta on empty List[Int] pin");
+    }
+
+    #[test]
+    fn rejects_eta_arity_mismatch() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map(["a"], Str.concat), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("expects 2 args") || err.message().contains("arg"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]

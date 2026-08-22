@@ -708,9 +708,12 @@ pub const TUP_UNPACK: &str = "__tup";
 /// Synthetic binder for `{ case Pat => body }`. The body matches this name.
 pub const CASE_LAMBDA: &str = "__case";
 
-/// True for `__tup` / `__case` binders that must not leak into hover or complete.
+/// Binder for a unary def passed as `A => B` (`List.map(xs, Str.fromInt)`).
+pub const ETA_PARAM: &str = "__eta";
+
+/// True for `__tup` / `__case` / `__eta` binders that must not leak into hover or complete.
 pub fn is_synthetic_lambda_param(name: &str) -> bool {
-    name == TUP_UNPACK || name == CASE_LAMBDA
+    name == TUP_UNPACK || name == CASE_LAMBDA || name == ETA_PARAM
 }
 
 /// Arms of `{ case … }` from a lambda's param and body.

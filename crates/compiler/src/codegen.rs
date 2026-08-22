@@ -1039,7 +1039,11 @@ fn emit_fundef(def: &FunDef, ctx: &mut EmitCtx<'_>, out: &mut String) {
         );
     }
 
-    let body = emit_expr(&def.body, ctx, &mut locals, "body");
+    let body = if matches!(&def.ret, Type::Fun(_, _)) {
+        emit_fun_arg(&def.ret, &def.body, ctx, &mut locals, "body")
+    } else {
+        emit_expr(&def.body, ctx, &mut locals, "body")
+    };
     out.push_str(&body.code);
 
     let ret_kind = kind_of_type(&def.ret);
@@ -13742,6 +13746,68 @@ def apply(f: Int => String, n: Int): String = f(n)
         assert!(
             ir.contains("sz_smap_"),
             "placeholder A => B must emit a value closure:\n{ir}"
+        );
+        assert!(
+            ir.contains("_fnp(ptr "),
+            "fun apply must call the unpacked fn:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_fun_apply_eta_kit() {
+        let src = r#"
+def apply(f: Int => String, n: Int): String = f(n)
+@main def main: IO[Unit] =
+  IO.println(apply(Str.fromInt(), 1))
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_smap_"),
+            "eta A => B must emit a value closure:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_string_from_int"),
+            "eta must call the kit:\n{ir}"
+        );
+        assert!(
+            ir.contains("_fnp(ptr "),
+            "fun apply must call the unpacked fn:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_list_map_eta_kit() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map([1, 2], Str.fromInt()), ","))
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_smap_"),
+            "eta List.map must emit a mapper closure:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_list_map"),
+            "eta List.map must call the kit:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_fun_apply_eta_user_def() {
+        let src = r#"
+def bump(n: Int): Int = n + 1
+def apply(f: Int => Int, n: Int): Int = f(n)
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(apply(bump, 3)))
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_smap_"),
+            "eta unary def must emit a value closure:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_user_bump"),
+            "eta must call the user def:\n{ir}"
         );
         assert!(
             ir.contains("_fnp(ptr "),

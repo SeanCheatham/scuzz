@@ -1784,6 +1784,18 @@ enum Opt[T]:
     }
 
     #[test]
+    fn formats_eta_kit() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map([1], Str.fromInt()), ","))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("Str.fromInt()"), "{out}");
+        assert!(!out.contains("__eta"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
     fn formats_triple_quoted_multiline() {
         let src = "@main def main: IO[Unit] =\n  IO.println(\"\"\"a\nb\"\"\")\n";
         let out = format_source(src).unwrap();
