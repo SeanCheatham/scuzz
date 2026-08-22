@@ -575,6 +575,14 @@ SzList *sz_list_zip_all(SzList *xs, SzList *ys, void *x, void *y);
 /* (List[A], List[B]) from List[(A, B)]. A null pair is skipped.
  * Empty is two empty lists. */
 SzPair *sz_list_unzip(SzList *pairs);
+/* List[(Int, T)] in order. Empty stays empty. */
+SzList *sz_list_zip_with_index(SzList *xs);
+/* Fold with `fn((acc, head), env)`. Empty returns a retain of `z`.
+ * `fn` returns an owned acc. */
+void *sz_list_fold_left(SzList *xs, void *z, SzListMapFn fn, void *env);
+/* Fold with `fn((head, acc), env)` from the right. Empty returns a retain of `z`.
+ * `fn` returns an owned acc. */
+void *sz_list_fold_right(SzList *xs, void *z, SzListMapFn fn, void *env);
 /* Rows to columns. Stops at the shortest row. Empty is empty. */
 SzList *sz_list_transpose(SzList *xss);
 /* 1 when any cell equals `x` (string / boxed i64 by value). */

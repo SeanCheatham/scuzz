@@ -1247,6 +1247,18 @@ static void *inc_i64(void *head, void *env) {
   return sz_box_i64(sz_unbox_i64(head) + 1);
 }
 
+static void *fold_add_i64(void *pack, void *env) {
+  SzPair *p = (SzPair *)pack;
+  (void)env;
+  return sz_box_i64(sz_unbox_i64(p->left) + sz_unbox_i64(p->right));
+}
+
+static void *fold_concat_pair(void *pack, void *env) {
+  SzPair *p = (SzPair *)pack;
+  (void)env;
+  return sz_string_concat((SzString *)p->left, (SzString *)p->right);
+}
+
 static SzIo *after_ref(void *value, void *env) {
   (void)env;
   SzRef *r = (SzRef *)value;
@@ -6208,6 +6220,84 @@ int main(void) {
     sz_string_free(two);
     sz_string_free(nine);
     sz_string_free(zee);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
+  /* List.zipWithIndex / foldLeft / foldRight. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *a;
+    SzString *b;
+    SzString *bang;
+    SzList *xs;
+    SzList *tmp;
+    SzList *zix;
+    SzPair *pair;
+    void *n1;
+    void *n2;
+    void *n3;
+    void *z0;
+    void *sum;
+    SzList *ns;
+    SzString *folded;
+    sz_alloc_stats(&base_bytes, &base_count);
+    a = sz_string_from_cstr("a");
+    b = sz_string_from_cstr("b");
+    bang = sz_string_from_cstr("!");
+    xs = sz_list_cons(a, NULL);
+    tmp = sz_list_append(xs, b);
+    sz_release(xs);
+    xs = tmp;
+    zix = sz_list_zip_with_index(xs);
+    assert(sz_list_len(zix) == 2);
+    pair = (SzPair *)sz_list_head(zix);
+    assert(sz_unbox_i64(pair->left) == 0);
+    assert(pair->right == a);
+    pair = (SzPair *)sz_list_at(zix, 1);
+    assert(sz_unbox_i64(pair->left) == 1);
+    assert(pair->right == b);
+    sz_list_free(zix);
+    zix = sz_list_zip_with_index(NULL);
+    assert(sz_list_is_empty(zix));
+    n1 = sz_box_i64(1);
+    n2 = sz_box_i64(2);
+    n3 = sz_box_i64(3);
+    ns = sz_list_cons(n1, NULL);
+    tmp = sz_list_append(ns, n2);
+    sz_release(ns);
+    ns = sz_list_append(tmp, n3);
+    sz_release(tmp);
+    z0 = sz_box_i64(0);
+    sum = sz_list_fold_left(ns, z0, fold_add_i64, NULL);
+    assert(sz_unbox_i64(sum) == 6);
+    sz_release(sum);
+    sum = sz_list_fold_left(NULL, z0, fold_add_i64, NULL);
+    assert(sz_unbox_i64(sum) == 0);
+    sz_release(sum);
+    sum = sz_list_fold_right(ns, z0, fold_add_i64, NULL);
+    assert(sz_unbox_i64(sum) == 6);
+    sz_release(sum);
+    folded = (SzString *)sz_list_fold_left(xs, bang, fold_concat_pair, NULL);
+    assert(strcmp(sz_string_cstr(folded), "!ab") == 0);
+    sz_release(folded);
+    folded = (SzString *)sz_list_fold_right(xs, bang, fold_concat_pair, NULL);
+    assert(strcmp(sz_string_cstr(folded), "ab!") == 0);
+    sz_release(folded);
+    folded = (SzString *)sz_list_fold_left(NULL, bang, fold_concat_pair, NULL);
+    assert(strcmp(sz_string_cstr(folded), "!") == 0);
+    sz_release(folded);
+    sz_list_free(ns);
+    sz_list_free(xs);
+    sz_release(n1);
+    sz_release(n2);
+    sz_release(n3);
+    sz_release(z0);
+    sz_string_free(a);
+    sz_string_free(b);
+    sz_string_free(bang);
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
     assert(live_bytes == base_bytes);

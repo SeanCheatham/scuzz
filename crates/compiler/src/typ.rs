@@ -2233,6 +2233,16 @@ fn kit_lambda_param_ty_at(
             prior.first().and_then(|t| set_elem(t).ok())
         }
         ("List.tabulate", 1) => Some(Type::Int),
+        ("List.foldLeft", 2) => {
+            let elem = prior.first().and_then(|t| list_elem(t).ok())?;
+            let z = prior.get(1)?.clone();
+            Some(Type::Tuple(vec![z, elem]))
+        }
+        ("List.foldRight", 2) => {
+            let elem = prior.first().and_then(|t| list_elem(t).ok())?;
+            let z = prior.get(1)?.clone();
+            Some(Type::Tuple(vec![elem, z]))
+        }
         (
             "Stream.filter" | "Stream.map" | "Stream.takeWhile" | "Stream.dropWhile"
             | "Stream.find" | "Stream.exists" | "Stream.evalMap",
@@ -3682,6 +3692,20 @@ fn infer_call(
             expect_arity(callee, &arg_tys, 1)?;
             expect_int_elem(callee, &list_elem(&arg_tys[0])?)?;
             Ok(Type::Int)
+        }
+        "List.zipWithIndex" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            let elem = list_elem(&arg_tys[0])?;
+            Ok(list_of(Type::Tuple(vec![Type::Int, elem])))
+        }
+        "List.foldLeft" | "List.foldRight" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            list_elem(&arg_tys[0])?;
+            let ret = match &arg_tys[2] {
+                Type::Fun(_, r) => (**r).clone(),
+                other => other.clone(),
+            };
+            prefer_named(&arg_tys[1], &ret, "fold accumulator")
         }
         "List.exists" | "List.forall" => {
             expect_arity(callee, &arg_tys, 2)?;
@@ -10577,6 +10601,23 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("List.zip/zipAll/unzip/transpose should typecheck");
+    }
+
+    #[test]
+    fn typechecks_list_zip_with_index_and_fold() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs = []: List[Int]
+    _ <- IO.println(List.join(List.map(List.zipWithIndex(["a", "b"]), (i, s) => s"${Str.fromInt(i)},$s"), "|"))
+    _ <- IO.println(Str.fromInt(List.foldLeft([1, 2, 3], 0, (acc, n) => acc + n)))
+    _ <- IO.println(List.foldLeft(["a", "b"], "!", (acc, x) => Str.concat(acc, x)))
+    _ <- IO.println(List.foldRight(["a", "b"], "!", (x, acc) => Str.concat(x, acc)))
+    _ <- IO.println(Str.fromInt(List.foldLeft(xs, 7, (acc, n) => acc + n)))
+    _ <- IO.println(Str.fromInt(List.foldLeft([]: List[Int], 7, (acc, n) => acc + n)))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("List.zipWithIndex/foldLeft/foldRight should typecheck");
     }
 
     #[test]

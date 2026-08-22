@@ -581,6 +581,63 @@ SzPair *sz_list_unzip(SzList *pairs) {
   return out;
 }
 
+SzList *sz_list_zip_with_index(SzList *xs) {
+  SzList *p;
+  SzList *acc = NULL;
+  SzList *out;
+  int64_t i = 0;
+  void *box;
+  SzPair *pair;
+  for (p = xs; p; p = p->tail) {
+    box = sz_box_i64(i);
+    pair = sz_pair_new(box, p->head);
+    sz_release(box);
+    acc = sz_list_cons_take(pair, acc);
+    sz_release(pair);
+    i++;
+  }
+  out = sz_list_reverse(acc);
+  sz_release(acc);
+  return out;
+}
+
+void *sz_list_fold_left(SzList *xs, void *z, SzListMapFn fn, void *env) {
+  void *acc;
+  SzList *p;
+  SzPair *pack;
+  void *next;
+  if (!fn)
+    sz_panic("sz_list_fold_left(null fn)");
+  sz_retain(z);
+  acc = z;
+  for (p = xs; p; p = p->tail) {
+    pack = sz_pair_new(acc, p->head);
+    next = fn(pack, env);
+    sz_release(pack);
+    sz_release(acc);
+    acc = next;
+  }
+  return acc;
+}
+
+void *sz_list_fold_right(SzList *xs, void *z, SzListMapFn fn, void *env) {
+  SzPair *pack;
+  void *rest;
+  void *out;
+  if (!fn)
+    sz_panic("sz_list_fold_right(null fn)");
+  if (!xs) {
+    sz_retain(z);
+    return z;
+  }
+  rest = sz_list_fold_right(xs->tail, z, fn, env);
+  pack = sz_pair_new(xs->head, rest);
+  out = fn(pack, env);
+  sz_release(pack);
+  sz_release(rest);
+  return out;
+}
+
 int64_t sz_list_contains(SzList *xs, void *x) {
   SzList *p;
   for (p = xs; p; p = p->tail) {

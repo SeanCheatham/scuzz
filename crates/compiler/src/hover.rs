@@ -707,6 +707,18 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "List.unzip(pairs: List[(A, B)]): (List[A], List[B])",
     ),
     (
+        "List.zipWithIndex",
+        "List.zipWithIndex(xs: List[T]): List[(Int, T)]",
+    ),
+    (
+        "List.foldLeft",
+        "List.foldLeft(xs: List[T], z: U, f: (U, T) => U): U",
+    ),
+    (
+        "List.foldRight",
+        "List.foldRight(xs: List[T], z: U, f: (T, U) => U): U",
+    ),
+    (
         "List.transpose",
         "List.transpose(xss: List[List[T]]): List[List[T]]",
     ),
@@ -2319,6 +2331,30 @@ enum Opt[T]:
         let h = hover_src(src, "unzip");
         assert!(
             h.contains("List.unzip(pairs: List[(A, B)]): (List[A], List[B])"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map(List.zipWithIndex(["a"]), (i, s) => s"${Str.fromInt(i)},$s"), "|"))
+"#;
+        let h = hover_src(src, "zipWithIndex");
+        assert!(
+            h.contains("List.zipWithIndex(xs: List[T]): List[(Int, T)]"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(List.foldLeft([1], 0, (acc, n) => acc + n)))
+"#;
+        let h = hover_src(src, "foldLeft");
+        assert!(
+            h.contains("List.foldLeft(xs: List[T], z: U, f: (U, T) => U): U"),
+            "{h}"
+        );
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.foldRight(["a"], "!", (x, acc) => Str.concat(x, acc)))
+"#;
+        let h = hover_src(src, "foldRight");
+        assert!(
+            h.contains("List.foldRight(xs: List[T], z: U, f: (T, U) => U): U"),
             "{h}"
         );
         let src = r#"@main def main: IO[Unit] =
