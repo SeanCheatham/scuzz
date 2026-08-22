@@ -4,9 +4,9 @@ use scuzz_compiler::compile_prepared_program;
 use scuzz_compiler::compile_project;
 use scuzz_compiler::driver::load_verify_program;
 use scuzz_compiler::fuzz::{
-    corpus_keep, corpus_push, count_dump_section, drive_script_lines, dump_push, exhaust_alphabet,
-    fuzz_mutate_sites, fuzz_pick_sched, fuzz_pick_script, lines_nonempty, missing_from,
-    parse_repro, repro_text, script_text,
+    corpus_entry_name, corpus_keep, corpus_push, corpus_sorted_names, count_dump_section,
+    drive_script_lines, dump_push, exhaust_alphabet, fuzz_mutate_sites, fuzz_pick_sched,
+    fuzz_pick_script, lines_nonempty, missing_from, parse_repro, repro_text, script_text, Repro,
 };
 use scuzz_compiler::manifest::load_manifest;
 use scuzz_compiler::mutate::{mutate_apply_mode, mutate_count_mode, MutateMode};
@@ -63,6 +63,14 @@ struct UiKeep {
     events: Vec<String>,
 }
 
+#[derive(Default)]
+struct CorpusReport {
+    entries: i64,
+    failures: i64,
+    reached: Vec<String>,
+    promoted: i64,
+}
+
 /// Result fields written to summary.toml.
 struct FuzzSummary<'a> {
     seed: i64,
@@ -75,6 +83,9 @@ struct FuzzSummary<'a> {
     events: &'a [String],
     declared: &'a [String],
     reached: &'a [String],
+    missing_budget: &'a [String],
+    missing_corpus: &'a [String],
+    stored: &'a CorpusReport,
     repro: Option<&'a Path>,
     mutate: &'a MutateStats,
 }
@@ -93,6 +104,10 @@ struct Campaign {
     fail_fast: bool,
     search_failures: i64,
     repro: Option<SearchRepro>,
+    stored: CorpusReport,
+    corpus_reached: Vec<String>,
+    coverage_promoted: i64,
+    declared_count: i64,
 }
 
 struct UiSearch {
@@ -152,6 +167,7 @@ fn fuzz_run(
         is_ui,
     };
     let (search_budget, mutate_slots) = budget_split(iterations);
+    let declared_count = declared_names(&project_dir).len() as i64;
     let mut camp = Campaign {
         seed,
         iterations,
@@ -161,7 +177,14 @@ fn fuzz_run(
         fail_fast,
         search_failures: 0,
         repro: None,
+        stored: CorpusReport::default(),
+        corpus_reached: Vec::new(),
+        coverage_promoted: 0,
+        declared_count,
     };
+    if iterations == 0 {
+        println!("scuzz fuzz: corpus-only (--iterations 0)");
+    }
     if is_ui {
         fuzz_ui_campaign(&ctx, &mut camp, search_budget)
     } else {
@@ -241,6 +264,7 @@ fn fuzz_ui_campaign(
         prefixes: Vec::new(),
         seen: vec![dump],
     };
+    replay_stored_corpus(ctx, camp, Some(&mut search), None)?;
     let mut remaining = search_budget;
     let alphabet = exhaust_alphabet(
         targets.n_buttons,
@@ -275,6 +299,7 @@ fn fuzz_io_campaign(
 ) -> Result<ExitCode> {
     let mut corpus: Vec<IoKeep> = Vec::new();
     let drivers = read_drivers(ctx.project_dir);
+    replay_stored_corpus(ctx, camp, None, Some(&mut corpus))?;
     for iter in 0..search_budget {
         let sched_corpus: Vec<String> = corpus.iter().map(|k| k.sched.clone()).collect();
         let sched = fuzz_pick_sched(camp.seed, iter, &sched_corpus);
@@ -310,6 +335,14 @@ fn fuzz_io_campaign(
                 },
             );
             corpus.truncate(32);
+            maybe_promote_coverage(
+                ctx,
+                camp,
+                camp.seed + iter,
+                &sched,
+                &corpus[0].drives,
+                &reached,
+            )?;
         }
     }
     camp.search_used = search_budget;
@@ -442,6 +475,14 @@ fn consider_ui_script(
                 events: events.to_vec(),
             },
         );
+        maybe_promote_coverage(
+            ctx,
+            camp,
+            camp.seed + iter,
+            &sched.to_string(),
+            events,
+            &reached,
+        )?;
     }
     Ok(())
 }
@@ -453,28 +494,38 @@ fn finish_campaign(
     corpus_ui: &[UiKeep],
     corpus_io: &[IoKeep],
 ) -> Result<ExitCode> {
-    let missing = sometimes_missing(ctx.project_dir, ctx.fuzz_dir);
-    if camp.fail_fast && !missing.is_empty() {
-        return report_sometimes_fail(ctx, camp, corpus, &missing);
+    let declared = declared_names(ctx.project_dir);
+    let reached = reached_names(ctx.fuzz_dir);
+    let missing_budget = sometimes_missing_from(&declared, &reached);
+    if camp.fail_fast && !missing_budget.is_empty() {
+        return report_sometimes_fail(ctx, camp, corpus, &declared, &reached, &missing_budget);
     }
-    mutate_then_finish(ctx, camp, corpus, corpus_ui, corpus_io, &missing)
+    mutate_then_finish(
+        ctx,
+        camp,
+        corpus,
+        corpus_ui,
+        corpus_io,
+        &declared,
+        &reached,
+        &missing_budget,
+    )
 }
 
-fn sometimes_missing(project_dir: &Path, fuzz_dir: &Path) -> Vec<String> {
-    let decl = declared_names(project_dir);
-    let camp = reached_names(fuzz_dir);
-    missing_from(&decl, &camp).into_iter().cloned().collect()
+fn sometimes_missing_from(declared: &[String], have: &[String]) -> Vec<String> {
+    missing_from(declared, have).into_iter().cloned().collect()
 }
 
 fn report_sometimes_fail(
     ctx: &FuzzCtx<'_>,
     camp: &Campaign,
     corpus: i64,
-    missing: &[String],
+    declared: &[String],
+    reached: &[String],
+    missing_budget: &[String],
 ) -> Result<ExitCode> {
     let mutate = mutate_stats_skip(ctx.project_dir, camp.oracles);
-    let declared = declared_names(ctx.project_dir);
-    let reached = reached_names(ctx.fuzz_dir);
+    let missing_corpus = sometimes_missing_from(declared, &camp.stored.reached);
     let repro = camp.repro.as_ref().map(|r| r.path.as_path());
     let events: &[String] = camp
         .repro
@@ -492,13 +543,29 @@ fn report_sometimes_fail(
             ok: false,
             drivers: &read_drivers(ctx.project_dir),
             events,
-            declared: &declared,
-            reached: &reached,
+            declared,
+            reached,
+            missing_budget,
+            missing_corpus: &missing_corpus,
+            stored: &camp.stored,
             repro,
             mutate: &mutate,
         },
     )?;
-    bail!("Property.sometimes never reached: {}", missing.join(", "))
+    bail_sometimes(missing_budget, &missing_corpus)
+}
+
+fn bail_sometimes(missing_budget: &[String], missing_corpus: &[String]) -> Result<ExitCode> {
+    if !missing_corpus.is_empty() {
+        bail!(
+            "Property.sometimes reached by no stored corpus entry: {}",
+            missing_corpus.join(", ")
+        )
+    }
+    bail!(
+        "Property.sometimes not reached in this budget: {}",
+        missing_budget.join(", ")
+    )
 }
 
 fn mutate_then_finish(
@@ -507,7 +574,9 @@ fn mutate_then_finish(
     corpus: i64,
     corpus_ui: &[UiKeep],
     corpus_io: &[IoKeep],
-    sometimes_missing: &[String],
+    declared: &[String],
+    reached: &[String],
+    missing_budget: &[String],
 ) -> Result<ExitCode> {
     let mutate = mutate_phase(
         ctx,
@@ -517,15 +586,14 @@ fn mutate_then_finish(
         corpus_ui,
         corpus_io,
     )?;
-    let declared = declared_names(ctx.project_dir);
-    let reached = reached_names(ctx.fuzz_dir);
+    let missing_corpus = sometimes_missing_from(declared, &camp.stored.reached);
     let repro = camp.repro.as_ref().map(|r| r.path.as_path());
     let events: &[String] = camp
         .repro
         .as_ref()
         .map(|r| r.events.as_slice())
         .unwrap_or(&[]);
-    let ok = camp.search_failures == 0 && sometimes_missing.is_empty() && mutate.survived == 0;
+    let ok = camp.search_failures == 0 && missing_budget.is_empty() && mutate.survived == 0;
     write_and_print(
         ctx,
         &FuzzSummary {
@@ -537,20 +605,17 @@ fn mutate_then_finish(
             ok,
             drivers: &read_drivers(ctx.project_dir),
             events,
-            declared: &declared,
-            reached: &reached,
+            declared,
+            reached,
+            missing_budget,
+            missing_corpus: &missing_corpus,
+            stored: &camp.stored,
             repro,
             mutate: &mutate,
         },
     )?;
     if ok {
         return Ok(ExitCode::SUCCESS);
-    }
-    if !sometimes_missing.is_empty() {
-        println!(
-            "Property.sometimes never reached: {}",
-            sometimes_missing.join(", ")
-        );
     }
     if camp.search_failures > 0 {
         if let Some(repro) = &camp.repro {
@@ -571,13 +636,25 @@ fn mutate_then_finish(
     if camp.search_failures > 0 {
         bail!("fuzz failure");
     }
-    if !sometimes_missing.is_empty() {
-        bail!(
-            "Property.sometimes never reached: {}",
-            sometimes_missing.join(", ")
-        );
+    if !missing_budget.is_empty() {
+        return bail_sometimes(missing_budget, &missing_corpus);
     }
     bail!("mutate survivors");
+}
+
+fn print_sometimes_missing(missing_budget: &[String], missing_corpus: &[String]) {
+    if !missing_budget.is_empty() {
+        println!(
+            "Property.sometimes not reached in this budget: {}",
+            missing_budget.join(", ")
+        );
+    }
+    if !missing_corpus.is_empty() {
+        println!(
+            "Property.sometimes reached by no stored corpus entry: {}",
+            missing_corpus.join(", ")
+        );
+    }
 }
 
 fn mutate_stats_skip(project_dir: &Path, oracles: bool) -> MutateStats {
@@ -792,6 +869,8 @@ fn write_fail_summary(ctx: &FuzzCtx<'_>, camp: &Campaign, corpus: i64) -> Result
     let mutate = mutate_stats_skip(ctx.project_dir, camp.oracles);
     let declared = declared_names(ctx.project_dir);
     let reached = reached_names(ctx.fuzz_dir);
+    let missing_budget = sometimes_missing_from(&declared, &reached);
+    let missing_corpus = sometimes_missing_from(&declared, &camp.stored.reached);
     let repro = camp.repro.as_ref().map(|r| r.path.as_path());
     let events: &[String] = camp
         .repro
@@ -811,6 +890,9 @@ fn write_fail_summary(ctx: &FuzzCtx<'_>, camp: &Campaign, corpus: i64) -> Result
             events,
             declared: &declared,
             reached: &reached,
+            missing_budget: &missing_budget,
+            missing_corpus: &missing_corpus,
+            stored: &camp.stored,
             repro,
             mutate: &mutate,
         },
@@ -875,6 +957,14 @@ fn note_search_fail(
                 println!("  {line}");
             }
         }
+        if promote_to_corpus(
+            ctx.project_dir,
+            script_seed,
+            &schedule_seed.to_string(),
+            &shrunk,
+        )? {
+            camp.stored.promoted += 1;
+        }
         camp.repro = Some(SearchRepro {
             path,
             events: shrunk,
@@ -889,6 +979,179 @@ fn note_search_fail(
     if first {
         println!("scuzz fuzz: --no-fail-fast; continue search then mutation");
     }
+    Ok(())
+}
+
+fn load_corpus(project_dir: &Path) -> Result<Vec<(PathBuf, Repro)>> {
+    let dir = project_dir.join("corpus");
+    if !dir.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut names = Vec::new();
+    for ent in std::fs::read_dir(&dir)? {
+        let ent = ent?;
+        names.push(ent.file_name().to_string_lossy().into_owned());
+    }
+    let mut out = Vec::new();
+    for name in corpus_sorted_names(names) {
+        let path = dir.join(&name);
+        if !path.is_file() {
+            continue;
+        }
+        let text = std::fs::read_to_string(&path)
+            .with_context(|| format!("reading {}", path.display()))?;
+        let repro = parse_repro(&text).map_err(|e| anyhow::anyhow!("{}: {e}", path.display()))?;
+        out.push((path, repro));
+    }
+    Ok(out)
+}
+
+fn replay_stored_corpus(
+    ctx: &FuzzCtx<'_>,
+    camp: &mut Campaign,
+    mut ui: Option<&mut UiSearch>,
+    mut io: Option<&mut Vec<IoKeep>>,
+) -> Result<()> {
+    let entries = load_corpus(ctx.project_dir)?;
+    camp.stored.entries = entries.len() as i64;
+    if !entries.is_empty() {
+        println!(
+            "scuzz fuzz: replay {} corpus {}",
+            entries.len(),
+            if entries.len() == 1 {
+                "entry"
+            } else {
+                "entries"
+            }
+        );
+    }
+    for (path, repro) in entries {
+        let sched = repro.schedule_seed.clone().unwrap_or_default();
+        let code = if ctx.is_ui {
+            fuzz_exec(ctx.exe, ctx.fuzz_dir, ctx.w, ctx.h, &repro.events, &sched)?
+        } else {
+            fuzz_exec_io(ctx.exe, ctx.fuzz_dir, &sched, &repro.events)?
+        };
+        let this_reached = lines_nonempty(
+            &std::fs::read_to_string(ctx.fuzz_dir.join("sometimes.reached")).unwrap_or_default(),
+        );
+        for n in this_reached {
+            if !camp.corpus_reached.iter().any(|c| c == &n) {
+                camp.corpus_reached.push(n);
+            }
+        }
+        if code != 0 {
+            camp.stored.failures += 1;
+            camp.search_failures += 1;
+            if camp.repro.is_none() {
+                let dump_src = ctx.fuzz_dir.join("dump.txt");
+                let dump_fail = ctx.fuzz_dir.join("dump.fail");
+                if dump_src.exists() {
+                    std::fs::copy(&dump_src, &dump_fail)?;
+                }
+                std::fs::copy(&path, ctx.fuzz_dir.join("repro.toml"))?;
+                println!(
+                    "fuzz failure on corpus {} ({} events)",
+                    path.display(),
+                    repro.events.len()
+                );
+                println!(
+                    "replay: scuzz fuzz {} --replay {}",
+                    ctx.project_dir.display(),
+                    path.display()
+                );
+                camp.repro = Some(SearchRepro {
+                    path: path.clone(),
+                    events: repro.events.clone(),
+                });
+            } else {
+                println!(
+                    "fuzz failure on corpus {}; counted (repro kept)",
+                    path.display()
+                );
+            }
+            if camp.fail_fast {
+                let corpus_len = ui
+                    .as_ref()
+                    .map(|s| s.prefixes.len() as i64)
+                    .or_else(|| io.as_ref().map(|c| c.len() as i64))
+                    .unwrap_or(0);
+                camp.stored.reached = camp.corpus_reached.clone();
+                write_fail_summary(ctx, camp, corpus_len)?;
+                bail!("fuzz failure");
+            }
+            continue;
+        }
+        if let Some(search) = ui.as_mut() {
+            let dump = std::fs::read_to_string(ctx.fuzz_dir.join("dump.txt")).unwrap_or_default();
+            dump_push(&mut search.seen, dump);
+            corpus_push(
+                &mut search.prefixes,
+                UiKeep {
+                    sched: sched.clone(),
+                    events: repro.events,
+                },
+            );
+        } else if let Some(corpus) = io.as_mut() {
+            corpus_push(
+                corpus,
+                IoKeep {
+                    sched,
+                    drives: repro.events,
+                },
+            );
+        }
+    }
+    camp.stored.reached = camp.corpus_reached.clone();
+    Ok(())
+}
+
+fn promote_to_corpus(
+    project_dir: &Path,
+    seed: i64,
+    schedule_seed: &str,
+    events: &[String],
+) -> Result<bool> {
+    let dir = project_dir.join("corpus");
+    std::fs::create_dir_all(&dir)?;
+    let path = dir.join(format!("{}.toml", corpus_entry_name(schedule_seed, events)));
+    if path.exists() {
+        return Ok(false);
+    }
+    std::fs::write(&path, repro_text(seed, schedule_seed, events))?;
+    println!("scuzz fuzz: promoted {}", path.display());
+    Ok(true)
+}
+
+fn maybe_promote_coverage(
+    ctx: &FuzzCtx<'_>,
+    camp: &mut Campaign,
+    script_seed: i64,
+    schedule_seed: &str,
+    events: &[String],
+    reached: &[String],
+) -> Result<()> {
+    let novel: Vec<String> = missing_from(reached, &camp.corpus_reached)
+        .into_iter()
+        .cloned()
+        .collect();
+    if novel.is_empty() {
+        return Ok(());
+    }
+    if camp.declared_count <= 0 || camp.coverage_promoted >= camp.declared_count {
+        return Ok(());
+    }
+    if !promote_to_corpus(ctx.project_dir, script_seed, schedule_seed, events)? {
+        return Ok(());
+    }
+    camp.stored.promoted += 1;
+    camp.coverage_promoted += 1;
+    for n in novel {
+        if !camp.corpus_reached.iter().any(|c| c == &n) {
+            camp.corpus_reached.push(n);
+        }
+    }
+    camp.stored.reached = camp.corpus_reached.clone();
     Ok(())
 }
 
@@ -945,6 +1208,10 @@ fn print_report(s: &FuzzSummary<'_>) {
         s.search, s.search_failures, s.seed, s.corpus
     );
     println!(
+        "corpus: {} stored, {} failed, {} promoted",
+        s.stored.entries, s.stored.failures, s.stored.promoted
+    );
+    println!(
         "coverage: {}",
         if s.reached.is_empty() {
             "(none)".into()
@@ -960,6 +1227,7 @@ fn print_report(s: &FuzzSummary<'_>) {
             s.declared.join(", ")
         }
     );
+    print_sometimes_missing(s.missing_budget, s.missing_corpus);
     println!(
         "mutate: {} killed, {} survived ({} of {} sites)",
         s.mutate.killed, s.mutate.survived, s.mutate.ran, s.mutate.sites
@@ -977,7 +1245,7 @@ fn write_fuzz_summary(ctx: &FuzzCtx<'_>, s: &FuzzSummary<'_>) -> Result<()> {
         None => String::new(),
     };
     let text = format!(
-        "[fuzz]\nok = {ok}\nseed = {seed}\niterations = {iterations}\nsearch = {search}\nsearch_failures = {search_failures}\ncorpus = {corpus}\ndrivers = [{drivers}]\nevents = [{events}]\ndeclared = [{declared}]\nreachability = [{reached}]\nrepro = \"{repro}\"\nreplay = \"{replay}\"\n\n[mutate]\nkilled = {killed}\nsurvived = {survived}\nran = {ran}\nsites = {sites}\noracles = {oracles}\n",
+        "[fuzz]\nok = {ok}\nseed = {seed}\niterations = {iterations}\nsearch = {search}\nsearch_failures = {search_failures}\ncorpus = {corpus}\ndrivers = [{drivers}]\nevents = [{events}]\ndeclared = [{declared}]\nreachability = [{reached}]\nmissing_budget = [{missing_budget}]\nmissing_corpus = [{missing_corpus}]\nrepro = \"{repro}\"\nreplay = \"{replay}\"\n\n[corpus]\nentries = {entries}\nfailures = {failures}\nreached = [{corpus_reached}]\npromoted = {promoted}\n\n[mutate]\nkilled = {killed}\nsurvived = {survived}\nran = {ran}\nsites = {sites}\noracles = {oracles}\n",
         ok = if s.ok { "true" } else { "false" },
         seed = s.seed,
         iterations = s.iterations,
@@ -988,8 +1256,14 @@ fn write_fuzz_summary(ctx: &FuzzCtx<'_>, s: &FuzzSummary<'_>) -> Result<()> {
         events = toml_str_array(s.events),
         declared = toml_str_array(s.declared),
         reached = toml_str_array(s.reached),
+        missing_budget = toml_str_array(s.missing_budget),
+        missing_corpus = toml_str_array(s.missing_corpus),
         repro = repro_path.replace('\\', "\\\\").replace('"', "\\\""),
         replay = replay.replace('\\', "\\\\").replace('"', "\\\""),
+        entries = s.stored.entries,
+        failures = s.stored.failures,
+        corpus_reached = toml_str_array(&s.stored.reached),
+        promoted = s.stored.promoted,
         killed = s.mutate.killed,
         survived = s.mutate.survived,
         ran = s.mutate.ran,
