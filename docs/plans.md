@@ -1,8 +1,8 @@
 # Next slice
 
-A2 — Caret.
+A3 — Hover and secondary click.
 
-Byte (or grapheme) offset on TextField. Click-to-caret from pointer `(x, y)`. Arrows, Home, End, Delete. Dump caret next to `[fields]` without shifting existing field indices.
+Today MOVE inject fails unless a button is down. There is no mouse button on `SzInputEvent`. Add a button field. Accept MOVE without a button. Show `View.tooltip` on hover. Headless inject drives hover and secondary click.
 
 Each slice lands Headless inject + dump + a runtime test. Desktop and Headless share verbs.
 

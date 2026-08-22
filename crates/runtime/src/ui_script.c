@@ -117,6 +117,32 @@ static void script_parse_backspace(const char *rest, int *index, int *count) {
   *count = a < 1 ? 1 : a;
 }
 
+static void script_parse_caret(const char *rest, int *index, int *offset) {
+  const char *p = rest ? rest : "";
+  int a = 0, b = 0;
+  *index = -1;
+  *offset = 0;
+  if (*p < '0' || *p > '9')
+    return;
+  while (*p >= '0' && *p <= '9') {
+    a = a * 10 + (*p - '0');
+    p++;
+  }
+  if (*p == ' ') {
+    p++;
+    if (*p >= '0' && *p <= '9') {
+      while (*p >= '0' && *p <= '9') {
+        b = b * 10 + (*p - '0');
+        p++;
+      }
+      *index = a;
+      *offset = b;
+      return;
+    }
+  }
+  *offset = a;
+}
+
 static int script_focus_field(SzUiSession *session, int index) {
   if (session && sz_view_focus_text_field_at(sz_ui_session_root(session), index))
     return 1;
@@ -214,15 +240,18 @@ void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
      xy <x> <y> inject TAP at logical point; miss does not panic
      text <s>   replace the [fields] starred TextField with <s>; no field is a no-op
      text <n> <s>  replace dump-index n (a11y order); `text 0` is still payload "0"
-     type <s>   append <s> to the [fields] starred TextField; empty is a no-op; no field is a no-op
-     type <n> <s>  append to dump-index n; `type 0` is still payload "0"
+     type <s>   insert <s> at the caret on the [fields] starred TextField; empty is a no-op; no field is a no-op
+     type <n> <s>  insert at the caret on dump-index n; `type 0` is still payload "0"
      key <name> [text]  named key on the starred TextField (`Enter`, `Backspace`, `ArrowLeft`, `a`);
-                        optional UTF-8 insert text; unused names inject and no-op; live OS keys record this verb
+                        optional UTF-8 insert text; arrows / Home / End / Delete use the caret;
+                        live OS keys record this verb
+     caret <n>  set the starred TextField caret to byte offset n
+     caret <i> <n>  set dump-index i caret to byte offset n
      pump <k>   pump k extra frames
      scroll <dy> pan the first Scroll on its axis (positive = content up or left); no scroll is a no-op
      scroll <n> <dy>  pan dump-index n ([scrolls] scan order); `scroll 40` stays dy 40
-     backspace <n> chop n UTF-8 code points from the [fields] starred TextField (default 1); no field is a no-op
-     backspace <n> <k>  chop k UTF-8 code points from dump-index n
+     backspace <n> chop n UTF-8 code points before the caret on the [fields] starred TextField (default 1); no field is a no-op
+     backspace <n> <k>  chop k UTF-8 code points before the caret on dump-index n
      dump       rewrite the live debug dump now (includes [heap] kinds, delta, and [live] rows); no dump path is a no-op
      reload     rebuild the View factory now; missing factory is a no-op
      quit       stop the live session; remaining script lines do not run
@@ -309,6 +338,15 @@ static void play_script_line(SzUiSession *session, char *line) {
     if (rest[ni] == ' ')
       text = rest + ni + 1;
     script_key(session, name, text);
+  } else if (strncmp(line, "caret ", 6) == 0 || strcmp(line, "caret") == 0) {
+    int idx, off;
+    script_parse_caret(len > 5 ? line + 6 : "", &idx, &off);
+    if (!sz_ui_session_set_caret(session, idx, off)) {
+      if (idx < 0)
+        fprintf(stderr, "scuzz: script caret skipped (no text field)\n");
+      else
+        fprintf(stderr, "scuzz: script caret %d skipped\n", idx);
+    }
   } else if (strcmp(line, "dump") == 0) {
     sz_ui_session_dump_now(session);
   } else if (strcmp(line, "reload") == 0) {

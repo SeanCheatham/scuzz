@@ -94,7 +94,7 @@ button:Clear
 25 Clear 12,516 48x32
 
 [fields]
-0* item=""
+0* item="" caret=0
 
 [scrolls]
 0 scrollh

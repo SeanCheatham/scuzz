@@ -379,11 +379,14 @@ int sz_view_handle_tap(SzView *root, float x, float y);
 int sz_view_activate(SzView *root, SzView *target, float x, float y);
 /* Layout + activate `target` and mark the session dirty (script `tap N`). */
 int sz_ui_session_activate_view(SzUiSession *session, SzView *target);
-/* Append UTF-8 to the focused TextField, or chop one UTF-8 code point at the
- * end when backspace != 0. Caret-in-middle is not this helper. */
+/* Focus dump-index `index` (starred field when index < 0), set caret, mark dirty. */
+int sz_ui_session_set_caret(SzUiSession *session, int index, int offset);
+/* Insert UTF-8 at the caret, or chop one UTF-8 code point before the caret
+ * when backspace != 0. */
 int sz_view_handle_text_edit(SzView *root, const char *text, int backspace);
-/* Named key on the focused TextField. Backspace chops a UTF-8 code point at
- * the end. Nonempty `text` inserts UTF-8. Unused names inject and no-op. */
+/* Named key on the focused TextField. Backspace / Delete / arrows / Home / End
+ * use the caret. Nonempty `text` inserts UTF-8 at the caret. Unused names
+ * inject and no-op. */
 int sz_view_handle_key(SzView *root, const char *key, const char *text,
                        int mods);
 
@@ -458,6 +461,10 @@ SzA11yRole sz_view_a11y_role(const SzView *view);
 const char *sz_view_a11y_label(const SzView *view);
 /* Live TextField string, or "" if not a field. */
 const char *sz_view_text_field_value(const SzView *view);
+/* Caret byte offset on a TextField (clamped, UTF-8 snapped). 0 if not a field. */
+int sz_view_text_field_caret(const SzView *view);
+/* Set caret byte offset (clamped, UTF-8 snapped). 1 if `view` is a TextField. */
+int sz_view_set_text_field_caret(SzView *view, int offset);
 /* Depth-first "role:label" lines joined by newlines (caller frees SzString). */
 SzString *sz_view_a11y_dump(SzView *root);
 
@@ -481,10 +488,12 @@ int sz_ui_session_watch(SzUiSession *session, const char *path);
  * pumps, stamp reload, and IO-bridge flushes. Agents read the file.
  * [taps] lists inject indices for `tap N` (scan order, cap 64).
  * [fields] lists TextFields in a11y order. `N*` is the text/type/backspace/key
- * target (focused, else first). Lines are `N placeholder="live"` (star on
- * the target). `text N s` / `type N s` / `backspace N k` target dump index N.
+ * target (focused, else first). Lines are `N placeholder="live" caret=B` (star on
+ * the target; `B` is the caret byte offset). `text N s` / `type N s` /
+ * `backspace N k` / `caret N b` target dump index N.
  * One-token forms still use the starred field. `key <name> [text]` uses the
- * starred field. Live OS keys record as `key`, not `type`.
+ * starred field. Live OS keys record as `key`, not `type`. `caret <n>` sets the
+ * starred-field caret. Click-to-caret uses TAP / `xy` on the field.
  * [scrolls] lists hittable Scrolls in scan order; `scroll N dy` pans index N
  * (`scroll 40` stays the first).
  * [last_hit] appears after a TAP in this session: `xy x y -> role:label` or
@@ -498,7 +507,7 @@ int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
 int sz_ui_session_write_dump(SzUiSession *session, const char *path);
 /* Rewrite the live debug dump now, including [session] and [heap]. No path is a no-op. */
 int sz_ui_session_dump_now(SzUiSession *session);
-/* Watch an inject script (tap/xy/text/type/key/pump/scroll/backspace/dump/reload/quit/resetpeak).
+/* Watch an inject script (tap/xy/text/type/key/caret/pump/scroll/backspace/dump/reload/quit/resetpeak).
  * Next pump that sees new contents plays the suffix (append) or the whole file
  * (rewrite). Missing = empty. */
 int sz_ui_session_set_inject(SzUiSession *session, const char *path);
@@ -643,7 +652,7 @@ SzView *sz_lang_view_bind_text(SzSignalStr *sig);
  * SCUZZ_UI_RELOAD_CODE (dylib exporting sz_ui_reload_rebuild) if that
  * file exists, then rebuilds. Writes SCUZZ_UI_DEBUG_DUMP on dirty pumps
  * when set (includes [heap]). Plays SCUZZ_UI_INJECT
- * (tap/xy/text/type/key/pump/scroll/backspace/dump/reload/quit/resetpeak) when
+ * (tap/xy/text/type/key/caret/pump/scroll/backspace/dump/reload/quit/resetpeak) when
  * that file changes. `quit` stops the live pump loop. Desktop quit is window
  * close. `resetpeak` resets
  * peak bytes and the heap delta mark. */
