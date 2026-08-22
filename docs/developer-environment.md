@@ -34,15 +34,18 @@ export LIBRARY_PATH=/usr/lib/gcc/x86_64-linux-gnu/13
 
 ASan skips when the ASan runtime cannot link. GPU needs `LIBGL_ALWAYS_SOFTWARE=1` when the host has no GPU.
 
+## Git hooks
+
+```bash
+./scripts/install-githooks.sh
+```
+
+A pre-commit hook checks conflict markers. When you stage `.rs`, it runs `./scripts/check-fmt-clippy.sh` (same rustfmt + clippy gate as CI). When you stage runtime, ffi-skia, or embedder `.c`, it compiles with `-Werror`. Bypass with `git commit --no-verify`.
+
 ## Prove the host
 
 ```bash
-cargo fmt --all -- --check
-cargo clippy -p scuzz -p scuzz-compiler --all-targets -- \
-  -D warnings -A clippy::too_many_arguments -A clippy::type_complexity \
-  -A clippy::if_same_then_else -A clippy::collapsible_if \
-  -A clippy::redundant_guards -A clippy::useless_format \
-  -A clippy::identity_op -A clippy::len_zero -A clippy::unnecessary_to_owned
+./scripts/check-fmt-clippy.sh
 make -C crates/runtime test CC=clang
 make -C crates/runtime test-asan CC=clang   # skip if ASan cannot link
 cargo test -p scuzz-compiler

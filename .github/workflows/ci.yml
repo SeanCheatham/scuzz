@@ -16,10 +16,8 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - name: rustfmt
-        run: cargo fmt --all -- --check
-      - name: clippy
-        run: cargo clippy -p scuzz -p scuzz-compiler --all-targets -- -D warnings -A clippy::too_many_arguments -A clippy::type_complexity -A clippy::if_same_then_else -A clippy::collapsible_if -A clippy::redundant_guards -A clippy::useless_format -A clippy::identity_op -A clippy::len_zero -A clippy::unnecessary_to_owned
+      - name: rustfmt + clippy
+        run: ./scripts/check-fmt-clippy.sh
 
   linux-headless:
     runs-on: ubuntu-latest
