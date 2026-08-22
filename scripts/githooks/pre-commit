@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Fast local gate. Not a CI substitute. Install: ./scripts/install-githooks.sh
+# Local gate: conflict markers, rustfmt+clippy on staged .rs, -Werror on staged C.
+# Install: ./scripts/install-githooks.sh
 set -euo pipefail
 
 ROOT="$(git rev-parse --show-toplevel)"
@@ -23,7 +24,7 @@ while IFS= read -r path; do
   fi
 done <<<"$STAGED"
 
-# --- rustfmt on staged .rs (working-tree path; run cargo fmt to fix) ---
+# --- rustfmt + clippy (same gate as CI rustfmt-clippy) ---
 RS=()
 while IFS= read -r path; do
   [[ "$path" == *.rs && -f "$path" ]] || continue
@@ -31,12 +32,8 @@ while IFS= read -r path; do
 done <<<"$STAGED"
 
 if [[ ${#RS[@]} -gt 0 ]]; then
-  if ! command -v rustfmt >/dev/null 2>&1; then
-    echo "pre-commit: rustfmt not on PATH (see rust-toolchain.toml components)" >&2
-    fail=1
-  elif ! rustfmt --edition 2021 --check "${RS[@]}" >/dev/null 2>&1; then
-    echo "pre-commit: rustfmt --check failed on staged .rs (run: cargo fmt)" >&2
-    rustfmt --edition 2021 --check "${RS[@]}" >&2 || true
+  if ! "$ROOT/scripts/check-fmt-clippy.sh"; then
+    echo "pre-commit: rustfmt/clippy failed (run: ./scripts/check-fmt-clippy.sh)" >&2
     fail=1
   fi
 fi
