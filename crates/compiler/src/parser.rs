@@ -376,6 +376,13 @@ impl Parser {
         self.peek_nth(0)
     }
 
+    /// True when a newline sits between `from` and the next token. `e(x)` apply
+    /// stays on one line so `(a, b) = e` after a value is a binder, not apply.
+    fn newline_before_peek(&self, from: usize) -> bool {
+        let to = self.current_span().start;
+        self.source.get(from..to).is_some_and(|s| s.contains('\n'))
+    }
+
     fn peek_nth(&self, n: usize) -> &Token {
         let i = self.i.saturating_add(n);
         if i < self.tokens.len() {
@@ -1681,6 +1688,24 @@ impl Parser {
                         ExprKind::Match {
                             scrutinee: Box::new(expr),
                             arms,
+                        },
+                        span,
+                    );
+                }
+                Token::LParen => {
+                    if self.newline_before_peek(expr.span.end) {
+                        break;
+                    }
+                    let args = self.parse_args()?;
+                    if args.len() != 1 {
+                        return Err(self.err(format!("apply expects 1 arg, got {}", args.len())));
+                    }
+                    let arg = args.into_iter().next().unwrap();
+                    let span = expr.span.clone().cover(&arg.span);
+                    expr = self.mk(
+                        ExprKind::Apply {
+                            fun: Box::new(expr),
+                            arg: Box::new(arg),
                         },
                         span,
                     );
@@ -3188,6 +3213,140 @@ enum Opt[T]:
                 other => panic!("expected List.join, got {other:?}"),
             },
             other => panic!("expected println, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_fun_expr_apply() {
+        let src = r#"
+def plusOne(): Int => Int = (n: Int) => n + 1
+def addN(n: Int): Int => Int = (m: Int) => n + m
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(plusOne()(5)))
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::IoPrintln(arg) => match &arg.kind {
+                ExprKind::Call { callee, args } if callee == "Str.fromInt" => match &args[0].kind {
+                    ExprKind::Apply { fun, arg } => {
+                        assert!(
+                            matches!(&fun.kind, ExprKind::Call { callee, args } if callee == "plusOne" && args.is_empty()),
+                            "expected plusOne(), got {:?}",
+                            fun.kind
+                        );
+                        assert!(
+                            matches!(arg.kind, ExprKind::IntLit(5)),
+                            "expected 5, got {:?}",
+                            arg.kind
+                        );
+                    }
+                    other => panic!("expected apply, got {other:?}"),
+                },
+                other => panic!("expected Str.fromInt, got {other:?}"),
+            },
+            other => panic!("expected println, got {other:?}"),
+        }
+        let src = r#"
+def addN(n: Int): Int => Int = (m: Int) => n + m
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(addN(3)(4)))
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::IoPrintln(arg) => match &arg.kind {
+                ExprKind::Call { args, .. } => match &args[0].kind {
+                    ExprKind::Apply { fun, arg } => {
+                        assert!(
+                            matches!(&fun.kind, ExprKind::Call { callee, args } if callee == "addN" && args.len() == 1),
+                            "expected addN(3), got {:?}",
+                            fun.kind
+                        );
+                        assert!(
+                            matches!(arg.kind, ExprKind::IntLit(4)),
+                            "expected 4, got {:?}",
+                            arg.kind
+                        );
+                    }
+                    other => panic!("expected apply, got {other:?}"),
+                },
+                other => panic!("expected Str.fromInt, got {other:?}"),
+            },
+            other => panic!("expected println, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_lambda_literal_apply() {
+        let src = r#"@main def main: IO[Unit] = IO.println(Str.fromInt(((n: Int) => n + 1)(6)))"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::IoPrintln(arg) => match &arg.kind {
+                ExprKind::Call { args, .. } => match &args[0].kind {
+                    ExprKind::Apply { fun, arg } => {
+                        assert!(
+                            matches!(&fun.kind, ExprKind::Lambda { param: Some(n), param_ty: Some(Type::Int), .. } if n == "n"),
+                            "expected typed lambda, got {:?}",
+                            fun.kind
+                        );
+                        assert!(
+                            matches!(arg.kind, ExprKind::IntLit(6)),
+                            "expected 6, got {:?}",
+                            arg.kind
+                        );
+                    }
+                    other => panic!("expected apply, got {other:?}"),
+                },
+                other => panic!("expected Str.fromInt, got {other:?}"),
+            },
+            other => panic!("expected println, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_apply_arity() {
+        let err = parse(r#"@main def main: IO[Unit] = IO.println(plusOne()())"#).unwrap_err();
+        assert!(
+            err.message().contains("apply expects 1 arg"),
+            "{}",
+            err.message()
+        );
+        let err = parse(r#"@main def main: IO[Unit] = IO.println(plusOne()(1, 2))"#).unwrap_err();
+        assert!(
+            err.message().contains("apply expects 1 arg"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn parse_for_tuple_binder_after_tuple_value() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    (n, s) = (1, "x")
+    (a, b) <- IO.both(IO.pure(2), IO.pure("y"))
+  } yield IO.println("ok")
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::For { binders, .. } => {
+                assert_eq!(binders.len(), 2);
+                assert!(matches!(
+                    &binders[0],
+                    ForBinder::Eq {
+                        pat: Some(Pattern::Tuple { .. }),
+                        ..
+                    }
+                ));
+                assert!(matches!(
+                    &binders[1],
+                    ForBinder::Draw {
+                        pat: Some(Pattern::Tuple { .. }),
+                        ..
+                    }
+                ));
+            }
+            other => panic!("expected for, got {other:?}"),
         }
     }
 

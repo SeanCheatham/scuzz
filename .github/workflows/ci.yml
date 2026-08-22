@@ -253,6 +253,11 @@ jobs:
           grep -q "funpass0:7" /tmp/kernel.out
           grep -q "funmap:1,2" /tmp/kernel.out
           grep -q "funmap0:" /tmp/kernel.out
+          grep -q "funapp:6" /tmp/kernel.out
+          grep -q "funcurry:7" /tmp/kernel.out
+          grep -q "funlit:7" /tmp/kernel.out
+          grep -q "fungrp:4" /tmp/kernel.out
+          grep -q "funphapp:9" /tmp/kernel.out
           grep -q "ifone:fn" /tmp/kernel.out
           grep -q "ifone:y" /tmp/kernel.out
           grep -q "tab:0,1,2" /tmp/kernel.out

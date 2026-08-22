@@ -329,6 +329,10 @@ impl Expr {
                 callee,
                 args: map_expr_vec(args, &mut f)?,
             },
+            ExprKind::Apply { fun, arg } => ExprKind::Apply {
+                fun: Box::new(f(*fun)?),
+                arg: Box::new(f(*arg)?),
+            },
             ExprKind::AdtConstruct {
                 enum_name,
                 case_name,
@@ -450,6 +454,10 @@ impl Expr {
                 left: inner,
                 right: body,
                 ..
+            }
+            | ExprKind::Apply {
+                fun: inner,
+                arg: body,
             }
             | ExprKind::IoTimeout {
                 ms: inner,
@@ -683,6 +691,8 @@ pub enum ExprKind {
     Ascribe { expr: Box<Expr>, ty: Type },
     /// Builtin or user call: `Str.concat(a,b)`, `foo(x)`, `Fs.read(p)`
     Call { callee: String, args: Vec<Expr> },
+    /// `e(x)` when `e` is `A => B`. Named `f(x)` stays `Call`.
+    Apply { fun: Box<Expr>, arg: Box<Expr> },
     /// `name = expr` in a call argument list. Rewritten to positional before typecheck.
     NamedArg { name: String, value: Box<Expr> },
     /// `_ => expr` or `x => expr` — single-param lambda literal (tap callbacks).
