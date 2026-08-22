@@ -1655,7 +1655,15 @@ fn typecheck_def(
             &mut env,
         )?
     } else {
-        infer(&d.body, enums, funs, methods, &d.module, &mut env)?
+        infer_with_expected(
+            &d.body,
+            Some(&ret),
+            enums,
+            funs,
+            methods,
+            &d.module,
+            &mut env,
+        )?
     };
     if !types_compat(&body_ty, &ret) {
         return Err(TypeError::At {
@@ -2291,6 +2299,33 @@ fn user_fun_lambda_expected(
     }
 }
 
+fn type_mentions_params(ty: &Type, params: &[String]) -> bool {
+    match ty {
+        Type::Var(n) => params.iter().any(|p| p == n),
+        Type::List(t) | Type::Io(t) => type_mentions_params(t, params),
+        Type::Fun(a, b) => type_mentions_params(a, params) || type_mentions_params(b, params),
+        Type::Tuple(xs) | Type::App(_, xs) => xs.iter().any(|t| type_mentions_params(t, params)),
+        _ => false,
+    }
+}
+
+fn user_fun_param_ty(
+    callee: &str,
+    arg_i: usize,
+    enums: &EnumIndex<'_>,
+    funs: &FunIndex<'_>,
+    current_module: &str,
+) -> Option<Type> {
+    let f = funs.resolve(callee, current_module).ok()?;
+    let p = f.params.get(arg_i)?;
+    let ty = resolve_type_in(&p.ty, enums, &f.module, &f.type_params).ok()?;
+    if type_mentions_params(&ty, &f.type_params) {
+        None
+    } else {
+        Some(ty)
+    }
+}
+
 fn kit_lambda_ret_ty(callee: &str, arg_i: usize, nargs: usize) -> Option<Type> {
     match (callee, arg_i) {
         ("Ui.run", 0) => Some(Type::Opaque("View".into())),
@@ -2740,6 +2775,271 @@ fn rewrite_fields(
     }
 }
 
+fn is_ctor_ident(name: &str) -> bool {
+    name.starts_with(|c: char| c.is_ascii_uppercase())
+}
+
+fn name_is_free(
+    name: &str,
+    env: &HashMap<String, Type>,
+    funs: &FunIndex<'_>,
+    current_module: &str,
+) -> bool {
+    !env.contains_key(name) && funs.resolve(name, current_module).is_err()
+}
+
+fn is_bare_ctor_expr(
+    expr: &Expr,
+    env: &HashMap<String, Type>,
+    funs: &FunIndex<'_>,
+    current_module: &str,
+) -> bool {
+    match &expr.kind {
+        ExprKind::Var(name) => is_ctor_ident(name) && name_is_free(name, env, funs, current_module),
+        ExprKind::Call { callee, .. } if !callee.contains('.') => {
+            is_ctor_ident(callee) && name_is_free(callee, env, funs, current_module)
+        }
+        _ => false,
+    }
+}
+
+fn type_adt_id(ty: &Type) -> Option<&str> {
+    match ty {
+        Type::Adt(id) | Type::App(id, _) => Some(id.as_str()),
+        _ => None,
+    }
+}
+
+fn infer_bare_ctor(
+    expr: &Expr,
+    want: &Type,
+    enums: &EnumIndex<'_>,
+    funs: &FunIndex<'_>,
+    methods: &MethodIndex,
+    current_module: &str,
+    env: &mut HashMap<String, Type>,
+) -> Result<Type, TypeError> {
+    let Some(eid) = type_adt_id(want) else {
+        return Err(TypeError::Msg(format!(
+            "constructor needs an enum type, got {want:?}"
+        )));
+    };
+    let (en, id) = lookup_enum(enums, eid, current_module)?;
+    let _ = id;
+    let (ctor_name, args): (&str, &[Expr]) = match &expr.kind {
+        ExprKind::Var(name) => (name.as_str(), &[]),
+        ExprKind::Call { callee, args } => (callee.as_str(), args.as_slice()),
+        _ => {
+            return Err(TypeError::Msg(
+                "internal: infer_bare_ctor on a non-constructor".into(),
+            ))
+        }
+    };
+    let case = en
+        .cases
+        .iter()
+        .find(|c| c.name == ctor_name)
+        .ok_or_else(|| TypeError::Msg(format!("unknown case {ctor_name} for {}", en.name)))?;
+    if args.len() != case.fields.len() {
+        if case.fields.is_empty() {
+            return Err(TypeError::Msg(format!(
+                "{}.{} is nullary; remove payload",
+                en.name, case.name
+            )));
+        }
+        return Err(TypeError::Msg(format!(
+            "{}.{} expects {} arg(s), got {}",
+            en.name,
+            case.name,
+            case.fields.len(),
+            args.len()
+        )));
+    }
+    let field_tys = payload_field_types(en, case, want, enums)?;
+    for (arg, fty) in args.iter().zip(field_tys.iter()) {
+        let got = infer_with_expected(arg, Some(fty), enums, funs, methods, current_module, env)?;
+        expect_ty(&got, fty).map_err(|e| e.with_span_if_bare(&arg.span))?;
+    }
+    Ok(want.clone())
+}
+
+fn infer_with_expected(
+    expr: &Expr,
+    expected: Option<&Type>,
+    enums: &EnumIndex<'_>,
+    funs: &FunIndex<'_>,
+    methods: &MethodIndex,
+    current_module: &str,
+    env: &mut HashMap<String, Type>,
+) -> Result<Type, TypeError> {
+    let expected = expected.filter(|t| !matches!(t, Type::Opaque(_)));
+    if let Some(want) = expected {
+        if is_bare_ctor_expr(expr, env, funs, current_module) {
+            return infer_bare_ctor(expr, want, enums, funs, methods, current_module, env)
+                .map_err(|e| e.with_span_if_bare(&expr.span));
+        }
+        match &expr.kind {
+            ExprKind::ListLit { elems } => {
+                if let Type::List(elem) = want {
+                    if elems.is_empty() {
+                        return Ok(want.clone());
+                    }
+                    let mut got_elem: Option<Type> = None;
+                    for e in elems {
+                        let t = infer_with_expected(
+                            e,
+                            Some(elem),
+                            enums,
+                            funs,
+                            methods,
+                            current_module,
+                            env,
+                        )?;
+                        got_elem = Some(match got_elem {
+                            None => t,
+                            Some(prev) => prefer_elem(&prev, &t)?,
+                        });
+                    }
+                    return Ok(Type::List(Box::new(got_elem.unwrap())));
+                }
+            }
+            ExprKind::Tuple { elems } => {
+                if let Type::Tuple(tys) = want {
+                    if tys.len() == elems.len() {
+                        let mut got = Vec::new();
+                        for (e, t) in elems.iter().zip(tys.iter()) {
+                            got.push(infer_with_expected(
+                                e,
+                                Some(t),
+                                enums,
+                                funs,
+                                methods,
+                                current_module,
+                                env,
+                            )?);
+                        }
+                        return Ok(Type::Tuple(got));
+                    }
+                }
+            }
+            ExprKind::If {
+                cond,
+                then_branch,
+                else_branch,
+                implicit_else,
+            } => {
+                let ct = infer(cond, enums, funs, methods, current_module, env)?;
+                if !matches!(ct, Type::Bool) {
+                    return Err(
+                        TypeError::Msg(format!("if condition must be Bool, got {ct:?}"))
+                            .with_span_if_bare(&expr.span),
+                    );
+                }
+                let tt = infer_with_expected(
+                    then_branch,
+                    Some(want),
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?;
+                if *implicit_else {
+                    return implicit_else_ty(&tt);
+                }
+                let et = infer_with_expected(
+                    else_branch,
+                    Some(want),
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?;
+                return prefer_join(&tt, &et).map_err(|_| {
+                    TypeError::Msg(format!("if branches disagree: {tt:?} vs {et:?}"))
+                });
+            }
+            ExprKind::IoPure(inner) => {
+                if let Type::Io(t) = want {
+                    let inner_ty = infer_with_expected(
+                        inner,
+                        Some(t),
+                        enums,
+                        funs,
+                        methods,
+                        current_module,
+                        env,
+                    )?;
+                    return Ok(Type::Io(Box::new(inner_ty)));
+                }
+            }
+            ExprKind::Match { scrutinee, arms } => {
+                let st = infer(scrutinee, enums, funs, methods, current_module, env)?;
+                let mut result: Option<Type> = None;
+                for arm in arms {
+                    let bound =
+                        bind_pattern(&arm.pattern, &st, enums, current_module, env, arm.unpack)?;
+                    if let Some(g) = &arm.guard {
+                        let gt = infer(g, enums, funs, methods, current_module, env)?;
+                        if !matches!(gt, Type::Bool) {
+                            unbind_pattern(bound, env);
+                            return Err(TypeError::Msg(format!(
+                                "match guard must be Bool, got {gt:?}"
+                            )));
+                        }
+                    }
+                    let bt = infer_with_expected(
+                        &arm.body,
+                        Some(want),
+                        enums,
+                        funs,
+                        methods,
+                        current_module,
+                        env,
+                    )?;
+                    unbind_pattern(bound, env);
+                    match &result {
+                        None => result = Some(bt),
+                        Some(prev) => match prefer_join(prev, &bt) {
+                            Ok(joined) => result = Some(joined),
+                            Err(_) => {
+                                return Err(TypeError::Msg(format!(
+                                    "match arms disagree: {prev:?} vs {bt:?}"
+                                )))
+                            }
+                        },
+                    }
+                }
+                check_match_exhaustive(&st, arms, enums, current_module)?;
+                return result.ok_or_else(|| TypeError::Msg("empty match".into()));
+            }
+            ExprKind::Let { name, value, body } => {
+                let vt = infer(value, enums, funs, methods, current_module, env)?;
+                let old = env.insert(name.clone(), vt);
+                let bt = infer_with_expected(
+                    body,
+                    Some(want),
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?;
+                if let Some(v) = old {
+                    env.insert(name.clone(), v);
+                } else {
+                    env.remove(name);
+                }
+                return Ok(bt);
+            }
+            _ => {}
+        }
+        return infer(expr, enums, funs, methods, current_module, env);
+    }
+    infer(expr, enums, funs, methods, current_module, env)
+}
+
 fn infer(
     expr: &Expr,
     enums: &EnumIndex<'_>,
@@ -3047,7 +3347,15 @@ fn infer(
                     expect_ty(&got, &want)?;
                     return Ok(want);
                 }
-                let got = infer(expr, enums, funs, methods, current_module, env)?;
+                let got = infer_with_expected(
+                    expr,
+                    Some(&want),
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?;
                 expect_ty(&got, &want)?;
                 Ok(want)
             }
@@ -3523,6 +3831,8 @@ fn infer_call(
                     current_module,
                     env,
                 )?
+            } else if let Some(want) = user_fun_param_ty(callee, i, enums, funs, current_module) {
+                infer_with_expected(a, Some(&want), enums, funs, methods, current_module, env)?
             } else {
                 infer(a, enums, funs, methods, current_module, env)?
             },
@@ -5139,6 +5449,123 @@ fn check_payload_ty(
 }
 
 /// Typecheck a pattern and bind payload names into `env`. Returns previous bindings to restore.
+fn resolve_bare_ctor_pat(
+    pat: &crate::ast::Pattern,
+    scrut: &Type,
+    enums: &EnumIndex<'_>,
+    current_module: &str,
+) -> Result<crate::ast::Pattern, TypeError> {
+    match pat {
+        crate::ast::Pattern::Bind(name) if is_ctor_ident(name) => {
+            if let Some(eid) = type_adt_id(scrut) {
+                if let Ok((en, id)) = lookup_enum(enums, eid, current_module) {
+                    if en.cases.iter().any(|c| c.name == *name) {
+                        return Ok(crate::ast::Pattern::Adt {
+                            enum_name: id,
+                            case_name: name.clone(),
+                            binds: Vec::new(),
+                            type_args: Vec::new(),
+                        });
+                    }
+                }
+            }
+            Ok(pat.clone())
+        }
+        crate::ast::Pattern::Adt {
+            enum_name,
+            case_name,
+            binds,
+            type_args,
+        } => {
+            let (en, kept_name) = if enum_name == case_name {
+                if let Some(eid) = type_adt_id(scrut) {
+                    if let Ok((en, id)) = lookup_enum(enums, eid, current_module) {
+                        if en.cases.iter().any(|c| c.name == *case_name) {
+                            (en, id)
+                        } else {
+                            let (en, _) = lookup_enum(enums, enum_name, current_module)?;
+                            (en, enum_name.clone())
+                        }
+                    } else {
+                        let (en, _) = lookup_enum(enums, enum_name, current_module)?;
+                        (en, enum_name.clone())
+                    }
+                } else {
+                    let (en, _) = lookup_enum(enums, enum_name, current_module)?;
+                    (en, enum_name.clone())
+                }
+            } else {
+                let (en, _) = lookup_enum(enums, enum_name, current_module)?;
+                (en, enum_name.clone())
+            };
+            let case = en
+                .cases
+                .iter()
+                .find(|c| c.name == *case_name)
+                .ok_or_else(|| {
+                    TypeError::Msg(format!("unknown case {enum_name}.{case_name} in pattern"))
+                })?;
+            let field_tys = payload_field_types(en, case, scrut, enums)?;
+            let mut out_binds = Vec::with_capacity(binds.len());
+            for (i, b) in binds.iter().enumerate() {
+                let fty = field_tys.get(i).unwrap_or(scrut);
+                out_binds.push(resolve_bare_ctor_pat(b, fty, enums, current_module)?);
+            }
+            Ok(crate::ast::Pattern::Adt {
+                enum_name: kept_name,
+                case_name: case_name.clone(),
+                binds: out_binds,
+                type_args: type_args.clone(),
+            })
+        }
+        crate::ast::Pattern::Or(alts) => Ok(crate::ast::Pattern::Or(
+            alts.iter()
+                .map(|a| resolve_bare_ctor_pat(a, scrut, enums, current_module))
+                .collect::<Result<Vec<_>, _>>()?,
+        )),
+        crate::ast::Pattern::As { name, inner } => Ok(crate::ast::Pattern::As {
+            name: name.clone(),
+            inner: Box::new(resolve_bare_ctor_pat(inner, scrut, enums, current_module)?),
+        }),
+        crate::ast::Pattern::Cons { head, tail, elem } => {
+            let et = if let Ok(e) = list_elem(scrut) {
+                e
+            } else {
+                return Ok(pat.clone());
+            };
+            Ok(crate::ast::Pattern::Cons {
+                head: Box::new(resolve_bare_ctor_pat(head, &et, enums, current_module)?),
+                tail: Box::new(resolve_bare_ctor_pat(
+                    tail,
+                    &list_of(et),
+                    enums,
+                    current_module,
+                )?),
+                elem: elem.clone(),
+            })
+        }
+        crate::ast::Pattern::Tuple { elems, tys } => {
+            let stys = match scrut {
+                Type::Tuple(ts) if ts.len() == elems.len() => ts.clone(),
+                _ => return Ok(pat.clone()),
+            };
+            let mut out = Vec::with_capacity(elems.len());
+            for (e, t) in elems.iter().zip(stys.iter()) {
+                out.push(resolve_bare_ctor_pat(e, t, enums, current_module)?);
+            }
+            Ok(crate::ast::Pattern::Tuple {
+                elems: out,
+                tys: tys.clone(),
+            })
+        }
+        crate::ast::Pattern::Named { name, inner } => Ok(crate::ast::Pattern::Named {
+            name: name.clone(),
+            inner: Box::new(resolve_bare_ctor_pat(inner, scrut, enums, current_module)?),
+        }),
+        other => Ok(other.clone()),
+    }
+}
+
 fn bind_pattern(
     pat: &crate::ast::Pattern,
     scrut: &Type,
@@ -5147,7 +5574,8 @@ fn bind_pattern(
     env: &mut HashMap<String, Type>,
     loose: bool,
 ) -> Result<Vec<(String, Option<Type>)>, TypeError> {
-    match pat {
+    let pat = resolve_bare_ctor_pat(pat, scrut, enums, current_module)?;
+    match &pat {
         crate::ast::Pattern::Named { .. } => Err(TypeError::Msg(
             "named field pattern is only allowed in a constructor payload".into(),
         )),
@@ -5382,7 +5810,10 @@ fn check_match_exhaustive(
 ) -> Result<(), TypeError> {
     let rewritten: Vec<crate::ast::Pattern> = arms
         .iter()
-        .map(|a| rewrite_named_in_pattern(&a.pattern, enums, current_module))
+        .map(|a| {
+            let p = resolve_bare_ctor_pat(&a.pattern, scrut, enums, current_module)?;
+            rewrite_named_in_pattern(&p, enums, current_module)
+        })
         .collect::<Result<Vec<_>, _>>()?;
     for pat in &rewritten {
         check_unique_binds(pat)?;
@@ -5796,7 +6227,8 @@ fn elaborate_pattern(
     span: &Span,
     loose: bool,
 ) -> Result<crate::ast::Pattern, TypeError> {
-    match pat {
+    let pat = resolve_bare_ctor_pat(pat, scrut, enums, current_module)?;
+    match &pat {
         crate::ast::Pattern::Wildcard
         | crate::ast::Pattern::Bind(_)
         | crate::ast::Pattern::Int(_)
@@ -7356,6 +7788,64 @@ fn elaborate_lambda_arg(
 
 // Arity comes from the shared typecheck context (enums, funs, methods, module, env).
 #[allow(clippy::too_many_arguments)]
+fn rewrite_bare_ctor_expr(
+    expr: Expr,
+    expected: Option<&Type>,
+    enums: &EnumIndex<'_>,
+    env: &HashMap<String, Type>,
+    funs: &FunIndex<'_>,
+    current_module: &str,
+) -> Expr {
+    let Some(want) = expected else {
+        return expr;
+    };
+    if !is_bare_ctor_expr(&expr, env, funs, current_module) {
+        return expr;
+    }
+    let Some(eid) = type_adt_id(want) else {
+        return expr;
+    };
+    let Ok((en, id)) = lookup_enum(enums, eid, current_module) else {
+        return expr;
+    };
+    let span = expr.span.clone();
+    match expr.kind {
+        ExprKind::Var(name)
+            if en
+                .cases
+                .iter()
+                .any(|c| c.name == name && c.fields.is_empty()) =>
+        {
+            Expr::new(
+                ExprKind::AdtConstruct {
+                    enum_name: id,
+                    case_name: name,
+                    args: Vec::new(),
+                    type_args: Vec::new(),
+                },
+                span,
+            )
+        }
+        ExprKind::Call { callee, args }
+            if en
+                .cases
+                .iter()
+                .any(|c| c.name == callee && c.fields.len() == args.len()) =>
+        {
+            Expr::new(
+                ExprKind::AdtConstruct {
+                    enum_name: id,
+                    case_name: callee,
+                    args,
+                    type_args: Vec::new(),
+                },
+                span,
+            )
+        }
+        kind => Expr::new(kind, span),
+    }
+}
+
 fn elaborate_expr(
     expr: Expr,
     enums: &EnumIndex<'_>,
@@ -7371,6 +7861,7 @@ fn elaborate_expr(
     } else {
         expr
     };
+    let expr = rewrite_bare_ctor_expr(expr, expected, enums, env, funs, current_module);
     let span = expr.span.clone();
     match expr.kind {
         ExprKind::AdtConstruct {
@@ -8050,17 +8541,32 @@ fn elaborate_expr(
             },
             span,
         )),
-        ExprKind::ListLit { elems } => Ok(Expr::new(
-            ExprKind::ListLit {
-                elems: elems
-                    .into_iter()
-                    .map(|e| {
-                        elaborate_expr(e, enums, funs, methods, current_module, env, None, tparams)
-                    })
-                    .collect::<Result<Vec<_>, _>>()?,
-            },
-            span,
-        )),
+        ExprKind::ListLit { elems } => {
+            let elem_expected = match expected {
+                Some(Type::List(t)) => Some(t.as_ref()),
+                _ => None,
+            };
+            Ok(Expr::new(
+                ExprKind::ListLit {
+                    elems: elems
+                        .into_iter()
+                        .map(|e| {
+                            elaborate_expr(
+                                e,
+                                enums,
+                                funs,
+                                methods,
+                                current_module,
+                                env,
+                                elem_expected,
+                                tparams,
+                            )
+                        })
+                        .collect::<Result<Vec<_>, _>>()?,
+                },
+                span,
+            ))
+        }
         ExprKind::Interpolate { parts } => Ok(Expr::new(
             ExprKind::Interpolate {
                 parts: parts
@@ -8144,7 +8650,7 @@ fn elaborate_expr(
             Ok(Expr::new(
                 ExprKind::Ascribe {
                     expr: Box::new(inner),
-                    ty,
+                    ty: want,
                 },
                 span,
             ))
@@ -8585,9 +9091,13 @@ fn collect_node_targs(expr: &Expr, out: &mut Vec<(String, Vec<Type>)>) {
             collect_node_targs(left, out);
             collect_node_targs(right, out);
         }
-        ExprKind::Unary { expr, .. }
-        | ExprKind::NamedArg { value: expr, .. }
-        | ExprKind::Ascribe { expr, .. } => collect_node_targs(expr, out),
+        ExprKind::Unary { expr, .. } | ExprKind::NamedArg { value: expr, .. } => {
+            collect_node_targs(expr, out)
+        }
+        ExprKind::Ascribe { expr, ty } => {
+            collect_apps_in_type(ty, out);
+            collect_node_targs(expr, out);
+        }
         ExprKind::Lambda { param_ty, body, .. } => {
             if let Some(t) = param_ty {
                 collect_apps_in_type(t, out);
@@ -9768,6 +10278,95 @@ enum Opt:
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("unguarded cases still cover Some and None");
+    }
+
+    #[test]
+    fn typechecks_bare_ctor_patterns() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+enum Color:
+  case Red
+  case Blue
+def describe(o: Opt[Int]): String =
+  o match {
+    case Some(n) => Str.fromInt(n)
+    case None => "n"
+  }
+def hue(c: Color): String =
+  c match {
+    case Red | Blue => "p"
+  }
+@main def main: IO[Unit] =
+  IO.println(describe(Some(1)))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("bare Some/None/Red patterns");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate bare patterns");
+        crate::typ::monomorphize(p).expect("mono bare patterns");
+    }
+
+    #[test]
+    fn typechecks_bare_ctor_from_expected() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+def noneInt(): Opt[Int] = None
+def someN(n: Int): Opt[Int] = Some(n)
+def pick(ok: Bool): Opt[Int] =
+  if (ok) Some(1) else None
+def wrap(o: Opt[Int]): Opt[Int] = o
+@main def main: IO[Unit] =
+  for {
+    a = None: Opt[Int]
+    b = [Some(1), None]: List[Opt[Int]]
+    c = wrap(Some(3))
+    _ <- IO.println("ok")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("bare constructors from expected type");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate bare ctor");
+        crate::typ::monomorphize(p).expect("mono bare ctor");
+    }
+
+    #[test]
+    fn rejects_bare_none_as_nonexhaustive() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  Opt.Some(1) match {
+    case None => IO.println("n")
+  }
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("non-exhaustive match"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_lowercase_bind_as_ctor() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+def hue(c: Color): String =
+  c match {
+    case red => "r"
+  }
+@main def main: IO[Unit] =
+  IO.println(hue(Color.Red))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("lowercase red stays a catch-all bind");
     }
 
     #[test]

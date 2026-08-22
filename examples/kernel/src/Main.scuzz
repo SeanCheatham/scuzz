@@ -128,6 +128,20 @@ def describe(o: Opt[Int]): String =
     case Opt.None => "adt:describe:none"
   }
 
+def describeBare(o: Opt[Int]): String =
+  o match {
+    case Some(n) => Str.concat("bare:", Str.fromInt(n))
+    case None => "bare:none"
+  }
+
+def hueBare(c: Color): String =
+  c match {
+    case Red | Blue => "barehue"
+  }
+
+def fromBare(n: Int): Opt[Int] =
+  if (n > 0) Some(n) else None
+
 def describePos(o: Opt[Int]): String =
   o match {
     case Opt.Some(n) if n > 0 => Str.concat("pos:", Str.fromInt(n))
@@ -296,6 +310,10 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"caselam:${List.join(List.map([Opt.Some(1), noneInt()], {
   case Opt.Some(n) => Str.fromInt(n)
   case Opt.None => "n"
+}), ",")}")
+    _ <- IO.println(s"caselambare:${List.join(List.map([Opt.Some(1), noneInt()], {
+  case Some(n) => Str.fromInt(n)
+  case None => "n"
 }), ",")}")
     _ <- IO.println(s"caselam0:${List.join(List.map([]: List[Opt[Int]], {
   case Opt.Some(n) => Str.fromInt(n)
@@ -500,12 +518,14 @@ def unpackProof(): IO[Unit] =
   for {
     Point(x, y) = Point(3, 5)
     Opt.Some(n) = Opt.Some(7)
+    Some(k) = Opt.Some(6)
     h :: _t = [8, 9]
     got <- IO.pure(Opt.Some(4))
     Opt.Some(m) = got
     xs = List.map([Opt.Some(1), Opt.Some(2)], (Opt.Some(k)) => k)
     _ <- IO.println(s"unpack:${Str.fromInt(x + y)}")
     _ <- IO.println(s"unpackSome:${Str.fromInt(n)}")
+    _ <- IO.println(s"unpackBare:${Str.fromInt(k)}")
     _ <- IO.println(s"unpackCons:${Str.fromInt(h)}")
     _ <- IO.println(s"unpackDraw:${Str.fromInt(m)}")
     _ <- IO.println(s"unpackLam:${Str.fromInt(List.head(xs))}")
@@ -626,6 +646,13 @@ record Box[T](x: T):
   case Color.Blue => IO.println("adt:flip:blue")
 }
     _ <- IO.println(desc)
+    _ <- IO.println(describeBare(o))
+    _ <- IO.println(describeBare(noneInt()))
+    _ <- IO.println(hueBare(Color.Red))
+    _ <- IO.println(describeBare(fromBare(2)))
+    _ <- IO.println(describeBare(fromBare(0)))
+    noneBare = None: Opt[Int]
+    _ <- IO.println(s"barenone:${noneBare.getOrElse(9)}")
     _ <- head match {
   case Color.Red => IO.println("adt:list:red")
   case Color.Blue => IO.println("adt:list:blue")

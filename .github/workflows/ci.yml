@@ -89,6 +89,12 @@ jobs:
         run: |
           cargo run -p scuzz -- run examples/kernel | tee /tmp/kernel.out
           grep -q "adt:red" /tmp/kernel.out
+          grep -q "bare:42" /tmp/kernel.out
+          grep -q "bare:none" /tmp/kernel.out
+          grep -q "barehue" /tmp/kernel.out
+          grep -q "bare:2" /tmp/kernel.out
+          grep -q "barenone:9" /tmp/kernel.out
+          grep -q "unpackBare:6" /tmp/kernel.out
           grep -q "phmap:1,2,3" /tmp/kernel.out
           grep -q "phadd:2,3,4" /tmp/kernel.out
           grep -q "phfilt:a,c" /tmp/kernel.out
@@ -233,6 +239,7 @@ jobs:
           grep -q "range:1,2,3" /tmp/kernel.out
           grep -q "typedlam:1,2,3" /tmp/kernel.out
           grep -q "caselam:1,n" /tmp/kernel.out
+          grep -q "caselambare:1,n" /tmp/kernel.out
           grep -q "caselam0:" /tmp/kernel.out
           grep -q "caselit:z,n" /tmp/kernel.out
           grep -q "funapply:3" /tmp/kernel.out
