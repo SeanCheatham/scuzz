@@ -64,7 +64,7 @@ Close every prerequisite in this section before that package and before `scuzz i
 
 #### 1. Input and embedder
 
-Today Desktop (X11 and Cocoa) quit is window close. Live keys are `SZ_INPUT_KEY` (name, UTF-8 insert, Shift / Ctrl / Cmd / Alt). Headless `key <name> [text]` matches `record.script`. Insert is UTF-8. Backspace chops a UTF-8 code point at the end of the focused TextField. Unused names (arrows, Home, End, Delete) inject and no-op. `type` / `text` / `backspace` stay agent sugar through `SZ_INPUT_TEXT_EDIT`. `SZ_INPUT_KEYBOARD` is mobile soft-keyboard show/hide, not a key. Mobile IME may still send `TEXT_EDIT`. Pointer move fires while the button is down. There is no hover-without-button and no secondary click. Clipboard is absent. OS IME candidate windows stay deferred (see above). Arrows do not move a caret yet.
+Today Desktop (X11 and Cocoa) quit is window close. Live keys are `SZ_INPUT_KEY` (name, UTF-8 insert, Shift / Ctrl / Cmd / Alt). Headless `key <name> [text]` matches `record.script`. Insert is UTF-8 at the TextField caret. Backspace and Delete chop a UTF-8 code point at the caret. Arrows, Home, and End move the caret. A TAP / `xy` on a TextField sets the caret from measured advance. Headless `caret <n>` sets the byte offset. `type` / `text` / `backspace` stay agent sugar through `SZ_INPUT_TEXT_EDIT`. `SZ_INPUT_KEYBOARD` is mobile soft-keyboard show/hide, not a key. Mobile IME may still send `TEXT_EDIT`. Pointer move fires while the button is down. There is no hover-without-button and no secondary click. Clipboard is absent. OS IME candidate windows stay deferred (see above).
 
 Close:
 
@@ -72,14 +72,14 @@ Close:
 - One key event on Desktop, Mobile, Headless inject, and `record.script`. Payload: key, UTF-8 insert text, Shift / Ctrl / Cmd / Alt. Cover Enter, Tab, arrows, Home, End, PageUp, PageDown, Delete, Backspace.
 - Backspace and arrows walk UTF-8 code points (or graphemes), not raw bytes.
 - Insert is UTF-8, not Latin-1.
-- Click-to-caret uses the pointer `(x, y)` on the editor. Today a TextField tap only focuses. The caret stays at the end.
+- Click-to-caret uses the pointer `(x, y)` on the editor. TextField TAP / `xy` already sets the caret from measured advance. `View.editor` is not in.
 - Pointer hover without a button (hover docs, tooltips). Secondary click (context menu).
 - Blessed clipboard: copy, cut, paste. Headless inject must drive paste. Do not make clipboard Desktop-only.
 - Repeat keys and IME compose. IME UI placement can stay deferred if UTF-8 insert already works.
 
 #### 2. Editor widget
 
-Today `View.textField` is one line (`control_h`). Insert appends at the end. Backspace chops a UTF-8 code point at the end. There is no caret offset. Layout and paint copy the value through a 256-byte stack buffer. Caret metrics use that buffer. `View.text` wraps at newlines for display, but it is not editable. `View.textColor` wraps a whole child. A line of tokens as many Views is not an editor. `View.each` rebuilds every child. Default each-row text also caps at 256 bytes. Collect of text fields caps at 64. `sk_sw` measure is monospace. The pinned Skia prebuilt is proportional.
+Today `View.textField` is one line (`control_h`). It stores a caret byte offset. Insert, Backspace, and Delete edit at the caret. Arrows, Home, End, and click-to-caret move it. `[fields]` dumps `caret=B` without shifting inject indices. Layout and paint copy the value through a 256-byte stack buffer. Caret metrics use that buffer. `View.text` wraps at newlines for display, but it is not editable. `View.textColor` wraps a whole child. A line of tokens as many Views is not an editor. `View.each` rebuilds every child. Default each-row text also caps at 256 bytes. Collect of text fields caps at 64. `sk_sw` measure is monospace. The pinned Skia prebuilt is proportional.
 
 Close:
 
@@ -146,12 +146,12 @@ Close:
 
 #### 6. Headless and verification
 
-Today inject verbs are `tap` / `xy` / `text` / `type` / `key` / `pump` / `scroll` / `backspace` / `dump` / `reload` / `quit` / `resetpeak`. Fuzz composes taps, fields, scrolls, and drivers. A whole-file a11y dump of an editor is the wrong oracle.
+Today inject verbs are `tap` / `xy` / `text` / `type` / `key` / `caret` / `pump` / `scroll` / `backspace` / `dump` / `reload` / `quit` / `resetpeak`. `[fields]` dumps `caret=B`. Fuzz composes taps, fields, scrolls, and drivers. A whole-file a11y dump of an editor is the wrong oracle.
 
 Close:
 
-- Inject verbs for caret, selection, key-with-modifiers, and paste. Record those verbs from Desktop. `key` is in. Caret, selection, and paste are not.
-- Structural dump fields for buffer, caret, selection, and diagnostics. Properties talk to that surface (`Property.signalStr`, `Property.a11yHas`, or a dedicated editor observation).
+- Inject verbs for caret, selection, key-with-modifiers, and paste. Record those verbs from Desktop. `key` and `caret` are in. Selection and paste are not.
+- Structural dump fields for buffer, caret, selection, and diagnostics. Properties talk to that surface (`Property.signalStr`, `Property.a11yHas`, or a dedicated editor observation). `[fields]` dumps `caret=B`. Editor `[editor]` dump is not.
 - Every new editor or chrome widget has a Headless path. No Desktop-only shortcut.
 - IDE package uses in-source properties, drivers, goldens, and `scuzz fuzz`. TestRuntime fakes cover check/fs as in group 3.
 

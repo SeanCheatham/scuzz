@@ -406,7 +406,7 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
     fputs_dump_label(f, sz_view_a11y_label(fields[i]));
     fputc('=', f);
     fputs_dump_quoted(f, sz_view_text_field_value(fields[i]));
-    fputc('\n', f);
+    fprintf(f, " caret=%d\n", sz_view_text_field_caret(fields[i]));
   }
   fprintf(f, "\n[scrolls]\n");
   n_scrolls = sz_ui_collect_scrolls(session, scrolls, 64);
@@ -1171,6 +1171,19 @@ int sz_ui_session_activate_view(SzUiSession *session, SzView *target) {
     return 0;
   session_set_last_hit(session, x, y, target);
   sync_keyboard(session);
+  session->dirty = 1;
+  return 1;
+}
+
+int sz_ui_session_set_caret(SzUiSession *session, int index, int offset) {
+  SzView *target;
+  if (!session || !session->root)
+    return 0;
+  if (!sz_view_focus_text_field_at(session->root, index))
+    return 0;
+  target = sz_view_text_field_target(session->root);
+  if (!sz_view_set_text_field_caret(target, offset))
+    return 0;
   session->dirty = 1;
   return 1;
 }

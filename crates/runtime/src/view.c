@@ -62,6 +62,8 @@ struct SzView {
   int pad;
   /* View.radio: value written into sig_int on tap. */
   int64_t radio_value;
+  /* TextField caret: byte offset into the live string (UTF-8 snapped). */
+  int caret;
 };
 
 static SzView *view_new(SzViewKind kind) {
@@ -615,11 +617,14 @@ int sz_view_slider_set_at(SzView *view, float x) {
 
 SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder) {
   SzView *v = view_new(SZ_VIEW_TEXT_FIELD);
+  const char *s;
   v->sig_str = text;
   v->placeholder = sz_strdup(placeholder ? placeholder : "");
   v->interactive = 1;
   v->a11y_role = SZ_A11Y_TEXT_FIELD;
   v->a11y_label = sz_strdup(placeholder ? placeholder : "text field");
+  s = text ? sz_signal_str_get(text) : "";
+  v->caret = s ? (int)strlen(s) : 0;
   return v;
 }
 
@@ -635,6 +640,53 @@ const char *sz_view_text_field_value(const SzView *view) {
   if (!view || view->kind != SZ_VIEW_TEXT_FIELD || !view->sig_str)
     return "";
   return sz_signal_str_get(view->sig_str);
+}
+
+static const char *field_cstr(const SzView *v) {
+  const char *s;
+  if (!v || v->kind != SZ_VIEW_TEXT_FIELD || !v->sig_str)
+    return "";
+  s = sz_signal_str_get(v->sig_str);
+  return s ? s : "";
+}
+
+static int utf8_snap(const char *s, int i) {
+  int n;
+  if (!s)
+    return 0;
+  n = (int)strlen(s);
+  if (i <= 0)
+    return 0;
+  if (i >= n)
+    return n;
+  while (i > 0 && ((unsigned char)s[i] & 0xc0) == 0x80)
+    i--;
+  return i;
+}
+
+static int field_caret_clamped(const SzView *v) {
+  const char *s = field_cstr(v);
+  int n = (int)strlen(s);
+  int c = v ? v->caret : 0;
+  if (c < 0)
+    c = 0;
+  if (c > n)
+    c = n;
+  return utf8_snap(s, c);
+}
+
+int sz_view_text_field_caret(const SzView *view) {
+  if (!view || view->kind != SZ_VIEW_TEXT_FIELD)
+    return 0;
+  return field_caret_clamped(view);
+}
+
+int sz_view_set_text_field_caret(SzView *view, int offset) {
+  if (!view || view->kind != SZ_VIEW_TEXT_FIELD)
+    return 0;
+  view->caret = offset;
+  view->caret = field_caret_clamped(view);
+  return 1;
 }
 
 static const char *a11y_role_name(SzA11yRole role) {
@@ -3553,12 +3605,17 @@ SzRect sz_view_caret_rect(SzView *root, const SzTheme *theme) {
   SzView *f;
   char buf[256];
   float x, y, h;
+  int c, n;
   if (!root || !theme)
     return z;
   f = find_focused_text_field(root);
   if (!f)
     return z;
   resolve_text(f, buf, sizeof buf);
+  c = field_caret_clamped(f);
+  n = (int)strlen(buf);
+  if (c < n)
+    buf[c] = '\0';
   x = f->frame.x + k_text_field_inset + text_width(buf, theme->font_px);
   if (x > f->frame.x + f->frame.w - 2.f)
     x = f->frame.x + f->frame.w - 2.f;
@@ -3575,6 +3632,39 @@ SzRect sz_view_caret_rect(SzView *root, const SzTheme *theme) {
   z.w = 1.f;
   z.h = h;
   return z;
+}
+
+static int caret_offset_at_x(SzView *f, float x) {
+  const char *s;
+  int n, i, best;
+  float local, best_d, font_px;
+  if (!f || f->kind != SZ_VIEW_TEXT_FIELD)
+    return 0;
+  s = field_cstr(f);
+  n = (int)strlen(s);
+  font_px = sz_theme_default()->font_px;
+  local = x - f->frame.x - k_text_field_inset;
+  if (local <= 0.f || n == 0)
+    return 0;
+  best = 0;
+  best_d = local;
+  i = 0;
+  while (i < n) {
+    int clen = utf8_clen(s, i);
+    float w, d;
+    if (clen < 1)
+      clen = 1;
+    i += clen;
+    if (i > n)
+      i = n;
+    w = span_width(s, 0, i, font_px);
+    d = w > local ? w - local : local - w;
+    if (d < best_d) {
+      best_d = d;
+      best = i;
+    }
+  }
+  return best;
 }
 
 int sz_view_activate(SzView *root, SzView *hit, float x, float y) {
@@ -3616,6 +3706,7 @@ int sz_view_activate(SzView *root, SzView *hit, float x, float y) {
   if (hit->kind == SZ_VIEW_TEXT_FIELD) {
     clear_focus(root);
     hit->focused = 1;
+    sz_view_set_text_field_caret(hit, caret_offset_at_x(hit, x));
     return 1;
   }
   return 0;
@@ -3735,43 +3826,108 @@ int sz_view_focus_text_field_at(SzView *root, int index) {
 
 int sz_view_handle_text(SzView *root, const char *text) {
   SzView *target = sz_view_text_field_target(root);
+  const char *s;
   if (!target || !target->sig_str)
     return 0;
   sz_signal_str_set(target->sig_str, text ? text : "");
+  s = field_cstr(target);
+  target->caret = (int)strlen(s);
   target->focused = 1;
   return 1;
 }
 
+static void field_insert_at_caret(SzView *t, const char *text) {
+  const char *cur;
+  int c, n, add;
+  char *buf;
+  if (!t || !t->sig_str || !text || !text[0])
+    return;
+  cur = field_cstr(t);
+  n = (int)strlen(cur);
+  c = field_caret_clamped(t);
+  add = (int)strlen(text);
+  buf = (char *)sz_alloc((size_t)n + (size_t)add + 1);
+  memcpy(buf, cur, (size_t)c);
+  memcpy(buf + c, text, (size_t)add);
+  memcpy(buf + c + add, cur + c, (size_t)(n - c + 1));
+  sz_signal_str_set(t->sig_str, buf);
+  sz_free(buf);
+  t->caret = c + add;
+}
+
+static void field_backspace_at_caret(SzView *t) {
+  const char *cur;
+  int c, n, keep;
+  char *buf;
+  if (!t || !t->sig_str)
+    return;
+  cur = field_cstr(t);
+  n = (int)strlen(cur);
+  c = field_caret_clamped(t);
+  if (c <= 0)
+    return;
+  keep = utf8_prev(cur, c);
+  buf = (char *)sz_alloc((size_t)(n - (c - keep)) + 1);
+  memcpy(buf, cur, (size_t)keep);
+  memcpy(buf + keep, cur + c, (size_t)(n - c + 1));
+  sz_signal_str_set(t->sig_str, buf);
+  sz_free(buf);
+  t->caret = keep;
+}
+
+static void field_delete_at_caret(SzView *t) {
+  const char *cur;
+  int c, n, clen;
+  char *buf;
+  if (!t || !t->sig_str)
+    return;
+  cur = field_cstr(t);
+  n = (int)strlen(cur);
+  c = field_caret_clamped(t);
+  if (c >= n)
+    return;
+  clen = utf8_clen(cur, c);
+  if (clen < 1)
+    clen = 1;
+  if (c + clen > n)
+    clen = n - c;
+  buf = (char *)sz_alloc((size_t)(n - clen) + 1);
+  memcpy(buf, cur, (size_t)c);
+  memcpy(buf + c, cur + c + clen, (size_t)(n - c - clen + 1));
+  sz_signal_str_set(t->sig_str, buf);
+  sz_free(buf);
+  t->caret = c;
+}
+
+static void field_move_caret(SzView *t, int dir) {
+  const char *cur;
+  int c, n, clen;
+  if (!t)
+    return;
+  cur = field_cstr(t);
+  n = (int)strlen(cur);
+  c = field_caret_clamped(t);
+  if (dir < 0)
+    t->caret = utf8_prev(cur, c);
+  else if (dir > 0) {
+    clen = utf8_clen(cur, c);
+    if (clen < 1)
+      clen = 1;
+    c += clen;
+    if (c > n)
+      c = n;
+    t->caret = c;
+  }
+}
+
 int sz_view_handle_text_edit(SzView *root, const char *text, int backspace) {
   SzView *target = sz_view_text_field_target(root);
-  const char *cur;
-  size_t n;
-  char *buf;
-
   if (!target || !target->sig_str)
     return 0;
-  cur = sz_signal_str_get(target->sig_str);
-  if (!cur)
-    cur = "";
-  n = strlen(cur);
-
-  if (backspace) {
-    if (n > 0) {
-      int keep = utf8_prev(cur, (int)n);
-      buf = (char *)sz_alloc((size_t)keep + 1);
-      memcpy(buf, cur, (size_t)keep);
-      buf[keep] = '\0';
-      sz_signal_str_set(target->sig_str, buf);
-      sz_free(buf);
-    }
-  } else if (text && text[0]) {
-    size_t add = strlen(text);
-    buf = (char *)sz_alloc(n + add + 1);
-    memcpy(buf, cur, n);
-    memcpy(buf + n, text, add + 1);
-    sz_signal_str_set(target->sig_str, buf);
-    sz_free(buf);
-  }
+  if (backspace)
+    field_backspace_at_caret(target);
+  else
+    field_insert_at_caret(target, text);
   target->focused = 1;
   return 1;
 }
@@ -3786,13 +3942,50 @@ static int key_is_one_code_point(const char *key) {
 
 int sz_view_handle_key(SzView *root, const char *key, const char *text,
                        int mods) {
+  SzView *target;
   (void)mods;
   if (!root)
     return 1;
   if (!key)
     key = "";
+  target = sz_view_text_field_target(root);
   if (strcmp(key, "Backspace") == 0) {
     (void)sz_view_handle_text_edit(root, NULL, 1);
+    return 1;
+  }
+  if (strcmp(key, "Delete") == 0) {
+    if (target)
+      field_delete_at_caret(target);
+    if (target)
+      target->focused = 1;
+    return 1;
+  }
+  if (strcmp(key, "ArrowLeft") == 0) {
+    if (target)
+      field_move_caret(target, -1);
+    if (target)
+      target->focused = 1;
+    return 1;
+  }
+  if (strcmp(key, "ArrowRight") == 0) {
+    if (target)
+      field_move_caret(target, 1);
+    if (target)
+      target->focused = 1;
+    return 1;
+  }
+  if (strcmp(key, "Home") == 0) {
+    if (target)
+      target->caret = 0;
+    if (target)
+      target->focused = 1;
+    return 1;
+  }
+  if (strcmp(key, "End") == 0) {
+    if (target)
+      target->caret = (int)strlen(field_cstr(target));
+    if (target)
+      target->focused = 1;
     return 1;
   }
   if (text && text[0]) {

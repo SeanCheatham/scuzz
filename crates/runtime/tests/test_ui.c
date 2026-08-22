@@ -572,7 +572,7 @@ static void test_session_debug_dump(void) {
     assert(sz_ui_pump_sync(session));
     free(a);
     a = slurp_cstr(path);
-    assert(strstr(a, "0* item=\"hi\"") != NULL);
+    assert(strstr(a, "0* item=\"hi\" caret=2") != NULL);
   }
 
   memset(&tap, 0, sizeof(tap));
@@ -1256,7 +1256,7 @@ static void test_session_inject_key(void) {
   assert(strcmp(sz_signal_str_get(draft), "hi") == 0);
   assert(sz_ui_session_alive(session));
 
-  write_stamp(path, "key ArrowLeft\nkey Home\nkey Delete\n");
+  write_stamp(path, "key PageUp\nkey PageDown\n");
   assert(sz_ui_pump_sync(session));
   assert(strcmp(sz_signal_str_get(draft), "hi") == 0);
 
@@ -1362,6 +1362,98 @@ static void test_record_live_key(void) {
   sz_ui_unmount(session);
   sz_signal_str_free(draft);
   remove(record);
+}
+
+static void test_session_inject_caret(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *field;
+  SzSignalStr *draft;
+  SzInputEvent ev;
+  const SzTheme *theme = sz_theme_default();
+  const char *path = "/tmp/scuzz_ui_inject_caret.script";
+  const char *dump = "/tmp/scuzz_ui_inject_caret.dump";
+  char *body;
+  SzRect fr;
+  float tap_x, tap_y;
+
+  remove(path);
+  remove(dump);
+  draft = sz_signal_str("");
+  root = sz_view_column();
+  field = sz_view_text_field(draft, "item");
+  sz_view_add_child(root, field);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_inject(session, path));
+  assert(sz_ui_session_set_debug_dump(session, dump));
+  assert(sz_ui_pump_sync(session));
+
+  write_stamp(path, "text abc\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "abc") == 0);
+  assert(sz_view_text_field_caret(field) == 3);
+  body = slurp_cstr(dump);
+  assert(strstr(body, "0* item=\"abc\" caret=3") != NULL);
+  assert(strstr(body, "[taps]") != NULL);
+  free(body);
+
+  write_stamp(path, "caret 1\nkey Delete\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "ac") == 0);
+  assert(sz_view_text_field_caret(field) == 1);
+  body = slurp_cstr(dump);
+  assert(strstr(body, "0* item=\"ac\" caret=1") != NULL);
+  free(body);
+
+  write_stamp(path, "text abc\nkey Home\nkey ArrowRight\nkey x x\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "axbc") == 0);
+  assert(sz_view_text_field_caret(field) == 2);
+
+  write_stamp(path, "text abc\nkey End\nkey ArrowLeft\nkey Backspace\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "ac") == 0);
+  assert(sz_view_text_field_caret(field) == 1);
+
+  write_stamp(path, "text caf\xC3\xA9\nkey ArrowLeft\nkey Delete\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "caf") == 0);
+  assert(sz_view_text_field_caret(field) == 3);
+
+  write_stamp(path, "text abc\ncaret 0 1\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_text_field_caret(field) == 1);
+
+  sz_view_layout(sz_ui_session_root(session), (float)cfg.width, (float)cfg.height,
+                 theme);
+  fr = sz_view_frame(field);
+  tap_x = fr.x + 6.f + sk_font_measure_string("a", theme->font_px);
+  tap_y = fr.y + fr.h * 0.5f;
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_TAP;
+  ev.x = tap_x;
+  ev.y = tap_y;
+  write_stamp(path, "text abc\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_text_field_caret(field) == 1);
+  write_stamp(path, "key Delete\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "ac") == 0);
+
+  sz_ui_unmount(session);
+  sz_signal_str_free(draft);
+  remove(path);
+  remove(dump);
 }
 
 static void test_session_inject_field_index(void) {
@@ -12502,12 +12594,13 @@ static void test_caret_metrics(void) {
   assert(caret.h >= 1.f - 0.5f);
 
   /* Same byte length, different glyphs: measured advance, not n * cell. */
-  sz_signal_str_set(draft, "ii");
+  assert(sz_view_handle_text_edit(root, "i", 0));
   sz_view_layout(root, 200.f, 80.f, theme);
   caret = sz_view_caret_rect(root, theme);
   want = fr.x + 6.f + sk_font_measure_string("ii", theme->font_px);
   assert(fabsf(caret.x - want) < 0.5f);
   sz_signal_str_set(draft, "WW");
+  assert(sz_view_handle_key(root, "End", "", 0));
   sz_view_layout(root, 200.f, 80.f, theme);
   caret = sz_view_caret_rect(root, theme);
   want = fr.x + 6.f + sk_font_measure_string("WW", theme->font_px);
@@ -12867,6 +12960,7 @@ int main(void) {
   test_session_inject_key();
   test_session_inject_key_utf8_backspace();
   test_record_live_key();
+  test_session_inject_caret();
   test_session_inject_field_index();
   test_button_set_and_show_when();
   test_widgets();
