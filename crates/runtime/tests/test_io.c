@@ -1375,9 +1375,25 @@ static int64_t keep_none(void *head, void *env) {
   return 0;
 }
 
-static void *map_bang(void *head, void *env) {
+static int64_t keep_true(void *head, void *env) {
+  (void)head;
   (void)env;
-  return sz_string_concat((SzString *)head, sz_string_from_cstr("!"));
+  return 1;
+}
+
+static void *map_bang(void *head, void *env) {
+  SzString *bang;
+  SzString *out;
+  (void)env;
+  bang = sz_string_from_cstr("!");
+  out = sz_string_concat((SzString *)head, bang);
+  sz_release(bang);
+  return out;
+}
+
+static void *map_singleton(void *head, void *env) {
+  (void)env;
+  return sz_list_cons(head, NULL);
 }
 
 static void *map_id(void *head, void *env) {
@@ -7237,12 +7253,19 @@ int main(void) {
     size_t base_bytes = 0, base_count = 0;
     size_t live_bytes = 0, live_count = 0;
     SzString *s;
+    SzString *y;
     SzList *xs = NULL;
     SzList *tmp;
     SzList *ys;
+    SzList *sing;
+    SzList *nums = NULL;
+    void *one;
+    void *z0;
+    void *sum;
     int i;
     sz_alloc_stats(&base_bytes, &base_count);
     s = sz_string_from_cstr("x");
+    y = sz_string_from_cstr("y");
     for (i = 0; i < 10000; i++) {
       tmp = sz_list_cons(s, xs);
       sz_release(xs);
@@ -7256,6 +7279,82 @@ int main(void) {
     sz_list_free(ys);
     ys = sz_list_concat(xs, NULL);
     assert(sz_list_len(ys) == 10000);
+    sz_list_free(ys);
+    ys = sz_list_init(xs);
+    assert(sz_list_len(ys) == 9999);
+    sz_list_free(ys);
+    ys = sz_list_set_at(xs, 0, y);
+    assert(sz_list_len(ys) == 10000);
+    assert(ys->head == y);
+    sz_list_free(ys);
+    sing = sz_list_map(xs, map_singleton, NULL);
+    ys = sz_list_flatten(sing);
+    assert(sz_list_len(ys) == 10000);
+    sz_list_free(ys);
+    sz_list_free(sing);
+    ys = sz_list_zip(xs, xs);
+    assert(sz_list_len(ys) == 10000);
+    sz_list_free(ys);
+    ys = sz_list_tails(xs);
+    assert(sz_list_len(ys) == 10001);
+    sz_list_free(ys);
+    ys = sz_list_takewhile(xs, keep_true, NULL);
+    assert(sz_list_len(ys) == 10000);
+    sz_list_free(ys);
+    ys = sz_list_intersperse(xs, s);
+    assert(sz_list_len(ys) == 19999);
+    sz_list_free(ys);
+    ys = sz_list_sliding(xs, 2);
+    assert(sz_list_len(ys) == 9999);
+    sz_list_free(ys);
+    ys = sz_list_grouped(xs, 10);
+    assert(sz_list_len(ys) == 1000);
+    sz_list_free(ys);
+    one = sz_box_i64(1);
+    z0 = sz_box_i64(0);
+    for (i = 0; i < 10000; i++) {
+      tmp = sz_list_cons(one, nums);
+      sz_release(nums);
+      nums = tmp;
+    }
+    sum = sz_list_fold_right(nums, z0, fold_add_i64, NULL);
+    assert(sz_unbox_i64(sum) == 10000);
+    sz_release(sum);
+    sz_list_free(nums);
+    sz_release(one);
+    sz_release(z0);
+    sz_list_free(xs);
+    sz_string_free(s);
+    sz_string_free(y);
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
+  /* 100k spine: init, takeWhile, and sliding must loop, not recurse. */
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    SzString *s;
+    SzList *xs = NULL;
+    SzList *tmp;
+    SzList *ys;
+    int i;
+    sz_alloc_stats(&base_bytes, &base_count);
+    s = sz_string_from_cstr("x");
+    for (i = 0; i < 100000; i++) {
+      tmp = sz_list_cons(s, xs);
+      sz_release(xs);
+      xs = tmp;
+    }
+    ys = sz_list_init(xs);
+    assert(sz_list_len(ys) == 99999);
+    sz_list_free(ys);
+    ys = sz_list_takewhile(xs, keep_true, NULL);
+    assert(sz_list_len(ys) == 100000);
+    sz_list_free(ys);
+    ys = sz_list_sliding(xs, 2);
+    assert(sz_list_len(ys) == 99999);
     sz_list_free(ys);
     sz_list_free(xs);
     sz_string_free(s);
