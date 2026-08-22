@@ -60,11 +60,11 @@ Path deps only (`manifest.rs`). Git, versioned, and hosted artifacts are directi
 
 A Scuzz `[ui]` package is the in-tree IDE. `scuzz ide` on the one CLI launches it with Desktop. Headless stays a peer. The app consumes `scuzz check`, `scuzz lsp`, `scuzz fmt`, `scuzz run`, and `scuzz fuzz`. It does not reimplement the compiler. Locks: [`vision.md`](vision.md#tooling).
 
-Close every prerequisite in this section before that package and before `scuzz ide`. An implementation that invents a missing primitive at IDE time is a miss of this list. Close groups in order: input, editor widget, kits, chrome, analyze, Headless, then the launcher.
+Close every prerequisite in this section before that package and before `scuzz ide`. An implementation that invents a missing primitive at IDE time is a miss of this list. Sequence: input/editor and kits in parallel. Put Headless in every UI slice. Prove on `examples/editor` before the launcher. The close-lists below stay the bar.
 
 #### 1. Input and embedder
 
-Today Desktop (X11 and Cocoa) maps `q` / `Q` / Escape to quit even when a TextField is focused. Key insert is ASCII 32–127. Backspace drops one raw byte. There is no Enter, Tab, arrow, Home, End, Page, Delete, or modifier chord. `SZ_INPUT_TEXT_EDIT` appends to the focused field or backspaces the last byte. `SZ_INPUT_KEYBOARD` is mobile soft-keyboard show/hide, not a key. Pointer move fires while the button is down. There is no hover-without-button and no secondary click. Clipboard is absent. OS IME candidate windows stay deferred (see above).
+Today Desktop (X11 and Cocoa) quit is window close. Live keys are `SZ_INPUT_KEY` (name, UTF-8 insert, Shift / Ctrl / Cmd / Alt). Headless `key <name> [text]` matches `record.script`. Insert is UTF-8. Backspace chops a UTF-8 code point at the end of the focused TextField. Unused names (arrows, Home, End, Delete) inject and no-op. `type` / `text` / `backspace` stay agent sugar through `SZ_INPUT_TEXT_EDIT`. `SZ_INPUT_KEYBOARD` is mobile soft-keyboard show/hide, not a key. Mobile IME may still send `TEXT_EDIT`. Pointer move fires while the button is down. There is no hover-without-button and no secondary click. Clipboard is absent. OS IME candidate windows stay deferred (see above). Arrows do not move a caret yet.
 
 Close:
 
@@ -79,7 +79,7 @@ Close:
 
 #### 2. Editor widget
 
-Today `View.textField` is one line (`control_h`). Insert appends. Backspace deletes the last byte. Layout and paint copy the value through a 256-byte stack buffer. Caret metrics use that buffer. `View.text` wraps at newlines for display, but it is not editable. `View.textColor` wraps a whole child. A line of tokens as many Views is not an editor. `View.each` rebuilds every child. Default each-row text also caps at 256 bytes. Collect of text fields caps at 64. `sk_sw` measure is monospace. The pinned Skia prebuilt is proportional.
+Today `View.textField` is one line (`control_h`). Insert appends at the end. Backspace chops a UTF-8 code point at the end. There is no caret offset. Layout and paint copy the value through a 256-byte stack buffer. Caret metrics use that buffer. `View.text` wraps at newlines for display, but it is not editable. `View.textColor` wraps a whole child. A line of tokens as many Views is not an editor. `View.each` rebuilds every child. Default each-row text also caps at 256 bytes. Collect of text fields caps at 64. `sk_sw` measure is monospace. The pinned Skia prebuilt is proportional.
 
 Close:
 
@@ -146,11 +146,11 @@ Close:
 
 #### 6. Headless and verification
 
-Today inject verbs are `tap` / `xy` / `text` / `type` / `pump` / `scroll` / `backspace` / `dump` / `reload` / `quit` / `resetpeak`. Fuzz composes taps, fields, scrolls, and drivers. A whole-file a11y dump of an editor is the wrong oracle.
+Today inject verbs are `tap` / `xy` / `text` / `type` / `key` / `pump` / `scroll` / `backspace` / `dump` / `reload` / `quit` / `resetpeak`. Fuzz composes taps, fields, scrolls, and drivers. A whole-file a11y dump of an editor is the wrong oracle.
 
 Close:
 
-- Inject verbs for caret, selection, key-with-modifiers, and paste. Record those verbs from Desktop.
+- Inject verbs for caret, selection, key-with-modifiers, and paste. Record those verbs from Desktop. `key` is in. Caret, selection, and paste are not.
 - Structural dump fields for buffer, caret, selection, and diagnostics. Properties talk to that surface (`Property.signalStr`, `Property.a11yHas`, or a dedicated editor observation).
 - Every new editor or chrome widget has a Headless path. No Desktop-only shortcut.
 - IDE package uses in-source properties, drivers, goldens, and `scuzz fuzz`. TestRuntime fakes cover check/fs as in group 3.

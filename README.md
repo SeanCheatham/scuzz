@@ -41,7 +41,7 @@ scuzz run --headless    # Desktop: scuzz run
 
 ## Example
 
-A multi-page Desktop app. Radios switch pages with `showWhen`. Tasks live in a `Signal.list` and persist through `Fs`. The window stays open. Press q or Esc to quit. The snippet condenses [`examples/studio`](examples/studio). The full example adds the widget catalog, properties, and drivers.
+A multi-page Desktop app. Radios switch pages with `showWhen`. Tasks live in a `Signal.list` and persist through `Fs`. The window stays open. Close the window to quit. The snippet condenses [`examples/studio`](examples/studio). The full example adds the widget catalog, properties, and drivers.
 
 ```scala
 @main def main: IO[Unit] =
@@ -73,7 +73,7 @@ A multi-page Desktop app. Radios switch pages with `showWhen`. Tasks live in a `
 ```
 
 ```bash
-scuzz run examples/studio            # Desktop window; q or Esc quits
+scuzz run examples/studio            # Desktop window; close the window to quit
 scuzz run --headless examples/studio
 ```
 

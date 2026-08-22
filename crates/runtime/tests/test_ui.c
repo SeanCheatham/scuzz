@@ -1220,6 +1220,150 @@ static void test_session_inject_type(void) {
   remove(path);
 }
 
+static void test_session_inject_key(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *field;
+  SzSignalStr *draft;
+  SzInputEvent ev;
+  const char *path = "/tmp/scuzz_ui_inject_key.script";
+
+  remove(path);
+  draft = sz_signal_str("");
+  root = sz_view_column();
+  field = sz_view_text_field(draft, "item");
+  sz_view_add_child(root, field);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_inject(session, path));
+  assert(sz_ui_pump_sync(session));
+
+  /* Focused field keeps q (quit is window close / Headless quit). */
+  write_stamp(path, "text hi\nkey q q\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "hiq") == 0);
+  assert(sz_ui_session_alive(session));
+
+  write_stamp(path, "key Enter\nkey Tab\nkey Backspace\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "hi") == 0);
+  assert(sz_ui_session_alive(session));
+
+  write_stamp(path, "key ArrowLeft\nkey Home\nkey Delete\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "hi") == 0);
+
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_KEY;
+  ev.key = "q";
+  ev.text = "q";
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(strcmp(sz_signal_str_get(draft), "hiq") == 0);
+
+  sz_ui_unmount(session);
+  sz_signal_str_free(draft);
+  remove(path);
+}
+
+static void test_session_inject_key_utf8_backspace(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *field;
+  SzSignalStr *draft;
+  const char *path = "/tmp/scuzz_ui_inject_key_utf8.script";
+  const char *cafe = "caf\xC3\xA9";
+
+  remove(path);
+  draft = sz_signal_str("");
+  root = sz_view_column();
+  field = sz_view_text_field(draft, "item");
+  sz_view_add_child(root, field);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_inject(session, path));
+  assert(sz_ui_pump_sync(session));
+
+  write_stamp(path, "text caf\xC3\xA9\nkey Backspace\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "caf") == 0);
+  assert(strlen(cafe) == 5);
+
+  write_stamp(path, "text caf\xC3\xA9\nbackspace\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "caf") == 0);
+
+  sz_ui_unmount(session);
+  sz_signal_str_free(draft);
+  remove(path);
+}
+
+static void test_record_live_key(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *field;
+  SzSignalStr *draft;
+  SzInputEvent ev;
+  const char *record = "/tmp/scuzz_ui_record_key.script";
+  char *body;
+
+  remove(record);
+  draft = sz_signal_str("");
+  root = sz_view_column();
+  field = sz_view_text_field(draft, "item");
+  sz_view_add_child(root, field);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_record(session, record));
+  assert(sz_ui_pump_sync(session));
+
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_KEY;
+  ev.key = "q";
+  ev.text = "q";
+  assert(sz_ui_session_live_inject(session, &ev));
+  assert(strcmp(sz_signal_str_get(draft), "q") == 0);
+  body = slurp_cstr(record);
+  assert(strstr(body, "key q q") != NULL);
+  assert(strstr(body, "type ") == NULL);
+  free(body);
+
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_KEY;
+  ev.key = "Backspace";
+  ev.text = "";
+  assert(sz_ui_session_live_inject(session, &ev));
+  assert(strcmp(sz_signal_str_get(draft), "") == 0);
+  body = slurp_cstr(record);
+  assert(strstr(body, "key Backspace") != NULL);
+  assert(strstr(body, "backspace") == NULL);
+  free(body);
+
+  sz_ui_unmount(session);
+  sz_signal_str_free(draft);
+  remove(record);
+}
+
 static void test_session_inject_field_index(void) {
   SzUiConfig cfg;
   SzUiSession *session;
@@ -12720,6 +12864,9 @@ int main(void) {
   test_session_inject_scroll();
   test_session_inject_backspace();
   test_session_inject_type();
+  test_session_inject_key();
+  test_session_inject_key_utf8_backspace();
+  test_record_live_key();
   test_session_inject_field_index();
   test_button_set_and_show_when();
   test_widgets();

@@ -88,6 +88,8 @@ int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
 int sz_view_handle_tap(SzView *root, float x, float y);
 int sz_view_handle_text(SzView *root, const char *text);
 int sz_view_handle_text_edit(SzView *root, const char *text, int backspace);
+int sz_view_handle_key(SzView *root, const char *key, const char *text,
+                       int mods);
 
 typedef enum {
   BRIDGE_INT = 1,
@@ -786,6 +788,11 @@ static void record_live_event(SzUiSession *session, const SzInputEvent *ev) {
     return;
   if (ev->kind == SZ_INPUT_TAP) {
     record_tap_or_xy(session, f, ev->x, ev->y);
+  } else if (ev->kind == SZ_INPUT_KEY && ev->key && ev->key[0]) {
+    if (ev->text && ev->text[0])
+      fprintf(f, "key %s %s\n", ev->key, ev->text);
+    else
+      fprintf(f, "key %s\n", ev->key);
   } else if (ev->kind == SZ_INPUT_TEXT_EDIT) {
     if (!ev->text || !ev->text[0])
       fputs("backspace\n", f);
@@ -1087,6 +1094,13 @@ int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event) {
     session->dirty = 1;
     return 1;
   }
+  case SZ_INPUT_KEY:
+    if (!sz_view_handle_key(session->root, event->key, event->text,
+                            event->key_mods))
+      return 0;
+    sync_keyboard(session);
+    session->dirty = 1;
+    return 1;
   case SZ_INPUT_RESIZE:
     if (event->width <= 0 || event->height <= 0)
       return 0;

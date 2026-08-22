@@ -17,7 +17,7 @@ use support::resolve_dir;
     name = "scuzz",
     version,
     about = "Scuzz Lang CLI",
-    after_help = "Examples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz check --message-format=json\n  scuzz lsp\n  scuzz test\n  scuzz run --headless\n  scuzz run examples/studio\n  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio\n  scuzz watch\n  scuzz run --watch --headless\n  scuzz fuzz --iterations 16\n\nJSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check` (open buffers overlay disk; not a second typer).\n`scuzz check` is the linter. `watch` rebuilds. `[ui] run --watch` is hot reload: it keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (Signals stay). IO-only `run --watch` kills and reruns on source change. Live dump: build/debug.dump (includes [heap] kinds, delta, and [live] rows). Live inject: build/inject.script (tap/xy/text/type/pump/scroll/backspace/dump/reload/quit/resetpeak). Desktop/Mobile record: build/record.script."
+    after_help = "Examples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz check --message-format=json\n  scuzz lsp\n  scuzz test\n  scuzz run --headless\n  scuzz run examples/studio\n  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio\n  scuzz watch\n  scuzz run --watch --headless\n  scuzz fuzz --iterations 16\n\nJSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check` (open buffers overlay disk; not a second typer).\n`scuzz check` is the linter. `watch` rebuilds. `[ui] run --watch` is hot reload: it keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (Signals stay). IO-only `run --watch` kills and reruns on source change. Live dump: build/debug.dump (includes [heap] kinds, delta, and [live] rows). Live inject: build/inject.script (tap/xy/text/type/key/pump/scroll/backspace/dump/reload/quit/resetpeak). Desktop quit is window close. Headless `quit` stops the session. Desktop/Mobile record: build/record.script (live keys write `key`)."
 )]
 struct Cli {
     /// Diagnostic format: human (default) or json (`scuzz check` only)
@@ -49,7 +49,7 @@ enum Commands {
     },
     /// Build and run a Scuzz Lang project
     #[command(
-        after_help = "Examples:\n  scuzz run\n  scuzz run --headless\n  scuzz run examples/studio\n  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio\n  scuzz run --watch --headless\n\nDesktop/Mobile `run` writes build/record.script (live OS input) and build/debug.dump. Replay Headless with --script and --dump. `[ui] run --watch` is hot reload. `build/inject.script` stays watch playback only (`dump` / `reload` / `quit` / `resetpeak` included)."
+        after_help = "Examples:\n  scuzz run\n  scuzz run --headless\n  scuzz run examples/studio\n  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio\n  scuzz run --watch --headless\n\nDesktop/Mobile `run` writes build/record.script (live OS input; keys as `key`) and build/debug.dump. Replay Headless with --script and --dump. `[ui] run --watch` is hot reload. `build/inject.script` stays watch playback only (`dump` / `reload` / `quit` / `resetpeak` / `key` included). Desktop quit is window close. Headless `quit` stops the session."
     )]
     Run {
         #[arg(default_value = ".")]
@@ -482,7 +482,7 @@ fn watch_run(path: &Path, out_dir: &Path, headless: bool) -> Result<ExitCode> {
         return watch_run_io(&project_dir, path, out_dir);
     }
     eprintln!(
-        "scuzz run --watch {} (hot reload: recompiles build/reload.dylib then stamp-reloads View tree; live dump build/debug.dump; inject build/inject.script including dump/reload/quit/resetpeak)",
+        "scuzz run --watch {} (hot reload: recompiles build/reload.dylib then stamp-reloads View tree; live dump build/debug.dump; inject build/inject.script including dump/reload/quit/resetpeak/key)",
         project_dir.display()
     );
     watch_run_ui(&project_dir, path, out_dir, headless)

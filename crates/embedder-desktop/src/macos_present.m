@@ -6,10 +6,12 @@
 #include <dispatch/dispatch.h>
 #include <stdio.h>
 #include <string.h>
+#include <stddef.h>
 
 #define EVENT_CAP 64
 #define TEXT_RING 64
-#define TEXT_LEN 64
+#define TEXT_LEN 128
+#define KEY_NAME_LEN 32
 
 static NSWindow *g_win;
 static NSImageView *g_view;
@@ -22,6 +24,7 @@ static int g_user_quit;
 static SzInputEvent g_queue[EVENT_CAP];
 static int g_q_head;
 static int g_q_tail;
+static char g_key_bufs[TEXT_RING][KEY_NAME_LEN];
 static char g_text_bufs[TEXT_RING][TEXT_LEN];
 static int g_text_i;
 
@@ -66,25 +69,40 @@ static int q_full(void) {
 static int text_slot_queued(const char *slot) {
   int i;
   for (i = g_q_head; i != g_q_tail; i = (i + 1) % EVENT_CAP) {
+    if (g_queue[i].kind == SZ_INPUT_KEY &&
+        (g_queue[i].key == slot || g_queue[i].text == slot))
+      return 1;
     if (g_queue[i].kind == SZ_INPUT_TEXT_EDIT && g_queue[i].text == slot)
       return 1;
   }
   return 0;
 }
 
-static const char *stash_text(const char *s) {
-  size_t n;
-  char *dst;
-  if (!s)
-    s = "";
-  n = strlen(s);
-  if (n >= TEXT_LEN)
-    n = TEXT_LEN - 1;
-  dst = g_text_bufs[g_text_i];
+static void stash_key_text(const char *name, const char *text, const char **out_key,
+                           const char **out_text) {
+  size_t nk;
+  size_t nt;
+  char *kdst;
+  char *tdst;
+  if (!name)
+    name = "";
+  if (!text)
+    text = "";
+  nk = strlen(name);
+  nt = strlen(text);
+  if (nk >= KEY_NAME_LEN)
+    nk = KEY_NAME_LEN - 1;
+  if (nt >= TEXT_LEN)
+    nt = TEXT_LEN - 1;
+  kdst = g_key_bufs[g_text_i];
+  tdst = g_text_bufs[g_text_i];
   g_text_i = (g_text_i + 1) % TEXT_RING;
-  memcpy(dst, s, n);
-  dst[n] = '\0';
-  return dst;
+  memcpy(kdst, name, nk);
+  kdst[nk] = '\0';
+  memcpy(tdst, text, nt);
+  tdst[nt] = '\0';
+  *out_key = kdst;
+  *out_text = tdst;
 }
 
 static int q_push(const SzInputEvent *ev) {
@@ -127,15 +145,108 @@ static void enqueue_scroll(float x, float y, float dy) {
   q_push(&ev);
 }
 
-static void enqueue_text_edit(const char *text) {
+static void enqueue_key(const char *name, const char *text, int mods) {
   SzInputEvent ev;
-  /* Drop if the queue is full, or if the next text slot is still queued. */
-  if (q_full() || text_slot_queued(g_text_bufs[g_text_i]))
+  const char *k;
+  const char *t;
+  if (q_full() || text_slot_queued(g_key_bufs[g_text_i]) ||
+      text_slot_queued(g_text_bufs[g_text_i]))
     return;
+  stash_key_text(name, text, &k, &t);
   memset(&ev, 0, sizeof(ev));
-  ev.kind = SZ_INPUT_TEXT_EDIT;
-  ev.text = stash_text(text ? text : "");
+  ev.kind = SZ_INPUT_KEY;
+  ev.key = k;
+  ev.text = t;
+  ev.key_mods = mods;
   q_push(&ev);
+}
+
+static int cocoa_key_no_insert(const char *name) {
+  return strcmp(name, "Backspace") == 0 || strcmp(name, "Enter") == 0 ||
+         strcmp(name, "Tab") == 0 || strcmp(name, "Escape") == 0 ||
+         strcmp(name, "Delete") == 0 || strncmp(name, "Arrow", 5) == 0 ||
+         strcmp(name, "Home") == 0 || strcmp(name, "End") == 0 ||
+         strcmp(name, "PageUp") == 0 || strcmp(name, "PageDown") == 0;
+}
+
+static void cocoa_key_name(unichar c, char *out, size_t cap) {
+  const char *s = NULL;
+  if (!out || cap == 0)
+    return;
+  out[0] = '\0';
+  switch (c) {
+  case NSEnterCharacter:
+  case NSCarriageReturnCharacter:
+  case NSNewlineCharacter:
+    s = "Enter";
+    break;
+  case NSTabCharacter:
+    s = "Tab";
+    break;
+  case 0x08:
+  case NSDeleteCharacter:
+    s = "Backspace";
+    break;
+  case NSDeleteFunctionKey:
+    s = "Delete";
+    break;
+  case 0x1b:
+    s = "Escape";
+    break;
+  case NSLeftArrowFunctionKey:
+    s = "ArrowLeft";
+    break;
+  case NSRightArrowFunctionKey:
+    s = "ArrowRight";
+    break;
+  case NSUpArrowFunctionKey:
+    s = "ArrowUp";
+    break;
+  case NSDownArrowFunctionKey:
+    s = "ArrowDown";
+    break;
+  case NSHomeFunctionKey:
+    s = "Home";
+    break;
+  case NSEndFunctionKey:
+    s = "End";
+    break;
+  case NSPageUpFunctionKey:
+    s = "PageUp";
+    break;
+  case NSPageDownFunctionKey:
+    s = "PageDown";
+    break;
+  case ' ':
+    s = "Space";
+    break;
+  default:
+    break;
+  }
+  if (s) {
+    snprintf(out, cap, "%s", s);
+    return;
+  }
+  if (c >= 'A' && c <= 'Z') {
+    out[0] = (char)('a' + (c - 'A'));
+    out[1] = '\0';
+    return;
+  }
+  if (c >= 32 && c < 127) {
+    out[0] = (char)c;
+    out[1] = '\0';
+    return;
+  }
+  {
+    unichar u = c;
+    NSString *one = [NSString stringWithCharacters:&u length:1];
+    const char *utf8 = one ? [one UTF8String] : NULL;
+    if (utf8 && utf8[0]) {
+      snprintf(out, cap, "%s", utf8);
+      return;
+    }
+  }
+  snprintf(out, cap, "Unidentified");
 }
 
 /* Convert a window event to Scuzz layout coords. 0 if outside the content view. */
@@ -302,23 +413,31 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
         }
 
         if ([ev type] == NSEventTypeKeyDown) {
+          NSString *ign = [ev charactersIgnoringModifiers];
           NSString *chars = [ev characters];
           unichar c =
-              (chars && [chars length] > 0) ? [chars characterAtIndex:0] : 0;
-          if (c == 'q' || c == 'Q' || c == 27) {
-            quit = 1;
-            break;
+              (ign && [ign length] > 0) ? [ign characterAtIndex:0] : 0;
+          char name[KEY_NAME_LEN];
+          char utf8[TEXT_LEN];
+          int mods = 0;
+          NSEventModifierFlags flags = [ev modifierFlags];
+          cocoa_key_name(c, name, sizeof name);
+          utf8[0] = '\0';
+          if (!cocoa_key_no_insert(name) && chars && [chars length] > 0) {
+            const char *u = [chars UTF8String];
+            if (u && (unsigned char)u[0] >= 32)
+              snprintf(utf8, sizeof utf8, "%s", u);
           }
-          if (c == 127 || c == NSDeleteCharacter) {
-            enqueue_text_edit("");
-            continue;
-          }
-          if (c >= 32 && c < 127) {
-            char buf[2] = {(char)c, '\0'};
-            enqueue_text_edit(buf);
-            continue;
-          }
-          continue; /* swallow other keydowns (no system beep path) */
+          if (flags & NSEventModifierFlagShift)
+            mods |= SZ_KEY_SHIFT;
+          if (flags & NSEventModifierFlagControl)
+            mods |= SZ_KEY_CTRL;
+          if (flags & NSEventModifierFlagCommand)
+            mods |= SZ_KEY_CMD;
+          if (flags & NSEventModifierFlagOption)
+            mods |= SZ_KEY_ALT;
+          enqueue_key(name, utf8, mods);
+          continue; /* swallow keydowns (no system beep path) */
         }
 
         [NSApp sendEvent:ev];

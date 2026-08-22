@@ -3757,9 +3757,10 @@ int sz_view_handle_text_edit(SzView *root, const char *text, int backspace) {
 
   if (backspace) {
     if (n > 0) {
-      buf = (char *)sz_alloc(n); /* n bytes: drop last, keep NUL */
-      memcpy(buf, cur, n - 1);
-      buf[n - 1] = '\0';
+      int keep = utf8_prev(cur, (int)n);
+      buf = (char *)sz_alloc((size_t)keep + 1);
+      memcpy(buf, cur, (size_t)keep);
+      buf[keep] = '\0';
       sz_signal_str_set(target->sig_str, buf);
       sz_free(buf);
     }
@@ -3772,5 +3773,37 @@ int sz_view_handle_text_edit(SzView *root, const char *text, int backspace) {
     sz_free(buf);
   }
   target->focused = 1;
+  return 1;
+}
+
+static int key_is_one_code_point(const char *key) {
+  int clen;
+  if (!key || !key[0])
+    return 0;
+  clen = utf8_clen(key, 0);
+  return clen > 0 && key[clen] == '\0' && (unsigned char)key[0] >= 32;
+}
+
+int sz_view_handle_key(SzView *root, const char *key, const char *text,
+                       int mods) {
+  (void)mods;
+  if (!root)
+    return 1;
+  if (!key)
+    key = "";
+  if (strcmp(key, "Backspace") == 0) {
+    (void)sz_view_handle_text_edit(root, NULL, 1);
+    return 1;
+  }
+  if (text && text[0]) {
+    (void)sz_view_handle_text_edit(root, text, 0);
+    return 1;
+  }
+  if (strcmp(key, "Space") == 0) {
+    (void)sz_view_handle_text_edit(root, " ", 0);
+    return 1;
+  }
+  if (key_is_one_code_point(key))
+    (void)sz_view_handle_text_edit(root, key, 0);
   return 1;
 }
