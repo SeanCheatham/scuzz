@@ -245,6 +245,14 @@ jobs:
           grep -q "mapeta:1,2" /tmp/kernel.out
           grep -q "mapeta0:" /tmp/kernel.out
           grep -q "usereta:3" /tmp/kernel.out
+          grep -q "funlet:4" /tmp/kernel.out
+          grep -q "funtyped:5" /tmp/kernel.out
+          grep -q "funret:6" /tmp/kernel.out
+          grep -q "funcap:7" /tmp/kernel.out
+          grep -q "funpass:6" /tmp/kernel.out
+          grep -q "funpass0:7" /tmp/kernel.out
+          grep -q "funmap:1,2" /tmp/kernel.out
+          grep -q "funmap0:" /tmp/kernel.out
           grep -q "tab:0,1,2" /tmp/kernel.out
           grep -q "isp:a,|,b,|,c" /tmp/kernel.out
           grep -q "grp:a,b|c" /tmp/kernel.out
