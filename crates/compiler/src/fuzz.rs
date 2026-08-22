@@ -40,11 +40,7 @@ fn letter_at(i: i64) -> String {
 }
 
 fn fuzz_kind_count(n_fields: i64, n_scrolls: i64, has_drive: bool) -> i64 {
-    3 + i64::from(has_drive)
-        + i64::from(n_fields > 0)
-        + i64::from(n_fields > 0)
-        + i64::from(n_fields > 0)
-        + i64::from(n_scrolls > 0)
+    3 + i64::from(has_drive) + 3 * i64::from(n_fields > 0) + i64::from(n_scrolls > 0)
 }
 
 fn fuzz_word(prefix: &str, mut s: i64, n: i64) -> (String, i64) {
@@ -127,16 +123,7 @@ fn fuzz_event(
     n_scrolls: i64,
     drivers: &[String],
 ) -> (String, i64) {
-    fuzz_event_at(lcg_next(s), n_buttons, n_fields, n_scrolls, drivers)
-}
-
-fn fuzz_event_at(
-    s: i64,
-    n_buttons: i64,
-    n_fields: i64,
-    n_scrolls: i64,
-    drivers: &[String],
-) -> (String, i64) {
+    let s = lcg_next(s);
     let k = lcg_below(s, fuzz_kind_count(n_fields, n_scrolls, !drivers.is_empty()));
     fuzz_event_kind(s, k, n_buttons, n_scrolls, n_fields, drivers)
 }
@@ -235,7 +222,7 @@ fn fuzz_script_acc(
     acc
 }
 
-pub fn fuzz_script(
+fn fuzz_script(
     seed: i64,
     n_buttons: i64,
     n_fields: i64,
@@ -370,13 +357,6 @@ pub fn fuzz_mutate_sites(seed: i64, take: i64, sites: i64) -> Vec<i64> {
     out
 }
 
-pub fn sched_push(corpus: &mut Vec<String>, sched: String) {
-    if !corpus.iter().any(|s| s == &sched) {
-        corpus.insert(0, sched);
-        corpus.truncate(32);
-    }
-}
-
 pub fn missing_from<'a>(have: &'a [String], known: &[String]) -> Vec<&'a String> {
     have.iter()
         .filter(|n| !known.iter().any(|k| k == *n))
@@ -394,7 +374,8 @@ pub fn lines_nonempty(text: &str) -> Vec<String> {
         .collect()
 }
 
-pub fn count_prefix_lines(s: &str, prefix: &str) -> i64 {
+#[cfg(test)]
+fn count_prefix_lines(s: &str, prefix: &str) -> i64 {
     s.lines().filter(|l| l.starts_with(prefix)).count() as i64
 }
 
@@ -612,6 +593,14 @@ scroll:scroll
         assert_eq!(a, b);
         assert_eq!(a.len(), 16);
         assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn corpus_entry_name_matches_bad_example_pin() {
+        assert_eq!(
+            corpus_entry_name("42", &["drive bumpIncreases 101".into()]),
+            "fd143d7bacdf695a"
+        );
     }
 
     #[test]
