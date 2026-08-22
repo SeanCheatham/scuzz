@@ -495,6 +495,22 @@ def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
     }
 
     #[test]
+    fn completes_eta_user_def_arg() {
+        let src = r#"
+def bump(n: Int): Int = n + 1
+def apply(f: Int => Int, n: Int): Int = f(n)
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(apply(bump, 3)))
+"#;
+        let labels = labels_at(src, "apply(bu");
+        assert!(labels.iter().any(|l| l == "bump"), "{labels:?}");
+        assert!(
+            labels.iter().all(|l| l != "__eta"),
+            "synthetic binder leaked: {labels:?}"
+        );
+    }
+
+    #[test]
     fn completes_def_by_prefix() {
         let src = "def add(n: Int): Int = n\n@main def main: IO[Unit] = ad\n";
         let labels = labels_at(src, " ad");

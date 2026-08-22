@@ -2711,6 +2711,34 @@ def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
     }
 
     #[test]
+    fn hovers_eta_kit_on_list_map() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map([1], Str.fromInt()), ","))
+"#;
+        let h = hover_src(src, "fromInt");
+        assert!(h.contains("Str.fromInt(n: Int): String"), "{h}");
+        assert!(!h.contains("__eta"), "{h}");
+        let h = hover_src(src, "map");
+        assert!(
+            h.contains("List.map(xs: List[T], f: T => U): List[U]"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_eta_user_def() {
+        let src = r#"
+def bump(n: Int): Int = n + 1
+def apply(f: Int => Int, n: Int): Int = f(n)
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(apply(bump, 3)))
+"#;
+        let h = hover_src(src, "bump,");
+        assert!(h.contains("def bump(n: Int): Int"), "{h}");
+        assert!(!h.contains("__eta"), "{h}");
+    }
+
+    #[test]
     fn hovers_list_forall() {
         let src = r#"@main def main: IO[Unit] =
   IO.println(if (List.forall(["a"], x => true)) "y" else "n")
