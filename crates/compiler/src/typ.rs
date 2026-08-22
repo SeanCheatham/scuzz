@@ -3552,7 +3552,7 @@ fn infer(
                         "IO.race arms disagree: {a:?} vs {b:?}"
                     )));
                 }
-                Ok(Type::Io(Box::new(prefer_concrete(&*a, &*b))))
+                Ok(Type::Io(Box::new(prefer_concrete(&a, &b))))
             }
             ExprKind::IoBoth { left, right } => {
                 let lt = infer(left, enums, funs, methods, current_module, env)?;
@@ -8796,12 +8796,10 @@ fn elaborate_expr(
                 tparams,
             )?;
             restore_opt(old, env);
-            let param_ty = param_ty.or_else(|| {
-                if matches!(bind_ty, Type::Opaque(_)) {
-                    None
-                } else {
-                    Some(bind_ty)
-                }
+            let param_ty = param_ty.or(if matches!(bind_ty, Type::Opaque(_)) {
+                None
+            } else {
+                Some(bind_ty)
             });
             Ok(Expr::new(
                 ExprKind::Lambda {
