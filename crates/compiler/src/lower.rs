@@ -371,7 +371,29 @@ fn desugar_for(
                     sp,
                 )
             }
+            ForBinder::Guard { pred, span } => {
+                let sp = pred.span.clone().cover(&body.span);
+                let miss = io_fail_str("for guard", span);
+                Expr::new(
+                    ExprKind::If {
+                        cond: Box::new(lower_expr(pred, enums, current_module)),
+                        then_branch: Box::new(body),
+                        else_branch: Box::new(miss),
+                    },
+                    sp,
+                )
+            }
         })
+}
+
+fn io_fail_str(msg: &str, span: Span) -> Expr {
+    Expr::new(
+        ExprKind::IoFail(Box::new(Expr::new(
+            ExprKind::StrLit(msg.into()),
+            span.clone(),
+        ))),
+        span,
+    )
 }
 
 #[cfg(test)]
@@ -397,6 +419,24 @@ mod tests {
             }
             other => panic!("expected nested Let, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn lowers_for_guard_to_if_fail() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    x <- IO.pure(1)
+    if x > 0
+  } yield x
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let dumped = format!("{:?}", p.main.body.kind);
+        assert!(dumped.contains("If"), "{dumped}");
+        assert!(
+            dumped.contains("IoFail") || dumped.contains("for guard"),
+            "{dumped}"
+        );
     }
 
     #[test]

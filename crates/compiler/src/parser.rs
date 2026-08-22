@@ -1260,6 +1260,12 @@ impl Parser {
                 Token::Yield => {
                     return Err(self.err("`yield` belongs after `}`: `for { … } yield e`"))
                 }
+                Token::If => {
+                    let if_span = self.bump().span;
+                    let pred = self.parse_expr()?;
+                    let span = if_span.cover(&pred.span);
+                    binders.push(ForBinder::Guard { pred, span });
+                }
                 _ => {
                     let (pat, span) = self.parse_for_binder_pat()?;
                     let (name, span, unpack) = Self::binder_from_pat(pat, span);
@@ -1296,9 +1302,15 @@ impl Parser {
         self.expect(&Token::RBrace)?;
         self.expect(&Token::Yield)?;
         let body = self.parse_expr()?;
+        let has_guard = binders.iter().any(|b| matches!(b, ForBinder::Guard { .. }));
+        let has_draw = binders.iter().any(|b| matches!(b, ForBinder::Draw { .. }));
+        if has_guard && !has_draw {
+            return Err(self.err("`if` in `for` needs a `<-` binder so a miss is IO.fail"));
+        }
         let span = if let Some(b) = binders.first() {
             let vs = match b {
                 ForBinder::Eq { value, .. } | ForBinder::Draw { value, .. } => value.span.clone(),
+                ForBinder::Guard { pred, .. } => pred.span.clone(),
             };
             vs.cover(&body.span)
         } else {
@@ -3312,6 +3324,43 @@ law bad: String = "x"
             }
             other => panic!("expected for, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_for_if_guard() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    x <- IO.pure(1)
+    if x > 0
+  } yield IO.println(Str.fromInt(x))
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::For { binders, .. } => {
+                assert_eq!(binders.len(), 2);
+                assert!(matches!(&binders[0], ForBinder::Draw { name, .. } if name == "x"));
+                assert!(matches!(&binders[1], ForBinder::Guard { .. }));
+            }
+            other => panic!("expected for, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_for_if_guard_needs_draw() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    x = 1
+    if x > 0
+  } yield IO.println("x")
+"#;
+        let err = parse(src).unwrap_err();
+        assert!(
+            err.message().contains("`if` in `for` needs a `<-` binder"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]

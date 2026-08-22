@@ -439,6 +439,29 @@ def unpackProof(): IO[Unit] =
     _ <- IO.println(s"unpackLam:${Str.fromInt(List.head(xs))}")
   } yield ()
 
+def choose(ok: Bool): IO[Int] =
+  if (ok) IO.pure(7) else IO.fail("nope")
+
+def positive(n: Int): IO[Int] =
+  for {
+    x <- IO.pure(n)
+    if x > 0
+  } yield x
+
+def failProof(): IO[Unit] =
+  for {
+    n <- choose(true)
+    _ <- IO.println(s"failif:${Str.fromInt(n)}")
+    _ <- choose(false).handleErrorWith(_ =>
+  IO.println("failif:miss")
+)
+    p <- positive(3)
+    _ <- IO.println(s"forif:${Str.fromInt(p)}")
+    _ <- positive(0).handleErrorWith(_ =>
+  IO.println("forif:miss")
+)
+  } yield ()
+
 def tupleProof(): IO[Unit] =
   for {
     (n, s) = (42, "ok")
@@ -629,4 +652,5 @@ b"""
     _ <- eqProof()
     _ <- tupleProof()
     _ <- unpackProof()
+    _ <- failProof()
   } yield ()

@@ -362,6 +362,10 @@ impl Expr {
                             value: f(value)?,
                             pat,
                         },
+                        ForBinder::Guard { pred, span } => ForBinder::Guard {
+                            pred: f(pred)?,
+                            span,
+                        },
                     });
                 }
                 ExprKind::For {
@@ -480,6 +484,7 @@ impl Expr {
                 for b in binders {
                     match b {
                         ForBinder::Eq { value, .. } | ForBinder::Draw { value, .. } => f(value),
+                        ForBinder::Guard { pred, .. } => f(pred),
                     }
                 }
                 f(body);
@@ -704,7 +709,7 @@ pub fn tuple_slot(field: &str) -> Option<usize> {
     }
 }
 
-/// Binder inside `for { … }`: `x = e` (pure) or `x <- e` (effect).
+/// Binder inside `for { … }`: `x = e` (pure), `x <- e` (effect), or `if pred`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ForBinder {
     /// `name = value` — `pat` unpacks `(a, b) = value` / `Opt.Some(n) = value`.
@@ -721,24 +726,30 @@ pub enum ForBinder {
         value: Expr,
         pat: Option<Pattern>,
     },
+    /// `if pred` — a miss is `IO.fail`. The `for` needs a `<-` binder.
+    Guard { pred: Expr, span: Span },
 }
 
 impl ForBinder {
     pub fn name(&self) -> &str {
         match self {
             ForBinder::Eq { name, .. } | ForBinder::Draw { name, .. } => name,
+            ForBinder::Guard { .. } => "",
         }
     }
 
     pub fn name_span(&self) -> &Span {
         match self {
-            ForBinder::Eq { span, .. } | ForBinder::Draw { span, .. } => span,
+            ForBinder::Eq { span, .. }
+            | ForBinder::Draw { span, .. }
+            | ForBinder::Guard { span, .. } => span,
         }
     }
 
     pub fn value(&self) -> &Expr {
         match self {
             ForBinder::Eq { value, .. } | ForBinder::Draw { value, .. } => value,
+            ForBinder::Guard { pred, .. } => pred,
         }
     }
 
@@ -746,6 +757,7 @@ impl ForBinder {
     pub fn unpack_pat(&self) -> Option<&Pattern> {
         match self {
             ForBinder::Eq { pat, .. } | ForBinder::Draw { pat, .. } => pat.as_ref(),
+            ForBinder::Guard { .. } => None,
         }
     }
 }

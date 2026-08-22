@@ -693,6 +693,12 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
                         out.push_str(pretty_expr(value, 0).trim());
                         out.push('\n');
                     }
+                    ForBinder::Guard { pred, .. } => {
+                        out.push_str(&inner);
+                        out.push_str("if ");
+                        out.push_str(pretty_expr(pred, 0).trim());
+                        out.push('\n');
+                    }
                 }
             }
             out.push_str(&pad);
@@ -1242,6 +1248,20 @@ record Box[T](x: T):
         assert!(out.contains("count = Signal.int(0)"));
         assert!(out.contains("_ <- Ui.run(_ => View.text(\"x\"))"));
         assert!(out.contains("yield IO.pure(())"));
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_for_if_guard() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    x <- IO.pure(1)
+    if x > 0
+  } yield x
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("if x > 0"), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

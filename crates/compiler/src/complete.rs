@@ -481,6 +481,7 @@ mod tests {
             ("List.groupB", "List.groupBy"),
             ("List.sum", "List.sum"),
             ("List.prod", "List.product"),
+            ("IO.fa", "IO.fail"),
             ("Map.fil", "Map.filter"),
             ("Map.mapV", "Map.mapValues"),
             ("Map.to", "Map.toList"),

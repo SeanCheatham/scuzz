@@ -932,6 +932,7 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
                 match b {
                     crate::ast::ForBinder::Eq { value, .. }
                     | crate::ast::ForBinder::Draw { value, .. } => collect_strings(value, out),
+                    crate::ast::ForBinder::Guard { pred, .. } => collect_strings(pred, out),
                 }
             }
             collect_strings(body, out);
@@ -9368,6 +9369,30 @@ def id(m: Map[String, String]): Map[String, String] = m
             ir[at..].contains(&format!("call void @sz_release(ptr {name})")),
             "expected last-use release of error {name} after IO.fail:\n{ir}"
         );
+    }
+
+    #[test]
+    fn emit_for_guard_uses_if_and_fail() {
+        let src = r#"
+def positive(n: Int): IO[Int] =
+  for {
+    x <- IO.pure(n)
+    if x > 0
+  } yield x
+@main def main: IO[Unit] =
+  for {
+    n <- positive(3)
+    _ <- IO.println(Str.fromInt(n))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("for guard typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_io_fail"),
+            "for guard miss is IO.fail:\n{ir}"
+        );
+        assert!(ir.contains("br i1"), "for guard lowers to if:\n{ir}");
     }
 
     #[test]
