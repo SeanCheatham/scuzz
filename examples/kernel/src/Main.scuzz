@@ -233,6 +233,7 @@ def mapSetProof(): IO[Unit] =
     _ <- IO.println(s"smap:${List.join(Set.toList(Set.map(st, x => Str.concat(x, "!"))), ",")}")
     _ <- IO.println(s"sex:${if (Set.exists(st, x => x == "x")) "y" else "n"}")
     _ <- IO.println(s"sfa:${if (Set.forall(st, x => x != "z")) "y" else "n"}")
+    _ <- IO.println(s"tolist:${List.join(List.map(Map.toList(mp), (k, v) => s"$k:$v"), "|")}")
   } yield ()
 
 def listProof(): IO[Unit] =
@@ -306,6 +307,13 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"lix:${Str.fromInt(List.indexOf(xs, "b"))}")
     _ <- IO.println(s"llix:${Str.fromInt(List.lastIndexOf(["a", "b", "a"], "a"))}")
     _ <- IO.println(s"uniq:${List.join(List.distinct(["a", "b", "a", "c"]), ",")}")
+    _ <- IO.println(s"dby:${List.join(List.distinctBy(["aa", "b", "cc", "d"], x => Str.len(x)), ",")}")
+    _ <- IO.println(s"dby0:${List.join(List.distinctBy([]: List[String], x => x), ",")}")
+    _ <- IO.println(s"tomap:${Map.getOrElse(List.toMap([("a", "1"), ("b", "2")]), "a", "?")}")
+    _ <- IO.println(s"tomapN:${Map.getOrElse(List.toMap([("a", "1"), ("a", "9")]), "a", "?")}")
+    _ <- IO.println(s"tomap0:${Map.size(List.toMap([]: List[(String, Int)]))}")
+    _ <- IO.println(s"toset:${List.join(Set.toList(List.toSet(["b", "a", "b"])), ",")}")
+    _ <- IO.println(s"tosetN:${List.join(List.map(Set.toList(List.toSet([2, 1, 2])), Str.fromInt(_)), ",")}")
     _ <- IO.println(s"ldiff:${List.join(List.diff(xs, ["a", "z"]), ",")}")
     _ <- IO.println(s"lisect:${List.join(List.intersect(xs, ["a", "z"]), ",")}")
     _ <- IO.println(s"nhas:${if (List.contains(List.range(1, 4), 2)) "y" else "n"}")

@@ -147,6 +147,8 @@ SzList *sz_string_split(const SzString *s, const SzString *sep);
 /* Boxed i64 for IO[Int] */
 void *sz_box_i64(int64_t n);
 int64_t sz_unbox_i64(const void *p);
+/* 0 when `key` is a boxed Int, else 1 (String). Null is 1. */
+int32_t sz_map_infer_key_kind(const void *key);
 /* 1 when pointers match, or both strings, boxed i64, lists, maps, ADTs,
  * pairs, Either, or errors match by value. Other RC kinds stay identity. */
 int sz_ptr_eq(const void *a, const void *b);
@@ -605,6 +607,16 @@ int64_t sz_list_index_of(SzList *xs, void *x);
 int64_t sz_list_last_index_of(SzList *xs, void *x);
 /* First cell of each equal value. Empty stays empty. */
 SzList *sz_list_distinct(SzList *xs);
+/* First cell of each key that `fn` returns. `key_kind` is 0 for boxed
+ * Int, 1 for String. Empty stays empty. */
+SzList *sz_list_distinct_by(SzList *xs, SzListMapFn fn, void *env,
+                            int32_t key_kind);
+/* Map from `List[(K, V)]`. Duplicate keys keep the last value. A null
+ * pair is skipped. Empty is empty. Key kind is boxed Int or String. */
+SzMap *sz_list_to_map(SzList *pairs);
+/* Set from `List[Int]` or `List[String]`. Duplicate cells collapse.
+ * Empty is empty. `key_kind` is 0 for boxed Int, 1 for String. */
+SzMap *sz_list_to_set(SzList *xs, int32_t key_kind);
 /* Cells of `xs` that are missing from `ys`. Empty `xs` is empty. */
 SzList *sz_list_diff(SzList *xs, SzList *ys);
 /* Cells of `xs` that occur in `ys`. Empty `xs` or `ys` is empty. */
@@ -674,6 +686,8 @@ SzMap *sz_map_remove(SzMap *m, void *key);
 SzList *sz_map_keys(SzMap *m);
 /* Inorder values as a new list. Cons retains values. */
 SzList *sz_map_values(SzMap *m);
+/* Inorder `(K, V)` pairs as a new list. Empty is empty. */
+SzList *sz_map_to_list(SzMap *m);
 int64_t sz_map_size(SzMap *m);
 /* Set algebra. Values stay null. Empty `b` retains `a` for union/diff. */
 SzMap *sz_set_union(SzMap *a, SzMap *b);

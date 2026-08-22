@@ -1230,6 +1230,12 @@ int64_t sz_unbox_i64(const void *p) {
   return p ? *(const int64_t *)p : 0;
 }
 
+int32_t sz_map_infer_key_kind(const void *key) {
+  if (!sz_is_rc(key))
+    return 1;
+  return sz_rc_hdr(key)->kind == SZ_RC_BOX ? 0 : 1;
+}
+
 static int list_eq(const SzList *a, const SzList *b) {
   while (a && b) {
     if (!sz_ptr_eq(a->head, b->head))

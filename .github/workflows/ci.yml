@@ -266,6 +266,14 @@ jobs:
           grep -q "lix:1" /tmp/kernel.out
           grep -q "llix:2" /tmp/kernel.out
           grep -q "uniq:a,b,c" /tmp/kernel.out
+          grep -q "dby:aa,b" /tmp/kernel.out
+          grep -q "dby0:" /tmp/kernel.out
+          grep -q "tomap:1" /tmp/kernel.out
+          grep -q "tomapN:9" /tmp/kernel.out
+          grep -q "tomap0:0" /tmp/kernel.out
+          grep -q "toset:a,b" /tmp/kernel.out
+          grep -q "tosetN:1,2" /tmp/kernel.out
+          grep -Fq "tolist:a:1|b:2" /tmp/kernel.out
           grep -q "ldiff:b,c" /tmp/kernel.out
           grep -q "lisect:a" /tmp/kernel.out
           grep -q "nhas:y" /tmp/kernel.out

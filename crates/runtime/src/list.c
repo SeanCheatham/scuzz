@@ -755,6 +755,62 @@ SzList *sz_list_distinct(SzList *xs) {
   return rev;
 }
 
+SzList *sz_list_distinct_by(SzList *xs, SzListMapFn fn, void *env,
+                            int32_t key_kind) {
+  SzMap *seen = NULL;
+  SzList *acc = NULL;
+  SzList *p;
+  SzList *rev;
+  if (!fn)
+    sz_panic("sz_list_distinct_by(null fn)");
+  for (p = xs; p; p = p->tail) {
+    void *key = fn(p->head, env);
+    if (sz_map_contains(seen, key) == 0) {
+      SzMap *next = sz_map_set(seen, key, NULL, key_kind);
+      sz_release(seen);
+      seen = next;
+      acc = sz_list_cons_take(p->head, acc);
+    }
+    sz_release(key);
+  }
+  sz_release(seen);
+  rev = sz_list_reverse(acc);
+  sz_release(acc);
+  return rev;
+}
+
+SzMap *sz_list_to_map(SzList *pairs) {
+  SzMap *acc = NULL;
+  SzList *p;
+  int32_t kind = 1;
+  if (pairs && pairs->head) {
+    SzPair *first = (SzPair *)pairs->head;
+    if (first && first->left)
+      kind = sz_map_infer_key_kind(first->left);
+  }
+  for (p = pairs; p; p = p->tail) {
+    SzPair *pair = (SzPair *)p->head;
+    SzMap *next;
+    if (!pair)
+      continue;
+    next = sz_map_set(acc, pair->left, pair->right, kind);
+    sz_release(acc);
+    acc = next;
+  }
+  return acc;
+}
+
+SzMap *sz_list_to_set(SzList *xs, int32_t key_kind) {
+  SzMap *acc = NULL;
+  SzList *p;
+  for (p = xs; p; p = p->tail) {
+    SzMap *next = sz_map_set(acc, p->head, NULL, key_kind);
+    sz_release(acc);
+    acc = next;
+  }
+  return acc;
+}
+
 SzList *sz_list_diff(SzList *xs, SzList *ys) {
   SzList *acc = NULL;
   SzList *p;
