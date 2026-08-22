@@ -472,6 +472,33 @@ pub fn parse_repro(text: &str) -> Result<Repro, String> {
     Ok(parsed.fuzz)
 }
 
+/// FNV-1a 64-bit. Stable across rustc versions (unlike `DefaultHasher`).
+fn fnv1a64(h: &mut u64, bytes: &[u8]) {
+    for &b in bytes {
+        *h ^= u64::from(b);
+        *h = h.wrapping_mul(0x100000001b3);
+    }
+}
+
+/// Content hash of `schedule_seed` plus events. Filename stem is idempotent.
+pub fn corpus_entry_name(schedule_seed: &str, events: &[String]) -> String {
+    let mut h = 0xcbf29ce484222325u64;
+    fnv1a64(&mut h, schedule_seed.as_bytes());
+    fnv1a64(&mut h, &[0xff]);
+    for e in events {
+        fnv1a64(&mut h, e.as_bytes());
+        fnv1a64(&mut h, &[0xff]);
+    }
+    format!("{h:016x}")
+}
+
+/// `*.toml` names in lexicographic order. Missing or empty input is empty.
+pub fn corpus_sorted_names(names: impl IntoIterator<Item = String>) -> Vec<String> {
+    let mut out: Vec<String> = names.into_iter().filter(|n| n.ends_with(".toml")).collect();
+    out.sort();
+    out
+}
+
 pub fn repro_text(seed: i64, schedule_seed: &str, events: &[String]) -> String {
     let mut out = format!("[fuzz]\nseed = {seed}\n");
     if !schedule_seed.is_empty() {
@@ -575,6 +602,51 @@ scroll:scroll
     fn parse_repro_rejects_invalid_toml() {
         assert!(parse_repro("not toml").is_err());
         assert!(parse_repro("[fuzz]\nevents = 1\n").is_err());
+    }
+
+    #[test]
+    fn corpus_entry_name_is_idempotent() {
+        let events = vec!["drive bumpIncreases 0".into(), "pump 1".into()];
+        let a = corpus_entry_name("9", &events);
+        let b = corpus_entry_name("9", &events);
+        assert_eq!(a, b);
+        assert_eq!(a.len(), 16);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit()));
+    }
+
+    #[test]
+    fn corpus_entry_name_changes_with_seed_or_events() {
+        let ev = vec!["tap 0".to_string()];
+        let base = corpus_entry_name("1", &ev);
+        assert_ne!(base, corpus_entry_name("2", &ev));
+        assert_ne!(base, corpus_entry_name("1", &["tap 1".into()]));
+        assert_ne!(
+            corpus_entry_name("ab", &["c".into()]),
+            corpus_entry_name("a", &["bc".into()])
+        );
+    }
+
+    #[test]
+    fn corpus_entry_name_survives_repro_roundtrip() {
+        let seed = "42";
+        let events = vec!["drive bumpIncreases -1".into()];
+        let name = corpus_entry_name(seed, &events);
+        let text = repro_text(7, seed, &events);
+        let r = parse_repro(&text).expect("repro toml");
+        let sched = r.schedule_seed.as_deref().unwrap_or("");
+        assert_eq!(corpus_entry_name(sched, &r.events), name);
+    }
+
+    #[test]
+    fn corpus_sorted_names_toml_only_lexicographic() {
+        let names = corpus_sorted_names([
+            "b.toml".into(),
+            "a.txt".into(),
+            "a.toml".into(),
+            "c.TOML".into(),
+        ]);
+        assert_eq!(names, vec!["a.toml".to_string(), "b.toml".into()]);
+        assert!(corpus_sorted_names(Vec::<String>::new()).is_empty());
     }
 
     #[test]

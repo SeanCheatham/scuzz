@@ -122,12 +122,12 @@ enum Commands {
     },
     /// Search in-source properties, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation
     #[command(
-        after_help = "Examples:\n  scuzz fuzz --iterations 16\n  scuzz fuzz --iterations 16 examples/counter\n  scuzz fuzz --oracles examples/counter\n  scuzz fuzz --replay build/fuzz/repro.toml\n  scuzz fuzz --no-fail-fast --iterations 8 examples/bad-example\n\n`examples/bad-example` is an expected fuzz failure (known-wrong `bump`). Default stops at the first search failure. `--no-fail-fast` finishes search and still mutates. `scuzz check` and `scuzz test` still pass.\n"
+        after_help = "Examples:\n  scuzz fuzz --iterations 16\n  scuzz fuzz --iterations 16 examples/counter\n  scuzz fuzz --iterations 0\n  scuzz fuzz --oracles examples/counter\n  scuzz fuzz --replay build/fuzz/repro.toml\n  scuzz fuzz --no-fail-fast --iterations 8 examples/bad-example\n\n`scuzz fuzz` loads `<pkg>/corpus/*.toml` (sibling of goldens/) and replays those entries before search. `--iterations 0` is corpus-only: replay, then stop. A missing or empty corpus/ is a no-op. `examples/bad-example` is an expected fuzz failure (known-wrong `bump`). Default stops at the first search failure. `--no-fail-fast` finishes search and still mutates. `scuzz check` and `scuzz test` still pass.\n"
     )]
     Fuzz {
         #[arg(default_value = ".")]
         path: PathBuf,
-        /// Iteration budget (search + mutation slots)
+        /// Iteration budget. Search then mutation. `0` replays corpus/ only.
         #[arg(long, default_value_t = 32)]
         iterations: i64,
         /// Deterministic LCG seed
