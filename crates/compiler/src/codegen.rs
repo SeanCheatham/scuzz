@@ -3477,6 +3477,7 @@ fn emit_smap_pack(
 }
 
 /// `f(x)` when `f` is an `A => B` local. Same pack as `List.map`.
+/// `f(x, y)` packs args as a tuple when `f` is `(A, B) => C`.
 fn emit_fun_apply(
     callee: &str,
     args: &[Expr],
@@ -3484,7 +3485,6 @@ fn emit_fun_apply(
     locals: &mut HashMap<String, Local>,
     prefix: &str,
 ) -> Emitted {
-    assert!(args.len() == 1, "{callee} expects 1 arg");
     let loc = locals.get(callee).cloned().expect("fun apply local");
     let pack = Emitted {
         code: String::new(),
@@ -3496,7 +3496,26 @@ fn emit_fun_apply(
         elem: loc.fun.map(|(_, b)| b).unwrap_or(Kind::Ptr),
     };
     let ret_k = loc.fun.map(|(_, b)| b).unwrap_or(Kind::Ptr);
-    emit_apply_pack(pack, &args[0], ret_k, ctx, locals, prefix)
+    if args.len() == 1 {
+        return emit_apply_pack(pack, &args[0], ret_k, ctx, locals, prefix);
+    }
+    assert!(
+        (2..=crate::ast::MAX_TUPLE_ARITY).contains(&args.len()),
+        "{callee} expects 1 arg or a tuple of 2 through 8, got {}",
+        args.len()
+    );
+    let end = args
+        .last()
+        .map(|a| a.span.clone())
+        .unwrap_or_else(crate::span::Span::dummy);
+    let span = args[0].span.clone().cover(&end);
+    let tup = Expr::new(
+        ExprKind::Tuple {
+            elems: args.to_vec(),
+        },
+        span,
+    );
+    emit_apply_pack(pack, &tup, ret_k, ctx, locals, prefix)
 }
 
 /// `e(x)` when `e` is an `A => B` expression.
@@ -13993,6 +14012,59 @@ def apply(f: Int => Int, n: Int): Int = f(n) + 1
             "Int => Int apply must unbox:\n{ir}"
         );
         assert!(ir.contains("add i64"), "unboxed Int result must add:\n{ir}");
+    }
+
+    #[test]
+    fn emit_fun_tuple_apply() {
+        let src = r#"
+def add(n: Int, m: Int): Int = n + m
+def applyPair(f: (Int, Int) => Int, x: Int, y: Int): Int = f(x, y)
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(applyPair(add, 2, 3)))
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_smap_"),
+            "n-ary eta must emit a value closure:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_pair_new"),
+            "f(x, y) must pack a tuple:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_user_add"),
+            "n-ary eta must call the user def:\n{ir}"
+        );
+        assert!(
+            ir.contains("_fnp(ptr "),
+            "fun apply must call the unpacked fn:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_fun_tuple_expr_apply() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(((a, b) => a + b)(2, 3)))
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_pair_new"),
+            "e(x, y) must pack a tuple:\n{ir}"
+        );
+        assert!(
+            ir.contains("_fnp(ptr "),
+            "tuple apply must call the unpacked fn:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_unbox_i64"),
+            "e(x, y) Int slots must unbox:\n{ir}"
+        );
+        assert!(ir.contains("add i64"), "e(x, y) Int body must add:\n{ir}");
+        assert!(
+            !ir.contains("call ptr @sz_string_concat"),
+            "e(x, y) Int add must not concat as String:\n{ir}"
+        );
     }
 
     #[test]

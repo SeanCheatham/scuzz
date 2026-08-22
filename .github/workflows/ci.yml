@@ -265,6 +265,12 @@ jobs:
           grep -q "funlit:7" /tmp/kernel.out
           grep -q "fungrp:4" /tmp/kernel.out
           grep -q "funphapp:9" /tmp/kernel.out
+          grep -q "pairapp:5" /tmp/kernel.out
+          grep -q "paireta:5" /tmp/kernel.out
+          grep -q "pairtup:5" /tmp/kernel.out
+          grep -q "pairexpr:5" /tmp/kernel.out
+          grep -q "pairfold:6" /tmp/kernel.out
+          grep -q "pairfold0:7" /tmp/kernel.out
           grep -q "ifone:fn" /tmp/kernel.out
           grep -q "ifone:y" /tmp/kernel.out
           grep -q "tab:0,1,2" /tmp/kernel.out

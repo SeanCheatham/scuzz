@@ -555,11 +555,15 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             format!("{pad}{callee}({})", a.join(", "))
         }
         ExprKind::Apply { fun, arg } => {
-            format!(
-                "{pad}{}({})",
-                pretty_in(fun, WrapCtx::Postfix),
-                pretty_expr(arg, 0).trim()
-            )
+            let args = match &arg.kind {
+                ExprKind::Tuple { elems } => elems
+                    .iter()
+                    .map(|e| pretty_expr(e, 0).trim().to_string())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                _ => pretty_expr(arg, 0).trim().to_string(),
+            };
+            format!("{pad}{}({args})", pretty_in(fun, WrapCtx::Postfix))
         }
         ExprKind::NamedArg { name, value } => {
             format!("{pad}{name} = {}", pretty_expr(value, 0).trim())
@@ -1795,6 +1799,18 @@ def addN(n: Int): Int => Int = (m: Int) => n + m
         assert!(out.contains("plusOne()(5)"), "{out}");
         assert!(out.contains("addN(3)(4)"), "{out}");
         assert!(out.contains("((n: Int) => n + 1)(6)"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_fun_tuple_apply() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(((a, b) => a + b)(2, 3)))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("((a, b) => a + b)(2, 3)"), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }
