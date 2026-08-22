@@ -671,6 +671,9 @@ fn binder_local_names(b: &crate::ast::ForBinder) -> Vec<String> {
 pub(crate) fn uses_name(e: &Expr, name: &str) -> bool {
     match &e.kind {
         ExprKind::Var(n) => n == name,
+        ExprKind::Call { callee, args } => {
+            callee == name || args.iter().any(|a| uses_name(a, name))
+        }
         ExprKind::Lambda {
             param, pat, body, ..
         } => {
@@ -1162,6 +1165,17 @@ mod tests {
         );
         assert!(msgs.iter().any(|m| m == "unused local b"), "{msgs:?}");
         assert!(!msgs.iter().any(|m| m == "unused local a"), "{msgs:?}");
+    }
+
+    #[test]
+    fn used_fun_param_as_callee() {
+        let msgs = names(
+            "def apply(f: Int => String, n: Int): String = f(n)\n@main def main: IO[Unit] = IO.println(apply(Str.fromInt(_), 1))\n",
+        );
+        assert!(
+            !msgs.iter().any(|m| m.contains("unused parameter f")),
+            "{msgs:?}"
+        );
     }
 
     #[test]

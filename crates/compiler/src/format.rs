@@ -1,8 +1,8 @@
 //! Minimal Scuzz Lang formatter: parse → pretty-print (kernel dialect).
 
 use crate::ast::{
-    BinOp, EnumDef, Expr, ExprKind, ForBinder, FunDef, ImplDef, MatchArm, Pattern, Program,
-    TraitDef, Type, TypeAlias,
+    case_lambda_match_arms, BinOp, EnumDef, Expr, ExprKind, ForBinder, FunDef, ImplDef, MatchArm,
+    Pattern, Program, TraitDef, Type, TypeAlias,
 };
 use crate::parser::{parse, ParseError};
 use crate::span::Span;
@@ -521,6 +521,9 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             pat,
             body,
         } => {
+            if let Some(arms) = case_lambda_match_arms(param.as_deref(), body) {
+                return pretty_case_lambda(arms, indent);
+            }
             let body = pretty_expr(body, 0).trim().to_string();
             if let Some(p) = pat {
                 let binder = pretty_pattern(p.as_ref());
@@ -605,6 +608,12 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
         }
         ExprKind::FlatMap { inner, param, body } => {
             let left = pretty_in(inner, WrapCtx::Postfix);
+            if let Some(arms) = case_lambda_match_arms(param.as_deref(), body) {
+                return format!(
+                    "{pad}{left}.flatMap({})",
+                    pretty_case_lambda(arms, 0).trim()
+                );
+            }
             let right = pretty_expr(body, indent + 1);
             let p = param.as_deref().unwrap_or("_");
             if !matches!(
@@ -622,6 +631,9 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
         }
         ExprKind::IoMap { inner, param, body } => {
             let left = pretty_in(inner, WrapCtx::Postfix);
+            if let Some(arms) = case_lambda_match_arms(param.as_deref(), body) {
+                return format!("{pad}{left}.map({})", pretty_case_lambda(arms, 0).trim());
+            }
             let right = pretty_expr(body, indent + 1);
             let p = param.as_deref().unwrap_or("_");
             if !matches!(
@@ -758,6 +770,18 @@ fn binop_str(op: BinOp) -> &'static str {
         BinOp::Shl => "<<",
         BinOp::Shr => ">>",
     }
+}
+
+fn pretty_case_lambda(arms: &[MatchArm], indent: usize) -> String {
+    let pad = "  ".repeat(indent);
+    let mut out = format!("{pad}{{\n");
+    for arm in arms {
+        out.push_str(&pretty_arm(arm, indent + 1));
+        out.push('\n');
+    }
+    out.push_str(&pad);
+    out.push('}');
+    out
 }
 
 fn pretty_arm(arm: &MatchArm, indent: usize) -> String {
@@ -1720,6 +1744,41 @@ record Point(x: Int, y: Int)
 "#;
         let out = format_source(src).unwrap();
         assert!(out.contains("(n: Int) =>"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_case_lambda() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map([Opt.Some(1)], { case Opt.Some(n) => Str.fromInt(n) case Opt.None => "n" }), ","))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("{"), "{out}");
+        assert!(out.contains("case Opt.Some(n)"), "{out}");
+        assert!(out.contains("case Opt.None"), "{out}");
+        assert!(!out.contains("__case"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_case_lambda_on_io_map() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  IO.pure(Opt.Some(1)).map({ case Opt.Some(n) => n case Opt.None => 0 }).flatMap(n => IO.println(Str.fromInt(n)))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains(".map({"), "{out}");
+        assert!(out.contains("case Opt.Some(n)"), "{out}");
+        assert!(!out.contains("__case"), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

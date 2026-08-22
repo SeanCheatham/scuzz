@@ -232,6 +232,9 @@ jobs:
           grep -q "nempty:y" /tmp/kernel.out
           grep -q "range:1,2,3" /tmp/kernel.out
           grep -q "typedlam:1,2,3" /tmp/kernel.out
+          grep -q "caselam:1,n" /tmp/kernel.out
+          grep -q "caselam0:" /tmp/kernel.out
+          grep -q "caselit:z,n" /tmp/kernel.out
           grep -q "tab:0,1,2" /tmp/kernel.out
           grep -q "isp:a,|,b,|,c" /tmp/kernel.out
           grep -q "grp:a,b|c" /tmp/kernel.out
@@ -303,6 +306,7 @@ jobs:
           grep -q "iomap:4" /tmp/kernel.out
           grep -q "iomapS:a!" /tmp/kernel.out
           grep -q "iomapU:7" /tmp/kernel.out
+          grep -q "caseio:1" /tmp/kernel.out
           cargo run -p scuzz -- run examples/io | tee /tmp/io.out
           grep -q "ref-ok" /tmp/io.out
           grep -q "queue-ok" /tmp/io.out
