@@ -89,6 +89,15 @@ def applyIntStr(f: Int => String, n: Int): String =
 def applyInt(f: Int => Int, n: Int): Int =
   f(n)
 
+def add(n: Int, m: Int): Int =
+  n + m
+
+def applyPair(f: (Int, Int) => Int, x: Int, y: Int): Int =
+  f(x, y)
+
+def applyTup(f: (Int, Int) => Int, p: (Int, Int)): Int =
+  f(p)
+
 def plusOne(): Int => Int =
   (n: Int) => n + 1
 
@@ -357,6 +366,12 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"funlit:${Str.fromInt(((n: Int) => n + 1)(6))}")
     _ <- IO.println(s"fungrp:${Str.fromInt(inc(3))}")
     _ <- IO.println(s"funphapp:${Str.fromInt((_ + 1)(8))}")
+    _ <- IO.println(s"pairapp:${Str.fromInt(applyPair((a, b) => a + b, 2, 3))}")
+    _ <- IO.println(s"paireta:${Str.fromInt(applyPair(add, 2, 3))}")
+    _ <- IO.println(s"pairtup:${Str.fromInt(applyTup(add, (2, 3)))}")
+    _ <- IO.println(s"pairexpr:${Str.fromInt(((a, b) => a + b)(2, 3))}")
+    _ <- IO.println(s"pairfold:${Str.fromInt(List.foldLeft([1, 2, 3], 0, add))}")
+    _ <- IO.println(s"pairfold0:${Str.fromInt(List.foldLeft([]: List[Int], 7, add))}")
     _ <- maybeYes(true)
     _ <- maybeYes(false)
     _ <- if (true) IO.println("ifone:y")

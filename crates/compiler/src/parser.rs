@@ -1697,10 +1697,19 @@ impl Parser {
                         break;
                     }
                     let args = self.parse_args()?;
-                    if args.len() != 1 {
-                        return Err(self.err(format!("apply expects 1 arg, got {}", args.len())));
-                    }
-                    let arg = args.into_iter().next().unwrap();
+                    let arg = match args.len() {
+                        0 => return Err(self.err("apply expects an argument")),
+                        1 => args.into_iter().next().unwrap(),
+                        n => {
+                            self.check_tuple_arity(n)?;
+                            let end = args
+                                .last()
+                                .map(|a| a.span.clone())
+                                .unwrap_or(expr.span.clone());
+                            let span = args[0].span.clone().cover(&end);
+                            self.mk(ExprKind::Tuple { elems: args }, span)
+                        }
+                    };
                     let span = expr.span.clone().cover(&arg.span);
                     expr = self.mk(
                         ExprKind::Apply {
@@ -3303,19 +3312,44 @@ def addN(n: Int): Int => Int = (m: Int) => n + m
     }
 
     #[test]
-    fn rejects_apply_arity() {
+    fn rejects_empty_apply() {
         let err = parse(r#"@main def main: IO[Unit] = IO.println(plusOne()())"#).unwrap_err();
         assert!(
-            err.message().contains("apply expects 1 arg"),
+            err.message().contains("apply expects an argument"),
             "{}",
             err.message()
         );
-        let err = parse(r#"@main def main: IO[Unit] = IO.println(plusOne()(1, 2))"#).unwrap_err();
-        assert!(
-            err.message().contains("apply expects 1 arg"),
-            "{}",
-            err.message()
-        );
+    }
+
+    #[test]
+    fn parse_fun_tuple_apply() {
+        let src = r#"
+def plusOne(): Int => Int = (n: Int) => n + 1
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(((a, b) => a + b)(2, 3)))
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::IoPrintln(arg) => match &arg.kind {
+                ExprKind::Call { args, .. } => match &args[0].kind {
+                    ExprKind::Apply { fun, arg } => {
+                        assert!(
+                            matches!(&fun.kind, ExprKind::Lambda { .. }),
+                            "expected tuple lambda, got {:?}",
+                            fun.kind
+                        );
+                        assert!(
+                            matches!(&arg.kind, ExprKind::Tuple { elems } if elems.len() == 2),
+                            "expected (2, 3), got {:?}",
+                            arg.kind
+                        );
+                    }
+                    other => panic!("expected apply, got {other:?}"),
+                },
+                other => panic!("expected Str.fromInt, got {other:?}"),
+            },
+            other => panic!("expected println, got {other:?}"),
+        }
     }
 
     #[test]

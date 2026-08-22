@@ -723,11 +723,12 @@ pub const TUP_UNPACK: &str = "__tup";
 pub const CASE_LAMBDA: &str = "__case";
 
 /// Binder for a unary def passed as `A => B` (`List.map(xs, Str.fromInt)`).
+/// Tuple eta uses `__eta0` … `__eta7` for the unpacked slots.
 pub const ETA_PARAM: &str = "__eta";
 
 /// True for `__tup` / `__case` / `__eta` binders that must not leak into hover or complete.
 pub fn is_synthetic_lambda_param(name: &str) -> bool {
-    name == TUP_UNPACK || name == CASE_LAMBDA || name == ETA_PARAM
+    name == TUP_UNPACK || name == CASE_LAMBDA || name.starts_with(ETA_PARAM)
 }
 
 /// Arms of `{ case … }` from a lambda's param and body.

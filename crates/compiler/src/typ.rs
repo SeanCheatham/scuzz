@@ -2427,7 +2427,7 @@ fn rewrite_lambda_arg(
     current_module: &str,
     env: &mut HashMap<String, Type>,
 ) -> Result<Expr, TypeError> {
-    let expr = as_lambda_arg(expr, env, funs, current_module)?;
+    let expr = as_lambda_arg(expr, env, funs, current_module, Some(&param_ty))?;
     if let ExprKind::Lambda {
         param,
         param_ty: ann,
@@ -3364,14 +3364,17 @@ fn infer(
             ))),
             ExprKind::Call { callee, args } => {
                 if let Some(Type::Fun(param_ty, ret_ty)) = env.get(callee).cloned() {
-                    if args.len() != 1 {
-                        return Err(TypeError::Msg(format!(
-                            "{callee} expects 1 arg, got {}",
-                            args.len()
-                        )));
-                    }
-                    let at = infer(&args[0], enums, funs, methods, current_module, env)?;
-                    if !types_compat(&at, &param_ty) {
+                    let at = infer_fun_apply_args(
+                        callee,
+                        &param_ty,
+                        args,
+                        enums,
+                        funs,
+                        methods,
+                        current_module,
+                        env,
+                    )?;
+                    if args.len() == 1 && !types_compat(&at, &param_ty) {
                         return Err(TypeError::Msg(format!(
                             "{callee} arg type mismatch: expected {param_ty:?}, got {at:?}"
                         )));
@@ -3618,12 +3621,60 @@ fn wrap_placeholder(expr: Expr) -> Result<Expr, TypeError> {
     ))
 }
 
-/// Wrap a unary def as `x => callee(x)` when a kit or `A => B` argument expects a function.
+fn infer_fun_apply_args(
+    callee: &str,
+    param_ty: &Type,
+    args: &[Expr],
+    enums: &EnumIndex<'_>,
+    funs: &FunIndex<'_>,
+    methods: &MethodIndex,
+    current_module: &str,
+    env: &mut HashMap<String, Type>,
+) -> Result<Type, TypeError> {
+    if args.len() == 1 {
+        return infer_with_expected(
+            &args[0],
+            Some(param_ty),
+            enums,
+            funs,
+            methods,
+            current_module,
+            env,
+        );
+    }
+    match param_ty {
+        Type::Tuple(slots) if slots.len() == args.len() => {
+            for (a, slot) in args.iter().zip(slots.iter()) {
+                let t =
+                    infer_with_expected(a, Some(slot), enums, funs, methods, current_module, env)?;
+                if !types_compat(&t, slot) {
+                    return Err(TypeError::Msg(format!(
+                        "{callee} arg type mismatch: expected {slot:?}, got {t:?}"
+                    )));
+                }
+            }
+            Ok(param_ty.clone())
+        }
+        Type::Tuple(slots) => Err(TypeError::Msg(format!(
+            "{callee} expects {} args, got {}",
+            slots.len(),
+            args.len()
+        ))),
+        _ => Err(TypeError::Msg(format!(
+            "{callee} expects 1 arg, got {}",
+            args.len()
+        ))),
+    }
+}
+
+/// Wrap a def as `x => callee(x)`, or `(a, b) => callee(a, b)` when the expected
+/// parameter is a tuple and the def has that many params.
 fn wrap_eta_arg(
     expr: Expr,
     env: &HashMap<String, Type>,
     funs: &FunIndex<'_>,
     module: &str,
+    expected_param: Option<&Type>,
 ) -> Expr {
     if matches!(expr.kind, ExprKind::Lambda { .. }) {
         return expr;
@@ -3637,6 +3688,17 @@ fn wrap_eta_arg(
         ExprKind::Var(name) if !env.contains_key(name) => name.clone(),
         _ => return expr,
     };
+    if let Some(Type::Tuple(slots)) = expected_param {
+        let n = slots.len();
+        if (2..=crate::ast::MAX_TUPLE_ARITY).contains(&n)
+            && funs
+                .resolve(&callee, module)
+                .ok()
+                .is_some_and(|f| f.params.len() == n)
+        {
+            return wrap_eta_tuple(callee, slots, span);
+        }
+    }
     let param = crate::ast::ETA_PARAM.to_string();
     let arg = Expr::new(ExprKind::Var(param.clone()), span.clone());
     let body = Expr::new(
@@ -3657,18 +3719,52 @@ fn wrap_eta_arg(
     )
 }
 
+fn wrap_eta_tuple(callee: String, slots: &[Type], span: crate::span::Span) -> Expr {
+    let param = crate::ast::ETA_PARAM.to_string();
+    let mut binds = Vec::with_capacity(slots.len());
+    let mut args = Vec::with_capacity(slots.len());
+    for i in 0..slots.len() {
+        let name = format!("{}{i}", crate::ast::ETA_PARAM);
+        binds.push(crate::ast::Pattern::Bind(name.clone()));
+        args.push(Expr::new(ExprKind::Var(name), span.clone()));
+    }
+    let body = Expr::new(
+        ExprKind::Match {
+            scrutinee: Box::new(Expr::new(ExprKind::Var(param.clone()), span.clone())),
+            arms: vec![crate::ast::MatchArm::unpack(
+                crate::ast::Pattern::Tuple {
+                    elems: binds,
+                    tys: slots.to_vec(),
+                },
+                Expr::new(ExprKind::Call { callee, args }, span.clone()),
+            )],
+        },
+        span.clone(),
+    );
+    Expr::new(
+        ExprKind::Lambda {
+            param: Some(param),
+            param_ty: None,
+            pat: None,
+            body: Box::new(body),
+        },
+        span,
+    )
+}
+
 fn as_lambda_arg(
     expr: Expr,
     env: &HashMap<String, Type>,
     funs: &FunIndex<'_>,
     module: &str,
+    expected_param: Option<&Type>,
 ) -> Result<Expr, TypeError> {
     if matches!(expr.kind, ExprKind::Lambda { .. }) {
         Ok(expr)
     } else if crate::ast::count_placeholders(&expr) > 0 {
         wrap_placeholder(expr)
     } else {
-        Ok(wrap_eta_arg(expr, env, funs, module))
+        Ok(wrap_eta_arg(expr, env, funs, module, expected_param))
     }
 }
 
@@ -3735,7 +3831,7 @@ fn infer_lambda_arg(
     } else if !matches!(expr.kind, ExprKind::Lambda { .. })
         && is_eta_candidate(expr, env, funs, current_module)
     {
-        wrapped = wrap_eta_arg(expr.clone(), env, funs, current_module);
+        wrapped = wrap_eta_arg(expr.clone(), env, funs, current_module, Some(&param_ty));
         &wrapped
     } else {
         expr
@@ -6846,7 +6942,7 @@ fn mono_lambda_arg(
     env: &mut HashMap<String, Type>,
     specialized: &mut HashMap<String, FunDef>,
 ) -> Result<Expr, TypeError> {
-    let expr = as_lambda_arg(expr, env, funs, current_module)?;
+    let expr = as_lambda_arg(expr, env, funs, current_module, Some(&param_ty))?;
     if let ExprKind::Lambda {
         param,
         param_ty: ann,
@@ -7737,7 +7833,7 @@ fn elaborate_lambda_arg(
     env: &mut HashMap<String, Type>,
     tparams: &[String],
 ) -> Result<Expr, TypeError> {
-    let expr = as_lambda_arg(expr, env, funs, current_module)?;
+    let expr = as_lambda_arg(expr, env, funs, current_module, Some(&param_ty))?;
     if let ExprKind::Lambda {
         param,
         param_ty: ann,
@@ -7856,8 +7952,8 @@ fn elaborate_expr(
     expected: Option<&Type>,
     tparams: &[String],
 ) -> Result<Expr, TypeError> {
-    let expr = if matches!(expected, Some(Type::Fun(_, _))) {
-        as_lambda_arg(expr, env, funs, current_module)?
+    let expr = if let Some(Type::Fun(a, _)) = expected {
+        as_lambda_arg(expr, env, funs, current_module, Some(a.as_ref()))?
     } else {
         expr
     };
@@ -8718,31 +8814,37 @@ fn elaborate_expr(
             ))
         }
         ExprKind::For { .. } => panic!("internal: unlowered `for` in elaboration"),
-        ExprKind::Apply { fun, arg } => Ok(Expr::new(
-            ExprKind::Apply {
-                fun: Box::new(elaborate_expr(
-                    *fun,
-                    enums,
-                    funs,
-                    methods,
-                    current_module,
-                    env,
-                    None,
-                    tparams,
-                )?),
-                arg: Box::new(elaborate_expr(
-                    *arg,
-                    enums,
-                    funs,
-                    methods,
-                    current_module,
-                    env,
-                    None,
-                    tparams,
-                )?),
-            },
-            span,
-        )),
+        ExprKind::Apply { fun, arg } => {
+            let arg = elaborate_expr(
+                *arg,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                None,
+                tparams,
+            )?;
+            let at = infer(&arg, enums, funs, methods, current_module, env)?;
+            let want = Type::Fun(Box::new(at), Box::new(Type::Opaque("Elem".into())));
+            let fun = elaborate_expr(
+                *fun,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                Some(&want),
+                tparams,
+            )?;
+            Ok(Expr::new(
+                ExprKind::Apply {
+                    fun: Box::new(fun),
+                    arg: Box::new(arg),
+                },
+                span,
+            ))
+        }
         other => Ok(Expr::new(other, span)),
     }
 }
@@ -9976,6 +10078,60 @@ def addN(n: Int): Int => Int = (m: Int) => n + m
         typecheck(&p).expect("A => B expression apply");
         let p = crate::typ::elaborate_generics(p).expect("elaborate apply");
         crate::typ::monomorphize(p).expect("mono apply");
+    }
+
+    #[test]
+    fn typechecks_fun_tuple_apply() {
+        let src = r#"
+def add(n: Int, m: Int): Int = n + m
+def applyPair(f: (Int, Int) => Int, x: Int, y: Int): Int = f(x, y)
+def applyTup(f: (Int, Int) => Int, p: (Int, Int)): Int = f(p)
+@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(Str.fromInt(applyPair((a, b) => a + b, 2, 3)))
+    _ <- IO.println(Str.fromInt(applyPair(add, 2, 3)))
+    _ <- IO.println(Str.fromInt(applyTup(add, (2, 3))))
+    _ <- IO.println(Str.fromInt(((a, b) => a + b)(2, 3)))
+    _ <- IO.println(Str.fromInt(List.foldLeft([1, 2, 3], 0, add)))
+    _ <- IO.println(Str.fromInt(List.foldLeft([]: List[Int], 7, add)))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("tuple Fun apply and n-ary eta");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate tuple apply");
+        crate::typ::monomorphize(p).expect("mono tuple apply");
+    }
+
+    #[test]
+    fn rejects_unary_fun_tuple_apply() {
+        let src = r#"
+def plusOne(): Int => Int = (n: Int) => n + 1
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(plusOne()(1, 2)))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("mismatch") || err.message().contains("apply"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_tuple_fun_arity() {
+        let src = r#"
+def applyPair(f: (Int, Int) => Int, x: Int): Int = f(x, 1, 2)
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(applyPair((a, b) => a + b, 1)))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("expects 2 args") || err.message().contains("arg"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]
