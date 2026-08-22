@@ -2723,6 +2723,18 @@ fn rewrite_fields(
             }
             Ok(Expr::new(ExprKind::Call { callee, args: out }, span))
         }
+        ExprKind::Apply { fun, arg } => {
+            let arg = rewrite_fields(*arg, enums, funs, methods, current_module, env)?;
+            let at = infer(&arg, enums, funs, methods, current_module, env)?;
+            let fun = rewrite_lambda_arg(*fun, at, enums, funs, methods, current_module, env)?;
+            Ok(Expr::new(
+                ExprKind::Apply {
+                    fun: Box::new(fun),
+                    arg: Box::new(arg),
+                },
+                span,
+            ))
+        }
         kind => Ok(Expr { kind, span }
             .try_map_children(|c| rewrite_fields(c, enums, funs, methods, current_module, env))?),
     }
@@ -3060,6 +3072,29 @@ fn infer(
                 } else {
                     infer_call(callee, args, enums, funs, methods, current_module, env)
                 }
+            }
+            ExprKind::Apply { fun, arg } => {
+                let at = infer(arg, enums, funs, methods, current_module, env)?;
+                let ft = infer_lambda_arg(
+                    "apply",
+                    fun,
+                    at.clone(),
+                    None,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                )?;
+                let Type::Fun(a, b) = ft else {
+                    return Err(TypeError::Msg(format!("apply needs A => B, got {ft:?}")));
+                };
+                if !types_compat(&at, &a) {
+                    return Err(TypeError::Msg(format!(
+                        "apply arg type mismatch: expected {a:?}, got {at:?}"
+                    )));
+                }
+                Ok(*b)
             }
             ExprKind::Match { scrutinee, arms } => {
                 let st = infer(scrutinee, enums, funs, methods, current_module, env)?;
@@ -7105,6 +7140,29 @@ fn mono_expr(
                 span,
             ))
         }
+        ExprKind::Apply { fun, arg } => Ok(Expr::new(
+            ExprKind::Apply {
+                fun: Box::new(mono_expr(
+                    *fun,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+                arg: Box::new(mono_expr(
+                    *arg,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    specialized,
+                )?),
+            },
+            span,
+        )),
         other => Ok(Expr::new(other, span)),
     }
 }
@@ -8154,6 +8212,31 @@ fn elaborate_expr(
             ))
         }
         ExprKind::For { .. } => panic!("internal: unlowered `for` in elaboration"),
+        ExprKind::Apply { fun, arg } => Ok(Expr::new(
+            ExprKind::Apply {
+                fun: Box::new(elaborate_expr(
+                    *fun,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    None,
+                    tparams,
+                )?),
+                arg: Box::new(elaborate_expr(
+                    *arg,
+                    enums,
+                    funs,
+                    methods,
+                    current_module,
+                    env,
+                    None,
+                    tparams,
+                )?),
+            },
+            span,
+        )),
         other => Ok(Expr::new(other, span)),
     }
 }
@@ -8316,6 +8399,10 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
         ExprKind::Ascribe { expr, ty } => ExprKind::Ascribe {
             expr: Box::new(subst_node_targs(*expr, subst)),
             ty: apply_subst(&ty, subst),
+        },
+        ExprKind::Apply { fun, arg } => ExprKind::Apply {
+            fun: Box::new(subst_node_targs(*fun, subst)),
+            arg: Box::new(subst_node_targs(*arg, subst)),
         },
         other => other,
     };
@@ -8490,7 +8577,11 @@ fn collect_node_targs(expr: &Expr, out: &mut Vec<(String, Vec<Type>)>) {
                 }
             }
         }
-        ExprKind::Binary { left, right, .. } => {
+        ExprKind::Binary { left, right, .. }
+        | ExprKind::Apply {
+            fun: left,
+            arg: right,
+        } => {
             collect_node_targs(left, out);
             collect_node_targs(right, out);
         }
@@ -8729,6 +8820,10 @@ fn rewrite_enum_refs(
         ExprKind::Ascribe { expr, ty } => ExprKind::Ascribe {
             expr: Box::new(rewrite_enum_refs(*expr, clones)?),
             ty: concretize_type(&ty, clones)?,
+        },
+        ExprKind::Apply { fun, arg } => ExprKind::Apply {
+            fun: Box::new(rewrite_enum_refs(*fun, clones)?),
+            arg: Box::new(rewrite_enum_refs(*arg, clones)?),
         },
         other => other,
     };
@@ -9349,6 +9444,59 @@ def apply(f: Int => Int, n: Int): Int = f(n)
         typecheck(&p).expect("Fun return and apply");
         let p = crate::typ::elaborate_generics(p).expect("elaborate fun ret");
         crate::typ::monomorphize(p).expect("mono fun ret");
+    }
+
+    #[test]
+    fn typechecks_fun_expr_apply() {
+        let src = r#"
+def plusOne(): Int => Int = (n: Int) => n + 1
+def addN(n: Int): Int => Int = (m: Int) => n + m
+@main def main: IO[Unit] =
+  for {
+    inc = (_ + 1): Int => Int
+    _ <- IO.println(Str.fromInt(plusOne()(5)))
+    _ <- IO.println(Str.fromInt(addN(3)(4)))
+    _ <- IO.println(Str.fromInt(((n: Int) => n + 1)(6)))
+    _ <- IO.println(Str.fromInt((inc)(3)))
+    _ <- IO.println(Str.fromInt((_ + 1)(8)))
+    _ <- IO.println(Str.fromInt()(7))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("A => B expression apply");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate apply");
+        crate::typ::monomorphize(p).expect("mono apply");
+    }
+
+    #[test]
+    fn rejects_apply_on_non_fun() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt((1 + 2)(3)))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("apply needs A => B") || err.message().contains("apply"),
+            "{}",
+            err.message()
+        );
+    }
+
+    #[test]
+    fn rejects_apply_arg_mismatch() {
+        let src = r#"
+def plusOne(): Int => Int = (n: Int) => n + 1
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(plusOne()("x")))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("mismatch") || err.message().contains("apply"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]

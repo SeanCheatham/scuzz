@@ -922,6 +922,10 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
                 collect_strings(a, out);
             }
         }
+        ExprKind::Apply { fun, arg } => {
+            collect_strings(fun, out);
+            collect_strings(arg, out);
+        }
         ExprKind::ListLit { elems } | ExprKind::Tuple { elems } => {
             for e in elems {
                 collect_strings(e, out);
@@ -2420,6 +2424,7 @@ fn emit_expr(
         ExprKind::Unary { op, expr } => emit_unary(*op, expr, ctx, locals, prefix),
         ExprKind::Binary { op, left, right } => emit_binary(op, left, right, ctx, locals, prefix),
         ExprKind::Call { callee, args } => emit_call(callee, args, ctx, locals, prefix),
+        ExprKind::Apply { fun, arg } => emit_apply(fun, arg, ctx, locals, prefix),
         ExprKind::NamedArg { .. } => panic!("internal: unlowered named argument"),
         ExprKind::For { .. } => panic!("internal: unlowered `for` in codegen"),
         ExprKind::Match { scrutinee, arms } => emit_match(scrutinee, arms, ctx, locals, prefix),
@@ -3481,13 +3486,67 @@ fn emit_fun_apply(
 ) -> Emitted {
     assert!(args.len() == 1, "{callee} expects 1 arg");
     let loc = locals.get(callee).cloned().expect("fun apply local");
-    let arg = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
+    let pack = Emitted {
+        code: String::new(),
+        value: loc.value.clone(),
+        kind: Kind::Ptr,
+        payload: Kind::Ptr,
+        payload_owned: false,
+        owned: false,
+        elem: loc.fun.map(|(_, b)| b).unwrap_or(Kind::Ptr),
+    };
     let ret_k = loc.fun.map(|(_, b)| b).unwrap_or(Kind::Ptr);
+    emit_apply_pack(pack, &args[0], ret_k, ctx, locals, prefix)
+}
+
+/// `e(x)` when `e` is an `A => B` expression.
+fn emit_apply(
+    fun: &Expr,
+    arg: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    if let ExprKind::Var(name) = &fun.kind {
+        if locals.get(name).is_some_and(|l| l.fun.is_some()) {
+            return emit_fun_apply(name, std::slice::from_ref(arg), ctx, locals, prefix);
+        }
+    }
+    let pack = match &fun.kind {
+        ExprKind::Lambda {
+            param,
+            param_ty,
+            body,
+            ..
+        } => {
+            let a_k = param_ty.as_ref().map(kind_of_type).unwrap_or(Kind::Ptr);
+            emit_smap_lambda(param, body, ctx, locals, prefix, true, a_k)
+        }
+        _ => emit_expr(fun, ctx, locals, &format!("{prefix}_fn")),
+    };
+    let ret_k = bound_fun_kinds(fun, &pack, locals, ctx)
+        .map(|(_, b)| b)
+        .unwrap_or(pack.elem);
+    emit_apply_pack(pack, arg, ret_k, ctx, locals, prefix)
+}
+
+fn emit_apply_pack(
+    pack: Emitted,
+    arg: &Expr,
+    ret_k: Kind,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    let arg = emit_expr(arg, ctx, locals, &format!("{prefix}_a0"));
     let arg_owned = arg.owned;
     let arg_kind = arg.kind;
     let arg_value = arg.value.clone();
-    let mut code = arg.code;
-    unpack_closure(&mut code, &loc.value, prefix);
+    let pack_owned = pack.owned;
+    let pack_value = pack.value.clone();
+    let mut code = pack.code;
+    code.push_str(&arg.code);
+    unpack_closure(&mut code, &pack_value, prefix);
     let (arg_ptr, drop_box) = if arg_kind == Kind::Int || arg_kind == Kind::Float {
         (
             box_numeric(&mut code, arg_kind, &arg_value, &format!("{prefix}_ab")),
@@ -3506,6 +3565,9 @@ fn emit_fun_apply(
     }
     if drop_box {
         writeln!(code, "  call void @sz_release(ptr {arg_ptr})").unwrap();
+    }
+    if pack_owned {
+        writeln!(code, "  call void @sz_release(ptr {pack_value})").unwrap();
     }
     match ret_k {
         Kind::Int | Kind::Float => {
@@ -13990,6 +14052,41 @@ def addN(n: Int): Int => Int = (m: Int) => n + m
         assert!(
             ir.contains("_fnp(ptr "),
             "Fun return apply must call the unpacked fn:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_fun_expr_apply() {
+        let src = r#"
+def plusOne(): Int => Int = (n: Int) => n + 1
+def addN(n: Int): Int => Int = (m: Int) => n + m
+@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(Str.fromInt(plusOne()(5)))
+    _ <- IO.println(Str.fromInt(addN(3)(4)))
+    _ <- IO.println(Str.fromInt(((n: Int) => n + 1)(6)))
+  } yield ()
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("_fnp(ptr "),
+            "expression apply must call the unpacked fn:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_unbox_i64"),
+            "Int => Int expression apply must unbox:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_smap_"),
+            "lambda literal apply must emit a value closure:\n{ir}"
+        );
+        assert!(
+            ir.contains("@sz_user_plusOne"),
+            "plusOne()(5) must call the Fun return:\n{ir}"
+        );
+        assert!(
+            ir.contains("@sz_user_addN"),
+            "addN(3)(4) must call the Fun return:\n{ir}"
         );
     }
 

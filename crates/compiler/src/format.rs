@@ -361,7 +361,7 @@ enum WrapCtx {
     Cons { right: bool },
     /// Operand of prefix `-`, `!`, or `~`.
     Unary,
-    /// Receiver of `.field`, `.method`, `match`, `.attempt`, `.map`, `.flatMap`, or `.handleErrorWith`.
+    /// Receiver of `.field`, `.method`, `match`, `.attempt`, `.map`, `.flatMap`, `.handleErrorWith`, or `e(x)`.
     Postfix,
 }
 
@@ -553,6 +553,13 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
                 .map(|e| pretty_expr(e, 0).trim().to_string())
                 .collect();
             format!("{pad}{callee}({})", a.join(", "))
+        }
+        ExprKind::Apply { fun, arg } => {
+            format!(
+                "{pad}{}({})",
+                pretty_in(fun, WrapCtx::Postfix),
+                pretty_expr(arg, 0).trim()
+            )
         }
         ExprKind::NamedArg { name, value } => {
             format!("{pad}{name} = {}", pretty_expr(value, 0).trim())
@@ -1768,6 +1775,26 @@ record Point(x: Int, y: Int)
 "#;
         let out = format_source(src).unwrap();
         assert!(out.contains("(n: Int) =>"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_fun_expr_apply() {
+        let src = r#"
+def plusOne(): Int => Int = (n: Int) => n + 1
+def addN(n: Int): Int => Int = (m: Int) => n + m
+@main def main: IO[Unit] =
+  for {
+    _ <- IO.println(Str.fromInt(plusOne()(5)))
+    _ <- IO.println(Str.fromInt(addN(3)(4)))
+    _ <- IO.println(Str.fromInt(((n: Int) => n + 1)(6)))
+  } yield ()
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("plusOne()(5)"), "{out}");
+        assert!(out.contains("addN(3)(4)"), "{out}");
+        assert!(out.contains("((n: Int) => n + 1)(6)"), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }
