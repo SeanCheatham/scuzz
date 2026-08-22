@@ -528,12 +528,10 @@ SzList *sz_list_tails(SzList *xs) {
   return sz_list_cons_take(xs, rest);
 }
 
-static SzList *elem_pair(void *a, void *b) {
-  return sz_list_cons_take(a, sz_list_cons(b, NULL));
-}
+static SzPair *elem_pair(void *a, void *b) { return sz_pair_new(a, b); }
 
 SzList *sz_list_zip(SzList *xs, SzList *ys) {
-  SzList *pair;
+  SzPair *pair;
   SzList *rest;
   SzList *out;
   if (!xs || !ys)
@@ -546,7 +544,7 @@ SzList *sz_list_zip(SzList *xs, SzList *ys) {
 }
 
 SzList *sz_list_zip_all(SzList *xs, SzList *ys, void *x, void *y) {
-  SzList *pair;
+  SzPair *pair;
   SzList *rest;
   SzList *out;
   if (!xs && !ys)
@@ -558,25 +556,29 @@ SzList *sz_list_zip_all(SzList *xs, SzList *ys, void *x, void *y) {
   return out;
 }
 
-SzList *sz_list_unzip(SzList *pairs) {
+SzPair *sz_list_unzip(SzList *pairs) {
   SzList *as = NULL;
   SzList *bs = NULL;
   SzList *p;
-  SzList *inner;
+  SzPair *inner;
   SzList *arev;
   SzList *brev;
+  SzPair *out;
   for (p = pairs; p; p = p->tail) {
-    inner = (SzList *)p->head;
-    if (!inner || !inner->tail)
+    inner = (SzPair *)p->head;
+    if (!inner)
       continue;
-    as = sz_list_cons_take(inner->head, as);
-    bs = sz_list_cons_take(inner->tail->head, bs);
+    as = sz_list_cons_take(inner->left, as);
+    bs = sz_list_cons_take(inner->right, bs);
   }
   arev = sz_list_reverse(as);
   sz_release(as);
   brev = sz_list_reverse(bs);
   sz_release(bs);
-  return list_two(arev, brev);
+  out = sz_pair_new(arev, brev);
+  sz_release(arev);
+  sz_release(brev);
+  return out;
 }
 
 int64_t sz_list_contains(SzList *xs, void *x) {

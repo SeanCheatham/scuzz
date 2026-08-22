@@ -248,6 +248,7 @@ jobs:
           grep -Fq "zip:a,1|b,2" /tmp/kernel.out
           grep -Fq "zipAll:a,1|b,9|c,9" /tmp/kernel.out
           grep -Fq "unzip:a,b|1,2" /tmp/kernel.out
+          grep -Fq "zipN:1,a|2,b" /tmp/kernel.out
           grep -Fq "tr:a,c|b,d" /tmp/kernel.out
           grep -q "lhas:y" /tmp/kernel.out
           grep -q "lix:1" /tmp/kernel.out

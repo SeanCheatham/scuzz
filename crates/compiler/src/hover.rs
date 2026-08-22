@@ -696,15 +696,15 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("List.tails", "List.tails(xs: List[T]): List[List[T]]"),
     (
         "List.zip",
-        "List.zip(xs: List[T], ys: List[T]): List[List[T]]",
+        "List.zip(xs: List[A], ys: List[B]): List[(A, B)]",
     ),
     (
         "List.zipAll",
-        "List.zipAll(xs: List[T], ys: List[T], x: T, y: T): List[List[T]]",
+        "List.zipAll(xs: List[A], ys: List[B], x: A, y: B): List[(A, B)]",
     ),
     (
         "List.unzip",
-        "List.unzip(pairs: List[List[T]]): List[List[T]]",
+        "List.unzip(pairs: List[(A, B)]): (List[A], List[B])",
     ),
     (
         "List.transpose",
@@ -2295,27 +2295,30 @@ enum Opt[T]:
         let h = hover_src(src, "tails");
         assert!(h.contains("List.tails(xs: List[T]): List[List[T]]"), "{h}");
         let src = r#"@main def main: IO[Unit] =
-  IO.println(List.join(List.map(List.zip(["a"], ["1"]), g => List.join(g, ",")), "|"))
+  IO.println(List.join(List.map(List.zip(["a"], ["1"]), (a, b) => s"$a,$b"), "|"))
 "#;
         let h = hover_src(src, "zip");
         assert!(
-            h.contains("List.zip(xs: List[T], ys: List[T]): List[List[T]]"),
+            h.contains("List.zip(xs: List[A], ys: List[B]): List[(A, B)]"),
             "{h}"
         );
         let src = r#"@main def main: IO[Unit] =
-  IO.println(List.join(List.map(List.zipAll(["a"], ["1"], "z", "9"), g => List.join(g, ",")), "|"))
+  IO.println(List.join(List.map(List.zipAll(["a"], ["1"], "z", "9"), (a, b) => s"$a,$b"), "|"))
 "#;
         let h = hover_src(src, "zipAll");
         assert!(
-            h.contains("List.zipAll(xs: List[T], ys: List[T], x: T, y: T): List[List[T]]"),
+            h.contains("List.zipAll(xs: List[A], ys: List[B], x: A, y: B): List[(A, B)]"),
             "{h}"
         );
         let src = r#"@main def main: IO[Unit] =
-  IO.println(List.join(List.map(List.unzip(List.zip(["a"], ["1"])), g => List.join(g, ",")), "|"))
+  for {
+    (as, bs) = List.unzip(List.zip(["a"], ["1"]))
+    _ <- IO.println(List.join([List.join(as, ","), List.join(bs, ",")], "|"))
+  } yield ()
 "#;
         let h = hover_src(src, "unzip");
         assert!(
-            h.contains("List.unzip(pairs: List[List[T]]): List[List[T]]"),
+            h.contains("List.unzip(pairs: List[(A, B)]): (List[A], List[B])"),
             "{h}"
         );
         let src = r#"@main def main: IO[Unit] =

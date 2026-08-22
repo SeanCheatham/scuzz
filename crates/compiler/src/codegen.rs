@@ -4804,7 +4804,7 @@ fn emit_call(
             }
         }
         "List.reverse" | "List.init" | "List.inits" | "List.tails" | "List.last"
-        | "List.flatten" | "List.indices" | "List.unzip" | "List.transpose" | "List.distinct" => {
+        | "List.flatten" | "List.indices" | "List.transpose" | "List.distinct" => {
             let rt = match callee {
                 "List.reverse" => "sz_list_reverse",
                 "List.init" => "sz_list_init",
@@ -4812,7 +4812,6 @@ fn emit_call(
                 "List.tails" => "sz_list_tails",
                 "List.last" => "sz_list_last",
                 "List.flatten" => "sz_list_flatten",
-                "List.unzip" => "sz_list_unzip",
                 "List.transpose" => "sz_list_transpose",
                 "List.distinct" => "sz_list_distinct",
                 _ => "sz_list_indices",
@@ -4832,6 +4831,16 @@ fn emit_call(
                 _ => Kind::Ptr,
             };
             owned_ptr(code, format!("%{prefix}_v")).with_elem(elem)
+        }
+        "List.unzip" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_list_unzip(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
         }
         "List.join" => {
             writeln!(
@@ -9735,9 +9744,10 @@ def id(m: Map[String, String]): Map[String, String] = m
     fn emit_list_zip_unzip_transpose() {
         let src = r#"@main def main: IO[Unit] =
   for {
-    _ <- IO.println(List.join(List.map(List.zip(["a", "b"], ["1"]), g => List.join(g, ",")), "|"))
-    _ <- IO.println(List.join(List.map(List.zipAll(["a", "b"], ["1"], "z", "9"), g => List.join(g, ",")), "|"))
-    _ <- IO.println(List.join(List.map(List.unzip(List.zip(["a"], ["1"])), g => List.join(g, ",")), "|"))
+    (as, bs) = List.unzip(List.zip(["a"], ["1"]))
+    _ <- IO.println(List.join(List.map(List.zip(["a", "b"], ["1"]), (a, b) => s"$a,$b"), "|"))
+    _ <- IO.println(List.join(List.map(List.zipAll(["a", "b"], ["1"], "z", "9"), (a, b) => s"$a,$b"), "|"))
+    _ <- IO.println(List.join([List.join(as, ","), List.join(bs, ",")], "|"))
     _ <- IO.println(List.join(List.map(List.transpose([["a", "b"], ["c", "d"]]), g => List.join(g, ",")), "|"))
   } yield ()
 "#;
