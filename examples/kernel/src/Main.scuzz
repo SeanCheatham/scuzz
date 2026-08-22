@@ -89,6 +89,12 @@ def applyIntStr(f: Int => String, n: Int): String =
 def applyInt(f: Int => Int, n: Int): Int =
   f(n)
 
+def plusOne(): Int => Int =
+  (n: Int) => n + 1
+
+def addN(n: Int): Int => Int =
+  (m: Int) => n + m
+
 def applyTwice(f: Int => String, n: Int): String =
   Str.concat(f(n), f(n))
 
@@ -312,6 +318,19 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"mapeta:${List.join(List.map([1, 2], Str.fromInt()), ",")}")
     _ <- IO.println(s"mapeta0:${List.join(List.map([]: List[Int], Str.fromInt()), ",")}")
     _ <- IO.println(s"usereta:${Str.fromInt(applyInt(id, 3))}")
+    inc = (_ + 1): Int => Int
+    typed = (n: Int) => n + 1
+    eta = Str.fromInt(): Int => String
+    po = plusOne()
+    add3 = addN(3)
+    _ <- IO.println(s"funlet:${Str.fromInt(inc(3))}")
+    _ <- IO.println(s"funtyped:${Str.fromInt(typed(4))}")
+    _ <- IO.println(s"funret:${Str.fromInt(po(5))}")
+    _ <- IO.println(s"funcap:${Str.fromInt(add3(4))}")
+    _ <- IO.println(s"funpass:${Str.fromInt(applyInt(inc, 5))}")
+    _ <- IO.println(s"funpass0:${Str.fromInt(applyInt(plusOne(), 6))}")
+    _ <- IO.println(s"funmap:${List.join(List.map([1, 2], eta), ",")}")
+    _ <- IO.println(s"funmap0:${List.join(List.map([]: List[Int], eta), ",")}")
     _ <- IO.println(s"tab:${List.join(List.tabulate(3, i => Str.fromInt(i)), ",")}")
     _ <- IO.println(s"isp:${List.join(List.intersperse(xs, "|"), ",")}")
     _ <- IO.println(s"grp:${List.join(List.map(List.grouped(xs, 2), g => List.join(g, ",")), "|")}")

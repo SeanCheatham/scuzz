@@ -2279,13 +2279,21 @@ fn emit_expr(
         ExprKind::Field { .. } => panic!("internal: unresolved field access in codegen"),
         ExprKind::MethodCall { .. } => panic!("internal: unresolved method call in codegen"),
         ExprKind::Ascribe { expr, ty } => {
+            if matches!(ty, Type::Fun(_, _)) {
+                let mut e = emit_fun_arg(ty, expr, ctx, locals, prefix);
+                if let Some((a, b)) = fun_kinds(ty) {
+                    e.elem = b;
+                    let _ = a;
+                }
+                return e;
+            }
             let mut e = emit_expr(expr, ctx, locals, prefix);
             e.elem = cell_elem_of_type(ty);
             e
         }
         ExprKind::Let { name, value, body } => {
             // Nested vals must not reuse the same LLVM name prefix.
-            let ve = emit_expr(value, ctx, locals, &format!("{prefix}_lv_{name}"));
+            let ve = emit_let_value(value, ctx, locals, &format!("{prefix}_lv_{name}"));
             if name == "_" {
                 let mut code = ve.code;
                 drop_discarded(&mut code, ve.kind, &ve.value, ve.owned);
@@ -2301,6 +2309,7 @@ fn emit_expr(
                     elem: be.elem,
                 };
             }
+            let fun = bound_fun_kinds(value, &ve, locals, ctx);
             let mut code = ve.code;
             locals.insert(
                 name.clone(),
@@ -2309,7 +2318,7 @@ fn emit_expr(
                     kind: ve.kind,
                     owned: ve.owned,
                     elem: ve.elem,
-                    fun: None,
+                    fun,
                 },
             );
             let mut be = emit_expr(body, ctx, locals, &format!("{prefix}_l_{name}"));
@@ -3398,6 +3407,68 @@ fn emit_fun_arg(
     }
 }
 
+fn emit_let_value(
+    value: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+) -> Emitted {
+    if let ExprKind::Lambda {
+        param,
+        param_ty: Some(pty),
+        body,
+        ..
+    } = &value.kind
+    {
+        emit_smap_lambda(param, body, ctx, locals, prefix, true, kind_of_type(pty))
+    } else {
+        emit_expr(value, ctx, locals, prefix)
+    }
+}
+
+fn bound_fun_kinds(
+    value: &Expr,
+    emitted: &Emitted,
+    locals: &HashMap<String, Local>,
+    ctx: &EmitCtx<'_>,
+) -> Option<(Kind, Kind)> {
+    match &value.kind {
+        ExprKind::Ascribe { ty, .. } => fun_kinds(ty),
+        ExprKind::Lambda {
+            param_ty: Some(pty),
+            ..
+        } => Some((kind_of_type(pty), emitted.elem)),
+        ExprKind::Var(n) => locals.get(n).and_then(|l| l.fun),
+        ExprKind::Call { callee, args } if !locals.contains_key(callee) => ctx
+            .funs
+            .resolve(callee, ctx.current_module)
+            .ok()
+            .and_then(|f| {
+                if args.len() == f.params.len() {
+                    fun_kinds(&f.ret)
+                } else {
+                    None
+                }
+            }),
+        _ => None,
+    }
+}
+
+fn emit_smap_pack(
+    expr: &Expr,
+    ctx: &mut EmitCtx<'_>,
+    locals: &mut HashMap<String, Local>,
+    prefix: &str,
+    box_int: bool,
+    elem: Kind,
+) -> Emitted {
+    if let ExprKind::Lambda { param, body, .. } = &expr.kind {
+        emit_smap_lambda(param, body, ctx, locals, prefix, box_int, elem)
+    } else {
+        emit_expr(expr, ctx, locals, prefix)
+    }
+}
+
 /// `f(x)` when `f` is an `A => B` local. Same pack as `List.map`.
 fn emit_fun_apply(
     callee: &str,
@@ -3799,12 +3870,8 @@ fn emit_ptr_map(
 ) -> Emitted {
     assert!(args.len() == 2, "{callee} expects 2 args");
     let inner = emit_expr(&args[0], ctx, locals, &format!("{prefix}_a0"));
-    let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
-        panic!("{callee} mapper must be a lambda");
-    };
-    let lam = emit_smap_lambda(
-        param,
-        body,
+    let lam = emit_smap_pack(
+        &args[1],
         ctx,
         locals,
         &format!("{prefix}_fn"),
@@ -13860,6 +13927,71 @@ def apply(g: Int => String, n: Int): String = g(n)
         assert!(
             ir.contains("sz_retain"),
             "returning a borrowed Fun retains the pack:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_let_bound_fun_apply() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    inc = (_ + 1): Int => Int
+    _ <- IO.println(Str.fromInt(inc(3)))
+  } yield ()
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_smap_"),
+            "let-bound A => B must emit a value closure:\n{ir}"
+        );
+        assert!(
+            ir.contains("_fnp(ptr "),
+            "let-bound apply must call the unpacked fn:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_unbox_i64"),
+            "Int => Int let apply must unbox:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_fun_return_capture() {
+        let src = r#"
+def addN(n: Int): Int => Int = (m: Int) => n + m
+@main def main: IO[Unit] =
+  for {
+    add3 = addN(3)
+    _ <- IO.println(Str.fromInt(add3(4)))
+  } yield ()
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_smap_"),
+            "Fun return must emit a value closure:\n{ir}"
+        );
+        assert!(
+            ir.contains("_fnp(ptr "),
+            "Fun return apply must call the unpacked fn:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_named_fun_list_map() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    eta = Str.fromInt: Int => String
+    _ <- IO.println(List.join(List.map([1, 2], eta), ","))
+  } yield ()
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_list_map"),
+            "named Fun List.map must emit sz_list_map:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_smap_"),
+            "named Fun must pack a value closure:\n{ir}"
         );
     }
 

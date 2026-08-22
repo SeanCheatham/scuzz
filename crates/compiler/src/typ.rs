@@ -1642,9 +1642,18 @@ fn typecheck_def(
         }
     }
     let ret = resolve_type_in(&d.ret, enums, &d.module, &d.type_params)?;
-    let body_ty = if matches!(&ret, Type::Fun(_, _)) {
-        let wrapped = as_lambda_arg(d.body.clone(), &env)?;
-        infer(&wrapped, enums, funs, methods, &d.module, &mut env)?
+    let body_ty = if let Type::Fun(a, b) = &ret {
+        infer_lambda_arg(
+            &d.name,
+            &d.body,
+            a.as_ref().clone(),
+            Some(b.as_ref().clone()),
+            enums,
+            funs,
+            methods,
+            &d.module,
+            &mut env,
+        )?
     } else {
         infer(&d.body, enums, funs, methods, &d.module, &mut env)?
     };
@@ -2383,7 +2392,7 @@ fn rewrite_lambda_arg(
     current_module: &str,
     env: &mut HashMap<String, Type>,
 ) -> Result<Expr, TypeError> {
-    let expr = as_lambda_arg(expr, env)?;
+    let expr = as_lambda_arg(expr, env, funs, current_module)?;
     if let ExprKind::Lambda {
         param,
         param_ty: ann,
@@ -3005,16 +3014,22 @@ fn infer(
             }
             ExprKind::Ascribe { expr, ty } => {
                 let want = resolve_ascribe_type(ty, enums, current_module)?;
-                let wrapped;
-                let inner = if matches!(want, Type::Fun(_, _))
-                    && !matches!(expr.kind, ExprKind::Lambda { .. })
-                {
-                    wrapped = as_lambda_arg(expr.as_ref().clone(), env)?;
-                    &wrapped
-                } else {
-                    expr
-                };
-                let got = infer(inner, enums, funs, methods, current_module, env)?;
+                if let Type::Fun(a, b) = &want {
+                    let got = infer_lambda_arg(
+                        "ascribe",
+                        expr,
+                        a.as_ref().clone(),
+                        Some(b.as_ref().clone()),
+                        enums,
+                        funs,
+                        methods,
+                        current_module,
+                        env,
+                    )?;
+                    expect_ty(&got, &want)?;
+                    return Ok(want);
+                }
+                let got = infer(expr, enums, funs, methods, current_module, env)?;
                 expect_ty(&got, &want)?;
                 Ok(want)
             }
@@ -3155,16 +3170,21 @@ fn infer(
             } => {
                 // Bare lambdas (View.button tap). Kit Call args bind String/Int
                 // and check the body type in infer_call via infer_lambda_arg.
-                // `(x: T) =>` binds `T` so the body typechecks against that param.
+                // `(x: T) =>` is an `A => B` value. Untyped `x =>` stays a tap.
                 let bind_ty = if let Some(ann) = param_ty {
                     resolve_ascribe_type(ann, enums, current_module)?
                 } else {
                     Type::Opaque("Param".into())
                 };
-                let old = bind_opt(param.as_ref(), bind_ty, env);
-                let _ = infer(body, enums, funs, methods, current_module, env)?;
+                let old = bind_opt(param.as_ref(), bind_ty.clone(), env);
+                let result = infer(body, enums, funs, methods, current_module, env);
                 restore_opt(old, env);
-                Ok(Type::Opaque("TapFn".into()))
+                let bt = result?;
+                if param_ty.is_some() {
+                    Ok(Type::Fun(Box::new(bind_ty), Box::new(bt)))
+                } else {
+                    Ok(Type::Opaque("TapFn".into()))
+                }
             }
             ExprKind::IoRace { left, right } => {
                 let lt = infer(left, enums, funs, methods, current_module, env)?;
@@ -3250,8 +3270,16 @@ fn wrap_placeholder(expr: Expr) -> Result<Expr, TypeError> {
 }
 
 /// Wrap a unary def as `x => callee(x)` when a kit or `A => B` argument expects a function.
-fn wrap_eta_arg(expr: Expr, env: &HashMap<String, Type>) -> Expr {
+fn wrap_eta_arg(
+    expr: Expr,
+    env: &HashMap<String, Type>,
+    funs: &FunIndex<'_>,
+    module: &str,
+) -> Expr {
     if matches!(expr.kind, ExprKind::Lambda { .. }) {
+        return expr;
+    }
+    if is_fun_value_call(&expr, funs, module) {
         return expr;
     }
     let span = expr.span.clone();
@@ -3280,17 +3308,40 @@ fn wrap_eta_arg(expr: Expr, env: &HashMap<String, Type>) -> Expr {
     )
 }
 
-fn as_lambda_arg(expr: Expr, env: &HashMap<String, Type>) -> Result<Expr, TypeError> {
+fn as_lambda_arg(
+    expr: Expr,
+    env: &HashMap<String, Type>,
+    funs: &FunIndex<'_>,
+    module: &str,
+) -> Result<Expr, TypeError> {
     if matches!(expr.kind, ExprKind::Lambda { .. }) {
         Ok(expr)
     } else if crate::ast::count_placeholders(&expr) > 0 {
         wrap_placeholder(expr)
     } else {
-        Ok(wrap_eta_arg(expr, env))
+        Ok(wrap_eta_arg(expr, env, funs, module))
     }
 }
 
-fn is_eta_candidate(e: &Expr, env: &HashMap<String, Type>) -> bool {
+fn is_fun_value_call(e: &Expr, funs: &FunIndex<'_>, module: &str) -> bool {
+    match &e.kind {
+        ExprKind::Call { callee, args } if args.is_empty() => funs
+            .resolve(callee, module)
+            .ok()
+            .is_some_and(|f| f.params.is_empty() && matches!(f.ret, Type::Fun(_, _))),
+        _ => false,
+    }
+}
+
+fn is_eta_candidate(
+    e: &Expr,
+    env: &HashMap<String, Type>,
+    funs: &FunIndex<'_>,
+    module: &str,
+) -> bool {
+    if is_fun_value_call(e, funs, module) {
+        return false;
+    }
     match &e.kind {
         ExprKind::Call { args, .. } if args.is_empty() => true,
         ExprKind::Var(name) if !env.contains_key(name) => true,
@@ -3301,7 +3352,16 @@ fn is_eta_candidate(e: &Expr, env: &HashMap<String, Type>) -> bool {
 fn is_callback_shape(e: &Expr, env: &HashMap<String, Type>) -> bool {
     matches!(e.kind, ExprKind::Lambda { .. })
         || crate::ast::count_placeholders(e) > 0
-        || is_eta_candidate(e, env)
+        || match &e.kind {
+            ExprKind::Call { args, .. } if args.is_empty() => true,
+            ExprKind::Var(name) if !env.contains_key(name) => true,
+            ExprKind::Var(name) if matches!(env.get(name), Some(Type::Fun(_, _))) => true,
+            ExprKind::Ascribe {
+                ty: Type::Fun(_, _),
+                ..
+            } => true,
+            _ => false,
+        }
 }
 
 // Arity comes from the shared typecheck context (enums, funs, methods, module, env).
@@ -3323,8 +3383,10 @@ fn infer_lambda_arg(
     {
         wrapped = wrap_placeholder(expr.clone())?;
         &wrapped
-    } else if !matches!(expr.kind, ExprKind::Lambda { .. }) && is_eta_candidate(expr, env) {
-        wrapped = wrap_eta_arg(expr.clone(), env);
+    } else if !matches!(expr.kind, ExprKind::Lambda { .. })
+        && is_eta_candidate(expr, env, funs, current_module)
+    {
+        wrapped = wrap_eta_arg(expr.clone(), env, funs, current_module);
         &wrapped
     } else {
         expr
@@ -3360,7 +3422,23 @@ fn infer_lambda_arg(
     } else if callee == "Ui.run" {
         Err(TypeError::Msg("Ui.run expects _ => View".into()))
     } else {
-        infer(expr, enums, funs, methods, current_module, env)
+        let got = infer(expr, enums, funs, methods, current_module, env)?;
+        if let Type::Fun(a, b) = &got {
+            if !types_compat(a, &param_ty) {
+                return Err(TypeError::Msg(format!(
+                    "{callee} function param mismatch: expected {param_ty}, got {a}"
+                )));
+            }
+            if let Some(want) = ret_ty {
+                if !kit_lambda_body_ok(b, &want) {
+                    return Err(TypeError::Msg(format!(
+                        "{callee} lambda must return {}, got {b:?}",
+                        kit_ret_label(&want)
+                    )));
+                }
+            }
+        }
+        Ok(got)
     }
 }
 
@@ -6282,7 +6360,7 @@ fn mono_lambda_arg(
     env: &mut HashMap<String, Type>,
     specialized: &mut HashMap<String, FunDef>,
 ) -> Result<Expr, TypeError> {
-    let expr = as_lambda_arg(expr, env)?;
+    let expr = as_lambda_arg(expr, env, funs, current_module)?;
     if let ExprKind::Lambda {
         param,
         param_ty: ann,
@@ -7148,7 +7226,7 @@ fn elaborate_lambda_arg(
     env: &mut HashMap<String, Type>,
     tparams: &[String],
 ) -> Result<Expr, TypeError> {
-    let expr = as_lambda_arg(expr, env)?;
+    let expr = as_lambda_arg(expr, env, funs, current_module)?;
     if let ExprKind::Lambda {
         param,
         param_ty: ann,
@@ -7210,7 +7288,7 @@ fn elaborate_expr(
     tparams: &[String],
 ) -> Result<Expr, TypeError> {
     let expr = if matches!(expected, Some(Type::Fun(_, _))) {
-        as_lambda_arg(expr, env)?
+        as_lambda_arg(expr, env, funs, current_module)?
     } else {
         expr
     };
@@ -8008,7 +8086,7 @@ fn elaborate_expr(
                 Some(Type::Fun(_, b)) => Some(b.as_ref()),
                 _ => None,
             };
-            let old = bind_opt(param.as_ref(), bind_ty, env);
+            let old = bind_opt(param.as_ref(), bind_ty.clone(), env);
             let body = elaborate_expr(
                 *body,
                 enums,
@@ -8020,6 +8098,13 @@ fn elaborate_expr(
                 tparams,
             )?;
             restore_opt(old, env);
+            let param_ty = param_ty.or_else(|| {
+                if matches!(bind_ty, Type::Opaque(_)) {
+                    None
+                } else {
+                    Some(bind_ty)
+                }
+            });
             Ok(Expr::new(
                 ExprKind::Lambda {
                     param,
@@ -9110,6 +9195,82 @@ def apply(f: Int => Int, n: Int): Int = f(n)
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("eta on empty List[Int] pin");
+    }
+
+    #[test]
+    fn typechecks_let_bound_fun() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    inc = (_ + 1): Int => Int
+    typed = (n: Int) => n + 1
+    eta = Str.fromInt: Int => String
+    _ <- IO.println(Str.fromInt(inc(3)))
+    _ <- IO.println(Str.fromInt(typed(4)))
+    _ <- IO.println(eta(7))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("let-bound A => B");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate let fun");
+        crate::typ::monomorphize(p).expect("mono let fun");
+    }
+
+    #[test]
+    fn typechecks_fun_return_and_apply() {
+        let src = r#"
+def plusOne(): Int => Int = (n: Int) => n + 1
+def addN(n: Int): Int => Int = (m: Int) => n + m
+def apply(f: Int => Int, n: Int): Int = f(n)
+@main def main: IO[Unit] =
+  for {
+    f = plusOne()
+    add3 = addN(3)
+    inc = (_ + 1): Int => Int
+    _ <- IO.println(Str.fromInt(f(5)))
+    _ <- IO.println(Str.fromInt(add3(4)))
+    _ <- IO.println(Str.fromInt(apply(inc, 5)))
+    _ <- IO.println(Str.fromInt(apply(plusOne(), 6)))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Fun return and apply");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate fun ret");
+        crate::typ::monomorphize(p).expect("mono fun ret");
+    }
+
+    #[test]
+    fn typechecks_named_fun_on_list_map() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    eta = Str.fromInt: Int => String
+    _ <- IO.println(List.join(List.map([1, 2], eta), ","))
+    _ <- IO.println(List.join(List.map([]: List[Int], eta), ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("named Fun on List.map");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate named map");
+        crate::typ::monomorphize(p).expect("mono named map");
+    }
+
+    #[test]
+    fn rejects_named_fun_param_mismatch() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    inc = (_ + 1): Int => Int
+    _ <- IO.println(List.join(List.map(["a"], inc), ","))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message().contains("param mismatch") || err.message().contains("mismatch"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]

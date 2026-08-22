@@ -309,8 +309,13 @@ fn walk_binders(expr: &Expr, name: &str, offset: usize, best: &mut Option<(usize
     let span_len = expr.span.end.saturating_sub(expr.span.start);
     let covers = expr.span.start <= offset && offset <= expr.span.end;
     match &expr.kind {
-        ExprKind::Let { name: n, body, .. } if n == name && covers => {
-            consider(best, span_len, n);
+        ExprKind::Let {
+            name: n,
+            value,
+            body,
+            ..
+        } if n == name && covers => {
+            consider_label(best, span_len, binder_type_label(n, value));
             walk_binders(body, name, offset, best);
         }
         ExprKind::FlatMap {
@@ -354,7 +359,13 @@ fn walk_binders(expr: &Expr, name: &str, offset: usize, best: &mut Option<(usize
         ExprKind::For { binders, body } => {
             for b in binders {
                 if covers && binder_binds(b, name) {
-                    consider(best, span_len, name);
+                    let label = match b {
+                        ForBinder::Eq { name: n, value, .. } if n == name => {
+                            binder_type_label(n, value)
+                        }
+                        _ => name.to_string(),
+                    };
+                    consider_label(best, span_len, label);
                 }
                 walk_binders(b.value(), name, offset, best);
             }
@@ -386,11 +397,21 @@ fn pat_binds(p: &Pattern, name: &str) -> bool {
 }
 
 fn consider(best: &mut Option<(usize, String)>, span_len: usize, name: &str) {
-    let text = name.to_string();
+    consider_label(best, span_len, name.to_string());
+}
+
+fn consider_label(best: &mut Option<(usize, String)>, span_len: usize, text: String) {
     match best {
         None => *best = Some((span_len, text)),
         Some((len, _)) if span_len < *len => *best = Some((span_len, text)),
         _ => {}
+    }
+}
+
+fn binder_type_label(name: &str, value: &Expr) -> String {
+    match &value.kind {
+        ExprKind::Ascribe { ty, .. } => format!("{name}: {ty}"),
+        _ => name.to_string(),
     }
 }
 
@@ -1403,6 +1424,20 @@ record Point(x: Int, y: Int)
         let program = parse_file(src, "Main.scuzz").unwrap();
         let h = hover_in_source(&program, "Main.scuzz", src, offset).unwrap();
         assert!(h.contains("n: Int"), "{h}");
+    }
+
+    #[test]
+    fn hovers_let_bound_fun() {
+        let src = r#"
+@main def main: IO[Unit] =
+  for {
+    inc = (_ + 1): Int => Int
+  } yield IO.println(Str.fromInt(inc(3)))
+"#;
+        let program = parse_file(src, "Main.scuzz").unwrap();
+        let offset = src.find("inc(3)").unwrap();
+        let h = hover_in_source(&program, "Main.scuzz", src, offset).unwrap();
+        assert!(h.contains("inc: Int => Int"), "{h}");
     }
 
     #[test]
