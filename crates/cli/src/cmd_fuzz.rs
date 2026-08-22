@@ -5,11 +5,15 @@ use scuzz_compiler::compile_project;
 use scuzz_compiler::driver::load_verify_program;
 use scuzz_compiler::fuzz::{
     corpus_entry_name, corpus_keep, corpus_push, corpus_sorted_names, count_dump_section,
-    drive_script_lines, dump_push, exhaust_alphabet, fuzz_mutate_sites, fuzz_pick_sched,
-    fuzz_pick_script, lines_nonempty, missing_from, parse_repro, repro_text, script_text, Repro,
+    drive_line_shrinks, drive_script_lines, dump_push, exhaust_alphabet, fuzz_mutate_sites,
+    fuzz_pick_sched, fuzz_pick_script, lines_nonempty, missing_from, parse_repro, repro_text,
+    script_text, Repro,
 };
 use scuzz_compiler::manifest::load_manifest;
-use scuzz_compiler::mutate::{mutate_apply_mode, mutate_count_mode, MutateMode};
+use scuzz_compiler::mutate::{
+    collect_oracle_sites, mutate_apply_mode, mutate_count_mode, mutate_describe, nearest_oracle,
+    MutantDesc, MutateMode, OracleSite,
+};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
@@ -31,12 +35,21 @@ struct FuzzTargets {
     drivers: Vec<String>,
 }
 
+struct MutantSurvivor {
+    site: i64,
+    def: String,
+    location: String,
+    label: String,
+    oracle: String,
+}
+
 struct MutateStats {
     killed: i64,
     survived: i64,
     ran: i64,
     sites: i64,
     oracles: bool,
+    survivors: Vec<MutantSurvivor>,
 }
 
 impl MutateStats {
@@ -47,6 +60,7 @@ impl MutateStats {
             ran: 0,
             sites,
             oracles,
+            survivors: Vec::new(),
         }
     }
 }
@@ -594,6 +608,67 @@ fn print_sometimes_missing(missing_budget: &[String], missing_corpus: &[String])
     }
 }
 
+fn source_text_for_span(project_dir: &Path, file: &str) -> Option<String> {
+    if file.is_empty() {
+        return None;
+    }
+    let direct = project_dir.join(file);
+    if direct.is_file() {
+        return std::fs::read_to_string(direct).ok();
+    }
+    if let Some((_, rest)) = file.split_once('/') {
+        let stripped = project_dir.join(rest);
+        if stripped.is_file() {
+            return std::fs::read_to_string(stripped).ok();
+        }
+    }
+    None
+}
+
+fn print_surviving_mutant(
+    project_dir: &Path,
+    site: i64,
+    desc: Option<&MutantDesc>,
+    oracles: &[OracleSite],
+) -> MutantSurvivor {
+    let Some(desc) = desc else {
+        println!("  mutant {site}: survived");
+        return MutantSurvivor {
+            site,
+            def: String::new(),
+            location: String::new(),
+            label: String::new(),
+            oracle: String::new(),
+        };
+    };
+    let source = source_text_for_span(project_dir, &desc.file);
+    let location = desc.location(source.as_deref());
+    let excerpt = source
+        .as_deref()
+        .map(|s| desc.excerpt(s))
+        .unwrap_or_default();
+    let oracle = nearest_oracle(desc, oracles);
+    println!("  mutant {site}: survived");
+    println!("    {location}  {}", desc.def);
+    if excerpt.is_empty() {
+        println!("    {}", desc.label);
+    } else {
+        println!("    {}: {excerpt}", desc.label);
+    }
+    if oracle.starts_with("no oracle") {
+        println!("    {oracle}");
+    } else {
+        println!("    nearest oracle: {oracle}");
+    }
+    MutantSurvivor {
+        site,
+        def: desc.def.clone(),
+        location,
+        label: desc.label.clone(),
+        oracle,
+    }
+}
+
 fn mutate_stats_skip(project_dir: &Path, oracles: bool) -> MutateStats {
     let sites = match load_verify_program(project_dir) {
         Ok((prog, _)) => {
@@ -644,8 +719,10 @@ fn mutate_phase(
     println!("scuzz fuzz mutate: {take} of {sites} {kind}; idle + corpus replay");
     let idle_sched = seed.to_string();
     let site_idxs = fuzz_mutate_sites(seed, take, sites);
+    let oracle_sites = collect_oracle_sites(&prog);
     let mut killed = 0i64;
     let mut survived = 0i64;
+    let mut survivors = Vec::new();
     for site in &site_idxs {
         let out_dir = ctx
             .project_dir
@@ -669,7 +746,13 @@ fn mutate_phase(
             mutate_exec_io(&compiled.executable, &out_dir, corpus_io, &idle_sched)?
         };
         if code == 0 {
-            println!("  mutant {site}: survived");
+            let desc = mutate_describe(&prog, *site as i32, mode);
+            survivors.push(print_surviving_mutant(
+                &ctx.project_dir,
+                *site,
+                desc.as_ref(),
+                &oracle_sites,
+            ));
             survived += 1;
         } else {
             println!("  mutant {site}: killed");
@@ -683,6 +766,7 @@ fn mutate_phase(
         ran: take,
         sites,
         oracles,
+        survivors,
     })
 }
 
@@ -802,6 +886,51 @@ fn shrink_events(
     Ok(cur)
 }
 
+/// Shrink args inside surviving `drive` lines. Try smaller Int/Bool/String
+/// values. Keep a candidate only when the run still fails.
+fn shrink_drive_args(
+    exe: &Path,
+    fuzz_dir: &Path,
+    is_ui: bool,
+    w: i32,
+    h: i32,
+    schedule_seed: &str,
+    events: &[String],
+    specs: &[String],
+) -> Result<Vec<String>> {
+    let mut cur = events.to_vec();
+    loop {
+        let mut progressed = false;
+        let mut i = 0;
+        while i < cur.len() {
+            let cands = drive_line_shrinks(&cur[i], specs);
+            let mut kept = false;
+            for cand_line in cands {
+                let mut cand = cur.clone();
+                cand[i] = cand_line;
+                let code = if is_ui {
+                    fuzz_exec(exe, fuzz_dir, w, h, &cand, schedule_seed)?
+                } else {
+                    fuzz_exec_io(exe, fuzz_dir, schedule_seed, &cand)?
+                };
+                if code != 0 {
+                    cur = cand;
+                    progressed = true;
+                    kept = true;
+                    break;
+                }
+            }
+            if !kept {
+                i += 1;
+            }
+        }
+        if !progressed {
+            break;
+        }
+    }
+    Ok(cur)
+}
+
 fn write_fail_summary(ctx: &FuzzCtx, camp: &Campaign, corpus: i64) -> Result<()> {
     let mutate = mutate_stats_skip(&ctx.project_dir, camp.oracles);
     let declared = declared_names(&ctx.project_dir);
@@ -840,6 +969,16 @@ fn note_search_fail(
         ctx.h,
         &schedule_seed.to_string(),
         events,
+    )?;
+    let shrunk = shrink_drive_args(
+        &ctx.exe,
+        &shrink_dir,
+        ctx.is_ui,
+        ctx.w,
+        ctx.h,
+        &schedule_seed.to_string(),
+        &shrunk,
+        &read_drivers(&ctx.project_dir),
     )?;
     camp.search_failures += 1;
     let first = camp.repro.is_none();
@@ -1097,10 +1236,31 @@ fn stash_dump_fail(fuzz_dir: &Path) -> Result<()> {
     Ok(())
 }
 
+fn toml_escape(s: &str) -> String {
+    s.replace('\\', "\\\\").replace('"', "\\\"")
+}
+
 fn toml_str_array(items: &[String]) -> String {
     items
         .iter()
-        .map(|s| format!("\"{}\"", s.replace('\\', "\\\\").replace('"', "\\\"")))
+        .map(|s| format!("\"{}\"", toml_escape(s)))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn toml_survivor_array(items: &[MutantSurvivor]) -> String {
+    items
+        .iter()
+        .map(|s| {
+            format!(
+                "{{ site = {}, def = \"{}\", location = \"{}\", label = \"{}\", oracle = \"{}\" }}",
+                s.site,
+                toml_escape(&s.def),
+                toml_escape(&s.location),
+                toml_escape(&s.label),
+                toml_escape(&s.oracle),
+            )
+        })
         .collect::<Vec<_>>()
         .join(", ")
 }
@@ -1181,6 +1341,12 @@ fn print_report(s: &FuzzSummary<'_>) {
         "mutate: {} killed, {} survived ({} of {} sites)",
         s.mutate.killed, s.mutate.survived, s.mutate.ran, s.mutate.sites
     );
+    for v in &s.mutate.survivors {
+        println!(
+            "  survivor {}: {}  {}  {}  {}",
+            v.site, v.location, v.def, v.label, v.oracle
+        );
+    }
 }
 
 fn write_fuzz_summary(ctx: &FuzzCtx, s: &FuzzSummary<'_>) -> Result<()> {
@@ -1194,7 +1360,7 @@ fn write_fuzz_summary(ctx: &FuzzCtx, s: &FuzzSummary<'_>) -> Result<()> {
         None => String::new(),
     };
     let text = format!(
-        "[fuzz]\nok = {ok}\nseed = {seed}\niterations = {iterations}\nsearch = {search}\nsearch_failures = {search_failures}\ncorpus = {corpus}\ndrivers = [{drivers}]\nevents = [{events}]\ndeclared = [{declared}]\nreachability = [{reached}]\nmissing_budget = [{missing_budget}]\nmissing_corpus = [{missing_corpus}]\nrepro = \"{repro}\"\nreplay = \"{replay}\"\n\n[corpus]\nentries = {entries}\nfailures = {failures}\nreached = [{corpus_reached}]\npromoted = {promoted}\n\n[mutate]\nkilled = {killed}\nsurvived = {survived}\nran = {ran}\nsites = {sites}\noracles = {oracles}\n",
+        "[fuzz]\nok = {ok}\nseed = {seed}\niterations = {iterations}\nsearch = {search}\nsearch_failures = {search_failures}\ncorpus = {corpus}\ndrivers = [{drivers}]\nevents = [{events}]\ndeclared = [{declared}]\nreachability = [{reached}]\nmissing_budget = [{missing_budget}]\nmissing_corpus = [{missing_corpus}]\nrepro = \"{repro}\"\nreplay = \"{replay}\"\n\n[corpus]\nentries = {entries}\nfailures = {failures}\nreached = [{corpus_reached}]\npromoted = {promoted}\n\n[mutate]\nkilled = {killed}\nsurvived = {survived}\nran = {ran}\nsites = {sites}\noracles = {oracles}\nsurvivors = [{survivors}]\n",
         ok = if s.ok { "true" } else { "false" },
         seed = s.seed,
         iterations = s.iterations,
@@ -1218,6 +1384,7 @@ fn write_fuzz_summary(ctx: &FuzzCtx, s: &FuzzSummary<'_>) -> Result<()> {
         ran = s.mutate.ran,
         sites = s.mutate.sites,
         oracles = s.mutate.oracles,
+        survivors = toml_survivor_array(&s.mutate.survivors),
     );
     std::fs::write(ctx.fuzz_dir.join("summary.toml"), text)?;
     Ok(())

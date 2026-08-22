@@ -25,14 +25,6 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 **Proof.** `SCUZZ_SKIA=gpu` renders `examples/counter` with unchanged structural goldens. Pixel goldens match `sk_sw` when `--pixels` is on. Unused GPU stubs do not close the proof.
 
-### 3. One-strategy ergonomics at app scale
-
-**Status.** `scuzz fuzz` proves the mechanism on `examples/` (`bad-example` is the expected-fail campaign, pinned by `corpus/`). `--iterations 0` replays the corpus only. Value shrinking and mutant-report UX stay next ([`vision.md`](vision.md#open-work)).
-
-**Unproven.** Authors and agents stay inside the one strategy for ordinary apps. That holds only when the inner loop answers in seconds, counterexamples are minimal, and a surviving mutant names the oracle to strengthen. If authors route around the strategy, an opinionated system is worse than a permissive one.
-
-**Proof.** A corpus-only replay tier runs the `examples/` corpora in seconds. A fixed `bad-example` bug stays pinned across campaigns. A failing parameterized property reports shrunk args. A surviving-mutant report shows the mutant diff and the nearest oracle.
-
 ## Known gaps
 
 ### Residuals
@@ -53,5 +45,5 @@ Path deps only (`manifest.rs`). Git, versioned, and hosted artifacts are directi
 - **OS IME candidate windows** — focused TextField caret uses measured advance (`sz_view_caret_rect`). Embedders do not yet place OS IME UI from it.
 - **macOS in default CI** — `macos-smoke` runs on push/PR (runtime tests, compiler tests, hello). Full macOS packaging stays `workflow_dispatch`.
 - **Web apps** — not a current target.
-- **Fault injection and schedule exploration** — TestRuntime fakes can fail the Nth operation and drop stub responses. PCT-style schedule exploration bounds race depth for fiber interleavings. After value shrinking.
+- **Fault injection and schedule exploration** — TestRuntime fakes can fail the Nth operation and drop stub responses. PCT-style schedule exploration bounds race depth for fiber interleavings. See [`vision.md`](vision.md#open-work).
 - **Oracle idioms in `guide.md`** — model agreement, metamorphic relations, and concrete-fact properties ride the existing property surface. The guide does not yet document them.

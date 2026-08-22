@@ -1,6 +1,8 @@
 //! Stem-paired `*.scuzz_sim` / `*.scuzz_drivers` overlays and in-source `property` residualization.
 
-use crate::ast::{EnumDef, Expr, ExprKind, ForBinder, FunDef, Import, Pattern, Program, Type};
+use crate::ast::{
+    BinOp, EnumDef, Expr, ExprKind, ForBinder, FunDef, Import, Pattern, Program, Type, UnOp,
+};
 use crate::parser::{parse_file, ParseError};
 use crate::resolve::split_dotted;
 use crate::span::Span;
@@ -631,8 +633,9 @@ fn check_drive_table(program: &Program) -> Result<(), OverlayError> {
     Ok(())
 }
 
-/// Table lines for `build/drivers.txt`: `name`, `name i`, `name s`, `name b`,
-/// or several kind tokens (`name i i`). Includes parameterized properties.
+/// Table lines for `build/drivers.txt`. One line per driver or parameterized
+/// property. Kind tokens are `i`, `s`, and `b`. A simple Int `where` bound
+/// joins the `i` token (`noteDrive i>=0`).
 pub fn driver_table_text(program: &Program) -> String {
     let mut out = String::new();
     for d in &program.defs {
@@ -649,10 +652,79 @@ fn push_drive_spec(out: &mut String, d: &FunDef) {
         match p.ty {
             Type::String => out.push_str(" s"),
             Type::Bool => out.push_str(" b"),
+            Type::Int => {
+                out.push(' ');
+                out.push_str(&int_kind_token(p));
+            }
             _ => out.push_str(" i"),
         }
     }
     out.push('\n');
+}
+
+/// `i`, or `i>=0` / `i>0` / `i<=k` / `i<k` when `where` is a simple comparison.
+fn int_kind_token(p: &crate::ast::Param) -> String {
+    match p.rfn.as_ref().and_then(|e| simple_cmp_bound(&p.name, e)) {
+        Some((op, k)) => format!("i{op}{k}"),
+        None => "i".into(),
+    }
+}
+
+fn simple_cmp_bound(param: &str, e: &Expr) -> Option<(&'static str, i64)> {
+    let ExprKind::Binary { op, left, right } = &e.kind else {
+        return None;
+    };
+    let (lit, flipped) = if var_named(left, param) {
+        (int_lit(right)?, false)
+    } else if var_named(right, param) {
+        (int_lit(left)?, true)
+    } else {
+        return None;
+    };
+    let op = if flipped {
+        flip_cmp_token(*op)?
+    } else {
+        cmp_token(*op)?
+    };
+    Some((op, lit))
+}
+
+fn var_named(e: &Expr, name: &str) -> bool {
+    matches!(&e.kind, ExprKind::Var(n) if n == name)
+}
+
+fn int_lit(e: &Expr) -> Option<i64> {
+    match &e.kind {
+        ExprKind::IntLit(n) => Some(*n),
+        ExprKind::Unary {
+            op: UnOp::Neg,
+            expr,
+        } => match &expr.kind {
+            ExprKind::IntLit(n) => n.checked_neg(),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn cmp_token(op: BinOp) -> Option<&'static str> {
+    match op {
+        BinOp::Ge => Some(">="),
+        BinOp::Gt => Some(">"),
+        BinOp::Le => Some("<="),
+        BinOp::Lt => Some("<"),
+        _ => None,
+    }
+}
+
+fn flip_cmp_token(op: BinOp) -> Option<&'static str> {
+    match op {
+        BinOp::Ge => Some("<="),
+        BinOp::Gt => Some("<"),
+        BinOp::Le => Some(">="),
+        BinOp::Lt => Some(">"),
+        _ => None,
+    }
 }
 
 /// Rewrite calls and record construction so `where` predicates become `Property.check`
@@ -1231,6 +1303,56 @@ mod tests {
         let properties = collect_property_names(&prog).unwrap();
         check_properties_applied(&prog, &properties).unwrap();
         assert_eq!(driver_table_text(&prog).trim(), "addComm i i");
+    }
+
+    #[test]
+    fn driver_table_appends_simple_int_bounds() {
+        let prog = parse_sources(&[(
+            "Main.scuzz".into(),
+            "property noteDrive(n: Int where n >= 0): Bool = n >= 0\n@main def main: IO[Unit] = IO.println(\"x\")\n"
+                .into(),
+        )])
+        .unwrap();
+        assert_eq!(driver_table_text(&prog), "noteDrive i>=0\n");
+
+        let prog = parse_sources(&[(
+            "Main.scuzz".into(),
+            "property pos(n: Int where n > 0): Bool = n > 0\n@main def main: IO[Unit] = IO.println(\"x\")\n"
+                .into(),
+        )])
+        .unwrap();
+        assert_eq!(driver_table_text(&prog), "pos i>0\n");
+
+        let prog = parse_sources(&[(
+            "Main.scuzz".into(),
+            "property cap(n: Int where 10 >= n): Bool = n <= 10\n@main def main: IO[Unit] = IO.println(\"x\")\n"
+                .into(),
+        )])
+        .unwrap();
+        assert_eq!(driver_table_text(&prog), "cap i<=10\n");
+
+        let prog = parse_sources(&[(
+            "Main.scuzz".into(),
+            "property both(n: Int where n >= 0 && n <= 10): Bool = true\n@main def main: IO[Unit] = IO.println(\"x\")\n"
+                .into(),
+        )])
+        .unwrap();
+        assert_eq!(driver_table_text(&prog), "both i\n");
+
+        let live = parse_sources(&[(
+            "Main.scuzz".into(),
+            "@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
+        )])
+        .unwrap();
+        let overlays = vec![OverlaySource {
+            stem: "Main".into(),
+            kind: OverlayKind::Drivers,
+            path: PathBuf::new(),
+            label: "Main.scuzz_drivers".into(),
+            text: "def noteDrive(n: Int where n >= 0): IO[Unit] =\n  IO.pure(())\n".into(),
+        }];
+        let prog = apply_overlays(live, &overlays).unwrap();
+        assert_eq!(driver_table_text(&prog), "noteDrive i>=0\n");
     }
 
     #[test]
