@@ -25,6 +25,7 @@ fn negate_pred(pred: Expr) -> Expr {
             cond: Box::new(pred),
             then_branch: Box::new(Expr::new(ExprKind::BoolLit(false), span.clone())),
             else_branch: Box::new(Expr::new(ExprKind::BoolLit(true), span.clone())),
+            implicit_else: false,
         },
         span,
     )
@@ -142,15 +143,16 @@ fn mutate_expr(e: Expr, target: i32, seen: i32, in_oracle: bool, cx: &MutCx<'_>)
             cond,
             then_branch,
             else_branch,
+            implicit_else,
         } if cx.mode == MutateMode::Program && !in_oracle => {
             let swap = seen;
             let (cond, seen) = mutate_expr(*cond, target, seen + 1, false, cx);
             let (then_branch, seen) = mutate_expr(*then_branch, target, seen, false, cx);
             let (else_branch, seen) = mutate_expr(*else_branch, target, seen, false, cx);
-            let (then_branch, else_branch) = if swap == target {
-                (else_branch, then_branch)
+            let (then_branch, else_branch, implicit_else) = if swap == target {
+                (else_branch, then_branch, false)
             } else {
-                (then_branch, else_branch)
+                (then_branch, else_branch, implicit_else)
             };
             (
                 Expr::new(
@@ -158,6 +160,7 @@ fn mutate_expr(e: Expr, target: i32, seen: i32, in_oracle: bool, cx: &MutCx<'_>)
                         cond: Box::new(cond),
                         then_branch: Box::new(then_branch),
                         else_branch: Box::new(else_branch),
+                        implicit_else,
                     },
                     span,
                 ),

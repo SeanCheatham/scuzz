@@ -561,12 +561,23 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             cond,
             then_branch,
             else_branch,
-        } => format!(
-            "{pad}if ({}) {} else {}",
-            pretty_expr(cond, 0).trim(),
-            pretty_expr(then_branch, 0).trim(),
-            pretty_expr(else_branch, 0).trim()
-        ),
+            implicit_else,
+        } => {
+            if *implicit_else {
+                format!(
+                    "{pad}if ({}) {}",
+                    pretty_expr(cond, 0).trim(),
+                    pretty_expr(then_branch, 0).trim()
+                )
+            } else {
+                format!(
+                    "{pad}if ({}) {} else {}",
+                    pretty_expr(cond, 0).trim(),
+                    pretty_expr(then_branch, 0).trim(),
+                    pretty_expr(else_branch, 0).trim()
+                )
+            }
+        }
         ExprKind::Binary { op, left, right } => format!(
             "{pad}{} {} {}",
             pretty_in(
@@ -1272,6 +1283,19 @@ record Box[T](x: T):
         assert!(out.contains("def get(): T ="));
         assert!(out.contains("def wrap[T](x: T): Box[T] ="));
         assert!(out.find("def wrap").unwrap() < out.find("record Box").unwrap());
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_if_without_else() {
+        let src = r#"
+def maybeYes(ok: Bool): IO[Unit] = if (ok) IO.println("y")
+@main def main: IO[Unit] = if (true) IO.println("ok")
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains("if (ok) IO.println(\"y\")"), "{out}");
+        assert!(!out.contains("else"), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

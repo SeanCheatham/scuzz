@@ -901,6 +901,7 @@ fn collect_strings(expr: &Expr, out: &mut Vec<String>) {
             cond,
             then_branch,
             else_branch,
+            ..
         } => {
             collect_strings(cond, out);
             collect_strings(then_branch, out);
@@ -2353,6 +2354,7 @@ fn emit_expr(
             cond,
             then_branch,
             else_branch,
+            ..
         } => {
             let id = *ctx.cont_id;
             *ctx.cont_id += 1;
@@ -13609,6 +13611,22 @@ def add1(n: Int): Int = n + 1
         assert!(ir.contains("@sz_user_add1"));
         assert!(ir.contains("icmp"));
         assert!(ir.contains("sz_runtime_main_args"));
+    }
+
+    #[test]
+    fn emit_if_without_else_inserts_io_pure() {
+        let src = r#"
+def maybeYes(ok: Bool): IO[Unit] =
+  if (ok) IO.println("y")
+@main def main: IO[Unit] =
+  maybeYes(false)
+"#;
+        let ir = emit_full(src);
+        assert!(
+            ir.contains("sz_io_pure"),
+            "if without else IO[Unit] must insert IO.pure(()):\n{ir}"
+        );
+        assert!(ir.contains("sz_io_println"), "{ir}");
     }
 
     #[test]
