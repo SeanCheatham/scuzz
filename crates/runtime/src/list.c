@@ -638,6 +638,78 @@ void *sz_list_fold_right(SzList *xs, void *z, SzListMapFn fn, void *env) {
   return out;
 }
 
+SzList *sz_list_scan_left(SzList *xs, void *z, SzListMapFn fn, void *env) {
+  SzList *acc_rev = NULL;
+  SzList *p;
+  SzPair *pack;
+  void *acc;
+  void *next;
+  SzList *out;
+  if (!fn)
+    sz_panic("sz_list_scan_left(null fn)");
+  sz_retain(z);
+  acc = z;
+  acc_rev = sz_list_cons_take(acc, acc_rev);
+  for (p = xs; p; p = p->tail) {
+    pack = sz_pair_new(acc, p->head);
+    next = fn(pack, env);
+    sz_release(pack);
+    sz_release(acc);
+    acc = next;
+    acc_rev = sz_list_cons_take(acc, acc_rev);
+  }
+  sz_release(acc);
+  out = sz_list_reverse(acc_rev);
+  sz_release(acc_rev);
+  return out;
+}
+
+SzList *sz_list_scan_right(SzList *xs, void *z, SzListMapFn fn, void *env) {
+  SzList *rest;
+  SzPair *pack;
+  void *next;
+  SzList *out;
+  if (!fn)
+    sz_panic("sz_list_scan_right(null fn)");
+  if (!xs)
+    return sz_list_cons(z, NULL);
+  rest = sz_list_scan_right(xs->tail, z, fn, env);
+  pack = sz_pair_new(xs->head, rest->head);
+  next = fn(pack, env);
+  sz_release(pack);
+  out = sz_list_cons_take(next, rest);
+  sz_release(next);
+  return out;
+}
+
+void *sz_list_reduce_left(SzList *xs, SzListMapFn fn, void *env) {
+  if (!xs)
+    sz_panic("List.reduceLeft on empty");
+  if (!fn)
+    sz_panic("sz_list_reduce_left(null fn)");
+  return sz_list_fold_left(xs->tail, xs->head, fn, env);
+}
+
+void *sz_list_reduce_right(SzList *xs, SzListMapFn fn, void *env) {
+  void *rest;
+  SzPair *pack;
+  void *out;
+  if (!xs)
+    sz_panic("List.reduceRight on empty");
+  if (!fn)
+    sz_panic("sz_list_reduce_right(null fn)");
+  if (!xs->tail) {
+    sz_retain(xs->head);
+    return xs->head;
+  }
+  rest = sz_list_reduce_right(xs->tail, fn, env);
+  pack = sz_pair_new(xs->head, rest);
+  out = fn(pack, env);
+  sz_release(pack);
+  sz_release(rest);
+  return out;
+}
+
 int64_t sz_list_contains(SzList *xs, void *x) {
   SzList *p;
   for (p = xs; p; p = p->tail) {
