@@ -112,7 +112,7 @@ src/
 - No `src/test` twin trees. Only stem-paired `*.scuzz_sim` / `*.scuzz_drivers`. No third-party test or mutation frameworks.
 - Example: `examples/counter` + `examples/shared` (`Shared.scuzz_sim` swaps `counterTitle`; `countLabel` uses `.require`; `noteDrive(n: Int where n >= 0)` residualizes at `plusN`; `+1` records `Property.sometimes("tappedPlus")`; `Main.scuzz` applies count / label / button / sim-title oracles through `.require` on `Ui.run`). `examples/kernel` uses `where` on `Point.x` / `Point.y`. `examples/bad-example` is the expected-fail campaign: `bump` is wrong, `scuzz fuzz` drives `bumpIncreases` and writes `repro.toml`, `corpus/` holds a shrunk entry, `scale` has no oracle. `--no-fail-fast` still mutates after that property failure.
 
-**Now:**
+### Commands
 
 - `[ui]` packages: `scuzz test` is Headless **structural** goldens on the **live** graph (signal store + a11y dump + tap/field/scroll indices). PNG optional through `--pixels`. Seed with `scuzz test --update`. `--update` creates `goldens/` when it is missing. Missing `goldens/` or empty dumps fail without `--update`. Seed and compare PNG goldens under the in-tree `sk_sw` backend (`SCUZZ_SKIA=sk_sw`) so pixels stay platform-deterministic. `scuzz fuzz` compiles the **verify** graph (sim + residual `.require` / properties + drivers).
 - IO packages (no `[ui]`): `scuzz test` compiles and runs under `SCUZZ_TESTRT=1`, requiring exit 0
