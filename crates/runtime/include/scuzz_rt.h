@@ -501,8 +501,8 @@ int sz_list_is_empty(const SzList *xs);
 SzList *sz_list_cons(void *head, SzList *tail);
 void *sz_list_head(const SzList *xs);
 SzList *sz_list_tail(const SzList *xs);
-size_t sz_list_len(const SzList *xs);
-void *sz_list_at(const SzList *xs, size_t index);
+int64_t sz_list_len(const SzList *xs);
+void *sz_list_at(const SzList *xs, int64_t index);
 SzList *sz_list_reverse(SzList *xs);
 /* Copy the spine and retain `x` (same as cons). Drop an owned `x` after. */
 SzList *sz_list_append(SzList *xs, void *x);

@@ -39,16 +39,18 @@ SzList *sz_list_tail(const SzList *xs) {
   return xs->tail;
 }
 
-size_t sz_list_len(const SzList *xs) {
-  size_t n = 0;
+int64_t sz_list_len(const SzList *xs) {
+  int64_t n = 0;
   for (const SzList *p = xs; p; p = p->tail)
     n++;
   return n;
 }
 
-void *sz_list_at(const SzList *xs, size_t index) {
+void *sz_list_at(const SzList *xs, int64_t index) {
   const SzList *p = xs;
-  size_t i = 0;
+  int64_t i = 0;
+  if (index < 0)
+    sz_panic("List.at out of bounds");
   while (p) {
     if (i == index)
       return p->head;
@@ -83,30 +85,25 @@ SzList *sz_list_append(SzList *xs, void *x) {
   return out;
 }
 
-static SzList *sz_list_copy(SzList *xs) {
-  if (!xs)
-    return NULL;
-  return sz_list_cons_take(xs->head, sz_list_copy(xs->tail));
-}
-
 /* Replace the head at `index`. Copy the spine so `xs` is not mutated.
  * Out of range (empty, negative, or past the end) returns `xs` with an extra
  * retain so the caller can drop their ref. */
 SzList *sz_list_set_at(SzList *xs, int64_t index, void *v) {
-  SzList *rest;
-  if (!xs || index < 0) {
+  SzList *prefix;
+  SzList *suffix;
+  SzList *mid;
+  SzList *out;
+  if (!xs || index < 0 || index >= sz_list_len(xs)) {
     sz_retain(xs);
     return xs;
   }
-  if (index == 0)
-    return sz_list_cons_take(v, sz_list_copy(xs->tail));
-  rest = sz_list_set_at(xs->tail, index - 1, v);
-  if (rest == xs->tail) {
-    sz_release(rest);
-    sz_retain(xs);
-    return xs;
-  }
-  return sz_list_cons_take(xs->head, rest);
+  prefix = sz_list_take(xs, index);
+  suffix = sz_list_drop(xs, index + 1);
+  mid = sz_list_cons_take(v, suffix);
+  out = sz_list_concat(prefix, mid);
+  sz_release(prefix);
+  sz_release(mid);
+  return out;
 }
 
 static SzList *list_filter(SzList *xs, SzListPred pred, void *env, int keep,
@@ -174,32 +171,28 @@ SzList *sz_list_drop(SzList *xs, int64_t n) {
 }
 
 SzList *sz_list_take_right(SzList *xs, int64_t n) {
-  size_t len;
+  int64_t len;
   if (!xs || n <= 0)
     return NULL;
   len = sz_list_len(xs);
-  if ((uint64_t)n >= (uint64_t)len)
+  if (n >= len)
     return sz_list_drop(xs, 0);
-  return sz_list_drop(xs, (int64_t)(len - (size_t)n));
+  return sz_list_drop(xs, len - n);
 }
 
 SzList *sz_list_drop_right(SzList *xs, int64_t n) {
-  size_t len;
+  int64_t len;
   if (!xs)
     return NULL;
   if (n <= 0)
     return sz_list_drop(xs, 0);
   len = sz_list_len(xs);
-  if ((uint64_t)n >= (uint64_t)len)
+  if (n >= len)
     return NULL;
-  return sz_list_take(xs, (int64_t)(len - (size_t)n));
+  return sz_list_take(xs, len - n);
 }
 
-SzList *sz_list_init(SzList *xs) {
-  if (!xs || !xs->tail)
-    return NULL;
-  return sz_list_cons_take(xs->head, sz_list_init(xs->tail));
-}
+SzList *sz_list_init(SzList *xs) { return sz_list_drop_right(xs, 1); }
 
 SzList *sz_list_last(SzList *xs) {
   SzList *p = xs;
@@ -259,11 +252,19 @@ int64_t sz_list_exists(SzList *xs, SzListPred pred, void *env) {
 }
 
 SzList *sz_list_takewhile(SzList *xs, SzListPred pred, void *env) {
+  SzList *acc = NULL;
+  SzList *p;
+  SzList *out;
   if (!pred)
     sz_panic("sz_list_takewhile(null pred)");
-  if (!xs || !pred(xs->head, env))
-    return NULL;
-  return sz_list_cons_take(xs->head, sz_list_takewhile(xs->tail, pred, env));
+  for (p = xs; p; p = p->tail) {
+    if (!pred(p->head, env))
+      break;
+    acc = sz_list_cons_take(p->head, acc);
+  }
+  out = sz_list_reverse(acc);
+  sz_release(acc);
+  return out;
 }
 
 SzList *sz_list_dropwhile(SzList *xs, SzListPred pred, void *env) {
@@ -307,14 +308,24 @@ SzList *sz_list_concat(SzList *xs, SzList *ys) {
   return out;
 }
 
+/* Concatenate inners of a reversed outer spine. `concat(inner, out)` is
+ * linear in the inner length, so the whole walk is linear in total cells. */
+static SzList *flatten_from_rev(SzList *rev) {
+  SzList *out = NULL;
+  SzList *p;
+  SzList *next;
+  for (p = rev; p; p = p->tail) {
+    next = sz_list_concat((SzList *)p->head, out);
+    sz_release(out);
+    out = next;
+  }
+  return out;
+}
+
 SzList *sz_list_flatten(SzList *xss) {
-  SzList *rest;
-  SzList *out;
-  if (!xss)
-    return NULL;
-  rest = sz_list_flatten(xss->tail);
-  out = sz_list_concat((SzList *)xss->head, rest);
-  sz_release(rest);
+  SzList *rev = sz_list_reverse(xss);
+  SzList *out = flatten_from_rev(rev);
+  sz_release(rev);
   return out;
 }
 
@@ -337,31 +348,32 @@ SzList *sz_list_map(SzList *xs, SzListMapFn fn, void *env) {
 }
 
 SzList *sz_list_flat_map(SzList *xs, SzListMapFn fn, void *env) {
+  SzList *chunks = NULL;
+  SzList *p;
   SzList *chunk;
-  SzList *rest;
   SzList *out;
   if (!fn)
     sz_panic("sz_list_flat_map(null fn)");
-  if (!xs)
-    return NULL;
-  /* Mapper returns +1 list. Concat retains. Drop the mapper list. */
-  chunk = (SzList *)fn(xs->head, env);
-  rest = sz_list_flat_map(xs->tail, fn, env);
-  out = sz_list_concat(chunk, rest);
-  sz_release(chunk);
-  sz_release(rest);
+  /* Mapper returns +1 list. Cons retains. Drop the mapper list. */
+  for (p = xs; p; p = p->tail) {
+    chunk = (SzList *)fn(p->head, env);
+    chunks = sz_list_cons_take(chunk, chunks);
+    sz_release(chunk);
+  }
+  out = flatten_from_rev(chunks);
+  sz_release(chunks);
   return out;
 }
 
 SzList *sz_list_pad_to(SzList *xs, int64_t n, void *x) {
-  size_t len = sz_list_len(xs);
+  int64_t len = sz_list_len(xs);
   SzList *suffix;
   SzList *out;
   if (n < 0)
     n = 0;
-  if ((uint64_t)n <= (uint64_t)len)
+  if (n <= len)
     return sz_list_drop(xs, 0);
-  suffix = sz_list_fill(n - (int64_t)len, x);
+  suffix = sz_list_fill(n - len, x);
   out = sz_list_concat(xs, suffix);
   sz_release(suffix);
   return out;
@@ -404,52 +416,75 @@ SzList *sz_list_tabulate(int64_t n, SzListMapFn fn, void *env) {
 }
 
 SzList *sz_list_intersperse(SzList *xs, void *x) {
-  SzList *rest;
-  SzList *mid;
+  SzList *acc = NULL;
+  SzList *p;
+  SzList *out;
+  int first = 1;
   if (!xs)
     return NULL;
   if (!xs->tail) {
     sz_retain(xs);
     return xs;
   }
-  rest = sz_list_intersperse(xs->tail, x);
-  mid = sz_list_cons_take(x, rest);
-  return sz_list_cons_take(xs->head, mid);
+  for (p = xs; p; p = p->tail) {
+    if (!first)
+      acc = sz_list_cons_take(x, acc);
+    first = 0;
+    acc = sz_list_cons_take(p->head, acc);
+  }
+  out = sz_list_reverse(acc);
+  sz_release(acc);
+  return out;
 }
 
 SzList *sz_list_grouped(SzList *xs, int64_t n) {
-  SzList *chunk;
+  SzList *acc = NULL;
   SzList *rest;
-  SzList *more;
+  SzList *chunk;
+  SzList *next;
   SzList *out;
   if (!xs || n <= 0)
     return NULL;
-  chunk = sz_list_take(xs, n);
-  rest = sz_list_drop(xs, n);
-  more = sz_list_grouped(rest, n);
-  sz_release(rest);
-  out = sz_list_cons_take(chunk, more);
-  sz_release(chunk);
+  rest = sz_list_drop(xs, 0);
+  while (rest) {
+    chunk = sz_list_take(rest, n);
+    next = sz_list_drop(rest, n);
+    sz_release(rest);
+    rest = next;
+    acc = sz_list_cons_take(chunk, acc);
+    sz_release(chunk);
+  }
+  out = sz_list_reverse(acc);
+  sz_release(acc);
   return out;
 }
 
 SzList *sz_list_sliding(SzList *xs, int64_t n) {
+  SzList *acc = NULL;
+  SzList *p;
   SzList *window;
-  SzList *more;
   SzList *out;
+  int64_t remaining;
   if (!xs || n <= 0)
     return NULL;
-  if ((uint64_t)n > (uint64_t)sz_list_len(xs))
+  remaining = sz_list_len(xs);
+  if (n > remaining)
     return NULL;
-  window = sz_list_take(xs, n);
-  more = sz_list_sliding(xs->tail, n);
-  out = sz_list_cons_take(window, more);
-  sz_release(window);
+  p = xs;
+  while (remaining >= n) {
+    window = sz_list_take(p, n);
+    acc = sz_list_cons_take(window, acc);
+    sz_release(window);
+    p = p->tail;
+    remaining--;
+  }
+  out = sz_list_reverse(acc);
+  sz_release(acc);
   return out;
 }
 
 SzList *sz_list_slice(SzList *xs, int64_t from, int64_t until) {
-  size_t len = sz_list_len(xs);
+  int64_t len = sz_list_len(xs);
   SzList *dropped;
   SzList *out;
   int64_t n;
@@ -457,10 +492,10 @@ SzList *sz_list_slice(SzList *xs, int64_t from, int64_t until) {
     from = 0;
   if (until < 0)
     until = 0;
-  if ((uint64_t)from >= (uint64_t)len || until <= from)
+  if (from >= len || until <= from)
     return NULL;
-  if ((uint64_t)until > (uint64_t)len)
-    until = (int64_t)len;
+  if (until > len)
+    until = len;
   n = until - from;
   dropped = sz_list_drop(xs, from);
   out = sz_list_take(dropped, n);
@@ -468,9 +503,7 @@ SzList *sz_list_slice(SzList *xs, int64_t from, int64_t until) {
   return out;
 }
 
-SzList *sz_list_indices(SzList *xs) {
-  return sz_list_range(0, (int64_t)sz_list_len(xs));
-}
+SzList *sz_list_indices(SzList *xs) { return sz_list_range(0, sz_list_len(xs)); }
 
 static SzList *list_two(SzList *a, SzList *b) {
   SzList *inner = sz_list_cons(b, NULL);
@@ -508,12 +541,12 @@ SzList *sz_list_partition(SzList *xs, SzListPred pred, void *env) {
 }
 
 SzList *sz_list_inits(SzList *xs) {
-  size_t n = sz_list_len(xs);
-  size_t i;
+  int64_t n = sz_list_len(xs);
+  int64_t i;
   SzList *out = NULL;
   SzList *prefix;
   for (i = n + 1; i > 0; i--) {
-    prefix = sz_list_take(xs, (int64_t)(i - 1));
+    prefix = sz_list_take(xs, i - 1);
     out = sz_list_cons_take(prefix, out);
     sz_release(prefix);
   }
@@ -521,38 +554,55 @@ SzList *sz_list_inits(SzList *xs) {
 }
 
 SzList *sz_list_tails(SzList *xs) {
-  SzList *rest;
-  if (!xs)
-    return sz_list_cons(NULL, NULL);
-  rest = sz_list_tails(xs->tail);
-  return sz_list_cons_take(xs, rest);
+  SzList *acc = NULL;
+  SzList *p;
+  SzList *out;
+  for (p = xs; p; p = p->tail)
+    acc = sz_list_cons_take(p, acc);
+  out = sz_list_cons(NULL, NULL);
+  for (p = acc; p; p = p->tail)
+    out = sz_list_cons_take(p->head, out);
+  sz_release(acc);
+  return out;
 }
 
 static SzPair *elem_pair(void *a, void *b) { return sz_pair_new(a, b); }
 
 SzList *sz_list_zip(SzList *xs, SzList *ys) {
+  SzList *acc = NULL;
+  SzList *a = xs;
+  SzList *b = ys;
   SzPair *pair;
-  SzList *rest;
   SzList *out;
-  if (!xs || !ys)
-    return NULL;
-  pair = elem_pair(xs->head, ys->head);
-  rest = sz_list_zip(xs->tail, ys->tail);
-  out = sz_list_cons_take(pair, rest);
-  sz_release(pair);
+  while (a && b) {
+    pair = elem_pair(a->head, b->head);
+    acc = sz_list_cons_take(pair, acc);
+    sz_release(pair);
+    a = a->tail;
+    b = b->tail;
+  }
+  out = sz_list_reverse(acc);
+  sz_release(acc);
   return out;
 }
 
 SzList *sz_list_zip_all(SzList *xs, SzList *ys, void *x, void *y) {
+  SzList *acc = NULL;
+  SzList *a = xs;
+  SzList *b = ys;
   SzPair *pair;
-  SzList *rest;
   SzList *out;
-  if (!xs && !ys)
-    return NULL;
-  pair = elem_pair(xs ? xs->head : x, ys ? ys->head : y);
-  rest = sz_list_zip_all(xs ? xs->tail : NULL, ys ? ys->tail : NULL, x, y);
-  out = sz_list_cons_take(pair, rest);
-  sz_release(pair);
+  while (a || b) {
+    pair = elem_pair(a ? a->head : x, b ? b->head : y);
+    acc = sz_list_cons_take(pair, acc);
+    sz_release(pair);
+    if (a)
+      a = a->tail;
+    if (b)
+      b = b->tail;
+  }
+  out = sz_list_reverse(acc);
+  sz_release(acc);
   return out;
 }
 
@@ -621,21 +671,25 @@ void *sz_list_fold_left(SzList *xs, void *z, SzListMapFn fn, void *env) {
 }
 
 void *sz_list_fold_right(SzList *xs, void *z, SzListMapFn fn, void *env) {
+  SzList *rev;
+  void *acc;
+  SzList *p;
   SzPair *pack;
-  void *rest;
-  void *out;
+  void *next;
   if (!fn)
     sz_panic("sz_list_fold_right(null fn)");
-  if (!xs) {
-    sz_retain(z);
-    return z;
+  rev = sz_list_reverse(xs);
+  sz_retain(z);
+  acc = z;
+  for (p = rev; p; p = p->tail) {
+    pack = sz_pair_new(p->head, acc);
+    next = fn(pack, env);
+    sz_release(pack);
+    sz_release(acc);
+    acc = next;
   }
-  rest = sz_list_fold_right(xs->tail, z, fn, env);
-  pack = sz_pair_new(xs->head, rest);
-  out = fn(pack, env);
-  sz_release(pack);
-  sz_release(rest);
-  return out;
+  sz_release(rev);
+  return acc;
 }
 
 SzList *sz_list_scan_left(SzList *xs, void *z, SzListMapFn fn, void *env) {
@@ -665,21 +719,29 @@ SzList *sz_list_scan_left(SzList *xs, void *z, SzListMapFn fn, void *env) {
 }
 
 SzList *sz_list_scan_right(SzList *xs, void *z, SzListMapFn fn, void *env) {
-  SzList *rest;
+  SzList *rev;
+  SzList *acc_rev = NULL;
+  SzList *p;
   SzPair *pack;
+  void *acc;
   void *next;
-  SzList *out;
   if (!fn)
     sz_panic("sz_list_scan_right(null fn)");
-  if (!xs)
-    return sz_list_cons(z, NULL);
-  rest = sz_list_scan_right(xs->tail, z, fn, env);
-  pack = sz_pair_new(xs->head, rest->head);
-  next = fn(pack, env);
-  sz_release(pack);
-  out = sz_list_cons_take(next, rest);
-  sz_release(next);
-  return out;
+  rev = sz_list_reverse(xs);
+  sz_retain(z);
+  acc = z;
+  acc_rev = sz_list_cons_take(acc, acc_rev);
+  for (p = rev; p; p = p->tail) {
+    pack = sz_pair_new(p->head, acc);
+    next = fn(pack, env);
+    sz_release(pack);
+    sz_release(acc);
+    acc = next;
+    acc_rev = sz_list_cons_take(acc, acc_rev);
+  }
+  sz_release(acc);
+  sz_release(rev);
+  return acc_rev;
 }
 
 void *sz_list_reduce_left(SzList *xs, SzListMapFn fn, void *env) {
@@ -691,23 +753,27 @@ void *sz_list_reduce_left(SzList *xs, SzListMapFn fn, void *env) {
 }
 
 void *sz_list_reduce_right(SzList *xs, SzListMapFn fn, void *env) {
-  void *rest;
+  SzList *rev;
+  void *acc;
+  SzList *p;
   SzPair *pack;
-  void *out;
+  void *next;
   if (!xs)
     sz_panic("List.reduceRight on empty");
   if (!fn)
     sz_panic("sz_list_reduce_right(null fn)");
-  if (!xs->tail) {
-    sz_retain(xs->head);
-    return xs->head;
+  rev = sz_list_reverse(xs);
+  sz_retain(rev->head);
+  acc = rev->head;
+  for (p = rev->tail; p; p = p->tail) {
+    pack = sz_pair_new(p->head, acc);
+    next = fn(pack, env);
+    sz_release(pack);
+    sz_release(acc);
+    acc = next;
   }
-  rest = sz_list_reduce_right(xs->tail, fn, env);
-  pack = sz_pair_new(xs->head, rest);
-  out = fn(pack, env);
-  sz_release(pack);
-  sz_release(rest);
-  return out;
+  sz_release(rev);
+  return acc;
 }
 
 int64_t sz_list_contains(SzList *xs, void *x) {
@@ -840,33 +906,47 @@ SzList *sz_list_intersect(SzList *xs, SzList *ys) {
 }
 
 SzList *sz_list_transpose(SzList *xss) {
+  SzList *rows;
+  SzList *acc = NULL;
   SzList *p;
-  SzList *heads = NULL;
-  SzList *tails = NULL;
+  SzList *heads;
+  SzList *next_rows;
   SzList *hrev;
-  SzList *trev;
-  SzList *rest;
-  SzList *out;
   SzList *row;
+  SzList *out;
+  int empty;
   if (!xss)
     return NULL;
-  for (p = xss; p; p = p->tail) {
-    if (!p->head)
-      return NULL;
+  sz_retain(xss);
+  rows = xss;
+  while (rows) {
+    empty = 0;
+    for (p = rows; p; p = p->tail) {
+      if (!p->head) {
+        empty = 1;
+        break;
+      }
+    }
+    if (empty)
+      break;
+    heads = NULL;
+    next_rows = NULL;
+    for (p = rows; p; p = p->tail) {
+      row = (SzList *)p->head;
+      heads = sz_list_cons_take(row->head, heads);
+      next_rows = sz_list_cons_take(row->tail, next_rows);
+    }
+    hrev = sz_list_reverse(heads);
+    sz_release(heads);
+    acc = sz_list_cons_take(hrev, acc);
+    sz_release(hrev);
+    sz_release(rows);
+    rows = sz_list_reverse(next_rows);
+    sz_release(next_rows);
   }
-  for (p = xss; p; p = p->tail) {
-    row = (SzList *)p->head;
-    heads = sz_list_cons_take(row->head, heads);
-    tails = sz_list_cons_take(row->tail, tails);
-  }
-  hrev = sz_list_reverse(heads);
-  sz_release(heads);
-  trev = sz_list_reverse(tails);
-  sz_release(tails);
-  rest = sz_list_transpose(trev);
-  sz_release(trev);
-  out = sz_list_cons_take(hrev, rest);
-  sz_release(hrev);
+  sz_release(rows);
+  out = sz_list_reverse(acc);
+  sz_release(acc);
   return out;
 }
 
@@ -910,10 +990,10 @@ int64_t sz_list_starts_with(SzList *xs, SzList *prefix) {
 }
 
 int64_t sz_list_ends_with(SzList *xs, SzList *suffix) {
-  size_t n = sz_list_len(xs);
-  size_t m = sz_list_len(suffix);
+  int64_t n = sz_list_len(xs);
+  int64_t m = sz_list_len(suffix);
   SzList *p;
-  size_t i;
+  int64_t i;
   if (m > n)
     return 0;
   p = xs;
@@ -935,29 +1015,29 @@ int64_t sz_list_same_elements(SzList *xs, SzList *ys) {
 }
 
 SzList *sz_list_patch(SzList *xs, int64_t from, SzList *other, int64_t replaced) {
-  size_t len = sz_list_len(xs);
-  size_t f;
-  size_t r;
-  size_t skip;
+  int64_t len = sz_list_len(xs);
+  int64_t f;
+  int64_t r;
+  int64_t skip;
   SzList *left;
   SzList *right;
   SzList *mid;
   SzList *out;
   if (from < 0)
     f = 0;
-  else if ((uint64_t)from > (uint64_t)len)
+  else if (from > len)
     f = len;
   else
-    f = (size_t)from;
+    f = from;
   if (replaced < 0)
     r = 0;
-  else if ((uint64_t)replaced > (uint64_t)(len - f))
+  else if (replaced > len - f)
     r = len - f;
   else
-    r = (size_t)replaced;
+    r = replaced;
   skip = f + r;
-  left = sz_list_take(xs, (int64_t)f);
-  right = sz_list_drop(xs, (int64_t)skip);
+  left = sz_list_take(xs, f);
+  right = sz_list_drop(xs, skip);
   mid = sz_list_concat(left, other);
   sz_release(left);
   out = sz_list_concat(mid, right);
@@ -1011,7 +1091,7 @@ int64_t sz_list_last_index_of_slice(SzList *xs, SzList *slice) {
   int64_t i = 0;
   int64_t hit = -1;
   if (!slice)
-    return (int64_t)sz_list_len(xs);
+    return sz_list_len(xs);
   for (p = xs; p; p = p->tail) {
     if (sz_list_starts_with(p, slice))
       hit = i;
@@ -1126,13 +1206,13 @@ static SzList *sort_slots(SzSortSlot *slots, size_t n,
 }
 
 SzList *sz_list_sort(SzList *xs, int64_t as_int) {
-  size_t n = sz_list_len(xs);
+  int64_t n = sz_list_len(xs);
   SzSortSlot *slots;
   SzList *p;
   size_t i;
   if (!xs)
     return NULL;
-  slots = (SzSortSlot *)sz_alloc(n * sizeof(SzSortSlot));
+  slots = (SzSortSlot *)sz_alloc((size_t)n * sizeof(SzSortSlot));
   i = 0;
   for (p = xs; p; p = p->tail) {
     slots[i].value = p->head;
@@ -1140,11 +1220,11 @@ SzList *sz_list_sort(SzList *xs, int64_t as_int) {
     slots[i].idx = i;
     i++;
   }
-  return sort_slots(slots, n, as_int ? cmp_int_slots : cmp_str_slots);
+  return sort_slots(slots, (size_t)n, as_int ? cmp_int_slots : cmp_str_slots);
 }
 
 SzList *sz_list_sort_by(SzList *xs, SzListMapFn fn, void *env) {
-  size_t n = sz_list_len(xs);
+  int64_t n = sz_list_len(xs);
   SzSortSlot *slots;
   SzList *p;
   size_t i;
@@ -1152,7 +1232,7 @@ SzList *sz_list_sort_by(SzList *xs, SzListMapFn fn, void *env) {
     sz_panic("sz_list_sort_by(null fn)");
   if (!xs)
     return NULL;
-  slots = (SzSortSlot *)sz_alloc(n * sizeof(SzSortSlot));
+  slots = (SzSortSlot *)sz_alloc((size_t)n * sizeof(SzSortSlot));
   i = 0;
   for (p = xs; p; p = p->tail) {
     void *box = fn(p->head, env);
@@ -1162,7 +1242,7 @@ SzList *sz_list_sort_by(SzList *xs, SzListMapFn fn, void *env) {
     sz_release(box);
     i++;
   }
-  return sort_slots(slots, n, cmp_key_slots);
+  return sort_slots(slots, (size_t)n, cmp_key_slots);
 }
 
 static int cell_ord(void *a, void *b, int64_t as_int) {
@@ -1201,43 +1281,46 @@ void *sz_list_min(SzList *xs, int64_t as_int) {
   return list_extreme(xs, as_int, 0, "List.min on empty");
 }
 
+static void *list_reverse_value(void *head, void *env) {
+  (void)env;
+  return sz_list_reverse((SzList *)head);
+}
+
 SzMap *sz_list_group_by(SzList *xs, SzListMapFn fn, void *env, int32_t key_kind) {
   SzMap *acc = NULL;
+  SzMap *out;
   SzList *p;
   if (!fn)
     sz_panic("sz_list_group_by(null fn)");
   for (p = xs; p; p = p->tail) {
     void *key = fn(p->head, env);
     void *cur = sz_map_get_or(acc, key, NULL);
-    SzList *grown;
-    SzMap *next;
-    if (cur)
-      grown = sz_list_append((SzList *)cur, p->head);
-    else
-      grown = sz_list_cons(p->head, NULL);
-    next = sz_map_set(acc, key, grown, key_kind);
+    SzList *grown = sz_list_cons(p->head, (SzList *)cur);
+    SzMap *next = sz_map_set(acc, key, grown, key_kind);
     sz_release(grown);
     sz_release(acc);
     sz_release(key);
     acc = next;
   }
-  return acc;
+  out = sz_map_map_values(acc, list_reverse_value, NULL);
+  sz_release(acc);
+  return out;
 }
 
 int64_t sz_list_sum(SzList *xs) {
-  int64_t acc = 0;
+  uint64_t acc = 0;
   SzList *p;
   for (p = xs; p; p = p->tail)
-    acc += sz_unbox_i64(p->head);
-  return acc;
+    acc += (uint64_t)sz_unbox_i64(p->head);
+  return (int64_t)acc;
 }
 
 int64_t sz_list_product(SzList *xs) {
-  int64_t acc = 1;
+  uint64_t acc = 1;
   SzList *p;
   for (p = xs; p; p = p->tail)
-    acc *= sz_unbox_i64(p->head);
-  return acc;
+    acc *= (uint64_t)sz_unbox_i64(p->head);
+  return (int64_t)acc;
 }
 
 void *sz_list_max_by(SzList *xs, SzListMapFn fn, void *env, int64_t want_max) {
