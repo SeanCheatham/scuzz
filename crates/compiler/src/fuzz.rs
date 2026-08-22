@@ -26,12 +26,57 @@ fn lcg_below(s: i64, n: i64) -> i64 {
 
 const INTERESTING_INTS: [i64; 8] = [0, 1, -1, 2, 3, 8, 255, -100];
 
-fn drive_int(s: i64) -> i64 {
-    if lcg_below(s, 2) == 0 {
+/// Inclusive Int range from a driver-table bound token (`i>=0` → lo 0).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct IntBound {
+    lo: Option<i64>,
+    hi: Option<i64>,
+}
+
+impl IntBound {
+    const NONE: Self = Self { lo: None, hi: None };
+
+    fn contains(self, v: i64) -> bool {
+        if let Some(lo) = self.lo {
+            if v < lo {
+                return false;
+            }
+        }
+        if let Some(hi) = self.hi {
+            if v > hi {
+                return false;
+            }
+        }
+        true
+    }
+
+    fn clamp(self, v: i64) -> i64 {
+        let v = match self.lo {
+            Some(lo) => v.max(lo),
+            None => v,
+        };
+        match self.hi {
+            Some(hi) => v.min(hi),
+            None => v,
+        }
+    }
+}
+
+/// One generated argument in a driver-table spec.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum DriveArgKind {
+    Int(IntBound),
+    String,
+    Bool,
+}
+
+fn drive_int(s: i64, bound: IntBound) -> i64 {
+    let v = if lcg_below(s, 2) == 0 {
         INTERESTING_INTS[lcg_below(lcg_next(s), INTERESTING_INTS.len() as i64) as usize]
     } else {
         lcg_below(lcg_next(s), 1000) - 100
-    }
+    };
+    bound.clamp(v)
 }
 
 fn letter_at(i: i64) -> String {
@@ -62,36 +107,182 @@ fn drive_bool(s: i64) -> &'static str {
     }
 }
 
-fn drive_spec_parts(spec: &str) -> (String, Vec<char>) {
+fn drive_spec_kinds(spec: &str) -> (String, Vec<DriveArgKind>) {
     let mut parts = spec.split_whitespace();
     let name = parts.next().unwrap_or("").to_string();
-    let kinds: Vec<char> = parts.filter_map(|p| p.chars().next()).collect();
+    let kinds: Vec<DriveArgKind> = parts.map(parse_kind_token).collect();
     (name, kinds)
 }
 
+fn parse_kind_token(tok: &str) -> DriveArgKind {
+    match tok.chars().next() {
+        Some('s') => DriveArgKind::String,
+        Some('b') => DriveArgKind::Bool,
+        _ => DriveArgKind::Int(parse_int_bound(tok)),
+    }
+}
+
+/// Parse `i`, `i>=0`, `i>0`, `i<=k`, or `i<k`. Exclusive bounds become inclusive.
+fn parse_int_bound(tok: &str) -> IntBound {
+    let rest = tok.strip_prefix('i').unwrap_or(tok);
+    if rest.is_empty() {
+        return IntBound::NONE;
+    }
+    if let Some(n) = rest.strip_prefix(">=") {
+        return IntBound {
+            lo: n.parse().ok(),
+            hi: None,
+        };
+    }
+    if let Some(n) = rest.strip_prefix("<=") {
+        return IntBound {
+            lo: None,
+            hi: n.parse().ok(),
+        };
+    }
+    if let Some(n) = rest.strip_prefix('>') {
+        return IntBound {
+            lo: n.parse().ok().and_then(|k: i64| k.checked_add(1)),
+            hi: None,
+        };
+    }
+    if let Some(n) = rest.strip_prefix('<') {
+        return IntBound {
+            lo: None,
+            hi: n.parse().ok().and_then(|k: i64| k.checked_sub(1)),
+        };
+    }
+    IntBound::NONE
+}
+
 fn drive_line(spec: &str, mut s: i64) -> String {
-    let (name, kinds) = drive_spec_parts(spec);
+    let (name, kinds) = drive_spec_kinds(spec);
     if kinds.is_empty() {
         return format!("drive {name}");
     }
     let mut args = Vec::new();
     for k in kinds {
         match k {
-            's' => {
+            DriveArgKind::String => {
                 args.push(letter_at(lcg_below(s, 26)));
                 s = lcg_next(s);
             }
-            'b' => {
+            DriveArgKind::Bool => {
                 args.push(drive_bool(s).to_string());
                 s = lcg_next(s);
             }
-            _ => {
-                args.push(drive_int(s).to_string());
+            DriveArgKind::Int(bound) => {
+                args.push(drive_int(s, bound).to_string());
                 s = lcg_next(s);
             }
         }
     }
     format!("drive {name} {}", args.join(" "))
+}
+
+fn infer_kind(raw: &str) -> DriveArgKind {
+    if raw == "true" || raw == "false" {
+        DriveArgKind::Bool
+    } else if raw.parse::<i64>().is_ok() {
+        DriveArgKind::Int(IntBound::NONE)
+    } else {
+        DriveArgKind::String
+    }
+}
+
+fn kinds_for_drive(name: &str, specs: &[String]) -> Vec<DriveArgKind> {
+    for spec in specs {
+        let (spec_name, kinds) = drive_spec_kinds(spec);
+        if spec_name == name {
+            return kinds;
+        }
+    }
+    Vec::new()
+}
+
+fn shrink_int(n: i64, bound: IntBound) -> Vec<i64> {
+    let target = bound.lo.unwrap_or(0);
+    let mut out = Vec::new();
+    let mut push = |v: i64| {
+        if v != n && bound.contains(v) && !out.contains(&v) {
+            out.push(v);
+        }
+    };
+    push(target);
+    let mid = target.saturating_add(n.saturating_sub(target) / 2);
+    push(mid);
+    if n > target {
+        push(n.saturating_sub(1));
+    }
+    out
+}
+
+fn shrink_arg(kind: DriveArgKind, raw: &str) -> Vec<String> {
+    match kind {
+        DriveArgKind::Int(bound) => match raw.parse::<i64>() {
+            Ok(n) => shrink_int(n, bound)
+                .into_iter()
+                .map(|v| v.to_string())
+                .collect(),
+            Err(_) => Vec::new(),
+        },
+        DriveArgKind::Bool => {
+            if raw == "true" {
+                vec!["false".into()]
+            } else {
+                Vec::new()
+            }
+        }
+        DriveArgKind::String => {
+            if raw != "a" {
+                vec!["a".into()]
+            } else {
+                Vec::new()
+            }
+        }
+    }
+}
+
+fn set_drive_arg(name: &str, args: &[&str], i: usize, val: &str) -> String {
+    let mut s = format!("drive {name}");
+    for (j, a) in args.iter().enumerate() {
+        s.push(' ');
+        if j == i {
+            s.push_str(val);
+        } else {
+            s.push_str(a);
+        }
+    }
+    s
+}
+
+/// Smaller `drive` lines for one event. Earlier args first. Int: lower bound
+/// (0 or published bound), then midpoint, then decrement. Bool: `false`.
+/// String: `a`.
+pub fn drive_line_shrinks(line: &str, specs: &[String]) -> Vec<String> {
+    let mut parts = line.split_whitespace();
+    let Some(verb) = parts.next() else {
+        return Vec::new();
+    };
+    if verb != "drive" {
+        return Vec::new();
+    }
+    let Some(name) = parts.next() else {
+        return Vec::new();
+    };
+    let args: Vec<&str> = parts.collect();
+    if args.is_empty() {
+        return Vec::new();
+    }
+    let kinds = kinds_for_drive(name, specs);
+    let mut out = Vec::new();
+    for (i, arg) in args.iter().enumerate() {
+        let kind = kinds.get(i).copied().unwrap_or_else(|| infer_kind(arg));
+        for val in shrink_arg(kind, arg) {
+            out.push(set_drive_arg(name, &args, i, &val));
+        }
+    }
+    out
 }
 
 /// One `drive` line per driver table spec, with generated args.
@@ -598,8 +789,8 @@ scroll:scroll
     #[test]
     fn corpus_entry_name_matches_bad_example_pin() {
         assert_eq!(
-            corpus_entry_name("42", &["drive bumpIncreases 101".into()]),
-            "fd143d7bacdf695a"
+            corpus_entry_name("42", &["drive bumpIncreases 0".into()]),
+            "140caeeb01b1f10a"
         );
     }
 
@@ -665,6 +856,111 @@ scroll:scroll
             !got.is_subset(&small),
             "Int draws stayed in {{1,2,3}}: {got:?}"
         );
+    }
+
+    #[test]
+    fn drive_int_clamps_to_published_bound() {
+        for seed in 0..64 {
+            let line = drive_line("f i>=0", seed);
+            let n: i64 = line
+                .split_whitespace()
+                .nth(2)
+                .expect("int arg")
+                .parse()
+                .expect("int");
+            assert!(n >= 0, "draw {n} below i>=0");
+        }
+        for seed in 0..64 {
+            let line = drive_line("f i>0", seed);
+            let n: i64 = line
+                .split_whitespace()
+                .nth(2)
+                .expect("int arg")
+                .parse()
+                .expect("int");
+            assert!(n >= 1, "draw {n} below i>0");
+        }
+    }
+
+    #[test]
+    fn parse_int_bound_tokens() {
+        assert_eq!(parse_int_bound("i"), IntBound::NONE);
+        assert_eq!(
+            parse_int_bound("i>=0"),
+            IntBound {
+                lo: Some(0),
+                hi: None
+            }
+        );
+        assert_eq!(
+            parse_int_bound("i>0"),
+            IntBound {
+                lo: Some(1),
+                hi: None
+            }
+        );
+        assert_eq!(
+            parse_int_bound("i<=10"),
+            IntBound {
+                lo: None,
+                hi: Some(10)
+            }
+        );
+        assert_eq!(
+            parse_int_bound("i<10"),
+            IntBound {
+                lo: None,
+                hi: Some(9)
+            }
+        );
+        assert_eq!(
+            parse_int_bound("i>=-1"),
+            IntBound {
+                lo: Some(-1),
+                hi: None
+            }
+        );
+    }
+
+    #[test]
+    fn drive_line_shrinks_int_toward_zero() {
+        let specs = vec!["bumpIncreases i".into()];
+        assert_eq!(
+            drive_line_shrinks("drive bumpIncreases 101", &specs),
+            vec![
+                "drive bumpIncreases 0".to_string(),
+                "drive bumpIncreases 50".into(),
+                "drive bumpIncreases 100".into(),
+            ]
+        );
+        assert!(drive_line_shrinks("drive bumpIncreases 0", &specs).is_empty());
+    }
+
+    #[test]
+    fn drive_line_shrinks_int_to_refinement_bound() {
+        let specs = vec!["f i>=10".into()];
+        assert_eq!(
+            drive_line_shrinks("drive f 101", &specs),
+            vec![
+                "drive f 10".to_string(),
+                "drive f 55".into(),
+                "drive f 100".into(),
+            ]
+        );
+    }
+
+    #[test]
+    fn drive_line_shrinks_bool_and_string() {
+        assert_eq!(
+            drive_line_shrinks("drive flag true", &["flag b".into()]),
+            vec!["drive flag false".to_string()]
+        );
+        assert!(drive_line_shrinks("drive flag false", &["flag b".into()]).is_empty());
+        assert_eq!(
+            drive_line_shrinks("drive w z", &["w s".into()]),
+            vec!["drive w a".to_string()]
+        );
+        assert!(drive_line_shrinks("drive w a", &["w s".into()]).is_empty());
     }
 
     #[test]
