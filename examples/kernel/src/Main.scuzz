@@ -95,6 +95,9 @@ def plusOne(): Int => Int =
 def addN(n: Int): Int => Int =
   (m: Int) => n + m
 
+def maybeYes(ok: Bool): IO[Unit] =
+  if (ok) IO.println("ifone:fn")
+
 def applyTwice(f: Int => String, n: Int): String =
   Str.concat(f(n), f(n))
 
@@ -331,6 +334,11 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"funpass0:${Str.fromInt(applyInt(plusOne(), 6))}")
     _ <- IO.println(s"funmap:${List.join(List.map([1, 2], eta), ",")}")
     _ <- IO.println(s"funmap0:${List.join(List.map([]: List[Int], eta), ",")}")
+    _ <- maybeYes(true)
+    _ <- maybeYes(false)
+    _ <- if (true) IO.println("ifone:y")
+    _ <- if (false) IO.println("ifone:skip")
+    _ = if (true) ()
     _ <- IO.println(s"tab:${List.join(List.tabulate(3, i => Str.fromInt(i)), ",")}")
     _ <- IO.println(s"isp:${List.join(List.intersperse(xs, "|"), ",")}")
     _ <- IO.println(s"grp:${List.join(List.map(List.grouped(xs, 2), g => List.join(g, ",")), "|")}")

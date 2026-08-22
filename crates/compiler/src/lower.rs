@@ -379,6 +379,7 @@ fn desugar_for(
                         cond: Box::new(lower_expr(pred, enums, current_module)),
                         then_branch: Box::new(body),
                         else_branch: Box::new(miss),
+                        implicit_else: false,
                     },
                     sp,
                 )

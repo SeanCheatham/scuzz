@@ -2923,6 +2923,7 @@ fn infer(
                 cond,
                 then_branch,
                 else_branch,
+                implicit_else,
             } => {
                 let ct = infer(cond, enums, funs, methods, current_module, env)?;
                 if !matches!(ct, Type::Bool) {
@@ -2931,9 +2932,14 @@ fn infer(
                     )));
                 }
                 let tt = infer(then_branch, enums, funs, methods, current_module, env)?;
-                let et = infer(else_branch, enums, funs, methods, current_module, env)?;
-                prefer_join(&tt, &et)
-                    .map_err(|_| TypeError::Msg(format!("if branches disagree: {tt:?} vs {et:?}")))
+                if *implicit_else {
+                    implicit_else_ty(&tt)
+                } else {
+                    let et = infer(else_branch, enums, funs, methods, current_module, env)?;
+                    prefer_join(&tt, &et).map_err(|_| {
+                        TypeError::Msg(format!("if branches disagree: {tt:?} vs {et:?}"))
+                    })
+                }
             }
             ExprKind::Binary { op, left, right } => {
                 let lt = infer(left, enums, funs, methods, current_module, env)?;
@@ -5961,6 +5967,19 @@ fn fail_ty() -> Type {
     Type::Io(Box::new(Type::Opaque("Fail".into())))
 }
 
+/// Missing `else` is `()` or `IO.pure(())`.
+fn implicit_else_ty(then_ty: &Type) -> Result<Type, TypeError> {
+    match then_ty {
+        Type::Unit => Ok(Type::Unit),
+        Type::Io(inner) if matches!(inner.as_ref(), Type::Unit) || is_meta_opaque(inner) => {
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
+        other => Err(TypeError::Msg(format!(
+            "if without else needs Unit or IO[Unit], got {other:?}"
+        ))),
+    }
+}
+
 fn prefer_join(a: &Type, b: &Type) -> Result<Type, TypeError> {
     if types_compat(a, b) {
         Ok(prefer_concrete(a, b))
@@ -6911,6 +6930,7 @@ fn mono_expr(
             cond,
             then_branch,
             else_branch,
+            implicit_else,
         } => Ok(Expr::new(
             ExprKind::If {
                 cond: Box::new(mono_expr(
@@ -6940,6 +6960,7 @@ fn mono_expr(
                     env,
                     specialized,
                 )?),
+                implicit_else,
             },
             span,
         )),
@@ -7454,29 +7475,29 @@ fn elaborate_expr(
             cond,
             then_branch,
             else_branch,
-        } => Ok(Expr::new(
-            ExprKind::If {
-                cond: Box::new(elaborate_expr(
-                    *cond,
-                    enums,
-                    funs,
-                    methods,
-                    current_module,
-                    env,
-                    None,
-                    tparams,
-                )?),
-                then_branch: Box::new(elaborate_expr(
-                    *then_branch,
-                    enums,
-                    funs,
-                    methods,
-                    current_module,
-                    env,
-                    expected,
-                    tparams,
-                )?),
-                else_branch: Box::new(elaborate_expr(
+            implicit_else,
+        } => {
+            let then_branch = elaborate_expr(
+                *then_branch,
+                enums,
+                funs,
+                methods,
+                current_module,
+                env,
+                expected,
+                tparams,
+            )?;
+            let else_branch = if implicit_else {
+                let tt = infer(&then_branch, enums, funs, methods, current_module, env)?;
+                match tt {
+                    Type::Io(_) => Expr::new(
+                        ExprKind::IoPure(Box::new(Expr::new(ExprKind::Unit, span.clone()))),
+                        span.clone(),
+                    ),
+                    _ => *else_branch,
+                }
+            } else {
+                elaborate_expr(
                     *else_branch,
                     enums,
                     funs,
@@ -7485,10 +7506,27 @@ fn elaborate_expr(
                     env,
                     expected,
                     tparams,
-                )?),
-            },
-            span,
-        )),
+                )?
+            };
+            Ok(Expr::new(
+                ExprKind::If {
+                    cond: Box::new(elaborate_expr(
+                        *cond,
+                        enums,
+                        funs,
+                        methods,
+                        current_module,
+                        env,
+                        None,
+                        tparams,
+                    )?),
+                    then_branch: Box::new(then_branch),
+                    else_branch: Box::new(else_branch),
+                    implicit_else,
+                },
+                span,
+            ))
+        }
         ExprKind::Call { callee, args } => {
             if let Ok(f) = funs.resolve(&callee, current_module) {
                 let mut subst: HashMap<String, Type> = HashMap::new();
@@ -8155,10 +8193,12 @@ fn subst_node_targs(expr: Expr, subst: &HashMap<String, Type>) -> Expr {
             cond,
             then_branch,
             else_branch,
+            implicit_else,
         } => ExprKind::If {
             cond: Box::new(subst_node_targs(*cond, subst)),
             then_branch: Box::new(subst_node_targs(*then_branch, subst)),
             else_branch: Box::new(subst_node_targs(*else_branch, subst)),
+            implicit_else,
         },
         ExprKind::Call { callee, args } => ExprKind::Call {
             callee,
@@ -8385,6 +8425,7 @@ fn collect_node_targs(expr: &Expr, out: &mut Vec<(String, Vec<Type>)>) {
             cond,
             then_branch,
             else_branch,
+            ..
         } => {
             collect_node_targs(cond, out);
             collect_node_targs(then_branch, out);
@@ -8562,10 +8603,12 @@ fn rewrite_enum_refs(
             cond,
             then_branch,
             else_branch,
+            implicit_else,
         } => ExprKind::If {
             cond: Box::new(rewrite_enum_refs(*cond, clones)?),
             then_branch: Box::new(rewrite_enum_refs(*then_branch, clones)?),
             else_branch: Box::new(rewrite_enum_refs(*else_branch, clones)?),
+            implicit_else,
         },
         ExprKind::Call { callee, args } => ExprKind::Call {
             callee,
@@ -9017,6 +9060,75 @@ def positive(n: Int): IO[Int] =
             "{}",
             err.message()
         );
+    }
+
+    #[test]
+    fn typechecks_if_without_else_io_unit() {
+        let src = r#"
+def maybeYes(ok: Bool): IO[Unit] =
+  if (ok) IO.println("y")
+@main def main: IO[Unit] =
+  for {
+    _ <- maybeYes(true)
+    _ <- maybeYes(false)
+    _ <- if (true) IO.println("y")
+    _ <- if (false) IO.println("n")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("if without else IO[Unit]");
+    }
+
+    #[test]
+    fn typechecks_if_without_else_unit() {
+        let src = r#"
+def flagUnit(ok: Bool): Unit =
+  if (ok) ()
+@main def main: IO[Unit] =
+  for {
+    _ = flagUnit(true)
+    _ = if (false) ()
+    _ <- IO.println("ok")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("if without else Unit");
+    }
+
+    #[test]
+    fn typechecks_if_without_else_fail() {
+        let src = r#"
+def boom(ok: Bool): IO[Unit] =
+  if (ok) IO.fail("x")
+@main def main: IO[Unit] =
+  boom(false).handleErrorWith(_ => IO.println("ok"))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("if without else IO.fail");
+    }
+
+    #[test]
+    fn rejects_if_without_else_int() {
+        let src = r#"
+def bad(ok: Bool): Int =
+  if (ok) 1
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(err.contains("if without else"), "{err}");
+    }
+
+    #[test]
+    fn rejects_if_without_else_io_int() {
+        let src = r#"
+def bad(ok: Bool): IO[Int] =
+  if (ok) IO.pure(1)
+@main def main: IO[Unit] = IO.println("x")
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err().to_string();
+        assert!(err.contains("if without else"), "{err}");
     }
 
     #[test]

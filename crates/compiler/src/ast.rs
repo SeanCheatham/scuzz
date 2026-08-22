@@ -309,10 +309,12 @@ impl Expr {
                 cond,
                 then_branch,
                 else_branch,
+                implicit_else,
             } => ExprKind::If {
                 cond: Box::new(f(*cond)?),
                 then_branch: Box::new(f(*then_branch)?),
                 else_branch: Box::new(f(*else_branch)?),
+                implicit_else,
             },
             ExprKind::MethodCall {
                 receiver,
@@ -468,6 +470,7 @@ impl Expr {
                 cond,
                 then_branch,
                 else_branch,
+                ..
             } => {
                 f(cond);
                 f(then_branch);
@@ -661,11 +664,12 @@ pub enum ExprKind {
     Tuple { elems: Vec<Expr> },
     /// `s"...$x..."` / `s"...${expr}..."` — typed concat (Int / Float holes stringify).
     Interpolate { parts: Vec<InterpPart> },
-    /// `if (cond) then else else_`
+    /// `if (cond) then else else_`. `implicit_else` is a missing `else` (`Unit` or `IO[Unit]`).
     If {
         cond: Box<Expr>,
         then_branch: Box<Expr>,
         else_branch: Box<Expr>,
+        implicit_else: bool,
     },
     /// Binary operator
     Binary {

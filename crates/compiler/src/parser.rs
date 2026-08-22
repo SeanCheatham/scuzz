@@ -2171,14 +2171,25 @@ impl Parser {
                 let cond = self.parse_expr()?;
                 self.expect(&Token::RParen)?;
                 let then_branch = self.parse_if_branch()?;
-                self.expect(&Token::Else)?;
-                let else_branch = self.parse_if_branch()?;
-                let span = start.cover(&else_branch.span);
+                let (else_branch, implicit_else, span) = if matches!(self.peek(), Token::Else) {
+                    self.bump();
+                    let else_branch = self.parse_if_branch()?;
+                    let span = start.cover(&else_branch.span);
+                    (else_branch, false, span)
+                } else {
+                    let span = start.cover(&then_branch.span);
+                    (
+                        self.mk(ExprKind::Unit, then_branch.span.clone()),
+                        true,
+                        span,
+                    )
+                };
                 Ok(self.mk(
                     ExprKind::If {
                         cond: Box::new(cond),
                         then_branch: Box::new(then_branch),
                         else_branch: Box::new(else_branch),
+                        implicit_else,
                     },
                     span,
                 ))
@@ -3265,6 +3276,25 @@ def add1(n: Int): Int = n + 1
         let p = parse(src).unwrap();
         assert_eq!(p.defs.len(), 1);
         assert!(matches!(p.main.body.kind, ExprKind::If { .. }));
+    }
+
+    #[test]
+    fn parse_if_without_else() {
+        let src = r#"
+def maybeYes(ok: Bool): IO[Unit] =
+  if (ok) IO.println("y")
+@main def main: IO[Unit] =
+  if (true) IO.println("ok")
+"#;
+        let p = parse(src).unwrap();
+        match &p.defs[0].body.kind {
+            ExprKind::If { implicit_else, .. } => assert!(*implicit_else),
+            other => panic!("expected If, got {other:?}"),
+        }
+        match &p.main.body.kind {
+            ExprKind::If { implicit_else, .. } => assert!(*implicit_else),
+            other => panic!("expected If, got {other:?}"),
+        }
     }
 
     #[test]
@@ -4600,7 +4630,9 @@ def f(n: Int, b: Bool): Int = if (!b) -n else ~n
                 cond,
                 then_branch,
                 else_branch,
+                implicit_else,
             } => {
+                assert!(!*implicit_else);
                 assert!(
                     matches!(&cond.kind, ExprKind::Unary { op: UnOp::Not, .. }),
                     "{cond:?}"

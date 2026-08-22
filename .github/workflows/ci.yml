@@ -253,6 +253,8 @@ jobs:
           grep -q "funpass0:7" /tmp/kernel.out
           grep -q "funmap:1,2" /tmp/kernel.out
           grep -q "funmap0:" /tmp/kernel.out
+          grep -q "ifone:fn" /tmp/kernel.out
+          grep -q "ifone:y" /tmp/kernel.out
           grep -q "tab:0,1,2" /tmp/kernel.out
           grep -q "isp:a,|,b,|,c" /tmp/kernel.out
           grep -q "grp:a,b|c" /tmp/kernel.out
