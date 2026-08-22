@@ -12,8 +12,8 @@ Edit this file when a decision or next-step order changes.
 - **Runtime**: custom native (LLVM). Native binaries, not a VM. No JVM. No Java interop. No classpath/Maven. Web is not a current target.
 - **UI**: a primary product path, not the only one (Flutter-shaped: GUI is first-class; so are CLI and server). One design language + Skia, as a **`Ui` effect** with Headless/Desktop/Mobile interpreters. Headless is a product runtime (agents, CI), not a test-only shim.
 - **Batteries**: the language and standard kits cover common app cases. No ecosystem library sprawl. No Maven, cats, or ZIO ports.
-- **Tooling**: one opinionated CLI (`scuzz`) — compile, link, assets, watch, packaging, format, check, and the whole verification stack. One formatter (`scuzz fmt`). One linter (`scuzz check`: format-verify + typecheck; further lints emit here; no `lint` subcommand). One testing strategy. Mutation, fuzzing, properties, simulation, and determinism are **first-class in the language and `scuzz`**. They are not a third-party harness. Compiler, CLI, and toolchain are **Rust** (`crates/compiler`, `crates/cli`).
-- **Language proof**: examples that exercise the surface (`examples/`), not a self-hosted compiler.
+- **Tooling**: one opinionated CLI (`scuzz`) — compile, link, assets, watch, packaging, format, check, and the whole verification stack. One formatter (`scuzz fmt`). One linter (`scuzz check`: format-verify + typecheck; further lints emit here; no `lint` subcommand). One testing strategy. Mutation, fuzzing, properties, simulation, and determinism are **first-class in the language and `scuzz`**. They are not a third-party harness. Compiler, CLI, and toolchain are **Rust** (`crates/compiler`, `crates/cli`). Later: `scuzz ide` launches a Scuzz `[ui]` app. That app is the dogfood IDE. It is not a self-hosted compiler. Prerequisites: [`gaps.md`](gaps.md).
+- **Language proof**: examples that exercise the surface (`examples/`), not a self-hosted compiler. The dogfood IDE is an app on that same surface.
 - **AI-Friendly**: Headless, hot reload, and debugging tools aid agents. Headless is a peer runtime. `scuzz watch` only rebuilds. `[ui] run --watch` is hot reload: it stamp-reloads Views, writes `build/debug.dump` (including `[taps]` frames / `[fields]` live strings / `[scrolls]` / `[last_hit]` after a TAP, live `View.bindText`, `[session]` kind/size/lifecycle/pumps, and `[heap]` alloc stats with kind census, delta, and `[live]` remaining blocks), and plays `build/inject.script` (`tap` / `xy` / `text` / `type` / `pump` / `scroll` / `backspace` / `dump` / `reload` / `quit` / `resetpeak`). `quit` stops the live session. `resetpeak` sets peak bytes to live and marks the heap delta. Panic prints remaining `[heap]` and `[live]` and writes `*.panic` when a dump path is set. Desktop/Mobile `scuzz run` records live OS input to `build/record.script` and writes `build/debug.dump`. Replay Headless with `scuzz run --headless --script build/record.script --dump build/debug.dump`. `[ui]` build emits `build/reload.dylib`. Stamp-watch `dlopen`s it so a source View-label change appears live (Signals stay). IO-only `run --watch` kills and reruns on source change. `scuzz lsp` wraps `scuzz check` JSON diagnostics. Language-server methods use the same parse (catalog: [Tooling](#tooling)).
 
 Upstream Scala Native is a *reference*, not a dependency. Divergence is intentional.
@@ -47,6 +47,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 - Not an sbt / Gradle / `pubspec` plugin DSL (`scuzz.toml` is data)
 - Not Flutter platform channels
 - Not a self-hosted compiler as a product bar. `scuzz` is Rust. Scuzz programs are apps and examples.
+- Not a second IDE typer. External editors speak `scuzz lsp`. The dogfood IDE is a Scuzz `[ui]` app that consumes `scuzz check` JSON and `scuzz lsp`. It does not grow a parallel analyze frontend.
 
 ## Success bars
 
@@ -68,6 +69,7 @@ One CLI. One typer. One formatter. One linter. One testing strategy. No second a
 - **Static hygiene** is `scuzz check` (the linter). `scuzz fmt` rewrites. No `lint` subcommand.
 - **Verification** is built into `scuzz` and the language (properties, sim overlays, deterministic TestRuntime, fuzz search, mutation). Not optional crates or Maven/npm test plugins.
 - **JSON diagnostics** (`scuzz check --message-format=json`) are the editor protocol. `scuzz lsp` wraps that, overlays open buffers, and serves hover, completion, definition, document symbols, references, rename, workspace symbols, signature help, document highlights, folding ranges, format, selection ranges, inlay hints, semantic tokens (full and range), code actions, pull diagnostics, call hierarchy, type hierarchy, type definition, implementation, code lenses, document links, and `workspace/executeCommand` (`scuzz.references`) from the same parse. Quickfix actions attach the check diagnostic they fix. `codeAction/resolve` fills the edit from action data. `workspace/diagnostic` lists every src file. `textDocument/declaration` jumps to the import that bound a name. `workspace/willRenameFiles` rewrites `import Module` and qualified `Module.name` when a `.scuzz` stem changes. Unknown-function diagnostics include a related "did you mean" location. Non-exhaustive match diagnostics include the enum def. Unused import, unused local, unused parameter, and unused private def diagnostics include a quickfix. Do not grow a second typer or schema.
+- **Dogfood IDE (later).** A Scuzz `[ui]` package is the in-tree IDE. `scuzz ide` on the one CLI launches that package with Desktop. Headless stays a peer (`scuzz ide --headless`). The app talks to `scuzz check` / `scuzz lsp` / `scuzz fmt` / `scuzz run` / `scuzz fuzz`. It does not reimplement them. `scuzz lsp` stays the protocol for external editors. Do not start the IDE package until the prerequisites in [`gaps.md`](gaps.md) close. Do not add Desktop-only editor behavior. Do not ship a second `scuzz-ide` binary.
 - **`scuzz.toml` is data** — package, path deps, `[ui]`. No plugin DSL. No `build.scuzz` hooks. Unknown keys rejected. Do not add `[plugins]`.
 - **Fingerprint** (incremental): miss → rebuild. The fingerprint includes compiler/runtime identity, native sources, target, clang version, Skia backend, and verify mode. Live (`fingerprint`) and verify (`fingerprint.verify`) share `build/` artifacts. A compile writes its mode file and deletes the sibling so a later switch rebuilds. No `scuzz clean` ritual.
 - **Native make:** quiet on success. A failed `make` prints the log. Clang compiles `.ll` without C `-I`. Link uses `-Wno-override-module` (IR has no host triple).
@@ -228,7 +230,7 @@ Corpus files stay generator-independent event lists. The observation surface is 
 
 ## Open work
 
-Unknowns and known gaps: [`gaps.md`](gaps.md). `scuzz package --target ios` and `--target android` drive the platform shells. `SCUZZ_SKIA=gpu` presents through OpenGL. `Sys.getenv` is sealed under TestRuntime. `Sys.alive` / `Sys.kill` use a fake process table. Device packaging and Impeller / Skia GPU raster stay deferred.
+Unknowns and known gaps: [`gaps.md`](gaps.md). `scuzz package --target ios` and `--target android` drive the platform shells. `SCUZZ_SKIA=gpu` presents through OpenGL. `Sys.getenv` is sealed under TestRuntime. `Sys.alive` / `Sys.kill` use a fake process table. Device packaging and Impeller / Skia GPU raster stay deferred. A Scuzz-written IDE is later. Close the IDE prerequisites in [`gaps.md`](gaps.md) before `scuzz ide`. It is not the next slice.
 
 Parameterized `property` decls take at most three `Int` / `String` / `Bool` params. Search shrinks a failing event prefix, then shrinks `drive` args. Simple Int `where` bounds clamp draws. A surviving mutant names the enclosing def, the mutation, and the nearest residual oracle.
 
@@ -260,9 +262,10 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-on
 | Concrete business facts have no home without unit tests | Concrete-fact properties are sanctioned oracles. Seed tables are direction |
 | “Almost Scala” confusion | Explicit non-goals. Language direction above. [guide.md](guide.md) |
 | Watch confused with hot reload | `scuzz watch` rebuilds. `[ui]` `run --watch` is hot reload (stamp-reload Views). IO-only `run --watch` kills and reruns |
-| IDE typer ≠ batch typer | One JSON schema. LSP wraps `scuzz check` |
+| IDE typer ≠ batch typer | One JSON schema. LSP wraps `scuzz check`. The dogfood IDE consumes that schema. It does not grow a second typer |
+| Dogfood IDE before editor primitives | Close IDE prerequisites in [`gaps.md`](gaps.md) first. Do not start `scuzz ide` on a one-line TextField |
 | Skia weight | pinned CPU prebuilt default. `sk_sw` opt-out |
-| Desktop-only features | Headless peer rule |
+| Desktop-only features | Headless peer rule. Editor keys, caret, and inject verbs share one input alphabet |
 | Treating UI as the only product | UI is a primary path (Flutter-shaped). CLI/server/desktop/mobile are peers |
 | GC vs frame budget | `pump` boundary. Measure |
 | Mobile packaging | Host Mobile peer first. Device toolchains later |

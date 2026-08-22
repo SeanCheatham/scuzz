@@ -25,13 +25,21 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 **Proof.** `SCUZZ_SKIA=gpu` renders `examples/counter` with unchanged structural goldens. Pixel goldens match `sk_sw` when `--pixels` is on. Unused GPU stubs do not close the proof.
 
+### 3. Dogfood IDE at editor scale
+
+**Status.** Direction is locked in [`vision.md`](vision.md#tooling): a Scuzz `[ui]` app is the in-tree IDE. `scuzz ide` launches it. The compiler and `scuzz lsp` stay Rust. Prerequisites below are not closed. Do not start the IDE package yet.
+
+**Unproven.** An editor-scale Scuzz app stays inside Headless-as-peer, one input alphabet, the `pump` frame budget, and `scuzz fuzz` as the verification strategy. A second typer, Desktop-only keys, or a View-per-token tree that Headless cannot dump breaks those locks.
+
+**Proof.** After the prerequisites close: one `[ui]` package opens a project, edits a buffer, shows `check` diagnostics, and saves. Headless goldens cover that path. `scuzz fuzz` drives caret, insert, and file-tree taps. Desktop and Headless share inject verbs.
+
 ## Known gaps
 
 ### Residuals
 
 - **Concurrency** — cooperative fibers only. Later: OS threads, supervision trees.
 - **Memory** — Last-use retain/release is locked in [`vision.md`](vision.md) GC. Values with no last-use stay allocated until panic sweep or process exit. No cycle collector.
-- **LSP / editor tooling** — `scuzz lsp` wraps `check`. JSON diagnostics stay the single schema. Method catalog: [`vision.md`](vision.md#tooling).
+- **LSP for external editors** — `scuzz lsp` wraps `check`. JSON diagnostics stay the single schema. Method catalog: [`vision.md`](vision.md#tooling). The dogfood IDE consumes that schema. It does not replace it. Prerequisites: [Dogfood IDE](#dogfood-ide).
 
 ### Dependency forms beyond `path`
 
@@ -47,3 +55,122 @@ Path deps only (`manifest.rs`). Git, versioned, and hosted artifacts are directi
 - **Web apps** — not a current target.
 - **Fault injection and schedule exploration** — TestRuntime fakes can fail the Nth operation and drop stub responses. PCT-style schedule exploration bounds race depth for fiber interleavings. See [`vision.md`](vision.md#open-work).
 - **Oracle idioms in `guide.md`** — model agreement, metamorphic relations, and concrete-fact properties ride the existing property surface. The guide does not yet document them.
+
+### Dogfood IDE
+
+A Scuzz `[ui]` package is the in-tree IDE. `scuzz ide` on the one CLI launches it with Desktop. Headless stays a peer. The app consumes `scuzz check`, `scuzz lsp`, `scuzz fmt`, `scuzz run`, and `scuzz fuzz`. It does not reimplement the compiler. Locks: [`vision.md`](vision.md#tooling).
+
+Close every prerequisite in this section before that package and before `scuzz ide`. An implementation that invents a missing primitive at IDE time is a miss of this list. Close groups in order: input, editor widget, kits, chrome, analyze, Headless, then the launcher.
+
+#### 1. Input and embedder
+
+Today Desktop (X11 and Cocoa) maps `q` / `Q` / Escape to quit even when a TextField is focused. Key insert is ASCII 32–127. Backspace drops one raw byte. There is no Enter, Tab, arrow, Home, End, Page, Delete, or modifier chord. `SZ_INPUT_TEXT_EDIT` appends to the focused field or backspaces the last byte. `SZ_INPUT_KEYBOARD` is mobile soft-keyboard show/hide, not a key. Pointer move fires while the button is down. There is no hover-without-button and no secondary click. Clipboard is absent. OS IME candidate windows stay deferred (see above).
+
+Close:
+
+- Quit is window close (and Headless `quit`). A focused editor keeps `q` and Escape.
+- One key event on Desktop, Mobile, Headless inject, and `record.script`. Payload: key, UTF-8 insert text, Shift / Ctrl / Cmd / Alt. Cover Enter, Tab, arrows, Home, End, PageUp, PageDown, Delete, Backspace.
+- Backspace and arrows walk UTF-8 code points (or graphemes), not raw bytes.
+- Insert is UTF-8, not Latin-1.
+- Click-to-caret uses the pointer `(x, y)` on the editor. Today a TextField tap only focuses. The caret stays at the end.
+- Pointer hover without a button (hover docs, tooltips). Secondary click (context menu).
+- Blessed clipboard: copy, cut, paste. Headless inject must drive paste. Do not make clipboard Desktop-only.
+- Repeat keys and IME compose. IME UI placement can stay deferred if UTF-8 insert already works.
+
+#### 2. Editor widget
+
+Today `View.textField` is one line (`control_h`). Insert appends. Backspace deletes the last byte. Layout and paint copy the value through a 256-byte stack buffer. Caret metrics use that buffer. `View.text` wraps at newlines for display, but it is not editable. `View.textColor` wraps a whole child. A line of tokens as many Views is not an editor. `View.each` rebuilds every child. Default each-row text also caps at 256 bytes. Collect of text fields caps at 64. `sk_sw` measure is monospace. The pinned Skia prebuilt is proportional.
+
+Close:
+
+- One multiline editor View (extend TextField or add a code editor). Headless is a peer.
+- Caret as a byte (or grapheme) offset. Click, arrows, Home, End.
+- Selection: Shift+arrows and pointer drag. Replace and delete the selection.
+- Insert and delete at the caret, including newline and tab / soft-tab.
+- Undo and redo.
+- Scroll the viewport to the caret. Horizontal scroll for long lines. Vertical scroll for the file.
+- Paint and layout the full buffer. No 256-byte stack cap.
+- Monospace typeface on every presenter (`sk_sw`, Skia CPU, GPU present). `View.fontSize` stays. The editor does not use the proportional UI font.
+- Viewport virtualization. Do not layout one View per line for a large file. Do not dump one a11y node per token.
+- Gutter: line numbers and diagnostic marks on the editor, not a second dumped tree.
+- Headless dump: buffer text, caret, selection, and diagnostics. Keep `[fields]` / inject indices stable. Do not golden a token View forest.
+- Syntax highlight inside that widget (LSP semantic tokens or a lexer). Do not require a CustomPaint kit in Scuzz source for the first editor.
+
+Folding ranges, inlay hints, and bracket match consume LSP data that already exists. They need the editor viewport first. Close them before a “real” IDE, after the caret and dump land.
+
+#### 3. Kits the IDE process needs
+
+Today there is no JSON kit. `Sys.exec` returns an exit code. It does not capture stdout or stderr. `Sys.spawn` returns a pid. It has no child stdin/stdout pipes. `Sys.exec` / `Sys.spawn` fail under TestRuntime. `Fs.list` is one directory of names (no file vs directory). There is no `Fs.delete`, `Fs.rename`, `Fs.exists`, `Fs.watch`, path join, dirname, or basename. `Fs.read` / `Fs.write` / `Fs.mkdirs` / `Fs.canonicalize` exist. `Sys.args` exists. `Clock` exists (poll is possible; there is no fs watch).
+
+Close:
+
+- JSON parse and stringify for `check --message-format=json` and, later, LSP JSON-RPC.
+- Capture stdout and stderr from `Sys.exec` (or a sibling that returns `(code, stdout, stderr)`). The IDE prints `fmt` / `run` / `fuzz` output.
+- Bidirectional stdio to a child before an in-process LSP client. Until then the IDE drives analyze through files: write the buffer, run `scuzz check --message-format=json` with stdout captured or redirected, parse JSON. That path matches the one editor protocol. Do not add a second typer.
+- `Fs.list` reports file vs directory. Walk a tree (recursive list or a walk kit).
+- `Fs.delete`, `Fs.rename`, `Fs.exists`. Rename must stay compatible with `workspace/willRenameFiles`.
+- Path join, dirname, basename (blessed, not ad-hoc `Str` concat).
+- File watch (`Fs.watch`) or a documented poll on `Clock` plus `Fs` that Headless can fake.
+- TestRuntime story for check-from-IDE: a `*.scuzz_sim` overlay, or a fake that writes JSON onto the mem FS. Live `Sys.exec` must not be the only analyze path. Fuzz stays hermetic.
+
+#### 4. Chrome around the editor
+
+Today `examples/studio` shows pages, lists, and file load/save. `View.stack` / `View.positioned` exist. `View.tooltip` sizes to the child and does not show on hover. Only TextField holds focus. Session title is `SzUiConfig.title` at start. There is no splitter, tab strip, overlay popup, or app-level key binding.
+
+Close:
+
+- Focus model: editor, file tree, diagnostics list, and popups. Keys go to the focused surface.
+- File tree from `Fs.list` (files vs directories, expand/collapse).
+- Open buffers: tabs, dirty flag, save / save-all via `Fs.write`.
+- Split panes with a draggable splitter (Row/Column alone is not a resize handle).
+- Overlay popups on `View.stack`: completion, hover, command palette, context menu. Key routing and dismiss. Headless inject opens and selects them.
+- Diagnostics list from check JSON. Jump to file + caret.
+- Find and replace in the buffer (needs selection).
+- App-level chords once keys exist: save, find, go-to-definition, format, command palette. Same chords on Headless inject.
+- Output panel for captured `run` / `fuzz` / `fmt` text.
+- Window title that follows the open file and dirty state.
+- Project root from `Sys.args` (what `scuzz ide <path>` passes).
+
+In-app open-folder UI is enough. Native OS file dialogs, native menus, and multi-window stay later.
+
+#### 5. Analyze consumption
+
+`scuzz lsp` already serves hover, completion, definition, diagnostics, format, rename, semantic tokens, inlay hints, folding, code actions, and related methods. The IDE must consume them. It must not parse Scuzz in app code.
+
+Close:
+
+- Map LSP (or check JSON) line/character ranges onto editor offsets.
+- Overlay unsaved buffers into check/lsp the same way `scuzz lsp` overlays `didChange`.
+- Wire: diagnostics, go-to-definition, completion popup, hover overlay, format, rename, quickfix, semantic tokens into the editor widget.
+- First slice may use `check` JSON only. Host `scuzz lsp` over stdio after JSON and child pipes close. Do not skip diagnostics.
+
+#### 6. Headless and verification
+
+Today inject verbs are `tap` / `xy` / `text` / `type` / `pump` / `scroll` / `backspace` / `dump` / `reload` / `quit` / `resetpeak`. Fuzz composes taps, fields, scrolls, and drivers. A whole-file a11y dump of an editor is the wrong oracle.
+
+Close:
+
+- Inject verbs for caret, selection, key-with-modifiers, and paste. Record those verbs from Desktop.
+- Structural dump fields for buffer, caret, selection, and diagnostics. Properties talk to that surface (`Property.signalStr`, `Property.a11yHas`, or a dedicated editor observation).
+- Every new editor or chrome widget has a Headless path. No Desktop-only shortcut.
+- IDE package uses in-source properties, drivers, goldens, and `scuzz fuzz`. TestRuntime fakes cover check/fs as in group 3.
+
+#### 7. CLI and ship
+
+Today `scuzz run examples/studio` opens Desktop when `[ui].default_runtime = "desktop"`. There is no `ide` subcommand. `install.sh` already ships the CLI plus SDK.
+
+Close:
+
+- `scuzz ide [path]` launches the bundled IDE package with Desktop. `--headless` stays.
+- Bundle the package in the SDK. One CLI. No `scuzz-ide` binary. No editor widgets in the Rust CLI.
+- Pass the project path through `Sys.args`.
+
+#### Not a prerequisite for the first real IDE
+
+Leave these until after `scuzz ide` exists. Do not block the list above on them:
+
+- Multi-window, native menus, native file picker, drag-and-drop from the OS
+- Multi-cursor, minimap, Git UI, debugger, plugin host
+- Custom canvas kit from Scuzz source
+- Windows desktop embedder, web target
+- Flutter DevTools / VM patching (explicit non-goal)
