@@ -3,6 +3,7 @@
 
 #include <arpa/inet.h>
 #include <assert.h>
+#include <errno.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <signal.h>
@@ -314,6 +315,30 @@ static SzIo *serve_padded_ok(void *path, void *env) {
   s = sz_string_from_bytes(blob, N);
   free(blob);
   return pure_drop(s);
+}
+
+enum { SERVE_LEAK_N = 10000 };
+static int g_serve_rounds;
+static size_t g_serve_bytes[2];
+static size_t g_serve_count[2];
+static size_t g_serve_raw[2];
+static size_t g_serve_io[2];
+
+static SzIo *serve_leak_ok(void *path, void *env) {
+  int slot = -1;
+  g_serve_rounds++;
+  if (g_serve_rounds == 8)
+    slot = 0;
+  else if (g_serve_rounds == SERVE_LEAK_N)
+    slot = 1;
+  if (slot >= 0) {
+    sz_alloc_stats(&g_serve_bytes[slot], &g_serve_count[slot]);
+    sz_alloc_kind_stats(SZ_RC_RAW, NULL, &g_serve_raw[slot]);
+    sz_alloc_kind_stats(SZ_RC_IO, NULL, &g_serve_io[slot]);
+  }
+  if (g_serve_rounds < SERVE_LEAK_N)
+    sz_testrt_net_queue_request("/x");
+  return serve_path_ok(path, env);
 }
 
 static void *live_get_client(void *arg) {
@@ -1203,6 +1228,139 @@ static void *ipv4_http_rst(void *arg) {
   setsockopt(cfd, SOL_SOCKET, SO_LINGER, &lin, sizeof lin);
   close(cfd);
   return (void *)1;
+}
+
+static char g_http_captured[2048];
+
+static void *capture_http_req4(void *arg) {
+  int port = *(int *)arg;
+  int fd, cfd;
+  int one = 1;
+  struct sockaddr_in addr;
+  const char *resp = "HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nok";
+  ssize_t n;
+  memset(g_http_captured, 0, sizeof g_http_captured);
+  fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0)
+    return NULL;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+  memset(&addr, 0, sizeof addr);
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)port);
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  if (bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0 || listen(fd, 1) != 0) {
+    close(fd);
+    return NULL;
+  }
+  cfd = accept(fd, NULL, NULL);
+  close(fd);
+  if (cfd < 0)
+    return NULL;
+  n = read(cfd, g_http_captured, sizeof g_http_captured - 1);
+  if (n > 0)
+    g_http_captured[n] = '\0';
+  if (write(cfd, resp, strlen(resp)) < 0) {
+    close(cfd);
+    return NULL;
+  }
+  close(cfd);
+  return (void *)1;
+}
+
+static void *capture_http_req6(void *arg) {
+  int port = *(int *)arg;
+  int fd, cfd;
+  int one = 1;
+  struct sockaddr_in6 addr;
+  const char *resp = "HTTP/1.0 200 OK\r\nContent-Length: 2\r\n\r\nok";
+  ssize_t n;
+  memset(g_http_captured, 0, sizeof g_http_captured);
+  fd = socket(AF_INET6, SOCK_STREAM, 0);
+  if (fd < 0)
+    return NULL;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+#ifdef IPV6_V6ONLY
+  setsockopt(fd, IPPROTO_IPV6, IPV6_V6ONLY, &one, sizeof one);
+#endif
+  memset(&addr, 0, sizeof addr);
+  addr.sin6_family = AF_INET6;
+  addr.sin6_port = htons((uint16_t)port);
+  if (inet_pton(AF_INET6, "::1", &addr.sin6_addr) != 1 ||
+      bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0 || listen(fd, 1) != 0) {
+    close(fd);
+    return NULL;
+  }
+  cfd = accept(fd, NULL, NULL);
+  close(fd);
+  if (cfd < 0)
+    return NULL;
+  n = read(cfd, g_http_captured, sizeof g_http_captured - 1);
+  if (n > 0)
+    g_http_captured[n] = '\0';
+  if (write(cfd, resp, strlen(resp)) < 0) {
+    close(cfd);
+    return NULL;
+  }
+  close(cfd);
+  return (void *)1;
+}
+
+typedef struct HttpRespArg {
+  int port;
+  const char *resp;
+} HttpRespArg;
+
+static void *ipv4_http_resp(void *arg) {
+  HttpRespArg *a = (HttpRespArg *)arg;
+  int fd, cfd;
+  int one = 1;
+  struct sockaddr_in addr;
+  char buf[512];
+  ssize_t n;
+  fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0)
+    return NULL;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+  memset(&addr, 0, sizeof addr);
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)a->port);
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  if (bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0 || listen(fd, 1) != 0) {
+    close(fd);
+    return NULL;
+  }
+  cfd = accept(fd, NULL, NULL);
+  close(fd);
+  if (cfd < 0)
+    return NULL;
+  n = read(cfd, buf, sizeof buf);
+  (void)n;
+  if (write(cfd, a->resp, strlen(a->resp)) < 0) {
+    close(cfd);
+    return NULL;
+  }
+  close(cfd);
+  return (void *)1;
+}
+
+static int try_bind_v4(int port) {
+  int fd;
+  int one = 1;
+  struct sockaddr_in addr;
+  fd = socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0)
+    return -1;
+  setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+  memset(&addr, 0, sizeof addr);
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons((uint16_t)port);
+  addr.sin_addr.s_addr = inet_addr("127.0.0.1");
+  if (bind(fd, (struct sockaddr *)&addr, sizeof addr) != 0) {
+    close(fd);
+    return -1;
+  }
+  close(fd);
+  return 0;
 }
 
 static void *stdin_late_write(void *arg) {
@@ -4183,6 +4341,40 @@ int main(void) {
     assert(r.ok);
     assert(strcmp(sz_testrt_net_last_serve_body(), "ok:/b") == 0);
 
+    /* Persistent serve: many rounds must not grow the continuation stack. */
+    g_serve_rounds = 0;
+    memset(g_serve_bytes, 0, sizeof g_serve_bytes);
+    memset(g_serve_count, 0, sizeof g_serve_count);
+    memset(g_serve_raw, 0, sizeof g_serve_raw);
+    memset(g_serve_io, 0, sizeof g_serve_io);
+    sz_testrt_net_set_last_serve_body(NULL);
+    sz_testrt_net_inject_request("/x");
+    r = sz_io_unsafe_run(sz_net_serve(8080, serve_leak_ok, NULL));
+    assert(r.ok);
+    assert(g_serve_rounds == SERVE_LEAK_N);
+    assert(g_serve_count[1] <= g_serve_count[0] + 2);
+    assert(g_serve_raw[1] <= g_serve_raw[0] + 2);
+    assert(g_serve_io[1] <= g_serve_io[0] + 2);
+    assert(g_serve_bytes[1] <= g_serve_bytes[0] + 256);
+    sz_testrt_net_set_last_serve_body(NULL);
+
+    sz_testrt_net_inject_request("/");
+    r = sz_io_unsafe_run(sz_net_serve((int64_t)((1ULL << 32) | 8080),
+                                     serve_path_ok, NULL));
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "port must be 1..65535") !=
+               NULL);
+    sz_error_free(r.error);
+
+    sz_testrt_net_inject_request("/");
+    r = sz_io_unsafe_run(sz_net_serve(-4294967216LL, serve_path_ok, NULL));
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "port must be 1..65535") !=
+               NULL);
+    sz_error_free(r.error);
+
     /* Console: argv override, stdin feed, println capture (+ echo) */
     {
       char *argv[] = {"x", "y"};
@@ -4920,6 +5112,74 @@ int main(void) {
     assert(strcmp(sz_string_cstr((SzString *)pair->right), "ok:/x") == 0);
   }
 
+  /* Live httpGet Host includes a non-default port (RFC 9110). */
+  {
+    pthread_t th;
+    int port = 18620;
+    char url[64];
+    char want[64];
+    snprintf(url, sizeof url, "http://127.0.0.1:%d/x", port);
+    snprintf(want, sizeof want, "Host: 127.0.0.1:%d", port);
+    pthread_create(&th, NULL, capture_http_req4, &port);
+    r = sz_io_unsafe_run(fm_drop(sz_io_sleep_ms(30), after_sleep_http,
+                                      sz_string_from_cstr(url)));
+    pthread_join(th, NULL);
+    assert(r.ok);
+    sz_release(r.value);
+    assert(strstr(g_http_captured, want) != NULL);
+    assert(strstr(g_http_captured, "Host: 127.0.0.1\r\n") == NULL);
+  }
+
+  /* Live httpGet Host for IPv6 includes the non-default port in brackets. */
+  {
+    pthread_t th;
+    int port = 18621;
+    char url[64];
+    char want[64];
+    snprintf(url, sizeof url, "http://[::1]:%d/x", port);
+    snprintf(want, sizeof want, "Host: [::1]:%d", port);
+    pthread_create(&th, NULL, capture_http_req6, &port);
+    r = sz_io_unsafe_run(fm_drop(sz_io_sleep_ms(30), after_sleep_http,
+                                      sz_string_from_cstr(url)));
+    pthread_join(th, NULL);
+    assert(r.ok);
+    sz_release(r.value);
+    assert(strstr(g_http_captured, want) != NULL);
+  }
+
+  /* Port 80 Host is host-only. Bind 80 is not required. */
+  {
+    char host[64];
+    sz_net_test_http_host_header("127.0.0.1", 80, host, sizeof host);
+    assert(strcmp(host, "127.0.0.1") == 0);
+    sz_net_test_http_host_header("127.0.0.1", 18620, host, sizeof host);
+    assert(strcmp(host, "127.0.0.1:18620") == 0);
+    sz_net_test_http_host_header("::1", 80, host, sizeof host);
+    assert(strcmp(host, "[::1]") == 0);
+    sz_net_test_http_host_header("::1", 18621, host, sizeof host);
+    assert(strcmp(host, "[::1]:18621") == 0);
+  }
+
+  /* Live Net.serve: a wide port that truncates to 18622 must not bind 18622. */
+  {
+    int port = 18622;
+    r = sz_io_unsafe_run(
+        sz_net_serve((int64_t)((1ULL << 32) | (unsigned)port), serve_path_ok,
+                     NULL));
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "port must be 1..65535") !=
+               NULL);
+    sz_error_free(r.error);
+    assert(try_bind_v4(port) == 0);
+    r = sz_io_unsafe_run(sz_net_serve(-4294967216LL, serve_path_ok, NULL));
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "port must be 1..65535") !=
+               NULL);
+    sz_error_free(r.error);
+  }
+
   /* v4 listen occupied: persistent serve stays on ::1 for two GETs. */
   {
     int port = 18603;
@@ -5405,6 +5665,46 @@ int main(void) {
     assert(strcmp(sz_string_cstr((SzString *)r.value), "ok:/x") == 0);
     sz_release(r.value);
     assert(t1 - t0 < 900);
+  }
+
+  /* Duplicate Content-Length is malformed. */
+  {
+    pthread_t th;
+    int port = 18623;
+    char url[64];
+    HttpRespArg arg;
+    arg.port = port;
+    arg.resp = "HTTP/1.0 200 OK\r\nContent-Length: 5\r\nContent-Length: 5\r\n\r\nok:/x";
+    snprintf(url, sizeof url, "http://127.0.0.1:%d/x", port);
+    pthread_create(&th, NULL, ipv4_http_resp, &arg);
+    r = sz_io_unsafe_run(fm_drop(sz_io_sleep_ms(30), after_sleep_http,
+                                      sz_string_from_cstr(url)));
+    pthread_join(th, NULL);
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "malformed response") !=
+               NULL);
+    sz_error_free(r.error);
+  }
+
+  /* Transfer-Encoding with OWS around the name is still rejected. */
+  {
+    pthread_t th;
+    int port = 18624;
+    char url[64];
+    HttpRespArg arg;
+    arg.port = port;
+    arg.resp = "HTTP/1.0 200 OK\r\nTransfer-Encoding : chunked\r\n\r\n"
+               "5\r\nok:/x\r\n0\r\n\r\n";
+    snprintf(url, sizeof url, "http://127.0.0.1:%d/x", port);
+    pthread_create(&th, NULL, ipv4_http_resp, &arg);
+    r = sz_io_unsafe_run(fm_drop(sz_io_sleep_ms(30), after_sleep_http,
+                                      sz_string_from_cstr(url)));
+    pthread_join(th, NULL);
+    assert(!r.ok);
+    assert(r.error &&
+           strstr(sz_string_cstr(r.error->message), "chunked") != NULL);
+    sz_error_free(r.error);
   }
 
   /* Non-2xx fails. */

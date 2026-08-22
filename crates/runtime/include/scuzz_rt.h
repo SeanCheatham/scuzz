@@ -756,6 +756,9 @@ SzIo *sz_net_serve_once(int64_t port, SzCont handler, void *env); /* IO[Unit]; o
 SzIo *sz_net_serve(int64_t port, SzCont handler, void *env); /* IO[Unit]; keep listen; drop bad clients/handlers */
 /* Test-only: UDP nameserver for live httpGet DNS. NULL ip restores /etc/resolv.conf. */
 void sz_net_test_set_nameserver(const char *ipv4, int port);
+/* Test-only: Host header value for httpGet (RFC 9110). */
+void sz_net_test_http_host_header(const char *host, int port, char *out,
+                                 size_t cap);
 
 /* TestRuntime — fake interpreters for deterministic scuzz test / fuzz */
 void sz_testrt_install(void); /* fake clock+rng+mem FS+stub net+sys/console */
