@@ -9,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <stddef.h>
 #include <poll.h>
 #include <sys/socket.h>
 #include <time.h>
@@ -240,6 +241,7 @@ typedef struct GetSt {
   size_t req_len;
   size_t req_off;
   char *acc;
+  size_t acc_cap;
   size_t total;
 } GetSt;
 
@@ -641,6 +643,7 @@ static void get_free(GetSt *st) {
   st->req = NULL;
   sz_free(st->acc);
   st->acc = NULL;
+  st->acc_cap = 0;
   sz_release(st->url);
   st->url = NULL;
 }
@@ -846,14 +849,36 @@ static int tcp_begin(const struct sockaddr *sa, socklen_t len) {
   return fd;
 }
 
+/* RFC 9110: omit the port when it is the default for the scheme (80). */
+static void http_fmt_hosthdr(char *dst, size_t cap, const char *host, int port) {
+  int v6 = host && strchr(host, ':') != NULL;
+  if (!dst || cap == 0)
+    return;
+  if (!host)
+    host = "";
+  if (port != 80) {
+    if (v6)
+      snprintf(dst, cap, "[%s]:%d", host, port);
+    else
+      snprintf(dst, cap, "%s:%d", host, port);
+    return;
+  }
+  if (v6)
+    snprintf(dst, cap, "[%s]", host);
+  else
+    snprintf(dst, cap, "%s", host);
+}
+
+void sz_net_test_http_host_header(const char *host, int port, char *out,
+                                 size_t cap) {
+  http_fmt_hosthdr(out, cap, host, port);
+}
+
 static void get_build_req(GetSt *st) {
   char req[2048];
   char hosthdr[300];
   size_t nreq;
-  if (strchr(st->host, ':'))
-    snprintf(hosthdr, sizeof hosthdr, "[%s]", st->host);
-  else
-    snprintf(hosthdr, sizeof hosthdr, "%s", st->host);
+  http_fmt_hosthdr(hosthdr, sizeof hosthdr, st->host, st->http_port);
   nreq = (size_t)snprintf(req, sizeof req,
                           "GET %s HTTP/1.0\r\nHost: %s\r\nConnection: close\r\n\r\n",
                           st->path, hosthdr);
@@ -865,6 +890,7 @@ static void get_build_req(GetSt *st) {
   st->req_off = 0;
   st->acc = (char *)sz_alloc(1);
   st->acc[0] = '\0';
+  st->acc_cap = 1;
   st->total = 0;
 }
 
@@ -1098,8 +1124,28 @@ static int http_status_code(const char *acc, size_t hdr_len) {
   return (acc[i] - '0') * 100 + (acc[i + 1] - '0') * 10 + (acc[i + 2] - '0');
 }
 
+/* Field name match. Strip OWS around the name so `Transfer-Encoding :` still
+ * matches. */
+static int http_field_name_eq(const char *acc, size_t start, size_t colon,
+                              const char *name) {
+  size_t nlen;
+  size_t a;
+  size_t b;
+  if (!acc || !name || colon < start)
+    return 0;
+  nlen = strlen(name);
+  a = start;
+  b = colon;
+  while (a < b && (acc[a] == ' ' || acc[a] == '\t'))
+    a++;
+  while (b > a && (acc[b - 1] == ' ' || acc[b - 1] == '\t'))
+    b--;
+  if ((size_t)(b - a) != nlen)
+    return 0;
+  return ascii_ieq(acc + a, name, nlen);
+}
+
 static int http_header_present(const char *acc, size_t hdr_len, const char *name) {
-  size_t nlen = strlen(name);
   size_t i = 0;
   while (i + 1 < hdr_len && !(acc[i] == '\r' && acc[i + 1] == '\n'))
     i++;
@@ -1114,8 +1160,7 @@ static int http_header_present(const char *acc, size_t hdr_len, const char *name
     colon = start;
     while (colon < i && acc[colon] != ':')
       colon++;
-    if (colon < i && (size_t)(colon - start) == nlen &&
-        ascii_ieq(acc + start, name, nlen))
+    if (colon < i && http_field_name_eq(acc, start, colon, name))
       return 1;
     i += 2;
   }
@@ -1125,7 +1170,7 @@ static int http_header_present(const char *acc, size_t hdr_len, const char *name
 static int http_content_length(const char *acc, size_t hdr_len, size_t *out) {
   size_t i = 0;
   const char *name = "Content-Length";
-  size_t nlen = 14;
+  int found = 0;
   while (i + 1 < hdr_len && !(acc[i] == '\r' && acc[i + 1] == '\n'))
     i++;
   i += 2;
@@ -1139,11 +1184,12 @@ static int http_content_length(const char *acc, size_t hdr_len, size_t *out) {
     colon = start;
     while (colon < i && acc[colon] != ':')
       colon++;
-    if (colon < i && (size_t)(colon - start) == nlen &&
-        ascii_ieq(acc + start, name, nlen)) {
+    if (colon < i && http_field_name_eq(acc, start, colon, name)) {
       unsigned long v = 0;
       size_t p = colon + 1;
       int digits = 0;
+      if (found)
+        return 0;
       while (p < i && (acc[p] == ' ' || acc[p] == '\t'))
         p++;
       if (p >= i || acc[p] < '0' || acc[p] > '9')
@@ -1160,11 +1206,11 @@ static int http_content_length(const char *acc, size_t hdr_len, size_t *out) {
       if (p != i)
         return 0;
       *out = (size_t)v;
-      return 1;
+      found = 1;
     }
     i += 2;
   }
-  return 0;
+  return found;
 }
 
 /* 1 = r is final (ok or err). 0 = retry. eof = connection closed. */
@@ -1263,20 +1309,37 @@ static void *get_read(void *env) {
   }
   if (n > 0) {
     size_t add = (size_t)n;
-    char *nacc;
+    size_t need;
     if (st->total >= HE_BODY_MAX || add > HE_BODY_MAX - st->total) {
       r->is_err = 1;
       r->as.err = sz_error_new(6, "Net.httpGet: response too large");
       return r;
     }
-    nacc = (char *)sz_alloc(st->total + add + 1);
-    if (st->total)
-      memcpy(nacc, st->acc, st->total);
-    memcpy(nacc + st->total, buf, add);
-    st->total += add;
-    nacc[st->total] = '\0';
-    sz_free(st->acc);
-    st->acc = nacc;
+    need = st->total + add + 1;
+    if (need > st->acc_cap) {
+      size_t cap = st->acc_cap ? st->acc_cap : 1;
+      char *nacc;
+      while (cap < need) {
+        if (cap > SIZE_MAX / 2) {
+          cap = need;
+          break;
+        }
+        cap *= 2;
+      }
+      nacc = (char *)sz_alloc(cap);
+      if (st->total)
+        memcpy(nacc, st->acc, st->total);
+      memcpy(nacc + st->total, buf, add);
+      st->total += add;
+      nacc[st->total] = '\0';
+      sz_free(st->acc);
+      st->acc = nacc;
+      st->acc_cap = cap;
+    } else {
+      memcpy(st->acc + st->total, buf, add);
+      st->total += add;
+      st->acc[st->total] = '\0';
+    }
     if (get_try_complete(st, r, 0))
       return r;
     r->retry = 1;
@@ -1496,8 +1559,9 @@ SzIo *sz_net_http_get(SzString *url) {
  * on the bound loopback match. TestRuntime injects paths and
  * skips sockets. Request read and response write each wait at most 1000ms.
  * A timed-out, malformed, reset, or handler-failed client is dropped.
- * Persistent serve accepts the next. Error code 6. serveOnce is one request.
- * serve keeps the
+ * Persistent serve accepts the next. One request is one round that always
+ * completes; the next round is built outside handleErrorWith. Error code 6.
+ * serveOnce is one request. serve keeps the
  * listen sockets (n<=0 forever live, or until the TestRuntime queue is empty). */
 
 typedef struct ServeSt {
@@ -1622,21 +1686,26 @@ static int serve_bind_v6(int port) {
   return fd;
 }
 
+static int serve_accept_wait(int err) {
+  return err == EAGAIN || err == EWOULDBLOCK || err == ECONNABORTED ||
+         err == EMFILE || err == ENFILE || err == EINTR;
+}
+
 static void *serve_ensure_listen(void *env) {
   ServeSt *st = (ServeSt *)env;
   NetResult *r = (NetResult *)rc_box_zero(sizeof(NetResult));
   int port;
 
+  if (st->port < 1 || st->port > 65535) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(6, "Net.serve: port must be 1..65535");
+    return r;
+  }
   if (sz_testrt_net_is_fake()) {
     r->is_err = 0;
     return r;
   }
   port = (int)st->port;
-  if (port <= 0 || port > 65535) {
-    r->is_err = 1;
-    r->as.err = sz_error_new(6, "Net.serve: port must be 1..65535");
-    return r;
-  }
   if (st->listen_fd >= 0 || st->listen6_fd >= 0) {
     r->is_err = 0;
     return r;
@@ -1687,11 +1756,11 @@ static void *serve_accept(void *env) {
     return r;
   }
   conn = fd >= 0 ? accept(fd, NULL, NULL) : -1;
-  if (conn < 0 && (fd < 0 || errno == EAGAIN || errno == EWOULDBLOCK) &&
-      st->listen6_fd >= 0)
+  if (conn < 0 && st->listen6_fd >= 0 &&
+      (fd < 0 || serve_accept_wait(errno)))
     conn = accept(st->listen6_fd, NULL, NULL);
   if (conn < 0) {
-    if (errno == EAGAIN || errno == EWOULDBLOCK) {
+    if (serve_accept_wait(errno)) {
       r->retry = 1;
       return r;
     }
@@ -1845,11 +1914,10 @@ static void *serve_write_close(void *env) {
   return r;
 }
 
-static SzIo *serve_round(ServeSt *st);
-
 static SzIo *serve_poll_then_accept(void *value, void *env);
 static SzIo *serve_poll_conn_read(void *value, void *env);
 static SzIo *serve_poll_conn_write(void *value, void *env);
+static SzIo *serve_after_path(void *path, void *env);
 
 static SzIo *serve_unwrap_accept(void *value, void *env) {
   ServeSt *st = (ServeSt *)env;
@@ -1861,12 +1929,20 @@ static SzIo *serve_unwrap_accept(void *value, void *env) {
   return unwrap_net(value, NULL);
 }
 
+/* Drop is success of this round. serveOnce still fails. Do not start a nested
+ * server here: that would leave serve_after_path on the stack. */
 static SzIo *serve_drop_conn(ServeSt *st, SzError *err) {
   serve_close_conn(st);
   if (st->left == 1)
     return fail_drop(err);
   sz_error_free(err);
-  return serve_round(st);
+  return pure_drop(NULL);
+}
+
+static SzIo *serve_path_from_net(void *value, void *env) {
+  ServeSt *st = (ServeSt *)env;
+  SzIo *io = unwrap_net(value, NULL);
+  return fm_drop(io, serve_after_path, st);
 }
 
 static SzIo *serve_unwrap_read(void *value, void *env) {
@@ -1882,7 +1958,7 @@ static SzIo *serve_unwrap_read(void *value, void *env) {
     sz_release(r);
     return serve_drop_conn(st, err);
   }
-  return unwrap_net(value, NULL);
+  return serve_path_from_net(value, st);
 }
 
 static SzIo *serve_unwrap_write(void *value, void *env) {
@@ -1964,7 +2040,7 @@ static SzIo *serve_after_listen(void *value, void *env) {
   SzIo *io;
   (void)value;
   if (sz_testrt_net_is_fake())
-    return fm_drop(sz_io_delay(serve_accept, st), unwrap_net, NULL);
+    return fm_drop(sz_io_delay(serve_accept, st), serve_path_from_net, st);
   io = serve_poll_then_accept(NULL, st);
   return fm_drop(io, serve_poll_conn_read, st);
 }
@@ -1974,16 +2050,7 @@ static SzIo *serve_after_write(void *value, void *env) {
   (void)value;
   if (st->left > 0)
     st->left--;
-  if (st->left == 0) {
-    serve_free(st);
-    return pure_drop(NULL);
-  }
-  if (st->left < 0 && sz_testrt_net_is_fake() &&
-      sz_testrt_net_serve_pending() <= 0) {
-    serve_free(st);
-    return pure_drop(NULL);
-  }
-  return serve_round(st);
+  return pure_drop(NULL);
 }
 
 static SzIo *serve_after_body(void *body, void *env) {
@@ -2002,23 +2069,43 @@ static SzIo *serve_on_handler_err(SzError *err, void *env) {
 
 static SzIo *serve_after_path(void *path, void *env) {
   ServeSt *st = (ServeSt *)env;
-  SzIo *io = st->handler(path, st->henv);
+  SzIo *io;
+  if (!path)
+    return pure_drop(NULL);
+  io = st->handler(path, st->henv);
   sz_release(path);
   io = fm_drop(io, serve_after_body, st);
   io = fm_drop(io, serve_after_write, st);
   return handle_drop(io, serve_on_handler_err, st);
 }
 
-static SzIo *serve_round(ServeSt *st) {
-  SzIo *prog;
+static SzIo *serve_one(ServeSt *st) {
+  SzIo *prog = fm_drop(sz_io_delay(serve_ensure_listen, st), unwrap_net, NULL);
+  return fm_drop(prog, serve_after_listen, st);
+}
+
+static int serve_should_stop(ServeSt *st) {
+  if (st->left == 0)
+    return 1;
   if (st->left < 0 && sz_testrt_net_is_fake() &&
-      sz_testrt_net_serve_pending() <= 0) {
+      sz_testrt_net_serve_pending() <= 0)
+    return 1;
+  return 0;
+}
+
+static SzIo *serve_again(void *value, void *env);
+
+static SzIo *serve_loop(ServeSt *st) {
+  if (serve_should_stop(st)) {
     serve_free(st);
     return pure_drop(NULL);
   }
-  prog = fm_drop(sz_io_delay(serve_ensure_listen, st), unwrap_net, NULL);
-  prog = fm_drop(prog, serve_after_listen, st);
-  return fm_drop(prog, serve_after_path, st);
+  return fm_drop(serve_one(st), serve_again, st);
+}
+
+static SzIo *serve_again(void *value, void *env) {
+  (void)value;
+  return serve_loop((ServeSt *)env);
 }
 
 typedef struct ServeSpec {
@@ -2044,7 +2131,7 @@ static SzIo *serve_after_kick(void *ignored, void *env) {
   sz_retain(pack->left);
   st->henv = pack->left;
   {
-    SzIo *io = serve_round(st);
+    SzIo *io = serve_loop(st);
     SzIo *fin = sz_io_delay(serve_cleanup, st);
     SzIo *ens = sz_io_ensure(io, fin);
     sz_release(io);
