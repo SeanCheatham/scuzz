@@ -11,7 +11,8 @@
 
 #define EVENT_CAP 64
 #define TEXT_RING 64
-#define TEXT_LEN 64
+#define TEXT_LEN 128
+#define KEY_NAME_LEN 32
 
 static Display *g_dpy;
 static Window g_win;
@@ -29,6 +30,7 @@ static int g_probe_ok;
 static SzInputEvent g_queue[EVENT_CAP];
 static int g_q_head;
 static int g_q_tail;
+static char g_key_bufs[TEXT_RING][KEY_NAME_LEN];
 static char g_text_bufs[TEXT_RING][TEXT_LEN];
 static int g_text_i;
 
@@ -75,25 +77,40 @@ static int q_full(void) {
 static int text_slot_queued(const char *slot) {
   int i;
   for (i = g_q_head; i != g_q_tail; i = (i + 1) % EVENT_CAP) {
+    if (g_queue[i].kind == SZ_INPUT_KEY &&
+        (g_queue[i].key == slot || g_queue[i].text == slot))
+      return 1;
     if (g_queue[i].kind == SZ_INPUT_TEXT_EDIT && g_queue[i].text == slot)
       return 1;
   }
   return 0;
 }
 
-static const char *stash_text(const char *s) {
-  size_t n;
-  char *dst;
-  if (!s)
-    s = "";
-  n = strlen(s);
-  if (n >= TEXT_LEN)
-    n = TEXT_LEN - 1;
-  dst = g_text_bufs[g_text_i];
+static void stash_key_text(const char *name, const char *text, const char **out_key,
+                           const char **out_text) {
+  size_t nk;
+  size_t nt;
+  char *kdst;
+  char *tdst;
+  if (!name)
+    name = "";
+  if (!text)
+    text = "";
+  nk = strlen(name);
+  nt = strlen(text);
+  if (nk >= KEY_NAME_LEN)
+    nk = KEY_NAME_LEN - 1;
+  if (nt >= TEXT_LEN)
+    nt = TEXT_LEN - 1;
+  kdst = g_key_bufs[g_text_i];
+  tdst = g_text_bufs[g_text_i];
   g_text_i = (g_text_i + 1) % TEXT_RING;
-  memcpy(dst, s, n);
-  dst[n] = '\0';
-  return dst;
+  memcpy(kdst, name, nk);
+  kdst[nk] = '\0';
+  memcpy(tdst, text, nt);
+  tdst[nt] = '\0';
+  *out_key = kdst;
+  *out_text = tdst;
 }
 
 static int q_push(const SzInputEvent *ev) {
@@ -136,15 +153,153 @@ static void enqueue_scroll(float x, float y, float dy) {
   q_push(&ev);
 }
 
-static void enqueue_text_edit(const char *text) {
+static void enqueue_key(const char *name, const char *text, int mods) {
   SzInputEvent ev;
-  /* Drop if the queue is full, or if the next text slot is still queued. */
-  if (q_full() || text_slot_queued(g_text_bufs[g_text_i]))
+  const char *k;
+  const char *t;
+  if (q_full() || text_slot_queued(g_key_bufs[g_text_i]) ||
+      text_slot_queued(g_text_bufs[g_text_i]))
     return;
+  stash_key_text(name, text, &k, &t);
   memset(&ev, 0, sizeof(ev));
-  ev.kind = SZ_INPUT_TEXT_EDIT;
-  ev.text = stash_text(text ? text : "");
+  ev.kind = SZ_INPUT_KEY;
+  ev.key = k;
+  ev.text = t;
+  ev.key_mods = mods;
   q_push(&ev);
+}
+
+static int x11_is_modifier(KeySym ks) {
+  return ks == XK_Shift_L || ks == XK_Shift_R || ks == XK_Control_L ||
+         ks == XK_Control_R || ks == XK_Alt_L || ks == XK_Alt_R ||
+         ks == XK_Meta_L || ks == XK_Meta_R || ks == XK_Super_L ||
+         ks == XK_Super_R || ks == XK_Hyper_L || ks == XK_Hyper_R ||
+         ks == XK_Caps_Lock || ks == XK_Num_Lock || ks == XK_Scroll_Lock ||
+         ks == XK_Mode_switch || ks == XK_ISO_Level3_Shift;
+}
+
+static int x11_key_no_insert(const char *name) {
+  return strcmp(name, "Backspace") == 0 || strcmp(name, "Enter") == 0 ||
+         strcmp(name, "Tab") == 0 || strcmp(name, "Escape") == 0 ||
+         strcmp(name, "Delete") == 0 || strncmp(name, "Arrow", 5) == 0 ||
+         strcmp(name, "Home") == 0 || strcmp(name, "End") == 0 ||
+         strcmp(name, "PageUp") == 0 || strcmp(name, "PageDown") == 0;
+}
+
+static void x11_key_name(KeySym ks, char *out, size_t cap) {
+  const char *s = NULL;
+  const char *xs;
+  if (!out || cap == 0)
+    return;
+  out[0] = '\0';
+  switch (ks) {
+  case XK_Return:
+  case XK_KP_Enter:
+    s = "Enter";
+    break;
+  case XK_Tab:
+  case XK_ISO_Left_Tab:
+    s = "Tab";
+    break;
+  case XK_BackSpace:
+    s = "Backspace";
+    break;
+  case XK_Delete:
+  case XK_KP_Delete:
+    s = "Delete";
+    break;
+  case XK_Escape:
+    s = "Escape";
+    break;
+  case XK_Left:
+  case XK_KP_Left:
+    s = "ArrowLeft";
+    break;
+  case XK_Right:
+  case XK_KP_Right:
+    s = "ArrowRight";
+    break;
+  case XK_Up:
+  case XK_KP_Up:
+    s = "ArrowUp";
+    break;
+  case XK_Down:
+  case XK_KP_Down:
+    s = "ArrowDown";
+    break;
+  case XK_Home:
+  case XK_KP_Home:
+    s = "Home";
+    break;
+  case XK_End:
+  case XK_KP_End:
+    s = "End";
+    break;
+  case XK_Page_Up:
+  case XK_KP_Page_Up:
+    s = "PageUp";
+    break;
+  case XK_Page_Down:
+  case XK_KP_Page_Down:
+    s = "PageDown";
+    break;
+  case XK_space:
+  case XK_KP_Space:
+    s = "Space";
+    break;
+  default:
+    break;
+  }
+  if (s) {
+    snprintf(out, cap, "%s", s);
+    return;
+  }
+  if (ks >= XK_A && ks <= XK_Z) {
+    out[0] = (char)('a' + (int)(ks - XK_A));
+    out[1] = '\0';
+    return;
+  }
+  if (ks >= XK_a && ks <= XK_z) {
+    out[0] = (char)ks;
+    out[1] = '\0';
+    return;
+  }
+  if (ks >= XK_0 && ks <= XK_9) {
+    out[0] = (char)ks;
+    out[1] = '\0';
+    return;
+  }
+  if (ks >= 0x20 && ks <= 0x7e) {
+    out[0] = (char)ks;
+    out[1] = '\0';
+    return;
+  }
+  xs = XKeysymToString(ks);
+  if (xs && xs[0]) {
+    snprintf(out, cap, "%s", xs);
+    return;
+  }
+  snprintf(out, cap, "Unidentified");
+}
+
+static void latin1_to_utf8(const char *in, int n, char *out, size_t cap) {
+  size_t o = 0;
+  int i;
+  if (!out || cap == 0)
+    return;
+  out[0] = '\0';
+  if (!in || n <= 0)
+    return;
+  for (i = 0; i < n && o + 3 < cap; i++) {
+    unsigned char c = (unsigned char)in[i];
+    if (c < 0x80)
+      out[o++] = (char)c;
+    else {
+      out[o++] = (char)(0xc0 | (c >> 6));
+      out[o++] = (char)(0x80 | (c & 0x3f));
+    }
+  }
+  out[o] = '\0';
 }
 
 static int frame_bytes(int width, int height, size_t *out) {
@@ -339,24 +494,35 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
     if (ev.type == ButtonPress && ev.xbutton.button == 5)
       enqueue_scroll((float)ev.xbutton.x, (float)ev.xbutton.y, -40.f);
     if (ev.type == KeyPress) {
-      KeySym ks;
-      char buf[8];
+      KeySym unshifted;
+      char buf[64];
+      char name[KEY_NAME_LEN];
+      char utf8[TEXT_LEN];
       int nkey;
-      ks = XLookupKeysym(&ev.xkey, 0);
-      if (ks == XK_q || ks == XK_Q || ks == XK_Escape) {
-        g_user_quit = 1;
-        sz_embedder_shutdown();
-        return 1;
-      }
-      if (ks == XK_BackSpace) {
-        enqueue_text_edit("");
+      int mods = 0;
+      unshifted = XLookupKeysym(&ev.xkey, 0);
+      if (x11_is_modifier(unshifted))
         continue;
+      nkey = XLookupString(&ev.xkey, buf, (int)sizeof(buf) - 1, NULL, NULL);
+      if (nkey < 0)
+        nkey = 0;
+      buf[nkey] = '\0';
+      x11_key_name(unshifted, name, sizeof name);
+      utf8[0] = '\0';
+      if (!x11_key_no_insert(name)) {
+        latin1_to_utf8(buf, nkey, utf8, sizeof utf8);
+        if (utf8[0] && (unsigned char)utf8[0] < 32)
+          utf8[0] = '\0';
       }
-      nkey = XLookupString(&ev.xkey, buf, (int)sizeof(buf) - 1, &ks, NULL);
-      if (nkey == 1 && buf[0] >= 32 && buf[0] < 127) {
-        buf[1] = '\0';
-        enqueue_text_edit(buf);
-      }
+      if (ev.xkey.state & ShiftMask)
+        mods |= SZ_KEY_SHIFT;
+      if (ev.xkey.state & ControlMask)
+        mods |= SZ_KEY_CTRL;
+      if (ev.xkey.state & Mod1Mask)
+        mods |= SZ_KEY_ALT;
+      if (ev.xkey.state & Mod4Mask)
+        mods |= SZ_KEY_CMD;
+      enqueue_key(name, utf8, mods);
     }
   }
   return 1;

@@ -8,7 +8,7 @@ Linked when present.
 ## Linux (X11)
 
 - Needs `DISPLAY` (use `xvfb-run` in CI)
-- Press `q` / Escape to close during `present`
+- Close the window to quit during `present`
 - Without `DISPLAY`, Desktop stays offscreen
 - Link: `-lX11`
 - `sz_embedder_alive` is 0 after quit (stay-open apps stop pumping)
@@ -16,7 +16,7 @@ Linked when present.
 ## macOS (Cocoa)
 
 - Needs a GUI session (main display). Otherwise Desktop stays offscreen.
-- Press `q` / Escape to close during `present`
+- Close the window to quit during `present`
 - AppKit runs on the process main thread (`dispatch_sync` from the IO worker;
   `sz_runtime_main_args` parks main in the CFRunLoop)
 - Retina: session paints at `backingScaleFactor` and presents a point-sized

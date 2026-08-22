@@ -25,7 +25,7 @@ scroll:scrollh
 button:+1
 slider:40
 progress:40
-text:q or Esc quits
+text:Close the window to quit
 textfield:item
 button:Add
 vdiv:vdiv

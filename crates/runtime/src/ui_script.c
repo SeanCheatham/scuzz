@@ -157,6 +157,16 @@ static void script_type(SzUiSession *session, int index, const char *text) {
     fprintf(stderr, "scuzz: script type skipped (no text field)\n");
 }
 
+static void script_key(SzUiSession *session, const char *name, const char *text) {
+  SzInputEvent ev;
+  memset(&ev, 0, sizeof ev);
+  ev.kind = SZ_INPUT_KEY;
+  ev.key = name ? name : "";
+  ev.text = text ? text : "";
+  if (!sz_ui_inject_sync(session, &ev))
+    fprintf(stderr, "scuzz: script key skipped\n");
+}
+
 void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
   SzInputEvent tap;
   SzView *hit_btn = NULL;
@@ -206,11 +216,13 @@ void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
      text <n> <s>  replace dump-index n (a11y order); `text 0` is still payload "0"
      type <s>   append <s> to the [fields] starred TextField; empty is a no-op; no field is a no-op
      type <n> <s>  append to dump-index n; `type 0` is still payload "0"
+     key <name> [text]  named key on the starred TextField (`Enter`, `Backspace`, `ArrowLeft`, `a`);
+                        optional UTF-8 insert text; unused names inject and no-op; live OS keys record this verb
      pump <k>   pump k extra frames
      scroll <dy> pan the first Scroll on its axis (positive = content up or left); no scroll is a no-op
      scroll <n> <dy>  pan dump-index n ([scrolls] scan order); `scroll 40` stays dy 40
-     backspace <n> chop n bytes from the [fields] starred TextField (default 1); no field is a no-op
-     backspace <n> <k>  chop k bytes from dump-index n
+     backspace <n> chop n UTF-8 code points from the [fields] starred TextField (default 1); no field is a no-op
+     backspace <n> <k>  chop k UTF-8 code points from dump-index n
      dump       rewrite the live debug dump now (includes [heap] kinds, delta, and [live] rows); no dump path is a no-op
      reload     rebuild the View factory now; missing factory is a no-op
      quit       stop the live session; remaining script lines do not run
@@ -282,6 +294,21 @@ static void play_script_line(SzUiSession *session, char *line) {
     int idx;
     const char *payload = script_field_payload(len > 4 ? line + 5 : "", &idx);
     script_type(session, idx, payload);
+  } else if (strncmp(line, "key ", 4) == 0 || strcmp(line, "key") == 0) {
+    const char *rest = len > 3 ? line + 4 : "";
+    char name[64];
+    const char *text = "";
+    size_t ni = 0;
+    while (*rest == ' ')
+      rest++;
+    while (rest[ni] && rest[ni] != ' ' && ni + 1 < sizeof name) {
+      name[ni] = rest[ni];
+      ni++;
+    }
+    name[ni] = '\0';
+    if (rest[ni] == ' ')
+      text = rest + ni + 1;
+    script_key(session, name, text);
   } else if (strcmp(line, "dump") == 0) {
     sz_ui_session_dump_now(session);
   } else if (strcmp(line, "reload") == 0) {

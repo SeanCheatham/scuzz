@@ -21,7 +21,7 @@ int sz_embedder_available(void);
 double sz_embedder_display_scale(void);
 
 /* Nonzero while the desktop window session must keep pumping.
- * Becomes 0 after the user quits (q / Escape / window close).
+ * Becomes 0 after the user closes the window.
  * Weak stub returns 0 (one-shot demos). */
 int sz_embedder_alive(void);
 
@@ -36,7 +36,7 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
 void sz_embedder_shutdown(void);
 
 /* Pop one queued OS event into out. Returns 1 if an event was written.
- * present() enqueues pointer / scroll / text edits. pump drains through this. */
+ * present() enqueues pointer / scroll / key events. pump drains through this. */
 int sz_embedder_poll_event(SzInputEvent *out);
 
 #ifdef __cplusplus

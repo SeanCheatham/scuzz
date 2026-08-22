@@ -44,8 +44,15 @@ typedef enum SzInputKind {
   SZ_INPUT_SCROLL = 5,    /* vertical pan dy on Scroll under (x,y) */
   SZ_INPUT_LIFECYCLE = 6, /* pause / resume / stop */
   SZ_INPUT_KEYBOARD = 7,  /* soft keyboard show (1) / hide (0) */
-  SZ_INPUT_TEXT_EDIT = 8  /* append text, or backspace if text NULL/empty */
+  SZ_INPUT_TEXT_EDIT = 8, /* append text, or backspace if text NULL/empty */
+  SZ_INPUT_KEY = 9        /* named key + optional UTF-8 insert; not KEYBOARD */
 } SzInputKind;
+
+/* SZ_INPUT_KEY modifier bits (combine with |). */
+#define SZ_KEY_SHIFT 1
+#define SZ_KEY_CTRL 2
+#define SZ_KEY_CMD 4
+#define SZ_KEY_ALT 8
 
 typedef struct SzInputEvent {
   SzInputKind kind;
@@ -53,11 +60,13 @@ typedef struct SzInputEvent {
   float y;
   int width;  /* resize */
   int height; /* resize */
-  const char *text; /* SZ_INPUT_TEXT / SZ_INPUT_TEXT_EDIT */
+  const char *text; /* SZ_INPUT_TEXT / SZ_INPUT_TEXT_EDIT / SZ_INPUT_KEY insert */
   SzPointerPhase pointer_phase; /* SZ_INPUT_POINTER */
   float dy;                     /* SZ_INPUT_SCROLL (positive = content up) */
   SzLifecyclePhase lifecycle;   /* SZ_INPUT_LIFECYCLE */
   int keyboard_visible;         /* SZ_INPUT_KEYBOARD: 1=show, 0=hide */
+  const char *key;              /* SZ_INPUT_KEY name: Enter, Backspace, ArrowLeft, a */
+  int key_mods;                 /* SZ_INPUT_KEY: SZ_KEY_SHIFT / CTRL / CMD / ALT */
 } SzInputEvent;
 
 /* --- theme tokens -------------------------------------------------------- */
@@ -370,8 +379,13 @@ int sz_view_handle_tap(SzView *root, float x, float y);
 int sz_view_activate(SzView *root, SzView *target, float x, float y);
 /* Layout + activate `target` and mark the session dirty (script `tap N`). */
 int sz_ui_session_activate_view(SzUiSession *session, SzView *target);
-/* Append to focused TextField, or chop one byte when backspace != 0. */
+/* Append UTF-8 to the focused TextField, or chop one UTF-8 code point at the
+ * end when backspace != 0. Caret-in-middle is not this helper. */
 int sz_view_handle_text_edit(SzView *root, const char *text, int backspace);
+/* Named key on the focused TextField. Backspace chops a UTF-8 code point at
+ * the end. Nonempty `text` inserts UTF-8. Unused names inject and no-op. */
+int sz_view_handle_key(SzView *root, const char *key, const char *text,
+                       int mods);
 
 /* Scroll offset + soft keyboard helpers. */
 float sz_view_scroll_x(const SzView *scroll);
@@ -387,7 +401,7 @@ int sz_view_collect_text_fields(SzView *root, SzView **out, int cap);
 int sz_view_collect_tap_targets(SzView *root, SzView **out, int cap);
 /* Shown Scroll views in a11y preorder (cap 64 for dump / `scroll N`). */
 int sz_view_collect_scrolls(SzView *root, SzView **out, int cap);
-/* Focused field, else the first collected field (`text`/`type`/`backspace`). */
+/* Focused field, else the first collected field (`text`/`type`/`backspace`/`key`). */
 SzView *sz_view_text_field_target(SzView *root);
 /* Focus collected field `index`, or the starred target when index < 0. */
 int sz_view_focus_text_field_at(SzView *root, int index);
@@ -466,10 +480,11 @@ int sz_ui_session_watch(SzUiSession *session, const char *path);
 /* Live structural dump (same format as SCUZZ_FUZZ_DUMP) rewritten on dirty
  * pumps, stamp reload, and IO-bridge flushes. Agents read the file.
  * [taps] lists inject indices for `tap N` (scan order, cap 64).
- * [fields] lists TextFields in a11y order. `N*` is the text/type/backspace
+ * [fields] lists TextFields in a11y order. `N*` is the text/type/backspace/key
  * target (focused, else first). Lines are `N placeholder="live"` (star on
  * the target). `text N s` / `type N s` / `backspace N k` target dump index N.
- * One-token forms still use the starred field.
+ * One-token forms still use the starred field. `key <name> [text]` uses the
+ * starred field. Live OS keys record as `key`, not `type`.
  * [scrolls] lists hittable Scrolls in scan order; `scroll N dy` pans index N
  * (`scroll 40` stays the first).
  * [last_hit] appears after a TAP in this session: `xy x y -> role:label` or
@@ -483,7 +498,7 @@ int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
 int sz_ui_session_write_dump(SzUiSession *session, const char *path);
 /* Rewrite the live debug dump now, including [session] and [heap]. No path is a no-op. */
 int sz_ui_session_dump_now(SzUiSession *session);
-/* Watch an inject script (tap/xy/text/type/pump/scroll/backspace/dump/reload/quit/resetpeak).
+/* Watch an inject script (tap/xy/text/type/key/pump/scroll/backspace/dump/reload/quit/resetpeak).
  * Next pump that sees new contents plays the suffix (append) or the whole file
  * (rewrite). Missing = empty. */
 int sz_ui_session_set_inject(SzUiSession *session, const char *path);
@@ -628,8 +643,9 @@ SzView *sz_lang_view_bind_text(SzSignalStr *sig);
  * SCUZZ_UI_RELOAD_CODE (dylib exporting sz_ui_reload_rebuild) if that
  * file exists, then rebuilds. Writes SCUZZ_UI_DEBUG_DUMP on dirty pumps
  * when set (includes [heap]). Plays SCUZZ_UI_INJECT
- * (tap/xy/text/type/pump/scroll/backspace/dump/reload/quit/resetpeak) when
- * that file changes. `quit` stops the live pump loop. `resetpeak` resets
+ * (tap/xy/text/type/key/pump/scroll/backspace/dump/reload/quit/resetpeak) when
+ * that file changes. `quit` stops the live pump loop. Desktop quit is window
+ * close. `resetpeak` resets
  * peak bytes and the heap delta mark. */
 SzIo *sz_ui_run_rebuild(SzUiRebuildFn fn, void *env);
 

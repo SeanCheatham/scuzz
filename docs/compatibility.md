@@ -32,7 +32,7 @@ What we keep vs cut. Product locks and language direction: [`vision.md`](vision.
 | UI | `View` + `Ui` + Skia (`sk_capi`; Impeller deferred) | Swing, JavaFX, Compose Multiplatform, Flutter widgets |
 | Watch | Rebuild on source change (`scuzz watch`); IO-only `run --watch` kills and reruns; `[ui] run --watch` is hot reload (stamp-reload Views) | Flutter DevTools / VM patching |
 | Diagnostics | `scuzz check` is the linter (`--message-format=json`); `scuzz lsp` wraps `check` | Separate IDE typer; analyze-vs-check; `lint` subcommand; `*.g.scuzz` codegen |
-| Dogfood IDE | Later: a Scuzz `[ui]` app plus `scuzz ide` on the one CLI. The app consumes `check` / `lsp`. Headless is a peer. Prerequisites: [`gaps.md`](gaps.md) | Self-hosted compiler; second typer; Desktop-only editor; a `scuzz-ide` binary |
+| Dogfood IDE | Later: a Scuzz `[ui]` app plus `scuzz ide` on the one CLI. The app consumes `check` / `lsp`. Headless is a peer. Input/editor and kits run in parallel. Prove on `examples/editor` before the launcher. Prerequisites: [`gaps.md`](gaps.md) | Self-hosted compiler; second typer; Desktop-only editor; a `scuzz-ide` binary |
 | Packaging | Android debug APK through `scuzz package --target android`; iOS sim `.app` through `scuzz package --target ios` | Gradle/CocoaPods as Scuzz APIs; Flutter platform channels |
 
 ## Platforms (Headless first)
