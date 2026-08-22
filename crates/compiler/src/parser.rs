@@ -1583,6 +1583,20 @@ impl Parser {
                     self.bump();
                     let (method, method_span) = self.expect_ident()?;
                     match method.as_str() {
+                        "map" => {
+                            self.expect(&Token::LParen)?;
+                            let (param, body) = self.parse_lambda()?;
+                            self.expect(&Token::RParen)?;
+                            let span = expr.span.clone().cover(&body.span);
+                            expr = self.mk(
+                                ExprKind::IoMap {
+                                    inner: Box::new(expr),
+                                    param,
+                                    body: Box::new(body),
+                                },
+                                span,
+                            );
+                        }
                         "flatMap" => {
                             self.expect(&Token::LParen)?;
                             let (param, body) = self.parse_lambda()?;
@@ -3129,6 +3143,19 @@ def x(): Float = 1.5e1 + 1e-3
                 ..
             } if n == "s"
         ));
+    }
+
+    #[test]
+    fn parse_io_map_bound() {
+        let src = r#"@main def main: IO[Unit] = IO.pure(1).map(n => n + 1).flatMap(n => IO.println(Str.fromInt(n)))"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::FlatMap { inner, .. } => match &inner.kind {
+                ExprKind::IoMap { param: Some(n), .. } if n == "n" => {}
+                other => panic!("expected IoMap, got {other:?}"),
+            },
+            other => panic!("expected FlatMap, got {other:?}"),
+        }
     }
 
     #[test]

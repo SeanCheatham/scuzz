@@ -462,6 +462,16 @@ def failProof(): IO[Unit] =
 )
   } yield ()
 
+def mapProof(): IO[Unit] =
+  for {
+    n <- IO.pure(3).map(x => x + 1)
+    s <- IO.pure("a").map(x => Str.concat(x, "!"))
+    z <- IO.pure(1).map(_ => 7)
+    _ <- IO.println(s"iomap:${Str.fromInt(n)}")
+    _ <- IO.println(s"iomapS:$s")
+    _ <- IO.println(s"iomapU:${Str.fromInt(z)}")
+  } yield ()
+
 def tupleProof(): IO[Unit] =
   for {
     (n, s) = (42, "ok")
@@ -653,4 +663,5 @@ b"""
     _ <- tupleProof()
     _ <- unpackProof()
     _ <- failProof()
+    _ <- mapProof()
   } yield ()

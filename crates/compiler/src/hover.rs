@@ -9,6 +9,7 @@ use crate::resolve::module_id_from_label;
 use crate::typ::kit_lambda_param_ty;
 
 const COPY_HOVER: &str = "record.copy(field = value, …): T";
+const MAP_HOVER: &str = "IO[A].map(f: A => B): IO[B]";
 
 /// Hover text at a byte offset in `source` (`file` is the parse label).
 pub fn hover_in_source(
@@ -34,6 +35,9 @@ pub fn hover_in_source(
         }
         if name == "copy" {
             return Some(COPY_HOVER.into());
+        }
+        if name == "map" {
+            return Some(MAP_HOVER.into());
         }
         if let Some(a) = alias_named(program, &q, &name) {
             return Some(show_alias(a));
@@ -69,6 +73,9 @@ pub fn hover_in_source(
     }
     if name == "copy" {
         return Some(COPY_HOVER.into());
+    }
+    if name == "map" {
+        return Some(MAP_HOVER.into());
     }
     binder_in_program(program, file, &name, offset)
 }
@@ -307,6 +314,11 @@ fn walk_binders(expr: &Expr, name: &str, offset: usize, best: &mut Option<(usize
             walk_binders(body, name, offset, best);
         }
         ExprKind::FlatMap {
+            param: Some(n),
+            body,
+            ..
+        }
+        | ExprKind::IoMap {
             param: Some(n),
             body,
             ..
@@ -1438,6 +1450,21 @@ enum Opt[T]:
         let src = "@main def main: IO[Unit] = IO.fail(\"x\")\n";
         let h = hover_src(src, "fail");
         assert!(h.contains("IO.fail(s: String): IO[A]"), "{h}");
+    }
+
+    #[test]
+    fn hovers_io_map() {
+        let src = "@main def main: IO[Unit] =\n  IO.pure(1).map(n => n + 1).flatMap(n => IO.println(Str.fromInt(n)))\n";
+        let h = hover_src(src, "map(n");
+        assert!(h.contains("IO[A].map(f: A => B): IO[B]"), "{h}");
+        let src_list = r#"@main def main: IO[Unit] =
+  IO.println(List.join(List.map(["a"], x => Str.concat(x, "!")), ","))
+"#;
+        let h_list = hover_src(src_list, "map");
+        assert!(
+            h_list.contains("List.map(xs: List[T], f: T => U): List[U]"),
+            "{h_list}"
+        );
     }
 
     #[test]

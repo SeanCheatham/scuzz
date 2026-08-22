@@ -361,7 +361,7 @@ enum WrapCtx {
     Cons { right: bool },
     /// Operand of prefix `-`, `!`, or `~`.
     Unary,
-    /// Receiver of `.field`, `.method`, `match`, `.attempt`, `.flatMap`, or `.handleErrorWith`.
+    /// Receiver of `.field`, `.method`, `match`, `.attempt`, `.map`, `.flatMap`, or `.handleErrorWith`.
     Postfix,
 }
 
@@ -609,12 +609,29 @@ fn pretty_expr(expr: &Expr, indent: usize) -> String {
             let p = param.as_deref().unwrap_or("_");
             if !matches!(
                 &body.kind,
-                ExprKind::Let { .. } | ExprKind::Match { .. } | ExprKind::FlatMap { .. }
+                ExprKind::Let { .. }
+                    | ExprKind::Match { .. }
+                    | ExprKind::FlatMap { .. }
+                    | ExprKind::IoMap { .. }
             ) && !right.contains('\n')
             {
                 format!("{pad}{left}.flatMap({p} => {})", right.trim())
             } else {
                 format!("{pad}{left}.flatMap({p} =>\n{right}\n{pad})")
+            }
+        }
+        ExprKind::IoMap { inner, param, body } => {
+            let left = pretty_in(inner, WrapCtx::Postfix);
+            let right = pretty_expr(body, indent + 1);
+            let p = param.as_deref().unwrap_or("_");
+            if !matches!(
+                &body.kind,
+                ExprKind::Let { .. } | ExprKind::Match { .. } | ExprKind::FlatMap { .. }
+            ) && !right.contains('\n')
+            {
+                format!("{pad}{left}.map({p} => {})", right.trim())
+            } else {
+                format!("{pad}{left}.map({p} =>\n{right}\n{pad})")
             }
         }
         ExprKind::HandleErrorWith { inner, param, body } => {
@@ -1681,6 +1698,17 @@ record Point(x: Int, y: Int)
 "#;
         let out = format_source(src).unwrap();
         assert!(out.contains("_ + 1"), "{out}");
+        let again = format_source(&out).unwrap();
+        assert_eq!(out, again);
+    }
+
+    #[test]
+    fn formats_io_map() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.pure(1).map(n => n + 1).flatMap(n => IO.println(Str.fromInt(n)))
+"#;
+        let out = format_source(src).unwrap();
+        assert!(out.contains(".map(n => n + 1)"), "{out}");
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

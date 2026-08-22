@@ -254,6 +254,11 @@ impl Expr {
                 param,
                 body: Box::new(f(*body)?),
             },
+            ExprKind::IoMap { inner, param, body } => ExprKind::IoMap {
+                inner: Box::new(f(*inner)?),
+                param,
+                body: Box::new(f(*body)?),
+            },
             ExprKind::HandleErrorWith { inner, param, body } => ExprKind::HandleErrorWith {
                 inner: Box::new(f(*inner)?),
                 param,
@@ -422,6 +427,7 @@ impl Expr {
             | ExprKind::Field { base: x, .. }
             | ExprKind::Lambda { body: x, .. } => f(x),
             ExprKind::FlatMap { inner, body, .. }
+            | ExprKind::IoMap { inner, body, .. }
             | ExprKind::HandleErrorWith { inner, body, .. }
             | ExprKind::Let {
                 value: inner, body, ..
@@ -576,6 +582,12 @@ pub enum ExprKind {
     IoPure(Box<Expr>),
     /// `left.flatMap(param => right)` — param None means `_`
     FlatMap {
+        inner: Box<Expr>,
+        param: Option<String>,
+        body: Box<Expr>,
+    },
+    /// `io.map(param => right)` — param None means `_`. Body is pure `B`; result is `IO[B]`.
+    IoMap {
         inner: Box<Expr>,
         param: Option<String>,
         body: Box<Expr>,
