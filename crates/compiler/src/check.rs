@@ -3,8 +3,8 @@
 use crate::format::format_source;
 use crate::lower::lower_program;
 use crate::overlay::{
-    apply_overlays, check_laws_applied, collect_fmt_sources, collect_law_names, is_fmt_source,
-    overlay_kind_from_path, residualize_refinements, OverlayError, OverlaySource,
+    apply_overlays, check_properties_applied, collect_fmt_sources, collect_property_names,
+    is_fmt_source, overlay_kind_from_path, residualize_refinements, OverlayError, OverlaySource,
 };
 use crate::parser::{parse_sources, parse_sources_recovering, ParseError};
 use crate::span::{offset_to_utf16_pos, Span};
@@ -518,7 +518,7 @@ fn format_check_src(
     Ok(diags)
 }
 
-/// Format-check `src/`, then parse, lower, and typecheck (live + sim twins + in-source laws).
+/// Format-check `src/`, then parse, lower, and typecheck (live + sim twins + in-source properties).
 /// No LLVM emit. No link. Format mismatches and type errors share one diagnostic list.
 pub fn check_project(project_dir: &Path) -> Result<Vec<Diagnostic>> {
     check_project_with(project_dir, &BTreeMap::new())
@@ -634,26 +634,26 @@ fn check_project_with_inner(
         return Ok(diags);
     };
     let live = program;
-    let law_names = match collect_law_names(&live) {
+    let property_names = match collect_property_names(&live) {
         Ok(n) => n,
         Err(e) => {
             diags.push(diagnostic_from_overlay(e, &named));
             Vec::new()
         }
     };
-    if let Err(e) = check_laws_applied(&live, &law_names) {
+    if let Err(e) = check_properties_applied(&live, &property_names) {
         diags.push(diagnostic_from_overlay(e, &named));
     }
     let mut live_prog = live.clone();
-    live_prog.law_names = law_names.clone();
+    live_prog.property_names = property_names.clone();
     merge_diags(&mut diags, check_typed_graph(live_prog, &named, false));
 
     match apply_overlays(live, &resolved.overlays) {
         Ok(mut program) => {
-            if let Err(e) = check_laws_applied(&program, &law_names) {
+            if let Err(e) = check_properties_applied(&program, &property_names) {
                 diags.push(diagnostic_from_overlay(e, &named));
             }
-            program.law_names = law_names;
+            program.property_names = property_names;
             merge_diags(&mut diags, check_typed_graph(program, &named, true));
         }
         Err(e) => {
@@ -1794,12 +1794,12 @@ version = "0.0.0"
     }
 
     #[test]
-    fn check_project_sim_require_does_not_apply_live_law() {
+    fn check_project_sim_require_does_not_apply_live_property() {
         let dir = tempdir().unwrap();
         let root = dir.path();
         write_sim_pkg(
             root,
-            "law always: Bool = 1 == 1\ndef title(): String = \"Live\"\n@main def main: IO[Unit] =\n  IO.println(title())\n",
+            "property always: Bool = 1 == 1\ndef title(): String = \"Live\"\n@main def main: IO[Unit] =\n  IO.println(title())\n",
             "def title(): String = \"Sim\".require(always)\n",
         );
         let diags = check_project(root).unwrap();
@@ -2236,17 +2236,17 @@ record Point(x: Int):
     }
 
     #[test]
-    fn check_project_reports_unused_law_and_type_error() {
+    fn check_project_reports_unused_property_and_type_error() {
         let dir = tempdir().unwrap();
         let root = dir.path();
         fs::write(
             root.join("scuzz.toml"),
-            "[package]\nname = \"law_and_ty\"\nversion = \"0.0.0\"\n",
+            "[package]\nname = \"property_and_ty\"\nversion = \"0.0.0\"\n",
         )
         .unwrap();
         fs::create_dir_all(root.join("src")).unwrap();
         let src = "\
-law always: Bool = 1 == 1
+property always: Bool = 1 == 1
 def a(): Int = \"x\"
 @main def main: IO[Unit] =
   IO.println(\"ok\")
@@ -2256,7 +2256,7 @@ def a(): Int = \"x\"
         let diags = check_project(root).unwrap();
         assert!(
             diags.len() >= 2,
-            "expected law and type diagnostics, got {}: {diags:?}",
+            "expected property and type diagnostics, got {}: {diags:?}",
             diags.len()
         );
         assert!(

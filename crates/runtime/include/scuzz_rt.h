@@ -799,13 +799,13 @@ void sz_testrt_proc_put(int64_t pid); /* fake Sys.alive table */
 int sz_testrt_proc_alive(int64_t pid); /* 1 if registered */
 void sz_testrt_proc_kill(int64_t pid); /* drop from table */
 
-/* Laws — residual checks armed only under SCUZZ_TESTRT=1 */
-void sz_law_stash_a11y(const char *dump);
-int64_t sz_law_a11y_has(SzString *needle);
-SzIo *sz_law_assert(SzString *name, int64_t ok);
-void sz_law_check(SzString *name, int64_t ok);
-void sz_law_sometimes(SzString *name);
-void sz_law_sometimes_flush(void);
+/* Properties — residual checks armed only under SCUZZ_TESTRT=1 */
+void sz_property_stash_a11y(const char *dump);
+int64_t sz_property_a11y_has(SzString *needle);
+SzIo *sz_property_assert(SzString *name, int64_t ok);
+void sz_property_check(SzString *name, int64_t ok);
+void sz_property_sometimes(SzString *name);
+void sz_property_sometimes_flush(void);
 void sz_driver_register(SzString *name, int64_t nargs, int64_t kind, void *fn);
 void sz_driver_run_line(const char *spec);
 void sz_driver_run_script(const char *path);

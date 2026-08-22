@@ -3298,7 +3298,7 @@ static void *sz_runtime_main_worker(void *arg) {
       sz_testrt_install();
   }
   SzIoResult r = sz_io_unsafe_run(a->program);
-  sz_law_sometimes_flush();
+  sz_property_sometimes_flush();
   if (!r.ok) {
     fprintf(stderr, "scuzz: IO failed: %s\n",
             r.error ? sz_string_cstr(r.error->message) : "unknown");

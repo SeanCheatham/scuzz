@@ -26,7 +26,7 @@ def flipDone(s: String): String =
   encodeItem(Item(if (itemDone(s) == 1) 0 else 1, itemLabel(s)))
 
 def noteAdd(_s: String): Unit =
-  Law.sometimes("droveAdd")
+  Property.sometimes("droveAdd")
 
 def loadList(text: String): List[String] =
   if (List.isEmpty(Str.lines(text))) ["milk"] else Str.lines(text)

@@ -66,7 +66,7 @@ pub fn emit_llvm(program: &Program) -> String {
             if !strs.contains(&d.name) {
                 strs.push(d.name.clone());
             }
-        } else if d.is_law && !d.params.is_empty() && !strs.contains(&d.name) {
+        } else if d.is_property && !d.params.is_empty() && !strs.contains(&d.name) {
             strs.push(d.name.clone());
         }
     }
@@ -432,14 +432,14 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_add_child(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_show_when(ptr, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_ui_run_rebuild(ptr, ptr)").unwrap();
-    writeln!(out, "declare i64 @sz_law_signal_int(i64)").unwrap();
-    writeln!(out, "declare ptr @sz_law_signal_str(i64)").unwrap();
-    writeln!(out, "declare i64 @sz_law_signal_list_len(i64)").unwrap();
-    writeln!(out, "declare ptr @sz_law_signal_list_at(i64, i64)").unwrap();
-    writeln!(out, "declare i64 @sz_law_a11y_has(ptr)").unwrap();
-    writeln!(out, "declare ptr @sz_law_assert(ptr, i64)").unwrap();
-    writeln!(out, "declare void @sz_law_check(ptr, i64)").unwrap();
-    writeln!(out, "declare void @sz_law_sometimes(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_property_signal_int(i64)").unwrap();
+    writeln!(out, "declare ptr @sz_property_signal_str(i64)").unwrap();
+    writeln!(out, "declare i64 @sz_property_signal_list_len(i64)").unwrap();
+    writeln!(out, "declare ptr @sz_property_signal_list_at(i64, i64)").unwrap();
+    writeln!(out, "declare i64 @sz_property_a11y_has(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_property_assert(ptr, i64)").unwrap();
+    writeln!(out, "declare void @sz_property_check(ptr, i64)").unwrap();
+    writeln!(out, "declare void @sz_property_sometimes(ptr)").unwrap();
     writeln!(out, "declare void @sz_driver_register(ptr, i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_box_i64(i64)").unwrap();
     writeln!(out, "declare i64 @sz_unbox_i64(ptr)").unwrap();
@@ -497,7 +497,7 @@ pub fn emit_llvm(program: &Program) -> String {
 
     out.push_str(&conts);
     out.push_str(&fundef_ir);
-    emit_law_drive_tramps(&mut out, program, &strs);
+    emit_property_drive_tramps(&mut out, program, &strs);
 
     writeln!(out, "define i32 @main(i32 %argc, ptr %argv) {{").unwrap();
     writeln!(out, "entry:").unwrap();
@@ -1113,7 +1113,7 @@ fn emit_driver_registers(out: &mut String, program: &Program, strs: &[String]) {
     for d in program
         .defs
         .iter()
-        .filter(|d| d.is_law && !d.params.is_empty())
+        .filter(|d| d.is_property && !d.params.is_empty())
     {
         let tramp = format!("{}__drv", user_symbol(&d.module, &d.name));
         emit_one_driver_register(out, d, strs, i, &tramp);
@@ -1121,14 +1121,14 @@ fn emit_driver_registers(out: &mut String, program: &Program, strs: &[String]) {
     }
 }
 
-fn emit_law_drive_tramps(out: &mut String, program: &Program, strs: &[String]) {
+fn emit_property_drive_tramps(out: &mut String, program: &Program, strs: &[String]) {
     for d in program
         .defs
         .iter()
-        .filter(|d| d.is_law && !d.params.is_empty())
+        .filter(|d| d.is_property && !d.params.is_empty())
     {
         let tramp = format!("{}__drv", user_symbol(&d.module, &d.name));
-        emit_law_drive_tramp(out, d, strs, &tramp);
+        emit_property_drive_tramp(out, d, strs, &tramp);
     }
 }
 
@@ -1157,12 +1157,12 @@ fn emit_one_driver_register(out: &mut String, d: &FunDef, strs: &[String], i: us
     .unwrap();
 }
 
-fn emit_law_drive_tramp(out: &mut String, d: &FunDef, strs: &[String], tramp: &str) {
-    let law = user_symbol(&d.module, &d.name);
+fn emit_property_drive_tramp(out: &mut String, d: &FunDef, strs: &[String], tramp: &str) {
+    let property = user_symbol(&d.module, &d.name);
     let idx = strs
         .iter()
         .position(|s| s == &d.name)
-        .expect("law name interned");
+        .expect("property name interned");
     let len = d.name.len() + 1;
     if d.params.len() <= 1 {
         let (arg_ty, arg_name) = match d.params.first().map(|p| &p.ty) {
@@ -1177,9 +1177,9 @@ fn emit_law_drive_tramp(out: &mut String, d: &FunDef, strs: &[String], tramp: &s
         writeln!(out, "define internal ptr @{tramp}({params}) {{").unwrap();
         writeln!(out, "entry:").unwrap();
         if d.params.is_empty() {
-            writeln!(out, "  %ok = call i64 @{law}()").unwrap();
+            writeln!(out, "  %ok = call i64 @{property}()").unwrap();
         } else {
-            writeln!(out, "  %ok = call i64 @{law}({arg_ty} {arg_name})").unwrap();
+            writeln!(out, "  %ok = call i64 @{property}({arg_ty} {arg_name})").unwrap();
         }
     } else {
         writeln!(out, "define internal ptr @{tramp}(ptr %args) {{").unwrap();
@@ -1200,7 +1200,12 @@ fn emit_law_drive_tramp(out: &mut String, d: &FunDef, strs: &[String], tramp: &s
             }
             cur = format!("%t{i}");
         }
-        writeln!(out, "  %ok = call i64 @{law}({})", call_args.join(", ")).unwrap();
+        writeln!(
+            out,
+            "  %ok = call i64 @{property}({})",
+            call_args.join(", ")
+        )
+        .unwrap();
     }
     writeln!(
         out,
@@ -1208,7 +1213,11 @@ fn emit_law_drive_tramp(out: &mut String, d: &FunDef, strs: &[String], tramp: &s
     )
     .unwrap();
     writeln!(out, "  %nm = call ptr @sz_string_from_cstr(ptr %nm_gep)").unwrap();
-    writeln!(out, "  %io = call ptr @sz_law_assert(ptr %nm, i64 %ok)").unwrap();
+    writeln!(
+        out,
+        "  %io = call ptr @sz_property_assert(ptr %nm, i64 %ok)"
+    )
+    .unwrap();
     writeln!(out, "  ret ptr %io").unwrap();
     writeln!(out, "}}").unwrap();
 }
@@ -6575,73 +6584,73 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
-        "Law.signalInt" => {
+        "Property.signalInt" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call i64 @sz_law_signal_int(i64 {})",
+                "  %{prefix}_v = call i64 @sz_property_signal_int(i64 {})",
                 emitted_args[0].value
             )
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        "Law.signalStr" => {
+        "Property.signalStr" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @sz_law_signal_str(i64 {})",
+                "  %{prefix}_v = call ptr @sz_property_signal_str(i64 {})",
                 emitted_args[0].value
             )
             .unwrap();
             owned_ptr(code, format!("%{prefix}_v"))
         }
-        "Law.signalListLen" => {
+        "Property.signalListLen" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call i64 @sz_law_signal_list_len(i64 {})",
+                "  %{prefix}_v = call i64 @sz_property_signal_list_len(i64 {})",
                 emitted_args[0].value
             )
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        "Law.signalListAt" => {
+        "Property.signalListAt" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @sz_law_signal_list_at(i64 {}, i64 {})",
+                "  %{prefix}_v = call ptr @sz_property_signal_list_at(i64 {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
             owned_ptr(code, format!("%{prefix}_v"))
         }
-        "Law.a11yHas" => {
+        "Property.a11yHas" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call i64 @sz_law_a11y_has(ptr {})",
+                "  %{prefix}_v = call i64 @sz_property_a11y_has(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        "Law.assert" => {
+        "Property.assert" => {
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @sz_law_assert(ptr {}, i64 {})",
+                "  %{prefix}_v = call ptr @sz_property_assert(ptr {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
-        "Law.check" => {
+        "Property.check" => {
             writeln!(
                 code,
-                "  call void @sz_law_check(ptr {}, i64 {})",
+                "  call void @sz_property_check(ptr {}, i64 {})",
                 emitted_args[0].value, emitted_args[1].value
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
             keep_emitted(code, &emitted_args[2])
         }
-        "Law.force" => {
+        "Property.force" => {
             // IO[Bool] → Int with unsafe_run + unbox (verify residual only).
             writeln!(
                 code,
@@ -6657,10 +6666,10 @@ fn emit_call(
             drop_run_result(&mut code, &format!("%{prefix}_fr"));
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        "Law.sometimes" => {
+        "Property.sometimes" => {
             writeln!(
                 code,
-                "  call void @sz_law_sometimes(ptr {})",
+                "  call void @sz_property_sometimes(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
@@ -11462,9 +11471,9 @@ def scale(x: Float): Float = x * 2.0
     }
 
     #[test]
-    fn emit_require_residual_law_check_and_assert() {
+    fn emit_require_residual_property_check_and_assert() {
         let src = r#"
-law always: Bool = 1 == 1
+property always: Bool = 1 == 1
 @main def main: IO[Unit] =
   for {
     n = 1.require("nonNeg", n => n >= 0)
@@ -11476,53 +11485,53 @@ law always: Bool = 1 == 1
         let p = crate::typ::resolve_field_access(p).expect("resolve require");
         let ir = emit_llvm(&p);
         assert!(
-            ir.contains("sz_law_check"),
-            "expected Law.check in IR:\n{ir}"
+            ir.contains("sz_property_check"),
+            "expected Property.check in IR:\n{ir}"
         );
         assert!(
-            ir.contains("sz_law_assert"),
-            "expected Law.assert in IR:\n{ir}"
+            ir.contains("sz_property_assert"),
+            "expected Property.assert in IR:\n{ir}"
         );
     }
 
     #[test]
-    fn emit_law_check_drops_name_keeps_value() {
+    fn emit_property_check_drops_name_keeps_value() {
         let ir = emit_full(
             r#"
-@main def main: IO[Unit] = IO.println(Law.check("n", true, "x"))
+@main def main: IO[Unit] = IO.println(Property.check("n", true, "x"))
 "#,
         );
-        let (at, name) = first_ptr_arg(&ir, "call void @sz_law_check(ptr ");
-        assert_release_after(&ir, at, name, "Law.check name");
+        let (at, name) = first_ptr_arg(&ir, "call void @sz_property_check(ptr ");
+        assert_release_after(&ir, at, name, "Property.check name");
         let (print_at, value) = first_ptr_arg(&ir, "call ptr @sz_io_println(ptr ");
         assert_ne!(
             value, name,
             "println must use the check value, not the name:\n{ir}"
         );
-        assert_release_after(&ir, print_at, value, "Law.check value");
+        assert_release_after(&ir, print_at, value, "Property.check value");
     }
 
     #[test]
-    fn emit_law_check_int_value_still_drops_name() {
+    fn emit_property_check_int_value_still_drops_name() {
         let ir = emit_full(
             r#"
-@main def main: IO[Unit] = IO.println(Str.fromInt(Law.check("n", true, 3)))
+@main def main: IO[Unit] = IO.println(Str.fromInt(Property.check("n", true, 3)))
 "#,
         );
-        let (at, name) = first_ptr_arg(&ir, "call void @sz_law_check(ptr ");
-        assert_release_after(&ir, at, name, "Law.check name");
+        let (at, name) = first_ptr_arg(&ir, "call void @sz_property_check(ptr ");
+        assert_release_after(&ir, at, name, "Property.check name");
     }
 
     #[test]
-    fn emit_law_check_list_value_dropped_after_len() {
+    fn emit_property_check_list_value_dropped_after_len() {
         let ir = emit_full(
             r#"
 @main def main: IO[Unit] =
-  IO.println(Str.fromInt(List.len(Law.check("n", true, [1, 2]))))
+  IO.println(Str.fromInt(List.len(Property.check("n", true, [1, 2]))))
 "#,
         );
-        let (at, name) = first_ptr_arg(&ir, "call void @sz_law_check(ptr ");
-        assert_release_after(&ir, at, name, "Law.check name");
+        let (at, name) = first_ptr_arg(&ir, "call void @sz_property_check(ptr ");
+        assert_release_after(&ir, at, name, "Property.check name");
         let needle = "call i64 @sz_list_len(ptr ";
         let len_at = ir.find(needle).expect("expected sz_list_len");
         let list = ir[len_at + needle.len()..]
@@ -11530,36 +11539,36 @@ law always: Bool = 1 == 1
             .next()
             .unwrap()
             .trim();
-        assert_release_after(&ir, len_at, list, "Law.check list value");
+        assert_release_after(&ir, len_at, list, "Property.check list value");
     }
 
     #[test]
-    fn emit_law_check_record_value_dropped_after_field() {
+    fn emit_property_check_record_value_dropped_after_field() {
         let ir = emit_full(
             r#"
 record Point(x: Int, y: Int)
 @main def main: IO[Unit] =
-  IO.println(Str.fromInt(Law.check("n", true, Point(1, 2)).x))
+  IO.println(Str.fromInt(Property.check("n", true, Point(1, 2)).x))
 "#,
         );
-        let (at, name) = first_ptr_arg(&ir, "call void @sz_law_check(ptr ");
-        assert_release_after(&ir, at, name, "Law.check name");
+        let (at, name) = first_ptr_arg(&ir, "call void @sz_property_check(ptr ");
+        assert_release_after(&ir, at, name, "Property.check name");
         let temps = adt_temps(&ir);
         assert!(!temps.is_empty(), "expected Point temp:\n{ir}");
         for t in &temps {
-            assert_released(&ir, t, "Law.check record value");
+            assert_released(&ir, t, "Property.check record value");
         }
     }
 
     #[test]
-    fn emit_require_drops_law_name_string() {
+    fn emit_require_drops_property_name_string() {
         let ir = emit_full(
             r#"
 @main def main: IO[Unit] =
   IO.println("x".require("nonEmpty", s => Str.len(s) > 0))
 "#,
         );
-        let (at, name) = first_ptr_arg(&ir, "call void @sz_law_check(ptr ");
+        let (at, name) = first_ptr_arg(&ir, "call void @sz_property_check(ptr ");
         assert_release_after(&ir, at, name, ".require name");
         let temps = cstr_string_temps(&ir);
         assert!(temps.len() >= 2, "expected name and value strings:\n{ir}");
@@ -11569,87 +11578,91 @@ record Point(x: Int, y: Int)
     }
 
     #[test]
-    fn emit_law_assert_drops_name() {
+    fn emit_property_assert_drops_name() {
         let ir = emit_full(
             r#"
-@main def main: IO[Unit] = Law.assert("ok", true)
+@main def main: IO[Unit] = Property.assert("ok", true)
 "#,
         );
-        let (at, name) = first_ptr_arg(&ir, "call ptr @sz_law_assert(ptr ");
-        assert_release_after(&ir, at, name, "Law.assert name");
+        let (at, name) = first_ptr_arg(&ir, "call ptr @sz_property_assert(ptr ");
+        assert_release_after(&ir, at, name, "Property.assert name");
     }
 
     #[test]
-    fn emit_law_sometimes_drops_name() {
+    fn emit_property_sometimes_drops_name() {
         let ir = emit_full(
             r#"
 @main def main: IO[Unit] =
   for {
-    _ = Law.sometimes("hit")
+    _ = Property.sometimes("hit")
     _ <- IO.println("ok")
   } yield ()
 "#,
         );
-        let (at, name) = first_ptr_arg(&ir, "call void @sz_law_sometimes(ptr ");
-        assert_release_after(&ir, at, name, "Law.sometimes name");
+        let (at, name) = first_ptr_arg(&ir, "call void @sz_property_sometimes(ptr ");
+        assert_release_after(&ir, at, name, "Property.sometimes name");
     }
 
     #[test]
-    fn emit_law_a11y_has_drops_needle() {
+    fn emit_property_a11y_has_drops_needle() {
         let ir = emit_full(
             r#"
 @main def main: IO[Unit] =
-  IO.println(Str.fromInt(if (Law.a11yHas("btn")) 1 else 0))
+  IO.println(Str.fromInt(if (Property.a11yHas("btn")) 1 else 0))
 "#,
         );
-        let (at, name) = first_ptr_arg(&ir, "call i64 @sz_law_a11y_has(ptr ");
-        assert_release_after(&ir, at, name, "Law.a11yHas needle");
+        let (at, name) = first_ptr_arg(&ir, "call i64 @sz_property_a11y_has(ptr ");
+        assert_release_after(&ir, at, name, "Property.a11yHas needle");
     }
 
     #[test]
-    fn emit_law_force_drops_unbox_box() {
+    fn emit_property_force_drops_unbox_box() {
         let ir = emit_full(
             r#"
 @main def main: IO[Unit] =
-  IO.println(Str.fromInt(if (Law.force(IO.pure(true))) 1 else 0))
+  IO.println(Str.fromInt(if (Property.force(IO.pure(true))) 1 else 0))
 "#,
         );
         let needle = " = call ptr @sz_io_unsafe_run_or_die(ptr ";
-        let at = ir.find(needle).expect("expected unsafe_run in Law.force");
+        let at = ir
+            .find(needle)
+            .expect("expected unsafe_run in Property.force");
         let box_name = ir[ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0)..at].trim();
         assert!(
             ir[at..].contains(&format!("call i64 @sz_unbox_i64(ptr {box_name})")),
             "expected unbox of {box_name}:\n{ir}"
         );
-        assert_release_after(&ir, at, box_name, "Law.force box");
+        assert_release_after(&ir, at, box_name, "Property.force box");
     }
 
     #[test]
-    fn emit_law_signal_str_owned_and_dropped() {
+    fn emit_property_signal_str_owned_and_dropped() {
         let ir = emit_full(
             r#"
-@main def main: IO[Unit] = IO.println(Law.signalStr(0))
+@main def main: IO[Unit] = IO.println(Property.signalStr(0))
 "#,
         );
-        let needle = " = call ptr @sz_law_signal_str(i64 ";
-        let at = ir.find(needle).expect("expected sz_law_signal_str");
+        let needle = " = call ptr @sz_property_signal_str(i64 ";
+        let at = ir.find(needle).expect("expected sz_property_signal_str");
         let name = ir[ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0)..at].trim();
         let print_at = ir.find("call ptr @sz_io_println(ptr ").expect("println");
-        assert_release_after(&ir, print_at, name, "Law.signalStr");
+        assert_release_after(&ir, print_at, name, "Property.signalStr");
     }
 
     #[test]
-    fn emit_law_signal_list_at_owned_and_dropped() {
+    fn emit_property_signal_list_at_owned_and_dropped() {
         let ir = emit_full(
             r#"
-@main def main: IO[Unit] = IO.println(Law.signalListAt(0, 0))
+@main def main: IO[Unit] = IO.println(Property.signalListAt(0, 0))
 "#,
         );
-        let needle = " = call ptr @sz_law_signal_list_at(i64 ";
-        let at = ir.find(needle).expect("expected sz_law_signal_list_at");
+        let needle = " = call ptr @sz_property_signal_list_at(i64 ";
+        let at = ir
+            .find(needle)
+            .expect("expected sz_property_signal_list_at");
         let name = ir[ir[..at].rfind('\n').map(|i| i + 1).unwrap_or(0)..at].trim();
         let print_at = ir.find("call ptr @sz_io_println(ptr ").expect("println");
-        assert_release_after(&ir, print_at, name, "Law.signalListAt");
+        assert_release_after(&ir, print_at, name, "Property.signalListAt");
     }
 
     #[test]

@@ -10,7 +10,7 @@ Scuzz is not Scala 3. It is not the JVM. It is not a cats-effect port. Scala Nat
 - **Runtime:** native LLVM. No VM, no Java, no classpath.
 - **UI:** `View` is pure. State lives in `Signal`. `Ui.run` is the session. Canvas is Skia-shaped. Headless is a peer runtime.
 - **Tooling:** one CLI (`scuzz`) for build, run, format, check, fuzz, and package. One formatter. One linter (`scuzz check`). `[ui] run --watch` is hot reload.
-- **Testing:** mutation, fuzz, laws, simulation, and determinism are built in. Oracles live in source. Drivers are oracle-free. Simulation is hermetic. Do not add a third-party harness.
+- **Testing:** mutation, fuzz, properties, simulation, and determinism are built in. Oracles live in source. Drivers are oracle-free. Simulation is hermetic. Do not add a third-party harness.
 - **Batteries:** the language and standard kits cover common cases. No ecosystem library sprawl.
 
 Product intent: [docs/vision.md](docs/vision.md). App path: [docs/guide.md](docs/guide.md). Checkout setup: [docs/developer-environment.md](docs/developer-environment.md).
@@ -41,7 +41,7 @@ scuzz run --headless    # Desktop: scuzz run
 
 ## Example
 
-A multi-page Desktop app. Radios switch pages with `showWhen`. Tasks live in a `Signal.list` and persist through `Fs`. The window stays open. Press q or Esc to quit. The snippet condenses [`examples/studio`](examples/studio). The full example adds the widget catalog, laws, and drivers.
+A multi-page Desktop app. Radios switch pages with `showWhen`. Tasks live in a `Signal.list` and persist through `Fs`. The window stays open. Press q or Esc to quit. The snippet condenses [`examples/studio`](examples/studio). The full example adds the widget catalog, properties, and drivers.
 
 ```scala
 @main def main: IO[Unit] =

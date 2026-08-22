@@ -469,14 +469,14 @@ jobs:
         run: |
           cargo run -p scuzz -- fuzz --iterations 16 examples/counter
           if cargo run -p scuzz -- fuzz --no-fail-fast --iterations 8 examples/bad-example; then
-            echo "fuzz should have found the law failure" && exit 1
+            echo "fuzz should have found the property failure" && exit 1
           fi
           test -f examples/bad-example/build/fuzz/repro.toml
           grep -E '^search_failures = [1-9]' examples/bad-example/build/fuzz/summary.toml
           grep -E '^survived = [1-9]' examples/bad-example/build/fuzz/summary.toml
           grep -E '^ran = [1-9]' examples/bad-example/build/fuzz/summary.toml
           if cargo run -p scuzz -- fuzz --replay examples/bad-example/build/fuzz/repro.toml examples/bad-example; then
-            echo "replay should have reproduced the law failure" && exit 1
+            echo "replay should have reproduced the property failure" && exit 1
           fi
           rm -rf /tmp/scuzz-fuzzbug
           cargo run -p scuzz -- new --ui --path /tmp scuzz-fuzzbug

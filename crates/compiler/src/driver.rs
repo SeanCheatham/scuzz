@@ -4,8 +4,9 @@ use crate::fuzz::sometimes_declared_text;
 use crate::lower::lower_program;
 use crate::manifest::{load_manifest, Manifest};
 use crate::overlay::{
-    apply_overlays, check_laws_applied, collect_law_names, driver_table_text, erase_laws,
-    erase_requires, overlay_kind_from_path, residualize_refinements, OverlaySource,
+    apply_overlays, check_properties_applied, collect_property_names, driver_table_text,
+    erase_properties, erase_requires, overlay_kind_from_path, residualize_refinements,
+    OverlaySource,
 };
 use crate::parser::parse_sources;
 use crate::typ::typecheck;
@@ -42,7 +43,7 @@ pub struct CompileOptions {
     pub clang: String,
     /// Skip clang link when fingerprint matches (incremental).
     pub incremental: bool,
-    /// Apply `*.scuzz_sim` and residual in-source `law` decls (fuzz / TestRuntime builds).
+    /// Apply `*.scuzz_sim` and residual in-source `property` decls (fuzz / TestRuntime builds).
     pub verify: bool,
 }
 
@@ -99,18 +100,19 @@ fn prepare_program(resolved: &ResolvedProject, verify: bool) -> Result<Program> 
         .collect();
     let program = parse_sources(&named).map_err(|e| anyhow::anyhow!("parse error: {e}"))?;
     let program = if verify {
-        let law_names = collect_law_names(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
-        check_laws_applied(&program, &law_names).map_err(|e| anyhow::anyhow!("{e}"))?;
+        let property_names =
+            collect_property_names(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
+        check_properties_applied(&program, &property_names).map_err(|e| anyhow::anyhow!("{e}"))?;
         let mut program =
             apply_overlays(program, &resolved.overlays).map_err(|e| anyhow::anyhow!("{e}"))?;
-        check_laws_applied(&program, &law_names).map_err(|e| anyhow::anyhow!("{e}"))?;
+        check_properties_applied(&program, &property_names).map_err(|e| anyhow::anyhow!("{e}"))?;
         program = crate::typ::resolve_named_args(program).map_err(|e| anyhow::anyhow!("{e}"))?;
         residualize_refinements(&mut program);
-        program.law_names = law_names;
+        program.property_names = property_names;
         program
     } else {
         let mut program = program;
-        erase_laws(&mut program);
+        erase_properties(&mut program);
         erase_requires(&mut program);
         program
     };
@@ -906,7 +908,7 @@ mod tests {
                 .collect::<Vec<_>>()
         );
         let mut p = p;
-        crate::overlay::erase_laws(&mut p);
+        crate::overlay::erase_properties(&mut p);
         crate::overlay::erase_requires(&mut p);
         let p = crate::typ::expand_impls(crate::lower::lower_program(p)).expect("expand");
         let p = crate::typ::resolve_named_args(p).expect("named args");

@@ -983,50 +983,50 @@ void sz_testrt_reset(void) {
   sz_testrt_sys_reset_live();
 }
 
-/* --- residual laws (armed under SCUZZ_TESTRT=1) -------------------------- */
+/* --- residual properties (armed under SCUZZ_TESTRT=1) -------------------------- */
 
-static char *g_law_a11y = NULL;
+static char *g_property_a11y = NULL;
 
-void sz_law_stash_a11y(const char *dump) {
+void sz_property_stash_a11y(const char *dump) {
   size_t n;
-  if (g_law_a11y) {
-    sz_free(g_law_a11y);
-    g_law_a11y = NULL;
+  if (g_property_a11y) {
+    sz_free(g_property_a11y);
+    g_property_a11y = NULL;
   }
   if (!dump)
     dump = "";
   n = strlen(dump);
-  g_law_a11y = (char *)sz_alloc(n + 1);
-  memcpy(g_law_a11y, dump, n + 1);
+  g_property_a11y = (char *)sz_alloc(n + 1);
+  memcpy(g_property_a11y, dump, n + 1);
 }
 
-int64_t sz_law_a11y_has(SzString *needle) {
+int64_t sz_property_a11y_has(SzString *needle) {
   const char *n = needle ? sz_string_cstr(needle) : "";
-  if (!g_law_a11y || !n[0])
+  if (!g_property_a11y || !n[0])
     return 0;
-  return strstr(g_law_a11y, n) != NULL ? 1 : 0;
+  return strstr(g_property_a11y, n) != NULL ? 1 : 0;
 }
 
-SzIo *sz_law_assert(SzString *name, int64_t ok) {
+SzIo *sz_property_assert(SzString *name, int64_t ok) {
   const char *tr = getenv("SCUZZ_TESTRT");
   char buf[256];
   if (!tr || tr[0] != '1')
     return pure_drop(NULL);
   if (ok)
     return pure_drop(NULL);
-  snprintf(buf, sizeof buf, "law failed: %s", name ? sz_string_cstr(name) : "?");
+  snprintf(buf, sizeof buf, "property failed: %s", name ? sz_string_cstr(name) : "?");
   fprintf(stderr, "scuzz: %s\n", buf);
   return sz_io_fail_cstr(buf);
 }
 
-void sz_law_check(SzString *name, int64_t ok) {
+void sz_property_check(SzString *name, int64_t ok) {
   const char *tr = getenv("SCUZZ_TESTRT");
   char buf[256];
   if (!tr || tr[0] != '1')
     return;
   if (ok)
     return;
-  snprintf(buf, sizeof buf, "law check failed: %s",
+  snprintf(buf, sizeof buf, "property check failed: %s",
            name ? sz_string_cstr(name) : "?");
   fprintf(stderr, "scuzz: %s\n", buf);
   sz_panic(buf);
@@ -1036,7 +1036,7 @@ void sz_law_check(SzString *name, int64_t ok) {
 static char *g_sometimes[SZ_SOMETIMES_MAX];
 static int g_sometimes_n;
 
-void sz_law_sometimes(SzString *name) {
+void sz_property_sometimes(SzString *name) {
   const char *tr = getenv("SCUZZ_TESTRT");
   const char *s;
   int i;
@@ -1059,7 +1059,7 @@ void sz_law_sometimes(SzString *name) {
   g_sometimes[g_sometimes_n++] = copy;
 }
 
-void sz_law_sometimes_flush(void) {
+void sz_property_sometimes_flush(void) {
   const char *path = getenv("SCUZZ_SOMETIMES_DUMP");
   FILE *f;
   int i;

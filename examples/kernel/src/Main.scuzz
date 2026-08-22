@@ -68,13 +68,13 @@ def lenBoxes(xs: BoxList[Int]): Int =
 def showTag(t: Tag): String =
   t
 
-law sumPositive: Bool =
+property sumPositive: Bool =
   sum(Point(3, 5)) > 0
 
-law onePositive: Bool =
+property onePositive: Bool =
   fromA() > 0
 
-law addComm(a: Int, b: Int): Bool =
+property addComm(a: Int, b: Int): Bool =
   a + b == b + a
 
 def noneInt(): Opt[Int] =

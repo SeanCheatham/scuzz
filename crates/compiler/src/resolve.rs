@@ -936,7 +936,7 @@ mod tests {
             name: name.into(),
             name_span: Span::dummy(),
             is_private: false,
-            is_law: false,
+            is_property: false,
             is_driver: false,
             type_params: vec![],
             params: vec![],

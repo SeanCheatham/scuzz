@@ -127,7 +127,7 @@ SzString *sz_signal_dump(void) {
   return out;
 }
 
-int64_t sz_law_signal_int(int64_t id) {
+int64_t sz_property_signal_int(int64_t id) {
   SigReg *r;
   for (r = g_sig_head; r; r = r->next) {
     if (r->id == (int)id && r->kind == SIG_INT)
@@ -136,7 +136,7 @@ int64_t sz_law_signal_int(int64_t id) {
   return 0;
 }
 
-SzString *sz_law_signal_str(int64_t id) {
+SzString *sz_property_signal_str(int64_t id) {
   SigReg *r;
   for (r = g_sig_head; r; r = r->next) {
     if (r->id == (int)id && r->kind == SIG_STR)
@@ -146,7 +146,7 @@ SzString *sz_law_signal_str(int64_t id) {
   return sz_string_from_cstr("");
 }
 
-int64_t sz_law_signal_list_len(int64_t id) {
+int64_t sz_property_signal_list_len(int64_t id) {
   SigReg *r;
   for (r = g_sig_head; r; r = r->next) {
     if (r->id == (int)id && r->kind == SIG_LIST)
@@ -156,7 +156,7 @@ int64_t sz_law_signal_list_len(int64_t id) {
   return 0;
 }
 
-SzString *sz_law_signal_list_at(int64_t id, int64_t index) {
+SzString *sz_property_signal_list_at(int64_t id, int64_t index) {
   SigReg *r;
   const SzList *p;
   int64_t i;

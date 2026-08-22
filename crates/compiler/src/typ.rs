@@ -626,7 +626,7 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
                 name: mangled,
                 name_span: Span::dummy(),
                 is_private: false,
-                is_law: false,
+                is_property: false,
                 is_driver: false,
                 type_params: for_en.type_params.clone(),
                 params,
@@ -662,7 +662,7 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
                     name: mangled,
                     name_span: Span::dummy(),
                     is_private: false,
-                    is_law: false,
+                    is_property: false,
                     is_driver: false,
                     type_params: en.type_params.clone(),
                     params,
@@ -770,9 +770,9 @@ pub fn typecheck_all(program: &Program) -> Vec<TypeError> {
                     continue;
                 }
                 if let Some(rfn) = case.field_rfn(i) {
-                    if crate::overlay::expr_has_law(rfn) {
+                    if crate::overlay::expr_has_property(rfn) {
                         errs.push(TypeError::Msg(format!(
-                            "where on `{}.{}` must not call Law.*",
+                            "where on `{}.{}` must not call Property.*",
                             en.name, fname
                         )));
                         continue;
@@ -1609,9 +1609,9 @@ fn typecheck_def(
                     });
                 }
             }
-            if crate::overlay::expr_has_law(dflt) {
+            if crate::overlay::expr_has_property(dflt) {
                 return Err(TypeError::At {
-                    msg: format!("default for `{}` must not call Law.*", p.name),
+                    msg: format!("default for `{}` must not call Property.*", p.name),
                     span: dflt.span.clone(),
                 });
             }
@@ -1626,9 +1626,9 @@ fn typecheck_def(
             }
         }
         if let Some(rfn) = &p.rfn {
-            if crate::overlay::expr_has_law(rfn) {
+            if crate::overlay::expr_has_property(rfn) {
                 return Err(TypeError::At {
-                    msg: format!("where on `{}` must not call Law.*", p.name),
+                    msg: format!("where on `{}` must not call Property.*", p.name),
                     span: rfn.span.clone(),
                 });
             }
@@ -1939,13 +1939,13 @@ fn split_require_args(args: &[Expr]) -> Result<(String, Expr), TypeError> {
     }
 }
 
-fn is_nullary_bool_law(
+fn is_nullary_bool_property(
     name: &str,
     funs: &FunIndex<'_>,
     current_module: &str,
 ) -> Result<bool, TypeError> {
     match funs.resolve(name, current_module) {
-        Ok(f) if f.is_law && f.params.is_empty() => Ok(matches!(f.ret, Type::Bool)),
+        Ok(f) if f.is_property && f.params.is_empty() => Ok(matches!(f.ret, Type::Bool)),
         Ok(f) if f.params.is_empty() && matches!(f.ret, Type::Bool) => Ok(true),
         Ok(_) => Ok(false),
         Err(crate::resolve::ResolveError::Unknown(_)) => Ok(false),
@@ -1971,7 +1971,9 @@ fn infer_require_pred(
     env: &mut HashMap<String, Type>,
 ) -> Result<Type, TypeError> {
     match &pred.kind {
-        ExprKind::Var(name) if is_nullary_bool_law(name, funs, current_module)? => Ok(Type::Bool),
+        ExprKind::Var(name) if is_nullary_bool_property(name, funs, current_module)? => {
+            Ok(Type::Bool)
+        }
         ExprKind::Lambda { param, body, .. } => {
             let inner = match receiver_ty {
                 Type::Io(t) => t.as_ref(),
@@ -2049,7 +2051,7 @@ fn normalize_require_pred(
     let span = pred.span.clone();
     match pred.kind {
         ExprKind::Var(name)
-            if is_nullary_bool_law(&name, funs, current_module).unwrap_or(false) =>
+            if is_nullary_bool_property(&name, funs, current_module).unwrap_or(false) =>
         {
             Expr::new(
                 ExprKind::Call {
@@ -2089,7 +2091,7 @@ fn force_pred_if_io(pred: Expr, pred_ty: &Type) -> Expr {
         let span = pred.span.clone();
         Expr::new(
             ExprKind::Call {
-                callee: "Law.force".into(),
+                callee: "Property.force".into(),
                 args: vec![pred],
             },
             span,
@@ -2131,7 +2133,7 @@ fn rewrite_require(
                 ExprKind::FlatMap {
                     inner: Box::new(Expr::new(
                         ExprKind::Call {
-                            callee: "Law.assert".into(),
+                            callee: "Property.assert".into(),
                             args: vec![
                                 name_lit,
                                 Expr::new(ExprKind::Var("__ok".into()), span.clone()),
@@ -2178,7 +2180,7 @@ fn rewrite_require(
             let pred = force_pred_if_io(pred, &pred_ty);
             let check = Expr::new(
                 ExprKind::Call {
-                    callee: "Law.check".into(),
+                    callee: "Property.check".into(),
                     args: vec![
                         name_lit,
                         pred,
@@ -5052,64 +5054,64 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::Opaque("SignalInt".into()))?;
             Ok(Type::Opaque("SignalStr".into()))
         }
-        "Law.signalInt" => {
+        "Property.signalInt" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
             Ok(Type::Int)
         }
-        "Law.signalStr" => {
+        "Property.signalStr" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
             Ok(Type::String)
         }
-        "Law.signalListLen" => {
+        "Property.signalListLen" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
             Ok(Type::Int)
         }
-        "Law.signalListAt" => {
+        "Property.signalListAt" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
             expect_ty(&arg_tys[1], &Type::Int)?;
             Ok(Type::String)
         }
-        "Law.a11yHas" => {
+        "Property.a11yHas" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::Bool)
         }
-        "Law.assert" => {
+        "Property.assert" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::String)?;
             if !matches!(arg_tys[1], Type::Bool) {
                 return Err(TypeError::Msg(format!(
-                    "Law.assert ok must be Bool, got {:?}",
+                    "Property.assert ok must be Bool, got {:?}",
                     arg_tys[1]
                 )));
             }
             Ok(Type::Io(Box::new(Type::Unit)))
         }
-        "Law.check" => {
+        "Property.check" => {
             expect_arity(callee, &arg_tys, 3)?;
             expect_ty(&arg_tys[0], &Type::String)?;
             if !matches!(arg_tys[1], Type::Bool) {
                 return Err(TypeError::Msg(format!(
-                    "Law.check ok must be Bool, got {:?}",
+                    "Property.check ok must be Bool, got {:?}",
                     arg_tys[1]
                 )));
             }
             Ok(arg_tys[2].clone())
         }
-        "Law.force" => {
+        "Property.force" => {
             expect_arity(callee, &arg_tys, 1)?;
             match &arg_tys[0] {
                 Type::Io(inner) if matches!(**inner, Type::Bool) => Ok(Type::Bool),
                 other => Err(TypeError::Msg(format!(
-                    "Law.force expects IO[Bool], got {other:?}"
+                    "Property.force expects IO[Bool], got {other:?}"
                 ))),
             }
         }
-        "Law.sometimes" => {
+        "Property.sometimes" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::Unit)
@@ -7085,7 +7087,7 @@ fn mono_expr(
                                 name: mangled.clone(),
                                 name_span: f.name_span.clone(),
                                 is_private: f.is_private,
-                                is_law: f.is_law,
+                                is_property: f.is_property,
                                 is_driver: f.is_driver,
                                 type_params: Vec::new(),
                                 params: params?,
@@ -10908,7 +10910,7 @@ def origin(): Point = Point(3, 5)
         let p = resolve_field_access(p).expect("copy lower");
         let dumped = format!("{:?}", p.main.body.kind);
         assert!(
-            dumped.contains("Law.check"),
+            dumped.contains("Property.check"),
             "copy-lower should wrap where: {dumped}"
         );
     }
@@ -13043,25 +13045,25 @@ def scale(x: Float): Float = x * 2.0
     }
 
     #[test]
-    fn typechecks_law_signal_list_at() {
+    fn typechecks_property_signal_list_at() {
         let src = r#"@main def main: IO[Unit] =
-  IO.println(Law.signalListAt(0, 0))
+  IO.println(Property.signalListAt(0, 0))
 "#;
         let p = lower_program(parse(src).unwrap());
-        typecheck(&p).expect("Law.signalListAt should typecheck");
+        typecheck(&p).expect("Property.signalListAt should typecheck");
     }
 
     #[test]
-    fn typechecks_law_check_sometimes() {
+    fn typechecks_property_check_sometimes() {
         let src = r#"@main def main: IO[Unit] =
   for {
-    _ = Law.sometimes("hit")
-    s = Law.check("ok", true, "x")
+    _ = Property.sometimes("hit")
+    s = Property.check("ok", true, "x")
     _ <- IO.println(s)
   } yield ()
 "#;
         let p = lower_program(parse(src).unwrap());
-        typecheck(&p).expect("Law.check / Law.sometimes should typecheck");
+        typecheck(&p).expect("Property.check / Property.sometimes should typecheck");
     }
 
     #[test]
@@ -14640,7 +14642,7 @@ def describe(e: Either[Int, String]): String = e match {
     #[test]
     fn typechecks_require_on_pure_and_io() {
         let src = r#"
-law always: Bool = 1 == 1
+property always: Bool = 1 == 1
 @main def main: IO[Unit] =
   for {
     n = 1.require(n => n >= 0)
@@ -14652,9 +14654,9 @@ law always: Bool = 1 == 1
     }
 
     #[test]
-    fn resolve_require_to_law_check_and_assert() {
+    fn resolve_require_to_property_check_and_assert() {
         let src = r#"
-law always: Bool = 1 == 1
+property always: Bool = 1 == 1
 @main def main: IO[Unit] =
   for {
     n = 1.require("nonNeg", n => n >= 0)
@@ -14666,12 +14668,12 @@ law always: Bool = 1 == 1
         let p = resolve_field_access(p).expect("resolve require");
         let dumped = format!("{:?}", p.main.body);
         assert!(
-            dumped.contains("Law.check"),
-            "expected Law.check residual: {dumped}"
+            dumped.contains("Property.check"),
+            "expected Property.check residual: {dumped}"
         );
         assert!(
-            dumped.contains("Law.assert"),
-            "expected Law.assert residual: {dumped}"
+            dumped.contains("Property.assert"),
+            "expected Property.assert residual: {dumped}"
         );
     }
 

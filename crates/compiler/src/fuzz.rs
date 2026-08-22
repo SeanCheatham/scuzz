@@ -441,7 +441,7 @@ pub fn sometimes_declared_text(program: &Program) -> String {
 
 fn collect_sometimes(e: &Expr, acc: &mut Vec<String>) {
     if let ExprKind::Call { callee, args } = &e.kind {
-        if callee == "Law.sometimes" {
+        if callee == "Property.sometimes" {
             if let Some(ExprKind::StrLit(name)) = args.first().map(|a| &a.kind) {
                 if !acc.iter().any(|n| n == name) {
                     acc.push(name.clone());
@@ -660,9 +660,9 @@ scroll:scroll
             r#"
 @main def main: IO[Unit] =
   for {
-    _ = Law.sometimes("a")
-    _ = Law.sometimes("b")
-    _ = Law.sometimes("a")
+    _ = Property.sometimes("a")
+    _ = Property.sometimes("b")
+    _ = Property.sometimes("a")
   } yield ()
 "#,
         )

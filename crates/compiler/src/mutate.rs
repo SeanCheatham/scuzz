@@ -1,21 +1,21 @@
 //! Mutation of live `def` bodies and residual oracle predicates.
 //!
 //! Program mode mutates live code and keeps residual oracles armed.
-//! Oracle mode mutates `Law.check` / `Law.assert` / `.require` predicates.
+//! Oracle mode mutates `Property.check` / `Property.assert` / `.require` predicates.
 
 use crate::ast::{BinOp, EnumDef, Expr, ExprKind, FunDef, Program};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MutateMode {
-    /// Mutate live `def` / `@main` bodies. Skip law and driver bodies and
+    /// Mutate live `def` / `@main` bodies. Skip property and driver bodies and
     /// residual oracle predicates.
     Program,
-    /// Mutate residual `Law.check` / `Law.assert` / `.require` predicates.
+    /// Mutate residual `Property.check` / `Property.assert` / `.require` predicates.
     Oracles,
 }
 
 fn is_oracle_callee(callee: &str) -> bool {
-    callee == "Law.check" || callee == "Law.assert"
+    callee == "Property.check" || callee == "Property.assert"
 }
 
 fn negate_pred(pred: Expr) -> Expr {
@@ -371,7 +371,7 @@ fn bin_mutant(
 
 fn mutate_def_body(d: &FunDef, cx: &MutCx<'_>) -> bool {
     match cx.mode {
-        MutateMode::Program => !d.is_law && !d.is_driver,
+        MutateMode::Program => !d.is_property && !d.is_driver,
         MutateMode::Oracles => true,
     }
 }

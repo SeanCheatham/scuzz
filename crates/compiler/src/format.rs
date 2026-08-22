@@ -282,7 +282,7 @@ fn pretty_type(t: &Type) -> String {
 }
 
 fn pretty_def(d: &FunDef) -> String {
-    if d.is_law {
+    if d.is_property {
         let params: Vec<String> = d.params.iter().map(pretty_param).collect();
         let sig = if params.is_empty() {
             d.name.clone()
@@ -290,7 +290,7 @@ fn pretty_def(d: &FunDef) -> String {
             format!("{}({})", d.name, params.join(", "))
         };
         return format!(
-            "law {}: {} =\n{}",
+            "property {}: {} =\n{}",
             sig,
             pretty_type(&d.ret),
             pretty_expr(&d.body, 1)
@@ -1036,13 +1036,13 @@ def scale(x: Float): Float = x * 2.0
     }
 
     #[test]
-    fn formats_law() {
+    fn formats_property() {
         let src = r#"
-law always: Bool = 1 == 1
+property always: Bool = 1 == 1
 @main def main: IO[Unit] = IO.println("ok")
 "#;
         let out = format_source(src).unwrap();
-        assert!(out.contains("law always: Bool ="));
+        assert!(out.contains("property always: Bool ="));
         assert!(!out.contains("def always"));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
