@@ -272,6 +272,18 @@ def listProof(): IO[Unit] =
     _ <- IO.println(s"phadd:${List.join(List.map(List.map(List.range(1, 4), _ + 1), Str.fromInt(_)), ",")}")
     _ <- IO.println(s"phfilt:${List.join(List.filter(["a", "b", "c"], _ != "b"), ",")}")
     _ <- IO.println(s"phid:${List.join(List.map(["a", "b"], _), ",")}")
+    _ <- IO.println(s"caselam:${List.join(List.map([Opt.Some(1), noneInt()], {
+  case Opt.Some(n) => Str.fromInt(n)
+  case Opt.None => "n"
+}), ",")}")
+    _ <- IO.println(s"caselam0:${List.join(List.map([]: List[Opt[Int]], {
+  case Opt.Some(n) => Str.fromInt(n)
+  case Opt.None => "n"
+}), ",")}")
+    _ <- IO.println(s"caselit:${List.join(List.map([0, 2], {
+  case 0 => "z"
+  case _ => "n"
+}), ",")}")
     _ <- IO.println(s"tab:${List.join(List.tabulate(3, i => Str.fromInt(i)), ",")}")
     _ <- IO.println(s"isp:${List.join(List.intersperse(xs, "|"), ",")}")
     _ <- IO.println(s"grp:${List.join(List.map(List.grouped(xs, 2), g => List.join(g, ",")), "|")}")
@@ -467,9 +479,14 @@ def mapProof(): IO[Unit] =
     n <- IO.pure(3).map(x => x + 1)
     s <- IO.pure("a").map(x => Str.concat(x, "!"))
     z <- IO.pure(1).map(_ => 7)
+    o <- IO.pure(Opt.Some(1)).map({
+  case Opt.Some(n) => n
+  case Opt.None => 0
+})
     _ <- IO.println(s"iomap:${Str.fromInt(n)}")
     _ <- IO.println(s"iomapS:$s")
     _ <- IO.println(s"iomapU:${Str.fromInt(z)}")
+    _ <- IO.println(s"caseio:${Str.fromInt(o)}")
   } yield ()
 
 def tupleProof(): IO[Unit] =

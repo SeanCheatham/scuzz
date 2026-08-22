@@ -1,7 +1,7 @@
 use crate::ast::{
     is_for_binder_pat, is_tuple_binder_pat, opaque_tuple_pat, simple_binder_name, BinOp, EnumCase,
     EnumDef, Expr, ExprKind, ForBinder, FunDef, ImplDef, ImplMethod, Import, InterpPart, MainDef,
-    MatchArm, Param, Pattern, Program, TraitDef, TraitMethod, Type, TypeAlias, UnOp,
+    MatchArm, Param, Pattern, Program, TraitDef, TraitMethod, Type, TypeAlias, UnOp, CASE_LAMBDA,
     MAX_TUPLE_ARITY, TUP_UNPACK,
 };
 use crate::lexer::{lex, InterpTok, LexError, SpannedToken, Token};
@@ -1929,6 +1929,14 @@ impl Parser {
 
     fn parse_lambda(&mut self) -> Result<(Option<String>, Expr), ParseError> {
         match self.peek().clone() {
+            Token::LBrace if matches!(self.peek_nth(1), Token::Case) => {
+                let start = self.current_span();
+                let lam = self.parse_case_lambda(start)?;
+                match lam.kind {
+                    ExprKind::Lambda { param, body, .. } => Ok((param, *body)),
+                    _ => Err(self.err("internal: case lambda")),
+                }
+            }
             Token::Underscore => {
                 self.bump();
                 self.expect(&Token::Arrow)?;
@@ -1974,9 +1982,24 @@ impl Parser {
             }
             _ => {
                 Err(self
-                    .err("expected `_ => expr`, `() => expr`, `(x: T) => expr`, `(a, b) => expr`, or `name => expr`"))
+                    .err("expected `_ => expr`, `() => expr`, `(x: T) => expr`, `(a, b) => expr`, `{ case … }`, or `name => expr`"))
             }
         }
+    }
+
+    /// `{ case Pat => body case … }`. Matches the bound kit or `A => B` value.
+    fn parse_case_lambda(&mut self, start: Span) -> Result<Expr, ParseError> {
+        let arms = self.parse_match_arms()?;
+        let span = start.cover(&self.prev_span());
+        let param = CASE_LAMBDA.to_string();
+        let body = self.mk(
+            ExprKind::Match {
+                scrutinee: Box::new(self.mk(ExprKind::Var(param.clone()), span.clone())),
+                arms,
+            },
+            span.clone(),
+        );
+        Ok(self.mk_lambda(Some(param), None, None, body, span))
     }
 
     /// `LParen` is already consumed. Parse `(x) => body`, `(x: T) => body`, or `(a, b) => body`.
@@ -2159,6 +2182,14 @@ impl Parser {
                     },
                     span,
                 ))
+            }
+            Token::LBrace => {
+                if matches!(self.peek_nth(1), Token::Case) {
+                    return self.parse_case_lambda(start);
+                }
+                return Err(self.err(
+                    "statement blocks are not allowed; write `{ case … }` or use `for` to bind names",
+                ));
             }
             Token::LParen => {
                 self.bump();
@@ -3023,6 +3054,72 @@ def x(): Float = 1.5e1 + 1e-3
             )),
             other => panic!("expected call, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn parse_case_lambda_on_list_map() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map([Opt.Some(1)], { case Opt.Some(n) => Str.fromInt(n) case Opt.None => "n" }), ","))
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::IoPrintln(arg) => match &arg.kind {
+                ExprKind::Call { callee, args } if callee == "List.join" => match &args[0].kind {
+                    ExprKind::Call { callee, args } if callee == "List.map" => {
+                        let ExprKind::Lambda { param, body, .. } = &args[1].kind else {
+                            panic!("expected lambda, got {:?}", args[1].kind);
+                        };
+                        let arms = crate::ast::case_lambda_match_arms(param.as_deref(), body)
+                            .expect("expected `{ case … }` lambda");
+                        assert_eq!(arms.len(), 2, "{arms:?}");
+                    }
+                    other => panic!("expected List.map, got {other:?}"),
+                },
+                other => panic!("expected List.join, got {other:?}"),
+            },
+            other => panic!("expected println, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn parse_case_lambda_on_io_map() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  IO.pure(Opt.Some(1)).map({ case Opt.Some(n) => n case Opt.None => 0 }).flatMap(n => IO.println(Str.fromInt(n)))
+"#;
+        let p = parse(src).unwrap();
+        match &p.main.body.kind {
+            ExprKind::FlatMap { inner, .. } => match &inner.kind {
+                ExprKind::IoMap { param, body, .. } => {
+                    assert_eq!(param.as_deref(), Some(crate::ast::CASE_LAMBDA));
+                    assert!(
+                        matches!(body.kind, ExprKind::Match { .. }),
+                        "expected match body, got {:?}",
+                        body.kind
+                    );
+                }
+                other => panic!("expected io.map, got {other:?}"),
+            },
+            other => panic!("expected flatMap, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn rejects_statement_block() {
+        let src = r#"@main def main: IO[Unit] = { IO.println("x") }"#;
+        let err = parse(src).unwrap_err();
+        assert!(
+            err.message().contains("statement blocks"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]

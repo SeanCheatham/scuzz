@@ -683,6 +683,7 @@ pub enum ExprKind {
     NamedArg { name: String, value: Box<Expr> },
     /// `_ => expr` or `x => expr` — single-param lambda literal (tap callbacks).
     /// `(a, b) =>` sets `pat` and binds `param` to `"__tup"` until lower unpacks.
+    /// `{ case Pat => body }` binds `param` to `"__case"` and matches that value.
     Lambda {
         param: Option<String>,
         /// `Some` for `(x: T) =>`. Kit args still bind from the callee.
@@ -703,6 +704,31 @@ pub enum InterpPart {
 
 /// Synthetic binder for `(a, b) = e` / `Opt.Some(n) =>` until lower unpacks the pattern.
 pub const TUP_UNPACK: &str = "__tup";
+
+/// Synthetic binder for `{ case Pat => body }`. The body matches this name.
+pub const CASE_LAMBDA: &str = "__case";
+
+/// True for `__tup` / `__case` binders that must not leak into hover or complete.
+pub fn is_synthetic_lambda_param(name: &str) -> bool {
+    name == TUP_UNPACK || name == CASE_LAMBDA
+}
+
+/// Arms of `{ case … }` from a lambda's param and body.
+pub fn case_lambda_match_arms<'a>(
+    param: Option<&'a str>,
+    body: &'a Expr,
+) -> Option<&'a [MatchArm]> {
+    if param != Some(CASE_LAMBDA) {
+        return None;
+    }
+    match &body.kind {
+        ExprKind::Match { scrutinee, arms } => match &scrutinee.kind {
+            ExprKind::Var(n) if n == CASE_LAMBDA => Some(arms.as_slice()),
+            _ => None,
+        },
+        _ => None,
+    }
+}
 
 /// Max tuple slots. Nest tuples for a larger product.
 pub const MAX_TUPLE_ARITY: usize = 8;

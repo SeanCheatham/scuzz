@@ -13555,6 +13555,46 @@ enum Opt[T]:
         );
     }
 
+    #[test]
+    fn emit_case_lambda_list_map() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map([Opt.Some(1)], { case Opt.Some(n) => Str.fromInt(n) case Opt.None => "n" }), ","))
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_list_map"),
+            "case lambda List.map must emit sz_list_map:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_adt_tag"),
+            "case lambda must match the element:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_case_lambda_io_map() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  IO.pure(Opt.Some(1)).map({ case Opt.Some(n) => n case Opt.None => 0 }).flatMap(n => IO.println(Str.fromInt(n)))
+"#;
+        let ir = gen_ir(src);
+        assert!(
+            ir.contains("sz_io_flatmap"),
+            "case lambda IO.map must emit sz_io_flatmap:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_adt_tag"),
+            "case lambda must match the success:\n{ir}"
+        );
+    }
+
     fn gen_ir(src: &str) -> String {
         let p = crate::lower::lower_program(parse(src).unwrap());
         crate::typ::typecheck(&p).expect("typecheck");

@@ -1,8 +1,8 @@
 //! Signature hover from the same parse as `check`. No second typer.
 
 use crate::ast::{
-    EnumDef, Expr, ExprKind, ForBinder, FunDef, Param, Pattern, Program, Type, TypeAlias,
-    TUP_UNPACK,
+    is_synthetic_lambda_param, EnumDef, Expr, ExprKind, ForBinder, FunDef, Param, Pattern, Program,
+    Type, TypeAlias,
 };
 use crate::lexer::{lex, Token};
 use crate::resolve::module_id_from_label;
@@ -284,7 +284,7 @@ fn collect_kit_locals(expr: &Expr, offset: usize, out: &mut Vec<(String, Type)>)
                         if a.span.start <= offset
                             && offset <= a.span.end
                             && p != "_"
-                            && p != TUP_UNPACK
+                            && !is_synthetic_lambda_param(p)
                         {
                             out.push((p.clone(), pty));
                         }
@@ -332,12 +332,24 @@ fn walk_binders(expr: &Expr, name: &str, offset: usize, best: &mut Option<(usize
             let hit = if let Some(p) = pat {
                 pat_binds(p, name)
             } else {
-                param.as_deref() == Some(name)
+                param.as_deref() == Some(name) && !is_synthetic_lambda_param(name)
             };
             if hit && covers {
                 consider(best, span_len, name);
             }
             walk_binders(body, name, offset, best);
+        }
+        ExprKind::Match { scrutinee, arms } => {
+            walk_binders(scrutinee, name, offset, best);
+            for arm in arms {
+                if covers && pat_binds(&arm.pattern, name) {
+                    consider(best, span_len, name);
+                }
+                if let Some(g) = &arm.guard {
+                    walk_binders(g, name, offset, best);
+                }
+                walk_binders(&arm.body, name, offset, best);
+            }
         }
         ExprKind::For { binders, body } => {
             for b in binders {
@@ -1321,6 +1333,7 @@ const TYPED_KIT_CALLEES: &[&str] = &[
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::TUP_UNPACK;
     use crate::parser::parse_file;
 
     fn hover_src(src: &str, needle: &str) -> String {
@@ -1432,6 +1445,27 @@ enum Opt[T]:
         let h = hover_in_source(&program, "Main.scuzz", src, offset).unwrap();
         assert_eq!(h, "n", "{h}");
         assert!(!h.contains(TUP_UNPACK), "{h}");
+    }
+
+    #[test]
+    fn hovers_case_lambda_bind() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map([Opt.Some(1)], { case Opt.Some(n) => Str.fromInt(n) case Opt.None => "n" }), ","))
+"#;
+        let program = parse_file(src, "Main.scuzz").unwrap();
+        let offset = src.find("fromInt(n)").unwrap() + 8;
+        let h = hover_in_source(&program, "Main.scuzz", src, offset).unwrap();
+        assert_eq!(h, "n", "{h}");
+        assert!(!h.contains("__case"), "{h}");
+        let h = hover_src(src, "map");
+        assert!(
+            h.contains("List.map(xs: List[T], f: T => U): List[U]"),
+            "{h}"
+        );
     }
 
     #[test]

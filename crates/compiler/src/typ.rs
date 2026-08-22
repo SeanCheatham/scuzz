@@ -2701,6 +2701,10 @@ fn rewrite_fields(
                 let rewritten = if let Some(pty) = kit_lambda_param_ty_at(&callee, i, nargs, &prior)
                 {
                     rewrite_lambda_arg(a, pty, enums, funs, methods, current_module, env)?
+                } else if let Some((pty, _)) =
+                    user_fun_lambda_expected(&callee, i, enums, funs, current_module)
+                {
+                    rewrite_lambda_arg(a, pty, enums, funs, methods, current_module, env)?
                 } else {
                     rewrite_fields(a, enums, funs, methods, current_module, env)?
                 };
@@ -6224,6 +6228,56 @@ pub fn monomorphize(mut program: Program) -> Result<Program, TypeError> {
     specialize_enums(program)
 }
 
+// Arity comes from the shared typecheck context (enums, funs, methods, module, env).
+#[allow(clippy::too_many_arguments)]
+fn mono_lambda_arg(
+    expr: Expr,
+    param_ty: Type,
+    enums: &EnumIndex<'_>,
+    funs: &FunIndex<'_>,
+    methods: &MethodIndex,
+    current_module: &str,
+    env: &mut HashMap<String, Type>,
+    specialized: &mut HashMap<String, FunDef>,
+) -> Result<Expr, TypeError> {
+    if let ExprKind::Lambda {
+        param,
+        param_ty: ann,
+        pat,
+        body,
+    } = expr.kind
+    {
+        let span = expr.span;
+        let bind_ty = if let Some(ref a) = ann {
+            resolve_ascribe_type(a, enums, current_module)?
+        } else {
+            param_ty
+        };
+        let old = bind_opt(param.as_ref(), bind_ty, env);
+        let body = mono_expr(
+            *body,
+            enums,
+            funs,
+            methods,
+            current_module,
+            env,
+            specialized,
+        )?;
+        restore_opt(old, env);
+        Ok(Expr::new(
+            ExprKind::Lambda {
+                param,
+                param_ty: ann,
+                pat,
+                body: Box::new(body),
+            },
+            span,
+        ))
+    } else {
+        mono_expr(expr, enums, funs, methods, current_module, env, specialized)
+    }
+}
+
 fn mono_expr(
     expr: Expr,
     enums: &EnumIndex<'_>,
@@ -6246,10 +6300,44 @@ fn mono_expr(
                 ),
                 _ => None,
             };
-            let args = args
-                .into_iter()
-                .map(|a| mono_expr(a, enums, funs, methods, current_module, env, specialized))
-                .collect::<Result<Vec<_>, _>>()?;
+            let nargs = args.len();
+            let mut prior: Vec<Type> = Vec::new();
+            let mut out = Vec::with_capacity(nargs);
+            for (i, a) in args.into_iter().enumerate() {
+                let rewritten = if let Some(pty) = kit_lambda_param_ty_at(&callee, i, nargs, &prior)
+                {
+                    mono_lambda_arg(
+                        a,
+                        pty,
+                        enums,
+                        funs,
+                        methods,
+                        current_module,
+                        env,
+                        specialized,
+                    )?
+                } else if let Some((pty, _)) =
+                    user_fun_lambda_expected(&callee, i, enums, funs, current_module)
+                {
+                    mono_lambda_arg(
+                        a,
+                        pty,
+                        enums,
+                        funs,
+                        methods,
+                        current_module,
+                        env,
+                        specialized,
+                    )?
+                } else {
+                    mono_expr(a, enums, funs, methods, current_module, env, specialized)?
+                };
+                let ty = infer(&rewritten, enums, funs, methods, current_module, env)
+                    .unwrap_or_else(|_| Type::Opaque("Rewrite".into()));
+                prior.push(ty);
+                out.push(rewritten);
+            }
+            let args = out;
             if let Ok(f) = funs.resolve(&callee, current_module) {
                 if !f.type_params.is_empty() {
                     let arg_tys = orig_arg_tys.expect("generic call arg types");
@@ -7868,8 +7956,14 @@ fn elaborate_expr(
         } => {
             let bind_ty = if let Some(ann) = &param_ty {
                 resolve_ascribe_type(ann, enums, current_module)?
+            } else if let Some(Type::Fun(a, _)) = expected {
+                a.as_ref().clone()
             } else {
                 Type::Opaque("Param".into())
+            };
+            let body_expected = match expected {
+                Some(Type::Fun(_, b)) => Some(b.as_ref()),
+                _ => None,
             };
             let old = bind_opt(param.as_ref(), bind_ty, env);
             let body = elaborate_expr(
@@ -7879,7 +7973,7 @@ fn elaborate_expr(
                 methods,
                 current_module,
                 env,
-                None,
+                body_expected,
                 tparams,
             )?;
             restore_opt(old, env);
@@ -8963,6 +9057,93 @@ def apply(f: Int => String, n: Int): String = f(n)
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("typed Int lambda on Fun param");
+    }
+
+    #[test]
+    fn typechecks_case_lambda_on_list_map() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+def noneInt(): Opt[Int] = Opt.None
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map([Opt.Some(1), noneInt()], { case Opt.Some(n) => Str.fromInt(n) case Opt.None => "n" }), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("case lambda on List.map");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate case lambda map");
+        crate::typ::monomorphize(p).expect("mono case lambda map");
+    }
+
+    #[test]
+    fn typechecks_case_lambda_on_user_fun() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
+@main def main: IO[Unit] =
+  IO.println(apply({ case Opt.Some(n) => Str.fromInt(n) case Opt.None => "?" }, Opt.Some(3)))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("case lambda on A => B param");
+        let p = crate::typ::elaborate_generics(p).expect("elaborate case lambda");
+        crate::typ::monomorphize(p).expect("mono case lambda");
+    }
+
+    #[test]
+    fn typechecks_case_lambda_on_io_map() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  IO.pure(Opt.Some(1)).map({ case Opt.Some(n) => n case Opt.None => 0 }).flatMap(n => IO.println(Str.fromInt(n)))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("case lambda on IO.map");
+    }
+
+    #[test]
+    fn typechecks_case_lambda_empty_list_pin() {
+        let src = r#"
+enum Opt[T]:
+  case Some(x: T)
+  case None
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map([]: List[Opt[Int]], { case Opt.Some(n) => Str.fromInt(n) case Opt.None => "n" }), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("case lambda on pinned empty List");
+    }
+
+    #[test]
+    fn typechecks_case_lambda_literal() {
+        let src = r#"
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map([0, 2], { case 0 => "z" case _ => "n" }), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("case lambda literal arms");
+    }
+
+    #[test]
+    fn rejects_case_lambda_nonexhaustive() {
+        let src = r#"
+enum Color:
+  case Red
+  case Blue
+@main def main: IO[Unit] =
+  IO.println(List.join(List.map([Color.Red], { case Color.Red => "r" }), ","))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        let err = typecheck(&p).unwrap_err();
+        assert!(
+            err.message()
+                .contains("non-exhaustive match: missing Color.Blue"),
+            "{}",
+            err.message()
+        );
     }
 
     #[test]
