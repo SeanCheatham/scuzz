@@ -42,7 +42,7 @@ Upstream Scala Native is a *reference*, not a dependency. Divergence is intentio
 - Not SwiftUI / UIKit / WinUI wrappers
 - Not “every widget rebuild is an `IO`” (`View` build stays sync/pure)
 - Not imperative View trees (`View.addChild`); nested constructors only
-- Not classical / example-based unit-test culture (`src/test`, Mockito, assert-equal fixtures, third-party test runners) for apps. Use **mutation + fuzz + properties + sim + determinism**, all in `scuzz`, instead. Examples survive only as oracle-free **drivers**. The objection is example-based *oracles*, not examples-as-workloads
+- Not classical / example-based unit-test culture (`src/test`, Mockito, assert-equal fixtures, third-party test runners) for apps. Use **mutation + fuzz + properties + sim + determinism**, all in `scuzz`, instead. Examples survive as oracle-free **drivers** and as concrete-fact properties. The objection is fixture-diff suites as the primary strategy, not examples-as-workloads and not concrete facts stated as properties
 - Not Flutter DevTools / VM patching. `[ui] run --watch` is in-process hot reload (stamp-reload Views). A live structural dump and stamp-driven inject are in. `scuzz watch` only rebuilds. IO-only `run --watch` kills and reruns.
 - Not an sbt / Gradle / `pubspec` plugin DSL (`scuzz.toml` is data)
 - Not Flutter platform channels
@@ -174,6 +174,8 @@ Direction: payload **enums** / **`record`** + thin **traits**-as-interfaces. Mon
 App correctness is **not** classical unit tests. Prefer **mutation, fuzzing, properties, simulation, and determinism**. All are first-class in the language and `scuzz` tooling. The split is **oracles in source, drivers as the test surface**:
 
 - **Oracles live in the live module.** Top-level `property` declarations (pure `Bool` predicates; nullary or generator-friendly `Int` / `String` / `Bool` params), explicit `.require(pred)` on values / `IO` (type-preserving; residual `Property.check` / sequenced `Property.assert` under verify), reachability `Property.sometimes(name)`, and `where` refinements on `def` params and `record` fields. All erase from live builds. Armed under TestRuntime / fuzz / mutation. Nullary properties apply at the call site through `.require`. Parameterized properties are instantiated by `scuzz fuzz`.
+- **Concrete facts are legitimate oracles.** A property may state one known input/output pair (the VAT rate for `"DE"` is `0.19`). Mutation arms it like any oracle. Do not contort a concrete fact into a general property. Do not grow fixture-diff suites out of concrete facts. Direction (not current): a blessed table idiom feeds known pairs to the fuzz corpus as seeds and arms them as oracles.
+- **Model and metamorphic oracles close the oracle gap.** Pair a live def with a deliberately naive model def. A property asserts agreement while drivers exercise both. When no absolute oracle exists, relate two runs of the same def (a permuted input keeps the total). These are idioms on the existing property surface, not new machinery.
 - **Drivers (`*.scuzz_drivers`) do things.** Impure, parameterized, oracle-free steps. `scuzz fuzz` composes them (generated args, random order / interleaving) alongside the UI event alphabet. `check` rejects `Property.*` and `.require` in driver files. A local binder may share a property name; a driver must not call that property. Drive names are unique in the package (`drive` has no module). A driver name must not match another driver or a parameterized property. At most 32 drive names. An assert inside a driver is a unit test in disguise.
 - **Simulation is hermetic.** Fuzz, mutation, and TestRuntime keep impurity inside fakes. No live sockets. `Net.httpGet` beyond the stub map fails. `Sys.exec` / `Sys.spawn` fail under TestRuntime so a child cannot open the network. `Sys.getenv` does not read the host map. `Sys.alive` / `Sys.kill` do not touch host pids. Live `Net.httpGet` may leave the host.
 - **`Property.sometimes` keeps composition honest.** Reachability accumulates across a fuzz *campaign*. Declared-but-never-reached states fail the campaign. Oracle-free drivers cannot pass vacuously. It is a coverage/fitness signal for corpus guidance, alongside Headless dump novelty. It is a path marker (`Unit`), not a value method.
@@ -226,7 +228,15 @@ Deterministic TestRuntime + (for `[ui]`) Headless event scripts (plus sim overla
 
 Unknowns and known gaps: [`gaps.md`](gaps.md). `scuzz package --target ios` and `--target android` drive the platform shells. `SCUZZ_SKIA=gpu` presents through OpenGL. `Sys.getenv` is sealed under TestRuntime. `Sys.alive` / `Sys.kill` use a fake process table. Device packaging and Impeller / Skia GPU raster stay deferred.
 
-Parameterized `property` decls take at most three `Int` / `String` / `Bool` params. Search shrinks a failing event prefix. It does not shrink individual generated values. Later work (not current): shrink generated args to a minimal counterexample; generate lists and records; use `where` refinements to constrain draws.
+Parameterized `property` decls take at most three `Int` / `String` / `Bool` params. Search shrinks a failing event prefix. It does not shrink individual generated values.
+
+Verification next steps, in order:
+
+1. **Corpus persistence.** Promote each shrunk `repro.toml` into a checked-in regression corpus. Every campaign replays that corpus before search, so a fixed bug stays pinned. A corpus-only tier replays in seconds for inner-loop feedback and makes `Property.sometimes` verdicts stable across budgets. Slice: [`plans.md`](plans.md).
+2. **Value shrinking.** Shrink generated args to a minimal counterexample. Use `where` refinements to constrain draws.
+3. **Mutant-report UX.** A surviving-mutant report shows the mutant diff and the nearest oracle to strengthen.
+
+Later (not current): generate lists and records; the seed-table idiom for concrete input/output pairs; fault injection through TestRuntime fakes (fail the Nth `Fs.write`; drop a stub response); PCT-style schedule exploration for fiber interleavings; differential structural dumps across render backends.
 
 App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-only UI features. UI is a primary path among CLI/server/desktop/mobile. It is not the only v0 bar. Web is not a current target. `scuzz package --target ios` builds a signed simulator `.app` when Xcode is present. The iOS shell feeds typed text into TextField. `scuzz package --target android` packs a debug APK when the NDK and SDK are present. The Android shell blits frames onto a SurfaceView and feeds taps and typed text into the pump. Device builds stay open.
 
@@ -243,6 +253,9 @@ App authors: [`guide.md`](guide.md). Vertical slices over breadth. No Desktop-on
 | Drivers become integration tests | `check` rejects `Property.*` in driver files. Correctness lives only in live-module oracles |
 | Drivers pass vacuously | `Property.sometimes` reachability fails the campaign when declared states are never reached |
 | Verification tool sprawl | One `scuzz` strategy — mutation/fuzz/properties/sim/determinism in-tree. No external test frameworks |
+| Slow fuzz inner loop pushes authors back to ad-hoc testing | Corpus-only replay tier answers in seconds. Full campaigns stay in CI |
+| `Property.sometimes` verdicts vary with iteration budget | Checked-in corpus keeps reaching prefixes. Summary separates never-reached from not-reached-in-budget |
+| Concrete business facts have no home without unit tests | Concrete-fact properties are sanctioned oracles. Seed tables are direction |
 | “Almost Scala” confusion | Explicit non-goals. Language direction above. [guide.md](guide.md) |
 | Watch confused with hot reload | `scuzz watch` rebuilds. `[ui]` `run --watch` is hot reload (stamp-reload Views). IO-only `run --watch` kills and reruns |
 | IDE typer ≠ batch typer | One JSON schema. LSP wraps `scuzz check` |
