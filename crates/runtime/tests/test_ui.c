@@ -13220,6 +13220,15 @@ static void test_view_editor_undo_gutter(void) {
   assert(strstr(body, "diag=1:1") != NULL);
   free(body);
   {
+    SzIoResult r = sz_io_unsafe_run(sz_lang_ui_set_editor_diagnostics(NULL));
+    assert(r.ok);
+  }
+  write_stamp(path, "dump\n");
+  assert(sz_ui_pump_sync(session));
+  body = slurp_cstr(dump);
+  assert(strstr(body, "diag=") == NULL);
+  free(body);
+  {
     SkSurface *surf = sk_surface_make_raster_n32_premul(200, 120);
     SkCanvas *canvas;
     assert(surf);

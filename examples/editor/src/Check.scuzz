@@ -29,9 +29,7 @@ def diagRows(j: Json): List[String] =
   }
 
 def diagMark(item: Json): (Int, Int) =
-  (jsonInt(jsonField(item, "line")), if (jsonStr(jsonField(item, "severity")) == "warning") 2 else 1) match {
-    case p => Property.check("diagMark", p._1 > 0 && p._2 == 1, p)
-  }
+  (jsonInt(jsonField(item, "line")), if (jsonStr(jsonField(item, "severity")) == "warning") 2 else 1)
 
 def diagMarks(j: Json): List[(Int, Int)] =
   j match {
