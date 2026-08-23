@@ -427,6 +427,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_aspect_ratio(i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_fraction(i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_text_field(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_editor(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_icon(i64, i64)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_image(i64, i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_add_child(ptr, ptr)").unwrap();
@@ -7167,6 +7168,15 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "View.editor" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_view_editor(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "View.icon" => {
             writeln!(
                 code,
@@ -12740,6 +12750,23 @@ enum Color:
         assert!(
             ir.contains("sz_lang_view_slider"),
             "expected sz_lang_view_slider in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_editor() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    s = Signal.str("x")
+    _ <- Ui.run(_ => View.editor(s))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_editor"),
+            "expected sz_lang_view_editor in IR:\n{ir}"
         );
     }
 

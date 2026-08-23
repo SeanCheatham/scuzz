@@ -1,8 +1,8 @@
 # Next slice
 
-A5 — `View.editor`.
+A6 — Viewport and monospace.
 
-Multiline buffer on a `SignalStr`. Insert/delete at caret including newline and tab/soft-tab. No 256-byte stack cap. Headless `[editor]` dump: buffer, caret, selection. Do not route a file through `View.each` + `View.text`. Repeat/IME stay deferred unless they block the editor.
+Scroll the viewport to the caret. Horizontal scroll for long lines. Vertical scroll for the file. Virtualize paint. Do not layout one View per line. Monospace typeface on every presenter (`sk_sw`, Skia CPU, GPU present). `View.fontSize` stays. The editor does not use the proportional UI font. `View.scroll` clips paint but does not window Views; the editor paints visible lines itself.
 
 Each slice lands Headless inject + dump + a runtime test. Desktop and Headless share verbs.
 

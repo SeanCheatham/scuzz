@@ -144,12 +144,16 @@ static void script_parse_caret(const char *rest, int *index, int *offset) {
 }
 
 static int script_focus_field(SzUiSession *session, int index) {
-  if (session && sz_view_focus_text_field_at(sz_ui_session_root(session), index))
-    return 1;
-  if (index < 0)
-    fprintf(stderr, "scuzz: script skipped (no text field)\n");
-  else
+  SzView *root = session ? sz_ui_session_root(session) : NULL;
+  if (index >= 0) {
+    if (root && sz_view_focus_text_field_at(root, index))
+      return 1;
     fprintf(stderr, "scuzz: script field %d skipped\n", index);
+    return 0;
+  }
+  if (root && sz_view_focus_edit_target(root))
+    return 1;
+  fprintf(stderr, "scuzz: script skipped (no text field)\n");
   return 0;
 }
 
@@ -346,19 +350,21 @@ void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
      text <n> <s>  replace dump-index n (a11y order); `text 0` is still payload "0"
      type <s>   insert <s> at the caret on the [fields] starred TextField; empty is a no-op; no field is a no-op
      type <n> <s>  insert at the caret on dump-index n; `type 0` is still payload "0"
-     key <name> [text]  named key on the starred TextField (`Enter`, `Backspace`, `ArrowLeft`, `a`);
+     key <name> [text]  named key on the starred TextField or focused editor
+                        (`Enter`, `Backspace`, `ArrowLeft`, `a`);
                         optional UTF-8 insert text; arrows / Home / End / Delete use the caret;
+                        Enter / Tab insert newline / two spaces on an editor;
                         `Name+shift` / `+ctrl` / `+cmd` / `+alt` set modifiers;
                         live OS keys record this verb
-     caret <n>  set the starred TextField caret to byte offset n
+     caret <n>  set the starred TextField or focused-editor caret to byte offset n
      caret <i> <n>  set dump-index i caret to byte offset n
-     select <a> <c>  set the starred TextField selection `[a, c)` (caret at c)
+     select <a> <c>  set the starred TextField or focused-editor selection `[a, c)` (caret at c)
      select <i> <a> <c>  set dump-index i selection
-     copy       copy the starred-field selection into the session clipboard
+     copy       copy the starred-field or focused-editor selection into the session clipboard
      cut        copy then delete the selection
      paste      insert the session clipboard (Headless) or OS pasteboard (Desktop/Mobile)
      paste <s>  set the session clipboard to <s> then paste
-     drag <x1> <y1> <x2> <y2>  pointer drag (TextField selection); live OS drag records this verb
+     drag <x1> <y1> <x2> <y2>  pointer drag (TextField / editor selection); live OS drag records this verb
      hover <x> <y>  pointer MOVE with no button (hover); shows View.tooltip; live OS hover records this verb
      secondary <n>  button-3 click on tap-dump index n; does not fire the primary tap
      secondary <x> <y>  button-3 click at a logical point; live OS right-click records this verb

@@ -1035,6 +1035,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.textField",
         "View.textField(sig: SignalStr, hint: String): View",
     ),
+    ("View.editor", "View.editor(sig: SignalStr): View"),
     ("View.stretch", "View.stretch(child: View): View"),
     ("View.clip", "View.clip(child: View): View"),
     ("View.opacity", "View.opacity(pct: Int, child: View): View"),
@@ -1335,6 +1336,7 @@ const TYPED_KIT_CALLEES: &[&str] = &[
     "View.image",
     "View.showWhen",
     "View.textField",
+    "View.editor",
     "Signal.get",
     "Signal.str",
     "Signal.getStr",
@@ -1647,6 +1649,7 @@ def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
                 "View.textField",
                 "View.textField(Signal.str(\"\"), \"hint\")",
             ),
+            ("View.editor", "View.editor(Signal.str(\"\"))"),
         ];
         for (callee, call) in view_calls {
             let needle = callee.rsplit('.').next().unwrap();
