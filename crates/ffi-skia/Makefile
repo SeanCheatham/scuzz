@@ -5,7 +5,7 @@ TRIPLE ?= $(shell $(ROOT)/scripts/skia_triple.sh)
 PREBUILT_DIR := $(ROOT)/third_party/skia/prebuilt/$(TRIPLE)
 PREBUILT_LIB := $(PREBUILT_DIR)/libsk_capi.a
 INCLUDES := -Iinclude -Isrc
-SRC := src/sk_sw.c src/png_enc.c
+SRC := src/sk_sw.c src/png_enc.c src/sk_mono.c
 OBJ := $(SRC:src/%.c=build/%.o)
 
 .PHONY: all clean test lib lib-skia lib-sk-sw lib-gpu ensure-prebuilt
@@ -73,16 +73,17 @@ lib-gpu: $(OBJ) build/sk_gpu.o | build
 	ar rcs build/libsk_capi.a $(OBJ) build/sk_gpu.o; \
 	echo gpu > build/sk_capi_backend
 
-lib-skia: build/sk_gpu_skia_stub.o | build
+lib-skia: build/sk_gpu_skia_stub.o build/sk_mono.o | build
 	@test -f "$(PREBUILT_LIB)"
 	@if [ -f build/libsk_capi.a ] && [ -f build/sk_capi_backend ] && grep -qx skia build/sk_capi_backend \
 	    && [ ! "$(PREBUILT_LIB)" -nt build/libsk_capi.a ] \
-	    && [ ! build/sk_gpu_skia_stub.o -nt build/libsk_capi.a ]; then \
+	    && [ ! build/sk_gpu_skia_stub.o -nt build/libsk_capi.a ] \
+	    && [ ! build/sk_mono.o -nt build/libsk_capi.a ]; then \
 	  exit 0; \
 	fi; \
 	rm -f build/*.a; \
 	cp -f "$(PREBUILT_LIB)" build/libsk_capi.a; \
-	ar rcs build/libsk_capi.a build/sk_gpu_skia_stub.o; \
+	ar rcs build/libsk_capi.a build/sk_gpu_skia_stub.o build/sk_mono.o; \
 	echo skia > build/sk_capi_backend
 
 build/test_skia: tests/test_skia.c lib

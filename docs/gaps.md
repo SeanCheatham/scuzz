@@ -79,7 +79,7 @@ Close:
 
 #### 2. Editor widget
 
-Today `View.textField` is one line (`control_h`). It stores a caret byte offset and a selection range. Insert, Backspace, and Delete edit at the caret, or replace/delete the selection. Shift+arrows and pointer drag extend the selection. Arrows, Home, and End move it. `[fields]` dumps `caret=B sel=A:C` without shifting inject indices. Layout and paint copy the field value through a 256-byte stack buffer. `View.editor` is a multiline buffer on a `SignalStr`. It is not a TextField. Insert includes newline and a two-space soft-tab. Enter and Tab stay no-ops on a TextField. Editor layout, paint, caret, and a11y do not copy through a 256-byte stack. `[editor]` dumps one node: `N* caret=B sel=A:C "escaped"` (newlines stay `\\n`). A11y dumps one `editor:editor` node. Simple clip/scroll keeps the caret in view. `View.text` wraps at newlines for display, but it is not editable. `View.fontSize` / `View.textColor` wrap `View.text` only. A line of tokens as many Views is not an editor. `View.each` rebuilds every child. Collect of text fields caps at 64. `sk_sw` measure is monospace. The pinned Skia prebuilt is proportional.
+Today `View.textField` is one line (`control_h`). It stores a caret byte offset and a selection range. Insert, Backspace, and Delete edit at the caret, or replace/delete the selection. Shift+arrows and pointer drag extend the selection. Arrows, Home, and End move it. `[fields]` dumps `caret=B sel=A:C` without shifting inject indices. Layout and paint copy the field value through a 256-byte stack buffer. `View.editor` is a multiline buffer on a `SignalStr`. It is not a TextField. Insert includes newline and a two-space soft-tab. Enter and Tab stay no-ops on a TextField. Editor layout, paint, caret, and a11y do not copy through a 256-byte stack. `[editor]` dumps one node: `N* caret=B sel=A:C sx=X sy=Y "escaped"` (newlines stay `\\n`; `sx`/`sy` are viewport pan). A11y dumps one `editor:editor` node. The editor pans to the caret. Long lines pan horizontally. A tall file pans vertically. Paint draws visible lines and visible columns on a monospace cell grid (`sk_font_measure_mono_string` / `sk_canvas_draw_mono_string` on every presenter). `View.fontSize` stays. The editor does not use the proportional UI font. `View.text` wraps at newlines for display, but it is not editable. `View.fontSize` / `View.textColor` wrap `View.text` only. A line of tokens as many Views is not an editor. `View.each` rebuilds every child. Collect of text fields caps at 64. `sk_sw` measure is monospace. The pinned Skia prebuilt is proportional for `View.text`.
 
 Close:
 
@@ -88,12 +88,12 @@ Close:
 - Selection: Shift+arrows and pointer drag. Replace and delete the selection. TextField has this. `View.editor` has this.
 - Insert and delete at the caret, including newline and tab / soft-tab. `View.editor` inserts newline on Enter and two spaces on Tab.
 - Undo and redo.
-- Scroll the viewport to the caret. Horizontal scroll for long lines. Vertical scroll for the file. A5 clips and scrolls to the caret. Full virtualization stays.
+- Scroll the viewport to the caret. Horizontal scroll for long lines. Vertical scroll for the file. The editor pans to the caret. Wheel over the editor pans Y.
 - Paint and layout the full buffer. No 256-byte stack cap. `View.editor` is in.
-- Monospace typeface on every presenter (`sk_sw`, Skia CPU, GPU present). `View.fontSize` stays. The editor does not use the proportional UI font.
-- Viewport virtualization. Do not layout one View per line for a large file. Do not dump one a11y node per token. A11y is one editor node. Virtualize paint stays.
+- Monospace typeface on every presenter (`sk_sw`, Skia CPU, GPU present). `View.fontSize` stays. The editor does not use the proportional UI font. Mono cell measure/draw is in.
+- Viewport virtualization. Do not layout one View per line for a large file. Do not dump one a11y node per token. A11y is one editor node. Paint draws visible lines and columns.
 - Gutter: line numbers and diagnostic marks on the editor, not a second dumped tree.
-- Headless dump: buffer text, caret, selection, and diagnostics. Keep `[fields]` / inject indices stable. Do not golden a token View forest. `[editor]` dumps buffer, caret, and selection. Diagnostics stay.
+- Headless dump: buffer text, caret, selection, and diagnostics. Keep `[fields]` / inject indices stable. Do not golden a token View forest. `[editor]` dumps buffer, caret, selection, and `sx`/`sy`. Diagnostics stay.
 - Syntax highlight inside that widget (LSP semantic tokens or a lexer). Do not require a CustomPaint kit in Scuzz source for the first editor.
 
 Folding ranges, inlay hints, and bracket match consume LSP data that already exists. They need the editor viewport first. Close them before a “real” IDE, after the caret and dump land.
@@ -146,12 +146,12 @@ Close:
 
 #### 6. Headless and verification
 
-Today inject verbs are `tap` / `xy` / `text` / `type` / `key` / `caret` / `select` / `copy` / `cut` / `paste` / `drag` / `hover` / `secondary` / `pump` / `scroll` / `backspace` / `dump` / `reload` / `quit` / `resetpeak`. `[fields]` dumps `caret=B sel=A:C`. `[editor]` dumps one node with buffer, caret, and selection when a `View.editor` is present. `[hover]` and `[last_secondary]` record pointer hover and button-3 hits. Fuzz composes taps, fields, scrolls, and drivers. A whole-file a11y dump of an editor is the wrong oracle.
+Today inject verbs are `tap` / `xy` / `text` / `type` / `key` / `caret` / `select` / `copy` / `cut` / `paste` / `drag` / `hover` / `secondary` / `pump` / `scroll` / `backspace` / `dump` / `reload` / `quit` / `resetpeak`. `[fields]` dumps `caret=B sel=A:C`. `[editor]` dumps one node with buffer, caret, selection, and `sx`/`sy` when a `View.editor` is present. `[hover]` and `[last_secondary]` record pointer hover and button-3 hits. Fuzz composes taps, fields, scrolls, and drivers. A whole-file a11y dump of an editor is the wrong oracle.
 
 Close:
 
 - Inject verbs for caret, selection, key-with-modifiers, and paste. Record those verbs from Desktop. `key`, `caret`, `select`, `copy` / `cut` / `paste`, `drag`, `hover`, and `secondary` are in.
-- Structural dump fields for buffer, caret, selection, and diagnostics. Properties talk to that surface (`Property.signalStr`, `Property.a11yHas`, or a dedicated editor observation). `[fields]` dumps `caret=B sel=A:C`. `[editor]` dumps buffer, caret, and selection. Diagnostics stay.
+- Structural dump fields for buffer, caret, selection, and diagnostics. Properties talk to that surface (`Property.signalStr`, `Property.a11yHas`, or a dedicated editor observation). `[fields]` dumps `caret=B sel=A:C`. `[editor]` dumps buffer, caret, selection, and `sx`/`sy`. Diagnostics stay.
 - Every new editor or chrome widget has a Headless path. No Desktop-only shortcut.
 - IDE package uses in-source properties, drivers, goldens, and `scuzz fuzz`. TestRuntime fakes cover check/fs as in group 3.
 

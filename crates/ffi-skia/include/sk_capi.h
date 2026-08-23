@@ -59,6 +59,14 @@ float sk_paint_get_text_size(const SkPaint *paint);
 
 /* Advance width of UTF-8 text at font_px (sk_sw: monospace n * font_px). */
 float sk_font_measure_string(const char *text, float font_px);
+/* Monospace cell and advance. Cell is max(measure("M"), measure("W")).
+ * Measure is code-point count times cell. Draw places each code point on that
+ * grid. View.editor uses these so click-to-caret columns match on every
+ * presenter (sk_sw, Skia CPU, GPU). View.text stays proportional. */
+float sk_font_mono_cell(float font_px);
+float sk_font_measure_mono_string(const char *text, float font_px);
+void sk_canvas_draw_mono_string(SkCanvas *canvas, const char *text, float x,
+                                float y, const SkPaint *paint);
 
 /* Encode surface pixels as PNG into freshly allocated buffer (caller frees). */
 int sk_encode_png(const SkSurface *surface, uint8_t **out_bytes, size_t *out_len);

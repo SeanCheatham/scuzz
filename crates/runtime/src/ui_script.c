@@ -354,6 +354,7 @@ void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
                         (`Enter`, `Backspace`, `ArrowLeft`, `a`);
                         optional UTF-8 insert text; arrows / Home / End / Delete use the caret;
                         Enter / Tab insert newline / two spaces on an editor;
+                        PageUp / PageDown move by the viewport on an editor;
                         `Name+shift` / `+ctrl` / `+cmd` / `+alt` set modifiers;
                         live OS keys record this verb
      caret <n>  set the starred TextField or focused-editor caret to byte offset n
