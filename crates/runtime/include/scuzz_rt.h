@@ -740,6 +740,10 @@ SzString *sz_fs_join(SzString *a, SzString *b);
 SzString *sz_fs_dirname(SzString *path);
 SzString *sz_fs_basename(SzString *path);
 
+/* Pure Json (follow Str.concat). Enum Null|Bool|Int|Float|Str|Arr|Obj. */
+SzAdt *sz_json_parse(SzString *s);
+SzString *sz_json_stringify(SzAdt *j);
+
 /* Process / args / env / console (console out = IO.println) */
 void sz_sys_set_args(int argc, char **argv);
 SzIo *sz_sys_args(void);

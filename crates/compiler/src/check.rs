@@ -1609,6 +1609,15 @@ mod tests {
     }
 
     #[test]
+    fn diagnostic_json_kit_round_trip_shape() {
+        let json = format_diagnostics(&[Diagnostic::error("x").with_loc(2, 3)], true);
+        assert_eq!(
+            json,
+            r#"[{"severity":"error","message":"x","line":2,"column":3}]"#
+        );
+    }
+
+    #[test]
     fn check_project_reports_unformatted() {
         let diags = check_project(&testdata("fmt/needs_format")).unwrap();
         assert_eq!(diags.len(), 1);
