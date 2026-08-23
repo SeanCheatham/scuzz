@@ -1,8 +1,8 @@
 # Next slice
 
-A7 — Undo, gutter, and highlight.
+A8 — Focus, splitter, overlay, and title.
 
-Undo and redo in the editor widget. Gutter line numbers and diagnostic marks stay inside `[editor]`. Do not dump a second tree. Syntax highlight from LSP semantic tokens or an in-widget lexer. Folding, inlays, and bracket match may land here if they stay cheap. Do not block C1 on them.
+Route keys to the focused editor, tree, diagnostics, or popup. Buttons clear TextField focus. Draggable splitter. Overlay popups compose `View.stack` / `View.positioned` with key routing and dismiss. Session title setter (`Ui.run` currently hardcodes `"Scuzz Lang"`). File tree, tabs, find, command palette, and output panel stay Scuzz composition in Track C.
 
 Each slice lands Headless inject + dump + a runtime test. Desktop and Headless share verbs.
 

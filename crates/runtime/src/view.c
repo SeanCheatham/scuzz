@@ -9,6 +9,14 @@
 #include <stdio.h>
 #include <string.h>
 
+#define EDITOR_UNDO_MAX 64
+
+typedef struct SzEditHist {
+  char *text;
+  int caret;
+  int sel_anchor;
+} SzEditHist;
+
 struct SzView {
   SzViewKind kind;
   SzView *parent;
@@ -66,6 +74,15 @@ struct SzView {
   int caret;
   /* TextField / editor selection anchor (UTF-8 snapped). Collapsed when equal to caret. */
   int sel_anchor;
+  SzEditHist *undo;
+  int undo_n;
+  int undo_cap;
+  SzEditHist *redo;
+  int redo_n;
+  int redo_cap;
+  int *diag_line;
+  int *diag_sev;
+  int diag_n;
   /* View.tooltip: 1 when the pointer hovers this node. */
   int hover;
 };
@@ -1339,6 +1356,17 @@ void sz_view_free(SzView *view) {
   view->tap_env = NULL;
   sz_release(view->each_env);
   view->each_env = NULL;
+  {
+    int u;
+    for (u = 0; u < view->undo_n; u++)
+      sz_free(view->undo[u].text);
+    sz_free(view->undo);
+    for (u = 0; u < view->redo_n; u++)
+      sz_free(view->redo[u].text);
+    sz_free(view->redo);
+    sz_free(view->diag_line);
+    sz_free(view->diag_sev);
+  }
   sz_free(view);
 }
 
@@ -1448,6 +1476,181 @@ static float editor_span_width(const char *s, int start, int end, float font_px)
     n++;
   }
   return (float)n * cell;
+}
+
+static int editor_line_count(const char *s) {
+  int n = 1;
+  int i;
+  if (!s || !s[0])
+    return 1;
+  for (i = 0; s[i]; i++) {
+    if (s[i] == '\n')
+      n++;
+  }
+  return n;
+}
+
+static float editor_gutter_w(const SzView *v, float font_px) {
+  int lines;
+  int digits = 1;
+  int n;
+  float cell;
+  if (!v || v->kind != SZ_VIEW_EDITOR)
+    return 0.f;
+  lines = editor_line_count(field_cstr(v));
+  n = lines;
+  while (n >= 10) {
+    n /= 10;
+    digits++;
+  }
+  cell = sk_font_mono_cell(font_px);
+  return (float)digits * cell + 4.f;
+}
+
+static void hist_clear(SzEditHist **hist, int *n, int *cap) {
+  int i;
+  if (!hist || !*hist)
+    return;
+  for (i = 0; i < *n; i++)
+    sz_free((*hist)[i].text);
+  sz_free(*hist);
+  *hist = NULL;
+  *n = 0;
+  *cap = 0;
+}
+
+static void hist_push(SzEditHist **hist, int *n, int *cap, const char *text,
+                      int caret, int sel_anchor) {
+  SzEditHist *next;
+  if (*n >= EDITOR_UNDO_MAX) {
+    sz_free((*hist)[0].text);
+    memmove(*hist, *hist + 1, sizeof(SzEditHist) * (size_t)(*n - 1));
+    (*n)--;
+  }
+  if (*n + 1 > *cap) {
+    int cap2 = *cap < 8 ? 8 : *cap * 2;
+    if (cap2 > EDITOR_UNDO_MAX)
+      cap2 = EDITOR_UNDO_MAX;
+    next = (SzEditHist *)sz_alloc(sizeof(SzEditHist) * (size_t)cap2);
+    if (*hist && *n > 0)
+      memcpy(next, *hist, sizeof(SzEditHist) * (size_t)*n);
+    sz_free(*hist);
+    *hist = next;
+    *cap = cap2;
+  }
+  (*hist)[*n].text = sz_strdup(text ? text : "");
+  (*hist)[*n].caret = caret;
+  (*hist)[*n].sel_anchor = sel_anchor;
+  (*n)++;
+}
+
+static void editor_push_undo(SzView *t) {
+  if (!t || t->kind != SZ_VIEW_EDITOR)
+    return;
+  hist_push(&t->undo, &t->undo_n, &t->undo_cap, field_cstr(t),
+            field_caret_clamped(t), field_anchor_clamped(t));
+  hist_clear(&t->redo, &t->redo_n, &t->redo_cap);
+}
+
+static int editor_restore(SzView *t, SzEditHist snap) {
+  if (!t || t->kind != SZ_VIEW_EDITOR || !t->sig_str)
+    return 0;
+  sz_signal_str_set(t->sig_str, snap.text ? snap.text : "");
+  t->caret = snap.caret;
+  t->sel_anchor = snap.sel_anchor;
+  t->caret = field_caret_clamped(t);
+  t->sel_anchor = field_anchor_clamped(t);
+  return 1;
+}
+
+int sz_view_editor_undo(SzView *view) {
+  SzEditHist snap;
+  if (!view || view->kind != SZ_VIEW_EDITOR || view->undo_n <= 0)
+    return 0;
+  hist_push(&view->redo, &view->redo_n, &view->redo_cap, field_cstr(view),
+            field_caret_clamped(view), field_anchor_clamped(view));
+  snap = view->undo[view->undo_n - 1];
+  view->undo_n--;
+  editor_restore(view, snap);
+  sz_free(snap.text);
+  return 1;
+}
+
+int sz_view_editor_redo(SzView *view) {
+  SzEditHist snap;
+  if (!view || view->kind != SZ_VIEW_EDITOR || view->redo_n <= 0)
+    return 0;
+  hist_push(&view->undo, &view->undo_n, &view->undo_cap, field_cstr(view),
+            field_caret_clamped(view), field_anchor_clamped(view));
+  snap = view->redo[view->redo_n - 1];
+  view->redo_n--;
+  editor_restore(view, snap);
+  sz_free(snap.text);
+  return 1;
+}
+
+int sz_view_editor_line_count(const SzView *view) {
+  if (!view || view->kind != SZ_VIEW_EDITOR)
+    return 0;
+  return editor_line_count(field_cstr(view));
+}
+
+float sz_view_editor_gutter_w(const SzView *view) {
+  const SzTheme *theme = sz_theme_default();
+  if (!view || view->kind != SZ_VIEW_EDITOR)
+    return 0.f;
+  return editor_gutter_w(view, theme->font_px);
+}
+
+int sz_view_editor_set_diagnostics(SzView *view, const int *lines,
+                                  const int *severities, int n) {
+  int i;
+  if (!view || view->kind != SZ_VIEW_EDITOR)
+    return 0;
+  sz_free(view->diag_line);
+  sz_free(view->diag_sev);
+  view->diag_line = NULL;
+  view->diag_sev = NULL;
+  view->diag_n = 0;
+  if (n <= 0 || !lines || !severities)
+    return 1;
+  view->diag_line = (int *)sz_alloc(sizeof(int) * (size_t)n);
+  view->diag_sev = (int *)sz_alloc(sizeof(int) * (size_t)n);
+  for (i = 0; i < n; i++) {
+    view->diag_line[i] = lines[i];
+    view->diag_sev[i] = severities[i];
+  }
+  view->diag_n = n;
+  return 1;
+}
+
+int sz_view_editor_diag_count(const SzView *view) {
+  if (!view || view->kind != SZ_VIEW_EDITOR)
+    return 0;
+  return view->diag_n;
+}
+
+int sz_view_editor_diag_line(const SzView *view, int i) {
+  if (!view || view->kind != SZ_VIEW_EDITOR || i < 0 || i >= view->diag_n)
+    return 0;
+  return view->diag_line[i];
+}
+
+int sz_view_editor_diag_severity(const SzView *view, int i) {
+  if (!view || view->kind != SZ_VIEW_EDITOR || i < 0 || i >= view->diag_n)
+    return 0;
+  return view->diag_sev[i];
+}
+
+static int editor_diag_at(const SzView *v, int line) {
+  int i;
+  if (!v)
+    return 0;
+  for (i = 0; i < v->diag_n; i++) {
+    if (v->diag_line[i] == line)
+      return v->diag_sev[i] != 0 ? v->diag_sev[i] : 1;
+  }
+  return 0;
 }
 
 static void line_bounds_at_off(const char *s, int off, int *start, int *end) {
@@ -2999,54 +3202,149 @@ static void paint_mono_string(SkCanvas *c, const char *s, float x, float y,
   sk_paint_delete(p);
 }
 
-static void paint_editor_visible_span(SkCanvas *c, const char *s, int start,
-                                      int end, float base_x, float baseline,
-                                      float font_px, float scroll_x, float frame_w,
-                                      uint32_t argb) {
-  float cell = sk_font_mono_cell(font_px);
-  int first_col, vis_cols, i, vis_start, vis_end, n;
-  char *tmp;
+static int editor_cols(const char *s, int start, int end) {
+  int n = 0;
+  int i = start;
   if (!s || end <= start)
+    return 0;
+  while (i < end) {
+    int clen = utf8_clen(s, i);
+    if (clen < 1)
+      clen = 1;
+    if (i + clen > end)
+      clen = end - i;
+    i += clen;
+    n++;
+  }
+  return n;
+}
+
+static int editor_ident_end(const char *s, int i, int end) {
+  while (i < end) {
+    unsigned char ch = (unsigned char)s[i];
+    if (!((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') ||
+          (ch >= '0' && ch <= '9') || ch == '_'))
+      break;
+    i++;
+  }
+  return i;
+}
+
+static int editor_is_kw(const char *s, int a, int b) {
+  static const char *kws[] = {
+      "def",     "for",     "if",      "else",  "match",   "case",
+      "yield",   "import",  "enum",    "record","trait",   "impl",
+      "type",    "private", "package", "true",  "false",   NULL};
+  int n = b - a;
+  int i;
+  if (n <= 0)
+    return 0;
+  for (i = 0; kws[i]; i++) {
+    if ((int)strlen(kws[i]) == n && memcmp(s + a, kws[i], (size_t)n) == 0)
+      return 1;
+  }
+  return 0;
+}
+
+static void paint_editor_token(SkCanvas *c, const char *s, int line_start,
+                               int tok_start, int tok_end, float base_x,
+                               float baseline, float font_px, float scroll_x,
+                               float text_w, uint32_t argb) {
+  float cell = sk_font_mono_cell(font_px);
+  int first_col, vis_cols, i, n, vis0, vis1, col0, tok_col, out_n;
+  char tmp[256];
+  if (!s || tok_end <= tok_start)
     return;
   if (cell < 1.f)
     cell = 1.f;
   first_col = (int)(scroll_x / cell);
   if (first_col < 0)
     first_col = 0;
-  vis_cols = (int)(frame_w / cell) + 2;
+  vis_cols = (int)(text_w / cell) + 2;
   if (vis_cols < 1)
     vis_cols = 1;
-  i = start;
-  n = 0;
-  while (i < end && n < first_col) {
-    int clen = utf8_clen(s, i);
-    if (clen < 1)
-      clen = 1;
-    if (i + clen > end)
-      break;
-    i += clen;
-    n++;
-  }
-  vis_start = i;
-  n = 0;
-  while (i < end && n < vis_cols) {
-    int clen = utf8_clen(s, i);
-    if (clen < 1)
-      clen = 1;
-    if (i + clen > end)
-      break;
-    i += clen;
-    n++;
-  }
-  vis_end = i;
-  if (vis_end <= vis_start)
+  vis0 = first_col;
+  vis1 = first_col + vis_cols;
+  col0 = editor_cols(s, line_start, tok_start);
+  if (col0 + editor_cols(s, tok_start, tok_end) <= vis0 || col0 >= vis1)
     return;
-  tmp = (char *)sz_alloc((size_t)(vis_end - vis_start) + 1);
-  memcpy(tmp, s + vis_start, (size_t)(vis_end - vis_start));
-  tmp[vis_end - vis_start] = '\0';
-  paint_mono_string(c, tmp, base_x + (float)first_col * cell, baseline, argb,
-                    font_px);
-  sz_free(tmp);
+  i = tok_start;
+  n = col0;
+  while (i < tok_end && n < vis0) {
+    int clen = utf8_clen(s, i);
+    if (clen < 1)
+      clen = 1;
+    if (i + clen > tok_end)
+      break;
+    i += clen;
+    n++;
+  }
+  tok_col = n;
+  out_n = 0;
+  while (i < tok_end && n < vis1 && out_n < (int)sizeof(tmp) - 5) {
+    int clen = utf8_clen(s, i);
+    if (clen < 1)
+      clen = 1;
+    if (i + clen > tok_end)
+      clen = tok_end - i;
+    memcpy(tmp + out_n, s + i, (size_t)clen);
+    out_n += clen;
+    i += clen;
+    n++;
+  }
+  tmp[out_n] = '\0';
+  if (out_n > 0)
+    paint_mono_string(c, tmp, base_x + (float)tok_col * cell, baseline, argb,
+                      font_px);
+}
+
+static void paint_editor_line_hl(SkCanvas *c, const char *s, int start, int end,
+                                 float base_x, float baseline, float font_px,
+                                 float scroll_x, float text_w,
+                                 const SzTheme *theme) {
+  int i = start;
+  if (!theme)
+    return;
+  while (i < end) {
+    int tok_s = i;
+    int tok_e;
+    uint32_t col = theme->foreground;
+    unsigned char ch = (unsigned char)s[i];
+    if (ch == '/' && i + 1 < end && s[i + 1] == '/') {
+      tok_e = end;
+      col = theme->muted;
+    } else if (ch == '"') {
+      i++;
+      while (i < end && s[i] != '"') {
+        if (s[i] == '\\' && i + 1 < end)
+          i++;
+        i++;
+      }
+      if (i < end)
+        i++;
+      tok_e = i;
+      col = theme->accent;
+    } else if (ch >= '0' && ch <= '9') {
+      while (i < end && s[i] >= '0' && s[i] <= '9')
+        i++;
+      tok_e = i;
+      col = theme->primary;
+    } else if ((ch >= 'A' && ch <= 'Z') || (ch >= 'a' && ch <= 'z') ||
+               ch == '_') {
+      tok_e = editor_ident_end(s, i, end);
+      if (editor_is_kw(s, tok_s, tok_e))
+        col = theme->primary;
+      i = tok_e;
+    } else {
+      i++;
+      tok_e = i;
+    }
+    paint_editor_token(c, s, start, tok_s, tok_e, base_x, baseline, font_px,
+                       scroll_x, text_w, col);
+    if (tok_e <= tok_s)
+      break;
+    i = tok_e;
+  }
 }
 
 typedef struct SzWrapPaint {
@@ -3714,7 +4012,9 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
     float font_px = theme->font_px;
     float line_h = text_line_h(theme, font_px);
     float inset = k_text_field_inset;
-    float base_x = v->frame.x + inset - v->scroll_x;
+    float gutter = editor_gutter_w(v, font_px);
+    float text_w = v->frame.w - gutter;
+    float base_x = v->frame.x + gutter + inset - v->scroll_x;
     float base_y = v->frame.y + inset - v->scroll_y;
     SzRect prev_clip = g_clip;
     int prev_on = g_clip_on;
@@ -3734,6 +4034,8 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
       g_clip_on = 1;
     }
     paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
+    if (gutter > 0.f)
+      paint_rect(c, v->frame.x, v->frame.y, gutter, v->frame.h, theme->background);
     {
       SkPaint *p = sk_paint_new();
       if (p) {
@@ -3783,8 +4085,20 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
               paint_rect(c, x0, top, x1 - x0, h, theme->accent);
           }
         }
-        paint_editor_visible_span(c, s, start, end, base_x, top + font_px, font_px,
-                                  v->scroll_x, v->frame.w, theme->foreground);
+        {
+          char num[16];
+          int sev = editor_diag_at(v, line + 1);
+          snprintf(num, sizeof num, "%d", line + 1);
+          paint_mono_string(c, num, v->frame.x + 2.f, top + font_px, theme->muted,
+                            font_px);
+          if (sev) {
+            float mark = font_px < 4.f ? 2.f : 3.f;
+            paint_rect(c, v->frame.x + gutter - mark - 1.f, top + 1.f, mark, mark,
+                       theme->accent);
+          }
+        }
+        paint_editor_line_hl(c, s, start, end, base_x, top + font_px, font_px,
+                             v->scroll_x, text_w > 8.f ? text_w : 8.f, theme);
         if (i >= n)
           break;
         i++;
@@ -4156,16 +4470,20 @@ static SzRect editor_caret_rect(SzView *f, const SzTheme *theme) {
   font_px = theme->font_px;
   line_h = text_line_h(theme, font_px);
   inset = k_text_field_inset;
-  c = field_caret_clamped(f);
-  line_bounds_at_off(s, c, &ls, &le);
-  (void)le;
-  line = line_index_at_off(s, c);
-  x = f->frame.x + inset + editor_span_width(s, ls, c, font_px) - f->scroll_x;
-  y = f->frame.y + inset + (float)line * line_h - f->scroll_y;
-  if (x > f->frame.x + f->frame.w - 2.f)
-    x = f->frame.x + f->frame.w - 2.f;
-  if (x < f->frame.x + 1.f)
-    x = f->frame.x + 1.f;
+  {
+    float gutter = editor_gutter_w(f, font_px);
+    c = field_caret_clamped(f);
+    line_bounds_at_off(s, c, &ls, &le);
+    (void)le;
+    line = line_index_at_off(s, c);
+    x = f->frame.x + gutter + inset + editor_span_width(s, ls, c, font_px) -
+        f->scroll_x;
+    y = f->frame.y + inset + (float)line * line_h - f->scroll_y;
+    if (x > f->frame.x + f->frame.w - 2.f)
+      x = f->frame.x + f->frame.w - 2.f;
+    if (x < f->frame.x + gutter + 1.f)
+      x = f->frame.x + gutter + 1.f;
+  }
   if (y + line_h > f->frame.y + f->frame.h)
     y = f->frame.y + f->frame.h - line_h;
   if (y < f->frame.y)
@@ -4193,16 +4511,22 @@ static void editor_scroll_to_caret(SzView *v) {
   font_px = theme->font_px;
   line_h = text_line_h(theme, font_px);
   inset = k_text_field_inset;
-  c = field_caret_clamped(v);
-  line_bounds_at_off(s, c, &ls, &le);
-  (void)le;
-  line = line_index_at_off(s, c);
-  cx = inset + editor_span_width(s, ls, c, font_px);
-  cy = inset + (float)line * line_h;
-  if (cx - v->scroll_x < inset)
-    v->scroll_x = cx - inset;
-  if (cx - v->scroll_x > v->frame.w - 2.f)
-    v->scroll_x = cx - (v->frame.w - 2.f);
+  {
+    float gutter = editor_gutter_w(v, font_px);
+    float text_w = v->frame.w - gutter;
+    c = field_caret_clamped(v);
+    line_bounds_at_off(s, c, &ls, &le);
+    (void)le;
+    line = line_index_at_off(s, c);
+    cx = inset + editor_span_width(s, ls, c, font_px);
+    cy = inset + (float)line * line_h;
+    if (text_w < 8.f)
+      text_w = 8.f;
+    if (cx - v->scroll_x < inset)
+      v->scroll_x = cx - inset;
+    if (cx - v->scroll_x > text_w - 2.f)
+      v->scroll_x = cx - (text_w - 2.f);
+  }
   if (v->scroll_x < 0.f)
     v->scroll_x = 0.f;
   if (cy - v->scroll_y < 0.f)
@@ -4294,8 +4618,11 @@ static int caret_offset_at_xy(SzView *f, float x, float y) {
   font_px = theme->font_px;
   line_h = text_line_h(theme, font_px);
   inset = k_text_field_inset;
-  local_y = y - f->frame.y - inset + f->scroll_y;
-  local_x = x - f->frame.x - inset + f->scroll_x;
+  {
+    float gutter = editor_gutter_w(f, font_px);
+    local_y = y - f->frame.y - inset + f->scroll_y;
+    local_x = x - f->frame.x - gutter - inset + f->scroll_x;
+  }
   if (line_h < 1.f)
     line_h = 1.f;
   line = (int)(local_y / line_h);
@@ -4523,6 +4850,7 @@ int sz_view_handle_text(SzView *root, const char *text) {
   const char *s;
   if (!target || !target->sig_str)
     return 0;
+  editor_push_undo(target);
   sz_signal_str_set(target->sig_str, text ? text : "");
   s = field_cstr(target);
   target->caret = (int)strlen(s);
@@ -4539,6 +4867,7 @@ static int field_delete_sel(SzView *t) {
   char *buf;
   if (!t || !t->sig_str || !field_has_sel(t))
     return 0;
+  editor_push_undo(t);
   cur = field_cstr(t);
   n = (int)strlen(cur);
   field_sel_bounds(t, &a, &b);
@@ -4564,7 +4893,8 @@ static void field_insert_at_caret(SzView *t, const char *text) {
   char *buf;
   if (!t || !t->sig_str || !text || !text[0])
     return;
-  (void)field_delete_sel(t);
+  if (!field_delete_sel(t))
+    editor_push_undo(t);
   cur = field_cstr(t);
   n = (int)strlen(cur);
   c = field_caret_clamped(t);
@@ -4592,6 +4922,10 @@ static void field_backspace_at_caret(SzView *t) {
   c = field_caret_clamped(t);
   if (c <= 0)
     return;
+  editor_push_undo(t);
+  cur = field_cstr(t);
+  n = (int)strlen(cur);
+  c = field_caret_clamped(t);
   keep = utf8_prev(cur, c);
   buf = (char *)sz_alloc((size_t)(n - (c - keep)) + 1);
   memcpy(buf, cur, (size_t)keep);
@@ -4615,6 +4949,10 @@ static void field_delete_at_caret(SzView *t) {
   c = field_caret_clamped(t);
   if (c >= n)
     return;
+  editor_push_undo(t);
+  cur = field_cstr(t);
+  n = (int)strlen(cur);
+  c = field_caret_clamped(t);
   clen = utf8_clen(cur, c);
   if (clen < 1)
     clen = 1;
@@ -4830,6 +5168,23 @@ int sz_view_handle_key(SzView *root, const char *key, const char *text,
   }
   if (is_ed && strcmp(key, "Tab") == 0) {
     (void)sz_view_handle_text_edit(root, "  ", 0);
+    return 1;
+  }
+  if ((mods & (SZ_KEY_CTRL | SZ_KEY_CMD)) != 0) {
+    int z = strcmp(key, "z") == 0 || strcmp(key, "Z") == 0;
+    int y = strcmp(key, "y") == 0 || strcmp(key, "Y") == 0;
+    if (is_ed && z && !extend) {
+      (void)sz_view_editor_undo(target);
+      editor_scroll_to_caret(target);
+      target->focused = 1;
+      return 1;
+    }
+    if (is_ed && (y || (z && extend))) {
+      (void)sz_view_editor_redo(target);
+      editor_scroll_to_caret(target);
+      target->focused = 1;
+      return 1;
+    }
     return 1;
   }
   if (text && text[0]) {
