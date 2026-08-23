@@ -84,8 +84,11 @@ fn letter_at(i: i64) -> String {
     (LETTERS[idx] as char).to_string()
 }
 
-fn fuzz_kind_count(n_fields: i64, n_scrolls: i64, has_drive: bool) -> i64 {
-    3 + i64::from(has_drive) + 3 * i64::from(n_fields > 0) + i64::from(n_scrolls > 0)
+fn fuzz_kind_count(n_fields: i64, n_scrolls: i64, has_drive: bool, n_editors: i64) -> i64 {
+    3 + i64::from(has_drive)
+        + 3 * i64::from(n_fields > 0)
+        + i64::from(n_scrolls > 0)
+        + 2 * i64::from(n_editors > 0)
 }
 
 fn fuzz_word(prefix: &str, mut s: i64, n: i64) -> (String, i64) {
@@ -312,11 +315,15 @@ fn fuzz_event(
     n_buttons: i64,
     n_fields: i64,
     n_scrolls: i64,
+    n_editors: i64,
     drivers: &[String],
 ) -> (String, i64) {
     let s = lcg_next(s);
-    let k = lcg_below(s, fuzz_kind_count(n_fields, n_scrolls, !drivers.is_empty()));
-    fuzz_event_kind(s, k, n_buttons, n_scrolls, n_fields, drivers)
+    let k = lcg_below(
+        s,
+        fuzz_kind_count(n_fields, n_scrolls, !drivers.is_empty(), n_editors),
+    );
+    fuzz_event_kind(s, k, n_buttons, n_scrolls, n_fields, n_editors, drivers)
 }
 
 fn fuzz_event_kind(
@@ -325,6 +332,7 @@ fn fuzz_event_kind(
     n_buttons: i64,
     n_scrolls: i64,
     n_fields: i64,
+    n_editors: i64,
     drivers: &[String],
 ) -> (String, i64) {
     if k <= 1 {
@@ -351,10 +359,10 @@ fn fuzz_event_kind(
             let s = lcg_next(s);
             (drive_line(spec, s), s)
         } else {
-            fuzz_event_extra(lcg_next(s), k - 4, n_scrolls, n_fields)
+            fuzz_event_extra(lcg_next(s), k - 4, n_scrolls, n_fields, n_editors)
         }
     } else {
-        fuzz_event_extra(lcg_next(s), k - 3, n_scrolls, n_fields)
+        fuzz_event_extra(lcg_next(s), k - 3, n_scrolls, n_fields, n_editors)
     }
 }
 
@@ -364,13 +372,34 @@ fn fuzz_field_word(verb: &str, s: i64, n_fields: i64) -> (String, i64) {
     fuzz_word(&format!("{verb} {idx} "), lcg_next(s), 1 + lcg_below(s, 7))
 }
 
-fn fuzz_event_extra(s: i64, k: i64, n_scrolls: i64, n_fields: i64) -> (String, i64) {
+fn fuzz_editor_key(s: i64) -> (String, i64) {
+    let s = lcg_next(s);
+    let pick = lcg_below(s, 3);
+    if pick == 0 {
+        (String::from("key Enter"), s)
+    } else if pick == 1 {
+        (String::from("key Backspace"), s)
+    } else {
+        let (w, s) = fuzz_word("", lcg_next(s), 1);
+        (format!("key {w} {w}"), s)
+    }
+}
+
+fn fuzz_event_extra(
+    s: i64,
+    k: i64,
+    n_scrolls: i64,
+    n_fields: i64,
+    n_editors: i64,
+) -> (String, i64) {
     if k == 0 {
         if n_scrolls > 0 {
             let s = lcg_next(s);
             (format!("scroll {} 40", lcg_below(s, n_scrolls.max(1))), s)
         } else if n_fields > 0 {
             fuzz_field_word("text", s, n_fields)
+        } else if n_editors > 0 {
+            fuzz_editor_key(s)
         } else {
             fuzz_word("text ", lcg_next(s), 1 + lcg_below(s, 7))
         }
@@ -378,17 +407,21 @@ fn fuzz_event_extra(s: i64, k: i64, n_scrolls: i64, n_fields: i64) -> (String, i
         if n_fields > 0 {
             let s = lcg_next(s);
             (format!("backspace {} 1", lcg_below(s, n_fields.max(1))), s)
+        } else if n_editors > 0 {
+            fuzz_editor_key(s)
         } else {
             fuzz_word("text ", lcg_next(s), 1 + lcg_below(s, 7))
         }
     } else if k == 2 {
         if n_fields > 0 {
             fuzz_field_word("type", s, n_fields)
+        } else if n_editors > 0 {
+            fuzz_editor_key(s)
         } else {
             fuzz_word("text ", lcg_next(s), 1 + lcg_below(s, 7))
         }
-    } else if n_fields > 0 {
-        fuzz_field_word("text", s, n_fields)
+    } else if n_editors > 0 {
+        fuzz_editor_key(s)
     } else {
         fuzz_word("text ", lcg_next(s), 1 + lcg_below(s, 7))
     }
@@ -400,12 +433,13 @@ fn fuzz_script_acc(
     n_buttons: i64,
     n_fields: i64,
     n_scrolls: i64,
+    n_editors: i64,
     drivers: &[String],
     mut acc: Vec<String>,
 ) -> Vec<String> {
     let mut left = remaining;
     while left > 0 {
-        let (ev, next) = fuzz_event(s, n_buttons, n_fields, n_scrolls, drivers);
+        let (ev, next) = fuzz_event(s, n_buttons, n_fields, n_scrolls, n_editors, drivers);
         acc.push(ev);
         s = next;
         left -= 1;
@@ -418,11 +452,21 @@ fn fuzz_script(
     n_buttons: i64,
     n_fields: i64,
     n_scrolls: i64,
+    n_editors: i64,
     drivers: &[String],
 ) -> Vec<String> {
     let s = lcg_next(lcg_seed(seed));
     let len = 1 + lcg_below(s, 12);
-    fuzz_script_acc(s, len, n_buttons, n_fields, n_scrolls, drivers, Vec::new())
+    fuzz_script_acc(
+        s,
+        len,
+        n_buttons,
+        n_fields,
+        n_scrolls,
+        n_editors,
+        drivers,
+        Vec::new(),
+    )
 }
 
 fn fuzz_extend_prefix(
@@ -431,6 +475,7 @@ fn fuzz_extend_prefix(
     n_buttons: i64,
     n_fields: i64,
     n_scrolls: i64,
+    n_editors: i64,
     drivers: &[String],
 ) -> Vec<String> {
     let extra = 1 + lcg_below(s, 4);
@@ -440,6 +485,7 @@ fn fuzz_extend_prefix(
         n_buttons,
         n_fields,
         n_scrolls,
+        n_editors,
         drivers,
         prefix.to_vec(),
     )
@@ -450,19 +496,28 @@ pub fn fuzz_pick_script(
     n_buttons: i64,
     n_fields: i64,
     n_scrolls: i64,
+    n_editors: i64,
     drivers: &[String],
     corpus: &[Vec<String>],
 ) -> Vec<String> {
     if corpus.is_empty() {
-        return fuzz_script(seed, n_buttons, n_fields, n_scrolls, drivers);
+        return fuzz_script(seed, n_buttons, n_fields, n_scrolls, n_editors, drivers);
     }
     let s = lcg_next(lcg_seed(seed));
     if lcg_below(s, 2) == 0 {
-        fuzz_script(seed, n_buttons, n_fields, n_scrolls, drivers)
+        fuzz_script(seed, n_buttons, n_fields, n_scrolls, n_editors, drivers)
     } else {
         let s = lcg_next(s);
         let base = &corpus[lcg_below(s, corpus.len() as i64) as usize];
-        fuzz_extend_prefix(base, lcg_next(s), n_buttons, n_fields, n_scrolls, drivers)
+        fuzz_extend_prefix(
+            base,
+            lcg_next(s),
+            n_buttons,
+            n_fields,
+            n_scrolls,
+            n_editors,
+            drivers,
+        )
     }
 }
 
@@ -489,6 +544,7 @@ pub fn exhaust_alphabet(
     n_buttons: i64,
     n_fields: i64,
     n_scrolls: i64,
+    n_editors: i64,
     drivers: &[String],
 ) -> Vec<String> {
     let mut out = Vec::new();
@@ -500,6 +556,11 @@ pub fn exhaust_alphabet(
         out.push(format!("type {i} a"));
         // Two numbers: field index then chop count. `backspace N` is count on the starred field.
         out.push(format!("backspace {i} 1"));
+    }
+    if n_editors > 0 {
+        out.push("key a a".into());
+        out.push("key Enter".into());
+        out.push("key Backspace".into());
     }
     for i in 0..n_scrolls {
         out.push(format!("scroll {i} 40"));
@@ -695,15 +756,15 @@ mod tests {
 
     #[test]
     fn script_same_seed_same_events() {
-        let a = fuzz_script(42, 2, 1, 0, &[]);
-        let b = fuzz_script(42, 2, 1, 0, &[]);
+        let a = fuzz_script(42, 2, 1, 0, 0, &[]);
+        let b = fuzz_script(42, 2, 1, 0, 0, &[]);
         assert_eq!(a, b);
         assert!(!a.is_empty());
     }
 
     #[test]
     fn exhaust_alphabet_includes_taps_and_pump() {
-        let a = exhaust_alphabet(2, 0, 0, &[]);
+        let a = exhaust_alphabet(2, 0, 0, 0, &[]);
         assert_eq!(
             a,
             vec!["tap 0".to_string(), "tap 1".into(), "pump 1".into()]
@@ -712,12 +773,15 @@ mod tests {
 
     #[test]
     fn exhaust_alphabet_pump_only() {
-        assert_eq!(exhaust_alphabet(0, 0, 0, &[]), vec!["pump 1".to_string()]);
+        assert_eq!(
+            exhaust_alphabet(0, 0, 0, 0, &[]),
+            vec!["pump 1".to_string()]
+        );
     }
 
     #[test]
     fn exhaust_alphabet_indexes_fields_and_scrolls() {
-        let a = exhaust_alphabet(0, 2, 2, &[]);
+        let a = exhaust_alphabet(0, 2, 2, 0, &[]);
         assert_eq!(
             a,
             vec![
@@ -729,6 +793,21 @@ mod tests {
                 "backspace 1 1".into(),
                 "scroll 0 40".into(),
                 "scroll 1 40".into(),
+                "pump 1".into(),
+            ]
+        );
+    }
+
+    #[test]
+    fn exhaust_alphabet_includes_editor_keys() {
+        let a = exhaust_alphabet(1, 0, 0, 1, &[]);
+        assert_eq!(
+            a,
+            vec![
+                "tap 0".to_string(),
+                "key a a".into(),
+                "key Enter".into(),
+                "key Backspace".into(),
                 "pump 1".into(),
             ]
         );

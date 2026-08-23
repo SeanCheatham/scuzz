@@ -1,0 +1,23 @@
+property hasSave: Bool =
+  Property.a11yHas("button:Save")
+
+property hasEditor: Bool =
+  Property.a11yHas("editor:editor")
+
+property bufNonNeg: Bool =
+  Str.len(Property.signalStr(0)) >= 0
+
+@main def main: IO[Unit] =
+  for {
+    args <- Sys.args()
+    path = if (List.isEmpty(args)) "sample.txt" else List.head(args)
+    raw <- Fs.read(path).handleErrorWith(_ =>
+  IO.pure("")
+)
+    buf = Signal.str(raw)
+    _ <- Ui.setTitle(Fs.basename(path))
+    _ <- Ui.run(_ => View.column(View.row(View.text(path), View.button("Save", _ => for {
+  _ = Property.sometimes("tappedSave")
+  _ <- Fs.write(path, Signal.getStr(buf))
+} yield ())), View.expanded(View.editor(buf)))).require(hasSave).require(hasEditor).require(bufNonNeg)
+  } yield ()
