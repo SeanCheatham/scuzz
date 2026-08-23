@@ -1,7 +1,7 @@
 # Next slice
 
-B5 — `Fs.watch` or Clock+Fs poll.
+B6 — Bidirectional stdio on spawn for `scuzz lsp`.
 
-Pick one: `Fs.watch` with a Headless/TestRuntime fake, or a documented Clock plus `Fs` poll. Not both.
+After B3/C2 shape. No in-process Rust LSP client in the Scuzz app. TestRuntime still rejects spawn.
 
 Locks: [`vision.md`](vision.md). Full bar: [`gaps.md`](gaps.md).

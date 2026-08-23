@@ -100,7 +100,7 @@ Folding ranges, inlay hints, and bracket match consume LSP data that already exi
 
 #### 3. Kits the IDE process needs
 
-Today `Json.parse` / `Json.stringify` exist on blessed enum `Null|Bool|Int|Float|Str|Arr|Obj`. `Sys.exec` returns `(code, stdout, stderr)`. `Sys.spawn` returns a pid. It has no child stdin/stdout pipes. `Sys.exec` / `Sys.spawn` fail under TestRuntime. `Fs.list` returns `(name, isDir)` entries. `Fs.exists`, `Fs.join`, `Fs.dirname`, `Fs.basename`, `Fs.delete`, `Fs.rename`, and `Fs.walk` exist. There is no `Fs.watch`. `Fs.read` / `Fs.write` / `Fs.mkdirs` / `Fs.canonicalize` exist. `Sys.args` exists. `Clock` exists (poll is possible; there is no fs watch).
+Today `Json.parse` / `Json.stringify` exist on blessed enum `Null|Bool|Int|Float|Str|Arr|Obj`. `Sys.exec` returns `(code, stdout, stderr)`. `Sys.spawn` returns a pid. It has no child stdin/stdout pipes. `Sys.exec` / `Sys.spawn` fail under TestRuntime. `Fs.list` returns `(name, isDir)` entries. `Fs.exists`, `Fs.join`, `Fs.dirname`, `Fs.basename`, `Fs.delete`, `Fs.rename`, and `Fs.walk` exist. There is no `Fs.watch`. File change detection is a `Clock` plus `Fs` poll (`IO.sleep` / `Clock.monotonic` with `Fs.read` / `Fs.exists` / `Fs.list`). TestRuntime fakes Clock and Fs so Headless can drive that loop. `Fs.read` / `Fs.write` / `Fs.mkdirs` / `Fs.canonicalize` exist. `Sys.args` exists.
 
 Close:
 
@@ -110,7 +110,7 @@ Close:
 - `Fs.list` reports file vs directory. Walk a tree (recursive list or a walk kit). `Fs.list` returns `List[(String, Bool)]`. `Fs.exists`, `Fs.join`, `Fs.dirname`, `Fs.basename`, and `Fs.walk` are in.
 - `Fs.delete`, `Fs.rename`, `Fs.exists`. Rename must stay compatible with `workspace/willRenameFiles`. `Fs.delete` / `Fs.rename` / `Fs.exists` are in. Rename fails when the dest exists or the dest parent is missing. `Fs.write` still requires the parent directory.
 - Path join, dirname, basename (blessed, not ad-hoc `Str` concat). `Fs.join` / `Fs.dirname` / `Fs.basename` are in.
-- File watch (`Fs.watch`) or a documented poll on `Clock` plus `Fs` that Headless can fake.
+- File watch (`Fs.watch`) or a documented poll on `Clock` plus `Fs` that Headless can fake. Poll is the pick: `IO.sleep` / `Clock.monotonic` plus `Fs.read` / `Fs.exists` / `Fs.list`. No `Fs.watch`.
 - TestRuntime story for check-from-IDE: a `*.scuzz_sim` overlay, or a fake that writes JSON onto the mem FS. Live `Sys.exec` must not be the only analyze path. Fuzz stays hermetic.
 
 #### 4. Chrome around the editor

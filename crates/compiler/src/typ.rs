@@ -13647,6 +13647,21 @@ def note(n: Int where "x"): Unit = ()
     }
 
     #[test]
+    fn typechecks_clock_fs_poll() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- Clock.monotonic
+    body <- Fs.read("x")
+    _ <- IO.sleep(50)
+    next <- Fs.read("x")
+    _ <- IO.println(next)
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Clock plus Fs poll should typecheck");
+    }
+
+    #[test]
     fn typechecks_view_outlined_button() {
         let src = r#"@main def main: IO[Unit] =
   Ui.run(_ => View.outlinedButton("Edit", _ => ()))
