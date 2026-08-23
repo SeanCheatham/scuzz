@@ -4,11 +4,28 @@ def filesOf(ents: List[(String, Bool)]): List[String] =
 def joinChild(dir: String, label: String): String =
   Fs.join(dir, Str.stripSuffix(label, "/"))
 
-def openPath(arg: String, listed: Int): String =
-  listed match {
-    case 0 => arg
-    case _ => Fs.join(arg, "sample.txt")
-  }
+def scuzzNames(ents: List[(String, Bool)]): List[String] =
+  List.filter(filesOf(ents), s => Str.endsWith(s, ".scuzz"))
+
+def preferredRel(hasMain: Bool, srcHits: List[String], topHits: List[String]): String =
+  if (hasMain) Fs.join("src", "Main.scuzz") else if (List.nonEmpty(srcHits)) List.head(srcHits) else if (List.nonEmpty(topHits)) List.head(topHits) else Fs.join("src", "Main.scuzz")
+
+def pickSource(dir: String): IO[String] =
+  for {
+    main = Fs.join(dir, Fs.join("src", "Main.scuzz"))
+    hasMain <- Fs.exists(main)
+    srcEnts <- Fs.list(Fs.join(dir, "src")).handleErrorWith(_ =>
+  IO.pure([]: List[(String, Bool)])
+)
+    srcHits = scuzzNames(srcEnts)
+    topEnts <- Fs.list(dir).handleErrorWith(_ =>
+  IO.pure([]: List[(String, Bool)])
+)
+    topHits = scuzzNames(topEnts)
+  } yield if (hasMain) main else if (List.nonEmpty(srcHits)) Fs.join(Fs.join(dir, "src"), List.head(srcHits)) else if (List.nonEmpty(topHits)) Fs.join(dir, List.head(topHits)) else main
+
+def openBuffer(arg: String, isDir: Int): IO[String] =
+  if (isDir == 0) IO.pure(arg) else pickSource(arg)
 
 def keepTree(_dir: String, s: String): Bool =
   Property.check("keep", Str.len(s) > 0, !Str.startsWith(s, ".") && s != "corpus/" && s != "goldens/" && s != "build/")

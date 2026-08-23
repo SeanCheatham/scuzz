@@ -129,7 +129,7 @@ Close:
 - App-level chords once keys exist: save, find, go-to-definition, format, command palette. Same chords on Headless inject. `key s+ctrl` / `f+ctrl` / `f+ctrl+shift` / `k+ctrl` / `p+ctrl` fire Save / Find / Format / Hover / Complete.
 - Output panel for captured `run` / `fuzz` / `fmt` text. Format appends `fmt` to an output list.
 - Window title that follows the open file and dirty state. `Ui.setTitle` is in. Replace sets a `*` title. `[session]` dumps `title=` and `focus=`.
-- Project root from `Sys.args` (what `scuzz ide <path>` passes). A file arg is the buffer. The tree lists `Fs.dirname` of that file. Empty args open `sample.txt`.
+- Project root from `Sys.args` (what `scuzz ide <path>` passes). A file arg is the buffer. The tree lists `Fs.dirname` of that file. A directory arg is the tree root. The buffer is `src/Main.scuzz` when that file exists, else the first `.scuzz` file in `src/` or in the directory. Empty args open `sample.txt` in the editor package.
 
 In-app open-folder UI is enough. Native OS file dialogs, native menus, and multi-window stay later.
 
@@ -163,7 +163,7 @@ Close:
 
 - `scuzz ide [path]` launches the bundled IDE package with Desktop. `--headless` stays.
 - Bundle the package in the SDK. One CLI. No `scuzz-ide` binary. No editor widgets in the Rust CLI. `package_release.sh` copies `examples/editor` to `ide/`. `scuzz ide` finds `SCUZZ_HOME/ide` or `examples/editor`.
-- Pass the project path through `Sys.args`. A directory arg lists as the tree root and opens `sample.txt` under that directory when the listing is nonempty.
+- Pass the project path through `Sys.args`. A directory arg lists as the tree root and opens `src/Main.scuzz` when that file exists, else the first `.scuzz` file in `src/` or in the directory.
 
 #### Not a prerequisite for the first real IDE
 
