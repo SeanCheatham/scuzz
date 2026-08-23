@@ -17,7 +17,7 @@ use support::resolve_dir;
     name = "scuzz",
     version,
     about = "Scuzz Lang CLI",
-    after_help = "Examples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz check --message-format=json\n  scuzz lsp\n  scuzz test\n  scuzz run --headless\n  scuzz run examples/studio\n  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio\n  scuzz watch\n  scuzz run --watch --headless\n  scuzz fuzz --iterations 16\n\nJSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check` (open buffers overlay disk; not a second typer).\n`scuzz check` is the linter. `watch` rebuilds. `[ui] run --watch` is hot reload: it keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (Signals stay). IO-only `run --watch` kills and reruns on source change. Live dump: build/debug.dump (includes [heap] kinds, delta, and [live] rows). Live inject: build/inject.script (tap/xy/text/type/key/caret/select/copy/cut/paste/drag/hover/secondary/pump/scroll/backspace/dump/reload/quit/resetpeak). Desktop quit is window close. Headless `quit` stops the session. Desktop/Mobile record: build/record.script (live keys write `key`; Shift+arrows write `key ArrowLeft+shift`; copy/cut/paste write those verbs; hover and right-click write `hover` / `secondary`)."
+    after_help = "Examples:\n  scuzz new myapp --ui\n  scuzz check\n  scuzz check --message-format=json\n  scuzz lsp\n  scuzz ide\n  scuzz ide --headless .\n  scuzz test\n  scuzz run --headless\n  scuzz run examples/studio\n  scuzz run --headless --script examples/studio/build/record.script --dump examples/studio/build/debug.dump examples/studio\n  scuzz watch\n  scuzz run --watch --headless\n  scuzz fuzz --iterations 16\n\nJSON diagnostics are the check protocol. `scuzz lsp` wraps `scuzz check` (open buffers overlay disk; not a second typer).\n`scuzz check` is the linter. `watch` rebuilds. `[ui] run --watch` is hot reload: it keeps the process, recompiles build/reload.dylib, and stamp-reloads the View tree (Signals stay). IO-only `run --watch` kills and reruns on source change. Live dump: build/debug.dump (includes [heap] kinds, delta, and [live] rows). Live inject: build/inject.script (tap/xy/text/type/key/caret/select/copy/cut/paste/drag/hover/secondary/pump/scroll/backspace/dump/reload/quit/resetpeak). Desktop quit is window close. Headless `quit` stops the session. Desktop/Mobile record: build/record.script (live keys write `key`; Shift+arrows write `key ArrowLeft+shift`; copy/cut/paste write those verbs; hover and right-click write `hover` / `secondary`)."
 )]
 struct Cli {
     /// Diagnostic format: human (default) or json (`scuzz check` only)
@@ -155,6 +155,20 @@ enum Commands {
         #[arg(long)]
         ui: bool,
     },
+    /// Launch the bundled Scuzz IDE (`[ui]` package in the SDK)
+    #[command(
+        after_help = "Examples:\n  scuzz ide\n  scuzz ide examples/hello\n  scuzz ide --headless .\n\nLaunches the bundled IDE package with Desktop. `--headless` stays a peer. Pass a file or a project directory through Sys.args. No scuzz-ide binary.\n"
+    )]
+    Ide {
+        /// Project file or directory to open
+        #[arg(default_value = ".")]
+        path: PathBuf,
+        /// Force Headless UiRuntime (no display needed)
+        #[arg(long)]
+        headless: bool,
+        #[arg(long, default_value = "build")]
+        out_dir: PathBuf,
+    },
     /// Package a project for host, Android, or iOS
     #[command(
         after_help = "Examples:\n  scuzz package --target host\n  scuzz package --target all examples/counter\n  scuzz package --target ios examples/counter\n  scuzz package --target android examples/counter\n\nDefault target is host. ios builds a signed simulator .app. It needs Xcode. android packs a debug APK. It needs the NDK and the Android SDK. Missing xcrun, NDK, or SDK fails with one install line.\n"
@@ -246,6 +260,8 @@ fn real_main() -> Result<ExitCode> {
                 headless,
                 script.as_deref(),
                 dump.as_deref(),
+                None,
+                false,
             )
         }
         Commands::Watch { path, out_dir } => watch_build(&path, &out_dir),
@@ -357,6 +373,22 @@ version = "0.1.0"
             oracles,
             no_fail_fast,
         ),
+        Commands::Ide {
+            path,
+            headless,
+            out_dir,
+        } => {
+            let ide = find_ide_dir()?;
+            run_once(
+                &ide,
+                &out_dir,
+                headless,
+                None,
+                None,
+                Some(path.as_path()),
+                true,
+            )
+        }
         Commands::Package {
             path,
             target,
@@ -389,17 +421,71 @@ fn apply_peer_env(
     );
 }
 
+fn walk_ide_pkg(start: &Path) -> Option<PathBuf> {
+    let mut cur = start.to_path_buf();
+    loop {
+        for rel in ["ide", "examples/editor"] {
+            let p = cur.join(rel);
+            if p.join("scuzz.toml").is_file() {
+                return Some(p);
+            }
+        }
+        if !cur.pop() {
+            return None;
+        }
+    }
+}
+
+fn find_ide_dir() -> Result<PathBuf> {
+    if let Ok(p) = std::env::var("SCUZZ_IDE") {
+        if !p.is_empty() {
+            let p = PathBuf::from(p);
+            if p.join("scuzz.toml").is_file() {
+                return Ok(p);
+            }
+        }
+    }
+    if let Ok(home) = std::env::var("SCUZZ_HOME") {
+        if !home.is_empty() {
+            let p = PathBuf::from(home).join("ide");
+            if p.join("scuzz.toml").is_file() {
+                return Ok(p);
+            }
+        }
+    }
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("."));
+    if let Some(p) = walk_ide_pkg(&cwd) {
+        return Ok(p);
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(parent) = exe.parent() {
+            if let Some(p) = walk_ide_pkg(parent) {
+                return Ok(p);
+            }
+        }
+    }
+    bail!(
+        "could not find the bundled IDE package (ide/ or examples/editor with scuzz.toml). Set SCUZZ_IDE or SCUZZ_HOME."
+    )
+}
+
 fn run_once(
     path: &Path,
     out_dir: &Path,
     headless: bool,
     script: Option<&Path>,
     dump: Option<&Path>,
+    open: Option<&Path>,
+    prefer_desktop: bool,
 ) -> Result<ExitCode> {
     let project_dir = resolve_dir(path)?;
     let manifest = load_manifest(&project_dir.join("scuzz.toml"))
         .with_context(|| format!("reading {}/scuzz.toml", project_dir.display()))?;
-    let effective = effective_ui_runtime(&manifest, headless);
+    let effective = if prefer_desktop && !headless {
+        "desktop".into()
+    } else {
+        effective_ui_runtime(&manifest, headless)
+    };
     let use_headless = effective.eq_ignore_ascii_case("headless");
     let use_mobile = effective.eq_ignore_ascii_case("mobile");
     let use_desktop = effective.eq_ignore_ascii_case("desktop")
@@ -408,9 +494,13 @@ fn run_once(
     let out = build(path, out_dir, true, false)?;
     let mut cmd = Command::new(&out.executable);
     cmd.current_dir(&project_dir);
-    if project_dir.join("sample.txt").is_file() {
+    if let Some(open) = open {
+        let abs = std::fs::canonicalize(open).unwrap_or_else(|_| open.to_path_buf());
+        cmd.arg(abs);
+    } else if project_dir.join("sample.txt").is_file() {
         cmd.arg("sample.txt");
     }
+    let verb = if open.is_some() { "ide" } else { "run" };
     if use_headless && (headless || manifest.ui.is_some()) {
         let snap = out
             .executable
@@ -419,9 +509,9 @@ fn run_once(
             .join("snapshot.png");
         apply_ui_env(&mut cmd, &manifest, &snap, /*tap*/ false);
         if headless {
-            eprintln!("scuzz run --headless → snapshot {}", snap.display());
+            eprintln!("scuzz {verb} --headless → snapshot {}", snap.display());
         } else {
-            eprintln!("scuzz run → Headless snapshot {}", snap.display());
+            eprintln!("scuzz {verb} → Headless snapshot {}", snap.display());
         }
     } else if use_mobile {
         apply_peer_env(&mut cmd, &manifest, &project_dir, true);
@@ -429,7 +519,7 @@ fn run_once(
             "SCUZZ_UI_DEBUG_DUMP",
             project_dir.join("build").join("debug.dump"),
         );
-        eprintln!("scuzz run → UiRuntime.Mobile (host shell)");
+        eprintln!("scuzz {verb} → UiRuntime.Mobile (host shell)");
     } else if use_desktop {
         // Desktop peer + desktop embedder (X11 / Cocoa) when available.
         apply_peer_env(&mut cmd, &manifest, &project_dir, false);
@@ -437,7 +527,7 @@ fn run_once(
             "SCUZZ_UI_DEBUG_DUMP",
             project_dir.join("build").join("debug.dump"),
         );
-        eprintln!("scuzz run → UiRuntime.Desktop (desktop embedder)");
+        eprintln!("scuzz {verb} → UiRuntime.Desktop (desktop embedder)");
     }
     if let Some(script) = script {
         cmd.env("SCUZZ_UI_SCRIPT", script);

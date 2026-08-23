@@ -35,6 +35,7 @@ cd myapp
 scuzz test --update
 scuzz test
 scuzz run --headless    # Desktop: scuzz run
+scuzz ide --headless .  # bundled editor; Desktop without --headless
 ```
 
 `install.sh --help` lists flags and env vars.

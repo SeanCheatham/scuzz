@@ -27,7 +27,7 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ### 3. Dogfood IDE at editor scale
 
-**Status.** Direction is locked in [`vision.md`](vision.md#tooling): a Scuzz `[ui]` app is the in-tree IDE. `scuzz ide` launches it. The compiler and `scuzz lsp` stay Rust. `examples/editor` opens a project root from `Sys.args`, edits in `View.editor`, saves, runs `scuzz check --message-format=json`, hosts `scuzz lsp` over `Sys.spawn` pipes, and composes file tree, tabs, find/replace, overlay stubs, output, and title. Fuzz overlays `analyze` and `lspCall` with canned JSON. Do not start the IDE package yet.
+**Status.** Direction is locked in [`vision.md`](vision.md#tooling): a Scuzz `[ui]` app is the in-tree IDE. `scuzz ide` launches the bundled package (`examples/editor` in a checkout; `SCUZZ_HOME/ide` from a release). The compiler and `scuzz lsp` stay Rust. `examples/editor` opens a project root from `Sys.args`, edits in `View.editor`, saves, runs `scuzz check --message-format=json`, hosts `scuzz lsp` over `Sys.spawn` pipes, and composes file tree, tabs, find/replace, overlay stubs, output, and title. Fuzz overlays `analyze` and `lspCall` with canned JSON.
 
 **Unproven.** An editor-scale Scuzz app stays inside Headless-as-peer, one input alphabet, the `pump` frame budget, and `scuzz fuzz` as the verification strategy. A second typer, Desktop-only keys, or a View-per-token tree that Headless cannot dump breaks those locks.
 
@@ -60,7 +60,7 @@ Path deps only (`manifest.rs`). Git, versioned, and hosted artifacts are directi
 
 A Scuzz `[ui]` package is the in-tree IDE. `scuzz ide` on the one CLI launches it with Desktop. Headless stays a peer. The app consumes `scuzz check`, `scuzz lsp`, `scuzz fmt`, `scuzz run`, and `scuzz fuzz`. It does not reimplement the compiler. Locks: [`vision.md`](vision.md#tooling).
 
-Close every prerequisite in this section before that package and before `scuzz ide`. An implementation that invents a missing primitive at IDE time is a miss of this list. Sequence: input/editor and kits in parallel. Put Headless in every UI slice. Prove on `examples/editor` before the launcher. The close-lists below stay the bar.
+`scuzz ide` launches the bundled package. Close-lists below stay the bar for that app. Headless is part of every UI slice. `examples/editor` is the proof and the SDK `ide/` tree.
 
 #### 1. Input and embedder
 
@@ -157,17 +157,17 @@ Close:
 
 #### 7. CLI and ship
 
-Today `scuzz run examples/studio` opens Desktop when `[ui].default_runtime = "desktop"`. There is no `ide` subcommand. `install.sh` already ships the CLI plus SDK.
+Today `scuzz ide [path]` launches the bundled `[ui]` package with Desktop. `--headless` stays. `install.sh` ships the CLI plus SDK (`SCUZZ_HOME/ide`). `scuzz run examples/studio` opens Desktop when `[ui].default_runtime = "desktop"`.
 
 Close:
 
 - `scuzz ide [path]` launches the bundled IDE package with Desktop. `--headless` stays.
-- Bundle the package in the SDK. One CLI. No `scuzz-ide` binary. No editor widgets in the Rust CLI.
-- Pass the project path through `Sys.args`.
+- Bundle the package in the SDK. One CLI. No `scuzz-ide` binary. No editor widgets in the Rust CLI. `package_release.sh` copies `examples/editor` to `ide/`. `scuzz ide` finds `SCUZZ_HOME/ide` or `examples/editor`.
+- Pass the project path through `Sys.args`. A directory arg lists as the tree root and opens `sample.txt` under that directory when the listing is nonempty.
 
 #### Not a prerequisite for the first real IDE
 
-Leave these until after `scuzz ide` exists. Do not block the list above on them:
+These stay later. They do not block the list above:
 
 - Multi-window, native menus, native file picker, drag-and-drop from the OS
 - Multi-cursor, minimap, Git UI, debugger, plugin host

@@ -4,6 +4,12 @@ def filesOf(ents: List[(String, Bool)]): List[String] =
 def joinChild(dir: String, label: String): String =
   Fs.join(dir, Str.stripSuffix(label, "/"))
 
+def openPath(arg: String, listed: Int): String =
+  listed match {
+    case 0 => arg
+    case _ => Fs.join(arg, "sample.txt")
+  }
+
 def keepTree(_dir: String, s: String): Bool =
   Property.check("keep", Str.len(s) > 0, !Str.startsWith(s, ".") && s != "corpus/" && s != "goldens/" && s != "build/")
 
