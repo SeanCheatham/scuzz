@@ -66,6 +66,13 @@ def listDir(dir: String): IO[List[String]] =
     findOpen = Signal.int(Str.len(""))
     compOpen = Signal.int(Str.len(""))
     hoverOpen = Signal.int(Str.len(""))
+    hoverTxt = Signal.str("hover stub")
+    comps = Signal.list([])
+    _ = Lsp.frame("{}")
+    _ = Lsp.parseLen(Str.concat("Content-Length: 2", Str.concat(Lsp.headerBreak(), "{}")))
+    _ = Property.check("need", Lsp.needLen(Str.len("abcd"), Str.len("xy")) == Str.len("abcdef"), true)
+    _ = Property.check("ms", Lsp.msgSlice("aabbcc", Str.len("aa"), Str.len("bb")) == "bb", true)
+    _ = Property.check("idm", Check.jsonInt(Check.jsonField(Lsp.takeIfMatch(Json.parse("{\"id\":2}"), Str.len("xy")), "id")) == Str.len("xy"), true)
     _ <- Ui.setTitle(Fs.basename(file))
     _ <- Ui.run(_ => View.split(frac, View.column(View.text("Files"), View.each(tree, s => View.button(s, _ => for {
   dir = Signal.getStr(dirSig)
@@ -110,19 +117,52 @@ def listDir(dir: String): IO[List[String]] =
   _ <- IO.pure(())
 } yield ()), View.button("Complete", _ => for {
   _ = Property.sometimes("tappedComplete")
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/completion").handleErrorWith(_ =>
+  IO.pure(Json.Null)
+)
+  _ = Signal.setList(comps, Lsp.completeLabels(j))
   _ = Signal.set(compOpen, Str.len("x"))
   _ <- IO.pure(())
 } yield ()), View.button("Hover", _ => for {
   _ = Property.sometimes("tappedHover")
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/hover").handleErrorWith(_ =>
+  IO.pure(Json.Null)
+)
+  tok <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/semanticTokens/full").handleErrorWith(_ =>
+  IO.pure(Json.Null)
+)
+  _ = Signal.setStr(hoverTxt, Lsp.hoverText(j))
+  _ = Signal.setList(output, List.append(Signal.getList(output), Str.concat("tok", Str.fromInt(Lsp.tokenCount(tok)))))
   _ = Signal.set(hoverOpen, Str.len("x"))
   _ <- IO.pure(())
 } yield ()), View.button("Format", _ => for {
   _ = Property.sometimes("tappedFormat")
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/formatting").handleErrorWith(_ =>
+  IO.pure(Json.Null)
+)
+  _ = Signal.setStr(buf, Lsp.formatText(j, Signal.getStr(buf)))
   _ = Signal.setList(output, List.append(Signal.getList(output), "fmt"))
+  _ <- IO.pure(())
+} yield ()), View.button("Def", _ => for {
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/definition").handleErrorWith(_ =>
+  IO.pure(Json.Null)
+)
+  _ <- Ui.setEditorCaret(Lsp.defLine(j), Lsp.defCol(j))
+} yield ()), View.button("Rename", _ => for {
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/rename").handleErrorWith(_ =>
+  IO.pure(Json.Null)
+)
+  _ = Signal.setStr(buf, Lsp.renameText(j, Signal.getStr(buf)))
+  _ <- IO.pure(())
+} yield ()), View.button("Fix", _ => for {
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/codeAction").handleErrorWith(_ =>
+  IO.pure(Json.Null)
+)
+  _ = Signal.setList(output, List.append(Signal.getList(output), Lsp.fixTitle(j)))
   _ <- IO.pure(())
 } yield ())), View.expanded(View.editor(buf)), View.each(diags, s => View.button(s, _ => Check.jumpDiag(s))), View.each(output, s => View.text(s))), View.overlay(findOpen, View.column(View.text("Find"), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => Ui.setEditorCaret(Str.len("x"), Str.len("x"))), View.button("Replace", _ => for {
   _ = Signal.setStr(buf, Str.replace(Signal.getStr(buf), Signal.getStr(findQ), Signal.getStr(replQ)))
   _ = Signal.set(dirty, Str.len("x"))
   _ <- Ui.setTitle(Str.concat(Fs.basename(Signal.getStr(pathSig)), " *"))
-} yield ()))), View.overlay(compOpen, View.column(View.text("complete"), View.button("Insert", _ => ()))), View.overlay(hoverOpen, View.text("hover stub"))))).require(hasSave).require(hasCheck).require(hasFind).require(hasEditor).require(bufNonNeg).require(diagNonNeg)
+} yield ()))), View.overlay(compOpen, View.column(View.text("complete"), View.each(comps, s => View.button(s, _ => ())))), View.overlay(hoverOpen, View.bindText(hoverTxt))))).require(hasSave).require(hasCheck).require(hasFind).require(hasEditor).require(bufNonNeg).require(diagNonNeg)
   } yield ()

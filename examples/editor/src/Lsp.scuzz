@@ -1,0 +1,149 @@
+def headerBreak(): String =
+  """
+
+"""
+
+def frame(body: String): String =
+  Str.concat("Content-Length: ", Str.concat(Str.fromInt(Str.len(body)), Str.concat(headerBreak(), body))) match {
+    case s => Property.check("frame", Str.contains(s, "Content-Length: ") && Str.contains(s, body), s)
+  }
+
+def parseLen(head: String): Int =
+  Str.toInt(Str.take(Str.drop(head, Str.indexOf(head, "Content-Length: ") + Str.len("Content-Length: ")), Str.indexOf(Str.drop(head, Str.indexOf(head, "Content-Length: ") + Str.len("Content-Length: ")), Str.take(headerBreak(), Str.len("x")))), Str.len("")) match {
+    case n => Property.check("plen", n >= 0, n)
+  }
+
+def needLen(start: Int, len: Int): Int =
+  start + len
+
+def msgSlice(full: String, start: Int, len: Int): String =
+  Str.slice(full, start, needLen(start, len)) match {
+    case s => Property.check("mslice", Str.len(s) >= 0, s)
+  }
+
+def takeIfMatch(j: Json, want: Int): Json =
+  if (Check.jsonInt(Check.jsonField(j, "id")) == want) j else Json.Null
+
+def emptyObj(): Json =
+  Json.Obj([]: List[(String, Json)])
+
+def jField(k: String, v: Json): (String, Json) =
+  (k, v)
+
+def posObj(line: Int, col: Int): Json =
+  Json.Obj(jField("line", Json.Int(line)) :: jField("character", Json.Int(col)) :: ([]: List[(String, Json)]))
+
+def docObj(uri: String): Json =
+  Json.Obj(jField("uri", Json.Str(uri)) :: ([]: List[(String, Json)]))
+
+def initBody(rootUri: String): String =
+  Json.stringify(Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("x"))) :: jField("method", Json.Str("initialize")) :: jField("params", Json.Obj(jField("rootUri", Json.Str(rootUri)) :: jField("capabilities", emptyObj()) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)])))
+
+def didOpenBody(uri: String, text: String): String =
+  Json.stringify(Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("method", Json.Str("textDocument/didOpen")) :: jField("params", Json.Obj(jField("textDocument", Json.Obj(jField("uri", Json.Str(uri)) :: jField("languageId", Json.Str("scuzz")) :: jField("version", Json.Int(Str.len("x"))) :: jField("text", Json.Str(text)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)])))
+
+def initializedBody(): String =
+  Json.stringify(Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("method", Json.Str("initialized")) :: jField("params", emptyObj()) :: ([]: List[(String, Json)])))
+
+def requestBody(method: String, uri: String, line: Int, col: Int): String =
+  Json.stringify(method match {
+  case "textDocument/rename" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: jField("position", posObj(line, col)) :: jField("newName", Json.Str("x")) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
+  case "textDocument/formatting" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
+  case "textDocument/semanticTokens/full" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
+  case "textDocument/codeAction" => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: jField("range", Json.Obj(jField("start", posObj(line, col)) :: jField("end", posObj(line, col)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
+  case _ => Json.Obj(jField("jsonrpc", Json.Str("2.0")) :: jField("id", Json.Int(Str.len("xy"))) :: jField("method", Json.Str(method)) :: jField("params", Json.Obj(jField("textDocument", docObj(uri)) :: jField("position", posObj(line, col)) :: ([]: List[(String, Json)]))) :: ([]: List[(String, Json)]))
+})
+
+def hoverText(j: Json): String =
+  Check.jsonStr(Check.jsonField(Check.jsonField(Check.jsonField(j, "result"), "contents"), "value")) match {
+    case s => Property.check("hover", Str.len(s) >= 0, s)
+  }
+
+def completeLabels(j: Json): List[String] =
+  Check.jsonField(Check.jsonField(j, "result"), "items") match {
+    case Json.Arr(xs) => List.map(xs, it => Check.jsonStr(Check.jsonField(it, "label")))
+    case _ => []: List[String]
+  }
+
+def defLine(j: Json): Int =
+  Check.jsonInt(Check.jsonField(Check.jsonField(Check.jsonField(Check.jsonField(j, "result"), "range"), "start"), "line")) + Str.len("x") match {
+  case n => Property.check("defLine", n > 0, n)
+}
+
+def defCol(j: Json): Int =
+  Check.jsonInt(Check.jsonField(Check.jsonField(Check.jsonField(Check.jsonField(j, "result"), "range"), "start"), "character")) + Str.len("x") match {
+  case n => Property.check("defCol", n > 0, n)
+}
+
+def formatText(j: Json, fallback: String): String =
+  Check.jsonField(j, "result") match {
+    case Json.Arr(x :: _) => Check.jsonStr(Check.jsonField(x, "newText")) match {
+  case t => if (Str.isEmpty(t)) fallback else t
+}
+    case _ => fallback
+  }
+
+def renameText(j: Json, fallback: String): String =
+  Check.jsonStr(Check.jsonField(Check.jsonField(j, "result"), "newText")) match {
+    case t => if (Str.isEmpty(t)) fallback else t
+  }
+
+def fixTitle(j: Json): String =
+  Check.jsonField(j, "result") match {
+    case Json.Arr(x :: _) => Check.jsonStr(Check.jsonField(x, "title"))
+    case _ => ""
+  }
+
+def tokenCount(j: Json): Int =
+  Check.jsonField(Check.jsonField(j, "result"), "data") match {
+    case Json.Arr(xs) => List.len(xs)
+    case _ => Str.len("")
+  }
+
+def readUntil(pid: Int, acc: String, needle: String): IO[String] =
+  if (Str.indexOf(acc, needle) >= 0) IO.pure(acc) else Sys.childRead(pid, 256).flatMap(c => if (Str.isEmpty(c)) IO.pure(acc) else readUntil(pid, Str.concat(acc, c), needle))
+
+def fillTo(pid: Int, acc: String, need: Int): IO[String] =
+  if (Str.len(acc) >= need) IO.pure(acc) else Sys.childRead(pid, 256).flatMap(c => if (Str.isEmpty(c)) IO.pure(acc) else fillTo(pid, Str.concat(acc, c), need))
+
+def readMsg(pid: Int): IO[String] =
+  for {
+    acc <- readUntil(pid, "", headerBreak())
+    split = Str.indexOf(acc, headerBreak())
+    len = parseLen(Str.take(acc, split))
+    start = needLen(split, Str.len(headerBreak()))
+    full <- fillTo(pid, acc, needLen(start, len))
+  } yield msgSlice(full, start, len)
+
+def readResult(pid: Int, want: Int): IO[Json] =
+  for {
+    raw <- readMsg(pid)
+    j = Json.parse(raw)
+    hit = takeIfMatch(j, want)
+    out <- hit match {
+  case Json.Null => readResult(pid, want)
+  case _ => IO.pure(hit)
+}
+  } yield out
+
+def lspCall(root: String, path: String, body: String, method: String): IO[Json] =
+  for {
+    pid <- Sys.spawn("scuzz lsp")
+    abs <- Fs.canonicalize(path).handleErrorWith(_ =>
+  IO.pure(path)
+)
+    rootAbs <- Fs.canonicalize(root).handleErrorWith(_ =>
+  IO.pure(root)
+)
+    uri = Str.concat("file://", abs)
+    rootUri = Str.concat("file://", rootAbs)
+    _ <- Sys.childWrite(pid, frame(initBody(rootUri)))
+    _ <- readResult(pid, Str.len("x"))
+    _ <- Sys.childWrite(pid, frame(initializedBody()))
+    _ <- Sys.childWrite(pid, frame(didOpenBody(uri, body)))
+    _ <- Sys.childWrite(pid, frame(requestBody(method, uri, Str.len(""), Str.len(""))))
+    j <- readResult(pid, Str.len("xy"))
+    _ <- Sys.childClose(pid)
+    _ <- Sys.kill(pid)
+  } yield j
+
