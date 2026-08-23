@@ -1,9 +1,7 @@
 # Next slice
 
-A8 — Focus, splitter, overlay, and title.
+B1 — `Fs.list` entries and path helpers.
 
-Route keys to the focused editor, tree, diagnostics, or popup. Buttons clear TextField focus. Draggable splitter. Overlay popups compose `View.stack` / `View.positioned` with key routing and dismiss. Session title setter (`Ui.run` currently hardcodes `"Scuzz Lang"`). File tree, tabs, find, command palette, and output panel stay Scuzz composition in Track C.
-
-Each slice lands Headless inject + dump + a runtime test. Desktop and Headless share verbs.
+`Fs.list` returns `IO[List[(String, Bool)]]` (`name`, `isDir`). Mem FS already stores `is_dir`. Add `Fs.exists`. Add `Fs.join` / `Fs.dirname` / `Fs.basename`. Forwards-only: rewrite every `IO[List[String]]` call site. Live disk and TestRuntime stay in lockstep.
 
 Locks: [`vision.md`](vision.md). Full bar: [`gaps.md`](gaps.md).

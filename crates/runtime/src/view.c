@@ -121,6 +121,11 @@ static int view_offstage_shown(const SzView *v) {
          sz_signal_int_get(v->sig_int) != 0;
 }
 
+static int view_overlay_open(const SzView *v) {
+  return v && v->kind == SZ_VIEW_OVERLAY && v->sig_int &&
+         sz_signal_int_get(v->sig_int) != 0;
+}
+
 static int count_shown_children(const SzView *v) {
   int i, n = 0;
   if (!v)
@@ -154,7 +159,8 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_PLACEHOLDER || kind == SZ_VIEW_SEMANTICS ||
          kind == SZ_VIEW_MERGE_SEMANTICS || kind == SZ_VIEW_INK_WELL ||
          kind == SZ_VIEW_VISIBILITY || kind == SZ_VIEW_OFFSTAGE ||
-         kind == SZ_VIEW_UNCONSTRAINED_BOX;
+         kind == SZ_VIEW_UNCONSTRAINED_BOX || kind == SZ_VIEW_SPLIT ||
+         kind == SZ_VIEW_OVERLAY;
 }
 
 /* Expanded, or Stretch wrapping Expanded. */
@@ -347,6 +353,46 @@ SzView *sz_view_slider(SzSignalInt *sig) {
   v->a11y_role = SZ_A11Y_SLIDER;
   v->a11y_label = sz_strdup("slider");
   return v;
+}
+
+SzView *sz_view_split(SzSignalInt *frac, SzView *start, SzView *end) {
+  SzView *v = view_new(SZ_VIEW_SPLIT);
+  v->sig_int = frac;
+  v->interactive = 1;
+  v->a11y_role = SZ_A11Y_SPLIT;
+  v->a11y_label = sz_strdup("split");
+  if (start)
+    sz_view_add_child(v, start);
+  if (end)
+    sz_view_add_child(v, end);
+  return v;
+}
+
+SzView *sz_view_overlay(SzSignalInt *open, SzView *child) {
+  SzView *v = view_new(SZ_VIEW_OVERLAY);
+  v->sig_int = open;
+  v->interactive = 1;
+  v->a11y_role = SZ_A11Y_OVERLAY;
+  v->a11y_label = sz_strdup("overlay");
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
+int sz_view_overlay_is_open(const SzView *view) {
+  return view_overlay_open(view) ? 1 : 0;
+}
+
+int sz_view_split_frac(const SzView *view) {
+  int64_t n;
+  if (!view || view->kind != SZ_VIEW_SPLIT)
+    return 0;
+  n = view->sig_int ? sz_signal_int_get(view->sig_int) : 50;
+  if (n < 0)
+    n = 0;
+  if (n > 100)
+    n = 100;
+  return (int)n;
 }
 
 SzView *sz_view_progress(SzSignalInt *sig) {
@@ -621,6 +667,25 @@ int sz_view_slider_set_at(SzView *view, float x) {
   float t;
   int64_t n;
   if (!view || view->kind != SZ_VIEW_SLIDER || !view->sig_int)
+    return 0;
+  if (view->frame.w <= 0.f)
+    n = 0;
+  else {
+    t = (x - view->frame.x) / view->frame.w;
+    if (t < 0.f)
+      t = 0.f;
+    if (t > 1.f)
+      t = 1.f;
+    n = (int64_t)(t * 100.f + 0.5f);
+  }
+  sz_signal_int_set(view->sig_int, slider_clamp(n));
+  return 1;
+}
+
+int sz_view_split_set_at(SzView *view, float x) {
+  float t;
+  int64_t n;
+  if (!view || view->kind != SZ_VIEW_SPLIT || !view->sig_int)
     return 0;
   if (view->frame.w <= 0.f)
     n = 0;
@@ -932,6 +997,10 @@ static const char *a11y_role_name(SzA11yRole role) {
     return "unconstrained";
   case SZ_A11Y_EDITOR:
     return "editor";
+  case SZ_A11Y_SPLIT:
+    return "split";
+  case SZ_A11Y_OVERLAY:
+    return "overlay";
   default:
     return "none";
   }
@@ -994,6 +1063,15 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
       snprintf(live, sizeof live, "%d", view_offstage_shown(v) ? 1 : 0);
       label = live;
     }
+    if (v->kind == SZ_VIEW_SPLIT) {
+      int64_t n = v->sig_int ? slider_clamp(sz_signal_int_get(v->sig_int)) : 50;
+      snprintf(live, sizeof live, "%lld", (long long)n);
+      label = live;
+    }
+    if (v->kind == SZ_VIEW_OVERLAY) {
+      snprintf(live, sizeof live, "%d", view_overlay_open(v) ? 1 : 0);
+      label = live;
+    }
     n = snprintf(line, sizeof line, "%s:%s\n", a11y_role_name(v->a11y_role),
                  label);
     if (n > 0 && *len + (size_t)n < cap) {
@@ -1007,6 +1085,8 @@ static void a11y_dump_node(SzView *v, char *buf, size_t cap, size_t *len) {
   if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
     return;
   if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
+    return;
+  if (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))
     return;
   for (i = 0; i < v->child_count; i++)
     a11y_dump_node(v->children[i], buf, cap, len);
@@ -2746,6 +2826,42 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     /* Child gets unbounded max (0). Incoming max still clamps this frame. */
     layout_pass_child(v, x, y, 0.f, 0.f, 0.f, 0.f, theme);
     break;
+  case SZ_VIEW_SPLIT: {
+    SzView *left = v->child_count > 0 ? v->children[0] : NULL;
+    SzView *right = v->child_count > 1 ? v->children[1] : NULL;
+    float handle = 6.f;
+    float avail = max_w > handle ? max_w - handle : 0.f;
+    float n = (float)slider_clamp(v->sig_int ? sz_signal_int_get(v->sig_int) : 50);
+    float lw = avail * (n / 100.f);
+    float rw = avail - lw;
+    float inner_h = max_h > 0.f ? max_h : theme->control_h;
+    if (lw < 0.f)
+      lw = 0.f;
+    if (rw < 0.f)
+      rw = 0.f;
+    if (left)
+      layout_constrained(left, x, y, box_tight_width(lw, inner_h), theme);
+    if (right)
+      layout_constrained(right, x + lw + handle, y, box_tight_width(rw, inner_h),
+                         theme);
+    v->frame.w = max_w > 0.f ? max_w : lw + handle + rw;
+    v->frame.h = inner_h;
+    break;
+  }
+  case SZ_VIEW_OVERLAY:
+    if (!view_overlay_open(v)) {
+      if (v->child_count > 0)
+        layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
+      v->frame.w = 0.f;
+      v->frame.h = 0.f;
+      break;
+    }
+    v->frame.w = max_w > 0.f ? max_w : min_w;
+    v->frame.h = max_h > 0.f ? max_h : min_h;
+    if (v->child_count > 0)
+      layout_constrained(v->children[0], x, y,
+                         box_loose(v->frame.w, v->frame.h), theme);
+    break;
   case SZ_VIEW_MAX_LINES: {
     int prev = g_max_lines;
     g_max_lines = tighten_max_lines(v->img_w);
@@ -2887,6 +3003,10 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
     v->frame.w = max_w;
   if (max_h > 0.f && v->frame.h > max_h)
     v->frame.h = max_h;
+  if (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v)) {
+    v->frame.w = 0.f;
+    v->frame.h = 0.f;
+  }
 }
 
 void sz_view_layout(SzView *root, float width, float height, const SzTheme *theme) {
@@ -2914,6 +3034,8 @@ static SzView *hit_node(SzView *v, float x, float y) {
     return NULL;
   if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
     return NULL;
+  if (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))
+    return NULL;
   if (v->kind == SZ_VIEW_ABSORB_POINTER)
     return v;
   /* Front-to-back: last child wins. */
@@ -2939,6 +3061,8 @@ static SzView *tooltip_at_node(SzView *v, float x, float y) {
   if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
     return NULL;
   if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
+    return NULL;
+  if (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))
     return NULL;
   for (i = v->child_count - 1; i >= 0; i--) {
     found = tooltip_at_node(v->children[i], x, y);
@@ -3418,6 +3542,8 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
     return;
   if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
+    return;
+  if (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))
     return;
 
   switch (v->kind) {
@@ -4237,11 +4363,24 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_VISIBILITY:
   case SZ_VIEW_OFFSTAGE:
   case SZ_VIEW_UNCONSTRAINED_BOX:
+  case SZ_VIEW_OVERLAY:
     if (v->kind == SZ_VIEW_LIST)
       paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, theme->surface);
+    if (v->kind == SZ_VIEW_OVERLAY)
+      paint_rect(c, v->frame.x, v->frame.y, v->frame.w, v->frame.h, 0x66000000u);
     for (i = 0; i < v->child_count; i++)
       paint_node(v->children[i], c, theme);
     break;
+  case SZ_VIEW_SPLIT: {
+    float handle = 6.f;
+    float n = (float)slider_clamp(v->sig_int ? sz_signal_int_get(v->sig_int) : 50);
+    float hx;
+    for (i = 0; i < v->child_count; i++)
+      paint_node(v->children[i], c, theme);
+    hx = v->frame.x + (v->frame.w > handle ? (v->frame.w - handle) * (n / 100.f) : 0.f);
+    paint_rect(c, hx, v->frame.y, handle, v->frame.h, theme->muted);
+    break;
+  }
   case SZ_VIEW_PLACEHOLDER: {
     SzRect f = v->frame;
     for (i = 0; i < v->child_count; i++)
@@ -4400,6 +4539,12 @@ int sz_view_has_focused_text_field(SzView *root) {
   int i;
   if (!root)
     return 0;
+  if (root->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(root))
+    return 0;
+  if (root->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(root))
+    return 0;
+  if (root->kind == SZ_VIEW_OVERLAY && !view_overlay_open(root))
+    return 0;
   if (view_is_edit(root) && root->focused)
     return 1;
   for (i = 0; i < root->child_count; i++) {
@@ -4413,6 +4558,12 @@ static SzView *find_focused_edit(SzView *root) {
   int i;
   SzView *found;
   if (!root || !view_is_shown(root))
+    return NULL;
+  if (root->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(root))
+    return NULL;
+  if (root->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(root))
+    return NULL;
+  if (root->kind == SZ_VIEW_OVERLAY && !view_overlay_open(root))
     return NULL;
   if (view_is_edit(root) && root->focused)
     return root;
@@ -4638,6 +4789,8 @@ static int caret_offset_at_xy(SzView *f, float x, float y) {
 int sz_view_activate(SzView *root, SzView *hit, float x, float y) {
   if (!root || !hit)
     return 0;
+  if (hit->kind != SZ_VIEW_TEXT_FIELD && hit->kind != SZ_VIEW_EDITOR)
+    clear_focus(root);
   if ((hit->kind == SZ_VIEW_BUTTON || hit->kind == SZ_VIEW_ICON_BUTTON ||
        hit->kind == SZ_VIEW_FAB || hit->kind == SZ_VIEW_OUTLINED_BUTTON ||
        hit->kind == SZ_VIEW_TEXT_BUTTON || hit->kind == SZ_VIEW_ACTION_CHIP ||
@@ -4670,6 +4823,14 @@ int sz_view_activate(SzView *root, SzView *hit, float x, float y) {
   }
   if (hit->kind == SZ_VIEW_SLIDER)
     return sz_view_slider_set_at(hit, x);
+  if (hit->kind == SZ_VIEW_SPLIT)
+    return sz_view_split_set_at(hit, x);
+  if (hit->kind == SZ_VIEW_OVERLAY) {
+    if (hit->sig_int)
+      sz_signal_int_set(hit->sig_int, 0);
+    clear_focus(root);
+    return 1;
+  }
   if (hit->kind == SZ_VIEW_TEXT_FIELD) {
     clear_focus(root);
     hit->focused = 1;
@@ -4706,6 +4867,8 @@ static int collect_text_fields_node(SzView *v, SzView **out, int cap, int n) {
     return n;
   if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
     return n;
+  if (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))
+    return n;
   if (v->kind == SZ_VIEW_TEXT_FIELD)
     out[n++] = v;
   for (i = 0; i < v->child_count && n < cap; i++)
@@ -4730,6 +4893,8 @@ static int collect_editors_node(SzView *v, SzView **out, int cap, int n) {
     return n;
   if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
     return n;
+  if (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))
+    return n;
   if (v->kind == SZ_VIEW_EDITOR)
     out[n++] = v;
   for (i = 0; i < v->child_count && n < cap; i++)
@@ -4743,6 +4908,89 @@ int sz_view_collect_editors(SzView *root, SzView **out, int cap) {
   return collect_editors_node(root, out, cap, 0);
 }
 
+static int collect_splits_node(SzView *v, SzView **out, int cap, int n) {
+  int i;
+  if (!v || !view_is_shown(v) || n >= cap)
+    return n;
+  if (v->kind == SZ_VIEW_EXCLUDE_SEMANTICS)
+    return n;
+  if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
+    return n;
+  if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
+    return n;
+  if (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))
+    return n;
+  if (v->kind == SZ_VIEW_SPLIT)
+    out[n++] = v;
+  for (i = 0; i < v->child_count && n < cap; i++)
+    n = collect_splits_node(v->children[i], out, cap, n);
+  return n;
+}
+
+int sz_view_collect_splits(SzView *root, SzView **out, int cap) {
+  if (!root || !out || cap <= 0)
+    return 0;
+  return collect_splits_node(root, out, cap, 0);
+}
+
+static int collect_overlays_node(SzView *v, SzView **out, int cap, int n) {
+  int i;
+  if (!v || !view_is_shown(v) || n >= cap)
+    return n;
+  if (v->kind == SZ_VIEW_EXCLUDE_SEMANTICS)
+    return n;
+  if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
+    return n;
+  if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
+    return n;
+  if (v->kind == SZ_VIEW_OVERLAY)
+    out[n++] = v;
+  if (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))
+    return n;
+  for (i = 0; i < v->child_count && n < cap; i++)
+    n = collect_overlays_node(v->children[i], out, cap, n);
+  return n;
+}
+
+int sz_view_collect_overlays(SzView *root, SzView **out, int cap) {
+  if (!root || !out || cap <= 0)
+    return 0;
+  return collect_overlays_node(root, out, cap, 0);
+}
+
+static SzView *find_open_overlay(SzView *v) {
+  int i;
+  SzView *found;
+  if (!v || !view_is_shown(v))
+    return NULL;
+  if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
+    return NULL;
+  if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
+    return NULL;
+  if (v->kind == SZ_VIEW_OVERLAY)
+    return view_overlay_open(v) ? v : NULL;
+  for (i = v->child_count - 1; i >= 0; i--) {
+    found = find_open_overlay(v->children[i]);
+    if (found)
+      return found;
+  }
+  return NULL;
+}
+
+const char *sz_view_focus_kind(SzView *root) {
+  SzView *ed;
+  if (!root)
+    return "none";
+  ed = find_focused_edit(root);
+  if (ed && ed->kind == SZ_VIEW_EDITOR)
+    return "editor";
+  if (ed && ed->kind == SZ_VIEW_TEXT_FIELD)
+    return "field";
+  if (find_open_overlay(root))
+    return "overlay";
+  return "none";
+}
+
 static int collect_walk_hidden(const SzView *v) {
   if (!v || !view_is_shown(v))
     return 1;
@@ -4751,6 +4999,8 @@ static int collect_walk_hidden(const SzView *v) {
   if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
     return 1;
   if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
+    return 1;
+  if (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))
     return 1;
   return 0;
 }
@@ -4805,14 +5055,18 @@ SzView *sz_view_edit_target(SzView *root) {
   SzView *focused;
   SzView *field;
   SzView *eds[64];
+  SzView *scope;
   int n;
-  focused = find_focused_edit(root);
+  scope = find_open_overlay(root);
+  if (!scope)
+    scope = root;
+  focused = find_focused_edit(scope);
   if (focused)
     return focused;
-  field = sz_view_text_field_target(root);
+  field = sz_view_text_field_target(scope);
   if (field)
     return field;
-  n = sz_view_collect_editors(root, eds, 64);
+  n = sz_view_collect_editors(scope, eds, 64);
   return n > 0 ? eds[0] : NULL;
 }
 
@@ -5057,12 +5311,20 @@ static int key_is_one_code_point(const char *key) {
 int sz_view_handle_key(SzView *root, const char *key, const char *text,
                        int mods) {
   SzView *target;
+  SzView *overlay;
   int extend = (mods & SZ_KEY_SHIFT) != 0;
   int is_ed;
   if (!root)
     return 1;
   if (!key)
     key = "";
+  overlay = find_open_overlay(root);
+  if (overlay && strcmp(key, "Escape") == 0) {
+    if (overlay->sig_int)
+      sz_signal_int_set(overlay->sig_int, 0);
+    clear_focus(root);
+    return 1;
+  }
   target = sz_view_edit_target(root);
   is_ed = target && target->kind == SZ_VIEW_EDITOR;
   if (strcmp(key, "Backspace") == 0) {

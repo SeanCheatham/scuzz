@@ -206,7 +206,9 @@ typedef enum SzViewKind {
   SZ_VIEW_VISIBILITY,         /* Signal.int; sizes to the child; off keeps size, skips paint */
   SZ_VIEW_OFFSTAGE,           /* Signal.int; lays out the child; off reports size 0, skips paint */
   SZ_VIEW_UNCONSTRAINED_BOX,  /* sizes to the child; child lays out with unbounded max */
-  SZ_VIEW_EDITOR              /* multiline SignalStr buffer; not a TextField */
+  SZ_VIEW_EDITOR,             /* multiline SignalStr buffer; not a TextField */
+  SZ_VIEW_SPLIT,              /* Signal.int 0-100; two children + drag handle */
+  SZ_VIEW_OVERLAY             /* Signal.int; fills parent when on; Escape dismisses */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -299,6 +301,19 @@ SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder);
 /* Multiline buffer on `text`. Insert includes newline and a two-space soft-tab.
  * Not a TextField: omitted from `[fields]` / field inject indices. */
 SzView *sz_view_editor(SzSignalStr *text);
+/* Row of `start` | handle | `end`. Tap/drag writes `frac` 0–100 from hit x. */
+SzView *sz_view_split(SzSignalInt *frac, SzView *start, SzView *end);
+/* When `open` is not 0, fills the parent (compose on `View.stack`). Escape
+ * and a backdrop tap write 0. Closed overlay reports size 0. */
+SzView *sz_view_overlay(SzSignalInt *open, SzView *child);
+/* Drag writes `frac` from hit x, clamped 0–100. 1 if `view` is a split. */
+int sz_view_split_set_at(SzView *view, float x);
+int sz_view_collect_splits(SzView *root, SzView **out, int cap);
+int sz_view_collect_overlays(SzView *root, SzView **out, int cap);
+int sz_view_overlay_is_open(const SzView *view);
+int sz_view_split_frac(const SzView *view);
+/* "editor", "field", "overlay", or "none" from the live focus / open overlay. */
+const char *sz_view_focus_kind(SzView *root);
 SzView *sz_view_column(void);
 SzView *sz_view_row(void);
 SzView *sz_view_wrap(void);
@@ -492,7 +507,9 @@ typedef enum SzA11yRole {
   SZ_A11Y_VISIBILITY = 38,
   SZ_A11Y_OFFSTAGE = 39,
   SZ_A11Y_UNCONSTRAINED = 40,
-  SZ_A11Y_EDITOR = 41
+  SZ_A11Y_EDITOR = 41,
+  SZ_A11Y_SPLIT = 42,
+  SZ_A11Y_OVERLAY = 43
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
@@ -590,8 +607,11 @@ int sz_ui_session_watch(SzUiSession *session, const char *path);
  * [heap] is live alloc stats (`live_bytes` / `live_count` / `peak_bytes`),
  * `delta_bytes` / `delta_count` since the last live dump or `resetpeak`,
  * and per-kind `name=count:bytes` (`raw`, `string`, `list`, …).
- * [session] is kind, size, lifecycle, keyboard, and pump count.
- * Only the live debug dump includes them. Fuzz / golden dumps omit them. */
+ * [session] is kind, size, title, focus, lifecycle, keyboard, and pump count.
+ * [splits] lists split panes (`N frac=F`). [overlays] lists overlays
+ * (`N* open=0|1`; star is the topmost open overlay).
+ * Only the live debug dump includes [session] / [heap]. Fuzz / golden dumps
+ * omit them. */
 int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
 int sz_ui_session_write_dump(SzUiSession *session, const char *path);
 /* Rewrite the live debug dump now, including [session] and [heap]. No path is a no-op. */
@@ -625,6 +645,11 @@ SzUiRuntimeKind sz_ui_session_kind(const SzUiSession *session);
 int sz_ui_session_width(const SzUiSession *session);
 int sz_ui_session_height(const SzUiSession *session);
 SzView *sz_ui_session_root(SzUiSession *session);
+/* Copy `title` into the session. The next present uses it. Headless dumps it. */
+int sz_ui_session_set_title(SzUiSession *session, const char *title);
+const char *sz_ui_session_title(const SzUiSession *session);
+/* Title for a new mount when the app called Ui.setTitle before Ui.run. */
+const char *sz_ui_default_title(void);
 SzLifecyclePhase sz_ui_session_lifecycle(const SzUiSession *session);
 /* 1 while the session is not STOP. `quit` / request_stop clear this. */
 int sz_ui_session_alive(const SzUiSession *session);
@@ -726,6 +751,9 @@ SzView *sz_lang_view_aspect_ratio(int64_t rw, int64_t rh, SzView *child);
 SzView *sz_lang_view_fraction(int64_t wpct, int64_t hpct, SzView *child);
 SzView *sz_lang_view_text_field(SzSignalStr *text, SzString *placeholder);
 SzView *sz_lang_view_editor(SzSignalStr *text);
+SzView *sz_lang_view_split(SzSignalInt *frac, SzView *start, SzView *end);
+SzView *sz_lang_view_overlay(SzSignalInt *open, SzView *child);
+SzIo *sz_lang_ui_set_title(SzString *title);
 SzView *sz_lang_view_icon(int64_t glyph, int64_t argb);
 SzView *sz_lang_view_image(int64_t w, int64_t h, int64_t argb, SzString *caption);
 void *sz_lang_view_add_child(SzView *parent, SzView *child);

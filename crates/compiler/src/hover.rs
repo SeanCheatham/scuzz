@@ -1036,6 +1036,14 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.textField(sig: SignalStr, hint: String): View",
     ),
     ("View.editor", "View.editor(sig: SignalStr): View"),
+    (
+        "View.split",
+        "View.split(frac: SignalInt, start: View, end: View): View",
+    ),
+    (
+        "View.overlay",
+        "View.overlay(open: SignalInt, child: View): View",
+    ),
     ("View.stretch", "View.stretch(child: View): View"),
     ("View.clip", "View.clip(child: View): View"),
     ("View.opacity", "View.opacity(pct: Int, child: View): View"),
@@ -1083,6 +1091,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.excludeSemantics(child: View): View",
     ),
     ("Ui.run", "Ui.run(_ => View): IO[Unit]"),
+    ("Ui.setTitle", "Ui.setTitle(s: String): IO[Unit]"),
     (
         "Property.check",
         "Property.check(name: String, ok: Bool, value: T): T",
@@ -1337,6 +1346,8 @@ const TYPED_KIT_CALLEES: &[&str] = &[
     "View.showWhen",
     "View.textField",
     "View.editor",
+    "View.split",
+    "View.overlay",
     "Signal.get",
     "Signal.str",
     "Signal.getStr",
@@ -1357,6 +1368,7 @@ const TYPED_KIT_CALLEES: &[&str] = &[
     "Sys.alive",
     "Sys.kill",
     "Sys.getenv",
+    "Ui.setTitle",
     "Random.nextInt",
     "Net.serveOnce",
     "Impurity.runKit",
@@ -1650,6 +1662,14 @@ def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
                 "View.textField(Signal.str(\"\"), \"hint\")",
             ),
             ("View.editor", "View.editor(Signal.str(\"\"))"),
+            (
+                "View.split",
+                "View.split(Signal.int(40), View.text(\"a\"), View.text(\"b\"))",
+            ),
+            (
+                "View.overlay",
+                "View.overlay(Signal.int(1), View.text(\"p\"))",
+            ),
         ];
         for (callee, call) in view_calls {
             let needle = callee.rsplit('.').next().unwrap();
@@ -1672,6 +1692,7 @@ def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
             ("Sys.alive", "Sys.alive(1)"),
             ("Sys.kill", "Sys.kill(1)"),
             ("Sys.getenv", "Sys.getenv(\"HOME\")"),
+            ("Ui.setTitle", "Ui.setTitle(\"Hello\")"),
             ("Random.nextInt", "Random.nextInt(10)"),
             ("Net.serveOnce", "Net.serveOnce(8080, s => IO.pure(s))"),
             ("Impurity.runKit", "Impurity.runKit()"),
