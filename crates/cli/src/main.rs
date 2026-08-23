@@ -407,6 +407,10 @@ fn run_once(
 
     let out = build(path, out_dir, true, false)?;
     let mut cmd = Command::new(&out.executable);
+    cmd.current_dir(&project_dir);
+    if project_dir.join("sample.txt").is_file() {
+        cmd.arg("sample.txt");
+    }
     if use_headless && (headless || manifest.ui.is_some()) {
         let snap = out
             .executable
@@ -748,6 +752,7 @@ fn run_goldens(project_dir: &Path, exe: &Path, update: bool, pixels: bool) -> Re
         capture_structural(
             exe,
             &manifest,
+            project_dir,
             &base,
             out_dir.join(format!("{name}.actual.png")),
             false,
@@ -755,6 +760,7 @@ fn run_goldens(project_dir: &Path, exe: &Path, update: bool, pixels: bool) -> Re
         capture_structural(
             exe,
             &manifest,
+            project_dir,
             &tap,
             out_dir.join(format!("{name}_after_tap.actual.png")),
             true,
@@ -781,7 +787,14 @@ fn run_goldens(project_dir: &Path, exe: &Path, update: bool, pixels: bool) -> Re
         let tap = stem.ends_with("_after_tap");
         let actual_dump = out_dir.join(format!("{stem}.actual.dump"));
         let actual_png = out_dir.join(format!("{stem}.actual.png"));
-        capture_structural(exe, &manifest, &actual_dump, actual_png.clone(), tap)?;
+        capture_structural(
+            exe,
+            &manifest,
+            project_dir,
+            &actual_dump,
+            actual_png.clone(),
+            tap,
+        )?;
         if update {
             std::fs::copy(&actual_dump, path)
                 .with_context(|| format!("updating golden {}", path.display()))?;
@@ -827,15 +840,24 @@ fn run_goldens(project_dir: &Path, exe: &Path, update: bool, pixels: bool) -> Re
     Ok(())
 }
 
+fn apply_pkg_argv(cmd: &mut Command, project_dir: &Path) {
+    cmd.current_dir(project_dir);
+    if project_dir.join("sample.txt").is_file() {
+        cmd.arg("sample.txt");
+    }
+}
+
 fn capture_structural(
     exe: &Path,
     manifest: &scuzz_compiler::manifest::Manifest,
+    project_dir: &Path,
     dump: &Path,
     snapshot: PathBuf,
     tap: bool,
 ) -> Result<()> {
     let mut cmd = Command::new(exe);
     apply_ui_env(&mut cmd, manifest, &snapshot, tap);
+    apply_pkg_argv(&mut cmd, project_dir);
     cmd.env("SCUZZ_FUZZ_DUMP", dump);
     let status = cmd
         .status()

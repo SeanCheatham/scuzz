@@ -1,0 +1,22 @@
+[signals]
+str[0] = "hello
+world
+"
+
+[views]
+text:sample.txt
+button:Save
+editor:editor
+
+[taps]
+0 Save 79,24 48x32
+
+[fields]
+
+[editor]
+0* caret=12 sel=12:12 sx=0 sy=0 lines=3 "hello\nworld\n"
+
+[scrolls]
+
+[last_hit]
+xy 103.0 40.0 -> button:Save

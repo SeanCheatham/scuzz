@@ -32,6 +32,7 @@ struct FuzzTargets {
     n_buttons: i64,
     n_fields: i64,
     n_scrolls: i64,
+    n_editors: i64,
     drivers: Vec<String>,
 }
 
@@ -256,11 +257,13 @@ fn fuzz_ui_campaign(ctx: &FuzzCtx, camp: &mut Campaign, search_budget: i64) -> R
     let n_taps = count_dump_section(&dump, "[taps]");
     let n_fields = count_dump_section(&dump, "[fields]");
     let n_scrolls = count_dump_section(&dump, "[scrolls]");
+    let n_editors = count_dump_section(&dump, "[editor]");
     let drivers = read_drivers(&ctx.project_dir);
     let targets = FuzzTargets {
         n_buttons: n_taps,
         n_fields,
         n_scrolls,
+        n_editors,
         drivers,
     };
     let mut search = UiSearch {
@@ -273,6 +276,7 @@ fn fuzz_ui_campaign(ctx: &FuzzCtx, camp: &mut Campaign, search_budget: i64) -> R
         targets.n_buttons,
         targets.n_fields,
         targets.n_scrolls,
+        targets.n_editors,
         &targets.drivers,
     );
     if !alphabet.is_empty() {
@@ -350,6 +354,7 @@ fn fuzz_loop(
             targets.n_buttons,
             targets.n_fields,
             targets.n_scrolls,
+            targets.n_editors,
             &targets.drivers,
             &event_corpus,
         );

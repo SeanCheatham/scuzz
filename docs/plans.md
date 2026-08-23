@@ -1,7 +1,7 @@
 # Next slice
 
-C1 — `examples/editor`.
+C2 — Check in-app.
 
-Open a path from `Sys.args` (not getenv). Edit in `View.editor`, save. Headless goldens on `[editor]`. `scuzz fuzz` drives keys and taps. No analyze yet.
+Live: write buffer, `Sys.exec` `scuzz check --message-format=json`, `Json.parse`, diagnostics list, jump to caret. Fuzz: `*.scuzz_sim` overlay or canned JSON on mem FS. Do not stub `Sys.exec`. No second typer.
 
 Locks: [`vision.md`](vision.md). Full bar: [`gaps.md`](gaps.md).

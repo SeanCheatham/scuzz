@@ -27,7 +27,7 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ### 3. Dogfood IDE at editor scale
 
-**Status.** Direction is locked in [`vision.md`](vision.md#tooling): a Scuzz `[ui]` app is the in-tree IDE. `scuzz ide` launches it. The compiler and `scuzz lsp` stay Rust. Prerequisites below are not closed. Do not start the IDE package yet.
+**Status.** Direction is locked in [`vision.md`](vision.md#tooling): a Scuzz `[ui]` app is the in-tree IDE. `scuzz ide` launches it. The compiler and `scuzz lsp` stay Rust. `examples/editor` opens a path from `Sys.args`, edits in `View.editor`, and saves. Headless goldens dump `[editor]`. `scuzz fuzz` drives keys and taps. Analyze (check JSON / lsp) and chrome stay later. Do not start the IDE package yet.
 
 **Unproven.** An editor-scale Scuzz app stays inside Headless-as-peer, one input alphabet, the `pump` frame budget, and `scuzz fuzz` as the verification strategy. A second typer, Desktop-only keys, or a View-per-token tree that Headless cannot dump breaks those locks.
 
