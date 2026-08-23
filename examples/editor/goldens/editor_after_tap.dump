@@ -2,14 +2,18 @@
 str[0] = "hello
 world
 "
+list[1] = []
 
 [views]
 text:sample.txt
 button:Save
+button:Check
 editor:editor
+list:list
 
 [taps]
 0 Save 79,24 48x32
+1 Check 135,24 49x32
 
 [fields]
 

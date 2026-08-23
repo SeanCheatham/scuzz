@@ -1,0 +1,49 @@
+def jsonField(obj: Json, key: String): Json =
+  obj match {
+    case Json.Obj(pairs) => List.find(pairs, p => p._1 == key) match {
+  case [] => Json.Null
+  case x :: _ => x._2
+}
+    case _ => Json.Null
+  }
+
+def jsonStr(j: Json): String =
+  j match {
+    case Json.Str(s) => s
+    case _ => ""
+  }
+
+def jsonInt(j: Json): Int =
+  j match {
+    case Json.Int(n) => n
+    case _ => Str.len("")
+  }
+
+def diagRow(item: Json): String =
+  Str.concat(Str.fromInt(jsonInt(jsonField(item, "line"))), Str.concat(":", Str.concat(Str.fromInt(jsonInt(jsonField(item, "column"))), Str.concat(" ", jsonStr(jsonField(item, "message"))))))
+
+def diagRows(j: Json): List[String] =
+  j match {
+    case Json.Arr(xs) => List.map(xs, diagRow)
+    case _ => []: List[String]
+  }
+
+def diagMark(item: Json): (Int, Int) =
+  (jsonInt(jsonField(item, "line")), if (jsonStr(jsonField(item, "severity")) == "warning") 2 else 1) match {
+    case p => Property.check("diagMark", p._1 > 0 && p._2 == 1, p)
+  }
+
+def diagMarks(j: Json): List[(Int, Int)] =
+  j match {
+    case Json.Arr(xs) => List.map(xs, diagMark)
+    case _ => []: List[(Int, Int)]
+  }
+
+def jumpDiag(s: String): IO[Unit] =
+  for {
+    _ = Property.sometimes("tappedDiag")
+    head = List.head(Str.split(s, " "))
+    lc = Str.split(head, ":")
+    _ <- Ui.setEditorCaret(Str.toInt(List.head(lc), Str.len("")), Str.toInt(List.at(lc, Str.len("x")), Str.len("")))
+  } yield ()
+

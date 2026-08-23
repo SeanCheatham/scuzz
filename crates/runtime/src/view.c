@@ -818,6 +818,35 @@ int sz_view_set_editor_caret(SzView *view, int offset) {
   return edit_set_caret(view, offset);
 }
 
+int sz_view_editor_offset_at_line_col(const SzView *view, int line, int col) {
+  const char *s;
+  int cur_line = 1;
+  int cur_col = 1;
+  int i = 0;
+  if (!view || view->kind != SZ_VIEW_EDITOR)
+    return 0;
+  if (line < 1)
+    line = 1;
+  if (col < 1)
+    col = 1;
+  s = field_cstr(view);
+  if (!s)
+    return 0;
+  while (s[i]) {
+    if (cur_line == line && cur_col == col)
+      return i;
+    if (s[i] == '\n') {
+      if (cur_line == line)
+        return i;
+      cur_line++;
+      cur_col = 1;
+    } else
+      cur_col++;
+    i++;
+  }
+  return i;
+}
+
 static int field_anchor_clamped(const SzView *v) {
   const char *s = field_cstr(v);
   int n = (int)strlen(s);

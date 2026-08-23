@@ -13190,6 +13190,35 @@ static void test_view_editor_undo_gutter(void) {
   assert(strstr(body, "lines=3") != NULL);
   assert(strstr(body, "diag=1:1,2:2") != NULL);
   free(body);
+
+  sz_signal_str_set(buf, "ab\ncd\n");
+  assert(sz_view_editor_offset_at_line_col(ed, 1, 1) == 0);
+  assert(sz_view_editor_offset_at_line_col(ed, 1, 3) == 2);
+  assert(sz_view_editor_offset_at_line_col(ed, 2, 1) == 3);
+  {
+    SzIoResult r = sz_io_unsafe_run(sz_lang_ui_set_editor_caret(2, 1));
+    assert(r.ok);
+    assert(sz_view_editor_caret(ed) == 3);
+  }
+  {
+    void *ln = sz_box_i64(1);
+    void *sv = sz_box_i64(1);
+    SzPair *cell = sz_pair_new(ln, sv);
+    SzList *xs;
+    SzIoResult r;
+    sz_release(ln);
+    sz_release(sv);
+    xs = sz_list_cons(cell, sz_list_nil());
+    sz_release(cell);
+    r = sz_io_unsafe_run(sz_lang_ui_set_editor_diagnostics(xs));
+    assert(r.ok);
+    sz_release(xs);
+  }
+  write_stamp(path, "dump\n");
+  assert(sz_ui_pump_sync(session));
+  body = slurp_cstr(dump);
+  assert(strstr(body, "diag=1:1") != NULL);
+  free(body);
   {
     SkSurface *surf = sk_surface_make_raster_n32_premul(200, 120);
     SkCanvas *canvas;

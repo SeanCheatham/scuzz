@@ -1,7 +1,7 @@
 [package]
 name = "editor"
 version = "0.1.0"
-description = "Open a path from Sys.args, edit in View.editor, save"
+description = "Open a path from Sys.args, edit in View.editor, check JSON, save"
 
 [ui]
 default_runtime = "headless"

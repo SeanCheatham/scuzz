@@ -1093,6 +1093,14 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Ui.run", "Ui.run(_ => View): IO[Unit]"),
     ("Ui.setTitle", "Ui.setTitle(s: String): IO[Unit]"),
     (
+        "Ui.setEditorCaret",
+        "Ui.setEditorCaret(line: Int, col: Int): IO[Unit]",
+    ),
+    (
+        "Ui.setEditorDiagnostics",
+        "Ui.setEditorDiagnostics(marks: List[(Int, Int)]): IO[Unit]",
+    ),
+    (
         "Property.check",
         "Property.check(name: String, ok: Bool, value: T): T",
     ),
@@ -1402,6 +1410,8 @@ const TYPED_KIT_CALLEES: &[&str] = &[
     "Sys.kill",
     "Sys.getenv",
     "Ui.setTitle",
+    "Ui.setEditorCaret",
+    "Ui.setEditorDiagnostics",
     "Random.nextInt",
     "Net.serveOnce",
     "Impurity.runKit",
@@ -1738,6 +1748,11 @@ def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
             ("Sys.kill", "Sys.kill(1)"),
             ("Sys.getenv", "Sys.getenv(\"HOME\")"),
             ("Ui.setTitle", "Ui.setTitle(\"Hello\")"),
+            ("Ui.setEditorCaret", "Ui.setEditorCaret(1, 1)"),
+            (
+                "Ui.setEditorDiagnostics",
+                "Ui.setEditorDiagnostics([(1, 1)])",
+            ),
             ("Random.nextInt", "Random.nextInt(10)"),
             ("Net.serveOnce", "Net.serveOnce(8080, s => IO.pure(s))"),
             ("Impurity.runKit", "Impurity.runKit()"),

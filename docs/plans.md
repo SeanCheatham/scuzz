@@ -1,7 +1,7 @@
 # Next slice
 
-C2 — Check in-app.
+C3 — IDE chrome on `examples/editor`.
 
-Live: write buffer, `Sys.exec` `scuzz check --message-format=json`, `Json.parse`, diagnostics list, jump to caret. Fuzz: `*.scuzz_sim` overlay or canned JSON on mem FS. Do not stub `Sys.exec`. No second typer.
+File tree, tabs+dirty, overlay completion/hover stubs, find/replace, app chords, output panel, title, project root from `Sys.args`. Headless inject opens overlays. Chrome is Scuzz composition, not blessed widgets.
 
 Locks: [`vision.md`](vision.md). Full bar: [`gaps.md`](gaps.md).
