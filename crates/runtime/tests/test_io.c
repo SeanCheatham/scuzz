@@ -667,6 +667,17 @@ static void *ipv4_http_hold(void *arg) {
 }
 
 static volatile int g_peer_flag;
+static int64_t g_pipe_pid;
+
+static SzIo *pipe_write_hello(void *value, void *env) {
+  SzString *msg = sz_string_from_cstr("hello");
+  SzIo *io;
+  (void)value;
+  (void)env;
+  io = sz_sys_child_write(g_pipe_pid, msg);
+  sz_release(msg);
+  return io;
+}
 
 static SzIo *assert_peer_quiet(void *value, void *env) {
   (void)value;
@@ -5047,6 +5058,99 @@ int main(void) {
     assert(r.ok);
     assert(sz_unbox_i64(r.value) == 0);
   }
+
+  /* Sys.spawn pipes: write stdin, read stdout (dd copies five bytes). */
+  {
+    SzIoResult pr;
+    int64_t pid;
+    SzString *cmd;
+    SzString *msg;
+    SzString *got;
+    cmd = sz_string_from_cstr("dd bs=1 count=5 2>/dev/null");
+    pr = sz_io_unsafe_run(sz_sys_spawn(cmd));
+    sz_release(cmd);
+    assert(pr.ok);
+    pid = sz_unbox_i64(pr.value);
+    sz_release(pr.value);
+    assert(pid > 0);
+    msg = sz_string_from_cstr("hello");
+    pr = sz_io_unsafe_run(sz_sys_child_write(pid, msg));
+    sz_release(msg);
+    assert(pr.ok);
+    pr = sz_io_unsafe_run(sz_sys_child_read(pid, 5));
+    assert(pr.ok);
+    got = (SzString *)pr.value;
+    assert(got && got->len == 5);
+    assert(memcmp(sz_string_cstr(got), "hello", 5) == 0);
+    sz_release(got);
+    pr = sz_io_unsafe_run(sz_sys_child_close(pid));
+    assert(pr.ok);
+    pr = sz_io_unsafe_run(sz_sys_kill(pid));
+    assert(pr.ok);
+  }
+
+  /* Close child stdin so cat flushes and later reads are EOF. */
+  {
+    SzIoResult pr;
+    int64_t pid;
+    SzString *cmd;
+    SzString *msg;
+    SzString *got;
+    cmd = sz_string_from_cstr("cat");
+    pr = sz_io_unsafe_run(sz_sys_spawn(cmd));
+    sz_release(cmd);
+    assert(pr.ok);
+    pid = sz_unbox_i64(pr.value);
+    sz_release(pr.value);
+    msg = sz_string_from_cstr("xy");
+    pr = sz_io_unsafe_run(sz_sys_child_write(pid, msg));
+    sz_release(msg);
+    assert(pr.ok);
+    pr = sz_io_unsafe_run(sz_sys_child_close(pid));
+    assert(pr.ok);
+    pr = sz_io_unsafe_run(sz_sys_child_read(pid, 2));
+    assert(pr.ok);
+    got = (SzString *)pr.value;
+    assert(got && got->len == 2);
+    assert(memcmp(sz_string_cstr(got), "xy", 2) == 0);
+    sz_release(got);
+    pr = sz_io_unsafe_run(sz_sys_child_read(pid, 1));
+    assert(pr.ok);
+    got = (SzString *)pr.value;
+    assert(got && got->len == 0);
+    sz_release(got);
+    pr = sz_io_unsafe_run(sz_sys_kill(pid));
+    assert(pr.ok);
+  }
+
+  /* Child read parks; a peer fiber writes before the copy finishes. */
+  {
+    SzIoResult pr;
+    SzPair *pair;
+    SzString *cmd;
+    SzString *got;
+    cmd = sz_string_from_cstr("dd bs=1 count=5 2>/dev/null");
+    pr = sz_io_unsafe_run(sz_sys_spawn(cmd));
+    sz_release(cmd);
+    assert(pr.ok);
+    g_pipe_pid = sz_unbox_i64(pr.value);
+    sz_release(pr.value);
+    pr = sz_io_unsafe_run(both_drop(
+        sz_sys_child_read(g_pipe_pid, 5),
+        fm_drop(sz_io_sleep_ms(30), pipe_write_hello, NULL)));
+    assert(pr.ok);
+    pair = (SzPair *)pr.value;
+    assert(pair && pair->left);
+    got = (SzString *)pair->left;
+    assert(got && got->len == 5);
+    assert(memcmp(sz_string_cstr(got), "hello", 5) == 0);
+    sz_release(pair);
+    pr = sz_io_unsafe_run(sz_sys_child_close(g_pipe_pid));
+    assert(pr.ok);
+    pr = sz_io_unsafe_run(sz_sys_kill(g_pipe_pid));
+    assert(pr.ok);
+    g_pipe_pid = 0;
+  }
   {
     r = sz_io_unsafe_run(sz_sys_exec(sz_string_from_cstr("true")));
     assert(r.ok);
@@ -5136,6 +5240,25 @@ int main(void) {
       assert(tr.error &&
              strstr(sz_string_cstr(tr.error->message), "TestRuntime") != NULL);
       sz_error_free(tr.error);
+      {
+        SzString *msg = sz_string_from_cstr("x");
+        tr = sz_io_unsafe_run(sz_sys_child_write(1, msg));
+        sz_release(msg);
+        assert(!tr.ok);
+        assert(tr.error &&
+               strstr(sz_string_cstr(tr.error->message), "TestRuntime") != NULL);
+        sz_error_free(tr.error);
+        tr = sz_io_unsafe_run(sz_sys_child_read(1, 1));
+        assert(!tr.ok);
+        assert(tr.error &&
+               strstr(sz_string_cstr(tr.error->message), "TestRuntime") != NULL);
+        sz_error_free(tr.error);
+        tr = sz_io_unsafe_run(sz_sys_child_close(1));
+        assert(!tr.ok);
+        assert(tr.error &&
+               strstr(sz_string_cstr(tr.error->message), "TestRuntime") != NULL);
+        sz_error_free(tr.error);
+      }
     }
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);

@@ -1,7 +1,7 @@
 # Next slice
 
-B6 — Bidirectional stdio on spawn for `scuzz lsp`.
+C1 — `examples/editor`.
 
-After B3/C2 shape. No in-process Rust LSP client in the Scuzz app. TestRuntime still rejects spawn.
+Open a path from `Sys.args` (not getenv). Edit in `View.editor`, save. Headless goldens on `[editor]`. `scuzz fuzz` drives keys and taps. No analyze yet.
 
 Locks: [`vision.md`](vision.md). Full bar: [`gaps.md`](gaps.md).
