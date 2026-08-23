@@ -27,7 +27,7 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ### 3. Dogfood IDE at editor scale
 
-**Status.** Direction is locked in [`vision.md`](vision.md#tooling): a Scuzz `[ui]` app is the in-tree IDE. `scuzz ide` launches it. The compiler and `scuzz lsp` stay Rust. `examples/editor` opens a path from `Sys.args`, edits in `View.editor`, saves, and runs `scuzz check --message-format=json`. It parses that JSON into a diagnostics list and jumps the caret. Fuzz overlays `analyze` with canned JSON. Chrome stays later. Do not start the IDE package yet.
+**Status.** Direction is locked in [`vision.md`](vision.md#tooling): a Scuzz `[ui]` app is the in-tree IDE. `scuzz ide` launches it. The compiler and `scuzz lsp` stay Rust. `examples/editor` opens a project root from `Sys.args`, edits in `View.editor`, saves, runs `scuzz check --message-format=json`, and composes file tree, tabs, find/replace, overlay stubs, output, and title. Fuzz overlays `analyze` with canned JSON. LSP host stays later. Do not start the IDE package yet.
 
 **Unproven.** An editor-scale Scuzz app stays inside Headless-as-peer, one input alphabet, the `pump` frame budget, and `scuzz fuzz` as the verification strategy. A second typer, Desktop-only keys, or a View-per-token tree that Headless cannot dump breaks those locks.
 
@@ -115,21 +115,21 @@ Close:
 
 #### 4. Chrome around the editor
 
-Today `examples/studio` shows pages, lists, and file load/save. `View.stack` / `View.positioned` exist. `View.tooltip` shows its message on hover. TextField and `View.editor` hold focus. A button tap clears that focus. `View.split` is a draggable 0–100 pane. `View.overlay` fills the parent when open; Escape and a backdrop tap dismiss it. Keys go to the open overlay. `Ui.setTitle` sets the session title. `[session]` dumps `title=` and `focus=`. `[splits]` / `[overlays]` dump those widgets. File tree, tabs, find, command palette, and output panel stay Scuzz composition.
+Today `examples/editor` composes a file tree from `Fs.list`, a tab plus dirty mark, find/replace, completion/hover overlays, an output list, and `Ui.setTitle`. `examples/studio` shows pages, lists, and file load/save. `View.stack` / `View.positioned` exist. `View.tooltip` shows its message on hover. TextField and `View.editor` hold focus. A button tap clears that focus. `View.split` is a draggable 0–100 pane. `View.overlay` fills the parent when open; Escape and a backdrop tap dismiss it. Keys go to the open overlay. Ctrl/Cmd+S / F / Shift+F / K / P fire labeled toolbar buttons. `[session]` dumps `title=` and `focus=`. `[splits]` / `[overlays]` dump those widgets. Command palette stays a later overlay.
 
 Close:
 
 - Focus model: editor, file tree, diagnostics list, and popups. Keys go to the focused surface. A button tap clears TextField and editor focus. An open overlay takes keys. File tree and diagnostics list stay Track C composition.
-- File tree from `Fs.list` (files vs directories, expand/collapse).
-- Open buffers: tabs, dirty flag, save / save-all via `Fs.write`.
+- File tree from `Fs.list` (files vs directories, expand/collapse). `examples/editor` lists root files and dirs and opens a dir listing on tap.
+- Open buffers: tabs, dirty flag, save / save-all via `Fs.write`. The open path is a tab. Replace sets dirty and a `*` title.
 - Split panes with a draggable splitter (Row/Column alone is not a resize handle). `View.split` is in. `[splits]` dumps `frac`.
-- Overlay popups on `View.stack`: completion, hover, command palette, context menu. Key routing and dismiss. Headless inject opens and selects them. `View.overlay` plus Escape / backdrop dismiss is in. Palette and menus stay Track C composition.
+- Overlay popups on `View.stack`: completion, hover, command palette, context menu. Key routing and dismiss. Headless inject opens and selects them. `View.overlay` plus Escape / backdrop dismiss is in. Find / Complete / Hover overlays open from toolbar taps and from Ctrl/Cmd chords. Palette stays a later overlay.
 - Diagnostics list from check JSON. Jump to file + caret. `examples/editor` lists check rows and jumps with `Ui.setEditorCaret`. File jump stays Track C chrome.
-- Find and replace in the buffer (needs selection).
-- App-level chords once keys exist: save, find, go-to-definition, format, command palette. Same chords on Headless inject.
-- Output panel for captured `run` / `fuzz` / `fmt` text.
-- Window title that follows the open file and dirty state. `Ui.setTitle` is in. `[session]` dumps `title=` and `focus=`.
-- Project root from `Sys.args` (what `scuzz ide <path>` passes).
+- Find and replace in the buffer (needs selection). Find overlay has find/replace fields. Replace writes the buffer.
+- App-level chords once keys exist: save, find, go-to-definition, format, command palette. Same chords on Headless inject. `key s+ctrl` / `f+ctrl` / `f+ctrl+shift` / `k+ctrl` / `p+ctrl` fire Save / Find / Format / Hover / Complete.
+- Output panel for captured `run` / `fuzz` / `fmt` text. Format appends `fmt` to an output list.
+- Window title that follows the open file and dirty state. `Ui.setTitle` is in. Replace sets a `*` title. `[session]` dumps `title=` and `focus=`.
+- Project root from `Sys.args` (what `scuzz ide <path>` passes). A file arg is the buffer. The tree lists `Fs.dirname` of that file. Empty args open `sample.txt`.
 
 In-app open-folder UI is enough. Native OS file dialogs, native menus, and multi-window stay later.
 

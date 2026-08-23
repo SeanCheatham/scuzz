@@ -1,0 +1,4 @@
+[fuzz]
+seed = 8
+schedule_seed = "8"
+events = ["key s+ctrl"]

@@ -5,6 +5,6 @@ description = "Open a path from Sys.args, edit in View.editor, check JSON, save"
 
 [ui]
 default_runtime = "headless"
-headless_size = [400, 240]
+headless_size = [720, 400]
 headless_scale = 1.0
-tap_button = 0
+tap_button = 3

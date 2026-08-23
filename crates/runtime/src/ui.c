@@ -1058,6 +1058,27 @@ static int clipboard_chord(const char *key, int mods) {
   return 0;
 }
 
+/* 0 none; else a toolbar a11y label. Ctrl/Cmd + s/f/k/p; Ctrl/Cmd+Shift+f. */
+static const char *app_chord_label(const char *key, int mods) {
+  unsigned char c;
+  if (!key || !key[0] || key[1] != '\0')
+    return NULL;
+  if ((mods & (SZ_KEY_CTRL | SZ_KEY_CMD)) == 0)
+    return NULL;
+  c = (unsigned char)key[0];
+  if (c >= 'A' && c <= 'Z')
+    c = (unsigned char)(c - 'A' + 'a');
+  if (c == 's')
+    return "Save";
+  if (c == 'f')
+    return (mods & SZ_KEY_SHIFT) ? "Format" : "Find";
+  if (c == 'k')
+    return "Hover";
+  if (c == 'p')
+    return "Complete";
+  return NULL;
+}
+
 static void record_clipboard_verb(SzUiSession *session, int op) {
   FILE *f;
   if (!session || !session->record_path || op < 1 || op > 3)
@@ -1526,6 +1547,16 @@ int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event) {
       if (!sz_ui_session_paste(session, NULL))
         return 0;
       return 1;
+    }
+    {
+      const char *lab = app_chord_label(event->key, event->key_mods);
+      if (lab) {
+        sz_view_layout(session->root, (float)session->cfg.width,
+                       (float)session->cfg.height, session->theme);
+        (void)sz_view_tap_label(session->root, lab);
+        session->dirty = 1;
+        return 1;
+      }
     }
     if (!sz_view_handle_key(session->root, event->key, event->text,
                             event->key_mods))

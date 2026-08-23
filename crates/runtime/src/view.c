@@ -5051,6 +5051,24 @@ int sz_view_collect_tap_targets(SzView *root, SzView **out, int cap) {
   return collect_tap_targets_node(root, out, cap, 0);
 }
 
+int sz_view_tap_label(SzView *root, const char *label) {
+  SzView *taps[64];
+  int n;
+  int i;
+  if (!root || !label || !label[0])
+    return 0;
+  n = sz_view_collect_tap_targets(root, taps, 64);
+  for (i = 0; i < n; i++) {
+    const char *lab = taps[i]->a11y_label;
+    SzRect fr;
+    if (!lab || strcmp(lab, label) != 0)
+      continue;
+    fr = taps[i]->frame;
+    return sz_view_activate(root, taps[i], fr.x + 4.f, fr.y + 4.f);
+  }
+  return 0;
+}
+
 static int collect_scrolls_node(SzView *v, SzView **out, int cap, int n) {
   int i;
   if (collect_walk_hidden(v) || n >= cap)

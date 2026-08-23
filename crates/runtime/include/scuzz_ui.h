@@ -449,6 +449,8 @@ int sz_view_collect_text_fields(SzView *root, SzView **out, int cap);
 int sz_view_collect_editors(SzView *root, SzView **out, int cap);
 /* Shown tap targets in a11y preorder (cap 64 for dump / `tap N`). */
 int sz_view_collect_tap_targets(SzView *root, SzView **out, int cap);
+/* Fire the first tap target whose a11y label equals `label`. 1 if it fired. */
+int sz_view_tap_label(SzView *root, const char *label);
 /* Shown Scroll views in a11y preorder (cap 64 for dump / `scroll N`). */
 int sz_view_collect_scrolls(SzView *root, SzView **out, int cap);
 /* Focused field, else the first collected field (`text`/`type`/`backspace`/`key`). */
