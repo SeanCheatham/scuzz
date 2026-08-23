@@ -12852,6 +12852,156 @@ static void test_alloc_each_pump_flat(void) {
   sz_signal_list_free(items);
 }
 
+static void test_view_editor(void) {
+  SzSignalStr *buf, *field_sig;
+  SzView *root, *ed, *field, *btn;
+  SzUiConfig cfg;
+  SzUiSession *session;
+  const SzTheme *theme = sz_theme_default();
+  const char *path = "/tmp/scuzz_ui_inject_editor.script";
+  const char *dump = "/tmp/scuzz_ui_inject_editor.dump";
+  char *body;
+  SzString *a11y;
+  char long_s[400];
+  int i;
+  SzView *fields[8];
+  SzView *taps[8];
+  SzInputEvent ev;
+  SzRect fr;
+
+  buf = sz_signal_str("");
+  root = sz_view_column();
+  btn = sz_view_button("Go", NULL, NULL);
+  sz_view_add_child(root, btn);
+  field_sig = sz_signal_str("hi");
+  field = sz_view_text_field(field_sig, "item");
+  sz_view_add_child(root, field);
+  ed = sz_view_editor(buf);
+  sz_view_add_child(root, ed);
+  sz_view_layout(root, 240.f, 200.f, theme);
+  assert(sz_view_kind(ed) == SZ_VIEW_EDITOR);
+  assert(sz_view_collect_text_fields(root, fields, 8) == 1);
+  assert(fields[0] == field);
+  assert(sz_view_collect_editors(root, fields, 8) == 1);
+  assert(fields[0] == ed);
+  assert(sz_view_collect_tap_targets(root, taps, 8) == 1);
+  assert(taps[0] == btn);
+  a11y = sz_view_a11y_dump(root);
+  assert(strstr(sz_string_cstr(a11y), "editor:editor") != NULL);
+  assert(strstr(sz_string_cstr(a11y), "textfield:item") != NULL);
+  sz_string_free(a11y);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 240;
+  cfg.height = 200;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_inject(session, path));
+  assert(sz_ui_session_set_debug_dump(session, dump));
+  assert(sz_ui_pump_sync(session));
+
+  /* Keys go to the starred field while the editor is unfocused. */
+  write_stamp(path, "key a a\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(field_sig), "hia") == 0);
+  assert(strcmp(sz_signal_str_get(buf), "") == 0);
+
+  fr = sz_view_frame(ed);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_TAP;
+  ev.x = fr.x + 8.f;
+  ev.y = fr.y + 8.f;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_ui_pump_sync(session));
+
+  /* Rewrite must not share a prefix with the prior `key a a` stamp (suffix play). */
+  write_stamp(path, "key z z\nkey Enter\nkey Tab\nkey b b\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(buf), "z\n  b") == 0);
+  assert(strcmp(sz_signal_str_get(field_sig), "hia") == 0);
+  body = slurp_cstr(dump);
+  assert(strstr(body, "[fields]") != NULL);
+  assert(strstr(body, "item=\"hia\"") != NULL);
+  assert(strstr(body, "[editor]") != NULL);
+  assert(strstr(body, "0* caret=5 sel=5:5 \"z\\n  b\"") != NULL);
+  {
+    const char *taps_sec = strstr(body, "[taps]\n");
+    assert(taps_sec != NULL);
+    assert(strstr(taps_sec, "0 Go") != NULL);
+  }
+  free(body);
+
+  write_stamp(path, "caret 2\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_editor_caret(ed) == 2);
+
+  write_stamp(path, "select 0 2\nkey x x\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(buf), "x  b") == 0);
+
+  write_stamp(path, "select 0 1\ncopy\nkey End\npaste\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(buf), "x  bx") == 0);
+
+  write_stamp(path, "text ab\nkey Enter\nkey c c\nkey d d\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(buf), "ab\ncd") == 0);
+  body = slurp_cstr(dump);
+  assert(strstr(body, "\"ab\\ncd\"") != NULL);
+  free(body);
+
+  write_stamp(path, "caret 3\nkey Backspace\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(buf), "abcd") == 0);
+
+  write_stamp(path, "caret 2\nkey Enter\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(buf), "ab\ncd") == 0);
+
+  write_stamp(path, "select 0 5\ncut\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(buf), "") == 0);
+  write_stamp(path, "paste\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(buf), "ab\ncd") == 0);
+
+  /* No 256-byte cap on the editor buffer. */
+  for (i = 0; i < 300; i++)
+    long_s[i] = 'a';
+  long_s[300] = '\0';
+  sz_signal_str_set(buf, long_s);
+  assert(sz_view_set_editor_caret(ed, 300));
+  write_stamp(path, "dump\n");
+  assert(sz_ui_pump_sync(session));
+  body = slurp_cstr(dump);
+  assert(strstr(body, "[editor]") != NULL);
+  assert(strstr(body, long_s) != NULL);
+  assert(strstr(body, "caret=300") != NULL);
+  free(body);
+  a11y = sz_view_a11y_dump(sz_ui_session_root(session));
+  assert(strstr(sz_string_cstr(a11y), "editor:editor") != NULL);
+  assert(strstr(sz_string_cstr(a11y), long_s) == NULL);
+  sz_string_free(a11y);
+  {
+    SkSurface *surf = sk_surface_make_raster_n32_premul(240, 200);
+    SkCanvas *canvas;
+    assert(surf);
+    canvas = sk_surface_get_canvas(surf);
+    assert(canvas);
+    assert(sz_view_paint(sz_ui_session_root(session), canvas, 240, 200, theme));
+    sk_surface_unref(surf);
+  }
+
+  sz_ui_unmount(session);
+  sz_signal_str_free(buf);
+  sz_signal_str_free(field_sig);
+  remove(path);
+  remove(dump);
+}
+
 static void test_text_field_edit(void) {
   SzSignalStr *draft;
   SzView *root;
@@ -13810,6 +13960,7 @@ int main(void) {
   test_property_signal_list_at();
   test_property_signal_str();
   test_text_field_edit();
+  test_view_editor();
   test_caret_metrics();
   test_alloc_pump_flat();
   test_alloc_counter_pump_flat();

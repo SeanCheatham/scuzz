@@ -364,6 +364,30 @@ static void fputs_dump_quoted(FILE *f, const char *s) {
   fputc('"', f);
 }
 
+/* Editor dump: keep newlines as \\n so a file buffer stays one node. */
+static void fputs_dump_escaped(FILE *f, const char *s) {
+  const char *p;
+  fputc('"', f);
+  if (s) {
+    for (p = s; *p; p++) {
+      unsigned char c = (unsigned char)*p;
+      if (c == '\\')
+        fputs("\\\\", f);
+      else if (c == '"')
+        fputs("\\\"", f);
+      else if (c == '\n')
+        fputs("\\n", f);
+      else if (c == '\r')
+        fputs("\\r", f);
+      else if (c == '\t')
+        fputs("\\t", f);
+      else
+        fputc(*p, f);
+    }
+  }
+  fputc('"', f);
+}
+
 static const char *runtime_kind_name(SzUiRuntimeKind kind) {
   switch (kind) {
   case SZ_UI_RUNTIME_HEADLESS:
@@ -421,7 +445,7 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
                  ? sz_view_collect_text_fields(session->root, fields, 64)
                  : 0;
   field_target = (session && session->root)
-                     ? sz_view_text_field_target(session->root)
+                     ? sz_view_edit_target(session->root)
                      : NULL;
   for (i = 0; i < n_fields; i++) {
     fprintf(f, "%d%s ", i, fields[i] == field_target ? "*" : "");
@@ -431,6 +455,26 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
     fprintf(f, " caret=%d sel=%d:%d\n", sz_view_text_field_caret(fields[i]),
             sz_view_text_field_sel_start(fields[i]),
             sz_view_text_field_sel_end(fields[i]));
+  }
+  {
+    SzView *editors[64];
+    SzView *ed_target;
+    int n_editors = (session && session->root)
+                        ? sz_view_collect_editors(session->root, editors, 64)
+                        : 0;
+    if (n_editors > 0) {
+      ed_target = sz_view_edit_target(session->root);
+      fprintf(f, "\n[editor]\n");
+      for (i = 0; i < n_editors; i++) {
+        fprintf(f, "%d%s caret=%d sel=%d:%d ", i,
+                editors[i] == ed_target ? "*" : "",
+                sz_view_editor_caret(editors[i]),
+                sz_view_editor_sel_start(editors[i]),
+                sz_view_editor_sel_end(editors[i]));
+        fputs_dump_escaped(f, sz_view_editor_value(editors[i]));
+        fputc('\n', f);
+      }
+    }
   }
   fprintf(f, "\n[scrolls]\n");
   n_scrolls = sz_ui_collect_scrolls(session, scrolls, 64);
@@ -729,6 +773,9 @@ static void format_last_hit_desc(SzView *hit, char *buf, size_t cap) {
   case SZ_A11Y_UNCONSTRAINED:
     role = "unconstrained";
     break;
+  case SZ_A11Y_EDITOR:
+    role = "editor";
+    break;
   case SZ_A11Y_SWITCH:
     role = "switch";
     break;
@@ -901,11 +948,17 @@ static char *field_sel_dup(SzView *field) {
   char *out;
   if (!field)
     return sz_strdup("");
-  s = sz_view_text_field_value(field);
+  if (sz_view_kind(field) == SZ_VIEW_EDITOR) {
+    s = sz_view_editor_value(field);
+    a = sz_view_editor_sel_start(field);
+    b = sz_view_editor_sel_end(field);
+  } else {
+    s = sz_view_text_field_value(field);
+    a = sz_view_text_field_sel_start(field);
+    b = sz_view_text_field_sel_end(field);
+  }
   if (!s)
     s = "";
-  a = sz_view_text_field_sel_start(field);
-  b = sz_view_text_field_sel_end(field);
   n = (int)strlen(s);
   if (a < 0)
     a = 0;
@@ -1236,7 +1289,8 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
       session->pointer_slider = hit;
       session->pointer_scroll = NULL;
       sz_view_slider_set_at(hit, event->x);
-    } else if (hit && sz_view_kind(hit) == SZ_VIEW_TEXT_FIELD) {
+    } else if (hit && (sz_view_kind(hit) == SZ_VIEW_TEXT_FIELD ||
+                      sz_view_kind(hit) == SZ_VIEW_EDITOR)) {
       session->pointer_slider = NULL;
       session->pointer_scroll = NULL;
       session->pointer_field = hit;
@@ -1271,7 +1325,8 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
       sz_view_slider_set_at(session->pointer_slider, event->x);
       session->dirty = 1;
     } else if (session->pointer_field) {
-      (void)sz_view_text_field_extend_to_x(session->pointer_field, event->x);
+      (void)sz_view_edit_extend_to_xy(session->pointer_field, event->x,
+                                      event->y);
       session->dirty = 1;
     } else if (session->pointer_scroll) {
       /* Finger down → content follows (positive finger pans content up or left). */
@@ -1320,7 +1375,8 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
     }
     if (session->pointer_field) {
       if (dx * dx + dy * dy > tap_slop2)
-        (void)sz_view_text_field_extend_to_x(session->pointer_field, event->x);
+        (void)sz_view_edit_extend_to_xy(session->pointer_field, event->x,
+                                        event->y);
       else
         (void)sz_view_handle_tap(session->root, event->x, event->y);
       sync_keyboard(session);
@@ -1482,11 +1538,22 @@ int sz_ui_session_set_caret(SzUiSession *session, int index, int offset) {
   SzView *target;
   if (!session || !session->root)
     return 0;
-  if (!sz_view_focus_text_field_at(session->root, index))
-    return 0;
-  target = sz_view_text_field_target(session->root);
-  if (!sz_view_set_text_field_caret(target, offset))
-    return 0;
+  if (index >= 0) {
+    if (!sz_view_focus_text_field_at(session->root, index))
+      return 0;
+    target = sz_view_text_field_target(session->root);
+    if (!sz_view_set_text_field_caret(target, offset))
+      return 0;
+  } else {
+    if (!sz_view_focus_edit_target(session->root))
+      return 0;
+    target = sz_view_edit_target(session->root);
+    if (sz_view_kind(target) == SZ_VIEW_EDITOR) {
+      if (!sz_view_set_editor_caret(target, offset))
+        return 0;
+    } else if (!sz_view_set_text_field_caret(target, offset))
+      return 0;
+  }
   session->dirty = 1;
   return 1;
 }
@@ -1495,11 +1562,22 @@ int sz_ui_session_set_sel(SzUiSession *session, int index, int start, int end) {
   SzView *target;
   if (!session || !session->root)
     return 0;
-  if (!sz_view_focus_text_field_at(session->root, index))
-    return 0;
-  target = sz_view_text_field_target(session->root);
-  if (!sz_view_set_text_field_sel(target, start, end))
-    return 0;
+  if (index >= 0) {
+    if (!sz_view_focus_text_field_at(session->root, index))
+      return 0;
+    target = sz_view_text_field_target(session->root);
+    if (!sz_view_set_text_field_sel(target, start, end))
+      return 0;
+  } else {
+    if (!sz_view_focus_edit_target(session->root))
+      return 0;
+    target = sz_view_edit_target(session->root);
+    if (sz_view_kind(target) == SZ_VIEW_EDITOR) {
+      if (!sz_view_set_editor_sel(target, start, end))
+        return 0;
+    } else if (!sz_view_set_text_field_sel(target, start, end))
+      return 0;
+  }
   session->dirty = 1;
   return 1;
 }
@@ -1509,7 +1587,7 @@ int sz_ui_session_copy(SzUiSession *session) {
   char *sel;
   if (!session || !session->root)
     return 0;
-  target = sz_view_text_field_target(session->root);
+  target = sz_view_edit_target(session->root);
   if (!target)
     return 0;
   sel = field_sel_dup(target);
@@ -1525,12 +1603,20 @@ int sz_ui_session_copy(SzUiSession *session) {
 int sz_ui_session_cut(SzUiSession *session) {
   SzView *target;
   SzInputEvent ev;
+  int a, b;
   if (!sz_ui_session_copy(session))
     return 0;
-  target = sz_view_text_field_target(session->root);
+  target = sz_view_edit_target(session->root);
   if (!target)
     return 1;
-  if (sz_view_text_field_sel_end(target) <= sz_view_text_field_sel_start(target))
+  if (sz_view_kind(target) == SZ_VIEW_EDITOR) {
+    a = sz_view_editor_sel_start(target);
+    b = sz_view_editor_sel_end(target);
+  } else {
+    a = sz_view_text_field_sel_start(target);
+    b = sz_view_text_field_sel_end(target);
+  }
+  if (b <= a)
     return 1;
   memset(&ev, 0, sizeof ev);
   ev.kind = SZ_INPUT_KEY;
@@ -1547,7 +1633,7 @@ int sz_ui_session_paste(SzUiSession *session, const char *text) {
   const char *payload;
   if (!session || !session->root)
     return 0;
-  target = sz_view_text_field_target(session->root);
+  target = sz_view_edit_target(session->root);
   if (!target)
     return 0;
   if (text && text[0]) {

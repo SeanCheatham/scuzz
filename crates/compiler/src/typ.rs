@@ -5401,6 +5401,11 @@ fn infer_call(
             expect_ty(&arg_tys[1], &Type::String)?;
             Ok(Type::Opaque("View".into()))
         }
+        "View.editor" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("SignalStr".into()))?;
+            Ok(Type::Opaque("View".into()))
+        }
         "View.icon" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
@@ -13422,6 +13427,18 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.fab should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_editor() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    s = Signal.str("x")
+    _ <- Ui.run(_ => View.editor(s))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.editor should typecheck");
     }
 
     #[test]

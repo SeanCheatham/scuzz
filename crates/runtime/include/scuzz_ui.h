@@ -205,7 +205,8 @@ typedef enum SzViewKind {
   SZ_VIEW_INK_WELL,           /* label tap + child; sizes to the child; same closure as button */
   SZ_VIEW_VISIBILITY,         /* Signal.int; sizes to the child; off keeps size, skips paint */
   SZ_VIEW_OFFSTAGE,           /* Signal.int; lays out the child; off reports size 0, skips paint */
-  SZ_VIEW_UNCONSTRAINED_BOX   /* sizes to the child; child lays out with unbounded max */
+  SZ_VIEW_UNCONSTRAINED_BOX,  /* sizes to the child; child lays out with unbounded max */
+  SZ_VIEW_EDITOR              /* multiline SignalStr buffer; not a TextField */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -295,6 +296,9 @@ SzView *sz_view_unconstrained_box(SzView *child);
 /* 8 px slot, `control_h` tall, muted vertical hairline. Not a tap target. */
 SzView *sz_view_vertical_divider(void);
 SzView *sz_view_text_field(SzSignalStr *text, const char *placeholder);
+/* Multiline buffer on `text`. Insert includes newline and a two-space soft-tab.
+ * Not a TextField: omitted from `[fields]` / field inject indices. */
+SzView *sz_view_editor(SzSignalStr *text);
 SzView *sz_view_column(void);
 SzView *sz_view_row(void);
 SzView *sz_view_wrap(void);
@@ -386,27 +390,32 @@ int sz_view_activate(SzView *root, SzView *target, float x, float y);
 /* Layout + activate `target` and mark the session dirty (script `tap N`). */
 int sz_ui_session_activate_view(SzUiSession *session, SzView *target);
 /* Focus dump-index `index` (starred field when index < 0), set caret, mark dirty.
- * Collapses the selection to that offset. */
+ * Collapses the selection to that offset. Index < 0 uses the focused editor
+ * when that is the edit target. */
 int sz_ui_session_set_caret(SzUiSession *session, int index, int offset);
 /* Focus dump-index `index` (starred field when index < 0), set selection
- * `[start, end)` (byte offsets; order does not matter), mark dirty. */
+ * `[start, end)` (byte offsets; order does not matter), mark dirty.
+ * Index < 0 uses the focused editor when that is the edit target. */
 int sz_ui_session_set_sel(SzUiSession *session, int index, int start, int end);
-/* Copy the starred-field selection into the session clipboard. Syncs the OS
- * pasteboard when a Desktop/Mobile embedder is present. Empty selection is a
- * no-op. */
+/* Copy the starred-field or focused-editor selection into the session clipboard.
+ * Syncs the OS pasteboard when a Desktop/Mobile embedder is present. Empty
+ * selection is a no-op. */
 int sz_ui_session_copy(SzUiSession *session);
-/* Copy then delete the starred-field selection. */
+/* Copy then delete the starred-field or focused-editor selection. */
 int sz_ui_session_cut(SzUiSession *session);
-/* Replace the starred-field selection (or insert at the caret) with `text`.
- * NULL `text` uses the session clipboard, after a Desktop/Mobile OS pull. */
+/* Replace the starred-field or focused-editor selection (or insert at the
+ * caret) with `text`. NULL `text` uses the session clipboard, after a
+ * Desktop/Mobile OS pull. */
 int sz_ui_session_paste(SzUiSession *session, const char *text);
 /* Insert UTF-8 at the caret, or chop one UTF-8 code point before the caret
- * when backspace != 0. A selection is replaced or deleted. */
+ * when backspace != 0. A selection is replaced or deleted. Targets the focused
+ * TextField or editor (else the first field, else the first editor). */
 int sz_view_handle_text_edit(SzView *root, const char *text, int backspace);
-/* Named key on the focused TextField. Backspace / Delete / arrows / Home / End
- * use the caret. Shift+arrows / Shift+Home / Shift+End extend the selection.
- * Nonempty `text` inserts UTF-8 (replaces a selection). Unused names
- * inject and no-op. */
+/* Named key on the focused TextField or editor. Backspace / Delete / arrows /
+ * Home / End use the caret. Shift+arrows / Shift+Home / Shift+End extend the
+ * selection. On an editor, Enter inserts a newline, Tab inserts two spaces,
+ * and ArrowUp / ArrowDown move by line. Nonempty `text` inserts UTF-8
+ * (replaces a selection). Unused names inject and no-op. */
 int sz_view_handle_key(SzView *root, const char *key, const char *text,
                        int mods);
 
@@ -417,19 +426,27 @@ float sz_view_scroll_y(const SzView *scroll);
 void sz_view_scroll_by(SzView *scroll, float d);
 int sz_view_scroll_is_h(const SzView *scroll);
 SzView *sz_view_scroll_at(SzView *root, float x, float y);
+/* 1 if a TextField or editor is focused (soft-keyboard show). */
 int sz_view_has_focused_text_field(SzView *root);
-/* Shown TextFields in a11y preorder (cap 64 for dump / inject). */
+/* Shown TextFields in a11y preorder (cap 64 for dump / inject). Editors omit. */
 int sz_view_collect_text_fields(SzView *root, SzView **out, int cap);
+/* Shown editors in a11y preorder (cap 64 for `[editor]` dump). */
+int sz_view_collect_editors(SzView *root, SzView **out, int cap);
 /* Shown tap targets in a11y preorder (cap 64 for dump / `tap N`). */
 int sz_view_collect_tap_targets(SzView *root, SzView **out, int cap);
 /* Shown Scroll views in a11y preorder (cap 64 for dump / `scroll N`). */
 int sz_view_collect_scrolls(SzView *root, SzView **out, int cap);
 /* Focused field, else the first collected field (`text`/`type`/`backspace`/`key`). */
 SzView *sz_view_text_field_target(SzView *root);
+/* Focused TextField or editor, else the first field, else the first editor. */
+SzView *sz_view_edit_target(SzView *root);
 /* Focus collected field `index`, or the starred target when index < 0. */
 int sz_view_focus_text_field_at(SzView *root, int index);
-/* Caret in the focused TextField from measured text advance (not a cell grid).
- * Empty rect if nothing is focused. `theme` supplies font_px (default theme OK). */
+/* Focus the edit target (focused field/editor, else first field, else first editor). */
+int sz_view_focus_edit_target(SzView *root);
+/* Caret in the focused TextField or editor from measured text advance
+ * (not a cell grid). Empty rect if nothing is focused. `theme` supplies
+ * font_px (default theme OK). */
 SzRect sz_view_caret_rect(SzView *root, const SzTheme *theme);
 
 /* Accessibility hooks (Headless-dumpable; no OS AT bridge yet). */
@@ -474,25 +491,35 @@ typedef enum SzA11yRole {
   SZ_A11Y_INK_WELL = 37,
   SZ_A11Y_VISIBILITY = 38,
   SZ_A11Y_OFFSTAGE = 39,
-  SZ_A11Y_UNCONSTRAINED = 40
+  SZ_A11Y_UNCONSTRAINED = 40,
+  SZ_A11Y_EDITOR = 41
 } SzA11yRole;
 
 SzA11yRole sz_view_a11y_role(const SzView *view);
 const char *sz_view_a11y_label(const SzView *view);
 /* Live TextField string, or "" if not a field. */
 const char *sz_view_text_field_value(const SzView *view);
+/* Live editor buffer, or "" if not an editor. */
+const char *sz_view_editor_value(const SzView *view);
 /* Caret byte offset on a TextField (clamped, UTF-8 snapped). 0 if not a field. */
 int sz_view_text_field_caret(const SzView *view);
+int sz_view_editor_caret(const SzView *view);
 /* Set caret byte offset (clamped, UTF-8 snapped). Collapses the selection.
  * 1 if `view` is a TextField. */
 int sz_view_set_text_field_caret(SzView *view, int offset);
+int sz_view_set_editor_caret(SzView *view, int offset);
 /* Selection range on a TextField (`[start, end)` byte offsets, start <= end). */
 int sz_view_text_field_sel_start(const SzView *view);
 int sz_view_text_field_sel_end(const SzView *view);
+int sz_view_editor_sel_start(const SzView *view);
+int sz_view_editor_sel_end(const SzView *view);
 /* Set selection: `start` is the anchor, `end` is the caret (both snapped). */
 int sz_view_set_text_field_sel(SzView *view, int start, int end);
+int sz_view_set_editor_sel(SzView *view, int start, int end);
 /* Move the caret to the measured x without collapsing the selection. */
 int sz_view_text_field_extend_to_x(SzView *view, float x);
+/* Move the caret to (x, y) without collapsing the selection. TextField uses x. */
+int sz_view_edit_extend_to_xy(SzView *view, float x, float y);
 /* Depth-first "role:label" lines joined by newlines (caller frees SzString). */
 SzString *sz_view_a11y_dump(SzView *root);
 
@@ -518,13 +545,17 @@ int sz_ui_session_watch(SzUiSession *session, const char *path);
  * [fields] lists TextFields in a11y order. `N*` is the text/type/backspace/key
  * target (focused, else first). Lines are `N placeholder="live" caret=B sel=A:C`
  * (star on the target; `B` is the caret byte offset; `A:C` is the selection
- * `[A, C)`). `text N s` / `type N s` / `backspace N k` / `caret N b` /
- * `select N a c` target dump index N.
- * One-token forms still use the starred field. `key <name>[+shift|+ctrl|+cmd|+alt] [text]`
- * uses the starred field. Shift+arrows extend the selection. Live OS keys
- * record as `key`, not `type`. `caret <n>` sets the starred-field caret.
- * `select <a> <c>` sets the starred-field selection. Click-to-caret uses TAP /
- * `xy` on the field. Pointer drag on a TextField extends the selection.
+ * `[A, C)`). Quoted field values flatten newlines. Editors omit from `[fields]`.
+ * [editor] lists `View.editor` nodes (one line each) when any exist:
+ * `N* caret=B sel=A:C "escaped"` (star on the focused editor, else first).
+ * Quotes keep newlines as `\\n` (not a space). `text N s` / `type N s` /
+ * `backspace N k` / `caret N b` / `select N a c` target dump index N.
+ * One-token forms still use the starred field, or the focused editor when
+ * that is the edit target. `key <name>[+shift|+ctrl|+cmd|+alt] [text]`
+ * uses the starred field or focused editor. Shift+arrows extend the selection.
+ * Live OS keys record as `key`, not `type`. `caret <n>` sets the starred-field
+ * or focused-editor caret. `select <a> <c>` sets that selection. Click-to-caret
+ * uses TAP / `xy` on the field or editor. Pointer drag extends the selection.
  * `copy` / `cut` / `paste` / `paste <s>` are the clipboard verbs. Headless
  * `paste` uses the session clipboard. Desktop/Mobile pull the OS pasteboard
  * on paste when present. Live OS copy/cut/paste and Shift+arrows record those
@@ -678,6 +709,7 @@ SzView *sz_lang_view_background(int64_t argb, SzView *child);
 SzView *sz_lang_view_aspect_ratio(int64_t rw, int64_t rh, SzView *child);
 SzView *sz_lang_view_fraction(int64_t wpct, int64_t hpct, SzView *child);
 SzView *sz_lang_view_text_field(SzSignalStr *text, SzString *placeholder);
+SzView *sz_lang_view_editor(SzSignalStr *text);
 SzView *sz_lang_view_icon(int64_t glyph, int64_t argb);
 SzView *sz_lang_view_image(int64_t w, int64_t h, int64_t argb, SzString *caption);
 void *sz_lang_view_add_child(SzView *parent, SzView *child);

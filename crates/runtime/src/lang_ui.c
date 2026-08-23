@@ -285,6 +285,10 @@ SzView *sz_lang_view_text_field(SzSignalStr *text, SzString *placeholder) {
   return sz_view_text_field(text, placeholder ? sz_string_cstr(placeholder) : "");
 }
 
+SzView *sz_lang_view_editor(SzSignalStr *text) {
+  return sz_view_editor(text);
+}
+
 SzView *sz_lang_view_icon(int64_t glyph, int64_t argb) {
   return sz_view_icon((char)glyph, (uint32_t)argb);
 }
