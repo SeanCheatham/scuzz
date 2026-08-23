@@ -39,7 +39,7 @@ def listDir(dir: String): IO[List[String]] =
     ents <- Fs.list(dir).handleErrorWith(_ =>
   IO.pure([]: List[(String, Bool)])
 )
-  } yield List.sort(List.filter(Chrome.filesOf(ents), s => Chrome.keepTree(dir, s)))
+  } yield List.sort(List.filter(Chrome.filesOf(ents), s => Chrome.keepTree(s)))
 
 @main def main: IO[Unit] =
   for {
@@ -84,12 +84,10 @@ def listDir(dir: String): IO[List[String]] =
   listed <- Fs.list(next).flatMap(_ => IO.pure(Str.len("x"))).handleErrorWith(_ =>
   IO.pure(Str.len(""))
 )
-  kids <- Fs.list(next).handleErrorWith(_ =>
-  IO.pure([]: List[(String, Bool)])
-)
   _ <- if (listed == Str.len("x")) for {
+  names <- listDir(next)
   _ = Signal.setStr(dirSig, next)
-  _ = Signal.setList(tree, List.sort(List.filter(Chrome.filesOf(kids), s => Chrome.keepTree(next, s))))
+  _ = Signal.setList(tree, names)
   _ <- IO.pure(())
 } yield () else for {
   _ = Property.sometimes("tappedTree")
