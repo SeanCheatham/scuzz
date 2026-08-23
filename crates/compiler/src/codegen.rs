@@ -557,7 +557,7 @@ struct Emitted {
     code: String,
     value: String,
     kind: Kind,
-    /// When `kind == Io`, the kind of the successful payload (Int for Sys.exec).
+    /// When `kind == Io`, the kind of the successful payload.
     payload: Kind,
     /// When `kind == Io` and the payload is a ptr, the run result holds a distinct RC.
     payload_owned: bool,
@@ -6227,7 +6227,7 @@ fn emit_call(
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
-            io_emitted(code, format!("%{prefix}_v"), Kind::Int)
+            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
         }
         "Sys.spawn" => {
             writeln!(
@@ -12989,6 +12989,29 @@ enum Color:
         assert!(
             ir.contains("sz_fs_walk"),
             "expected sz_fs_walk in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_sys_exec_capture() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    (code, out, err) <- Sys.exec("true")
+    _ <- IO.println(Str.fromInt(code))
+    _ <- IO.println(out)
+    _ <- IO.println(err)
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_sys_exec"),
+            "expected sz_sys_exec in IR:\n{ir}"
+        );
+        assert!(
+            ir.contains("call void @sz_release(ptr %value)"),
+            "expected owned Sys.exec tuple last-use:\n{ir}"
         );
     }
 

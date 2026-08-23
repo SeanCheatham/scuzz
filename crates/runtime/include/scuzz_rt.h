@@ -746,7 +746,7 @@ SzIo *sz_sys_args(void);
 SzIo *sz_sys_read_line(void); /* IO[String]: one stdin line; EOF → ""; parks on poll */
 SzIo *sz_sys_read(int64_t n); /* IO[String]: n stdin bytes (or fewer at EOF); parks on poll */
 SzIo *sz_sys_write(SzString *s); /* IO[Unit]: stdout bytes, no newline */
-SzIo *sz_sys_exec(SzString *cmd); /* IO[Int] exit code; parks on poll; fails under TestRuntime */
+SzIo *sz_sys_exec(SzString *cmd); /* IO[(Int, String, String)] code+stdout+stderr; parks on poll; fails under TestRuntime */
 SzIo *sz_sys_spawn(SzString *cmd); /* IO[Int] pid; does not wait; fails under TestRuntime */
 SzIo *sz_sys_alive(int64_t pid);   /* IO[Int] 1 if running */
 SzIo *sz_sys_kill(int64_t pid);    /* IO[Unit] SIGTERM; no-op if already gone */

@@ -4992,11 +4992,31 @@ int main(void) {
   {
     r = sz_io_unsafe_run(sz_sys_exec(sz_string_from_cstr("true")));
     assert(r.ok);
-    assert(sz_unbox_i64(r.value) == 0);
+    {
+      SzPair *tup = (SzPair *)r.value;
+      SzPair *io = (SzPair *)tup->right;
+      assert(sz_unbox_i64(tup->left) == 0);
+      assert(sz_string_len((SzString *)io->left) == 0);
+      assert(sz_string_len((SzString *)io->right) == 0);
+    }
     sz_release(r.value);
     r = sz_io_unsafe_run(sz_sys_exec(sz_string_from_cstr("exit 7")));
     assert(r.ok);
-    assert(sz_unbox_i64(r.value) == 7);
+    {
+      SzPair *tup = (SzPair *)r.value;
+      assert(sz_unbox_i64(tup->left) == 7);
+    }
+    sz_release(r.value);
+    r = sz_io_unsafe_run(
+        sz_sys_exec(sz_string_from_cstr("echo out; echo err >&2; exit 3")));
+    assert(r.ok);
+    {
+      SzPair *tup = (SzPair *)r.value;
+      SzPair *io = (SzPair *)tup->right;
+      assert(sz_unbox_i64(tup->left) == 3);
+      assert(strcmp(sz_string_cstr((SzString *)io->left), "out\n") == 0);
+      assert(strcmp(sz_string_cstr((SzString *)io->right), "err\n") == 0);
+    }
     sz_release(r.value);
   }
 
@@ -5097,7 +5117,10 @@ int main(void) {
     assert(r.ok);
     pair = (SzPair *)r.value;
     assert(pair && pair->left);
-    assert(sz_unbox_i64(pair->left) == 0);
+    {
+      SzPair *got = (SzPair *)pair->left;
+      assert(sz_unbox_i64(got->left) == 0);
+    }
     assert(g_peer_flag == 1);
   }
 

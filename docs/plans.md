@@ -1,7 +1,7 @@
 # Next slice
 
-B3 — `Sys.exec` capture `(code, stdout, stderr)`.
+B4 — Pure Json kit.
 
-Capture via `dup2`. Still fail under TestRuntime. No exec stub map. Rewrite `IO[Int]` call sites. Forwards-only.
+Enum `Null|Bool|Int|Float|Str|Arr|Obj`. Parse and stringify. Follow `Str.concat`, not Clock. Wire typ/codegen/hover/KIT_SIGS/`json.c`/guide. Round-trip check JSON from `check.rs`.
 
 Locks: [`vision.md`](vision.md). Full bar: [`gaps.md`](gaps.md).

@@ -1227,7 +1227,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
     ("Sys.readLine", "Sys.readLine(): IO[String]"),
     ("Sys.read", "Sys.read(n: Int): IO[String]"),
     ("Sys.write", "Sys.write(s: String): IO[Unit]"),
-    ("Sys.exec", "Sys.exec(cmd: String): IO[Int]"),
+    (
+        "Sys.exec",
+        "Sys.exec(cmd: String): IO[(Int, String, String)]",
+    ),
     ("Sys.spawn", "Sys.spawn(cmd: String): IO[Int]"),
     ("Sys.alive", "Sys.alive(pid: Int): IO[Int]"),
     ("Sys.kill", "Sys.kill(pid: Int): IO[Unit]"),

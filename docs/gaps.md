@@ -100,12 +100,12 @@ Folding ranges, inlay hints, and bracket match consume LSP data that already exi
 
 #### 3. Kits the IDE process needs
 
-Today there is no JSON kit. `Sys.exec` returns an exit code. It does not capture stdout or stderr. `Sys.spawn` returns a pid. It has no child stdin/stdout pipes. `Sys.exec` / `Sys.spawn` fail under TestRuntime. `Fs.list` returns `(name, isDir)` entries. `Fs.exists`, `Fs.join`, `Fs.dirname`, `Fs.basename`, `Fs.delete`, `Fs.rename`, and `Fs.walk` exist. There is no `Fs.watch`. `Fs.read` / `Fs.write` / `Fs.mkdirs` / `Fs.canonicalize` exist. `Sys.args` exists. `Clock` exists (poll is possible; there is no fs watch).
+Today there is no JSON kit. `Sys.exec` returns `(code, stdout, stderr)`. `Sys.spawn` returns a pid. It has no child stdin/stdout pipes. `Sys.exec` / `Sys.spawn` fail under TestRuntime. `Fs.list` returns `(name, isDir)` entries. `Fs.exists`, `Fs.join`, `Fs.dirname`, `Fs.basename`, `Fs.delete`, `Fs.rename`, and `Fs.walk` exist. There is no `Fs.watch`. `Fs.read` / `Fs.write` / `Fs.mkdirs` / `Fs.canonicalize` exist. `Sys.args` exists. `Clock` exists (poll is possible; there is no fs watch).
 
 Close:
 
 - JSON parse and stringify for `check --message-format=json` and, later, LSP JSON-RPC.
-- Capture stdout and stderr from `Sys.exec` (or a sibling that returns `(code, stdout, stderr)`). The IDE prints `fmt` / `run` / `fuzz` output.
+- Capture stdout and stderr from `Sys.exec` (or a sibling that returns `(code, stdout, stderr)`). `Sys.exec` is `IO[(Int, String, String)]`. Capture uses `dup2`. TestRuntime still rejects exec. No exec stub map.
 - Bidirectional stdio to a child before an in-process LSP client. Until then the IDE drives analyze through files: write the buffer, run `scuzz check --message-format=json` with stdout captured or redirected, parse JSON. That path matches the one editor protocol. Do not add a second typer.
 - `Fs.list` reports file vs directory. Walk a tree (recursive list or a walk kit). `Fs.list` returns `List[(String, Bool)]`. `Fs.exists`, `Fs.join`, `Fs.dirname`, `Fs.basename`, and `Fs.walk` are in.
 - `Fs.delete`, `Fs.rename`, `Fs.exists`. Rename must stay compatible with `workspace/willRenameFiles`. `Fs.delete` / `Fs.rename` / `Fs.exists` are in. Rename fails when the dest exists or the dest parent is missing. `Fs.write` still requires the parent directory.
