@@ -4414,6 +4414,15 @@ int main(void) {
     assert(r.ok);
     assert(strcmp(sz_string_cstr((SzString *)r.value), "mem") == 0);
     sz_release(r.value);
+    r = sz_io_unsafe_run(sz_io_sleep_ms(50));
+    assert(r.ok);
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("a/b.txt"), sz_string_from_cstr("poll")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("a/b.txt")));
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "poll") == 0);
+    sz_release(r.value);
 
     r = sz_io_unsafe_run(sz_fs_mkdirs(sz_string_from_cstr("tree/a")));
     assert(r.ok);
