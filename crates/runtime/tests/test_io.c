@@ -3321,11 +3321,19 @@ int main(void) {
       SzIo *ls = sz_fs_list(path);
       SzIo *mk = sz_fs_mkdirs(path);
       SzIo *cn = sz_fs_canonicalize(path);
+      SzIo *ex = sz_fs_exists(path);
+      SzIo *del = sz_fs_delete(path);
+      SzIo *ren = sz_fs_rename(path, path);
+      SzIo *wk = sz_fs_walk(path);
       sz_release(path);
       sz_release(rd);
       sz_release(ls);
       sz_release(mk);
       sz_release(cn);
+      sz_release(ex);
+      sz_release(del);
+      sz_release(ren);
+      sz_release(wk);
     }
     sz_alloc_stats(&live_bytes, &live_count);
     assert(live_count == base_count);
@@ -4153,6 +4161,72 @@ int main(void) {
       sz_release(d);
       sz_release(b);
     }
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("build/b2_src.txt"), sz_string_from_cstr("src")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_fs_rename(sz_string_from_cstr("build/b2_src.txt"),
+                                     sz_string_from_cstr("build/b2_dst.txt")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_fs_exists(sz_string_from_cstr("build/b2_src.txt")));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 0);
+    r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("build/b2_dst.txt")));
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "src") == 0);
+    r = sz_io_unsafe_run(sz_fs_delete(sz_string_from_cstr("build/b2_dst.txt")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_fs_exists(sz_string_from_cstr("build/b2_dst.txt")));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 0);
+    r = sz_io_unsafe_run(sz_fs_mkdirs(sz_string_from_cstr("build/b2_walk/a")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("build/b2_walk/a/x.txt"),
+                                    sz_string_from_cstr("w")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_fs_walk(sz_string_from_cstr("build/b2_walk")));
+    assert(r.ok);
+    {
+      SzList *xs = (SzList *)r.value;
+      int saw_dir = 0;
+      int saw_file = 0;
+      while (xs && !sz_list_is_empty(xs)) {
+        SzPair *ent = (SzPair *)sz_list_head(xs);
+        SzString *name = (SzString *)sz_pair_left(ent);
+        int64_t is_dir = sz_unbox_i64(sz_pair_right(ent));
+        if (strcmp(sz_string_cstr(name), "a") == 0) {
+          saw_dir = 1;
+          assert(is_dir == 1);
+        }
+        if (strcmp(sz_string_cstr(name), "a/x.txt") == 0) {
+          saw_file = 1;
+          assert(is_dir == 0);
+        }
+        xs = sz_list_tail(xs);
+      }
+      assert(saw_dir);
+      assert(saw_file);
+    }
+    r = sz_io_unsafe_run(sz_fs_rename(sz_string_from_cstr("build/b2_walk/a/x.txt"),
+                                     sz_string_from_cstr("build/b2_walk/a/y.txt")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(
+        sz_fs_rename(sz_string_from_cstr("build/b2_walk/a/y.txt"),
+                     sz_string_from_cstr("build/b2_missing/z.txt")));
+    assert(!r.ok);
+    sz_error_free(r.error);
+    r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("build/b2_walk/a/clash.txt"),
+                                    sz_string_from_cstr("c")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(
+        sz_fs_rename(sz_string_from_cstr("build/b2_walk/a/y.txt"),
+                     sz_string_from_cstr("build/b2_walk/a/clash.txt")));
+    assert(!r.ok);
+    sz_error_free(r.error);
+    r = sz_io_unsafe_run(sz_fs_delete(sz_string_from_cstr("build/b2_walk")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_fs_exists(sz_string_from_cstr("build/b2_walk")));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 0);
     r = sz_io_unsafe_run(sz_fs_canonicalize(sz_string_from_cstr("build")));
     assert(r.ok);
     assert(sz_string_len((SzString *)r.value) > 0);
@@ -4202,6 +4276,27 @@ int main(void) {
     assert(r.ok);
     assert(sz_unbox_i64(r.value) == 1);
     r = sz_io_unsafe_run(sz_fs_exists(sz_string_from_cstr("missing-mem")));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 0);
+    r = sz_io_unsafe_run(sz_fs_rename(sz_string_from_cstr("step/x.txt"),
+                                    sz_string_from_cstr("step/y.txt")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("step/y.txt")));
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "step-mem") == 0);
+    r = sz_io_unsafe_run(sz_fs_walk(sz_string_from_cstr("step")));
+    assert(r.ok);
+    {
+      SzList *xs = (SzList *)r.value;
+      SzPair *ent = (SzPair *)sz_list_head(xs);
+      SzString *name = (SzString *)sz_pair_left(ent);
+      int64_t is_dir = sz_unbox_i64(sz_pair_right(ent));
+      assert(strcmp(sz_string_cstr(name), "y.txt") == 0);
+      assert(is_dir == 0);
+    }
+    r = sz_io_unsafe_run(sz_fs_delete(sz_string_from_cstr("step")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_fs_exists(sz_string_from_cstr("step")));
     assert(r.ok);
     assert(sz_unbox_i64(r.value) == 0);
     assert(access("step/x.txt", F_OK) != 0);
@@ -4271,6 +4366,63 @@ int main(void) {
     assert(strcmp(sz_string_cstr((SzString *)r.value), "mem") == 0);
     sz_release(r.value);
 
+    r = sz_io_unsafe_run(sz_fs_mkdirs(sz_string_from_cstr("tree/a")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(
+        sz_fs_write(sz_string_from_cstr("tree/a/x.txt"), sz_string_from_cstr("w")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_fs_walk(sz_string_from_cstr("tree")));
+    assert(r.ok);
+    {
+      SzList *xs = (SzList *)r.value;
+      int saw_dir = 0;
+      int saw_file = 0;
+      while (xs && !sz_list_is_empty(xs)) {
+        SzPair *ent = (SzPair *)sz_list_head(xs);
+        SzString *name = (SzString *)sz_pair_left(ent);
+        int64_t is_dir = sz_unbox_i64(sz_pair_right(ent));
+        if (strcmp(sz_string_cstr(name), "a") == 0) {
+          saw_dir = 1;
+          assert(is_dir == 1);
+        }
+        if (strcmp(sz_string_cstr(name), "a/x.txt") == 0) {
+          saw_file = 1;
+          assert(is_dir == 0);
+        }
+        xs = sz_list_tail(xs);
+      }
+      assert(saw_dir);
+      assert(saw_file);
+    }
+    r = sz_io_unsafe_run(
+        sz_fs_rename(sz_string_from_cstr("tree/a"), sz_string_from_cstr("tree/b")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_fs_read(sz_string_from_cstr("tree/b/x.txt")));
+    assert(r.ok);
+    assert(strcmp(sz_string_cstr((SzString *)r.value), "w") == 0);
+    sz_release(r.value);
+    r = sz_io_unsafe_run(
+        sz_fs_rename(sz_string_from_cstr("tree/b/x.txt"),
+                     sz_string_from_cstr("missing/z.txt")));
+    assert(!r.ok);
+    sz_error_free(r.error);
+    r = sz_io_unsafe_run(sz_fs_write(sz_string_from_cstr("tree/b/clash.txt"),
+                                    sz_string_from_cstr("c")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(
+        sz_fs_rename(sz_string_from_cstr("tree/b/x.txt"),
+                     sz_string_from_cstr("tree/b/clash.txt")));
+    assert(!r.ok);
+    sz_error_free(r.error);
+    r = sz_io_unsafe_run(sz_fs_delete(sz_string_from_cstr("tree")));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_fs_exists(sz_string_from_cstr("tree")));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 0);
+    r = sz_io_unsafe_run(sz_fs_delete(sz_string_from_cstr("missing-del")));
+    assert(!r.ok);
+    sz_error_free(r.error);
+
     sz_alloc_stats(&base_bytes, &base_count);
     {
       SzString *file = sz_string_from_cstr("a/b.txt");
@@ -4279,6 +4431,9 @@ int main(void) {
       assert(r.ok);
       sz_release(r.value);
       r = sz_io_unsafe_run(sz_fs_list(dir));
+      assert(r.ok);
+      sz_release(r.value);
+      r = sz_io_unsafe_run(sz_fs_walk(dir));
       assert(r.ok);
       sz_release(r.value);
       r = sz_io_unsafe_run(sz_fs_mkdirs(dir));

@@ -1,7 +1,7 @@
 # Next slice
 
-B2 — `Fs.delete`, `Fs.rename`, and walk.
+B3 — `Sys.exec` capture `(code, stdout, stderr)`.
 
-`Fs.delete` and `Fs.rename` (compatible with `workspace/willRenameFiles`). Walk a directory tree. `Fs.write` still requires the parent directory. Live disk and TestRuntime stay in lockstep. Forwards-only.
+Capture via `dup2`. Still fail under TestRuntime. No exec stub map. Rewrite `IO[Int]` call sites. Forwards-only.
 
 Locks: [`vision.md`](vision.md). Full bar: [`gaps.md`](gaps.md).
