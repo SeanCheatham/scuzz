@@ -8,7 +8,7 @@ def scuzzNames(ents: List[(String, Bool)]): List[String] =
   List.filter(filesOf(ents), s => Str.endsWith(s, ".scuzz"))
 
 def preferredRel(hasMain: Bool, srcHits: List[String], topHits: List[String]): String =
-  if (hasMain) Fs.join("src", "Main.scuzz") else if (List.nonEmpty(srcHits)) List.head(srcHits) else if (List.nonEmpty(topHits)) List.head(topHits) else Fs.join("src", "Main.scuzz")
+  if (hasMain) Fs.join("src", "Main.scuzz") else if (List.nonEmpty(srcHits)) Fs.join("src", List.head(srcHits)) else if (List.nonEmpty(topHits)) List.head(topHits) else Fs.join("src", "Main.scuzz")
 
 def pickSource(dir: String): IO[String] =
   for {
@@ -22,12 +22,12 @@ def pickSource(dir: String): IO[String] =
   IO.pure([]: List[(String, Bool)])
 )
     topHits = scuzzNames(topEnts)
-  } yield if (hasMain) main else if (List.nonEmpty(srcHits)) Fs.join(Fs.join(dir, "src"), List.head(srcHits)) else if (List.nonEmpty(topHits)) Fs.join(dir, List.head(topHits)) else main
+  } yield Fs.join(dir, preferredRel(hasMain, srcHits, topHits))
 
 def openBuffer(arg: String, isDir: Int): IO[String] =
   if (isDir == 0) IO.pure(arg) else pickSource(arg)
 
-def keepTree(_dir: String, s: String): Bool =
+def keepTree(s: String): Bool =
   Property.check("keep", Str.len(s) > 0, !Str.startsWith(s, ".") && s != "corpus/" && s != "goldens/" && s != "build/")
 
 def seedWorkspace(): IO[Unit] =
