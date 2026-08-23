@@ -357,3 +357,38 @@ void sz_mobile_set_keyboard(int visible) {
       [g_keyboard_field becomeFirstResponder];
   });
 }
+
+int sz_mobile_clipboard_set(const char *text) {
+  __block int ok = 0;
+  NSString *s = [NSString stringWithUTF8String:text ? text : ""];
+  if (!s)
+    s = @"";
+  void (^block)(void) = ^{
+    [UIPasteboard generalPasteboard].string = s;
+    ok = 1;
+  };
+  if ([NSThread isMainThread])
+    block();
+  else
+    dispatch_sync(dispatch_get_main_queue(), block);
+  return ok;
+}
+
+char *sz_mobile_clipboard_get(void) {
+  __block char *out = NULL;
+  void (^block)(void) = ^{
+    NSString *s = [UIPasteboard generalPasteboard].string;
+    const char *u = s ? [s UTF8String] : NULL;
+    if (u) {
+      size_t n = strlen(u);
+      out = (char *)malloc(n + 1);
+      if (out)
+        memcpy(out, u, n + 1);
+    }
+  };
+  if ([NSThread isMainThread])
+    block();
+  else
+    dispatch_sync(dispatch_get_main_queue(), block);
+  return out;
+}

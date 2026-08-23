@@ -30,9 +30,11 @@ static void *scuzz_app_thread(void *unused) {
   return NULL;
 }
 
+void scuzz_android_set_vm(JavaVM *vm);
+
 JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *vm, void *reserved) {
-  (void)vm;
   (void)reserved;
+  scuzz_android_set_vm(vm);
   return JNI_VERSION_1_6;
 }
 

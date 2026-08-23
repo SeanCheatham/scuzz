@@ -3,6 +3,7 @@
 #include "scuzz_mobile.h"
 
 #include <android/log.h>
+#include <jni.h>
 #include <pthread.h>
 #include <stdatomic.h>
 #include <stdint.h>
@@ -28,6 +29,10 @@ static size_t g_rgba_cap;
 static char g_text_bufs[TEXT_RING][TEXT_LEN];
 static int g_text_i;
 static char g_poll_text[TEXT_LEN];
+static JavaVM *g_vm;
+static char *g_clip;
+
+void scuzz_android_set_vm(JavaVM *vm) { g_vm = vm; }
 
 int sz_mobile_available(void) { return 1; }
 
@@ -42,6 +47,8 @@ void sz_mobile_shutdown(void) {
   g_rgba_cap = 0;
   g_w = g_h = 0;
   pthread_mutex_unlock(&g_frame_lock);
+  free(g_clip);
+  g_clip = NULL;
   scuzz_android_set_alive(0);
 }
 
@@ -253,4 +260,164 @@ int scuzz_android_copy_argb(int32_t *dst, int cap) {
   }
   pthread_mutex_unlock(&g_frame_lock);
   return frames;
+}
+
+static char *clip_dup(const char *s) {
+  size_t n;
+  char *out;
+  if (!s)
+    return NULL;
+  n = strlen(s);
+  out = (char *)malloc(n + 1);
+  if (!out)
+    return NULL;
+  memcpy(out, s, n + 1);
+  return out;
+}
+
+static JNIEnv *android_env(int *need_detach) {
+  JNIEnv *env = NULL;
+  *need_detach = 0;
+  if (!g_vm)
+    return NULL;
+  if ((*g_vm)->GetEnv(g_vm, (void **)&env, JNI_VERSION_1_6) == JNI_OK)
+    return env;
+  if ((*g_vm)->AttachCurrentThread(g_vm, &env, NULL) == 0) {
+    *need_detach = 1;
+    return env;
+  }
+  return NULL;
+}
+
+static void android_clear_exn(JNIEnv *env) {
+  if (env && (*env)->ExceptionCheck(env))
+    (*env)->ExceptionClear(env);
+}
+
+static jobject android_clipboard(JNIEnv *env) {
+  jclass at;
+  jmethodID current;
+  jobject app;
+  jclass ctx;
+  jmethodID get_sys;
+  jstring name;
+  jobject cm;
+  if (!env)
+    return NULL;
+  at = (*env)->FindClass(env, "android/app/ActivityThread");
+  if (!at) {
+    android_clear_exn(env);
+    return NULL;
+  }
+  current = (*env)->GetStaticMethodID(env, at, "currentApplication",
+                                      "()Landroid/app/Application;");
+  if (!current) {
+    android_clear_exn(env);
+    return NULL;
+  }
+  app = (*env)->CallStaticObjectMethod(env, at, current);
+  android_clear_exn(env);
+  if (!app)
+    return NULL;
+  ctx = (*env)->GetObjectClass(env, app);
+  get_sys = (*env)->GetMethodID(env, ctx, "getSystemService",
+                               "(Ljava/lang/String;)Ljava/lang/Object;");
+  if (!get_sys) {
+    android_clear_exn(env);
+    return NULL;
+  }
+  name = (*env)->NewStringUTF(env, "clipboard");
+  cm = (*env)->CallObjectMethod(env, app, get_sys, name);
+  android_clear_exn(env);
+  return cm;
+}
+
+int sz_mobile_clipboard_set(const char *text) {
+  int detach = 0;
+  JNIEnv *env;
+  jobject cm;
+  free(g_clip);
+  g_clip = clip_dup(text ? text : "");
+  env = android_env(&detach);
+  cm = android_clipboard(env);
+  if (env && cm) {
+    jclass clip_cls = (*env)->FindClass(env, "android/content/ClipData");
+    jmethodID neu;
+    jstring label;
+    jstring body;
+    jobject clip;
+    jclass cm_cls;
+    jmethodID set_clip;
+    if (clip_cls) {
+      neu = (*env)->GetStaticMethodID(
+          env, clip_cls, "newPlainText",
+          "(Ljava/lang/CharSequence;Ljava/lang/CharSequence;)Landroid/content/"
+          "ClipData;");
+      label = (*env)->NewStringUTF(env, "scuzz");
+      body = (*env)->NewStringUTF(env, text ? text : "");
+      if (neu) {
+        clip = (*env)->CallStaticObjectMethod(env, clip_cls, neu, label, body);
+        android_clear_exn(env);
+        cm_cls = (*env)->GetObjectClass(env, cm);
+        set_clip = (*env)->GetMethodID(env, cm_cls, "setPrimaryClip",
+                                       "(Landroid/content/ClipData;)V");
+        if (set_clip && clip)
+          (*env)->CallVoidMethod(env, cm, set_clip, clip);
+        android_clear_exn(env);
+      }
+    }
+  }
+  if (detach && g_vm)
+    (*g_vm)->DetachCurrentThread(g_vm);
+  return g_clip ? 1 : 0;
+}
+
+char *sz_mobile_clipboard_get(void) {
+  int detach = 0;
+  JNIEnv *env = android_env(&detach);
+  jobject cm = android_clipboard(env);
+  char *out = NULL;
+  if (env && cm) {
+    jclass cm_cls = (*env)->GetObjectClass(env, cm);
+    jmethodID get_clip = (*env)->GetMethodID(
+        env, cm_cls, "getPrimaryClip", "()Landroid/content/ClipData;");
+    jobject clip = get_clip ? (*env)->CallObjectMethod(env, cm, get_clip) : NULL;
+    android_clear_exn(env);
+    if (clip) {
+      jclass clip_cls = (*env)->GetObjectClass(env, clip);
+      jmethodID get_item = (*env)->GetMethodID(
+          env, clip_cls, "getItemAt", "(I)Landroid/content/ClipData$Item;");
+      jobject item =
+          get_item ? (*env)->CallObjectMethod(env, clip, get_item, 0) : NULL;
+      android_clear_exn(env);
+      if (item) {
+        jclass item_cls = (*env)->GetObjectClass(env, item);
+        jmethodID get_text = (*env)->GetMethodID(
+            env, item_cls, "getText", "()Ljava/lang/CharSequence;");
+        jobject cs =
+            get_text ? (*env)->CallObjectMethod(env, item, get_text) : NULL;
+        android_clear_exn(env);
+        if (cs) {
+          jmethodID cs_str = (*env)->GetMethodID(
+              env, (*env)->GetObjectClass(env, cs), "toString",
+              "()Ljava/lang/String;");
+          jstring js = cs_str
+                           ? (jstring)(*env)->CallObjectMethod(env, cs, cs_str)
+                           : NULL;
+          const char *utf;
+          android_clear_exn(env);
+          utf = js ? (*env)->GetStringUTFChars(env, js, NULL) : NULL;
+          if (utf) {
+            out = clip_dup(utf);
+            (*env)->ReleaseStringUTFChars(env, js, utf);
+          }
+        }
+      }
+    }
+  }
+  if (detach && g_vm)
+    (*g_vm)->DetachCurrentThread(g_vm);
+  if (!out && g_clip)
+    out = clip_dup(g_clip);
+  return out;
 }

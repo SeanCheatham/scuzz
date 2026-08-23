@@ -1612,6 +1612,150 @@ static void test_session_inject_hover_secondary(void) {
   remove(dump);
 }
 
+static void test_session_inject_selection_clipboard(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *field;
+  SzSignalStr *draft;
+  SzInputEvent ev;
+  const SzTheme *theme = sz_theme_default();
+  const char *path = "/tmp/scuzz_ui_inject_sel.script";
+  const char *dump = "/tmp/scuzz_ui_inject_sel.dump";
+  const char *record = "/tmp/scuzz_ui_record_sel.script";
+  char *body;
+  SzRect fr;
+  float x0, x2, y;
+
+  remove(path);
+  remove(dump);
+  remove(record);
+  draft = sz_signal_str("");
+  root = sz_view_column();
+  field = sz_view_text_field(draft, "item");
+  sz_view_add_child(root, field);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_inject(session, path));
+  assert(sz_ui_session_set_debug_dump(session, dump));
+  assert(sz_ui_session_set_record(session, record));
+  assert(sz_ui_pump_sync(session));
+
+  write_stamp(path, "text abc\ncaret 0\nkey ArrowRight+shift\nkey ArrowRight+shift\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "abc") == 0);
+  assert(sz_view_text_field_caret(field) == 2);
+  assert(sz_view_text_field_sel_start(field) == 0);
+  assert(sz_view_text_field_sel_end(field) == 2);
+  body = slurp_cstr(dump);
+  assert(strstr(body, "0* item=\"abc\" caret=2 sel=0:2") != NULL);
+  assert(strstr(body, "[taps]") != NULL);
+  assert(strstr(body, "[fields]") != NULL);
+  free(body);
+
+  write_stamp(path, "copy\nkey End\npaste\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "abcab") == 0);
+
+  write_stamp(path, "text abc\nselect 0 2\ntype x\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "xc") == 0);
+  assert(sz_view_text_field_caret(field) == 1);
+  assert(sz_view_text_field_sel_start(field) == 1);
+  assert(sz_view_text_field_sel_end(field) == 1);
+  body = slurp_cstr(dump);
+  assert(strstr(body, "0* item=\"xc\" caret=1 sel=1:1") != NULL);
+  free(body);
+
+  write_stamp(path, "text abc\nselect 0 2\nkey Backspace\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "c") == 0);
+
+  write_stamp(path, "text abc\nselect 1 3\nkey Delete\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "a") == 0);
+
+  write_stamp(path, "text abc\nselect 0 2\ncut\nkey End\npaste\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "cab") == 0);
+
+  write_stamp(path, "text hi\npaste xyz\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "hixyz") == 0);
+
+  write_stamp(path, "text caf\xC3\xA9\nselect 3 5\nkey Backspace\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "caf") == 0);
+
+  write_stamp(path, "text abc\nselect 0 3\nkey ArrowLeft\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_text_field_caret(field) == 0);
+  assert(sz_view_text_field_sel_start(field) == 0);
+  assert(sz_view_text_field_sel_end(field) == 0);
+
+  sz_view_layout(sz_ui_session_root(session), (float)cfg.width, (float)cfg.height,
+                 theme);
+  fr = sz_view_frame(field);
+  x0 = fr.x + 6.f;
+  x2 = fr.x + 6.f + sk_font_measure_string("ab", theme->font_px);
+  y = fr.y + fr.h * 0.5f;
+  write_stamp(path, "text abc\n");
+  assert(sz_ui_pump_sync(session));
+  {
+    char line[128];
+    snprintf(line, sizeof line, "drag %.1f %.1f %.1f %.1f\n", x0, y, x2, y);
+    write_stamp(path, line);
+  }
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_text_field_sel_start(field) == 0);
+  assert(sz_view_text_field_sel_end(field) >= 1);
+  assert(strcmp(sz_signal_str_get(draft), "abc") == 0);
+
+  write_stamp(path, "text abc\nselect 0 2\n");
+  assert(sz_ui_pump_sync(session));
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_KEY;
+  ev.key = "c";
+  ev.key_mods = SZ_KEY_CMD;
+  assert(sz_ui_session_live_inject(session, &ev));
+  ev.key = "v";
+  ev.key_mods = SZ_KEY_CTRL;
+  write_stamp(path, "key End\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_live_inject(session, &ev));
+  assert(strcmp(sz_signal_str_get(draft), "abcab") == 0);
+  body = slurp_cstr(record);
+  assert(strstr(body, "copy") != NULL);
+  assert(strstr(body, "paste ab") != NULL);
+  assert(strstr(body, "key c") == NULL);
+  free(body);
+
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_KEY;
+  ev.key = "ArrowLeft";
+  ev.key_mods = SZ_KEY_SHIFT;
+  write_stamp(path, "text abc\nkey End\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_ui_session_live_inject(session, &ev));
+  assert(sz_view_text_field_sel_end(field) == 3);
+  assert(sz_view_text_field_sel_start(field) < 3);
+  body = slurp_cstr(record);
+  assert(strstr(body, "key ArrowLeft+shift") != NULL);
+  free(body);
+
+  sz_ui_unmount(session);
+  sz_signal_str_free(draft);
+  remove(path);
+  remove(dump);
+  remove(record);
+}
+
 static void test_session_inject_field_index(void) {
   SzUiConfig cfg;
   SzUiSession *session;
@@ -13152,6 +13296,7 @@ int main(void) {
   test_record_live_hover_secondary();
   test_session_inject_caret();
   test_session_inject_hover_secondary();
+  test_session_inject_selection_clipboard();
   test_session_inject_field_index();
   test_button_set_and_show_when();
   test_widgets();

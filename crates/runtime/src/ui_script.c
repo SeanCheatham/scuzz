@@ -183,14 +183,118 @@ static void script_type(SzUiSession *session, int index, const char *text) {
     fprintf(stderr, "scuzz: script type skipped (no text field)\n");
 }
 
-static void script_key(SzUiSession *session, const char *name, const char *text) {
+static void script_key(SzUiSession *session, const char *name, const char *text,
+                       int mods) {
   SzInputEvent ev;
   memset(&ev, 0, sizeof ev);
   ev.kind = SZ_INPUT_KEY;
   ev.key = name ? name : "";
   ev.text = text ? text : "";
+  ev.key_mods = mods;
   if (!sz_ui_inject_sync(session, &ev))
     fprintf(stderr, "scuzz: script key skipped\n");
+}
+
+static int script_eq_mod(const char *s, const char *mod) {
+  size_t i;
+  if (!s || !mod)
+    return 0;
+  for (i = 0; s[i] && mod[i]; i++) {
+    char a = s[i];
+    char b = mod[i];
+    if (a >= 'A' && a <= 'Z')
+      a = (char)(a - 'A' + 'a');
+    if (b >= 'A' && b <= 'Z')
+      b = (char)(b - 'A' + 'a');
+    if (a != b)
+      return 0;
+  }
+  return s[i] == '\0' && mod[i] == '\0';
+}
+
+/* First token is `Name` or `Name+shift+ctrl`. Known pieces: shift, ctrl, cmd,
+ * alt. The leftover piece is the key name. */
+static void script_parse_key_token(const char *tok, char *name, size_t cap,
+                                   int *mods) {
+  char buf[128];
+  char *p;
+    char *part;
+    *mods = 0;
+  if (!name || cap == 0)
+    return;
+  name[0] = '\0';
+  if (!tok)
+    tok = "";
+  if (strcmp(tok, "+") == 0) {
+    snprintf(name, cap, "+");
+    return;
+  }
+  snprintf(buf, sizeof buf, "%s", tok);
+  p = buf;
+  while (p && *p) {
+    part = p;
+    p = strchr(p, '+');
+    if (p) {
+      *p = '\0';
+      p++;
+    }
+    if (!part[0])
+      continue;
+    if (script_eq_mod(part, "shift"))
+      *mods |= SZ_KEY_SHIFT;
+    else if (script_eq_mod(part, "ctrl"))
+      *mods |= SZ_KEY_CTRL;
+    else if (script_eq_mod(part, "cmd"))
+      *mods |= SZ_KEY_CMD;
+    else if (script_eq_mod(part, "alt"))
+      *mods |= SZ_KEY_ALT;
+    else {
+      size_t n = strlen(part);
+      if (n >= cap)
+        n = cap - 1;
+      memcpy(name, part, n);
+      name[n] = '\0';
+    }
+  }
+}
+
+static void script_parse_select(const char *rest, int *index, int *start,
+                               int *end) {
+  int a = 0, b = 0, c = 0;
+  int n;
+  *index = -1;
+  *start = 0;
+  *end = 0;
+  n = sscanf(rest ? rest : "", "%d %d %d", &a, &b, &c);
+  if (n >= 3) {
+    *index = a;
+    *start = b;
+    *end = c;
+  } else if (n == 2) {
+    *start = a;
+    *end = b;
+  }
+}
+
+static void script_drag(SzUiSession *session, float x1, float y1, float x2,
+                       float y2) {
+  SzInputEvent ev;
+  memset(&ev, 0, sizeof ev);
+  ev.kind = SZ_INPUT_POINTER;
+  ev.pointer_phase = SZ_POINTER_DOWN;
+  ev.pointer_button = 1;
+  ev.x = x1;
+  ev.y = y1;
+  if (!sz_ui_inject_sync(session, &ev))
+    sz_panic("Ui.run: script drag inject failed");
+  ev.pointer_phase = SZ_POINTER_MOVE;
+  ev.x = x2;
+  ev.y = y2;
+  if (!sz_ui_inject_sync(session, &ev))
+    sz_panic("Ui.run: script drag inject failed");
+  ev.pointer_phase = SZ_POINTER_UP;
+  if (!sz_ui_inject_sync(session, &ev))
+    sz_panic("Ui.run: script drag inject failed");
 }
 
 void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
@@ -244,9 +348,17 @@ void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
      type <n> <s>  insert at the caret on dump-index n; `type 0` is still payload "0"
      key <name> [text]  named key on the starred TextField (`Enter`, `Backspace`, `ArrowLeft`, `a`);
                         optional UTF-8 insert text; arrows / Home / End / Delete use the caret;
+                        `Name+shift` / `+ctrl` / `+cmd` / `+alt` set modifiers;
                         live OS keys record this verb
      caret <n>  set the starred TextField caret to byte offset n
      caret <i> <n>  set dump-index i caret to byte offset n
+     select <a> <c>  set the starred TextField selection `[a, c)` (caret at c)
+     select <i> <a> <c>  set dump-index i selection
+     copy       copy the starred-field selection into the session clipboard
+     cut        copy then delete the selection
+     paste      insert the session clipboard (Headless) or OS pasteboard (Desktop/Mobile)
+     paste <s>  set the session clipboard to <s> then paste
+     drag <x1> <y1> <x2> <y2>  pointer drag (TextField selection); live OS drag records this verb
      hover <x> <y>  pointer MOVE with no button (hover); shows View.tooltip; live OS hover records this verb
      secondary <n>  button-3 click on tap-dump index n; does not fire the primary tap
      secondary <x> <y>  button-3 click at a logical point; live OS right-click records this verb
@@ -368,19 +480,22 @@ static void play_script_line(SzUiSession *session, char *line) {
     script_type(session, idx, payload);
   } else if (strncmp(line, "key ", 4) == 0 || strcmp(line, "key") == 0) {
     const char *rest = len > 3 ? line + 4 : "";
+    char token[96];
     char name[64];
     const char *text = "";
     size_t ni = 0;
+    int mods = 0;
     while (*rest == ' ')
       rest++;
-    while (rest[ni] && rest[ni] != ' ' && ni + 1 < sizeof name) {
-      name[ni] = rest[ni];
+    while (rest[ni] && rest[ni] != ' ' && ni + 1 < sizeof token) {
+      token[ni] = rest[ni];
       ni++;
     }
-    name[ni] = '\0';
+    token[ni] = '\0';
     if (rest[ni] == ' ')
       text = rest + ni + 1;
-    script_key(session, name, text);
+    script_parse_key_token(token, name, sizeof name, &mods);
+    script_key(session, name, text, mods);
   } else if (strncmp(line, "caret ", 6) == 0 || strcmp(line, "caret") == 0) {
     int idx, off;
     script_parse_caret(len > 5 ? line + 6 : "", &idx, &off);
@@ -390,6 +505,33 @@ static void play_script_line(SzUiSession *session, char *line) {
       else
         fprintf(stderr, "scuzz: script caret %d skipped\n", idx);
     }
+  } else if (strncmp(line, "select ", 7) == 0 || strcmp(line, "select") == 0) {
+    int idx, a, b;
+    script_parse_select(len > 6 ? line + 7 : "", &idx, &a, &b);
+    if (!sz_ui_session_set_sel(session, idx, a, b)) {
+      if (idx < 0)
+        fprintf(stderr, "scuzz: script select skipped (no text field)\n");
+      else
+        fprintf(stderr, "scuzz: script select %d skipped\n", idx);
+    }
+  } else if (strcmp(line, "copy") == 0) {
+    if (!sz_ui_session_copy(session))
+      fprintf(stderr, "scuzz: script copy skipped (no text field)\n");
+  } else if (strcmp(line, "cut") == 0) {
+    if (!sz_ui_session_cut(session))
+      fprintf(stderr, "scuzz: script cut skipped (no text field)\n");
+  } else if (strncmp(line, "paste ", 6) == 0 || strcmp(line, "paste") == 0) {
+    const char *payload = NULL;
+    if (len > 6 && line[5] == ' ' && line[6])
+      payload = line + 6;
+    if (!sz_ui_session_paste(session, payload))
+      fprintf(stderr, "scuzz: script paste skipped (no text field)\n");
+  } else if (strncmp(line, "drag ", 5) == 0) {
+    float x1 = 0.f, y1 = 0.f, x2 = 0.f, y2 = 0.f;
+    if (sscanf(line + 5, "%f %f %f %f", &x1, &y1, &x2, &y2) == 4)
+      script_drag(session, x1, y1, x2, y2);
+    else
+      sz_panic("Ui.run: drag needs x1 y1 x2 y2");
   } else if (strncmp(line, "hover ", 6) == 0) {
     float x = 0.f, y = 0.f;
     if (sscanf(line + 6, "%f %f", &x, &y) == 2)

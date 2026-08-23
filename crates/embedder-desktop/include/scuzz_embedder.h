@@ -39,6 +39,12 @@ void sz_embedder_shutdown(void);
  * present() enqueues pointer / scroll / key events. pump drains through this. */
 int sz_embedder_poll_event(SzInputEvent *out);
 
+/* Session clipboard sync. `set` stores UTF-8 on the OS pasteboard when a
+ * window exists. `get` returns malloc'd UTF-8 or NULL; caller frees with
+ * free(). Weak stubs in the runtime return 0 / NULL. */
+int sz_embedder_clipboard_set(const char *text);
+char *sz_embedder_clipboard_get(void);
+
 #ifdef __cplusplus
 }
 #endif

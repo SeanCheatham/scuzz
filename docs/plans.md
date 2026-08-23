@@ -1,8 +1,8 @@
 # Next slice
 
-A4 — Selection and clipboard.
+A5 — `View.editor`.
 
-Shift+arrows and pointer drag. Replace/delete selection. Session-owned clipboard buffer plus script `copy` / `cut` / `paste`; Desktop/Mobile sync the OS pasteboard in the embedder. Do not start OS-only. Repeat/IME compose if A1 left gaps.
+Multiline buffer on a `SignalStr`. Insert/delete at caret including newline and tab/soft-tab. No 256-byte stack cap. Headless `[editor]` dump: buffer, caret, selection. Do not route a file through `View.each` + `View.text`. Repeat/IME stay deferred unless they block the editor.
 
 Each slice lands Headless inject + dump + a runtime test. Desktop and Headless share verbs.
 
