@@ -1909,8 +1909,7 @@ static void *thunk_set_editor_diagnostics(void *env) {
 }
 
 SzIo *sz_lang_ui_set_editor_diagnostics(SzList *marks) {
-  if (!marks)
-    sz_panic("Ui.setEditorDiagnostics(null)");
+  /* Nil is NULL. Check JSON `[]` must clear marks, not panic. */
   return sz_io_delay(thunk_set_editor_diagnostics, marks);
 }
 

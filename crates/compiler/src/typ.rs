@@ -13627,6 +13627,7 @@ def note(n: Int where "x"): Unit = ()
   for {
     _ <- Ui.setEditorCaret(1, 1)
     _ <- Ui.setEditorDiagnostics([(1, 1)])
+    _ <- Ui.setEditorDiagnostics([]: List[(Int, Int)])
     _ <- Ui.run(_ => View.editor(Signal.str("x")))
   } yield ()
 "#;

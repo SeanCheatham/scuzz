@@ -139,7 +139,7 @@ In-app open-folder UI is enough. Native OS file dialogs, native menus, and multi
 
 Close:
 
-- Map LSP (or check JSON) line/character ranges onto editor offsets. `Ui.setEditorCaret(line, col)` maps 1-based line/column onto a `View.editor` byte offset. `Ui.setEditorDiagnostics` paints gutter marks from `(line, severity)` pairs.
+- Map LSP (or check JSON) line/character ranges onto editor offsets. `Ui.setEditorCaret(line, col)` maps 1-based line/column onto a `View.editor` byte offset. `Ui.setEditorDiagnostics` paints gutter marks from `(line, severity)` pairs. An empty list clears marks.
 - Overlay unsaved buffers into check/lsp the same way `scuzz lsp` overlays `didChange`. `examples/editor` sends `textDocument/didOpen` with the live buffer.
 - Wire: diagnostics, go-to-definition, completion popup, hover overlay, format, rename, quickfix, semantic tokens into the editor widget. Hover / Complete / Format / Def / Rename / Fix call `scuzz lsp`. Semantic token count appends to the output list. Format / rename write the buffer.
 - Host `scuzz lsp` over stdio after JSON and child pipes close. Do not skip diagnostics. Child pipes are in (`Sys.childWrite` / `Sys.childRead` / `Sys.childClose`). `examples/editor` frames JSON-RPC `Content-Length`. Fuzz overlays `lspCall` in `Lsp.scuzz_sim`.
