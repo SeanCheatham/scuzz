@@ -100,13 +100,13 @@ Folding ranges, inlay hints, and bracket match consume LSP data that already exi
 
 #### 3. Kits the IDE process needs
 
-Today `Json.parse` / `Json.stringify` exist on blessed enum `Null|Bool|Int|Float|Str|Arr|Obj`. `Sys.exec` returns `(code, stdout, stderr)`. `Sys.spawn` returns a pid. It has no child stdin/stdout pipes. `Sys.exec` / `Sys.spawn` fail under TestRuntime. `Fs.list` returns `(name, isDir)` entries. `Fs.exists`, `Fs.join`, `Fs.dirname`, `Fs.basename`, `Fs.delete`, `Fs.rename`, and `Fs.walk` exist. There is no `Fs.watch`. File change detection is a `Clock` plus `Fs` poll (`IO.sleep` / `Clock.monotonic` with `Fs.read` / `Fs.exists` / `Fs.list`). TestRuntime fakes Clock and Fs so Headless can drive that loop. `Fs.read` / `Fs.write` / `Fs.mkdirs` / `Fs.canonicalize` exist. `Sys.args` exists.
+Today `Json.parse` / `Json.stringify` exist on blessed enum `Null|Bool|Int|Float|Str|Arr|Obj`. `Sys.exec` returns `(code, stdout, stderr)`. `Sys.spawn` returns a pid and attaches stdin/stdout pipes (`Sys.childWrite` / `Sys.childRead` / `Sys.childClose`). `Sys.exec` / `Sys.spawn` / child stdio fail under TestRuntime. `Fs.list` returns `(name, isDir)` entries. `Fs.exists`, `Fs.join`, `Fs.dirname`, `Fs.basename`, `Fs.delete`, `Fs.rename`, and `Fs.walk` exist. There is no `Fs.watch`. File change detection is a `Clock` plus `Fs` poll (`IO.sleep` / `Clock.monotonic` with `Fs.read` / `Fs.exists` / `Fs.list`). TestRuntime fakes Clock and Fs so Headless can drive that loop. `Fs.read` / `Fs.write` / `Fs.mkdirs` / `Fs.canonicalize` exist. `Sys.args` exists.
 
 Close:
 
 - JSON parse and stringify for `check --message-format=json` and, later, LSP JSON-RPC. `Json.parse` / `Json.stringify` are pure. Enum `Json`: `Null|Bool|Int|Float|Str|Arr|Obj`. `Obj` is `List[(String, Json)]`.
 - Capture stdout and stderr from `Sys.exec` (or a sibling that returns `(code, stdout, stderr)`). `Sys.exec` is `IO[(Int, String, String)]`. Capture uses `dup2`. TestRuntime still rejects exec. No exec stub map.
-- Bidirectional stdio to a child before an in-process LSP client. Until then the IDE drives analyze through files: write the buffer, run `scuzz check --message-format=json` with stdout captured or redirected, parse JSON. That path matches the one editor protocol. Do not add a second typer.
+- Bidirectional stdio to a child before an in-process LSP client. `Sys.spawn` attaches pipes. `Sys.childWrite` / `Sys.childRead` / `Sys.childClose` park on poll. TestRuntime still rejects spawn and child stdio. Host `scuzz lsp` over those pipes in C4. Until C4, analyze can also write the buffer and run `scuzz check --message-format=json`. Do not add a second typer.
 - `Fs.list` reports file vs directory. Walk a tree (recursive list or a walk kit). `Fs.list` returns `List[(String, Bool)]`. `Fs.exists`, `Fs.join`, `Fs.dirname`, `Fs.basename`, and `Fs.walk` are in.
 - `Fs.delete`, `Fs.rename`, `Fs.exists`. Rename must stay compatible with `workspace/willRenameFiles`. `Fs.delete` / `Fs.rename` / `Fs.exists` are in. Rename fails when the dest exists or the dest parent is missing. `Fs.write` still requires the parent directory.
 - Path join, dirname, basename (blessed, not ad-hoc `Str` concat). `Fs.join` / `Fs.dirname` / `Fs.basename` are in.
@@ -142,7 +142,7 @@ Close:
 - Map LSP (or check JSON) line/character ranges onto editor offsets.
 - Overlay unsaved buffers into check/lsp the same way `scuzz lsp` overlays `didChange`.
 - Wire: diagnostics, go-to-definition, completion popup, hover overlay, format, rename, quickfix, semantic tokens into the editor widget.
-- First slice may use `check` JSON only. Host `scuzz lsp` over stdio after JSON and child pipes close. Do not skip diagnostics.
+- Host `scuzz lsp` over stdio after JSON and child pipes close. Do not skip diagnostics. Child pipes are in (`Sys.childWrite` / `Sys.childRead` / `Sys.childClose`).
 
 #### 6. Headless and verification
 

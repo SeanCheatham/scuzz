@@ -291,6 +291,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_sys_write(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_sys_exec(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_sys_spawn(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_sys_child_write(i64, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_sys_child_read(i64, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_sys_child_close(i64)").unwrap();
     writeln!(out, "declare ptr @sz_sys_alive(i64)").unwrap();
     writeln!(out, "declare ptr @sz_sys_kill(i64)").unwrap();
     writeln!(out, "declare ptr @sz_sys_getenv(ptr)").unwrap();
@@ -6256,6 +6259,34 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
+        "Sys.childWrite" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_sys_child_write(i64 {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[1]);
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Sys.childRead" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_sys_child_read(i64 {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            io_emitted_payload(code, format!("%{prefix}_v"), Kind::Ptr, true)
+        }
+        "Sys.childClose" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_sys_child_close(i64 {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "Sys.alive" => {
             writeln!(
                 code,
@@ -9522,6 +9553,10 @@ def id(m: Map[String, String]): Map[String, String] = m
             "sz_sys_spawn",
         );
         assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] = Sys.spawn("true").flatMap(pid => Sys.childWrite(pid, "x"))"#,
+            "sz_sys_child_write",
+        );
+        assert_owned_ptr_args_released(
             r#"@main def main: IO[Unit] = Sys.getenv("PATH").flatMap(_ => IO.pure(()))"#,
             "sz_sys_getenv",
         );
@@ -11604,6 +11639,21 @@ def scale(x: Float): Float = x * 2.0
         crate::typ::typecheck(&p).expect("typecheck");
         let ir = emit_llvm(&p);
         assert!(ir.contains("sz_sys_kill"));
+    }
+
+    #[test]
+    fn emit_sys_child_stdio() {
+        let src = r#"@main def main: IO[Unit] =
+  Sys.spawn("cat").flatMap(pid =>
+    Sys.childWrite(pid, "x").flatMap(_ =>
+      Sys.childRead(pid, 1).flatMap(_ => Sys.childClose(pid))))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(ir.contains("sz_sys_child_write"));
+        assert!(ir.contains("sz_sys_child_read"));
+        assert!(ir.contains("sz_sys_child_close"));
     }
 
     #[test]

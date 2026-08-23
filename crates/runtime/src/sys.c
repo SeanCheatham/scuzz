@@ -680,22 +680,158 @@ SzIo *sz_sys_exec(SzString *cmd) {
   }
 }
 
+#define CHILD_MAX 16
+#define CHILD_CAP (1024 * 1024)
+
+typedef struct {
+  pid_t pid;
+  int in_fd;
+  int out_fd;
+  char *buf;
+  size_t len;
+  size_t cap;
+} ChildSlot;
+
+static ChildSlot g_children[CHILD_MAX];
+
+static void child_ignore_sigpipe(void) {
+  static int done = 0;
+  if (done)
+    return;
+  done = 1;
+  signal(SIGPIPE, SIG_IGN);
+}
+
+static ChildSlot *child_find(pid_t pid) {
+  int i;
+  if (pid <= 0)
+    return NULL;
+  for (i = 0; i < CHILD_MAX; i++) {
+    if (g_children[i].pid == pid)
+      return &g_children[i];
+  }
+  return NULL;
+}
+
+static ChildSlot *child_reserve(void) {
+  int i;
+  for (i = 0; i < CHILD_MAX; i++) {
+    if (g_children[i].pid == 0)
+      return &g_children[i];
+  }
+  return NULL;
+}
+
+static void child_clear(ChildSlot *c) {
+  if (!c || c->pid == 0)
+    return;
+  exec_close_fd(&c->in_fd);
+  exec_close_fd(&c->out_fd);
+  sz_free(c->buf);
+  c->buf = NULL;
+  c->len = 0;
+  c->cap = 0;
+  c->pid = 0;
+}
+
+static int child_drain(ChildSlot *c) {
+  if (!c)
+    return 1;
+  return exec_drain_fd(&c->out_fd, &c->buf, &c->len, &c->cap);
+}
+
+static void child_gc(void) {
+  int i;
+  for (i = 0; i < CHILD_MAX; i++) {
+    ChildSlot *c = &g_children[i];
+    int status = 0;
+    pid_t w;
+    if (c->pid <= 0)
+      continue;
+    do {
+      w = waitpid(c->pid, &status, WNOHANG);
+    } while (w < 0 && errno == EINTR);
+    if (w == 0)
+      continue;
+    if (!child_drain(c))
+      continue;
+    if (c->len == 0 && c->out_fd < 0)
+      child_clear(c);
+  }
+}
+
+static void child_drop_pid(pid_t pid) {
+  ChildSlot *c = child_find(pid);
+  if (c)
+    child_clear(c);
+}
+
 static void *sys_spawn_result(void *env) {
   SzPair *p = (SzPair *)env;
   SzString *cmd = p ? (SzString *)p->left : NULL;
   SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
+  ChildSlot *slot;
+  int in_fds[2];
+  int out_fds[2];
   pid_t pid;
   const char *c = cmd ? sz_string_cstr(cmd) : "";
+
+  child_ignore_sigpipe();
+  child_gc();
+  slot = child_reserve();
+  if (!slot) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.spawn: too many children");
+    return r;
+  }
+  if (pipe(in_fds) != 0) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.spawn: pipe failed");
+    return r;
+  }
+  if (pipe(out_fds) != 0) {
+    close(in_fds[0]);
+    close(in_fds[1]);
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.spawn: pipe failed");
+    return r;
+  }
   pid = fork();
   if (pid < 0) {
+    close(in_fds[0]);
+    close(in_fds[1]);
+    close(out_fds[0]);
+    close(out_fds[1]);
     r->is_err = 1;
     r->as.err = sz_error_new(3, "Sys.spawn: fork failed");
     return r;
   }
   if (pid == 0) {
+    if (dup2(in_fds[0], STDIN_FILENO) < 0)
+      _exit(127);
+    if (dup2(out_fds[1], STDOUT_FILENO) < 0)
+      _exit(127);
+    if (in_fds[0] != STDIN_FILENO)
+      close(in_fds[0]);
+    if (in_fds[1] != STDIN_FILENO && in_fds[1] != STDOUT_FILENO)
+      close(in_fds[1]);
+    if (out_fds[0] != STDIN_FILENO && out_fds[0] != STDOUT_FILENO)
+      close(out_fds[0]);
+    if (out_fds[1] != STDOUT_FILENO && out_fds[1] != STDIN_FILENO)
+      close(out_fds[1]);
     execl("/bin/sh", "sh", "-c", c, (char *)NULL);
     _exit(127);
   }
+  close(in_fds[0]);
+  close(out_fds[1]);
+  exec_set_cloexec_nb(in_fds[1]);
+  exec_set_cloexec_nb(out_fds[0]);
+  slot->in_fd = in_fds[1];
+  slot->out_fd = out_fds[0];
+  slot->buf = NULL;
+  slot->len = 0;
+  slot->cap = 0;
+  slot->pid = pid;
   r->is_err = 0;
   r->as.ok = sz_box_i64((int64_t)pid);
   return r;
@@ -728,6 +864,7 @@ static void *sys_alive_result(void *env) {
   int status = 0;
   pid_t w;
   r->is_err = 0;
+  child_gc();
   if (sz_testrt_sys_is_fake()) {
     r->as.ok = sz_box_i64(sz_testrt_proc_alive(pid));
     return r;
@@ -752,6 +889,7 @@ static void *sys_kill_result(void *env) {
   SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
   r->is_err = 0;
   r->as.ok = NULL;
+  child_gc();
   if (sz_testrt_sys_is_fake()) {
     sz_testrt_proc_kill(pid);
     return r;
@@ -759,13 +897,265 @@ static void *sys_kill_result(void *env) {
   if (pid > 0 && kill((pid_t)pid, SIGTERM) != 0 && errno != ESRCH) {
     r->is_err = 1;
     r->as.err = sz_error_new(3, "Sys.kill: kill failed");
+    return r;
   }
+  child_drop_pid((pid_t)pid);
   return r;
 }
 
 SzIo *sz_sys_kill(int64_t pid) {
   void *p = sz_box_i64(pid);
   SzIo *io = fm_drop(sz_io_delay(sys_kill_result, p), unwrap_sys, NULL);
+  sz_release(p);
+  return io;
+}
+
+typedef struct {
+  int64_t pid;
+  SzString *s;
+  size_t off;
+} ChildWriteSt;
+
+typedef struct {
+  int64_t pid;
+  size_t want;
+} ChildReadSt;
+
+static void child_write_drop(ChildWriteSt *st) {
+  if (!st)
+    return;
+  sz_release(st->s);
+  st->s = NULL;
+}
+
+static SzIo *child_write_keep(void *value, void *env) {
+  ChildWriteSt *st = (ChildWriteSt *)env;
+  (void)value;
+  child_write_drop(st);
+  return pure_drop(NULL);
+}
+
+static SzIo *child_write_on_err(SzError *err, void *env) {
+  child_write_drop((ChildWriteSt *)env);
+  return fail_drop(err);
+}
+
+static SzIo *child_write_pump(void *value, void *env);
+
+static SzIo *child_write_after_try(void *value, void *env) {
+  SysResult *r = (SysResult *)value;
+  ChildWriteSt *st = (ChildWriteSt *)env;
+  if (r && r->retry) {
+    ChildSlot *c;
+    sz_release(r);
+    child_gc();
+    c = child_find((pid_t)st->pid);
+    if (!c || c->in_fd < 0)
+      return sz_io_fail_cstr("Sys.childWrite: stdin closed");
+    return fm_drop(sz_io_poll_writable(c->in_fd), child_write_pump, st);
+  }
+  return unwrap_sys(value, NULL);
+}
+
+static void *child_write_try(void *env) {
+  ChildWriteSt *st = (ChildWriteSt *)env;
+  ChildSlot *c;
+  SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
+  const char *p;
+  size_t n;
+  child_gc();
+  c = child_find((pid_t)st->pid);
+  if (!c) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.childWrite: unknown pid");
+    return r;
+  }
+  if (c->in_fd < 0) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.childWrite: stdin closed");
+    return r;
+  }
+  p = st->s ? sz_string_cstr(st->s) : "";
+  n = st->s ? (size_t)sz_string_len(st->s) : 0;
+  while (st->off < n) {
+    ssize_t w = write(c->in_fd, p + st->off, n - st->off);
+    if (w > 0) {
+      st->off += (size_t)w;
+      continue;
+    }
+    if (w < 0 && errno == EINTR)
+      continue;
+    if (w < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+      r->retry = 1;
+      return r;
+    }
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.childWrite: write failed");
+    return r;
+  }
+  r->is_err = 0;
+  r->as.ok = NULL;
+  return r;
+}
+
+static SzIo *child_write_pump(void *value, void *env) {
+  (void)value;
+  return fm_drop(sz_io_delay(child_write_try, env), child_write_after_try, env);
+}
+
+static SzIo *child_write_after_dispatch(void *value, void *env) {
+  ChildWriteSt *st = (ChildWriteSt *)env;
+  SzIo *io;
+  if ((intptr_t)value) {
+    child_write_drop(st);
+    return sz_io_fail_cstr("Sys.childWrite: rejected under TestRuntime");
+  }
+  io = child_write_pump(NULL, st);
+  {
+    SzIo *handled = sz_io_handle_error_with(io, child_write_on_err, st);
+    SzIo *done = sz_io_flatmap(handled, child_write_keep, st);
+    sz_release(io);
+    sz_release(handled);
+    return done;
+  }
+}
+
+SzIo *sz_sys_child_write(int64_t pid, SzString *s) {
+  ChildWriteSt *st;
+  if (!s)
+    sz_panic("sz_sys_child_write(null)");
+  st = (ChildWriteSt *)sz_rc_alloc(sizeof(ChildWriteSt), SZ_RC_BOX);
+  memset(st, 0, sizeof(ChildWriteSt));
+  st->pid = pid;
+  sz_retain(s);
+  st->s = s;
+  st->off = 0;
+  {
+    SzIo *io = fm_drop(sz_io_delay(sys_proc_dispatch, NULL),
+                       child_write_after_dispatch, st);
+    sz_release(st);
+    return io;
+  }
+}
+
+static int child_take(ChildSlot *c, SysResult *r, size_t want) {
+  size_t n;
+  if (!c || c->len < want)
+    return 0;
+  n = want;
+  r->is_err = 0;
+  r->as.ok = sz_string_from_bytes(c->buf ? c->buf : "", n);
+  if (n < c->len)
+    memmove(c->buf, c->buf + n, c->len - n);
+  c->len -= n;
+  return 1;
+}
+
+static SzIo *child_read_pump(void *value, void *env);
+
+static SzIo *child_read_after_try(void *value, void *env) {
+  SysResult *r = (SysResult *)value;
+  ChildReadSt *st = (ChildReadSt *)env;
+  if (r && r->retry) {
+    ChildSlot *c;
+    sz_release(r);
+    child_gc();
+    c = child_find((pid_t)st->pid);
+    if (!c || c->out_fd < 0)
+      return child_read_pump(NULL, st);
+    return fm_drop(sz_io_poll_readable(c->out_fd), child_read_pump, st);
+  }
+  return unwrap_sys(value, NULL);
+}
+
+static void *child_read_try(void *env) {
+  ChildReadSt *st = (ChildReadSt *)env;
+  ChildSlot *c;
+  SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
+  child_gc();
+  c = child_find((pid_t)st->pid);
+  if (!c) {
+    r->is_err = 0;
+    r->as.ok = sz_string_from_cstr("");
+    return r;
+  }
+  if (!child_drain(c)) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.childRead: read failed");
+    return r;
+  }
+  if (child_take(c, r, st->want))
+    return r;
+  if (c->out_fd < 0) {
+    size_t n = c->len < st->want ? c->len : st->want;
+    r->is_err = 0;
+    r->as.ok = sz_string_from_bytes(c->buf ? c->buf : "", n);
+    if (n < c->len)
+      memmove(c->buf, c->buf + n, c->len - n);
+    c->len -= n;
+    if (c->len == 0)
+      child_clear(c);
+    return r;
+  }
+  r->retry = 1;
+  return r;
+}
+
+static SzIo *child_read_pump(void *value, void *env) {
+  (void)value;
+  return fm_drop(sz_io_delay(child_read_try, env), child_read_after_try, env);
+}
+
+static SzIo *child_read_after_dispatch(void *value, void *env) {
+  if ((intptr_t)value)
+    return sz_io_fail_cstr("Sys.childRead: rejected under TestRuntime");
+  return child_read_pump(NULL, env);
+}
+
+SzIo *sz_sys_child_read(int64_t pid, int64_t n) {
+  ChildReadSt *st;
+  size_t want = n < 0 ? 0 : (size_t)n;
+  if (want > CHILD_CAP)
+    want = CHILD_CAP;
+  st = (ChildReadSt *)sz_rc_alloc(sizeof(ChildReadSt), SZ_RC_BOX);
+  memset(st, 0, sizeof(ChildReadSt));
+  st->pid = pid;
+  st->want = want;
+  {
+    SzIo *io = fm_drop(sz_io_delay(sys_proc_dispatch, NULL),
+                       child_read_after_dispatch, st);
+    sz_release(st);
+    return io;
+  }
+}
+
+static void *child_close_try(void *env) {
+  int64_t pid = sz_unbox_i64(env);
+  SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
+  ChildSlot *c;
+  child_gc();
+  c = child_find((pid_t)pid);
+  if (!c) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.childClose: unknown pid");
+    return r;
+  }
+  exec_close_fd(&c->in_fd);
+  r->is_err = 0;
+  r->as.ok = NULL;
+  return r;
+}
+
+static SzIo *child_close_after_dispatch(void *value, void *env) {
+  if ((intptr_t)value)
+    return sz_io_fail_cstr("Sys.childClose: rejected under TestRuntime");
+  return fm_drop(sz_io_delay(child_close_try, env), unwrap_sys, NULL);
+}
+
+SzIo *sz_sys_child_close(int64_t pid) {
+  void *p = sz_box_i64(pid);
+  SzIo *io = fm_drop(sz_io_delay(sys_proc_dispatch, NULL),
+                     child_close_after_dispatch, p);
   sz_release(p);
   return io;
 }

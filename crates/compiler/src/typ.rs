@@ -4760,6 +4760,23 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::Io(Box::new(Type::Int)))
         }
+        "Sys.childWrite" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
+        "Sys.childRead" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(Type::Io(Box::new(Type::String)))
+        }
+        "Sys.childClose" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
         "Sys.alive" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
@@ -13257,6 +13274,17 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Sys.kill should typecheck");
+    }
+
+    #[test]
+    fn typechecks_sys_child_stdio() {
+        let src = r#"@main def main: IO[Unit] =
+  Sys.spawn("cat").flatMap(pid =>
+    Sys.childWrite(pid, "x").flatMap(_ =>
+      Sys.childRead(pid, 1).flatMap(_ => Sys.childClose(pid))))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Sys.childWrite/Read/Close should typecheck");
     }
 
     #[test]
