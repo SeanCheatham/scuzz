@@ -7,6 +7,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <stddef.h>
+#include <stdlib.h>
 
 #define EVENT_CAP 64
 #define TEXT_RING 64
@@ -474,6 +475,39 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
     return 1;
   }
   return 1;
+}
+
+int sz_embedder_clipboard_set(const char *text) {
+  __block int ok = 0;
+  NSString *s = [NSString stringWithUTF8String:text ? text : ""];
+  if (!s)
+    s = @"";
+  on_main(^{
+    @autoreleasepool {
+      NSPasteboard *pb = [NSPasteboard generalPasteboard];
+      [pb clearContents];
+      ok = [pb setString:s forType:NSPasteboardTypeString] ? 1 : 0;
+    }
+  });
+  return ok;
+}
+
+char *sz_embedder_clipboard_get(void) {
+  __block char *out = NULL;
+  on_main(^{
+    @autoreleasepool {
+      NSPasteboard *pb = [NSPasteboard generalPasteboard];
+      NSString *s = [pb stringForType:NSPasteboardTypeString];
+      const char *u = s ? [s UTF8String] : NULL;
+      if (u) {
+        size_t n = strlen(u);
+        out = (char *)malloc(n + 1);
+        if (out)
+          memcpy(out, u, n + 1);
+      }
+    }
+  });
+  return out;
 }
 
 void sz_embedder_shutdown(void) {

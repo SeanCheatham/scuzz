@@ -1,5 +1,6 @@
 #include "scuzz_embedder.h"
 
+#include <X11/Xatom.h>
 #include <X11/Xlib.h>
 #include <X11/Xutil.h>
 #include <X11/keysym.h>
@@ -8,6 +9,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #define EVENT_CAP 64
 #define TEXT_RING 64
@@ -33,6 +35,135 @@ static int g_q_tail;
 static char g_key_bufs[TEXT_RING][KEY_NAME_LEN];
 static char g_text_bufs[TEXT_RING][TEXT_LEN];
 static int g_text_i;
+static char *g_clip;
+static int g_clip_own;
+static Atom g_atom_clipboard;
+static Atom g_atom_utf8;
+static Atom g_atom_targets;
+static Atom g_atom_prop;
+
+static char *clip_dup(const char *s) {
+  size_t n;
+  char *out;
+  if (!s)
+    return NULL;
+  n = strlen(s);
+  out = (char *)malloc(n + 1);
+  if (!out)
+    return NULL;
+  memcpy(out, s, n + 1);
+  return out;
+}
+
+static void x11_clip_atoms(void) {
+  if (!g_dpy || g_atom_clipboard)
+    return;
+  g_atom_clipboard = XInternAtom(g_dpy, "CLIPBOARD", False);
+  g_atom_utf8 = XInternAtom(g_dpy, "UTF8_STRING", False);
+  g_atom_targets = XInternAtom(g_dpy, "TARGETS", False);
+  g_atom_prop = XInternAtom(g_dpy, "SCUZZ_CLIPBOARD", False);
+}
+
+static void x11_serve_selection(XSelectionRequestEvent *req) {
+  XEvent notify;
+  int ok = 0;
+  if (!req || !g_dpy)
+    return;
+  x11_clip_atoms();
+  if (req->target == g_atom_targets) {
+    Atom targets[3];
+    targets[0] = g_atom_targets;
+    targets[1] = g_atom_utf8;
+    targets[2] = XA_STRING;
+    XChangeProperty(g_dpy, req->requestor, req->property, XA_ATOM, 32,
+                    PropModeReplace, (unsigned char *)targets, 3);
+    ok = 1;
+  } else if ((req->target == g_atom_utf8 || req->target == XA_STRING) &&
+             g_clip) {
+    XChangeProperty(g_dpy, req->requestor, req->property, req->target, 8,
+                    PropModeReplace, (unsigned char *)g_clip,
+                    (int)strlen(g_clip));
+    ok = 1;
+  }
+  memset(&notify, 0, sizeof notify);
+  notify.xselection.type = SelectionNotify;
+  notify.xselection.display = req->display;
+  notify.xselection.requestor = req->requestor;
+  notify.xselection.selection = req->selection;
+  notify.xselection.target = req->target;
+  notify.xselection.property = ok ? req->property : None;
+  notify.xselection.time = req->time;
+  XSendEvent(g_dpy, req->requestor, True, NoEventMask, &notify);
+}
+
+int sz_embedder_clipboard_set(const char *text) {
+  free(g_clip);
+  g_clip = clip_dup(text ? text : "");
+  if (!g_clip)
+    return 0;
+  if (g_dpy && g_win) {
+    x11_clip_atoms();
+    XStoreBytes(g_dpy, g_clip, (int)strlen(g_clip));
+    XSetSelectionOwner(g_dpy, g_atom_clipboard, g_win, CurrentTime);
+    g_clip_own = XGetSelectionOwner(g_dpy, g_atom_clipboard) == g_win;
+    XFlush(g_dpy);
+  }
+  return 1;
+}
+
+static char *x11_read_prop(Atom prop) {
+  Atom type = None;
+  int fmt = 0;
+  unsigned long nitems = 0;
+  unsigned long after = 0;
+  unsigned char *data = NULL;
+  char *out;
+  if (!g_dpy || !g_win || prop == None)
+    return NULL;
+  if (XGetWindowProperty(g_dpy, g_win, prop, 0, 65536, True, AnyPropertyType,
+                         &type, &fmt, &nitems, &after, &data) != Success ||
+      !data)
+    return NULL;
+  out = (char *)malloc(nitems + 1);
+  if (out) {
+    memcpy(out, data, nitems);
+    out[nitems] = '\0';
+  }
+  XFree(data);
+  return out;
+}
+
+char *sz_embedder_clipboard_get(void) {
+  int i;
+  if (g_clip_own && g_clip)
+    return clip_dup(g_clip);
+  if (!g_dpy || !g_win)
+    return g_clip ? clip_dup(g_clip) : NULL;
+  x11_clip_atoms();
+  XConvertSelection(g_dpy, g_atom_clipboard, g_atom_utf8, g_atom_prop, g_win,
+                    CurrentTime);
+  XFlush(g_dpy);
+  for (i = 0; i < 50; i++) {
+    while (XPending(g_dpy)) {
+      XEvent ev;
+      XNextEvent(g_dpy, &ev);
+      if (ev.type == SelectionRequest)
+        x11_serve_selection(&ev.xselectionrequest);
+      else if (ev.type == SelectionClear)
+        g_clip_own = 0;
+      else if (ev.type == SelectionNotify) {
+        char *got = NULL;
+        if (ev.xselection.property != None)
+          got = x11_read_prop(ev.xselection.property);
+        if (got)
+          return got;
+        return g_clip ? clip_dup(g_clip) : NULL;
+      }
+    }
+    usleep(2000);
+  }
+  return g_clip ? clip_dup(g_clip) : NULL;
+}
 
 int sz_embedder_available(void) {
   if (g_dpy)
@@ -484,6 +615,10 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
       sz_embedder_shutdown();
       return 1;
     }
+    if (ev.type == SelectionRequest)
+      x11_serve_selection(&ev.xselectionrequest);
+    if (ev.type == SelectionClear)
+      g_clip_own = 0;
     if (ev.type == ButtonPress && ev.xbutton.button == 1)
       enqueue_pointer(SZ_POINTER_DOWN, (float)ev.xbutton.x, (float)ev.xbutton.y,
                       1);
@@ -566,4 +701,8 @@ void sz_embedder_shutdown(void) {
   g_ready = 0;
   g_w = g_h = 0;
   g_q_head = g_q_tail = 0;
+  g_clip_own = 0;
+  g_atom_clipboard = g_atom_utf8 = g_atom_targets = g_atom_prop = 0;
+  free(g_clip);
+  g_clip = NULL;
 }

@@ -385,13 +385,27 @@ int sz_view_handle_tap(SzView *root, float x, float y);
 int sz_view_activate(SzView *root, SzView *target, float x, float y);
 /* Layout + activate `target` and mark the session dirty (script `tap N`). */
 int sz_ui_session_activate_view(SzUiSession *session, SzView *target);
-/* Focus dump-index `index` (starred field when index < 0), set caret, mark dirty. */
+/* Focus dump-index `index` (starred field when index < 0), set caret, mark dirty.
+ * Collapses the selection to that offset. */
 int sz_ui_session_set_caret(SzUiSession *session, int index, int offset);
+/* Focus dump-index `index` (starred field when index < 0), set selection
+ * `[start, end)` (byte offsets; order does not matter), mark dirty. */
+int sz_ui_session_set_sel(SzUiSession *session, int index, int start, int end);
+/* Copy the starred-field selection into the session clipboard. Syncs the OS
+ * pasteboard when a Desktop/Mobile embedder is present. Empty selection is a
+ * no-op. */
+int sz_ui_session_copy(SzUiSession *session);
+/* Copy then delete the starred-field selection. */
+int sz_ui_session_cut(SzUiSession *session);
+/* Replace the starred-field selection (or insert at the caret) with `text`.
+ * NULL `text` uses the session clipboard, after a Desktop/Mobile OS pull. */
+int sz_ui_session_paste(SzUiSession *session, const char *text);
 /* Insert UTF-8 at the caret, or chop one UTF-8 code point before the caret
- * when backspace != 0. */
+ * when backspace != 0. A selection is replaced or deleted. */
 int sz_view_handle_text_edit(SzView *root, const char *text, int backspace);
 /* Named key on the focused TextField. Backspace / Delete / arrows / Home / End
- * use the caret. Nonempty `text` inserts UTF-8 at the caret. Unused names
+ * use the caret. Shift+arrows / Shift+Home / Shift+End extend the selection.
+ * Nonempty `text` inserts UTF-8 (replaces a selection). Unused names
  * inject and no-op. */
 int sz_view_handle_key(SzView *root, const char *key, const char *text,
                        int mods);
@@ -469,8 +483,16 @@ const char *sz_view_a11y_label(const SzView *view);
 const char *sz_view_text_field_value(const SzView *view);
 /* Caret byte offset on a TextField (clamped, UTF-8 snapped). 0 if not a field. */
 int sz_view_text_field_caret(const SzView *view);
-/* Set caret byte offset (clamped, UTF-8 snapped). 1 if `view` is a TextField. */
+/* Set caret byte offset (clamped, UTF-8 snapped). Collapses the selection.
+ * 1 if `view` is a TextField. */
 int sz_view_set_text_field_caret(SzView *view, int offset);
+/* Selection range on a TextField (`[start, end)` byte offsets, start <= end). */
+int sz_view_text_field_sel_start(const SzView *view);
+int sz_view_text_field_sel_end(const SzView *view);
+/* Set selection: `start` is the anchor, `end` is the caret (both snapped). */
+int sz_view_set_text_field_sel(SzView *view, int start, int end);
+/* Move the caret to the measured x without collapsing the selection. */
+int sz_view_text_field_extend_to_x(SzView *view, float x);
 /* Depth-first "role:label" lines joined by newlines (caller frees SzString). */
 SzString *sz_view_a11y_dump(SzView *root);
 
@@ -494,13 +516,20 @@ int sz_ui_session_watch(SzUiSession *session, const char *path);
  * pumps, stamp reload, and IO-bridge flushes. Agents read the file.
  * [taps] lists inject indices for `tap N` (scan order, cap 64).
  * [fields] lists TextFields in a11y order. `N*` is the text/type/backspace/key
- * target (focused, else first). Lines are `N placeholder="live" caret=B` (star on
- * the target; `B` is the caret byte offset). `text N s` / `type N s` /
- * `backspace N k` / `caret N b` target dump index N.
- * One-token forms still use the starred field. `key <name> [text]` uses the
- * starred field. Live OS keys record as `key`, not `type`. `caret <n>` sets the
- * starred-field caret. Click-to-caret uses TAP / `xy` on the field.
- * `hover x y` is pointer MOVE with no button. `secondary N` / `secondary x y`
+ * target (focused, else first). Lines are `N placeholder="live" caret=B sel=A:C`
+ * (star on the target; `B` is the caret byte offset; `A:C` is the selection
+ * `[A, C)`). `text N s` / `type N s` / `backspace N k` / `caret N b` /
+ * `select N a c` target dump index N.
+ * One-token forms still use the starred field. `key <name>[+shift|+ctrl|+cmd|+alt] [text]`
+ * uses the starred field. Shift+arrows extend the selection. Live OS keys
+ * record as `key`, not `type`. `caret <n>` sets the starred-field caret.
+ * `select <a> <c>` sets the starred-field selection. Click-to-caret uses TAP /
+ * `xy` on the field. Pointer drag on a TextField extends the selection.
+ * `copy` / `cut` / `paste` / `paste <s>` are the clipboard verbs. Headless
+ * `paste` uses the session clipboard. Desktop/Mobile pull the OS pasteboard
+ * on paste when present. Live OS copy/cut/paste and Shift+arrows record those
+ * verbs. `drag x1 y1 x2 y2` is pointer-drag select. `hover x y` is pointer
+ * MOVE with no button. `secondary N` / `secondary x y`
  * is button 3. Live OS hover and right-click record those verbs.
  * [scrolls] lists hittable Scrolls in scan order; `scroll N dy` pans index N
  * (`scroll 40` stays the first).
@@ -520,7 +549,7 @@ int sz_ui_session_set_debug_dump(SzUiSession *session, const char *path);
 int sz_ui_session_write_dump(SzUiSession *session, const char *path);
 /* Rewrite the live debug dump now, including [session] and [heap]. No path is a no-op. */
 int sz_ui_session_dump_now(SzUiSession *session);
-/* Watch an inject script (tap/xy/text/type/key/caret/hover/secondary/pump/scroll/backspace/dump/reload/quit/resetpeak).
+/* Watch an inject script (tap/xy/text/type/key/caret/select/copy/cut/paste/drag/hover/secondary/pump/scroll/backspace/dump/reload/quit/resetpeak).
  * Next pump that sees new contents plays the suffix (append) or the whole file
  * (rewrite). Missing = empty. */
 int sz_ui_session_set_inject(SzUiSession *session, const char *path);
@@ -665,7 +694,7 @@ SzView *sz_lang_view_bind_text(SzSignalStr *sig);
  * SCUZZ_UI_RELOAD_CODE (dylib exporting sz_ui_reload_rebuild) if that
  * file exists, then rebuilds. Writes SCUZZ_UI_DEBUG_DUMP on dirty pumps
  * when set (includes [heap]). Plays SCUZZ_UI_INJECT
- * (tap/xy/text/type/key/caret/hover/secondary/pump/scroll/backspace/dump/reload/quit/resetpeak) when
+ * (tap/xy/text/type/key/caret/select/copy/cut/paste/drag/hover/secondary/pump/scroll/backspace/dump/reload/quit/resetpeak) when
  * that file changes. `quit` stops the live pump loop. Desktop quit is window
  * close. `resetpeak` resets
  * peak bytes and the heap delta mark. */

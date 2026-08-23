@@ -37,6 +37,11 @@ int sz_mobile_alive(void);
 /* Enqueue an OS event. Returns 1 if stored. */
 int sz_mobile_push_event(const SzInputEvent *event);
 
+/* Session clipboard sync. Same contract as the Desktop embedder. Weak stubs
+ * in the runtime return 0 / NULL. Caller frees `get` with free(). */
+int sz_mobile_clipboard_set(const char *text);
+char *sz_mobile_clipboard_get(void);
+
 #ifdef __cplusplus
 }
 #endif

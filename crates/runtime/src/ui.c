@@ -56,6 +56,11 @@ __attribute__((weak)) int sz_embedder_poll_event(SzInputEvent *out) {
   (void)out;
   return 0;
 }
+__attribute__((weak)) int sz_embedder_clipboard_set(const char *text) {
+  (void)text;
+  return 0;
+}
+__attribute__((weak)) char *sz_embedder_clipboard_get(void) { return NULL; }
 
 /* Weak stubs — strong defs from embedder-mobile override when linked. */
 __attribute__((weak)) int sz_mobile_available(void) { return 0; }
@@ -81,6 +86,11 @@ __attribute__((weak)) int sz_mobile_poll_event(SzInputEvent *out) {
   return 0;
 }
 __attribute__((weak)) int sz_mobile_alive(void) { return 0; }
+__attribute__((weak)) int sz_mobile_clipboard_set(const char *text) {
+  (void)text;
+  return 0;
+}
+__attribute__((weak)) char *sz_mobile_clipboard_get(void) { return NULL; }
 
 /* Implemented in view.c */
 int sz_view_paint(SzView *root, SkCanvas *canvas, int width, int height,
@@ -125,6 +135,7 @@ struct SzUiSession {
   float pointer_down_y;
   SzView *pointer_scroll;
   SzView *pointer_slider;
+  SzView *pointer_field;
   SzUiRebuildFn rebuild;
   void *rebuild_env;
   char *watch_path;
@@ -147,6 +158,7 @@ struct SzUiSession {
   float last_secondary_x;
   float last_secondary_y;
   char *last_secondary_desc;
+  char *clipboard;
   void *code_handle;
   void *code_stale;
   int code_gen;
@@ -416,7 +428,9 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
     fputs_dump_label(f, sz_view_a11y_label(fields[i]));
     fputc('=', f);
     fputs_dump_quoted(f, sz_view_text_field_value(fields[i]));
-    fprintf(f, " caret=%d\n", sz_view_text_field_caret(fields[i]));
+    fprintf(f, " caret=%d sel=%d:%d\n", sz_view_text_field_caret(fields[i]),
+            sz_view_text_field_sel_start(fields[i]),
+            sz_view_text_field_sel_end(fields[i]));
   }
   fprintf(f, "\n[scrolls]\n");
   n_scrolls = sz_ui_collect_scrolls(session, scrolls, 64);
@@ -623,6 +637,7 @@ void sz_ui_unmount(SzUiSession *session) {
   sz_free(session->hover_desc);
   sz_free(session->record_hover_desc);
   sz_free(session->last_secondary_desc);
+  sz_free(session->clipboard);
   sz_free(session);
 }
 
@@ -852,6 +867,114 @@ static void record_secondary_or_xy(SzUiSession *session, FILE *f, float x,
     fprintf(f, "secondary %.1f %.1f\n", x, y);
 }
 
+static void session_set_clipboard(SzUiSession *session, const char *text) {
+  if (!session)
+    return;
+  sz_free(session->clipboard);
+  session->clipboard = sz_strdup(text ? text : "");
+}
+
+static void clipboard_os_set(const char *text) {
+  if (sz_embedder_available())
+    (void)sz_embedder_clipboard_set(text ? text : "");
+  if (sz_mobile_available())
+    (void)sz_mobile_clipboard_set(text ? text : "");
+}
+
+static void clipboard_os_pull(SzUiSession *session) {
+  char *os = NULL;
+  if (!session)
+    return;
+  if (sz_embedder_available())
+    os = sz_embedder_clipboard_get();
+  if (!os && sz_mobile_available())
+    os = sz_mobile_clipboard_get();
+  if (os) {
+    session_set_clipboard(session, os);
+    free(os);
+  }
+}
+
+static char *field_sel_dup(SzView *field) {
+  const char *s;
+  int a, b, n;
+  char *out;
+  if (!field)
+    return sz_strdup("");
+  s = sz_view_text_field_value(field);
+  if (!s)
+    s = "";
+  a = sz_view_text_field_sel_start(field);
+  b = sz_view_text_field_sel_end(field);
+  n = (int)strlen(s);
+  if (a < 0)
+    a = 0;
+  if (b > n)
+    b = n;
+  if (b < a)
+    b = a;
+  out = (char *)sz_alloc((size_t)(b - a) + 1);
+  memcpy(out, s + a, (size_t)(b - a));
+  out[b - a] = '\0';
+  return out;
+}
+
+/* 0 none, 1 copy, 2 cut, 3 paste. Ctrl/Cmd + c/x/v. */
+static int clipboard_chord(const char *key, int mods) {
+  unsigned char c;
+  if (!key || !key[0] || key[1] != '\0')
+    return 0;
+  if ((mods & (SZ_KEY_CTRL | SZ_KEY_CMD)) == 0)
+    return 0;
+  c = (unsigned char)key[0];
+  if (c >= 'A' && c <= 'Z')
+    c = (unsigned char)(c - 'A' + 'a');
+  if (c == 'c')
+    return 1;
+  if (c == 'x')
+    return 2;
+  if (c == 'v')
+    return 3;
+  return 0;
+}
+
+static void record_clipboard_verb(SzUiSession *session, int op) {
+  FILE *f;
+  if (!session || !session->record_path || op < 1 || op > 3)
+    return;
+  f = fopen(session->record_path, "a");
+  if (!f)
+    return;
+  if (op == 1)
+    fputs("copy\n", f);
+  else if (op == 2)
+    fputs("cut\n", f);
+  else if (session->clipboard && session->clipboard[0])
+    fprintf(f, "paste %s\n", session->clipboard);
+  else
+    fputs("paste\n", f);
+  fclose(f);
+}
+
+static void record_key_line(FILE *f, const SzInputEvent *ev) {
+  int mods = ev->key_mods;
+  fputs("key ", f);
+  fputs(ev->key, f);
+  if (mods & SZ_KEY_SHIFT)
+    fputs("+shift", f);
+  if (mods & SZ_KEY_CTRL)
+    fputs("+ctrl", f);
+  if (mods & SZ_KEY_CMD)
+    fputs("+cmd", f);
+  if (mods & SZ_KEY_ALT)
+    fputs("+alt", f);
+  if (ev->text && ev->text[0]) {
+    fputc(' ', f);
+    fputs(ev->text, f);
+  }
+  fputc('\n', f);
+}
+
 /* Append one OS event to the record file. Script / inject playback must not
  * call this. */
 static void record_live_event(SzUiSession *session, const SzInputEvent *ev) {
@@ -864,10 +987,8 @@ static void record_live_event(SzUiSession *session, const SzInputEvent *ev) {
   if (ev->kind == SZ_INPUT_TAP) {
     record_tap_or_xy(session, f, ev->x, ev->y);
   } else if (ev->kind == SZ_INPUT_KEY && ev->key && ev->key[0]) {
-    if (ev->text && ev->text[0])
-      fprintf(f, "key %s %s\n", ev->key, ev->text);
-    else
-      fprintf(f, "key %s\n", ev->key);
+    if (!clipboard_chord(ev->key, ev->key_mods))
+      record_key_line(f, ev);
   } else if (ev->kind == SZ_INPUT_TEXT_EDIT) {
     if (!ev->text || !ev->text[0])
       fputs("backspace\n", f);
@@ -897,7 +1018,10 @@ static void record_live_event(SzUiSession *session, const SzInputEvent *ev) {
     if (session->pointer_button == 3 || ev->pointer_button == 3) {
       if (dx * dx + dy * dy <= 64.f)
         record_secondary_or_xy(session, f, ev->x, ev->y);
-    } else if (session->pointer_slider)
+    } else if (session->pointer_field && dx * dx + dy * dy > 64.f)
+      fprintf(f, "drag %.1f %.1f %.1f %.1f\n", session->pointer_down_x,
+              session->pointer_down_y, ev->x, ev->y);
+    else if (session->pointer_slider)
       fprintf(f, "xy %.1f %.1f\n", ev->x, ev->y);
     else if (dx * dx + dy * dy <= 64.f)
       record_tap_or_xy(session, f, ev->x, ev->y);
@@ -926,8 +1050,17 @@ static void record_live_event(SzUiSession *session, const SzInputEvent *ev) {
 
 /* Live OS path: record then inject. Tests call this to simulate drain. */
 int sz_ui_session_live_inject(SzUiSession *session, const SzInputEvent *event) {
+  int chord = 0;
+  int ok;
   if (!session || !event)
     return 0;
+  if (event->kind == SZ_INPUT_KEY)
+    chord = clipboard_chord(event->key, event->key_mods);
+  if (chord) {
+    ok = sz_ui_inject_sync(session, event);
+    record_clipboard_verb(session, chord);
+    return ok;
+  }
   record_live_event(session, event);
   return sz_ui_inject_sync(session, event);
 }
@@ -1095,6 +1228,7 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
     session->pointer_down_x = event->x;
     session->pointer_down_y = event->y;
     session_clear_hover(session);
+    session->pointer_field = NULL;
     if (button == 3) {
       session->pointer_slider = NULL;
       session->pointer_scroll = NULL;
@@ -1102,6 +1236,12 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
       session->pointer_slider = hit;
       session->pointer_scroll = NULL;
       sz_view_slider_set_at(hit, event->x);
+    } else if (hit && sz_view_kind(hit) == SZ_VIEW_TEXT_FIELD) {
+      session->pointer_slider = NULL;
+      session->pointer_scroll = NULL;
+      session->pointer_field = hit;
+      (void)sz_view_handle_tap(session->root, event->x, event->y);
+      sync_keyboard(session);
     } else {
       session->pointer_slider = NULL;
       session->pointer_scroll =
@@ -1129,6 +1269,9 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
     }
     if (session->pointer_slider) {
       sz_view_slider_set_at(session->pointer_slider, event->x);
+      session->dirty = 1;
+    } else if (session->pointer_field) {
+      (void)sz_view_text_field_extend_to_x(session->pointer_field, event->x);
       session->dirty = 1;
     } else if (session->pointer_scroll) {
       /* Finger down → content follows (positive finger pans content up or left). */
@@ -1162,6 +1305,7 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
         session->dirty = 1;
       }
       session->pointer_slider = NULL;
+      session->pointer_field = NULL;
       session->pointer_button = 0;
       return 1;
     }
@@ -1170,6 +1314,17 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
       sz_view_slider_set_at(sl, event->x);
       session_set_last_hit(session, event->x, event->y, sl);
       session->pointer_slider = NULL;
+      session->pointer_field = NULL;
+      session->dirty = 1;
+      return 1;
+    }
+    if (session->pointer_field) {
+      if (dx * dx + dy * dy > tap_slop2)
+        (void)sz_view_text_field_extend_to_x(session->pointer_field, event->x);
+      else
+        (void)sz_view_handle_tap(session->root, event->x, event->y);
+      sync_keyboard(session);
+      session->pointer_field = NULL;
       session->dirty = 1;
       return 1;
     }
@@ -1181,6 +1336,7 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
         sync_keyboard(session);
       session->dirty = 1;
     }
+    session->pointer_field = NULL;
     return 1;
   default:
     return 0;
@@ -1224,13 +1380,30 @@ int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event) {
     session->dirty = 1;
     return 1;
   }
-  case SZ_INPUT_KEY:
+  case SZ_INPUT_KEY: {
+    int chord = clipboard_chord(event->key, event->key_mods);
+    if (chord == 1) {
+      if (!sz_ui_session_copy(session))
+        return 0;
+      return 1;
+    }
+    if (chord == 2) {
+      if (!sz_ui_session_cut(session))
+        return 0;
+      return 1;
+    }
+    if (chord == 3) {
+      if (!sz_ui_session_paste(session, NULL))
+        return 0;
+      return 1;
+    }
     if (!sz_view_handle_key(session->root, event->key, event->text,
                             event->key_mods))
       return 0;
     sync_keyboard(session);
     session->dirty = 1;
     return 1;
+  }
   case SZ_INPUT_RESIZE:
     if (event->width <= 0 || event->height <= 0)
       return 0;
@@ -1314,6 +1487,82 @@ int sz_ui_session_set_caret(SzUiSession *session, int index, int offset) {
   target = sz_view_text_field_target(session->root);
   if (!sz_view_set_text_field_caret(target, offset))
     return 0;
+  session->dirty = 1;
+  return 1;
+}
+
+int sz_ui_session_set_sel(SzUiSession *session, int index, int start, int end) {
+  SzView *target;
+  if (!session || !session->root)
+    return 0;
+  if (!sz_view_focus_text_field_at(session->root, index))
+    return 0;
+  target = sz_view_text_field_target(session->root);
+  if (!sz_view_set_text_field_sel(target, start, end))
+    return 0;
+  session->dirty = 1;
+  return 1;
+}
+
+int sz_ui_session_copy(SzUiSession *session) {
+  SzView *target;
+  char *sel;
+  if (!session || !session->root)
+    return 0;
+  target = sz_view_text_field_target(session->root);
+  if (!target)
+    return 0;
+  sel = field_sel_dup(target);
+  if (sel[0]) {
+    session_set_clipboard(session, sel);
+    clipboard_os_set(sel);
+  }
+  sz_free(sel);
+  session->dirty = 1;
+  return 1;
+}
+
+int sz_ui_session_cut(SzUiSession *session) {
+  SzView *target;
+  SzInputEvent ev;
+  if (!sz_ui_session_copy(session))
+    return 0;
+  target = sz_view_text_field_target(session->root);
+  if (!target)
+    return 1;
+  if (sz_view_text_field_sel_end(target) <= sz_view_text_field_sel_start(target))
+    return 1;
+  memset(&ev, 0, sizeof ev);
+  ev.kind = SZ_INPUT_KEY;
+  ev.key = "Backspace";
+  if (!sz_view_handle_key(session->root, ev.key, "", 0))
+    return 0;
+  sync_keyboard(session);
+  session->dirty = 1;
+  return 1;
+}
+
+int sz_ui_session_paste(SzUiSession *session, const char *text) {
+  SzView *target;
+  const char *payload;
+  if (!session || !session->root)
+    return 0;
+  target = sz_view_text_field_target(session->root);
+  if (!target)
+    return 0;
+  if (text && text[0]) {
+    session_set_clipboard(session, text);
+    clipboard_os_set(text);
+  } else
+    clipboard_os_pull(session);
+  payload = session->clipboard ? session->clipboard : "";
+  if (!payload[0]) {
+    session->dirty = 1;
+    return 1;
+  }
+  if (!sz_view_handle_text_edit(session->root, payload, 0))
+    return 0;
+  sync_keyboard(session);
   session->dirty = 1;
   return 1;
 }

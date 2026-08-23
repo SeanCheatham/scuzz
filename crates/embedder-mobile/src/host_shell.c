@@ -14,6 +14,7 @@ static int g_frames;
 static SzInputEvent g_queue[EVENT_CAP];
 static int g_q_head;
 static int g_q_tail;
+static char *g_clip;
 
 static int shell_enabled(void) {
   const char *e = getenv("SCUZZ_MOBILE_SHELL");
@@ -94,6 +95,29 @@ void sz_mobile_shutdown(void) {
   g_keyboard = 0;
   g_frames = 0;
   g_q_head = g_q_tail = 0;
+  free(g_clip);
+  g_clip = NULL;
   if (shell_enabled())
     fprintf(stderr, "scuzz mobile: shutdown\n");
 }
+
+static char *clip_dup(const char *s) {
+  size_t n;
+  char *out;
+  if (!s)
+    return NULL;
+  n = strlen(s);
+  out = (char *)malloc(n + 1);
+  if (!out)
+    return NULL;
+  memcpy(out, s, n + 1);
+  return out;
+}
+
+int sz_mobile_clipboard_set(const char *text) {
+  free(g_clip);
+  g_clip = clip_dup(text ? text : "");
+  return g_clip ? 1 : 0;
+}
+
+char *sz_mobile_clipboard_get(void) { return g_clip ? clip_dup(g_clip) : NULL; }
