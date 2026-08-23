@@ -46,8 +46,13 @@ def listDir(dir: String): IO[List[String]] =
     _ <- Chrome.seedWorkspace()
     args <- Sys.args()
     arg = if (List.isEmpty(args)) "sample.txt" else List.head(args)
-    root = Fs.dirname(arg)
-    file = arg
+    _ = Property.check("file", Chrome.openPath("f", Str.len("")) == "f", true)
+    _ = Property.check("dir", Chrome.openPath("d", Str.len("x")) == Fs.join("d", "sample.txt"), true)
+    argListed <- Fs.list(arg).map(_ => Str.len("x")).handleErrorWith(_ =>
+  IO.pure(Str.len(""))
+)
+    file = Chrome.openPath(arg, argListed)
+    root = Fs.dirname(file)
     raw <- Fs.read(file).handleErrorWith(_ =>
   IO.pure("")
 )

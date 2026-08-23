@@ -1,7 +1,5 @@
 # Next slice
 
-C5 — `scuzz ide [path]` on the one CLI.
+None.
 
-Launch the bundled `[ui]` package with Desktop. `--headless` stays. No `scuzz-ide` binary. No editor widgets in Rust. Bundle in SDK. Only after C1–C4.
-
-Locks: [`vision.md`](vision.md). Full bar: [`gaps.md`](gaps.md).
+Verification next steps live in [`vision.md`](vision.md) (list generators, seed tables, fault injection). Open work: [`gaps.md`](gaps.md).
