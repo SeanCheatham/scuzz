@@ -4632,12 +4632,13 @@ fn infer_call(
             set_elem(&arg_tys[0])?;
             Ok(Type::Bool)
         }
-        "Fs.read" | "Fs.list" | "Fs.mkdirs" | "Fs.canonicalize" | "Fs.exists" => {
+        "Fs.read" | "Fs.list" | "Fs.mkdirs" | "Fs.canonicalize" | "Fs.exists" | "Fs.delete"
+        | "Fs.walk" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(match callee {
                 "Fs.read" => Type::Io(Box::new(Type::String)),
-                "Fs.list" => Type::Io(Box::new(list_of(Type::Tuple(vec![
+                "Fs.list" | "Fs.walk" => Type::Io(Box::new(list_of(Type::Tuple(vec![
                     Type::String,
                     Type::Bool,
                 ])))),
@@ -4657,7 +4658,7 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::String)
         }
-        "Fs.write" => {
+        "Fs.write" | "Fs.rename" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::String)?;
             expect_ty(&arg_tys[1], &Type::String)?;
@@ -13535,6 +13536,20 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Fs path helpers should typecheck");
+    }
+
+    #[test]
+    fn typechecks_fs_delete_rename_walk() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- Fs.delete("a")
+    _ <- Fs.rename("a", "b")
+    xs <- Fs.walk(".")
+    _ <- IO.println(Str.fromInt(List.len(xs)))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Fs delete/rename/walk should typecheck");
     }
 
     #[test]

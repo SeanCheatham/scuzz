@@ -730,6 +730,9 @@ SzIo *sz_fs_read(SzString *path);
 SzIo *sz_fs_write(SzString *path, SzString *contents);
 SzIo *sz_fs_list(SzString *path);
 SzIo *sz_fs_exists(SzString *path);
+SzIo *sz_fs_delete(SzString *path);
+SzIo *sz_fs_rename(SzString *from, SzString *to);
+SzIo *sz_fs_walk(SzString *path);
 SzIo *sz_fs_mkdirs(SzString *path);
 SzIo *sz_fs_canonicalize(SzString *path);
 /* Pure path helpers (follow Str.concat). */
@@ -782,6 +785,9 @@ SzIo *sz_testrt_fs_read(SzString *path);
 SzIo *sz_testrt_fs_write(SzString *path, SzString *contents);
 SzIo *sz_testrt_fs_list(SzString *path);
 SzIo *sz_testrt_fs_exists(SzString *path);
+SzIo *sz_testrt_fs_delete(SzString *path);
+SzIo *sz_testrt_fs_rename(SzString *from, SzString *to);
+SzIo *sz_testrt_fs_walk(SzString *path);
 SzIo *sz_testrt_fs_mkdirs(SzString *path);
 SzIo *sz_testrt_fs_canonicalize(SzString *path);
 

@@ -362,6 +362,205 @@ SzIo *sz_testrt_fs_exists(SzString *path) {
   return testrt_fs_bind(path, mem_exists);
 }
 
+static int is_self_or_under(const char *dir, const char *path) {
+  size_t dlen = strlen(dir);
+  if (strcmp(dir, path) == 0)
+    return 1;
+  if (dlen == 0)
+    return path[0] != '\0';
+  return strncmp(path, dir, dlen) == 0 && path[dlen] == '/';
+}
+
+static int is_under(const char *dir, const char *child) {
+  size_t dlen = strlen(dir);
+  if (dlen == 0)
+    return child[0] != '\0';
+  return strncmp(child, dir, dlen) == 0 && child[dlen] == '/';
+}
+
+static void mem_free_node(MemNode *n) {
+  sz_free(n->path);
+  sz_free(n->data);
+  sz_free(n);
+}
+
+static void *mem_delete(void *env) {
+  SzPair *pack = (SzPair *)env;
+  SzString *path_s = pack_path(pack);
+  BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
+  char *path = norm_path(sz_string_cstr(path_s));
+  MemNode *n;
+  MemNode **pp;
+  if (!path[0]) {
+    sz_free(path);
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.delete: refused root (mem)");
+    goto done;
+  }
+  n = fs_find(path);
+  if (!n) {
+    sz_free(path);
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.delete: not found (mem)");
+    goto done;
+  }
+  pp = &g_fs;
+  while (*pp) {
+    MemNode *cur = *pp;
+    if (is_self_or_under(path, cur->path)) {
+      *pp = cur->next;
+      mem_free_node(cur);
+    } else {
+      pp = &cur->next;
+    }
+  }
+  sz_free(path);
+  r->is_err = 0;
+  r->as.ok = NULL;
+done:
+  return r;
+}
+
+SzIo *sz_testrt_fs_delete(SzString *path) {
+  return testrt_fs_bind(path, mem_delete);
+}
+
+static void *mem_rename(void *env) {
+  SzPair *pack = (SzPair *)env;
+  SzString *from_s = pack ? (SzString *)pack->left : NULL;
+  SzString *to_s = pack ? (SzString *)pack->right : NULL;
+  BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
+  char *from = norm_path(sz_string_cstr(from_s));
+  char *to = norm_path(sz_string_cstr(to_s));
+  char parent[1024];
+  MemNode *src;
+  MemNode *n;
+  size_t from_len;
+  if (!from[0] || !to[0]) {
+    sz_free(from);
+    sz_free(to);
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.rename: refused root (mem)");
+    goto done;
+  }
+  src = fs_find(from);
+  if (!src) {
+    sz_free(from);
+    sz_free(to);
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.rename: not found (mem)");
+    goto done;
+  }
+  if (fs_find(to)) {
+    sz_free(from);
+    sz_free(to);
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.rename: dest exists (mem)");
+    goto done;
+  }
+  if (!parent_path(to, parent, sizeof parent)) {
+    sz_free(from);
+    sz_free(to);
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.rename: path too long (mem)");
+    goto done;
+  }
+  if (parent[0] != '\0') {
+    MemNode *pnode = fs_find(parent);
+    if (!pnode || !pnode->is_dir) {
+      sz_free(from);
+      sz_free(to);
+      r->is_err = 1;
+      r->as.err = sz_error_new(2, "Fs.rename: no parent (mem)");
+      goto done;
+    }
+  }
+  if (src->is_dir && is_under(from, to)) {
+    sz_free(from);
+    sz_free(to);
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.rename: into self (mem)");
+    goto done;
+  }
+  from_len = strlen(from);
+  for (n = g_fs; n; n = n->next) {
+    char *np;
+    size_t suffix_len;
+    if (!is_self_or_under(from, n->path))
+      continue;
+    suffix_len = strlen(n->path) - from_len;
+    np = (char *)sz_alloc(strlen(to) + suffix_len + 1);
+    memcpy(np, to, strlen(to));
+    memcpy(np + strlen(to), n->path + from_len, suffix_len + 1);
+    sz_free(n->path);
+    n->path = np;
+  }
+  sz_free(from);
+  sz_free(to);
+  r->is_err = 0;
+  r->as.ok = NULL;
+done:
+  return r;
+}
+
+SzIo *sz_testrt_fs_rename(SzString *from, SzString *to) {
+  SzPair *pack = sz_pair_new(from, to);
+  SzIo *io = fm_drop(sz_io_delay(mem_rename, pack), unwrap_box, NULL);
+  sz_release(pack);
+  return io;
+}
+
+static void *mem_walk(void *env) {
+  SzPair *pack = (SzPair *)env;
+  SzString *path_s = pack_path(pack);
+  BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
+  char *path = norm_path(sz_string_cstr(path_s));
+  MemNode *dir = fs_find(path);
+  MemNode *n;
+  SzList *acc;
+  size_t dlen;
+  if (!dir || !dir->is_dir) {
+    sz_free(path);
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.walk: not a directory (mem)");
+    goto done;
+  }
+  acc = sz_list_nil();
+  dlen = strlen(path);
+  for (n = g_fs; n; n = n->next) {
+    const char *rel;
+    if (n == dir)
+      continue;
+    if (!is_under(path, n->path))
+      continue;
+    rel = dlen == 0 ? n->path : n->path + dlen + 1;
+    {
+      SzString *s = sz_string_from_cstr(rel);
+      void *flag = sz_box_i64(n->is_dir ? 1 : 0);
+      SzPair *ent = sz_pair_new(s, flag);
+      SzList *old = acc;
+      acc = sz_list_cons(ent, old);
+      sz_release(s);
+      sz_release(flag);
+      sz_release(ent);
+      sz_release(old);
+    }
+  }
+  sz_free(path);
+  r->is_err = 0;
+  {
+    SzList *rev = sz_list_reverse(acc);
+    sz_release(acc);
+    r->as.ok = rev;
+  }
+done:
+  return r;
+}
+
+SzIo *sz_testrt_fs_walk(SzString *path) {
+  return testrt_fs_bind(path, mem_walk);
+}
+
 static void *mem_mkdirs(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path_s = pack_path(pack);

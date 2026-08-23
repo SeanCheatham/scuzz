@@ -389,6 +389,304 @@ static SzIo *fs_after_exists(void *value, void *env) {
 
 SzIo *sz_fs_exists(SzString *path) { return fs_bind(path, fs_after_exists); }
 
+static int fs_join_into(char *out, size_t out_sz, const char *dir, const char *name) {
+  int n;
+  size_t dlen = strlen(dir);
+  if (dlen == 1 && dir[0] == '/')
+    n = snprintf(out, out_sz, "/%s", name);
+  else if (dlen > 0 && dir[dlen - 1] == '/')
+    n = snprintf(out, out_sz, "%s%s", dir, name);
+  else if (dlen == 0)
+    n = snprintf(out, out_sz, "%s", name);
+  else
+    n = snprintf(out, out_sz, "%s/%s", dir, name);
+  return n >= 0 && (size_t)n < out_sz;
+}
+
+static int fs_is_root_path(const char *p) {
+  return !p || !p[0] || strcmp(p, ".") == 0 || strcmp(p, "/") == 0;
+}
+
+static int fs_parent_is_dir(const char *path) {
+  const char *slash = strrchr(path, '/');
+  char buf[2048];
+  size_t n;
+  struct stat st;
+  if (!slash)
+    return 1;
+  if (slash == path) {
+    return stat("/", &st) == 0 && S_ISDIR(st.st_mode);
+  }
+  n = (size_t)(slash - path);
+  if (n >= sizeof buf)
+    return 0;
+  memcpy(buf, path, n);
+  buf[n] = '\0';
+  return stat(buf, &st) == 0 && S_ISDIR(st.st_mode);
+}
+
+static int fs_rm_tree(const char *path, int depth, FsResult *r) {
+  struct stat st;
+  if (depth > 256) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.delete: path too deep");
+    return 0;
+  }
+  if (lstat(path, &st) != 0) {
+    char msg[512];
+    snprintf(msg, sizeof msg, "Fs.delete: %s: %s", path, strerror(errno));
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, msg);
+    return 0;
+  }
+  if (S_ISDIR(st.st_mode)) {
+    DIR *d = opendir(path);
+    struct dirent *ent;
+    if (!d) {
+      char msg[512];
+      snprintf(msg, sizeof msg, "Fs.delete: cannot open %s: %s", path,
+               strerror(errno));
+      r->is_err = 1;
+      r->as.err = sz_error_new(2, msg);
+      return 0;
+    }
+    while ((ent = readdir(d)) != NULL) {
+      char child[2048];
+      if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+        continue;
+      if (!fs_join_into(child, sizeof child, path, ent->d_name)) {
+        closedir(d);
+        r->is_err = 1;
+        r->as.err = sz_error_new(2, "Fs.delete: path too long");
+        return 0;
+      }
+      if (!fs_rm_tree(child, depth + 1, r)) {
+        closedir(d);
+        return 0;
+      }
+    }
+    closedir(d);
+    if (rmdir(path) != 0) {
+      char msg[512];
+      snprintf(msg, sizeof msg, "Fs.delete: rmdir %s: %s", path, strerror(errno));
+      r->is_err = 1;
+      r->as.err = sz_error_new(2, msg);
+      return 0;
+    }
+    return 1;
+  }
+  if (unlink(path) != 0) {
+    char msg[512];
+    snprintf(msg, sizeof msg, "Fs.delete: unlink %s: %s", path, strerror(errno));
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, msg);
+    return 0;
+  }
+  return 1;
+}
+
+static void *fs_delete_result(void *env) {
+  SzPair *pack = (SzPair *)env;
+  SzString *path = pack_path(pack);
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
+  const char *p = sz_string_cstr(path);
+  if (fs_is_root_path(p)) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.delete: refused root");
+    goto done;
+  }
+  if (!fs_rm_tree(p, 0, r))
+    goto done;
+  r->is_err = 0;
+  r->as.ok = NULL;
+done:
+  return r;
+}
+
+static SzIo *fs_after_delete(void *value, void *env) {
+  SzPair *pack = (SzPair *)env;
+  if ((intptr_t)value)
+    return sz_testrt_fs_delete(pack_path(pack));
+  return fm_drop(sz_io_delay(fs_delete_result, pack), unwrap_fs, NULL);
+}
+
+SzIo *sz_fs_delete(SzString *path) { return fs_bind(path, fs_after_delete); }
+
+static void *fs_rename_result(void *env) {
+  SzPair *pack = (SzPair *)env;
+  SzString *from = pack ? (SzString *)pack->left : NULL;
+  SzString *to = pack ? (SzString *)pack->right : NULL;
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
+  const char *src = sz_string_cstr(from);
+  const char *dst = sz_string_cstr(to);
+  struct stat st;
+  if (fs_is_root_path(src) || fs_is_root_path(dst)) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.rename: refused root");
+    goto done;
+  }
+  if (lstat(src, &st) != 0) {
+    char msg[512];
+    snprintf(msg, sizeof msg, "Fs.rename: %s: %s", src, strerror(errno));
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, msg);
+    goto done;
+  }
+  if (lstat(dst, &st) == 0) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.rename: dest exists");
+    goto done;
+  }
+  if (!fs_parent_is_dir(dst)) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.rename: no parent");
+    goto done;
+  }
+  if (rename(src, dst) != 0) {
+    char msg[512];
+    snprintf(msg, sizeof msg, "Fs.rename: %s: %s", src, strerror(errno));
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, msg);
+    goto done;
+  }
+  r->is_err = 0;
+  r->as.ok = NULL;
+done:
+  return r;
+}
+
+static SzIo *fs_after_rename(void *value, void *env) {
+  SzPair *pack = (SzPair *)env;
+  if ((intptr_t)value)
+    return sz_testrt_fs_rename((SzString *)pack->left, (SzString *)pack->right);
+  return fm_drop(sz_io_delay(fs_rename_result, pack), unwrap_fs, NULL);
+}
+
+SzIo *sz_fs_rename(SzString *from, SzString *to) {
+  SzPair *pack;
+  if (!from || !to)
+    sz_panic("sz_fs_rename(null)");
+  pack = sz_pair_new(from, to);
+  {
+    SzIo *io = fm_drop(sz_io_delay(fs_dispatch, NULL), fs_after_rename, pack);
+    sz_release(pack);
+    return io;
+  }
+}
+
+static int fs_walk_into(const char *root, const char *rel, int depth, SzList **acc,
+                        FsResult *r) {
+  char full[2048];
+  DIR *d;
+  struct dirent *ent;
+  if (depth > 256) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, "Fs.walk: path too deep");
+    return 0;
+  }
+  if (rel[0]) {
+    if (!fs_join_into(full, sizeof full, root, rel)) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(2, "Fs.walk: path too long");
+      return 0;
+    }
+  } else {
+    if (strlen(root) >= sizeof full) {
+      r->is_err = 1;
+      r->as.err = sz_error_new(2, "Fs.walk: path too long");
+      return 0;
+    }
+    memcpy(full, root, strlen(root) + 1);
+  }
+  d = opendir(full);
+  if (!d) {
+    char msg[512];
+    snprintf(msg, sizeof msg, "Fs.walk: cannot open %s: %s", full,
+             strerror(errno));
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, msg);
+    return 0;
+  }
+  while ((ent = readdir(d)) != NULL) {
+    char child_rel[2048];
+    char child_full[2048];
+    struct stat st;
+    if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
+      continue;
+    if (rel[0]) {
+      if (!fs_join_into(child_rel, sizeof child_rel, rel, ent->d_name)) {
+        closedir(d);
+        r->is_err = 1;
+        r->as.err = sz_error_new(2, "Fs.walk: path too long");
+        return 0;
+      }
+    } else {
+      if (strlen(ent->d_name) >= sizeof child_rel) {
+        closedir(d);
+        r->is_err = 1;
+        r->as.err = sz_error_new(2, "Fs.walk: path too long");
+        return 0;
+      }
+      memcpy(child_rel, ent->d_name, strlen(ent->d_name) + 1);
+    }
+    if (!fs_join_into(child_full, sizeof child_full, full, ent->d_name)) {
+      closedir(d);
+      r->is_err = 1;
+      r->as.err = sz_error_new(2, "Fs.walk: path too long");
+      return 0;
+    }
+    if (lstat(child_full, &st) != 0)
+      continue;
+    *acc = cons_fs_entry(*acc, child_rel, S_ISDIR(st.st_mode) ? 1 : 0);
+    if (S_ISDIR(st.st_mode)) {
+      if (!fs_walk_into(root, child_rel, depth + 1, acc, r)) {
+        closedir(d);
+        return 0;
+      }
+    }
+  }
+  closedir(d);
+  return 1;
+}
+
+static void *fs_walk_result(void *env) {
+  SzPair *pack = (SzPair *)env;
+  SzString *path = pack_path(pack);
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
+  const char *p = sz_string_cstr(path);
+  struct stat st;
+  SzList *acc;
+  if (stat(p, &st) != 0 || !S_ISDIR(st.st_mode)) {
+    char msg[512];
+    snprintf(msg, sizeof msg, "Fs.walk: not a directory: %s", p);
+    r->is_err = 1;
+    r->as.err = sz_error_new(2, msg);
+    goto done;
+  }
+  acc = sz_list_nil();
+  if (!fs_walk_into(p, "", 0, &acc, r)) {
+    sz_release(acc);
+    goto done;
+  }
+  r->is_err = 0;
+  {
+    SzList *rev = sz_list_reverse(acc);
+    sz_release(acc);
+    r->as.ok = rev;
+  }
+done:
+  return r;
+}
+
+static SzIo *fs_after_walk(void *value, void *env) {
+  SzPair *pack = (SzPair *)env;
+  if ((intptr_t)value)
+    return sz_testrt_fs_walk(pack_path(pack));
+  return fm_drop(sz_io_delay(fs_walk_result, pack), unwrap_fs, NULL);
+}
+
+SzIo *sz_fs_walk(SzString *path) { return fs_bind(path, fs_after_walk); }
+
 static SzString *fs_copy_cstr(const char *s) {
   return sz_string_from_cstr(s ? s : "");
 }

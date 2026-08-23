@@ -275,6 +275,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_fs_write(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_list(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_exists(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_fs_delete(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_fs_rename(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_fs_walk(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_join(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_dirname(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_basename(ptr)").unwrap();
@@ -6106,11 +6109,12 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Int)
         }
-        "Fs.read" | "Fs.list" | "Fs.canonicalize" | "Fs.exists" => {
+        "Fs.read" | "Fs.list" | "Fs.canonicalize" | "Fs.exists" | "Fs.walk" => {
             let rt = match callee {
                 "Fs.read" => "sz_fs_read",
                 "Fs.list" => "sz_fs_list",
                 "Fs.exists" => "sz_fs_exists",
+                "Fs.walk" => "sz_fs_walk",
                 _ => "sz_fs_canonicalize",
             };
             writeln!(
@@ -6151,14 +6155,30 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
-        "Fs.mkdirs" => {
+        "Fs.mkdirs" | "Fs.delete" => {
+            let rt = if callee == "Fs.delete" {
+                "sz_fs_delete"
+            } else {
+                "sz_fs_mkdirs"
+            };
             writeln!(
                 code,
-                "  %{prefix}_v = call ptr @sz_fs_mkdirs(ptr {})",
+                "  %{prefix}_v = call ptr @{rt}(ptr {})",
                 emitted_args[0].value
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Fs.rename" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_fs_rename(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "Fs.write" => {
@@ -9431,6 +9451,18 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert_owned_ptr_args_released(
             r#"@main def main: IO[Unit] = Fs.exists("x").flatMap(_ => IO.pure(()))"#,
             "sz_fs_exists",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] = Fs.delete("x")"#,
+            "sz_fs_delete",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] = Fs.rename("x", "y")"#,
+            "sz_fs_rename",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] = Fs.walk("x").flatMap(_ => IO.pure(()))"#,
+            "sz_fs_walk",
         );
         assert_owned_ptr_args_released(
             r#"@main def main: IO[Unit] = IO.println(Fs.join("a", "b"))"#,
@@ -12930,6 +12962,33 @@ enum Color:
         assert!(
             ir.contains("sz_fs_basename"),
             "expected sz_fs_basename in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_fs_delete_rename_walk() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- Fs.delete("a")
+    _ <- Fs.rename("a", "b")
+    xs <- Fs.walk(".")
+    _ <- IO.println(Str.fromInt(List.len(xs)))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_fs_delete"),
+            "expected sz_fs_delete in IR:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_fs_rename"),
+            "expected sz_fs_rename in IR:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_fs_walk"),
+            "expected sz_fs_walk in IR:\n{ir}"
         );
     }
 
