@@ -100,11 +100,11 @@ Folding ranges, inlay hints, and bracket match consume LSP data that already exi
 
 #### 3. Kits the IDE process needs
 
-Today there is no JSON kit. `Sys.exec` returns `(code, stdout, stderr)`. `Sys.spawn` returns a pid. It has no child stdin/stdout pipes. `Sys.exec` / `Sys.spawn` fail under TestRuntime. `Fs.list` returns `(name, isDir)` entries. `Fs.exists`, `Fs.join`, `Fs.dirname`, `Fs.basename`, `Fs.delete`, `Fs.rename`, and `Fs.walk` exist. There is no `Fs.watch`. `Fs.read` / `Fs.write` / `Fs.mkdirs` / `Fs.canonicalize` exist. `Sys.args` exists. `Clock` exists (poll is possible; there is no fs watch).
+Today `Json.parse` / `Json.stringify` exist on blessed enum `Null|Bool|Int|Float|Str|Arr|Obj`. `Sys.exec` returns `(code, stdout, stderr)`. `Sys.spawn` returns a pid. It has no child stdin/stdout pipes. `Sys.exec` / `Sys.spawn` fail under TestRuntime. `Fs.list` returns `(name, isDir)` entries. `Fs.exists`, `Fs.join`, `Fs.dirname`, `Fs.basename`, `Fs.delete`, `Fs.rename`, and `Fs.walk` exist. There is no `Fs.watch`. `Fs.read` / `Fs.write` / `Fs.mkdirs` / `Fs.canonicalize` exist. `Sys.args` exists. `Clock` exists (poll is possible; there is no fs watch).
 
 Close:
 
-- JSON parse and stringify for `check --message-format=json` and, later, LSP JSON-RPC.
+- JSON parse and stringify for `check --message-format=json` and, later, LSP JSON-RPC. `Json.parse` / `Json.stringify` are pure. Enum `Json`: `Null|Bool|Int|Float|Str|Arr|Obj`. `Obj` is `List[(String, Json)]`.
 - Capture stdout and stderr from `Sys.exec` (or a sibling that returns `(code, stdout, stderr)`). `Sys.exec` is `IO[(Int, String, String)]`. Capture uses `dup2`. TestRuntime still rejects exec. No exec stub map.
 - Bidirectional stdio to a child before an in-process LSP client. Until then the IDE drives analyze through files: write the buffer, run `scuzz check --message-format=json` with stdout captured or redirected, parse JSON. That path matches the one editor protocol. Do not add a second typer.
 - `Fs.list` reports file vs directory. Walk a tree (recursive list or a walk kit). `Fs.list` returns `List[(String, Bool)]`. `Fs.exists`, `Fs.join`, `Fs.dirname`, `Fs.basename`, and `Fs.walk` are in.

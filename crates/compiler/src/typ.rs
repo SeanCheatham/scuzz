@@ -689,6 +689,60 @@ pub fn inject_builtin_enums(enums: &mut Vec<EnumDef>) {
     if !enums.iter().any(|e| e.name == "Result") {
         enums.push(builtin_result_enum());
     }
+    if !enums.iter().any(|e| e.name == "Json") {
+        enums.push(builtin_json_enum());
+    }
+}
+
+fn builtin_json_enum() -> EnumDef {
+    let json = Type::Adt("Json".into());
+    EnumDef {
+        module: String::new(),
+        name: "Json".into(),
+        type_params: Vec::new(),
+        cases: vec![
+            crate::ast::EnumCase {
+                name: "Null".into(),
+                fields: Vec::new(),
+                field_rfns: Vec::new(),
+            },
+            crate::ast::EnumCase {
+                name: "Bool".into(),
+                fields: vec![("value".into(), Type::Bool)],
+                field_rfns: vec![None],
+            },
+            crate::ast::EnumCase {
+                name: "Int".into(),
+                fields: vec![("value".into(), Type::Int)],
+                field_rfns: vec![None],
+            },
+            crate::ast::EnumCase {
+                name: "Float".into(),
+                fields: vec![("value".into(), Type::Float)],
+                field_rfns: vec![None],
+            },
+            crate::ast::EnumCase {
+                name: "Str".into(),
+                fields: vec![("value".into(), Type::String)],
+                field_rfns: vec![None],
+            },
+            crate::ast::EnumCase {
+                name: "Arr".into(),
+                fields: vec![("value".into(), Type::List(Box::new(json.clone())))],
+                field_rfns: vec![None],
+            },
+            crate::ast::EnumCase {
+                name: "Obj".into(),
+                fields: vec![(
+                    "value".into(),
+                    Type::List(Box::new(Type::Tuple(vec![Type::String, json]))),
+                )],
+                field_rfns: vec![None],
+            },
+        ],
+        is_record: false,
+        methods: Vec::new(),
+    }
 }
 
 fn builtin_result_enum() -> EnumDef {
@@ -4656,6 +4710,16 @@ fn infer_call(
         "Fs.dirname" | "Fs.basename" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::String)
+        }
+        "Json.parse" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::Adt("Json".into()))
+        }
+        "Json.stringify" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::Adt("Json".into()))?;
             Ok(Type::String)
         }
         "Fs.write" | "Fs.rename" => {
@@ -13568,6 +13632,18 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Sys.exec capture should typecheck");
+    }
+
+    #[test]
+    fn typechecks_json_parse_stringify() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    j = Json.parse("{\"a\":1}")
+    _ <- IO.println(Json.stringify(j))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Json.parse/stringify should typecheck");
     }
 
     #[test]

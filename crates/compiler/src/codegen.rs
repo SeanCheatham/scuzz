@@ -281,6 +281,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_fs_join(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_dirname(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_basename(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_json_parse(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_json_stringify(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_mkdirs(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_fs_canonicalize(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_sys_args()").unwrap();
@@ -6155,6 +6157,21 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             owned_ptr(code, format!("%{prefix}_v"))
         }
+        "Json.parse" | "Json.stringify" => {
+            let rt = if callee == "Json.parse" {
+                "sz_json_parse"
+            } else {
+                "sz_json_stringify"
+            };
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @{rt}(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            owned_ptr(code, format!("%{prefix}_v"))
+        }
         "Fs.mkdirs" | "Fs.delete" => {
             let rt = if callee == "Fs.delete" {
                 "sz_fs_delete"
@@ -9483,6 +9500,14 @@ def id(m: Map[String, String]): Map[String, String] = m
         assert_owned_ptr_args_released(
             r#"@main def main: IO[Unit] = Fs.canonicalize("x").flatMap(_ => IO.pure(()))"#,
             "sz_fs_canonicalize",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] = IO.println(Json.stringify(Json.parse("null")))"#,
+            "sz_json_parse",
+        );
+        assert_owned_ptr_args_released(
+            r#"@main def main: IO[Unit] = IO.println(Json.stringify(Json.parse("null")))"#,
+            "sz_json_stringify",
         );
         assert_owned_ptr_args_released(
             r#"@main def main: IO[Unit] = Sys.write("x")"#,
@@ -13012,6 +13037,24 @@ enum Color:
         assert!(
             ir.contains("call void @sz_release(ptr %value)"),
             "expected owned Sys.exec tuple last-use:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_json_parse_stringify() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Json.stringify(Json.parse("[1,true]")))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_json_parse"),
+            "expected sz_json_parse in IR:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_json_stringify"),
+            "expected sz_json_stringify in IR:\n{ir}"
         );
     }
 

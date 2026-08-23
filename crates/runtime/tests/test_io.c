@@ -3340,6 +3340,55 @@ int main(void) {
     assert(live_bytes == base_bytes);
   }
 
+  /* Json.parse / stringify — check diagnostic JSON round-trips compact. */
+  {
+    const char *sample =
+        "[{\"severity\":\"error\",\"message\":\"x\",\"line\":2,\"column\":3}]";
+    SzString *in = sz_string_from_cstr(sample);
+    SzAdt *j = sz_json_parse(in);
+    SzString *out = sz_json_stringify(j);
+    assert(strcmp(sz_string_cstr(out), sample) == 0);
+    sz_release(out);
+    sz_release(j);
+    sz_release(in);
+    {
+      SzString *n = sz_string_from_cstr("null");
+      SzAdt *jn = sz_json_parse(n);
+      SzString *so = sz_json_stringify(jn);
+      assert(sz_adt_tag(jn) == 0);
+      assert(strcmp(sz_string_cstr(so), "null") == 0);
+      sz_release(so);
+      sz_release(jn);
+      sz_release(n);
+    }
+    {
+      SzString *t = sz_string_from_cstr("{\"ok\":true,\"n\":1,\"s\":\"a\"}");
+      SzAdt *jo = sz_json_parse(t);
+      SzString *so = sz_json_stringify(jo);
+      assert(strcmp(sz_string_cstr(so), "{\"ok\":true,\"n\":1,\"s\":\"a\"}") == 0);
+      sz_release(so);
+      sz_release(jo);
+      sz_release(t);
+    }
+  }
+
+  {
+    size_t base_bytes = 0, base_count = 0;
+    size_t live_bytes = 0, live_count = 0;
+    sz_alloc_stats(&base_bytes, &base_count);
+    {
+      SzString *s = sz_string_from_cstr("[1,true,null]");
+      SzAdt *j = sz_json_parse(s);
+      SzString *out = sz_json_stringify(j);
+      sz_release(s);
+      sz_release(j);
+      sz_release(out);
+    }
+    sz_alloc_stats(&live_bytes, &live_count);
+    assert(live_count == base_count);
+    assert(live_bytes == base_bytes);
+  }
+
   /* Stream — emit / eval / concat / evalMap / map / take / drop / filter / compileToList / drain */
   {
     SzList *xs = sz_list_cons(
