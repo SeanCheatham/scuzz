@@ -5560,6 +5560,20 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
+        "Ui.setEditorCaret" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::Int)?;
+            expect_ty(&arg_tys[1], &Type::Int)?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
+        "Ui.setEditorDiagnostics" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(
+                &arg_tys[0],
+                &Type::List(Box::new(Type::Tuple(vec![Type::Int, Type::Int]))),
+            )?;
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
         _ => {
             let f = funs
                 .resolve(callee, current_module)
@@ -13608,6 +13622,19 @@ def note(n: Int where "x"): Unit = ()
     }
 
     #[test]
+    fn typechecks_ui_set_editor_caret_and_diagnostics() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- Ui.setEditorCaret(1, 1)
+    _ <- Ui.setEditorDiagnostics([(1, 1)])
+    _ <- Ui.run(_ => View.editor(Signal.str("x")))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Ui.setEditorCaret/Diagnostics should typecheck");
+    }
+
+    #[test]
     fn typechecks_fs_list_entries() {
         let src = r#"@main def main: IO[Unit] =
   for {
@@ -13667,7 +13694,9 @@ def note(n: Int where "x"): Unit = ()
         let src = r#"@main def main: IO[Unit] =
   for {
     j = Json.parse("{\"a\":1}")
+    n = Json.Null
     _ <- IO.println(Json.stringify(j))
+    _ <- IO.println(Json.stringify(n))
   } yield ()
 "#;
         let p = lower_program(parse(src).unwrap());

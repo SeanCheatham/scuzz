@@ -525,6 +525,8 @@ int sz_view_editor_caret(const SzView *view);
  * 1 if `view` is a TextField. */
 int sz_view_set_text_field_caret(SzView *view, int offset);
 int sz_view_set_editor_caret(SzView *view, int offset);
+/* Byte offset for 1-based line/column (column counts bytes). 0 if not an editor. */
+int sz_view_editor_offset_at_line_col(const SzView *view, int line, int col);
 /* Selection range on a TextField (`[start, end)` byte offsets, start <= end). */
 int sz_view_text_field_sel_start(const SzView *view);
 int sz_view_text_field_sel_end(const SzView *view);
@@ -754,6 +756,8 @@ SzView *sz_lang_view_editor(SzSignalStr *text);
 SzView *sz_lang_view_split(SzSignalInt *frac, SzView *start, SzView *end);
 SzView *sz_lang_view_overlay(SzSignalInt *open, SzView *child);
 SzIo *sz_lang_ui_set_title(SzString *title);
+SzIo *sz_lang_ui_set_editor_caret(int64_t line, int64_t col);
+SzIo *sz_lang_ui_set_editor_diagnostics(SzList *marks);
 SzView *sz_lang_view_icon(int64_t glyph, int64_t argb);
 SzView *sz_lang_view_image(int64_t w, int64_t h, int64_t argb, SzString *caption);
 void *sz_lang_view_add_child(SzView *parent, SzView *child);

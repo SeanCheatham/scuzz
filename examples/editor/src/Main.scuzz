@@ -1,11 +1,35 @@
 property hasSave: Bool =
   Property.a11yHas("button:Save")
 
+property hasCheck: Bool =
+  Property.a11yHas("button:Check")
+
 property hasEditor: Bool =
   Property.a11yHas("editor:editor")
 
 property bufNonNeg: Bool =
   Str.len(Property.signalStr(0)) >= 0
+
+property diagNonNeg: Bool =
+  Property.signalListLen(1) >= 0
+
+def analyze(path: String, body: String): IO[String] =
+  for {
+    _ <- Fs.write(path, body)
+    start = Fs.dirname(path)
+    here <- Fs.canonicalize(start).handleErrorWith(_ =>
+  IO.pure(start)
+)
+    hit <- Fs.exists(Fs.join(here, "scuzz.toml"))
+    parent = Fs.dirname(here)
+    up <- Fs.exists(Fs.join(parent, "scuzz.toml"))
+    above = Fs.dirname(parent)
+    up2 <- Fs.exists(Fs.join(above, "scuzz.toml"))
+    root = if (hit) here else if (up) parent else if (up2) above else here
+    got <- Sys.exec(Str.concat("scuzz check --message-format=json ", root)).handleErrorWith(_ =>
+  IO.pure((1, "[]", ""))
+)
+  } yield if (Str.startsWith(got._2, "[")) got._2 else "[]"
 
 @main def main: IO[Unit] =
   for {
@@ -15,9 +39,16 @@ property bufNonNeg: Bool =
   IO.pure("")
 )
     buf = Signal.str(raw)
+    diags = Signal.list([])
     _ <- Ui.setTitle(Fs.basename(path))
     _ <- Ui.run(_ => View.column(View.row(View.text(path), View.button("Save", _ => for {
   _ = Property.sometimes("tappedSave")
   _ <- Fs.write(path, Signal.getStr(buf))
-} yield ())), View.expanded(View.editor(buf)))).require(hasSave).require(hasEditor).require(bufNonNeg)
+} yield ()), View.button("Check", _ => for {
+  _ = Property.sometimes("tappedCheck")
+  raw <- analyze(path, Signal.getStr(buf))
+  j = Json.parse(raw)
+  _ <- Ui.setEditorDiagnostics(Check.diagMarks(j))
+  _ = Signal.setList(diags, Check.diagRows(j))
+} yield ())), View.expanded(View.editor(buf)), View.each(diags, s => View.button(s, _ => Check.jumpDiag(s))))).require(hasSave).require(hasCheck).require(hasEditor).require(bufNonNeg).require(diagNonNeg)
   } yield ()

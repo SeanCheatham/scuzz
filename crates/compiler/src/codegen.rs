@@ -443,6 +443,8 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_split(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_overlay(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_ui_set_title(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_ui_set_editor_caret(i64, i64)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_ui_set_editor_diagnostics(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_icon(i64, i64)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_image(i64, i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_add_child(ptr, ptr)").unwrap();
@@ -7310,6 +7312,25 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "Ui.setEditorCaret" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_ui_set_editor_caret(i64 {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Ui.setEditorDiagnostics" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_ui_set_editor_diagnostics(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "View.icon" => {
             writeln!(
                 code,
@@ -13006,6 +13027,28 @@ enum Color:
         assert!(
             ir.contains("sz_lang_ui_set_title"),
             "expected sz_lang_ui_set_title in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_ui_set_editor_caret_and_diagnostics() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- Ui.setEditorCaret(1, 1)
+    _ <- Ui.setEditorDiagnostics([(1, 1)])
+    _ <- Ui.run(_ => View.editor(Signal.str("x")))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_ui_set_editor_caret"),
+            "expected sz_lang_ui_set_editor_caret in IR:\n{ir}"
+        );
+        assert!(
+            ir.contains("sz_lang_ui_set_editor_diagnostics"),
+            "expected sz_lang_ui_set_editor_diagnostics in IR:\n{ir}"
         );
     }
 

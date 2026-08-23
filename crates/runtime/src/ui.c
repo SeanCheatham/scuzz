@@ -1801,6 +1801,86 @@ SzIo *sz_lang_ui_set_title(SzString *title) {
   return sz_io_delay(thunk_set_title, title);
 }
 
+static SzView *live_first_editor(void) {
+  SzView *eds[64];
+  int n;
+  if (!g_live_session || !g_live_session->root)
+    return NULL;
+  n = sz_view_collect_editors(g_live_session->root, eds, 64);
+  return n > 0 ? eds[0] : NULL;
+}
+
+static void *thunk_set_editor_caret(void *env) {
+  SzPair *p = (SzPair *)env;
+  int64_t line = p ? sz_unbox_i64(p->left) : 1;
+  int64_t col = p && p->right ? sz_unbox_i64(p->right) : 1;
+  SzView *ed = live_first_editor();
+  int off;
+  if (!ed)
+    return NULL;
+  off = sz_view_editor_offset_at_line_col(ed, (int)line, (int)col);
+  sz_view_set_editor_caret(ed, off);
+  if (g_live_session)
+    g_live_session->dirty = 1;
+  return NULL;
+}
+
+SzIo *sz_lang_ui_set_editor_caret(int64_t line, int64_t col) {
+  void *lb = sz_box_i64(line);
+  void *cb = sz_box_i64(col);
+  SzPair *p = sz_pair_new(lb, cb);
+  SzIo *io;
+  sz_release(lb);
+  sz_release(cb);
+  io = sz_io_delay(thunk_set_editor_caret, p);
+  sz_release(p);
+  return io;
+}
+
+static void *thunk_set_editor_diagnostics(void *env) {
+  SzList *marks = (SzList *)env;
+  SzView *ed = live_first_editor();
+  int n;
+  int i;
+  int *lines;
+  int *sevs;
+  SzList *p;
+  if (!ed)
+    return NULL;
+  n = (int)sz_list_len(marks);
+  if (n <= 0) {
+    sz_view_editor_set_diagnostics(ed, NULL, NULL, 0);
+    if (g_live_session)
+      g_live_session->dirty = 1;
+    return NULL;
+  }
+  lines = (int *)sz_alloc(sizeof(int) * (size_t)n);
+  sevs = (int *)sz_alloc(sizeof(int) * (size_t)n);
+  p = marks;
+  for (i = 0; i < n && p && !sz_list_is_empty(p); i++) {
+    SzPair *cell = (SzPair *)sz_list_head(p);
+    lines[i] = cell ? (int)sz_unbox_i64(cell->left) : 1;
+    sevs[i] = cell && cell->right ? (int)sz_unbox_i64(cell->right) : 1;
+    if (lines[i] < 1)
+      lines[i] = 1;
+    if (sevs[i] < 1)
+      sevs[i] = 1;
+    p = sz_list_tail(p);
+  }
+  sz_view_editor_set_diagnostics(ed, lines, sevs, n);
+  sz_free(lines);
+  sz_free(sevs);
+  if (g_live_session)
+    g_live_session->dirty = 1;
+  return NULL;
+}
+
+SzIo *sz_lang_ui_set_editor_diagnostics(SzList *marks) {
+  if (!marks)
+    sz_panic("Ui.setEditorDiagnostics(null)");
+  return sz_io_delay(thunk_set_editor_diagnostics, marks);
+}
+
 SzLifecyclePhase sz_ui_session_lifecycle(const SzUiSession *session) {
   return session ? session->lifecycle : SZ_LIFECYCLE_STOP;
 }

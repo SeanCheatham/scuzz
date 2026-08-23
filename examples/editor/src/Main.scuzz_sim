@@ -1,0 +1,3 @@
+def analyze(_path: String, _body: String): IO[String] =
+  IO.pure("[{\"severity\":\"error\",\"message\":\"x\",\"line\":1,\"column\":1}]")
+

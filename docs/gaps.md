@@ -27,7 +27,7 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ### 3. Dogfood IDE at editor scale
 
-**Status.** Direction is locked in [`vision.md`](vision.md#tooling): a Scuzz `[ui]` app is the in-tree IDE. `scuzz ide` launches it. The compiler and `scuzz lsp` stay Rust. `examples/editor` opens a path from `Sys.args`, edits in `View.editor`, and saves. Headless goldens dump `[editor]`. `scuzz fuzz` drives keys and taps. Analyze (check JSON / lsp) and chrome stay later. Do not start the IDE package yet.
+**Status.** Direction is locked in [`vision.md`](vision.md#tooling): a Scuzz `[ui]` app is the in-tree IDE. `scuzz ide` launches it. The compiler and `scuzz lsp` stay Rust. `examples/editor` opens a path from `Sys.args`, edits in `View.editor`, saves, and runs `scuzz check --message-format=json`. It parses that JSON into a diagnostics list and jumps the caret. Fuzz overlays `analyze` with canned JSON. Chrome stays later. Do not start the IDE package yet.
 
 **Unproven.** An editor-scale Scuzz app stays inside Headless-as-peer, one input alphabet, the `pump` frame budget, and `scuzz fuzz` as the verification strategy. A second typer, Desktop-only keys, or a View-per-token tree that Headless cannot dump breaks those locks.
 
@@ -111,7 +111,7 @@ Close:
 - `Fs.delete`, `Fs.rename`, `Fs.exists`. Rename must stay compatible with `workspace/willRenameFiles`. `Fs.delete` / `Fs.rename` / `Fs.exists` are in. Rename fails when the dest exists or the dest parent is missing. `Fs.write` still requires the parent directory.
 - Path join, dirname, basename (blessed, not ad-hoc `Str` concat). `Fs.join` / `Fs.dirname` / `Fs.basename` are in.
 - File watch (`Fs.watch`) or a documented poll on `Clock` plus `Fs` that Headless can fake. Poll is the pick: `IO.sleep` / `Clock.monotonic` plus `Fs.read` / `Fs.exists` / `Fs.list`. No `Fs.watch`.
-- TestRuntime story for check-from-IDE: a `*.scuzz_sim` overlay, or a fake that writes JSON onto the mem FS. Live `Sys.exec` must not be the only analyze path. Fuzz stays hermetic.
+- TestRuntime story for check-from-IDE: a `*.scuzz_sim` overlay, or a fake that writes JSON onto the mem FS. Live `Sys.exec` must not be the only analyze path. Fuzz stays hermetic. `examples/editor` overlays `analyze` in `Main.scuzz_sim`. Live `Sys.exec` still runs `scuzz check --message-format=json`. No exec stub map.
 
 #### 4. Chrome around the editor
 
@@ -124,7 +124,7 @@ Close:
 - Open buffers: tabs, dirty flag, save / save-all via `Fs.write`.
 - Split panes with a draggable splitter (Row/Column alone is not a resize handle). `View.split` is in. `[splits]` dumps `frac`.
 - Overlay popups on `View.stack`: completion, hover, command palette, context menu. Key routing and dismiss. Headless inject opens and selects them. `View.overlay` plus Escape / backdrop dismiss is in. Palette and menus stay Track C composition.
-- Diagnostics list from check JSON. Jump to file + caret.
+- Diagnostics list from check JSON. Jump to file + caret. `examples/editor` lists check rows and jumps with `Ui.setEditorCaret`. File jump stays Track C chrome.
 - Find and replace in the buffer (needs selection).
 - App-level chords once keys exist: save, find, go-to-definition, format, command palette. Same chords on Headless inject.
 - Output panel for captured `run` / `fuzz` / `fmt` text.
@@ -139,7 +139,7 @@ In-app open-folder UI is enough. Native OS file dialogs, native menus, and multi
 
 Close:
 
-- Map LSP (or check JSON) line/character ranges onto editor offsets.
+- Map LSP (or check JSON) line/character ranges onto editor offsets. `Ui.setEditorCaret(line, col)` maps 1-based line/column onto a `View.editor` byte offset. `Ui.setEditorDiagnostics` paints gutter marks from `(line, severity)` pairs.
 - Overlay unsaved buffers into check/lsp the same way `scuzz lsp` overlays `didChange`.
 - Wire: diagnostics, go-to-definition, completion popup, hover overlay, format, rename, quickfix, semantic tokens into the editor widget.
 - Host `scuzz lsp` over stdio after JSON and child pipes close. Do not skip diagnostics. Child pipes are in (`Sys.childWrite` / `Sys.childRead` / `Sys.childClose`).
