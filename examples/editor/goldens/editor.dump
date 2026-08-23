@@ -17,6 +17,8 @@ int[10] = 28
 int[11] = 0
 int[12] = 0
 int[13] = 0
+str[14] = "hover stub"
+list[15] = []
 
 [views]
 split:28
@@ -32,6 +34,9 @@ button:Find
 button:Complete
 button:Hover
 button:Format
+button:Def
+button:Rename
+button:Fix
 editor:editor
 list:list
 list:list
@@ -43,12 +48,15 @@ overlay:0
 0 sample.txt 24,46 67x32
 1 scuzz.toml 24,86 66x32
 2 src/ 24,126 48x32
-3 Save 297,36 48x32
-4 Check 353,36 49x32
-5 Find 410,36 48x32
-6 Complete 466,36 56x32
-7 Hover 530,36 48x32
-8 Format 586,36 53x32
+3 Save 286,36 37x32
+4 Check 331,36 37x32
+5 Find 376,36 37x32
+6 Complete 421,36 37x32
+7 Hover 466,36 37x32
+8 Format 511,36 37x32
+9 Def 556,36 37x32
+10 Rename 601,36 37x32
+11 Fix 646,36 37x32
 
 [fields]
 

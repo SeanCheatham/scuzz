@@ -1,4 +1,4 @@
 [fuzz]
 seed = 2
 schedule_seed = "2"
-events = ["tap 4", "tap 9"]
+events = ["tap 4", "tap 12"]

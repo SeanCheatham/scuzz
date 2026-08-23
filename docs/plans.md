@@ -1,7 +1,7 @@
 # Next slice
 
-C4 — host `scuzz lsp` over pipes.
+C5 — `scuzz ide [path]` on the one CLI.
 
-After B6: map ranges to offsets. Overlay unsaved buffers. Wire hover/completion/definition/format/rename/quickfix/semantic tokens into `View.editor`. No in-process Rust LSP client in the Scuzz app.
+Launch the bundled `[ui]` package with Desktop. `--headless` stays. No `scuzz-ide` binary. No editor widgets in Rust. Bundle in SDK. Only after C1–C4.
 
 Locks: [`vision.md`](vision.md). Full bar: [`gaps.md`](gaps.md).

@@ -27,7 +27,7 @@ When a gap closes or its assessment changes, update this file. If direction chan
 
 ### 3. Dogfood IDE at editor scale
 
-**Status.** Direction is locked in [`vision.md`](vision.md#tooling): a Scuzz `[ui]` app is the in-tree IDE. `scuzz ide` launches it. The compiler and `scuzz lsp` stay Rust. `examples/editor` opens a project root from `Sys.args`, edits in `View.editor`, saves, runs `scuzz check --message-format=json`, and composes file tree, tabs, find/replace, overlay stubs, output, and title. Fuzz overlays `analyze` with canned JSON. LSP host stays later. Do not start the IDE package yet.
+**Status.** Direction is locked in [`vision.md`](vision.md#tooling): a Scuzz `[ui]` app is the in-tree IDE. `scuzz ide` launches it. The compiler and `scuzz lsp` stay Rust. `examples/editor` opens a project root from `Sys.args`, edits in `View.editor`, saves, runs `scuzz check --message-format=json`, hosts `scuzz lsp` over `Sys.spawn` pipes, and composes file tree, tabs, find/replace, overlay stubs, output, and title. Fuzz overlays `analyze` and `lspCall` with canned JSON. Do not start the IDE package yet.
 
 **Unproven.** An editor-scale Scuzz app stays inside Headless-as-peer, one input alphabet, the `pump` frame budget, and `scuzz fuzz` as the verification strategy. A second typer, Desktop-only keys, or a View-per-token tree that Headless cannot dump breaks those locks.
 
@@ -106,7 +106,7 @@ Close:
 
 - JSON parse and stringify for `check --message-format=json` and, later, LSP JSON-RPC. `Json.parse` / `Json.stringify` are pure. Enum `Json`: `Null|Bool|Int|Float|Str|Arr|Obj`. `Obj` is `List[(String, Json)]`.
 - Capture stdout and stderr from `Sys.exec` (or a sibling that returns `(code, stdout, stderr)`). `Sys.exec` is `IO[(Int, String, String)]`. Capture uses `dup2`. TestRuntime still rejects exec. No exec stub map.
-- Bidirectional stdio to a child before an in-process LSP client. `Sys.spawn` attaches pipes. `Sys.childWrite` / `Sys.childRead` / `Sys.childClose` park on poll. TestRuntime still rejects spawn and child stdio. Host `scuzz lsp` over those pipes in C4. Until C4, analyze can also write the buffer and run `scuzz check --message-format=json`. Do not add a second typer.
+- Bidirectional stdio to a child before an in-process LSP client. `Sys.spawn` attaches pipes. `Sys.childWrite` / `Sys.childRead` / `Sys.childClose` park on poll. TestRuntime still rejects spawn and child stdio. `examples/editor` hosts `scuzz lsp` over those pipes. Fuzz overlays `lspCall`. Do not add a second typer.
 - `Fs.list` reports file vs directory. Walk a tree (recursive list or a walk kit). `Fs.list` returns `List[(String, Bool)]`. `Fs.exists`, `Fs.join`, `Fs.dirname`, `Fs.basename`, and `Fs.walk` are in.
 - `Fs.delete`, `Fs.rename`, `Fs.exists`. Rename must stay compatible with `workspace/willRenameFiles`. `Fs.delete` / `Fs.rename` / `Fs.exists` are in. Rename fails when the dest exists or the dest parent is missing. `Fs.write` still requires the parent directory.
 - Path join, dirname, basename (blessed, not ad-hoc `Str` concat). `Fs.join` / `Fs.dirname` / `Fs.basename` are in.
@@ -140,9 +140,9 @@ In-app open-folder UI is enough. Native OS file dialogs, native menus, and multi
 Close:
 
 - Map LSP (or check JSON) line/character ranges onto editor offsets. `Ui.setEditorCaret(line, col)` maps 1-based line/column onto a `View.editor` byte offset. `Ui.setEditorDiagnostics` paints gutter marks from `(line, severity)` pairs.
-- Overlay unsaved buffers into check/lsp the same way `scuzz lsp` overlays `didChange`.
-- Wire: diagnostics, go-to-definition, completion popup, hover overlay, format, rename, quickfix, semantic tokens into the editor widget.
-- Host `scuzz lsp` over stdio after JSON and child pipes close. Do not skip diagnostics. Child pipes are in (`Sys.childWrite` / `Sys.childRead` / `Sys.childClose`).
+- Overlay unsaved buffers into check/lsp the same way `scuzz lsp` overlays `didChange`. `examples/editor` sends `textDocument/didOpen` with the live buffer.
+- Wire: diagnostics, go-to-definition, completion popup, hover overlay, format, rename, quickfix, semantic tokens into the editor widget. Hover / Complete / Format / Def / Rename / Fix call `scuzz lsp`. Semantic token count appends to the output list. Format / rename write the buffer.
+- Host `scuzz lsp` over stdio after JSON and child pipes close. Do not skip diagnostics. Child pipes are in (`Sys.childWrite` / `Sys.childRead` / `Sys.childClose`). `examples/editor` frames JSON-RPC `Content-Length`. Fuzz overlays `lspCall` in `Lsp.scuzz_sim`.
 
 #### 6. Headless and verification
 

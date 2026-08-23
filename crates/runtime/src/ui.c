@@ -1076,6 +1076,8 @@ static const char *app_chord_label(const char *key, int mods) {
     return "Hover";
   if (c == 'p')
     return "Complete";
+  if (c == 'd')
+    return "Def";
   return NULL;
 }
 
