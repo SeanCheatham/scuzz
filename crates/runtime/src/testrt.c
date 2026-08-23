@@ -320,9 +320,13 @@ static void *mem_list(void *env) {
       base = base ? base + 1 : n->path;
       {
         SzString *s = sz_string_from_cstr(base);
+        void *flag = sz_box_i64(n->is_dir ? 1 : 0);
+        SzPair *ent = sz_pair_new(s, flag);
         SzList *old = acc;
-        acc = sz_list_cons(s, old);
+        acc = sz_list_cons(ent, old);
         sz_release(s);
+        sz_release(flag);
+        sz_release(ent);
         sz_release(old);
       }
     }
@@ -340,6 +344,22 @@ done:
 
 SzIo *sz_testrt_fs_list(SzString *path) {
   return testrt_fs_bind(path, mem_list);
+}
+
+static void *mem_exists(void *env) {
+  SzPair *pack = (SzPair *)env;
+  SzString *path_s = pack_path(pack);
+  BoxResult *r = (BoxResult *)rc_box_zero(sizeof(BoxResult));
+  char *path = norm_path(sz_string_cstr(path_s));
+  MemNode *n = fs_find(path);
+  sz_free(path);
+  r->is_err = 0;
+  r->as.ok = sz_box_i64(n ? 1 : 0);
+  return r;
+}
+
+SzIo *sz_testrt_fs_exists(SzString *path) {
+  return testrt_fs_bind(path, mem_exists);
 }
 
 static void *mem_mkdirs(void *env) {

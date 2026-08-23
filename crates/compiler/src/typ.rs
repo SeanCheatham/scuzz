@@ -4632,15 +4632,30 @@ fn infer_call(
             set_elem(&arg_tys[0])?;
             Ok(Type::Bool)
         }
-        "Fs.read" | "Fs.list" | "Fs.mkdirs" | "Fs.canonicalize" => {
+        "Fs.read" | "Fs.list" | "Fs.mkdirs" | "Fs.canonicalize" | "Fs.exists" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(match callee {
                 "Fs.read" => Type::Io(Box::new(Type::String)),
-                "Fs.list" => Type::Io(Box::new(list_of(Type::String))),
+                "Fs.list" => Type::Io(Box::new(list_of(Type::Tuple(vec![
+                    Type::String,
+                    Type::Bool,
+                ])))),
                 "Fs.canonicalize" => Type::Io(Box::new(Type::String)),
+                "Fs.exists" => Type::Io(Box::new(Type::Bool)),
                 _ => Type::Io(Box::new(Type::Unit)),
             })
+        }
+        "Fs.join" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            expect_ty(&arg_tys[1], &Type::String)?;
+            Ok(Type::String)
+        }
+        "Fs.dirname" | "Fs.basename" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            Ok(Type::String)
         }
         "Fs.write" => {
             expect_arity(callee, &arg_tys, 2)?;
@@ -13493,6 +13508,33 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Ui.setTitle should typecheck");
+    }
+
+    #[test]
+    fn typechecks_fs_list_entries() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    xs <- Fs.list(".")
+    _ <- IO.println(Str.fromInt(List.len(xs)))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Fs.list entries should typecheck");
+    }
+
+    #[test]
+    fn typechecks_fs_path_helpers() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    ok <- Fs.exists("a")
+    _ <- IO.println(Fs.join("a", "b"))
+    _ <- IO.println(Fs.dirname("a/b"))
+    _ <- IO.println(Fs.basename("a/b"))
+    _ <- IO.println(if (ok) "y" else "n")
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Fs path helpers should typecheck");
     }
 
     #[test]

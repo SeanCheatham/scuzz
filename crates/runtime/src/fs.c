@@ -210,6 +210,36 @@ SzIo *sz_fs_write(SzString *path, SzString *contents) {
   }
 }
 
+static SzList *cons_fs_entry(SzList *acc, const char *name, int is_dir) {
+  SzString *s = sz_string_from_cstr(name);
+  void *flag = sz_box_i64(is_dir ? 1 : 0);
+  SzPair *ent = sz_pair_new(s, flag);
+  SzList *old = acc;
+  SzList *out = sz_list_cons(ent, old);
+  sz_release(s);
+  sz_release(flag);
+  sz_release(ent);
+  sz_release(old);
+  return out;
+}
+
+static int fs_name_is_dir(const char *dir, const char *name) {
+  char full[2048];
+  struct stat st;
+  size_t n = strlen(dir);
+  if (n == 1 && dir[0] == '/')
+    snprintf(full, sizeof full, "/%s", name);
+  else if (n > 0 && dir[n - 1] == '/')
+    snprintf(full, sizeof full, "%s%s", dir, name);
+  else if (n == 0 || (n == 1 && dir[0] == '.'))
+    snprintf(full, sizeof full, "%s", name);
+  else
+    snprintf(full, sizeof full, "%s/%s", dir, name);
+  if (stat(full, &st) != 0)
+    return 0;
+  return S_ISDIR(st.st_mode) ? 1 : 0;
+}
+
 static void *fs_list_result(void *env) {
   SzPair *pack = (SzPair *)env;
   SzString *path = pack_path(pack);
@@ -228,13 +258,7 @@ static void *fs_list_result(void *env) {
   while ((ent = readdir(d)) != NULL) {
     if (strcmp(ent->d_name, ".") == 0 || strcmp(ent->d_name, "..") == 0)
       continue;
-    {
-      SzString *s = sz_string_from_cstr(ent->d_name);
-      SzList *old = acc;
-      acc = sz_list_cons(s, old);
-      sz_release(s);
-      sz_release(old);
-    }
+    acc = cons_fs_entry(acc, ent->d_name, fs_name_is_dir(p, ent->d_name));
   }
   closedir(d);
   r->is_err = 0;
@@ -343,4 +367,126 @@ static SzIo *fs_after_canonicalize(void *value, void *env) {
 
 SzIo *sz_fs_canonicalize(SzString *path) {
   return fs_bind(path, fs_after_canonicalize);
+}
+
+static void *fs_exists_result(void *env) {
+  SzPair *pack = (SzPair *)env;
+  SzString *path = pack_path(pack);
+  FsResult *r = (FsResult *)rc_box_zero(sizeof(FsResult));
+  const char *p = sz_string_cstr(path);
+  struct stat st;
+  r->is_err = 0;
+  r->as.ok = sz_box_i64(stat(p, &st) == 0 ? 1 : 0);
+  return r;
+}
+
+static SzIo *fs_after_exists(void *value, void *env) {
+  SzPair *pack = (SzPair *)env;
+  if ((intptr_t)value)
+    return sz_testrt_fs_exists(pack_path(pack));
+  return fm_drop(sz_io_delay(fs_exists_result, pack), unwrap_fs, NULL);
+}
+
+SzIo *sz_fs_exists(SzString *path) { return fs_bind(path, fs_after_exists); }
+
+static SzString *fs_copy_cstr(const char *s) {
+  return sz_string_from_cstr(s ? s : "");
+}
+
+SzString *sz_fs_join(SzString *a, SzString *b) {
+  const char *left;
+  const char *right;
+  size_t ln, rn;
+  char *out;
+  SzString *s;
+  if (!a || !b)
+    sz_panic("Fs.join(null)");
+  left = sz_string_cstr(a);
+  right = sz_string_cstr(b);
+  if (!right[0])
+    return fs_copy_cstr(left);
+  if (right[0] == '/')
+    return fs_copy_cstr(right);
+  if (!left[0] || strcmp(left, ".") == 0)
+    return fs_copy_cstr(right);
+  ln = strlen(left);
+  rn = strlen(right);
+  if (left[ln - 1] == '/') {
+    out = (char *)sz_alloc(ln + rn + 1);
+    memcpy(out, left, ln);
+    memcpy(out + ln, right, rn + 1);
+  } else {
+    out = (char *)sz_alloc(ln + 1 + rn + 1);
+    memcpy(out, left, ln);
+    out[ln] = '/';
+    memcpy(out + ln + 1, right, rn + 1);
+  }
+  s = sz_string_from_cstr(out);
+  sz_free(out);
+  return s;
+}
+
+static void fs_strip_trailing_slash(char *s) {
+  size_t n;
+  if (!s)
+    return;
+  n = strlen(s);
+  while (n > 1 && s[n - 1] == '/') {
+    s[n - 1] = '\0';
+    n--;
+  }
+}
+
+SzString *sz_fs_dirname(SzString *path) {
+  const char *p;
+  char *buf;
+  char *slash;
+  SzString *s;
+  if (!path)
+    sz_panic("Fs.dirname(null)");
+  p = sz_string_cstr(path);
+  if (!p[0])
+    return fs_copy_cstr(".");
+  buf = (char *)sz_alloc(strlen(p) + 1);
+  memcpy(buf, p, strlen(p) + 1);
+  fs_strip_trailing_slash(buf);
+  slash = strrchr(buf, '/');
+  if (!slash) {
+    sz_free(buf);
+    return fs_copy_cstr(".");
+  }
+  if (slash == buf) {
+    slash[1] = '\0';
+    s = sz_string_from_cstr(buf);
+    sz_free(buf);
+    return s;
+  }
+  *slash = '\0';
+  s = sz_string_from_cstr(buf);
+  sz_free(buf);
+  return s;
+}
+
+SzString *sz_fs_basename(SzString *path) {
+  const char *p;
+  char *buf;
+  char *slash;
+  SzString *s;
+  if (!path)
+    sz_panic("Fs.basename(null)");
+  p = sz_string_cstr(path);
+  if (!p[0])
+    return fs_copy_cstr("");
+  buf = (char *)sz_alloc(strlen(p) + 1);
+  memcpy(buf, p, strlen(p) + 1);
+  fs_strip_trailing_slash(buf);
+  if (buf[0] == '/' && buf[1] == '\0') {
+    s = sz_string_from_cstr("/");
+    sz_free(buf);
+    return s;
+  }
+  slash = strrchr(buf, '/');
+  s = sz_string_from_cstr(slash ? slash + 1 : buf);
+  sz_free(buf);
+  return s;
 }

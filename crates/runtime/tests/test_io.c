@@ -4121,6 +4121,38 @@ int main(void) {
     r = sz_io_unsafe_run(sz_fs_list(sz_string_from_cstr("build")));
     assert(r.ok);
     assert(!sz_list_is_empty((SzList *)r.value));
+    {
+      SzList *xs = (SzList *)r.value;
+      int saw_file = 0;
+      while (xs && !sz_list_is_empty(xs)) {
+        SzPair *ent = (SzPair *)sz_list_head(xs);
+        SzString *name = (SzString *)sz_pair_left(ent);
+        int64_t is_dir = sz_unbox_i64(sz_pair_right(ent));
+        if (strcmp(sz_string_cstr(name), "test_fs_roundtrip.txt") == 0) {
+          saw_file = 1;
+          assert(is_dir == 0);
+        }
+        xs = sz_list_tail(xs);
+      }
+      assert(saw_file);
+    }
+    r = sz_io_unsafe_run(sz_fs_exists(sz_string_from_cstr(path)));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 1);
+    r = sz_io_unsafe_run(sz_fs_exists(sz_string_from_cstr("build/missing-fs-b1")));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 0);
+    {
+      SzString *j = sz_fs_join(sz_string_from_cstr("a"), sz_string_from_cstr("b"));
+      SzString *d = sz_fs_dirname(sz_string_from_cstr("a/b/c"));
+      SzString *b = sz_fs_basename(sz_string_from_cstr("a/b/c"));
+      assert(strcmp(sz_string_cstr(j), "a/b") == 0);
+      assert(strcmp(sz_string_cstr(d), "a/b") == 0);
+      assert(strcmp(sz_string_cstr(b), "c") == 0);
+      sz_release(j);
+      sz_release(d);
+      sz_release(b);
+    }
     r = sz_io_unsafe_run(sz_fs_canonicalize(sz_string_from_cstr("build")));
     assert(r.ok);
     assert(sz_string_len((SzString *)r.value) > 0);
@@ -4158,6 +4190,20 @@ int main(void) {
     r = sz_io_unsafe_run(ls);
     assert(r.ok);
     assert(!sz_list_is_empty((SzList *)r.value));
+    {
+      SzList *xs = (SzList *)r.value;
+      SzPair *ent = (SzPair *)sz_list_head(xs);
+      SzString *name = (SzString *)sz_pair_left(ent);
+      int64_t is_dir = sz_unbox_i64(sz_pair_right(ent));
+      assert(strcmp(sz_string_cstr(name), "x.txt") == 0);
+      assert(is_dir == 0);
+    }
+    r = sz_io_unsafe_run(sz_fs_exists(sz_string_from_cstr("step/x.txt")));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 1);
+    r = sz_io_unsafe_run(sz_fs_exists(sz_string_from_cstr("missing-mem")));
+    assert(r.ok);
+    assert(sz_unbox_i64(r.value) == 0);
     assert(access("step/x.txt", F_OK) != 0);
     sz_testrt_reset();
   }
