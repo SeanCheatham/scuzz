@@ -12926,7 +12926,7 @@ static void test_view_editor(void) {
   assert(strstr(body, "[fields]") != NULL);
   assert(strstr(body, "item=\"hia\"") != NULL);
   assert(strstr(body, "[editor]") != NULL);
-  assert(strstr(body, "0* caret=5 sel=5:5 \"z\\n  b\"") != NULL);
+  assert(strstr(body, "0* caret=5 sel=5:5 sx=0 sy=0 \"z\\n  b\"") != NULL);
   {
     const char *taps_sec = strstr(body, "[taps]\n");
     assert(taps_sec != NULL);
@@ -12998,6 +12998,124 @@ static void test_view_editor(void) {
   sz_ui_unmount(session);
   sz_signal_str_free(buf);
   sz_signal_str_free(field_sig);
+  remove(path);
+  remove(dump);
+}
+
+static void test_view_editor_viewport(void) {
+  SzSignalStr *buf;
+  SzView *root, *ed;
+  SzUiConfig cfg;
+  SzUiSession *session;
+  const SzTheme *theme = sz_theme_default();
+  const char *path = "/tmp/scuzz_ui_editor_viewport.script";
+  const char *dump = "/tmp/scuzz_ui_editor_viewport.dump";
+  char *body;
+  char long_line[97];
+  char tall[512];
+  int i;
+  SzInputEvent ev;
+  SzRect fr;
+  float cell = sk_font_mono_cell(theme->font_px);
+  float line_h = theme->font_px + 6.f;
+
+  buf = sz_signal_str("");
+  root = sz_view_column();
+  ed = sz_view_editor(buf);
+  sz_view_add_child(root, ed);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 80;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_inject(session, path));
+  assert(sz_ui_session_set_debug_dump(session, dump));
+  assert(sz_ui_pump_sync(session));
+
+  fr = sz_view_frame(ed);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_TAP;
+  ev.x = fr.x + 8.f;
+  ev.y = fr.y + 8.f;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_ui_pump_sync(session));
+
+  /* Long line: End pans horizontally. */
+  for (i = 0; i < 96; i++)
+    long_line[i] = 'a';
+  long_line[96] = '\0';
+  sz_signal_str_set(buf, long_line);
+  write_stamp(path, "key End\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_editor_scroll_x(ed) > 0.f);
+  body = slurp_cstr(dump);
+  assert(strstr(body, "[editor]") != NULL);
+  assert(strstr(body, "sx=0") == NULL);
+  free(body);
+
+  /* Tall file: caret at end pans vertically. Paint visible lines only. */
+  tall[0] = '\0';
+  for (i = 0; i < 40; i++)
+    strcat(tall, "x\n");
+  strcat(tall, "z");
+  sz_signal_str_set(buf, tall);
+  sz_view_set_editor_caret(ed, (int)strlen(tall));
+  write_stamp(path, "caret 80\nkey End\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_editor_scroll_y(ed) > 0.f);
+  body = slurp_cstr(dump);
+  assert(strstr(body, "sy=0") == NULL);
+  free(body);
+  {
+    SkSurface *surf = sk_surface_make_raster_n32_premul(80, 80);
+    SkCanvas *canvas;
+    assert(surf);
+    canvas = sk_surface_get_canvas(surf);
+    assert(canvas);
+    assert(sz_view_paint(sz_ui_session_root(session), canvas, 80, 80, theme));
+    sk_surface_unref(surf);
+  }
+
+  /* Wheel over the editor pans Y. Editors omit from [scrolls]. */
+  {
+    float y0 = sz_view_editor_scroll_y(ed);
+    SzView *scrolls[8];
+    assert(sz_view_collect_scrolls(sz_ui_session_root(session), scrolls, 8) == 0);
+    fr = sz_view_frame(ed);
+    memset(&ev, 0, sizeof(ev));
+    ev.kind = SZ_INPUT_SCROLL;
+    ev.x = fr.x + 8.f;
+    ev.y = fr.y + 8.f;
+    ev.dy = -y0;
+    assert(sz_ui_inject_sync(session, &ev));
+    assert(sz_view_editor_scroll_y(ed) < y0);
+  }
+
+  /* Mono columns: i and W share a click-to-caret column. */
+  sz_signal_str_set(buf, "ii\nWW");
+  sz_view_set_editor_caret(ed, 0);
+  write_stamp(path, "key Home\n");
+  assert(sz_ui_pump_sync(session));
+  fr = sz_view_frame(ed);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_TAP;
+  ev.x = fr.x + 6.f + cell * 1.5f;
+  ev.y = fr.y + 6.f + line_h * 0.4f;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_view_editor_caret(ed) == 2);
+  ev.y = fr.y + 6.f + line_h * 1.4f;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_view_editor_caret(ed) == 5);
+
+  write_stamp(path, "key PageUp\nkey PageDown\n");
+  assert(sz_ui_pump_sync(session));
+
+  sz_ui_unmount(session);
+  sz_signal_str_free(buf);
   remove(path);
   remove(dump);
 }
@@ -13961,6 +14079,7 @@ int main(void) {
   test_property_signal_str();
   test_text_field_edit();
   test_view_editor();
+  test_view_editor_viewport();
   test_caret_metrics();
   test_alloc_pump_flat();
   test_alloc_counter_pump_flat();

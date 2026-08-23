@@ -466,11 +466,13 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
       ed_target = sz_view_edit_target(session->root);
       fprintf(f, "\n[editor]\n");
       for (i = 0; i < n_editors; i++) {
-        fprintf(f, "%d%s caret=%d sel=%d:%d ", i,
+        fprintf(f, "%d%s caret=%d sel=%d:%d sx=%.0f sy=%.0f ", i,
                 editors[i] == ed_target ? "*" : "",
                 sz_view_editor_caret(editors[i]),
                 sz_view_editor_sel_start(editors[i]),
-                sz_view_editor_sel_end(editors[i]));
+                sz_view_editor_sel_end(editors[i]),
+                sz_view_editor_scroll_x(editors[i]),
+                sz_view_editor_scroll_y(editors[i]));
         fputs_dump_escaped(f, sz_view_editor_value(editors[i]));
         fputc('\n', f);
       }

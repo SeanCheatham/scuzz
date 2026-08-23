@@ -28,11 +28,23 @@ int main(void) {
   sk_canvas_draw_string(canvas, "Scuzz Lang", 14, 20, paint);
 
   float measured = sk_font_measure_string("Scuzz", 8.f);
+  float cell;
+  float ii;
+  float ww;
   assert(measured > 0.f);
   assert(sk_font_measure_string("", 8.f) == 0.f);
   assert(sk_paint_get_text_size(paint) == 8.f);
   /* sk_sw is monospace (5 * 8); real Skia is proportional — both OK. */
   (void)measured;
+  cell = sk_font_mono_cell(8.f);
+  assert(cell > 0.f);
+  ii = sk_font_measure_mono_string("ii", 8.f);
+  ww = sk_font_measure_mono_string("WW", 8.f);
+  assert(ii == ww);
+  assert(ii == 2.f * sk_font_measure_mono_string("i", 8.f));
+  assert(sk_font_measure_mono_string("", 8.f) == 0.f);
+  sk_paint_set_color(paint, sk_color_rgba(240, 240, 240, 255));
+  sk_canvas_draw_mono_string(canvas, "ii", 8, 28, paint);
 
   px = sk_surface_peek_pixels(surf, &px_len);
   assert(px && px_len == 64 * 32 * 4);

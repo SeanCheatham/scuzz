@@ -513,6 +513,9 @@ int sz_view_text_field_sel_start(const SzView *view);
 int sz_view_text_field_sel_end(const SzView *view);
 int sz_view_editor_sel_start(const SzView *view);
 int sz_view_editor_sel_end(const SzView *view);
+/* Viewport pan on a View.editor (content origin). 0 if not an editor. */
+float sz_view_editor_scroll_x(const SzView *view);
+float sz_view_editor_scroll_y(const SzView *view);
 /* Set selection: `start` is the anchor, `end` is the caret (both snapped). */
 int sz_view_set_text_field_sel(SzView *view, int start, int end);
 int sz_view_set_editor_sel(SzView *view, int start, int end);
@@ -547,7 +550,8 @@ int sz_ui_session_watch(SzUiSession *session, const char *path);
  * (star on the target; `B` is the caret byte offset; `A:C` is the selection
  * `[A, C)`). Quoted field values flatten newlines. Editors omit from `[fields]`.
  * [editor] lists `View.editor` nodes (one line each) when any exist:
- * `N* caret=B sel=A:C "escaped"` (star on the focused editor, else first).
+ * `N* caret=B sel=A:C sx=X sy=Y "escaped"` (star on the focused editor, else
+ * first; `sx`/`sy` are viewport pan). Editor paint is monospace cells.
  * Quotes keep newlines as `\\n` (not a space). `text N s` / `type N s` /
  * `backspace N k` / `caret N b` / `select N a c` target dump index N.
  * One-token forms still use the starred field, or the focused editor when

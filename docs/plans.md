@@ -1,8 +1,8 @@
 # Next slice
 
-A6 — Viewport and monospace.
+A7 — Undo, gutter, and highlight.
 
-Scroll the viewport to the caret. Horizontal scroll for long lines. Vertical scroll for the file. Virtualize paint. Do not layout one View per line. Monospace typeface on every presenter (`sk_sw`, Skia CPU, GPU present). `View.fontSize` stays. The editor does not use the proportional UI font. `View.scroll` clips paint but does not window Views; the editor paints visible lines itself.
+Undo and redo in the editor widget. Gutter line numbers and diagnostic marks stay inside `[editor]`. Do not dump a second tree. Syntax highlight from LSP semantic tokens or an in-widget lexer. Folding, inlays, and bracket match may land here if they stay cheap. Do not block C1 on them.
 
 Each slice lands Headless inject + dump + a runtime test. Desktop and Headless share verbs.
 
