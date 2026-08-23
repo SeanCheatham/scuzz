@@ -370,92 +370,242 @@ SzIo *sz_sys_write(SzString *s) {
   }
 }
 
+#define EXEC_CAP (1024 * 1024)
+
 typedef struct ExecSt {
   SzString *cmd;
-  int read_fd;
+  int out_fd;
+  int err_fd;
   pid_t pid;
+  int status;
+  char *out_buf;
+  size_t out_len;
+  size_t out_cap;
+  char *err_buf;
+  size_t err_len;
+  size_t err_cap;
 } ExecSt;
+
+static SzIo *race_drop(SzIo *left, SzIo *right) {
+  SzIo *io = sz_io_race(left, right);
+  sz_release(left);
+  sz_release(right);
+  return io;
+}
+
+static void exec_close_fd(int *fd) {
+  if (fd && *fd >= 0) {
+    close(*fd);
+    *fd = -1;
+  }
+}
 
 static void exec_free(ExecSt *st) {
   int status = 0;
   if (!st)
     return;
-  if (st->read_fd >= 0) {
-    close(st->read_fd);
-    st->read_fd = -1;
-  }
+  exec_close_fd(&st->out_fd);
+  exec_close_fd(&st->err_fd);
   if (st->pid > 0)
     (void)waitpid(st->pid, &status, WNOHANG);
+  sz_free(st->out_buf);
+  sz_free(st->err_buf);
+  st->out_buf = NULL;
+  st->err_buf = NULL;
   sz_release(st->cmd);
   st->cmd = NULL;
+}
+
+static void exec_set_cloexec_nb(int fd) {
+  int fl;
+  (void)fcntl(fd, F_SETFD, FD_CLOEXEC);
+  fl = fcntl(fd, F_GETFL, 0);
+  if (fl >= 0)
+    (void)fcntl(fd, F_SETFL, fl | O_NONBLOCK);
+}
+
+static int exec_append(char **buf, size_t *len, size_t *cap, const char *src,
+                       size_t n) {
+  size_t room;
+  if (*len >= EXEC_CAP)
+    return 1;
+  room = EXEC_CAP - *len;
+  if (n > room)
+    n = room;
+  if (!n)
+    return 1;
+  if (*len + n + 1 > *cap) {
+    size_t nc = *cap ? *cap * 2 : 256;
+    char *p;
+    while (nc < *len + n + 1)
+      nc *= 2;
+    if (nc > EXEC_CAP + 1)
+      nc = EXEC_CAP + 1;
+    p = (char *)sz_alloc(nc);
+    if (*buf && *len)
+      memcpy(p, *buf, *len);
+    sz_free(*buf);
+    *buf = p;
+    *cap = nc;
+  }
+  memcpy(*buf + *len, src, n);
+  *len += n;
+  (*buf)[*len] = '\0';
+  return 1;
+}
+
+static int exec_drain_fd(int *fd, char **buf, size_t *len, size_t *cap) {
+  char tmp[4096];
+  if (!fd || *fd < 0)
+    return 1;
+  for (;;) {
+    ssize_t n = read(*fd, tmp, sizeof tmp);
+    if (n > 0) {
+      exec_append(buf, len, cap, tmp, (size_t)n);
+      continue;
+    }
+    if (n == 0) {
+      exec_close_fd(fd);
+      return 1;
+    }
+    if (errno == EINTR)
+      continue;
+    if (errno == EAGAIN || errno == EWOULDBLOCK)
+      return 1;
+    return 0;
+  }
 }
 
 static void *sys_exec_start(void *env) {
   ExecSt *st = (ExecSt *)env;
   SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
-  int fds[2];
+  int out_fds[2];
+  int err_fds[2];
   pid_t pid;
   const char *c = sz_string_cstr(st->cmd);
 
-  if (pipe(fds) != 0) {
+  if (pipe(out_fds) != 0) {
+    r->is_err = 1;
+    r->as.err = sz_error_new(3, "Sys.exec: pipe failed");
+    return r;
+  }
+  if (pipe(err_fds) != 0) {
+    close(out_fds[0]);
+    close(out_fds[1]);
     r->is_err = 1;
     r->as.err = sz_error_new(3, "Sys.exec: pipe failed");
     return r;
   }
   pid = fork();
   if (pid < 0) {
-    close(fds[0]);
-    close(fds[1]);
+    close(out_fds[0]);
+    close(out_fds[1]);
+    close(err_fds[0]);
+    close(err_fds[1]);
     r->is_err = 1;
     r->as.err = sz_error_new(3, "Sys.exec: fork failed");
     return r;
   }
   if (pid == 0) {
-    close(fds[0]);
+    close(out_fds[0]);
+    close(err_fds[0]);
+    if (dup2(out_fds[1], STDOUT_FILENO) < 0)
+      _exit(127);
+    if (dup2(err_fds[1], STDERR_FILENO) < 0)
+      _exit(127);
+    if (out_fds[1] != STDOUT_FILENO)
+      close(out_fds[1]);
+    if (err_fds[1] != STDERR_FILENO && err_fds[1] != STDOUT_FILENO)
+      close(err_fds[1]);
     execl("/bin/sh", "sh", "-c", c, (char *)NULL);
     _exit(127);
   }
-  close(fds[1]);
-  (void)fcntl(fds[0], F_SETFD, FD_CLOEXEC);
-  st->read_fd = fds[0];
+  close(out_fds[1]);
+  close(err_fds[1]);
+  exec_set_cloexec_nb(out_fds[0]);
+  exec_set_cloexec_nb(err_fds[0]);
+  st->out_fd = out_fds[0];
+  st->err_fd = err_fds[0];
   st->pid = pid;
   r->is_err = 0;
   return r;
 }
 
-static void *sys_exec_reap(void *env) {
-  ExecSt *st = (ExecSt *)env;
+static void *sys_exec_pack(ExecSt *st, int code) {
   SysResult *r = (SysResult *)rc_box_zero(sizeof(SysResult));
-  int status = 0;
-  int code;
-  pid_t w;
-
-  do {
-    w = waitpid(st->pid, &status, 0);
-  } while (w < 0 && errno == EINTR);
-  if (st->read_fd >= 0) {
-    close(st->read_fd);
-    st->read_fd = -1;
-  }
-  st->pid = 0;
-  if (w < 0) {
-    r->is_err = 1;
-    r->as.err = sz_error_new(3, "Sys.exec: wait failed");
-    return r;
-  }
-  code = status;
-#ifdef WIFEXITED
-  if (WIFEXITED(status))
-    code = WEXITSTATUS(status);
-#endif
+  SzString *out = sz_string_from_bytes(st->out_buf ? st->out_buf : "", st->out_len);
+  SzString *err = sz_string_from_bytes(st->err_buf ? st->err_buf : "", st->err_len);
+  void *boxed = sz_box_i64((int64_t)code);
+  SzPair *io = sz_pair_new(out, err);
+  SzPair *tup = sz_pair_new(boxed, io);
+  sz_release(out);
+  sz_release(err);
+  sz_release(boxed);
+  sz_release(io);
   r->is_err = 0;
-  r->as.ok = sz_box_i64((int64_t)code);
+  r->as.ok = tup;
   return r;
 }
 
+static int exec_exit_code(int status) {
+  int code = status;
+#ifdef WIFEXITED
+  if (WIFEXITED(status))
+    return WEXITSTATUS(status);
+#endif
+#ifdef WIFSIGNALED
+  if (WIFSIGNALED(status))
+    return 128 + WTERMSIG(status);
+#endif
+  return code;
+}
+
+static SzIo *exec_wait_ready(ExecSt *st);
+
 static SzIo *exec_after_poll(void *value, void *env) {
+  ExecSt *st = (ExecSt *)env;
+  int status = 0;
+  pid_t w = 0;
   (void)value;
-  return fm_drop(sz_io_delay(sys_exec_reap, env), unwrap_sys, NULL);
+  if (!exec_drain_fd(&st->out_fd, &st->out_buf, &st->out_len, &st->out_cap) ||
+      !exec_drain_fd(&st->err_fd, &st->err_buf, &st->err_len, &st->err_cap))
+    return sz_io_fail_cstr("Sys.exec: read failed");
+  if (st->pid > 0) {
+    do {
+      w = waitpid(st->pid, &status, WNOHANG);
+    } while (w < 0 && errno == EINTR);
+    if (w > 0) {
+      st->status = status;
+      st->pid = 0;
+    } else if (w < 0)
+      return sz_io_fail_cstr("Sys.exec: wait failed");
+  }
+  if (st->out_fd >= 0 || st->err_fd >= 0)
+    return exec_wait_ready(st);
+  if (st->pid > 0) {
+    do {
+      w = waitpid(st->pid, &status, 0);
+    } while (w < 0 && errno == EINTR);
+    if (w < 0)
+      return sz_io_fail_cstr("Sys.exec: wait failed");
+    st->status = status;
+    st->pid = 0;
+  }
+  return unwrap_sys(sys_exec_pack(st, exec_exit_code(st->status)), NULL);
+}
+
+static SzIo *exec_wait_ready(ExecSt *st) {
+  SzIo *ready;
+  if (st->out_fd >= 0 && st->err_fd >= 0)
+    ready = race_drop(sz_io_poll_readable(st->out_fd),
+                      sz_io_poll_readable(st->err_fd));
+  else if (st->out_fd >= 0)
+    ready = sz_io_poll_readable(st->out_fd);
+  else if (st->err_fd >= 0)
+    ready = sz_io_poll_readable(st->err_fd);
+  else
+    ready = sz_io_pure(NULL);
+  return fm_drop(ready, exec_after_poll, st);
 }
 
 static SzIo *exec_finish(void *code, void *env) {
@@ -475,7 +625,7 @@ static SzIo *exec_after_start(void *value, void *env) {
   if (!r || r->is_err)
     return unwrap_sys(value, NULL);
   sz_release(r);
-  io = fm_drop(sz_io_poll_readable(st->read_fd), exec_after_poll, st);
+  io = exec_wait_ready(st);
   return fm_drop(io, exec_finish, st);
 }
 
@@ -493,7 +643,8 @@ static SzIo *exec_after_kick(void *ignored, void *env) {
   memset(st, 0, sizeof(ExecSt));
   sz_retain(p->left);
   st->cmd = (SzString *)p->left;
-  st->read_fd = -1;
+  st->out_fd = -1;
+  st->err_fd = -1;
   io = fm_drop(sz_io_delay(sys_exec_start, st), exec_after_start, st);
   {
     SzIo *handled = sz_io_handle_error_with(io, exec_on_err, st);

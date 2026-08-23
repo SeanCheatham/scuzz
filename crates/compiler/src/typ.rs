@@ -4685,7 +4685,11 @@ fn infer_call(
         "Sys.exec" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
-            Ok(Type::Io(Box::new(Type::Int)))
+            Ok(Type::Io(Box::new(Type::Tuple(vec![
+                Type::Int,
+                Type::String,
+                Type::String,
+            ]))))
         }
         "Sys.spawn" => {
             expect_arity(callee, &arg_tys, 1)?;
@@ -13550,6 +13554,20 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Fs delete/rename/walk should typecheck");
+    }
+
+    #[test]
+    fn typechecks_sys_exec_capture() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    (code, out, err) <- Sys.exec("true")
+    _ <- IO.println(Str.fromInt(code))
+    _ <- IO.println(out)
+    _ <- IO.println(err)
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Sys.exec capture should typecheck");
     }
 
     #[test]
