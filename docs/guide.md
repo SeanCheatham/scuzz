@@ -25,7 +25,7 @@ From a prebuilt tarball (no checkout build): `RELEASE_TGZ=scuzz-<triple>.tar.gz 
 
 `scuzz new --ui` scaffolds `scuzz.toml` with `[ui]`, a Counter-shaped `src/Main.scuzz`, and Headless-friendly defaults.
 
-`scuzz ide [path]` launches the bundled `[ui]` editor (`examples/editor` in a checkout; `SCUZZ_HOME/ide` from a release). Desktop is the default. `--headless` stays a peer. Pass a file or a project directory. A directory lists as the tree root and opens `sample.txt` under that directory. There is no `scuzz-ide` binary.
+`scuzz ide [path]` launches the bundled `[ui]` editor (`examples/editor` in a checkout; `SCUZZ_HOME/ide` from a release). Desktop is the default. `--headless` stays a peer. Pass a file or a project directory. A directory lists as the tree root and opens `src/Main.scuzz` when that file exists, else the first `.scuzz` file in `src/` or in the directory. There is no `scuzz-ide` binary.
 
 `scuzz package --target host` writes a Mobile host shell under `build/package/host`. `scuzz package --target android` packs a debug APK (needs the NDK and the Android SDK). Missing NDK or SDK fails with one install line. `scuzz package --target ios` builds a signed iOS simulator `.app` (needs Xcode). Missing Xcode fails with one install line. The iOS and Android shells send typed text to TextField. SurfaceView taps on Android enter the same pump as iOS touches.
 

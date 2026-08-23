@@ -46,13 +46,12 @@ def listDir(dir: String): IO[List[String]] =
     _ <- Chrome.seedWorkspace()
     args <- Sys.args()
     arg = if (List.isEmpty(args)) "sample.txt" else List.head(args)
-    _ = Property.check("file", Chrome.openPath("f", Str.len("")) == "f", true)
-    _ = Property.check("dir", Chrome.openPath("d", Str.len("x")) == Fs.join("d", "sample.txt"), true)
+    _ = Property.check("rel", Chrome.preferredRel(true, []: List[String], []: List[String]) == Fs.join("src", "Main.scuzz"), true)
     argListed <- Fs.list(arg).map(_ => Str.len("x")).handleErrorWith(_ =>
   IO.pure(Str.len(""))
 )
-    file = Chrome.openPath(arg, argListed)
-    root = Fs.dirname(file)
+    file <- Chrome.openBuffer(arg, argListed)
+    root = if (argListed == 0) Fs.dirname(file) else arg
     raw <- Fs.read(file).handleErrorWith(_ =>
   IO.pure("")
 )
