@@ -729,8 +729,13 @@ int64_t sz_set_is_disjoint(SzMap *a, SzMap *b);
 SzIo *sz_fs_read(SzString *path);
 SzIo *sz_fs_write(SzString *path, SzString *contents);
 SzIo *sz_fs_list(SzString *path);
+SzIo *sz_fs_exists(SzString *path);
 SzIo *sz_fs_mkdirs(SzString *path);
 SzIo *sz_fs_canonicalize(SzString *path);
+/* Pure path helpers (follow Str.concat). */
+SzString *sz_fs_join(SzString *a, SzString *b);
+SzString *sz_fs_dirname(SzString *path);
+SzString *sz_fs_basename(SzString *path);
 
 /* Process / args / env / console (console out = IO.println) */
 void sz_sys_set_args(int argc, char **argv);
@@ -776,6 +781,7 @@ int sz_testrt_fs_is_fake(void);
 SzIo *sz_testrt_fs_read(SzString *path);
 SzIo *sz_testrt_fs_write(SzString *path, SzString *contents);
 SzIo *sz_testrt_fs_list(SzString *path);
+SzIo *sz_testrt_fs_exists(SzString *path);
 SzIo *sz_testrt_fs_mkdirs(SzString *path);
 SzIo *sz_testrt_fs_canonicalize(SzString *path);
 
