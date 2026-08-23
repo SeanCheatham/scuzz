@@ -13416,6 +13416,39 @@ static void test_text_field_edit(void) {
   sz_signal_str_free(draft);
 }
 
+static void test_app_chord_save(void) {
+  SzSignalInt *n;
+  SzView *root, *btn;
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzInputEvent ev;
+
+  n = sz_signal_int(0);
+  root = sz_view_column();
+  btn = sz_view_button("Save", counter_tap, n);
+  sz_view_add_child(root, btn);
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_KEY;
+  ev.key = "s";
+  ev.key_mods = SZ_KEY_CTRL;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_signal_int_get(n) == 1);
+  ev.key = "f";
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_signal_int_get(n) == 1);
+  sz_ui_unmount(session);
+  sz_signal_int_free(n);
+}
+
 static void test_caret_metrics(void) {
   SzSignalStr *draft;
   SzView *root;
@@ -14329,6 +14362,7 @@ int main(void) {
   test_view_editor_viewport();
   test_view_editor_undo_gutter();
   test_view_focus_split_overlay();
+  test_app_chord_save();
   test_caret_metrics();
   test_alloc_pump_flat();
   test_alloc_counter_pump_flat();

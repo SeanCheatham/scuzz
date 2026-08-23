@@ -1,0 +1,24 @@
+def filesOf(ents: List[(String, Bool)]): List[String] =
+  List.map(ents, e => Property.check("enc", Str.len(e._1) > 0, if (e._2) Str.concat(e._1, "/") else e._1))
+
+def joinChild(dir: String, label: String): String =
+  Fs.join(dir, Str.stripSuffix(label, "/"))
+
+def keepTree(_dir: String, s: String): Bool =
+  Property.check("keep", Str.len(s) > 0, !Str.startsWith(s, ".") && s != "corpus/" && s != "goldens/" && s != "build/")
+
+def seedWorkspace(): IO[Unit] =
+  for {
+    _ <- Fs.mkdirs("src").handleErrorWith(_ =>
+  IO.pure(())
+)
+    _ <- Fs.read("sample.txt").flatMap(_ => IO.pure(())).handleErrorWith(_ =>
+  Fs.write("sample.txt", """hello
+world
+""")
+)
+    _ <- Fs.read("scuzz.toml").flatMap(_ => IO.pure(())).handleErrorWith(_ =>
+  Fs.write("scuzz.toml", "")
+)
+  } yield ()
+

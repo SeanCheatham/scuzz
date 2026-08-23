@@ -2,25 +2,68 @@
 str[0] = "hello
 world
 "
-list[1] = []
+str[1] = "hello
+world
+"
+str[2] = "sample.txt"
+str[3] = "."
+int[4] = 0
+list[5] = []
+list[6] = ["sample.txt", "scuzz.toml", "src/"]
+list[7] = []
+str[8] = ""
+str[9] = ""
+int[10] = 28
+int[11] = 0
+int[12] = 0
+int[13] = 0
 
 [views]
+split:28
+text:Files
+list:list
+button:sample.txt
+button:scuzz.toml
+button:src/
 text:sample.txt
 button:Save
 button:Check
+button:Find
+button:Complete
+button:Hover
+button:Format
 editor:editor
 list:list
+list:list
+overlay:0
+overlay:0
+overlay:0
 
 [taps]
-0 Save 79,24 48x32
-1 Check 135,24 49x32
+0 sample.txt 24,46 67x32
+1 scuzz.toml 24,86 66x32
+2 src/ 24,126 48x32
+3 Save 297,36 48x32
+4 Check 353,36 49x32
+5 Find 410,36 48x32
+6 Complete 466,36 56x32
+7 Hover 530,36 48x32
+8 Format 586,36 53x32
 
 [fields]
 
 [editor]
 0* caret=12 sel=12:12 sx=0 sy=0 lines=3 "hello\nworld\n"
 
+[splits]
+0 frac=28
+
+[overlays]
+0 open=0
+1 open=0
+2 open=0
+
 [scrolls]
 
 [last_hit]
-xy 103.0 40.0 -> button:Save
+xy 320.9 52.0 -> button:Save
