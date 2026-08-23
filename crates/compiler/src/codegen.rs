@@ -428,6 +428,9 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_fraction(i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_text_field(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_editor(ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_split(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_overlay(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_ui_set_title(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_icon(i64, i64)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_image(i64, i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_add_child(ptr, ptr)").unwrap();
@@ -7177,6 +7180,34 @@ fn emit_call(
             .unwrap();
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
+        "View.split" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_view_split(ptr {}, ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value, emitted_args[2].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "View.overlay" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_view_overlay(ptr {}, ptr {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "Ui.setTitle" => {
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_ui_set_title(ptr {})",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            io_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
         "View.icon" => {
             writeln!(
                 code,
@@ -12767,6 +12798,57 @@ enum Color:
         assert!(
             ir.contains("sz_lang_view_editor"),
             "expected sz_lang_view_editor in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_split() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(40)
+    _ <- Ui.run(_ => View.split(n, View.text("a"), View.text("b")))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_split"),
+            "expected sz_lang_view_split in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_overlay() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(1)
+    _ <- Ui.run(_ => View.overlay(n, View.text("p")))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_overlay"),
+            "expected sz_lang_view_overlay in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_ui_set_title() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- Ui.setTitle("Hello")
+    _ <- Ui.run(_ => View.text("x"))
+  } yield ()
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_ui_set_title"),
+            "expected sz_lang_ui_set_title in IR:\n{ir}"
         );
     }
 

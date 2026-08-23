@@ -159,11 +159,15 @@ struct SzUiSession {
   float last_secondary_y;
   char *last_secondary_desc;
   char *clipboard;
+  char *title_owned;
   void *code_handle;
   void *code_stale;
   int code_gen;
   unsigned pumps;
 };
+
+static SzUiSession *g_live_session;
+static char *g_pending_title;
 
 static int runtime_kind_ok(SzUiRuntimeKind kind) {
   return kind == SZ_UI_RUNTIME_HEADLESS || kind == SZ_UI_RUNTIME_DESKTOP ||
@@ -221,6 +225,16 @@ SzUiSession *sz_ui_mount(const SzUiConfig *cfg, SzView *root) {
   }
   s->canvas = sk_surface_get_canvas(s->surface);
   s->dirty = 1;
+  {
+    const char *t = cfg->title;
+    if (!t || !t[0])
+      t = g_pending_title;
+    if (!t || !t[0])
+      t = "Scuzz Lang";
+    s->title_owned = sz_strdup(t);
+    s->cfg.title = s->title_owned;
+  }
+  g_live_session = s;
   if (cfg->kind == SZ_UI_RUNTIME_DESKTOP) {
     if (sz_embedder_available()) {
       fprintf(stderr,
@@ -492,6 +506,37 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
       }
     }
   }
+  {
+    SzView *splits[64];
+    int n_splits = (session && session->root)
+                       ? sz_view_collect_splits(session->root, splits, 64)
+                       : 0;
+    if (n_splits > 0) {
+      fprintf(f, "\n[splits]\n");
+      for (i = 0; i < n_splits; i++)
+        fprintf(f, "%d frac=%d\n", i, sz_view_split_frac(splits[i]));
+    }
+  }
+  {
+    SzView *overlays[64];
+    SzView *top = NULL;
+    int n_ov = (session && session->root)
+                   ? sz_view_collect_overlays(session->root, overlays, 64)
+                   : 0;
+    int j;
+    if (n_ov > 0) {
+      for (j = n_ov - 1; j >= 0; j--) {
+        if (sz_view_overlay_is_open(overlays[j])) {
+          top = overlays[j];
+          break;
+        }
+      }
+      fprintf(f, "\n[overlays]\n");
+      for (i = 0; i < n_ov; i++)
+        fprintf(f, "%d%s open=%d\n", i, overlays[i] == top ? "*" : "",
+                sz_view_overlay_is_open(overlays[i]));
+    }
+  }
   fprintf(f, "\n[scrolls]\n");
   n_scrolls = sz_ui_collect_scrolls(session, scrolls, 64);
   for (i = 0; i < n_scrolls; i++) {
@@ -517,10 +562,13 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
   }
   if (session && session->debug_dump_path && path &&
       strcmp(path, session->debug_dump_path) == 0) {
-    fprintf(f, "\n[session]\nkind=%s\nwidth=%d\nheight=%d\nlifecycle=%s\n"
+    fprintf(f, "\n[session]\nkind=%s\nwidth=%d\nheight=%d\ntitle=%s\n"
+               "focus=%s\nlifecycle=%s\n"
                "keyboard=%d\npumps=%u\n",
             runtime_kind_name(session->cfg.kind), session->cfg.width,
-            session->cfg.height, lifecycle_name(session->lifecycle),
+            session->cfg.height, sz_ui_session_title(session),
+            session->root ? sz_view_focus_kind(session->root) : "none",
+            lifecycle_name(session->lifecycle),
             session->keyboard_visible, session->pumps);
     {
       char heap[1536];
@@ -668,6 +716,8 @@ void sz_ui_bridge_flush(SzUiSession *session) {
 void sz_ui_unmount(SzUiSession *session) {
   if (!session)
     return;
+  if (g_live_session == session)
+    g_live_session = NULL;
   sz_ui_bridge_flush(session);
   if (session->cfg.kind == SZ_UI_RUNTIME_DESKTOP)
     sz_embedder_shutdown();
@@ -698,6 +748,7 @@ void sz_ui_unmount(SzUiSession *session) {
   sz_free(session->record_hover_desc);
   sz_free(session->last_secondary_desc);
   sz_free(session->clipboard);
+  sz_free(session->title_owned);
   sz_free(session);
 }
 
@@ -1305,6 +1356,10 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
       session->pointer_slider = hit;
       session->pointer_scroll = NULL;
       sz_view_slider_set_at(hit, event->x);
+    } else if (hit && sz_view_kind(hit) == SZ_VIEW_SPLIT) {
+      session->pointer_slider = hit;
+      session->pointer_scroll = NULL;
+      sz_view_split_set_at(hit, event->x);
     } else if (hit && (sz_view_kind(hit) == SZ_VIEW_TEXT_FIELD ||
                       sz_view_kind(hit) == SZ_VIEW_EDITOR)) {
       session->pointer_slider = NULL;
@@ -1338,7 +1393,10 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
       return 1;
     }
     if (session->pointer_slider) {
-      sz_view_slider_set_at(session->pointer_slider, event->x);
+      if (sz_view_kind(session->pointer_slider) == SZ_VIEW_SPLIT)
+        sz_view_split_set_at(session->pointer_slider, event->x);
+      else
+        sz_view_slider_set_at(session->pointer_slider, event->x);
       session->dirty = 1;
     } else if (session->pointer_field) {
       (void)sz_view_edit_extend_to_xy(session->pointer_field, event->x,
@@ -1699,6 +1757,48 @@ int sz_ui_session_height(const SzUiSession *session) {
 
 SzView *sz_ui_session_root(SzUiSession *session) {
   return session ? session->root : NULL;
+}
+
+int sz_ui_session_set_title(SzUiSession *session, const char *title) {
+  char *n;
+  if (!session)
+    return 0;
+  n = sz_strdup(title && title[0] ? title : "Scuzz Lang");
+  sz_free(session->title_owned);
+  session->title_owned = n;
+  session->cfg.title = n;
+  session->dirty = 1;
+  return 1;
+}
+
+const char *sz_ui_session_title(const SzUiSession *session) {
+  if (!session || !session->cfg.title || !session->cfg.title[0])
+    return "Scuzz Lang";
+  return session->cfg.title;
+}
+
+const char *sz_ui_default_title(void) {
+  if (g_pending_title && g_pending_title[0])
+    return g_pending_title;
+  return "Scuzz Lang";
+}
+
+static void *thunk_set_title(void *env) {
+  SzString *s = (SzString *)env;
+  const char *t = s ? sz_string_cstr(s) : "";
+  if (g_live_session)
+    sz_ui_session_set_title(g_live_session, t);
+  else {
+    sz_free(g_pending_title);
+    g_pending_title = sz_strdup(t && t[0] ? t : "Scuzz Lang");
+  }
+  return NULL;
+}
+
+SzIo *sz_lang_ui_set_title(SzString *title) {
+  if (!title)
+    sz_panic("Ui.setTitle(null)");
+  return sz_io_delay(thunk_set_title, title);
 }
 
 SzLifecyclePhase sz_ui_session_lifecycle(const SzUiSession *session) {

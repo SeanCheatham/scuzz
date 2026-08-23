@@ -5406,6 +5406,19 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::Opaque("SignalStr".into()))?;
             Ok(Type::Opaque("View".into()))
         }
+        "View.split" => {
+            expect_arity(callee, &arg_tys, 3)?;
+            expect_ty(&arg_tys[0], &Type::Opaque("SignalInt".into()))?;
+            expect_ty(&arg_tys[1], &Type::Opaque("View".into()))?;
+            expect_ty(&arg_tys[2], &Type::Opaque("View".into()))?;
+            Ok(Type::Opaque("View".into()))
+        }
+        "View.overlay" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[1], &Type::Opaque("View".into()))?;
+            expect_ty(&arg_tys[0], &Type::Opaque("SignalInt".into()))?;
+            Ok(Type::Opaque("View".into()))
+        }
         "View.icon" => {
             expect_arity(callee, &arg_tys, 2)?;
             expect_ty(&arg_tys[0], &Type::Int)?;
@@ -5439,6 +5452,11 @@ fn infer_call(
                     arg_tys[0]
                 )));
             }
+            Ok(Type::Io(Box::new(Type::Unit)))
+        }
+        "Ui.setTitle" => {
+            expect_arity(callee, &arg_tys, 1)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::Io(Box::new(Type::Unit)))
         }
         _ => {
@@ -13439,6 +13457,42 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.editor should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_split() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(40)
+    _ <- Ui.run(_ => View.split(n, View.text("a"), View.text("b")))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.split should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_overlay() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    n = Signal.int(1)
+    _ <- Ui.run(_ => View.overlay(n, View.text("p")))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.overlay should typecheck");
+    }
+
+    #[test]
+    fn typechecks_ui_set_title() {
+        let src = r#"@main def main: IO[Unit] =
+  for {
+    _ <- Ui.setTitle("Hello")
+    _ <- Ui.run(_ => View.text("x"))
+  } yield ()
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Ui.setTitle should typecheck");
     }
 
     #[test]

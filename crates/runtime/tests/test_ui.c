@@ -13206,6 +13206,138 @@ static void test_view_editor_undo_gutter(void) {
   remove(dump);
 }
 
+static void noop_tap(SzView *self, void *env) {
+  (void)self;
+  (void)env;
+}
+
+static void test_view_focus_split_overlay(void) {
+  SzSignalStr *draft;
+  SzSignalStr *pop;
+  SzSignalInt *frac;
+  SzSignalInt *open;
+  SzView *root, *field, *btn, *split, *overlay, *pop_field;
+  SzUiConfig cfg;
+  SzUiSession *session;
+  const char *path = "/tmp/scuzz_ui_a8.script";
+  const char *dump = "/tmp/scuzz_ui_a8.dump";
+  char *body;
+  SzInputEvent ev;
+  SzRect fr;
+
+  draft = sz_signal_str("");
+  pop = sz_signal_str("");
+  frac = sz_signal_int(50);
+  open = sz_signal_int(1);
+  root = sz_view_stack();
+  {
+    SzView *col = sz_view_column();
+    field = sz_view_text_field(draft, "main");
+    btn = sz_view_button("Go", noop_tap, NULL);
+    split = sz_view_split(frac, sz_view_text("L"), sz_view_text("R"));
+    sz_view_add_child(col, field);
+    sz_view_add_child(col, btn);
+    sz_view_add_child(col, split);
+    sz_view_add_child(root, col);
+  }
+  pop_field = sz_view_text_field(pop, "pop");
+  overlay = sz_view_overlay(open, pop_field);
+  sz_view_add_child(root, overlay);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 240;
+  cfg.height = 200;
+  cfg.scale = 1.0;
+  cfg.title = "Scuzz Lang";
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_inject(session, path));
+  assert(sz_ui_session_set_debug_dump(session, dump));
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_ui_session_title(session), "Scuzz Lang") == 0);
+  assert(sz_ui_session_set_title(session, "Hello"));
+  assert(strcmp(sz_ui_session_title(session), "Hello") == 0);
+
+  write_stamp(path, "key p p\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(pop), "p") == 0);
+  assert(strcmp(sz_signal_str_get(draft), "") == 0);
+
+  write_stamp(path, "key Escape\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_overlay_is_open(overlay) == 0);
+
+  fr = sz_view_frame(field);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_TAP;
+  ev.x = fr.x + 8.f;
+  ev.y = fr.y + 8.f;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_has_focused_text_field(root));
+
+  write_stamp(path, "key a a\n");
+  assert(sz_ui_pump_sync(session));
+  assert(strcmp(sz_signal_str_get(draft), "a") == 0);
+
+  fr = sz_view_frame(btn);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_TAP;
+  ev.x = fr.x + 8.f;
+  ev.y = fr.y + 8.f;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_ui_pump_sync(session));
+  assert(!sz_view_has_focused_text_field(root));
+
+  sz_view_layout(root, 240.f, 200.f, sz_theme_default());
+  fr = sz_view_frame(split);
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_POINTER;
+  ev.pointer_phase = SZ_POINTER_DOWN;
+  ev.pointer_button = 1;
+  ev.x = fr.x + (fr.w > 6.f ? (fr.w - 6.f) * 0.5f : 0.f) + 3.f;
+  ev.y = fr.y + 8.f;
+  assert(sz_ui_inject_sync(session, &ev));
+  ev.pointer_phase = SZ_POINTER_MOVE;
+  ev.x = fr.x + fr.w * 0.25f;
+  assert(sz_ui_inject_sync(session, &ev));
+  ev.pointer_phase = SZ_POINTER_UP;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_split_frac(split) == 25);
+
+  write_stamp(path, "dump\n");
+  assert(sz_ui_pump_sync(session));
+  body = slurp_cstr(dump);
+  assert(strstr(body, "title=Hello") != NULL);
+  assert(strstr(body, "[splits]") != NULL);
+  assert(strstr(body, "frac=25") != NULL);
+  assert(strstr(body, "[overlays]") != NULL);
+  assert(strstr(body, "open=0") != NULL);
+  assert(strstr(body, "split:") != NULL);
+  assert(strstr(body, "overlay:") != NULL);
+  free(body);
+  {
+    SkSurface *surf = sk_surface_make_raster_n32_premul(240, 200);
+    SkCanvas *canvas;
+    assert(surf);
+    canvas = sk_surface_get_canvas(surf);
+    assert(sz_view_paint(sz_ui_session_root(session), canvas, 240, 200,
+                         sz_theme_default()));
+    sk_surface_unref(surf);
+  }
+
+  sz_ui_unmount(session);
+  sz_signal_str_free(draft);
+  sz_signal_str_free(pop);
+  sz_signal_int_free(frac);
+  sz_signal_int_free(open);
+  remove(path);
+  remove(dump);
+}
+
 static void test_text_field_edit(void) {
   SzSignalStr *draft;
   SzView *root;
@@ -14167,6 +14299,7 @@ int main(void) {
   test_view_editor();
   test_view_editor_viewport();
   test_view_editor_undo_gutter();
+  test_view_focus_split_overlay();
   test_caret_metrics();
   test_alloc_pump_flat();
   test_alloc_counter_pump_flat();

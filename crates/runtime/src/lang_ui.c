@@ -22,7 +22,7 @@ static void fill_cfg(SzUiConfig *cfg, int width, int height) {
     cfg->kind = SZ_UI_RUNTIME_MOBILE;
   cfg->width = width;
   cfg->height = height;
-  cfg->title = "Scuzz Lang";
+  cfg->title = sz_ui_default_title();
   sz_ui_resolve_headless_size(&cfg->width, &cfg->height, &scale);
   cfg->scale = scale;
 }
@@ -287,6 +287,14 @@ SzView *sz_lang_view_text_field(SzSignalStr *text, SzString *placeholder) {
 
 SzView *sz_lang_view_editor(SzSignalStr *text) {
   return sz_view_editor(text);
+}
+
+SzView *sz_lang_view_split(SzSignalInt *frac, SzView *start, SzView *end) {
+  return sz_view_split(frac, start, end);
+}
+
+SzView *sz_lang_view_overlay(SzSignalInt *open, SzView *child) {
+  return sz_view_overlay(open, child);
 }
 
 SzView *sz_lang_view_icon(int64_t glyph, int64_t argb) {
