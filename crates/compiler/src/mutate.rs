@@ -667,9 +667,9 @@ pub fn mutate_describe(program: &Program, site: i32, mode: MutateMode) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::intent::apply_intents;
+    use crate::intent::{apply_intents, IntentScopeKind, IntentSource, SourceUnit};
     use crate::lower::lower_program;
-    use crate::overlay::{residualize_refinements, OverlayKind, OverlaySource};
+    use crate::overlay::residualize_refinements;
     use crate::parser::{parse, parse_file};
 
     #[test]
@@ -880,12 +880,18 @@ def scale(n: Int): Int =
         .unwrap();
         apply_intents(
             &mut p,
-            &[OverlaySource {
-                stem: "Main".into(),
-                kind: OverlayKind::Intent,
+            &[IntentSource {
+                package: "pkg".into(),
+                scope: IntentScopeKind::Package,
+                dir_rel: String::new(),
+                label: "pkg/intent.scuzz_intent".into(),
+                text: "For Main.bump:\nThe result is the input plus 1.\n".into(),
                 path: std::path::PathBuf::new(),
-                label: "Main.scuzz_intent".into(),
-                text: "For bump:\nThe result is the input plus 1.\n".into(),
+            }],
+            &[SourceUnit {
+                package: "pkg".into(),
+                module: "Main".into(),
+                rel: "src/Main.scuzz".into(),
             }],
         )
         .unwrap();
