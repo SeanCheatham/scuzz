@@ -894,6 +894,7 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.onSecondary",
         "View.onSecondary(child: View, onSecondary: _ => Unit): View",
     ),
+    ("View.focusGroup", "View.focusGroup(child: View): View"),
     ("View.placeholder", "View.placeholder(child: View): View"),
     (
         "View.semantics",
@@ -1381,6 +1382,7 @@ const TYPED_KIT_CALLEES: &[&str] = &[
     "View.editor",
     "View.split",
     "View.overlay",
+    "View.focusGroup",
     "Signal.get",
     "Signal.str",
     "Signal.getStr",
@@ -1716,6 +1718,10 @@ def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
             (
                 "View.overlay",
                 "View.overlay(Signal.int(1), View.text(\"p\"))",
+            ),
+            (
+                "View.focusGroup",
+                "View.focusGroup(View.button(\"a\", _ => ()))",
             ),
         ];
         for (callee, call) in view_calls {
@@ -2115,6 +2121,15 @@ def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
             h.contains("View.onSecondary(child: View, onSecondary: _ => Unit): View"),
             "{h}"
         );
+    }
+
+    #[test]
+    fn hovers_view_focus_group() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.focusGroup(View.button("a", _ => ())))
+"#;
+        let h = hover_src(src, "focusGroup");
+        assert!(h.contains("View.focusGroup(child: View): View"), "{h}");
     }
 
     #[test]

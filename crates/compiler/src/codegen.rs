@@ -390,6 +390,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_card(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_tooltip(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_on_secondary(ptr, ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_focus_group(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_placeholder(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_semantics(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_merge_semantics(ptr, ptr)").unwrap();
@@ -7215,6 +7216,7 @@ fn emit_call(
         | "View.stretch"
         | "View.center"
         | "View.clip"
+        | "View.focusGroup"
         | "View.ellipsis"
         | "View.ignorePointer"
         | "View.absorbPointer"
@@ -7226,6 +7228,7 @@ fn emit_call(
                 "View.stretch" => "sz_lang_view_stretch",
                 "View.center" => "sz_lang_view_center",
                 "View.clip" => "sz_lang_view_clip",
+                "View.focusGroup" => "sz_lang_view_focus_group",
                 "View.ellipsis" => "sz_lang_view_ellipsis",
                 "View.ignorePointer" => "sz_lang_view_ignore_pointer",
                 "View.absorbPointer" => "sz_lang_view_absorb_pointer",
@@ -12899,6 +12902,10 @@ enum Color:
                 "sz_lang_view_max_size",
             ),
             ("View.clip(View.text(\"x\"))", "sz_lang_view_clip"),
+            (
+                "View.focusGroup(View.button(\"a\", _ => ()))",
+                "sz_lang_view_focus_group",
+            ),
             ("View.card(View.text(\"x\"))", "sz_lang_view_card"),
             ("View.divider()", "sz_lang_view_divider"),
             ("View.verticalDivider()", "sz_lang_view_vertical_divider"),
@@ -13506,6 +13513,20 @@ enum Color:
         assert!(
             ir.contains("sz_lang_view_on_secondary"),
             "expected sz_lang_view_on_secondary in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_focus_group() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.focusGroup(View.button("a", _ => ())))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_focus_group"),
+            "expected sz_lang_view_focus_group in IR:\n{ir}"
         );
     }
 

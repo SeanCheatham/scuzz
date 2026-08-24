@@ -126,6 +126,9 @@ static int view_overlay_open(const SzView *v) {
          sz_signal_int_get(v->sig_int) != 0;
 }
 
+static int collect_tap_targets_node(SzView *v, SzView **out, int cap, int n);
+static void restore_group_focus(SzView *group);
+
 static int count_shown_children(const SzView *v) {
   int i, n = 0;
   if (!v)
@@ -156,7 +159,7 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_RADIUS || kind == SZ_VIEW_LIST_TILE ||
          kind == SZ_VIEW_BADGE || kind == SZ_VIEW_CARD ||
          kind == SZ_VIEW_EXPANSION_TILE || kind == SZ_VIEW_TOOLTIP ||
-         kind == SZ_VIEW_ON_SECONDARY ||
+         kind == SZ_VIEW_ON_SECONDARY || kind == SZ_VIEW_FOCUS_GROUP ||
          kind == SZ_VIEW_PLACEHOLDER || kind == SZ_VIEW_SEMANTICS ||
          kind == SZ_VIEW_MERGE_SEMANTICS || kind == SZ_VIEW_INK_WELL ||
          kind == SZ_VIEW_VISIBILITY || kind == SZ_VIEW_OFFSTAGE ||
@@ -566,6 +569,14 @@ SzView *sz_view_tooltip(const char *message, SzView *child) {
 SzView *sz_view_on_secondary(SzView *child, SzViewTapFn on_tap, void *env) {
   SzView *v = view_new(SZ_VIEW_ON_SECONDARY);
   view_set_tap(v, on_tap, env);
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
+SzView *sz_view_focus_group(SzView *child) {
+  SzView *v = view_new(SZ_VIEW_FOCUS_GROUP);
+  v->caret = -1;
   if (child)
     sz_view_add_child(v, child);
   return v;
@@ -2843,12 +2854,15 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_BADGE:
   case SZ_VIEW_TOOLTIP:
   case SZ_VIEW_ON_SECONDARY:
+  case SZ_VIEW_FOCUS_GROUP:
   case SZ_VIEW_PLACEHOLDER:
   case SZ_VIEW_SEMANTICS:
   case SZ_VIEW_MERGE_SEMANTICS:
   case SZ_VIEW_INK_WELL:
   case SZ_VIEW_VISIBILITY:
     layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
+    if (v->kind == SZ_VIEW_FOCUS_GROUP)
+      restore_group_focus(v);
     break;
   case SZ_VIEW_OFFSTAGE:
     layout_pass_child(v, x, y, min_w, min_h, max_w, max_h, theme);
@@ -4426,6 +4440,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_GAP:
   case SZ_VIEW_TOOLTIP:
   case SZ_VIEW_ON_SECONDARY:
+  case SZ_VIEW_FOCUS_GROUP:
   case SZ_VIEW_SEMANTICS:
   case SZ_VIEW_MERGE_SEMANTICS:
   case SZ_VIEW_INK_WELL:
@@ -4528,6 +4543,149 @@ static void clear_focus(SzView *v) {
   v->focused = 0;
   for (i = 0; i < v->child_count; i++)
     clear_focus(v->children[i]);
+}
+
+static void clear_group_memories(SzView *v) {
+  int i;
+  if (!v)
+    return;
+  if (v->kind == SZ_VIEW_FOCUS_GROUP) {
+    sz_free(v->text);
+    v->text = NULL;
+    v->caret = -1;
+  }
+  for (i = 0; i < v->child_count; i++)
+    clear_group_memories(v->children[i]);
+}
+
+static SzView *ancestor_focus_group(SzView *v) {
+  for (; v; v = v->parent) {
+    if (v->kind == SZ_VIEW_FOCUS_GROUP)
+      return v;
+  }
+  return NULL;
+}
+
+static void remember_group_focus(SzView *group, SzView *hit) {
+  SzView *taps[64];
+  int n;
+  int i;
+  if (!group || !hit)
+    return;
+  sz_free(group->text);
+  group->text = sz_strdup(hit->a11y_label ? hit->a11y_label : "");
+  group->caret = 0;
+  n = collect_tap_targets_node(group, taps, 64, 0);
+  for (i = 0; i < n; i++) {
+    if (taps[i] == hit) {
+      group->caret = i;
+      break;
+    }
+  }
+}
+
+static void restore_group_focus(SzView *group) {
+  SzView *taps[64];
+  int n;
+  int i;
+  int idx = -1;
+  if (!group || group->kind != SZ_VIEW_FOCUS_GROUP)
+    return;
+  if (group->caret < 0 && (!group->text || !group->text[0]))
+    return;
+  n = collect_tap_targets_node(group, taps, 64, 0);
+  if (group->text && group->text[0]) {
+    for (i = 0; i < n; i++) {
+      const char *lab = taps[i]->a11y_label;
+      if (lab && strcmp(lab, group->text) == 0) {
+        idx = i;
+        break;
+      }
+    }
+  }
+  if (idx < 0 && group->caret >= 0 && group->caret < n)
+    idx = group->caret;
+  if (idx >= n)
+    idx = n - 1;
+  for (i = 0; i < n; i++)
+    taps[i]->focused = i == idx ? 1 : 0;
+  if (idx >= 0) {
+    group->caret = idx;
+    if (taps[idx]->a11y_label &&
+        (!group->text || strcmp(group->text, taps[idx]->a11y_label) != 0)) {
+      sz_free(group->text);
+      group->text = sz_strdup(taps[idx]->a11y_label);
+    }
+  }
+}
+
+static SzView *find_active_focus_group(SzView *v) {
+  int i;
+  SzView *found;
+  if (!v || !view_is_shown(v))
+    return NULL;
+  if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
+    return NULL;
+  if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
+    return NULL;
+  if (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))
+    return NULL;
+  if (v->kind == SZ_VIEW_FOCUS_GROUP) {
+    restore_group_focus(v);
+    if (v->caret >= 0)
+      return v;
+  }
+  for (i = 0; i < v->child_count; i++) {
+    found = find_active_focus_group(v->children[i]);
+    if (found)
+      return found;
+  }
+  return NULL;
+}
+
+static SzView *group_focused_target(SzView *group) {
+  SzView *taps[64];
+  int n;
+  if (!group)
+    return NULL;
+  restore_group_focus(group);
+  n = collect_tap_targets_node(group, taps, 64, 0);
+  if (group->caret < 0 || group->caret >= n)
+    return NULL;
+  return taps[group->caret];
+}
+
+static int move_group_focus(SzView *group, int dir) {
+  SzView *taps[64];
+  int n;
+  int idx;
+  if (!group)
+    return 0;
+  restore_group_focus(group);
+  n = collect_tap_targets_node(group, taps, 64, 0);
+  if (n <= 0)
+    return 0;
+  idx = group->caret;
+  if (idx < 0)
+    idx = 0;
+  idx += dir;
+  if (idx < 0)
+    idx = 0;
+  if (idx >= n)
+    idx = n - 1;
+  remember_group_focus(group, taps[idx]);
+  restore_group_focus(group);
+  return 1;
+}
+
+static int activate_group_focus(SzView *root, SzView *group) {
+  SzView *hit;
+  SzRect fr;
+  hit = group_focused_target(group);
+  if (!hit)
+    return 0;
+  fr = hit->frame;
+  return sz_view_activate(root, hit, fr.x + 4.f, fr.y + 4.f);
 }
 
 float sz_view_scroll_x(const SzView *scroll) {
@@ -4856,10 +5014,18 @@ static int caret_offset_at_xy(SzView *f, float x, float y) {
 }
 
 int sz_view_activate(SzView *root, SzView *hit, float x, float y) {
+  SzView *group;
   if (!root || !hit)
     return 0;
+  group = ancestor_focus_group(hit);
   if (hit->kind != SZ_VIEW_TEXT_FIELD && hit->kind != SZ_VIEW_EDITOR)
     clear_focus(root);
+  clear_group_memories(root);
+  if (group && sz_view_is_tap_target(hit) && hit->kind != SZ_VIEW_TEXT_FIELD &&
+      hit->kind != SZ_VIEW_EDITOR) {
+    hit->focused = 1;
+    remember_group_focus(group, hit);
+  }
   if ((hit->kind == SZ_VIEW_BUTTON || hit->kind == SZ_VIEW_ICON_BUTTON ||
        hit->kind == SZ_VIEW_FAB || hit->kind == SZ_VIEW_OUTLINED_BUTTON ||
        hit->kind == SZ_VIEW_TEXT_BUTTON || hit->kind == SZ_VIEW_ACTION_CHIP ||
@@ -5047,7 +5213,11 @@ static SzView *find_open_overlay(SzView *v) {
 }
 
 const char *sz_view_focus_kind(SzView *root) {
+  static char buf[160];
   SzView *ed;
+  SzView *group;
+  SzView *hit;
+  const char *lab;
   if (!root)
     return "none";
   ed = find_focused_edit(root);
@@ -5057,7 +5227,13 @@ const char *sz_view_focus_kind(SzView *root) {
     return "field";
   if (find_open_overlay(root))
     return "overlay";
-  return "none";
+  group = find_active_focus_group(root);
+  hit = group_focused_target(group);
+  if (!hit)
+    return "none";
+  lab = hit->a11y_label ? hit->a11y_label : "";
+  snprintf(buf, sizeof buf, "button:%s", lab);
+  return buf;
 }
 
 static int collect_walk_hidden(const SzView *v) {
@@ -5173,6 +5349,7 @@ int sz_view_focus_text_field_at(SzView *root, int index) {
   if (!t)
     return 0;
   clear_focus(root);
+  clear_group_memories(root);
   t->focused = 1;
   return 1;
 }
@@ -5182,6 +5359,7 @@ int sz_view_focus_edit_target(SzView *root) {
   if (!t)
     return 0;
   clear_focus(root);
+  clear_group_memories(root);
   t->focused = 1;
   return 1;
 }
@@ -5399,6 +5577,7 @@ int sz_view_handle_key(SzView *root, const char *key, const char *text,
                        int mods) {
   SzView *target;
   SzView *overlay;
+  SzView *group;
   int extend = (mods & SZ_KEY_SHIFT) != 0;
   int is_ed;
   if (!root)
@@ -5411,6 +5590,26 @@ int sz_view_handle_key(SzView *root, const char *key, const char *text,
       sz_signal_int_set(overlay->sig_int, 0);
     clear_focus(root);
     return 1;
+  }
+  if (!overlay) {
+    if (!find_focused_edit(root)) {
+      group = find_active_focus_group(root);
+      if (group) {
+        if (strcmp(key, "ArrowUp") == 0) {
+          (void)move_group_focus(group, -1);
+          return 1;
+        }
+        if (strcmp(key, "ArrowDown") == 0) {
+          (void)move_group_focus(group, 1);
+          return 1;
+        }
+        if (strcmp(key, "Enter") == 0 || strcmp(key, "Space") == 0) {
+          (void)activate_group_focus(root, group);
+          return 1;
+        }
+        return 1;
+      }
+    }
   }
   target = sz_view_edit_target(root);
   is_ed = target && target->kind == SZ_VIEW_EDITOR;

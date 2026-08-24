@@ -5481,6 +5481,7 @@ fn infer_call(
         | "View.stretch"
         | "View.center"
         | "View.clip"
+        | "View.focusGroup"
         | "View.ellipsis"
         | "View.ignorePointer"
         | "View.absorbPointer"
@@ -13347,6 +13348,7 @@ def note(n: Int where "x"): Unit = ()
             "View.scrollH(View.text(\"x\"))",
             "View.maxSize(40, 30, View.text(\"x\"))",
             "View.clip(View.text(\"x\"))",
+            "View.focusGroup(View.button(\"Go\", _ => ()))",
             "View.opacity(50, View.text(\"x\"))",
             "View.maxLines(2, View.text(\"x\"))",
             "View.ellipsis(View.text(\"x\"))",
@@ -13758,6 +13760,15 @@ def note(n: Int where "x"): Unit = ()
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("View.onSecondary should typecheck");
+    }
+
+    #[test]
+    fn typechecks_view_focus_group() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.focusGroup(View.button("a", _ => ())))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("View.focusGroup should typecheck");
     }
 
     #[test]

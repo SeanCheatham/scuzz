@@ -143,9 +143,10 @@ e""", true)
     _ = Property.check("duri", Lsp.defUri(Json.parse("{\"result\":[{\"uri\":\"file://x\",\"range\":{\"start\":{\"line\":0,\"character\":0}}}]}")) == "file://x", true)
     _ = Property.check("dobj", Lsp.defUri(Json.parse("{\"result\":{\"uri\":\"u\"}}")) == "u", true)
     _ <- Ui.setTitle(Fs.basename(file))
-    _ <- Ui.run(_ => View.split(frac, View.column(View.text("Files"), View.expanded(View.scroll(View.each(tree, s => if (Str.endsWith(s, "/")) View.button(Chrome.treeLabel(s), _ => for {
+    _ <- Ui.run(_ => View.split(frac, View.column(View.text("Files"), View.expanded(View.scroll(View.focusGroup(View.each(tree, s => if (Str.endsWith(s, "/")) View.button(Chrome.treeLabel(s), _ => for {
   dir = Signal.getStr(dirSig)
   _ = Property.sometimes("tappedDir")
+  _ = Property.sometimes("focusedList")
   open = Chrome.toggleOpen(Signal.getList(openSig), s)
   _ = Signal.setList(openSig, open)
   walked <- walkTree(dir)
@@ -154,6 +155,7 @@ e""", true)
 } yield ()) else View.onSecondary(View.button(Chrome.treeLabel(s), _ => for {
   dir = Signal.getStr(dirSig)
   _ = Property.sometimes("tappedTree")
+  _ = Property.sometimes("focusedList")
   next = Chrome.joinChild(dir, s)
   body <- Fs.read(next).handleErrorWith(_ =>
   IO.pure("")
@@ -173,7 +175,7 @@ e""", true)
   _ = Signal.setStr(ctxPath, s)
   _ = Signal.set(ctxOpen, Str.len("x"))
   _ <- IO.pure(())
-} yield ()))))), View.stack(View.column(View.wrap(View.button("Save", _ => for {
+} yield ())))))), View.stack(View.column(View.wrap(View.button("Save", _ => for {
   _ = Property.sometimes("tappedSave")
   p = Signal.getStr(pathSig)
   _ <- Fs.write(p, Signal.getStr(buf))
@@ -314,7 +316,7 @@ e""", true)
   _ = Signal.set(dirty, d)
   _ = Signal.setStr(pathSig, List.at(ps, i2))
   _ <- Ui.setTitle(Fs.basename(List.at(ps, i2)))
-} yield ()))), View.expanded(View.editor(buf)), View.showWhen(showDiags, 1, View.each(diags, s => View.button(s, _ => for {
+} yield ()))), View.expanded(View.editor(buf)), View.showWhen(showDiags, 1, View.focusGroup(View.each(diags, s => View.button(s, _ => for {
   file = Check.diagFile(s)
   _ <- if (Str.isEmpty(file)) IO.pure(()) else for {
   dest = Chrome.resolvePath(Signal.getStr(dirSig), file)
@@ -333,7 +335,7 @@ e""", true)
   _ <- Ui.setTitle(Fs.basename(List.at(ps, i2)))
 } yield ()
   _ <- Check.jumpDiag(s)
-} yield ()))), View.showWhen(showOut, 1, View.each(output, s => View.text(s))), View.overlay(findOpen, View.column(View.text("Find"), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => Ui.setEditorCaret(Str.len("x"), Str.len("x"))), View.button("Replace", _ => for {
+} yield ())))), View.showWhen(showOut, 1, View.each(output, s => View.text(s))), View.overlay(findOpen, View.column(View.text("Find"), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => Ui.setEditorCaret(Str.len("x"), Str.len("x"))), View.button("Replace", _ => for {
   _ = Signal.setStr(buf, Str.replace(Signal.getStr(buf), Signal.getStr(findQ), Signal.getStr(replQ)))
   _ = Signal.set(dirty, Str.len("x"))
   _ = Signal.setList(bodies, List.setAt(Signal.getList(bodies), Signal.get(idx), Signal.getStr(buf)))
