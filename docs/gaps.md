@@ -53,9 +53,7 @@ Path deps only (`manifest.rs`). Git, versioned, and hosted artifacts are directi
 - **OS IME candidate windows** — focused TextField caret uses measured advance (`sz_view_caret_rect`). Embedders do not yet place OS IME UI from it. Desktop does not yet emit compose from XIM or Cocoa marked text.
 - **macOS in default CI** — `macos-smoke` runs on push/PR (runtime tests, compiler tests, hello). Full macOS packaging stays `workflow_dispatch`.
 - **Web apps** — not a current target.
-- **Oracle idioms in `guide.md`** — model agreement, metamorphic relations, and concrete-fact properties ride the existing property surface. The guide does not yet document them.
-- **First-class model agreement** — a `*.scuzz_model` stem-paired file holds a simplified reference. The fuzzer checks agreement after each driver step. Today this is an idiom on the property surface.
-- **Temporal properties** — `Property.always` / `Property.eventually` over a session. `Property.sometimes` is reachability only.
+- **Oracle idioms in `guide.md`** — extra intent forms (`After tap`, richer always/eventually templates) stay ranked. Metamorphic swap and concrete-fact `.require` are in.
 - **Stronger mutation operators** — boundary `where` mutations, handler-swap on UI taps, Signal-map identity. Then a mutation score in `summary.toml`.
 - **Swarm testing + corpus hygiene** — vary event-alphabet weights per run. `scuzz fuzz --minimize-corpus` keeps stored entries small.
 - **Nightly deep campaign** — a long-budget run over examples with corpus promotion. CI stays a bounded deterministic campaign.

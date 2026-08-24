@@ -1388,6 +1388,14 @@ int sz_ui_pump_sync(SzUiSession *session) {
   }
   if (need_dump && session->debug_dump_path)
     sz_ui_session_write_dump(session, session->debug_dump_path);
+  if (sz_testrt_oracles_armed() && sz_property_session_armed()) {
+    if (session->root) {
+      SzString *views = sz_view_a11y_dump(session->root);
+      sz_property_stash_a11y(sz_string_cstr(views));
+      sz_string_free(views);
+    }
+    sz_property_session_step();
+  }
   return 1;
 }
 

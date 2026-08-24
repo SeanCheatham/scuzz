@@ -174,8 +174,7 @@ pub fn complete_in_source(
         }
     }
     for kw in [
-        "def", "property", "match", "for", "yield", "case", "import", "enum", "record", "type",
-        "trait", "impl",
+        "def", "match", "for", "yield", "case", "import", "enum", "record", "type", "trait", "impl",
     ] {
         if kw.starts_with(&prefix) {
             push(Completion {

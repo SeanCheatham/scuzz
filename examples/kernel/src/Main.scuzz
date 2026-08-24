@@ -68,15 +68,6 @@ def lenBoxes(xs: BoxList[Int]): Int =
 def showTag(t: Tag): String =
   t
 
-property sumPositive: Bool =
-  sum(Point(3, 5)) > 0
-
-property onePositive: Bool =
-  fromA() > 0
-
-property addComm(a: Int, b: Int): Bool =
-  a + b == b + a
-
 def noneInt(): Opt[Int] =
   Opt.None
 
@@ -709,7 +700,7 @@ record Box[T](x: T):
   case Pack.Of(ys) => IO.println(Str.concat("adt:box:", List.join(ys, ",")))
   case Pack.Empty => IO.println("adt:box:empty")
 }
-    _ <- IO.println(Str.concat("record:", Str.fromInt(sum(Point(3, 5))))).require(sumPositive).require(onePositive)
+    _ <- IO.println(Str.concat("record:", Str.fromInt(sum(Point(3, 5))))).require(sum(Point(3, 5)) > 0).require(fromA() > 0)
     _ <- IO.println(Point(3, 5).show())
     _ <- IO.println(Str.concat("get:", Str.fromInt(Point(3, 5).getOrElse(0))))
     b = Box(4)

@@ -1,8 +1,7 @@
-//! Stem-paired `*.scuzz_sim` / `*.scuzz_drivers` overlays and in-source `property` residualization.
+//! Stem-paired `*.scuzz_sim` / `*.scuzz_drivers` / `*.scuzz_intent` overlays
+//! and `.require` / `where` residualization.
 
-use crate::ast::{
-    BinOp, EnumDef, Expr, ExprKind, ForBinder, FunDef, Import, Pattern, Program, Type, UnOp,
-};
+use crate::ast::{BinOp, EnumDef, Expr, ExprKind, FunDef, Import, Program, Type, UnOp};
 use crate::parser::{parse_file, ParseError};
 use crate::resolve::{enum_id, split_dotted};
 use crate::span::Span;
@@ -24,6 +23,7 @@ pub enum OverlayError {
 pub enum OverlayKind {
     Sim,
     Drivers,
+    Intent,
 }
 
 #[derive(Debug, Clone)]
@@ -37,10 +37,9 @@ pub struct OverlaySource {
     pub path: PathBuf,
 }
 
-/// Apply same-name sim replacements, then merge `*.scuzz_drivers`. In-source
-/// `property` defs stay on the program. Call [`collect_property_names`] then
-/// [`check_properties_applied`] under verify / check. `.require` is rewritten
-/// by type in field resolution (verify) or erased live.
+/// Apply same-name sim replacements, then merge `*.scuzz_drivers`, then lower
+/// `*.scuzz_intent`. `.require` is rewritten by type in field resolution
+/// (verify) or erased live.
 pub fn apply_overlays(
     mut live: Program,
     overlays: &[OverlaySource],
@@ -50,19 +49,7 @@ pub fn apply_overlays(
             continue;
         }
         let prog = parse_file(&sim.text, &sim.label)?;
-        reject_overlay_extras(&prog, &sim.label, OverlayKind::Sim)?;
-        if !prog.main.name.is_empty() {
-            return Err(OverlayError::Msg(format!(
-                "{}: *.scuzz_sim must not define @main",
-                sim.label
-            )));
-        }
-        if !prog.enums.is_empty() {
-            return Err(OverlayError::Msg(format!(
-                "{}: *.scuzz_sim must not define enums",
-                sim.label
-            )));
-        }
+        reject_overlay_header(&prog, &sim.label, OverlayKind::Sim)?;
         for d in prog.defs {
             let mut d = d;
             d.module = sim.stem.clone();
@@ -76,49 +63,17 @@ pub fn apply_overlays(
         }
         apply_driver_overlay(&mut live, ov, &mut driver_names)?;
     }
+    crate::intent::apply_intents(&mut live, overlays)?;
     check_drive_table(&live)?;
     live.driver_names = driver_names;
     Ok(live)
 }
 
-/// Names of in-source `property` declarations, in source order. Reject a property that
-/// collides with a non-property def (already a parse duplicate). Check the return type.
-pub fn collect_property_names(program: &Program) -> Result<Vec<String>, OverlayError> {
-    let mut names = Vec::new();
-    for d in &program.defs {
-        if !d.is_property {
-            continue;
-        }
-        if !matches!(d.ret, Type::Bool) {
-            return Err(OverlayError::Msg(format!(
-                "property `{}` must return Bool, got {:?}",
-                d.name, d.ret
-            )));
-        }
-        if d.params.len() > 3 {
-            return Err(OverlayError::Msg(format!(
-                "property `{}` takes at most three generator-friendly params",
-                d.name
-            )));
-        }
-        for p in &d.params {
-            if !type_is_generator_friendly(&p.ty, program, &d.module, 0) {
-                return Err(OverlayError::Msg(format!(
-                    "property `{}` param `{}` must be Int, String, Bool, List, or a record/enum of those",
-                    d.name, p.name
-                )));
-            }
-        }
-        names.push(d.name.clone());
-    }
-    check_drive_table(program)?;
-    Ok(names)
-}
-
-/// Drop `property` defs. Live `build` / `run` must not emit them.
+/// Drop leftover intent thunk names. Live `build` / `run` must not emit intent
+/// thunks (verify overlays are not applied).
 pub fn erase_properties(program: &mut Program) {
-    program.defs.retain(|d| !d.is_property);
-    program.property_names.clear();
+    program.intent_always.clear();
+    program.intent_eventually.clear();
 }
 
 /// Drop `.require` to the receiver. Live `build` / `run` must not evaluate the predicate.
@@ -141,96 +96,40 @@ fn erase_require_expr(expr: Expr) -> Expr {
     }
 }
 
-/// Every `property` must appear in a `.require` predicate in live (non-property) code.
-pub fn check_properties_applied(
-    program: &Program,
-    property_names: &[String],
-) -> Result<(), OverlayError> {
-    if property_names.is_empty() {
-        return Ok(());
-    }
-    let mut used = std::collections::HashSet::new();
-    for d in &program.defs {
-        if d.is_property {
-            continue;
-        }
-        collect_required_properties(&d.body, property_names, &mut used);
-    }
-    collect_required_properties(&program.main.body, property_names, &mut used);
-    for d in &program.defs {
-        if !d.is_property || !d.params.is_empty() {
-            continue;
-        }
-        if !used.contains(&d.name) {
-            return Err(OverlayError::Msg(format!(
-                "property `{}` is never applied; use `.require({})` on the value it constrains",
-                d.name, d.name
-            )));
-        }
-    }
-    Ok(())
-}
-
-fn callee_base(callee: &str) -> &str {
-    callee.rsplit('.').next().unwrap_or(callee)
-}
-
-fn collect_required_properties(
-    e: &Expr,
-    property_names: &[String],
-    used: &mut std::collections::HashSet<String>,
-) {
-    if let ExprKind::MethodCall {
-        receiver,
-        method,
-        args,
-    } = &e.kind
-    {
-        if method == "require" {
-            collect_required_properties(receiver, property_names, used);
-            for a in args {
-                mark_property_refs(a, property_names, used);
-                collect_required_properties(a, property_names, used);
-            }
-            return;
-        }
-    }
-    e.for_each_child(|c| collect_required_properties(c, property_names, used));
-}
-
-fn mark_property_refs(
-    e: &Expr,
-    property_names: &[String],
-    used: &mut std::collections::HashSet<String>,
-) {
-    match &e.kind {
-        ExprKind::Var(name) => {
-            let base = callee_base(name);
-            if property_names.iter().any(|n| n == base || n == name) {
-                used.insert(base.to_string());
-            }
-        }
-        ExprKind::Call { callee, args } => {
-            let base = callee_base(callee);
-            if property_names
-                .iter()
-                .any(|n| n == base || n == callee.as_str())
-            {
-                used.insert(base.to_string());
-            }
-            for a in args {
-                mark_property_refs(a, property_names, used);
-            }
-        }
-        _ => e.for_each_child(|c| mark_property_refs(c, property_names, used)),
-    }
-}
-
 fn overlay_ext(kind: OverlayKind) -> &'static str {
     match kind {
         OverlayKind::Sim => "*.scuzz_sim",
         OverlayKind::Drivers => "*.scuzz_drivers",
+        OverlayKind::Intent => "*.scuzz_intent",
     }
+}
+
+fn overlay_kind_word(kind: OverlayKind) -> &'static str {
+    match kind {
+        OverlayKind::Sim => "sim",
+        OverlayKind::Drivers => "driver",
+        OverlayKind::Intent => "intent",
+    }
+}
+
+fn reject_overlay_header(
+    prog: &Program,
+    label: &str,
+    kind: OverlayKind,
+) -> Result<(), OverlayError> {
+    reject_overlay_extras(prog, label, kind)?;
+    let ext = overlay_ext(kind);
+    if !prog.main.name.is_empty() {
+        return Err(OverlayError::Msg(format!(
+            "{label}: {ext} must not define @main"
+        )));
+    }
+    if !prog.enums.is_empty() {
+        return Err(OverlayError::Msg(format!(
+            "{label}: {ext} must not define enums"
+        )));
+    }
+    Ok(())
 }
 
 fn reject_overlay_extras(
@@ -263,75 +162,79 @@ fn option_expr_matches(live: &Option<Expr>, sim: &Option<Expr>) -> bool {
     }
 }
 
+fn find_live_twin<'a>(
+    live: &'a Program,
+    overlay: &FunDef,
+    label: &str,
+    kind: OverlayKind,
+) -> Result<&'a FunDef, OverlayError> {
+    let word = overlay_kind_word(kind);
+    let Some(live_def) = live
+        .defs
+        .iter()
+        .find(|d| d.module == overlay.module && d.name == overlay.name)
+    else {
+        return Err(OverlayError::Msg(format!(
+            "{label}: {word} def `{}` has no live twin",
+            overlay.name
+        )));
+    };
+    if live_def.type_params != overlay.type_params {
+        return Err(OverlayError::Msg(format!(
+            "{label}: {word} def `{}` type params mismatch",
+            overlay.name
+        )));
+    }
+    if live_def.is_private != overlay.is_private {
+        return Err(OverlayError::Msg(format!(
+            "{label}: {word} def `{}` privacy mismatch",
+            overlay.name
+        )));
+    }
+    if live_def.params.len() != overlay.params.len() {
+        return Err(OverlayError::Msg(format!(
+            "{label}: {word} def `{}` arity mismatch (live {}, {word} {})",
+            overlay.name,
+            live_def.params.len(),
+            overlay.params.len()
+        )));
+    }
+    for (lp, op) in live_def.params.iter().zip(overlay.params.iter()) {
+        if lp.ty != op.ty {
+            return Err(OverlayError::Msg(format!(
+                "{label}: {word} def `{}` param `{}` type mismatch (live {:?}, {word} {:?})",
+                overlay.name, op.name, lp.ty, op.ty
+            )));
+        }
+        if !option_expr_matches(&lp.default, &op.default) {
+            return Err(OverlayError::Msg(format!(
+                "{label}: {word} def `{}` param `{}` default mismatch",
+                overlay.name, op.name
+            )));
+        }
+        if !option_expr_matches(&lp.rfn, &op.rfn) {
+            return Err(OverlayError::Msg(format!(
+                "{label}: {word} def `{}` param `{}` where mismatch",
+                overlay.name, op.name
+            )));
+        }
+    }
+    if live_def.ret != overlay.ret {
+        return Err(OverlayError::Msg(format!(
+            "{label}: {word} def `{}` return type mismatch (live {:?}, {word} {:?})",
+            overlay.name, live_def.ret, overlay.ret
+        )));
+    }
+    Ok(live_def)
+}
+
 fn replace_sim_def(live: &mut Program, sim: &FunDef, label: &str) -> Result<(), OverlayError> {
-    let Some(idx) = live
+    find_live_twin(live, sim, label, OverlayKind::Sim)?;
+    let idx = live
         .defs
         .iter()
         .position(|d| d.module == sim.module && d.name == sim.name)
-    else {
-        return Err(OverlayError::Msg(format!(
-            "{label}: sim def `{}` has no live twin",
-            sim.name
-        )));
-    };
-    let live_def = &live.defs[idx];
-    if live_def.is_property {
-        return Err(OverlayError::Msg(format!(
-            "{label}: sim def `{}` cannot replace a property",
-            sim.name
-        )));
-    }
-    if sim.is_property {
-        return Err(OverlayError::Msg(format!(
-            "{label}: sim def cannot be a property"
-        )));
-    }
-    if live_def.type_params != sim.type_params {
-        return Err(OverlayError::Msg(format!(
-            "{label}: sim def `{}` type params mismatch",
-            sim.name
-        )));
-    }
-    if live_def.is_private != sim.is_private {
-        return Err(OverlayError::Msg(format!(
-            "{label}: sim def `{}` privacy mismatch",
-            sim.name
-        )));
-    }
-    if live_def.params.len() != sim.params.len() {
-        return Err(OverlayError::Msg(format!(
-            "{label}: sim def `{}` arity mismatch (live {}, sim {})",
-            sim.name,
-            live_def.params.len(),
-            sim.params.len()
-        )));
-    }
-    for (lp, sp) in live_def.params.iter().zip(sim.params.iter()) {
-        if lp.ty != sp.ty {
-            return Err(OverlayError::Msg(format!(
-                "{label}: sim def `{}` param `{}` type mismatch (live {:?}, sim {:?})",
-                sim.name, sp.name, lp.ty, sp.ty
-            )));
-        }
-        if !option_expr_matches(&lp.default, &sp.default) {
-            return Err(OverlayError::Msg(format!(
-                "{label}: sim def `{}` param `{}` default mismatch",
-                sim.name, sp.name
-            )));
-        }
-        if !option_expr_matches(&lp.rfn, &sp.rfn) {
-            return Err(OverlayError::Msg(format!(
-                "{label}: sim def `{}` param `{}` where mismatch",
-                sim.name, sp.name
-            )));
-        }
-    }
-    if live_def.ret != sim.ret {
-        return Err(OverlayError::Msg(format!(
-            "{label}: sim def `{}` return type mismatch (live {:?}, sim {:?})",
-            sim.name, live_def.ret, sim.ret
-        )));
-    }
+        .expect("twin checked");
     live.defs[idx] = sim.clone();
     Ok(())
 }
@@ -342,19 +245,7 @@ fn apply_driver_overlay(
     names: &mut Vec<String>,
 ) -> Result<(), OverlayError> {
     let prog = parse_file(&ov.text, &ov.label)?;
-    reject_overlay_extras(&prog, &ov.label, OverlayKind::Drivers)?;
-    if !prog.main.name.is_empty() {
-        return Err(OverlayError::Msg(format!(
-            "{}: *.scuzz_drivers must not define @main",
-            ov.label
-        )));
-    }
-    if !prog.enums.is_empty() {
-        return Err(OverlayError::Msg(format!(
-            "{}: *.scuzz_drivers must not define enums",
-            ov.label
-        )));
-    }
+    reject_overlay_header(&prog, &ov.label, OverlayKind::Drivers)?;
     for mut d in prog.defs {
         d.module = ov.stem.clone();
         check_driver_def(live, &d, &ov.label)?;
@@ -366,11 +257,6 @@ fn apply_driver_overlay(
 }
 
 fn check_driver_def(live: &Program, d: &FunDef, label: &str) -> Result<(), OverlayError> {
-    if d.is_property {
-        return Err(OverlayError::Msg(format!(
-            "{label}: *.scuzz_drivers must not declare a property"
-        )));
-    }
     if let Some(prev) = live
         .defs
         .iter()
@@ -411,17 +297,11 @@ fn check_driver_def(live: &Program, d: &FunDef, label: &str) -> Result<(), Overl
             )));
         }
     }
-    {
-        let properties: Vec<&FunDef> = live.defs.iter().filter(|p| p.is_property).collect();
-        let mut binders: Vec<String> = d.params.iter().map(|p| p.name.clone()).collect();
-        if expr_has_property(&d.body)
-            || expr_mentions_property_name(&d.body, &properties, &mut binders)
-        {
-            return Err(OverlayError::Msg(format!(
-                "{label}: driver `{}` must not call Property.* or `.require`",
-                d.name
-            )));
-        }
+    if expr_has_property(&d.body) {
+        return Err(OverlayError::Msg(format!(
+            "{label}: driver `{}` must not call Property.* or `.require`",
+            d.name
+        )));
     }
     Ok(())
 }
@@ -444,172 +324,11 @@ pub(crate) fn expr_has_property(e: &Expr) -> bool {
     found
 }
 
-fn property_ref_hit(name: &str, properties: &[&FunDef], binders: &[String]) -> bool {
-    if let Some((module, base)) = split_dotted(name) {
-        return properties
-            .iter()
-            .any(|p| p.module == module && p.name == base);
-    }
-    !binders.iter().any(|b| b == name) && properties.iter().any(|p| p.name == name)
-}
-
-fn collect_pat_binds(p: &Pattern, binders: &mut Vec<String>) {
-    match p {
-        Pattern::Bind(n) if n != "_" => binders.push(n.clone()),
-        Pattern::Tuple { elems, .. } => {
-            for e in elems {
-                collect_pat_binds(e, binders);
-            }
-        }
-        Pattern::Adt { binds, .. } => {
-            for b in binds {
-                collect_pat_binds(b, binders);
-            }
-        }
-        Pattern::Cons { head, tail, .. } => {
-            collect_pat_binds(head, binders);
-            collect_pat_binds(tail, binders);
-        }
-        Pattern::As { name, inner } => {
-            if name != "_" {
-                binders.push(name.clone());
-            }
-            collect_pat_binds(inner, binders);
-        }
-        Pattern::Named { inner, .. } => collect_pat_binds(inner, binders),
-        Pattern::Or(alts) => {
-            for a in alts {
-                collect_pat_binds(a, binders);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn push_for_binder(b: &ForBinder, binders: &mut Vec<String>) {
-    if let Some(p) = b.unpack_pat() {
-        collect_pat_binds(p, binders);
-    } else {
-        let n = b.name();
-        if !n.is_empty() && n != "_" {
-            binders.push(n.to_string());
-        }
-    }
-}
-
-fn push_opt_binder(name: Option<&str>, binders: &mut Vec<String>) {
-    if let Some(n) = name {
-        if n != "_" {
-            binders.push(n.to_string());
-        }
-    }
-}
-
-fn expr_mentions_property_name(
-    e: &Expr,
-    properties: &[&FunDef],
-    binders: &mut Vec<String>,
-) -> bool {
-    if properties.is_empty() {
-        return false;
-    }
-    match &e.kind {
-        ExprKind::Var(name) => property_ref_hit(name, properties, binders),
-        ExprKind::Call { callee, args } => {
-            if property_ref_hit(callee, properties, binders) {
-                return true;
-            }
-            args.iter()
-                .any(|a| expr_mentions_property_name(a, properties, binders))
-        }
-        ExprKind::Let { name, value, body } => {
-            if expr_mentions_property_name(value, properties, binders) {
-                return true;
-            }
-            let n = binders.len();
-            push_opt_binder(Some(name.as_str()), binders);
-            let hit = expr_mentions_property_name(body, properties, binders);
-            binders.truncate(n);
-            hit
-        }
-        ExprKind::Lambda {
-            param, pat, body, ..
-        } => {
-            let n = binders.len();
-            if let Some(p) = pat {
-                collect_pat_binds(p, binders);
-            } else {
-                push_opt_binder(param.as_deref(), binders);
-            }
-            let hit = expr_mentions_property_name(body, properties, binders);
-            binders.truncate(n);
-            hit
-        }
-        ExprKind::FlatMap { inner, param, body }
-        | ExprKind::IoMap { inner, param, body }
-        | ExprKind::HandleErrorWith { inner, param, body } => {
-            if expr_mentions_property_name(inner, properties, binders) {
-                return true;
-            }
-            let n = binders.len();
-            push_opt_binder(param.as_deref(), binders);
-            let hit = expr_mentions_property_name(body, properties, binders);
-            binders.truncate(n);
-            hit
-        }
-        ExprKind::For {
-            binders: fb, body, ..
-        } => {
-            let n = binders.len();
-            for b in fb {
-                if expr_mentions_property_name(b.value(), properties, binders) {
-                    binders.truncate(n);
-                    return true;
-                }
-                push_for_binder(b, binders);
-            }
-            let hit = expr_mentions_property_name(body, properties, binders);
-            binders.truncate(n);
-            hit
-        }
-        ExprKind::Match { scrutinee, arms } => {
-            if expr_mentions_property_name(scrutinee, properties, binders) {
-                return true;
-            }
-            for arm in arms {
-                let n = binders.len();
-                collect_pat_binds(&arm.pattern, binders);
-                if let Some(g) = &arm.guard {
-                    if expr_mentions_property_name(g, properties, binders) {
-                        binders.truncate(n);
-                        return true;
-                    }
-                }
-                let hit = expr_mentions_property_name(&arm.body, properties, binders);
-                binders.truncate(n);
-                if hit {
-                    return true;
-                }
-            }
-            false
-        }
-        _ => {
-            let mut found = false;
-            e.for_each_child(|c| {
-                if !found {
-                    found = expr_mentions_property_name(c, properties, binders);
-                }
-            });
-            found
-        }
-    }
-}
-
 /// Matches `SZ_DRIVERS_MAX` in `crates/runtime/src/testrt.c`.
 const DRIVE_NAMES_MAX: usize = 32;
 
 fn is_drive_spec(d: &FunDef) -> bool {
-    d.is_driver || (d.is_property && !d.params.is_empty())
+    d.is_driver
 }
 
 fn check_drive_table(program: &Program) -> Result<(), OverlayError> {
@@ -636,14 +355,14 @@ fn check_drive_table(program: &Program) -> Result<(), OverlayError> {
     Ok(())
 }
 
-/// Table lines for `build/drivers.txt`. One line per driver or parameterized
-/// property. Kind tokens are `i`, `s`, `b`, `[i]`, `Point(i>=0,i)`, and
+/// Table lines for `build/drivers.txt`. One line per driver or `For` intent
+/// drive. Kind tokens are `i`, `s`, `b`, `[i]`, `Point(i>=0,i)`, and
 /// `e:Some(i)|None`. A simple Int `where` bound joins the `i` token
 /// (`noteDrive i>=0`).
 pub fn driver_table_text(program: &Program) -> String {
     let mut out = String::new();
     for d in &program.defs {
-        if d.is_driver || (d.is_property && !d.params.is_empty()) {
+        if d.is_driver {
             push_drive_spec(&mut out, d, program);
         }
     }
@@ -673,7 +392,12 @@ fn int_bound_token(name: &str, rfn: Option<&Expr>) -> String {
     }
 }
 
-fn type_is_generator_friendly(ty: &Type, program: &Program, module: &str, depth: usize) -> bool {
+pub(crate) fn type_is_generator_friendly(
+    ty: &Type,
+    program: &Program,
+    module: &str,
+    depth: usize,
+) -> bool {
     match ty {
         Type::Int | Type::String | Type::Bool => true,
         Type::List(inner) => {
@@ -1284,7 +1008,8 @@ fn residualize_expr(
     }
 }
 
-/// True when `path` is a stem-paired `*.scuzz_sim` or `*.scuzz_drivers` overlay.
+/// True when `path` is a stem-paired overlay (`*.scuzz_sim` / `*.scuzz_drivers` /
+/// `*.scuzz_intent`).
 pub fn overlay_kind_from_path(path: &std::path::Path) -> Option<(String, OverlayKind)> {
     let name = path.file_name()?.to_str()?;
     if let Some(stem) = name.strip_suffix(".scuzz_sim") {
@@ -1295,6 +1020,11 @@ pub fn overlay_kind_from_path(path: &std::path::Path) -> Option<(String, Overlay
     if let Some(stem) = name.strip_suffix(".scuzz_drivers") {
         if !stem.is_empty() {
             return Some((stem.to_string(), OverlayKind::Drivers));
+        }
+    }
+    if let Some(stem) = name.strip_suffix(".scuzz_intent") {
+        if !stem.is_empty() {
+            return Some((stem.to_string(), OverlayKind::Intent));
         }
     }
     None
@@ -1339,10 +1069,10 @@ mod tests {
     use crate::parser::parse_sources;
 
     #[test]
-    fn sim_replaces_live_def_and_keeps_properties() {
+    fn sim_replaces_live_def() {
         let live = parse_sources(&[(
             "Main.scuzz".into(),
-            "def title(): String = \"Live\"\nproperty always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(title())\n"
+            "def title(): String = \"Live\"\n@main def main: IO[Unit] = IO.println(title())\n"
                 .into(),
         )])
         .unwrap();
@@ -1354,44 +1084,25 @@ mod tests {
             text: "def title(): String = \"Sim\"\n".into(),
         }];
         let prog = apply_overlays(live, &overlays).unwrap();
-        let properties = collect_property_names(&prog).unwrap();
-        assert_eq!(properties, vec!["always".to_string()]);
         let title = prog.defs.iter().find(|d| d.name == "title").unwrap();
         match &title.body.kind {
             crate::ast::ExprKind::StrLit(s) => assert_eq!(s, "Sim"),
             other => panic!("expected sim body, got {other:?}"),
         }
-        let property = prog.defs.iter().find(|d| d.name == "always").unwrap();
-        assert!(property.is_property);
     }
 
     #[test]
-    fn erase_drops_properties_from_live() {
+    fn erase_drops_intent_thunk_names() {
         let mut live = parse_sources(&[(
             "Main.scuzz".into(),
-            "property always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
+            "@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
         )])
         .unwrap();
-        assert_eq!(live.defs.len(), 1);
+        live.intent_always = vec!["always_0".into()];
+        live.intent_eventually = vec!["eventually_0".into()];
         erase_properties(&mut live);
-        assert!(live.defs.is_empty());
-    }
-
-    #[test]
-    fn sim_cannot_replace_a_property() {
-        let live = parse_sources(&[(
-            "Main.scuzz".into(),
-            "property title: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
-        )])
-        .unwrap();
-        let overlays = vec![OverlaySource {
-            stem: "Main".into(),
-            kind: OverlayKind::Sim,
-            path: PathBuf::new(),
-            label: "Main.scuzz_sim".into(),
-            text: "def title(): Bool = 1 == 1\n".into(),
-        }];
-        assert!(apply_overlays(live, &overlays).is_err());
+        assert!(live.intent_always.is_empty());
+        assert!(live.intent_eventually.is_empty());
     }
 
     #[test]
@@ -1498,61 +1209,77 @@ mod tests {
     }
 
     #[test]
-    fn unused_property_errors() {
-        let prog = parse_sources(&[(
+    fn empty_intent_fails_apply() {
+        let live = parse_sources(&[(
             "Main.scuzz".into(),
-            "property always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
+            "@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
         )])
         .unwrap();
-        let properties = collect_property_names(&prog).unwrap();
-        let err = check_properties_applied(&prog, &properties).unwrap_err();
-        assert!(err.to_string().contains("never applied"));
+        let err = apply_overlays(live, &[intent_ov("# comment only\n")]).unwrap_err();
+        assert!(err.to_string().contains("empty"), "{err}");
     }
 
     #[test]
-    fn parameterized_property_need_not_require() {
-        let prog = parse_sources(&[(
+    fn for_claim_publishes_drive() {
+        let live = parse_sources(&[(
             "Main.scuzz".into(),
-            "property addComm(a: Int, b: Int): Bool = a + b == b + a\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
+            "def add(a: Int, b: Int): Int = a + b\n@main def main: IO[Unit] = IO.println(\"x\")\n"
+                .into(),
         )])
         .unwrap();
-        let properties = collect_property_names(&prog).unwrap();
-        check_properties_applied(&prog, &properties).unwrap();
-        assert_eq!(driver_table_text(&prog).trim(), "addComm i i");
+        let prog = apply_overlays(
+            live,
+            &[intent_ov(
+                "For add:\nSwapping the inputs does not change the result.\n",
+            )],
+        )
+        .unwrap();
+        assert_eq!(driver_table_text(&prog).trim(), "add i i");
     }
 
     #[test]
     fn driver_table_appends_simple_int_bounds() {
-        let prog = parse_sources(&[(
+        let live = parse_sources(&[(
             "Main.scuzz".into(),
-            "property noteDrive(n: Int where n >= 0): Bool = n >= 0\n@main def main: IO[Unit] = IO.println(\"x\")\n"
+            "def noteDrive(n: Int where n >= 0): Int = n\n@main def main: IO[Unit] = IO.println(\"x\")\n"
                 .into(),
         )])
+        .unwrap();
+        let prog = apply_overlays(
+            live,
+            &[intent_ov("For noteDrive:\nThe result is the input.\n")],
+        )
         .unwrap();
         assert_eq!(driver_table_text(&prog), "noteDrive i>=0\n");
 
-        let prog = parse_sources(&[(
+        let live = parse_sources(&[(
             "Main.scuzz".into(),
-            "property pos(n: Int where n > 0): Bool = n > 0\n@main def main: IO[Unit] = IO.println(\"x\")\n"
+            "def pos(n: Int where n > 0): Int = n\n@main def main: IO[Unit] = IO.println(\"x\")\n"
                 .into(),
         )])
         .unwrap();
+        let prog =
+            apply_overlays(live, &[intent_ov("For pos:\nThe result is the input.\n")]).unwrap();
         assert_eq!(driver_table_text(&prog), "pos i>0\n");
 
-        let prog = parse_sources(&[(
+        let live = parse_sources(&[(
             "Main.scuzz".into(),
-            "property cap(n: Int where 10 >= n): Bool = n <= 10\n@main def main: IO[Unit] = IO.println(\"x\")\n"
+            "def cap(n: Int where 10 >= n): Int = n\n@main def main: IO[Unit] = IO.println(\"x\")\n"
                 .into(),
         )])
         .unwrap();
+        let prog =
+            apply_overlays(live, &[intent_ov("For cap:\nThe result is the input.\n")]).unwrap();
         assert_eq!(driver_table_text(&prog), "cap i<=10\n");
 
-        let prog = parse_sources(&[(
+        let live = parse_sources(&[(
             "Main.scuzz".into(),
-            "property both(n: Int where n >= 0 && n <= 10): Bool = true\n@main def main: IO[Unit] = IO.println(\"x\")\n"
+            "def both(n: Int where n >= 0 && n <= 10): Int = n\n@main def main: IO[Unit] = IO.println(\"x\")\n"
                 .into(),
         )])
         .unwrap();
+        let prog =
+            apply_overlays(live, &[intent_ov("For both:\nThe result is the input.\n")]).unwrap();
         assert_eq!(driver_table_text(&prog), "both i\n");
 
         let live = parse_sources(&[(
@@ -1573,72 +1300,83 @@ mod tests {
 
     #[test]
     fn driver_table_records_enums_and_lists() {
-        let prog = parse_sources(&[(
+        let live = parse_sources(&[(
             "Main.scuzz".into(),
             "record Rect(w: Int where w >= 0, h: Int where h >= 0)\n\
-             property areaIsProduct(r: Rect): Bool = true\n\
              @main def main: IO[Unit] = IO.println(\"x\")\n"
                 .into(),
         )])
         .unwrap();
-        collect_property_names(&prog).unwrap();
+        let prog = apply_overlays(
+            live,
+            &[driver_ov(
+                "Main",
+                "def areaIsProduct(r: Rect): IO[Unit] =\n  IO.pure(())\n",
+            )],
+        )
+        .unwrap();
         assert_eq!(driver_table_text(&prog), "areaIsProduct Rect(i>=0,i>=0)\n");
 
-        let prog = parse_sources(&[(
+        let live = parse_sources(&[(
             "Main.scuzz".into(),
             "enum Color:\n  case Red\n  case Blue\n\
-             property isRed(c: Color): Bool = true\n\
              @main def main: IO[Unit] = IO.println(\"x\")\n"
                 .into(),
         )])
         .unwrap();
-        collect_property_names(&prog).unwrap();
+        let prog = apply_overlays(
+            live,
+            &[driver_ov(
+                "Main",
+                "def isRed(c: Color): IO[Unit] =\n  IO.pure(())\n",
+            )],
+        )
+        .unwrap();
         assert_eq!(driver_table_text(&prog), "isRed e:Red|Blue\n");
 
-        let prog = parse_sources(&[(
+        let live = parse_sources(&[(
             "Main.scuzz".into(),
             "enum Opt[T]:\n  case Some(x: T)\n  case None\n\
-             property describe(o: Opt[Int]): Bool = true\n\
              @main def main: IO[Unit] = IO.println(\"x\")\n"
                 .into(),
         )])
         .unwrap();
-        collect_property_names(&prog).unwrap();
+        let prog = apply_overlays(
+            live,
+            &[driver_ov(
+                "Main",
+                "def describe(o: Opt[Int]): IO[Unit] =\n  IO.pure(())\n",
+            )],
+        )
+        .unwrap();
         assert_eq!(driver_table_text(&prog), "describe e:Some(i)|None\n");
 
-        let prog = parse_sources(&[(
+        let live = parse_sources(&[(
             "Main.scuzz".into(),
-            "property sumLen(xs: List[Int]): Bool = true\n\
-             @main def main: IO[Unit] = IO.println(\"x\")\n"
-                .into(),
+            "@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
         )])
         .unwrap();
-        collect_property_names(&prog).unwrap();
+        let prog = apply_overlays(
+            live,
+            &[driver_ov(
+                "Main",
+                "def sumLen(xs: List[Int]): IO[Unit] =\n  IO.pure(())\n",
+            )],
+        )
+        .unwrap();
         assert_eq!(driver_table_text(&prog), "sumLen [i]\n");
     }
 
     #[test]
-    fn rejects_float_property_param() {
-        let prog = parse_sources(&[(
+    fn rejects_float_for_param() {
+        let live = parse_sources(&[(
             "Main.scuzz".into(),
-            "property bad(x: Float): Bool = true\n@main def main: IO[Unit] = IO.println(\"x\")\n"
-                .into(),
+            "def bad(x: Float): Float = x\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
         )])
         .unwrap();
-        let err = collect_property_names(&prog).unwrap_err();
+        let err =
+            apply_overlays(live, &[intent_ov("For bad:\nThe result is the input.\n")]).unwrap_err();
         assert!(err.to_string().contains("record/enum"), "{}", err);
-    }
-
-    #[test]
-    fn applied_property_ok() {
-        let prog = parse_sources(&[(
-            "Main.scuzz".into(),
-            "property always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\").require(always)\n"
-                .into(),
-        )])
-        .unwrap();
-        let properties = collect_property_names(&prog).unwrap();
-        check_properties_applied(&prog, &properties).unwrap();
     }
 
     #[test]
@@ -1664,6 +1402,16 @@ mod tests {
             label: "Main.scuzz_sim".into(),
             text: text.into(),
         }]
+    }
+
+    fn intent_ov(text: &str) -> OverlaySource {
+        OverlaySource {
+            stem: "Main".into(),
+            kind: OverlayKind::Intent,
+            path: PathBuf::new(),
+            label: "Main.scuzz_intent".into(),
+            text: text.into(),
+        }
     }
 
     fn live_with(src: &str) -> Program {
@@ -1706,12 +1454,12 @@ mod tests {
     }
 
     #[test]
-    fn sim_rejects_property_def() {
+    fn sim_rejects_property_keyword() {
         let live =
             live_with("def title(): Bool = true\n@main def main: IO[Unit] = IO.println(\"x\")\n");
         let err = apply_overlays(live, &sim_ov("property title: Bool = true\n")).unwrap_err();
         assert!(
-            err.to_string().contains("sim def cannot be a property"),
+            err.to_string().contains("expected") || err.to_string().contains("property"),
             "{err}"
         );
     }
@@ -1752,16 +1500,14 @@ mod tests {
     }
 
     #[test]
-    fn drivers_reject_property_name_call() {
-        let live = live_with(
-            "property always: Bool = 1 == 1\n@main def main: IO[Unit] = IO.println(\"x\").require(always)\n",
-        );
+    fn drivers_reject_require() {
+        let live = live_with("@main def main: IO[Unit] = IO.println(\"x\")\n");
         let overlays = vec![OverlaySource {
             stem: "Main".into(),
             kind: OverlayKind::Drivers,
             path: PathBuf::new(),
             label: "Main.scuzz_drivers".into(),
-            text: "def plusN(): IO[Unit] =\n  IO.pure(always)\n".into(),
+            text: "def plusN(): IO[Unit] =\n  IO.println(\"x\").require(1 == 1)\n".into(),
         }];
         let err = apply_overlays(live, &overlays).unwrap_err();
         assert!(err.to_string().contains("must not call Property"), "{err}");
@@ -1778,10 +1524,8 @@ mod tests {
     }
 
     #[test]
-    fn drivers_allow_property_name_as_binder() {
-        let live = live_with(
-            "property always: Bool = true\n@main def main: IO[Unit] = IO.println(\"x\").require(always)\n",
-        );
+    fn drivers_allow_binder_named_always() {
+        let live = live_with("@main def main: IO[Unit] = IO.println(\"x\")\n");
         let overlays = vec![driver_ov(
             "Main",
             "def plusN(always: Bool): IO[Unit] =\n  IO.when(always, IO.println(\"x\"))\n",
@@ -1789,9 +1533,7 @@ mod tests {
         let prog = apply_overlays(live, &overlays).unwrap();
         assert!(prog.defs.iter().any(|d| d.is_driver && d.name == "plusN"));
 
-        let live = live_with(
-            "property always: Bool = true\n@main def main: IO[Unit] = IO.println(\"x\").require(always)\n",
-        );
+        let live = live_with("@main def main: IO[Unit] = IO.println(\"x\")\n");
         let overlays = vec![driver_ov(
             "Main",
             "def plusN(): IO[Unit] =\n  for {\n    always = true\n    _ <- IO.when(always, IO.println(\"x\"))\n  } yield ()\n",
@@ -1815,37 +1557,51 @@ mod tests {
     }
 
     #[test]
-    fn drivers_reject_parameterized_property_name() {
-        let live = live_with(
-            "property p(a: Int): Bool = a == a\n@main def main: IO[Unit] = IO.println(\"x\")\n",
-        );
-        let overlays = vec![driver_ov("Main", "def p(n: Int): IO[Unit] = IO.pure(())\n")];
+    fn drivers_reject_for_drive_name() {
+        let live =
+            live_with("def p(a: Int): Int = a\n@main def main: IO[Unit] = IO.println(\"x\")\n");
+        let overlays = vec![
+            driver_ov("Main", "def p(n: Int): IO[Unit] = IO.pure(())\n"),
+            OverlaySource {
+                stem: "Main".into(),
+                kind: OverlayKind::Intent,
+                path: PathBuf::new(),
+                label: "Main.scuzz_intent".into(),
+                text: "For p:\nThe result is the input.\n".into(),
+            },
+        ];
         let err = apply_overlays(live, &overlays).unwrap_err();
-        assert!(
-            err.to_string().contains("driver `p` collides with"),
-            "{err}"
-        );
+        assert!(err.to_string().contains("collides"), "{err}");
     }
 
     #[test]
-    fn parameterized_properties_reject_duplicate_drive_name() {
-        let prog = parse_sources(&[
-            (
-                "A.scuzz".into(),
-                "property p(a: Int): Bool = a == a\n".into(),
-            ),
+    fn for_claims_reject_duplicate_drive_name() {
+        let live = parse_sources(&[
+            ("A.scuzz".into(), "def p(a: Int): Int = a\n".into()),
             (
                 "B.scuzz".into(),
-                "property p(a: Int): Bool = a == a\n@main def main: IO[Unit] = IO.println(\"x\")\n"
-                    .into(),
+                "def p(a: Int): Int = a\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
             ),
         ])
         .unwrap();
-        let err = collect_property_names(&prog).unwrap_err();
-        assert!(
-            err.to_string().contains("driver `p` collides with"),
-            "{err}"
-        );
+        let overlays = vec![
+            OverlaySource {
+                stem: "A".into(),
+                kind: OverlayKind::Intent,
+                path: PathBuf::new(),
+                label: "A.scuzz_intent".into(),
+                text: "For p:\nThe result is the input.\n".into(),
+            },
+            OverlaySource {
+                stem: "B".into(),
+                kind: OverlayKind::Intent,
+                path: PathBuf::new(),
+                label: "B.scuzz_intent".into(),
+                text: "For p:\nThe result is the input.\n".into(),
+            },
+        ];
+        let err = apply_overlays(live, &overlays).unwrap_err();
+        assert!(err.to_string().contains("collides"), "{err}");
     }
 
     #[test]
@@ -1885,5 +1641,14 @@ mod tests {
             dumped.contains("Property.check"),
             "record method should wrap note: {dumped}"
         );
+    }
+
+    #[test]
+    fn overlay_kind_from_intent_path() {
+        let p = std::path::Path::new("src/Main.scuzz_intent");
+        let (stem, kind) = overlay_kind_from_path(p).unwrap();
+        assert_eq!(stem, "Main");
+        assert_eq!(kind, OverlayKind::Intent);
+        assert!(!is_fmt_source(p));
     }
 }

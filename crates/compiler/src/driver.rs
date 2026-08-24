@@ -4,9 +4,8 @@ use crate::fuzz::{classify_declared_text, sometimes_declared_text};
 use crate::lower::lower_program;
 use crate::manifest::{load_manifest, Manifest};
 use crate::overlay::{
-    apply_overlays, check_properties_applied, collect_property_names, driver_table_text,
-    erase_properties, erase_requires, overlay_kind_from_path, residualize_refinements,
-    OverlaySource,
+    apply_overlays, driver_table_text, erase_properties, erase_requires, overlay_kind_from_path,
+    residualize_refinements, OverlaySource,
 };
 use crate::parser::parse_sources;
 use crate::typ::typecheck;
@@ -43,7 +42,7 @@ pub struct CompileOptions {
     pub clang: String,
     /// Skip clang link when fingerprint matches (incremental).
     pub incremental: bool,
-    /// Apply `*.scuzz_sim` and residual in-source `property` decls (fuzz / TestRuntime builds).
+    /// Apply `*.scuzz_sim` / `*.scuzz_drivers` / `*.scuzz_intent` and residual `.require` / `where` (fuzz / TestRuntime builds).
     pub verify: bool,
 }
 
@@ -69,7 +68,7 @@ pub struct ResolvedSource {
 pub struct ResolvedProject {
     pub root_manifest: Manifest,
     pub sources: Vec<ResolvedSource>,
-    /// Stem-paired sim overlays (not loaded for live `build`/`run`).
+    /// Stem-paired sim / model / driver overlays (not loaded for live `build`/`run`).
     pub overlays: Vec<OverlaySource>,
     /// Canonical package directories in visit order (deps first).
     pub package_dirs: Vec<PathBuf>,
@@ -100,15 +99,10 @@ fn prepare_program(resolved: &ResolvedProject, verify: bool) -> Result<Program> 
         .collect();
     let program = parse_sources(&named).map_err(|e| anyhow::anyhow!("parse error: {e}"))?;
     let program = if verify {
-        let property_names =
-            collect_property_names(&program).map_err(|e| anyhow::anyhow!("{e}"))?;
-        check_properties_applied(&program, &property_names).map_err(|e| anyhow::anyhow!("{e}"))?;
         let mut program =
             apply_overlays(program, &resolved.overlays).map_err(|e| anyhow::anyhow!("{e}"))?;
-        check_properties_applied(&program, &property_names).map_err(|e| anyhow::anyhow!("{e}"))?;
         program = crate::typ::resolve_named_args(program).map_err(|e| anyhow::anyhow!("{e}"))?;
         residualize_refinements(&mut program);
-        program.property_names = property_names;
         program
     } else {
         let mut program = program;

@@ -266,7 +266,6 @@ pub(crate) fn impl_block_end(source: &str, tok: &crate::lexer::SpannedToken) -> 
         | Token::Record
         | Token::Type
         | Token::Import
-        | Token::Property
         | Token::AtMain => true,
         Token::Def => unindented(source, tok.span.start),
         _ => false,

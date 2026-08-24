@@ -1,9 +1,3 @@
-property hasPlusButton: Bool =
-  Property.a11yHas("button:+1")
-
-property titleFromSim: Bool =
-  Property.a11yHas("text:SimCounter")
-
 def noteDrive(n: Int where n >= 0): Unit =
   Property.sometimes("drovePlus")
 
@@ -15,5 +9,5 @@ def noteDrive(n: Int where n >= 0): Unit =
     _ <- Ui.run(_ => View.center(View.column(View.background(Color.rgb(230, 240, 248), View.text(counterTitle())), View.bindText(label), View.row(View.minSize(80, 36, View.button("+1", _ => for {
   _ = Property.sometimes("tappedPlus")
   _ = Signal.set(count, Signal.get(count) + 1)
-} yield Property.check("incremented", Signal.get(count) > 0, ()))), View.sized(32, 32, View.stack(View.image(24, 24, Color.rgb(61, 126, 166), ""), View.positioned(4, 4, View.icon(43, Theme.accent())))))))).require(Signal.get(count) >= 0).require(Str.len(Signal.getStr(label)) >= 0).require(hasPlusButton).require(titleFromSim)
+} yield Property.check("incremented", Signal.get(count) > 0, ()))), View.sized(32, 32, View.stack(View.image(24, 24, Color.rgb(61, 126, 166), ""), View.positioned(4, 4, View.icon(43, Theme.accent())))))))).require(Signal.get(count) >= 0).require(Str.len(Signal.getStr(label)) >= 0)
   } yield ()

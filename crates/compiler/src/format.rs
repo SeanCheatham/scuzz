@@ -282,20 +282,6 @@ fn pretty_type(t: &Type) -> String {
 }
 
 fn pretty_def(d: &FunDef) -> String {
-    if d.is_property {
-        let params: Vec<String> = d.params.iter().map(pretty_param).collect();
-        let sig = if params.is_empty() {
-            d.name.clone()
-        } else {
-            format!("{}({})", d.name, params.join(", "))
-        };
-        return format!(
-            "property {}: {} =\n{}",
-            sig,
-            pretty_type(&d.ret),
-            pretty_expr(&d.body, 1)
-        );
-    }
     let params: Vec<String> = d.params.iter().map(pretty_param).collect();
     let vis = if d.is_private { "private " } else { "" };
     let tparams = if d.type_params.is_empty() {
@@ -1036,14 +1022,12 @@ def scale(x: Float): Float = x * 2.0
     }
 
     #[test]
-    fn formats_property() {
+    fn formats_require() {
         let src = r#"
-property always: Bool = 1 == 1
-@main def main: IO[Unit] = IO.println("ok")
+@main def main: IO[Unit] = IO.println("ok").require(1 == 1)
 "#;
         let out = format_source(src).unwrap();
-        assert!(out.contains("property always: Bool ="));
-        assert!(!out.contains("def always"));
+        assert!(out.contains(".require("));
         let again = format_source(&out).unwrap();
         assert_eq!(out, again);
     }

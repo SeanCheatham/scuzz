@@ -70,8 +70,9 @@ Invalid `default_runtime`, non-positive `headless_size`, non-positive `headless_
 my-app/
   scuzz.toml
   src/
-    Main.scuzz              # live module (*.scuzz under src/; `property` decls erase from live builds)
+    Main.scuzz              # live module (*.scuzz under src/; `.require` / `where` / `sometimes` erase from live builds)
     Other.scuzz             # multi-file packages / enums
+    Main.scuzz_intent       # optional: session / forall spec
     Main.scuzz_sim          # optional: same-name defs under fuzz / TestRuntime
     Main.scuzz_drivers      # optional: oracle-free IO workloads for scuzz fuzz
   .scuzz/
@@ -83,4 +84,4 @@ my-app/
     ios/<name>.app          # signed sim bundle (`scuzz package --target ios`)
 ```
 
-The compiler accepts `*.scuzz` under `src/` (recursive). Units in the same package are merged. Executables need exactly one `@main`. Stem-paired `*.scuzz_sim` / `*.scuzz_drivers` and in-source `property` decls load under `scuzz check` and verify/fuzz builds. See [vision.md](../vision.md#properties-simulation-mutation-and-verification). `scuzz fmt` and `scuzz check` format-verify only the selected project's `src/` (not dependency trees).
+The compiler accepts `*.scuzz` under `src/` (recursive). Units in the same package are merged. Executables need exactly one `@main`. Stem-paired `*.scuzz_sim` / `*.scuzz_drivers` / `*.scuzz_intent` load under `scuzz check` and verify/fuzz builds. See [vision.md](../vision.md#properties-simulation-mutation-and-verification). `scuzz fmt` and `scuzz check` format-verify only the selected project's `src/` (not dependency trees). Intent files are not format sources.

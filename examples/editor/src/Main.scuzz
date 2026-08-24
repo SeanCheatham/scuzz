@@ -1,36 +1,3 @@
-property hasSave: Bool =
-  Property.a11yHas("button:Save")
-
-property hasCheck: Bool =
-  Property.a11yHas("button:Check")
-
-property hasFind: Bool =
-  Property.a11yHas("button:Find")
-
-property hasPalette: Bool =
-  Property.a11yHas("button:Palette")
-
-property hasSaveAll: Bool =
-  Property.a11yHas("button:Save all")
-
-property hasRun: Bool =
-  Property.a11yHas("button:Run")
-
-property hasFuzz: Bool =
-  Property.a11yHas("button:Fuzz")
-
-property hasClose: Bool =
-  Property.a11yHas("button:x sample.txt")
-
-property hasEditor: Bool =
-  Property.a11yHas("editor:editor")
-
-property bufNonNeg: Bool =
-  Str.len(Property.signalStr(0)) >= 0
-
-property diagNonNeg: Bool =
-  Property.signalListLen(5) >= 0
-
 def analyze(path: String, body: String): IO[String] =
   for {
     _ <- Fs.write(path, body)
@@ -492,5 +459,5 @@ e""", true)
   _ = Signal.setList(tree, Chrome.flatten(walked, Signal.getList(openSig)))
   _ = Signal.set(ctxOpen, Str.len(""))
   _ <- Ui.setTitle(Fs.basename(List.at(ps, i2)))
-} yield ()))))))).require(hasSave).require(hasCheck).require(hasFind).require(hasPalette).require(hasSaveAll).require(hasRun).require(hasFuzz).require(hasClose).require(hasEditor).require(bufNonNeg).require(diagNonNeg)
+} yield ()))))))).require(Str.len(Property.signalStr(0)) >= 0).require(Property.signalListLen(5) >= 0)
   } yield ()

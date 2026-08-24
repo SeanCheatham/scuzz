@@ -156,7 +156,6 @@ fn classify(
         | Token::Case
         | Token::Match
         | Token::Def
-        | Token::Property
         | Token::Where
         | Token::Import
         | Token::For
@@ -206,7 +205,7 @@ fn classify_ident(
     let prev_tok = prev.map(|t| &t.token);
     let next_tok = next.map(|t| &t.token);
     match prev_tok {
-        Some(Token::Def) | Some(Token::Property) => return (TY_FUNCTION, MOD_DECLARATION),
+        Some(Token::Def) => return (TY_FUNCTION, MOD_DECLARATION),
         Some(Token::Enum) | Some(Token::Record) => return (TY_ENUM, MOD_DECLARATION),
         Some(Token::Type) | Some(Token::Trait) => return (TY_TYPE, MOD_DECLARATION),
         Some(Token::Case) => return (TY_ENUM_MEMBER, MOD_DECLARATION),

@@ -1,0 +1,4 @@
+[package]
+name = "bad-intent"
+version = "0.1.0"
+description = "Present empty intent. scuzz check must fail."

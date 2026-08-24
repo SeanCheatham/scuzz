@@ -1675,6 +1675,10 @@ static char *slurp_path(const char *path) {
   return buf;
 }
 
+static int64_t session_ok(void) { return 1; }
+
+static int64_t session_fail(void) { return 0; }
+
 int main(void) {
   /* delay */
   delay_calls = 0;
@@ -8870,6 +8874,54 @@ int main(void) {
     unsetenv("SCUZZ_CLASSIFY_DUMP");
     unsetenv("SCUZZ_TESTRT");
     unlink(path);
+  }
+
+  /* Session always / eventually thunks. */
+  {
+    pid_t pid;
+    SzString *nm;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    sz_property_session_reset();
+    nm = sz_string_from_cstr("visible");
+    sz_property_always_register(nm, (void *)session_ok);
+    sz_release(nm);
+    assert(sz_property_session_armed());
+    sz_property_session_step();
+    sz_property_session_end();
+    sz_property_session_reset();
+    assert(!sz_property_session_armed());
+    fflush(NULL);
+    pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      setenv("SCUZZ_TESTRT", "1", 1);
+      nm = sz_string_from_cstr("visible");
+      sz_property_always_register(nm, (void *)session_fail);
+      sz_release(nm);
+      sz_property_session_step();
+      _exit(0);
+    }
+    assert(wait_aborted(pid));
+    fflush(NULL);
+    pid = fork();
+    assert(pid >= 0);
+    if (pid == 0) {
+      setenv("SCUZZ_TESTRT", "1", 1);
+      nm = sz_string_from_cstr("shown");
+      sz_property_eventually_register(nm, (void *)session_fail);
+      sz_release(nm);
+      sz_property_session_step();
+      sz_property_session_end();
+      _exit(0);
+    }
+    assert(wait_aborted(pid));
+    nm = sz_string_from_cstr("shown");
+    sz_property_eventually_register(nm, (void *)session_ok);
+    sz_release(nm);
+    sz_property_session_step();
+    sz_property_session_end();
+    sz_property_session_reset();
+    unsetenv("SCUZZ_TESTRT");
   }
 
   puts("runtime io tests ok");

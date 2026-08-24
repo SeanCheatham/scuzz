@@ -1,4 +1,4 @@
 [fuzz]
 seed = 42
 schedule_seed = "42"
-events = ["drive bumpIncreases 0"]
+events = ["drive area Rect(0,1)"]

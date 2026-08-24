@@ -82,8 +82,9 @@ fn empty_program(file: &str) -> Program {
             body: Expr::dummy(ExprKind::Unit),
         },
         imports: Vec::new(),
-        property_names: Vec::new(),
         driver_names: Vec::new(),
+        intent_always: Vec::new(),
+        intent_eventually: Vec::new(),
     }
 }
 
@@ -225,8 +226,9 @@ pub fn parse_sources(sources: &[(String, String)]) -> Result<Program, ParseError
         defs,
         main,
         imports,
-        property_names: Vec::new(),
         driver_names: Vec::new(),
+        intent_always: Vec::new(),
+        intent_eventually: Vec::new(),
     })
 }
 
@@ -347,8 +349,9 @@ pub fn parse_sources_recovering(
             defs,
             main,
             imports,
-            property_names: Vec::new(),
             driver_names: Vec::new(),
+            intent_always: Vec::new(),
+            intent_eventually: Vec::new(),
         }),
         errors,
     )
@@ -462,7 +465,6 @@ impl Parser {
                 | Token::Import
                 | Token::Private
                 | Token::Def
-                | Token::Property
                 | Token::AtMain
                 | Token::Eof
         )
@@ -591,13 +593,6 @@ impl Parser {
                         self.skip_to_item();
                     }
                 },
-                Token::Property => match self.parse_property() {
-                    Ok(d) => defs.push(d),
-                    Err(e) => {
-                        errors.push(e);
-                        self.skip_to_item();
-                    }
-                },
                 Token::AtMain => {
                     if !main.name.is_empty() {
                         errors.push(self.err("multiple @main"));
@@ -615,7 +610,7 @@ impl Parser {
                 Token::Eof => break,
                 other => {
                     let msg = format!(
-                    "expected enum/record/type/trait/impl/import/def/private def/property/@main, got {other:?}"
+                    "expected enum/record/type/trait/impl/import/def/private def/@main, got {other:?}"
                 );
                     errors.push(self.err(msg));
                     self.skip_to_item();
@@ -633,8 +628,9 @@ impl Parser {
                 defs,
                 main,
                 imports,
-                property_names: Vec::new(),
                 driver_names: Vec::new(),
+                intent_always: Vec::new(),
+                intent_eventually: Vec::new(),
             },
             errors,
         )
@@ -724,7 +720,6 @@ impl Parser {
             name,
             name_span,
             is_private,
-            is_property: false,
             is_driver: false,
             type_params,
             params,
@@ -750,39 +745,6 @@ impl Parser {
             name_span,
             type_params,
             target,
-        })
-    }
-
-    fn parse_property(&mut self) -> Result<FunDef, ParseError> {
-        self.expect(&Token::Property)?;
-        let (name, name_span) = self.expect_ident()?;
-        let params = if matches!(self.peek(), Token::LParen) {
-            self.bump();
-            let params = self.parse_param_list_with_tparams(&[])?;
-            self.expect(&Token::RParen)?;
-            params
-        } else {
-            Vec::new()
-        };
-        self.expect(&Token::Colon)?;
-        let ret = self.parse_type()?;
-        if !matches!(ret, Type::Bool) {
-            return Err(self.err(format!("property `{name}` must return Bool, got {ret:?}")));
-        }
-        self.reject_param_defaults(&params, "property parameters")?;
-        self.expect(&Token::Eq)?;
-        let body = self.parse_expr()?;
-        Ok(FunDef {
-            module: self.module.clone(),
-            name,
-            name_span,
-            is_private: false,
-            is_property: true,
-            is_driver: false,
-            type_params: Vec::new(),
-            params,
-            ret,
-            body,
         })
     }
 
@@ -3505,29 +3467,12 @@ def tag(): String = helper()
     }
 
     #[test]
-    fn parse_property_with_params() {
-        let src = r#"
-property addComm(a: Int, b: Int): Bool = a + b == b + a
-@main def main: IO[Unit] = IO.println("ok")
-"#;
-        let p = parse(src).unwrap();
-        assert!(p.defs[0].is_property);
-        assert_eq!(p.defs[0].params.len(), 2);
-        assert!(matches!(p.defs[0].params[0].ty, Type::Int));
-    }
-
-    #[test]
-    fn parse_property_declaration() {
+    fn parse_rejects_property_keyword() {
         let src = r#"
 property always: Bool = 1 == 1
 @main def main: IO[Unit] = IO.println("ok")
 "#;
-        let p = parse(src).unwrap();
-        assert_eq!(p.defs.len(), 1);
-        assert!(p.defs[0].is_property);
-        assert_eq!(p.defs[0].name, "always");
-        assert!(matches!(p.defs[0].ret, Type::Bool));
-        assert!(p.defs[0].params.is_empty());
+        assert!(parse(src).is_err());
     }
 
     #[test]
@@ -3579,19 +3524,6 @@ def add(n: Int = 1, m: Int): Int = n + m
     }
 
     #[test]
-    fn parse_rejects_property_param_default() {
-        let src = r#"
-property addComm(a: Int = 0, b: Int = 0): Bool = a + b == b + a
-@main def main: IO[Unit] = IO.println("ok")
-"#;
-        let err = parse(src).unwrap_err().to_string();
-        assert!(
-            err.contains("property parameters cannot have a default"),
-            "unexpected: {err}"
-        );
-    }
-
-    #[test]
     fn parse_rejects_method_param_default() {
         let src = r#"
 record Point(x: Int, y: Int):
@@ -3614,15 +3546,6 @@ record Point(x: Int where x >= 0, y: Int)
         let p = parse(src).unwrap();
         assert!(p.enums[0].cases[0].field_rfn(0).is_some());
         assert!(p.enums[0].cases[0].field_rfn(1).is_none());
-    }
-
-    #[test]
-    fn parse_property_rejects_non_bool() {
-        let src = r#"
-property bad: String = "x"
-@main def main: IO[Unit] = IO.println("ok")
-"#;
-        assert!(parse(src).is_err());
     }
 
     #[test]
