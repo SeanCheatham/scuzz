@@ -1,10 +1,12 @@
 //! Parse, lower, and typecheck. No codegen. No link.
 
+use crate::driver::apply_resolved_overlays;
 use crate::format::format_source;
+use crate::intent::{intent_source_from_parts, place_intent_file};
 use crate::lower::lower_program;
 use crate::overlay::{
-    apply_overlays, collect_fmt_sources, is_fmt_source, overlay_kind_from_path,
-    residualize_refinements, OverlayError, OverlaySource,
+    collect_fmt_sources, is_fmt_source, overlay_kind_from_path, residualize_refinements,
+    OverlayError, OverlaySource,
 };
 use crate::parser::{parse_sources, parse_sources_recovering, ParseError};
 use crate::span::{offset_to_utf16_pos, Span};
@@ -239,6 +241,9 @@ fn named_sources(resolved: &crate::driver::ResolvedProject) -> Vec<(String, Stri
     for ov in &resolved.overlays {
         out.push((ov.label.clone(), ov.text.clone()));
     }
+    for intent in &resolved.intents {
+        out.push((intent.label.clone(), intent.text.clone()));
+    }
     out
 }
 
@@ -446,6 +451,15 @@ fn apply_unsaved(
             matched.insert(canonicalize_source_path(&ov.path), ());
         }
     }
+    for intent in &mut resolved.intents {
+        if intent.path.as_os_str().is_empty() {
+            continue;
+        }
+        if let Some(text) = lookup_unsaved(&intent.path, unsaved) {
+            intent.text = text.clone();
+            matched.insert(canonicalize_source_path(&intent.path), ());
+        }
+    }
     let root = canonicalize_source_path(project_dir);
     let src_dir = root.join("src");
     let pkg = resolved.root_manifest.package.name.clone();
@@ -454,7 +468,17 @@ fn apply_unsaved(
         if matched.contains_key(&key) {
             continue;
         }
-        if !key.starts_with(&src_dir) {
+        let under_src = key.starts_with(&src_dir);
+        let name = key.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if name.ends_with(".scuzz_intent") {
+            if let Ok(Some(placement)) = place_intent_file(&root, &key) {
+                resolved
+                    .intents
+                    .push(intent_source_from_parts(&pkg, placement, key, text.clone()));
+            }
+            continue;
+        }
+        if !under_src {
             continue;
         }
         let rel = key
@@ -479,6 +503,30 @@ fn apply_unsaved(
             });
         }
     }
+}
+
+fn unsaved_intent_diags(
+    project_dir: &Path,
+    unsaved: &BTreeMap<PathBuf, String>,
+) -> Vec<Diagnostic> {
+    let root = canonicalize_source_path(project_dir);
+    let mut out = Vec::new();
+    for path in unsaved.keys() {
+        let key = canonicalize_source_path(path);
+        let name = key.file_name().and_then(|n| n.to_str()).unwrap_or("");
+        if !name.ends_with(".scuzz_intent") {
+            continue;
+        }
+        if let Err(msg) = place_intent_file(&root, &key) {
+            let rel = key
+                .strip_prefix(&root)
+                .unwrap_or(&key)
+                .display()
+                .to_string();
+            out.push(Diagnostic::error(msg).with_file(rel).with_loc(1, 1));
+        }
+    }
+    out
 }
 
 fn format_check_src(
@@ -528,6 +576,7 @@ fn diagnostic_from_overlay(e: OverlayError, sources: &[(String, String)]) -> Dia
     match e {
         OverlayError::Parse(p) => diagnostic_from_parse(p, sources),
         OverlayError::Msg(m) => Diagnostic::error(m),
+        OverlayError::At { msg, span } => Diagnostic::error(msg).with_span(&span, sources),
     }
 }
 
@@ -622,6 +671,7 @@ fn check_project_with_inner(
     let mut resolved = crate::driver::resolve_project(project_dir)
         .with_context(|| format!("resolving {}", project_dir.display()))?;
     apply_unsaved(&mut resolved, unsaved, project_dir);
+    merge_diags(&mut diags, unsaved_intent_diags(project_dir, unsaved));
 
     let named = named_sources(&resolved);
     let live_named = live_named_sources(&resolved);
@@ -637,7 +687,7 @@ fn check_project_with_inner(
     let live_prog = live.clone();
     merge_diags(&mut diags, check_typed_graph(live_prog, &named, false));
 
-    match apply_overlays(live, &resolved.overlays) {
+    match apply_resolved_overlays(live, &resolved) {
         Ok(program) => {
             merge_diags(&mut diags, check_typed_graph(program, &named, true));
         }
@@ -664,17 +714,22 @@ fn load_overlay_file(
             .find(|s| canonicalize_source_path(&s.path) == key)
         {
             Some(s) => (s.label.clone(), s.text.clone()),
-            None => match resolved.overlays.iter().find(|o| {
-                !o.path.as_os_str().is_empty() && canonicalize_source_path(&o.path) == key
+            None => match resolved.intents.iter().find(|i| {
+                !i.path.as_os_str().is_empty() && canonicalize_source_path(&i.path) == key
             }) {
-                Some(o) => (o.label.clone(), o.text.clone()),
-                None => return Ok(None),
+                Some(i) => (i.label.clone(), i.text.clone()),
+                None => match resolved.overlays.iter().find(|o| {
+                    !o.path.as_os_str().is_empty() && canonicalize_source_path(&o.path) == key
+                }) {
+                    Some(o) => (o.label.clone(), o.text.clone()),
+                    None => return Ok(None),
+                },
             },
         };
     let live_named = live_named_sources(&resolved);
     let program = parse_sources(&live_named)
         .ok()
-        .and_then(|p| apply_overlays(p, &resolved.overlays).ok());
+        .and_then(|p| apply_resolved_overlays(p, &resolved).ok());
     Ok(Some((resolved, label, text, program)))
 }
 
@@ -928,7 +983,7 @@ pub fn workspace_symbols_project(
     let named = named_sources(&resolved);
     let Some(program) = parse_sources(&named)
         .ok()
-        .and_then(|p| apply_overlays(p, &resolved.overlays).ok())
+        .and_then(|p| apply_resolved_overlays(p, &resolved).ok())
     else {
         return Ok(Vec::new());
     };
@@ -1796,7 +1851,11 @@ version = "0.0.0"
             "def title(): String = \"Live\"\n@main def main: IO[Unit] =\n  IO.println(title())\n",
             "def title(): String = \"Sim\"\n",
         );
-        fs::write(root.join("src/Main.scuzz_intent"), "# empty on purpose\n").unwrap();
+        fs::write(
+            root.join(crate::intent::INTENT_FILE_NAME),
+            "# empty on purpose\n",
+        )
+        .unwrap();
         let diags = check_project(root).unwrap();
         assert!(
             diags.iter().any(|d| d.message.contains("empty")),

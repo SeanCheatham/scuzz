@@ -1,5 +1,5 @@
-//! Stem-paired `*.scuzz_sim` / `*.scuzz_drivers` / `*.scuzz_intent` overlays
-//! and `.require` / `where` residualization.
+//! Stem-paired `*.scuzz_sim` / `*.scuzz_drivers` overlays, hierarchical intent
+//! lowering, and `.require` / `where` residualization.
 
 use crate::ast::{BinOp, EnumDef, Expr, ExprKind, FunDef, Import, Program, Type, UnOp};
 use crate::parser::{parse_file, ParseError};
@@ -15,6 +15,8 @@ const GEN_DEPTH_MAX: usize = 3;
 pub enum OverlayError {
     #[error("{0}")]
     Msg(String),
+    #[error("{msg}")]
+    At { msg: String, span: Span },
     #[error(transparent)]
     Parse(#[from] ParseError),
 }
@@ -23,7 +25,6 @@ pub enum OverlayError {
 pub enum OverlayKind {
     Sim,
     Drivers,
-    Intent,
 }
 
 #[derive(Debug, Clone)]
@@ -38,11 +39,19 @@ pub struct OverlaySource {
 }
 
 /// Apply same-name sim replacements, then merge `*.scuzz_drivers`, then lower
-/// `*.scuzz_intent`. `.require` is rewritten by type in field resolution
-/// (verify) or erased live.
-pub fn apply_overlays(
+/// hierarchical intent files. `.require` is rewritten by type in field
+/// resolution (verify) or erased live.
+#[cfg(test)]
+pub fn apply_overlays(live: Program, overlays: &[OverlaySource]) -> Result<Program, OverlayError> {
+    apply_verify_overlays(live, overlays, &[], &[])
+}
+
+/// Apply sim, drivers, and intent constraints from a resolved package graph.
+pub fn apply_verify_overlays(
     mut live: Program,
     overlays: &[OverlaySource],
+    intents: &[crate::intent::IntentSource],
+    units: &[crate::intent::SourceUnit],
 ) -> Result<Program, OverlayError> {
     for sim in overlays {
         if sim.kind != OverlayKind::Sim {
@@ -63,7 +72,7 @@ pub fn apply_overlays(
         }
         apply_driver_overlay(&mut live, ov, &mut driver_names)?;
     }
-    crate::intent::apply_intents(&mut live, overlays)?;
+    crate::intent::apply_intents(&mut live, intents, units)?;
     check_drive_table(&live)?;
     live.driver_names = driver_names;
     Ok(live)
@@ -100,7 +109,6 @@ fn overlay_ext(kind: OverlayKind) -> &'static str {
     match kind {
         OverlayKind::Sim => "*.scuzz_sim",
         OverlayKind::Drivers => "*.scuzz_drivers",
-        OverlayKind::Intent => "*.scuzz_intent",
     }
 }
 
@@ -108,7 +116,6 @@ fn overlay_kind_word(kind: OverlayKind) -> &'static str {
     match kind {
         OverlayKind::Sim => "sim",
         OverlayKind::Drivers => "driver",
-        OverlayKind::Intent => "intent",
     }
 }
 
@@ -1008,8 +1015,7 @@ fn residualize_expr(
     }
 }
 
-/// True when `path` is a stem-paired overlay (`*.scuzz_sim` / `*.scuzz_drivers` /
-/// `*.scuzz_intent`).
+/// True when `path` is a stem-paired overlay (`*.scuzz_sim` / `*.scuzz_drivers`).
 pub fn overlay_kind_from_path(path: &std::path::Path) -> Option<(String, OverlayKind)> {
     let name = path.file_name()?.to_str()?;
     if let Some(stem) = name.strip_suffix(".scuzz_sim") {
@@ -1020,11 +1026,6 @@ pub fn overlay_kind_from_path(path: &std::path::Path) -> Option<(String, Overlay
     if let Some(stem) = name.strip_suffix(".scuzz_drivers") {
         if !stem.is_empty() {
             return Some((stem.to_string(), OverlayKind::Drivers));
-        }
-    }
-    if let Some(stem) = name.strip_suffix(".scuzz_intent") {
-        if !stem.is_empty() {
-            return Some((stem.to_string(), OverlayKind::Intent));
         }
     }
     None
@@ -1215,7 +1216,7 @@ mod tests {
             "@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
         )])
         .unwrap();
-        let err = apply_overlays(live, &[intent_ov("# comment only\n")]).unwrap_err();
+        let err = apply_intent(live, "# comment only\n").unwrap_err();
         assert!(err.to_string().contains("empty"), "{err}");
     }
 
@@ -1227,11 +1228,9 @@ mod tests {
                 .into(),
         )])
         .unwrap();
-        let prog = apply_overlays(
+        let prog = apply_intent(
             live,
-            &[intent_ov(
-                "For add:\nSwapping the inputs does not change the result.\n",
-            )],
+            "For Main.add:\nSwapping the inputs does not change the result.\n",
         )
         .unwrap();
         assert_eq!(driver_table_text(&prog).trim(), "add i i");
@@ -1245,11 +1244,7 @@ mod tests {
                 .into(),
         )])
         .unwrap();
-        let prog = apply_overlays(
-            live,
-            &[intent_ov("For noteDrive:\nThe result is the input.\n")],
-        )
-        .unwrap();
+        let prog = apply_intent(live, "For Main.noteDrive:\nThe result is the input.\n").unwrap();
         assert_eq!(driver_table_text(&prog), "noteDrive i>=0\n");
 
         let live = parse_sources(&[(
@@ -1258,8 +1253,7 @@ mod tests {
                 .into(),
         )])
         .unwrap();
-        let prog =
-            apply_overlays(live, &[intent_ov("For pos:\nThe result is the input.\n")]).unwrap();
+        let prog = apply_intent(live, "For Main.pos:\nThe result is the input.\n").unwrap();
         assert_eq!(driver_table_text(&prog), "pos i>0\n");
 
         let live = parse_sources(&[(
@@ -1268,8 +1262,7 @@ mod tests {
                 .into(),
         )])
         .unwrap();
-        let prog =
-            apply_overlays(live, &[intent_ov("For cap:\nThe result is the input.\n")]).unwrap();
+        let prog = apply_intent(live, "For Main.cap:\nThe result is the input.\n").unwrap();
         assert_eq!(driver_table_text(&prog), "cap i<=10\n");
 
         let live = parse_sources(&[(
@@ -1278,8 +1271,7 @@ mod tests {
                 .into(),
         )])
         .unwrap();
-        let prog =
-            apply_overlays(live, &[intent_ov("For both:\nThe result is the input.\n")]).unwrap();
+        let prog = apply_intent(live, "For Main.both:\nThe result is the input.\n").unwrap();
         assert_eq!(driver_table_text(&prog), "both i\n");
 
         let live = parse_sources(&[(
@@ -1374,8 +1366,7 @@ mod tests {
             "def bad(x: Float): Float = x\n@main def main: IO[Unit] = IO.println(\"x\")\n".into(),
         )])
         .unwrap();
-        let err =
-            apply_overlays(live, &[intent_ov("For bad:\nThe result is the input.\n")]).unwrap_err();
+        let err = apply_intent(live, "For Main.bad:\nThe result is the input.\n").unwrap_err();
         assert!(err.to_string().contains("record/enum"), "{}", err);
     }
 
@@ -1404,14 +1395,27 @@ mod tests {
         }]
     }
 
-    fn intent_ov(text: &str) -> OverlaySource {
-        OverlaySource {
-            stem: "Main".into(),
-            kind: OverlayKind::Intent,
-            path: PathBuf::new(),
-            label: "Main.scuzz_intent".into(),
+    fn pkg_intent(text: &str) -> crate::intent::IntentSource {
+        crate::intent::IntentSource {
+            package: "pkg".into(),
+            scope: crate::intent::IntentScopeKind::Package,
+            dir_rel: String::new(),
+            label: "pkg/intent.scuzz_intent".into(),
             text: text.into(),
+            path: PathBuf::new(),
         }
+    }
+
+    fn main_unit() -> crate::intent::SourceUnit {
+        crate::intent::SourceUnit {
+            package: "pkg".into(),
+            module: "Main".into(),
+            rel: "src/Main.scuzz".into(),
+        }
+    }
+
+    fn apply_intent(live: Program, text: &str) -> Result<Program, OverlayError> {
+        apply_verify_overlays(live, &[], &[pkg_intent(text)], &[main_unit()])
     }
 
     fn live_with(src: &str) -> Program {
@@ -1560,17 +1564,13 @@ mod tests {
     fn drivers_reject_for_drive_name() {
         let live =
             live_with("def p(a: Int): Int = a\n@main def main: IO[Unit] = IO.println(\"x\")\n");
-        let overlays = vec![
-            driver_ov("Main", "def p(n: Int): IO[Unit] = IO.pure(())\n"),
-            OverlaySource {
-                stem: "Main".into(),
-                kind: OverlayKind::Intent,
-                path: PathBuf::new(),
-                label: "Main.scuzz_intent".into(),
-                text: "For p:\nThe result is the input.\n".into(),
-            },
-        ];
-        let err = apply_overlays(live, &overlays).unwrap_err();
+        let err = apply_verify_overlays(
+            live,
+            &[driver_ov("Main", "def p(n: Int): IO[Unit] = IO.pure(())\n")],
+            &[pkg_intent("For Main.p:\nThe result is the input.\n")],
+            &[main_unit()],
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("collides"), "{err}");
     }
 
@@ -1584,23 +1584,35 @@ mod tests {
             ),
         ])
         .unwrap();
-        let overlays = vec![
-            OverlaySource {
-                stem: "A".into(),
-                kind: OverlayKind::Intent,
-                path: PathBuf::new(),
-                label: "A.scuzz_intent".into(),
-                text: "For p:\nThe result is the input.\n".into(),
+        let units = vec![
+            crate::intent::SourceUnit {
+                package: "pkg".into(),
+                module: "A".into(),
+                rel: "src/A.scuzz".into(),
             },
-            OverlaySource {
-                stem: "B".into(),
-                kind: OverlayKind::Intent,
-                path: PathBuf::new(),
-                label: "B.scuzz_intent".into(),
-                text: "For p:\nThe result is the input.\n".into(),
+            crate::intent::SourceUnit {
+                package: "pkg".into(),
+                module: "B".into(),
+                rel: "src/B.scuzz".into(),
             },
         ];
-        let err = apply_overlays(live, &overlays).unwrap_err();
+        let err = apply_verify_overlays(
+            live,
+            &[],
+            &[
+                pkg_intent("For A.p:\nThe result is the input.\n"),
+                crate::intent::IntentSource {
+                    package: "pkg".into(),
+                    scope: crate::intent::IntentScopeKind::Package,
+                    dir_rel: String::new(),
+                    label: "pkg/src/intent.scuzz_intent".into(),
+                    text: "For B.p:\nThe result is the input.\n".into(),
+                    path: PathBuf::new(),
+                },
+            ],
+            &units,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("collides"), "{err}");
     }
 
@@ -1644,11 +1656,12 @@ mod tests {
     }
 
     #[test]
-    fn overlay_kind_from_intent_path() {
+    fn overlay_kind_ignores_intent_path() {
         let p = std::path::Path::new("src/Main.scuzz_intent");
-        let (stem, kind) = overlay_kind_from_path(p).unwrap();
-        assert_eq!(stem, "Main");
-        assert_eq!(kind, OverlayKind::Intent);
+        assert!(overlay_kind_from_path(p).is_none());
+        assert!(!is_fmt_source(p));
+        let p = std::path::Path::new("intent.scuzz_intent");
+        assert!(overlay_kind_from_path(p).is_none());
         assert!(!is_fmt_source(p));
     }
 }
