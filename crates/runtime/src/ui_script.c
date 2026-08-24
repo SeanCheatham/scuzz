@@ -368,7 +368,7 @@ void sz_ui_scripted_button_tap(SzUiSession *session, int prefer_upper) {
      paste <s>  set the session clipboard to <s> then paste
      drag <x1> <y1> <x2> <y2>  pointer drag (TextField / editor selection); live OS drag records this verb
      hover <x> <y>  pointer MOVE with no button (hover); shows View.tooltip; live OS hover records this verb
-     secondary <n>  button-3 click on tap-dump index n; does not fire the primary tap
+     secondary <n>  button-3 click on tap-dump index n; does not fire the primary tap; runs View.onSecondary
      secondary <x> <y>  button-3 click at a logical point; live OS right-click records this verb
      pump <k>   pump k extra frames
      scroll <dy> pan the first Scroll on its axis (positive = content up or left); no scroll is a no-op

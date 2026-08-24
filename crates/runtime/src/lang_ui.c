@@ -166,6 +166,10 @@ SzView *sz_lang_view_tooltip(SzString *message, SzView *child) {
   return sz_view_tooltip(message ? sz_string_cstr(message) : "", child);
 }
 
+SzView *sz_lang_view_on_secondary(SzView *child, SzViewTapFn tap, void *env) {
+  return sz_view_on_secondary(child, tap, env);
+}
+
 SzView *sz_lang_view_placeholder(SzView *child) {
   return sz_view_placeholder(child);
 }

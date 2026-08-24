@@ -32,6 +32,8 @@ list[21] = []
 list[22] = []
 int[23] = 0
 list[24] = ["Save", "Check", "Find", "Complete", "Hover", "Format", "Def", "Rename", "Fix", "Save all", "Run", "Fuzz"]
+int[25] = 0
+str[26] = ""
 
 [views]
 split:28
@@ -58,6 +60,7 @@ list:list
 button:sample.txt
 button:x sample.txt
 editor:editor
+overlay:0
 overlay:0
 overlay:0
 overlay:0
@@ -96,6 +99,7 @@ overlay:0
 1 open=0
 2 open=0
 3 open=0
+4 open=0
 
 [scrolls]
 0 scroll

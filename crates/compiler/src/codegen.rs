@@ -389,6 +389,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_lang_view_unconstrained_box(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_card(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_tooltip(ptr, ptr)").unwrap();
+    writeln!(out, "declare ptr @sz_lang_view_on_secondary(ptr, ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_placeholder(ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_semantics(ptr, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_lang_view_merge_semantics(ptr, ptr)").unwrap();
@@ -2875,7 +2876,7 @@ fn emit_interpolate(
 /// 2-element `SzList` `cons(fn_ptr, cons(env_ptr, nil))`. `fn_ptr` matches the
 /// C `SzViewTapFn` signature `void (*)(SzView *self, void *env)`. `env_ptr` is
 /// the captured-locals list (same packing scheme as `flatMap` continuations).
-/// Consumers (`View.button`, `View.iconButton`, `View.fab`, `View.outlinedButton`, `View.textButton`, `View.actionChip`, `View.inkWell`) unpack the pair.
+/// Consumers (`View.button`, `View.iconButton`, `View.fab`, `View.outlinedButton`, `View.textButton`, `View.actionChip`, `View.inkWell`, `View.onSecondary`) unpack the pair.
 fn emit_lambda(
     param: &Option<String>,
     body: &Expr,
@@ -7069,6 +7070,17 @@ fn emit_call(
             )
             .unwrap();
             drop_owned_ptr(&mut code, &emitted_args[0]);
+            val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
+        }
+        "View.onSecondary" => {
+            unpack_closure(&mut code, &emitted_args[1].value, prefix);
+            writeln!(
+                code,
+                "  %{prefix}_v = call ptr @sz_lang_view_on_secondary(ptr {}, ptr %{prefix}_fnp, ptr %{prefix}_envp)",
+                emitted_args[0].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[1]);
             val_emitted(code, format!("%{prefix}_v"), Kind::Ptr)
         }
         "View.placeholder" => {
@@ -12237,6 +12249,24 @@ enum Color:
     }
 
     #[test]
+    fn emit_on_secondary_tap_leftover_string_drops() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] =
+  Ui.run(_ => View.onSecondary(View.text("x"), _ => "leftover"))
+"#,
+        );
+        let temps = cstr_string_temps(&ir);
+        assert!(
+            temps.len() >= 2,
+            "expected onSecondary child and leftover:\n{ir}"
+        );
+        for name in &temps {
+            assert_released(&ir, name, "onSecondary tap leftover");
+        }
+    }
+
+    #[test]
     fn emit_tap_leftover_map_drops() {
         let ir = emit_full(
             r#"
@@ -12703,6 +12733,13 @@ enum Color:
 "#,
                 "call ptr @sz_lang_view_ink_well(",
                 "View.inkWell",
+            ),
+            (
+                r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.onSecondary(View.avatar("b"), _ => ()))
+"#,
+                "call ptr @sz_lang_view_on_secondary(",
+                "View.onSecondary",
             ),
             (
                 r#"@main def main: IO[Unit] =
@@ -13455,6 +13492,20 @@ enum Color:
         assert!(
             ir.contains("sz_lang_view_tooltip"),
             "expected sz_lang_view_tooltip in IR:\n{ir}"
+        );
+    }
+
+    #[test]
+    fn emit_view_on_secondary() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.onSecondary(View.avatar("S"), _ => ()))
+"#;
+        let p = crate::lower::lower_program(parse(src).unwrap());
+        crate::typ::typecheck(&p).expect("typecheck");
+        let ir = emit_llvm(&p);
+        assert!(
+            ir.contains("sz_lang_view_on_secondary"),
+            "expected sz_lang_view_on_secondary in IR:\n{ir}"
         );
     }
 

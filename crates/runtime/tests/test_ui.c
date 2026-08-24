@@ -1612,6 +1612,60 @@ static void test_session_inject_hover_secondary(void) {
   remove(dump);
 }
 
+static void test_on_secondary_script_fires(void) {
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzView *root, *btn, *wrap;
+  SzSignalInt *primary;
+  SzSignalInt *secondary;
+  const char *path = "/tmp/scuzz_ui_on_secondary.script";
+  const char *dump = "/tmp/scuzz_ui_on_secondary.dump";
+  char *body;
+
+  remove(path);
+  remove(dump);
+  primary = sz_signal_int(0);
+  secondary = sz_signal_int(0);
+  btn = sz_view_button("Go", counter_tap, primary);
+  wrap = sz_view_on_secondary(btn, counter_tap, secondary);
+  root = sz_view_column();
+  sz_view_add_child(root, wrap);
+
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_session_set_inject(session, path));
+  assert(sz_ui_session_set_debug_dump(session, dump));
+  assert(sz_ui_pump_sync(session));
+  assert(sz_view_kind(wrap) == SZ_VIEW_ON_SECONDARY);
+  assert(!sz_view_is_tap_target(wrap));
+
+  write_stamp(path, "secondary 0\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(primary) == 0);
+  assert(sz_signal_int_get(secondary) == 1);
+  body = slurp_cstr(dump);
+  assert(strstr(body, "[last_secondary]") != NULL);
+  assert(strstr(body, "button:Go") != NULL);
+  free(body);
+
+  write_stamp(path, "tap 0\n");
+  assert(sz_ui_pump_sync(session));
+  assert(sz_signal_int_get(primary) == 1);
+  assert(sz_signal_int_get(secondary) == 1);
+
+  sz_ui_unmount(session);
+  sz_signal_int_free(primary);
+  sz_signal_int_free(secondary);
+  remove(path);
+  remove(dump);
+}
+
 static void test_session_inject_selection_clipboard(void) {
   SzUiConfig cfg;
   SzUiSession *session;
@@ -13920,6 +13974,7 @@ int main(void) {
   test_record_live_hover_secondary();
   test_session_inject_caret();
   test_session_inject_hover_secondary();
+  test_on_secondary_script_fires();
   test_session_inject_selection_clipboard();
   test_session_inject_field_index();
   test_button_set_and_show_when();

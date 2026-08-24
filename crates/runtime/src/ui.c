@@ -1454,6 +1454,7 @@ static int inject_pointer(SzUiSession *session, const SzInputEvent *event) {
       if (dx * dx + dy * dy <= tap_slop2) {
         hit = sz_view_hit_test(session->root, event->x, event->y);
         session_set_last_secondary(session, event->x, event->y, hit);
+        (void)sz_view_handle_secondary(session->root, event->x, event->y);
         session->dirty = 1;
       }
       session->pointer_slider = NULL;

@@ -208,7 +208,8 @@ typedef enum SzViewKind {
   SZ_VIEW_UNCONSTRAINED_BOX,  /* sizes to the child; child lays out with unbounded max */
   SZ_VIEW_EDITOR,             /* multiline SignalStr buffer; not a TextField */
   SZ_VIEW_SPLIT,              /* Signal.int 0-100; two children + drag handle */
-  SZ_VIEW_OVERLAY             /* Signal.int; fills parent when on; Escape dismisses */
+  SZ_VIEW_OVERLAY,            /* Signal.int; fills parent when on; Escape dismisses */
+  SZ_VIEW_ON_SECONDARY        /* child + button-3 handler; sizes to the child; not a tap */
 } SzViewKind;
 
 typedef struct SzRect {
@@ -280,6 +281,9 @@ SzView *sz_view_outlined_button(const char *label, SzViewTapFn on_tap, void *env
 SzView *sz_view_text_button(const char *label, SzViewTapFn on_tap, void *env);
 /* Sizes to `child`. `message` is a11y. Shows `message` on hover. Not a tap. */
 SzView *sz_view_tooltip(const char *message, SzView *child);
+/* Sizes to `child`. Button-3 on the child or a descendant runs `on_tap`.
+ * Not a tap target. Primary taps still hit the child. */
+SzView *sz_view_on_secondary(SzView *child, SzViewTapFn on_tap, void *env);
 /* Sizes to `child`. Paints a muted box mark. Not a tap target. */
 SzView *sz_view_placeholder(SzView *child);
 /* Sizes to `child`. `label` is a11y. Not a tap target. */
@@ -396,6 +400,10 @@ void sz_view_layout(SzView *root, float width, float height, const SzTheme *them
 SzView *sz_view_hit_test(SzView *root, float x, float y);
 /* Innermost View.tooltip whose frame contains (x, y), or NULL. */
 SzView *sz_view_tooltip_at(SzView *root, float x, float y);
+/* Innermost View.onSecondary whose frame contains (x, y), or NULL. */
+SzView *sz_view_on_secondary_at(SzView *root, float x, float y);
+/* Run the innermost onSecondary handler at (x, y). 1 if a handler ran. */
+int sz_view_handle_secondary(SzView *root, float x, float y);
 /* Clear hover marks. Mark the tooltip at (x, y). 1 if a tooltip is hovered. */
 int sz_view_set_hover_at(SzView *root, float x, float y);
 void sz_view_clear_hover(SzView *root);
@@ -606,7 +614,8 @@ int sz_ui_session_watch(SzUiSession *session, const char *path);
  * [hover] appears after a pointer MOVE with no button: `xy x y -> tooltip:msg`
  * or `-> NULL`.
  * [last_secondary] appears after a button-3 click: `xy x y -> role:label` or
- * `-> NULL`. `hover x y` and `secondary N` / `secondary x y` are inject verbs.
+ * `-> NULL`. Button-3 also runs `View.onSecondary` on that hit. `hover x y`
+ * and `secondary N` / `secondary x y` are inject verbs.
  * Live Desktop hover and right-click record those verbs.
  * [heap] is live alloc stats (`live_bytes` / `live_count` / `peak_bytes`),
  * `delta_bytes` / `delta_count` since the last live dump or `resetpeak`,
