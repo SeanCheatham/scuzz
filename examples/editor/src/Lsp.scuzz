@@ -65,13 +65,24 @@ def completeLabels(j: Json): List[String] =
     case _ => []: List[String]
   }
 
+def defLoc(j: Json): Json =
+  Check.jsonField(j, "result") match {
+    case Json.Arr(x :: _) => x
+    case other => other
+  }
+
+def defUri(j: Json): String =
+  Check.jsonStr(Check.jsonField(defLoc(j), "uri")) match {
+    case s => Property.check("defUri", Str.len(s) >= 0, s)
+  }
+
 def defLine(j: Json): Int =
-  Check.jsonInt(Check.jsonField(Check.jsonField(Check.jsonField(Check.jsonField(j, "result"), "range"), "start"), "line")) + Str.len("x") match {
+  Check.jsonInt(Check.jsonField(Check.jsonField(Check.jsonField(defLoc(j), "range"), "start"), "line")) + Str.len("x") match {
   case n => Property.check("defLine", n > 0, n)
 }
 
 def defCol(j: Json): Int =
-  Check.jsonInt(Check.jsonField(Check.jsonField(Check.jsonField(Check.jsonField(j, "result"), "range"), "start"), "character")) + Str.len("x") match {
+  Check.jsonInt(Check.jsonField(Check.jsonField(Check.jsonField(defLoc(j), "range"), "start"), "character")) + Str.len("x") match {
   case n => Property.check("defCol", n > 0, n)
 }
 
@@ -92,6 +103,27 @@ def fixTitle(j: Json): String =
   Check.jsonField(j, "result") match {
     case Json.Arr(x :: _) => Check.jsonStr(Check.jsonField(x, "title"))
     case _ => ""
+  }
+
+def firstNewText(j: Json): String =
+  j match {
+    case Json.Obj(pairs) => List.find(pairs, p => p._1 == "newText") match {
+  case x :: _ => Check.jsonStr(x._2)
+  case [] => List.find(List.map(pairs, p => firstNewText(p._2)), s => Str.nonEmpty(s)) match {
+  case h :: _ => h
+  case [] => ""
+}
+}
+    case Json.Arr(xs) => List.find(List.map(xs, firstNewText), s => Str.nonEmpty(s)) match {
+  case h :: _ => h
+  case [] => ""
+}
+    case _ => ""
+  }
+
+def fixText(j: Json, fallback: String): String =
+  firstNewText(j) match {
+    case t => if (Str.isEmpty(t)) fallback else t
   }
 
 def tokenCount(j: Json): Int =

@@ -6,23 +6,30 @@ str[1] = "hello
 world
 "
 str[2] = "sample.txt"
-str[3] = "."
-int[4] = 0
-list[5] = []
-list[6] = ["sample.txt", "scuzz.toml", "src/"]
-list[7] = []
-str[8] = ""
-str[9] = ""
-int[10] = 28
-int[11] = 0
-int[12] = 0
-int[13] = 0
-str[14] = "hover stub"
-list[15] = []
+str[3] = "sample.txt"
+str[4] = "."
+int[5] = 0
+list[6] = []
+int[7] = 0
+list[8] = ["sample.txt", "scuzz.toml", "src/"]
+list[9] = []
+int[10] = 0
+str[11] = ""
+str[12] = ""
+int[13] = 28
+int[14] = 0
+int[15] = 0
+int[16] = 0
+str[17] = "hover stub"
+list[18] = []
+list[19] = []
+int[20] = 0
+list[21] = ["Save", "Check", "Find", "Complete", "Hover", "Format", "Def", "Rename", "Fix"]
 
 [views]
 split:28
 text:Files
+scroll:scroll
 list:list
 button:sample.txt
 button:scuzz.toml
@@ -37,26 +44,27 @@ button:Format
 button:Def
 button:Rename
 button:Fix
+button:Palette
 editor:editor
-list:list
-list:list
+overlay:0
 overlay:0
 overlay:0
 overlay:0
 
 [taps]
-0 sample.txt 24,46 67x32
-1 scuzz.toml 24,86 66x32
-2 src/ 24,126 48x32
-3 Save 286,36 37x32
-4 Check 331,36 37x32
-5 Find 376,36 37x32
-6 Complete 421,36 37x32
-7 Hover 466,36 37x32
-8 Format 511,36 37x32
-9 Def 556,36 37x32
-10 Rename 601,36 37x32
-11 Fix 646,36 37x32
+0 sample.txt 36,58 67x32
+1 scuzz.toml 36,98 66x32
+2 src/ 36,138 48x32
+3 Save 364,36 48x32
+4 Check 420,36 49x32
+5 Find 477,36 48x32
+6 Complete 533,36 63x32
+7 Hover 604,36 48x32
+8 Format 660,36 53x32
+9 Def 721,36 48x32
+10 Rename 777,36 58x32
+11 Fix 843,36 48x32
+12 Palette 309,76 52x32
 
 [fields]
 
@@ -70,8 +78,10 @@ overlay:0
 0 open=0
 1 open=0
 2 open=0
+3 open=0
 
 [scrolls]
+0 scroll
 
 [last_hit]
-xy 304.4 52.0 -> button:Save
+xy 388.1 52.0 -> button:Save

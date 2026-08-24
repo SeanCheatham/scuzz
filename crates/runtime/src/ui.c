@@ -1058,7 +1058,7 @@ static int clipboard_chord(const char *key, int mods) {
   return 0;
 }
 
-/* 0 none; else a toolbar a11y label. Ctrl/Cmd + s/f/k/p; Ctrl/Cmd+Shift+f. */
+/* 0 none; else a toolbar a11y label. Ctrl/Cmd + s/f/k/p; Ctrl/Cmd+Shift+f/p. */
 static const char *app_chord_label(const char *key, int mods) {
   unsigned char c;
   if (!key || !key[0] || key[1] != '\0')
@@ -1075,7 +1075,7 @@ static const char *app_chord_label(const char *key, int mods) {
   if (c == 'k')
     return "Hover";
   if (c == 'p')
-    return "Complete";
+    return (mods & SZ_KEY_SHIFT) ? "Palette" : "Complete";
   if (c == 'd')
     return "Def";
   return NULL;

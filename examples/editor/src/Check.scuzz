@@ -20,7 +20,13 @@ def jsonInt(j: Json): Int =
   }
 
 def diagRow(item: Json): String =
-  Str.concat(Str.fromInt(jsonInt(jsonField(item, "line"))), Str.concat(":", Str.concat(Str.fromInt(jsonInt(jsonField(item, "column"))), Str.concat(" ", jsonStr(jsonField(item, "message"))))))
+  Str.concat(Str.fromInt(jsonInt(jsonField(item, "line"))), Str.concat(":", Str.concat(Str.fromInt(jsonInt(jsonField(item, "column"))), Str.concat("|", Str.concat(jsonStr(jsonField(item, "file")), Str.concat("|", jsonStr(jsonField(item, "message"))))))))
+
+def diagFile(s: String): String =
+  Str.split(s, "|") match {
+    case _ :: f :: _ => f
+    case _ => ""
+  }
 
 def diagRows(j: Json): List[String] =
   j match {
@@ -40,7 +46,7 @@ def diagMarks(j: Json): List[(Int, Int)] =
 def jumpDiag(s: String): IO[Unit] =
   for {
     _ = Property.sometimes("tappedDiag")
-    head = List.head(Str.split(s, " "))
+    head = List.head(Str.split(s, "|"))
     lc = Str.split(head, ":")
     _ <- Ui.setEditorCaret(Str.toInt(List.head(lc), Str.len("")), Str.toInt(List.at(lc, Str.len("x")), Str.len("")))
   } yield ()

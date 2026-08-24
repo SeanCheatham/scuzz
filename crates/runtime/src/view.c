@@ -2530,13 +2530,9 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
         break;
       }
     }
-    child_max =
-        shown > 0
-            ? (max_w - theme->pad * 2.f - layout_gap(theme) * (float)(shown - 1)) /
-                  (float)shown
-            : max_w;
-    if (child_max < 0)
-      child_max = 0;
+    /* Give each non-flex child the inner max width. Do not split the row
+     * equally. Equal split shrinks button labels when the row overflows. */
+    child_max = max_w > theme->pad * 2.f ? max_w - theme->pad * 2.f : 0.f;
     for (i = 0; i < v->child_count; i++) {
       if (!view_is_shown(v->children[i])) {
         layout_constrained(v->children[i], cx, y + theme->pad,
