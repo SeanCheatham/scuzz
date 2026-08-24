@@ -27,8 +27,40 @@ def pickSource(dir: String): IO[String] =
 def openBuffer(arg: String, isDir: Int): IO[String] =
   if (isDir == 0) IO.pure(arg) else pickSource(arg)
 
-def keepTree(s: String): Bool =
-  Property.check("keep", Str.len(s) > 0, !Str.startsWith(s, ".") && s != "corpus/" && s != "goldens/" && s != "build/")
+def stripUri(s: String): String =
+  if (Str.startsWith(s, "file://")) Str.drop(s, Str.len("file://")) else s
+
+def resolvePath(dir: String, rel: String): String =
+  stripUri(rel) match {
+    case raw => if (Str.startsWith(raw, "/")) raw else Fs.join(dir, raw)
+  }
+
+def keepPart(p: String): Bool =
+  p != "" && !Str.startsWith(p, ".") && p != "corpus" && p != "goldens" && p != "build"
+
+def keepWalk(s: String): Bool =
+  Property.check("walk", Str.len(s) > 0, List.forall(Str.split(Str.stripSuffix(s, "/"), "/"), p => keepPart(p)))
+
+def parts(path: String): List[String] =
+  List.filter(Str.split(Str.stripSuffix(path, "/"), "/"), p => p != "")
+
+def treeLabel(path: String): String =
+  if (List.isEmpty(parts(path))) path else Str.concat(Str.repeat("    ", List.len(parts(path)) - 1), Str.concat(Fs.basename(Str.stripSuffix(path, "/")), if (Str.endsWith(path, "/")) "/" else ""))
+
+def flagNonEmpty(xs: List[String]): Int =
+  if (List.len(xs) > 0) 1 else 0
+
+def parentRel(path: String): String =
+  if (Fs.dirname(Str.stripSuffix(path, "/")) == "." || Fs.dirname(Str.stripSuffix(path, "/")) == "" || Fs.dirname(Str.stripSuffix(path, "/")) == "/") "" else Str.concat(Fs.dirname(Str.stripSuffix(path, "/")), "/")
+
+def isVisible(path: String, open: List[String]): Bool =
+  parentRel(path) == "" || List.contains(open, parentRel(path))
+
+def flatten(ents: List[String], open: List[String]): List[String] =
+  List.filter(ents, s => isVisible(s, open))
+
+def toggleOpen(open: List[String], path: String): List[String] =
+  if (List.contains(open, path)) List.filter(open, s => !Str.startsWith(s, path)) else List.append(open, path)
 
 def seedWorkspace(): IO[Unit] =
   for {

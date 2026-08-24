@@ -2,10 +2,10 @@ def lspCall(_root: String, _path: String, _body: String, method: String): IO[Jso
   IO.pure(Json.parse(method match {
   case "textDocument/hover" => "{\"result\":{\"contents\":{\"kind\":\"plaintext\",\"value\":\"hover\"}}}"
   case "textDocument/completion" => "{\"result\":{\"items\":[{\"label\":\"foo\"}]}}"
-  case "textDocument/definition" => "{\"result\":{\"range\":{\"start\":{\"line\":0,\"character\":0}}}}"
+  case "textDocument/definition" => "{\"result\":[{\"uri\":\"\",\"range\":{\"start\":{\"line\":0,\"character\":0}}}]}"
   case "textDocument/formatting" => "{\"result\":[]}"
   case "textDocument/rename" => "{\"result\":{\"newText\":\"\"}}"
-  case "textDocument/codeAction" => "{\"result\":[{\"title\":\"fix\"}]}"
+  case "textDocument/codeAction" => "{\"result\":[{\"title\":\"fix\",\"edit\":{\"changes\":{\"file://x\":[{\"newText\":\"fixed\"}]}}}]}"
   case _ => "{\"result\":{\"data\":[1]}}"
 }))
 

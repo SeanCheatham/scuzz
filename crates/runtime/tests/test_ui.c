@@ -1098,8 +1098,8 @@ static void test_session_inject_scroll(void) {
   scroll = sz_view_scroll(list);
   scroll2 = sz_view_scroll(list2);
   row = sz_view_row();
-  sz_view_add_child(row, scroll);
-  sz_view_add_child(row, scroll2);
+  sz_view_add_child(row, sz_view_expanded(scroll));
+  sz_view_add_child(row, sz_view_expanded(scroll2));
   sz_view_add_child(root, row);
 
   memset(&cfg, 0, sizeof(cfg));
@@ -2636,6 +2636,30 @@ static void test_row_non_flex_stays_intrinsic(void) {
   inner = rf.w - theme->pad * 2.f;
   assert(fabsf(rf.w - 320.f) < 0.5f);
   assert(mf.w + 1.f < inner);
+  sz_view_free(row);
+}
+
+static void test_row_overflow_keeps_button_width(void) {
+  SzView *row, *solo, *first, *last;
+  const SzTheme *theme = sz_theme_default();
+  float want;
+  int i;
+
+  solo = sz_view_button("Complete", NULL, NULL);
+  sz_view_layout(solo, 400.f, 80.f, theme);
+  want = sz_view_frame(solo).w;
+  sz_view_free(solo);
+
+  row = sz_view_row();
+  first = sz_view_button("Complete", NULL, NULL);
+  sz_view_add_child(row, first);
+  for (i = 0; i < 6; i++)
+    sz_view_add_child(row, sz_view_button("Complete", NULL, NULL));
+  last = sz_view_button("Complete", NULL, NULL);
+  sz_view_add_child(row, last);
+  sz_view_layout(row, 200.f, 80.f, theme);
+  assert(fabsf(sz_view_frame(first).w - want) < 0.5f);
+  assert(fabsf(sz_view_frame(last).w - want) < 0.5f);
   sz_view_free(row);
 }
 
@@ -13458,6 +13482,49 @@ static void test_app_chord_save(void) {
   sz_signal_int_free(n);
 }
 
+static void test_app_chord_palette(void) {
+  SzSignalInt *complete;
+  SzSignalInt *palette;
+  SzView *root, *btn;
+  SzUiConfig cfg;
+  SzUiSession *session;
+  SzInputEvent ev;
+
+  complete = sz_signal_int(0);
+  palette = sz_signal_int(0);
+  root = sz_view_column();
+  btn = sz_view_button("Complete", counter_tap, complete);
+  sz_view_add_child(root, btn);
+  btn = sz_view_button("Palette", counter_tap, palette);
+  sz_view_add_child(root, btn);
+  memset(&cfg, 0, sizeof(cfg));
+  cfg.kind = SZ_UI_RUNTIME_HEADLESS;
+  cfg.width = 200;
+  cfg.height = 80;
+  cfg.scale = 1.0;
+  session = sz_ui_mount(&cfg, root);
+  assert(session);
+  sz_ui_session_take_root(session);
+  assert(sz_ui_pump_sync(session));
+  memset(&ev, 0, sizeof(ev));
+  ev.kind = SZ_INPUT_KEY;
+  ev.key = "p";
+  ev.key_mods = SZ_KEY_CTRL;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_signal_int_get(complete) == 1);
+  assert(sz_signal_int_get(palette) == 0);
+  ev.key_mods = SZ_KEY_CTRL | SZ_KEY_SHIFT;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_signal_int_get(complete) == 1);
+  assert(sz_signal_int_get(palette) == 1);
+  ev.key_mods = SZ_KEY_CMD | SZ_KEY_SHIFT;
+  assert(sz_ui_inject_sync(session, &ev));
+  assert(sz_signal_int_get(palette) == 2);
+  sz_ui_unmount(session);
+  sz_signal_int_free(complete);
+  sz_signal_int_free(palette);
+}
+
 static void test_caret_metrics(void) {
   SzSignalStr *draft;
   SzView *root;
@@ -13886,6 +13953,7 @@ int main(void) {
   test_min_size_inside_expanded();
   test_column_non_flex_stays_intrinsic();
   test_row_non_flex_stays_intrinsic();
+  test_row_overflow_keeps_button_width();
   test_wrap_kind();
   test_wrap_one_run_when_wide();
   test_wrap_sizes_to_runs_not_max();
@@ -14372,6 +14440,7 @@ int main(void) {
   test_view_editor_undo_gutter();
   test_view_focus_split_overlay();
   test_app_chord_save();
+  test_app_chord_palette();
   test_caret_metrics();
   test_alloc_pump_flat();
   test_alloc_counter_pump_flat();

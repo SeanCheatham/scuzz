@@ -7,6 +7,9 @@ property hasCheck: Bool =
 property hasFind: Bool =
   Property.a11yHas("button:Find")
 
+property hasPalette: Bool =
+  Property.a11yHas("button:Palette")
+
 property hasEditor: Bool =
   Property.a11yHas("editor:editor")
 
@@ -34,12 +37,12 @@ def analyze(path: String, body: String): IO[String] =
 )
   } yield if (Str.startsWith(got._2, "[")) got._2 else "[]"
 
-def listDir(dir: String): IO[List[String]] =
+def walkTree(root: String): IO[List[String]] =
   for {
-    ents <- Fs.list(dir).handleErrorWith(_ =>
+    ents <- Fs.walk(root).handleErrorWith(_ =>
   IO.pure([]: List[(String, Bool)])
 )
-  } yield List.sort(List.filter(Chrome.filesOf(ents), s => Chrome.keepTree(s)))
+  } yield List.sort(List.filter(Chrome.filesOf(ents), s => Chrome.keepWalk(s)))
 
 @main def main: IO[Unit] =
   for {
@@ -47,6 +50,16 @@ def listDir(dir: String): IO[List[String]] =
     args <- Sys.args()
     arg = if (List.isEmpty(args)) "sample.txt" else List.head(args)
     _ = Property.check("rel", Chrome.preferredRel(true, []: List[String], []: List[String]) == Fs.join("src", "Main.scuzz"), true)
+    _ = Property.check("flat", Chrome.flatten(["a.txt", "b/", "b/c.scuzz"], []) == ["a.txt", "b/"], true)
+    _ = Property.check("exp", Chrome.flatten(["a.txt", "b/", "b/c.scuzz"], ["b/"]) == ["a.txt", "b/", "b/c.scuzz"], true)
+    _ = Property.check("tog", Chrome.toggleOpen([], "b/") == ["b/"], true)
+    _ = Property.check("lab", Chrome.treeLabel("src/Main.scuzz") == "    Main.scuzz", true)
+    _ = Property.check("labd", Chrome.treeLabel("src/") == "src/", true)
+    _ = Property.check("strip", Chrome.stripUri("file://a") == "a", true)
+    _ = Property.check("abs", Chrome.resolvePath("d", "/a") == "/a", true)
+    _ = Property.check("res", Chrome.resolvePath("d", "b") == Fs.join("d", "b"), true)
+    _ = Property.check("dfile", Check.diagFile("1:1|a.scuzz|m") == "a.scuzz", true)
+    _ = Property.check("dempty", Check.diagFile("1:1||m") == "", true)
     argListed <- Fs.list(arg).map(_ => Str.len("x")).handleErrorWith(_ =>
   IO.pure(Str.len(""))
 )
@@ -55,15 +68,19 @@ def listDir(dir: String): IO[List[String]] =
     raw <- Fs.read(file).handleErrorWith(_ =>
   IO.pure("")
 )
-    names <- listDir(root)
+    walked <- walkTree(root)
+    names = Chrome.flatten(walked, [])
     buf = Signal.str(raw)
     orig = Signal.str(raw)
     pathSig = Signal.str(file)
+    tabSig = Signal.str(Fs.basename(file))
     dirSig = Signal.str(root)
     dirty = Signal.int(Str.len(""))
     diags = Signal.list([])
+    showDiags = Signal.int(0)
     tree = Signal.list(names)
     output = Signal.list([])
+    showOut = Signal.int(0)
     findQ = Signal.str("")
     replQ = Signal.str("")
     frac = Signal.int(28)
@@ -72,35 +89,41 @@ def listDir(dir: String): IO[List[String]] =
     hoverOpen = Signal.int(Str.len(""))
     hoverTxt = Signal.str("hover stub")
     comps = Signal.list([])
+    openSig = Signal.list([])
+    palOpen = Signal.int(Str.len(""))
+    palCmds = Signal.list(["Save", "Check", "Find", "Complete", "Hover", "Format", "Def", "Rename", "Fix"])
     _ = Lsp.frame("{}")
     _ = Lsp.parseLen(Str.concat("Content-Length: 2", Str.concat(Lsp.headerBreak(), "{}")))
     _ = Property.check("need", Lsp.needLen(Str.len("abcd"), Str.len("xy")) == Str.len("abcdef"), true)
     _ = Property.check("ms", Lsp.msgSlice("aabbcc", Str.len("aa"), Str.len("bb")) == "bb", true)
     _ = Property.check("idm", Check.jsonInt(Check.jsonField(Lsp.takeIfMatch(Json.parse("{\"id\":2}"), Str.len("xy")), "id")) == Str.len("xy"), true)
+    _ = Property.check("fix", Lsp.fixText(Json.parse("{\"result\":[{\"title\":\"fix\",\"edit\":{\"changes\":{\"u\":[{\"newText\":\"fixed\"}]}}}]}"), "x") == "fixed", true)
+    _ = Property.check("duri", Lsp.defUri(Json.parse("{\"result\":[{\"uri\":\"file://x\",\"range\":{\"start\":{\"line\":0,\"character\":0}}}]}")) == "file://x", true)
+    _ = Property.check("dobj", Lsp.defUri(Json.parse("{\"result\":{\"uri\":\"u\"}}")) == "u", true)
     _ <- Ui.setTitle(Fs.basename(file))
-    _ <- Ui.run(_ => View.split(frac, View.column(View.text("Files"), View.each(tree, s => View.button(s, _ => for {
+    _ <- Ui.run(_ => View.split(frac, View.column(View.text("Files"), View.expanded(View.scroll(View.each(tree, s => View.button(Chrome.treeLabel(s), _ => for {
   dir = Signal.getStr(dirSig)
-  next = Chrome.joinChild(dir, s)
-  listed <- Fs.list(next).flatMap(_ => IO.pure(Str.len("x"))).handleErrorWith(_ =>
-  IO.pure(Str.len(""))
-)
-  _ <- if (listed == Str.len("x")) for {
-  names <- listDir(next)
-  _ = Signal.setStr(dirSig, next)
-  _ = Signal.setList(tree, names)
+  _ <- if (Str.endsWith(s, "/")) for {
+  _ = Property.sometimes("tappedDir")
+  open = Chrome.toggleOpen(Signal.getList(openSig), s)
+  _ = Signal.setList(openSig, open)
+  walked <- walkTree(dir)
+  _ = Signal.setList(tree, Chrome.flatten(walked, open))
   _ <- IO.pure(())
 } yield () else for {
   _ = Property.sometimes("tappedTree")
+  next = Chrome.joinChild(dir, s)
   body <- Fs.read(next).handleErrorWith(_ =>
   IO.pure("")
 )
   _ = Signal.setStr(pathSig, next)
+  _ = Signal.setStr(tabSig, Fs.basename(next))
   _ = Signal.setStr(buf, body)
   _ = Signal.setStr(orig, body)
   _ = Signal.set(dirty, Str.len(""))
   _ <- Ui.setTitle(Fs.basename(next))
 } yield ()
-} yield ()))), View.stack(View.column(View.row(View.bindText(pathSig), View.showWhen(dirty, Str.len("x"), View.text("*")), View.button("Save", _ => for {
+} yield ()))))), View.stack(View.column(View.wrap(View.bindText(tabSig), View.showWhen(dirty, Str.len("x"), View.text("*")), View.button("Save", _ => for {
   _ = Property.sometimes("tappedSave")
   p = Signal.getStr(pathSig)
   _ <- Fs.write(p, Signal.getStr(buf))
@@ -112,7 +135,9 @@ def listDir(dir: String): IO[List[String]] =
   raw <- analyze(Signal.getStr(pathSig), Signal.getStr(buf))
   j = Json.parse(raw)
   _ <- Ui.setEditorDiagnostics(Check.diagMarks(j))
-  _ = Signal.setList(diags, Check.diagRows(j))
+  rows = Check.diagRows(j)
+  _ = Signal.setList(diags, rows)
+  _ = Signal.set(showDiags, Chrome.flagNonEmpty(rows))
 } yield ()), View.button("Find", _ => for {
   _ = Property.sometimes("tappedFind")
   _ = Signal.set(findOpen, Str.len("x"))
@@ -134,7 +159,9 @@ def listDir(dir: String): IO[List[String]] =
   IO.pure(Json.Null)
 )
   _ = Signal.setStr(hoverTxt, Lsp.hoverText(j))
-  _ = Signal.setList(output, List.append(Signal.getList(output), Str.concat("tok", Str.fromInt(Lsp.tokenCount(tok)))))
+  hoverOut = List.append(Signal.getList(output), Str.concat("tok", Str.fromInt(Lsp.tokenCount(tok))))
+  _ = Signal.setList(output, hoverOut)
+  _ = Signal.set(showOut, Chrome.flagNonEmpty(hoverOut))
   _ = Signal.set(hoverOpen, Str.len("x"))
   _ <- IO.pure(())
 } yield ()), View.button("Format", _ => for {
@@ -143,12 +170,27 @@ def listDir(dir: String): IO[List[String]] =
   IO.pure(Json.Null)
 )
   _ = Signal.setStr(buf, Lsp.formatText(j, Signal.getStr(buf)))
-  _ = Signal.setList(output, List.append(Signal.getList(output), "fmt"))
+  fmtOut = List.append(Signal.getList(output), "fmt")
+  _ = Signal.setList(output, fmtOut)
+  _ = Signal.set(showOut, Chrome.flagNonEmpty(fmtOut))
   _ <- IO.pure(())
 } yield ()), View.button("Def", _ => for {
   j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/definition").handleErrorWith(_ =>
   IO.pure(Json.Null)
 )
+  uri = Lsp.defUri(j)
+  _ <- if (Str.isEmpty(uri)) IO.pure(()) else for {
+  dest = Chrome.resolvePath(Signal.getStr(dirSig), uri)
+  body <- Fs.read(dest).handleErrorWith(_ =>
+  IO.pure("")
+)
+  _ = Signal.setStr(pathSig, dest)
+  _ = Signal.setStr(tabSig, Fs.basename(dest))
+  _ = Signal.setStr(buf, body)
+  _ = Signal.setStr(orig, body)
+  _ = Signal.set(dirty, Str.len(""))
+  _ <- Ui.setTitle(Fs.basename(dest))
+} yield ()
   _ <- Ui.setEditorCaret(Lsp.defLine(j), Lsp.defCol(j))
 } yield ()), View.button("Rename", _ => for {
   j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/rename").handleErrorWith(_ =>
@@ -160,11 +202,123 @@ def listDir(dir: String): IO[List[String]] =
   j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/codeAction").handleErrorWith(_ =>
   IO.pure(Json.Null)
 )
-  _ = Signal.setList(output, List.append(Signal.getList(output), Lsp.fixTitle(j)))
+  t = Lsp.fixText(j, "")
+  _ = if (Str.nonEmpty(t)) Signal.setStr(buf, t)
+  _ = Signal.set(dirty, if (Signal.getStr(buf) == Signal.getStr(orig)) Str.len("") else Str.len("x"))
+  fixOut = List.append(Signal.getList(output), Lsp.fixTitle(j))
+  _ = Signal.setList(output, fixOut)
+  _ = Signal.set(showOut, Chrome.flagNonEmpty(fixOut))
   _ <- IO.pure(())
-} yield ())), View.expanded(View.editor(buf)), View.each(diags, s => View.button(s, _ => Check.jumpDiag(s))), View.each(output, s => View.text(s))), View.overlay(findOpen, View.column(View.text("Find"), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => Ui.setEditorCaret(Str.len("x"), Str.len("x"))), View.button("Replace", _ => for {
+} yield ()), View.button("Palette", _ => for {
+  _ = Signal.set(palOpen, Str.len("x"))
+  _ <- IO.pure(())
+} yield ())), View.expanded(View.editor(buf)), View.showWhen(showDiags, 1, View.each(diags, s => View.button(s, _ => for {
+  file = Check.diagFile(s)
+  _ <- if (Str.isEmpty(file)) IO.pure(()) else for {
+  dest = Chrome.resolvePath(Signal.getStr(dirSig), file)
+  body <- Fs.read(dest).handleErrorWith(_ =>
+  IO.pure("")
+)
+  _ = Signal.setStr(pathSig, dest)
+  _ = Signal.setStr(tabSig, Fs.basename(dest))
+  _ = Signal.setStr(buf, body)
+  _ = Signal.setStr(orig, body)
+  _ = Signal.set(dirty, Str.len(""))
+  _ <- Ui.setTitle(Fs.basename(dest))
+} yield ()
+  _ <- Check.jumpDiag(s)
+} yield ()))), View.showWhen(showOut, 1, View.each(output, s => View.text(s))), View.overlay(findOpen, View.column(View.text("Find"), View.textField(findQ, "find"), View.textField(replQ, "repl"), View.button("Next", _ => Ui.setEditorCaret(Str.len("x"), Str.len("x"))), View.button("Replace", _ => for {
   _ = Signal.setStr(buf, Str.replace(Signal.getStr(buf), Signal.getStr(findQ), Signal.getStr(replQ)))
   _ = Signal.set(dirty, Str.len("x"))
   _ <- Ui.setTitle(Str.concat(Fs.basename(Signal.getStr(pathSig)), " *"))
-} yield ()))), View.overlay(compOpen, View.column(View.text("complete"), View.each(comps, s => View.button(s, _ => ())))), View.overlay(hoverOpen, View.bindText(hoverTxt))))).require(hasSave).require(hasCheck).require(hasFind).require(hasEditor).require(bufNonNeg).require(diagNonNeg)
+} yield ()))), View.overlay(compOpen, View.column(View.text("complete"), View.each(comps, s => View.button(s, _ => ())))), View.overlay(hoverOpen, View.bindText(hoverTxt)), View.overlay(palOpen, View.column(View.text("Palette"), View.each(palCmds, s => View.button(s, _ => for {
+  _ = Signal.set(palOpen, Str.len(""))
+  _ <- if (s == "Save") for {
+  _ = Property.sometimes("tappedSave")
+  p = Signal.getStr(pathSig)
+  _ <- Fs.write(p, Signal.getStr(buf))
+  _ = Signal.setStr(orig, Signal.getStr(buf))
+  _ = Signal.set(dirty, Str.len(""))
+  _ <- Ui.setTitle(Fs.basename(p))
+} yield () else if (s == "Check") for {
+  _ = Property.sometimes("tappedCheck")
+  raw <- analyze(Signal.getStr(pathSig), Signal.getStr(buf))
+  j = Json.parse(raw)
+  _ <- Ui.setEditorDiagnostics(Check.diagMarks(j))
+  rows = Check.diagRows(j)
+  _ = Signal.setList(diags, rows)
+  _ = Signal.set(showDiags, Chrome.flagNonEmpty(rows))
+} yield () else if (s == "Find") for {
+  _ = Property.sometimes("tappedFind")
+  _ = Signal.set(findOpen, Str.len("x"))
+  _ <- IO.pure(())
+} yield () else if (s == "Complete") for {
+  _ = Property.sometimes("tappedComplete")
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/completion").handleErrorWith(_ =>
+  IO.pure(Json.Null)
+)
+  _ = Signal.setList(comps, Lsp.completeLabels(j))
+  _ = Signal.set(compOpen, Str.len("x"))
+  _ <- IO.pure(())
+} yield () else if (s == "Hover") for {
+  _ = Property.sometimes("tappedHover")
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/hover").handleErrorWith(_ =>
+  IO.pure(Json.Null)
+)
+  tok <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/semanticTokens/full").handleErrorWith(_ =>
+  IO.pure(Json.Null)
+)
+  _ = Signal.setStr(hoverTxt, Lsp.hoverText(j))
+  hoverOut = List.append(Signal.getList(output), Str.concat("tok", Str.fromInt(Lsp.tokenCount(tok))))
+  _ = Signal.setList(output, hoverOut)
+  _ = Signal.set(showOut, Chrome.flagNonEmpty(hoverOut))
+  _ = Signal.set(hoverOpen, Str.len("x"))
+  _ <- IO.pure(())
+} yield () else if (s == "Format") for {
+  _ = Property.sometimes("tappedFormat")
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/formatting").handleErrorWith(_ =>
+  IO.pure(Json.Null)
+)
+  _ = Signal.setStr(buf, Lsp.formatText(j, Signal.getStr(buf)))
+  fmtOut = List.append(Signal.getList(output), "fmt")
+  _ = Signal.setList(output, fmtOut)
+  _ = Signal.set(showOut, Chrome.flagNonEmpty(fmtOut))
+  _ <- IO.pure(())
+} yield () else if (s == "Def") for {
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/definition").handleErrorWith(_ =>
+  IO.pure(Json.Null)
+)
+  uri = Lsp.defUri(j)
+  _ <- if (Str.isEmpty(uri)) IO.pure(()) else for {
+  dest = Chrome.resolvePath(Signal.getStr(dirSig), uri)
+  body <- Fs.read(dest).handleErrorWith(_ =>
+  IO.pure("")
+)
+  _ = Signal.setStr(pathSig, dest)
+  _ = Signal.setStr(tabSig, Fs.basename(dest))
+  _ = Signal.setStr(buf, body)
+  _ = Signal.setStr(orig, body)
+  _ = Signal.set(dirty, Str.len(""))
+  _ <- Ui.setTitle(Fs.basename(dest))
+} yield ()
+  _ <- Ui.setEditorCaret(Lsp.defLine(j), Lsp.defCol(j))
+} yield () else if (s == "Rename") for {
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/rename").handleErrorWith(_ =>
+  IO.pure(Json.Null)
+)
+  _ = Signal.setStr(buf, Lsp.renameText(j, Signal.getStr(buf)))
+  _ <- IO.pure(())
+} yield () else if (s == "Fix") for {
+  j <- Lsp.lspCall(Signal.getStr(dirSig), Signal.getStr(pathSig), Signal.getStr(buf), "textDocument/codeAction").handleErrorWith(_ =>
+  IO.pure(Json.Null)
+)
+  t = Lsp.fixText(j, "")
+  _ = if (Str.nonEmpty(t)) Signal.setStr(buf, t)
+  _ = Signal.set(dirty, if (Signal.getStr(buf) == Signal.getStr(orig)) Str.len("") else Str.len("x"))
+  fixOut = List.append(Signal.getList(output), Lsp.fixTitle(j))
+  _ = Signal.setList(output, fixOut)
+  _ = Signal.set(showOut, Chrome.flagNonEmpty(fixOut))
+  _ <- IO.pure(())
+} yield () else IO.pure(())
+} yield ())))))))).require(hasSave).require(hasCheck).require(hasFind).require(hasPalette).require(hasEditor).require(bufNonNeg).require(diagNonNeg)
   } yield ()
