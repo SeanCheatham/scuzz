@@ -13307,6 +13307,116 @@ static void test_view_editor_undo_gutter(void) {
   assert(strstr(body, "diag=") == NULL);
   free(body);
   {
+    int data[5];
+    int ilines[1];
+    int icols[1];
+    const char *ilabs[1];
+    int fstarts[1];
+    int fends[1];
+    data[0] = 0;
+    data[1] = 0;
+    data[2] = 5;
+    data[3] = 8;
+    data[4] = 0;
+    assert(sz_view_editor_set_tokens(ed, data, 5));
+    assert(sz_view_editor_token_count(ed) == 1);
+    ilines[0] = 0;
+    icols[0] = 5;
+    ilabs[0] = "Int";
+    assert(sz_view_editor_set_inlays(ed, ilines, icols, ilabs, 1));
+    assert(sz_view_editor_inlay_count(ed) == 1);
+    fstarts[0] = 0;
+    fends[0] = 1;
+    assert(sz_view_editor_set_folds(ed, fstarts, fends, 1));
+    assert(sz_view_editor_fold_count(ed) == 1);
+  }
+  {
+    void *a = sz_box_i64(0);
+    void *b = sz_box_i64(0);
+    void *c = sz_box_i64(3);
+    void *d = sz_box_i64(8);
+    void *e = sz_box_i64(0);
+    SzList *xs;
+    SzIoResult r;
+    xs = sz_list_cons(e, sz_list_nil());
+    sz_release(e);
+    xs = sz_list_cons(d, xs);
+    sz_release(d);
+    xs = sz_list_cons(c, xs);
+    sz_release(c);
+    xs = sz_list_cons(b, xs);
+    sz_release(b);
+    xs = sz_list_cons(a, xs);
+    sz_release(a);
+    r = sz_io_unsafe_run(sz_lang_ui_set_editor_tokens(xs));
+    assert(r.ok);
+    sz_release(xs);
+  }
+  {
+    void *ln = sz_box_i64(0);
+    void *col = sz_box_i64(1);
+    SzString *lab = sz_string_from_cstr("T");
+    SzPair *inner = sz_pair_new(col, lab);
+    SzPair *cell;
+    SzList *xs;
+    SzIoResult r;
+    sz_release(col);
+    sz_release(lab);
+    cell = sz_pair_new(ln, inner);
+    sz_release(ln);
+    sz_release(inner);
+    xs = sz_list_cons(cell, sz_list_nil());
+    sz_release(cell);
+    r = sz_io_unsafe_run(sz_lang_ui_set_editor_inlays(xs));
+    assert(r.ok);
+    sz_release(xs);
+  }
+  {
+    void *a = sz_box_i64(0);
+    void *b = sz_box_i64(1);
+    SzPair *cell = sz_pair_new(a, b);
+    SzList *xs;
+    SzIoResult r;
+    sz_release(a);
+    sz_release(b);
+    xs = sz_list_cons(cell, sz_list_nil());
+    sz_release(cell);
+    r = sz_io_unsafe_run(sz_lang_ui_set_editor_folds(xs));
+    assert(r.ok);
+    sz_release(xs);
+  }
+  write_stamp(path, "dump\n");
+  assert(sz_ui_pump_sync(session));
+  body = slurp_cstr(dump);
+  assert(strstr(body, "tok=1") != NULL);
+  assert(strstr(body, "inlay=1") != NULL);
+  assert(strstr(body, "fold=1") != NULL);
+  free(body);
+  {
+    SkSurface *surf = sk_surface_make_raster_n32_premul(200, 120);
+    SkCanvas *canvas;
+    assert(surf);
+    canvas = sk_surface_get_canvas(surf);
+    assert(sz_view_paint(sz_ui_session_root(session), canvas, 200, 120,
+                         sz_theme_default()));
+    sk_surface_unref(surf);
+  }
+  {
+    SzIoResult r = sz_io_unsafe_run(sz_lang_ui_set_editor_tokens(NULL));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_lang_ui_set_editor_inlays(NULL));
+    assert(r.ok);
+    r = sz_io_unsafe_run(sz_lang_ui_set_editor_folds(NULL));
+    assert(r.ok);
+  }
+  write_stamp(path, "dump\n");
+  assert(sz_ui_pump_sync(session));
+  body = slurp_cstr(dump);
+  assert(strstr(body, "tok=") == NULL);
+  assert(strstr(body, "inlay=") == NULL);
+  assert(strstr(body, "fold=") == NULL);
+  free(body);
+  {
     SkSurface *surf = sk_surface_make_raster_n32_premul(200, 120);
     SkCanvas *canvas;
     assert(surf);

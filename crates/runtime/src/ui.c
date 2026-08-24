@@ -490,6 +490,9 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
                 sz_view_editor_line_count(editors[i]));
         {
           int d, nd = sz_view_editor_diag_count(editors[i]);
+          int nt = sz_view_editor_token_count(editors[i]);
+          int ni = sz_view_editor_inlay_count(editors[i]);
+          int nf = sz_view_editor_fold_count(editors[i]);
           if (nd > 0) {
             fputs(" diag=", f);
             for (d = 0; d < nd; d++) {
@@ -499,6 +502,12 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
                       sz_view_editor_diag_severity(editors[i], d));
             }
           }
+          if (nt > 0)
+            fprintf(f, " tok=%d", nt);
+          if (ni > 0)
+            fprintf(f, " inlay=%d", ni);
+          if (nf > 0)
+            fprintf(f, " fold=%d", nf);
         }
         fputc(' ', f);
         fputs_dump_escaped(f, sz_view_editor_value(editors[i]));
@@ -1912,6 +1921,127 @@ static void *thunk_set_editor_diagnostics(void *env) {
 SzIo *sz_lang_ui_set_editor_diagnostics(SzList *marks) {
   /* Nil is NULL. Check JSON `[]` must clear marks, not panic. */
   return sz_io_delay(thunk_set_editor_diagnostics, marks);
+}
+
+static void *thunk_set_editor_tokens(void *env) {
+  SzList *data = (SzList *)env;
+  SzView *ed = live_first_editor();
+  int n;
+  int i;
+  int *vals;
+  SzList *p;
+  if (!ed)
+    return NULL;
+  n = (int)sz_list_len(data);
+  if (n <= 0) {
+    sz_view_editor_set_tokens(ed, NULL, 0);
+    if (g_live_session)
+      g_live_session->dirty = 1;
+    return NULL;
+  }
+  vals = (int *)sz_alloc(sizeof(int) * (size_t)n);
+  p = data;
+  for (i = 0; i < n && p && !sz_list_is_empty(p); i++) {
+    vals[i] = (int)sz_unbox_i64(sz_list_head(p));
+    p = sz_list_tail(p);
+  }
+  sz_view_editor_set_tokens(ed, vals, n);
+  sz_free(vals);
+  if (g_live_session)
+    g_live_session->dirty = 1;
+  return NULL;
+}
+
+SzIo *sz_lang_ui_set_editor_tokens(SzList *data) {
+  return sz_io_delay(thunk_set_editor_tokens, data);
+}
+
+static void *thunk_set_editor_inlays(void *env) {
+  SzList *hints = (SzList *)env;
+  SzView *ed = live_first_editor();
+  int n;
+  int i;
+  int *lines;
+  int *cols;
+  const char **labels;
+  char **owned;
+  SzList *p;
+  if (!ed)
+    return NULL;
+  n = (int)sz_list_len(hints);
+  if (n <= 0) {
+    sz_view_editor_set_inlays(ed, NULL, NULL, NULL, 0);
+    if (g_live_session)
+      g_live_session->dirty = 1;
+    return NULL;
+  }
+  lines = (int *)sz_alloc(sizeof(int) * (size_t)n);
+  cols = (int *)sz_alloc(sizeof(int) * (size_t)n);
+  labels = (const char **)sz_alloc(sizeof(char *) * (size_t)n);
+  owned = (char **)sz_alloc(sizeof(char *) * (size_t)n);
+  p = hints;
+  for (i = 0; i < n && p && !sz_list_is_empty(p); i++) {
+    SzPair *cell = (SzPair *)sz_list_head(p);
+    SzPair *rest = cell ? (SzPair *)cell->right : NULL;
+    SzString *lab = rest ? (SzString *)rest->right : NULL;
+    lines[i] = cell ? (int)sz_unbox_i64(cell->left) : 0;
+    cols[i] = rest ? (int)sz_unbox_i64(rest->left) : 0;
+    owned[i] = sz_strdup(lab ? sz_string_cstr(lab) : "");
+    labels[i] = owned[i];
+    p = sz_list_tail(p);
+  }
+  sz_view_editor_set_inlays(ed, lines, cols, labels, n);
+  for (i = 0; i < n; i++)
+    sz_free(owned[i]);
+  sz_free(owned);
+  sz_free(lines);
+  sz_free(cols);
+  sz_free(labels);
+  if (g_live_session)
+    g_live_session->dirty = 1;
+  return NULL;
+}
+
+SzIo *sz_lang_ui_set_editor_inlays(SzList *hints) {
+  return sz_io_delay(thunk_set_editor_inlays, hints);
+}
+
+static void *thunk_set_editor_folds(void *env) {
+  SzList *ranges = (SzList *)env;
+  SzView *ed = live_first_editor();
+  int n;
+  int i;
+  int *starts;
+  int *ends;
+  SzList *p;
+  if (!ed)
+    return NULL;
+  n = (int)sz_list_len(ranges);
+  if (n <= 0) {
+    sz_view_editor_set_folds(ed, NULL, NULL, 0);
+    if (g_live_session)
+      g_live_session->dirty = 1;
+    return NULL;
+  }
+  starts = (int *)sz_alloc(sizeof(int) * (size_t)n);
+  ends = (int *)sz_alloc(sizeof(int) * (size_t)n);
+  p = ranges;
+  for (i = 0; i < n && p && !sz_list_is_empty(p); i++) {
+    SzPair *cell = (SzPair *)sz_list_head(p);
+    starts[i] = cell ? (int)sz_unbox_i64(cell->left) : 0;
+    ends[i] = cell && cell->right ? (int)sz_unbox_i64(cell->right) : starts[i];
+    p = sz_list_tail(p);
+  }
+  sz_view_editor_set_folds(ed, starts, ends, n);
+  sz_free(starts);
+  sz_free(ends);
+  if (g_live_session)
+    g_live_session->dirty = 1;
+  return NULL;
+}
+
+SzIo *sz_lang_ui_set_editor_folds(SzList *ranges) {
+  return sz_io_delay(thunk_set_editor_folds, ranges);
 }
 
 SzLifecyclePhase sz_ui_session_lifecycle(const SzUiSession *session) {

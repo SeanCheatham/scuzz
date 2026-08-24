@@ -564,6 +564,18 @@ int sz_view_editor_set_diagnostics(SzView *view, const int *lines,
 int sz_view_editor_diag_count(const SzView *view);
 int sz_view_editor_diag_line(const SzView *view, int i);
 int sz_view_editor_diag_severity(const SzView *view, int i);
+/* Packed LSP `data` (delta line, startChar, length, type, modifiers). Empty
+ * keeps the in-widget lexer. */
+int sz_view_editor_set_tokens(SzView *view, const int *data, int n);
+int sz_view_editor_token_count(const SzView *view);
+/* 0-based line/col. Labels copy. Clears when n <= 0. */
+int sz_view_editor_set_inlays(SzView *view, const int *lines, const int *cols,
+                             const char *const *labels, int n);
+int sz_view_editor_inlay_count(const SzView *view);
+/* 0-based start/end lines. Clears when n <= 0. */
+int sz_view_editor_set_folds(SzView *view, const int *starts, const int *ends,
+                            int n);
+int sz_view_editor_fold_count(const SzView *view);
 /* Set selection: `start` is the anchor, `end` is the caret (both snapped). */
 int sz_view_set_text_field_sel(SzView *view, int start, int end);
 int sz_view_set_editor_sel(SzView *view, int start, int end);
@@ -598,10 +610,11 @@ int sz_ui_session_watch(SzUiSession *session, const char *path);
  * (star on the target; `B` is the caret byte offset; `A:C` is the selection
  * `[A, C)`). Quoted field values flatten newlines. Editors omit from `[fields]`.
  * [editor] lists `View.editor` nodes (one line each) when any exist:
- * `N* caret=B sel=A:C sx=X sy=Y lines=L diag=P:S,... "escaped"` (star on the
- * focused editor, else first; `sx`/`sy` are viewport pan; `lines` is the
- * buffer line count; `diag` is 1-based line:severity marks, omitted when
- * empty). Editor paint is monospace cells with a gutter.
+ * `N* caret=B sel=A:C sx=X sy=Y lines=L diag=P:S,... tok=N inlay=N fold=N "escaped"`
+ * (star on the focused editor, else first; `sx`/`sy` are viewport pan; `lines`
+ * is the buffer line count; `diag` is 1-based line:severity marks; `tok` /
+ * `inlay` / `fold` are LSP span counts). `diag` / `tok` / `inlay` / `fold` omit
+ * when zero. Editor paint is monospace cells with a gutter.
  * Quotes keep newlines as `\\n` (not a space). `text N s` / `type N s` /
  * `backspace N k` / `caret N b` / `select N a c` target dump index N.
  * One-token forms still use the starred field, or the focused editor when
@@ -780,6 +793,9 @@ SzView *sz_lang_view_overlay(SzSignalInt *open, SzView *child);
 SzIo *sz_lang_ui_set_title(SzString *title);
 SzIo *sz_lang_ui_set_editor_caret(int64_t line, int64_t col);
 SzIo *sz_lang_ui_set_editor_diagnostics(SzList *marks);
+SzIo *sz_lang_ui_set_editor_tokens(SzList *data);
+SzIo *sz_lang_ui_set_editor_inlays(SzList *hints);
+SzIo *sz_lang_ui_set_editor_folds(SzList *ranges);
 SzView *sz_lang_view_icon(int64_t glyph, int64_t argb);
 SzView *sz_lang_view_image(int64_t w, int64_t h, int64_t argb, SzString *caption);
 void *sz_lang_view_add_child(SzView *parent, SzView *child);
