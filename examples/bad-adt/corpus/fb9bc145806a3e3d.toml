@@ -1,0 +1,4 @@
+[fuzz]
+seed = 42
+schedule_seed = "42"
+events = ["drive areaIsProduct Rect(0,1)"]

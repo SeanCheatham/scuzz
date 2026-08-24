@@ -393,6 +393,8 @@ jobs:
           cargo run -p scuzz -- test examples/bad-example
           cargo run -p scuzz -- check examples/bad-fault
           cargo run -p scuzz -- test examples/bad-fault
+          cargo run -p scuzz -- check examples/bad-adt
+          cargo run -p scuzz -- test examples/bad-adt
           cargo run -p scuzz -- check --message-format=json examples/hello | tee /tmp/hello-check.json
           grep -q '^\[\]$' /tmp/hello-check.json
           cargo run -p scuzz -- lsp --help | tee /tmp/lsp-help.txt
@@ -490,6 +492,15 @@ jobs:
           fi
           if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-fault; then
             echo "corpus-only should pin the bad-fault failure" && exit 1
+          fi
+          if cargo run -p scuzz -- fuzz --iterations 0 examples/bad-adt; then
+            echo "corpus-only should pin the bad-adt failure" && exit 1
+          fi
+          grep -q 'drive areaIsProduct Rect(' examples/bad-adt/corpus/fb9bc145806a3e3d.toml
+          grep -q 'square_false' examples/bad-adt/build/fuzz/summary.toml
+          grep -q 'wide_false' examples/bad-adt/build/fuzz/summary.toml
+          if cargo run -p scuzz -- fuzz --replay examples/bad-adt/corpus/fb9bc145806a3e3d.toml examples/bad-adt; then
+            echo "replay should have reproduced the ADT property failure" && exit 1
           fi
           test -f examples/bad-fault/build/fuzz/repro.toml
           grep -q 'fault_seed' examples/bad-fault/build/fuzz/repro.toml

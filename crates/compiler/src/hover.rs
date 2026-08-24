@@ -1125,6 +1125,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "Property.sometimes",
         "Property.sometimes(name: String): Unit",
     ),
+    (
+        "Property.classify",
+        "Property.classify(name: String, hit: Bool): Bool",
+    ),
     ("Property.force", "Property.force(inner: IO[Bool]): Bool"),
     (
         "Property.assert",

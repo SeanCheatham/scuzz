@@ -70,6 +70,7 @@ pub fn emit_llvm(program: &Program) -> String {
             strs.push(d.name.clone());
         }
     }
+    intern_drive_decode_names(program, &mut strs);
 
     let enum_tags = build_enum_tags(&program.enums);
     let enum_payloads = build_enum_payloads(&program.enums);
@@ -463,6 +464,13 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare ptr @sz_property_assert(ptr, i64)").unwrap();
     writeln!(out, "declare void @sz_property_check(ptr, i64)").unwrap();
     writeln!(out, "declare void @sz_property_sometimes(ptr)").unwrap();
+    writeln!(out, "declare void @sz_property_classify(ptr, i64)").unwrap();
+    writeln!(out, "declare i32 @sz_drive_uncons(ptr, ptr, ptr, i32)").unwrap();
+    writeln!(out, "declare i32 @sz_drive_uncons_list(ptr, ptr, i32)").unwrap();
+    writeln!(out, "declare i64 @sz_drive_nfields(ptr)").unwrap();
+    writeln!(out, "declare i32 @sz_drive_field(ptr, i64, ptr, i32)").unwrap();
+    writeln!(out, "declare i64 @sz_drive_parse_int(ptr)").unwrap();
+    writeln!(out, "declare i64 @sz_drive_parse_bool(ptr)").unwrap();
     writeln!(out, "declare void @sz_driver_register(ptr, i64, i64, ptr)").unwrap();
     writeln!(out, "declare ptr @sz_box_i64(i64)").unwrap();
     writeln!(out, "declare i64 @sz_unbox_i64(ptr)").unwrap();
@@ -1117,9 +1125,9 @@ fn pack_param_kinds(params: &[crate::ast::Param]) -> i64 {
     let mut place = 1i64;
     for p in params {
         let k = match p.ty {
-            Type::String => 1,
             Type::Bool => 2,
-            _ => 0,
+            Type::Int => 0,
+            _ => 1,
         };
         kind += k * place;
         place *= 4;
@@ -1127,10 +1135,73 @@ fn pack_param_kinds(params: &[crate::ast::Param]) -> i64 {
     kind
 }
 
+fn ty_needs_decode(ty: &Type) -> bool {
+    !matches!(ty, Type::Int | Type::String | Type::Bool)
+}
+
+fn fun_needs_decode(d: &FunDef) -> bool {
+    d.params.iter().any(|p| ty_needs_decode(&p.ty))
+}
+
+fn intern_str(strs: &mut Vec<String>, s: &str) {
+    if !strs.iter().any(|x| x == s) {
+        strs.push(s.to_string());
+    }
+}
+
+fn intern_drive_decode_names(program: &Program, strs: &mut Vec<String>) {
+    intern_str(strs, "drive decode failed");
+    for d in &program.defs {
+        if d.is_driver || (d.is_property && !d.params.is_empty()) {
+            for p in &d.params {
+                intern_ctor_names_ty(&p.ty, program, strs);
+            }
+        }
+    }
+}
+
+fn intern_ctor_names_ty(ty: &Type, program: &Program, strs: &mut Vec<String>) {
+    match ty {
+        Type::List(inner) => intern_ctor_names_ty(inner, program, strs),
+        Type::Adt(id) | Type::App(id, _) => {
+            if let Some(en) = lookup_enum_cg(program, id) {
+                intern_str(strs, &en.name);
+                for c in &en.cases {
+                    intern_str(strs, &c.name);
+                    for (_, fty) in &c.fields {
+                        intern_ctor_names_ty(fty, program, strs);
+                    }
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn lookup_enum_cg<'a>(program: &'a Program, id: &str) -> Option<&'a EnumDef> {
+    program
+        .enums
+        .iter()
+        .find(|e| crate::resolve::enum_id(&e.module, &e.name) == id)
+        .or_else(|| {
+            let hits: Vec<&EnumDef> = program.enums.iter().filter(|e| e.name == id).collect();
+            if hits.len() == 1 {
+                Some(hits[0])
+            } else {
+                None
+            }
+        })
+}
+
 fn emit_driver_registers(out: &mut String, program: &Program, strs: &[String]) {
     let mut i = 0usize;
     for d in program.defs.iter().filter(|d| d.is_driver) {
-        emit_one_driver_register(out, d, strs, i, &user_symbol(&d.module, &d.name));
+        let sym = if fun_needs_decode(d) {
+            format!("{}__drv", user_symbol(&d.module, &d.name))
+        } else {
+            user_symbol(&d.module, &d.name)
+        };
+        emit_one_driver_register(out, d, strs, i, &sym);
         i += 1;
     }
     for d in program
@@ -1151,7 +1222,15 @@ fn emit_property_drive_tramps(out: &mut String, program: &Program, strs: &[Strin
         .filter(|d| d.is_property && !d.params.is_empty())
     {
         let tramp = format!("{}__drv", user_symbol(&d.module, &d.name));
-        emit_property_drive_tramp(out, d, strs, &tramp);
+        emit_property_drive_tramp(out, program, d, strs, &tramp);
+    }
+    for d in program
+        .defs
+        .iter()
+        .filter(|d| d.is_driver && fun_needs_decode(d))
+    {
+        let tramp = format!("{}__drv", user_symbol(&d.module, &d.name));
+        emit_driver_decode_tramp(out, program, d, strs, &tramp);
     }
 }
 
@@ -1180,69 +1259,475 @@ fn emit_one_driver_register(out: &mut String, d: &FunDef, strs: &[String], i: us
     .unwrap();
 }
 
-fn emit_property_drive_tramp(out: &mut String, d: &FunDef, strs: &[String], tramp: &str) {
+fn tramp_arg_llvm(ty: &Type) -> &'static str {
+    match ty {
+        Type::Int | Type::Bool => "i64",
+        _ => "ptr",
+    }
+}
+
+struct DriveEmit<'a> {
+    out: &'a mut String,
+    program: &'a Program,
+    strs: &'a [String],
+    n: usize,
+}
+
+struct Decoded {
+    value: String,
+    llvm_ty: &'static str,
+    owned: bool,
+}
+
+impl DriveEmit<'_> {
+    fn tmp(&mut self, stem: &str) -> String {
+        self.n += 1;
+        format!("{stem}{}", self.n)
+    }
+
+    fn intern_gep(&mut self, s: &str) -> String {
+        let t = self.tmp("sg");
+        let idx = self
+            .strs
+            .iter()
+            .position(|x| x == s)
+            .unwrap_or_else(|| panic!("missing interned string {s}"));
+        let len = s.len() + 1;
+        writeln!(
+            self.out,
+            "  %{t} = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
+        )
+        .unwrap();
+        format!("%{t}")
+    }
+
+    fn alloca_buf(&mut self) -> String {
+        let t = self.tmp("buf");
+        writeln!(self.out, "  %{t} = alloca [192 x i8], align 1").unwrap();
+        format!("%{t}")
+    }
+}
+
+fn emit_property_drive_tramp(
+    out: &mut String,
+    program: &Program,
+    d: &FunDef,
+    strs: &[String],
+    tramp: &str,
+) {
     let property = user_symbol(&d.module, &d.name);
     let idx = strs
         .iter()
         .position(|s| s == &d.name)
         .expect("property name interned");
     let len = d.name.len() + 1;
-    if d.params.len() <= 1 {
-        let (arg_ty, arg_name) = match d.params.first().map(|p| &p.ty) {
-            Some(Type::String) => ("ptr", "%a"),
-            Some(_) | None => ("i64", "%a"),
-        };
-        let params = if d.params.is_empty() {
-            String::new()
-        } else {
-            format!("{arg_ty} {arg_name}")
-        };
-        writeln!(out, "define internal ptr @{tramp}({params}) {{").unwrap();
-        writeln!(out, "entry:").unwrap();
-        if d.params.is_empty() {
-            writeln!(out, "  %ok = call i64 @{property}()").unwrap();
-        } else {
-            writeln!(out, "  %ok = call i64 @{property}({arg_ty} {arg_name})").unwrap();
-        }
+    emit_tramp_header(out, d, tramp);
+    let mut em = DriveEmit {
+        out,
+        program,
+        strs,
+        n: 0,
+    };
+    let (call_args, owned) = emit_tramp_decode(&mut em, d);
+    if call_args.is_empty() {
+        writeln!(em.out, "  %ok = call i64 @{property}()").unwrap();
     } else {
-        writeln!(out, "define internal ptr @{tramp}(ptr %args) {{").unwrap();
-        writeln!(out, "entry:").unwrap();
-        let mut cur = "%args".to_string();
-        let mut call_args = Vec::new();
-        for (i, p) in d.params.iter().enumerate() {
-            writeln!(out, "  %h{i} = call ptr @sz_list_head(ptr {cur})").unwrap();
-            writeln!(out, "  %t{i} = call ptr @sz_list_tail(ptr {cur})").unwrap();
-            match p.ty {
-                Type::String => {
-                    call_args.push(format!("ptr %h{i}"));
-                }
-                _ => {
-                    writeln!(out, "  %v{i} = call i64 @sz_unbox_i64(ptr %h{i})").unwrap();
-                    call_args.push(format!("i64 %v{i}"));
-                }
-            }
-            cur = format!("%t{i}");
-        }
         writeln!(
-            out,
+            em.out,
             "  %ok = call i64 @{property}({})",
             call_args.join(", ")
         )
         .unwrap();
     }
+    for v in owned {
+        writeln!(em.out, "  call void @sz_release(ptr {v})").unwrap();
+    }
     writeln!(
-        out,
+        em.out,
         "  %nm_gep = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
     )
     .unwrap();
-    writeln!(out, "  %nm = call ptr @sz_string_from_cstr(ptr %nm_gep)").unwrap();
+    writeln!(em.out, "  %nm = call ptr @sz_string_from_cstr(ptr %nm_gep)").unwrap();
     writeln!(
-        out,
+        em.out,
         "  %io = call ptr @sz_property_assert(ptr %nm, i64 %ok)"
     )
     .unwrap();
-    writeln!(out, "  ret ptr %io").unwrap();
-    writeln!(out, "}}").unwrap();
+    writeln!(em.out, "  ret ptr %io").unwrap();
+    writeln!(em.out, "}}").unwrap();
+}
+
+fn emit_driver_decode_tramp(
+    out: &mut String,
+    program: &Program,
+    d: &FunDef,
+    strs: &[String],
+    tramp: &str,
+) {
+    let user = user_symbol(&d.module, &d.name);
+    emit_tramp_header(out, d, tramp);
+    let mut em = DriveEmit {
+        out,
+        program,
+        strs,
+        n: 0,
+    };
+    let (call_args, owned) = emit_tramp_decode(&mut em, d);
+    if call_args.is_empty() {
+        writeln!(em.out, "  %io = call ptr @{user}()").unwrap();
+    } else {
+        writeln!(em.out, "  %io = call ptr @{user}({})", call_args.join(", ")).unwrap();
+    }
+    for v in owned {
+        writeln!(em.out, "  call void @sz_release(ptr {v})").unwrap();
+    }
+    writeln!(em.out, "  ret ptr %io").unwrap();
+    writeln!(em.out, "}}").unwrap();
+}
+
+fn emit_tramp_header(out: &mut String, d: &FunDef, tramp: &str) {
+    if d.params.len() <= 1 {
+        let params = if d.params.is_empty() {
+            String::new()
+        } else {
+            format!("{} %a", tramp_arg_llvm(&d.params[0].ty))
+        };
+        writeln!(out, "define internal ptr @{tramp}({params}) {{").unwrap();
+    } else {
+        writeln!(out, "define internal ptr @{tramp}(ptr %args) {{").unwrap();
+    }
+    writeln!(out, "entry:").unwrap();
+}
+
+fn emit_tramp_decode(em: &mut DriveEmit<'_>, d: &FunDef) -> (Vec<String>, Vec<String>) {
+    let mut call_args = Vec::new();
+    let mut owned = Vec::new();
+    if d.params.is_empty() {
+        return (call_args, owned);
+    }
+    if d.params.len() == 1 {
+        let ty = &d.params[0].ty;
+        match ty {
+            Type::Int | Type::Bool => {
+                call_args.push("i64 %a".into());
+            }
+            Type::String => {
+                call_args.push("ptr %a".into());
+            }
+            _ => {
+                let c = em.tmp("cs");
+                writeln!(em.out, "  %{c} = call ptr @sz_string_cstr(ptr %a)").unwrap();
+                let dec = emit_decode_tok(em, &format!("%{c}"), ty);
+                call_args.push(format!("{} {}", dec.llvm_ty, dec.value));
+                if dec.owned {
+                    owned.push(dec.value);
+                }
+            }
+        }
+        return (call_args, owned);
+    }
+    let mut cur = "%args".to_string();
+    for (i, p) in d.params.iter().enumerate() {
+        writeln!(em.out, "  %h{i} = call ptr @sz_list_head(ptr {cur})").unwrap();
+        writeln!(em.out, "  %t{i} = call ptr @sz_list_tail(ptr {cur})").unwrap();
+        match &p.ty {
+            Type::String => {
+                call_args.push(format!("ptr %h{i}"));
+            }
+            Type::Int | Type::Bool => {
+                writeln!(em.out, "  %v{i} = call i64 @sz_unbox_i64(ptr %h{i})").unwrap();
+                call_args.push(format!("i64 %v{i}"));
+            }
+            ty => {
+                let c = em.tmp("cs");
+                writeln!(em.out, "  %{c} = call ptr @sz_string_cstr(ptr %h{i})").unwrap();
+                let dec = emit_decode_tok(em, &format!("%{c}"), ty);
+                call_args.push(format!("{} {}", dec.llvm_ty, dec.value));
+                if dec.owned {
+                    owned.push(dec.value);
+                }
+            }
+        }
+        cur = format!("%t{i}");
+    }
+    (call_args, owned)
+}
+
+fn emit_decode_tok(em: &mut DriveEmit<'_>, tok: &str, ty: &Type) -> Decoded {
+    match ty {
+        Type::Int => {
+            let t = em.tmp("di");
+            writeln!(em.out, "  %{t} = call i64 @sz_drive_parse_int(ptr {tok})").unwrap();
+            Decoded {
+                value: format!("%{t}"),
+                llvm_ty: "i64",
+                owned: false,
+            }
+        }
+        Type::Bool => {
+            let t = em.tmp("db");
+            writeln!(em.out, "  %{t} = call i64 @sz_drive_parse_bool(ptr {tok})").unwrap();
+            Decoded {
+                value: format!("%{t}"),
+                llvm_ty: "i64",
+                owned: false,
+            }
+        }
+        Type::String => {
+            let t = em.tmp("ds");
+            writeln!(em.out, "  %{t} = call ptr @sz_string_from_cstr(ptr {tok})").unwrap();
+            Decoded {
+                value: format!("%{t}"),
+                llvm_ty: "ptr",
+                owned: true,
+            }
+        }
+        Type::List(inner) => emit_decode_list(em, tok, inner),
+        Type::Adt(_) | Type::App(_, _) => emit_decode_adt(em, tok, ty),
+        _ => {
+            let t = em.tmp("di");
+            writeln!(em.out, "  %{t} = call i64 @sz_drive_parse_int(ptr {tok})").unwrap();
+            Decoded {
+                value: format!("%{t}"),
+                llvm_ty: "i64",
+                owned: false,
+            }
+        }
+    }
+}
+
+fn emit_decode_field(em: &mut DriveEmit<'_>, inner: &str, i: i64, ty: &Type) -> Decoded {
+    let fbuf = em.alloca_buf();
+    let _ok = em.tmp("fld");
+    writeln!(
+        em.out,
+        "  %{_ok} = call i32 @sz_drive_field(ptr {inner}, i64 {i}, ptr {fbuf}, i32 192)"
+    )
+    .unwrap();
+    emit_decode_tok(em, &fbuf, ty)
+}
+
+fn emit_decode_list(em: &mut DriveEmit<'_>, tok: &str, elem_ty: &Type) -> Decoded {
+    let inner = em.alloca_buf();
+    let ok = em.tmp("ol");
+    writeln!(
+        em.out,
+        "  %{ok} = call i32 @sz_drive_uncons_list(ptr {tok}, ptr {inner}, i32 192)"
+    )
+    .unwrap();
+    let n = em.tmp("nf");
+    writeln!(em.out, "  %{n} = call i64 @sz_drive_nfields(ptr {inner})").unwrap();
+    let l0 = em.tmp("l0");
+    let l1 = em.tmp("l1");
+    let l2 = em.tmp("l2");
+    let l3 = em.tmp("l3");
+    let join = em.tmp("lj");
+    writeln!(
+        em.out,
+        "  switch i64 %{n}, label %{l3} [ i64 0, label %{l0} i64 1, label %{l1} i64 2, label %{l2} ]"
+    )
+    .unwrap();
+    writeln!(em.out, "{l0}:").unwrap();
+    let nil = em.tmp("nil");
+    writeln!(em.out, "  %{nil} = call ptr @sz_list_nil()").unwrap();
+    let e0 = em.tmp("le");
+    writeln!(em.out, "  br label %{e0}").unwrap();
+    writeln!(em.out, "{e0}:").unwrap();
+    writeln!(em.out, "  br label %{join}").unwrap();
+    writeln!(em.out, "{l1}:").unwrap();
+    let d0 = emit_decode_field(em, &inner, 0, elem_ty);
+    let c1 = emit_cons_one(em, &d0, "null");
+    let e1 = em.tmp("le");
+    writeln!(em.out, "  br label %{e1}").unwrap();
+    writeln!(em.out, "{e1}:").unwrap();
+    writeln!(em.out, "  br label %{join}").unwrap();
+    writeln!(em.out, "{l2}:").unwrap();
+    let a0 = emit_decode_field(em, &inner, 0, elem_ty);
+    let a1 = emit_decode_field(em, &inner, 1, elem_ty);
+    let t2 = emit_cons_one(em, &a1, "null");
+    let c2 = emit_cons_one(em, &a0, &t2);
+    let e2 = em.tmp("le");
+    writeln!(em.out, "  br label %{e2}").unwrap();
+    writeln!(em.out, "{e2}:").unwrap();
+    writeln!(em.out, "  br label %{join}").unwrap();
+    writeln!(em.out, "{l3}:").unwrap();
+    let b0 = emit_decode_field(em, &inner, 0, elem_ty);
+    let b1 = emit_decode_field(em, &inner, 1, elem_ty);
+    let b2 = emit_decode_field(em, &inner, 2, elem_ty);
+    let u1 = emit_cons_one(em, &b2, "null");
+    let u2 = emit_cons_one(em, &b1, &u1);
+    let c3 = emit_cons_one(em, &b0, &u2);
+    let e3 = em.tmp("le");
+    writeln!(em.out, "  br label %{e3}").unwrap();
+    writeln!(em.out, "{e3}:").unwrap();
+    writeln!(em.out, "  br label %{join}").unwrap();
+    writeln!(em.out, "{join}:").unwrap();
+    let phi = em.tmp("lp");
+    writeln!(
+        em.out,
+        "  %{phi} = phi ptr [ %{nil}, %{e0} ], [ {c1}, %{e1} ], [ {c2}, %{e2} ], [ {c3}, %{e3} ]"
+    )
+    .unwrap();
+    Decoded {
+        value: format!("%{phi}"),
+        llvm_ty: "ptr",
+        owned: true,
+    }
+}
+
+fn emit_cons_one(em: &mut DriveEmit<'_>, head: &Decoded, tail: &str) -> String {
+    let ptr = if head.llvm_ty == "i64" {
+        let bx = em.tmp("bx");
+        writeln!(em.out, "  %{bx} = call ptr @sz_box_i64(i64 {})", head.value).unwrap();
+        format!("%{bx}")
+    } else {
+        head.value.clone()
+    };
+    let c = em.tmp("cons");
+    writeln!(
+        em.out,
+        "  %{c} = call ptr @sz_list_cons(ptr {ptr}, ptr {tail})"
+    )
+    .unwrap();
+    if tail != "null" {
+        writeln!(em.out, "  call void @sz_release(ptr {tail})").unwrap();
+    }
+    if head.llvm_ty == "i64" {
+        writeln!(em.out, "  call void @sz_release(ptr {ptr})").unwrap();
+    } else if head.owned {
+        writeln!(em.out, "  call void @sz_release(ptr {})", head.value).unwrap();
+    }
+    format!("%{c}")
+}
+
+fn emit_decode_adt(em: &mut DriveEmit<'_>, tok: &str, ty: &Type) -> Decoded {
+    let id = match ty {
+        Type::Adt(id) | Type::App(id, _) => id.as_str(),
+        _ => "?",
+    };
+    let Some(en) = lookup_enum_cg(em.program, id) else {
+        return emit_decode_tok(em, tok, &Type::Int);
+    };
+    let inner = em.alloca_buf();
+    let join = em.tmp("aj");
+    let fail = em.tmp("af");
+    let mut try_labs = Vec::new();
+    let mut case_labs = Vec::new();
+    for _ in &en.cases {
+        try_labs.push(em.tmp("at"));
+        case_labs.push(em.tmp("ac"));
+    }
+    if try_labs.is_empty() {
+        writeln!(em.out, "  br label %{fail}").unwrap();
+    } else {
+        writeln!(em.out, "  br label %{}", try_labs[0]).unwrap();
+    }
+    let mut phi_inc = Vec::new();
+    for (i, c) in en.cases.iter().enumerate() {
+        writeln!(em.out, "{}:", try_labs[i]).unwrap();
+        let nm = em.intern_gep(&c.name);
+        let is = em.tmp("is");
+        writeln!(
+            em.out,
+            "  %{is} = call i32 @sz_drive_uncons(ptr {tok}, ptr {nm}, ptr {inner}, i32 192)"
+        )
+        .unwrap();
+        let h = em.tmp("ih");
+        writeln!(em.out, "  %{h} = icmp ne i32 %{is}, 0").unwrap();
+        let next = if i + 1 < en.cases.len() {
+            try_labs[i + 1].clone()
+        } else {
+            fail.clone()
+        };
+        writeln!(
+            em.out,
+            "  br i1 %{h}, label %{}, label %{next}",
+            case_labs[i]
+        )
+        .unwrap();
+        writeln!(em.out, "{}:", case_labs[i]).unwrap();
+        let built = emit_construct_case(em, i as i32, c, &inner);
+        let end = em.tmp("ae");
+        writeln!(em.out, "  br label %{end}").unwrap();
+        writeln!(em.out, "{end}:").unwrap();
+        phi_inc.push((built, end));
+        writeln!(em.out, "  br label %{join}").unwrap();
+    }
+    writeln!(em.out, "{fail}:").unwrap();
+    let pg = em.intern_gep("drive decode failed");
+    let ps = em.tmp("ps");
+    writeln!(em.out, "  %{ps} = call ptr @sz_string_from_cstr(ptr {pg})").unwrap();
+    writeln!(em.out, "  call void @sz_panic(ptr %{ps})").unwrap();
+    writeln!(em.out, "  unreachable").unwrap();
+    writeln!(em.out, "{join}:").unwrap();
+    let phi = em.tmp("ap");
+    if phi_inc.is_empty() {
+        writeln!(em.out, "  %{phi} = call ptr @sz_list_nil()").unwrap();
+    } else {
+        let parts: Vec<String> = phi_inc
+            .iter()
+            .map(|(v, lab)| format!("[ {v}, %{lab} ]"))
+            .collect();
+        writeln!(em.out, "  %{phi} = phi ptr {}", parts.join(", ")).unwrap();
+    }
+    Decoded {
+        value: format!("%{phi}"),
+        llvm_ty: "ptr",
+        owned: true,
+    }
+}
+
+fn emit_construct_case(
+    em: &mut DriveEmit<'_>,
+    tag: i32,
+    case: &crate::ast::EnumCase,
+    inner: &str,
+) -> String {
+    if case.fields.is_empty() {
+        let a = em.tmp("adt");
+        writeln!(em.out, "  %{a} = call ptr @sz_adt_new(i32 {tag}, ptr null)").unwrap();
+        return format!("%{a}");
+    }
+    let mut decoded = Vec::new();
+    for (i, (_, fty)) in case.fields.iter().enumerate() {
+        decoded.push(emit_decode_field(em, inner, i as i64, fty));
+    }
+    if decoded.len() == 1 {
+        let d = &decoded[0];
+        let payload = if d.llvm_ty == "i64" {
+            let bx = em.tmp("bx");
+            writeln!(em.out, "  %{bx} = call ptr @sz_box_i64(i64 {})", d.value).unwrap();
+            format!("%{bx}")
+        } else {
+            d.value.clone()
+        };
+        let a = em.tmp("adt");
+        writeln!(
+            em.out,
+            "  %{a} = call ptr @sz_adt_new(i32 {tag}, ptr {payload})"
+        )
+        .unwrap();
+        if d.llvm_ty == "i64" || d.owned {
+            writeln!(em.out, "  call void @sz_release(ptr {payload})").unwrap();
+        }
+        return format!("%{a}");
+    }
+    let mut cur = {
+        let n = em.tmp("nil");
+        writeln!(em.out, "  %{n} = call ptr @sz_list_nil()").unwrap();
+        format!("%{n}")
+    };
+    for d in decoded.iter().rev() {
+        cur = emit_cons_one(em, d, &cur);
+    }
+    let a = em.tmp("adt");
+    writeln!(
+        em.out,
+        "  %{a} = call ptr @sz_adt_new(i32 {tag}, ptr {cur})"
+    )
+    .unwrap();
+    writeln!(em.out, "  call void @sz_release(ptr {cur})").unwrap();
+    format!("%{a}")
 }
 
 fn ensure_io(code: &mut String, kind: Kind, value: &str, tmp: &str, owned: bool) -> String {
@@ -6789,6 +7274,16 @@ fn emit_call(
             drop_owned_ptr(&mut code, &emitted_args[0]);
             val_emitted(code, "null".into(), Kind::Ptr)
         }
+        "Property.classify" => {
+            writeln!(
+                code,
+                "  call void @sz_property_classify(ptr {}, i64 {})",
+                emitted_args[0].value, emitted_args[1].value
+            )
+            .unwrap();
+            drop_owned_ptr(&mut code, &emitted_args[0]);
+            val_emitted(code, "1".into(), Kind::Int)
+        }
         "View.text" => {
             writeln!(
                 code,
@@ -11868,6 +12363,18 @@ record Point(x: Int, y: Int)
         );
         let (at, name) = first_ptr_arg(&ir, "call void @sz_property_sometimes(ptr ");
         assert_release_after(&ir, at, name, "Property.sometimes name");
+    }
+
+    #[test]
+    fn emit_property_classify_drops_name() {
+        let ir = emit_full(
+            r#"
+@main def main: IO[Unit] =
+  IO.println(Str.fromInt(if (Property.classify("square", true)) 1 else 0))
+"#,
+        );
+        let (at, name) = first_ptr_arg(&ir, "call void @sz_property_classify(ptr ");
+        assert_release_after(&ir, at, name, "Property.classify name");
     }
 
     #[test]

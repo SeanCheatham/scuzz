@@ -4,10 +4,13 @@ use crate::ast::{
     BinOp, EnumDef, Expr, ExprKind, ForBinder, FunDef, Import, Pattern, Program, Type, UnOp,
 };
 use crate::parser::{parse_file, ParseError};
-use crate::resolve::split_dotted;
+use crate::resolve::{enum_id, split_dotted};
 use crate::span::Span;
 use std::path::PathBuf;
 use thiserror::Error;
+
+/// Nested ADT / list depth for generation. Deeper trees pick a nullary case or `[]`.
+const GEN_DEPTH_MAX: usize = 3;
 
 #[derive(Debug, Error)]
 pub enum OverlayError {
@@ -94,14 +97,14 @@ pub fn collect_property_names(program: &Program) -> Result<Vec<String>, OverlayE
         }
         if d.params.len() > 3 {
             return Err(OverlayError::Msg(format!(
-                "property `{}` takes at most three Int, String, or Bool params",
+                "property `{}` takes at most three generator-friendly params",
                 d.name
             )));
         }
         for p in &d.params {
-            if !matches!(p.ty, Type::Int | Type::String | Type::Bool) {
+            if !type_is_generator_friendly(&p.ty, program, &d.module, 0) {
                 return Err(OverlayError::Msg(format!(
-                    "property `{}` param `{}` must be Int, String, or Bool",
+                    "property `{}` param `{}` must be Int, String, Bool, List, or a record/enum of those",
                     d.name, p.name
                 )));
             }
@@ -396,14 +399,14 @@ fn check_driver_def(live: &Program, d: &FunDef, label: &str) -> Result<(), Overl
     }
     if d.params.len() > 1 {
         return Err(OverlayError::Msg(format!(
-            "{label}: driver `{}` takes at most one Int, String, or Bool param",
+            "{label}: driver `{}` takes at most one generator-friendly param",
             d.name
         )));
     }
     for p in &d.params {
-        if !matches!(p.ty, Type::Int | Type::String | Type::Bool) {
+        if !type_is_generator_friendly(&p.ty, live, &d.module, 0) {
             return Err(OverlayError::Msg(format!(
-                "{label}: driver `{}` param `{}` must be Int, String, or Bool",
+                "{label}: driver `{}` param `{}` must be Int, String, Bool, List, or a record/enum of those",
                 d.name, p.name
             )));
         }
@@ -634,40 +637,253 @@ fn check_drive_table(program: &Program) -> Result<(), OverlayError> {
 }
 
 /// Table lines for `build/drivers.txt`. One line per driver or parameterized
-/// property. Kind tokens are `i`, `s`, and `b`. A simple Int `where` bound
-/// joins the `i` token (`noteDrive i>=0`).
+/// property. Kind tokens are `i`, `s`, `b`, `[i]`, `Point(i>=0,i)`, and
+/// `e:Some(i)|None`. A simple Int `where` bound joins the `i` token
+/// (`noteDrive i>=0`).
 pub fn driver_table_text(program: &Program) -> String {
     let mut out = String::new();
     for d in &program.defs {
         if d.is_driver || (d.is_property && !d.params.is_empty()) {
-            push_drive_spec(&mut out, d);
+            push_drive_spec(&mut out, d, program);
         }
     }
     out
 }
 
-fn push_drive_spec(out: &mut String, d: &FunDef) {
+fn push_drive_spec(out: &mut String, d: &FunDef, program: &Program) {
     out.push_str(&d.name);
     for p in &d.params {
-        match p.ty {
-            Type::String => out.push_str(" s"),
-            Type::Bool => out.push_str(" b"),
-            Type::Int => {
-                out.push(' ');
-                out.push_str(&int_kind_token(p));
-            }
-            _ => out.push_str(" i"),
-        }
+        out.push(' ');
+        out.push_str(&type_kind_token(
+            &p.ty,
+            p.rfn.as_ref(),
+            &p.name,
+            program,
+            &d.module,
+            0,
+        ));
     }
     out.push('\n');
 }
 
-/// `i`, or `i>=0` / `i>0` / `i<=k` / `i<k` when `where` is a simple comparison.
-fn int_kind_token(p: &crate::ast::Param) -> String {
-    match p.rfn.as_ref().and_then(|e| simple_cmp_bound(&p.name, e)) {
+fn int_bound_token(name: &str, rfn: Option<&Expr>) -> String {
+    match rfn.and_then(|e| simple_cmp_bound(name, e)) {
         Some((op, k)) => format!("i{op}{k}"),
         None => "i".into(),
     }
+}
+
+fn type_is_generator_friendly(ty: &Type, program: &Program, module: &str, depth: usize) -> bool {
+    match ty {
+        Type::Int | Type::String | Type::Bool => true,
+        Type::List(inner) => {
+            if depth >= GEN_DEPTH_MAX {
+                true
+            } else {
+                type_is_generator_friendly(inner, program, module, depth + 1)
+            }
+        }
+        Type::Adt(_) | Type::App(_, _) => match enum_and_subst(ty, program, module) {
+            Some((en, subst)) => {
+                if is_opaque_app(ty) {
+                    return false;
+                }
+                if en.cases.is_empty() {
+                    return false;
+                }
+                if depth >= GEN_DEPTH_MAX {
+                    return en.cases.iter().any(|c| c.fields.is_empty());
+                }
+                en.cases.iter().all(|c| {
+                    c.fields.iter().all(|(_, fty)| {
+                        type_is_generator_friendly(
+                            &apply_field_subst(fty, &subst),
+                            program,
+                            module,
+                            depth + 1,
+                        )
+                    })
+                })
+            }
+            None => false,
+        },
+        _ => false,
+    }
+}
+
+fn is_opaque_app(ty: &Type) -> bool {
+    match ty {
+        Type::App(n, _) => {
+            let bare = n.rsplit('.').next().unwrap_or(n);
+            matches!(
+                bare,
+                "Fiber" | "Ref" | "Queue" | "Deferred" | "Resource" | "Stream" | "Map" | "Set"
+            )
+        }
+        _ => false,
+    }
+}
+
+fn lookup_enum<'a>(program: &'a Program, id: &str, module: &str) -> Option<&'a EnumDef> {
+    program
+        .enums
+        .iter()
+        .find(|e| enum_id(&e.module, &e.name) == id)
+        .or_else(|| {
+            program
+                .enums
+                .iter()
+                .find(|e| e.module == module && e.name == id)
+        })
+        .or_else(|| {
+            let hits: Vec<&EnumDef> = program.enums.iter().filter(|e| e.name == id).collect();
+            if hits.len() == 1 {
+                Some(hits[0])
+            } else {
+                None
+            }
+        })
+}
+
+fn enum_and_subst<'a>(
+    ty: &'a Type,
+    program: &'a Program,
+    module: &str,
+) -> Option<(&'a EnumDef, Vec<(String, Type)>)> {
+    match ty {
+        Type::Adt(id) => {
+            let en = lookup_enum(program, id, module)?;
+            Some((en, Vec::new()))
+        }
+        Type::App(id, args) => {
+            if is_opaque_app(ty) {
+                return None;
+            }
+            let en = lookup_enum(program, id, module)?;
+            let subst = en
+                .type_params
+                .iter()
+                .cloned()
+                .zip(args.iter().cloned())
+                .collect();
+            Some((en, subst))
+        }
+        _ => None,
+    }
+}
+
+fn apply_field_subst(ty: &Type, subst: &[(String, Type)]) -> Type {
+    if subst.is_empty() {
+        return ty.clone();
+    }
+    match ty {
+        Type::Var(n) | Type::Adt(n) => subst
+            .iter()
+            .find(|(k, _)| k == n)
+            .map(|(_, t)| t.clone())
+            .unwrap_or_else(|| ty.clone()),
+        Type::List(inner) => Type::List(Box::new(apply_field_subst(inner, subst))),
+        Type::App(n, args) => {
+            if args.is_empty() {
+                if let Some((_, t)) = subst.iter().find(|(k, _)| k == n) {
+                    return t.clone();
+                }
+            }
+            Type::App(
+                n.clone(),
+                args.iter().map(|a| apply_field_subst(a, subst)).collect(),
+            )
+        }
+        Type::Tuple(xs) => Type::Tuple(xs.iter().map(|t| apply_field_subst(t, subst)).collect()),
+        other => other.clone(),
+    }
+}
+
+fn type_kind_token(
+    ty: &Type,
+    rfn: Option<&Expr>,
+    name: &str,
+    program: &Program,
+    module: &str,
+    depth: usize,
+) -> String {
+    match ty {
+        Type::String => "s".into(),
+        Type::Bool => "b".into(),
+        Type::Int => int_bound_token(name, rfn),
+        Type::List(inner) => {
+            format!(
+                "[{}]",
+                type_kind_token(inner, None, "", program, module, depth + 1)
+            )
+        }
+        Type::Adt(_) | Type::App(_, _) => adt_kind_token(ty, program, module, depth),
+        _ => "i".into(),
+    }
+}
+
+fn adt_kind_token(ty: &Type, program: &Program, module: &str, depth: usize) -> String {
+    let Some((en, subst)) = enum_and_subst(ty, program, module) else {
+        return "i".into();
+    };
+    if en.is_record || (en.cases.len() == 1 && en.cases[0].name == en.name) {
+        let case = &en.cases[0];
+        let fields: Vec<String> = case
+            .fields
+            .iter()
+            .enumerate()
+            .map(|(i, (fname, fty))| {
+                type_kind_token(
+                    &apply_field_subst(fty, &subst),
+                    case.field_rfn(i),
+                    fname,
+                    program,
+                    module,
+                    depth + 1,
+                )
+            })
+            .collect();
+        return format!("{}({})", en.name, fields.join(","));
+    }
+    if depth >= GEN_DEPTH_MAX {
+        let cases: Vec<String> = en
+            .cases
+            .iter()
+            .filter(|c| c.fields.is_empty())
+            .map(|c| c.name.clone())
+            .collect();
+        if cases.is_empty() {
+            return "i".into();
+        }
+        return format!("e:{}", cases.join("|"));
+    }
+    let cases: Vec<String> = en
+        .cases
+        .iter()
+        .map(|c| {
+            if c.fields.is_empty() {
+                c.name.clone()
+            } else {
+                let fs: Vec<String> = c
+                    .fields
+                    .iter()
+                    .enumerate()
+                    .map(|(i, (fname, fty))| {
+                        type_kind_token(
+                            &apply_field_subst(fty, &subst),
+                            c.field_rfn(i),
+                            fname,
+                            program,
+                            module,
+                            depth + 1,
+                        )
+                    })
+                    .collect();
+                format!("{}({})", c.name, fs.join(","))
+            }
+        })
+        .collect();
+    format!("e:{}", cases.join("|"))
 }
 
 fn simple_cmp_bound(param: &str, e: &Expr) -> Option<(&'static str, i64)> {
@@ -1353,6 +1569,64 @@ mod tests {
         }];
         let prog = apply_overlays(live, &overlays).unwrap();
         assert_eq!(driver_table_text(&prog), "noteDrive i>=0\n");
+    }
+
+    #[test]
+    fn driver_table_records_enums_and_lists() {
+        let prog = parse_sources(&[(
+            "Main.scuzz".into(),
+            "record Rect(w: Int where w >= 0, h: Int where h >= 0)\n\
+             property areaIsProduct(r: Rect): Bool = true\n\
+             @main def main: IO[Unit] = IO.println(\"x\")\n"
+                .into(),
+        )])
+        .unwrap();
+        collect_property_names(&prog).unwrap();
+        assert_eq!(driver_table_text(&prog), "areaIsProduct Rect(i>=0,i>=0)\n");
+
+        let prog = parse_sources(&[(
+            "Main.scuzz".into(),
+            "enum Color:\n  case Red\n  case Blue\n\
+             property isRed(c: Color): Bool = true\n\
+             @main def main: IO[Unit] = IO.println(\"x\")\n"
+                .into(),
+        )])
+        .unwrap();
+        collect_property_names(&prog).unwrap();
+        assert_eq!(driver_table_text(&prog), "isRed e:Red|Blue\n");
+
+        let prog = parse_sources(&[(
+            "Main.scuzz".into(),
+            "enum Opt[T]:\n  case Some(x: T)\n  case None\n\
+             property describe(o: Opt[Int]): Bool = true\n\
+             @main def main: IO[Unit] = IO.println(\"x\")\n"
+                .into(),
+        )])
+        .unwrap();
+        collect_property_names(&prog).unwrap();
+        assert_eq!(driver_table_text(&prog), "describe e:Some(i)|None\n");
+
+        let prog = parse_sources(&[(
+            "Main.scuzz".into(),
+            "property sumLen(xs: List[Int]): Bool = true\n\
+             @main def main: IO[Unit] = IO.println(\"x\")\n"
+                .into(),
+        )])
+        .unwrap();
+        collect_property_names(&prog).unwrap();
+        assert_eq!(driver_table_text(&prog), "sumLen [i]\n");
+    }
+
+    #[test]
+    fn rejects_float_property_param() {
+        let prog = parse_sources(&[(
+            "Main.scuzz".into(),
+            "property bad(x: Float): Bool = true\n@main def main: IO[Unit] = IO.println(\"x\")\n"
+                .into(),
+        )])
+        .unwrap();
+        let err = collect_property_names(&prog).unwrap_err();
+        assert!(err.to_string().contains("record/enum"), "{}", err);
     }
 
     #[test]

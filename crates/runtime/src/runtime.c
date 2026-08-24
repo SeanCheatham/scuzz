@@ -298,6 +298,8 @@ void sz_panic(const char *msg) {
   if (g_in_panic)
     abort();
   g_in_panic = 1;
+  sz_property_sometimes_flush();
+  sz_property_classify_flush();
   sz_alloc_format_panic(report, sizeof report, msg);
   fputs(report, stderr);
   fflush(stderr);
@@ -3368,7 +3370,6 @@ static void *sz_runtime_main_worker(void *arg) {
       sz_testrt_install();
   }
   SzIoResult r = sz_io_unsafe_run(a->program);
-  sz_property_sometimes_flush();
   if (!r.ok) {
     fprintf(stderr, "scuzz: IO failed: %s\n",
             r.error ? sz_string_cstr(r.error->message) : "unknown");
@@ -3383,6 +3384,8 @@ static void *sz_runtime_main_worker(void *arg) {
     }
     a->rc = 0;
   }
+  sz_property_sometimes_flush();
+  sz_property_classify_flush();
 #if defined(__APPLE__)
   g_sz_main_worker_done = 1;
   /* Wake the main CFRunLoop so it notices the done flag promptly. */

@@ -5217,6 +5217,17 @@ fn infer_call(
             expect_ty(&arg_tys[0], &Type::String)?;
             Ok(Type::Unit)
         }
+        "Property.classify" => {
+            expect_arity(callee, &arg_tys, 2)?;
+            expect_ty(&arg_tys[0], &Type::String)?;
+            if !matches!(arg_tys[1], Type::Bool) {
+                return Err(TypeError::Msg(format!(
+                    "Property.classify hit must be Bool, got {:?}",
+                    arg_tys[1]
+                )));
+            }
+            Ok(Type::Bool)
+        }
         "View.text" => {
             expect_arity(callee, &arg_tys, 1)?;
             expect_ty(&arg_tys[0], &Type::String)?;
@@ -13233,6 +13244,15 @@ def scale(x: Float): Float = x * 2.0
 "#;
         let p = lower_program(parse(src).unwrap());
         typecheck(&p).expect("Property.check / Property.sometimes should typecheck");
+    }
+
+    #[test]
+    fn typechecks_property_classify() {
+        let src = r#"@main def main: IO[Unit] =
+  IO.println(Str.fromInt(if (Property.classify("square", true)) 1 else 0))
+"#;
+        let p = lower_program(parse(src).unwrap());
+        typecheck(&p).expect("Property.classify should typecheck");
     }
 
     #[test]
