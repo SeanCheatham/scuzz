@@ -77,3 +77,46 @@ world
 )
   } yield ()
 
+def dirtyFlag(body: String, orig: String): Int =
+  if (body == orig) 0 else 1
+
+def tabLabel(path: String, body: String, orig: String): String =
+  if (body == orig) Fs.basename(path) else Str.concat(Fs.basename(path), " *")
+
+def closeLabel(path: String): String =
+  Str.concat("x ", Fs.basename(path))
+
+def openPaths(paths: List[String], path: String): List[String] =
+  if (List.contains(paths, path)) paths else List.append(paths, path)
+
+def dropAt(xs: List[String], i: Int): List[String] =
+  List.concat(List.take(xs, i), List.drop(xs, i + 1))
+
+def afterClose(idx: Int, closed: Int, n: Int): Int =
+  if (n <= 0) 0 else if (closed < idx) idx - 1 else if (idx >= n) n - 1 else idx
+
+def liveSlot(slots: List[String], paths: List[String], path: String, curPath: String, curVal: String): String =
+  if (path == curPath) curVal else List.getOrElse(slots, List.indexOf(paths, path), curVal)
+
+def captureOut(stdout: String, stderr: String): String =
+  if (Str.isEmpty(stderr)) stdout else if (Str.isEmpty(stdout)) stderr else Str.concat(stdout, Str.concat("""
+""", stderr))
+
+def takeTab(ps: List[String], bs: List[String], os: List[String], i: Int): (List[String], List[String], List[String], Int, String, String, Int) =
+  (ps, bs, os, i, List.at(bs, i), List.at(os, i), dirtyFlag(List.at(bs, i), List.at(os, i)))
+
+def loadTab(ps: List[String], bs: List[String], os: List[String], dest: String): (List[String], List[String], List[String], Int, String, String, Int) =
+  takeTab(ps, bs, os, List.indexOf(ps, dest))
+
+def applyOpen(paths: List[String], bodies: List[String], origs: List[String], idx: Int, curBody: String, curOrig: String, dest: String, destBody: String): (List[String], List[String], List[String], Int, String, String, Int) =
+  loadTab(if (List.contains(paths, dest)) paths else List.append(paths, dest), if (List.contains(paths, dest)) List.setAt(bodies, idx, curBody) else List.append(List.setAt(bodies, idx, curBody), destBody), if (List.contains(paths, dest)) List.setAt(origs, idx, curOrig) else List.append(List.setAt(origs, idx, curOrig), destBody), dest)
+
+def dropTab(paths: List[String], bodies: List[String], origs: List[String], idx: Int, closed: Int): (List[String], List[String], List[String], Int, String, String, Int) =
+  if (closed < 0) takeTab(paths, bodies, origs, idx) else takeTab(dropAt(paths, closed), dropAt(bodies, closed), dropAt(origs, closed), afterClose(idx, closed, List.len(paths) - 1))
+
+def applyClose(paths: List[String], bodies: List[String], origs: List[String], idx: Int, curBody: String, curOrig: String, dest: String): (List[String], List[String], List[String], Int, String, String, Int) =
+  if (List.len(paths) <= 1) takeTab(paths, List.setAt(bodies, idx, curBody), List.setAt(origs, idx, curOrig), idx) else dropTab(paths, List.setAt(bodies, idx, curBody), List.setAt(origs, idx, curOrig), idx, List.indexOf(paths, dest))
+
+def writeDirty(paths: List[String], bodies: List[String], origs: List[String]): IO[List[String]] =
+  IO.foreach(List.indices(paths), i => if (List.at(bodies, i) == List.at(origs, i)) IO.pure(List.at(origs, i)) else Fs.write(List.at(paths, i), List.at(bodies, i)).map(_ => List.at(bodies, i)))
+
