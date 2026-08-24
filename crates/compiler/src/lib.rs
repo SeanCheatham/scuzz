@@ -15,6 +15,7 @@ pub(crate) mod highlight;
 pub(crate) mod hover;
 pub(crate) mod implement;
 pub(crate) mod inlay;
+pub(crate) mod intent;
 pub(crate) mod lens;
 pub(crate) mod lexer;
 pub(crate) mod links;

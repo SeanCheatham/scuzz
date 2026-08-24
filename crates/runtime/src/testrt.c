@@ -1408,6 +1408,7 @@ void sz_testrt_reset(void) {
   g_idle_have = 0;
   g_idle_bytes = 0;
   g_idle_count = 0;
+  sz_property_session_reset();
   sz_testrt_clock_reset_live();
   sz_testrt_random_reset_live();
   sz_testrt_fs_reset_live();
@@ -1563,6 +1564,105 @@ void sz_property_classify_flush(void) {
     fprintf(f, "%s %d %d\n", g_classify[i].name, g_classify[i].yes,
             g_classify[i].no);
   fclose(f);
+}
+
+#define SZ_SESSION_MAX 32
+typedef struct {
+  char *name;
+  int64_t (*fn)(void);
+  int held;
+} SzSessionProp;
+
+static SzSessionProp g_always[SZ_SESSION_MAX];
+static int g_always_n;
+static SzSessionProp g_eventually[SZ_SESSION_MAX];
+static int g_eventually_n;
+
+static void session_register(SzSessionProp *tab, int *n, SzString *name,
+                             void *fn) {
+  const char *s = name ? sz_string_cstr(name) : "";
+  size_t len;
+  char *copy;
+  if (!fn || !s[0])
+    return;
+  if (*n >= SZ_SESSION_MAX)
+    sz_panic("sz_property session: too many thunks");
+  len = strlen(s);
+  copy = (char *)sz_alloc(len + 1);
+  memcpy(copy, s, len + 1);
+  tab[*n].name = copy;
+  tab[*n].fn = (int64_t(*)(void))fn;
+  tab[*n].held = 0;
+  *n += 1;
+}
+
+void sz_property_always_register(SzString *name, void *fn) {
+  session_register(g_always, &g_always_n, name, fn);
+}
+
+void sz_property_eventually_register(SzString *name, void *fn) {
+  session_register(g_eventually, &g_eventually_n, name, fn);
+}
+
+int sz_property_session_armed(void) {
+  return g_always_n > 0 || g_eventually_n > 0;
+}
+
+void sz_property_session_step(void) {
+  const char *tr = getenv("SCUZZ_TESTRT");
+  char buf[256];
+  int i;
+  if (!tr || tr[0] != '1')
+    return;
+  for (i = 0; i < g_always_n; i++) {
+    if (g_always[i].fn && g_always[i].fn())
+      continue;
+    snprintf(buf, sizeof buf, "always failed: %s",
+             g_always[i].name ? g_always[i].name : "?");
+    fprintf(stderr, "scuzz: %s\n", buf);
+    sz_panic(buf);
+  }
+  for (i = 0; i < g_eventually_n; i++) {
+    if (g_eventually[i].fn && g_eventually[i].fn())
+      g_eventually[i].held = 1;
+  }
+}
+
+void sz_property_session_end(void) {
+  const char *tr = getenv("SCUZZ_TESTRT");
+  char buf[256];
+  int i;
+  if (!tr || tr[0] != '1')
+    return;
+  sz_property_session_step();
+  for (i = 0; i < g_eventually_n; i++) {
+    if (g_eventually[i].held)
+      continue;
+    snprintf(buf, sizeof buf, "eventually never held: %s",
+             g_eventually[i].name ? g_eventually[i].name : "?");
+    fprintf(stderr, "scuzz: %s\n", buf);
+    sz_panic(buf);
+  }
+}
+
+void sz_property_session_reset(void) {
+  int i;
+  for (i = 0; i < g_always_n; i++) {
+    if (g_always[i].name)
+      sz_free(g_always[i].name);
+    g_always[i].name = NULL;
+    g_always[i].fn = NULL;
+    g_always[i].held = 0;
+  }
+  g_always_n = 0;
+  for (i = 0; i < g_eventually_n; i++) {
+    if (g_eventually[i].name)
+      sz_free(g_eventually[i].name);
+    g_eventually[i].name = NULL;
+    g_eventually[i].fn = NULL;
+    g_eventually[i].held = 0;
+  }
+  g_eventually_n = 0;
 }
 
 /* Matches DRIVE_NAMES_MAX in crates/compiler/src/overlay.rs. Overlay rejects a larger table. */
@@ -1830,6 +1930,7 @@ void sz_driver_run_line(const char *spec) {
   }
   /* Driver work runs between pumps. Baseline the next idle frame. */
   sz_testrt_ui_idle_reset();
+  sz_property_session_step();
 }
 
 void sz_driver_run_script(const char *path) {

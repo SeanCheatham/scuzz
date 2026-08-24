@@ -3477,6 +3477,7 @@ static void *sz_runtime_main_worker(void *arg) {
       if (ds && ds[0])
         sz_driver_run_script(ds);
     }
+    sz_property_session_end();
     a->rc = 0;
   }
   sz_property_sometimes_flush();

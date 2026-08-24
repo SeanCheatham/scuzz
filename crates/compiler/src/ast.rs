@@ -16,10 +16,12 @@ pub struct Program {
     /// `import Module.name` / `import Module.name as alias` / `import Module.*`.
     /// Bare `alias` (or `name`) in `in_module` resolves to `from_module.name`.
     pub imports: Vec<Import>,
-    /// Property def names residualized under TestRuntime (empty for live builds).
-    pub property_names: Vec<String>,
     /// Driver def names merged from `*.scuzz_drivers` (empty for live builds).
     pub driver_names: Vec<String>,
+    /// Compiler-inserted always thunk names (`__intent` module).
+    pub intent_always: Vec<String>,
+    /// Compiler-inserted eventually thunk names (`__intent` module).
+    pub intent_eventually: Vec<String>,
 }
 
 /// `trait Show:` / `trait Get[T]: def getOrElse(default: T): T`
@@ -136,8 +138,6 @@ pub struct FunDef {
     pub name_span: Span,
     /// `private def` — visible only within `module`. Default public.
     pub is_private: bool,
-    /// Top-level `property name: Bool = …` — erased from live builds; residualized under verify.
-    pub is_property: bool,
     /// Def merged from `*.scuzz_drivers` (verify graph only).
     pub is_driver: bool,
     /// `def foo[T](…)` — monomorphized before codegen.

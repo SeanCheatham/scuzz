@@ -8,8 +8,7 @@ use crate::span::{offset_to_line_col, Span};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MutateMode {
-    /// Mutate live `def` / `@main` bodies. Skip property and driver bodies and
-    /// residual oracle predicates.
+    /// Mutate live `def` / `@main` bodies. Skip intent and driver bodies and residual oracle predicates.
     Program,
     /// Mutate residual `Property.check` / `Property.assert` / `.require` predicates.
     Oracles,
@@ -55,7 +54,7 @@ impl MutantDesc {
     }
 }
 
-/// Residual `Property.check` / `Property.assert` / `.require` site, or a `property` def.
+/// Residual `Property.check` / `Property.assert` / `.require` site.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OracleSite {
     pub def: String,
@@ -143,9 +142,6 @@ fn collect_oracles_in_expr(e: &Expr, def: &str, module: &str, out: &mut Vec<Orac
 pub fn collect_oracle_sites(program: &Program) -> Vec<OracleSite> {
     let mut out = Vec::new();
     for d in &program.defs {
-        if d.is_property {
-            out.push(oracle_site(&d.name, &d.module, &d.body.span, &d.body));
-        }
         collect_oracles_in_expr(&d.body, &d.name, &d.module, &mut out);
     }
     if !program.main.name.is_empty() {
@@ -186,6 +182,9 @@ pub fn nearest_oracle(desc: &MutantDesc, oracles: &[OracleSite]) -> String {
             .iter()
             .filter(|o| o.module == desc.module && o.observes(&desc.def)),
     ) {
+        return hit.def.clone();
+    }
+    if let Some(hit) = closest_oracle(desc, oracles.iter().filter(|o| o.observes(&desc.def))) {
         return hit.def.clone();
     }
     format!("no oracle observes `{}`", desc.def)
@@ -612,7 +611,7 @@ fn bin_mutant(
 
 fn mutate_def_body(d: &FunDef, mode: MutateMode) -> bool {
     match mode {
-        MutateMode::Program => !d.is_property && !d.is_driver,
+        MutateMode::Program => !d.is_driver && !crate::intent::is_intent_module(&d.module),
         MutateMode::Oracles => true,
     }
 }
@@ -668,8 +667,9 @@ pub fn mutate_describe(program: &Program, site: i32, mode: MutateMode) -> Option
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::intent::apply_intents;
     use crate::lower::lower_program;
-    use crate::overlay::residualize_refinements;
+    use crate::overlay::{residualize_refinements, OverlayKind, OverlaySource};
     use crate::parser::{parse, parse_file};
 
     #[test]
@@ -864,7 +864,7 @@ def paint(): Color = Color.Red
     }
 
     fn bad_example_prog() -> Program {
-        parse_file(
+        let mut p = parse_file(
             r#"
 def bump(n: Int): Int =
   n - 1
@@ -872,15 +872,24 @@ def bump(n: Int): Int =
 def scale(n: Int): Int =
   n * 2
 
-property bumpIncreases(n: Int): Bool =
-  bump(n) == n + 1
-
 @main def main: IO[Unit] =
   IO.println(Str.fromInt(bump(0) + scale(1)))
 "#,
             "Main.scuzz",
         )
-        .unwrap()
+        .unwrap();
+        apply_intents(
+            &mut p,
+            &[OverlaySource {
+                stem: "Main".into(),
+                kind: OverlayKind::Intent,
+                path: std::path::PathBuf::new(),
+                label: "Main.scuzz_intent".into(),
+                text: "For bump:\nThe result is the input plus 1.\n".into(),
+            }],
+        )
+        .unwrap();
+        p
     }
 
     #[test]
@@ -904,7 +913,7 @@ property bumpIncreases(n: Int): Bool =
     }
 
     #[test]
-    fn bump_mutants_name_bump_increases_oracle() {
+    fn bump_mutants_name_bump_oracle() {
         let p = bad_example_prog();
         let oracles = collect_oracle_sites(&p);
         let n = mutate_count_mode(&p, MutateMode::Program);
@@ -917,7 +926,7 @@ property bumpIncreases(n: Int): Bool =
                 continue;
             }
             bump_sites += 1;
-            assert_eq!(nearest_oracle(&d, &oracles), "bumpIncreases");
+            assert_eq!(nearest_oracle(&d, &oracles), "bump");
         }
         assert!(bump_sites > 0, "expected at least one bump mutant");
     }

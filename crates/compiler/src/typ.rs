@@ -626,7 +626,6 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
                 name: mangled,
                 name_span: Span::dummy(),
                 is_private: false,
-                is_property: false,
                 is_driver: false,
                 type_params: for_en.type_params.clone(),
                 params,
@@ -662,7 +661,6 @@ pub fn expand_impls(mut program: Program) -> Result<Program, TypeError> {
                     name: mangled,
                     name_span: Span::dummy(),
                     is_private: false,
-                    is_property: false,
                     is_driver: false,
                     type_params: en.type_params.clone(),
                     params,
@@ -1999,7 +1997,6 @@ fn is_nullary_bool_property(
     current_module: &str,
 ) -> Result<bool, TypeError> {
     match funs.resolve(name, current_module) {
-        Ok(f) if f.is_property && f.params.is_empty() => Ok(matches!(f.ret, Type::Bool)),
         Ok(f) if f.params.is_empty() && matches!(f.ret, Type::Bool) => Ok(true),
         Ok(_) => Ok(false),
         Err(crate::resolve::ResolveError::Unknown(_)) => Ok(false),
@@ -7267,7 +7264,6 @@ fn mono_expr(
                                 name: mangled.clone(),
                                 name_span: f.name_span.clone(),
                                 is_private: f.is_private,
-                                is_property: f.is_property,
                                 is_driver: f.is_driver,
                                 type_params: Vec::new(),
                                 params: params?,
@@ -15013,11 +15009,10 @@ def describe(e: Either[Int, String]): String = e match {
     #[test]
     fn typechecks_require_on_pure_and_io() {
         let src = r#"
-property always: Bool = 1 == 1
 @main def main: IO[Unit] =
   for {
     n = 1.require(n => n >= 0)
-    _ <- IO.println(Str.fromInt(n)).require(always)
+    _ <- IO.println(Str.fromInt(n)).require(1 == 1)
   } yield ()
 "#;
         let p = lower_program(parse(src).unwrap());
@@ -15027,11 +15022,10 @@ property always: Bool = 1 == 1
     #[test]
     fn resolve_require_to_property_check_and_assert() {
         let src = r#"
-property always: Bool = 1 == 1
 @main def main: IO[Unit] =
   for {
     n = 1.require("nonNeg", n => n >= 0)
-    _ <- IO.println("x").require(always)
+    _ <- IO.println("x").require(1 == 1)
   } yield ()
 "#;
         let p = lower_program(parse(src).unwrap());

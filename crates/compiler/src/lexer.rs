@@ -14,7 +14,6 @@ pub enum Token {
     Case,
     Match,
     Def,
-    Property,
     Where,
     Private,
     Import,
@@ -383,7 +382,6 @@ pub fn lex(input: &str) -> Result<Vec<SpannedToken>, LexError> {
                         "case" => Token::Case,
                         "match" => Token::Match,
                         "def" => Token::Def,
-                        "property" => Token::Property,
                         "where" => Token::Where,
                         "private" => Token::Private,
                         "import" => Token::Import,
@@ -758,13 +756,6 @@ mod tests {
             .any(|t| matches!(&t.token, Token::StringLit(s) if s == "hi")));
         assert_eq!(toks[0].span.start, 0);
         assert!(toks[0].span.end > 0);
-    }
-
-    #[test]
-    fn lexes_property() {
-        let toks = lex("property always: Bool = 1 == 1").unwrap();
-        assert!(matches!(toks[0].token, Token::Property));
-        assert!(matches!(&toks[1].token, Token::Ident(s) if s == "always"));
     }
 
     #[test]

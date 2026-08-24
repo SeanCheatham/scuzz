@@ -423,11 +423,7 @@ pub(crate) fn show_def(d: &FunDef) -> String {
         format!("[{}]", d.type_params.join(", "))
     };
     let params: Vec<String> = d.params.iter().map(show_param).collect();
-    if d.is_property {
-        format!("property {}: {}", d.name, d.ret)
-    } else {
-        format!("{vis}def {}{tps}({}): {}", d.name, params.join(", "), d.ret)
-    }
+    format!("{vis}def {}{tps}({}): {}", d.name, params.join(", "), d.ret)
 }
 
 pub(crate) fn show_param(p: &Param) -> String {

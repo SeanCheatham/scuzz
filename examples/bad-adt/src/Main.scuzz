@@ -1,10 +1,7 @@
 record Rect(w: Int where w >= 0, h: Int where h >= 0)
 
 def area(r: Rect): Int =
-  r.w + r.h
-
-property areaIsProduct(r: Rect): Bool =
-  Property.classify("square", r.w == r.h) && Property.classify("wide", r.w > r.h) && area(r) == r.w * r.h
+  (r.w + r.h).require(Property.classify("square", r.w == r.h) && Property.classify("wide", r.w > r.h))
 
 @main def main: IO[Unit] =
   IO.println(Str.fromInt(area(Rect(2, 3))))

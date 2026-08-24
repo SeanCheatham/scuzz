@@ -1418,6 +1418,14 @@ scroll:scroll
     }
 
     #[test]
+    fn corpus_entry_name_matches_bad_model_pin() {
+        assert_eq!(
+            corpus_entry_name("42", &["drive step 0".into()]),
+            "38e8b0d55f93c3bb"
+        );
+    }
+
+    #[test]
     fn corpus_entry_name_changes_with_seed_or_events() {
         let ev = vec!["tap 0".to_string()];
         let base = corpus_entry_name("1", &ev);
@@ -1738,7 +1746,7 @@ scroll:scroll
     fn classify_declared_first_seen() {
         let p = parse(
             r#"
-property p(n: Int): Bool =
+def p(n: Int): Bool =
   Property.classify("square", n == 0) && n >= 0
 @main def main: IO[Unit] =
   IO.pure(Property.classify("wide", false))

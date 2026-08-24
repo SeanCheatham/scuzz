@@ -66,9 +66,14 @@ pub fn emit_llvm(program: &Program) -> String {
             if !strs.contains(&d.name) {
                 strs.push(d.name.clone());
             }
-        } else if d.is_property && !d.params.is_empty() && !strs.contains(&d.name) {
-            strs.push(d.name.clone());
         }
+    }
+    for name in program
+        .intent_always
+        .iter()
+        .chain(program.intent_eventually.iter())
+    {
+        intern_str(&mut strs, name);
     }
     intern_drive_decode_names(program, &mut strs);
 
@@ -465,6 +470,12 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "declare void @sz_property_check(ptr, i64)").unwrap();
     writeln!(out, "declare void @sz_property_sometimes(ptr)").unwrap();
     writeln!(out, "declare void @sz_property_classify(ptr, i64)").unwrap();
+    writeln!(out, "declare void @sz_property_always_register(ptr, ptr)").unwrap();
+    writeln!(
+        out,
+        "declare void @sz_property_eventually_register(ptr, ptr)"
+    )
+    .unwrap();
     writeln!(out, "declare i32 @sz_drive_uncons(ptr, ptr, ptr, i32)").unwrap();
     writeln!(out, "declare i32 @sz_drive_uncons_list(ptr, ptr, i32)").unwrap();
     writeln!(out, "declare i64 @sz_drive_nfields(ptr)").unwrap();
@@ -533,6 +544,7 @@ pub fn emit_llvm(program: &Program) -> String {
     writeln!(out, "define i32 @main(i32 %argc, ptr %argv) {{").unwrap();
     writeln!(out, "entry:").unwrap();
     emit_driver_registers(&mut out, program, &strs);
+    emit_intent_registers(&mut out, program, &strs);
     out.push_str(&body_expr.code);
     let io_val = ensure_io(
         &mut out,
@@ -1152,7 +1164,7 @@ fn intern_str(strs: &mut Vec<String>, s: &str) {
 fn intern_drive_decode_names(program: &Program, strs: &mut Vec<String>) {
     intern_str(strs, "drive decode failed");
     for d in &program.defs {
-        if d.is_driver || (d.is_property && !d.params.is_empty()) {
+        if d.is_driver {
             for p in &d.params {
                 intern_ctor_names_ty(&p.ty, program, strs);
             }
@@ -1194,36 +1206,63 @@ fn lookup_enum_cg<'a>(program: &'a Program, id: &str) -> Option<&'a EnumDef> {
 }
 
 fn emit_driver_registers(out: &mut String, program: &Program, strs: &[String]) {
-    let mut i = 0usize;
-    for d in program.defs.iter().filter(|d| d.is_driver) {
+    for (i, d) in program.defs.iter().filter(|d| d.is_driver).enumerate() {
         let sym = if fun_needs_decode(d) {
             format!("{}__drv", user_symbol(&d.module, &d.name))
         } else {
             user_symbol(&d.module, &d.name)
         };
         emit_one_driver_register(out, d, strs, i, &sym);
-        i += 1;
-    }
-    for d in program
-        .defs
-        .iter()
-        .filter(|d| d.is_property && !d.params.is_empty())
-    {
-        let tramp = format!("{}__drv", user_symbol(&d.module, &d.name));
-        emit_one_driver_register(out, d, strs, i, &tramp);
-        i += 1;
     }
 }
 
-fn emit_property_drive_tramps(out: &mut String, program: &Program, strs: &[String]) {
-    for d in program
+fn emit_intent_registers(out: &mut String, program: &Program, strs: &[String]) {
+    for (i, name) in program.intent_always.iter().enumerate() {
+        emit_one_intent_register(out, program, strs, i, name, "always");
+    }
+    let base = program.intent_always.len();
+    for (j, name) in program.intent_eventually.iter().enumerate() {
+        emit_one_intent_register(out, program, strs, base + j, name, "eventually");
+    }
+}
+
+fn emit_one_intent_register(
+    out: &mut String,
+    program: &Program,
+    strs: &[String],
+    i: usize,
+    name: &str,
+    kind: &str,
+) {
+    let idx = strs
+        .iter()
+        .position(|s| s == name)
+        .unwrap_or_else(|| panic!("intent name interned: {name}"));
+    let len = name.len() + 1;
+    let d = program
         .defs
         .iter()
-        .filter(|d| d.is_property && !d.params.is_empty())
-    {
-        let tramp = format!("{}__drv", user_symbol(&d.module, &d.name));
-        emit_property_drive_tramp(out, program, d, strs, &tramp);
-    }
+        .find(|d| crate::intent::is_intent_module(&d.module) && d.name == name)
+        .expect("intent thunk def");
+    let sym = user_symbol(&d.module, &d.name);
+    writeln!(
+        out,
+        "  %int{i}_gep = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  %int{i}_ss = call ptr @sz_string_from_cstr(ptr %int{i}_gep)"
+    )
+    .unwrap();
+    writeln!(
+        out,
+        "  call void @sz_property_{kind}_register(ptr %int{i}_ss, ptr @{sym})"
+    )
+    .unwrap();
+}
+
+fn emit_property_drive_tramps(out: &mut String, program: &Program, strs: &[String]) {
     for d in program
         .defs
         .iter()
@@ -1306,55 +1345,6 @@ impl DriveEmit<'_> {
         writeln!(self.out, "  %{t} = alloca [192 x i8], align 1").unwrap();
         format!("%{t}")
     }
-}
-
-fn emit_property_drive_tramp(
-    out: &mut String,
-    program: &Program,
-    d: &FunDef,
-    strs: &[String],
-    tramp: &str,
-) {
-    let property = user_symbol(&d.module, &d.name);
-    let idx = strs
-        .iter()
-        .position(|s| s == &d.name)
-        .expect("property name interned");
-    let len = d.name.len() + 1;
-    emit_tramp_header(out, d, tramp);
-    let mut em = DriveEmit {
-        out,
-        program,
-        strs,
-        n: 0,
-    };
-    let (call_args, owned) = emit_tramp_decode(&mut em, d);
-    if call_args.is_empty() {
-        writeln!(em.out, "  %ok = call i64 @{property}()").unwrap();
-    } else {
-        writeln!(
-            em.out,
-            "  %ok = call i64 @{property}({})",
-            call_args.join(", ")
-        )
-        .unwrap();
-    }
-    for v in owned {
-        writeln!(em.out, "  call void @sz_release(ptr {v})").unwrap();
-    }
-    writeln!(
-        em.out,
-        "  %nm_gep = getelementptr inbounds [{len} x i8], ptr @.str{idx}, i64 0, i64 0"
-    )
-    .unwrap();
-    writeln!(em.out, "  %nm = call ptr @sz_string_from_cstr(ptr %nm_gep)").unwrap();
-    writeln!(
-        em.out,
-        "  %io = call ptr @sz_property_assert(ptr %nm, i64 %ok)"
-    )
-    .unwrap();
-    writeln!(em.out, "  ret ptr %io").unwrap();
-    writeln!(em.out, "}}").unwrap();
 }
 
 fn emit_driver_decode_tramp(
@@ -12235,11 +12225,10 @@ def scale(x: Float): Float = x * 2.0
     #[test]
     fn emit_require_residual_property_check_and_assert() {
         let src = r#"
-property always: Bool = 1 == 1
 @main def main: IO[Unit] =
   for {
     n = 1.require("nonNeg", n => n >= 0)
-    _ <- IO.println(Str.fromInt(n)).require(always)
+    _ <- IO.println(Str.fromInt(n)).require(1 == 1)
   } yield ()
 "#;
         let p = crate::lower::lower_program(parse(src).unwrap());
