@@ -156,6 +156,7 @@ static int view_accepts_children(SzViewKind kind) {
          kind == SZ_VIEW_RADIUS || kind == SZ_VIEW_LIST_TILE ||
          kind == SZ_VIEW_BADGE || kind == SZ_VIEW_CARD ||
          kind == SZ_VIEW_EXPANSION_TILE || kind == SZ_VIEW_TOOLTIP ||
+         kind == SZ_VIEW_ON_SECONDARY ||
          kind == SZ_VIEW_PLACEHOLDER || kind == SZ_VIEW_SEMANTICS ||
          kind == SZ_VIEW_MERGE_SEMANTICS || kind == SZ_VIEW_INK_WELL ||
          kind == SZ_VIEW_VISIBILITY || kind == SZ_VIEW_OFFSTAGE ||
@@ -557,6 +558,14 @@ SzView *sz_view_tooltip(const char *message, SzView *child) {
   v->text = sz_strdup(message ? message : "");
   v->a11y_role = SZ_A11Y_TOOLTIP;
   v->a11y_label = sz_strdup(message ? message : "");
+  if (child)
+    sz_view_add_child(v, child);
+  return v;
+}
+
+SzView *sz_view_on_secondary(SzView *child, SzViewTapFn on_tap, void *env) {
+  SzView *v = view_new(SZ_VIEW_ON_SECONDARY);
+  view_set_tap(v, on_tap, env);
   if (child)
     sz_view_add_child(v, child);
   return v;
@@ -2833,6 +2842,7 @@ static void layout_node_ex(SzView *v, float x, float y, float min_w, float min_h
   case SZ_VIEW_RADIUS:
   case SZ_VIEW_BADGE:
   case SZ_VIEW_TOOLTIP:
+  case SZ_VIEW_ON_SECONDARY:
   case SZ_VIEW_PLACEHOLDER:
   case SZ_VIEW_SEMANTICS:
   case SZ_VIEW_MERGE_SEMANTICS:
@@ -3099,6 +3109,39 @@ static SzView *tooltip_at_node(SzView *v, float x, float y) {
 
 SzView *sz_view_tooltip_at(SzView *root, float x, float y) {
   return tooltip_at_node(root, x, y);
+}
+
+static SzView *on_secondary_at_node(SzView *v, float x, float y) {
+  int i;
+  SzView *found;
+  if (!v || !view_is_shown(v) || !point_in(&v->frame, x, y))
+    return NULL;
+  if (v->kind == SZ_VIEW_IGNORE_POINTER)
+    return NULL;
+  if (v->kind == SZ_VIEW_VISIBILITY && !view_visibility_on(v))
+    return NULL;
+  if (v->kind == SZ_VIEW_OFFSTAGE && !view_offstage_shown(v))
+    return NULL;
+  if (v->kind == SZ_VIEW_OVERLAY && !view_overlay_open(v))
+    return NULL;
+  for (i = v->child_count - 1; i >= 0; i--) {
+    found = on_secondary_at_node(v->children[i], x, y);
+    if (found)
+      return found;
+  }
+  return v->kind == SZ_VIEW_ON_SECONDARY ? v : NULL;
+}
+
+SzView *sz_view_on_secondary_at(SzView *root, float x, float y) {
+  return on_secondary_at_node(root, x, y);
+}
+
+int sz_view_handle_secondary(SzView *root, float x, float y) {
+  SzView *sec = on_secondary_at_node(root, x, y);
+  if (!sec || !sec->on_tap)
+    return 0;
+  sec->on_tap(sec, sec->tap_env);
+  return 1;
 }
 
 void sz_view_clear_hover(SzView *root) {
@@ -4382,6 +4425,7 @@ static void paint_node(SzView *v, SkCanvas *c, const SzTheme *theme) {
   case SZ_VIEW_EXCLUDE_SEMANTICS:
   case SZ_VIEW_GAP:
   case SZ_VIEW_TOOLTIP:
+  case SZ_VIEW_ON_SECONDARY:
   case SZ_VIEW_SEMANTICS:
   case SZ_VIEW_MERGE_SEMANTICS:
   case SZ_VIEW_INK_WELL:

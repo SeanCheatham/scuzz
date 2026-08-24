@@ -890,6 +890,10 @@ pub(crate) const KIT_SIGS: &[(&str, &str)] = &[
         "View.tooltip",
         "View.tooltip(message: String, child: View): View",
     ),
+    (
+        "View.onSecondary",
+        "View.onSecondary(child: View, onSecondary: _ => Unit): View",
+    ),
     ("View.placeholder", "View.placeholder(child: View): View"),
     (
         "View.semantics",
@@ -2097,6 +2101,18 @@ def apply(f: Opt[Int] => String, o: Opt[Int]): String = f(o)
         let h = hover_src(src, "tooltip");
         assert!(
             h.contains("View.tooltip(message: String, child: View): View"),
+            "{h}"
+        );
+    }
+
+    #[test]
+    fn hovers_view_on_secondary() {
+        let src = r#"@main def main: IO[Unit] =
+  Ui.run(_ => View.onSecondary(View.avatar("S"), _ => ()))
+"#;
+        let h = hover_src(src, "onSecondary");
+        assert!(
+            h.contains("View.onSecondary(child: View, onSecondary: _ => Unit): View"),
             "{h}"
         );
     }
