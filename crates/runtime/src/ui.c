@@ -100,6 +100,7 @@ int sz_view_handle_text(SzView *root, const char *text);
 int sz_view_handle_text_edit(SzView *root, const char *text, int backspace);
 int sz_view_handle_key(SzView *root, const char *key, const char *text,
                        int mods);
+int sz_view_handle_compose(SzView *root, const char *text);
 
 typedef enum {
   BRIDGE_INT = 1,
@@ -466,9 +467,17 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
     fputs_dump_label(f, sz_view_a11y_label(fields[i]));
     fputc('=', f);
     fputs_dump_quoted(f, sz_view_text_field_value(fields[i]));
-    fprintf(f, " caret=%d sel=%d:%d\n", sz_view_text_field_caret(fields[i]),
+    fprintf(f, " caret=%d sel=%d:%d", sz_view_text_field_caret(fields[i]),
             sz_view_text_field_sel_start(fields[i]),
             sz_view_text_field_sel_end(fields[i]));
+    {
+      const char *pre = sz_view_text_field_preedit(fields[i]);
+      if (pre && pre[0]) {
+        fputs(" preedit=", f);
+        fputs_dump_quoted(f, pre);
+      }
+    }
+    fputc('\n', f);
   }
   {
     SzView *editors[64];
@@ -508,6 +517,13 @@ int sz_ui_session_write_dump(SzUiSession *session, const char *path) {
             fprintf(f, " inlay=%d", ni);
           if (nf > 0)
             fprintf(f, " fold=%d", nf);
+        }
+        {
+          const char *pre = sz_view_editor_preedit(editors[i]);
+          if (pre && pre[0]) {
+            fputs(" preedit=", f);
+            fputs_dump_quoted(f, pre);
+          }
         }
         fputc(' ', f);
         fputs_dump_escaped(f, sz_view_editor_value(editors[i]));
@@ -1120,6 +1136,8 @@ static void record_key_line(FILE *f, const SzInputEvent *ev) {
     fputs("+cmd", f);
   if (mods & SZ_KEY_ALT)
     fputs("+alt", f);
+  if (ev->key_repeat)
+    fputs("+repeat", f);
   if (ev->text && ev->text[0]) {
     fputc(' ', f);
     fputs(ev->text, f);
@@ -1141,6 +1159,11 @@ static void record_live_event(SzUiSession *session, const SzInputEvent *ev) {
   } else if (ev->kind == SZ_INPUT_KEY && ev->key && ev->key[0]) {
     if (!clipboard_chord(ev->key, ev->key_mods))
       record_key_line(f, ev);
+  } else if (ev->kind == SZ_INPUT_COMPOSE) {
+    if (ev->text && ev->text[0])
+      fprintf(f, "compose %s\n", ev->text);
+    else
+      fputs("commit\n", f);
   } else if (ev->kind == SZ_INPUT_TEXT_EDIT) {
     if (!ev->text || !ev->text[0])
       fputs("backspace\n", f);
@@ -1577,6 +1600,12 @@ int sz_ui_inject_sync(SzUiSession *session, const SzInputEvent *event) {
     session->dirty = 1;
     return 1;
   }
+  case SZ_INPUT_COMPOSE:
+    if (!sz_view_handle_compose(session->root, event->text))
+      return 0;
+    sync_keyboard(session);
+    session->dirty = 1;
+    return 1;
   case SZ_INPUT_RESIZE:
     if (event->width <= 0 || event->height <= 0)
       return 0;

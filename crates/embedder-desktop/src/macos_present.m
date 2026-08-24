@@ -147,7 +147,7 @@ static void enqueue_scroll(float x, float y, float dy) {
   q_push(&ev);
 }
 
-static void enqueue_key(const char *name, const char *text, int mods) {
+static void enqueue_key(const char *name, const char *text, int mods, int repeat) {
   SzInputEvent ev;
   const char *k;
   const char *t;
@@ -160,6 +160,7 @@ static void enqueue_key(const char *name, const char *text, int mods) {
   ev.key = k;
   ev.text = t;
   ev.key_mods = mods;
+  ev.key_repeat = repeat ? 1 : 0;
   q_push(&ev);
 }
 
@@ -455,7 +456,7 @@ int sz_embedder_present(const char *title, int point_w, int point_h,
             mods |= SZ_KEY_CMD;
           if (flags & NSEventModifierFlagOption)
             mods |= SZ_KEY_ALT;
-          enqueue_key(name, utf8, mods);
+          enqueue_key(name, utf8, mods, [ev isARepeat] ? 1 : 0);
           continue; /* swallow keydowns (no system beep path) */
         }
 
