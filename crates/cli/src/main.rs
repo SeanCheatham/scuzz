@@ -122,7 +122,7 @@ enum Commands {
     },
     /// Search in-source properties, drivers, and [taps] events under TestRuntime; mix coverage-guided search and mutation
     #[command(
-        after_help = "Examples:\n  scuzz fuzz --iterations 16\n  scuzz fuzz --iterations 16 examples/counter\n  scuzz fuzz --iterations 0\n  scuzz fuzz --oracles examples/counter\n  scuzz fuzz --replay build/fuzz/repro.toml\n  scuzz fuzz --no-fail-fast --iterations 8 examples/bad-example\n\n`scuzz fuzz` loads `<pkg>/corpus/*.toml` (sibling of goldens/) and replays those entries before search. `--iterations 0` is corpus-only: replay, then stop. A missing or empty corpus/ is a no-op. `examples/bad-example` is an expected fuzz failure (known-wrong `bump`). `examples/bad-fault` is an expected fuzz failure (swallowed `Fs.write` under a fault seed). Default stops at the first search failure. `--no-fail-fast` finishes search and still mutates. `scuzz check` and `scuzz test` still pass.\n"
+        after_help = "Examples:\n  scuzz fuzz --iterations 16\n  scuzz fuzz --iterations 16 examples/counter\n  scuzz fuzz --iterations 0\n  scuzz fuzz --oracles examples/counter\n  scuzz fuzz --replay build/fuzz/repro.toml\n  scuzz fuzz --no-fail-fast --iterations 8 examples/bad-example\n\n`scuzz fuzz` loads `<pkg>/corpus/*.toml` (sibling of goldens/) and replays those entries before search. `--iterations 0` is corpus-only: replay, then stop. A missing or empty corpus/ is a no-op. `examples/bad-example` is an expected fuzz failure (known-wrong `bump`). `examples/bad-fault` is an expected fuzz failure (swallowed `Fs.write` under a fault seed). `examples/bad-adt` is an expected fuzz failure (wrong `record` area). `examples/bad-sched` is an expected fuzz failure (lost Ref update under PCT). Default stops at the first search failure. `--no-fail-fast` finishes search and still mutates. `scuzz check` and `scuzz test` still pass.\n"
     )]
     Fuzz {
         #[arg(default_value = ".")]
@@ -133,7 +133,7 @@ enum Commands {
         /// Deterministic LCG seed
         #[arg(long, default_value_t = 42)]
         seed: i64,
-        /// Replay a repro.toml (events + optional schedule_seed + optional fault_seed)
+        /// Replay a repro.toml (events + optional schedule_seed / pct_d / pct_k + optional fault_seed)
         #[arg(long)]
         replay: Option<PathBuf>,
         /// Mutate residual Property.check / Property.assert / .require predicates

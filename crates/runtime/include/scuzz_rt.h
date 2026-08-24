@@ -779,6 +779,9 @@ void sz_net_test_http_host_header(const char *host, int port, char *out,
 void sz_testrt_install(void); /* fake clock+rng+mem FS+stub net+sys/console */
 void sz_testrt_reset(void);   /* restore live interpreters */
 
+/* PCT schedule (fiber run). SCUZZ_SCHED_SEED arms priority + change-points.
+ * Packed seed: k=s%8, d=2+(s/8)%4, rng=s/32. SCUZZ_PCT_D / SCUZZ_PCT_K override. */
+
 /* Fault injection (TestRuntime). Kind ids match SCUZZ_FAULT_KIND. */
 enum { SZ_FAULT_FS = 1, SZ_FAULT_NET = 2, SZ_FAULT_QUEUE = 3 };
 enum { SZ_FAULT_FAIL = 0, SZ_FAULT_DROP = 1, SZ_FAULT_CORRUPT = 2 };

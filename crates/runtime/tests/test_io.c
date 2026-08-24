@@ -1436,6 +1436,17 @@ static SzIo *after_ref(void *value, void *env) {
   return io;
 }
 
+static SzIo *pct_take_after_both(void *pair, void *q) {
+  sz_release(pair);
+  return sz_queue_take((SzQueue *)q);
+}
+
+static SzIo *pct_offer_lr_then_take(SzQueue *q) {
+  return fm_drop(
+      both_drop(sz_queue_offer_cstr(q, "L"), sz_queue_offer_cstr(q, "R")),
+      pct_take_after_both, q);
+}
+
 static SzIo *fiber_join_cont(void *fiber, void *env) {
   (void)env;
   return sz_fiber_join(fiber);
@@ -4907,12 +4918,17 @@ int main(void) {
     sz_testrt_reset();
   }
 
-  /* Seed-driven schedule pick (SCUZZ_SCHED_SEED): seed 0 → first 2-way pick is right. */
+  /* PCT (SCUZZ_SCHED_SEED): packed seed is deterministic; FIFO stays a then b. */
   {
     char saved[64];
     const char *s;
+    int seed;
+    int reversed = 0;
+    char seedbuf[16];
 
     sz_testrt_install();
+    unsetenv("SCUZZ_PCT_D");
+    unsetenv("SCUZZ_PCT_K");
     setenv("SCUZZ_SCHED_SEED", "0", 1);
 
     sz_testrt_stdout_reset();
@@ -4920,7 +4936,6 @@ int main(void) {
         both_drop(sz_io_println_cstr("a"), sz_io_println_cstr("b")));
     assert(r.ok);
     s = sz_testrt_stdout_cstr();
-    assert(strstr(s, "b\na\n") != NULL);
     assert(strlen(s) < sizeof(saved));
     memcpy(saved, s, strlen(s) + 1);
 
@@ -4937,6 +4952,67 @@ int main(void) {
     assert(r.ok);
     assert(strstr(sz_testrt_stdout_cstr(), "a\nb\n") != NULL);
 
+    for (seed = 0; seed <= 64; seed++) {
+      snprintf(seedbuf, sizeof seedbuf, "%d", seed);
+      setenv("SCUZZ_SCHED_SEED", seedbuf, 1);
+      sz_testrt_stdout_reset();
+      r = sz_io_unsafe_run(
+          both_drop(sz_io_println_cstr("a"), sz_io_println_cstr("b")));
+      assert(r.ok);
+      if (strstr(sz_testrt_stdout_cstr(), "b\na\n") != NULL)
+        reversed = 1;
+    }
+    assert(reversed);
+
+    /* FIFO both(offer L, offer R) then take is L. PCT can take R. Replay. */
+    {
+      SzQueue *q;
+      int right_first = 0;
+      int right_seed = -1;
+
+      unsetenv("SCUZZ_SCHED_SEED");
+      q = sz_queue_make();
+      r = sz_io_unsafe_run(pct_offer_lr_then_take(q));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), "L") == 0);
+      sz_release(r.value);
+      sz_queue_free(q);
+
+      for (seed = 0; seed <= 64; seed++) {
+        snprintf(seedbuf, sizeof seedbuf, "%d", seed);
+        setenv("SCUZZ_SCHED_SEED", seedbuf, 1);
+        q = sz_queue_make();
+        r = sz_io_unsafe_run(pct_offer_lr_then_take(q));
+        assert(r.ok);
+        if (strcmp(sz_string_cstr((SzString *)r.value), "R") == 0) {
+          right_first = 1;
+          right_seed = seed;
+          sz_release(r.value);
+          sz_queue_free(q);
+          break;
+        }
+        assert(strcmp(sz_string_cstr((SzString *)r.value), "L") == 0);
+        sz_release(r.value);
+        sz_queue_free(q);
+      }
+      assert(right_first);
+      snprintf(seedbuf, sizeof seedbuf, "%d", right_seed);
+      setenv("SCUZZ_SCHED_SEED", seedbuf, 1);
+      q = sz_queue_make();
+      r = sz_io_unsafe_run(pct_offer_lr_then_take(q));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), "R") == 0);
+      sz_release(r.value);
+      sz_queue_free(q);
+      q = sz_queue_make();
+      r = sz_io_unsafe_run(pct_offer_lr_then_take(q));
+      assert(r.ok);
+      assert(strcmp(sz_string_cstr((SzString *)r.value), "R") == 0);
+      sz_release(r.value);
+      sz_queue_free(q);
+    }
+
+    unsetenv("SCUZZ_SCHED_SEED");
     sz_testrt_reset();
   }
 

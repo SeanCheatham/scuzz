@@ -1,0 +1,4 @@
+[package]
+name = "bad-sched"
+version = "0.1.0"
+description = "Known-wrong Queue offer order. scuzz fuzz must fail under PCT."

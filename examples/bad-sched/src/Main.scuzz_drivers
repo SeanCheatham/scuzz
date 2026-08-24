@@ -1,0 +1,5 @@
+def checkOrder(): IO[Unit] =
+  for {
+    _ <- leftFirst()
+  } yield ()
+
