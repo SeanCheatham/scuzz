@@ -8743,6 +8743,59 @@ int main(void) {
     unsetenv("SCUZZ_TESTRT");
   }
 
+  /* Compact drive tokens: ctor / list / fields. */
+  {
+    char inner[192];
+    char f0[192];
+    char f1[192];
+    assert(sz_drive_uncons("None", "None", inner, (int)sizeof inner));
+    assert(inner[0] == 0);
+    assert(sz_drive_uncons("Some(3)", "Some", inner, (int)sizeof inner));
+    assert(strcmp(inner, "3") == 0);
+    assert(sz_drive_uncons("Point(3,5)", "Point", inner, (int)sizeof inner));
+    assert(strcmp(inner, "3,5") == 0);
+    assert(sz_drive_nfields(inner) == 2);
+    assert(sz_drive_field(inner, 0, f0, (int)sizeof f0));
+    assert(sz_drive_field(inner, 1, f1, (int)sizeof f1));
+    assert(strcmp(f0, "3") == 0);
+    assert(strcmp(f1, "5") == 0);
+    assert(sz_drive_uncons("Some(Point(1,2))", "Some", inner, (int)sizeof inner));
+    assert(strcmp(inner, "Point(1,2)") == 0);
+    assert(sz_drive_uncons_list("[1,2,3]", inner, (int)sizeof inner));
+    assert(strcmp(inner, "1,2,3") == 0);
+    assert(sz_drive_nfields(inner) == 3);
+    assert(sz_drive_uncons_list("[]", inner, (int)sizeof inner));
+    assert(inner[0] == 0);
+    assert(sz_drive_nfields("") == 0);
+    assert(sz_drive_parse_int("42") == 42);
+    assert(sz_drive_parse_bool("true") == 1);
+    assert(sz_drive_parse_bool("false") == 0);
+    assert(!sz_drive_uncons("Some(3)", "None", inner, (int)sizeof inner));
+  }
+
+  /* Property.classify dump. */
+  {
+    char path[] = "/tmp/scuzz-classify-test.txt";
+    FILE *f;
+    char line[64];
+    SzString *nm;
+    setenv("SCUZZ_TESTRT", "1", 1);
+    setenv("SCUZZ_CLASSIFY_DUMP", path, 1);
+    nm = sz_string_from_cstr("square");
+    sz_property_classify(nm, 1);
+    sz_property_classify(nm, 0);
+    sz_release(nm);
+    sz_property_classify_flush();
+    f = fopen(path, "r");
+    assert(f);
+    assert(fgets(line, (int)sizeof line, f));
+    fclose(f);
+    assert(strstr(line, "square 1 1") != NULL);
+    unsetenv("SCUZZ_CLASSIFY_DUMP");
+    unsetenv("SCUZZ_TESTRT");
+    unlink(path);
+  }
+
   puts("runtime io tests ok");
   return 0;
 }

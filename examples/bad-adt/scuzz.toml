@@ -1,0 +1,4 @@
+[package]
+name = "bad-adt"
+version = "0.1.0"
+description = "Known-wrong record area. scuzz fuzz must fail on generated Rect values."

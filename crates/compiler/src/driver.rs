@@ -1,6 +1,6 @@
 use crate::ast::Program;
 use crate::codegen::emit_llvm;
-use crate::fuzz::sometimes_declared_text;
+use crate::fuzz::{classify_declared_text, sometimes_declared_text};
 use crate::lower::lower_program;
 use crate::manifest::{load_manifest, Manifest};
 use crate::overlay::{
@@ -174,6 +174,7 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
     let ll_path = opts.out_dir.join(format!("{exe_name}.ll"));
 
     let declared = sometimes_declared_text(&program);
+    let classify = classify_declared_text(&program);
     let mut program = program;
     crate::typ::inject_builtin_enums(&mut program.enums);
     let program = lower_program(program);
@@ -193,6 +194,7 @@ pub fn compile_prepared_program(opts: &CompileOptions, program: Program) -> Resu
             driver_table_text(&program),
         )?;
         std::fs::write(opts.out_dir.join("sometimes.declared"), declared)?;
+        std::fs::write(opts.out_dir.join("classify.declared"), classify)?;
     } else {
         let _ = std::fs::remove_file(opts.out_dir.join("drivers.txt"));
     }

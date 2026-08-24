@@ -1507,6 +1507,64 @@ void sz_property_sometimes_flush(void) {
   fclose(f);
 }
 
+#define SZ_CLASSIFY_MAX 64
+typedef struct {
+  char *name;
+  int yes;
+  int no;
+} SzClassify;
+
+static SzClassify g_classify[SZ_CLASSIFY_MAX];
+static int g_classify_n;
+
+void sz_property_classify(SzString *name, int64_t hit) {
+  const char *tr = getenv("SCUZZ_TESTRT");
+  const char *s;
+  int i;
+  size_t n;
+  char *copy;
+  if (!tr || tr[0] != '1')
+    return;
+  s = name ? sz_string_cstr(name) : "";
+  if (!s[0])
+    return;
+  for (i = 0; i < g_classify_n; i++) {
+    if (strcmp(g_classify[i].name, s) == 0) {
+      if (hit)
+        g_classify[i].yes++;
+      else
+        g_classify[i].no++;
+      sz_testrt_ui_idle_reset();
+      return;
+    }
+  }
+  if (g_classify_n >= SZ_CLASSIFY_MAX)
+    return;
+  n = strlen(s);
+  copy = (char *)sz_alloc(n + 1);
+  memcpy(copy, s, n + 1);
+  g_classify[g_classify_n].name = copy;
+  g_classify[g_classify_n].yes = hit ? 1 : 0;
+  g_classify[g_classify_n].no = hit ? 0 : 1;
+  g_classify_n++;
+  sz_testrt_ui_idle_reset();
+}
+
+void sz_property_classify_flush(void) {
+  const char *path = getenv("SCUZZ_CLASSIFY_DUMP");
+  FILE *f;
+  int i;
+  if (!path || !path[0])
+    return;
+  f = fopen(path, "w");
+  if (!f)
+    return;
+  for (i = 0; i < g_classify_n; i++)
+    fprintf(f, "%s %d %d\n", g_classify[i].name, g_classify[i].yes,
+            g_classify[i].no);
+  fclose(f);
+}
+
 /* Matches DRIVE_NAMES_MAX in crates/compiler/src/overlay.rs. Overlay rejects a larger table. */
 #define SZ_DRIVERS_MAX 32
 typedef struct {
@@ -1554,7 +1612,140 @@ static int64_t sz_driver_kind_at(int64_t packed, int i) {
   return (packed / p) % 4;
 }
 
-static int sz_driver_split_rest(const char *rest, char tok[][64], int maxn) {
+#define SZ_DRIVE_INNER 192
+
+static int sz_drive_copy_range(const char *src, size_t n, char *out, int cap) {
+  if (!out || cap <= 0)
+    return 0;
+  if (n >= (size_t)cap)
+    n = (size_t)cap - 1;
+  memcpy(out, src, n);
+  out[n] = 0;
+  return 1;
+}
+
+int sz_drive_uncons(const char *tok, const char *name, char *inner, int cap) {
+  size_t nlen;
+  const char *p;
+  int depth;
+  if (!tok || !name)
+    return 0;
+  nlen = strlen(name);
+  if (strncmp(tok, name, nlen) != 0)
+    return 0;
+  if (tok[nlen] == 0) {
+    if (inner && cap > 0)
+      inner[0] = 0;
+    return 1;
+  }
+  if (tok[nlen] != '(')
+    return 0;
+  p = tok + nlen + 1;
+  depth = 0;
+  while (*p) {
+    if (*p == '(' || *p == '[')
+      depth++;
+    else if (*p == ')' || *p == ']') {
+      if (depth == 0) {
+        if (*p != ')')
+          return 0;
+        if (p[1] != 0)
+          return 0;
+        return sz_drive_copy_range(tok + nlen + 1, (size_t)(p - (tok + nlen + 1)),
+                                   inner, cap);
+      }
+      depth--;
+    }
+    p++;
+  }
+  return 0;
+}
+
+int sz_drive_uncons_list(const char *tok, char *inner, int cap) {
+  const char *p;
+  int depth;
+  if (!tok || tok[0] != '[')
+    return 0;
+  p = tok + 1;
+  depth = 0;
+  while (*p) {
+    if (*p == '(' || *p == '[')
+      depth++;
+    else if (*p == ')' || *p == ']') {
+      if (depth == 0) {
+        if (*p != ']')
+          return 0;
+        if (p[1] != 0)
+          return 0;
+        return sz_drive_copy_range(tok + 1, (size_t)(p - (tok + 1)), inner, cap);
+      }
+      depth--;
+    }
+    p++;
+  }
+  return 0;
+}
+
+int64_t sz_drive_nfields(const char *inner) {
+  int64_t n;
+  int depth;
+  int i;
+  if (!inner || !inner[0])
+    return 0;
+  n = 1;
+  depth = 0;
+  for (i = 0; inner[i]; i++) {
+    if (inner[i] == '(' || inner[i] == '[')
+      depth++;
+    else if ((inner[i] == ')' || inner[i] == ']') && depth > 0)
+      depth--;
+    else if (inner[i] == ',' && depth == 0)
+      n++;
+  }
+  return n;
+}
+
+int sz_drive_field(const char *inner, int64_t idx, char *out, int cap) {
+  int64_t cur = 0;
+  int depth = 0;
+  int i = 0;
+  int start = 0;
+  if (!inner || !out || cap <= 0 || idx < 0)
+    return 0;
+  out[0] = 0;
+  while (inner[i]) {
+    if (inner[i] == '(' || inner[i] == '[')
+      depth++;
+    else if ((inner[i] == ')' || inner[i] == ']') && depth > 0)
+      depth--;
+    else if (inner[i] == ',' && depth == 0) {
+      if (cur == idx)
+        return sz_drive_copy_range(inner + start, (size_t)(i - start), out, cap);
+      cur++;
+      start = i + 1;
+    }
+    i++;
+  }
+  if (cur == idx)
+    return sz_drive_copy_range(inner + start, (size_t)(i - start), out, cap);
+  return 0;
+}
+
+int64_t sz_drive_parse_int(const char *tok) {
+  if (!tok || !tok[0])
+    return 0;
+  return (int64_t)strtoll(tok, NULL, 10);
+}
+
+int64_t sz_drive_parse_bool(const char *tok) {
+  if (!tok)
+    return 0;
+  if (strcmp(tok, "true") == 0 || strcmp(tok, "1") == 0)
+    return 1;
+  return 0;
+}
+
+static int sz_driver_split_rest(const char *rest, char tok[][128], int maxn) {
   int n = 0;
   int i = 0;
   while (rest[i] && n < maxn) {
@@ -1564,7 +1755,7 @@ static int sz_driver_split_rest(const char *rest, char tok[][64], int maxn) {
       break;
     int k = 0;
     while (rest[i] && rest[i] != ' ' && rest[i] != '\t' && rest[i] != '\n' &&
-           k < 63) {
+           k < 127) {
       tok[n][k++] = rest[i++];
     }
     tok[n][k] = 0;
@@ -1606,7 +1797,7 @@ void sz_driver_run_line(const char *spec) {
     else
       io = ((SzIo * (*)(int64_t)) d->fn)((int64_t)atoi(rest));
   } else {
-    char tok[4][64];
+    char tok[4][128];
     int ntok = sz_driver_split_rest(rest, tok, 4);
     SzList *args = sz_list_nil();
     int j;
@@ -1643,7 +1834,7 @@ void sz_driver_run_line(const char *spec) {
 
 void sz_driver_run_script(const char *path) {
   FILE *f;
-  char line[256];
+  char line[512];
   if (!path || !path[0])
     return;
   f = fopen(path, "r");

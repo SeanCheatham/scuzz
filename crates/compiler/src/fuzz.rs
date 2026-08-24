@@ -63,12 +63,23 @@ impl IntBound {
 }
 
 /// One generated argument in a driver-table spec.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 enum DriveArgKind {
     Int(IntBound),
     String,
     Bool,
+    List(Box<DriveArgKind>),
+    Record {
+        name: String,
+        fields: Vec<DriveArgKind>,
+    },
+    Enum {
+        cases: Vec<(String, Vec<DriveArgKind>)>,
+    },
 }
+
+const GEN_NEST_MAX: i64 = 3;
+const GEN_LIST_MAX: i64 = 3;
 
 fn drive_int(s: i64, bound: IntBound) -> i64 {
     let v = if lcg_below(s, 2) == 0 {
@@ -118,11 +129,96 @@ fn drive_spec_kinds(spec: &str) -> (String, Vec<DriveArgKind>) {
 }
 
 fn parse_kind_token(tok: &str) -> DriveArgKind {
-    match tok.chars().next() {
-        Some('s') => DriveArgKind::String,
-        Some('b') => DriveArgKind::Bool,
-        _ => DriveArgKind::Int(parse_int_bound(tok)),
+    if tok == "s" {
+        return DriveArgKind::String;
     }
+    if tok == "b" {
+        return DriveArgKind::Bool;
+    }
+    if is_int_kind_token(tok) {
+        return DriveArgKind::Int(parse_int_bound(tok));
+    }
+    if tok.starts_with('[') && tok.ends_with(']') && tok.len() >= 2 {
+        let inner = &tok[1..tok.len() - 1];
+        return DriveArgKind::List(Box::new(parse_kind_token(inner)));
+    }
+    if let Some(rest) = tok.strip_prefix("e:") {
+        return DriveArgKind::Enum {
+            cases: parse_enum_cases(rest),
+        };
+    }
+    if let Some((name, fields)) = parse_record_spec(tok) {
+        return DriveArgKind::Record { name, fields };
+    }
+    DriveArgKind::Int(IntBound::NONE)
+}
+
+fn is_int_kind_token(tok: &str) -> bool {
+    tok == "i"
+        || tok.starts_with("i>=")
+        || tok.starts_with("i<=")
+        || tok.starts_with("i>")
+        || tok.starts_with("i<")
+}
+
+fn parse_enum_cases(spec: &str) -> Vec<(String, Vec<DriveArgKind>)> {
+    split_top_level(spec, '|')
+        .into_iter()
+        .map(|c| parse_enum_case(&c))
+        .collect()
+}
+
+fn parse_enum_case(tok: &str) -> (String, Vec<DriveArgKind>) {
+    if let Some((name, fields)) = parse_record_spec(tok) {
+        (name, fields)
+    } else {
+        (tok.to_string(), Vec::new())
+    }
+}
+
+fn parse_record_spec(tok: &str) -> Option<(String, Vec<DriveArgKind>)> {
+    let open = tok.find('(')?;
+    if !tok.ends_with(')') {
+        return None;
+    }
+    let name = tok[..open].to_string();
+    if name.is_empty() {
+        return None;
+    }
+    let inner = &tok[open + 1..tok.len() - 1];
+    let fields = if inner.is_empty() {
+        Vec::new()
+    } else {
+        split_top_level(inner, ',')
+            .into_iter()
+            .map(|t| parse_kind_token(&t))
+            .collect()
+    };
+    Some((name, fields))
+}
+
+fn split_top_level(s: &str, sep: char) -> Vec<String> {
+    let mut out = Vec::new();
+    let mut start = 0;
+    let mut depth = 0i32;
+    for (i, c) in s.char_indices() {
+        match c {
+            '(' | '[' => depth += 1,
+            ')' | ']' => depth -= 1,
+            _ if c == sep && depth == 0 => {
+                out.push(s[start..i].to_string());
+                start = i + c.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    if start <= s.len() {
+        out.push(s[start..].to_string());
+    }
+    if s.is_empty() {
+        out.clear();
+    }
+    out
 }
 
 /// Parse `i`, `i>=0`, `i>0`, `i<=k`, or `i<k`. Exclusive bounds become inclusive.
@@ -158,27 +254,118 @@ fn parse_int_bound(tok: &str) -> IntBound {
     IntBound::NONE
 }
 
+fn gen_kind(kind: &DriveArgKind, s: i64, depth: i64) -> (String, i64) {
+    match kind {
+        DriveArgKind::String => (letter_at(lcg_below(s, 26)), lcg_next(s)),
+        DriveArgKind::Bool => (drive_bool(s).to_string(), lcg_next(s)),
+        DriveArgKind::Int(bound) => (drive_int(s, *bound).to_string(), lcg_next(s)),
+        DriveArgKind::List(inner) => {
+            if depth >= GEN_NEST_MAX {
+                return ("[]".into(), s);
+            }
+            let n = lcg_below(s, GEN_LIST_MAX + 1);
+            let mut s = lcg_next(s);
+            let mut elems = Vec::new();
+            let mut left = n;
+            while left > 0 {
+                let (e, ns) = gen_kind(inner, s, depth + 1);
+                elems.push(e);
+                s = ns;
+                left -= 1;
+            }
+            (format!("[{}]", elems.join(",")), s)
+        }
+        DriveArgKind::Record { name, fields } => {
+            let mut s = s;
+            let mut vals = Vec::new();
+            for f in fields {
+                let (v, ns) = gen_kind(f, s, depth + 1);
+                vals.push(v);
+                s = ns;
+            }
+            (format_ctor(name, &vals), s)
+        }
+        DriveArgKind::Enum { cases } if cases.is_empty() => ("None".into(), s),
+        DriveArgKind::Enum { cases } => {
+            let pick = pick_enum_case(cases, s, depth);
+            let mut s = lcg_next(s);
+            let mut vals = Vec::new();
+            for f in &pick.1 {
+                let (v, ns) = gen_kind(f, s, depth + 1);
+                vals.push(v);
+                s = ns;
+            }
+            (format_ctor(&pick.0, &vals), s)
+        }
+    }
+}
+
+fn pick_enum_case(
+    cases: &[(String, Vec<DriveArgKind>)],
+    s: i64,
+    depth: i64,
+) -> (String, Vec<DriveArgKind>) {
+    let nullary: Vec<&(String, Vec<DriveArgKind>)> =
+        cases.iter().filter(|(_, fs)| fs.is_empty()).collect();
+    if depth >= GEN_NEST_MAX && !nullary.is_empty() {
+        let i = lcg_below(s, nullary.len() as i64) as usize;
+        return nullary[i].clone();
+    }
+    if !nullary.is_empty() && lcg_below(s, 2) == 0 {
+        let i = lcg_below(lcg_next(s), nullary.len() as i64) as usize;
+        return nullary[i].clone();
+    }
+    let i = lcg_below(lcg_next(s), cases.len() as i64) as usize;
+    cases[i].clone()
+}
+
+fn format_ctor(name: &str, fields: &[String]) -> String {
+    if fields.is_empty() {
+        name.to_string()
+    } else {
+        format!("{name}({})", fields.join(","))
+    }
+}
+
+fn split_ctor(tok: &str) -> Option<(String, Vec<String>)> {
+    if let Some(open) = tok.find('(') {
+        if !tok.ends_with(')') {
+            return None;
+        }
+        let name = tok[..open].to_string();
+        if name.is_empty() {
+            return None;
+        }
+        let inner = &tok[open + 1..tok.len() - 1];
+        Some((name, split_top_level(inner, ',')))
+    } else if tok.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
+        Some((tok.to_string(), Vec::new()))
+    } else {
+        None
+    }
+}
+
+fn split_list_tok(tok: &str) -> Option<Vec<String>> {
+    if tok == "[]" {
+        return Some(Vec::new());
+    }
+    if tok.starts_with('[') && tok.ends_with(']') {
+        Some(split_top_level(&tok[1..tok.len() - 1], ','))
+    } else {
+        None
+    }
+}
+
 fn drive_line(spec: &str, mut s: i64) -> String {
     let (name, kinds) = drive_spec_kinds(spec);
     if kinds.is_empty() {
         return format!("drive {name}");
     }
     let mut args = Vec::new();
-    for k in kinds {
-        match k {
-            DriveArgKind::String => {
-                args.push(letter_at(lcg_below(s, 26)));
-                s = lcg_next(s);
-            }
-            DriveArgKind::Bool => {
-                args.push(drive_bool(s).to_string());
-                s = lcg_next(s);
-            }
-            DriveArgKind::Int(bound) => {
-                args.push(drive_int(s, bound).to_string());
-                s = lcg_next(s);
-            }
-        }
+    for k in &kinds {
+        let (tok, ns) = gen_kind(k, s, 0);
+        args.push(tok);
+        s = ns;
     }
     format!("drive {name} {}", args.join(" "))
 }
@@ -243,7 +430,78 @@ fn shrink_arg(kind: DriveArgKind, raw: &str) -> Vec<String> {
                 Vec::new()
             }
         }
+        DriveArgKind::List(inner) => shrink_list(*inner, raw),
+        DriveArgKind::Record { name, fields } => shrink_record(&name, &fields, raw),
+        DriveArgKind::Enum { cases } => shrink_enum(&cases, raw),
     }
+}
+
+fn shrink_list(inner: DriveArgKind, raw: &str) -> Vec<String> {
+    let Some(elems) = split_list_tok(raw) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    if !elems.is_empty() {
+        out.push("[]".into());
+    }
+    if elems.len() > 1 {
+        let shorter = &elems[..elems.len() - 1];
+        out.push(format!("[{}]", shorter.join(",")));
+    }
+    for (i, e) in elems.iter().enumerate() {
+        for v in shrink_arg(inner.clone(), e) {
+            let mut n = elems.clone();
+            n[i] = v;
+            out.push(format!("[{}]", n.join(",")));
+        }
+    }
+    out
+}
+
+fn shrink_record(name: &str, fields: &[DriveArgKind], raw: &str) -> Vec<String> {
+    let Some((ctor, vals)) = split_ctor(raw) else {
+        return Vec::new();
+    };
+    if ctor != name {
+        return Vec::new();
+    }
+    let mut out = Vec::new();
+    for (i, kind) in fields.iter().enumerate() {
+        let Some(cur) = vals.get(i) else {
+            continue;
+        };
+        for v in shrink_arg(kind.clone(), cur) {
+            let mut n = vals.clone();
+            n[i] = v;
+            out.push(format_ctor(name, &n));
+        }
+    }
+    out
+}
+
+fn shrink_enum(cases: &[(String, Vec<DriveArgKind>)], raw: &str) -> Vec<String> {
+    let Some((ctor, vals)) = split_ctor(raw) else {
+        return Vec::new();
+    };
+    let mut out = Vec::new();
+    for (name, fields) in cases {
+        if fields.is_empty() && name != &ctor {
+            out.push(name.clone());
+        }
+    }
+    if let Some((_, fields)) = cases.iter().find(|(n, _)| n == &ctor) {
+        for (i, kind) in fields.iter().enumerate() {
+            let Some(cur) = vals.get(i) else {
+                continue;
+            };
+            for v in shrink_arg(kind.clone(), cur) {
+                let mut n = vals.clone();
+                n[i] = v;
+                out.push(format_ctor(&ctor, &n));
+            }
+        }
+    }
+    out
 }
 
 fn set_drive_arg(name: &str, args: &[&str], i: usize, val: &str) -> String {
@@ -261,7 +519,8 @@ fn set_drive_arg(name: &str, args: &[&str], i: usize, val: &str) -> String {
 
 /// Smaller `drive` lines for one event. Earlier args first. Int: lower bound
 /// (0 or published bound), then midpoint, then decrement. Bool: `false`.
-/// String: `a`.
+/// String: `a`. Records and enums shrink fields. Lists drop the last element,
+/// then shrink elements, then `[]`.
 pub fn drive_line_shrinks(line: &str, specs: &[String]) -> Vec<String> {
     let mut parts = line.split_whitespace();
     let Some(verb) = parts.next() else {
@@ -280,7 +539,7 @@ pub fn drive_line_shrinks(line: &str, specs: &[String]) -> Vec<String> {
     let kinds = kinds_for_drive(name, specs);
     let mut out = Vec::new();
     for (i, arg) in args.iter().enumerate() {
-        let kind = kinds.get(i).copied().unwrap_or_else(|| infer_kind(arg));
+        let kind = kinds.get(i).cloned().unwrap_or_else(|| infer_kind(arg));
         for val in shrink_arg(kind, arg) {
             out.push(set_drive_arg(name, &args, i, &val));
         }
@@ -815,6 +1074,34 @@ fn collect_sometimes(e: &Expr, acc: &mut Vec<String>) {
     e.for_each_child(|c| collect_sometimes(c, acc));
 }
 
+pub fn classify_declared_text(program: &Program) -> String {
+    let mut names = Vec::new();
+    for d in &program.defs {
+        collect_classify(&d.body, &mut names);
+    }
+    collect_classify(&program.main.body, &mut names);
+    if names.is_empty() {
+        String::new()
+    } else {
+        let mut s = names.join("\n");
+        s.push('\n');
+        s
+    }
+}
+
+fn collect_classify(e: &Expr, acc: &mut Vec<String>) {
+    if let ExprKind::Call { callee, args } = &e.kind {
+        if callee == "Property.classify" {
+            if let Some(ExprKind::StrLit(name)) = args.first().map(|a| &a.kind) {
+                if !acc.iter().any(|n| n == name) {
+                    acc.push(name.clone());
+                }
+            }
+        }
+    }
+    e.for_each_child(|c| collect_classify(c, acc));
+}
+
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct Repro {
     #[serde(default)]
@@ -1225,6 +1512,88 @@ scroll:scroll
     }
 
     #[test]
+    fn parse_kind_token_records_enums_lists() {
+        assert_eq!(
+            parse_kind_token("Rect(i>=0,i>=0)"),
+            DriveArgKind::Record {
+                name: "Rect".into(),
+                fields: vec![
+                    DriveArgKind::Int(IntBound {
+                        lo: Some(0),
+                        hi: None
+                    }),
+                    DriveArgKind::Int(IntBound {
+                        lo: Some(0),
+                        hi: None
+                    }),
+                ],
+            }
+        );
+        assert_eq!(
+            parse_kind_token("e:Some(i)|None"),
+            DriveArgKind::Enum {
+                cases: vec![
+                    ("Some".into(), vec![DriveArgKind::Int(IntBound::NONE)]),
+                    ("None".into(), vec![]),
+                ],
+            }
+        );
+        assert_eq!(
+            parse_kind_token("[Point(i,i)]"),
+            DriveArgKind::List(Box::new(DriveArgKind::Record {
+                name: "Point".into(),
+                fields: vec![
+                    DriveArgKind::Int(IntBound::NONE),
+                    DriveArgKind::Int(IntBound::NONE),
+                ],
+            }))
+        );
+        assert_eq!(parse_kind_token("s"), DriveArgKind::String);
+        assert_eq!(parse_kind_token("b"), DriveArgKind::Bool);
+    }
+
+    #[test]
+    fn drive_line_record_is_one_token() {
+        let line = drive_line("area Rect(i>=0,i>=0)", 1);
+        assert!(line.starts_with("drive area "), "{line}");
+        let arg = line.split_whitespace().nth(2).expect("record arg");
+        assert!(arg.starts_with("Rect(") && arg.ends_with(')'), "{line}");
+        let (_, fields) = split_ctor(arg).expect("ctor");
+        assert_eq!(fields.len(), 2);
+        for f in fields {
+            let n: i64 = f.parse().expect("int field");
+            assert!(n >= 0, "field {n} below i>=0");
+        }
+    }
+
+    #[test]
+    fn drive_line_shrinks_record_fields() {
+        let specs = vec!["area Rect(i>=0,i>=0)".into()];
+        let got = drive_line_shrinks("drive area Rect(3,5)", &specs);
+        assert!(got.contains(&"drive area Rect(0,5)".to_string()), "{got:?}");
+        assert!(got.contains(&"drive area Rect(3,0)".to_string()), "{got:?}");
+    }
+
+    #[test]
+    fn drive_line_shrinks_enum_to_nullary() {
+        let specs = vec!["describe e:Some(i)|None".into()];
+        let got = drive_line_shrinks("drive describe Some(5)", &specs);
+        assert!(got.contains(&"drive describe None".to_string()), "{got:?}");
+        assert!(
+            got.contains(&"drive describe Some(0)".to_string()),
+            "{got:?}"
+        );
+    }
+
+    #[test]
+    fn drive_line_shrinks_list() {
+        let specs = vec!["sum [i]".into()];
+        let got = drive_line_shrinks("drive sum [3,5]", &specs);
+        assert!(got.contains(&"drive sum []".to_string()), "{got:?}");
+        assert!(got.contains(&"drive sum [3]".to_string()), "{got:?}");
+    }
+
+    #[test]
     fn drive_script_lines_shuffles_or_subsets() {
         let drivers = vec!["a".into(), "b".into(), "c".into()];
         let mut saw_all = false;
@@ -1286,5 +1655,19 @@ scroll:scroll
         )
         .unwrap();
         assert_eq!(sometimes_declared_text(&p), "a\nb\n");
+    }
+
+    #[test]
+    fn classify_declared_first_seen() {
+        let p = parse(
+            r#"
+property p(n: Int): Bool =
+  Property.classify("square", n == 0) && n >= 0
+@main def main: IO[Unit] =
+  IO.pure(Property.classify("wide", false))
+"#,
+        )
+        .unwrap();
+        assert_eq!(classify_declared_text(&p), "square\nwide\n");
     }
 }
